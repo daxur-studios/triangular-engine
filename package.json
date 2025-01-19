@@ -6,7 +6,9 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "build:triangular-engine": "ng build triangular-engine",
+    "publish": "npm run build:triangular-engine && cd dist/triangular-engine && npm publish"
   },
   "private": true,
   "dependencies": {

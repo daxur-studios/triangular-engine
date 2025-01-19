@@ -35,7 +35,7 @@ A simple 3D spinning box in Triangular Engine:
 
 ```typescript
 import { Component, ElementRef, OnInit, ViewChild } from "@angular/core";
-import { Canvas, Object3DComponent, provideObject3DComponent, TriangularEngineModule } from "@daxur-studios/triangular-engine";
+import { Canvas, Object3DComponent, provideObject3DComponent, TriangularEngineModule } from "triangular-engine";
 
 @Component({
   selector: "app-box",
