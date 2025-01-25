@@ -1,3 +1,5 @@
+[back to Readme](../README.md)
+
 **Triangular Engine** is a library that allows you to build 3D experiences in the browser using **Three.js** and **Angular**. It simplifies working with Three.js by providing a declarative Angular-based approach to creating and managing 3D scenes.
 
 ### Key Features:
@@ -56,20 +58,30 @@ export class BoxComponent extends Object3DComponent implements OnInit {
     console.log("Clicked!");
   }
 }
+```
+
+```typescript
+import { EngineModule, EngineService, provideEngineOptions } from "triangular-engine";
 
 @Component({
   selector: "app-root",
-  template: `
-    <scene>
-      <ambientLight></ambientLight>
-      <pointLight [position]="[10, 10, 10]"></pointLight>
-      <app-box></app-box>
-    </scene>
-  `,
   standalone: true,
-  imports: [TriangularEngineModule],
+  imports: [RouterModule, EngineModule],
+  templateUrl: "./app.component.html",
+  styleUrl: "./app.component.scss",
+  providers: [
+    EngineService,
+    provideEngineOptions({
+      showFPS: true,
+    }),
+  ],
+  host: {
+    class: "flex-page",
+  },
 })
-export class AppComponent {}
+export class AppComponent {
+  readonly engineService = inject(EngineService);
+}
 ```
 
 Triangular Engine bridges the gap between Angular's declarative nature and the powerful 3D rendering capabilities of Three.js, making it a great choice for Angular developers interested in 3D graphics.

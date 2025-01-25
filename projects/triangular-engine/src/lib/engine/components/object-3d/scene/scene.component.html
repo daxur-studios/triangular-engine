@@ -1,0 +1,33 @@
+@let userSettings = engineSettingsService.settingsForm.value;
+
+<div class="flex-page">
+  <div
+    #wrapper
+    class="canvas-size-observer flex-wrapper"
+    tabindex="0"
+    (keyup)="engineService.keyup$.next($event)"
+    (keydown)="engineService.keydown$.next($event)"
+    (mousedown)="engineService.mousedown$.next($event)"
+    (mouseup)="engineService.mouseup$.next($event)"
+    (mousemove)="engineService.mousemove$.next($event)"
+    (mousewheel)="engineService.mousewheel$.next($event)"
+    (contextmenu)="
+      engineService.contextmenu$.next($event); $event.preventDefault()
+    "
+  >
+    <div class="css-2d-renderer" #css2dRenderer></div>
+
+    <!--Canvas is added here programmatically-->
+  </div>
+
+  @if (userSettings.showPlaceholderEngine) {
+  <div
+    class="placeholder-engine position-absolute mat-app-background top-0 bottom-0 start-0 end-0 d-flex align-items-center justify-content-center"
+    style="border: dashed 2px rgba(0, 149, 255, 0.356)"
+  >
+    <h1>Engine</h1>
+  </div>
+  }
+</div>
+
+<engine-ui [userInterface]="userInterface()" />

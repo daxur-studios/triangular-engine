@@ -1,0 +1,36 @@
+:host {
+  position: relative;
+  z-index: 1;
+
+  display: flex;
+  flex-direction: column;
+  flex: 1 1;
+  overflow: auto;
+
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.ui-toolbar-top,
+.ui-toolbar-bottom,
+.ui-main,
+.ui-sidebar-left,
+.ui-sidebar-right {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.main-wrapper {
+  flex-direction: row;
+}
+.ui-main {
+  flex: 1 1 100%;
+
+  align-items: center;
+  justify-content: center;
+}

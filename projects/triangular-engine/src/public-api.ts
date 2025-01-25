@@ -3,4 +3,5 @@
  */
 
 export * from './lib/triangular-engine.service';
-export * from './lib/triangular-engine.component';
+
+export * from './lib/engine';
