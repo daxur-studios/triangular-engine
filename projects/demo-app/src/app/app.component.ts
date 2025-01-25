@@ -1,13 +1,28 @@
-import { Component } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { Component, inject } from '@angular/core';
+import { RouterModule } from '@angular/router';
+
+import {
+  EngineModule,
+  EngineService,
+  provideEngineOptions,
+} from 'triangular-engine';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet],
+  imports: [RouterModule, EngineModule],
   templateUrl: './app.component.html',
-  styleUrl: './app.component.scss'
+  styleUrl: './app.component.scss',
+  providers: [
+    EngineService,
+    provideEngineOptions({
+      showFPS: true,
+    }),
+  ],
+  host: {
+    class: 'flex-page',
+  },
 })
 export class AppComponent {
-  title = 'demo-app';
+  readonly engineService = inject(EngineService);
 }

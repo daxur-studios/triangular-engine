@@ -1,0 +1,155 @@
+<p>Field Panel</p>
+
+<h3>{{ object3D?.name }}</h3>
+
+<div class="fields">
+  @for (field of fields; track field) {
+  <div class="field">
+    {{ field.key }} <small style="opacity: 0.5">{{ field.type }}</small>
+
+    <!--Number-->
+    @if (field.type === 'number') {
+
+      <input
+        type="number"
+        [value]="field.value"
+        (blur)="setField(numberField.value, field)"
+        #numberField
+      />
+    
+}
+    <!--String-->
+    @if (field.type === 'string') {
+
+      <input
+        type="text"
+        [value]="field.value"
+        (blur)="setField(stringField.value, field)"
+        #stringField
+      />
+    
+}
+    <!--Boolean-->
+    @if (field.type === 'boolean') {
+
+      <input
+        type="checkbox"
+        [checked]="field.value"
+        (change)="setField(booleanField.checked, field)"
+        #booleanField
+      />
+    
+}
+    <!--Vector3-->
+    @if (field.type === 'Vector3') {
+
+      <ng-container
+        *ngTemplateOutlet="vector3Field; context: { $implicit: field }"
+      ></ng-container>
+    
+}
+    <!--Euler-->
+    @if (field.type === 'Euler') {
+
+      <ng-container
+        *ngTemplateOutlet="eulerField; context: { $implicit: field }"
+      ></ng-container>
+    
+}
+  </div>
+}
+</div>
+
+<ng-template #vector3Field let-field>
+  <div class="value">
+    <input
+      type="number"
+      [value]="field.value.x"
+      placeholder="X"
+      #xField
+      (blur)="
+        setVector3Field(
+          {
+            x: xField.value,
+            y: yField.value,
+            z: zField.value
+          },
+          field
+        )
+      "
+    />
+    <input
+      type="number"
+      [value]="field.value.y"
+      placeholder="Y"
+      #yField
+      (blur)="
+        setVector3Field(
+          {
+            x: xField.value,
+            y: yField.value,
+            z: zField.value
+          },
+          field
+        )
+      "
+    />
+    <input
+      type="number"
+      [value]="field.value.z"
+      placeholder="Z"
+      #zField
+      (blur)="
+        setVector3Field(
+          {
+            x: xField.value,
+            y: yField.value,
+            z: zField.value
+          },
+          field
+        )
+      "
+    />
+  </div>
+</ng-template>
+
+<ng-template #eulerField let-field>
+  <div class="value">
+    <input
+      type="number"
+      [value]="field.value.x"
+      placeholder="X"
+      #xField
+      (blur)="
+        setEulerField(
+          { x: xField.value, y: yField.value, z: zField.value },
+          field
+        )
+      "
+    />
+    <input
+      type="number"
+      [value]="field.value.y"
+      placeholder="Y"
+      #yField
+      (blur)="
+        setEulerField(
+          { x: xField.value, y: yField.value, z: zField.value },
+          field
+        )
+      "
+    />
+    <input
+      type="number"
+      [value]="field.value.z"
+      placeholder="Z"
+      #zField
+      (blur)="
+        setEulerField(
+          { x: xField.value, y: yField.value, z: zField.value },
+          field
+        )
+      "
+    />
+  </div>
+</ng-template>

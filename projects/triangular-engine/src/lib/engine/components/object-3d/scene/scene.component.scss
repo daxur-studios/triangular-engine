@@ -1,0 +1,18 @@
+:host {
+  position: relative;
+  user-select: none;
+}
+
+.flex-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1;
+  position: relative;
+  overflow: hidden;
+}
+canvas {
+  box-sizing: border-box;
+  min-width: 1px;
+  min-height: 1px;
+  pointer-events: none;
+}

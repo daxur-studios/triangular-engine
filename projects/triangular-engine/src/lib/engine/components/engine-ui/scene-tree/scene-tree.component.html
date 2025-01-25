@@ -1,0 +1,36 @@
+<p>
+  <button mat-icon-button (click)="refresh()">
+    <mat-icon>close</mat-icon>
+  </button>
+</p>
+
+@if (transformControls) {
+  <div style="display: flex; gap: 0.5rem">
+    <!--Scale-->
+    <button mat-icon-button (click)="transformControls.setMode('scale')">
+      <mat-icon>aspect_ratio</mat-icon>
+    </button>
+    <!--Rotate-->
+    <button mat-icon-button (click)="transformControls.setMode('rotate')">
+      <mat-icon>rotate_right</mat-icon>
+    </button>
+    <!--Translate-->
+    <button mat-icon-button (click)="transformControls.setMode('translate')">
+      <mat-icon>open_with</mat-icon>
+    </button>
+  </div>
+}
+@for (component of children(); track component) {
+  <div
+    (click)="selectObject3D(component)"
+    [class.selected]="component === selectedObject3D"
+  >
+    <div class="label">
+      {{ component.emoji }} {{ component.name }}
+      <small style="opacity: 0.5">{{ component.object3D().type }}</small>
+    </div>
+  </div>
+}
+@if (selectedObject3D) {
+  <field-panel [object3D]="selectedObject3D.object3D()"></field-panel>
+}

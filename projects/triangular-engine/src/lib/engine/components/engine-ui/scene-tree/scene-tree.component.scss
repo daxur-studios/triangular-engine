@@ -1,0 +1,23 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1;
+  overflow: auto;
+
+  background: #3333334f;
+  color: #fff;
+  pointer-events: auto;
+}
+
+.label {
+}
+.label:hover {
+  background: #3333336f;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.selected .label {
+  background: #3333338f;
+  text-decoration: underline;
+}

@@ -3,6 +3,16 @@
 {
   "compileOnSave": false,
   "compilerOptions": {
+    "paths": {
+      "triangular-engine": ["./projects/triangular-engine/src/public-api"]
+    },
+    /*
+    "paths": {
+      "triangular-engine": [
+        "./dist/triangular-engine"
+      ]
+    },
+    */
     "outDir": "./dist/out-tsc",
     "strict": true,
     "noImplicitOverride": true,
@@ -19,15 +29,7 @@
     "importHelpers": true,
     "target": "ES2022",
     "module": "ES2022",
-    "lib": [
-      "ES2022",
-      "dom"
-    ],
-    "paths": {
-      "triangular-engine": [
-        "./dist/triangular-engine"
-      ]
-    }
+    "lib": ["ES2022", "dom"]
   },
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,
