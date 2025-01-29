@@ -5,19 +5,15 @@ import {
   Provider,
   Type,
   WritableSignal,
-  computed,
-  contentChildren,
   effect,
   forwardRef,
   inject,
-  model,
-  viewChildren,
+  model
 } from '@angular/core';
-import { xyz } from '../../models';
 import { EngineService } from '../../services';
 
 import { Subject } from 'rxjs';
-import { EulerTuple, Object3D, QuaternionTuple } from 'three';
+import { EulerTuple, Object3D, Vector3Tuple } from 'three';
 
 /**
  * Provides a provider for Object3DComponent or any subclass of it.
@@ -61,8 +57,8 @@ export abstract class Object3DComponent implements OnDestroy {
   //   ...this._contentChildren(),
   // ]);
 
-  readonly position = model<xyz>([0, 0, 0]);
-  readonly scale = model<xyz | number>(1);
+  readonly position = model<Vector3Tuple>([0, 0, 0]);
+  readonly scale = model<Vector3Tuple | number>(1);
   readonly rotation = model<EulerTuple>([0, 0, 0]);
 
   readonly name = model<string>('');

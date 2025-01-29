@@ -1,4 +1,4 @@
-# Game Workspace - Triangular Engine
+# Triangular Engine Workspace
 
 ## Getting Started
 

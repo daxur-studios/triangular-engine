@@ -9,23 +9,21 @@ import {
   signal,
   viewChildren,
 } from '@angular/core';
-import { xyz } from '../../../models';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Rotation } from '@dimforge/rapier3d-compat';
 import {
+  BufferGeometry,
   InstancedMesh,
   Material,
-  BufferGeometry,
-  Object3D,
   Matrix4,
-  Vector3,
-  Euler,
+  Object3D,
   Quaternion as ThreeQuaternion,
-  Box3,
+  Vector3,
+  Vector3Tuple
 } from 'three';
-import { provideObject3DComponent, Object3DComponent } from '../../object-3d';
-import { RigidBodyComponent } from './rigid-body.component';
 import { PhysicsService } from '../../../services';
-import { Quaternion, Rotation, Vector } from '@dimforge/rapier3d-compat';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Object3DComponent, provideObject3DComponent } from '../../object-3d';
+import { RigidBodyComponent } from './rigid-body.component';
 
 // Geometry Change: Update instancedMesh.geometry and dispose of the old geometry.
 // Material Change: Update instancedMesh.material and dispose of the old material.
@@ -36,7 +34,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 export interface IInstancedRigidBodyData {
   position: Vector3;
   rotation: Rotation;
-  scale: number | xyz;
+  scale: number | Vector3Tuple;
 }
 
 @Component({
@@ -297,7 +295,7 @@ export class InstancedRigidBodyComponent extends Object3DComponent {
 
       matrix.makeRotationFromQuaternion(tmpRotation);
 
-      const scale: xyz =
+      const scale: Vector3Tuple =
         typeof params.scale === 'number'
           ? [params.scale, params.scale, params.scale]
           : params.scale;

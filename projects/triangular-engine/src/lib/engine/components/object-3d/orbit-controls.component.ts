@@ -10,23 +10,18 @@ import {
 } from '@angular/core';
 import {
   CameraHelper,
-  Group,
   MathUtils,
   Object3D,
   PerspectiveCamera,
   Vector3,
   Vector3Like,
-  Vector3Tuple,
+  Vector3Tuple
 } from 'three';
-import {
-  Object3DComponent,
-  provideObject3DComponent,
-} from './object-3d.component';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-import { combineLatest, of, Subscription, switchMap, takeUntil } from 'rxjs';
-import { AdvancedOrbitControls, xyz } from '../../models';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { combineLatest, of, switchMap } from 'rxjs';
+import { AdvancedOrbitControls } from '../../models';
 import { EngineService } from '../../services';
 
 @Component({
@@ -48,10 +43,10 @@ export class OrbitControlsComponent implements OnDestroy {
   /** Set to eg a timeStamp, so when this changes, it witches the engine's rendering camera to this orbit control's camera */
   readonly switchCameraTrigger = model<number>();
 
-  readonly target = input<xyz>();
-  readonly cameraPosition = input<xyz>();
+  readonly target = input<Vector3Tuple>();
+  readonly cameraPosition = input<Vector3Tuple>();
   /** Move both target and camera position by adding this vector to it */
-  readonly moveBy = input<xyz>();
+  readonly moveBy = input<Vector3Tuple>();
 
   /** Follow this Object3D, both target and camera */
   readonly follow = input<Object3D>();

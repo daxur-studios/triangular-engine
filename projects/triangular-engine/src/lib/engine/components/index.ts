@@ -9,5 +9,6 @@ export * from './light';
 export * from './particle';
 export * from './gltf';
 export * from './physics';
+export * from './environment';
 
 export * from './curve';

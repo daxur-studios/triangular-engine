@@ -17,12 +17,13 @@ import {
   Matrix4,
   Vector3,
   Euler,
+  Vector3Tuple,
 } from 'three';
 import {
   Object3DComponent,
   provideObject3DComponent,
 } from '../object-3d/object-3d.component';
-import { xyz } from '../../models';
+
 
 // Geometry Change: Update instancedMesh.geometry and dispose of the old geometry.
 // Material Change: Update instancedMesh.material and dispose of the old material.
@@ -31,9 +32,9 @@ import { xyz } from '../../models';
 // Count Decrease: Adjust instancedMesh.count; no need to recreate.
 
 export interface IInstancedMeshData {
-  position: xyz;
-  rotation: xyz;
-  scale: xyz;
+  position: Vector3Tuple;
+  rotation: Vector3Tuple;
+  scale: Vector3Tuple;
 }
 
 @Component({

@@ -1,15 +1,14 @@
 import { Component, effect, input, signal } from '@angular/core';
 
-import { ArrowHelper, ColorRepresentation, Vector3 } from 'three';
+import { ArrowHelper, ColorRepresentation, Vector3, Vector3Tuple } from 'three';
 import {
   Object3DComponent,
   provideObject3DComponent,
 } from './object-3d.component';
-import { xyz } from '../../models';
 
 type ArrowHelperParameters = {
   //dir?: xyz;
-  origin?: xyz;
+  origin?: Vector3Tuple;
   // length?: number;
   // color?: ColorRepresentation;
   headLength?: number;
@@ -30,7 +29,7 @@ export class ArrowHelperComponent extends Object3DComponent {
   //  readonly params = input<ArrowHelperParameters>();
 
   readonly length = input.required<number>();
-  readonly direction = input.required<xyz>();
+  readonly direction = input.required<Vector3Tuple>();
   readonly color = input<ColorRepresentation>('red');
 
   readonly arrow = signal<ArrowHelper>(new ArrowHelper());
