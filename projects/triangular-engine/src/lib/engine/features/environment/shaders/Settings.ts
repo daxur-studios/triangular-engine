@@ -239,13 +239,12 @@ const parallax = /*glsl*/ `
     }
 `;
 
-export const environmentSettingsShaderChunks = {
-  global,
-  skybox,
-  ocean,
-  parallax,
-};
-
+export function initEnvironmentShaderChunks() {
+  (ShaderChunk as any).global = global;
+  (ShaderChunk as any).skybox = skybox;
+  (ShaderChunk as any).ocean = ocean;
+  (ShaderChunk as any).parallax = parallax;
+}
 // export function Start()
 // {
 //     ShaderChunk.global = global;

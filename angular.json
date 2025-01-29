@@ -76,6 +76,11 @@
               {
                 "glob": "**/*",
                 "input": "projects/demo-app/public"
+              },
+              {
+                "glob": "**/*",
+                "input": "projects/triangular-engine/assets",
+                "output": "/triangular-engine"
               }
             ],
             "styles": ["projects/demo-app/src/styles.scss"],
@@ -86,8 +91,8 @@
               "budgets": [
                 {
                   "type": "initial",
-                  "maximumWarning": "500kB",
-                  "maximumError": "1MB"
+                  "maximumWarning": "4MB",
+                  "maximumError": "5MB"
                 },
                 {
                   "type": "anyComponentStyle",

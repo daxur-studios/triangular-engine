@@ -1,3 +1,4 @@
 export * from './_environment.module';
-export * from './sky-sphere.component';
-export * from './components/sky-box.component';
+export * from './components';
+export * from './materials';
+export * from './shaders';

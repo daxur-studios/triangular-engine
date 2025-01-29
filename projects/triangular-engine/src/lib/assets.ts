@@ -1,4 +1,4 @@
-export const ASSET_BASE_PATH = 'assets';
+export const ASSET_BASE_PATH = '/triangular-engine';
 
 export const IMAGES = {
   basicChecker: `${ASSET_BASE_PATH}/images/basicChecker.png`,
@@ -8,5 +8,5 @@ export const IMAGES = {
   sand: `${ASSET_BASE_PATH}/images/sand.png`,
   triangle: `${ASSET_BASE_PATH}/images/triangle.png`,
   waterNormal1: `${ASSET_BASE_PATH}/images/waterNormal1.png`,
-  waterNormal2: `${ASSET_BASE_PATH}/images/waterNormal2.png`
+  waterNormal2: `${ASSET_BASE_PATH}/images/waterNormal2.png`,
 } as const;
