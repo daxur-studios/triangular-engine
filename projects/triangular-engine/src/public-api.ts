@@ -5,3 +5,5 @@
 export * from './lib/triangular-engine.service';
 
 export * from './lib/engine';
+
+export * from './lib/assets';

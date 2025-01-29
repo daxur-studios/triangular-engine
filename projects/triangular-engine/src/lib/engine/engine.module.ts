@@ -25,8 +25,8 @@ import {
   SphereGeometryComponent,
   EngineMaterialsModule,
   SpriteComponent,
-  EngineEnvironmentModule,
 } from './components';
+import { EngineEnvironmentModule } from './features';
 import { EngineCurveModule } from './components/curve';
 
 const importExport = [

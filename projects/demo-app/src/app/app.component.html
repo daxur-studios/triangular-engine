@@ -1,13 +1,29 @@
+<!-- @let elapsedTime = (engineService.elapsedTime$|async ) ?? 0; -->
+
 <router-outlet></router-outlet>
 
 <scene>
+  <orbitControls></orbitControls>
 
-<orbitControls></orbitControls>
+  <grid-helper></grid-helper>
 
-<grid-helper></grid-helper>
+  <sphere>
+    <mesh-normal-material></mesh-normal-material>
+  </sphere>
 
-    <sphere>
-        <mesh-normal-material></mesh-normal-material>
-    </sphere>
+  <!-- <sky-sphere [dayNightCycle]="(elapsedTime / 10 % 1) "/> -->
 
+  <!-- <sky
+    [scale]="2000"
+    [turbidity]="10"
+    [rayleigh]="3"
+    [mieCoefficient]="0.005"
+    [mieDirectionalG]="0.7"
+    [elevation]="(elapsedTime / 10 % 1) * 180"
+     
+    [exposure]="0.5">
+</sky>
+
+  -->
+  <skyBox />
 </scene>
