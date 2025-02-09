@@ -138,7 +138,7 @@ export class BufferGeometryComponent implements OnDestroy {
 type BoxGeometryParameters = ConstructorParameters<typeof BoxGeometry>;
 
 @Component({
-  selector: 'box-geometry',
+  selector: 'boxGeometry',
   template: `<ng-content></ng-content>`,
   providers: [provideBufferGeometryComponent(BoxGeometryComponent)],
   standalone: true,
@@ -203,7 +203,7 @@ export class SphereGeometryComponent
 
 type PlaneGeometryParameters = ConstructorParameters<typeof PlaneGeometry>;
 @Component({
-  selector: 'plane-geometry',
+  selector: 'planeGeometry',
   template: `<ng-content></ng-content>`,
   standalone: true,
   imports: [],

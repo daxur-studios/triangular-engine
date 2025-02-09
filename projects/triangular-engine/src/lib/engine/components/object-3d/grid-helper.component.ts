@@ -7,9 +7,8 @@ import {
 } from './object-3d.component';
 
 @Component({
-  selector: 'grid-helper',
-  template: `<ng-content></ng-content> `,
-
+  selector: 'gridHelper',
+  template: `<ng-content></ng-content>`,
   standalone: true,
   imports: [],
   providers: [provideObject3DComponent(GridHelperComponent)],

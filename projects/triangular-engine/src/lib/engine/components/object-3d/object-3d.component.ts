@@ -8,7 +8,7 @@ import {
   effect,
   forwardRef,
   inject,
-  model
+  model,
 } from '@angular/core';
 import { EngineService } from '../../services';
 
@@ -22,7 +22,7 @@ import { EulerTuple, Object3D, Vector3Tuple } from 'three';
  * @returns A Provider object for Angular's dependency injection.
  */
 export function provideObject3DComponent<T extends Object3DComponent>(
-  component: Type<T>
+  component: Type<T>,
 ): Provider {
   return {
     provide: Object3DComponent,
@@ -32,7 +32,7 @@ export function provideObject3DComponent<T extends Object3DComponent>(
 
 @Component({
   standalone: true,
-  selector: 'object-3d',
+  selector: 'object3d',
   template: `<ng-content></ng-content>`,
   providers: [],
 })
@@ -123,15 +123,15 @@ export abstract class Object3DComponent implements OnDestroy {
     //#region Static Instance Counts
     Object3DComponent.InstanceCounts.set(
       'Object3DComponent',
-      (Object3DComponent.InstanceCounts.get('Object3DComponent') || 0) + 1
+      (Object3DComponent.InstanceCounts.get('Object3DComponent') || 0) + 1,
     );
     Object3DComponent.InstanceCounts.set(
       shortName,
-      (Object3DComponent.InstanceCounts.get(shortName) || 0) + 1
+      (Object3DComponent.InstanceCounts.get(shortName) || 0) + 1,
     );
 
     this.name.set(
-      `${shortName} ${Object3DComponent.InstanceCounts.get(shortName)}`
+      `${shortName} ${Object3DComponent.InstanceCounts.get(shortName)}`,
     );
     //#endregion
   }
