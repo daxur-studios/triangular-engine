@@ -15,6 +15,7 @@ import { IUserInterfaceOptions } from '../../models';
 })
 export class EngineUiComponent {
   readonly userInterface = input<IUserInterfaceOptions>({});
+  //
 
   constructor(readonly engineService: EngineService) {}
 }

@@ -79,6 +79,11 @@
               },
               {
                 "glob": "**/*",
+                "input": "node_modules/three/examples/jsm/libs/draco/",
+                "output": "draco/"
+              },
+              {
+                "glob": "**/*",
                 "input": "projects/triangular-engine/assets",
                 "output": "/triangular-engine"
               }

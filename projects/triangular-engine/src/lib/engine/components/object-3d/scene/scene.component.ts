@@ -82,7 +82,10 @@ export class SceneComponent
       const children = this.children();
 
       children.forEach((child) => {
-        this.scene.add(child.object3D());
+        const object3D = child.object3D();
+        if (object3D) {
+          this.scene.add(object3D);
+        }
       });
     });
   }

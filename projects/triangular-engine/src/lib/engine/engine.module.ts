@@ -25,9 +25,13 @@ import {
   SphereGeometryComponent,
   EngineMaterialsModule,
   SpriteComponent,
+  PrimitiveComponent,
+  EngineUiComponent,
 } from './components';
 import { EngineEnvironmentModule } from './features';
 import { EngineCurveModule } from './components/curve';
+import { EngineSlotDirective } from './components/engine-ui/engine-slot.directive';
+import { EngineCssComponentsModule } from './components/css';
 
 const importExport = [
   CommonModule,
@@ -37,8 +41,10 @@ const importExport = [
   EngineMeshComponentsModule,
   EngineCurveModule,
   EngineEnvironmentModule,
+  EngineCssComponentsModule,
 
   SceneComponent,
+  PrimitiveComponent,
   GridHelperComponent,
   OrbitControlsComponent,
 
@@ -56,6 +62,8 @@ const importExport = [
   ArrowHelperComponent,
   SpriteComponent,
   RaycastDirective,
+
+  EngineSlotDirective,
 ];
 
 @NgModule({

@@ -5,6 +5,10 @@
     @if (userInterface().top; as top) {
       <ng-container *ngTemplateOutlet="top" />
     }
+
+    <ng-content></ng-content>
+    <ng-content select="[engineSlot=top]" />
+
     @if (engineService.options.showFPS) {
       <engine-stats />
     }
@@ -14,11 +18,13 @@
       @if (userInterface().left; as left) {
         <ng-container *ngTemplateOutlet="left" />
       }
+      <ng-content select="[engineSlot=left]" />
     </div>
     <div class="ui-main">
       @if (userInterface().main; as main) {
         <ng-container *ngTemplateOutlet="main" />
       }
+      <ng-content select="[engineSlot=main]" />
     </div>
     <div class="ui-sidebar-right">
       @if (userInterface().showSceneTree) {
@@ -27,19 +33,23 @@
       @if (userInterface().right; as right) {
         <ng-container *ngTemplateOutlet="right" />
       }
+      <ng-content select="[engineSlot=right]" />
     </div>
   </div>
+
   <div class="ui-toolbar-bottom">
     @if (userInterface().bottom; as bottom) {
       <ng-container *ngTemplateOutlet="bottom" />
     }
+    <ng-content select="[engineSlot=bottom]" />
   </div>
 </div>
 <!-- <div class="ui-layer-2 flex-page">
+
       <div class="ui-modal">
-        <ng-content select="[slot=modal]"></ng-content>
+        <ng-content select="[engineSlot=modal]"></ng-content>
       </div>
       <div class="ui-notification">
-        <ng-content select="[slot=notification]"></ng-content>
+        <ng-content select="[engineSlot=notification]"></ng-content>
       </div>
     </div> -->

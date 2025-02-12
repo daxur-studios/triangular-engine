@@ -2,6 +2,8 @@
 
 ## Getting Started
 
+Open the Library's readme here: [triangular-engine](/projects/triangular-engine/README.md)
+
 ### Triangular Engine
 
 See the npm scripts in [package.json](package.json).
@@ -23,4 +25,3 @@ Run `npm run start` or `ng s -o` to serve the demo app.
 # See roadmap at [roadmap.md](instructions/roadmap.md)
 
 # See summary at [summary.md](instructions/summary.md)
-

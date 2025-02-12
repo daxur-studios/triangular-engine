@@ -47,7 +47,7 @@ export class MeshComponent
 
   readonly mesh = signal(new Mesh());
 
-  readonly geometry = signal<BufferGeometry | undefined>(undefined);
+  readonly geometry = model<BufferGeometry | undefined>(undefined);
   readonly material = model<Material | undefined>(undefined);
 
   readonly renderOrder = input<number>();
