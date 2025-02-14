@@ -9,3 +9,5 @@ export * from './sprite.component';
 export * from './primitive.component';
 
 export * from './scene/scene.component';
+
+export * from './_object-3d.module';

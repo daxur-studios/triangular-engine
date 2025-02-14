@@ -3,14 +3,13 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
-    "start": "npm run watch",
     "build": "ng build",
     "test": "ng test",
     "build:triangular-engine": "ng build triangular-engine",
     "publish": "npm run build:triangular-engine && cd dist/triangular-engine && npm publish",
     "link": "ng build triangular-engine --configuration development && cd dist/triangular-engine && npm link",
     "watch": "ng build triangular-engine --watch --configuration development",
-    "local": "npm run link && npm run watch"
+    "start": "npm run link && npm run watch"
   },
   "private": true,
   "dependencies": {

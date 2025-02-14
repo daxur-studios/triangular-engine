@@ -9,7 +9,7 @@ import {
   input,
   signal,
 } from '@angular/core';
-import { BehaviorSubject, ReplaySubject } from 'rxjs';
+import { BehaviorSubject, filter, firstValueFrom, ReplaySubject } from 'rxjs';
 import {
   ACESFilmicToneMapping,
   Camera,
@@ -85,7 +85,7 @@ export class EngineService implements IEngine {
   public readonly clock = new Clock();
 
   readonly camera$: BehaviorSubject<Camera> = new BehaviorSubject<Camera>(
-    new PerspectiveCamera()
+    new PerspectiveCamera(),
   );
   get camera() {
     return this.camera$.value;
@@ -157,17 +157,23 @@ export class EngineService implements IEngine {
     });
   }
 
-  #sceneComponent: SceneComponent | undefined;
-  public getEngineComponent() {
-    return this.#sceneComponent;
+  readonly sceneComponent = new BehaviorSubject<SceneComponent | undefined>(
+    undefined,
+  );
+
+  public getSceneComponent() {
+    return this.sceneComponent.value;
   }
-  public setEngineComponent(sceneComponent: SceneComponent) {
-    this.#sceneComponent = sceneComponent;
+  public async getSceneComponentAsync() {
+    return await firstValueFrom(this.sceneComponent.pipe(filter((x) => !!x)));
+  }
+  public setSceneComponent(sceneComponent: SceneComponent) {
+    this.sceneComponent.next(sceneComponent);
   }
 
   public consoleLogGroup(
     message: any,
-    type?: 'log' | 'warn' | 'error' | 'debug'
+    type?: 'log' | 'warn' | 'error' | 'debug',
   ) {
     if (type === 'warn') {
       console.warn(message);
@@ -227,7 +233,7 @@ export class EngineService implements IEngine {
     //  document.body.appendChild(this.CSS2DRenderer.domElement);
   }
   public createWebGlRenderer(
-    webGLRendererParameters?: WebGLRendererParameters
+    webGLRendererParameters?: WebGLRendererParameters,
   ): WebGLRenderer {
     if (this.renderer) {
       this.renderer.dispose();
@@ -248,7 +254,7 @@ export class EngineService implements IEngine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     this.resolution$.subscribe(({ width, height }) =>
-      this.onResize(width, height)
+      this.onResize(width, height),
     );
 
     if (this.composer) {
@@ -299,8 +305,25 @@ export class EngineService implements IEngine {
   /** Start the rendering loop */
   async startLoop() {
     await this.physicsService.initPromise;
+    const sceneComponent = await this.getSceneComponentAsync();
 
+    // Check if we should only render on trigger
+    if (sceneComponent.renderOnlyWhenThisIsTriggered() !== undefined) {
+      // Initial render
+      this.render(this.clock.getElapsedTime(), true);
+      return;
+    }
+
+    this.startAnimationLoop();
+  }
+
+  public startAnimationLoop() {
     this.renderer!.setAnimationLoop((time) => this.tick(time));
+  }
+
+  /** Handle single render requests */
+  public requestSingleRender() {
+    this.render(this.clock.getElapsedTime(), true);
   }
 
   /** Stop the rendering loop */

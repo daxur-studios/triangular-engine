@@ -9,6 +9,7 @@ import {
   input,
   OnDestroy,
   OnInit,
+  output,
   Renderer2,
   signal,
   viewChild,
@@ -51,6 +52,18 @@ export class SceneComponent
   readonly keyBindings = input<IKeyBindingOptions[]>([]);
   readonly userInterface = input<IUserInterfaceOptions>({});
 
+  /**
+   * If this input is set, the scene will only render when this input is triggered
+   *
+   * set it to true to render only once, or an incrementing number/string if multiple renders are needed
+   *
+   * No ticks will be triggered while this is enabled
+   */
+  readonly renderOnlyWhenThisIsTriggered = input<
+    boolean | number | string | undefined | null
+  >(undefined);
+  readonly rendered = output<this>();
+
   readonly #resizeObserver: ResizeObserver = new ResizeObserver((entries) => {
     const { width, height } = entries[0].contentRect;
     this.#onResize(width, height);
@@ -76,7 +89,7 @@ export class SceneComponent
     SceneComponent.instance++;
     this.name.set(`Engine Scene ${SceneComponent.instance}`);
 
-    this.engineService.setEngineComponent(this);
+    this.engineService.setSceneComponent(this);
 
     effect(() => {
       const children = this.children();
@@ -87,6 +100,21 @@ export class SceneComponent
           this.scene.add(object3D);
         }
       });
+    });
+
+    // Watch for render trigger changes
+    effect(() => {
+      const shouldRender = this.renderOnlyWhenThisIsTriggered();
+
+      if (shouldRender === undefined) {
+        // Resume animation loop
+        this.engineService.startAnimationLoop();
+      } else {
+        // Stop animation loop and do a single render
+        this.engineService.stopLoop();
+        this.engineService.requestSingleRender();
+        this.rendered.emit(this);
+      }
     });
   }
 

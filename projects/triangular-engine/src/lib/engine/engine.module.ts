@@ -32,6 +32,7 @@ import { EngineEnvironmentModule } from './features';
 import { EngineCurveModule } from './components/curve';
 import { EngineSlotDirective } from './components/engine-ui/engine-slot.directive';
 import { EngineCssComponentsModule } from './components/css';
+import { EngineObject3DModule } from './components/object-3d/_object-3d.module';
 
 const importExport = [
   CommonModule,
@@ -42,28 +43,10 @@ const importExport = [
   EngineCurveModule,
   EngineEnvironmentModule,
   EngineCssComponentsModule,
-
-  SceneComponent,
-  PrimitiveComponent,
-  GridHelperComponent,
-  OrbitControlsComponent,
-
-  GroupComponent,
-  PointLightComponent,
-  AmbientLightComponent,
-  DirectionalLightComponent,
-  PointLightComponent,
-  SphereGeometryComponent,
-  BoxGeometryComponent,
-  KeyboardControlsComponent,
-  CapsuleGeometryComponent,
-  BufferAttributeComponent,
-  GltfComponent,
-  ArrowHelperComponent,
-  SpriteComponent,
-  RaycastDirective,
+  EngineObject3DModule,
 
   EngineSlotDirective,
+  KeyboardControlsComponent,
 ];
 
 @NgModule({
