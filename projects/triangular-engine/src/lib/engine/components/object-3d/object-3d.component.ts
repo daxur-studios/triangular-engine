@@ -5,19 +5,15 @@ import {
   Provider,
   Type,
   WritableSignal,
-  computed,
-  contentChildren,
   effect,
   forwardRef,
   inject,
   model,
-  viewChildren,
 } from '@angular/core';
-import { xyz } from '../../models';
 import { EngineService } from '../../services';
 
 import { Subject } from 'rxjs';
-import { EulerTuple, Object3D, QuaternionTuple } from 'three';
+import { EulerTuple, Object3D, Vector3Tuple } from 'three';
 
 /**
  * Provides a provider for Object3DComponent or any subclass of it.
@@ -26,7 +22,7 @@ import { EulerTuple, Object3D, QuaternionTuple } from 'three';
  * @returns A Provider object for Angular's dependency injection.
  */
 export function provideObject3DComponent<T extends Object3DComponent>(
-  component: Type<T>
+  component: Type<T>,
 ): Provider {
   return {
     provide: Object3DComponent,
@@ -36,7 +32,7 @@ export function provideObject3DComponent<T extends Object3DComponent>(
 
 @Component({
   standalone: true,
-  selector: 'object-3d',
+  selector: 'object3d',
   template: `<ng-content></ng-content>`,
   providers: [],
 })
@@ -61,8 +57,8 @@ export abstract class Object3DComponent implements OnDestroy {
   //   ...this._contentChildren(),
   // ]);
 
-  readonly position = model<xyz>([0, 0, 0]);
-  readonly scale = model<xyz | number>(1);
+  readonly position = model<Vector3Tuple>([0, 0, 0]);
+  readonly scale = model<Vector3Tuple | number>(1);
   readonly rotation = model<EulerTuple>([0, 0, 0]);
 
   readonly name = model<string>('');
@@ -127,15 +123,15 @@ export abstract class Object3DComponent implements OnDestroy {
     //#region Static Instance Counts
     Object3DComponent.InstanceCounts.set(
       'Object3DComponent',
-      (Object3DComponent.InstanceCounts.get('Object3DComponent') || 0) + 1
+      (Object3DComponent.InstanceCounts.get('Object3DComponent') || 0) + 1,
     );
     Object3DComponent.InstanceCounts.set(
       shortName,
-      (Object3DComponent.InstanceCounts.get(shortName) || 0) + 1
+      (Object3DComponent.InstanceCounts.get(shortName) || 0) + 1,
     );
 
     this.name.set(
-      `${shortName} ${Object3DComponent.InstanceCounts.get(shortName)}`
+      `${shortName} ${Object3DComponent.InstanceCounts.get(shortName)}`,
     );
     //#endregion
   }

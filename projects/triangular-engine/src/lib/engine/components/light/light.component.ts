@@ -16,7 +16,7 @@ import {
 import { BehaviorSubject } from 'rxjs';
 
 @Component({
-  selector: 'ambient-light',
+  selector: 'ambientLight',
   template: `<ng-content></ng-content>`,
 
   standalone: true,
@@ -48,7 +48,7 @@ export class AmbientLightComponent extends Object3DComponent {
 }
 
 @Component({
-  selector: 'directional-light',
+  selector: 'directionalLight',
   template: `<ng-content></ng-content>`,
 
   standalone: true,
@@ -91,7 +91,7 @@ export class DirectionalLightComponent extends Object3DComponent {
 }
 
 @Component({
-  selector: 'point-light',
+  selector: 'pointLight',
   template: `<ng-content></ng-content>`,
 
   standalone: true,

@@ -25,8 +25,14 @@ import {
   SphereGeometryComponent,
   EngineMaterialsModule,
   SpriteComponent,
+  PrimitiveComponent,
+  EngineUiComponent,
 } from './components';
+import { EngineEnvironmentModule } from './features';
 import { EngineCurveModule } from './components/curve';
+import { EngineSlotDirective } from './components/engine-ui/engine-slot.directive';
+import { EngineCssComponentsModule } from './components/css';
+import { EngineObject3DModule } from './components/object-3d/_object-3d.module';
 
 const importExport = [
   CommonModule,
@@ -35,25 +41,12 @@ const importExport = [
   EngineParticlesModule,
   EngineMeshComponentsModule,
   EngineCurveModule,
+  EngineEnvironmentModule,
+  EngineCssComponentsModule,
+  EngineObject3DModule,
 
-  SceneComponent,
-  GridHelperComponent,
-  OrbitControlsComponent,
-
-  GroupComponent,
-  PointLightComponent,
-  AmbientLightComponent,
-  DirectionalLightComponent,
-  PointLightComponent,
-  SphereGeometryComponent,
-  BoxGeometryComponent,
+  EngineSlotDirective,
   KeyboardControlsComponent,
-  CapsuleGeometryComponent,
-  BufferAttributeComponent,
-  GltfComponent,
-  ArrowHelperComponent,
-  SpriteComponent,
-  RaycastDirective,
 ];
 
 @NgModule({

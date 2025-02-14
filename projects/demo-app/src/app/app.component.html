@@ -1,13 +1,35 @@
+<!-- @let elapsedTime = (engineService.elapsedTime$|async ) ?? 0; -->
+
 <router-outlet></router-outlet>
 
 <scene>
+  <directionalLight [position]="[44, 122, 1]" [intensity]="122" />
+  <ambientLight [intensity]="0.5" />
 
-<orbitControls></orbitControls>
+  <orbitControls></orbitControls>
 
-<grid-helper></grid-helper>
+  <gridHelper />
 
-    <sphere>
-        <mesh-normal-material></mesh-normal-material>
-    </sphere>
+  <sphere>
+    <meshNormalMaterial />
+  </sphere>
 
+  <skinnedMesh [debug]="true"> </skinnedMesh>
+
+  <!-- <sky-sphere [dayNightCycle]="(elapsedTime / 10 % 1) "/> -->
+
+  <!-- <sky
+    [scale]="2000"
+    [turbidity]="10"
+    [rayleigh]="3"
+    [mieCoefficient]="0.005"
+    [mieDirectionalG]="0.7"
+    [elevation]="(elapsedTime / 10 % 1) * 180"
+     
+    [exposure]="0.5">
+</sky>
+
+  -->
+  <skyBox />
+  <ocean />
 </scene>

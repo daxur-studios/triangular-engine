@@ -129,7 +129,7 @@ export abstract class MaterialComponent implements OnDestroy {
 }
 
 @Component({
-  selector: 'mesh-standard-material',
+  selector: 'meshStandardMaterial',
   standalone: true,
   template: `<ng-content></ng-content>`,
   providers: [provideMaterialComponent(MeshStandardMaterialComponent)],
@@ -166,7 +166,7 @@ export class MeshStandardMaterialComponent extends MaterialComponent {
 }
 
 @Component({
-  selector: 'mesh-normal-material',
+  selector: 'meshNormalMaterial',
   standalone: true,
   template: `<ng-content></ng-content>`,
   providers: [provideMaterialComponent(MeshNormalMaterialComponent)],
@@ -181,7 +181,7 @@ export class MeshNormalMaterialComponent extends MaterialComponent {
 }
 
 @Component({
-  selector: 'shader-material',
+  selector: 'shaderMaterial',
   standalone: true,
   template: `<ng-content></ng-content>`,
   providers: [provideMaterialComponent(ShaderMaterialComponent)],
@@ -197,7 +197,7 @@ export class ShaderMaterialComponent extends MaterialComponent {
 }
 
 @Component({
-  selector: 'raw-shader-material',
+  selector: 'rawShaderMaterial',
   standalone: true,
   template: `<ng-content></ng-content>`,
   providers: [provideMaterialComponent(RawShaderMaterialComponent)],

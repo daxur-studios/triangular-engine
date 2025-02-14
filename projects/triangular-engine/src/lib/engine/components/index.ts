@@ -1,5 +1,6 @@
 export * from './object-3d';
 export * from './engine-ui/engine-ui.component';
+export * from './engine-ui/engine-slot.directive';
 export * from './materials';
 export * from './keyboard';
 export * from './geometry';
@@ -9,5 +10,5 @@ export * from './light';
 export * from './particle';
 export * from './gltf';
 export * from './physics';
-
 export * from './curve';
+export * from './css';

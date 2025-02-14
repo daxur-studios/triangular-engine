@@ -13,6 +13,7 @@ import { GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { buildGraph, ObjectMap } from '../models';
 
 @Injectable({
   providedIn: 'root',
@@ -39,23 +40,33 @@ export class LoaderService {
     this.gltfLoader.setDRACOLoader(this.dracoLoader);
   }
 
-  public loadAndCacheGltf(gltfPath: string): Promise<GLTF | undefined> {
-    if (this.gltfCache.has(gltfPath)) {
+  public loadAndCacheGltf(
+    gltfPath: string,
+    cachePath?: string,
+  ): Promise<GLTF | undefined> {
+    if (this.gltfCache.has(cachePath || gltfPath)) {
       // Return the cached promise if the model is already loading or loaded
-      return this.gltfCache.get(gltfPath)!;
+      return this.gltfCache.get(cachePath || gltfPath)!;
     }
 
     // Load the GLTF model and store the promise in the cache
     const gltfPromise = new Promise<GLTF | undefined>((resolve, reject) => {
       this.gltfLoader.load(
         gltfPath,
-        (gltf) => resolve(gltf),
+        (gltf) => {
+          const objectMap = buildGraph(gltf.scene);
+
+          gltf.userData['objectMap'] = objectMap;
+
+          return resolve(gltf);
+        },
         undefined,
-        (error) => reject(error)
+        (error) => reject(error),
       );
     });
 
-    this.gltfCache.set(gltfPath, gltfPromise);
+    this.gltfCache.set(cachePath || gltfPath, gltfPromise);
+
     return gltfPromise;
   }
   public loadAndCacheTexture(texturePath: string): Promise<Texture> {
@@ -76,7 +87,7 @@ export class LoaderService {
           return resolve(texture);
         },
         undefined,
-        (error) => reject(error)
+        (error) => reject(error),
       );
     });
 

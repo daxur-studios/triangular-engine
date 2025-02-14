@@ -3,13 +3,13 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
-    "start": "ng serve",
     "build": "ng build",
     "test": "ng test",
     "build:triangular-engine": "ng build triangular-engine",
     "publish": "npm run build:triangular-engine && cd dist/triangular-engine && npm publish",
-    "link": "npm run build:triangular-engine && cd dist/triangular-engine && npm link",
-    "watch": "ng build triangular-engine --watch --configuration development"
+    "link": "ng build triangular-engine --configuration development && cd dist/triangular-engine && npm link",
+    "watch": "ng build triangular-engine --watch --configuration development",
+    "start": "npm run link && npm run watch"
   },
   "private": true,
   "dependencies": {
@@ -24,7 +24,7 @@
     "@dimforge/rapier3d-compat": "^0.14.0",
     "dexie": "^4.0.11",
     "rxjs": "~7.8.0",
-    "three": "^0.172.0",
+    "three": "^0.173.0",
     "tslib": "^2.3.0",
     "zone.js": "~0.14.10"
   },
@@ -33,7 +33,7 @@
     "@angular/cli": "^18.2.7",
     "@angular/compiler-cli": "^18.2.0",
     "@types/jasmine": "~5.1.0",
-    "@types/three": "^0.172.0",
+    "@types/three": "^0.173.0",
     "jasmine-core": "~5.2.0",
     "karma": "~6.4.0",
     "karma-chrome-launcher": "~3.2.0",
@@ -41,7 +41,7 @@
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.1.0",
     "ng-packagr": "^18.2.0",
-    "prettier": "^3.4.2",
+    "prettier": "^3.3.3",
     "typescript": "~5.5.2"
   }
 }

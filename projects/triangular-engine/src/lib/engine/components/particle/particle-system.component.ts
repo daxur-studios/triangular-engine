@@ -1,20 +1,12 @@
 import {
   Component,
-  computed,
-  contentChild,
   effect,
-  inject,
   input,
-  signal,
-  viewChild,
+  signal
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { BufferGeometry, Material, Points } from 'three';
 import { Object3DComponent, provideObject3DComponent } from '../object-3d';
-import { BufferGeometryComponent } from '../geometry';
-import { MaterialComponent } from '../materials';
-import { xyz } from '../../models';
-import { EngineService } from '../../services';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IParticle } from './particle.model';
 
 // particles: Particle[] = [];

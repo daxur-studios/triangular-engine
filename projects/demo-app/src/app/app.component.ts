@@ -1,3 +1,4 @@
+import { CommonModule } from '@angular/common';
 import { Component, inject } from '@angular/core';
 import { RouterModule } from '@angular/router';
 
@@ -10,7 +11,7 @@ import {
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterModule, EngineModule],
+  imports: [RouterModule, CommonModule, EngineModule],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss',
   providers: [
