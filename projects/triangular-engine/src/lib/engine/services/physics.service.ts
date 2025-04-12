@@ -75,6 +75,11 @@ export class PhysicsService {
     );
   }
 
+  // Public method to create debug mesh
+  public createDebugMesh() {
+    this.#createDebugMesh();
+  }
+
   private async initPhysics() {
     // Load the Rapier WASM module
     await RAPIER.init();

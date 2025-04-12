@@ -12,8 +12,11 @@ import { InstancedRigidBodyComponent } from './rigid-body/instanced-rigid-body.c
 import { JointComponent } from './joint/joint.component';
 import { FixedJointComponent } from './joint/fixed-joint.component';
 import { SphericalJointComponent } from './joint/spherical-joint.component';
+import { PhysicsComponent } from './physics/physics.component';
 
 const importExport: Array<Type<any>> = [
+  PhysicsComponent,
+
   RigidBodyComponent,
   InstancedRigidBodyComponent,
 
