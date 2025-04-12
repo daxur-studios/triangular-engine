@@ -2,6 +2,7 @@ import { Component, effect, inject, input, signal } from '@angular/core';
 import RAPIER, {
   RigidBody,
   RigidBodyDesc,
+  RigidBodyType,
   Vector,
 } from '@dimforge/rapier3d-compat';
 import { GroupComponent, provideObject3DComponent } from '../../object-3d';
@@ -15,6 +16,7 @@ import {
   Vector3Tuple,
 } from 'three';
 import { PhysicsService } from '../../../services';
+import { firstValueFrom } from 'rxjs';
 
 @Component({
   selector: 'rigidBody',
@@ -94,7 +96,7 @@ export class RigidBodyComponent extends GroupComponent {
 
         this.physicsService.setRigidBodyById(id, rigidBody);
       },
-      { allowSignalWrites: true }
+      { allowSignalWrites: true },
     );
   }
 
@@ -104,7 +106,7 @@ export class RigidBodyComponent extends GroupComponent {
         const rigidBodyDesc = new RigidBodyDesc(this.rigidBodyType());
         this.rigidBodyDesc.set(rigidBodyDesc);
       },
-      { allowSignalWrites: true }
+      { allowSignalWrites: true },
     );
   }
 
@@ -152,7 +154,7 @@ export class RigidBodyComponent extends GroupComponent {
           z: rigidBodyRotation[2],
           w: rigidBodyRotation[3],
         },
-        true
+        true,
       );
     });
   }
@@ -192,24 +194,24 @@ export class RigidBodyComponent extends GroupComponent {
           y: velocity[1],
           z: velocity[2],
         },
-        true
+        true,
       );
     });
   }
 
   #initRigidBody() {
     effect(
-      () => {
+      async () => {
         const rigidBodyDesc = this.rigidBodyDesc();
         if (!rigidBodyDesc) return;
 
-        const world = this.physicsService.world$.value!;
+        const world = await this.physicsService.worldPromise;
 
         const rigidBody = world.createRigidBody(rigidBodyDesc);
 
         this.rigidBody.set(rigidBody);
       },
-      { allowSignalWrites: true }
+      { allowSignalWrites: true },
     );
   }
   #initSyncGroupPositionWithPhysicsPosition() {
@@ -228,13 +230,13 @@ export class RigidBodyComponent extends GroupComponent {
         const physicsPosition = new Vector3(
           translation.x,
           translation.y,
-          translation.z
+          translation.z,
         );
         const worldQuaternion = new Quaternion(
           rotation.x,
           rotation.y,
           rotation.z,
-          rotation.w
+          rotation.w,
         );
 
         if (group.parent) {
@@ -270,7 +272,7 @@ export class RigidBodyComponent extends GroupComponent {
 }
 
 export function getRigidBodyUserData(
-  rigidBody: RAPIER.RigidBody
+  rigidBody: RAPIER.RigidBody,
 ): IRigidBodyUserData | undefined {
   return rigidBody.userData as IRigidBodyUserData | undefined;
 }
@@ -301,7 +303,7 @@ export enum CustomForceEnum {
 export function updateRigidBodyCustomForcesToApply(
   rigidBody: RAPIER.RigidBody,
   id: CustomForceEnum,
-  force: ForceToApply[] | undefined
+  force: ForceToApply[] | undefined,
 ) {
   const fallback: IRigidBodyUserData = {
     group: undefined!,

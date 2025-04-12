@@ -9,14 +9,8 @@ import { PrimitiveComponent } from './primitive.component';
 import { RaycastDirective } from './raycast';
 import { SpriteComponent } from './sprite.component';
 import { SceneComponent } from './scene/scene.component';
-import { PointLightComponent } from '../light';
-import { AmbientLightComponent } from '../light';
-import { DirectionalLightComponent } from '../light';
-import { SphereGeometryComponent } from '../geometry';
-import { BoxGeometryComponent } from '../geometry';
-import { CapsuleGeometryComponent } from '../geometry';
-import { BufferAttributeComponent } from '../geometry';
 import { GltfComponent } from '../gltf';
+import { CameraComponent } from './camera.component';
 
 const importExport: Array<Type<any>> = [
   ArrowHelperComponent,
@@ -31,18 +25,11 @@ const importExport: Array<Type<any>> = [
   GridHelperComponent,
   OrbitControlsComponent,
   GroupComponent,
-  PointLightComponent,
-  AmbientLightComponent,
-  DirectionalLightComponent,
-  PointLightComponent,
-  SphereGeometryComponent,
-  BoxGeometryComponent,
-  CapsuleGeometryComponent,
-  BufferAttributeComponent,
   GltfComponent,
   ArrowHelperComponent,
   SpriteComponent,
   RaycastDirective,
+  CameraComponent,
 ];
 
 @NgModule({

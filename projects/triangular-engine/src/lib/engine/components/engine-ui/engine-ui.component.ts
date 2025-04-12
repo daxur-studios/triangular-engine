@@ -5,11 +5,12 @@ import { EngineService } from '../../services';
 import { CommonModule } from '@angular/common';
 import { EngineStatsComponent } from './engine-stats/engine-stats.component';
 import { IUserInterfaceOptions } from '../../models';
+import { SceneTreeComponent } from '../../features/scene-tree/scene-tree.component';
 
 @Component({
   selector: 'engine-ui',
   standalone: true,
-  imports: [CommonModule, EngineStatsComponent],
+  imports: [CommonModule, EngineStatsComponent, SceneTreeComponent],
   templateUrl: './engine-ui.component.html',
   styleUrl: './engine-ui.component.scss',
 })

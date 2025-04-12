@@ -22,7 +22,7 @@ import { Vector3, Vector3Tuple } from 'three';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
-  selector: 'css-3d',
+  selector: 'css3d',
   standalone: true,
   template: `<ng-content></ng-content>`,
   providers: [provideObject3DComponent(Css3dComponent)],

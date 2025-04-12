@@ -15,7 +15,7 @@ import {
   PerspectiveCamera,
   Vector3,
   Vector3Like,
-  Vector3Tuple
+  Vector3Tuple,
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
@@ -76,6 +76,23 @@ export class OrbitControlsComponent implements OnDestroy {
     this.#initSwitchCameraChanges();
 
     this.#initUpVectorChanges();
+
+    this.#initIsDraggingTransformControls();
+  }
+
+  #initIsDraggingTransformControls() {
+    this.engineService.isDraggingTransformControls$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((isDragging) => {
+        const orbit = this.orbitControls();
+        if (!orbit) return;
+
+        if (isDragging) {
+          orbit.enabled = false;
+        } else {
+          orbit.enabled = true;
+        }
+      });
   }
 
   #initUpVectorChanges() {
@@ -127,7 +144,7 @@ export class OrbitControlsComponent implements OnDestroy {
 
           return this.engineService.tick$;
         }),
-        takeUntilDestroyed(this.destroyRef)
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((delta) => {
         if (!delta) return;
@@ -192,7 +209,7 @@ export class OrbitControlsComponent implements OnDestroy {
         if (isActive) {
           const orbit = new AdvancedOrbitControls(
             this.internalCamera,
-            this.engineService.renderer.domElement
+            this.engineService.renderer.domElement,
           );
           this.#makeOrbitControlsBetter(orbit);
           this.orbitControls.set(orbit);
@@ -204,7 +221,7 @@ export class OrbitControlsComponent implements OnDestroy {
           this.previousFollowPosition = undefined;
         }
       },
-      { allowSignalWrites: true }
+      { allowSignalWrites: true },
     );
   }
 

@@ -26,6 +26,8 @@ export class PhysicsService {
   readonly world$ = new BehaviorSubject<RAPIER.World | undefined>(undefined);
   private gravity: RAPIER.Vector3 = new RAPIER.Vector3(0, 0, 0); // new RAPIER.Vector3(0, -9.81, 0);
 
+  public readonly simulatePhysics$ = new BehaviorSubject<boolean>(true);
+
   readonly meshToBodyMap = new Map<Mesh, RAPIER.RigidBody>();
 
   readonly #rigidBodiesWithId = new Map<
@@ -52,17 +54,16 @@ export class PhysicsService {
 
   debugRenderBuffers = new RAPIER.DebugRenderBuffers(
     new Float32Array(),
-    new Float32Array()
+    new Float32Array(),
   );
 
   private debugMaterial: LineBasicMaterial | undefined;
   private debugGeometry: BufferGeometry | undefined;
   readonly debugMesh = signal<LineSegments | undefined>(undefined);
 
-  readonly initPromise: Promise<void>;
+  readonly worldPromise: Promise<RAPIER.World> = this.initPhysics();
 
   constructor() {
-    this.initPromise = this.initPhysics();
     this.#syncDebugSettings();
   }
 
@@ -70,7 +71,7 @@ export class PhysicsService {
     this.debugMaterial = new LineBasicMaterial({ vertexColors: true });
     this.debugGeometry = new BufferGeometry();
     this.debugMesh.set(
-      new LineSegments(this.debugGeometry, this.debugMaterial)
+      new LineSegments(this.debugGeometry, this.debugMaterial),
     );
   }
 
@@ -79,7 +80,10 @@ export class PhysicsService {
     await RAPIER.init();
 
     // Create the physics world
-    this.world$.next(new RAPIER.World(this.gravity));
+    const world = new RAPIER.World(this.gravity);
+    this.world$.next(world);
+
+    return world;
   }
 
   readonly beforeStep$ = new Subject<number>();
@@ -90,9 +94,13 @@ export class PhysicsService {
   readonly stepped$ = new Subject<number>();
 
   public update(deltaTime: number) {
+    if (!this.simulatePhysics$.value) return;
+
     this.beforeStep$.next(deltaTime);
 
-    const world = this.world$.value!;
+    const world = this.world$.value;
+
+    if (!world) return;
 
     world.timestep = deltaTime;
     // Step the physics simulation
@@ -132,7 +140,7 @@ export class PhysicsService {
   }
   private updateDebugGeometry(
     debugBuffers: RAPIER.DebugRenderBuffers,
-    geometry: BufferGeometry
+    geometry: BufferGeometry,
   ) {
     // Convert Rapier's Float32Array data to Three.js Float32BufferAttributes
     const positions = new Float32Array(debugBuffers.vertices.length);
@@ -186,7 +194,7 @@ export class PhysicsService {
         const forceVector = new Vector3(
           data.force.x,
           data.force.y,
-          data.force.z
+          data.force.z,
         );
 
         const forceArrowHelper = new ArrowHelper(
@@ -195,7 +203,7 @@ export class PhysicsService {
           forceVector.length() * 100,
           'purple',
           10.6,
-          10.3
+          10.3,
         );
 
         this.customForceArrowHelpers.push(forceArrowHelper);
@@ -227,42 +235,42 @@ export class PhysicsService {
   }
 
   // Add a rigid body with an associated Three.js mesh
-  public addRigidBody(mesh: Mesh, options: IPhysicsOptions) {
-    if (this.meshToBodyMap.has(mesh)) {
-      console.warn('Mesh already has a rigid body. Will not add another one.');
-      return;
-    }
+  // public addRigidBody(mesh: Mesh, options: IPhysicsOptions) {
+  //   if (this.meshToBodyMap.has(mesh)) {
+  //     console.warn('Mesh already has a rigid body. Will not add another one.');
+  //     return;
+  //   }
 
-    const world = this.world$.value!;
+  //   const world = this.world$.value!;
 
-    //#region Use Absolute Position
-    // Ensure the world matrices are updated
-    mesh.updateWorldMatrix(true, false);
+  //   //#region Use Absolute Position
+  //   // Ensure the world matrices are updated
+  //   mesh.updateWorldMatrix(true, false);
 
-    // Create a Vector3 to store the world position
-    const worldPosition = new Vector3();
+  //   // Create a Vector3 to store the world position
+  //   const worldPosition = new Vector3();
 
-    // Get the world position of the mesh
-    mesh.getWorldPosition(worldPosition);
-    //#endregion
+  //   // Get the world position of the mesh
+  //   mesh.getWorldPosition(worldPosition);
+  //   //#endregion
 
-    const rigidBodyDesc = new RAPIER.RigidBodyDesc(options.rigidBodyType)
-      .setTranslation(worldPosition.x, worldPosition.y, worldPosition.z)
-      .setRotation(mesh.quaternion);
+  //   const rigidBodyDesc = new RAPIER.RigidBodyDesc(options.rigidBodyType)
+  //     .setTranslation(worldPosition.x, worldPosition.y, worldPosition.z)
+  //     .setRotation(mesh.quaternion);
 
-    const rigidBody = world.createRigidBody(rigidBodyDesc);
+  //   const rigidBody = world.createRigidBody(rigidBodyDesc);
 
-    const colliderDesc = this.#createColliderDesc(mesh, options);
+  //   const colliderDesc = this.#createColliderDesc(mesh, options);
 
-    world.createCollider(colliderDesc, rigidBody);
+  //   world.createCollider(colliderDesc, rigidBody);
 
-    // Map the mesh to the rigid body for easy synchronization
-    this.meshToBodyMap.set(mesh, rigidBody);
-  }
+  //   // Map the mesh to the rigid body for easy synchronization
+  //   this.meshToBodyMap.set(mesh, rigidBody);
+  // }
 
   #createColliderDesc(
     mesh: Mesh,
-    options: IPhysicsOptions
+    options: IPhysicsOptions,
   ): RAPIER.ColliderDesc {
     let colliderDesc: RAPIER.ColliderDesc;
 
@@ -280,7 +288,7 @@ export class PhysicsService {
       colliderDesc = RAPIER.ColliderDesc.cuboid(
         halfExtents.x,
         halfExtents.y,
-        halfExtents.z
+        halfExtents.z,
       );
     } else if (options.shapeType === RAPIER.ShapeType.Capsule) {
       colliderDesc = RAPIER.ColliderDesc.capsule(halfExtents.y, halfExtents.x);
@@ -290,7 +298,7 @@ export class PhysicsService {
       colliderDesc = RAPIER.ColliderDesc.cuboid(
         halfExtents.x,
         halfExtents.y,
-        halfExtents.z
+        halfExtents.z,
       );
     }
 

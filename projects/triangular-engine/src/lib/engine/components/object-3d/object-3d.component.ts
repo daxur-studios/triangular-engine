@@ -77,6 +77,18 @@ export abstract class Object3DComponent implements OnDestroy {
 
     this.#initSetName();
     this.#initAttachToParent();
+
+    this.#initSetObject3DUserData();
+  }
+
+  #initSetObject3DUserData() {
+    effect(() => {
+      const object3D = this.object3D();
+      if (object3D) {
+        object3D.userData ||= {};
+        object3D.userData['object3DComponent'] = this;
+      }
+    });
   }
 
   #initSetPosition() {

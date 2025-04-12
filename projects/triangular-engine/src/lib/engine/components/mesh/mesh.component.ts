@@ -112,9 +112,9 @@ export class MeshComponent
     //#endregion
   }
 
-  addRigidBody(physics: IPhysicsOptions, mesh: Mesh) {
-    this.physicsService.addRigidBody(mesh, physics);
-  }
+  // addRigidBody(physics: IPhysicsOptions, mesh: Mesh) {
+  //   this.physicsService.addRigidBody(mesh, physics);
+  // }
 
   override ngOnDestroy(): void {
     super.ngOnDestroy();

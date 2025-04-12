@@ -5,14 +5,16 @@
 <scene>
   <directionalLight [position]="[44, 122, 1]" [intensity]="122" />
   <ambientLight [intensity]="0.5" />
+  <pointLight />
 
   <orbitControls></orbitControls>
 
   <gridHelper />
 
-  <sphere>
-    <meshNormalMaterial />
-  </sphere>
+  <mesh>
+    <sphereGeometry [params]="{ radius: 1 }" />
+    <meshStandardMaterial [params]="{ color: 'red' }" />
+  </mesh>
 
   <skinnedMesh [debug]="true"> </skinnedMesh>
 

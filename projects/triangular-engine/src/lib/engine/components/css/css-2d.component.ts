@@ -20,7 +20,7 @@ import {
 } from '../object-3d/object-3d.component';
 
 @Component({
-  selector: 'css-2d',
+  selector: 'css2d',
   standalone: true,
   template: `<ng-content></ng-content>`,
   providers: [provideObject3DComponent(Css2dComponent)],

@@ -8,7 +8,7 @@ Open the Library's readme here: [triangular-engine](/projects/triangular-engine/
 
 See the npm scripts in [package.json](package.json).
 
-To use in another project run `npm run link`.
+To use in another project run `npm run link` here and `npm link triangular-engine` in the other project
 To serve locally with hot reload run `npm run watch`.
 
 ```json

@@ -127,6 +127,10 @@ export class EngineService implements IEngine {
   >(null);
   readonly contextmenu$ = new BehaviorSubject<MouseEvent | null>(null);
   //#endregion
+  public readonly isDraggingTransformControls$ = new BehaviorSubject<boolean>(
+    false,
+  );
+
   readonly cursor: Cursor;
 
   readonly fpsController: FPSController = new FPSController(this);
@@ -304,7 +308,7 @@ export class EngineService implements IEngine {
 
   /** Start the rendering loop */
   async startLoop() {
-    await this.physicsService.initPromise;
+    await this.physicsService.worldPromise;
     const sceneComponent = await this.getSceneComponentAsync();
 
     // Check if we should only render on trigger
