@@ -7,7 +7,6 @@ import {
   WritableSignal,
 } from '@angular/core';
 import { ImpulseJoint, JointData } from '@dimforge/rapier3d-compat';
-import { getWorld } from '../../../models/getter.helper';
 import { PhysicsService } from '../../../services';
 import { RigidBodyComponent } from '../rigid-body/rigid-body.component';
 
@@ -47,7 +46,7 @@ export abstract class JointComponent implements OnDestroy {
 
   #initCreateJoint() {
     effect(
-      () => {
+      async () => {
         const joint = this.joint();
         if (joint) return;
 
@@ -65,7 +64,7 @@ export abstract class JointComponent implements OnDestroy {
 
         if (!body1 || !body2) return;
 
-        const world = getWorld(this);
+        const world = await this.physicsService.worldPromise;
 
         const jointData = this.createJointData();
 
@@ -74,7 +73,7 @@ export abstract class JointComponent implements OnDestroy {
           jointData,
           body1,
           body2,
-          true
+          true,
         );
 
         setTimeout(() => {
@@ -85,7 +84,7 @@ export abstract class JointComponent implements OnDestroy {
 
         this.joint.set(impulseJoint);
       },
-      { allowSignalWrites: true }
+      { allowSignalWrites: true },
     );
   }
 
@@ -100,9 +99,9 @@ export abstract class JointComponent implements OnDestroy {
     });
   }
 
-  public destroyJoint() {
+  public async destroyJoint() {
     const impulseJoint = this.joint();
-    const world = this.physicsService.world$.value!;
+    const world = await this.physicsService.worldPromise;
 
     if (impulseJoint) {
       world.removeImpulseJoint(impulseJoint, true);

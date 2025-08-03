@@ -35,7 +35,7 @@ import {
 
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import type { SceneComponent } from '../components/object-3d/scene/scene.component';
-import { PhysicsService } from './physics.service';
+
 import { EngineSettingsService } from './engine-settings.service';
 
 @Injectable()
@@ -48,7 +48,6 @@ export class EngineService implements IEngine {
   //#region Injected Dependencies
   readonly options = inject<IEngineOptions>(ENGINE_OPTIONS);
   readonly engineSettingsService = inject(EngineSettingsService);
-  readonly physicsService = inject(PhysicsService);
 
   //#endregion
 
@@ -101,7 +100,10 @@ export class EngineService implements IEngine {
   readonly elapsedTime$: BehaviorSubject<number> =
     this.options.elapsedTime$ || new BehaviorSubject(0);
 
-  /** Ticker for the rendering loop, holds the delta time */
+  /**
+   * Ticker for the rendering loop, holds the delta time.
+   * Unit: seconds
+   */
   readonly tick$: BehaviorSubject<number> = new BehaviorSubject<number>(0);
 
   /** Triggered when the SceneComponent is destroyed */
@@ -121,6 +123,7 @@ export class EngineService implements IEngine {
   readonly mouseup$ = new BehaviorSubject<MouseEvent | null>(null);
   readonly mousedown$ = new BehaviorSubject<MouseEvent | null>(null);
   readonly mousemove$ = new BehaviorSubject<MouseEvent | null>(null);
+  readonly click$ = new BehaviorSubject<MouseEvent | null>(null);
 
   readonly mousewheel$ = new BehaviorSubject<
     Event | WheelEvent | MouseEvent | null
@@ -140,8 +143,6 @@ export class EngineService implements IEngine {
     this.instance = EngineService.instance;
     console.debug('EngineService created, instance: ', this.instance);
 
-    this.#syncPhysicsDebugMesh();
-
     this.cursor = new Cursor(this);
 
     const renderer = this.initRenderer(this.options);
@@ -150,15 +151,6 @@ export class EngineService implements IEngine {
     if (renderer instanceof WebGLRenderer) {
       this.createComposer(renderer);
     }
-  }
-
-  #syncPhysicsDebugMesh() {
-    effect(() => {
-      const debugMesh = this.physicsService.debugMesh();
-      if (debugMesh) {
-        this.scene.add(debugMesh);
-      }
-    });
   }
 
   readonly sceneComponent = new BehaviorSubject<SceneComponent | undefined>(
@@ -308,7 +300,7 @@ export class EngineService implements IEngine {
 
   /** Start the rendering loop */
   async startLoop() {
-    await this.physicsService.worldPromise;
+    // await this.physicsService.worldPromise;
     const sceneComponent = await this.getSceneComponentAsync();
 
     // Check if we should only render on trigger
@@ -342,18 +334,14 @@ export class EngineService implements IEngine {
     this.elapsedTime$.next(this.elapsedTime$.value + delta);
 
     // Update the physics simulation
-    this.physicsService.update(delta);
+    //this.physicsService.update(delta);
 
     // Synchronize physics and rendering
-    this.syncPhysicsToRender();
+    //this.syncPhysicsToRender();
 
     //if (this.useOrbitControls) this.orbitControls?.update(delta);
 
     this.render(time);
-  }
-
-  private syncPhysicsToRender() {
-    this.physicsService.syncMeshes();
   }
 
   public render(time: number, force?: boolean) {

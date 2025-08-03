@@ -1,7 +1,7 @@
 import { signal } from '@angular/core';
 import { BehaviorSubject, takeUntil } from 'rxjs';
 import { IEngine } from './engine.model';
-import { Vector2 } from 'three';
+import { Vector2, Vector2Like } from 'three';
 
 /**
  * Cursor x and y position in pixels relative to the canvas
@@ -23,7 +23,25 @@ export class Cursor {
 
   event: MouseEvent | undefined;
 
-  normalizedPosition$ = new BehaviorSubject<Cursor>(this);
+  readonly normalizedPosition$ = new BehaviorSubject<Cursor>(this);
+
+  /**
+   * This is normalized position of the click event
+   * Ranging from -1 to 1
+   */
+  readonly click$ = new BehaviorSubject<Vector2Like>({
+    x: 0,
+    y: 0,
+  });
+
+  /**
+   * This is normalized position of the mouse move event
+   * Ranging from -1 to 1
+   */
+  readonly mouseMove$ = new BehaviorSubject<Vector2Like>({
+    x: 0,
+    y: 0,
+  });
 
   constructor(private readonly engine: IEngine) {
     this.engine.mousemove$
@@ -50,5 +68,19 @@ export class Cursor {
 
     this.previousX = this.x();
     this.previousY = this.y();
+
+    this.mouseMove$.next({
+      x: this.x(),
+      y: this.y(),
+    });
   };
+
+  onClick(event: MouseEvent) {
+    this.updatePosition(event);
+
+    this.click$.next({
+      x: this.x(),
+      y: this.y(),
+    });
+  }
 }

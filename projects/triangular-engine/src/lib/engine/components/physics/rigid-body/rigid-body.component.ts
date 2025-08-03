@@ -31,6 +31,13 @@ export class RigidBodyComponent extends GroupComponent {
   readonly physicsService = inject(PhysicsService);
   //#endregion
 
+  /**
+   * Examples, use number or enum:
+   * - Dynamic = 0
+   * - Fixed = 1
+   * - KinematicPositionBased = 2
+   * - KinematicVelocityBased = 3
+   */
   readonly rigidBodyType = input.required<RAPIER.RigidBodyType>();
 
   readonly id = input<string | undefined>(undefined);

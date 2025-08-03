@@ -15,7 +15,7 @@ import { PhysicsService } from '../../../services';
 import { QuaternionTuple, Vector3Tuple } from 'three';
 
 export function provideColliderComponent<T extends ColliderComponent>(
-  colliderComponent: Type<T>
+  colliderComponent: Type<T>,
 ) {
   return [{ provide: ColliderComponent, useValue: colliderComponent }];
 }
@@ -62,7 +62,7 @@ export class ColliderComponent implements OnDestroy {
 
   #initCollider() {
     effect(
-      () => {
+      async () => {
         const parentRigidBodyComponent = this.#getParentAsRigidBodyComponent();
         if (!parentRigidBodyComponent) return;
 
@@ -70,7 +70,7 @@ export class ColliderComponent implements OnDestroy {
 
         if (!colliderDesc) return;
 
-        const world = this.physicsService.world$.value!;
+        const world = await this.physicsService.worldPromise;
 
         const rigidBody = parentRigidBodyComponent.rigidBody();
 
@@ -78,7 +78,7 @@ export class ColliderComponent implements OnDestroy {
 
         this.collider.set(collider);
       },
-      { allowSignalWrites: true }
+      { allowSignalWrites: true },
     );
   }
 
@@ -190,7 +190,7 @@ export class ColliderComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     const collider = this.collider();
-    const world = this.physicsService.world$.value!;
+    const world = this.physicsService.world$.value;
 
     if (collider && world) {
       world.removeCollider(collider, true);

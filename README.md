@@ -15,7 +15,8 @@ To serve locally with hot reload run `npm run watch`.
     "build:triangular-engine": "ng build triangular-engine",
     "publish": "npm run build:triangular-engine && cd dist/triangular-engine && npm publish",
     "link": "npm run build:triangular-engine && cd dist/triangular-engine && npm link",
-    "watch": "ng build triangular-engine --watch --configuration development"
+    "watch": "ng build triangular-engine --watch --configuration development",
+    "dev": "npm run watch"
 ```
 
 ### Demo App

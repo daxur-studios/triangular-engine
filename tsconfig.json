@@ -3,16 +3,11 @@
 {
   "compileOnSave": false,
   "compilerOptions": {
+    "baseUrl": ".",
     "paths": {
-      "triangular-engine": ["./projects/triangular-engine/src/public-api"]
+      // comment this out once not testing demo app
+      "triangular-engine": ["projects/triangular-engine/src/public-api"]
     },
-    /*
-    "paths": {
-      "triangular-engine": [
-        "./dist/triangular-engine"
-      ]
-    },
-    */
     "outDir": "./dist/out-tsc",
     "strict": true,
     "noImplicitOverride": true,

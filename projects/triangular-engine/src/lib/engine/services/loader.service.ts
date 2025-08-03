@@ -43,8 +43,9 @@ export class LoaderService {
   public loadAndCacheGltf(
     gltfPath: string,
     cachePath?: string,
+    force = false,
   ): Promise<GLTF | undefined> {
-    if (this.gltfCache.has(cachePath || gltfPath)) {
+    if (this.gltfCache.has(cachePath || gltfPath) && !force) {
       // Return the cached promise if the model is already loading or loaded
       return this.gltfCache.get(cachePath || gltfPath)!;
     }

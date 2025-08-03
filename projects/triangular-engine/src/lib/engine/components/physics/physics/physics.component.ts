@@ -1,19 +1,19 @@
+import { CommonModule } from '@angular/common';
 import {
   Component,
+  DestroyRef,
   OnDestroy,
   OnInit,
+  effect,
   inject,
   input,
-  effect,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { PhysicsService } from '../../../services/physics.service';
-import { EngineService } from '../../../services/engine.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Subject } from 'rxjs';
-import { PhysicsComponentsModule } from '../physics-components.module';
-import { Vector3Tuple } from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
+import { Subject } from 'rxjs';
+import { Vector3Tuple } from 'three';
+import { EngineService } from '../../../services/engine.service';
+import { PhysicsService } from '../../../services/physics.service';
 
 /**
  * Wraps your 3D scene components in a physics world.
@@ -25,26 +25,25 @@ import RAPIER from '@dimforge/rapier3d-compat';
 @Component({
   selector: 'physics',
   standalone: true,
-  imports: [CommonModule, PhysicsComponentsModule],
+  imports: [CommonModule],
   templateUrl: './physics.component.html',
   styleUrl: './physics.component.css',
+  providers: [],
 })
 export class PhysicsComponent implements OnInit, OnDestroy {
   //#region Injected Dependencies
   readonly physicsService = inject(PhysicsService);
   readonly engineService = inject(EngineService);
+  readonly #destroyRef = inject(DestroyRef);
   //#endregion
 
   // Configuration inputs
   readonly gravity = input<Vector3Tuple>([0, -9.81, 0]);
-  readonly debug = input<boolean>(false);
-  readonly paused = input<boolean>(false);
+  readonly debug = input<boolean>();
+  readonly paused = input<boolean>();
 
   // Physics debug visualization
   readonly debugMesh = this.physicsService.debugMesh;
-
-  // Physics simulation state
-  readonly simulatePhysics$ = this.physicsService.simulatePhysics$;
 
   // Physics world
   readonly world$ = this.physicsService.world$;
@@ -64,9 +63,15 @@ export class PhysicsComponent implements OnInit, OnDestroy {
     this.#initOnDebugChange();
 
     // Watch for paused state changes
+    this.#initOnSimulatePhysicsChange();
+
+    this.#initEngineTick();
+  }
+
+  #initOnSimulatePhysicsChange(): void {
     effect(() => {
-      const paused = this.paused();
-      this.simulatePhysics$.next(!paused);
+      const isPaused = this.paused();
+      this.physicsService.setSimulatePhysics(isPaused);
     });
   }
 
@@ -78,32 +83,27 @@ export class PhysicsComponent implements OnInit, OnDestroy {
   }
 
   #initOnDebugChange(): void {
-    effect(() => {
-      const debug = this.debug();
-      if (debug) {
-        // Create debug mesh if it doesn't exist
-        if (!this.debugMesh()) {
-          this.physicsService.createDebugMesh();
+    effect(
+      () => {
+        const debug = this.debug();
+        if (debug) {
+          // Create debug mesh if it doesn't exist
+          if (!this.debugMesh()) {
+            this.physicsService.createDebugMesh();
+          }
+        } else {
+          this.debugMesh.set(undefined);
         }
-      } else {
-        this.debugMesh.set(undefined);
-      }
-    });
+      },
+      { allowSignalWrites: true },
+    );
   }
 
-  ngOnInit(): void {
-    // Wait for the physics world to be initialized
-    this.physicsService.worldPromise.then(() => {
-      console.log('Physics world initialized');
-
-      // Set initial gravity
-      this.updateGravity(this.gravity());
-    });
-
+  #initEngineTick(): void {
     // Set up the physics simulation loop
     this.engineService.tick$
-      .pipe(takeUntilDestroyed())
-      .subscribe((deltaTime: number) => {
+      .pipe(takeUntilDestroyed(this.#destroyRef))
+      .subscribe((deltaTime) => {
         // Update physics simulation
         this.physicsService.update(deltaTime);
 
@@ -117,6 +117,16 @@ export class PhysicsComponent implements OnInit, OnDestroy {
       });
   }
 
+  ngOnInit(): void {
+    // Wait for the physics world to be initialized
+    this.physicsService.worldPromise.then(() => {
+      console.log('Physics world initialized');
+
+      // Set initial gravity
+      this.updateGravity(this.gravity());
+    });
+  }
+
   private updateGravity(gravity: Vector3Tuple): void {
     const world = this.world$.value;
     if (!world) return;
@@ -128,5 +138,6 @@ export class PhysicsComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
+    this.physicsService.dispose();
   }
 }

@@ -3,6 +3,7 @@ import {
   DestroyRef,
   OnDestroy,
   Provider,
+  QueryList,
   Type,
   WritableSignal,
   effect,
@@ -47,6 +48,7 @@ export abstract class Object3DComponent implements OnDestroy {
     skipSelf: true,
     optional: true,
   });
+
   //#endregion
 
   // readonly _viewChildren = viewChildren(Object3DComponent);

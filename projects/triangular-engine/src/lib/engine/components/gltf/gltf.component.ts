@@ -1,10 +1,11 @@
 import { Component, effect, inject, input, signal } from '@angular/core';
 import { Object3DComponent, provideObject3DComponent } from '../object-3d';
 import { Object3D, Scene } from 'three';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, combineLatest, distinctUntilChanged } from 'rxjs';
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LoaderService } from '../../services';
 import { buildGraph } from '../../models';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 
 @Component({
   selector: 'gltf',
@@ -19,10 +20,12 @@ export class GltfComponent extends Object3DComponent {
   //#endregion
 
   readonly gltfPath = input.required<string>();
+  readonly gltfPath$ = toObservable(this.gltfPath);
   /**
    * Whether to cache the GLTF to a different path than the one provided in the gltfPath input.
    */
   readonly cachePath = input<string | undefined>(undefined);
+  readonly cachePath$ = toObservable(this.cachePath);
 
   readonly object3D = signal(new Object3D());
 
@@ -35,13 +38,20 @@ export class GltfComponent extends Object3DComponent {
     effect(() => {
       this.#loadAndCache(this.gltfPath(), this.cachePath());
     });
+
+    this.#initReCacheOnGltfPathChange();
   }
 
-  async #loadAndCache(gltfPath: string | undefined, cachePath?: string) {
+  async #loadAndCache(
+    gltfPath: string | undefined,
+    cachePath?: string,
+    force = false,
+  ) {
     if (gltfPath) {
       const gltf = await this.loaderService.loadAndCacheGltf(
         gltfPath,
         cachePath,
+        force,
       );
 
       this.gltf$.next(gltf);
@@ -51,5 +61,24 @@ export class GltfComponent extends Object3DComponent {
         // console.warn('GLTF loaded:', gltf);
       }
     }
+  }
+
+  #initReCacheOnGltfPathChange() {
+    this.gltfPath$
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        distinctUntilChanged((previous, current) => {
+          // Only interested in additional changes, where both a and b are defined
+          return previous !== current && !!previous && !!current;
+        }),
+      )
+      .subscribe((gltfPath) => {
+        if (!this.cachePath()) {
+          return;
+        }
+
+        console.log('Re-caching GLTF now', gltfPath);
+        this.#loadAndCache(gltfPath, this.cachePath(), true);
+      });
   }
 }

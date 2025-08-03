@@ -10,6 +10,9 @@
     (mousedown)="engineService.mousedown$.next($event)"
     (mouseup)="engineService.mouseup$.next($event)"
     (mousemove)="engineService.mousemove$.next($event)"
+    (click)="
+      engineService.click$.next($event); engineService.cursor.onClick($event)
+    "
     (mousewheel)="engineService.mousewheel$.next($event)"
     (contextmenu)="
       engineService.contextmenu$.next($event); $event.preventDefault()

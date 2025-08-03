@@ -1,6 +1,13 @@
-import { inject, Injectable, signal, WritableSignal } from '@angular/core';
+import {
+  DestroyRef,
+  effect,
+  inject,
+  Injectable,
+  signal,
+  WritableSignal,
+} from '@angular/core';
 import RAPIER, { Vector } from '@dimforge/rapier3d-compat';
-import { BehaviorSubject, startWith, Subject } from 'rxjs';
+import { BehaviorSubject, startWith, Subject, takeUntil } from 'rxjs';
 import {
   ArrowHelper,
   BufferAttribute,
@@ -14,19 +21,32 @@ import { IPhysicsOptions } from '../models';
 
 import { getRigidBodyUserData, IRigidBodyUserData } from '../components';
 import { EngineSettingsService } from './engine-settings.service';
+import { EngineService } from './engine.service';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-@Injectable({
-  providedIn: 'root',
-})
+@Injectable()
 export class PhysicsService {
+  readonly worldPromise: Promise<RAPIER.World> = this.initRAPIER();
   //#region Injected Dependencies
+  readonly engineService = inject(EngineService);
   readonly engineSettingsService = inject(EngineSettingsService);
   // #endregion
+  public readonly onDestroy$ = new Subject<void>();
+  public dispose() {
+    this.onDestroy$.next();
+    this.onDestroy$.complete();
+  }
 
   readonly world$ = new BehaviorSubject<RAPIER.World | undefined>(undefined);
   private gravity: RAPIER.Vector3 = new RAPIER.Vector3(0, 0, 0); // new RAPIER.Vector3(0, -9.81, 0);
 
-  public readonly simulatePhysics$ = new BehaviorSubject<boolean>(true);
+  readonly #physicsPaused$ = new BehaviorSubject<boolean>(false);
+  public setSimulatePhysics(value: boolean | undefined) {
+    this.#physicsPaused$.next(value ?? false);
+  }
+  public getSimulatePhysics() {
+    return this.#physicsPaused$.value;
+  }
 
   readonly meshToBodyMap = new Map<Mesh, RAPIER.RigidBody>();
 
@@ -61,10 +81,31 @@ export class PhysicsService {
   private debugGeometry: BufferGeometry | undefined;
   readonly debugMesh = signal<LineSegments | undefined>(undefined);
 
-  readonly worldPromise: Promise<RAPIER.World> = this.initPhysics();
-
   constructor() {
     this.#syncDebugSettings();
+    this.#syncPhysicsDebugMesh();
+    this.#initEngineTick();
+  }
+
+  #initEngineTick() {
+    this.engineService.tick$
+      .pipe(takeUntil(this.onDestroy$))
+      .subscribe((delta) => {
+        this.update(delta);
+        this.syncPhysicsToRender;
+      });
+  }
+  private syncPhysicsToRender() {
+    this.syncMeshes();
+  }
+
+  #syncPhysicsDebugMesh() {
+    effect(() => {
+      const debugMesh = this.debugMesh();
+      if (debugMesh) {
+        this.engineService.scene.add(debugMesh);
+      }
+    });
   }
 
   #createDebugMesh() {
@@ -80,7 +121,7 @@ export class PhysicsService {
     this.#createDebugMesh();
   }
 
-  private async initPhysics() {
+  private async initRAPIER() {
     // Load the Rapier WASM module
     await RAPIER.init();
 
@@ -99,7 +140,7 @@ export class PhysicsService {
   readonly stepped$ = new Subject<number>();
 
   public update(deltaTime: number) {
-    if (!this.simulatePhysics$.value) return;
+    if (this.#physicsPaused$.value) return;
 
     this.beforeStep$.next(deltaTime);
 
@@ -132,7 +173,11 @@ export class PhysicsService {
   public syncDebugMeshes() {
     if (!this.debugGeometry) return;
 
-    const world = this.world$.value!;
+    const world = this.world$.value;
+    if (!world) return;
+
+    const debugMesh = this.debugMesh();
+    if (!debugMesh) return;
 
     // Clear previous debug data
     // this.debugRenderBuffers.clear();
@@ -141,11 +186,16 @@ export class PhysicsService {
     this.debugRenderBuffers = world.debugRender();
 
     // Update Three.js geometry with debug data
-    this.updateDebugGeometry(this.debugRenderBuffers, this.debugGeometry);
+    this.updateDebugGeometry(
+      this.debugRenderBuffers,
+      this.debugGeometry,
+      debugMesh,
+    );
   }
   private updateDebugGeometry(
     debugBuffers: RAPIER.DebugRenderBuffers,
     geometry: BufferGeometry,
+    debugMesh: LineSegments,
   ) {
     // Convert Rapier's Float32Array data to Three.js Float32BufferAttributes
     const positions = new Float32Array(debugBuffers.vertices.length);
@@ -161,7 +211,7 @@ export class PhysicsService {
     // Update the draw range
     geometry.setDrawRange(0, debugBuffers.vertices.length / 3);
 
-    this.debugMesh()!.frustumCulled = false; // bug fix, but should be looked into
+    debugMesh.frustumCulled = false; // bug fix, but should be looked into
 
     this.#debugCustomForces();
   }
@@ -175,7 +225,8 @@ export class PhysicsService {
 
     this.customForceArrowHelpers = [];
 
-    const world = this.world$.value!;
+    const world = this.world$.value;
+    if (!world) return;
 
     world.forEachActiveRigidBody((rigidBody) => {
       const userData = getRigidBodyUserData(rigidBody);
