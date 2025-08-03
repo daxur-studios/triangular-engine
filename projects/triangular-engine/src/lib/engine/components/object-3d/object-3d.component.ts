@@ -42,7 +42,7 @@ export abstract class Object3DComponent implements OnDestroy {
 
   //#region Injected Dependencies
   readonly engineService = inject(EngineService);
-  protected readonly destroyRef = inject(DestroyRef);
+  readonly destroyRef = inject(DestroyRef);
 
   readonly parent = inject(Object3DComponent, {
     skipSelf: true,

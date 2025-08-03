@@ -1,5 +1,5 @@
 import { signal } from '@angular/core';
-import { BehaviorSubject, takeUntil } from 'rxjs';
+import { BehaviorSubject, Subject, takeUntil } from 'rxjs';
 import { IEngine } from './engine.model';
 import { Vector2, Vector2Like } from 'three';
 
@@ -29,10 +29,7 @@ export class Cursor {
    * This is normalized position of the click event
    * Ranging from -1 to 1
    */
-  readonly click$ = new BehaviorSubject<Vector2Like>({
-    x: 0,
-    y: 0,
-  });
+  readonly click$ = new Subject<Vector2Like>();
 
   /**
    * This is normalized position of the mouse move event
