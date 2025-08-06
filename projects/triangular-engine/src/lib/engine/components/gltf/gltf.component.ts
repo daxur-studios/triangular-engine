@@ -1,6 +1,6 @@
 import { Component, effect, inject, input, signal } from '@angular/core';
 import { Object3DComponent, provideObject3DComponent } from '../object-3d';
-import { Object3D, Scene } from 'three';
+import { Mesh, Object3D, Scene } from 'three';
 import { BehaviorSubject, combineLatest, distinctUntilChanged } from 'rxjs';
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LoaderService } from '../../services';
@@ -27,6 +27,10 @@ export class GltfComponent extends Object3DComponent {
   readonly cachePath = input<string | undefined>(undefined);
   readonly cachePath$ = toObservable(this.cachePath);
 
+  /** When this is true, the geometry will be computed and stored in a BVH tree for faster raycasting for every mesh in this gltf */
+  readonly enableBVH = input<boolean>(false);
+  readonly enableBVH$ = toObservable(this.enableBVH);
+
   readonly object3D = signal(new Object3D());
 
   readonly gltf$ = new BehaviorSubject<GLTF | undefined>(undefined);
@@ -40,6 +44,25 @@ export class GltfComponent extends Object3DComponent {
     });
 
     this.#initReCacheOnGltfPathChange();
+    this.#initEnableBVH();
+  }
+
+  #initEnableBVH() {
+    combineLatest([this.enableBVH$, this.gltf$])
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(([enableBVH, gltf]) => {
+        if (enableBVH && gltf) {
+          gltf.scene.traverse((child) => {
+            if (
+              child instanceof Mesh &&
+              typeof child.geometry.computeBoundsTree === 'function'
+            ) {
+              console.log('🧊 I am computing BVH for Gltf sub-mesh');
+              child.geometry.computeBoundsTree();
+            }
+          });
+        }
+      });
   }
 
   async #loadAndCache(

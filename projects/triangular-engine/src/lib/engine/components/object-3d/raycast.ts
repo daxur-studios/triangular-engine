@@ -82,7 +82,7 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
           // Update the raycaster
           this.raycaster.setFromCamera(
             mousePosition,
-            this.engineService.camera
+            this.engineService.camera,
           );
           this.raycaster.far = 1000;
 
@@ -91,7 +91,7 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
           if (object3D) {
             const intersects = this.raycastService.raycaster.intersectObject(
               object3D,
-              true
+              true,
             );
             if (intersects.length > 0) {
               // An intersection occurred
@@ -107,7 +107,7 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
               this.raycaster.ray.direction,
               this.raycaster.ray.origin,
               this.raycaster.far,
-              0xff0000
+              0xff0000,
             );
             this.scene.add(arrow);
             setTimeout(() => {
@@ -139,7 +139,7 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
           // Update the raycaster
           this.raycaster.setFromCamera(
             mousePosition,
-            this.engineService.camera
+            this.engineService.camera,
           );
           this.raycaster.far = 1000;
 
@@ -148,7 +148,7 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
           if (object3D) {
             const intersects = this.raycastService.raycaster.intersectObject(
               object3D,
-              true
+              true,
             );
             if (intersects.length > 0) {
               if (!this.isPointerOver) {
@@ -177,9 +177,9 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
 export class RaycastService {
   readonly raycaster = new Raycaster();
 
-  // readonly itemsToWatch = new Set<Object3D>();
-
-  constructor() {}
+  constructor() {
+    this.raycaster.firstHitOnly = true;
+  }
 }
 
 class RaycastEventEmitter<T> extends EventEmitter<T> {

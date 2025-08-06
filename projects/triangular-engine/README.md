@@ -11,6 +11,7 @@
     "@dimforge/rapier3d-compat": "^0.18.0",
     "dexie": "^4.0.11",
     "three": "^0.178.0",
+    "three-mesh-bvh": "^0.9.1",
   },
 ```
 

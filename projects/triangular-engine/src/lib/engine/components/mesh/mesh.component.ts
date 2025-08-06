@@ -42,6 +42,9 @@ export class MeshComponent
 
   readonly renderOrder = input<number>();
 
+  /** When this is true, the geometry will be computed and stored in a BVH tree for faster raycasting */
+  readonly enableBVH = input<boolean>(false);
+
   override object3D = this.mesh;
 
   constructor() {
@@ -72,6 +75,9 @@ export class MeshComponent
       const mesh = this.mesh();
       if (geometry) {
         mesh.geometry = geometry;
+        if (this.enableBVH()) {
+          geometry.computeBoundsTree();
+        }
       }
     });
   }

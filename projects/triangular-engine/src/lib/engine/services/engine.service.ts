@@ -19,6 +19,8 @@ import {
   Scene,
   WebGLRenderer,
   WebGLRendererParameters,
+  BufferGeometry,
+  Mesh,
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -37,6 +39,11 @@ import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import type { SceneComponent } from '../components/object-3d/scene/scene.component';
 
 import { EngineSettingsService } from './engine-settings.service';
+import {
+  acceleratedRaycast,
+  computeBoundsTree,
+  disposeBoundsTree,
+} from 'three-mesh-bvh';
 
 @Injectable()
 export class EngineService implements IEngine {
@@ -151,6 +158,10 @@ export class EngineService implements IEngine {
     if (renderer instanceof WebGLRenderer) {
       this.createComposer(renderer);
     }
+
+    BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+    BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+    Mesh.prototype.raycast = acceleratedRaycast;
   }
 
   readonly sceneComponent = new BehaviorSubject<SceneComponent | undefined>(
