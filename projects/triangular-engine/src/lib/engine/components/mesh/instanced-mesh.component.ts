@@ -6,6 +6,7 @@ import {
   effect,
   inject,
   input,
+  model,
   signal,
   viewChildren,
 } from '@angular/core';
@@ -24,17 +25,17 @@ import {
   provideObject3DComponent,
 } from '../object-3d/object-3d.component';
 
-
 // Geometry Change: Update instancedMesh.geometry and dispose of the old geometry.
 // Material Change: Update instancedMesh.material and dispose of the old material.
 // Position Change: Update instance matrices; no need to recreate.
 // Count Increase: Dispose and recreate InstancedMesh with a higher count.
 // Count Decrease: Adjust instancedMesh.count; no need to recreate.
 
-export interface IInstancedMeshData {
+export interface IInstancedMeshData<DATA = any> {
   position: Vector3Tuple;
   rotation: Vector3Tuple;
   scale: Vector3Tuple;
+  data?: DATA;
 }
 
 @Component({
@@ -51,14 +52,14 @@ export class InstancedMeshComponent extends Object3DComponent {
   #prevMaxCount: number | undefined;
 
   //  readonly positions = input.required<xyz[]>();
-  readonly data = input.required<IInstancedMeshData[]>();
+  readonly data = model.required<IInstancedMeshData[]>();
 
   /** The number of instances */
   readonly count = input.required<number>();
 
   /** The instanced mesh object */
   readonly instancedMesh = signal<InstancedMesh>(
-    new InstancedMesh(new BufferGeometry(), [], 0)
+    new InstancedMesh(new BufferGeometry(), [], 0),
   );
   override object3D: WritableSignal<Object3D> = this.instancedMesh;
   #previousInstancedMesh: InstancedMesh | undefined = this.instancedMesh();
@@ -96,7 +97,7 @@ export class InstancedMeshComponent extends Object3DComponent {
           const instancedMesh = new InstancedMesh(
             this.geometry(),
             this.material(),
-            maxCount
+            maxCount,
           );
 
           this.instancedMesh.set(instancedMesh);
@@ -106,7 +107,7 @@ export class InstancedMeshComponent extends Object3DComponent {
 
         this.#prevMaxCount = maxCount;
       },
-      { allowSignalWrites: true }
+      { allowSignalWrites: true },
     );
   }
   #initGeometry() {
@@ -154,7 +155,7 @@ export class InstancedMeshComponent extends Object3DComponent {
 
   public onDataChanged(
     data: IInstancedMeshData[],
-    instancedMesh: InstancedMesh
+    instancedMesh: InstancedMesh,
   ) {
     const eulerRotation = this.#eulerRotation;
     const scaleVector = this.#scaleVector;
@@ -165,7 +166,7 @@ export class InstancedMeshComponent extends Object3DComponent {
       eulerRotation.set(
         params.rotation[0],
         params.rotation[1],
-        params.rotation[2]
+        params.rotation[2],
       );
       matrix.makeRotationFromEuler(eulerRotation);
 
@@ -175,7 +176,7 @@ export class InstancedMeshComponent extends Object3DComponent {
       matrix.setPosition(
         params.position[0],
         params.position[1],
-        params.position[2]
+        params.position[2],
       );
 
       instancedMesh.setMatrixAt(index, matrix);

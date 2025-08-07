@@ -16,6 +16,8 @@ import {
   Object3DEventMap,
   Sprite,
   SpriteMaterial,
+  Vector2,
+  Vector2Tuple,
 } from 'three';
 
 @Component({
@@ -30,13 +32,24 @@ export class SpriteComponent extends Object3DComponent {
   override readonly object3D = this.sprite;
 
   readonly material = model<SpriteMaterial | undefined>(undefined);
+  readonly center = model<Vector2Tuple | undefined>(undefined);
 
   constructor() {
     super();
 
     this.#initSetMaterial();
+    this.#initSetCenter();
   }
 
+  #initSetCenter() {
+    effect(() => {
+      const center = this.center();
+      const sprite = this.sprite();
+      if (center) {
+        sprite.center = new Vector2(...center);
+      }
+    });
+  }
   #initSetMaterial() {
     effect(() => {
       const material = this.material();
