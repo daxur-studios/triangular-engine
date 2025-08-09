@@ -7,6 +7,7 @@ import {
   effect,
   inject,
   input,
+  model,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import RAPIER from '@dimforge/rapier3d-compat';
@@ -86,14 +87,15 @@ export class PhysicsComponent implements OnInit, OnDestroy {
     effect(
       () => {
         const debug = this.debug();
-        if (debug) {
-          // Create debug mesh if it doesn't exist
-          if (!this.debugMesh()) {
-            this.physicsService.createDebugMesh();
-          }
-        } else {
-          this.debugMesh.set(undefined);
-        }
+        this.physicsService.setDebugState(debug ?? false);
+        // if (debug) {
+        //   // Create debug mesh if it doesn't exist
+        //   if (!this.debugMesh()) {
+        //     this.physicsService.createDebugMesh();
+        //   }
+        // } else {
+        //   this.debugMesh.set(undefined);
+        // }
       },
       { allowSignalWrites: true },
     );

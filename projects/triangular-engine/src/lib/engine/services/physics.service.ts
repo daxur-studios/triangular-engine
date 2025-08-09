@@ -271,6 +271,12 @@ export class PhysicsService {
     });
   }
 
+  getDebugState() {
+    return this.engineSettingsService.settingsForm.value.debug ?? false;
+  }
+  setDebugState(state: boolean) {
+    this.engineSettingsService.settingsForm.controls.debug.setValue(state);
+  }
   #syncDebugSettings() {
     this.engineSettingsService.settingsForm.controls.debug.valueChanges
       .pipe(startWith(this.engineSettingsService.settingsForm.value.debug))

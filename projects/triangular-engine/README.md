@@ -1,5 +1,7 @@
 # Triangular Engine
 
+Documentation: [docs/README.md](./docs/README.md)
+
 # Peer Dependencies
 
 ```json
