@@ -31,6 +31,11 @@ export class GltfComponent extends Object3DComponent {
   readonly enableBVH = input<boolean>(false);
   readonly enableBVH$ = toObservable(this.enableBVH);
 
+  readonly castShadow = input<boolean>(false);
+  readonly castShadow$ = toObservable(this.castShadow);
+  readonly receiveShadow = input<boolean>(false);
+  readonly receiveShadow$ = toObservable(this.receiveShadow);
+
   readonly object3D = signal(new Object3D());
 
   readonly gltf$ = new BehaviorSubject<GLTF | undefined>(undefined);
@@ -45,6 +50,7 @@ export class GltfComponent extends Object3DComponent {
 
     this.#initReCacheOnGltfPathChange();
     this.#initEnableBVH();
+    this.#initCastShadow();
   }
 
   #initEnableBVH() {
@@ -59,6 +65,21 @@ export class GltfComponent extends Object3DComponent {
             ) {
               console.log('🧊 I am computing BVH for Gltf sub-mesh');
               child.geometry.computeBoundsTree();
+            }
+          });
+        }
+      });
+  }
+
+  #initCastShadow() {
+    combineLatest([this.castShadow$, this.receiveShadow$, this.gltf$])
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(([castShadow, receiveShadow, gltf]) => {
+        if (gltf) {
+          gltf.scene.traverse((child) => {
+            if (child instanceof Mesh) {
+              child.castShadow = castShadow;
+              child.receiveShadow = receiveShadow;
             }
           });
         }

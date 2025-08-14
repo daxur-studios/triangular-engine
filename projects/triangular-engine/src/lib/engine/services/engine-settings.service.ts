@@ -35,7 +35,7 @@ export class EngineSettingsService {
     this.settingsForm.valueChanges
       .pipe(
         debounceTime(500),
-        distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b))
+        distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b)),
       )
       .subscribe(() => {
         this.saveSettings();
@@ -56,9 +56,8 @@ export class EngineSettingsService {
   }
 
   async loadSettings() {
-    const userSettings = await this.databaseService.database.userSettings.get(
-      'DEFAULT'
-    );
+    const userSettings =
+      await this.databaseService.database.userSettings.get('DEFAULT');
 
     this.settingsForm.setValue({
       autoSave: userSettings?.autoSave ?? false,
