@@ -44,6 +44,7 @@ export class RigidBodyComponent extends GroupComponent {
   //#region Physical Properties
   readonly mass = input<number>();
   readonly angularDamping = input<number>();
+  readonly linearDamping = input<number>();
   //#endregion
 
   /** Linear velocity vector in meters per second */
@@ -73,6 +74,7 @@ export class RigidBodyComponent extends GroupComponent {
     //#region Physical Properties
     this.#initMass();
     this.#initAngularDamping();
+    this.#initLinearDamping();
     //#endregion
     this.#initVelocity();
 
@@ -185,6 +187,16 @@ export class RigidBodyComponent extends GroupComponent {
       if (!rigidBodyDesc || angularDamping === undefined) return;
 
       rigidBodyDesc.setAngularDamping(angularDamping);
+    });
+  }
+  #initLinearDamping() {
+    effect(() => {
+      const linearDamping = this.linearDamping();
+      const rigidBodyDesc = this.rigidBodyDesc();
+
+      if (!rigidBodyDesc || linearDamping === undefined) return;
+
+      rigidBodyDesc.setLinearDamping(linearDamping);
     });
   }
   //#endregion

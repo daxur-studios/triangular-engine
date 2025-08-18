@@ -41,6 +41,16 @@ export class ColliderComponent implements OnDestroy {
   readonly friction = input<number>();
   readonly restitution = input<number>();
   readonly density = input<number>();
+  /**
+   * Rapier ActiveEvents bitflags value.
+   *
+   * - NONE = 0: No events enabled.
+   * - COLLISION_EVENTS = 1: Enable collision events.
+   * - CONTACT_FORCE_EVENTS = 2: Enable contact force events.
+   *
+   * You can combine these using bitwise OR, e.g. (COLLISION_EVENTS | CONTACT_FORCE_EVENTS).
+   */
+  readonly activeEvents = input<RAPIER.ActiveEvents>();
   //#endregion
 
   readonly colliderDesc = signal<RAPIER.ColliderDesc | undefined>(undefined);
@@ -57,6 +67,7 @@ export class ColliderComponent implements OnDestroy {
     this.#initFriction();
     this.#initRestitution();
     this.#initDensity();
+    this.#initActiveEvents();
     //#endregion
   }
 
@@ -187,6 +198,24 @@ export class ColliderComponent implements OnDestroy {
     });
   }
   //#endregion
+
+  #initActiveEvents() {
+    // Apply to descriptor before creation if possible
+    effect(() => {
+      const activeEvents = this.activeEvents();
+      const colliderDesc = this.colliderDesc();
+      if (!colliderDesc || activeEvents === undefined) return;
+      colliderDesc.setActiveEvents(activeEvents);
+    });
+
+    // Apply to collider after creation too (reactive updates)
+    effect(() => {
+      const activeEvents = this.activeEvents();
+      const collider = this.collider();
+      if (!collider || activeEvents === undefined) return;
+      collider.setActiveEvents(activeEvents);
+    });
+  }
 
   ngOnDestroy(): void {
     const collider = this.collider();

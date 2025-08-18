@@ -81,6 +81,16 @@ export class PhysicsService {
   private debugGeometry: BufferGeometry | undefined;
   readonly debugMesh = signal<LineSegments | undefined>(undefined);
 
+  /** Collision events drained after each world.step */
+  readonly collisionEvents$ = new Subject<{
+    h1: number;
+    h2: number;
+    started: boolean;
+  }>();
+
+  /** Internal Rapier event queue used for collision/trigger events */
+  private eventQueue: RAPIER.EventQueue | undefined;
+
   constructor() {
     this.#syncDebugSettings();
     this.#syncPhysicsDebugMesh();
@@ -129,6 +139,9 @@ export class PhysicsService {
     const world = new RAPIER.World(this.gravity);
     this.world$.next(world);
 
+    // Initialize event queue after Rapier is ready
+    this.eventQueue = new RAPIER.EventQueue(true);
+
     return world;
   }
 
@@ -149,8 +162,16 @@ export class PhysicsService {
     if (!world) return;
 
     world.timestep = deltaTime;
-    // Step the physics simulation
-    world.step();
+    // Step the physics simulation using the event queue so we can drain collision events
+    if (this.eventQueue) {
+      world.step(this.eventQueue);
+      // Drain and emit collision events (started/ended)
+      this.eventQueue.drainCollisionEvents((h1, h2, started) => {
+        this.collisionEvents$.next({ h1, h2, started });
+      });
+    } else {
+      world.step();
+    }
 
     this.stepped$.next(world.timestep);
   }
