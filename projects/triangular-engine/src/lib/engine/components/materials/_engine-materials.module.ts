@@ -9,6 +9,7 @@ import {
   ShaderMaterialComponent,
 } from './material.component';
 import { MeshBasicMaterialComponent } from './mesh-basic-material.component';
+import { LineBasicMaterialComponent } from './line-basic-material.component';
 
 const importExport: Type<any>[] = [
   //MaterialComponent,
@@ -19,6 +20,7 @@ const importExport: Type<any>[] = [
   RawShaderMaterialComponent,
   SpriteMaterialComponent,
   PointsMaterialComponent,
+  LineBasicMaterialComponent,
 ];
 
 @NgModule({

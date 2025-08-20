@@ -1,5 +1,5 @@
-import { Component, effect, model, signal } from '@angular/core';
-import { BufferGeometry, Line, Material } from 'three';
+import { Component, effect, input, model, signal } from '@angular/core';
+import { BufferGeometry, Line, Material, Vector3, Vector3Tuple } from 'three';
 import { Object3DComponent, provideObject3DComponent } from '../object-3d';
 
 @Component({
@@ -13,6 +13,8 @@ export class LineComponent extends Object3DComponent {
   readonly line = signal(new Line());
   override object3D = this.line;
 
+  readonly points = input<Vector3Tuple[]>();
+
   readonly geometry = signal<BufferGeometry | undefined>(undefined);
   readonly material = model<Material | undefined>(undefined);
 
@@ -21,6 +23,21 @@ export class LineComponent extends Object3DComponent {
 
     this.#initSetMaterial();
     this.#initSetGeometry();
+    this.#initSetPoints();
+  }
+
+  #initSetPoints() {
+    effect(() => {
+      const points = this.points();
+      const geometry = this.geometry();
+
+      if (geometry && points) {
+        const vectors = points.map((point) => new Vector3(...point));
+
+        geometry.setFromPoints(vectors);
+        this.line().computeLineDistances();
+      }
+    });
   }
 
   #initSetMaterial() {
