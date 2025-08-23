@@ -1,5 +1,6 @@
 import {
   Component,
+  DestroyRef,
   InputSignal,
   OnDestroy,
   Provider,
@@ -7,6 +8,7 @@ import {
   effect,
   inject,
   input,
+  model,
   signal,
 } from '@angular/core';
 import {
@@ -23,6 +25,7 @@ import { InstancedMeshComponent } from '../mesh';
 import { InstancedRigidBodyComponent } from '../physics';
 import { LineComponent } from '../curve/line.component';
 import { handleMaterialAndGeometryLinking } from '../util';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 
 export function provideBufferGeometryComponent(component: any): Provider {
   return {
@@ -44,13 +47,23 @@ export class BufferGeometryComponent implements OnDestroy {
   readonly parent = inject(Object3DComponent, {
     skipSelf: true,
   });
+  readonly destroyRef = inject(DestroyRef);
   //#endregion
 
   readonly params = input<any>();
-
   readonly name = input<string>();
 
-  readonly geometry: WritableSignal<BufferGeometry> = signal(
+  /**
+   * Useful when you get warning like this:
+   * `THREE.BufferGeometry: Buffer size too small for points data. Use .dispose() and create a new geometry.`
+   * Eg when dynamically creating larger lines
+   */
+  readonly reCreateGeometryTrigger = input<any>();
+  readonly reCreateGeometryTrigger$ = toObservable(
+    this.reCreateGeometryTrigger,
+  );
+
+  readonly geometry: WritableSignal<BufferGeometry> = model(
     new BufferGeometry(),
   );
   previousGeometry: BufferGeometry | undefined;
@@ -61,6 +74,16 @@ export class BufferGeometryComponent implements OnDestroy {
     this.#initUpdateGeometry();
     this.#initSetName();
     this.#iniCastAndSetGeometry();
+    this.#initReCreateGeometryTrigger();
+  }
+
+  #initReCreateGeometryTrigger() {
+    this.reCreateGeometryTrigger$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.geometry().dispose();
+        this.geometry.set(this.createGeometry(this.params()));
+      });
   }
 
   #initUpdateGeometry() {

@@ -14,6 +14,7 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { buildGraph, ObjectMap } from '../models';
+import { Observable } from 'rxjs';
 
 @Injectable({
   providedIn: 'root',
@@ -40,6 +41,22 @@ export class LoaderService {
     this.gltfLoader.setDRACOLoader(this.dracoLoader);
   }
 
+  public loadGltfObservable(
+    gltfPath: string,
+    cachePath?: string,
+    force = false,
+  ): Observable<GLTF | undefined> {
+    return new Observable((subscriber) => {
+      this.loadAndCacheGltf(gltfPath, cachePath, force)
+        .then((gltf) => {
+          subscriber.next(gltf);
+          subscriber.complete();
+        })
+        .catch((error) => {
+          subscriber.error(error);
+        });
+    });
+  }
   public loadAndCacheGltf(
     gltfPath: string,
     cachePath?: string,
