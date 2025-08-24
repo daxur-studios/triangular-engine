@@ -42,6 +42,17 @@ export class MeshComponent
 
   readonly renderOrder = input<number>();
 
+  /**
+   * Single Layer (resets all other layers)
+   * https://threejs.org/docs/#api/en/core/Layers
+   */
+  readonly layer = input<number>();
+  /**
+   * Array of layers (resets all other layers)
+   * https://threejs.org/docs/#api/en/core/Layers
+   */
+  readonly layers = input<number[]>();
+
   /** When this is true, the geometry will be computed and stored in a BVH tree for faster raycasting */
   readonly enableBVH = input<boolean>(false);
 
@@ -57,6 +68,30 @@ export class MeshComponent
     this.#initSetCastShadow();
 
     this.#initRenderOrder();
+    this.#initSetLayer();
+  }
+
+  #initSetLayer() {
+    effect(() => {
+      const layer = this.layer();
+      const mesh = this.mesh();
+
+      if (layer !== undefined) {
+        mesh.layers.set(layer);
+      }
+    });
+
+    effect(() => {
+      const layers = this.layers();
+      const mesh = this.mesh();
+
+      if (layers !== undefined) {
+        mesh.layers.disableAll();
+        layers.forEach((layer) => {
+          mesh.layers.enable(layer);
+        });
+      }
+    });
   }
 
   #initSetMaterial() {

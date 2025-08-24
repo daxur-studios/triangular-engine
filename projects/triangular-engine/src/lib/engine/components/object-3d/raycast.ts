@@ -15,6 +15,7 @@ import { EngineService, EngineSettingsService } from '../../services';
 import { Object3DComponent } from './object-3d.component';
 
 export interface IRaycastEvent {
+  //event: MouseEvent;
   object: Object3D;
 }
 
@@ -32,10 +33,17 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
   readonly raycastService = inject(RaycastService);
   readonly engineService = inject(EngineService);
   readonly engineSettingsService = inject(EngineSettingsService);
+  /** The parent object3D component this directive is attached to */
   readonly object3DComponent = inject(Object3DComponent);
   //#endregion
 
+  /**
+   * Emitted when the raycast hits the parent object3D component
+   */
   @Output() rayClick = new RaycastEventEmitter<IRaycastEvent>();
+  /**
+   * Emitted when the raycast hits an object but the object is not the parent object3D component
+   */
   @Output() rayClickOutside = new RaycastEventEmitter<IRaycastEvent>();
 
   @Output() rayMouseEnter = new RaycastEventEmitter<IRaycastEvent>();
