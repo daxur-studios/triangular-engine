@@ -22,6 +22,7 @@ import {
   BufferGeometry,
   Mesh,
 } from 'three';
+import { WebGPURenderer } from 'three/webgpu';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -82,7 +83,7 @@ export class EngineService implements IEngine {
 
   webGLRenderer?: WebGLRenderer;
 
-  renderer: WebGLRenderer;
+  renderer: WebGLRenderer | WebGPURenderer;
   CSS2DRenderer: CSS2DRenderer | undefined;
 
   public composer: EffectComposer | undefined;
@@ -131,6 +132,9 @@ export class EngineService implements IEngine {
   readonly mousedown$ = new BehaviorSubject<MouseEvent | null>(null);
   readonly mousemove$ = new BehaviorSubject<MouseEvent | null>(null);
   readonly click$ = new BehaviorSubject<MouseEvent | null>(null);
+  readonly dblclick$ = new BehaviorSubject<MouseEvent | null>(null);
+  readonly wheel$ = new BehaviorSubject<WheelEvent | null>(null);
+  readonly pointerdown$ = new BehaviorSubject<PointerEvent | null>(null);
 
   readonly mousewheel$ = new BehaviorSubject<
     Event | WheelEvent | MouseEvent | null
@@ -203,6 +207,15 @@ export class EngineService implements IEngine {
   }
 
   onComponentInit(): void {
+    // WebGPU needs explicit initialization before the first render.
+    if (this.renderer instanceof WebGPURenderer) {
+      // Do not await to keep the signature synchronous; start loop after init completes.
+      this.renderer
+        .init()
+        .then(() => this.startLoop())
+        .catch(() => this.startLoop());
+      return;
+    }
     this.startLoop();
   }
 
@@ -218,12 +231,33 @@ export class EngineService implements IEngine {
   }
 
   private initRenderer(options?: IEngineOptions) {
-    const webGLParams = options?.webGLRendererParameters || {};
+    const preferred = options?.preferredRenderer ?? 'webgl';
 
+    // Try WebGPU if preferred or auto
+    if (preferred === 'webgpu' && this.isWebGPUSupported()) {
+      const webGpuParams: any = {
+        ...(options?.webGpuRendererParameters || {}),
+      } as any;
+      if (options?.transparent) {
+        // Align behavior with WebGL when transparent scenes are requested
+        (webGpuParams as any).alpha = true;
+      }
+      try {
+        this.renderer = this.createWebGpuRenderer(webGpuParams);
+        return this.renderer;
+      } catch (err) {
+        console.warn(
+          'WebGPU renderer initialization failed, falling back to WebGL.',
+          err,
+        );
+      }
+    }
+
+    // Fallback to WebGL
+    const webGLParams = options?.webGLRendererParameters || {};
     if (options?.transparent) {
       webGLParams.alpha = true;
     }
-
     this.renderer = this.createWebGlRenderer(webGLParams);
     return this.renderer;
   }
@@ -269,6 +303,41 @@ export class EngineService implements IEngine {
     }
 
     return this.renderer;
+  }
+
+  public createWebGpuRenderer(
+    webGpuRendererParameters?: unknown,
+  ): WebGPURenderer {
+    if (this.renderer) {
+      this.renderer.dispose();
+    }
+
+    const renderer = new WebGPURenderer({
+      canvas: this.canvas,
+      ...(webGpuRendererParameters || {}),
+    } as any);
+
+    // Keep tone mapping alignment with WebGL defaults
+    renderer.toneMapping = ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+
+    renderer.setSize(this.width, this.height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    this.resolution$.subscribe(({ width, height }) =>
+      this.onResize(width, height),
+    );
+
+    // Composer currently targets WebGL. Skip for WebGPU.
+    return (this.renderer = renderer);
+  }
+
+  private isWebGPUSupported(): boolean {
+    return (
+      typeof navigator !== 'undefined' &&
+      'gpu' in navigator &&
+      !!(navigator as any).gpu
+    );
   }
 
   private onResize(width: number, height: number) {
