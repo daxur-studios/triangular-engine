@@ -19,6 +19,7 @@ import {
   Vector3,
   Euler,
   Vector3Tuple,
+  EulerTuple,
 } from 'three';
 import {
   Object3DComponent,
@@ -33,7 +34,7 @@ import {
 
 export interface IInstancedMeshData<DATA = any> {
   position: Vector3Tuple;
-  rotation: Vector3Tuple;
+  rotation: EulerTuple;
   scale: Vector3Tuple;
   data?: DATA;
 }

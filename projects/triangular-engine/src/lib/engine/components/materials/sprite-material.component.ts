@@ -1,5 +1,9 @@
 import { Component, effect, inject, input, signal } from '@angular/core';
-import { SpriteMaterial, SpriteMaterialParameters } from 'three';
+import {
+  SpriteMaterial,
+  SpriteMaterialParameters,
+  SRGBColorSpace,
+} from 'three';
 import {
   MaterialComponent,
   provideMaterialComponent,
@@ -34,10 +38,14 @@ export class SpriteMaterialComponent extends MaterialComponent {
   #initMap() {
     effect(() => {
       const map = this.map();
+
       if (map) {
         this.loaderService.loadAndCacheTexture(map).then((texture) => {
           this.material().map = texture;
           this.material().needsUpdate = true;
+          this.material().transparent = true;
+
+          texture.colorSpace = SRGBColorSpace;
         });
       }
     });

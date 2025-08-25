@@ -11,7 +11,7 @@ import {
   inject,
   model,
 } from '@angular/core';
-import { EngineService } from '../../services';
+import { EngineService, MaterialService } from '../../services';
 
 import { Subject } from 'rxjs';
 import { EulerTuple, Object3D, Vector3Tuple } from 'three';
@@ -42,6 +42,7 @@ export abstract class Object3DComponent implements OnDestroy {
 
   //#region Injected Dependencies
   readonly engineService = inject(EngineService);
+  readonly materialService = inject(MaterialService);
   readonly destroyRef = inject(DestroyRef);
 
   readonly parent = inject(Object3DComponent, {

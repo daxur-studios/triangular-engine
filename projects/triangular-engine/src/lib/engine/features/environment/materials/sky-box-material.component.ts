@@ -68,10 +68,6 @@ export class SkyBoxMaterialComponent
     this.initializeMaterial();
   }
 
-  ngOnInit() {
-    // Initialize component
-  }
-
   private initializeStars() {
     // Seeded RNG for deterministic starfield
     const rng = ((seed) => {

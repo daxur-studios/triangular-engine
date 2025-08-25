@@ -1,7 +1,10 @@
 import {
   Component,
+  DestroyRef,
+  Injector,
   InputSignal,
   OnDestroy,
+  OnInit,
   Provider,
   WritableSignal,
   effect,
@@ -25,13 +28,15 @@ import {
 
 import { MeshComponent } from '../mesh/mesh.component';
 import { Object3DComponent } from '../object-3d/object-3d.component';
-import { EngineService, LoaderService } from '../../services';
+import { EngineService, LoaderService, MaterialService } from '../../services';
 import { PointsComponent } from '../particle';
 import { InstancedMeshComponent } from '../mesh';
 import { InstancedRigidBodyComponent } from '../physics';
 import { LineComponent } from '../curve/line.component';
 import { SpriteComponent } from '../object-3d/sprite.component';
 import { handleMaterialAndGeometryLinking } from '../util';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { combineLatest, distinctUntilChanged, Observable, Subject } from 'rxjs';
 
 export function provideMaterialComponent<T extends typeof MaterialComponent>(
   component: T,
@@ -47,24 +52,66 @@ export function provideMaterialComponent<T extends typeof MaterialComponent>(
   standalone: true,
   template: `<ng-content></ng-content>`,
 })
-export abstract class MaterialComponent implements OnDestroy {
+export abstract class MaterialComponent implements OnInit, OnDestroy {
   //#region Injected Dependencies
 
   readonly engineService = inject(EngineService);
+  readonly injector = inject(Injector);
+  readonly materialService = inject(MaterialService);
   readonly parent = inject(Object3DComponent, {
     skipSelf: true,
   });
-
+  readonly destroyRef = inject(DestroyRef);
   //#endregion
 
   abstract params: InputSignal<MaterialParameters>;
   abstract material: WritableSignal<Material>;
+  readonly material$ = new Subject<Material>();
   readonly name = input<string>();
 
+  /**
+   * If set, it adds this material to the shared materials map
+   * If material already exists under the key, it will re-use it instead of creating a new one
+   */
+  readonly shareMaterialKey = input<string>();
+  readonly shareMaterialKey$ = toObservable(this.shareMaterialKey);
+
   constructor() {
+    this.#initMaterialObservable();
+
     this.#initUpdateMaterial();
     this.#initCastAndSetMaterial();
     this.#initSetName();
+  }
+
+  ngOnInit(): void {
+    this.#initShareMaterial();
+  }
+
+  #initMaterialObservable() {
+    effect(() => {
+      this.material$.next(this.material());
+    });
+  }
+
+  #initShareMaterial() {
+    effect(
+      () => {
+        const material = this.material();
+        const key = this.shareMaterialKey();
+
+        if (key && material) {
+          const existingMaterial = this.materialService.getMaterial(key);
+          if (existingMaterial && existingMaterial.uuid !== material.uuid) {
+            this.material.set(existingMaterial);
+            material.dispose();
+          } else {
+            this.materialService.setMaterial(key, material);
+          }
+        }
+      },
+      { injector: this.injector, allowSignalWrites: true },
+    );
   }
 
   #initUpdateMaterial() {
