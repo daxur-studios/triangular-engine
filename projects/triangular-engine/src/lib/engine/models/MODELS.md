@@ -106,7 +106,7 @@ Defines types related to 3D objects used within the engine.
 **Key Components:**
 
 - **`xyz` Type:**
-  - Represents a 3D coordinate as a tuple `[number, number, number]`.
+  - Represents a 3D coordinate as a tuple `Vector3Tuple`.
 
 ### `user-interface.model.ts`
 

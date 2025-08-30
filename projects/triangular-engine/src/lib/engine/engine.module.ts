@@ -33,6 +33,9 @@ const importExport = [
   KeyboardControlsComponent,
 ];
 
+/**
+ * Import this to a standalone component to have access to all the engine components
+ */
 @NgModule({
   imports: [...importExport],
   exports: [...importExport],

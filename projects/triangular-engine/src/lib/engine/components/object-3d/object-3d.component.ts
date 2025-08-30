@@ -3,7 +3,6 @@ import {
   DestroyRef,
   OnDestroy,
   Provider,
-  QueryList,
   Type,
   WritableSignal,
   effect,
@@ -114,6 +113,7 @@ export abstract class Object3DComponent implements OnDestroy {
       }
     });
   }
+
   #initSetName() {
     effect(() => {
       const object3D = this.object3D();
