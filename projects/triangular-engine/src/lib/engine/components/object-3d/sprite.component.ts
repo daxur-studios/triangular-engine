@@ -32,6 +32,11 @@ export class SpriteComponent extends Object3DComponent {
   override readonly object3D = this.sprite;
 
   readonly material = model<SpriteMaterial | undefined>(undefined);
+  /**
+   * The center of the sprite
+   *
+   * to center it to the bottom-center it would be `[0.5, 0]`
+   */
   readonly center = model<Vector2Tuple | undefined>(undefined);
 
   constructor() {
