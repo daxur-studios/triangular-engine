@@ -1,8 +1,9 @@
 import Dexie from 'dexie';
 import type { Table } from 'dexie';
+import { MathUtils } from 'three';
 
 export function generateId() {
-  return Math.random().toString(36).substring(2, 9);
+  return MathUtils.generateUUID();
 }
 
 const databaseVersion = 9;

@@ -49,11 +49,12 @@ Optional peers:
 
 ## Quick Start
 
-Provide the engine per component/page that hosts a `<scene>` and render a minimal scene.
+Provide the engine per component/page that hosts a `<scene>` using the recommended helper:
+`EngineService.provide(...)`. Then render a minimal scene.
 
 ```ts
 import { Component } from "@angular/core";
-import { EngineModule, EngineService, provideEngineOptions } from "triangular-engine";
+import { EngineModule, EngineService } from "triangular-engine";
 
 @Component({
   selector: "app-demo",
@@ -69,7 +70,7 @@ import { EngineModule, EngineService, provideEngineOptions } from "triangular-en
       </mesh>
     </scene>
   `,
-  providers: [EngineService, provideEngineOptions({ showFPS: true })],
+  providers: EngineService.provide({ showFPS: true }),
 })
 export class DemoComponent {}
 ```
@@ -156,7 +157,7 @@ Rigid body types: 0 Dynamic, 1 Fixed, 2 KinematicPositionBased, 3 KinematicVeloc
 Provide per component where you host `<scene>`:
 
 ```ts
-providers: [EngineService, provideEngineOptions({ showFPS: true })];
+providers: EngineService.provide({ showFPS: true });
 ```
 
 - EngineService: `scene`, `renderer`, `tick$`, `elapsedTime$`, `setFPSLimit`, input streams (`keydown$`, `mousemove$`, `mousewheel$`, etc.), `camera$`, `switchCamera(camera)`, `requestSingleRender()`
@@ -194,7 +195,7 @@ List of selectors available in templates (not exhaustive):
 
 Error: `NullInjectorError: No provider for _EngineService`
 
-Fix: Provide `EngineService` and optionally `provideEngineOptions(...)` in every component that hosts a `<scene>`.
+Fix: Provide `EngineService.provide(...)` in every component that hosts a `<scene>`.
 
 ### Working locally with npm link
 
@@ -222,7 +223,7 @@ If changes are not reflected in the app, set `"preserveSymlinks": true` in your 
 
 ```ts
 import { Component } from "@angular/core";
-import { EngineModule, EngineService, provideEngineOptions } from "triangular-engine";
+import { EngineModule, EngineService } from "triangular-engine";
 
 @Component({
   selector: "app-basic",
@@ -252,7 +253,7 @@ import { EngineModule, EngineService, provideEngineOptions } from "triangular-en
       </physics>
     </scene>
   `,
-  providers: [EngineService, provideEngineOptions({ showFPS: true })],
+  providers: EngineService.provide({ showFPS: true }),
 })
 export class BasicComponent {}
 ```

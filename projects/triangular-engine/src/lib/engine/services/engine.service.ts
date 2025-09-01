@@ -8,6 +8,7 @@ import {
   inject,
   input,
   signal,
+  Provider,
 } from '@angular/core';
 import { BehaviorSubject, filter, firstValueFrom, ReplaySubject } from 'rxjs';
 import {
@@ -49,6 +50,9 @@ import {
 @Injectable()
 export class EngineService implements IEngine {
   static provideEngineOptions = provideEngineOptions;
+  static provide(options: IEngineOptions = {}): Provider[] {
+    return [EngineService, provideEngineOptions(options)];
+  }
 
   static instance = 0;
   public instance: number;
