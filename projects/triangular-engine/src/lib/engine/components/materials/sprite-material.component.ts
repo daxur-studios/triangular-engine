@@ -26,6 +26,8 @@ export class SpriteMaterialComponent extends MaterialComponent {
 
   readonly map = input<string>();
   readonly alphaMap = input<string>();
+  /**The rotation of the sprite in radians. */
+  readonly rotation = input<number>();
 
   override readonly material = signal(new SpriteMaterial());
 
@@ -33,6 +35,19 @@ export class SpriteMaterialComponent extends MaterialComponent {
     super();
     this.#initMap();
     this.#initAlphaMap();
+    this.#initRotation();
+  }
+
+  #initRotation() {
+    effect(() => {
+      const rotation = this.rotation();
+      const material = this.material();
+
+      if (rotation || rotation === 0) {
+        material.rotation = rotation;
+        material.needsUpdate = true;
+      }
+    });
   }
 
   #initMap() {
