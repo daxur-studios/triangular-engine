@@ -9,7 +9,6 @@ import {
   EngineService,
   EngineTextures,
   PhysicsService,
-  provideEngineOptions,
 } from 'triangular-engine';
 
 @Component({
@@ -19,8 +18,7 @@ import {
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss',
   providers: [
-    EngineService,
-    provideEngineOptions({
+    EngineService.provide({
       showFPS: true,
     }),
     PhysicsService,
