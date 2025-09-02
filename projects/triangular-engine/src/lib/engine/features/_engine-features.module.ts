@@ -1,7 +1,7 @@
-import { NgModule, Type } from '@angular/core';
+import { NgModule } from '@angular/core';
 import { SceneTreeComponent } from './scene-tree/scene-tree.component';
 
-const importExport: Array<Type<any>> = [SceneTreeComponent];
+const importExport = [SceneTreeComponent] as const;
 
 @NgModule({
   imports: [...importExport],

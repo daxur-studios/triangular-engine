@@ -1,19 +1,21 @@
-import { NgModule, Type } from '@angular/core';
-import { BoxGeometryComponent } from './geometry.component';
-import { SphereGeometryComponent } from './geometry.component';
-import { PlaneGeometryComponent } from './geometry.component';
-import { CapsuleGeometryComponent } from './capsule-geometry.component';
-import { BufferGeometryComponent } from './geometry.component';
+import { NgModule } from '@angular/core';
 import { BufferAttributeComponent } from './buffer-attribute.component';
+import { CapsuleGeometryComponent } from './capsule-geometry.component';
+import {
+  BoxGeometryComponent,
+  BufferGeometryComponent,
+  PlaneGeometryComponent,
+  SphereGeometryComponent,
+} from './geometry.component';
 
-const importExport: Array<Type<any>> = [
+const importExport = [
   BoxGeometryComponent,
   SphereGeometryComponent,
   PlaneGeometryComponent,
   CapsuleGeometryComponent,
   BufferGeometryComponent,
   BufferAttributeComponent,
-];
+] as const;
 
 @NgModule({
   imports: [...importExport],

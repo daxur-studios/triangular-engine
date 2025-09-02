@@ -1,18 +1,18 @@
-import { NgModule, Type } from '@angular/core';
+import { NgModule } from '@angular/core';
 
 import { ArrowHelperComponent } from './arrow-helper.component';
 import { GridHelperComponent } from './grid-helper.component';
 import { GroupComponent } from './group.component';
 
+import { GltfComponent } from '../gltf';
+import { CameraComponent } from './camera.component';
 import { OrbitControlsComponent } from './orbit-controls.component';
 import { PrimitiveComponent } from './primitive.component';
 import { RaycastDirective } from './raycast';
-import { SpriteComponent } from './sprite.component';
 import { SceneComponent } from './scene/scene.component';
-import { GltfComponent } from '../gltf';
-import { CameraComponent } from './camera.component';
+import { SpriteComponent } from './sprite.component';
 
-const importExport: Array<Type<any>> = [
+const importExport = [
   ArrowHelperComponent,
   GridHelperComponent,
   GroupComponent,
@@ -30,7 +30,7 @@ const importExport: Array<Type<any>> = [
   SpriteComponent,
   RaycastDirective,
   CameraComponent,
-];
+] as const;
 
 @NgModule({
   imports: [...importExport],

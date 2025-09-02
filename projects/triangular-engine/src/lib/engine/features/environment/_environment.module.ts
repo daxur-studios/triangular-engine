@@ -1,12 +1,12 @@
-import { NgModule, Type } from '@angular/core';
+import { NgModule } from '@angular/core';
 
-import { EnvironmentMaterialsModule } from './materials';
 import { EnvironmentComponentsModule } from './components';
+import { EnvironmentMaterialsModule } from './materials';
 
-const importExport: Type<any>[] = [
+const importExport = [
   EnvironmentMaterialsModule,
   EnvironmentComponentsModule,
-];
+] as const;
 
 @NgModule({
   imports: [...importExport],

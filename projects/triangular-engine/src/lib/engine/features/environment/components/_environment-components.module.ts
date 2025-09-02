@@ -1,8 +1,8 @@
-import { NgModule, Type } from '@angular/core';
-import { SkyBoxComponent } from './sky-box.component';
+import { NgModule } from '@angular/core';
 import { OceanComponent } from './ocean.component';
+import { SkyBoxComponent } from './sky-box.component';
 
-const importExport: Type<any>[] = [SkyBoxComponent, OceanComponent];
+const importExport = [SkyBoxComponent, OceanComponent] as const;
 
 @NgModule({
   imports: [...importExport],

@@ -1,7 +1,7 @@
-import { NgModule, Type } from '@angular/core';
+import { NgModule } from '@angular/core';
 import { SkyBoxMaterialComponent } from './sky-box-material.component';
 
-const importExport: Type<any>[] = [SkyBoxMaterialComponent];
+const importExport = [SkyBoxMaterialComponent] as const;
 
 @NgModule({
   imports: [...importExport],

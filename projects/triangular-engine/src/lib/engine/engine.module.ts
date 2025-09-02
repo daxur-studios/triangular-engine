@@ -16,7 +16,6 @@ import { EngineSlotDirective } from './components/engine-ui/engine-slot.directiv
 import { EngineEnvironmentModule, EngineFeaturesModule } from './features';
 
 const importExport = [
-  CommonModule,
   PhysicsComponentsModule,
   EngineMaterialsModule,
   EngineParticlesModule,
@@ -31,10 +30,10 @@ const importExport = [
 
   EngineSlotDirective,
   KeyboardControlsComponent,
-];
+] as const;
 
 /**
- * Import this to a standalone component to have access to all the engine components
+ * 🐉 Import this to a standalone component to have access to all the engine components
  */
 @NgModule({
   imports: [...importExport],

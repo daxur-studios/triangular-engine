@@ -16,11 +16,11 @@ import {
   MathUtils,
   Uniform,
 } from 'three';
+import { MeshComponent } from '../../../components/mesh/mesh.component';
 import {
-  MeshComponent,
   Object3DComponent,
   provideObject3DComponent,
-} from '../../../components';
+} from '../../../components/object-3d/object-3d.component';
 import { SkyBoxMaterialComponent } from '../materials';
 import { EngineService } from '../../../services';
 

@@ -9,7 +9,7 @@ import {
   TransformControlsMode,
 } from 'three/examples/jsm/controls/TransformControls.js';
 import { Subscription } from 'rxjs';
-import { Object3DComponent } from '../../components';
+import { Object3DComponent } from '../../components/object-3d/object-3d.component';
 
 // Node for the scene tree
 interface SceneNode {

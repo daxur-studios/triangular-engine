@@ -1,5 +1,8 @@
 import { Component, effect, inject, input, signal } from '@angular/core';
-import { Object3DComponent, provideObject3DComponent } from '../object-3d';
+import {
+  Object3DComponent,
+  provideObject3DComponent,
+} from '../object-3d/object-3d.component';
 import { Mesh, Object3D, Scene } from 'three';
 import { BehaviorSubject, combineLatest, distinctUntilChanged } from 'rxjs';
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
