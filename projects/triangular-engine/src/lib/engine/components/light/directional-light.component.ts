@@ -1,5 +1,5 @@
 import { Component, computed, effect, input, signal } from '@angular/core';
-import { DirectionalLight } from 'three';
+import { DirectionalLight, OrthographicCamera } from 'three';
 import {
   Object3DComponent,
   provideObject3DComponent,
@@ -26,6 +26,9 @@ export class DirectionalLightComponent extends LightComponent {
   public override emoji = '💡';
 
   override readonly object3D = signal(new DirectionalLight());
+  override get light() {
+    return this.object3D;
+  }
 
   readonly castShadow = input<boolean>(true);
   readonly castShadow$ = toObservable(this.castShadow);
@@ -41,19 +44,28 @@ export class DirectionalLightComponent extends LightComponent {
     super();
 
     effect(() => {
-      this.light().castShadow = this.castShadow();
+      const castShadow = this.castShadow();
 
-      //    const directionalLight = this.light();
-      // if (directionalLight.shadow) {
-      //   directionalLight.shadow.mapSize.width = 1024;
-      //   directionalLight.shadow.mapSize.height = 1024;
-      //   directionalLight.shadow.camera.near = 1;
-      //   directionalLight.shadow.camera.far = 50;
-      //   directionalLight.shadow.camera.left = -10;
-      //   directionalLight.shadow.camera.right = 10;
-      //   directionalLight.shadow.camera.top = 10;
-      //   directionalLight.shadow.camera.bottom = -10;
-      // }
+      const directionalLight = this.light();
+      directionalLight.castShadow = castShadow;
+
+      if (castShadow) {
+        // resolution vs perf
+        directionalLight.shadow.mapSize.set(2048, 2048); // 4096 if you really need sharper
+
+        // a big orthographic frustum that covers your ground
+        const cam = directionalLight.shadow.camera as OrthographicCamera;
+        const d = 1000; // half-extent in world units (covers 2km square)
+        cam.left = -d;
+        cam.right = d;
+        cam.top = d;
+        cam.bottom = -d;
+        cam.near = 0.5;
+        cam.far = 5000; // long enough for low sun angles
+        cam.updateProjectionMatrix();
+        directionalLight.shadow.bias = -0.0005;
+        directionalLight.shadow.normalBias = 0.5; // 0.2–1.0 typical
+      }
     });
 
     effect(() => {
