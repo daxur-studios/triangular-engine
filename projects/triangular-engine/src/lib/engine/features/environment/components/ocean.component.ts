@@ -96,6 +96,9 @@ export class OceanComponent extends MeshComponent implements OnInit, OnDestroy {
   }
 
   private animateWaves(delta: number): void {
+    if (!this.planeGeometry) {
+      return;
+    }
     const time = this.engineService.clock.getElapsedTime();
 
     this.vertexData.forEach((vd, idx) => {
