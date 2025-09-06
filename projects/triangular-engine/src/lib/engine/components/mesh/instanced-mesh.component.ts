@@ -49,7 +49,7 @@ export class InstancedMeshComponent extends Object3DComponent {
   override emoji = '🧩';
 
   /** The maximum number of instances*/
-  readonly maxCount = input.required<number>();
+  readonly maxCount = model.required<number>();
   #prevMaxCount: number | undefined;
 
   //  readonly positions = input.required<xyz[]>();
@@ -57,6 +57,19 @@ export class InstancedMeshComponent extends Object3DComponent {
 
   /** The number of instances */
   readonly count = input.required<number>();
+
+  /**
+   * Controls how much to increase the maxCount by when the current count reaches the limit.
+   *
+   * Default is 1, meaning the maxCount is increased by 1 every time the current count reaches the limit.
+   *
+   * For example, if initial maxCount is 100 and growStep is 100:
+   * - When count reaches 100, maxCount increases to 200.
+   * - When count reaches 200, maxCount increases to 300, etc.
+   *
+   * Set to 0 or undefined to disable auto-growing.
+   */
+  readonly growStep = input<number>(1);
 
   /** The instanced mesh object */
   readonly instancedMesh = signal<InstancedMesh>(
@@ -66,8 +79,8 @@ export class InstancedMeshComponent extends Object3DComponent {
   #previousInstancedMesh: InstancedMesh | undefined = this.instancedMesh();
 
   /** Geometry and material signals */
-  readonly geometry = signal<BufferGeometry | undefined>(undefined);
-  readonly material = signal<Material | undefined>(undefined);
+  readonly geometry = model<BufferGeometry | undefined>(undefined);
+  readonly material = model<Material | undefined>(undefined);
 
   constructor() {
     super();
@@ -131,27 +144,44 @@ export class InstancedMeshComponent extends Object3DComponent {
   }
 
   #initCountChange() {
-    effect(() => {
-      const instancedMesh = this.instancedMesh();
-      const count = this.count();
-      const maxCount = this.maxCount();
+    effect(
+      () => {
+        const instancedMesh = this.instancedMesh();
+        const count = this.count();
+        const maxCount = this.maxCount();
+        const growStep = this.growStep();
 
-      const newCount = Math.min(count, maxCount);
+        let newMaxCount = maxCount;
 
-      instancedMesh.count = newCount;
-    });
+        // Auto-grow maxCount if growStep is enabled and count exceeds current maxCount
+        if (growStep && growStep > 0 && count >= maxCount) {
+          newMaxCount = maxCount + growStep;
+          this.maxCount.set(newMaxCount);
+        }
+
+        const newCount = Math.min(count, newMaxCount);
+        instancedMesh.count = newCount;
+      },
+      { allowSignalWrites: true },
+    );
   }
 
   #eulerRotation = new Euler();
   #scaleVector = new Vector3();
 
   #initDataChange() {
-    effect(() => {
-      const instancedMesh = this.instancedMesh();
-      const data = this.data();
+    effect(
+      () => {
+        const instancedMesh = this.instancedMesh();
 
-      this.onDataChanged(data, instancedMesh);
-    });
+        // Change can be either detected by data ref change, or same data array, but it's been pushed to, so it's length changes
+        const data = this.data();
+        const count = this.count();
+
+        this.onDataChanged(data, instancedMesh);
+      },
+      { allowSignalWrites: true },
+    );
   }
 
   public onDataChanged(

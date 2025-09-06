@@ -3,7 +3,7 @@ import {
   Object3DComponent,
   provideObject3DComponent,
 } from '../object-3d/object-3d.component';
-import { Mesh, Object3D, Scene } from 'three';
+import { Material, Mesh, Object3D, Scene } from 'three';
 import { BehaviorSubject, combineLatest, distinctUntilChanged } from 'rxjs';
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LoaderService } from '../../services';
@@ -42,6 +42,9 @@ export class GltfComponent extends Object3DComponent {
   readonly object3D = signal(new Object3D());
 
   readonly gltf$ = new BehaviorSubject<GLTF | undefined>(undefined);
+
+  /** Track current GLTF for proper resource disposal */
+  private currentGltf: GLTF | undefined;
 
   constructor() {
     super();
@@ -95,6 +98,9 @@ export class GltfComponent extends Object3DComponent {
     force = false,
   ) {
     if (gltfPath) {
+      // Dispose of previous GLTF resources before loading new one
+      this.#disposeGltfResources(this.currentGltf);
+
       const gltf = await this.loaderService.loadAndCacheGltf(
         gltfPath,
         cachePath,
@@ -104,7 +110,7 @@ export class GltfComponent extends Object3DComponent {
       this.gltf$.next(gltf);
       if (gltf) {
         this.object3D.set(gltf.scene);
-        this.gltf$.next(gltf);
+        this.currentGltf = gltf; // Track current GLTF for disposal
         // console.warn('GLTF loaded:', gltf);
       }
     }
@@ -127,5 +133,33 @@ export class GltfComponent extends Object3DComponent {
         console.log('Re-caching GLTF now', gltfPath);
         this.#loadAndCache(gltfPath, this.cachePath(), true);
       });
+  }
+
+  override ngOnDestroy(): void {
+    // Dispose of GLTF resources before component destruction
+    this.#disposeGltfResources(this.currentGltf);
+    this.currentGltf = undefined;
+
+    // Call parent ngOnDestroy
+    super.ngOnDestroy();
+  }
+
+  /** Dispose of GLTF resources to prevent memory leaks */
+  #disposeGltfResources(gltf: GLTF | undefined) {
+    if (!gltf?.scene) return;
+
+    gltf.scene.traverse((child) => {
+      if (child instanceof Mesh) {
+        // Dispose geometry
+        child.geometry?.dispose();
+
+        // Dispose materials
+        if (Array.isArray(child.material)) {
+          child.material.forEach((material) => material.dispose());
+        } else if (child.material) {
+          child.material.dispose();
+        }
+      }
+    });
   }
 }
