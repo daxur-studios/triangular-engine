@@ -33,7 +33,7 @@ const importExport = [
 ] as const;
 
 /**
- * 🐉 Import this to a standalone component to have access to all the engine components
+ * 🐉 Import this to a standalone component to have access to all the engine components.
  */
 @NgModule({
   imports: [...importExport],

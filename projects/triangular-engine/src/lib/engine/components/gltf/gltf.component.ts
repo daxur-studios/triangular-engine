@@ -11,7 +11,12 @@ import {
   provideObject3DComponent,
 } from '../object-3d/object-3d.component';
 import { Material, Mesh, Object3D, Scene } from 'three';
-import { BehaviorSubject, combineLatest, distinctUntilChanged } from 'rxjs';
+import {
+  BehaviorSubject,
+  combineLatest,
+  distinctUntilChanged,
+  skip,
+} from 'rxjs';
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LoaderService } from '../../services';
 import { buildGraph } from '../../models';
@@ -129,6 +134,7 @@ export class GltfComponent extends Object3DComponent {
   #initReCacheOnGltfPathChange() {
     this.gltfPath$
       .pipe(
+        skip(1),
         takeUntilDestroyed(this.destroyRef),
         distinctUntilChanged((previous, current) => {
           // Only interested in additional changes, where both a and b are defined

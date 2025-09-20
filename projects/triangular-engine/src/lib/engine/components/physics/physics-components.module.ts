@@ -4,6 +4,7 @@ import {
   CapsuleColliderComponent,
   CuboidColliderComponent,
   CylinderColliderComponent,
+  HullColliderComponent,
 } from './collider';
 import { ConeColliderComponent } from './collider/cone-collider.component';
 import { FixedJointComponent } from './joint/fixed-joint.component';
@@ -24,6 +25,7 @@ const importExport = [
   CapsuleColliderComponent,
   CylinderColliderComponent,
   ConeColliderComponent,
+  HullColliderComponent,
 
   FixedJointComponent,
   SphericalJointComponent,

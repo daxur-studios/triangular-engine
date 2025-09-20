@@ -6,12 +6,14 @@ import {
   BufferGeometryComponent,
   PlaneGeometryComponent,
   SphereGeometryComponent,
+  TorusKnotGeometryComponent,
 } from './geometry.component';
 
 const importExport = [
   BoxGeometryComponent,
   SphereGeometryComponent,
   PlaneGeometryComponent,
+  TorusKnotGeometryComponent,
   CapsuleGeometryComponent,
   BufferGeometryComponent,
   BufferAttributeComponent,

@@ -87,6 +87,18 @@ If you load DRACO-compressed GLTF assets, add the decoder to your `angular.json`
 }
 ```
 
+## Engine Assets
+
+Ensure you have the following in your `angular.json` assets:
+
+```json
+{
+  "glob": "**/*",
+  "input": "node_modules/triangular-engine/assets",
+  "output": "triangular-engine"
+}
+```
+
 ## Components Overview
 
 All components are standalone and can be nested inside `<scene>`.

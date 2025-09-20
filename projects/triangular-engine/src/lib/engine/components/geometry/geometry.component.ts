@@ -16,6 +16,7 @@ import {
   BufferGeometry,
   PlaneGeometry,
   SphereGeometry,
+  TorusKnotGeometry,
 } from 'three';
 
 import { MeshComponent } from '../mesh/mesh.component';
@@ -247,5 +248,37 @@ export class PlaneGeometryComponent
 
   override createGeometry(parameters: PlaneGeometryParameters): PlaneGeometry {
     return new PlaneGeometry(...parameters);
+  }
+}
+
+type TorusKnotGeometryParameters = ConstructorParameters<
+  typeof TorusKnotGeometry
+>;
+@Component({
+  selector: 'torusKnotGeometry',
+  template: `<ng-content></ng-content>`,
+  standalone: true,
+  imports: [],
+  providers: [provideBufferGeometryComponent(TorusKnotGeometryComponent)],
+})
+export class TorusKnotGeometryComponent
+  extends BufferGeometryComponent
+  implements OnDestroy
+{
+  override readonly params = input<TorusKnotGeometryParameters>([
+    1, 0.4, 64, 8,
+  ]);
+
+  override readonly geometry = signal(new TorusKnotGeometry());
+  override previousGeometry: TorusKnotGeometry | undefined = this.geometry();
+
+  constructor() {
+    super();
+  }
+
+  override createGeometry(
+    parameters: TorusKnotGeometryParameters,
+  ): TorusKnotGeometry {
+    return new TorusKnotGeometry(...parameters);
   }
 }
