@@ -1,4 +1,11 @@
-import { Component, effect, inject, input, signal } from '@angular/core';
+import {
+  Component,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import {
   Object3DComponent,
   provideObject3DComponent,
@@ -38,6 +45,8 @@ export class GltfComponent extends Object3DComponent {
   readonly castShadow$ = toObservable(this.castShadow);
   readonly receiveShadow = input<boolean>(false);
   readonly receiveShadow$ = toObservable(this.receiveShadow);
+
+  readonly loaded = output<GLTF | undefined>();
 
   readonly object3D = signal(new Object3D());
 
@@ -113,6 +122,7 @@ export class GltfComponent extends Object3DComponent {
         this.currentGltf = gltf; // Track current GLTF for disposal
         // console.warn('GLTF loaded:', gltf);
       }
+      this.loaded.emit(gltf);
     }
   }
 
