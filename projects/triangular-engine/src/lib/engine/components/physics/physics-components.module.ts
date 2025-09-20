@@ -5,6 +5,7 @@ import {
   CuboidColliderComponent,
   CylinderColliderComponent,
   HullColliderComponent,
+  TrimeshColliderComponent,
 } from './collider';
 import { ConeColliderComponent } from './collider/cone-collider.component';
 import { FixedJointComponent } from './joint/fixed-joint.component';
@@ -26,6 +27,7 @@ const importExport = [
   CylinderColliderComponent,
   ConeColliderComponent,
   HullColliderComponent,
+  TrimeshColliderComponent,
 
   FixedJointComponent,
   SphericalJointComponent,
