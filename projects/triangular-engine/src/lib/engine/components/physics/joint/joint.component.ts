@@ -76,11 +76,20 @@ export abstract class JointComponent implements OnDestroy {
           true,
         );
 
-        setTimeout(() => {
-          // clear all velocities
-          body1.setLinvel({ x: 0, y: 0, z: 0 }, true);
-          body2.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        }, 2220);
+        // // Schedule a small stabilization after joint creation. Guard against
+        // // bodies being removed/destroyed before this fires.
+        // this.#clearVelocityTimeout = setTimeout(() => {
+        //   try {
+        //     if (body1.isValid()) {
+        //       body1.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        //     }
+        //     if (body2.isValid()) {
+        //       body2.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        //     }
+        //   } catch {
+        //     // Ignore WASM errors from stale bodies
+        //   }
+        // }, 1);
 
         this.joint.set(impulseJoint);
       },
@@ -106,9 +115,21 @@ export abstract class JointComponent implements OnDestroy {
     if (impulseJoint) {
       world.removeImpulseJoint(impulseJoint, true);
     }
+
+    // Reset local state
+    this.joint.set(undefined);
   }
 
   ngOnDestroy(): void {
+    // Clear any pending timer to avoid calling Rapier on invalid bodies
+    if (this.#clearVelocityTimeout) {
+      clearTimeout(this.#clearVelocityTimeout);
+      this.#clearVelocityTimeout = undefined;
+    }
+
     this.destroyJoint();
   }
+
+  // Keep reference to the stabilization timeout so it can be cleared on destroy
+  #clearVelocityTimeout: ReturnType<typeof setTimeout> | undefined;
 }

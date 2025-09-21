@@ -88,6 +88,17 @@ export class PhysicsService {
     started: boolean;
   }>();
 
+  /** Contact force events drained after each world.step */
+  readonly contactForceEvents$ = new Subject<{
+    h1: number;
+    h2: number;
+    totalForceMagnitude: number;
+    maxForceMagnitude: number;
+    // The total force and max force direction can be useful for effects
+    totalForce: Vector;
+    maxForceDirection: Vector;
+  }>();
+
   /** Internal Rapier event queue used for collision/trigger events */
   private eventQueue: RAPIER.EventQueue | undefined;
 
@@ -152,6 +163,7 @@ export class PhysicsService {
    */
   readonly stepped$ = new Subject<number>();
 
+  /** Delta seconds */
   public update(deltaTime: number) {
     if (this.#physicsPaused$.value) return;
 
@@ -168,6 +180,17 @@ export class PhysicsService {
       // Drain and emit collision events (started/ended)
       this.eventQueue.drainCollisionEvents((h1, h2, started) => {
         this.collisionEvents$.next({ h1, h2, started });
+      });
+      // Drain and emit contact force events
+      this.eventQueue.drainContactForceEvents((event) => {
+        this.contactForceEvents$.next({
+          h1: event.collider1(),
+          h2: event.collider2(),
+          totalForceMagnitude: event.totalForceMagnitude(),
+          maxForceMagnitude: event.maxForceMagnitude(),
+          totalForce: event.totalForce(),
+          maxForceDirection: event.maxForceDirection(),
+        });
       });
     } else {
       world.step();
