@@ -51,8 +51,28 @@ Attach one or more colliders under a rigid body. Use local `position`/`rotation`
 
 ## Joints
 
-- `<fixedJoint>`
-- `<sphericalJoint>`
+- `<fixedJoint [anchor1]="[x,y,z]" [frame1]="[x,y,z,w]" [anchor2]="[x,y,z]" [frame2]="[x,y,z,w]" />`
+- `<sphericalJoint [anchor1]="[x,y,z]" [anchor2]="[x,y,z]" />`
+- `<springJoint [anchor1]="[x,y,z]" [anchor2]="[x,y,z]" [axis]="[0,1,0]" [stiffness]="100" [damping]="10" [target]="0" />`
+
+### Spring Joint
+
+Creates a linear spring connection between two rigid bodies using Rapier's prismatic impulse joints with motor control.
+
+**Inputs:**
+
+- `anchor1`, `anchor2`: Attachment points on each body (local space)
+- `axis`: Direction of linear movement (default: `[0,1,0]`)
+- `target`: Target distance along the axis (rest position) (default: `0`)
+- `stiffness`: Spring stiffness - how strongly it pulls toward target (default: `100`)
+- `damping`: Spring damping - reduces oscillation (default: `10`)
+
+**Example:**
+
+```html
+<!-- Linear spring along Y axis -->
+<springJoint [rigidBodies]="[body1, body2]" [anchor1]="[0,0,0]" [anchor2]="[0,0,0]" [axis]="[0,1,0]" [stiffness]="100" [damping]="10" [target]="1" />
+```
 
 ## Instanced Rigid Bodies
 

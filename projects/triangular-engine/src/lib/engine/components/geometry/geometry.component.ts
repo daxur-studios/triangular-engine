@@ -238,12 +238,31 @@ export class PlaneGeometryComponent
   implements OnDestroy
 {
   override readonly params = input<PlaneGeometryParameters>([1, 1]);
+  /**
+   * Whether to rotate the geometry to be horizontal
+   */
+  readonly horizontal = input<boolean>(false);
 
   override readonly geometry = signal(new PlaneGeometry());
   override previousGeometry: PlaneGeometry | undefined = this.geometry();
 
   constructor() {
     super();
+    this.#initHorizontal();
+  }
+
+  #initHorizontal() {
+    effect(
+      () => {
+        const horizontal = this.horizontal();
+        if (horizontal === undefined) {
+          return;
+        }
+        // Rotate the geometry to be horizontal
+        this.geometry().rotateX((Math.PI / 2) * -1);
+      },
+      { allowSignalWrites: true },
+    );
   }
 
   override createGeometry(parameters: PlaneGeometryParameters): PlaneGeometry {

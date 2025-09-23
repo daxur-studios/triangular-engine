@@ -2,12 +2,11 @@ import { Component, effect, inject, input, signal } from '@angular/core';
 import RAPIER, {
   RigidBody,
   RigidBodyDesc,
-  RigidBodyType,
   Vector,
 } from '@dimforge/rapier3d-compat';
 import { GroupComponent, provideObject3DComponent } from '../../object-3d';
 
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import {
   Group,
   Quaternion,
@@ -16,7 +15,6 @@ import {
   Vector3Tuple,
 } from 'three';
 import { PhysicsService } from '../../../services';
-import { firstValueFrom } from 'rxjs';
 
 @Component({
   selector: 'rigidBody',
@@ -59,6 +57,7 @@ export class RigidBodyComponent extends GroupComponent {
 
   readonly rigidBodyDesc = signal<RigidBodyDesc | undefined>(undefined);
   readonly rigidBody = signal<RigidBody | undefined>(undefined);
+  readonly rigidBody$ = toObservable(this.rigidBody);
 
   constructor() {
     super();
