@@ -30,7 +30,7 @@ export interface IContactForceEvent {
 export function provideColliderComponent<T extends ColliderComponent>(
   colliderComponent: Type<T>,
 ) {
-  return [{ provide: ColliderComponent, useValue: colliderComponent }];
+  return [{ provide: ColliderComponent, useExisting: colliderComponent }];
 }
 
 @Component({

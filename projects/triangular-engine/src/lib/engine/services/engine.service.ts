@@ -10,7 +10,13 @@ import {
   signal,
   Provider,
 } from '@angular/core';
-import { BehaviorSubject, filter, firstValueFrom, ReplaySubject } from 'rxjs';
+import {
+  BehaviorSubject,
+  Subject,
+  filter,
+  firstValueFrom,
+  ReplaySubject,
+} from 'rxjs';
 import {
   ACESFilmicToneMapping,
   Camera,
@@ -117,6 +123,8 @@ export class EngineService implements IEngine {
    * Unit: seconds
    */
   readonly tick$: BehaviorSubject<number> = new BehaviorSubject<number>(0);
+  /** Fired after all tick$ subscribers run but before rendering the frame */
+  readonly postTick$ = new Subject<void>();
 
   /** Triggered when the SceneComponent is destroyed */
   readonly onDestroy$ = new ReplaySubject<void>();
@@ -424,6 +432,9 @@ export class EngineService implements IEngine {
     //this.syncPhysicsToRender();
 
     //if (this.useOrbitControls) this.orbitControls?.update(delta);
+
+    // Allow late subscribers (e.g., camera follow) to update just before render
+    this.postTick$.next();
 
     this.render(time);
   }

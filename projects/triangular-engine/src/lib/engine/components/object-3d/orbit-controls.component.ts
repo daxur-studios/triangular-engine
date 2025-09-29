@@ -142,13 +142,11 @@ export class OrbitControlsComponent implements OnDestroy {
         switchMap((isActive) => {
           if (!isActive) return of(undefined);
 
-          return this.engineService.tick$;
+          return this.engineService.postTick$;
         }),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe((delta) => {
-        if (!delta) return;
-
+      .subscribe(() => {
         this.orbitControls()?.update();
         if (this.cameraHelper) {
           this.cameraHelper.update();
@@ -249,7 +247,7 @@ export class OrbitControlsComponent implements OnDestroy {
       toObservable(this.orbitControls),
       toObservable(this.follow),
       toObservable(this.isActive),
-      this.engineService.tick$,
+      this.engineService.postTick$,
     ])
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([orbitControls, followObject, isActive, delta]) => {
@@ -257,23 +255,28 @@ export class OrbitControlsComponent implements OnDestroy {
         if (!followObject) return;
 
         const currentPosition = followObject.position.clone();
-        const deltaPosition = currentPosition.clone();
-        // .sub(this.previousFollowPosition);
 
-        if (this.previousFollowPosition) {
-          deltaPosition.sub(this.previousFollowPosition);
+        // Compute how much the followed object moved this frame
+        if (!this.previousFollowPosition) {
+          this.previousFollowPosition = currentPosition.clone();
+          return;
         }
 
-        // Apply delta movement to camera position and orbitControls target
+        const deltaPosition = currentPosition
+          .clone()
+          .sub(this.previousFollowPosition as Vector3);
+
+        // Apply delta to both target and camera so user input is preserved
         this.internalCamera.position.add(deltaPosition);
         orbitControls.target.add(deltaPosition);
 
-        // Update previous position for next frame
-        //this.previousFollowPosition.copy(currentPosition);
+        // Keep damping for smooth camera motion
+        orbitControls.enableDamping = true;
+
+        // Store for next frame
         this.previousFollowPosition = currentPosition.clone();
 
-        // Update orbit controls
-        orbitControls.update();
+        // OrbitControls are updated in postTick update handler
       });
   }
 
