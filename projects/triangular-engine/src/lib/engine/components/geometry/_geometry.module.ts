@@ -8,6 +8,7 @@ import {
   SphereGeometryComponent,
   TorusKnotGeometryComponent,
 } from './geometry.component';
+import { HeightMapGeometryComponent } from './height-map-geometry.component';
 
 const importExport = [
   BoxGeometryComponent,
@@ -17,6 +18,7 @@ const importExport = [
   CapsuleGeometryComponent,
   BufferGeometryComponent,
   BufferAttributeComponent,
+  HeightMapGeometryComponent,
 ] as const;
 
 @NgModule({

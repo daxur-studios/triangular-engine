@@ -119,7 +119,9 @@ export class EngineService implements IEngine {
     this.options.elapsedTime$ || new BehaviorSubject(0);
 
   /**
-   * Ticker for the rendering loop, holds the delta time.
+   * value: delta time * speed factor
+   *
+   * Ticker for the rendering loop, holds the delta time * speed factor.
    * Unit: seconds
    */
   readonly tick$: BehaviorSubject<number> = new BehaviorSubject<number>(0);

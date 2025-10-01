@@ -102,25 +102,6 @@ export class BufferGeometryComponent implements OnDestroy {
     effect(
       () => {
         handleMaterialAndGeometryLinking(this.geometry(), this.parent);
-        // const geometry = this.geometry();
-        // // Cast to MeshComponent to see if it should be added to the mesh
-        // if (this.parent instanceof MeshComponent) {
-        //   this.parent.geometry.set(geometry);
-        //   this.parent.mesh().geometry = geometry;
-        // }
-        // // Cast to PointsComponent to see if it should be added to the points
-        // else if (this.parent instanceof PointsComponent) {
-        //   this.parent.geometry.set(geometry);
-        //   this.parent.points().geometry = geometry;
-        // } else if (this.parent instanceof InstancedMeshComponent) {
-        //   this.parent.geometry.set(geometry);
-        //   this.parent.instancedMesh().geometry = geometry;
-        // } else if (this.parent instanceof InstancedRigidBodyComponent) {
-        //   this.parent.geometry.set(geometry);
-        // } else if (this.parent instanceof LineComponent) {
-        //   this.parent.geometry.set(geometry);
-        // }
-        // TO DO, MAKE THIS EASIER, MORE SAFE TO MAINTAIN
       },
       { allowSignalWrites: true },
     );
