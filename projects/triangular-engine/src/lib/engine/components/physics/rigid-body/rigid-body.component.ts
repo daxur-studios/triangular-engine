@@ -286,6 +286,11 @@ export class RigidBodyComponent extends GroupComponent {
     if (rigidBody) {
       this.physicsService.world$.value?.removeRigidBody(rigidBody);
     }
+
+    const id = this.id();
+    if (id) {
+      this.physicsService.clearRigidBodyWithId(id);
+    }
   }
 }
 

@@ -71,6 +71,14 @@ export class PhysicsService {
       this.#rigidBodiesWithId.set(id, signal(body));
     }
   }
+  /** Remove the rigid body from the map and clear the signal */
+  public clearRigidBodyWithId(id: string) {
+    const prev = this.#rigidBodiesWithId.get(id);
+    if (prev) {
+      prev.set(undefined);
+    }
+    this.#rigidBodiesWithId.delete(id);
+  }
 
   debugRenderBuffers = new RAPIER.DebugRenderBuffers(
     new Float32Array(),

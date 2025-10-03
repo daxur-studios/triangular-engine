@@ -4,6 +4,7 @@ import { CapsuleGeometryComponent } from './capsule-geometry.component';
 import {
   BoxGeometryComponent,
   BufferGeometryComponent,
+  CylinderGeometryComponent,
   PlaneGeometryComponent,
   SphereGeometryComponent,
   TorusKnotGeometryComponent,
@@ -15,6 +16,7 @@ const importExport = [
   SphereGeometryComponent,
   PlaneGeometryComponent,
   TorusKnotGeometryComponent,
+  CylinderGeometryComponent,
   CapsuleGeometryComponent,
   BufferGeometryComponent,
   BufferAttributeComponent,
