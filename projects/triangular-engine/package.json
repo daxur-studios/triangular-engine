@@ -1,6 +1,6 @@
 {
   "name": "triangular-engine",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Angular-first 3D engine powered by Three.js and Rapier. Declarative components for scenes, meshes, materials, lights, GLTF, and physics.",
   "keywords": [
     "angular",
@@ -15,10 +15,10 @@
     "components"
   ],
   "peerDependencies": {
-    "@angular/common": "^18.2.0",
-    "@angular/core": "^18.2.0",
+    "@angular/common": "^19.2.15",
+    "@angular/core": "^19.2.15",
     "three": "^0.178.0",
-    "@dimforge/rapier3d-compat": "^0.14.0",
+    "@dimforge/rapier3d-compat": "^0.18.0",
     "dexie": "^4.0.11"
   },
   "dependencies": {
