@@ -23,11 +23,10 @@ interface SceneNode {
 }
 
 @Component({
-  selector: 'sceneTree',
-  standalone: true,
-  imports: [CommonModule, FormsModule, MatMenuModule],
-  templateUrl: './scene-tree.component.html',
-  styleUrl: './scene-tree.component.css',
+    selector: 'sceneTree',
+    imports: [CommonModule, FormsModule, MatMenuModule],
+    templateUrl: './scene-tree.component.html',
+    styleUrl: './scene-tree.component.css'
 })
 export class SceneTreeComponent implements OnInit, OnDestroy {
   readonly engineService = inject(EngineService);

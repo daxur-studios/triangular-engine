@@ -9,11 +9,10 @@ import {
 import { JointComponent } from './joint.component';
 
 @Component({
-  selector: 'springJoint',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [],
+    selector: 'springJoint',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: []
 })
 export class SpringJointComponent extends JointComponent {
   //#region Injected Dependencies

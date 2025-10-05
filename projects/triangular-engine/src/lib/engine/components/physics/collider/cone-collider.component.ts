@@ -7,7 +7,6 @@ import RAPIER, { ColliderDesc } from '@dimforge/rapier3d-compat';
 
 @Component({
   selector: 'coneCollider',
-  standalone: true,
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideColliderComponent(ConeColliderComponent)],
@@ -23,14 +22,11 @@ export class ConeColliderComponent extends ColliderComponent {
   }
 
   #initColliderDesc() {
-    effect(
-      () => {
-        const radius = this.radius();
-        const halfHeight = this.halfHeight();
+    effect(() => {
+      const radius = this.radius();
+      const halfHeight = this.halfHeight();
 
-        this.colliderDesc.set(RAPIER.ColliderDesc.cone(halfHeight, radius));
-      },
-      { allowSignalWrites: true },
-    );
+      this.colliderDesc.set(RAPIER.ColliderDesc.cone(halfHeight, radius));
+    });
   }
 }

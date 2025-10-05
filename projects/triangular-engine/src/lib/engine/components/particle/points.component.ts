@@ -12,11 +12,10 @@ import { BufferGeometryComponent } from '../geometry';
 import { MaterialComponent } from '../materials';
 
 @Component({
-  selector: 'points',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideObject3DComponent(PointsComponent)],
+    selector: 'points',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideObject3DComponent(PointsComponent)]
 })
 export class PointsComponent extends Object3DComponent {
   readonly points = signal(new Points());

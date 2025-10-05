@@ -11,7 +11,6 @@ import { BufferGeometry } from 'three';
  */
 @Component({
   selector: 'trimeshCollider',
-  standalone: true,
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideColliderComponent(TrimeshColliderComponent)],
@@ -28,48 +27,45 @@ export class TrimeshColliderComponent extends ColliderComponent {
   }
 
   #initColliderDesc() {
-    effect(
-      () => {
-        const vertices = this.vertices();
-        const indices = this.indices();
-        const geometry = this.geometry();
+    effect(() => {
+      const vertices = this.vertices();
+      const indices = this.indices();
+      const geometry = this.geometry();
 
-        if (!vertices && !geometry) {
+      if (!vertices && !geometry) {
+        return;
+      }
+
+      let vertexData: Float32Array;
+      let indexData: Uint32Array;
+
+      if (geometry) {
+        vertexData = geometry.attributes['position'].array as Float32Array;
+        indexData = geometry.index?.array as Uint32Array;
+
+        if (!indexData) {
+          console.error('Geometry must have an index for trimesh collider');
           return;
         }
-
-        let vertexData: Float32Array;
-        let indexData: Uint32Array;
-
-        if (geometry) {
-          vertexData = geometry.attributes['position'].array as Float32Array;
-          indexData = geometry.index?.array as Uint32Array;
-
-          if (!indexData) {
-            console.error('Geometry must have an index for trimesh collider');
-            return;
-          }
-        } else {
-          if (!vertices || !indices) {
-            console.error(
-              'Both vertices and indices are required for trimesh collider',
-            );
-            return;
-          }
-          vertexData = vertices;
-          indexData = indices;
-        }
-
-        const x = RAPIER.ColliderDesc.trimesh(vertexData, indexData);
-
-        if (!x) {
-          console.error('Failed to create trimesh collider desc');
+      } else {
+        if (!vertices || !indices) {
+          console.error(
+            'Both vertices and indices are required for trimesh collider',
+          );
           return;
         }
+        vertexData = vertices;
+        indexData = indices;
+      }
 
-        this.colliderDesc.set(x);
-      },
-      { allowSignalWrites: true },
-    );
+      const x = RAPIER.ColliderDesc.trimesh(vertexData, indexData);
+
+      if (!x) {
+        console.error('Failed to create trimesh collider desc');
+        return;
+      }
+
+      this.colliderDesc.set(x);
+    });
   }
 }

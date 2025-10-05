@@ -16,7 +16,6 @@ export interface EllipseCurveParamsMap {
 
 @Component({
   selector: 'ellipseCurve',
-  standalone: true,
   imports: [],
   template: `<ng-content></ng-content>`,
 })
@@ -49,24 +48,21 @@ export class EllipseCurveComponent extends CurveComponent {
   }
 
   #initParams() {
-    effect(
-      () => {
-        const params = this.params();
-        const curve = this.curve();
+    effect(() => {
+      const params = this.params();
+      const curve = this.curve();
 
-        curve.aX = params.aX;
-        curve.aY = params.aY;
-        curve.xRadius = params.xRadius;
-        curve.yRadius = params.yRadius;
-        curve.aStartAngle = params.aStartAngle;
-        curve.aEndAngle = params.aEndAngle;
-        curve.aClockwise = params.aClockwise;
-        curve.aRotation = params.aRotation;
+      curve.aX = params.aX;
+      curve.aY = params.aY;
+      curve.xRadius = params.xRadius;
+      curve.yRadius = params.yRadius;
+      curve.aStartAngle = params.aStartAngle;
+      curve.aEndAngle = params.aEndAngle;
+      curve.aClockwise = params.aClockwise;
+      curve.aRotation = params.aRotation;
 
-        curve.updateArcLengths();
-        this.curveUpdatedTrigger.update((count) => count + 1);
-      },
-      { allowSignalWrites: true },
-    );
+      curve.updateArcLengths();
+      this.curveUpdatedTrigger.update((count) => count + 1);
+    });
   }
 }

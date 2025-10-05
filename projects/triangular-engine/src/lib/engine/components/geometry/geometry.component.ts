@@ -39,8 +39,6 @@ export function provideBufferGeometryComponent(component: any): Provider {
 @Component({
   selector: 'bufferGeometry',
   template: `<ng-content></ng-content>`,
-
-  standalone: true,
   imports: [],
   providers: [],
 })
@@ -89,23 +87,17 @@ export class BufferGeometryComponent implements OnDestroy {
   }
 
   #initUpdateGeometry() {
-    effect(
-      () => {
-        if (this.params()) {
-          this.updateParameters(this.params());
-        }
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      if (this.params()) {
+        this.updateParameters(this.params());
+      }
+    });
   }
 
   #iniCastAndSetGeometry() {
-    effect(
-      () => {
-        handleMaterialAndGeometryLinking(this.geometry(), this.parent);
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      handleMaterialAndGeometryLinking(this.geometry(), this.parent);
+    });
   }
 
   #initSetName() {
@@ -175,7 +167,6 @@ type SphereGeometryParameters =
 @Component({
   selector: 'sphereGeometry',
   template: `<ng-content></ng-content>`,
-  standalone: true,
   imports: [],
   providers: [provideBufferGeometryComponent(SphereGeometryComponent)],
 })
@@ -211,7 +202,6 @@ type PlaneGeometryParameters = ConstructorParameters<typeof PlaneGeometry>;
 @Component({
   selector: 'planeGeometry',
   template: `<ng-content></ng-content>`,
-  standalone: true,
   imports: [],
   providers: [provideBufferGeometryComponent(PlaneGeometryComponent)],
 })
@@ -234,17 +224,14 @@ export class PlaneGeometryComponent
   }
 
   #initHorizontal() {
-    effect(
-      () => {
-        const horizontal = this.horizontal();
-        if (horizontal === undefined) {
-          return;
-        }
-        // Rotate the geometry to be horizontal
-        this.geometry().rotateX((Math.PI / 2) * -1);
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      const horizontal = this.horizontal();
+      if (horizontal === undefined) {
+        return;
+      }
+      // Rotate the geometry to be horizontal
+      this.geometry().rotateX((Math.PI / 2) * -1);
+    });
   }
 
   override createGeometry(parameters: PlaneGeometryParameters): PlaneGeometry {
@@ -258,7 +245,6 @@ type TorusKnotGeometryParameters = ConstructorParameters<
 @Component({
   selector: 'torusKnotGeometry',
   template: `<ng-content></ng-content>`,
-  standalone: true,
   imports: [],
   providers: [provideBufferGeometryComponent(TorusKnotGeometryComponent)],
 })
@@ -291,7 +277,6 @@ type CylinderGeometryParameters = ConstructorParameters<
 @Component({
   selector: 'cylinderGeometry',
   template: `<ng-content></ng-content>`,
-  standalone: true,
   imports: [],
   providers: [provideBufferGeometryComponent(CylinderGeometryComponent)],
 })

@@ -7,12 +7,10 @@ import {
 } from './object-3d.component';
 
 @Component({
-  selector: 'group',
-  template: `<ng-content></ng-content> `,
-
-  standalone: true,
-  imports: [],
-  providers: [provideObject3DComponent(GroupComponent)],
+    selector: 'group',
+    template: `<ng-content></ng-content> `,
+    imports: [],
+    providers: [provideObject3DComponent(GroupComponent)]
 })
 export class GroupComponent extends Object3DComponent {
   public override emoji = '👥';

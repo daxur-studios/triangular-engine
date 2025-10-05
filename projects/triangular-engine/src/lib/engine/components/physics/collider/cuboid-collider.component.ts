@@ -9,7 +9,6 @@ import { Vector3Tuple } from 'three';
 
 @Component({
   selector: 'cuboidCollider',
-  standalone: true,
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideColliderComponent(CuboidColliderComponent)],
@@ -24,13 +23,10 @@ export class CuboidColliderComponent extends ColliderComponent {
   }
 
   #initColliderDesc() {
-    effect(
-      () => {
-        const halfExtents = this.halfExtents();
+    effect(() => {
+      const halfExtents = this.halfExtents();
 
-        this.colliderDesc.set(RAPIER.ColliderDesc.cuboid(...halfExtents));
-      },
-      { allowSignalWrites: true }
-    );
+      this.colliderDesc.set(RAPIER.ColliderDesc.cuboid(...halfExtents));
+    });
   }
 }

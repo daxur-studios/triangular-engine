@@ -24,12 +24,9 @@ export class BufferGeometryComponent implements OnDestroy {
   previousGeometry: BufferGeometry | undefined;
 
   constructor() {
-    effect(
-      () => {
-        if (this.params()) this.updateParameters(this.params());
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      if (this.params()) this.updateParameters(this.params());
+    });
   }
 
   /**

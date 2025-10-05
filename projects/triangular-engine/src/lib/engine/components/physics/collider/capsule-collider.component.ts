@@ -7,7 +7,6 @@ import {
 
 @Component({
   selector: 'capsuleCollider',
-  standalone: true,
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideColliderComponent(CapsuleColliderComponent)],
@@ -23,14 +22,11 @@ export class CapsuleColliderComponent extends ColliderComponent {
   }
 
   #initCreateColliderDesc() {
-    effect(
-      () => {
-        const halfExtents = this.halfHeight();
-        const radius = this.radius();
+    effect(() => {
+      const halfExtents = this.halfHeight();
+      const radius = this.radius();
 
-        this.colliderDesc.set(RAPIER.ColliderDesc.capsule(halfExtents, radius));
-      },
-      { allowSignalWrites: true }
-    );
+      this.colliderDesc.set(RAPIER.ColliderDesc.capsule(halfExtents, radius));
+    });
   }
 }

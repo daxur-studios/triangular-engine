@@ -18,10 +18,8 @@ import { PhysicsService } from '../../../services';
 
 @Component({
   selector: 'rigidBody',
-  standalone: true,
   imports: [],
   template: `<ng-content></ng-content>`,
-
   providers: [provideObject3DComponent(RigidBodyComponent)],
 })
 export class RigidBodyComponent extends GroupComponent {
@@ -96,26 +94,20 @@ export class RigidBodyComponent extends GroupComponent {
   }
 
   #initId() {
-    effect(
-      () => {
-        const id = this.id();
-        const rigidBody = this.rigidBody();
-        if (!id || !rigidBody) return;
+    effect(() => {
+      const id = this.id();
+      const rigidBody = this.rigidBody();
+      if (!id || !rigidBody) return;
 
-        this.physicsService.setRigidBodyById(id, rigidBody);
-      },
-      { allowSignalWrites: true },
-    );
+      this.physicsService.setRigidBodyById(id, rigidBody);
+    });
   }
 
   #initRigidBodyDesc() {
-    effect(
-      () => {
-        const rigidBodyDesc = new RigidBodyDesc(this.rigidBodyType());
-        this.rigidBodyDesc.set(rigidBodyDesc);
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      const rigidBodyDesc = new RigidBodyDesc(this.rigidBodyType());
+      this.rigidBodyDesc.set(rigidBodyDesc);
+    });
   }
 
   #initRigidBodyPosition() {
@@ -218,19 +210,16 @@ export class RigidBodyComponent extends GroupComponent {
   }
 
   #initRigidBody() {
-    effect(
-      async () => {
-        const rigidBodyDesc = this.rigidBodyDesc();
-        if (!rigidBodyDesc) return;
+    effect(async () => {
+      const rigidBodyDesc = this.rigidBodyDesc();
+      if (!rigidBodyDesc) return;
 
-        const world = await this.physicsService.worldPromise;
+      const world = await this.physicsService.worldPromise;
 
-        const rigidBody = world.createRigidBody(rigidBodyDesc);
+      const rigidBody = world.createRigidBody(rigidBodyDesc);
 
-        this.rigidBody.set(rigidBody);
-      },
-      { allowSignalWrites: true },
-    );
+      this.rigidBody.set(rigidBody);
+    });
   }
   #initSyncGroupPositionWithPhysicsPosition() {
     this.physicsService.stepped$

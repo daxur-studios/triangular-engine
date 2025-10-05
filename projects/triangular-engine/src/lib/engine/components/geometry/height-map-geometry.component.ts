@@ -10,11 +10,10 @@ import { LoaderService } from '../../services/loader.service';
  * Create Three.js geometry from a black and white image.
  */
 @Component({
-  selector: 'heightMapGeometry',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideBufferGeometryComponent(HeightMapGeometryComponent)],
+    selector: 'heightMapGeometry',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideBufferGeometryComponent(HeightMapGeometryComponent)]
 })
 export class HeightMapGeometryComponent extends BufferGeometryComponent {
   readonly #loaderService = inject(LoaderService);

@@ -35,7 +35,6 @@ export function provideColliderComponent<T extends ColliderComponent>(
 
 @Component({
   selector: 'collider',
-  standalone: true,
   imports: [],
   template: `<ng-content></ng-content>`,
 })
@@ -156,25 +155,22 @@ export class ColliderComponent implements OnDestroy {
   }
 
   #initCollider() {
-    effect(
-      async () => {
-        const parentRigidBodyComponent = this.#getParentAsRigidBodyComponent();
-        if (!parentRigidBodyComponent) return;
+    effect(async () => {
+      const parentRigidBodyComponent = this.#getParentAsRigidBodyComponent();
+      if (!parentRigidBodyComponent) return;
 
-        const colliderDesc = this.colliderDesc();
+      const colliderDesc = this.colliderDesc();
 
-        if (!colliderDesc) return;
+      if (!colliderDesc) return;
 
-        const world = await this.physicsService.worldPromise;
+      const world = await this.physicsService.worldPromise;
 
-        const rigidBody = parentRigidBodyComponent.rigidBody();
+      const rigidBody = parentRigidBodyComponent.rigidBody();
 
-        const collider = world.createCollider(colliderDesc, rigidBody);
+      const collider = world.createCollider(colliderDesc, rigidBody);
 
-        this.collider.set(collider);
-      },
-      { allowSignalWrites: true },
-    );
+      this.collider.set(collider);
+    });
   }
 
   #initColliderPosition() {

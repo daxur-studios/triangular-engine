@@ -23,11 +23,10 @@ Common attribute names include:
 - index: Indices for indexed geometries.
 */
 @Component({
-  selector: 'bufferAttribute',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [],
+    selector: 'bufferAttribute',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: []
 })
 export class BufferAttributeComponent implements OnDestroy {
   readonly parent = inject(BufferGeometryComponent);

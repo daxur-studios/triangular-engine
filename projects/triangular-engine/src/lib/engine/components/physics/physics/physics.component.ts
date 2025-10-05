@@ -25,7 +25,6 @@ import { PhysicsService } from '../../../services/physics.service';
  */
 @Component({
   selector: 'physics',
-  standalone: true,
   imports: [CommonModule],
   templateUrl: './physics.component.html',
   styleUrl: './physics.component.css',
@@ -84,21 +83,18 @@ export class PhysicsComponent implements OnInit, OnDestroy {
   }
 
   #initOnDebugChange(): void {
-    effect(
-      () => {
-        const debug = this.debug();
-        this.physicsService.setDebugState(debug ?? false);
-        // if (debug) {
-        //   // Create debug mesh if it doesn't exist
-        //   if (!this.debugMesh()) {
-        //     this.physicsService.createDebugMesh();
-        //   }
-        // } else {
-        //   this.debugMesh.set(undefined);
-        // }
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      const debug = this.debug();
+      this.physicsService.setDebugState(debug ?? false);
+      // if (debug) {
+      //   // Create debug mesh if it doesn't exist
+      //   if (!this.debugMesh()) {
+      //     this.physicsService.createDebugMesh();
+      //   }
+      // } else {
+      //   this.debugMesh.set(undefined);
+      // }
+    });
   }
 
   #initEngineTick(): void {

@@ -26,7 +26,6 @@ import { EngineService } from '../../../services';
 
 @Component({
   selector: 'skyBox',
-  standalone: true,
   template: `
     <skyBoxMaterial />
     <ng-content></ng-content>
@@ -136,7 +135,7 @@ export class SkyBoxComponent extends MeshComponent implements OnInit {
         // Update position to follow camera
         this.object3D().position.copy(this.engineService.camera.position);
       },
-      { injector: this.injector, allowSignalWrites: true },
+      { injector: this.injector },
     );
   }
 

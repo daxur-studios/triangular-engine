@@ -42,12 +42,9 @@ export class OceanComponent extends MeshComponent implements OnInit, OnDestroy {
     super();
 
     // Watch for size changes and recreate geometry
-    effect(
-      () => {
-        this.createGeometry();
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      this.createGeometry();
+    });
   }
 
   override ngOnInit(): void {

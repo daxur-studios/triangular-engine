@@ -8,11 +8,10 @@ import {
 import { JointComponent } from './joint.component';
 
 @Component({
-  selector: 'fixedJoint',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [],
+    selector: 'fixedJoint',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: []
 })
 export class FixedJointComponent extends JointComponent {
   //#region Injected Dependencies

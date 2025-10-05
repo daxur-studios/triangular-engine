@@ -3,11 +3,10 @@ import { BufferGeometry, Line, Material, Vector3, Vector3Tuple } from 'three';
 import { Object3DComponent, provideObject3DComponent } from '../object-3d';
 
 @Component({
-  selector: 'line',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideObject3DComponent(LineComponent)],
+    selector: 'line',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideObject3DComponent(LineComponent)]
 })
 export class LineComponent extends Object3DComponent {
   readonly line = signal(new Line());

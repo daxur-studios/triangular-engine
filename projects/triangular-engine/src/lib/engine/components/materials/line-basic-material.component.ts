@@ -19,12 +19,9 @@ export class LineBasicMaterialComponent extends MaterialComponent {
   constructor() {
     super();
 
-    effect(
-      () => {
-        this.material().setValues(this.params());
-        this.material().needsUpdate = true;
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      this.material().setValues(this.params());
+      this.material().needsUpdate = true;
+    });
   }
 }

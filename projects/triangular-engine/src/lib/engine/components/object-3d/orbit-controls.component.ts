@@ -27,8 +27,6 @@ import { EngineService } from '../../services';
 @Component({
   selector: 'orbitControls',
   template: `<ng-content></ng-content> `,
-
-  standalone: true,
   imports: [],
 })
 export class OrbitControlsComponent implements OnDestroy {
@@ -201,26 +199,23 @@ export class OrbitControlsComponent implements OnDestroy {
   }
 
   #initIsActive() {
-    effect(
-      () => {
-        const isActive = this.isActive();
-        if (isActive) {
-          const orbit = new AdvancedOrbitControls(
-            this.internalCamera,
-            this.engineService.renderer.domElement,
-          );
-          this.#makeOrbitControlsBetter(orbit);
-          this.orbitControls.set(orbit);
+    effect(() => {
+      const isActive = this.isActive();
+      if (isActive) {
+        const orbit = new AdvancedOrbitControls(
+          this.internalCamera,
+          this.engineService.renderer.domElement,
+        );
+        this.#makeOrbitControlsBetter(orbit);
+        this.orbitControls.set(orbit);
 
-          this.switchCameraTrigger.update((v) => (v || 0) + 1);
-        } else {
-          this.orbitControls()?.dispose();
-          this.orbitControls.set(undefined);
-          this.previousFollowPosition = undefined;
-        }
-      },
-      { allowSignalWrites: true },
-    );
+        this.switchCameraTrigger.update((v) => (v || 0) + 1);
+      } else {
+        this.orbitControls()?.dispose();
+        this.orbitControls.set(undefined);
+        this.previousFollowPosition = undefined;
+      }
+    });
   }
 
   cameraHelper: CameraHelper | undefined;
