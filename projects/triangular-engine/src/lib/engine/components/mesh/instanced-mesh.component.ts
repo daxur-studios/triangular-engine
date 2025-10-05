@@ -95,34 +95,31 @@ export class InstancedMeshComponent extends Object3DComponent {
     this.#initDataChange();
   }
   #initMaxCountChange() {
-    effect(
-      () => {
-        const maxCount = this.maxCount();
+    effect(() => {
+      const maxCount = this.maxCount();
 
-        if (this.#prevMaxCount === undefined || maxCount > this.#prevMaxCount) {
-          console.warn('🌴🌴🌴 Recreating instanced mesh');
-          if (this.#previousInstancedMesh) {
-            this.#previousInstancedMesh.count = 0;
-            this.#previousInstancedMesh.clear();
-            this.#previousInstancedMesh.dispose();
-            this.#previousInstancedMesh.removeFromParent();
-          }
-          // Recreate the instanced mesh and dispose of the old one
-          const instancedMesh = new InstancedMesh(
-            this.geometry(),
-            this.material(),
-            maxCount,
-          );
-
-          this.instancedMesh.set(instancedMesh);
-
-          this.#previousInstancedMesh = instancedMesh;
+      if (this.#prevMaxCount === undefined || maxCount > this.#prevMaxCount) {
+        console.warn('🌴🌴🌴 Recreating instanced mesh');
+        if (this.#previousInstancedMesh) {
+          this.#previousInstancedMesh.count = 0;
+          this.#previousInstancedMesh.clear();
+          this.#previousInstancedMesh.dispose();
+          this.#previousInstancedMesh.removeFromParent();
         }
+        // Recreate the instanced mesh and dispose of the old one
+        const instancedMesh = new InstancedMesh(
+          this.geometry(),
+          this.material(),
+          maxCount,
+        );
 
-        this.#prevMaxCount = maxCount;
-      },
-      { allowSignalWrites: true },
-    );
+        this.instancedMesh.set(instancedMesh);
+
+        this.#previousInstancedMesh = instancedMesh;
+      }
+
+      this.#prevMaxCount = maxCount;
+    });
   }
   #initGeometry() {
     effect(() => {
@@ -144,44 +141,38 @@ export class InstancedMeshComponent extends Object3DComponent {
   }
 
   #initCountChange() {
-    effect(
-      () => {
-        const instancedMesh = this.instancedMesh();
-        const count = this.count();
-        const maxCount = this.maxCount();
-        const growStep = this.growStep();
+    effect(() => {
+      const instancedMesh = this.instancedMesh();
+      const count = this.count();
+      const maxCount = this.maxCount();
+      const growStep = this.growStep();
 
-        let newMaxCount = maxCount;
+      let newMaxCount = maxCount;
 
-        // Auto-grow maxCount if growStep is enabled and count exceeds current maxCount
-        if (growStep && growStep > 0 && count >= maxCount) {
-          newMaxCount = maxCount + growStep;
-          this.maxCount.set(newMaxCount);
-        }
+      // Auto-grow maxCount if growStep is enabled and count exceeds current maxCount
+      if (growStep && growStep > 0 && count >= maxCount) {
+        newMaxCount = maxCount + growStep;
+        this.maxCount.set(newMaxCount);
+      }
 
-        const newCount = Math.min(count, newMaxCount);
-        instancedMesh.count = newCount;
-      },
-      { allowSignalWrites: true },
-    );
+      const newCount = Math.min(count, newMaxCount);
+      instancedMesh.count = newCount;
+    });
   }
 
   #eulerRotation = new Euler();
   #scaleVector = new Vector3();
 
   #initDataChange() {
-    effect(
-      () => {
-        const instancedMesh = this.instancedMesh();
+    effect(() => {
+      const instancedMesh = this.instancedMesh();
 
-        // Change can be either detected by data ref change, or same data array, but it's been pushed to, so it's length changes
-        const data = this.data();
-        const count = this.count();
+      // Change can be either detected by data ref change, or same data array, but it's been pushed to, so it's length changes
+      const data = this.data();
+      const count = this.count();
 
-        this.onDataChanged(data, instancedMesh);
-      },
-      { allowSignalWrites: true },
-    );
+      this.onDataChanged(data, instancedMesh);
+    });
   }
 
   public onDataChanged(

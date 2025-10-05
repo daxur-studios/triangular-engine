@@ -17,10 +17,10 @@ type RigidBodyInputTuple =
   | [RigidBodyComponent, string];
 
 @Component({
-    selector: 'joint',
-    template: `<ng-content></ng-content>`,
-    imports: [],
-    providers: []
+  selector: 'joint',
+  template: `<ng-content></ng-content>`,
+  imports: [],
+  providers: [],
 })
 export abstract class JointComponent implements OnDestroy {
   //#region Injected Dependencies
@@ -44,56 +44,53 @@ export abstract class JointComponent implements OnDestroy {
   abstract createJointData(): JointData;
 
   #initCreateJoint() {
-    effect(
-      async () => {
-        const joint = this.joint();
-        if (joint) return;
+    effect(async () => {
+      const joint = this.joint();
+      if (joint) return;
 
-        const rigidBodies = this.rigidBodies();
+      const rigidBodies = this.rigidBodies();
 
-        const body1 =
-          typeof rigidBodies[0] === 'string'
-            ? this.physicsService.getRigidBodyById(rigidBodies[0])()
-            : rigidBodies[0].rigidBody();
+      const body1 =
+        typeof rigidBodies[0] === 'string'
+          ? this.physicsService.getRigidBodyById(rigidBodies[0])()
+          : rigidBodies[0].rigidBody();
 
-        const body2 =
-          typeof rigidBodies[1] === 'string'
-            ? this.physicsService.getRigidBodyById(rigidBodies[1])()
-            : rigidBodies[1].rigidBody();
+      const body2 =
+        typeof rigidBodies[1] === 'string'
+          ? this.physicsService.getRigidBodyById(rigidBodies[1])()
+          : rigidBodies[1].rigidBody();
 
-        if (!body1 || !body2) return;
+      if (!body1 || !body2) return;
 
-        const world = await this.physicsService.worldPromise;
+      const world = await this.physicsService.worldPromise;
 
-        const jointData = this.createJointData();
+      const jointData = this.createJointData();
 
-        // Create the joint
-        const impulseJoint = world.createImpulseJoint(
-          jointData,
-          body1,
-          body2,
-          true,
-        );
+      // Create the joint
+      const impulseJoint = world.createImpulseJoint(
+        jointData,
+        body1,
+        body2,
+        true,
+      );
 
-        // // Schedule a small stabilization after joint creation. Guard against
-        // // bodies being removed/destroyed before this fires.
-        // this.#clearVelocityTimeout = setTimeout(() => {
-        //   try {
-        //     if (body1.isValid()) {
-        //       body1.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        //     }
-        //     if (body2.isValid()) {
-        //       body2.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        //     }
-        //   } catch {
-        //     // Ignore WASM errors from stale bodies
-        //   }
-        // }, 1);
+      // // Schedule a small stabilization after joint creation. Guard against
+      // // bodies being removed/destroyed before this fires.
+      // this.#clearVelocityTimeout = setTimeout(() => {
+      //   try {
+      //     if (body1.isValid()) {
+      //       body1.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      //     }
+      //     if (body2.isValid()) {
+      //       body2.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      //     }
+      //   } catch {
+      //     // Ignore WASM errors from stale bodies
+      //   }
+      // }, 1);
 
-        this.joint.set(impulseJoint);
-      },
-      { allowSignalWrites: true },
-    );
+      this.joint.set(impulseJoint);
+    });
   }
 
   #initContactsEnabled() {

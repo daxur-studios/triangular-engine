@@ -6,10 +6,10 @@ import {
 } from './_collider.component';
 
 @Component({
-    selector: 'capsuleCollider',
-    imports: [],
-    template: `<ng-content></ng-content>`,
-    providers: [provideColliderComponent(CapsuleColliderComponent)]
+  selector: 'capsuleCollider',
+  imports: [],
+  template: `<ng-content></ng-content>`,
+  providers: [provideColliderComponent(CapsuleColliderComponent)],
 })
 export class CapsuleColliderComponent extends ColliderComponent {
   readonly halfHeight = input.required<number>();
@@ -22,14 +22,11 @@ export class CapsuleColliderComponent extends ColliderComponent {
   }
 
   #initCreateColliderDesc() {
-    effect(
-      () => {
-        const halfExtents = this.halfHeight();
-        const radius = this.radius();
+    effect(() => {
+      const halfExtents = this.halfHeight();
+      const radius = this.radius();
 
-        this.colliderDesc.set(RAPIER.ColliderDesc.capsule(halfExtents, radius));
-      },
-      { allowSignalWrites: true }
-    );
+      this.colliderDesc.set(RAPIER.ColliderDesc.capsule(halfExtents, radius));
+    });
   }
 }

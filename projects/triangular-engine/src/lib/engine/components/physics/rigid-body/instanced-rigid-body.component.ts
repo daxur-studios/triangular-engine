@@ -19,7 +19,7 @@ import {
   Object3D,
   Quaternion as ThreeQuaternion,
   Vector3,
-  Vector3Tuple
+  Vector3Tuple,
 } from 'three';
 import { PhysicsService } from '../../../services';
 import { Object3DComponent, provideObject3DComponent } from '../../object-3d';
@@ -61,7 +61,7 @@ export class InstancedRigidBodyComponent extends Object3DComponent {
 
   /** The instanced mesh object */
   readonly instancedMesh = signal<InstancedMesh>(
-    new InstancedMesh(new BufferGeometry(), [], 0)
+    new InstancedMesh(new BufferGeometry(), [], 0),
   );
   override object3D: WritableSignal<Object3D> = this.instancedMesh;
   #previousInstancedMesh: InstancedMesh | undefined = this.instancedMesh();
@@ -88,38 +88,35 @@ export class InstancedRigidBodyComponent extends Object3DComponent {
   constructor() {
     super();
 
-    effect(
-      () => {
-        const allRigidBodies = this.allRigidBodies();
+    effect(() => {
+      const allRigidBodies = this.allRigidBodies();
 
-        const data: IInstancedRigidBodyData[] = [];
+      const data: IInstancedRigidBodyData[] = [];
 
-        allRigidBodies.forEach((rigidBody) => {
-          const b = rigidBody.rigidBody();
-          const translation = b?.translation();
-          const r = b?.rotation();
+      allRigidBodies.forEach((rigidBody) => {
+        const b = rigidBody.rigidBody();
+        const translation = b?.translation();
+        const r = b?.rotation();
 
-          const position = new Vector3(
-            translation?.x || 0,
-            translation?.y || 0,
-            translation?.z || 0
-          );
-          const rotation = b?.rotation() || {
-            x: 0,
-            y: 0,
-            z: 0,
-            w: 1,
-          };
-          const scale = rigidBody.scale() || 1;
+        const position = new Vector3(
+          translation?.x || 0,
+          translation?.y || 0,
+          translation?.z || 0,
+        );
+        const rotation = b?.rotation() || {
+          x: 0,
+          y: 0,
+          z: 0,
+          w: 1,
+        };
+        const scale = rigidBody.scale() || 1;
 
-          data.push({ position, rotation, scale });
-        });
+        data.push({ position, rotation, scale });
+      });
 
-        this.count.set(data.length);
-        this.data.set(data);
-      },
-      { allowSignalWrites: true }
-    );
+      this.count.set(data.length);
+      this.data.set(data);
+    });
 
     this.physicsService.stepped$
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -191,35 +188,32 @@ export class InstancedRigidBodyComponent extends Object3DComponent {
   // }
 
   #initMaxCountChange() {
-    effect(
-      () => {
-        const maxCount = this.maxCount();
+    effect(() => {
+      const maxCount = this.maxCount();
 
-        if (this.#prevMaxCount === undefined || maxCount > this.#prevMaxCount) {
-          console.warn('🌴🌴🌴 Recreating instanced mesh');
-          if (this.#previousInstancedMesh) {
-            this.#previousInstancedMesh.count = 0;
-            this.#previousInstancedMesh.clear();
-            this.#previousInstancedMesh.dispose();
-            this.#previousInstancedMesh.removeFromParent();
-          }
-          // Recreate the instanced mesh and dispose of the old one
-          const instancedMesh = new InstancedMesh(
-            this.geometry(),
-            this.material(),
-            maxCount
-          );
-          //  instancedMesh.geometry.boundingBox = this.instancedMeshBoundingBox;
-
-          this.instancedMesh.set(instancedMesh);
-
-          this.#previousInstancedMesh = instancedMesh;
+      if (this.#prevMaxCount === undefined || maxCount > this.#prevMaxCount) {
+        console.warn('🌴🌴🌴 Recreating instanced mesh');
+        if (this.#previousInstancedMesh) {
+          this.#previousInstancedMesh.count = 0;
+          this.#previousInstancedMesh.clear();
+          this.#previousInstancedMesh.dispose();
+          this.#previousInstancedMesh.removeFromParent();
         }
+        // Recreate the instanced mesh and dispose of the old one
+        const instancedMesh = new InstancedMesh(
+          this.geometry(),
+          this.material(),
+          maxCount,
+        );
+        //  instancedMesh.geometry.boundingBox = this.instancedMeshBoundingBox;
 
-        this.#prevMaxCount = maxCount;
-      },
-      { allowSignalWrites: true }
-    );
+        this.instancedMesh.set(instancedMesh);
+
+        this.#previousInstancedMesh = instancedMesh;
+      }
+
+      this.#prevMaxCount = maxCount;
+    });
   }
   #initGeometry() {
     effect(() => {
@@ -270,7 +264,7 @@ export class InstancedRigidBodyComponent extends Object3DComponent {
 
   public onDataChanged(
     data: IInstancedRigidBodyData[],
-    instancedMesh: InstancedMesh
+    instancedMesh: InstancedMesh,
   ) {
     const tmpRotation = this.#tmpRotation;
     const scaleVector = this.#scaleVector;
@@ -290,7 +284,7 @@ export class InstancedRigidBodyComponent extends Object3DComponent {
         params.rotation.x,
         params.rotation.y,
         params.rotation.z,
-        params.rotation.w
+        params.rotation.w,
       );
 
       matrix.makeRotationFromQuaternion(tmpRotation);

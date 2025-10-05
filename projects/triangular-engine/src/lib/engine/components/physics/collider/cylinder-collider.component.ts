@@ -6,10 +6,10 @@ import {
 import RAPIER, { ColliderDesc } from '@dimforge/rapier3d-compat';
 
 @Component({
-    selector: 'cylinderCollider',
-    imports: [],
-    template: `<ng-content></ng-content>`,
-    providers: [provideColliderComponent(CylinderColliderComponent)]
+  selector: 'cylinderCollider',
+  imports: [],
+  template: `<ng-content></ng-content>`,
+  providers: [provideColliderComponent(CylinderColliderComponent)],
 })
 export class CylinderColliderComponent extends ColliderComponent {
   readonly halfHeight = input.required<number>();
@@ -22,14 +22,11 @@ export class CylinderColliderComponent extends ColliderComponent {
   }
 
   #initColliderDesc() {
-    effect(
-      () => {
-        const radius = this.radius();
-        const halfHeight = this.halfHeight();
+    effect(() => {
+      const radius = this.radius();
+      const halfHeight = this.halfHeight();
 
-        this.colliderDesc.set(RAPIER.ColliderDesc.cylinder(halfHeight, radius));
-      },
-      { allowSignalWrites: true },
-    );
+      this.colliderDesc.set(RAPIER.ColliderDesc.cylinder(halfHeight, radius));
+    });
   }
 }

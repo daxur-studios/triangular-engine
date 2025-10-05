@@ -6,10 +6,10 @@ import {
 import RAPIER, { ColliderDesc } from '@dimforge/rapier3d-compat';
 
 @Component({
-    selector: 'ballCollider',
-    imports: [],
-    template: `<ng-content></ng-content>`,
-    providers: [provideColliderComponent(BallColliderComponent)]
+  selector: 'ballCollider',
+  imports: [],
+  template: `<ng-content></ng-content>`,
+  providers: [provideColliderComponent(BallColliderComponent)],
 })
 export class BallColliderComponent extends ColliderComponent {
   readonly radius = input.required<number>();
@@ -21,13 +21,10 @@ export class BallColliderComponent extends ColliderComponent {
   }
 
   #initColliderDesc() {
-    effect(
-      () => {
-        const radius = this.radius();
+    effect(() => {
+      const radius = this.radius();
 
-        this.colliderDesc.set(RAPIER.ColliderDesc.ball(radius));
-      },
-      { allowSignalWrites: true },
-    );
+      this.colliderDesc.set(RAPIER.ColliderDesc.ball(radius));
+    });
   }
 }

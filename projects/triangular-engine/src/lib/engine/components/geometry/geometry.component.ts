@@ -37,10 +37,10 @@ export function provideBufferGeometryComponent(component: any): Provider {
 }
 
 @Component({
-    selector: 'bufferGeometry',
-    template: `<ng-content></ng-content>`,
-    imports: [],
-    providers: []
+  selector: 'bufferGeometry',
+  template: `<ng-content></ng-content>`,
+  imports: [],
+  providers: [],
 })
 export class BufferGeometryComponent implements OnDestroy {
   //#region Injected Dependencies
@@ -87,23 +87,17 @@ export class BufferGeometryComponent implements OnDestroy {
   }
 
   #initUpdateGeometry() {
-    effect(
-      () => {
-        if (this.params()) {
-          this.updateParameters(this.params());
-        }
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      if (this.params()) {
+        this.updateParameters(this.params());
+      }
+    });
   }
 
   #iniCastAndSetGeometry() {
-    effect(
-      () => {
-        handleMaterialAndGeometryLinking(this.geometry(), this.parent);
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      handleMaterialAndGeometryLinking(this.geometry(), this.parent);
+    });
   }
 
   #initSetName() {
@@ -171,10 +165,10 @@ type SphereGeometryParameters =
   (typeof SphereGeometry)['prototype']['parameters'];
 
 @Component({
-    selector: 'sphereGeometry',
-    template: `<ng-content></ng-content>`,
-    imports: [],
-    providers: [provideBufferGeometryComponent(SphereGeometryComponent)]
+  selector: 'sphereGeometry',
+  template: `<ng-content></ng-content>`,
+  imports: [],
+  providers: [provideBufferGeometryComponent(SphereGeometryComponent)],
 })
 export class SphereGeometryComponent
   extends BufferGeometryComponent
@@ -206,10 +200,10 @@ export class SphereGeometryComponent
 
 type PlaneGeometryParameters = ConstructorParameters<typeof PlaneGeometry>;
 @Component({
-    selector: 'planeGeometry',
-    template: `<ng-content></ng-content>`,
-    imports: [],
-    providers: [provideBufferGeometryComponent(PlaneGeometryComponent)]
+  selector: 'planeGeometry',
+  template: `<ng-content></ng-content>`,
+  imports: [],
+  providers: [provideBufferGeometryComponent(PlaneGeometryComponent)],
 })
 export class PlaneGeometryComponent
   extends BufferGeometryComponent
@@ -230,17 +224,14 @@ export class PlaneGeometryComponent
   }
 
   #initHorizontal() {
-    effect(
-      () => {
-        const horizontal = this.horizontal();
-        if (horizontal === undefined) {
-          return;
-        }
-        // Rotate the geometry to be horizontal
-        this.geometry().rotateX((Math.PI / 2) * -1);
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      const horizontal = this.horizontal();
+      if (horizontal === undefined) {
+        return;
+      }
+      // Rotate the geometry to be horizontal
+      this.geometry().rotateX((Math.PI / 2) * -1);
+    });
   }
 
   override createGeometry(parameters: PlaneGeometryParameters): PlaneGeometry {
@@ -252,10 +243,10 @@ type TorusKnotGeometryParameters = ConstructorParameters<
   typeof TorusKnotGeometry
 >;
 @Component({
-    selector: 'torusKnotGeometry',
-    template: `<ng-content></ng-content>`,
-    imports: [],
-    providers: [provideBufferGeometryComponent(TorusKnotGeometryComponent)]
+  selector: 'torusKnotGeometry',
+  template: `<ng-content></ng-content>`,
+  imports: [],
+  providers: [provideBufferGeometryComponent(TorusKnotGeometryComponent)],
 })
 export class TorusKnotGeometryComponent
   extends BufferGeometryComponent
@@ -284,10 +275,10 @@ type CylinderGeometryParameters = ConstructorParameters<
 >;
 
 @Component({
-    selector: 'cylinderGeometry',
-    template: `<ng-content></ng-content>`,
-    imports: [],
-    providers: [provideBufferGeometryComponent(CylinderGeometryComponent)]
+  selector: 'cylinderGeometry',
+  template: `<ng-content></ng-content>`,
+  imports: [],
+  providers: [provideBufferGeometryComponent(CylinderGeometryComponent)],
 })
 export class CylinderGeometryComponent
   extends BufferGeometryComponent

@@ -24,11 +24,11 @@ import { PhysicsService } from '../../../services/physics.service';
  * All physics-enabled components (like <rigidBody>, <collider>, etc.) inside this tag will interact with each other based on physics rules.
  */
 @Component({
-    selector: 'physics',
-    imports: [CommonModule],
-    templateUrl: './physics.component.html',
-    styleUrl: './physics.component.css',
-    providers: []
+  selector: 'physics',
+  imports: [CommonModule],
+  templateUrl: './physics.component.html',
+  styleUrl: './physics.component.css',
+  providers: [],
 })
 export class PhysicsComponent implements OnInit, OnDestroy {
   //#region Injected Dependencies
@@ -83,21 +83,18 @@ export class PhysicsComponent implements OnInit, OnDestroy {
   }
 
   #initOnDebugChange(): void {
-    effect(
-      () => {
-        const debug = this.debug();
-        this.physicsService.setDebugState(debug ?? false);
-        // if (debug) {
-        //   // Create debug mesh if it doesn't exist
-        //   if (!this.debugMesh()) {
-        //     this.physicsService.createDebugMesh();
-        //   }
-        // } else {
-        //   this.debugMesh.set(undefined);
-        // }
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      const debug = this.debug();
+      this.physicsService.setDebugState(debug ?? false);
+      // if (debug) {
+      //   // Create debug mesh if it doesn't exist
+      //   if (!this.debugMesh()) {
+      //     this.physicsService.createDebugMesh();
+      //   }
+      // } else {
+      //   this.debugMesh.set(undefined);
+      // }
+    });
   }
 
   #initEngineTick(): void {

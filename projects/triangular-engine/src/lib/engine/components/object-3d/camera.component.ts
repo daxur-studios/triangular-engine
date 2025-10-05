@@ -26,10 +26,10 @@ import {
   provideObject3DComponent,
 } from './object-3d.component';
 @Component({
-    selector: 'camera',
-    template: `<ng-content></ng-content> `,
-    imports: [],
-    providers: [provideObject3DComponent(CameraComponent)]
+  selector: 'camera',
+  template: `<ng-content></ng-content> `,
+  imports: [],
+  providers: [provideObject3DComponent(CameraComponent)],
 })
 export class CameraComponent extends Object3DComponent implements OnDestroy {
   readonly camera = signal(new PerspectiveCamera());
@@ -162,20 +162,17 @@ export class CameraComponent extends Object3DComponent implements OnDestroy {
   }
 
   #initIsActive() {
-    effect(
-      () => {
-        const isActive = this.isActive();
-        const camera = this.camera();
-        if (isActive) {
-          this.#makeCameraBetter(camera);
+    effect(() => {
+      const isActive = this.isActive();
+      const camera = this.camera();
+      if (isActive) {
+        this.#makeCameraBetter(camera);
 
-          this.switchCameraTrigger.update((v) => (v || 0) + 1);
-        } else {
-          this.previousFollowPosition = undefined;
-        }
-      },
-      { allowSignalWrites: true },
-    );
+        this.switchCameraTrigger.update((v) => (v || 0) + 1);
+      } else {
+        this.previousFollowPosition = undefined;
+      }
+    });
   }
 
   cameraHelper: CameraHelper | undefined;
