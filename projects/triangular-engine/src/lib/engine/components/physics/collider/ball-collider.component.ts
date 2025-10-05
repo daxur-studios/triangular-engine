@@ -6,11 +6,10 @@ import {
 import RAPIER, { ColliderDesc } from '@dimforge/rapier3d-compat';
 
 @Component({
-  selector: 'ballCollider',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideColliderComponent(BallColliderComponent)],
+    selector: 'ballCollider',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideColliderComponent(BallColliderComponent)]
 })
 export class BallColliderComponent extends ColliderComponent {
   readonly radius = input.required<number>();

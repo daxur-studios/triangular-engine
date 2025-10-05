@@ -34,10 +34,9 @@ export function provideColliderComponent<T extends ColliderComponent>(
 }
 
 @Component({
-  selector: 'collider',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
+    selector: 'collider',
+    imports: [],
+    template: `<ng-content></ng-content>`
 })
 export class ColliderComponent implements OnDestroy {
   //#region Injected Dependencies

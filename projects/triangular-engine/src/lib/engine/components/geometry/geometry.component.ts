@@ -37,12 +37,10 @@ export function provideBufferGeometryComponent(component: any): Provider {
 }
 
 @Component({
-  selector: 'bufferGeometry',
-  template: `<ng-content></ng-content>`,
-
-  standalone: true,
-  imports: [],
-  providers: [],
+    selector: 'bufferGeometry',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: []
 })
 export class BufferGeometryComponent implements OnDestroy {
   //#region Injected Dependencies
@@ -173,11 +171,10 @@ type SphereGeometryParameters =
   (typeof SphereGeometry)['prototype']['parameters'];
 
 @Component({
-  selector: 'sphereGeometry',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [provideBufferGeometryComponent(SphereGeometryComponent)],
+    selector: 'sphereGeometry',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: [provideBufferGeometryComponent(SphereGeometryComponent)]
 })
 export class SphereGeometryComponent
   extends BufferGeometryComponent
@@ -209,11 +206,10 @@ export class SphereGeometryComponent
 
 type PlaneGeometryParameters = ConstructorParameters<typeof PlaneGeometry>;
 @Component({
-  selector: 'planeGeometry',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [provideBufferGeometryComponent(PlaneGeometryComponent)],
+    selector: 'planeGeometry',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: [provideBufferGeometryComponent(PlaneGeometryComponent)]
 })
 export class PlaneGeometryComponent
   extends BufferGeometryComponent
@@ -256,11 +252,10 @@ type TorusKnotGeometryParameters = ConstructorParameters<
   typeof TorusKnotGeometry
 >;
 @Component({
-  selector: 'torusKnotGeometry',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [provideBufferGeometryComponent(TorusKnotGeometryComponent)],
+    selector: 'torusKnotGeometry',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: [provideBufferGeometryComponent(TorusKnotGeometryComponent)]
 })
 export class TorusKnotGeometryComponent
   extends BufferGeometryComponent
@@ -289,11 +284,10 @@ type CylinderGeometryParameters = ConstructorParameters<
 >;
 
 @Component({
-  selector: 'cylinderGeometry',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [provideBufferGeometryComponent(CylinderGeometryComponent)],
+    selector: 'cylinderGeometry',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: [provideBufferGeometryComponent(CylinderGeometryComponent)]
 })
 export class CylinderGeometryComponent
   extends BufferGeometryComponent

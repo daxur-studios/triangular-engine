@@ -12,20 +12,19 @@ import {
 } from 'triangular-engine';
 
 @Component({
-  selector: 'app-root',
-  standalone: true,
-  imports: [RouterModule, CommonModule, EngineModule],
-  templateUrl: './app.component.html',
-  styleUrl: './app.component.scss',
-  providers: [
-    EngineService.provide({
-      showFPS: true,
-    }),
-    PhysicsService,
-  ],
-  host: {
-    class: 'flex-page',
-  },
+    selector: 'app-root',
+    imports: [RouterModule, CommonModule, EngineModule],
+    templateUrl: './app.component.html',
+    styleUrl: './app.component.scss',
+    providers: [
+        EngineService.provide({
+            showFPS: true,
+        }),
+        PhysicsService,
+    ],
+    host: {
+        class: 'flex-page',
+    }
 })
 export class AppComponent {
   readonly engineService = inject(EngineService);

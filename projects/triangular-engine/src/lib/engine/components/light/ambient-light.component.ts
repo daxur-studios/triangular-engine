@@ -14,11 +14,10 @@ import { LightComponent } from './light.component';
  * | intensity  | The intensity of the light.                      | LightComponent    |
  */
 @Component({
-  selector: 'ambientLight',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [provideObject3DComponent(AmbientLightComponent)],
+    selector: 'ambientLight',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: [provideObject3DComponent(AmbientLightComponent)]
 })
 export class AmbientLightComponent extends LightComponent {
   public override emoji = '💡';

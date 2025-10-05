@@ -15,10 +15,9 @@ export interface EllipseCurveParamsMap {
 }
 
 @Component({
-  selector: 'ellipseCurve',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
+    selector: 'ellipseCurve',
+    imports: [],
+    template: `<ng-content></ng-content>`
 })
 export class EllipseCurveComponent extends CurveComponent {
   /**

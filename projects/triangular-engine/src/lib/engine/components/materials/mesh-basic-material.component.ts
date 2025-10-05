@@ -7,11 +7,10 @@ import {
 import { LoaderService } from '../../services';
 
 @Component({
-  selector: 'meshBasicMaterial',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [provideMaterialComponent(MeshBasicMaterialComponent)],
+    selector: 'meshBasicMaterial',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: [provideMaterialComponent(MeshBasicMaterialComponent)]
 })
 export class MeshBasicMaterialComponent extends MaterialComponent {
   //#region Injected Dependencies

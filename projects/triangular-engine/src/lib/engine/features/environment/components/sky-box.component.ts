@@ -25,14 +25,13 @@ import { SkyBoxMaterialComponent } from '../materials';
 import { EngineService } from '../../../services';
 
 @Component({
-  selector: 'skyBox',
-  standalone: true,
-  template: `
+    selector: 'skyBox',
+    template: `
     <skyBoxMaterial />
     <ng-content></ng-content>
   `,
-  imports: [SkyBoxMaterialComponent],
-  providers: [provideObject3DComponent(SkyBoxComponent)],
+    imports: [SkyBoxMaterialComponent],
+    providers: [provideObject3DComponent(SkyBoxComponent)]
 })
 export class SkyBoxComponent extends MeshComponent implements OnInit {
   override readonly engineService = inject(EngineService);

@@ -8,11 +8,10 @@ import {
 import { Vector3Tuple } from 'three';
 
 @Component({
-  selector: 'cuboidCollider',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideColliderComponent(CuboidColliderComponent)],
+    selector: 'cuboidCollider',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideColliderComponent(CuboidColliderComponent)]
 })
 export class CuboidColliderComponent extends ColliderComponent {
   readonly halfExtents = input.required<Vector3Tuple>();

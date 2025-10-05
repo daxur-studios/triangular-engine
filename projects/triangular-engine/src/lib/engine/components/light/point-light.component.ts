@@ -13,11 +13,10 @@ import { LightComponent } from './light.component';
  * | decay      | The decay rate of the light.                     | PointLightComponent |
  */
 @Component({
-  selector: 'pointLight',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [provideObject3DComponent(PointLightComponent)],
+    selector: 'pointLight',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: [provideObject3DComponent(PointLightComponent)]
 })
 export class PointLightComponent extends LightComponent {
   public override emoji = '💡';

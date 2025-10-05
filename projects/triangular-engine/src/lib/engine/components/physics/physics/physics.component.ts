@@ -24,12 +24,11 @@ import { PhysicsService } from '../../../services/physics.service';
  * All physics-enabled components (like <rigidBody>, <collider>, etc.) inside this tag will interact with each other based on physics rules.
  */
 @Component({
-  selector: 'physics',
-  standalone: true,
-  imports: [CommonModule],
-  templateUrl: './physics.component.html',
-  styleUrl: './physics.component.css',
-  providers: [],
+    selector: 'physics',
+    imports: [CommonModule],
+    templateUrl: './physics.component.html',
+    styleUrl: './physics.component.css',
+    providers: []
 })
 export class PhysicsComponent implements OnInit, OnDestroy {
   //#region Injected Dependencies

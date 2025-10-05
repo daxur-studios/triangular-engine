@@ -17,12 +17,10 @@ import {
 import { PhysicsService } from '../../../services';
 
 @Component({
-  selector: 'rigidBody',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-
-  providers: [provideObject3DComponent(RigidBodyComponent)],
+    selector: 'rigidBody',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideObject3DComponent(RigidBodyComponent)]
 })
 export class RigidBodyComponent extends GroupComponent {
   //#region Injected Dependencies

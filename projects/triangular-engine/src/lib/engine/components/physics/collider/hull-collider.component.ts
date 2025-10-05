@@ -10,11 +10,10 @@ import { BufferGeometry } from 'three';
  * Provide positions OR geometry as input to generate the hull collider
  */
 @Component({
-  selector: 'hullCollider',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideColliderComponent(HullColliderComponent)],
+    selector: 'hullCollider',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideColliderComponent(HullColliderComponent)]
 })
 export class HullColliderComponent extends ColliderComponent {
   readonly positions = input<Float32Array>();

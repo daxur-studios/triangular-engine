@@ -8,11 +8,10 @@ import { IUserInterfaceOptions } from '../../models';
 import { SceneTreeComponent } from '../../features/scene-tree/scene-tree.component';
 
 @Component({
-  selector: 'engine-ui',
-  standalone: true,
-  imports: [CommonModule, EngineStatsComponent, SceneTreeComponent],
-  templateUrl: './engine-ui.component.html',
-  styleUrl: './engine-ui.component.scss',
+    selector: 'engine-ui',
+    imports: [CommonModule, EngineStatsComponent, SceneTreeComponent],
+    templateUrl: './engine-ui.component.html',
+    styleUrl: './engine-ui.component.scss'
 })
 export class EngineUiComponent {
   readonly userInterface = input<IUserInterfaceOptions>({});

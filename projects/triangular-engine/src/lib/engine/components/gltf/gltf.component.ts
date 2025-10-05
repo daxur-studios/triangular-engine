@@ -23,11 +23,10 @@ import { buildGraph } from '../../models';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 
 @Component({
-  selector: 'gltf',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideObject3DComponent(GltfComponent)],
+    selector: 'gltf',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideObject3DComponent(GltfComponent)]
 })
 export class GltfComponent extends Object3DComponent {
   //#region Injected Dependencies

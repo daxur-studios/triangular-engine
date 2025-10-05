@@ -11,11 +11,10 @@ import {
 import { LoaderService } from '../../services';
 
 @Component({
-  selector: 'spriteMaterial',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideMaterialComponent(SpriteMaterialComponent)],
+    selector: 'spriteMaterial',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideMaterialComponent(SpriteMaterialComponent)]
 })
 export class SpriteMaterialComponent extends MaterialComponent {
   //#region Injected Dependencies

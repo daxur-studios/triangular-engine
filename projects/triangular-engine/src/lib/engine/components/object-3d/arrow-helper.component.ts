@@ -16,12 +16,10 @@ type ArrowHelperParameters = {
 };
 
 @Component({
-  selector: 'arrowHelper',
-  template: `<ng-content></ng-content> `,
-
-  standalone: true,
-  imports: [],
-  providers: [provideObject3DComponent(ArrowHelperComponent)],
+    selector: 'arrowHelper',
+    template: `<ng-content></ng-content> `,
+    imports: [],
+    providers: [provideObject3DComponent(ArrowHelperComponent)]
 })
 export class ArrowHelperComponent extends Object3DComponent {
   public override emoji = '🏹';

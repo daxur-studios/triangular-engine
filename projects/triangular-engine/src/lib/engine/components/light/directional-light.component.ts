@@ -16,11 +16,10 @@ import { toObservable } from '@angular/core/rxjs-interop';
  * | castShadow | Whether the light casts shadows.                 | DirectionalLightComponent |
  */
 @Component({
-  selector: 'directionalLight',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [provideObject3DComponent(DirectionalLightComponent)],
+    selector: 'directionalLight',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: [provideObject3DComponent(DirectionalLightComponent)]
 })
 export class DirectionalLightComponent extends LightComponent {
   public override emoji = '💡';

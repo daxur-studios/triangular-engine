@@ -26,12 +26,10 @@ import {
   provideObject3DComponent,
 } from './object-3d.component';
 @Component({
-  selector: 'camera',
-  template: `<ng-content></ng-content> `,
-
-  standalone: true,
-  imports: [],
-  providers: [provideObject3DComponent(CameraComponent)],
+    selector: 'camera',
+    template: `<ng-content></ng-content> `,
+    imports: [],
+    providers: [provideObject3DComponent(CameraComponent)]
 })
 export class CameraComponent extends Object3DComponent implements OnDestroy {
   readonly camera = signal(new PerspectiveCamera());

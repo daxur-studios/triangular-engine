@@ -17,11 +17,10 @@ import { IParticle } from './particle.model';
 // positions: Float32Array;
 
 @Component({
-  selector: 'particleSystem',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideObject3DComponent(ParticleSystemComponent)],
+    selector: 'particleSystem',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideObject3DComponent(ParticleSystemComponent)]
 })
 export class ParticleSystemComponent extends Object3DComponent {
   //#region Injected Dependencies

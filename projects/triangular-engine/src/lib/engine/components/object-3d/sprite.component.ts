@@ -21,11 +21,10 @@ import {
 } from 'three';
 
 @Component({
-  selector: 'sprite',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideObject3DComponent(SpriteComponent)],
+    selector: 'sprite',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideObject3DComponent(SpriteComponent)]
 })
 export class SpriteComponent extends Object3DComponent {
   readonly sprite = signal(new Sprite());

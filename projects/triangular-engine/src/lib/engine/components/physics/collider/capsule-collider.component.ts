@@ -6,11 +6,10 @@ import {
 } from './_collider.component';
 
 @Component({
-  selector: 'capsuleCollider',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideColliderComponent(CapsuleColliderComponent)],
+    selector: 'capsuleCollider',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideColliderComponent(CapsuleColliderComponent)]
 })
 export class CapsuleColliderComponent extends ColliderComponent {
   readonly halfHeight = input.required<number>();

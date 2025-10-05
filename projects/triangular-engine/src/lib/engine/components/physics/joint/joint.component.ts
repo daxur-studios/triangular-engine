@@ -17,11 +17,10 @@ type RigidBodyInputTuple =
   | [RigidBodyComponent, string];
 
 @Component({
-  selector: 'joint',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [],
+    selector: 'joint',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: []
 })
 export abstract class JointComponent implements OnDestroy {
   //#region Injected Dependencies

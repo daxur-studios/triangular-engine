@@ -7,11 +7,10 @@ import {
 } from './object-3d.component';
 
 @Component({
-  selector: 'gridHelper',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [provideObject3DComponent(GridHelperComponent)],
+    selector: 'gridHelper',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: [provideObject3DComponent(GridHelperComponent)]
 })
 export class GridHelperComponent extends Object3DComponent {
   public override emoji = '📐';

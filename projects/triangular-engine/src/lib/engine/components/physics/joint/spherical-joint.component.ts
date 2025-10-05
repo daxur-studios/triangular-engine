@@ -7,11 +7,10 @@ import {
 import { JointComponent } from './joint.component';
 
 @Component({
-  selector: 'sphericalJoint',
-  template: `<ng-content></ng-content>`,
-  standalone: true,
-  imports: [],
-  providers: [],
+    selector: 'sphericalJoint',
+    template: `<ng-content></ng-content>`,
+    imports: [],
+    providers: []
 })
 export class SphericalJointComponent extends JointComponent {
   //#region Injected Dependencies

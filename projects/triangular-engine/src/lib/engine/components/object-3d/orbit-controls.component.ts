@@ -25,11 +25,9 @@ import { AdvancedOrbitControls } from '../../models';
 import { EngineService } from '../../services';
 
 @Component({
-  selector: 'orbitControls',
-  template: `<ng-content></ng-content> `,
-
-  standalone: true,
-  imports: [],
+    selector: 'orbitControls',
+    template: `<ng-content></ng-content> `,
+    imports: []
 })
 export class OrbitControlsComponent implements OnDestroy {
   readonly engineService = inject(EngineService);

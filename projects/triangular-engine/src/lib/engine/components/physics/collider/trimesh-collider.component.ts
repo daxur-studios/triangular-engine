@@ -10,11 +10,10 @@ import { BufferGeometry } from 'three';
  * Provide vertices and indices OR geometry as input to generate the trimesh collider
  */
 @Component({
-  selector: 'trimeshCollider',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideColliderComponent(TrimeshColliderComponent)],
+    selector: 'trimeshCollider',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideColliderComponent(TrimeshColliderComponent)]
 })
 export class TrimeshColliderComponent extends ColliderComponent {
   readonly vertices = input<Float32Array>();

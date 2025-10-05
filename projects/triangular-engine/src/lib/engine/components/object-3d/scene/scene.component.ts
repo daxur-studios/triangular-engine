@@ -24,15 +24,14 @@ import {
 } from '../object-3d.component';
 
 @Component({
-  selector: 'scene',
-  standalone: true,
-  imports: [EngineUiComponent],
-  templateUrl: './scene.component.html',
-  styleUrl: './scene.component.scss',
-  host: {
-    class: 'flex-page',
-  },
-  providers: [provideObject3DComponent(SceneComponent)],
+    selector: 'scene',
+    imports: [EngineUiComponent],
+    templateUrl: './scene.component.html',
+    styleUrl: './scene.component.scss',
+    host: {
+        class: 'flex-page',
+    },
+    providers: [provideObject3DComponent(SceneComponent)]
 })
 export class SceneComponent
   extends Object3DComponent
