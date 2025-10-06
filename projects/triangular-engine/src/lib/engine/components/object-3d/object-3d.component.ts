@@ -95,21 +95,30 @@ export abstract class Object3DComponent implements OnDestroy {
 
   #initSetPosition() {
     effect(() => {
-      this.object3D().position.set(...this.position());
+      const object3D = this.object3D();
+      const position = this.position();
+      if (!object3D) return;
+      object3D.position.set(...position);
     });
   }
   #initSetRotation() {
     effect(() => {
-      this.object3D().rotation.set(...this.rotation());
+      const object3D = this.object3D();
+      const rotation = this.rotation();
+      if (!object3D) return;
+      object3D.rotation.set(...rotation);
     });
   }
   #initSetScale() {
     effect(() => {
       const scale = this.scale();
+      const object3D = this.object3D();
+      if (!object3D) return;
+
       if (typeof scale === 'number') {
-        this.object3D().scale.set(scale, scale, scale);
+        object3D.scale.set(scale, scale, scale);
       } else {
-        this.object3D().scale.set(...scale);
+        object3D.scale.set(...scale);
       }
     });
   }
@@ -125,7 +134,8 @@ export abstract class Object3DComponent implements OnDestroy {
   }
   #initAttachToParent() {
     effect(() => {
-      if (this.parent) {
+      const object3D = this.object3D();
+      if (this.parent && object3D) {
         this.parent.object3D().add(this.object3D());
       }
     });
