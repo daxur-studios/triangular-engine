@@ -31,10 +31,10 @@ These are expected to be provided by your app (see package.json for exact versio
 
 ```json
 {
-  "@angular/common": "^18.2.0",
-  "@angular/core": "^18.2.0",
+  "@angular/common": "^20.3.3",
+  "@angular/core": "^20.3.3",
   "three": "^0.178.0",
-  "@dimforge/rapier3d-compat": "^0.14.0",
+  "@dimforge/rapier3d-compat": "^0.18.0",
   "dexie": "^4.0.11"
 }
 ```
