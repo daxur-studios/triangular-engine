@@ -20,10 +20,15 @@ import {
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { combineLatest, of, switchMap } from 'rxjs';
+import { combineLatest, distinctUntilChanged, of, switchMap } from 'rxjs';
 import { AdvancedOrbitControls } from '../../models';
 import { EngineService } from '../../services';
 
+/**
+ * - Use input `follow` to follow an Object3D.
+ * - Use input `cameraPosition` to set the camera position.
+ * - `target` is the target of the camera.
+ */
 @Component({
   selector: 'orbitControls',
   template: `<ng-content></ng-content> `,
@@ -41,7 +46,7 @@ export class OrbitControlsComponent implements OnDestroy {
   /** Set to eg a timeStamp, so when this changes, it witches the engine's rendering camera to this orbit control's camera */
   readonly switchCameraTrigger = model<number>();
 
-  readonly target = input<Vector3Tuple>();
+  readonly target = input<Vector3Tuple | Object3D>();
   readonly cameraPosition = input<Vector3Tuple>();
   /** Move both target and camera position by adding this vector to it */
   readonly moveBy = input<Vector3Tuple>();
@@ -113,7 +118,9 @@ export class OrbitControlsComponent implements OnDestroy {
     effect(() => {
       const target = this.target();
       if (target) {
-        this.orbitControls()?.target.set(...target);
+        const position =
+          target instanceof Object3D ? target.position.toArray() : target;
+        this.orbitControls()?.target.set(...position);
       }
     });
   }
@@ -240,7 +247,20 @@ export class OrbitControlsComponent implements OnDestroy {
   #initFollow() {
     combineLatest([
       toObservable(this.orbitControls),
-      toObservable(this.follow),
+      toObservable(this.follow).pipe(
+        distinctUntilChanged((a, b) => {
+          const isSame = a === b;
+          if (!isSame && a) {
+            // follow has changed, ensure orbit control is re-centered for the new follow
+            const orbitControls = this.orbitControls();
+            if (!orbitControls) return false;
+
+            orbitControls.target.set(...a.position.toArray());
+          }
+
+          return isSame;
+        }),
+      ),
       toObservable(this.isActive),
       this.engineService.postTick$,
     ])
