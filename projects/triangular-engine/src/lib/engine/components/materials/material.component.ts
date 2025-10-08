@@ -184,6 +184,7 @@ export class MeshStandardMaterialComponent extends MaterialComponent {
 
   /** Texture path */
   readonly map = input<string>();
+  readonly alphaMap = input<string>();
 
   override readonly material = signal(new MeshStandardMaterial());
 
@@ -191,6 +192,7 @@ export class MeshStandardMaterialComponent extends MaterialComponent {
     super();
 
     this.#initMap();
+    this.#initAlphaMap();
   }
 
   #initMap() {
@@ -199,6 +201,18 @@ export class MeshStandardMaterialComponent extends MaterialComponent {
       if (map) {
         this.loaderService.loadAndCacheTexture(map).then((texture) => {
           this.material().map = texture;
+          this.material().needsUpdate = true;
+        });
+      }
+    });
+  }
+
+  #initAlphaMap() {
+    effect(() => {
+      const alphaMap = this.alphaMap();
+      if (alphaMap) {
+        this.loaderService.loadAndCacheTexture(alphaMap).then((texture) => {
+          this.material().alphaMap = texture;
           this.material().needsUpdate = true;
         });
       }
