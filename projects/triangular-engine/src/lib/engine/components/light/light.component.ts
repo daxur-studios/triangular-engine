@@ -18,6 +18,7 @@ import {
   Vector3Like,
   Light,
   Object3D,
+  ColorRepresentation,
 } from 'three';
 import {
   Object3DComponent,
@@ -34,7 +35,7 @@ import { BehaviorSubject } from 'rxjs';
 export abstract class LightComponent extends Object3DComponent {
   public override emoji = '💡';
 
-  readonly color = input<string>('#ffffff');
+  readonly color = input<string | ColorRepresentation>('#ffffff');
   readonly intensity = input<number>(1);
 
   abstract override readonly object3D: WritableSignal<Light>;
