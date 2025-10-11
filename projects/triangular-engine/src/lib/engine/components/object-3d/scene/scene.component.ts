@@ -24,22 +24,18 @@ import {
 } from '../object-3d.component';
 
 @Component({
-    selector: 'scene',
-    imports: [EngineUiComponent],
-    templateUrl: './scene.component.html',
-    styleUrl: './scene.component.scss',
-    host: {
-        class: 'flex-page',
-    },
-    providers: [provideObject3DComponent(SceneComponent)]
+  selector: 'scene',
+  imports: [EngineUiComponent],
+  templateUrl: './scene.component.html',
+  styleUrl: './scene.component.scss',
+  host: {
+    class: 'flex-page',
+  },
 })
-export class SceneComponent
-  extends Object3DComponent
-  implements OnInit, OnDestroy, AfterViewInit
-{
+export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   //#region Injected Dependencies
   readonly #destroyRef = inject(DestroyRef);
-  override readonly engineService: EngineService = inject(EngineService, {
+  readonly engineService: EngineService = inject(EngineService, {
     skipSelf: true,
   });
 
@@ -78,15 +74,11 @@ export class SceneComponent
   get scene() {
     return this.engineService.scene;
   }
-  override readonly object3D = signal(this.scene);
 
   readonly children = contentChildren(Object3DComponent);
 
   constructor() {
-    super();
-
     SceneComponent.instance++;
-    this.name.set(`Engine Scene ${SceneComponent.instance}`);
 
     this.engineService.setSceneComponent(this);
 
@@ -126,9 +118,7 @@ export class SceneComponent
     this.engineService.onComponentInit();
   }
 
-  override ngOnDestroy(): void {
-    super.ngOnDestroy();
-
+  ngOnDestroy(): void {
     this.#resizeObserver.disconnect();
     this.engineService.onComponentDestroy();
   }

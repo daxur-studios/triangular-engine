@@ -135,8 +135,12 @@ export abstract class Object3DComponent implements OnDestroy {
   #initAttachToParent() {
     effect(() => {
       const object3D = this.object3D();
-      if (this.parent && object3D) {
+      if (!object3D) return;
+
+      if (this.parent) {
         this.parent.object3D().add(this.object3D());
+      } else {
+        this.engineService.scene.add(this.object3D());
       }
     });
   }
