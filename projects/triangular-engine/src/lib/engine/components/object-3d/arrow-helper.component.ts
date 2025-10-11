@@ -15,6 +15,10 @@ type ArrowHelperParameters = {
   headWidth?: number;
 };
 
+/**
+ * @example
+ * <arrowHelper [length]="10" [direction]="[1, 0, 0]" [color]="'red'" />
+ */
 @Component({
   selector: 'arrowHelper',
   template: `<ng-content></ng-content> `,
