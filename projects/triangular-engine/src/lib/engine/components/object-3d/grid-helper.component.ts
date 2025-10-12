@@ -6,6 +6,12 @@ import {
   provideObject3DComponent,
 } from './object-3d.component';
 
+/**
+ * Example:
+ * ```html
+ * <gridHelper [size]="10" [divisions]="5" [color1]="'rgb(99, 99, 990)'" [color2]="'rgb(0, 99, 99)'" />
+ * ```
+ */
 @Component({
   selector: 'gridHelper',
   template: `<ng-content></ng-content>`,
