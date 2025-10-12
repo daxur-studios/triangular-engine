@@ -137,12 +137,20 @@ export abstract class Object3DComponent implements OnDestroy {
       const object3D = this.object3D();
       if (!object3D) return;
 
-      if (this.parent) {
+      if (this.parent && this.#isSameSceneAsParent(this.parent)) {
         this.parent.object3D().add(this.object3D());
       } else {
         this.engineService.scene.add(this.object3D());
       }
     });
+  }
+
+  /**
+   * Returns true when the parent's scene is different to the closest EngineService.scene
+   * Fix edge case where a <scene> is placed inside another <scene>, and otherwise it's objects would be parented to the outer scene.
+   */
+  #isSameSceneAsParent(parent: Object3DComponent): boolean {
+    return parent.engineService.scene === this.engineService.scene;
   }
 
   #initNamingAndInstanceCounts() {
