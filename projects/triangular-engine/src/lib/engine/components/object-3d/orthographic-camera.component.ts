@@ -1,8 +1,6 @@
 import {
   Component,
-  DestroyRef,
   effect,
-  inject,
   input,
   model,
   OnDestroy,
@@ -11,7 +9,6 @@ import {
 import {
   Camera,
   CameraHelper,
-  MathUtils,
   Object3D,
   OrthographicCamera,
   PerspectiveCamera,
@@ -21,20 +18,22 @@ import {
 } from 'three';
 
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { combineLatest, of, switchMap } from 'rxjs';
-import { EngineService } from '../../services';
+import { of, switchMap } from 'rxjs';
 import {
   Object3DComponent,
   provideObject3DComponent,
 } from './object-3d.component';
 @Component({
-  selector: 'camera',
+  selector: 'orthographicCamera',
   template: `<ng-content></ng-content> `,
   imports: [],
-  providers: [provideObject3DComponent(CameraComponent)],
+  providers: [provideObject3DComponent(OrthographicCameraComponent)],
 })
-export class CameraComponent extends Object3DComponent implements OnDestroy {
-  readonly camera = signal(new PerspectiveCamera());
+export class OrthographicCameraComponent
+  extends Object3DComponent
+  implements OnDestroy
+{
+  readonly camera = signal<OrthographicCamera>(new OrthographicCamera());
   override object3D = this.camera;
 
   readonly debug = input<boolean | undefined>();
@@ -59,6 +58,21 @@ export class CameraComponent extends Object3DComponent implements OnDestroy {
 
   readonly upVector = input<Vector3Tuple>();
 
+  /** Left frustum plane. @remarks — Expects a Float @defaultValue — -1 */
+  readonly left = input<number>();
+
+  /** Right frustum plane. @remarks — Expects a Float @defaultValue — 1 */
+  readonly right = input<number>();
+
+  /** Top frustum plane. @remarks — Expects a Float @defaultValue — 1 */
+  readonly top = input<number>();
+
+  /** Bottom frustum plane. @remarks — Expects a Float @defaultValue — -1 */
+  readonly bottom = input<number>();
+
+  /** Camera zoom factor. @remarks — Expects a Float @defaultValue — 1 */
+  readonly zoom = input<number>();
+
   constructor() {
     super();
 
@@ -77,14 +91,59 @@ export class CameraComponent extends Object3DComponent implements OnDestroy {
 
     this.#initSwitchCameraChanges();
     this.#initFarClippingPlaneChanges();
+    this.#initOrthographicFrustumChanges();
+    this.#initZoomChanges();
   }
 
   #initFarClippingPlaneChanges() {
     effect(() => {
       const far = this.far();
       const camera = this.camera();
-      if (far) {
+      if (far && camera instanceof OrthographicCamera) {
         camera.far = far;
+        camera.updateProjectionMatrix();
+        if (this.cameraHelper) {
+          this.cameraHelper.update();
+        }
+      }
+    });
+  }
+
+  #initOrthographicFrustumChanges() {
+    effect(() => {
+      const left = this.left();
+      const right = this.right();
+      const top = this.top();
+      const bottom = this.bottom();
+      const camera = this.camera();
+
+      if (camera instanceof OrthographicCamera) {
+        if (left !== undefined) camera.left = left;
+        if (right !== undefined) camera.right = right;
+        if (top !== undefined) camera.top = top;
+        if (bottom !== undefined) camera.bottom = bottom;
+
+        if (
+          left !== undefined ||
+          right !== undefined ||
+          top !== undefined ||
+          bottom !== undefined
+        ) {
+          camera.updateProjectionMatrix();
+          if (this.cameraHelper) {
+            this.cameraHelper.update();
+          }
+        }
+      }
+    });
+  }
+
+  #initZoomChanges() {
+    effect(() => {
+      const zoom = this.zoom();
+      const camera = this.camera();
+      if (zoom && camera instanceof OrthographicCamera) {
+        camera.zoom = zoom;
         camera.updateProjectionMatrix();
         if (this.cameraHelper) {
           this.cameraHelper.update();
@@ -159,15 +218,17 @@ export class CameraComponent extends Object3DComponent implements OnDestroy {
     this.camera().removeFromParent();
   }
 
-  #makeCameraBetter(camera: PerspectiveCamera) {
+  #makeCameraBetter(camera: OrthographicCamera) {
     camera.updateProjectionMatrix();
+    return;
+    camera.far = Number.MAX_SAFE_INTEGER;
   }
 
   #initIsActive() {
     effect(() => {
       const isActive = this.isActive();
       const camera = this.camera();
-      if (isActive && camera instanceof PerspectiveCamera) {
+      if (isActive && camera instanceof OrthographicCamera) {
         this.#makeCameraBetter(camera);
 
         this.switchCameraTrigger.update((v) => (v || 0) + 1);
@@ -196,4 +257,41 @@ export class CameraComponent extends Object3DComponent implements OnDestroy {
   }
 
   private previousFollowPosition: Vector3Like | undefined;
+
+  // #initFollow() {
+  //   combineLatest([
+  //     toObservable(this.camera),
+  //     toObservable(this.follow),
+  //     toObservable(this.lookAt),
+  //     toObservable(this.isActive),
+  //     this.engineService.tick$,
+  //   ])
+  //     .pipe(takeUntilDestroyed(this.destroyRef))
+  //     .subscribe(([camera, lookAt, isActive, delta]) => {
+  //       if (!isActive || !camera) return;
+  //       if (!lookAt) return;
+
+  //       const currentPosition = lookAt.position.clone();
+  //       const deltaPosition = currentPosition.clone();
+  //       // .sub(this.previousFollowPosition);
+
+  //       if (this.previousFollowPosition) {
+  //         deltaPosition.sub(this.previousFollowPosition);
+  //       }
+
+  //       // Apply delta movement to camera position and orbitControls target
+  //       camera.position.add(deltaPosition);
+
+  //       this.lookAt.set([
+  //         target[0] + deltaPosition.x,
+  //         target[1] + deltaPosition.y,
+  //         target[2] + deltaPosition.z,
+  //       ]);
+  //       camera.lookAt(...lookAt);
+
+  //       // Update previous position for next frame
+  //       //this.previousFollowPosition.copy(currentPosition);
+  //       this.previousFollowPosition = currentPosition.clone();
+  //     });
+  // }
 }

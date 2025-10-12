@@ -164,6 +164,12 @@ export class BoxGeometryComponent
 type SphereGeometryParameters =
   (typeof SphereGeometry)['prototype']['parameters'];
 
+/**
+ * Example:
+ * ```html
+ * <sphereGeometry [params]="{ radius: 1, widthSegments: 64, heightSegments: 64 }" />
+ * ```
+ */
 @Component({
   selector: 'sphereGeometry',
   template: `<ng-content></ng-content>`,

@@ -10,6 +10,7 @@ export enum ParticleTextures {
   Circle03 = 'textures/engine/particles/circle_03.png',
   Circle04 = 'textures/engine/particles/circle_04.png',
   Circle05 = 'textures/engine/particles/circle_05.png',
+  Circle06 = 'textures/engine/particles/circle_06.png',
   Dirt01 = 'textures/engine/particles/dirt_01.png',
   Dirt02 = 'textures/engine/particles/dirt_02.png',
   Dirt03 = 'textures/engine/particles/dirt_03.png',

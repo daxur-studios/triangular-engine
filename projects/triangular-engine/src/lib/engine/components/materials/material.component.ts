@@ -123,27 +123,6 @@ export abstract class MaterialComponent implements OnInit, OnDestroy {
   #initCastAndSetMaterial() {
     effect(() => {
       handleMaterialAndGeometryLinking(this.material(), this.parent);
-
-      // const material = this.material();
-      // // Cast to MeshComponent to see if it should be added to the mesh
-      // if (this.parent instanceof MeshComponent) {
-      //   this.parent.material.set(material);
-      //   this.parent.mesh().material = material;
-      // }
-      // // Cast to PointsComponent to see if it should be added to the points
-      // else if (this.parent instanceof PointsComponent) {
-      //   this.parent.material.set(material);
-      //   this.parent.points().material = material;
-      // } else if (this.parent instanceof InstancedMeshComponent) {
-      //   this.parent.material.set(material);
-      //   this.parent.instancedMesh().material = material;
-      // } else if (this.parent instanceof InstancedRigidBodyComponent) {
-      //   this.parent.material.set(material);
-      // } else if (this.parent instanceof LineComponent) {
-      //   this.parent.material.set(material);
-      // } else if (this.parent instanceof SpriteComponent) {
-      //   this.parent.material.set(material);
-      // }
     });
   }
 

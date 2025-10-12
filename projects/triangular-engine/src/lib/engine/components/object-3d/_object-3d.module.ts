@@ -11,6 +11,7 @@ import { PrimitiveComponent } from './primitive.component';
 import { RaycastDirective } from './raycast';
 import { SceneComponent } from './scene/scene.component';
 import { SpriteComponent } from './sprite.component';
+import { OrthographicCameraComponent } from './orthographic-camera.component';
 
 const importExport = [
   ArrowHelperComponent,
@@ -30,6 +31,7 @@ const importExport = [
   SpriteComponent,
   RaycastDirective,
   CameraComponent,
+  OrthographicCameraComponent,
 ] as const;
 
 @NgModule({
