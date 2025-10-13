@@ -10,10 +10,10 @@ import { LoaderService } from '../../services/loader.service';
  * Create Three.js geometry from a black and white image.
  */
 @Component({
-    selector: 'heightMapGeometry',
-    imports: [],
-    template: `<ng-content></ng-content>`,
-    providers: [provideBufferGeometryComponent(HeightMapGeometryComponent)]
+  selector: 'heightMapGeometry',
+  imports: [],
+  template: `<ng-content></ng-content>`,
+  providers: [provideBufferGeometryComponent(HeightMapGeometryComponent)],
 })
 export class HeightMapGeometryComponent extends BufferGeometryComponent {
   readonly #loaderService = inject(LoaderService);
@@ -29,9 +29,9 @@ export class HeightMapGeometryComponent extends BufferGeometryComponent {
    */
   readonly sampleCount = input.required<number>();
   /** The width of the height map in world units. eg 10 = 10 meters */
-  readonly width = input<number>();
+  readonly width = input.required<number>();
   /** The height of the height map in world units. eg 10 = 10 meters */
-  readonly height = input<number>();
+  readonly height = input.required<number>();
   /** Maximum depth/height displacement in world units. If not provided, defaults to 10% of the average of width and height. */
   readonly depth = input<number>();
 
