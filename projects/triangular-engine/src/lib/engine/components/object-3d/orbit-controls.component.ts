@@ -54,7 +54,7 @@ export class OrbitControlsComponent implements OnDestroy {
   /** Follow this Object3D, both target and camera */
   readonly follow = input<Object3D>();
 
-  readonly upVector = input<Vector3Tuple>();
+  readonly upVector = input<Vector3Tuple | Readonly<Vector3Tuple>>();
 
   readonly orbitControls = signal<AdvancedOrbitControls | undefined>(undefined);
 
@@ -99,10 +99,6 @@ export class OrbitControlsComponent implements OnDestroy {
   }
 
   #initUpVectorChanges() {
-    effect(() => {
-      const upVector = this.upVector();
-    });
-
     effect(() => {
       const upVector = this.upVector();
       const orbit = this.orbitControls();
