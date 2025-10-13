@@ -118,8 +118,14 @@ export class OrbitControlsComponent implements OnDestroy {
     effect(() => {
       const target = this.target();
       if (target) {
-        const position =
-          target instanceof Object3D ? target.position.toArray() : target;
+        let position: Vector3Tuple;
+        if (target instanceof Object3D) {
+          const worldPos = new Vector3();
+          target.getWorldPosition(worldPos);
+          position = worldPos.toArray();
+        } else {
+          position = target;
+        }
         this.orbitControls()?.target.set(...position);
       }
     });
@@ -242,7 +248,7 @@ export class OrbitControlsComponent implements OnDestroy {
     });
   }
 
-  private previousFollowPosition: Vector3Like | undefined;
+  private previousFollowPosition: Vector3 | undefined;
 
   #initFollow() {
     combineLatest([
@@ -255,7 +261,11 @@ export class OrbitControlsComponent implements OnDestroy {
             const orbitControls = this.orbitControls();
             if (!orbitControls) return false;
 
-            orbitControls.target.set(...a.position.toArray());
+            const worldPos = new Vector3();
+            a.getWorldPosition(worldPos);
+            orbitControls.target.set(...worldPos.toArray());
+
+            //TODO: Should ensure the camera is at least far enough to see the object (eg switching from something tiny to something big)
           }
 
           return isSame;
@@ -279,7 +289,7 @@ export class OrbitControlsComponent implements OnDestroy {
 
         const deltaPosition = currentPosition
           .clone()
-          .sub(this.previousFollowPosition as Vector3);
+          .sub(this.previousFollowPosition);
 
         // Apply delta to both target and camera so user input is preserved
         this.internalCamera.position.add(deltaPosition);
@@ -293,6 +303,20 @@ export class OrbitControlsComponent implements OnDestroy {
 
         // OrbitControls are updated in postTick update handler
       });
+  }
+
+  /**
+   * Fix stuff such as follow that is keeping track of last position when the world is shifted.
+   */
+  onFloatingOriginRebase(delta: Vector3Tuple) {
+    const orbit = this.orbitControls();
+    if (!orbit) return;
+
+    orbit.target.sub(new Vector3(...delta));
+
+    orbit.update();
+
+    this.previousFollowPosition = undefined;
   }
 
   public getForwardsVector(): Vector3 {
