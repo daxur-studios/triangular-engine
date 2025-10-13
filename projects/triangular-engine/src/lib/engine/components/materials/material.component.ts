@@ -21,6 +21,7 @@ import {
   MeshNormalMaterialParameters,
   MeshStandardMaterial,
   MeshStandardMaterialParameters,
+  RepeatWrapping,
   RawShaderMaterial,
   ShaderMaterial,
   ShaderMaterialParameters,
@@ -164,6 +165,8 @@ export class MeshStandardMaterialComponent extends MaterialComponent {
   /** Texture path */
   readonly map = input<string>();
   readonly alphaMap = input<string>();
+  /** Flip the map vertically at the sampler level */
+  readonly mapFlipY = input<boolean>();
 
   override readonly material = signal(new MeshStandardMaterial());
 
@@ -177,8 +180,16 @@ export class MeshStandardMaterialComponent extends MaterialComponent {
   #initMap() {
     effect(() => {
       const map = this.map();
+      const flipY = this.mapFlipY();
       if (map) {
         this.loaderService.loadAndCacheTexture(map).then((texture) => {
+          if (flipY) {
+            texture.wrapS = RepeatWrapping;
+            texture.wrapT = RepeatWrapping;
+            texture.repeat.set(1, -1);
+            texture.offset.set(0, 1);
+            texture.needsUpdate = true;
+          }
           this.material().map = texture;
           this.material().needsUpdate = true;
         });

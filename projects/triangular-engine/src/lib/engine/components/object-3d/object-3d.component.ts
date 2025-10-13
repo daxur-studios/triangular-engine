@@ -13,7 +13,14 @@ import {
 import { EngineService, MaterialService } from '../../services';
 
 import { Subject } from 'rxjs';
-import { EulerTuple, Object3D, Vector3Tuple } from 'three';
+import {
+  Euler,
+  EulerTuple,
+  Object3D,
+  Quaternion,
+  QuaternionTuple,
+  Vector3Tuple,
+} from 'three';
 
 /**
  * Provides a provider for Object3DComponent or any subclass of it.
@@ -61,7 +68,10 @@ export abstract class Object3DComponent implements OnDestroy {
 
   readonly position = model<Vector3Tuple>([0, 0, 0]);
   readonly scale = model<Vector3Tuple | number>(1);
+  /** EULER rotation */
   readonly rotation = model<EulerTuple>([0, 0, 0]);
+  /** QUATERNION rotation. Updating this will update the `rotation` input converting the quaternion to euler. */
+  readonly quaternion = model<QuaternionTuple>();
 
   readonly name = model<string>('');
 
@@ -75,6 +85,7 @@ export abstract class Object3DComponent implements OnDestroy {
 
     this.#initSetPosition();
     this.#initSetRotation();
+    this.#initSetQuaternion();
     this.#initSetScale();
 
     this.#initSetName();
@@ -105,8 +116,24 @@ export abstract class Object3DComponent implements OnDestroy {
     effect(() => {
       const object3D = this.object3D();
       const rotation = this.rotation();
+
       if (!object3D) return;
+
       object3D.rotation.set(...rotation);
+    });
+  }
+  #initSetQuaternion() {
+    effect(() => {
+      const object3D = this.object3D();
+      const quaternion = this.quaternion();
+      if (!object3D) return;
+      if (!quaternion) return;
+
+      // convert to euler tuple and set the rotation
+      const euler = new Euler().setFromQuaternion(
+        new Quaternion(...quaternion),
+      );
+      this.rotation.set(euler.toArray());
     });
   }
   #initSetScale() {
