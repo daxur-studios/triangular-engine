@@ -335,6 +335,9 @@ export class EngineService implements IEngine {
     renderer.toneMapping = ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
 
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = PCFSoftShadowMap;
+
     renderer.setSize(this.width, this.height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
