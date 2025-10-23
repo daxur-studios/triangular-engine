@@ -28,6 +28,7 @@ import {
   WebGLRendererParameters,
   BufferGeometry,
   Mesh,
+  OrthographicCamera,
 } from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -368,6 +369,12 @@ export class EngineService implements IEngine {
     if (this.camera instanceof PerspectiveCamera) {
       this.camera.aspect = width / height;
       this.camera.updateProjectionMatrix();
+    } else if (this.camera instanceof OrthographicCamera) {
+      const aspect = width / height;
+      const viewHeight = this.camera.top - this.camera.bottom;
+      this.camera.left = -((aspect * viewHeight) / 2);
+      this.camera.right = (aspect * viewHeight) / 2;
+      this.camera.updateProjectionMatrix();
     }
 
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -479,11 +486,16 @@ export class EngineService implements IEngine {
     if (newCamera instanceof PerspectiveCamera && this.canvas) {
       newCamera.aspect = this.width / this.height;
       newCamera.updateProjectionMatrix();
+    } else if (newCamera instanceof OrthographicCamera) {
+      newCamera.updateProjectionMatrix();
     }
 
     if (this.renderPass) {
       this.renderPass.camera = newCamera;
     }
+
+    // Trigger resize to adjust ortho frustum if needed
+    this.onResize(this.width, this.height);
 
     // Render the scene with the composer instead of the renderer
     this.render(this.fpsController.lastRenderTime, true);
