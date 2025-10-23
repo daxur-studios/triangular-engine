@@ -1,6 +1,6 @@
 {
   "name": "triangular-engine",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Angular-first 3D engine powered by Three.js and Rapier. Declarative components for scenes, meshes, materials, lights, GLTF, and physics.",
   "keywords": [
     "angular",
