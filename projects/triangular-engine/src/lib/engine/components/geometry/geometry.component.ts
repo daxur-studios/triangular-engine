@@ -205,6 +205,9 @@ export class SphereGeometryComponent
 }
 
 type PlaneGeometryParameters = ConstructorParameters<typeof PlaneGeometry>;
+/**
+ * Use input `horizontal` to rotate the geometry to be horizontal
+ */
 @Component({
   selector: 'planeGeometry',
   template: `<ng-content></ng-content>`,
