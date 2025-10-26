@@ -103,6 +103,7 @@ export interface IEngineCore extends IEngineCamera {
   readonly resolution$: BehaviorSubject<ISizes>;
 }
 
+/** Width and height */
 export interface ISizes {
   width: number;
   height: number;

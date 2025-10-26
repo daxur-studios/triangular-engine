@@ -1,5 +1,10 @@
 import { Component, input, inject, effect } from '@angular/core';
-import { PlaneGeometry, BufferGeometry, Float32BufferAttribute } from 'three';
+import {
+  PlaneGeometry,
+  BufferGeometry,
+  Float32BufferAttribute,
+  Texture,
+} from 'three';
 import {
   BufferGeometryComponent,
   provideBufferGeometryComponent,
@@ -19,7 +24,7 @@ export class HeightMapGeometryComponent extends BufferGeometryComponent {
   readonly #loaderService = inject(LoaderService);
 
   /** The path to the black and white image height map image loaded by TextureLoader.*/
-  readonly map = input.required<string>();
+  readonly map = input.required<string | Texture>();
   /** Whether to cache the loaded height map in LoaderService for future use. */
   readonly cache = input<boolean>(false);
 
@@ -63,7 +68,7 @@ export class HeightMapGeometryComponent extends BufferGeometryComponent {
   }
 
   async #createHeightMapGeometry(
-    map: string,
+    map: string | Texture,
     sampleCount: number,
     width: number,
     height: number,
@@ -71,7 +76,12 @@ export class HeightMapGeometryComponent extends BufferGeometryComponent {
   ) {
     try {
       // Load the texture
-      const texture = await this.#loaderService.loadAndCacheTexture(map);
+      let texture: Texture;
+      if (typeof map === 'string') {
+        texture = await this.#loaderService.loadAndCacheTexture(map);
+      } else {
+        texture = map;
+      }
 
       // Create canvas and sample the texture
       const canvas = document.createElement('canvas');

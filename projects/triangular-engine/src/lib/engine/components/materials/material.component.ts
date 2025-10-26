@@ -25,6 +25,7 @@ import {
   RawShaderMaterial,
   ShaderMaterial,
   ShaderMaterialParameters,
+  Texture,
 } from 'three';
 
 import { MeshComponent } from '../mesh/mesh.component';
@@ -162,8 +163,8 @@ export class MeshStandardMaterialComponent extends MaterialComponent {
 
   override readonly params = model<MeshStandardMaterialParameters>({});
 
-  /** Texture path */
-  readonly map = input<string>();
+  /** Texture path or Texture object */
+  readonly map = input<string | Texture>();
   readonly alphaMap = input<string>();
   /** Flip the map vertically at the sampler level */
   readonly mapFlipY = input<boolean>();
@@ -178,21 +179,27 @@ export class MeshStandardMaterialComponent extends MaterialComponent {
   }
 
   #initMap() {
-    effect(() => {
-      const map = this.map();
+    effect(async () => {
+      const mapInput = this.map();
       const flipY = this.mapFlipY();
-      if (map) {
-        this.loaderService.loadAndCacheTexture(map).then((texture) => {
-          if (flipY) {
-            texture.wrapS = RepeatWrapping;
-            texture.wrapT = RepeatWrapping;
-            texture.repeat.set(1, -1);
-            texture.offset.set(0, 1);
-            texture.needsUpdate = true;
-          }
-          this.material().map = texture;
-          this.material().needsUpdate = true;
-        });
+
+      let texture: Texture | undefined;
+      if (typeof mapInput === 'string') {
+        texture = await this.loaderService.loadAndCacheTexture(mapInput);
+      } else {
+        texture = mapInput;
+      }
+
+      if (texture) {
+        if (flipY) {
+          texture.wrapS = RepeatWrapping;
+          texture.wrapT = RepeatWrapping;
+          texture.repeat.set(1, -1);
+          texture.offset.set(0, 1);
+          texture.needsUpdate = true;
+        }
+        this.material().map = texture;
+        this.material().needsUpdate = true;
       }
     });
   }

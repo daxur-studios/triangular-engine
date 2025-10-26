@@ -12,3 +12,5 @@ export * from './gltf';
 export * from './physics';
 export * from './curve';
 export * from './css';
+export * from './render-target';
+export * from './scene-saver';

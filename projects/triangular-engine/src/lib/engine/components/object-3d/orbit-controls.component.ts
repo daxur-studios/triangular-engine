@@ -57,6 +57,7 @@ export class OrbitControlsComponent implements OnDestroy {
   readonly upVector = input<Vector3Tuple | Readonly<Vector3Tuple>>();
 
   readonly orbitControls = signal<AdvancedOrbitControls | undefined>(undefined);
+  readonly orbitControls$ = toObservable(this.orbitControls);
 
   constructor() {
     this.engineService.scene.add(this.internalCamera);
