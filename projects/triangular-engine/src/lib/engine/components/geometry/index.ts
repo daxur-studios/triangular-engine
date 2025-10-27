@@ -1,5 +1,6 @@
 export * from './geometry.component';
 export * from './capsule-geometry.component';
+export * from './icosahedron-geometry.component';
 export * from './buffer-attribute.component';
 export * from './height-map-geometry.component';
 

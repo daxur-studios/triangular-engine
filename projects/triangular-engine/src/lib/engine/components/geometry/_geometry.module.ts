@@ -10,6 +10,7 @@ import {
   TorusKnotGeometryComponent,
 } from './geometry.component';
 import { HeightMapGeometryComponent } from './height-map-geometry.component';
+import { IcosahedronGeometryComponent } from './icosahedron-geometry.component';
 
 const importExport = [
   BoxGeometryComponent,
@@ -20,6 +21,7 @@ const importExport = [
   CapsuleGeometryComponent,
   BufferGeometryComponent,
   BufferAttributeComponent,
+  IcosahedronGeometryComponent,
   HeightMapGeometryComponent,
 ] as const;
 
