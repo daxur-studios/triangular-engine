@@ -31,7 +31,7 @@ import { JoltPhysicsComponent } from '../jolt-physics/jolt-physics.component';
 import { JoltPhysicsService } from '../jolt-physics/jolt-physics.service';
 
 @Component({
-  selector: 'app-jolt-debug-renderer',
+  selector: 'jolt-debug-renderer',
   imports: [],
   templateUrl: './jolt-debug-renderer.component.html',
   styleUrl: './jolt-debug-renderer.component.scss',

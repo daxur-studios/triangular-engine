@@ -27,15 +27,23 @@ import {
   JoltPhysicsService,
 } from '../jolt-physics/jolt-physics.service';
 import { JoltShapeComponent } from '../jolt-shapes/jolt-shape.component';
-import { Vector3Tuple } from 'three';
+import { Euler, Quaternion, Vector3Tuple } from 'three';
 
+/**
+ * Provides both:
+ * - JoltRigidBodyComponent
+ * - Object3DComponent
+ */
 export function provideJoltRigidBodyComponent<T extends JoltRigidBodyComponent>(
   component: Type<T>,
-): Provider {
-  return {
-    provide: JoltRigidBodyComponent,
-    useExisting: forwardRef(() => component),
-  };
+): Provider[] {
+  return [
+    {
+      provide: JoltRigidBodyComponent,
+      useExisting: forwardRef(() => component),
+    },
+    provideObject3DComponent(component),
+  ];
 }
 
 @Component({
@@ -110,6 +118,7 @@ export class JoltRigidBodyComponent extends GroupComponent {
     this.#initTick(metadata);
     this.#initId();
     this.#initPosition(metadata);
+    this.#initRotation(metadata);
     this.#initVelocity(metadata);
   }
 
@@ -240,6 +249,31 @@ export class JoltRigidBodyComponent extends GroupComponent {
           );
         } finally {
           Jolt.destroy(rpos);
+        }
+      },
+      { injector: this.injector },
+    );
+  }
+
+  #initRotation(metadata: IJoltMetadata) {
+    effect(
+      () => {
+        const rotation = this.rotation();
+        if (!rotation) return;
+        const body = this.body();
+        if (!body) return;
+
+        const q = new Quaternion().setFromEuler(new Euler(...rotation));
+
+        const rrot = new Jolt.Quat(...q.toArray());
+        try {
+          metadata.bodyInterface.SetRotation(
+            body.GetID(),
+            rrot,
+            Jolt.EActivation_Activate,
+          );
+        } finally {
+          Jolt.destroy(rrot);
         }
       },
       { injector: this.injector },

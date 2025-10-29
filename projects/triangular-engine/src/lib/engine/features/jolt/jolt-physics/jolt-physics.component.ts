@@ -15,9 +15,10 @@ import {
 import { loadJolt } from '../jolt-loader';
 import { JoltRigidBodyComponent } from '../jolt-rigid-body/jolt-rigid-body.component';
 import { IJoltMetadata, JoltPhysicsService } from './jolt-physics.service';
+import { JoltDebugRendererComponent } from '../jolt-debug-renderer/jolt-debug-renderer.component';
 @Component({
   selector: 'jolt-physics',
-  imports: [AsyncPipe],
+  imports: [AsyncPipe, JoltDebugRendererComponent],
   templateUrl: './jolt-physics.component.html',
   styleUrl: './jolt-physics.component.scss',
   providers: [JoltPhysicsService],
@@ -33,6 +34,9 @@ export class JoltPhysicsComponent {
 
   readonly gravity = input<Vector3Tuple>();
   readonly gravity$ = toObservable(this.gravity);
+
+  readonly debug = input<boolean>();
+  readonly debug$ = toObservable(this.debug);
   //#endregion
 
   //#region View Children

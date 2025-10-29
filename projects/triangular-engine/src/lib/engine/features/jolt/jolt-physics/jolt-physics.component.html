@@ -2,4 +2,8 @@
 
 @if (metadata) {
   <ng-content></ng-content>
+
+  @if (debug()) {
+    <jolt-debug-renderer />
+  }
 }
