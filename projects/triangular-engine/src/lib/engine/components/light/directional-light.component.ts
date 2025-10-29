@@ -1,11 +1,15 @@
-import { Component, computed, effect, input, signal } from '@angular/core';
-import { DirectionalLight, OrthographicCamera } from 'three';
 import {
-  Object3DComponent,
-  provideObject3DComponent,
-} from '../object-3d/object-3d.component';
-import { LightComponent } from './light.component';
+  Component,
+  computed,
+  effect,
+  input,
+  model,
+  signal,
+} from '@angular/core';
 import { toObservable } from '@angular/core/rxjs-interop';
+import { DirectionalLight, OrthographicCamera, Vector3Tuple } from 'three';
+import { provideObject3DComponent } from '../object-3d/object-3d.component';
+import { LightComponent } from './light.component';
 
 /**
  * Component Inputs:
@@ -16,13 +20,15 @@ import { toObservable } from '@angular/core/rxjs-interop';
  * | castShadow | Whether the light casts shadows.                 | DirectionalLightComponent |
  */
 @Component({
-    selector: 'directionalLight',
-    template: `<ng-content></ng-content>`,
-    imports: [],
-    providers: [provideObject3DComponent(DirectionalLightComponent)]
+  selector: 'directionalLight',
+  template: `<ng-content></ng-content>`,
+  imports: [],
+  providers: [provideObject3DComponent(DirectionalLightComponent)],
 })
 export class DirectionalLightComponent extends LightComponent {
   public override emoji = '💡';
+
+  override readonly position = model<Vector3Tuple>([0, 10, 10]);
 
   override readonly object3D = signal(new DirectionalLight());
   override get light() {
