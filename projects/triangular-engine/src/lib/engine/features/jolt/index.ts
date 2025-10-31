@@ -6,4 +6,5 @@ export * from './jolt-debug-renderer';
 export * from './jolt-fountain';
 export * from './jolt-physics.module';
 export * from './example';
+export * from './jolt-physics.providers';
 // export { loadJolt } from './jolt-loader';
