@@ -25,6 +25,9 @@
   "peerDependenciesMeta": {
     "jolt-physics": {
       "optional": true
+    },
+    "@dimforge/rapier3d-compat": {
+      "optional": true
     }
   },
   "dependencies": {
