@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   effect,
   inject,
   input,
@@ -10,7 +11,7 @@ import {
   Object3DComponent,
   provideObject3DComponent,
 } from '../object-3d/object-3d.component';
-import { Material, Mesh, Object3D, Scene } from 'three';
+import { BufferGeometry, Material, Mesh, Object3D, Scene } from 'three';
 import {
   BehaviorSubject,
   combineLatest,
@@ -20,13 +21,17 @@ import {
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LoaderService } from '../../services';
 import { buildGraph } from '../../models';
-import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import {
+  takeUntilDestroyed,
+  toObservable,
+  toSignal,
+} from '@angular/core/rxjs-interop';
 
 @Component({
-    selector: 'gltf',
-    imports: [],
-    template: `<ng-content></ng-content>`,
-    providers: [provideObject3DComponent(GltfComponent)]
+  selector: 'gltf',
+  imports: [],
+  template: `<ng-content></ng-content>`,
+  providers: [provideObject3DComponent(GltfComponent)],
 })
 export class GltfComponent extends Object3DComponent {
   //#region Injected Dependencies
@@ -55,6 +60,14 @@ export class GltfComponent extends Object3DComponent {
   readonly object3D = signal(new Object3D());
 
   readonly gltf$ = new BehaviorSubject<GLTF | undefined>(undefined);
+  readonly gltf = toSignal(this.gltf$);
+  /** 1st Geometry of the 1st Mesh of this GLTF */
+  readonly geometry = computed(() => {
+    const firstMesh = this.gltf()?.scene.children.find(
+      (child) => child instanceof Mesh,
+    );
+    return firstMesh?.geometry;
+  });
 
   /** Track current GLTF for proper resource disposal */
   private currentGltf: GLTF | undefined;
