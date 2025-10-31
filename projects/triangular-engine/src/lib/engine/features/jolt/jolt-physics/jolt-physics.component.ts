@@ -1,7 +1,7 @@
 import { AsyncPipe } from '@angular/common';
 import { Component, DestroyRef, inject, input } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import type { default as Jolt } from 'jolt-physics/wasm-compat';
+
 import { BehaviorSubject, combineLatest, Subject } from 'rxjs';
 import { Mesh, Vector3Tuple } from 'three';
 import { EngineService } from '../../../services/engine.service';
@@ -12,9 +12,12 @@ import {
   wrapQuat,
   wrapVec3,
 } from '../example';
-import { loadJolt } from '../jolt-loader';
 import { JoltRigidBodyComponent } from '../jolt-rigid-body/jolt-rigid-body.component';
-import { IJoltMetadata, JoltPhysicsService } from './jolt-physics.service';
+import {
+  IJoltMetadata,
+  Jolt,
+  JoltPhysicsService,
+} from './jolt-physics.service';
 import { JoltDebugRendererComponent } from '../jolt-debug-renderer/jolt-debug-renderer.component';
 @Component({
   selector: 'jolt-physics',
@@ -58,20 +61,10 @@ export class JoltPhysicsComponent {
   #maxStepsPerFrame = 300; // safety to avoid spiral of death
 
   constructor() {
-    this.#initAsync();
+    this.#init();
     this.#initSyncRigidBodyComponents();
   }
-  async #initAsync() {
-    const JoltModule = await loadJolt();
-    const JoltDefault = JoltModule.default || JoltModule;
-    const jolt = await JoltDefault({
-      locateFile: (file: string) => `jolt/${file}`,
-    });
-
-    // Merge loaded module with the default export for compatibility
-    const Jolt = Object.assign(JoltDefault, jolt);
-    (window as any).Jolt = Jolt;
-
+  #init() {
     const metadata = this.#initPhysics(Jolt);
     this.#initGravity(metadata);
     this.#initPhysicsTick(metadata);

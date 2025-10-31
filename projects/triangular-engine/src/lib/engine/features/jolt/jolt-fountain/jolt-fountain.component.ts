@@ -1,6 +1,6 @@
 import { Component, inject } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import Jolt from 'jolt-physics/wasm-compat';
+
 import { BehaviorSubject } from 'rxjs';
 import { EngineModule } from '../../../engine.module';
 import { GroupComponent } from '../../../components/object-3d/group.component';
@@ -13,6 +13,7 @@ import {
 } from '../example';
 import { JoltPhysicsModule } from '../jolt-physics.module';
 import { JoltPhysicsComponent } from '../jolt-physics/jolt-physics.component';
+import { Jolt } from '../jolt-physics/jolt-physics.service';
 
 interface IRandomBody {
   id: string;

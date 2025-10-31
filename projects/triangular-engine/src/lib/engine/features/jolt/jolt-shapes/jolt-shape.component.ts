@@ -8,9 +8,9 @@ import {
   Type,
 } from '@angular/core';
 import { toObservable, toSignal } from '@angular/core/rxjs-interop';
-import Jolt from 'jolt-physics/wasm-compat';
+
 import { Object3DComponent } from '../../../components/object-3d/object-3d.component';
-import { JoltPhysicsService } from '../jolt-physics/jolt-physics.service';
+import { Jolt, JoltPhysicsService } from '../jolt-physics/jolt-physics.service';
 import { JoltRigidBodyComponent } from '../jolt-rigid-body/jolt-rigid-body.component';
 import { BehaviorSubject } from 'rxjs';
 

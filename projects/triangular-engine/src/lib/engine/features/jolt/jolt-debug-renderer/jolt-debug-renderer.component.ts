@@ -7,7 +7,7 @@ import {
   OnDestroy,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import Jolt from 'jolt-physics/wasm-compat';
+
 import {
   BufferAttribute,
   BufferGeometry,
@@ -28,7 +28,7 @@ import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { EngineService } from '../../../services/engine.service';
 import { wrapVec3, wrapQuat, createMeshForShape } from '../example';
 import { JoltPhysicsComponent } from '../jolt-physics/jolt-physics.component';
-import { JoltPhysicsService } from '../jolt-physics/jolt-physics.service';
+import { Jolt, JoltPhysicsService } from '../jolt-physics/jolt-physics.service';
 
 @Component({
   selector: 'jolt-debug-renderer',

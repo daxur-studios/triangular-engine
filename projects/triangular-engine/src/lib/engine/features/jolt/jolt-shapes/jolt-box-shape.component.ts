@@ -1,10 +1,10 @@
 import { Component, effect, input } from '@angular/core';
-import Jolt from 'jolt-physics/wasm-compat';
 
 import {
   JoltShapeComponent,
   provideShapeComponent,
 } from './jolt-shape.component';
+import { Jolt } from '../jolt-physics/jolt-physics.service';
 
 type BoxShapeParams = [number, number, number];
 

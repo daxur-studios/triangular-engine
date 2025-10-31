@@ -15,8 +15,8 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
+import { Jolt } from './jolt-physics/jolt-physics.service';
 // WASM embedded in the bundle, debug checking enabled (outputs errors to the console and enables the debug renderer)
-import Jolt from 'jolt-physics/wasm-compat';
 
 let settings: Jolt.JoltSettings;
 
@@ -33,6 +33,8 @@ var physicsSystem;
 
 // The update function
 var onExampleUpdate: (time: number, deltaTime: number) => void;
+
+const DegreesToRadians = (deg: number) => deg * (Math.PI / 180.0);
 
 export const wrapVec3 = (v: Jolt.RVec3 | Jolt.Vec3) =>
   new Vector3(v.GetX(), v.GetY(), v.GetZ());
@@ -469,4 +471,39 @@ export function createMeshFloor(
   let body = bodyInterface.CreateBody(creationSettings);
   Jolt.destroy(creationSettings);
   addToScene(dynamicObjects, bodyInterface, scene, body, 0xc7c7c7);
+}
+
+function addLine(
+  scene: Scene,
+  from: Jolt.RVec3,
+  to: Jolt.RVec3,
+  color: number,
+) {
+  const material = new LineBasicMaterial({ color: color });
+  const points = [];
+  points.push(wrapRVec3(from));
+  points.push(wrapRVec3(to));
+  const geometry = new BufferGeometry().setFromPoints(points);
+  const line = new Line(geometry, material);
+  scene.add(line);
+}
+
+function addMarker(
+  scene: Scene,
+  location: Jolt.RVec3,
+  size: number,
+  color: number,
+) {
+  const material = new LineBasicMaterial({ color: color });
+  const points = [];
+  const center = wrapVec3(location);
+  points.push(center.clone().add(new Vector3(-size, 0, 0)));
+  points.push(center.clone().add(new Vector3(size, 0, 0)));
+  points.push(center.clone().add(new Vector3(0, -size, 0)));
+  points.push(center.clone().add(new Vector3(0, size, 0)));
+  points.push(center.clone().add(new Vector3(0, 0, -size)));
+  points.push(center.clone().add(new Vector3(0, 0, size)));
+  const geometry = new BufferGeometry().setFromPoints(points);
+  const line = new LineSegments(geometry, material);
+  scene.add(line);
 }

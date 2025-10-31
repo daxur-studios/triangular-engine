@@ -16,7 +16,7 @@ import {
   toObservable,
   toSignal,
 } from '@angular/core/rxjs-interop';
-import Jolt from 'jolt-physics/wasm-compat';
+
 import { BehaviorSubject, combineLatest } from 'rxjs';
 import { GroupComponent } from '../../../components/object-3d/group.component';
 import { provideObject3DComponent } from '../../../components/object-3d/object-3d.component';
@@ -24,6 +24,7 @@ import { LAYER_MOVING, wrapQuat, wrapVec3 } from '../example';
 import { JoltPhysicsComponent } from '../jolt-physics/jolt-physics.component';
 import {
   IJoltMetadata,
+  Jolt,
   JoltPhysicsService,
 } from '../jolt-physics/jolt-physics.service';
 import { JoltShapeComponent } from '../jolt-shapes/jolt-shape.component';

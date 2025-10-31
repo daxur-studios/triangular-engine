@@ -1,5 +1,5 @@
 import { Injectable, signal, viewChild, WritableSignal } from '@angular/core';
-import type { default as Jolt } from 'jolt-physics/wasm-compat';
+import Jolt from 'jolt-physics/wasm-compat';
 import { BehaviorSubject, filter, firstValueFrom, Subject } from 'rxjs';
 import { JoltRigidBodyComponent } from '../jolt-rigid-body/jolt-rigid-body.component';
 
@@ -11,8 +11,32 @@ export interface IJoltMetadata {
   bodyInterface: Jolt.BodyInterface;
 }
 
+// Export the Jolt module - consumers should import this instead of 'jolt-physics/wasm-compat'
+// After JoltPhysicsService.load() is called, this will be the initialized instance
+// This fixes bugs where Jolt.Vec3 is undefined
+export {
+  /** IMPORTANT: USE THIS INSTEAD OF IMPORTING 'jolt-physics/wasm-compat' EVERYWHERE*/
+  Jolt,
+};
+
 @Injectable()
 export class JoltPhysicsService {
+  static Jolt = Jolt;
+  static async load() {
+    const initializedJolt = await Jolt({
+      // locateFile: (file: string) => `jolt/${file}`,
+    });
+
+    Object.assign(Jolt, initializedJolt);
+
+    // Also set on window for global access
+    (window as any).Jolt = Jolt;
+
+    this.Jolt = Jolt;
+
+    return initializedJolt;
+  }
+
   readonly metaDat$ = new BehaviorSubject<IJoltMetadata | undefined>(undefined);
   readonly metaDataPromise = firstValueFrom(
     this.metaDat$.pipe(filter(Boolean)),

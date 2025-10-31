@@ -10,7 +10,7 @@ import {
   Type,
 } from '@angular/core';
 import { JoltRigidBodyComponent } from '../jolt-rigid-body/jolt-rigid-body.component';
-import { JoltPhysicsService } from '../jolt-physics/jolt-physics.service';
+import { Jolt, JoltPhysicsService } from '../jolt-physics/jolt-physics.service';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import {
   BehaviorSubject,
@@ -22,7 +22,6 @@ import {
   of,
   switchMap,
 } from 'rxjs';
-import Jolt from 'jolt-physics/wasm-compat';
 
 export function provideJoltConstraintComponent(
   component: Type<JoltConstraintComponent>,

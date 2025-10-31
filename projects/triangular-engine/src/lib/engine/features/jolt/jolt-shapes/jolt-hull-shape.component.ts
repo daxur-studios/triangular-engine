@@ -2,7 +2,7 @@ import { Component, effect, input } from '@angular/core';
 import { provideShapeComponent } from './jolt-shape.component';
 import { JoltShapeComponent } from './jolt-shape.component';
 import { BufferGeometry } from 'three';
-import Jolt from 'jolt-physics/wasm-compat';
+import { Jolt } from '../jolt-physics/jolt-physics.service';
 
 /**
  * Provide either positions or geometry but not both at the same time to generate the hull shape.

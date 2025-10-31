@@ -1,7 +1,6 @@
 import { Component } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import Jolt from 'jolt-physics/wasm-compat';
-import { IJoltMetadata } from '../jolt-physics/jolt-physics.service';
+import { IJoltMetadata, Jolt } from '../jolt-physics/jolt-physics.service';
 import {
   JoltConstraintComponent,
   provideJoltConstraintComponent,

@@ -1,5 +1,4 @@
 import { Component, effect, inject, input, signal } from '@angular/core';
-import Jolt from 'jolt-physics/wasm-compat';
 
 import {
   JoltShapeComponent,
@@ -7,6 +6,7 @@ import {
 } from './jolt-shape.component';
 import { Texture, Vector3Tuple } from 'three';
 import { LoaderService } from '../../../services/loader.service';
+import { Jolt } from '../jolt-physics/jolt-physics.service';
 
 interface IHeightFieldParams {
   map: string | Texture;
