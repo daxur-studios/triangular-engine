@@ -9,6 +9,7 @@ import {
   input,
   Provider,
   Type,
+  untracked,
   viewChildren,
 } from '@angular/core';
 import {
@@ -75,6 +76,10 @@ export class JoltRigidBodyComponent extends GroupComponent {
 
   readonly velocity = input<Vector3Tuple>();
   readonly velocity$ = toObservable(this.velocity);
+
+  // TODO: set up effects to update these when they change
+  readonly angularDamping = input<number>();
+  readonly linearDamping = input<number>();
   //#endregion
 
   readonly contentChildrenShapes = contentChildren(JoltShapeComponent, {
@@ -188,9 +193,12 @@ export class JoltRigidBodyComponent extends GroupComponent {
             );
           Jolt.destroy(bodyPosition);
 
-          // Set angular damping to 0 (disable default angular damping)
-          settings.mAngularDamping = 0.0;
-          settings.mLinearDamping = 0.0;
+          // Set angular and linear damping (default to 0 if not specified)
+          // Use untracked() to read signal values without causing reactive subscriptions/effects to track them
+          const angularDamping = untracked(() => this.angularDamping);
+          const linearDamping = untracked(() => this.linearDamping);
+          settings.mAngularDamping = angularDamping() ?? 0.0;
+          settings.mLinearDamping = linearDamping() ?? 0.0;
           // Prefer continuous collision detection for fast movers
           settings.mMotionQuality = Jolt.EMotionQuality_LinearCast;
 

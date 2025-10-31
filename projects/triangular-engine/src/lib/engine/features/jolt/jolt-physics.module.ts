@@ -8,6 +8,7 @@ import { JoltHullShapeComponent } from './jolt-shapes/jolt-hull-shape.component'
 import { JoltMeshShapeComponent } from './jolt-shapes/jolt-mesh-shape.component';
 import { JoltHeightFieldShapeComponent } from './jolt-shapes/jolt-height-field-shape.component';
 import { JoltFixedConstraintComponent } from './constraints/jolt-fixed-constraint.component';
+import { JoltHingeConstraintComponent } from './constraints/jolt-hinge-constraint.component';
 
 const importExport = [
   JoltPhysicsComponent,
@@ -20,6 +21,7 @@ const importExport = [
   JoltHeightFieldShapeComponent,
 
   JoltFixedConstraintComponent,
+  JoltHingeConstraintComponent,
 ] as const;
 
 @NgModule({

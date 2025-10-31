@@ -60,16 +60,18 @@ export class JoltConstraintComponent implements OnDestroy {
 
   readonly joltBodyPair = computed(() => {
     const rigidBodies = this.bodies();
+    const a = rigidBodies[0];
+    const b = rigidBodies[1];
 
     const body1 =
-      typeof rigidBodies[0] === 'string'
-        ? this.physicsService.getRigidBodyById(rigidBodies[0])()
-        : rigidBodies[0].body();
+      typeof a === 'string'
+        ? this.physicsService.getRigidBodyById(a)()
+        : a.body();
 
     const body2 =
-      typeof rigidBodies[1] === 'string'
-        ? this.physicsService.getRigidBodyById(rigidBodies[1])()
-        : rigidBodies[1].body();
+      typeof b === 'string'
+        ? this.physicsService.getRigidBodyById(b)()
+        : b.body();
 
     if (!body1 || !body2) return;
 

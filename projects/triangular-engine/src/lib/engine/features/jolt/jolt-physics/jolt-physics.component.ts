@@ -1,5 +1,5 @@
 import { AsyncPipe } from '@angular/common';
-import { Component, DestroyRef, inject, input } from '@angular/core';
+import { Component, DestroyRef, inject, Injector, input } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 
 import { BehaviorSubject, combineLatest, Subject } from 'rxjs';
@@ -24,7 +24,20 @@ import { JoltDebugRendererComponent } from '../jolt-debug-renderer/jolt-debug-re
   imports: [AsyncPipe, JoltDebugRendererComponent],
   templateUrl: './jolt-physics.component.html',
   styleUrl: './jolt-physics.component.scss',
-  providers: [JoltPhysicsService],
+  providers: [
+    {
+      provide: JoltPhysicsService,
+      useFactory: () => {
+        // prefer parent instance if it exists
+        const parent = inject(JoltPhysicsService, {
+          skipSelf: true,
+          optional: true,
+        });
+        console.log('parent???', parent);
+        return parent ?? new JoltPhysicsService();
+      },
+    },
+  ],
 })
 export class JoltPhysicsComponent {
   readonly engineService = inject(EngineService);

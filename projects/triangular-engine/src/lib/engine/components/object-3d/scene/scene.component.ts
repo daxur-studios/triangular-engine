@@ -31,6 +31,20 @@ import {
   host: {
     class: 'flex-page',
   },
+  providers: [
+    {
+      provide: EngineService,
+      useFactory: () => {
+        // prefer parent instance if it exists
+        const parent = inject(EngineService, {
+          skipSelf: true,
+          optional: true,
+        });
+
+        return parent ?? new EngineService();
+      },
+    },
+  ],
 })
 export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   //#region Injected Dependencies
