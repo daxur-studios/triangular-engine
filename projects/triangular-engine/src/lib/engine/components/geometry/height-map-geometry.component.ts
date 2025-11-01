@@ -92,7 +92,13 @@ export class HeightMapGeometryComponent extends BufferGeometryComponent {
       if (!ctx) return;
 
       // Draw the texture scaled to our sample count
-      const image = texture.image;
+      const image = texture.image as HTMLImageElement | undefined;
+      if (!image) {
+        throw new Error(
+          'HeightMapGeometry: Texture image not ready or missing',
+        );
+      }
+
       if (image && image.complete && image.width > 0 && image.height > 0) {
         ctx.drawImage(image, 0, 0, sampleCount, sampleCount);
       } else {

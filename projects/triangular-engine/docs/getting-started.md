@@ -8,7 +8,7 @@ This page shows how to add Triangular Engine to an Angular app and render your f
 npm i triangular-engine three @dimforge/rapier3d-compat three-mesh-bvh
 ```
 
-Peer versions (see repo README for latest): Angular 18, Three 0.178, Rapier 0.18.
+Peer versions (see repo README for latest): Angular 18, Three 0.181 (r181), Rapier 0.18.
 
 ## Configure Draco
 

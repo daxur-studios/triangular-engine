@@ -18,5 +18,6 @@ Useful starting points:
 Tech stack:
 
 - Angular 18 Signals/Standalone APIs
-- Three.js 0.178
-- Rapier 3D physics (@dimforge/rapier3d-compat)
+- Three.js 0.181 (r181)
+- Jolt Physics (jolt-physics, optional)
+- Rapier 3D physics (@dimforge/rapier3d-compat, optional)

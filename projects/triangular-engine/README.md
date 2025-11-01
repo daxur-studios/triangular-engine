@@ -16,14 +16,10 @@ This README contains the full documentation needed to use the library on npm. No
 ## Install
 
 ```bash
-npm i triangular-engine three @dimforge/rapier3d-compat
+npm i triangular-engine three three-mesh-bvh
 ```
 
-Optional (recommended for raycast performance):
-
-```bash
-npm i three-mesh-bvh
-```
+(optionally add @dimforge/rapier3d-compat OR jolt-physics for physics)
 
 ### Peer Dependencies
 
@@ -33,17 +29,18 @@ These are expected to be provided by your app (see package.json for exact versio
 {
   "@angular/common": "^20.3.3",
   "@angular/core": "^20.3.3",
-  "three": "^0.178.0",
-  "@dimforge/rapier3d-compat": "^0.18.0",
+  "three": "^0.181.0",
   "dexie": "^4.0.11"
 }
 ```
 
-Optional peers:
+Optional peer dependencies:
 
 ```json
 {
-  "three-mesh-bvh": "^0.9.1"
+  "@dimforge/rapier3d-compat": "^0.18.0",
+  OR
+  "jolt-physics": "^0.38.0"
 }
 ```
 

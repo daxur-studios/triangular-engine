@@ -207,7 +207,7 @@ export class JoltHeightFieldShapeComponent extends JoltShapeComponent<Jolt.Heigh
         }
 
         // Create a temporary canvas texture to draw the image data
-        const image = texture.image;
+        const image = texture.image as HTMLImageElement | undefined;
         if (!image) {
           reject(new Error('Texture image not available'));
           return;
