@@ -1,7 +1,6 @@
-import { Component, input, inject, signal, contentChild } from '@angular/core';
-import { EngineService } from '../../services/engine.service';
-import { SceneComponent } from '../object-3d/scene/scene.component';
+import { Component, contentChild, input, signal } from '@angular/core';
 import { ISizes } from '../../models/engine.model';
+import { SceneComponent } from '../object-3d/scene/scene.component';
 
 @Component({
   selector: 'sceneSaver',

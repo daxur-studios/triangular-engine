@@ -5,11 +5,14 @@ import {
   DestroyRef,
   effect,
   ElementRef,
+  forwardRef,
   inject,
+  Injector,
   input,
   OnDestroy,
   OnInit,
   output,
+  Provider,
   Renderer2,
   signal,
   viewChild,
@@ -23,6 +26,57 @@ import {
   provideObject3DComponent,
 } from '../object-3d.component';
 
+/**
+ * Scenarios:
+ * 1. <scene> is added without providing EngineService in a parent component
+ * 2. <scene> is added with EngineService provided in a parent component
+ * 3. <scene> is added inside another <scene> (therefore MUST not use parent EngineService)
+ */
+function optionallyProvideEngineService(): Provider[] {
+  return [
+    {
+      provide: EngineService,
+      useFactory: () => {
+        const parentInjector = inject(Injector);
+        const parentEngineService = inject(EngineService, {
+          skipSelf: true,
+          optional: true,
+        });
+        const parentSceneComponent = inject(
+          forwardRef(() => SceneComponent),
+          {
+            optional: true,
+            skipSelf: true,
+          },
+        );
+
+        console.log({
+          parentEngineService,
+          parentSceneComponent,
+        });
+
+        const createEngineService = () =>
+          Injector.create({
+            providers: EngineService.provide({
+              showFPS: false,
+            }),
+            parent: parentInjector,
+          }).get(EngineService);
+
+        if (parentSceneComponent) {
+          return createEngineService();
+        }
+
+        if (parentEngineService) {
+          return parentEngineService;
+        }
+
+        return createEngineService();
+      },
+    },
+  ];
+}
+
 @Component({
   selector: 'scene',
   imports: [EngineUiComponent],
@@ -31,27 +85,14 @@ import {
   host: {
     class: 'flex-page',
   },
-  providers: [
-    {
-      provide: EngineService,
-      useFactory: () => {
-        // prefer parent instance if it exists
-        const parent = inject(EngineService, {
-          skipSelf: true,
-          optional: true,
-        });
-
-        return parent ?? new EngineService();
-      },
-    },
-  ],
+  providers: [optionallyProvideEngineService()],
 })
 export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
+  static instance = 1;
+  public readonly instance: number = SceneComponent.instance++;
   //#region Injected Dependencies
   readonly #destroyRef = inject(DestroyRef);
-  readonly engineService: EngineService = inject(EngineService, {
-    skipSelf: true,
-  });
+  readonly engineService: EngineService = inject(EngineService);
 
   readonly engineSettingsService = inject(EngineSettingsService);
 
@@ -83,8 +124,6 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   readonly css2dRenderer =
     viewChild.required<ElementRef<HTMLElement>>('css2dRenderer');
 
-  static instance = 0;
-
   get scene() {
     return this.engineService.scene;
   }
@@ -92,10 +131,6 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   readonly children = contentChildren(Object3DComponent);
 
   constructor() {
-    SceneComponent.instance++;
-
-    this.engineService.setSceneComponent(this);
-
     effect(() => {
       const children = this.children();
 
@@ -124,6 +159,8 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   }
 
   ngOnInit(): void {
+    this.engineService.setSceneComponent(this);
+
     this.#resizeObserver.observe(this.wrapper().nativeElement);
     this.engineService.initCss2dRenderer(this.css2dRenderer()!.nativeElement!);
 

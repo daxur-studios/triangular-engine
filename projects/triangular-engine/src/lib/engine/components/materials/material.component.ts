@@ -1,44 +1,37 @@
 import {
   Component,
   DestroyRef,
+  effect,
+  inject,
   Injector,
+  input,
   InputSignal,
+  model,
   OnDestroy,
   OnInit,
   Provider,
-  WritableSignal,
-  effect,
-  inject,
-  input,
-  model,
   signal,
+  WritableSignal,
 } from '@angular/core';
 import {
-  BufferGeometry,
   Material,
   MaterialParameters,
   MeshNormalMaterial,
   MeshNormalMaterialParameters,
   MeshStandardMaterial,
   MeshStandardMaterialParameters,
-  RepeatWrapping,
   RawShaderMaterial,
+  RepeatWrapping,
   ShaderMaterial,
   ShaderMaterialParameters,
   Texture,
 } from 'three';
 
-import { MeshComponent } from '../mesh/mesh.component';
-import { Object3DComponent } from '../object-3d/object-3d.component';
+import { toObservable } from '@angular/core/rxjs-interop';
+import { Subject } from 'rxjs';
 import { EngineService, LoaderService, MaterialService } from '../../services';
-import { PointsComponent } from '../particle';
-import { InstancedMeshComponent } from '../mesh';
-import { InstancedRigidBodyComponent } from '../physics';
-import { LineComponent } from '../curve/line.component';
-import { SpriteComponent } from '../object-3d/sprite.component';
-import { handleMaterialAndGeometryLinking } from '../util';
-import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { combineLatest, distinctUntilChanged, Observable, Subject } from 'rxjs';
+import { Object3DComponent } from '../object-3d/object-3d.component';
+import { handleMaterialAndGeometryLinking, IMaterialComponent } from '../util';
 
 export function provideMaterialComponent<T extends typeof MaterialComponent>(
   component: T,
@@ -54,7 +47,9 @@ export function provideMaterialComponent<T extends typeof MaterialComponent>(
   standalone: true,
   template: `<ng-content></ng-content>`,
 })
-export abstract class MaterialComponent implements OnInit, OnDestroy {
+export abstract class MaterialComponent
+  implements OnInit, OnDestroy, IMaterialComponent
+{
   //#region Injected Dependencies
 
   readonly engineService = inject(EngineService);

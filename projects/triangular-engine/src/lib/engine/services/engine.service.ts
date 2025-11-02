@@ -62,7 +62,7 @@ export class EngineService implements IEngine {
   }
 
   static instance = 0;
-  public instance: number;
+  public readonly instance: number;
 
   //#region Injected Dependencies
   readonly options = inject<IEngineOptions>(ENGINE_OPTIONS);

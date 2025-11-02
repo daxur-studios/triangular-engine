@@ -23,12 +23,12 @@ import {
 import { BufferGeometryComponent } from '../geometry';
 
 @Component({
-    selector: 'curve',
-    imports: [],
-    template: `<ng-content></ng-content>`,
-    providers: [
+  selector: 'curve',
+  imports: [],
+  template: `<ng-content></ng-content>`,
+  providers: [
     // provideObject3DComponent(CurveComponent),
-    ]
+  ],
 })
 export abstract class CurveComponent {
   //#region Injected Dependencies

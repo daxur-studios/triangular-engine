@@ -1,7 +1,6 @@
 import {
   Component,
   DestroyRef,
-  InputSignal,
   OnDestroy,
   Provider,
   WritableSignal,
@@ -20,14 +19,9 @@ import {
   TorusKnotGeometry,
 } from 'three';
 
-import { MeshComponent } from '../mesh/mesh.component';
-import { PointsComponent } from '../particle';
-import { Object3DComponent } from '../object-3d';
-import { InstancedMeshComponent } from '../mesh';
-import { InstancedRigidBodyComponent } from '../physics';
-import { LineComponent } from '../curve/line.component';
-import { handleMaterialAndGeometryLinking } from '../util';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { Object3DComponent } from '../object-3d';
+import { handleMaterialAndGeometryLinking, IGeometryComponent } from '../util';
 
 export function provideBufferGeometryComponent(component: any): Provider {
   return {
@@ -42,7 +36,7 @@ export function provideBufferGeometryComponent(component: any): Provider {
   imports: [],
   providers: [],
 })
-export class BufferGeometryComponent implements OnDestroy {
+export class BufferGeometryComponent implements OnDestroy, IGeometryComponent {
   //#region Injected Dependencies
   readonly parent = inject(Object3DComponent, {
     skipSelf: true,
