@@ -103,7 +103,9 @@ export class JoltPhysicsComponent {
     }, 10000);
   }
 
-  #initPhysics(loadedJolt: any): IJoltMetadata {
+  readonly activationListener = new Jolt.BodyActivationListenerJS();
+
+  #initPhysics(loadedJolt: typeof Jolt): IJoltMetadata {
     // Initialize Jolt
     const settings = new loadedJolt.JoltSettings();
     settings.mMaxWorkerThreads = 4; // Limit the number of worker threads to 3 (for a total of 4 threads working on the simulation). Note that this value will always be clamped against the number of CPUs in the system - 1.
@@ -112,6 +114,23 @@ export class JoltPhysicsComponent {
     loadedJolt.destroy(settings);
     const physicsSystem = jolt.GetPhysicsSystem();
     const bodyInterface = physicsSystem.GetBodyInterface();
+
+    // Create and register body activation listener
+    const activationListener = this.activationListener;
+    activationListener.OnBodyActivated = (
+      inBodyID: number,
+      inBodyUserData: number,
+    ) => {
+      this.OnBodyActivated(inBodyID, inBodyUserData);
+    };
+    activationListener.OnBodyDeactivated = (
+      inBodyID: number,
+      inBodyUserData: number,
+    ) => {
+      this.OnBodyDeactivated(inBodyID, inBodyUserData);
+    };
+
+    physicsSystem.SetBodyActivationListener(activationListener);
 
     const metadata: IJoltMetadata = {
       settings,
@@ -124,6 +143,24 @@ export class JoltPhysicsComponent {
     this.metaDat$.next(metadata);
 
     return metadata;
+  }
+
+  OnBodyActivated(inBodyID: number, inBodyUserData: number): void {
+    const component = this.physicsService.bodyIdToComponent.get(
+      inBodyID as any,
+    );
+    if (component) {
+      component.onActivate.emit();
+    }
+  }
+
+  OnBodyDeactivated(inBodyID: number, inBodyUserData: number): void {
+    const component = this.physicsService.bodyIdToComponent.get(
+      inBodyID as any,
+    );
+    if (component) {
+      component.onSleep.emit();
+    }
   }
 
   #initGravity(metadata: IJoltMetadata) {
@@ -268,6 +305,14 @@ export class JoltPhysicsComponent {
     this.#disposeSyncRigidBodyComponents();
     const meta = this.physicsService.metaDat$.value;
     if (!meta) return;
+
+    // Release the activation listener
+    try {
+      Jolt.destroy(this.activationListener);
+    } catch {
+      console.warn('Failed to destroy activation listener');
+    }
+
     if (this.#memoryLogInterval) {
       clearInterval(this.#memoryLogInterval);
       this.#memoryLogInterval = undefined;

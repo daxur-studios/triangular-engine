@@ -89,13 +89,18 @@ export class JoltPhysicsService {
   readonly bodies$ = new BehaviorSubject<Jolt.Body[]>([]);
   readonly constraints$ = new BehaviorSubject<IJoltConstraintData[]>([]);
 
+  /** Maps Jolt BodyID to rigid body component for activation listener */
+  readonly bodyIdToComponent = new Map<Jolt.BodyID, JoltRigidBodyComponent>();
+
   constructor() {}
 
-  registerBody(body: Jolt.Body) {
+  registerBody(body: Jolt.Body, component: JoltRigidBodyComponent) {
     this.bodies$.next([...this.bodies$.value, body]);
+    this.bodyIdToComponent.set(body.GetID(), component);
   }
   unregisterBody(body: Jolt.Body) {
     this.bodies$.next(this.bodies$.value.filter((b) => b !== body));
+    this.bodyIdToComponent.delete(body.GetID());
   }
 
   registerConstraint(constraint: Jolt.Constraint, a: Jolt.Body, b: Jolt.Body) {

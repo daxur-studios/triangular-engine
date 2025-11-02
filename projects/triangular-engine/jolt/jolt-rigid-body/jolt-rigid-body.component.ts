@@ -7,6 +7,7 @@ import {
   inject,
   Injector,
   input,
+  output,
   Provider,
   Type,
   untracked,
@@ -79,6 +80,13 @@ export class JoltRigidBodyComponent extends GroupComponent {
   // TODO: set up effects to update these when they change
   readonly angularDamping = input<number>();
   readonly linearDamping = input<number>();
+  //#endregion
+
+  //#region Outputs
+  /** Emits whenever the body switches from active to asleep mode. Updated by JoltPhysicsComponent.OnBodyDeactivated */
+  readonly onSleep = output<void>();
+  /** Emits whenever the body switches from asleep to active mode. Updated by JoltPhysicsComponent.OnBodyActivated */
+  readonly onActivate = output<void>();
   //#endregion
 
   readonly contentChildrenShapes = contentChildren(JoltShapeComponent, {
@@ -205,7 +213,7 @@ export class JoltRigidBodyComponent extends GroupComponent {
           Jolt.destroy(settings);
 
           this.body$.next(body);
-          this.physicsService.registerBody(body);
+          this.physicsService.registerBody(body, this);
 
           metadata.bodyInterface.AddBody(
             body.GetID(),
