@@ -171,6 +171,7 @@ export class JoltRigidBodyComponent extends GroupComponent {
 
         const initialPosition = this.position();
 
+        // TODO: see if this can be simplified between single and compound shapes
         // Single shape
         if (Array.isArray(shapes) && shapes.length === 1 && shapes[0]) {
           const shape = shapes[0];
@@ -231,7 +232,102 @@ export class JoltRigidBodyComponent extends GroupComponent {
         }
         // Multiple shapes inside a compound shape
         else if (Array.isArray(shapes) && shapes.length > 1) {
-          // TODO: Implement multiple shapes inside a compound shape
+          // Replace existing body if any
+          const existing = this.body$.value;
+          if (existing) {
+            try {
+              this.physicsService.unregisterBody(existing);
+              metadata.bodyInterface.RemoveBody(existing.GetID());
+              metadata.bodyInterface.DestroyBody(existing.GetID());
+            } catch {}
+          }
+
+          // Create compound shape settings
+          const compoundShapeSettings = new Jolt.StaticCompoundShapeSettings();
+
+          // Add each shape with its local position and rotation
+          for (const shapeComponent of childShapeComponents) {
+            const shape = shapeComponent.shape();
+            if (!shape) continue;
+
+            // Get the shape component's local position and rotation relative to the rigid body
+            const localPosition = shapeComponent.position?.() ?? [0, 0, 0];
+            const localRotation = shapeComponent.rotation?.() ?? [0, 0, 0];
+
+            // Convert Euler rotation to quaternion
+            const q = new Quaternion().setFromEuler(
+              new Euler(localRotation[0], localRotation[1], localRotation[2]),
+            );
+            const joltQuat = new Jolt.Quat(q.x, q.y, q.z, q.w);
+            const joltPosition = new Jolt.Vec3(
+              localPosition[0],
+              localPosition[1],
+              localPosition[2],
+            );
+
+            try {
+              compoundShapeSettings.AddShapeShape(
+                joltPosition,
+                joltQuat,
+                shape,
+                0, // userData
+              );
+            } finally {
+              Jolt.destroy(joltPosition);
+              Jolt.destroy(joltQuat);
+            }
+          }
+
+          const compoundShape = compoundShapeSettings.Create().Get();
+          Jolt.destroy(compoundShapeSettings);
+
+          // Create the body with the compound shape
+          const bodyPosition = new Jolt.RVec3(
+            initialPosition[0],
+            initialPosition[1],
+            initialPosition[2],
+          );
+
+          const settings: Jolt.BodyCreationSettings =
+            new Jolt.BodyCreationSettings(
+              compoundShape,
+              bodyPosition,
+              Jolt.Quat.prototype.sIdentity(),
+              resolvedMotionType,
+              LAYER_MOVING,
+            );
+          Jolt.destroy(bodyPosition);
+
+          // Set angular and linear damping (default to 0 if not specified)
+          const angularDamping = untracked(() => this.angularDamping);
+          const linearDamping = untracked(() => this.linearDamping);
+          settings.mAngularDamping = angularDamping() ?? 0.0;
+          settings.mLinearDamping = linearDamping() ?? 0.0;
+          // Prefer continuous collision detection for fast movers
+          settings.mMotionQuality = Jolt.EMotionQuality_LinearCast;
+
+          const body = metadata.bodyInterface.CreateBody(settings);
+          Jolt.destroy(settings);
+
+          this.body$.next(body);
+          this.physicsService.registerBody(body, this);
+
+          metadata.bodyInterface.AddBody(
+            body.GetID(),
+            Jolt.EActivation_Activate,
+          );
+
+          const speedOfLight = 299_792_458; // ~3.0 × 10^8 m/s
+          const cubeMP = body.GetMotionProperties();
+          cubeMP.SetMaxLinearVelocity(speedOfLight);
+          // Ensure CCD is applied at runtime too (required for active bodies)
+          metadata.bodyInterface.SetMotionQuality(
+            body.GetID(),
+            Jolt.EMotionQuality_LinearCast,
+          );
+
+          // Clean up the compound shape reference
+          compoundShape.Release();
         }
       },
       { injector: this.injector },

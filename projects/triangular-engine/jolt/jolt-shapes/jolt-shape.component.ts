@@ -3,6 +3,7 @@ import {
   forwardRef,
   inject,
   Injector,
+  input,
   OnDestroy,
   signal,
   Type,
@@ -13,6 +14,7 @@ import { Object3DComponent } from 'triangular-engine';
 import { Jolt, JoltPhysicsService } from '../jolt-physics/jolt-physics.service';
 import { JoltRigidBodyComponent } from '../jolt-rigid-body/jolt-rigid-body.component';
 import { BehaviorSubject } from 'rxjs';
+import { Euler, Vector3Tuple } from 'three';
 
 /** All shapes extending JoltShapeComponent should have this in their providers array */
 export function provideShapeComponent<T extends JoltShapeComponent<any>>(
@@ -42,6 +44,11 @@ export abstract class JoltShapeComponent<T extends Jolt.Shape = Jolt.Shape>
   readonly injector = inject(Injector);
   /** The nearest Object3DComponent that is containing the shape */
   readonly parentComponent = inject(Object3DComponent);
+
+  /** Local position of this shape relative to the rigid body (only used in compound shapes) */
+  readonly position = input<Vector3Tuple>([0, 0, 0]);
+  /** Local rotation of this shape relative to the rigid body as Euler angles in radians (only used in compound shapes) */
+  readonly rotation = input<Vector3Tuple>([0, 0, 0]);
   get parentRigidBodyComponent() {
     return this.#findClosestRigidBodyComponent();
   }
