@@ -55,6 +55,9 @@ export function provideJoltRigidBodyComponent<T extends JoltRigidBodyComponent>(
   providers: [provideObject3DComponent(JoltRigidBodyComponent)],
 })
 export class JoltRigidBodyComponent extends GroupComponent {
+  static nextUserDataId = 1;
+  /** This is added as the custom user data ID in Jolt `body.SetUserData(this.instanceId)` */
+  readonly userDataId = JoltRigidBodyComponent.nextUserDataId++;
   //#region Services
   readonly physicsService = inject(JoltPhysicsService);
   readonly physicsComponent = inject(JoltPhysicsComponent);
@@ -213,6 +216,9 @@ export class JoltRigidBodyComponent extends GroupComponent {
           const body = metadata.bodyInterface.CreateBody(settings);
           Jolt.destroy(settings);
 
+          // Set the custom user data ID in Jolt
+          body.SetUserData(this.userDataId);
+
           this.body$.next(body);
           this.physicsService.registerBody(body, this);
 
@@ -308,6 +314,9 @@ export class JoltRigidBodyComponent extends GroupComponent {
 
           const body = metadata.bodyInterface.CreateBody(settings);
           Jolt.destroy(settings);
+
+          // Set the custom user data ID in Jolt
+          body.SetUserData(this.userDataId);
 
           this.body$.next(body);
           this.physicsService.registerBody(body, this);
@@ -412,7 +421,7 @@ export class JoltRigidBodyComponent extends GroupComponent {
 
   dispose() {
     const body = this.body$.value;
-    const metadata = this.physicsService.metaDat$.value;
+    const metadata = this.physicsService.metaData$.value;
 
     if (!body) return;
 

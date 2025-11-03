@@ -150,8 +150,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
   }
 
   private onTick() {
-    const physicsSystem = (this.parentPhysics as any).metaDat$.value
-      ?.physicsSystem;
+    const physicsSystem = this.parentPhysics.metaData$.value?.physicsSystem;
     if (!physicsSystem) return;
 
     if (!this.enabled()) {
@@ -540,7 +539,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
     const v = new Vector3();
 
     // Get current physics system to validate body references
-    const physicsSystem = this.parentPhysics.metaDat$.value?.physicsSystem;
+    const physicsSystem = this.parentPhysics.metaData$.value?.physicsSystem;
     if (!physicsSystem) return;
 
     // Build validated allBodies: skip destroyed ones with GetID check (cheap validation)

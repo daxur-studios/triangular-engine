@@ -37,9 +37,11 @@ export class JoltPhysicsService {
     return initializedJolt;
   }
 
-  readonly metaDat$ = new BehaviorSubject<IJoltMetadata | undefined>(undefined);
+  readonly metaData$ = new BehaviorSubject<IJoltMetadata | undefined>(
+    undefined,
+  );
   readonly metaDataPromise = firstValueFrom(
-    this.metaDat$.pipe(filter(Boolean)),
+    this.metaData$.pipe(filter(Boolean)),
   );
 
   /**
@@ -89,18 +91,18 @@ export class JoltPhysicsService {
   readonly bodies$ = new BehaviorSubject<Jolt.Body[]>([]);
   readonly constraints$ = new BehaviorSubject<IJoltConstraintData[]>([]);
 
-  /** Maps Jolt BodyID to rigid body component for activation listener */
-  readonly bodyIdToComponent = new Map<Jolt.BodyID, JoltRigidBodyComponent>();
+  /** Maps Jolt User Data ID to rigid body component for activation listener */
+  readonly userDataToComponent = new Map<number, JoltRigidBodyComponent>();
 
   constructor() {}
 
   registerBody(body: Jolt.Body, component: JoltRigidBodyComponent) {
     this.bodies$.next([...this.bodies$.value, body]);
-    this.bodyIdToComponent.set(body.GetID(), component);
+    this.userDataToComponent.set(component.userDataId, component);
   }
   unregisterBody(body: Jolt.Body) {
     this.bodies$.next(this.bodies$.value.filter((b) => b !== body));
-    this.bodyIdToComponent.delete(body.GetID());
+    this.userDataToComponent.delete(body.GetUserData());
   }
 
   registerConstraint(constraint: Jolt.Constraint, a: Jolt.Body, b: Jolt.Body) {

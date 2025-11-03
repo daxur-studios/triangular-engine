@@ -62,7 +62,7 @@ export class JoltPhysicsComponent {
   );
   //#endregion
 
-  readonly metaDat$ = this.physicsService.metaDat$;
+  readonly metaData$ = this.physicsService.metaData$;
   readonly metaDataPromise = this.physicsService.metaDataPromise;
 
   readonly dynamicObjects: Mesh[] = [];
@@ -140,27 +140,45 @@ export class JoltPhysicsComponent {
       bodyInterface,
     };
 
-    this.metaDat$.next(metadata);
+    this.metaData$.next(metadata);
 
     return metadata;
   }
 
   OnBodyActivated(inBodyID: number, inBodyUserData: number): void {
-    const component = this.physicsService.bodyIdToComponent.get(
-      inBodyID as any,
-    );
+    const decodedUserData = this.decodeUserData(inBodyUserData);
+    const component =
+      this.physicsService.userDataToComponent.get(decodedUserData);
+
     if (component) {
       component.onActivate.emit();
     }
   }
 
   OnBodyDeactivated(inBodyID: number, inBodyUserData: number): void {
-    const component = this.physicsService.bodyIdToComponent.get(
-      inBodyID as any,
-    );
+    const decodedUserData = this.decodeUserData(inBodyUserData);
+    const component =
+      this.physicsService.userDataToComponent.get(decodedUserData);
+
     if (component) {
       component.onSleep.emit();
     }
+  }
+  /**
+   * Fix when user data comes back as a weird number, eg in Jolt.BodyActivationListenerJS.OnBodyActivated and OnBodyDeactivated.
+   *
+   * Nothing is “breaking” your IDs—your wrapper is just reinterpreting the 64-bit integer bits as a float64 when it calls you back.
+   * So 1 → 5e-324, 2 → 1e-323, etc.
+   * That’ll always look weird if you read it directly.
+   */
+  decodeUserData(raw: number): number {
+    const ab = new ArrayBuffer(8);
+    const f64 = new Float64Array(ab);
+    const u32 = new Uint32Array(ab);
+    f64[0] = raw; // same 64 bits you received
+    const low = u32[0] >>> 0;
+    const high = u32[1] >>> 0;
+    return low + high * 2 ** 32; // exact up to 2^53-1
   }
 
   #initGravity(metadata: IJoltMetadata) {
@@ -303,7 +321,7 @@ export class JoltPhysicsComponent {
 
   ngOnDestroy(): void {
     this.#disposeSyncRigidBodyComponents();
-    const meta = this.physicsService.metaDat$.value;
+    const meta = this.physicsService.metaData$.value;
     if (!meta) return;
 
     // Release the activation listener

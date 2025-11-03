@@ -95,7 +95,7 @@ export class JoltConstraintComponent implements OnDestroy {
 
     try {
       this.physicsService.unregisterConstraint(constraint);
-      const meta = this.physicsService.metaDat$.value;
+      const meta = this.physicsService.metaData$.value;
       if (meta) {
         meta.physicsSystem.RemoveConstraint(constraint);
       }

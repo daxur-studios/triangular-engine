@@ -66,7 +66,7 @@ export class JoltHingeConstraintComponent extends JoltConstraintComponent {
   }
 
   #init() {
-    const metaData = this.physicsService.metaDat$.value;
+    const metaData = this.physicsService.metaData$.value;
     if (!metaData) {
       throw new Error('No metadata found');
     }
