@@ -9,11 +9,10 @@ import {
 type CapsuleGeometryParameters = ConstructorParameters<typeof CapsuleGeometry>;
 
 @Component({
-  selector: 'capsuleGeometry',
-  standalone: true,
-  imports: [],
-  template: `<ng-content></ng-content>`,
-  providers: [provideBufferGeometryComponent(CapsuleGeometryComponent)],
+    selector: 'capsuleGeometry',
+    imports: [],
+    template: `<ng-content></ng-content>`,
+    providers: [provideBufferGeometryComponent(CapsuleGeometryComponent)]
 })
 export class CapsuleGeometryComponent extends BufferGeometryComponent {
   override readonly params = input<CapsuleGeometryParameters>([]);

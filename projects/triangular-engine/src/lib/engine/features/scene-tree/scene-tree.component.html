@@ -1,0 +1,232 @@
+<div class="scene-tree-container">
+  <div class="scene-tree-header">
+    <div class="header-left">
+      <button
+        class="collapse-button"
+        [class.collapsed]="!isTreeVisible()"
+        (click)="toggleTreeVisibility()"
+        [title]="isTreeVisible() ? 'Collapse tree' : 'Expand tree'"
+      >
+        <span class="icon">{{ isTreeVisible() ? "◀" : "▶" }}</span>
+      </button>
+      <h3>Scene Tree</h3>
+    </div>
+    <div class="header-controls">
+      <button
+        class="refresh-button"
+        title="Refresh tree"
+        (click)="refreshTree()"
+      >
+        <span class="icon">⟳</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="scene-tree" *ngIf="isTreeVisible()">
+    <ng-container
+      *ngTemplateOutlet="nodeTemplate; context: { nodes: treeData }"
+    ></ng-container>
+  </div>
+
+  <!-- Transform Controls Section -->
+  <div class="transform-section" *ngIf="selectedObject()">
+    <div class="transform-controls">
+      <div class="transform-button-group">
+        <button
+          class="transform-button"
+          [class.active]="transformMode() === 'translate'"
+          (click)="setTransformMode('translate', $event)"
+          title="Move"
+        >
+          <span class="icon">↔</span>
+        </button>
+        <button
+          class="transform-button"
+          [class.active]="transformMode() === 'rotate'"
+          (click)="setTransformMode('rotate', $event)"
+          title="Rotate"
+        >
+          <span class="icon">⟳</span>
+        </button>
+        <button
+          class="transform-button"
+          [class.active]="transformMode() === 'scale'"
+          (click)="setTransformMode('scale', $event)"
+          title="Scale"
+        >
+          <span class="icon">⤧</span>
+        </button>
+      </div>
+
+      <!-- Transform Inputs -->
+      <div class="transform-inputs">
+        <!-- Position -->
+        <div class="transform-group">
+          <div class="transform-label">Position</div>
+          <div class="transform-row">
+            <input
+              type="number"
+              class="transform-input"
+              [ngModel]="position().x"
+              (ngModelChange)="onPositionChange('x', $event)"
+              step="0.1"
+            />
+            <input
+              type="number"
+              class="transform-input"
+              [ngModel]="position().y"
+              (ngModelChange)="onPositionChange('y', $event)"
+              step="0.1"
+            />
+            <input
+              type="number"
+              class="transform-input"
+              [ngModel]="position().z"
+              (ngModelChange)="onPositionChange('z', $event)"
+              step="0.1"
+            />
+            <button
+              class="copy-button"
+              [matMenuTriggerFor]="positionMenu"
+              title="Copy position options"
+            >
+              <span class="icon">📋</span>
+            </button>
+
+            <mat-menu #positionMenu="matMenu">
+              <button
+                mat-menu-item
+                (click)="copyTransformValues(position(), 'position')"
+              >
+                <span>Copy Local Position</span>
+              </button>
+              <button
+                mat-menu-item
+                (click)="
+                  copyTransformValues(getWorldPosition(), 'world position')
+                "
+              >
+                <span>Copy World Position</span>
+              </button>
+            </mat-menu>
+          </div>
+        </div>
+
+        <!-- Rotation (in degrees) -->
+        <div class="transform-group">
+          <div class="transform-label">Rotation</div>
+          <div class="transform-row">
+            <input
+              type="number"
+              class="transform-input"
+              [ngModel]="(rotation().x * 180) / Math.PI"
+              (ngModelChange)="onRotationChange('x', $event)"
+              step="1"
+            />
+            <input
+              type="number"
+              class="transform-input"
+              [ngModel]="(rotation().y * 180) / Math.PI"
+              (ngModelChange)="onRotationChange('y', $event)"
+              step="1"
+            />
+            <input
+              type="number"
+              class="transform-input"
+              [ngModel]="(rotation().z * 180) / Math.PI"
+              (ngModelChange)="onRotationChange('z', $event)"
+              step="1"
+            />
+            <button
+              class="copy-button"
+              title="Copy rotation values"
+              (click)="copyTransformValues(rotation(), 'rotation')"
+            >
+              <span class="icon">📋</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Scale -->
+        <div class="transform-group">
+          <div class="transform-label">Scale</div>
+          <div class="transform-row">
+            <input
+              type="number"
+              class="transform-input"
+              [ngModel]="scale().x"
+              (ngModelChange)="onScaleChange('x', $event)"
+              step="0.1"
+            />
+            <input
+              type="number"
+              class="transform-input"
+              [ngModel]="scale().y"
+              (ngModelChange)="onScaleChange('y', $event)"
+              step="0.1"
+            />
+            <input
+              type="number"
+              class="transform-input"
+              [ngModel]="scale().z"
+              (ngModelChange)="onScaleChange('z', $event)"
+              step="0.1"
+            />
+            <button
+              class="copy-button"
+              title="Copy scale values"
+              (click)="copyTransformValues(scale(), 'scale')"
+            >
+              <span class="icon">📋</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Template for rendering tree nodes recursively -->
+<ng-template #nodeTemplate let-nodes="nodes">
+  <ul class="tree-list">
+    <li
+      *ngFor="let node of nodes; trackBy: trackByFn"
+      class="tree-node"
+      [class.has-children]="node.children.length > 0"
+    >
+      <div
+        class="node-row"
+        [class.selected]="selectedObject() === node.object"
+        [style.padding-left.px]="node.level * 16"
+      >
+        <button
+          *ngIf="node.children.length > 0"
+          class="toggle-button"
+          (click)="toggleNode(node, $event)"
+        >
+          <span class="toggle-icon">{{ node.expanded ? "▼" : "►" }}</span>
+        </button>
+
+        <span
+          *ngIf="node.children.length === 0"
+          class="toggle-placeholder"
+        ></span>
+
+        <span class="node-content" (click)="selectObject(node, $event)">
+          <span class="node-emoji">{{ node.emoji }}</span>
+          <span class="node-name">{{ node.name }}</span>
+        </span>
+      </div>
+
+      <!-- Render children recursively if expanded -->
+      <div
+        *ngIf="node.expanded && node.children.length > 0"
+        class="children-container"
+      >
+        <ng-container
+          *ngTemplateOutlet="nodeTemplate; context: { nodes: node.children }"
+        ></ng-container>
+      </div>
+    </li>
+  </ul>
+</ng-template>

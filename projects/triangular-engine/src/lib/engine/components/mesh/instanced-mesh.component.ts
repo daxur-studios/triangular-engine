@@ -6,6 +6,7 @@ import {
   effect,
   inject,
   input,
+  model,
   signal,
   viewChildren,
 } from '@angular/core';
@@ -18,12 +19,12 @@ import {
   Vector3,
   Euler,
   Vector3Tuple,
+  EulerTuple,
 } from 'three';
 import {
   Object3DComponent,
   provideObject3DComponent,
 } from '../object-3d/object-3d.component';
-
 
 // Geometry Change: Update instancedMesh.geometry and dispose of the old geometry.
 // Material Change: Update instancedMesh.material and dispose of the old material.
@@ -31,10 +32,11 @@ import {
 // Count Increase: Dispose and recreate InstancedMesh with a higher count.
 // Count Decrease: Adjust instancedMesh.count; no need to recreate.
 
-export interface IInstancedMeshData {
+export interface IInstancedMeshData<DATA = any> {
   position: Vector3Tuple;
-  rotation: Vector3Tuple;
+  rotation: EulerTuple;
   scale: Vector3Tuple;
+  data?: DATA;
 }
 
 @Component({
@@ -47,25 +49,38 @@ export class InstancedMeshComponent extends Object3DComponent {
   override emoji = '🧩';
 
   /** The maximum number of instances*/
-  readonly maxCount = input.required<number>();
+  readonly maxCount = model.required<number>();
   #prevMaxCount: number | undefined;
 
   //  readonly positions = input.required<xyz[]>();
-  readonly data = input.required<IInstancedMeshData[]>();
+  readonly data = model.required<IInstancedMeshData[]>();
 
   /** The number of instances */
   readonly count = input.required<number>();
 
+  /**
+   * Controls how much to increase the maxCount by when the current count reaches the limit.
+   *
+   * Default is 1, meaning the maxCount is increased by 1 every time the current count reaches the limit.
+   *
+   * For example, if initial maxCount is 100 and growStep is 100:
+   * - When count reaches 100, maxCount increases to 200.
+   * - When count reaches 200, maxCount increases to 300, etc.
+   *
+   * Set to 0 or undefined to disable auto-growing.
+   */
+  readonly growStep = input<number>(1);
+
   /** The instanced mesh object */
   readonly instancedMesh = signal<InstancedMesh>(
-    new InstancedMesh(new BufferGeometry(), [], 0)
+    new InstancedMesh(new BufferGeometry(), [], 0),
   );
   override object3D: WritableSignal<Object3D> = this.instancedMesh;
   #previousInstancedMesh: InstancedMesh | undefined = this.instancedMesh();
 
   /** Geometry and material signals */
-  readonly geometry = signal<BufferGeometry | undefined>(undefined);
-  readonly material = signal<Material | undefined>(undefined);
+  readonly geometry = model<BufferGeometry | undefined>(undefined);
+  readonly material = model<Material | undefined>(undefined);
 
   constructor() {
     super();
@@ -80,34 +95,31 @@ export class InstancedMeshComponent extends Object3DComponent {
     this.#initDataChange();
   }
   #initMaxCountChange() {
-    effect(
-      () => {
-        const maxCount = this.maxCount();
+    effect(() => {
+      const maxCount = this.maxCount();
 
-        if (this.#prevMaxCount === undefined || maxCount > this.#prevMaxCount) {
-          console.warn('🌴🌴🌴 Recreating instanced mesh');
-          if (this.#previousInstancedMesh) {
-            this.#previousInstancedMesh.count = 0;
-            this.#previousInstancedMesh.clear();
-            this.#previousInstancedMesh.dispose();
-            this.#previousInstancedMesh.removeFromParent();
-          }
-          // Recreate the instanced mesh and dispose of the old one
-          const instancedMesh = new InstancedMesh(
-            this.geometry(),
-            this.material(),
-            maxCount
-          );
-
-          this.instancedMesh.set(instancedMesh);
-
-          this.#previousInstancedMesh = instancedMesh;
+      if (this.#prevMaxCount === undefined || maxCount > this.#prevMaxCount) {
+        console.warn('🌴🌴🌴 Recreating instanced mesh');
+        if (this.#previousInstancedMesh) {
+          this.#previousInstancedMesh.count = 0;
+          this.#previousInstancedMesh.clear();
+          this.#previousInstancedMesh.dispose();
+          this.#previousInstancedMesh.removeFromParent();
         }
+        // Recreate the instanced mesh and dispose of the old one
+        const instancedMesh = new InstancedMesh(
+          this.geometry(),
+          this.material(),
+          maxCount,
+        );
 
-        this.#prevMaxCount = maxCount;
-      },
-      { allowSignalWrites: true }
-    );
+        this.instancedMesh.set(instancedMesh);
+
+        this.#previousInstancedMesh = instancedMesh;
+      }
+
+      this.#prevMaxCount = maxCount;
+    });
   }
   #initGeometry() {
     effect(() => {
@@ -133,9 +145,17 @@ export class InstancedMeshComponent extends Object3DComponent {
       const instancedMesh = this.instancedMesh();
       const count = this.count();
       const maxCount = this.maxCount();
+      const growStep = this.growStep();
 
-      const newCount = Math.min(count, maxCount);
+      let newMaxCount = maxCount;
 
+      // Auto-grow maxCount if growStep is enabled and count exceeds current maxCount
+      if (growStep && growStep > 0 && count >= maxCount) {
+        newMaxCount = maxCount + growStep;
+        this.maxCount.set(newMaxCount);
+      }
+
+      const newCount = Math.min(count, newMaxCount);
       instancedMesh.count = newCount;
     });
   }
@@ -146,7 +166,10 @@ export class InstancedMeshComponent extends Object3DComponent {
   #initDataChange() {
     effect(() => {
       const instancedMesh = this.instancedMesh();
+
+      // Change can be either detected by data ref change, or same data array, but it's been pushed to, so it's length changes
       const data = this.data();
+      const count = this.count();
 
       this.onDataChanged(data, instancedMesh);
     });
@@ -154,7 +177,7 @@ export class InstancedMeshComponent extends Object3DComponent {
 
   public onDataChanged(
     data: IInstancedMeshData[],
-    instancedMesh: InstancedMesh
+    instancedMesh: InstancedMesh,
   ) {
     const eulerRotation = this.#eulerRotation;
     const scaleVector = this.#scaleVector;
@@ -165,7 +188,7 @@ export class InstancedMeshComponent extends Object3DComponent {
       eulerRotation.set(
         params.rotation[0],
         params.rotation[1],
-        params.rotation[2]
+        params.rotation[2],
       );
       matrix.makeRotationFromEuler(eulerRotation);
 
@@ -175,7 +198,7 @@ export class InstancedMeshComponent extends Object3DComponent {
       matrix.setPosition(
         params.position[0],
         params.position[1],
-        params.position[2]
+        params.position[2],
       );
 
       instancedMesh.setMatrixAt(index, matrix);

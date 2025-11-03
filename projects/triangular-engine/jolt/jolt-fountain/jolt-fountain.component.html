@@ -1,0 +1,65 @@
+@let size = 637;
+<!--Floor-->
+<jolt-rigid-body [motionType]="0" [position]="[0, -1, 0]">
+  <mesh [receiveShadow]="true" [castShadow]="false">
+    <boxGeometry #boxGeometry [params]="[size, 1, size]" />
+    <meshStandardMaterial [params]="{ color: 'lightgray' }" />
+  </mesh>
+
+  <jolt-mesh-shape [geometry]="boxGeometry.geometry()" />
+</jolt-rigid-body>
+
+<!--#region tests-->
+<jolt-rigid-body [position]="[0, 242, 0]" [motionType]="2">
+  <mesh>
+    <sphereGeometry [params]="{ radius: 1 }" />
+    <meshStandardMaterial
+      [params]="{ color: 'indigo', transparent: true, opacity: 0.5 }"
+    />
+  </mesh>
+  <jolt-sphere-shape [radius]="1" />
+</jolt-rigid-body>
+
+<jolt-rigid-body [position]="[-19, 11, 0]" [motionType]="2">
+  <mesh>
+    <boxGeometry [params]="[1, 1, 1]" />
+    <meshStandardMaterial
+      [params]="{ color: 'indigo', transparent: true, opacity: 0.8 }"
+    />
+  </mesh>
+  <jolt-box-shape [params]="[1, 1, 1]" />
+</jolt-rigid-body>
+
+<jolt-rigid-body [position]="[-2, 30, 2]" [motionType]="2" #joint1Body>
+  <mesh>
+    <torusKnotGeometry #knot />
+    <meshStandardMaterial
+      [params]="{ color: 'blue', transparent: true, opacity: 0.8 }"
+    />
+  </mesh>
+  <jolt-hull-shape [geometry]="knot.geometry()" />
+</jolt-rigid-body>
+
+<jolt-rigid-body [position]="[2, 30, -2]" [motionType]="2" #joint2Body>
+  <mesh>
+    <torusKnotGeometry #knotJoint2 />
+    <meshStandardMaterial
+      [params]="{ color: 'pink', transparent: true, opacity: 0.8 }"
+    />
+  </mesh>
+  <jolt-hull-shape [geometry]="knotJoint2.geometry()" />
+</jolt-rigid-body>
+
+<jolt-fixed-constraint [bodies]="[joint1Body, joint2Body]" />
+
+<!-- Triangle meshes are only supported on static bodies in Jolt -->
+<jolt-rigid-body [position]="[-13, 2, 2]" [motionType]="0">
+  <mesh>
+    <torusKnotGeometry #knot2 />
+    <meshStandardMaterial
+      [params]="{ color: 'lightyellow', transparent: true, opacity: 0.8 }"
+    />
+  </mesh>
+  <jolt-mesh-shape [geometry]="knot2.geometry()" />
+</jolt-rigid-body>
+<!--#endregion-->

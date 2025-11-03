@@ -1,8 +1,8 @@
-import { NgModule, Type } from '@angular/core';
-import { PointsComponent } from './points.component';
+import { NgModule } from '@angular/core';
 import { ParticleSystemComponent } from './particle-system.component';
+import { PointsComponent } from './points.component';
 
-const importExport: Type<any>[] = [PointsComponent, ParticleSystemComponent];
+const importExport = [PointsComponent, ParticleSystemComponent] as const;
 
 @NgModule({
   imports: [...importExport],

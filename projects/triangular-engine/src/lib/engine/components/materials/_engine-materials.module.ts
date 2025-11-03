@@ -1,16 +1,16 @@
-import { NgModule, Type } from '@angular/core';
-import { SpriteMaterialComponent } from './sprite-material.component';
-import { PointsMaterialComponent } from './points-material.component';
+import { NgModule } from '@angular/core';
+import { LineBasicMaterialComponent } from './line-basic-material.component';
 import {
-  MaterialComponent,
   MeshNormalMaterialComponent,
   MeshStandardMaterialComponent,
   RawShaderMaterialComponent,
   ShaderMaterialComponent,
 } from './material.component';
 import { MeshBasicMaterialComponent } from './mesh-basic-material.component';
+import { PointsMaterialComponent } from './points-material.component';
+import { SpriteMaterialComponent } from './sprite-material.component';
 
-const importExport: Type<any>[] = [
+const importExport = [
   //MaterialComponent,
   MeshNormalMaterialComponent,
   MeshBasicMaterialComponent,
@@ -19,7 +19,8 @@ const importExport: Type<any>[] = [
   RawShaderMaterialComponent,
   SpriteMaterialComponent,
   PointsMaterialComponent,
-];
+  LineBasicMaterialComponent,
+] as const;
 
 @NgModule({
   imports: [...importExport],

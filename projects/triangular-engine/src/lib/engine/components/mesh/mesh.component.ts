@@ -1,32 +1,20 @@
 import {
-  AfterContentInit,
   Component,
   Injector,
   OnDestroy,
   OnInit,
-  SkipSelf,
-  computed,
-  contentChild,
-  contentChildren,
   effect,
-  forwardRef,
   inject,
   input,
   model,
   signal,
-  viewChild,
-  viewChildren,
 } from '@angular/core';
 
-import { BufferGeometry, Group, Material, Mesh } from 'three';
+import { BufferGeometry, Material, Mesh } from 'three';
 import {
   Object3DComponent,
   provideObject3DComponent,
 } from '../object-3d/object-3d.component';
-import { MaterialComponent } from '../materials/material.component';
-import { BufferGeometryComponent } from '../geometry/geometry.component';
-import { IPhysicsOptions } from '../../models';
-import { PhysicsService } from '../../services';
 
 @Component({
   standalone: true,
@@ -39,7 +27,6 @@ export class MeshComponent
   implements OnDestroy, OnInit
 {
   //#region Injected Dependencies
-  readonly physicsService = inject(PhysicsService);
   readonly injector = inject(Injector);
   //#endregion
 
@@ -50,7 +37,24 @@ export class MeshComponent
   readonly geometry = model<BufferGeometry | undefined>(undefined);
   readonly material = model<Material | undefined>(undefined);
 
+  readonly receiveShadow = input<boolean>();
+  readonly castShadow = input<boolean>();
+
   readonly renderOrder = input<number>();
+
+  /**
+   * Single Layer (resets all other layers)
+   * https://threejs.org/docs/#api/en/core/Layers
+   */
+  readonly layer = input<number>();
+  /**
+   * Array of layers (resets all other layers)
+   * https://threejs.org/docs/#api/en/core/Layers
+   */
+  readonly layers = input<number[]>();
+
+  /** When this is true, the geometry will be computed and stored in a BVH tree for faster raycasting */
+  readonly enableBVH = input<boolean>(false);
 
   override object3D = this.mesh;
 
@@ -59,7 +63,35 @@ export class MeshComponent
 
     this.#initSetMaterial();
     this.#initSetGeometry();
+
+    this.#initSetReceiveShadow();
+    this.#initSetCastShadow();
+
     this.#initRenderOrder();
+    this.#initSetLayer();
+  }
+
+  #initSetLayer() {
+    effect(() => {
+      const layer = this.layer();
+      const mesh = this.mesh();
+
+      if (layer !== undefined) {
+        mesh.layers.set(layer);
+      }
+    });
+
+    effect(() => {
+      const layers = this.layers();
+      const mesh = this.mesh();
+
+      if (layers !== undefined) {
+        mesh.layers.disableAll();
+        layers.forEach((layer) => {
+          mesh.layers.enable(layer);
+        });
+      }
+    });
   }
 
   #initSetMaterial() {
@@ -78,6 +110,9 @@ export class MeshComponent
       const mesh = this.mesh();
       if (geometry) {
         mesh.geometry = geometry;
+        if (this.enableBVH()) {
+          geometry.computeBoundsTree();
+        }
       }
     });
   }
@@ -92,35 +127,27 @@ export class MeshComponent
     });
   }
 
-  ngOnInit(): void {
-    //#region Physics
-    // effect(
-    //   () => {
-    //     const physics = this.physics();
-    //     const mesh = this.mesh();
-    //     const geometry = this.geometry();
-    //     if (mesh && geometry) {
-    //       mesh.geometry = geometry;
-    //     }
-    //     if (physics && mesh && mesh.geometry && geometry) {
-    //       //this.physicsService.addRigidBody(mesh, physics);
-    //       this.addRigidBody(physics, mesh);
-    //     }
-    //   },
-    //   { injector: this.injector },
-    // );
-    //#endregion
+  #initSetReceiveShadow() {
+    effect(() => {
+      const receiveShadow = this.receiveShadow();
+      const mesh = this.mesh();
+
+      mesh.receiveShadow = receiveShadow ?? false;
+    });
   }
 
-  addRigidBody(physics: IPhysicsOptions, mesh: Mesh) {
-    this.physicsService.addRigidBody(mesh, physics);
+  #initSetCastShadow() {
+    effect(() => {
+      const castShadow = this.castShadow();
+      const mesh = this.mesh();
+
+      mesh.castShadow = castShadow ?? false;
+    });
   }
+
+  ngOnInit(): void {}
 
   override ngOnDestroy(): void {
     super.ngOnDestroy();
-
-    // if (this.physics()) {
-    //   this.physicsService.removeRigidBody(this.mesh());
-    // }
   }
 }

@@ -1,10 +1,9 @@
-import { Component, effect, model, signal } from '@angular/core';
-import { BufferGeometry, Line, Material } from 'three';
+import { Component, effect, input, model, signal } from '@angular/core';
+import { BufferGeometry, Line, Material, Vector3, Vector3Tuple } from 'three';
 import { Object3DComponent, provideObject3DComponent } from '../object-3d';
 
 @Component({
   selector: 'line',
-  standalone: true,
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideObject3DComponent(LineComponent)],
@@ -12,6 +11,10 @@ import { Object3DComponent, provideObject3DComponent } from '../object-3d';
 export class LineComponent extends Object3DComponent {
   readonly line = signal(new Line());
   override object3D = this.line;
+
+  readonly points = input<Vector3Tuple[]>();
+  /** Defaults to `true` if not provided */
+  readonly frustumCulled = input<boolean>();
 
   readonly geometry = signal<BufferGeometry | undefined>(undefined);
   readonly material = model<Material | undefined>(undefined);
@@ -21,6 +24,22 @@ export class LineComponent extends Object3DComponent {
 
     this.#initSetMaterial();
     this.#initSetGeometry();
+    this.#initSetPoints();
+    this.#initSetFrustumCulled();
+  }
+
+  #initSetPoints() {
+    effect(() => {
+      const points = this.points();
+      const geometry = this.geometry();
+
+      if (geometry && points) {
+        const vectors = points.map((point) => new Vector3(...point));
+
+        geometry.setFromPoints(vectors);
+        this.line().computeLineDistances();
+      }
+    });
   }
 
   #initSetMaterial() {
@@ -40,6 +59,16 @@ export class LineComponent extends Object3DComponent {
       if (geometry) {
         mesh.geometry = geometry;
       }
+    });
+  }
+
+  #initSetFrustumCulled() {
+    effect(() => {
+      const frustumCulled = this.frustumCulled();
+      const mesh = this.line();
+
+      mesh.frustumCulled =
+        typeof frustumCulled === 'boolean' ? frustumCulled : true;
     });
   }
 }

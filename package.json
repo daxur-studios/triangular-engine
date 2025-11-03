@@ -1,6 +1,6 @@
 {
   "name": "triangular-workspace",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "scripts": {
     "ng": "ng",
     "build": "ng build",
@@ -9,39 +9,45 @@
     "publish": "npm run build:triangular-engine && cd dist/triangular-engine && npm publish",
     "link": "ng build triangular-engine --configuration development && cd dist/triangular-engine && npm link",
     "watch": "ng build triangular-engine --watch --configuration development",
-    "start": "npm run link && npm run watch"
+    "dev": "npm run watch",
+    "start": "npm run link && npm run watch",
+    "local": "npm run link && npm run watch"
   },
   "private": true,
   "dependencies": {
-    "@angular/animations": "^18.2.0",
-    "@angular/common": "^18.2.0",
-    "@angular/compiler": "^18.2.0",
-    "@angular/core": "^18.2.0",
-    "@angular/forms": "^18.2.0",
-    "@angular/platform-browser": "^18.2.0",
-    "@angular/platform-browser-dynamic": "^18.2.0",
-    "@angular/router": "^18.2.0",
-    "@dimforge/rapier3d-compat": "^0.14.0",
+    "@angular/animations": "^20.3.3",
+    "@angular/cdk": "^20.2.7",
+    "@angular/common": "^20.3.3",
+    "@angular/compiler": "^20.3.3",
+    "@angular/core": "^20.3.3",
+    "@angular/forms": "^20.3.3",
+    "@angular/material": "^20.2.7",
+    "@angular/platform-browser": "^20.3.3",
+    "@angular/platform-browser-dynamic": "^20.3.3",
+    "@angular/router": "^20.3.3",
     "dexie": "^4.0.11",
     "rxjs": "~7.8.0",
-    "three": "^0.173.0",
+    "three": "^0.181.0",
+    "three-mesh-bvh": "^0.9.1",
     "tslib": "^2.3.0",
-    "zone.js": "~0.14.10"
+    "zone.js": "~0.15.1"
   },
   "devDependencies": {
-    "@angular-devkit/build-angular": "^18.2.12",
-    "@angular/cli": "^18.2.7",
-    "@angular/compiler-cli": "^18.2.0",
+    "@angular/build": "^20.3.4",
+    "@angular/cli": "^20.3.4",
+    "@angular/compiler-cli": "^20.3.3",
     "@types/jasmine": "~5.1.0",
-    "@types/three": "^0.173.0",
+    "@types/three": "^0.181.0",
     "jasmine-core": "~5.2.0",
+    "jolt-physics": "file:../_external/JoltPhysics.js/jolt-physics-0.38.0.tgz",
+    "@dimforge/rapier3d-compat": "^0.18.0",
     "karma": "~6.4.0",
     "karma-chrome-launcher": "~3.2.0",
     "karma-coverage": "~2.2.0",
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.1.0",
-    "ng-packagr": "^18.2.0",
+    "ng-packagr": "^20.3.0",
     "prettier": "^3.3.3",
-    "typescript": "~5.5.2"
+    "typescript": "~5.9.3"
   }
 }

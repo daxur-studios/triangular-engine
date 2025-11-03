@@ -24,7 +24,6 @@ import { BufferGeometryComponent } from '../geometry';
 
 @Component({
   selector: 'curve',
-  standalone: true,
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [

@@ -7,9 +7,15 @@
     tabindex="0"
     (keyup)="engineService.keyup$.next($event)"
     (keydown)="engineService.keydown$.next($event)"
+    (dblclick)="engineService.dblclick$.next($event)"
+    (wheel)="engineService.wheel$.next($event)"
     (mousedown)="engineService.mousedown$.next($event)"
     (mouseup)="engineService.mouseup$.next($event)"
     (mousemove)="engineService.mousemove$.next($event)"
+    (pointerdown)="engineService.pointerdown$.next($event)"
+    (click)="
+      engineService.click$.next($event); engineService.cursor.onClick($event)
+    "
     (mousewheel)="engineService.mousewheel$.next($event)"
     (contextmenu)="
       engineService.contextmenu$.next($event); $event.preventDefault()

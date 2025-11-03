@@ -68,34 +68,40 @@ export class SkyBoxMaterialComponent
     this.initializeMaterial();
   }
 
-  ngOnInit() {
-    // Initialize component
-  }
-
   private initializeStars() {
-    // Initialize stars map (simplified version - you might want to implement a proper random generator)
-    for (let i = 0; i < this.starsCount; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const b = Math.random() * 2 - 1;
-      const c = Math.sqrt(1 - b * b);
-      const target = new Vector3(Math.cos(a) * c, Math.sin(a) * c, b);
+    // Seeded RNG for deterministic starfield
+    const rng = ((seed) => {
+      // mulberry32
+      let t = seed >>> 0;
+      return () => {
+        t += 0x6d2b79f5;
+        let x = Math.imul(t ^ (t >>> 15), 1 | t);
+        x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+        return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+      };
+    })(this.starsSeed);
 
-      const index = i * 4;
-      this.starsMap[index] =
-        MathUtils.lerp(
-          0.5 - this.maxOffset,
-          0.5 + this.maxOffset,
-          Math.random(),
-        ) * 255;
-      this.starsMap[index + 1] =
-        MathUtils.lerp(
-          0.5 - this.maxOffset,
-          0.5 + this.maxOffset,
-          Math.random(),
-        ) * 255;
-      this.starsMap[index + 2] = Math.pow(Math.random(), 6) * 255;
-      this.starsMap[index + 3] = Math.random() * 255;
+    // Distribute stars uniformly across the entire cube atlas (6 faces x gridSize x gridSize)
+    const totalCells = this.gridSize * this.gridSize * 6;
+    const targetCount = Math.min(this.starsCount, totalCells);
+
+    // Pick unique random cells for stars to avoid clustering only in the first block
+    const chosen = new Set<number>();
+    while (chosen.size < targetCount) {
+      const cell = Math.floor(rng() * totalCells);
+      chosen.add(cell);
     }
+
+    // Initialize selected cells with per-cell parameters
+    chosen.forEach((cell) => {
+      const base = cell * 4;
+      this.starsMap[base] =
+        MathUtils.lerp(0.5 - this.maxOffset, 0.5 + this.maxOffset, rng()) * 255;
+      this.starsMap[base + 1] =
+        MathUtils.lerp(0.5 - this.maxOffset, 0.5 + this.maxOffset, rng()) * 255;
+      this.starsMap[base + 2] = Math.pow(rng(), 6) * 255; // intensity
+      this.starsMap[base + 3] = rng() * 255; // color index
+    });
 
     this.stars.value.needsUpdate = true;
   }

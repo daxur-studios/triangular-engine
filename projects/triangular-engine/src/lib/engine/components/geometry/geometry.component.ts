@@ -1,28 +1,27 @@
 import {
   Component,
-  InputSignal,
+  DestroyRef,
   OnDestroy,
   Provider,
   WritableSignal,
   effect,
   inject,
   input,
+  model,
   signal,
 } from '@angular/core';
 import {
   BoxGeometry,
   BufferGeometry,
+  CylinderGeometry,
   PlaneGeometry,
   SphereGeometry,
+  TorusKnotGeometry,
 } from 'three';
 
-import { MeshComponent } from '../mesh/mesh.component';
-import { PointsComponent } from '../particle';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { Object3DComponent } from '../object-3d';
-import { InstancedMeshComponent } from '../mesh';
-import { InstancedRigidBodyComponent } from '../physics';
-import { LineComponent } from '../curve/line.component';
-import { handleMaterialAndGeometryLinking } from '../util';
+import { handleMaterialAndGeometryLinking, IGeometryComponent } from '../util';
 
 export function provideBufferGeometryComponent(component: any): Provider {
   return {
@@ -34,23 +33,31 @@ export function provideBufferGeometryComponent(component: any): Provider {
 @Component({
   selector: 'bufferGeometry',
   template: `<ng-content></ng-content>`,
-
-  standalone: true,
   imports: [],
   providers: [],
 })
-export class BufferGeometryComponent implements OnDestroy {
+export class BufferGeometryComponent implements OnDestroy, IGeometryComponent {
   //#region Injected Dependencies
   readonly parent = inject(Object3DComponent, {
     skipSelf: true,
   });
+  readonly destroyRef = inject(DestroyRef);
   //#endregion
 
   readonly params = input<any>();
-
   readonly name = input<string>();
 
-  readonly geometry: WritableSignal<BufferGeometry> = signal(
+  /**
+   * Useful when you get warning like this:
+   * `THREE.BufferGeometry: Buffer size too small for points data. Use .dispose() and create a new geometry.`
+   * Eg when dynamically creating larger lines
+   */
+  readonly reCreateGeometryTrigger = input<any>();
+  readonly reCreateGeometryTrigger$ = toObservable(
+    this.reCreateGeometryTrigger,
+  );
+
+  readonly geometry: WritableSignal<BufferGeometry> = model(
     new BufferGeometry(),
   );
   previousGeometry: BufferGeometry | undefined;
@@ -61,45 +68,30 @@ export class BufferGeometryComponent implements OnDestroy {
     this.#initUpdateGeometry();
     this.#initSetName();
     this.#iniCastAndSetGeometry();
+    this.#initReCreateGeometryTrigger();
+  }
+
+  #initReCreateGeometryTrigger() {
+    this.reCreateGeometryTrigger$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.geometry().dispose();
+        this.geometry.set(this.createGeometry(this.params()));
+      });
   }
 
   #initUpdateGeometry() {
-    effect(
-      () => {
-        if (this.params()) {
-          this.updateParameters(this.params());
-        }
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      if (this.params()) {
+        this.updateParameters(this.params());
+      }
+    });
   }
 
   #iniCastAndSetGeometry() {
-    effect(
-      () => {
-        handleMaterialAndGeometryLinking(this.geometry(), this.parent);
-        // const geometry = this.geometry();
-        // // Cast to MeshComponent to see if it should be added to the mesh
-        // if (this.parent instanceof MeshComponent) {
-        //   this.parent.geometry.set(geometry);
-        //   this.parent.mesh().geometry = geometry;
-        // }
-        // // Cast to PointsComponent to see if it should be added to the points
-        // else if (this.parent instanceof PointsComponent) {
-        //   this.parent.geometry.set(geometry);
-        //   this.parent.points().geometry = geometry;
-        // } else if (this.parent instanceof InstancedMeshComponent) {
-        //   this.parent.geometry.set(geometry);
-        //   this.parent.instancedMesh().geometry = geometry;
-        // } else if (this.parent instanceof InstancedRigidBodyComponent) {
-        //   this.parent.geometry.set(geometry);
-        // } else if (this.parent instanceof LineComponent) {
-        //   this.parent.geometry.set(geometry);
-        // }
-        // TO DO, MAKE THIS EASIER, MORE SAFE TO MAINTAIN
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      handleMaterialAndGeometryLinking(this.geometry(), this.parent);
+    });
   }
 
   #initSetName() {
@@ -166,10 +158,15 @@ export class BoxGeometryComponent
 type SphereGeometryParameters =
   (typeof SphereGeometry)['prototype']['parameters'];
 
+/**
+ * Example:
+ * ```html
+ * <sphereGeometry [params]="{ radius: 1, widthSegments: 64, heightSegments: 64 }" />
+ * ```
+ */
 @Component({
   selector: 'sphereGeometry',
   template: `<ng-content></ng-content>`,
-  standalone: true,
   imports: [],
   providers: [provideBufferGeometryComponent(SphereGeometryComponent)],
 })
@@ -202,10 +199,12 @@ export class SphereGeometryComponent
 }
 
 type PlaneGeometryParameters = ConstructorParameters<typeof PlaneGeometry>;
+/**
+ * Use input `horizontal` to rotate the geometry to be horizontal
+ */
 @Component({
   selector: 'planeGeometry',
   template: `<ng-content></ng-content>`,
-  standalone: true,
   imports: [],
   providers: [provideBufferGeometryComponent(PlaneGeometryComponent)],
 })
@@ -214,15 +213,103 @@ export class PlaneGeometryComponent
   implements OnDestroy
 {
   override readonly params = input<PlaneGeometryParameters>([1, 1]);
+  /**
+   * Whether to rotate the geometry to be horizontal
+   */
+  readonly horizontal = input<boolean>(false);
 
   override readonly geometry = signal(new PlaneGeometry());
   override previousGeometry: PlaneGeometry | undefined = this.geometry();
 
   constructor() {
     super();
+    this.#initHorizontal();
+  }
+
+  #initHorizontal() {
+    effect(() => {
+      const horizontal = this.horizontal();
+      if (horizontal === undefined) {
+        return;
+      }
+      // Rotate the geometry to be horizontal
+      this.geometry().rotateX((Math.PI / 2) * -1);
+    });
   }
 
   override createGeometry(parameters: PlaneGeometryParameters): PlaneGeometry {
     return new PlaneGeometry(...parameters);
+  }
+}
+
+type TorusKnotGeometryParameters = ConstructorParameters<
+  typeof TorusKnotGeometry
+>;
+@Component({
+  selector: 'torusKnotGeometry',
+  template: `<ng-content></ng-content>`,
+  imports: [],
+  providers: [provideBufferGeometryComponent(TorusKnotGeometryComponent)],
+})
+export class TorusKnotGeometryComponent
+  extends BufferGeometryComponent
+  implements OnDestroy
+{
+  override readonly params = input<TorusKnotGeometryParameters>([
+    1, 0.4, 64, 8,
+  ]);
+
+  override readonly geometry = signal(new TorusKnotGeometry());
+  override previousGeometry: TorusKnotGeometry | undefined = this.geometry();
+
+  constructor() {
+    super();
+  }
+
+  override createGeometry(
+    parameters: TorusKnotGeometryParameters,
+  ): TorusKnotGeometry {
+    return new TorusKnotGeometry(...parameters);
+  }
+}
+
+type CylinderGeometryParameters = ConstructorParameters<
+  typeof CylinderGeometry
+>;
+
+@Component({
+  selector: 'cylinderGeometry',
+  template: `<ng-content></ng-content>`,
+  imports: [],
+  providers: [provideBufferGeometryComponent(CylinderGeometryComponent)],
+})
+export class CylinderGeometryComponent
+  extends BufferGeometryComponent
+  implements OnDestroy
+{
+  /**
+   * Create a new instance of {@link CylinderGeometry}
+   * @param radiusTop Radius of the cylinder at the top. Default `1`
+   * @param radiusBottom Radius of the cylinder at the bottom. Default `1`
+   * @param height Height of the cylinder. Default `1`
+   * @param radialSegments Number of segmented faces around the circumference of the cylinder. Default `32`
+   * @param heightSegments Number of rows of faces along the height of the cylinder. Expects a `Integer`. Default `1`
+   * @param openEnded A Boolean indicating whether the ends of the cylinder are open or capped. Default `false`, _meaning capped_.
+   * @param thetaStart Start angle for first segment. Default `0`, _(three o'clock position)_.
+   * @param thetaLength The central angle, often called theta, of the circular sector. Default `Math.PI * 2`, _which makes for a complete cylinder.
+   */
+  override readonly params = input.required<CylinderGeometryParameters>();
+
+  override readonly geometry = signal(new CylinderGeometry());
+  override previousGeometry: CylinderGeometry | undefined = this.geometry();
+
+  constructor() {
+    super();
+  }
+
+  override createGeometry(
+    parameters: CylinderGeometryParameters,
+  ): CylinderGeometry {
+    return new CylinderGeometry(...parameters);
   }
 }

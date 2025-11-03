@@ -15,11 +15,13 @@ type ArrowHelperParameters = {
   headWidth?: number;
 };
 
+/**
+ * @example
+ * <arrowHelper [length]="10" [direction]="[1, 0, 0]" [color]="'red'" />
+ */
 @Component({
   selector: 'arrowHelper',
   template: `<ng-content></ng-content> `,
-
-  standalone: true,
   imports: [],
   providers: [provideObject3DComponent(ArrowHelperComponent)],
 })
@@ -49,33 +51,5 @@ export class ArrowHelperComponent extends Object3DComponent {
     effect(() => {
       this.arrow().setColor(this.color());
     });
-
-    // effect(
-    //   () => {
-    //     const params = this.params();
-    //     if (!params) return;
-
-    //     const prevArrow = this.previousArrow;
-    //     if (prevArrow) {
-    //       //    prevArrow.dispose();
-    //       //  prevArrow.removeFromParent();
-    //     }
-
-    //     const arrow = new ArrowHelper(
-    //       new Vector3(...this.direction()).normalize(),
-    //       undefined,
-    //       // new Vector3(...(params?.origin || [0, 0, 0])),
-    //       this.length(),
-    //       this.color(),
-    //       params.headLength,
-    //       params.headWidth,
-    //     );
-    //     console.warn('arrow', arrow, this.parent?.object3D());
-    //     this.object3D.set(arrow);
-    //     this.parent?.object3D().add(arrow);
-    //     this.previousArrow = arrow;
-    //   },
-    //   { allowSignalWrites: true },
-    // );
   }
 }

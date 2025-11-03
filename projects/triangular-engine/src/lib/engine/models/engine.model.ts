@@ -19,9 +19,7 @@ import {
 
 import { FPSController } from './fps.controller';
 import { Cursor } from './cursor.model';
-import WebGPURenderer, {
-  WebGPURendererParameters,
-} from 'three/src/renderers/webgpu/WebGPURenderer.js';
+import { WebGPURenderer } from 'three/webgpu';
 
 //#region Provide Engine Options
 export const ENGINE_OPTIONS = new InjectionToken<IEngineOptions>(
@@ -41,7 +39,12 @@ export interface IEngineOptions {
 
   transparent?: boolean;
   webGLRendererParameters?: WebGLRendererParameters;
-  webGpuRendererParameters?: WebGPURendererParameters;
+  /** Parameters forwarded to WebGPURenderer constructor. */
+  webGpuRendererParameters?: unknown;
+  /**
+   * Preferred renderer to use. WebGL by default
+   */
+  preferredRenderer?: 'webgl' | 'webgpu';
 
   speedFactor$?: BehaviorSubject<number>;
   elapsedTime$?: BehaviorSubject<number>;
@@ -100,6 +103,7 @@ export interface IEngineCore extends IEngineCamera {
   readonly resolution$: BehaviorSubject<ISizes>;
 }
 
+/** Width and height */
 export interface ISizes {
   width: number;
   height: number;

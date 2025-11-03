@@ -1,14 +1,34 @@
-import { Component, effect, inject, input, signal } from '@angular/core';
-import { Object3DComponent, provideObject3DComponent } from '../object-3d';
-import { Object3D, Scene } from 'three';
-import { BehaviorSubject } from 'rxjs';
+import {
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
+import {
+  Object3DComponent,
+  provideObject3DComponent,
+} from '../object-3d/object-3d.component';
+import { BufferGeometry, Material, Mesh, Object3D, Scene } from 'three';
+import {
+  BehaviorSubject,
+  combineLatest,
+  distinctUntilChanged,
+  skip,
+} from 'rxjs';
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LoaderService } from '../../services';
 import { buildGraph } from '../../models';
+import {
+  takeUntilDestroyed,
+  toObservable,
+  toSignal,
+} from '@angular/core/rxjs-interop';
 
 @Component({
   selector: 'gltf',
-  standalone: true,
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideObject3DComponent(GltfComponent)],
@@ -19,14 +39,38 @@ export class GltfComponent extends Object3DComponent {
   //#endregion
 
   readonly gltfPath = input.required<string>();
+  readonly gltfPath$ = toObservable(this.gltfPath);
   /**
    * Whether to cache the GLTF to a different path than the one provided in the gltfPath input.
    */
   readonly cachePath = input<string | undefined>(undefined);
+  readonly cachePath$ = toObservable(this.cachePath);
+
+  /** When this is true, the geometry will be computed and stored in a BVH tree for faster raycasting for every mesh in this gltf */
+  readonly enableBVH = input<boolean>(false);
+  readonly enableBVH$ = toObservable(this.enableBVH);
+
+  readonly castShadow = input<boolean>(false);
+  readonly castShadow$ = toObservable(this.castShadow);
+  readonly receiveShadow = input<boolean>(false);
+  readonly receiveShadow$ = toObservable(this.receiveShadow);
+
+  readonly loaded = output<GLTF | undefined>();
 
   readonly object3D = signal(new Object3D());
 
   readonly gltf$ = new BehaviorSubject<GLTF | undefined>(undefined);
+  readonly gltf = toSignal(this.gltf$);
+  /** 1st Geometry of the 1st Mesh of this GLTF */
+  readonly geometry = computed(() => {
+    const firstMesh = this.gltf()?.scene.children.find(
+      (child) => child instanceof Mesh,
+    );
+    return firstMesh?.geometry;
+  });
+
+  /** Track current GLTF for proper resource disposal */
+  private currentGltf: GLTF | undefined;
 
   constructor() {
     super();
@@ -35,21 +79,115 @@ export class GltfComponent extends Object3DComponent {
     effect(() => {
       this.#loadAndCache(this.gltfPath(), this.cachePath());
     });
+
+    this.#initReCacheOnGltfPathChange();
+    this.#initEnableBVH();
+    this.#initCastShadow();
   }
 
-  async #loadAndCache(gltfPath: string | undefined, cachePath?: string) {
+  #initEnableBVH() {
+    combineLatest([this.enableBVH$, this.gltf$])
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(([enableBVH, gltf]) => {
+        if (enableBVH && gltf) {
+          gltf.scene.traverse((child) => {
+            if (
+              child instanceof Mesh &&
+              typeof child.geometry.computeBoundsTree === 'function'
+            ) {
+              console.log('🧊 I am computing BVH for Gltf sub-mesh');
+              child.geometry.computeBoundsTree();
+            }
+          });
+        }
+      });
+  }
+
+  #initCastShadow() {
+    combineLatest([this.castShadow$, this.receiveShadow$, this.gltf$])
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(([castShadow, receiveShadow, gltf]) => {
+        if (gltf) {
+          gltf.scene.traverse((child) => {
+            if (child instanceof Mesh) {
+              child.castShadow = castShadow;
+              child.receiveShadow = receiveShadow;
+            }
+          });
+        }
+      });
+  }
+
+  async #loadAndCache(
+    gltfPath: string | undefined,
+    cachePath?: string,
+    force = false,
+  ) {
     if (gltfPath) {
+      // Dispose of previous GLTF resources before loading new one
+      this.#disposeGltfResources(this.currentGltf);
+
       const gltf = await this.loaderService.loadAndCacheGltf(
         gltfPath,
         cachePath,
+        force,
       );
 
       this.gltf$.next(gltf);
       if (gltf) {
         this.object3D.set(gltf.scene);
-        this.gltf$.next(gltf);
+        this.currentGltf = gltf; // Track current GLTF for disposal
         // console.warn('GLTF loaded:', gltf);
       }
+      this.loaded.emit(gltf);
     }
+  }
+
+  #initReCacheOnGltfPathChange() {
+    this.gltfPath$
+      .pipe(
+        skip(1),
+        takeUntilDestroyed(this.destroyRef),
+        distinctUntilChanged((previous, current) => {
+          // Only interested in additional changes, where both a and b are defined
+          return previous !== current && !!previous && !!current;
+        }),
+      )
+      .subscribe((gltfPath) => {
+        if (!this.cachePath()) {
+          return;
+        }
+
+        console.log('Re-caching GLTF now', gltfPath);
+        this.#loadAndCache(gltfPath, this.cachePath(), true);
+      });
+  }
+
+  override ngOnDestroy(): void {
+    // Dispose of GLTF resources before component destruction
+    this.#disposeGltfResources(this.currentGltf);
+    this.currentGltf = undefined;
+
+    // Call parent ngOnDestroy
+    super.ngOnDestroy();
+  }
+
+  /** Dispose of GLTF resources to prevent memory leaks */
+  #disposeGltfResources(gltf: GLTF | undefined) {
+    if (!gltf?.scene) return;
+
+    gltf.scene.traverse((child) => {
+      if (child instanceof Mesh) {
+        // Dispose geometry
+        child.geometry?.dispose();
+
+        // Dispose materials
+        if (Array.isArray(child.material)) {
+          child.material.forEach((material) => material.dispose());
+        } else if (child.material) {
+          child.material.dispose();
+        }
+      }
+    });
   }
 }

@@ -1,25 +1,22 @@
-import { NgModule, Type } from '@angular/core';
+import { NgModule } from '@angular/core';
 
 import { ArrowHelperComponent } from './arrow-helper.component';
+import { AxesHelperComponent } from './axes-helper.component';
 import { GridHelperComponent } from './grid-helper.component';
 import { GroupComponent } from './group.component';
 
+import { GltfComponent } from '../gltf';
+import { CameraComponent } from './camera.component';
 import { OrbitControlsComponent } from './orbit-controls.component';
 import { PrimitiveComponent } from './primitive.component';
 import { RaycastDirective } from './raycast';
-import { SpriteComponent } from './sprite.component';
 import { SceneComponent } from './scene/scene.component';
-import { PointLightComponent } from '../light';
-import { AmbientLightComponent } from '../light';
-import { DirectionalLightComponent } from '../light';
-import { SphereGeometryComponent } from '../geometry';
-import { BoxGeometryComponent } from '../geometry';
-import { CapsuleGeometryComponent } from '../geometry';
-import { BufferAttributeComponent } from '../geometry';
-import { GltfComponent } from '../gltf';
+import { SpriteComponent } from './sprite.component';
+import { OrthographicCameraComponent } from './orthographic-camera.component';
 
-const importExport: Array<Type<any>> = [
+const importExport = [
   ArrowHelperComponent,
+  AxesHelperComponent,
   GridHelperComponent,
   GroupComponent,
   OrbitControlsComponent,
@@ -31,19 +28,13 @@ const importExport: Array<Type<any>> = [
   GridHelperComponent,
   OrbitControlsComponent,
   GroupComponent,
-  PointLightComponent,
-  AmbientLightComponent,
-  DirectionalLightComponent,
-  PointLightComponent,
-  SphereGeometryComponent,
-  BoxGeometryComponent,
-  CapsuleGeometryComponent,
-  BufferAttributeComponent,
   GltfComponent,
   ArrowHelperComponent,
   SpriteComponent,
   RaycastDirective,
-];
+  CameraComponent,
+  OrthographicCameraComponent,
+] as const;
 
 @NgModule({
   imports: [...importExport],

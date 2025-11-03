@@ -1,15 +1,15 @@
-import { NgModule, Type } from '@angular/core';
-import { MeshComponent } from './mesh.component';
+import { NgModule } from '@angular/core';
 import { InstancedMeshComponent } from './instanced-mesh.component';
-import { SphereComponent } from './sphere.component';
+import { MeshComponent } from './mesh.component';
+
 import { SkinnedMeshComponent } from './skinned-mesh.component';
 
-const importExport: Array<Type<any>> = [
+const importExport = [
   MeshComponent,
-  SphereComponent,
+
   SkinnedMeshComponent,
   InstancedMeshComponent,
-];
+] as const;
 
 @NgModule({
   imports: [...importExport],

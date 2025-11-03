@@ -8,8 +8,15 @@ import {
   inject,
   input,
   signal,
+  Provider,
 } from '@angular/core';
-import { BehaviorSubject, filter, firstValueFrom, ReplaySubject } from 'rxjs';
+import {
+  BehaviorSubject,
+  Subject,
+  filter,
+  firstValueFrom,
+  ReplaySubject,
+} from 'rxjs';
 import {
   ACESFilmicToneMapping,
   Camera,
@@ -19,7 +26,11 @@ import {
   Scene,
   WebGLRenderer,
   WebGLRendererParameters,
+  BufferGeometry,
+  Mesh,
+  OrthographicCamera,
 } from 'three';
+import { WebGPURenderer } from 'three/webgpu';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -35,20 +46,28 @@ import {
 
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import type { SceneComponent } from '../components/object-3d/scene/scene.component';
-import { PhysicsService } from './physics.service';
+
 import { EngineSettingsService } from './engine-settings.service';
+import {
+  acceleratedRaycast,
+  computeBoundsTree,
+  disposeBoundsTree,
+} from 'three-mesh-bvh';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 @Injectable()
 export class EngineService implements IEngine {
   static provideEngineOptions = provideEngineOptions;
+  static provide(options: IEngineOptions = {}): Provider[] {
+    return [EngineService, provideEngineOptions(options)];
+  }
 
   static instance = 0;
-  public instance: number;
+  public readonly instance: number;
 
   //#region Injected Dependencies
   readonly options = inject<IEngineOptions>(ENGINE_OPTIONS);
   readonly engineSettingsService = inject(EngineSettingsService);
-  readonly physicsService = inject(PhysicsService);
 
   //#endregion
 
@@ -76,7 +95,7 @@ export class EngineService implements IEngine {
 
   webGLRenderer?: WebGLRenderer;
 
-  renderer: WebGLRenderer;
+  renderer: WebGLRenderer | WebGPURenderer;
   CSS2DRenderer: CSS2DRenderer | undefined;
 
   public composer: EffectComposer | undefined;
@@ -87,6 +106,8 @@ export class EngineService implements IEngine {
   readonly camera$: BehaviorSubject<Camera> = new BehaviorSubject<Camera>(
     new PerspectiveCamera(),
   );
+  /** Created from the camera$ BehaviorSubject */
+  readonly cameraSignal = toSignal(this.camera$);
   get camera() {
     return this.camera$.value;
   }
@@ -101,8 +122,15 @@ export class EngineService implements IEngine {
   readonly elapsedTime$: BehaviorSubject<number> =
     this.options.elapsedTime$ || new BehaviorSubject(0);
 
-  /** Ticker for the rendering loop, holds the delta time */
+  /**
+   * value: delta time * speed factor
+   *
+   * Ticker for the rendering loop, holds the delta time * speed factor.
+   * Unit: seconds
+   */
   readonly tick$: BehaviorSubject<number> = new BehaviorSubject<number>(0);
+  /** Fired after all tick$ subscribers run but before rendering the frame */
+  readonly postTick$ = new Subject<void>();
 
   /** Triggered when the SceneComponent is destroyed */
   readonly onDestroy$ = new ReplaySubject<void>();
@@ -121,12 +149,20 @@ export class EngineService implements IEngine {
   readonly mouseup$ = new BehaviorSubject<MouseEvent | null>(null);
   readonly mousedown$ = new BehaviorSubject<MouseEvent | null>(null);
   readonly mousemove$ = new BehaviorSubject<MouseEvent | null>(null);
+  readonly click$ = new BehaviorSubject<MouseEvent | null>(null);
+  readonly dblclick$ = new BehaviorSubject<MouseEvent | null>(null);
+  readonly wheel$ = new BehaviorSubject<WheelEvent | null>(null);
+  readonly pointerdown$ = new BehaviorSubject<PointerEvent | null>(null);
 
   readonly mousewheel$ = new BehaviorSubject<
     Event | WheelEvent | MouseEvent | null
   >(null);
   readonly contextmenu$ = new BehaviorSubject<MouseEvent | null>(null);
   //#endregion
+  public readonly isDraggingTransformControls$ = new BehaviorSubject<boolean>(
+    false,
+  );
+
   readonly cursor: Cursor;
 
   readonly fpsController: FPSController = new FPSController(this);
@@ -136,8 +172,6 @@ export class EngineService implements IEngine {
     this.instance = EngineService.instance;
     console.debug('EngineService created, instance: ', this.instance);
 
-    this.#syncPhysicsDebugMesh();
-
     this.cursor = new Cursor(this);
 
     const renderer = this.initRenderer(this.options);
@@ -146,15 +180,10 @@ export class EngineService implements IEngine {
     if (renderer instanceof WebGLRenderer) {
       this.createComposer(renderer);
     }
-  }
 
-  #syncPhysicsDebugMesh() {
-    effect(() => {
-      const debugMesh = this.physicsService.debugMesh();
-      if (debugMesh) {
-        this.scene.add(debugMesh);
-      }
-    });
+    BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+    BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+    Mesh.prototype.raycast = acceleratedRaycast;
   }
 
   readonly sceneComponent = new BehaviorSubject<SceneComponent | undefined>(
@@ -196,6 +225,15 @@ export class EngineService implements IEngine {
   }
 
   onComponentInit(): void {
+    // WebGPU needs explicit initialization before the first render.
+    if (this.renderer instanceof WebGPURenderer) {
+      // Do not await to keep the signature synchronous; start loop after init completes.
+      this.renderer
+        .init()
+        .then(() => this.startLoop())
+        .catch(() => this.startLoop());
+      return;
+    }
     this.startLoop();
   }
 
@@ -211,12 +249,33 @@ export class EngineService implements IEngine {
   }
 
   private initRenderer(options?: IEngineOptions) {
-    const webGLParams = options?.webGLRendererParameters || {};
+    const preferred = options?.preferredRenderer ?? 'webgl';
 
+    // Try WebGPU if preferred or auto
+    if (preferred === 'webgpu' && this.isWebGPUSupported()) {
+      const webGpuParams: any = {
+        ...(options?.webGpuRendererParameters || {}),
+      } as any;
+      if (options?.transparent) {
+        // Align behavior with WebGL when transparent scenes are requested
+        (webGpuParams as any).alpha = true;
+      }
+      try {
+        this.renderer = this.createWebGpuRenderer(webGpuParams);
+        return this.renderer;
+      } catch (err) {
+        console.warn(
+          'WebGPU renderer initialization failed, falling back to WebGL.',
+          err,
+        );
+      }
+    }
+
+    // Fallback to WebGL
+    const webGLParams = options?.webGLRendererParameters || {};
     if (options?.transparent) {
       webGLParams.alpha = true;
     }
-
     this.renderer = this.createWebGlRenderer(webGLParams);
     return this.renderer;
   }
@@ -264,6 +323,44 @@ export class EngineService implements IEngine {
     return this.renderer;
   }
 
+  public createWebGpuRenderer(
+    webGpuRendererParameters?: unknown,
+  ): WebGPURenderer {
+    if (this.renderer) {
+      this.renderer.dispose();
+    }
+
+    const renderer = new WebGPURenderer({
+      canvas: this.canvas,
+      ...(webGpuRendererParameters || {}),
+    } as any);
+
+    // Keep tone mapping alignment with WebGL defaults
+    renderer.toneMapping = ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = PCFSoftShadowMap;
+
+    renderer.setSize(this.width, this.height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    this.resolution$.subscribe(({ width, height }) =>
+      this.onResize(width, height),
+    );
+
+    // Composer currently targets WebGL. Skip for WebGPU.
+    return (this.renderer = renderer);
+  }
+
+  private isWebGPUSupported(): boolean {
+    return (
+      typeof navigator !== 'undefined' &&
+      'gpu' in navigator &&
+      !!(navigator as any).gpu
+    );
+  }
+
   private onResize(width: number, height: number) {
     if (!this.renderer) {
       return;
@@ -274,6 +371,12 @@ export class EngineService implements IEngine {
 
     if (this.camera instanceof PerspectiveCamera) {
       this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
+    } else if (this.camera instanceof OrthographicCamera) {
+      const aspect = width / height;
+      const viewHeight = this.camera.top - this.camera.bottom;
+      this.camera.left = -((aspect * viewHeight) / 2);
+      this.camera.right = (aspect * viewHeight) / 2;
       this.camera.updateProjectionMatrix();
     }
 
@@ -304,7 +407,7 @@ export class EngineService implements IEngine {
 
   /** Start the rendering loop */
   async startLoop() {
-    await this.physicsService.initPromise;
+    // await this.physicsService.worldPromise;
     const sceneComponent = await this.getSceneComponentAsync();
 
     // Check if we should only render on trigger
@@ -338,18 +441,17 @@ export class EngineService implements IEngine {
     this.elapsedTime$.next(this.elapsedTime$.value + delta);
 
     // Update the physics simulation
-    this.physicsService.update(delta);
+    //this.physicsService.update(delta);
 
     // Synchronize physics and rendering
-    this.syncPhysicsToRender();
+    //this.syncPhysicsToRender();
 
     //if (this.useOrbitControls) this.orbitControls?.update(delta);
 
-    this.render(time);
-  }
+    // Allow late subscribers (e.g., camera follow) to update just before render
+    this.postTick$.next();
 
-  private syncPhysicsToRender() {
-    this.physicsService.syncMeshes();
+    this.render(time);
   }
 
   public render(time: number, force?: boolean) {
@@ -387,11 +489,16 @@ export class EngineService implements IEngine {
     if (newCamera instanceof PerspectiveCamera && this.canvas) {
       newCamera.aspect = this.width / this.height;
       newCamera.updateProjectionMatrix();
+    } else if (newCamera instanceof OrthographicCamera) {
+      newCamera.updateProjectionMatrix();
     }
 
     if (this.renderPass) {
       this.renderPass.camera = newCamera;
     }
+
+    // Trigger resize to adjust ortho frustum if needed
+    this.onResize(this.width, this.height);
 
     // Render the scene with the composer instead of the renderer
     this.render(this.fpsController.lastRenderTime, true);

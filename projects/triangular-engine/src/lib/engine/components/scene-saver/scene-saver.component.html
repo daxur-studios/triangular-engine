@@ -1,0 +1,39 @@
+@let sizes = resolution();
+<div class="scene-saver-container">
+  <div class="scene-saver-controls">
+    <div class="control-group">
+      <label for="zoom-input">Zoom:</label>
+      <input
+        id="zoom-input"
+        type="range"
+        min="0.1"
+        max="3"
+        step="0.1"
+        [value]="zoomValue()"
+        (input)="onZoomChange($event)"
+      />
+      <span>{{ zoomValue() }}</span>
+    </div>
+
+    <div class="control-group">
+      <label for="prefix-input">File Prefix:</label>
+      <input
+        id="prefix-input"
+        type="text"
+        [value]="prefixValue()"
+        (input)="onPrefixChange($event)"
+        placeholder="scene"
+      />
+    </div>
+
+    <button (click)="saveScene()">Save Scene</button>
+  </div>
+  <div
+    class="scene-wrapper d-flex"
+    [style.zoom]="zoomValue()"
+    [style.width.px]="sizes.width"
+    [style.height.px]="sizes.height"
+  >
+    <ng-content></ng-content>
+  </div>
+</div>
