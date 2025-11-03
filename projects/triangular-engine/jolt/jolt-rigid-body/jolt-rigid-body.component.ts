@@ -8,6 +8,7 @@ import {
   Injector,
   input,
   output,
+  Output,
   Provider,
   Type,
   untracked,
@@ -20,6 +21,7 @@ import {
 } from '@angular/core/rxjs-interop';
 
 import { BehaviorSubject, combineLatest } from 'rxjs';
+import { Euler, Quaternion, Vector3Tuple } from 'three';
 import { GroupComponent, provideObject3DComponent } from 'triangular-engine';
 import { LAYER_MOVING, wrapQuat, wrapVec3 } from '../example';
 import { JoltPhysicsComponent } from '../jolt-physics/jolt-physics.component';
@@ -29,7 +31,13 @@ import {
   JoltPhysicsService,
 } from '../jolt-physics/jolt-physics.service';
 import { JoltShapeComponent } from '../jolt-shapes/jolt-shape.component';
-import { Euler, Quaternion, Vector3Tuple } from 'three';
+import {
+  IContactAddedEvent,
+  IContactPersistedEvent,
+  IContactRemovedEvent,
+  IContactValidateEvent,
+  JoltEventEmitter,
+} from '../models/contact-events.model';
 
 /**
  * Provides both:
@@ -86,10 +94,19 @@ export class JoltRigidBodyComponent extends GroupComponent {
   //#endregion
 
   //#region Outputs
-  /** Emits whenever the body switches from active to asleep mode. Updated by JoltPhysicsComponent.OnBodyDeactivated */
+  /** Emits whenever the body switches from active to asleep mode. Updated by {@link JoltPhysicsComponent#OnBodyDeactivated} */
   readonly onSleep = output<void>();
-  /** Emits whenever the body switches from asleep to active mode. Updated by JoltPhysicsComponent.OnBodyActivated */
+  /** Emits whenever the body switches from asleep to active mode. Updated by {@link JoltPhysicsComponent#OnBodyActivated} */
   readonly onActivate = output<void>();
+
+  /** Emits when contact validation occurs between this body and another. Updated by {@link JoltPhysicsComponent#OnContactValidate} */
+  @Output() onContactValidate = new JoltEventEmitter<IContactValidateEvent>();
+  /** Emits when contact is first added between this body and another. Updated by {@link JoltPhysicsComponent#OnContactAdded} */
+  @Output() onContactAdded = new JoltEventEmitter<IContactAddedEvent>();
+  /** Emits when contact persists between this body and another. Updated by {@link JoltPhysicsComponent#OnContactPersisted} */
+  @Output() onContactPersisted = new JoltEventEmitter<IContactPersistedEvent>();
+  /** Emits when contact is removed between this body and another. Updated by {@link JoltPhysicsComponent#OnContactRemoved} */
+  @Output() onContactRemoved = new JoltEventEmitter<IContactRemovedEvent>();
   //#endregion
 
   readonly contentChildrenShapes = contentChildren(JoltShapeComponent, {

@@ -93,16 +93,26 @@ export class JoltPhysicsService {
 
   /** Maps Jolt User Data ID to rigid body component for activation listener */
   readonly userDataToComponent = new Map<number, JoltRigidBodyComponent>();
+  /** Maps BodyID (index+sequence) to rigid body component for fast contact checks */
+  readonly bodyIdToComponent = new Map<number, JoltRigidBodyComponent>();
 
   constructor() {}
 
   registerBody(body: Jolt.Body, component: JoltRigidBodyComponent) {
     this.bodies$.next([...this.bodies$.value, body]);
     this.userDataToComponent.set(component.userDataId, component);
+    try {
+      const id = body.GetID().GetIndexAndSequenceNumber();
+      this.bodyIdToComponent.set(id, component);
+    } catch {}
   }
   unregisterBody(body: Jolt.Body) {
     this.bodies$.next(this.bodies$.value.filter((b) => b !== body));
     this.userDataToComponent.delete(body.GetUserData());
+    try {
+      const id = body.GetID().GetIndexAndSequenceNumber();
+      this.bodyIdToComponent.delete(id);
+    } catch {}
   }
 
   registerConstraint(constraint: Jolt.Constraint, a: Jolt.Body, b: Jolt.Body) {

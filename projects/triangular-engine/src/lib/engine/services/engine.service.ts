@@ -53,6 +53,7 @@ import {
   computeBoundsTree,
   disposeBoundsTree,
 } from 'three-mesh-bvh';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 @Injectable()
 export class EngineService implements IEngine {
@@ -105,6 +106,8 @@ export class EngineService implements IEngine {
   readonly camera$: BehaviorSubject<Camera> = new BehaviorSubject<Camera>(
     new PerspectiveCamera(),
   );
+  /** Created from the camera$ BehaviorSubject */
+  readonly cameraSignal = toSignal(this.camera$);
   get camera() {
     return this.camera$.value;
   }

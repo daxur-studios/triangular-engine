@@ -19,6 +19,13 @@ import {
   JoltPhysicsService,
 } from './jolt-physics.service';
 import { JoltDebugRendererComponent } from '../jolt-debug-renderer/jolt-debug-renderer.component';
+import {
+  IContactValidateEvent,
+  IContactAddedEvent,
+  IContactPersistedEvent,
+  IContactRemovedEvent,
+  JoltEventEmitter,
+} from '../models/contact-events.model';
 @Component({
   selector: 'jolt-physics',
   imports: [AsyncPipe, JoltDebugRendererComponent],
@@ -104,6 +111,7 @@ export class JoltPhysicsComponent {
   }
 
   readonly activationListener = new Jolt.BodyActivationListenerJS();
+  readonly contactListener = new Jolt.ContactListenerJS();
 
   #initPhysics(loadedJolt: typeof Jolt): IJoltMetadata {
     // Initialize Jolt
@@ -132,6 +140,43 @@ export class JoltPhysicsComponent {
 
     physicsSystem.SetBodyActivationListener(activationListener);
 
+    // Create and register contact listener
+    const contactListener = this.contactListener;
+    contactListener.OnContactValidate = (
+      body1: number,
+      body2: number,
+      baseOffset: number,
+      collideShapeResult: number,
+    ) => {
+      return this.OnContactValidate(
+        body1,
+        body2,
+        baseOffset,
+        collideShapeResult,
+      );
+    };
+    contactListener.OnContactAdded = (
+      body1: number,
+      body2: number,
+      manifold: number,
+      settings: number,
+    ) => {
+      this.OnContactAdded(body1, body2, manifold, settings);
+    };
+    contactListener.OnContactPersisted = (
+      body1: number,
+      body2: number,
+      manifold: number,
+      settings: number,
+    ) => {
+      this.OnContactPersisted(body1, body2, manifold, settings);
+    };
+    contactListener.OnContactRemoved = (subShapePair: number) => {
+      this.OnContactRemoved(subShapePair);
+    };
+
+    physicsSystem.SetContactListener(contactListener);
+
     const metadata: IJoltMetadata = {
       settings,
       jolt,
@@ -145,7 +190,7 @@ export class JoltPhysicsComponent {
     return metadata;
   }
 
-  OnBodyActivated(inBodyID: number, inBodyUserData: number): void {
+  private OnBodyActivated(inBodyID: number, inBodyUserData: number): void {
     const decodedUserData = this.decodeUserData(inBodyUserData);
     const component =
       this.physicsService.userDataToComponent.get(decodedUserData);
@@ -155,13 +200,202 @@ export class JoltPhysicsComponent {
     }
   }
 
-  OnBodyDeactivated(inBodyID: number, inBodyUserData: number): void {
+  private OnBodyDeactivated(inBodyID: number, inBodyUserData: number): void {
     const decodedUserData = this.decodeUserData(inBodyUserData);
     const component =
       this.physicsService.userDataToComponent.get(decodedUserData);
 
     if (component) {
       component.onSleep.emit();
+    }
+  }
+
+  // Check if an emitter has subscribers without importing its specific type
+  #hasSubscribers(emitter: JoltEventEmitter<any> | undefined): boolean {
+    return !!emitter && !!emitter.hasSubscribers;
+  }
+
+  // Resolve component for a body using UserData first, then fall back to BodyID mapping
+  #getComponentForBody(body: Jolt.Body) {
+    try {
+      const userData = this.decodeUserData(body.GetUserData());
+      const comp = this.physicsService.userDataToComponent.get(userData);
+      if (comp) return comp;
+    } catch {}
+    try {
+      const id = body.GetID().GetIndexAndSequenceNumber();
+      const comp = this.physicsService.bodyIdToComponent.get(id);
+      if (comp) return comp;
+    } catch {}
+    return undefined;
+  }
+
+  private OnContactValidate(
+    body1Ptr: number,
+    body2Ptr: number,
+    baseOffset: number,
+    collideShapeResult: number,
+  ): number {
+    const body1 = Jolt.wrapPointer(body1Ptr, Jolt.Body);
+    const body2 = Jolt.wrapPointer(body2Ptr, Jolt.Body);
+
+    const component1 = this.#getComponentForBody(body1);
+    const component2 = this.#getComponentForBody(body2);
+
+    const needs1 = this.#hasSubscribers(component1?.onContactValidate);
+    const needs2 = this.#hasSubscribers(component2?.onContactValidate);
+    if (!needs1 && !needs2) {
+      return Jolt.ValidateResult_AcceptAllContactsForThisBodyPair;
+    }
+
+    const collideShapeResultWrapped = Jolt.wrapPointer(
+      collideShapeResult,
+      Jolt.CollideShapeResult,
+    );
+
+    if (needs1) {
+      const event: IContactValidateEvent = {
+        otherBody: body2,
+        baseOffset,
+        collideShapeResult: collideShapeResultWrapped,
+      };
+      component1!.onContactValidate.emit(event);
+    }
+    if (needs2) {
+      const event: IContactValidateEvent = {
+        otherBody: body1,
+        baseOffset,
+        collideShapeResult: collideShapeResultWrapped,
+      };
+      component2!.onContactValidate.emit(event);
+    }
+
+    return Jolt.ValidateResult_AcceptAllContactsForThisBodyPair;
+  }
+
+  private OnContactAdded(
+    body1Ptr: number,
+    body2Ptr: number,
+    manifold: number,
+    settings: number,
+  ): void {
+    const body1 = Jolt.wrapPointer(body1Ptr, Jolt.Body);
+    const body2 = Jolt.wrapPointer(body2Ptr, Jolt.Body);
+
+    const component1 = this.#getComponentForBody(body1);
+    const component2 = this.#getComponentForBody(body2);
+
+    const needs1 = this.#hasSubscribers(component1?.onContactAdded);
+    const needs2 = this.#hasSubscribers(component2?.onContactAdded);
+    if (!needs1 && !needs2) return;
+
+    const manifoldWrapped = Jolt.wrapPointer(manifold, Jolt.ContactManifold);
+    const settingsWrapped = Jolt.wrapPointer(settings, Jolt.ContactSettings);
+
+    if (needs1) {
+      const event: IContactAddedEvent = {
+        otherBody: body2,
+        manifold: manifoldWrapped,
+        settings: settingsWrapped,
+      };
+      component1!.onContactAdded.emit(event);
+    }
+    if (needs2) {
+      const event: IContactAddedEvent = {
+        otherBody: body1,
+        manifold: manifoldWrapped,
+        settings: settingsWrapped,
+      };
+      component2!.onContactAdded.emit(event);
+    }
+  }
+
+  private OnContactPersisted(
+    body1Ptr: number,
+    body2Ptr: number,
+    manifold: number,
+    settings: number,
+  ): void {
+    const body1 = Jolt.wrapPointer(body1Ptr, Jolt.Body);
+    const body2 = Jolt.wrapPointer(body2Ptr, Jolt.Body);
+
+    const component1 = this.#getComponentForBody(body1);
+    const component2 = this.#getComponentForBody(body2);
+
+    const needs1 = this.#hasSubscribers(component1?.onContactPersisted);
+    const needs2 = this.#hasSubscribers(component2?.onContactPersisted);
+    if (!needs1 && !needs2) return;
+
+    const manifoldWrapped = Jolt.wrapPointer(manifold, Jolt.ContactManifold);
+    const settingsWrapped = Jolt.wrapPointer(settings, Jolt.ContactSettings);
+
+    if (needs1) {
+      const event: IContactPersistedEvent = {
+        otherBody: body2,
+        manifold: manifoldWrapped,
+        settings: settingsWrapped,
+      };
+      component1!.onContactPersisted.emit(event);
+    }
+    if (needs2) {
+      const event: IContactPersistedEvent = {
+        otherBody: body1,
+        manifold: manifoldWrapped,
+        settings: settingsWrapped,
+      };
+      component2!.onContactPersisted.emit(event);
+    }
+  }
+
+  private OnContactRemoved(subShapePair: number): void {
+    const subShapePairWrapped = Jolt.wrapPointer(
+      subShapePair,
+      Jolt.SubShapeIDPair,
+    );
+
+    const body1ID = subShapePairWrapped.GetBody1ID();
+    const body2ID = subShapePairWrapped.GetBody2ID();
+
+    // Early exit if neither body cares about removal events
+    const c1 = this.physicsService.bodyIdToComponent.get(
+      body1ID.GetIndexAndSequenceNumber(),
+    );
+    const c2 = this.physicsService.bodyIdToComponent.get(
+      body2ID.GetIndexAndSequenceNumber(),
+    );
+
+    const needs1 = this.#hasSubscribers(c1?.onContactRemoved);
+    const needs2 = this.#hasSubscribers(c2?.onContactRemoved);
+    if (!needs1 && !needs2) return;
+
+    // Find the bodies by iterating through registered bodies only when needed
+    const bodies = this.physicsService.bodies$.value;
+    const body1 = bodies.find(
+      (body) =>
+        body.GetID().GetIndexAndSequenceNumber() ===
+        body1ID.GetIndexAndSequenceNumber(),
+    );
+    const body2 = bodies.find(
+      (body) =>
+        body.GetID().GetIndexAndSequenceNumber() ===
+        body2ID.GetIndexAndSequenceNumber(),
+    );
+
+    if (!body1 || !body2) return;
+
+    if (needs1) {
+      const event: IContactRemovedEvent = {
+        subShapePair: subShapePairWrapped,
+        otherBody: body2,
+      };
+      c1!.onContactRemoved.emit(event);
+    }
+    if (needs2) {
+      const event: IContactRemovedEvent = {
+        subShapePair: subShapePairWrapped,
+        otherBody: body1,
+      };
+      c2!.onContactRemoved.emit(event);
     }
   }
   /**
@@ -329,6 +563,13 @@ export class JoltPhysicsComponent {
       Jolt.destroy(this.activationListener);
     } catch {
       console.warn('Failed to destroy activation listener');
+    }
+
+    // Release the contact listener
+    try {
+      Jolt.destroy(this.contactListener);
+    } catch {
+      console.warn('Failed to destroy contact listener');
     }
 
     if (this.#memoryLogInterval) {
