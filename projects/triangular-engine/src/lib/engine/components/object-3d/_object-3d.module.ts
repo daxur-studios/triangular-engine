@@ -1,6 +1,7 @@
 import { NgModule } from '@angular/core';
 
 import { ArrowHelperComponent } from './arrow-helper.component';
+import { AxesHelperComponent } from './axes-helper.component';
 import { GridHelperComponent } from './grid-helper.component';
 import { GroupComponent } from './group.component';
 
@@ -15,6 +16,7 @@ import { OrthographicCameraComponent } from './orthographic-camera.component';
 
 const importExport = [
   ArrowHelperComponent,
+  AxesHelperComponent,
   GridHelperComponent,
   GroupComponent,
   OrbitControlsComponent,

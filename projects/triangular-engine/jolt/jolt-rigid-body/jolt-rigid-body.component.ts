@@ -174,10 +174,8 @@ export class JoltRigidBodyComponent extends GroupComponent {
 
         const initialPosition = this.position();
 
-        // TODO: see if this can be simplified between single and compound shapes
-        // Single shape
-        if (Array.isArray(shapes) && shapes.length === 1 && shapes[0]) {
-          const shape = shapes[0];
+        // Shared helper for both single and compound shapes
+        const createOrReplaceBody = (shape: Jolt.Shape) => {
           // Replace existing body if any
           const existing = this.body$.value;
           if (existing) {
@@ -187,7 +185,8 @@ export class JoltRigidBodyComponent extends GroupComponent {
               metadata.bodyInterface.DestroyBody(existing.GetID());
             } catch {}
           }
-          // Prepare creation settings with explicit temporary allocations that we destroy afterwards
+
+          // Prepare creation settings
           const bodyPosition = new Jolt.RVec3(
             initialPosition[0],
             initialPosition[1],
@@ -200,25 +199,20 @@ export class JoltRigidBodyComponent extends GroupComponent {
               Jolt.Quat.prototype.sIdentity(),
               resolvedMotionType,
               LAYER_MOVING,
-              //   requiresStaticBody ? LAYER_NON_MOVING : LAYER_MOVING,
             );
           Jolt.destroy(bodyPosition);
 
-          // Set angular and linear damping (default to 0 if not specified)
-          // Use untracked() to read signal values without causing reactive subscriptions/effects to track them
+          // Damping + CCD
           const angularDamping = untracked(() => this.angularDamping);
           const linearDamping = untracked(() => this.linearDamping);
           settings.mAngularDamping = angularDamping() ?? 0.0;
           settings.mLinearDamping = linearDamping() ?? 0.0;
-          // Prefer continuous collision detection for fast movers
           settings.mMotionQuality = Jolt.EMotionQuality_LinearCast;
 
           const body = metadata.bodyInterface.CreateBody(settings);
           Jolt.destroy(settings);
 
-          // Set the custom user data ID in Jolt
           body.SetUserData(this.userDataId);
-
           this.body$.next(body);
           this.physicsService.registerBody(body, this);
 
@@ -227,40 +221,32 @@ export class JoltRigidBodyComponent extends GroupComponent {
             Jolt.EActivation_Activate,
           );
 
-          const speedOfLight = 299_792_458; // ~3.0 × 10^8 m/s
-          const cubeMP = body.GetMotionProperties();
-          cubeMP.SetMaxLinearVelocity(speedOfLight);
-          // Ensure CCD is applied at runtime too (required for active bodies)
+          const speedOfLight = 299_792_458;
+          const mp = body.GetMotionProperties();
+          mp.SetMaxLinearVelocity(speedOfLight);
           metadata.bodyInterface.SetMotionQuality(
             body.GetID(),
             Jolt.EMotionQuality_LinearCast,
           );
+
+          return body;
+        };
+
+        // Single shape
+        if (Array.isArray(shapes) && shapes.length === 1 && shapes[0]) {
+          createOrReplaceBody(shapes[0]);
         }
         // Multiple shapes inside a compound shape
         else if (Array.isArray(shapes) && shapes.length > 1) {
-          // Replace existing body if any
-          const existing = this.body$.value;
-          if (existing) {
-            try {
-              this.physicsService.unregisterBody(existing);
-              metadata.bodyInterface.RemoveBody(existing.GetID());
-              metadata.bodyInterface.DestroyBody(existing.GetID());
-            } catch {}
-          }
+          const compoundShapeSettings = new Jolt.MutableCompoundShapeSettings();
 
-          // Create compound shape settings
-          const compoundShapeSettings = new Jolt.StaticCompoundShapeSettings();
-
-          // Add each shape with its local position and rotation
           for (const shapeComponent of childShapeComponents) {
-            const shape = shapeComponent.shape();
-            if (!shape) continue;
+            const subShape = shapeComponent.shape();
+            if (!subShape) continue;
 
-            // Get the shape component's local position and rotation relative to the rigid body
             const localPosition = shapeComponent.position?.() ?? [0, 0, 0];
             const localRotation = shapeComponent.rotation?.() ?? [0, 0, 0];
 
-            // Convert Euler rotation to quaternion
             const q = new Quaternion().setFromEuler(
               new Euler(localRotation[0], localRotation[1], localRotation[2]),
             );
@@ -272,11 +258,15 @@ export class JoltRigidBodyComponent extends GroupComponent {
             );
 
             try {
-              compoundShapeSettings.AddShapeShape(
+              const addFn =
+                compoundShapeSettings.AddShapeShape ||
+                compoundShapeSettings.AddShape;
+              addFn.call(
+                compoundShapeSettings,
                 joltPosition,
                 joltQuat,
-                shape,
-                0, // userData
+                subShape,
+                0,
               );
             } finally {
               Jolt.destroy(joltPosition);
@@ -284,59 +274,37 @@ export class JoltRigidBodyComponent extends GroupComponent {
             }
           }
 
-          const compoundShape = compoundShapeSettings.Create().Get();
+          // Safe Create(): handle both "result object" and "shape directly" bindings
+          const createRet: any = compoundShapeSettings.Create();
+
+          // Always destroy settings once we have the result
           Jolt.destroy(compoundShapeSettings);
 
-          // Create the body with the compound shape
-          const bodyPosition = new Jolt.RVec3(
-            initialPosition[0],
-            initialPosition[1],
-            initialPosition[2],
-          );
+          const hasError =
+            typeof createRet?.HasError === 'function'
+              ? createRet.HasError()
+              : false;
+          if (hasError) {
+            const msg =
+              typeof createRet?.GetError === 'function'
+                ? createRet.GetError()
+                : 'Unknown error';
+            console.error('Compound shape Create() failed:', msg);
+            return;
+          }
 
-          const settings: Jolt.BodyCreationSettings =
-            new Jolt.BodyCreationSettings(
-              compoundShape,
-              bodyPosition,
-              Jolt.Quat.prototype.sIdentity(),
-              resolvedMotionType,
-              LAYER_MOVING,
+          const compoundShape =
+            typeof createRet?.Get === 'function' ? createRet.Get() : createRet;
+
+          if (!compoundShape) {
+            console.error(
+              'Compound shape Create() returned null/invalid shape',
             );
-          Jolt.destroy(bodyPosition);
+            return;
+          }
 
-          // Set angular and linear damping (default to 0 if not specified)
-          const angularDamping = untracked(() => this.angularDamping);
-          const linearDamping = untracked(() => this.linearDamping);
-          settings.mAngularDamping = angularDamping() ?? 0.0;
-          settings.mLinearDamping = linearDamping() ?? 0.0;
-          // Prefer continuous collision detection for fast movers
-          settings.mMotionQuality = Jolt.EMotionQuality_LinearCast;
-
-          const body = metadata.bodyInterface.CreateBody(settings);
-          Jolt.destroy(settings);
-
-          // Set the custom user data ID in Jolt
-          body.SetUserData(this.userDataId);
-
-          this.body$.next(body);
-          this.physicsService.registerBody(body, this);
-
-          metadata.bodyInterface.AddBody(
-            body.GetID(),
-            Jolt.EActivation_Activate,
-          );
-
-          const speedOfLight = 299_792_458; // ~3.0 × 10^8 m/s
-          const cubeMP = body.GetMotionProperties();
-          cubeMP.SetMaxLinearVelocity(speedOfLight);
-          // Ensure CCD is applied at runtime too (required for active bodies)
-          metadata.bodyInterface.SetMotionQuality(
-            body.GetID(),
-            Jolt.EMotionQuality_LinearCast,
-          );
-
-          // Clean up the compound shape reference
-          compoundShape.Release();
+          // Do NOT Release() the shape here; body owns the ref now.
+          createOrReplaceBody(compoundShape);
         }
       },
       { injector: this.injector },
