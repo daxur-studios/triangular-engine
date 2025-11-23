@@ -20,7 +20,7 @@
     "@angular/common": "^20.3.3",
     "@angular/core": "^20.3.3",
     "three": "^0.181.0",
-    "dexie": "^4.0.11",
+    "dexie": "^4.2.1",
     "@dimforge/rapier3d-compat": "^0.18.0",
     "jolt-physics": "file:../_external/JoltPhysics.js/jolt-physics-0.38.0.tgz"
   },

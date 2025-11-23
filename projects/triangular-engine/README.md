@@ -30,7 +30,7 @@ These are expected to be provided by your app (see package.json for exact versio
   "@angular/common": "^20.3.3",
   "@angular/core": "^20.3.3",
   "three": "^0.181.0",
-  "dexie": "^4.0.11"
+  "dexie": "^4.2.1"
 }
 ```
 
@@ -218,12 +218,14 @@ npm run link
 npm link triangular-engine
 ```
 
-If changes are not reflected in the app, set `"preserveSymlinks": true` in your app's `angular.json` build options and add the following to your `tsconfig.json`:
+**Important**: Set `"preserveSymlinks": true` in your app's `angular.json` build options to avoid runtime injection errors (such as `_HighContrastModeDetector` token injection failures). Also add the following to your `tsconfig.json`:
 
 ```json
 {
-  "paths": {
-    "triangular-engine": ["node_modules/triangular-engine"]
+  "compilerOptions": {
+    "paths": {
+      "triangular-engine": ["node_modules/triangular-engine"]
+    }
   }
 }
 ```

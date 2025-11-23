@@ -20,6 +20,8 @@ import {
   Euler,
   Vector3Tuple,
   EulerTuple,
+  Color,
+  ColorRepresentation,
 } from 'three';
 import {
   Object3DComponent,
@@ -36,9 +38,17 @@ export interface IInstancedMeshData<DATA = any> {
   position: Vector3Tuple;
   rotation: EulerTuple;
   scale: Vector3Tuple;
+  color?: ColorRepresentation;
   data?: DATA;
 }
 
+/**
+ * Instanced mesh component.
+ *
+ * @example
+ * <instancedMesh [geometry]="geometry" [material]="material" [maxCount]="1000" [data]="data" [count]="data.length" [growStep]="100">
+ * </instancedMesh>
+ */
 @Component({
   standalone: true,
   selector: 'instancedMesh',
@@ -71,6 +81,8 @@ export class InstancedMeshComponent extends Object3DComponent {
    */
   readonly growStep = input<number>(1);
 
+  readonly frustumCulled = input<boolean>();
+
   /** The instanced mesh object */
   readonly instancedMesh = signal<InstancedMesh>(
     new InstancedMesh(new BufferGeometry(), [], 0),
@@ -93,6 +105,8 @@ export class InstancedMeshComponent extends Object3DComponent {
     this.#initCountChange();
 
     this.#initDataChange();
+
+    this.#initFrustumCulled();
   }
   #initMaxCountChange() {
     effect(() => {
@@ -162,6 +176,7 @@ export class InstancedMeshComponent extends Object3DComponent {
 
   #eulerRotation = new Euler();
   #scaleVector = new Vector3();
+  #color = new Color();
 
   #initDataChange() {
     effect(() => {
@@ -202,7 +217,25 @@ export class InstancedMeshComponent extends Object3DComponent {
       );
 
       instancedMesh.setMatrixAt(index, matrix);
+
+      if (params.color !== undefined) {
+        this.#color.set(params.color);
+        instancedMesh.setColorAt(index, this.#color);
+      }
     });
     instancedMesh.instanceMatrix.needsUpdate = true;
+    if (instancedMesh.instanceColor) {
+      instancedMesh.instanceColor.needsUpdate = true;
+    }
+  }
+
+  #initFrustumCulled() {
+    effect(() => {
+      const frustumCulled = this.frustumCulled();
+      const instancedMesh = this.instancedMesh();
+      if (frustumCulled !== undefined) {
+        instancedMesh.frustumCulled = frustumCulled;
+      }
+    });
   }
 }
