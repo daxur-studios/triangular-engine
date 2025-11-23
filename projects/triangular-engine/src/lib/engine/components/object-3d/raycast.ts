@@ -17,6 +17,11 @@ import { Object3DComponent } from './object-3d.component';
 export interface IRaycastEvent {
   //event: MouseEvent;
   object: Object3D;
+
+  /**
+   * The instance id of the object that was hit if clicking on an instanced mesh
+   */
+  instanceId?: number;
 }
 
 interface RaycastEvents {
@@ -103,7 +108,10 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
             );
             if (intersects.length > 0) {
               // An intersection occurred
-              this.rayClick.emit({ object: object3D });
+              this.rayClick.emit({
+                object: object3D,
+                instanceId: intersects[0].instanceId,
+              });
             } else {
               this.rayClickOutside.emit({ object: object3D });
             }
@@ -160,7 +168,10 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
             );
             if (intersects.length > 0) {
               if (!this.isPointerOver) {
-                this.rayMouseEnter.emit({ object: object3D });
+                this.rayMouseEnter.emit({
+                  object: object3D,
+                  instanceId: intersects[0].instanceId,
+                });
                 this.isPointerOver = true;
               }
             } else {
