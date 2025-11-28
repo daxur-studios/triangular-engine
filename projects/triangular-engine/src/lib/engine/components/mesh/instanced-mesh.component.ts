@@ -227,6 +227,7 @@ export class InstancedMeshComponent extends Object3DComponent {
     if (instancedMesh.instanceColor) {
       instancedMesh.instanceColor.needsUpdate = true;
     }
+    instancedMesh.boundingSphere = null;
   }
 
   #initFrustumCulled() {
