@@ -124,6 +124,9 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   readonly css2dRenderer =
     viewChild.required<ElementRef<HTMLElement>>('css2dRenderer');
 
+  readonly css3dRenderer =
+    viewChild.required<ElementRef<HTMLElement>>('css3dRenderer');
+
   get scene() {
     return this.engineService.scene;
   }
@@ -163,6 +166,7 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
 
     this.#resizeObserver.observe(this.wrapper().nativeElement);
     this.engineService.initCss2dRenderer(this.css2dRenderer()!.nativeElement!);
+    this.engineService.initCss3dRenderer(this.css3dRenderer()!.nativeElement!);
 
     this.handleKeyBindings();
 

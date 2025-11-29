@@ -45,6 +45,7 @@ import {
 } from '../models';
 
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
+import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
 import type { SceneComponent } from '../components/object-3d/scene/scene.component';
 
 import { EngineSettingsService } from './engine-settings.service';
@@ -97,6 +98,7 @@ export class EngineService implements IEngine {
 
   renderer: WebGLRenderer | WebGPURenderer;
   CSS2DRenderer: CSS2DRenderer | undefined;
+  CSS3DRenderer: CSS3DRenderer | undefined;
 
   public composer: EffectComposer | undefined;
   public renderPass: RenderPass | undefined;
@@ -291,6 +293,18 @@ export class EngineService implements IEngine {
 
     //  document.body.appendChild(this.CSS2DRenderer.domElement);
   }
+  /** Initiated in the canvas component */
+  public initCss3dRenderer(element: HTMLElement) {
+    this.CSS3DRenderer = new CSS3DRenderer({ element: element });
+    this.CSS3DRenderer.setSize(this.width, this.height);
+    this.CSS3DRenderer.domElement.style.position = 'absolute';
+    this.CSS3DRenderer.domElement.style.pointerEvents = 'none';
+    this.CSS3DRenderer.domElement.style.top = '0';
+    this.CSS3DRenderer.domElement.style.width = '100%';
+    this.CSS3DRenderer.domElement.style.height = '100%';
+
+    //  document.body.appendChild(this.CSS3DRenderer.domElement);
+  }
   public createWebGlRenderer(
     webGLRendererParameters?: WebGLRendererParameters,
   ): WebGLRenderer {
@@ -384,6 +398,7 @@ export class EngineService implements IEngine {
     this.composer?.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     this.CSS2DRenderer?.setSize(this.width, this.height);
+    this.CSS3DRenderer?.setSize(this.width, this.height);
 
     this.render(this.fpsController.lastRenderTime);
   }
@@ -471,6 +486,9 @@ export class EngineService implements IEngine {
 
       if (this.CSS2DRenderer)
         this.CSS2DRenderer.render(this.scene, this.camera);
+
+      if (this.CSS3DRenderer)
+        this.CSS3DRenderer.render(this.scene, this.camera);
 
       this.fpsController.lastRenderTime = time;
     }
