@@ -20,11 +20,19 @@ import {
   Vector2Tuple,
 } from 'three';
 
+/**
+ * @example
+ * ```html
+ * <sprite>
+ *   <spriteMaterial [map]="'assets/textures/sprite.png'" />
+ * </sprite>
+ * ```
+ */
 @Component({
-    selector: 'sprite',
-    imports: [],
-    template: `<ng-content></ng-content>`,
-    providers: [provideObject3DComponent(SpriteComponent)]
+  selector: 'sprite',
+  imports: [],
+  template: `<ng-content></ng-content>`,
+  providers: [provideObject3DComponent(SpriteComponent)],
 })
 export class SpriteComponent extends Object3DComponent {
   readonly sprite = signal(new Sprite());
