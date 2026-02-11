@@ -71,6 +71,21 @@ See also: src/lib/engine/components/light/LIGHT.md
 
 - `<keyboardControls>` exposes a minimal keyboard control component
 
+## Post-Processing (WebGL)
+
+Declarative EffectComposer with pass components. Place inside `<scene>`:
+
+```html
+<effect-composer>
+  <unrealBloomPass [strength]="1.2" [radius]="0.4" [threshold]="0.85" />
+  <glitchPass [goWild]="false" />
+  <smaaPass />
+  <outputPass />
+</effect-composer>
+```
+
+Passes: `unrealBloomPass`, `glitchPass`, `outputPass`, `smaaPass`, `shaderPass`. Order matters; `outputPass` should typically be last.
+
 ## Features
 
 - Environment: `<skyBox>`, `<ocean>`

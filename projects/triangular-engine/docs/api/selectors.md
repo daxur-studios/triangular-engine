@@ -54,6 +54,11 @@ List of component selectors you can use in templates.
 - `fixedJoint`, `sphericalJoint`
 - `instancedRigidBody`
 
+## Post-Processing
+
+- `effect-composer` — EffectComposer wrapper
+- `unrealBloomPass`, `glitchPass`, `outputPass`, `smaaPass`, `shaderPass`
+
 ## Features
 
 - `skyBox`, `ocean`

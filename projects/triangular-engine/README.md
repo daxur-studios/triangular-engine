@@ -16,7 +16,7 @@ This README contains the full documentation needed to use the library on npm. No
 
 ## Features
 
-- Standalone Angular components: `scene`, `camera`, `mesh`, `materials`, `lights`, `gltf`, `physics`, `css2d/css3d`, and more
+- Standalone Angular components: `scene`, `camera`, `mesh`, `materials`, `lights`, `gltf`, `physics`, `css2d/css3d`, post-processing, and more
 - Declarative Object3D graph with inputs for `position`, `rotation`, `scale`, and common options
 - Rapier 3D physics integration: rigid bodies, colliders, joints, instanced rigid bodies
 - GLTF loader with optional BVH acceleration for fast raycasts
@@ -112,6 +112,7 @@ All components are standalone and can be nested inside `<scene>`.
 
 - `scene`: hosts the renderer canvas, handles resize, and drives the render loop
 - Core nodes: `group`, `mesh`, `points`, `sprite`, `gridHelper`, `arrowHelper`
+- Post-processing: `effect-composer`, `unrealBloomPass`, `glitchPass`, `outputPass`, `smaaPass`, `shaderPass`
 - Geometry: `boxGeometry`, `sphereGeometry`, `planeGeometry`, `bufferGeometry`, `capsuleGeometry`, `bufferAttribute`
 - Materials: `meshStandardMaterial`, `meshNormalMaterial`, `meshBasicMaterial`, `shaderMaterial`, `rawShaderMaterial`, `pointsMaterial`, `spriteMaterial`
 - Lights: `ambientLight`, `directionalLight`, `pointLight`
@@ -189,6 +190,7 @@ providers: EngineService.provide({ showFPS: true });
 List of selectors available in templates (not exhaustive):
 
 - Core: `scene`, `group`, `mesh`, `points`, `sprite`, `primitive`, `gridHelper`, `arrowHelper`
+- Post-processing: `effect-composer`, `unrealBloomPass`, `glitchPass`, `outputPass`, `smaaPass`, `shaderPass`
 - Camera & Controls: `camera`, `orbitControls`
 - Geometry: `bufferGeometry`, `bufferAttribute`, `boxGeometry`, `sphereGeometry`, `planeGeometry`, `capsuleGeometry`
 - Materials: `material`, `meshStandardMaterial`, `meshNormalMaterial`, `meshBasicMaterial`, `shaderMaterial`, `rawShaderMaterial`, `pointsMaterial`, `spriteMaterial`
@@ -278,6 +280,14 @@ import { EngineModule, EngineService } from "triangular-engine";
 })
 export class BasicComponent {}
 ```
+
+## For Maintainers: Publishing to npm
+
+1. Ensure you're logged in: `npm login`
+2. Bump version in `projects/triangular-engine/package.json` if needed
+3. From the workspace root: `npm run publish`
+
+The publish script builds with development configuration (required for npm) and publishes from `dist/triangular-engine`. For local development with `jolt-physics`, the workspace uses a local file override in its `devDependencies`; the published package lists `jolt-physics` as an optional `^0.38.0` peer dependency.
 
 ---
 

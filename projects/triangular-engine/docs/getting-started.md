@@ -5,10 +5,12 @@ This page shows how to add Triangular Engine to an Angular app and render your f
 ## Install
 
 ```bash
-npm i triangular-engine three @dimforge/rapier3d-compat three-mesh-bvh
+npm i triangular-engine three three-mesh-bvh dexie
 ```
 
-Peer versions (see repo README for latest): Angular 18, Three 0.181 (r181), Rapier 0.18.
+Optional (physics): `@dimforge/rapier3d-compat` or `jolt-physics`
+
+Peer versions (see package README for latest): Angular ^20.3.3, Three ^0.181, Dexie ^4.2.1.
 
 ## Configure Draco
 
@@ -28,7 +30,7 @@ Provide the engine in a component and render a scene:
 
 ```ts
 import { Component } from "@angular/core";
-import { EngineModule, EngineService, provideEngineOptions } from "triangular-engine";
+import { EngineModule, EngineService } from "triangular-engine";
 
 @Component({
   selector: "app-demo",
@@ -44,7 +46,7 @@ import { EngineModule, EngineService, provideEngineOptions } from "triangular-en
       </mesh>
     </scene>
   `,
-  providers: [EngineService, provideEngineOptions({ showFPS: true })],
+  providers: EngineService.provide({ showFPS: true }),
 })
 export class DemoComponent {}
 ```
