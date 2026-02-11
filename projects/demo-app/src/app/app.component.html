@@ -34,4 +34,12 @@
   -->
   <skyBox />
   <ocean />
+
+  <!-- Post-processing: Bloom, Glitch, SMAA, Output (order matters; outputPass last) -->
+  <effect-composer>
+    <unrealBloomPass [strength]="0.5" [radius]="0.4" [threshold]="0.85" />
+    <!-- <glitchPass [goWild]="glitchWild()" /> -->
+    <!-- <smaaPass /> -->
+    <outputPass />
+  </effect-composer>
 </scene>

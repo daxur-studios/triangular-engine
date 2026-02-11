@@ -32,8 +32,8 @@ import {
 } from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import type { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 
 import {
   Cursor,
@@ -101,6 +101,7 @@ export class EngineService implements IEngine {
   CSS3DRenderer: CSS3DRenderer | undefined;
 
   public composer: EffectComposer | undefined;
+  /** Set by EffectComposerComponent when using declarative post-processing (WebGL only). */
   public renderPass: RenderPass | undefined;
 
   public readonly clock = new Clock();
@@ -178,10 +179,6 @@ export class EngineService implements IEngine {
 
     const renderer = this.initRenderer(this.options);
     this.renderer = renderer;
-
-    if (renderer instanceof WebGLRenderer) {
-      this.createComposer(renderer);
-    }
 
     BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
     BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -402,22 +399,23 @@ export class EngineService implements IEngine {
 
     this.render(this.fpsController.lastRenderTime);
   }
-  private createComposer(renderer: WebGLRenderer): EffectComposer {
-    if (this.renderPass) {
-      this.renderPass.dispose();
-    }
-    if (this.composer) {
-      this.composer.dispose();
-    }
 
-    const composer = new EffectComposer(renderer);
-
-    const renderPass = new RenderPass(this.scene, this.camera);
+  /**
+   * Register the active effect composer (called by EffectComposerComponent).
+   * When set, render() uses composer.render() instead of renderer.render().
+   */
+  public setComposer(composer: EffectComposer, renderPass?: RenderPass): void {
+    this.composer = composer;
     this.renderPass = renderPass;
+  }
 
-    composer.addPass(renderPass);
-
-    return composer;
+  /**
+   * Clear the active effect composer (called by EffectComposerComponent on destroy).
+   */
+  public clearComposer(): void {
+    this.composer?.dispose();
+    this.composer = undefined;
+    this.renderPass = undefined;
   }
 
   /** Start the rendering loop */
@@ -507,13 +505,11 @@ export class EngineService implements IEngine {
     if (newCamera instanceof PerspectiveCamera && this.canvas) {
       newCamera.aspect = this.width / this.height;
       newCamera.updateProjectionMatrix();
-    } else if (newCamera instanceof OrthographicCamera) {
+    } else     if (newCamera instanceof OrthographicCamera) {
       newCamera.updateProjectionMatrix();
     }
 
-    if (this.renderPass) {
-      this.renderPass.camera = newCamera;
-    }
+    // EffectComposerComponent subscribes to camera$ and updates its RenderPass camera
 
     // Trigger resize to adjust ortho frustum if needed
     this.onResize(this.width, this.height);

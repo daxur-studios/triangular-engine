@@ -27,7 +27,7 @@
     "@angular/router": "^20.3.0",
     "dexie": "^4.2.1",
     "rxjs": "~7.8.0",
-    "three": "^0.181.0",
+    "three": "^0.182.0",
     "three-mesh-bvh": "^0.9.1",
     "tslib": "^2.3.0",
     "zone.js": "~0.15.1"
@@ -38,7 +38,7 @@
     "@angular/compiler-cli": "^20.3.0",
     "@dimforge/rapier3d-compat": "^0.18.0",
     "@types/jasmine": "~5.1.0",
-    "@types/three": "^0.181.0",
+    "@types/three": "^0.182.0",
     "jasmine-core": "~5.2.0",
     "jolt-physics": "file:../_external/JoltPhysics.js/jolt-physics-0.38.0.tgz",
     "karma": "~6.4.0",

@@ -7,8 +7,8 @@ import {
   WebGLRendererParameters,
 } from 'three';
 
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import type { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import {
   EventEmitter,
   InjectionToken,

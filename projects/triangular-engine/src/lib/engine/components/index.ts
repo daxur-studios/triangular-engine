@@ -12,5 +12,6 @@ export * from './gltf';
 export * from './curve';
 export * from './css';
 export * from './render';
+export * from './postprocessing';
 export * from './scene-saver';
 export * from './util';

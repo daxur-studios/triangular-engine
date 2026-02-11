@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { NgModule } from '@angular/core';
 import {
+  EffectComposerComponent,
   EngineCssComponentsModule,
   EngineCurveModule,
   EngineGeometryModule,
@@ -9,8 +10,12 @@ import {
   EngineMeshComponentsModule,
   EngineObject3DModule,
   EngineParticlesModule,
+  GlitchPassComponent,
   KeyboardControlsComponent,
+  OutputPassComponent,
   RenderTargetComponent,
+  SMAAPassComponent,
+  UnrealBloomPassComponent,
 } from './components';
 import { EngineSlotDirective } from './components/engine-ui/engine-slot.directive';
 import { EngineDirectiveModule } from './directive';
@@ -33,6 +38,12 @@ const importExport = [
   KeyboardControlsComponent,
 
   RenderTargetComponent,
+
+  EffectComposerComponent,
+  UnrealBloomPassComponent,
+  GlitchPassComponent,
+  OutputPassComponent,
+  SMAAPassComponent,
 ] as const;
 
 /**
