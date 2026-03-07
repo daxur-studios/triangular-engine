@@ -1,31 +1,24 @@
 import {
   Component,
-  Injector,
-  Optional,
-  SkipSelf,
-  computed,
-  effect,
-  input,
-  signal,
-  Directive,
-  Signal,
   WritableSignal,
+  effect,
+  input
 } from '@angular/core';
 import {
-  AmbientLight,
-  DirectionalLight,
-  PointLight,
-  Vector3Like,
-  Light,
-  Object3D,
   ColorRepresentation,
+  DirectionalLight,
+  Light,
   OrthographicCamera,
+  PointLight,
+  SpotLight
 } from 'three';
+
 import {
-  Object3DComponent,
-  provideObject3DComponent,
+  Object3DComponent
 } from '../object-3d/object-3d.component';
-import { BehaviorSubject } from 'rxjs';
+
+/** Light that can cast shadows */
+type ShadowCastingLight = PointLight | DirectionalLight | SpotLight;
 
 /** Abstract base class for lights components */
 @Component({
@@ -58,7 +51,7 @@ export abstract class LightComponent extends Object3DComponent {
         return;
       }
 
-      const pointLight = this.light();
+      const pointLight = this.light() as ShadowCastingLight;
 
       const setterFactory: {
         [key in keyof Required<LightShadowParams>]?: (

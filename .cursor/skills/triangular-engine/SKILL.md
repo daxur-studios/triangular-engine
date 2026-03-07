@@ -27,12 +27,12 @@ Do not import from internal source paths.
 | Dependency | Version | Required |
 | --- | --- | --- |
 | Angular | `^20.3.3` | Yes |
-| Three.js | `^0.181.0` | Yes |
+| Three.js | `^0.183.0` | Yes |
 | Dexie | `^4.2.1` | Yes |
 | Rapier | `^0.18.0` | Optional |
 | Jolt | `0.38.0` | Optional |
 
-Target Angular 20.3.x and Three 0.181.x unless explicitly refactoring compatibility.
+Target Angular 20.3.x and Three 0.183.x unless explicitly refactoring compatibility.
 
 ## Install
 
@@ -179,6 +179,7 @@ Use `raycastGroup` to resolve nearest hit across grouped targets.
 
 - **Rapier**: See [rapier.md](rapier.md) for setup, components, and collider reference.
 - **Jolt**: See [jolt.md](jolt.md) for setup, initialization, and shape reference.
+- **Three.js version bumps**: See [threejs-upgrade.md](threejs-upgrade.md) for the files to update, high-risk code paths, and the recommended upgrade workflow.
 
 ## Common failure modes
 

@@ -4,12 +4,14 @@ Angular-first 3D engine powered by Three.js and Rapier. Build interactive 3D sce
 
 This README contains the full documentation needed to use the library on npm. No external links are required.
 
+See [CHANGELOG.md](CHANGELOG.md) for release history.
+
 ## Compatibility
 
 | Dependency   | Version  | Notes                                 |
 | ------------ | -------- | ------------------------------------- |
 | Angular      | ^20.3.3  | Required - Angular 20.3.3 or higher   |
-| Three.js     | ^0.181.0 | Required                              |
+| Three.js     | ^0.183.0 | Required                              |
 | Dexie        | ^4.2.1   | Required                              |
 | Rapier 3D    | ^0.18.0  | Optional - for physics support        |
 | Jolt Physics | ^0.38.0  | Optional - alternative physics engine |
@@ -39,7 +41,7 @@ These are expected to be provided by your app (see package.json for exact versio
 {
   "@angular/common": "^20.3.3",
   "@angular/core": "^20.3.3",
-  "three": "^0.181.0",
+  "three": "^0.183.0",
   "dexie": "^4.2.1"
 }
 ```

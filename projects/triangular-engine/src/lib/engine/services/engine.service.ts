@@ -21,7 +21,7 @@ import {
   ACESFilmicToneMapping,
   Camera,
   Clock,
-  PCFSoftShadowMap,
+  PCFShadowMap,
   PerspectiveCamera,
   Scene,
   WebGLRenderer,
@@ -317,7 +317,7 @@ export class EngineService implements IEngine {
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    this.renderer.shadowMap.type = PCFShadowMap;
 
     this.renderer.setSize(this.width, this.height);
 
@@ -351,7 +351,7 @@ export class EngineService implements IEngine {
     renderer.toneMappingExposure = 1.0;
 
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = PCFSoftShadowMap;
+    renderer.shadowMap.type = PCFShadowMap;
 
     renderer.setSize(this.width, this.height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));

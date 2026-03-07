@@ -10,7 +10,7 @@ npm i triangular-engine three three-mesh-bvh dexie
 
 Optional (physics): `@dimforge/rapier3d-compat` or `jolt-physics`
 
-Peer versions (see package README for latest): Angular ^20.3.3, Three ^0.181, Dexie ^4.2.1.
+Peer versions (see package README for latest): Angular ^20.3.3, Three ^0.183, Dexie ^4.2.1.
 
 ## Configure Draco
 
