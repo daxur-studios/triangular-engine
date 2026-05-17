@@ -8,13 +8,14 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Compatibility
 
-| Dependency   | Version  | Notes                                 |
-| ------------ | -------- | ------------------------------------- |
-| Angular      | ^20.3.3  | Required - Angular 20.3.3 or higher   |
-| Three.js     | ^0.183.0 | Required                              |
-| Dexie        | ^4.2.1   | Required                              |
-| Rapier 3D    | ^0.18.0  | Optional - for physics support        |
-| Jolt Physics | ^0.38.0  | Optional - alternative physics engine |
+| Dependency      | Version  | Notes                                                          |
+| --------------- | -------- | -------------------------------------------------------------- |
+| Angular         | ^20.3.3  | Required - Angular 20.3.3 or higher                            |
+| Three.js        | ^0.183.0 | Required                                                       |
+| Dexie           | ^4.2.1   | Required                                                       |
+| Rapier 3D       | ^0.18.0  | Optional - for physics support                                 |
+| Jolt Physics    | ^0.38.0  | Optional - alternative physics engine                          |
+| @pmndrs/vanilla | ^1.24.0  | Optional - Billboard and Sparkles (`triangular-engine/pmndrs`) |
 
 ## Features
 
@@ -31,7 +32,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 npm i triangular-engine three three-mesh-bvh
 ```
 
-(optionally add @dimforge/rapier3d-compat OR jolt-physics for physics)
+(optionally add @dimforge/rapier3d-compat OR jolt-physics for physics, or @pmndrs/vanilla for billboard/sparkles)
 
 ### Peer Dependencies
 
@@ -52,9 +53,13 @@ Optional peer dependencies:
 {
   "@dimforge/rapier3d-compat": "^0.18.0",
   OR
-  "jolt-physics": "^0.38.0"
+  "jolt-physics": "^0.38.0",
+  AND
+  "@pmndrs/vanilla": "^1.24.0"
 }
 ```
+
+See [docs/pmndrs.md](docs/pmndrs.md) for Billboard and Sparkles usage.
 
 ## Quick Start
 

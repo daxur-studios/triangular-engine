@@ -114,3 +114,7 @@ If that line already exists, leave it as is.
 - [ ] New section added to `projects/triangular-engine/CHANGELOG.md`
 - [ ] README references CHANGELOG.md
 - [ ] Commits since last version are included in the new changelog section
+
+## After the user commits
+
+Remind the user to publish when ready: `npm run publish` from the workspace root (builds and publishes to npm).

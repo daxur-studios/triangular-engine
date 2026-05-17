@@ -111,7 +111,7 @@ export class BufferGeometryComponent implements OnDestroy, IGeometryComponent {
     return new BufferGeometry();
   }
 
-  private updateParameters(parameters: any) {
+  protected updateParameters(parameters: any) {
     if (this.previousGeometry) {
       this.previousGeometry.dispose();
     }
@@ -199,8 +199,18 @@ export class SphereGeometryComponent
 }
 
 type PlaneGeometryParameters = ConstructorParameters<typeof PlaneGeometry>;
+
+/** How a {@link PlaneGeometry} is oriented after creation. */
+export type PlaneGeometryOrientation = 'vertical' | 'horizontal' | 'billboard';
+
+/** Radians: lay plane in XZ (floor), normal +Y. Same as legacy `[horizontal]="true"`. */
+const PLANE_ORIENTATION_HORIZONTAL_ROTATION_X = -Math.PI / 2;
+
 /**
- * Use input `horizontal` to rotate the geometry to be horizontal
+ * orientation input:
+ * - `vertical` — default Three.js plane (XY, normal +Z).
+ * - `horizontal` — floor plane (XZ, normal +Y); `rotateX(-π/2)`.
+ * - `billboard` — no geometry rotation; use with `<billboard>` (camera facing is handled there).
  */
 @Component({
   selector: 'planeGeometry',
@@ -213,8 +223,12 @@ export class PlaneGeometryComponent
   implements OnDestroy
 {
   override readonly params = input<PlaneGeometryParameters>([1, 1]);
+
+  /** `vertical`, `horizontal`, `billboard` */
+  readonly orientation = input<PlaneGeometryOrientation>('vertical');
+
   /**
-   * Whether to rotate the geometry to be horizontal
+   * @deprecated Use `[orientation]="'horizontal'"` instead.
    */
   readonly horizontal = input<boolean>(false);
 
@@ -223,22 +237,36 @@ export class PlaneGeometryComponent
 
   constructor() {
     super();
-    this.#initHorizontal();
+    this.#initOrientation();
   }
 
-  #initHorizontal() {
+  #initOrientation() {
     effect(() => {
-      const horizontal = this.horizontal();
-      if (horizontal === undefined) {
-        return;
-      }
-      // Rotate the geometry to be horizontal
-      this.geometry().rotateX((Math.PI / 2) * -1);
+      this.orientation();
+      this.horizontal();
+      this.params();
+      this.updateParameters(this.params());
     });
   }
 
+  #resolvedOrientation(): PlaneGeometryOrientation {
+    if (this.horizontal()) {
+      return 'horizontal';
+    }
+    return this.orientation();
+  }
+
   override createGeometry(parameters: PlaneGeometryParameters): PlaneGeometry {
-    return new PlaneGeometry(...parameters);
+    const geometry = new PlaneGeometry(...parameters);
+    switch (this.#resolvedOrientation()) {
+      case 'horizontal':
+        geometry.rotateX(PLANE_ORIENTATION_HORIZONTAL_ROTATION_X);
+        break;
+      case 'billboard':
+      case 'vertical':
+        break;
+    }
+    return geometry;
   }
 }
 

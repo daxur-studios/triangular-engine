@@ -19,6 +19,7 @@ Use only these package entry points in consumer apps:
 - Core: `triangular-engine`
 - Rapier physics: `triangular-engine/rapier`
 - Jolt physics: `triangular-engine/jolt`
+- @pmndrs/vanilla helpers: `triangular-engine/pmndrs`
 
 Do not import from internal source paths.
 
@@ -31,6 +32,7 @@ Do not import from internal source paths.
 | Dexie | `^4.2.1` | Yes |
 | Rapier | `^0.18.0` | Optional |
 | Jolt | `0.38.0` | Optional |
+| @pmndrs/vanilla | `^1.24.0` | Optional |
 
 Target Angular 20.3.x and Three 0.183.x unless explicitly refactoring compatibility.
 
@@ -45,6 +47,9 @@ npm i @dimforge/rapier3d-compat
 
 # Jolt physics (optional)
 npm i jolt-physics
+
+# @pmndrs/vanilla helpers (optional)
+npm i @pmndrs/vanilla
 ```
 
 ## Asset setup (angular.json)
@@ -109,7 +114,7 @@ export class DemoComponent {}
 
 **Cameras/controls:** `camera`, `orthographicCamera`, `orbitControls`, `cameraHelper`, `gridHelper`, `axesHelper`, `arrowHelper`
 
-**Geometry:** `bufferGeometry`, `bufferAttribute`, `boxGeometry`, `sphereGeometry`, `planeGeometry`, `torusKnotGeometry`, `cylinderGeometry`, `capsuleGeometry`, `icosahedronGeometry`, `heightMapGeometry`
+**Geometry:** `bufferGeometry`, `bufferAttribute`, `boxGeometry`, `sphereGeometry`, `planeGeometry` (`[orientation]="'vertical' | 'horizontal' | 'billboard'"`), `torusKnotGeometry`, `cylinderGeometry`, `capsuleGeometry`, `icosahedronGeometry`, `heightMapGeometry`
 
 **Materials:** `meshStandardMaterial`, `meshNormalMaterial`, `meshBasicMaterial`, `shaderMaterial`, `rawShaderMaterial`, `pointsMaterial`, `spriteMaterial`, `lineBasicMaterial`
 
@@ -175,10 +180,11 @@ Use `raycastGroup` to resolve nearest hit across grouped targets.
 - Input streams: `keydown$`, `keyup$`, `mousedown$`, `mouseup$`, `mousemove$`, `click$`, `wheel$`
 - `switchCamera(camera)`, `requestSingleRender()`
 
-## Physics backends
+## Optional backends
 
 - **Rapier**: See [rapier.md](rapier.md) for setup, components, and collider reference.
 - **Jolt**: See [jolt.md](jolt.md) for setup, initialization, and shape reference.
+- **pmndrs**: See [pmndrs.md](../../../projects/triangular-engine/docs/pmndrs.md) for Billboard and Sparkles (`triangular-engine/pmndrs`).
 - **Three.js version bumps**: See [threejs-upgrade.md](threejs-upgrade.md) for the files to update, high-risk code paths, and the recommended upgrade workflow.
 
 ## Common failure modes
@@ -188,6 +194,7 @@ Use `raycastGroup` to resolve nearest hit across grouped targets.
 | Draco 404 | Add Draco assets glob to `angular.json` (see Asset setup) |
 | Engine asset 404 (`/triangular-engine/...`) | Add engine assets glob to `angular.json` (see Asset setup) |
 | Physics imports from wrong entrypoint | Import from `triangular-engine/rapier` or `/jolt`, not `triangular-engine` |
+| pmndrs imports from wrong entrypoint | Import from `triangular-engine/pmndrs`, not `triangular-engine` |
 | `NullInjectorError: PhysicsService` | Provide `PhysicsService` explicitly -- see [rapier.md](rapier.md) |
 | Jolt `Vec3` undefined at runtime | Add `provideJoltPhysicsInitializer()` at bootstrap -- see [jolt.md](jolt.md) |
 | Injector issues with linked packages | Set `preserveSymlinks: true` in build options and add tsconfig path mapping |

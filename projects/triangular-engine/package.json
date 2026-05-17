@@ -1,7 +1,7 @@
 {
   "name": "triangular-engine",
-  "version": "0.0.12",
-  "description": "Angular-first 3D engine powered by Three.js and optional physics engines (Rapier or Jolt). Declarative components for scenes, meshes, materials, lights, GLTF, post-processing, and physics.",
+  "version": "0.0.14",
+  "description": "Angular-first 3D engine powered by Three.js and optional physics engines (Rapier or Jolt) and optional @pmndrs/vanilla helpers. Declarative components for scenes, meshes, materials, lights, GLTF, post-processing, and physics.",
   "keywords": [
     "angular",
     "three",
@@ -14,7 +14,10 @@
     "jolt",
     "engine",
     "components",
-    "postprocessing"
+    "postprocessing",
+    "pmndrs",
+    "billboard",
+    "sparkles"
   ],
   "type": "module",
   "peerDependencies": {
@@ -23,13 +26,17 @@
     "three": "^0.183.0",
     "dexie": "^4.2.1",
     "@dimforge/rapier3d-compat": "^0.18.0",
-    "jolt-physics": "file:../_external/JoltPhysics.js/jolt-physics-0.38.0.tgz"
+    "jolt-physics": "file:../_external/JoltPhysics.js/jolt-physics-0.38.0.tgz",
+    "@pmndrs/vanilla": "^1.24.0"
   },
   "peerDependenciesMeta": {
     "@dimforge/rapier3d-compat": {
       "optional": true
     },
     "jolt-physics": {
+      "optional": true
+    },
+    "@pmndrs/vanilla": {
       "optional": true
     }
   },
