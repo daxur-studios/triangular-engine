@@ -198,3 +198,5 @@ Use `raycastGroup` to resolve nearest hit across grouped targets.
 | `NullInjectorError: PhysicsService` | Provide `PhysicsService` explicitly -- see [rapier.md](rapier.md) |
 | Jolt `Vec3` undefined at runtime | Add `provideJoltPhysicsInitializer()` at bootstrap -- see [jolt.md](jolt.md) |
 | Injector issues with linked packages | Set `preserveSymlinks: true` in build options and add tsconfig path mapping |
+| 3D Scene is 0 height / invisible | Ensure parent components use `host: { class: 'flex-page' }` and wrapper elements are `display: flex;` |
+

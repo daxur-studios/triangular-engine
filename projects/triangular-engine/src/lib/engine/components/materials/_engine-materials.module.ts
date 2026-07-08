@@ -9,6 +9,7 @@ import {
 import { MeshBasicMaterialComponent } from './mesh-basic-material.component';
 import { PointsMaterialComponent } from './points-material.component';
 import { SpriteMaterialComponent } from './sprite-material.component';
+import { HtmlTextureComponent } from './html-texture.component';
 
 const importExport = [
   //MaterialComponent,
@@ -20,6 +21,7 @@ const importExport = [
   SpriteMaterialComponent,
   PointsMaterialComponent,
   LineBasicMaterialComponent,
+  HtmlTextureComponent,
 ] as const;
 
 @NgModule({
