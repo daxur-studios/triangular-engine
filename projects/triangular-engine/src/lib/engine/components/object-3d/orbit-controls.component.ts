@@ -223,7 +223,6 @@ export class OrbitControlsComponent implements OnDestroy {
       } else {
         this.orbitControls()?.dispose();
         this.orbitControls.set(undefined);
-        this.previousFollowPosition = undefined;
       }
     });
   }

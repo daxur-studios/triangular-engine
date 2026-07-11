@@ -102,6 +102,9 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   readonly keyBindings = input<IKeyBindingOptions[]>([]);
   readonly userInterface = input<IUserInterfaceOptions>({});
 
+  /** Overrides the FPS overlay setting for this scene's engine instance. */
+  readonly showFps = input<boolean | undefined>(undefined);
+
   /**
    * If this input is set, the scene will only render when this input is triggered
    *
@@ -134,6 +137,14 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   readonly children = contentChildren(Object3DComponent);
 
   constructor() {
+    effect(() => {
+      const showFps = this.showFps();
+
+      if (showFps !== undefined) {
+        this.engineService.options.showFPS = showFps;
+      }
+    });
+
     effect(() => {
       const children = this.children();
 

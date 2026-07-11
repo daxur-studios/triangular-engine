@@ -89,6 +89,17 @@ import { EngineModule, EngineService } from "triangular-engine";
 export class DemoComponent {}
 ```
 
+Scene-local debug options can also be set declaratively:
+
+```html
+<scene [showFps]="true">
+  <!-- scene content -->
+</scene>
+```
+
+`showFps` overrides `EngineService.provide({ showFPS: ... })` for the engine
+instance used by that scene. Omit it to retain the provider setting.
+
 ## Configure Draco (GLTF)
 
 If you load DRACO-compressed GLTF assets, add the decoder to your `angular.json` assets:
