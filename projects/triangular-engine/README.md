@@ -23,8 +23,9 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 - Declarative Object3D graph with inputs for `position`, `rotation`, `scale`, and common options
 - Rapier 3D physics integration: rigid bodies, colliders, joints, instanced rigid bodies
 - GLTF loader with optional BVH acceleration for fast raycasts
-- Engine UI helpers: stats overlay, scene tree, slots system
-- Signals-based services: engine tick, inputs, camera switching
+- Engine UI helpers: stats overlay, scene tree, portal-based HUD overlay system
+- Signals-based services: engine tick, inputs, camera switching, engine portal system
+- Stacking overlays: support top, bottom, left sidebar, right sidebar, main, modal, and notification layers
 
 ## Install
 
@@ -138,7 +139,7 @@ All components are standalone and can be nested inside `<scene>`.
 - GLTF: `gltf`
 - CSS: `css2d`, `css3d`
 - Physics: `physics`, `rigidBody`, `collider` family, `fixedJoint`, `sphericalJoint`, `instancedRigidBody`
-- Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `[engineSlot]`, `[raycast]`
+- Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `engine-portal-outlet`, `[enginePortal]`, `[raycast]`
 
 Example mesh:
 
@@ -247,7 +248,31 @@ List of selectors available in templates (not exhaustive):
 - GLTF: `gltf`
 - CSS Renderers: `css2d`, `css3d`
 - Physics: `physics`, `rigidBody`, `collider` family, `cuboidCollider`, `ballCollider`, `capsuleCollider`, `cylinderCollider`, `coneCollider`, `fixedJoint`, `sphericalJoint`, `instancedRigidBody`
-- Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `[engineSlot]`, `[raycast]`
+- Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `engine-portal-outlet`, `[enginePortal]`, `[raycast]`
+
+## Engine Portals (Dynamic UI Overlay System)
+
+`triangular-engine` provides a portal-based UI stacking system (similar to `Daxur-Daemon`) allowing any component/page to register controls on top of the 3D HUD dynamically.
+
+### How to use:
+In any child component or page that lives inside the engine context, register templates using `<ng-template enginePortal="area">`. They will be automatically rendered in the appropriate zone and cleaned up on destroy.
+
+```html
+<!-- Inside a consumer component -->
+<ng-template enginePortal="top" lane="content" [order]="1">
+  <button (click)="doSomething()">My HUD Action</button>
+</ng-template>
+
+<ng-template enginePortal="left" lane="before">
+  <div class="my-sidebar-list">
+    <h3>Configuration</h3>
+  </div>
+</ng-template>
+```
+
+- **Areas**: `'top' | 'bottom' | 'left' | 'right' | 'main' | 'modal' | 'notification'`
+- **Lanes**: `'before' | 'content' | 'after'` (governs sorting layout order within the area)
+- **Order**: numerical sorting priority within the lane.
 
 ## Assets & Loading
 

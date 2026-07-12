@@ -2,6 +2,15 @@
 
 All notable changes to triangular-engine are documented here.
 
+## [0.1.0-alpha.1] - 2026-07-12
+
+### Added
+- Dynamic layout areas/HUD overlay management utilizing TemplatePortals (`@angular/cdk/portal`).
+- `EnginePortalService`, `EnginePortalDirective` (`[enginePortal]`), and `EnginePortalOutletComponent` (`engine-portal-outlet`).
+
+### Removed (BREAKING CHANGES)
+- Removed `EngineSlotDirective` (`[engineSlot]`). UI placement is now managed via `enginePortal` directives rather than custom static slots.
+
 ## [0.0.14] - 2026-05-16
 
 ### Added

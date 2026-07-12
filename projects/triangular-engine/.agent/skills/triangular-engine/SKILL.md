@@ -249,9 +249,10 @@ All components are standalone. Import `EngineModule` for convenience.
 | `ocean`              | Ocean surface                |
 | `performanceMonitor` | FPS/performance overlay      |
 | `sceneTree`          | Scene hierarchy viewer       |
-| `engine-ui`          | UI shell with slots          |
+| `engine-ui`          | UI shell with portal areas   |
 | `engine-stats`       | Stats overlay                |
-| `[engineSlot]`       | Slot directive for engine UI |
+| `engine-portal-outlet`| Portal outlet element       |
+| `[enginePortal]`     | Dynamic portal registration  |
 | `[raycast]`          | Raycast directive            |
 
 ---
@@ -460,6 +461,32 @@ export class AnimatedSceneComponent implements OnInit {
   <!-- scene content -->
 </scene>
 ```
+
+### Engine Portals (Dynamic HUD Overlay)
+
+Use the engine portal system to register UI components on top of the 3D HUD canvas from any component context dynamically:
+
+```html
+<!-- Inside a page or custom dashboard component -->
+<ng-template enginePortal="top" lane="content" [order]="10">
+  <div class="hud-controls">
+    <button (click)="openInventory()">Inventory</button>
+  </div>
+</ng-template>
+
+<ng-template enginePortal="left" lane="before">
+  <div class="quest-log">
+    <h3>Quests</h3>
+    <ul>
+      <li>Fly to Mars</li>
+    </ul>
+  </div>
+</ng-template>
+```
+
+- **Areas**: `'top'`, `'bottom'`, `'left'`, `'right'`, `'main'`, `'modal'`, `'notification'`
+- **Lanes**: `'before'`, `'content'`, `'after'` (governs sorting layout order inside the area)
+- **Order**: numerical priority sorting inside the lane.
 
 ---
 

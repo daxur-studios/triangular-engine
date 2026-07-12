@@ -1,6 +1,6 @@
 {
   "name": "triangular-engine",
-  "version": "0.0.14",
+  "version": "0.1.0-alpha.1",
   "description": "Angular-first 3D engine powered by Three.js and optional physics engines (Rapier or Jolt) and optional @pmndrs/vanilla helpers. Declarative components for scenes, meshes, materials, lights, GLTF, post-processing, and physics.",
   "keywords": [
     "angular",

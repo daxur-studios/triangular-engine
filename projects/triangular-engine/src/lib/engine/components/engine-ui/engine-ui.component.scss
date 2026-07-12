@@ -34,3 +34,22 @@
   align-items: center;
   justify-content: center;
 }
+
+.ui-layer-modal,
+.ui-layer-notification {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ui-layer-notification {
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 1rem;
+}
