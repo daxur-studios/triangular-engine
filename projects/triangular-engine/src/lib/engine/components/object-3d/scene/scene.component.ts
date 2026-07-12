@@ -18,6 +18,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { WebGLRenderer } from 'three';
 import { IKeyBindingOptions, IUserInterfaceOptions } from '../../../models';
 import { EngineService, EngineSettingsService } from '../../../services';
 import { EngineUiComponent } from '../../engine-ui/engine-ui.component';
@@ -25,6 +26,7 @@ import {
   Object3DComponent,
   provideObject3DComponent,
 } from '../object-3d.component';
+import { WebGPURenderer } from 'three/webgpu';
 
 /**
  * Scenarios:
@@ -106,6 +108,15 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   readonly showFps = input<boolean | undefined>(undefined);
 
   /**
+   * Uses logarithmic depth precision for this scene's WebGL renderer.
+   *
+   * This prevents depth-fighting in scenes spanning very large distances.
+   * Changing it recreates the renderer because Three.js only reads this option
+   * when the renderer is constructed. WebGPU does not use this WebGL option.
+   */
+  readonly logarithmicDepthBuffer = input<boolean | undefined>(undefined);
+
+  /**
    * If this input is set, the scene will only render when this input is triggered
    *
    * set it to true to render only once, or an incrementing number/string if multiple renders are needed
@@ -142,6 +153,26 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
 
       if (showFps !== undefined) {
         this.engineService.options.showFPS = showFps;
+      }
+    });
+
+    effect(() => {
+      const logarithmicDepthBuffer = this.logarithmicDepthBuffer();
+
+      if (logarithmicDepthBuffer === undefined) {
+        return;
+      }
+
+      if (this.engineService.renderer instanceof WebGLRenderer) {
+        this.engineService.createWebGlRenderer({
+          ...this.engineService.options.webGLRendererParameters,
+          logarithmicDepthBuffer,
+        });
+      } else if (this.engineService.renderer instanceof WebGPURenderer) {
+        this.engineService.createWebGpuRenderer({
+          ...this.engineService.options.webGpuRendererParameters,
+          logarithmicDepthBuffer,
+        });
       }
     });
 

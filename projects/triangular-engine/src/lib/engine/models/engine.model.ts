@@ -20,6 +20,7 @@ import {
 import { FPSController } from './fps.controller';
 import { Cursor } from './cursor.model';
 import { WebGPURenderer } from 'three/webgpu';
+import type { WebGPURendererParameters } from 'three/src/renderers/webgpu/WebGPURenderer.js';
 
 //#region Provide Engine Options
 export const ENGINE_OPTIONS = new InjectionToken<IEngineOptions>(
@@ -40,7 +41,7 @@ export interface IEngineOptions {
   transparent?: boolean;
   webGLRendererParameters?: WebGLRendererParameters;
   /** Parameters forwarded to WebGPURenderer constructor. */
-  webGpuRendererParameters?: unknown;
+  webGpuRendererParameters?: WebGPURendererParameters;
   /**
    * Preferred renderer to use. WebGL by default
    */
