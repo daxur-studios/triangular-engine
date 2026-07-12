@@ -190,6 +190,37 @@ Wrap physics-enabled content in `<physics>`:
 
 Rigid body types: 0 Dynamic, 1 Fixed, 2 KinematicPositionBased, 3 KinematicVelocityBased.
 
+## Physics (Jolt)
+
+Wrap Jolt physics-enabled content in `<jolt-physics>`:
+
+```html
+<jolt-physics [gravity]="[0, -9.81, 0]" [debug]="false" [paused]="false">
+  <!-- Ground (Static) -->
+  <jolt-rigid-body [position]="[0, -0.5, 0]" [motionType]="0">
+    <jolt-box-shape [params]="[100, 1, 100]" />
+    <mesh>
+      <boxGeometry [params]="[100, 1, 100]" />
+      <meshStandardMaterial [params]="{ color: '#666' }" />
+    </mesh>
+  </jolt-rigid-body>
+
+  <!-- Falling Ball (Dynamic) -->
+  <jolt-rigid-body [position]="[0, 5, 0]" [motionType]="2">
+    <jolt-sphere-shape [params]="[0.5]" />
+    <mesh>
+      <sphereGeometry [params]="{ radius: 0.5 }" />
+      <meshStandardMaterial [params]="{ color: 'springgreen' }" />
+    </mesh>
+  </jolt-rigid-body>
+</jolt-physics>
+```
+
+Motion types: 0 Static, 1 Kinematic, 2 Dynamic.
+See `.agent/skills/triangular-engine-jolt/SKILL.md` for advanced Jolt controls, double precision coordinates, and joints/constraints (e.g. `<jolt-fixed-constraint>` or `<jolt-hinge-constraint>`).
+
+
+
 ## Services
 
 Provide per component where you host `<scene>`:

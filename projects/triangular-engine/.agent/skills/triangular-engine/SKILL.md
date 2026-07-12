@@ -404,6 +404,36 @@ export class DemoComponent {}
 </scene>
 ```
 
+### Physics Scene (Jolt)
+
+```html
+<scene>
+  <camera [position]="[4, 3, 6]" [lookAt]="[0, 0, 0]" />
+  <directionalLight [position]="[3, 5, 2]" />
+
+  <jolt-physics [gravity]="[0, -9.81, 0]" [debug]="false" [paused]="false">
+    <!-- Ground (Static) -->
+    <jolt-rigid-body [position]="[0, -0.5, 0]" [motionType]="0">
+      <jolt-box-shape [params]="[100, 1, 100]" />
+      <mesh>
+        <boxGeometry [params]="[100, 1, 100]" />
+        <meshStandardMaterial [params]="{ color: '#666' }" />
+      </mesh>
+    </jolt-rigid-body>
+
+    <!-- Falling Ball (Dynamic) -->
+    <jolt-rigid-body [position]="[0, 4, 0]" [motionType]="2">
+      <jolt-sphere-shape [params]="[0.5]" />
+      <mesh>
+        <sphereGeometry [params]="{ radius: 0.5, widthSegments: 32, heightSegments: 16 }" />
+        <meshNormalMaterial />
+      </mesh>
+    </jolt-rigid-body>
+  </jolt-physics>
+</scene>
+```
+
+
 ### Animation via Tick
 
 ```typescript
