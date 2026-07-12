@@ -314,6 +314,8 @@ export class EngineService implements IEngine {
       ...webGLRendererParameters,
     });
 
+    this.renderer.info.autoReset = false;
+
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.enabled = true;
@@ -345,6 +347,8 @@ export class EngineService implements IEngine {
       canvas: this.canvas,
       ...(webGpuRendererParameters || {}),
     } as any);
+
+    renderer.info.autoReset = false;
 
     // Keep tone mapping alignment with WebGL defaults
     renderer.toneMapping = ACESFilmicToneMapping;
@@ -448,6 +452,7 @@ export class EngineService implements IEngine {
   }
   /** Ticker function runs every frame */
   tick(time: number) {
+    const startTime = performance.now();
     const delta = this.clock.getDelta() * this.speedFactor$.value;
 
     this.tick$.next(delta);
@@ -465,6 +470,9 @@ export class EngineService implements IEngine {
     this.postTick$.next();
 
     this.render(time);
+
+    const frameTimeMs = performance.now() - startTime;
+    this.fpsController.recordFrame(frameTimeMs);
   }
 
   public render(time: number, force?: boolean) {
@@ -476,6 +484,8 @@ export class EngineService implements IEngine {
       time - this.fpsController.lastRenderTime >=
         this.fpsController.fpsLimitInterval
     ) {
+      this.renderer.info.reset();
+
       if (this.composer) {
         this.composer.render();
       } else {

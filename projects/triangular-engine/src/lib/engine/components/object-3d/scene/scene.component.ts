@@ -19,7 +19,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { WebGLRenderer } from 'three';
-import { IKeyBindingOptions, IUserInterfaceOptions } from '../../../models';
+import { IKeyBindingOptions, IPerformanceThresholds, IUserInterfaceOptions } from '../../../models';
 import { EngineService, EngineSettingsService } from '../../../services';
 import { EngineUiComponent } from '../../engine-ui/engine-ui.component';
 import {
@@ -107,6 +107,9 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   /** Overrides the FPS overlay setting for this scene's engine instance. */
   readonly showFps = input<boolean | undefined>(undefined);
 
+  /** Custom performance thresholds for warning/critical states. */
+  readonly performanceThresholds = input<IPerformanceThresholds | undefined>(undefined);
+
   /**
    * Uses logarithmic depth precision for this scene's WebGL renderer.
    *
@@ -153,6 +156,14 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
 
       if (showFps !== undefined) {
         this.engineService.options.showFPS = showFps;
+      }
+    });
+
+    effect(() => {
+      const thresholds = this.performanceThresholds();
+
+      if (thresholds !== undefined) {
+        this.engineService.options.performanceThresholds = thresholds;
       }
     });
 

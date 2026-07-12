@@ -1,10 +1,63 @@
 <div
-  style="
-    color: springgreen;
-    user-select: none;
-    background: rgba(0, 0, 0, 0.15);
-    z-index: 999;
-  "
+  class="perf-stats-container"
+  [class.status-good]="engineService.fpsController.status() === 'good'"
+  [class.status-warning]="engineService.fpsController.status() === 'warning'"
+  [class.status-critical]="engineService.fpsController.status() === 'critical'"
+  [class.expanded]="expanded()"
 >
-  FPS: {{ engineService.fpsController.displayCount() }}
+  <!-- Header / Compact Mode -->
+  <div class="perf-header" (click)="toggleExpanded()">
+    <span class="perf-indicator"></span>
+    <span class="perf-main-val">
+      <span class="fps-val">{{ engineService.fpsController.displayCount() }}</span>
+      <span class="unit"> FPS</span>
+      <span class="divider">|</span>
+      <span class="ms-val">{{ engineService.fpsController.frameTime() | number:'1.1-1' }}</span>
+      <span class="unit"> ms</span>
+    </span>
+    <span class="perf-toggle-icon">
+      {{ expanded() ? '▼' : '▲' }}
+    </span>
+  </div>
+
+  <!-- Detailed Mode -->
+  @if (expanded()) {
+    <div class="perf-details">
+      <div class="perf-row">
+        <span class="label">Draw Calls</span>
+        <span
+          class="value"
+          [class.warn-val]="engineService.fpsController.drawCalls() >= getThresholds().maxDrawCallsWarning"
+          [class.crit-val]="engineService.fpsController.drawCalls() >= getThresholds().maxDrawCallsCritical"
+        >
+          {{ engineService.fpsController.drawCalls() }}
+        </span>
+      </div>
+      <div class="perf-row">
+        <span class="label">Triangles</span>
+        <span
+          class="value"
+          [class.warn-val]="engineService.fpsController.triangles() >= getThresholds().maxTrianglesWarning"
+          [class.crit-val]="engineService.fpsController.triangles() >= getThresholds().maxTrianglesCritical"
+        >
+          {{ formatNumber(engineService.fpsController.triangles()) }}
+        </span>
+      </div>
+
+      <hr class="perf-divider" />
+
+      <div class="perf-row">
+        <span class="label">Geometries</span>
+        <span class="value">{{ engineService.fpsController.geometries() }}</span>
+      </div>
+      <div class="perf-row">
+        <span class="label">Textures</span>
+        <span class="value">{{ engineService.fpsController.textures() }}</span>
+      </div>
+      <div class="perf-row">
+        <span class="label">Shaders</span>
+        <span class="value">{{ engineService.fpsController.programs() }}</span>
+      </div>
+    </div>
+  }
 </div>

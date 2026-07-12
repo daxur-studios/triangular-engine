@@ -35,8 +35,23 @@ export function provideEngineOptions(options: IEngineOptions) {
 }
 //#endregion
 
+export interface IPerformanceThresholds {
+  /** Maximum healthy frame time in ms. Default is 16.6ms (60 FPS equivalent) */
+  maxFrameTimeWarning?: number;
+  maxFrameTimeCritical?: number;
+
+  /** Maximum healthy draw calls. Default is 150 */
+  maxDrawCallsWarning?: number;
+  maxDrawCallsCritical?: number;
+
+  /** Maximum healthy triangles. Default is 1,000,000 */
+  maxTrianglesWarning?: number;
+  maxTrianglesCritical?: number;
+}
+
 export interface IEngineOptions {
   showFPS?: boolean;
+  performanceThresholds?: IPerformanceThresholds;
 
   transparent?: boolean;
   webGLRendererParameters?: WebGLRendererParameters;
