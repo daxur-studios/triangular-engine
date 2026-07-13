@@ -58,12 +58,14 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class TakramCloudsSpikeComponent implements AfterViewInit {
-  private readonly canvas = viewChild.required<ElementRef<HTMLCanvasElement>>('canvas');
+  private readonly canvas =
+    viewChild.required<ElementRef<HTMLCanvasElement>>('canvas');
   private readonly destroyRef = inject(DestroyRef);
 
   readonly status = signal<'loading' | 'ready' | 'error'>('loading');
   readonly message = signal('Loading cloud textures…');
   readonly diagnostics = signal('WebGL: checking');
+  readonly capabilities = signal('Capabilities: checking');
 
   ngAfterViewInit(): void {
     try {
@@ -88,6 +90,20 @@ export class TakramCloudsSpikeComponent implements AfterViewInit {
       throw new Error('Takram clouds require WebGL2-class functionality.');
     }
 
+    const gl = renderer.getContext() as WebGL2RenderingContext;
+    const colorBufferFloat = gl.getExtension('EXT_color_buffer_float');
+    if (colorBufferFloat === null) {
+      renderer.dispose();
+      throw new Error('Takram clouds require EXT_color_buffer_float.');
+    }
+
+    const max3DTextureSize = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE) as number;
+    const floatLinearFiltering =
+      gl.getExtension('OES_texture_float_linear') !== null;
+    this.capabilities.set(
+      `half-float targets yes · 3D textures ${max3DTextureSize}px · float filtering ${floatLinearFiltering ? 'linear' : 'nearest'}`,
+    );
+
     const scene = new Scene();
     const camera = new PerspectiveCamera(60, 1, 1, 300_000);
     camera.position.set(0, 100, 1_500);
@@ -106,13 +122,25 @@ export class TakramCloudsSpikeComponent implements AfterViewInit {
     // origin to the WGS84 surface at latitude/longitude 0, with local Y as up.
     const earthRadius = Ellipsoid.WGS84.maximumRadius;
     const worldToECEF = new Matrix4().set(
-      0, 1, 0, earthRadius,
-      1, 0, 0, 0,
-      0, 0, -1, 0,
-      0, 0, 0, 1,
+      0,
+      1,
+      0,
+      earthRadius,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      -1,
+      0,
+      0,
+      0,
+      0,
+      1,
     );
 
-    const clouds = new CloudsEffect(camera, { resolutionScale: 0.25 });
+    const clouds = new CloudsEffect(camera, { resolutionScale: 0.5 });
     clouds.qualityPreset = 'low';
     clouds.coverage = 0.45;
     clouds.sunDirection.copy(new Vector3(1, 0.7, 0.4).normalize());
@@ -165,7 +193,7 @@ export class TakramCloudsSpikeComponent implements AfterViewInit {
       this.status.set('ready');
       this.message.set('Rendering one default cloud layer');
     };
-    loadingManager.onError = url => {
+    loadingManager.onError = (url) => {
       this.status.set('error');
       this.message.set(`Failed to load texture: ${url}`);
     };
@@ -212,7 +240,11 @@ export class TakramCloudsSpikeComponent implements AfterViewInit {
       CLOUD_SHAPE_DETAIL_TEXTURE_SIZE,
     );
     clouds.stbnTexture = new STBNLoader(loadingManager).load(DEFAULT_STBN_URL);
-    textures.push(clouds.shapeTexture, clouds.shapeDetailTexture, clouds.stbnTexture);
+    textures.push(
+      clouds.shapeTexture,
+      clouds.shapeDetailTexture,
+      clouds.stbnTexture,
+    );
 
     const resizeObserver = new ResizeObserver(() => {
       const width = canvas.clientWidth;
@@ -255,7 +287,7 @@ export class TakramCloudsSpikeComponent implements AfterViewInit {
       clouds.dispose();
       aerialPerspective.dispose();
       atmosphereGenerator.dispose();
-      textures.forEach(texture => texture.dispose());
+      textures.forEach((texture) => texture.dispose());
       renderer.dispose();
     });
   }
