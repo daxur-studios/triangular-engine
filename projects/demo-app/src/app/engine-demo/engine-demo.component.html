@@ -15,8 +15,7 @@
   <skyBox />
   <ocean />
 
-  <effect-composer>
-    <unrealBloomPass [strength]="0.5" [radius]="0.4" [threshold]="0.85" />
-    <outputPass />
-  </effect-composer>
+  <postprocessing-composer>
+    <vignetteEffect [offset]="0.35" [darkness]="0.45" />
+  </postprocessing-composer>
 </scene>

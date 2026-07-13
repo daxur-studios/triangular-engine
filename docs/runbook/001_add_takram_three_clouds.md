@@ -255,22 +255,22 @@ Exit gate: a plain Three.js/Takram example renders inside the demo application w
 
 ### Phase 1 — Generic render pipeline
 
-- [ ] Add `EngineRenderPipeline` to triangular-engine core.
-- [ ] Adapt the current Three.js examples composer to register through it.
-- [ ] Preserve the existing composer API and tests.
-- [ ] Pass real frame delta time into the active render pipeline.
-- [ ] Forward engine resize events through the pipeline contract.
-- [ ] Define behaviour when multiple pipelines attempt to register.
+- [x] Add `EngineRenderPipeline` to triangular-engine core.
+- [x] Adapt the current Three.js examples composer to register through it.
+- [x] Preserve the existing composer API and build compatibility.
+- [x] Pass real frame delta time into the active render pipeline.
+- [x] Forward engine resize events through the pipeline contract.
+- [x] Define behaviour when multiple pipelines attempt to register.
 
 Exit gate: all existing post-processing examples still work unchanged.
 
 ### Phase 2 — `postprocessing` composer backend
 
-- [ ] Add an Angular wrapper around `postprocessing.EffectComposer`.
-- [ ] Add scene render, effect-pass, depth, and normal support as required.
-- [ ] Track camera replacement through `EngineService.camera$`.
-- [ ] Handle resize, enable/disable, teardown, and renderer validation.
-- [ ] Add a minimal non-Takram effect to prove the backend independently.
+- [x] Add an Angular wrapper around `postprocessing.EffectComposer`.
+- [x] Add scene render, effect-pass, depth, and normal support as required.
+- [x] Track camera replacement through `EngineService.camera$`.
+- [x] Handle resize, enable/disable, teardown, and renderer validation.
+- [x] Add a minimal non-Takram effect to prove the backend independently.
 
 Exit gate: triangular-engine can declaratively render an ordinary `postprocessing` effect.
 
@@ -411,6 +411,24 @@ Acceptance criteria:
 - Added visible capability diagnostics for `EXT_color_buffer_float`, maximum 3D texture size, and linear float-texture filtering. Missing float render-target support now fails with a clear message.
 - Resize is handled through `ResizeObserver`; animation, controls, observer, composer, effects, generated lookup textures, loaded textures, and renderer are released with the Angular component lifecycle.
 - M1 is complete. WebGL does not expose true GPU-memory consumption, so renderer texture allocations are retained as the portable baseline proxy.
+
+### 2026-07-13 — M2 generic render pipeline
+
+- Added the public `EngineRenderPipeline` contract with `render(deltaTime)` and `setSize(width, height, pixelRatio)`.
+- `EngineService` now registers one active main-render pipeline and rejects competing registrations with a clear error.
+- Adapted the existing Three.js examples `EffectComposer` internally; its declarative component API remains unchanged.
+- The engine's measured frame delta and resize/pixel-ratio changes now flow through the active pipeline.
+- Both the triangular-engine package and demo application development builds pass. Runtime visual confirmation of the existing composer demo remains the Phase 1 exit check.
+- Runtime visual confirmation passed for both the normal engine demo and the isolated Takram spike. M2 is complete.
+
+### 2026-07-13 — M3 `postprocessing` backend
+
+- Added the optional `triangular-engine/postprocessing` secondary entry point; core users do not need the `postprocessing` peer.
+- Added a declarative `PostprocessingComposerComponent` with scene rendering, effect passes, optional normal pass, WebGL2 validation, camera replacement, resize, disable fallback, and teardown.
+- Added `PostprocessingEffectComponent` as the extension boundary that the future Takram cloud adapter can implement.
+- Added a minimal `VignetteEffectComponent` and switched the normal engine demo to it as the non-Takram proof.
+- The full triangular-engine package build, including all secondary entry points, and the demo development build pass.
+- Browser visual confirmation of the normal demo remains the M3 exit check.
 
 ## References
 

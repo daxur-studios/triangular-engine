@@ -4,7 +4,10 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "triangular-engine": ["projects/triangular-engine/src/public-api"]
+      "triangular-engine": ["projects/triangular-engine/src/public-api"],
+      "triangular-engine/postprocessing": [
+        "projects/triangular-engine/postprocessing/public-api"
+      ]
     },
     "outDir": "../../out-tsc/app",
     "types": []

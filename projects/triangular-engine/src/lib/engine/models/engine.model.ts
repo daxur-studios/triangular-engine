@@ -21,6 +21,7 @@ import { FPSController } from './fps.controller';
 import { Cursor } from './cursor.model';
 import { WebGPURenderer } from 'three/webgpu';
 import type { WebGPURendererParameters } from 'three/src/renderers/webgpu/WebGPURenderer.js';
+import type { EngineRenderPipeline } from './engine-render-pipeline.model';
 
 //#region Provide Engine Options
 export const ENGINE_OPTIONS = new InjectionToken<IEngineOptions>(
@@ -89,7 +90,7 @@ export interface IEngineLifecycle {
   tick(delta: number): void;
   startLoop(): void;
   stopLoop(): void;
-  render(time: number, force?: boolean): void;
+  render(time: number, force?: boolean, deltaTime?: number): void;
   setFPSLimit(fps: number): void;
 }
 
@@ -106,6 +107,7 @@ export interface IEngineCore extends IEngineCamera {
   renderer: WebGLRenderer | WebGPURenderer | undefined;
   composer: EffectComposer | undefined;
   renderPass: RenderPass | undefined;
+  renderPipeline: EngineRenderPipeline | undefined;
 
   readonly scene: Scene;
   readonly clock: Clock;

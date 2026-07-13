@@ -6,7 +6,10 @@
     "baseUrl": ".",
     "paths": {
       // comment this out once not testing demo app
-      "triangular-engine": ["projects/triangular-engine/src/public-api"]
+      "triangular-engine": ["projects/triangular-engine/src/public-api"],
+      "triangular-engine/postprocessing": [
+        "projects/triangular-engine/postprocessing/public-api"
+      ]
     },
     "outDir": "./dist/out-tsc",
     "strict": true,

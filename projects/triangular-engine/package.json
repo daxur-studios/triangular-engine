@@ -28,7 +28,8 @@
     "dexie": "^4.2.1",
     "@dimforge/rapier3d-compat": "^0.18.0",
     "jolt-physics": "^1.0.1",
-    "@pmndrs/vanilla": "^1.24.0"
+    "@pmndrs/vanilla": "^1.24.0",
+    "postprocessing": "^6.39.2"
   },
   "peerDependenciesMeta": {
     "@dimforge/rapier3d-compat": {
@@ -38,6 +39,9 @@
       "optional": true
     },
     "@pmndrs/vanilla": {
+      "optional": true
+    },
+    "postprocessing": {
       "optional": true
     }
   },

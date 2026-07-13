@@ -1,4 +1,5 @@
 export * from './engine.model';
+export * from './engine-render-pipeline.model';
 export * from './fps.controller';
 export * from './cursor.model';
 export * from './key-binding-options';

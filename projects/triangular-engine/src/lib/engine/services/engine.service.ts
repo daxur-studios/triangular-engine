@@ -41,6 +41,7 @@ import {
   FPSController,
   IEngine,
   IEngineOptions,
+  EngineRenderPipeline,
   provideEngineOptions,
 } from '../models';
 
@@ -103,6 +104,8 @@ export class EngineService implements IEngine {
   public composer: EffectComposer | undefined;
   /** Set by EffectComposerComponent when using declarative post-processing (WebGL only). */
   public renderPass: RenderPass | undefined;
+  public renderPipeline: EngineRenderPipeline | undefined;
+  private composerPipeline: EngineRenderPipeline | undefined;
 
   public readonly clock = new Clock();
 
@@ -382,7 +385,8 @@ export class EngineService implements IEngine {
     }
 
     this.renderer.setSize(width, height, true);
-    this.composer?.setSize(width, height);
+    const pixelRatio = Math.min(window.devicePixelRatio, 2);
+    this.renderPipeline?.setSize(width, height, pixelRatio);
 
     if (this.camera instanceof PerspectiveCamera) {
       this.camera.aspect = width / height;
@@ -395,8 +399,7 @@ export class EngineService implements IEngine {
       this.camera.updateProjectionMatrix();
     }
 
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.composer?.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(pixelRatio);
 
     this.CSS2DRenderer?.setSize(this.width, this.height);
     this.CSS3DRenderer?.setSize(this.width, this.height);
@@ -409,17 +412,52 @@ export class EngineService implements IEngine {
    * When set, render() uses composer.render() instead of renderer.render().
    */
   public setComposer(composer: EffectComposer, renderPass?: RenderPass): void {
+    const pipeline: EngineRenderPipeline = {
+      render: (deltaTime) => composer.render(deltaTime),
+      setSize: (width, height, pixelRatio) => {
+        composer.setPixelRatio(pixelRatio);
+        composer.setSize(width, height);
+      },
+    };
+
+    this.registerRenderPipeline(pipeline);
     this.composer = composer;
     this.renderPass = renderPass;
+    this.composerPipeline = pipeline;
   }
 
   /**
    * Clear the active effect composer (called by EffectComposerComponent on destroy).
    */
   public clearComposer(): void {
+    if (this.composerPipeline) {
+      this.unregisterRenderPipeline(this.composerPipeline);
+      this.composerPipeline = undefined;
+    }
     this.composer?.dispose();
     this.composer = undefined;
     this.renderPass = undefined;
+  }
+
+  /** Register the sole owner of the engine's main render. */
+  public registerRenderPipeline(pipeline: EngineRenderPipeline): void {
+    if (this.renderPipeline && this.renderPipeline !== pipeline) {
+      throw new Error('An EngineRenderPipeline is already registered.');
+    }
+
+    this.renderPipeline = pipeline;
+    pipeline.setSize(
+      this.width,
+      this.height,
+      Math.min(window.devicePixelRatio, 2),
+    );
+  }
+
+  /** Remove a pipeline only when it is the currently registered instance. */
+  public unregisterRenderPipeline(pipeline: EngineRenderPipeline): void {
+    if (this.renderPipeline === pipeline) {
+      this.renderPipeline = undefined;
+    }
   }
 
   /** Start the rendering loop */
@@ -469,13 +507,13 @@ export class EngineService implements IEngine {
     // Allow late subscribers (e.g., camera follow) to update just before render
     this.postTick$.next();
 
-    this.render(time);
+    this.render(time, false, delta);
 
     const frameTimeMs = performance.now() - startTime;
     this.fpsController.recordFrame(frameTimeMs);
   }
 
-  public render(time: number, force?: boolean) {
+  public render(time: number, force?: boolean, deltaTime = 0) {
     if (!this.renderer || !this.camera) return;
 
     // Only render if enough time has passed since the last frame
@@ -486,8 +524,8 @@ export class EngineService implements IEngine {
     ) {
       this.renderer.info.reset();
 
-      if (this.composer) {
-        this.composer.render();
+      if (this.renderPipeline) {
+        this.renderPipeline.render(deltaTime);
       } else {
         this.renderer.render(this.scene, this.camera);
       }

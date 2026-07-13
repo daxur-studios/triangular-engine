@@ -6,5 +6,8 @@ import { RouterOutlet } from '@angular/router';
   imports: [RouterOutlet],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss',
+  host: {
+    class: 'flex-page',
+  },
 })
 export class AppComponent {}
