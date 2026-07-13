@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
-import { Component, inject, signal } from '@angular/core';
-import { RouterModule } from '@angular/router';
+import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NavigationEnd, Router, RouterModule } from '@angular/router';
 import { RigidBodyType } from '@dimforge/rapier3d-compat';
 import { DoubleSide, MathUtils } from 'three';
 
@@ -22,6 +23,7 @@ import { EngineModule, EngineService, EngineTextures } from 'triangular-engine';
 })
 export class AppComponent {
   readonly engineService = inject(EngineService);
+  readonly isTakramSpike = signal(false);
 
   readonly DoubleSide = DoubleSide;
   readonly RigidBodyType = RigidBodyType;
@@ -32,4 +34,22 @@ export class AppComponent {
 
   /** Toggle for glitch pass "go wild" mode (stronger effect). */
   readonly glitchWild = signal(false);
+
+  constructor() {
+    const router = inject(Router);
+    const destroyRef = inject(DestroyRef);
+
+    const updateRoute = (): void => {
+      this.isTakramSpike.set(router.url.startsWith('/takram-clouds-spike'));
+    };
+
+    updateRoute();
+    router.events
+      .pipe(takeUntilDestroyed(destroyRef))
+      .subscribe(event => {
+        if (event instanceof NavigationEnd) {
+          updateRoute();
+        }
+      });
+  }
 }

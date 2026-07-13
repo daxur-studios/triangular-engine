@@ -2,6 +2,7 @@
 
 <router-outlet></router-outlet>
 
+@if (!isTakramSpike()) {
 <scene>
   <directionalLight [position]="[44, 44, 44]" [intensity]="2" />
   <ambientLight [intensity]="0.5" />
@@ -43,3 +44,4 @@
     <outputPass />
   </effect-composer>
 </scene>
+}
