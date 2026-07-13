@@ -49,6 +49,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 @Component({
   selector: 'app-takram-clouds-spike',
@@ -89,8 +90,16 @@ export class TakramCloudsSpikeComponent implements AfterViewInit {
 
     const scene = new Scene();
     const camera = new PerspectiveCamera(60, 1, 1, 300_000);
-    camera.position.set(0, 100, 0);
-    camera.lookAt(0, 1_600, -20_000);
+    camera.position.set(0, 100, 1_500);
+
+    const controls = new OrbitControls(camera, canvas);
+    controls.target.set(0, 800, 0);
+    controls.enableDamping = true;
+    controls.enablePan = false;
+    controls.enableZoom = false;
+    controls.minPolarAngle = Math.PI / 2;
+    controls.maxPolarAngle = 2.05;
+    controls.update();
 
     // Takram performs its atmosphere and cloud calculations in ECEF space.
     // Keep the demo camera in convenient local metre coordinates and map its
@@ -221,6 +230,7 @@ export class TakramCloudsSpikeComponent implements AfterViewInit {
     let frames = 0;
     const animate = (): void => {
       animationFrame = requestAnimationFrame(animate);
+      controls.update();
       aerialPerspective.overlay = clouds.atmosphereOverlay;
       composer.render(clock.getDelta());
       frames += 1;
@@ -239,6 +249,7 @@ export class TakramCloudsSpikeComponent implements AfterViewInit {
 
     this.destroyRef.onDestroy(() => {
       cancelAnimationFrame(animationFrame);
+      controls.dispose();
       resizeObserver.disconnect();
       composer.dispose();
       clouds.dispose();
