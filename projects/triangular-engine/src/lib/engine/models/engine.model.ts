@@ -54,6 +54,12 @@ export interface IEngineOptions {
   showFPS?: boolean;
   performanceThresholds?: IPerformanceThresholds;
 
+  /**
+   * Renderer pixel ratio. Defaults to the device pixel ratio capped at 2.
+   * Lower values reduce GPU fill cost; 1 renders at CSS-pixel resolution.
+   */
+  pixelRatio?: number;
+
   transparent?: boolean;
   webGLRendererParameters?: WebGLRendererParameters;
   /** Parameters forwarded to WebGPURenderer constructor. */

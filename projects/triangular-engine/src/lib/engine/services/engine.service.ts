@@ -326,7 +326,7 @@ export class EngineService implements IEngine {
 
     this.renderer.setSize(this.width, this.height);
 
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(this.pixelRatio);
 
     this.resolution$.subscribe(({ width, height }) =>
       this.onResize(width, height),
@@ -361,7 +361,7 @@ export class EngineService implements IEngine {
     renderer.shadowMap.type = PCFShadowMap;
 
     renderer.setSize(this.width, this.height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(this.pixelRatio);
 
     this.resolution$.subscribe(({ width, height }) =>
       this.onResize(width, height),
@@ -385,7 +385,7 @@ export class EngineService implements IEngine {
     }
 
     this.renderer.setSize(width, height, true);
-    const pixelRatio = Math.min(window.devicePixelRatio, 2);
+    const pixelRatio = this.pixelRatio;
     this.renderPipeline?.setSize(width, height, pixelRatio);
 
     if (this.camera instanceof PerspectiveCamera) {
@@ -449,8 +449,16 @@ export class EngineService implements IEngine {
     pipeline.setSize(
       this.width,
       this.height,
-      Math.min(window.devicePixelRatio, 2),
+      this.pixelRatio,
     );
+  }
+
+  /** The configured renderer pixel ratio, or the engine's capped device default. */
+  public get pixelRatio(): number {
+    const pixelRatio = this.options.pixelRatio;
+    return pixelRatio !== undefined && pixelRatio > 0
+      ? pixelRatio
+      : Math.min(window.devicePixelRatio, 2);
   }
 
   /** Remove a pipeline only when it is the currently registered instance. */
