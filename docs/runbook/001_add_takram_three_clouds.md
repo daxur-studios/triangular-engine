@@ -466,3 +466,8 @@ Acceptance criteria:
 - [CloudsEffect source](https://github.com/takram-design-engineering/three-geospatial/blob/main/packages/clouds/src/CloudsEffect.ts)
 - [Clouds R3F wrapper source](https://github.com/takram-design-engineering/three-geospatial/blob/main/packages/clouds/src/r3f/Clouds.tsx)
 - [Atmosphere package source](https://github.com/takram-design-engineering/three-geospatial/tree/main/packages/atmosphere)
+### Declarative parity follow-up
+
+- Exposed `fov`, `near`, and `far` on triangular-engine's `<orbitControls>` camera.
+- Exposed `cloudShadows` on `<takram-aerial-perspective>`.
+- The `/takram-clouds` comparison disables aerial cloud-shadow composition because the original spike only connected `atmosphereOverlay`; it also matches the spike camera projection (`60`, `1`, `300000`).

@@ -16,6 +16,7 @@ export class TakramAtmosphereService {
   private readonly generator: PrecomputedTexturesGenerator;
   private clouds: CloudsEffect | undefined;
   private aerialPerspective: AerialPerspectiveEffect | undefined;
+  private cloudShadowsEnabled = true;
 
   readonly atmosphere = new AtmosphereParameters();
   readonly sunDirection = new Vector3(1, 0.7, 0.4).normalize();
@@ -82,6 +83,11 @@ export class TakramAtmosphereService {
     }
   }
 
+  setCloudShadowsEnabled(enabled: boolean): void {
+    this.cloudShadowsEnabled = enabled;
+    this.routeCloudBuffers();
+  }
+
   applySharedState(): void {
     const textures = this.generator.textures;
     if (this.clouds) {
@@ -109,9 +115,12 @@ export class TakramAtmosphereService {
   private routeCloudBuffers(): void {
     if (!this.aerialPerspective) return;
     this.aerialPerspective.overlay = this.clouds?.atmosphereOverlay ?? null;
-    this.aerialPerspective.shadow = this.clouds?.atmosphereShadow ?? null;
-    this.aerialPerspective.shadowLength =
-      this.clouds?.atmosphereShadowLength ?? null;
+    this.aerialPerspective.shadow = this.cloudShadowsEnabled
+      ? (this.clouds?.atmosphereShadow ?? null)
+      : null;
+    this.aerialPerspective.shadowLength = this.cloudShadowsEnabled
+      ? (this.clouds?.atmosphereShadowLength ?? null)
+      : null;
   }
 }
 

@@ -28,6 +28,8 @@ export class TakramAerialPerspectiveComponent
   readonly skyLight = input(false);
   readonly transmittance = input(true);
   readonly inscatter = input(true);
+  /** Compose cloud shadow and light-shaft buffers into aerial perspective. */
+  readonly cloudShadows = input(true);
 
   private aerialPerspective: AerialPerspectiveEffect | undefined;
 
@@ -35,6 +37,7 @@ export class TakramAerialPerspectiveComponent
     super();
     effect(() => {
       const settings = this.settings();
+      this.atmosphere.setCloudShadowsEnabled(this.cloudShadows());
       if (this.aerialPerspective) {
         Object.assign(this.aerialPerspective, settings);
       }

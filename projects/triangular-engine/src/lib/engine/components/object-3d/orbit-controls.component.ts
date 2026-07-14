@@ -48,6 +48,9 @@ export class OrbitControlsComponent implements OnDestroy {
 
   readonly target = input<Vector3Tuple | Object3D>();
   readonly cameraPosition = input<Vector3Tuple>();
+  readonly fov = input(50);
+  readonly near = input(0.1);
+  readonly far = input(Number.MAX_SAFE_INTEGER);
   /** Move both target and camera position by adding this vector to it */
   readonly moveBy = input<Vector3Tuple>();
 
@@ -69,6 +72,7 @@ export class OrbitControlsComponent implements OnDestroy {
     this.#initTargetChanges();
     // Update OrbitControls camera position
     this.#initCameraPositionChanges();
+    this.#initCameraProjectionChanges();
     // Move both target and camera position by adding this vector to it
     this.#initMoveByChanges();
 
@@ -135,6 +139,14 @@ export class OrbitControlsComponent implements OnDestroy {
       }
     });
   }
+  #initCameraProjectionChanges() {
+    effect(() => {
+      this.internalCamera.fov = this.fov();
+      this.internalCamera.near = this.near();
+      this.internalCamera.far = this.far();
+      this.internalCamera.updateProjectionMatrix();
+    });
+  }
   #initMoveByChanges() {
     effect(() => {
       const moveBy = this.moveBy();
@@ -179,9 +191,6 @@ export class OrbitControlsComponent implements OnDestroy {
     orbit.enableDamping = true;
     //   this.controls.zoomSpeed = 100;
     const camera = orbit.object as PerspectiveCamera;
-    camera.far = Number.MAX_SAFE_INTEGER;
-    camera.updateProjectionMatrix();
-
     orbit.addEventListener('change', () => {
       if (!this.isActive()) return;
 
