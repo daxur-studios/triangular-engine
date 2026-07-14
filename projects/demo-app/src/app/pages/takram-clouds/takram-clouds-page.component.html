@@ -1,32 +1,41 @@
+<app-takram-cloud-controls #controls />
+
 <scene>
   <orbitControls
     [cameraPosition]="[0, 100, 1500]"
     [target]="[0, 800, 0]"
     [upVector]="[0, 1, 0]"
-    [fov]="60"
-    [near]="1"
-    [far]="300000"
+    [fov]="controls.cameraFov()"
+    [near]="controls.cameraNear()"
+    [far]="controls.cameraFar()"
   />
 
   <postprocessing-composer>
     <takram-atmosphere>
       <takram-clouds
-        qualityPreset="low"
-        [coverage]="0.45"
-        [resolutionScale]="0.5"
-        [shadowCascadeCount]="1"
+        [qualityPreset]="controls.qualityPreset()"
+        [coverage]="controls.coverage()"
+        [resolutionScale]="controls.resolutionScale()"
+        [temporalUpscale]="controls.temporalUpscale()"
+        [shapeDetail]="controls.shapeDetail()"
+        [turbulence]="controls.turbulence()"
+        [haze]="controls.haze()"
+        [lightShafts]="controls.lightShafts()"
+        [localWeatherVelocity]="[controls.localWeatherVelocityX(), 0]"
+        [shadowCascadeCount]="0"
       >
         <takram-cloud-layer
           channel="r"
-          [altitude]="750"
-          [height]="650"
-          [densityScale]="0.2"
+          [altitude]="controls.altitude()"
+          [height]="controls.height()"
+          [densityScale]="controls.densityScale()"
           [shadow]="false"
         />
       </takram-clouds>
 
       <takram-aerial-perspective [sky]="true" [cloudShadows]="false" />
     </takram-atmosphere>
+    <toneMappingEffect />
   </postprocessing-composer>
 </scene>
 

@@ -3,6 +3,13 @@
   min-height: 0;
 }
 
+app-takram-cloud-controls {
+  position: absolute;
+  right: 1rem;
+  top: 1rem;
+  z-index: 2;
+}
+
 aside {
   position: absolute;
   top: 1rem;

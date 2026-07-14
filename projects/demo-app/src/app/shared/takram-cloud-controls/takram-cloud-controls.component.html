@@ -1,0 +1,25 @@
+<details open>
+  <summary>Shared cloud parameters</summary>
+
+  <label>
+    Resolution <output>{{ resolutionScale() }}</output>
+    <input type="range" min="0.25" max="1" step="0.05" [value]="resolutionScale()" (input)="setNumber(resolutionScale, $event)" />
+  </label>
+  <label>
+    Coverage <output>{{ coverage() }}</output>
+    <input type="range" min="0" max="1" step="0.01" [value]="coverage()" (input)="setNumber(coverage, $event)" />
+  </label>
+  <label>
+    Density <output>{{ densityScale() }}</output>
+    <input type="range" min="0" max="1" step="0.01" [value]="densityScale()" (input)="setNumber(densityScale, $event)" />
+  </label>
+  <label>
+    Weather speed <output>{{ localWeatherVelocityX() }}</output>
+    <input type="range" min="0" max="0.01" step="0.0005" [value]="localWeatherVelocityX()" (input)="setNumber(localWeatherVelocityX, $event)" />
+  </label>
+  <label class="toggle"><input type="checkbox" [checked]="temporalUpscale()" (change)="temporalUpscale.set($any($event.target).checked)" /> Temporal upscale</label>
+  <label class="toggle"><input type="checkbox" [checked]="shapeDetail()" (change)="shapeDetail.set($any($event.target).checked)" /> Shape detail</label>
+  <label class="toggle"><input type="checkbox" [checked]="turbulence()" (change)="turbulence.set($any($event.target).checked)" /> Turbulence</label>
+  <label class="toggle"><input type="checkbox" [checked]="haze()" (change)="haze.set($any($event.target).checked)" /> Haze</label>
+  <label class="toggle"><input type="checkbox" [checked]="lightShafts()" (change)="lightShafts.set($any($event.target).checked)" /> Light shafts</label>
+</details>

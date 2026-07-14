@@ -1,0 +1,16 @@
+:host {
+  background: rgb(8 14 23 / 82%);
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 0.5rem;
+  color: #dce9f5;
+  display: block;
+  font: 12px/1.4 ui-monospace, monospace;
+  padding: 0.65rem 0.8rem;
+  pointer-events: auto;
+  width: 16rem;
+}
+
+summary { cursor: pointer; color: white; font-weight: 700; }
+label { display: grid; grid-template-columns: 1fr auto; gap: 0.2rem 0.5rem; margin-top: 0.45rem; }
+input[type='range'] { grid-column: 1 / -1; width: 100%; }
+.toggle { display: flex; align-items: center; }

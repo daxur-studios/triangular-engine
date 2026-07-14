@@ -471,3 +471,6 @@ Acceptance criteria:
 - Exposed `fov`, `near`, and `far` on triangular-engine's `<orbitControls>` camera.
 - Exposed `cloudShadows` on `<takram-aerial-perspective>`.
 - The `/takram-clouds` comparison disables aerial cloud-shadow composition because the original spike only connected `atmosphereOverlay`; it also matches the spike camera projection (`60`, `1`, `300000`).
+- Added one standalone shared controls component used by both `/takram-clouds-spike` and `/takram-clouds`; its defaults are the spike preset and changes update both implementations through the same parameter shape.
+- Added declarative `localWeatherVelocity` support, matching the spike's `(0.002, 0)` setting.
+- Restored and preserved the spike's `shadow.cascadeCount = 0`; the declarative comparison now uses the same value while aerial cloud-shadow composition is disabled.
