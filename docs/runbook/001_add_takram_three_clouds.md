@@ -290,12 +290,12 @@ Exit gate: clouds render and animate without R3F, even before full atmosphere co
 
 ### Phase 4 — Atmosphere and aerial perspective
 
-- [ ] Implement atmosphere state/service scoped to an Angular scene subtree.
-- [ ] Load or generate atmosphere lookup textures.
-- [ ] Implement `TakramAerialPerspectiveComponent`.
-- [ ] Route cloud overlay, shadow, and shadow-length buffers.
-- [ ] Synchronise atmosphere parameters across effects.
-- [ ] Synchronise sun direction and world/ECEF transforms.
+- [x] Implement atmosphere state/service scoped to an Angular scene subtree.
+- [x] Load or generate atmosphere lookup textures.
+- [x] Implement `TakramAerialPerspectiveComponent`.
+- [x] Route cloud overlay, shadow, and shadow-length buffers.
+- [x] Synchronise atmosphere parameters across effects.
+- [x] Synchronise sun direction and world/ECEF transforms.
 - [ ] Implement optional sun and sky lights.
 - [ ] Verify cloud shadows on opaque scene geometry.
 - [ ] Verify sky rendering and light shafts.
@@ -444,6 +444,19 @@ Acceptance criteria:
 - Added a component-scoped default asset service for weather, turbulence, shape-volume, shape-detail-volume, and STBN textures, including GPU disposal.
 - The default asset base URL is `/takram-clouds`; consuming applications must copy the Takram cloud assets to that deployment path or provide a different base URL.
 - This is not yet a standalone visual milestone: the proven integration requires the cloud atmosphere overlay to be routed through `AerialPerspectiveEffect`, which remains the next phase.
+
+### 2026-07-14 — M5 atmosphere composition started
+
+- Added a subtree-scoped atmosphere service that owns the shared atmosphere parameters, runtime-generated lookup textures, sun direction, and world/ECEF transform.
+- Added `TakramAtmosphereComponent` and `TakramAerialPerspectiveComponent`.
+- Clouds register with the atmosphere service, which routes their overlay, shadow, and shadow-length buffers into aerial perspective and keeps shared state aligned.
+- The generic `postprocessing` composer now explicitly discovers nested projected effects, allowing clouds and aerial perspective to live inside `<takram-atmosphere>`.
+- The triangular-engine development build passes. Next: migrate the working spike settings into a declarative demo and visually verify sky/cloud composition before adding scene lights and geometry-shadow checks.
+- Added `/takram-clouds` as an isolated declarative adapter test page under the demo application's `pages` directory. It mirrors the proven M1 camera and single-layer settings and includes triangular-engine orbit controls.
+- Added `IEngineOptions.pixelRatio`; when omitted, the existing `min(devicePixelRatio, 2)` default remains. The renderer and active postprocessing pipeline now consistently use the configured value on creation and resize.
+- Exposed Takram's cloud `shadow.cascadeCount` as `[shadowCascadeCount]` on `<takram-clouds>`, with validation for Takram's supported range of 1–4.
+- Set the declarative page to pixel ratio `1`, antialiasing off, logarithmic depth off, and the minimum one cloud-shadow cascade. A zero cascade count was tested but rejected: Takram emits zero-length GLSL arrays and incomplete layered framebuffers, so zero is not a supported way to disable its shadow pass.
+- Both the triangular-engine package and demo application development builds pass with these controls.
 
 ## References
 

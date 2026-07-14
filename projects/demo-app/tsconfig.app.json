@@ -7,6 +7,9 @@
       "triangular-engine": ["projects/triangular-engine/src/public-api"],
       "triangular-engine/postprocessing": [
         "projects/triangular-engine/postprocessing/public-api"
+      ],
+      "triangular-engine/takram": [
+        "projects/triangular-engine/takram/public-api"
       ]
     },
     "outDir": "../../out-tsc/app",

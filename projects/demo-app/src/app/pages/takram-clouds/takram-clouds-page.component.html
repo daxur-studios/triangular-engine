@@ -1,0 +1,33 @@
+<scene>
+  <orbitControls
+    [cameraPosition]="[0, 100, 1500]"
+    [target]="[0, 800, 0]"
+    [upVector]="[0, 1, 0]"
+  />
+
+  <postprocessing-composer>
+    <takram-atmosphere>
+      <takram-clouds
+        qualityPreset="low"
+        [coverage]="0.45"
+        [resolutionScale]="0.5"
+        [shadowCascadeCount]="1"
+      >
+        <takram-cloud-layer
+          channel="r"
+          [altitude]="750"
+          [height]="650"
+          [densityScale]="0.2"
+          [shadow]="false"
+        />
+      </takram-clouds>
+
+      <takram-aerial-perspective [sky]="true" />
+    </takram-atmosphere>
+  </postprocessing-composer>
+</scene>
+
+<aside>
+  <strong>Takram adapter · declarative</strong>
+  <span>One cloud layer · pixel ratio 1 · one shadow cascade · resolution 0.5</span>
+</aside>

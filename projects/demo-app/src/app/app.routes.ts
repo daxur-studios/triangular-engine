@@ -16,4 +16,11 @@ export const routes: Routes = [
         ({ TakramCloudsSpikeComponent }) => TakramCloudsSpikeComponent,
       ),
   },
+  {
+    path: 'takram-clouds',
+    loadComponent: () =>
+      import('./pages/takram-clouds/takram-clouds-page.component').then(
+        ({ TakramCloudsPageComponent }) => TakramCloudsPageComponent,
+      ),
+  },
 ];

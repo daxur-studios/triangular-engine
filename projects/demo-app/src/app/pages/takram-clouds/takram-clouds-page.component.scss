@@ -1,0 +1,19 @@
+:host {
+  position: relative;
+  min-height: 0;
+}
+
+aside {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 1;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.65rem 0.8rem;
+  color: white;
+  font: 13px/1.35 system-ui, sans-serif;
+  background: rgb(0 0 0 / 55%);
+  border-radius: 0.35rem;
+  pointer-events: none;
+}

@@ -44,6 +44,8 @@ export class TakramCloudsComponent
   readonly turbulence = input(true);
   readonly haze = input(true);
   readonly lightShafts = input(true);
+  /** Number of Takram cloud-shadow cascades. Takram supports 1 through 4. */
+  readonly shadowCascadeCount = input<number | undefined>(undefined);
 
   private clouds: CloudsEffect | undefined;
   private readonly atmosphere = inject(TakramAtmosphereService, {
@@ -65,6 +67,7 @@ export class TakramCloudsComponent
         haze: this.haze(),
         lightShafts: this.lightShafts(),
       };
+      const shadowCascadeCount = this.shadowCascadeCount();
 
       if (values.length > 4) {
         throw new Error('Takram clouds support at most four cloud layers.');
@@ -72,11 +75,19 @@ export class TakramCloudsComponent
       if (!this.clouds) return;
 
       Object.assign(this.clouds, settings);
+      if (shadowCascadeCount !== undefined) {
+        this.clouds.shadow.cascadeCount = validateShadowCascadeCount(
+          shadowCascadeCount,
+        );
+      }
       this.clouds.cloudLayers.reset().set(values);
     });
   }
 
   override createEffect(camera: Camera): CloudsEffect {
+    if (this.clouds) {
+      this.atmosphere?.unregisterClouds(this.clouds);
+    }
     this.clouds = new CloudsEffect(camera, {
       resolutionScale: this.resolutionScale(),
     });
@@ -107,6 +118,12 @@ export class TakramCloudsComponent
     clouds.turbulence = this.turbulence();
     clouds.haze = this.haze();
     clouds.lightShafts = this.lightShafts();
+    const shadowCascadeCount = this.shadowCascadeCount();
+    if (shadowCascadeCount !== undefined) {
+      clouds.shadow.cascadeCount = validateShadowCascadeCount(
+        shadowCascadeCount,
+      );
+    }
 
     const layers = this.layers();
     if (layers.length > 4) {
@@ -114,4 +131,11 @@ export class TakramCloudsComponent
     }
     clouds.cloudLayers.reset().set(layers.map((layer) => layer.toCloudLayer()));
   }
+}
+
+function validateShadowCascadeCount(value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > 4) {
+    throw new Error('Takram shadowCascadeCount must be an integer from 1 to 4.');
+  }
+  return value;
 }

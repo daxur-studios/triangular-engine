@@ -42,6 +42,9 @@ export class TakramAerialPerspectiveComponent
   }
 
   override createEffect(camera: Camera): AerialPerspectiveEffect {
+    if (this.aerialPerspective) {
+      this.atmosphere.unregisterAerialPerspective(this.aerialPerspective);
+    }
     const effect = new AerialPerspectiveEffect(
       camera,
       this.settings(),
