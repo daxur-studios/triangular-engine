@@ -3,8 +3,17 @@ import {
   TakramCloudLayerComponent,
   TakramCloudsComponent,
 } from './clouds';
+import {
+  TakramAerialPerspectiveComponent,
+  TakramAtmosphereComponent,
+} from './atmosphere';
 
-const components = [TakramCloudLayerComponent, TakramCloudsComponent] as const;
+const components = [
+  TakramAtmosphereComponent,
+  TakramAerialPerspectiveComponent,
+  TakramCloudLayerComponent,
+  TakramCloudsComponent,
+] as const;
 
 @NgModule({
   imports: [...components],

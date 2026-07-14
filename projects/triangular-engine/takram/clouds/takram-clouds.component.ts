@@ -2,6 +2,7 @@ import {
   Component,
   contentChildren,
   effect,
+  inject,
   input,
   OnDestroy,
 } from '@angular/core';
@@ -13,6 +14,7 @@ import type { Camera } from 'three';
 import { PostprocessingEffectComponent } from 'triangular-engine/postprocessing';
 import { TakramCloudAssetsService } from './takram-cloud-assets.service';
 import { TakramCloudLayerComponent } from './takram-cloud-layer.component';
+import { TakramAtmosphereService } from '../atmosphere/takram-atmosphere.service';
 
 /** Declarative adapter for Takram's framework-independent CloudsEffect. */
 @Component({
@@ -44,6 +46,9 @@ export class TakramCloudsComponent
   readonly lightShafts = input(true);
 
   private clouds: CloudsEffect | undefined;
+  private readonly atmosphere = inject(TakramAtmosphereService, {
+    optional: true,
+  });
 
   constructor(private readonly assets: TakramCloudAssetsService) {
     super();
@@ -76,11 +81,13 @@ export class TakramCloudsComponent
       resolutionScale: this.resolutionScale(),
     });
     this.applyInputs(this.clouds);
+    this.atmosphere?.registerClouds(this.clouds);
     void this.assets.loadDefaults(this.clouds, this.assetBaseUrl());
     return this.clouds;
   }
 
   ngOnDestroy(): void {
+    if (this.clouds) this.atmosphere?.unregisterClouds(this.clouds);
     this.clouds?.dispose();
     this.clouds = undefined;
     this.assets.dispose();

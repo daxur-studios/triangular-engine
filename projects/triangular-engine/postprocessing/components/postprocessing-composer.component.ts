@@ -36,7 +36,9 @@ export class PostprocessingComposerComponent implements OnInit, OnDestroy {
   readonly enabled = input(true);
   readonly enableNormalPass = input(false);
   readonly frameBufferType = input<TextureDataType>(HalfFloatType);
-  readonly effectComponents = contentChildren(PostprocessingEffectComponent);
+  readonly effectComponents = contentChildren(PostprocessingEffectComponent, {
+    descendants: true,
+  });
 
   private composer: EffectComposer | undefined;
   private renderPass: RenderPass | undefined;
