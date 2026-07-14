@@ -3,6 +3,7 @@ import {
   Camera,
   Clock,
   Scene,
+  ToneMapping,
   WebGLRenderer,
   WebGLRendererParameters,
 } from 'three';
@@ -59,6 +60,11 @@ export interface IEngineOptions {
    * Lower values reduce GPU fill cost; 1 renders at CSS-pixel resolution.
    */
   pixelRatio?: number;
+
+  /** Renderer tone mapping. Defaults to THREE.ACESFilmicToneMapping. */
+  toneMapping?: ToneMapping;
+  /** Renderer tone-mapping exposure. Defaults to 1. */
+  toneMappingExposure?: number;
 
   transparent?: boolean;
   webGLRendererParameters?: WebGLRendererParameters;

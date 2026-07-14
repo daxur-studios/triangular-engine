@@ -319,8 +319,10 @@ export class EngineService implements IEngine {
 
     this.renderer.info.autoReset = false;
 
-    this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMapping =
+      this.options.toneMapping ?? ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure =
+      this.options.toneMappingExposure ?? 1.0;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = PCFShadowMap;
 
@@ -354,8 +356,8 @@ export class EngineService implements IEngine {
     renderer.info.autoReset = false;
 
     // Keep tone mapping alignment with WebGL defaults
-    renderer.toneMapping = ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
+    renderer.toneMapping = this.options.toneMapping ?? ACESFilmicToneMapping;
+    renderer.toneMappingExposure = this.options.toneMappingExposure ?? 1.0;
 
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = PCFShadowMap;

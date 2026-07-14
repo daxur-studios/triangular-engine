@@ -10,7 +10,7 @@ import {
   CloudsEffect,
   type CloudsQualityPreset,
 } from '@takram/three-clouds';
-import type { Camera } from 'three';
+import { Vector2, type Camera, type Vector2Tuple } from 'three';
 import { PostprocessingEffectComponent } from 'triangular-engine/postprocessing';
 import { TakramCloudAssetsService } from './takram-cloud-assets.service';
 import { TakramCloudLayerComponent } from './takram-cloud-layer.component';
@@ -44,7 +44,8 @@ export class TakramCloudsComponent
   readonly turbulence = input(true);
   readonly haze = input(true);
   readonly lightShafts = input(true);
-  /** Number of Takram cloud-shadow cascades. Takram supports 1 through 4. */
+  readonly localWeatherVelocity = input<Vector2Tuple>([0, 0]);
+  /** Number of cloud-shadow cascades. Zero disables the shadow cascade pass. */
   readonly shadowCascadeCount = input<number | undefined>(undefined);
 
   private clouds: CloudsEffect | undefined;
@@ -75,6 +76,9 @@ export class TakramCloudsComponent
       if (!this.clouds) return;
 
       Object.assign(this.clouds, settings);
+      this.clouds.localWeatherVelocity.copy(
+        new Vector2(...this.localWeatherVelocity()),
+      );
       if (shadowCascadeCount !== undefined) {
         this.clouds.shadow.cascadeCount = validateShadowCascadeCount(
           shadowCascadeCount,
@@ -118,6 +122,7 @@ export class TakramCloudsComponent
     clouds.turbulence = this.turbulence();
     clouds.haze = this.haze();
     clouds.lightShafts = this.lightShafts();
+    clouds.localWeatherVelocity.set(...this.localWeatherVelocity());
     const shadowCascadeCount = this.shadowCascadeCount();
     if (shadowCascadeCount !== undefined) {
       clouds.shadow.cascadeCount = validateShadowCascadeCount(
@@ -134,8 +139,8 @@ export class TakramCloudsComponent
 }
 
 function validateShadowCascadeCount(value: number): number {
-  if (!Number.isInteger(value) || value < 1 || value > 4) {
-    throw new Error('Takram shadowCascadeCount must be an integer from 1 to 4.');
+  if (!Number.isInteger(value) || value < 0 || value > 4) {
+    throw new Error('Takram shadowCascadeCount must be an integer from 0 to 4.');
   }
   return value;
 }
