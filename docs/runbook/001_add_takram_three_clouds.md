@@ -5,7 +5,7 @@
 - State: Planning
 - Target entry point: `triangular-engine/takram`
 - Initial renderer: WebGL
-- Last updated: 2026-07-13
+- Last updated: 2026-07-14
 
 ## Objective
 
@@ -276,13 +276,13 @@ Exit gate: triangular-engine can declaratively render an ordinary `postprocessin
 
 ### Phase 3 — Cloud-only adapter
 
-- [ ] Scaffold the `triangular-engine/takram` secondary entry point.
-- [ ] Implement `TakramCloudsComponent` around `CloudsEffect`.
-- [ ] Implement `TakramCloudLayerComponent` around `CloudLayer`.
-- [ ] Project cloud-layer children into the parent effect.
-- [ ] Implement default cloud asset loading.
-- [ ] Implement volume and STBN loaders.
-- [ ] Add quality preset, coverage, resolution scale, temporal upscale, haze, turbulence, and light-shaft inputs.
+- [x] Scaffold the `triangular-engine/takram` secondary entry point.
+- [x] Implement `TakramCloudsComponent` around `CloudsEffect`.
+- [x] Implement `TakramCloudLayerComponent` around `CloudLayer`.
+- [x] Project cloud-layer children into the parent effect.
+- [x] Implement default cloud asset loading.
+- [x] Implement volume and STBN loaders.
+- [x] Add quality preset, coverage, resolution scale, temporal upscale, haze, turbulence, and light-shaft inputs.
 - [ ] Support custom `Texture`, `Data3DTexture`, and procedural texture inputs.
 - [ ] Add clear errors for invalid renderer, camera, layer count, and failed assets.
 
@@ -429,6 +429,21 @@ Acceptance criteria:
 - Added a minimal `VignetteEffectComponent` and switched the normal engine demo to it as the non-Takram proof.
 - The full triangular-engine package build, including all secondary entry points, and the demo development build pass.
 - Browser visual confirmation of the normal demo remains the M3 exit check.
+
+### 2026-07-14 — M4 cloud adapter started
+
+- Added the optional `triangular-engine/takram` secondary entry point with Takram atmosphere, clouds, geospatial, and `postprocessing` peer metadata.
+- Added `TakramCloudLayerComponent`, mapping the public cloud-layer inputs to Takram's framework-independent `CloudLayerLike` type.
+- The full triangular-engine development build passes with the new entry point.
+- No demo runtime changed in this slice. Next: implement the parent `TakramCloudsComponent` and its default asset loaders.
+
+### 2026-07-14 — M4 cloud parent and assets
+
+- Added `TakramCloudsComponent` as a projected `postprocessing` effect with reactive quality, coverage, resolution, temporal, detail, turbulence, haze, and light-shaft inputs.
+- Projected up to four `TakramCloudLayerComponent` children into Takram's packed cloud-layer uniforms; a fifth layer produces a clear error.
+- Added a component-scoped default asset service for weather, turbulence, shape-volume, shape-detail-volume, and STBN textures, including GPU disposal.
+- The default asset base URL is `/takram-clouds`; consuming applications must copy the Takram cloud assets to that deployment path or provide a different base URL.
+- This is not yet a standalone visual milestone: the proven integration requires the cloud atmosphere overlay to be routed through `AerialPerspectiveEffect`, which remains the next phase.
 
 ## References
 
