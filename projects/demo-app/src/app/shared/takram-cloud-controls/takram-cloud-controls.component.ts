@@ -1,5 +1,13 @@
-import { ChangeDetectionStrategy, Component, computed, inject, Injectable, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  Injectable,
+  signal,
+} from '@angular/core';
 import type { CloudsQualityPreset } from '@takram/three-clouds';
+import { TakramCloudDemoTextures } from './takram-cloud-demo-textures.service';
 
 export interface TakramCloudDemoParameters {
   qualityPreset: CloudsQualityPreset;
@@ -72,4 +80,5 @@ export class TakramCloudControlsStore {
 })
 export class TakramCloudControlsComponent {
   readonly state = inject(TakramCloudControlsStore);
+  readonly textures = inject(TakramCloudDemoTextures);
 }

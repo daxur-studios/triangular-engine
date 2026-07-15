@@ -3,6 +3,8 @@ import {
   CLOUD_SHAPE_DETAIL_TEXTURE_SIZE,
   CLOUD_SHAPE_TEXTURE_SIZE,
   type CloudsEffect,
+  type Procedural3DTexture,
+  type ProceduralTexture,
 } from '@takram/three-clouds';
 import {
   DataTextureLoader,
@@ -23,30 +25,42 @@ import {
 } from 'three';
 
 export interface TakramCloudTextures {
+  localWeather?: Texture | ProceduralTexture;
+  turbulence?: Texture | ProceduralTexture;
+  shape?: Data3DTexture | Procedural3DTexture;
+  shapeDetail?: Data3DTexture | Procedural3DTexture;
+  stbn?: Data3DTexture;
+}
+
+type TakramDefaultCloudTextures = {
   localWeather?: Texture;
   turbulence?: Texture;
   shape?: Data3DTexture;
   shapeDetail?: Data3DTexture;
   stbn?: Data3DTexture;
-}
+};
 
 /** Owns the default GPU textures used by one declarative cloud component. */
 @Injectable()
 export class TakramCloudAssetsService {
-  private defaults: TakramCloudTextures | undefined;
+  private defaults: TakramDefaultCloudTextures = {};
   private ownedTextures: Texture[] = [];
+  private defaultAssetBaseUrl: string | undefined;
 
   loadDefaults(
     effect: CloudsEffect,
     assetBaseUrl: string,
     custom: TakramCloudTextures = {},
   ): Promise<void> {
-    if (this.defaults) {
-      this.assign(effect, { ...this.defaults, ...withoutUndefined(custom) });
-      return Promise.resolve();
-    }
-
     const baseUrl = assetBaseUrl.replace(/\/$/, '');
+    if (
+      this.defaultAssetBaseUrl !== undefined &&
+      this.defaultAssetBaseUrl !== baseUrl
+    ) {
+      this.dispose();
+    }
+    this.defaultAssetBaseUrl = baseUrl;
+
     const manager = new LoadingManager();
     const completed = new Promise<void>((resolve, reject) => {
       manager.onLoad = () => resolve();
@@ -55,6 +69,7 @@ export class TakramCloudAssetsService {
     });
 
     const textureLoader = new TextureLoader(manager);
+    let startedLoad = false;
     const configure2D = (texture: Texture): void => {
       texture.minFilter = LinearMipMapLinearFilter;
       texture.magFilter = LinearFilter;
@@ -62,14 +77,22 @@ export class TakramCloudAssetsService {
       texture.wrapT = RepeatWrapping;
       texture.colorSpace = NoColorSpace;
     };
-    const localWeather = custom.localWeather ?? textureLoader.load(
-      `${baseUrl}/local_weather.png`,
-      configure2D,
-    );
-    const turbulence = custom.turbulence ?? textureLoader.load(
-      `${baseUrl}/turbulence.png`,
-      configure2D,
-    );
+    if (custom.localWeather === undefined && !this.defaults.localWeather) {
+      startedLoad = true;
+      this.defaults.localWeather = textureLoader.load(
+        `${baseUrl}/local_weather.png`,
+        configure2D,
+      );
+      this.ownedTextures.push(this.defaults.localWeather);
+    }
+    if (custom.turbulence === undefined && !this.defaults.turbulence) {
+      startedLoad = true;
+      this.defaults.turbulence = textureLoader.load(
+        `${baseUrl}/turbulence.png`,
+        configure2D,
+      );
+      this.ownedTextures.push(this.defaults.turbulence);
+    }
 
     const loadVolume = (url: string, size: number): Data3DTexture =>
       new DataTextureLoader(Data3DTexture, parseUint8Array, {
@@ -85,26 +108,30 @@ export class TakramCloudAssetsService {
         colorSpace: NoColorSpace,
         manager,
       }).load(url);
-    const shape = custom.shape ?? loadVolume(
-      `${baseUrl}/shape.bin`,
-      CLOUD_SHAPE_TEXTURE_SIZE,
-    );
-    const shapeDetail = custom.shapeDetail ?? loadVolume(
-      `${baseUrl}/shape_detail.bin`,
-      CLOUD_SHAPE_DETAIL_TEXTURE_SIZE,
-    );
-    const stbn = custom.stbn ?? new STBNLoader(manager).load(DEFAULT_STBN_URL);
+    if (custom.shape === undefined && !this.defaults.shape) {
+      startedLoad = true;
+      this.defaults.shape = loadVolume(
+        `${baseUrl}/shape.bin`,
+        CLOUD_SHAPE_TEXTURE_SIZE,
+      );
+      this.ownedTextures.push(this.defaults.shape);
+    }
+    if (custom.shapeDetail === undefined && !this.defaults.shapeDetail) {
+      startedLoad = true;
+      this.defaults.shapeDetail = loadVolume(
+        `${baseUrl}/shape_detail.bin`,
+        CLOUD_SHAPE_DETAIL_TEXTURE_SIZE,
+      );
+      this.ownedTextures.push(this.defaults.shapeDetail);
+    }
+    if (custom.stbn === undefined && !this.defaults.stbn) {
+      startedLoad = true;
+      this.defaults.stbn = new STBNLoader(manager).load(DEFAULT_STBN_URL);
+      this.ownedTextures.push(this.defaults.stbn);
+    }
 
-    this.defaults = { localWeather, turbulence, shape, shapeDetail, stbn };
-    this.ownedTextures = [
-      custom.localWeather ? undefined : localWeather,
-      custom.turbulence ? undefined : turbulence,
-      custom.shape ? undefined : shape,
-      custom.shapeDetail ? undefined : shapeDetail,
-      custom.stbn ? undefined : stbn,
-    ].filter((texture): texture is Texture => texture !== undefined);
     this.assign(effect, { ...this.defaults, ...withoutUndefined(custom) });
-    return this.ownedTextures.length === 0 ? Promise.resolve() : completed;
+    return startedLoad ? completed : Promise.resolve();
   }
 
   /** Assigns caller-owned textures without transferring disposal ownership. */
@@ -115,11 +142,13 @@ export class TakramCloudAssetsService {
   dispose(): void {
     this.ownedTextures.forEach((texture) => texture.dispose());
     this.ownedTextures = [];
-    this.defaults = undefined;
+    this.defaults = {};
+    this.defaultAssetBaseUrl = undefined;
   }
 
   private assign(effect: CloudsEffect, textures: TakramCloudTextures): void {
-    if (textures.localWeather) effect.localWeatherTexture = textures.localWeather;
+    if (textures.localWeather)
+      effect.localWeatherTexture = textures.localWeather;
     if (textures.turbulence) effect.turbulenceTexture = textures.turbulence;
     if (textures.shape) effect.shapeTexture = textures.shape;
     if (textures.shapeDetail) effect.shapeDetailTexture = textures.shapeDetail;

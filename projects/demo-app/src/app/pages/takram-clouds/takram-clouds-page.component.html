@@ -6,7 +6,10 @@
   <ng-template enginePortal="top" lane="content">
     <aside class="demo-status">
       <strong>Takram adapter · declarative</strong>
-      <span>Spike-matched camera and composition · pixel ratio 1 · resolution 0.5</span>
+      <span
+        >Spike-matched camera and composition · pixel ratio 1 · resolution
+        0.5</span
+      >
     </aside>
   </ng-template>
 
@@ -22,6 +25,7 @@
   <postprocessing-composer>
     <takram-atmosphere>
       <takram-clouds
+        [localWeatherTexture]="textures.selectedTexture()"
         [qualityPreset]="controls.qualityPreset()"
         [coverage]="controls.coverage()"
         [resolutionScale]="controls.resolutionScale()"

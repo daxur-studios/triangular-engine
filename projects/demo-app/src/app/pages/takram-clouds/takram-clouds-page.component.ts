@@ -7,14 +7,21 @@ import {
   TakramCloudControlsComponent,
   TakramCloudControlsStore,
 } from '../../shared/takram-cloud-controls/takram-cloud-controls.component';
+import { TakramCloudDemoTextures } from '../../shared/takram-cloud-controls/takram-cloud-demo-textures.service';
 
 @Component({
   selector: 'app-takram-clouds-page',
-  imports: [EngineModule, PostprocessingModule, TakramModule, TakramCloudControlsComponent],
+  imports: [
+    EngineModule,
+    PostprocessingModule,
+    TakramModule,
+    TakramCloudControlsComponent,
+  ],
   templateUrl: './takram-clouds-page.component.html',
   styleUrl: './takram-clouds-page.component.scss',
   providers: [
     TakramCloudControlsStore,
+    TakramCloudDemoTextures,
     EngineService.provide({
       showFPS: true,
       pixelRatio: 1,
@@ -32,4 +39,5 @@ import {
 })
 export class TakramCloudsPageComponent {
   readonly controls = inject(TakramCloudControlsStore);
+  readonly textures = inject(TakramCloudDemoTextures);
 }

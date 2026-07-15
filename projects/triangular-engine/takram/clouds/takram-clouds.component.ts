@@ -9,6 +9,8 @@ import {
 import {
   CloudsEffect,
   type CloudsQualityPreset,
+  type Procedural3DTexture,
+  type ProceduralTexture,
 } from '@takram/three-clouds';
 import {
   Vector2,
@@ -43,13 +45,13 @@ export class TakramCloudsComponent
 
   readonly assetBaseUrl = input('/takram-clouds');
   /** Optional caller-owned weather map. May be a loaded or procedural texture. */
-  readonly localWeatherTexture = input<Texture>();
+  readonly localWeatherTexture = input<Texture | ProceduralTexture>();
   /** Optional caller-owned turbulence map. May be a loaded or procedural texture. */
-  readonly turbulenceTexture = input<Texture>();
+  readonly turbulenceTexture = input<Texture | ProceduralTexture>();
   /** Optional caller-owned base cloud-noise volume. */
-  readonly shapeTexture = input<Data3DTexture>();
+  readonly shapeTexture = input<Data3DTexture | Procedural3DTexture>();
   /** Optional caller-owned detail cloud-noise volume. */
-  readonly shapeDetailTexture = input<Data3DTexture>();
+  readonly shapeDetailTexture = input<Data3DTexture | Procedural3DTexture>();
   /** Optional caller-owned spatiotemporal blue-noise volume. */
   readonly stbnTexture = input<Data3DTexture>();
   readonly qualityPreset = input<CloudsQualityPreset>('low');
@@ -96,12 +98,15 @@ export class TakramCloudsComponent
         new Vector2(...this.localWeatherVelocity()),
       );
       if (shadowCascadeCount !== undefined) {
-        this.clouds.shadow.cascadeCount = validateShadowCascadeCount(
-          shadowCascadeCount,
-        );
+        this.clouds.shadow.cascadeCount =
+          validateShadowCascadeCount(shadowCascadeCount);
       }
       this.clouds.cloudLayers.reset().set(values);
-      this.assets.assignCustom(this.clouds, this.customTextures());
+      void this.assets.loadDefaults(
+        this.clouds,
+        this.assetBaseUrl(),
+        this.customTextures(),
+      );
     });
   }
 
@@ -146,9 +151,8 @@ export class TakramCloudsComponent
     clouds.localWeatherVelocity.set(...this.localWeatherVelocity());
     const shadowCascadeCount = this.shadowCascadeCount();
     if (shadowCascadeCount !== undefined) {
-      clouds.shadow.cascadeCount = validateShadowCascadeCount(
-        shadowCascadeCount,
-      );
+      clouds.shadow.cascadeCount =
+        validateShadowCascadeCount(shadowCascadeCount);
     }
 
     const layers = this.layers();
@@ -171,7 +175,9 @@ export class TakramCloudsComponent
 
 function validateShadowCascadeCount(value: number): number {
   if (!Number.isInteger(value) || value < 0 || value > 4) {
-    throw new Error('Takram shadowCascadeCount must be an integer from 0 to 4.');
+    throw new Error(
+      'Takram shadowCascadeCount must be an integer from 0 to 4.',
+    );
   }
   return value;
 }

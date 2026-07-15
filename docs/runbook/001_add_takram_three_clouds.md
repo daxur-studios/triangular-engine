@@ -283,7 +283,7 @@ Exit gate: triangular-engine can declaratively render an ordinary `postprocessin
 - [x] Implement default cloud asset loading.
 - [x] Implement volume and STBN loaders.
 - [x] Add quality preset, coverage, resolution scale, temporal upscale, haze, turbulence, and light-shaft inputs.
-- [ ] Support custom `Texture`, `Data3DTexture`, and procedural texture inputs.
+- [x] Support custom `Texture`, `Data3DTexture`, and procedural texture inputs.
 - [ ] Add clear errors for invalid renderer, camera, layer count, and failed assets.
 
 Exit gate: clouds render and animate without R3F, even before full atmosphere composition is complete.
@@ -306,7 +306,7 @@ Exit gate: reproduce Takram's documented three-layer example with comparable out
 
 - [ ] Finalise selector and input naming conventions.
 - [ ] Add Angular signal-input updates without unnecessary effect reconstruction.
-- [ ] Add examples for default clouds, custom layers, custom weather, and procedural textures.
+- [x] Add examples for default clouds, custom layers, custom weather, and procedural textures.
 - [ ] Document performance presets and browser requirements.
 - [ ] Add unit tests for lifecycle, layer mapping, and buffer routing.
 - [ ] Add render/screenshot regression coverage where practical.
@@ -466,6 +466,7 @@ Acceptance criteria:
 - [CloudsEffect source](https://github.com/takram-design-engineering/three-geospatial/blob/main/packages/clouds/src/CloudsEffect.ts)
 - [Clouds R3F wrapper source](https://github.com/takram-design-engineering/three-geospatial/blob/main/packages/clouds/src/r3f/Clouds.tsx)
 - [Atmosphere package source](https://github.com/takram-design-engineering/three-geospatial/tree/main/packages/atmosphere)
+
 ### Declarative parity follow-up
 
 - Exposed `fov`, `near`, and `far` on triangular-engine's `<orbitControls>` camera.
@@ -474,3 +475,11 @@ Acceptance criteria:
 - Added one standalone shared controls component used by both `/takram-clouds-spike` and `/takram-clouds`; its defaults are the spike preset and changes update both implementations through the same parameter shape.
 - Added declarative `localWeatherVelocity` support, matching the spike's `(0.002, 0)` setting.
 - Restored and preserved the spike's `shadow.cascadeCount = 0`; the declarative comparison now uses the same value while aerial cloud-shadow composition is disabled.
+
+### 2026-07-15 — Custom and procedural cloud textures
+
+- Expanded the declarative cloud inputs to match Takram's native texture contracts: ordinary or procedural 2D weather/turbulence, ordinary or procedural 3D shape volumes, and `Data3DTexture` STBN.
+- Defined ownership explicitly: defaults loaded by the adapter are adapter-owned, while supplied textures and procedural generators remain caller-owned.
+- Default textures are now cached independently from custom inputs, so clearing a live custom input reliably loads or restores the default instead of retaining the initial override.
+- Added default, custom tileable `DataTexture`, and Takram `LocalWeather` procedural modes to `/takram-clouds`. The plain Three.js spike remains the frozen comparison baseline.
+- Both the triangular-engine and demo application development builds pass.

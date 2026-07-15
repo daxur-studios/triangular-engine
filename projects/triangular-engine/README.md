@@ -284,6 +284,39 @@ In any child component or page that lives inside the engine context, register te
 
 - Direct loaders/exporters: access via `LoaderService` if you need `BufferGeometryLoader`, `ObjectLoader`, `SVGLoader`, `STLLoader`, `FBXLoader`, `GLTFExporter`
 
+### Takram cloud textures
+
+`<takram-clouds>` loads its weather, turbulence, shape, shape-detail, and STBN
+defaults from `assetBaseUrl` (`/takram-clouds` by default). Applications using
+those defaults must copy the `@takram/three-clouds` assets to that path.
+
+Each texture can instead be supplied by the caller. Weather and turbulence
+accept either a Three.js `Texture` or Takram `ProceduralTexture`; shape and
+shape-detail accept either `Data3DTexture` or `Procedural3DTexture`. STBN accepts
+`Data3DTexture`.
+
+```ts
+import { DestroyRef, inject } from '@angular/core';
+import { LocalWeather } from '@takram/three-clouds';
+
+readonly localWeather = new LocalWeather();
+
+constructor() {
+  inject(DestroyRef).onDestroy(() => this.localWeather.dispose());
+}
+```
+
+```html
+<takram-clouds [localWeatherTexture]="localWeather">
+  <takram-cloud-layer channel="r" />
+</takram-clouds>
+```
+
+Provided textures and procedural generators remain caller-owned and must be
+disposed by the caller. Setting an input back to `undefined` restores the
+component-owned default. The `/takram-clouds` demo shows default, custom
+`DataTexture`, and Takram procedural weather sources.
+
 ## Troubleshooting
 
 ### 3D Canvas / Scene is 0 Height (Invisible)
