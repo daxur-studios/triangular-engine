@@ -318,6 +318,34 @@ component-owned default. The `/takram-clouds` demo shows default, custom
 
 ### Takram atmosphere lights
 
+Takram cloud shadows affect scene geometry through aerial-perspective
+post-processing, not through Three.js shadow maps. For that composition mode,
+render scene meshes as albedo with unlit materials, enable the composer's normal
+pass, and enable aerial sun/sky lighting:
+
+```html
+<postprocessing-composer [enableNormalPass]="true">
+  <takram-atmosphere>
+    <mesh>
+      <boxGeometry />
+      <meshBasicMaterial [params]="{ color: '#b58b62' }" />
+    </mesh>
+    <takram-clouds [shadowCascadeCount]="1">
+      <takram-cloud-layer channel="r" [shadow]="true" />
+    </takram-clouds>
+    <takram-aerial-perspective
+      [sunLight]="true"
+      [skyLight]="true"
+      [cloudShadows]="true"
+    />
+  </takram-atmosphere>
+</postprocessing-composer>
+```
+
+The composer supplies its view-space normal texture to effects that need it.
+Disabling `cloudShadows` is a useful A/B check: direct illumination on the
+geometry should brighten while the clouds remain visible.
+
 Place the optional atmosphere-aware lights inside `<takram-atmosphere>` when
 ordinary Three.js materials should receive the same sun and sky lighting as the
 cloud and aerial-perspective effects:
@@ -334,6 +362,11 @@ cloud and aerial-perspective effects:
 optional conventional Three.js `castShadow`. `<takram-sky-light>` supports
 `intensity` and `correctAltitude`. Both use the enclosing atmosphere's lookup
 textures, sun direction, and world/ECEF transform.
+
+Do not combine these real lights with aerial `sunLight`/`skyLight` on the same
+unmasked objects; that applies lighting twice. Conventional `castShadow` and
+`receiveShadow` remain a separate Three.js shadow-map path and do not make
+Takram's cloud-shadow texture affect a standard material.
 
 The Takram cloud adapter rejects non-WebGL/WebGL1 renderers, non-perspective
 cameras, more than four layers, and shadow cascade counts outside 1–4. A failed

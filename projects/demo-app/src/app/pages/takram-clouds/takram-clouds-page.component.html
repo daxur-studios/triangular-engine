@@ -1,6 +1,6 @@
 <scene>
   <ng-template enginePortal="right" lane="content">
-    <app-takram-cloud-controls />
+    <app-takram-cloud-controls [showSceneLightingControls]="true" />
   </ng-template>
 
   <ng-template enginePortal="top" lane="content">
@@ -22,28 +22,42 @@
     [far]="controls.cameraFar()"
   />
 
-  <postprocessing-composer>
+  <postprocessing-composer [enableNormalPass]="true">
     <takram-atmosphere>
-      <takram-sun-light [intensity]="1.5" />
-      <takram-sky-light [intensity]="0.7" />
+      @if (!controls.takramLighting()) {
+        <takram-sun-light [intensity]="1.5" />
+        <takram-sky-light [intensity]="0.7" />
+      }
 
       <mesh [position]="[0, -25, 0]" [receiveShadow]="true">
         <planeGeometry [params]="[5000, 5000]" orientation="horizontal" />
-        <meshStandardMaterial
-          [params]="{ color: '#73806b', roughness: 0.9, metalness: 0 }"
-        />
+        @if (controls.takramLighting()) {
+          <meshBasicMaterial [params]="{ color: '#73806b' }" />
+        } @else {
+          <meshStandardMaterial
+            [params]="{ color: '#73806b', roughness: 0.9, metalness: 0 }"
+          />
+        }
       </mesh>
       <mesh [position]="[-350, 125, 0]" [castShadow]="true">
         <boxGeometry [params]="[250, 300, 250]" />
-        <meshStandardMaterial
-          [params]="{ color: '#b58b62', roughness: 0.75, metalness: 0 }"
-        />
+        @if (controls.takramLighting()) {
+          <meshBasicMaterial [params]="{ color: '#b58b62' }" />
+        } @else {
+          <meshStandardMaterial
+            [params]="{ color: '#b58b62', roughness: 0.75, metalness: 0 }"
+          />
+        }
       </mesh>
       <mesh [position]="[300, 75, -150]" [castShadow]="true">
         <boxGeometry [params]="[180, 200, 180]" />
-        <meshStandardMaterial
-          [params]="{ color: '#8296a8', roughness: 0.65, metalness: 0 }"
-        />
+        @if (controls.takramLighting()) {
+          <meshBasicMaterial [params]="{ color: '#8296a8' }" />
+        } @else {
+          <meshStandardMaterial
+            [params]="{ color: '#8296a8', roughness: 0.65, metalness: 0 }"
+          />
+        }
       </mesh>
 
       <takram-clouds
@@ -68,7 +82,12 @@
         />
       </takram-clouds>
 
-      <takram-aerial-perspective [sky]="true" [cloudShadows]="true" />
+      <takram-aerial-perspective
+        [sky]="true"
+        [sunLight]="controls.takramLighting()"
+        [skyLight]="controls.takramLighting()"
+        [cloudShadows]="controls.cloudShadows()"
+      />
     </takram-atmosphere>
     <toneMappingEffect />
   </postprocessing-composer>

@@ -1,6 +1,6 @@
 import { Component, effect, input, OnDestroy } from '@angular/core';
 import { AerialPerspectiveEffect } from '@takram/three-atmosphere';
-import type { Camera } from 'three';
+import type { Camera, Texture } from 'three';
 import { PostprocessingEffectComponent } from 'triangular-engine/postprocessing';
 import { TakramAtmosphereService } from './takram-atmosphere.service';
 
@@ -56,6 +56,12 @@ export class TakramAerialPerspectiveComponent
     this.aerialPerspective = effect;
     this.atmosphere.registerAerialPerspective(effect);
     return effect;
+  }
+
+  override setNormalBuffer(texture: Texture | null): void {
+    if (this.aerialPerspective) {
+      this.aerialPerspective.normalBuffer = texture;
+    }
   }
 
   ngOnDestroy(): void {

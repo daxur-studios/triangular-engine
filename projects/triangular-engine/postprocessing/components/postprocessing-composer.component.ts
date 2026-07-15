@@ -135,7 +135,12 @@ export class PostprocessingComposerComponent implements OnInit, OnDestroy {
       composer.addPass(this.normalPass);
     }
 
-    const effects = children.map((child) => child.createEffect(camera));
+    const normalBuffer = this.normalPass?.texture ?? null;
+    const effects = children.map((child) => {
+      const created = child.createEffect(camera);
+      child.setNormalBuffer(normalBuffer);
+      return created;
+    });
     if (effects.length > 0) {
       this.effectPass = new EffectPass(camera, ...effects);
       composer.addPass(this.effectPass);

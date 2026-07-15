@@ -140,4 +140,22 @@
     />
     Light shafts</label
   >
+  @if (showSceneLightingControls()) {
+    <label class="toggle"
+      ><input
+        type="checkbox"
+        [checked]="state.takramLighting()"
+        (change)="state.takramLighting.set($any($event.target).checked)"
+      />
+      Takram scene lighting</label
+    >
+    <label class="toggle"
+      ><input
+        type="checkbox"
+        [checked]="state.cloudShadows()"
+        (change)="state.cloudShadows.set($any($event.target).checked)"
+      />
+      Cloud shadows on geometry</label
+    >
+  }
 </details>

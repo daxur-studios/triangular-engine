@@ -5,7 +5,7 @@
 - State: Planning
 - Target entry point: `triangular-engine/takram`
 - Initial renderer: WebGL
-- Last updated: 2026-07-14
+- Last updated: 2026-07-15
 
 ## Objective
 
@@ -278,7 +278,8 @@ Exit gate: clouds render and animate without R3F, even before full atmosphere co
 - [x] Synchronise sun direction and world/ECEF transforms.
 - [x] Implement optional sun and sky lights.
 - [x] Verify cloud shadows on opaque scene geometry.
-- [ ] Verify sky rendering and light shafts.
+- [x] Verify sky rendering.
+- [ ] Verify visually distinct light shafts in a low-sun test scene.
 
 Exit gate: reproduce Takram's documented three-layer example with comparable output.
 
@@ -470,5 +471,14 @@ Acceptance criteria:
 - Default asset failures now surface on `TakramCloudsComponent.assetError` and log an error containing the failed asset URL instead of becoming unobserved promise rejections.
 - Added optional `<takram-sun-light>` and `<takram-sky-light>` adapters. They share the enclosing atmosphere's generated LUTs, sun direction, world/ECEF transform, and atmosphere parameters, and update before each render.
 - Added opaque ground and box geometry to `/takram-clouds`, enabled one shadow cascade on the shadow-contributing cloud layer, and routed cloud shadow and shadow-length buffers into aerial perspective.
-- Browser verification rendered the atmosphere, clouds, lit geometry, and active cloud-shadow composition without Takram/WebGL errors. The only console warning was Three.js's existing `Clock` deprecation.
+- Initial browser verification rendered the atmosphere, clouds, and lit geometry without Takram/WebGL errors, but did not prove that cloud density affected geometry. The original standard-material/real-light scene bypassed Takram's post-process lighting path, so the earlier cloud-shadow verification claim was incomplete.
 - Both the triangular-engine and demo application development builds pass.
+
+### 2026-07-15 — Post-process scene lighting and cloud-shadow proof
+
+- Added a generic normal-buffer handoff from `PostprocessingComposerComponent` to projected effects; enabling `NormalPass` now supplies its texture to `AerialPerspectiveEffect`.
+- Updated `/takram-clouds` to use Takram's documented scene-lighting composition: unlit albedo materials, aerial `sunLight`/`skyLight`, a normal pass, and routed cloud shadow buffers.
+- Added independent `Takram scene lighting` and `Cloud shadows on geometry` A/B toggles. Disabling cloud shadows in browser testing visibly brightened the ground while clouds remained rendered, confirming that cloud coverage now affects opaque geometry through aerial perspective.
+- Kept the optional real sun/sky light path behind the lighting toggle to demonstrate that conventional Three.js lighting and shadows are separate from Takram cloud-shadow composition.
+- The `Light shafts` toggle rebuilds and runs the enabled shader path without errors. The current default sun/cloud framing still does not produce clearly visible shafts, so visual shaft verification remains open. ANGLE emits Takram's previously observed potentially-uninitialised dynamic-index warning when the shaft variant compiles.
+- The triangular-engine package build and demo development build pass.

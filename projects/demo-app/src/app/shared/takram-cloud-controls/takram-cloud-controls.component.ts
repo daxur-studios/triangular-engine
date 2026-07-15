@@ -4,6 +4,7 @@ import {
   computed,
   inject,
   Injectable,
+  input,
   signal,
 } from '@angular/core';
 import type { CloudsQualityPreset } from '@takram/three-clouds';
@@ -38,6 +39,8 @@ export class TakramCloudControlsStore {
   readonly turbulence = signal(false);
   readonly haze = signal(true);
   readonly lightShafts = signal(false);
+  readonly takramLighting = signal(true);
+  readonly cloudShadows = signal(true);
   readonly localWeatherVelocityX = signal(0.002);
   readonly altitude = signal(750);
   readonly height = signal(650);
@@ -81,4 +84,5 @@ export class TakramCloudControlsStore {
 export class TakramCloudControlsComponent {
   readonly state = inject(TakramCloudControlsStore);
   readonly textures = inject(TakramCloudDemoTextures);
+  readonly showSceneLightingControls = input(false);
 }
