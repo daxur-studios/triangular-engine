@@ -1,0 +1,75 @@
+<scene>
+  <ng-template enginePortal="top" lane="content">
+    <aside class="demo-status">
+      <strong>Mini planet · hybrid clouds</strong>
+      <span>Camera altitude {{ cameraAltitude() | number: '1.0-0' }} m</span>
+      <span>2D cloud shell {{ shellOpacity() | percent: '1.0-0' }}</span>
+      <small>Zoom from the surface to a full-globe view to test the handoff.</small>
+    </aside>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="[0, 900, 1800]"
+    [target]="planetCentre"
+    [upVector]="[0, 1, 0]"
+    [fov]="50"
+    [near]="1"
+    [far]="100000"
+  />
+
+  <postprocessing-composer [enableNormalPass]="true">
+    <takram-atmosphere
+      [planetRadius]="planetRadius"
+      [atmosphereHeight]="atmosphereHeight"
+      [sunDirection]="sunDirection"
+    >
+      <takram-sun-light [intensity]="1.4" />
+      <takram-sky-light [intensity]="0.65" />
+
+      <mesh [position]="planetCentre">
+        <sphereGeometry
+          [params]="{ radius: planetRadius, widthSegments: 96, heightSegments: 64 }"
+        />
+        <meshBasicMaterial [params]="{ color: '#28618b' }" />
+      </mesh>
+
+      <takram-clouds
+        [coverage]="0.5"
+        qualityPreset="low"
+        [resolutionScale]="0.5"
+        [shadowCascadeCount]="1"
+      >
+        <takram-cloud-layer
+          channel="r"
+          [altitude]="180"
+          [height]="260"
+          [densityScale]="0.7"
+          [shadow]="true"
+        />
+      </takram-clouds>
+
+      <mesh [position]="planetCentre" [renderOrder]="10">
+        <sphereGeometry
+          [params]="{
+            radius: cloudShellRadius,
+            widthSegments: 96,
+            heightSegments: 64
+          }"
+        />
+        <meshStandardMaterial
+          map="/takram-clouds/local_weather.png"
+          alphaMap="/takram-clouds/local_weather.png"
+          [params]="shellMaterial()"
+        />
+      </mesh>
+
+      <takram-aerial-perspective
+        [sky]="true"
+        [sunLight]="true"
+        [skyLight]="true"
+        [cloudShadows]="true"
+      />
+    </takram-atmosphere>
+    <toneMappingEffect />
+  </postprocessing-composer>
+</scene>

@@ -30,4 +30,11 @@ export const routes: Routes = [
         ({ TakramCloudsPageComponent }) => TakramCloudsPageComponent,
       ),
   },
+  {
+    path: 'takram-mini-planet',
+    loadComponent: () =>
+      import('./pages/takram-mini-planet/takram-mini-planet-page.component').then(
+        ({ TakramMiniPlanetPageComponent }) => TakramMiniPlanetPageComponent,
+      ),
+  },
 ];

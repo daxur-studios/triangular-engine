@@ -493,6 +493,12 @@ Acceptance criteria:
 - Added executing unit coverage for effect teardown, Angular-to-Takram cloud-layer mapping, and aerial overlay/shadow buffer routing.
 - Added packaged Takram MIT attribution, including the cloud assets redistributed by the demo.
 
+### 2026-07-16 — Mini-planet hybrid cloud prototype
+
+- Added `/takram-mini-planet` as an isolated 5 km-radius planet test.
+- The page uses Takram volumetric clouds near the surface and fades in a spherical 2D cloud shell between 2 km and 5 km camera altitude. Both representations use the default `local_weather.png` weather source.
+- Takram does not expose whole-effect opacity, so this first prototype uses its natural distance falloff for the volumetric side of the handoff. A controlled two-sided crossfade and skipping the volumetric render at high altitude require a small adapter/API extension.
+
 ### Takram ground-boundary troubleshooting
 
 Takram's local planetary surface is `y = 0`. Geometry extending below it can
