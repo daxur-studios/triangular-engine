@@ -24,6 +24,28 @@
 
   <postprocessing-composer>
     <takram-atmosphere>
+      <takram-sun-light [intensity]="1.5" />
+      <takram-sky-light [intensity]="0.7" />
+
+      <mesh [position]="[0, -25, 0]" [receiveShadow]="true">
+        <planeGeometry [params]="[5000, 5000]" orientation="horizontal" />
+        <meshStandardMaterial
+          [params]="{ color: '#73806b', roughness: 0.9, metalness: 0 }"
+        />
+      </mesh>
+      <mesh [position]="[-350, 125, 0]" [castShadow]="true">
+        <boxGeometry [params]="[250, 300, 250]" />
+        <meshStandardMaterial
+          [params]="{ color: '#b58b62', roughness: 0.75, metalness: 0 }"
+        />
+      </mesh>
+      <mesh [position]="[300, 75, -150]" [castShadow]="true">
+        <boxGeometry [params]="[180, 200, 180]" />
+        <meshStandardMaterial
+          [params]="{ color: '#8296a8', roughness: 0.65, metalness: 0 }"
+        />
+      </mesh>
+
       <takram-clouds
         [localWeatherTexture]="textures.selectedTexture()"
         [qualityPreset]="controls.qualityPreset()"
@@ -35,18 +57,18 @@
         [haze]="controls.haze()"
         [lightShafts]="controls.lightShafts()"
         [localWeatherVelocity]="[controls.localWeatherVelocityX(), 0]"
-        [shadowCascadeCount]="0"
+        [shadowCascadeCount]="1"
       >
         <takram-cloud-layer
           channel="r"
           [altitude]="controls.altitude()"
           [height]="controls.height()"
           [densityScale]="controls.densityScale()"
-          [shadow]="false"
+          [shadow]="true"
         />
       </takram-clouds>
 
-      <takram-aerial-perspective [sky]="true" [cloudShadows]="false" />
+      <takram-aerial-perspective [sky]="true" [cloudShadows]="true" />
     </takram-atmosphere>
     <toneMappingEffect />
   </postprocessing-composer>

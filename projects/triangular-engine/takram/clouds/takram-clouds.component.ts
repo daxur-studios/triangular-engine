@@ -5,6 +5,7 @@ import {
   inject,
   input,
   OnDestroy,
+  signal,
 } from '@angular/core';
 import {
   CloudsEffect,
@@ -14,12 +15,15 @@ import {
 } from '@takram/three-clouds';
 import {
   Vector2,
+  PerspectiveCamera,
+  WebGLRenderer,
   type Camera,
   type Data3DTexture,
   type Texture,
   type Vector2Tuple,
 } from 'three';
 import { PostprocessingEffectComponent } from 'triangular-engine/postprocessing';
+import { EngineService } from 'triangular-engine';
 import { TakramCloudAssetsService } from './takram-cloud-assets.service';
 import { TakramCloudLayerComponent } from './takram-cloud-layer.component';
 import { TakramAtmosphereService } from '../atmosphere/takram-atmosphere.service';
@@ -63,10 +67,13 @@ export class TakramCloudsComponent
   readonly haze = input(true);
   readonly lightShafts = input(true);
   readonly localWeatherVelocity = input<Vector2Tuple>([0, 0]);
-  /** Number of cloud-shadow cascades. Zero disables the shadow cascade pass. */
+  /** Number of cloud-shadow cascades supported by Takram (1–4). */
   readonly shadowCascadeCount = input<number | undefined>(undefined);
 
   private clouds: CloudsEffect | undefined;
+  /** The most recent default-asset loading failure, if any. */
+  readonly assetError = signal<Error | undefined>(undefined);
+  private readonly engine = inject(EngineService);
   private readonly atmosphere = inject(TakramAtmosphereService, {
     optional: true,
   });
@@ -102,15 +109,12 @@ export class TakramCloudsComponent
           validateShadowCascadeCount(shadowCascadeCount);
       }
       this.clouds.cloudLayers.reset().set(values);
-      void this.assets.loadDefaults(
-        this.clouds,
-        this.assetBaseUrl(),
-        this.customTextures(),
-      );
+      this.loadAssets(this.clouds, this.assetBaseUrl(), this.customTextures());
     });
   }
 
   override createEffect(camera: Camera): CloudsEffect {
+    this.validateRuntime(camera);
     if (this.clouds) {
       this.atmosphere?.unregisterClouds(this.clouds);
     }
@@ -119,11 +123,7 @@ export class TakramCloudsComponent
     });
     this.applyInputs(this.clouds);
     this.atmosphere?.registerClouds(this.clouds);
-    void this.assets.loadDefaults(
-      this.clouds,
-      this.assetBaseUrl(),
-      this.customTextures(),
-    );
+    this.loadAssets(this.clouds, this.assetBaseUrl(), this.customTextures());
     return this.clouds;
   }
 
@@ -171,12 +171,46 @@ export class TakramCloudsComponent
       stbn: this.stbnTexture(),
     };
   }
+
+  private loadAssets(
+    clouds: CloudsEffect,
+    assetBaseUrl: string,
+    textures: ReturnType<TakramCloudsComponent['customTextures']>,
+  ): void {
+    void this.assets
+      .loadDefaults(clouds, assetBaseUrl, textures)
+      .then(() => this.assetError.set(undefined))
+      .catch((reason: unknown) => {
+        const error =
+          reason instanceof Error
+            ? reason
+            : new Error('Failed to load Takram cloud assets.');
+        this.assetError.set(error);
+        console.error(error);
+      });
+  }
+
+  private validateRuntime(camera: Camera): void {
+    if (!(this.engine.renderer instanceof WebGLRenderer)) {
+      throw new Error('TakramCloudsComponent requires THREE.WebGLRenderer.');
+    }
+    if (!this.engine.renderer.capabilities.isWebGL2) {
+      throw new Error(
+        'TakramCloudsComponent requires WebGL2-class functionality.',
+      );
+    }
+    if (!(camera instanceof PerspectiveCamera)) {
+      throw new Error(
+        'TakramCloudsComponent requires a THREE.PerspectiveCamera.',
+      );
+    }
+  }
 }
 
 function validateShadowCascadeCount(value: number): number {
-  if (!Number.isInteger(value) || value < 0 || value > 4) {
+  if (!Number.isInteger(value) || value < 1 || value > 4) {
     throw new Error(
-      'Takram shadowCascadeCount must be an integer from 0 to 4.',
+      'Takram shadowCascadeCount must be an integer from 1 to 4.',
     );
   }
   return value;

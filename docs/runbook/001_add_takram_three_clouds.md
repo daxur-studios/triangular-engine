@@ -18,32 +18,12 @@ The intended consumer API should provide the equivalent of Takram's React Three 
   <postprocessing-composer [enableNormalPass]="true">
     <takram-atmosphere>
       <takram-clouds [disableDefaultLayers]="true">
-        <takram-cloud-layer
-          channel="r"
-          [altitude]="750"
-          [height]="650"
-        />
-        <takram-cloud-layer
-          channel="g"
-          [altitude]="1000"
-          [height]="1200"
-        />
-        <takram-cloud-layer
-          channel="b"
-          [altitude]="7500"
-          [height]="500"
-          [densityScale]="0.003"
-          [shapeAmount]="0.4"
-          [shapeDetailAmount]="0"
-          [coverageFilterWidth]="0.5"
-        />
+        <takram-cloud-layer channel="r" [altitude]="750" [height]="650" />
+        <takram-cloud-layer channel="g" [altitude]="1000" [height]="1200" />
+        <takram-cloud-layer channel="b" [altitude]="7500" [height]="500" [densityScale]="0.003" [shapeAmount]="0.4" [shapeDetailAmount]="0" [coverageFilterWidth]="0.5" />
       </takram-clouds>
 
-      <takram-aerial-perspective
-        [sky]="true"
-        [sunLight]="true"
-        [skyLight]="true"
-      />
+      <takram-aerial-perspective [sky]="true" [sunLight]="true" [skyLight]="true" />
     </takram-atmosphere>
   </postprocessing-composer>
 </scene>
@@ -97,7 +77,7 @@ triangular-engine/takram
 Use:
 
 ```ts
-import { CloudLayer, CloudsEffect } from '@takram/three-clouds';
+import { CloudLayer, CloudsEffect } from "@takram/three-clouds";
 ```
 
 Do not import `@takram/three-clouds/r3f` in triangular-engine.
@@ -118,13 +98,13 @@ Pin and test a known-compatible set before publishing. Takram's open-ended Three
 Triangular-engine currently wraps the composer from:
 
 ```ts
-three/examples/jsm/postprocessing/EffectComposer.js
+three / examples / jsm / postprocessing / EffectComposer.js;
 ```
 
 Takram effects use the separate `postprocessing` package:
 
 ```ts
-import { Effect, EffectComposer, EffectPass } from 'postprocessing';
+import { Effect, EffectComposer, EffectPass } from "postprocessing";
 ```
 
 The two systems are not interchangeable. A Takram `CloudsEffect` cannot be added to the current composer as a Three.js examples `Pass`.
@@ -284,7 +264,7 @@ Exit gate: triangular-engine can declaratively render an ordinary `postprocessin
 - [x] Implement volume and STBN loaders.
 - [x] Add quality preset, coverage, resolution scale, temporal upscale, haze, turbulence, and light-shaft inputs.
 - [x] Support custom `Texture`, `Data3DTexture`, and procedural texture inputs.
-- [ ] Add clear errors for invalid renderer, camera, layer count, and failed assets.
+- [x] Add clear errors for invalid renderer, camera, layer count, and failed assets.
 
 Exit gate: clouds render and animate without R3F, even before full atmosphere composition is complete.
 
@@ -296,8 +276,8 @@ Exit gate: clouds render and animate without R3F, even before full atmosphere co
 - [x] Route cloud overlay, shadow, and shadow-length buffers.
 - [x] Synchronise atmosphere parameters across effects.
 - [x] Synchronise sun direction and world/ECEF transforms.
-- [ ] Implement optional sun and sky lights.
-- [ ] Verify cloud shadows on opaque scene geometry.
+- [x] Implement optional sun and sky lights.
+- [x] Verify cloud shadows on opaque scene geometry.
 - [ ] Verify sky rendering and light shafts.
 
 Exit gate: reproduce Takram's documented three-layer example with comparable output.
@@ -318,17 +298,17 @@ Exit gate: the entry point is documented, independently installable, and safe to
 
 ## Minimum test matrix
 
-| Area | Cases |
-| --- | --- |
-| Renderer | WebGL success; WebGPU explicit rejection |
-| Camera | initial camera; runtime camera replacement; resize |
-| Layers | defaults; one custom layer; four layers; fifth-layer rejection |
-| Assets | package defaults; custom URLs; provided texture objects; failed load |
-| Temporal rendering | moving camera; stationary camera; effect disable/re-enable |
-| Composition | standalone clouds; atmosphere overlay; scene shadows; light shafts |
-| Lifecycle | component destroy/recreate; route change; repeated scene creation |
-| Packaging | core-only install; Takram install; production build; clean consumer app |
-| Performance | low/medium/high presets; high-DPI display; reduced resolution scale |
+| Area               | Cases                                                                   |
+| ------------------ | ----------------------------------------------------------------------- |
+| Renderer           | WebGL success; WebGPU explicit rejection                                |
+| Camera             | initial camera; runtime camera replacement; resize                      |
+| Layers             | defaults; one custom layer; four layers; fifth-layer rejection          |
+| Assets             | package defaults; custom URLs; provided texture objects; failed load    |
+| Temporal rendering | moving camera; stationary camera; effect disable/re-enable              |
+| Composition        | standalone clouds; atmosphere overlay; scene shadows; light shafts      |
+| Lifecycle          | component destroy/recreate; route change; repeated scene creation       |
+| Packaging          | core-only install; Takram install; production build; clean consumer app |
+| Performance        | low/medium/high presets; high-DPI display; reduced resolution scale     |
 
 ## Initial acceptance example
 
@@ -336,10 +316,10 @@ The first full-fidelity milestone should reproduce these settings:
 
 ```ts
 [
-  { channel: 'r', altitude: 750, height: 650 },
-  { channel: 'g', altitude: 1000, height: 1200 },
+  { channel: "r", altitude: 750, height: 650 },
+  { channel: "g", altitude: 1000, height: 1200 },
   {
-    channel: 'b',
+    channel: "b",
     altitude: 7500,
     height: 500,
     densityScale: 0.003,
@@ -347,7 +327,7 @@ The first full-fidelity milestone should reproduce these settings:
     shapeDetailAmount: 0,
     coverageFilterWidth: 0.5,
   },
-]
+];
 ```
 
 Acceptance criteria:
@@ -471,10 +451,10 @@ Acceptance criteria:
 
 - Exposed `fov`, `near`, and `far` on triangular-engine's `<orbitControls>` camera.
 - Exposed `cloudShadows` on `<takram-aerial-perspective>`.
-- The `/takram-clouds` comparison disables aerial cloud-shadow composition because the original spike only connected `atmosphereOverlay`; it also matches the spike camera projection (`60`, `1`, `300000`).
+- The `/takram-clouds` comparison initially disabled aerial cloud-shadow composition to match the spike; it now enables one supported cascade for the Phase 4 geometry-shadow verification while retaining the spike camera projection (`60`, `1`, `300000`).
 - Added one standalone shared controls component used by both `/takram-clouds-spike` and `/takram-clouds`; its defaults are the spike preset and changes update both implementations through the same parameter shape.
 - Added declarative `localWeatherVelocity` support, matching the spike's `(0.002, 0)` setting.
-- Restored and preserved the spike's `shadow.cascadeCount = 0`; the declarative comparison now uses the same value while aerial cloud-shadow composition is disabled.
+- The plain Three.js spike preserves `shadow.cascadeCount = 0` as its frozen comparison baseline. The declarative adapter rejects zero because Takram's shader path creates invalid zero-length arrays; it uses one cascade instead.
 
 ### 2026-07-15 — Custom and procedural cloud textures
 
@@ -482,4 +462,13 @@ Acceptance criteria:
 - Defined ownership explicitly: defaults loaded by the adapter are adapter-owned, while supplied textures and procedural generators remain caller-owned.
 - Default textures are now cached independently from custom inputs, so clearing a live custom input reliably loads or restores the default instead of retaining the initial override.
 - Added default, custom tileable `DataTexture`, and Takram `LocalWeather` procedural modes to `/takram-clouds`. The plain Three.js spike remains the frozen comparison baseline.
+- Both the triangular-engine and demo application development builds pass.
+
+### 2026-07-15 — Validation, atmosphere lights, and geometry shadows
+
+- Added explicit cloud runtime validation for WebGL/WebGL2 and perspective cameras, retained the four-layer limit, and tightened shadow cascades to Takram's valid 1–4 range.
+- Default asset failures now surface on `TakramCloudsComponent.assetError` and log an error containing the failed asset URL instead of becoming unobserved promise rejections.
+- Added optional `<takram-sun-light>` and `<takram-sky-light>` adapters. They share the enclosing atmosphere's generated LUTs, sun direction, world/ECEF transform, and atmosphere parameters, and update before each render.
+- Added opaque ground and box geometry to `/takram-clouds`, enabled one shadow cascade on the shadow-contributing cloud layer, and routed cloud shadow and shadow-length buffers into aerial perspective.
+- Browser verification rendered the atmosphere, clouds, lit geometry, and active cloud-shadow composition without Takram/WebGL errors. The only console warning was Three.js's existing `Clock` deprecation.
 - Both the triangular-engine and demo application development builds pass.

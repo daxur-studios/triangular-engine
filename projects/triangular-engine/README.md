@@ -220,8 +220,6 @@ Wrap Jolt physics-enabled content in `<jolt-physics>`:
 Motion types: 0 Static, 1 Kinematic, 2 Dynamic.
 See `.agent/skills/triangular-engine-jolt/SKILL.md` for advanced Jolt controls, double precision coordinates, and joints/constraints (e.g. `<jolt-fixed-constraint>` or `<jolt-hinge-constraint>`).
 
-
-
 ## Services
 
 Provide per component where you host `<scene>`:
@@ -255,6 +253,7 @@ List of selectors available in templates (not exhaustive):
 `triangular-engine` provides a portal-based UI stacking system (similar to `Daxur-Daemon`) allowing any component/page to register controls on top of the 3D HUD dynamically.
 
 ### How to use:
+
 In any child component or page that lives inside the engine context, register templates using `<ng-template enginePortal="area">`. They will be automatically rendered in the appropriate zone and cleaned up on destroy.
 
 ```html
@@ -316,6 +315,30 @@ Provided textures and procedural generators remain caller-owned and must be
 disposed by the caller. Setting an input back to `undefined` restores the
 component-owned default. The `/takram-clouds` demo shows default, custom
 `DataTexture`, and Takram procedural weather sources.
+
+### Takram atmosphere lights
+
+Place the optional atmosphere-aware lights inside `<takram-atmosphere>` when
+ordinary Three.js materials should receive the same sun and sky lighting as the
+cloud and aerial-perspective effects:
+
+```html
+<takram-atmosphere>
+  <takram-sun-light [intensity]="1.5" />
+  <takram-sky-light [intensity]="0.7" />
+  <!-- scene meshes, clouds, and aerial perspective -->
+</takram-atmosphere>
+```
+
+`<takram-sun-light>` supports `intensity`, `distance`, `correctAltitude`, and
+optional conventional Three.js `castShadow`. `<takram-sky-light>` supports
+`intensity` and `correctAltitude`. Both use the enclosing atmosphere's lookup
+textures, sun direction, and world/ECEF transform.
+
+The Takram cloud adapter rejects non-WebGL/WebGL1 renderers, non-perspective
+cameras, more than four layers, and shadow cascade counts outside 1–4. A failed
+default texture load is reported through `TakramCloudsComponent.assetError` and
+logged with the failing asset URL.
 
 ## Troubleshooting
 

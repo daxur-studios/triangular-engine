@@ -5,7 +5,10 @@ import {
   PrecomputedTexturesGenerator,
 } from '@takram/three-atmosphere';
 import { Ellipsoid } from '@takram/three-geospatial';
-import type { CloudsEffect, CloudsEffectChangeEvent } from '@takram/three-clouds';
+import type {
+  CloudsEffect,
+  CloudsEffectChangeEvent,
+} from '@takram/three-clouds';
 import { Matrix4, Vector3, WebGLRenderer } from 'three';
 import { EngineService } from 'triangular-engine';
 
@@ -24,6 +27,11 @@ export class TakramAtmosphereService {
   readonly ready = signal(false);
   readonly error = signal<Error | undefined>(undefined);
 
+  /** Precomputed lookup textures shared by effects and atmosphere lights. */
+  get textures() {
+    return this.generator.textures;
+  }
+
   private readonly onCloudsChange = (_event: CloudsEffectChangeEvent): void => {
     this.routeCloudBuffers();
   };
@@ -31,10 +39,14 @@ export class TakramAtmosphereService {
   constructor() {
     const renderer = this.engine.renderer;
     if (!(renderer instanceof WebGLRenderer)) {
-      throw new Error('TakramAtmosphereComponent requires THREE.WebGLRenderer.');
+      throw new Error(
+        'TakramAtmosphereComponent requires THREE.WebGLRenderer.',
+      );
     }
     if (!renderer.capabilities.isWebGL2) {
-      throw new Error('TakramAtmosphereComponent requires WebGL2-class functionality.');
+      throw new Error(
+        'TakramAtmosphereComponent requires WebGL2-class functionality.',
+      );
     }
 
     this.generator = new PrecomputedTexturesGenerator(renderer);
@@ -45,7 +57,9 @@ export class TakramAtmosphereService {
         this.error.set(
           reason instanceof Error
             ? reason
-            : new Error('Failed to generate Takram atmosphere lookup textures.'),
+            : new Error(
+                'Failed to generate Takram atmosphere lookup textures.',
+              ),
         );
       });
   }
@@ -127,9 +141,21 @@ export class TakramAtmosphereService {
 function createDefaultWorldToECEFMatrix(): Matrix4 {
   const earthRadius = Ellipsoid.WGS84.maximumRadius;
   return new Matrix4().set(
-    0, 1, 0, earthRadius,
-    1, 0, 0, 0,
-    0, 0, -1, 0,
-    0, 0, 0, 1,
+    0,
+    1,
+    0,
+    earthRadius,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    -1,
+    0,
+    0,
+    0,
+    0,
+    1,
   );
 }
