@@ -7,6 +7,7 @@
   "assets": [
     "./assets",
     "README.md",
+    "THIRD_PARTY_NOTICES.md",
     {
       "glob": "**/*",
       "input": "./.agent/skills",

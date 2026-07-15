@@ -20,8 +20,10 @@ export class TakramAtmosphereService {
   private clouds: CloudsEffect | undefined;
   private aerialPerspective: AerialPerspectiveEffect | undefined;
   private cloudShadowsEnabled = true;
+  private textureGeneration = 0;
 
   readonly atmosphere = new AtmosphereParameters();
+  ellipsoid = Ellipsoid.WGS84;
   readonly sunDirection = new Vector3(1, 0.7, 0.4).normalize();
   readonly worldToECEFMatrix = createDefaultWorldToECEFMatrix();
   readonly ready = signal(false);
@@ -50,18 +52,7 @@ export class TakramAtmosphereService {
     }
 
     this.generator = new PrecomputedTexturesGenerator(renderer);
-    void this.generator
-      .update(this.atmosphere)
-      .then(() => this.ready.set(true))
-      .catch((reason: unknown) => {
-        this.error.set(
-          reason instanceof Error
-            ? reason
-            : new Error(
-                'Failed to generate Takram atmosphere lookup textures.',
-              ),
-        );
-      });
+    this.updateTextures('Failed to generate Takram atmosphere lookup textures.');
   }
 
   registerClouds(effect: CloudsEffect): void {
@@ -71,6 +62,26 @@ export class TakramAtmosphereService {
     this.clouds = effect;
     effect.events.addEventListener('change', this.onCloudsChange);
     this.applySharedState();
+  }
+
+  configurePlanet(
+    radius: number,
+    atmosphereHeight: number,
+    resetWorldToECEF = true,
+  ): void {
+    if (!(radius > 0) || !(atmosphereHeight > 0)) {
+      throw new Error(
+        'Takram planetRadius and atmosphereHeight must be greater than zero.',
+      );
+    }
+    this.ellipsoid = new Ellipsoid(radius, radius, radius);
+    this.atmosphere.bottomRadius = radius;
+    this.atmosphere.topRadius = radius + atmosphereHeight;
+    if (resetWorldToECEF) {
+      this.worldToECEFMatrix.copy(createWorldToECEFMatrix(radius));
+    }
+    this.ready.set(false);
+    this.updateTextures('Failed to update Takram atmosphere lookup textures.');
   }
 
   unregisterClouds(effect: CloudsEffect): void {
@@ -106,11 +117,13 @@ export class TakramAtmosphereService {
     const textures = this.generator.textures;
     if (this.clouds) {
       Object.assign(this.clouds, textures);
+      this.clouds.ellipsoid = this.ellipsoid;
       this.clouds.sunDirection.copy(this.sunDirection);
       this.clouds.worldToECEFMatrix.copy(this.worldToECEFMatrix);
     }
     if (this.aerialPerspective) {
       Object.assign(this.aerialPerspective, textures);
+      this.aerialPerspective.ellipsoid = this.ellipsoid;
       this.aerialPerspective.sunDirection.copy(this.sunDirection);
       this.aerialPerspective.worldToECEFMatrix.copy(this.worldToECEFMatrix);
     }
@@ -118,6 +131,7 @@ export class TakramAtmosphereService {
   }
 
   dispose(): void {
+    this.textureGeneration++;
     if (this.clouds) {
       this.clouds.events.removeEventListener('change', this.onCloudsChange);
     }
@@ -128,23 +142,66 @@ export class TakramAtmosphereService {
 
   private routeCloudBuffers(): void {
     if (!this.aerialPerspective) return;
-    this.aerialPerspective.overlay = this.clouds?.atmosphereOverlay ?? null;
-    this.aerialPerspective.shadow = this.cloudShadowsEnabled
-      ? (this.clouds?.atmosphereShadow ?? null)
-      : null;
-    this.aerialPerspective.shadowLength = this.cloudShadowsEnabled
-      ? (this.clouds?.atmosphereShadowLength ?? null)
-      : null;
+    routeTakramCloudBuffers(
+      this.aerialPerspective,
+      this.clouds,
+      this.cloudShadowsEnabled,
+    );
+  }
+
+  private updateTextures(fallbackMessage: string): void {
+    const generation = ++this.textureGeneration;
+    void this.generator
+      .update(this.atmosphere)
+      .then(() => {
+        if (generation !== this.textureGeneration) return;
+        this.error.set(undefined);
+        this.applySharedState();
+        this.ready.set(true);
+      })
+      .catch((reason: unknown) => {
+        if (generation !== this.textureGeneration) return;
+        this.error.set(
+          reason instanceof Error ? reason : new Error(fallbackMessage),
+        );
+      });
   }
 }
 
+type AerialCloudBufferTarget = Pick<
+  AerialPerspectiveEffect,
+  'overlay' | 'shadow' | 'shadowLength'
+>;
+type CloudBufferSource = Pick<
+  CloudsEffect,
+  'atmosphereOverlay' | 'atmosphereShadow' | 'atmosphereShadowLength'
+>;
+
+/** @internal Exported for focused buffer-routing tests. */
+export function routeTakramCloudBuffers(
+  aerialPerspective: AerialCloudBufferTarget,
+  clouds: CloudBufferSource | undefined,
+  shadowsEnabled: boolean,
+): void {
+  aerialPerspective.overlay = clouds?.atmosphereOverlay ?? null;
+  aerialPerspective.shadow = shadowsEnabled
+    ? (clouds?.atmosphereShadow ?? null)
+    : null;
+  aerialPerspective.shadowLength = shadowsEnabled
+    ? (clouds?.atmosphereShadowLength ?? null)
+    : null;
+}
+
 function createDefaultWorldToECEFMatrix(): Matrix4 {
-  const earthRadius = Ellipsoid.WGS84.maximumRadius;
+  return createWorldToECEFMatrix(Ellipsoid.WGS84.maximumRadius);
+}
+
+function createWorldToECEFMatrix(radius: number): Matrix4 {
   return new Matrix4().set(
     0,
     1,
     0,
-    earthRadius,
+    radius,
     1,
     0,
     0,

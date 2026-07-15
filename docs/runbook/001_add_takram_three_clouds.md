@@ -285,15 +285,15 @@ Exit gate: reproduce Takram's documented three-layer example with comparable out
 
 ### Phase 5 — Productise the API
 
-- [ ] Finalise selector and input naming conventions.
-- [ ] Add Angular signal-input updates without unnecessary effect reconstruction.
+- [x] Finalise selector and input naming conventions.
+- [x] Add Angular signal-input updates without unnecessary effect reconstruction.
 - [x] Add examples for default clouds, custom layers, custom weather, and procedural textures.
 - [ ] Document performance presets and browser requirements.
-- [ ] Add unit tests for lifecycle, layer mapping, and buffer routing.
+- [x] Add unit tests for lifecycle, layer mapping, and buffer routing.
 - [ ] Add render/screenshot regression coverage where practical.
 - [ ] Test a production build and a clean external consumer installation.
 - [ ] Confirm tree shaking and that core users do not receive Takram dependencies.
-- [ ] Add Takram MIT attribution if source or assets are redistributed.
+- [x] Add Takram MIT attribution if source or assets are redistributed.
 
 Exit gate: the entry point is documented, independently installable, and safe to publish.
 
@@ -482,7 +482,16 @@ Acceptance criteria:
 - Kept the optional real sun/sky light path behind the lighting toggle to demonstrate that conventional Three.js lighting and shadows are separate from Takram cloud-shadow composition.
 - The `Light shafts` toggle rebuilds and runs the enabled shader path without errors. The current default sun/cloud framing still does not produce clearly visible shafts, so visual shaft verification remains open. ANGLE emits Takram's previously observed potentially-uninitialised dynamic-index warning when the shaft variant compiles.
 - Added a `Time of day` control to `/takram-clouds`. It drives the shared atmosphere sun direction from sunrise at 06:00, through overhead sun at 12:00, to sunset at 18:00; use dawn/dusk with `Light shafts` toggled on/off for visual verification.
+- Manual testing across multiple times of day still showed no visually distinct light shafts. The feature remains wired and optional, but further shader/framing investigation is deferred as low priority.
 - The triangular-engine package build and demo development build pass.
+
+### 2026-07-15 — API productisation slice
+
+- Reviewed and retained the consistent `takram-*` selectors and Takram-native input names; added `planetRadius` and `atmosphereHeight` to support spherical planets without changing the Earth-sized default.
+- Custom planet sizing regenerates atmosphere lookup textures and propagates one shared ellipsoid to clouds, aerial perspective, sun light, and sky light. One atmosphere subtree still represents one planet; simultaneous independently positioned atmospheric planets remain unverified.
+- Split live cloud parameter/layer updates from asset-input updates, so ordinary control changes no longer reload default cloud textures or reconstruct the effect.
+- Added executing unit coverage for effect teardown, Angular-to-Takram cloud-layer mapping, and aerial overlay/shadow buffer routing.
+- Added packaged Takram MIT attribution, including the cloud assets redistributed by the demo.
 
 ### Takram ground-boundary troubleshooting
 

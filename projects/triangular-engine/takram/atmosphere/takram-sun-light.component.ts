@@ -31,6 +31,7 @@ export class TakramSunLightComponent extends Object3DComponent {
       const light = this.object3D();
       const textures = this.atmosphere.textures;
       light.transmittanceTexture = textures.transmittanceTexture;
+      light.ellipsoid = this.atmosphere.ellipsoid;
       light.sunDirection.copy(this.atmosphere.sunDirection);
       light.worldToECEFMatrix.copy(this.atmosphere.worldToECEFMatrix);
       light.intensity = this.intensity();

@@ -109,7 +109,12 @@ export class TakramCloudsComponent
           validateShadowCascadeCount(shadowCascadeCount);
       }
       this.clouds.cloudLayers.reset().set(values);
-      this.loadAssets(this.clouds, this.assetBaseUrl(), this.customTextures());
+    });
+    effect(() => {
+      const assetBaseUrl = this.assetBaseUrl();
+      const textures = this.customTextures();
+      if (!this.clouds) return;
+      this.loadAssets(this.clouds, assetBaseUrl, textures);
     });
   }
 

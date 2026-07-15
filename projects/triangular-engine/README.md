@@ -363,6 +363,29 @@ optional conventional Three.js `castShadow`. `<takram-sky-light>` supports
 `intensity` and `correctAltitude`. Both use the enclosing atmosphere's lookup
 textures, sun direction, and world/ECEF transform.
 
+### Custom planet sizes
+
+The default atmosphere uses Takram's Earth-sized model. For a spherical game
+planet, set its radius and atmosphere thickness in the same world units used by
+the scene (Takram's physical defaults use metres):
+
+```html
+<takram-atmosphere
+  [planetRadius]="planet.radius"
+  [atmosphereHeight]="planet.atmosphereHeight"
+>
+  <!-- clouds, lights, and aerial perspective -->
+</takram-atmosphere>
+```
+
+Changing either value regenerates the atmosphere lookup textures and updates
+the ellipsoid shared by clouds, aerial perspective, and atmosphere-aware
+lights. The default local tangent frame keeps the planetary surface at `y = 0`.
+Supply `worldToECEFMatrix` as well when the planet needs a custom position or
+orientation. One atmosphere subtree represents one planet; scenes showing
+several independently positioned atmospheric planets at once require separate
+composition work and are not yet a verified use case.
+
 Do not combine these real lights with aerial `sunLight`/`skyLight` on the same
 unmasked objects; that applies lighting twice. Conventional `castShadow` and
 `receiveShadow` remain a separate Three.js shadow-map path and do not make

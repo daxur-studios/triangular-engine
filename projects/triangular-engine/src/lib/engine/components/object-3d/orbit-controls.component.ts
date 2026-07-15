@@ -261,6 +261,14 @@ export class OrbitControlsComponent implements OnDestroy {
       toObservable(this.follow).pipe(
         distinctUntilChanged((a, b) => {
           const isSame = a === b;
+          if (!isSame) {
+            // The followed object itself changed identity (including
+            // switching to/from undefined) — drop the stale per-frame delta
+            // baseline so the next tick re-initializes against the new
+            // object instead of computing one huge delta against whatever
+            // the *previous* object's last known position was.
+            this.previousFollowPosition = undefined;
+          }
           if (!isSame && a) {
             // follow has changed, ensure orbit control is re-centered for the new follow
             const orbitControls = this.orbitControls();
