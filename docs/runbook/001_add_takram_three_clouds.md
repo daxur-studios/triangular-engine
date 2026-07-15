@@ -482,3 +482,13 @@ Acceptance criteria:
 - Kept the optional real sun/sky light path behind the lighting toggle to demonstrate that conventional Three.js lighting and shadows are separate from Takram cloud-shadow composition.
 - The `Light shafts` toggle rebuilds and runs the enabled shader path without errors. The current default sun/cloud framing still does not produce clearly visible shafts, so visual shaft verification remains open. ANGLE emits Takram's previously observed potentially-uninitialised dynamic-index warning when the shaft variant compiles.
 - The triangular-engine package build and demo development build pass.
+
+### Takram ground-boundary troubleshooting
+
+Takram's local planetary surface is `y = 0`. Geometry extending below it can
+look submerged and can also cause angle-dependent darkening, a thick/distorted
+atmospheric edge, or a black-hole-like globe when viewed from a distance. Keep
+surface geometry at or above `y = 0`; in the demo, placing the ground at `0`
+and lifting each box so its base is `0` resolved all of these symptoms. Do not
+work around this by restricting orbit controls—the globe must remain viewable
+from any angle.
