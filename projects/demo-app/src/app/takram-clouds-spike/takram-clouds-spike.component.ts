@@ -83,6 +83,9 @@ export class TakramCloudsSpikeComponent implements AfterViewInit {
       powerPreference: 'high-performance',
     });
     renderer.outputColorSpace = SRGBColorSpace;
+    // AGX deliberately preserves highlights, so a small exposure lift avoids
+    // the otherwise underexposed, "sunglasses" presentation.
+    renderer.toneMappingExposure = 1.3;
     renderer.setPixelRatio(1);
 
     if (!renderer.capabilities.isWebGL2) {

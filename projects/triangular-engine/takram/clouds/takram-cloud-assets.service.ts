@@ -22,14 +22,27 @@ import {
   TextureLoader,
 } from 'three';
 
+export interface TakramCloudTextures {
+  localWeather?: Texture;
+  turbulence?: Texture;
+  shape?: Data3DTexture;
+  shapeDetail?: Data3DTexture;
+  stbn?: Data3DTexture;
+}
+
 /** Owns the default GPU textures used by one declarative cloud component. */
 @Injectable()
 export class TakramCloudAssetsService {
-  private textures: Texture[] | undefined;
+  private defaults: TakramCloudTextures | undefined;
+  private ownedTextures: Texture[] = [];
 
-  loadDefaults(effect: CloudsEffect, assetBaseUrl: string): Promise<void> {
-    if (this.textures) {
-      this.assign(effect, this.textures);
+  loadDefaults(
+    effect: CloudsEffect,
+    assetBaseUrl: string,
+    custom: TakramCloudTextures = {},
+  ): Promise<void> {
+    if (this.defaults) {
+      this.assign(effect, { ...this.defaults, ...withoutUndefined(custom) });
       return Promise.resolve();
     }
 
@@ -49,11 +62,11 @@ export class TakramCloudAssetsService {
       texture.wrapT = RepeatWrapping;
       texture.colorSpace = NoColorSpace;
     };
-    const localWeather = textureLoader.load(
+    const localWeather = custom.localWeather ?? textureLoader.load(
       `${baseUrl}/local_weather.png`,
       configure2D,
     );
-    const turbulence = textureLoader.load(
+    const turbulence = custom.turbulence ?? textureLoader.load(
       `${baseUrl}/turbulence.png`,
       configure2D,
     );
@@ -72,32 +85,50 @@ export class TakramCloudAssetsService {
         colorSpace: NoColorSpace,
         manager,
       }).load(url);
-    const shape = loadVolume(
+    const shape = custom.shape ?? loadVolume(
       `${baseUrl}/shape.bin`,
       CLOUD_SHAPE_TEXTURE_SIZE,
     );
-    const shapeDetail = loadVolume(
+    const shapeDetail = custom.shapeDetail ?? loadVolume(
       `${baseUrl}/shape_detail.bin`,
       CLOUD_SHAPE_DETAIL_TEXTURE_SIZE,
     );
-    const stbn = new STBNLoader(manager).load(DEFAULT_STBN_URL);
+    const stbn = custom.stbn ?? new STBNLoader(manager).load(DEFAULT_STBN_URL);
 
-    this.textures = [localWeather, turbulence, shape, shapeDetail, stbn];
-    this.assign(effect, this.textures);
-    return completed;
+    this.defaults = { localWeather, turbulence, shape, shapeDetail, stbn };
+    this.ownedTextures = [
+      custom.localWeather ? undefined : localWeather,
+      custom.turbulence ? undefined : turbulence,
+      custom.shape ? undefined : shape,
+      custom.shapeDetail ? undefined : shapeDetail,
+      custom.stbn ? undefined : stbn,
+    ].filter((texture): texture is Texture => texture !== undefined);
+    this.assign(effect, { ...this.defaults, ...withoutUndefined(custom) });
+    return this.ownedTextures.length === 0 ? Promise.resolve() : completed;
+  }
+
+  /** Assigns caller-owned textures without transferring disposal ownership. */
+  assignCustom(effect: CloudsEffect, custom: TakramCloudTextures): void {
+    this.assign(effect, { ...this.defaults, ...withoutUndefined(custom) });
   }
 
   dispose(): void {
-    this.textures?.forEach((texture) => texture.dispose());
-    this.textures = undefined;
+    this.ownedTextures.forEach((texture) => texture.dispose());
+    this.ownedTextures = [];
+    this.defaults = undefined;
   }
 
-  private assign(effect: CloudsEffect, textures: Texture[]): void {
-    const [localWeather, turbulence, shape, shapeDetail, stbn] = textures;
-    effect.localWeatherTexture = localWeather;
-    effect.turbulenceTexture = turbulence;
-    effect.shapeTexture = shape as Data3DTexture;
-    effect.shapeDetailTexture = shapeDetail as Data3DTexture;
-    effect.stbnTexture = stbn as Data3DTexture;
+  private assign(effect: CloudsEffect, textures: TakramCloudTextures): void {
+    if (textures.localWeather) effect.localWeatherTexture = textures.localWeather;
+    if (textures.turbulence) effect.turbulenceTexture = textures.turbulence;
+    if (textures.shape) effect.shapeTexture = textures.shape;
+    if (textures.shapeDetail) effect.shapeDetailTexture = textures.shapeDetail;
+    if (textures.stbn) effect.stbnTexture = textures.stbn;
   }
+}
+
+function withoutUndefined(textures: TakramCloudTextures): TakramCloudTextures {
+  return Object.fromEntries(
+    Object.entries(textures).filter(([, texture]) => texture !== undefined),
+  ) as TakramCloudTextures;
 }

@@ -1,6 +1,15 @@
-<app-takram-cloud-controls #controls />
-
 <scene>
+  <ng-template enginePortal="right" lane="content">
+    <app-takram-cloud-controls />
+  </ng-template>
+
+  <ng-template enginePortal="top" lane="content">
+    <aside class="demo-status">
+      <strong>Takram adapter · declarative</strong>
+      <span>Spike-matched camera and composition · pixel ratio 1 · resolution 0.5</span>
+    </aside>
+  </ng-template>
+
   <orbitControls
     [cameraPosition]="[0, 100, 1500]"
     [target]="[0, 800, 0]"
@@ -38,8 +47,3 @@
     <toneMappingEffect />
   </postprocessing-composer>
 </scene>
-
-<aside>
-  <strong>Takram adapter · declarative</strong>
-  <span>Spike-matched camera and composition · pixel ratio 1 · resolution 0.5</span>
-</aside>

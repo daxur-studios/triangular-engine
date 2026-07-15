@@ -2,24 +2,24 @@
   <summary>Shared cloud parameters</summary>
 
   <label>
-    Resolution <output>{{ resolutionScale() }}</output>
-    <input type="range" min="0.25" max="1" step="0.05" [value]="resolutionScale()" (input)="setNumber(resolutionScale, $event)" />
+    Resolution <output>{{ state.resolutionScale() }}</output>
+    <input type="range" min="0.25" max="1" step="0.05" [value]="state.resolutionScale()" (input)="state.setNumber(state.resolutionScale, $event)" />
   </label>
   <label>
-    Coverage <output>{{ coverage() }}</output>
-    <input type="range" min="0" max="1" step="0.01" [value]="coverage()" (input)="setNumber(coverage, $event)" />
+    Coverage <output>{{ state.coverage() }}</output>
+    <input type="range" min="0" max="1" step="0.01" [value]="state.coverage()" (input)="state.setNumber(state.coverage, $event)" />
   </label>
   <label>
-    Density <output>{{ densityScale() }}</output>
-    <input type="range" min="0" max="1" step="0.01" [value]="densityScale()" (input)="setNumber(densityScale, $event)" />
+    Density <output>{{ state.densityScale() }}</output>
+    <input type="range" min="0" max="1" step="0.01" [value]="state.densityScale()" (input)="state.setNumber(state.densityScale, $event)" />
   </label>
   <label>
-    Weather speed <output>{{ localWeatherVelocityX() }}</output>
-    <input type="range" min="0" max="0.01" step="0.0005" [value]="localWeatherVelocityX()" (input)="setNumber(localWeatherVelocityX, $event)" />
+    Weather speed <output>{{ state.localWeatherVelocityX() }}</output>
+    <input type="range" min="0" max="0.01" step="0.0005" [value]="state.localWeatherVelocityX()" (input)="state.setNumber(state.localWeatherVelocityX, $event)" />
   </label>
-  <label class="toggle"><input type="checkbox" [checked]="temporalUpscale()" (change)="temporalUpscale.set($any($event.target).checked)" /> Temporal upscale</label>
-  <label class="toggle"><input type="checkbox" [checked]="shapeDetail()" (change)="shapeDetail.set($any($event.target).checked)" /> Shape detail</label>
-  <label class="toggle"><input type="checkbox" [checked]="turbulence()" (change)="turbulence.set($any($event.target).checked)" /> Turbulence</label>
-  <label class="toggle"><input type="checkbox" [checked]="haze()" (change)="haze.set($any($event.target).checked)" /> Haze</label>
-  <label class="toggle"><input type="checkbox" [checked]="lightShafts()" (change)="lightShafts.set($any($event.target).checked)" /> Light shafts</label>
+  <label class="toggle"><input type="checkbox" [checked]="state.temporalUpscale()" (change)="state.temporalUpscale.set($any($event.target).checked)" /> Temporal upscale</label>
+  <label class="toggle"><input type="checkbox" [checked]="state.shapeDetail()" (change)="state.shapeDetail.set($any($event.target).checked)" /> Shape detail</label>
+  <label class="toggle"><input type="checkbox" [checked]="state.turbulence()" (change)="state.turbulence.set($any($event.target).checked)" /> Turbulence</label>
+  <label class="toggle"><input type="checkbox" [checked]="state.haze()" (change)="state.haze.set($any($event.target).checked)" /> Haze</label>
+  <label class="toggle"><input type="checkbox" [checked]="state.lightShafts()" (change)="state.lightShafts.set($any($event.target).checked)" /> Light shafts</label>
 </details>

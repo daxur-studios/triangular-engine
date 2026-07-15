@@ -3,18 +3,7 @@
   min-height: 0;
 }
 
-app-takram-cloud-controls {
-  position: absolute;
-  right: 1rem;
-  top: 1rem;
-  z-index: 2;
-}
-
-aside {
-  position: absolute;
-  top: 1rem;
-  left: 1rem;
-  z-index: 1;
+.demo-status {
   display: grid;
   gap: 0.25rem;
   padding: 0.65rem 0.8rem;

@@ -5,6 +5,13 @@ export const routes: Routes = [
     path: '',
     pathMatch: 'full',
     loadComponent: () =>
+      import('./pages/demo-index/demo-index.component').then(
+        ({ DemoIndexComponent }) => DemoIndexComponent,
+      ),
+  },
+  {
+    path: 'engine-demo',
+    loadComponent: () =>
       import('./engine-demo/engine-demo.component').then(
         ({ EngineDemoComponent }) => EngineDemoComponent,
       ),

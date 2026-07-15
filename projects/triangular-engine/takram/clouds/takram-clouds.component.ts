@@ -10,7 +10,13 @@ import {
   CloudsEffect,
   type CloudsQualityPreset,
 } from '@takram/three-clouds';
-import { Vector2, type Camera, type Vector2Tuple } from 'three';
+import {
+  Vector2,
+  type Camera,
+  type Data3DTexture,
+  type Texture,
+  type Vector2Tuple,
+} from 'three';
 import { PostprocessingEffectComponent } from 'triangular-engine/postprocessing';
 import { TakramCloudAssetsService } from './takram-cloud-assets.service';
 import { TakramCloudLayerComponent } from './takram-cloud-layer.component';
@@ -36,6 +42,16 @@ export class TakramCloudsComponent
   readonly layers = contentChildren(TakramCloudLayerComponent);
 
   readonly assetBaseUrl = input('/takram-clouds');
+  /** Optional caller-owned weather map. May be a loaded or procedural texture. */
+  readonly localWeatherTexture = input<Texture>();
+  /** Optional caller-owned turbulence map. May be a loaded or procedural texture. */
+  readonly turbulenceTexture = input<Texture>();
+  /** Optional caller-owned base cloud-noise volume. */
+  readonly shapeTexture = input<Data3DTexture>();
+  /** Optional caller-owned detail cloud-noise volume. */
+  readonly shapeDetailTexture = input<Data3DTexture>();
+  /** Optional caller-owned spatiotemporal blue-noise volume. */
+  readonly stbnTexture = input<Data3DTexture>();
   readonly qualityPreset = input<CloudsQualityPreset>('low');
   readonly coverage = input(0.45);
   readonly resolutionScale = input(0.5);
@@ -85,6 +101,7 @@ export class TakramCloudsComponent
         );
       }
       this.clouds.cloudLayers.reset().set(values);
+      this.assets.assignCustom(this.clouds, this.customTextures());
     });
   }
 
@@ -97,7 +114,11 @@ export class TakramCloudsComponent
     });
     this.applyInputs(this.clouds);
     this.atmosphere?.registerClouds(this.clouds);
-    void this.assets.loadDefaults(this.clouds, this.assetBaseUrl());
+    void this.assets.loadDefaults(
+      this.clouds,
+      this.assetBaseUrl(),
+      this.customTextures(),
+    );
     return this.clouds;
   }
 
@@ -135,6 +156,16 @@ export class TakramCloudsComponent
       throw new Error('Takram clouds support at most four cloud layers.');
     }
     clouds.cloudLayers.reset().set(layers.map((layer) => layer.toCloudLayer()));
+  }
+
+  private customTextures() {
+    return {
+      localWeather: this.localWeatherTexture(),
+      turbulence: this.turbulenceTexture(),
+      shape: this.shapeTexture(),
+      shapeDetail: this.shapeDetailTexture(),
+      stbn: this.stbnTexture(),
+    };
   }
 }
 

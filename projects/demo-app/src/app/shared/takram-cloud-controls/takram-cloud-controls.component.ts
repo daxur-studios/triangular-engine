@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, Injectable, signal } from '@angular/core';
 import type { CloudsQualityPreset } from '@takram/three-clouds';
 
 export interface TakramCloudDemoParameters {
@@ -19,15 +19,9 @@ export interface TakramCloudDemoParameters {
   cameraFar: number;
 }
 
-/** Shared live controls and canonical preset for both Takram cloud demos. */
-@Component({
-  standalone: true,
-  selector: 'app-takram-cloud-controls',
-  templateUrl: './takram-cloud-controls.component.html',
-  styleUrl: './takram-cloud-controls.component.scss',
-  changeDetection: ChangeDetectionStrategy.OnPush,
-})
-export class TakramCloudControlsComponent {
+/** Page-scoped state shared by the portal UI and the declarative scene. */
+@Injectable()
+export class TakramCloudControlsStore {
   readonly qualityPreset = signal<CloudsQualityPreset>('low');
   readonly coverage = signal(0.45);
   readonly resolutionScale = signal(0.5);
@@ -66,4 +60,16 @@ export class TakramCloudControlsComponent {
   setNumber(target: { set(value: number): void }, event: Event): void {
     target.set(Number((event.target as HTMLInputElement).value));
   }
+}
+
+/** Shared live controls and canonical preset for both Takram cloud demos. */
+@Component({
+  standalone: true,
+  selector: 'app-takram-cloud-controls',
+  templateUrl: './takram-cloud-controls.component.html',
+  styleUrl: './takram-cloud-controls.component.scss',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class TakramCloudControlsComponent {
+  readonly state = inject(TakramCloudControlsStore);
 }
