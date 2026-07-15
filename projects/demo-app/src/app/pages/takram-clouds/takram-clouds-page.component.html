@@ -23,7 +23,7 @@
   />
 
   <postprocessing-composer [enableNormalPass]="true">
-    <takram-atmosphere>
+    <takram-atmosphere [sunDirection]="controls.sunDirection()">
       @if (!controls.takramLighting()) {
         <takram-sun-light [intensity]="1.5" />
         <takram-sky-light [intensity]="0.7" />

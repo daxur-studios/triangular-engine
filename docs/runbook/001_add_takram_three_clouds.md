@@ -481,6 +481,7 @@ Acceptance criteria:
 - Added independent `Takram scene lighting` and `Cloud shadows on geometry` A/B toggles. Disabling cloud shadows in browser testing visibly brightened the ground while clouds remained rendered, confirming that cloud coverage now affects opaque geometry through aerial perspective.
 - Kept the optional real sun/sky light path behind the lighting toggle to demonstrate that conventional Three.js lighting and shadows are separate from Takram cloud-shadow composition.
 - The `Light shafts` toggle rebuilds and runs the enabled shader path without errors. The current default sun/cloud framing still does not produce clearly visible shafts, so visual shaft verification remains open. ANGLE emits Takram's previously observed potentially-uninitialised dynamic-index warning when the shaft variant compiles.
+- Added a `Time of day` control to `/takram-clouds`. It drives the shared atmosphere sun direction from sunrise at 06:00, through overhead sun at 12:00, to sunset at 18:00; use dawn/dusk with `Light shafts` toggled on/off for visual verification.
 - The triangular-engine package build and demo development build pass.
 
 ### Takram ground-boundary troubleshooting

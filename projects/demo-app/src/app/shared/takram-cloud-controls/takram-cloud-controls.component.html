@@ -141,6 +141,17 @@
     Light shafts</label
   >
   @if (showSceneLightingControls()) {
+    <label>
+      Time of day <output>{{ state.timeOfDay() }} h</output>
+      <input
+        type="range"
+        min="0"
+        max="24"
+        step="0.25"
+        [value]="state.timeOfDay()"
+        (input)="state.setNumber(state.timeOfDay, $event)"
+      />
+    </label>
     <label class="toggle"
       ><input
         type="checkbox"

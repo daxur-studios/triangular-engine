@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import type { CloudsQualityPreset } from '@takram/three-clouds';
+import { Vector3 } from 'three';
 import { TakramCloudDemoTextures } from './takram-cloud-demo-textures.service';
 
 export interface TakramCloudDemoParameters {
@@ -23,6 +24,7 @@ export interface TakramCloudDemoParameters {
   altitude: number;
   height: number;
   densityScale: number;
+  timeOfDay: number;
   cameraFov: number;
   cameraNear: number;
   cameraFar: number;
@@ -41,6 +43,18 @@ export class TakramCloudControlsStore {
   readonly lightShafts = signal(false);
   readonly takramLighting = signal(true);
   readonly cloudShadows = signal(true);
+  readonly timeOfDay = signal(12);
+  readonly sunDirection = computed(() => {
+    const solarAngle = ((this.timeOfDay() - 6) / 12) * Math.PI;
+    const horizontal = Math.cos(solarAngle);
+    const azimuth = Math.PI / 6;
+
+    return new Vector3(
+      horizontal * Math.cos(azimuth),
+      Math.sin(solarAngle),
+      horizontal * Math.sin(azimuth),
+    ).normalize();
+  });
   readonly localWeatherVelocityX = signal(0.002);
   readonly altitude = signal(750);
   readonly height = signal(650);
@@ -63,6 +77,7 @@ export class TakramCloudControlsStore {
     altitude: this.altitude(),
     height: this.height(),
     densityScale: this.densityScale(),
+    timeOfDay: this.timeOfDay(),
     cameraFov: this.cameraFov(),
     cameraNear: this.cameraNear(),
     cameraFar: this.cameraFar(),
