@@ -10,7 +10,11 @@ import {
 import { DecimalPipe, PercentPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Color, FrontSide, NoToneMapping, Vector3 } from 'three';
-import { EngineModule, EngineService } from 'triangular-engine';
+import {
+  EngineModule,
+  EngineService,
+  OrbitControlsComponent,
+} from 'triangular-engine';
 import { PostprocessingModule } from 'triangular-engine/postprocessing';
 import {
   TakramAerialPerspectiveComponent,
@@ -30,6 +34,8 @@ const CLOUD_ALTITUDE = 3_000;
 const CLOUD_HEIGHT = 2_000;
 const TRANSITION_START = 30_000;
 const TRANSITION_END = 80_000;
+const REFERENCE_PLANET_RADIUS = 6_360_000;
+const REFERENCE_LOCAL_WEATHER_REPEAT = 100;
 
 type PlanetSizePreset = 'small' | 'medium' | 'large';
 
@@ -144,6 +150,16 @@ export class TakramMiniPlanetPageComponent {
   readonly cloudShellRadius = computed(
     () => this.planetRadius() + CLOUD_ALTITUDE + CLOUD_HEIGHT * 0.5,
   );
+  /**
+   * Takram samples weather in normalized globe UVs. Repeats must scale with
+   * radius to keep the Earth preset's checker/cloud width constant in metres.
+   */
+  readonly cloudLocalWeatherRepeat = computed<[number, number]>(() => {
+    const repeat =
+      REFERENCE_LOCAL_WEATHER_REPEAT *
+      (this.planetRadius() / REFERENCE_PLANET_RADIUS);
+    return [repeat, repeat];
+  });
   readonly cameraAltitude = signal(0);
   readonly shellOpacity = computed(() =>
     smoothstep(TRANSITION_START, TRANSITION_END, this.cameraAltitude()),
@@ -179,6 +195,7 @@ export class TakramMiniPlanetPageComponent {
   private readonly atmosphereRef = viewChild(TakramAtmosphereComponent);
   private readonly cloudsRef = viewChild(TakramCloudsComponent);
   private readonly aerialRef = viewChild(TakramAerialPerspectiveComponent);
+  private readonly orbitControlsRef = viewChild(OrbitControlsComponent);
 
   private readonly engine = inject(EngineService);
 
@@ -209,6 +226,17 @@ export class TakramMiniPlanetPageComponent {
 
   /** Transient button-label feedback after a clipboard copy attempt. */
   readonly dumpStatus = signal<'idle' | 'copied' | 'failed'>('idle');
+
+  /** Restore the size-appropriate surface framing after free orbiting. */
+  recenterOnSurface(): void {
+    const component = this.orbitControlsRef();
+    const orbit = component?.orbitControls();
+    if (!component || !orbit) return;
+
+    component.internalCamera.position.set(...this.cameraHomePosition());
+    orbit.target.set(...this.surfaceTarget);
+    orbit.update();
+  }
 
   /**
    * Phase 0 diagnostic: copies a compact, single-line-per-section snapshot

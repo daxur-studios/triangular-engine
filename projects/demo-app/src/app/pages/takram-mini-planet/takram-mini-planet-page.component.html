@@ -6,8 +6,8 @@
   <ng-template enginePortal="top" lane="content">
     <aside class="demo-status">
       <strong>Mini planet · hybrid clouds</strong>
-      <span>Camera altitude {{ cameraAltitude() | number: '1.0-0' }} m</span>
-      <span>2D cloud shell {{ shellOpacity() | percent: '1.0-0' }}</span>
+      <span>Camera altitude {{ cameraAltitude() | number: "1.0-0" }} m</span>
+      <span>2D cloud shell {{ shellOpacity() | percent: "1.0-0" }}</span>
       <small>Only the exterior texture fades; Takram remains unchanged.</small>
     </aside>
   </ng-template>
@@ -75,12 +75,15 @@
         />
         Thin atmosphere 6 km (phase 3)</label
       >
+      <button type="button" (click)="recenterOnSurface()">
+        Re-center camera on surface
+      </button>
       <button type="button" (click)="dumpState()">
         @switch (dumpStatus()) {
-          @case ('copied') {
+          @case ("copied") {
             Copied to clipboard
           }
-          @case ('failed') {
+          @case ("failed") {
             Copy failed — see console
           }
           @default {
@@ -115,7 +118,7 @@
             [params]="{
               radius: planetRadius(),
               widthSegments: planetSegments().width,
-              heightSegments: planetSegments().height
+              heightSegments: planetSegments().height,
             }"
           />
           <meshBasicMaterial [params]="{ color: '#28618b' }" />
@@ -133,6 +136,7 @@
             [haze]="controls.haze()"
             [lightShafts]="controls.lightShafts()"
             [localWeatherVelocity]="[controls.localWeatherVelocityX(), 0]"
+            [localWeatherRepeat]="cloudLocalWeatherRepeat()"
             [shadowCascadeCount]="1"
           >
             <takram-cloud-layer
@@ -151,7 +155,7 @@
               [params]="{
                 radius: cloudShellRadius(),
                 widthSegments: 96,
-                heightSegments: 64
+                heightSegments: 64,
               }"
             />
             <meshBasicMaterial

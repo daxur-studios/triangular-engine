@@ -41,6 +41,22 @@ describe('Takram adapter contracts', () => {
     });
   });
 
+  describe('physical weather-map scale', () => {
+    it('scales globe-UV repeat linearly with radius', () => {
+      const referenceRadius = 6_360_000;
+      const referenceRepeat = 100;
+
+      expect(referenceRepeat * (1_000_000 / referenceRadius)).toBeCloseTo(
+        15.72327044,
+        6,
+      );
+      expect(referenceRepeat * (100_000 / referenceRadius)).toBeCloseTo(
+        1.57232704,
+        6,
+      );
+    });
+  });
+
   describe('buffer routing', () => {
     it('always routes overlay and independently disables shadow buffers', () => {
       const overlay = {} as NonNullable<CloudsEffect['atmosphereOverlay']>;

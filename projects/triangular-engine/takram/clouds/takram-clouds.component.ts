@@ -68,6 +68,8 @@ export class TakramCloudsComponent
   readonly haze = input(true);
   readonly lightShafts = input(true);
   readonly localWeatherVelocity = input<Vector2Tuple>([0, 0]);
+  /** Globe-UV tiling. Scale with planet radius to preserve physical feature size. */
+  readonly localWeatherRepeat = input<Vector2Tuple>([100, 100]);
   /** Number of cloud-shadow cascades supported by Takram (1–4). */
   readonly shadowCascadeCount = input<number | undefined>(undefined);
 
@@ -95,6 +97,7 @@ export class TakramCloudsComponent
         lightShafts: this.lightShafts(),
       };
       const shadowCascadeCount = this.shadowCascadeCount();
+      const localWeatherRepeat = this.localWeatherRepeat();
 
       if (values.length > 4) {
         throw new Error('Takram clouds support at most four cloud layers.');
@@ -105,6 +108,7 @@ export class TakramCloudsComponent
       this.clouds.localWeatherVelocity.copy(
         new Vector2(...this.localWeatherVelocity()),
       );
+      this.clouds.localWeatherRepeat.set(...localWeatherRepeat);
       if (shadowCascadeCount !== undefined) {
         this.clouds.shadow.cascadeCount =
           validateShadowCascadeCount(shadowCascadeCount);
@@ -160,6 +164,7 @@ export class TakramCloudsComponent
     clouds.haze = this.haze();
     clouds.lightShafts = this.lightShafts();
     clouds.localWeatherVelocity.set(...this.localWeatherVelocity());
+    clouds.localWeatherRepeat.set(...this.localWeatherRepeat());
     const shadowCascadeCount = this.shadowCascadeCount();
     if (shadowCascadeCount !== undefined) {
       clouds.shadow.cascadeCount =

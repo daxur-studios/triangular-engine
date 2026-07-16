@@ -381,11 +381,81 @@ verify clouds from below, within, and above the layer at all three presets,
 and distinguish the fixed height-branch defect from Takram 0.7.6's remaining
 100 km ray distance / unsupported orbital-view limitations.
 
+User visual verification later on 2026-07-16: all three sizes are fixed for
+the angle-dependent disappearance bug, and clouds are visible correctly from
+all tested angles. This confirms F10 as the principal visibility root cause.
+
+## F14 — Remaining cloud-proportion mismatch explained
+
+Source inspection of `clouds.glsl` confirms Takram mixes planet-normalized and
+physical-coordinate sampling:
+
+- Local weather coverage uses normalized globe UV multiplied by the fixed
+  `localWeatherRepeat` (default 100). Its physical wavelength is therefore
+  proportional to planet radius, so weather features become physically much
+  smaller/compressed on smaller planets.
+- Turbulence UV derives from the same normalized weather UV and fixed repeats,
+  so it has the same radius-dependent physical scaling.
+- Shape and shape-detail noise sample ECEF `position` multiplied by fixed
+  metre-scale repeats, so those features remain approximately constant in
+  physical size instead of scaling with radius.
+- Cloud altitude and thickness are currently fixed at 3,000 m and 2,000 m.
+  A 2 km layer is 2% of the Small planet's radius but only about 0.03% of the
+  Large planet's radius, so it necessarily appears much thicker/farther
+  outward relative to the Small globe.
+
+This mixed coordinate system explains the reported combination of more packed
+small-planet clouds and a disproportionately thick/outward cloud volume. It is
+not a recurrence of the camera-height bug. The next implementation must first
+choose an artistic invariant:
+
+- Constant real-world cloud dimensions: scale normalized weather/turbulence
+  repeats with radius to preserve a target wavelength in metres, while keeping
+  altitude/height and 3D-noise repeats fixed.
+- Constant planet-relative appearance: scale altitude/height with radius and
+  keep normalized weather repeat fixed; 3D-noise repeats must inversely scale
+  with radius as well.
+
+No cloud-scale adjustment was applied with this finding because those two
+targets require intentionally different behavior.
+
+The mini-planet diagnostics now include a "Re-center camera on surface"
+button. It restores the current preset's `cameraHomePosition`, resets the
+orbit target to the surface origin, and immediately updates OrbitControls.
+
+## F15 — Constant-physical-size weather scaling implemented
+
+Subsequent user testing described the checker preset changing from a thin
+square at Large, to rounder/thicker at Medium, to a narrow vertical "hotdog"
+at Small. This confirms F14: normalized horizontal weather dimensions were
+shrinking with radius while the fixed 2 km vertical dimension did not.
+
+The adapter now exposes a `localWeatherRepeat` input (default `[100, 100]`, so
+existing Earth demos are unchanged). Mini-planet supplies:
+
+```text
+repeat = 100 * planetRadius / 6,360,000
+```
+
+Resulting repeats are Large `100`, Medium approximately `15.72`, and Small
+approximately `1.57`. Because normalized UV arc length grows with radius,
+scaling repeat linearly with radius preserves the Large preset's checker and
+weather feature width in physical metres. Cloud altitude/height and ECEF 3D
+shape/detail repeats remain fixed, matching the chosen constant-real-world-
+cloud-size invariant.
+
+Verification receipts:
+
+- Demo development build succeeded.
+- Triangular-engine adapter tests succeeded, 8/8.
+
+Interactive aspect-ratio verification remains required.
+
 ## Open / unresolved
 
-- **Small/Medium visual verification**: the WGS84 camera-height shim and
-  radius regression tests are implemented (F13), but the interactive result
-  has not yet been verified by the user.
+- **Small/Medium visibility**: verified fixed by the user at every tested
+  angle. Remaining scale/proportion differences are tracked separately in
+  F14.
 - **Medium preset**: user grouped it with Small ("at lower scales its not
   working") but no dump or description was captured for Medium specifically.
 - **Fix B (remount) and Fix D (camera altitude cap)**: code-complete and
