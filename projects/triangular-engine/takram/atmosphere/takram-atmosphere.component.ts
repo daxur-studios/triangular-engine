@@ -36,7 +36,11 @@ export class TakramAtmosphereComponent implements OnInit, OnDestroy {
     // construction. Configure the parent synchronously before projected child
     // effects are initialized; the effect above handles subsequent changes.
     const planetRadius = this.planetRadius();
-    if (planetRadius !== undefined) this.configurePlanet(planetRadius);
+    if (planetRadius !== undefined) {
+      this.configurePlanet(planetRadius);
+    } else {
+      this.state.initializeDefaultAtmosphere();
+    }
   }
 
   ngOnDestroy(): void {

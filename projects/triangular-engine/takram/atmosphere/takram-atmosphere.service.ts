@@ -2,6 +2,7 @@ import { inject, Injectable, signal } from '@angular/core';
 import {
   AerialPerspectiveEffect,
   AtmosphereParameters,
+  DensityProfileLayer,
   PrecomputedTexturesGenerator,
 } from '@takram/three-atmosphere';
 import { Ellipsoid } from '@takram/three-geospatial';
@@ -12,6 +13,15 @@ import type {
 import { Matrix4, Vector3, WebGLRenderer } from 'three';
 import { EngineService } from 'triangular-engine';
 
+/**
+ * Takram's default (Earth) atmosphere height, in metres. The Rayleigh/Mie/ozone
+ * density profiles below are tuned as absolute-metre curves against this height,
+ * not against `bottomRadius`/`topRadius` — see `configurePlanet()`.
+ */
+const DEFAULT_ATMOSPHERE_HEIGHT =
+  AtmosphereParameters.DEFAULT.topRadius -
+  AtmosphereParameters.DEFAULT.bottomRadius;
+
 /** Shared atmosphere resources and cloud/aerial buffer routing for one subtree. */
 @Injectable()
 export class TakramAtmosphereService {
@@ -21,8 +31,22 @@ export class TakramAtmosphereService {
   private aerialPerspective: AerialPerspectiveEffect | undefined;
   private cloudShadowsEnabled = true;
   private textureGeneration = 0;
+  private textureUpdateInFlight = false;
+  private textureUpdateRequested = false;
+  private textureConfiguration: string | undefined;
+  private disposed = false;
 
   readonly atmosphere = new AtmosphereParameters();
+  /** Pristine Earth density profiles, rescaled by `configurePlanet()` for custom radii. */
+  private readonly defaultRayleighDensity = cloneDensityProfile(
+    this.atmosphere.rayleighDensity,
+  );
+  private readonly defaultMieDensity = cloneDensityProfile(
+    this.atmosphere.mieDensity,
+  );
+  private readonly defaultAbsorptionDensity = cloneDensityProfile(
+    this.atmosphere.absorptionDensity,
+  );
   ellipsoid = Ellipsoid.WGS84;
   readonly sunDirection = new Vector3(1, 0.7, 0.4).normalize();
   readonly worldToECEFMatrix = createDefaultWorldToECEFMatrix();
@@ -52,7 +76,14 @@ export class TakramAtmosphereService {
     }
 
     this.generator = new PrecomputedTexturesGenerator(renderer);
-    this.updateTextures('Failed to generate Takram atmosphere lookup textures.');
+  }
+
+  /** Generate the default Earth LUT once when no custom planet is configured. */
+  initializeDefaultAtmosphere(): void {
+    this.requestTextureUpdate(
+      `default:${this.atmosphere.bottomRadius}:${this.atmosphere.topRadius}`,
+      'Failed to generate Takram atmosphere lookup textures.',
+    );
   }
 
   registerClouds(effect: CloudsEffect): void {
@@ -77,11 +108,33 @@ export class TakramAtmosphereService {
     this.ellipsoid = new Ellipsoid(radius, radius, radius);
     this.atmosphere.bottomRadius = radius;
     this.atmosphere.topRadius = radius + atmosphereHeight;
+
+    // The density profiles are absolute-metre curves (e.g. an 8 km Rayleigh
+    // scale height) tuned for Earth's 60 km atmosphere. Left unscaled, a much
+    // thinner custom atmosphere compresses that curve into a tiny fraction of
+    // the LUT's radial range, which is a known source of visible LUT banding.
+    // Rescale so the profile occupies the same fraction of the shell as on Earth.
+    const densityScale = atmosphereHeight / DEFAULT_ATMOSPHERE_HEIGHT;
+    this.atmosphere.rayleighDensity = scaleDensityProfile(
+      this.defaultRayleighDensity,
+      densityScale,
+    );
+    this.atmosphere.mieDensity = scaleDensityProfile(
+      this.defaultMieDensity,
+      densityScale,
+    );
+    this.atmosphere.absorptionDensity = scaleDensityProfile(
+      this.defaultAbsorptionDensity,
+      densityScale,
+    );
+
     if (resetWorldToECEF) {
       this.worldToECEFMatrix.copy(createWorldToECEFMatrix(radius));
     }
-    this.ready.set(false);
-    this.updateTextures('Failed to update Takram atmosphere lookup textures.');
+    this.requestTextureUpdate(
+      `planet:${radius}:${atmosphereHeight}`,
+      'Failed to update Takram atmosphere lookup textures.',
+    );
   }
 
   unregisterClouds(effect: CloudsEffect): void {
@@ -131,6 +184,7 @@ export class TakramAtmosphereService {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.textureGeneration++;
     if (this.clouds) {
       this.clouds.events.removeEventListener('change', this.onCloudsChange);
@@ -149,21 +203,46 @@ export class TakramAtmosphereService {
     );
   }
 
-  private updateTextures(fallbackMessage: string): void {
-    const generation = ++this.textureGeneration;
+  private requestTextureUpdate(
+    configuration: string,
+    fallbackMessage: string,
+  ): void {
+    if (configuration === this.textureConfiguration) return;
+    this.textureConfiguration = configuration;
+    this.textureGeneration++;
+    this.textureUpdateRequested = true;
+    this.ready.set(false);
+    this.runTextureUpdate(fallbackMessage);
+  }
+
+  private runTextureUpdate(fallbackMessage: string): void {
+    if (
+      this.textureUpdateInFlight ||
+      !this.textureUpdateRequested ||
+      this.disposed
+    ) {
+      return;
+    }
+    this.textureUpdateRequested = false;
+    this.textureUpdateInFlight = true;
+    const generation = this.textureGeneration;
     void this.generator
       .update(this.atmosphere)
       .then(() => {
-        if (generation !== this.textureGeneration) return;
+        if (generation !== this.textureGeneration || this.disposed) return;
         this.error.set(undefined);
         this.applySharedState();
         this.ready.set(true);
       })
       .catch((reason: unknown) => {
-        if (generation !== this.textureGeneration) return;
+        if (generation !== this.textureGeneration || this.disposed) return;
         this.error.set(
           reason instanceof Error ? reason : new Error(fallbackMessage),
         );
+      })
+      .finally(() => {
+        this.textureUpdateInFlight = false;
+        this.runTextureUpdate(fallbackMessage);
       });
   }
 }
@@ -190,6 +269,55 @@ export function routeTakramCloudBuffers(
   aerialPerspective.shadowLength = shadowsEnabled
     ? (clouds?.atmosphereShadowLength ?? null)
     : null;
+}
+
+type DensityProfile = [DensityProfileLayer, DensityProfileLayer];
+
+function cloneDensityProfile(profile: DensityProfile): DensityProfile {
+  return [
+    cloneDensityProfileLayer(profile[0]),
+    cloneDensityProfileLayer(profile[1]),
+  ];
+}
+
+function cloneDensityProfileLayer(
+  layer: DensityProfileLayer,
+): DensityProfileLayer {
+  return new DensityProfileLayer(
+    layer.width,
+    layer.expTerm,
+    layer.expScale,
+    layer.linearTerm,
+    layer.constantTerm,
+  );
+}
+
+/**
+ * Rescales a density profile's height-dependent terms so that
+ * `density(scale * h) === original density(h)`, i.e. the profile keeps its
+ * shape but occupies `scale` times the vertical extent.
+ */
+function scaleDensityProfile(
+  profile: DensityProfile,
+  scale: number,
+): DensityProfile {
+  return [
+    scaleDensityProfileLayer(profile[0], scale),
+    scaleDensityProfileLayer(profile[1], scale),
+  ];
+}
+
+function scaleDensityProfileLayer(
+  layer: DensityProfileLayer,
+  scale: number,
+): DensityProfileLayer {
+  return new DensityProfileLayer(
+    layer.width * scale,
+    layer.expTerm,
+    layer.expScale / scale,
+    layer.linearTerm / scale,
+    layer.constantTerm,
+  );
 }
 
 function createDefaultWorldToECEFMatrix(): Matrix4 {

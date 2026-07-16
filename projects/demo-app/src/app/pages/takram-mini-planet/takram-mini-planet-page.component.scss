@@ -18,3 +18,20 @@
   margin-top: 0.2rem;
   color: #b9c7cf;
 }
+
+.diagnostics {
+  pointer-events: auto;
+  width: 15rem;
+}
+
+.diagnostics .toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.diagnostics button {
+  margin-top: 0.6rem;
+  width: 100%;
+}

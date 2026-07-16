@@ -7,6 +7,8 @@ import {
   TakramAtmosphereService,
 } from '../takram/atmosphere/takram-atmosphere.service';
 import { TakramCloudLayerComponent } from '../takram/clouds/takram-cloud-layer.component';
+import { applyTakramCloudCameraHeightFix } from '../takram/clouds/takram-clouds-compat';
+import { Matrix4, PerspectiveCamera, Uniform, Vector3 } from 'three';
 
 describe('Takram adapter contracts', () => {
   describe('cloud-layer mapping', () => {
@@ -95,6 +97,58 @@ describe('Takram adapter contracts', () => {
       );
       expect(effect.dispose).toHaveBeenCalled();
       expect(component.effect).toBeUndefined();
+    });
+  });
+
+  describe('custom-planet cloud camera height', () => {
+    for (const radius of [100_000, 1_000_000, 6_360_000]) {
+      it(`uses the configured spherical radius at ${radius} m`, () => {
+        const uniforms = {
+          altitudeCorrection: new Uniform(new Vector3()),
+          bottomRadius: new Uniform(radius),
+          cameraHeight: new Uniform(-999),
+          worldToECEFMatrix: new Uniform(new Matrix4()),
+        };
+        const material = {
+          uniforms,
+          copyCameraSettings: jasmine.createSpy('copyCameraSettings'),
+        };
+        const effect = {
+          cloudsPass: { currentMaterial: material },
+        } as unknown as CloudsEffect;
+        const camera = new PerspectiveCamera();
+        camera.position.set(radius + 5_000, 0, 0);
+        camera.updateMatrixWorld(true);
+
+        applyTakramCloudCameraHeightFix(effect);
+        material.copyCameraSettings(camera);
+
+        expect(uniforms.cameraHeight.value).toBeCloseTo(5_000, 6);
+      });
+    }
+
+    it('includes Takram altitude correction in the shader-frame height', () => {
+      const uniforms = {
+        altitudeCorrection: new Uniform(new Vector3(250, 0, 0)),
+        bottomRadius: new Uniform(100_000),
+        cameraHeight: new Uniform(0),
+        worldToECEFMatrix: new Uniform(new Matrix4()),
+      };
+      const material = {
+        uniforms,
+        copyCameraSettings: jasmine.createSpy('copyCameraSettings'),
+      };
+      const effect = {
+        cloudsPass: { currentMaterial: material },
+      } as unknown as CloudsEffect;
+      const camera = new PerspectiveCamera();
+      camera.position.set(103_000, 0, 0);
+      camera.updateMatrixWorld(true);
+
+      applyTakramCloudCameraHeightFix(effect);
+      material.copyCameraSettings(camera);
+
+      expect(uniforms.cameraHeight.value).toBeCloseTo(3_250, 6);
     });
   });
 });

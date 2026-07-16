@@ -12,8 +12,87 @@
     </aside>
   </ng-template>
 
+  <ng-template enginePortal="right" lane="content" [order]="-10">
+    <aside class="demo-status diagnostics">
+      <strong>Diagnostics (runbook 003, phase 0/1)</strong>
+      <strong>Planet size</strong>
+      @for (key of planetSizePresetKeys; track key) {
+        <label class="toggle"
+          ><input
+            type="radio"
+            name="planetSizePreset"
+            [checked]="planetSizePreset() === key"
+            (change)="setPlanetSizePreset(key)"
+          />
+          {{ planetSizePresets[key].label }}</label
+        >
+      }
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="diagClouds()"
+          (change)="diagClouds.set($any($event.target).checked)"
+        />
+        Clouds effect</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="diagAerial()"
+          (change)="diagAerial.set($any($event.target).checked)"
+        />
+        Aerial perspective effect</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="diagAerialSky()"
+          (change)="diagAerialSky.set($any($event.target).checked)"
+        />
+        Aerial: sky</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="diagShell()"
+          (change)="diagShell.set($any($event.target).checked)"
+        />
+        2D cloud shell mesh</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="diagHighTessellation()"
+          (change)="diagHighTessellation.set($any($event.target).checked)"
+        />
+        Planet mesh 512×256 (phase 1)</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="diagThinAtmosphere()"
+          (change)="diagThinAtmosphere.set($any($event.target).checked)"
+        />
+        Thin atmosphere 6 km (phase 3)</label
+      >
+      <button type="button" (click)="dumpState()">
+        @switch (dumpStatus()) {
+          @case ('copied') {
+            Copied to clipboard
+          }
+          @case ('failed') {
+            Copy failed — see console
+          }
+          @default {
+            Copy state to clipboard
+          }
+        }
+      </button>
+    </aside>
+  </ng-template>
+
   <orbitControls
-    [cameraPosition]="[0, 3000, 8000]"
+    [cameraPosition]="cameraHomePosition()"
     [target]="surfaceTarget"
     [upVector]="[0, 1, 0]"
     [fov]="controls.cameraFov()"
@@ -22,65 +101,77 @@
   />
 
   <postprocessing-composer [enableNormalPass]="true">
-    <takram-atmosphere
-      [planetRadius]="planetRadius"
-      [atmosphereHeight]="atmosphereHeight"
-      [sunDirection]="controls.sunDirection()"
-    >
-      <takram-sun-light [intensity]="1.4" />
-      <takram-sky-light [intensity]="0.65" />
-
-      <mesh [position]="planetCentre">
-        <sphereGeometry
-          [params]="{ radius: planetRadius, widthSegments: 96, heightSegments: 64 }"
-        />
-        <meshBasicMaterial [params]="{ color: '#28618b' }" />
-      </mesh>
-
-      <takram-clouds
-        [localWeatherTexture]="textures.selectedTexture()"
-        [coverage]="controls.coverage()"
-        [qualityPreset]="controls.qualityPreset()"
-        [resolutionScale]="controls.resolutionScale()"
-        [temporalUpscale]="controls.temporalUpscale()"
-        [shapeDetail]="controls.shapeDetail()"
-        [turbulence]="controls.turbulence()"
-        [haze]="controls.haze()"
-        [lightShafts]="controls.lightShafts()"
-        [localWeatherVelocity]="[controls.localWeatherVelocityX(), 0]"
-        [shadowCascadeCount]="1"
+    @if (planetMounted()) {
+      <takram-atmosphere
+        [planetRadius]="planetRadius()"
+        [atmosphereHeight]="atmosphereHeight()"
+        [sunDirection]="controls.sunDirection()"
       >
-        <takram-cloud-layer
-          channel="r"
-          [altitude]="controls.altitude()"
-          [height]="controls.height()"
-          [densityScale]="controls.densityScale()"
-          [shadow]="true"
-        />
-      </takram-clouds>
+        <takram-sun-light [intensity]="1.4" />
+        <takram-sky-light [intensity]="0.65" />
 
-      <mesh [position]="planetCentre" [renderOrder]="10">
-        <sphereGeometry
-          [params]="{
-            radius: cloudShellRadius,
-            widthSegments: 96,
-            heightSegments: 64
-          }"
-        />
-        <meshBasicMaterial
-          map="/planet-clouds/cloud-opacity-map.png"
-          alphaMap="/planet-clouds/cloud-opacity-map.png"
-          [params]="shellMaterial()"
-        />
-      </mesh>
+        <mesh [position]="planetCentre()">
+          <sphereGeometry
+            [params]="{
+              radius: planetRadius(),
+              widthSegments: planetSegments().width,
+              heightSegments: planetSegments().height
+            }"
+          />
+          <meshBasicMaterial [params]="{ color: '#28618b' }" />
+        </mesh>
 
-      <takram-aerial-perspective
-        [sky]="true"
-        [sunLight]="true"
-        [skyLight]="true"
-        [cloudShadows]="controls.cloudShadows()"
-      />
-    </takram-atmosphere>
+        @if (diagClouds()) {
+          <takram-clouds
+            [localWeatherTexture]="textures.selectedTexture()"
+            [coverage]="controls.coverage()"
+            [qualityPreset]="controls.qualityPreset()"
+            [resolutionScale]="controls.resolutionScale()"
+            [temporalUpscale]="controls.temporalUpscale()"
+            [shapeDetail]="controls.shapeDetail()"
+            [turbulence]="controls.turbulence()"
+            [haze]="controls.haze()"
+            [lightShafts]="controls.lightShafts()"
+            [localWeatherVelocity]="[controls.localWeatherVelocityX(), 0]"
+            [shadowCascadeCount]="1"
+          >
+            <takram-cloud-layer
+              channel="r"
+              [altitude]="controls.altitude()"
+              [height]="controls.height()"
+              [densityScale]="controls.densityScale()"
+              [shadow]="true"
+            />
+          </takram-clouds>
+        }
+
+        @if (diagShell()) {
+          <mesh [position]="planetCentre()" [renderOrder]="10">
+            <sphereGeometry
+              [params]="{
+                radius: cloudShellRadius(),
+                widthSegments: 96,
+                heightSegments: 64
+              }"
+            />
+            <meshBasicMaterial
+              map="/planet-clouds/cloud-opacity-map.png"
+              alphaMap="/planet-clouds/cloud-opacity-map.png"
+              [params]="shellMaterial()"
+            />
+          </mesh>
+        }
+
+        @if (diagAerial()) {
+          <takram-aerial-perspective
+            [sky]="diagAerialSky()"
+            [sunLight]="true"
+            [skyLight]="true"
+            [cloudShadows]="controls.cloudShadows()"
+          />
+        }
+      </takram-atmosphere>
+    }
     <toneMappingEffect />
   </postprocessing-composer>
 </scene>

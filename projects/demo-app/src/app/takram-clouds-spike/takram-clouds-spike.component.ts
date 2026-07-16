@@ -81,6 +81,7 @@ export class TakramCloudsSpikeComponent implements AfterViewInit {
       canvas,
       antialias: false,
       powerPreference: 'high-performance',
+      logarithmicDepthBuffer: true,
     });
     renderer.outputColorSpace = SRGBColorSpace;
     // AGX deliberately preserves highlights, so a small exposure lift avoids

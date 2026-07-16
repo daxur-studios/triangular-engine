@@ -27,6 +27,7 @@ import { EngineService } from 'triangular-engine';
 import { TakramCloudAssetsService } from './takram-cloud-assets.service';
 import { TakramCloudLayerComponent } from './takram-cloud-layer.component';
 import { TakramAtmosphereService } from '../atmosphere/takram-atmosphere.service';
+import { applyTakramCloudCameraHeightFix } from './takram-clouds-compat';
 
 /** Declarative adapter for Takram's framework-independent CloudsEffect. */
 @Component({
@@ -123,9 +124,14 @@ export class TakramCloudsComponent
     if (this.clouds) {
       this.atmosphere?.unregisterClouds(this.clouds);
     }
-    this.clouds = new CloudsEffect(camera, {
-      resolutionScale: this.resolutionScale(),
-    }, this.atmosphere?.atmosphere);
+    this.clouds = new CloudsEffect(
+      camera,
+      {
+        resolutionScale: this.resolutionScale(),
+      },
+      this.atmosphere?.atmosphere,
+    );
+    applyTakramCloudCameraHeightFix(this.clouds);
     this.applyInputs(this.clouds);
     this.atmosphere?.registerClouds(this.clouds);
     this.loadAssets(this.clouds, this.assetBaseUrl(), this.customTextures());

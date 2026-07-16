@@ -29,7 +29,7 @@ import { TakramCloudDemoTextures } from '../../shared/takram-cloud-controls/takr
       toneMappingExposure: 1.3,
       webGLRendererParameters: {
         antialias: false,
-        logarithmicDepthBuffer: false,
+        logarithmicDepthBuffer: true,
       },
     }),
   ],
