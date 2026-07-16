@@ -3,6 +3,7 @@ import {
   Component,
   computed,
   DestroyRef,
+  effect,
   inject,
   signal,
   viewChild,
@@ -223,7 +224,29 @@ export class TakramMiniPlanetPageComponent {
     this.controls.height.set(CLOUD_HEIGHT);
     this.controls.densityScale.set(0.3);
     this.controls.temporalUpscale.set(false);
-    this.controls.cameraFar.set(50_000_000);
+
+    effect(() => {
+      const altitude = this.cameraAltitude();
+      const radius = this.planetRadius();
+
+      // Dynamic Far Plane: 15x the planet radius, but at least 2,000,000 m (to see skybox/space)
+      // and at least 3x the camera altitude to avoid clipping.
+      const targetFar = Math.max(2_000_000, radius * 15, altitude * 3);
+
+      // Dynamic Near Plane: 5% of camera altitude, but at least 1 m and at most 10% of planet radius.
+      const targetNear = Math.max(1, Math.min(altitude * 0.05, radius * 0.1));
+
+      const currentNear = this.controls.cameraNear();
+      const currentFar = this.controls.cameraFar();
+
+      // Quantize changes to 10% to prevent updating camera/material uniforms on tiny changes.
+      if (Math.abs(targetNear - currentNear) / currentNear > 0.1) {
+        this.controls.cameraNear.set(targetNear);
+      }
+      if (Math.abs(targetFar - currentFar) / currentFar > 0.1) {
+        this.controls.cameraFar.set(targetFar);
+      }
+    });
     const centre = new Vector3();
     this.engine.postTick$.pipe(takeUntilDestroyed(destroyRef)).subscribe(() => {
       centre.set(...this.planetCentre());
@@ -239,9 +262,9 @@ export class TakramMiniPlanetPageComponent {
 
   /** Transient button-label feedback after a clipboard copy attempt. */
   readonly dumpStatus = signal<'idle' | 'copied' | 'failed'>('idle');
-  readonly diagnosticStatus = signal<
-    'idle' | 'running' | 'copied' | 'failed'
-  >('idle');
+  readonly diagnosticStatus = signal<'idle' | 'running' | 'copied' | 'failed'>(
+    'idle',
+  );
 
   /** Restore the size-appropriate surface framing after free orbiting. */
   recenterOnSurface(): void {
@@ -377,7 +400,9 @@ export class TakramMiniPlanetPageComponent {
       aerial.normalBuffer = null;
       aerial.reconstructNormal = true;
       await this.waitForFrames(3);
-      variants.push(await this.captureDiagnostic('depth-reconstructed-normals'));
+      variants.push(
+        await this.captureDiagnostic('depth-reconstructed-normals'),
+      );
 
       aerial.reconstructNormal = originalReconstructNormal;
       aerial.normalBuffer = originalNormalBuffer;
@@ -454,7 +479,10 @@ export class TakramMiniPlanetPageComponent {
     await this.waitForFrames(2);
     const source = this.engine.renderer.domElement;
     const width = Math.min(320, source.width);
-    const height = Math.max(1, Math.round((source.height / source.width) * width));
+    const height = Math.max(
+      1,
+      Math.round((source.height / source.width) * width),
+    );
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;

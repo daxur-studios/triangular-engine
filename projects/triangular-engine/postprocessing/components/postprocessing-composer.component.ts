@@ -143,6 +143,13 @@ export class PostprocessingComposerComponent implements OnInit, OnDestroy {
     });
     if (effects.length > 0) {
       this.effectPass = new EffectPass(camera, ...effects);
+      const renderer = this.engine.renderer as WebGLRenderer;
+      if (renderer.capabilities?.logarithmicDepthBuffer) {
+        const material = this.effectPass.fullscreenMaterial as any;
+        if (material) {
+          material.logarithmicDepthBuffer = true;
+        }
+      }
       composer.addPass(this.effectPass);
     }
   }
