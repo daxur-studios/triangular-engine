@@ -495,8 +495,15 @@ Acceptance criteria:
 
 ### 2026-07-16 — Mini-planet hybrid cloud prototype
 
-- Added `/takram-mini-planet` as an isolated 5 km-radius planet test.
-- The page uses Takram volumetric clouds near the surface and fades in a spherical 2D cloud shell between 2 km and 5 km camera altitude. Both representations use the default `local_weather.png` weather source.
+- Added `/takram-mini-planet` as an isolated 100 km-radius planet test with the shared live cloud controls.
+- The simplified page leaves Takram and the post-processing composer unchanged at every altitude. It only fades an exterior-facing 2D cloud sphere in between 30 km and 80 km camera altitude, using a dedicated equirectangular cloud opacity map rather than Takram's weather-control texture.
+- The first 5 km test rendered too dark/noisy and its lit shell was effectively black. The shell now uses the same unlit-albedo composition as the proven Takram scene, and temporal upscaling defaults off on this diagnostic page to reduce motion noise.
+- The initial 100 km test exposed an adapter bug: `AerialPerspectiveEffect` received the configured custom atmosphere, but `CloudsEffect` was still constructed with Takram's default Earth parameters. Passing the shared `AtmosphereParameters` into both effects fixes the visibly oversized cloud/atmosphere model around custom-radius planets.
+- Follow-up testing showed that passing the shared object was necessary but insufficient: Takram snapshots its radii into effect uniforms at construction, while the Angular wrapper initially configured the custom planet later in a reactive effect. The wrapper now configures its initial planet synchronously in `ngOnInit`, before projected cloud/aerial effects are created; reactive handling remains for later input changes.
+- A discarded prototype disabled the whole composer at the far-view cutoff. This caused visible popping, removed atmosphere/tone mapping, and exposed the renderer's white clear background. The composer cutoff was removed; the page retains an explicit near-black space background and restores the previous scene background on teardown.
+- `local_weather.png` is a macro-scale cloud coverage/input mask, not the final appearance produced by Takram's 3D density, lighting, and scattering. Painting it directly on a sphere cannot produce a matching handoff; a visually continuous far view needs a custom baked or procedural globe-cloud texture derived from the same weather state.
+- Planet-scale testing requires `logarithmicDepthBuffer: true`; enabling it removed much of the far-distance jitter and black/noisy depth instability reported on the 100 km page. Its camera far plane is now 10,000 km instead of 1,000 km so the planet and 2D shell are not clipped near 1,000 km camera altitude.
+- The orbit target is derived as the planet centre plus its radius along local up. For the current centre `[0, -radius, 0]` this evaluates to `[0, 0, 0]`, but deriving it keeps the target tied to a changed radius/centre rather than relying on that literal coincidence.
 - Takram does not expose whole-effect opacity, so this first prototype uses its natural distance falloff for the volumetric side of the handoff. A controlled two-sided crossfade and skipping the volumetric render at high altitude require a small adapter/API extension.
 
 ### Takram ground-boundary troubleshooting

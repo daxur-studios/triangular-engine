@@ -1,4 +1,4 @@
-import { Component, effect, input, OnDestroy } from '@angular/core';
+import { Component, effect, input, OnDestroy, OnInit } from '@angular/core';
 import type { Matrix4, Vector3 } from 'three';
 import { TakramAtmosphereService } from './takram-atmosphere.service';
 
@@ -9,7 +9,7 @@ import { TakramAtmosphereService } from './takram-atmosphere.service';
   template: '<ng-content />',
   providers: [TakramAtmosphereService],
 })
-export class TakramAtmosphereComponent implements OnDestroy {
+export class TakramAtmosphereComponent implements OnInit, OnDestroy {
   readonly sunDirection = input<Vector3>();
   readonly worldToECEFMatrix = input<Matrix4>();
   /** Optional spherical planet radius in world units (metres by default). */
@@ -27,22 +27,32 @@ export class TakramAtmosphereComponent implements OnDestroy {
     });
     effect(() => {
       const planetRadius = this.planetRadius();
-      if (planetRadius !== undefined) {
-        const worldToECEFMatrix = this.worldToECEFMatrix();
-        state.configurePlanet(
-          planetRadius,
-          this.atmosphereHeight(),
-          worldToECEFMatrix === undefined,
-        );
-        if (worldToECEFMatrix) {
-          state.worldToECEFMatrix.copy(worldToECEFMatrix);
-          state.applySharedState();
-        }
-      }
+      if (planetRadius !== undefined) this.configurePlanet(planetRadius);
     });
+  }
+
+  ngOnInit(): void {
+    // Takram snapshots the atmosphere radii into effect uniforms during effect
+    // construction. Configure the parent synchronously before projected child
+    // effects are initialized; the effect above handles subsequent changes.
+    const planetRadius = this.planetRadius();
+    if (planetRadius !== undefined) this.configurePlanet(planetRadius);
   }
 
   ngOnDestroy(): void {
     this.state.dispose();
+  }
+
+  private configurePlanet(planetRadius: number): void {
+    const worldToECEFMatrix = this.worldToECEFMatrix();
+    this.state.configurePlanet(
+      planetRadius,
+      this.atmosphereHeight(),
+      worldToECEFMatrix === undefined,
+    );
+    if (worldToECEFMatrix) {
+      this.state.worldToECEFMatrix.copy(worldToECEFMatrix);
+      this.state.applySharedState();
+    }
   }
 }

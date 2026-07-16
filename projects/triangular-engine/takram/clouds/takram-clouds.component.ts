@@ -125,7 +125,7 @@ export class TakramCloudsComponent
     }
     this.clouds = new CloudsEffect(camera, {
       resolutionScale: this.resolutionScale(),
-    });
+    }, this.atmosphere?.atmosphere);
     this.applyInputs(this.clouds);
     this.atmosphere?.registerClouds(this.clouds);
     this.loadAssets(this.clouds, this.assetBaseUrl(), this.customTextures());

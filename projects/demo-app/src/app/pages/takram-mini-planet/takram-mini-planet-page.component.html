@@ -1,27 +1,31 @@
 <scene>
+  <ng-template enginePortal="right" lane="content">
+    <app-takram-cloud-controls [showSceneLightingControls]="true" />
+  </ng-template>
+
   <ng-template enginePortal="top" lane="content">
     <aside class="demo-status">
       <strong>Mini planet · hybrid clouds</strong>
       <span>Camera altitude {{ cameraAltitude() | number: '1.0-0' }} m</span>
       <span>2D cloud shell {{ shellOpacity() | percent: '1.0-0' }}</span>
-      <small>Zoom from the surface to a full-globe view to test the handoff.</small>
+      <small>Only the exterior texture fades; Takram remains unchanged.</small>
     </aside>
   </ng-template>
 
   <orbitControls
-    [cameraPosition]="[0, 900, 1800]"
-    [target]="planetCentre"
+    [cameraPosition]="[0, 3000, 8000]"
+    [target]="surfaceTarget"
     [upVector]="[0, 1, 0]"
-    [fov]="50"
-    [near]="1"
-    [far]="100000"
+    [fov]="controls.cameraFov()"
+    [near]="controls.cameraNear()"
+    [far]="controls.cameraFar()"
   />
 
   <postprocessing-composer [enableNormalPass]="true">
     <takram-atmosphere
       [planetRadius]="planetRadius"
       [atmosphereHeight]="atmosphereHeight"
-      [sunDirection]="sunDirection"
+      [sunDirection]="controls.sunDirection()"
     >
       <takram-sun-light [intensity]="1.4" />
       <takram-sky-light [intensity]="0.65" />
@@ -34,16 +38,23 @@
       </mesh>
 
       <takram-clouds
-        [coverage]="0.5"
-        qualityPreset="low"
-        [resolutionScale]="0.5"
+        [localWeatherTexture]="textures.selectedTexture()"
+        [coverage]="controls.coverage()"
+        [qualityPreset]="controls.qualityPreset()"
+        [resolutionScale]="controls.resolutionScale()"
+        [temporalUpscale]="controls.temporalUpscale()"
+        [shapeDetail]="controls.shapeDetail()"
+        [turbulence]="controls.turbulence()"
+        [haze]="controls.haze()"
+        [lightShafts]="controls.lightShafts()"
+        [localWeatherVelocity]="[controls.localWeatherVelocityX(), 0]"
         [shadowCascadeCount]="1"
       >
         <takram-cloud-layer
           channel="r"
-          [altitude]="180"
-          [height]="260"
-          [densityScale]="0.7"
+          [altitude]="controls.altitude()"
+          [height]="controls.height()"
+          [densityScale]="controls.densityScale()"
           [shadow]="true"
         />
       </takram-clouds>
@@ -56,9 +67,9 @@
             heightSegments: 64
           }"
         />
-        <meshStandardMaterial
-          map="/takram-clouds/local_weather.png"
-          alphaMap="/takram-clouds/local_weather.png"
+        <meshBasicMaterial
+          map="/planet-clouds/cloud-opacity-map.png"
+          alphaMap="/planet-clouds/cloud-opacity-map.png"
           [params]="shellMaterial()"
         />
       </mesh>
@@ -67,7 +78,7 @@
         [sky]="true"
         [sunLight]="true"
         [skyLight]="true"
-        [cloudShadows]="true"
+        [cloudShadows]="controls.cloudShadows()"
       />
     </takram-atmosphere>
     <toneMappingEffect />

@@ -1,5 +1,9 @@
 import { Component, effect, inject, input, signal } from '@angular/core';
-import { MeshBasicMaterialParameters, MeshBasicMaterial } from 'three';
+import {
+  MeshBasicMaterialParameters,
+  MeshBasicMaterial,
+  Texture,
+} from 'three';
 import {
   MaterialComponent,
   provideMaterialComponent,
@@ -26,24 +30,41 @@ export class MeshBasicMaterialComponent extends MaterialComponent {
   // Initialize MeshBasicMaterial
   override readonly material = signal(new MeshBasicMaterial());
 
-  /** Texture path */
-  readonly map = input<string>();
+  /** Texture path or caller-owned texture. */
+  readonly map = input<string | Texture>();
+  /** Optional opacity map path or caller-owned texture. */
+  readonly alphaMap = input<string | Texture>();
 
   constructor() {
     super();
 
     this.#initMap();
+    this.#initAlphaMap();
   }
 
   #initMap() {
-    effect(() => {
+    effect(async () => {
       const map = this.map();
-      if (map) {
-        this.loaderService.loadAndCacheTexture(map).then((texture) => {
-          this.material().map = texture;
-          this.material().needsUpdate = true;
-        });
-      }
+      if (!map) return;
+      const texture =
+        typeof map === 'string'
+          ? await this.loaderService.loadAndCacheTexture(map)
+          : map;
+      this.material().map = texture;
+      this.material().needsUpdate = true;
+    });
+  }
+
+  #initAlphaMap() {
+    effect(async () => {
+      const alphaMap = this.alphaMap();
+      if (!alphaMap) return;
+      const texture =
+        typeof alphaMap === 'string'
+          ? await this.loaderService.loadAndCacheTexture(alphaMap)
+          : alphaMap;
+      this.material().alphaMap = texture;
+      this.material().needsUpdate = true;
     });
   }
 
