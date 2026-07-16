@@ -22,6 +22,34 @@ const DEFAULT_ATMOSPHERE_HEIGHT =
   AtmosphereParameters.DEFAULT.topRadius -
   AtmosphereParameters.DEFAULT.bottomRadius;
 
+/**
+ * Earth's own default config never renders geometry exactly at
+ * `atmosphere.bottomRadius`: the WGS84 ellipsoid surface
+ * (`Ellipsoid.WGS84.maximumRadius`, 6,378,137 m) sits ~18.1 km above
+ * `AtmosphereParameters.DEFAULT.bottomRadius` (6,360,000 m). That headroom
+ * keeps rendered-surface ECEF positions off the degenerate `r == bottom_radius`
+ * edge of Takram's transmittance/irradiance LUTs (`rho = sqrt(r² - bottom_radius²)`
+ * → 0 there), which otherwise produces visible concentric banding wherever
+ * post-lighting (`sunLight`/`skyLight`) samples `GetSunAndSkyIrradiance`.
+ * `configurePlanet()` reproduces the same ratio so every custom planet keeps
+ * this headroom. Takram's own `correctAltitude`/`getAltitudeCorrectionOffset`
+ * mechanism (on by default on both `AerialPerspectiveEffect` and
+ * `CloudsEffect`) already exists to reconcile an ellipsoid surface radius
+ * that differs from `bottomRadius`, so no other adapter code needs to change.
+ */
+const GROUND_OFFSET_RATIO =
+  (Ellipsoid.WGS84.maximumRadius - AtmosphereParameters.DEFAULT.bottomRadius) /
+  AtmosphereParameters.DEFAULT.bottomRadius;
+
+/**
+ * The nominal atmosphere `bottomRadius` for a planet whose rendered surface
+ * (globe mesh, `worldToECEFMatrix` translation, `ellipsoid`) has the given
+ * true radius. Always strictly less than `radius` — see `GROUND_OFFSET_RATIO`.
+ */
+export function computeAtmosphereBottomRadius(radius: number): number {
+  return radius / (1 + GROUND_OFFSET_RATIO);
+}
+
 /** Shared atmosphere resources and cloud/aerial buffer routing for one subtree. */
 @Injectable()
 export class TakramAtmosphereService {
@@ -106,8 +134,9 @@ export class TakramAtmosphereService {
       );
     }
     this.ellipsoid = new Ellipsoid(radius, radius, radius);
-    this.atmosphere.bottomRadius = radius;
-    this.atmosphere.topRadius = radius + atmosphereHeight;
+    this.atmosphere.bottomRadius = computeAtmosphereBottomRadius(radius);
+    this.atmosphere.topRadius =
+      this.atmosphere.bottomRadius + atmosphereHeight;
 
     // The density profiles are absolute-metre curves (e.g. an 8 km Rayleigh
     // scale height) tuned for Earth's 60 km atmosphere. Left unscaled, a much

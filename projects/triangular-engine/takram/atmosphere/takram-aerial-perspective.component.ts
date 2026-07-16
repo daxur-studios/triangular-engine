@@ -3,6 +3,7 @@ import { AerialPerspectiveEffect } from '@takram/three-atmosphere';
 import type { Camera, Texture } from 'three';
 import { PostprocessingEffectComponent } from 'triangular-engine/postprocessing';
 import { TakramAtmosphereService } from './takram-atmosphere.service';
+import { applyTakramAerialCameraHeightFix } from './takram-aerial-perspective-compat';
 
 /** Declarative Takram aerial-perspective and sky composition effect. */
 @Component({
@@ -28,6 +29,8 @@ export class TakramAerialPerspectiveComponent
   readonly skyLight = input(false);
   readonly transmittance = input(true);
   readonly inscatter = input(true);
+  /** Takram's depth-derived globe-position correction; useful to disable for true sphere geometry. */
+  readonly correctGeometricError = input(true);
   /** Compose cloud shadow and light-shaft buffers into aerial perspective. */
   readonly cloudShadows = input(true);
 
@@ -53,6 +56,7 @@ export class TakramAerialPerspectiveComponent
       this.settings(),
       this.atmosphere.atmosphere,
     );
+    applyTakramAerialCameraHeightFix(effect);
     this.aerialPerspective = effect;
     this.atmosphere.registerAerialPerspective(effect);
     return effect;
@@ -86,6 +90,7 @@ export class TakramAerialPerspectiveComponent
       skyLight: this.skyLight(),
       transmittance: this.transmittance(),
       inscatter: this.inscatter(),
+      correctGeometricError: this.correctGeometricError(),
     };
   }
 }

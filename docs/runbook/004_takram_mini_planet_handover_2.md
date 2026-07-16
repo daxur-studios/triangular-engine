@@ -451,6 +451,90 @@ Verification receipts:
 
 Interactive aspect-ratio verification remains required.
 
+User subsequently confirmed the checker/cloud aspect ratio is fixed.
+
+## F16 — Orbital aerial-perspective rings
+
+With clouds and the 2D shell disabled, the artifact was reproduced in the live
+Small preset at approximately 90 km camera altitude: broad concentric/radial
+blue bands move with camera angle and zoom across the visible globe.
+
+The existing 512×256 planet tessellation diagnostic did not remove the bands,
+ruling out the 96×64 sphere facets as the primary cause. A guarded runtime fix
+was also added for the separate WGS84 omission in
+`AerialPerspectiveEffect.copyCameraSettings()`: its orbital geometric-error
+blend now derives camera height from the configured spherical ellipsoid. The
+demo build and 9/9 adapter tests pass, but a same-camera live comparison showed
+that the rings remain. The WGS84 fix is therefore a valid custom-ellipsoid
+correctness fix, but not the direct ring cause.
+
+The remaining evidence points to the fixed-resolution scattering LUT in
+Takram's WebGL atmosphere implementation. Its scattering texture has only 32
+radial slices (`SCATTERING_TEXTURE_R_SIZE = 32`), with linear filtering. The
+whole-globe orbital view maps large screen regions across those radial/optical-
+path coordinates, exposing discrete blue contours. The earlier `/takram-clouds`
+POC renders a local flat plane near the surface, not an entire globe from
+outside the atmosphere, so it is not an equivalent test of this LUT regime.
+
+This aligns with the artifact appearing only when zoomed far enough to see the
+planet/atmosphere as a disc, on all radii, and changing contour size with camera
+angle and distance. No LUT-resolution modification has been made: the WebGL
+constants are compiled into Takram's generator and sampling shaders, so raising
+them is not available through the public adapter API. Practical no-fork options
+are post-process dithering to hide the contours or fading/replacing Takram
+aerial perspective with a dedicated orbital atmosphere shell beyond a chosen
+altitude. Raising the LUT resolution itself requires a package patch/fork or a
+future configurable Takram API.
+
+Correction to the isolation description: the original diagnostics had no
+planet-visibility toggle. Unchecking all effect toggles still left the blue
+planet sphere rendered and writing depth; "Planet mesh 512×256" changed only
+tessellation. A real `Planet globe mesh` checkbox has now been added so the
+next test can distinguish aerial sky/LUT output with no geometry from aerial
+composition over globe depth. The user also reports a black horizon at the
+surface on both Small and Large; this makes the globe-depth/ground intersection
+path a live alternative to the LUT-only theory. Do not treat F16's LUT diagnosis
+as final until the new globe-off test is reported.
+
+### Surface reference scene parity
+
+- The user subsequently reported that the black-horizon issue appears fixed,
+  although the view was difficult to judge without a clear surface reference.
+- `/takram-mini-planet` now includes the same physical reference geometry as
+  the working `/takram-clouds` POC: a 5,000 m square horizontal platform at
+  `y = 0`, a 250 × 300 × 250 m box at `[-350, 150, 0]`, and a
+  180 × 200 × 180 m box at `[300, 100, -150]`.
+- This geometry intentionally uses fixed metre dimensions rather than scaling
+  with planet radius. Every mini-planet preset places its top tangent surface
+  at local `y = 0`, so the objects provide the same human-scale and altitude
+  reference for Small, Medium, and Large.
+- The reference geometry remains mounted when the diagnostic planet globe mesh
+  is disabled, allowing the globe-depth path to be isolated without losing the
+  local surface cue.
+
+### Aerial globe-path isolation
+
+- User verification narrowed the remaining concentric rings to the globe-depth
+  composition path: disabling `Planet globe mesh` removes the rings.
+- Disabling Takram's geometric correction reduces the number/severity of the
+  rings but does not eliminate them. Geometric correction therefore contributes
+  to the artifact but is not its sole source.
+- Added independent, default-on diagnostics for aerial `inscatter`,
+  `transmittance`, and `ground`. These map directly to the existing Takram
+  effect defines and preserve the previous rendering when all remain enabled.
+- Test one of these three switches at a time while keeping the planet globe and
+  aerial effect enabled. This separates atmospheric light added to globe pixels
+  (`inscatter`), attenuation of the globe colour (`transmittance`), and Takram's
+  ground-ray branch (`ground`).
+- User test: disabling all three still left the glass-ball/black-hole rings
+  unchanged, ruling them out as the direct source.
+- Shader trace then identified a separate path that remained active: the mini
+  page hardcoded both aerial post-process `sunLight` and `skyLight` on. This path
+  reconstructs each globe pixel's position and normal from the depth/normal
+  buffers, computes irradiance, and only then applies the now-ruled-out
+  transmittance/inscatter branch. Added a combined, default-on
+  `Aerial: post lighting` diagnostic controlling both lighting defines.
+
 ## Open / unresolved
 
 - **Small/Medium visibility**: verified fixed by the user at every tested
@@ -492,3 +576,33 @@ Interactive aspect-ratio verification remains required.
   of this writing).
 - Clouds `qualityPreset`: `'low'` (via `TakramCloudControlsStore` default,
   unchanged), giving `maxRayDistance = 100,000 m` fixed.
+## Automated post-lighting diagnostic capture
+
+The mini-planet diagnostics panel now includes **Run post-lighting diagnostics**.
+It programmatically reproduces the confirmed isolation case (globe plus aerial
+post-lighting, with clouds, shell, sky, inscatter, transmittance, and ground
+disabled), then captures these controlled variants from the same camera:
+
+1. Composer normal-buffer baseline.
+2. Post-lighting disabled control.
+3. Geometric correction disabled.
+4. Takram `reconstructNormal` enabled with its normal buffer disconnected.
+5. A camera frustum tightened around the rendered planet.
+
+For every variant it records downsampled-frame luminance statistics, a radial
+adjacent-difference measurement, and a horizontal centre-line adjacent-
+difference measurement. The copied JSON also contains the camera clipping
+planes, planet and atmosphere radii, ellipsoid radii, and world-to-ECEF matrix.
+
+The runner restores all affected scene toggles, camera clipping values, and the
+effect's original normal-buffer/reconstruction settings in a `finally` block.
+The report is intended to distinguish normal-buffer involvement from depth-
+precision involvement; its measurements do not by themselves prove the final
+rendering cause. `npx ng build demo-app --configuration development` passed
+after this addition.
+
+The first report returned all-zero image measurements. Its state fields were
+valid, but the image captures were not: the renderer's drawing buffer had been
+discarded before the diagnostic canvas copied it. The mini-planet renderer now
+uses `preserveDrawingBuffer: true` for this diagnostic page, and the runner
+rejects an all-zero capture instead of copying a misleading report.

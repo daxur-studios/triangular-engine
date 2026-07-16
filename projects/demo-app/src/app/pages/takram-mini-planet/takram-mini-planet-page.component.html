@@ -54,10 +54,60 @@
       <label class="toggle"
         ><input
           type="checkbox"
+          [checked]="diagAerialInscatter()"
+          (change)="diagAerialInscatter.set($any($event.target).checked)"
+        />
+        Aerial: inscatter</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="diagAerialTransmittance()"
+          (change)="diagAerialTransmittance.set($any($event.target).checked)"
+        />
+        Aerial: transmittance</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="diagAerialGround()"
+          (change)="diagAerialGround.set($any($event.target).checked)"
+        />
+        Aerial: ground</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="diagAerialPostLighting()"
+          (change)="diagAerialPostLighting.set($any($event.target).checked)"
+        />
+        Aerial: post lighting</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="diagAerialGeometricCorrection()"
+          (change)="
+            diagAerialGeometricCorrection.set($any($event.target).checked)
+          "
+        />
+        Aerial: geometric correction</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
           [checked]="diagShell()"
           (change)="diagShell.set($any($event.target).checked)"
         />
         2D cloud shell mesh</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="diagPlanet()"
+          (change)="diagPlanet.set($any($event.target).checked)"
+        />
+        Planet globe mesh</label
       >
       <label class="toggle"
         ><input
@@ -91,6 +141,26 @@
           }
         }
       </button>
+      <button
+        type="button"
+        [disabled]="diagnosticStatus() === 'running'"
+        (click)="runPostLightingDiagnostics()"
+      >
+        @switch (diagnosticStatus()) {
+          @case ("running") {
+            Running diagnostics…
+          }
+          @case ("copied") {
+            Report copied to clipboard
+          }
+          @case ("failed") {
+            Failed — see console
+          }
+          @default {
+            Run post-lighting diagnostics
+          }
+        }
+      </button>
     </aside>
   </ng-template>
 
@@ -113,15 +183,51 @@
         <takram-sun-light [intensity]="1.4" />
         <takram-sky-light [intensity]="0.65" />
 
-        <mesh [position]="planetCentre()">
-          <sphereGeometry
-            [params]="{
-              radius: planetRadius(),
-              widthSegments: planetSegments().width,
-              heightSegments: planetSegments().height,
-            }"
-          />
-          <meshBasicMaterial [params]="{ color: '#28618b' }" />
+        @if (diagPlanet()) {
+          <mesh [position]="planetCentre()">
+            <sphereGeometry
+              [params]="{
+                radius: planetRadius(),
+                widthSegments: planetSegments().width,
+                heightSegments: planetSegments().height,
+              }"
+            />
+            <meshBasicMaterial [params]="{ color: '#28618b' }" />
+          </mesh>
+        }
+
+        <!-- Match the working /takram-clouds POC's human-scale surface
+             references. The mini planet's tangent surface is y=0 for every
+             radius preset, so these dimensions and positions stay physical. -->
+        <mesh [position]="[0, 0, 0]" [receiveShadow]="true">
+          <planeGeometry [params]="[5000, 5000]" orientation="horizontal" />
+          @if (controls.takramLighting()) {
+            <meshBasicMaterial [params]="{ color: '#73806b' }" />
+          } @else {
+            <meshStandardMaterial
+              [params]="{ color: '#73806b', roughness: 0.9, metalness: 0 }"
+            />
+          }
+        </mesh>
+        <mesh [position]="[-350, 150, 0]" [castShadow]="true">
+          <boxGeometry [params]="[250, 300, 250]" />
+          @if (controls.takramLighting()) {
+            <meshBasicMaterial [params]="{ color: '#b58b62' }" />
+          } @else {
+            <meshStandardMaterial
+              [params]="{ color: '#b58b62', roughness: 0.75, metalness: 0 }"
+            />
+          }
+        </mesh>
+        <mesh [position]="[300, 100, -150]" [castShadow]="true">
+          <boxGeometry [params]="[180, 200, 180]" />
+          @if (controls.takramLighting()) {
+            <meshBasicMaterial [params]="{ color: '#8296a8' }" />
+          } @else {
+            <meshStandardMaterial
+              [params]="{ color: '#8296a8', roughness: 0.65, metalness: 0 }"
+            />
+          }
         </mesh>
 
         @if (diagClouds()) {
@@ -169,8 +275,12 @@
         @if (diagAerial()) {
           <takram-aerial-perspective
             [sky]="diagAerialSky()"
-            [sunLight]="true"
-            [skyLight]="true"
+            [inscatter]="diagAerialInscatter()"
+            [transmittance]="diagAerialTransmittance()"
+            [ground]="diagAerialGround()"
+            [correctGeometricError]="diagAerialGeometricCorrection()"
+            [sunLight]="diagAerialPostLighting()"
+            [skyLight]="diagAerialPostLighting()"
             [cloudShadows]="controls.cloudShadows()"
           />
         }

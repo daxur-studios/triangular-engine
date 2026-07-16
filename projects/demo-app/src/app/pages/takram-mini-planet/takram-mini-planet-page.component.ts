@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { DecimalPipe, PercentPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Color, FrontSide, NoToneMapping, Vector3 } from 'three';
+import { Color, FrontSide, NoToneMapping, Vector3, type Texture } from 'three';
 import {
   EngineModule,
   EngineService,
@@ -40,9 +40,13 @@ const REFERENCE_LOCAL_WEATHER_REPEAT = 100;
 type PlanetSizePreset = 'small' | 'medium' | 'large';
 
 /**
- * `large` intentionally matches `AtmosphereParameters.DEFAULT` exactly
- * (bottomRadius 6,360,000 / atmosphereHeight 60,000) so it's a true
- * apples-to-apples control against the known-good `/takram-clouds` page.
+ * `large`'s radius/atmosphereHeight numerically match `AtmosphereParameters.DEFAULT`
+ * (bottomRadius 6,360,000 / atmosphereHeight 60,000), but `radius` here is this
+ * preset's *true rendered surface* radius (globe mesh, ellipsoid, worldToECEF
+ * translation) — `TakramAtmosphereService.configurePlanet()` derives the actual
+ * `atmosphere.bottomRadius` from it with the same headroom ratio Earth's own
+ * WGS84-ellipsoid-vs-bottomRadius default config uses, so it no longer equals
+ * this number exactly. See `configurePlanet()`'s `GROUND_OFFSET_RATIO` doc.
  */
 const PLANET_SIZE_PRESETS: Record<
   PlanetSizePreset,
@@ -85,6 +89,9 @@ const PLANET_SIZE_PRESETS: Record<
       webGLRendererParameters: {
         antialias: false,
         logarithmicDepthBuffer: true,
+        // Required by the on-page diagnostic runner, which copies the final
+        // composited framebuffer after each controlled render variant.
+        preserveDrawingBuffer: true,
       },
     }),
   ],
@@ -176,6 +183,12 @@ export class TakramMiniPlanetPageComponent {
   readonly diagClouds = signal(true);
   readonly diagAerial = signal(true);
   readonly diagAerialSky = signal(true);
+  readonly diagAerialInscatter = signal(true);
+  readonly diagAerialTransmittance = signal(true);
+  readonly diagAerialGround = signal(true);
+  readonly diagAerialPostLighting = signal(true);
+  readonly diagAerialGeometricCorrection = signal(true);
+  readonly diagPlanet = signal(true);
   readonly diagShell = signal(true);
   /** Phase 1 test: raises planet mesh tessellation to rule out facet banding. */
   readonly diagHighTessellation = signal(false);
@@ -226,6 +239,9 @@ export class TakramMiniPlanetPageComponent {
 
   /** Transient button-label feedback after a clipboard copy attempt. */
   readonly dumpStatus = signal<'idle' | 'copied' | 'failed'>('idle');
+  readonly diagnosticStatus = signal<
+    'idle' | 'running' | 'copied' | 'failed'
+  >('idle');
 
   /** Restore the size-appropriate surface framing after free orbiting. */
   recenterOnSurface(): void {
@@ -292,10 +308,251 @@ export class TakramMiniPlanetPageComponent {
     );
   }
 
+  /**
+   * Runs controlled post-lighting comparisons and copies the measurements as
+   * JSON. The scene and camera settings are restored even if capture fails.
+   */
+  async runPostLightingDiagnostics(): Promise<void> {
+    if (this.diagnosticStatus() === 'running') return;
+    this.diagnosticStatus.set('running');
+
+    const camera = this.engine.camera;
+    const saved = {
+      clouds: this.diagClouds(),
+      aerial: this.diagAerial(),
+      sky: this.diagAerialSky(),
+      inscatter: this.diagAerialInscatter(),
+      transmittance: this.diagAerialTransmittance(),
+      ground: this.diagAerialGround(),
+      postLighting: this.diagAerialPostLighting(),
+      geometricCorrection: this.diagAerialGeometricCorrection(),
+      planet: this.diagPlanet(),
+      shell: this.diagShell(),
+      near: this.controls.cameraNear(),
+      far: this.controls.cameraFar(),
+    };
+
+    let testedAerial:
+      | {
+          normalBuffer: Texture | null;
+          reconstructNormal: boolean;
+        }
+      | undefined;
+    try {
+      // Match the user's isolating test: globe + aerial post-lighting only.
+      this.diagClouds.set(false);
+      this.diagShell.set(false);
+      this.diagPlanet.set(true);
+      this.diagAerial.set(true);
+      this.diagAerialSky.set(false);
+      this.diagAerialInscatter.set(false);
+      this.diagAerialTransmittance.set(false);
+      this.diagAerialGround.set(false);
+      this.diagAerialPostLighting.set(true);
+      this.diagAerialGeometricCorrection.set(true);
+      await this.waitForFrames(4);
+
+      const aerial = this.aerialRef()?.effect;
+      if (!aerial) throw new Error('Aerial perspective effect is not mounted.');
+      const originalNormalBuffer = aerial.normalBuffer;
+      const originalReconstructNormal = aerial.reconstructNormal;
+      testedAerial = {
+        normalBuffer: originalNormalBuffer,
+        reconstructNormal: originalReconstructNormal,
+      };
+
+      const variants: DiagnosticCapture[] = [];
+      variants.push(await this.captureDiagnostic('baseline-normal-buffer'));
+
+      this.diagAerialPostLighting.set(false);
+      await this.waitForFrames(3);
+      variants.push(await this.captureDiagnostic('post-lighting-off-control'));
+
+      this.diagAerialPostLighting.set(true);
+      this.diagAerialGeometricCorrection.set(false);
+      await this.waitForFrames(3);
+      variants.push(await this.captureDiagnostic('geometric-correction-off'));
+
+      this.diagAerialGeometricCorrection.set(true);
+      aerial.normalBuffer = null;
+      aerial.reconstructNormal = true;
+      await this.waitForFrames(3);
+      variants.push(await this.captureDiagnostic('depth-reconstructed-normals'));
+
+      aerial.reconstructNormal = originalReconstructNormal;
+      aerial.normalBuffer = originalNormalBuffer;
+      const centre = new Vector3(...this.planetCentre());
+      const distance = camera.position.distanceTo(centre);
+      const margin = this.planetRadius() * 1.1;
+      this.controls.cameraNear.set(Math.max(1, distance - margin));
+      this.controls.cameraFar.set(distance + margin);
+      await this.waitForFrames(3);
+      variants.push(await this.captureDiagnostic('tight-camera-frustum'));
+
+      if (variants.every((variant) => variant.meanLuminance === 0)) {
+        throw new Error(
+          'All diagnostic captures were empty; no report was copied.',
+        );
+      }
+
+      const atmosphere = this.atmosphereRef()?.state;
+      const report = {
+        diagnostic: 'takram-mini-planet-post-lighting',
+        generatedAt: new Date().toISOString(),
+        preset: this.planetSizePreset(),
+        radius: this.planetRadius(),
+        atmosphereHeight: this.atmosphereHeight(),
+        camera: {
+          position: camera.position.toArray(),
+          originalNear: saved.near,
+          originalFar: saved.far,
+          tightNear: this.controls.cameraNear(),
+          tightFar: this.controls.cameraFar(),
+        },
+        atmosphere: atmosphere
+          ? {
+              bottomRadius: atmosphere.atmosphere.bottomRadius,
+              topRadius: atmosphere.atmosphere.topRadius,
+              ellipsoidRadii: atmosphere.ellipsoid.radii.toArray(),
+              worldToECEF: atmosphere.worldToECEFMatrix.toArray(),
+            }
+          : null,
+        variants,
+        interpretation:
+          'Compare radialAdjacentDifference and centreLineAdjacentDifference with the post-lighting-off control. Reconstructed-normal improvement implicates the normal-buffer path; tight-frustum improvement implicates depth precision.',
+      };
+      const text = JSON.stringify(report, null, 2);
+      console.log(text);
+      await navigator.clipboard.writeText(text);
+      this.diagnosticStatus.set('copied');
+    } catch (error) {
+      console.error('Post-lighting diagnostics failed.', error);
+      this.diagnosticStatus.set('failed');
+    } finally {
+      const aerial = this.aerialRef()?.effect;
+      if (aerial && testedAerial) {
+        aerial.reconstructNormal = testedAerial.reconstructNormal;
+        aerial.normalBuffer = testedAerial.normalBuffer;
+      }
+      this.diagClouds.set(saved.clouds);
+      this.diagAerial.set(saved.aerial);
+      this.diagAerialSky.set(saved.sky);
+      this.diagAerialInscatter.set(saved.inscatter);
+      this.diagAerialTransmittance.set(saved.transmittance);
+      this.diagAerialGround.set(saved.ground);
+      this.diagAerialPostLighting.set(saved.postLighting);
+      this.diagAerialGeometricCorrection.set(saved.geometricCorrection);
+      this.diagPlanet.set(saved.planet);
+      this.diagShell.set(saved.shell);
+      this.controls.cameraNear.set(saved.near);
+      this.controls.cameraFar.set(saved.far);
+      setTimeout(() => this.diagnosticStatus.set('idle'), 3000);
+    }
+  }
+
+  private async captureDiagnostic(name: string): Promise<DiagnosticCapture> {
+    await this.waitForFrames(2);
+    const source = this.engine.renderer.domElement;
+    const width = Math.min(320, source.width);
+    const height = Math.max(1, Math.round((source.height / source.width) * width));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('Could not create diagnostic canvas.');
+    context.drawImage(source, 0, 0, width, height);
+    const pixels = context.getImageData(0, 0, width, height).data;
+    return measureDiagnosticImage(name, pixels, width, height);
+  }
+
+  private waitForFrames(count: number): Promise<void> {
+    return new Promise((resolve) => {
+      let remaining = count;
+      const subscription = this.engine.postTick$.subscribe(() => {
+        remaining--;
+        if (remaining <= 0) {
+          subscription.unsubscribe();
+          requestAnimationFrame(() => resolve());
+        }
+      });
+    });
+  }
+
   private setDumpStatus(status: 'copied' | 'failed'): void {
     this.dumpStatus.set(status);
     setTimeout(() => this.dumpStatus.set('idle'), 2000);
   }
+}
+
+interface DiagnosticCapture {
+  name: string;
+  width: number;
+  height: number;
+  meanLuminance: number;
+  luminanceStdDev: number;
+  radialAdjacentDifference: number;
+  centreLineAdjacentDifference: number;
+}
+
+function measureDiagnosticImage(
+  name: string,
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): DiagnosticCapture {
+  const luminance = new Float32Array(width * height);
+  let sum = 0;
+  for (let i = 0; i < luminance.length; i++) {
+    const offset = i * 4;
+    const value =
+      pixels[offset] * 0.2126 +
+      pixels[offset + 1] * 0.7152 +
+      pixels[offset + 2] * 0.0722;
+    luminance[i] = value;
+    sum += value;
+  }
+  const mean = sum / luminance.length;
+  let variance = 0;
+  for (const value of luminance) variance += (value - mean) ** 2;
+
+  const cx = (width - 1) / 2;
+  const cy = (height - 1) / 2;
+  const binCount = Math.max(8, Math.floor(Math.min(width, height) / 2));
+  const radialSum = new Float64Array(binCount);
+  const radialCount = new Uint32Array(binCount);
+  const maxRadius = Math.hypot(cx, cy);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const bin = Math.min(
+        binCount - 1,
+        Math.floor((Math.hypot(x - cx, y - cy) / maxRadius) * binCount),
+      );
+      radialSum[bin] += luminance[y * width + x];
+      radialCount[bin]++;
+    }
+  }
+  let radialDifference = 0;
+  for (let i = 1; i < binCount; i++) {
+    radialDifference += Math.abs(
+      radialSum[i] / radialCount[i] - radialSum[i - 1] / radialCount[i - 1],
+    );
+  }
+  let centreLineDifference = 0;
+  const centreY = Math.floor(cy);
+  for (let x = 1; x < width; x++) {
+    centreLineDifference += Math.abs(
+      luminance[centreY * width + x] - luminance[centreY * width + x - 1],
+    );
+  }
+  return {
+    name,
+    width,
+    height,
+    meanLuminance: r(mean)!,
+    luminanceStdDev: r(Math.sqrt(variance / luminance.length))!,
+    radialAdjacentDifference: r(radialDifference / (binCount - 1))!,
+    centreLineAdjacentDifference: r(centreLineDifference / (width - 1))!,
+  };
 }
 
 function smoothstep(min: number, max: number, value: number): number {

@@ -1,14 +1,23 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import type { AerialPerspectiveEffect } from '@takram/three-atmosphere';
+import { AtmosphereParameters, type AerialPerspectiveEffect } from '@takram/three-atmosphere';
+import { Ellipsoid } from '@takram/three-geospatial';
 import type { CloudsEffect } from '@takram/three-clouds';
 import { TakramAerialPerspectiveComponent } from '../takram/atmosphere/takram-aerial-perspective.component';
+import { applyTakramAerialCameraHeightFix } from '../takram/atmosphere/takram-aerial-perspective-compat';
 import {
+  computeAtmosphereBottomRadius,
   routeTakramCloudBuffers,
   TakramAtmosphereService,
 } from '../takram/atmosphere/takram-atmosphere.service';
 import { TakramCloudLayerComponent } from '../takram/clouds/takram-cloud-layer.component';
 import { applyTakramCloudCameraHeightFix } from '../takram/clouds/takram-clouds-compat';
-import { Matrix4, PerspectiveCamera, Uniform, Vector3 } from 'three';
+import {
+  Matrix4,
+  PerspectiveCamera,
+  Uniform,
+  Vector3,
+  type Camera,
+} from 'three';
 
 describe('Takram adapter contracts', () => {
   describe('cloud-layer mapping', () => {
@@ -54,6 +63,22 @@ describe('Takram adapter contracts', () => {
         1.57232704,
         6,
       );
+    });
+  });
+
+  describe('custom-planet atmosphere ground headroom', () => {
+    for (const radius of [100_000, 1_000_000, 6_360_000]) {
+      it(`keeps bottomRadius strictly below the true radius at ${radius} m`, () => {
+        expect(computeAtmosphereBottomRadius(radius)).toBeLessThan(radius);
+      });
+    }
+
+    it('reproduces the Earth-default bottomRadius when fed the WGS84 ellipsoid radius', () => {
+      // This is the identity the ratio is derived from: it should invert
+      // exactly (mod floating point) at the WGS84 surface radius.
+      expect(
+        computeAtmosphereBottomRadius(Ellipsoid.WGS84.maximumRadius),
+      ).toBeCloseTo(AtmosphereParameters.DEFAULT.bottomRadius, 3);
     });
   });
 
@@ -165,6 +190,32 @@ describe('Takram adapter contracts', () => {
       material.copyCameraSettings(camera);
 
       expect(uniforms.cameraHeight.value).toBeCloseTo(3_250, 6);
+    });
+  });
+
+  describe('custom-planet aerial camera height', () => {
+    it('uses the configured sphere for orbital geometric correction', () => {
+      const radius = 100_000;
+      const correction = new Uniform(0);
+      const effect = {
+        copyCameraSettings: jasmine.createSpy('copyCameraSettings'),
+        ellipsoid: { maximumRadius: radius },
+        worldToECEFMatrix: new Matrix4(),
+        uniforms: new Map([['geometricErrorCorrectionAmount', correction]]),
+      } as unknown as AerialPerspectiveEffect;
+      const camera = new PerspectiveCamera(50, 1, 1, 50_000_000);
+      camera.position.set(radius + 90_000, 0, 0);
+      camera.updateMatrixWorld(true);
+      camera.updateProjectionMatrix();
+
+      applyTakramAerialCameraHeightFix(effect);
+      (
+        effect as unknown as { copyCameraSettings(camera: Camera): void }
+      ).copyCameraSettings(camera);
+
+      expect(Number.isFinite(correction.value)).toBeTrue();
+      expect(correction.value).toBeGreaterThanOrEqual(0);
+      expect(correction.value).toBeLessThanOrEqual(1);
     });
   });
 });
