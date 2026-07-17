@@ -1,0 +1,60 @@
+<scene>
+  <ng-template portalTarget="toolbarTop" lane="content">
+    <section class="panel" aria-label="Camera and floating-origin controls">
+      <header>
+        <div><a routerLink="/">← Examples</a><small>Camera laboratory</small></div>
+        <strong>{{ scenarioTitle() }}</strong>
+      </header>
+
+      <nav aria-label="Test scenario">
+        <button [class.active]="scenario() === 'ordinary'" (click)="selectScenario('ordinary')">1 · Motion</button>
+        <button [class.active]="scenario() === 'rebase'" (click)="selectScenario('rebase')">2 · Rebase</button>
+        <button [class.active]="scenario() === 'interstellar'" (click)="selectScenario('interstellar')">3 · Interstellar</button>
+      </nav>
+
+      <div class="actions">
+        <button (click)="toggleFollow()">{{ following() ? 'Stop following' : 'Follow craft' }}</button>
+        @if (scenario() === 'ordinary') {
+          <button (click)="perturb()">Speed + direction spike</button>
+        }
+        @if (scenario() === 'rebase') {
+          <button (click)="burstRebases()">12 rebases in one frame</button>
+        }
+        @if (scenario() === 'interstellar') {
+          <button (click)="startTravel(10)">Slow · 10s</button>
+          <button (click)="startTravel(5)">Medium · 5s</button>
+          <button (click)="startTravel(2)">Fast · 2s</button>
+        }
+      </div>
+
+      <dl>
+        <div><dt>Local</dt><dd>{{ localPosition()[0] | number:'1.0-1' }}, {{ localPosition()[1] | number:'1.0-1' }}, {{ localPosition()[2] | number:'1.0-1' }}</dd></div>
+        <div><dt>World distance</dt><dd>{{ worldDistance() | number:'1.0-0' }} m</dd></div>
+        <div><dt>Rebases</dt><dd>{{ rebaseCount() }}</dd></div>
+        <div><dt>Follow input</dt><dd>authoritative Vector3</dd></div>
+      </dl>
+
+      @if (scenario() === 'interstellar') {
+        <div class="journey" aria-label="Journey progress">
+          <div class="rail"><i [style.width.%]="progress() * 100"></i></div>
+          <div class="markers">@for (marker of progressMarkers; track marker) { <span [class.passed]="progress() >= marker"></span> }</div>
+          <small>0 → Alpha Centauri · 4.2465 light-years · {{ progress() | percent:'1.1-1' }}</small>
+        </div>
+      }
+    </section>
+  </ng-template>
+
+  <orbitControls [cameraPosition]="[0, 12, 28]" [target]="[0, 1.5, 0]" [near]="0.1" [far]="5000" />
+  <ambientLight [intensity]="1.8" />
+  <directionalLight [position]="[10, 20, 12]" [intensity]="3" />
+
+  <gridHelper [size]="1000" [divisions]="40" color1="#31526a" color2="#172b39" />
+  <mesh #craft [position]="localPosition()" [rotation]="[0, 0, -1.5708]">
+    <cylinderGeometry [params]="[0, 1.5, 6, 12]" />
+    <meshStandardMaterial [params]="{ color: '#77d7ff', emissive: '#123b55', roughness: 0.35, metalness: 0.65 }" />
+  </mesh>
+  <mesh [position]="[localPosition()[0], localPosition()[1], localPosition()[2] - 3.4]" [scale]="[0.7, 0.7, 1.8]">
+    <sphereGeometry [params]="{ radius: 1, widthSegments: 16, heightSegments: 10 }" />
+    <meshBasicMaterial [params]="{ color: '#ff8a3d' }" />
+  </mesh>
+</scene>

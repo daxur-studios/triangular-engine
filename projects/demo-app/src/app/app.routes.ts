@@ -17,6 +17,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'camera-and-floating-origin',
+    loadComponent: () =>
+      import('./pages/camera-floating-origin/camera-floating-origin-page.component').then(
+        ({ CameraFloatingOriginPageComponent }) =>
+          CameraFloatingOriginPageComponent,
+      ),
+  },
+  {
     path: 'takram-clouds-spike',
     loadComponent: () =>
       import('./takram-clouds-spike/takram-clouds-spike.component').then(
