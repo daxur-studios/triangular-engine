@@ -9,10 +9,12 @@ import {
   signal,
 } from '@angular/core';
 import {
+  Box3,
   CameraHelper,
   MathUtils,
   Object3D,
   PerspectiveCamera,
+  Sphere,
   Vector3,
   Vector3Like,
   Vector3Tuple,
@@ -256,66 +258,111 @@ export class OrbitControlsComponent implements OnDestroy {
   private previousFollowPosition: Vector3 | undefined;
 
   #initFollow() {
+    effect(() => {
+      const followObject = this.follow();
+      const orbit = this.orbitControls();
+      this.previousFollowPosition = undefined;
+      if (followObject && orbit) {
+        followObject.updateMatrixWorld(true);
+        const worldPos = new Vector3();
+        followObject.getWorldPosition(worldPos);
+
+        // Automatically adjust camera zoom/distance to fit the object
+        const direction = new Vector3();
+        direction.subVectors(this.internalCamera.position, orbit.target).normalize();
+        if (direction.lengthSq() === 0) {
+          direction.set(0, 1, 2).normalize();
+        }
+
+        const box = new Box3().setFromObject(followObject);
+        const sphere = new Sphere();
+        box.getBoundingSphere(sphere);
+        const radius = Math.max(sphere.radius, 0.02);
+
+        // Keep current zoom distance, but clamp to fit target size
+        const currentDistance = this.internalCamera.position.distanceTo(orbit.target);
+        const minDistance = radius * 3.5;
+        const targetDistance = Math.max(currentDistance, minDistance);
+
+        orbit.target.copy(worldPos);
+        this.previousFollowPosition = worldPos;
+
+        this.internalCamera.position.copy(worldPos).addScaledVector(direction, targetDistance);
+      }
+    });
+
     combineLatest([
       toObservable(this.orbitControls),
-      toObservable(this.follow).pipe(
-        distinctUntilChanged((a, b) => {
-          const isSame = a === b;
-          if (!isSame) {
-            // The followed object itself changed identity (including
-            // switching to/from undefined) — drop the stale per-frame delta
-            // baseline so the next tick re-initializes against the new
-            // object instead of computing one huge delta against whatever
-            // the *previous* object's last known position was.
-            this.previousFollowPosition = undefined;
-          }
-          if (!isSame && a) {
-            // follow has changed, ensure orbit control is re-centered for the new follow
-            const orbitControls = this.orbitControls();
-            if (!orbitControls) return false;
-
-            const worldPos = new Vector3();
-            a.getWorldPosition(worldPos);
-            orbitControls.target.set(...worldPos.toArray());
-
-            //TODO: Should ensure the camera is at least far enough to see the object (eg switching from something tiny to something big)
-          }
-
-          return isSame;
-        }),
-      ),
       toObservable(this.isActive),
       this.engineService.postTick$,
     ])
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(([orbitControls, followObject, isActive, delta]) => {
+      .subscribe(([orbitControls, isActive]) => {
         if (!isActive || !orbitControls) return;
+        const followObject = this.follow();
         if (!followObject) return;
 
-        const currentPosition = followObject.position.clone();
+        followObject.updateMatrixWorld(true);
+        const currentWorldPos = new Vector3();
+        followObject.getWorldPosition(currentWorldPos);
 
         // Compute how much the followed object moved this frame
         if (!this.previousFollowPosition) {
-          this.previousFollowPosition = currentPosition.clone();
+          this.previousFollowPosition = currentWorldPos.clone();
           return;
         }
 
-        const deltaPosition = currentPosition
+        const deltaPosition = currentWorldPos
           .clone()
           .sub(this.previousFollowPosition);
 
-        // Apply delta to both target and camera so user input is preserved
+        // Apply delta to both target and camera so user input (pan/zoom/
+        // rotate) is preserved — unlike snapping target to the object's
+        // absolute position every frame, this only adds the object's own
+        // motion, so a manual pan away from the vessel persists instead of
+        // being overridden the next frame.
         this.internalCamera.position.add(deltaPosition);
         orbitControls.target.add(deltaPosition);
 
-        // Keep damping for smooth camera motion
         orbitControls.enableDamping = true;
 
-        // Store for next frame
-        this.previousFollowPosition = currentPosition.clone();
-
-        // OrbitControls are updated in postTick update handler
+        this.previousFollowPosition = currentWorldPos.clone();
       });
+  }
+
+  /**
+   * Advances the follow-delta tracker using an authoritative world-space
+   * position supplied by the caller, instead of reading `follow()`'s
+   * Object3D back out via `getWorldPosition()`. Use this when the caller
+   * already computes the followed object's corrected position itself (e.g.
+   * once per physics substep, in the same synchronous step as a
+   * floating-origin rebase) — that avoids a race against Angular's
+   * effect-driven mesh position update, which runs asynchronously relative
+   * to the physics tick and can still be stale when `postTick$`'s automatic
+   * tracking below reads it, especially when several rebases land inside a
+   * single rendered frame under high time-warp.
+   *
+   * Safe to call every frame alongside the automatic `postTick$` tracking:
+   * once this catches `previousFollowPosition` up to the real position, the
+   * automatic handler's own diff against the (by-then-matching) mesh
+   * position comes out as ~zero, so it's a no-op rather than a double-move.
+   */
+  updateFollowPosition(worldPos: Vector3Tuple): void {
+    const orbit = this.orbitControls();
+    if (!orbit) return;
+
+    const currentWorldPos = new Vector3(...worldPos);
+
+    if (!this.previousFollowPosition) {
+      this.previousFollowPosition = currentWorldPos.clone();
+      return;
+    }
+
+    const deltaPosition = currentWorldPos.clone().sub(this.previousFollowPosition);
+    this.internalCamera.position.add(deltaPosition);
+    orbit.target.add(deltaPosition);
+
+    this.previousFollowPosition = currentWorldPos.clone();
   }
 
   /**
@@ -342,17 +389,25 @@ export class OrbitControlsComponent implements OnDestroy {
   }
 
   /**
-   * Fix stuff such as follow that is keeping track of last position when the world is shifted.
+   * Shift the camera, its target, and the follow-delta tracker into the new
+   * coordinate frame after a floating-origin rebase, which moves every
+   * physics-tracked body's local position by `-delta` (see `PhysicsOrigin`/
+   * `PhysicsWorld` in the host app). `previousFollowPosition` must be
+   * corrected (not discarded) here: `#initFollow` diffs it against the
+   * followed object's current position every postTick, and nulling it
+   * requires two consecutive rebase-free frames to resume tracking — rare
+   * enough to not matter at 1x, but at high rails warp rebases can fire on
+   * nearly every frame, which stalled tracking almost entirely.
    */
   onFloatingOriginRebase(delta: Vector3Tuple) {
     const orbit = this.orbitControls();
     if (!orbit) return;
 
-    orbit.target.sub(new Vector3(...delta));
-
+    const deltaVector = new Vector3(...delta);
+    orbit.target.sub(deltaVector);
+    this.internalCamera.position.sub(deltaVector);
+    this.previousFollowPosition?.sub(deltaVector);
     orbit.update();
-
-    this.previousFollowPosition = undefined;
   }
 
   public getForwardsVector(): Vector3 {

@@ -93,7 +93,10 @@
                 "output": "/takram-clouds"
               }
             ],
-            "styles": ["projects/demo-app/src/styles.scss"],
+            "styles": [
+              "node_modules/@angular/material/prebuilt-themes/cyan-orange.css",
+              "projects/demo-app/src/styles.scss"
+            ],
             "scripts": []
           },
           "configurations": {
@@ -147,7 +150,10 @@
                 "input": "projects/demo-app/public"
               }
             ],
-            "styles": ["projects/demo-app/src/styles.scss"],
+            "styles": [
+              "node_modules/@angular/material/prebuilt-themes/cyan-orange.css",
+              "projects/demo-app/src/styles.scss"
+            ],
             "scripts": []
           }
         }

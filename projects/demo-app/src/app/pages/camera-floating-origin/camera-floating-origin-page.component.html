@@ -1,5 +1,5 @@
 <scene>
-  <ng-template portalTarget="toolbarTop" lane="content">
+  <ng-template portalTarget="overlay" lane="topStart">
     <section class="panel" aria-label="Camera and floating-origin controls">
       <header>
         <div><a routerLink="/">← Examples</a><small>Camera laboratory</small></div>
@@ -7,53 +7,73 @@
       </header>
 
       <nav aria-label="Test scenario">
-        <button [class.active]="scenario() === 'ordinary'" (click)="selectScenario('ordinary')">1 · Motion</button>
-        <button [class.active]="scenario() === 'rebase'" (click)="selectScenario('rebase')">2 · Rebase</button>
-        <button [class.active]="scenario() === 'interstellar'" (click)="selectScenario('interstellar')">3 · Interstellar</button>
+        <button matTooltip="Move the craft at ordinary scene scale without rebasing." [class.active]="scenario() === 'ordinary'" (click)="selectScenario('ordinary')">1 · Motion</button>
+        <button matTooltip="Move quickly while repeatedly shifting the local floating origin." [class.active]="scenario() === 'rebase'" (click)="selectScenario('rebase')">2 · Rebase</button>
+        <button matTooltip="Cross an Alpha Centauri-scale distance while keeping local coordinates small." [class.active]="scenario() === 'interstellar'" (click)="selectScenario('interstellar')">3 · Interstellar</button>
       </nav>
 
       <div class="actions">
-        <button (click)="toggleFollow()">{{ following() ? 'Stop following' : 'Follow craft' }}</button>
+        <button matTooltip="Toggle whether the camera target tracks the blue craft's local position." (click)="toggleFollow()">{{ following() ? 'Stop following' : 'Follow craft' }}</button>
         @if (scenario() === 'ordinary') {
-          <button (click)="perturb()">Speed + direction spike</button>
+          <button matTooltip="Apply a sudden velocity change to test whether camera follow remains smooth." (click)="perturb()">Speed + direction spike</button>
         }
         @if (scenario() === 'rebase') {
-          <button (click)="burstRebases()">12 rebases in one frame</button>
+          <button matTooltip="Force twelve synchronous origin shifts during one update." (click)="burstRebases()">12 rebases in one frame</button>
         }
         @if (scenario() === 'interstellar') {
-          <button (click)="startTravel(10)">Slow · 10s</button>
-          <button (click)="startTravel(5)">Medium · 5s</button>
-          <button (click)="startTravel(2)">Fast · 2s</button>
+          <button matTooltip="Run the full journey over ten seconds." (click)="startTravel(10)">Slow · 10s</button>
+          <button matTooltip="Run the full journey over five seconds." (click)="startTravel(5)">Medium · 5s</button>
+          <button matTooltip="Run the full journey over two seconds." (click)="startTravel(2)">Fast · 2s</button>
         }
       </div>
 
+      <div class="legend" aria-label="Scene legend">
+        <span><i class="swatch craft-swatch"></i>Blue craft <span class="help" tabindex="0" role="img" aria-label="Blue craft help" matTooltip="The followed Object3D. Its authoritative world position is converted to a small local position before rendering.">?</span></span>
+        <span><i class="swatch plume-swatch"></i>Orange plume <span class="help" tabindex="0" role="img" aria-label="Orange plume help" matTooltip="A visual exhaust marker attached behind the craft. It is not a second object being followed.">?</span></span>
+        <span><i class="swatch grid-swatch"></i>Local grid <span class="help" tabindex="0" role="img" aria-label="Local grid help" matTooltip="Render-space around the current floating origin. During a rebase, world positions stay continuous while this local coordinate frame shifts.">?</span></span>
+      </div>
+
       <dl>
-        <div><dt>Local</dt><dd>{{ localPosition()[0] | number:'1.0-1' }}, {{ localPosition()[1] | number:'1.0-1' }}, {{ localPosition()[2] | number:'1.0-1' }}</dd></div>
-        <div><dt>World distance</dt><dd>{{ worldDistance() | number:'1.0-0' }} m</dd></div>
-        <div><dt>Rebases</dt><dd>{{ rebaseCount() }}</dd></div>
-        <div><dt>Follow input</dt><dd>authoritative Vector3</dd></div>
+        <div class="metric-local"><dt>Local XYZ <span class="help" tabindex="0" role="img" aria-label="Local XYZ help" matTooltip="The blue craft's render-space coordinates after subtracting the floating origin. These should remain small.">?</span></dt><dd>{{ localPositionLabel() }}</dd></div>
+        <div><dt>World distance <span class="help" tabindex="0" role="img" aria-label="World distance help" matTooltip="Distance from the journey's original world-space origin. This remains authoritative across rebases.">?</span></dt><dd>{{ worldDistanceLabel() }}</dd></div>
+        <div><dt>Rebases <span class="help" tabindex="0" role="img" aria-label="Rebases help" matTooltip="How many times the local origin has shifted to keep render-space numbers precise.">?</span></dt><dd>{{ rebaseCount() }}</dd></div>
+        <div><dt>Follow source <span class="help" tabindex="0" role="img" aria-label="Follow source help" matTooltip="The camera controller receives the current local Vector3 directly in the same update that moves the craft.">?</span></dt><dd>Vector3 · direct</dd></div>
       </dl>
 
       @if (scenario() === 'interstellar') {
         <div class="journey" aria-label="Journey progress">
           <div class="rail"><i [style.width.%]="progress() * 100"></i></div>
           <div class="markers">@for (marker of progressMarkers; track marker) { <span [class.passed]="progress() >= marker"></span> }</div>
-          <small>0 → Alpha Centauri · 4.2465 light-years · {{ progress() | percent:'1.1-1' }}</small>
+          <small>0 → Alpha Centauri A · 4.2465 light-years · {{ progress() | percent:'1.1-1' }}</small>
+          <small>Arrival: {{ arrivalClearance }} m before the surface · star radius: 851,000 km</small>
         </div>
       }
     </section>
   </ng-template>
 
-  <orbitControls [cameraPosition]="[0, 12, 28]" [target]="[0, 1.5, 0]" [near]="0.1" [far]="5000" />
+  <orbitControls [cameraPosition]="[0, 12, 28]" [target]="[0, 1.5, 0]" [near]="0.1" [far]="cameraFar" />
   <ambientLight [intensity]="1.8" />
   <directionalLight [position]="[10, 20, 12]" [intensity]="3" />
 
-  <gridHelper [size]="1000" [divisions]="40" color1="#31526a" color2="#172b39" />
-  <mesh #craft [position]="localPosition()" [rotation]="[0, 0, -1.5708]">
+  @if (scenario() === 'interstellar') {
+    @for (position of milestonePositions(); track $index) {
+      <mesh [position]="position">
+        <sphereGeometry [params]="{ radius: milestoneRadius, widthSegments: 12, heightSegments: 8 }" />
+        <meshBasicMaterial [params]="{ color: '#31526a', wireframe: true }" />
+      </mesh>
+    }
+    <mesh [position]="alphaCentauriPosition()">
+      <sphereGeometry [params]="{ radius: alphaCentauriRadius, widthSegments: 32, heightSegments: 24 }" />
+      <meshBasicMaterial [params]="{ color: '#ffd36a' }" />
+    </mesh>
+  } @else {
+    <gridHelper [size]="1000" [divisions]="40" color1="#31526a" color2="#172b39" />
+  }
+  <mesh [position]="localPosition()" [rotation]="[0, 0, -1.5708]">
     <cylinderGeometry [params]="[0, 1.5, 6, 12]" />
     <meshStandardMaterial [params]="{ color: '#77d7ff', emissive: '#123b55', roughness: 0.35, metalness: 0.65 }" />
   </mesh>
-  <mesh [position]="[localPosition()[0], localPosition()[1], localPosition()[2] - 3.4]" [scale]="[0.7, 0.7, 1.8]">
+  <mesh [position]="plumePosition()" [scale]="[1.8, 0.7, 0.7]">
     <sphereGeometry [params]="{ radius: 1, widthSegments: 16, heightSegments: 10 }" />
     <meshBasicMaterial [params]="{ color: '#ff8a3d' }" />
   </mesh>
