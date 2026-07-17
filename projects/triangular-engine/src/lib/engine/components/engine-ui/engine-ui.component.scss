@@ -30,6 +30,7 @@
 }
 .ui-main {
   flex: 1 1 100%;
+  position: relative; /* Anchor overlay inside main inner area */
 
   align-items: center;
   justify-content: center;
@@ -53,3 +54,51 @@
   align-items: flex-start;
   padding: 1rem;
 }
+
+.ui-layer-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 500;
+  pointer-events: none;
+}
+
+.engine-overlay-lane {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: auto; /* Allow children inside lanes to be clickable */
+}
+
+.engine-overlay-lane--top-start {
+  top: 12px;
+  left: 12px;
+  align-items: flex-start;
+}
+
+.engine-overlay-lane--top-end {
+  top: 12px;
+  right: 12px;
+  align-items: flex-end;
+}
+
+.engine-overlay-lane--bottom-start {
+  bottom: 12px;
+  left: 12px;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+}
+
+.engine-overlay-lane--bottom-end {
+  bottom: 12px;
+  right: 12px;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+}
+
+.engine-overlay-lane--center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
