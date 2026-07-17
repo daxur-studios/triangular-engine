@@ -319,6 +319,29 @@ export class OrbitControlsComponent implements OnDestroy {
   }
 
   /**
+   * Re-centers the target on whatever `follow` currently points at and
+   * pulls the camera back to `offset` from it — the fix for "I panned/
+   * zoomed away and can't find my vessel again": panning moves `target`
+   * itself, so afterward `#initFollow`'s per-frame delta-add keeps it
+   * offset by the same drifted amount forever instead of correcting back
+   * toward the followed object. A plain re-lock (no offset) only fixes the
+   * target; passing `offset` also resets zoom/angle to a known-good view.
+   */
+  recenterOnFollow(offset?: Vector3Tuple): void {
+    const orbit = this.orbitControls();
+    const followObject = this.follow();
+    if (!orbit || !followObject) return;
+
+    const worldPos = new Vector3();
+    followObject.getWorldPosition(worldPos);
+    orbit.target.copy(worldPos);
+    if (offset) {
+      this.internalCamera.position.copy(worldPos).add(new Vector3(...offset));
+    }
+    this.previousFollowPosition = worldPos.clone();
+  }
+
+  /**
    * Fix stuff such as follow that is keeping track of last position when the world is shifted.
    */
   onFloatingOriginRebase(delta: Vector3Tuple) {
