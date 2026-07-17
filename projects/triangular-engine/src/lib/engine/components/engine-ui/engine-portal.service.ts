@@ -1,5 +1,6 @@
-import { Injectable, Signal, signal } from '@angular/core';
+import { Injectable, Signal, computed, inject } from '@angular/core';
 import { TemplatePortal } from '@angular/cdk/portal';
+import { PortalRegistryService } from '@daxur-studios/portal-layout';
 
 import { EnginePortalArea, EnginePortalLane, EnginePortalEntry } from './engine-portal.models';
 
@@ -8,14 +9,17 @@ import { EnginePortalArea, EnginePortalLane, EnginePortalEntry } from './engine-
  *
  * Value: serves as a central registry for all HUD overlay templates, allowing components/pages
  * to dynamically inject controls into top/bottom toolbars, left/right sidebars, and main content area.
+ *
+ * Adapts to @daxur-studios/portal-layout's PortalRegistryService.
  */
 @Injectable({ providedIn: 'root' })
 export class EnginePortalService {
-  private readonly registeredEntries = signal<readonly EnginePortalEntry[]>([]);
-  private nextEntrySequence = 0;
+  private readonly registry = inject(PortalRegistryService);
 
   /** All currently registered entries across all areas. */
-  readonly entries: Signal<readonly EnginePortalEntry[]> = this.registeredEntries.asReadonly();
+  readonly entries: Signal<readonly EnginePortalEntry[]> = computed(() =>
+    this.registry.entries() as unknown as readonly EnginePortalEntry[]
+  );
 
   /** Registers a template portal into an area/lane and returns its entry ID for cleanup. */
   registerEntry(
@@ -24,18 +28,11 @@ export class EnginePortalService {
     order: number,
     portal: TemplatePortal
   ): string {
-    const id = `engine-portal-${this.nextEntrySequence++}`;
-    this.registeredEntries.update((entries) => [
-      ...entries,
-      { id, area, lane, order, portal },
-    ]);
-    return id;
+    return this.registry.register(area, lane, order, portal);
   }
 
   /** Removes a previously registered entry. */
   unregisterEntry(id: string): void {
-    this.registeredEntries.update((entries) =>
-      entries.filter((entry) => entry.id !== id)
-    );
+    this.registry.unregister(id);
   }
 }

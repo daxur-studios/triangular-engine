@@ -24,6 +24,7 @@
     "@angular/cdk": "^20.2.14",
     "@angular/common": "^20.3.3",
     "@angular/core": "^20.3.3",
+    "@daxur-studios/portal-layout": "^0.0.1",
     "three": "^0.183.0",
     "dexie": "^4.2.1",
     "@dimforge/rapier3d-compat": "^0.18.0",

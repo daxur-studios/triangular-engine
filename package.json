@@ -30,7 +30,8 @@
     "three": "0.183.2",
     "three-mesh-bvh": "^0.9.9",
     "tslib": "^2.3.0",
-    "zone.js": "~0.15.1"
+    "zone.js": "~0.15.1",
+    "@daxur-studios/portal-layout": "file:./daxur-studios-portal-layout-0.0.1.tgz"
   },
   "devDependencies": {
     "@angular/build": "^20.3.23",
