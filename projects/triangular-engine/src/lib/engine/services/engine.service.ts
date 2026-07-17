@@ -1,47 +1,41 @@
 import {
-  EventEmitter,
-  Inject,
   Injectable,
-  InjectionToken,
-  WritableSignal,
-  effect,
-  inject,
-  input,
-  signal,
   Provider,
+  WritableSignal,
+  inject,
+  signal,
 } from '@angular/core';
 import {
   BehaviorSubject,
+  ReplaySubject,
   Subject,
   filter,
   firstValueFrom,
-  ReplaySubject,
 } from 'rxjs';
 import {
   ACESFilmicToneMapping,
+  BufferGeometry,
   Camera,
   Clock,
+  Mesh,
+  OrthographicCamera,
   PCFShadowMap,
   PerspectiveCamera,
   Scene,
   WebGLRenderer,
   WebGLRendererParameters,
-  BufferGeometry,
-  Mesh,
-  OrthographicCamera,
 } from 'three';
-import { WebGPURenderer } from 'three/webgpu';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import type { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { WebGPURenderer } from 'three/webgpu';
 
 import {
   Cursor,
   ENGINE_OPTIONS,
+  EngineRenderPipeline,
   FPSController,
   IEngine,
   IEngineOptions,
-  EngineRenderPipeline,
   provideEngineOptions,
 } from '../models';
 
@@ -49,13 +43,13 @@ import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
 import type { SceneComponent } from '../components/object-3d/scene/scene.component';
 
-import { EngineSettingsService } from './engine-settings.service';
+import { toSignal } from '@angular/core/rxjs-interop';
 import {
   acceleratedRaycast,
   computeBoundsTree,
   disposeBoundsTree,
 } from 'three-mesh-bvh';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { EngineSettingsService } from './engine-settings.service';
 
 @Injectable()
 export class EngineService implements IEngine {
@@ -321,8 +315,7 @@ export class EngineService implements IEngine {
 
     this.renderer.toneMapping =
       this.options.toneMapping ?? ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure =
-      this.options.toneMappingExposure ?? 1.0;
+    this.renderer.toneMappingExposure = this.options.toneMappingExposure ?? 1.0;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = PCFShadowMap;
 
@@ -448,11 +441,7 @@ export class EngineService implements IEngine {
     }
 
     this.renderPipeline = pipeline;
-    pipeline.setSize(
-      this.width,
-      this.height,
-      this.pixelRatio,
-    );
+    pipeline.setSize(this.width, this.height, this.pixelRatio);
   }
 
   /** The configured renderer pixel ratio, or the engine's capped device default. */
@@ -563,7 +552,7 @@ export class EngineService implements IEngine {
     if (newCamera instanceof PerspectiveCamera && this.canvas) {
       newCamera.aspect = this.width / this.height;
       newCamera.updateProjectionMatrix();
-    } else     if (newCamera instanceof OrthographicCamera) {
+    } else if (newCamera instanceof OrthographicCamera) {
       newCamera.updateProjectionMatrix();
     }
 

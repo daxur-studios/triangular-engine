@@ -1,9 +1,9 @@
 <scene>
-  <ng-template enginePortal="right" lane="content">
+  <ng-template portalTarget="rightSidebar" lane="content">
     <app-takram-cloud-controls [showSceneLightingControls]="true" />
   </ng-template>
 
-  <ng-template enginePortal="top" lane="content">
+  <ng-template portalTarget="toolbarTop" lane="content">
     <aside class="demo-status">
       <strong>Mini planet · hybrid clouds</strong>
       <span>Camera altitude {{ cameraAltitude() | number: "1.0-0" }} m</span>
@@ -12,7 +12,7 @@
     </aside>
   </ng-template>
 
-  <ng-template enginePortal="right" lane="content" [order]="-10">
+  <ng-template portalTarget="rightSidebar" lane="content" [order]="-10">
     <aside class="demo-status diagnostics">
       <strong>Diagnostics (runbook 003, phase 0/1)</strong>
       <strong>Planet size</strong>

@@ -5,11 +5,11 @@ import { EngineService } from '../../services';
 import { EngineStatsComponent } from './engine-stats/engine-stats.component';
 import { IUserInterfaceOptions } from '../../models';
 import { SceneTreeComponent } from '../../features/scene-tree/scene-tree.component';
-import { EnginePortalOutletComponent } from './engine-portal-outlet.component';
+import { PortalOutletComponent } from '@daxur-studios/portal-layout';
 
 @Component({
   selector: 'engine-ui',
-  imports: [CommonModule, EngineStatsComponent, SceneTreeComponent, EnginePortalOutletComponent],
+  imports: [CommonModule, EngineStatsComponent, SceneTreeComponent, PortalOutletComponent],
   templateUrl: './engine-ui.component.html',
   styleUrl: './engine-ui.component.scss'
 })

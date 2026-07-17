@@ -2,7 +2,7 @@
 
 <div class="ui-layer-1 flex-page">
   <div class="ui-toolbar-top">
-    <engine-portal-outlet area="top" />
+    <portalOutlet area="toolbarTop" />
 
     @if (engineService.options.showFPS) {
       <engine-stats />
@@ -10,28 +10,28 @@
   </div>
   <div class="main-wrapper flex-page">
     <div class="ui-sidebar-left">
-      <engine-portal-outlet area="left" />
+      <portalOutlet area="leftSidebar" />
     </div>
     <div class="ui-main">
-      <engine-portal-outlet area="main" />
+      <portalOutlet area="main" />
     </div>
     <div class="ui-sidebar-right">
       @if (userInterface().showSceneTree) {
         <sceneTree />
       }
-      <engine-portal-outlet area="right" />
+      <portalOutlet area="rightSidebar" />
     </div>
   </div>
 
   <div class="ui-toolbar-bottom">
-    <engine-portal-outlet area="bottom" />
+    <portalOutlet area="toolbarBottom" />
   </div>
 </div>
 
 <div class="ui-layer-modal">
-  <engine-portal-outlet area="modal" />
+  <portalOutlet area="modal" />
 </div>
 
 <div class="ui-layer-notification">
-  <engine-portal-outlet area="notification" />
+  <portalOutlet area="notification" />
 </div>

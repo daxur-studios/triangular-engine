@@ -17,8 +17,7 @@ import {
   SMAAPassComponent,
   UnrealBloomPassComponent,
 } from './components';
-import { EnginePortalDirective } from './components/engine-ui/engine-portal.directive';
-import { EnginePortalOutletComponent } from './components/engine-ui/engine-portal-outlet.component';
+import { PortalTargetDirective } from '@daxur-studios/portal-layout';
 import { EngineDirectiveModule } from './directive';
 import { EngineEnvironmentModule, EngineFeaturesModule } from './features';
 
@@ -35,8 +34,7 @@ const importExport = [
   EngineFeaturesModule,
   EngineDirectiveModule,
 
-  EnginePortalDirective,
-  EnginePortalOutletComponent,
+  PortalTargetDirective,
   KeyboardControlsComponent,
 
   RenderTargetComponent,
