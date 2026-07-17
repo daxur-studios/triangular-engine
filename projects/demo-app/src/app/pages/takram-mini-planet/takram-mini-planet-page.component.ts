@@ -188,7 +188,7 @@ export class TakramMiniPlanetPageComponent {
   readonly diagAerialTransmittance = signal(true);
   readonly diagAerialGround = signal(true);
   readonly diagAerialPostLighting = signal(true);
-  readonly diagAerialGeometricCorrection = signal(true);
+  readonly diagAerialGeometricCorrection = signal(false);
   readonly diagPlanet = signal(true);
   readonly diagShell = signal(true);
   /** Phase 1 test: raises planet mesh tessellation to rule out facet banding. */

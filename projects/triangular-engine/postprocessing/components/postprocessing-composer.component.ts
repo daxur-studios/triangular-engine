@@ -84,6 +84,7 @@ export class PostprocessingComposerComponent implements OnInit, OnDestroy {
     this.pipeline = {
       render: (deltaTime) => {
         if (this.enabled()) {
+          composer.setMainCamera(this.engine.camera);
           composer.render(deltaTime);
         } else {
           renderer.render(this.engine.scene, this.engine.camera);

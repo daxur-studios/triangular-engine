@@ -515,3 +515,13 @@ surface geometry at or above `y = 0`; in the demo, placing the ground at `0`
 and lifting each box so its base is `0` resolved all of these symptoms. Do not
 work around this by restricting orbit controls—the globe must remain viewable
 from any angle.
+
+### 2026-07-16 — Logarithmic Depth, Precision, & Lighting Fixes
+
+- **Fixed custom-planet camera height calculation**: resolved the hardcoded WGS84 ellipsoid assumption inside `@takram/three-clouds` and `@takram/three-atmosphere` camera height checks by injecting a compatibility shim (`takram-clouds-compat.ts` and `takram-aerial-perspective-compat.ts`) that projects camera height onto the custom ellipsoid.
+- **Fixed postprocessing logarithmic depth reconstruction**: resolved the concentric rings and visual warping when `logarithmicDepthBuffer: true` is enabled on the WebGLRenderer. Because the postprocessing `EffectPass` fullscreen material did not configure `logarithmicDepthBuffer: true`, custom shaders like Takram's that perform depth-based coordinate reconstruction treated logarithmic depth as perspective depth. Set `material.logarithmicDepthBuffer = true` on the `EffectPass` fullscreen material, ensuring Three.js compiles the shaders with correct log-depth uniforms and varyings.
+- **Fixed precision rings and zoom-out flipping**: resolved the close-range concentric rings (quantization steps in depth-to-viewZ conversion) and far-distance flipping between planet and sky (due to floating-point rounding hitting the hardcoded sky threshold). Replaced the static `cameraFar = 50,000,000` configuration in `/takram-mini-planet` with a reactive `effect` that dynamically scales `cameraNear` and `cameraFar` clip planes based on altitude and planet radius (keeping the `far / near` ratio small and the planet safely in front of the far clip plane).
+- **Disabled geometric error correction by default**: resolved the sudden shift/darkening of the planet globe at far distances by setting `diagAerialGeometricCorrection` to default `false` for the mini-planet. Since the planet is a perfect sphere, geometric error correction is unnecessary and distorts positions/normals at space altitudes.
+- **Synced camera parameters to composer on every frame**: resolved the issue where dynamic camera `near` and `far` changes did not propagate to the post-processing passes (causing them to get out of sync until a setting was toggled to recreate the pass). Added `composer.setMainCamera(this.engine.camera)` to the render pipeline loop of `PostprocessingComposerComponent`, keeping all pass materials and uniforms perfectly synchronized with camera changes.
+
+
