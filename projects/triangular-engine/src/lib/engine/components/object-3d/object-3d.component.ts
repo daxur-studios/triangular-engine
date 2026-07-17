@@ -66,6 +66,11 @@ export abstract class Object3DComponent implements OnDestroy {
   //   ...this._contentChildren(),
   // ]);
 
+  /**
+   * Declarative local position. Angular commits this through an effect; code
+   * in an external physics/engine tick must not assume the Object3D has the
+   * new value until change detection has flushed that binding.
+   */
   readonly position = model<Vector3Tuple>([0, 0, 0]);
   readonly scale = model<Vector3Tuple | number>(1);
   /** EULER rotation */

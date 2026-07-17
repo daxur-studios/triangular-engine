@@ -101,6 +101,46 @@ Scene-local debug options can also be set declaratively:
 `showFps` overrides `EngineService.provide({ showFPS: ... })` for the engine
 instance used by that scene. Omit it to retain the provider setting.
 
+## Frame-synchronous movement and camera follow
+
+Angular template bindings and direct Three.js mutations are different update
+paths. A signal change such as `[position]="renderPosition()"` first updates
+the Angular component input; the component's effect then writes that value to
+its `Object3D`. Code running in a physics or engine tick must not assume that
+the Object3D already contains a position signal written earlier in that tick.
+
+Do not mix a direct `object3D.position` mutation for one object with a
+template-bound position for another object that must remain visually locked to
+it. The direct object can reach the current Three.js frame while the bound
+object is still showing the previous Angular frame, which appears as jitter.
+Use one synchronized transform path for the whole visual assembly.
+
+Ordinary `<orbitControls [follow]="object3D">` tracking works when the followed
+Object3D is current by `postTick$`. Physics, time-warp, and floating-origin apps
+often already know the authoritative local render position before Angular has
+committed it. Those apps should push that same position in the simulation step:
+
+```html
+<orbitControls
+  #controls
+  [follow]="vessel.object3D()"
+/>
+
+<app-flight-controller
+  (rebase)="controls.onFloatingOriginRebase($event)"
+  (renderPosition)="controls.updateFollowPosition($event)"
+/>
+
+<group #vessel [position]="vesselPosition()">
+  <!-- vessel visuals -->
+</group>
+```
+
+Apply a rebase first, then push the authoritative position computed in the new
+local frame. A push suppresses automatic Object3D readback for that frame, so a
+still-stale template transform cannot undo the camera update. If pushes stop,
+normal Object3D-based follow resumes on the next frame.
+
 ## Configure Draco (GLTF)
 
 If you load DRACO-compressed GLTF assets, add the decoder to your `angular.json` assets:

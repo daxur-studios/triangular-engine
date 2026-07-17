@@ -256,12 +256,15 @@ export class OrbitControlsComponent implements OnDestroy {
   }
 
   private previousFollowPosition: Vector3 | undefined;
+  /** True when the caller supplied this frame's authoritative follow position. */
+  private followPositionPushedSincePostTick = false;
 
   #initFollow() {
     effect(() => {
       const followObject = this.follow();
       const orbit = this.orbitControls();
       this.previousFollowPosition = undefined;
+      this.followPositionPushedSincePostTick = false;
       if (followObject && orbit) {
         followObject.updateMatrixWorld(true);
         const worldPos = new Vector3();
@@ -298,7 +301,14 @@ export class OrbitControlsComponent implements OnDestroy {
     ])
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([orbitControls, isActive]) => {
+        const authoritativePositionWasPushed =
+          this.followPositionPushedSincePostTick;
+        this.followPositionPushedSincePostTick = false;
         if (!isActive || !orbitControls) return;
+        // Angular may not have committed the matching Object3D input yet.
+        // Reading it now would undo the authoritative delta already applied
+        // by updateFollowPosition() earlier in this engine frame.
+        if (authoritativePositionWasPushed) return;
         const followObject = this.follow();
         if (!followObject) return;
 
@@ -342,14 +352,14 @@ export class OrbitControlsComponent implements OnDestroy {
    * tracking below reads it, especially when several rebases land inside a
    * single rendered frame under high time-warp.
    *
-   * Safe to call every frame alongside the automatic `postTick$` tracking:
-   * once this catches `previousFollowPosition` up to the real position, the
-   * automatic handler's own diff against the (by-then-matching) mesh
-   * position comes out as ~zero, so it's a no-op rather than a double-move.
+   * Safe to call every frame alongside automatic `postTick$` tracking. A
+   * push suppresses Object3D readback for that frame, because Angular may
+   * not have committed the matching template-bound transform yet.
    */
   updateFollowPosition(worldPos: Vector3Tuple): void {
     const orbit = this.orbitControls();
     if (!orbit) return;
+    this.followPositionPushedSincePostTick = true;
 
     const currentWorldPos = new Vector3(...worldPos);
 
