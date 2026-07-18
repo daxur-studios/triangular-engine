@@ -190,6 +190,11 @@ export class JoltRigidBodyComponent extends GroupComponent {
         }
 
         const initialPosition = this.position();
+        const initialQuaternion = untracked(() => {
+          const quaternion = this.quaternion();
+          if (quaternion) return new Quaternion(...quaternion);
+          return new Quaternion().setFromEuler(new Euler(...this.rotation()));
+        });
 
         // Shared helper for both single and compound shapes
         const createOrReplaceBody = (shape: Jolt.Shape) => {
@@ -209,15 +214,17 @@ export class JoltRigidBodyComponent extends GroupComponent {
             initialPosition[1],
             initialPosition[2],
           );
+          const bodyRotation = new Jolt.Quat(...initialQuaternion.toArray());
           const settings: Jolt.BodyCreationSettings =
             new Jolt.BodyCreationSettings(
               shape,
               bodyPosition,
-              Jolt.Quat.prototype.sIdentity(),
+              bodyRotation,
               resolvedMotionType,
               LAYER_MOVING,
             );
           Jolt.destroy(bodyPosition);
+          Jolt.destroy(bodyRotation);
 
           // Damping + CCD
           const angularDamping = untracked(() => this.angularDamping);
