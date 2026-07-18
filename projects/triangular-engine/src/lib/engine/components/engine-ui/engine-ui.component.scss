@@ -102,3 +102,18 @@
   transform: translate(-50%, -50%);
 }
 
+.engine-overlay-lane--bottom-center {
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  flex-direction: column-reverse;
+  align-items: center;
+}
+
+.engine-overlay-lane--top-center {
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+}
+
