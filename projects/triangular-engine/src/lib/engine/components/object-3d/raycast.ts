@@ -60,6 +60,12 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
   readonly raycastGroup = input<string | undefined>('default-group');
 
   /**
+   * Max raycast distance. Defaults to three.js's own default (Infinity) so
+   * objects far from the camera (e.g. map-scale scenes) remain pickable.
+   */
+  readonly raycastFar = input<number>(Infinity);
+
+  /**
    * Emitted when the raycast hits the parent object3D component
    */
   @Output() rayClick = new RaycastEventEmitter<IRaycastEvent>();
@@ -72,6 +78,20 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
    * Only emitted if this directive is part of a raycastGroup.
    */
   @Output() rayGroupClick = new RaycastEventEmitter<IRaycastEvent[]>();
+
+  /**
+   * Emitted when a right-click (context menu button) raycast hits the parent object3D component
+   */
+  @Output() rayRightClick = new RaycastEventEmitter<IRaycastEvent>();
+  /**
+   * Emitted when a right-click raycast hits an object but the object is not the parent object3D component
+   */
+  @Output() rayRightClickOutside = new RaycastEventEmitter<IRaycastEvent>();
+  /**
+   * Emitted when any object in the raycast group is hit by a right-click, includes all hits sorted by distance.
+   * Only emitted if this directive is part of a raycastGroup.
+   */
+  @Output() rayGroupRightClick = new RaycastEventEmitter<IRaycastEvent[]>();
 
   @Output() rayMouseEnter = new RaycastEventEmitter<IRaycastEvent>();
   @Output() rayMouseLeave = new RaycastEventEmitter<IRaycastEvent>();
@@ -105,7 +125,12 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
   #initClick() {
     // Logic to only enable raycast checks if onClick has subscribers.
     // This could be periodically checked or triggered by specific events.
-    if (this.rayClick.hasSubscribers || this.rayGroupClick.hasSubscribers) {
+    if (
+      this.rayClick.hasSubscribers ||
+      this.rayGroupClick.hasSubscribers ||
+      this.rayRightClick.hasSubscribers ||
+      this.rayGroupRightClick.hasSubscribers
+    ) {
       // Implement the logic to perform raycast checks here.
 
       this.engineService.mouseup$
@@ -113,8 +138,10 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
         .subscribe((event) => {
           if (!event) return;
 
-          // Check if it's a left mouse up
-          if (event.button !== 0) return;
+          // Left mouse up (button 0) or right mouse up (button 2); ignore others (e.g. middle)
+          const isLeftClick = event.button === 0;
+          const isRightClick = event.button === 2;
+          if (!isLeftClick && !isRightClick) return;
 
           // Assuming `event` contains the mouse event information
           const mousePosition = new Vector2();
@@ -129,16 +156,24 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
             mousePosition,
             this.engineService.camera,
           );
-          this.raycaster.far = 1000;
+          this.raycaster.far = this.raycastFar();
 
           const groupName = this.#initialRaycastGroup;
 
-          // If part of a group, coordinate with other group members
-          if (groupName) {
-            this.#handleGroupClick(groupName);
+          if (isLeftClick) {
+            // If part of a group, coordinate with other group members
+            if (groupName) {
+              this.#handleGroupClick(groupName);
+            } else {
+              // Original behavior for non-grouped raycasts
+              this.#handleIndividualClick();
+            }
           } else {
-            // Original behavior for non-grouped raycasts
-            this.#handleIndividualClick();
+            if (groupName) {
+              this.#handleGroupRightClick(groupName);
+            } else {
+              this.#handleIndividualRightClick();
+            }
           }
 
           //#region debug
@@ -214,6 +249,62 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
       });
     }
   }
+
+  #handleIndividualRightClick() {
+    const object3D = this.object3DComponent.object3D();
+    if (object3D) {
+      const intersects = this.raycastService.raycaster.intersectObject(
+        object3D,
+        true,
+      );
+      if (intersects.length > 0) {
+        // An intersection occurred
+        this.rayRightClick.emit({
+          object: object3D,
+          instanceId: intersects[0].instanceId,
+          distance: intersects[0].distance,
+          intersects: intersects,
+        });
+      } else {
+        this.rayRightClickOutside.emit({ object: object3D, intersects: [] });
+      }
+    }
+  }
+
+  #handleGroupRightClick(groupName: string) {
+    const groupHits = this.raycastService.getGroupIntersections(groupName);
+
+    // Sort by distance (closest first)
+    groupHits.sort((a: IGroupHit, b: IGroupHit) => a.distance - b.distance);
+
+    if (groupHits.length > 0) {
+      // Emit rayGroupRightClick for all group members if they have subscribers
+      const groupMembers = this.raycastService.getGroupMembers(groupName);
+      groupMembers?.forEach((directive: RaycastDirective) => {
+        if (directive.rayGroupRightClick.hasSubscribers) {
+          directive.rayGroupRightClick.emit(groupHits);
+        }
+      });
+
+      // Only emit rayRightClick for the closest hit
+      const closestHit = groupHits[0];
+      if (closestHit.directive === this) {
+        this.rayRightClick.emit({
+          object: closestHit.object,
+          instanceId: closestHit.instanceId,
+          distance: closestHit.distance,
+          intersects: closestHit.intersects,
+        });
+      }
+    } else {
+      // No hits in the group
+      this.rayRightClickOutside.emit({
+        object: this.object3DComponent.object3D()!,
+        intersects: [],
+      });
+    }
+  }
+
   #initMouseEnterAndLeave() {
     if (
       this.rayMouseEnter.hasSubscribers ||
@@ -236,7 +327,7 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
             mousePosition,
             this.engineService.camera,
           );
-          this.raycaster.far = 1000;
+          this.raycaster.far = this.raycastFar();
 
           // Perform raycasting
           const object3D = this.object3DComponent.object3D();
