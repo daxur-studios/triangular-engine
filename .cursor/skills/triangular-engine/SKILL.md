@@ -20,6 +20,8 @@ Use only these package entry points in consumer apps:
 - Rapier physics: `triangular-engine/rapier`
 - Jolt physics: `triangular-engine/jolt`
 - @pmndrs/vanilla helpers: `triangular-engine/pmndrs`
+- Post-processing: `triangular-engine/postprocessing`
+- Takram atmosphere/clouds: `triangular-engine/takram`
 
 Do not import from internal source paths.
 

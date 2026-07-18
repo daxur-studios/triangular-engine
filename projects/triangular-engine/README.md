@@ -17,6 +17,19 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 | Jolt Physics    | ^0.38.0  | Optional - alternative physics engine                          |
 | @pmndrs/vanilla | ^1.24.0  | Optional - Billboard and Sparkles (`triangular-engine/pmndrs`) |
 
+## Sub-libraries & Entry Points
+
+The library is modularized into several secondary entry points (sub-libraries) so you only import and bundle what your app uses:
+
+| Entry Point | Purpose / What it does | Peer Dependencies |
+| ----------- | ---------------------- | ----------------- |
+| `triangular-engine` | **Core Package**: Declarative Angular components for Three.js scenes (such as `<scene>`, `<camera>`, `<mesh>`, `<directionalLight>`, geometries, materials, CSS2D/3D overlays, skybox, ocean, and GLTF loading). | `three`, `dexie`, `three-mesh-bvh` |
+| `triangular-engine/jolt` | **Jolt Physics**: Integration with Jolt Physics engine. Provides `<jolt-physics>`, `<jolt-rigid-body>`, colliders, constraints, and support for high-precision / double-precision coordinates. | `jolt-physics` |
+| `triangular-engine/rapier` | **Rapier Physics**: Integration with Rapier 3D physics. Provides `<physics>`, `<rigidBody>`, colliders, and joints. | `@dimforge/rapier3d-compat` |
+| `triangular-engine/pmndrs` | **PMNDRS Helpers**: Angular wrappers for `@pmndrs/vanilla` visual helper components such as `<billboard>` and `<sparkles>`. | `@pmndrs/vanilla` |
+| `triangular-engine/postprocessing` | **Post-processing**: Staged post-processing passes built using `postprocessing` (e.g. bloom, glitch, SMAA, output, custom shaders). | `postprocessing` |
+| `triangular-engine/takram` | **Takram Atmosphere**: Physical atmospheric and cloud rendering components (atmosphere, aerial perspective, and clouds). | `@takram/three-atmosphere`, `@takram/three-clouds` |
+
 ## Features
 
 - Standalone Angular components: `scene`, `camera`, `mesh`, `materials`, `lights`, `gltf`, `physics`, `css2d/css3d`, post-processing, and more
