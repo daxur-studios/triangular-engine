@@ -2,6 +2,7 @@ import { inject, Injectable, signal } from '@angular/core';
 import {
   AerialPerspectiveEffect,
   AtmosphereParameters,
+  type AtmosphereParametersOptions,
   DensityProfileLayer,
   PrecomputedTexturesGenerator,
 } from '@takram/three-atmosphere';
@@ -21,6 +22,58 @@ import { EngineService } from 'triangular-engine';
 const DEFAULT_ATMOSPHERE_HEIGHT =
   AtmosphereParameters.DEFAULT.topRadius -
   AtmosphereParameters.DEFAULT.bottomRadius;
+
+/**
+ * Spectral atmosphere controls supported by the declarative adapter.
+ *
+ * Planet radii and density profiles remain owned by `planetRadius` and
+ * `atmosphereHeight`, because the adapter rescales the Earth profiles to the
+ * configured shell. Accepting those values here would make the two APIs
+ * conflict and can reintroduce LUT banding on small planets.
+ */
+export type TakramAtmosphereParameters = Omit<
+  AtmosphereParametersOptions,
+  | 'bottomRadius'
+  | 'topRadius'
+  | 'rayleighDensity'
+  | 'mieDensity'
+  | 'absorptionDensity'
+>;
+
+/** Apply a complete preset, resetting omitted values to Takram's defaults. */
+export function applyTakramAtmosphereParameters(
+  target: AtmosphereParameters,
+  parameters?: TakramAtmosphereParameters,
+): void {
+  const defaults = AtmosphereParameters.DEFAULT;
+  target.solarIrradiance.copy(
+    parameters?.solarIrradiance ?? defaults.solarIrradiance,
+  );
+  target.sunAngularRadius =
+    parameters?.sunAngularRadius ?? defaults.sunAngularRadius;
+  target.rayleighScattering.copy(
+    parameters?.rayleighScattering ?? defaults.rayleighScattering,
+  );
+  target.mieScattering.copy(
+    parameters?.mieScattering ?? defaults.mieScattering,
+  );
+  target.mieExtinction.copy(
+    parameters?.mieExtinction ?? defaults.mieExtinction,
+  );
+  target.miePhaseFunctionG =
+    parameters?.miePhaseFunctionG ?? defaults.miePhaseFunctionG;
+  target.absorptionExtinction.copy(
+    parameters?.absorptionExtinction ?? defaults.absorptionExtinction,
+  );
+  target.groundAlbedo.copy(parameters?.groundAlbedo ?? defaults.groundAlbedo);
+  target.muSMin = parameters?.muSMin ?? defaults.muSMin;
+  target.skyRadianceToLuminance.copy(
+    parameters?.skyRadianceToLuminance ?? defaults.skyRadianceToLuminance,
+  );
+  target.sunRadianceToLuminance.copy(
+    parameters?.sunRadianceToLuminance ?? defaults.sunRadianceToLuminance,
+  );
+}
 
 /**
  * Earth's own default config never renders geometry exactly at
@@ -107,9 +160,10 @@ export class TakramAtmosphereService {
   }
 
   /** Generate the default Earth LUT once when no custom planet is configured. */
-  initializeDefaultAtmosphere(): void {
+  initializeDefaultAtmosphere(parameters?: TakramAtmosphereParameters): void {
+    applyTakramAtmosphereParameters(this.atmosphere, parameters);
     this.requestTextureUpdate(
-      `default:${this.atmosphere.bottomRadius}:${this.atmosphere.topRadius}`,
+      `default:${this.atmosphere.bottomRadius}:${this.atmosphere.topRadius}:${atmosphereParametersKey(this.atmosphere)}`,
       'Failed to generate Takram atmosphere lookup textures.',
     );
   }
@@ -127,6 +181,7 @@ export class TakramAtmosphereService {
     radius: number,
     atmosphereHeight: number,
     resetWorldToECEF = true,
+    parameters?: TakramAtmosphereParameters,
   ): void {
     if (!(radius > 0) || !(atmosphereHeight > 0)) {
       throw new Error(
@@ -135,8 +190,8 @@ export class TakramAtmosphereService {
     }
     this.ellipsoid = new Ellipsoid(radius, radius, radius);
     this.atmosphere.bottomRadius = computeAtmosphereBottomRadius(radius);
-    this.atmosphere.topRadius =
-      this.atmosphere.bottomRadius + atmosphereHeight;
+    this.atmosphere.topRadius = this.atmosphere.bottomRadius + atmosphereHeight;
+    applyTakramAtmosphereParameters(this.atmosphere, parameters);
 
     // The density profiles are absolute-metre curves (e.g. an 8 km Rayleigh
     // scale height) tuned for Earth's 60 km atmosphere. Left unscaled, a much
@@ -161,7 +216,7 @@ export class TakramAtmosphereService {
       this.worldToECEFMatrix.copy(createWorldToECEFMatrix(radius));
     }
     this.requestTextureUpdate(
-      `planet:${radius}:${atmosphereHeight}`,
+      `planet:${radius}:${atmosphereHeight}:${atmosphereParametersKey(this.atmosphere)}`,
       'Failed to update Takram atmosphere lookup textures.',
     );
   }
@@ -274,6 +329,22 @@ export class TakramAtmosphereService {
         this.runTextureUpdate(fallbackMessage);
       });
   }
+}
+
+function atmosphereParametersKey(atmosphere: AtmosphereParameters): string {
+  return [
+    ...atmosphere.solarIrradiance.toArray(),
+    atmosphere.sunAngularRadius,
+    ...atmosphere.rayleighScattering.toArray(),
+    ...atmosphere.mieScattering.toArray(),
+    ...atmosphere.mieExtinction.toArray(),
+    atmosphere.miePhaseFunctionG,
+    ...atmosphere.absorptionExtinction.toArray(),
+    ...atmosphere.groundAlbedo.toArray(),
+    atmosphere.muSMin,
+    ...atmosphere.skyRadianceToLuminance.toArray(),
+    ...atmosphere.sunRadianceToLuminance.toArray(),
+  ].join(':');
 }
 
 type AerialCloudBufferTarget = Pick<

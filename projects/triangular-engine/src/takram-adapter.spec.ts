@@ -1,10 +1,14 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { AtmosphereParameters, type AerialPerspectiveEffect } from '@takram/three-atmosphere';
+import {
+  AtmosphereParameters,
+  type AerialPerspectiveEffect,
+} from '@takram/three-atmosphere';
 import { Ellipsoid } from '@takram/three-geospatial';
 import type { CloudsEffect } from '@takram/three-clouds';
 import { TakramAerialPerspectiveComponent } from '../takram/atmosphere/takram-aerial-perspective.component';
 import { applyTakramAerialCameraHeightFix } from '../takram/atmosphere/takram-aerial-perspective-compat';
 import {
+  applyTakramAtmosphereParameters,
   computeAtmosphereBottomRadius,
   routeTakramCloudBuffers,
   TakramAtmosphereService,
@@ -12,6 +16,7 @@ import {
 import { TakramCloudLayerComponent } from '../takram/clouds/takram-cloud-layer.component';
 import { applyTakramCloudCameraHeightFix } from '../takram/clouds/takram-clouds-compat';
 import {
+  Color,
   Matrix4,
   PerspectiveCamera,
   Uniform,
@@ -20,6 +25,41 @@ import {
 } from 'three';
 
 describe('Takram adapter contracts', () => {
+  describe('atmosphere presets', () => {
+    it('applies spectral colours without changing the configured radii', () => {
+      const atmosphere = new AtmosphereParameters();
+      atmosphere.bottomRadius = 99_000;
+      atmosphere.topRadius = 120_000;
+
+      applyTakramAtmosphereParameters(atmosphere, {
+        rayleighScattering: new Vector3(0.03, 0.01, 0.002),
+        mieScattering: new Vector3(0.004, 0.002, 0.001),
+        groundAlbedo: new Color('#8f4626'),
+      });
+
+      expect(atmosphere.rayleighScattering.toArray()).toEqual([
+        0.03, 0.01, 0.002,
+      ]);
+      expect(atmosphere.mieScattering.toArray()).toEqual([0.004, 0.002, 0.001]);
+      expect(atmosphere.groundAlbedo.getHexString()).toBe('8f4626');
+      expect(atmosphere.bottomRadius).toBe(99_000);
+      expect(atmosphere.topRadius).toBe(120_000);
+    });
+
+    it('resets omitted values when replacing a preset', () => {
+      const atmosphere = new AtmosphereParameters();
+      applyTakramAtmosphereParameters(atmosphere, {
+        rayleighScattering: new Vector3(1, 2, 3),
+      });
+
+      applyTakramAtmosphereParameters(atmosphere, {});
+
+      expect(atmosphere.rayleighScattering.toArray()).toEqual(
+        AtmosphereParameters.DEFAULT.rayleighScattering.toArray(),
+      );
+    });
+  });
+
   describe('cloud-layer mapping', () => {
     let fixture: ComponentFixture<TakramCloudLayerComponent>;
 
