@@ -37,6 +37,8 @@ export class LineComponent extends Object3DComponent {
         const vectors = points.map((point) => new Vector3(...point));
 
         geometry.setFromPoints(vectors);
+        geometry.computeBoundingSphere();
+        geometry.computeBoundingBox();
         this.line().computeLineDistances();
       }
     });
