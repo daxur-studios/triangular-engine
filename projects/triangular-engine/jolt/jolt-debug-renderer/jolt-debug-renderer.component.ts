@@ -542,29 +542,20 @@ export class JoltDebugRendererComponent implements OnDestroy {
     const physicsSystem = this.parentPhysics.metaData$.value?.physicsSystem;
     if (!physicsSystem) return;
 
-    // Build validated allBodies: skip destroyed ones with GetID check (cheap validation)
+    // Enumerate the physics system itself so fallback debug rendering includes
+    // every live body, regardless of whether it came from a declarative
+    // <jolt-rigid-body> or an imperative BodyInterface caller. The physics
+    // system is the lifecycle authority: added bodies appear automatically and
+    // removed bodies disappear without debug-specific registration.
+    const bodyIds = new Jolt.BodyIDVector();
+    physicsSystem.GetBodies(bodyIds);
+    const bodyLock = physicsSystem.GetBodyLockInterfaceNoLock();
     const allBodies: Jolt.Body[] = [];
-    for (const obj of this.parentPhysics.dynamicObjects) {
-      const body = obj.userData['body'];
-      if (!body) continue;
-      try {
-        body.GetID(); // If this succeeds, body is valid enough
-        allBodies.push(body);
-      } catch (error) {
-        console.warn('Skipping destroyed body in dynamicObjects:', error);
-        // Clean up stale ref
-        delete obj.userData['body'];
-      }
+    for (let index = 0; index < bodyIds.size(); index++) {
+      const body = bodyLock.TryGetBody(bodyIds.at(index));
+      if (body) allBodies.push(body);
     }
-    for (const body of this.physicsService.bodies$.value) {
-      if (!body) continue;
-      try {
-        body.GetID();
-        allBodies.push(body);
-      } catch (error) {
-        console.warn('Skipping destroyed body in service:', error);
-      }
-    }
+    Jolt.destroy(bodyIds);
 
     // Aggregate all shapes' edges into separate buffers based on active/sleep state
     for (const body of allBodies) {
