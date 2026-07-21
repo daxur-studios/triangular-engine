@@ -17,9 +17,15 @@
 
 .ui-toolbar-top,
 .ui-toolbar-bottom,
-.ui-main,
 .ui-sidebar-left,
 .ui-sidebar-right {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  pointer-events: auto;
+}
+
+.ui-main {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -116,4 +122,3 @@
   transform: translateX(-50%);
   align-items: center;
 }
-

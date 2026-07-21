@@ -45,4 +45,12 @@ export const routes: Routes = [
         ({ TakramMiniPlanetPageComponent }) => TakramMiniPlanetPageComponent,
       ),
   },
+  {
+    path: 'takram-cylinder-clouds',
+    loadComponent: () =>
+      import('./pages/takram-cylinder-clouds/takram-cylinder-clouds-page.component').then(
+        ({ TakramCylinderCloudsPageComponent }) =>
+          TakramCylinderCloudsPageComponent,
+      ),
+  },
 ];

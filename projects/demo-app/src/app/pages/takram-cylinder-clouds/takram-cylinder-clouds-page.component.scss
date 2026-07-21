@@ -1,0 +1,45 @@
+.demo-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.55rem 0.8rem;
+}
+
+.controls {
+  display: grid;
+  gap: 0.55rem;
+  width: 17rem;
+  max-height: calc(100vh - 5rem);
+  padding: 0.75rem;
+  overflow: auto;
+  color: white;
+  font: 12px/1.25 system-ui, sans-serif;
+  background: rgb(7 17 31 / 90%);
+  border-radius: 0.35rem;
+}
+
+.controls label:not(.toggle) {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.2rem 0.5rem;
+}
+
+.controls input[type='range'] {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.controls .toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.controls output {
+  color: #9fc7e8;
+}
+
+.demo-status span {
+  opacity: 0.72;
+  font-size: 0.8rem;
+}

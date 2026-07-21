@@ -21,6 +21,7 @@ import {
   type Data3DTexture,
   type Texture,
   type Vector2Tuple,
+  type Vector3Tuple,
 } from 'three';
 import { PostprocessingEffectComponent } from 'triangular-engine/postprocessing';
 import { EngineService } from 'triangular-engine';
@@ -28,6 +29,10 @@ import { TakramCloudAssetsService } from './takram-cloud-assets.service';
 import { TakramCloudLayerComponent } from './takram-cloud-layer.component';
 import { TakramAtmosphereService } from '../atmosphere/takram-atmosphere.service';
 import { applyTakramCloudCameraHeightFix } from './takram-clouds-compat';
+import {
+  applyTakramCylinderClouds,
+  type TakramCylinderHazeModel,
+} from './takram-cylinder-clouds-compat';
 
 /** Declarative adapter for Takram's framework-independent CloudsEffect. */
 @Component({
@@ -67,11 +72,28 @@ export class TakramCloudsComponent
   readonly turbulence = input(true);
   readonly haze = input(true);
   readonly lightShafts = input(true);
+  /** Skips the expensive cloud march while retaining the effect instance. */
+  readonly skipRendering = input(false);
   readonly localWeatherVelocity = input<Vector2Tuple>([0, 0]);
   /** Globe-UV tiling. Scale with planet radius to preserve physical feature size. */
   readonly localWeatherRepeat = input<Vector2Tuple>([100, 100]);
+  readonly shapeRepeat = input<Vector3Tuple>([0.0003, 0.0003, 0.0003]);
+  readonly maxIterationCount = input<number | undefined>(undefined);
+  readonly maxIterationCountToSun = input<number | undefined>(undefined);
   /** Number of cloud-shadow cascades supported by Takram (1–4). */
   readonly shadowCascadeCount = input<number | undefined>(undefined);
+  /** Enables the O'Neill-cylinder POC (X axis, camera inside the habitat). */
+  readonly cylindrical = input(false);
+  /** Inner wall radius in world units when cylindrical mode is enabled. */
+  readonly cylinderRadius = input(10_000);
+  readonly cylinderHazeModel = input<TakramCylinderHazeModel>('bounded-v2');
+  /** Artistic direct-light multiplier used by the cylindrical cloud shader. */
+  readonly sunLightScale = input(1);
+  readonly skyLightScale = input(1);
+  readonly groundBounceScale = input(1);
+  readonly hazeDensityScale = input(1);
+  readonly hazeScaleHeight = input(2_000);
+  readonly maxRayDistance = input<number | undefined>(undefined);
 
   private clouds: CloudsEffect | undefined;
   /** The most recent default-asset loading failure, if any. */
@@ -95,9 +117,17 @@ export class TakramCloudsComponent
         turbulence: this.turbulence(),
         haze: this.haze(),
         lightShafts: this.lightShafts(),
+        skipRendering: this.skipRendering(),
+        skyLightScale: this.skyLightScale(),
+        groundBounceScale: this.groundBounceScale(),
       };
       const shadowCascadeCount = this.shadowCascadeCount();
       const localWeatherRepeat = this.localWeatherRepeat();
+      const shapeRepeat = this.shapeRepeat();
+      const cylindrical = this.cylindrical();
+      const cylinderRadius = this.cylinderRadius();
+      const sunLightScale = this.sunLightScale();
+      const cylinderHazeModel = this.cylinderHazeModel();
 
       if (values.length > 4) {
         throw new Error('Takram clouds support at most four cloud layers.');
@@ -105,11 +135,24 @@ export class TakramCloudsComponent
       if (!this.clouds) return;
 
       Object.assign(this.clouds, settings);
+      this.clouds.skyLightScale = this.skyLightScale();
+      this.clouds.groundBounceScale = this.groundBounceScale();
+      this.clouds.clouds.hazeDensityScale = this.hazeDensityScale();
+      this.clouds.clouds.hazeExponent = 1 / this.hazeScaleHeight();
+      const maxRayDistance = this.maxRayDistance();
+      if (maxRayDistance !== undefined) {
+        this.clouds.clouds.maxRayDistance = maxRayDistance;
+      }
       this.clouds.localWeatherVelocity.copy(
         new Vector2(...this.localWeatherVelocity()),
       );
       this.clouds.localWeatherRepeat.set(...localWeatherRepeat);
-      if (shadowCascadeCount !== undefined) {
+      this.clouds.shapeRepeat.set(...shapeRepeat);
+      if (cylindrical) {
+        applyTakramCylinderClouds(this.clouds, cylinderRadius, sunLightScale, cylinderHazeModel);
+        this.clouds.shadow.cascadeCount = 1;
+        this.applyCylinderRenderSettings(this.clouds);
+      } else if (shadowCascadeCount !== undefined) {
         this.clouds.shadow.cascadeCount =
           validateShadowCascadeCount(shadowCascadeCount);
       }
@@ -135,7 +178,19 @@ export class TakramCloudsComponent
       },
       this.atmosphere?.atmosphere,
     );
-    applyTakramCloudCameraHeightFix(this.clouds);
+    if (this.cylindrical()) {
+      applyTakramCylinderClouds(
+        this.clouds,
+        this.cylinderRadius(),
+        this.sunLightScale(),
+        this.cylinderHazeModel(),
+      );
+      // Takram always renders its shadow array target, so it must retain at
+      // least one layer even though cylinder-aware shadows are not supported.
+      this.clouds.shadow.cascadeCount = 1;
+    } else {
+      applyTakramCloudCameraHeightFix(this.clouds);
+    }
     this.applyInputs(this.clouds);
     this.atmosphere?.registerClouds(this.clouds);
     this.loadAssets(this.clouds, this.assetBaseUrl(), this.customTextures());
@@ -163,10 +218,32 @@ export class TakramCloudsComponent
     clouds.turbulence = this.turbulence();
     clouds.haze = this.haze();
     clouds.lightShafts = this.lightShafts();
+    clouds.skipRendering = this.skipRendering();
+    clouds.skyLightScale = this.skyLightScale();
+    clouds.groundBounceScale = this.groundBounceScale();
+    clouds.clouds.hazeDensityScale = this.hazeDensityScale();
+    clouds.clouds.hazeExponent = 1 / this.hazeScaleHeight();
+    const maxRayDistance = this.maxRayDistance();
+    if (maxRayDistance !== undefined) {
+      clouds.clouds.maxRayDistance = maxRayDistance;
+    }
     clouds.localWeatherVelocity.set(...this.localWeatherVelocity());
     clouds.localWeatherRepeat.set(...this.localWeatherRepeat());
+    clouds.shapeRepeat.set(...this.shapeRepeat());
+    if (this.cylindrical()) {
+      clouds.correctAltitude = false;
+      applyTakramCylinderClouds(
+        clouds,
+        this.cylinderRadius(),
+        this.sunLightScale(),
+        this.cylinderHazeModel(),
+      );
+      this.applyCylinderRenderSettings(clouds);
+    }
     const shadowCascadeCount = this.shadowCascadeCount();
-    if (shadowCascadeCount !== undefined) {
+    if (this.cylindrical()) {
+      clouds.shadow.cascadeCount = 1;
+    } else if (shadowCascadeCount !== undefined) {
       clouds.shadow.cascadeCount =
         validateShadowCascadeCount(shadowCascadeCount);
     }
@@ -176,6 +253,21 @@ export class TakramCloudsComponent
       throw new Error('Takram clouds support at most four cloud layers.');
     }
     clouds.cloudLayers.reset().set(layers.map((layer) => layer.toCloudLayer()));
+  }
+
+  private applyCylinderRenderSettings(clouds: CloudsEffect): void {
+    // These match the known-good fork POC. Spherical LUT sampling and the
+    // shadow-length attachment are not meaningful for the cylinder adapter.
+    clouds.clouds.accurateSunSkyLight = false;
+    clouds.shadow.maxIterationCount = 0;
+    const maxIterationCount = this.maxIterationCount();
+    if (maxIterationCount !== undefined) {
+      clouds.clouds.maxIterationCount = maxIterationCount;
+    }
+    const maxIterationCountToSun = this.maxIterationCountToSun();
+    if (maxIterationCountToSun !== undefined) {
+      clouds.clouds.maxIterationCountToSun = maxIterationCountToSun;
+    }
   }
 
   private customTextures() {

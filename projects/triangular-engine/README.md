@@ -36,8 +36,8 @@ The library is modularized into several secondary entry points (sub-libraries) s
 - Declarative Object3D graph with inputs for `position`, `rotation`, `scale`, and common options
 - Rapier 3D physics integration: rigid bodies, colliders, joints, instanced rigid bodies
 - GLTF loader with optional BVH acceleration for fast raycasts
-- Engine UI helpers: stats overlay, scene tree, portal-based HUD overlay system
-- Signals-based services: engine tick, inputs, camera switching, engine portal system
+- Engine UI helpers: stats overlay, scene tree, Daxur Studios portal-layout HUD system
+- Signals-based services: engine tick, inputs, and camera switching
 - Stacking overlays: support top, bottom, left sidebar, right sidebar, main, modal, and notification layers
 
 ## Install
@@ -192,7 +192,7 @@ All components are standalone and can be nested inside `<scene>`.
 - GLTF: `gltf`
 - CSS: `css2d`, `css3d`
 - Physics: `physics`, `rigidBody`, `collider` family, `fixedJoint`, `sphericalJoint`, `instancedRigidBody`
-- Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `engine-portal-outlet`, `[enginePortal]`, `[raycast]`
+- Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `portalOutlet`, `[portalTarget]`, `[raycast]`
 
 Example mesh:
 
@@ -299,31 +299,31 @@ List of selectors available in templates (not exhaustive):
 - GLTF: `gltf`
 - CSS Renderers: `css2d`, `css3d`
 - Physics: `physics`, `rigidBody`, `collider` family, `cuboidCollider`, `ballCollider`, `capsuleCollider`, `cylinderCollider`, `coneCollider`, `fixedJoint`, `sphericalJoint`, `instancedRigidBody`
-- Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `engine-portal-outlet`, `[enginePortal]`, `[raycast]`
+- Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `portalOutlet`, `[portalTarget]`, `[raycast]`
 
-## Engine Portals (Dynamic UI Overlay System)
+## Portal Layout (Dynamic UI Overlay System)
 
-`triangular-engine` provides a portal-based UI stacking system (similar to `Daxur-Daemon`) allowing any component/page to register controls on top of the 3D HUD dynamically.
+`triangular-engine` uses `@daxur-studios/portal-layout` for its UI stacking system. `EngineModule` exports the underlying `portalTarget` directive and `portalOutlet` component, so consumer templates use their library-native selector names.
 
 ### How to use:
 
-In any child component or page that lives inside the engine context, register templates using `<ng-template enginePortal="area">`. They will be automatically rendered in the appropriate zone and cleaned up on destroy.
+In any child component or page that lives inside the engine context, register templates using `<ng-template portalTarget="area">`. They are rendered in the matching `<engine-ui>` outlet and cleaned up on destroy.
 
 ```html
 <!-- Inside a consumer component -->
-<ng-template enginePortal="top" lane="content" [order]="1">
+<ng-template portalTarget="toolbarTop" lane="content" [order]="1">
   <button (click)="doSomething()">My HUD Action</button>
 </ng-template>
 
-<ng-template enginePortal="left" lane="before">
+<ng-template portalTarget="leftSidebar" lane="content">
   <div class="my-sidebar-list">
     <h3>Configuration</h3>
   </div>
 </ng-template>
 ```
 
-- **Areas**: `'top' | 'bottom' | 'left' | 'right' | 'main' | 'modal' | 'notification'`
-- **Lanes**: `'before' | 'content' | 'after'` (governs sorting layout order within the area)
+- **Engine UI areas**: `'toolbarTop' | 'toolbarBottom' | 'leftSidebar' | 'rightSidebar' | 'main' | 'overlay' | 'modal' | 'notification'`
+- **Sidebar/toolbar lanes**: use `'content'`; the overlay outlet additionally supports `'topStart' | 'topEnd' | 'topCenter' | 'center' | 'bottomStart' | 'bottomEnd' | 'bottomCenter'`
 - **Order**: numerical sorting priority within the lane.
 
 ## Assets & Loading
