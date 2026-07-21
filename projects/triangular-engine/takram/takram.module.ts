@@ -3,6 +3,7 @@ import { TakramCloudLayerComponent, TakramCloudsComponent } from './clouds';
 import {
   TakramAerialPerspectiveComponent,
   TakramAtmosphereComponent,
+  TakramCylinderAtmosphereComponent,
   TakramSkyLightComponent,
   TakramSunLightComponent,
 } from './atmosphere';
@@ -10,6 +11,7 @@ import {
 const components = [
   TakramAtmosphereComponent,
   TakramAerialPerspectiveComponent,
+  TakramCylinderAtmosphereComponent,
   TakramSkyLightComponent,
   TakramSunLightComponent,
   TakramCloudLayerComponent,

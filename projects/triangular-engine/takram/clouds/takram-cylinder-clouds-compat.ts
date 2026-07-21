@@ -250,7 +250,12 @@ vec3 getCloudSurfaceNormal(const vec3 position) {
   const float cosTheta,
   const float shadowLength
 ) {
-  float modulation = remapClamped(coverage, 0.2, 0.4);
+  // The legacy cloud shader used coverage to fade haze too, which made the
+  // cylinder atmosphere disappear whenever cloud coverage was reduced.
+  // Bounded v2 treats atmospheric haze as an independent medium.
+  float modulation = cylinderHazeModel == 1
+    ? 1.0
+    : remapClamped(coverage, 0.2, 0.4);
   const int SAMPLE_COUNT = 12;
   float stepSize = maxRayDistance / float(SAMPLE_COUNT);
   float opticalDepth = 0.0;

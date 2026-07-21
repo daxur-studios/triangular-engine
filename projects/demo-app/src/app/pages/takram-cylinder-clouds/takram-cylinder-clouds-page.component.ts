@@ -7,9 +7,9 @@ import {
   signal,
 } from '@angular/core';
 import {
-  Color,
   DataTexture,
   DoubleSide,
+  EquirectangularReflectionMapping,
   LinearMipmapLinearFilter,
   Matrix4,
   NoToneMapping,
@@ -65,6 +65,9 @@ export class TakramCylinderCloudsPageComponent {
   readonly atmosphereDensity = signal(0.00006);
   readonly atmosphereScaleHeight = signal(1_800);
   readonly atmosphereSkyLight = signal(1);
+  readonly atmosphereEnabled = signal(true);
+  readonly atmosphereScatteringDensity = signal(0.000008);
+  readonly atmosphereIntensity = signal(0.12);
   readonly wireframe = signal(false);
   readonly sunAngle = signal(120);
   readonly sunAxialPosition = signal(0.6);
@@ -84,22 +87,107 @@ export class TakramCylinderCloudsPageComponent {
     new Vector3(...this.sunPosition()).normalize(),
   );
   readonly meadowTexture = createMeadowTexture(this.radius, this.length, 120);
+  readonly starTexture = createStarTexture();
 
   constructor() {
     this.cloudTextures.source.set('procedural');
     const engine = inject(EngineService);
     const destroyRef = inject(DestroyRef);
     const previousBackground = engine.scene.background;
-    engine.scene.background = new Color('#07111f');
+    engine.scene.background = this.starTexture;
     destroyRef.onDestroy(() => {
       engine.scene.background = previousBackground;
       this.meadowTexture.dispose();
+      this.starTexture.dispose();
     });
   }
 
   setNumber(target: { value: string }, setter: (value: number) => void): void {
     setter(Number(target.value));
   }
+}
+
+function createStarTexture(): DataTexture {
+  const width = 4096;
+  const height = 2048;
+  const data = new Uint8Array(width * height * 4);
+  let seed = 0x57a25;
+  const random = (): number => {
+    seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+    return seed / 0x1_0000_0000;
+  };
+  // A clean lifted-black background avoids the noisy, low-resolution look of
+  // assigning random brightness independently to every texel.
+  for (let index = 0; index < width * height; index++) {
+    const offset = index * 4;
+    data[offset] = 3;
+    data[offset + 1] = 5;
+    data[offset + 2] = 9;
+    data[offset + 3] = 255;
+  }
+
+  // Place discrete sub-degree stars instead of magnified source pixels. Most
+  // are single-texel points; a small number get a restrained two-pixel halo.
+  const starCount = 7_500;
+  for (let star = 0; star < starCount; ++star) {
+    const x = Math.floor(random() * width);
+    const y = Math.floor(random() * height);
+    const magnitude = random();
+    const brightness = Math.floor(75 + Math.pow(magnitude, 3) * 180);
+    const warm = random() > 0.82;
+    writeStarPixel(
+      data,
+      width,
+      height,
+      x,
+      y,
+      brightness,
+      warm ? 0.88 : 0.96,
+      warm ? 0.7 : 1,
+    );
+    if (magnitude > 0.94) {
+      const halo = Math.floor(brightness * 0.2);
+      writeStarPixel(data, width, height, x - 1, y, halo, 0.95, 1);
+      writeStarPixel(data, width, height, x + 1, y, halo, 0.95, 1);
+      writeStarPixel(data, width, height, x, y - 1, halo, 0.95, 1);
+      writeStarPixel(data, width, height, x, y + 1, halo, 0.95, 1);
+    }
+  }
+  const texture = new DataTexture(
+    data,
+    width,
+    height,
+    RGBAFormat,
+    UnsignedByteType,
+  );
+  texture.mapping = EquirectangularReflectionMapping;
+  texture.colorSpace = SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function writeStarPixel(
+  data: Uint8Array,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  brightness: number,
+  greenScale: number,
+  blueScale: number,
+): void {
+  const wrappedX = (x + width) % width;
+  if (y < 0 || y >= height) return;
+  const offset = (y * width + wrappedX) * 4;
+  data[offset] = Math.max(data[offset], Math.min(255, brightness));
+  data[offset + 1] = Math.max(
+    data[offset + 1],
+    Math.min(255, Math.floor(brightness * greenScale)),
+  );
+  data[offset + 2] = Math.max(
+    data[offset + 2],
+    Math.min(255, Math.floor(brightness * blueScale)),
+  );
 }
 
 function createMeadowTexture(

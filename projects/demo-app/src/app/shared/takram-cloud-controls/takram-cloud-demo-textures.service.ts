@@ -17,7 +17,11 @@ import {
   UnsignedByteType,
 } from 'three';
 
-export type WeatherTextureSource = 'default' | 'custom' | 'procedural';
+export type WeatherTextureSource =
+  | 'default'
+  | 'custom'
+  | 'procedural'
+  | 'checker';
 
 /** Page-scoped, caller-owned textures used to exercise the public cloud API. */
 @Injectable()
@@ -28,6 +32,7 @@ export class TakramCloudDemoTextures {
   readonly threshold = signal(0.5);
 
   private readonly customWeather = createWeatherTexture(256);
+  private readonly checkerWeather = createCheckerWeatherTexture(512, 8);
   private readonly proceduralWeather = new LocalWeather();
 
   readonly selectedTexture = computed<Texture | ProceduralTexture | undefined>(
@@ -37,6 +42,8 @@ export class TakramCloudDemoTextures {
           return this.customWeather;
         case 'procedural':
           return this.proceduralWeather;
+        case 'checker':
+          return this.checkerWeather;
         default:
           return undefined;
       }
@@ -47,6 +54,7 @@ export class TakramCloudDemoTextures {
     this.regenerate();
     inject(DestroyRef).onDestroy(() => {
       this.customWeather.dispose();
+      this.checkerWeather.dispose();
       this.proceduralWeather.dispose();
     });
   }
@@ -81,6 +89,26 @@ export class TakramCloudDemoTextures {
 
     this.customWeather.needsUpdate = true;
   }
+}
+
+function createCheckerWeatherTexture(size: number, cells: number): DataTexture {
+  const texture = createWeatherTexture(size);
+  const data = texture.image.data as Uint8Array;
+  const cellSize = size / cells;
+  for (let y = 0; y < size; ++y) {
+    for (let x = 0; x < size; ++x) {
+      const value = (Math.floor(x / cellSize) + Math.floor(y / cellSize)) % 2
+        ? 255
+        : 0;
+      const offset = (y * size + x) * 4;
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+  texture.needsUpdate = true;
+  return texture;
 }
 
 function createWeatherTexture(size: number): DataTexture {

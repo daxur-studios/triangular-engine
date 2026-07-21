@@ -12,6 +12,14 @@
       <label class="toggle"><input type="checkbox" [checked]="enabled()" (change)="enabled.set($any($event.target).checked)" /> Clouds enabled</label>
       <label class="toggle"><input type="checkbox" [checked]="temporalUpscale()" (change)="temporalUpscale.set($any($event.target).checked)" /> Temporal upscale</label>
       <label class="toggle"><input type="checkbox" [checked]="haze()" (change)="haze.set($any($event.target).checked)" /> Internal haze</label>
+      <label class="toggle"><input type="checkbox" [checked]="atmosphereEnabled()" (change)="atmosphereEnabled.set($any($event.target).checked)" /> Cylinder atmosphere</label>
+      <label>Cloud preset
+        <select [value]="cloudTextures.source()" (change)="cloudTextures.source.set($any($event.target).value)">
+          <option value="default">Default noise</option>
+          <option value="procedural">Procedural noise</option>
+          <option value="checker">Checkerboard</option>
+        </select>
+      </label>
       <label>Haze model
         <select [value]="hazeModel()" (change)="hazeModel.set($any($event.target).value)">
           <option value="bounded-v2">Bounded v2</option>
@@ -29,6 +37,8 @@
       <label>Haze density <output>{{ atmosphereDensity() }}</output><input type="range" min="0" max="0.00015" step="0.000005" [value]="atmosphereDensity()" (input)="setNumber($any($event.target), atmosphereDensity.set.bind(atmosphereDensity))" /></label>
       <label>Haze scale height <output>{{ atmosphereScaleHeight() }} m</output><input type="range" min="250" max="8000" step="250" [value]="atmosphereScaleHeight()" (input)="setNumber($any($event.target), atmosphereScaleHeight.set.bind(atmosphereScaleHeight))" /></label>
       <label>Sky light <output>{{ atmosphereSkyLight() }}</output><input type="range" min="0" max="3" step="0.1" [value]="atmosphereSkyLight()" (input)="setNumber($any($event.target), atmosphereSkyLight.set.bind(atmosphereSkyLight))" /></label>
+      <label>Atmosphere intensity <output>{{ atmosphereIntensity() }}</output><input type="range" min="0" max="3" step="0.05" [value]="atmosphereIntensity()" (input)="setNumber($any($event.target), atmosphereIntensity.set.bind(atmosphereIntensity))" /></label>
+      <label>Air density <output>{{ atmosphereScatteringDensity() }}</output><input type="range" min="0" max="0.00005" step="0.000001" [value]="atmosphereScatteringDensity()" (input)="setNumber($any($event.target), atmosphereScatteringDensity.set.bind(atmosphereScatteringDensity))" /></label>
       <label>Sun angle <output>{{ sunAngle() }}°</output><input type="range" min="0" max="360" step="1" [value]="sunAngle()" (input)="setNumber($any($event.target), sunAngle.set.bind(sunAngle))" /></label>
       <label>Sun axial position <output>{{ sunAxialPosition() }}</output><input type="range" min="-2" max="2" step="0.05" [value]="sunAxialPosition()" (input)="setNumber($any($event.target), sunAxialPosition.set.bind(sunAxialPosition))" /></label>
       <label>Sun intensity <output>{{ sunLightIntensity() }}</output><input type="range" min="0" max="10" step="0.1" [value]="sunLightIntensity()" (input)="setNumber($any($event.target), sunLightIntensity.set.bind(sunLightIntensity))" /></label>
@@ -55,6 +65,9 @@
         <takram-cloud-layer channel="r" [altitude]="altitude()" [height]="cloudHeight()" [densityScale]="densityScale()" [shapeAmount]="0.9" [shapeDetailAmount]="0.8" [coverageFilterWidth]="0.65" [shadow]="false" />
       </takram-clouds>
     </takram-atmosphere>
+    @if (atmosphereEnabled()) {
+      <takram-cylinder-atmosphere [radius]="radius" [halfLength]="length / 2" [density]="atmosphereScatteringDensity()" [scaleHeight]="atmosphereScaleHeight()" [intensity]="atmosphereIntensity()" [sunDirection]="sunDirection()" />
+    }
     <toneMappingEffect />
   </postprocessing-composer>
 </scene>
