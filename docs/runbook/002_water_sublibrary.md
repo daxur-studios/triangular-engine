@@ -393,8 +393,10 @@ inventing a second version — track as a new phase once 004 has them.
 
 ### Phase 1b — Ocean and lake material, low + medium tiers
 
-- [ ] Water material: scrolling detail normals, fresnel, absorption colour,
+- [x] Water material: scrolling detail normals, fresnel, absorption colour,
       depth-texture shoreline fade and depth tint, built on the Phase 1a grid.
+      Shipped as `/water-material-poc`; user-verified 2026-07-22 including
+      under `logarithmicDepthBuffer: true` — see investigation log.
 - [ ] Shore foam band (medium tier) from depth delta.
 - [ ] Bounded mesh (distance-based segment density, no clipmap needed) for
       `water-lake`.
@@ -508,19 +510,28 @@ Exit gate: documented, independently installable, safe to publish.
 | Events              | single object; many tracked objects; tracked object destroyed             |
 | Buoyancy            | float; sink; neutral; long body; sleeping body entering water; flow drift |
 | Quality tiers       | runtime switch low↔medium↔high; reflection on/off                         |
-| Renderer            | WebGL success; WebGPU explicit rejection; logarithmic depth buffer on     |
+| Renderer            | WebGL success; WebGPU explicit rejection; logarithmic depth buffer on ✓  |
 | Packaging           | core-only install; water-only; water+jolt; clean consumer build           |
 
 ## Open questions
 
-- Does the depth-texture requirement (shoreline fade) work in the plain
+- ~~Does the depth-texture requirement (shoreline fade) work in the plain
   forward path without the postprocessing composer, or does `low`/`medium`
-  water already require a depth prepass helper in core? Resolve in Phase 1.
+  water already require a depth prepass helper in core?~~ **Resolved**: yes,
+  in the plain forward path — `WaterDepthPrepass` (`rendering/`) is a small
+  core helper (`scene.overrideMaterial = MeshDepthMaterial` into an offscreen
+  `WebGLRenderTarget` with a `DepthTexture`), called from
+  `EngineService.postTick$`, no `postprocessing` composer involved.
 - Planar reflection with the `postprocessing` composer active: render-order and
   RT interaction need a spike before committing Phase 4's design.
-- Logarithmic depth buffer: runbook 001 showed effect materials silently
+- ~~Logarithmic depth buffer: runbook 001 showed effect materials silently
   mis-reconstructing log depth. Water's depth-based shading must be tested with
-  `logarithmicDepthBuffer: true` early (Phase 1), since BSP planet scenes use it.
+  `logarithmicDepthBuffer: true` early (Phase 1), since BSP planet scenes use it.~~
+  **Resolved 2026-07-22**, see investigation log — `WATER_DEPTH_UNPACK_GLSL`
+  branches on three.js's auto-injected `USE_LOGARITHMIC_DEPTH_BUFFER` define,
+  and four new `WATER_LOGDEPTH_*_GLSL` passthrough chunks wire the water
+  material's own vertex/fragment shaders into three's log-depth encoding so
+  its hardware depth test matches built-in materials. User-verified in-browser.
 - Rapier buoyancy parity: out of scope; is a `water/rapier` entry ever wanted,
   or is Jolt-only acceptable long-term?
 - Should wave presets/quality presets be JSON-serialisable data the consumer
@@ -776,3 +787,69 @@ waterline never depended on the expensive rendering-only detail layer.
   the boundary-radius tests added in the previous entry).
 - **User-verified in-browser 2026-07-22**: "works like a charm!" — both fixes
   confirmed to resolve the reported artifacts; Phase 1a exit gate met.
+
+### 2026-07-22 — Phase 1b material spike built, four bugs fixed, log depth resolved
+
+- Built `/water-material-poc`: `WATER_DETAIL_NORMAL_GLSL` (dual-scroll
+  procedural normal map chop), `WATER_FRESNEL_GLSL`, `WATER_DEPTH_UNPACK_GLSL`
+  + `WATER_DEPTH_FADE_GLSL` (shore fade / absorption tint against a
+  `WaterDepthPrepass` capture), layered on the Phase 1a LOD grid against a
+  static sloped "shore" `PlaneGeometry`. `WaterDepthPrepass` renders the opaque
+  scene depth (water hidden, via `scene.overrideMaterial = MeshDepthMaterial`)
+  into an offscreen `WebGLRenderTarget`/`DepthTexture` each frame from
+  `EngineService.postTick$` — answers the "does depth-texture shading need the
+  postprocessing composer" open question: no.
+- User reported four distinct visual bugs in sequence, each root-caused by
+  reading actual source (three.js internals, not guessed) rather than trial
+  and error:
+  1. **Resolution/UV mismatch** ("water plane moves weirdly vs. the shore,
+     alignment changes with camera"): `uResolution` was set from
+     `engine.width`/`height` (CSS logical pixels) but `gl_FragCoord.xy` is
+     always physical framebuffer pixels — broke `screenUV` whenever
+     `devicePixelRatio > 1`. Fixed via `renderer.getDrawingBufferSize()`.
+  2. **Absorption/colour saturation** ("water is too black"):
+     `absorptionDistance: 5` was too small and `colorDeep: '#04283f'` too
+     close to the scene background after the diffuse term halved it, so deep
+     water visually vanished. Fixed: `absorptionDistance` → 40, `colorDeep` →
+     `'#146090'`, later nudged darker to `'#0e4a73'` per user feedback ("less
+     black now, tune it back just a tiniest bit").
+  3. **Far clip-plane float-precision collapse** ("water only visible through
+     the terrain, invisible everywhere else"): `<orbitControls>` defaults
+     `far` to `Number.MAX_SAFE_INTEGER`; the demo only set `[near]="0.1"`.
+     Packing `near=0.1`/`far≈9e15` into the 32-bit float
+     `waterPerspectiveDepthToViewZ` formula catastrophically cancelled,
+     producing garbage `sceneViewZ` almost everywhere. Fixed with an explicit
+     `[far]="5000"` on the template.
+  4. **Logarithmic depth buffer incompatibility** ("i need it to work with
+     this — the games im making all have this on"): user enabled
+     `webGLRendererParameters: { logarithmicDepthBuffer: true }`. Confirmed by
+     reading `WebGLProgram.js`/`WebGLCapabilities.js`/`WebGLPrograms.js` that
+     three.js auto-injects `#define USE_LOGARITHMIC_DEPTH_BUFFER` into every
+     compiled material — including a raw `ShaderMaterial` — whenever the
+     renderer capability is on; it is not material-gated. Two sub-bugs
+     followed from that: (a) the manual `uSceneDepthTexture` sample (captured
+     via `MeshDepthMaterial`, which log-encodes automatically) needed a
+     log-aware inverse, derived from three's own `logdepthbuf_fragment` chunk
+     (`winZ = log2(1.0 - viewZ) * logDepthBufFC * 0.5` inverted); (b) the
+     water material's own hardware depth write also needed log-encoding via
+     three's `#include <logdepthbuf_*>` chunks, or its depth test against
+     built-in (auto-log-encoded) materials like the shore mesh would be
+     essentially arbitrary at real distances. Fixed in
+     `core/water-shading-glsl.ts`: `WATER_DEPTH_UNPACK_GLSL` now branches on
+     `USE_LOGARITHMIC_DEPTH_BUFFER`; four new exported passthrough constants
+     (`WATER_LOGDEPTH_PARS_VERTEX_GLSL`, `WATER_LOGDEPTH_VERTEX_GLSL`,
+     `WATER_LOGDEPTH_PARS_FRAGMENT_GLSL`, `WATER_LOGDEPTH_FRAGMENT_GLSL`)
+     wrap three's own chunks and are spliced into any consumer's shader
+     strings (done for the demo). No extra uniforms needed —
+     `USE_LOGARITHMIC_DEPTH_BUFFER` and `logDepthBufFC` are both auto-injected
+     by three.js, and the chunks no-op when log depth is off, so this is a
+     library-level fix that benefits every `triangular-engine/water` consumer,
+     not just this demo.
+- Added a wireframe toggle (checkbox in the demo panel) mirroring the existing
+  detail-chop/shore-fade toggles: sets `ShaderMaterial.wireframe` on all LOD
+  level materials plus the shore mesh's `MeshStandardMaterial`, and is applied
+  at construction time so it survives ring-count rebuilds.
+- **User-verified in-browser 2026-07-22**: "ok it works" (far-plane fix), "log
+  depth works" (log-depth fix) — both confirmed live, not just build-checked.
+  This resolves both the "depth-texture without composer" and "logarithmic
+  depth buffer" open questions above.

@@ -57,6 +57,14 @@
           />
           Shore fade / depth tint
         </label>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="wireframe()"
+            (change)="toggleWireframe()"
+          />
+          Wireframe
+        </label>
       </div>
 
       <p class="blurb note">

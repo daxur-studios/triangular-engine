@@ -200,6 +200,7 @@ export class WaterMaterialPocPageComponent {
   readonly activePreset = signal<PresetKey>('oceanSwell');
   readonly detailChop = signal(true);
   readonly shoreFade = signal(true);
+  readonly wireframe = signal(false);
   readonly ringCount = signal(DEFAULT_RING_COUNT);
   readonly minRingCount = MIN_RING_COUNT;
   readonly maxRingCount = MAX_RING_COUNT;
@@ -311,6 +312,15 @@ export class WaterMaterialPocPageComponent {
     }
   }
 
+  toggleWireframe(): void {
+    this.wireframe.update((v) => !v);
+    for (const material of this.levelMaterials) {
+      material.wireframe = this.wireframe();
+    }
+    (this.shoreMesh.material as MeshStandardMaterial).wireframe =
+      this.wireframe();
+  }
+
   /** Rebuilds the LOD grid at a new ring count — the level count itself changes, so this disposes and recreates every level's mesh/material rather than patching uniforms in place. */
   setRingCount(value: number | string): void {
     const clamped = Math.min(
@@ -359,6 +369,7 @@ export class WaterMaterialPocPageComponent {
         side: DoubleSide,
         transparent: true,
         depthWrite: false,
+        wireframe: this.wireframe(),
       });
       this.levelMaterials.push(material);
 
