@@ -333,3 +333,12 @@ broadly stage this workspace.
   low blue ocean/lake basins, gently varying green meadow, and high ridged
   brown mountains. This is the visual language to validate before the same
   field and streaming owner replace the fixed active-cylinder integration.
+- Added a 1×–4× streaming-radius diagnostic. The default 1× preserves the
+  accepted selection; larger values expand both bounded root coverage and the
+  refinement area on the infinite plane, while sphere and cylinder retain
+  complete root coverage and expand only their camera-near detail area.
+- Added independent 0.5×–3× body-size controls for sphere and cylinder testing.
+  These reconstruct the actual domain dimensions and procedural field scale;
+  the cylinder keeps its proportions by scaling radius and length together.
+  Camera position and LOD distances scale with the body so visual framing and
+  relative selection behavior remain comparable between sizes.

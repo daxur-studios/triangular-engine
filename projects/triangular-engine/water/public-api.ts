@@ -11,3 +11,6 @@ export * from './core/gerstner-glsl';
 export * from './core/water-lod-grid';
 export * from './core/water-lod-glsl';
 export * from './core/water-lod-patch-geometry';
+export * from './core/water-shading-glsl';
+export * from './rendering/procedural-normal-map';
+export * from './rendering/water-depth-prepass';

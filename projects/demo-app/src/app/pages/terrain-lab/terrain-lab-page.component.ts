@@ -38,6 +38,7 @@ import {
 const PATCH_SIZE_M = 512;
 const PATCH_RESOLUTION = 24;
 const PATCH_RADIUS = 2;
+const MAX_STREAMING_RADIUS = 4;
 const MAX_LOD_LEVEL = 3;
 const LOD_SKIRT_DEPTH_M = 35;
 const LARGE_COORDINATE_M = 1_000_000_000;
@@ -88,13 +89,11 @@ class SphereTerrainLabField implements ITerrainField {
   readonly minElevationM = -90;
   readonly maxElevationM = 190;
 
+  constructor(private readonly radiusM: number) {}
+
   sample([x, y, z]: TerrainVector3): ITerrainFieldSample {
     return {
-      elevationM: biomeElevation(
-        x * SPHERE_RADIUS_M,
-        z * SPHERE_RADIUS_M,
-        y * 3,
-      ),
+      elevationM: biomeElevation(x * this.radiusM, z * this.radiusM, y * 3),
     };
   }
 
@@ -117,12 +116,14 @@ class CylinderTerrainLabField implements ITerrainField {
   readonly minElevationM = -90;
   readonly maxElevationM = 190;
 
+  constructor(private readonly radiusM: number) {}
+
   sample([axialM, radialY, radialZ]: TerrainVector3): ITerrainFieldSample {
     const angle = Math.atan2(radialZ, radialY);
     return {
       elevationM: biomeElevation(
         axialM,
-        angle * CYLINDER_RADIUS_M,
+        angle * this.radiusM,
         Math.sin(angle * 2),
       ),
     };
@@ -182,6 +183,9 @@ export class TerrainLabPageComponent {
   readonly largeCoordinates = signal(false);
   readonly patchBorders = signal(true);
   readonly wireframe = signal(false);
+  readonly streamingRadius = signal(1);
+  readonly sphereSizeScale = signal(1);
+  readonly cylinderSizeScale = signal(1);
   readonly patchCount = signal(0);
   readonly coordinateLabel = signal('0 m');
   readonly centrePatchLabel = signal('0, 0');
@@ -190,15 +194,15 @@ export class TerrainLabPageComponent {
   private readonly engine = inject(EngineService);
   private readonly domain = new PlaneTerrainDomain(PATCH_SIZE_M);
   private readonly field = new TerrainLabField();
-  private readonly sphereDomain = new SphereTerrainDomain(SPHERE_RADIUS_M);
-  private readonly sphereField = new SphereTerrainLabField();
-  private readonly cylinderDomain = new CylinderTerrainDomain({
+  private sphereDomain = new SphereTerrainDomain(SPHERE_RADIUS_M);
+  private sphereField = new SphereTerrainLabField(SPHERE_RADIUS_M);
+  private cylinderDomain = new CylinderTerrainDomain({
     radiusM: CYLINDER_RADIUS_M,
     lengthM: CYLINDER_LENGTH_M,
     levelZeroAngularPatchCount: CYLINDER_ANGULAR_PATCHES,
     levelZeroAxialPatchCount: CYLINDER_AXIAL_PATCHES,
   });
-  private readonly cylinderField = new CylinderTerrainLabField();
+  private cylinderField = new CylinderTerrainLabField(CYLINDER_RADIUS_M);
   private readonly terrain = new Group();
   private readonly orientationGrid = new GridHelper(
     ORIENTATION_GRID_SIZE_M,
@@ -259,6 +263,58 @@ export class TerrainLabPageComponent {
     this.patchBorders.update((enabled) => !enabled);
     for (const patch of this.patches.values())
       patch.borderMaterial.visible = this.patchBorders();
+  }
+
+  setStreamingRadius(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    this.streamingRadius.set(
+      Math.max(1, Math.min(MAX_STREAMING_RADIUS, Math.round(value))),
+    );
+    this.selectionSignature = '';
+    this.updateCameraSelection();
+  }
+
+  bodySizeScale(): number {
+    return this.shape() === 'sphere'
+      ? this.sphereSizeScale()
+      : this.cylinderSizeScale();
+  }
+
+  bodySizeLabel(): string {
+    if (this.shape() === 'sphere') {
+      return `${Math.round(SPHERE_RADIUS_M * this.sphereSizeScale()).toLocaleString()} m radius`;
+    }
+    if (this.shape() === 'cylinder') {
+      return `${Math.round(CYLINDER_RADIUS_M * this.cylinderSizeScale()).toLocaleString()} m radius × ${Math.round(CYLINDER_LENGTH_M * this.cylinderSizeScale()).toLocaleString()} m long`;
+    }
+    return 'Unbounded';
+  }
+
+  setBodySizeScale(event: Event): void {
+    if (this.shape() === 'plane') return;
+    const nextScale = Math.max(
+      0.5,
+      Math.min(3, Number((event.target as HTMLInputElement).value)),
+    );
+    const previousScale = this.bodySizeScale();
+    if (this.shape() === 'sphere') {
+      this.sphereSizeScale.set(nextScale);
+      const radiusM = SPHERE_RADIUS_M * nextScale;
+      this.sphereDomain = new SphereTerrainDomain(radiusM);
+      this.sphereField = new SphereTerrainLabField(radiusM);
+    } else {
+      this.cylinderSizeScale.set(nextScale);
+      const radiusM = CYLINDER_RADIUS_M * nextScale;
+      this.cylinderDomain = new CylinderTerrainDomain({
+        radiusM,
+        lengthM: CYLINDER_LENGTH_M * nextScale,
+        levelZeroAngularPatchCount: CYLINDER_ANGULAR_PATCHES,
+        levelZeroAxialPatchCount: CYLINDER_AXIAL_PATCHES,
+      });
+      this.cylinderField = new CylinderTerrainLabField(radiusM);
+    }
+    this.engine.camera.position.multiplyScalar(nextScale / previousScale);
+    this.rebuild();
   }
 
   private rebuild(): void {
@@ -333,14 +389,14 @@ export class TerrainLabPageComponent {
       this.domain,
       worldX,
       worldZ,
-      PATCH_RADIUS,
+      PATCH_RADIUS * this.streamingRadius(),
     );
     return selectAdaptiveTerrainPatches(this.domain, {
       roots,
       cameraWorldM: [worldX, this.engine.camera.position.y, worldZ],
       getLevel: (address) => address.level,
       maxLevel: MAX_LOD_LEVEL,
-      refinementDistanceM: 1_150,
+      refinementDistanceM: 1_150 * this.streamingRadius(),
     });
   }
 
@@ -360,7 +416,8 @@ export class TerrainLabPageComponent {
       ],
       getLevel: (address) => address.level,
       maxLevel: MAX_LOD_LEVEL,
-      refinementDistanceM: 1_600,
+      refinementDistanceM:
+        1_600 * this.streamingRadius() * this.sphereSizeScale(),
     });
   }
 
@@ -382,7 +439,8 @@ export class TerrainLabPageComponent {
       ],
       getLevel: (address) => address.level,
       maxLevel: MAX_LOD_LEVEL,
-      refinementDistanceM: 1_400,
+      refinementDistanceM:
+        1_400 * this.streamingRadius() * this.cylinderSizeScale(),
     });
   }
 
@@ -553,8 +611,8 @@ export class TerrainLabPageComponent {
         shape === 'plane'
           ? y
           : shape === 'sphere'
-            ? Math.hypot(x, y, z) - SPHERE_RADIUS_M
-            : CYLINDER_RADIUS_M - Math.hypot(y, z);
+            ? Math.hypot(x, y, z) - SPHERE_RADIUS_M * this.sphereSizeScale()
+            : CYLINDER_RADIUS_M * this.cylinderSizeScale() - Math.hypot(y, z);
       if (elevation < -25) {
         color.copy(ocean);
       } else if (elevation < 45) {

@@ -74,4 +74,11 @@ export const routes: Routes = [
         ({ WaterLodPocPageComponent }) => WaterLodPocPageComponent,
       ),
   },
+  {
+    path: 'water-material-poc',
+    loadComponent: () =>
+      import('./pages/water-material-poc/water-material-poc-page.component').then(
+        ({ WaterMaterialPocPageComponent }) => WaterMaterialPocPageComponent,
+      ),
+  },
 ];

@@ -1,0 +1,60 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Water material POC controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small>triangular-engine/water — Phase 1b material spike</small>
+        </div>
+        <strong>Shading: detail chop, fresnel, depth-texture shore fade</strong>
+      </header>
+
+      <p class="blurb">
+        Same Phase 1a LOD grid, now shaded: <code>waterDetailNormal</code>
+        scrolls two copies of a procedurally-generated tileable normal map
+        for fine chop (never geometry — see the Phase 0 finding), and
+        <code>WaterDepthPrepass</code> captures the opaque shore's depth
+        (water hidden) each frame so the shore fade / colour absorption react
+        to the real slope, not a fixed distance.
+      </p>
+
+      <nav aria-label="Wave preset">
+        @for (key of presetKeys; track key) {
+          <button
+            [class.active]="activePreset() === key"
+            (click)="selectPreset(key)"
+          >
+            {{ presetLabels[key] }}
+          </button>
+        }
+      </nav>
+
+      <div class="actions">
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="detailChop()"
+            (change)="toggleDetailChop()"
+          />
+          Detail chop
+        </label>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="shoreFade()"
+            (change)="toggleShoreFade()"
+          />
+          Shore fade / depth tint
+        </label>
+      </div>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="initialCameraPosition"
+    [target]="initialTarget"
+    [near]="0.1"
+  />
+  <ambientLight [intensity]="1.6" />
+  <directionalLight [position]="[10, 20, 12]" [intensity]="2.5" />
+</scene>
