@@ -707,3 +707,72 @@ waterline never depended on the expensive rendering-only detail layer.
   Spherical/planetary curvature remains out of scope for this runbook's
   Phase 1a (flat clipmap only); revisit once 1a proves out and 004 has a
   sphere adapter to compare against.
+
+### 2026-07-22 — Ring-boundary overlap fixed via fragment discard
+
+- User reported, with the level-tint debug toggle, that the three innermost
+  ring boundaries (levels 1↔2, 2↔3, 3↔4) visibly double-rendered — patches of
+  one level bleeding into another — while the outermost boundary (4↔5) looked
+  correct. Confirmed this was two literally-overlapping `InstancedMesh`
+  levels z-fighting, not a shading artifact: `computeWaterLodLevels` shrinks
+  each ring's inner hole by one whole patch as a safety margin (documented in
+  its own header comment), which was previously assumed "harmless" — true
+  only where nothing distinguishes the two layers, false here because
+  neighbouring levels have different tessellation density over the same
+  world area, so the overlap is visible in the sea material.
+- Considered three options with the user: (1) tighten the existing approach
+  to be geometrically non-overlapping, (2) a true single-buffer geometry
+  clipmap (Losasso-Hoppe style), (3) leave/mask it. Initially leaned toward
+  (2), then corrected that framing before implementing: real CDLOD (Strugar,
+  Unreal terrain) does **not** use one combined vertex buffer either — it
+  keeps per-level draw calls and gets seamlessness from non-overlapping
+  footprint selection plus boundary-only vertex morphing. Put the corrected
+  choice to the user via `AskUserQuestion`; user picked "Proper CDLOD
+  (non-overlapping rings)" over a true single-buffer clipmap.
+- While deriving the non-overlapping footprint math, found that exact
+  non-overlap is actually impossible: each level snaps its own centre to the
+  camera independently (`round(camera / patchWorldSize)`), so a fixed hole
+  size that avoids overlap in the worst-case drift leaves a gap in the
+  best-case drift, and vice versa — there is no single hole size that is
+  simultaneously gap-free and overlap-free under independent snapping.
+- Resolved by keeping the geometry overlapping (as it already was) but adding
+  a hard **fragment-discard ownership rule**: each level's fragment shader
+  discards any fragment outside the exact world-space annulus it owns, via
+  a new `computeWaterLodBoundaryRadius(level, options)` (`water-lod-grid.ts`)
+  and `WATER_LOD_CULL_GLSL` (`water-lod-glsl.ts`). The boundary radius is the
+  midpoint between the finer level's worst-case-guaranteed solid radius and
+  the coarser level's worst-case-guaranteed hole radius, so both sides keep
+  a safety margin and exactly one level ever shades any given world point.
+  Morph end distance was changed to match each level's own outer cull
+  radius (rather than its raw geometric edge), so the last fragment a level
+  draws is already phase-aligned with whoever takes over from there.
+- Added 3 unit tests for `computeWaterLodBoundaryRadius` (rejects `level < 1`;
+  radius doubles per level; sits strictly between the finer level's true edge
+  and the coarser level's hole edge). `ng test triangular-engine`: 61/61 pass.
+
+### 2026-07-22 — Ring-corner black voids fixed via Chebyshev distance
+
+- User reported black voids at the four corners where ring boundaries should
+  stitch together, immediately after the overlap fix above landed.
+- Root cause: `computeWaterLodLevels` places axis-aligned **square** ring
+  holes/footprints (independent `|dx| < threshold` and `|dz| < threshold`
+  checks), but `waterLodMorph`/`waterLodCull` tested against
+  `computeWaterLodBoundaryRadius` using Euclidean `distance()` — a circle.
+  Along the diagonals a square's true edge sits up to √2× farther from
+  centre than along an axis, so the circular cull radius (sized correctly
+  for the axis-aligned worst case) discarded the finer level's fragments at
+  the corners before the coarser level's square hole actually had geometry
+  there, leaving an uncovered gap.
+- Fixed by switching both GLSL functions (`water-lod-glsl.ts`) and the demo
+  page's duplicate `vMorph` debug-varying calculation
+  (`water-lod-poc-page.component.ts`) from Euclidean to Chebyshev
+  (L-infinity, `max(|dx|, |dz|)`) distance, matching the square shape
+  exactly in every direction. No change was needed to
+  `computeWaterLodBoundaryRadius`'s numeric formula — its bounds were already
+  derived per-axis and become exact/tight under the Chebyshev metric; only
+  the JSDoc was updated to state the required metric explicitly. Caught and
+  removed a broken, unused leftover GLSL constant from a false-start during
+  this edit before it landed. `ng test triangular-engine`: 63/63 pass (+2 for
+  the boundary-radius tests added in the previous entry).
+- **User-verified in-browser 2026-07-22**: "works like a charm!" — both fixes
+  confirmed to resolve the reported artifacts; Phase 1a exit gate met.
