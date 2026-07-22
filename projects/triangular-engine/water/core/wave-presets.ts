@@ -44,7 +44,7 @@ export const OCEAN_SWELL_PRESET: WaterWavePreset = {
   ],
 };
 
-/** Heavy, steep seas. Intentionally near the steepness-sum warning threshold. */
+/** Heavy, steep seas. */
 export const STORM_PRESET: WaterWavePreset = {
   name: 'storm',
   waves: [

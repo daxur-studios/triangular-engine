@@ -73,8 +73,8 @@ Game-facing queries and events:
 ```ts
 const water = inject(WaterService);
 water.sample(position); // → { body, surfaceHeight, depth, flowVelocity, submerged }
-water.track(object3D);  // → { entered$, exited$, submergedFraction: Signal<number> }
-water.cameraState;      // Signal<'above' | 'crossing' | 'below'>
+water.track(object3D); // → { entered$, exited$, submergedFraction: Signal<number> }
+water.cameraState; // Signal<'above' | 'crossing' | 'below'>
 ```
 
 ## The one decision to make now: a single `WaterSurface` model
@@ -176,15 +176,25 @@ One material, tier-gated features via shader defines. Unreal's water is the
 design reference (water body components + shared wave data + one water zone /
 registry + buoyancy probes), adapted to what WebGL/three.js does well:
 
-| Feature | low | medium | high |
-| --- | --- | --- | --- |
-| Wave displacement | normal maps only (flat mesh) | Gerstner vertex displacement | Gerstner, more octaves |
-| Detail normals | 2 scrolling normal maps | 2 scrolling normal maps | + distance-blended detail layer |
-| Reflection | environment map / sky colour | environment map + fresnel | planar reflection (Reflector-style RT) |
-| Refraction / below-surface colour | flat absorption colour | scene-colour distortion via screen copy | scene-colour distortion via screen copy |
-| Depth-based colour + shore fade | ✓ (needs depth texture) | ✓ | ✓ |
-| Shore foam band | — | ✓ (depth-delta driven) | ✓ + wave-crest foam |
-| Caustics | — | — | fake projected caustics (stretch goal) |
+| Feature                           | low                          | medium                                   | high                                            |
+| --------------------------------- | ---------------------------- | ---------------------------------------- | ----------------------------------------------- |
+| Wave displacement                 | normal maps only (flat mesh) | Gerstner vertex displacement (2-3 waves) | Gerstner (2-3 waves)                            |
+| Fine chop                         | —                            | scrolling detail normal maps             | scrolling detail normal maps, tighter tiling    |
+| Reflection                        | environment map / sky colour | environment map + fresnel                | screen-space reflection, falling back to planar |
+| Refraction / below-surface colour | flat absorption colour       | scene-colour distortion via screen copy  | scene-colour distortion via screen copy         |
+| Depth-based colour + shore fade   | ✓ (needs depth texture)      | ✓                                        | ✓                                               |
+| Foam                              | shore band only              | shore band + ambient surface foam        | + whitecap/breaking foam at crests              |
+| Caustics                          | —                            | —                                        | fake projected caustics (stretch goal)          |
+
+**Phase 0 finding, binding for every later phase:** fine chop must come from a
+_texture_ (scrolling detail normal maps, later optionally an FFT height/normal
+field), never from adding more short-wavelength Gerstner waves to the vertex
+grid. A Phase 0 spike tried the latter — layering 5-6 short waves onto an
+80m/220-segment plane — and it read as a faceted diagonal grid, not water,
+because a vertex grid can't resolve wavelengths near its sample spacing
+without visible aliasing; reverted, see the 2026-07-22 log entry. Keep
+Gerstner to 2-4 long, smooth swell waves and put everything higher-frequency
+in shader/texture space instead.
 
 Notes:
 
@@ -251,7 +261,7 @@ step:
    (a local plane approximation of the wave surface, refreshed every tick).
 2. If the body is at or below the surface, call
    `body.ApplyBuoyancyImpulse(surfacePosition, surfaceNormal, buoyancy,
-   linearDrag, angularDrag, fluidVelocity, gravity, deltaTime)` — Jolt computes
+linearDrag, angularDrag, fluidVelocity, gravity, deltaTime)` — Jolt computes
    submerged volume from the body's own shape against that plane, which is
    exactly the pattern in `JoltPhysics.js/Examples/buoyancy.html`.
 3. `fluidVelocity` comes from `getFlow(...)` — zero for oceans/lakes, the flow
@@ -312,19 +322,23 @@ forking the shading or the buoyancy component.
 
 ### Phase 0 — Surface model + entry-point spike
 
-- [ ] Scaffold `projects/triangular-engine/water/` (ng-package.json,
-      public-api.ts, module) and confirm the package builds with the new entry
-      point, plus a nested `water/jolt` entry point stub.
-- [ ] Implement `GerstnerSurface` (`WaterSurface` impl) in plain TS with unit
+- [x] Scaffold `projects/triangular-engine/water/` (ng-package.json,
+      public-api.ts) and confirm the package builds with the new entry point.
+      `water.module.ts` and the nested `water/jolt` entry-point stub are
+      deferred — no components exist yet to put in a module, and Jolt wiring
+      is Phase 3's job; both are trivial to add when needed.
+- [x] Implement `GerstnerSurface` (`WaterSurface` impl) in plain TS with unit
       tests: height/normal continuity, periodicity, flow = 0.
-- [ ] Implement the matching GLSL (vertex displacement from the same wave
+- [x] Implement the matching GLSL (vertex displacement from the same wave
       uniform layout) and a test comparing TS heights against a TS port of the
       GLSL math for a grid of sample points.
-- [ ] Demo page: displaced plane + a marker "buoy" object whose Y and tilt come
-      from CPU `getHeight`/`getNormal` each frame.
+- [x] Demo page: displaced plane + a marker "buoy" object whose Y and tilt come
+      from CPU `getHeight`/`getNormal` each frame. Shipped as
+      `/water-surface-spike` in demo-app with 5 buoys and a 3-preset switcher.
 
 Exit gate: the buoy visibly rides the GPU-displaced waves with no offset —
 proving the single-surface-model premise before anything else is built.
+**Met and user-verified 2026-07-22** — see investigation log.
 
 ### Phase 1 — Ocean and lake, low + medium tiers
 
@@ -399,6 +413,25 @@ Exit gate: a flowing river that looks continuous with a lake at its mouth, and
 physics objects that ride it downstream using only the existing buoyancy
 component.
 
+### Phase 5b — Wakes (later, optional)
+
+Added after a feature-coverage crosswalk against a broader ocean-rendering
+feature list (2026-07-22 log entry) — a moving-body wake was the one gap that
+matters for BSP's actual ask ("rocket moving with 3D water").
+
+- [ ] `water-wake` directive/component attaches to any Object3D; each frame it
+      reads the body's world velocity (already available — Jolt bodies expose
+      it, non-physics objects can supply it directly) and stamps a displacement + foam contribution into a scrolling trail texture behind the body.
+- [ ] The wake texture is sampled by the water material as an additive height
+      and foam-coverage term — it does not change `WaterSurface`'s contract or
+      buoyancy, since a wake is a rendering-only perturbation on top of the
+      shared wave model, not a new physics input.
+- [ ] Multiple simultaneous wakes (e.g. two vessels) composite into the same
+      trail texture without a full-screen cost per wake source.
+
+Exit gate: a body moving across the water leaves a visible, foamy trail that
+fades out behind it and looks continuous with the underlying swell.
+
 ### Phase 6 — Productise
 
 - [ ] Docs page (`projects/triangular-engine/docs/water.md`) + skill update so
@@ -414,18 +447,18 @@ Exit gate: documented, independently installable, safe to publish.
 
 ## Minimum test matrix
 
-| Area | Cases |
-| --- | --- |
-| Surface model | TS vs GLSL height agreement; normals; flow; preset switching |
-| Bodies | ocean only; lake only; overlapping river/lake/ocean priority |
-| LOD grid | camera fly-through at speed; no seams/swimming; horizon skirt |
-| Terrain integration | beach slope; steep cliff; water deeper than far plane |
-| Camera | above/crossing/below transitions; rapid oscillation (hysteresis) |
-| Events | single object; many tracked objects; tracked object destroyed |
-| Buoyancy | float; sink; neutral; long body; sleeping body entering water; flow drift |
-| Quality tiers | runtime switch low↔medium↔high; reflection on/off |
-| Renderer | WebGL success; WebGPU explicit rejection; logarithmic depth buffer on |
-| Packaging | core-only install; water-only; water+jolt; clean consumer build |
+| Area                | Cases                                                                     |
+| ------------------- | ------------------------------------------------------------------------- |
+| Surface model       | TS vs GLSL height agreement; normals; flow; preset switching              |
+| Bodies              | ocean only; lake only; overlapping river/lake/ocean priority              |
+| LOD grid            | camera fly-through at speed; no seams/swimming; horizon skirt             |
+| Terrain integration | beach slope; steep cliff; water deeper than far plane                     |
+| Camera              | above/crossing/below transitions; rapid oscillation (hysteresis)          |
+| Events              | single object; many tracked objects; tracked object destroyed             |
+| Buoyancy            | float; sink; neutral; long body; sleeping body entering water; flow drift |
+| Quality tiers       | runtime switch low↔medium↔high; reflection on/off                         |
+| Renderer            | WebGL success; WebGPU explicit rejection; logarithmic depth buffer on     |
+| Packaging           | core-only install; water-only; water+jolt; clean consumer build           |
 
 ## Open questions
 
@@ -441,6 +474,18 @@ Exit gate: documented, independently installable, safe to publish.
   or is Jolt-only acceptable long-term?
 - Should wave presets/quality presets be JSON-serialisable data the consumer
   can persist (settings menus)? Leaning yes — keep them plain objects.
+- Water masking (hide the surface inside a hull/cave interior by registering
+  mask meshes) — worth adding, likely Phase 4/6; not yet scoped in detail.
+- SSR vs. planar reflection for the high tier: SSR is cheaper (no second scene
+  render) but loses off-screen/occluded reflections; planar is exact but
+  double-renders the scene. Spike both before committing Phase 4's design —
+  SSR as primary with planar (or plain fresnel) as the off-screen fallback is
+  the likely answer.
+- Should `WATER_WAVE_PRESETS` grow into full "environment presets" (wave list
+  + colour + foam coverage + fog distance bundled together, switchable at
+  runtime, e.g. named tropical/stormy/moonlit presets)? Natural fit once
+  Phase 1's material inputs exist; revisit then rather than guessing the
+  shape now.
 
 ## Risks
 
@@ -452,9 +497,36 @@ Exit gate: documented, independently installable, safe to publish.
   acceptable within tested wave-preset ranges, documented limits otherwise.
 - CPU sampling cost if games track hundreds of objects — the tick interval and
   bulk sampling design must keep this linear and cheap.
-- Gerstner self-intersection at high steepness values; presets must clamp
-  steepness sums below 1.
+- Gerstner self-intersection when a preset's summed displacement gradient
+  (Σ steepness·k·amplitude, not raw steepness) approaches 1;
+  `GerstnerSurface` warns when this happens.
 - Same three.js-version sensitivity as every shader-heavy entry point.
+
+## Feature coverage crosswalk
+
+Checked our phased plan against a broader ocean-rendering feature list to spot gaps early.
+
+| Feature | Status |
+| --- | --- |
+| Depth colour, refraction, reflection | Covered — Phase 1 depth-tint/shore-fade, Phase 4 screen-colour refraction + reflection |
+| FFT wind waves + Gerstner swell | Gerstner-only, shared by rendering and physics. FFT detail is a possible Phase 4+ rendering-only add-on, not a replacement — see the chop-must-be-textured finding above |
+| Three-layer foam | Phase 4 retitled to cover shoreline + ambient + whitecap explicitly |
+| Buoyancy, multi-point sampling | Covered — Phase 3, `probePoints` stretch input for long bodies |
+| Underwater fog/distortion + waterline | Covered — Phase 2, this plan's cornerstone feature |
+| Caustics | Existing stretch goal, unscoped beyond that |
+| Boat wake | Gap — added as Phase 5b; the visible signature of "object moving through water" |
+| Infinite water + LOD clipmap | Covered — Phase 1 |
+| Environment presets | Only wave presets exist today; bundling colour/foam/fog into full presets is now an open question |
+| Compile-time quality stripping | Matches intent — shader `#define`-gated tiers, disabled code excluded, not just branched at runtime |
+| Multiplayer determinism | Already true by construction — `WaterSurface` is a pure function of (position, time), so synced clients compute identical waves with no extra sync code |
+| Water masking (hulls/caves) | Gap — added as an open question, likely Phase 4/6 |
+| WebGPU with fallback | WebGL-first throughout, matching the rest of triangular-engine; WebGPU is a reasonable later renderer target |
+
+Net effect: no phase numbers changed except adding Phase 5b (wake) and two
+open questions (masking, SSR-vs-planar); the core architecture — one shared
+analytic `WaterSurface`, texture-space chop, not geometry-space — holds up
+well against a much broader feature list precisely because physics/events/
+waterline never depended on the expensive rendering-only detail layer.
 
 ## References
 
@@ -487,3 +559,61 @@ Exit gate: documented, independently installable, safe to publish.
 - Deferred to later phases/repos: rivers (Phase 5), FFT ocean, wakes/ripples,
   caustics (stretch), WebGPU, and BSP's planetary spherical oceans (BSP plan
   doc to be opened when scheduled).
+
+### 2026-07-22 — Phase 0 spike built and verified
+
+- Scaffolded `projects/triangular-engine/water/` (ng-package.json,
+  public-api.ts, index.ts) plus `core/water-surface.ts` (`WaterSurface`
+  interface, `GerstnerSurface`, `resolveGerstnerWave(s)`) and
+  `core/wave-presets.ts` (calm-lake, ocean-swell, storm).
+- Added `core/gerstner-glsl.ts`: GLSL displacement/normal chunks plus
+  `createGerstnerUniforms`/`updateGerstnerUniforms`, both built from the same
+  `resolveGerstnerWaves` the TS surface uses — the single-source-of-truth
+  guarantee the plan calls for is enforced by sharing that one function, not
+  by convention.
+- Unit tests (`water-surface.spec.ts`, 10 cases) cover: TS `displace()`
+  matching a plain-number port of the GLSL formula for random samples,
+  `getHeight` correctly inverting horizontal displacement back to a requested
+  world XZ, normal unit-length/flat-case correctness, wavelength periodicity,
+  zero flow for still water, and constructor validation. Registered via
+  `angular.json`'s `test.options.include` (karma's default `**/*.spec.ts`
+  glob is resolved relative to the project's `sourceRoot`, i.e. `src/`, not
+  the project root as the schema text implies — secondary entry points need
+  an explicit `../<entry>/**/*.spec.ts` include or their specs never run).
+- Found and fixed a real bug during testing: the constructor's
+  self-intersection warning checked raw summed `steepness` (0..1 per wave)
+  against a `> 1` threshold, but steepness alone doesn't predict folding — the
+  actual risk is the summed _displacement gradient_
+  (Σ steepness·k·amplitude). The old heuristic false-positived on a
+  perfectly well-behaved preset; fixed to use the gradient sum.
+- Added `/water-surface-spike` to demo-app: a GPU-displaced plane
+  (`gerstnerDisplace`/`gerstnerNormal` in a hand-written `ShaderMaterial`) plus
+  five buoy meshes positioned/oriented on the CPU each frame from
+  `GerstnerSurface.getHeight`/`getNormal` at fixed world-XZ anchors, using the
+  same elapsed time as the GPU uniform. Preset switcher (calm lake / ocean
+  swell / storm) rebuilds the CPU surface and calls
+  `updateGerstnerUniforms` on the same uniform objects bound to the material.
+- **User-verified in-browser**: all three presets render, buoys sit exactly on
+  the displaced surface with no visible offset — the Phase 0 exit gate (CPU/GPU
+  parity) is confirmed, not just unit-tested.
+- **Regression and revert**: tried adding several short-wavelength "chop"
+  waves on top of the swell to address feedback that the surface read "more
+  mountainy than wavy." Result was worse — a visibly faceted diagonal grid,
+  less watery than the original. Root cause: the 220-segment/80m plane can't
+  resolve short wavelengths without aliasing into visible geometric facets:
+  fine chop has to live in shader/texture space (scrolling detail normal
+  maps, per the existing Phase 1 plan), not as more Gerstner waves on a
+  fixed-resolution vertex grid. Reverted `wave-presets.ts` to the original
+  values; recorded as a binding finding in the rendering-approach table above
+  so Phase 1 doesn't repeat the mistake.
+- Ran a feature-coverage crosswalk against a broader ocean-rendering feature
+  list at the user's request; added the crosswalk table above. Net new scope:
+  Phase 5b (boat wake) and two open questions (water masking, SSR-vs-planar
+  reflection). Confirmed the architecture holds up: the one-shared-model
+  design is _already_ multiplayer-deterministic by construction, and the
+  chop-aliasing finding independently reproduces why real ocean renderers
+  never put fine chop in geometry.
+- `npm run agent:verify-work`-equivalent checks run for this workspace:
+  `ng test triangular-engine` (34/34 pass, includes the 10 new water specs)
+  and `ng build demo-app --configuration development` (clean, water spike
+  page bundles as its own lazy chunk).

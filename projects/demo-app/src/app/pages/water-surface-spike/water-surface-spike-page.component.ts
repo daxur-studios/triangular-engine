@@ -157,7 +157,7 @@ export class WaterSurfaceSpikePageComponent {
       PRESETS[this.activePreset()].waves,
     );
 
-    this.waterGeometry = new PlaneGeometry(80, 80, 160, 160);
+    this.waterGeometry = new PlaneGeometry(80, 80, 220, 220);
     this.waterGeometry.rotateX(-Math.PI * 0.5);
 
     this.waterMaterial = new ShaderMaterial({

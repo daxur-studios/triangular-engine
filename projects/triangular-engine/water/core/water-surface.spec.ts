@@ -36,10 +36,13 @@ describe('GerstnerSurface', () => {
     { direction: [1, 0], wavelength: 10, amplitude: 1, steepness: 0.5 },
   ];
 
-  it('is flat (height 0) when no wave phase-aligns at the origin at t=0', () => {
+  it('is flat (height 0) at the undisplaced base origin at t=0', () => {
     const surface = new GerstnerSurface(oneWave);
-    // sin(0) = 0 for a single wave whose phase is k*x - omega*t, at x=0,t=0.
-    expect(surface.getHeight(0, 0, 0)).toBeCloseTo(0, 10);
+    // sin(0) = 0 for a single wave whose phase is k*x0 - omega*t, at x0=0,t=0.
+    // Note this is forward evaluation at a *base* coordinate, not
+    // getHeight(0,0,0): steepness also shifts the crest horizontally, so the
+    // world position where x0=0 lands is not world x=0 (see the next test).
+    expect(surface.displace(0, 0, 0).y).toBeCloseTo(0, 10);
   });
 
   it('matches a plain-number port of the GLSL displacement for random samples', () => {

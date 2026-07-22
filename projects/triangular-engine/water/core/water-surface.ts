@@ -106,10 +106,18 @@ export class GerstnerSurface implements WaterSurface {
       throw new Error('GerstnerSurface requires at least one wave.');
     }
     this.waves = resolveGerstnerWaves(waves);
-    const steepnessSum = this.waves.reduce((sum, w) => sum + w.steepness, 0);
-    if (steepnessSum > 1) {
+    // The horizontal displacement gradient per wave is ~steepness * k * amplitude;
+    // once the summed gradient approaches 1 the surface folds over (loops/cusps)
+    // and solveBase()'s fixed-point iteration stops converging. Raw steepness
+    // values (0..1) alone don't predict this — a steep but low-amplitude or
+    // long-wavelength wave is perfectly safe.
+    const gradientSum = this.waves.reduce(
+      (sum, w) => sum + w.steepness * w.k * w.amplitude,
+      0,
+    );
+    if (gradientSum > 1) {
       console.warn(
-        `GerstnerSurface: summed steepness (${steepnessSum.toFixed(2)}) exceeds 1 — ` +
+        `GerstnerSurface: summed displacement gradient (${gradientSum.toFixed(2)}) exceeds 1 — ` +
           'waves may self-intersect and getHeight()/getNormal() may converge poorly.',
       );
     }
