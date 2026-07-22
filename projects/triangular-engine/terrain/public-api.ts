@@ -4,4 +4,6 @@ export * from './core/terrain-math';
 export * from './core/terrain-patch';
 export * from './domains/terrain-surface-domain';
 export * from './domains/plane-terrain-domain';
+export * from './domains/plane-terrain-selection';
+export * from './domains/sphere-terrain-domain';
 export * from './meshing/terrain-patch-mesher';

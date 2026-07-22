@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: Phase 1 in progress; fixed-patch plane proof complete
+- State: Phase 2 in progress; sphere adapter and fixed demo complete
 - Target entry point: `triangular-engine/terrain`
 - Initial consumers: infinite plane, sphere, O'Neill-cylinder interior
 - Last updated: 2026-07-22
@@ -146,7 +146,7 @@ without any plane/sphere/cylinder conditional in the generic mesher.
 - [x] Prove adjacent patch positions/normals agree and negative/unbounded tile
       addresses work.
 - [x] Add a fixed-patch demo.
-- [ ] Add camera-local selection and eviction.
+- [x] Add camera-local selection and eviction.
 - [x] Verify patch-local precision under floating-origin-scale coordinates.
 
 Exit gate: continuous terrain while travelling across tile boundaries, with
@@ -154,8 +154,9 @@ bounded resident geometry and no seed reset per tile.
 
 ### Phase 2 — Sphere adapter
 
-- [ ] Port/generalise BSP's canonical cubesphere projection and address rules.
-- [ ] Port edge, corner, normal, precision, and LOD fixtures.
+- [x] Port/generalise BSP's canonical cubesphere projection and address rules.
+- [x] Port edge, corner, normal, and precision fixtures.
+- [ ] Port LOD fixtures.
 - [ ] Compare output against BSP regression fixtures before adopting it.
 
 Exit gate: all six faces stream without cracks or visible face seams.
@@ -261,6 +262,22 @@ broadly stage this workspace.
   retaining a small render-local coordinate frame.
 - Added a toggleable border diagnostic that traces every patch's sampled outer
   edge, making the 25 independent meshes and their seamless joins explicit.
+- Replaced the fixed address window with camera-local selection. Crossing a tile
+  boundary installs the newly visible row/column and disposes patches that leave
+  the bounded 5 × 5 resident window; stationary frames do no terrain work.
+- Added a 20 km render-local orientation grid 100 m below terrain datum so large
+  camera pans, rotations, and zoom-outs retain a stable spatial reference.
+
+### 2026-07-22 — Phase 2 fixed-patch sphere proof
+
+- Added `SphereTerrainDomain` using BSP's canonical six-face cubesphere mapping,
+  quadtree addresses, outward elevation, direction-space field coordinates, and
+  f64 centres with f32 patch-local vertices.
+- Added a domain-owned optional normal sampler. Sphere normals use a canonical
+  tangent frame derived only from the shared surface direction, so adjacent cube
+  faces produce matching lighting normals instead of face-parameter derivatives.
+- Added a 24-patch level-1 sphere mode to `/terrain-lab`; it reuses the generic
+  mesher and the same wireframe and patch-border diagnostics as the plane.
 - Kept floating-origin ownership outside the terrain package. Terrain emits f64
   world centres plus f32 local vertices; the example (and later BSP) applies the
   active render origin to patch objects.

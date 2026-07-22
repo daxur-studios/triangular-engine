@@ -12,16 +12,28 @@
         The plane uses absolute f64 sampling and f32 patch-local vertices. The
         large-coordinate test moves sampling near one billion metres while
         keeping the rendered frame close to zero—the same boundary used by
-        floating-origin rebasing.
+        floating-origin rebasing. Sphere mode renders all six cubesphere faces
+        as 24 independent patches.
       </p>
       <nav aria-label="Terrain shape">
-        <button class="active">Infinite plane</button>
-        <button disabled title="Added in Phase 2">Sphere · next</button>
+        <button
+          [class.active]="shape() === 'plane'"
+          (click)="selectShape('plane')"
+        >
+          Infinite plane
+        </button>
+        <button
+          [class.active]="shape() === 'sphere'"
+          (click)="selectShape('sphere')"
+        >
+          Sphere
+        </button>
         <button disabled title="Added in Phase 3">Cylinder · queued</button>
       </nav>
       <div class="actions">
         <button
           [class.active]="largeCoordinates()"
+          [disabled]="shape() !== 'plane'"
           (click)="toggleLargeCoordinates()"
         >
           1 billion metre origin
@@ -29,10 +41,16 @@
         <button [class.active]="wireframe()" (click)="toggleWireframe()">
           Wireframe
         </button>
+        <button [class.active]="patchBorders()" (click)="togglePatchBorders()">
+          Patch borders
+        </button>
       </div>
       <div class="stats">
         <span>World origin: {{ coordinateLabel() }}</span>
-        <span>Patches: {{ patchCount }}</span>
+        <span>Resident patches: {{ patchCount() }}</span>
+        <span>Camera patch: {{ centrePatchLabel() }}</span>
+        <span>Reference grid: 100 m below datum</span>
+        <span>Each outlined tile is one mesh</span>
         <span>Rebase owner: example/app</span>
       </div>
     </section>

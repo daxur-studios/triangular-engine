@@ -155,13 +155,25 @@ export function generateTerrainPatchMesh<TAddress>(
       setVector(
         normals,
         vertex,
-        normal(
-          subtract(point(points, extended + 1), point(points, extended - 1)),
-          subtract(
-            point(points, extended + extendedRow),
-            point(points, extended - extendedRow),
-          ),
-        ),
+        domain.getSurfaceNormal
+          ? domain.getSurfaceNormal(
+              field,
+              address,
+              bounds.minU + ui * stepU,
+              bounds.minV + vi * stepV,
+              stepU,
+              stepV,
+            )
+          : normal(
+              subtract(
+                point(points, extended + 1),
+                point(points, extended - 1),
+              ),
+              subtract(
+                point(points, extended + extendedRow),
+                point(points, extended - extendedRow),
+              ),
+            ),
       );
       uvs[vertex * UV_COUNT] = ui / resolution;
       uvs[vertex * UV_COUNT + 1] = vi / resolution;

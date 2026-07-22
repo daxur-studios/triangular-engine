@@ -1,3 +1,4 @@
+import type { ITerrainField } from '../core/terrain-field';
 import { TerrainVector3 } from '../core/terrain-math';
 
 /** Parametric bounds occupied by one rectangular terrain patch. */
@@ -23,6 +24,15 @@ export interface ITerrainSurfaceDomain<TAddress> {
     u: number,
     v: number,
     elevationM: number,
+  ): TerrainVector3;
+  /** Optional domain-owned normal sampling for topology boundaries. */
+  getSurfaceNormal?(
+    field: ITerrainField,
+    address: TAddress,
+    u: number,
+    v: number,
+    stepU: number,
+    stepV: number,
   ): TerrainVector3;
   /** Conservative domain-specific geometric error for LOD selection. */
   getGeometricErrorM(
