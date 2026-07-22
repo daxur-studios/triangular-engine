@@ -1,4 +1,8 @@
-import { computeWaterLodLevels, type WaterLodLevel } from './water-lod-grid';
+import {
+  computeWaterLodBoundaryRadius,
+  computeWaterLodLevels,
+  type WaterLodLevel,
+} from './water-lod-grid';
 
 const BASE_OPTIONS = {
   baseCellSize: 4,
@@ -83,6 +87,42 @@ describe('computeWaterLodLevels', () => {
           expect(covered).toBe(true);
         }
       }
+    }
+  });
+});
+
+describe('computeWaterLodBoundaryRadius', () => {
+  it('rejects level < 1', () => {
+    expect(() => computeWaterLodBoundaryRadius(0, BASE_OPTIONS)).toThrowError();
+    expect(() => computeWaterLodBoundaryRadius(-1, BASE_OPTIONS)).toThrowError();
+  });
+
+  it('doubles with each level, matching patchWorldSize growth', () => {
+    const r1 = computeWaterLodBoundaryRadius(1, BASE_OPTIONS);
+    const r2 = computeWaterLodBoundaryRadius(2, BASE_OPTIONS);
+    const r3 = computeWaterLodBoundaryRadius(3, BASE_OPTIONS);
+    expect(r2).toBeCloseTo(r1 * 2, 10);
+    expect(r3).toBeCloseTo(r2 * 2, 10);
+  });
+
+  it('sits strictly between the finer level\'s true edge and its own hole edge, with margin on both sides', () => {
+    for (let level = 1; level <= BASE_OPTIONS.ringCount; level++) {
+      const levels = computeWaterLodLevels(0, 0, BASE_OPTIONS);
+      const finer = levels[level - 1];
+      const coarser = levels[level];
+      const halfCountPatches = BASE_OPTIONS.coreSizePatches / 2;
+      const innerHalf = halfCountPatches / 2 - 1;
+
+      const finerTrueEdge = halfCountPatches * finer.patchWorldSize;
+      const coarserHoleEdge = innerHalf * coarser.patchWorldSize;
+
+      const boundary = computeWaterLodBoundaryRadius(level, BASE_OPTIONS);
+
+      // The boundary must fall inside the finer level's own footprint (it
+      // has to actually have geometry there to hand off from) and outside
+      // the coarser level's hole (same reasoning, other direction).
+      expect(boundary).toBeLessThan(finerTrueEdge);
+      expect(boundary).toBeGreaterThan(coarserHoleEdge);
     }
   });
 });

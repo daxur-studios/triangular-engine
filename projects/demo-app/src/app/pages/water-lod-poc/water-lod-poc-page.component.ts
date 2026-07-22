@@ -27,7 +27,9 @@ import {
   GerstnerSurface,
   OCEAN_SWELL_PRESET,
   STORM_PRESET,
+  WATER_LOD_CULL_GLSL,
   WATER_LOD_MORPH_GLSL,
+  computeWaterLodBoundaryRadius,
   computeWaterLodLevels,
   createGerstnerUniforms,
   createWaterLodPatchGeometry,
@@ -74,6 +76,9 @@ const MAX_INSTANCES_PER_LEVEL =
 
 const FLYTHROUGH_SPEED = 30; // m/s
 
+/** Effectively "never" for the outermost level's outer cull test — it has no coarser neighbour to defer to. */
+const OUTER_CULL_SENTINEL = 1e9;
+
 const VERTEX_SHADER = `
   ${GERSTNER_UNIFORMS_GLSL}
   ${GERSTNER_DISPLACE_GLSL}
@@ -91,7 +96,12 @@ const VERTEX_SHADER = `
     vec4 instanced = instanceMatrix * vec4(position, 1.0);
     vec4 worldPos4 = modelMatrix * instanced;
     vec2 base = waterLodMorph(worldPos4.xz, cameraPosition.xz, uCellSize, uMorphStart, uMorphEnd);
-    vMorph = clamp((distance(worldPos4.xz, cameraPosition.xz) - uMorphStart) / max(uMorphEnd - uMorphStart, 0.0001), 0.0, 1.0);
+    // Chebyshev, not Euclidean — must match waterLodMorph's own metric (see
+    // water-lod-glsl.ts) or this debug varying disagrees with what actually
+    // morphed, especially near the ring corners.
+    vec2 morphDelta = abs(worldPos4.xz - cameraPosition.xz);
+    float morphDist = max(morphDelta.x, morphDelta.y);
+    vMorph = clamp((morphDist - uMorphStart) / max(uMorphEnd - uMorphStart, 0.0001), 0.0, 1.0);
 
     vec3 displaced = gerstnerDisplace(base, uTime);
     vNormal = gerstnerNormal(base, uTime);
@@ -101,16 +111,20 @@ const VERTEX_SHADER = `
 `;
 
 const FRAGMENT_SHADER = `
+  ${WATER_LOD_CULL_GLSL}
   uniform vec3 uLightDirection;
   uniform vec3 uColorShallow;
   uniform vec3 uColorDeep;
   uniform vec3 uLevelTint;
   uniform float uLevelTintStrength;
+  uniform float uInnerCullRadius;
+  uniform float uOuterCullRadius;
   varying vec3 vNormal;
   varying vec3 vWorldPosition;
   varying float vMorph;
 
   void main() {
+    waterLodCull(vWorldPosition.xz, cameraPosition.xz, uInnerCullRadius, uOuterCullRadius);
     vec3 normal = normalize(vNormal);
     vec3 lightDir = normalize(uLightDirection);
     float diffuse = max(dot(normal, lightDir), 0.0);
@@ -194,16 +208,22 @@ export class WaterLodPocPageComponent {
       const patchWorldSize = GRID_OPTIONS.baseCellSize * 2 ** level;
       const outerHalfExtent = this.halfCountPatches * patchWorldSize;
       const isOutermost = level === GRID_OPTIONS.ringCount;
-      // The next level's ring hole is shrunk by one coarse patch (see
-      // water-lod-grid.ts) to guarantee no gaps, plus each level snaps its
-      // centre independently so the two can drift by up to ~1.5 coarse
-      // patches. Together the coarser neighbour's coverage can reach ~3.5
-      // coarse patches inside this level's true outer edge. Morphing must
-      // fully complete (reach the coarser grid) before that band starts, or
-      // both levels render independently-animated surfaces in the same
-      // place — visible as intersecting waves in shaded mode.
-      const overlapGuardM = isOutermost ? 0 : 4 * patchWorldSize;
-      const morphEnd = Math.max(outerHalfExtent - overlapGuardM, patchWorldSize);
+
+      // Each level's fragment shader discards the region its neighbours
+      // own, so adjacent levels never both draw the same world point (see
+      // computeWaterLodBoundaryRadius for the no-gap/no-overlap derivation).
+      const innerCullRadius =
+        level > 0 ? computeWaterLodBoundaryRadius(level, GRID_OPTIONS) : 0;
+      const outerCullRadius = isOutermost
+        ? OUTER_CULL_SENTINEL
+        : computeWaterLodBoundaryRadius(level + 1, GRID_OPTIONS);
+
+      // Morph completes exactly where this level stops being drawn (its own
+      // outer cull radius, or its true edge for the outermost level, which
+      // has no coarser neighbour to hand off to), so the last fragment this
+      // level ever draws is already phase-aligned with whichever level
+      // takes over from there — no crack at the cull boundary.
+      const morphEnd = isOutermost ? outerHalfExtent : outerCullRadius;
       const morphStart = Math.max(morphEnd - 2 * patchWorldSize, 0);
       const material = new ShaderMaterial({
         uniforms: {
@@ -214,6 +234,8 @@ export class WaterLodPocPageComponent {
           },
           uMorphStart: { value: morphStart },
           uMorphEnd: { value: morphEnd },
+          uInnerCullRadius: { value: innerCullRadius },
+          uOuterCullRadius: { value: outerCullRadius },
           uLightDirection: { value: new Vector3(0.4, 0.8, 0.3).normalize() },
           uColorShallow: { value: new Color('#8fe3ff') },
           uColorDeep: { value: new Color('#04283f') },
@@ -223,9 +245,6 @@ export class WaterLodPocPageComponent {
         vertexShader: VERTEX_SHADER,
         fragmentShader: FRAGMENT_SHADER,
         side: DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: level,
-        polygonOffsetUnits: level,
       });
       this.levelMaterials.push(material);
 

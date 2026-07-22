@@ -356,21 +356,25 @@ for the parallel, independently-authorised terrain rewrite — it is heading
 toward a clipmap for its plane domain too, and both docs agree water stays
 decoupled from terrain generation, so this phase does not touch terrain code.
 
-- [ ] Concentric-ring clipmap grid: one shared regular vertex raster, not
+- [x] Concentric-ring clipmap grid: one shared regular vertex raster, not
       independent tiles, grid-snapped to the camera so rings never drift out
       of alignment with each other.
-- [ ] Continuous CDLOD-style vertex morphing between ring resolutions — each
+- [x] Continuous CDLOD-style vertex morphing between ring resolutions — each
       vertex interpolates toward its coarser-ring position as it nears the
       ring boundary, so the LOD switch is invisible and no skirt geometry is
       needed.
-- [ ] Wireframe debug toggle to see the morph live and confirm there is no
+- [x] Wireframe debug toggle to see the morph live and confirm there is no
       popping, no T-junctions, and no crack at any ring boundary.
-- [ ] POC demo page: flat shaded water, large radius, camera flythrough at
+- [x] POC demo page: flat shaded water, large radius, camera flythrough at
       speed, wireframe toggle, perf overlay.
 
 Exit gate: continuous coverage at a large radius (document the tested
 radius/ring-count and frame cost), zero visible seams/cracks/popping in
 either wireframe or shaded view at any camera speed, user-verified.
+**Met and user-verified 2026-07-22** — 5 levels (core + 4 rings,
+`coreSizePatches: 16`, `baseCellSize: 4`), outer edge at 512m from camera —
+see the two investigation log entries below for the overlap and corner-void
+fixes that got it there.
 
 **Domain note**: this phase implements the plane domain only —
 `computeWaterLodLevels` places patches directly in world XZ, which only

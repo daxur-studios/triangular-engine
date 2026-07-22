@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: Phase 3 in progress; cylinder domain and fixed demo complete
+- State: Phase 3 visual integration implemented; awaiting POC visual verification
 - Target entry point: `triangular-engine/terrain`
 - Initial consumers: infinite plane, sphere, O'Neill-cylinder interior
 - Last updated: 2026-07-22
@@ -167,7 +167,7 @@ Exit gate: all six faces stream without cracks or visible face seams.
 - [x] Generate inward-displaced patch-local meshes with inhabitant-facing
       normals and winding.
 - [x] Prove exact angular seam continuity and deliberate axial-end behaviour.
-- [ ] Add `disabled | visual` to `/takram-cylinder-clouds`; preserve its current
+- [x] Add `disabled | visual` to `/takram-cylinder-clouds`; preserve its current
       smooth textured cylinder as fallback.
 
 Exit gate: the complete inner cylinder can toggle terrain without leaks, stale
@@ -300,3 +300,18 @@ broadly stage this workspace.
   active clouds/atmosphere POC remains untouched pending visual verification.
 - Verification: focused terrain specs 19/19, triangular-engine development
   build, and demo-app development build all pass.
+
+### 2026-07-22 — Phase 3 active POC integration
+
+- Added a `Smooth fallback | Generated visual` terrain selector to
+  `/takram-cylinder-clouds` while leaving its clouds, atmosphere, lighting,
+  camera-up behavior, and smooth textured cylinder intact.
+- The visual mode constructs the complete real-scale 10 km-radius by 50 km-long
+  interior from 16 periodic angular by 12 finite axial patches through the
+  shared cylinder domain and generic mesher. The deterministic field is
+  continuous at the angular seam and varies along the axis.
+- Mode changes synchronously remove and dispose all owned patch geometry and
+  shared materials. Returning to disabled mode restores the original smooth
+  cylinder; wireframe changes apply to either representation.
+- Visual acceptance remains with the user: inspect the full-turn seam, axial
+  ends, cloud/atmosphere composition, and repeated mode toggles.
