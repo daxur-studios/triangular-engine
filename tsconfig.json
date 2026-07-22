@@ -12,6 +12,9 @@
       ],
       "triangular-engine/takram": [
         "projects/triangular-engine/takram/public-api"
+      ],
+      "triangular-engine/water": [
+        "projects/triangular-engine/water/public-api"
       ]
     },
     "outDir": "./dist/out-tsc",

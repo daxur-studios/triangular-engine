@@ -53,4 +53,11 @@ export const routes: Routes = [
           TakramCylinderCloudsPageComponent,
       ),
   },
+  {
+    path: 'water-surface-spike',
+    loadComponent: () =>
+      import('./pages/water-surface-spike/water-surface-spike-page.component').then(
+        ({ WaterSurfaceSpikePageComponent }) => WaterSurfaceSpikePageComponent,
+      ),
+  },
 ];

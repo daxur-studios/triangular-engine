@@ -1,0 +1,40 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Water surface spike controls">
+      <header>
+        <div><a routerLink="/">← Examples</a><small>triangular-engine/water — Phase 0 spike</small></div>
+        <strong>WaterSurface model</strong>
+      </header>
+
+      <p class="blurb">
+        The mesh is displaced on the GPU by <code>gerstnerDisplace</code>/<code>gerstnerNormal</code>.
+        Each buoy is positioned on the CPU by <code>GerstnerSurface.getHeight</code>/<code>getNormal</code>
+        from the same resolved wave list and the same elapsed time. If they ever drift apart, a buoy
+        will visibly float above or sink below the surface.
+      </p>
+
+      <nav aria-label="Wave preset">
+        @for (key of presetKeys; track key) {
+          <button [class.active]="activePreset() === key" (click)="selectPreset(key)">{{ presetLabels[key] }}</button>
+        }
+      </nav>
+
+      <div class="legend" aria-label="Scene legend">
+        <span><i class="swatch buoy-swatch"></i>Buoy <span class="help" tabindex="0" role="img" aria-label="Buoy help" matTooltip="Position/orientation come from GerstnerSurface.getHeight/getNormal on the CPU, sampled at a fixed world XZ each frame.">?</span></span>
+      </div>
+    </section>
+  </ng-template>
+
+  <orbitControls [cameraPosition]="[0, 22, 40]" [target]="[0, 0, 0]" [near]="0.1" [far]="2000" />
+  <ambientLight [intensity]="1.6" />
+  <directionalLight [position]="[10, 20, 12]" [intensity]="2.5" />
+
+  <mesh [geometry]="waterGeometry" [material]="waterMaterial"></mesh>
+
+  @for (buoy of buoys; track $index) {
+    <mesh [position]="buoy.position()" [quaternion]="buoy.quaternion()">
+      <boxGeometry [params]="[1.2, 0.6, 1.2]" />
+      <meshStandardMaterial [params]="{ color: '#ffb454', roughness: 0.6, metalness: 0.1 }" />
+    </mesh>
+  }
+</scene>
