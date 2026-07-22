@@ -4,7 +4,7 @@
       <header>
         <div>
           <a routerLink="/">← Examples</a
-          ><small>triangular-engine/terrain — Phase 1</small>
+          ><small>triangular-engine/terrain — Phase 3</small>
         </div>
         <strong>Multi-surface terrain lab</strong>
       </header>
@@ -13,7 +13,8 @@
         large-coordinate test moves sampling near one billion metres while
         keeping the rendered frame close to zero—the same boundary used by
         floating-origin rebasing. Sphere mode renders all six cubesphere faces
-        as 24 independent patches.
+        as 24 independent patches. Cylinder mode renders a complete finite
+        inner wall as 48 independent, inward-facing patches.
       </p>
       <nav aria-label="Terrain shape">
         <button
@@ -28,7 +29,12 @@
         >
           Sphere
         </button>
-        <button disabled title="Added in Phase 3">Cylinder · queued</button>
+        <button
+          [class.active]="shape() === 'cylinder'"
+          (click)="selectShape('cylinder')"
+        >
+          Cylinder interior
+        </button>
       </nav>
       <div class="actions">
         <button

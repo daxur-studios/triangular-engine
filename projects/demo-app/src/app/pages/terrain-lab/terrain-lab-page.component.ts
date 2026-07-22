@@ -20,6 +20,7 @@ import {
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
+  CylinderTerrainDomain,
   generateTerrainPatchMesh,
   getPlaneTerrainPatchKey,
   type ITerrainField,
@@ -42,8 +43,12 @@ const ORIENTATION_GRID_DIVISIONS = 100;
 const ORIENTATION_GRID_Y_M = -100;
 const SPHERE_RADIUS_M = 650;
 const SPHERE_PATCH_LEVEL = 1;
+const CYLINDER_RADIUS_M = 1_500;
+const CYLINDER_LENGTH_M = 4_000;
+const CYLINDER_ANGULAR_PATCHES = 12;
+const CYLINDER_AXIAL_PATCHES = 4;
 
-type TerrainShape = 'plane' | 'sphere';
+type TerrainShape = 'plane' | 'sphere' | 'cylinder';
 
 interface ITerrainPatchVisual {
   readonly mesh: Mesh;
@@ -108,6 +113,35 @@ class SphereTerrainLabField implements ITerrainField {
   }
 }
 
+class CylinderTerrainLabField implements ITerrainField {
+  readonly minElevationM = -55;
+  readonly maxElevationM = 55;
+
+  sample([axialM, radialY, radialZ]: TerrainVector3): ITerrainFieldSample {
+    const angle = Math.atan2(radialZ, radialY);
+    return {
+      elevationM:
+        Math.sin(axialM / 170 + angle * 3) * 24 +
+        Math.cos(axialM / 390 - angle * 7) * 17 +
+        Math.sin(axialM / 83 + angle * 11) * 8,
+    };
+  }
+
+  sampleBatch(
+    positions: Float64Array,
+    output = new Float64Array(positions.length / 3),
+  ): Float64Array {
+    for (let i = 0; i < output.length; i++) {
+      output[i] = this.sample([
+        positions[i * 3],
+        positions[i * 3 + 1],
+        positions[i * 3 + 2],
+      ]).elevationM;
+    }
+    return output;
+  }
+}
+
 /** Visual Phase 1 fixture for absolute-coordinate, patch-local plane terrain. */
 @Component({
   selector: 'app-terrain-lab-page',
@@ -132,6 +166,13 @@ export class TerrainLabPageComponent {
   private readonly field = new TerrainLabField();
   private readonly sphereDomain = new SphereTerrainDomain(SPHERE_RADIUS_M);
   private readonly sphereField = new SphereTerrainLabField();
+  private readonly cylinderDomain = new CylinderTerrainDomain({
+    radiusM: CYLINDER_RADIUS_M,
+    lengthM: CYLINDER_LENGTH_M,
+    levelZeroAngularPatchCount: CYLINDER_ANGULAR_PATCHES,
+    levelZeroAxialPatchCount: CYLINDER_AXIAL_PATCHES,
+  });
+  private readonly cylinderField = new CylinderTerrainLabField();
   private readonly terrain = new Group();
   private readonly orientationGrid = new GridHelper(
     ORIENTATION_GRID_SIZE_M,
@@ -201,6 +242,13 @@ export class TerrainLabPageComponent {
       this.coordinateLabel.set('Body centre');
       this.centrePatchLabel.set('all six faces');
       this.buildSphere();
+      return;
+    }
+    if (this.shape() === 'cylinder') {
+      this.selectionCentreKey = '';
+      this.coordinateLabel.set('Body centre');
+      this.centrePatchLabel.set('complete inner wall');
+      this.buildCylinder();
       return;
     }
     const centreTile = this.largeCoordinates()
@@ -281,6 +329,33 @@ export class TerrainLabPageComponent {
             0,
           );
         }
+      }
+    }
+    this.patchCount.set(this.patches.size);
+  }
+
+  private buildCylinder(): void {
+    const counts = this.cylinderDomain.getPatchCounts(0);
+    for (let axialIndex = 0; axialIndex < counts.axial; axialIndex++) {
+      for (
+        let angularIndex = 0;
+        angularIndex < counts.angular;
+        angularIndex++
+      ) {
+        const address = { level: 0, angularIndex, axialIndex };
+        const key = `cylinder:0:${angularIndex}:${axialIndex}`;
+        const patch = generateTerrainPatchMesh(
+          this.cylinderField,
+          this.cylinderDomain,
+          { address, resolution: PATCH_RESOLUTION },
+        );
+        this.installPatch(
+          key,
+          patch,
+          (angularIndex + axialIndex) % 2 === 0 ? '#688d4f' : '#587943',
+          0,
+          0,
+        );
       }
     }
     this.patchCount.set(this.patches.size);

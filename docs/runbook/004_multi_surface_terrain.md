@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: Phase 2 in progress; sphere adapter and fixed demo complete
+- State: Phase 3 in progress; cylinder domain and fixed demo complete
 - Target entry point: `triangular-engine/terrain`
 - Initial consumers: infinite plane, sphere, O'Neill-cylinder interior
 - Last updated: 2026-07-22
@@ -163,10 +163,10 @@ Exit gate: all six faces stream without cracks or visible face seams.
 
 ### Phase 3 — Cylinder visual terrain
 
-- [ ] Implement periodic angular × axial addressing and neighbour lookup.
-- [ ] Generate inward-displaced patch-local meshes with inhabitant-facing
+- [x] Implement periodic angular × axial addressing and neighbour lookup.
+- [x] Generate inward-displaced patch-local meshes with inhabitant-facing
       normals and winding.
-- [ ] Prove exact angular seam continuity and deliberate axial-end behaviour.
+- [x] Prove exact angular seam continuity and deliberate axial-end behaviour.
 - [ ] Add `disabled | visual` to `/takram-cylinder-clouds`; preserve its current
       smooth textured cylinder as fallback.
 
@@ -283,3 +283,20 @@ broadly stage this workspace.
   active render origin to patch objects.
 - Verification: focused terrain specs 7/7, triangular-engine development build,
   and demo-app development build all pass.
+
+### 2026-07-22 — Phase 3 fixed-patch cylinder proof
+
+- Added `CylinderTerrainDomain` with periodic angular addresses, bounded axial
+  addresses, quadtree children, and explicit neighbor lookup. Angular neighbors
+  wrap across the seam; axial neighbors return no tile at the finite ends.
+- Chose axial metres as U and angle as V so the generic mesher's U × V winding
+  faces the inhabited cylinder interior without a shape branch in the mesher.
+- Embedded field coordinates as axial metres plus cosine/sine of angle. This
+  preserves variation along the cylinder while making procedural sampling
+  continuous across the full-turn seam.
+- Added fixtures for seam positions/normals, inward winding, end behavior, field
+  continuity, and patch-local precision at a billion-metre radius.
+- Added a fixed 48-patch complete inner-cylinder mode to `/terrain-lab`; the
+  active clouds/atmosphere POC remains untouched pending visual verification.
+- Verification: focused terrain specs 19/19, triangular-engine development
+  build, and demo-app development build all pass.
