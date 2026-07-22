@@ -32,6 +32,7 @@ import {
   selectPlaneTerrainPatches,
   SPHERE_TERRAIN_FACES,
   SphereTerrainDomain,
+  TerrainGenerationQueue,
   type TerrainVector3,
 } from 'triangular-engine/terrain';
 
@@ -39,6 +40,8 @@ const PATCH_SIZE_M = 512;
 const PATCH_RESOLUTION = 24;
 const PATCH_RADIUS = 2;
 const MAX_STREAMING_RADIUS = 4;
+const DEFAULT_GENERATION_BUDGET = 12;
+const MAX_GENERATION_BUDGET = 32;
 const MAX_LOD_LEVEL = 3;
 const LOD_SKIRT_DEPTH_M = 35;
 const LARGE_COORDINATE_M = 1_000_000_000;
@@ -46,6 +49,7 @@ const ORIENTATION_GRID_SIZE_M = 20_000;
 const ORIENTATION_GRID_DIVISIONS = 100;
 const ORIENTATION_GRID_Y_M = -100;
 const SPHERE_RADIUS_M = 650;
+const SPHERE_SIZE_PRESETS = [1, 15, 150, 1_500, 9_801.5] as const;
 const CYLINDER_RADIUS_M = 1_500;
 const CYLINDER_LENGTH_M = 4_000;
 const CYLINDER_ANGULAR_PATCHES = 12;
@@ -175,7 +179,12 @@ function biomeElevation(x: number, z: number, offset = 0): number {
   templateUrl: './terrain-lab-page.component.html',
   styleUrl: './terrain-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [EngineService.provide({ showFPS: true })],
+  providers: [
+    EngineService.provide({
+      showFPS: true,
+      webGLRendererParameters: { logarithmicDepthBuffer: true },
+    }),
+  ],
   host: { class: 'flex-page' },
 })
 export class TerrainLabPageComponent {
@@ -184,6 +193,8 @@ export class TerrainLabPageComponent {
   readonly patchBorders = signal(true);
   readonly wireframe = signal(false);
   readonly streamingRadius = signal(1);
+  readonly generationBudget = signal(DEFAULT_GENERATION_BUDGET);
+  readonly queuedPatchCount = signal(0);
   readonly sphereSizeScale = signal(1);
   readonly cylinderSizeScale = signal(1);
   readonly patchCount = signal(0);
@@ -211,6 +222,10 @@ export class TerrainLabPageComponent {
     '#263846',
   );
   private readonly patches = new Map<string, ITerrainPatchVisual>();
+  private readonly generationQueue = new TerrainGenerationQueue<{
+    readonly shape: TerrainShape;
+    readonly address: unknown;
+  }>();
   private renderOriginX = 0;
   private renderOriginZ = 0;
   private selectionSignature = '';
@@ -274,6 +289,18 @@ export class TerrainLabPageComponent {
     this.updateCameraSelection();
   }
 
+  setGenerationBudget(event: Event): void {
+    this.generationBudget.set(
+      Math.max(
+        1,
+        Math.min(
+          MAX_GENERATION_BUDGET,
+          Math.round(Number((event.target as HTMLInputElement).value)),
+        ),
+      ),
+    );
+  }
+
   bodySizeScale(): number {
     return this.shape() === 'sphere'
       ? this.sphereSizeScale()
@@ -290,12 +317,35 @@ export class TerrainLabPageComponent {
     return 'Unbounded';
   }
 
+  sphereSizePresetIndex(): number {
+    const index = SPHERE_SIZE_PRESETS.indexOf(
+      this.sphereSizeScale() as (typeof SPHERE_SIZE_PRESETS)[number],
+    );
+    return Math.max(0, index);
+  }
+
+  setSphereSizePreset(event: Event): void {
+    if (this.shape() !== 'sphere') return;
+    const index = Math.max(
+      0,
+      Math.min(
+        SPHERE_SIZE_PRESETS.length - 1,
+        Math.round(Number((event.target as HTMLInputElement).value)),
+      ),
+    );
+    this.applyBodySizeScale(SPHERE_SIZE_PRESETS[index]);
+  }
+
   setBodySizeScale(event: Event): void {
     if (this.shape() === 'plane') return;
     const nextScale = Math.max(
       0.5,
       Math.min(3, Number((event.target as HTMLInputElement).value)),
     );
+    this.applyBodySizeScale(nextScale);
+  }
+
+  private applyBodySizeScale(nextScale: number): void {
     const previousScale = this.bodySizeScale();
     if (this.shape() === 'sphere') {
       this.sphereSizeScale.set(nextScale);
@@ -363,19 +413,54 @@ export class TerrainLabPageComponent {
       key: this.getPatchKey(shape, address),
     }));
     const signature = entries.map(({ key }) => key).join('|');
-    if (signature === this.selectionSignature) return;
-    this.selectionSignature = signature;
-    const selectedKeys = new Set(entries.map(({ key }) => key));
-
-    for (const [key, patch] of this.patches) {
-      if (!selectedKeys.has(key)) this.removePatch(key, patch);
+    if (signature !== this.selectionSignature) {
+      this.selectionSignature = signature;
+      this.generationQueue.reconcile(
+        entries.map(({ address, key }) => ({
+          key,
+          value: { shape, address },
+          priority: this.getPatchDistance(shape, address),
+        })),
+        new Set(this.patches.keys()),
+      );
+      this.updateLodLabel(
+        entries.map(({ address }) => (address as { level: number }).level),
+      );
     }
-    for (const { address, key } of entries) {
-      if (!this.patches.has(key)) this.addSelectedPatch(shape, key, address);
+    this.generationQueue.drain(this.generationBudget(), ({ key, value }) =>
+      this.addSelectedPatch(value.shape, key, value.address),
+    );
+    if (this.generationQueue.pendingCount === 0) {
+      for (const [key, patch] of this.patches) {
+        if (!this.generationQueue.desired.has(key))
+          this.removePatch(key, patch);
+      }
     }
+    this.queuedPatchCount.set(this.generationQueue.pendingCount);
     this.patchCount.set(this.patches.size);
-    this.updateLodLabel(
-      entries.map(({ address }) => (address as { level: number }).level),
+  }
+
+  private getPatchDistance(shape: TerrainShape, address: unknown): number {
+    const domain =
+      shape === 'plane'
+        ? this.domain
+        : shape === 'sphere'
+          ? this.sphereDomain
+          : this.cylinderDomain;
+    const bounds = domain.getPatchBounds(address as never);
+    const centre = domain.getSurfacePosition(
+      address as never,
+      (bounds.minU + bounds.maxU) / 2,
+      (bounds.minV + bounds.maxV) / 2,
+      0,
+    );
+    const camera = this.engine.camera.position;
+    return Math.hypot(
+      centre[0] -
+        (shape === 'plane' ? this.renderOriginX + camera.x : camera.x),
+      centre[1] - camera.y,
+      centre[2] -
+        (shape === 'plane' ? this.renderOriginZ + camera.z : camera.z),
     );
   }
 
@@ -683,7 +768,9 @@ export class TerrainLabPageComponent {
   }
 
   private disposeTerrain(): void {
+    this.generationQueue.clear();
     for (const [key, patch] of [...this.patches]) this.removePatch(key, patch);
     this.patchCount.set(0);
+    this.queuedPatchCount.set(0);
   }
 }

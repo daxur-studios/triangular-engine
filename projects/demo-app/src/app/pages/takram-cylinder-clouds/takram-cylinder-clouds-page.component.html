@@ -83,6 +83,37 @@
         />
         Terrain wireframe</label
       >
+      <label
+        >Terrain streaming radius
+        <output>{{ terrainStreamingRadius() }}×</output
+        ><input
+          type="range"
+          min="0.5"
+          max="2"
+          step="0.25"
+          [disabled]="terrainMode() !== 'visual'"
+          [value]="terrainStreamingRadius()"
+          (change)="setTerrainStreamingRadius($any($event.target))"
+      /></label>
+      <label
+        >Terrain generation
+        <output>{{ terrainGenerationBudget() }} patches/frame</output
+        ><input
+          type="range"
+          min="1"
+          max="32"
+          step="1"
+          [disabled]="terrainMode() !== 'visual'"
+          [value]="terrainGenerationBudget()"
+          (input)="setTerrainGenerationBudget($any($event.target))"
+      /></label>
+      @if (terrainMode() === "visual") {
+        <div class="terrain-stats">
+          <span>Resident patches: {{ terrainPatchCount() }}</span>
+          <span>Queued patches: {{ terrainQueuedPatchCount() }}</span>
+          <span>{{ terrainLodLabel() }}</span>
+        </div>
+      }
       <label class="toggle"
         ><input
           type="checkbox"

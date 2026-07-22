@@ -10,6 +10,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   BufferAttribute,
   BufferGeometry,
+  Color,
   DataTexture,
   DoubleSide,
   EquirectangularReflectionMapping,
@@ -31,6 +32,8 @@ import {
   generateTerrainPatchMesh,
   type ITerrainField,
   type ITerrainFieldSample,
+  selectAdaptiveTerrainPatches,
+  TerrainGenerationQueue,
   type TerrainVector3,
 } from 'triangular-engine/terrain';
 import { PostprocessingModule } from 'triangular-engine/postprocessing';
@@ -40,20 +43,21 @@ import { TakramCloudDemoTextures } from '../../shared/takram-cloud-controls/takr
 const TERRAIN_ANGULAR_PATCHES = 16;
 const TERRAIN_AXIAL_PATCHES = 12;
 const TERRAIN_PATCH_RESOLUTION = 16;
+const TERRAIN_MAX_LOD_LEVEL = 3;
+const TERRAIN_REFINEMENT_DISTANCE_M = 9_000;
+const TERRAIN_SKIRT_DEPTH_M = 180;
+const DEFAULT_TERRAIN_GENERATION_BUDGET = 12;
 
 type TerrainMode = 'disabled' | 'visual';
 
 class CylinderPocTerrainField implements ITerrainField {
-  readonly minElevationM = -280;
-  readonly maxElevationM = 280;
+  readonly minElevationM = -360;
+  readonly maxElevationM = 720;
 
   sample([axialM, radialY, radialZ]: TerrainVector3): ITerrainFieldSample {
     const angle = Math.atan2(radialZ, radialY);
     return {
-      elevationM:
-        Math.sin(axialM / 2_800 + angle * 3) * 125 +
-        Math.cos(axialM / 5_600 - angle * 7) * 85 +
-        Math.sin(axialM / 1_150 + angle * 13) * 45,
+      elevationM: cylinderBiomeElevation(axialM, angle * 10_000),
     };
   }
 
@@ -124,6 +128,11 @@ export class TakramCylinderCloudsPageComponent {
   readonly atmosphereScatteringDensity = signal(0.000008);
   readonly atmosphereIntensity = signal(0.12);
   readonly wireframe = signal(false);
+  readonly terrainStreamingRadius = signal(1);
+  readonly terrainGenerationBudget = signal(DEFAULT_TERRAIN_GENERATION_BUDGET);
+  readonly terrainQueuedPatchCount = signal(0);
+  readonly terrainPatchCount = signal(0);
+  readonly terrainLodLabel = signal('L0: 0');
   readonly cylinderUp = signal(false);
   readonly cameraUp = signal<[number, number, number]>([0, 1, 0]);
   readonly sunAngle = signal(120);
@@ -155,6 +164,14 @@ export class TakramCylinderCloudsPageComponent {
   });
   private readonly terrainField = new CylinderPocTerrainField();
   private terrainGroup: Group | null = null;
+  private terrainMaterial: MeshStandardMaterial | null = null;
+  private readonly terrainPatches = new Map<string, Mesh>();
+  private readonly terrainGenerationQueue = new TerrainGenerationQueue<{
+    readonly level: number;
+    readonly angularIndex: number;
+    readonly axialIndex: number;
+  }>();
+  private terrainSelectionSignature = '';
 
   constructor() {
     this.cloudTextures.source.set('procedural');
@@ -162,16 +179,18 @@ export class TakramCylinderCloudsPageComponent {
     const previousBackground = this.engine.scene.background;
     this.engine.scene.background = this.starTexture;
     this.engine.postTick$.pipe(takeUntilDestroyed(destroyRef)).subscribe(() => {
-      if (!this.cylinderUp()) return;
-      const position = this.engine.camera.position;
-      const radialLength = Math.hypot(position.y, position.z);
-      if (radialLength > 0) {
-        this.cameraUp.set([
-          0,
-          -position.y / radialLength,
-          -position.z / radialLength,
-        ]);
+      if (this.cylinderUp()) {
+        const position = this.engine.camera.position;
+        const radialLength = Math.hypot(position.y, position.z);
+        if (radialLength > 0) {
+          this.cameraUp.set([
+            0,
+            -position.y / radialLength,
+            -position.z / radialLength,
+          ]);
+        }
       }
+      if (this.terrainMode() === 'visual') this.updateVisualTerrain();
     });
     destroyRef.onDestroy(() => {
       this.disposeVisualTerrain();
@@ -199,85 +218,246 @@ export class TakramCylinderCloudsPageComponent {
 
   setWireframe(enabled: boolean): void {
     this.wireframe.set(enabled);
-    this.terrainGroup?.traverse((object) => {
-      if (
-        object instanceof Mesh &&
-        object.material instanceof MeshStandardMaterial
-      ) {
-        object.material.wireframe = enabled;
-      }
-    });
+    if (this.terrainMaterial) this.terrainMaterial.wireframe = enabled;
+  }
+
+  setTerrainStreamingRadius(target: { value: string }): void {
+    this.terrainStreamingRadius.set(Number(target.value));
+    this.terrainSelectionSignature = '';
+    this.updateVisualTerrain();
+  }
+
+  setTerrainGenerationBudget(target: { value: string }): void {
+    this.terrainGenerationBudget.set(
+      Math.max(1, Math.min(32, Math.round(Number(target.value)))),
+    );
   }
 
   private buildVisualTerrain(): void {
     const group = new Group();
     group.name = 'cylinder-visual-terrain';
-    const materials = [
-      new MeshStandardMaterial({
-        color: '#62844b',
-        roughness: 0.94,
-        wireframe: this.wireframe(),
-      }),
-      new MeshStandardMaterial({
-        color: '#526f41',
-        roughness: 0.94,
-        wireframe: this.wireframe(),
-      }),
-    ];
-    const counts = this.terrainDomain.getPatchCounts(0);
-    for (let axialIndex = 0; axialIndex < counts.axial; axialIndex++) {
-      for (
-        let angularIndex = 0;
-        angularIndex < counts.angular;
-        angularIndex++
-      ) {
-        const patch = generateTerrainPatchMesh(
-          this.terrainField,
-          this.terrainDomain,
-          {
-            address: { level: 0, angularIndex, axialIndex },
-            resolution: TERRAIN_PATCH_RESOLUTION,
-          },
-        );
-        const geometry = new BufferGeometry();
-        geometry.setAttribute(
-          'position',
-          new BufferAttribute(patch.surface.positions, 3),
-        );
-        geometry.setAttribute(
-          'normal',
-          new BufferAttribute(patch.surface.normals, 3),
-        );
-        geometry.setAttribute('uv', new BufferAttribute(patch.surface.uvs, 2));
-        geometry.setIndex(new BufferAttribute(patch.surface.indices, 1));
-        const mesh = new Mesh(
-          geometry,
-          materials[(angularIndex + axialIndex) % 2],
-        );
-        mesh.position.set(...patch.centerWorldM);
-        group.add(mesh);
-      }
-    }
-    group.userData['ownedMaterials'] = materials;
+    this.terrainMaterial = new MeshStandardMaterial({
+      color: '#ffffff',
+      roughness: 0.94,
+      vertexColors: true,
+      wireframe: this.wireframe(),
+    });
     this.terrainGroup = group;
     this.engine.scene.add(group);
+    this.terrainSelectionSignature = '';
+    this.updateVisualTerrain();
+  }
+
+  private updateVisualTerrain(): void {
+    if (this.terrainGroup === null || this.terrainMaterial === null) return;
+    const counts = this.terrainDomain.getPatchCounts(0);
+    const roots = Array.from({ length: counts.axial }, (_, axialIndex) =>
+      Array.from({ length: counts.angular }, (_unused, angularIndex) => ({
+        level: 0,
+        angularIndex,
+        axialIndex,
+      })),
+    ).flat();
+    const camera = this.engine.camera.position;
+    const selected = selectAdaptiveTerrainPatches(this.terrainDomain, {
+      roots,
+      cameraWorldM: [camera.x, camera.y, camera.z],
+      getLevel: (address) => address.level,
+      maxLevel: TERRAIN_MAX_LOD_LEVEL,
+      refinementDistanceM:
+        TERRAIN_REFINEMENT_DISTANCE_M * this.terrainStreamingRadius(),
+    });
+    const entries = selected.map((address) => ({
+      address,
+      key: `${address.level}:${address.angularIndex}:${address.axialIndex}`,
+    }));
+    const signature = entries.map(({ key }) => key).join('|');
+    if (signature !== this.terrainSelectionSignature) {
+      this.terrainSelectionSignature = signature;
+      this.terrainGenerationQueue.reconcile(
+        entries.map(({ address, key }) => ({
+          key,
+          value: address,
+          priority: this.getTerrainPatchDistance(address),
+        })),
+        new Set(this.terrainPatches.keys()),
+      );
+      const levels = new Map<number, number>();
+      for (const { address } of entries) {
+        levels.set(address.level, (levels.get(address.level) ?? 0) + 1);
+      }
+      this.terrainLodLabel.set(
+        [...levels]
+          .sort(([a], [b]) => a - b)
+          .map(([level, count]) => `L${level}: ${count}`)
+          .join(' · '),
+      );
+    }
+    this.terrainGenerationQueue.drain(
+      this.terrainGenerationBudget(),
+      ({ key, value }) => this.addTerrainPatch(key, value),
+    );
+    if (this.terrainGenerationQueue.pendingCount === 0) {
+      for (const [key, mesh] of this.terrainPatches) {
+        if (!this.terrainGenerationQueue.desired.has(key)) {
+          this.removeTerrainPatch(key, mesh);
+        }
+      }
+    }
+    this.terrainPatchCount.set(this.terrainPatches.size);
+    this.terrainQueuedPatchCount.set(this.terrainGenerationQueue.pendingCount);
+  }
+
+  private getTerrainPatchDistance(address: {
+    level: number;
+    angularIndex: number;
+    axialIndex: number;
+  }): number {
+    const bounds = this.terrainDomain.getPatchBounds(address);
+    const centre = this.terrainDomain.getSurfacePosition(
+      address,
+      (bounds.minU + bounds.maxU) / 2,
+      (bounds.minV + bounds.maxV) / 2,
+      0,
+    );
+    const camera = this.engine.camera.position;
+    return Math.hypot(
+      centre[0] - camera.x,
+      centre[1] - camera.y,
+      centre[2] - camera.z,
+    );
+  }
+
+  private addTerrainPatch(
+    key: string,
+    address: { level: number; angularIndex: number; axialIndex: number },
+  ): void {
+    if (this.terrainGroup === null || this.terrainMaterial === null) return;
+    const patch = generateTerrainPatchMesh(
+      this.terrainField,
+      this.terrainDomain,
+      {
+        address,
+        resolution: TERRAIN_PATCH_RESOLUTION,
+        skirtDepthM: TERRAIN_SKIRT_DEPTH_M,
+      },
+    );
+    const mesh = new Mesh(
+      this.createTerrainGeometry(patch.centerWorldM, patch.surface),
+      this.terrainMaterial,
+    );
+    if (patch.skirt) {
+      mesh.add(
+        new Mesh(
+          this.createTerrainGeometry(patch.centerWorldM, patch.skirt),
+          this.terrainMaterial,
+        ),
+      );
+    }
+    mesh.position.set(...patch.centerWorldM);
+    this.terrainGroup.add(mesh);
+    this.terrainPatches.set(key, mesh);
+  }
+
+  private createTerrainGeometry(
+    centerWorldM: TerrainVector3,
+    source: {
+      positions: Float32Array;
+      normals: Float32Array;
+      uvs: Float32Array;
+      indices: Uint16Array | Uint32Array;
+    },
+  ): BufferGeometry {
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(source.positions, 3));
+    geometry.setAttribute('normal', new BufferAttribute(source.normals, 3));
+    geometry.setAttribute('uv', new BufferAttribute(source.uvs, 2));
+    geometry.setAttribute(
+      'color',
+      new BufferAttribute(
+        createCylinderBiomeColors(centerWorldM, source.positions, this.radius),
+        3,
+      ),
+    );
+    geometry.setIndex(new BufferAttribute(source.indices, 1));
+    return geometry;
+  }
+
+  private removeTerrainPatch(key: string, mesh: Mesh): void {
+    mesh.removeFromParent();
+    mesh.traverse((object) => {
+      if (object instanceof Mesh) object.geometry.dispose();
+    });
+    this.terrainPatches.delete(key);
   }
 
   private disposeVisualTerrain(): void {
+    this.terrainGenerationQueue.clear();
     const group = this.terrainGroup;
     if (group === null) return;
     group.removeFromParent();
-    group.traverse((object) => {
-      if (object instanceof Mesh) object.geometry.dispose();
-    });
-    for (const material of group.userData[
-      'ownedMaterials'
-    ] as MeshStandardMaterial[]) {
-      material.dispose();
-    }
+    for (const [key, mesh] of [...this.terrainPatches])
+      this.removeTerrainPatch(key, mesh);
+    this.terrainMaterial?.dispose();
+    this.terrainMaterial = null;
     group.clear();
     this.terrainGroup = null;
+    this.terrainSelectionSignature = '';
+    this.terrainPatchCount.set(0);
+    this.terrainQueuedPatchCount.set(0);
+    this.terrainLodLabel.set('L0: 0');
   }
+}
+
+function smoothstep(edge0: number, edge1: number, value: number): number {
+  const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+function cylinderBiomeElevation(axialM: number, arcM: number): number {
+  const continental =
+    Math.sin(axialM / 7_800 + arcM / 11_000) * 0.65 +
+    Math.cos(arcM / 9_200 - axialM / 15_000) * 0.55;
+  const mountainMask = smoothstep(0.3, 0.85, continental);
+  const oceanMask = smoothstep(0.25, 0.75, -continental);
+  const meadow = Math.sin(axialM / 1_450) * 12 + Math.cos(arcM / 1_800) * 8;
+  const ridges =
+    120 +
+    Math.abs(Math.sin(axialM / 1_050 + arcM / 1_700)) * 410 +
+    Math.abs(Math.cos(arcM / 730 - axialM / 2_100)) * 130;
+  const oceanFloor = -280 + Math.sin(axialM / 3_100 + arcM / 2_700) * 25;
+  return (
+    meadow * (1 - mountainMask) * (1 - oceanMask) +
+    ridges * mountainMask +
+    oceanFloor * oceanMask
+  );
+}
+
+function createCylinderBiomeColors(
+  centerWorldM: TerrainVector3,
+  positions: Float32Array,
+  radiusM: number,
+): Float32Array {
+  const colors = new Float32Array(positions.length);
+  const ocean = new Color('#315f78');
+  const meadow = new Color('#5f9856');
+  const mountain = new Color('#806f5b');
+  const snow = new Color('#c3c5bc');
+  const color = new Color();
+  for (let offset = 0; offset < positions.length; offset += 3) {
+    const y = centerWorldM[1] + positions[offset + 1];
+    const z = centerWorldM[2] + positions[offset + 2];
+    const elevation = radiusM - Math.hypot(y, z);
+    if (elevation < -80) color.copy(ocean);
+    else if (elevation < 120) color.copy(meadow);
+    else if (elevation < 500)
+      color.copy(meadow).lerp(mountain, (elevation - 120) / 380);
+    else color.copy(mountain).lerp(snow, Math.min(1, (elevation - 500) / 180));
+    colors[offset] = color.r;
+    colors[offset + 1] = color.g;
+    colors[offset + 2] = color.b;
+  }
+  return colors;
 }
 
 function createStarTexture(): DataTexture {

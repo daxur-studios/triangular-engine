@@ -3,6 +3,7 @@ import {
   ChangeDetectorRef,
   Component,
   DestroyRef,
+  computed,
   inject,
   signal,
 } from '@angular/core';
@@ -19,6 +20,7 @@ import {
   PerspectiveCamera,
   PlaneGeometry,
   ShaderMaterial,
+  Vector2,
   Vector3,
   WebGLRenderer,
   type Vector3Tuple,
@@ -37,6 +39,10 @@ import {
   WATER_FRESNEL_GLSL,
   WATER_LOD_CULL_GLSL,
   WATER_LOD_MORPH_GLSL,
+  WATER_LOGDEPTH_FRAGMENT_GLSL,
+  WATER_LOGDEPTH_PARS_FRAGMENT_GLSL,
+  WATER_LOGDEPTH_PARS_VERTEX_GLSL,
+  WATER_LOGDEPTH_VERTEX_GLSL,
   WATER_SHADING_UNIFORMS_GLSL,
   WaterDepthPrepass,
   computeWaterLodBoundaryRadius,
@@ -66,20 +72,32 @@ const PRESET_LABELS: Record<PresetKey, string> = {
   storm: 'Storm',
 };
 
-const GRID_OPTIONS: WaterLodGridOptions = {
+/**
+ * Ring count is the one grid parameter exposed as a runtime slider (see
+ * `setRingCount`): each added ring roughly doubles the covered radius for a
+ * fixed per-ring instance budget (CDLOD's whole point), so it's a cheap way
+ * to push the "how far does the ocean extend" boundary out. It does not by
+ * itself make the ocean infinite — see the runbook's still-unbuilt "far
+ * skirt to the horizon line" note under Mesh/LOD.
+ */
+const BASE_GRID_OPTIONS = {
   baseCellSize: 4,
   patchResolution: 8,
   coreSizePatches: 16,
-  ringCount: 3,
-};
+} as const;
+
+const DEFAULT_RING_COUNT = 4;
+const MIN_RING_COUNT = 1;
+const MAX_RING_COUNT = 7;
 
 const MAX_INSTANCES_PER_LEVEL =
-  GRID_OPTIONS.coreSizePatches * GRID_OPTIONS.coreSizePatches;
+  BASE_GRID_OPTIONS.coreSizePatches * BASE_GRID_OPTIONS.coreSizePatches;
 
 /** Effectively "never" for the outermost level's outer cull test. */
 const OUTER_CULL_SENTINEL = 1e9;
 
 const VERTEX_SHADER = `
+  ${WATER_LOGDEPTH_PARS_VERTEX_GLSL}
   ${GERSTNER_UNIFORMS_GLSL}
   ${GERSTNER_DISPLACE_GLSL}
   ${GERSTNER_NORMAL_GLSL}
@@ -104,10 +122,12 @@ const VERTEX_SHADER = `
     vec4 viewPos = viewMatrix * vec4(displaced, 1.0);
     vFragViewZ = viewPos.z;
     gl_Position = projectionMatrix * viewPos;
+    ${WATER_LOGDEPTH_VERTEX_GLSL}
   }
 `;
 
 const FRAGMENT_SHADER = `
+  ${WATER_LOGDEPTH_PARS_FRAGMENT_GLSL}
   ${WATER_LOD_CULL_GLSL}
   ${WATER_SHADING_UNIFORMS_GLSL}
   ${WATER_DETAIL_NORMAL_GLSL}
@@ -145,6 +165,7 @@ const FRAGMENT_SHADER = `
     vec3 color = mix(base, vec3(1.0), fresnel * 0.4);
 
     gl_FragColor = vec4(color, shoreFade);
+    ${WATER_LOGDEPTH_FRAGMENT_GLSL}
   }
 `;
 
@@ -165,7 +186,12 @@ const FRAGMENT_SHADER = `
   templateUrl: './water-material-poc-page.component.html',
   styleUrl: './water-material-poc-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [EngineService.provide({ showFPS: true })],
+  providers: [
+    EngineService.provide({
+      showFPS: true,
+      webGLRendererParameters: { logarithmicDepthBuffer: true },
+    }),
+  ],
   host: { class: 'flex-page' },
 })
 export class WaterMaterialPocPageComponent {
@@ -174,6 +200,15 @@ export class WaterMaterialPocPageComponent {
   readonly activePreset = signal<PresetKey>('oceanSwell');
   readonly detailChop = signal(true);
   readonly shoreFade = signal(true);
+  readonly ringCount = signal(DEFAULT_RING_COUNT);
+  readonly minRingCount = MIN_RING_COUNT;
+  readonly maxRingCount = MAX_RING_COUNT;
+  readonly outerExtentMeters = computed(() => {
+    const halfCountPatches = BASE_GRID_OPTIONS.coreSizePatches / 2;
+    const patchWorldSize =
+      BASE_GRID_OPTIONS.baseCellSize * 2 ** this.ringCount();
+    return Math.round(halfCountPatches * patchWorldSize);
+  });
 
   readonly initialCameraPosition: Vector3Tuple = [70, 30, 110];
   readonly initialTarget: Vector3Tuple = [10, -2, 0];
@@ -189,6 +224,8 @@ export class WaterMaterialPocPageComponent {
   private readonly patchGeometry: BufferGeometry;
   private readonly shoreMesh: Mesh;
   private readonly depthPrepass: WaterDepthPrepass;
+  private readonly drawingBufferSize = new Vector2();
+  private gridOptions: WaterLodGridOptions;
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -206,10 +243,10 @@ export class WaterMaterialPocPageComponent {
       }),
       detailTiling: 6,
       detailStrength: 0.45,
-      absorptionDistance: 5,
+      absorptionDistance: 40,
       shoreFadeDistance: 3,
       colorShallow: '#8fe3ff',
-      colorDeep: '#04283f',
+      colorDeep: '#0e4a73',
     });
 
     this.shoreMesh = new Mesh(
@@ -218,52 +255,16 @@ export class WaterMaterialPocPageComponent {
     );
     this.engine.scene.add(this.shoreMesh);
 
-    this.patchGeometry = createWaterLodPatchGeometry(GRID_OPTIONS.patchResolution);
-    const halfCountPatches = GRID_OPTIONS.coreSizePatches / 2;
+    this.patchGeometry = createWaterLodPatchGeometry(
+      BASE_GRID_OPTIONS.patchResolution,
+    );
+    this.gridOptions = { ...BASE_GRID_OPTIONS, ringCount: this.ringCount() };
+    this.buildGrid(this.gridOptions);
 
-    for (let level = 0; level <= GRID_OPTIONS.ringCount; level++) {
-      const patchWorldSize = GRID_OPTIONS.baseCellSize * 2 ** level;
-      const outerHalfExtent = halfCountPatches * patchWorldSize;
-      const isOutermost = level === GRID_OPTIONS.ringCount;
-
-      const innerCullRadius =
-        level > 0 ? computeWaterLodBoundaryRadius(level, GRID_OPTIONS) : 0;
-      const outerCullRadius = isOutermost
-        ? OUTER_CULL_SENTINEL
-        : computeWaterLodBoundaryRadius(level + 1, GRID_OPTIONS);
-      const morphEnd = isOutermost ? outerHalfExtent : outerCullRadius;
-      const morphStart = Math.max(morphEnd - 2 * patchWorldSize, 0);
-
-      const material = new ShaderMaterial({
-        uniforms: {
-          ...this.gerstnerUniforms,
-          ...this.shadingUniforms,
-          uTime: this.uTime,
-          uCellSize: { value: patchWorldSize / GRID_OPTIONS.patchResolution },
-          uMorphStart: { value: morphStart },
-          uMorphEnd: { value: morphEnd },
-          uInnerCullRadius: { value: innerCullRadius },
-          uOuterCullRadius: { value: outerCullRadius },
-          uLightDirection: { value: new Vector3(0.4, 0.8, 0.3).normalize() },
-          uDetailEnabled: { value: 1 },
-          uShoreFadeEnabled: { value: 1 },
-        },
-        vertexShader: VERTEX_SHADER,
-        fragmentShader: FRAGMENT_SHADER,
-        side: DoubleSide,
-        transparent: true,
-        depthWrite: false,
-      });
-      this.levelMaterials.push(material);
-
-      const mesh = new InstancedMesh(this.patchGeometry, material, MAX_INSTANCES_PER_LEVEL);
-      mesh.count = 0;
-      mesh.frustumCulled = false;
-      this.engine.scene.add(mesh);
-      this.levelMeshes.push(mesh);
-    }
-
-    this.depthPrepass = new WaterDepthPrepass(this.engine.width, this.engine.height);
+    this.depthPrepass = new WaterDepthPrepass(
+      this.engine.width,
+      this.engine.height,
+    );
 
     destroyRef.onDestroy(() => {
       this.engine.scene.background = previousBackground;
@@ -310,6 +311,81 @@ export class WaterMaterialPocPageComponent {
     }
   }
 
+  /** Rebuilds the LOD grid at a new ring count — the level count itself changes, so this disposes and recreates every level's mesh/material rather than patching uniforms in place. */
+  setRingCount(value: number | string): void {
+    const clamped = Math.min(
+      MAX_RING_COUNT,
+      Math.max(MIN_RING_COUNT, Math.round(Number(value))),
+    );
+    if (clamped === this.ringCount()) return;
+    this.ringCount.set(clamped);
+    this.disposeGrid();
+    this.gridOptions = { ...BASE_GRID_OPTIONS, ringCount: clamped };
+    this.buildGrid(this.gridOptions);
+  }
+
+  private buildGrid(gridOptions: WaterLodGridOptions): void {
+    const halfCountPatches = gridOptions.coreSizePatches / 2;
+
+    for (let level = 0; level <= gridOptions.ringCount; level++) {
+      const patchWorldSize = gridOptions.baseCellSize * 2 ** level;
+      const outerHalfExtent = halfCountPatches * patchWorldSize;
+      const isOutermost = level === gridOptions.ringCount;
+
+      const innerCullRadius =
+        level > 0 ? computeWaterLodBoundaryRadius(level, gridOptions) : 0;
+      const outerCullRadius = isOutermost
+        ? OUTER_CULL_SENTINEL
+        : computeWaterLodBoundaryRadius(level + 1, gridOptions);
+      const morphEnd = isOutermost ? outerHalfExtent : outerCullRadius;
+      const morphStart = Math.max(morphEnd - 2 * patchWorldSize, 0);
+
+      const material = new ShaderMaterial({
+        uniforms: {
+          ...this.gerstnerUniforms,
+          ...this.shadingUniforms,
+          uTime: this.uTime,
+          uCellSize: { value: patchWorldSize / gridOptions.patchResolution },
+          uMorphStart: { value: morphStart },
+          uMorphEnd: { value: morphEnd },
+          uInnerCullRadius: { value: innerCullRadius },
+          uOuterCullRadius: { value: outerCullRadius },
+          uLightDirection: { value: new Vector3(0.4, 0.8, 0.3).normalize() },
+          uDetailEnabled: { value: this.detailChop() ? 1 : 0 },
+          uShoreFadeEnabled: { value: this.shoreFade() ? 1 : 0 },
+        },
+        vertexShader: VERTEX_SHADER,
+        fragmentShader: FRAGMENT_SHADER,
+        side: DoubleSide,
+        transparent: true,
+        depthWrite: false,
+      });
+      this.levelMaterials.push(material);
+
+      const mesh = new InstancedMesh(
+        this.patchGeometry,
+        material,
+        MAX_INSTANCES_PER_LEVEL,
+      );
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      this.engine.scene.add(mesh);
+      this.levelMeshes.push(mesh);
+    }
+  }
+
+  private disposeGrid(): void {
+    for (const mesh of this.levelMeshes) {
+      mesh.removeFromParent();
+      mesh.dispose();
+    }
+    for (const material of this.levelMaterials) {
+      material.dispose();
+    }
+    this.levelMeshes.length = 0;
+    this.levelMaterials.length = 0;
+  }
+
   private tick(deltaTime: number): void {
     this.uTime.value = this.engine.clock.getElapsedTime();
 
@@ -317,7 +393,7 @@ export class WaterMaterialPocPageComponent {
     const levels = computeWaterLodLevels(
       camera.position.x,
       camera.position.z,
-      GRID_OPTIONS,
+      this.gridOptions,
     );
 
     for (let i = 0; i < levels.length; i++) {
@@ -326,7 +402,11 @@ export class WaterMaterialPocPageComponent {
       mesh.count = level.instances.length;
       for (let j = 0; j < level.instances.length; j++) {
         const instance = level.instances[j];
-        this.scratchMatrix.makeScale(level.patchWorldSize, 1, level.patchWorldSize);
+        this.scratchMatrix.makeScale(
+          level.patchWorldSize,
+          1,
+          level.patchWorldSize,
+        );
         this.scratchMatrix.setPosition(instance.x, 0, instance.z);
         mesh.setMatrixAt(j, this.scratchMatrix);
       }
@@ -338,13 +418,22 @@ export class WaterMaterialPocPageComponent {
     this.changeDetector.detectChanges();
   }
 
-  /** Captures opaque scene depth (water hidden) for this frame's shore-fade/tint sampling. */
+  /**
+   * Captures opaque scene depth (water hidden) for this frame's shore-fade/tint
+   * sampling. Must be sized and sampled in physical framebuffer pixels
+   * (`getDrawingBufferSize`), not `engine.width`/`height` (CSS pixels) — the
+   * fragment shader's `gl_FragCoord` is always physical pixels, and dividing it
+   * by a CSS-pixel resolution left `screenUV` running past 1.0 on any display
+   * with devicePixelRatio > 1, sampling the depth texture's clamped edge
+   * instead of the real depth almost everywhere.
+   */
   private captureDepth(): void {
     const renderer = this.engine.renderer;
     if (!(renderer instanceof WebGLRenderer)) return;
 
-    const width = this.engine.width;
-    const height = this.engine.height;
+    renderer.getDrawingBufferSize(this.drawingBufferSize);
+    const width = this.drawingBufferSize.x;
+    const height = this.drawingBufferSize.y;
     this.depthPrepass.setSize(width, height);
     this.depthPrepass.capture(
       renderer,

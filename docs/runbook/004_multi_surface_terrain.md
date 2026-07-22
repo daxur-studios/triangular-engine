@@ -342,3 +342,36 @@ broadly stage this workspace.
   the cylinder keeps its proportions by scaling radius and length together.
   Camera position and LOD distances scale with the body so visual framing and
   relative selection behavior remain comparable between sizes.
+
+### 2026-07-22 — Phase 4b active cylinder streaming integration
+
+- Promoted the visually accepted Terrain Lab selection into
+  `/takram-cylinder-clouds`. Generated mode now maintains a camera-driven keyed
+  resident set through the shared adaptive selector instead of constructing a
+  fixed 192-patch level-zero cylinder once.
+- Added level 0–3 selection, visual skirts across mixed-resolution boundaries,
+  resident-count and per-level diagnostics, and a 0.5×–2× refinement-radius
+  control. Stable patch keys reuse unchanged meshes as the camera moves.
+- Replaced the uniformly hilly active field with cylinder-scale deterministic
+  ocean basins, flat meadow regions, mountain ridges, and elevation-driven
+  vertex colours. The smooth textured cylinder remains the fallback mode.
+- Generation and disposal are still synchronous on the example owner; worker
+  scheduling and per-frame generation budgets remain Phase 4 follow-up work.
+
+### 2026-07-22 — Phase 4c scheduled generation queue
+
+- Added a framework-free `TerrainGenerationQueue` to the terrain package. It
+  reconciles desired and resident keys, cancels superseded work, prioritises
+  requests numerically, and lets the runtime drain a bounded number of jobs.
+- Terrain Lab and `/takram-cylinder-clouds` now default to a generous 12 patch
+  generations per frame with an adjustable 1–32 patch budget and live queued
+  count. Patch centres nearest the camera are generated first.
+- Obsolete resident patches remain visible while replacement work is queued,
+  then are disposed once the desired cut is complete. This trades brief overlap
+  for continuous coverage during camera jumps.
+- The queue boundary is ready for a future Web Worker producer: field sampling
+  and meshing can move off-thread without changing desired/resident ownership.
+- Terrain Lab sphere testing now includes stepped presets from the original
+  650 m radius through approximately Earth scale (6,371 km radius).
+- Next: add the optional terrain-to-Jolt collider adapter under the Jolt entry
+  point, then prove a smaller/coarser physics resident set before BSP migration.

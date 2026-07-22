@@ -67,23 +67,48 @@
         </small>
       </label>
       <label class="radius-control">
-        <span>Body size: {{ bodySizeLabel() }}</span>
+        <span>Generation budget: {{ generationBudget() }} patches/frame</span>
         <input
           type="range"
-          min="0.5"
-          max="3"
-          step="0.25"
-          [disabled]="shape() === 'plane'"
-          [value]="bodySizeScale()"
-          (change)="setBodySizeScale($event)"
+          min="1"
+          max="32"
+          step="1"
+          [value]="generationBudget()"
+          (input)="setGenerationBudget($event)"
         />
+        <small>Nearest desired patches are generated first.</small>
+      </label>
+      <label class="radius-control">
+        <span>Body size: {{ bodySizeLabel() }}</span>
+        @if (shape() === "sphere") {
+          <input
+            type="range"
+            min="0"
+            max="4"
+            step="1"
+            [value]="sphereSizePresetIndex()"
+            (change)="setSphereSizePreset($event)"
+          />
+        } @else {
+          <input
+            type="range"
+            min="0.5"
+            max="3"
+            step="0.25"
+            [disabled]="shape() === 'plane'"
+            [value]="bodySizeScale()"
+            (change)="setBodySizeScale($event)"
+          />
+        }
         <small>
-          Sphere changes radius. Cylinder scales radius and length together.
+          Sphere offers 650 m through Earth-scale presets. Cylinder scales
+          radius and length together.
         </small>
       </label>
       <div class="stats">
         <span>World origin: {{ coordinateLabel() }}</span>
         <span>Resident patches: {{ patchCount() }}</span>
+        <span>Queued patches: {{ queuedPatchCount() }}</span>
         <span>LOD distribution: {{ lodLabel() }}</span>
         <span>Camera patch: {{ centrePatchLabel() }}</span>
         <span>Reference grid: 100 m below datum</span>

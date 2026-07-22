@@ -9,3 +9,4 @@ export * from './domains/sphere-terrain-domain';
 export * from './domains/cylinder-terrain-domain';
 export * from './meshing/terrain-patch-mesher';
 export * from './streaming/terrain-patch-selection';
+export * from './streaming/terrain-generation-queue';

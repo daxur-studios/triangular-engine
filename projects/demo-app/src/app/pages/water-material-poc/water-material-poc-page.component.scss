@@ -14,4 +14,7 @@ button:hover, button.active { border-color: #65c9ee; background: #17384a; }
 .checkbox { display: inline-flex; align-items: center; gap: .4rem; padding: .45rem .7rem; color: #dcebf3; border: 1px solid #315064; border-radius: .35rem; background: #102330; cursor: pointer; }
 .checkbox:hover { border-color: #65c9ee; background: #17384a; }
 .checkbox input { margin: 0; }
+.slider { display: flex; flex-direction: column; gap: .35rem; padding: .45rem .7rem; min-width: 12rem; color: #dcebf3; border: 1px solid #315064; border-radius: .35rem; background: #102330; font-size: .82rem; }
+.slider input { width: 100%; accent-color: #65c9ee; }
+.blurb.note { margin: .6rem 0 0; font-size: .78rem; color: #8fa9b8; }
 @media (max-width: 48rem) { .panel { width: calc(100vw - 1rem); padding: .65rem; } header { align-items: flex-start; flex-direction: column; } }

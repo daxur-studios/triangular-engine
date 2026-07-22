@@ -30,6 +30,17 @@
       </nav>
 
       <div class="actions">
+        <label class="slider">
+          Ring count: {{ ringCount() }} (~{{ outerExtentMeters() }}m radius)
+          <input
+            type="range"
+            [min]="minRingCount"
+            [max]="maxRingCount"
+            step="1"
+            [value]="ringCount()"
+            (input)="setRingCount($any($event.target).value)"
+          />
+        </label>
         <label class="checkbox">
           <input
             type="checkbox"
@@ -47,6 +58,13 @@
           Shore fade / depth tint
         </label>
       </div>
+
+      <p class="blurb note">
+        Each ring roughly doubles the covered radius for a fixed instance
+        budget, so pushing this is cheap — but the grid is still finite:
+        there's a hard edge at the boundary above, with no far horizon skirt
+        yet (tracked in the runbook's Mesh/LOD notes).
+      </p>
     </section>
   </ng-template>
 
@@ -54,6 +72,7 @@
     [cameraPosition]="initialCameraPosition"
     [target]="initialTarget"
     [near]="0.1"
+    [far]="5000"
   />
   <ambientLight [intensity]="1.6" />
   <directionalLight [position]="[10, 20, 12]" [intensity]="2.5" />
