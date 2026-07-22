@@ -42,6 +42,8 @@ export class TakramCylinderCloudShellComponent {
   readonly weatherRepeat = input<readonly [number, number]>([2, 2]);
   /** Takram's mutable accumulated weather offset; share the same instance. */
   readonly weatherOffset = input<Vector2 | null>();
+  /** Scales shared weather-map advection so stacked shells can move independently. */
+  readonly weatherOffsetScale = input(1);
   readonly weatherVelocity = input<readonly [number, number]>([0, 0]);
   readonly fadeStart = input(8_000);
   readonly fadeEnd = input(18_000);
@@ -52,6 +54,7 @@ export class TakramCylinderCloudShellComponent {
     weatherTexture: new Uniform<Texture | null>(null),
     weatherRepeat: new Uniform(new Vector2(2, 2)),
     weatherOffset: new Uniform(new Vector2()),
+    weatherOffsetScale: new Uniform(1),
     coverage: new Uniform(0.5),
     evolutionAmount: new Uniform(0.025),
     evolutionSpeed: new Uniform(4),
@@ -77,6 +80,7 @@ void main() {
 uniform sampler2D weatherTexture;
 uniform vec2 weatherRepeat;
 uniform vec2 weatherOffset;
+uniform float weatherOffsetScale;
 uniform float coverage;
 uniform float evolutionAmount;
 uniform float evolutionSpeed;
@@ -94,7 +98,8 @@ void main() {
     angle * RECIPROCAL_PI2 + 0.5,
     vCloudShellWorldPosition.x / (cylinderRadius * 6.283185307179586)
   );
-  vec2 weatherUv = cylinderUv * weatherRepeat + weatherOffset;
+  vec2 weatherUv =
+    cylinderUv * weatherRepeat + weatherOffset * weatherOffsetScale;
   float phaseTime = evolutionTime * evolutionSpeed;
   vec2 evolution = vec2(
     sin(phaseTime * 0.017),
@@ -166,6 +171,7 @@ void main() {
       this.uniforms.weatherRepeat.value.set(...this.weatherRepeat());
       this.uniforms.weatherOffset.value =
         this.weatherOffset() ?? this.fallbackOffset;
+      this.uniforms.weatherOffsetScale.value = this.weatherOffsetScale();
       this.uniforms.coverage.value = this.coverage();
       this.uniforms.evolutionAmount.value = Math.max(0, this.evolutionAmount());
       this.uniforms.evolutionSpeed.value = Math.max(0, this.evolutionSpeed());

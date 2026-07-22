@@ -464,10 +464,33 @@
     "
     [weatherRepeat]="[2, 2]"
     [weatherOffset]="cloudEffect.effect?.localWeatherOffset"
+    [weatherOffsetScale]="1.35"
     [weatherVelocity]="[windSpeedX(), 0]"
     [fadeStart]="distanceShellFadeStart()"
     [fadeEnd]="distanceShellFadeEnd()"
     [opacity]="distanceShellOpacity()"
+    [enabled]="enabled() && distanceShell()"
+  />
+
+  <takram-cylinder-cloud-shell
+    [radius]="radius"
+    [length]="length"
+    [altitude]="altitude() + cloudHeight() + 350"
+    [height]="500"
+    [layerPosition]="0.5"
+    [coverage]="coverage() * 0.82"
+    [evolutionAmount]="distanceShellEvolution() * 0.7"
+    [evolutionSpeed]="distanceShellEvolutionSpeed() * 0.4"
+    [weatherTexture]="
+      cloudTextures.selectedTexture() ?? cloudEffect.effect?.localWeatherTexture
+    "
+    [weatherRepeat]="[1.35, 1.35]"
+    [weatherOffset]="cloudEffect.effect?.localWeatherOffset"
+    [weatherOffsetScale]="0.55"
+    [weatherVelocity]="[windSpeedX(), 0]"
+    [fadeStart]="distanceShellFadeStart()"
+    [fadeEnd]="distanceShellFadeEnd()"
+    [opacity]="distanceShellOpacity() * 0.65"
     [enabled]="enabled() && distanceShell()"
   />
 </scene>

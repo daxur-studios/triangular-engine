@@ -58,10 +58,10 @@ export class TakramCylinderCloudsPageComponent {
   readonly resolutionScale = signal(0.5);
   readonly altitude = signal(450);
   readonly cloudHeight = signal(1_400);
-  readonly coverage = signal(0.62);
+  readonly coverage = signal(0.28);
   readonly densityScale = signal(0.5);
   readonly distanceShell = signal(true);
-  readonly distanceShellOpacity = signal(0.82);
+  readonly distanceShellOpacity = signal(0.24);
   readonly distanceShellEvolution = signal(0.025);
   readonly distanceShellEvolutionSpeed = signal(4);
   readonly distanceShellFadeStart = signal(3_000);
@@ -69,9 +69,9 @@ export class TakramCylinderCloudsPageComponent {
   readonly windSpeedX = signal(0.005);
   readonly haze = signal(true);
   readonly hazeModel = signal<'legacy' | 'bounded-v2'>('bounded-v2');
-  readonly atmosphereDensity = signal(0.00006);
-  readonly atmosphereScaleHeight = signal(1_800);
-  readonly atmosphereSkyLight = signal(1);
+  readonly atmosphereDensity = signal(0.000005);
+  readonly atmosphereScaleHeight = signal(500);
+  readonly atmosphereSkyLight = signal(0.2);
   readonly atmosphereEnabled = signal(true);
   readonly atmosphereScatteringDensity = signal(0.000008);
   readonly atmosphereIntensity = signal(0.12);
