@@ -259,6 +259,8 @@ broadly stage this workspace.
 - Added `/terrain-lab` to the demo app. It renders 25 generated patches and can
   switch sampling between the origin and approximately one billion metres while
   retaining a small render-local coordinate frame.
+- Added a toggleable border diagnostic that traces every patch's sampled outer
+  edge, making the 25 independent meshes and their seamless joins explicit.
 - Kept floating-origin ownership outside the terrain package. Terrain emits f64
   world centres plus f32 local vertices; the example (and later BSP) applies the
   active render origin to patch objects.

@@ -36,6 +36,11 @@ A production-quality water system usable by any triangular-engine game
   underwater effect must run on the `triangular-engine/postprocessing` composer.
 - Later: spline-based flowing rivers with the same water behaviour, where flow
   velocity feeds both the shader and buoyancy drag.
+- Three base shapes, matching `004_multi_surface_terrain.md`'s domain triad:
+  infinite plane (BSP's local/flat water), planetary sphere (convex, water
+  curves away from the camera), and O'Neill-cylinder interior (concave, water
+  curves the opposite way — up and around, not down and away). Plane is the
+  only one built so far (Phase 1a); see Phase 1a's domain note.
 
 Intended consumer API (selector names may change after prototyping):
 
@@ -340,13 +345,55 @@ Exit gate: the buoy visibly rides the GPU-displaced waves with no offset —
 proving the single-surface-model premise before anything else is built.
 **Met and user-verified 2026-07-22** — see investigation log.
 
-### Phase 1 — Ocean and lake, low + medium tiers
+### Phase 1a — Large-scale LOD proof (CDLOD-style morphing clipmap)
+
+Large-scale water is the actual point of this library for BSP, not a
+polish pass — this phase proves it before any material work lands on top.
+Terrain's `patch-mesher.ts` uses independent quadtree patches stitched with
+skirts (a hidden-seam workaround, not seam-free by construction); water's
+grid deliberately does not repeat that. See `004_multi_surface_terrain.md`
+for the parallel, independently-authorised terrain rewrite — it is heading
+toward a clipmap for its plane domain too, and both docs agree water stays
+decoupled from terrain generation, so this phase does not touch terrain code.
+
+- [ ] Concentric-ring clipmap grid: one shared regular vertex raster, not
+      independent tiles, grid-snapped to the camera so rings never drift out
+      of alignment with each other.
+- [ ] Continuous CDLOD-style vertex morphing between ring resolutions — each
+      vertex interpolates toward its coarser-ring position as it nears the
+      ring boundary, so the LOD switch is invisible and no skirt geometry is
+      needed.
+- [ ] Wireframe debug toggle to see the morph live and confirm there is no
+      popping, no T-junctions, and no crack at any ring boundary.
+- [ ] POC demo page: flat shaded water, large radius, camera flythrough at
+      speed, wireframe toggle, perf overlay.
+
+Exit gate: continuous coverage at a large radius (document the tested
+radius/ring-count and frame cost), zero visible seams/cracks/popping in
+either wireframe or shaded view at any camera speed, user-verified.
+
+**Domain note**: this phase implements the plane domain only —
+`computeWaterLodLevels` places patches directly in world XZ, which only
+makes sense where "flat and infinite" is the right model. Sphere (planetary)
+and cylinder-interior (O'Neill hab, opposite curvature to a planet) are
+required shapes for this library, not stretch goals, but they are not this
+phase's job: 004's `ITerrainSurfaceDomain<TAddress>` contract
+(`getPatchBounds`/`getFieldPosition`/`getSurfacePosition`/`getGeometricErrorM`)
+is the right shape for water's own domain adapters later, since both systems
+need the same plane/sphere/cylinder parametrisations. The CDLOD morph
+*technique* (snap toward a coarser grid, blend by distance) is domain-
+agnostic; `computeWaterLodLevels`'s placement math is not, and should not be
+mistaken for shape-agnostic infrastructure when sphere/cylinder work starts.
+Water should follow, not lead, 004's sphere/cylinder domains rather than
+inventing a second version — track as a new phase once 004 has them.
+
+### Phase 1b — Ocean and lake material, low + medium tiers
 
 - [ ] Water material: scrolling detail normals, fresnel, absorption colour,
-      depth-texture shoreline fade and depth tint.
+      depth-texture shoreline fade and depth tint, built on the Phase 1a grid.
 - [ ] Shore foam band (medium tier) from depth delta.
-- [ ] Camera-following clipmap grid for `water-ocean` (grid-snapped, ring LODs,
-      horizon skirt); bounded mesh for `water-lake`.
+- [ ] Bounded mesh (distance-based segment density, no clipmap needed) for
+      `water-lake`.
 - [ ] `water-ocean` / `water-lake` components + `WaterService` registry with
       `sample()`.
 - [ ] Quality presets (`low`/`medium`) switchable at runtime; wave presets as
@@ -515,7 +562,7 @@ Checked our phased plan against a broader ocean-rendering feature list to spot g
 | Underwater fog/distortion + waterline | Covered — Phase 2, this plan's cornerstone feature |
 | Caustics | Existing stretch goal, unscoped beyond that |
 | Boat wake | Gap — added as Phase 5b; the visible signature of "object moving through water" |
-| Infinite water + LOD clipmap | Covered — Phase 1 |
+| Infinite water + LOD clipmap | Covered — Phase 1a, CDLOD-style morphing clipmap, seam-free by construction |
 | Environment presets | Only wave presets exist today; bundling colour/foam/fog into full presets is now an open question |
 | Compile-time quality stripping | Matches intent — shader `#define`-gated tiers, disabled code excluded, not just branched at runtime |
 | Multiplayer determinism | Already true by construction — `WaterSurface` is a pure function of (position, time), so synced clients compute identical waves with no extra sync code |
@@ -544,6 +591,15 @@ waterline never depended on the expensive rendering-only detail layer.
   `projects/triangular-engine/src/lib/engine/features/environment/components/ocean.component.ts`
 - Runbook 001 (`001_add_takram_three_clouds.md`) — entry-point, optional-peer,
   and postprocessing-composer patterns this runbook reuses
+- Runbook 004 (`004_multi_surface_terrain.md`) — parallel, independently
+  authorised terrain rewrite; its plane domain is also heading toward a
+  clipmap, and it explicitly keeps water decoupled from terrain generation
+  (see Phase 1a). Worth checking before generalising water's clipmap into a
+  shared primitive.
+- Losasso & Hoppe, "Geometry Clipmaps" and Strugar's CDLOD — the vertex
+  raster + continuous-morph technique Phase 1a implements; chosen because it
+  is seam-free by construction, unlike terrain's current skirt-based
+  quadtree patches.
 
 ## Investigation log
 
@@ -617,3 +673,33 @@ waterline never depended on the expensive rendering-only detail layer.
   `ng test triangular-engine` (34/34 pass, includes the 10 new water specs)
   and `ng build demo-app --configuration development` (clean, water spike
   page bundles as its own lazy chunk).
+
+### 2026-07-22 — Phase 1 restructured around large-scale LOD first
+
+- User flagged that large-scale/planetary water — not a small demo rectangle —
+  is the most important part of this plan and was under-scoped: Phase 1's
+  clipmap was a bullet point, and true planet curvature was explicitly punted
+  to a not-yet-written BSP doc.
+- Checked `patch-mesher.ts`: terrain's current LOD is independent quadtree
+  patches stitched with skirts — confirmed this hides seams rather than
+  avoiding them by construction, matching the user's report of ongoing seam
+  trouble there "even after a lot of effort."
+- User asked for a from-scratch POC of a better LOD technique, referencing an
+  Unreal Engine effect where vertices visibly slide out of pre-existing
+  positions in wireframe. Identified this as CDLOD-style continuous vertex
+  morphing on a shared concentric-ring raster (geometry clipmap) — seam-free
+  because neighbouring rings share one grid and vertices morph continuously
+  into their coarser-LOD position before the LOD switch, rather than popping.
+- Split Phase 1 into 1a (large-scale LOD proof: morphing clipmap, wireframe
+  debug, flythrough POC page, no material work) and 1b (the original
+  material/tier work, now built on top of 1a's grid instead of a placeholder
+  plane).
+- Discovered `004_multi_surface_terrain.md` mid-discussion (opened by the
+  user): a parallel, independently-authorised terrain rewrite (Phase 0 only,
+  not touching the live cylinder) whose plane domain is also heading toward a
+  clipmap, and which already states terrain mesh output must support water
+  without coupling terrain generation to water rendering. No conflict — added
+  a cross-reference in both directions rather than merging the efforts.
+  Spherical/planetary curvature remains out of scope for this runbook's
+  Phase 1a (flat clipmap only); revisit once 1a proves out and 004 has a
+  sphere adapter to compare against.

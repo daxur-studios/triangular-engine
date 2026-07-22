@@ -1,0 +1,80 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Water LOD POC controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small>triangular-engine/water — Phase 1a POC</small>
+        </div>
+        <strong>Large-scale LOD (CDLOD-style morphing clipmap)</strong>
+      </header>
+
+      <p class="blurb">
+        Concentric ring levels, each an <code>InstancedMesh</code> sharing one
+        patch geometry. Placement comes from
+        <code>computeWaterLodLevels</code> (plain math, unit-tested); the vertex
+        shader morphs each patch's outer band toward the next-coarser grid so
+        ring boundaries never crack or pop. Toggle wireframe and level tint to
+        see it.
+      </p>
+
+      <nav aria-label="Wave preset">
+        @for (key of presetKeys; track key) {
+          <button
+            [class.active]="activePreset() === key"
+            (click)="selectPreset(key)"
+          >
+            {{ presetLabels[key] }}
+          </button>
+        }
+      </nav>
+
+      <div class="actions">
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="wireframe()"
+            (change)="toggleWireframe()"
+          />
+          Wireframe
+        </label>
+        <button (click)="toggleLevelTint()">Level tint</button>
+        <button [class.active]="flythrough()" (click)="toggleFlythrough()">
+          Flythrough
+        </button>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="showGrid()"
+            (change)="toggleGrid()"
+          />
+          Reference grid
+        </label>
+      </div>
+
+      <div class="legend" aria-label="Live stats">
+        <span>Instances: {{ instanceCount() }}</span>
+        <span>Triangles: {{ triangleCount() }}</span>
+      </div>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="initialCameraPosition"
+    [target]="initialTarget"
+    [near]="0.1"
+    [moveBy]="flythroughDelta()"
+  />
+  <ambientLight [intensity]="1.6" />
+  <directionalLight [position]="[10, 20, 12]" [intensity]="2.5" />
+
+  @if (showGrid()) {
+    <gridHelper
+      [position]="[0, -20, 0]"
+      [size]="4000"
+      [divisions]="200"
+      [color1]="'#3a6a80'"
+      [color2]="'#1a2e38'"
+    />
+  }
+</scene>
