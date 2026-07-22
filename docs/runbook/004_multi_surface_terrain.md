@@ -2,10 +2,10 @@
 
 ## Status
 
-- State: Phase 4a view-driven LOD implemented in Terrain Lab; awaiting visual verification
+- State: Phase 4d Jolt collider streaming and local-gravity character verified
 - Target entry point: `triangular-engine/terrain`
 - Initial consumers: infinite plane, sphere, O'Neill-cylinder interior
-- Last updated: 2026-07-22
+- Last updated: 2026-07-23
 
 ## Objective
 
@@ -373,5 +373,18 @@ broadly stage this workspace.
   and meshing can move off-thread without changing desired/resident ownership.
 - Terrain Lab sphere testing now includes stepped presets from the original
   650 m radius through approximately Earth scale (6,371 km radius).
-- Next: add the optional terrain-to-Jolt collider adapter under the Jolt entry
-  point, then prove a smaller/coarser physics resident set before BSP migration.
+- Next: tune grounded movement/jumping, move patch generation into workers, and
+  then begin the incremental BSP migration.
+
+## Phase 4d — Jolt terrain colliders and local gravity character
+
+- Added `TerrainJoltColliderAdapter` under `triangular-engine/jolt`; the terrain
+  package remains physics-agnostic and Jolt imports terrain contracts one-way.
+- The adapter creates streamed static triangle-mesh bodies from patch surface
+  geometry only. Visual LOD skirts are deliberately excluded from collision.
+- Terrain Lab now maintains a separate, smaller physics cut at maximum LOD 1
+  and resolution 12, independently of the visual cut at maximum LOD 3.
+- Added a dynamic capsule proof controlled with WASD and Space. Gravity/up are
+  plane down/up, sphere centre/outward, and cylinder radial outward/inward.
+- The common triangle backend supports all domains. A Jolt height-field backend
+  remains an optional future optimization for plane patches only.

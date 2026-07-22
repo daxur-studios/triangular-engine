@@ -38,6 +38,12 @@
         </button>
       </nav>
       <div class="actions">
+        <button [class.active]="characterEnabled()" (click)="toggleCharacter()">
+          Jolt character
+        </button>
+        <button [class.active]="physicsDebug()" (click)="togglePhysicsDebug()">
+          Physics debug
+        </button>
         <button
           [class.active]="largeCoordinates()"
           [disabled]="shape() !== 'plane'"
@@ -108,20 +114,25 @@
       <div class="stats">
         <span>World origin: {{ coordinateLabel() }}</span>
         <span>Resident patches: {{ patchCount() }}</span>
+        <span>Physics colliders: {{ colliderCount() }}</span>
         <span>Queued patches: {{ queuedPatchCount() }}</span>
         <span>LOD distribution: {{ lodLabel() }}</span>
         <span>Camera patch: {{ centrePatchLabel() }}</span>
         <span>Reference grid: 100 m below datum</span>
         <span>Each outlined tile is one mesh</span>
         <span>Rebase owner: example/app</span>
+        <span>Move: WASD · thrust/jump: Space</span>
       </div>
     </section>
   </ng-template>
   <orbitControls
     [cameraPosition]="[700, 650, 900]"
     [target]="[0, 0, 0]"
+    [follow]="characterEnabled() ? characterVisual : undefined"
+    [upVector]="orbitUpVector()"
     [near]="1"
   />
   <ambientLight [intensity]="1.5" />
   <directionalLight [position]="[500, 900, 400]" [intensity]="2.4" />
+  <jolt-physics [gravity]="[0, 0, 0]" [debug]="physicsDebug()" />
 </scene>

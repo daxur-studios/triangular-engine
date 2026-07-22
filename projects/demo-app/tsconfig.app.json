@@ -8,6 +8,9 @@
       "triangular-engine/postprocessing": [
         "projects/triangular-engine/postprocessing/public-api"
       ],
+      "triangular-engine/jolt": [
+        "projects/triangular-engine/jolt/public-api"
+      ],
       "triangular-engine/takram": [
         "projects/triangular-engine/takram/public-api"
       ],

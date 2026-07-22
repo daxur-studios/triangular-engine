@@ -76,6 +76,7 @@
             "browser": "projects/demo-app/src/main.ts",
             "polyfills": ["zone.js"],
             "tsConfig": "projects/demo-app/tsconfig.app.json",
+            "externalDependencies": ["module"],
             "inlineStyleLanguage": "scss",
             "assets": [
               {

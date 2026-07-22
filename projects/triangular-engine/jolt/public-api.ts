@@ -8,4 +8,5 @@ export * from './jolt-physics.module';
 export * from './example';
 export * from './jolt.provider';
 export * from './models';
+export * from './terrain';
 // export { loadJolt } from './jolt-loader';

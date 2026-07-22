@@ -55,6 +55,12 @@ export const routes: Routes = [
   },
   {
     path: 'terrain-lab',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
     loadComponent: () =>
       import('./pages/terrain-lab/terrain-lab-page.component').then(
         ({ TerrainLabPageComponent }) => TerrainLabPageComponent,
@@ -79,6 +85,13 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./pages/water-material-poc/water-material-poc-page.component').then(
         ({ WaterMaterialPocPageComponent }) => WaterMaterialPocPageComponent,
+      ),
+  },
+  {
+    path: 'water-sphere-poc',
+    loadComponent: () =>
+      import('./pages/water-sphere-poc/water-sphere-poc-page.component').then(
+        ({ WaterSpherePocPageComponent }) => WaterSpherePocPageComponent,
       ),
   },
 ];

@@ -4,6 +4,7 @@ import {
   DestroyRef,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
@@ -11,14 +12,24 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  CapsuleGeometry,
   GridHelper,
   Group,
   LineBasicMaterial,
   LineSegments,
   Mesh,
   MeshStandardMaterial,
+  Quaternion,
+  Vector3,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
+import {
+  Jolt,
+  JoltPhysicsComponent,
+  JoltPhysicsModule,
+  LAYER_MOVING,
+  TerrainJoltColliderAdapter,
+} from 'triangular-engine/jolt';
 import {
   CylinderTerrainDomain,
   generateTerrainPatchMesh,
@@ -43,6 +54,10 @@ const MAX_STREAMING_RADIUS = 4;
 const DEFAULT_GENERATION_BUDGET = 12;
 const MAX_GENERATION_BUDGET = 32;
 const MAX_LOD_LEVEL = 3;
+const PHYSICS_MAX_LOD_LEVEL = 1;
+const PHYSICS_PATCH_RESOLUTION = 12;
+const CHARACTER_GRAVITY_MPS2 = 24;
+const CHARACTER_SPEED_MPS = 36;
 const LOD_SKIRT_DEPTH_M = 35;
 const LARGE_COORDINATE_M = 1_000_000_000;
 const ORIENTATION_GRID_SIZE_M = 20_000;
@@ -175,7 +190,7 @@ function biomeElevation(x: number, z: number, offset = 0): number {
 /** Visual Phase 1 fixture for absolute-coordinate, patch-local plane terrain. */
 @Component({
   selector: 'app-terrain-lab-page',
-  imports: [RouterLink, EngineModule],
+  imports: [RouterLink, EngineModule, JoltPhysicsModule],
   templateUrl: './terrain-lab-page.component.html',
   styleUrl: './terrain-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -198,11 +213,16 @@ export class TerrainLabPageComponent {
   readonly sphereSizeScale = signal(1);
   readonly cylinderSizeScale = signal(1);
   readonly patchCount = signal(0);
+  readonly colliderCount = signal(0);
+  readonly characterEnabled = signal(true);
+  readonly physicsDebug = signal(false);
+  readonly orbitUpVector = signal<readonly [number, number, number]>([0, 1, 0]);
   readonly coordinateLabel = signal('0 m');
   readonly centrePatchLabel = signal('0, 0');
   readonly lodLabel = signal('L0: 0');
 
   private readonly engine = inject(EngineService);
+  private readonly physicsComponent = viewChild(JoltPhysicsComponent);
   private readonly domain = new PlaneTerrainDomain(PATCH_SIZE_M);
   private readonly field = new TerrainLabField();
   private sphereDomain = new SphereTerrainDomain(SPHERE_RADIUS_M);
@@ -226,6 +246,14 @@ export class TerrainLabPageComponent {
     readonly shape: TerrainShape;
     readonly address: unknown;
   }>();
+  private colliderAdapter?: TerrainJoltColliderAdapter;
+  private colliderSignature = '';
+  private characterBody?: Jolt.Body;
+  readonly characterVisual = new Mesh(
+    new CapsuleGeometry(0.6, 2.4, 8, 16),
+    new MeshStandardMaterial({ color: '#ffd166', roughness: 0.65 }),
+  );
+  private readonly pressedKeys = new Set<string>();
   private renderOriginX = 0;
   private renderOriginZ = 0;
   private selectionSignature = '';
@@ -235,13 +263,32 @@ export class TerrainLabPageComponent {
     const previousBackground = this.engine.scene.background;
     this.engine.scene.background = new Color('#071018');
     this.orientationGrid.position.y = ORIENTATION_GRID_Y_M;
-    this.engine.scene.add(this.orientationGrid, this.terrain);
+    this.engine.scene.add(
+      this.orientationGrid,
+      this.terrain,
+      this.characterVisual,
+    );
+    const onKeyDown = (event: KeyboardEvent) =>
+      this.pressedKeys.add(event.code);
+    const onKeyUp = (event: KeyboardEvent) =>
+      this.pressedKeys.delete(event.code);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
     this.rebuild();
     this.engine.tick$
       .pipe(takeUntilDestroyed(destroyRef))
-      .subscribe(() => this.updateCameraSelection());
+      .subscribe((deltaSeconds) => {
+        this.updateCameraSelection();
+        this.updatePhysics(deltaSeconds);
+      });
     destroyRef.onDestroy(() => {
       this.disposeTerrain();
+      this.disposePhysics();
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      this.characterVisual.removeFromParent();
+      this.characterVisual.geometry.dispose();
+      (this.characterVisual.material as MeshStandardMaterial).dispose();
       this.terrain.removeFromParent();
       this.orientationGrid.removeFromParent();
       this.orientationGrid.geometry.dispose();
@@ -266,6 +313,17 @@ export class TerrainLabPageComponent {
     this.shape.set(shape);
     this.orientationGrid.visible = shape === 'plane';
     this.rebuild();
+    this.resetCharacter();
+  }
+
+  toggleCharacter(): void {
+    this.characterEnabled.update((enabled) => !enabled);
+    this.characterVisual.visible = this.characterEnabled();
+    this.resetCharacter();
+  }
+
+  togglePhysicsDebug(): void {
+    this.physicsDebug.update((enabled) => !enabled);
   }
 
   toggleWireframe(): void {
@@ -369,6 +427,7 @@ export class TerrainLabPageComponent {
 
   private rebuild(): void {
     this.disposeTerrain();
+    this.colliderSignature = '';
     if (this.shape() === 'sphere') {
       this.selectionSignature = '';
       this.coordinateLabel.set('Body centre');
@@ -438,6 +497,248 @@ export class TerrainLabPageComponent {
     }
     this.queuedPatchCount.set(this.generationQueue.pendingCount);
     this.patchCount.set(this.patches.size);
+  }
+
+  private updatePhysics(deltaSeconds: number): void {
+    const component = this.physicsComponent();
+    const metadata = component?.physicsService.metaData$.value;
+    if (!metadata) return;
+    this.colliderAdapter ??= new TerrainJoltColliderAdapter(metadata);
+    if (!this.characterBody && this.characterEnabled()) this.createCharacter();
+    this.updatePhysicsColliders();
+    this.updateOrbitUpVector();
+    if (!this.characterBody || !this.characterEnabled()) return;
+
+    const position = this.characterBody.GetPosition();
+    const worldPosition = new Vector3(
+      position.GetX() + (this.shape() === 'plane' ? this.renderOriginX : 0),
+      position.GetY(),
+      position.GetZ() + (this.shape() === 'plane' ? this.renderOriginZ : 0),
+    );
+    const gravity = this.getGravityDirection(worldPosition);
+    const up = gravity.clone().negate();
+    const velocityValue = this.characterBody.GetLinearVelocity();
+    const velocity = new Vector3(
+      velocityValue.GetX(),
+      velocityValue.GetY(),
+      velocityValue.GetZ(),
+    ).addScaledVector(gravity, CHARACTER_GRAVITY_MPS2 * deltaSeconds);
+    const verticalSpeed = velocity.dot(up);
+    const cameraForward = new Vector3();
+    this.engine.camera.getWorldDirection(cameraForward);
+    cameraForward.addScaledVector(up, -cameraForward.dot(up));
+    if (cameraForward.lengthSq() < 0.001) cameraForward.set(0, 0, -1);
+    cameraForward.normalize();
+    const right = new Vector3().crossVectors(cameraForward, up).normalize();
+    const movement = new Vector3();
+    if (this.pressedKeys.has('KeyW')) movement.add(cameraForward);
+    if (this.pressedKeys.has('KeyS')) movement.sub(cameraForward);
+    if (this.pressedKeys.has('KeyD')) movement.add(right);
+    if (this.pressedKeys.has('KeyA')) movement.sub(right);
+    if (movement.lengthSq() > 0)
+      movement.normalize().multiplyScalar(CHARACTER_SPEED_MPS);
+    velocity.copy(movement).addScaledVector(up, verticalSpeed);
+    if (this.pressedKeys.has('Space')) velocity.addScaledVector(up, 0.8);
+    const joltVelocity = new Jolt.Vec3(velocity.x, velocity.y, velocity.z);
+    metadata.bodyInterface.SetLinearVelocity(
+      this.characterBody.GetID(),
+      joltVelocity,
+    );
+    Jolt.destroy(joltVelocity);
+
+    const orientation = new Quaternion().setFromUnitVectors(
+      new Vector3(0, 1, 0),
+      up,
+    );
+    const joltOrientation = new Jolt.Quat(
+      orientation.x,
+      orientation.y,
+      orientation.z,
+      orientation.w,
+    );
+    metadata.bodyInterface.SetRotation(
+      this.characterBody.GetID(),
+      joltOrientation,
+      Jolt.EActivation_Activate,
+    );
+    Jolt.destroy(joltOrientation);
+    this.characterVisual.position.set(
+      position.GetX(),
+      position.GetY(),
+      position.GetZ(),
+    );
+    this.characterVisual.quaternion.copy(orientation);
+  }
+
+  private updateOrbitUpVector(): void {
+    const referencePosition = this.characterEnabled()
+      ? this.getCharacterWorldPosition()
+      : this.engine.camera.position;
+    const up = this.getGravityDirection(referencePosition).negate();
+    this.orbitUpVector.set([up.x, up.y, up.z]);
+  }
+
+  private updatePhysicsColliders(): void {
+    if (!this.colliderAdapter) return;
+    const character = this.getCharacterWorldPosition();
+    const shape = this.shape();
+    const addresses = this.selectPhysicsPatches(character);
+    const entries = addresses.map((address) => ({
+      address,
+      key: `physics:${this.getPatchKey(shape, address)}`,
+    }));
+    const signature = entries.map(({ key }) => key).join('|');
+    if (signature === this.colliderSignature) return;
+    this.colliderSignature = signature;
+    const desired = new Set(entries.map(({ key }) => key));
+    for (const { key, address } of entries) {
+      if (this.colliderAdapter.has(key)) continue;
+      const domain =
+        shape === 'plane'
+          ? this.domain
+          : shape === 'sphere'
+            ? this.sphereDomain
+            : this.cylinderDomain;
+      const field =
+        shape === 'plane'
+          ? this.field
+          : shape === 'sphere'
+            ? this.sphereField
+            : this.cylinderField;
+      const mesh = generateTerrainPatchMesh(field, domain as never, {
+        address: address as never,
+        resolution: PHYSICS_PATCH_RESOLUTION,
+      });
+      this.colliderAdapter.add({
+        key,
+        mesh,
+        positionM: [
+          mesh.centerWorldM[0] - (shape === 'plane' ? this.renderOriginX : 0),
+          mesh.centerWorldM[1],
+          mesh.centerWorldM[2] - (shape === 'plane' ? this.renderOriginZ : 0),
+        ],
+      });
+    }
+    this.colliderAdapter.reconcile(desired);
+    this.colliderCount.set(this.colliderAdapter.residentCount);
+  }
+
+  private selectPhysicsPatches(position: Vector3): readonly unknown[] {
+    if (this.shape() === 'plane') {
+      const roots = selectPlaneTerrainPatches(
+        this.domain,
+        position.x,
+        position.z,
+        1,
+      );
+      return selectAdaptiveTerrainPatches(this.domain, {
+        roots,
+        cameraWorldM: [position.x, position.y, position.z],
+        getLevel: (address) => address.level,
+        maxLevel: PHYSICS_MAX_LOD_LEVEL,
+        refinementDistanceM: 500,
+      });
+    }
+    if (this.shape() === 'sphere') {
+      return selectAdaptiveTerrainPatches(this.sphereDomain, {
+        roots: SPHERE_TERRAIN_FACES.map((face) => ({
+          face,
+          level: 0,
+          x: 0,
+          y: 0,
+        })),
+        cameraWorldM: position.toArray() as TerrainVector3,
+        getLevel: (address) => address.level,
+        maxLevel: PHYSICS_MAX_LOD_LEVEL,
+        refinementDistanceM: 800 * this.sphereSizeScale(),
+      });
+    }
+    const counts = this.cylinderDomain.getPatchCounts(0);
+    const roots = Array.from({ length: counts.axial }, (_, axialIndex) =>
+      Array.from({ length: counts.angular }, (_unused, angularIndex) => ({
+        level: 0,
+        angularIndex,
+        axialIndex,
+      })),
+    ).flat();
+    return selectAdaptiveTerrainPatches(this.cylinderDomain, {
+      roots,
+      cameraWorldM: position.toArray() as TerrainVector3,
+      getLevel: (address) => address.level,
+      maxLevel: PHYSICS_MAX_LOD_LEVEL,
+      refinementDistanceM: 700 * this.cylinderSizeScale(),
+    });
+  }
+
+  private createCharacter(): void {
+    const metadata = this.physicsComponent()?.physicsService.metaData$.value;
+    if (!metadata) return;
+    const spawn = this.getCharacterSpawnPosition();
+    const shape = new Jolt.CapsuleShape(1.2, 0.6, undefined);
+    const position = new Jolt.RVec3(spawn.x, spawn.y, spawn.z);
+    const rotation = new Jolt.Quat(0, 0, 0, 1);
+    const settings = new Jolt.BodyCreationSettings(
+      shape,
+      position,
+      rotation,
+      Jolt.EMotionType_Dynamic,
+      LAYER_MOVING,
+    );
+    settings.mGravityFactor = 0;
+    settings.mAngularDamping = 1;
+    const body = metadata.bodyInterface.CreateBody(settings);
+    metadata.bodyInterface.AddBody(body.GetID(), Jolt.EActivation_Activate);
+    this.characterBody = body;
+    this.characterVisual.position.copy(spawn);
+    Jolt.destroy(settings);
+    Jolt.destroy(position);
+    Jolt.destroy(rotation);
+  }
+
+  private resetCharacter(): void {
+    const metadata = this.physicsComponent()?.physicsService.metaData$.value;
+    if (this.characterBody && metadata) {
+      metadata.bodyInterface.RemoveBody(this.characterBody.GetID());
+      metadata.bodyInterface.DestroyBody(this.characterBody.GetID());
+    }
+    this.characterBody = undefined;
+    this.colliderAdapter?.dispose();
+    this.colliderSignature = '';
+    this.colliderCount.set(0);
+  }
+
+  private getCharacterSpawnPosition(): Vector3 {
+    if (this.shape() === 'sphere')
+      return new Vector3(0, SPHERE_RADIUS_M * this.sphereSizeScale() + 220, 0);
+    if (this.shape() === 'cylinder')
+      return new Vector3(
+        0,
+        CYLINDER_RADIUS_M * this.cylinderSizeScale() - 220,
+        0,
+      );
+    return new Vector3(0, 220, 0);
+  }
+
+  private getCharacterWorldPosition(): Vector3 {
+    if (!this.characterBody) return this.getCharacterSpawnPosition();
+    const position = this.characterBody.GetPosition();
+    return new Vector3(
+      position.GetX() + (this.shape() === 'plane' ? this.renderOriginX : 0),
+      position.GetY(),
+      position.GetZ() + (this.shape() === 'plane' ? this.renderOriginZ : 0),
+    );
+  }
+
+  private getGravityDirection(position: Vector3): Vector3 {
+    if (this.shape() === 'sphere') return position.clone().negate().normalize();
+    if (this.shape() === 'cylinder')
+      return new Vector3(0, position.y, position.z).normalize();
+    return new Vector3(0, -1, 0);
+  }
+
+  private disposePhysics(): void {
+    this.resetCharacter();
+    this.colliderAdapter = undefined;
   }
 
   private getPatchDistance(shape: TerrainShape, address: unknown): number {

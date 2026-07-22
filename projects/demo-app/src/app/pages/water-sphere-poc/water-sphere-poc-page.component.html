@@ -1,0 +1,87 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Water sphere POC controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small>triangular-engine/water — Phase 1c sphere domain spike</small>
+        </div>
+        <strong>Same Phase 1a/1b grid and material, curved onto a sphere</strong>
+      </header>
+
+      <p class="blurb">
+        <code>SphereWaterDomain</code> curves the unchanged flat CDLOD grid
+        onto a {{ sphereRadiusM }}m "planet" via a continuously-recentring
+        local tangent frame — no cube faces, no patch addresses, nothing to
+        seam-stitch. Orbit the whole sphere, including near the poles, and
+        watch for popping, swimming, or cracks.
+      </p>
+
+      <nav aria-label="Wave preset">
+        @for (key of presetKeys; track key) {
+          <button
+            [class.active]="activePreset() === key"
+            (click)="selectPreset(key)"
+          >
+            {{ presetLabels[key] }}
+          </button>
+        }
+      </nav>
+
+      <div class="actions">
+        <label class="slider">
+          Ring count: {{ ringCount() }} (~{{ outerExtentMeters() }}m radius)
+          <input
+            type="range"
+            [min]="minRingCount"
+            [max]="maxRingCount"
+            step="1"
+            [value]="ringCount()"
+            (input)="setRingCount($any($event.target).value)"
+          />
+        </label>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="detailChop()"
+            (change)="toggleDetailChop()"
+          />
+          Detail chop
+        </label>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="shoreFade()"
+            (change)="toggleShoreFade()"
+          />
+          Shore fade / depth tint
+        </label>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="wireframe()"
+            (change)="toggleWireframe()"
+          />
+          Wireframe
+        </label>
+      </div>
+
+      <p class="blurb note">
+        The local tangent-plane approximation only holds while the ring
+        grid's outer radius stays well under a quarter of the sphere's
+        circumference — the ring-count cap here keeps that margin at this
+        sphere's radius.
+      </p>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="initialCameraPosition"
+    [target]="initialTarget"
+    [upVector]="initialUpVector"
+    [near]="0.1"
+    [far]="5000"
+  />
+  <ambientLight [intensity]="1.6" />
+  <directionalLight [position]="[300, 400, 200]" [intensity]="2.5" />
+</scene>
