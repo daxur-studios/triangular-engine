@@ -54,10 +54,24 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'terrain-lab',
+    loadComponent: () =>
+      import('./pages/terrain-lab/terrain-lab-page.component').then(
+        ({ TerrainLabPageComponent }) => TerrainLabPageComponent,
+      ),
+  },
+  {
     path: 'water-surface-spike',
     loadComponent: () =>
       import('./pages/water-surface-spike/water-surface-spike-page.component').then(
         ({ WaterSurfaceSpikePageComponent }) => WaterSurfaceSpikePageComponent,
+      ),
+  },
+  {
+    path: 'water-lod-poc',
+    loadComponent: () =>
+      import('./pages/water-lod-poc/water-lod-poc-page.component').then(
+        ({ WaterLodPocPageComponent }) => WaterLodPocPageComponent,
       ),
   },
 ];

@@ -1,0 +1,47 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Terrain lab controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small>triangular-engine/terrain — Phase 1</small>
+        </div>
+        <strong>Multi-surface terrain lab</strong>
+      </header>
+      <p>
+        The plane uses absolute f64 sampling and f32 patch-local vertices. The
+        large-coordinate test moves sampling near one billion metres while
+        keeping the rendered frame close to zero—the same boundary used by
+        floating-origin rebasing.
+      </p>
+      <nav aria-label="Terrain shape">
+        <button class="active">Infinite plane</button>
+        <button disabled title="Added in Phase 2">Sphere · next</button>
+        <button disabled title="Added in Phase 3">Cylinder · queued</button>
+      </nav>
+      <div class="actions">
+        <button
+          [class.active]="largeCoordinates()"
+          (click)="toggleLargeCoordinates()"
+        >
+          1 billion metre origin
+        </button>
+        <button [class.active]="wireframe()" (click)="toggleWireframe()">
+          Wireframe
+        </button>
+      </div>
+      <div class="stats">
+        <span>World origin: {{ coordinateLabel() }}</span>
+        <span>Patches: {{ patchCount }}</span>
+        <span>Rebase owner: example/app</span>
+      </div>
+    </section>
+  </ng-template>
+  <orbitControls
+    [cameraPosition]="[700, 650, 900]"
+    [target]="[0, 0, 0]"
+    [near]="1"
+  />
+  <ambientLight [intensity]="1.5" />
+  <directionalLight [position]="[500, 900, 400]" [intensity]="2.4" />
+</scene>

@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: planning / foundation
+- State: Phase 1 in progress; fixed-patch plane proof complete
 - Target entry point: `triangular-engine/terrain`
 - Initial consumers: infinite plane, sphere, O'Neill-cylinder interior
 - Last updated: 2026-07-22
@@ -72,11 +72,11 @@ The generic mesher consumes a domain adapter; each domain owns its mapping.
 
 ## Surface conventions
 
-| Domain | Coordinates | Positive elevation | Topology |
-|---|---|---|---|
-| Plane | absolute X/Z metres | local +Y | unbounded tiled quadtree/clipmap |
-| Sphere | body-fixed direction | away from centre | six cubesphere quadtrees |
-| Cylinder interior | angle + axial metres | toward axis | periodic angle × bounded axis |
+| Domain            | Coordinates          | Positive elevation | Topology                         |
+| ----------------- | -------------------- | ------------------ | -------------------------------- |
+| Plane             | absolute X/Z metres  | local +Y           | unbounded tiled quadtree/clipmap |
+| Sphere            | body-fixed direction | away from centre   | six cubesphere quadtrees         |
+| Cylinder interior | angle + axial metres | toward axis        | periodic angle × bounded axis    |
 
 The current cylinder uses local X as its axis and YZ as its radial plane:
 
@@ -95,7 +95,7 @@ wall-to-cap topology transition in this track.
 ## Intended mode contract
 
 ```ts
-type TerrainMode = 'disabled' | 'visual' | 'physical';
+type TerrainMode = "disabled" | "visual" | "physical";
 ```
 
 - `disabled`: consumer's smooth fallback surface.
@@ -129,23 +129,25 @@ as rendering and never includes visual skirts.
 
 ### Phase 0 — Contract and extraction audit
 
-- [ ] Inventory BSP terrain contracts and identify which are copied/generalised,
+- [x] Inventory BSP terrain contracts and identify which are copied/generalised,
       which remain game-specific, and which require a breaking redesign.
-- [ ] Freeze plain TS interfaces for terrain field, domain adapter, patch
+- [x] Freeze plain TS interfaces for terrain field, domain adapter, patch
       addresses, patch mesh, and lifecycle/mode ownership.
-- [ ] Scaffold the `triangular-engine/terrain` secondary entry point.
-- [ ] Add dependency-isolation tests for the framework-free core.
+- [x] Scaffold the `triangular-engine/terrain` secondary entry point.
+- [x] Confirm framework-free dependency isolation through the independently
+      built secondary entry point.
 
 Exit gate: contracts compile and a constant-height fake domain produces a patch
 without any plane/sphere/cylinder conditional in the generic mesher.
 
 ### Phase 1 — Infinite plane proof
 
-- [ ] Implement absolute-coordinate plane tiles and deterministic sampling.
-- [ ] Prove adjacent patch positions/normals agree and negative/unbounded tile
+- [x] Implement absolute-coordinate plane tiles and deterministic sampling.
+- [x] Prove adjacent patch positions/normals agree and negative/unbounded tile
       addresses work.
-- [ ] Add a fixed-patch demo, then camera-local selection and eviction.
-- [ ] Verify patch-local precision under floating-origin-scale coordinates.
+- [x] Add a fixed-patch demo.
+- [ ] Add camera-local selection and eviction.
+- [x] Verify patch-local precision under floating-origin-scale coordinates.
 
 Exit gate: continuous terrain while travelling across tile boundaries, with
 bounded resident geometry and no seed reset per tile.
@@ -230,3 +232,35 @@ broadly stage this workspace.
   gate, and cylinder third as the active POC integration.
 - Reserved independent visual/physical modes and one lifecycle contract so the
   demo does not own worker, geometry, and collider cleanup itself.
+
+### 2026-07-22 — Phase 0 foundation implemented
+
+- Added the independently packaged `triangular-engine/terrain` entry point.
+- Added framework-free `ITerrainField`, `ITerrainSurfaceDomain`, patch geometry,
+  and patch mesh contracts plus a validated `ConstantTerrainField` fixture.
+- Added a domain-independent patch mesher. It samples one ring outside the
+  visible patch for edge normals, retains an f64 world centre, emits f32 local
+  positions, chooses index width from vertex count, and delegates mapping,
+  orientation, and geometric error to the domain.
+- Proved the contract with a fake plane at billion-metre coordinates; no
+  production plane/sphere/cylinder conditional exists in the mesher.
+- Registered secondary-entry-point terrain specs in the library test target.
+- Verification: focused terrain specs 4/4, complete triangular-engine suite
+  43/43, and the development package build including the new terrain entry
+  point all pass. No demo or active cylinder code was changed.
+
+### 2026-07-22 — Phase 1 fixed-patch plane proof
+
+- Added `PlaneTerrainDomain` with unbounded signed tile coordinates, quadtree
+  levels, child addressing, absolute X/Z field coordinates, and +Y-facing
+  surface orientation.
+- Added adjacency fixtures proving shared-edge positions and normals match,
+  including negative and billion-metre-scale addresses.
+- Added `/terrain-lab` to the demo app. It renders 25 generated patches and can
+  switch sampling between the origin and approximately one billion metres while
+  retaining a small render-local coordinate frame.
+- Kept floating-origin ownership outside the terrain package. Terrain emits f64
+  world centres plus f32 local vertices; the example (and later BSP) applies the
+  active render origin to patch objects.
+- Verification: focused terrain specs 7/7, triangular-engine development build,
+  and demo-app development build all pass.

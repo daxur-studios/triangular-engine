@@ -29,7 +29,11 @@
           "options": {
             "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"],
-            "include": ["**/*.spec.ts", "../water/**/*.spec.ts"]
+            "include": [
+              "**/*.spec.ts",
+              "../water/**/*.spec.ts",
+              "../terrain/**/*.spec.ts"
+            ]
           }
         }
       }
