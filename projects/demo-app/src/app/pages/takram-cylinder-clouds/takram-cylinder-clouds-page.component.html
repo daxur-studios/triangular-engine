@@ -195,6 +195,36 @@
           "
       /></label>
       <label
+        >2D evolution <output>{{ distanceShellEvolution() }}</output
+        ><input
+          type="range"
+          min="0"
+          max="0.2"
+          step="0.005"
+          [value]="distanceShellEvolution()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              distanceShellEvolution.set.bind(distanceShellEvolution)
+            )
+          "
+      /></label>
+      <label
+        >2D evolution speed <output>{{ distanceShellEvolutionSpeed() }}×</output
+        ><input
+          type="range"
+          min="0"
+          max="12"
+          step="0.25"
+          [value]="distanceShellEvolutionSpeed()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              distanceShellEvolutionSpeed.set.bind(distanceShellEvolutionSpeed)
+            )
+          "
+      /></label>
+      <label
         >Wind X <output>{{ windSpeedX() }}</output
         ><input
           type="range"
@@ -427,6 +457,8 @@
     [height]="cloudHeight()"
     [layerPosition]="0.3"
     [coverage]="coverage()"
+    [evolutionAmount]="distanceShellEvolution()"
+    [evolutionSpeed]="distanceShellEvolutionSpeed()"
     [weatherTexture]="
       cloudTextures.selectedTexture() ?? cloudEffect.effect?.localWeatherTexture
     "

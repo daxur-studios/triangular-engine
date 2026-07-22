@@ -62,6 +62,8 @@ export class TakramCylinderCloudsPageComponent {
   readonly densityScale = signal(0.5);
   readonly distanceShell = signal(true);
   readonly distanceShellOpacity = signal(0.82);
+  readonly distanceShellEvolution = signal(0.025);
+  readonly distanceShellEvolutionSpeed = signal(4);
   readonly distanceShellFadeStart = signal(3_000);
   readonly distanceShellFadeEnd = signal(7_000);
   readonly windSpeedX = signal(0.005);

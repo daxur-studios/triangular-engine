@@ -34,6 +34,10 @@ export class TakramCylinderCloudShellComponent {
   /** 0 = cloud base nearest the habitat wall, 1 = cloud top toward the axis. */
   readonly layerPosition = input(0.3);
   readonly coverage = input(0.5);
+  /** Slow coverage variation that keeps the distant shell from feeling static. */
+  readonly evolutionAmount = input(0.025);
+  /** Multiplier for the phase-driven weather-map evolution. */
+  readonly evolutionSpeed = input(4);
   readonly opacity = input(0.82);
   readonly weatherRepeat = input<readonly [number, number]>([2, 2]);
   /** Takram's mutable accumulated weather offset; share the same instance. */
@@ -49,6 +53,8 @@ export class TakramCylinderCloudShellComponent {
     weatherRepeat: new Uniform(new Vector2(2, 2)),
     weatherOffset: new Uniform(new Vector2()),
     coverage: new Uniform(0.5),
+    evolutionAmount: new Uniform(0.025),
+    evolutionSpeed: new Uniform(4),
     opacity: new Uniform(0.82),
     fadeStart: new Uniform(8_000),
     fadeEnd: new Uniform(18_000),
@@ -72,6 +78,8 @@ uniform sampler2D weatherTexture;
 uniform vec2 weatherRepeat;
 uniform vec2 weatherOffset;
 uniform float coverage;
+uniform float evolutionAmount;
+uniform float evolutionSpeed;
 uniform float opacity;
 uniform float fadeStart;
 uniform float fadeEnd;
@@ -87,15 +95,21 @@ void main() {
     vCloudShellWorldPosition.x / (cylinderRadius * 6.283185307179586)
   );
   vec2 weatherUv = cylinderUv * weatherRepeat + weatherOffset;
+  float phaseTime = evolutionTime * evolutionSpeed;
   vec2 evolution = vec2(
-    sin(evolutionTime * 0.017),
-    cos(evolutionTime * 0.013)
+    sin(phaseTime * 0.017),
+    cos(phaseTime * 0.013)
   ) * 0.035;
   float broad = texture2D(weatherTexture, weatherUv).r;
   float evolvingA = texture2D(weatherTexture, weatherUv * 1.73 + evolution).r;
   float evolvingB = texture2D(weatherTexture, weatherUv * 0.61 - evolution * 0.7).r;
   float weather = broad * 0.68 + evolvingA * 0.20 + evolvingB * 0.12;
-  float threshold = 1.0 - clamp(coverage, 0.0, 1.0);
+  float coverageDrift = (
+    sin(phaseTime * 0.061) * 0.65 +
+    sin(phaseTime * 0.023 + 1.7) * 0.35
+  ) * evolutionAmount;
+  float animatedCoverage = clamp(coverage + coverageDrift, 0.0, 1.0);
+  float threshold = 1.0 - animatedCoverage;
   float footprint = smoothstep(threshold - 0.2, threshold + 0.08, weather);
   float distanceFade = smoothstep(
     min(fadeStart, fadeEnd),
@@ -153,6 +167,8 @@ void main() {
       this.uniforms.weatherOffset.value =
         this.weatherOffset() ?? this.fallbackOffset;
       this.uniforms.coverage.value = this.coverage();
+      this.uniforms.evolutionAmount.value = Math.max(0, this.evolutionAmount());
+      this.uniforms.evolutionSpeed.value = Math.max(0, this.evolutionSpeed());
       this.uniforms.opacity.value = this.opacity();
       this.uniforms.fadeStart.value = this.fadeStart();
       this.uniforms.fadeEnd.value = this.fadeEnd();
