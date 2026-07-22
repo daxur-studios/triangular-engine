@@ -12,6 +12,16 @@
   <ng-template portalTarget="leftSidebar" lane="content">
     <aside class="controls">
       <strong>Cylinder clouds</strong>
+      <label
+        >Terrain
+        <select
+          [value]="terrainMode()"
+          (change)="setTerrainMode($any($event.target).value)"
+        >
+          <option value="disabled">Smooth fallback</option>
+          <option value="visual">Generated visual</option>
+        </select>
+      </label>
       <label class="toggle"
         ><input
           type="checkbox"
@@ -69,7 +79,7 @@
         ><input
           type="checkbox"
           [checked]="wireframe()"
-          (change)="wireframe.set($any($event.target).checked)"
+          (change)="setWireframe($any($event.target).checked)"
         />
         Terrain wireframe</label
       >
@@ -377,19 +387,21 @@
     /></mesh>
   </group>
 
-  <mesh [rotation]="[0, 0, 1.5707963267948966]">
-    <cylinderGeometry [params]="[radius, radius, length, 96, 1, true]" />
-    <meshStandardMaterial
-      [map]="terrainTexture"
-      [params]="{
-        color: 'white',
-        roughness: 0.9,
-        metalness: 0,
-        side: doubleSide,
-        wireframe: wireframe(),
-      }"
-    />
-  </mesh>
+  @if (terrainMode() === "disabled") {
+    <mesh [rotation]="[0, 0, 1.5707963267948966]">
+      <cylinderGeometry [params]="[radius, radius, length, 96, 1, true]" />
+      <meshStandardMaterial
+        [map]="terrainTexture"
+        [params]="{
+          color: 'white',
+          roughness: 0.9,
+          metalness: 0,
+          side: doubleSide,
+          wireframe: wireframe(),
+        }"
+      />
+    </mesh>
+  }
   <mesh [position]="[0, -radius + 0.5, 40]"
     ><boxGeometry [params]="[10, 10, 10]" /><meshStandardMaterial
       [params]="{ color: 'white' }"

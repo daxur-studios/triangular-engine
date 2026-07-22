@@ -4,7 +4,7 @@
       <header>
         <div>
           <a routerLink="/">← Examples</a
-          ><small>triangular-engine/terrain — Phase 3</small>
+          ><small>triangular-engine/terrain — LOD streaming lab</small>
         </div>
         <strong>Multi-surface terrain lab</strong>
       </header>
@@ -12,9 +12,10 @@
         The plane uses absolute f64 sampling and f32 patch-local vertices. The
         large-coordinate test moves sampling near one billion metres while
         keeping the rendered frame close to zero—the same boundary used by
-        floating-origin rebasing. Sphere mode renders all six cubesphere faces
-        as 24 independent patches. Cylinder mode renders a complete finite
-        inner wall as 48 independent, inward-facing patches.
+        floating-origin rebasing. All three shapes retain complete parent
+        coverage while subdividing patches near the camera. Blue basins, green
+        flat meadow, and brown ridged mountains make broad terrain regions easy
+        to distinguish.
       </p>
       <nav aria-label="Terrain shape">
         <button
@@ -54,6 +55,7 @@
       <div class="stats">
         <span>World origin: {{ coordinateLabel() }}</span>
         <span>Resident patches: {{ patchCount() }}</span>
+        <span>LOD distribution: {{ lodLabel() }}</span>
         <span>Camera patch: {{ centrePatchLabel() }}</span>
         <span>Reference grid: 100 m below datum</span>
         <span>Each outlined tile is one mesh</span>

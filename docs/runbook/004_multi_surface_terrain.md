@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: Phase 3 visual integration implemented; awaiting POC visual verification
+- State: Phase 4a view-driven LOD implemented in Terrain Lab; awaiting visual verification
 - Target entry point: `triangular-engine/terrain`
 - Initial consumers: infinite plane, sphere, O'Neill-cylinder interior
 - Last updated: 2026-07-22
@@ -175,7 +175,7 @@ patches, seam discontinuity, or damage to clouds/atmosphere.
 
 ### Phase 4 — Shared streaming and workers
 
-- [ ] Generalise selection around domain-provided bounds/topology rather than
+- [x] Generalise selection around domain-provided bounds/topology rather than
       forcing identical selection algorithms.
 - [ ] Add generation tokens, stale rejection, parent retention, budgets, cache,
       and transferable worker results.
@@ -315,3 +315,21 @@ broadly stage this workspace.
   cylinder; wireframe changes apply to either representation.
 - Visual acceptance remains with the user: inspect the full-turn seam, axial
   ends, cloud/atmosphere composition, and repeated mode toggles.
+
+### 2026-07-22 — Phase 4a Terrain Lab LOD correction
+
+- Returned validation to `/terrain-lab` before extending the active cylinder:
+  the prior plane window streamed only same-resolution tiles, while sphere and
+  cylinder were complete fixed-level meshes.
+- Added a shared domain-driven quadtree selector. It preserves complete root
+  coverage and recursively replaces nearby parents with four children, with a
+  bounded maximum level and stable patch identities for resident-set reuse.
+- Added visual-only skirts to the generic patch mesh result so renderers can
+  cover fine/coarse T-junctions without putting skirt triangles into future
+  physics meshes.
+- The lab now reports resident counts by LOD level for plane, sphere, and
+  cylinder. Camera movement updates only changed resident patches.
+- Replaced uniformly hilly lab fields with broad deterministic biome regions:
+  low blue ocean/lake basins, gently varying green meadow, and high ridged
+  brown mountains. This is the visual language to validate before the same
+  field and streaming owner replace the fixed active-cylinder integration.

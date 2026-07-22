@@ -15,6 +15,59 @@ export interface ITerrainPatchMeshOptions<TAddress> {
   address: TAddress;
   /** Number of surface quads along each patch axis. */
   resolution: number;
+  /** Optional visual-only edge extrusion used to cover mixed-LOD joins. */
+  skirtDepthM?: number;
+}
+
+function createSkirt(
+  positions: Float32Array,
+  normals: Float32Array,
+  resolution: number,
+  depthM: number,
+): ITerrainPatchGeometry {
+  const row = resolution + 1;
+  const edge: number[] = [];
+  for (let u = 0; u <= resolution; u++) edge.push(u);
+  for (let v = 1; v <= resolution; v++) edge.push(v * row + resolution);
+  for (let u = resolution - 1; u >= 0; u--) edge.push(resolution * row + u);
+  for (let v = resolution - 1; v > 0; v--) edge.push(v * row);
+  const skirtPositions = new Float32Array(edge.length * 2 * XYZ_COUNT);
+  const skirtNormals = new Float32Array(edge.length * 2 * XYZ_COUNT);
+  const skirtUvs = new Float32Array(edge.length * 2 * UV_COUNT);
+  for (let i = 0; i < edge.length; i++) {
+    const source = edge[i];
+    for (let axis = 0; axis < XYZ_COUNT; axis++) {
+      const value = positions[source * XYZ_COUNT + axis];
+      const direction = normals[source * XYZ_COUNT + axis];
+      skirtPositions[i * 6 + axis] = value;
+      skirtPositions[i * 6 + 3 + axis] = value - direction * depthM;
+      skirtNormals[i * 6 + axis] = direction;
+      skirtNormals[i * 6 + 3 + axis] = direction;
+    }
+    skirtUvs[i * 4] = i / edge.length;
+    skirtUvs[i * 4 + 1] = 0;
+    skirtUvs[i * 4 + 2] = i / edge.length;
+    skirtUvs[i * 4 + 3] = 1;
+  }
+  const IndexArray =
+    edge.length * 2 <= UINT16_MAX_VERTICES ? Uint16Array : Uint32Array;
+  const indices = new IndexArray(edge.length * 6);
+  for (let i = 0; i < edge.length; i++) {
+    const next = (i + 1) % edge.length;
+    const offset = i * 6;
+    indices[offset] = i * 2;
+    indices[offset + 1] = next * 2;
+    indices[offset + 2] = next * 2 + 1;
+    indices[offset + 3] = i * 2;
+    indices[offset + 4] = next * 2 + 1;
+    indices[offset + 5] = i * 2 + 1;
+  }
+  return {
+    positions: skirtPositions,
+    normals: skirtNormals,
+    uvs: skirtUvs,
+    indices,
+  };
 }
 
 function setVector(
@@ -83,7 +136,7 @@ export function generateTerrainPatchMesh<TAddress>(
   domain: ITerrainSurfaceDomain<TAddress>,
   options: ITerrainPatchMeshOptions<TAddress>,
 ): ITerrainPatchMesh<TAddress> {
-  const { address, resolution } = options;
+  const { address, resolution, skirtDepthM = 0 } = options;
   if (!Number.isInteger(resolution) || resolution < 2) {
     throw new RangeError(
       'Terrain patch resolution must be an integer of at least two quads.',
@@ -190,6 +243,10 @@ export function generateTerrainPatchMesh<TAddress>(
     resolution,
     centerWorldM: center,
     surface,
+    skirt:
+      skirtDepthM > 0
+        ? createSkirt(positions, normals, resolution, skirtDepthM)
+        : undefined,
     geometricErrorM: domain.getGeometricErrorM(
       address,
       resolution,

@@ -42,3 +42,10 @@ export interface ITerrainSurfaceDomain<TAddress> {
     maxElevationM: number,
   ): number;
 }
+
+/** Quadtree-capable domain used by the shared view-driven patch selector. */
+export interface IHierarchicalTerrainSurfaceDomain<
+  TAddress,
+> extends ITerrainSurfaceDomain<TAddress> {
+  getChildren(address: TAddress): readonly TAddress[];
+}

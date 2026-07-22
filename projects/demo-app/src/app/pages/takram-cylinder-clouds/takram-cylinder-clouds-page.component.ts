@@ -8,11 +8,16 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
+  BufferAttribute,
+  BufferGeometry,
   DataTexture,
   DoubleSide,
   EquirectangularReflectionMapping,
+  Group,
   LinearMipmapLinearFilter,
   Matrix4,
+  Mesh,
+  MeshStandardMaterial,
   NoToneMapping,
   RepeatWrapping,
   RGBAFormat,
@@ -21,9 +26,51 @@ import {
   Vector3,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
+import {
+  CylinderTerrainDomain,
+  generateTerrainPatchMesh,
+  type ITerrainField,
+  type ITerrainFieldSample,
+  type TerrainVector3,
+} from 'triangular-engine/terrain';
 import { PostprocessingModule } from 'triangular-engine/postprocessing';
 import { TakramModule } from 'triangular-engine/takram';
 import { TakramCloudDemoTextures } from '../../shared/takram-cloud-controls/takram-cloud-demo-textures.service';
+
+const TERRAIN_ANGULAR_PATCHES = 16;
+const TERRAIN_AXIAL_PATCHES = 12;
+const TERRAIN_PATCH_RESOLUTION = 16;
+
+type TerrainMode = 'disabled' | 'visual';
+
+class CylinderPocTerrainField implements ITerrainField {
+  readonly minElevationM = -280;
+  readonly maxElevationM = 280;
+
+  sample([axialM, radialY, radialZ]: TerrainVector3): ITerrainFieldSample {
+    const angle = Math.atan2(radialZ, radialY);
+    return {
+      elevationM:
+        Math.sin(axialM / 2_800 + angle * 3) * 125 +
+        Math.cos(axialM / 5_600 - angle * 7) * 85 +
+        Math.sin(axialM / 1_150 + angle * 13) * 45,
+    };
+  }
+
+  sampleBatch(
+    positions: Float64Array,
+    output = new Float64Array(positions.length / 3),
+  ): Float64Array {
+    for (let index = 0; index < output.length; index++) {
+      output[index] = this.sample([
+        positions[index * 3],
+        positions[index * 3 + 1],
+        positions[index * 3 + 2],
+      ]).elevationM;
+    }
+    return output;
+  }
+}
 
 @Component({
   selector: 'app-takram-cylinder-clouds-page',
@@ -53,6 +100,7 @@ export class TakramCylinderCloudsPageComponent {
   readonly length = this.radius * 5;
   readonly worldToCylinder = new Matrix4();
   readonly doubleSide = DoubleSide;
+  readonly terrainMode = signal<TerrainMode>('disabled');
   readonly enabled = signal(true);
   readonly temporalUpscale = signal(true);
   readonly resolutionScale = signal(0.5);
@@ -98,15 +146,24 @@ export class TakramCylinderCloudsPageComponent {
   readonly terrainTexture = createTerrainTexture();
   readonly starTexture = createStarTexture();
 
+  private readonly engine = inject(EngineService);
+  private readonly terrainDomain = new CylinderTerrainDomain({
+    radiusM: this.radius,
+    lengthM: this.length,
+    levelZeroAngularPatchCount: TERRAIN_ANGULAR_PATCHES,
+    levelZeroAxialPatchCount: TERRAIN_AXIAL_PATCHES,
+  });
+  private readonly terrainField = new CylinderPocTerrainField();
+  private terrainGroup: Group | null = null;
+
   constructor() {
     this.cloudTextures.source.set('procedural');
-    const engine = inject(EngineService);
     const destroyRef = inject(DestroyRef);
-    const previousBackground = engine.scene.background;
-    engine.scene.background = this.starTexture;
-    engine.postTick$.pipe(takeUntilDestroyed(destroyRef)).subscribe(() => {
+    const previousBackground = this.engine.scene.background;
+    this.engine.scene.background = this.starTexture;
+    this.engine.postTick$.pipe(takeUntilDestroyed(destroyRef)).subscribe(() => {
       if (!this.cylinderUp()) return;
-      const position = engine.camera.position;
+      const position = this.engine.camera.position;
       const radialLength = Math.hypot(position.y, position.z);
       if (radialLength > 0) {
         this.cameraUp.set([
@@ -117,7 +174,8 @@ export class TakramCylinderCloudsPageComponent {
       }
     });
     destroyRef.onDestroy(() => {
-      engine.scene.background = previousBackground;
+      this.disposeVisualTerrain();
+      this.engine.scene.background = previousBackground;
       this.terrainTexture.dispose();
       this.starTexture.dispose();
     });
@@ -130,6 +188,95 @@ export class TakramCylinderCloudsPageComponent {
   setCylinderUp(enabled: boolean): void {
     this.cylinderUp.set(enabled);
     if (!enabled) this.cameraUp.set([0, 1, 0]);
+  }
+
+  setTerrainMode(mode: TerrainMode): void {
+    if (mode === this.terrainMode()) return;
+    this.disposeVisualTerrain();
+    this.terrainMode.set(mode);
+    if (mode === 'visual') this.buildVisualTerrain();
+  }
+
+  setWireframe(enabled: boolean): void {
+    this.wireframe.set(enabled);
+    this.terrainGroup?.traverse((object) => {
+      if (
+        object instanceof Mesh &&
+        object.material instanceof MeshStandardMaterial
+      ) {
+        object.material.wireframe = enabled;
+      }
+    });
+  }
+
+  private buildVisualTerrain(): void {
+    const group = new Group();
+    group.name = 'cylinder-visual-terrain';
+    const materials = [
+      new MeshStandardMaterial({
+        color: '#62844b',
+        roughness: 0.94,
+        wireframe: this.wireframe(),
+      }),
+      new MeshStandardMaterial({
+        color: '#526f41',
+        roughness: 0.94,
+        wireframe: this.wireframe(),
+      }),
+    ];
+    const counts = this.terrainDomain.getPatchCounts(0);
+    for (let axialIndex = 0; axialIndex < counts.axial; axialIndex++) {
+      for (
+        let angularIndex = 0;
+        angularIndex < counts.angular;
+        angularIndex++
+      ) {
+        const patch = generateTerrainPatchMesh(
+          this.terrainField,
+          this.terrainDomain,
+          {
+            address: { level: 0, angularIndex, axialIndex },
+            resolution: TERRAIN_PATCH_RESOLUTION,
+          },
+        );
+        const geometry = new BufferGeometry();
+        geometry.setAttribute(
+          'position',
+          new BufferAttribute(patch.surface.positions, 3),
+        );
+        geometry.setAttribute(
+          'normal',
+          new BufferAttribute(patch.surface.normals, 3),
+        );
+        geometry.setAttribute('uv', new BufferAttribute(patch.surface.uvs, 2));
+        geometry.setIndex(new BufferAttribute(patch.surface.indices, 1));
+        const mesh = new Mesh(
+          geometry,
+          materials[(angularIndex + axialIndex) % 2],
+        );
+        mesh.position.set(...patch.centerWorldM);
+        group.add(mesh);
+      }
+    }
+    group.userData['ownedMaterials'] = materials;
+    this.terrainGroup = group;
+    this.engine.scene.add(group);
+  }
+
+  private disposeVisualTerrain(): void {
+    const group = this.terrainGroup;
+    if (group === null) return;
+    group.removeFromParent();
+    group.traverse((object) => {
+      if (object instanceof Mesh) object.geometry.dispose();
+    });
+    for (const material of group.userData[
+      'ownedMaterials'
+    ] as MeshStandardMaterial[]) {
+      material.dispose();
+    }
+    group.clear();
+    this.terrainGroup = null;
   }
 }
 

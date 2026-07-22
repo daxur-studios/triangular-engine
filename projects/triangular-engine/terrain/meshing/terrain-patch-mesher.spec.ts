@@ -123,4 +123,17 @@ describe('multi-surface terrain foundation', () => {
       field.sampleBatch(new Float64Array(6), new Float64Array(1)),
     ).toThrowError(RangeError);
   });
+
+  it('keeps optional visual skirts separate from the physics surface', () => {
+    const mesh = generateTerrainPatchMesh(new ConstantTerrainField(), domain, {
+      address,
+      resolution: 4,
+      skirtDepthM: 10,
+    });
+
+    expect(mesh.skirt).toBeDefined();
+    expect(mesh.surface.positions).toHaveSize(25 * 3);
+    expect(mesh.skirt!.positions.length).toBeGreaterThan(0);
+    expect(mesh.skirt!.indices.length).toBeGreaterThan(0);
+  });
 });
