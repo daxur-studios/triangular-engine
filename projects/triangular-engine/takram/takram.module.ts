@@ -1,5 +1,9 @@
 import { NgModule } from '@angular/core';
-import { TakramCloudLayerComponent, TakramCloudsComponent } from './clouds';
+import {
+  TakramCloudLayerComponent,
+  TakramCloudsComponent,
+  TakramCylinderCloudShellComponent,
+} from './clouds';
 import {
   TakramAerialPerspectiveComponent,
   TakramAtmosphereComponent,
@@ -15,6 +19,7 @@ const components = [
   TakramSkyLightComponent,
   TakramSunLightComponent,
   TakramCloudLayerComponent,
+  TakramCylinderCloudShellComponent,
   TakramCloudsComponent,
 ] as const;
 

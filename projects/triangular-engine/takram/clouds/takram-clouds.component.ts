@@ -149,7 +149,12 @@ export class TakramCloudsComponent
       this.clouds.localWeatherRepeat.set(...localWeatherRepeat);
       this.clouds.shapeRepeat.set(...shapeRepeat);
       if (cylindrical) {
-        applyTakramCylinderClouds(this.clouds, cylinderRadius, sunLightScale, cylinderHazeModel);
+        applyTakramCylinderClouds(
+          this.clouds,
+          cylinderRadius,
+          sunLightScale,
+          cylinderHazeModel,
+        );
         this.clouds.shadow.cascadeCount = 1;
         this.applyCylinderRenderSettings(this.clouds);
       } else if (shadowCascadeCount !== undefined) {
@@ -259,6 +264,12 @@ export class TakramCloudsComponent
     // These match the known-good fork POC. Spherical LUT sampling and the
     // shadow-length attachment are not meaningful for the cylinder adapter.
     clouds.clouds.accurateSunSkyLight = false;
+    // A cloud layer only a few kilometres thick can be tens of kilometres
+    // away near the axis. Takram's planetary perspective stepping can jump
+    // over that shell, so use bounded steps for cylindrical habitats.
+    clouds.clouds.minStepSize = 25;
+    clouds.clouds.maxStepSize = 100;
+    clouds.clouds.perspectiveStepScale = 1;
     clouds.shadow.maxIterationCount = 0;
     const maxIterationCount = this.maxIterationCount();
     if (maxIterationCount !== undefined) {

@@ -2,72 +2,440 @@
   <ng-template portalTarget="toolbarTop" lane="content">
     <aside class="demo-status">
       <strong>O'Neill cylinder clouds · engine-side POC</strong>
-      <span>Published Takram packages · X-axis cylinder · artistic internal haze</span>
+      <span
+        >Published Takram packages · X-axis cylinder · artistic internal
+        haze</span
+      >
     </aside>
   </ng-template>
 
   <ng-template portalTarget="leftSidebar" lane="content">
     <aside class="controls">
       <strong>Cylinder clouds</strong>
-      <label class="toggle"><input type="checkbox" [checked]="enabled()" (change)="enabled.set($any($event.target).checked)" /> Clouds enabled</label>
-      <label class="toggle"><input type="checkbox" [checked]="temporalUpscale()" (change)="temporalUpscale.set($any($event.target).checked)" /> Temporal upscale</label>
-      <label class="toggle"><input type="checkbox" [checked]="haze()" (change)="haze.set($any($event.target).checked)" /> Internal haze</label>
-      <label class="toggle"><input type="checkbox" [checked]="atmosphereEnabled()" (change)="atmosphereEnabled.set($any($event.target).checked)" /> Cylinder atmosphere</label>
-      <label>Cloud preset
-        <select [value]="cloudTextures.source()" (change)="cloudTextures.source.set($any($event.target).value)">
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="enabled()"
+          (change)="enabled.set($any($event.target).checked)"
+        />
+        Clouds enabled</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="temporalUpscale()"
+          (change)="temporalUpscale.set($any($event.target).checked)"
+        />
+        Temporal upscale</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="haze()"
+          (change)="haze.set($any($event.target).checked)"
+        />
+        Internal haze</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="atmosphereEnabled()"
+          (change)="atmosphereEnabled.set($any($event.target).checked)"
+        />
+        Cylinder atmosphere</label
+      >
+      <label
+        >Cloud preset
+        <select
+          [value]="cloudTextures.source()"
+          (change)="cloudTextures.source.set($any($event.target).value)"
+        >
           <option value="default">Default noise</option>
           <option value="procedural">Procedural noise</option>
           <option value="checker">Checkerboard</option>
         </select>
       </label>
-      <label>Haze model
-        <select [value]="hazeModel()" (change)="hazeModel.set($any($event.target).value)">
+      <label
+        >Haze model
+        <select
+          [value]="hazeModel()"
+          (change)="hazeModel.set($any($event.target).value)"
+        >
           <option value="bounded-v2">Bounded v2</option>
           <option value="legacy">Legacy POC</option>
         </select>
       </label>
-      <label class="toggle"><input type="checkbox" [checked]="wireframe()" (change)="wireframe.set($any($event.target).checked)" /> Meadow wireframe</label>
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="wireframe()"
+          (change)="wireframe.set($any($event.target).checked)"
+        />
+        Terrain wireframe</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="cylinderUp()"
+          (change)="setCylinderUp($any($event.target).checked)"
+        />
+        Cylinder-relative up</label
+      >
+      <label class="toggle"
+        ><input
+          type="checkbox"
+          [checked]="distanceShell()"
+          (change)="distanceShell.set($any($event.target).checked)"
+        />
+        Distant 2D clouds</label
+      >
 
-      <label>Resolution <output>{{ resolutionScale() }}</output><input type="range" min="0.25" max="1" step="0.25" [value]="resolutionScale()" (input)="setNumber($any($event.target), resolutionScale.set.bind(resolutionScale))" /></label>
-      <label>Cloud altitude <output>{{ altitude() }} m</output><input type="range" min="50" max="4000" step="50" [value]="altitude()" (input)="setNumber($any($event.target), altitude.set.bind(altitude))" /></label>
-      <label>Cloud height <output>{{ cloudHeight() }} m</output><input type="range" min="100" max="8000" step="100" [value]="cloudHeight()" (input)="setNumber($any($event.target), cloudHeight.set.bind(cloudHeight))" /></label>
-      <label>Coverage <output>{{ coverage() }}</output><input type="range" min="0" max="1" step="0.01" [value]="coverage()" (input)="setNumber($any($event.target), coverage.set.bind(coverage))" /></label>
-      <label>Density <output>{{ densityScale() }}</output><input type="range" min="0" max="2" step="0.05" [value]="densityScale()" (input)="setNumber($any($event.target), densityScale.set.bind(densityScale))" /></label>
-      <label>Wind X <output>{{ windSpeedX() }}</output><input type="range" min="-0.05" max="0.05" step="0.001" [value]="windSpeedX()" (input)="setNumber($any($event.target), windSpeedX.set.bind(windSpeedX))" /></label>
-      <label>Haze density <output>{{ atmosphereDensity() }}</output><input type="range" min="0" max="0.00015" step="0.000005" [value]="atmosphereDensity()" (input)="setNumber($any($event.target), atmosphereDensity.set.bind(atmosphereDensity))" /></label>
-      <label>Haze scale height <output>{{ atmosphereScaleHeight() }} m</output><input type="range" min="250" max="8000" step="250" [value]="atmosphereScaleHeight()" (input)="setNumber($any($event.target), atmosphereScaleHeight.set.bind(atmosphereScaleHeight))" /></label>
-      <label>Sky light <output>{{ atmosphereSkyLight() }}</output><input type="range" min="0" max="3" step="0.1" [value]="atmosphereSkyLight()" (input)="setNumber($any($event.target), atmosphereSkyLight.set.bind(atmosphereSkyLight))" /></label>
-      <label>Atmosphere intensity <output>{{ atmosphereIntensity() }}</output><input type="range" min="0" max="3" step="0.05" [value]="atmosphereIntensity()" (input)="setNumber($any($event.target), atmosphereIntensity.set.bind(atmosphereIntensity))" /></label>
-      <label>Air density <output>{{ atmosphereScatteringDensity() }}</output><input type="range" min="0" max="0.00005" step="0.000001" [value]="atmosphereScatteringDensity()" (input)="setNumber($any($event.target), atmosphereScatteringDensity.set.bind(atmosphereScatteringDensity))" /></label>
-      <label>Sun angle <output>{{ sunAngle() }}°</output><input type="range" min="0" max="360" step="1" [value]="sunAngle()" (input)="setNumber($any($event.target), sunAngle.set.bind(sunAngle))" /></label>
-      <label>Sun axial position <output>{{ sunAxialPosition() }}</output><input type="range" min="-2" max="2" step="0.05" [value]="sunAxialPosition()" (input)="setNumber($any($event.target), sunAxialPosition.set.bind(sunAxialPosition))" /></label>
-      <label>Sun intensity <output>{{ sunLightIntensity() }}</output><input type="range" min="0" max="10" step="0.1" [value]="sunLightIntensity()" (input)="setNumber($any($event.target), sunLightIntensity.set.bind(sunLightIntensity))" /></label>
+      <label
+        >Resolution <output>{{ resolutionScale() }}</output
+        ><input
+          type="range"
+          min="0.25"
+          max="1"
+          step="0.25"
+          [value]="resolutionScale()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              resolutionScale.set.bind(resolutionScale)
+            )
+          "
+      /></label>
+      <label
+        >Cloud altitude <output>{{ altitude() }} m</output
+        ><input
+          type="range"
+          min="50"
+          max="4000"
+          step="50"
+          [value]="altitude()"
+          (input)="setNumber($any($event.target), altitude.set.bind(altitude))"
+      /></label>
+      <label
+        >Cloud height <output>{{ cloudHeight() }} m</output
+        ><input
+          type="range"
+          min="100"
+          max="8000"
+          step="100"
+          [value]="cloudHeight()"
+          (input)="
+            setNumber($any($event.target), cloudHeight.set.bind(cloudHeight))
+          "
+      /></label>
+      <label
+        >Coverage <output>{{ coverage() }}</output
+        ><input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          [value]="coverage()"
+          (input)="setNumber($any($event.target), coverage.set.bind(coverage))"
+      /></label>
+      <label
+        >Density <output>{{ densityScale() }}</output
+        ><input
+          type="range"
+          min="0"
+          max="2"
+          step="0.05"
+          [value]="densityScale()"
+          (input)="
+            setNumber($any($event.target), densityScale.set.bind(densityScale))
+          "
+      /></label>
+      <label
+        >2D fade start <output>{{ distanceShellFadeStart() }} m</output
+        ><input
+          type="range"
+          min="1000"
+          max="30000"
+          step="500"
+          [value]="distanceShellFadeStart()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              distanceShellFadeStart.set.bind(distanceShellFadeStart)
+            )
+          "
+      /></label>
+      <label
+        >2D fade end <output>{{ distanceShellFadeEnd() }} m</output
+        ><input
+          type="range"
+          min="2000"
+          max="50000"
+          step="500"
+          [value]="distanceShellFadeEnd()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              distanceShellFadeEnd.set.bind(distanceShellFadeEnd)
+            )
+          "
+      /></label>
+      <label
+        >2D opacity <output>{{ distanceShellOpacity() }}</output
+        ><input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          [value]="distanceShellOpacity()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              distanceShellOpacity.set.bind(distanceShellOpacity)
+            )
+          "
+      /></label>
+      <label
+        >Wind X <output>{{ windSpeedX() }}</output
+        ><input
+          type="range"
+          min="-0.05"
+          max="0.05"
+          step="0.001"
+          [value]="windSpeedX()"
+          (input)="
+            setNumber($any($event.target), windSpeedX.set.bind(windSpeedX))
+          "
+      /></label>
+      <label
+        >Haze density <output>{{ atmosphereDensity() }}</output
+        ><input
+          type="range"
+          min="0"
+          max="0.00015"
+          step="0.000005"
+          [value]="atmosphereDensity()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              atmosphereDensity.set.bind(atmosphereDensity)
+            )
+          "
+      /></label>
+      <label
+        >Haze scale height <output>{{ atmosphereScaleHeight() }} m</output
+        ><input
+          type="range"
+          min="250"
+          max="8000"
+          step="250"
+          [value]="atmosphereScaleHeight()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              atmosphereScaleHeight.set.bind(atmosphereScaleHeight)
+            )
+          "
+      /></label>
+      <label
+        >Sky light <output>{{ atmosphereSkyLight() }}</output
+        ><input
+          type="range"
+          min="0"
+          max="3"
+          step="0.1"
+          [value]="atmosphereSkyLight()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              atmosphereSkyLight.set.bind(atmosphereSkyLight)
+            )
+          "
+      /></label>
+      <label
+        >Atmosphere intensity <output>{{ atmosphereIntensity() }}</output
+        ><input
+          type="range"
+          min="0"
+          max="3"
+          step="0.05"
+          [value]="atmosphereIntensity()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              atmosphereIntensity.set.bind(atmosphereIntensity)
+            )
+          "
+      /></label>
+      <label
+        >Air density <output>{{ atmosphereScatteringDensity() }}</output
+        ><input
+          type="range"
+          min="0"
+          max="0.00005"
+          step="0.000001"
+          [value]="atmosphereScatteringDensity()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              atmosphereScatteringDensity.set.bind(atmosphereScatteringDensity)
+            )
+          "
+      /></label>
+      <label
+        >Sun angle <output>{{ sunAngle() }}°</output
+        ><input
+          type="range"
+          min="0"
+          max="360"
+          step="1"
+          [value]="sunAngle()"
+          (input)="setNumber($any($event.target), sunAngle.set.bind(sunAngle))"
+      /></label>
+      <label
+        >Sun axial position <output>{{ sunAxialPosition() }}</output
+        ><input
+          type="range"
+          min="-2"
+          max="2"
+          step="0.05"
+          [value]="sunAxialPosition()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              sunAxialPosition.set.bind(sunAxialPosition)
+            )
+          "
+      /></label>
+      <label
+        >Sun intensity <output>{{ sunLightIntensity() }}</output
+        ><input
+          type="range"
+          min="0"
+          max="10"
+          step="0.1"
+          [value]="sunLightIntensity()"
+          (input)="
+            setNumber(
+              $any($event.target),
+              sunLightIntensity.set.bind(sunLightIntensity)
+            )
+          "
+      /></label>
     </aside>
   </ng-template>
 
-  <orbitControls [cameraPosition]="[0, -radius + 2, 50]" [target]="[radius * 0.15, 0, -radius * 0.8]" [upVector]="[0, 1, 0]" [fov]="60" [near]="10" [far]="1_000_000_000" />
+  <orbitControls
+    [cameraPosition]="[0, -radius + 2, 50]"
+    [target]="[radius * 0.15, 0, -radius * 0.8]"
+    [upVector]="cameraUp()"
+    [fov]="60"
+    [near]="10"
+    [far]="1_000_000_000"
+  />
   <ambientLight color="#9bb9dc" [intensity]="0.25" />
 
   <group [position]="sunPosition()">
     <pointLight color="#fff1c2" [intensity]="sunLightIntensity()" [decay]="0" />
-    <mesh><sphereGeometry [params]="{ radius: radius * sunSize(), widthSegments: 48, heightSegments: 24 }" /><meshBasicMaterial [params]="{ color: '#fff4c7', toneMapped: false }" /></mesh>
+    <mesh
+      ><sphereGeometry
+        [params]="{
+          radius: radius * sunSize(),
+          widthSegments: 48,
+          heightSegments: 24,
+        }" /><meshBasicMaterial
+        [params]="{ color: '#fff4c7', toneMapped: false }"
+    /></mesh>
   </group>
 
   <mesh [rotation]="[0, 0, 1.5707963267948966]">
     <cylinderGeometry [params]="[radius, radius, length, 96, 1, true]" />
-    <meshStandardMaterial [map]="meadowTexture" [params]="{ color: '#b9d89a', roughness: 0.95, metalness: 0, side: doubleSide, wireframe: wireframe() }" />
+    <meshStandardMaterial
+      [map]="terrainTexture"
+      [params]="{
+        color: 'white',
+        roughness: 0.9,
+        metalness: 0,
+        side: doubleSide,
+        wireframe: wireframe(),
+      }"
+    />
   </mesh>
-  <mesh [position]="[0, -radius + 0.5, 40]"><boxGeometry [params]="[10, 10, 10]" /><meshStandardMaterial [params]="{ color: 'white' }" /></mesh>
+  <mesh [position]="[0, -radius + 0.5, 40]"
+    ><boxGeometry [params]="[10, 10, 10]" /><meshStandardMaterial
+      [params]="{ color: 'white' }"
+  /></mesh>
 
   <postprocessing-composer [enableNormalPass]="true">
-    <takram-atmosphere [worldToECEFMatrix]="worldToCylinder" [sunDirection]="sunDirection()">
-      <takram-clouds [cylindrical]="true" [cylinderRadius]="radius" [cylinderHazeModel]="hazeModel()" [skipRendering]="!enabled()" [qualityPreset]="'high'" [coverage]="coverage()" [resolutionScale]="resolutionScale()" [temporalUpscale]="temporalUpscale()" [haze]="haze()" [lightShafts]="false" [localWeatherTexture]="cloudTextures.selectedTexture()" [localWeatherRepeat]="[2, 2]" [shapeRepeat]="[0.0003, 0.0003, 0.0003]" [localWeatherVelocity]="[windSpeedX(), 0]" [hazeDensityScale]="atmosphereDensity()" [hazeScaleHeight]="atmosphereScaleHeight()" [skyLightScale]="atmosphereSkyLight()" [sunLightScale]="sunLightIntensity() / 2.5" [groundBounceScale]="0" [maxIterationCount]="500" [maxIterationCountToSun]="4" [maxRayDistance]="radius * 2.5">
-        <takram-cloud-layer channel="r" [altitude]="altitude()" [height]="cloudHeight()" [densityScale]="densityScale()" [shapeAmount]="0.9" [shapeDetailAmount]="0.8" [coverageFilterWidth]="0.65" [shadow]="false" />
+    <takram-atmosphere
+      [worldToECEFMatrix]="worldToCylinder"
+      [sunDirection]="sunDirection()"
+    >
+      <takram-clouds
+        #cloudEffect
+        [cylindrical]="true"
+        [cylinderRadius]="radius"
+        [cylinderHazeModel]="hazeModel()"
+        [skipRendering]="!enabled()"
+        [qualityPreset]="'high'"
+        [coverage]="coverage()"
+        [resolutionScale]="resolutionScale()"
+        [temporalUpscale]="temporalUpscale()"
+        [haze]="haze()"
+        [lightShafts]="false"
+        [localWeatherTexture]="cloudTextures.selectedTexture()"
+        [localWeatherRepeat]="[2, 2]"
+        [shapeRepeat]="[0.0003, 0.0003, 0.0003]"
+        [localWeatherVelocity]="[windSpeedX(), 0]"
+        [hazeDensityScale]="atmosphereDensity()"
+        [hazeScaleHeight]="atmosphereScaleHeight()"
+        [skyLightScale]="atmosphereSkyLight()"
+        [sunLightScale]="sunLightIntensity() / 2.5"
+        [groundBounceScale]="0"
+        [maxIterationCount]="500"
+        [maxIterationCountToSun]="4"
+        [maxRayDistance]="radius * 2.5"
+      >
+        <takram-cloud-layer
+          channel="r"
+          [altitude]="altitude()"
+          [height]="cloudHeight()"
+          [densityScale]="densityScale()"
+          [shapeAmount]="0.9"
+          [shapeDetailAmount]="0.8"
+          [coverageFilterWidth]="0.65"
+          [shadow]="false"
+        />
       </takram-clouds>
     </takram-atmosphere>
     @if (atmosphereEnabled()) {
-      <takram-cylinder-atmosphere [radius]="radius" [halfLength]="length / 2" [density]="atmosphereScatteringDensity()" [scaleHeight]="atmosphereScaleHeight()" [intensity]="atmosphereIntensity()" [sunDirection]="sunDirection()" />
+      <takram-cylinder-atmosphere
+        [radius]="radius"
+        [halfLength]="length / 2"
+        [density]="atmosphereScatteringDensity()"
+        [scaleHeight]="atmosphereScaleHeight()"
+        [intensity]="atmosphereIntensity()"
+        [sunDirection]="sunDirection()"
+      />
     }
     <toneMappingEffect />
   </postprocessing-composer>
+
+  <takram-cylinder-cloud-shell
+    [radius]="radius"
+    [length]="length"
+    [altitude]="altitude()"
+    [height]="cloudHeight()"
+    [layerPosition]="0.3"
+    [coverage]="coverage()"
+    [weatherTexture]="
+      cloudTextures.selectedTexture() ?? cloudEffect.effect?.localWeatherTexture
+    "
+    [weatherRepeat]="[2, 2]"
+    [weatherOffset]="cloudEffect.effect?.localWeatherOffset"
+    [weatherVelocity]="[windSpeedX(), 0]"
+    [fadeStart]="distanceShellFadeStart()"
+    [fadeEnd]="distanceShellFadeEnd()"
+    [opacity]="distanceShellOpacity()"
+    [enabled]="enabled() && distanceShell()"
+  />
 </scene>

@@ -55,6 +55,10 @@ export class JoltPhysicsComponent {
   readonly paused = input<boolean>();
   readonly paused$ = toObservable(this.paused);
 
+  /** Multiplies the delta time fed into physics stepping — 1 = real time, 0.5 = slow-mo, 2 = fast-forward. */
+  readonly timeScale = input<number>(1);
+  readonly timeScale$ = toObservable(this.timeScale);
+
   readonly gravity = input<Vector3Tuple>();
   readonly gravity$ = toObservable(this.gravity);
 
@@ -477,11 +481,11 @@ export class JoltPhysicsComponent {
   }
 
   #initPhysicsTick(metadata: IJoltMetadata) {
-    combineLatest([this.engineService.tick$, this.paused$])
+    combineLatest([this.engineService.tick$, this.paused$, this.timeScale$])
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(([deltaSeconds, paused]) => {
+      .subscribe(([deltaSeconds, paused, timeScale]) => {
         if (paused) return;
-        this.#renderExampleTick(deltaSeconds, metadata);
+        this.#renderExampleTick(deltaSeconds * (timeScale ?? 1), metadata);
       });
   }
 

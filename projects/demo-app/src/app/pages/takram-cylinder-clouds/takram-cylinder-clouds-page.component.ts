@@ -6,6 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   DataTexture,
   DoubleSide,
@@ -59,6 +60,10 @@ export class TakramCylinderCloudsPageComponent {
   readonly cloudHeight = signal(1_400);
   readonly coverage = signal(0.62);
   readonly densityScale = signal(0.5);
+  readonly distanceShell = signal(true);
+  readonly distanceShellOpacity = signal(0.82);
+  readonly distanceShellFadeStart = signal(3_000);
+  readonly distanceShellFadeEnd = signal(7_000);
   readonly windSpeedX = signal(0.005);
   readonly haze = signal(true);
   readonly hazeModel = signal<'legacy' | 'bounded-v2'>('bounded-v2');
@@ -69,6 +74,8 @@ export class TakramCylinderCloudsPageComponent {
   readonly atmosphereScatteringDensity = signal(0.000008);
   readonly atmosphereIntensity = signal(0.12);
   readonly wireframe = signal(false);
+  readonly cylinderUp = signal(false);
+  readonly cameraUp = signal<[number, number, number]>([0, 1, 0]);
   readonly sunAngle = signal(120);
   readonly sunAxialPosition = signal(0.6);
   readonly sunSize = signal(0.035);
@@ -86,7 +93,7 @@ export class TakramCylinderCloudsPageComponent {
   readonly sunDirection = computed(() =>
     new Vector3(...this.sunPosition()).normalize(),
   );
-  readonly meadowTexture = createMeadowTexture(this.radius, this.length, 120);
+  readonly terrainTexture = createTerrainTexture();
   readonly starTexture = createStarTexture();
 
   constructor() {
@@ -95,15 +102,32 @@ export class TakramCylinderCloudsPageComponent {
     const destroyRef = inject(DestroyRef);
     const previousBackground = engine.scene.background;
     engine.scene.background = this.starTexture;
+    engine.postTick$.pipe(takeUntilDestroyed(destroyRef)).subscribe(() => {
+      if (!this.cylinderUp()) return;
+      const position = engine.camera.position;
+      const radialLength = Math.hypot(position.y, position.z);
+      if (radialLength > 0) {
+        this.cameraUp.set([
+          0,
+          -position.y / radialLength,
+          -position.z / radialLength,
+        ]);
+      }
+    });
     destroyRef.onDestroy(() => {
       engine.scene.background = previousBackground;
-      this.meadowTexture.dispose();
+      this.terrainTexture.dispose();
       this.starTexture.dispose();
     });
   }
 
   setNumber(target: { value: string }, setter: (value: number) => void): void {
     setter(Number(target.value));
+  }
+
+  setCylinderUp(enabled: boolean): void {
+    this.cylinderUp.set(enabled);
+    if (!enabled) this.cameraUp.set([0, 1, 0]);
   }
 }
 
@@ -190,12 +214,8 @@ function writeStarPixel(
   );
 }
 
-function createMeadowTexture(
-  radius: number,
-  length: number,
-  tileSize: number,
-): DataTexture {
-  const size = 256;
+function createTerrainTexture(): DataTexture {
+  const size = 512;
   const data = new Uint8Array(size * size * 4);
   let seed = 0x51f15e;
   const random = (): number => {
@@ -205,13 +225,29 @@ function createMeadowTexture(
   for (let y = 0; y < size; ++y) {
     for (let x = 0; x < size; ++x) {
       const index = (y * size + x) * 4;
-      const variation =
-        Math.sin(x * 0.075) * 8 + Math.sin(y * 0.057 + x * 0.021) * 7;
-      const detail = (random() - 0.5) * 24;
-      const flower = random() > 0.998;
-      data[index] = flower ? 225 : 54 + variation + detail;
-      data[index + 1] = flower ? 205 : 105 + variation + detail;
-      data[index + 2] = flower ? 115 : 47 + variation * 0.5 + detail;
+      const u = (x / size) * Math.PI * 2;
+      const v = (y / size) * Math.PI * 2;
+      const continent =
+        Math.sin(u * 2 + Math.sin(v)) * 0.42 +
+        Math.sin(v * 2 - u) * 0.3 +
+        Math.sin(u * 4 + v * 3) * 0.15 +
+        Math.sin(u * 9 - v * 7) * 0.07;
+      const detail = (random() - 0.5) * 10;
+      if (continent < -0.12) {
+        const depth = Math.min(1, (-0.12 - continent) * 2.5);
+        data[index] = 18 + depth * 4 + detail * 0.15;
+        data[index + 1] = 82 - depth * 27 + detail * 0.25;
+        data[index + 2] = 116 - depth * 24 + detail * 0.3;
+      } else if (continent < -0.04) {
+        data[index] = 151 + detail;
+        data[index + 1] = 145 + detail;
+        data[index + 2] = 82 + detail * 0.5;
+      } else {
+        const upland = Math.min(1, Math.max(0, continent - 0.35) * 2);
+        data[index] = 49 + upland * 46 + detail;
+        data[index + 1] = 105 - upland * 25 + detail;
+        data[index + 2] = 45 + upland * 18 + detail * 0.5;
+      }
       data[index + 3] = 255;
     }
   }
@@ -225,7 +261,7 @@ function createMeadowTexture(
   texture.colorSpace = SRGBColorSpace;
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
-  texture.repeat.set((Math.PI * 2 * radius) / tileSize, length / tileSize);
+  texture.repeat.set(1, 1);
   texture.minFilter = LinearMipmapLinearFilter;
   texture.generateMipmaps = true;
   texture.needsUpdate = true;
