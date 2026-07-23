@@ -10,7 +10,10 @@ import {
   PlaneWaterDomain,
   SphereWaterDomain,
 } from '../core/water-domain';
-import { WATER_RENDER_PRESETS } from './water-render-preset';
+import {
+  WATER_RENDER_PRESETS,
+  resolveWaterRenderPreset,
+} from './water-render-preset';
 import { WaterSurfaceRenderer } from './water-surface-renderer';
 
 describe('WaterSurfaceRenderer', () => {
@@ -63,7 +66,9 @@ describe('WaterSurfaceRenderer', () => {
   it('quantizes renderer time only when the stylize preset asks for it', () => {
     const renderer = new WaterSurfaceRenderer({
       domain: new PlaneWaterDomain(),
-      preset: WATER_RENDER_PRESETS.pixel,
+      preset: resolveWaterRenderPreset(WATER_RENDER_PRESETS.performance, {
+        stylize: { colorSteps: 6, timeQuantizeHz: 8, normalMapSize: 32 },
+      }),
     });
     const camera = new PerspectiveCamera();
     renderer.update(camera, 1.234);

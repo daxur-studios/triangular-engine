@@ -3,28 +3,38 @@
     <section class="panel" aria-label="Water material POC controls">
       <header>
         <div>
-          <a routerLink="/">← Examples</a
-          ><small>triangular-engine/water — Phase 1b material spike</small>
+          <a routerLink="/">← Examples</a>
+          <small>triangular-engine/water — shared renderer harness</small>
         </div>
-        <strong>Shading: detail chop, fresnel, depth-texture shore fade</strong>
+        <strong>Shared water quality and style presets</strong>
       </header>
 
       <p class="blurb">
-        Same Phase 1a LOD grid, now shaded: <code>waterDetailNormal</code>
-        scrolls two copies of a procedurally-generated tileable normal map for
-        fine chop (never geometry — see the Phase 0 finding), and
-        <code>WaterDepthPrepass</code> captures the opaque shore's depth (water
-        hidden) each frame so the shore fade / colour absorption react to the
-        real slope, not a fixed distance.
+        This page now uses <code>WaterSurfaceRenderer</code> directly. Switch
+        quality and motion independently on the same shared path games and the
+        upcoming <code>&lt;waterSurface&gt;</code> component will use.
       </p>
 
-      <nav aria-label="Wave preset">
+      <small>Quality</small>
+      <nav aria-label="Water quality preset">
         @for (key of presetKeys; track key) {
           <button
-            [class.active]="activePreset() === key"
+            [class.active]="activeQuality() === key"
             (click)="selectPreset(key)"
           >
             {{ presetLabels[key] }}
+          </button>
+        }
+      </nav>
+
+      <small class="control-label">Water motion</small>
+      <nav aria-label="Water motion preset">
+        @for (key of wavePresetKeys; track key) {
+          <button
+            [class.active]="activeWaves() === key"
+            (click)="selectWaves(key)"
+          >
+            {{ wavePresetLabels[key] }}
           </button>
         }
       </nav>
@@ -55,7 +65,7 @@
             [checked]="shoreFade()"
             (change)="toggleShoreFade()"
           />
-          Shore fade / depth tint
+          Shore fade
         </label>
         <label class="checkbox">
           <input
@@ -68,10 +78,9 @@
       </div>
 
       <p class="blurb note">
-        Each ring roughly doubles the covered radius for a fixed instance
-        budget, so pushing this is cheap — but the grid is still finite: there's
-        a hard edge at the boundary above, with no far horizon skirt yet
-        (tracked in the runbook's Mesh/LOD notes).
+        Performance skips detail normals and the opaque-scene depth prepass.
+        Balanced adds both; cinematic also adds distant reflection and glint.
+        Calm, wavy and storm remain independent of that quality choice.
       </p>
     </section>
   </ng-template>

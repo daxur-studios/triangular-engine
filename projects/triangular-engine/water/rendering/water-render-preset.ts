@@ -91,18 +91,6 @@ export const WATER_RENDER_PRESETS = {
     farField: { cascadeCount: 3, cascadeSpread: 8, distanceRoughness: 0.45 },
     grid: WATER_TIER_GRID_DEFAULTS.medium,
   },
-  pixel: {
-    name: 'pixel',
-    tier: 'low',
-    waves: CALM_LAKE_PRESET,
-    shading: {
-      colorShallow: '#67d5d0',
-      colorDeep: '#153f59',
-      detailStrength: 0.35,
-    },
-    stylize: { colorSteps: 6, timeQuantizeHz: 8, normalMapSize: 32 },
-    grid: WATER_TIER_GRID_DEFAULTS.low,
-  },
   cinematic: {
     name: 'cinematic',
     tier: 'high',

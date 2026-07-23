@@ -1,6 +1,5 @@
 import {
   ChangeDetectionStrategy,
-  ChangeDetectorRef,
   Component,
   DestroyRef,
   computed,
@@ -10,186 +9,58 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import {
-  BufferGeometry,
   Color,
-  DoubleSide,
-  InstancedMesh,
-  Matrix4,
   Mesh,
   MeshStandardMaterial,
-  PerspectiveCamera,
   PlaneGeometry,
-  ShaderMaterial,
-  Vector2,
-  Vector3,
   WebGLRenderer,
   type Vector3Tuple,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
-  CALM_LAKE_PRESET,
-  GERSTNER_DISPLACE_GLSL,
-  GERSTNER_NORMAL_GLSL,
-  GERSTNER_UNIFORMS_GLSL,
-  OCEAN_SWELL_PRESET,
-  STORM_PRESET,
-  WATER_DEPTH_FADE_GLSL,
-  WATER_DEPTH_UNPACK_GLSL,
-  WATER_DETAIL_NORMAL_GLSL,
-  WATER_FRESNEL_GLSL,
-  WATER_LOD_CULL_GLSL,
-  WATER_LOD_MORPH_GLSL,
-  WATER_LOGDEPTH_FRAGMENT_GLSL,
-  WATER_LOGDEPTH_PARS_FRAGMENT_GLSL,
-  WATER_LOGDEPTH_PARS_VERTEX_GLSL,
-  WATER_LOGDEPTH_VERTEX_GLSL,
-  WATER_SHADING_UNIFORMS_GLSL,
-  WATER_SURFACE_DEPTH_GLSL,
-  WATER_SURFACE_DEPTH_UNIFORMS_GLSL,
-  WaterDepthPrepass,
-  computeWaterLodBoundaryRadius,
-  computeWaterLodLevels,
-  createGerstnerUniforms,
-  createProceduralNormalMapTexture,
-  createWaterLodPatchGeometry,
-  createWaterShadingUniforms,
-  createWaterSurfaceDepthUniforms,
-  updateGerstnerUniforms,
-  updateWaterSurfaceDepthCamera,
-  type GerstnerUniforms,
-  type WaterLodGridOptions,
-  type WaterShadingUniforms,
-  type WaterSurfaceDepthUniforms,
-  type WaterWavePreset,
+  PlaneWaterDomain,
+  WATER_RENDER_PRESETS,
+  WATER_WAVE_PRESETS,
+  WaterSurfaceRenderer,
+  resolveWaterRenderPreset,
+  type WaterRenderPreset,
 } from 'triangular-engine/water';
 
-type PresetKey = 'calmLake' | 'oceanSwell' | 'storm';
+type RenderPresetKey = keyof typeof WATER_RENDER_PRESETS;
+type WavePresetKey = keyof typeof WATER_WAVE_PRESETS;
 
-const PRESETS: Record<PresetKey, WaterWavePreset> = {
-  calmLake: CALM_LAKE_PRESET,
-  oceanSwell: OCEAN_SWELL_PRESET,
-  storm: STORM_PRESET,
+const PRESET_KEYS: readonly RenderPresetKey[] = [
+  'performance',
+  'balanced',
+  'cinematic',
+];
+
+const PRESET_LABELS: Readonly<Record<RenderPresetKey, string>> = {
+  performance: 'Performance',
+  balanced: 'Balanced',
+  cinematic: 'Cinematic',
 };
 
-const PRESET_LABELS: Record<PresetKey, string> = {
-  calmLake: 'Calm lake',
-  oceanSwell: 'Ocean swell',
+const WAVE_PRESET_KEYS: readonly WavePresetKey[] = [
+  'calmLake',
+  'oceanSwell',
+  'storm',
+];
+
+const WAVE_PRESET_LABELS: Readonly<Record<WavePresetKey, string>> = {
+  calmLake: 'Calm',
+  oceanSwell: 'Wavy',
   storm: 'Storm',
 };
 
-/**
- * Ring count is the one grid parameter exposed as a runtime slider (see
- * `setRingCount`): each added ring roughly doubles the covered radius for a
- * fixed per-ring instance budget (CDLOD's whole point), so it's a cheap way
- * to push the "how far does the ocean extend" boundary out. It does not by
- * itself make the ocean infinite — see the runbook's still-unbuilt "far
- * skirt to the horizon line" note under Mesh/LOD.
- */
-const BASE_GRID_OPTIONS = {
-  baseCellSize: 4,
-  patchResolution: 8,
-  coreSizePatches: 16,
-} as const;
-
-const DEFAULT_RING_COUNT = 4;
+const DEFAULT_RING_COUNT = 5;
 const MIN_RING_COUNT = 1;
 const MAX_RING_COUNT = 7;
 
-const MAX_INSTANCES_PER_LEVEL =
-  BASE_GRID_OPTIONS.coreSizePatches * BASE_GRID_OPTIONS.coreSizePatches;
-
-/** Effectively "never" for the outermost level's outer cull test. */
-const OUTER_CULL_SENTINEL = 1e9;
-
-const VERTEX_SHADER = `
-  ${WATER_LOGDEPTH_PARS_VERTEX_GLSL}
-  ${GERSTNER_UNIFORMS_GLSL}
-  ${GERSTNER_DISPLACE_GLSL}
-  ${GERSTNER_NORMAL_GLSL}
-  ${WATER_LOD_MORPH_GLSL}
-  uniform float uTime;
-  uniform float uCellSize;
-  uniform float uMorphStart;
-  uniform float uMorphEnd;
-  varying vec3 vNormal;
-  varying vec3 vWorldPosition;
-  varying float vFragViewZ;
-
-  void main() {
-    vec4 instanced = instanceMatrix * vec4(position, 1.0);
-    vec4 worldPos4 = modelMatrix * instanced;
-    vec2 base = waterLodMorph(worldPos4.xz, cameraPosition.xz, uCellSize, uMorphStart, uMorphEnd);
-
-    vec3 displaced = gerstnerDisplace(base, uTime);
-    vNormal = gerstnerNormal(base, uTime);
-    vWorldPosition = displaced;
-
-    vec4 viewPos = viewMatrix * vec4(displaced, 1.0);
-    vFragViewZ = viewPos.z;
-    gl_Position = projectionMatrix * viewPos;
-    ${WATER_LOGDEPTH_VERTEX_GLSL}
-  }
-`;
-
-const FRAGMENT_SHADER = `
-  ${WATER_LOGDEPTH_PARS_FRAGMENT_GLSL}
-  ${WATER_LOD_CULL_GLSL}
-  ${WATER_SHADING_UNIFORMS_GLSL}
-  ${WATER_DETAIL_NORMAL_GLSL}
-  ${WATER_FRESNEL_GLSL}
-  ${WATER_DEPTH_UNPACK_GLSL}
-  ${WATER_SURFACE_DEPTH_UNIFORMS_GLSL}
-  ${WATER_SURFACE_DEPTH_GLSL}
-  ${WATER_DEPTH_FADE_GLSL}
-  uniform vec3 uLightDirection;
-  uniform float uInnerCullRadius;
-  uniform float uOuterCullRadius;
-  uniform float uTime;
-  uniform float uDetailEnabled;
-  uniform float uShoreFadeEnabled;
-  varying vec3 vNormal;
-  varying vec3 vWorldPosition;
-  varying float vFragViewZ;
-
-  void main() {
-    waterLodCull(vWorldPosition.xz, cameraPosition.xz, uInnerCullRadius, uOuterCullRadius);
-
-    vec3 baseNormal = normalize(vNormal);
-    vec3 detailed = waterDetailNormal(vWorldPosition.xz, baseNormal, uTime);
-    vec3 normal = normalize(mix(baseNormal, detailed, uDetailEnabled));
-
-    vec2 screenUV = gl_FragCoord.xy / uResolution;
-    float depth = waterSurfaceDepth(
-      screenUV,
-      vWorldPosition,
-      vec3(0.0, 1.0, 0.0)
-    );
-    float shoreFade = mix(1.0, waterShoreFade(depth), uShoreFadeEnabled);
-
-    vec3 lightDir = normalize(uLightDirection);
-    float diffuse = max(dot(normal, lightDir), 0.0);
-    vec3 viewDir = normalize(cameraPosition - vWorldPosition);
-    float fresnel = waterFresnel(normal, viewDir, uFresnelPower);
-
-    vec3 base = waterAbsorb(uColorShallow, uColorDeep, depth);
-    base *= (diffuse * 0.5 + 0.5);
-    vec3 color = mix(base, vec3(1.0), fresnel * 0.4);
-
-    gl_FragColor = vec4(color, shoreFade);
-    ${WATER_LOGDEPTH_FRAGMENT_GLSL}
-  }
-`;
-
 /**
- * Phase 1b material spike for triangular-engine/water
- * (docs/runbook/002_water_sublibrary.md): scrolling detail-normal chop,
- * fresnel, absorption colour, and depth-texture shoreline fade / depth tint,
- * layered on top of the Phase 1a LOD grid (unchanged) against a sloped
- * opaque "shore" mesh. The shore fade/tint reads a `WaterDepthPrepass`
- * capture of the opaque scene's depth (water hidden), taken each frame from
- * `EngineService.postTick$` — this is the spike that answers the runbook's
- * open question about depth-texture shading working outside the
- * postprocessing composer.
+ * Visual integration harness for the shared framework-free water renderer.
+ * This page owns only its shore, camera and UI; all water geometry, shaders,
+ * uniforms, depth capture and quality behavior live in WaterSurfaceRenderer.
  */
 @Component({
   selector: 'app-water-material-poc-page',
@@ -206,9 +77,12 @@ const FRAGMENT_SHADER = `
   host: { class: 'flex-page' },
 })
 export class WaterMaterialPocPageComponent {
-  readonly presetKeys = Object.keys(PRESETS) as PresetKey[];
+  readonly presetKeys = PRESET_KEYS;
   readonly presetLabels = PRESET_LABELS;
-  readonly activePreset = signal<PresetKey>('oceanSwell');
+  readonly wavePresetKeys = WAVE_PRESET_KEYS;
+  readonly wavePresetLabels = WAVE_PRESET_LABELS;
+  readonly activeQuality = signal<RenderPresetKey>('balanced');
+  readonly activeWaves = signal<WavePresetKey>('oceanSwell');
   readonly detailChop = signal(true);
   readonly shoreFade = signal(true);
   readonly wireframe = signal(false);
@@ -216,52 +90,25 @@ export class WaterMaterialPocPageComponent {
   readonly minRingCount = MIN_RING_COUNT;
   readonly maxRingCount = MAX_RING_COUNT;
   readonly outerExtentMeters = computed(() => {
-    const halfCountPatches = BASE_GRID_OPTIONS.coreSizePatches / 2;
-    const patchWorldSize =
-      BASE_GRID_OPTIONS.baseCellSize * 2 ** this.ringCount();
-    return Math.round(halfCountPatches * patchWorldSize);
+    const grid = WATER_RENDER_PRESETS[this.activeQuality()].grid;
+    return Math.round(
+      (grid.coreSizePatches / 2) *
+        grid.baseCellSize *
+        2 ** this.ringCount(),
+    );
   });
 
   readonly initialCameraPosition: Vector3Tuple = [70, 30, 110];
   readonly initialTarget: Vector3Tuple = [10, -2, 0];
 
   private readonly engine = inject(EngineService);
-  private readonly changeDetector = inject(ChangeDetectorRef);
-  private readonly gerstnerUniforms: GerstnerUniforms;
-  private readonly shadingUniforms: WaterShadingUniforms;
-  private readonly surfaceDepthUniforms: WaterSurfaceDepthUniforms;
-  private readonly uTime = { value: 0 };
-  private readonly levelMeshes: InstancedMesh[] = [];
-  private readonly levelMaterials: ShaderMaterial[] = [];
-  private readonly scratchMatrix = new Matrix4();
-  private readonly patchGeometry: BufferGeometry;
   private readonly shoreMesh: Mesh;
-  private readonly depthPrepass: WaterDepthPrepass;
-  private readonly drawingBufferSize = new Vector2();
-  private gridOptions: WaterLodGridOptions;
+  private readonly water: WaterSurfaceRenderer;
 
   constructor() {
     const destroyRef = inject(DestroyRef);
     const previousBackground = this.engine.scene.background;
     this.engine.scene.background = new Color('#04121c');
-
-    this.gerstnerUniforms = createGerstnerUniforms(
-      PRESETS[this.activePreset()].waves,
-    );
-    this.shadingUniforms = createWaterShadingUniforms({
-      detailNormalMap: createProceduralNormalMapTexture({
-        size: 128,
-        octaves: 5,
-        seed: 3,
-      }),
-      detailTiling: 6,
-      detailStrength: 0.45,
-      absorptionDistance: 40,
-      shoreFadeDistance: 3,
-      colorShallow: '#8fe3ff',
-      colorDeep: '#0e4a73',
-    });
-    this.surfaceDepthUniforms = createWaterSurfaceDepthUniforms();
 
     this.shoreMesh = new Mesh(
       createShoreGeometry(),
@@ -269,72 +116,62 @@ export class WaterMaterialPocPageComponent {
     );
     this.engine.scene.add(this.shoreMesh);
 
-    this.patchGeometry = createWaterLodPatchGeometry(
-      BASE_GRID_OPTIONS.patchResolution,
-    );
-    this.gridOptions = { ...BASE_GRID_OPTIONS, ringCount: this.ringCount() };
-    this.buildGrid(this.gridOptions);
-
-    this.depthPrepass = new WaterDepthPrepass(
-      this.engine.width,
-      this.engine.height,
-    );
-
-    destroyRef.onDestroy(() => {
-      this.engine.scene.background = previousBackground;
-      this.shoreMesh.removeFromParent();
-      this.shoreMesh.geometry.dispose();
-      (this.shoreMesh.material as MeshStandardMaterial).dispose();
-      for (const mesh of this.levelMeshes) {
-        mesh.removeFromParent();
-        mesh.dispose();
-      }
-      for (const material of this.levelMaterials) {
-        material.dispose();
-      }
-      this.patchGeometry.dispose();
-      this.shadingUniforms.uDetailNormalMap.value?.dispose();
-      this.depthPrepass.dispose();
+    this.water = new WaterSurfaceRenderer({
+      domain: new PlaneWaterDomain(),
+      preset: this.resolveActivePreset(),
     });
+    this.water.addTo(this.engine.scene);
 
     this.engine.tick$
       .pipe(takeUntilDestroyed(destroyRef))
-      .subscribe((deltaTime) => this.tick(deltaTime));
+      .subscribe(() =>
+        this.water.update(
+          this.engine.camera$.value,
+          this.engine.clock.getElapsedTime(),
+        ),
+      );
     this.engine.postTick$
       .pipe(takeUntilDestroyed(destroyRef))
       .subscribe(() => this.captureDepth());
+
+    destroyRef.onDestroy(() => {
+      this.engine.scene.background = previousBackground;
+      this.water.dispose();
+      this.shoreMesh.removeFromParent();
+      this.shoreMesh.geometry.dispose();
+      (this.shoreMesh.material as MeshStandardMaterial).dispose();
+    });
   }
 
-  selectPreset(key: PresetKey): void {
-    if (key === this.activePreset()) return;
-    this.activePreset.set(key);
-    updateGerstnerUniforms(this.gerstnerUniforms, PRESETS[key].waves);
+  selectPreset(key: RenderPresetKey): void {
+    if (key === this.activeQuality()) return;
+    this.activeQuality.set(key);
+    this.applyPreset();
+  }
+
+  selectWaves(key: WavePresetKey): void {
+    if (key === this.activeWaves()) return;
+    this.activeWaves.set(key);
+    this.applyPreset();
   }
 
   toggleDetailChop(): void {
-    this.detailChop.update((v) => !v);
-    for (const material of this.levelMaterials) {
-      material.uniforms['uDetailEnabled'].value = this.detailChop() ? 1 : 0;
-    }
+    this.detailChop.update((value) => !value);
+    this.applyPreset();
   }
 
   toggleShoreFade(): void {
-    this.shoreFade.update((v) => !v);
-    for (const material of this.levelMaterials) {
-      material.uniforms['uShoreFadeEnabled'].value = this.shoreFade() ? 1 : 0;
-    }
+    this.shoreFade.update((value) => !value);
+    this.applyPreset();
   }
 
   toggleWireframe(): void {
-    this.wireframe.update((v) => !v);
-    for (const material of this.levelMaterials) {
-      material.wireframe = this.wireframe();
-    }
+    this.wireframe.update((value) => !value);
+    this.water.setWireframe(this.wireframe());
     (this.shoreMesh.material as MeshStandardMaterial).wireframe =
       this.wireframe();
   }
 
-  /** Rebuilds the LOD grid at a new ring count — the level count itself changes, so this disposes and recreates every level's mesh/material rather than patching uniforms in place. */
   setRingCount(value: number | string): void {
     const clamped = Math.min(
       MAX_RING_COUNT,
@@ -342,145 +179,46 @@ export class WaterMaterialPocPageComponent {
     );
     if (clamped === this.ringCount()) return;
     this.ringCount.set(clamped);
-    this.disposeGrid();
-    this.gridOptions = { ...BASE_GRID_OPTIONS, ringCount: clamped };
-    this.buildGrid(this.gridOptions);
+    this.applyPreset();
   }
 
-  private buildGrid(gridOptions: WaterLodGridOptions): void {
-    const halfCountPatches = gridOptions.coreSizePatches / 2;
-
-    for (let level = 0; level <= gridOptions.ringCount; level++) {
-      const patchWorldSize = gridOptions.baseCellSize * 2 ** level;
-      const outerHalfExtent = halfCountPatches * patchWorldSize;
-      const isOutermost = level === gridOptions.ringCount;
-
-      const innerCullRadius =
-        level > 0 ? computeWaterLodBoundaryRadius(level, gridOptions) : 0;
-      const outerCullRadius = isOutermost
-        ? OUTER_CULL_SENTINEL
-        : computeWaterLodBoundaryRadius(level + 1, gridOptions);
-      const morphEnd = isOutermost ? outerHalfExtent : outerCullRadius;
-      const morphStart = Math.max(morphEnd - 2 * patchWorldSize, 0);
-
-      const material = new ShaderMaterial({
-        uniforms: {
-          ...this.gerstnerUniforms,
-          ...this.shadingUniforms,
-          ...this.surfaceDepthUniforms,
-          uTime: this.uTime,
-          uCellSize: { value: patchWorldSize / gridOptions.patchResolution },
-          uMorphStart: { value: morphStart },
-          uMorphEnd: { value: morphEnd },
-          uInnerCullRadius: { value: innerCullRadius },
-          uOuterCullRadius: { value: outerCullRadius },
-          uLightDirection: { value: new Vector3(0.4, 0.8, 0.3).normalize() },
-          uDetailEnabled: { value: this.detailChop() ? 1 : 0 },
-          uShoreFadeEnabled: { value: this.shoreFade() ? 1 : 0 },
-        },
-        vertexShader: VERTEX_SHADER,
-        fragmentShader: FRAGMENT_SHADER,
-        side: DoubleSide,
-        transparent: true,
-        depthWrite: false,
-        wireframe: this.wireframe(),
-      });
-      this.levelMaterials.push(material);
-
-      const mesh = new InstancedMesh(
-        this.patchGeometry,
-        material,
-        MAX_INSTANCES_PER_LEVEL,
-      );
-      mesh.count = 0;
-      mesh.frustumCulled = false;
-      this.engine.scene.add(mesh);
-      this.levelMeshes.push(mesh);
-    }
+  private applyPreset(): void {
+    this.water.setPreset(this.resolveActivePreset());
   }
 
-  private disposeGrid(): void {
-    for (const mesh of this.levelMeshes) {
-      mesh.removeFromParent();
-      mesh.dispose();
-    }
-    for (const material of this.levelMaterials) {
-      material.dispose();
-    }
-    this.levelMeshes.length = 0;
-    this.levelMaterials.length = 0;
+  private resolveActivePreset(): WaterRenderPreset {
+    const base: WaterRenderPreset =
+      WATER_RENDER_PRESETS[this.activeQuality()];
+    return resolveWaterRenderPreset(base, {
+      waves: WATER_WAVE_PRESETS[this.activeWaves()],
+      grid: { ringCount: this.ringCount() },
+      shading: {
+        detailStrength: this.detailChop()
+          ? base.shading.detailStrength
+          : 0,
+        // A tiny distance reaches full opacity immediately, effectively
+        // disabling only shoreline fade while retaining depth tint.
+        shoreFadeDistance: this.shoreFade()
+          ? base.shading.shoreFadeDistance
+          : 0.0001,
+      },
+    });
   }
 
-  private tick(deltaTime: number): void {
-    this.uTime.value = this.engine.clock.getElapsedTime();
-
-    const camera = this.engine.camera$.value;
-    const levels = computeWaterLodLevels(
-      camera.position.x,
-      camera.position.z,
-      this.gridOptions,
-    );
-
-    for (let i = 0; i < levels.length; i++) {
-      const level = levels[i];
-      const mesh = this.levelMeshes[i];
-      mesh.count = level.instances.length;
-      for (let j = 0; j < level.instances.length; j++) {
-        const instance = level.instances[j];
-        this.scratchMatrix.makeScale(
-          level.patchWorldSize,
-          1,
-          level.patchWorldSize,
-        );
-        this.scratchMatrix.setPosition(instance.x, 0, instance.z);
-        mesh.setMatrixAt(j, this.scratchMatrix);
-      }
-      mesh.instanceMatrix.needsUpdate = true;
-    }
-
-    // The Three.js render happens right after postTick$; flush these
-    // template inputs now so orbitControls reaches the same frame.
-    this.changeDetector.detectChanges();
-  }
-
-  /**
-   * Captures opaque scene depth (water hidden) for this frame's shore-fade/tint
-   * sampling. Must be sized and sampled in physical framebuffer pixels
-   * (`getDrawingBufferSize`), not `engine.width`/`height` (CSS pixels) — the
-   * fragment shader's `gl_FragCoord` is always physical pixels, and dividing it
-   * by a CSS-pixel resolution left `screenUV` running past 1.0 on any display
-   * with devicePixelRatio > 1, sampling the depth texture's clamped edge
-   * instead of the real depth almost everywhere.
-   */
   private captureDepth(): void {
     const renderer = this.engine.renderer;
     if (!(renderer instanceof WebGLRenderer)) return;
-
-    renderer.getDrawingBufferSize(this.drawingBufferSize);
-    const width = this.drawingBufferSize.x;
-    const height = this.drawingBufferSize.y;
-    this.depthPrepass.setSize(width, height);
-    this.depthPrepass.capture(
+    this.water.captureDepth(
       renderer,
       this.engine.scene,
       this.engine.camera$.value,
-      this.levelMeshes,
     );
-
-    const camera = this.engine.camera$.value as PerspectiveCamera;
-    updateWaterSurfaceDepthCamera(this.surfaceDepthUniforms, camera);
-    for (const material of this.levelMaterials) {
-      material.uniforms['uSceneDepthTexture'].value = this.depthPrepass.texture;
-      material.uniforms['uResolution'].value.set(width, height);
-      material.uniforms['uCameraNear'].value = camera.near;
-      material.uniforms['uCameraFar'].value = camera.far;
-    }
   }
 }
 
 /**
- * A single static sloped "shore": deep water on -X, dry beach on +X, a mild
- * along-shore ripple so the waterline isn't a perfectly straight edge.
+ * A static sloped shore: deep water on -X, dry beach on +X, with a mild
+ * along-shore ripple so depth tint and shoreline fading are easy to inspect.
  */
 function createShoreGeometry(): PlaneGeometry {
   const geometry = new PlaneGeometry(400, 300, 80, 60);

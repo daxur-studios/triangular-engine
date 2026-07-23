@@ -1,4 +1,5 @@
 import { GerstnerSurface } from '../core/water-surface';
+import { CALM_LAKE_PRESET } from '../core/wave-presets';
 import {
   WATER_RENDER_PRESETS,
   resolveWaterRenderPreset,
@@ -7,13 +8,13 @@ import {
 describe('water render presets', () => {
   it('deep-merges sections while replacing waves wholesale', () => {
     const resolved = resolveWaterRenderPreset(WATER_RENDER_PRESETS.cinematic, {
-      waves: WATER_RENDER_PRESETS.pixel.waves,
+      waves: CALM_LAKE_PRESET,
       shading: { colorDeep: '#000011' },
       farField: { glintStrength: 0.25 },
       grid: { ringCount: 3 },
     });
 
-    expect(resolved.waves).toBe(WATER_RENDER_PRESETS.pixel.waves);
+    expect(resolved.waves).toBe(CALM_LAKE_PRESET);
     expect(resolved.shading.colorDeep).toBe('#000011');
     expect(resolved.shading.fresnelPower).toBe(
       WATER_RENDER_PRESETS.cinematic.shading.fresnelPower,

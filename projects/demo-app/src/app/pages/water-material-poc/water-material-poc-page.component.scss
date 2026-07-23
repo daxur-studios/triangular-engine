@@ -9,6 +9,7 @@ a { text-decoration: none; }
 .blurb { margin: 0 0 .75rem; color: #bed0da; font-size: .82rem; }
 .blurb code { padding: .05rem .3rem; border-radius: .25rem; background: #0d1b25; color: #8fe3ff; font: 500 .78rem ui-monospace, monospace; }
 nav, .actions { flex-wrap: wrap; margin-top: .55rem; }
+.control-label { display: block; margin-top: .75rem; }
 button { padding: .45rem .7rem; color: #dcebf3; border: 1px solid #315064; border-radius: .35rem; background: #102330; cursor: pointer; }
 button:hover, button.active { border-color: #65c9ee; background: #17384a; }
 .checkbox { display: inline-flex; align-items: center; gap: .4rem; padding: .45rem .7rem; color: #dcebf3; border: 1px solid #315064; border-radius: .35rem; background: #102330; cursor: pointer; }

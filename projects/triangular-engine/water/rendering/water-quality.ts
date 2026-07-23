@@ -12,7 +12,7 @@ export type WaterShaderDefines = Readonly<Record<string, 1>>;
 export function waterTierDefines(tier: WaterQualityTier): WaterShaderDefines {
   switch (tier) {
     case 'low':
-      return { WATER_TIER_LOW: 1 };
+      return { WATER_TIER_LOW: 1, WATER_GERSTNER: 1 };
     case 'medium':
       return {
         WATER_TIER_MEDIUM: 1,

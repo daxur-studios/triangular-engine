@@ -105,7 +105,8 @@ The public model has independent axes:
 - **domain** — plane, convex sphere, or concave inside-cylinder;
 - **quality** — `low`, `medium`, or `high` rendering cost/features (`low` is
   the flat, normal-mapped path);
-- **effect** — named appearance such as `calm`, `ocean`, `storm`, or `pixel`;
+- **motion** — named wave character such as `calm`, `wavy`, or `storm`;
+- **stylize** — optional advanced appearance overrides, not a shipped mode;
 - **extent** — infinite/streamed, bounded rectangle, complete sphere, or a
   cylinder section.
 
@@ -639,10 +640,10 @@ Three forces converge here (user request, 2026-07-23):
    `vLocalXZ` into `waterDetailNormal` while the cylinder page correctly used
    a world-anchored coordinate (Phase 1c's report-1 bug) is exactly this
    class of defect. Centralize before the fourth copy exists.
-2. **Named presets.** Consumers want to pick "super efficient" / "medium" /
-   "pixelated retro" / "super good looking" water from one dropdown in every
-   demo, with light customisation on top — not re-derive shader feature sets
-   per page.
+2. **Independent quality and motion.** Consumers choose rendering cost
+   (`performance` / `balanced` / `cinematic`) independently from wave
+   character (`calm` / `wavy` / `storm`) rather than receiving a fixed wave
+   choice hidden inside a quality preset.
 3. **Far-distance character.** Zoomed out toward planetary scale, the current
    material mip-fades to flat colour: the fixed-tiling detail normals fall
    below pixel frequency and average away, taking the specular life with
@@ -650,7 +651,7 @@ Three forces converge here (user request, 2026-07-23):
    character. All of that stays in texture/shading space per the binding
    Phase 0 finding — never more short Gerstner waves.
 
-#### Preset model — one user-facing object, two internal axes
+#### Preset model — independent quality, motion and optional stylization
 
 ```ts
 /** Plain JSON-serialisable data — no functions, no three.js objects. */
@@ -671,21 +672,18 @@ export interface WaterRenderPreset {
 }
 ```
 
-Two axes, deliberately orthogonal: **tier** is the performance ladder
-(compile-time `#define` feature gating + grid budget), **stylize** is an
-aesthetic overlay available at any tier. The pixel preset is therefore not a
-fourth tier — it is `tier: 'low'` plus a stylize block, which keeps the tier
-table honest and lets someone build a _high_-tier pixel look later by just
-editing data.
+The axes are deliberately orthogonal: **tier** is the performance ladder
+(compile-time `#define` feature gating + grid budget), **waves** supplies calm,
+wavy or storm motion, and **stylize** remains an optional advanced override.
+There is no shipped pixel preset.
 
 Shipped presets (`WATER_RENDER_PRESETS` in `rendering/water-render-preset.ts`
 — **names are placeholders, rename freely before publishing**):
 
 | Preset        | tier   | Notes                                                                                  |
 | ------------- | ------ | -------------------------------------------------------------------------------------- |
-| `performance` | low    | Flat mesh (no Gerstner), no depth prepass, single detail sample, reduced grid budget   |
+| `performance` | low    | Gerstner motion, no depth prepass/detail normals, reduced grid budget                  |
 | `balanced`    | medium | The verified Phase 1b `/water-material-poc` feature set + detail cascades              |
-| `pixel`       | low    | + stylize: nearest-filtered chunky normal map, posterized colour bands, quantized time |
 | `cinematic`   | high   | + glint, distance roughness, far sky blend, tighter tiling, denser grid                |
 
 Customisation: `resolveWaterRenderPreset(base, overrides?)` does a typed deep
@@ -782,7 +780,7 @@ checkpoint, treat that as a renderer regression.
       `waterTierDefines(tier)` → `#define` map, per-tier default grid
       budgets; unit tests.
 - [x] `rendering/water-render-preset.ts`: `WaterRenderPreset` +
-      `WaterFarFieldOptions` + `WaterStylizeOptions`, the four shipped
+      `WaterFarFieldOptions` + `WaterStylizeOptions`, the three shipped
       presets, `resolveWaterRenderPreset` deep merge. Unit tests: merge
       semantics, JSON round-trip, and every shipped preset's wave list
       passing `GerstnerSurface`'s displacement-gradient check without
@@ -815,18 +813,42 @@ checkpoint, treat that as a renderer regression.
 - Added shared detail-cascade, distance-roughness, sun-glint and far-colour
   shader chunks with uniform builders and CPU-testable math.
 - Medium/high tiers now use distance-stable detail cascades; high additionally
-  enables glint and far reflective colour. Pixel water enables posterization,
-  quantized time and nearest-filtered 32px procedural normals.
+  enables glint and far reflective colour. The stylize extension remains
+  available but is not exposed as a shipped preset.
 - `ng build triangular-engine --configuration development` passes.
 - The focused Karma bundle compiles, but ChromeHeadless crashes its GPU process
   before Jasmine starts (`exit_code=-1073741790`), so browser execution remains
   unverified on this machine.
 
-Exit gate: all three demos switch between the four presets at runtime with no
-reload. On the **plane** demo at max ring count, zoomed far out: `cinematic`
+#### 2026-07-23 — Plane material POC migrated to the shared renderer
+
+- `/water-material-poc` no longer builds geometry, shader strings, uniforms or
+  its own depth prepass. It owns only the shore fixture, camera and controls;
+  all water rendering runs through `WaterSurfaceRenderer` + `PlaneWaterDomain`.
+- Added independent runtime quality (`performance`, `balanced`, `cinematic`)
+  and motion (`calm`, `wavy`, `storm`) controls, plus ring-count, detail,
+  shore-fade and wireframe debugging.
+- `ng build demo-app --configuration development` passes. Manual browser
+  verification confirmed the initial renderer integration. The pixel option
+  was subsequently removed after user review.
+
+#### 2026-07-23 — Quality and motion controls separated
+
+- Removed the shipped `pixel` preset after visual review.
+- Restored `calm`, `wavy` and `storm` as a separate motion selector. Motion is
+  independent from `performance`, `balanced` and `cinematic` quality.
+- Low quality retains Gerstner displacement so choosing a motion preset always
+  has a visible effect; its savings come from the reduced grid and omitting
+  detail-normal cascades and the opaque-scene depth prepass.
+- The underlying stylize shader extension remains available for custom
+  consumers, but it is not part of the standard preset surface.
+
+Exit gate: all three demos switch between the three quality levels and three
+motion presets at runtime with no reload. On the **plane** demo at max ring
+count, zoomed far out: `cinematic`
 keeps visible sparkle/wave character where the current material flattens to
 plain colour, and close-up rendering is indistinguishable from the verified
-Phase 1b state; `pixel` reads visibly chunky/banded/stepped; `performance` is
+Phase 1b state; `performance` is
 measurably cheaper (numbers recorded). User-verified in-browser. The sphere
 and cylinder demos must render all presets, but their far-view/seam exit
 gates remain owned by Phases 1c/1d — an open water-follows-camera bug there
