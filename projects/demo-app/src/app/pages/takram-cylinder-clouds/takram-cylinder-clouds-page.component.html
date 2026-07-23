@@ -350,6 +350,51 @@
         </div>
       </details>
 
+      @if (renderMode() === "3d") {
+        <details open>
+          <summary>Water</summary>
+          <div class="control-group">
+            <label>
+              Water height <output>{{ waterHeight() }} m</output>
+              <input
+                type="range"
+                min="10"
+                max="500"
+                step="5"
+                [value]="waterHeight()"
+                (input)="setNumber($any($event.target), waterHeight.set.bind(waterHeight))"
+              />
+            </label>
+            <label>
+              Water preset
+              <select
+                [value]="waterPreset()"
+                (change)="waterPreset.set($any($event.target).value)"
+              >
+                @for (preset of waterPresetKeys; track preset) {
+                  <option [value]="preset">{{ waterPresetLabels[preset] }}</option>
+                }
+              </select>
+            </label>
+            <label>
+              Mesh quality
+              <select
+                [value]="waterQuality()"
+                (change)="waterQuality.set($any($event.target).value)"
+              >
+                @for (quality of waterQualityKeys; track quality) {
+                  <option [value]="quality">{{ quality }}</option>
+                }
+              </select>
+            </label>
+            <small class="control-hint">
+              Quality controls cylinder tessellation. Presets tune the surface colour,
+              reflection and opacity.
+            </small>
+          </div>
+        </details>
+      }
+
       <details>
         <summary>Scene & diagnostics</summary>
         <div class="control-group">
@@ -403,14 +448,23 @@
   }
   @if (renderMode() === "3d") {
     <mesh [rotation]="[0, 0, 1.5707963267948966]">
-      <cylinderGeometry [params]="[radius - 85, radius - 85, length, 128, 24, true]" />
+      <cylinderGeometry
+        [params]="[
+          radius - waterHeight(),
+          radius - waterHeight(),
+          length,
+          waterSegments()[0],
+          waterSegments()[1],
+          true,
+        ]"
+      />
       <meshStandardMaterial
         [params]="{
-          color: '#167da1',
-          roughness: 0.18,
-          metalness: 0.08,
+          color: waterAppearance().color,
+          roughness: waterAppearance().roughness,
+          metalness: waterAppearance().metalness,
           transparent: true,
-          opacity: 0.82,
+          opacity: waterAppearance().opacity,
           side: doubleSide,
         }"
       />
@@ -485,7 +539,9 @@
     [fadeStart]="distanceShellFadeStart()"
     [fadeEnd]="distanceShellFadeEnd()"
     [opacity]="distanceShellOpacity()"
-    [enabled]="enabled() && renderMode() === '2d'"
+    [enabled]="
+      enabled() && (renderMode() === '2d' || distanceShell())
+    "
   />
 
   <takram-cylinder-cloud-shell
@@ -507,6 +563,8 @@
     [fadeStart]="distanceShellFadeStart()"
     [fadeEnd]="distanceShellFadeEnd()"
     [opacity]="distanceShellOpacity() * 0.65"
-    [enabled]="enabled() && renderMode() === '2d'"
+    [enabled]="
+      enabled() && (renderMode() === '2d' || distanceShell())
+    "
   />
 </scene>

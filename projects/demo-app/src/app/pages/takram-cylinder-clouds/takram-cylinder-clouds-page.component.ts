@@ -50,6 +50,50 @@ const DEFAULT_TERRAIN_GENERATION_BUDGET = 12;
 
 type TerrainMode = 'disabled' | 'visual';
 type CylinderRenderMode = '2d' | '3d';
+type WaterPreset = 'calmLake' | 'oceanSwell' | 'storm';
+type WaterQuality = 'low' | 'medium' | 'high';
+
+const WATER_PRESETS: Record<
+  WaterPreset,
+  {
+    readonly label: string;
+    readonly color: string;
+    readonly roughness: number;
+    readonly metalness: number;
+    readonly opacity: number;
+  }
+> = {
+  calmLake: {
+    label: 'Calm lake',
+    color: '#318eaa',
+    roughness: 0.08,
+    metalness: 0.12,
+    opacity: 0.76,
+  },
+  oceanSwell: {
+    label: 'Ocean swell',
+    color: '#167da1',
+    roughness: 0.18,
+    metalness: 0.08,
+    opacity: 0.82,
+  },
+  storm: {
+    label: 'Storm',
+    color: '#153f58',
+    roughness: 0.32,
+    metalness: 0.04,
+    opacity: 0.9,
+  },
+};
+
+const WATER_QUALITY_SEGMENTS: Record<
+  WaterQuality,
+  readonly [radial: number, height: number]
+> = {
+  low: [48, 8],
+  medium: [96, 16],
+  high: [160, 32],
+};
 
 class CylinderPocTerrainField implements ITerrainField {
   readonly minElevationM = -360;
@@ -130,6 +174,18 @@ export class TakramCylinderCloudsPageComponent {
   readonly atmosphereScatteringDensity = signal(0.000008);
   readonly atmosphereIntensity = signal(0.12);
   readonly wireframe = signal(false);
+  readonly waterHeight = signal(85);
+  readonly waterPreset = signal<WaterPreset>('oceanSwell');
+  readonly waterQuality = signal<WaterQuality>('medium');
+  readonly waterPresetKeys = Object.keys(WATER_PRESETS) as WaterPreset[];
+  readonly waterPresetLabels = Object.fromEntries(
+    Object.entries(WATER_PRESETS).map(([key, value]) => [key, value.label]),
+  ) as Record<WaterPreset, string>;
+  readonly waterQualityKeys: WaterQuality[] = ['low', 'medium', 'high'];
+  readonly waterAppearance = computed(() => WATER_PRESETS[this.waterPreset()]);
+  readonly waterSegments = computed(
+    () => WATER_QUALITY_SEGMENTS[this.waterQuality()],
+  );
   readonly terrainStreamingRadius = signal(1);
   readonly terrainGenerationBudget = signal(DEFAULT_TERRAIN_GENERATION_BUDGET);
   readonly terrainQueuedPatchCount = signal(0);
