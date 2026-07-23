@@ -6,32 +6,142 @@
 }
 
 .controls {
-  display: grid;
-  gap: 0.55rem;
-  width: 17rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  width: 18.5rem;
   max-height: calc(100vh - 5rem);
-  padding: 0.75rem;
+  padding: 0.85rem;
   overflow: auto;
   color: white;
   font:
     12px/1.25 system-ui,
     sans-serif;
-  background: rgb(7 17 31 / 90%);
-  border-radius: 0.35rem;
+  background: rgb(7 17 31 / 94%);
+  border: 1px solid rgb(157 202 235 / 18%);
+  border-radius: 0.65rem;
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 28%);
 }
 
-.controls label:not(.toggle) {
+.controls header {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.controls header strong {
+  font-size: 1.05rem;
+}
+
+.controls header p {
+  margin: 0.2rem 0 0;
+  color: #a9bfd0;
+}
+
+.eyebrow {
+  color: #7fc3ea;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  padding: 0.25rem;
+  background: rgb(255 255 255 / 6%);
+  border-radius: 0.5rem;
+}
+
+.mode-switch button {
+  display: grid;
+  gap: 0.05rem;
+  padding: 0.55rem;
+  color: #9fb2c1;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+
+.mode-switch button.active {
+  color: white;
+  background: #1878a6;
+  box-shadow: 0 0.3rem 1rem rgb(0 97 145 / 35%);
+}
+
+.mode-switch b {
+  font-size: 0.9rem;
+}
+
+.mode-switch span {
+  font-size: 0.67rem;
+  opacity: 0.75;
+}
+
+.profile-summary {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.6rem;
+  color: #c5d5df;
+  background: rgb(91 150 181 / 9%);
+  border-radius: 0.4rem;
+}
+
+.profile-summary span {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.profile-summary i {
+  width: 0.42rem;
+  height: 0.42rem;
+  background: #5fd6a0;
+  border-radius: 50%;
+  box-shadow: 0 0 0.5rem #5fd6a080;
+}
+
+.profile-summary .off {
+  color: #768692;
+}
+
+.profile-summary .off i {
+  background: #53616b;
+  box-shadow: none;
+}
+
+.controls details {
+  border-top: 1px solid rgb(255 255 255 / 10%);
+}
+
+.controls summary {
+  padding: 0.7rem 0 0.15rem;
+  color: #dbe8f0;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.control-group {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.65rem 0 0.2rem;
+}
+
+.control-group label:not(.toggle) {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0.2rem 0.5rem;
 }
 
-.controls input[type="range"] {
+.control-group input[type="range"] {
   grid-column: 1 / -1;
   width: 100%;
 }
 
-.controls .toggle {
+.control-group .toggle {
   display: flex;
   align-items: center;
   gap: 0.4rem;

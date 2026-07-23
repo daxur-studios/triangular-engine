@@ -1,88 +1,47 @@
 <scene>
   <ng-template portalTarget="toolbarTop" lane="content">
     <aside class="demo-status">
-      <strong>O'Neill cylinder clouds · engine-side POC</strong>
-      <span
-        >Published Takram packages · X-axis cylinder · artistic internal
-        haze</span
-      >
+      <strong>Cylinder world renderer</strong>
+      <span>{{ renderMode() === "2d" ? "Fast illustrated shell" : "Volumetric world preview" }}</span>
     </aside>
   </ng-template>
 
   <ng-template portalTarget="leftSidebar" lane="content">
     <aside class="controls">
-      <strong>Cylinder clouds</strong>
-      <label
-        >Terrain
-        <select
-          [value]="terrainMode()"
-          (change)="setTerrainMode($any($event.target).value)"
-        >
-          <option value="disabled">Smooth fallback</option>
-          <option value="visual">Generated visual</option>
-        </select>
-      </label>
-      <label class="toggle"
-        ><input
-          type="checkbox"
-          [checked]="enabled()"
-          (change)="enabled.set($any($event.target).checked)"
-        />
-        Clouds enabled</label
-      >
-      <label class="toggle"
-        ><input
-          type="checkbox"
-          [checked]="temporalUpscale()"
-          (change)="temporalUpscale.set($any($event.target).checked)"
-        />
-        Temporal upscale</label
-      >
-      <label class="toggle"
-        ><input
-          type="checkbox"
-          [checked]="haze()"
-          (change)="haze.set($any($event.target).checked)"
-        />
-        Internal haze</label
-      >
-      <label class="toggle"
-        ><input
-          type="checkbox"
-          [checked]="atmosphereEnabled()"
-          (change)="atmosphereEnabled.set($any($event.target).checked)"
-        />
-        Cylinder atmosphere</label
-      >
-      <label
-        >Cloud preset
-        <select
-          [value]="cloudTextures.source()"
-          (change)="cloudTextures.source.set($any($event.target).value)"
-        >
-          <option value="default">Default noise</option>
-          <option value="procedural">Procedural noise</option>
-          <option value="checker">Checkerboard</option>
-        </select>
-      </label>
-      <label
-        >Haze model
-        <select
-          [value]="hazeModel()"
-          (change)="hazeModel.set($any($event.target).value)"
-        >
-          <option value="bounded-v2">Bounded v2</option>
-          <option value="legacy">Legacy POC</option>
-        </select>
-      </label>
-      <label class="toggle"
-        ><input
-          type="checkbox"
-          [checked]="wireframe()"
-          (change)="setWireframe($any($event.target).checked)"
-        />
-        Terrain wireframe</label
-      >
+      <header>
+        <span class="eyebrow">Rendering profile</span>
+        <strong>{{ renderMode() === "2d" ? "2D cylinder" : "3D cylinder" }}</strong>
+        <p>{{ renderMode() === "2d"
+          ? "Lightweight clouds and a coloured cylinder mesh."
+          : "Takram clouds, streamed terrain and an inset water surface." }}</p>
+      </header>
+
+      <div class="mode-switch" role="group" aria-label="Cylinder render mode">
+        <button type="button" [class.active]="renderMode() === '2d'" (click)="setRenderMode('2d')">
+          <b>2D</b><span>Illustrated</span>
+        </button>
+        <button type="button" [class.active]="renderMode() === '3d'" (click)="setRenderMode('3d')">
+          <b>3D</b><span>Volumetric</span>
+        </button>
+      </div>
+
+      <div class="profile-summary">
+        <span><i></i>{{ renderMode() === "2d" ? "2D cloud shells" : "Takram volumetric clouds" }}</span>
+        <span><i></i>{{ renderMode() === "2d" ? "Coloured cylinder mesh" : "Adaptive 3D terrain" }}</span>
+        <span [class.off]="renderMode() === '2d'"><i></i>{{ renderMode() === "2d" ? "3D water disabled" : "3D water surface" }}</span>
+      </div>
+
+      <details open>
+        <summary>Clouds</summary>
+        <div class="control-group">
+          <label class="toggle"><input type="checkbox" [checked]="enabled()" (change)="enabled.set($any($event.target).checked)" /> Clouds enabled</label>
+          <label>Cloud preset
+            <select [value]="cloudTextures.source()" (change)="cloudTextures.source.set($any($event.target).value)">
+              <option value="default">Default noise</option>
+              <option value="procedural">Procedural noise</option>
+              <option value="checker">Checkerboard</option>
+            </select>
+          </label>
       <label
         >Terrain streaming radius
         <output>{{ terrainStreamingRadius() }}×</output
@@ -114,23 +73,6 @@
           <span>{{ terrainLodLabel() }}</span>
         </div>
       }
-      <label class="toggle"
-        ><input
-          type="checkbox"
-          [checked]="cylinderUp()"
-          (change)="setCylinderUp($any($event.target).checked)"
-        />
-        Cylinder-relative up</label
-      >
-      <label class="toggle"
-        ><input
-          type="checkbox"
-          [checked]="distanceShell()"
-          (change)="distanceShell.set($any($event.target).checked)"
-        />
-        Distant 2D clouds</label
-      >
-
       <label
         >Resolution <output>{{ resolutionScale() }}</output
         ><input
@@ -277,6 +219,19 @@
             setNumber($any($event.target), windSpeedX.set.bind(windSpeedX))
           "
       /></label>
+        </div>
+      </details>
+
+      <details>
+        <summary>Atmosphere & lighting</summary>
+        <div class="control-group">
+      <label class="toggle"><input type="checkbox" [checked]="haze()" (change)="haze.set($any($event.target).checked)" /> Internal haze</label>
+      <label>Haze model
+        <select [value]="hazeModel()" (change)="hazeModel.set($any($event.target).value)">
+          <option value="bounded-v2">Bounded v2</option>
+          <option value="legacy">Legacy POC</option>
+        </select>
+      </label>
       <label
         >Haze density <output>{{ atmosphereDensity() }}</output
         ><input
@@ -392,6 +347,19 @@
             )
           "
       /></label>
+        </div>
+      </details>
+
+      <details>
+        <summary>Scene & diagnostics</summary>
+        <div class="control-group">
+          <label class="toggle"><input type="checkbox" [checked]="cylinderUp()" (change)="setCylinderUp($any($event.target).checked)" /> Cylinder-relative up</label>
+          <label class="toggle"><input type="checkbox" [checked]="wireframe()" (change)="setWireframe($any($event.target).checked)" /> Terrain wireframe</label>
+          @if (renderMode() === "3d") {
+            <label class="toggle"><input type="checkbox" [checked]="temporalUpscale()" (change)="temporalUpscale.set($any($event.target).checked)" /> Temporal upscale</label>
+          }
+        </div>
+      </details>
     </aside>
   </ng-template>
 
@@ -433,6 +401,21 @@
       />
     </mesh>
   }
+  @if (renderMode() === "3d") {
+    <mesh [rotation]="[0, 0, 1.5707963267948966]">
+      <cylinderGeometry [params]="[radius - 85, radius - 85, length, 128, 24, true]" />
+      <meshStandardMaterial
+        [params]="{
+          color: '#167da1',
+          roughness: 0.18,
+          metalness: 0.08,
+          transparent: true,
+          opacity: 0.82,
+          side: doubleSide,
+        }"
+      />
+    </mesh>
+  }
   <mesh [position]="[0, -radius + 0.5, 40]"
     ><boxGeometry [params]="[10, 10, 10]" /><meshStandardMaterial
       [params]="{ color: 'white' }"
@@ -448,7 +431,7 @@
         [cylindrical]="true"
         [cylinderRadius]="radius"
         [cylinderHazeModel]="hazeModel()"
-        [skipRendering]="!enabled()"
+        [skipRendering]="!enabled() || renderMode() !== '3d'"
         [qualityPreset]="'high'"
         [coverage]="coverage()"
         [resolutionScale]="resolutionScale()"
@@ -480,16 +463,6 @@
         />
       </takram-clouds>
     </takram-atmosphere>
-    @if (atmosphereEnabled()) {
-      <takram-cylinder-atmosphere
-        [radius]="radius"
-        [halfLength]="length / 2"
-        [density]="atmosphereScatteringDensity()"
-        [scaleHeight]="atmosphereScaleHeight()"
-        [intensity]="atmosphereIntensity()"
-        [sunDirection]="sunDirection()"
-      />
-    }
     <toneMappingEffect />
   </postprocessing-composer>
 
@@ -512,7 +485,7 @@
     [fadeStart]="distanceShellFadeStart()"
     [fadeEnd]="distanceShellFadeEnd()"
     [opacity]="distanceShellOpacity()"
-    [enabled]="enabled() && distanceShell()"
+    [enabled]="enabled() && renderMode() === '2d'"
   />
 
   <takram-cylinder-cloud-shell
@@ -534,6 +507,6 @@
     [fadeStart]="distanceShellFadeStart()"
     [fadeEnd]="distanceShellFadeEnd()"
     [opacity]="distanceShellOpacity() * 0.65"
-    [enabled]="enabled() && distanceShell()"
+    [enabled]="enabled() && renderMode() === '2d'"
   />
 </scene>

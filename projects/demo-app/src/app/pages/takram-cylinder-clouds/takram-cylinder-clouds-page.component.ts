@@ -49,6 +49,7 @@ const TERRAIN_SKIRT_DEPTH_M = 180;
 const DEFAULT_TERRAIN_GENERATION_BUDGET = 12;
 
 type TerrainMode = 'disabled' | 'visual';
+type CylinderRenderMode = '2d' | '3d';
 
 class CylinderPocTerrainField implements ITerrainField {
   readonly minElevationM = -360;
@@ -104,6 +105,7 @@ export class TakramCylinderCloudsPageComponent {
   readonly length = this.radius * 5;
   readonly worldToCylinder = new Matrix4();
   readonly doubleSide = DoubleSide;
+  readonly renderMode = signal<CylinderRenderMode>('2d');
   readonly terrainMode = signal<TerrainMode>('disabled');
   readonly enabled = signal(true);
   readonly temporalUpscale = signal(true);
@@ -207,6 +209,12 @@ export class TakramCylinderCloudsPageComponent {
   setCylinderUp(enabled: boolean): void {
     this.cylinderUp.set(enabled);
     if (!enabled) this.cameraUp.set([0, 1, 0]);
+  }
+
+  setRenderMode(mode: CylinderRenderMode): void {
+    if (mode === this.renderMode()) return;
+    this.renderMode.set(mode);
+    this.setTerrainMode(mode === '3d' ? 'visual' : 'disabled');
   }
 
   setTerrainMode(mode: TerrainMode): void {
