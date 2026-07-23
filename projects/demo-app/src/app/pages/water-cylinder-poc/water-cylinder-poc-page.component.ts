@@ -40,15 +40,20 @@ import {
   WATER_LOGDEPTH_PARS_VERTEX_GLSL,
   WATER_LOGDEPTH_VERTEX_GLSL,
   WATER_SHADING_UNIFORMS_GLSL,
+  WATER_SURFACE_DEPTH_GLSL,
+  WATER_SURFACE_DEPTH_UNIFORMS_GLSL,
   WaterDepthPrepass,
   createGerstnerUniforms,
   createProceduralNormalMapTexture,
   createWaterDomainUniforms,
   createWaterShadingUniforms,
+  createWaterSurfaceDepthUniforms,
   updateGerstnerUniforms,
+  updateWaterSurfaceDepthCamera,
   type GerstnerUniforms,
   type WaterDomainUniforms,
   type WaterShadingUniforms,
+  type WaterSurfaceDepthUniforms,
   type WaterWavePreset,
 } from 'triangular-engine/water';
 
@@ -124,6 +129,8 @@ const FRAGMENT_SHADER = `
   ${WATER_DETAIL_NORMAL_GLSL}
   ${WATER_FRESNEL_GLSL}
   ${WATER_DEPTH_UNPACK_GLSL}
+  ${WATER_SURFACE_DEPTH_UNIFORMS_GLSL}
+  ${WATER_SURFACE_DEPTH_GLSL}
   ${WATER_DEPTH_FADE_GLSL}
   ${WATER_DOMAIN_UNIFORMS_GLSL}
   uniform vec3 uLightDirection;
@@ -140,16 +147,19 @@ const FRAGMENT_SHADER = `
     vec3 localDetailed = waterDetailNormal(vSurfXZ, localBase, uTime);
     vec3 localMixed = normalize(mix(localBase, localDetailed, uDetailEnabled));
 
-    float angle = atan(vWorldPosition.z, -vWorldPosition.y);
-    vec3 normal = vec3(
-      localMixed.x,
-      localMixed.y * cos(angle) - localMixed.z * sin(angle),
-      localMixed.y * sin(angle) + localMixed.z * cos(angle)
+    vec3 fromAxis = vWorldPosition - uCylinderCenter;
+    vec3 radial = fromAxis
+      - uCylinderAxis * dot(fromAxis, uCylinderAxis);
+    vec3 domainUp = -normalize(radial);
+    vec3 tangentAround = normalize(cross(uCylinderAxis, domainUp));
+    vec3 normal = normalize(
+      uCylinderAxis * localMixed.x
+      + domainUp * localMixed.y
+      + tangentAround * localMixed.z
     );
-    normal = normalize(normal);
 
     vec2 screenUV = gl_FragCoord.xy / uResolution;
-    float depth = waterDepth(screenUV, vFragViewZ);
+    float depth = waterSurfaceDepth(screenUV, vWorldPosition, domainUp);
     float shoreFade = mix(1.0, waterShoreFade(depth), uShoreFadeEnabled);
 
     vec3 lightDir = normalize(uLightDirection);
@@ -204,6 +214,7 @@ export class WaterCylinderPocPageComponent {
   });
   private readonly gerstnerUniforms: GerstnerUniforms;
   private readonly shadingUniforms: WaterShadingUniforms;
+  private readonly surfaceDepthUniforms: WaterSurfaceDepthUniforms;
   private readonly domainUniforms: WaterDomainUniforms;
   private readonly uTime = { value: 0 };
   private readonly waterMesh: Mesh;
@@ -255,6 +266,7 @@ export class WaterCylinderPocPageComponent {
       colorShallow: '#8fe3ff',
       colorDeep: '#0e4a73',
     });
+    this.surfaceDepthUniforms = createWaterSurfaceDepthUniforms();
     this.domainUniforms = createWaterDomainUniforms();
     this.domainUniforms.uCylinderCenter.value.copy(CYLINDER_CENTER);
     this.domainUniforms.uCylinderAxis.value.copy(CYLINDER_AXIS);
@@ -286,6 +298,7 @@ export class WaterCylinderPocPageComponent {
       uniforms: {
         ...this.gerstnerUniforms,
         ...this.shadingUniforms,
+        ...this.surfaceDepthUniforms,
         ...this.domainUniforms,
         uTime: this.uTime,
         uLightDirection: { value: new Vector3(0.4, 0.8, 0.3).normalize() },
@@ -401,6 +414,7 @@ export class WaterCylinderPocPageComponent {
     );
 
     const camera = this.engine.camera$.value as PerspectiveCamera;
+    updateWaterSurfaceDepthCamera(this.surfaceDepthUniforms, camera);
     this.waterMaterial.uniforms['uSceneDepthTexture'].value =
       this.depthPrepass.texture;
     this.waterMaterial.uniforms['uResolution'].value.set(width, height);

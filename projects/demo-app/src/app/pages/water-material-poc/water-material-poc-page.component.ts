@@ -44,6 +44,8 @@ import {
   WATER_LOGDEPTH_PARS_VERTEX_GLSL,
   WATER_LOGDEPTH_VERTEX_GLSL,
   WATER_SHADING_UNIFORMS_GLSL,
+  WATER_SURFACE_DEPTH_GLSL,
+  WATER_SURFACE_DEPTH_UNIFORMS_GLSL,
   WaterDepthPrepass,
   computeWaterLodBoundaryRadius,
   computeWaterLodLevels,
@@ -51,10 +53,13 @@ import {
   createProceduralNormalMapTexture,
   createWaterLodPatchGeometry,
   createWaterShadingUniforms,
+  createWaterSurfaceDepthUniforms,
   updateGerstnerUniforms,
+  updateWaterSurfaceDepthCamera,
   type GerstnerUniforms,
   type WaterLodGridOptions,
   type WaterShadingUniforms,
+  type WaterSurfaceDepthUniforms,
   type WaterWavePreset,
 } from 'triangular-engine/water';
 
@@ -133,6 +138,8 @@ const FRAGMENT_SHADER = `
   ${WATER_DETAIL_NORMAL_GLSL}
   ${WATER_FRESNEL_GLSL}
   ${WATER_DEPTH_UNPACK_GLSL}
+  ${WATER_SURFACE_DEPTH_UNIFORMS_GLSL}
+  ${WATER_SURFACE_DEPTH_GLSL}
   ${WATER_DEPTH_FADE_GLSL}
   uniform vec3 uLightDirection;
   uniform float uInnerCullRadius;
@@ -152,7 +159,11 @@ const FRAGMENT_SHADER = `
     vec3 normal = normalize(mix(baseNormal, detailed, uDetailEnabled));
 
     vec2 screenUV = gl_FragCoord.xy / uResolution;
-    float depth = waterDepth(screenUV, vFragViewZ);
+    float depth = waterSurfaceDepth(
+      screenUV,
+      vWorldPosition,
+      vec3(0.0, 1.0, 0.0)
+    );
     float shoreFade = mix(1.0, waterShoreFade(depth), uShoreFadeEnabled);
 
     vec3 lightDir = normalize(uLightDirection);
@@ -218,6 +229,7 @@ export class WaterMaterialPocPageComponent {
   private readonly changeDetector = inject(ChangeDetectorRef);
   private readonly gerstnerUniforms: GerstnerUniforms;
   private readonly shadingUniforms: WaterShadingUniforms;
+  private readonly surfaceDepthUniforms: WaterSurfaceDepthUniforms;
   private readonly uTime = { value: 0 };
   private readonly levelMeshes: InstancedMesh[] = [];
   private readonly levelMaterials: ShaderMaterial[] = [];
@@ -249,6 +261,7 @@ export class WaterMaterialPocPageComponent {
       colorShallow: '#8fe3ff',
       colorDeep: '#0e4a73',
     });
+    this.surfaceDepthUniforms = createWaterSurfaceDepthUniforms();
 
     this.shoreMesh = new Mesh(
       createShoreGeometry(),
@@ -354,6 +367,7 @@ export class WaterMaterialPocPageComponent {
         uniforms: {
           ...this.gerstnerUniforms,
           ...this.shadingUniforms,
+          ...this.surfaceDepthUniforms,
           uTime: this.uTime,
           uCellSize: { value: patchWorldSize / gridOptions.patchResolution },
           uMorphStart: { value: morphStart },
@@ -454,6 +468,7 @@ export class WaterMaterialPocPageComponent {
     );
 
     const camera = this.engine.camera$.value as PerspectiveCamera;
+    updateWaterSurfaceDepthCamera(this.surfaceDepthUniforms, camera);
     for (const material of this.levelMaterials) {
       material.uniforms['uSceneDepthTexture'].value = this.depthPrepass.texture;
       material.uniforms['uResolution'].value.set(width, height);

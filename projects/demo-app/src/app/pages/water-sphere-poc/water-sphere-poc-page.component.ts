@@ -48,6 +48,8 @@ import {
   WATER_LOGDEPTH_PARS_VERTEX_GLSL,
   WATER_LOGDEPTH_VERTEX_GLSL,
   WATER_SHADING_UNIFORMS_GLSL,
+  WATER_SURFACE_DEPTH_GLSL,
+  WATER_SURFACE_DEPTH_UNIFORMS_GLSL,
   WaterDepthPrepass,
   computeWaterLodBoundaryRadius,
   computeWaterLodLevels,
@@ -56,11 +58,14 @@ import {
   createWaterDomainUniforms,
   createWaterLodPatchGeometry,
   createWaterShadingUniforms,
+  createWaterSurfaceDepthUniforms,
   updateGerstnerUniforms,
+  updateWaterSurfaceDepthCamera,
   type GerstnerUniforms,
   type WaterDomainUniforms,
   type WaterLodGridOptions,
   type WaterShadingUniforms,
+  type WaterSurfaceDepthUniforms,
   type WaterWavePreset,
 } from 'triangular-engine/water';
 
@@ -185,6 +190,8 @@ const FRAGMENT_SHADER = `
   ${WATER_DETAIL_NORMAL_GLSL}
   ${WATER_FRESNEL_GLSL}
   ${WATER_DEPTH_UNPACK_GLSL}
+  ${WATER_SURFACE_DEPTH_UNIFORMS_GLSL}
+  ${WATER_SURFACE_DEPTH_GLSL}
   ${WATER_DEPTH_FADE_GLSL}
   ${WATER_DOMAIN_UNIFORMS_GLSL}
   ${WATER_DOMAIN_COMPOSE_NORMAL_GLSL}
@@ -208,7 +215,8 @@ const FRAGMENT_SHADER = `
     vec3 normal = waterComposeWorldNormal(localMixed);
 
     vec2 screenUV = gl_FragCoord.xy / uResolution;
-    float depth = waterDepth(screenUV, vFragViewZ);
+    vec3 domainUp = normalize(vWorldPosition - uSphereCenter);
+    float depth = waterSurfaceDepth(screenUV, vWorldPosition, domainUp);
     float shoreFade = mix(1.0, waterShoreFade(depth), uShoreFadeEnabled);
 
     vec3 lightDir = normalize(uLightDirection);
@@ -283,6 +291,7 @@ export class WaterSpherePocPageComponent {
   });
   private readonly gerstnerUniforms: GerstnerUniforms;
   private readonly shadingUniforms: WaterShadingUniforms;
+  private readonly surfaceDepthUniforms: WaterSurfaceDepthUniforms;
   private readonly domainUniforms: WaterDomainUniforms;
   private readonly uTime = { value: 0 };
   private readonly levelMeshes: InstancedMesh[] = [];
@@ -333,6 +342,7 @@ export class WaterSpherePocPageComponent {
       colorShallow: '#8fe3ff',
       colorDeep: '#0e4a73',
     });
+    this.surfaceDepthUniforms = createWaterSurfaceDepthUniforms();
     this.domainUniforms = createWaterDomainUniforms();
     this.domainUniforms.uSphereCenter.value.copy(SPHERE_CENTER);
     this.domainUniforms.uSphereRadius.value = SPHERE_RADIUS_M;
@@ -441,6 +451,7 @@ export class WaterSpherePocPageComponent {
         uniforms: {
           ...this.gerstnerUniforms,
           ...this.shadingUniforms,
+          ...this.surfaceDepthUniforms,
           ...this.domainUniforms,
           uTime: this.uTime,
           uCellSize: { value: patchWorldSize / gridOptions.patchResolution },
@@ -539,6 +550,7 @@ export class WaterSpherePocPageComponent {
     );
 
     const camera = this.engine.camera$.value as PerspectiveCamera;
+    updateWaterSurfaceDepthCamera(this.surfaceDepthUniforms, camera);
     for (const material of this.levelMaterials) {
       material.uniforms['uSceneDepthTexture'].value = this.depthPrepass.texture;
       material.uniforms['uResolution'].value.set(width, height);
