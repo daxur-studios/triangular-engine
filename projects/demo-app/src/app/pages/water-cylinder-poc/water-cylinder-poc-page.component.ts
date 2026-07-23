@@ -1,6 +1,5 @@
 import {
   ChangeDetectionStrategy,
-  ChangeDetectorRef,
   Component,
   DestroyRef,
   inject,
@@ -207,7 +206,6 @@ export class WaterCylinderPocPageComponent {
   readonly initialUpVector: Vector3Tuple;
 
   private readonly engine = inject(EngineService);
-  private readonly changeDetector = inject(ChangeDetectorRef);
   private readonly domain = new CylinderWaterDomain(CYLINDER_RADIUS_M, {
     axis: CYLINDER_AXIS,
     center: CYLINDER_CENTER,
@@ -336,12 +334,12 @@ export class WaterCylinderPocPageComponent {
       this.depthPrepass.dispose();
     });
 
-    this.engine.tick$
+    this.engine.beforeRender$
       .pipe(takeUntilDestroyed(destroyRef))
-      .subscribe((deltaTime) => this.tick(deltaTime));
-    this.engine.postTick$
-      .pipe(takeUntilDestroyed(destroyRef))
-      .subscribe(() => this.captureDepth());
+      .subscribe(() => {
+        this.tick();
+        this.captureDepth();
+      });
   }
 
   selectPreset(key: PresetKey): void {
@@ -393,9 +391,8 @@ export class WaterCylinderPocPageComponent {
     this.waterMesh.geometry = newGeometry;
   }
 
-  private tick(deltaTime: number): void {
+  private tick(): void {
     this.uTime.value = this.engine.clock.getElapsedTime();
-    this.changeDetector.detectChanges();
   }
 
   private captureDepth(): void {

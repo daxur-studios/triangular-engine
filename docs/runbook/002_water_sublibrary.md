@@ -55,18 +55,9 @@ Intended consumer API:
   </postprocessing-composer>
 
   <!-- Canonical API: shape, cost and appearance are independent axes. -->
-  <waterSurface
-    [domain]="planetOcean"
-    quality="high"
-    effect="ocean"
-  />
+  <waterSurface [domain]="planetOcean" quality="high" effect="ocean" />
 
-  <waterSurface
-    [domain]="flatLake"
-    quality="low"
-    effect="calm"
-    [extent]="[120, 90]"
-  />
+  <waterSurface [domain]="flatLake" quality="low" effect="calm" [extent]="[120, 90]" />
 
   <!-- Later phase -->
   <waterRiver [spline]="riverSpline" [width]="14" [flowSpeed]="2.5" />
@@ -91,7 +82,7 @@ habitatWater = waterCylinder({
   center: [0, 0, 0],
   axis: [1, 0, 0],
   radius: 4_000,
-  side: 'inside',
+  side: "inside",
 });
 ```
 
@@ -251,21 +242,21 @@ One material, tier-gated features via shader defines. Unreal's water is the
 design reference (water body components + shared wave data + one water zone /
 registry + buoyancy probes), adapted to what WebGL/three.js does well:
 
-| Feature                           | low                           | medium                                   | high                                            |
-| --------------------------------- | ------------------------------ | ---------------------------------------- | ----------------------------------------------- |
-| Wave displacement                 | normal maps only (flat mesh)   | Gerstner vertex displacement (2-3 waves) | Gerstner (2-3 waves)                            |
-| Fine chop                         | single scrolling normal sample | scrolling detail normal maps             | scrolling detail normal maps, tighter tiling    |
-| Far-field detail (Phase 1e)       | —                               | distance-blended detail cascades         | cascades + sun glint + distance roughness       |
-| Reflection                        | environment map / sky colour   | environment map + fresnel                | screen-space reflection, falling back to planar |
-| Refraction / below-surface colour | flat absorption colour         | scene-colour distortion via screen copy  | scene-colour distortion via screen copy         |
-| Depth-based colour + shore fade   | — (no depth prepass; see Phase 1e) | ✓                                    | ✓                                               |
-| Foam                              | shore band only                | shore band + ambient surface foam        | + whitecap/breaking foam at crests              |
-| Caustics                          | —                               | —                                        | fake projected caustics (stretch goal)          |
+| Feature                           | low                                | medium                                   | high                                            |
+| --------------------------------- | ---------------------------------- | ---------------------------------------- | ----------------------------------------------- |
+| Wave displacement                 | normal maps only (flat mesh)       | Gerstner vertex displacement (2-3 waves) | Gerstner (2-3 waves)                            |
+| Fine chop                         | single scrolling normal sample     | scrolling detail normal maps             | scrolling detail normal maps, tighter tiling    |
+| Far-field detail (Phase 1e)       | —                                  | distance-blended detail cascades         | cascades + sun glint + distance roughness       |
+| Reflection                        | environment map / sky colour       | environment map + fresnel                | screen-space reflection, falling back to planar |
+| Refraction / below-surface colour | flat absorption colour             | scene-colour distortion via screen copy  | scene-colour distortion via screen copy         |
+| Depth-based colour + shore fade   | — (no depth prepass; see Phase 1e) | ✓                                        | ✓                                               |
+| Foam                              | shore band only                    | shore band + ambient surface foam        | + whitecap/breaking foam at crests              |
+| Caustics                          | —                                  | —                                        | fake projected caustics (stretch goal)          |
 
 **Revision (2026-07-23, Phase 1e)**: confirmed the original low tier — flat
 mesh, normal maps only, no Gerstner vertex displacement or per-vertex normal
 computation. This is the standard cheap-water technique (three.js's own
-`Water.js` is exactly this) and it is the *correct* choice for low, not just
+`Water.js` is exactly this) and it is the _correct_ choice for low, not just
 the cheapest one: low tier's grid is necessarily coarse (fewer rings, lower
 patch resolution), and per the binding Phase 0 finding a coarse vertex grid
 cannot resolve Gerstner waves without aliasing into visible facets — keeping
@@ -474,7 +465,7 @@ phase's job: 004's `ITerrainSurfaceDomain<TAddress>` contract
 (`getPatchBounds`/`getFieldPosition`/`getSurfacePosition`/`getGeometricErrorM`)
 is the right shape for water's own domain adapters later, since both systems
 need the same plane/sphere/cylinder parametrisations. The CDLOD morph
-*technique* (snap toward a coarser grid, blend by distance) is domain-
+_technique_ (snap toward a coarser grid, blend by distance) is domain-
 agnostic; `computeWaterLodLevels`'s placement math is not, and should not be
 mistaken for shape-agnostic infrastructure when sphere/cylinder work starts.
 Water should follow, not lead, 004's sphere/cylinder domains rather than
@@ -527,10 +518,10 @@ note above for why.
       (plane path plus an `#ifdef WATER_DOMAIN_SPHERE` renormalize branch,
       same compile-time-`#ifdef` pattern as the log-depth chunks), and a
       separate `waterComposeWorldNormal` — composing the normal to world
-      space is domain-agnostic, but must happen *after* the detail-normal
+      space is domain-agnostic, but must happen _after_ the detail-normal
       texture perturbs it in local space, since that perturbation assumes a
       near-vertical base normal (true in world space only for the plane;
-      only true in the *local* frame for a sphere away from directly
+      only true in the _local_ frame for a sphere away from directly
       "north" of the camera).
 - [x] `/water-sphere-poc` demo: same grid/material/Gerstner/shading
       infrastructure as `/water-material-poc`, `SphereWaterDomain` instead of
@@ -574,7 +565,7 @@ verified behavior:
       `beforeRender$`). Update the water frame, patch instances and depth
       prepass from that ordered phase. Do not rely on Angular/RxJS subscription
       construction order as the contract.
-- [ ] Prove that rotating the camera without translating it does not change
+- [x] Prove that rotating the camera without translating it does not change
       composed world positions for a fixed surface sample. Prove that
       translating the camera may recycle patches but does not move a
       domain-anchored sample.
@@ -601,7 +592,7 @@ items.
 
 ### Phase 1d — Cylinder domain (interior wall, opposite-facing normal)
 
-Curves the same unchanged flat CDLOD grid onto the *inside* of a cylinder
+Curves the same unchanged flat CDLOD grid onto the _inside_ of a cylinder
 wall (O'Neill habitat), the concave counterpart to Phase 1c's convex sphere:
 water rises up and around the camera at distance instead of falling away
 toward a horizon.
@@ -612,7 +603,7 @@ toward a horizon.
       "up" is toward the centerline — the opposite sign from
       `SphereWaterDomain`); `tangentU` is the cylinder axis itself (zero
       curvature along the tube's length); `composeWorldPosition` renormalizes
-      only the component *perpendicular* to the axis, carrying the axial
+      only the component _perpendicular_ to the axis, carrying the axial
       coordinate through unchanged. Unit tested (frame correctness off-axis,
       on-axis fallback, exact radius round-trip from the axis line — not
       from `center` — and exact axial-coordinate preservation through
@@ -666,7 +657,7 @@ Three forces converge here (user request, 2026-07-23):
 export interface WaterRenderPreset {
   readonly name: string;
   /** Gates shader features via #defines and picks the grid budget. */
-  readonly tier: 'low' | 'medium' | 'high';
+  readonly tier: "low" | "medium" | "high";
   /** Reuses core/wave-presets — referenced by value, still plain data. */
   readonly waves: WaterWavePreset;
   /** Existing WaterShadingOptions: colours, absorption, fresnel, tiling… */
@@ -684,18 +675,18 @@ Two axes, deliberately orthogonal: **tier** is the performance ladder
 (compile-time `#define` feature gating + grid budget), **stylize** is an
 aesthetic overlay available at any tier. The pixel preset is therefore not a
 fourth tier — it is `tier: 'low'` plus a stylize block, which keeps the tier
-table honest and lets someone build a *high*-tier pixel look later by just
+table honest and lets someone build a _high_-tier pixel look later by just
 editing data.
 
 Shipped presets (`WATER_RENDER_PRESETS` in `rendering/water-render-preset.ts`
 — **names are placeholders, rename freely before publishing**):
 
-| Preset        | tier   | Notes                                                                                     |
-| ------------- | ------ | ----------------------------------------------------------------------------------------- |
-| `performance` | low    | Flat mesh (no Gerstner), no depth prepass, single detail sample, reduced grid budget         |
-| `balanced`    | medium | The verified Phase 1b `/water-material-poc` feature set + detail cascades                  |
-| `pixel`       | low    | + stylize: nearest-filtered chunky normal map, posterized colour bands, quantized time     |
-| `cinematic`   | high   | + glint, distance roughness, far sky blend, tighter tiling, denser grid                    |
+| Preset        | tier   | Notes                                                                                  |
+| ------------- | ------ | -------------------------------------------------------------------------------------- |
+| `performance` | low    | Flat mesh (no Gerstner), no depth prepass, single detail sample, reduced grid budget   |
+| `balanced`    | medium | The verified Phase 1b `/water-material-poc` feature set + detail cascades              |
+| `pixel`       | low    | + stylize: nearest-filtered chunky normal map, posterized colour bands, quantized time |
+| `cinematic`   | high   | + glint, distance roughness, far sky blend, tighter tiling, denser grid                |
 
 Customisation: `resolveWaterRenderPreset(base, overrides?)` does a typed deep
 merge (per-section spread — `shading`, `farField`, `stylize`, `grid` merge
@@ -748,13 +739,13 @@ objects, and shader assembly. Sketch:
 
 ```ts
 const water = new WaterSurfaceRenderer({
-  domain,                    // PlaneWaterDomain | SphereWaterDomain | CylinderWaterDomain
-  preset,                    // WaterRenderPreset (resolved)
+  domain, // PlaneWaterDomain | SphereWaterDomain | CylinderWaterDomain
+  preset, // WaterRenderPreset (resolved)
 });
 water.addTo(scene);
-water.update(camera, elapsedSeconds);            // per-frame: LOD instances + time
-water.captureDepth(renderer, scene, camera);     // per-frame, medium/high only (no-op on low)
-water.setPreset(next);       // uniform-only deltas patch in place; tier/define/grid deltas rebuild
+water.update(camera, elapsedSeconds); // per-frame: LOD instances + time
+water.captureDepth(renderer, scene, camera); // per-frame, medium/high only (no-op on low)
+water.setPreset(next); // uniform-only deltas patch in place; tier/define/grid deltas rebuild
 water.setWireframe(flag);
 water.dispose();
 ```
@@ -796,8 +787,7 @@ checkpoint, treat that as a renderer regression.
       semantics, JSON round-trip, and every shipped preset's wave list
       passing `GerstnerSurface`'s displacement-gradient check without
       warning.
-- [ ] `core/water-farfield-glsl.ts`: cascade/roughness/glint/far-blend chunks
-      + uniform builders, following the existing
+- [ ] `core/water-farfield-glsl.ts`: cascade/roughness/glint/far-blend chunks + uniform builders, following the existing
       chunk-string + `create*Uniforms` pattern. TS-port unit tests where the
       math allows (cascade weights partition unity; glint threshold
       monotonic in distance).
@@ -813,8 +803,7 @@ checkpoint, treat that as a renderer regression.
 - [ ] Migrate `/water-material-poc`, `/water-sphere-poc`,
       `/water-cylinder-poc` onto the renderer + a preset dropdown; keep the
       existing debug toggles (wireframe, ring count, detail/shore toggles
-      become preset overrides). Pages shrink to ground mesh + camera framing
-      + UI.
+      become preset overrides). Pages shrink to ground mesh + camera framing + UI.
 - [ ] Add one non-POC consumer fixture that uses only the documented HTML API;
       it must render plane, sphere and cylinder water without importing shader
       chunks or constructing a `ShaderMaterial`.
@@ -930,7 +919,7 @@ Exit gate: documented, independently installable, safe to publish.
 | Events              | single object; many tracked objects; tracked object destroyed             |
 | Buoyancy            | float; sink; neutral; long body; sleeping body entering water; flow drift |
 | Quality tiers       | runtime switch low↔medium↔high; reflection on/off                         |
-| Renderer            | WebGL success; WebGPU explicit rejection; logarithmic depth buffer on ✓  |
+| Renderer            | WebGL success; WebGPU explicit rejection; logarithmic depth buffer on ✓   |
 | Packaging           | core-only install; water-only; water+jolt; clean consumer build           |
 
 ## Open questions
@@ -964,13 +953,13 @@ Exit gate: documented, independently installable, safe to publish.
   SSR as primary with planar (or plain fresnel) as the off-screen fallback is
   the likely answer.
 - ~~Should `WATER_WAVE_PRESETS` grow into full "environment presets" (wave list
-  + colour + foam coverage + fog distance bundled together, switchable at
-  runtime, e.g. named tropical/stormy/moonlit presets)? Natural fit once
-  Phase 1's material inputs exist; revisit then rather than guessing the
-  shape now.~~ **Resolved 2026-07-23**: yes — shaped as `WaterRenderPreset`
-  (Phase 1e): plain JSON-serialisable data bundling tier + waves + shading +
-  far-field + stylize + grid budget, with `resolveWaterRenderPreset` for
-  consumer overrides.
+  - colour + foam coverage + fog distance bundled together, switchable at
+    runtime, e.g. named tropical/stormy/moonlit presets)? Natural fit once
+    Phase 1's material inputs exist; revisit then rather than guessing the
+    shape now.~~ **Resolved 2026-07-23**: yes — shaped as `WaterRenderPreset`
+    (Phase 1e): plain JSON-serialisable data bundling tier + waves + shading +
+    far-field + stylize + grid budget, with `resolveWaterRenderPreset` for
+    consumer overrides.
 
 ## Risks
 
@@ -991,21 +980,21 @@ Exit gate: documented, independently installable, safe to publish.
 
 Checked our phased plan against a broader ocean-rendering feature list to spot gaps early.
 
-| Feature | Status |
-| --- | --- |
-| Depth colour, refraction, reflection | Covered — Phase 1 depth-tint/shore-fade, Phase 4 screen-colour refraction + reflection |
-| FFT wind waves + Gerstner swell | Gerstner-only, shared by rendering and physics. FFT detail is a possible Phase 4+ rendering-only add-on, not a replacement — see the chop-must-be-textured finding above |
-| Three-layer foam | Phase 4 retitled to cover shoreline + ambient + whitecap explicitly |
-| Buoyancy, multi-point sampling | Covered — Phase 3, `probePoints` stretch input for long bodies |
-| Underwater fog/distortion + waterline | Covered — Phase 2, this plan's cornerstone feature |
-| Caustics | Existing stretch goal, unscoped beyond that |
-| Boat wake | Gap — added as Phase 5b; the visible signature of "object moving through water" |
-| Infinite water + LOD clipmap | Covered — Phase 1a, CDLOD-style morphing clipmap, seam-free by construction |
-| Environment presets | Only wave presets exist today; bundling colour/foam/fog into full presets is now an open question |
-| Compile-time quality stripping | Matches intent — shader `#define`-gated tiers, disabled code excluded, not just branched at runtime |
-| Multiplayer determinism | Already true by construction — `WaterSurface` is a pure function of (position, time), so synced clients compute identical waves with no extra sync code |
-| Water masking (hulls/caves) | Gap — added as an open question, likely Phase 4/6 |
-| WebGPU with fallback | WebGL-first throughout, matching the rest of triangular-engine; WebGPU is a reasonable later renderer target |
+| Feature                               | Status                                                                                                                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Depth colour, refraction, reflection  | Covered — Phase 1 depth-tint/shore-fade, Phase 4 screen-colour refraction + reflection                                                                                   |
+| FFT wind waves + Gerstner swell       | Gerstner-only, shared by rendering and physics. FFT detail is a possible Phase 4+ rendering-only add-on, not a replacement — see the chop-must-be-textured finding above |
+| Three-layer foam                      | Phase 4 retitled to cover shoreline + ambient + whitecap explicitly                                                                                                      |
+| Buoyancy, multi-point sampling        | Covered — Phase 3, `probePoints` stretch input for long bodies                                                                                                           |
+| Underwater fog/distortion + waterline | Covered — Phase 2, this plan's cornerstone feature                                                                                                                       |
+| Caustics                              | Existing stretch goal, unscoped beyond that                                                                                                                              |
+| Boat wake                             | Gap — added as Phase 5b; the visible signature of "object moving through water"                                                                                          |
+| Infinite water + LOD clipmap          | Covered — Phase 1a, CDLOD-style morphing clipmap, seam-free by construction                                                                                              |
+| Environment presets                   | Only wave presets exist today; bundling colour/foam/fog into full presets is now an open question                                                                        |
+| Compile-time quality stripping        | Matches intent — shader `#define`-gated tiers, disabled code excluded, not just branched at runtime                                                                      |
+| Multiplayer determinism               | Already true by construction — `WaterSurface` is a pure function of (position, time), so synced clients compute identical waves with no extra sync code                  |
+| Water masking (hulls/caves)           | Gap — added as an open question, likely Phase 4/6                                                                                                                        |
+| WebGPU with fallback                  | WebGL-first throughout, matching the rest of triangular-engine; WebGPU is a reasonable later renderer target                                                             |
 
 Net effect: no phase numbers changed except adding Phase 5b (wake) and two
 open questions (masking, SSR-vs-planar); the core architecture — one shared
@@ -1215,13 +1204,13 @@ waterline never depended on the expensive rendering-only detail layer.
 
 - Built `/water-material-poc`: `WATER_DETAIL_NORMAL_GLSL` (dual-scroll
   procedural normal map chop), `WATER_FRESNEL_GLSL`, `WATER_DEPTH_UNPACK_GLSL`
-  + `WATER_DEPTH_FADE_GLSL` (shore fade / absorption tint against a
-  `WaterDepthPrepass` capture), layered on the Phase 1a LOD grid against a
-  static sloped "shore" `PlaneGeometry`. `WaterDepthPrepass` renders the opaque
-  scene depth (water hidden, via `scene.overrideMaterial = MeshDepthMaterial`)
-  into an offscreen `WebGLRenderTarget`/`DepthTexture` each frame from
-  `EngineService.postTick$` — answers the "does depth-texture shading need the
-  postprocessing composer" open question: no.
+  - `WATER_DEPTH_FADE_GLSL` (shore fade / absorption tint against a
+    `WaterDepthPrepass` capture), layered on the Phase 1a LOD grid against a
+    static sloped "shore" `PlaneGeometry`. `WaterDepthPrepass` renders the opaque
+    scene depth (water hidden, via `scene.overrideMaterial = MeshDepthMaterial`)
+    into an offscreen `WebGLRenderTarget`/`DepthTexture` each frame from
+    `EngineService.postTick$` — answers the "does depth-texture shading need the
+    postprocessing composer" open question: no.
 - User reported four distinct visual bugs in sequence, each root-caused by
   reading actual source (three.js internals, not guessed) rather than trial
   and error:
@@ -1241,8 +1230,7 @@ waterline never depended on the expensive rendering-only detail layer.
      `far` to `Number.MAX_SAFE_INTEGER`; the demo only set `[near]="0.1"`.
      Packing `near=0.1`/`far≈9e15` into the 32-bit float
      `waterPerspectiveDepthToViewZ` formula catastrophically cancelled,
-     producing garbage `sceneViewZ` almost everywhere. Fixed with an explicit
-     `[far]="5000"` on the template.
+     producing garbage `sceneViewZ` almost everywhere.
   4. **Logarithmic depth buffer incompatibility** ("i need it to work with
      this — the games im making all have this on"): user enabled
      `webGLRendererParameters: { logarithmicDepthBuffer: true }`. Confirmed by
@@ -1294,7 +1282,7 @@ waterline never depended on the expensive rendering-only detail layer.
 - Caught one correctness bug during design, before it ever ran: the detail-
   normal chop (`WATER_DETAIL_NORMAL_GLSL`) assumes a near-vertical base
   normal, which only holds in world space for the plane domain. For the
-  sphere it only holds in the *local* tangent frame away from the "north"
+  sphere it only holds in the _local_ tangent frame away from the "north"
   point. Fixed by keeping the Gerstner normal in local space through the
   fragment shader (`vLocalNormal`/`vLocalXZ` varyings), perturbing it there,
   and composing to world space via `waterComposeWorldNormal` only as the
@@ -1349,7 +1337,7 @@ investigated, and what was actually changed, in order:
    water goes all the way through the cilinder, instead fo being inside it
    fixed, it goes in and out of it as i rotate the camera, kinda in opposite
    direction. also the cilinder needs to be double sided the mesh."**
-   Re-examined the ground mesh: the camera sits *inside* the concave tube,
+   Re-examined the ground mesh: the camera sits _inside_ the concave tube,
    so for the default single-sided (`FrontSide`) `MeshStandardMaterial` on a
    standard-winding `CylinderGeometry`, every visible wall face is a
    backface (the camera is always on the axis-side of every wall point,
@@ -1366,22 +1354,22 @@ investigated, and what was actually changed, in order:
    moves fast as i rotate the camera, either going all the way out one end
    of the other."** Diagnosed as a consequence of `CYLINDER_AXIS` being
    vertical (`(0, 1, 0)`): for a vertical-axis cylinder, the local "up"
-   (radially inward) has exactly zero world-Y component at *every* point on
+   (radially inward) has exactly zero world-Y component at _every_ point on
    the wall, with no exceptions (a mathematical property of the
    configuration, not a location-dependent edge case). `AdvancedOrbitControls
-   .setUpVector` (`third-person-controls.model.ts`) makes azimuthal drag
+.setUpVector` (`third-person-controls.model.ts`) makes azimuthal drag
    rotate the camera around whatever `upVector` it is given, so a purely
    horizontal up vector makes ordinary horizontal dragging sweep the camera
    through the tube's full axial length. **Fix attempted**: reoriented
    `CYLINDER_AXIS` to horizontal (`(1, 0, 0)`), added a `GROUND_ROTATION_RAD
-   = -Math.PI / 2` bake-in rotation (`geometry.rotateZ(...)`) so the ground
+= -Math.PI / 2` bake-in rotation (`geometry.rotateZ(...)`) so the ground
    `CylinderGeometry`'s native Y-axis orientation lands along world +X, a
    `nativeCylinderPointToWorld()` helper to keep the initial camera-framing
    reference point consistent with that same rotation, and moved the first
    bump to `angleRad: 0` (the tube's "bottom" after rotation, giving a
    near-`(0,1,0)` starting up vector). **This change was written to
    `water-cylinder-poc-page.component.ts` but the follow-up `ng build
-   demo-app` to verify it compiles was interrupted/rejected by the user
+demo-app` to verify it compiles was interrupted/rejected by the user
    before running — this fix is UNVERIFIED, not confirmed to build or to
    resolve the reported symptom.**
 4. User then reported a fourth symptom, explicitly from a different camera
@@ -1391,7 +1379,7 @@ investigated, and what was actually changed, in order:
    left. same story about turning the camera the other direction."**
    Re-derived the domain math by hand once more: `CylinderWaterDomain`'s
    frame origin has an axial coordinate equal to `dot(camera - center,
-   axis)` — an exact, unamplified 1:1 linear function of the camera's own
+axis)` — an exact, unamplified 1:1 linear function of the camera's own
    position, confirmed via the same reasoning used in the Phase 1d
    `composeWorldPosition` unit tests. Formed a hypothesis (not independently
    confirmed against the running demo) that the reported behavior is an
@@ -1474,21 +1462,21 @@ reported problems, in this order:
 
    Diagnosed the texture complaint as: `WATER_DETAIL_NORMAL_GLSL`'s
    `waterDetailNormal(worldXZ, ...)` is fed `vLocalXZ` in this page — the
-   *camera-recentring* local tangent-plane coordinate (see Phase 1c's frame
+   _camera-recentring_ local tangent-plane coordinate (see Phase 1c's frame
    design above), not a world-anchored one. On the plane domain `vLocalXZ`
    coincides with true world XZ (its frame is fixed), so the parameter name
    "worldXZ" is accurate there; on the sphere it recentres on the camera
    every frame, so the detail-normal texture UV pans with camera movement.
    Found the fix already half-built and unused: `water-domain-glsl.ts`
    exports `WATER_DOMAIN_SURFACE_XZ_GLSL`/`waterDomainSurfaceXZ`, a
-   world-anchored (lon/lat-unwrapped) coordinate, and the *cylinder* demo
+   world-anchored (lon/lat-unwrapped) coordinate, and the _cylinder_ demo
    already feeds its equivalent (`vSurfXZ`) into `waterDetailNormal`
    correctly — only the sphere page had never been wired up to it.
 
    **Fix applied**: added a `vSurfaceXZ` varying computed via
    `waterDomainSurfaceXZ(localDisplaced.xz)` in the vertex shader, fed it
    into `waterDetailNormal` in the fragment shader instead of `vLocalXZ`
-   (which stays in use for `waterLodCull`, where camera-relative *is*
+   (which stays in use for `waterLodCull`, where camera-relative _is_
    correct). Separately, generalized `ISLANDS` to a signed
    `TERRAIN_FEATURES` list (added three negative-`heightM` trenches) and
    changed the per-vertex bump selection from `Math.max` to
@@ -1517,7 +1505,7 @@ reported problems, in this order:
    `EngineService.tick()` directly, not just inferred from naming). So the
    rebuild always read `camera.position` one frame stale relative to what
    `orbit.update()` sets it to a moment later in that same frame, before
-   `render()` draws it — and because the *sphere* domain's entire local
+   `render()` draws it — and because the _sphere_ domain's entire local
    frame (origin **and** tangent basis) is rebuilt from that stale camera
    position every frame (unlike the plane domain, whose frame is fixed
    regardless of camera position), a stale frame doesn't just shift which
@@ -1665,3 +1653,23 @@ recentring" as the cause).
 - The library and demo production builds pass. The Karma bundle compiles, but
   this machine's ChromeHeadless GPU process crashes before running the specs.
   Live-page verification shows rendering with no new runtime/shader errors.
+
+### 2026-07-23 — Sphere depth and zoomed-out coverage fixture expanded
+
+- Added submerged crevices to the sphere terrain so the same page exposes dry
+  islands, shallow shelves, the ordinary 6m seabed, and substantially deeper
+  water for absorption/depth-tint testing.
+- Raised `/water-sphere-poc` from 3 to 5 rings by default (maximum remains 5),
+  expanding the displayed outer extent from roughly 256m to 1024m so a fully
+  zoomed-out camera does not expose the projected water grid's edge.
+
+### 2026-07-23 — Sphere anchoring user-verified; cylinder invariant work started
+
+- User verified that camera-angle changes no longer move the sphere water.
+  Together with the fixed-surface-sample unit test, this closes the
+  rotate-in-place/translated-frame proof above.
+- Added the equivalent fixed-sample regression for `CylinderWaterDomain`,
+  checking both composed world position and stable axial/wrapped surface
+  coordinates across three translated local frames.
+- Migrated `/water-cylinder-poc` from `tick$` + `postTick$` and render-loop
+  `detectChanges()` to the ordered `beforeRender$` hook used by the sphere.

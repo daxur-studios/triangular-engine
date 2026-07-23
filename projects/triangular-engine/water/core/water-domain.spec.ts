@@ -189,6 +189,53 @@ describe('CylinderWaterDomain', () => {
     expect(surfXZ2.x - surfXZ1.x).toBeCloseTo(50, 4);
   });
 
+  it('keeps a fixed surface sample stable across translated cylinder frames', () => {
+    const radius = 500;
+    const axis = new Vector3(1, 0, 0);
+    const center = new Vector3(20, -30, 40);
+    const domain = new CylinderWaterDomain(radius, { axis, center });
+    const sampleAxial = 135;
+    const sampleRadialDirection = new Vector3(0, 0.8, 0.6).normalize();
+    const fixedSample = center
+      .clone()
+      .addScaledVector(axis, sampleAxial)
+      .addScaledVector(sampleRadialDirection, radius);
+    const cameraPositions = [
+      center.clone().add(new Vector3(-80, 620, 0)),
+      center.clone().add(new Vector3(250, 300, 520)),
+      center.clone().add(new Vector3(40, -180, 590)),
+    ];
+
+    const surfaceCoordinates = cameraPositions.map((cameraPosition) => {
+      const frame = domain.getLocalFrame(cameraPosition);
+      const frameFromCenter = frame.origin.clone().sub(center);
+      const frameAxial = frameFromCenter.dot(axis);
+      const frameRadial = frameFromCenter
+        .addScaledVector(axis, -frameAxial)
+        .normalize();
+
+      // Intersect the fixed radial ray with this frame's tangent plane, then
+      // express that point in the frame's local axes.
+      const projectedRadius =
+        radius / sampleRadialDirection.dot(frameRadial);
+      const flatSample = center
+        .clone()
+        .addScaledVector(axis, sampleAxial)
+        .addScaledVector(sampleRadialDirection, projectedRadius);
+      const fromOrigin = flatSample.sub(frame.origin);
+      const localX = fromOrigin.dot(frame.tangentU);
+      const localZ = fromOrigin.dot(frame.tangentV);
+      const world = domain.composeWorldPosition(frame, localX, localZ, 0);
+
+      expect(world.distanceTo(fixedSample)).toBeCloseTo(0, 6);
+      return domain.getSurfaceXZ(frame, localX, localZ);
+    });
+
+    for (const coordinates of surfaceCoordinates.slice(1)) {
+      expect(coordinates.distanceTo(surfaceCoordinates[0])).toBeCloseTo(0, 6);
+    }
+  });
+
   it('rejects a non-positive radius', () => {
     expect(() => new CylinderWaterDomain(0)).toThrowError();
     expect(() => new CylinderWaterDomain(-5)).toThrowError();

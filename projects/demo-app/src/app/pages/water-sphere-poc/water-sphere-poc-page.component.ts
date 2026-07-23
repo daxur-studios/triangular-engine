@@ -145,11 +145,10 @@ const CREVICES: ReadonlyArray<{
 const OCEAN_FLOOR_DEPTH_M = 6;
 
 /**
- * Same ring-count-as-slider idea as `/water-material-poc`, but capped lower:
- * the local tangent-plane approximation this domain uses (see
- * `SphereWaterDomain`) only stays valid while the grid's outer radius is
- * well under a quarter of the sphere's circumference — at radius 500m that's
- * ~785m, and ring 4 reaches 512m, so this keeps a comfortable margin.
+ * Same ring-count-as-slider idea as `/water-material-poc`. Ring 4 is the
+ * conservative tangent-frame setting; ring 5 is the default zoomed-out
+ * coverage setting so the projected grid reaches beyond the visible limb of
+ * this 500m test sphere.
  */
 const BASE_GRID_OPTIONS = {
   baseCellSize: 4,
@@ -157,9 +156,9 @@ const BASE_GRID_OPTIONS = {
   coreSizePatches: 16,
 } as const;
 
-const DEFAULT_RING_COUNT = 3;
+const DEFAULT_RING_COUNT = 5;
 const MIN_RING_COUNT = 1;
-const MAX_RING_COUNT = 4;
+const MAX_RING_COUNT = 5;
 
 const MAX_INSTANCES_PER_LEVEL =
   BASE_GRID_OPTIONS.coreSizePatches * BASE_GRID_OPTIONS.coreSizePatches;

@@ -6,16 +6,18 @@
           <a routerLink="/">← Examples</a
           ><small>triangular-engine/water — Phase 1c sphere domain spike</small>
         </div>
-        <strong>Same Phase 1a/1b grid and material, curved onto a sphere</strong>
+        <strong
+          >Same Phase 1a/1b grid and material, curved onto a sphere</strong
+        >
       </header>
 
       <p class="blurb">
-        <code>SphereWaterDomain</code> curves the unchanged flat CDLOD grid
-        onto a {{ sphereRadiusM }}m "planet" via a continuously-recentring
-        local tangent frame — no cube faces, no patch addresses, nothing to
-        seam-stitch. Orbit the whole sphere, including near the poles, and
-        watch for popping, swimming, or cracks. Raised islands and submerged
-        crevices provide dry, shallow and deep regions for testing depth tint.
+        <code>SphereWaterDomain</code> curves the unchanged flat CDLOD grid onto
+        a {{ sphereRadiusM }}m "planet" via a continuously-recentring local
+        tangent frame — no cube faces, no patch addresses, nothing to
+        seam-stitch. Orbit the whole sphere, including near the poles, and watch
+        for popping, swimming, or cracks. Raised islands and submerged crevices
+        provide dry, shallow and deep regions for testing depth tint.
       </p>
 
       <nav aria-label="Wave preset">
@@ -68,10 +70,9 @@
       </div>
 
       <p class="blurb note">
-        The local tangent-plane approximation only holds while the ring
-        grid's outer radius stays well under a quarter of the sphere's
-        circumference — the ring-count cap here keeps that margin at this
-        sphere's radius.
+        Ring 4 is the conservative tangent-frame setting. The default ring 5
+        extends beyond that margin for zoomed-out coverage, ensuring the
+        projected water reaches past the planet's visible limb.
       </p>
     </section>
   </ng-template>
@@ -81,7 +82,6 @@
     [target]="initialTarget"
     [upVector]="initialUpVector"
     [near]="0.1"
-    [far]="5000"
   />
   <ambientLight [intensity]="1.6" />
   <directionalLight [position]="[300, 400, 200]" [intensity]="2.5" />
