@@ -1,4 +1,4 @@
-import { RepeatWrapping } from 'three';
+import { NearestFilter, RepeatWrapping } from 'three';
 import { createProceduralNormalMapTexture } from './procedural-normal-map';
 
 describe('createProceduralNormalMapTexture', () => {
@@ -33,5 +33,11 @@ describe('createProceduralNormalMapTexture', () => {
     expect(Array.from(a.image.data as Uint8Array)).not.toEqual(
       Array.from(c.image.data as Uint8Array),
     );
+  });
+
+  it('supports nearest filtering for intentionally chunky normals', () => {
+    const texture = createProceduralNormalMapTexture({ filter: 'nearest' });
+    expect(texture.magFilter).toBe(NearestFilter);
+    expect(texture.minFilter).toBe(NearestFilter);
   });
 });

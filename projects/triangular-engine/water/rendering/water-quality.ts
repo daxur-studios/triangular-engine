@@ -18,6 +18,7 @@ export function waterTierDefines(tier: WaterQualityTier): WaterShaderDefines {
         WATER_TIER_MEDIUM: 1,
         WATER_GERSTNER: 1,
         WATER_DETAIL_NORMALS: 1,
+        WATER_DETAIL_CASCADES: 1,
         WATER_DEPTH_PREPASS: 1,
       };
     case 'high':
@@ -25,6 +26,7 @@ export function waterTierDefines(tier: WaterQualityTier): WaterShaderDefines {
         WATER_TIER_HIGH: 1,
         WATER_GERSTNER: 1,
         WATER_DETAIL_NORMALS: 1,
+        WATER_DETAIL_CASCADES: 1,
         WATER_DEPTH_PREPASS: 1,
         WATER_FAR_FIELD: 1,
         WATER_GLINT: 1,

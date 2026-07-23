@@ -787,11 +787,11 @@ checkpoint, treat that as a renderer regression.
       semantics, JSON round-trip, and every shipped preset's wave list
       passing `GerstnerSurface`'s displacement-gradient check without
       warning.
-- [ ] `core/water-farfield-glsl.ts`: cascade/roughness/glint/far-blend chunks + uniform builders, following the existing
+- [x] `core/water-farfield-glsl.ts`: cascade/roughness/glint/far-blend chunks + uniform builders, following the existing
       chunk-string + `create*Uniforms` pattern. TS-port unit tests where the
       math allows (cascade weights partition unity; glint threshold
       monotonic in distance).
-- [ ] `core/water-stylize-glsl.ts`: posterize chunk; time quantization lives
+- [x] `core/water-stylize-glsl.ts`: posterize chunk; time quantization lives
       CPU-side in the renderer. Extend `createProceduralNormalMapTexture`
       with filter/size options if needed.
 - [x] `rendering/water-surface-renderer.ts` as specced above; everything
@@ -809,6 +809,18 @@ checkpoint, treat that as a renderer regression.
       chunks or constructing a `ShaderMaterial`.
 - [ ] Record per-preset frame cost (FPS at default camera) for each demo in
       the investigation log.
+
+#### 2026-07-23 — Far-field and stylize packs added
+
+- Added shared detail-cascade, distance-roughness, sun-glint and far-colour
+  shader chunks with uniform builders and CPU-testable math.
+- Medium/high tiers now use distance-stable detail cascades; high additionally
+  enables glint and far reflective colour. Pixel water enables posterization,
+  quantized time and nearest-filtered 32px procedural normals.
+- `ng build triangular-engine --configuration development` passes.
+- The focused Karma bundle compiles, but ChromeHeadless crashes its GPU process
+  before Jasmine starts (`exit_code=-1073741790`), so browser execution remains
+  unverified on this machine.
 
 Exit gate: all three demos switch between the four presets at runtime with no
 reload. On the **plane** demo at max ring count, zoomed far out: `cinematic`

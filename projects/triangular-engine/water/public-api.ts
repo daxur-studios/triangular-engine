@@ -15,6 +15,8 @@ export * from './core/water-shading-glsl';
 export * from './core/water-surface-depth-glsl';
 export * from './core/water-domain';
 export * from './core/water-domain-glsl';
+export * from './core/water-farfield-glsl';
+export * from './core/water-stylize-glsl';
 export * from './rendering/procedural-normal-map';
 export * from './rendering/water-depth-prepass';
 export * from './rendering/water-quality';

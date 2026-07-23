@@ -57,6 +57,20 @@ import {
   type WaterShadingUniforms,
 } from '../core/water-shading-glsl';
 import {
+  createWaterFarFieldUniforms,
+  WATER_DETAIL_CASCADE_GLSL,
+  WATER_FAR_COLOR_GLSL,
+  WATER_FAR_FIELD_UNIFORMS_GLSL,
+  WATER_GLINT_GLSL,
+  type WaterFarFieldUniforms,
+} from '../core/water-farfield-glsl';
+import {
+  createWaterStylizeUniforms,
+  WATER_POSTERIZE_GLSL,
+  WATER_STYLIZE_UNIFORMS_GLSL,
+  type WaterStylizeUniforms,
+} from '../core/water-stylize-glsl';
+import {
   createWaterSurfaceDepthUniforms,
   updateWaterSurfaceDepthCamera,
   WATER_SURFACE_DEPTH_GLSL,
@@ -95,6 +109,8 @@ export class WaterSurfaceRenderer {
   private readonly uTime = { value: 0 };
   private gerstnerUniforms: GerstnerUniforms;
   private shadingUniforms: WaterShadingUniforms;
+  private farFieldUniforms: WaterFarFieldUniforms;
+  private stylizeUniforms: WaterStylizeUniforms;
   private patchGeometry: BufferGeometry | null = null;
   private depthPrepass: WaterDepthPrepass | null = null;
   private ownedDetailNormalMap: Texture | null = null;
@@ -113,6 +129,8 @@ export class WaterSurfaceRenderer {
     this.surfaceDepthUniforms = createWaterSurfaceDepthUniforms();
     this.gerstnerUniforms = createGerstnerUniforms(this.preset.waves.waves);
     this.shadingUniforms = this.createShadingUniforms(this.preset);
+    this.farFieldUniforms = createWaterFarFieldUniforms(this.preset.farField);
+    this.stylizeUniforms = createWaterStylizeUniforms(this.preset.stylize);
     this.configureDomainUniforms();
     this.buildGrid();
   }
@@ -221,6 +239,8 @@ export class WaterSurfaceRenderer {
     this.preset = preset;
     updateGerstnerUniforms(this.gerstnerUniforms, preset.waves.waves);
     this.shadingUniforms = this.createShadingUniforms(preset);
+    this.farFieldUniforms = createWaterFarFieldUniforms(preset.farField);
+    this.stylizeUniforms = createWaterStylizeUniforms(preset.stylize);
     this.buildGrid();
     if (attachedScene) this.addTo(attachedScene);
   }
@@ -249,6 +269,7 @@ export class WaterSurfaceRenderer {
         size: normalMapSize,
         octaves: 5,
         seed: 3,
+        filter: preset.stylize ? 'nearest' : 'linear',
       });
     if (!preset.shading.detailNormalMap) {
       this.ownedDetailNormalMap = detailNormalMap;
@@ -278,7 +299,9 @@ export class WaterSurfaceRenderer {
       ...waterTierDefines(this.preset.tier),
       ...(this.domain.kind === 'sphere' ? { WATER_DOMAIN_SPHERE: 1 } : {}),
       ...(this.domain.kind === 'cylinder' ? { WATER_DOMAIN_CYLINDER: 1 } : {}),
-      ...(this.preset.stylize ? { WATER_STYLIZE: 1 } : {}),
+      ...(this.preset.stylize
+        ? { WATER_STYLIZE: 1, WATER_DETAIL_NORMALS: 1 }
+        : {}),
     };
 
     for (let level = 0; level <= grid.ringCount; level++) {
@@ -310,6 +333,8 @@ export class WaterSurfaceRenderer {
       uniforms: {
         ...this.gerstnerUniforms,
         ...this.shadingUniforms,
+        ...this.farFieldUniforms,
+        ...this.stylizeUniforms,
         ...this.surfaceDepthUniforms,
         ...this.domainUniforms,
         uTime: this.uTime,
@@ -390,6 +415,12 @@ export const WATER_SURFACE_FRAGMENT_SHADER = `
   ${WATER_LOD_CULL_GLSL}
   ${WATER_SHADING_UNIFORMS_GLSL}
   ${WATER_DETAIL_NORMAL_GLSL}
+  ${WATER_FAR_FIELD_UNIFORMS_GLSL}
+  ${WATER_DETAIL_CASCADE_GLSL}
+  ${WATER_GLINT_GLSL}
+  ${WATER_FAR_COLOR_GLSL}
+  ${WATER_STYLIZE_UNIFORMS_GLSL}
+  ${WATER_POSTERIZE_GLSL}
   ${WATER_FRESNEL_GLSL}
   ${WATER_DEPTH_UNPACK_GLSL}
   ${WATER_SURFACE_DEPTH_UNIFORMS_GLSL}
@@ -423,8 +454,18 @@ export const WATER_SURFACE_FRAGMENT_SHADER = `
   void main() {
     waterLodCull(vLocalXZ, uLodCameraXZ, uInnerCullRadius, uOuterCullRadius);
     vec3 localNormal = normalize(vLocalNormal);
+    float distanceToCamera = distance(cameraPosition, vWorldPosition);
     #ifdef WATER_DETAIL_NORMALS
-      localNormal = waterDetailNormal(vSurfaceXZ, localNormal, uTime);
+      #ifdef WATER_DETAIL_CASCADES
+        localNormal = waterDetailCascadeNormal(
+          vSurfaceXZ,
+          localNormal,
+          uTime,
+          distanceToCamera
+        );
+      #else
+        localNormal = waterDetailNormal(vSurfaceXZ, localNormal, uTime);
+      #endif
     #endif
     vec3 normal = waterComposeWorldNormal(localNormal);
     vec3 domainUp = waterDomainUp(vWorldPosition);
@@ -445,6 +486,22 @@ export const WATER_SURFACE_FRAGMENT_SHADER = `
     vec3 color = waterAbsorb(uColorShallow, uColorDeep, depth);
     color *= diffuse * 0.5 + 0.5;
     color = mix(color, vec3(1.0), fresnel * 0.4);
+    #ifdef WATER_GLINT
+      float glint = waterSunGlint(
+        vSurfaceXZ,
+        normal,
+        viewDir,
+        lightDir,
+        distanceToCamera
+      );
+      color += vec3(glint);
+    #endif
+    #ifdef WATER_FAR_FIELD
+      color = waterFarColor(color, fresnel, distanceToCamera);
+    #endif
+    #ifdef WATER_STYLIZE
+      color = waterPosterize(color);
+    #endif
     gl_FragColor = vec4(color, alpha);
     ${WATER_LOGDEPTH_FRAGMENT_GLSL}
   }

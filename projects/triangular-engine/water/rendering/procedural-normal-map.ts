@@ -1,4 +1,11 @@
-import { DataTexture, RGBAFormat, RepeatWrapping, UnsignedByteType } from 'three';
+import {
+  DataTexture,
+  LinearFilter,
+  NearestFilter,
+  RGBAFormat,
+  RepeatWrapping,
+  UnsignedByteType,
+} from 'three';
 
 export interface ProceduralNormalMapOptions {
   /** Texture resolution in pixels (square). Default 256. */
@@ -6,6 +13,8 @@ export interface ProceduralNormalMapOptions {
   /** Number of summed tileable sine octaves. Default 5. */
   readonly octaves?: number;
   readonly seed?: number;
+  /** Sampling mode. Pixel-style water uses nearest; default is linear. */
+  readonly filter?: 'linear' | 'nearest';
 }
 
 /**
@@ -72,6 +81,10 @@ export function createProceduralNormalMapTexture(
   const texture = new DataTexture(data, size, size, RGBAFormat, UnsignedByteType);
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
+  texture.magFilter =
+    options.filter === 'nearest' ? NearestFilter : LinearFilter;
+  texture.minFilter =
+    options.filter === 'nearest' ? NearestFilter : LinearFilter;
   texture.needsUpdate = true;
   return texture;
 }

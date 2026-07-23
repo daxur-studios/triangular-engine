@@ -1,4 +1,10 @@
-import { PerspectiveCamera, Scene, ShaderMaterial, Vector3 } from 'three';
+import {
+  NearestFilter,
+  PerspectiveCamera,
+  Scene,
+  ShaderMaterial,
+  Vector3,
+} from 'three';
 import {
   CylinderWaterDomain,
   PlaneWaterDomain,
@@ -64,6 +70,27 @@ describe('WaterSurfaceRenderer', () => {
 
     const material = renderer.meshes[0].material as ShaderMaterial;
     expect(material.uniforms['uTime'].value).toBe(1.125);
+    expect(material.defines['WATER_STYLIZE']).toBe(1);
+    expect(material.defines['WATER_DETAIL_NORMALS']).toBe(1);
+    expect(material.uniforms['uDetailNormalMap'].value.magFilter).toBe(
+      NearestFilter,
+    );
+    renderer.dispose();
+  });
+
+  it('enables cascades for balanced and far glint only for cinematic', () => {
+    const renderer = new WaterSurfaceRenderer({
+      domain: new PlaneWaterDomain(),
+      preset: WATER_RENDER_PRESETS.balanced,
+    });
+    let material = renderer.meshes[0].material as ShaderMaterial;
+    expect(material.defines['WATER_DETAIL_CASCADES']).toBe(1);
+    expect(material.defines['WATER_GLINT']).toBeUndefined();
+
+    renderer.setPreset(WATER_RENDER_PRESETS.cinematic);
+    material = renderer.meshes[0].material as ShaderMaterial;
+    expect(material.defines['WATER_GLINT']).toBe(1);
+    expect(material.uniforms['uGlintStrength'].value).toBe(0.8);
     renderer.dispose();
   });
 });

@@ -4,6 +4,7 @@ describe('water quality tiers', () => {
   it('only enables expensive capabilities on tiers that support them', () => {
     expect(waterTierDefines('low')['WATER_GERSTNER']).toBeUndefined();
     expect(waterTierDefines('medium')['WATER_GERSTNER']).toBe(1);
+    expect(waterTierDefines('medium')['WATER_DETAIL_CASCADES']).toBe(1);
     expect(waterTierDefines('medium')['WATER_GLINT']).toBeUndefined();
     expect(waterTierDefines('high')['WATER_GLINT']).toBe(1);
   });
