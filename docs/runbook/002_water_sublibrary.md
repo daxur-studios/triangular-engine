@@ -794,7 +794,7 @@ checkpoint, treat that as a renderer regression.
 - [ ] `core/water-stylize-glsl.ts`: posterize chunk; time quantization lives
       CPU-side in the renderer. Extend `createProceduralNormalMapTexture`
       with filter/size options if needed.
-- [ ] `rendering/water-surface-renderer.ts` as specced above; everything
+- [x] `rendering/water-surface-renderer.ts` as specced above; everything
       exported from `public-api.ts`.
 - [ ] Add the Angular `<waterSurface>` component as a thin lifecycle/input
       wrapper around `WaterSurfaceRenderer`. Add optional `<waterOcean>` and
@@ -1690,3 +1690,23 @@ recentring" as the cause).
 - Extended the sphere and cylinder domain regressions across `50m`, `500m`,
   and Earth-scale `6,371,000m` radii, checking normalized radius preservation,
   finite surface coordinates, and cylinder axial-coordinate preservation.
+
+### 2026-07-23 — Shared `WaterSurfaceRenderer` foundation added
+
+- Added the framework-free `WaterSurfaceRenderer` owning the CDLOD patch
+  geometry, per-level instanced meshes/materials, shared uniforms, domain
+  updates, optional depth prepass, preset switching, wireframe state and
+  disposal.
+- The one shader assembly now handles plane, sphere and inside-cylinder
+  domains. Gerstner/detail/depth work is compile-time gated by the quality
+  tier, and stylized time quantization is applied by the renderer.
+- Generalized cylinder GLSL composition and normal construction to its
+  configured axis instead of assuming a fixed YZ cylinder. Stable wrapped
+  surface coordinates remain anchored through the moving local frame.
+- Added renderer contract tests covering all three domains, scene attachment,
+  LOD updates, tier rebuilds and pixel-time quantization. The focused Karma
+  bundle compiles, but ChromeHeadless still exits in its GPU process before
+  executing tests on this machine.
+- The water entry point exports the renderer and the triangular-engine
+  development build passes. Far-field/stylize shader packs and the
+  `<waterSurface>` Angular wrapper remain the next Phase 1e slices.

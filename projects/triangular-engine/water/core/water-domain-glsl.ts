@@ -68,15 +68,17 @@ export const WATER_DOMAIN_COMPOSE_GLSL = `
       vec3 direction = normalize(flatPos - uSphereCenter);
       return uSphereCenter + direction * (uSphereRadius + heightAlongNormal);
     #elif defined(WATER_DOMAIN_CYLINDER)
-      float angle = uFrameOriginAngle + localXZ.y / uCylinderRadius;
-      float displacedRadius = uCylinderRadius - heightAlongNormal;
-      float axialComponent = uFrameOrigin.x + localXZ.x;
-      vec3 localCyl = vec3(
-        axialComponent,
-        -displacedRadius * cos(angle),
-        displacedRadius * sin(angle)
+      vec3 flatPos = uFrameOrigin
+        + uFrameTangentU * localXZ.x
+        + uFrameTangentV * localXZ.y;
+      vec3 relative = flatPos - uCylinderCenter;
+      float axialComponent = dot(relative, uCylinderAxis);
+      vec3 radialDirection = normalize(
+        relative - uCylinderAxis * axialComponent
       );
-      return uCylinderCenter + uCylinderAxis * localCyl.x + vec3(0.0, localCyl.y, localCyl.z);
+      return uCylinderCenter
+        + uCylinderAxis * axialComponent
+        + radialDirection * (uCylinderRadius - heightAlongNormal);
     #else
       vec3 flatPos = uFrameOrigin
         + uFrameTangentU * localXZ.x
@@ -92,13 +94,16 @@ export const WATER_DOMAIN_COMPOSE_GLSL = `
 export const WATER_DOMAIN_COMPOSE_NORMAL_GLSL = `
   vec3 waterComposeWorldNormal(vec3 localNormal) {
     #ifdef WATER_DOMAIN_CYLINDER
-      float angle = uFrameOriginAngle + vLocalXZ.y / uCylinderRadius;
-      vec3 rotNormal = vec3(
-        localNormal.x,
-        localNormal.y * cos(angle) - localNormal.z * sin(angle),
-        localNormal.y * sin(angle) + localNormal.z * cos(angle)
+      vec3 surfacePosition = waterComposeWorldPosition(vLocalXZ, 0.0);
+      vec3 relative = surfacePosition - uCylinderCenter;
+      vec3 radial = relative - uCylinderAxis * dot(relative, uCylinderAxis);
+      vec3 domainUp = -normalize(radial);
+      vec3 tangentAround = normalize(cross(domainUp, uCylinderAxis));
+      return normalize(
+        uCylinderAxis * localNormal.x
+        + domainUp * localNormal.y
+        + tangentAround * localNormal.z
       );
-      return normalize(rotNormal);
     #else
       return normalize(
         uFrameTangentU * localNormal.x +
@@ -117,7 +122,10 @@ export const WATER_DOMAIN_SURFACE_XZ_GLSL = `
   vec2 waterDomainSurfaceXZ(vec2 localXZ) {
     #ifdef WATER_DOMAIN_CYLINDER
       float angle = uFrameOriginAngle + localXZ.y / uCylinderRadius;
-      float axial = uFrameOrigin.x + localXZ.x;
+      float axial = dot(
+        uFrameOrigin - uCylinderCenter,
+        uCylinderAxis
+      ) + localXZ.x;
       return vec2(axial, uCylinderRadius * angle);
     #elif defined(WATER_DOMAIN_SPHERE)
       vec3 flatPos = uFrameOrigin

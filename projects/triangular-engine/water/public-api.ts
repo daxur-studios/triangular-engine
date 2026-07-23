@@ -19,3 +19,4 @@ export * from './rendering/procedural-normal-map';
 export * from './rendering/water-depth-prepass';
 export * from './rendering/water-quality';
 export * from './rendering/water-render-preset';
+export * from './rendering/water-surface-renderer';
