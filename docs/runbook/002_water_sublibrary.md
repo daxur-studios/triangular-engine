@@ -5,7 +5,7 @@
 - State: Planning
 - Target entry points: `triangular-engine/water` (core), `triangular-engine/water/jolt` (physics)
 - Initial renderer: WebGL
-- Last updated: 2026-07-22
+- Last updated: 2026-07-23 (cylinder domain built, awaiting live verification)
 
 ## TL;DR
 
@@ -39,8 +39,9 @@ A production-quality water system usable by any triangular-engine game
 - Three base shapes, matching `004_multi_surface_terrain.md`'s domain triad:
   infinite plane (BSP's local/flat water), planetary sphere (convex, water
   curves away from the camera), and O'Neill-cylinder interior (concave, water
-  curves the opposite way — up and around, not down and away). Plane is the
-  only one built so far (Phase 1a); see Phase 1a's domain note.
+  curves the opposite way — up and around, not down and away). All three are
+  built: plane (Phase 1a), sphere (Phase 1c), cylinder (Phase 1d) — see Phase
+  1a's domain note and Phases 1c/1d below.
 
 Intended consumer API (selector names may change after prototyping):
 
@@ -391,6 +392,17 @@ mistaken for shape-agnostic infrastructure when sphere/cylinder work starts.
 Water should follow, not lead, 004's sphere/cylinder domains rather than
 inventing a second version — track as a new phase once 004 has them.
 
+**Revision (2026-07-22, Phase 1c)**: 004's `SphereTerrainDomain` shipped, but
+adopting `ITerrainSurfaceDomain<TAddress>` literally turned out to be the
+wrong fit after all — that contract is shaped around terrain's discrete
+quadtree patches + skirts, the exact seam-prone pattern this phase's opening
+paragraph already rejected for water. It also only carries a scalar
+elevation (`getSurfacePosition(address, u, v, elevationM: number)`), not
+enough for Gerstner's horizontal + vertical displacement. Phase 1c instead
+built a small water-only `WaterSurfaceDomain` abstraction (continuously
+recentring local tangent frame, not patch addresses) — see Phase 1c below
+for the design and why it still keeps water and terrain decoupled.
+
 ### Phase 1b — Ocean and lake material, low + medium tiers
 
 - [x] Water material: scrolling detail normals, fresnel, absorption colour,
@@ -410,6 +422,88 @@ inventing a second version — track as a new phase once 004 has them.
 Exit gate: a good-looking medium-tier ocean and lake against a beach slope,
 no visible grid seams or swimming vertices while the camera moves, runtime
 quality switch works.
+
+### Phase 1c — Sphere domain (curved local tangent-plane grid)
+
+Curves the unchanged Phase 1a/1b flat CDLOD grid onto a sphere instead of
+adopting terrain's discrete-patch domain model — see the Phase 1a revision
+note above for why.
+
+- [x] `WaterSurfaceDomain` interface (`getLocalFrame(referencePosition)`,
+      `composeWorldPosition(frame, localX, localZ, heightAlongNormal)`) plus
+      `PlaneWaterDomain` and `SphereWaterDomain` implementations in
+      `water/core/water-domain.ts`, unit tested (frame correctness at the
+      equator/poles/arbitrary points, exact radius round-trip, plane
+      reproduces the pre-Phase-1c formula exactly).
+- [x] `water-domain-glsl.ts`: domain uniforms, `waterComposeWorldPosition`
+      (plane path plus an `#ifdef WATER_DOMAIN_SPHERE` renormalize branch,
+      same compile-time-`#ifdef` pattern as the log-depth chunks), and a
+      separate `waterComposeWorldNormal` — composing the normal to world
+      space is domain-agnostic, but must happen *after* the detail-normal
+      texture perturbs it in local space, since that perturbation assumes a
+      near-vertical base normal (true in world space only for the plane;
+      only true in the *local* frame for a sphere away from directly
+      "north" of the camera).
+- [x] `/water-sphere-poc` demo: same grid/material/Gerstner/shading
+      infrastructure as `/water-material-poc`, `SphereWaterDomain` instead of
+      raw world XZ, a bumpy `SphereGeometry` "ground" with 3 raised islands
+      feeding `WaterDepthPrepass` for shore-fade, camera framing and
+      `orbitControls`' `upVector` both derived from the domain's own frame at
+      start (not hand-picked), ring-count capped lower than the plane demo to
+      keep the ring radius a safe margin under a quarter of the sphere's
+      circumference (chord-vs-arc error is negligible at this margin —
+      `patchRadius² / (2·bodyRadius)`).
+
+Exit gate: continuous, seam/pop/swim-free coverage while orbiting the whole
+sphere including near both poles, user-verified in `/water-sphere-poc`.
+**Met and user-verified 2026-07-23.**
+
+Out of scope for this phase (deferred, not forgotten): CPU
+`WaterSurface.getHeight`/`getNormal` queries on a sphere (needs a
+world-position → local-frame inversion; no buoyancy consumer exists yet to
+need it), floating-origin/scaled-space integration with BSP's actual planet
+placement, the cylinder-interior domain (opposite-facing normal, same
+technique — its own phase), shore foam and the other still-open Phase 1b
+items.
+
+### Phase 1d — Cylinder domain (interior wall, opposite-facing normal)
+
+Curves the same unchanged flat CDLOD grid onto the *inside* of a cylinder
+wall (O'Neill habitat), the concave counterpart to Phase 1c's convex sphere:
+water rises up and around the camera at distance instead of falling away
+toward a horizon.
+
+- [x] `CylinderWaterDomain` (`radiusM`, `axis`, `center`) in
+      `water/core/water-domain.ts`: `normal` points inward toward the axis
+      (matching centrifugal "gravity" pushing outward against the wall, so
+      "up" is toward the centerline — the opposite sign from
+      `SphereWaterDomain`); `tangentU` is the cylinder axis itself (zero
+      curvature along the tube's length); `composeWorldPosition` renormalizes
+      only the component *perpendicular* to the axis, carrying the axial
+      coordinate through unchanged. Unit tested (frame correctness off-axis,
+      on-axis fallback, exact radius round-trip from the axis line — not
+      from `center` — and exact axial-coordinate preservation through
+      `composeWorldPosition`).
+- [x] `water-domain-glsl.ts`: additive `uCylinderAxis`/`uCylinderCenter`/
+      `uCylinderRadius` uniforms and a `WATER_DOMAIN_CYLINDER` branch in
+      `waterComposeWorldPosition`, mirroring the TS formula exactly.
+      `waterComposeWorldNormal` needed no changes — already domain-agnostic.
+- [x] `/water-cylinder-poc` demo: same grid/material/Gerstner/shading
+      infrastructure as `/water-sphere-poc`, `CylinderWaterDomain` (axis
+      `+Y`, radius 500m, matching the sphere demo's scale so the same
+      ring-count-cap margin applies) instead of a sphere, an open-ended
+      bumpy `CylinderGeometry` "ground" wall (bumps decrease radius —
+      "up" toward the axis, opposite sign from the sphere ground's islands)
+      feeding `WaterDepthPrepass`, camera framing and `upVector` derived
+      from the domain's own frame at a bump, same as Phase 1c.
+
+Exit gate: continuous, seam/pop/swim-free coverage while orbiting around the
+circumference and flying along the tube's length, user-verified in
+`/water-cylinder-poc`.
+
+Out of scope for this phase (deferred, not forgotten): same list as Phase
+1c's out-of-scope bullets, plus end-cap geometry (the domain itself is an
+infinite tube; the demo's ground mesh is just finite for visual framing).
 
 ### Phase 2 — Events, underwater, waterline
 
@@ -853,3 +947,147 @@ waterline never depended on the expensive rendering-only detail layer.
   depth works" (log-depth fix) — both confirmed live, not just build-checked.
   This resolves both the "depth-texture without composer" and "logarithmic
   depth buffer" open questions above.
+
+### 2026-07-23 — Phase 1c sphere domain built and verified
+
+- Investigated reusing 004's `ITerrainSurfaceDomain<TAddress>` per Phase 1a's
+  domain note as originally written; found it conflicts with Phase 1a's own
+  no-skirts decision (terrain's contract is shaped around discrete
+  quadtree+skirt patches) and can't carry Gerstner's horizontal displacement
+  (only a scalar elevation). Recorded the revision in Phase 1a's domain note
+  and built a lightweight water-only `WaterSurfaceDomain` instead — see
+  Phase 1c above for the design (continuously-recentring local tangent frame;
+  camera always projects to local `(0, 0)`, so the existing
+  `computeWaterLodLevels` ring-placement math needed zero changes).
+- Added `water/core/water-domain.ts` (`PlaneWaterDomain`, `SphereWaterDomain`)
+  and `water/core/water-domain-glsl.ts` (`waterComposeWorldPosition`,
+  `waterComposeWorldNormal`), both exported from `public-api.ts`.
+- Caught one correctness bug during design, before it ever ran: the detail-
+  normal chop (`WATER_DETAIL_NORMAL_GLSL`) assumes a near-vertical base
+  normal, which only holds in world space for the plane domain. For the
+  sphere it only holds in the *local* tangent frame away from the "north"
+  point. Fixed by keeping the Gerstner normal in local space through the
+  fragment shader (`vLocalNormal`/`vLocalXZ` varyings), perturbing it there,
+  and composing to world space via `waterComposeWorldNormal` only as the
+  final step.
+- Built `/water-sphere-poc`: 500m demo sphere, 3-island bumpy ground feeding
+  `WaterDepthPrepass`, ring-count capped at 4 (vs. the plane demo's 7) to
+  keep the tangent-plane approximation's margin safe relative to the
+  sphere's circumference.
+- User caught a real UX bug in the first pass: initial camera
+  position/target were hand-picked approximate tuples, and `<orbitControls>`
+  had no `[upVector]` binding at all — meaningless on a sphere, where "up"
+  varies by location and orbit controls default to world +Y. Fixed by
+  deriving `initialCameraPosition`/`initialTarget`/`initialUpVector` from
+  `SphereWaterDomain.getLocalFrame()` at the first island's surface point,
+  and binding `upVector` on the template.
+- **User-verified in-browser 2026-07-23**: "i tested it works ok" — confirmed
+  live after the camera-framing/upVector fix.
+
+### 2026-07-23 — Phase 1d cylinder domain built; navigation/rendering issues reported, not yet resolved
+
+Built `CylinderWaterDomain` (`water/core/water-domain.ts`), the
+`WATER_DOMAIN_CYLINDER` branch in `water-domain-glsl.ts`, unit tests, and the
+`/water-cylinder-poc` demo, following the same pattern as Phase 1c (see the
+Phase 1d checklist above). `npm run build:triangular-engine` and
+`ng build demo-app` both succeeded cleanly after the initial build. Unit
+tests were written but never executed in this session (see below) — a
+standalone Node script (not karma) was used partway through to numerically
+check the domain math instead.
+
+User then tested `/water-cylinder-poc` live and reported a sequence of
+distinct navigation/rendering problems. Trace of what was reported, what was
+investigated, and what was actually changed, in order:
+
+1. **"camera rotatiin is moving things around weirdly. potentially same
+   issue we've had with the water material demo page with the ground and the
+   water not aligned."** Investigated `EngineService.tick()`'s event order
+   (`tick$` → `postTick$` → `render()`) against `OrbitControlsComponent`'s
+   `orbit.update()` call (subscribed on `postTick$`, applied via a
+   later-constructed child component). Concluded water's per-frame domain-
+   frame/grid-instance update, subscribed on `tick$`, reads `camera.position`
+   one frame stale relative to `orbit.update()`'s result for that frame, and
+   that moving the subscription to `postTick$` would not reliably fix it
+   (RxJS `Subject` calls subscribers in subscription order; the page
+   component's own constructor — and its `postTick$` subscription — runs
+   before Angular instantiates the `<orbitControls>` child). Identified that
+   fixing this properly would need a new `EngineService` hook (e.g.
+   `beforeRender$`, fired after `postTick$.next()` and before `render()`).
+   **No code was changed for this.** Asked the user whether this matched
+   what they meant via `AskUserQuestion`; they answered "Water slides
+   relative to ground."
+2. User clarified further: **"its like when i zoom out and rotate, the
+   water goes all the way through the cilinder, instead fo being inside it
+   fixed, it goes in and out of it as i rotate the camera, kinda in opposite
+   direction. also the cilinder needs to be double sided the mesh."**
+   Re-examined the ground mesh: the camera sits *inside* the concave tube,
+   so for the default single-sided (`FrontSide`) `MeshStandardMaterial` on a
+   standard-winding `CylinderGeometry`, every visible wall face is a
+   backface (the camera is always on the axis-side of every wall point,
+   universally, not just nearby — confirmed by a dot-product check by hand).
+   **Fix applied**: added `side: DoubleSide` to the ground mesh's
+   `MeshStandardMaterial` (the water `ShaderMaterial` already had
+   `DoubleSide`, carried over correctly from the Phase 1c demo).
+   `ng build demo-app` succeeded after this change. This fix is believed
+   correct and necessary but has not been independently confirmed by the
+   user as sufficient on its own, since further issues were reported before
+   isolated confirmation.
+3. User reported a third, distinct symptom: **"the water is always moving
+   on the inner axis through the cylinder, like a nut and a bolt. but it
+   moves fast as i rotate the camera, either going all the way out one end
+   of the other."** Diagnosed as a consequence of `CYLINDER_AXIS` being
+   vertical (`(0, 1, 0)`): for a vertical-axis cylinder, the local "up"
+   (radially inward) has exactly zero world-Y component at *every* point on
+   the wall, with no exceptions (a mathematical property of the
+   configuration, not a location-dependent edge case). `AdvancedOrbitControls
+   .setUpVector` (`third-person-controls.model.ts`) makes azimuthal drag
+   rotate the camera around whatever `upVector` it is given, so a purely
+   horizontal up vector makes ordinary horizontal dragging sweep the camera
+   through the tube's full axial length. **Fix attempted**: reoriented
+   `CYLINDER_AXIS` to horizontal (`(1, 0, 0)`), added a `GROUND_ROTATION_RAD
+   = -Math.PI / 2` bake-in rotation (`geometry.rotateZ(...)`) so the ground
+   `CylinderGeometry`'s native Y-axis orientation lands along world +X, a
+   `nativeCylinderPointToWorld()` helper to keep the initial camera-framing
+   reference point consistent with that same rotation, and moved the first
+   bump to `angleRad: 0` (the tube's "bottom" after rotation, giving a
+   near-`(0,1,0)` starting up vector). **This change was written to
+   `water-cylinder-poc-page.component.ts` but the follow-up `ng build
+   demo-app` to verify it compiles was interrupted/rejected by the user
+   before running — this fix is UNVERIFIED, not confirmed to build or to
+   resolve the reported symptom.**
+4. User then reported a fourth symptom, explicitly from a different camera
+   regime: **"if im looking at the cylinder from far away, and move from
+   center to the left, the water moves to the left, and it moves quick. on
+   the same inner axis aligned with the tube. coming out of the tube on the
+   left. same story about turning the camera the other direction."**
+   Re-derived the domain math by hand once more: `CylinderWaterDomain`'s
+   frame origin has an axial coordinate equal to `dot(camera - center,
+   axis)` — an exact, unamplified 1:1 linear function of the camera's own
+   position, confirmed via the same reasoning used in the Phase 1d
+   `composeWorldPosition` unit tests. Formed a hypothesis (not independently
+   confirmed against the running demo) that the reported behavior is an
+   inherent consequence of two things each individually working as designed:
+   the water grid is a small local patch (≤ ~512m radius) that recenters
+   exactly on the camera every frame — the same technique Phase 1a/1c use,
+   neither of which render a full ocean/planet either — combined with
+   `orbitControls`' pan speed scaling with distance from target, so far from
+   the tube a small drag pans the camera (and therefore the patch) by very
+   large world distances. **No code was changed in response to this report.**
+   Proposed three options via `AskUserQuestion` (clamp max orbit distance;
+   document as an out-of-scope limitation; treat far-away viewing as a real
+   requirement needing a different approach). The user did not select an
+   option and instead directed that this log entry be written and that no
+   further solutions be proposed in this turn.
+
+**Current state, factually, as of this entry**: `CylinderWaterDomain`'s core
+math (frame + compose) has been verified by hand and via a standalone
+numeric script, not via the karma unit tests (never executed this session).
+The ground mesh's `DoubleSide` fix is applied and build-verified. The
+horizontal-axis reorientation (`CYLINDER_AXIS`, `GROUND_ROTATION_RAD`,
+`nativeCylinderPointToWorld`) is applied to the source file but **not
+build-verified**. None of the four reported navigation/rendering symptoms
+have been confirmed fixed by the user in-browser. The one-frame-lag
+hypothesis from report 1 and the far-away-panning hypothesis from report 4
+are both unconfirmed against the actual running demo — they are reasoned
+explanations, not verified root causes. Phase 1d's exit gate (continuous,
+seam/pop/swim-free coverage, user-verified) is **not met**.

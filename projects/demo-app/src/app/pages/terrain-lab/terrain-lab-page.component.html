@@ -121,7 +121,7 @@
         <span>Reference grid: 100 m below datum</span>
         <span>Each outlined tile is one mesh</span>
         <span>Rebase owner: example/app</span>
-        <span>Move: WASD · thrust/jump: Space</span>
+        <span>Move: WASD · sprint: Shift · thrust/jump: Space</span>
       </div>
     </section>
   </ng-template>
@@ -134,5 +134,9 @@
   />
   <ambientLight [intensity]="1.5" />
   <directionalLight [position]="[500, 900, 400]" [intensity]="2.4" />
-  <jolt-physics [gravity]="[0, 0, 0]" [debug]="physicsDebug()" />
+  <jolt-physics
+    [gravity]="[0, 0, 0]"
+    [debug]="physicsDebug()"
+    [debugSleepingBodyColor]="3801071"
+  />
 </scene>

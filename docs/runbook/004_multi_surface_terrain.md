@@ -383,8 +383,29 @@ broadly stage this workspace.
 - The adapter creates streamed static triangle-mesh bodies from patch surface
   geometry only. Visual LOD skirts are deliberately excluded from collision.
 - Terrain Lab now maintains a separate, smaller physics cut at maximum LOD 1
-  and resolution 12, independently of the visual cut at maximum LOD 3.
+  and resolution 24, independently of the visual cut at maximum LOD 3.
 - Added a dynamic capsule proof controlled with WASD and Space. Gravity/up are
   plane down/up, sphere centre/outward, and cylinder radial outward/inward.
 - The common triangle backend supports all domains. A Jolt height-field backend
   remains an optional future optimization for plane patches only.
+
+### Physics fall-through handoff
+
+- Symptom: the capsule repeatedly falls through particular steep/mountain-side
+  locations, including at walking speed or while sliding or falling. CCD did not solve it.
+- Added hold-Shift 3× sprint and Jolt linear-cast continuous collision detection.
+  Physics mesh resolution now matches the visual mesh at 24 quads per patch.
+- Physics debug now hides the Three.js terrain, refreshes as bodies stream, and
+  draws static terrain colliders bright cyan. Debug colors are configurable on
+  `jolt-physics`.
+- Mesh inspection found consistent inhabited-side winding; reversed triangles
+  are not the leading explanation.
+- Leading hypothesis: real cracks at mixed LOD joins. Physics uses the adaptive
+  L0/L1 cut but excludes visual skirts; fine edge samples need not lie on the
+  coarse edge approximation, especially in mountains.
+- Next diagnostic: reproduce with cyan physics-only wireframe and confirm the
+  failure lies on a large/small triangle boundary.
+- Preferred fix if confirmed: stream a uniform-detail, watertight collider
+  neighborhood around the character and keep mixed-LOD transitions outside the
+  playable physics radius. Avoid two-sided collision or physics skirts as the
+  primary fix because they can mask holes or create snagging walls.

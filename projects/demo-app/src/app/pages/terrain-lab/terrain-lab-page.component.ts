@@ -55,9 +55,10 @@ const DEFAULT_GENERATION_BUDGET = 12;
 const MAX_GENERATION_BUDGET = 32;
 const MAX_LOD_LEVEL = 3;
 const PHYSICS_MAX_LOD_LEVEL = 1;
-const PHYSICS_PATCH_RESOLUTION = 12;
+const PHYSICS_PATCH_RESOLUTION = PATCH_RESOLUTION;
 const CHARACTER_GRAVITY_MPS2 = 24;
 const CHARACTER_SPEED_MPS = 36;
+const CHARACTER_SPRINT_MULTIPLIER = 3;
 const LOD_SKIRT_DEPTH_M = 35;
 const LARGE_COORDINATE_M = 1_000_000_000;
 const ORIENTATION_GRID_SIZE_M = 20_000;
@@ -324,6 +325,7 @@ export class TerrainLabPageComponent {
 
   togglePhysicsDebug(): void {
     this.physicsDebug.update((enabled) => !enabled);
+    this.terrain.visible = !this.physicsDebug();
   }
 
   toggleWireframe(): void {
@@ -535,8 +537,14 @@ export class TerrainLabPageComponent {
     if (this.pressedKeys.has('KeyS')) movement.sub(cameraForward);
     if (this.pressedKeys.has('KeyD')) movement.add(right);
     if (this.pressedKeys.has('KeyA')) movement.sub(right);
-    if (movement.lengthSq() > 0)
-      movement.normalize().multiplyScalar(CHARACTER_SPEED_MPS);
+    if (movement.lengthSq() > 0) {
+      const speed =
+        CHARACTER_SPEED_MPS *
+        (this.pressedKeys.has('ShiftLeft') || this.pressedKeys.has('ShiftRight')
+          ? CHARACTER_SPRINT_MULTIPLIER
+          : 1);
+      movement.normalize().multiplyScalar(speed);
+    }
     velocity.copy(movement).addScaledVector(up, verticalSpeed);
     if (this.pressedKeys.has('Space')) velocity.addScaledVector(up, 0.8);
     const joltVelocity = new Jolt.Vec3(velocity.x, velocity.y, velocity.z);
@@ -686,6 +694,7 @@ export class TerrainLabPageComponent {
     );
     settings.mGravityFactor = 0;
     settings.mAngularDamping = 1;
+    settings.mMotionQuality = Jolt.EMotionQuality_LinearCast;
     const body = metadata.bodyInterface.CreateBody(settings);
     metadata.bodyInterface.AddBody(body.GetID(), Jolt.EActivation_Activate);
     this.characterBody = body;

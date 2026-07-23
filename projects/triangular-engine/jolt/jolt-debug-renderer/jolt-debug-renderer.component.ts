@@ -47,6 +47,8 @@ export class JoltDebugRendererComponent implements OnDestroy {
   readonly linesOnly = input<boolean>(true);
   readonly enabled = input<boolean>(true);
   readonly constraintColor = input<number>(0xff0000);
+  readonly activeBodyColor = input<number>(0xffff00);
+  readonly sleepingBodyColor = input<number>(0x4b0010);
 
   private initialized = false;
 
@@ -83,7 +85,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
   private fallbackActiveLine?: LineSegments;
   private fallbackSleepingLine?: LineSegments;
   private fallbackConstraintsLine?: LineSegments;
-  private fallbackEdgesByShapePtr = new Map<number, EdgesGeometry>();
+  private fallbackEdgesByBodyId = new Map<number, EdgesGeometry>();
 
   constructor() {
     effect(() => {
@@ -114,6 +116,8 @@ export class JoltDebugRendererComponent implements OnDestroy {
       this.engineService.scene.remove(this.fallbackSleepingLine);
     if (this.fallbackConstraintsLine)
       this.engineService.scene.remove(this.fallbackConstraintsLine);
+    for (const edges of this.fallbackEdgesByBodyId.values()) edges.dispose();
+    this.fallbackEdgesByBodyId.clear();
   }
 
   private async initOnceJoltReady() {
@@ -499,16 +503,13 @@ export class JoltDebugRendererComponent implements OnDestroy {
       this.fallbackConstraintsLine.visible = false;
   }
 
-  private getFallbackEdgesGeometry(shape: any): EdgesGeometry {
-    const ptr = (Jolt as any).getPointer
-      ? (Jolt as any).getPointer(shape)
-      : undefined;
-    const key = ptr ?? shape;
-    let edges = this.fallbackEdgesByShapePtr.get(key as number);
+  private getFallbackEdgesGeometry(bodyId: number, shape: any): EdgesGeometry {
+    let edges = this.fallbackEdgesByBodyId.get(bodyId);
     if (!edges) {
       const triGeom = createMeshForShape(shape);
       edges = new EdgesGeometry(triGeom);
-      this.fallbackEdgesByShapePtr.set(key as number, edges);
+      triGeom.dispose();
+      this.fallbackEdgesByBodyId.set(bodyId, edges);
     }
     return edges;
   }
@@ -551,11 +552,21 @@ export class JoltDebugRendererComponent implements OnDestroy {
     physicsSystem.GetBodies(bodyIds);
     const bodyLock = physicsSystem.GetBodyLockInterfaceNoLock();
     const allBodies: Jolt.Body[] = [];
+    const liveBodyIds = new Set<number>();
     for (let index = 0; index < bodyIds.size(); index++) {
       const body = bodyLock.TryGetBody(bodyIds.at(index));
-      if (body) allBodies.push(body);
+      if (body) {
+        allBodies.push(body);
+        liveBodyIds.add(body.GetID().GetIndexAndSequenceNumber());
+      }
     }
     Jolt.destroy(bodyIds);
+
+    for (const [bodyId, edges] of this.fallbackEdgesByBodyId) {
+      if (liveBodyIds.has(bodyId)) continue;
+      edges.dispose();
+      this.fallbackEdgesByBodyId.delete(bodyId);
+    }
 
     // Aggregate all shapes' edges into separate buffers based on active/sleep state
     for (const body of allBodies) {
@@ -571,7 +582,10 @@ export class JoltDebugRendererComponent implements OnDestroy {
         const shape = body.GetShape();
         if (!shape) continue;
 
-        const edges = this.getFallbackEdgesGeometry(shape);
+        const edges = this.getFallbackEdgesGeometry(
+          body.GetID().GetIndexAndSequenceNumber(),
+          shape,
+        );
         const arr = (edges.getAttribute('position') as BufferAttribute)
           .array as ArrayLike<number>;
 
@@ -642,7 +656,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
     } else {
       if (!this.fallbackActiveLine) {
         const material = new LineBasicMaterial({
-          color: 0xffff00, // Bright yellow
+          color: this.activeBodyColor(),
           depthTest: false,
           depthWrite: false,
         });
@@ -669,6 +683,8 @@ export class JoltDebugRendererComponent implements OnDestroy {
           attr.needsUpdate = true;
         }
         this.fallbackActiveLine.visible = true;
+        const material = this.fallbackActiveLine.material as LineBasicMaterial;
+        material.color.set(this.activeBodyColor());
       }
     }
 
@@ -678,7 +694,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
     } else {
       if (!this.fallbackSleepingLine) {
         const material = new LineBasicMaterial({
-          color: 0x4b0010, // Dark burgundy
+          color: this.sleepingBodyColor(),
           depthTest: false,
           depthWrite: false,
         });
@@ -705,6 +721,9 @@ export class JoltDebugRendererComponent implements OnDestroy {
           attr.needsUpdate = true;
         }
         this.fallbackSleepingLine.visible = true;
+        const material = this.fallbackSleepingLine
+          .material as LineBasicMaterial;
+        material.color.set(this.sleepingBodyColor());
       }
     }
 

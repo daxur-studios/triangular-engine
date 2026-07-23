@@ -94,4 +94,11 @@ export const routes: Routes = [
         ({ WaterSpherePocPageComponent }) => WaterSpherePocPageComponent,
       ),
   },
+  {
+    path: 'water-cylinder-poc',
+    loadComponent: () =>
+      import('./pages/water-cylinder-poc/water-cylinder-poc-page.component').then(
+        ({ WaterCylinderPocPageComponent }) => WaterCylinderPocPageComponent,
+      ),
+  },
 ];

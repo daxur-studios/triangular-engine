@@ -1,4 +1,4 @@
-import { Vector3 } from 'three';
+import { Vector2, Vector3 } from 'three';
 
 /**
  * Local tangent frame at some reference point on a water body's surface:
@@ -36,6 +36,12 @@ export interface WaterSurfaceDomain {
     heightAlongNormal: number,
     out?: Vector3,
   ): Vector3;
+  getSurfaceXZ?(
+    frame: WaterLocalFrame,
+    localX: number,
+    localZ: number,
+    out?: Vector2,
+  ): Vector2;
 }
 
 export interface PlaneWaterDomainOptions {
@@ -63,7 +69,7 @@ export class PlaneWaterDomain implements WaterSurfaceDomain {
     };
   }
 
-  getLocalFrame(): WaterLocalFrame {
+  getLocalFrame(_referencePosition?: Vector3): WaterLocalFrame {
     return this.frame;
   }
 
@@ -79,6 +85,15 @@ export class PlaneWaterDomain implements WaterSurfaceDomain {
       .addScaledVector(frame.tangentU, localX)
       .addScaledVector(frame.tangentV, localZ)
       .addScaledVector(frame.normal, heightAlongNormal);
+  }
+
+  getSurfaceXZ(
+    frame: WaterLocalFrame,
+    localX: number,
+    localZ: number,
+    out = new Vector2(),
+  ): Vector2 {
+    return out.set(frame.origin.x + localX, frame.origin.z + localZ);
   }
 }
 
@@ -154,4 +169,133 @@ export class SphereWaterDomain implements WaterSurfaceDomain {
       .add(this.center);
     return out;
   }
+
+  getSurfaceXZ(
+    frame: WaterLocalFrame,
+    localX: number,
+    localZ: number,
+    out = new Vector2(),
+  ): Vector2 {
+    const flatPos = new Vector3()
+      .copy(frame.origin)
+      .addScaledVector(frame.tangentU, localX)
+      .addScaledVector(frame.tangentV, localZ)
+      .sub(this.center);
+    const dir = flatPos.normalize();
+    const lat = Math.asin(Math.max(-1, Math.min(1, dir.y)));
+    const lon = Math.atan2(dir.z, dir.x);
+    return out.set(this.radiusM * lon, this.radiusM * lat);
+  }
 }
+
+const CYLINDER_AXIS_EPSILON_SQ = 1e-12;
+
+export interface CylinderWaterDomainOptions {
+  /** World-space unit vector along the cylinder's centerline. Defaults to +Y. */
+  readonly axis?: Vector3;
+  /** World-space point on the centerline. Defaults to the origin. */
+  readonly center?: Vector3;
+}
+
+/**
+ * Curves the flat CDLOD grid onto the *inside* of a cylinder wall (an
+ * O'Neill habitat, not a planet): `normal` points inward, toward the axis
+ * — the opposite of `SphereWaterDomain`, matching how centrifugal "gravity"
+ * on a spinning cylinder's interior pushes outward against the wall, so
+ * "up" is toward the centerline. `getLocalFrame` finds the point nearest
+ * the reference position on the wall (so the reference position's own
+ * projection onto tangentU/tangentV is still exactly zero, same trick as
+ * the sphere). `composeWorldPosition` renormalizes only the component
+ * *perpendicular* to the axis — a cylinder has zero curvature along its
+ * length, so the axial coordinate passes through unchanged, unlike the
+ * sphere's fully-renormalized composition.
+ */
+export class CylinderWaterDomain implements WaterSurfaceDomain {
+  readonly kind = 'cylinder';
+
+  readonly axis: Vector3;
+  readonly center: Vector3;
+
+  constructor(
+    readonly radiusM: number,
+    options: CylinderWaterDomainOptions = {},
+  ) {
+    if (!Number.isFinite(radiusM) || radiusM <= 0) {
+      throw new RangeError('CylinderWaterDomain radius must be positive and finite.');
+    }
+    this.axis = options.axis?.clone().normalize() ?? new Vector3(0, 1, 0);
+    this.center = options.center?.clone() ?? new Vector3(0, 0, 0);
+  }
+
+  getLocalFrame(referencePosition: Vector3): WaterLocalFrame {
+    const axialOffset = new Vector3()
+      .subVectors(referencePosition, this.center)
+      .dot(this.axis);
+    const axisPoint = new Vector3()
+      .copy(this.axis)
+      .multiplyScalar(axialOffset)
+      .add(this.center);
+
+    let radialVector = new Vector3().subVectors(referencePosition, axisPoint);
+    if (radialVector.lengthSq() < CYLINDER_AXIS_EPSILON_SQ) {
+      const reference =
+        Math.abs(this.axis.y) < 0.9 ? referenceUp : referenceRight;
+      radialVector = new Vector3().crossVectors(this.axis, reference);
+    }
+    const radialDir = radialVector.normalize();
+
+    const origin = new Vector3()
+      .copy(radialDir)
+      .multiplyScalar(this.radiusM)
+      .add(axisPoint);
+    const normal = radialDir.clone().negate();
+    const tangentU = this.axis.clone();
+    const tangentV = new Vector3().crossVectors(this.axis, radialDir).normalize();
+    return { origin, normal, tangentU, tangentV };
+  }
+
+  composeWorldPosition(
+    frame: WaterLocalFrame,
+    localX: number,
+    localZ: number,
+    heightAlongNormal: number,
+    out = new Vector3(),
+  ): Vector3 {
+    const flatPos = new Vector3()
+      .copy(frame.origin)
+      .addScaledVector(frame.tangentU, localX)
+      .addScaledVector(frame.tangentV, localZ)
+      .sub(this.center);
+    const axialComponent = flatPos.dot(this.axis);
+    const radialVector = flatPos.addScaledVector(this.axis, -axialComponent);
+    const direction = radialVector.normalize();
+    const displacedRadius = this.radiusM - heightAlongNormal;
+    return out
+      .copy(this.center)
+      .addScaledVector(this.axis, axialComponent)
+      .addScaledVector(direction, displacedRadius);
+  }
+
+  getSurfaceXZ(
+    frame: WaterLocalFrame,
+    localX: number,
+    localZ: number,
+    out = new Vector2(),
+  ): Vector2 {
+    const flatPos = new Vector3()
+      .copy(frame.origin)
+      .addScaledVector(frame.tangentU, localX)
+      .addScaledVector(frame.tangentV, localZ)
+      .sub(this.center);
+    const axialComponent = flatPos.dot(this.axis);
+    const radialVector = flatPos.addScaledVector(this.axis, -axialComponent);
+    const direction = radialVector.normalize();
+    const reference =
+      Math.abs(this.axis.y) < 0.9 ? referenceUp : referenceRight;
+    const refU = new Vector3().crossVectors(reference, this.axis).normalize();
+    const refV = new Vector3().crossVectors(this.axis, refU);
+    const angle = Math.atan2(direction.dot(refV), direction.dot(refU));
+    return out.set(axialComponent, this.radiusM * angle);
+  }
+}
+

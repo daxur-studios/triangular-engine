@@ -1,5 +1,20 @@
 import { Vector3 } from 'three';
-import { PlaneWaterDomain, SphereWaterDomain } from './water-domain';
+import {
+  CylinderWaterDomain,
+  PlaneWaterDomain,
+  SphereWaterDomain,
+} from './water-domain';
+
+/** Perpendicular distance from `point` to the infinite line through `center` along unit `axis`. */
+function distanceFromAxisLine(
+  point: Vector3,
+  center: Vector3,
+  axis: Vector3,
+): number {
+  const relative = new Vector3().subVectors(point, center);
+  const axialComponent = relative.dot(axis);
+  return relative.addScaledVector(axis, -axialComponent).length();
+}
 
 describe('PlaneWaterDomain', () => {
   it('reproduces the legacy flat formula exactly', () => {
@@ -69,3 +84,84 @@ describe('SphereWaterDomain', () => {
     expect(() => new SphereWaterDomain(-5)).toThrowError();
   });
 });
+
+describe('CylinderWaterDomain', () => {
+  it('finds the nearest wall point as the frame origin, radius from the axis line', () => {
+    const domain = new CylinderWaterDomain(100);
+    const frame = domain.getLocalFrame(new Vector3(150, 30, 0));
+    expect(frame.origin.distanceTo(new Vector3(100, 30, 0))).toBeCloseTo(0);
+    expect(frame.normal.distanceTo(new Vector3(-1, 0, 0))).toBeCloseTo(0);
+  });
+
+  it('gives the reference position zero projection onto the tangent basis', () => {
+    const domain = new CylinderWaterDomain(100);
+    const referencePositions = [
+      new Vector3(150, 30, 0),
+      new Vector3(-70, -400, 60),
+      new Vector3(0.02, 250, -0.03),
+      new Vector3(-99.99, 800, -1.5),
+    ];
+    for (const referencePosition of referencePositions) {
+      const frame = domain.getLocalFrame(referencePosition);
+      const toReference = new Vector3().subVectors(
+        referencePosition,
+        frame.origin,
+      );
+      expect(toReference.dot(frame.tangentU)).toBeCloseTo(0, 6);
+      expect(toReference.dot(frame.tangentV)).toBeCloseTo(0, 6);
+    }
+  });
+
+  it('falls back to a well-defined orthonormal basis exactly on the centerline', () => {
+    const domain = new CylinderWaterDomain(100);
+    const frame = domain.getLocalFrame(new Vector3(0, 250, 0));
+    expect(frame.tangentU.length()).toBeCloseTo(1);
+    expect(frame.tangentV.length()).toBeCloseTo(1);
+    expect(frame.tangentU.dot(frame.tangentV)).toBeCloseTo(0);
+    expect(frame.tangentU.dot(frame.normal)).toBeCloseTo(0);
+    expect(frame.tangentV.dot(frame.normal)).toBeCloseTo(0);
+    expect(distanceFromAxisLine(frame.origin, domain.center, domain.axis)).toBeCloseTo(100);
+  });
+
+  it('carries the axial coordinate through unchanged (zero curvature along the axis)', () => {
+    const axis = new Vector3(0, 1, 0);
+    const center = new Vector3(5, -10, 15);
+    const domain = new CylinderWaterDomain(200, { axis, center });
+    const frame = domain.getLocalFrame(new Vector3(305, 40, 15));
+    const world = domain.composeWorldPosition(frame, 37.5, -12, 2);
+    const originAxialOffset = new Vector3()
+      .subVectors(frame.origin, center)
+      .dot(axis);
+    const worldAxialOffset = new Vector3().subVectors(world, center).dot(axis);
+    expect(worldAxialOffset).toBeCloseTo(originAxialOffset + 37.5, 6);
+  });
+
+  it('renormalizes the perpendicular component onto radius - height from the axis line', () => {
+    const axis = new Vector3(1, 0, 0);
+    const center = new Vector3(0, 0, 0);
+    const domain = new CylinderWaterDomain(500, { axis, center });
+    const frame = domain.getLocalFrame(new Vector3(80, 0, 520));
+    const world = domain.composeWorldPosition(frame, -60, 90, 4);
+    expect(distanceFromAxisLine(world, center, axis)).toBeCloseTo(496);
+  });
+
+  it('computes surface XZ coordinates deterministically', () => {
+    const axis = new Vector3(1, 0, 0);
+    const center = new Vector3(0, 0, 0);
+    const domain = new CylinderWaterDomain(500, { axis, center });
+    const frame = domain.getLocalFrame(new Vector3(80, 0, 520));
+
+    const surfXZ1 = domain.getSurfaceXZ(frame, 0, 0);
+    const surfXZ2 = domain.getSurfaceXZ(frame, 50, 100);
+
+    expect(Number.isFinite(surfXZ1.x)).toBe(true);
+    expect(Number.isFinite(surfXZ1.y)).toBe(true);
+    expect(surfXZ2.x - surfXZ1.x).toBeCloseTo(50, 4);
+  });
+
+  it('rejects a non-positive radius', () => {
+    expect(() => new CylinderWaterDomain(0)).toThrowError();
+    expect(() => new CylinderWaterDomain(-5)).toThrowError();
+  });
+});
+

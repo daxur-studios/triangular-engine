@@ -4,6 +4,9 @@
   <ng-content></ng-content>
 
   @if (debug()) {
-    <jolt-debug-renderer />
+    <jolt-debug-renderer
+      [activeBodyColor]="debugActiveBodyColor()"
+      [sleepingBodyColor]="debugSleepingBodyColor()"
+    />
   }
 }

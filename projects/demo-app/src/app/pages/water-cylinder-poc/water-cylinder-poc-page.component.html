@@ -1,0 +1,85 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Water cylinder POC controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small
+            >triangular-engine/water — Phase 1d cylinder domain spike</small
+          >
+        </div>
+        <strong
+          >Same Phase 1a/1b grid and material, curved onto the inside of a
+          cylinder</strong
+        >
+      </header>
+
+      <p class="blurb">
+        <code>CylinderWaterDomain</code> curves the unchanged flat CDLOD grid
+        onto the inner wall of a {{ cylinderRadiusM }}m O'Neill-habitat tube via
+        a continuously-recentring local tangent frame — the opposite curvature
+        from the sphere demo, water rises up and around overhead rather than
+        falling away toward a horizon. Orbit and fly along the tube's length,
+        and watch for popping, swimming, or cracks.
+      </p>
+
+      <nav aria-label="Wave preset">
+        @for (key of presetKeys; track key) {
+          <button
+            [class.active]="activePreset() === key"
+            (click)="selectPreset(key)"
+          >
+            {{ presetLabels[key] }}
+          </button>
+        }
+      </nav>
+
+      <div class="actions">
+        <label class="slider">
+          Water depth: {{ waterLevel() }}m
+          <input
+            type="range"
+            [min]="minWaterLevel"
+            [max]="maxWaterLevel"
+            step="0.5"
+            [value]="waterLevel()"
+            (input)="setWaterLevel($any($event.target).value)"
+          />
+        </label>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="detailChop()"
+            (change)="toggleDetailChop()"
+          />
+          Detail chop
+        </label>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="shoreFade()"
+            (change)="toggleShoreFade()"
+          />
+          Shore fade / depth tint
+        </label>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="wireframe()"
+            (change)="toggleWireframe()"
+          />
+          Wireframe
+        </label>
+      </div>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="initialCameraPosition"
+    [target]="initialTarget"
+    [upVector]="initialUpVector"
+    [near]="0.1"
+  />
+  <ambientLight [intensity]="1.6" />
+  <directionalLight [position]="[300, 400, 200]" [intensity]="2.5" />
+</scene>

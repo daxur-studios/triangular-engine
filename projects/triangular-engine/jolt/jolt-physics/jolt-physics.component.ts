@@ -64,6 +64,8 @@ export class JoltPhysicsComponent {
 
   readonly debug = input<boolean>();
   readonly debug$ = toObservable(this.debug);
+  readonly debugActiveBodyColor = input<number>(0xffff00);
+  readonly debugSleepingBodyColor = input<number>(0x4b0010);
   //#endregion
 
   //#region View Children
