@@ -109,6 +109,29 @@ describe('SphereWaterDomain', () => {
     }
   });
 
+  it('preserves its radius from gameplay through planetary scales', () => {
+    for (const radius of [50, 500, 6_371_000]) {
+      const center = new Vector3(radius * 0.2, -radius * 0.1, radius * 0.05);
+      const domain = new SphereWaterDomain(radius, { center });
+      const camera = center
+        .clone()
+        .add(new Vector3(radius * 0.4, radius * 1.2, -radius * 0.3));
+      const frame = domain.getLocalFrame(camera);
+      const height = radius * 0.000_001;
+      const world = domain.composeWorldPosition(
+        frame,
+        radius * 0.03,
+        -radius * 0.02,
+        height,
+      );
+
+      expect(world.distanceTo(center) / (radius + height)).toBeCloseTo(1, 10);
+      const surfaceXZ = domain.getSurfaceXZ(frame, radius * 0.03, -radius * 0.02);
+      expect(Number.isFinite(surfaceXZ.x)).toBe(true);
+      expect(Number.isFinite(surfaceXZ.y)).toBe(true);
+    }
+  });
+
   it('rejects a non-positive radius', () => {
     expect(() => new SphereWaterDomain(0)).toThrowError();
     expect(() => new SphereWaterDomain(-5)).toThrowError();
@@ -233,6 +256,33 @@ describe('CylinderWaterDomain', () => {
 
     for (const coordinates of surfaceCoordinates.slice(1)) {
       expect(coordinates.distanceTo(surfaceCoordinates[0])).toBeCloseTo(0, 6);
+    }
+  });
+
+  it('preserves radial and axial coordinates through planetary scales', () => {
+    const axis = new Vector3(1, 0, 0);
+    for (const radius of [50, 500, 6_371_000]) {
+      const center = new Vector3(radius * 0.1, -radius * 0.05, radius * 0.2);
+      const domain = new CylinderWaterDomain(radius, { axis, center });
+      const camera = center
+        .clone()
+        .add(new Vector3(radius * 0.3, radius * 0.4, radius * 1.1));
+      const frame = domain.getLocalFrame(camera);
+      const localX = radius * 0.025;
+      const height = radius * 0.000_001;
+      const world = domain.composeWorldPosition(
+        frame,
+        localX,
+        -radius * 0.02,
+        height,
+      );
+      const frameAxial = frame.origin.clone().sub(center).dot(axis);
+      const worldAxial = world.clone().sub(center).dot(axis);
+
+      expect(
+        distanceFromAxisLine(world, center, axis) / (radius - height),
+      ).toBeCloseTo(1, 10);
+      expect((worldAxial - frameAxial) / localX).toBeCloseTo(1, 10);
     }
   });
 

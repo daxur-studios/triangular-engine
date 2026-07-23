@@ -17,3 +17,5 @@ export * from './core/water-domain';
 export * from './core/water-domain-glsl';
 export * from './rendering/procedural-normal-map';
 export * from './rendering/water-depth-prepass';
+export * from './rendering/water-quality';
+export * from './rendering/water-render-preset';

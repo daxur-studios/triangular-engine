@@ -569,11 +569,11 @@ verified behavior:
       composed world positions for a fixed surface sample. Prove that
       translating the camera may recycle patches but does not move a
       domain-anchored sample.
-- [ ] Exercise radii at `500m`, representative game scale, and planetary scale.
+- [x] Exercise radii at `500m`, representative game scale, and planetary scale.
       The algorithm must use local coordinates/floating-origin-compatible
       inputs so shader precision, LOD budgets and tangent approximation do not
       silently depend on the POC's small sphere.
-- [ ] Apply the same invariants to the inside-cylinder POC; a sphere-only patch
+- [x] Apply the same invariants to the inside-cylinder POC; a sphere-only patch
       is not an acceptable domain abstraction.
 
 Exit gate: on sphere and inside-cylinder, rotate-in-place produces no apparent
@@ -778,10 +778,10 @@ checkpoint, treat that as a renderer regression.
 
 #### Checklist
 
-- [ ] `rendering/water-quality.ts`: `WaterQualityTier` type,
+- [x] `rendering/water-quality.ts`: `WaterQualityTier` type,
       `waterTierDefines(tier)` → `#define` map, per-tier default grid
       budgets; unit tests.
-- [ ] `rendering/water-render-preset.ts`: `WaterRenderPreset` +
+- [x] `rendering/water-render-preset.ts`: `WaterRenderPreset` +
       `WaterFarFieldOptions` + `WaterStylizeOptions`, the four shipped
       presets, `resolveWaterRenderPreset` deep merge. Unit tests: merge
       semantics, JSON round-trip, and every shipped preset's wave list
@@ -1673,3 +1673,20 @@ recentring" as the cause).
   coordinates across three translated local frames.
 - Migrated `/water-cylinder-poc` from `tick$` + `postTick$` and render-loop
   `detectChanges()` to the ordered `beforeRender$` hook used by the sphere.
+
+### 2026-07-23 — Cylinder verified; shared quality and preset contracts started
+
+- User verified `/water-cylinder-poc` visually, closing the cylinder-domain
+  stability item together with its fixed-sample regression and ordered
+  `beforeRender$` integration.
+- Added the orthogonal `WaterQualityTier` capability ladder and per-tier LOD
+  defaults. Low is flat/cheap, medium adds Gerstner + detail + depth, and high
+  adds the far-field/glint capability flags.
+- Added plain-data `WaterRenderPreset` contracts, field-wise override merging,
+  and the initial `performance`, `balanced`, `pixel`, and `cinematic` presets.
+- Added unit coverage for tier gating/budgets, preset merge semantics, JSON
+  round-tripping, and safe shipped Gerstner wave sets. The water entry point
+  exports the new API and the triangular-engine development build passes.
+- Extended the sphere and cylinder domain regressions across `50m`, `500m`,
+  and Earth-scale `6,371,000m` radii, checking normalized radius preservation,
+  finite surface coordinates, and cylinder axial-coordinate preservation.
