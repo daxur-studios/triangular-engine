@@ -79,6 +79,36 @@ describe('SphereWaterDomain', () => {
     expect(world.distanceTo(center)).toBeCloseTo(503);
   });
 
+  it('keeps a fixed surface sample stable while the camera frame moves', () => {
+    const radius = 500;
+    const domain = new SphereWaterDomain(radius);
+    const sampleDirection = new Vector3(0.72, 0.31, -0.62).normalize();
+    const cameraPositions = [
+      new Vector3(0, 650, 0),
+      new Vector3(520, 260, 300),
+      new Vector3(-410, 180, -470),
+    ];
+
+    const surfaceCoordinates = cameraPositions.map((cameraPosition) => {
+      const frame = domain.getLocalFrame(cameraPosition);
+      // Invert the tangent-plane projection used by composeWorldPosition for
+      // this fixed direction, as each camera frame represents it differently.
+      const projectedRadius = radius / sampleDirection.dot(frame.normal);
+      const flatSample = sampleDirection.clone().multiplyScalar(projectedRadius);
+      const fromOrigin = flatSample.sub(frame.origin);
+      const localX = fromOrigin.dot(frame.tangentU);
+      const localZ = fromOrigin.dot(frame.tangentV);
+      const world = domain.composeWorldPosition(frame, localX, localZ, 0);
+
+      expect(world.clone().normalize().distanceTo(sampleDirection)).toBeCloseTo(0, 6);
+      return domain.getSurfaceXZ(frame, localX, localZ);
+    });
+
+    for (const coordinates of surfaceCoordinates.slice(1)) {
+      expect(coordinates.distanceTo(surfaceCoordinates[0])).toBeCloseTo(0, 6);
+    }
+  });
+
   it('rejects a non-positive radius', () => {
     expect(() => new SphereWaterDomain(0)).toThrowError();
     expect(() => new SphereWaterDomain(-5)).toThrowError();
@@ -164,4 +194,3 @@ describe('CylinderWaterDomain', () => {
     expect(() => new CylinderWaterDomain(-5)).toThrowError();
   });
 });
-

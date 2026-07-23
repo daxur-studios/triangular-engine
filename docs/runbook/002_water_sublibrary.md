@@ -5,10 +5,10 @@
 - State: Planning
 - Target entry points: `triangular-engine/water` (core), `triangular-engine/water/jolt` (physics)
 - Initial renderer: WebGL
-- Last updated: 2026-07-23 (cylinder domain built, awaiting live verification;
-  sphere domain's exit gate retracted — water-follows-camera bug found
-  post-verification, two fix attempts unsuccessful so far; Phase 1e planned:
-  render presets + centralized `WaterSurfaceRenderer` + far-field sparkle)
+- Last updated: 2026-07-23 (consumer API and stabilization order decided;
+  sphere domain's exit gate remains retracted — water-follows-camera bug found
+  post-verification; stabilize domain anchoring before Phase 1e centralizes the
+  renderer, presets and far-field sparkle)
 
 ## TL;DR
 
@@ -46,24 +46,89 @@ A production-quality water system usable by any triangular-engine game
   built: plane (Phase 1a), sphere (Phase 1c), cylinder (Phase 1d) — see Phase
   1a's domain note and Phases 1c/1d below.
 
-Intended consumer API (selector names may change after prototyping):
+Intended consumer API:
 
 ```html
 <scene>
   <postprocessing-composer>
-    <water-underwater-effect />
+    <waterUnderwaterEffect />
   </postprocessing-composer>
 
-  <!-- Infinite/large ocean at a fixed sea level -->
-  <water-ocean [seaLevel]="0" [waves]="wavePreset" [quality]="'medium'" />
+  <!-- Canonical API: shape, cost and appearance are independent axes. -->
+  <waterSurface
+    [domain]="planetOcean"
+    quality="high"
+    effect="ocean"
+  />
 
-  <!-- Bounded lake -->
-  <water-lake [position]="[200, 42, -80]" [extent]="[120, 90]" [waves]="calmPreset" />
+  <waterSurface
+    [domain]="flatLake"
+    quality="low"
+    effect="calm"
+    [extent]="[120, 90]"
+  />
 
   <!-- Later phase -->
-  <water-river [spline]="riverSpline" [width]="14" [flowSpeed]="2.5" />
+  <waterRiver [spline]="riverSpline" [width]="14" [flowSpeed]="2.5" />
 </scene>
 ```
+
+Domain configuration is plain data and is reusable from templates, services and
+framework-free consumers:
+
+```ts
+planetOcean = waterSphere({
+  center: [0, 0, 0],
+  radius: 6_371_000,
+});
+
+flatLake = waterPlane({
+  height: 0,
+  infinite: false,
+});
+
+habitatWater = waterCylinder({
+  center: [0, 0, 0],
+  axis: [1, 0, 0],
+  radius: 4_000,
+  side: 'inside',
+});
+```
+
+`<waterOcean>` and `<waterLake>` may be supplied as convenience wrappers, but
+they must delegate to `<waterSurface>`/`WaterSurfaceRenderer`; they are not
+separate rendering implementations.
+
+### Public API decision: camelCase elements; do not split `<water2d>` and `<water3d>`
+
+All triangular-engine 3D component selectors use camelCase custom elements,
+even though Angular's conventional selector style is kebab-case. This is an
+intentional engine standard: camelCase visually distinguishes scene/engine
+components from ordinary application HTML and UI components. Water follows
+that standard consistently: `<waterSurface>`, `<waterOcean>`, `<waterLake>`,
+`<waterRiver>`, `<waterUnderwaterEffect>` and `<waterBuoyancy>`. Do not add
+kebab-case selector aliases.
+
+The public model has independent axes:
+
+- **domain** — plane, convex sphere, or concave inside-cylinder;
+- **quality** — `low`, `medium`, or `high` rendering cost/features (`low` is
+  the flat, normal-mapped path);
+- **effect** — named appearance such as `calm`, `ocean`, `storm`, or `pixel`;
+- **extent** — infinite/streamed, bounded rectangle, complete sphere, or a
+  cylinder section.
+
+“2D versus 3D” is therefore a quality choice, not a body type. A flat
+normal-mapped ocean must still work on a planet or cylinder, and high-quality
+displaced water must still work on a plane. Separate `<water2d>`/`<water3d>`
+components would multiply domain combinations and allow their behavior to
+drift.
+
+The canonical Angular component is `<waterSurface>`. Its implementation owns
+one framework-free `WaterSurfaceRenderer`; games and examples use the same
+component and renderer. POC pages may provide controls and test terrain, but
+must not contain private copies of the water shader/grid/prepass stack after
+Phase 1e.
 
 Physics (separate nested entry point so core water users do not pull Jolt):
 
@@ -71,7 +136,7 @@ Physics (separate nested entry point so core water users do not pull Jolt):
 <jolt-physics>
   <jolt-rigid-body [motionType]="2" [position]="[0, 20, 0]">
     <jolt-box-shape [params]="[2, 1, 4]" />
-    <water-buoyancy [buoyancy]="1.3" [linearDrag]="0.4" [angularDrag]="0.1" />
+    <waterBuoyancy [buoyancy]="1.3" [linearDrag]="0.4" [angularDrag]="0.1" />
     <mesh>...</mesh>
   </jolt-rigid-body>
 </jolt-physics>
@@ -168,7 +233,7 @@ Dependency rules:
   `triangular-engine/jolt`, and the optional `jolt-physics` peer. This keeps
   Jolt out of the bundle for rendering-only consumers, mirroring how
   `postprocessing` stays optional.
-- `water-underwater-effect` is a `postprocessing`-package `Effect` registered
+- `<waterUnderwaterEffect>` is a `postprocessing`-package `Effect` registered
   through the existing `PostprocessingComposerComponent` (runbook 001's
   backend). It therefore requires the optional `postprocessing` peer, but only
   when the underwater effect is actually used. If that split proves awkward to
@@ -321,7 +386,7 @@ Design constraints:
 
 ### Rivers (later, but designed for now)
 
-- `water-river` takes a centreline spline + width (optionally per-point) and
+- `<waterRiver>` takes a centreline spline + width (optionally per-point) and
   builds a swept ribbon mesh with UVs parameterised along the spline.
 - Flow: direction follows the spline tangent; the shader uses the standard
   flow-map ping-pong technique (two phase-offset samples blended) so normal
@@ -434,8 +499,8 @@ for the design and why it still keeps water and terrain decoupled.
       under `logarithmicDepthBuffer: true` — see investigation log.
 - [ ] Shore foam band (medium tier) from depth delta.
 - [ ] Bounded mesh (distance-based segment density, no clipmap needed) for
-      `water-lake`.
-- [ ] `water-ocean` / `water-lake` components + `WaterService` registry with
+      `<waterLake>`.
+- [ ] `<waterOcean>` / `<waterLake>` components + `WaterService` registry with
       `sample()`.
 - [ ] ~~Quality presets (`low`/`medium`) switchable at runtime; wave presets as
       data.~~ Moved to Phase 1e (grew into the full render-preset system).
@@ -483,6 +548,48 @@ sphere including near both poles, user-verified in `/water-sphere-poc`.
 "water-follows-camera bug" investigation log entry below. The original
 "i tested it works ok" pass did not surface it; the exit gate is **not
 actually met**.
+
+#### Phase 1c.1 — Domain anchoring stabilization (must precede migration)
+
+Do not fold this investigation into the Phase 1e refactor. Establish a small
+set of observable invariants in the existing sphere POC first, then migrate the
+verified behavior:
+
+- [ ] Add a debug mode with persistent world-space markers on the ground and
+      water plus a wireframe view. Record camera pose, local frame origin and
+      tangent basis only when a discontinuity is detected; do not log every
+      frame.
+- [ ] Add a deterministic camera-path regression harness (translate, orbit,
+      rotate in place, cross a tangent-frame/pole boundary) and capture stable
+      screenshots or projected marker positions at named checkpoints.
+- [ ] Split the symptom into three independently testable layers: LOD patch
+      ownership/recentering; domain composition into stable world positions;
+      and shading coordinates/normals.
+- [x] Wire detail normals and later glint exclusively to
+      `waterDomainSurfaceXZ`; retain camera-relative local coordinates only for
+      LOD placement, morph and culling. Verify texture anchoring separately
+      before treating it as a whole-mesh fix.
+- [x] Introduce an engine render-phase hook that is explicitly after camera
+      controllers and before depth capture/render (working name
+      `beforeRender$`). Update the water frame, patch instances and depth
+      prepass from that ordered phase. Do not rely on Angular/RxJS subscription
+      construction order as the contract.
+- [ ] Prove that rotating the camera without translating it does not change
+      composed world positions for a fixed surface sample. Prove that
+      translating the camera may recycle patches but does not move a
+      domain-anchored sample.
+- [ ] Exercise radii at `500m`, representative game scale, and planetary scale.
+      The algorithm must use local coordinates/floating-origin-compatible
+      inputs so shader precision, LOD budgets and tangent approximation do not
+      silently depend on the POC's small sphere.
+- [ ] Apply the same invariants to the inside-cylinder POC; a sphere-only patch
+      is not an acceptable domain abstraction.
+
+Exit gate: on sphere and inside-cylinder, rotate-in-place produces no apparent
+water or terrain motion; translation causes no swimming, popping, gaps or
+texture panning; deterministic checkpoints are repeatable; the ordered render
+hook is the only per-frame integration path. Only then may Phase 1e replace the
+POC-owned stack with `WaterSurfaceRenderer`.
 
 Out of scope for this phase (deferred, not forgotten): CPU
 `WaterSurface.getHeight`/`getNormal` queries on a sphere (needs a
@@ -671,15 +778,12 @@ already paid for in a logged bug):
   `waterLodCull`/morph where camera-relative is correct.
 - Log-depth chunks spliced in unconditionally (they no-op when off).
 
-**Refactor constraint — bug-for-bug on sphere/cylinder.** The Phase 1c/1d
-water-follows-camera investigations are open and their root cause is
-unidentified. This phase must **not** attempt to fix them, and must not
-silently change per-frame call ordering: the renderer only exposes
-`update()`/`captureDepth()`, and each page keeps its existing subscription
-points (the sphere page keeps its current `ngAfterViewInit`/`postTick$`
-arrangement exactly as-is). If centralisation accidentally changes those
-symptoms in either direction, that is *evidence* for the open investigation —
-record it in the log, do not chase it inside this phase.
+**Refactor constraint — migrate verified invariants, not known bugs.** Phase
+1c.1 must meet its exit gate before the sphere/cylinder POCs migrate. Phase 1e
+does not invent another per-page update order: `WaterSurfaceRenderer` consumes
+the engine's ordered after-camera/before-render hook and preserves the
+domain-anchoring regression harness. If centralisation changes a verified
+checkpoint, treat that as a renderer regression.
 
 #### Checklist
 
@@ -702,11 +806,18 @@ record it in the log, do not chase it inside this phase.
       with filter/size options if needed.
 - [ ] `rendering/water-surface-renderer.ts` as specced above; everything
       exported from `public-api.ts`.
+- [ ] Add the Angular `<waterSurface>` component as a thin lifecycle/input
+      wrapper around `WaterSurfaceRenderer`. Add optional `<waterOcean>` and
+      `<waterLake>` convenience wrappers only if they remain zero-rendering-
+      logic adapters.
 - [ ] Migrate `/water-material-poc`, `/water-sphere-poc`,
       `/water-cylinder-poc` onto the renderer + a preset dropdown; keep the
       existing debug toggles (wireframe, ring count, detail/shore toggles
       become preset overrides). Pages shrink to ground mesh + camera framing
       + UI.
+- [ ] Add one non-POC consumer fixture that uses only the documented HTML API;
+      it must render plane, sphere and cylinder water without importing shader
+      chunks or constructing a `ShaderMaterial`.
 - [ ] Record per-preset frame cost (FPS at default camera) for each demo in
       the investigation log.
 
@@ -723,7 +834,7 @@ does not block this phase's gate.
 ### Phase 2 — Events, underwater, waterline
 
 - [ ] `track()` API + camera state signal with hysteresis.
-- [ ] `water-underwater-effect` on the `postprocessing` composer: depth fog,
+- [ ] `<waterUnderwaterEffect>` on the `postprocessing` composer: depth fog,
       tint, optional distortion.
 - [ ] Waterline meniscus band evaluating the shared wave uniforms at the near
       plane; double-sided surface rendering.
@@ -1518,3 +1629,39 @@ recentring" as the cause).
 - Resolved the "environment presets" open question (yes, as
   `WaterRenderPreset`); moved Phase 1b's quality-presets bullet into 1e.
 - No code changed — planning only, ready for implementation.
+
+### 2026-07-23 — Consumer API and stabilization order decided
+
+- Chose one canonical `<waterSurface>` component backed by the framework-free
+  `WaterSurfaceRenderer`. Plane/sphere/inside-cylinder domain, quality tier,
+  appearance effect and extent are independent inputs.
+- Rejected separate `<water2d>`/`<water3d>` implementations: the low tier is
+  the flat normal-mapped path and must still work on every domain.
+  `<waterOcean>`/`<waterLake>` remain optional convenience wrappers with no
+  rendering logic of their own.
+- Applied triangular-engine's intentional camelCase selector standard to every
+  planned water component; kebab-case aliases are explicitly out of scope.
+- Added Phase 1c.1 ahead of renderer migration. It requires deterministic
+  camera-path checks, world-anchored shading coordinates, stable composed
+  samples and an explicit after-camera/before-render engine hook on both sphere
+  and inside-cylinder.
+- Changed Phase 1e's migration rule from preserving known POC bugs to migrating
+  only the invariants verified by Phase 1c.1. Added a non-POC HTML-only consumer
+  fixture to ensure examples and games exercise the same public path.
+- Documentation changed; implementation has not started.
+
+### 2026-07-23 — Sphere anchoring implementation started
+
+- Added anchored Gerstner phase evaluation so the camera-relative LOD grid can
+  recycle independently from sphere-fixed wave coordinates. Existing plane
+  shaders retain the original two-argument helpers.
+- Moved sphere detail-normal sampling from local grid coordinates to
+  `waterDomainSurfaceXZ`.
+- Added `EngineService.beforeRender$` after `postTick$`, and moved the sphere
+  frame/grid update plus water depth capture onto it. Removed the render-loop
+  `detectChanges()` call that was throwing an Angular assertion every frame.
+- Added a sphere-domain regression proving a fixed surface sample resolves to
+  the same surface coordinates through multiple camera-local tangent frames.
+- The library and demo production builds pass. The Karma bundle compiles, but
+  this machine's ChromeHeadless GPU process crashes before running the specs.
+  Live-page verification shows rendering with no new runtime/shader errors.

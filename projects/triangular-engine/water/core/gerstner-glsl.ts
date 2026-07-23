@@ -85,7 +85,7 @@ export const GERSTNER_UNIFORMS_GLSL = `
  * undisplaced base (x0, z0), matching `GerstnerSurface.displace()`.
  */
 export const GERSTNER_DISPLACE_GLSL = `
-  vec3 gerstnerDisplace(vec2 base, float t) {
+  vec3 gerstnerDisplaceAnchored(vec2 base, vec2 phaseBase, float t) {
     vec3 result = vec3(base.x, 0.0, base.y);
     for (int i = 0; i < ${MAX_GERSTNER_WAVES}; i++) {
       if (i >= uWaveCount) break;
@@ -94,7 +94,7 @@ export const GERSTNER_DISPLACE_GLSL = `
       float amplitude = uWaveDirAmp[i].w;
       float steepness = uWaveSteepOmega[i].x;
       float omega = uWaveSteepOmega[i].y;
-      float phase = k * dot(dir, base) - omega * t;
+      float phase = k * dot(dir, phaseBase) - omega * t;
       float c = cos(phase);
       float s = sin(phase);
       result.x += steepness * amplitude * dir.x * c;
@@ -102,6 +102,10 @@ export const GERSTNER_DISPLACE_GLSL = `
       result.y += amplitude * s;
     }
     return result;
+  }
+
+  vec3 gerstnerDisplace(vec2 base, float t) {
+    return gerstnerDisplaceAnchored(base, base, t);
   }
 `;
 
@@ -112,7 +116,7 @@ export const GERSTNER_DISPLACE_GLSL = `
  * needs position (e.g. building the base grid) can skip the extra cos/sin.
  */
 export const GERSTNER_NORMAL_GLSL = `
-  vec3 gerstnerNormal(vec2 base, float t) {
+  vec3 gerstnerNormalAnchored(vec2 phaseBase, float t) {
     float dYdx0 = 0.0;
     float dYdz0 = 0.0;
     float dxdx0 = 1.0;
@@ -125,7 +129,7 @@ export const GERSTNER_NORMAL_GLSL = `
       float amplitude = uWaveDirAmp[i].w;
       float steepness = uWaveSteepOmega[i].x;
       float omega = uWaveSteepOmega[i].y;
-      float phase = k * dot(dir, base) - omega * t;
+      float phase = k * dot(dir, phaseBase) - omega * t;
       float s = sin(phase);
       float c = cos(phase);
       float wa = k * amplitude;
@@ -139,5 +143,9 @@ export const GERSTNER_NORMAL_GLSL = `
     vec3 tangentX0 = vec3(dxdx0, dYdx0, cross0);
     vec3 tangentZ0 = vec3(cross0, dYdz0, dzdz0);
     return normalize(cross(tangentZ0, tangentX0));
+  }
+
+  vec3 gerstnerNormal(vec2 base, float t) {
+    return gerstnerNormalAnchored(base, t);
   }
 `;

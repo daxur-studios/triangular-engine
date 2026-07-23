@@ -1,6 +1,5 @@
 import {
   ChangeDetectionStrategy,
-  ChangeDetectorRef,
   Component,
   DestroyRef,
   computed,
@@ -39,6 +38,7 @@ import {
   WATER_DETAIL_NORMAL_GLSL,
   WATER_DOMAIN_COMPOSE_GLSL,
   WATER_DOMAIN_COMPOSE_NORMAL_GLSL,
+  WATER_DOMAIN_SURFACE_XZ_GLSL,
   WATER_DOMAIN_UNIFORMS_GLSL,
   WATER_FRESNEL_GLSL,
   WATER_LOD_CULL_GLSL,
@@ -146,6 +146,7 @@ const VERTEX_SHADER = `
   ${WATER_LOD_MORPH_GLSL}
   ${WATER_DOMAIN_UNIFORMS_GLSL}
   ${WATER_DOMAIN_COMPOSE_GLSL}
+  ${WATER_DOMAIN_SURFACE_XZ_GLSL}
   uniform float uTime;
   uniform float uCellSize;
   uniform float uMorphStart;
@@ -153,6 +154,7 @@ const VERTEX_SHADER = `
   varying vec3 vLocalNormal;
   varying vec3 vWorldPosition;
   varying vec2 vLocalXZ;
+  varying vec2 vSurfaceXZ;
   varying float vFragViewZ;
 
   void main() {
@@ -160,9 +162,13 @@ const VERTEX_SHADER = `
     vec4 localPos4 = modelMatrix * instanced;
     vec2 base = waterLodMorph(localPos4.xz, vec2(0.0), uCellSize, uMorphStart, uMorphEnd);
 
-    vec3 localDisplaced = gerstnerDisplace(base, uTime);
-    vLocalNormal = gerstnerNormal(base, uTime);
+    // Geometry remains camera-local for LOD, while phase coordinates remain
+    // fixed to the sphere so rotating/recentring the camera cannot move waves.
+    vec2 surfaceXZ = waterDomainSurfaceXZ(base);
+    vec3 localDisplaced = gerstnerDisplaceAnchored(base, surfaceXZ, uTime);
+    vLocalNormal = gerstnerNormalAnchored(surfaceXZ, uTime);
     vLocalXZ = localDisplaced.xz;
+    vSurfaceXZ = waterDomainSurfaceXZ(localDisplaced.xz);
 
     vec3 worldPos = waterComposeWorldPosition(localDisplaced.xz, localDisplaced.y);
     vWorldPosition = worldPos;
@@ -204,13 +210,14 @@ const FRAGMENT_SHADER = `
   varying vec3 vLocalNormal;
   varying vec3 vWorldPosition;
   varying vec2 vLocalXZ;
+  varying vec2 vSurfaceXZ;
   varying float vFragViewZ;
 
   void main() {
     waterLodCull(vLocalXZ, vec2(0.0), uInnerCullRadius, uOuterCullRadius);
 
     vec3 localBase = normalize(vLocalNormal);
-    vec3 localDetailed = waterDetailNormal(vLocalXZ, localBase, uTime);
+    vec3 localDetailed = waterDetailNormal(vSurfaceXZ, localBase, uTime);
     vec3 localMixed = normalize(mix(localBase, localDetailed, uDetailEnabled));
     vec3 normal = waterComposeWorldNormal(localMixed);
 
@@ -285,7 +292,6 @@ export class WaterSpherePocPageComponent {
   readonly initialUpVector: Vector3Tuple;
 
   private readonly engine = inject(EngineService);
-  private readonly changeDetector = inject(ChangeDetectorRef);
   private readonly domain = new SphereWaterDomain(SPHERE_RADIUS_M, {
     center: SPHERE_CENTER,
   });
@@ -381,12 +387,12 @@ export class WaterSpherePocPageComponent {
       this.depthPrepass.dispose();
     });
 
-    this.engine.tick$
+    this.engine.beforeRender$
       .pipe(takeUntilDestroyed(destroyRef))
-      .subscribe((deltaTime) => this.tick(deltaTime));
-    this.engine.postTick$
-      .pipe(takeUntilDestroyed(destroyRef))
-      .subscribe(() => this.captureDepth());
+      .subscribe(() => {
+        this.tick();
+        this.captureDepth();
+      });
   }
 
   selectPreset(key: PresetKey): void {
@@ -497,7 +503,7 @@ export class WaterSpherePocPageComponent {
     this.levelMaterials.length = 0;
   }
 
-  private tick(deltaTime: number): void {
+  private tick(): void {
     this.uTime.value = this.engine.clock.getElapsedTime();
 
     const camera = this.engine.camera$.value;
@@ -528,9 +534,6 @@ export class WaterSpherePocPageComponent {
       mesh.instanceMatrix.needsUpdate = true;
     }
 
-    // The Three.js render happens right after postTick$; flush these
-    // template inputs now so orbitControls reaches the same frame.
-    this.changeDetector.detectChanges();
   }
 
   /** See `/water-material-poc`'s identical method for why physical drawing-buffer pixels matter here. */

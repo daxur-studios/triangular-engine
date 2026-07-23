@@ -131,6 +131,11 @@ export class EngineService implements IEngine {
   readonly tick$: BehaviorSubject<number> = new BehaviorSubject<number>(0);
   /** Fired after all tick$ subscribers run but before rendering the frame */
   readonly postTick$ = new Subject<void>();
+  /**
+   * Fired after postTick$ camera/controllers have settled, immediately before
+   * rendering. Camera-relative render systems should update here.
+   */
+  readonly beforeRender$ = new Subject<void>();
 
   /** Triggered when the SceneComponent is destroyed */
   readonly onDestroy$ = new ReplaySubject<void>();
@@ -505,6 +510,7 @@ export class EngineService implements IEngine {
 
     // Allow late subscribers (e.g., camera follow) to update just before render
     this.postTick$.next();
+    this.beforeRender$.next();
 
     this.render(time, false, delta);
 
