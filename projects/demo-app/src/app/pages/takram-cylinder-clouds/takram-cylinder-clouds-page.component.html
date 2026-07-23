@@ -43,37 +43,6 @@
             </select>
           </label>
       <label
-        >Terrain streaming radius
-        <output>{{ terrainStreamingRadius() }}×</output
-        ><input
-          type="range"
-          min="0.5"
-          max="2"
-          step="0.25"
-          [disabled]="terrainMode() !== 'visual'"
-          [value]="terrainStreamingRadius()"
-          (change)="setTerrainStreamingRadius($any($event.target))"
-      /></label>
-      <label
-        >Terrain generation
-        <output>{{ terrainGenerationBudget() }} patches/frame</output
-        ><input
-          type="range"
-          min="1"
-          max="32"
-          step="1"
-          [disabled]="terrainMode() !== 'visual'"
-          [value]="terrainGenerationBudget()"
-          (input)="setTerrainGenerationBudget($any($event.target))"
-      /></label>
-      @if (terrainMode() === "visual") {
-        <div class="terrain-stats">
-          <span>Resident patches: {{ terrainPatchCount() }}</span>
-          <span>Queued patches: {{ terrainQueuedPatchCount() }}</span>
-          <span>{{ terrainLodLabel() }}</span>
-        </div>
-      }
-      <label
         >Resolution <output>{{ resolutionScale() }}</output
         ><input
           type="range"
@@ -221,6 +190,103 @@
       /></label>
         </div>
       </details>
+
+      @if (renderMode() === "3d") {
+        <details open>
+          <summary>Terrain</summary>
+          <div class="control-group">
+            <p class="control-hint">
+              Shape the large biomes first, then add mountain and meadow detail.
+              Changes rebuild the visible terrain patches.
+            </p>
+            <label
+              >Seed <output>{{ terrainSeed() }}</output
+              ><input
+                type="range"
+                min="0"
+                max="50"
+                step="1"
+                [value]="terrainSeed()"
+                (change)="setTerrainShape($any($event.target), terrainSeed)"
+            /></label>
+            <label
+              >Landform scale <output>{{ terrainLandformScale() }}×</output
+              ><input
+                type="range"
+                min="0.5"
+                max="2.5"
+                step="0.1"
+                [value]="terrainLandformScale()"
+                (change)="setTerrainShape($any($event.target), terrainLandformScale)"
+            /></label>
+            <label
+              >Mountain height <output>{{ terrainMountainHeight() }}×</output
+              ><input
+                type="range"
+                min="0.25"
+                max="1.6"
+                step="0.05"
+                [value]="terrainMountainHeight()"
+                (change)="setTerrainShape($any($event.target), terrainMountainHeight)"
+            /></label>
+            <label
+              >Mountain detail <output>{{ terrainMountainDetail() }}</output
+              ><input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                [value]="terrainMountainDetail()"
+                (change)="setTerrainShape($any($event.target), terrainMountainDetail)"
+            /></label>
+            <label
+              >Meadow relief <output>{{ terrainMeadowRelief() }}</output
+              ><input
+                type="range"
+                min="0"
+                max="1.25"
+                step="0.05"
+                [value]="terrainMeadowRelief()"
+                (change)="setTerrainShape($any($event.target), terrainMeadowRelief)"
+            /></label>
+            <label
+              >Water coverage <output>{{ terrainWaterCoverage() }}</output
+              ><input
+                type="range"
+                min="0.15"
+                max="0.8"
+                step="0.01"
+                [value]="terrainWaterCoverage()"
+                (change)="setTerrainShape($any($event.target), terrainWaterCoverage)"
+            /></label>
+            <label
+              >Streaming radius <output>{{ terrainStreamingRadius() }}×</output
+              ><input
+                type="range"
+                min="0.5"
+                max="2"
+                step="0.25"
+                [value]="terrainStreamingRadius()"
+                (change)="setTerrainStreamingRadius($any($event.target))"
+            /></label>
+            <label
+              >Generation <output>{{ terrainGenerationBudget() }} patches/frame</output
+              ><input
+                type="range"
+                min="1"
+                max="32"
+                step="1"
+                [value]="terrainGenerationBudget()"
+                (input)="setTerrainGenerationBudget($any($event.target))"
+            /></label>
+            <div class="terrain-stats">
+              <span>Resident patches: {{ terrainPatchCount() }}</span>
+              <span>Queued patches: {{ terrainQueuedPatchCount() }}</span>
+              <span>{{ terrainLodLabel() }}</span>
+            </div>
+          </div>
+        </details>
+      }
 
       <details>
         <summary>Atmosphere & lighting</summary>

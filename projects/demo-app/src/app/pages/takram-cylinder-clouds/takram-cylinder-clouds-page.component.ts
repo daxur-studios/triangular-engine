@@ -49,6 +49,14 @@ const TERRAIN_SKIRT_DEPTH_M = 180;
 const DEFAULT_TERRAIN_GENERATION_BUDGET = 12;
 
 type TerrainMode = 'disabled' | 'visual';
+interface TerrainShapeSettings {
+  readonly seed: number;
+  readonly landformScale: number;
+  readonly mountainHeight: number;
+  readonly mountainDetail: number;
+  readonly meadowRelief: number;
+  readonly waterCoverage: number;
+}
 type CylinderRenderMode = '2d' | '3d';
 type WaterPreset = 'calmLake' | 'oceanSwell' | 'storm';
 type WaterQuality = 'low' | 'medium' | 'high';
@@ -97,12 +105,18 @@ const WATER_QUALITY_SEGMENTS: Record<
 
 class CylinderPocTerrainField implements ITerrainField {
   readonly minElevationM = -360;
-  readonly maxElevationM = 720;
+  readonly maxElevationM = 1_100;
+
+  constructor(private readonly settings: () => TerrainShapeSettings) {}
 
   sample([axialM, radialY, radialZ]: TerrainVector3): ITerrainFieldSample {
     const angle = Math.atan2(radialZ, radialY);
     return {
-      elevationM: cylinderBiomeElevation(axialM, angle * 10_000),
+      elevationM: cylinderBiomeElevation(
+        axialM,
+        angle * 10_000,
+        this.settings(),
+      ),
     };
   }
 
@@ -188,6 +202,12 @@ export class TakramCylinderCloudsPageComponent {
   );
   readonly terrainStreamingRadius = signal(1);
   readonly terrainGenerationBudget = signal(DEFAULT_TERRAIN_GENERATION_BUDGET);
+  readonly terrainSeed = signal(7);
+  readonly terrainLandformScale = signal(1);
+  readonly terrainMountainHeight = signal(1);
+  readonly terrainMountainDetail = signal(0.55);
+  readonly terrainMeadowRelief = signal(0.45);
+  readonly terrainWaterCoverage = signal(0.48);
   readonly terrainQueuedPatchCount = signal(0);
   readonly terrainPatchCount = signal(0);
   readonly terrainLodLabel = signal('L0: 0');
@@ -220,7 +240,14 @@ export class TakramCylinderCloudsPageComponent {
     levelZeroAngularPatchCount: TERRAIN_ANGULAR_PATCHES,
     levelZeroAxialPatchCount: TERRAIN_AXIAL_PATCHES,
   });
-  private readonly terrainField = new CylinderPocTerrainField();
+  private readonly terrainField = new CylinderPocTerrainField(() => ({
+    seed: this.terrainSeed(),
+    landformScale: this.terrainLandformScale(),
+    mountainHeight: this.terrainMountainHeight(),
+    mountainDetail: this.terrainMountainDetail(),
+    meadowRelief: this.terrainMeadowRelief(),
+    waterCoverage: this.terrainWaterCoverage(),
+  }));
   private terrainGroup: Group | null = null;
   private terrainMaterial: MeshStandardMaterial | null = null;
   private readonly terrainPatches = new Map<string, Mesh>();
@@ -295,6 +322,16 @@ export class TakramCylinderCloudsPageComponent {
     this.terrainGenerationBudget.set(
       Math.max(1, Math.min(32, Math.round(Number(target.value)))),
     );
+  }
+
+  setTerrainShape(
+    target: { value: string },
+    setting: { set(value: number): void },
+  ): void {
+    setting.set(Number(target.value));
+    if (this.terrainMode() !== 'visual') return;
+    this.disposeVisualTerrain();
+    this.buildVisualTerrain();
   }
 
   private buildVisualTerrain(): void {
@@ -478,23 +515,83 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function cylinderBiomeElevation(axialM: number, arcM: number): number {
-  const continental =
-    Math.sin(axialM / 7_800 + arcM / 11_000) * 0.65 +
-    Math.cos(arcM / 9_200 - axialM / 15_000) * 0.55;
-  const mountainMask = smoothstep(0.3, 0.85, continental);
-  const oceanMask = smoothstep(0.25, 0.75, -continental);
-  const meadow = Math.sin(axialM / 1_450) * 12 + Math.cos(arcM / 1_800) * 8;
-  const ridges =
-    120 +
-    Math.abs(Math.sin(axialM / 1_050 + arcM / 1_700)) * 410 +
-    Math.abs(Math.cos(arcM / 730 - axialM / 2_100)) * 130;
-  const oceanFloor = -280 + Math.sin(axialM / 3_100 + arcM / 2_700) * 25;
-  return (
-    meadow * (1 - mountainMask) * (1 - oceanMask) +
-    ridges * mountainMask +
-    oceanFloor * oceanMask
+function cylinderBiomeElevation(
+  axialM: number,
+  arcM: number,
+  settings: TerrainShapeSettings,
+): number {
+  const scale = Math.max(0.35, settings.landformScale);
+  const x = axialM / (7_500 * scale);
+  const y = arcM / (7_500 * scale);
+  const seed = settings.seed;
+
+  // Warping stops the biome boundaries following obvious noise contours.
+  const warpX = fbm2(x * 0.7, y * 0.7, seed + 31, 3) * 0.42;
+  const warpY = fbm2(x * 0.7 + 19, y * 0.7 - 11, seed + 73, 3) * 0.42;
+  const wx = x + warpX;
+  const wy = y + warpY;
+  const continental = fbm2(wx, wy, seed, 5);
+  const coastLevel = (settings.waterCoverage - 0.5) * 0.75;
+  const landMask = smoothstep(coastLevel - 0.1, coastLevel + 0.12, continental);
+  const mountainMask = smoothstep(
+    coastLevel + 0.18,
+    coastLevel + 0.55,
+    continental,
   );
+
+  const meadowNoise = fbm2(wx * 5.2, wy * 5.2, seed + 151, 4);
+  const meadow = (18 + meadowNoise * 42) * settings.meadowRelief;
+
+  const ridgeBase = 1 - Math.abs(fbm2(wx * 3.1, wy * 3.1, seed + 211, 5));
+  const sharpRidges = Math.pow(Math.max(0, ridgeBase), 2.3);
+  const fineRidges =
+    (1 - Math.abs(fbm2(wx * 8.5, wy * 8.5, seed + 307, 3))) *
+    settings.mountainDetail;
+  const mountains =
+    (150 + sharpRidges * 610 + fineRidges * 170) *
+    settings.mountainHeight;
+
+  const oceanNoise = fbm2(wx * 2.2, wy * 2.2, seed + 401, 3);
+  const oceanFloor = -190 + oceanNoise * 55;
+  const landElevation = meadow * (1 - mountainMask) + mountains * mountainMask;
+  return oceanFloor * (1 - landMask) + landElevation * landMask;
+}
+
+function fbm2(x: number, y: number, seed: number, octaves: number): number {
+  let value = 0;
+  let amplitude = 0.55;
+  let frequency = 1;
+  let normalizer = 0;
+  for (let octave = 0; octave < octaves; octave++) {
+    value += valueNoise2(x * frequency, y * frequency, seed + octave * 101) * amplitude;
+    normalizer += amplitude;
+    amplitude *= 0.5;
+    frequency *= 2.03;
+  }
+  return value / normalizer;
+}
+
+function valueNoise2(x: number, y: number, seed: number): number {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uy = fy * fy * (3 - 2 * fy);
+  const a = noiseHash(ix, iy, seed);
+  const b = noiseHash(ix + 1, iy, seed);
+  const c = noiseHash(ix, iy + 1, seed);
+  const d = noiseHash(ix + 1, iy + 1, seed);
+  return (
+    a + (b - a) * ux + (c - a) * uy +
+    (d - c - b + a) * ux * uy
+  );
+}
+
+function noiseHash(x: number, y: number, seed: number): number {
+  let hash = Math.imul(x, 374_761_393) + Math.imul(y, 668_265_263);
+  hash = Math.imul(hash ^ (hash >>> 13) ^ Math.imul(seed, 1_274_126_177), 1_274_126_177);
+  return ((hash ^ (hash >>> 16)) >>> 0) / 0x7fff_ffff - 1;
 }
 
 function createCylinderBiomeColors(
