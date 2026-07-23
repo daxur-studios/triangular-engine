@@ -102,7 +102,46 @@ const ISLANDS: ReadonlyArray<{
   { direction: new Vector3(0.1, -0.3, 0.95).normalize(), cosAngularRadius: Math.cos(0.4), heightM: 16 },
 ];
 
-/** Ground sits this far below the water radius everywhere except island bumps. */
+/**
+ * Narrow, localized great-circle valleys cut below the ordinary ocean floor.
+ * One crosses the starting island so a single camera view includes dry land,
+ * shallow shore, the regular seabed and a visibly deeper channel.
+ */
+const CREVICES: ReadonlyArray<{
+  readonly centerDirection: Vector3;
+  readonly planeNormal: Vector3;
+  readonly cosAngularExtent: number;
+  readonly halfWidthSin: number;
+  readonly featherWidthSin: number;
+  readonly depthM: number;
+}> = [
+  {
+    centerDirection: ISLANDS[0].direction,
+    planeNormal: new Vector3(-0.2, 0, 1).normalize(),
+    cosAngularExtent: Math.cos(0.55),
+    halfWidthSin: Math.sin(0.025),
+    featherWidthSin: Math.sin(0.075),
+    depthM: 30,
+  },
+  {
+    centerDirection: new Vector3(-0.45, 0.15, 0.88).normalize(),
+    planeNormal: new Vector3(0.9, 0.25, 0.42).normalize(),
+    cosAngularExtent: Math.cos(0.7),
+    halfWidthSin: Math.sin(0.04),
+    featherWidthSin: Math.sin(0.1),
+    depthM: 22,
+  },
+  {
+    centerDirection: new Vector3(-0.7, -0.5, -0.35).normalize(),
+    planeNormal: new Vector3(-0.35, 0.8, -0.44).normalize(),
+    cosAngularExtent: Math.cos(0.65),
+    halfWidthSin: Math.sin(0.03),
+    featherWidthSin: Math.sin(0.085),
+    depthM: 36,
+  },
+];
+
+/** Ground sits this far below the water radius before islands/crevices. */
 const OCEAN_FLOOR_DEPTH_M = 6;
 
 /**
@@ -564,10 +603,9 @@ export class WaterSpherePocPageComponent {
 }
 
 /**
- * Ground sits `OCEAN_FLOOR_DEPTH_M` below the water radius everywhere except
- * a few raised islands, so shore-fade/depth-tint has real depth variation to
- * react to (matching the plane demo's sloped-shore role), rather than ground
- * and water sharing one radius everywhere.
+ * Ground sits `OCEAN_FLOOR_DEPTH_M` below the water radius, with raised
+ * islands and narrow crevices reaching much deeper. This gives the water
+ * shader dry, shallow, ordinary-depth and deep-channel samples.
  */
 function createGroundGeometry(): SphereGeometry {
   const baseRadius = SPHERE_RADIUS_M - OCEAN_FLOOR_DEPTH_M;
@@ -584,7 +622,27 @@ function createGroundGeometry(): SphereGeometry {
       const t = smoothstep(island.cosAngularRadius, 1, cos);
       bump = Math.max(bump, t * island.heightM);
     }
-    const radius = baseRadius + bump;
+    let creviceDepth = 0;
+    for (const crevice of CREVICES) {
+      const across = Math.abs(direction.dot(crevice.planeNormal));
+      const crossSection =
+        1 -
+        smoothstep(
+          crevice.halfWidthSin,
+          crevice.featherWidthSin,
+          across,
+        );
+      const along = smoothstep(
+        crevice.cosAngularExtent,
+        1,
+        direction.dot(crevice.centerDirection),
+      );
+      creviceDepth = Math.max(
+        creviceDepth,
+        crossSection * along * crevice.depthM,
+      );
+    }
+    const radius = baseRadius + bump - creviceDepth;
     position.setXYZ(i, direction.x * radius, direction.y * radius, direction.z * radius);
   }
   geometry.computeVertexNormals();
