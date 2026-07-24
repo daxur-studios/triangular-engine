@@ -86,6 +86,36 @@ describe('generateTerrainScatterInstances', () => {
     expect(instances.length).toBe(0);
   });
 
+  it('fades density to zero beyond the distance-fade end radius', () => {
+    const instances = generateTerrainScatterInstances({
+      field: new ConstantTerrainField(0),
+      domain,
+      cellAddress: address,
+      cellKey: 'plane:0:0:0',
+      identity,
+      candidatePoolSize: 16,
+      rules,
+      baseDensity01: 1,
+      distanceFade: { viewpointWorldM: [0, 0, 0], fadeStartM: 0, fadeEndM: 1 },
+    });
+    expect(instances.length).toBe(0);
+  });
+
+  it('leaves density untouched inside the distance-fade start radius', () => {
+    const instances = generateTerrainScatterInstances({
+      field: new ConstantTerrainField(0),
+      domain,
+      cellAddress: address,
+      cellKey: 'plane:0:0:0',
+      identity,
+      candidatePoolSize: 16,
+      rules,
+      baseDensity01: 1,
+      distanceFade: { viewpointWorldM: [50, 0, -50], fadeStartM: 1_000, fadeEndM: 2_000 },
+    });
+    expect(instances.length).toBe(16);
+  });
+
   it('is fully deterministic for identical inputs', () => {
     const options = {
       field: new ConstantTerrainField(3),

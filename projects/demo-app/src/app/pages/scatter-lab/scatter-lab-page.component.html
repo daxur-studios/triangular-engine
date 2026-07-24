@@ -4,17 +4,21 @@
       <header>
         <div>
           <a routerLink="/">← Examples</a
-          ><small>triangular-engine/scatter — Phase 1c instanced placement</small>
+          ><small>triangular-engine/scatter — Phase 2 LOD + distance fade</small>
         </div>
         <strong>Deterministic ground scatter on plane, sphere, cylinder</strong>
       </header>
 
       <p class="blurb">
         Trees are placed by <code>generateTerrainScatterInstances</code> from
-        deterministic candidate pools, then rendered with one
-        <code>InstancedMesh</code> via <code>buildScatterInstancedMesh</code>.
-        Placement reads the same terrain surface sampler the ground mesh does,
-        so instances never float or sink — and reject steep slopes.
+        deterministic candidate pools, then bucketed into near/far LOD tiers
+        by <code>bucketScatterInstancesByLod</code> and rendered as one
+        <code>InstancedMesh</code> per tier via
+        <code>buildScatterInstancedMeshesByLod</code>. Grass has no far tier —
+        it fades out by density via <code>distanceFade</code> instead of
+        popping. Placement reads the same terrain surface sampler the ground
+        mesh does, so instances never float or sink — and reject steep
+        slopes.
       </p>
 
       <nav aria-label="Terrain shape">
@@ -44,8 +48,10 @@
       </div>
 
       <p class="blurb note">
-        {{ treeCount() }} tree instances across {{ cellCount() }} identity
-        cells (one fixed-level scatter cell per terrain patch's quarter — see
+        {{ treeCount() }} tree instances ({{ treeNearCount() }} near /
+        {{ treeFarCount() }} far LOD) + {{ grassCount() }} grass instances
+        across {{ cellCount() }} identity cells (one fixed-level scatter cell
+        per terrain patch's quarter — see
         <code>selectFixedLevelScatterCells</code>).
       </p>
     </section>

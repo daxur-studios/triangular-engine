@@ -6,6 +6,7 @@ import type {
 import { sampleTerrainSurface } from 'triangular-engine/terrain';
 
 import { generateScatterCandidates } from '../core/scatter-candidate';
+import { computeScatterDistanceFade01 } from '../core/scatter-distance-fade';
 import type { IScatterCellIdentity, ScatterInstanceId } from '../core/scatter-instance-id';
 import {
   evaluateScatterPlacement,
@@ -24,6 +25,13 @@ export interface ITerrainScatterInstance {
   readonly embedSeed01: number;
 }
 
+export interface IScatterDistanceFadeOptions {
+  readonly viewpointWorldM: TerrainVector3;
+  /** Density is unaffected inside this radius, then ramps linearly to 0 at fadeEndM. */
+  readonly fadeStartM: number;
+  readonly fadeEndM: number;
+}
+
 export interface IGenerateTerrainScatterInstancesOptions<TAddress> {
   readonly field: ITerrainField;
   readonly domain: ITerrainSurfaceDomain<TAddress>;
@@ -34,6 +42,15 @@ export interface IGenerateTerrainScatterInstancesOptions<TAddress> {
   readonly rules: ScatterPlacementRules;
   readonly baseDensity01: number;
   readonly suitability?: ScatterSuitabilityFn;
+  /** For species with no far LOD (grass): density fades to zero instead of popping. */
+  readonly distanceFade?: IScatterDistanceFadeOptions;
+}
+
+function distanceM(a: TerrainVector3, b: TerrainVector3): number {
+  const dx = a[0] - b[0];
+  const dy = a[1] - b[1];
+  const dz = a[2] - b[2];
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 /**
@@ -72,12 +89,24 @@ export function generateTerrainScatterInstances<TAddress>(
       surfaceUp: sample.surfaceUp,
       slope01: sample.slope01,
     };
+    let suitability = options.suitability;
+    if (options.distanceFade) {
+      const { viewpointWorldM, fadeStartM, fadeEndM } = options.distanceFade;
+      const fade01 = computeScatterDistanceFade01(
+        distanceM(sample.worldPositionM, viewpointWorldM),
+        fadeStartM,
+        fadeEndM,
+      );
+      const baseSuitability = options.suitability;
+      suitability = (s) => (baseSuitability ? baseSuitability(s) : 1) * fade01;
+    }
+
     const placement = evaluateScatterPlacement(
       candidate,
       surfaceSample,
       options.rules,
       options.baseDensity01,
-      options.suitability,
+      suitability,
     );
     if (!placement.accepted) continue;
 
