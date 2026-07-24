@@ -598,7 +598,7 @@ wall (O'Neill habitat), the concave counterpart to Phase 1c's convex sphere:
 water rises up and around the camera at distance instead of falling away
 toward a horizon.
 
-- [x] `CylinderWaterDomain` (`radiusM`, `axis`, `center`) in
+- [x] `CylinderWaterDomain` (`radiusM`, `axis`, `center`, optional `lengthM`) in
       `water/core/water-domain.ts`: `normal` points inward toward the axis
       (matching centrifugal "gravity" pushing outward against the wall, so
       "up" is toward the centerline — the opposite sign from
@@ -613,6 +613,16 @@ toward a horizon.
       `uCylinderRadius` uniforms and a `WATER_DOMAIN_CYLINDER` branch in
       `waterComposeWorldPosition`, mirroring the TS formula exactly.
       `waterComposeWorldNormal` needed no changes — already domain-agnostic.
+- [x] Finite cylinders use a fixed domain frame/seam while their LOD centres
+      follow the camera through axial/arc parameter space. Their grid ring
+      count expands automatically to cover the worst case from one boundary
+      to the opposite boundary (`lengthM` and `2π * radiusM`), and the
+      fragment domain clip removes only geometry beyond the physical ends or
+      beyond one complete wrap. Camera movement changes tessellation
+      distribution without translating, rotating, or truncating the tube.
+      Cylinder LOD distance is periodic around `2π * radiusM`; the renderer
+      unions the neighbouring wrapped patch set at the fixed seam so a
+      camera-centred fine region straddles both joined edges continuously.
 - [x] `/water-cylinder-poc` demo: same grid/material/Gerstner/shading
       infrastructure as `/water-sphere-poc`, `CylinderWaterDomain` (axis
       `+Y`, radius 500m, matching the sphere demo's scale so the same
@@ -680,11 +690,11 @@ There is no shipped pixel preset.
 Shipped presets (`WATER_RENDER_PRESETS` in `rendering/water-render-preset.ts`
 — **names are placeholders, rename freely before publishing**):
 
-| Preset        | tier   | Notes                                                                                  |
-| ------------- | ------ | -------------------------------------------------------------------------------------- |
-| `performance` | low    | Gerstner motion, no depth prepass/detail normals, reduced grid budget                  |
-| `balanced`    | medium | The verified Phase 1b `/water-material-poc` feature set + detail cascades              |
-| `cinematic`   | high   | + glint, distance roughness, far sky blend, tighter tiling, denser grid                |
+| Preset        | tier   | Notes                                                                     |
+| ------------- | ------ | ------------------------------------------------------------------------- |
+| `performance` | low    | Gerstner motion, no depth prepass/detail normals, reduced grid budget     |
+| `balanced`    | medium | The verified Phase 1b `/water-material-poc` feature set + detail cascades |
+| `cinematic`   | high   | + glint, distance roughness, far sky blend, tighter tiling, denser grid   |
 
 Customisation: `resolveWaterRenderPreset(base, overrides?)` does a typed deep
 merge (per-section spread — `shading`, `farField`, `stylize`, `grid` merge
@@ -794,11 +804,11 @@ checkpoint, treat that as a renderer regression.
       with filter/size options if needed.
 - [x] `rendering/water-surface-renderer.ts` as specced above; everything
       exported from `public-api.ts`.
-- [ ] Add the Angular `<waterSurface>` component as a thin lifecycle/input
+- [x] Add the Angular `<waterSurface>` component as a thin lifecycle/input
       wrapper around `WaterSurfaceRenderer`. Add optional `<waterOcean>` and
       `<waterLake>` convenience wrappers only if they remain zero-rendering-
       logic adapters.
-- [ ] Migrate `/water-material-poc`, `/water-sphere-poc`,
+- [x] Migrate `/water-material-poc`, `/water-sphere-poc`,
       `/water-cylinder-poc` onto the renderer + a preset dropdown; keep the
       existing debug toggles (wireframe, ring count, detail/shore toggles
       become preset overrides). Pages shrink to ground mesh + camera framing + UI.
@@ -842,6 +852,34 @@ checkpoint, treat that as a renderer regression.
   detail-normal cascades and the opaque-scene depth prepass.
 - The underlying stylize shader extension remains available for custom
   consumers, but it is not part of the standard preset surface.
+
+#### 2026-07-24 — Declarative `<waterSurface>` component added
+
+- Added the standalone camelCase `<waterSurface>` component as the canonical
+  HTML API over `WaterSurfaceRenderer`; it is exported from
+  `triangular-engine/water`.
+- `quality="performance|balanced|cinematic"` and
+  `motion="calmLake|oceanSwell|storm"` are independent inputs. `[domain]`
+  selects plane, sphere or inside-cylinder geometry, while
+  `[presetOverrides]` supports grid, colour, detail and custom-wave changes
+  without forking renderer logic.
+- The component owns scene attachment, ordered `beforeRender$` updates, depth
+  capture, runtime preset/domain switching and disposal. The library and demo
+  development builds pass, and the focused component spec type-checks. The
+  browser-backed Karma runner was intentionally not launched for this slice.
+
+#### 2026-07-24 — Sphere and cylinder POCs migrated to `<waterSurface>`
+
+- Removed the duplicated grid, shader assembly, uniforms and depth-prepass
+  ownership from both domain POCs. Their templates now instantiate the public
+  camelCase `<waterSurface>` component used by game consumers.
+- Preserved the sphere islands/crevices, cylinder ground features, verified
+  domain orientation and camera framing. Both pages expose independent
+  performance/balanced/cinematic quality and calm/wavy/storm motion controls,
+  plus their existing diagnostic overrides.
+- The sphere ring-count override now changes only ring count, so each quality
+  preset retains its own base cell, patch-resolution and core-size budget.
+- `ng build demo-app --configuration development` passes without browser use.
 
 Exit gate: all three demos switch between the three quality levels and three
 motion presets at runtime with no reload. On the **plane** demo at max ring

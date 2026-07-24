@@ -29,14 +29,52 @@ describe('WaterSurfaceRenderer', () => {
         domain,
         preset: WATER_RENDER_PRESETS.performance,
       });
-      expect(renderer.meshes.length).toBe(
+      expect(renderer.meshes.length).toBeGreaterThanOrEqual(
         WATER_RENDER_PRESETS.performance.grid.ringCount + 1,
       );
       const material = renderer.meshes[0].material as ShaderMaterial;
       expect(material.vertexShader).toContain('waterComposeWorldPosition');
-      expect(material.fragmentShader).toContain('waterComposeWorldNormal');
+      expect(material.fragmentShader).toContain(
+        'waterComposeWorldNormal(localNormal, vLocalXZ)',
+      );
+      expect(material.fragmentShader).toContain(
+        'waterDomainClip(vWorldPosition, vLocalXZ)',
+      );
       renderer.dispose();
     }
+  });
+
+  it('builds a complete finite cylinder while its LOD follows the camera', () => {
+    const domain = new CylinderWaterDomain(500, {
+      axis: new Vector3(1, 0, 0),
+      lengthM: 1_000,
+    });
+    const renderer = new WaterSurfaceRenderer({
+      domain,
+      preset: WATER_RENDER_PRESETS.performance,
+    });
+    const camera = new PerspectiveCamera();
+
+    // Performance normally has four rings; this cylinder needs seven so a
+    // camera-centred grid still reaches the opposite side of the full wrap.
+    expect(renderer.meshes.length).toBe(8);
+    camera.position.set(0, 0, 100);
+    renderer.update(camera, 0);
+    const firstMatrix = renderer.meshes[0].instanceMatrix.array.slice();
+    const material = renderer.meshes[0].material as ShaderMaterial;
+    expect(material.uniforms['uLodCameraXZ'].value.toArray()).toEqual([0, 0]);
+
+    camera.position.set(4_000, -3_000, -2_000);
+    renderer.update(camera, 1);
+    expect(renderer.meshes[0].instanceMatrix.array).not.toEqual(firstMatrix);
+    expect(material.uniforms['uLodCameraXZ'].value.x).toBe(500);
+    expect(material.uniforms['uLodCameraXZ'].value.y).not.toBe(0);
+
+    expect(material.uniforms['uCylinderHalfLength'].value).toBe(500);
+    expect(material.uniforms['uLodPeriodZ'].value).toBeCloseTo(
+      2 * Math.PI * 500,
+    );
+    renderer.dispose();
   });
 
   it('updates instances, attaches to a scene, and rebuilds for a new tier', () => {

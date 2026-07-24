@@ -237,17 +237,15 @@ describe('CylinderWaterDomain', () => {
         .addScaledVector(axis, -frameAxial)
         .normalize();
 
-      // Intersect the fixed radial ray with this frame's tangent plane, then
-      // express that point in the frame's local axes.
-      const projectedRadius =
-        radius / sampleRadialDirection.dot(frameRadial);
-      const flatSample = center
-        .clone()
-        .addScaledVector(axis, sampleAxial)
-        .addScaledVector(sampleRadialDirection, projectedRadius);
-      const fromOrigin = flatSample.sub(frame.origin);
+      // Express the fixed sample as axial distance plus signed arc length
+      // from this continuously-recentring frame.
+      const fromOrigin = fixedSample.clone().sub(frame.origin);
       const localX = fromOrigin.dot(frame.tangentU);
-      const localZ = fromOrigin.dot(frame.tangentV);
+      const localAngle = Math.atan2(
+        sampleRadialDirection.dot(frame.tangentV),
+        sampleRadialDirection.dot(frameRadial),
+      );
+      const localZ = radius * localAngle;
       const world = domain.composeWorldPosition(frame, localX, localZ, 0);
 
       expect(world.distanceTo(fixedSample)).toBeCloseTo(0, 6);
@@ -286,8 +284,46 @@ describe('CylinderWaterDomain', () => {
     }
   });
 
+  it('maps circumferential distance as arc length around the cylinder', () => {
+    const radius = 500;
+    const axis = new Vector3(1, 0, 0);
+    const domain = new CylinderWaterDomain(radius, { axis });
+    const frame = domain.getLocalFrame(new Vector3(0, -450, 0));
+
+    const quarterTurn = domain.composeWorldPosition(
+      frame,
+      0,
+      radius * Math.PI * 0.5,
+      0,
+    );
+    const fullTurn = domain.composeWorldPosition(
+      frame,
+      0,
+      radius * Math.PI * 2,
+      0,
+    );
+
+    expect(quarterTurn.distanceTo(new Vector3(0, 0, -radius))).toBeCloseTo(
+      0,
+      10,
+    );
+    expect(fullTurn.distanceTo(frame.origin)).toBeCloseTo(0, 10);
+  });
+
   it('rejects a non-positive radius', () => {
     expect(() => new CylinderWaterDomain(0)).toThrowError();
     expect(() => new CylinderWaterDomain(-5)).toThrowError();
+  });
+
+  it('supports finite and infinite axial extents', () => {
+    expect(new CylinderWaterDomain(50).lengthM).toBe(
+      Number.POSITIVE_INFINITY,
+    );
+    expect(
+      new CylinderWaterDomain(50, { lengthM: 1_000 }).lengthM,
+    ).toBe(1_000);
+    expect(
+      () => new CylinderWaterDomain(50, { lengthM: 0 }),
+    ).toThrowError();
   });
 });

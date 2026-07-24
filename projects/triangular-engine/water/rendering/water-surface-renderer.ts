@@ -37,6 +37,7 @@ import {
 } from '../core/water-domain';
 import {
   createWaterDomainUniforms,
+  WATER_DOMAIN_CLIP_GLSL,
   WATER_DOMAIN_COMPOSE_GLSL,
   WATER_DOMAIN_COMPOSE_NORMAL_GLSL,
   WATER_DOMAIN_SURFACE_XZ_GLSL,
@@ -104,6 +105,7 @@ export class WaterSurfaceRenderer {
   private readonly scratchMatrix = new Matrix4();
   private readonly drawingBufferSize = new Vector2();
   private readonly uLodCameraXZ = { value: new Vector2() };
+  private readonly uLodPeriodZ = { value: 0 };
   private readonly domainUniforms: WaterDomainUniforms;
   private readonly surfaceDepthUniforms: WaterSurfaceDepthUniforms;
   private readonly uTime = { value: 0 };
@@ -147,7 +149,10 @@ export class WaterSurfaceRenderer {
   }
 
   update(camera: Camera, elapsedSeconds: number): void {
-    const frame = this.domain.getLocalFrame(camera.position);
+    const frame =
+      this.domain instanceof CylinderWaterDomain
+        ? this.getFixedCylinderFrame(this.domain)
+        : this.domain.getLocalFrame(camera.position);
     this.domainUniforms.uFrameOrigin.value.copy(frame.origin);
     this.domainUniforms.uFrameNormal.value.copy(frame.normal);
     this.domainUniforms.uFrameTangentU.value.copy(frame.tangentU);
@@ -180,25 +185,39 @@ export class WaterSurfaceRenderer {
         : elapsedSeconds;
 
     const localCamera =
-      this.domain.kind === 'plane'
-        ? new Vector2(
-            camera.position.clone().sub(frame.origin).dot(frame.tangentU),
-            camera.position.clone().sub(frame.origin).dot(frame.tangentV),
-          )
-        : new Vector2(0, 0);
+      this.domain instanceof CylinderWaterDomain
+        ? this.getCylinderCameraXZ(this.domain, frame, camera.position)
+        : this.domain.kind === 'plane'
+          ? new Vector2(
+              camera.position.clone().sub(frame.origin).dot(frame.tangentU),
+              camera.position.clone().sub(frame.origin).dot(frame.tangentV),
+            )
+          : new Vector2(0, 0);
     const levels = computeWaterLodLevels(
       localCamera.x,
       localCamera.y,
-      this.preset.grid,
+      this.getGridOptions(),
     );
+    const wrappedLevels =
+      this.domain instanceof CylinderWaterDomain
+        ? computeWaterLodLevels(
+            localCamera.x,
+            localCamera.y +
+              (localCamera.y >= 0 ? -1 : 1) * this.uLodPeriodZ.value,
+            this.getGridOptions(),
+          )
+        : undefined;
     this.uLodCameraXZ.value.copy(localCamera);
 
     for (let i = 0; i < levels.length; i++) {
       const level = levels[i];
       const mesh = this.levelMeshes[i];
-      mesh.count = level.instances.length;
-      for (let j = 0; j < level.instances.length; j++) {
-        const instance = level.instances[j];
+      const instances = wrappedLevels
+        ? this.mergeLodInstances(level.instances, wrappedLevels[i].instances)
+        : level.instances;
+      mesh.count = instances.length;
+      for (let j = 0; j < instances.length; j++) {
+        const instance = instances[j];
         this.scratchMatrix.makeScale(
           level.patchWorldSize,
           1,
@@ -288,13 +307,21 @@ export class WaterSurfaceRenderer {
       this.domainUniforms.uCylinderCenter.value.copy(this.domain.center);
       this.domainUniforms.uCylinderAxis.value.copy(this.domain.axis);
       this.domainUniforms.uCylinderRadius.value = this.domain.radiusM;
+      this.uLodPeriodZ.value = 2 * Math.PI * this.domain.radiusM;
+      this.domainUniforms.uCylinderHalfLength.value =
+        Number.isFinite(this.domain.lengthM)
+          ? this.domain.lengthM * 0.5
+          : OUTER_CULL_SENTINEL;
     }
   }
 
   private buildGrid(): void {
-    const grid = this.preset.grid;
+    const grid = this.getGridOptions();
     this.patchGeometry = createWaterLodPatchGeometry(grid.patchResolution);
-    const capacity = grid.coreSizePatches * grid.coreSizePatches;
+    const capacity =
+      grid.coreSizePatches *
+      grid.coreSizePatches *
+      (this.domain instanceof CylinderWaterDomain ? 2 : 1);
     const defines = {
       ...waterTierDefines(this.preset.tier),
       ...(this.domain.kind === 'sphere' ? { WATER_DOMAIN_SPHERE: 1 } : {}),
@@ -312,6 +339,95 @@ export class WaterSurfaceRenderer {
       this.levelMaterials.push(material);
       this.levelMeshes.push(mesh);
     }
+  }
+
+  private mergeLodInstances(
+    primary: readonly { readonly x: number; readonly z: number }[],
+    wrapped: readonly { readonly x: number; readonly z: number }[],
+  ): readonly { readonly x: number; readonly z: number }[] {
+    const merged = [...primary];
+    const occupied = new Set(primary.map(({ x, z }) => `${x}:${z}`));
+    for (const instance of wrapped) {
+      const key = `${instance.x}:${instance.z}`;
+      if (!occupied.has(key)) {
+        occupied.add(key);
+        merged.push(instance);
+      }
+    }
+    return merged;
+  }
+
+  /**
+   * A finite cylinder is a complete object, unlike the camera-following
+   * horizon used by plane/sphere domains. Keep its axial origin and seam
+   * stable so orbiting the camera never rotates or translates the mesh.
+   */
+  private getFixedCylinderFrame(domain: CylinderWaterDomain) {
+    const reference =
+      Math.abs(domain.axis.y) < 0.9
+        ? new Vector3(0, 1, 0)
+        : new Vector3(1, 0, 0);
+    const radial = new Vector3()
+      .crossVectors(domain.axis, reference)
+      .normalize();
+    return domain.getLocalFrame(
+      domain.center.clone().addScaledVector(radial, domain.radiusM),
+    );
+  }
+
+  /**
+   * Tracks the camera across the fixed cylinder parameter space. Clamping to
+   * the finite axial bounds keeps an arbitrarily distant outside camera from
+   * dragging the LOD grid away from the water object.
+   */
+  private getCylinderCameraXZ(
+    domain: CylinderWaterDomain,
+    frame: ReturnType<CylinderWaterDomain['getLocalFrame']>,
+    cameraPosition: Vector3,
+  ): Vector2 {
+    const relative = cameraPosition.clone().sub(domain.center);
+    const axial = relative.dot(domain.axis);
+    const clampedAxial = Number.isFinite(domain.lengthM)
+      ? Math.max(-domain.lengthM * 0.5, Math.min(domain.lengthM * 0.5, axial))
+      : axial;
+    const radial = relative.addScaledVector(domain.axis, -axial);
+    if (radial.lengthSq() === 0) {
+      return new Vector2(clampedAxial, 0);
+    }
+    radial.normalize();
+    const frameRadial = frame.normal.clone().negate();
+    const angle = Math.atan2(
+      radial.dot(frame.tangentV),
+      radial.dot(frameRadial),
+    );
+    return new Vector2(clampedAxial, angle * domain.radiusM);
+  }
+
+  /**
+   * Ensure the static cylinder grid reaches both ends and the seam opposite
+   * its fixed origin. Quality still controls local tessellation; bounds
+   * control only how many progressively coarser rings are required.
+   */
+  private getGridOptions(): WaterLodGridOptions {
+    if (!(this.domain instanceof CylinderWaterDomain)) {
+      return this.preset.grid;
+    }
+
+    const grid = this.preset.grid;
+    const requiredHalfExtent = Math.max(
+      2 * Math.PI * this.domain.radiusM,
+      Number.isFinite(this.domain.lengthM) ? this.domain.lengthM : 0,
+    );
+    const baseHalfExtent =
+      (grid.coreSizePatches / 2) * grid.baseCellSize;
+    const requiredRingCount = Math.max(
+      0,
+      Math.ceil(Math.log2(requiredHalfExtent / baseHalfExtent)),
+    );
+    return {
+      ...grid,
+      ringCount: Math.max(grid.ringCount, requiredRingCount),
+    };
   }
 
   private createLevelMaterial(
@@ -339,6 +455,7 @@ export class WaterSurfaceRenderer {
         ...this.domainUniforms,
         uTime: this.uTime,
         uLodCameraXZ: this.uLodCameraXZ,
+        uLodPeriodZ: this.uLodPeriodZ,
         uCellSize: { value: patchWorldSize / grid.patchResolution },
         uMorphStart: { value: Math.max(morphEnd - 2 * patchWorldSize, 0) },
         uMorphEnd: { value: morphEnd },
@@ -429,6 +546,7 @@ export const WATER_SURFACE_FRAGMENT_SHADER = `
   ${WATER_DOMAIN_UNIFORMS_GLSL}
   ${WATER_DOMAIN_COMPOSE_GLSL}
   ${WATER_DOMAIN_COMPOSE_NORMAL_GLSL}
+  ${WATER_DOMAIN_CLIP_GLSL}
   uniform vec3 uLightDirection;
   uniform float uInnerCullRadius;
   uniform float uOuterCullRadius;
@@ -453,6 +571,7 @@ export const WATER_SURFACE_FRAGMENT_SHADER = `
 
   void main() {
     waterLodCull(vLocalXZ, uLodCameraXZ, uInnerCullRadius, uOuterCullRadius);
+    waterDomainClip(vWorldPosition, vLocalXZ);
     vec3 localNormal = normalize(vLocalNormal);
     float distanceToCamera = distance(cameraPosition, vWorldPosition);
     #ifdef WATER_DETAIL_NORMALS
@@ -467,7 +586,7 @@ export const WATER_SURFACE_FRAGMENT_SHADER = `
         localNormal = waterDetailNormal(vSurfaceXZ, localNormal, uTime);
       #endif
     #endif
-    vec3 normal = waterComposeWorldNormal(localNormal);
+    vec3 normal = waterComposeWorldNormal(localNormal, vLocalXZ);
     vec3 domainUp = waterDomainUp(vWorldPosition);
 
     #ifdef WATER_DEPTH_PREPASS

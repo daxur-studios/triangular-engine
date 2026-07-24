@@ -22,9 +22,15 @@
  * docs/runbook/002_water_sublibrary.md, Phase 1a.
  */
 export const WATER_LOD_MORPH_GLSL = `
+  uniform float uLodPeriodZ;
+
   vec2 waterLodMorph(vec2 worldXZ, vec2 cameraXZ, float cellSize, float morphStart, float morphEnd) {
     vec2 snapped = round(worldXZ / (2.0 * cellSize)) * (2.0 * cellSize);
     vec2 delta = abs(worldXZ - cameraXZ);
+    if (uLodPeriodZ > 0.0) {
+      float wrappedZ = mod(delta.y, uLodPeriodZ);
+      delta.y = min(wrappedZ, uLodPeriodZ - wrappedZ);
+    }
     float dist = max(delta.x, delta.y);
     float t = clamp((dist - morphStart) / max(morphEnd - morphStart, 0.0001), 0.0, 1.0);
     return mix(worldXZ, snapped, t);
@@ -43,8 +49,14 @@ export const WATER_LOD_MORPH_GLSL = `
  * docs/runbook/002_water_sublibrary.md, Phase 1a.
  */
 export const WATER_LOD_CULL_GLSL = `
+  uniform float uLodPeriodZ;
+
   void waterLodCull(vec2 worldXZ, vec2 cameraXZ, float innerCullRadius, float outerCullRadius) {
     vec2 delta = abs(worldXZ - cameraXZ);
+    if (uLodPeriodZ > 0.0) {
+      float wrappedZ = mod(delta.y, uLodPeriodZ);
+      delta.y = min(wrappedZ, uLodPeriodZ - wrappedZ);
+    }
     float dist = max(delta.x, delta.y);
     if (dist < innerCullRadius || dist >= outerCullRadius) {
       discard;

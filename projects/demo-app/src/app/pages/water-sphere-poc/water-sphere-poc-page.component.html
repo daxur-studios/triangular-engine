@@ -20,13 +20,24 @@
         provide dry, shallow and deep regions for testing depth tint.
       </p>
 
-      <nav aria-label="Wave preset">
-        @for (key of presetKeys; track key) {
+      <nav aria-label="Wave motion">
+        @for (key of motionKeys; track key) {
           <button
-            [class.active]="activePreset() === key"
-            (click)="selectPreset(key)"
+            [class.active]="activeMotion() === key"
+            (click)="activeMotion.set(key)"
           >
-            {{ presetLabels[key] }}
+            {{ motionLabels[key] }}
+          </button>
+        }
+      </nav>
+
+      <nav aria-label="Water quality">
+        @for (key of qualityKeys; track key) {
+          <button
+            [class.active]="activeQuality() === key"
+            (click)="activeQuality.set(key)"
+          >
+            {{ qualityLabels[key] }}
           </button>
         }
       </nav>
@@ -47,7 +58,7 @@
           <input
             type="checkbox"
             [checked]="detailChop()"
-            (change)="toggleDetailChop()"
+            (change)="detailChop.set(!detailChop())"
           />
           Detail chop
         </label>
@@ -55,7 +66,7 @@
           <input
             type="checkbox"
             [checked]="shoreFade()"
-            (change)="toggleShoreFade()"
+            (change)="shoreFade.set(!shoreFade())"
           />
           Shore fade / depth tint
         </label>
@@ -77,6 +88,13 @@
     </section>
   </ng-template>
 
+  <waterSurface
+    [domain]="domain"
+    [quality]="activeQuality()"
+    [motion]="activeMotion()"
+    [presetOverrides]="presetOverrides()"
+    [wireframe]="wireframe()"
+  />
   <orbitControls
     [cameraPosition]="initialCameraPosition"
     [target]="initialTarget"

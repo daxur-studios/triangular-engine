@@ -195,6 +195,8 @@ export interface CylinderWaterDomainOptions {
   readonly axis?: Vector3;
   /** World-space point on the centerline. Defaults to the origin. */
   readonly center?: Vector3;
+  /** Total end-to-end length. Omit for an infinite cylinder. */
+  readonly lengthM?: number;
 }
 
 /**
@@ -215,6 +217,7 @@ export class CylinderWaterDomain implements WaterSurfaceDomain {
 
   readonly axis: Vector3;
   readonly center: Vector3;
+  readonly lengthM: number;
 
   constructor(
     readonly radiusM: number,
@@ -223,8 +226,17 @@ export class CylinderWaterDomain implements WaterSurfaceDomain {
     if (!Number.isFinite(radiusM) || radiusM <= 0) {
       throw new RangeError('CylinderWaterDomain radius must be positive and finite.');
     }
+    if (
+      options.lengthM !== undefined &&
+      (!Number.isFinite(options.lengthM) || options.lengthM <= 0)
+    ) {
+      throw new RangeError(
+        'CylinderWaterDomain length must be positive and finite.',
+      );
+    }
     this.axis = options.axis?.clone().normalize() ?? new Vector3(0, 1, 0);
     this.center = options.center?.clone() ?? new Vector3(0, 0, 0);
+    this.lengthM = options.lengthM ?? Number.POSITIVE_INFINITY;
   }
 
   getLocalFrame(referencePosition: Vector3): WaterLocalFrame {
@@ -261,14 +273,18 @@ export class CylinderWaterDomain implements WaterSurfaceDomain {
     heightAlongNormal: number,
     out = new Vector3(),
   ): Vector3 {
-    const flatPos = new Vector3()
-      .copy(frame.origin)
-      .addScaledVector(frame.tangentU, localX)
-      .addScaledVector(frame.tangentV, localZ)
-      .sub(this.center);
-    const axialComponent = flatPos.dot(this.axis);
-    const radialVector = flatPos.addScaledVector(this.axis, -axialComponent);
-    const direction = radialVector.normalize();
+    const originFromCenter = new Vector3().subVectors(
+      frame.origin,
+      this.center,
+    );
+    const axialComponent = originFromCenter.dot(this.axis) + localX;
+    const direction = originFromCenter
+      .addScaledVector(
+        this.axis,
+        -originFromCenter.dot(this.axis),
+      )
+      .normalize()
+      .applyAxisAngle(this.axis, localZ / this.radiusM);
     const displacedRadius = this.radiusM - heightAlongNormal;
     return out
       .copy(this.center)
@@ -298,4 +314,3 @@ export class CylinderWaterDomain implements WaterSurfaceDomain {
     return out.set(axialComponent, this.radiusM * angle);
   }
 }
-
