@@ -40,6 +40,7 @@ import {
   generateTerrainScatterInstances,
   selectFixedLevelScatterCells,
   type ITerrainScatterInstance,
+  type ScatterInstanceId,
   type ScatterLodDefinition,
   type ScatterPlacementRules,
 } from 'triangular-engine/scatter';
@@ -78,6 +79,12 @@ const TREE_SCALE = { min: 0.7, max: 1.6 };
  */
 const TREE_LOD_NEAR_RATIO = 0.55;
 const TREE_LOD_FAR_RATIO = 2.2;
+/** Width of the hysteresis band straddling each LOD boundary, as a fraction of scene scale — resists flicker while scrubbing the view-distance slider near a threshold. */
+const TREE_LOD_HYSTERESIS_RATIO = 0.08;
+/** The view-distance slider scales the LOD/fade thresholds directly rather than driving them off the live orbit camera, so LOD transitions can be scrubbed on demand instead of chasing the camera around. */
+const VIEW_DISTANCE_SCALE_MIN = 0.15;
+const VIEW_DISTANCE_SCALE_MAX = 2.5;
+const VIEW_DISTANCE_SCALE_DEFAULT = 1;
 
 const GRASS_RULES: ScatterPlacementRules = {
   alignment: 'align-to-surface-up',
@@ -188,6 +195,7 @@ interface IShapeFixture {
 export class ScatterLabPageComponent {
   readonly shape = signal<ScatterLabShape>('plane');
   readonly density = signal(0.5);
+  readonly viewDistanceScale = signal(VIEW_DISTANCE_SCALE_DEFAULT);
   readonly treeCount = signal(0);
   readonly treeNearCount = signal(0);
   readonly treeFarCount = signal(0);
@@ -222,6 +230,8 @@ export class ScatterLabPageComponent {
     vertexColors: true,
   });
   private group?: Group;
+  /** Persisted across rebuilds so hysteresis can resist flicker as the view-distance slider is scrubbed near a tier boundary; naturally moot across a shape switch since instance IDs embed the cell key. */
+  private previousTreeTierByInstanceId?: ReadonlyMap<ScatterInstanceId, number>;
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -251,6 +261,14 @@ export class ScatterLabPageComponent {
   setDensity(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
     this.density.set(Math.max(0, Math.min(1, value)));
+    this.rebuild();
+  }
+
+  setViewDistanceScale(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    this.viewDistanceScale.set(
+      Math.max(VIEW_DISTANCE_SCALE_MIN, Math.min(VIEW_DISTANCE_SCALE_MAX, value)),
+    );
     this.rebuild();
   }
 
@@ -367,12 +385,28 @@ export class ScatterLabPageComponent {
       cameraWorldM[1] - targetWorldM[1],
       cameraWorldM[2] - targetWorldM[2],
     );
+    /**
+     * The view-distance slider scales every threshold below directly — it
+     * simulates pulling the viewpoint closer/further without actually
+     * moving it, so LOD/fade transitions can be scrubbed on demand instead
+     * of chasing the live orbit camera around the shape.
+     */
+    const viewDistanceScale = this.viewDistanceScale();
     const treeLodTiers: readonly ScatterLodDefinition[] = [
-      { kind: 'mesh', maxDistanceM: sceneScaleM * TREE_LOD_NEAR_RATIO, castShadow: true },
-      { kind: 'mesh', maxDistanceM: sceneScaleM * TREE_LOD_FAR_RATIO, castShadow: false },
+      {
+        kind: 'mesh',
+        maxDistanceM: sceneScaleM * TREE_LOD_NEAR_RATIO * viewDistanceScale,
+        castShadow: true,
+      },
+      {
+        kind: 'mesh',
+        maxDistanceM: sceneScaleM * TREE_LOD_FAR_RATIO * viewDistanceScale,
+        castShadow: false,
+      },
     ];
-    const grassFadeStartM = sceneScaleM * GRASS_FADE_START_RATIO;
-    const grassFadeEndM = sceneScaleM * GRASS_FADE_END_RATIO;
+    const treeLodHysteresisM = sceneScaleM * TREE_LOD_HYSTERESIS_RATIO * viewDistanceScale;
+    const grassFadeStartM = sceneScaleM * GRASS_FADE_START_RATIO * viewDistanceScale;
+    const grassFadeEndM = sceneScaleM * GRASS_FADE_END_RATIO * viewDistanceScale;
     group.add(
       this.buildDistanceDebugHelpers(
         viewpointWorldM,
@@ -447,7 +481,10 @@ export class ScatterLabPageComponent {
       instances: allTreeInstances,
       lods: treeLodTiers,
       viewpointWorldM,
+      previousTierByInstanceId: this.previousTreeTierByInstanceId,
+      hysteresisM: treeLodHysteresisM,
     });
+    this.previousTreeTierByInstanceId = treeLods.tierByInstanceId;
     const treeMeshes = buildScatterInstancedMeshesByLod({
       buckets: treeLods.buckets,
       assetsByTier: (tierIndex) => ({
