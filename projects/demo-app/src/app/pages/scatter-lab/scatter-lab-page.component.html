@@ -4,40 +4,59 @@
       <header>
         <div>
           <a routerLink="/">← Examples</a
-          ><small>triangular-engine/scatter — Phase 2 LOD + distance fade</small>
+          ><small
+            >triangular-engine/scatter — Phase 2 LOD + distance fade</small
+          >
         </div>
         <strong>Deterministic ground scatter on plane, sphere, cylinder</strong>
       </header>
 
       <p class="blurb">
         Trees are placed by <code>generateTerrainScatterInstances</code> from
-        deterministic candidate pools, then bucketed into near/far LOD tiers
-        by <code>bucketScatterInstancesByLod</code> and rendered as one
+        deterministic candidate pools, then bucketed into near/far LOD tiers by
+        <code>bucketScatterInstancesByLod</code> and rendered as one
         <code>InstancedMesh</code> per tier via
         <code>buildScatterInstancedMeshesByLod</code>. Grass has no far tier —
         it fades out by density via <code>distanceFade</code> instead of
         popping. Placement reads the same terrain surface sampler the ground
-        mesh does, so instances never float or sink — and reject steep
-        slopes. The view-distance slider scales every LOD/fade threshold
-        directly (not the live orbit camera), with a hysteresis band on the
-        tree tiers so scrubbing near a boundary doesn't flicker.
+        mesh does, so instances never float or sink — and reject steep slopes.
+        The view-distance slider scales every LOD/fade threshold directly (not
+        the live orbit camera), with a hysteresis band on the tree tiers so
+        scrubbing near a boundary doesn't flicker. A lake basin is carved into
+        the shared terrain field and rendered as a flat water patch at the same
+        elevation; a <code>suitability</code> callback rejects any candidate at
+        or below the waterline, so nothing spawns underwater. Trees additionally
+        use a noise-based suitability mask to clump into forest patches instead
+        of blanketing the terrain — grass stays uniform, so the patches read
+        clearly against it. Grass and forest density are separate sliders so
+        forest density can be pushed to full to see dense stands without also
+        flooding the grass layer.
       </p>
 
       <nav aria-label="Terrain shape">
-        <button [class.active]="shape() === 'plane'" (click)="selectShape('plane')">
+        <button
+          [class.active]="shape() === 'plane'"
+          (click)="selectShape('plane')"
+        >
           Plane
         </button>
-        <button [class.active]="shape() === 'sphere'" (click)="selectShape('sphere')">
+        <button
+          [class.active]="shape() === 'sphere'"
+          (click)="selectShape('sphere')"
+        >
           Sphere
         </button>
-        <button [class.active]="shape() === 'cylinder'" (click)="selectShape('cylinder')">
+        <button
+          [class.active]="shape() === 'cylinder'"
+          (click)="selectShape('cylinder')"
+        >
           Cylinder interior
         </button>
       </nav>
 
       <div class="actions">
         <label class="slider">
-          Base density: {{ density() | number: '1.0-2' }}
+          Grass density: {{ density() | number: "1.0-2" }}
           <input
             type="range"
             min="0"
@@ -48,7 +67,18 @@
           />
         </label>
         <label class="slider">
-          Simulated view distance: {{ viewDistanceScale() | number: '1.2-2' }}×
+          Forest density: {{ forestDensity() | number: "1.0-2" }}
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            [value]="forestDensity()"
+            (input)="setForestDensity($event)"
+          />
+        </label>
+        <label class="slider">
+          Simulated view distance: {{ viewDistanceScale() | number: "1.2-2" }}×
           <input
             type="range"
             min="0.15"
