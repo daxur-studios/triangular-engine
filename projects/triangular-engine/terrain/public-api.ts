@@ -2,6 +2,7 @@
 export * from './core/terrain-field';
 export * from './core/terrain-math';
 export * from './core/terrain-patch';
+export * from './core/terrain-surface-sample';
 export * from './domains/terrain-surface-domain';
 export * from './domains/plane-terrain-domain';
 export * from './domains/plane-terrain-selection';
