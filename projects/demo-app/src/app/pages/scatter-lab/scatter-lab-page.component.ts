@@ -38,6 +38,7 @@ import {
   bucketScatterInstancesByLod,
   buildScatterInstancedMesh,
   buildScatterInstancedMeshesByLod,
+  enableScatterDitherFade,
   generateTerrainScatterInstances,
   selectFixedLevelScatterCells,
   type IScatterSurfaceSample,
@@ -64,7 +65,7 @@ const SCATTER_FIXED_LEVEL_DEPTH = 1;
 const WORLD_SEED = 1_337;
 
 const TREE_RULES: ScatterPlacementRules = {
-  alignment: 'align-to-normal',
+  alignment: 'align-to-surface-up',
   slopeMax01: 0.55,
   embedDepthM: 0.3,
 };
@@ -85,6 +86,8 @@ const TREE_LOD_NEAR_RATIO = 0.55;
 const TREE_LOD_FAR_RATIO = 2.2;
 /** Width of the hysteresis band straddling each LOD boundary, as a fraction of scene scale — resists flicker while scrubbing the view-distance slider near a threshold. */
 const TREE_LOD_HYSTERESIS_RATIO = 0.08;
+/** Distance before the near tier's cutoff over which it cross-fades into the far tier via shader dither, as a fraction of scene scale — replaces the hard mesh pop with a gradual screen-door blend. */
+const TREE_LOD_DITHER_BAND_RATIO = 0.18;
 /** The view-distance slider scales the LOD/fade thresholds directly rather than driving them off the live orbit camera, so LOD transitions can be scrubbed on demand instead of chasing the camera around. */
 const VIEW_DISTANCE_SCALE_MIN = 0.15;
 const VIEW_DISTANCE_SCALE_MAX = 2.5;
@@ -364,6 +367,8 @@ export class ScatterLabPageComponent {
     const destroyRef = inject(DestroyRef);
     const previousBackground = this.engine.scene.background;
     this.engine.scene.background = new Color('#071018');
+    enableScatterDitherFade(this.treeMaterial);
+    enableScatterDitherFade(this.treeMaterialFar);
     this.rebuild();
     destroyRef.onDestroy(() => {
       this.disposeScene();
@@ -547,6 +552,8 @@ export class ScatterLabPageComponent {
     ];
     const treeLodHysteresisM =
       sceneScaleM * TREE_LOD_HYSTERESIS_RATIO * viewDistanceScale;
+    const treeLodDitherBandM =
+      sceneScaleM * TREE_LOD_DITHER_BAND_RATIO * viewDistanceScale;
     const grassFadeStartM =
       sceneScaleM * GRASS_FADE_START_RATIO * viewDistanceScale;
     const grassFadeEndM =
@@ -646,6 +653,7 @@ export class ScatterLabPageComponent {
       viewpointWorldM,
       previousTierByInstanceId: this.previousTreeTierByInstanceId,
       hysteresisM: treeLodHysteresisM,
+      ditherBandM: treeLodDitherBandM,
     });
     this.previousTreeTierByInstanceId = treeLods.tierByInstanceId;
     const treeMeshes = buildScatterInstancedMeshesByLod({
@@ -674,9 +682,8 @@ export class ScatterLabPageComponent {
 
     this.engine.scene.add(group);
     this.group = group;
-    this.treeCount.set(
-      treeLods.buckets.reduce((sum, b) => sum + b.instances.length, 0),
-    );
+    /** Unique instances, not summed bucket lengths — an instance mid dither cross-fade is drawn in two buckets at once. */
+    this.treeCount.set(treeLods.tierByInstanceId.size);
     this.treeNearCount.set(
       treeLods.buckets.find((b) => b.tierIndex === 0)?.instances.length ?? 0,
     );

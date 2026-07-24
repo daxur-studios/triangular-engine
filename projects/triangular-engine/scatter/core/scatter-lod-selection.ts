@@ -58,8 +58,19 @@ export function selectScatterLodTier(
   let blend01 = 0;
   if (ditherBandM > 0 && lod) {
     const distanceToBoundaryM = lod.maxDistanceM - distanceM;
-    if (distanceToBoundaryM >= 0 && distanceToBoundaryM < ditherBandM) {
-      blend01 = 1 - distanceToBoundaryM / ditherBandM;
+    /**
+     * Clamped rather than gated on `>= 0`: hysteresis can resist a raw tier
+     * change and leave `distanceM` already past this tier's own boundary
+     * (negative distanceToBoundaryM). Treating that as "outside the band, no
+     * fade" snapped the cross-fade back to fully opaque every time the
+     * boundary itself moves past a stationary instance faster than the
+     * dither band — visible as a hard pop-then-pop-back at the resisted
+     * boundary. Clamping keeps blend pinned at 1 (already fully faded)
+     * instead, so the resisted tier stays visually continuous with the
+     * frame before hysteresis kicked in.
+     */
+    if (distanceToBoundaryM < ditherBandM) {
+      blend01 = Math.min(1, Math.max(0, 1 - distanceToBoundaryM / ditherBandM));
     }
   }
 

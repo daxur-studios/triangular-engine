@@ -23,11 +23,13 @@ describe('buildScatterInstancedMeshesByLod', () => {
         tierIndex: 0,
         lod: { kind: 'mesh', maxDistanceM: 50, castShadow: true },
         instances: [instance('a', 0), instance('b', 5)],
+        alpha01ByInstanceId: new Map(),
       },
       {
         tierIndex: 1,
         lod: { kind: 'billboard', maxDistanceM: 200, castShadow: false },
         instances: [instance('c', 100)],
+        alpha01ByInstanceId: new Map(),
       },
     ];
 

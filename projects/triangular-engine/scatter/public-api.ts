@@ -13,3 +13,4 @@ export * from './terrain/scatter-lod-batches';
 export * from './three/scatter-instance-transform';
 export * from './three/scatter-instanced-mesh';
 export * from './three/scatter-lod-instanced-meshes';
+export * from './three/scatter-dither-material';

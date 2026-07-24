@@ -49,6 +49,7 @@ export function buildScatterInstancedMeshesByLod(
       scale: options.scale,
       anchorWorldM: options.anchorWorldM,
       castShadow: bucket.lod.castShadow,
+      alpha01ByInstanceId: bucket.alpha01ByInstanceId,
     });
     return { tierIndex: bucket.tierIndex, lod: bucket.lod, mesh };
   });

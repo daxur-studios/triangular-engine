@@ -71,6 +71,19 @@ describe('selectScatterLodTier', () => {
     expect(clearlyInside.tierIndex).toBe(0);
   });
 
+  it('keeps blend01 pinned at 1 when hysteresis resists a tier already past its own boundary', () => {
+    // distance 52 is past tier 0's boundary (50), but hysteresis (half=5) resists
+    // the raw tier change, so the resisted tier's own distanceToBoundaryM goes
+    // negative. The fade must stay fully committed (1), not snap back to 0.
+    const resisted = selectScatterLodTier(52, lods, {
+      previousTierIndex: 0,
+      hysteresisM: 10,
+      ditherBandM: 10,
+    });
+    expect(resisted.tierIndex).toBe(0);
+    expect(resisted.blend01).toBeCloseTo(1, 5);
+  });
+
   it('ignores hysteresis across a multi-tier jump (e.g. teleport)', () => {
     const result = selectScatterLodTier(300, lods, {
       previousTierIndex: 0,

@@ -77,4 +77,54 @@ describe('bucketScatterInstancesByLod', () => {
     });
     expect(result.buckets.map((b) => b.tierIndex)).toEqual([0, 1]);
   });
+
+  it('leaves alpha01ByInstanceId empty when ditherBandM is unset', () => {
+    const instances = [instance('near', 10)];
+    const result = bucketScatterInstancesByLod({
+      instances,
+      lods,
+      viewpointWorldM: [0, 0, 0],
+    });
+    expect(result.buckets[0].alpha01ByInstanceId.size).toBe(0);
+  });
+
+  it('duplicates an instance into both tiers with complementary alpha inside the dither band', () => {
+    // Tier 0's boundary is at 50; a ditherBandM of 10 starts the cross-fade at distance 40.
+    const instances = [instance('a', 45)];
+    const result = bucketScatterInstancesByLod({
+      instances,
+      lods,
+      viewpointWorldM: [0, 0, 0],
+      ditherBandM: 10,
+    });
+
+    expect(result.buckets.length).toBe(2);
+    const nearBucket = result.buckets.find((b) => b.tierIndex === 0)!;
+    const farBucket = result.buckets.find((b) => b.tierIndex === 1)!;
+    expect(nearBucket.instances.map((i) => i.instanceId)).toEqual(['a']);
+    expect(farBucket.instances.map((i) => i.instanceId)).toEqual(['a']);
+
+    const nearAlpha = nearBucket.alpha01ByInstanceId.get('a')!;
+    const farAlpha = farBucket.alpha01ByInstanceId.get('a')!;
+    expect(nearAlpha + farAlpha).toBeCloseTo(1, 6);
+    expect(farAlpha).toBeGreaterThan(0);
+    expect(farAlpha).toBeLessThan(1);
+
+    // The instance's "home" tier for hysteresis stays tier 0, regardless of the fade-in duplicate.
+    expect(result.tierByInstanceId.get('a')).toBe(0);
+  });
+
+  it('does not dither the last tier out to nothing — it still hard-culls at its own maxDistanceM', () => {
+    const instances = [instance('a', 195)];
+    const result = bucketScatterInstancesByLod({
+      instances,
+      lods,
+      viewpointWorldM: [0, 0, 0],
+      ditherBandM: 10,
+    });
+
+    expect(result.buckets.length).toBe(1);
+    expect(result.buckets[0].tierIndex).toBe(1);
+    expect(result.buckets[0].alpha01ByInstanceId.size).toBe(0);
+  });
 });
