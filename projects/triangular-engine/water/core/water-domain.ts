@@ -298,14 +298,18 @@ export class CylinderWaterDomain implements WaterSurfaceDomain {
     localZ: number,
     out = new Vector2(),
   ): Vector2 {
-    const flatPos = new Vector3()
-      .copy(frame.origin)
-      .addScaledVector(frame.tangentU, localX)
-      .addScaledVector(frame.tangentV, localZ)
-      .sub(this.center);
-    const axialComponent = flatPos.dot(this.axis);
-    const radialVector = flatPos.addScaledVector(this.axis, -axialComponent);
-    const direction = radialVector.normalize();
+    const originFromCenter = new Vector3().subVectors(
+      frame.origin,
+      this.center,
+    );
+    const axialComponent = originFromCenter.dot(this.axis) + localX;
+    const direction = originFromCenter
+      .addScaledVector(
+        this.axis,
+        -originFromCenter.dot(this.axis),
+      )
+      .normalize()
+      .applyAxisAngle(this.axis, localZ / this.radiusM);
     const reference =
       Math.abs(this.axis.y) < 0.9 ? referenceUp : referenceRight;
     const refU = new Vector3().crossVectors(reference, this.axis).normalize();
