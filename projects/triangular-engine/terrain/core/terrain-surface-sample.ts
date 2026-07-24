@@ -13,6 +13,8 @@ export interface ITerrainSurfaceSample {
   /** worldPositionM relative to options.anchorWorldM, f32-safe at planetary radii. */
   readonly anchorRelativeM: TerrainVector3;
   readonly normal: TerrainVector3;
+  /** Undisplaced "which way is up" reference (flat=+Y, sphere=outward radial, cylinder=inward radial). */
+  readonly surfaceUp: TerrainVector3;
   readonly elevationM: number;
   /** 0 = flat relative to the undisplaced surface, 1 = vertical or steeper. */
   readonly slope01: number;
@@ -144,6 +146,7 @@ export function sampleTerrainSurface<TAddress>(
     worldPositionM,
     anchorRelativeM,
     normal: normalVector,
+    surfaceUp: baseNormal,
     elevationM,
     slope01,
   };

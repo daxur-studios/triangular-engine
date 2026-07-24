@@ -101,4 +101,11 @@ export const routes: Routes = [
         ({ WaterCylinderPocPageComponent }) => WaterCylinderPocPageComponent,
       ),
   },
+  {
+    path: 'scatter-lab',
+    loadComponent: () =>
+      import('./pages/scatter-lab/scatter-lab-page.component').then(
+        ({ ScatterLabPageComponent }) => ScatterLabPageComponent,
+      ),
+  },
 ];

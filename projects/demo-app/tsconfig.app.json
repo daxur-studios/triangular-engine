@@ -17,7 +17,10 @@
       "triangular-engine/terrain": [
         "projects/triangular-engine/terrain/public-api"
       ],
-      "triangular-engine/water": ["projects/triangular-engine/water/public-api"]
+      "triangular-engine/water": ["projects/triangular-engine/water/public-api"],
+      "triangular-engine/scatter": [
+        "projects/triangular-engine/scatter/public-api"
+      ]
     },
     "outDir": "../../out-tsc/app",
     "types": []

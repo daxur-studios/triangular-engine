@@ -1,0 +1,62 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Scatter lab controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small>triangular-engine/scatter — Phase 1c instanced placement</small>
+        </div>
+        <strong>Deterministic ground scatter on plane, sphere, cylinder</strong>
+      </header>
+
+      <p class="blurb">
+        Trees are placed by <code>generateTerrainScatterInstances</code> from
+        deterministic candidate pools, then rendered with one
+        <code>InstancedMesh</code> via <code>buildScatterInstancedMesh</code>.
+        Placement reads the same terrain surface sampler the ground mesh does,
+        so instances never float or sink — and reject steep slopes.
+      </p>
+
+      <nav aria-label="Terrain shape">
+        <button [class.active]="shape() === 'plane'" (click)="selectShape('plane')">
+          Plane
+        </button>
+        <button [class.active]="shape() === 'sphere'" (click)="selectShape('sphere')">
+          Sphere
+        </button>
+        <button [class.active]="shape() === 'cylinder'" (click)="selectShape('cylinder')">
+          Cylinder interior
+        </button>
+      </nav>
+
+      <div class="actions">
+        <label class="slider">
+          Base density: {{ density() | number: '1.0-2' }}
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            [value]="density()"
+            (input)="setDensity($event)"
+          />
+        </label>
+      </div>
+
+      <p class="blurb note">
+        {{ treeCount() }} tree instances across {{ cellCount() }} identity
+        cells (one fixed-level scatter cell per terrain patch's quarter — see
+        <code>selectFixedLevelScatterCells</code>).
+      </p>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="initialCameraPosition()"
+    [target]="initialTarget()"
+    [upVector]="initialUpVector()"
+    [near]="0.1"
+  />
+  <ambientLight [intensity]="1.4" />
+  <directionalLight [position]="[300, 400, 200]" [intensity]="2.2" />
+</scene>

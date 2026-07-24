@@ -48,6 +48,9 @@ describe('sampleTerrainSurface', () => {
       expect(sample.normal[0]).toBeCloseTo(0, 5);
       expect(sample.normal[1]).toBeCloseTo(1, 5);
       expect(sample.normal[2]).toBeCloseTo(0, 5);
+      expect(sample.surfaceUp[0]).toBeCloseTo(0, 5);
+      expect(sample.surfaceUp[1]).toBeCloseTo(1, 5);
+      expect(sample.surfaceUp[2]).toBeCloseTo(0, 5);
       expect(sample.slope01).toBeCloseTo(0, 5);
       expect(sample.worldPositionM).toEqual(
         domain.getSurfacePosition(address, 0, 0, 5),
@@ -134,6 +137,11 @@ describe('sampleTerrainSurface', () => {
         sample.normal[1] * sample.fieldPosition[1] +
         sample.normal[2] * sample.fieldPosition[2];
       expect(dot).toBeGreaterThan(0.99);
+      const surfaceUpDot =
+        sample.surfaceUp[0] * sample.fieldPosition[0] +
+        sample.surfaceUp[1] * sample.fieldPosition[1] +
+        sample.surfaceUp[2] * sample.fieldPosition[2];
+      expect(surfaceUpDot).toBeGreaterThan(0.99);
     });
 
     it('reports non-zero slope where the field actually tilts', () => {
