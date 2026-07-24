@@ -5,6 +5,8 @@ export * from './core/scatter-layer-definition';
 export * from './core/scatter-instance-id';
 export * from './core/scatter-candidate';
 export * from './core/scatter-placement';
+export * from './core/scatter-lod-selection';
+export * from './core/scatter-distance-fade';
 export * from './terrain/scatter-terrain-cells';
 export * from './terrain/scatter-terrain-instances';
 export * from './three/scatter-instance-transform';
