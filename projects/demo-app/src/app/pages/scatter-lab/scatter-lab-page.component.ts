@@ -23,6 +23,7 @@ import {
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
+  ConstantTerrainField,
   CylinderTerrainDomain,
   generateTerrainPatchMesh,
   PlaneTerrainDomain,
@@ -39,10 +40,12 @@ import {
   buildScatterInstancedMeshesByLod,
   generateTerrainScatterInstances,
   selectFixedLevelScatterCells,
+  type IScatterSurfaceSample,
   type ITerrainScatterInstance,
   type ScatterInstanceId,
   type ScatterLodDefinition,
   type ScatterPlacementRules,
+  type ScatterSuitabilityFn,
 } from 'triangular-engine/scatter';
 
 type ScatterLabShape = 'plane' | 'sphere' | 'cylinder';
@@ -99,6 +102,23 @@ const GRASS_SCALE = { min: 0.5, max: 1.1 };
 const GRASS_FADE_START_RATIO = 0.5;
 const GRASS_FADE_END_RATIO = 1.6;
 
+/** Field-space elevation a lake basin dips to at its deepest, and the radius (in the same shared field-space coords `bumps` uses) it blends out over. */
+const LAKE_CENTER_FIELD: readonly [number, number] = [55, -45];
+const LAKE_RADIUS_M = 55;
+const LAKE_DEPTH_M = 18;
+/** Anything at or below this elevation is water — trees/grass are excluded there to verify scatter respects a water level. */
+const WATER_LEVEL_M = -8;
+/** Small buffer above the waterline so nothing spawns right at the shore edge. */
+const WATER_SHORE_MARGIN_M = 0.5;
+/** Bounds widen to fit the lake dip on top of the ambient bump range (~±14). */
+const FIELD_MIN_ELEVATION_M = -34;
+const FIELD_MAX_ELEVATION_M = 20;
+
+/** Wavelength (in world meters) of the forest-patch noise — bigger reads as fewer, larger stands. */
+const FOREST_PATCH_WAVELENGTH_M = 45;
+const FOREST_PATCH_THRESHOLD01 = 0.52;
+const FOREST_PATCH_EDGE_SOFTNESS01 = 0.12;
+
 /** Shared hill noise so every domain's field looks like the same terrain, just curved differently. */
 function bumps(x: number, z: number): number {
   return (
@@ -106,27 +126,96 @@ function bumps(x: number, z: number): number {
   );
 }
 
+/** Single circular basin subtracted from `bumps`, smoothstepped to zero at its rim so the shoreline isn't a hard crease. */
+function lakeBasin(x: number, z: number): number {
+  const dx = x - LAKE_CENTER_FIELD[0];
+  const dz = z - LAKE_CENTER_FIELD[1];
+  const t = Math.max(0, 1 - Math.hypot(dx, dz) / LAKE_RADIUS_M);
+  const smooth01 = t * t * (3 - 2 * t);
+  return -LAKE_DEPTH_M * smooth01;
+}
+
+/** Same elevation every shape's field samples — one lake, at the same field-space spot, regardless of how that field-space maps onto plane/sphere/cylinder. */
+function terrainElevationM(x: number, z: number): number {
+  return bumps(x, z) + lakeBasin(x, z);
+}
+
+function smoothstep01(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/** Deterministic 0..1 hash, used as the value-noise lattice corner values below. */
+function hash3(x: number, y: number, z: number): number {
+  const s = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453123;
+  return s - Math.floor(s);
+}
+
+/** Trilinearly-interpolated value noise — cheap and dependency-free, good enough for a visual patchiness mask. */
+function valueNoise3D(x: number, y: number, z: number): number {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const zi = Math.floor(z);
+  const u = smoothstep01(0, 1, x - xi);
+  const v = smoothstep01(0, 1, y - yi);
+  const w = smoothstep01(0, 1, z - zi);
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+  const x00 = lerp(hash3(xi, yi, zi), hash3(xi + 1, yi, zi), u);
+  const x10 = lerp(hash3(xi, yi + 1, zi), hash3(xi + 1, yi + 1, zi), u);
+  const x01 = lerp(hash3(xi, yi, zi + 1), hash3(xi + 1, yi, zi + 1), u);
+  const x11 = lerp(hash3(xi, yi + 1, zi + 1), hash3(xi + 1, yi + 1, zi + 1), u);
+  const y0 = lerp(x00, x10, v);
+  const y1 = lerp(x01, x11, v);
+  return lerp(y0, y1, w);
+}
+
+/**
+ * 0..1 mask carving trees into patches instead of blanketing the terrain —
+ * uses full 3D world position (not just x/z) so it stays sensible on a
+ * sphere or cylinder, where two surface points can share an x/z pair.
+ */
+function forestPatchMask01(worldPositionM: TerrainVector3): number {
+  const noise01 = valueNoise3D(
+    worldPositionM[0] / FOREST_PATCH_WAVELENGTH_M,
+    worldPositionM[1] / FOREST_PATCH_WAVELENGTH_M,
+    worldPositionM[2] / FOREST_PATCH_WAVELENGTH_M,
+  );
+  return smoothstep01(
+    FOREST_PATCH_THRESHOLD01 - FOREST_PATCH_EDGE_SOFTNESS01,
+    FOREST_PATCH_THRESHOLD01 + FOREST_PATCH_EDGE_SOFTNESS01,
+    noise01,
+  );
+}
+
+/** Excludes any candidate at or below the waterline — shared by trees and grass so nothing spawns underwater. */
+const aboveWaterSuitability: ScatterSuitabilityFn = (sample: IScatterSurfaceSample) =>
+  sample.elevationM > WATER_LEVEL_M + WATER_SHORE_MARGIN_M ? 1 : 0;
+
+/** Trees additionally clump into patches; grass stays uniform (besides the water exclusion) so the lake reads clearly against a mostly-even ground cover. */
+const treeSuitability: ScatterSuitabilityFn = (sample: IScatterSurfaceSample) =>
+  aboveWaterSuitability(sample) * forestPatchMask01(sample.worldPositionM);
+
 class PlaneScatterField implements ITerrainField {
-  readonly minElevationM = -20;
-  readonly maxElevationM = 20;
+  readonly minElevationM = FIELD_MIN_ELEVATION_M;
+  readonly maxElevationM = FIELD_MAX_ELEVATION_M;
   sample([x, _y, z]: TerrainVector3): ITerrainFieldSample {
-    return { elevationM: bumps(x, z) };
+    return { elevationM: terrainElevationM(x, z) };
   }
   sampleBatch(positions: Float64Array, out = new Float64Array(positions.length / 3)): Float64Array {
     for (let i = 0; i < out.length; i++) {
-      out[i] = bumps(positions[i * 3], positions[i * 3 + 2]);
+      out[i] = terrainElevationM(positions[i * 3], positions[i * 3 + 2]);
     }
     return out;
   }
 }
 
 class SphereScatterField implements ITerrainField {
-  readonly minElevationM = -20;
-  readonly maxElevationM = 20;
+  readonly minElevationM = FIELD_MIN_ELEVATION_M;
+  readonly maxElevationM = FIELD_MAX_ELEVATION_M;
   constructor(private readonly radiusM: number) {}
   sample([x, y, z]: TerrainVector3): ITerrainFieldSample {
     return {
-      elevationM: bumps(x * this.radiusM, z * this.radiusM) + Math.sin(y * 4) * 3,
+      elevationM: terrainElevationM(x * this.radiusM, z * this.radiusM) + Math.sin(y * 4) * 3,
     };
   }
   sampleBatch(positions: Float64Array, out = new Float64Array(positions.length / 3)): Float64Array {
@@ -142,12 +231,12 @@ class SphereScatterField implements ITerrainField {
 }
 
 class CylinderScatterField implements ITerrainField {
-  readonly minElevationM = -20;
-  readonly maxElevationM = 20;
+  readonly minElevationM = FIELD_MIN_ELEVATION_M;
+  readonly maxElevationM = FIELD_MAX_ELEVATION_M;
   constructor(private readonly radiusM: number) {}
   sample([axialM, radialY, radialZ]: TerrainVector3): ITerrainFieldSample {
     const angle = Math.atan2(radialZ, radialY);
-    return { elevationM: bumps(axialM, angle * this.radiusM) };
+    return { elevationM: terrainElevationM(axialM, angle * this.radiusM) };
   }
   sampleBatch(positions: Float64Array, out = new Float64Array(positions.length / 3)): Float64Array {
     for (let i = 0; i < out.length; i++) {
@@ -229,6 +318,15 @@ export class ScatterLabPageComponent {
     roughness: 0.95,
     vertexColors: true,
   });
+  private readonly waterField = new ConstantTerrainField(WATER_LEVEL_M);
+  private readonly waterMaterial = new MeshStandardMaterial({
+    color: '#2f7fb8',
+    transparent: true,
+    opacity: 0.6,
+    roughness: 0.15,
+    metalness: 0.05,
+    depthWrite: false,
+  });
   private group?: Group;
   /** Persisted across rebuilds so hysteresis can resist flicker as the view-distance slider is scrubbed near a tier boundary; naturally moot across a shape switch since instance IDs embed the cell key. */
   private previousTreeTierByInstanceId?: ReadonlyMap<ScatterInstanceId, number>;
@@ -247,6 +345,7 @@ export class ScatterLabPageComponent {
       this.grassGeometry.dispose();
       this.grassMaterial.dispose();
       this.groundMaterial.dispose();
+      this.waterMaterial.dispose();
       this.engine.scene.background = previousBackground;
     });
   }
@@ -424,6 +523,12 @@ export class ScatterLabPageComponent {
       }) as ITerrainPatchMesh<unknown>;
       group.add(this.buildTerrainMesh(patch));
 
+      const waterPatch = generateTerrainPatchMesh(this.waterField, fixture.domain as never, {
+        address: address as never,
+        resolution: TERRAIN_RESOLUTION,
+      }) as ITerrainPatchMesh<unknown>;
+      group.add(this.buildWaterMesh(waterPatch));
+
       const cellAddresses = selectFixedLevelScatterCells(fixture.domain as never, {
         roots: [address],
         anchorWorldM: [0, 0, 0],
@@ -449,6 +554,7 @@ export class ScatterLabPageComponent {
             candidatePoolSize: TREE_CANDIDATE_POOL_SIZE,
             rules: TREE_RULES,
             baseDensity01: this.density(),
+            suitability: treeSuitability,
           }),
         );
 
@@ -467,6 +573,7 @@ export class ScatterLabPageComponent {
             candidatePoolSize: GRASS_CANDIDATE_POOL_SIZE,
             rules: GRASS_RULES,
             baseDensity01: this.density(),
+            suitability: aboveWaterSuitability,
             distanceFade: {
               viewpointWorldM,
               fadeStartM: grassFadeStartM,
@@ -570,6 +677,22 @@ export class ScatterLabPageComponent {
     return mesh;
   }
 
+  /** Flat water patch at the fixed waterline — reuses the terrain mesher with a `ConstantTerrainField` so it's displaced onto whichever shape's surface exactly like the ground is. */
+  private buildWaterMesh(patch: ITerrainPatchMesh<unknown>): Mesh {
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(patch.surface.positions, 3));
+    geometry.setAttribute('normal', new BufferAttribute(patch.surface.normals, 3));
+    geometry.setIndex(new BufferAttribute(patch.surface.indices, 1));
+    const mesh = new Mesh(geometry, this.waterMaterial);
+    mesh.renderOrder = 1;
+    mesh.position.set(
+      patch.centerWorldM[0],
+      patch.centerWorldM[1],
+      patch.centerWorldM[2],
+    );
+    return mesh;
+  }
+
   private colorByHeight(patch: ITerrainPatchMesh<unknown>): Float32Array {
     const low = new Color('#4c6b3a');
     const high = new Color('#8f8770');
@@ -594,6 +717,7 @@ export class ScatterLabPageComponent {
       this.treeMaterial,
       this.treeMaterialFar,
       this.grassMaterial,
+      this.waterMaterial,
     ];
     this.group.traverse((object) => {
       if (object instanceof Mesh) {

@@ -88,6 +88,7 @@ export function generateTerrainScatterInstances<TAddress>(
       normal: sample.normal,
       surfaceUp: sample.surfaceUp,
       slope01: sample.slope01,
+      elevationM: sample.elevationM,
     };
     let suitability = options.suitability;
     if (options.distanceFade) {

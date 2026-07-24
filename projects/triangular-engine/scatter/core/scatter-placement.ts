@@ -10,6 +10,8 @@ export interface IScatterSurfaceSample {
   /** Undisplaced "which way is up" reference — used for align-to-surface-up. */
   readonly surfaceUp: ScatterVector3;
   readonly slope01: number;
+  /** Field-space elevation, shape-agnostic (unlike worldPositionM.y on a sphere/cylinder) — lets suitability rules key off height, e.g. excluding candidates below a water level. */
+  readonly elevationM: number;
 }
 
 /** 0..1 multiplier on base density; 0 excludes the point entirely. */

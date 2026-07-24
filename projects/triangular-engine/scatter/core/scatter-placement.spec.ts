@@ -10,6 +10,7 @@ function sample(overrides: Partial<IScatterSurfaceSample> = {}): IScatterSurface
     normal: [0, 1, 0],
     surfaceUp: [0, 1, 0],
     slope01: 0,
+    elevationM: 0,
     ...overrides,
   };
 }
