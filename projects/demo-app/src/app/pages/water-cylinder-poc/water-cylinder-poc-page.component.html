@@ -57,6 +57,17 @@
             (input)="setWaterLevel($any($event.target).value)"
           />
         </label>
+        <label class="slider">
+          LOD detail: {{ lodDetail() }}×
+          <input
+            type="range"
+            min="0.5"
+            max="3"
+            step="0.5"
+            [value]="lodDetail()"
+            (input)="lodDetail.set(+$any($event.target).value)"
+          />
+        </label>
         <label class="checkbox">
           <input
             type="checkbox"
@@ -90,6 +101,7 @@
     [quality]="activeQuality()"
     [motion]="activeMotion()"
     [presetOverrides]="presetOverrides()"
+    [lodDetail]="lodDetail()"
     [wireframe]="wireframe()"
   />
   <orbitControls

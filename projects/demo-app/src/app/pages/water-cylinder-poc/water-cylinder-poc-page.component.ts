@@ -73,7 +73,7 @@ const OCEAN_FLOOR_DEPTH_M = 6;
 export class WaterCylinderPocPageComponent {
   readonly waterLevel = signal(10);
   readonly minWaterLevel = 2;
-  readonly maxWaterLevel = 25;
+  readonly maxWaterLevel = 50;
   readonly motionKeys = Object.keys(MOTION_LABELS) as WaterMotionPresetName[];
   readonly motionLabels = MOTION_LABELS;
   readonly qualityKeys = Object.keys(
@@ -84,6 +84,7 @@ export class WaterCylinderPocPageComponent {
   readonly activeQuality = signal<WaterQualityPresetName>('balanced');
   readonly detailChop = signal(true);
   readonly shoreFade = signal(true);
+  readonly lodDetail = signal(1);
   readonly wireframe = signal(false);
 
   readonly cylinderRadiusM = CYLINDER_RADIUS_M;
@@ -144,6 +145,8 @@ export class WaterCylinderPocPageComponent {
       new MeshStandardMaterial({
         color: '#8f7a52',
         roughness: 0.95,
+        // The geometry remains inward-facing for the shared depth prepass,
+        // while the display fixture stays inspectable from outside.
         side: DoubleSide,
       }),
     );
@@ -202,6 +205,19 @@ function createGroundGeometry(): CylinderGeometry {
     }
     const radius = baseRadius - bump;
     position.setXYZ(i, Math.cos(angle) * radius, y, Math.sin(angle) * radius);
+  }
+  // CylinderGeometry faces outward by default. This fixture is an interior
+  // ocean, so make the seabed genuinely inward-facing instead of relying on a
+  // DoubleSide display material. The depth prepass can then capture the same
+  // shore geometry that the main scene renders.
+  const index = geometry.index;
+  if (index) {
+    for (let i = 0; i < index.count; i += 3) {
+      const second = index.getX(i + 1);
+      index.setX(i + 1, index.getX(i + 2));
+      index.setX(i + 2, second);
+    }
+    index.needsUpdate = true;
   }
   geometry.computeVertexNormals();
   geometry.rotateZ(GROUND_ROTATION_RAD);

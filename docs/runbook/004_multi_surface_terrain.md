@@ -52,7 +52,10 @@ patch mesher -> patch-local transferable mesh
 
 ### Shared responsibilities
 
-- Seeded generator layers, masks, biomes, elevation bounds, and batch sampling.
+- Seeded generator layers, masks, biome-style field masks feeding elevation,
+  elevation bounds, and batch sampling. (Biome *classification* — blended
+  biome weights from environmental channels — is not terrain scope; it is a
+  future sibling entry, see `005_scatter_sublibrary.md`.)
 - A canonical patch-mesh result with f64 patch centre and f32 local vertices.
 - Scheduler lifecycle, generation tokens, stale-result rejection, caching, and
   worker protocol.

@@ -44,6 +44,12 @@ export class WaterSurfaceComponent implements OnInit, OnDestroy {
   readonly quality = input<WaterQualityPresetName>('balanced');
   readonly motion = input<WaterMotionPresetName>('oceanSwell');
   readonly presetOverrides = input<WaterRenderPresetOverrides>({});
+  /**
+   * Multiplies the camera-centred area retained at each LOD level.
+   * Values above 1 keep finer geometry farther from the camera, at the cost
+   * of more patch instances. This does not alter wave motion or surface size.
+   */
+  readonly lodDetail = input(1);
   readonly wireframe = input(false);
 
   private renderer: WaterSurfaceRenderer | undefined;
@@ -62,10 +68,25 @@ export class WaterSurfaceComponent implements OnInit, OnDestroy {
       const quality = this.quality();
       const motion = this.motion();
       const overrides = this.presetOverrides();
-      const preset = resolveWaterRenderPreset(WATER_RENDER_PRESETS[quality], {
+      const lodDetail = this.lodDetail();
+      const basePreset = resolveWaterRenderPreset(WATER_RENDER_PRESETS[quality], {
         ...overrides,
         waves: overrides.waves ?? WATER_WAVE_PRESETS[motion],
       });
+      const detailMultiplier =
+        Number.isFinite(lodDetail) && lodDetail > 0 ? lodDetail : 1;
+      const preset = {
+        ...basePreset,
+        grid: {
+          ...basePreset.grid,
+          coreSizePatches: Math.max(
+            4,
+            Math.ceil(
+              (basePreset.grid.coreSizePatches * detailMultiplier) / 4,
+            ) * 4,
+          ),
+        },
+      };
 
       if (this.renderer && this.activeDomain === domain) {
         this.renderer.setPreset(preset);

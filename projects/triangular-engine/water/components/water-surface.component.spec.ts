@@ -50,6 +50,7 @@ describe('WaterSurfaceComponent', () => {
     fixture.componentRef.setInput('presetOverrides', {
       grid: { ringCount: 1 },
     });
+    fixture.componentRef.setInput('lodDetail', 2);
     fixture.componentRef.setInput('wireframe', true);
     fixture.detectChanges();
 
