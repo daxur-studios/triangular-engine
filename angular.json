@@ -32,7 +32,8 @@
             "include": [
               "**/*.spec.ts",
               "../water/**/*.spec.ts",
-              "../terrain/**/*.spec.ts"
+              "../terrain/**/*.spec.ts",
+              "../scatter/**/*.spec.ts"
             ]
           }
         }

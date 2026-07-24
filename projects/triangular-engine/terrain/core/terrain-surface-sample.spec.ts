@@ -112,7 +112,7 @@ describe('sampleTerrainSurface', () => {
         sampleTerrainSurface(new ConstantTerrainField(), domain, address, 0, 0, {
           epsilon: 0,
         }),
-      ).toThrow(RangeError);
+      ).toThrowError(RangeError);
     });
   });
 
