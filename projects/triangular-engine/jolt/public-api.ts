@@ -9,4 +9,5 @@ export * from './example';
 export * from './jolt.provider';
 export * from './models';
 export * from './terrain';
+export * from './scatter';
 // export { loadJolt } from './jolt-loader';

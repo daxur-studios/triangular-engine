@@ -29,6 +29,7 @@ import {
   generateTerrainPatchMesh,
   CylinderTerrainDomain,
   PlaneTerrainDomain,
+  selectAdaptiveTerrainPatches,
   SphereTerrainDomain,
   SPHERE_TERRAIN_FACES,
   type ITerrainField,
@@ -125,11 +126,11 @@ export class WaterPageComponent {
     const scale = this.worldScale();
     switch (this.activeDomain()) {
       case 'sphere':
-        return `${6 * scale * scale} chunks · radius ${SPHERE_RADIUS * scale} m`;
+        return `adaptive LOD · radius ${SPHERE_RADIUS * scale} m`;
       case 'cylinder':
-        return `${8 * scale} × ${4 * scale} chunks · ${CYLINDER_LENGTH * scale} m long`;
+        return `${8 * scale} × ${4 * scale} root chunks · adaptive LOD`;
       default:
-        return `${2 * scale} × ${2 * scale} chunks · ${(COAST_PATCH_SIZE_M * 2 * scale) / 1_000} km`;
+        return `${2 * scale} × ${2 * scale} root chunks · adaptive LOD`;
     }
   });
   readonly relativeUp = signal(true);
@@ -301,7 +302,9 @@ function createFixtures(worldScale: number): Record<DomainKind, Object3D> {
 }
 
 const COAST_PATCH_SIZE_M = 800;
-const COAST_PATCH_RESOLUTION = 128;
+const TERRAIN_PATCH_RESOLUTION = 48;
+const TERRAIN_MAX_LOD_LEVEL = 2;
+const TERRAIN_SKIRT_DEPTH_M = 5;
 
 class CoastalTerrainField implements ITerrainField {
   readonly minElevationM = -58;
@@ -372,14 +375,27 @@ function createCoastalTerrain(worldScale: number): Group {
 
   const chunksPerSide = 2 * worldScale;
   const start = -Math.floor(chunksPerSide / 2);
+  const roots = [];
   for (let z = start; z < start + chunksPerSide; z++) {
     for (let x = start; x < start + chunksPerSide; x++) {
-      const patch = generateTerrainPatchMesh(field, domain, {
-        address: { level: 0, x, z },
-        resolution: COAST_PATCH_RESOLUTION,
-      });
-      group.add(createCoastalPatchMesh(patch));
+      roots.push({ level: 0, x, z });
     }
+  }
+  const camera = getInitialCameraPosition('plane', worldScale);
+  const selected = selectAdaptiveTerrainPatches(domain, {
+    roots,
+    cameraWorldM: camera,
+    getLevel: (address) => address.level,
+    maxLevel: TERRAIN_MAX_LOD_LEVEL,
+    refinementDistanceM: 1_100 * worldScale,
+  });
+  for (const address of selected) {
+    const patch = generateTerrainPatchMesh(field, domain, {
+      address,
+      resolution: TERRAIN_PATCH_RESOLUTION,
+      skirtDepthM: TERRAIN_SKIRT_DEPTH_M,
+    });
+    group.add(createCoastalPatchMesh(patch));
   }
 
   return group;
@@ -388,6 +404,9 @@ function createCoastalTerrain(worldScale: number): Group {
 function createCoastalPatchMesh(
   patch: ITerrainPatchMesh<unknown>,
   colors = createTerrainColors(patch.surface.positions),
+  skirtColors = patch.skirt
+    ? createTerrainColors(patch.skirt.positions)
+    : undefined,
 ): Mesh {
   const geometry = new BufferGeometry();
   geometry.setAttribute(
@@ -413,12 +432,27 @@ function createCoastalPatchMesh(
       side: DoubleSide,
     }),
   );
+  if (patch.skirt) {
+    const skirtGeometry = new BufferGeometry();
+    skirtGeometry.setAttribute(
+      'position',
+      new BufferAttribute(patch.skirt.positions, 3),
+    );
+    skirtGeometry.setAttribute(
+      'normal',
+      new BufferAttribute(patch.skirt.normals, 3),
+    );
+    skirtGeometry.setAttribute('uv', new BufferAttribute(patch.skirt.uvs, 2));
+    skirtGeometry.setAttribute(
+      'color',
+      new BufferAttribute(skirtColors!, 3),
+    );
+    skirtGeometry.setIndex(new BufferAttribute(patch.skirt.indices, 1));
+    mesh.add(new Mesh(skirtGeometry, mesh.material));
+  }
   mesh.position.fromArray(patch.centerWorldM);
   return mesh;
 }
-
-const PLANET_PATCH_RESOLUTION = 96;
-const CYLINDER_PATCH_RESOLUTION = 64;
 
 class OceanPlanetTerrainField implements ITerrainField {
   readonly minElevationM = -46;
@@ -475,28 +509,42 @@ function createOceanPlanetTerrain(worldScale: number): Group {
   const radius = SPHERE_RADIUS * worldScale;
   const domain = new SphereTerrainDomain(radius);
   const field = new OceanPlanetTerrainField();
-  const level = Math.log2(worldScale);
-  const chunksPerFaceEdge = 2 ** level;
-
-  for (const face of SPHERE_TERRAIN_FACES) {
-    for (let y = 0; y < chunksPerFaceEdge; y++) {
-      for (let x = 0; x < chunksPerFaceEdge; x++) {
-        const patch = generateTerrainPatchMesh(field, domain, {
-          address: { face, level, x, y },
-          resolution: PLANET_PATCH_RESOLUTION,
-        });
-        group.add(
-          createCoastalPatchMesh(
-            patch,
-            createSphereTerrainColors(
+  const roots = SPHERE_TERRAIN_FACES.map((face) => ({
+    face,
+    level: 0,
+    x: 0,
+    y: 0,
+  }));
+  const selected = selectAdaptiveTerrainPatches(domain, {
+    roots,
+    cameraWorldM: getInitialCameraPosition('sphere', worldScale),
+    getLevel: (address) => address.level,
+    maxLevel: TERRAIN_MAX_LOD_LEVEL + Math.log2(worldScale),
+    refinementDistanceM: 720 * worldScale,
+  });
+  for (const address of selected) {
+    const patch = generateTerrainPatchMesh(field, domain, {
+      address,
+      resolution: TERRAIN_PATCH_RESOLUTION,
+      skirtDepthM: TERRAIN_SKIRT_DEPTH_M,
+    });
+    group.add(
+      createCoastalPatchMesh(
+        patch,
+        createSphereTerrainColors(
+          patch.centerWorldM,
+          patch.surface.positions,
+          radius,
+        ),
+        patch.skirt
+          ? createSphereTerrainColors(
               patch.centerWorldM,
-              patch.surface.positions,
+              patch.skirt.positions,
               radius,
-            ),
-          ),
-        );
-      }
-    }
+            )
+          : undefined,
+      ),
+    );
   }
   return group;
 }
@@ -552,30 +600,64 @@ function createCylinderTerrain(worldScale: number): Group {
   });
   const field = new CylinderHabitatTerrainField();
   const counts = domain.getPatchCounts(0);
-
+  const roots = [];
   for (let axialIndex = 0; axialIndex < counts.axial; axialIndex++) {
     for (
       let angularIndex = 0;
       angularIndex < counts.angular;
       angularIndex++
     ) {
-      const patch = generateTerrainPatchMesh(field, domain, {
-        address: { level: 0, angularIndex, axialIndex },
-        resolution: CYLINDER_PATCH_RESOLUTION,
-      });
-      group.add(
-        createCoastalPatchMesh(
-          patch,
-          createCylinderTerrainColors(
-            patch.centerWorldM,
-            patch.surface.positions,
-            radius,
-          ),
-        ),
-      );
+      roots.push({ level: 0, angularIndex, axialIndex });
     }
   }
+  const selected = selectAdaptiveTerrainPatches(domain, {
+    roots,
+    cameraWorldM: getInitialCameraPosition('cylinder', worldScale),
+    getLevel: (address) => address.level,
+    maxLevel: TERRAIN_MAX_LOD_LEVEL,
+    refinementDistanceM: 520 * worldScale,
+  });
+  for (const address of selected) {
+    const patch = generateTerrainPatchMesh(field, domain, {
+      address,
+      resolution: TERRAIN_PATCH_RESOLUTION,
+      skirtDepthM: TERRAIN_SKIRT_DEPTH_M,
+    });
+    group.add(
+      createCoastalPatchMesh(
+        patch,
+        createCylinderTerrainColors(
+          patch.centerWorldM,
+          patch.surface.positions,
+          radius,
+        ),
+        patch.skirt
+          ? createCylinderTerrainColors(
+              patch.centerWorldM,
+              patch.skirt.positions,
+              radius,
+            )
+          : undefined,
+      ),
+    );
+  }
   return group;
+}
+
+function getInitialCameraPosition(
+  kind: DomainKind,
+  worldScale: number,
+): TerrainVector3 {
+  if (kind === 'sphere') {
+    const direction = new Vector3(310, -80, 145).normalize();
+    return direction
+      .multiplyScalar(SPHERE_RADIUS * worldScale + 170)
+      .toArray() as TerrainVector3;
+  }
+  if (kind === 'cylinder') {
+    return [-55, CYLINDER_RADIUS * worldScale - 24, 45];
+  }
+  return [-430, 115, 330];
 }
 
 function createCylinderTerrainColors(

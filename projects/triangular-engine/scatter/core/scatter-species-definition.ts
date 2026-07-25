@@ -38,7 +38,13 @@ export interface ScatterColliderDefinition {
   /** No 'mesh' shape — Jolt mesh shapes are static-only and scatter colliders may need to go dynamic (falling trees). */
   readonly shape: 'box' | 'sphere' | 'capsule' | 'cylinder' | 'hull';
   readonly params: readonly number[];
-  readonly impactThresholdN?: number;
+  /**
+   * Contact momentum (kg·m/s) above which the instance is reported as
+   * destroyed. Momentum, not force, because Jolt's contact-added callback
+   * has no solved impulse available yet — see estimateScatterImpactMomentumNs
+   * in triangular-engine/jolt.
+   */
+  readonly impactThresholdNs?: number;
 }
 
 export interface ScatterInteractionDefinition {

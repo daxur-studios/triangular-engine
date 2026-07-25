@@ -6,7 +6,11 @@
   dithered cross-fade, grass density fade, per-LOD shadow flags,
   surface-relative alignment, wind sway, true camera-facing cylindrical
   billboards, instance picking), all wired into the `scatter-lab` demo.
-  Phases 3-5 not started.
+  Phase 3 core/library code implemented (residency ring, removal overlay,
+  collider descriptors, `ScatterJoltColliderAdapter`, impact-momentum
+  estimate) but **not yet wired into the `scatter-lab` demo** — no rover,
+  no compound-collider visual/behavioral verification yet. Phases 4-5 not
+  started.
 - Entry point: `triangular-engine/scatter` (decided — "foliage" rejected as
   the name because rocks/stones/clutter are first-class, not an exception)
 - Initial consumers: `scatter-lab` demo page (`projects/demo-app`), terrain-lab
@@ -295,12 +299,34 @@ the far tree tier (`enableScatterCylindricalBillboard`,
 one-mesh-per-tier not yet needed at demo scale. The `impostor` LOD kind is
 still a label only — reserved for Phase 5.
 
-### Phase 3 — Jolt collider ring + removal overlay — not started
+### Phase 3 — Jolt collider ring + removal overlay — library code done, demo wiring not started
 
 `ScatterJoltColliderAdapter` in the jolt entry: velocity-aware residency
 ring, compound shape per physics cell for small rocks, impact-threshold
 destruction promotion events, stable-ID overlay hooks. Cutting and
 crash-destruction both fall out of this phase.
+
+Step-by-step implementation plan:
+[`005a_scatter_phase3_plan.md`](005a_scatter_phase3_plan.md).
+
+Implemented (steps 1-5 of the plan): `scatter/core/scatter-physics-residency.ts`
+(velocity look-ahead anchor + hysteresis diff), `scatter/core/scatter-removal-overlay.ts`
+(immutable removed-ID set), `scatter/three/scatter-collider-descriptors.ts`
+(anchor-relative descriptors reusing `computeScatterInstanceMatrix`),
+`jolt/scatter/ScatterJoltColliderAdapter` (one static compound body per
+physics cell, sub-shape userData → instance index, `resolveInstanceId` for
+contact-time lookup), and `jolt/scatter/estimateScatterImpactMomentumNs`
+(approach-momentum approximation, since `OnContactAdded` has no solved
+impulse yet). `ScatterColliderDefinition.impactThresholdN` renamed to
+`impactThresholdNs` to match (momentum, not force). All new core/three
+modules covered by specs (28 new, 237/237 passing); the jolt adapter itself
+has no headless-Jolt test harness and is verified via the demo instead.
+
+Not yet done (step 6 of the plan): `scatter-lab` demo wiring — a driveable
+rover, `reconcile`-driven residency each frame, debug visualization of
+resident cells/ring radii, click-to-cut removal, drive-into-tree felling,
+and HUD counters. Until this lands, the adapter is unexercised against a
+real Jolt world.
 
 ### Phase 4 — Biome-driven suitability — not started
 
@@ -317,6 +343,59 @@ slot. Only after Phase 2 is measured.
 Parallax 2.0 generates scatter on the GPU per frame. CPU-per-cell is correct
 for v1; a WebGPU compute path could later slot in behind the same species
 definitions if grass density demands it.
+
+## Destructibility and growth — use-case notes
+
+Captured from design discussion, informs Phase 3 (colliders) and is a note
+for a possible later phase (growth) — not scheduled, no phase number yet.
+
+**Three collidability tiers per species** (all expressible via
+`ScatterColliderDefinition` already defined above):
+- No `collider` → visible only, never physical.
+- `collider`, no (or unreachable) `impactThresholdNs` → visible + collidable,
+  permanent.
+- `collider` + `impactThresholdNs` → destructible. On exceeding threshold the
+  library only **emits an event** (instanceId, contact point, normal,
+  momentum) — it never decides the outcome. The game chooses: remove only, or
+  remove-from-static-compound-and-spawn-its-own-standalone-dynamic-body from
+  the same descriptor (rolling rock, falling tree).
+
+**Persistence is always game-owned.** Scatter instances stay derived/
+deterministic; the only scatter-owned state is the removal-overlay (a set of
+removed instance IDs). Anything promoted to a free dynamic body (rolling
+rock, falling tree) leaves scatter's world and is saved like any other game
+prop — unrelated to scatter's save format. "Respawn after time" falls out for
+free: clearing an instance ID from the overlay regenerates the exact same
+deterministic instance, no extra data needed.
+
+**Worked examples:**
+- Car hits a big rock, it rolls, must persist the new spot: impact event →
+  overlay-remove the original instance → game spawns a normal dynamic body
+  from the descriptor → physics settles it → game saves that prop's transform
+  via its own object-save system. On reload: overlay suppresses regeneration
+  of the original; the game's save respawns the settled rock. Two independent
+  systems, not one.
+- Villager cuts a tree: not a collision — a direct game-triggered removal via
+  the interaction's stable ID. Game may spawn a temporary falling-tree body
+  for the animation and despawns it after "collection." Scatter never sees
+  "collected" (inventory is a non-goal, see above).
+- Vehicle hits a tree, it falls, then disappears or respawns: same
+  impact-event path as the rock; "respawn after time" = clear the overlay
+  entry after a timer.
+
+**Dynamically growing trees — two distinct cases, not one feature:**
+- *Ambient background growth* (whole forests aging): fits the derived-data
+  model for free. Bake a `plantedAtSeed` into candidate generation (same
+  seeded-random source as rotation/scale today); scale or discrete
+  mesh-stage becomes a pure function of `currentTime - plantedTime`. Discrete
+  stage swaps (sapling → young → adult mesh) can reuse the existing LOD-swap
+  + dither-crossfade machinery, keyed by age instead of camera distance —
+  no new architecture needed.
+- *Individually meaningful trees* (player-planted, must persist and grow
+  specifically): not a scatter candidate at all — same category as a
+  promoted dynamic rock. Game owns identity, growth stage, and save state;
+  it may borrow scatter's LOD/mesh-swap rendering plumbing for efficiency,
+  but growth progression and persistence are 100% game-side.
 
 ## Investigation log
 
