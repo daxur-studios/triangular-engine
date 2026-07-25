@@ -18,6 +18,8 @@ export interface IContactValidateEvent {
 export interface IContactAddedEvent {
   /** The other body involved in the contact */
   otherBody: Jolt.Body;
+  /** The sub-shape ID that belongs to otherBody. */
+  otherSubShapeId: Jolt.SubShapeID;
   /** Contact manifold containing collision geometry data */
   manifold: Jolt.ContactManifold;
   /** Contact settings that can be modified to affect the collision response */

@@ -85,7 +85,10 @@ export class JoltDebugRendererComponent implements OnDestroy {
   private fallbackActiveLine?: LineSegments;
   private fallbackSleepingLine?: LineSegments;
   private fallbackConstraintsLine?: LineSegments;
-  private fallbackEdgesByBodyId = new Map<number, EdgesGeometry>();
+  private fallbackEdgesByBodyId = new Map<
+    number,
+    { geometry: EdgesGeometry; subShapeCount: number }
+  >();
 
   constructor() {
     effect(() => {
@@ -116,7 +119,8 @@ export class JoltDebugRendererComponent implements OnDestroy {
       this.engineService.scene.remove(this.fallbackSleepingLine);
     if (this.fallbackConstraintsLine)
       this.engineService.scene.remove(this.fallbackConstraintsLine);
-    for (const edges of this.fallbackEdgesByBodyId.values()) edges.dispose();
+    for (const cached of this.fallbackEdgesByBodyId.values())
+      cached.geometry.dispose();
     this.fallbackEdgesByBodyId.clear();
   }
 
@@ -503,15 +507,31 @@ export class JoltDebugRendererComponent implements OnDestroy {
       this.fallbackConstraintsLine.visible = false;
   }
 
-  private getFallbackEdgesGeometry(bodyId: number, shape: any): EdgesGeometry {
-    let edges = this.fallbackEdgesByBodyId.get(bodyId);
-    if (!edges) {
-      const triGeom = createMeshForShape(shape);
-      edges = new EdgesGeometry(triGeom);
-      triGeom.dispose();
-      this.fallbackEdgesByBodyId.set(bodyId, edges);
-    }
-    return edges;
+  /**
+   * Mutable compound shapes (e.g. scatter cell colliders) change sub-shape
+   * count in place without a new body ID, so a cache keyed only on bodyId
+   * would keep showing felled trees until something else invalidated it.
+   * GetNumSubShapes() is the cheap signal that the shape actually changed —
+   * but it's only bound on CompoundShape, not the base Shape that
+   * body.GetShape() returns, so it needs an explicit subtype cast first.
+   */
+  private getFallbackEdgesGeometry(bodyId: number, shape: Jolt.Shape): EdgesGeometry {
+    const subType = shape.GetSubType();
+    const isCompound =
+      subType === (Jolt as any).EShapeSubType_StaticCompound ||
+      subType === (Jolt as any).EShapeSubType_MutableCompound;
+    const subShapeCount: number = isCompound
+      ? Jolt.castObject(shape, (Jolt as any).CompoundShape).GetNumSubShapes()
+      : -1;
+    const cached = this.fallbackEdgesByBodyId.get(bodyId);
+    if (cached && cached.subShapeCount === subShapeCount) return cached.geometry;
+
+    if (cached) cached.geometry.dispose();
+    const triGeom = createMeshForShape(shape);
+    const geometry = new EdgesGeometry(triGeom);
+    triGeom.dispose();
+    this.fallbackEdgesByBodyId.set(bodyId, { geometry, subShapeCount });
+    return geometry;
   }
 
   private RenderFallback() {
@@ -562,9 +582,9 @@ export class JoltDebugRendererComponent implements OnDestroy {
     }
     Jolt.destroy(bodyIds);
 
-    for (const [bodyId, edges] of this.fallbackEdgesByBodyId) {
+    for (const [bodyId, cached] of this.fallbackEdgesByBodyId) {
       if (liveBodyIds.has(bodyId)) continue;
-      edges.dispose();
+      cached.geometry.dispose();
       this.fallbackEdgesByBodyId.delete(bodyId);
     }
 

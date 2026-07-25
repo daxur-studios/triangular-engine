@@ -301,6 +301,7 @@ export class JoltPhysicsComponent {
     if (needs1) {
       const event: IContactAddedEvent = {
         otherBody: body2,
+        otherSubShapeId: manifoldWrapped.mSubShapeID2,
         manifold: manifoldWrapped,
         settings: settingsWrapped,
       };
@@ -309,6 +310,7 @@ export class JoltPhysicsComponent {
     if (needs2) {
       const event: IContactAddedEvent = {
         otherBody: body1,
+        otherSubShapeId: manifoldWrapped.mSubShapeID1,
         manifold: manifoldWrapped,
         settings: settingsWrapped,
       };

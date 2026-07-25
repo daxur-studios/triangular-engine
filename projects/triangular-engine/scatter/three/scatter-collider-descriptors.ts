@@ -76,7 +76,12 @@ export function buildScatterColliderDescriptors(
       rotation: [scratchQuaternion.x, scratchQuaternion.y, scratchQuaternion.z, scratchQuaternion.w],
       shape: collider.shape,
       params: collider.params.map((param) => param * scratchScale.x),
-      impactThresholdNs: collider.impactThresholdNs,
+      // Bigger instances (uniform scale > 1) need proportionally more
+      // momentum to fell — same knob the caller already tunes per species.
+      impactThresholdNs:
+        collider.impactThresholdNs === undefined
+          ? undefined
+          : collider.impactThresholdNs * scratchScale.x,
     });
   }
 

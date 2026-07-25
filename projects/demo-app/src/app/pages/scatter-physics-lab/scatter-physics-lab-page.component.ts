@@ -84,10 +84,16 @@ const TREE_TRUNK_HALF_HEIGHT_M = 1.6;
 const TREE_TRUNK_RADIUS_M = 0.35;
 /**
  * Contact momentum (kg·m/s) above which a tree is felled — see
- * estimateScatterImpactMomentumNs. Tuned so the rover fells reliably on
- * contact, while thrown rocks can be dialed above or below it.
+ * estimateScatterImpactMomentumNs. This is the base for the species'
+ * collider.impactThresholdNs, which buildScatterColliderDescriptors then
+ * scales per-instance by tree size, so bigger trees resist more.
+ *
+ * Tuned against rover mass/speed (650kg, 7 m/s walk / 12.6 m/s sprint):
+ * walk momentum (~4550 Ns) fells smaller trees but not the largest, sprint
+ * (~8190 Ns) fells reliably across the whole size range, and a max-dialed
+ * thrown rock (80kg @ 45 m/s = 3600 Ns) can still fell the smallest trees.
  */
-const TREE_IMPACT_THRESHOLD_NS = 900;
+const TREE_IMPACT_THRESHOLD_NS = 4000;
 
 const TREE_RULES: ScatterPlacementRules = {
   alignment: 'align-to-surface-up',
@@ -418,10 +424,9 @@ export class ScatterPhysicsLabPageComponent {
 
   /**
    * Shared felling path for both the rover and thrown rocks — mirrors the
-   * plan's step 5: resolve the hit instance via the adapter (trying both
-   * sub-shape IDs, since manifold body ordering isn't guaranteed), estimate
-   * contact momentum (no solved impulse exists yet at OnContactAdded time),
-   * and remove from the same overlay the render batch reads.
+   * plan's step 5: resolve the hit instance via the adapter, estimate contact
+   * momentum (no solved impulse exists yet at OnContactAdded time), and remove
+   * from the same overlay the render batch reads.
    */
   private handleImpact(
     event: IContactAddedEvent,
@@ -431,15 +436,10 @@ export class ScatterPhysicsLabPageComponent {
   ): void {
     if (!this.colliderAdapter) return;
     const manifold = event.manifold;
-    const instanceId =
-      this.colliderAdapter.resolveInstanceId(
-        event.otherBody,
-        manifold.mSubShapeID1,
-      ) ??
-      this.colliderAdapter.resolveInstanceId(
-        event.otherBody,
-        manifold.mSubShapeID2,
-      );
+    const instanceId = this.colliderAdapter.resolveInstanceId(
+      event.otherBody,
+      event.otherSubShapeId,
+    );
     if (instanceId === undefined) return;
 
     const normal = manifold.mWorldSpaceNormal;
@@ -448,7 +448,9 @@ export class ScatterPhysicsLabPageComponent {
       otherBodyVelocityMps: velocityMps,
       contactNormal: [normal.GetX(), normal.GetY(), normal.GetZ()],
     });
-    const felled = momentumNs >= TREE_IMPACT_THRESHOLD_NS;
+    const thresholdNs =
+      this.colliderAdapter.resolveImpactThresholdNs(instanceId) ?? TREE_IMPACT_THRESHOLD_NS;
+    const felled = momentumNs >= thresholdNs;
     this.lastImpact.set({ momentumNs, felled, source });
     if (!felled) return;
 
