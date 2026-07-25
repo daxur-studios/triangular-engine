@@ -34,12 +34,10 @@ export const WATER_SURFACE_DEPTH_UNIFORMS_GLSL = `
 
 /**
  * Reconstructs the opaque scene sample in world space, then measures the
- * terrain-to-water separation along the water domain's local "up" normal.
- *
- * Unlike a view-Z subtraction, this is invariant to whether the domain is a
- * plane, a convex sphere, or the concave inside of a cylinder. The caller
- * supplies the domain-correct normal: +Y for a plane, outward for a sphere,
- * and inward (toward the axis) for an interior cylinder.
+ * ray distance from the water fragment to that sample. Since opaque geometry
+ * is rendered before water, a surviving water fragment is in front of the
+ * sample. Measuring along the viewing ray prevents distant terrain from being
+ * mistaken for a zero-depth shoreline when it happens to be above a wave.
  *
  * `waterSceneViewZ` is provided by WATER_DEPTH_UNPACK_GLSL. Scaling a
  * projection-inverse far-plane ray by viewZ also works with logarithmic
@@ -56,14 +54,16 @@ export const WATER_SURFACE_DEPTH_GLSL = `
 
   float waterSurfaceDepth(
     vec2 screenUV,
-    vec3 waterWorldPosition,
-    vec3 waterSurfaceNormal
+    vec3 waterWorldPosition
   ) {
+    // A cleared depth texel contains sky, not an opaque surface at the far
+    // plane. Treat it as open/deep water; reconstructing the far plane here
+    // makes grazing-angle waves fade out along the undisplaced domain plane.
+    float rawSceneDepth = texture2D(uSceneDepthTexture, screenUV).x;
+    if (rawSceneDepth >= 0.999999) {
+      return 1000000.0;
+    }
     vec3 sceneWorldPosition = waterSceneWorldPosition(screenUV);
-    vec3 domainUp = normalize(waterSurfaceNormal);
-    return max(
-      dot(waterWorldPosition - sceneWorldPosition, domainUp),
-      0.0
-    );
+    return distance(waterWorldPosition, sceneWorldPosition);
   }
 `;

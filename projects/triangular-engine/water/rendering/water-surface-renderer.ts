@@ -557,18 +557,6 @@ export const WATER_SURFACE_FRAGMENT_SHADER = `
   varying vec2 vLocalXZ;
   varying vec2 vSurfaceXZ;
 
-  vec3 waterDomainUp(vec3 worldPosition) {
-    #ifdef WATER_DOMAIN_SPHERE
-      return normalize(worldPosition - uSphereCenter);
-    #elif defined(WATER_DOMAIN_CYLINDER)
-      vec3 fromAxis = worldPosition - uCylinderCenter;
-      vec3 radial = fromAxis - uCylinderAxis * dot(fromAxis, uCylinderAxis);
-      return -normalize(radial);
-    #else
-      return normalize(uFrameNormal);
-    #endif
-  }
-
   void main() {
     waterLodCull(vLocalXZ, uLodCameraXZ, uInnerCullRadius, uOuterCullRadius);
     waterDomainClip(vWorldPosition, vLocalXZ);
@@ -587,11 +575,9 @@ export const WATER_SURFACE_FRAGMENT_SHADER = `
       #endif
     #endif
     vec3 normal = waterComposeWorldNormal(localNormal, vLocalXZ);
-    vec3 domainUp = waterDomainUp(vWorldPosition);
-
     #ifdef WATER_DEPTH_PREPASS
       vec2 screenUV = gl_FragCoord.xy / uResolution;
-      float depth = waterSurfaceDepth(screenUV, vWorldPosition, domainUp);
+      float depth = waterSurfaceDepth(screenUV, vWorldPosition);
       float alpha = waterShoreFade(depth);
     #else
       float depth = uAbsorptionDistance;

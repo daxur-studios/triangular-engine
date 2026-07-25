@@ -96,7 +96,7 @@ export class OceanComponent extends MeshComponent implements OnInit, OnDestroy {
     if (!this.planeGeometry) {
       return;
     }
-    const time = this.engineService.clock.getElapsedTime();
+    const time = this.engineService.timer.getElapsed();
 
     this.vertexData.forEach((vd, idx) => {
       const y = vd.initH + Math.sin(time + vd.phase) * vd.amplitude;

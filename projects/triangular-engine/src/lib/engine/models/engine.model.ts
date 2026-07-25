@@ -1,8 +1,8 @@
-import { BehaviorSubject, ReplaySubject, takeUntil } from 'rxjs';
+import { BehaviorSubject, ReplaySubject } from 'rxjs';
 import {
   Camera,
-  Clock,
   Scene,
+  Timer,
   ToneMapping,
   WebGLRenderer,
   WebGLRendererParameters,
@@ -11,11 +11,8 @@ import {
 import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import type { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import {
-  EventEmitter,
   InjectionToken,
-  InputSignal,
   WritableSignal,
-  signal,
 } from '@angular/core';
 
 import { FPSController } from './fps.controller';
@@ -122,7 +119,9 @@ export interface IEngineCore extends IEngineCamera {
   renderPipeline: EngineRenderPipeline | undefined;
 
   readonly scene: Scene;
-  readonly clock: Clock;
+  readonly timer: Timer;
+  /** @deprecated Use `timer` instead. */
+  readonly clock: Timer;
 
   cursor: Cursor;
 

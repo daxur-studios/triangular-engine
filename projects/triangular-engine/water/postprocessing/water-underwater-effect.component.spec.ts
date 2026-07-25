@@ -27,13 +27,18 @@ describe('WaterUnderwaterEffect', () => {
       density: 0.04,
       distortion: 0.003,
       fadeDistance: 2,
+      waterlineColor: new Color('#b7f5ef'),
+      waterlineWidth: 1,
+      waterlineOpacity: 0.7,
     }));
 
     effect.update(null as never, null as never, 0.5);
     expect(effect.getUniforms().get('waterActive')?.value).toBe(0);
 
     state$.next({
-      underwater: true,
+      // Crossing events remain hysteresis-filtered, but the visual effect must
+      // follow the exact signed camera sample without waiting for that latch.
+      underwater: false,
       sample: {
         body: {} as never,
         position: new Vector3(),
@@ -46,6 +51,7 @@ describe('WaterUnderwaterEffect', () => {
     effect.update(null as never, null as never, 0.5);
 
     expect(effect.getUniforms().get('waterActive')?.value).toBe(1);
+    expect(effect.getUniforms().get('waterSurfacePresent')?.value).toBe(1);
     expect(effect.getUniforms().get('waterImmersion')?.value).toBe(0.5);
     expect(effect.getUniforms().get('waterCameraNear')?.value).toBe(0.25);
     expect(effect.getUniforms().get('waterCameraFar')?.value).toBe(500);
@@ -55,11 +61,13 @@ describe('WaterUnderwaterEffect', () => {
     expect(WATER_UNDERWATER_FRAGMENT_SHADER).toContain('waterLinearDepth');
     expect(WATER_UNDERWATER_FRAGMENT_SHADER).toContain('void mainUv');
     expect(WATER_UNDERWATER_FRAGMENT_SHADER).toContain('void mainImage');
-    expect(WATER_UNDERWATER_FRAGMENT_SHADER).toContain(
-      'const in float depth',
-    );
+    expect(WATER_UNDERWATER_FRAGMENT_SHADER).toContain('const in float depth');
     expect(WATER_UNDERWATER_FRAGMENT_SHADER).toContain(
       'waterLinearDepth(depth)',
     );
+    expect(WATER_UNDERWATER_FRAGMENT_SHADER).toContain(
+      'waterNearPlaneSignedDistance',
+    );
+    expect(WATER_UNDERWATER_FRAGMENT_SHADER).toContain('meniscus');
   });
 });

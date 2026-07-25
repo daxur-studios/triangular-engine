@@ -187,7 +187,7 @@ export class WaterSurfaceSpikePageComponent {
   }
 
   private tick(): void {
-    const t = this.engine.clock.getElapsedTime();
+    const t = this.engine.timer.getElapsed();
     this.waterMaterial.uniforms['uTime'].value = t;
 
     for (const buoy of this.buoys) {

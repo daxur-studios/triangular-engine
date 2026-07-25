@@ -36,7 +36,9 @@ import {
   CylinderWaterDomain,
   PlaneWaterDomain,
   SphereWaterDomain,
+  WaterService,
   WaterSurfaceComponent,
+  type WaterTracker,
   type WaterMotionPresetName,
   type WaterQualityPresetName,
   type WaterSurfaceDomain,
@@ -114,6 +116,9 @@ export class WaterPageComponent {
   readonly activeQuality = signal<WaterQualityPresetName>('balanced');
   readonly activeMotion = signal<WaterMotionPresetName>('oceanSwell');
   readonly underwaterEnabled = signal(true);
+  readonly cameraWaterState = signal('Waiting for a water sample…');
+  readonly lastCrossing = signal('None yet');
+  readonly crossingCount = signal(0);
   readonly wireframe = signal(false);
   readonly waterHeight = signal(0);
   readonly worldSize = signal(1);
@@ -250,7 +255,7 @@ export class WaterPageComponent {
         return new CylinderWaterDomain(
           Math.max(1, CYLINDER_RADIUS * scale - height),
           {
-          axis: new Vector3(1, 0, 0),
+            axis: new Vector3(1, 0, 0),
             lengthM: CYLINDER_LENGTH * scale,
           },
         );
@@ -289,6 +294,8 @@ export class WaterPageComponent {
   });
 
   private readonly engine = inject(EngineService);
+  private readonly water = inject(WaterService);
+  private readonly cameraTracker: WaterTracker;
   private readonly terrainWorker = new Worker(
     new URL('./water-terrain.worker', import.meta.url),
     { type: 'module' },
@@ -304,6 +311,29 @@ export class WaterPageComponent {
 
   constructor() {
     const destroyRef = inject(DestroyRef);
+    // Resolve on every sample: controls/composers may replace the active
+    // camera object after this page's constructor has run.
+    this.cameraTracker = this.water.track(() => this.engine.camera.position, {
+      hysteresis: 0.1,
+    });
+    const stateSubscription = this.cameraTracker.state$.subscribe((state) => {
+      if (!state.sample) {
+        this.cameraWaterState.set('Outside registered water');
+        return;
+      }
+      const signed = state.sample.signedDistance;
+      this.cameraWaterState.set(
+        `${signed < 0 ? 'Below' : 'Above'} · ${Math.abs(signed).toFixed(2)} m from surface`,
+      );
+    });
+    const crossingSubscription = this.cameraTracker.crossings$.subscribe(
+      (event) => {
+        this.lastCrossing.set(
+          `${event.type === 'enter' ? 'Entered' : 'Exited'} water`,
+        );
+        this.crossingCount.update((count) => count + 1);
+      },
+    );
     const previousBackground = this.engine.scene.background;
     this.engine.scene.background = new Color('#04121c');
     this.terrainWorker.onmessage = ({
@@ -325,6 +355,9 @@ export class WaterPageComponent {
     });
 
     destroyRef.onDestroy(() => {
+      stateSubscription.unsubscribe();
+      crossingSubscription.unsubscribe();
+      this.cameraTracker.dispose();
       upSubscription.unsubscribe();
       this.terrainWorker.terminate();
       for (const { reject } of this.terrainRequests.values()) {
@@ -386,7 +419,6 @@ export class WaterPageComponent {
       this.orbitUp.set(next);
     }
   }
-
 }
 
 const COAST_PATCH_SIZE_M = 800;
@@ -400,9 +432,7 @@ class CoastalTerrainField implements ITerrainField {
     // The warped coast runs roughly north/south. Its wide shelf makes the
     // absorption gradient readable before the floor drops into the basin.
     const coastX =
-      115 +
-      Math.sin(z * 0.008) * 55 +
-      Math.sin(z * 0.021 + 1.4) * 18;
+      115 + Math.sin(z * 0.008) * 55 + Math.sin(z * 0.021 + 1.4) * 18;
     const offshoreM = coastX - x;
     const shelf = -2.5 - smoothstep(35, 235, offshoreM) * 9;
     const basin = -smoothstep(220, 570, offshoreM) * 38;
@@ -416,7 +446,7 @@ class CoastalTerrainField implements ITerrainField {
 
     const inlandRise = smoothstep(-25, 260, x - coastX) * 25;
     const inlandHills =
-      Math.max(0, x - coastX) / 260 *
+      (Math.max(0, x - coastX) / 260) *
       (8 + Math.sin(z * 0.013) * 6 + Math.sin(x * 0.018) * 4);
     const beach = smoothstep(-18, 42, x - coastX) * 5;
 
@@ -477,15 +507,22 @@ class OceanPlanetTerrainField implements ITerrainField {
     const abyss =
       sphericalBump(direction, [-0.62, 0.06, 0.78], 0.72, 0.22) * -13;
     const trench =
-      Math.exp(-Math.pow((direction.dot(new Vector3(-0.45, -0.35, 0.82)) - 0.91) / 0.035, 2)) *
-      -10;
+      Math.exp(
+        -Math.pow(
+          (direction.dot(new Vector3(-0.45, -0.35, 0.82)) - 0.91) / 0.035,
+          2,
+        ),
+      ) * -10;
     const relief =
       Math.sin(direction.x * 17 + direction.z * 9) * 2.2 +
       Math.sin(direction.y * 23 - direction.x * 7) * 1.4 +
       Math.sin((direction.x + direction.y + direction.z) * 31) * 0.7;
 
     return {
-      elevationM: Math.min(32, Math.max(-46, -31 + continent + islandArc + abyss + trench + relief)),
+      elevationM: Math.min(
+        32,
+        Math.max(-46, -31 + continent + islandArc + abyss + trench + relief),
+      ),
     };
   }
 
@@ -516,8 +553,7 @@ class CylinderHabitatTerrainField implements ITerrainField {
     const broadShelf = -9 + coast;
     const basin =
       -26 * smoothstep(0.25, 0.85, Math.sin(angle - x * 0.0015) * 0.5 + 0.5);
-    const islands =
-      Math.max(0, Math.sin(angle * 5 + x * 0.018) - 0.55) * 38;
+    const islands = Math.max(0, Math.sin(angle * 5 + x * 0.018) - 0.55) * 38;
     const relief =
       Math.sin(x * 0.025 + angle * 9) * 2 +
       Math.sin(x * 0.009 - angle * 13) * 1.2;

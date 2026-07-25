@@ -32,7 +32,6 @@ import {
   ToneMappingMode,
 } from 'postprocessing';
 import {
-  Clock,
   Data3DTexture,
   HalfFloatType,
   LinearFilter,
@@ -46,6 +45,7 @@ import {
   SRGBColorSpace,
   Texture,
   TextureLoader,
+  Timer,
   Vector3,
   WebGLRenderer,
 } from 'three';
@@ -260,15 +260,16 @@ export class TakramCloudsSpikeComponent implements AfterViewInit {
     });
     resizeObserver.observe(canvas);
 
-    const clock = new Clock();
+    const timer = new Timer();
     let animationFrame = 0;
     let sampleTime = performance.now();
     let frames = 0;
-    const animate = (): void => {
+    const animate = (timestamp?: number): void => {
       animationFrame = requestAnimationFrame(animate);
+      timer.update(timestamp);
       controls.update();
       aerialPerspective.overlay = clouds.atmosphereOverlay;
-      composer.render(clock.getDelta());
+      composer.render(timer.getDelta());
       frames += 1;
 
       const now = performance.now();

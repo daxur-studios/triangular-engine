@@ -16,12 +16,12 @@ import {
   ACESFilmicToneMapping,
   BufferGeometry,
   Camera,
-  Clock,
   Mesh,
   OrthographicCamera,
   PCFShadowMap,
   PerspectiveCamera,
   Scene,
+  Timer,
   WebGLRenderer,
   WebGLRendererParameters,
 } from 'three';
@@ -101,7 +101,11 @@ export class EngineService implements IEngine {
   public renderPipeline: EngineRenderPipeline | undefined;
   private composerPipeline: EngineRenderPipeline | undefined;
 
-  public readonly clock = new Clock();
+  public readonly timer = new Timer();
+  /** @deprecated Use `timer` instead. */
+  public get clock(): Timer {
+    return this.timer;
+  }
 
   readonly camera$: BehaviorSubject<Camera> = new BehaviorSubject<Camera>(
     new PerspectiveCamera(),
@@ -472,7 +476,8 @@ export class EngineService implements IEngine {
     // Check if we should only render on trigger
     if (sceneComponent.renderOnlyWhenThisIsTriggered() !== undefined) {
       // Initial render
-      this.render(this.clock.getElapsedTime(), true);
+      this.timer.update();
+      this.render(this.timer.getElapsed(), true);
       return;
     }
 
@@ -485,7 +490,8 @@ export class EngineService implements IEngine {
 
   /** Handle single render requests */
   public requestSingleRender() {
-    this.render(this.clock.getElapsedTime(), true);
+    this.timer.update();
+    this.render(this.timer.getElapsed(), true);
   }
 
   /** Stop the rendering loop */
@@ -495,7 +501,8 @@ export class EngineService implements IEngine {
   /** Ticker function runs every frame */
   tick(time: number) {
     const startTime = performance.now();
-    const delta = this.clock.getDelta() * this.speedFactor$.value;
+    this.timer.update(time);
+    const delta = this.timer.getDelta() * this.speedFactor$.value;
 
     this.tick$.next(delta);
     this.elapsedTime$.next(this.elapsedTime$.value + delta);

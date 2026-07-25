@@ -127,7 +127,7 @@ export class WaterMaterialPocPageComponent {
       .subscribe(() =>
         this.water.update(
           this.engine.camera$.value,
-          this.engine.clock.getElapsedTime(),
+          this.engine.timer.getElapsed(),
         ),
       );
     this.engine.postTick$

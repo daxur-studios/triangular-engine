@@ -115,4 +115,19 @@ export const routes: Routes = [
         ({ ScatterLabPageComponent }) => ScatterLabPageComponent,
       ),
   },
+  {
+    path: 'scatter-physics-lab',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
+    loadComponent: () =>
+      import(
+        './pages/scatter-physics-lab/scatter-physics-lab-page.component'
+      ).then(
+        ({ ScatterPhysicsLabPageComponent }) => ScatterPhysicsLabPageComponent,
+      ),
+  },
 ];

@@ -156,11 +156,13 @@ export class ScatterJoltColliderAdapter {
       const [rotX, rotY, rotZ, rotW] = descriptor.rotation;
       const position = new Jolt.Vec3(relX, relY, relZ);
       const rotation = new Jolt.Quat(rotX, rotY, rotZ, rotW);
+      // The compound takes a reference to the shape settings and releases it
+      // when compoundSettings is destroyed. Destroying it here (or separately
+      // after Create) leaves a dangling reference or causes a double release.
       compoundSettings.AddShapeShapeSettings(position, rotation, subShapeSettings, index);
       instanceIds.push(descriptor.instanceId);
       Jolt.destroy(position);
       Jolt.destroy(rotation);
-      Jolt.destroy(subShapeSettings);
     }
 
     const shapeResult = compoundSettings.Create();

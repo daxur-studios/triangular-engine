@@ -1,7 +1,7 @@
 import { Component, effect, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Sparkles, SparklesProps } from '@pmndrs/vanilla';
-import { Clock, Object3D } from 'three';
+import { Object3D, Timer } from 'three';
 import {
   Object3DComponent,
   provideObject3DComponent,
@@ -29,7 +29,7 @@ export class SparklesComponent extends Object3DComponent {
   readonly noise = input(1);
 
   private sparkles: Sparkles | undefined;
-  private readonly clock = new Clock();
+  private readonly timer = new Timer();
 
   override object3D = signal<Object3D>(new Object3D());
 
@@ -73,7 +73,8 @@ export class SparklesComponent extends Object3DComponent {
     this.engineService.tick$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
-        this.sparkles?.update(this.clock.getElapsedTime());
+        this.timer.update();
+        this.sparkles?.update(this.timer.getElapsed());
       });
   }
 }

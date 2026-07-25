@@ -904,15 +904,35 @@ does not block this phase's gate.
       hysteresis. Declarative `<waterSurface>` bodies register automatically.
 - [x] `<waterUnderwaterEffect>` on the `postprocessing` composer: depth fog,
       tint, optional distortion.
-- [ ] Waterline meniscus band evaluating the shared wave uniforms at the near
-      plane; double-sided surface rendering.
+- [x] Waterline meniscus band at the near plane, driven by the active
+      `WaterService` sample's exact displaced position and normal so it shares
+      the registered body's `WaterSurface` rather than duplicating wave math.
+      The renderer already uses `DoubleSide`.
 - [x] Decide (and record here) whether the effect stays in `water` or moves to
       a `water/postprocessing` nested entry point, based on tree-shaking
       verification in a clean consumer build. Chosen nested entry point to
       preserve the existing optional-peer boundary; clean consumer verification
       remains part of Phase 6.
-- [ ] Demo: fly the camera through the surface repeatedly; show enter/exit
-      events and depth readout in the UI.
+- [x] Demo: `/water` shows the live camera side/distance, last enter/exit event
+      and crossing count while orbiting through the surface.
+
+#### 2026-07-25 — Shared-surface waterline and crossing diagnostics
+
+- `WaterUnderwaterEffect` now projects the active CPU surface sample and its
+  domain-aware world normal into camera space. A configurable near-plane
+  meniscus separates submerged and clear pixels; the same mask gates fog and
+  distortion during a crossing.
+- Added `waterlineColor`, `waterlineWidth` and `waterlineOpacity` inputs to
+  `<waterUnderwaterEffect>`. Perspective and orthographic cameras are both
+  supported.
+- The official `/water` demo now tracks the camera through the public
+  `WaterService` API and displays signed surface distance plus exactly-once
+  crossing events.
+- Development builds pass for both `triangular-engine` and `demo-app`.
+  In-app browser verification rendered the plane scene above and below the
+  moving surface with no console errors from the water stack. The focused
+  Karma bundle compiles, but this machine's known ChromeHeadless GPU-process
+  crash still prevents Jasmine from starting.
 
 Exit gate: crossing the surface shows a stable, wave-accurate waterline and a
 convincing underwater state; events fire exactly once per crossing.

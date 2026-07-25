@@ -128,7 +128,7 @@ export class WaterSurfaceComponent implements OnInit, OnDestroy {
         if (!renderer) return;
 
         const camera = this.engine.camera;
-        const elapsed = this.engine.clock.getElapsedTime();
+        const elapsed = this.engine.timer.getElapsed();
         renderer.update(camera, elapsed);
         this.water.updateTracked(elapsed);
         if (this.engine.renderer instanceof WebGLRenderer) {

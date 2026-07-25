@@ -27,6 +27,11 @@
         }
       </nav>
       <p class="status">{{ domains[activeDomain()].description }}</p>
+      <p class="status">
+        Camera: <strong>{{ cameraWaterState() }}</strong
+        ><br />
+        Last crossing: {{ lastCrossing() }} · {{ crossingCount() }} total
+      </p>
 
       <label class="range-control">
         <span
@@ -175,7 +180,11 @@
 
   <postprocessing-composer>
     @if (underwaterEnabled()) {
-      <waterUnderwaterEffect />
+      <waterUnderwaterEffect
+        waterlineColor="#c8fff7"
+        [waterlineWidth]="25"
+        [waterlineOpacity]="0.75"
+      />
     }
     <toneMappingEffect />
   </postprocessing-composer>

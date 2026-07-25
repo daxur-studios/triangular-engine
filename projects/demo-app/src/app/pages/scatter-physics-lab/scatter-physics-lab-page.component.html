@@ -1,0 +1,133 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Scatter physics lab controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small
+            >triangular-engine/scatter + jolt — Phase 3 collider ring</small
+          >
+        </div>
+        <strong>Destructible scatter physics lab</strong>
+      </header>
+
+      <p class="blurb">
+        A driveable rover proves the Jolt collider ring
+        (<code>diffScatterPhysicsResidency</code>) follows the rover's
+        position + velocity, not the camera — orbit away and the colliders
+        stay put. <code>ScatterJoltColliderAdapter</code> owns one static
+        compound body per resident physics cell; driving into a tree resolves
+        the hit instance via <code>resolveInstanceId</code> and estimates
+        contact momentum via <code>estimateScatterImpactMomentumNs</code>.
+        Thrown rocks reuse the same path with an adjustable mass/speed, so the
+        felling threshold can be tested from both sides. Felled or clicked
+        trees go into one removal overlay applied identically to rendering and
+        colliders — cut a tree, drive away, drive back: it stays gone.
+      </p>
+
+      <div class="actions">
+        <button
+          [class.active]="physicsDebug()"
+          (click)="togglePhysicsDebug()"
+        >
+          Physics debug
+        </button>
+        <button (click)="throwProjectile()">Throw at crosshair</button>
+      </div>
+
+      <div class="actions">
+        <label class="slider">
+          Thrown mass: {{ projectileMassKg() | number: "1.0-0" }} kg
+          <input
+            type="range"
+            min="2"
+            max="80"
+            step="1"
+            [value]="projectileMassKg()"
+            (input)="setProjectileMass($event)"
+          />
+        </label>
+        <label class="slider">
+          Throw speed: {{ projectileSpeedMps() | number: "1.0-0" }} m/s
+          <input
+            type="range"
+            min="5"
+            max="45"
+            step="1"
+            [value]="projectileSpeedMps()"
+            (input)="setProjectileSpeed($event)"
+          />
+        </label>
+      </div>
+
+      <p class="blurb note">
+        {{ treeTotalCount() }} tree instances total,
+        {{ residentCellCount() }} resident physics cells /
+        {{ residentInstanceCount() }} resident colliders,
+        {{ removedCount() }} removed ({{ felledCount() }} felled by impact).
+        @if (lastImpact(); as impact) {
+          Last impact: {{ impact.momentumNs | number: "1.0-0" }} Ns from
+          {{ impact.source }} —
+          {{ impact.felled ? "felled" : "bounced off" }} (threshold 900 Ns).
+        } @else {
+          No impacts yet.
+        }
+      </p>
+      <p class="blurb note">
+        Drive: WASD · sprint: Shift · click a tree to cut it · aim by orbiting
+        the camera, then Throw.
+      </p>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="initialCameraPosition()"
+    [target]="initialTarget()"
+    [near]="0.1"
+  />
+  <ambientLight [intensity]="1.3" />
+  <directionalLight [position]="[220, 260, 140]" [intensity]="2.1" />
+
+  <jolt-physics [gravity]="[0, -9.81, 0]" [debug]="physicsDebug()">
+    <jolt-rigid-body
+      #rover
+      [motionType]="2"
+      [position]="roverSpawnPositionM"
+      [angularDamping]="0.9"
+      [linearDamping]="0.05"
+      (onContactAdded)="onRoverContact($event)"
+    >
+      <jolt-box-shape [params]="roverBoxParams" />
+      <mesh [castShadow]="true">
+        <boxGeometry [params]="roverBoxParams" />
+        <meshStandardMaterial
+          [params]="{ color: '#ffb347', roughness: 0.5, metalness: 0.15 }"
+        />
+      </mesh>
+    </jolt-rigid-body>
+
+    @for (projectile of projectiles(); track projectile.id) {
+      <jolt-rigid-body
+        #projBody
+        [motionType]="2"
+        [position]="projectile.spawnPositionM"
+        [velocity]="projectile.velocityMps"
+        (onContactAdded)="onProjectileContact($event, projectile, projBody)"
+      >
+        <jolt-sphere-shape [radius]="projectile.radiusM" />
+        <mesh [castShadow]="true">
+          <sphereGeometry
+            [params]="{
+              radius: projectile.radiusM,
+              widthSegments: 16,
+              heightSegments: 12,
+            }"
+          />
+          <meshStandardMaterial
+            [params]="{ color: '#9fb4c7', roughness: 0.6 }"
+          />
+        </mesh>
+      </jolt-rigid-body>
+    }
+  </jolt-physics>
+</scene>

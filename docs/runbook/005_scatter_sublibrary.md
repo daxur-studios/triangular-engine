@@ -6,11 +6,13 @@
   dithered cross-fade, grass density fade, per-LOD shadow flags,
   surface-relative alignment, wind sway, true camera-facing cylindrical
   billboards, instance picking), all wired into the `scatter-lab` demo.
-  Phase 3 core/library code implemented (residency ring, removal overlay,
-  collider descriptors, `ScatterJoltColliderAdapter`, impact-momentum
-  estimate) but **not yet wired into the `scatter-lab` demo** — no rover,
-  no compound-collider visual/behavioral verification yet. Phases 4-5 not
-  started.
+  Phase 3 is fully implemented and wired into a new dedicated demo,
+  `scatter-physics-lab` (driveable rover, throwable rock, click-to-cut,
+  drive-into-tree felling, residency-ring debug viz, HUD counters) — builds
+  clean (`ng build demo-app`) but has not yet been driven in a browser, so
+  runtime behavior (correct sub-shape indices, residency churn at rest,
+  contact resolution) is unverified until someone actually plays with it.
+  Phases 4-5 not started.
 - Entry point: `triangular-engine/scatter` (decided — "foliage" rejected as
   the name because rocks/stones/clutter are first-class, not an exception)
 - Initial consumers: `scatter-lab` demo page (`projects/demo-app`), terrain-lab
@@ -299,7 +301,7 @@ the far tree tier (`enableScatterCylindricalBillboard`,
 one-mesh-per-tier not yet needed at demo scale. The `impostor` LOD kind is
 still a label only — reserved for Phase 5.
 
-### Phase 3 — Jolt collider ring + removal overlay — library code done, demo wiring not started
+### Phase 3 — Jolt collider ring + removal overlay — implemented, awaiting a play-test
 
 `ScatterJoltColliderAdapter` in the jolt entry: velocity-aware residency
 ring, compound shape per physics cell for small rocks, impact-threshold
@@ -322,11 +324,37 @@ impulse yet). `ScatterColliderDefinition.impactThresholdN` renamed to
 modules covered by specs (28 new, 237/237 passing); the jolt adapter itself
 has no headless-Jolt test harness and is verified via the demo instead.
 
-Not yet done (step 6 of the plan): `scatter-lab` demo wiring — a driveable
-rover, `reconcile`-driven residency each frame, debug visualization of
-resident cells/ring radii, click-to-cut removal, drive-into-tree felling,
-and HUD counters. Until this lands, the adapter is unexercised against a
-real Jolt world.
+Step 6 (demo wiring) is done, as a new dedicated page rather than an
+addition to `scatter-lab`: `projects/demo-app/src/app/pages/scatter-physics-lab/`.
+`scatter-lab.component.ts` was already ~900 lines juggling three terrain
+shapes, LOD bucketing, and picking — a real driveable rover only makes sense
+on a flat plane anyway (sphere/cylinder need surface-relative vehicle
+orientation, a separate problem), so a focused new page kept the physics
+wiring out of that file. It has: a WASD-driveable dynamic rover
+(`JoltRigidBodyComponent`, camera-relative movement, imperative velocity
+control mirroring `terrain-lab`'s character controller), a throwable-rock
+spawner (mass/speed sliders; radius is derived from mass at a fixed density
+so the slider also drives the rock's real simulated mass, not just the
+momentum formula — thrown from the camera along its look direction, so
+"aim" is orbiting the camera), `ScatterJoltColliderAdapter.reconcile` driven
+every tick off the rover's own position + velocity (not the camera), a
+shared `handleImpact` path used by both the rover's and every projectile's
+`onContactAdded` (tries both `mSubShapeID1`/`mSubShapeID2` per the plan's
+note on manifold body-ordering), click-to-cut sharing the same removal
+overlay as felling, wireframe rings visualizing the add/remove residency
+radii, and HUD counters (resident cells/colliders, removed/felled counts,
+last impact momentum + source). Ground is a small flat `PlaneTerrainDomain`
+grid with a static `TerrainJoltColliderAdapter` collider, built once (no
+LOD streaming — the area is small and bounded on purpose, to keep this a
+focused physics proof rather than a second terrain-streaming demo).
+
+Verified so far: `ng build demo-app` compiles clean (the jolt/scatter code
+this exercises has no Karma coverage, so this build is the only automated
+check). Not yet verified: anything at runtime. Per this repo's "I serve the
+app, you don't" convention, nobody has driven the rover, thrown a rock, or
+watched the residency ring reconcile in a real browser yet — that's the
+actual proof this phase needs before Phase 3 can be called done, not just
+implemented.
 
 ### Phase 4 — Biome-driven suitability — not started
 

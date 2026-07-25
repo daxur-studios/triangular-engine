@@ -291,7 +291,7 @@ export class WaterLodPocPageComponent {
   }
 
   private tick(deltaTime: number): void {
-    const t = this.engine.clock.getElapsedTime();
+    const t = this.engine.timer.getElapsed();
     this.uTime.value = t;
 
     if (this.flythrough()) {
