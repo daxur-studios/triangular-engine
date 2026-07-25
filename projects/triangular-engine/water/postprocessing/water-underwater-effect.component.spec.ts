@@ -68,6 +68,12 @@ describe('WaterUnderwaterEffect', () => {
     expect(WATER_UNDERWATER_FRAGMENT_SHADER).toContain(
       'waterNearPlaneSignedDistance',
     );
+    expect(WATER_UNDERWATER_FRAGMENT_SHADER).toContain(
+      'fog * submerged',
+    );
+    expect(WATER_UNDERWATER_FRAGMENT_SHADER).not.toContain(
+      'fog * immersion',
+    );
     expect(WATER_UNDERWATER_FRAGMENT_SHADER).toContain('meniscus');
   });
 });

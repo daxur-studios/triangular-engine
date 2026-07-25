@@ -271,8 +271,9 @@ void mainImage(
   );
   float sceneDepth = waterLinearDepth(depth);
   float fog = 1.0 - exp(-sceneDepth * waterCameraFar * waterDensity);
-  float immersion = max(waterImmersion, submerged * 0.15);
-  fog = clamp(fog * immersion * submerged, 0.0, 0.94);
+  // Optical attenuation depends on the distance travelled through water,
+  // not how far the camera happens to sit below the nearby wave crest.
+  fog = clamp(fog * submerged, 0.0, 0.94);
   vec3 tinted = mix(inputColor.rgb, waterColor, fog);
   float meniscusHalfWidth = max(0.5, waterlineWidth * 0.5);
   float meniscus = 1.0 - smoothstep(

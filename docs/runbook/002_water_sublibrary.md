@@ -7,13 +7,13 @@
 
 ## Status
 
-- State: Planning
+- State: In progress
 - Target entry points: `triangular-engine/water` (core), `triangular-engine/water/jolt` (physics)
 - Initial renderer: WebGL
-- Last updated: 2026-07-23 (consumer API and stabilization order decided;
-  sphere domain's exit gate remains retracted — water-follows-camera bug found
-  post-verification; stabilize domain anchoring before Phase 1e centralizes the
-  renderer, presets and far-field sparkle)
+- Last updated: 2026-07-25 (the public renderer, service, underwater effect and
+  maintained integration demo are operational; near-shore rendering now
+  requires a shared world-space shallow-water field before displacement,
+  floating objects or future Jolt buoyancy are changed)
 
 ## TL;DR
 
@@ -494,6 +494,23 @@ for the design and why it still keeps water and terrain decoupled.
       depth-texture shoreline fade and depth tint, built on the Phase 1a grid.
       Shipped as `/water-material-poc`; user-verified 2026-07-22 including
       under `logarithmicDepthBuffer: true` — see investigation log.
+- [ ] Shared world-space shallow-water field and near-shore wave model.
+      Rendering, CPU surface queries, floating-object helpers and future Jolt
+      buoyancy must consume the same deterministic water-depth/wave data.
+      Do not derive geometric wave attenuation from camera-space scene depth:
+      that cannot be reproduced by physics, changes with the viewpoint and
+      makes visible waves disagree with floating objects.
+      - First provide an efficient bathymetry/water-depth source with matching
+        GPU and CPU access and no per-frame GPU readback.
+      - Then apply shallow-water modulation to displacement, normals, surface
+        velocity and CPU sampling together, so floating and buoyant bodies
+        remain on the rendered surface near shore.
+      - Add a bounded breaker layer after that foundation: shore-facing wave
+        steepening, crest foam and controlled collapse. A full fluid simulation
+        is not required for the initial implementation.
+      - Acceptance: waves and floating objects remain synchronized as water
+        shallows; the result is camera-independent; crests meet terrain without
+        repeated crescents, obvious interpenetration or popping.
 - [ ] Shore foam band (medium tier) from depth delta.
 - [ ] Bounded mesh (distance-based segment density, no clipmap needed) for
       `<waterLake>`.
@@ -1814,3 +1831,35 @@ recentring" as the cause).
 - The water entry point exports the renderer and the triangular-engine
   development build passes. Far-field/stylize shader packs and the
   `<waterSurface>` Angular wrapper remain the next Phase 1e slices.
+
+### 2026-07-25 — Maintained demo and surface/underwater alignment stabilized
+
+- The public `<waterSurface>` path, `WaterService` sampling/tracking and
+  optional underwater post-processing effect are exercised together on the
+  maintained `/water` page for plane, sphere and cylinder domains.
+- Camera above/below state and the underwater transition now use the same exact
+  analytic surface sample as the rendered Gerstner waves. Rejected speculative
+  time-offset fixes that did not address the observed position mismatch.
+- Underwater fog is driven by reconstructed distance travelled through water,
+  rather than scaling visibility by the camera's depth beneath the local crest.
+  This preserves attenuation when the camera is only just below the surface.
+- Opaque-scene depth separation was corrected so foreground waves depth-test
+  against terrain correctly. Transparent water now writes the nearest visible
+  surface depth, preventing farther folded wave faces from showing through
+  nearer crests; fully transparent shoreline fragments are discarded first.
+- Added maintained-demo visibility fixtures: a large orange crate following
+  the exact CPU Gerstner surface sample with damped tilt, plus separated shallow
+  and deep submerged markers for underwater-effect testing.
+- User visually verified the surface alignment, terrain occlusion, underwater
+  transition, folded-crest occlusion and performance improvements.
+- Remaining shoreline defect: geometric Gerstner displacement still reaches
+  the dry beach before fragment shoreline fade removes it, producing excessive
+  near-shore crescents and terrain intersection.
+- A camera-space depth-texture experiment attenuated displacement visually but
+  was rejected and removed: it did not look natural and CPU-sampled floating
+  objects could not reproduce it. Future Jolt buoyancy would have inherited the
+  same renderer/physics mismatch.
+- Phase 1b now requires a shared world-space bathymetry/shallow-water field
+  before changing near-shore waves. Rendering, surface queries and physics must
+  use the same modulation, with inexpensive stylized breakers added only after
+  that common foundation exists.

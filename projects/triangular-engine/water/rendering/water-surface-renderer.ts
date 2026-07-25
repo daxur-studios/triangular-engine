@@ -468,7 +468,9 @@ export class WaterSurfaceRenderer {
       fragmentShader: WATER_SURFACE_FRAGMENT_SHADER,
       side: DoubleSide,
       transparent: true,
-      depthWrite: false,
+      // Grazing views can expose several folded wave faces. The nearest face
+      // must populate the depth buffer so faces behind it cannot show through.
+      depthWrite: true,
       wireframe: this.wireframe,
     });
   }
@@ -583,6 +585,7 @@ export const WATER_SURFACE_FRAGMENT_SHADER = `
       float depth = uAbsorptionDistance;
       float alpha = 1.0;
     #endif
+    if (alpha <= 0.001) discard;
 
     vec3 lightDir = normalize(uLightDirection);
     float diffuse = max(dot(normal, lightDir), 0.0);

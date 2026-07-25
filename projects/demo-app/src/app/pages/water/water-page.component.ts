@@ -8,9 +8,14 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
+  BoxGeometry,
   Color,
   DoubleSide,
+  Group,
+  Mesh,
   MeshStandardMaterial,
+  Quaternion,
+  SphereGeometry,
   Vector3,
   type Vector3Tuple,
 } from 'three';
@@ -296,6 +301,11 @@ export class WaterPageComponent {
   private readonly engine = inject(EngineService);
   private readonly water = inject(WaterService);
   private readonly cameraTracker: WaterTracker;
+  private readonly waterTestFixtures = createWaterTestFixtures();
+  private readonly floatingFixtureAnchor = new Vector3();
+  private readonly floatingFixtureRestRotation = new Quaternion();
+  private readonly floatingFixtureWaveRotation = new Quaternion();
+  private fixtureLayoutKey = '';
   private readonly terrainWorker = new Worker(
     new URL('./water-terrain.worker', import.meta.url),
     { type: 'module' },
@@ -336,6 +346,7 @@ export class WaterPageComponent {
     );
     const previousBackground = this.engine.scene.background;
     this.engine.scene.background = new Color('#04121c');
+    this.engine.scene.add(this.waterTestFixtures);
     this.terrainWorker.onmessage = ({
       data,
     }: MessageEvent<{
@@ -352,7 +363,11 @@ export class WaterPageComponent {
 
     const upSubscription = this.engine.postTick$.subscribe(() => {
       this.updateOrbitUp();
+      this.updateWaterTestFixtures();
+      this.floatSurfaceFixture();
     });
+    this.updateWaterTestFixtures();
+    this.floatSurfaceFixture();
 
     destroyRef.onDestroy(() => {
       stateSubscription.unsubscribe();
@@ -364,6 +379,8 @@ export class WaterPageComponent {
         reject(new Error('Terrain worker was terminated.'));
       }
       this.terrainRequests.clear();
+      this.engine.scene.remove(this.waterTestFixtures);
+      disposeWaterTestFixtures(this.waterTestFixtures);
       this.engine.scene.background = previousBackground;
     });
   }
@@ -419,10 +436,126 @@ export class WaterPageComponent {
       this.orbitUp.set(next);
     }
   }
+
+  private updateWaterTestFixtures(): void {
+    const layoutKey = `${this.activeDomain()}:${this.worldScale()}:${this.waterHeight()}`;
+    if (layoutKey === this.fixtureLayoutKey) return;
+    this.fixtureLayoutKey = layoutKey;
+
+    const domain = this.activeWaterDomain();
+    const reference = new Vector3(...this.cameraPosition());
+    const frame = domain.getLocalFrame(reference);
+    const fixtures = this.waterTestFixtures.children;
+    const placements = [
+      // A broad crate straddling the mean surface.
+      { localX: 40, localZ: -80, height: 1 },
+      // A bright marker at snorkelling depth.
+      { localX: -100, localZ: 80, height: -8 },
+      // A second marker deep enough to make distance fog obvious.
+      { localX: -220, localZ: -120, height: -26 },
+    ] as const;
+
+    for (let i = 0; i < placements.length; i++) {
+      const placement = placements[i];
+      domain.composeWorldPosition(
+        frame,
+        placement.localX,
+        placement.localZ,
+        placement.height,
+        fixtures[i].position,
+      );
+      if (i === 0) {
+        this.floatingFixtureAnchor.copy(fixtures[i].position);
+        this.floatingFixtureRestRotation.setFromUnitVectors(
+          WATER_FIXTURE_UP,
+          frame.normal,
+        );
+      }
+      fixtures[i].quaternion.setFromUnitVectors(
+        WATER_FIXTURE_UP,
+        frame.normal,
+      );
+    }
+  }
+
+  private floatSurfaceFixture(): void {
+    const sample = this.water.sample(
+      this.floatingFixtureAnchor,
+      this.engine.timer.getElapsed(),
+    );
+    if (!sample) return;
+
+    const floating = this.waterTestFixtures.children[0];
+    floating.position
+      .copy(sample.position)
+      // Keep the crate's centre slightly above the sampled surface so its
+      // lower portion remains visibly submerged.
+      .addScaledVector(sample.normal, 1);
+    this.floatingFixtureWaveRotation.setFromUnitVectors(
+      WATER_FIXTURE_UP,
+      sample.normal,
+    );
+    floating.quaternion
+      .copy(this.floatingFixtureRestRotation)
+      .slerp(this.floatingFixtureWaveRotation, WATER_FIXTURE_TILT_RESPONSE);
+  }
 }
 
 const COAST_PATCH_SIZE_M = 800;
 const TERRAIN_MAX_LOD_LEVEL = 2;
+const WATER_FIXTURE_UP = new Vector3(0, 1, 0);
+// Large floating bodies normally respond less sharply than the local water
+// normal. Vertical motion still follows the sampled 3D surface exactly.
+const WATER_FIXTURE_TILT_RESPONSE = 0.25;
+
+function createWaterTestFixtures(): Group {
+  const group = new Group();
+  group.name = 'water-effect-test-fixtures';
+
+  const floating = new Mesh(
+    new BoxGeometry(9, 3, 6),
+    new MeshStandardMaterial({
+      color: '#ef9f32',
+      roughness: 0.72,
+    }),
+  );
+  floating.name = 'floating-surface-crate';
+
+  const shallow = new Mesh(
+    new SphereGeometry(3.5, 24, 16),
+    new MeshStandardMaterial({
+      color: '#ff4f73',
+      emissive: '#5c071b',
+      roughness: 0.5,
+    }),
+  );
+  shallow.name = 'shallow-submerged-marker';
+
+  const deep = new Mesh(
+    new BoxGeometry(8, 8, 8),
+    new MeshStandardMaterial({
+      color: '#d7ff42',
+      emissive: '#334400',
+      roughness: 0.58,
+    }),
+  );
+  deep.name = 'deep-submerged-marker';
+
+  group.add(floating, shallow, deep);
+  return group;
+}
+
+function disposeWaterTestFixtures(group: Group): void {
+  for (const child of group.children) {
+    if (!(child instanceof Mesh)) continue;
+    child.geometry.dispose();
+    if (Array.isArray(child.material)) {
+      for (const material of child.material) material.dispose();
+    } else {
+      child.material.dispose();
+    }
+  }
+}
 
 class CoastalTerrainField implements ITerrainField {
   readonly minElevationM = -58;
