@@ -33,4 +33,20 @@ describe('adaptive terrain patch selection', () => {
       }),
     ).toEqual([root]);
   });
+
+  it('keeps an already-refined patch stable inside the hysteresis margin', () => {
+    const smallDomain = new PlaneTerrainDomain(100);
+    const root = { level: 0, x: 0, z: 0 };
+    const selected = selectAdaptiveTerrainPatches(smallDomain, {
+      roots: [root],
+      cameraWorldM: [155, 0, -50],
+      getLevel: (address) => address.level,
+      maxLevel: 1,
+      refinementDistanceM: 100,
+      hysteresis: 0.1,
+      wasRefined: () => true,
+    });
+
+    expect(selected.length).toBe(4);
+  });
 });

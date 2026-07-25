@@ -1,4 +1,5 @@
-/** Framework-free multi-surface terrain foundation. */
+/** Multi-surface terrain foundation and declarative Angular renderer. */
+export * from './components/terrain-surface.component';
 export * from './core/terrain-field';
 export * from './core/terrain-math';
 export * from './core/terrain-patch';

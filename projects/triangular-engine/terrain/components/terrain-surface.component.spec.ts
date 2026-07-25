@@ -1,0 +1,69 @@
+import { TestBed } from '@angular/core/testing';
+import { Subject } from 'rxjs';
+import { PerspectiveCamera, Scene } from 'three';
+import { EngineService } from 'triangular-engine';
+import { ConstantTerrainField } from '../core/terrain-field';
+import { PlaneTerrainDomain } from '../domains/plane-terrain-domain';
+import { TerrainSurfaceComponent } from './terrain-surface.component';
+
+describe('TerrainSurfaceComponent', () => {
+  let scene: Scene;
+  let camera: PerspectiveCamera;
+  let beforeRender$: Subject<void>;
+
+  beforeEach(() => {
+    scene = new Scene();
+    camera = new PerspectiveCamera();
+    beforeRender$ = new Subject<void>();
+    TestBed.configureTestingModule({
+      imports: [TerrainSurfaceComponent],
+      providers: [
+        {
+          provide: EngineService,
+          useValue: { scene, camera, beforeRender$ },
+        },
+      ],
+    });
+  });
+
+  it('follows the engine camera and replaces coarse patches with nearby detail', () => {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', [{ level: 0, x: 0, z: 0 }]);
+    fixture.componentRef.setInput('maxLod', 2);
+    fixture.componentRef.setInput('refinementDistance', 1_200);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('generationBudget', 100);
+    camera.position.set(5_000, 100, 5_000);
+    fixture.detectChanges();
+
+    beforeRender$.next();
+    expect(scene.children.length).toBe(1);
+    expect(scene.children[0].children.length).toBe(1);
+
+    camera.position.set(400, 100, -400);
+    beforeRender$.next();
+    expect(scene.children[0].children.length).toBe(16);
+
+    fixture.destroy();
+    expect(scene.children.length).toBe(0);
+  });
+
+  it('uses an explicit LOD position instead of the camera when supplied', () => {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', [{ level: 0, x: 0, z: 0 }]);
+    fixture.componentRef.setInput('lodPosition', [400, 100, -400]);
+    fixture.componentRef.setInput('maxLod', 1);
+    fixture.componentRef.setInput('refinementDistance', 1_200);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('generationBudget', 100);
+    camera.position.set(5_000, 100, 5_000);
+    fixture.detectChanges();
+
+    beforeRender$.next();
+    expect(scene.children[0].children.length).toBe(4);
+  });
+});

@@ -114,8 +114,8 @@
         useful shoreline view. Performance, balanced, and cinematic change the
         rendering budget without changing wave motion. The flat-world fixture
         uses the terrain sub-library and spans beach, shelf, and deep-basin
-        elevations. World size adds fixed-size terrain chunks; it does not scale
-        existing chunks.
+        elevations. The reusable terrain component follows the active camera,
+        refining nearby chunks and retaining coarse geometry in the distance.
       </p>
     </section>
   </ng-template>
@@ -126,6 +126,21 @@
     [quality]="activeQuality()"
     [motion]="activeMotion()"
     [wireframe]="wireframe()"
+  />
+  <terrainSurface
+    [field]="activeTerrainField()"
+    [domain]="$any(activeTerrainDomain())"
+    [roots]="terrainRoots()"
+    [maxLod]="terrainMaxLod()"
+    [refinementDistance]="terrainRefinementDistance()"
+    [resolution]="48"
+    [skirtDepth]="5"
+    [generationBudget]="6"
+    [lodHysteresis]="0.18"
+    [meshGenerator]="generateTerrainPatch"
+    [wireframe]="wireframe()"
+    [createMaterial]="createTerrainMaterial"
+    [createColors]="createTerrainColors"
   />
 
   @switch (activeDomain()) {

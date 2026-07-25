@@ -3,20 +3,14 @@ import {
   Component,
   computed,
   DestroyRef,
-  effect,
   inject,
   signal,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
-  BufferAttribute,
-  BufferGeometry,
   Color,
   DoubleSide,
-  Group,
-  Mesh,
   MeshStandardMaterial,
-  Object3D,
   Vector3,
   type Vector3Tuple,
 } from 'three';
@@ -26,15 +20,16 @@ import {
   ToneMappingEffectComponent,
 } from 'triangular-engine/postprocessing';
 import {
-  generateTerrainPatchMesh,
   CylinderTerrainDomain,
   PlaneTerrainDomain,
-  selectAdaptiveTerrainPatches,
   SphereTerrainDomain,
   SPHERE_TERRAIN_FACES,
+  TerrainSurfaceComponent,
   type ITerrainField,
   type ITerrainFieldSample,
+  type ITerrainSurfaceColorContext,
   type ITerrainPatchMesh,
+  type ITerrainSurfaceGenerationRequest,
   type TerrainVector3,
 } from 'triangular-engine/terrain';
 import {
@@ -95,6 +90,7 @@ const MOTION_KEYS: readonly WaterMotionPresetName[] = [
     EngineModule,
     PostprocessingComposerComponent,
     ToneMappingEffectComponent,
+    TerrainSurfaceComponent,
     WaterSurfaceComponent,
     WaterUnderwaterEffectComponent,
   ],
@@ -135,6 +131,115 @@ export class WaterPageComponent {
   });
   readonly relativeUp = signal(true);
   readonly orbitUp = signal<Vector3Tuple>([0, 1, 0]);
+  private readonly terrainFields: Record<DomainKind, ITerrainField> = {
+    plane: new CoastalTerrainField(),
+    sphere: new OceanPlanetTerrainField(),
+    cylinder: new CylinderHabitatTerrainField(),
+  };
+  readonly activeTerrainField = computed(
+    () => this.terrainFields[this.activeDomain()],
+  );
+  readonly activeTerrainDomain = computed(() => {
+    const scale = this.worldScale();
+    switch (this.activeDomain()) {
+      case 'sphere':
+        return new SphereTerrainDomain(SPHERE_RADIUS * scale);
+      case 'cylinder':
+        return new CylinderTerrainDomain({
+          radiusM: CYLINDER_RADIUS * scale,
+          lengthM: CYLINDER_LENGTH * scale,
+          levelZeroAngularPatchCount: 8 * scale,
+          levelZeroAxialPatchCount: 4 * scale,
+        });
+      default:
+        return new PlaneTerrainDomain(COAST_PATCH_SIZE_M);
+    }
+  });
+  readonly terrainRoots = computed<readonly any[]>(() => {
+    const scale = this.worldScale();
+    if (this.activeDomain() === 'sphere') {
+      return SPHERE_TERRAIN_FACES.map((face) => ({
+        face,
+        level: 0,
+        x: 0,
+        y: 0,
+      }));
+    }
+    if (this.activeDomain() === 'cylinder') {
+      const domain = this.activeTerrainDomain() as CylinderTerrainDomain;
+      const counts = domain.getPatchCounts(0);
+      return Array.from({ length: counts.axial }, (_, axialIndex) =>
+        Array.from({ length: counts.angular }, (_unused, angularIndex) => ({
+          level: 0,
+          angularIndex,
+          axialIndex,
+        })),
+      ).flat();
+    }
+    const chunksPerSide = 2 * scale;
+    const start = -Math.floor(chunksPerSide / 2);
+    return Array.from({ length: chunksPerSide }, (_, zOffset) =>
+      Array.from({ length: chunksPerSide }, (_unused, xOffset) => ({
+        level: 0,
+        x: start + xOffset,
+        z: start + zOffset,
+      })),
+    ).flat();
+  });
+  readonly terrainMaxLod = computed(
+    () =>
+      TERRAIN_MAX_LOD_LEVEL +
+      (this.activeDomain() === 'sphere' ? Math.log2(this.worldScale()) : 0),
+  );
+  readonly terrainRefinementDistance = computed(() => {
+    const scale = this.worldScale();
+    if (this.activeDomain() === 'sphere') return 720 * scale;
+    if (this.activeDomain() === 'cylinder') return 520 * scale;
+    return 1_100 * scale;
+  });
+  readonly createTerrainMaterial = () =>
+    new MeshStandardMaterial({
+      color: '#ffffff',
+      vertexColors: true,
+      roughness: 0.96,
+      side: DoubleSide,
+    });
+  readonly createTerrainColors = (
+    context: ITerrainSurfaceColorContext<any>,
+  ): Float32Array => {
+    const scale = this.worldScale();
+    if (this.activeDomain() === 'sphere') {
+      return createSphereTerrainColors(
+        context.centerWorldM,
+        context.surface.positions,
+        SPHERE_RADIUS * scale,
+      );
+    }
+    if (this.activeDomain() === 'cylinder') {
+      return createCylinderTerrainColors(
+        context.centerWorldM,
+        context.surface.positions,
+        CYLINDER_RADIUS * scale,
+      );
+    }
+    return createTerrainColors(context.surface.positions);
+  };
+  readonly generateTerrainPatch = (
+    request: ITerrainSurfaceGenerationRequest<any>,
+  ): Promise<ITerrainPatchMesh<any>> => {
+    const id = this.nextTerrainRequestId++;
+    return new Promise((resolve, reject) => {
+      this.terrainRequests.set(id, { resolve, reject });
+      this.terrainWorker.postMessage({
+        id,
+        kind: this.activeDomain(),
+        scale: this.worldScale(),
+        address: request.address,
+        resolution: request.resolution,
+        skirtDepthM: request.skirtDepthM,
+      });
+    });
+  };
   readonly activeWaterDomain = computed<WaterSurfaceDomain>(() => {
     const height = this.waterHeight();
     const scale = this.worldScale();
@@ -184,38 +289,36 @@ export class WaterPageComponent {
   });
 
   private readonly engine = inject(EngineService);
-  private fixtures = createFixtures(1);
-  private fixtureWorldSize = 1;
+  private readonly terrainWorker = new Worker(
+    new URL('./water-terrain.worker', import.meta.url),
+    { type: 'module' },
+  );
+  private nextTerrainRequestId = 0;
+  private readonly terrainRequests = new Map<
+    number,
+    {
+      resolve: (patch: ITerrainPatchMesh<any>) => void;
+      reject: (error: Error) => void;
+    }
+  >();
 
   constructor() {
     const destroyRef = inject(DestroyRef);
     const previousBackground = this.engine.scene.background;
     this.engine.scene.background = new Color('#04121c');
-    for (const fixture of Object.values(this.fixtures)) {
-      this.engine.scene.add(fixture);
-    }
-
-    effect(() => {
-      const active = this.activeDomain();
-      const wireframe = this.wireframe();
-      const worldSize = this.worldSize();
-      if (worldSize !== this.fixtureWorldSize) {
-        this.disposeFixtures();
-        this.fixtures = createFixtures(2 ** (worldSize - 1));
-        this.fixtureWorldSize = worldSize;
-        for (const fixture of Object.values(this.fixtures)) {
-          this.engine.scene.add(fixture);
-        }
-      }
-      for (const [kind, fixture] of Object.entries(this.fixtures)) {
-        fixture.visible = kind === active;
-        fixture.traverse((child) => {
-          if (child instanceof Mesh) {
-            (child.material as MeshStandardMaterial).wireframe = wireframe;
-          }
-        });
-      }
-    });
+    this.terrainWorker.onmessage = ({
+      data,
+    }: MessageEvent<{
+      id: number;
+      patch?: ITerrainPatchMesh<any>;
+      error?: string;
+    }>) => {
+      const pending = this.terrainRequests.get(data.id);
+      if (!pending) return;
+      this.terrainRequests.delete(data.id);
+      if (data.patch) pending.resolve(data.patch);
+      else pending.reject(new Error(data.error ?? 'Terrain worker failed.'));
+    };
 
     const upSubscription = this.engine.postTick$.subscribe(() => {
       this.updateOrbitUp();
@@ -223,8 +326,12 @@ export class WaterPageComponent {
 
     destroyRef.onDestroy(() => {
       upSubscription.unsubscribe();
+      this.terrainWorker.terminate();
+      for (const { reject } of this.terrainRequests.values()) {
+        reject(new Error('Terrain worker was terminated.'));
+      }
+      this.terrainRequests.clear();
       this.engine.scene.background = previousBackground;
-      this.disposeFixtures();
     });
   }
 
@@ -280,31 +387,10 @@ export class WaterPageComponent {
     }
   }
 
-  private disposeFixtures(): void {
-    for (const fixture of Object.values(this.fixtures)) {
-      fixture.removeFromParent();
-      fixture.traverse((child) => {
-        if (child instanceof Mesh) {
-          child.geometry.dispose();
-          (child.material as MeshStandardMaterial).dispose();
-        }
-      });
-    }
-  }
-}
-
-function createFixtures(worldScale: number): Record<DomainKind, Object3D> {
-  return {
-    plane: createCoastalTerrain(worldScale),
-    sphere: createOceanPlanetTerrain(worldScale),
-    cylinder: createCylinderTerrain(worldScale),
-  };
 }
 
 const COAST_PATCH_SIZE_M = 800;
-const TERRAIN_PATCH_RESOLUTION = 48;
 const TERRAIN_MAX_LOD_LEVEL = 2;
-const TERRAIN_SKIRT_DEPTH_M = 5;
 
 class CoastalTerrainField implements ITerrainField {
   readonly minElevationM = -58;
@@ -368,92 +454,6 @@ class CoastalTerrainField implements ITerrainField {
   }
 }
 
-function createCoastalTerrain(worldScale: number): Group {
-  const group = new Group();
-  const domain = new PlaneTerrainDomain(COAST_PATCH_SIZE_M);
-  const field = new CoastalTerrainField();
-
-  const chunksPerSide = 2 * worldScale;
-  const start = -Math.floor(chunksPerSide / 2);
-  const roots = [];
-  for (let z = start; z < start + chunksPerSide; z++) {
-    for (let x = start; x < start + chunksPerSide; x++) {
-      roots.push({ level: 0, x, z });
-    }
-  }
-  const camera = getInitialCameraPosition('plane', worldScale);
-  const selected = selectAdaptiveTerrainPatches(domain, {
-    roots,
-    cameraWorldM: camera,
-    getLevel: (address) => address.level,
-    maxLevel: TERRAIN_MAX_LOD_LEVEL,
-    refinementDistanceM: 1_100 * worldScale,
-  });
-  for (const address of selected) {
-    const patch = generateTerrainPatchMesh(field, domain, {
-      address,
-      resolution: TERRAIN_PATCH_RESOLUTION,
-      skirtDepthM: TERRAIN_SKIRT_DEPTH_M,
-    });
-    group.add(createCoastalPatchMesh(patch));
-  }
-
-  return group;
-}
-
-function createCoastalPatchMesh(
-  patch: ITerrainPatchMesh<unknown>,
-  colors = createTerrainColors(patch.surface.positions),
-  skirtColors = patch.skirt
-    ? createTerrainColors(patch.skirt.positions)
-    : undefined,
-): Mesh {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute(
-    'position',
-    new BufferAttribute(patch.surface.positions, 3),
-  );
-  geometry.setAttribute(
-    'normal',
-    new BufferAttribute(patch.surface.normals, 3),
-  );
-  geometry.setAttribute('uv', new BufferAttribute(patch.surface.uvs, 2));
-  geometry.setAttribute(
-    'color',
-    new BufferAttribute(colors, 3),
-  );
-  geometry.setIndex(new BufferAttribute(patch.surface.indices, 1));
-
-  const mesh = new Mesh(
-    geometry,
-    new MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.96,
-      side: DoubleSide,
-    }),
-  );
-  if (patch.skirt) {
-    const skirtGeometry = new BufferGeometry();
-    skirtGeometry.setAttribute(
-      'position',
-      new BufferAttribute(patch.skirt.positions, 3),
-    );
-    skirtGeometry.setAttribute(
-      'normal',
-      new BufferAttribute(patch.skirt.normals, 3),
-    );
-    skirtGeometry.setAttribute('uv', new BufferAttribute(patch.skirt.uvs, 2));
-    skirtGeometry.setAttribute(
-      'color',
-      new BufferAttribute(skirtColors!, 3),
-    );
-    skirtGeometry.setIndex(new BufferAttribute(patch.skirt.indices, 1));
-    mesh.add(new Mesh(skirtGeometry, mesh.material));
-  }
-  mesh.position.fromArray(patch.centerWorldM);
-  return mesh;
-}
-
 class OceanPlanetTerrainField implements ITerrainField {
   readonly minElevationM = -46;
   readonly maxElevationM = 32;
@@ -504,51 +504,6 @@ class OceanPlanetTerrainField implements ITerrainField {
   }
 }
 
-function createOceanPlanetTerrain(worldScale: number): Group {
-  const group = new Group();
-  const radius = SPHERE_RADIUS * worldScale;
-  const domain = new SphereTerrainDomain(radius);
-  const field = new OceanPlanetTerrainField();
-  const roots = SPHERE_TERRAIN_FACES.map((face) => ({
-    face,
-    level: 0,
-    x: 0,
-    y: 0,
-  }));
-  const selected = selectAdaptiveTerrainPatches(domain, {
-    roots,
-    cameraWorldM: getInitialCameraPosition('sphere', worldScale),
-    getLevel: (address) => address.level,
-    maxLevel: TERRAIN_MAX_LOD_LEVEL + Math.log2(worldScale),
-    refinementDistanceM: 720 * worldScale,
-  });
-  for (const address of selected) {
-    const patch = generateTerrainPatchMesh(field, domain, {
-      address,
-      resolution: TERRAIN_PATCH_RESOLUTION,
-      skirtDepthM: TERRAIN_SKIRT_DEPTH_M,
-    });
-    group.add(
-      createCoastalPatchMesh(
-        patch,
-        createSphereTerrainColors(
-          patch.centerWorldM,
-          patch.surface.positions,
-          radius,
-        ),
-        patch.skirt
-          ? createSphereTerrainColors(
-              patch.centerWorldM,
-              patch.skirt.positions,
-              radius,
-            )
-          : undefined,
-      ),
-    );
-  }
-  return group;
-}
-
 class CylinderHabitatTerrainField implements ITerrainField {
   readonly minElevationM = -42;
   readonly maxElevationM = 28;
@@ -587,77 +542,6 @@ class CylinderHabitatTerrainField implements ITerrainField {
     }
     return out;
   }
-}
-
-function createCylinderTerrain(worldScale: number): Group {
-  const group = new Group();
-  const radius = CYLINDER_RADIUS * worldScale;
-  const domain = new CylinderTerrainDomain({
-    radiusM: radius,
-    lengthM: CYLINDER_LENGTH * worldScale,
-    levelZeroAngularPatchCount: 8 * worldScale,
-    levelZeroAxialPatchCount: 4 * worldScale,
-  });
-  const field = new CylinderHabitatTerrainField();
-  const counts = domain.getPatchCounts(0);
-  const roots = [];
-  for (let axialIndex = 0; axialIndex < counts.axial; axialIndex++) {
-    for (
-      let angularIndex = 0;
-      angularIndex < counts.angular;
-      angularIndex++
-    ) {
-      roots.push({ level: 0, angularIndex, axialIndex });
-    }
-  }
-  const selected = selectAdaptiveTerrainPatches(domain, {
-    roots,
-    cameraWorldM: getInitialCameraPosition('cylinder', worldScale),
-    getLevel: (address) => address.level,
-    maxLevel: TERRAIN_MAX_LOD_LEVEL,
-    refinementDistanceM: 520 * worldScale,
-  });
-  for (const address of selected) {
-    const patch = generateTerrainPatchMesh(field, domain, {
-      address,
-      resolution: TERRAIN_PATCH_RESOLUTION,
-      skirtDepthM: TERRAIN_SKIRT_DEPTH_M,
-    });
-    group.add(
-      createCoastalPatchMesh(
-        patch,
-        createCylinderTerrainColors(
-          patch.centerWorldM,
-          patch.surface.positions,
-          radius,
-        ),
-        patch.skirt
-          ? createCylinderTerrainColors(
-              patch.centerWorldM,
-              patch.skirt.positions,
-              radius,
-            )
-          : undefined,
-      ),
-    );
-  }
-  return group;
-}
-
-function getInitialCameraPosition(
-  kind: DomainKind,
-  worldScale: number,
-): TerrainVector3 {
-  if (kind === 'sphere') {
-    const direction = new Vector3(310, -80, 145).normalize();
-    return direction
-      .multiplyScalar(SPHERE_RADIUS * worldScale + 170)
-      .toArray() as TerrainVector3;
-  }
-  if (kind === 'cylinder') {
-    return [-55, CYLINDER_RADIUS * worldScale - 24, 45];
-  }
-  return [-430, 115, 330];
 }
 
 function createCylinderTerrainColors(
