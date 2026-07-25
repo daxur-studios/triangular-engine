@@ -2,17 +2,13 @@
 
 ## Status
 
-- State: Phase 0, Phase 1, and Phase 2 complete (LOD tiers, hysteresis,
-  dithered cross-fade, grass density fade, per-LOD shadow flags,
-  surface-relative alignment, wind sway, true camera-facing cylindrical
-  billboards, instance picking), all wired into the `scatter-lab` demo.
-  Phase 3 is fully implemented and wired into a new dedicated demo,
-  `scatter-physics-lab` (driveable rover, throwable rock, click-to-cut,
-  drive-into-tree felling, residency-ring debug viz, HUD counters) — builds
-  clean (`ng build demo-app`) but has not yet been driven in a browser, so
-  runtime behavior (correct sub-shape indices, residency churn at rest,
-  contact resolution) is unverified until someone actually plays with it.
-  Phases 4-5 not started.
+- State: Phases 0-3 complete. Phase 3 (`scatter-physics-lab`: driveable
+  rover, throwable rock, click-to-cut, drive-into-tree felling,
+  residency-ring debug viz, HUD counters) is runtime-verified in-browser —
+  both bugs found during play-testing (stale debug-renderer wireframe on
+  felled trees; walk-speed unconditionally felling every tree) are fixed and
+  confirmed working. Leftover diagnostic `console.warn` logging removed from
+  the demo page. Phases 4-5 not started.
 - Entry point: `triangular-engine/scatter` (decided — "foliage" rejected as
   the name because rocks/stones/clutter are first-class, not an exception)
 - Initial consumers: `scatter-lab` demo page (`projects/demo-app`), terrain-lab
@@ -301,7 +297,7 @@ the far tree tier (`enableScatterCylindricalBillboard`,
 one-mesh-per-tier not yet needed at demo scale. The `impostor` LOD kind is
 still a label only — reserved for Phase 5.
 
-### Phase 3 — Jolt collider ring + removal overlay — implemented, awaiting a play-test
+### Phase 3 — Jolt collider ring + removal overlay — done
 
 `ScatterJoltColliderAdapter` in the jolt entry: velocity-aware residency
 ring, compound shape per physics cell for small rocks, impact-threshold
@@ -348,13 +344,34 @@ grid with a static `TerrainJoltColliderAdapter` collider, built once (no
 LOD streaming — the area is small and bounded on purpose, to keep this a
 focused physics proof rather than a second terrain-streaming demo).
 
-Verified so far: `ng build demo-app` compiles clean (the jolt/scatter code
-this exercises has no Karma coverage, so this build is the only automated
-check). Not yet verified: anything at runtime. Per this repo's "I serve the
-app, you don't" convention, nobody has driven the rover, thrown a rock, or
-watched the residency ring reconcile in a real browser yet — that's the
-actual proof this phase needs before Phase 3 can be called done, not just
-implemented.
+Verified: `ng build demo-app` compiles clean (the jolt/scatter code this
+exercises has no Karma coverage, so the build is the only automated check),
+and the demo has been driven in a real browser — rover driving, rock
+throwing, click-to-cut, and drive-into-tree felling all confirmed working.
+
+Two bugs surfaced and fixed during that play-test:
+
+- **Stale debug-renderer wireframe**: felled trees kept showing their
+  collider wireframe until the debug checkbox was manually toggled off/on.
+  Root cause: `jolt-debug-renderer.component.ts` cached fallback edge
+  geometry keyed only by body ID, with a `GetNumSubShapes()` cache-busting
+  check that silently never engaged — that method is bound on
+  `CompoundShape`, not on the base `Jolt.Shape` type `body.GetShape()`
+  returns, so `typeof shape.GetNumSubShapes === 'function'` was always
+  `false`. Fixed by checking `shape.GetSubType()` against
+  `EShapeSubType_StaticCompound` / `EShapeSubType_MutableCompound` and
+  `Jolt.castObject(shape, Jolt.CompoundShape)` before calling it — the same
+  subtype-cast pattern already used elsewhere in the jolt entry.
+- **Felling was effectively unconditional**: the flat `impactThresholdNs`
+  (900) was well below rover walk-speed momentum (~4550 Ns), so any contact
+  at all felled a tree regardless of speed or tree size. Fixed by (a) reading
+  each instance's own `impactThresholdNs`, now scaled by that instance's
+  placement scale in `buildScatterColliderDescriptors` so bigger trees
+  resist more, plumbed through `ScatterJoltColliderAdapter.resolveImpactThresholdNs`,
+  and (b) raising the demo's base threshold 900 → 4000 Ns so walk speed no
+  longer clears it for every tree. Confirmed in-browser: walk fells smaller
+  trees but not the largest, sprint fells reliably, a max-dialed thrown rock
+  can still fell the smallest trees.
 
 ### Phase 4 — Biome-driven suitability — not started
 

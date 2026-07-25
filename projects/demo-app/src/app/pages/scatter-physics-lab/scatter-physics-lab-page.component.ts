@@ -283,7 +283,6 @@ export class ScatterPhysicsLabPageComponent {
   private colliderAdapter?: ScatterJoltColliderAdapter;
   private groundBuilt = false;
   private residentCellKeys: ReadonlySet<string> = new Set();
-  private loggedDiagnostics = false;
   private readonly pendingFelledInstanceIds = new Set<ScatterInstanceId>();
 
   private readonly pressedKeys = new Set<string>();
@@ -605,27 +604,6 @@ export class ScatterPhysicsLabPageComponent {
     });
     this.residentCellKeys = diff.residentKeys;
 
-    if (!this.loggedDiagnostics && this.residencyCandidates.length > 0) {
-      this.loggedDiagnostics = true;
-      let nearest = Infinity;
-      for (const c of this.residencyCandidates) {
-        const d = Math.hypot(
-          c.centreWorldM[0] - anchorWorldM[0],
-          c.centreWorldM[1] - anchorWorldM[1],
-          c.centreWorldM[2] - anchorWorldM[2],
-        );
-        if (d < nearest) nearest = d;
-      }
-      console.warn('[scatter-physics-lab] diag', {
-        anchorWorldM,
-        candidateCount: this.residencyCandidates.length,
-        nearestCandidateDistanceM: nearest,
-        addRadiusM: PHYSICS_ADD_RADIUS_M,
-        toAddLength: diff.toAdd.length,
-        sampleCandidate: this.residencyCandidates[0],
-      });
-    }
-
     if (diff.toAdd.length > 0) {
       const overlay = this.overlay();
       for (const cellKey of diff.toAdd) {
@@ -640,12 +618,6 @@ export class ScatterPhysicsLabPageComponent {
           overlay,
         });
         colliderAdapter.add(descriptors);
-        console.warn('[scatter-physics-lab] add cell', {
-          cellKey,
-          instanceCount: cell.instances.length,
-          descriptorCount: descriptors.descriptors.length,
-          residentCellCountAfter: colliderAdapter.residentCellCount,
-        });
       }
     }
     colliderAdapter.reconcile(diff.residentKeys);
