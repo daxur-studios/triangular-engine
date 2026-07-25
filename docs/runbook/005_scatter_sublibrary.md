@@ -2,15 +2,16 @@
 
 ## Status
 
-- State: Phase 0 and Phase 1 complete; Phase 2 mostly done (LOD tiers,
-  hysteresis, dithered cross-fade, grass density fade, per-LOD shadow flags,
-  surface-relative alignment) — wind trait and true camera-facing billboards
-  still open, see Phase 2 note below. Phases 3-5 not started.
+- State: Phase 0, Phase 1, and Phase 2 complete (LOD tiers, hysteresis,
+  dithered cross-fade, grass density fade, per-LOD shadow flags,
+  surface-relative alignment, wind sway, true camera-facing cylindrical
+  billboards, instance picking), all wired into the `scatter-lab` demo.
+  Phases 3-5 not started.
 - Entry point: `triangular-engine/scatter` (decided — "foliage" rejected as
   the name because rocks/stones/clutter are first-class, not an exception)
 - Initial consumers: `scatter-lab` demo page (`projects/demo-app`), terrain-lab
   demo surfaces, Bruno's Space Program planets
-- Last updated: 2026-07-24
+- Last updated: 2026-07-25
 
 ## Objective
 
@@ -279,21 +280,20 @@ Fixed-level identity cells, candidate-set IDs, one species, one LOD, proven
 on plane, sphere, and cylinder. This alone demonstrates large forests /
 boulder fields. One batch per cell is acceptable here.
 
-### Phase 2 — LOD ladder, billboards, wind, grass — mostly done
+### Phase 2 — LOD ladder, billboards, wind, grass — done
 
 Done: mesh LOD tiers with hysteresis + shader-side dithered cross-fade
 (`selectScatterLodTier`, `bucketScatterInstancesByLod`,
 `enableScatterDitherFade`), surface-relative alignment
 (`align-to-surface-up` vs `align-to-normal` vs `random-tumble`),
-density-fade grass ring, per-LOD `castShadow` flags. Batching pages beyond
-one-mesh-per-tier not yet needed at demo scale.
-
-Still open: the `billboard`/`impostor` LOD kinds exist as labels only — no
-camera-facing quad geometry or atlas yet, so the current "far" tier is just a
-lower-poly mesh, not a true billboard. The `wind` trait
-(`ScatterWindDefinition`) is defined in `scatter/core` but has no
-`scatter/three` shader implementation. Picking (per-instance raycast → stable
-ID) hasn't been started anywhere in `scatter/`.
+density-fade grass ring, per-LOD `castShadow` flags, surface-relative wind
+sway (`enableScatterWindSway`), true camera-facing cylindrical billboards for
+the far tree tier (`enableScatterCylindricalBillboard`,
+`buildScatterBillboardInstancedMesh`), and per-instance raycast picking
+(stable candidate ID from a scatter `InstancedMesh` hit). All wired into the
+`scatter-lab` demo (plane, sphere, cylinder). Batching pages beyond
+one-mesh-per-tier not yet needed at demo scale. The `impostor` LOD kind is
+still a label only — reserved for Phase 5.
 
 ### Phase 3 — Jolt collider ring + removal overlay — not started
 
@@ -367,3 +367,48 @@ fade. Fixed by clamping instead of gating: `distanceToBoundaryM < ditherBandM`
 now maps negative distances to `blend01 = 1` (already fully faded) rather
 than snapping back to 0. Regression test added in
 `scatter-lod-selection.spec.ts`.
+
+### 2026-07-25 — Wind/billboard/picking wired; shader program cache-key collision bug fixed
+
+Wind sway, cylindrical billboards, and instance picking wired into
+`scatter-lab`, closing Phase 2. Wiring the wind trait onto both the tree and
+grass materials surfaced a bug: grass instances rendered fully invisible
+(2692 instances present, correct matrices, zero console errors/warnings)
+while trees rendered and animated correctly.
+
+Root cause: `Material.prototype.customProgramCacheKey()` defaults to
+`this.onBeforeCompile.toString()`. A JS closure's `.toString()` returns only
+its literal source text, not captured variable values — so `treeMaterial`
+(patched with `enableScatterDitherFade` then `enableScatterWindSway`) and
+`grassMaterial` (patched with only `enableScatterWindSway`) both ended up
+with an identical final `onBeforeCompile.toString()` (the wind wrapper's
+source text is the same regardless of the captured `wind` values or any
+earlier chained patch). With every other program-cache-key parameter also
+matching in this simple demo scene, Three.js's `WebGLPrograms` treated the
+two materials as needing the same compiled program and silently reused
+tree's already-compiled program (which expects a per-instance
+`instanceDitherAlpha` attribute from the dither patch) for grass's draw
+calls. Grass's geometry never provides that attribute, so it read as a
+default `0`, and the dither fragment shader's
+`if (vScatterDitherAlpha < scatterBayerDither(...)) discard;` discarded
+every fragment — a valid-but-wrong render, not a GL error, hence no console
+output.
+
+Confirmed via Three.js source (`Material.js` default `customProgramCacheKey`,
+`WebGLPrograms.js` consuming `parameters.customProgramCacheKey`), not
+guesswork, and reproduced/isolated with a reversible diagnostic edit
+(temporarily disabling `enableScatterWindSway` on grass only) before fixing.
+
+Fix: all three `scatter/three` shader-patch functions
+(`enableScatterWindSway`, `enableScatterDitherFade`,
+`enableScatterCylindricalBillboard`) now also override
+`customProgramCacheKey`, chained with any previous value the same way
+`onBeforeCompile` is chained. `enableScatterWindSway`'s override bakes in
+the actual `wind.frequency`/`wind.strength` values (since those are baked as
+GLSL literals into the injected shader text); the other two use a fixed tag
+string, since they don't vary their injected GLSL per call but are still
+protected against colliding with any other single-patch material. General
+takeaway: any `onBeforeCompile` patch whose injected GLSL depends on
+captured, per-call-varying data must also patch `customProgramCacheKey` to
+vary with that same data — otherwise two differently-configured materials
+can silently share one compiled program with no error of any kind.

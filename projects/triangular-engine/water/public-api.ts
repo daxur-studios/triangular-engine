@@ -5,6 +5,7 @@
  */
 export * from './components/water-surface.component';
 export * from './core/water-surface';
+export * from './core/water.service';
 export * from './core/wave-presets';
 export * from './core/gerstner-glsl';
 export * from './core/water-lod-grid';

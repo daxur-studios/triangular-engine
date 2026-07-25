@@ -21,6 +21,7 @@ export function enableScatterWindSway(
 ): IScatterWindHandle {
   const timeUniform = { value: 0 };
   const previousOnBeforeCompile = material.onBeforeCompile.bind(material);
+  const previousCacheKey = material.customProgramCacheKey.bind(material);
   material.onBeforeCompile = (
     shader: WebGLProgramParametersWithUniforms,
     renderer: WebGLRenderer,
@@ -49,6 +50,14 @@ export function enableScatterWindSway(
 }`,
       );
   };
+  // Three.js's shader program cache keys on `customProgramCacheKey()`, which
+  // defaults to `onBeforeCompile.toString()` — identical source text across
+  // every call to this function regardless of `wind`. Without this override,
+  // two materials patched with different `wind` values collide on the same
+  // cache key and Three.js silently reuses one's compiled program (with
+  // whatever OTHER patches it has, e.g. dither) for the other's draw calls.
+  material.customProgramCacheKey = () =>
+    `${previousCacheKey()}|scatterWind:${wind.frequency.toFixed(6)}:${wind.strength.toFixed(6)}`;
   material.needsUpdate = true;
 
   return {

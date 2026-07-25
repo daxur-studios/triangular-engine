@@ -20,6 +20,9 @@
         "projects/triangular-engine/terrain/public-api"
       ],
       "triangular-engine/water": ["projects/triangular-engine/water/public-api"],
+      "triangular-engine/water/postprocessing": [
+        "projects/triangular-engine/water/postprocessing/public-api"
+      ],
       "triangular-engine/scatter": [
         "projects/triangular-engine/scatter/public-api"
       ]

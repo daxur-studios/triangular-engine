@@ -9,6 +9,7 @@ Useful starting points:
 - Components Guide: [components.md](./components.md)
 - Physics Guide: [physics.md](./physics.md)
 - Services: [services.md](./services.md)
+- Water: [../water/README.md](../water/README.md)
 - Assets & Loading (GLTF, textures, Draco): [assets-and-loading.md](./assets-and-loading.md)
 - API Reference (Selectors): [api/selectors.md](./api/selectors.md)
 - AI Agents Guide: [ai-agents.md](./ai-agents.md)

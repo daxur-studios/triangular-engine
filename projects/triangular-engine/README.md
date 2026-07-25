@@ -29,6 +29,9 @@ The library is modularized into several secondary entry points (sub-libraries) s
 | `triangular-engine/pmndrs` | **PMNDRS Helpers**: Angular wrappers for `@pmndrs/vanilla` visual helper components such as `<billboard>` and `<sparkles>`. | `@pmndrs/vanilla` |
 | `triangular-engine/postprocessing` | **Post-processing**: Staged post-processing passes built using `postprocessing` (e.g. bloom, glitch, SMAA, output, custom shaders). | `postprocessing` |
 | `triangular-engine/takram` | **Takram Atmosphere**: Physical atmospheric and cloud rendering components (atmosphere, aerial perspective, and clouds). | `@takram/three-atmosphere`, `@takram/three-clouds` |
+| `triangular-engine/water` | **Water**: Declarative large-scale plane, planet, and inside-cylinder water with quality and motion presets. See [water/README.md](./water/README.md). | `three` |
+| `triangular-engine/terrain` | **Terrain**: Domain-aware terrain generation, surface sampling, and LOD streaming. | — |
+| `triangular-engine/scatter` | **Scatter**: Deterministic streamed placement and LOD rendering for vegetation and repeated environment objects. | — |
 
 ## Features
 

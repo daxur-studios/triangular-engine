@@ -12,6 +12,7 @@ import type { Material, WebGLProgramParametersWithUniforms, WebGLRenderer } from
  */
 export function enableScatterDitherFade(material: Material): void {
   const previousOnBeforeCompile = material.onBeforeCompile.bind(material);
+  const previousCacheKey = material.customProgramCacheKey.bind(material);
   material.onBeforeCompile = (
     shader: WebGLProgramParametersWithUniforms,
     renderer: WebGLRenderer,
@@ -50,5 +51,10 @@ float scatterBayerDither(vec2 fragCoord) {
         'void main() {\n  if (vScatterDitherAlpha < scatterBayerDither(gl_FragCoord.xy)) discard;',
       );
   };
+  // See scatter-wind-material.ts for why this is required: `customProgramCacheKey()`
+  // defaults to `onBeforeCompile.toString()`, which is identical source text on
+  // every call — without a distinct tag here, materials patched with only this
+  // function collide with any other single-purpose patch's cache key.
+  material.customProgramCacheKey = () => `${previousCacheKey()}|scatterDither`;
   material.needsUpdate = true;
 }

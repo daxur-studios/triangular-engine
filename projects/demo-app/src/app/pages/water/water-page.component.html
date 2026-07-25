@@ -1,0 +1,167 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Official water library demo controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>triangular-engine/water — official demo</small>
+        </div>
+        <strong>Water library</strong>
+      </header>
+
+      <p class="blurb">
+        One consumer-facing scene for the library’s supported domains, quality
+        budgets, motion presets, and underwater effect. Move the camera through
+        the surface to test the post-processing transition.
+      </p>
+
+      <small>World shape</small>
+      <nav aria-label="Water domain">
+        @for (key of domainKeys; track key) {
+          <button
+            [class.active]="activeDomain() === key"
+            (click)="selectDomain(key)"
+          >
+            {{ domains[key].label }}
+          </button>
+        }
+      </nav>
+      <p class="status">{{ domains[activeDomain()].description }}</p>
+
+      <label class="range-control">
+        <span
+          >Water height <output>{{ waterHeight() }} m</output></span
+        >
+        <input
+          type="range"
+          min="-30"
+          max="30"
+          step="1"
+          [value]="waterHeight()"
+          (input)="setWaterHeight($any($event.target))"
+        />
+      </label>
+
+      <label class="range-control">
+        <span
+          >World size <output>{{ worldSizeDescription() }}</output></span
+        >
+        <input
+          type="range"
+          min="1"
+          max="10"
+          step="1"
+          [value]="worldSize()"
+          (input)="setWorldSize($any($event.target))"
+        />
+      </label>
+
+      <small>Quality</small>
+      <nav aria-label="Water quality">
+        @for (key of qualityKeys; track key) {
+          <button
+            [class.active]="activeQuality() === key"
+            (click)="activeQuality.set(key)"
+          >
+            {{ key }}
+          </button>
+        }
+      </nav>
+
+      <small>Motion</small>
+      <nav aria-label="Water motion">
+        @for (key of motionKeys; track key) {
+          <button
+            [class.active]="activeMotion() === key"
+            (click)="activeMotion.set(key)"
+          >
+            {{ key }}
+          </button>
+        }
+      </nav>
+
+      <div class="actions">
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="underwaterEnabled()"
+            (change)="toggleUnderwater()"
+          />
+          Underwater post-processing
+        </label>
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            [checked]="wireframe()"
+            (change)="toggleWireframe()"
+          />
+          Wireframe
+        </label>
+        @if (activeDomain() !== "plane") {
+          <label class="checkbox">
+            <input
+              type="checkbox"
+              [checked]="relativeUp()"
+              (change)="relativeUp.set($any($event.target).checked)"
+            />
+            Domain-relative up
+          </label>
+        }
+      </div>
+
+      <p class="blurb note">
+        Switching shape recreates the orbit camera so each domain starts at a
+        useful shoreline view. Performance, balanced, and cinematic change the
+        rendering budget without changing wave motion. The flat-world fixture
+        uses the terrain sub-library and spans beach, shelf, and deep-basin
+        elevations. World size adds fixed-size terrain chunks; it does not scale
+        existing chunks.
+      </p>
+    </section>
+  </ng-template>
+
+  <waterSurface
+    bodyId="official-water-demo"
+    [domain]="activeWaterDomain()"
+    [quality]="activeQuality()"
+    [motion]="activeMotion()"
+    [wireframe]="wireframe()"
+  />
+
+  @switch (activeDomain()) {
+    @case ("plane") {
+      <orbitControls
+        [cameraPosition]="cameraPosition()"
+        [target]="cameraTarget()"
+        [upVector]="orbitUp()"
+        [near]="0.1"
+      />
+    }
+    @case ("sphere") {
+      <orbitControls
+        [cameraPosition]="cameraPosition()"
+        [target]="cameraTarget()"
+        [upVector]="orbitUp()"
+        [near]="0.1"
+      />
+    }
+    @case ("cylinder") {
+      <orbitControls
+        [cameraPosition]="cameraPosition()"
+        [target]="cameraTarget()"
+        [upVector]="orbitUp()"
+        [near]="0.1"
+      />
+    }
+  }
+
+  <ambientLight [intensity]="1.5" />
+  <directionalLight [position]="[250, 350, 180]" [intensity]="2.5" />
+
+  <postprocessing-composer>
+    @if (underwaterEnabled()) {
+      <waterUnderwaterEffect />
+    }
+    <toneMappingEffect />
+  </postprocessing-composer>
+</scene>

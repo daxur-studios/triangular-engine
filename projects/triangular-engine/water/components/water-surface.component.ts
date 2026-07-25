@@ -15,6 +15,8 @@ import {
   type WaterSurfaceDomain,
 } from '../core/water-domain';
 import { WATER_WAVE_PRESETS } from '../core/wave-presets';
+import { GerstnerSurface } from '../core/water-surface';
+import { WaterService } from '../core/water.service';
 import {
   resolveWaterRenderPreset,
   WATER_RENDER_PRESETS,
@@ -38,8 +40,11 @@ export type WaterMotionPresetName = keyof typeof WATER_WAVE_PRESETS;
 })
 export class WaterSurfaceComponent implements OnInit, OnDestroy {
   private readonly engine = inject(EngineService);
+  private readonly water = inject(WaterService);
   private readonly destroyRef = inject(DestroyRef);
 
+  readonly bodyId = input(`water-surface-${nextWaterBodyId++}`);
+  readonly priority = input(0);
   readonly domain = input<WaterSurfaceDomain>(new PlaneWaterDomain());
   readonly quality = input<WaterQualityPresetName>('balanced');
   readonly motion = input<WaterMotionPresetName>('oceanSwell');
@@ -55,6 +60,7 @@ export class WaterSurfaceComponent implements OnInit, OnDestroy {
   private renderer: WaterSurfaceRenderer | undefined;
   private activeDomain: WaterSurfaceDomain | undefined;
   private currentWireframe = false;
+  private unregisterBody: (() => void) | undefined;
 
   constructor() {
     effect(() => {
@@ -69,6 +75,8 @@ export class WaterSurfaceComponent implements OnInit, OnDestroy {
       const motion = this.motion();
       const overrides = this.presetOverrides();
       const lodDetail = this.lodDetail();
+      const bodyId = this.bodyId();
+      const priority = this.priority();
       const basePreset = resolveWaterRenderPreset(WATER_RENDER_PRESETS[quality], {
         ...overrides,
         waves: overrides.waves ?? WATER_WAVE_PRESETS[motion],
@@ -87,6 +95,14 @@ export class WaterSurfaceComponent implements OnInit, OnDestroy {
           ),
         },
       };
+
+      this.unregisterBody?.();
+      this.unregisterBody = this.water.register({
+        id: bodyId,
+        priority,
+        domain,
+        surface: new GerstnerSurface(preset.waves.waves),
+      });
 
       if (this.renderer && this.activeDomain === domain) {
         this.renderer.setPreset(preset);
@@ -112,7 +128,9 @@ export class WaterSurfaceComponent implements OnInit, OnDestroy {
         if (!renderer) return;
 
         const camera = this.engine.camera;
-        renderer.update(camera, this.engine.clock.getElapsedTime());
+        const elapsed = this.engine.clock.getElapsedTime();
+        renderer.update(camera, elapsed);
+        this.water.updateTracked(elapsed);
         if (this.engine.renderer instanceof WebGLRenderer) {
           renderer.captureDepth(
             this.engine.renderer,
@@ -124,8 +142,12 @@ export class WaterSurfaceComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.unregisterBody?.();
+    this.unregisterBody = undefined;
     this.renderer?.dispose();
     this.renderer = undefined;
     this.activeDomain = undefined;
   }
 }
+
+let nextWaterBodyId = 1;

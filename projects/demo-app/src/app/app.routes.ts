@@ -67,6 +67,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'water',
+    loadComponent: () =>
+      import('./pages/water/water-page.component').then(
+        ({ WaterPageComponent }) => WaterPageComponent,
+      ),
+  },
+  {
     path: 'water-surface-spike',
     loadComponent: () =>
       import('./pages/water-surface-spike/water-surface-spike-page.component').then(

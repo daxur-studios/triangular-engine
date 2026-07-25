@@ -1,5 +1,10 @@
 # 002 — Water sub-library
 
+> Maintained integration demo: `projects/demo-app/src/app/pages/water` at
+> `/water`. It exercises the public Angular surface across plane, sphere, and
+> cylinder domains, all quality and motion presets, and the optional
+> underwater post-processing effect.
+
 ## Status
 
 - State: Planning
@@ -228,9 +233,9 @@ Dependency rules:
 - `<waterUnderwaterEffect>` is a `postprocessing`-package `Effect` registered
   through the existing `PostprocessingComposerComponent` (runbook 001's
   backend). It therefore requires the optional `postprocessing` peer, but only
-  when the underwater effect is actually used. If that split proves awkward to
-  tree-shake, promote the effect to its own nested entry point
-  (`water/postprocessing`) — decide during Phase 2.
+  when the underwater effect is actually used. **Resolved in Phase 2:** it
+  ships from the nested `triangular-engine/water/postprocessing` entry point,
+  keeping the core water import free of the optional peer.
 
 No new npm dependencies are expected: waves are our own math, and reference
 material (`three/examples/jsm/objects/Water.js`, `Water2.js`, `WaterMesh.js`)
@@ -894,14 +899,18 @@ does not block this phase's gate.
 
 ### Phase 2 — Events, underwater, waterline
 
-- [ ] `track()` API + camera state signal with hysteresis.
-- [ ] `<waterUnderwaterEffect>` on the `postprocessing` composer: depth fog,
+- [x] `WaterService` body registry, domain-aware `sample()`, priority and
+      containment resolution, plus `track()` state/crossing streams with
+      hysteresis. Declarative `<waterSurface>` bodies register automatically.
+- [x] `<waterUnderwaterEffect>` on the `postprocessing` composer: depth fog,
       tint, optional distortion.
 - [ ] Waterline meniscus band evaluating the shared wave uniforms at the near
       plane; double-sided surface rendering.
-- [ ] Decide (and record here) whether the effect stays in `water` or moves to
+- [x] Decide (and record here) whether the effect stays in `water` or moves to
       a `water/postprocessing` nested entry point, based on tree-shaking
-      verification in a clean consumer build.
+      verification in a clean consumer build. Chosen nested entry point to
+      preserve the existing optional-peer boundary; clean consumer verification
+      remains part of Phase 6.
 - [ ] Demo: fly the camera through the surface repeatedly; show enter/exit
       events and depth readout in the UI.
 
@@ -968,8 +977,11 @@ fades out behind it and looks continuous with the underlying swell.
 
 ### Phase 6 — Productise
 
-- [ ] Docs page (`projects/triangular-engine/docs/water.md`) + skill update so
-      agents know the selectors.
+- [x] Sub-library README (`projects/triangular-engine/water/README.md`) covering the
+      shipped component, domains, presets, overrides, sampling API,
+      limitations, and the rule that public water API changes update that
+      page in the same change.
+- [ ] Skill update so agents know the selectors.
 - [ ] Unit tests for lifecycle, registry, tier switching; screenshot regression
       where practical.
 - [ ] Clean external consumer test: core-only install must not require
