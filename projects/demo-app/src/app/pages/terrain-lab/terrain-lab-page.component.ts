@@ -54,7 +54,7 @@ const MAX_STREAMING_RADIUS = 4;
 const DEFAULT_GENERATION_BUDGET = 12;
 const MAX_GENERATION_BUDGET = 32;
 const MAX_LOD_LEVEL = 3;
-const PHYSICS_MAX_LOD_LEVEL = 1;
+const PHYSICS_MAX_LOD_LEVEL = MAX_LOD_LEVEL;
 const PHYSICS_PATCH_RESOLUTION = PATCH_RESOLUTION;
 const CHARACTER_GRAVITY_MPS2 = 24;
 const CHARACTER_SPEED_MPS = 36;
@@ -545,7 +545,10 @@ export class TerrainLabPageComponent {
           : 1);
       movement.normalize().multiplyScalar(speed);
     }
-    velocity.copy(movement).addScaledVector(up, verticalSpeed);
+    const horizontalVelocity = velocity.clone().addScaledVector(up, -verticalSpeed);
+    const steeredHorizontal =
+      movement.lengthSq() > 0 ? movement : horizontalVelocity;
+    velocity.copy(steeredHorizontal).addScaledVector(up, verticalSpeed);
     if (this.pressedKeys.has('Space')) velocity.addScaledVector(up, 0.8);
     const joltVelocity = new Jolt.Vec3(velocity.x, velocity.y, velocity.z);
     metadata.bodyInterface.SetLinearVelocity(

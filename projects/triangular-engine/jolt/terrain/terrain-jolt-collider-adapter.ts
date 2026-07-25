@@ -52,6 +52,9 @@ export class TerrainJoltColliderAdapter {
     }
 
     const shapeSettings = new Jolt.MeshShapeSettings(triangles, materials);
+    shapeSettings.mBuildQuality =
+      Jolt.MeshShapeSettings_EBuildQuality_FavorBuildSpeed;
+    shapeSettings.Sanitize();
     const shapeResult = shapeSettings.Create();
     const shape = shapeResult.Get() as Jolt.MeshShape;
     const centre = patch.positionM ?? patch.mesh.centerWorldM;
@@ -64,6 +67,7 @@ export class TerrainJoltColliderAdapter {
       Jolt.EMotionType_Static,
       LAYER_NON_MOVING,
     );
+    bodySettings.mEnhancedInternalEdgeRemoval = true;
     const body = this.metadata.bodyInterface.CreateBody(bodySettings);
     this.metadata.bodyInterface.AddBody(
       body.GetID(),
