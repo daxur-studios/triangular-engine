@@ -9,6 +9,7 @@ import {
 import type { ScatterInstanceId } from '../core/scatter-instance-id';
 import type { ITerrainScatterInstance } from '../terrain/scatter-terrain-instances';
 import type { ScatterPlacementRules } from '../core/scatter-species-definition';
+import { SCATTER_INSTANCE_IDS_USERDATA_KEY } from './scatter-instance-picking';
 import {
   computeScatterInstanceMatrix,
   type ScatterScaleRange,
@@ -66,6 +67,9 @@ export function buildScatterInstancedMesh(
   }
   mesh.instanceMatrix.needsUpdate = true;
   mesh.count = options.instances.length;
+  mesh.userData[SCATTER_INSTANCE_IDS_USERDATA_KEY] = options.instances.map(
+    (instance) => instance.instanceId,
+  );
 
   if (ditherAlpha) {
     options.geometry.setAttribute(

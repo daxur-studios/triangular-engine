@@ -6,6 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import {
   ArrowHelper,
@@ -13,11 +14,15 @@ import {
   BufferGeometry,
   Color,
   ConeGeometry,
+  DoubleSide,
   Group,
+  InstancedMesh,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  Raycaster,
   SphereGeometry,
+  Vector2,
   Vector3,
   type Vector3Tuple,
 } from 'three';
@@ -35,18 +40,25 @@ import {
   type TerrainVector3,
 } from 'triangular-engine/terrain';
 import {
+  buildScatterBillboardGeometry,
   bucketScatterInstancesByLod,
   buildScatterInstancedMesh,
   buildScatterInstancedMeshesByLod,
+  enableScatterCylindricalBillboard,
   enableScatterDitherFade,
+  enableScatterWindSway,
   generateTerrainScatterInstances,
+  pickScatterInstanceId,
   selectFixedLevelScatterCells,
+  type IScatterBillboardHandle,
   type IScatterSurfaceSample,
+  type IScatterWindHandle,
   type ITerrainScatterInstance,
   type ScatterInstanceId,
   type ScatterLodDefinition,
   type ScatterPlacementRules,
   type ScatterSuitabilityFn,
+  type ScatterWindDefinition,
 } from 'triangular-engine/scatter';
 
 type ScatterLabShape = 'plane' | 'sphere' | 'cylinder';
@@ -92,6 +104,10 @@ const TREE_LOD_DITHER_BAND_RATIO = 0.18;
 const VIEW_DISTANCE_SCALE_MIN = 0.15;
 const VIEW_DISTANCE_SCALE_MAX = 2.5;
 const VIEW_DISTANCE_SCALE_DEFAULT = 1;
+/** The far tier renders as a true camera-facing (cylindrical) billboard quad instead of a lower-poly mesh. */
+const TREE_BILLBOARD_WIDTH_M = 2.2;
+const TREE_BILLBOARD_HEIGHT_M = 3.6;
+const TREE_WIND: ScatterWindDefinition = { strength: 0.04, frequency: 0.9 };
 
 const GRASS_RULES: ScatterPlacementRules = {
   alignment: 'align-to-surface-up',
@@ -105,6 +121,7 @@ const GRASS_SCALE = { min: 0.5, max: 1.1 };
 /** Grass has no far LOD tier, so it fades out by density instead of popping. */
 const GRASS_FADE_START_RATIO = 0.5;
 const GRASS_FADE_END_RATIO = 1.6;
+const GRASS_WIND: ScatterWindDefinition = { strength: 0.12, frequency: 1.6 };
 
 /** Field-space elevation a lake basin dips to at its deepest, and the radius (in the same shared field-space coords `bumps` uses) it blends out over. */
 const LAKE_CENTER_FIELD: readonly [number, number] = [55, -45];
@@ -318,6 +335,8 @@ export class ScatterLabPageComponent {
   readonly treeFarCount = signal(0);
   readonly grassCount = signal(0);
   readonly cellCount = signal(0);
+  /** Set by clicking a tree/grass instance in the scene — proves `pickScatterInstanceId` resolves a raycast hit back to a stable instance id, not just a build-order index. */
+  readonly pickedInstanceId = signal<ScatterInstanceId | undefined>(undefined);
 
   readonly initialCameraPosition = signal<Vector3Tuple>([170, 130, 170]);
   readonly initialTarget = signal<Vector3Tuple>([0, 0, 0]);
@@ -325,15 +344,19 @@ export class ScatterLabPageComponent {
 
   private readonly engine = inject(EngineService);
   private readonly treeGeometryNear = new ConeGeometry(0.9, 3.2, 6);
-  /** Deliberately coarse (3-sided) so the near/far LOD swap reads as an obvious shape change, not just a poly-count nudge. */
-  private readonly treeGeometryFar = new ConeGeometry(0.9, 3.2, 3);
   private readonly treeMaterial = new MeshStandardMaterial({
     color: '#3f8f4c',
     roughness: 0.85,
   });
-  private readonly treeMaterialFar = new MeshStandardMaterial({
+  /** True camera-facing (cylindrical) billboard quad for the far tree tier, via `enableScatterCylindricalBillboard` — always faces the camera around its own surfaceUp axis instead of popping to a fixed lower-poly mesh. */
+  private readonly treeBillboardGeometry = buildScatterBillboardGeometry({
+    widthM: TREE_BILLBOARD_WIDTH_M,
+    heightM: TREE_BILLBOARD_HEIGHT_M,
+  });
+  private readonly treeBillboardMaterial = new MeshStandardMaterial({
     color: '#2c6636',
     roughness: 1,
+    side: DoubleSide,
   });
   /** A squashed sphere reads as a low mound, not a smaller tree — trees and grass must never look like the same shape at two sizes. */
   private readonly grassGeometry = new SphereGeometry(0.45, 6, 4).scale(
@@ -359,29 +382,80 @@ export class ScatterLabPageComponent {
     metalness: 0.05,
     depthWrite: false,
   });
+  private readonly pickRaycaster = new Raycaster();
   private group?: Group;
   /** Persisted across rebuilds so hysteresis can resist flicker as the view-distance slider is scrubbed near a tier boundary; naturally moot across a shape switch since instance IDs embed the cell key. */
   private previousTreeTierByInstanceId?: ReadonlyMap<ScatterInstanceId, number>;
+  /** Raycast targets for click-to-pick; refreshed on every rebuild since the meshes themselves are rebuilt wholesale. */
+  private pickableMeshes: InstancedMesh[] = [];
+  private treeWindHandle!: IScatterWindHandle;
+  private grassWindHandle!: IScatterWindHandle;
+  private treeBillboardHandle!: IScatterBillboardHandle;
 
   constructor() {
     const destroyRef = inject(DestroyRef);
     const previousBackground = this.engine.scene.background;
     this.engine.scene.background = new Color('#071018');
     enableScatterDitherFade(this.treeMaterial);
-    enableScatterDitherFade(this.treeMaterialFar);
+    enableScatterDitherFade(this.treeBillboardMaterial);
+    this.treeWindHandle = enableScatterWindSway(this.treeMaterial, TREE_WIND);
+    this.grassWindHandle = enableScatterWindSway(this.grassMaterial, GRASS_WIND);
+    this.treeBillboardHandle = enableScatterCylindricalBillboard(
+      this.treeBillboardMaterial,
+    );
     this.rebuild();
+
+    this.engine.elapsedTime$
+      .pipe(takeUntilDestroyed(destroyRef))
+      .subscribe((elapsedTimeS) => {
+        this.treeWindHandle.setTimeS(elapsedTimeS);
+        this.grassWindHandle.setTimeS(elapsedTimeS);
+        const camera = this.engine.camera$.value;
+        if (camera) {
+          this.treeBillboardHandle.setCameraWorldM([
+            camera.position.x,
+            camera.position.y,
+            camera.position.z,
+          ]);
+        }
+      });
+
+    this.engine.click$
+      .pipe(takeUntilDestroyed(destroyRef))
+      .subscribe((event) => this.pickInstanceAt(event));
+
     destroyRef.onDestroy(() => {
       this.disposeScene();
       this.treeGeometryNear.dispose();
-      this.treeGeometryFar.dispose();
+      this.treeBillboardGeometry.dispose();
       this.treeMaterial.dispose();
-      this.treeMaterialFar.dispose();
+      this.treeBillboardMaterial.dispose();
       this.grassGeometry.dispose();
       this.grassMaterial.dispose();
       this.groundMaterial.dispose();
       this.waterMaterial.dispose();
       this.engine.scene.background = previousBackground;
     });
+  }
+
+  /** Resolves a scene click into a stable scatter instance id via `pickScatterInstanceId`, so the UI can prove picking survives a rebuild's InstancedMesh reordering. */
+  private pickInstanceAt(event: MouseEvent | null): void {
+    if (!event || this.pickableMeshes.length === 0) return;
+    const resolution = this.engine.resolution$.value;
+    const mouseNdc = new Vector2(
+      (event.offsetX / resolution.width) * 2 - 1,
+      -(event.offsetY / resolution.height) * 2 + 1,
+    );
+    this.pickRaycaster.setFromCamera(mouseNdc, this.engine.camera);
+    const intersections = this.pickRaycaster.intersectObjects(
+      this.pickableMeshes,
+      false,
+    );
+    this.pickedInstanceId.set(
+      intersections.length > 0
+        ? pickScatterInstanceId(intersections[0])
+        : undefined,
+    );
   }
 
   selectShape(shape: ScatterLabShape): void {
@@ -545,7 +619,7 @@ export class ScatterLabPageComponent {
         castShadow: true,
       },
       {
-        kind: 'mesh',
+        kind: 'billboard',
         maxDistanceM: sceneScaleM * TREE_LOD_FAR_RATIO * viewDistanceScale,
         castShadow: false,
       },
@@ -660,8 +734,9 @@ export class ScatterLabPageComponent {
       buckets: treeLods.buckets,
       assetsByTier: (tierIndex) => ({
         geometry:
-          tierIndex === 0 ? this.treeGeometryNear : this.treeGeometryFar,
-        material: tierIndex === 0 ? this.treeMaterial : this.treeMaterialFar,
+          tierIndex === 0 ? this.treeGeometryNear : this.treeBillboardGeometry,
+        material:
+          tierIndex === 0 ? this.treeMaterial : this.treeBillboardMaterial,
       }),
       rules: TREE_RULES,
       scale: TREE_SCALE,
@@ -679,6 +754,9 @@ export class ScatterLabPageComponent {
       castShadow: false,
     });
     group.add(grassMesh);
+
+    this.pickableMeshes = [...treeMeshes.map(({ mesh }) => mesh), grassMesh];
+    this.pickedInstanceId.set(undefined);
 
     this.engine.scene.add(group);
     this.group = group;
@@ -812,13 +890,13 @@ export class ScatterLabPageComponent {
     if (!this.group) return;
     const sharedGeometries: unknown[] = [
       this.treeGeometryNear,
-      this.treeGeometryFar,
+      this.treeBillboardGeometry,
       this.grassGeometry,
     ];
     const sharedMaterials: unknown[] = [
       this.groundMaterial,
       this.treeMaterial,
-      this.treeMaterialFar,
+      this.treeBillboardMaterial,
       this.grassMaterial,
       this.waterMaterial,
     ];

@@ -92,10 +92,18 @@
 
       <p class="blurb note">
         {{ treeCount() }} tree instances ({{ treeNearCount() }} near /
-        {{ treeFarCount() }} far LOD) + {{ grassCount() }} grass instances
-        across {{ cellCount() }} identity cells (one fixed-level scatter cell
-        per terrain patch's quarter — see
-        <code>selectFixedLevelScatterCells</code>).
+        {{ treeFarCount() }} far LOD, far tier now a true camera-facing
+        billboard) + {{ grassCount() }} grass instances across
+        {{ cellCount() }} identity cells (one fixed-level scatter cell per
+        terrain patch's quarter — see
+        <code>selectFixedLevelScatterCells</code>). Grass and the near tree
+        tier sway via <code>enableScatterWindSway</code>. Click a tree or
+        grass instance to resolve it via <code>pickScatterInstanceId</code>:
+        @if (pickedInstanceId(); as pickedInstanceId) {
+          <code>{{ pickedInstanceId }}</code>
+        } @else {
+          none picked yet.
+        }
       </p>
     </section>
   </ng-template>

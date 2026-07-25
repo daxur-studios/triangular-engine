@@ -2,10 +2,14 @@
 
 ## Status
 
-- State: design settled after external review; no implementation started
+- State: Phase 0 and Phase 1 complete; Phase 2 mostly done (LOD tiers,
+  hysteresis, dithered cross-fade, grass density fade, per-LOD shadow flags,
+  surface-relative alignment) — wind trait and true camera-facing billboards
+  still open, see Phase 2 note below. Phases 3-5 not started.
 - Entry point: `triangular-engine/scatter` (decided — "foliage" rejected as
   the name because rocks/stones/clutter are first-class, not an exception)
-- Initial consumers: terrain-lab demo surfaces, Bruno's Space Program planets
+- Initial consumers: `scatter-lab` demo page (`projects/demo-app`), terrain-lab
+  demo surfaces, Bruno's Space Program planets
 - Last updated: 2026-07-24
 
 ## Objective
@@ -264,36 +268,46 @@ or custom rules without the biome package installed.
 
 ## Ordered phases
 
-### Phase 0 — Terrain surface sampler
+### Phase 0 — Terrain surface sampler — done
 
 The canonical `ITerrainSurfaceSample` API in the terrain lib, shared by
 meshing and scatter. Blocks everything else.
 
-### Phase 1 — Deterministic scatter + instanced rendering
+### Phase 1 — Deterministic scatter + instanced rendering — done
 
 Fixed-level identity cells, candidate-set IDs, one species, one LOD, proven
 on plane, sphere, and cylinder. This alone demonstrates large forests /
 boulder fields. One batch per cell is acceptable here.
 
-### Phase 2 — LOD ladder, billboards, wind, grass
+### Phase 2 — LOD ladder, billboards, wind, grass — mostly done
 
-Full mesh → low-poly → billboard tiers with hysteresis + dither, batching
-pages if draw calls demand it, surface-relative wind hook, density-fade grass
-ring, per-LOD shadow flags, picking.
+Done: mesh LOD tiers with hysteresis + shader-side dithered cross-fade
+(`selectScatterLodTier`, `bucketScatterInstancesByLod`,
+`enableScatterDitherFade`), surface-relative alignment
+(`align-to-surface-up` vs `align-to-normal` vs `random-tumble`),
+density-fade grass ring, per-LOD `castShadow` flags. Batching pages beyond
+one-mesh-per-tier not yet needed at demo scale.
 
-### Phase 3 — Jolt collider ring + removal overlay
+Still open: the `billboard`/`impostor` LOD kinds exist as labels only — no
+camera-facing quad geometry or atlas yet, so the current "far" tier is just a
+lower-poly mesh, not a true billboard. The `wind` trait
+(`ScatterWindDefinition`) is defined in `scatter/core` but has no
+`scatter/three` shader implementation. Picking (per-instance raycast → stable
+ID) hasn't been started anywhere in `scatter/`.
+
+### Phase 3 — Jolt collider ring + removal overlay — not started
 
 `ScatterJoltColliderAdapter` in the jolt entry: velocity-aware residency
 ring, compound shape per physics cell for small rocks, impact-threshold
 destruction promotion events, stable-ID overlay hooks. Cutting and
 crash-destruction both fall out of this phase.
 
-### Phase 4 — Biome-driven suitability
+### Phase 4 — Biome-driven suitability — not started
 
 `triangular-engine/biomes` sibling entry feeding the suitability callback and
 the terrain-material tint.
 
-### Phase 5 — Octahedral impostor baker
+### Phase 5 — Octahedral impostor baker — not started
 
 Baking pipeline, atlas management, LOD blending into the reserved impostor
 slot. Only after Phase 2 is measured.
@@ -329,3 +343,27 @@ standalone grid; candidate pools have an explicit size cap tied to generator
 version; clustered canopy cards remain optional pending measurement; per-cell
 batching allowed in Phase 1 as long as the API keeps identity separate from
 batching.
+
+### 2026-07-24 — Phase 0-2 implemented; LOD dither/hysteresis interaction bug fixed
+
+Implemented in `projects/triangular-engine/scatter` and exercised via the
+`scatter-lab` demo page: surface sampler, fixed-level identity cells,
+candidate-set instance IDs, per-species placement rules (including
+surface-relative alignment), density-fade grass ring, mesh LOD tiers with
+hysteresis, and a shader-side dithered cross-fade
+(`enableScatterDitherFade`, 4×4 Bayer discard) for the near/far tree tier
+pop, on plane, sphere, and cylinder.
+
+Bug found via demo testing: scrubbing the LOD/view-distance slider (which
+moves a tier's `maxDistanceM` boundary past a stationary instance, rather
+than the more common case of the viewpoint moving past a stationary
+boundary) produced a visible ring where trees snapped fully back to
+high-detail then snapped forward again. Root cause in
+`selectScatterLodTier`: once hysteresis resisted a raw tier change, the
+resisted tier's `distanceToBoundaryM` could go negative (already past its
+own boundary), and the old dither-blend guard (`>= 0`) treated that as
+"outside the band" and reset `blend01` to 0 — discarding an in-progress
+fade. Fixed by clamping instead of gating: `distanceToBoundaryM < ditherBandM`
+now maps negative distances to `blend01 = 1` (already fully faded) rather
+than snapping back to 0. Regression test added in
+`scatter-lod-selection.spec.ts`.
