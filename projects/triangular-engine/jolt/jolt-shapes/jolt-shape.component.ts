@@ -37,13 +37,25 @@ export function provideShapeComponent<T extends JoltShapeComponent<any>>(
   imports: [],
   template: `<ng-content></ng-content>`,
 })
-export abstract class JoltShapeComponent<T extends Jolt.Shape = Jolt.Shape>
-  implements OnDestroy
-{
+export abstract class JoltShapeComponent<
+  T extends Jolt.Shape = Jolt.Shape,
+> implements OnDestroy {
+  private static nextInstanceId = 1;
+
   readonly physicsService = inject(JoltPhysicsService);
   readonly injector = inject(Injector);
   /** The nearest Object3DComponent that is containing the shape */
   readonly parentComponent = inject(Object3DComponent);
+
+  /**
+   * Stable identity used by a compound rigid body to reconcile this shape
+   * without recreating the live body. Supply this for shapes rendered from
+   * dynamic collections; otherwise the component instance receives a stable
+   * identity for its own lifetime.
+   */
+  readonly id = input<string>();
+  /** Instance-lifetime fallback used when callers do not supply an explicit id. */
+  readonly reconciliationId = `jolt-shape-${JoltShapeComponent.nextInstanceId++}`;
 
   /** Local position of this shape relative to the rigid body (only used in compound shapes) */
   readonly position = input<Vector3Tuple>([0, 0, 0]);

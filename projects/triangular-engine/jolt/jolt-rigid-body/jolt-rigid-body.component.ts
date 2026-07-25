@@ -38,6 +38,18 @@ import {
   IContactValidateEvent,
   JoltEventEmitter,
 } from '../models/contact-events.model';
+import {
+  canReconcileMutableCompoundBody,
+  findDuplicateCompoundShapeKey,
+  ICompoundShapeEntry,
+  planCompoundShapeReconciliation,
+  shouldUseMutableCompoundShape,
+} from './compound-shape-reconciliation';
+
+interface IResolvedCompoundShape extends ICompoundShapeEntry<Jolt.Shape> {
+  readonly position: Vector3Tuple;
+  readonly rotation: Vector3Tuple;
+}
 
 /**
  * Provides both:
@@ -123,6 +135,9 @@ export class JoltRigidBodyComponent extends GroupComponent {
   readonly body$ = new BehaviorSubject<Jolt.Body | undefined>(undefined);
   readonly body = toSignal(this.body$);
 
+  #liveCompoundShapes: IResolvedCompoundShape[] | undefined;
+  #liveMotionType: Jolt.EMotionType | undefined;
+
   constructor() {
     super();
 
@@ -159,18 +174,33 @@ export class JoltRigidBodyComponent extends GroupComponent {
     effect(
       () => {
         const childShapeComponents = this.shapes();
-        if (!childShapeComponents) return;
+        if (childShapeComponents.length === 0) return;
         const resolvedMotionType =
           this.motionType() ?? Jolt.EMotionType_Dynamic;
 
-        const shapes: Jolt.Shape[] = childShapeComponents.map((component) =>
-          component.shape(),
-        );
+        const resolvedShapes = childShapeComponents.flatMap((component) => {
+          const shape = component.shape();
+          if (!shape) return [];
+          return [
+            {
+              key: component.id() ?? component.reconciliationId,
+              shape,
+              position: component.position(),
+              rotation: component.rotation(),
+            },
+          ];
+        });
+        if (resolvedShapes.length === 0) return;
 
-        if (!shapes) return;
+        const duplicateKey = findDuplicateCompoundShapeKey(resolvedShapes);
+        if (duplicateKey !== undefined) {
+          console.error(
+            `JoltRigidBody: compound shape id "${duplicateKey}" is duplicated. Shape ids must be unique within a rigid body.`,
+          );
+          return;
+        }
 
-        const shapesList = Array.isArray(shapes) ? shapes : [shapes];
-        const requiresStaticBody = shapesList.some((shape) => {
+        const requiresStaticBody = resolvedShapes.some(({ shape }) => {
           const subType = shape?.GetSubType?.();
           return (
             subType === Jolt.EShapeSubType_Mesh ||
@@ -189,6 +219,19 @@ export class JoltRigidBodyComponent extends GroupComponent {
           return;
         }
 
+        const existingBody = this.body$.value;
+        if (
+          canReconcileMutableCompoundBody(
+            existingBody,
+            this.#liveCompoundShapes !== undefined,
+            this.#liveMotionType,
+            resolvedMotionType,
+          )
+        ) {
+          this.#reconcileCompoundShape(metadata, existingBody, resolvedShapes);
+          return;
+        }
+
         const initialPosition = this.position();
         const initialQuaternion = untracked(() => {
           const quaternion = this.quaternion();
@@ -197,9 +240,24 @@ export class JoltRigidBodyComponent extends GroupComponent {
         });
 
         // Shared helper for both single and compound shapes
-        const createOrReplaceBody = (shape: Jolt.Shape) => {
+        const createOrReplaceBody = (
+          shape: Jolt.Shape,
+          compoundShapes?: IResolvedCompoundShape[],
+        ) => {
           // Replace existing body if any
           const existing = this.body$.value;
+          const livePosition = existing
+            ? wrapVec3(existing.GetPosition())
+            : undefined;
+          const liveRotation = existing
+            ? wrapQuat(existing.GetRotation())
+            : undefined;
+          const liveLinearVelocity = existing
+            ? wrapVec3(existing.GetLinearVelocity())
+            : undefined;
+          const liveAngularVelocity = existing
+            ? wrapVec3(existing.GetAngularVelocity())
+            : undefined;
           if (existing) {
             try {
               this.physicsService.unregisterBody(existing);
@@ -210,11 +268,18 @@ export class JoltRigidBodyComponent extends GroupComponent {
 
           // Prepare creation settings
           const bodyPosition = new Jolt.RVec3(
-            initialPosition[0],
-            initialPosition[1],
-            initialPosition[2],
+            livePosition?.x ?? initialPosition[0],
+            livePosition?.y ?? initialPosition[1],
+            livePosition?.z ?? initialPosition[2],
           );
-          const bodyRotation = new Jolt.Quat(...initialQuaternion.toArray());
+          const bodyRotation = liveRotation
+            ? new Jolt.Quat(
+                liveRotation.x,
+                liveRotation.y,
+                liveRotation.z,
+                liveRotation.w,
+              )
+            : new Jolt.Quat(...initialQuaternion.toArray());
           const settings: Jolt.BodyCreationSettings =
             new Jolt.BodyCreationSettings(
               shape,
@@ -253,33 +318,54 @@ export class JoltRigidBodyComponent extends GroupComponent {
             Jolt.EMotionQuality_LinearCast,
           );
 
+          if (liveLinearVelocity) {
+            const velocity = new Jolt.Vec3(
+              liveLinearVelocity.x,
+              liveLinearVelocity.y,
+              liveLinearVelocity.z,
+            );
+            metadata.bodyInterface.SetLinearVelocity(body.GetID(), velocity);
+            Jolt.destroy(velocity);
+          }
+          if (liveAngularVelocity) {
+            const velocity = new Jolt.Vec3(
+              liveAngularVelocity.x,
+              liveAngularVelocity.y,
+              liveAngularVelocity.z,
+            );
+            metadata.bodyInterface.SetAngularVelocity(body.GetID(), velocity);
+            Jolt.destroy(velocity);
+          }
+
+          this.#liveCompoundShapes = compoundShapes
+            ? [...compoundShapes]
+            : undefined;
+          this.#liveMotionType = resolvedMotionType;
           return body;
         };
 
-        // Single shape
-        if (Array.isArray(shapes) && shapes.length === 1 && shapes[0]) {
-          createOrReplaceBody(shapes[0]);
-        }
-        // Multiple shapes inside a compound shape
-        else if (Array.isArray(shapes) && shapes.length > 1) {
+        // An explicit shape id opts even a single child into a mutable
+        // compound, allowing a one-part vessel to gain a second part without
+        // replacing its live body. Unkeyed single shapes retain the lean
+        // direct-shape path for backwards compatibility.
+        const useMutableCompound = shouldUseMutableCompoundShape(
+          resolvedShapes.length,
+          childShapeComponents.some(
+            (component) => component.id() !== undefined,
+          ),
+        );
+
+        if (!useMutableCompound) {
+          createOrReplaceBody(resolvedShapes[0].shape);
+        } else {
           const compoundShapeSettings = new Jolt.MutableCompoundShapeSettings();
 
-          for (const shapeComponent of childShapeComponents) {
-            const subShape = shapeComponent.shape();
-            if (!subShape) continue;
-
-            const localPosition = shapeComponent.position?.() ?? [0, 0, 0];
-            const localRotation = shapeComponent.rotation?.() ?? [0, 0, 0];
-
+          for (const resolvedShape of resolvedShapes) {
             const q = new Quaternion().setFromEuler(
-              new Euler(localRotation[0], localRotation[1], localRotation[2]),
+              new Euler(...resolvedShape.rotation),
             );
             const joltQuat = new Jolt.Quat(q.x, q.y, q.z, q.w);
-            const joltPosition = new Jolt.Vec3(
-              localPosition[0],
-              localPosition[1],
-              localPosition[2],
-            );
+            const joltPosition = new Jolt.Vec3(...resolvedShape.position);
 
             try {
               const addFn =
@@ -289,7 +375,7 @@ export class JoltRigidBodyComponent extends GroupComponent {
                 compoundShapeSettings,
                 joltPosition,
                 joltQuat,
-                subShape,
+                resolvedShape.shape,
                 0,
               );
             } finally {
@@ -328,11 +414,108 @@ export class JoltRigidBodyComponent extends GroupComponent {
           }
 
           // Do NOT Release() the shape here; body owns the ref now.
-          createOrReplaceBody(compoundShape);
+          createOrReplaceBody(compoundShape, resolvedShapes);
         }
       },
       { injector: this.injector },
     );
+  }
+
+  /**
+   * Reconciles keyed children against a live mutable compound without
+   * replacing its body, preserving pose, velocity, contacts, and constraints.
+   */
+  #reconcileCompoundShape(
+    metadata: IJoltMetadata,
+    body: Jolt.Body,
+    nextShapes: IResolvedCompoundShape[],
+  ): void {
+    const liveShapes = this.#liveCompoundShapes;
+    if (!liveShapes) return;
+
+    const reconciliation = planCompoundShapeReconciliation(
+      liveShapes,
+      nextShapes,
+    );
+    const nextByKey = new Map(nextShapes.map((entry) => [entry.key, entry]));
+
+    if (
+      reconciliation.removedIndices.length === 0 &&
+      reconciliation.modifiedKeys.size === 0 &&
+      reconciliation.addedShapes.length === 0
+    ) {
+      return;
+    }
+
+    const compound = Jolt.castObject(
+      body.GetShape(),
+      Jolt.MutableCompoundShape,
+    );
+    const centerOfMass = body.GetShape().GetCenterOfMass();
+    const previousCenterOfMass = new Jolt.Vec3(
+      centerOfMass.GetX(),
+      centerOfMass.GetY(),
+      centerOfMass.GetZ(),
+    );
+
+    try {
+      for (const index of reconciliation.removedIndices) {
+        compound.RemoveShape(index);
+        liveShapes.splice(index, 1);
+      }
+
+      let modifiedShape = false;
+      for (let index = 0; index < liveShapes.length; index++) {
+        const live = liveShapes[index];
+        if (!reconciliation.modifiedKeys.has(live.key)) continue;
+        const next = nextByKey.get(live.key);
+        if (!next) continue;
+        this.#withJoltShapeTransform(next, (position, rotation) => {
+          compound.ModifyShape(index, position, rotation, next.shape);
+        });
+        liveShapes[index] = next;
+        modifiedShape = true;
+      }
+
+      for (const added of reconciliation.addedShapes) {
+        this.#withJoltShapeTransform(added, (position, rotation) => {
+          const index = compound.AddShape(position, rotation, added.shape, 0);
+          liveShapes.splice(index, 0, added);
+        });
+      }
+
+      if (modifiedShape) compound.AdjustCenterOfMass();
+      metadata.bodyInterface.NotifyShapeChanged(
+        body.GetID(),
+        previousCenterOfMass,
+        true,
+        Jolt.EActivation_DontActivate,
+      );
+    } finally {
+      Jolt.destroy(previousCenterOfMass);
+    }
+  }
+
+  #withJoltShapeTransform(
+    shape: IResolvedCompoundShape,
+    use: (position: Jolt.Vec3, rotation: Jolt.Quat) => void,
+  ): void {
+    const position = new Jolt.Vec3(...shape.position);
+    const quaternion = new Quaternion().setFromEuler(
+      new Euler(...shape.rotation),
+    );
+    const rotation = new Jolt.Quat(
+      quaternion.x,
+      quaternion.y,
+      quaternion.z,
+      quaternion.w,
+    );
+    try {
+      use(position, rotation);
+    } finally {
+      Jolt.destroy(position);
+      Jolt.destroy(rotation);
+    }
   }
 
   #initId() {
