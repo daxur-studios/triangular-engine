@@ -22,3 +22,4 @@ export * from './three/scatter-billboard-geometry';
 export * from './three/scatter-billboard-material';
 export * from './three/scatter-billboard-mesh';
 export * from './three/scatter-instance-picking';
+export * from './engine/scatter-streaming.service';

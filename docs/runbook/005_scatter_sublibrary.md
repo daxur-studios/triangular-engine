@@ -297,6 +297,13 @@ the far tree tier (`enableScatterCylindricalBillboard`,
 one-mesh-per-tier not yet needed at demo scale. The `impostor` LOD kind is
 still a label only — reserved for Phase 5.
 
+Engine integration: `ScatterStreamingService` follows the active
+`EngineService` camera in world space by default and supplies that viewpoint to
+fixed-level render-cell selection and LOD bucketing. It coalesces small movement
+and supports an explicit tuple/provider override for player-following, editor,
+spectator, and multi-view use cases. Physics residency remains independently
+player/vehicle-driven.
+
 ### Phase 3 — Jolt collider ring + removal overlay — done
 
 `ScatterJoltColliderAdapter` in the jolt entry: velocity-aware residency
