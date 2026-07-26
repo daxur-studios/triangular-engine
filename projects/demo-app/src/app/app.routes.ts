@@ -109,6 +109,21 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'water-buoyancy-poc',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
+    loadComponent: () =>
+      import(
+        './pages/water-buoyancy-poc/water-buoyancy-poc-page.component'
+      ).then(
+        ({ WaterBuoyancyPocPageComponent }) => WaterBuoyancyPocPageComponent,
+      ),
+  },
+  {
     path: 'scatter-lab',
     loadComponent: () =>
       import('./pages/scatter-lab/scatter-lab-page.component').then(

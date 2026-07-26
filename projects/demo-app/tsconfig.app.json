@@ -21,6 +21,9 @@
       "triangular-engine/water/postprocessing": [
         "projects/triangular-engine/water/postprocessing/public-api"
       ],
+      "triangular-engine/water/jolt": [
+        "projects/triangular-engine/water/jolt/public-api"
+      ],
       "triangular-engine/scatter": [
         "projects/triangular-engine/scatter/public-api"
       ]
