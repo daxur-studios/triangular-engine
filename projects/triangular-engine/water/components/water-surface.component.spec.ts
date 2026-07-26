@@ -64,7 +64,7 @@ describe('WaterSurfaceComponent', () => {
 
     fixture.componentRef.setInput('domain', new SphereWaterDomain(100));
     fixture.detectChanges();
-    expect(scene.children.length).toBe(2);
+    expect(scene.children.length).toBe(3);
 
     fixture.componentRef.setInput('domain', new PlaneWaterDomain());
     fixture.detectChanges();

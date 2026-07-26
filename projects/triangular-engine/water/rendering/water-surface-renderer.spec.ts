@@ -44,6 +44,53 @@ describe('WaterSurfaceRenderer', () => {
     }
   });
 
+  it('adds complete non-displaced far coverage only for a sphere', () => {
+    const scene = new Scene();
+    const sphereRenderer = new WaterSurfaceRenderer({
+      domain: new SphereWaterDomain(600_000),
+      preset: WATER_RENDER_PRESETS.balanced,
+    });
+    const planeRenderer = new WaterSurfaceRenderer({
+      domain: new PlaneWaterDomain(),
+      preset: WATER_RENDER_PRESETS.balanced,
+    });
+
+    sphereRenderer.addTo(scene);
+    expect(sphereRenderer.farSurfaceMesh?.name).toBe(
+      'water-planetary-far-surface',
+    );
+    expect(sphereRenderer.farSurfaceMesh?.parent).toBe(scene);
+    expect(planeRenderer.farSurfaceMesh).toBeNull();
+
+    sphereRenderer.dispose();
+    planeRenderer.dispose();
+  });
+
+  it('automatically replaces geometric waves with the far sphere in orbit', () => {
+    const radius = 600_000;
+    const renderer = new WaterSurfaceRenderer({
+      domain: new SphereWaterDomain(radius),
+      preset: WATER_RENDER_PRESETS.balanced,
+    });
+    const camera = new PerspectiveCamera();
+    const localMaterial = renderer.meshes[0].material as ShaderMaterial;
+
+    camera.position.set(0, radius + 10, 0);
+    renderer.update(camera, 1);
+    expect(localMaterial.uniforms['uNearFieldOpacity'].value).toBe(1);
+    expect(
+      renderer.farSurfaceMesh?.material.uniforms['uNearFieldOpacity'].value,
+    ).toBe(1);
+
+    camera.position.set(0, radius * 2, 0);
+    renderer.update(camera, 2);
+    expect(localMaterial.uniforms['uNearFieldOpacity'].value).toBe(0);
+    expect(
+      renderer.farSurfaceMesh?.material.uniforms['uNearFieldOpacity'].value,
+    ).toBe(0);
+    renderer.dispose();
+  });
+
   it('builds a complete finite cylinder while its LOD follows the camera', () => {
     const domain = new CylinderWaterDomain(500, {
       axis: new Vector3(1, 0, 0),

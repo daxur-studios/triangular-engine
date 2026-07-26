@@ -3,9 +3,11 @@ import {
   DoubleSide,
   InstancedMesh,
   Matrix4,
+  Mesh,
   PerspectiveCamera,
   Scene,
   ShaderMaterial,
+  SphereGeometry,
   Texture,
   Vector2,
   Vector3,
@@ -84,6 +86,14 @@ import { waterTierDefines } from './water-quality';
 import type { WaterRenderPreset } from './water-render-preset';
 
 const OUTER_CULL_SENTINEL = 1e20;
+const PLANETARY_FAR_SPHERE_WIDTH_SEGMENTS = 96;
+const PLANETARY_FAR_SPHERE_HEIGHT_SEGMENTS = 48;
+const PLANETARY_FAR_NORMAL_TILING = 48;
+const PLANETARY_FAR_SURFACE_OFFSET_CELL_RATIO = 0.025;
+const PLANETARY_FAR_SURFACE_MIN_OFFSET_M = 0.05;
+const NEAR_FIELD_FADE_START_EXTENTS = 2;
+const NEAR_FIELD_FADE_END_EXTENTS = 8;
+const NEAR_FIELD_HOLE_INNER_RATIO = 0.65;
 
 export interface WaterSurfaceRendererOptions {
   readonly domain: WaterSurfaceDomain;
@@ -116,6 +126,9 @@ export class WaterSurfaceRenderer {
   private patchGeometry: BufferGeometry | null = null;
   private depthPrepass: WaterDepthPrepass | null = null;
   private ownedDetailNormalMap: Texture | null = null;
+  private planetaryFarMesh: Mesh<SphereGeometry, ShaderMaterial> | null = null;
+  private planetaryFarNormalMap: Texture | null = null;
+  private readonly uNearFieldOpacity = { value: 1 };
   private scene: Scene | null = null;
   private preset: WaterRenderPreset;
   private wireframe: boolean;
@@ -141,10 +154,19 @@ export class WaterSurfaceRenderer {
     return this.levelMeshes;
   }
 
+  /**
+   * Whole-sphere, non-displaced ocean used when a spherical body is viewed
+   * beyond the local wave grid.
+   */
+  get farSurfaceMesh(): Mesh<SphereGeometry, ShaderMaterial> | null {
+    return this.planetaryFarMesh;
+  }
+
   addTo(scene: Scene): void {
     if (this.scene === scene) return;
     this.removeFromScene();
     this.scene = scene;
+    if (this.planetaryFarMesh) scene.add(this.planetaryFarMesh);
     for (const mesh of this.levelMeshes) scene.add(mesh);
   }
 
@@ -157,6 +179,7 @@ export class WaterSurfaceRenderer {
     this.domainUniforms.uFrameNormal.value.copy(frame.normal);
     this.domainUniforms.uFrameTangentU.value.copy(frame.tangentU);
     this.domainUniforms.uFrameTangentV.value.copy(frame.tangentV);
+    this.updatePlanetaryFarSurface(camera, frame.normal, elapsedSeconds);
 
     if (this.domain instanceof CylinderWaterDomain) {
       const relative = frame.origin.clone().sub(this.domain.center);
@@ -308,10 +331,11 @@ export class WaterSurfaceRenderer {
       this.domainUniforms.uCylinderAxis.value.copy(this.domain.axis);
       this.domainUniforms.uCylinderRadius.value = this.domain.radiusM;
       this.uLodPeriodZ.value = 2 * Math.PI * this.domain.radiusM;
-      this.domainUniforms.uCylinderHalfLength.value =
-        Number.isFinite(this.domain.lengthM)
-          ? this.domain.lengthM * 0.5
-          : OUTER_CULL_SENTINEL;
+      this.domainUniforms.uCylinderHalfLength.value = Number.isFinite(
+        this.domain.lengthM,
+      )
+        ? this.domain.lengthM * 0.5
+        : OUTER_CULL_SENTINEL;
     }
   }
 
@@ -339,6 +363,91 @@ export class WaterSurfaceRenderer {
       this.levelMaterials.push(material);
       this.levelMeshes.push(mesh);
     }
+    this.buildPlanetaryFarSurface(grid);
+  }
+
+  /**
+   * Adds complete spherical coverage beneath the camera-local wave grid.
+   * Geometry stays undisplaced; animated normal texture and lighting preserve
+   * ocean character when individual waves are below a pixel.
+   */
+  private buildPlanetaryFarSurface(grid: WaterLodGridOptions): void {
+    if (!(this.domain instanceof SphereWaterDomain)) return;
+
+    const surfaceOffset = Math.max(
+      PLANETARY_FAR_SURFACE_MIN_OFFSET_M,
+      grid.baseCellSize * PLANETARY_FAR_SURFACE_OFFSET_CELL_RATIO,
+    );
+    const geometry = new SphereGeometry(
+      Math.max(
+        PLANETARY_FAR_SURFACE_MIN_OFFSET_M,
+        this.domain.radiusM - surfaceOffset,
+      ),
+      PLANETARY_FAR_SPHERE_WIDTH_SEGMENTS,
+      PLANETARY_FAR_SPHERE_HEIGHT_SEGMENTS,
+    );
+    this.planetaryFarNormalMap = createProceduralNormalMapTexture({
+      size: 128,
+      octaves: 5,
+      seed: 17,
+    });
+    const material = new ShaderMaterial({
+      uniforms: {
+        uSphereCenter: { value: this.domain.center.clone() },
+        uCameraSurfaceNormal: { value: new Vector3(0, 1, 0) },
+        uNearAngularRadius: {
+          value: Math.atan(
+            this.getGridOuterHalfExtent(grid) / this.domain.radiusM,
+          ),
+        },
+        uNearFieldOpacity: this.uNearFieldOpacity,
+        uNormalMap: { value: this.planetaryFarNormalMap },
+        uTime: this.uTime,
+        uLightDirection: { value: this.lightDirection },
+        uColorShallow: { value: this.shadingUniforms.uColorShallow.value },
+        uColorDeep: { value: this.shadingUniforms.uColorDeep.value },
+      },
+      vertexShader: PLANETARY_FAR_SURFACE_VERTEX_SHADER,
+      fragmentShader: PLANETARY_FAR_SURFACE_FRAGMENT_SHADER,
+      transparent: true,
+      depthWrite: true,
+      side: DoubleSide,
+    });
+    this.planetaryFarMesh = new Mesh(geometry, material);
+    this.planetaryFarMesh.name = 'water-planetary-far-surface';
+    this.planetaryFarMesh.position.copy(this.domain.center);
+    this.planetaryFarMesh.frustumCulled = false;
+  }
+
+  private updatePlanetaryFarSurface(
+    camera: Camera,
+    cameraSurfaceNormal: Vector3,
+    _elapsedSeconds: number,
+  ): void {
+    if (!(this.domain instanceof SphereWaterDomain) || !this.planetaryFarMesh) {
+      this.uNearFieldOpacity.value = 1;
+      return;
+    }
+
+    const gridExtent = this.getGridOuterHalfExtent(this.getGridOptions());
+    const altitude = Math.max(
+      0,
+      camera.position.distanceTo(this.domain.center) - this.domain.radiusM,
+    );
+    this.uNearFieldOpacity.value =
+      1 -
+      smoothstep(
+        gridExtent * NEAR_FIELD_FADE_START_EXTENTS,
+        gridExtent * NEAR_FIELD_FADE_END_EXTENTS,
+        altitude,
+      );
+    this.planetaryFarMesh.material.uniforms['uCameraSurfaceNormal'].value.copy(
+      cameraSurfaceNormal,
+    );
+  }
+
+  private getGridOuterHalfExtent(grid: WaterLodGridOptions): number {
+    return (grid.coreSizePatches / 2) * grid.baseCellSize * 2 ** grid.ringCount;
   }
 
   private mergeLodInstances(
@@ -418,8 +527,7 @@ export class WaterSurfaceRenderer {
       2 * Math.PI * this.domain.radiusM,
       Number.isFinite(this.domain.lengthM) ? this.domain.lengthM : 0,
     );
-    const baseHalfExtent =
-      (grid.coreSizePatches / 2) * grid.baseCellSize;
+    const baseHalfExtent = (grid.coreSizePatches / 2) * grid.baseCellSize;
     const requiredRingCount = Math.max(
       0,
       Math.ceil(Math.log2(requiredHalfExtent / baseHalfExtent)),
@@ -462,6 +570,7 @@ export class WaterSurfaceRenderer {
         uInnerCullRadius: { value: innerCullRadius },
         uOuterCullRadius: { value: outerCullRadius },
         uLightDirection: { value: this.lightDirection },
+        uNearFieldOpacity: this.uNearFieldOpacity,
       },
       defines,
       vertexShader: WATER_SURFACE_VERTEX_SHADER,
@@ -476,6 +585,7 @@ export class WaterSurfaceRenderer {
   }
 
   private removeFromScene(): void {
+    this.planetaryFarMesh?.removeFromParent();
     for (const mesh of this.levelMeshes) mesh.removeFromParent();
     this.scene = null;
   }
@@ -483,6 +593,11 @@ export class WaterSurfaceRenderer {
   private disposeGrid(): void {
     for (const mesh of this.levelMeshes) mesh.dispose();
     for (const material of this.levelMaterials) material.dispose();
+    this.planetaryFarMesh?.geometry.dispose();
+    this.planetaryFarMesh?.material.dispose();
+    this.planetaryFarNormalMap?.dispose();
+    this.planetaryFarMesh = null;
+    this.planetaryFarNormalMap = null;
     this.patchGeometry?.dispose();
     this.patchGeometry = null;
     this.levelMeshes.length = 0;
@@ -552,6 +667,7 @@ export const WATER_SURFACE_FRAGMENT_SHADER = `
   uniform vec3 uLightDirection;
   uniform float uInnerCullRadius;
   uniform float uOuterCullRadius;
+  uniform float uNearFieldOpacity;
   uniform float uTime;
   uniform vec2 uLodCameraXZ;
   varying vec3 vLocalNormal;
@@ -585,6 +701,7 @@ export const WATER_SURFACE_FRAGMENT_SHADER = `
       float depth = uAbsorptionDistance;
       float alpha = 1.0;
     #endif
+    alpha *= uNearFieldOpacity;
     if (alpha <= 0.001) discard;
 
     vec3 lightDir = normalize(uLightDirection);
@@ -614,3 +731,99 @@ export const WATER_SURFACE_FRAGMENT_SHADER = `
     ${WATER_LOGDEPTH_FRAGMENT_GLSL}
   }
 `;
+
+export const PLANETARY_FAR_SURFACE_VERTEX_SHADER = `
+  ${WATER_LOGDEPTH_PARS_VERTEX_GLSL}
+  varying vec2 vUv;
+  varying vec3 vWorldPosition;
+  varying vec3 vSphereNormal;
+
+  void main() {
+    vUv = uv;
+    vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+    vSphereNormal = normalize(mat3(modelMatrix) * normal);
+    vec4 viewPos = viewMatrix * vec4(vWorldPosition, 1.0);
+    gl_Position = projectionMatrix * viewPos;
+    ${WATER_LOGDEPTH_VERTEX_GLSL}
+  }
+`;
+
+export const PLANETARY_FAR_SURFACE_FRAGMENT_SHADER = `
+  ${WATER_LOGDEPTH_PARS_FRAGMENT_GLSL}
+  uniform vec3 uSphereCenter;
+  uniform vec3 uCameraSurfaceNormal;
+  uniform float uNearAngularRadius;
+  uniform float uNearFieldOpacity;
+  uniform sampler2D uNormalMap;
+  uniform float uTime;
+  uniform vec3 uLightDirection;
+  uniform vec3 uColorShallow;
+  uniform vec3 uColorDeep;
+  varying vec2 vUv;
+  varying vec3 vWorldPosition;
+  varying vec3 vSphereNormal;
+
+  void main() {
+    vec3 sphereNormal = normalize(vSphereNormal);
+    float angularDistance = acos(clamp(
+      dot(sphereNormal, normalize(uCameraSurfaceNormal)),
+      -1.0,
+      1.0
+    ));
+    float localHole = smoothstep(
+      uNearAngularRadius * ${NEAR_FIELD_HOLE_INNER_RATIO.toFixed(2)},
+      uNearAngularRadius,
+      angularDistance
+    );
+    float alpha = mix(1.0, localHole, uNearFieldOpacity);
+    if (alpha <= 0.001) discard;
+
+    vec2 tiling = vec2(
+      ${PLANETARY_FAR_NORMAL_TILING.toFixed(1)},
+      ${(PLANETARY_FAR_NORMAL_TILING * 0.5).toFixed(1)}
+    );
+    vec3 detailA = texture2D(
+      uNormalMap,
+      vUv * tiling + vec2(uTime * 0.003, uTime * 0.0015)
+    ).xyz * 2.0 - 1.0;
+    vec3 detailB = texture2D(
+      uNormalMap,
+      vUv.yx * tiling.yx + vec2(-uTime * 0.0012, uTime * 0.002)
+    ).xyz * 2.0 - 1.0;
+    vec3 longitudeTangent = cross(vec3(0.0, 1.0, 0.0), sphereNormal);
+    if (dot(longitudeTangent, longitudeTangent) < 0.0001) {
+      longitudeTangent = vec3(1.0, 0.0, 0.0);
+    } else {
+      longitudeTangent = normalize(longitudeTangent);
+    }
+    vec3 latitudeTangent = normalize(cross(sphereNormal, longitudeTangent));
+    vec2 detail = (detailA.xy + detailB.xy) * 0.12;
+    vec3 normal = normalize(
+      sphereNormal
+      + longitudeTangent * detail.x
+      + latitudeTangent * detail.y
+    );
+
+    vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+    vec3 lightDirection = normalize(uLightDirection);
+    float diffuse = max(dot(normal, lightDirection), 0.0);
+    float fresnel = pow(
+      1.0 - max(dot(normal, viewDirection), 0.0),
+      3.0
+    );
+    float glint = pow(
+      max(dot(reflect(-lightDirection, normal), viewDirection), 0.0),
+      96.0
+    );
+    vec3 color = mix(uColorDeep, uColorShallow, 0.28 + diffuse * 0.32);
+    color = mix(color, vec3(0.62, 0.78, 0.92), fresnel * 0.5);
+    color += vec3(glint * 0.45);
+    gl_FragColor = vec4(color, alpha);
+    ${WATER_LOGDEPTH_FRAGMENT_GLSL}
+  }
+`;
+
+function smoothstep(edge0: number, edge1: number, value: number): number {
+  const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}

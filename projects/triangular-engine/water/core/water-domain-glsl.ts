@@ -112,7 +112,19 @@ export const WATER_DOMAIN_COMPOSE_GLSL = `
  */
 export const WATER_DOMAIN_COMPOSE_NORMAL_GLSL = `
   vec3 waterComposeWorldNormal(vec3 localNormal, vec2 localXZ) {
-    #ifdef WATER_DOMAIN_CYLINDER
+    #ifdef WATER_DOMAIN_SPHERE
+      vec3 surfacePosition = waterComposeWorldPosition(localXZ, 0.0);
+      vec3 domainUp = normalize(surfacePosition - uSphereCenter);
+      vec3 tangentU = normalize(
+        uFrameTangentU - domainUp * dot(uFrameTangentU, domainUp)
+      );
+      vec3 tangentV = normalize(cross(domainUp, tangentU));
+      return normalize(
+        tangentU * localNormal.x
+        + domainUp * localNormal.y
+        + tangentV * localNormal.z
+      );
+    #elif defined(WATER_DOMAIN_CYLINDER)
       vec3 surfacePosition = waterComposeWorldPosition(localXZ, 0.0);
       vec3 relative = surfacePosition - uCylinderCenter;
       vec3 radial = relative - uCylinderAxis * dot(relative, uCylinderAxis);
