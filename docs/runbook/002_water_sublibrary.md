@@ -10,10 +10,10 @@
 - State: In progress
 - Target entry points: `triangular-engine/water` (core), `triangular-engine/water/jolt` (physics)
 - Initial renderer: WebGL
-- Last updated: 2026-07-25 (the public renderer, service, underwater effect and
-  maintained integration demo are operational; near-shore rendering now
-  requires a shared world-space shallow-water field before displacement,
-  floating objects or future Jolt buoyancy are changed)
+- Last updated: 2026-07-26 (Phase 3 Jolt buoyancy shipped and user-verified in
+  `/water-buoyancy-poc`, open water only; near-shore rendering still requires
+  a shared world-space shallow-water field before displacement, floating
+  objects or buoyancy are changed for shorelines)
 
 ## TL;DR
 
@@ -956,19 +956,44 @@ convincing underwater state; events fire exactly once per crossing.
 
 ### Phase 3 — Jolt buoyancy
 
-- [ ] `WaterBuoyancyComponent` in `water/jolt`: per-tick surface sampling →
+- [x] `WaterBuoyancyComponent` in `water/jolt`: per-tick surface sampling →
       `ApplyBuoyancyImpulse`, body activation on entry, enter/leave events into
       the shared stream.
-- [ ] Expose the sampling→impulse step as a plain function (adapter-friendly,
-      no Angular required) and verify the call signature against the f64 fork's
-      typings (`_external/JoltPhysics.js`).
-- [ ] Demo: dropped boxes/capsules of varying density splash down, bob in sync
-      with the visual waves, float or sink; a "dead stage" style capsule
-      stabilises floating on its side.
+- [x] Expose the sampling→impulse step as a plain function (adapter-friendly,
+      no Angular required) — `resolveWaterBuoyancyImpulseInput` in
+      `water/jolt/water-buoyancy.ts`. Verification against the f64 fork's
+      (`_external/JoltPhysics.js`) typings is still open; the shipped demo and
+      component target the stock npm `jolt-physics` peer only.
+- [x] Demo: dropped boxes/capsules of varying density splash down, bob in sync
+      with the visual waves, float or sink. Shipped as `/water-buoyancy-poc`
+      with spawnable floater/neutral/sinker/custom-density hulls and a
+      calm/mid/storm wave-motion switcher; the "dead stage" capsule-on-its-side
+      stabilisation case was not separately exercised.
 
 Exit gate: a dropped dynamic body visibly floats **on** the rendered waves
 (not on an invisible flat plane), and the demo shows tunable
-buoyancy/drag producing float vs. sink.
+buoyancy/drag producing float vs. sink. **Met and user-verified 2026-07-26**
+in `/water-buoyancy-poc` — see the log entry below. Deliberately open water
+only: the shallow-water/near-shore wave model (Phase 1b's open item) is out of
+scope for this demo and remains a separate, still-open item.
+
+#### 2026-07-26 — Jolt buoyancy demo shipped
+
+- Added `WaterBuoyancyComponent` (`water/jolt`) and the pure
+  `resolveWaterBuoyancyImpulseInput` adapter function, plus the
+  `triangular-engine/water/jolt` nested secondary entry point.
+- Shipped `/water-buoyancy-poc`: spawns box/sphere hulls with float/neutral/
+  sink/custom buoyancy onto an `oceanSwell` `<waterSurface>` inside
+  `<jolt-physics>`, with a physics-debug toggle and live floating/submerged
+  counts.
+- Added a calm/mid/storm wave-motion switcher bound to `<waterSurface>`'s
+  existing `motion` input (`WATER_WAVE_PRESETS.calmLake` /
+  `.oceanSwell` / `.storm` — no new wave presets needed).
+- User-verified in-browser: different-buoyancy hulls float at different
+  depths/attitudes as expected.
+- Not yet done: Karma execution of `water-buoyancy.spec.ts` on this machine
+  (blocked by the existing ChromeHeadless GPU-process crash noted in earlier
+  phases), and f64-fork typings verification.
 
 ### Phase 4 — High tier
 
