@@ -31,6 +31,27 @@
         <button (click)="clearMarks()">Clear marks</button>
       </nav>
 
+      <nav aria-label="Ground shape">
+        <button
+          [class.active]="groundShape() === 'plane'"
+          (click)="setGroundShape('plane')"
+        >
+          Plane
+        </button>
+        <button
+          [class.active]="groundShape() === 'sphere'"
+          (click)="setGroundShape('sphere')"
+        >
+          Sphere
+        </button>
+        <button
+          [class.active]="groundShape() === 'cylinder'"
+          (click)="setGroundShape('cylinder')"
+        >
+          Cylinder
+        </button>
+      </nav>
+
       <p class="blurb note">
         {{ trackCount() }} track ribbons, {{ scorchCount() }} scorch stamps.
       </p>

@@ -152,4 +152,19 @@ export const routes: Routes = [
         ({ ScatterPhysicsLabPageComponent }) => ScatterPhysicsLabPageComponent,
       ),
   },
+  {
+    path: 'vehicle-trail-lab',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
+    loadComponent: () =>
+      import(
+        './pages/vehicle-trail-lab/vehicle-trail-lab-page.component'
+      ).then(
+        ({ VehicleTrailLabPageComponent }) => VehicleTrailLabPageComponent,
+      ),
+  },
 ];

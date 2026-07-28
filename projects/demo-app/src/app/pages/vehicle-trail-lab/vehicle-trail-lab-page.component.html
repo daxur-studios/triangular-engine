@@ -1,0 +1,81 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Vehicle trail lab controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small>triangular-engine/trail + jolt — a fading, driven trail</small>
+        </div>
+        <strong>Vehicle trail lab</strong>
+      </header>
+
+      <p class="blurb">
+        A Jolt box vehicle leaves a live <code>createTrailRibbonGeometry</code>
+        ribbon that fades and self-prunes over a few seconds via its per-vertex
+        <code>alpha01</code> attribute — no BSP-side decay policy involved,
+        just the engine's own fade-ready geometry + material. Gravity is a
+        manual per-tick <code>Body.AddForce</code> toward each shape's local
+        "down" (radial for sphere/cylinder, constant for plane), so the same
+        drive code works unchanged on all three ground shapes.
+      </p>
+
+      <nav aria-label="Ground shape">
+        <button
+          [class.active]="groundShape() === 'plane'"
+          (click)="setGroundShape('plane')"
+        >
+          Plane
+        </button>
+        <button
+          [class.active]="groundShape() === 'sphere'"
+          (click)="setGroundShape('sphere')"
+        >
+          Sphere
+        </button>
+        <button
+          [class.active]="groundShape() === 'cylinder'"
+          (click)="setGroundShape('cylinder')"
+        >
+          Cylinder (inside)
+        </button>
+      </nav>
+
+      <div class="actions">
+        <button
+          [class.active]="physicsDebug()"
+          (click)="togglePhysicsDebug()"
+        >
+          Physics debug
+        </button>
+      </div>
+
+      <p class="blurb note">
+        {{ trailPointCount() }} live trail points. Drive: WASD · sprint: Shift
+        · orbit the camera to look around.
+      </p>
+    </section>
+  </ng-template>
+
+  <orbitControls [cameraPosition]="[0, 60, 80]" [target]="[0, 0, 0]" [isActive]="true" />
+  <ambientLight [intensity]="1.2" />
+  <directionalLight [position]="[80, 120, 60]" [intensity]="2" />
+
+  <jolt-physics [gravity]="[0, 0, 0]" [debug]="physicsDebug()">
+    <jolt-rigid-body
+      #vehicle
+      [motionType]="2"
+      [position]="vehicleSpawnPositionM()"
+      [velocity]="vehicleSpawnVelocityM()"
+      [angularDamping]="0.9"
+      [linearDamping]="0.05"
+    >
+      <jolt-box-shape [params]="vehicleBoxParams" />
+      <mesh [castShadow]="true">
+        <boxGeometry [params]="vehicleBoxParams" />
+        <meshStandardMaterial
+          [params]="{ color: '#ffb347', roughness: 0.5, metalness: 0.15 }"
+        />
+      </mesh>
+    </jolt-rigid-body>
+  </jolt-physics>
+</scene>
