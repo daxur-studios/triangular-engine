@@ -1,5 +1,13 @@
 import { Component, effect, input, model, signal } from '@angular/core';
-import { BufferGeometry, Line, Material, Vector3, Vector3Tuple } from 'three';
+import {
+  BufferAttribute,
+  BufferGeometry,
+  Float32BufferAttribute,
+  Line,
+  Material,
+  Vector3,
+  Vector3Tuple,
+} from 'three';
 import { Object3DComponent, provideObject3DComponent } from '../object-3d';
 
 @Component({
@@ -35,8 +43,25 @@ export class LineComponent extends Object3DComponent {
 
       if (geometry && points) {
         const vectors = points.map((point) => new Vector3(...point));
+        const positionAttr = geometry.getAttribute('position') as BufferAttribute | undefined;
 
-        geometry.setFromPoints(vectors);
+        if (!positionAttr || positionAttr.count < vectors.length) {
+          // Capacity headroom: minimum 64 points, up to 50% extra, capped at max +10,000 points (120 KB RAM max step)
+          const headroom = Math.min(Math.max(64, Math.ceil(vectors.length * 0.5)), 10000);
+          const capacity = vectors.length + headroom;
+          const newAttr = new Float32BufferAttribute(capacity * 3, 3);
+          for (let i = 0; i < vectors.length; i++) {
+            newAttr.setXYZ(i, vectors[i].x, vectors[i].y, vectors[i].z);
+          }
+          geometry.setAttribute('position', newAttr);
+        } else {
+          for (let i = 0; i < vectors.length; i++) {
+            positionAttr.setXYZ(i, vectors[i].x, vectors[i].y, vectors[i].z);
+          }
+          positionAttr.needsUpdate = true;
+        }
+
+        geometry.setDrawRange(0, vectors.length);
         geometry.computeBoundingSphere();
         geometry.computeBoundingBox();
         this.line().computeLineDistances();

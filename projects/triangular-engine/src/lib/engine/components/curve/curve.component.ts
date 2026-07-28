@@ -1,3 +1,4 @@
+import { Float32BufferAttribute } from 'three';
 import {
   Component,
   effect,
@@ -53,7 +54,28 @@ export abstract class CurveComponent {
       const curveUpdatedTrigger = this.curveUpdatedTrigger();
 
       if (this.bufferGeometry) {
-        this.bufferGeometry.geometry().setFromPoints(curve.getPoints(count));
+        const geometry = this.bufferGeometry.geometry();
+        const points = curve.getPoints(count);
+        const positionAttr = geometry.getAttribute('position');
+
+        if (!positionAttr || positionAttr.count < points.length) {
+          const headroom = Math.min(Math.max(64, Math.ceil(points.length * 0.5)), 10000);
+          const capacity = points.length + headroom;
+          const newAttr = new Float32BufferAttribute(capacity * 3, 3);
+          for (let i = 0; i < points.length; i++) {
+            newAttr.setXYZ(i, points[i].x, points[i].y, points[i].z);
+          }
+          geometry.setAttribute('position', newAttr);
+        } else {
+          for (let i = 0; i < points.length; i++) {
+            positionAttr.setXYZ(i, points[i].x, points[i].y, points[i].z);
+          }
+          positionAttr.needsUpdate = true;
+        }
+
+        geometry.setDrawRange(0, points.length);
+        geometry.computeBoundingSphere();
+        geometry.computeBoundingBox();
       }
     });
   }

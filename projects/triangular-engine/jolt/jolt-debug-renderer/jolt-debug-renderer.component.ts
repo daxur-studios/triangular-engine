@@ -12,6 +12,7 @@ import {
   BufferAttribute,
   BufferGeometry,
   EdgesGeometry,
+  Float32BufferAttribute,
   InterleavedBuffer,
   InterleavedBufferAttribute,
   LineBasicMaterial,
@@ -406,7 +407,20 @@ export class JoltDebugRendererComponent implements OnDestroy {
       const color = parseInt(colorU32, 10);
       if (this.lineMesh[color]) {
         const geometry = this.lineMesh[color].geometry as BufferGeometry;
-        geometry.setFromPoints(points);
+        const positionAttr = geometry.getAttribute('position') as BufferAttribute | undefined;
+        if (!positionAttr || positionAttr.count < points.length) {
+          const newAttr = new Float32BufferAttribute(points.length * 3, 3);
+          for (let i = 0; i < points.length; i++) {
+            newAttr.setXYZ(i, points[i].x, points[i].y, points[i].z);
+          }
+          geometry.setAttribute('position', newAttr);
+        } else {
+          for (let i = 0; i < points.length; i++) {
+            positionAttr.setXYZ(i, points[i].x, points[i].y, points[i].z);
+          }
+          positionAttr.needsUpdate = true;
+        }
+        geometry.setDrawRange(0, points.length);
         this.lineMesh[color].visible = true;
       } else {
         const material = new LineBasicMaterial({
