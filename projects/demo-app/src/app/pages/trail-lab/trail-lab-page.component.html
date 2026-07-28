@@ -1,0 +1,47 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Trail lab controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small>triangular-engine/trail — surface trails G1</small>
+        </div>
+        <strong>Ribbon trails & point-stamp decals</strong>
+      </header>
+
+      <p class="blurb">
+        <strong>Track mode:</strong> drag across the ground to lay a strip via
+        <code>createTrailRibbonGeometry</code> — a rover-tracks stand-in.
+        <strong>Scorch mode:</strong> click to stamp a decal via
+        <code>createStampDecalGeometry</code> (a thin wrapper around
+        <code>THREE.DecalGeometry</code>) — an engine-scorch / leg-pad
+        stand-in. Both are framework-free geometry builders; persistence,
+        bucketing per terrain patch, and decay policy are app-side concerns
+        (see <code>docs/v3-planning/plans/ground-marks.md</code> in
+        brunos-space-program), not part of this engine utility.
+      </p>
+
+      <nav aria-label="Mode">
+        <button [class.active]="mode() === 'track'" (click)="setMode('track')">
+          Track
+        </button>
+        <button [class.active]="mode() === 'scorch'" (click)="setMode('scorch')">
+          Scorch
+        </button>
+        <button (click)="clearMarks()">Clear marks</button>
+      </nav>
+
+      <p class="blurb note">
+        {{ trackCount() }} track ribbons, {{ scorchCount() }} scorch stamps.
+      </p>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="[0, 60, 80]"
+    [target]="[0, 0, 0]"
+    [isActive]="isOrbitActive()"
+  />
+  <ambientLight [intensity]="1.2" />
+  <directionalLight [position]="[80, 120, 60]" [intensity]="2" />
+</scene>

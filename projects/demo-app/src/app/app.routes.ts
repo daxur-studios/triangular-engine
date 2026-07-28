@@ -124,6 +124,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'trail-lab',
+    loadComponent: () =>
+      import('./pages/trail-lab/trail-lab-page.component').then(
+        ({ TrailLabPageComponent }) => TrailLabPageComponent,
+      ),
+  },
+  {
     path: 'scatter-lab',
     loadComponent: () =>
       import('./pages/scatter-lab/scatter-lab-page.component').then(

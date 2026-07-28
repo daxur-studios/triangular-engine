@@ -28,6 +28,9 @@
       ],
       "triangular-engine/scatter": [
         "projects/triangular-engine/scatter/public-api"
+      ],
+      "triangular-engine/trail": [
+        "projects/triangular-engine/trail/public-api"
       ]
     },
     "outDir": "./dist/out-tsc",
