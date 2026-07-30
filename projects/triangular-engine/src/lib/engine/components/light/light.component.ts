@@ -69,6 +69,16 @@ export abstract class LightComponent extends Object3DComponent {
           if (!pointLight.shadow) return;
           (pointLight.shadow.camera as OrthographicCamera).far = value ?? 1000;
         },
+        cameraHalfExtent: (value) => {
+          const camera = pointLight.shadow?.camera;
+          if (!(camera instanceof OrthographicCamera) || value === undefined) {
+            return;
+          }
+          camera.left = -value;
+          camera.right = value;
+          camera.top = value;
+          camera.bottom = -value;
+        },
         bias: (value) => {
           if (!pointLight.shadow) return;
           pointLight.shadow.bias = value ?? 0;
@@ -90,6 +100,9 @@ export abstract class LightComponent extends Object3DComponent {
 
         setterFactory[key]?.(shadowParams[key] as any);
       });
+
+      // near/far/half-extent silently do nothing without a projection rebuild.
+      pointLight.shadow?.camera?.updateProjectionMatrix();
     });
   }
 }
@@ -192,6 +205,14 @@ export abstract class LightComponent extends Object3DComponent {
 export type LightShadowParams = {
   /** Width and height of the shadow map. Default is 1024 for better quality shadows. */
   mapSize?: [width: number, height: number]; // e.g., [1024,1024] (try 2048 if needed)
+  /**
+   * Half-extent (world units) of an orthographic shadow camera's frustum:
+   * left/right/top/bottom become ±value. Directional lights only — ignored
+   * for perspective shadow cameras (point/spot). Shadow-map texel density is
+   * mapSize / (2 × halfExtent), so a small extent around the subject beats a
+   * large one covering the whole scene.
+   */
+  cameraHalfExtent?: number;
   /** Near clipping plane for shadow camera. Default is 1e-4 for tight frustum. */
   cameraNear?: number; // e.g., 1e-4
   /** Far clipping plane for shadow camera. Default is 2.0, just enough to cover receivers. */
