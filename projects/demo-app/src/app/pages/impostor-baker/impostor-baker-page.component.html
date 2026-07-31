@@ -12,14 +12,14 @@
       </div>
       <div class="previews">
         <div><h3>Atlas</h3><canvas #atlasCanvas (click)="selectCell(0, 0)"></canvas></div>
-        <div><h3>Selected direction</h3><code>{{ selectedCell() }}</code><p>Rows are top-origin. Cell centers decode to camera directions.</p></div>
+        <div><h3>Runtime impostor</h3><code>cell {{ selectedCell() }}</code><p>The sprite at right follows the camera and selects the nearest octahedral frame.</p></div>
       </div>
       @if (metadata(); as data) {
         <pre>{{ data | json }}</pre>
       }
   </section>
 <scene>
-  <camera [position]="cameraPosition" [lookAt]="cameraTarget" />
+  <camera [position]="cameraPosition" [lookAt]="[1.4, 0, 0]" />
   <orbitControls [cameraPosition]="cameraPosition" [target]="cameraTarget" />
   <ambientLight [intensity]="1.2" />
   <directionalLight [position]="[4, 6, 5]" [intensity]="2.4" />

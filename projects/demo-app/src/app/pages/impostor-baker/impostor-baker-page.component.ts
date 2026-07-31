@@ -2,6 +2,7 @@ import {
   AfterViewInit,
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ElementRef,
   ViewChild,
   inject,
@@ -12,6 +13,7 @@ import { RouterLink } from '@angular/router';
 import {
   AmbientLight,
   BoxGeometry,
+  CanvasTexture,
   Color,
   DirectionalLight,
   MeshBasicMaterial,
@@ -23,10 +25,13 @@ import {
   RGBAFormat,
   UnsignedByteType,
   Scene,
+  Sprite,
+  SpriteMaterial,
   Vector3,
 } from 'three';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EngineModule, EngineService } from 'triangular-engine';
-import { ImpostorAtlasMetadata, atlasDirection } from './impostor-atlas.models';
+import { ImpostorAtlasMetadata, atlasDirection, octahedralEncode } from './impostor-atlas.models';
 
 @Component({
   selector: 'app-impostor-baker-page',
@@ -46,10 +51,15 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   readonly metadata = signal<ImpostorAtlasMetadata | undefined>(undefined);
   readonly atlasUrl = signal('');
   readonly engine = inject(EngineService);
+  private readonly destroyRef = inject(DestroyRef);
   readonly cameraPosition: [number, number, number] = [4, 3, 5];
   readonly cameraTarget: [number, number, number] = [0, 0, 0];
+  private impostorTexture?: CanvasTexture;
+  private impostorSprite?: Sprite;
+  private readonly impostorDirection = new Vector3();
 
   ngAfterViewInit(): void {
+    this.engine.tick$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.updateRuntimeImpostor());
     this.generateAtlas();
   }
 
@@ -117,6 +127,43 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     this.metadata.set(metadata);
     this.atlasUrl.set(canvas.toDataURL('image/png'));
     this.selectedCell.set('0,0');
+    this.createRuntimeImpostor(canvas);
+  }
+
+  private createRuntimeImpostor(atlas: HTMLCanvasElement): void {
+    this.impostorTexture?.dispose();
+    this.impostorSprite?.removeFromParent();
+    this.impostorTexture = new CanvasTexture(atlas);
+    this.impostorTexture.needsUpdate = true;
+    const material = new SpriteMaterial({ map: this.impostorTexture, transparent: true });
+    this.impostorSprite = new Sprite(material);
+    this.impostorSprite.position.set(2.8, 0, 0);
+    this.impostorSprite.scale.set(2.8, 2.8, 1);
+    this.engine.scene.add(this.impostorSprite);
+    this.updateRuntimeImpostor();
+  }
+
+  private updateRuntimeImpostor(): void {
+    const sprite = this.impostorSprite;
+    const texture = this.impostorTexture;
+    const camera = this.engine.camera$.value;
+    const data = this.metadata();
+    if (!sprite || !texture || !camera || !data) return;
+    // Atlas views are baked around the source object's center (the origin),
+    // so do not measure the lookup direction from the preview sprite's offset
+    // position. Using the sprite position skews the vertical orbit direction.
+    this.impostorDirection.copy(camera.position).normalize();
+    const encoded = octahedralEncode(this.impostorDirection);
+    // octahedralEncode already returns normalized atlas UVs in the 0–1 range.
+    // Match the camera orbit's vertical convention to the baked row order.
+    // The atlas image is displayed top-to-bottom, but the orbit's up/down
+    // direction is already represented by the encoded Y coordinate here.
+    const column = Math.min(data.columns - 1, Math.max(0, Math.floor(encoded.x * data.columns)));
+    const row = Math.min(data.rows - 1, Math.max(0, Math.floor(encoded.y * data.rows)));
+    texture.repeat.set(1 / data.columns, 1 / data.rows);
+    texture.offset.set(column / data.columns, 1 - (row + 1) / data.rows);
+    texture.needsUpdate = true;
+    this.selectedCell.set(`${column},${row}`);
   }
 
   selectCell(column: number, row: number): void {
