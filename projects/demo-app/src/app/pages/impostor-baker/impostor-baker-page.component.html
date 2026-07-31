@@ -1,9 +1,9 @@
 <section class="panel">
       <header>
-        <div><a routerLink="/">← Examples</a><small>Generic octahedral impostor baker</small></div>
+        <div><a routerLink="/">← Examples</a><small>Generic impostor baker</small></div>
         <strong>Cube POC</strong>
       </header>
-      <p>Generate a transparent octahedral atlas from an intentionally asymmetric, six-color cube. The atlas and metadata are inspectable exports; the mapping is shared by the baker and the future runtime shader.</p>
+      <p>Generate a transparent directional atlas from an intentionally asymmetric, six-color cube. Atlas columns are azimuth and rows are elevation, so vertical camera motion cannot select a left or right view.</p>
       <div class="actions">
         <label>Grid <select [value]="columns()" (change)="columns.set(+$any($event.target).value); rows.set(+$any($event.target).value); generateAtlas()"><option value="4">4 × 4</option><option value="8">8 × 8</option><option value="12">12 × 12</option></select></label>
         <button (click)="generateAtlas()">Regenerate</button>
@@ -12,18 +12,18 @@
       </div>
       <div class="previews">
         <div><h3>Atlas</h3><canvas #atlasCanvas (click)="selectCell(0, 0)"></canvas></div>
-        <div><h3>Runtime impostor</h3><code>cell {{ selectedCell() }}</code><p>The sprite at right follows the camera and selects the nearest octahedral frame.</p></div>
+        <div><h3>Runtime impostor</h3><code>cell {{ selectedCell() }}</code><p>The centered sprite follows the camera; the reference cube is offset to its right.</p></div>
       </div>
       @if (metadata(); as data) {
         <pre>{{ data | json }}</pre>
       }
   </section>
 <scene>
-  <camera [position]="cameraPosition" [lookAt]="[1.4, 0, 0]" />
+  <camera [position]="cameraPosition" [lookAt]="cameraTarget" />
   <orbitControls [cameraPosition]="cameraPosition" [target]="cameraTarget" />
   <ambientLight [intensity]="1.2" />
   <directionalLight [position]="[4, 6, 5]" [intensity]="2.4" />
-  <mesh [rotation]="[0.25, 0.55, 0]">
+  <mesh [position]="[2.8, 0, 0]">
     <boxGeometry [params]="[2, 2, 2]" />
     <meshStandardMaterial [params]="{ color: '#4cc9f0', roughness: 0.55 }" />
   </mesh>

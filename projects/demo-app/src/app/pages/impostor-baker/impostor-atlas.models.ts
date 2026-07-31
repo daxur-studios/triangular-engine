@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 
 export interface ImpostorAtlasMetadata {
   version: 1;
-  projection: 'octahedral';
+  projection: 'latitude-longitude';
   columns: number;
   rows: number;
   viewCount: number;
@@ -38,5 +38,26 @@ export function octahedralDecode(x: number, y: number): Vector3 {
 }
 
 export function atlasDirection(column: number, row: number, columns: number, rows: number): Vector3 {
-  return octahedralDecode((column + 0.5) / columns, 1 - (row + 0.5) / rows);
+  const azimuth = ((column + 0.5) / columns) * Math.PI * 2 - Math.PI;
+  const elevation = ((row + 0.5) / rows) * Math.PI - Math.PI / 2;
+  const horizontal = Math.cos(elevation);
+  return new Vector3(
+    Math.sin(azimuth) * horizontal,
+    Math.sin(elevation),
+    Math.cos(azimuth) * horizontal,
+  );
+}
+
+export function atlasCellForDirection(
+  direction: Vector3,
+  columns: number,
+  rows: number,
+): { column: number; row: number } {
+  const normalized = direction.clone().normalize();
+  const azimuth = Math.atan2(normalized.x, normalized.z);
+  const elevation = Math.asin(Math.min(1, Math.max(-1, normalized.y)));
+  return {
+    column: Math.min(columns - 1, Math.max(0, Math.floor(((azimuth + Math.PI) / (Math.PI * 2)) * columns))),
+    row: Math.min(rows - 1, Math.max(0, Math.floor(((elevation + Math.PI / 2) / Math.PI) * rows))),
+  };
 }

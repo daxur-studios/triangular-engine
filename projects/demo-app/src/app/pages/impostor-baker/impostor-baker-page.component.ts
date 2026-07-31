@@ -27,11 +27,12 @@ import {
   Scene,
   Sprite,
   SpriteMaterial,
+  Quaternion,
   Vector3,
 } from 'three';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EngineModule, EngineService } from 'triangular-engine';
-import { ImpostorAtlasMetadata, atlasDirection, octahedralEncode } from './impostor-atlas.models';
+import { ImpostorAtlasMetadata, atlasCellForDirection, atlasDirection } from './impostor-atlas.models';
 
 @Component({
   selector: 'app-impostor-baker-page',
@@ -57,6 +58,12 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   private impostorTexture?: CanvasTexture;
   private impostorSprite?: Sprite;
   private readonly impostorDirection = new Vector3();
+  private readonly impostorPosition = new Vector3();
+  private readonly bakeUp = new Vector3();
+  private readonly runtimeUp = new Vector3();
+  private readonly cameraQuaternion = new Quaternion();
+  private readonly worldUp = new Vector3(0, 1, 0);
+  private readonly fallbackUp = new Vector3(0, 0, 1);
 
   ngAfterViewInit(): void {
     this.engine.tick$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.updateRuntimeImpostor());
@@ -94,19 +101,30 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     const light = new DirectionalLight(0xffffff, 1.5);
     light.position.set(4, 6, 5);
     bakeScene.add(light);
-    const camera = new OrthographicCamera(-1.45, 1.45, 1.45, -1.45, 0.1, 20);
+    // Leave room for the cube's diagonal projection at pole-adjacent views.
+    const camera = new OrthographicCamera(-1.8, 1.8, 1.8, -1.8, 0.1, 20);
     const pixels = new Uint8Array(frameSize * frameSize * 4);
+    const uprightPixels = new Uint8ClampedArray(frameSize * frameSize * 4);
     for (let row = 0; row < rows; row++) {
       for (let column = 0; column < columns; column++) {
         const direction = atlasDirection(column, row, columns, rows);
         camera.position.copy(direction).multiplyScalar(5);
+        camera.up.copy(this.getBakeUp(direction, this.bakeUp));
         camera.lookAt(0, 0, 0);
         camera.updateMatrixWorld();
         renderer.setRenderTarget(renderTarget);
         renderer.clear();
         renderer.render(bakeScene, camera);
         renderer.readRenderTargetPixels(renderTarget, 0, 0, frameSize, frameSize, pixels);
-        const image = new ImageData(new Uint8ClampedArray(pixels), frameSize, frameSize);
+        // WebGL readback starts at the bottom-left, whereas ImageData starts at
+        // the top-left. Copy rows in reverse order so frames are not vertically
+        // mirrored (which makes polar camera movement appear backwards).
+        const rowBytes = frameSize * 4;
+        for (let pixelRow = 0; pixelRow < frameSize; pixelRow++) {
+          const sourceOffset = (frameSize - 1 - pixelRow) * rowBytes;
+          uprightPixels.set(pixels.subarray(sourceOffset, sourceOffset + rowBytes), pixelRow * rowBytes);
+        }
+        const image = new ImageData(uprightPixels, frameSize, frameSize);
         const imageCanvas = document.createElement('canvas');
         imageCanvas.width = frameSize; imageCanvas.height = frameSize;
         imageCanvas.getContext('2d')?.putImageData(image, 0, 0);
@@ -120,7 +138,7 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     renderer.dispose();
     renderer.domElement.remove();
     const metadata: ImpostorAtlasMetadata = {
-      version: 1, projection: 'octahedral', columns, rows,
+      version: 1, projection: 'latitude-longitude', columns, rows,
       viewCount: columns * rows, frameSize, padding: 4, rowOrigin: 'top',
       sourceBounds: { center: [0, 0, 0], radius: Math.sqrt(3) },
     };
@@ -137,7 +155,7 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     this.impostorTexture.needsUpdate = true;
     const material = new SpriteMaterial({ map: this.impostorTexture, transparent: true });
     this.impostorSprite = new Sprite(material);
-    this.impostorSprite.position.set(2.8, 0, 0);
+    this.impostorSprite.position.set(0, 0, 0);
     this.impostorSprite.scale.set(2.8, 2.8, 1);
     this.engine.scene.add(this.impostorSprite);
     this.updateRuntimeImpostor();
@@ -149,21 +167,39 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     const camera = this.engine.camera$.value;
     const data = this.metadata();
     if (!sprite || !texture || !camera || !data) return;
-    // Atlas views are baked around the source object's center (the origin),
-    // so do not measure the lookup direction from the preview sprite's offset
-    // position. Using the sprite position skews the vertical orbit direction.
-    this.impostorDirection.copy(camera.position).normalize();
-    const encoded = octahedralEncode(this.impostorDirection);
-    // octahedralEncode already returns normalized atlas UVs in the 0–1 range.
-    // Match the camera orbit's vertical convention to the baked row order.
-    // The atlas image is displayed top-to-bottom, but the orbit's up/down
-    // direction is already represented by the encoded Y coordinate here.
-    const column = Math.min(data.columns - 1, Math.max(0, Math.floor(encoded.x * data.columns)));
-    const row = Math.min(data.rows - 1, Math.max(0, Math.floor(encoded.y * data.rows)));
+    // Atlas views are baked around the source object's center; the runtime
+    // direction is measured from the preview sprite's own world position.
+    // The preview sprite is offset from the source cube, so use the camera
+    // direction relative to the sprite rather than relative to world origin.
+    camera.getWorldPosition(this.impostorDirection);
+    sprite.getWorldPosition(this.impostorPosition);
+    this.impostorDirection.sub(this.impostorPosition).normalize();
+    const { column, row } = atlasCellForDirection(this.impostorDirection, data.columns, data.rows);
     texture.repeat.set(1 / data.columns, 1 / data.rows);
     texture.offset.set(column / data.columns, 1 - (row + 1) / data.rows);
-    texture.needsUpdate = true;
+    const material = sprite.material;
+    if (material instanceof SpriteMaterial) {
+      // Frame selection is discrete, but its screen-space orientation must
+      // follow the continuous camera direction. Deriving this from the chosen
+      // cell causes a visible roll jump at octahedral cell boundaries.
+      const frameUp = this.getBakeUp(this.impostorDirection, this.bakeUp);
+      camera.getWorldQuaternion(this.cameraQuaternion);
+      this.runtimeUp.set(0, 1, 0).applyQuaternion(this.cameraQuaternion)
+        .addScaledVector(this.impostorDirection, -this.runtimeUp.dot(this.impostorDirection))
+        .normalize();
+      const cross = this.runtimeUp.clone().cross(frameUp);
+      material.rotation = Math.atan2(this.impostorDirection.dot(cross), this.runtimeUp.dot(frameUp));
+    }
     this.selectedCell.set(`${column},${row}`);
+  }
+
+  /** Returns the stable image-up axis used for a given baked camera direction. */
+  private getBakeUp(direction: Vector3, target: Vector3): Vector3 {
+    target.copy(this.worldUp).addScaledVector(direction, -this.worldUp.dot(direction));
+    if (target.lengthSq() < 0.000001) {
+      target.copy(this.fallbackUp).addScaledVector(direction, -this.fallbackUp.dot(direction));
+    }
+    return target.normalize();
   }
 
   selectCell(column: number, row: number): void {
