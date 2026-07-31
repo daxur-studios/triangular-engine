@@ -17,6 +17,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'impostor-baker',
+    loadComponent: () =>
+      import('./pages/impostor-baker/impostor-baker-page.component').then(
+        ({ ImpostorBakerPageComponent }) => ImpostorBakerPageComponent,
+      ),
+  },
+  {
     path: 'camera-and-floating-origin',
     loadComponent: () =>
       import('./pages/camera-floating-origin/camera-floating-origin-page.component').then(
