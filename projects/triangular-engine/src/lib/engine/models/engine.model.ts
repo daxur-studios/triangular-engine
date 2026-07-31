@@ -10,10 +10,7 @@ import {
 
 import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import type { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import {
-  InjectionToken,
-  WritableSignal,
-} from '@angular/core';
+import { InjectionToken, WritableSignal } from '@angular/core';
 
 import { FPSController } from './fps.controller';
 import { Cursor } from './cursor.model';

@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { inject, Injectable } from '@angular/core';
 import {
   AudioLoader,
   BufferGeometryLoader,
@@ -15,11 +15,16 @@ import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { buildGraph, ObjectMap } from '../models';
 import { Observable } from 'rxjs';
+import { EngineService } from './engine.service';
 
 @Injectable({
   providedIn: 'root',
 })
 export class LoaderService {
+  private readonly injectedEngineService = inject(EngineService, { optional: true });
+  private get engineService() {
+    return this.injectedEngineService ?? EngineService.activeInstance;
+  }
   textureLoader = new TextureLoader();
   bufferGeometryLoader = new BufferGeometryLoader();
   objectLoader = new ObjectLoader();
@@ -68,6 +73,8 @@ export class LoaderService {
     }
 
     // Load the GLTF model and store the promise in the cache
+    const startedAt = performance.now();
+    const record = () => this.engineService?.fpsController.recordAssetLoadingTime(performance.now() - startedAt);
     const gltfPromise = new Promise<GLTF | undefined>((resolve, reject) => {
       this.gltfLoader.load(
         gltfPath,
@@ -76,10 +83,11 @@ export class LoaderService {
 
           gltf.userData['objectMap'] = objectMap;
 
+          record();
           return resolve(gltf);
         },
         undefined,
-        (error) => reject(error),
+        (error) => { record(); reject(error); },
       );
     });
 
@@ -94,6 +102,8 @@ export class LoaderService {
     }
 
     // Load the texture and store the promise in the cache
+    const startedAt = performance.now();
+    const record = () => this.engineService?.fpsController.recordAssetLoadingTime(performance.now() - startedAt);
     const texturePromise = new Promise<Texture>((resolve, reject) => {
       this.textureLoader.load(
         texturePath,
@@ -102,10 +112,11 @@ export class LoaderService {
           // texture.wrapT = RepeatWrapping;
           // texture.repeat.set(1, 1);
 
+          record();
           return resolve(texture);
         },
         undefined,
-        (error) => reject(error),
+        (error) => { record(); reject(error); },
       );
     });
 

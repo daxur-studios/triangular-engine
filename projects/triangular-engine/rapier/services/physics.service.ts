@@ -172,6 +172,8 @@ export class PhysicsService {
   public update(deltaTime: number) {
     if (this.#physicsPaused$.value) return;
 
+    const startedAt = performance.now();
+
     this.beforeStep$.next(deltaTime);
 
     const world = this.world$.value;
@@ -202,6 +204,7 @@ export class PhysicsService {
     }
 
     this.stepped$.next(world.timestep);
+    this.engineService.fpsController.recordPhysicsTime(performance.now() - startedAt);
   }
 
   public syncMeshes() {

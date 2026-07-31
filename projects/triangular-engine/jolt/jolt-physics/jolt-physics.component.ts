@@ -494,6 +494,7 @@ export class JoltPhysicsComponent {
   }
 
   #renderExampleTick(deltaTime: number, metadata: IJoltMetadata) {
+    const physicsStartedAt = performance.now();
     // Accumulate scaled time and advance physics in fixed substeps
     this.#accumulator += deltaTime;
     let steps = 0;
@@ -535,6 +536,7 @@ export class JoltPhysicsComponent {
 
     // Signal that physics + transforms are updated
     this.physicsUpdated$.next();
+    this.engineService.fpsController.recordPhysicsTime(performance.now() - physicsStartedAt);
   }
 
   #updatePhysics(deltaTime: number, metadata: IJoltMetadata) {

@@ -21,6 +21,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { WebGLRenderer } from 'three';
 import { IKeyBindingOptions, IPerformanceThresholds, IUserInterfaceOptions } from '../../../models';
 import { EngineService, EngineSettingsService } from '../../../services';
+import { ENGINE_OPTIONS, IEngineOptions } from '../../../models';
 import { EngineUiComponent } from '../../engine-ui/engine-ui.component';
 import {
   Object3DComponent,
@@ -44,6 +45,10 @@ function optionallyProvideEngineService(): Provider[] {
           skipSelf: true,
           optional: true,
         });
+        const parentOptions = inject<IEngineOptions>(ENGINE_OPTIONS, {
+          skipSelf: true,
+          optional: true,
+        });
         const parentSceneComponent = inject(
           forwardRef(() => SceneComponent),
           {
@@ -60,7 +65,8 @@ function optionallyProvideEngineService(): Provider[] {
         const createEngineService = () =>
           Injector.create({
             providers: EngineService.provide({
-              showFPS: false,
+              ...parentOptions,
+              showFPS: parentOptions?.showFPS ?? false,
             }),
             parent: parentInjector,
           }).get(EngineService);

@@ -53,7 +53,9 @@ import { EngineSettingsService } from './engine-settings.service';
 import { EngineInputService } from './engine-input.service';
 
 /** Application-level provider. Scene components can override options with `EngineService.provide(...)`. */
-export function provideTriangularEngine(options: IEngineOptions = {}): Provider[] {
+export function provideTriangularEngine(
+  options: IEngineOptions = {},
+): Provider[] {
   return [EngineService, EngineInputService, provideEngineOptions(options)];
 }
 
@@ -65,6 +67,7 @@ export class EngineService implements IEngine {
   }
 
   static instance = 0;
+  static activeInstance: EngineService | undefined;
   public readonly instance: number;
 
   //#region Injected Dependencies
@@ -186,6 +189,7 @@ export class EngineService implements IEngine {
   constructor() {
     EngineService.instance++;
     this.instance = EngineService.instance;
+    EngineService.activeInstance = this;
     console.debug('EngineService created, instance: ', this.instance);
 
     this.cursor = new Cursor(this);
@@ -234,6 +238,8 @@ export class EngineService implements IEngine {
     this.onDestroy$.complete();
 
     this.renderer?.dispose();
+    if (EngineService.activeInstance === this)
+      EngineService.activeInstance = undefined;
   }
 
   onComponentInit(): void {

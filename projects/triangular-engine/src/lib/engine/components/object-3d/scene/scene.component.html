@@ -6,7 +6,12 @@
     class="canvas-size-observer flex-wrapper"
     tabindex="0"
     (keyup)="engineService.keyup$.next($event)"
-    (keydown)="engineService.keydown$.next($event); engineService.input.handleKeyDown($event)"
+    (keydown)="
+      engineService.keydown$.next($event);
+      engineService.input.handleKeyDown($event)
+    "
+    (keyup)="engineService.input.handleKeyUp($event)"
+    (window:blur)="engineService.input.clear()"
     (dblclick)="engineService.dblclick$.next($event)"
     (wheel)="engineService.wheel$.next($event)"
     (mousedown)="engineService.mousedown$.next($event)"
