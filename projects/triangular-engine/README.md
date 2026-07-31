@@ -19,6 +19,10 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Sub-libraries & Entry Points
 
+See the complete import and dependency matrix in [Secondary Entry Points](docs/entry-points.md).
+
+See the complete import and dependency matrix in [Secondary Entry Points](docs/entry-points.md).
+
 The library is modularized into several secondary entry points (sub-libraries) so you only import and bundle what your app uses:
 
 | Entry Point | Purpose / What it does | Peer Dependencies |

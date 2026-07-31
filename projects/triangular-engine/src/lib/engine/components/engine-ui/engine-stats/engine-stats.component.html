@@ -54,6 +54,13 @@
         <span class="label">Textures</span>
         <span class="value">{{ engineService.fpsController.textures() }}</span>
       </div>
+      <div class="perf-row"><span class="label">Materials</span><span class="value">{{ engineService.fpsController.materials() }}</span></div>
+      <div class="perf-row"><span class="label">Geometry memory</span><span class="value">{{ formatNumber(engineService.fpsController.geometryBytes()) }} B</span></div>
+      <div class="perf-row"><span class="label">Texture memory</span><span class="value">{{ formatNumber(engineService.fpsController.textureBytes()) }} B</span></div>
+      <div class="perf-row"><span class="label">CPU frame</span><span class="value">{{ engineService.fpsController.cpuFrameTime() | number:'1.1-1' }} ms</span></div>
+      <div class="perf-row"><span class="label">GPU frame</span><span class="value">{{ engineService.fpsController.gpuFrameTime() === null ? 'n/a' : (engineService.fpsController.gpuFrameTime() | number:'1.1-1') + ' ms' }}</span></div>
+      <div class="perf-row"><span class="label">Physics</span><span class="value">{{ engineService.fpsController.physicsTime() | number:'1.1-1' }} ms</span></div>
+      <div class="perf-row"><span class="label">Asset loading</span><span class="value">{{ engineService.fpsController.assetLoadingTime() | number:'1.1-1' }} ms</span></div>
       <div class="perf-row">
         <span class="label">Shaders</span>
         <span class="value">{{ engineService.fpsController.programs() }}</span>

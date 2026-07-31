@@ -50,12 +50,18 @@ import {
   disposeBoundsTree,
 } from 'three-mesh-bvh';
 import { EngineSettingsService } from './engine-settings.service';
+import { EngineInputService } from './engine-input.service';
+
+/** Application-level provider. Scene components can override options with `EngineService.provide(...)`. */
+export function provideTriangularEngine(options: IEngineOptions = {}): Provider[] {
+  return [EngineService, EngineInputService, provideEngineOptions(options)];
+}
 
 @Injectable()
 export class EngineService implements IEngine {
   static provideEngineOptions = provideEngineOptions;
   static provide(options: IEngineOptions = {}): Provider[] {
-    return [EngineService, provideEngineOptions(options)];
+    return [EngineService, EngineInputService, provideEngineOptions(options)];
   }
 
   static instance = 0;
@@ -64,6 +70,7 @@ export class EngineService implements IEngine {
   //#region Injected Dependencies
   readonly options = inject<IEngineOptions>(ENGINE_OPTIONS);
   readonly engineSettingsService = inject(EngineSettingsService);
+  readonly input = inject(EngineInputService);
 
   //#endregion
 

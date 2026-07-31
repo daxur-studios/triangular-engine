@@ -5,7 +5,8 @@
     <p>Small, focused scenes for testing the engine and its integrations.</p>
   </header>
 
-  <nav aria-label="Demo examples">
+  <h2>Core and rendering</h2>
+  <nav aria-label="Core and rendering examples">
     <a routerLink="/water">
       <span class="number">★</span>
       <strong>Water library</strong>
@@ -21,28 +22,51 @@
         >Core scene, lighting, geometry, environment and postprocessing.</span
       >
     </a>
+    <a routerLink="/camera-and-floating-origin">
+      <span class="number">02</span>
+      <strong>Camera & floating origin</strong>
+      <span>Authoritative camera follow, rebasing, and large-distance precision.</span>
+    </a>
+    <a routerLink="/takram-clouds">
+      <span class="number">03</span>
+      <strong>Takram clouds</strong>
+      <span>Declarative atmosphere and cloud integration.</span>
+    </a>
+  </nav>
+  <h2>Water, terrain, and scatter</h2>
+  <nav aria-label="World systems examples">
+    <a routerLink="/water">
+      <span class="number">★</span>
+      <strong>Water library</strong>
+      <span>Official flat, sphere, and cylinder water demo.</span>
+    </a>
+    <a routerLink="/terrain-lab">
+      <span class="number">04</span>
+      <strong>Terrain lab</strong>
+      <span>Multi-surface terrain, streaming, and patch-local precision.</span>
+    </a>
+    <a routerLink="/scatter-lab">
+      <span class="number">05</span>
+      <strong>Scatter lab</strong>
+      <span>Deterministic placement, instancing, and LOD rendering.</span>
+    </a>
+    <a routerLink="/water-buoyancy-poc">
+      <span class="number">06</span>
+      <strong>Water buoyancy</strong>
+      <span>Water surface sampling and Jolt buoyancy integration.</span>
+    </a>
+  </nav>
+  <h2>Research and integration spikes</h2>
+  <nav aria-label="Research examples">
     <a routerLink="/takram-clouds-spike">
       <span class="number">02</span>
       <strong>Takram clouds spike</strong>
       <span>Frozen plain Three.js reference implementation.</span>
     </a>
-    <a routerLink="/takram-clouds">
-      <span class="number">03</span>
-      <strong>Takram clouds</strong>
-      <span>Declarative Triangular Engine integration.</span>
-    </a>
     <a routerLink="/takram-mini-planet">
       <span class="number">04</span>
       <strong>Takram mini planet</strong>
       <span>Small-planet scale and volumetric-to-texture cloud handoff.</span>
-    </a>
-    <a routerLink="/camera-and-floating-origin">
-      <span class="number">05</span>
-      <strong>Camera & floating origin</strong>
-      <span
-        >Authoritative follow input, synchronous rebases and large-distance
-        stress tests.</span
-      >
     </a>
     <a routerLink="/takram-cylinder-clouds">
       <span class="number">06</span>
@@ -63,14 +87,6 @@
       <span
         >triangular-engine/water Phase 1a: large-scale CDLOD-style morphing
         clipmap, no seams.</span
-      >
-    </a>
-    <a routerLink="/terrain-lab">
-      <span class="number">09</span>
-      <strong>Multi-surface terrain lab</strong>
-      <span
-        >Infinite plane and billion-metre patch-local precision; sphere and
-        cylinder follow here.</span
       >
     </a>
     <a routerLink="/water-material-poc">
@@ -99,15 +115,6 @@
         the sphere.</span
       >
     </a>
-    <a routerLink="/scatter-lab">
-      <span class="number">13</span>
-      <strong>Scatter lab</strong>
-      <span
-        >triangular-engine/scatter Phase 1c: deterministic candidate-set
-        placement + instanced rendering, proven on plane, sphere, and cylinder
-        terrain.</span
-      >
-    </a>
     <a routerLink="/scatter-physics-lab">
       <span class="number">14</span>
       <strong>Scatter physics lab</strong>
@@ -115,15 +122,6 @@
         >triangular-engine/scatter Phase 3: Jolt collider ring, removal
         overlay, and impact-momentum felling — driveable rover plus a
         mass/speed throwable rock.</span
-      >
-    </a>
-    <a routerLink="/water-buoyancy-poc">
-      <span class="number">15</span>
-      <strong>Water buoyancy POC</strong>
-      <span
-        >triangular-engine/water/jolt Phase 3: declarative
-        &lt;waterBuoyancy&gt;, per-substep surface sampling into
-        ApplyBuoyancyImpulse — spawn floaters and sinkers in open water.</span
       >
     </a>
     <a routerLink="/trail-lab">

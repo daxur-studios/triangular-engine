@@ -32,6 +32,7 @@ export function provideEngineOptions(options: IEngineOptions) {
     useValue: options,
   };
 }
+
 //#endregion
 
 export interface IPerformanceThresholds {

@@ -26,9 +26,24 @@ export class FPSController {
   readonly geometries = signal<number>(0);
   readonly textures = signal<number>(0);
   readonly programs = signal<number>(0);
+  readonly materials = signal<number>(0);
+  readonly geometryBytes = signal<number>(0);
+  readonly textureBytes = signal<number>(0);
+  readonly cpuFrameTime = signal<number>(0);
+  readonly gpuFrameTime = signal<number | null>(null);
+  readonly physicsTime = signal<number>(0);
+  readonly assetLoadingTime = signal<number>(0);
   readonly status = signal<'good' | 'warning' | 'critical'>('good');
 
   graph: number[] = [];
+
+  recordPhysicsTime(milliseconds: number): void {
+    this.physicsTime.set(milliseconds);
+  }
+
+  recordAssetLoadingTime(milliseconds: number): void {
+    this.assetLoadingTime.set(milliseconds);
+  }
 
   constructor(public readonly engineService: IEngine) {}
 
@@ -41,6 +56,7 @@ export class FPSController {
   recordFrame(frameTimeMs: number) {
     this.frameCount++;
     this.accumulatedFrameTime += frameTimeMs;
+    this.cpuFrameTime.set(frameTimeMs);
 
     const now = performance.now();
     const ONE_SECOND = 1000;
@@ -65,12 +81,31 @@ export class FPSController {
         const geometriesVal = info?.memory?.geometries ?? 0;
         const texturesVal = info?.memory?.textures ?? 0;
         const programsVal = info?.programs?.length ?? 0;
+        const materials = new Set<string>();
+        let geometryBytes = 0;
+        let textureBytes = 0;
+        this.engineService.scene.traverse((object: any) => {
+          if (object.material) {
+            const list = Array.isArray(object.material) ? object.material : [object.material];
+            for (const material of list) materials.add(material.uuid);
+          }
+          const geometry = object.geometry;
+          if (geometry?.attributes) for (const attribute of Object.values(geometry.attributes) as any[]) geometryBytes += attribute.array?.byteLength ?? 0;
+          if (geometry?.index?.array) geometryBytes += geometry.index.array.byteLength;
+          const materialList = object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : [];
+          for (const material of materialList) for (const value of Object.values(material)) {
+            if ((value as any)?.isTexture && (value as any).image) textureBytes += ((value as any).image.width ?? 0) * ((value as any).image.height ?? 0) * 4;
+          }
+        });
 
         this.drawCalls.set(drawCallsVal);
         this.triangles.set(trianglesVal);
         this.geometries.set(geometriesVal);
         this.textures.set(texturesVal);
         this.programs.set(programsVal);
+        this.materials.set(materials.size);
+        this.geometryBytes.set(geometryBytes);
+        this.textureBytes.set(textureBytes);
 
         this.updateStatus(avgFrameTime, drawCallsVal, trianglesVal);
       } else {

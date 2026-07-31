@@ -1,4 +1,4 @@
-[Back to Technical Specs](/documentation/TECHNICAL-SPECS.md)
+[Back to package documentation](../../../README.md)
 
 # Engine
 
@@ -6,18 +6,6 @@
 - [Services](./services/SERVICES.md)
 - [Models](./models/MODELS.md)
 
-three.js
-
-Objet3D Components
-
-provideObject3D
-
-provideMaterialComponent
-
-## Engine Service
-
-## Scene Component
-
-## Physics
-
-@dimforge/rapier3d-compat
+This is an internal implementation index. Consumer-facing usage belongs in
+[`docs/`](../../../docs/README.md); source files and tests are authoritative for
+implementation behavior.

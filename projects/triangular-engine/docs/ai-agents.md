@@ -5,11 +5,13 @@ This guide provides conventions and reliable entry points to control the engine 
 ## Import/Provide
 
 - Always import `EngineModule` in the host component.
-- Provide `EngineService` and `provideEngineOptions` at the component that owns `<scene>`.
+- Provide the engine at the component that owns `<scene>`. Prefer the convenience API shown below; it registers `EngineService` and `provideEngineOptions` together.
 
 ```ts
-providers: [EngineService, provideEngineOptions({ showFPS: true })];
+providers: EngineService.provide({ showFPS: true });
 ```
+
+The equivalent explicit form is `providers: [EngineService, provideEngineOptions({ showFPS: true })]`.
 
 ## Scene Ownership
 

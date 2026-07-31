@@ -3,3 +3,4 @@ export * from './loader.service';
 export * from './engine-settings.service';
 export * from './material.service';
 export * from './audio-cache.service';
+export * from './engine-input.service';

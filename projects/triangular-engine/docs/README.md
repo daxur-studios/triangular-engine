@@ -1,6 +1,6 @@
 # Triangular Engine Documentation
 
-Welcome to the Triangular Engine docs. This guide helps you build 3D experiences in Angular using Three.js and Rapier physics.
+Welcome to the Triangular Engine docs. Use the [package README](../README.md) for installation and the complete quick start; these pages provide focused guides.
 
 Useful starting points:
 
@@ -13,12 +13,13 @@ Useful starting points:
 - Assets & Loading (GLTF, textures, Draco): [assets-and-loading.md](./assets-and-loading.md)
 - API Reference (Selectors): [api/selectors.md](./api/selectors.md)
 - AI Agents Guide: [ai-agents.md](./ai-agents.md)
+- Secondary Entry Points: [entry-points.md](./entry-points.md)
 - Examples:
   - Basic Scene: [examples/basic-scene.md](./examples/basic-scene.md)
 
 Tech stack:
 
 - Angular 20 Signals/Standalone APIs
-- Three.js 0.181+ (r181)
+- Three.js 0.183+
 - Jolt Physics (jolt-physics, optional)
 - Rapier 3D physics (@dimforge/rapier3d-compat, optional)
