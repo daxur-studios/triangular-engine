@@ -1,10 +1,11 @@
 <section class="panel">
       <header>
         <div><a routerLink="/">← Examples</a><small>Generic impostor baker</small></div>
-        <strong>Cube POC</strong>
+        <strong>Impostor POC</strong>
       </header>
       <p>Generate a transparent directional atlas from an intentionally asymmetric, six-color cube. Atlas columns are azimuth and rows are elevation, so vertical camera motion cannot select a left or right view.</p>
       <div class="actions">
+        <label>Model <select [value]="model()" (change)="selectModel($any($event.target).value)"><option value="cube">Cube</option><option value="tree">Tree</option></select></label>
         <label>Grid <select [value]="columns()" (change)="columns.set(+$any($event.target).value); rows.set(+$any($event.target).value); generateAtlas()"><option value="4">4 × 4</option><option value="8">8 × 8</option><option value="12">12 × 12</option></select></label>
         <button (click)="generateAtlas()">Regenerate</button>
         <button (click)="downloadAtlas()" [disabled]="!atlasUrl()">Download PNG</button>
@@ -23,8 +24,24 @@
   <orbitControls [cameraPosition]="cameraPosition" [target]="cameraTarget" />
   <ambientLight [intensity]="1.2" />
   <directionalLight [position]="[4, 6, 5]" [intensity]="2.4" />
+  @if (model() === 'cube') {
   <mesh [position]="[2.8, 0, 0]">
     <boxGeometry [params]="[2, 2, 2]" />
     <meshStandardMaterial [params]="{ color: '#4cc9f0', roughness: 0.55 }" />
   </mesh>
+  } @else {
+  <mesh [position]="[2.8, -0.35, 0]">
+    <boxGeometry [params]="[0.55, 2.4, 0.55]" />
+    <meshStandardMaterial [params]="{ color: '#75452a', roughness: 0.9 }" />
+  </mesh>
+  <mesh [position]="[2.8, 0.35, 0]">
+    <boxGeometry [params]="[1.9, 1.2, 1.9]" />
+    <meshStandardMaterial [params]="{ color: '#2e9f5b', roughness: 0.8 }" />
+  </mesh>
+  <mesh [position]="[2.8, 1.15, 0]">
+    <boxGeometry [params]="[1.5, 1.1, 1.5]" />
+    <meshStandardMaterial [params]="{ color: '#2e9f5b', roughness: 0.8 }" />
+  </mesh>
+  <mesh [position]="[2.8, 1.85, 0]"><boxGeometry [params]="[1.05, 0.95, 1.05]" /><meshStandardMaterial [params]="{ color: '#2e9f5b', roughness: 0.8 }" /></mesh>
+  }
 </scene>

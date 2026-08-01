@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import { atlasCellForDirection, atlasDirection, octahedralDecode, octahedralEncode } from './impostor-atlas.models';
+import { atlasCellForDirection, atlasDirection, atlasNeighborsForOctahedralDirection, octahedralDecode, octahedralEncode } from './impostor-atlas.models';
 
 describe('impostor atlas direction mapping', () => {
   it('round-trips representative directions', () => {
@@ -42,5 +42,12 @@ describe('impostor atlas direction mapping', () => {
         expect(atlasCellForDirection(direction, 8, 8)).toEqual({ column, row });
       }
     }
+  });
+
+  it('produces three bounded neighbors whose weights sum to one', () => {
+    const neighbors = atlasNeighborsForOctahedralDirection(new Vector3(0.42, 0.31, 0.85), 8, 8);
+    expect(neighbors).toHaveSize(3);
+    expect(neighbors.every((neighbor) => neighbor.column >= 0 && neighbor.column < 8 && neighbor.row >= 0 && neighbor.row < 8)).toBeTrue();
+    expect(neighbors.reduce((sum, neighbor) => sum + neighbor.weight, 0)).toBeCloseTo(1);
   });
 });

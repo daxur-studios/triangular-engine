@@ -61,3 +61,33 @@ export function atlasCellForDirection(
     row: Math.min(rows - 1, Math.max(0, Math.floor(((elevation + Math.PI / 2) / Math.PI) * rows))),
   };
 }
+
+export interface AtlasNeighbor {
+  column: number;
+  row: number;
+  weight: number;
+}
+
+/** Returns the three octahedral-grid neighbors used for barycentric blending. */
+export function atlasNeighborsForOctahedralDirection(
+  direction: Vector3,
+  columns: number,
+  rows: number,
+): AtlasNeighbor[] {
+  const encoded = octahedralEncode(direction);
+  const x = encoded.x * (columns - 1);
+  const y = encoded.y * (rows - 1);
+  const baseColumn = Math.min(columns - 1, Math.max(0, Math.floor(x)));
+  const baseRow = Math.min(rows - 1, Math.max(0, Math.floor(y)));
+  const fx = x - baseColumn;
+  const fy = y - baseRow;
+  const diagonal = fx >= fy;
+  const neighbors = diagonal
+    ? [[baseColumn, baseRow, 1 - fx], [baseColumn + 1, baseRow, fx - fy], [baseColumn + 1, baseRow + 1, fy]]
+    : [[baseColumn, baseRow, 1 - fy], [baseColumn, baseRow + 1, fy - fx], [baseColumn + 1, baseRow + 1, fx]];
+  return neighbors.map(([column, row, weight]) => ({
+    column: Math.min(columns - 1, Math.max(0, column)),
+    row: Math.min(rows - 1, Math.max(0, row)),
+    weight: Math.max(0, weight),
+  }));
+}

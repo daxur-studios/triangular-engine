@@ -13,12 +13,14 @@ import { RouterLink } from '@angular/router';
 import {
   AmbientLight,
   BoxGeometry,
+  ConeGeometry,
   CanvasTexture,
   Color,
   DirectionalLight,
   MeshBasicMaterial,
   Mesh,
   MeshStandardMaterial,
+  Group,
   OrthographicCamera,
   WebGLRenderTarget,
   WebGLRenderer,
@@ -49,6 +51,7 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   readonly rows = signal(8);
   readonly frameSize = signal(96);
   readonly selectedCell = signal('0,0');
+  readonly model = signal<'cube' | 'tree'>('cube');
   readonly metadata = signal<ImpostorAtlasMetadata | undefined>(undefined);
   readonly atlasUrl = signal('');
   readonly engine = inject(EngineService);
@@ -89,15 +92,9 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     });
     const bakeScene = new Scene();
     bakeScene.background = null;
-    const cube = new Mesh(
-      new BoxGeometry(2, 2, 2),
-      [
-        new MeshBasicMaterial({ color: '#55d6be' }), new MeshBasicMaterial({ color: '#ff6b6b' }),
-        new MeshBasicMaterial({ color: '#6c8cff' }), new MeshBasicMaterial({ color: '#ffd166' }),
-        new MeshBasicMaterial({ color: '#c77dff' }), new MeshBasicMaterial({ color: '#4cc9f0' }),
-      ],
-    );
-    bakeScene.add(cube, new AmbientLight(0xffffff, 1));
+    const sourceModel = this.createSourceModel(this.model());
+    bakeScene.add(sourceModel, new AmbientLight(0xffffff, 1));
+    const cube = sourceModel;
     const light = new DirectionalLight(0xffffff, 1.5);
     light.position.set(4, 6, 5);
     bakeScene.add(light);
@@ -133,8 +130,13 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     }
     renderer.setRenderTarget(null);
     renderTarget.dispose();
-    cube.geometry.dispose();
-    (cube.material as MeshBasicMaterial[]).forEach((material) => material.dispose());
+    cube.traverse((object) => {
+      if (object instanceof Mesh) {
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((material) => material.dispose());
+      }
+    });
     renderer.dispose();
     renderer.domElement.remove();
     const metadata: ImpostorAtlasMetadata = {
@@ -146,6 +148,32 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     this.atlasUrl.set(canvas.toDataURL('image/png'));
     this.selectedCell.set('0,0');
     this.createRuntimeImpostor(canvas);
+  }
+
+  selectModel(model: 'cube' | 'tree'): void {
+    this.model.set(model);
+    void this.generateAtlas();
+  }
+
+  private createSourceModel(model: 'cube' | 'tree'): Group {
+    const group = new Group();
+    if (model === 'cube') {
+      group.add(new Mesh(new BoxGeometry(2, 2, 2), [
+        new MeshBasicMaterial({ color: '#55d6be' }), new MeshBasicMaterial({ color: '#ff6b6b' }),
+        new MeshBasicMaterial({ color: '#6c8cff' }), new MeshBasicMaterial({ color: '#ffd166' }),
+        new MeshBasicMaterial({ color: '#c77dff' }), new MeshBasicMaterial({ color: '#4cc9f0' }),
+      ]));
+      return group;
+    }
+    const trunk = new Mesh(new ConeGeometry(0.28, 2.4, 8), new MeshStandardMaterial({ color: '#75452a' }));
+    trunk.position.y = -0.35;
+    group.add(trunk);
+    for (const [radius, height, y] of [[1.15, 1.7, 0.35], [0.9, 1.5, 1.15], [0.62, 1.25, 1.85]] as const) {
+      const foliage = new Mesh(new ConeGeometry(radius, height, 10), new MeshStandardMaterial({ color: '#2e9f5b' }));
+      foliage.position.y = y;
+      group.add(foliage);
+    }
+    return group;
   }
 
   private createRuntimeImpostor(atlas: HTMLCanvasElement): void {
