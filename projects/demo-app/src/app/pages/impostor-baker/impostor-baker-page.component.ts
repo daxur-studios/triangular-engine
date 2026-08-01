@@ -140,7 +140,7 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     renderer.dispose();
     renderer.domElement.remove();
     const metadata: ImpostorAtlasMetadata = {
-      version: 1, projection: 'latitude-longitude', columns, rows,
+      version: 1, projection: 'octahedral', columns, rows,
       viewCount: columns * rows, frameSize, padding: 4, rowOrigin: 'top',
       sourceBounds: { center: [0, 0, 0], radius: Math.sqrt(3) },
     };

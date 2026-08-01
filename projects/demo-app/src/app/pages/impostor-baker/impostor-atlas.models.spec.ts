@@ -22,17 +22,14 @@ describe('impostor atlas direction mapping', () => {
     }
   });
 
-  it('keeps a fixed azimuth in one column from pole to pole', () => {
-    const azimuth = 0.37;
-    const columns = Array.from({ length: 79 }, (_, index) => {
-      const elevation = Math.PI / 2 - 0.01 - (index / 78) * (Math.PI - 0.02);
-      return atlasCellForDirection(new Vector3(
-        Math.sin(azimuth) * Math.cos(elevation),
-        Math.sin(elevation),
-        Math.cos(azimuth) * Math.cos(elevation),
-      ), 12, 12).column;
-    });
-    expect(new Set(columns).size).toBe(1);
+  it('keeps pole lookups bounded in the octahedral grid', () => {
+    for (const direction of [new Vector3(0, 1, 0), new Vector3(0, -1, 0)]) {
+      const cell = atlasCellForDirection(direction, 12, 12);
+      expect(cell.column).toBeGreaterThanOrEqual(0);
+      expect(cell.column).toBeLessThan(12);
+      expect(cell.row).toBeGreaterThanOrEqual(0);
+      expect(cell.row).toBeLessThan(12);
+    }
   });
 
   it('maps every atlas cell back inside its own cell', () => {
