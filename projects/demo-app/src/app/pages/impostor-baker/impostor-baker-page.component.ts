@@ -19,6 +19,7 @@ import {
   DirectionalLight,
   MeshBasicMaterial,
   Mesh,
+  SphereGeometry,
   MeshStandardMaterial,
   PlaneGeometry,
   EdgesGeometry,
@@ -164,6 +165,10 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   private impostorTexture?: CanvasTexture;
   private impostorSprite?: Mesh<PlaneGeometry, ShaderMaterial> | Sprite;
   private impostorWireframe?: LineSegments;
+  private debugCameraMarkers = new Group();
+  private stressGrid = new Group();
+  readonly showCameraPositions = signal(false);
+  readonly stressGridSize = signal(1);
   readonly showWireframe = signal(false);
   private readonly impostorDirection = new Vector3();
   private readonly impostorPosition = new Vector3();
@@ -175,6 +180,8 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   private readonly spriteRight = new Vector3();
 
   ngAfterViewInit(): void {
+    this.engine.scene.add(this.debugCameraMarkers);
+    this.engine.scene.add(this.stressGrid);
     this.engine.tick$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.updateRuntimeImpostor());
     this.generateAtlas();
   }
@@ -251,9 +258,33 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
       sourceBounds: { center: [0, 0, 0], radius: Math.sqrt(3) },
     };
     this.metadata.set(metadata);
+    this.rebuildCameraMarkers();
     this.atlasUrl.set(canvas.toDataURL('image/png'));
     this.selectedCell.set('0,0');
     this.createRuntimeImpostor(canvas);
+  }
+
+  setStressGridSize(size: number): void {
+    this.stressGridSize.set(size);
+    this.rebuildStressGrid();
+  }
+
+  private rebuildStressGrid(): void {
+    this.stressGrid.clear();
+    const sprite = this.impostorSprite;
+    if (!(sprite instanceof Sprite) || !this.impostorTexture || this.stressGridSize() <= 1) return;
+    const size = this.stressGridSize();
+    const spacing = 1.25;
+    const material = sprite.material as SpriteMaterial;
+    const offset = (size - 1) * spacing * 0.5;
+    for (let z = 0; z < size; z++) {
+      for (let x = 0; x < size; x++) {
+        const instance = new Sprite(material);
+        instance.position.set(x * spacing - offset, 0, z * spacing - offset);
+        instance.scale.copy(sprite.scale).multiplyScalar(0.35);
+        this.stressGrid.add(instance);
+      }
+    }
   }
 
   selectModel(model: 'cube' | 'tree'): void {
@@ -284,6 +315,7 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
 
   private createRuntimeImpostor(atlas: HTMLCanvasElement): void {
     this.impostorTexture?.dispose();
+    this.stressGrid.clear();
     this.impostorSprite?.removeFromParent();
     this.impostorWireframe?.removeFromParent();
     this.impostorWireframe?.geometry.dispose();
@@ -302,6 +334,7 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
       this.impostorSprite = sprite;
       this.engine.scene.add(sprite);
       this.createWireframe(sprite);
+      this.rebuildStressGrid();
       this.updateRuntimeImpostor();
       return;
     }
@@ -338,6 +371,35 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   setShowWireframe(value: boolean): void {
     this.showWireframe.set(value);
     if (this.impostorWireframe) this.impostorWireframe.visible = value;
+  }
+
+  setShowCameraPositions(value: boolean): void {
+    this.showCameraPositions.set(value);
+    this.debugCameraMarkers.visible = value;
+  }
+
+  private rebuildCameraMarkers(): void {
+    this.debugCameraMarkers.clear();
+    const geometry = new SphereGeometry(0.075, 8, 6);
+    const count = this.columns() * this.rows();
+    for (let index = 0; index < count; index++) {
+      const column = index % this.columns();
+      const row = Math.floor(index / this.columns());
+      const marker = new Mesh(geometry, new MeshBasicMaterial({ color: 0x6688aa }));
+      marker.position.copy(atlasDirection(column, row, this.columns(), this.rows())).multiplyScalar(5);
+      marker.userData['cell'] = `${column},${row}`;
+      this.debugCameraMarkers.add(marker);
+    }
+    this.debugCameraMarkers.visible = this.showCameraPositions();
+    this.updateCameraMarkerHighlight();
+  }
+
+  private updateCameraMarkerHighlight(): void {
+    const active = this.debugCameraCell() ?? this.selectedCell();
+    this.debugCameraMarkers.children.forEach((child) => {
+      const material = (child as Mesh).material as MeshBasicMaterial;
+      material.color.set(child.userData['cell'] === active ? 0xffff00 : 0x6688aa);
+    });
   }
 
   private updateRuntimeImpostor(): void {
@@ -396,6 +458,7 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
       sprite.material.uniforms['map'].value = texture;
     }
     this.selectedCell.set(`${column},${row}`);
+    this.updateCameraMarkerHighlight();
   }
 
   setRuntimeMode(mode: 'discrete' | 'reference'): void {
@@ -408,10 +471,12 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   snapCameraToCell(column: number, row: number): void {
     this.debugCameraCell.set(`${column},${row}`);
     this.selectedCell.set(`${column},${row}`);
+    this.updateCameraMarkerHighlight();
   }
 
   releaseDebugCamera(): void {
     this.debugCameraCell.set(undefined);
+    this.updateCameraMarkerHighlight();
   }
 
   debugCells(): string[] {
