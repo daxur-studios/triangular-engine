@@ -61,7 +61,8 @@ vec2 encodeDirection(vec3 d) {
   return p * 0.5 + 0.5;
 }
 vec3 decodeDirection(vec2 cell, float spritesMinusOne) {
-  vec2 p = cell / spritesMinusOne * 2.0 - 1.0;
+  // The baker samples cell centers, so decode the same center direction here.
+  vec2 p = ((cell + 0.5) / (spritesMinusOne + 1.0)) * 2.0 - 1.0;
   vec3 d = vec3(p, 1.0 - abs(p.x) - abs(p.y));
   if (d.z < 0.0) d.xy = (1.0 - abs(d.yx)) * sign(d.xy);
   return normalize(d);
@@ -101,7 +102,10 @@ void main() {
   vec3 cameraLocal = (inverse(impostorModelMatrix) * vec4(cameraPosition, 1.0)).xyz;
   vec3 cameraDir = normalize(cameraLocal);
   float spritesMinusOne = spritesPerSide - 1.0;
-  vec2 grid = encodeDirection(cameraDir) * spritesMinusOne;
+  // Map the continuous octahedral coordinate onto cell centers.  The old
+  // * (N - 1) mapping sampled atlas directions between the baked frames.
+  vec2 grid = encodeDirection(cameraDir) * spritesPerSide - 0.5;
+  grid = clamp(grid, vec2(0.0), vec2(spritesMinusOne));
   vec2 base = min(floor(grid), vec2(spritesMinusOne));
   vec2 f = fract(grid);
   if (f.x >= f.y) {

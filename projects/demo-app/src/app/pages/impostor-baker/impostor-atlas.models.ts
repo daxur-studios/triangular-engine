@@ -69,8 +69,10 @@ export function atlasNeighborsForOctahedralDirection(
   rows: number,
 ): AtlasNeighbor[] {
   const encoded = octahedralEncode(direction);
-  const x = encoded.x * (columns - 1);
-  const y = encoded.y * (rows - 1);
+  // Frames are baked at cell centers, i.e. (cell + 0.5) / size.  Use the
+  // same center-based coordinate system for runtime interpolation.
+  const x = encoded.x * columns - 0.5;
+  const y = encoded.y * rows - 0.5;
   const baseColumn = Math.min(columns - 1, Math.max(0, Math.floor(x)));
   const baseRow = Math.min(rows - 1, Math.max(0, Math.floor(y)));
   const fx = x - baseColumn;
