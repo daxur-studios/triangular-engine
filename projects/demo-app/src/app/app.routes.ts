@@ -74,6 +74,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'river-lab',
+    loadComponent: () =>
+      import('./pages/river-lab/river-lab-page.component').then(
+        ({ RiverLabPageComponent }) => RiverLabPageComponent,
+      ),
+  },
+  {
     path: 'water',
     loadComponent: () =>
       import('./pages/water/water-page.component').then(

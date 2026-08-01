@@ -1,0 +1,56 @@
+:host {
+  min-height: 100%;
+  color: #edf5e8;
+  background: #07130f;
+}
+
+.panel {
+  width: min(34rem, calc(100vw - 2rem));
+  padding: 1rem;
+  border: 1px solid #385245;
+  border-radius: 0.75rem;
+  background: rgba(7, 18, 14, 0.92);
+  box-shadow: 0 1rem 3rem #0008;
+  font:
+    14px/1.4 Inter,
+    system-ui,
+    sans-serif;
+}
+
+header,
+header div,
+label {
+  display: flex;
+  gap: 0.55rem;
+}
+
+header {
+  align-items: center;
+  justify-content: space-between;
+}
+
+header div {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+a,
+small,
+.note {
+  color: #9bb7a8;
+}
+
+a {
+  text-decoration: none;
+}
+
+label {
+  align-items: center;
+  cursor: pointer;
+}
+
+.note {
+  margin-bottom: 0;
+  font-size: 0.8rem;
+}

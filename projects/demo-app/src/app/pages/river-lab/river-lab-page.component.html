@@ -1,0 +1,53 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="River lab information">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>terrain + water contract — vertical slice</small>
+        </div>
+        <strong>Procedural river lab</strong>
+      </header>
+      <p>
+        One deterministic river description drives both the carved terrain and
+        the bounded water ribbon. The {{ pointCount }} generated control points
+        carry downstream elevation, width, and flow speed.
+      </p>
+      <label>
+        <input
+          type="checkbox"
+          [checked]="wireframe()"
+          (change)="toggleWireframe()"
+        />
+        Terrain wireframe
+      </label>
+      <p class="note">
+        This deliberately lives in the demo first. It validates the shared data
+        contract before generic spline editing and hydrology become public entry
+        points.
+      </p>
+    </section>
+  </ng-template>
+
+  <terrainSurface
+    [field]="field"
+    [domain]="domain"
+    [roots]="roots"
+    [maxLod]="3"
+    [refinementDistance]="520"
+    [resolution]="48"
+    [skirtDepth]="6"
+    [generationBudget]="5"
+    [wireframe]="wireframe()"
+    [createMaterial]="createTerrainMaterial"
+    [createColors]="createTerrainColors"
+  />
+
+  <orbitControls
+    [cameraPosition]="[245, 165, 270]"
+    [target]="[0, 14, 10]"
+    [near]="0.1"
+  />
+  <ambientLight [intensity]="1.25" />
+  <directionalLight [position]="[180, 280, -120]" [intensity]="2.4" />
+</scene>
