@@ -6,6 +6,7 @@
       <p>Generate a transparent directional atlas from an intentionally asymmetric, six-color cube. Atlas columns are azimuth and rows are elevation, so vertical camera motion cannot select a left or right view.</p>
       <div class="actions">
         <label>Model <select [value]="model()" (change)="selectModel($any($event.target).value)"><option value="cube">Cube</option><option value="tree">Tree</option></select></label>
+        <label>Runtime <select [value]="runtimeMode()" (change)="setRuntimeMode($any($event.target).value)"><option value="discrete">Crisp frame</option><option value="reference">Reference blend</option></select></label>
         <label>Grid <select [value]="columns()" (change)="columns.set(+$any($event.target).value); rows.set(+$any($event.target).value); generateAtlas()"><option value="4">4 × 4</option><option value="8">8 × 8</option><option value="12">12 × 12</option></select></label>
         <button (click)="generateAtlas()">Regenerate</button>
         <button (click)="downloadAtlas()" [disabled]="!atlasUrl()">Download PNG</button>
