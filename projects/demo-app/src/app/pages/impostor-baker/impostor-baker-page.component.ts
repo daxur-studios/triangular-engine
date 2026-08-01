@@ -27,6 +27,7 @@ import {
   LineSegments,
   ShaderMaterial,
   Group,
+  InstancedMesh,
   OrthographicCamera,
   WebGLRenderTarget,
   WebGLRenderer,
@@ -36,6 +37,7 @@ import {
   Sprite,
   SpriteMaterial,
   Quaternion,
+  Matrix4,
   Vector3,
 } from 'three';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -66,8 +68,15 @@ vec3 decodeDirection(vec2 cell, float spritesMinusOne) {
 }
 void computePlaneBasis(vec3 n, out vec3 t, out vec3 b) {
   vec3 up = vec3(0.0, 1.0, 0.0);
-  if (n.y > 0.999) up = vec3(-1.0, 0.0, 0.0);
-  if (n.y < -0.999) up = vec3(1.0, 0.0, 0.0);
+  // This must be identical to getBakeUp().  In particular, the atlas uses
+  // Z as the pole fallback, whereas the reference shader's X fallback is
+  // only correct for atlases baked with that same convention.
+  up -= n * dot(up, n);
+  if (dot(up, up) < 0.000001) {
+    up = vec3(0.0, 0.0, 1.0);
+    up -= n * dot(up, n);
+  }
+  up = normalize(up);
   t = normalize(cross(up, n));
   b = normalize(cross(n, t));
 }
@@ -83,7 +92,13 @@ vec2 projectToPlaneUV(vec3 n, vec3 t, vec3 b, vec3 cameraLocal, vec3 viewDir) {
   return vec2(dot(p, t), dot(p, b)) * 0.5 + 0.5;
 }
 void main() {
-  vec3 cameraLocal = (inverse(modelMatrix) * vec4(cameraPosition, 1.0)).xyz;
+  // For an InstancedMesh, this is each instance's complete local-to-world
+  // transform. That gives every impostor its own camera direction on the GPU.
+  mat4 impostorModelMatrix = modelMatrix;
+  #ifdef USE_INSTANCING
+    impostorModelMatrix = modelMatrix * instanceMatrix;
+  #endif
+  vec3 cameraLocal = (inverse(impostorModelMatrix) * vec4(cameraPosition, 1.0)).xyz;
   vec3 cameraDir = normalize(cameraLocal);
   float spritesMinusOne = spritesPerSide - 1.0;
   vec2 grid = encodeDirection(cameraDir) * spritesMinusOne;
@@ -112,7 +127,7 @@ void main() {
   vUv1 = projectToPlaneUV(n1, t1, b1, cameraLocal, viewDirLocal);
   vUv2 = projectToPlaneUV(n2, t2, b2, cameraLocal, viewDirLocal);
   vUv3 = projectToPlaneUV(n3, t3, b3, cameraLocal, viewDirLocal);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(projectedPosition, 1.0);
+  gl_Position = projectionMatrix * viewMatrix * impostorModelMatrix * vec4(projectedPosition, 1.0);
 }
 `;
 
@@ -120,6 +135,7 @@ const IMPOSTOR_FRAGMENT_SHADER = `
 uniform sampler2D map;
 uniform float spritesPerSide;
 uniform float alphaClamp;
+uniform bool blendFrames;
 varying vec2 vSprite1;
 varying vec2 vSprite2;
 varying vec2 vSprite3;
@@ -128,11 +144,29 @@ varying vec2 vUv1;
 varying vec2 vUv2;
 varying vec2 vUv3;
 vec4 sampleSprite(vec2 uv, vec2 cell) {
-  vec2 atlasUv = (cell + clamp(uv, 0.0, 1.0)) / spritesPerSide;
+  // Canvas rows are written top-to-bottom, while shader texture coordinates
+  // run bottom-to-top. Keep the frame's own V orientation, but invert the
+  // atlas-row address so a camera above the object samples its top-view row.
+  vec2 localUv = clamp(uv, 0.0, 1.0);
+  vec2 atlasUv = vec2(
+    (cell.x + localUv.x) / spritesPerSide,
+    (spritesPerSide - 1.0 - cell.y + localUv.y) / spritesPerSide
+  );
   return texture2D(map, atlasUv);
 }
 void main() {
-  vec4 color = sampleSprite(vUv1, vSprite1)*vWeights.x + sampleSprite(vUv2, vSprite2)*vWeights.y + sampleSprite(vUv3, vSprite3)*vWeights.z;
+  vec4 color;
+  if (blendFrames) {
+    color = sampleSprite(vUv1, vSprite1) * vWeights.x
+      + sampleSprite(vUv2, vSprite2) * vWeights.y
+      + sampleSprite(vUv3, vSprite3) * vWeights.z;
+  } else if (vWeights.x >= vWeights.y && vWeights.x >= vWeights.z) {
+    color = sampleSprite(vUv1, vSprite1);
+  } else if (vWeights.y >= vWeights.z) {
+    color = sampleSprite(vUv2, vSprite2);
+  } else {
+    color = sampleSprite(vUv3, vSprite3);
+  }
   if (color.a < alphaClamp) discard;
   gl_FragColor = color;
 }
@@ -167,6 +201,7 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   private impostorWireframe?: LineSegments;
   private debugCameraMarkers = new Group();
   private stressGrid = new Group();
+  private stressGridMesh?: InstancedMesh;
   readonly showCameraPositions = signal(false);
   readonly stressGridSize = signal(1);
   readonly showWireframe = signal(false);
@@ -175,6 +210,9 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   private readonly bakeUp = new Vector3();
   private readonly runtimeUp = new Vector3();
   private readonly cameraQuaternion = new Quaternion();
+  private readonly gridQuaternion = new Quaternion();
+  private readonly gridRollQuaternion = new Quaternion();
+  private readonly gridRollAxis = new Vector3(0, 0, 1);
   private readonly worldUp = new Vector3(0, 1, 0);
   private readonly fallbackUp = new Vector3(0, 0, 1);
   private readonly spriteRight = new Vector3();
@@ -271,20 +309,44 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
 
   private rebuildStressGrid(): void {
     this.stressGrid.clear();
-    const sprite = this.impostorSprite;
-    if (!(sprite instanceof Sprite) || !this.impostorTexture || this.stressGridSize() <= 1) return;
+    this.stressGridMesh?.geometry.dispose();
+    (this.stressGridMesh?.material as ShaderMaterial | undefined)?.dispose();
+    this.stressGridMesh = undefined;
+    const impostor = this.impostorSprite;
+    // Both runtime modes use the same GPU-instanced geometry path; the shader
+    // chooses between a crisp nearest frame and the reference three-frame blend.
+    if (!(impostor instanceof Mesh) || !this.impostorTexture || this.stressGridSize() <= 1) return;
     const size = this.stressGridSize();
-    const spacing = 1.25;
-    const material = sprite.material as SpriteMaterial;
+    const spacing = 2.5;
+    const material = new ShaderMaterial({
+      uniforms: {
+        map: { value: this.impostorTexture },
+        spritesPerSide: { value: this.columns() },
+        alphaClamp: { value: 0.02 },
+        blendFrames: { value: this.runtimeMode() === 'reference' },
+      },
+      vertexShader: IMPOSTOR_VERTEX_SHADER,
+      fragmentShader: IMPOSTOR_FRAGMENT_SHADER,
+      transparent: true,
+      depthWrite: true,
+      depthTest: true,
+      side: 2,
+    });
+    const grid = new InstancedMesh(new PlaneGeometry(2, 2), material, size * size);
     const offset = (size - 1) * spacing * 0.5;
+    const matrix = new Matrix4();
+    const rotation = new Quaternion();
+    const scale = new Vector3(0.98, 0.98, 1);
+    const position = new Vector3();
     for (let z = 0; z < size; z++) {
       for (let x = 0; x < size; x++) {
-        const instance = new Sprite(material);
-        instance.position.set(x * spacing - offset, 0, z * spacing - offset);
-        instance.scale.copy(sprite.scale).multiplyScalar(0.35);
-        this.stressGrid.add(instance);
+        position.set(x * spacing - offset, 0, z * spacing - offset);
+        grid.setMatrixAt(z * size + x, matrix.compose(position, rotation, scale));
       }
     }
+    grid.instanceMatrix.needsUpdate = true;
+    this.stressGridMesh = grid;
+    this.stressGrid.add(grid);
   }
 
   selectModel(model: 'cube' | 'tree'): void {
@@ -328,21 +390,12 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     }
     this.impostorTexture = new CanvasTexture(atlas);
     this.impostorTexture.needsUpdate = true;
-    if (this.runtimeMode() === 'discrete') {
-      const sprite = new Sprite(new SpriteMaterial({ map: this.impostorTexture, transparent: true, depthWrite: false }));
-      sprite.scale.set(5.6, 5.6, 1);
-      this.impostorSprite = sprite;
-      this.engine.scene.add(sprite);
-      this.createWireframe(sprite);
-      this.rebuildStressGrid();
-      this.updateRuntimeImpostor();
-      return;
-    }
     const material = new ShaderMaterial({
       uniforms: {
         map: { value: this.impostorTexture },
         spritesPerSide: { value: this.columns() },
         alphaClamp: { value: 0.02 },
+        blendFrames: { value: this.runtimeMode() === 'reference' },
       },
       vertexShader: IMPOSTOR_VERTEX_SHADER,
       fragmentShader: IMPOSTOR_FRAGMENT_SHADER,
@@ -352,9 +405,14 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     });
     this.impostorSprite = new Mesh(new PlaneGeometry(2, 2), material);
     this.impostorSprite.position.set(0, 0, 0);
-    this.impostorSprite.scale.set(2.8, 2.8, 1);
+    // The vertex shader derives the camera direction in object space by
+    // applying inverse(modelMatrix). Keep this transform uniform; a z scale
+    // of 1 would skew that direction and make the plane appear compressed at
+    // oblique camera angles.
+    this.impostorSprite.scale.setScalar(2.8);
     this.engine.scene.add(this.impostorSprite);
     this.createWireframe(this.impostorSprite);
+    this.rebuildStressGrid();
     this.updateRuntimeImpostor();
   }
 
@@ -453,9 +511,21 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
       material.rotation = this.impostorDirection.y < -0.001 ? roll : -roll;
       material.map = texture;
       material.needsUpdate = true;
+      if (this.stressGridMesh) {
+        const gridMaterial = this.stressGridMesh.material as ShaderMaterial;
+        gridMaterial.uniforms['map'].value = texture;
+        gridMaterial.uniforms['spritesPerSide'].value = data.columns;
+      }
     } else {
       sprite.material.uniforms['spritesPerSide'].value = data.columns;
       sprite.material.uniforms['map'].value = texture;
+      sprite.material.uniforms['blendFrames'].value = this.runtimeMode() === 'reference';
+      if (this.stressGridMesh) {
+        const gridMaterial = this.stressGridMesh.material as ShaderMaterial;
+        gridMaterial.uniforms['map'].value = texture;
+        gridMaterial.uniforms['spritesPerSide'].value = data.columns;
+        gridMaterial.uniforms['blendFrames'].value = this.runtimeMode() === 'reference';
+      }
     }
     this.selectedCell.set(`${column},${row}`);
     this.updateCameraMarkerHighlight();
