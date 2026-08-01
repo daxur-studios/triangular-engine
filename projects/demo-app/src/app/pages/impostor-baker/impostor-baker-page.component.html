@@ -31,17 +31,17 @@
   </mesh>
   } @else {
   <mesh [position]="[2.8, -0.35, 0]">
-    <boxGeometry [params]="[0.55, 2.4, 0.55]" />
+    <coneGeometry [params]="[0.28, 2.4, 8]" />
     <meshStandardMaterial [params]="{ color: '#75452a', roughness: 0.9 }" />
   </mesh>
   <mesh [position]="[2.8, 0.35, 0]">
-    <boxGeometry [params]="[1.9, 1.2, 1.9]" />
+    <coneGeometry [params]="[1.15, 1.7, 10]" />
     <meshStandardMaterial [params]="{ color: '#2e9f5b', roughness: 0.8 }" />
   </mesh>
   <mesh [position]="[2.8, 1.15, 0]">
-    <boxGeometry [params]="[1.5, 1.1, 1.5]" />
+    <coneGeometry [params]="[0.9, 1.5, 10]" />
     <meshStandardMaterial [params]="{ color: '#2e9f5b', roughness: 0.8 }" />
   </mesh>
-  <mesh [position]="[2.8, 1.85, 0]"><boxGeometry [params]="[1.05, 0.95, 1.05]" /><meshStandardMaterial [params]="{ color: '#2e9f5b', roughness: 0.8 }" /></mesh>
+  <mesh [position]="[2.8, 1.85, 0]"><coneGeometry [params]="[0.62, 1.25, 10]" /><meshStandardMaterial [params]="{ color: '#2e9f5b', roughness: 0.8 }" /></mesh>
   }
 </scene>

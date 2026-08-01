@@ -14,6 +14,7 @@ import {
   BoxGeometry,
   BufferGeometry,
   CylinderGeometry,
+  ConeGeometry,
   PlaneGeometry,
   SphereGeometry,
   TorusKnotGeometry,
@@ -304,6 +305,24 @@ export class TorusKnotGeometryComponent
 type CylinderGeometryParameters = ConstructorParameters<
   typeof CylinderGeometry
 >;
+
+type ConeGeometryParameters = ConstructorParameters<typeof ConeGeometry>;
+
+@Component({
+  selector: 'coneGeometry',
+  template: `<ng-content></ng-content>`,
+  imports: [],
+  providers: [provideBufferGeometryComponent(ConeGeometryComponent)],
+})
+export class ConeGeometryComponent extends BufferGeometryComponent implements OnDestroy {
+  override readonly params = input.required<ConeGeometryParameters>();
+  override readonly geometry = signal(new ConeGeometry());
+  override previousGeometry: ConeGeometry | undefined = this.geometry();
+
+  override createGeometry(parameters: ConeGeometryParameters): ConeGeometry {
+    return new ConeGeometry(...parameters);
+  }
+}
 
 @Component({
   selector: 'cylinderGeometry',

@@ -3,6 +3,7 @@ import { BufferAttributeComponent } from './buffer-attribute.component';
 import { CapsuleGeometryComponent } from './capsule-geometry.component';
 import {
   BoxGeometryComponent,
+  ConeGeometryComponent,
   BufferGeometryComponent,
   CylinderGeometryComponent,
   PlaneGeometryComponent,
@@ -14,6 +15,7 @@ import { IcosahedronGeometryComponent } from './icosahedron-geometry.component';
 
 const importExport = [
   BoxGeometryComponent,
+  ConeGeometryComponent,
   SphereGeometryComponent,
   PlaneGeometryComponent,
   TorusKnotGeometryComponent,
