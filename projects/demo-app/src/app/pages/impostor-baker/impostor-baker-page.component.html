@@ -7,6 +7,16 @@
       <div class="actions">
         <label>Model <select [value]="model()" (change)="selectModel($any($event.target).value)"><option value="cube">Cube</option><option value="tree">Tree</option></select></label>
         <label>Runtime <select [value]="runtimeMode()" (change)="setRuntimeMode($any($event.target).value)"><option value="discrete">Crisp frame</option><option value="reference">Reference blend</option></select></label>
+        <label><input type="checkbox" [checked]="showWireframe()" (change)="setShowWireframe($any($event.target).checked)" /> Wireframe</label>
+        <label>Debug camera
+          <select [value]="debugCameraCell() ?? ''" (change)="($any($event.target).value ? snapCameraToCell(+$any($event.target).value.split(',')[0], +$any($event.target).value.split(',')[1]) : releaseDebugCamera())">
+            <option value="">Free orbit</option>
+            @for (cell of debugCells(); track cell) {
+              <option [value]="cell">Cell {{ cell }}</option>
+            }
+          </select>
+        </label>
+        <span class="debug-readout">active {{ selectedCell() }}{{ debugCameraCell() ? ' (locked)' : '' }}</span>
         <label>Grid <select [value]="columns()" (change)="columns.set(+$any($event.target).value); rows.set(+$any($event.target).value); generateAtlas()"><option value="4">4 × 4</option><option value="8">8 × 8</option><option value="12">12 × 12</option></select></label>
         <button (click)="generateAtlas()">Regenerate</button>
         <button (click)="downloadAtlas()" [disabled]="!atlasUrl()">Download PNG</button>
@@ -14,7 +24,7 @@
       </div>
       <div class="previews">
         <div><h3>Atlas</h3><canvas #atlasCanvas (click)="selectCell(0, 0)"></canvas></div>
-        <div><h3>Runtime impostor</h3><code>cell {{ selectedCell() }}</code><p>The centered sprite follows the camera; the reference cube is offset to its right.</p></div>
+        <div><h3>Runtime impostor</h3><code>cell {{ selectedCell() }}</code><p>The centered sprite follows the camera; the reference cube is offset to its right. The yellow wireframe is the impostor plane and should remain camera-facing.</p></div>
       </div>
       @if (metadata(); as data) {
         <pre>{{ data | json }}</pre>

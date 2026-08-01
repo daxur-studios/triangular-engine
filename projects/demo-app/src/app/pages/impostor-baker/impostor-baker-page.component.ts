@@ -21,6 +21,9 @@ import {
   Mesh,
   MeshStandardMaterial,
   PlaneGeometry,
+  EdgesGeometry,
+  LineBasicMaterial,
+  LineSegments,
   ShaderMaterial,
   Group,
   OrthographicCamera,
@@ -149,6 +152,7 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   readonly rows = signal(8);
   readonly frameSize = signal(96);
   readonly selectedCell = signal('0,0');
+  readonly debugCameraCell = signal<string | undefined>(undefined);
   readonly model = signal<'cube' | 'tree'>('cube');
   readonly runtimeMode = signal<'discrete' | 'reference'>('discrete');
   readonly metadata = signal<ImpostorAtlasMetadata | undefined>(undefined);
@@ -159,6 +163,8 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   readonly cameraTarget: [number, number, number] = [0, 0, 0];
   private impostorTexture?: CanvasTexture;
   private impostorSprite?: Mesh<PlaneGeometry, ShaderMaterial> | Sprite;
+  private impostorWireframe?: LineSegments;
+  readonly showWireframe = signal(false);
   private readonly impostorDirection = new Vector3();
   private readonly impostorPosition = new Vector3();
   private readonly bakeUp = new Vector3();
@@ -166,6 +172,7 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   private readonly cameraQuaternion = new Quaternion();
   private readonly worldUp = new Vector3(0, 1, 0);
   private readonly fallbackUp = new Vector3(0, 0, 1);
+  private readonly spriteRight = new Vector3();
 
   ngAfterViewInit(): void {
     this.engine.tick$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.updateRuntimeImpostor());
@@ -278,6 +285,9 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
   private createRuntimeImpostor(atlas: HTMLCanvasElement): void {
     this.impostorTexture?.dispose();
     this.impostorSprite?.removeFromParent();
+    this.impostorWireframe?.removeFromParent();
+    this.impostorWireframe?.geometry.dispose();
+    (this.impostorWireframe?.material as LineBasicMaterial | undefined)?.dispose();
     if (this.impostorSprite instanceof Mesh) {
       this.impostorSprite.geometry.dispose();
       this.impostorSprite.material.dispose();
@@ -291,6 +301,7 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
       sprite.scale.set(5.6, 5.6, 1);
       this.impostorSprite = sprite;
       this.engine.scene.add(sprite);
+      this.createWireframe(sprite);
       this.updateRuntimeImpostor();
       return;
     }
@@ -310,7 +321,23 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     this.impostorSprite.position.set(0, 0, 0);
     this.impostorSprite.scale.set(2.8, 2.8, 1);
     this.engine.scene.add(this.impostorSprite);
+    this.createWireframe(this.impostorSprite);
     this.updateRuntimeImpostor();
+  }
+
+  private createWireframe(object: Sprite | Mesh<PlaneGeometry, ShaderMaterial>): void {
+    const geometry = new PlaneGeometry(2, 2);
+    const wireframe = new LineSegments( new EdgesGeometry(geometry), new LineBasicMaterial({ color: 0xffff00 }) );
+    wireframe.position.copy(object.position);
+    wireframe.scale.copy(object.scale);
+    wireframe.visible = this.showWireframe();
+    this.impostorWireframe = wireframe;
+    this.engine.scene.add(wireframe);
+  }
+
+  setShowWireframe(value: boolean): void {
+    this.showWireframe.set(value);
+    if (this.impostorWireframe) this.impostorWireframe.visible = value;
   }
 
   private updateRuntimeImpostor(): void {
@@ -319,6 +346,19 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     const camera = this.engine.camera$.value;
     const data = this.metadata();
     if (!sprite || !texture || !camera || !data) return;
+    const lockedCell = this.debugCameraCell();
+    if (lockedCell) {
+      const [lockedColumn, lockedRow] = lockedCell.split(',').map(Number);
+      const lockedDirection = atlasDirection(lockedColumn, lockedRow, data.columns, data.rows);
+      camera.position.copy(lockedDirection).multiplyScalar(5);
+      camera.lookAt(0, 0, 0);
+      camera.updateMatrixWorld();
+    }
+    if (this.impostorWireframe) {
+      sprite.getWorldPosition(this.impostorWireframe.position);
+      sprite.getWorldQuaternion(this.impostorWireframe.quaternion);
+      this.impostorWireframe.scale.copy(sprite.scale);
+    }
     // Atlas views are baked around the source object's center; the runtime
     // direction is measured from the preview sprite's own world position.
     // The preview sprite is offset from the source cube, so use the camera
@@ -332,6 +372,23 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
       const uv = atlasCellForDirection(this.impostorDirection, data.columns, data.rows);
       texture.repeat.set(1 / data.columns, 1 / data.rows);
       texture.offset.set(uv.column / data.columns, 1 - (uv.row + 1) / data.rows);
+      // SpriteMaterial is camera-facing, but its texture is not automatically
+      // rolled to match the camera's screen-up axis. Align the baked frame's
+      // projected up direction with the current camera up so polar views do
+      // not appear to rotate independently of the reference model.
+      camera.getWorldQuaternion(this.cameraQuaternion);
+      this.runtimeUp.copy(this.worldUp).applyQuaternion(this.cameraQuaternion);
+      this.runtimeUp.projectOnPlane(this.impostorDirection).normalize();
+      this.getBakeUp(this.impostorDirection, this.bakeUp);
+      this.spriteRight.crossVectors(this.impostorDirection, this.bakeUp).normalize();
+      const sin = this.runtimeUp.dot(this.spriteRight);
+      const cos = this.runtimeUp.dot(this.bakeUp);
+      const roll = Math.atan2(sin, cos);
+      // The octahedral lower hemisphere reverses the projected basis winding;
+      // compensate it so semi-polar views keep the same roll direction as the
+      // upper hemisphere. The exact pole uses the fallback bake-up axis and is
+      // already stable.
+      material.rotation = this.impostorDirection.y < -0.001 ? roll : -roll;
       material.map = texture;
       material.needsUpdate = true;
     } else {
@@ -346,6 +403,21 @@ export class ImpostorBakerPageComponent implements AfterViewInit {
     this.runtimeMode.set(mode);
     const canvas = this.atlasCanvas?.nativeElement;
     if (canvas) this.createRuntimeImpostor(canvas);
+  }
+
+  snapCameraToCell(column: number, row: number): void {
+    this.debugCameraCell.set(`${column},${row}`);
+    this.selectedCell.set(`${column},${row}`);
+  }
+
+  releaseDebugCamera(): void {
+    this.debugCameraCell.set(undefined);
+  }
+
+  debugCells(): string[] {
+    return Array.from({ length: this.columns() * this.rows() }, (_, index) =>
+      `${index % this.columns()},${Math.floor(index / this.columns())}`,
+    );
   }
 
   /** Returns the stable image-up axis used for a given baked camera direction. */
