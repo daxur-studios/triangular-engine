@@ -2,10 +2,16 @@ import { DecimalPipe } from '@angular/common';
 import { AfterViewInit, ChangeDetectionStrategy, Component, DestroyRef, ElementRef, HostListener, ViewChild, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { BufferAttribute, BufferGeometry, Color, DoubleSide, Group, Line, LineBasicMaterial, Mesh, MeshBasicMaterial, MeshStandardMaterial, Plane, PlaneGeometry, Raycaster, SphereGeometry, Vector2, Vector3 } from 'three';
+import { ArrowHelper, BufferAttribute, BufferGeometry, Color, DoubleSide, Group, Line, LineBasicMaterial, Mesh, MeshBasicMaterial, MeshStandardMaterial, Plane, PlaneGeometry, Raycaster, SphereGeometry, Vector2, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import { SplineEditorHistory, moveSplinePoint, type SplineMoveConstraint } from 'triangular-engine/spline';
 import { defaultComposerSettings, sampleHeightmap, TerrainComposerField, type ComposerFeature, type ComposerLayer, type ComposerSettings } from './terrain-composer';
+
+type ComposerPickTarget =
+  | { kind: 'point'; featureId: string; index: number }
+  | { kind: 'spline'; featureId: string }
+  | { kind: 'axis'; axis: 'x' | 'y' | 'z' }
+  | { kind: 'plane'; constraint: 'xy' | 'xz' | 'yz' };
 
 @Component({
   selector: 'app-terrain-composer-lab-page',
@@ -19,7 +25,7 @@ import { defaultComposerSettings, sampleHeightmap, TerrainComposerField, type Co
 export class TerrainComposerLabPageComponent implements AfterViewInit {
   @ViewChild('heightmap', { static: true }) private readonly heightmap?: ElementRef<HTMLCanvasElement>;
   readonly activeLayer = signal<ComposerLayer>('island');
-  readonly editMode = signal(false);
+  readonly editMode = signal(true);
   readonly settings = signal<ComposerSettings>(defaultComposerSettings());
   readonly features = signal<ComposerFeature[]>(createDemoFeatures());
   readonly field = signal(new TerrainComposerField(this.features(), this.settings()));
@@ -52,9 +58,11 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
   );
   private currentFeatureId?: string;
   private selectedPoint?: { featureId: string; index: number };
-  private drag?: { featureId: string; index: number; startHit: readonly [number, number, number]; startPoint: readonly [number, number, number] };
+  private drag?: { kind: 'point' | 'axis' | 'plane'; featureId: string; index: number; axis?: SplineMoveConstraint; startHit: readonly [number, number, number]; startPoint: readonly [number, number, number] };
   private lines: Line[] = [];
   private pointMeshes: Mesh[] = [];
+  private gizmoArrows: ArrowHelper[] = [];
+  private gizmoPlanes: Mesh[] = [];
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -80,6 +88,7 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
       (this.water.material as MeshStandardMaterial).dispose();
       this.disposeLines();
       this.disposePointMeshes();
+      this.disposeTransformGizmo();
       this.pointGeometry.dispose();
       this.pointMaterial.dispose();
       this.selectedPointMaterial.dispose();
@@ -152,7 +161,6 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
 
   @HostListener('document:keydown', ['$event'])
   onKeyDown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') this.setEditMode(false);
     const restored = this.history.handleKeyDown(event, this.features());
     if (restored) { this.features.set(restored); this.rebuild(); }
     this.syncHistoryState();
@@ -160,8 +168,23 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
 
   onCanvasClick(event: MouseEvent | null): void {
     if (!event || !this.editMode() || event.button !== 0) return;
-    const pointHit = this.pickPoint(event);
-    if (pointHit) {
+    const target = this.pickTarget(event);
+    if (target?.kind === 'axis' || target?.kind === 'plane') {
+      const selected = this.selectedPoint;
+      const feature = selected ? this.features().find((item) => item.id === selected.featureId) : undefined;
+      const point = selected && feature ? feature.points[selected.index] : undefined;
+      const hit = point ? this.raycastFree(event, point) : undefined;
+      if (selected && point && hit) {
+        this.history.push(this.features()); this.syncHistoryState();
+        this.drag = { kind: target.kind, featureId: selected.featureId, index: selected.index, axis: target.kind === 'axis' ? target.axis : target.constraint, startHit: hit, startPoint: point };
+      }
+      return;
+    }
+    if (target?.kind === 'point') {
+      const pointHit = target;
+      this.currentFeatureId = pointHit.featureId;
+      const selectedFeature = this.features().find((item) => item.id === pointHit.featureId);
+      if (selectedFeature) this.activeLayer.set(selectedFeature.layer);
       if (event.shiftKey && this.selectedPoint?.featureId === pointHit.featureId && this.selectedPoint.index === pointHit.index) {
         this.selectedPoint = undefined;
       } else {
@@ -173,6 +196,14 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
           if (point) { this.history.push(this.features()); this.syncHistoryState(); this.drag = { ...pointHit, startHit: this.moveConstraint() === 'free' ? this.raycastFree(event, point) ?? hit : hit, startPoint: point }; }
         }
       }
+      this.rebuildPointMeshes();
+      return;
+    }
+    if (target?.kind === 'spline') {
+      this.currentFeatureId = target.featureId;
+      this.selectedPoint = undefined;
+      const feature = this.features().find((item) => item.id === target.featureId);
+      if (feature) this.activeLayer.set(feature.layer);
       this.rebuildPointMeshes();
       return;
     }
@@ -196,7 +227,8 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
     const delta: [number, number, number] = [hit[0] - drag.startHit[0], hit[1] - drag.startHit[1], hit[2] - drag.startHit[2]];
     this.features.update((items) => items.map((feature) => {
       if (feature.id !== drag.featureId) return feature;
-      return { ...feature, points: feature.points.map((point, index) => index === drag.index ? moveSplinePoint(drag.startPoint, delta, this.moveConstraint()) : point) };
+      const constraint = drag.kind === 'axis' || drag.kind === 'plane' ? drag.axis ?? 'free' : this.moveConstraint();
+      return { ...feature, points: feature.points.map((point, index) => index === drag.index ? moveSplinePoint(drag.startPoint, delta, constraint) : point) };
     }));
     this.rebuild();
   }
@@ -223,12 +255,18 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
     return hit ? [hit.x, hit.y, hit.z] : undefined;
   }
 
-  private pickPoint(event: MouseEvent): { featureId: string; index: number } | undefined {
+  private pickTarget(event: MouseEvent): ComposerPickTarget | undefined {
     const rect = (event.target as HTMLElement).getBoundingClientRect();
     this.pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(this.pointer, this.engine.camera);
+    const [axisHit] = this.raycaster.intersectObjects(this.gizmoArrows, true);
+    if (axisHit) return axisHit.object.userData['dragTarget'];
     const hit = this.raycaster.intersectObjects(this.pointMeshes, false)[0];
-    return hit?.object.userData['dragTarget'];
+    if (hit) return hit.object.userData['dragTarget'];
+    const [planeHit] = this.raycaster.intersectObjects(this.gizmoPlanes, false);
+    if (planeHit) return planeHit.object.userData['dragTarget'];
+    const [lineHit] = this.raycaster.intersectObjects(this.lines, false);
+    return lineHit?.object.userData['dragTarget'];
   }
 
   private rebuild(): void {
@@ -290,6 +328,7 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
       const geometry = new BufferGeometry().setFromPoints(visiblePoints as any);
       const color = feature.layer === 'island' ? '#f4d35e' : feature.layer === 'mountain' ? '#e76f51' : '#53c7e8';
       const line = new Line(geometry, new LineBasicMaterial({ color, linewidth: 2 }));
+      line.userData['dragTarget'] = { kind: 'spline', featureId: feature.id } satisfies ComposerPickTarget;
       if (feature.closed) {
         const closedPoints = [...visiblePoints, visiblePoints[0]];
         line.geometry.dispose();
@@ -310,11 +349,65 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
         const mesh = new Mesh(this.pointGeometry, this.selectedPoint?.featureId === feature.id && this.selectedPoint.index === index ? this.selectedPointMaterial : this.pointMaterial);
         const visible = this.overlayPoint(point);
         mesh.position.set(visible.x, visible.y + 0.4, visible.z);
-        mesh.userData['dragTarget'] = { featureId: feature.id, index };
+        mesh.userData['dragTarget'] = { kind: 'point', featureId: feature.id, index } satisfies ComposerPickTarget;
         this.group.add(mesh);
         this.pointMeshes.push(mesh);
       });
     }
+    this.rebuildTransformGizmo();
+  }
+
+  private rebuildTransformGizmo(): void {
+    this.disposeTransformGizmo();
+    if (!this.editMode() || !this.selectedPoint) return;
+    const feature = this.features().find((item) => item.id === this.selectedPoint?.featureId);
+    const point = feature?.points[this.selectedPoint.index];
+    if (!point) return;
+    const visible = this.overlayPoint(point);
+    const origin = new Vector3(visible.x, visible.y, visible.z);
+    const axes: Array<['x' | 'y' | 'z', Vector3, number]> = [
+      ['x', new Vector3(1, 0, 0), 0xff4d4d],
+      ['y', new Vector3(0, 1, 0), 0x55dd77],
+      ['z', new Vector3(0, 0, 1), 0x4d8dff],
+    ];
+    for (const [axis, direction, color] of axes) {
+      const arrow = new ArrowHelper(direction, origin, 7, color, 1.5, 0.8);
+      arrow.traverse((child) => { child.userData['dragTarget'] = { kind: 'axis', axis } satisfies ComposerPickTarget; });
+      this.group.add(arrow);
+      this.gizmoArrows.push(arrow);
+    }
+    const planes: Array<['xy' | 'xz' | 'yz', number]> = [
+      ['xy', 0],
+      ['xz', -Math.PI / 2],
+      ['yz', Math.PI / 2],
+    ];
+    for (const [constraint, rotation] of planes) {
+      const plane = new Mesh(new PlaneGeometry(3.2, 3.2), new MeshBasicMaterial({ color: '#ffc857', transparent: true, opacity: 0.22, side: DoubleSide, depthWrite: false }));
+      plane.position.copy(origin);
+      if (constraint === 'xy') plane.rotation.set(0, 0, rotation);
+      else if (constraint === 'xz') plane.rotation.x = rotation;
+      else plane.rotation.y = rotation;
+      plane.userData['dragTarget'] = { kind: 'plane', constraint } satisfies ComposerPickTarget;
+      this.group.add(plane);
+      this.gizmoPlanes.push(plane);
+    }
+  }
+
+  private disposeTransformGizmo(): void {
+    for (const arrow of this.gizmoArrows) {
+      arrow.removeFromParent();
+      arrow.line.geometry.dispose();
+      (arrow.line.material as MeshBasicMaterial).dispose();
+      arrow.cone.geometry.dispose();
+      (arrow.cone.material as MeshBasicMaterial).dispose();
+    }
+    this.gizmoArrows = [];
+    for (const plane of this.gizmoPlanes) {
+      plane.removeFromParent();
+      plane.geometry.dispose();
+      (plane.material as MeshBasicMaterial).dispose();
+    }
+    this.gizmoPlanes = [];
   }
 
   private disposePointMeshes(): void { for (const mesh of this.pointMeshes) mesh.removeFromParent(); this.pointMeshes = []; }

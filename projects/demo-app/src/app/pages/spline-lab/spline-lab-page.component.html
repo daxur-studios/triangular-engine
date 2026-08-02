@@ -16,13 +16,7 @@
         don't exist yet, so picking/dragging here is bespoke to this page.
       </p>
 
-      <nav aria-label="Mode">
-        <button [class.active]="mode() === 'add'" (click)="setMode('add')">
-          Add points
-        </button>
-        <button [class.active]="mode() === 'edit'" (click)="setMode('edit')">
-          Edit
-        </button>
+      <nav aria-label="Spline editing">
         <button [disabled]="pointCount() === 0" (click)="selectAll()">Select all</button>
         <button (click)="clearAll()">Clear all</button>
       </nav>
@@ -40,7 +34,7 @@
         <p class="blurb note">{{ status }}</p>
       }
       <p class="blurb note">
-        Ctrl/Cmd-click empty space to add a point. Shift-click a point to add/remove it from the selection, then drag
+        Click a point to select it. Ctrl/Cmd-click empty space to add a point. Shift-click a point to add/remove it from the selection, then drag
         any selected point to move the whole group together. Ctrl+Z / Ctrl+Y
         (or Ctrl+Shift+Z) to undo/redo.
       </p>
@@ -66,10 +60,6 @@
           Closed loop
         </button>
       </nav>
-
-      @if (mode() === 'add' && closed()) {
-        <p class="blurb note">Open the loop to add more points.</p>
-      }
 
       @if (hasSelection()) {
         <nav aria-label="Point movement">

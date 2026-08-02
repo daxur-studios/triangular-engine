@@ -19,6 +19,7 @@ import {
   LineBasicMaterial,
   Mesh,
   MeshBasicMaterial,
+  ArrowHelper,
   Plane,
   PlaneGeometry,
   Raycaster,
@@ -45,12 +46,13 @@ import {
   type SplineVector3,
 } from 'triangular-engine/spline';
 
-type EditMode = 'add' | 'edit';
 /** What a raycast hit on a gizmo mesh identifies — stored in `mesh.userData`. */
 type PickTarget =
   | { kind: 'point'; index: number }
   | { kind: 'handleOut'; index: number }
-  | { kind: 'handleIn'; index: number };
+  | { kind: 'handleIn'; index: number }
+  | { kind: 'axis'; axis: 'x' | 'y' | 'z' }
+  | { kind: 'plane'; constraint: 'xy' | 'xz' | 'yz' };
 type DragTarget =
   | {
       kind: 'point';
@@ -61,7 +63,8 @@ type DragTarget =
       startPositions: Map<number, SplineVector3>;
     }
   | { kind: 'handleOut'; index: number }
-  | { kind: 'handleIn'; index: number };
+  | { kind: 'handleIn'; index: number }
+  | { kind: 'axis' | 'plane'; constraint: SplineMoveConstraint; startHit: SplineVector3; startPositions: Map<number, SplineVector3> };
 
 /** Undo/redo unit — everything that defines the curve, but not transient UI state like selection. */
 interface HistorySnapshot {
@@ -97,7 +100,6 @@ let nextSplineLabId = 1;
   host: { class: 'flex-page' },
 })
 export class SplineLabPageComponent {
-  readonly mode = signal<EditMode>('add');
   readonly interpolation = signal<SplineInterpolation>('bezier');
   readonly closed = signal(false);
   readonly selectedIndices = signal<ReadonlySet<number>>(new Set());
@@ -173,6 +175,8 @@ export class SplineLabPageComponent {
   private handleMeshes: Mesh[] = [];
   private handleLines: Line[] = [];
   private curveLine?: Line;
+  private gizmoArrows: ArrowHelper[] = [];
+  private gizmoPlanes: Mesh[] = [];
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -197,10 +201,6 @@ export class SplineLabPageComponent {
       this.group.removeFromParent();
       this.disposeAll();
     });
-  }
-
-  setMode(mode: EditMode): void {
-    this.mode.set(mode);
   }
 
   setMoveConstraint(constraint: SplineMoveConstraint): void { this.moveConstraint.set(constraint); }
@@ -377,8 +377,7 @@ export class SplineLabPageComponent {
   private onMouseDown(event: MouseEvent | null): void {
     if (!event || event.button !== 0) return;
 
-    if (this.mode() === 'add') {
-      if (this.closed() || !(event.ctrlKey || event.metaKey)) return;
+    if (event.ctrlKey || event.metaKey) {
       const hit = this.raycastGround(event);
       if (!hit) return;
       this.pushHistory(this.snapshot());
@@ -397,7 +396,15 @@ export class SplineLabPageComponent {
       return;
     }
 
-    if (target.kind === 'point') {
+    if (target.kind === 'axis' || target.kind === 'plane') {
+      const index = this.selectedIndices().values().next().value as number | undefined;
+      const point = index === undefined ? undefined : this.points[index];
+      const hit = point ? this.raycastFree(event, point.position) : undefined;
+      if (index !== undefined && point && hit) {
+        this.drag = { kind: target.kind, constraint: target.kind === 'axis' ? target.axis : target.constraint, startHit: hit, startPositions: new Map(Array.from(this.selectedIndices(), (i) => [i, this.points[i].position] as const)) };
+        this.dragStartSnapshot = this.snapshot();
+      }
+    } else if (target.kind === 'point') {
       const current = this.selectedIndices();
       if (event.shiftKey) {
         const next = new Set(current);
@@ -440,7 +447,9 @@ export class SplineLabPageComponent {
 
   private onMouseMove(event: MouseEvent | null): void {
     if (!event || !this.drag) return;
-    const hit = this.drag.kind === 'point' && this.moveConstraint() === 'free'
+    const hit = this.drag.kind === 'axis' || this.drag.kind === 'plane'
+      ? this.raycastFree(event, this.drag.startPositions.values().next().value ?? [0, 0, 0])
+      : this.drag.kind === 'point' && this.moveConstraint() === 'free'
       ? this.raycastFree(event, this.drag.startPositions.get(this.drag.index) ?? [0, 0, 0])
       : this.raycastGround(event);
     if (!hit) return;
@@ -462,6 +471,18 @@ export class SplineLabPageComponent {
       return;
     }
 
+    if (this.drag.kind === 'axis' || this.drag.kind === 'plane') {
+      const { startHit, startPositions, constraint } = this.drag;
+      const delta = subVec3(hit, startHit);
+      this.points = this.points.map((existing, i) => {
+        const start = startPositions.get(i);
+        return start ? { ...existing, position: moveSplinePoint(start, delta, constraint) } : existing;
+      });
+      this.rebuildScene();
+      return;
+    }
+
+    if (this.drag.kind !== 'handleOut' && this.drag.kind !== 'handleIn') return;
     const { index, kind } = this.drag;
     const point = this.points[index];
     const relative = subVec3(hit, point.position);
@@ -494,6 +515,10 @@ export class SplineLabPageComponent {
 
   private pickTarget(event: MouseEvent): PickTarget | undefined {
     this.updateRaycasterFromEvent(event);
+    const [axisHit] = this.raycaster.intersectObjects(this.gizmoArrows, true);
+    if (axisHit) return axisHit.object.userData['dragTarget'] as PickTarget;
+    const [planeHit] = this.raycaster.intersectObjects(this.gizmoPlanes, false);
+    if (planeHit) return planeHit.object.userData['dragTarget'] as PickTarget;
     const [handleHit] = this.raycaster.intersectObjects(this.handleMeshes, false);
     if (handleHit) return handleHit.object.userData['dragTarget'] as PickTarget;
     const [pointHit] = this.raycaster.intersectObjects(this.pointMeshes, false);
@@ -530,6 +555,7 @@ export class SplineLabPageComponent {
     this.rebuildPointMeshes();
     this.rebuildHandles();
     this.rebuildCurveLine();
+    this.rebuildTransformGizmo();
   }
 
   private rebuildPointMeshes(): void {
@@ -545,6 +571,57 @@ export class SplineLabPageComponent {
       this.group.add(mesh);
       return mesh;
     });
+  }
+
+  private rebuildTransformGizmo(): void {
+    this.disposeTransformGizmo();
+    const index = this.selectedIndices().values().next().value as number | undefined;
+    const point = index === undefined ? undefined : this.points[index];
+    if (!point) return;
+    const origin = new Vector3(point.position[0], point.position[1] + LIFT_M, point.position[2]);
+    const axes: Array<['x' | 'y' | 'z', Vector3, number]> = [
+      ['x', new Vector3(1, 0, 0), 0xff4d4d],
+      ['y', new Vector3(0, 1, 0), 0x55dd77],
+      ['z', new Vector3(0, 0, 1), 0x4d8dff],
+    ];
+    for (const [axis, direction, color] of axes) {
+      const arrow = new ArrowHelper(direction, origin, 7, color, 1.5, 0.8);
+      arrow.traverse((child) => { child.userData['dragTarget'] = { kind: 'axis', axis } satisfies PickTarget; });
+      this.group.add(arrow);
+      this.gizmoArrows.push(arrow);
+    }
+    const planes: Array<['xy' | 'xz' | 'yz', number, number]> = [
+      ['xy', 0, 0xffc857],
+      ['xz', -Math.PI / 2, 0xffc857],
+      ['yz', Math.PI / 2, 0xffc857],
+    ];
+    for (const [constraint, rotation, color] of planes) {
+      const plane = new Mesh(new PlaneGeometry(3.2, 3.2), new MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: DoubleSide, depthWrite: false }));
+      plane.position.copy(origin);
+      if (constraint === 'xy') plane.rotation.set(0, 0, rotation);
+      else if (constraint === 'xz') plane.rotation.x = rotation;
+      else plane.rotation.y = rotation;
+      plane.userData['dragTarget'] = { kind: 'plane', constraint } satisfies PickTarget;
+      this.group.add(plane);
+      this.gizmoPlanes.push(plane);
+    }
+  }
+
+  private disposeTransformGizmo(): void {
+    for (const arrow of this.gizmoArrows) {
+      arrow.removeFromParent();
+      arrow.line.geometry.dispose();
+      (arrow.line.material as MeshBasicMaterial).dispose();
+      arrow.cone.geometry.dispose();
+      (arrow.cone.material as MeshBasicMaterial).dispose();
+    }
+    this.gizmoArrows = [];
+    for (const plane of this.gizmoPlanes) {
+      plane.removeFromParent();
+      plane.geometry.dispose();
+      (plane.material as MeshBasicMaterial).dispose();
+    }
+    this.gizmoPlanes = [];
   }
 
   private rebuildHandles(): void {
@@ -686,6 +763,7 @@ export class SplineLabPageComponent {
     this.handleInMaterial.dispose();
     this.curveMaterial.dispose();
     this.handleLineMaterial.dispose();
+    this.disposeTransformGizmo();
   }
 }
 
