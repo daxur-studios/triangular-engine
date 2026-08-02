@@ -4,6 +4,7 @@ import {
   Component,
   computed,
   DestroyRef,
+  HostListener,
   inject,
   signal,
 } from '@angular/core';
@@ -55,6 +56,13 @@ type DragTarget =
   | { kind: 'handleOut'; index: number }
   | { kind: 'handleIn'; index: number };
 
+/** Undo/redo unit — everything that defines the curve, but not transient UI state like selection. */
+interface HistorySnapshot {
+  points: ISplinePoint[];
+  closed: boolean;
+  interpolation: SplineInterpolation;
+}
+
 const GROUND_SIZE_M = 120;
 const POINT_RADIUS_M = 0.9;
 const HANDLE_RADIUS_M = 0.55;
@@ -93,6 +101,11 @@ export class SplineLabPageComponent {
   readonly hasSelection = computed(() => this.selectedIndices().size > 0);
   readonly selectedCount = computed(() => this.selectedIndices().size);
 
+  private readonly undoStack = signal<HistorySnapshot[]>([]);
+  private readonly redoStack = signal<HistorySnapshot[]>([]);
+  readonly canUndo = computed(() => this.undoStack().length > 0);
+  readonly canRedo = computed(() => this.redoStack().length > 0);
+
   /** `undefined` when nothing is selected, or when the selection has mixed handle modes. */
   readonly selectedHandleMode = computed<SplineHandleMode | undefined>(() => {
     const indices = this.selectedIndices();
@@ -126,6 +139,8 @@ export class SplineLabPageComponent {
     this.pointsSignal.set(value);
   }
   private drag?: DragTarget;
+  /** Pre-drag snapshot, pushed to the undo stack lazily on the drag's first actual move. */
+  private dragStartSnapshot?: HistorySnapshot;
 
   private readonly groundGeometry: PlaneGeometry;
   private readonly groundMaterial = new MeshBasicMaterial({
@@ -178,13 +193,66 @@ export class SplineLabPageComponent {
   }
 
   setInterpolation(interpolation: SplineInterpolation): void {
+    if (interpolation === this.interpolation()) return;
+    this.pushHistory(this.snapshot());
     this.interpolation.set(interpolation);
     this.rebuildScene();
   }
 
   toggleClosed(): void {
     if (!this.closed() && this.points.length < 3) return;
+    this.pushHistory(this.snapshot());
     this.closed.update((value) => !value);
+    this.rebuildScene();
+  }
+
+  undo(): void {
+    const stack = this.undoStack();
+    if (stack.length === 0) return;
+    const previous = stack[stack.length - 1];
+    this.undoStack.set(stack.slice(0, -1));
+    this.redoStack.update((s) => [...s, this.snapshot()]);
+    this.applySnapshot(previous);
+  }
+
+  redo(): void {
+    const stack = this.redoStack();
+    if (stack.length === 0) return;
+    const next = stack[stack.length - 1];
+    this.redoStack.set(stack.slice(0, -1));
+    this.undoStack.update((s) => [...s, this.snapshot()]);
+    this.applySnapshot(next);
+  }
+
+  @HostListener('document:keydown', ['$event'])
+  onGlobalKeyDown(event: KeyboardEvent): void {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    const key = event.key.toLowerCase();
+    if (key === 'z' && !event.shiftKey) {
+      event.preventDefault();
+      this.undo();
+    } else if (key === 'y' || (key === 'z' && event.shiftKey)) {
+      event.preventDefault();
+      this.redo();
+    }
+  }
+
+  private snapshot(): HistorySnapshot {
+    return { points: this.points, closed: this.closed(), interpolation: this.interpolation() };
+  }
+
+  /** Records `snapshot` (the state *before* an edit) as an undo step, and invalidates any redo history. */
+  private pushHistory(snapshot: HistorySnapshot): void {
+    this.undoStack.update((stack) => [...stack, snapshot]);
+    this.redoStack.set([]);
+  }
+
+  private applySnapshot(snapshot: HistorySnapshot): void {
+    this.points = snapshot.points;
+    this.closed.set(snapshot.closed);
+    this.interpolation.set(snapshot.interpolation);
+    // Selection isn't part of history — indices may no longer point at the same points.
+    this.selectedIndices.set(new Set());
     this.rebuildScene();
   }
 
@@ -192,6 +260,7 @@ export class SplineLabPageComponent {
     const indices = this.selectedIndices();
     if (indices.size === 0) return;
     const original = this.points;
+    this.pushHistory(this.snapshot());
 
     this.points = original.map((point, index) => {
       if (!indices.has(index)) return point;
@@ -229,6 +298,7 @@ export class SplineLabPageComponent {
   deleteSelected(): void {
     const indices = this.selectedIndices();
     if (indices.size === 0) return;
+    this.pushHistory(this.snapshot());
     this.points = this.points.filter((_, i) => !indices.has(i));
     this.selectedIndices.set(new Set());
     if (this.closed() && this.points.length < 3) this.closed.set(false);
@@ -236,6 +306,8 @@ export class SplineLabPageComponent {
   }
 
   clearAll(): void {
+    if (this.points.length === 0 && !this.closed()) return;
+    this.pushHistory(this.snapshot());
     this.points = [];
     this.selectedIndices.set(new Set());
     this.closed.set(false);
@@ -255,6 +327,7 @@ export class SplineLabPageComponent {
       if (this.closed()) return;
       const hit = this.raycastGround(event);
       if (!hit) return;
+      this.pushHistory(this.snapshot());
       this.points = [...this.points, { position: hit, handleMode: 'auto' }];
       this.selectedIndices.set(new Set([this.points.length - 1]));
       this.rebuildScene();
@@ -299,9 +372,11 @@ export class SplineLabPageComponent {
           startHit: hit,
           startPositions: new Map(Array.from(indices, (i) => [i, this.points[i].position] as const)),
         };
+        this.dragStartSnapshot = this.snapshot();
       }
     } else {
       this.drag = target;
+      this.dragStartSnapshot = this.snapshot();
     }
 
     this.isOrbitActive.set(false);
@@ -312,6 +387,12 @@ export class SplineLabPageComponent {
     if (!event || !this.drag) return;
     const hit = this.raycastGround(event);
     if (!hit) return;
+
+    if (this.dragStartSnapshot) {
+      // First move of this drag — record the pre-drag state as a single undo step.
+      this.pushHistory(this.dragStartSnapshot);
+      this.dragStartSnapshot = undefined;
+    }
 
     if (this.drag.kind === 'point') {
       const { startHit, startPositions } = this.drag;
@@ -350,6 +431,7 @@ export class SplineLabPageComponent {
   private onMouseUp(): void {
     if (!this.drag) return;
     this.drag = undefined;
+    this.dragStartSnapshot = undefined;
     this.isOrbitActive.set(true);
   }
 

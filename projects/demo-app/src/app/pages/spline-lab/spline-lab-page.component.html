@@ -26,9 +26,14 @@
         <button [disabled]="pointCount() === 0" (click)="selectAll()">Select all</button>
         <button (click)="clearAll()">Clear all</button>
       </nav>
+      <nav aria-label="History">
+        <button [disabled]="!canUndo()" (click)="undo()">Undo</button>
+        <button [disabled]="!canRedo()" (click)="redo()">Redo</button>
+      </nav>
       <p class="blurb note">
         Shift-click a point to add/remove it from the selection, then drag
-        any selected point to move the whole group together.
+        any selected point to move the whole group together. Ctrl+Z / Ctrl+Y
+        (or Ctrl+Shift+Z) to undo/redo.
       </p>
 
       <nav aria-label="Interpolation">
