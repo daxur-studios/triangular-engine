@@ -33,6 +33,7 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
   readonly canUndo = signal(false);
   readonly canRedo = signal(false);
   readonly seedLabel = signal('7');
+  readonly isDragging = signal(false);
   readonly featureCount = () => this.features().length;
 
   private readonly engine = inject(EngineService);
@@ -104,6 +105,7 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
     this.currentFeatureId = undefined;
     this.selectedPoint = undefined;
     this.drag = undefined;
+    this.isDragging.set(false);
     this.rebuildLines();
   }
   addFeature(): void {
@@ -137,7 +139,10 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
   }
   resetDemo(): void { this.features.set(createDemoFeatures()); this.settings.set(defaultComposerSettings()); this.seedLabel.set('7'); this.rebuild(); }
 
-  setMoveConstraint(constraint: SplineMoveConstraint): void { this.moveConstraint.set(constraint); }
+  setMoveConstraint(constraint: SplineMoveConstraint): void {
+    this.moveConstraint.set(constraint);
+    this.rebuildTransformGizmo();
+  }
   selectedPointPosition(axis: 0 | 1 | 2): number | undefined {
     if (!this.selectedPoint) return undefined;
     const feature = this.features().find((item) => item.id === this.selectedPoint?.featureId);
@@ -177,6 +182,7 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
       if (selected && point && hit) {
         this.history.push(this.features()); this.syncHistoryState();
         this.drag = { kind: target.kind, featureId: selected.featureId, index: selected.index, axis: target.kind === 'axis' ? target.axis : target.constraint, startHit: hit, startPoint: point };
+        this.isDragging.set(true);
       }
       return;
     }
@@ -193,7 +199,11 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
         if (hit) {
           const feature = this.features().find((item) => item.id === pointHit.featureId);
           const point = feature?.points[pointHit.index];
-          if (point) { this.history.push(this.features()); this.syncHistoryState(); this.drag = { ...pointHit, startHit: this.moveConstraint() === 'free' ? this.raycastFree(event, point) ?? hit : hit, startPoint: point }; }
+          if (point) {
+            this.history.push(this.features()); this.syncHistoryState();
+            this.drag = { ...pointHit, startHit: this.moveConstraint() === 'free' ? this.raycastFree(event, point) ?? hit : hit, startPoint: point };
+            this.isDragging.set(true);
+          }
         }
       }
       this.rebuildPointMeshes();
@@ -233,7 +243,10 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
     this.rebuild();
   }
 
-  private onCanvasUp(): void { this.drag = undefined; }
+  private onCanvasUp(): void {
+    this.drag = undefined;
+    this.isDragging.set(false);
+  }
 
   private syncHistoryState(): void { this.canUndo.set(this.history.canUndo); this.canRedo.set(this.history.canRedo); }
 
@@ -371,19 +384,21 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
       ['z', new Vector3(0, 0, 1), 0x4d8dff],
     ];
     for (const [axis, direction, color] of axes) {
+      if (!constraintAllowsAxis(this.moveConstraint(), axis)) continue;
       const arrow = new ArrowHelper(direction, origin, 7, color, 1.5, 0.8);
       arrow.traverse((child) => { child.userData['dragTarget'] = { kind: 'axis', axis } satisfies ComposerPickTarget; });
       this.group.add(arrow);
       this.gizmoArrows.push(arrow);
     }
-    const planes: Array<['xy' | 'xz' | 'yz', number]> = [
-      ['xy', 0],
-      ['xz', -Math.PI / 2],
-      ['yz', Math.PI / 2],
+    const planes: Array<['xy' | 'xz' | 'yz', number, Vector3]> = [
+      ['xy', 0, new Vector3(0, 0, 2.8)],
+      ['xz', -Math.PI / 2, new Vector3(0, 2.8, 0)],
+      ['yz', Math.PI / 2, new Vector3(2.8, 0, 0)],
     ];
-    for (const [constraint, rotation] of planes) {
+    for (const [constraint, rotation, offset] of planes) {
+      if (!constraintAllowsPlane(this.moveConstraint(), constraint)) continue;
       const plane = new Mesh(new PlaneGeometry(3.2, 3.2), new MeshBasicMaterial({ color: '#ffc857', transparent: true, opacity: 0.22, side: DoubleSide, depthWrite: false }));
-      plane.position.copy(origin);
+      plane.position.copy(origin).add(offset);
       if (constraint === 'xy') plane.rotation.set(0, 0, rotation);
       else if (constraint === 'xz') plane.rotation.x = rotation;
       else plane.rotation.y = rotation;
@@ -430,6 +445,14 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
 
 function cloneFeatures(features: ComposerFeature[]): ComposerFeature[] {
   return features.map((feature) => ({ ...feature, points: feature.points.map((point) => [...point] as [number, number, number]) }));
+}
+
+function constraintAllowsAxis(constraint: SplineMoveConstraint, axis: 'x' | 'y' | 'z'): boolean {
+  return constraint === 'free' || constraint.includes(axis);
+}
+
+function constraintAllowsPlane(constraint: SplineMoveConstraint, plane: 'xy' | 'xz' | 'yz'): boolean {
+  return constraint === 'free' || (constraint.length === 2 && plane.split('').every((axis) => constraint.includes(axis)));
 }
 
 function createDemoFeatures(): ComposerFeature[] {

@@ -203,7 +203,10 @@ export class SplineLabPageComponent {
     });
   }
 
-  setMoveConstraint(constraint: SplineMoveConstraint): void { this.moveConstraint.set(constraint); }
+  setMoveConstraint(constraint: SplineMoveConstraint): void {
+    this.moveConstraint.set(constraint);
+    this.rebuildTransformGizmo();
+  }
 
   selectedPosition(axis: 0 | 1 | 2): number | undefined {
     const index = this.selectedIndices().values().next().value as number | undefined;
@@ -585,19 +588,21 @@ export class SplineLabPageComponent {
       ['z', new Vector3(0, 0, 1), 0x4d8dff],
     ];
     for (const [axis, direction, color] of axes) {
+      if (!constraintAllowsAxis(this.moveConstraint(), axis)) continue;
       const arrow = new ArrowHelper(direction, origin, 7, color, 1.5, 0.8);
       arrow.traverse((child) => { child.userData['dragTarget'] = { kind: 'axis', axis } satisfies PickTarget; });
       this.group.add(arrow);
       this.gizmoArrows.push(arrow);
     }
-    const planes: Array<['xy' | 'xz' | 'yz', number, number]> = [
-      ['xy', 0, 0xffc857],
-      ['xz', -Math.PI / 2, 0xffc857],
-      ['yz', Math.PI / 2, 0xffc857],
+    const planes: Array<['xy' | 'xz' | 'yz', number, number, Vector3]> = [
+      ['xy', 0, 0xffc857, new Vector3(0, 0, 2.8)],
+      ['xz', -Math.PI / 2, 0xffc857, new Vector3(0, 2.8, 0)],
+      ['yz', Math.PI / 2, 0xffc857, new Vector3(2.8, 0, 0)],
     ];
-    for (const [constraint, rotation, color] of planes) {
+    for (const [constraint, rotation, color, offset] of planes) {
+      if (!constraintAllowsPlane(this.moveConstraint(), constraint)) continue;
       const plane = new Mesh(new PlaneGeometry(3.2, 3.2), new MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: DoubleSide, depthWrite: false }));
-      plane.position.copy(origin);
+      plane.position.copy(origin).add(offset);
       if (constraint === 'xy') plane.rotation.set(0, 0, rotation);
       else if (constraint === 'xz') plane.rotation.x = rotation;
       else plane.rotation.y = rotation;
@@ -779,4 +784,12 @@ function cloneHistorySnapshot(snapshot: HistorySnapshot): HistorySnapshot {
       channels: point.channels ? { ...point.channels } : undefined,
     })),
   };
+}
+
+function constraintAllowsAxis(constraint: SplineMoveConstraint, axis: 'x' | 'y' | 'z'): boolean {
+  return constraint === 'free' || constraint.includes(axis);
+}
+
+function constraintAllowsPlane(constraint: SplineMoveConstraint, plane: 'xy' | 'xz' | 'yz'): boolean {
+  return constraint === 'free' || (constraint.length === 2 && plane.split('').every((axis) => constraint.includes(axis)));
 }

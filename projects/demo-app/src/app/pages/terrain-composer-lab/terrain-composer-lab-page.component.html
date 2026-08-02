@@ -21,7 +21,7 @@
       </fieldset>
       <fieldset><legend>Point movement</legend>
         <p class="note">Click a point or spline to select it. Ctrl/Cmd-click empty space adds a node to the selected spline.</p>
-        <nav><button [class.active]="moveConstraint() === 'xz'" (click)="setMoveConstraint('xz')">XZ plane</button><button [class.active]="moveConstraint() === 'free'" (click)="setMoveConstraint('free')">Free</button></nav>
+        <nav><button [class.active]="moveConstraint() === 'xz'" (click)="setMoveConstraint('xz')">XZ</button><button [class.active]="moveConstraint() === 'xy'" (click)="setMoveConstraint('xy')">XY</button><button [class.active]="moveConstraint() === 'yz'" (click)="setMoveConstraint('yz')">YZ</button><button [class.active]="moveConstraint() === 'x'" (click)="setMoveConstraint('x')">X</button><button [class.active]="moveConstraint() === 'y'" (click)="setMoveConstraint('y')">Y</button><button [class.active]="moveConstraint() === 'z'" (click)="setMoveConstraint('z')">Z</button><button [class.active]="moveConstraint() === 'free'" (click)="setMoveConstraint('free')">Free</button></nav>
         @if (selectedPointPosition(0) !== undefined) {
           <div class="axis-controls"><span>X {{ selectedPointPosition(0) | number:'1.0-1' }}</span><button (click)="nudgeSelected(0, -1)">−</button><button (click)="nudgeSelected(0, 1)">+</button><span>Y {{ selectedPointPosition(1) | number:'1.0-1' }}</span><button (click)="nudgeSelected(1, -1)">−</button><button (click)="nudgeSelected(1, 1)">+</button><span>Z {{ selectedPointPosition(2) | number:'1.0-1' }}</span><button (click)="nudgeSelected(2, -1)">−</button><button (click)="nudgeSelected(2, 1)">+</button></div>
         }
@@ -31,6 +31,6 @@
     </section>
   </ng-template>
   <ng-template portalTarget="overlay" lane="topEnd"><section class="preview"><label>Heightmap</label><canvas #heightmap></canvas></section></ng-template>
-  <orbitControls [cameraPosition]="[145, 125, 165]" [target]="[0, 8, 0]" [isActive]="!editMode()" />
+  <orbitControls [cameraPosition]="[145, 125, 165]" [target]="[0, 8, 0]" [isActive]="!isDragging()" />
   <ambientLight [intensity]="1.1" /><directionalLight [position]="[80, 130, 60]" [intensity]="2" />
 </scene>
