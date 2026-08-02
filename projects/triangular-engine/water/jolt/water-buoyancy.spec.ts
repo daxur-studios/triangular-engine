@@ -5,11 +5,19 @@ import {
 } from './water-buoyancy';
 
 describe('resolveWaterBuoyancyImpulseInput', () => {
-  const sample = {
-    position: new Vector3(1, 2, 3),
-    normal: new Vector3(0, 1, 0),
-    flow: new Vector3(0.5, 0, -0.5),
+  let sample: {
+    position: Vector3;
+    normal: Vector3;
+    flow: Vector3;
   };
+
+  beforeEach(() => {
+    sample = {
+      position: new Vector3(1, 2, 3),
+      normal: new Vector3(0, 1, 0),
+      flow: new Vector3(0.5, 0, -0.5),
+    };
+  });
 
   it('maps the water sample position/normal/flow into plain tuples', () => {
     const result = resolveWaterBuoyancyImpulseInput(sample, [0, -9.81, 0], 1 / 240);

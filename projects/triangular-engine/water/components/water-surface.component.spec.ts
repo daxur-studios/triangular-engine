@@ -24,7 +24,7 @@ describe('WaterSurfaceComponent', () => {
             scene,
             renderer: null,
             camera,
-            clock: { getElapsedTime: () => 2 },
+            timer: { getElapsed: () => 2 },
             beforeRender$,
           },
         },
