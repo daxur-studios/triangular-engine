@@ -4,7 +4,10 @@ import { PerspectiveCamera, Scene } from 'three';
 import { EngineService } from 'triangular-engine';
 import { ConstantTerrainField } from '../core/terrain-field';
 import { PlaneTerrainDomain } from '../domains/plane-terrain-domain';
-import { TerrainSurfaceComponent } from './terrain-surface.component';
+import {
+  ITerrainSurfaceLodStats,
+  TerrainSurfaceComponent,
+} from './terrain-surface.component';
 
 describe('TerrainSurfaceComponent', () => {
   let scene: Scene;
@@ -65,5 +68,31 @@ describe('TerrainSurfaceComponent', () => {
 
     beforeRender$.next();
     expect(scene.children[0].children.length).toBe(4);
+  });
+
+  it('reports resident geometry bytes and skirt draw calls for performance diagnostics', () => {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    const stats: ITerrainSurfaceLodStats[] = [];
+    fixture.componentInstance.lodChange.subscribe((value) => stats.push(value));
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', [{ level: 0, x: 0, z: 0 }]);
+    fixture.componentRef.setInput('maxLod', 0);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('skirtDepth', 10);
+    fixture.componentRef.setInput('generationBudget', 1);
+    fixture.detectChanges();
+
+    beforeRender$.next();
+
+    expect(stats.at(-1)).toEqual(
+      jasmine.objectContaining({
+        desired: 1,
+        resident: 1,
+        queued: 0,
+        drawCalls: 2,
+      }),
+    );
+    expect(stats.at(-1)!.geometryBytes).toBeGreaterThan(0);
   });
 });

@@ -30,8 +30,13 @@ import { TerrainGenerationQueue } from '../streaming/terrain-generation-queue';
 import { selectAdaptiveTerrainPatches } from '../streaming/terrain-patch-selection';
 
 export interface ITerrainSurfaceLodStats {
+  readonly desired: number;
   readonly resident: number;
   readonly queued: number;
+  /** One draw per resident surface, plus one when its visual skirt is present. */
+  readonly drawCalls: number;
+  /** CPU-side typed-array bytes currently referenced by resident geometries. */
+  readonly geometryBytes: number;
   readonly levels: Readonly<Record<number, number>>;
 }
 
@@ -57,6 +62,8 @@ export type TerrainSurfaceMeshGenerator<TAddress> = (
 interface IResidentPatch {
   readonly object: Mesh;
   readonly material: Material;
+  readonly drawCalls: number;
+  readonly geometryBytes: number;
 }
 
 /**
@@ -84,6 +91,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   private generationEpoch = 0;
   private readonly generating = new Set<string>();
   private selectedLevels: Record<number, number> = {};
+  private desiredPatchCount = 0;
   private statsSignature = '';
 
   readonly field = input.required<ITerrainField>();
@@ -108,9 +116,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     TerrainSurfaceMeshGenerator<TAddress> | undefined
   >(undefined);
   readonly wireframe = input(false);
-  readonly getLevel = input<(address: TAddress) => number>(
-    defaultAddressLevel,
-  );
+  readonly getLevel = input<(address: TAddress) => number>(defaultAddressLevel);
   readonly getKey = input<(address: TAddress) => string>(defaultAddressKey);
   readonly createMaterial = input<() => Material>(
     () =>
@@ -178,8 +184,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       getLevel,
       maxLevel: Math.max(0, Math.floor(this.maxLod())),
       refinementDistanceM:
-        this.refinementDistance() ??
-        estimateRefinementDistance(domain, roots),
+        this.refinementDistance() ?? estimateRefinementDistance(domain, roots),
       hysteresis: Math.min(0.95, Math.max(0, this.lodHysteresis())),
       wasRefined: (address) => this.refinedKeys.has(getKey(address)),
       onRefinement: (address, refined) => {
@@ -191,6 +196,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       address,
       key: getKey(address),
     }));
+    this.desiredPatchCount = entries.length;
     this.selectedLevels = {};
     for (const address of selected) {
       const level = getLevel(address);
@@ -205,20 +211,16 @@ export class TerrainSurfaceComponent<TAddress = unknown>
           value: address,
           priority: patchDistance(domain, address, position),
         })),
-      new Set([...this.residents.keys(), ...this.generating]),
+        new Set([...this.residents.keys(), ...this.generating]),
       );
     }
 
-    const generationBudget = Math.max(
-      0,
-      Math.floor(this.generationBudget()),
-    );
+    const generationBudget = Math.max(0, Math.floor(this.generationBudget()));
     const availableGenerationSlots = this.meshGenerator()
       ? Math.max(0, generationBudget - this.generating.size)
       : generationBudget;
-    this.queue.drain(
-      availableGenerationSlots,
-      ({ key, value }) => this.generatePatch(key, value),
+    this.queue.drain(availableGenerationSlots, ({ key, value }) =>
+      this.generatePatch(key, value),
     );
     if (this.queue.pendingCount === 0 && this.generating.size === 0) {
       for (const [key, patch] of this.residents) {
@@ -274,21 +276,34 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     if ('wireframe' in material) {
       (material as MeshStandardMaterial).wireframe = this.wireframe();
     }
-    const mesh = new Mesh(
-      this.createGeometry(patch, address, patch.surface, false),
-      material,
+    const surfaceGeometry = this.createGeometry(
+      patch,
+      address,
+      patch.surface,
+      false,
     );
+    const mesh = new Mesh(surfaceGeometry, material);
+    let drawCalls = 1;
+    let geometryBytes = geometryByteCount(surfaceGeometry);
     if (patch.skirt) {
-      mesh.add(
-        new Mesh(
-          this.createGeometry(patch, address, patch.skirt, true),
-          material,
-        ),
+      const skirtGeometry = this.createGeometry(
+        patch,
+        address,
+        patch.skirt,
+        true,
       );
+      mesh.add(new Mesh(skirtGeometry, material));
+      drawCalls += 1;
+      geometryBytes += geometryByteCount(skirtGeometry);
     }
     mesh.position.fromArray(patch.centerWorldM);
     this.group.add(mesh);
-    this.residents.set(key, { object: mesh, material });
+    this.residents.set(key, {
+      object: mesh,
+      material,
+      drawCalls,
+      geometryBytes,
+    });
   }
 
   private createGeometry(
@@ -298,7 +313,10 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     skirt: boolean,
   ): BufferGeometry {
     const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new BufferAttribute(surface.positions, 3));
+    geometry.setAttribute(
+      'position',
+      new BufferAttribute(surface.positions, 3),
+    );
     geometry.setAttribute('normal', new BufferAttribute(surface.normals, 3));
     geometry.setAttribute('uv', new BufferAttribute(surface.uvs, 2));
     const colors = this.createColors()?.({
@@ -342,15 +360,32 @@ export class TerrainSurfaceComponent<TAddress = unknown>
 
   private emitStats(): void {
     const queued = this.queue.pendingCount + this.generating.size;
-    const signature = `${this.residents.size}:${queued}:${JSON.stringify(this.selectedLevels)}`;
+    let drawCalls = 0;
+    let geometryBytes = 0;
+    for (const patch of this.residents.values()) {
+      drawCalls += patch.drawCalls;
+      geometryBytes += patch.geometryBytes;
+    }
+    const signature = `${this.desiredPatchCount}:${this.residents.size}:${queued}:${drawCalls}:${geometryBytes}:${JSON.stringify(this.selectedLevels)}`;
     if (signature === this.statsSignature) return;
     this.statsSignature = signature;
     this.lodChange.emit({
+      desired: this.desiredPatchCount,
       resident: this.residents.size,
       queued,
+      drawCalls,
+      geometryBytes,
       levels: this.selectedLevels,
     });
   }
+}
+
+function geometryByteCount(geometry: BufferGeometry): number {
+  let byteCount = geometry.index?.array.byteLength ?? 0;
+  for (const attribute of Object.values(geometry.attributes)) {
+    byteCount += attribute.array.byteLength;
+  }
+  return byteCount;
 }
 
 function defaultAddressLevel(address: unknown): number {

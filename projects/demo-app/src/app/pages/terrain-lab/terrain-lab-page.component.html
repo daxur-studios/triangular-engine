@@ -113,9 +113,13 @@
       </label>
       <div class="stats">
         <span>World origin: {{ coordinateLabel() }}</span>
+        <span>Desired patches: {{ desiredPatchCount() }}</span>
         <span>Resident patches: {{ patchCount() }}</span>
         <span>Physics colliders: {{ colliderCount() }}</span>
         <span>Queued patches: {{ queuedPatchCount() }}</span>
+        <span>Terrain draw calls: {{ terrainDrawCallCount() }}</span>
+        <span>Debug border calls: {{ debugDrawCallCount() }}</span>
+        <span>Terrain geometry: {{ geometryByteLabel() }}</span>
         <span>LOD distribution: {{ lodLabel() }}</span>
         <span>Camera patch: {{ centrePatchLabel() }}</span>
         <span>Reference grid: 100 m below datum</span>
