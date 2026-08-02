@@ -57,3 +57,6 @@ All notable changes to triangular-engine are documented here.
 ## [0.0.11] - 2025-03-07
 
 Initial changelog. See git history for changes prior to this version.
+# Unreleased
+
+- Added framework-free spline editor helpers for axis-constrained point movement and reusable undo/redo keyboard handling.

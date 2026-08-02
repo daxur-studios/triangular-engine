@@ -19,24 +19,29 @@ import {
   LineBasicMaterial,
   Mesh,
   MeshBasicMaterial,
+  Plane,
   PlaneGeometry,
   Raycaster,
   SphereGeometry,
   Vector2,
+  Vector3,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
   addVec3,
   deserializeSplineDefinition,
   getSplineArcLengthTable,
+  moveSplinePoint,
   scaleVec3,
   serializeSplineDefinition,
+  SplineEditorHistory,
   subVec3,
   validateSplineDefinition,
   type ISplineDefinition,
   type ISplinePoint,
   type SplineHandleMode,
   type SplineInterpolation,
+  type SplineMoveConstraint,
   type SplineVector3,
 } from 'triangular-engine/spline';
 
@@ -100,14 +105,14 @@ export class SplineLabPageComponent {
   readonly lengthM = signal(0);
   readonly validationError = signal<string | undefined>(undefined);
   readonly isOrbitActive = signal(true);
+  readonly moveConstraint = signal<SplineMoveConstraint>('xz');
 
   readonly hasSelection = computed(() => this.selectedIndices().size > 0);
   readonly selectedCount = computed(() => this.selectedIndices().size);
 
-  private readonly undoStack = signal<HistorySnapshot[]>([]);
-  private readonly redoStack = signal<HistorySnapshot[]>([]);
-  readonly canUndo = computed(() => this.undoStack().length > 0);
-  readonly canRedo = computed(() => this.redoStack().length > 0);
+  private readonly history = new SplineEditorHistory<HistorySnapshot>(cloneHistorySnapshot);
+  readonly canUndo = signal(false);
+  readonly canRedo = signal(false);
 
   readonly hasSaved = signal(localStorage.getItem(STORAGE_KEY) !== null);
   readonly persistenceStatus = signal<string | undefined>(undefined);
@@ -198,6 +203,25 @@ export class SplineLabPageComponent {
     this.mode.set(mode);
   }
 
+  setMoveConstraint(constraint: SplineMoveConstraint): void { this.moveConstraint.set(constraint); }
+
+  selectedPosition(axis: 0 | 1 | 2): number | undefined {
+    const index = this.selectedIndices().values().next().value as number | undefined;
+    return index === undefined ? undefined : this.points[index]?.position[axis];
+  }
+
+  nudgeSelected(axis: 0 | 1 | 2, amount: number): void {
+    const indices = this.selectedIndices();
+    if (indices.size === 0) return;
+    this.pushHistory(this.snapshot());
+    this.points = this.points.map((point, index) => {
+      if (!indices.has(index)) return point;
+      const delta: SplineVector3 = axis === 0 ? [amount, 0, 0] : axis === 1 ? [0, amount, 0] : [0, 0, amount];
+      return { ...point, position: moveSplinePoint(point.position, delta, 'free') };
+    });
+    this.rebuildScene();
+  }
+
   setInterpolation(interpolation: SplineInterpolation): void {
     if (interpolation === this.interpolation()) return;
     this.pushHistory(this.snapshot());
@@ -213,21 +237,15 @@ export class SplineLabPageComponent {
   }
 
   undo(): void {
-    const stack = this.undoStack();
-    if (stack.length === 0) return;
-    const previous = stack[stack.length - 1];
-    this.undoStack.set(stack.slice(0, -1));
-    this.redoStack.update((s) => [...s, this.snapshot()]);
-    this.applySnapshot(previous);
+    const previous = this.history.undo(this.snapshot());
+    if (previous) this.applySnapshot(previous);
+    this.syncHistoryState();
   }
 
   redo(): void {
-    const stack = this.redoStack();
-    if (stack.length === 0) return;
-    const next = stack[stack.length - 1];
-    this.redoStack.set(stack.slice(0, -1));
-    this.undoStack.update((s) => [...s, this.snapshot()]);
-    this.applySnapshot(next);
+    const next = this.history.redo(this.snapshot());
+    if (next) this.applySnapshot(next);
+    this.syncHistoryState();
   }
 
   save(): void {
@@ -263,15 +281,9 @@ export class SplineLabPageComponent {
 
   @HostListener('document:keydown', ['$event'])
   onGlobalKeyDown(event: KeyboardEvent): void {
-    if (!(event.ctrlKey || event.metaKey)) return;
-    const key = event.key.toLowerCase();
-    if (key === 'z' && !event.shiftKey) {
-      event.preventDefault();
-      this.undo();
-    } else if (key === 'y' || (key === 'z' && event.shiftKey)) {
-      event.preventDefault();
-      this.redo();
-    }
+    const restored = this.history.handleKeyDown(event, this.snapshot());
+    if (restored) this.applySnapshot(restored);
+    this.syncHistoryState();
   }
 
   private snapshot(): HistorySnapshot {
@@ -280,8 +292,13 @@ export class SplineLabPageComponent {
 
   /** Records `snapshot` (the state *before* an edit) as an undo step, and invalidates any redo history. */
   private pushHistory(snapshot: HistorySnapshot): void {
-    this.undoStack.update((stack) => [...stack, snapshot]);
-    this.redoStack.set([]);
+    this.history.push(snapshot);
+    this.syncHistoryState();
+  }
+
+  private syncHistoryState(): void {
+    this.canUndo.set(this.history.canUndo);
+    this.canRedo.set(this.history.canRedo);
   }
 
   private applySnapshot(snapshot: HistorySnapshot): void {
@@ -361,7 +378,7 @@ export class SplineLabPageComponent {
     if (!event || event.button !== 0) return;
 
     if (this.mode() === 'add') {
-      if (this.closed()) return;
+      if (this.closed() || !(event.ctrlKey || event.metaKey)) return;
       const hit = this.raycastGround(event);
       if (!hit) return;
       this.pushHistory(this.snapshot());
@@ -400,13 +417,14 @@ export class SplineLabPageComponent {
         return;
       }
 
-      const hit = this.raycastGround(event);
-      if (hit) {
-        const indices = this.selectedIndices();
-        this.drag = {
-          kind: 'point',
-          index: target.index,
-          startHit: hit,
+        const hit = this.raycastGround(event);
+        if (hit) {
+          const indices = this.selectedIndices();
+          const dragHit = this.moveConstraint() === 'free' ? this.raycastFree(event, this.points[target.index].position) : hit;
+          this.drag = {
+            kind: 'point',
+            index: target.index,
+            startHit: dragHit ?? hit,
           startPositions: new Map(Array.from(indices, (i) => [i, this.points[i].position] as const)),
         };
         this.dragStartSnapshot = this.snapshot();
@@ -422,7 +440,9 @@ export class SplineLabPageComponent {
 
   private onMouseMove(event: MouseEvent | null): void {
     if (!event || !this.drag) return;
-    const hit = this.raycastGround(event);
+    const hit = this.drag.kind === 'point' && this.moveConstraint() === 'free'
+      ? this.raycastFree(event, this.drag.startPositions.get(this.drag.index) ?? [0, 0, 0])
+      : this.raycastGround(event);
     if (!hit) return;
 
     if (this.dragStartSnapshot) {
@@ -436,7 +456,7 @@ export class SplineLabPageComponent {
       const delta = subVec3(hit, startHit);
       this.points = this.points.map((existing, i) => {
         const start = startPositions.get(i);
-        return start ? { ...existing, position: addVec3(start, delta) } : existing;
+        return start ? { ...existing, position: moveSplinePoint(start, delta, this.moveConstraint()) } : existing;
       });
       this.rebuildScene();
       return;
@@ -486,6 +506,14 @@ export class SplineLabPageComponent {
     const [hit] = this.raycaster.intersectObject(this.groundMesh, false);
     if (!hit) return undefined;
     return [hit.point.x, 0, hit.point.z];
+  }
+
+  private raycastFree(event: MouseEvent, origin: SplineVector3): SplineVector3 | undefined {
+    this.updateRaycasterFromEvent(event);
+    const normal = this.engine.camera.getWorldDirection(new Vector3());
+    const plane = new Plane().setFromNormalAndCoplanarPoint(normal, new Vector3(origin[0], origin[1], origin[2]));
+    const hit = this.raycaster.ray.intersectPlane(plane, new Vector3());
+    return hit ? [hit.x, hit.y, hit.z] : undefined;
   }
 
   private updateRaycasterFromEvent(event: MouseEvent): void {
@@ -659,4 +687,18 @@ export class SplineLabPageComponent {
     this.curveMaterial.dispose();
     this.handleLineMaterial.dispose();
   }
+}
+
+function cloneHistorySnapshot(snapshot: HistorySnapshot): HistorySnapshot {
+  return {
+    closed: snapshot.closed,
+    interpolation: snapshot.interpolation,
+    points: snapshot.points.map((point) => ({
+      ...point,
+      position: [...point.position] as SplineVector3,
+      handleIn: point.handleIn ? [...point.handleIn] as SplineVector3 : undefined,
+      handleOut: point.handleOut ? [...point.handleOut] as SplineVector3 : undefined,
+      channels: point.channels ? { ...point.channels } : undefined,
+    })),
+  };
 }

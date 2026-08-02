@@ -6,3 +6,4 @@ export * from './core/spline-evaluate';
 export * from './core/spline-arc-length';
 export * from './core/spline-proximity';
 export * from './core/spline-serialization';
+export * from './core/spline-editor';

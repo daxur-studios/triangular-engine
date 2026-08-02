@@ -8,7 +8,7 @@
         <button [class.active]="activeLayer() === 'mountain'" (click)="setLayer('mountain')">Mountains</button>
         <button [class.active]="activeLayer() === 'river'" (click)="setLayer('river')">Rivers</button>
       </nav>
-      <nav><button [class.active]="editMode()" (click)="setEditMode(!editMode())">{{ editMode() ? 'Click map to add points' : 'Edit splines' }}</button><button (click)="addFeature()" [disabled]="activeLayer() === 'island'">New path</button><button (click)="clearLayer()">Clear layer</button></nav>
+      <nav><button [class.active]="editMode()" (click)="setEditMode(!editMode())">{{ editMode() ? 'Edit splines' : 'Edit splines' }}</button><button (click)="addFeature()" [disabled]="activeLayer() === 'island'">New path</button><button (click)="clearLayer()">Clear layer</button><button (click)="undo()" [disabled]="!canUndo()">Undo</button><button (click)="redo()" [disabled]="!canRedo()">Redo</button></nav>
       @if (activeLayer() === 'island') { <button (click)="closeIsland()">Close island boundary</button> }
       <fieldset><legend>Shape</legend>
         <label>Island height <input type="range" min="0" max="60" [value]="settings().islandHeight" (input)="updateSetting('islandHeight', $event)" /></label>
@@ -19,8 +19,15 @@
         <label>River width <input type="range" min="2" max="16" [value]="settings().riverWidth" (input)="updateSetting('riverWidth', $event)" /></label>
         <label>Noise <input type="range" min="0" max="18" [value]="settings().noiseAmplitude" (input)="updateSetting('noiseAmplitude', $event)" /></label>
       </fieldset>
+      <fieldset><legend>Point movement</legend>
+        <p class="note">Ctrl/Cmd-click empty space adds a point. Drag moves in the selected plane; buttons nudge all 3 axes.</p>
+        <nav><button [class.active]="moveConstraint() === 'xz'" (click)="setMoveConstraint('xz')">XZ plane</button><button [class.active]="moveConstraint() === 'free'" (click)="setMoveConstraint('free')">Free</button></nav>
+        @if (selectedPointPosition(0) !== undefined) {
+          <div class="axis-controls"><span>X {{ selectedPointPosition(0) | number:'1.0-1' }}</span><button (click)="nudgeSelected(0, -1)">−</button><button (click)="nudgeSelected(0, 1)">+</button><span>Y {{ selectedPointPosition(1) | number:'1.0-1' }}</span><button (click)="nudgeSelected(1, -1)">−</button><button (click)="nudgeSelected(1, 1)">+</button><span>Z {{ selectedPointPosition(2) | number:'1.0-1' }}</span><button (click)="nudgeSelected(2, -1)">−</button><button (click)="nudgeSelected(2, 1)">+</button></div>
+        }
+      </fieldset>
       <nav><button (click)="randomizeNoise()">Randomize noise</button><button (click)="resetDemo()">Reset demo</button></nav>
-      <p class="note">{{ featureCount() }} spline features · seed {{ seedLabel() }} · press Escape to stop editing</p>
+      <p class="note">{{ featureCount() }} spline features · seed {{ seedLabel() }} · click a point to drag it, Ctrl/Cmd-click empty space to add · Ctrl/Cmd+Z/Y undo/redo</p>
     </section>
   </ng-template>
   <ng-template portalTarget="overlay" lane="topEnd"><section class="preview"><label>Heightmap</label><canvas #heightmap></canvas></section></ng-template>

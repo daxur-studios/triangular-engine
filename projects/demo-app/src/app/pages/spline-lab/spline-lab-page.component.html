@@ -40,7 +40,7 @@
         <p class="blurb note">{{ status }}</p>
       }
       <p class="blurb note">
-        Shift-click a point to add/remove it from the selection, then drag
+        Ctrl/Cmd-click empty space to add a point. Shift-click a point to add/remove it from the selection, then drag
         any selected point to move the whole group together. Ctrl+Z / Ctrl+Y
         (or Ctrl+Shift+Z) to undo/redo.
       </p>
@@ -72,6 +72,15 @@
       }
 
       @if (hasSelection()) {
+        <nav aria-label="Point movement">
+          <span class="label">Drag constraint:</span>
+          <button [class.active]="moveConstraint() === 'xz'" (click)="setMoveConstraint('xz')">XZ plane</button>
+          <button [class.active]="moveConstraint() === 'free'" (click)="setMoveConstraint('free')">Free</button>
+          <span class="label">{{ selectedPosition(0) | number:'1.0-1' }}, {{ selectedPosition(1) | number:'1.0-1' }}, {{ selectedPosition(2) | number:'1.0-1' }}</span>
+          <button (click)="nudgeSelected(0, -1)">X−</button><button (click)="nudgeSelected(0, 1)">X+</button>
+          <button (click)="nudgeSelected(1, -1)">Y−</button><button (click)="nudgeSelected(1, 1)">Y+</button>
+          <button (click)="nudgeSelected(2, -1)">Z−</button><button (click)="nudgeSelected(2, 1)">Z+</button>
+        </nav>
         <nav aria-label="Handle type">
           <span class="label">
             {{ selectedCount() }} selected{{ selectedHandleMode() ? '' : ' (mixed)' }}:

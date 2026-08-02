@@ -13,6 +13,14 @@ no Three.js or Angular import. Surface binding, masks, rendering, and editing
 land in later phases — see `docs/runbook/008_spline_sublibrary.md` in the
 `triangular-workspace` repo for the full contract and phased plan.
 
+The framework-free editor helpers are also available from this entry point.
+`SplineEditorHistory<T>` provides consistent Ctrl/Cmd+Z, Ctrl/Cmd+Y, and
+Ctrl/Cmd+Shift+Z behavior for host editors. `moveSplinePoint` and
+`constrainSplineDelta` support free 3D movement or axis/plane constraints such
+as `xz` for a ground-bound editor. Rendering and pointer raycasting remain
+host responsibilities so the same state rules can be used with Three.js,
+Unity-style tools, or a custom UI.
+
 ## Defining a spline
 
 ```ts
