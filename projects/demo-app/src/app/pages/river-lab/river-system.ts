@@ -1,10 +1,11 @@
-import { Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, DoubleSide, Mesh, ShaderMaterial, Vector3 } from 'three';
 import type {
   ITerrainField,
   ITerrainFieldSample,
   TerrainVector3,
 } from 'triangular-engine/terrain';
 import type { WaterSurface } from 'triangular-engine/water';
+import { WATER_LOGDEPTH_FRAGMENT_GLSL, WATER_LOGDEPTH_PARS_FRAGMENT_GLSL, WATER_LOGDEPTH_PARS_VERTEX_GLSL, WATER_LOGDEPTH_VERTEX_GLSL } from 'triangular-engine/water';
 
 export interface RiverControlPoint {
   readonly x: number;
@@ -182,6 +183,71 @@ export function createProceduralRiver(): RiverPath {
     });
   }
   return new RiverPath(points);
+}
+
+export function createRiverRibbon(river: RiverPath, material: ShaderMaterial): Mesh {
+  const count = river.points.length;
+  const positions = new Float32Array(count * 2 * 3);
+  const uvs = new Float32Array(count * 2 * 2);
+  const indices: number[] = [];
+  for (let index = 0; index < count; index++) {
+    const point = river.points[index];
+    const previous = river.points[Math.max(0, index - 1)];
+    const next = river.points[Math.min(count - 1, index + 1)];
+    const inverseLength = 1 / Math.hypot(next.x - previous.x, next.z - previous.z);
+    const perpendicularX = -(next.z - previous.z) * inverseLength;
+    const perpendicularZ = (next.x - previous.x) * inverseLength;
+    for (let side = 0; side < 2; side++) {
+      const sign = side === 0 ? -1 : 1;
+      const vertex = index * 2 + side;
+      positions[vertex * 3] = point.x + perpendicularX * point.halfWidth * sign;
+      positions[vertex * 3 + 1] = point.surfaceY + 0.08;
+      positions[vertex * 3 + 2] = point.z + perpendicularZ * point.halfWidth * sign;
+      uvs[vertex * 2] = side;
+      uvs[vertex * 2 + 1] = index / (count - 1);
+    }
+    if (index < count - 1) indices.push(index * 2, index * 2 + 2, index * 2 + 1, index * 2 + 1, index * 2 + 2, index * 2 + 3);
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  const mesh = new Mesh(geometry, material);
+  mesh.renderOrder = 1;
+  return mesh;
+}
+
+export function createFlowMaterial(): ShaderMaterial {
+  return new ShaderMaterial({
+    uniforms: { time: { value: 0 } },
+    vertexShader: `
+      ${WATER_LOGDEPTH_PARS_VERTEX_GLSL}
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        ${WATER_LOGDEPTH_VERTEX_GLSL}
+      }
+    `,
+    fragmentShader: `
+      ${WATER_LOGDEPTH_PARS_FRAGMENT_GLSL}
+      uniform float time;
+      varying vec2 vUv;
+      void main() {
+        float travelling = sin((vUv.y * 150.0 - time * 7.0) + sin(vUv.x * 11.0));
+        float crossRipple = sin(vUv.x * 28.0 + time * 1.8) * 0.5 + 0.5;
+        float foam = smoothstep(0.82, 1.0, travelling * 0.5 + 0.5) * crossRipple;
+        float edge = smoothstep(0.0, 0.16, vUv.x) * smoothstep(0.0, 0.16, 1.0 - vUv.x);
+        vec3 deep = vec3(0.025, 0.24, 0.31);
+        vec3 crest = vec3(0.38, 0.78, 0.78);
+        gl_FragColor = vec4(mix(deep, crest, foam * 0.65), 0.83 * edge);
+        ${WATER_LOGDEPTH_FRAGMENT_GLSL}
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    side: DoubleSide,
+  });
 }
 
 function lerp(start: number, end: number, t: number): number {

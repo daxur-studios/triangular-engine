@@ -17,7 +17,7 @@
         <label>Mountain width <input type="range" min="5" max="45" [value]="settings().mountainWidth" (input)="updateSetting('mountainWidth', $event)" /></label>
         <label>River depth <input type="range" min="0" max="35" [value]="settings().riverDepth" (input)="updateSetting('riverDepth', $event)" /></label>
         <label>River width <input type="range" min="2" max="16" [value]="settings().riverWidth" (input)="updateSetting('riverWidth', $event)" /></label>
-        <label>Noise <input type="range" min="0" max="18" [value]="settings().noiseAmplitude" (input)="updateSetting('noiseAmplitude', $event)" /></label>
+        <label>Noise <input type="range" min="0" max="40" [value]="settings().noiseAmplitude" (input)="updateSetting('noiseAmplitude', $event)" /></label>
       </fieldset>
       <fieldset><legend>Point movement</legend>
         <p class="note">Click a point or spline to select it. Ctrl/Cmd-click empty space adds a node to the selected spline.</p>

@@ -35,7 +35,7 @@ export interface ComposerSettings {
 }
 
 const DEFAULTS: ComposerSettings = {
-  worldSize: 180,
+  worldSize: 280,
   seaLevel: -8,
   islandHeight: 22,
   islandFalloff: 18,
@@ -44,7 +44,7 @@ const DEFAULTS: ComposerSettings = {
   mountainSharpness: 1.6,
   riverDepth: 18,
   riverWidth: 7,
-  noiseAmplitude: 7,
+  noiseAmplitude: 16,
   noiseScale: 0.035,
   noiseSeed: 7,
 };
@@ -68,6 +68,19 @@ export class TerrainComposerField implements ITerrainField {
 
   sample([x, _y, z]: TerrainVector3): ITerrainFieldSample {
     const { settings } = this;
+    let elevation = this.sampleLandElevation(x, z);
+    for (const feature of this.features) {
+      if (feature.layer !== 'river') continue;
+      const line = this.polylines.get(feature.id) ?? [];
+      const distance = distanceToPolyline(x, z, line);
+      const channel = smoothstep(settings.riverWidth * 1.8, 0, distance);
+      elevation -= channel * settings.riverDepth;
+    }
+    return { elevationM: elevation };
+  }
+
+  sampleLandElevation(x: number, z: number): number {
+    const { settings } = this;
     const island = this.features.find((feature) => feature.layer === 'island');
     const islandLine = island ? this.polylines.get(island.id) ?? [] : [];
     const inside = islandLine.length > 2 && pointInPolygon(x, z, islandLine);
@@ -81,17 +94,15 @@ export class TerrainComposerField implements ITerrainField {
         const distance = distanceToPolyline(x, z, line);
         const ridge = Math.pow(Math.max(0, 1 - distance / settings.mountainWidth), settings.mountainSharpness);
         elevation += ridge * settings.mountainHeight * coast;
-      } else if (feature.layer === 'river') {
-        const distance = distanceToPolyline(x, z, line);
-        const channel = smoothstep(settings.riverWidth * 1.8, 0, distance);
-        elevation -= channel * settings.riverDepth;
       }
     }
 
-    const noise = valueNoise2D(x * settings.noiseScale, z * settings.noiseScale, settings.noiseSeed);
+    const noise = fractalNoise2D(x * settings.noiseScale, z * settings.noiseScale, settings.noiseSeed);
     elevation += (noise - 0.5) * settings.noiseAmplitude * coast;
-    return { elevationM: elevation };
+    return elevation;
   }
+
+  riverPolyline(featureId: string): readonly SplineVector3[] { return this.polylines.get(featureId) ?? []; }
 
   sampleBatch(positions: Float64Array, output = new Float64Array(positions.length / 3)): Float64Array {
     for (let i = 0; i < output.length; i++) {
@@ -171,6 +182,17 @@ function valueNoise2D(x: number, z: number, seed: number): number {
   const a = hash(x0, z0, seed), b = hash(x0 + 1, z0, seed);
   const c = hash(x0, z0 + 1, seed), d = hash(x0 + 1, z0 + 1, seed);
   return lerp(lerp(a, b, sx), lerp(c, d, sx), sz);
+}
+
+function fractalNoise2D(x: number, z: number, seed: number): number {
+  let total = 0, amplitude = 1, frequency = 1, weight = 0;
+  for (let octave = 0; octave < 4; octave++) {
+    total += valueNoise2D(x * frequency, z * frequency, seed + octave * 31) * amplitude;
+    weight += amplitude;
+    amplitude *= 0.5;
+    frequency *= 2;
+  }
+  return total / weight;
 }
 
 function hash(x: number, z: number, seed: number): number {
