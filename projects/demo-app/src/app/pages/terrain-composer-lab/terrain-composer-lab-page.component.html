@@ -1,0 +1,29 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel">
+      <header><div><a routerLink="/">← Examples</a><small>terrain authoring — Phase 0B POC</small></div><strong>Terrain composer</strong></header>
+      <p class="note">Define an island boundary, mountain ridges, and river paths. Every layer feeds the same procedural field and heightmap.</p>
+      <nav class="tabs">
+        <button [class.active]="activeLayer() === 'island'" (click)="setLayer('island')">Island</button>
+        <button [class.active]="activeLayer() === 'mountain'" (click)="setLayer('mountain')">Mountains</button>
+        <button [class.active]="activeLayer() === 'river'" (click)="setLayer('river')">Rivers</button>
+      </nav>
+      <nav><button [class.active]="editMode()" (click)="setEditMode(!editMode())">{{ editMode() ? 'Click map to add points' : 'Edit splines' }}</button><button (click)="addFeature()" [disabled]="activeLayer() === 'island'">New path</button><button (click)="clearLayer()">Clear layer</button></nav>
+      @if (activeLayer() === 'island') { <button (click)="closeIsland()">Close island boundary</button> }
+      <fieldset><legend>Shape</legend>
+        <label>Island height <input type="range" min="0" max="60" [value]="settings().islandHeight" (input)="updateSetting('islandHeight', $event)" /></label>
+        <label>Coast falloff <input type="range" min="4" max="40" [value]="settings().islandFalloff" (input)="updateSetting('islandFalloff', $event)" /></label>
+        <label>Mountain height <input type="range" min="0" max="60" [value]="settings().mountainHeight" (input)="updateSetting('mountainHeight', $event)" /></label>
+        <label>Mountain width <input type="range" min="5" max="45" [value]="settings().mountainWidth" (input)="updateSetting('mountainWidth', $event)" /></label>
+        <label>River depth <input type="range" min="0" max="35" [value]="settings().riverDepth" (input)="updateSetting('riverDepth', $event)" /></label>
+        <label>River width <input type="range" min="2" max="16" [value]="settings().riverWidth" (input)="updateSetting('riverWidth', $event)" /></label>
+        <label>Noise <input type="range" min="0" max="18" [value]="settings().noiseAmplitude" (input)="updateSetting('noiseAmplitude', $event)" /></label>
+      </fieldset>
+      <nav><button (click)="randomizeNoise()">Randomize noise</button><button (click)="resetDemo()">Reset demo</button></nav>
+      <p class="note">{{ featureCount() }} spline features · seed {{ seedLabel() }} · press Escape to stop editing</p>
+    </section>
+  </ng-template>
+  <ng-template portalTarget="overlay" lane="topEnd"><section class="preview"><label>Heightmap</label><canvas #heightmap></canvas></section></ng-template>
+  <orbitControls [cameraPosition]="[145, 125, 165]" [target]="[0, 8, 0]" [isActive]="!editMode()" />
+  <ambientLight [intensity]="1.1" /><directionalLight [position]="[80, 130, 60]" [intensity]="2" />
+</scene>

@@ -1,0 +1,7 @@
+:host { background: #071018; }
+.panel, .preview { margin: 1rem; padding: 1rem; background: rgba(9, 18, 25, .92); border: 1px solid #38505b; border-radius: .7rem; color: #d9e6e8; box-shadow: 0 1rem 3rem rgba(0,0,0,.25); }
+.panel { width: min(27rem, calc(100vw - 2rem)); }
+.preview { width: 12rem; } .preview canvas { display: block; width: 100%; margin-top: .5rem; image-rendering: pixelated; }
+header { display: flex; justify-content: space-between; gap: 1rem; align-items: start; } header div { display: grid; gap: .25rem; } small, .note { color: #9eb2b8; font-size: .78rem; line-height: 1.45; }
+nav { display: flex; flex-wrap: wrap; gap: .4rem; margin: .65rem 0; } button { color: #d9e6e8; background: #172a33; border: 1px solid #45616c; border-radius: .35rem; padding: .4rem .55rem; cursor: pointer; } button.active { background: #276575; border-color: #7fe0ef; } button:disabled { opacity: .4; cursor: default; }
+fieldset { display: grid; gap: .45rem; border-color: #38505b; } label { display: grid; gap: .2rem; font-size: .82rem; } input[type='range'] { width: 100%; accent-color: #63c9d7; }

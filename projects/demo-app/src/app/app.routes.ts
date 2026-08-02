@@ -174,6 +174,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'terrain-composer-lab',
+    loadComponent: () =>
+      import('./pages/terrain-composer-lab/terrain-composer-lab-page.component').then(
+        ({ TerrainComposerLabPageComponent }) => TerrainComposerLabPageComponent,
+      ),
+  },
+  {
     path: 'vehicle-trail-lab',
     canActivate: [
       () =>
