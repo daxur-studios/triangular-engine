@@ -30,6 +30,15 @@
         <button [disabled]="!canUndo()" (click)="undo()">Undo</button>
         <button [disabled]="!canRedo()" (click)="redo()">Redo</button>
       </nav>
+      <nav aria-label="Persistence">
+        <button [disabled]="pointCount() === 0 || !!validationError()" (click)="save()">
+          Save
+        </button>
+        <button [disabled]="!hasSaved()" (click)="load()">Load</button>
+      </nav>
+      @if (persistenceStatus(); as status) {
+        <p class="blurb note">{{ status }}</p>
+      }
       <p class="blurb note">
         Shift-click a point to add/remove it from the selection, then drag
         any selected point to move the whole group together. Ctrl+Z / Ctrl+Y

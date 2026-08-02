@@ -27,8 +27,10 @@ import {
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
   addVec3,
+  deserializeSplineDefinition,
   getSplineArcLengthTable,
   scaleVec3,
+  serializeSplineDefinition,
   subVec3,
   validateSplineDefinition,
   type ISplineDefinition,
@@ -68,6 +70,7 @@ const POINT_RADIUS_M = 0.9;
 const HANDLE_RADIUS_M = 0.55;
 /** Nudges every gizmo/curve line above the ground plane so it doesn't z-fight. */
 const LIFT_M = 0.05;
+const STORAGE_KEY = 'triangular-engine:spline-lab:last';
 
 let nextSplineLabId = 1;
 
@@ -105,6 +108,9 @@ export class SplineLabPageComponent {
   private readonly redoStack = signal<HistorySnapshot[]>([]);
   readonly canUndo = computed(() => this.undoStack().length > 0);
   readonly canRedo = computed(() => this.redoStack().length > 0);
+
+  readonly hasSaved = signal(localStorage.getItem(STORAGE_KEY) !== null);
+  readonly persistenceStatus = signal<string | undefined>(undefined);
 
   /** `undefined` when nothing is selected, or when the selection has mixed handle modes. */
   readonly selectedHandleMode = computed<SplineHandleMode | undefined>(() => {
@@ -222,6 +228,37 @@ export class SplineLabPageComponent {
     this.redoStack.set(stack.slice(0, -1));
     this.undoStack.update((s) => [...s, this.snapshot()]);
     this.applySnapshot(next);
+  }
+
+  save(): void {
+    try {
+      const json = serializeSplineDefinition(this.buildDefinition());
+      localStorage.setItem(STORAGE_KEY, json);
+      this.hasSaved.set(true);
+      this.persistenceStatus.set(`Saved ${this.points.length} points.`);
+    } catch (err) {
+      this.persistenceStatus.set(err instanceof Error ? `Save failed: ${err.message}` : 'Save failed.');
+    }
+  }
+
+  load(): void {
+    const json = localStorage.getItem(STORAGE_KEY);
+    if (!json) {
+      this.persistenceStatus.set('Nothing saved yet.');
+      return;
+    }
+    try {
+      const definition = deserializeSplineDefinition(json);
+      this.pushHistory(this.snapshot());
+      this.points = [...definition.points];
+      this.closed.set(definition.closed);
+      this.interpolation.set(definition.interpolation);
+      this.selectedIndices.set(new Set());
+      this.rebuildScene();
+      this.persistenceStatus.set(`Loaded ${definition.points.length} points.`);
+    } catch (err) {
+      this.persistenceStatus.set(err instanceof Error ? `Load failed: ${err.message}` : 'Load failed.');
+    }
   }
 
   @HostListener('document:keydown', ['$event'])
