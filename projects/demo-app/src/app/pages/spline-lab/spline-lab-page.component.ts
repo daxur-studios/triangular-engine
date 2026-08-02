@@ -81,7 +81,7 @@ export class SplineLabPageComponent {
   readonly selectedHandleMode = computed<SplineHandleMode | undefined>(() => {
     const index = this.selectedIndex();
     if (index === undefined) return undefined;
-    return this.points[index]?.handleMode ?? 'auto';
+    return this.pointsSignal()[index]?.handleMode ?? 'auto';
   });
 
   private readonly engine = inject(EngineService);
@@ -89,7 +89,19 @@ export class SplineLabPageComponent {
   private readonly group = new Group();
   private readonly id = `spline-lab-${nextSplineLabId++}`;
 
-  private points: ISplinePoint[] = [];
+  /**
+   * Backing store for `points`. Plain-field mutation doesn't invalidate
+   * `computed()`s (e.g. `selectedHandleMode`), so state lives in a signal;
+   * the `points` get/set accessor below keeps every other call site (which
+   * reads/writes it like a plain array) unchanged.
+   */
+  private readonly pointsSignal = signal<ISplinePoint[]>([]);
+  private get points(): ISplinePoint[] {
+    return this.pointsSignal();
+  }
+  private set points(value: ISplinePoint[]) {
+    this.pointsSignal.set(value);
+  }
   private drag?: DragTarget;
 
   private readonly groundGeometry: PlaneGeometry;
@@ -157,15 +169,32 @@ export class SplineLabPageComponent {
     const index = this.selectedIndex();
     if (index === undefined) return;
     const point = this.points[index];
+    const showOut = this.closed() || index < this.points.length - 1;
+    const showIn = this.closed() || index > 0;
     let handleOut = point.handleOut;
     let handleIn = point.handleIn;
+
     if (handleMode === 'linear') {
       handleOut = [0, 0, 0];
       handleIn = [0, 0, 0];
     } else if (handleMode === 'auto') {
       handleOut = undefined;
       handleIn = undefined;
+    } else if (handleMode === 'mirrored') {
+      // Enforce the mirror constraint right away (instead of waiting for a
+      // drag) so switching to mirrored is visible immediately.
+      const source =
+        handleOut ??
+        (handleIn ? scaleVec3(handleIn, -1) : subVec3(this.resolveHandle(index, 'out'), point.position));
+      handleOut = source;
+      handleIn = scaleVec3(source, -1);
+    } else {
+      // broken: independent handles; seed any still-undefined side from its
+      // current auto-resolved position so the point doesn't visually jump.
+      if (!handleOut && showOut) handleOut = subVec3(this.resolveHandle(index, 'out'), point.position);
+      if (!handleIn && showIn) handleIn = subVec3(this.resolveHandle(index, 'in'), point.position);
     }
+
     this.points = this.points.map((existing, i) =>
       i === index ? { ...existing, handleMode, handleOut, handleIn } : existing,
     );
