@@ -59,7 +59,7 @@ describe('selectSphereTerrainQuadtreePatches', () => {
       options: { ...input.options, splitErrorPx: 1e12, mergeErrorPx: 1e11 },
     });
 
-    expect(leaves).toHaveLength(6);
+    expect(leaves.length).toBe(6);
     expect(leaves.every((leaf) => leaf.level === 0)).toBe(true);
   });
 

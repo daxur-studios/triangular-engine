@@ -41,10 +41,12 @@ import {
   PlaneTerrainDomain,
   selectAdaptiveTerrainPatches,
   selectPlaneTerrainPatches,
+  selectSphereTerrainQuadtreePatches,
   SPHERE_TERRAIN_FACES,
   SphereTerrainDomain,
   TerrainGenerationQueue,
   type TerrainVector3,
+  type ISphereTerrainPatchAddress,
 } from 'triangular-engine/terrain';
 
 const PATCH_SIZE_M = 512;
@@ -70,6 +72,9 @@ const CYLINDER_RADIUS_M = 1_500;
 const CYLINDER_LENGTH_M = 4_000;
 const CYLINDER_ANGULAR_PATCHES = 12;
 const CYLINDER_AXIAL_PATCHES = 4;
+const BSP_PARITY_SPLIT_ERROR_PX = 16;
+const BSP_PARITY_MERGE_ERROR_PX = 6;
+const BSP_PARITY_SCREEN_SPACE_ERROR_FACTOR_PX = 700;
 
 type TerrainShape = 'plane' | 'sphere' | 'cylinder';
 
@@ -210,6 +215,8 @@ export class TerrainLabPageComponent {
   readonly largeCoordinates = signal(false);
   readonly patchBorders = signal(true);
   readonly wireframe = signal(false);
+  /** BSP-compatible sphere LOD is the default; false keeps the generic POC available. */
+  readonly sphereParitySelection = signal(true);
   readonly streamingRadius = signal(1);
   readonly generationBudget = signal(DEFAULT_GENERATION_BUDGET);
   readonly desiredPatchCount = signal(0);
@@ -227,6 +234,8 @@ export class TerrainLabPageComponent {
   readonly coordinateLabel = signal('0 m');
   readonly centrePatchLabel = signal('0, 0');
   readonly lodLabel = signal('L0: 0');
+  readonly parityDesiredPatchCount = signal(0);
+  readonly parityLodLabel = signal('Off');
 
   private readonly engine = inject(EngineService);
   private readonly physicsComponent = viewChild(JoltPhysicsComponent);
@@ -264,6 +273,8 @@ export class TerrainLabPageComponent {
   private renderOriginX = 0;
   private renderOriginZ = 0;
   private selectionSignature = '';
+  private sphereParityPreviousLeaves: readonly ISphereTerrainPatchAddress[] =
+    [];
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -338,6 +349,15 @@ export class TerrainLabPageComponent {
     this.wireframe.update((enabled) => !enabled);
     for (const patch of this.patches.values())
       patch.material.wireframe = this.wireframe();
+  }
+
+  toggleSphereParitySelection(): void {
+    this.sphereParitySelection.update((enabled) => !enabled);
+    this.sphereParityPreviousLeaves = [];
+    this.parityDesiredPatchCount.set(0);
+    this.parityLodLabel.set(this.sphereParitySelection() ? 'Loading…' : 'Off');
+    this.selectionSignature = '';
+    this.updateCameraSelection();
   }
 
   togglePatchBorders(): void {
@@ -441,6 +461,9 @@ export class TerrainLabPageComponent {
   private rebuild(): void {
     this.disposeTerrain();
     this.colliderSignature = '';
+    this.sphereParityPreviousLeaves = [];
+    this.parityDesiredPatchCount.set(0);
+    this.parityLodLabel.set(this.sphereParitySelection() ? 'Loading…' : 'Off');
     if (this.shape() === 'sphere') {
       this.selectionSignature = '';
       this.coordinateLabel.set('Body centre');
@@ -820,6 +843,7 @@ export class TerrainLabPageComponent {
       x: 0,
       y: 0,
     }));
+    if (this.sphereParitySelection()) return this.selectSphereParityLod();
     return selectAdaptiveTerrainPatches(this.sphereDomain, {
       roots,
       cameraWorldM: [
@@ -832,6 +856,36 @@ export class TerrainLabPageComponent {
       refinementDistanceM:
         1_600 * this.streamingRadius() * this.sphereSizeScale(),
     });
+  }
+
+  private selectSphereParityLod(): readonly ISphereTerrainPatchAddress[] {
+    const camera = this.engine.camera.position;
+    const leaves = selectSphereTerrainQuadtreePatches({
+      radiusM: SPHERE_RADIUS_M * this.sphereSizeScale(),
+      minElevationM: this.sphereField.minElevationM,
+      maxElevationM: this.sphereField.maxElevationM,
+      cameraWorldM: [camera.x, camera.y, camera.z],
+      options: {
+        maxLevel: this.getSphereMaxLodLevel(),
+        patchResolution: PATCH_RESOLUTION,
+        splitErrorPx: BSP_PARITY_SPLIT_ERROR_PX,
+        mergeErrorPx: BSP_PARITY_MERGE_ERROR_PX,
+        screenSpaceErrorFactorPx: BSP_PARITY_SCREEN_SPACE_ERROR_FACTOR_PX,
+      },
+      previousLeaves: this.sphereParityPreviousLeaves,
+    });
+    this.sphereParityPreviousLeaves = leaves;
+    this.parityDesiredPatchCount.set(leaves.length);
+    this.parityLodLabel.set(this.getLodDistributionLabel(leaves));
+    return leaves;
+  }
+
+  /** Keeps the approximate physical sample spacing stable as the body grows. */
+  private getSphereMaxLodLevel(): number {
+    return Math.min(
+      18,
+      MAX_LOD_LEVEL + Math.ceil(Math.log2(this.sphereSizeScale())),
+    );
   }
 
   private selectCylinderLod() {
@@ -911,12 +965,23 @@ export class TerrainLabPageComponent {
   private updateLodLabel(levels: readonly number[]): void {
     const counts = new Map<number, number>();
     for (const level of levels) counts.set(level, (counts.get(level) ?? 0) + 1);
-    this.lodLabel.set(
-      [...counts]
-        .sort(([a], [b]) => a - b)
-        .map(([level, count]) => `L${level}: ${count}`)
-        .join(' · '),
-    );
+    this.lodLabel.set(this.formatLodDistribution(counts));
+  }
+
+  private getLodDistributionLabel(
+    addresses: readonly { readonly level: number }[],
+  ): string {
+    const counts = new Map<number, number>();
+    for (const { level } of addresses)
+      counts.set(level, (counts.get(level) ?? 0) + 1);
+    return this.formatLodDistribution(counts);
+  }
+
+  private formatLodDistribution(counts: ReadonlyMap<number, number>): string {
+    return [...counts]
+      .sort(([a], [b]) => a - b)
+      .map(([level, count]) => `L${level}: ${count}`)
+      .join(' · ');
   }
 
   private installPatch(

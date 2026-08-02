@@ -57,6 +57,17 @@
         <button [class.active]="patchBorders()" (click)="togglePatchBorders()">
           Patch borders
         </button>
+        <button
+          [class.active]="sphereParitySelection()"
+          [disabled]="shape() !== 'sphere'"
+          (click)="toggleSphereParitySelection()"
+        >
+          {{
+            sphereParitySelection()
+              ? "Use generic sphere LOD"
+              : "Use BSP-parity LOD"
+          }}
+        </button>
       </div>
       <label class="radius-control">
         <span>Streaming radius: {{ streamingRadius() }}×</span>
@@ -121,6 +132,11 @@
         <span>Debug border calls: {{ debugDrawCallCount() }}</span>
         <span>Terrain geometry: {{ geometryByteLabel() }}</span>
         <span>LOD distribution: {{ lodLabel() }}</span>
+        @if (shape() === "sphere" && sphereParitySelection()) {
+          <span>LOD selector: BSP parity</span>
+          <span>BSP-parity desired: {{ parityDesiredPatchCount() }}</span>
+          <span>BSP-parity LOD: {{ parityLodLabel() }}</span>
+        }
         <span>Camera patch: {{ centrePatchLabel() }}</span>
         <span>Reference grid: 100 m below datum</span>
         <span>Each outlined tile is one mesh</span>

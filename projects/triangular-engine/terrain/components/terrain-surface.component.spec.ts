@@ -70,6 +70,28 @@ describe('TerrainSurfaceComponent', () => {
     expect(scene.children[0].children.length).toBe(4);
   });
 
+  it('uses an opt-in patch selector while retaining shared mesh streaming', () => {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    const selector = jasmine
+      .createSpy('patchSelector')
+      .and.callFake(({ roots }: { roots: readonly unknown[] }) => roots);
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', [{ level: 0, x: 0, z: 0 }]);
+    fixture.componentRef.setInput('maxLod', 2);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('generationBudget', 100);
+    fixture.componentRef.setInput('patchSelector', selector);
+    fixture.detectChanges();
+
+    beforeRender$.next();
+
+    expect(selector).toHaveBeenCalledWith(
+      jasmine.objectContaining({ maxLevel: 2 }),
+    );
+    expect(scene.children[0].children.length).toBe(1);
+  });
+
   it('reports resident geometry bytes and skirt draw calls for performance diagnostics', () => {
     const fixture = TestBed.createComponent(TerrainSurfaceComponent);
     const stats: ITerrainSurfaceLodStats[] = [];

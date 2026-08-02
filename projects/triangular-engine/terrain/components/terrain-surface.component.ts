@@ -55,6 +55,28 @@ export interface ITerrainSurfaceGenerationRequest<TAddress> {
   readonly skirtDepthM: number;
 }
 
+/** Context supplied to an optional terrain-surface patch selector. */
+export interface ITerrainSurfaceSelectionRequest<TAddress> {
+  readonly domain: IHierarchicalTerrainSurfaceDomain<TAddress>;
+  readonly roots: readonly TAddress[];
+  readonly cameraWorldM: TerrainVector3;
+  readonly getLevel: (address: TAddress) => number;
+  readonly getKey: (address: TAddress) => string;
+  readonly maxLevel: number;
+  readonly refinementDistanceM: number;
+  readonly hysteresis: number;
+  /** Whether the default selector refined this address on its previous update. */
+  readonly wasRefined: (address: TAddress) => boolean;
+}
+
+/**
+ * Optional LOD strategy for a terrain surface. Returning leaf patches keeps
+ * meshing, nearby-first generation, retention, and render diagnostics shared.
+ */
+export type TerrainSurfacePatchSelector<TAddress> = (
+  request: ITerrainSurfaceSelectionRequest<TAddress>,
+) => readonly TAddress[];
+
 export type TerrainSurfaceMeshGenerator<TAddress> = (
   request: ITerrainSurfaceGenerationRequest<TAddress>,
 ) => ITerrainPatchMesh<TAddress> | Promise<ITerrainPatchMesh<TAddress>>;
@@ -108,6 +130,10 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   readonly generationBudget = input(4);
   /** Prevents LOD oscillation near a refinement boundary. */
   readonly lodHysteresis = input(0.15);
+  /** Uses the built-in adaptive distance selector when omitted. */
+  readonly patchSelector = input<
+    TerrainSurfacePatchSelector<TAddress> | undefined
+  >(undefined);
   /**
    * Optional asynchronous mesh generator. Supply a worker-backed function to
    * move field sampling and typed-array construction off the main thread.
@@ -150,6 +176,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       this.resolution();
       this.skirtDepth();
       this.lodHysteresis();
+      this.patchSelector();
       this.meshGenerator();
       this.getLevel();
       this.getKey();
@@ -177,21 +204,33 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     const position = this.lodPosition() ?? this.cameraPosition();
     const getLevel = this.getLevel();
     const getKey = this.getKey();
-    const nextRefinedKeys = new Set<string>();
-    const selected = selectAdaptiveTerrainPatches(domain, {
-      roots,
-      cameraWorldM: position,
-      getLevel,
-      maxLevel: Math.max(0, Math.floor(this.maxLod())),
-      refinementDistanceM:
-        this.refinementDistance() ?? estimateRefinementDistance(domain, roots),
-      hysteresis: Math.min(0.95, Math.max(0, this.lodHysteresis())),
-      wasRefined: (address) => this.refinedKeys.has(getKey(address)),
-      onRefinement: (address, refined) => {
-        if (refined) nextRefinedKeys.add(getKey(address));
-      },
-    });
-    this.refinedKeys = nextRefinedKeys;
+    const maxLevel = Math.max(0, Math.floor(this.maxLod()));
+    const refinementDistanceM =
+      this.refinementDistance() ?? estimateRefinementDistance(domain, roots);
+    const hysteresis = Math.min(0.95, Math.max(0, this.lodHysteresis()));
+    const patchSelector = this.patchSelector();
+    const selected = patchSelector
+      ? this.selectCustomPatches(patchSelector, {
+          domain,
+          roots,
+          cameraWorldM: position,
+          getLevel,
+          getKey,
+          maxLevel,
+          refinementDistanceM,
+          hysteresis,
+          wasRefined: (address) => this.refinedKeys.has(getKey(address)),
+        })
+      : this.selectDefaultPatches({
+          domain,
+          roots,
+          cameraWorldM: position,
+          getLevel,
+          getKey,
+          maxLevel,
+          refinementDistanceM,
+          hysteresis,
+        });
     const entries = selected.map((address) => ({
       address,
       key: getKey(address),
@@ -265,6 +304,34 @@ export class TerrainSurfaceComponent<TAddress = unknown>
         console.error('Terrain patch generation failed.', error);
       })
       .finally(() => this.generating.delete(key));
+  }
+
+  private selectCustomPatches(
+    selector: TerrainSurfacePatchSelector<TAddress>,
+    request: ITerrainSurfaceSelectionRequest<TAddress>,
+  ): readonly TAddress[] {
+    this.refinedKeys.clear();
+    return selector(request);
+  }
+
+  private selectDefaultPatches(
+    request: Omit<ITerrainSurfaceSelectionRequest<TAddress>, 'wasRefined'>,
+  ): readonly TAddress[] {
+    const nextRefinedKeys = new Set<string>();
+    const selected = selectAdaptiveTerrainPatches(request.domain, {
+      roots: request.roots,
+      cameraWorldM: request.cameraWorldM,
+      getLevel: request.getLevel,
+      maxLevel: request.maxLevel,
+      refinementDistanceM: request.refinementDistanceM,
+      hysteresis: request.hysteresis,
+      wasRefined: (address) => this.refinedKeys.has(request.getKey(address)),
+      onRefinement: (address, refined) => {
+        if (refined) nextRefinedKeys.add(request.getKey(address));
+      },
+    });
+    this.refinedKeys = nextRefinedKeys;
+    return selected;
   }
 
   private installPatch(
