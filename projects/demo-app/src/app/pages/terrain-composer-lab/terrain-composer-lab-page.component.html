@@ -13,11 +13,26 @@
       <fieldset><legend>Shape</legend>
         <label>Island height <input type="range" min="0" max="60" [value]="settings().islandHeight" (input)="updateSetting('islandHeight', $event)" /></label>
         <label>Coast falloff <input type="range" min="4" max="40" [value]="settings().islandFalloff" (input)="updateSetting('islandFalloff', $event)" /></label>
+        <label>Ocean level <input type="range" min="-30" max="20" [value]="settings().seaLevel" (input)="updateSetting('seaLevel', $event)" /></label>
         <label>Mountain height <input type="range" min="0" max="60" [value]="settings().mountainHeight" (input)="updateSetting('mountainHeight', $event)" /></label>
         <label>Mountain width <input type="range" min="5" max="45" [value]="settings().mountainWidth" (input)="updateSetting('mountainWidth', $event)" /></label>
         <label>River depth <input type="range" min="0" max="35" [value]="settings().riverDepth" (input)="updateSetting('riverDepth', $event)" /></label>
         <label>River width <input type="range" min="2" max="16" [value]="settings().riverWidth" (input)="updateSetting('riverWidth', $event)" /></label>
-        <label>Noise <input type="range" min="0" max="40" [value]="settings().noiseAmplitude" (input)="updateSetting('noiseAmplitude', $event)" /></label>
+      </fieldset>
+      <fieldset><legend>Island noise</legend>
+        <label>Amplitude <input type="range" min="0" max="20" [value]="settings().islandNoiseAmplitude" (input)="updateSetting('islandNoiseAmplitude', $event)" /></label>
+        <label>Scale <input type="range" min="0.005" max="0.12" step="0.005" [value]="settings().islandNoiseScale" (input)="updateSetting('islandNoiseScale', $event)" /></label>
+        <label>Style <select [value]="settings().islandNoiseStyle" (change)="updateNoiseStyle('islandNoiseStyle', $event)"><option value="meadow">Meadow</option><option value="curl">Curl</option><option value="ridge">Ridge</option></select></label>
+      </fieldset>
+      <fieldset><legend>Mountain noise</legend>
+        <label>Amplitude <input type="range" min="0" max="35" [value]="settings().mountainNoiseAmplitude" (input)="updateSetting('mountainNoiseAmplitude', $event)" /></label>
+        <label>Scale <input type="range" min="0.005" max="0.15" step="0.005" [value]="settings().mountainNoiseScale" (input)="updateSetting('mountainNoiseScale', $event)" /></label>
+        <label>Style <select [value]="settings().mountainNoiseStyle" (change)="updateNoiseStyle('mountainNoiseStyle', $event)"><option value="meadow">Meadow</option><option value="curl">Curl</option><option value="ridge">Ridge</option></select></label>
+      </fieldset>
+      <fieldset><legend>River variation</legend>
+        <label>Amplitude <input type="range" min="0" max="1" step="0.05" [value]="settings().riverNoiseAmplitude" (input)="updateSetting('riverNoiseAmplitude', $event)" /></label>
+        <label>Scale <input type="range" min="0.02" max="0.2" step="0.01" [value]="settings().riverNoiseScale" (input)="updateSetting('riverNoiseScale', $event)" /></label>
+        <label>Style <select [value]="settings().riverNoiseStyle" (change)="updateNoiseStyle('riverNoiseStyle', $event)"><option value="meadow">Meadow</option><option value="curl">Curl</option><option value="ridge">Ridge</option></select></label>
       </fieldset>
       <fieldset><legend>Point movement</legend>
         <p class="note">Click a point or spline to select it. Ctrl/Cmd-click empty space adds a node to the selected spline.</p>
@@ -30,7 +45,7 @@
       <p class="note">{{ featureCount() }} spline features · seed {{ seedLabel() }} · click to select, Ctrl/Cmd-click to add a node · Ctrl/Cmd+Z/Y undo/redo</p>
     </section>
   </ng-template>
-  <ng-template portalTarget="overlay" lane="topEnd"><section class="preview"><label>Heightmap</label><canvas #heightmap></canvas></section></ng-template>
+  <ng-template portalTarget="overlay" lane="topEnd"><section class="preview"><label>Heightmap</label><canvas #heightmap></canvas><div class="preview-grid"><label>Island mask<canvas #islandPreview></canvas></label><label>Mountain mask<canvas #mountainPreview></canvas></label><label>River mask<canvas #riverPreview></canvas></label></div></section></ng-template>
   <orbitControls [cameraPosition]="[145, 125, 165]" [target]="[0, 8, 0]" [isActive]="!isDragging()" />
   <ambientLight [intensity]="1.1" /><directionalLight [position]="[80, 130, 60]" [intensity]="2" />
 </scene>

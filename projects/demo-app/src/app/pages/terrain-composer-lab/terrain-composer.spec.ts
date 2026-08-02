@@ -25,4 +25,20 @@ describe('TerrainComposerField', () => {
     expect(Math.min(...heightmap)).toBeGreaterThanOrEqual(0);
     expect(Math.max(...heightmap)).toBeLessThanOrEqual(255);
   });
+
+  it('keeps terrain fixed when only the ocean level changes', () => {
+    const lowOcean = new TerrainComposerField(features, {
+      ...defaultComposerSettings(),
+      noiseAmplitude: 0,
+      seaLevel: -20,
+    });
+    const highOcean = new TerrainComposerField(features, {
+      ...defaultComposerSettings(),
+      noiseAmplitude: 0,
+      seaLevel: 10,
+    });
+    expect(highOcean.sample([0, 0, 0]).elevationM).toBe(
+      lowOcean.sample([0, 0, 0]).elevationM,
+    );
+  });
 });

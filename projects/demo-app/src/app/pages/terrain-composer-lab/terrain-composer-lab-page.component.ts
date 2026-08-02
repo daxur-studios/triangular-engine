@@ -73,8 +73,14 @@ type ComposerPickTarget =
   host: { class: 'flex-page' },
 })
 export class TerrainComposerLabPageComponent implements AfterViewInit {
-  @ViewChild('heightmap', { static: true })
+  @ViewChild('heightmap')
   private readonly heightmap?: ElementRef<HTMLCanvasElement>;
+  @ViewChild('islandPreview')
+  private readonly islandPreview?: ElementRef<HTMLCanvasElement>;
+  @ViewChild('mountainPreview')
+  private readonly mountainPreview?: ElementRef<HTMLCanvasElement>;
+  @ViewChild('riverPreview')
+  private readonly riverPreview?: ElementRef<HTMLCanvasElement>;
   readonly activeLayer = signal<ComposerLayer>('island');
   readonly editMode = signal(true);
   readonly settings = signal<ComposerSettings>(defaultComposerSettings());
@@ -107,6 +113,15 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
   });
   private readonly waterMaterial = createFlowMaterial();
   private water?: Mesh;
+  private readonly oceanMaterial = new MeshStandardMaterial({
+    color: '#1c7085',
+    roughness: 0.18,
+    metalness: 0.05,
+    transparent: true,
+    opacity: 0.78,
+    depthWrite: false,
+  });
+  private ocean?: Mesh;
   private currentFeatureId?: string;
   private selectedPoint?: { featureId: string; index: number };
   private drag?: {
@@ -143,9 +158,6 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
         (elapsedTime) =>
           (this.waterMaterial.uniforms['time'].value = elapsedTime),
       );
-    this.engine.tick$
-      .pipe(takeUntilDestroyed(destroyRef))
-      .subscribe(() => this.drawHeightmap());
     this.rebuild();
     destroyRef.onDestroy(() => {
       this.group.removeFromParent();
@@ -155,6 +167,9 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
       this.water?.removeFromParent();
       this.water?.geometry.dispose();
       this.waterMaterial.dispose();
+      this.ocean?.removeFromParent();
+      this.ocean?.geometry.dispose();
+      this.oceanMaterial.dispose();
       this.disposeLines();
       this.disposePointMeshes();
       this.disposeTransformGizmo();
@@ -166,7 +181,7 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
   }
 
   ngAfterViewInit(): void {
-    this.drawHeightmap();
+    requestAnimationFrame(() => this.drawPreviews());
   }
 
   setLayer(layer: ComposerLayer): void {
@@ -212,6 +227,11 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
   }
   updateSetting(key: keyof ComposerSettings, event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
+    this.settings.update((settings) => ({ ...settings, [key]: value }));
+    this.rebuild();
+  }
+  updateNoiseStyle(key: keyof ComposerSettings, event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
     this.settings.update((settings) => ({ ...settings, [key]: value }));
     this.rebuild();
   }
@@ -418,12 +438,18 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
         };
       }),
     );
-    this.rebuild();
+    // Keep pointer movement light: the terrain mesh, ocean, river ribbon and
+    // preview canvases are committed once the drag ends. Only the editor
+    // overlay needs to follow the pointer continuously.
+    this.field.set(new TerrainComposerField(this.features(), this.settings()));
+    this.rebuildLines();
   }
 
   private onCanvasUp(): void {
+    const wasDragging = this.drag !== undefined;
     this.drag = undefined;
     this.isDragging.set(false);
+    if (wasDragging) this.rebuild();
   }
 
   private syncHistoryState(): void {
@@ -484,7 +510,7 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
     this.field.set(new TerrainComposerField(this.features(), this.settings()));
     this.rebuildTerrainMesh();
     this.rebuildLines();
-    this.drawHeightmap();
+    this.drawPreviews();
   }
 
   private rebuildTerrainMesh(): void {
@@ -540,7 +566,20 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
     }
     mesh.name = 'terrain';
     this.group.add(mesh);
+    this.rebuildOcean();
     this.rebuildWater();
+  }
+
+  private rebuildOcean(): void {
+    this.ocean?.removeFromParent();
+    this.ocean?.geometry.dispose();
+    const size = this.settings().worldSize * 1.8;
+    this.ocean = new Mesh(new PlaneGeometry(size, size), this.oceanMaterial);
+    this.ocean.name = 'ocean';
+    this.ocean.rotation.x = -Math.PI / 2;
+    this.ocean.position.y = this.settings().seaLevel;
+    this.ocean.renderOrder = 0;
+    this.group.add(this.ocean);
   }
 
   private rebuildWater(): void {
@@ -739,6 +778,13 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
     this.pointMeshes = [];
   }
 
+  private drawPreviews(): void {
+    this.drawHeightmap();
+    this.drawLayerPreview(this.islandPreview?.nativeElement, 'island');
+    this.drawLayerPreview(this.mountainPreview?.nativeElement, 'mountain');
+    this.drawLayerPreview(this.riverPreview?.nativeElement, 'river');
+  }
+
   private drawHeightmap(): void {
     const canvas = this.heightmap?.nativeElement;
     if (!canvas) return;
@@ -771,6 +817,35 @@ export class TerrainComposerLabPageComponent implements AfterViewInit {
       image.data[i * 4 + 1] = Math.round(color.g * 255);
       image.data[i * 4 + 2] = Math.round(color.b * 255);
       image.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(image, 0, 0);
+  }
+
+  private drawLayerPreview(
+    canvas: HTMLCanvasElement | undefined,
+    layer: ComposerLayer,
+  ): void {
+    if (!canvas) return;
+    const size = 192;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const image = ctx.createImageData(size, size);
+    const color = new Color();
+    for (let row = 0; row < size; row++) {
+      for (let column = 0; column < size; column++) {
+        const x = (column / (size - 1)) * this.settings().worldSize - this.settings().worldSize / 2;
+        const z = (row / (size - 1)) * this.settings().worldSize - this.settings().worldSize / 2;
+        const value = this.field().sampleLayerMask(layer, x, z);
+        color.set(layer === 'island' ? '#d3a84c' : layer === 'mountain' ? '#d9634e' : '#4dc7e5');
+        color.multiplyScalar(0.16 + value * 0.84);
+        const index = (row * size + column) * 4;
+        image.data[index] = Math.round(color.r * 255);
+        image.data[index + 1] = Math.round(color.g * 255);
+        image.data[index + 2] = Math.round(color.b * 255);
+        image.data[index + 3] = 255;
+      }
     }
     ctx.putImageData(image, 0, 0);
   }
