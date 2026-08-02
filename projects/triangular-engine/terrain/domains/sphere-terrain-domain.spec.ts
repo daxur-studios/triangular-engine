@@ -4,6 +4,7 @@ import {
   SPHERE_TERRAIN_FACES,
   SphereTerrainDomain,
   sphereFaceUvToDirection,
+  sphereTerrainPatchNeighbor,
 } from './sphere-terrain-domain';
 
 describe('SphereTerrainDomain', () => {
@@ -161,5 +162,16 @@ describe('SphereTerrainDomain', () => {
         ),
       ).toBeLessThan(0.001);
     }
+  });
+
+  it('finds reciprocal same-level neighbors across cube-face seams', () => {
+    const domain = new SphereTerrainDomain(2_000);
+    const address = { face: 'positive-x' as const, level: 4, x: 15, y: 7 };
+    const neighbor = sphereTerrainPatchNeighbor(domain, address, 'right');
+
+    expect(neighbor.face).toBe('negative-z');
+    expect(sphereTerrainPatchNeighbor(domain, neighbor, 'left')).toEqual(
+      address,
+    );
   });
 });

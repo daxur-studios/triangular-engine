@@ -78,6 +78,8 @@ interface ITerrainPatchVisual {
   readonly border: LineSegments;
   readonly material: MeshStandardMaterial;
   readonly borderMaterial: LineBasicMaterial;
+  readonly terrainDrawCalls: number;
+  readonly geometryBytes: number;
 }
 
 class TerrainLabField implements ITerrainField {
@@ -210,10 +212,14 @@ export class TerrainLabPageComponent {
   readonly wireframe = signal(false);
   readonly streamingRadius = signal(1);
   readonly generationBudget = signal(DEFAULT_GENERATION_BUDGET);
+  readonly desiredPatchCount = signal(0);
   readonly queuedPatchCount = signal(0);
   readonly sphereSizeScale = signal(1);
   readonly cylinderSizeScale = signal(1);
   readonly patchCount = signal(0);
+  readonly terrainDrawCallCount = signal(0);
+  readonly debugDrawCallCount = signal(0);
+  readonly geometryByteCount = signal(0);
   readonly colliderCount = signal(0);
   readonly characterEnabled = signal(true);
   readonly physicsDebug = signal(false);
@@ -338,6 +344,11 @@ export class TerrainLabPageComponent {
     this.patchBorders.update((enabled) => !enabled);
     for (const patch of this.patches.values())
       patch.borderMaterial.visible = this.patchBorders();
+    this.updateRenderDiagnostics();
+  }
+
+  geometryByteLabel(): string {
+    return `${this.geometryByteCount().toLocaleString()} B`;
   }
 
   setStreamingRadius(event: Event): void {
@@ -473,6 +484,7 @@ export class TerrainLabPageComponent {
       address,
       key: this.getPatchKey(shape, address),
     }));
+    this.desiredPatchCount.set(entries.length);
     const signature = entries.map(({ key }) => key).join('|');
     if (signature !== this.selectionSignature) {
       this.selectionSignature = signature;
@@ -499,6 +511,7 @@ export class TerrainLabPageComponent {
     }
     this.queuedPatchCount.set(this.generationQueue.pendingCount);
     this.patchCount.set(this.patches.size);
+    this.updateRenderDiagnostics();
   }
 
   private updatePhysics(deltaSeconds: number): void {
@@ -545,7 +558,9 @@ export class TerrainLabPageComponent {
           : 1);
       movement.normalize().multiplyScalar(speed);
     }
-    const horizontalVelocity = velocity.clone().addScaledVector(up, -verticalSpeed);
+    const horizontalVelocity = velocity
+      .clone()
+      .addScaledVector(up, -verticalSpeed);
     const steeredHorizontal =
       movement.lengthSq() > 0 ? movement : horizontalVelocity;
     velocity.copy(steeredHorizontal).addScaledVector(up, verticalSpeed);
@@ -940,6 +955,8 @@ export class TerrainLabPageComponent {
       vertexColors: true,
     });
     const mesh = new Mesh(geometry, material);
+    let terrainDrawCalls = 1;
+    let geometryBytes = getGeometryByteCount(geometry);
     if (patch.skirt) {
       const skirtGeometry = new BufferGeometry();
       skirtGeometry.setAttribute(
@@ -964,6 +981,8 @@ export class TerrainLabPageComponent {
       );
       skirtGeometry.setIndex(new BufferAttribute(patch.skirt.indices, 1));
       mesh.add(new Mesh(skirtGeometry, material));
+      terrainDrawCalls++;
+      geometryBytes += getGeometryByteCount(skirtGeometry);
     }
     const borderMaterial = new LineBasicMaterial({
       color: '#d7f08a',
@@ -987,7 +1006,15 @@ export class TerrainLabPageComponent {
     mesh.position.set(renderX, renderY, renderZ);
     border.position.set(renderX, renderY, renderZ);
     this.terrain.add(mesh, border);
-    this.patches.set(key, { mesh, border, material, borderMaterial });
+    geometryBytes += getGeometryByteCount(border.geometry);
+    this.patches.set(key, {
+      mesh,
+      border,
+      material,
+      borderMaterial,
+      terrainDrawCalls,
+      geometryBytes,
+    });
   }
 
   private createBiomeColors(
@@ -1039,6 +1066,18 @@ export class TerrainLabPageComponent {
     this.patches.delete(key);
   }
 
+  private updateRenderDiagnostics(): void {
+    let terrainDrawCalls = 0;
+    let geometryBytes = 0;
+    for (const patch of this.patches.values()) {
+      terrainDrawCalls += patch.terrainDrawCalls;
+      geometryBytes += patch.geometryBytes;
+    }
+    this.terrainDrawCallCount.set(terrainDrawCalls);
+    this.debugDrawCallCount.set(this.patchBorders() ? this.patches.size : 0);
+    this.geometryByteCount.set(geometryBytes);
+  }
+
   private createPatchBorderGeometry(
     positions: Float32Array,
     normals: Float32Array,
@@ -1084,6 +1123,18 @@ export class TerrainLabPageComponent {
     this.generationQueue.clear();
     for (const [key, patch] of [...this.patches]) this.removePatch(key, patch);
     this.patchCount.set(0);
+    this.desiredPatchCount.set(0);
     this.queuedPatchCount.set(0);
+    this.terrainDrawCallCount.set(0);
+    this.debugDrawCallCount.set(0);
+    this.geometryByteCount.set(0);
   }
+}
+
+function getGeometryByteCount(geometry: BufferGeometry): number {
+  let byteCount = geometry.index?.array.byteLength ?? 0;
+  for (const attribute of Object.values(geometry.attributes)) {
+    byteCount += attribute.array.byteLength;
+  }
+  return byteCount;
 }

@@ -29,7 +29,16 @@ export interface ISphereTerrainPatchAddress {
   readonly y: number;
 }
 
-const MAX_SPHERE_TERRAIN_LEVEL = 30;
+/** Maximum quadtree level that keeps exact integer tile counts in JS numbers. */
+export const MAX_SPHERE_TERRAIN_LEVEL = 30;
+
+export type SphereTerrainPatchEdge = 'left' | 'right' | 'bottom' | 'top';
+
+export interface ISphereTerrainFaceUv {
+  readonly face: SphereTerrainFace;
+  readonly u: number;
+  readonly v: number;
+}
 
 function normalize([x, y, z]: TerrainVector3): TerrainVector3 {
   const inverseLength = 1 / Math.hypot(x, y, z);
@@ -72,6 +81,76 @@ export function sphereFaceUvToDirection(
       break;
   }
   return normalize(cube);
+}
+
+/** Resolves a finite non-zero direction to this domain's canonical cube face. */
+export function sphereDirectionToFaceUv(
+  direction: TerrainVector3,
+): ISphereTerrainFaceUv {
+  const [x, y, z] = direction;
+  if (![x, y, z].every(Number.isFinite) || (x === 0 && y === 0 && z === 0)) {
+    throw new RangeError(
+      'Sphere terrain direction must be finite and non-zero.',
+    );
+  }
+  const absX = Math.abs(x);
+  const absY = Math.abs(y);
+  const absZ = Math.abs(z);
+  if (absX >= absY && absX >= absZ) {
+    return x >= 0
+      ? { face: 'positive-x', u: -z / absX, v: y / absX }
+      : { face: 'negative-x', u: z / absX, v: y / absX };
+  }
+  if (absY >= absZ) {
+    return y >= 0
+      ? { face: 'positive-y', u: x / absY, v: -z / absY }
+      : { face: 'negative-y', u: x / absY, v: z / absY };
+  }
+  return z >= 0
+    ? { face: 'positive-z', u: x / absZ, v: y / absZ }
+    : { face: 'negative-z', u: -x / absZ, v: y / absZ };
+}
+
+/** Finds a same-level neighbor, including transitions across cube faces. */
+export function sphereTerrainPatchNeighbor(
+  domain: SphereTerrainDomain,
+  address: ISphereTerrainPatchAddress,
+  edge: SphereTerrainPatchEdge,
+): ISphereTerrainPatchAddress {
+  const bounds = domain.getPatchBounds(address);
+  const outsideOffset = Number.EPSILON * 16;
+  let u = (bounds.minU + bounds.maxU) / 2;
+  let v = (bounds.minV + bounds.maxV) / 2;
+  switch (edge) {
+    case 'left':
+      u = bounds.minU - outsideOffset;
+      break;
+    case 'right':
+      u = bounds.maxU + outsideOffset;
+      break;
+    case 'bottom':
+      v = bounds.minV - outsideOffset;
+      break;
+    case 'top':
+      v = bounds.maxV + outsideOffset;
+      break;
+  }
+  const neighbor = sphereDirectionToFaceUv(
+    sphereFaceUvToDirection(address.face, u, v),
+  );
+  const tileCount = 2 ** address.level;
+  return {
+    face: neighbor.face,
+    level: address.level,
+    x: Math.min(
+      tileCount - 1,
+      Math.max(0, Math.floor((neighbor.u + 1) * 0.5 * tileCount)),
+    ),
+    y: Math.min(
+      tileCount - 1,
+      Math.max(0, Math.floor((neighbor.v + 1) * 0.5 * tileCount)),
+    ),
+  };
 }
 
 /** Six-face cubesphere terrain with outward positive elevation. */
