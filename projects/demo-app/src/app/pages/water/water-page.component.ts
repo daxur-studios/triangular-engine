@@ -30,6 +30,7 @@ import {
   SphereTerrainDomain,
   SPHERE_TERRAIN_FACES,
   TerrainSurfaceComponent,
+  createSphereTerrainSurfaceSelector,
   type ITerrainField,
   type ITerrainFieldSample,
   type ITerrainSurfaceColorContext,
@@ -206,6 +207,22 @@ export class WaterPageComponent {
     if (this.activeDomain() === 'sphere') return 720 * scale;
     if (this.activeDomain() === 'cylinder') return 520 * scale;
     return 1_100 * scale;
+  });
+  /** Uses the production BSP sphere cut while plane/cylinder keep generic LOD. */
+  readonly sphereTerrainPatchSelector = computed(() => {
+    if (this.activeDomain() !== 'sphere') return undefined;
+
+    const scale = this.worldScale();
+    const field = this.terrainFields.sphere;
+    return createSphereTerrainSurfaceSelector({
+      radiusM: SPHERE_RADIUS * scale,
+      minElevationM: field.minElevationM,
+      maxElevationM: field.maxElevationM,
+      patchResolution: 48,
+      splitErrorPx: 16,
+      mergeErrorPx: 6,
+      screenSpaceErrorFactorPx: 700,
+    }).select;
   });
   readonly createTerrainMaterial = () =>
     new MeshStandardMaterial({

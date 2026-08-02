@@ -12,4 +12,6 @@ export * from './domains/cylinder-terrain-domain';
 export * from './meshing/terrain-patch-mesher';
 export * from './streaming/terrain-patch-selection';
 export * from './streaming/sphere-terrain-quadtree-selection';
+export * from './streaming/sphere-terrain-surface-selector';
+export * from './streaming/terrain-surface-patch-selector';
 export * from './streaming/terrain-generation-queue';

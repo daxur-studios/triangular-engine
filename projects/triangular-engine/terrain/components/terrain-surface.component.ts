@@ -28,7 +28,6 @@ import type { IHierarchicalTerrainSurfaceDomain } from '../domains/terrain-surfa
 import { generateTerrainPatchMesh } from '../meshing/terrain-patch-mesher';
 import { TerrainGenerationQueue } from '../streaming/terrain-generation-queue';
 import { selectAdaptiveTerrainPatches } from '../streaming/terrain-patch-selection';
-
 export interface ITerrainSurfaceLodStats {
   readonly desired: number;
   readonly resident: number;
@@ -55,27 +54,14 @@ export interface ITerrainSurfaceGenerationRequest<TAddress> {
   readonly skirtDepthM: number;
 }
 
-/** Context supplied to an optional terrain-surface patch selector. */
-export interface ITerrainSurfaceSelectionRequest<TAddress> {
-  readonly domain: IHierarchicalTerrainSurfaceDomain<TAddress>;
-  readonly roots: readonly TAddress[];
-  readonly cameraWorldM: TerrainVector3;
-  readonly getLevel: (address: TAddress) => number;
-  readonly getKey: (address: TAddress) => string;
-  readonly maxLevel: number;
-  readonly refinementDistanceM: number;
-  readonly hysteresis: number;
-  /** Whether the default selector refined this address on its previous update. */
-  readonly wasRefined: (address: TAddress) => boolean;
-}
-
-/**
- * Optional LOD strategy for a terrain surface. Returning leaf patches keeps
- * meshing, nearby-first generation, retention, and render diagnostics shared.
- */
-export type TerrainSurfacePatchSelector<TAddress> = (
-  request: ITerrainSurfaceSelectionRequest<TAddress>,
-) => readonly TAddress[];
+export type {
+  ITerrainSurfaceSelectionRequest,
+  TerrainSurfacePatchSelector,
+} from '../streaming/terrain-surface-patch-selector';
+import type {
+  ITerrainSurfaceSelectionRequest,
+  TerrainSurfacePatchSelector,
+} from '../streaming/terrain-surface-patch-selector';
 
 export type TerrainSurfaceMeshGenerator<TAddress> = (
   request: ITerrainSurfaceGenerationRequest<TAddress>,
@@ -108,6 +94,11 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   private readonly group = new Object3D();
   private readonly residents = new Map<string, IResidentPatch>();
   private readonly queue = new TerrainGenerationQueue<TAddress>();
+  private readonly completed = new Map<
+    string,
+    { readonly address: TAddress; readonly patch: ITerrainPatchMesh<TAddress> }
+  >();
+  private desiredPriorities = new Map<string, number>();
   private selectionSignature = '';
   private refinedKeys = new Set<string>();
   private generationEpoch = 0;
@@ -235,6 +226,12 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       address,
       key: getKey(address),
     }));
+    this.desiredPriorities = new Map(
+      entries.map(({ address, key }) => [
+        key,
+        patchDistance(domain, address, position),
+      ]),
+    );
     this.desiredPatchCount = entries.length;
     this.selectedLevels = {};
     for (const address of selected) {
@@ -248,7 +245,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
         entries.map(({ address, key }) => ({
           key,
           value: address,
-          priority: patchDistance(domain, address, position),
+          priority: this.desiredPriorities.get(key) ?? 0,
         })),
         new Set([...this.residents.keys(), ...this.generating]),
       );
@@ -261,7 +258,13 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     this.queue.drain(availableGenerationSlots, ({ key, value }) =>
       this.generatePatch(key, value),
     );
-    if (this.queue.pendingCount === 0 && this.generating.size === 0) {
+    this.installCompletedPatches(generationBudget);
+    if (
+      this.queue.pendingCount === 0 &&
+      this.generating.size === 0 &&
+      this.completed.size === 0 &&
+      this.desiredPatchesAreResident()
+    ) {
       for (const [key, patch] of this.residents) {
         if (!this.queue.desired.has(key)) this.removePatch(key, patch);
       }
@@ -284,7 +287,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     const epoch = this.generationEpoch;
     const result = generator(request);
     if (!(result instanceof Promise)) {
-      this.installPatch(key, address, result);
+      this.completed.set(key, { address, patch: result });
       return;
     }
     this.generating.add(key);
@@ -295,7 +298,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
           this.queue.desired.has(key) &&
           !this.residents.has(key)
         ) {
-          this.installPatch(key, address, patch);
+          this.completed.set(key, { address, patch });
         }
       })
       .catch((error: unknown) => {
@@ -306,11 +309,36 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       .finally(() => this.generating.delete(key));
   }
 
+  private installCompletedPatches(maxInstalls: number): void {
+    if (maxInstalls <= 0 || this.completed.size === 0) return;
+    const completed = Array.from(this.completed.entries())
+      .filter(([key]) => this.queue.desired.has(key))
+      .sort(
+        ([a], [b]) =>
+          (this.desiredPriorities.get(a) ?? Number.POSITIVE_INFINITY) -
+          (this.desiredPriorities.get(b) ?? Number.POSITIVE_INFINITY),
+      )
+      .slice(0, maxInstalls);
+    for (const [key, { address, patch }] of completed) {
+      this.completed.delete(key);
+      if (!this.residents.has(key)) this.installPatch(key, address, patch);
+    }
+    for (const [key] of this.completed) {
+      if (!this.queue.desired.has(key)) this.completed.delete(key);
+    }
+  }
+
+  private desiredPatchesAreResident(): boolean {
+    for (const key of this.queue.desired) {
+      if (!this.residents.has(key)) return false;
+    }
+    return true;
+  }
+
   private selectCustomPatches(
     selector: TerrainSurfacePatchSelector<TAddress>,
     request: ITerrainSurfaceSelectionRequest<TAddress>,
   ): readonly TAddress[] {
-    this.refinedKeys.clear();
     return selector(request);
   }
 
@@ -416,6 +444,8 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     this.statsSignature = '';
     this.generationEpoch++;
     this.generating.clear();
+    this.completed.clear();
+    this.desiredPriorities.clear();
     this.queue.clear();
     this.disposeResidents();
   }
