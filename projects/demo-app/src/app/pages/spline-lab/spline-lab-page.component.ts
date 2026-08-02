@@ -38,8 +38,20 @@ import {
 } from 'triangular-engine/spline';
 
 type EditMode = 'add' | 'edit';
-type DragTarget =
+/** What a raycast hit on a gizmo mesh identifies — stored in `mesh.userData`. */
+type PickTarget =
   | { kind: 'point'; index: number }
+  | { kind: 'handleOut'; index: number }
+  | { kind: 'handleIn'; index: number };
+type DragTarget =
+  | {
+      kind: 'point';
+      index: number;
+      /** Ground hit at drag start, so later moves can be expressed as a delta. */
+      startHit: SplineVector3;
+      /** Every selected point's starting position, so the whole group moves together. */
+      startPositions: Map<number, SplineVector3>;
+    }
   | { kind: 'handleOut'; index: number }
   | { kind: 'handleIn'; index: number };
 
@@ -72,16 +84,27 @@ export class SplineLabPageComponent {
   readonly mode = signal<EditMode>('add');
   readonly interpolation = signal<SplineInterpolation>('bezier');
   readonly closed = signal(false);
-  readonly selectedIndex = signal<number | undefined>(undefined);
+  readonly selectedIndices = signal<ReadonlySet<number>>(new Set());
   readonly pointCount = signal(0);
   readonly lengthM = signal(0);
   readonly validationError = signal<string | undefined>(undefined);
   readonly isOrbitActive = signal(true);
 
+  readonly hasSelection = computed(() => this.selectedIndices().size > 0);
+  readonly selectedCount = computed(() => this.selectedIndices().size);
+
+  /** `undefined` when nothing is selected, or when the selection has mixed handle modes. */
   readonly selectedHandleMode = computed<SplineHandleMode | undefined>(() => {
-    const index = this.selectedIndex();
-    if (index === undefined) return undefined;
-    return this.pointsSignal()[index]?.handleMode ?? 'auto';
+    const indices = this.selectedIndices();
+    if (indices.size === 0) return undefined;
+    const points = this.pointsSignal();
+    let mode: SplineHandleMode | undefined;
+    for (const index of indices) {
+      const pointMode = points[index]?.handleMode ?? 'auto';
+      if (mode === undefined) mode = pointMode;
+      else if (mode !== pointMode) return undefined;
+    }
+    return mode;
   });
 
   private readonly engine = inject(EngineService);
@@ -166,54 +189,62 @@ export class SplineLabPageComponent {
   }
 
   setSelectedHandleMode(handleMode: SplineHandleMode): void {
-    const index = this.selectedIndex();
-    if (index === undefined) return;
-    const point = this.points[index];
-    const showOut = this.closed() || index < this.points.length - 1;
-    const showIn = this.closed() || index > 0;
-    let handleOut = point.handleOut;
-    let handleIn = point.handleIn;
+    const indices = this.selectedIndices();
+    if (indices.size === 0) return;
+    const original = this.points;
 
-    if (handleMode === 'linear') {
-      handleOut = [0, 0, 0];
-      handleIn = [0, 0, 0];
-    } else if (handleMode === 'auto') {
-      handleOut = undefined;
-      handleIn = undefined;
-    } else if (handleMode === 'mirrored') {
-      // Enforce the mirror constraint right away (instead of waiting for a
-      // drag) so switching to mirrored is visible immediately.
-      const source =
-        handleOut ??
-        (handleIn ? scaleVec3(handleIn, -1) : subVec3(this.resolveHandle(index, 'out'), point.position));
-      handleOut = source;
-      handleIn = scaleVec3(source, -1);
-    } else {
-      // broken: independent handles; seed any still-undefined side from its
-      // current auto-resolved position so the point doesn't visually jump.
-      if (!handleOut && showOut) handleOut = subVec3(this.resolveHandle(index, 'out'), point.position);
-      if (!handleIn && showIn) handleIn = subVec3(this.resolveHandle(index, 'in'), point.position);
-    }
+    this.points = original.map((point, index) => {
+      if (!indices.has(index)) return point;
+      const showOut = this.closed() || index < original.length - 1;
+      const showIn = this.closed() || index > 0;
+      let handleOut = point.handleOut;
+      let handleIn = point.handleIn;
 
-    this.points = this.points.map((existing, i) =>
-      i === index ? { ...existing, handleMode, handleOut, handleIn } : existing,
-    );
+      if (handleMode === 'linear') {
+        handleOut = [0, 0, 0];
+        handleIn = [0, 0, 0];
+      } else if (handleMode === 'auto') {
+        handleOut = undefined;
+        handleIn = undefined;
+      } else if (handleMode === 'mirrored') {
+        // Enforce the mirror constraint right away (instead of waiting for a
+        // drag) so switching to mirrored is visible immediately.
+        const source =
+          handleOut ??
+          (handleIn ? scaleVec3(handleIn, -1) : subVec3(this.resolveHandle(index, 'out'), point.position));
+        handleOut = source;
+        handleIn = scaleVec3(source, -1);
+      } else {
+        // broken: independent handles; seed any still-undefined side from its
+        // current auto-resolved position so the point doesn't visually jump.
+        if (!handleOut && showOut) handleOut = subVec3(this.resolveHandle(index, 'out'), point.position);
+        if (!handleIn && showIn) handleIn = subVec3(this.resolveHandle(index, 'in'), point.position);
+      }
+
+      return { ...point, handleMode, handleOut, handleIn };
+    });
     this.rebuildScene();
   }
 
   deleteSelected(): void {
-    const index = this.selectedIndex();
-    if (index === undefined) return;
-    this.points = this.points.filter((_, i) => i !== index);
-    this.selectedIndex.set(undefined);
+    const indices = this.selectedIndices();
+    if (indices.size === 0) return;
+    this.points = this.points.filter((_, i) => !indices.has(i));
+    this.selectedIndices.set(new Set());
     if (this.closed() && this.points.length < 3) this.closed.set(false);
     this.rebuildScene();
   }
 
   clearAll(): void {
     this.points = [];
-    this.selectedIndex.set(undefined);
+    this.selectedIndices.set(new Set());
     this.closed.set(false);
+    this.rebuildScene();
+  }
+
+  selectAll(): void {
+    if (this.points.length === 0) return;
+    this.selectedIndices.set(new Set(this.points.map((_, i) => i)));
     this.rebuildScene();
   }
 
@@ -225,19 +256,54 @@ export class SplineLabPageComponent {
       const hit = this.raycastGround(event);
       if (!hit) return;
       this.points = [...this.points, { position: hit, handleMode: 'auto' }];
-      this.selectedIndex.set(this.points.length - 1);
+      this.selectedIndices.set(new Set([this.points.length - 1]));
       this.rebuildScene();
       return;
     }
 
     const target = this.pickTarget(event);
     if (!target) {
-      this.selectedIndex.set(undefined);
+      // Shift-click on empty space preserves the current selection, matching
+      // the additive-only convention shift-click uses on point gizmos.
+      if (!event.shiftKey) this.selectedIndices.set(new Set());
       this.rebuildScene();
       return;
     }
-    this.drag = target;
-    if (target.kind === 'point') this.selectedIndex.set(target.index);
+
+    if (target.kind === 'point') {
+      const current = this.selectedIndices();
+      if (event.shiftKey) {
+        const next = new Set(current);
+        if (next.has(target.index)) next.delete(target.index);
+        else next.add(target.index);
+        this.selectedIndices.set(next);
+      } else if (!current.has(target.index)) {
+        // Replace the selection, unless the clicked point is already part of
+        // it — in which case keep the whole group selected so it can be
+        // dragged together.
+        this.selectedIndices.set(new Set([target.index]));
+      }
+
+      if (!this.selectedIndices().has(target.index)) {
+        // Just deselected via shift-click; nothing to drag.
+        this.rebuildScene();
+        return;
+      }
+
+      const hit = this.raycastGround(event);
+      if (hit) {
+        const indices = this.selectedIndices();
+        this.drag = {
+          kind: 'point',
+          index: target.index,
+          startHit: hit,
+          startPositions: new Map(Array.from(indices, (i) => [i, this.points[i].position] as const)),
+        };
+      }
+    } else {
+      this.drag = target;
+    }
+
     this.isOrbitActive.set(false);
     this.rebuildScene();
   }
@@ -247,17 +313,19 @@ export class SplineLabPageComponent {
     const hit = this.raycastGround(event);
     if (!hit) return;
 
-    const { index, kind } = this.drag;
-    const point = this.points[index];
-
-    if (kind === 'point') {
-      this.points = this.points.map((existing, i) =>
-        i === index ? { ...existing, position: hit } : existing,
-      );
+    if (this.drag.kind === 'point') {
+      const { startHit, startPositions } = this.drag;
+      const delta = subVec3(hit, startHit);
+      this.points = this.points.map((existing, i) => {
+        const start = startPositions.get(i);
+        return start ? { ...existing, position: addVec3(start, delta) } : existing;
+      });
       this.rebuildScene();
       return;
     }
 
+    const { index, kind } = this.drag;
+    const point = this.points[index];
     const relative = subVec3(hit, point.position);
     const currentMode = point.handleMode ?? 'auto';
     const mirrors = currentMode === 'mirrored' || currentMode === 'auto';
@@ -285,12 +353,12 @@ export class SplineLabPageComponent {
     this.isOrbitActive.set(true);
   }
 
-  private pickTarget(event: MouseEvent): DragTarget | undefined {
+  private pickTarget(event: MouseEvent): PickTarget | undefined {
     this.updateRaycasterFromEvent(event);
     const [handleHit] = this.raycaster.intersectObjects(this.handleMeshes, false);
-    if (handleHit) return handleHit.object.userData['dragTarget'] as DragTarget;
+    if (handleHit) return handleHit.object.userData['dragTarget'] as PickTarget;
     const [pointHit] = this.raycaster.intersectObjects(this.pointMeshes, false);
-    if (pointHit) return pointHit.object.userData['dragTarget'] as DragTarget;
+    if (pointHit) return pointHit.object.userData['dragTarget'] as PickTarget;
     return undefined;
   }
 
@@ -319,14 +387,14 @@ export class SplineLabPageComponent {
 
   private rebuildPointMeshes(): void {
     for (const mesh of this.pointMeshes) this.group.remove(mesh);
-    const selected = this.selectedIndex();
+    const selected = this.selectedIndices();
     this.pointMeshes = this.points.map((point, index) => {
       const mesh = new Mesh(
         this.pointGeometry,
-        index === selected ? this.selectedPointMaterial : this.pointMaterial,
+        selected.has(index) ? this.selectedPointMaterial : this.pointMaterial,
       );
       mesh.position.set(point.position[0], point.position[1] + LIFT_M, point.position[2]);
-      mesh.userData['dragTarget'] = { kind: 'point', index } satisfies DragTarget;
+      mesh.userData['dragTarget'] = { kind: 'point', index } satisfies PickTarget;
       this.group.add(mesh);
       return mesh;
     });
@@ -341,17 +409,19 @@ export class SplineLabPageComponent {
     }
     this.handleLines = [];
 
-    const index = this.selectedIndex();
-    if (index === undefined || this.interpolation() !== 'bezier' || this.points.length < 2) return;
-    const point = this.points[index];
-    const showOut = this.closed() || index < this.points.length - 1;
-    const showIn = this.closed() || index > 0;
+    if (this.interpolation() !== 'bezier' || this.points.length < 2) return;
 
-    if (showOut) {
-      this.addHandleGizmo(point, index, 'handleOut', this.resolveHandle(index, 'out'), this.handleOutMaterial);
-    }
-    if (showIn) {
-      this.addHandleGizmo(point, index, 'handleIn', this.resolveHandle(index, 'in'), this.handleInMaterial);
+    for (const index of this.selectedIndices()) {
+      const point = this.points[index];
+      const showOut = this.closed() || index < this.points.length - 1;
+      const showIn = this.closed() || index > 0;
+
+      if (showOut) {
+        this.addHandleGizmo(point, index, 'handleOut', this.resolveHandle(index, 'out'), this.handleOutMaterial);
+      }
+      if (showIn) {
+        this.addHandleGizmo(point, index, 'handleIn', this.resolveHandle(index, 'in'), this.handleInMaterial);
+      }
     }
   }
 
@@ -364,7 +434,7 @@ export class SplineLabPageComponent {
   ): void {
     const mesh = new Mesh(this.handleGeometry, material);
     mesh.position.set(absolute[0], absolute[1] + LIFT_M, absolute[2]);
-    mesh.userData['dragTarget'] = { kind, index } satisfies DragTarget;
+    mesh.userData['dragTarget'] = { kind, index } satisfies PickTarget;
     this.group.add(mesh);
     this.handleMeshes.push(mesh);
 

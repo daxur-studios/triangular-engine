@@ -23,8 +23,13 @@
         <button [class.active]="mode() === 'edit'" (click)="setMode('edit')">
           Edit
         </button>
+        <button [disabled]="pointCount() === 0" (click)="selectAll()">Select all</button>
         <button (click)="clearAll()">Clear all</button>
       </nav>
+      <p class="blurb note">
+        Shift-click a point to add/remove it from the selection, then drag
+        any selected point to move the whole group together.
+      </p>
 
       <nav aria-label="Interpolation">
         <button
@@ -52,22 +57,24 @@
         <p class="blurb note">Open the loop to add more points.</p>
       }
 
-      @if (selectedHandleMode(); as handleMode) {
+      @if (hasSelection()) {
         <nav aria-label="Handle type">
-          <span class="label">Point type:</span>
-          <button [class.active]="handleMode === 'auto'" (click)="setSelectedHandleMode('auto')">
+          <span class="label">
+            {{ selectedCount() }} selected{{ selectedHandleMode() ? '' : ' (mixed)' }}:
+          </span>
+          <button [class.active]="selectedHandleMode() === 'auto'" (click)="setSelectedHandleMode('auto')">
             Auto
           </button>
-          <button [class.active]="handleMode === 'mirrored'" (click)="setSelectedHandleMode('mirrored')">
+          <button [class.active]="selectedHandleMode() === 'mirrored'" (click)="setSelectedHandleMode('mirrored')">
             Mirrored
           </button>
-          <button [class.active]="handleMode === 'broken'" (click)="setSelectedHandleMode('broken')">
+          <button [class.active]="selectedHandleMode() === 'broken'" (click)="setSelectedHandleMode('broken')">
             Broken
           </button>
-          <button [class.active]="handleMode === 'linear'" (click)="setSelectedHandleMode('linear')">
+          <button [class.active]="selectedHandleMode() === 'linear'" (click)="setSelectedHandleMode('linear')">
             Linear
           </button>
-          <button (click)="deleteSelected()">Delete point</button>
+          <button (click)="deleteSelected()">Delete {{ selectedCount() === 1 ? 'point' : 'points' }}</button>
         </nav>
       }
 
