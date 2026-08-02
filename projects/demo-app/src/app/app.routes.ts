@@ -167,6 +167,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'spline-lab',
+    loadComponent: () =>
+      import('./pages/spline-lab/spline-lab-page.component').then(
+        ({ SplineLabPageComponent }) => SplineLabPageComponent,
+      ),
+  },
+  {
     path: 'vehicle-trail-lab',
     canActivate: [
       () =>

@@ -33,7 +33,8 @@
               "**/*.spec.ts",
               "../water/**/*.spec.ts",
               "../terrain/**/*.spec.ts",
-              "../scatter/**/*.spec.ts"
+              "../scatter/**/*.spec.ts",
+              "../spline/**/*.spec.ts"
             ]
           }
         }

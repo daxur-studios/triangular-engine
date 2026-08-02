@@ -36,6 +36,7 @@ The library is modularized into several secondary entry points (sub-libraries) s
 | `triangular-engine/water` | **Water**: Declarative large-scale plane, planet, and inside-cylinder water with quality and motion presets. See [water/README.md](./water/README.md). | `three` |
 | `triangular-engine/terrain` | **Terrain**: Domain-aware terrain generation, surface sampling, and LOD streaming. | — |
 | `triangular-engine/scatter` | **Scatter**: Deterministic streamed placement and LOD rendering for vegetation and repeated environment objects. | — |
+| `triangular-engine/spline` | **Spline**: Authoring-neutral open/closed curves, arc-length sampling, and nearest-point queries for rivers, roads, and area outlines. Core geometry only so far. See [spline/README.md](./spline/README.md). | — |
 
 ## Features
 

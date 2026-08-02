@@ -2,6 +2,16 @@
 
 All notable changes to triangular-engine are documented here.
 
+## [Unreleased]
+
+### Added
+- `triangular-engine/spline` secondary entry point (Phase 0A — core geometry
+  only). Open/closed splines with linear and cubic Bezier evaluation,
+  adaptive arc-length sampling, a brute-force `closestPoint` reference
+  solver, and schema-versioned JSON serialization. See
+  `docs/runbook/008_spline_sublibrary.md` for the phased plan; surface
+  binding, masks, rendering, and editing land in later phases.
+
 ## [0.1.0-alpha.1] - 2026-07-12
 
 ### Added
