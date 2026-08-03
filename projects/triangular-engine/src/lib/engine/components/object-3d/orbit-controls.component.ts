@@ -291,10 +291,6 @@ export class OrbitControlsComponent implements OnDestroy {
       const orbit = this.orbitControls();
       this.previousFollowPosition = undefined;
       this.followPositionPushedSincePostTick = false;
-      if (this.isPannedAway()) {
-        this.isPannedAway.set(false);
-        this.pannedAwayChange.emit(false);
-      }
       if (followObject && orbit) {
         followObject.updateMatrixWorld(true);
         const worldPos = new Vector3();
