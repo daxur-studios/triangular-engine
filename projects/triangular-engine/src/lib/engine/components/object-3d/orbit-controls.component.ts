@@ -6,6 +6,7 @@ import {
   input,
   model,
   OnDestroy,
+  output,
   signal,
 } from '@angular/core';
 import {
@@ -63,6 +64,15 @@ export class OrbitControlsComponent implements OnDestroy {
 
   readonly orbitControls = signal<AdvancedOrbitControls | undefined>(undefined);
   readonly orbitControls$ = toObservable(this.orbitControls);
+
+  /** Distance threshold in meters from follow target to consider camera panned away (defaults to 5.0m). */
+  readonly panThresholdM = input(5.0);
+
+  /** Emits true when camera target pans away beyond panThresholdM, false when recentered. */
+  readonly pannedAwayChange = output<boolean>();
+
+  /** True when camera target has panned away from the follow object's position. */
+  readonly isPannedAway = signal(false);
 
   constructor() {
     this.engineService.scene.add(this.internalCamera);
@@ -169,9 +179,25 @@ export class OrbitControlsComponent implements OnDestroy {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => {
-        this.orbitControls()?.update();
+        const orbit = this.orbitControls();
+        orbit?.update();
         if (this.cameraHelper) {
           this.cameraHelper.update();
+        }
+
+        const followObject = this.follow();
+        if (orbit && followObject) {
+          const followWorldPos = new Vector3();
+          followObject.getWorldPosition(followWorldPos);
+          const dist = orbit.target.distanceTo(followWorldPos);
+          const isPanned = dist > this.panThresholdM();
+          if (this.isPannedAway() !== isPanned) {
+            this.isPannedAway.set(isPanned);
+            this.pannedAwayChange.emit(isPanned);
+          }
+        } else if (this.isPannedAway()) {
+          this.isPannedAway.set(false);
+          this.pannedAwayChange.emit(false);
         }
       });
   }
@@ -265,6 +291,10 @@ export class OrbitControlsComponent implements OnDestroy {
       const orbit = this.orbitControls();
       this.previousFollowPosition = undefined;
       this.followPositionPushedSincePostTick = false;
+      if (this.isPannedAway()) {
+        this.isPannedAway.set(false);
+        this.pannedAwayChange.emit(false);
+      }
       if (followObject && orbit) {
         followObject.updateMatrixWorld(true);
         const worldPos = new Vector3();
@@ -396,6 +426,11 @@ export class OrbitControlsComponent implements OnDestroy {
       this.internalCamera.position.copy(worldPos).add(new Vector3(...offset));
     }
     this.previousFollowPosition = worldPos.clone();
+    orbit.update();
+    if (this.isPannedAway()) {
+      this.isPannedAway.set(false);
+      this.pannedAwayChange.emit(false);
+    }
   }
 
   /**
