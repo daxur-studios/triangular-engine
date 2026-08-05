@@ -32,6 +32,9 @@
       ],
       "triangular-engine/spline": [
         "projects/triangular-engine/spline/public-api"
+      ],
+      "triangular-engine/life": [
+        "projects/triangular-engine/life/public-api"
       ]
     },
     "outDir": "../../out-tsc/app",

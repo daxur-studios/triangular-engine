@@ -17,6 +17,7 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/scatter` | Deterministic streamed placement, instanced LOD rendering, billboard/wind materials, picking, and collider descriptors. | — |
 | `triangular-engine/trail` | Ribbon trails, stamp decals, and surface-track geometry/materials. | — |
 | `triangular-engine/spline` | Authoring-neutral open/closed curves, arc-length sampling, and nearest-point queries. Core geometry only so far. | — |
+| `triangular-engine/life` | Fixed-step autonomous-agent movement, flocking behaviours, local influences, and obstacle queries. | — for `core`; optional adapters may add world dependencies |
 
 ## Provider configuration
 

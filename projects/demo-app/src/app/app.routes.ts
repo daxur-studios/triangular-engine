@@ -174,6 +174,20 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'life-lab',
+    loadComponent: () =>
+      import('./pages/life-lab/life-lab-page.component').then(
+        ({ LifeLabPageComponent }) => LifeLabPageComponent,
+      ),
+  },
+  {
+    path: 'life-lab',
+    loadComponent: () =>
+      import('./pages/life-lab/life-lab-page.component').then(
+        ({ LifeLabPageComponent }) => LifeLabPageComponent,
+      ),
+  },
+  {
     path: 'terrain-composer-lab',
     loadComponent: () =>
       import('./pages/terrain-composer-lab/terrain-composer-lab-page.component').then(

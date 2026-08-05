@@ -1,0 +1,25 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Life lab controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>triangular-engine/life — Phase 0 bird slice</small>
+        </div>
+        <strong>A little life</strong>
+      </header>
+      <p class="blurb">
+        Sixty birds use separation, alignment, cohesion, canopy avoidance, and
+        player avoidance. The red sphere is a moving player influence.
+      </p>
+      <p class="blurb note">
+        This is intentionally a small vertical slice: the birds are the test
+        for whether the reusable simulation deserves to grow.
+      </p>
+    </section>
+  </ng-template>
+
+  <orbitControls [cameraPosition]="[0, 42, 54]" [target]="[0, 8, 0]" />
+  <ambientLight [intensity]="1.1" />
+  <directionalLight [position]="[30, 50, 20]" [intensity]="2.4" />
+</scene>

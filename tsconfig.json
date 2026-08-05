@@ -10,16 +10,16 @@
       "triangular-engine/postprocessing": [
         "projects/triangular-engine/postprocessing/public-api"
       ],
-      "triangular-engine/jolt": [
-        "projects/triangular-engine/jolt/public-api"
-      ],
+      "triangular-engine/jolt": ["projects/triangular-engine/jolt/public-api"],
       "triangular-engine/takram": [
         "projects/triangular-engine/takram/public-api"
       ],
       "triangular-engine/terrain": [
         "projects/triangular-engine/terrain/public-api"
       ],
-      "triangular-engine/water": ["projects/triangular-engine/water/public-api"],
+      "triangular-engine/water": [
+        "projects/triangular-engine/water/public-api"
+      ],
       "triangular-engine/water/postprocessing": [
         "projects/triangular-engine/water/postprocessing/public-api"
       ],
@@ -34,7 +34,8 @@
       ],
       "triangular-engine/spline": [
         "projects/triangular-engine/spline/public-api"
-      ]
+      ],
+      "triangular-engine/life": ["projects/triangular-engine/life/public-api"]
     },
     "outDir": "./dist/out-tsc",
     "strict": true,

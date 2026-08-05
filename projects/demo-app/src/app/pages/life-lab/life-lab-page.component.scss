@@ -1,0 +1,45 @@
+.panel {
+  width: min(30rem, calc(100vw - 2rem));
+  margin: 1rem;
+  padding: 1rem 1.1rem;
+  color: #f5ead2;
+  background: rgba(24, 31, 26, 0.82);
+  border: 1px solid rgba(245, 234, 210, 0.2);
+  border-radius: 0.8rem;
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(0.6rem);
+}
+
+header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+a {
+  display: block;
+  color: #f4c26b;
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+
+small {
+  display: block;
+  margin-top: 0.35rem;
+  color: #b8c6b8;
+}
+
+strong {
+  font-size: 1.15rem;
+}
+
+.blurb {
+  line-height: 1.5;
+  color: #dce6d8;
+}
+
+.note {
+  color: #b8c6b8;
+  font-size: 0.85rem;
+}

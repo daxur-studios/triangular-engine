@@ -559,3 +559,6 @@ The publish script builds with development configuration (required for npm) and 
 ---
 
 If anything is missing from this README, please open an issue or PR. This file is designed to render correctly on npm without relying on external docs.
+The first autonomous-agent simulation primitives are available from
+`triangular-engine/life`; see the `/life-lab` demo and the life sub-library
+runbook for the intentionally small bird vertical slice.
