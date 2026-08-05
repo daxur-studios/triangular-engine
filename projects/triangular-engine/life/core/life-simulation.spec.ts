@@ -1,5 +1,5 @@
 import { LifeSimulation } from './life-simulation';
-import { alignment, cohesion, separation } from './life-behaviors';
+import { alignment, cohesion, keepWithinBounds, separation } from './life-behaviors';
 
 describe('LifeSimulation', () => {
   it('keeps agents within their speed limit while stepping', () => {
@@ -38,5 +38,21 @@ describe('LifeSimulation', () => {
     second.step(0.5);
 
     expect(second.agents).toEqual(first.agents);
+  });
+
+  it('steers agents back into a bounded habitat', () => {
+    const simulation = new LifeSimulation();
+    simulation.behaviors.push(keepWithinBounds({ x: -10, y: 0, z: -10 }, { x: 10, y: 20, z: 10 }, 10));
+    const agent = simulation.addAgent({
+      id: 1,
+      position: { x: 11, y: 21, z: 0 },
+      maxAcceleration: 100,
+      maxSpeed: 100,
+    });
+
+    simulation.step(1 / 60);
+
+    expect(agent.velocity.x).toBeLessThan(0);
+    expect(agent.velocity.y).toBeLessThan(0);
   });
 });

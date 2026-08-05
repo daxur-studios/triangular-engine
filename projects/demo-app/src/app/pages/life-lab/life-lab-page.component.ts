@@ -20,6 +20,7 @@ import {
   cohesion,
   fleeInfluences,
   keepAbove,
+  keepWithinBounds,
   LifeSimulation,
   separation,
   type LifeInfluence,
@@ -29,6 +30,7 @@ const WORLD_SIZE = 80;
 const BIRD_COUNT = 60;
 
 type BirdStage = 0 | 1 | 2 | 3 | 4;
+type TimeScale = 0.5 | 1 | 2 | 5 | 10;
 
 @Component({
   selector: 'app-life-lab-page',
@@ -41,6 +43,8 @@ type BirdStage = 0 | 1 | 2 | 3 | 4;
 })
 export class LifeLabPageComponent {
   protected birdStage: BirdStage = 4;
+  protected timeScale: TimeScale = 1;
+  protected readonly timeScales: readonly TimeScale[] = [0.5, 1, 2, 5, 10];
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
   private readonly simulation = new LifeSimulation({ neighborRadius: 10 });
@@ -144,8 +148,18 @@ export class LifeLabPageComponent {
     this.simulation.behaviors.length = 0;
     if (stage >= 1) this.simulation.behaviors.push(separation(4, 9));
     if (stage >= 2) this.simulation.behaviors.push(alignment(1.4), cohesion(0.9));
-    if (stage >= 3) this.simulation.behaviors.push(avoidObstacles(15), keepAbove(8, 4));
+    if (stage >= 3) {
+      this.simulation.behaviors.push(
+        avoidObstacles(15),
+        keepAbove(8, 4),
+        keepWithinBounds({ x: -34, y: 8, z: -34 }, { x: 34, y: 30, z: 34 }, 3),
+      );
+    }
     if (stage >= 4) this.simulation.behaviors.push(fleeInfluences(20));
+  }
+
+  protected setTimeScale(scale: TimeScale): void {
+    this.timeScale = scale;
   }
 
   private update(deltaSeconds: number): void {
@@ -156,7 +170,7 @@ export class LifeLabPageComponent {
     this.playerInfluence.position.z = this.player.position.z;
     this.simulation.influences.length = 0;
     this.simulation.influences.push(this.playerInfluence);
-    this.simulation.step(deltaSeconds);
+    this.simulation.step(deltaSeconds * this.timeScale);
 
     for (let index = 0; index < this.simulation.agents.length; index++) {
       const agent = this.simulation.agents[index];

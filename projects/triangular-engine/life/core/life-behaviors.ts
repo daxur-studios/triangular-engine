@@ -102,6 +102,21 @@ export function keepAbove(minY: number, strength = 10): LifeBehavior {
   };
 }
 
+export function keepWithinBounds(
+  min: LifeVector3,
+  max: LifeVector3,
+  strength = 4,
+): LifeBehavior {
+  return ({ agent }, out) => {
+    if (agent.position.x < min.x) out.x += (min.x - agent.position.x) * strength;
+    if (agent.position.x > max.x) out.x -= (agent.position.x - max.x) * strength;
+    if (agent.position.y < min.y) out.y += (min.y - agent.position.y) * strength;
+    if (agent.position.y > max.y) out.y -= (agent.position.y - max.y) * strength;
+    if (agent.position.z < min.z) out.z += (min.z - agent.position.z) * strength;
+    if (agent.position.z > max.z) out.z -= (agent.position.z - max.z) * strength;
+  };
+}
+
 export function limitAcceleration(out: LifeVector3, maxAcceleration: number): LifeVector3 {
   return clampLifeVector3Length(out, maxAcceleration);
 }

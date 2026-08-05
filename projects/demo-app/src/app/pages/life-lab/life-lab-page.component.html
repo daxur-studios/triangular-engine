@@ -15,6 +15,12 @@
         <button type="button" [class.active]="birdStage === 3" (click)="setBirdStage(3)">4. Trees + terrain</button>
         <button type="button" [class.active]="birdStage === 4" (click)="setBirdStage(4)">5. Player influence</button>
       </nav>
+      <div class="time-warp" aria-label="Simulation time warp">
+        <span>Time warp</span>
+        @for (scale of timeScales; track scale) {
+          <button type="button" [class.active]="timeScale === scale" (click)="setTimeScale(scale)">{{ scale }}×</button>
+        }
+      </div>
       <p class="blurb">
         Start with one primitive bird, then add group movement, flocking, world
         constraints, and finally player avoidance. The red sphere is the player.
