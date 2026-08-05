@@ -60,6 +60,7 @@ export class LifeLabPageComponent {
   private readonly herdMesh: InstancedMesh;
   private readonly fishSimulation = new LifeSimulation({ neighborRadius: 8 });
   private readonly herdSimulation = new LifeSimulation({ neighborRadius: 10 });
+  private readonly herdPhaseOffsets = Array.from({ length: HERD_COUNT }, (_, index) => (index * 3.7) % 18);
   private readonly treeMeshes: Mesh[] = [];
   private readonly player = new Mesh(
     new SphereGeometry(1.4, 16, 12),
@@ -170,20 +171,29 @@ export class LifeLabPageComponent {
   private buildHerd(): void {
     const graze: LifeBehavior = ({ agent, timeSeconds }, out) => {
       const phase = agent.id * 2.399;
+      const cycle = (timeSeconds + this.herdPhaseOffsets[agent.id]) % 18;
+
+      if (cycle >= 7) {
+        // Grazing: settle in place and let the herd slowly spread around the patch.
+        out.x -= agent.velocity.x * 2.2;
+        out.y -= agent.velocity.y * 2.2;
+        out.z -= agent.velocity.z * 2.2;
+        return;
+      }
+
       const target = {
         x: Math.sin(timeSeconds * 0.11 + phase) * 18 + Math.cos(timeSeconds * 0.047 + phase * 1.7) * 7,
         y: 0.9,
         z: Math.cos(timeSeconds * 0.083 + phase * 1.3) * 18 + Math.sin(timeSeconds * 0.053 + phase * 0.6) * 7,
       };
-      out.x += (target.x - agent.position.x) * 0.12;
+      out.x += (target.x - agent.position.x) * 0.16;
       out.y += (target.y - agent.position.y) * 0.8;
-      out.z += (target.z - agent.position.z) * 0.12;
+      out.z += (target.z - agent.position.z) * 0.16;
     };
 
     this.herdSimulation.behaviors.push(
       separation(2.4, 18),
       alignment(0.25),
-      cohesion(0.18),
       graze,
       keepAbove(0.9, 12),
       keepWithinBounds({ x: -28, y: 0.9, z: -28 }, { x: 28, y: 1.4, z: 28 }, 8),
