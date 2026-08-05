@@ -10,6 +10,27 @@
   backdrop-filter: blur(0.6rem);
 }
 
+.stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.75rem 0;
+}
+
+.stages button {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  padding: 0.35rem 0.6rem;
+  color: inherit;
+  background: rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+}
+
+.stages button.active {
+  border-color: #f4c26b;
+  background: rgba(244, 194, 107, 0.2);
+}
+
 header {
   display: flex;
   align-items: flex-end;

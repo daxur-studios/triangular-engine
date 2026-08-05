@@ -8,9 +8,16 @@
         </div>
         <strong>A little life</strong>
       </header>
+      <nav class="stages" aria-label="Bird complexity stages">
+        <button type="button" [class.active]="birdStage === 0" (click)="setBirdStage(0)">1. Single bird</button>
+        <button type="button" [class.active]="birdStage === 1" (click)="setBirdStage(1)">2. Small group</button>
+        <button type="button" [class.active]="birdStage === 2" (click)="setBirdStage(2)">3. Flocking</button>
+        <button type="button" [class.active]="birdStage === 3" (click)="setBirdStage(3)">4. Trees + terrain</button>
+        <button type="button" [class.active]="birdStage === 4" (click)="setBirdStage(4)">5. Player influence</button>
+      </nav>
       <p class="blurb">
-        Sixty birds use separation, alignment, cohesion, canopy avoidance, and
-        player avoidance. The red sphere is a moving player influence.
+        Start with one primitive bird, then add group movement, flocking, world
+        constraints, and finally player avoidance. The red sphere is the player.
       </p>
       <p class="blurb note">
         This is intentionally a small vertical slice: the birds are the test

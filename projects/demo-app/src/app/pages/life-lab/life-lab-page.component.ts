@@ -28,6 +28,8 @@ import {
 const WORLD_SIZE = 80;
 const BIRD_COUNT = 60;
 
+type BirdStage = 0 | 1 | 2 | 3 | 4;
+
 @Component({
   selector: 'app-life-lab-page',
   imports: [RouterLink, EngineModule],
@@ -38,6 +40,7 @@ const BIRD_COUNT = 60;
   host: { class: 'flex-page' },
 })
 export class LifeLabPageComponent {
+  protected birdStage: BirdStage = 4;
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
   private readonly simulation = new LifeSimulation({ neighborRadius: 10 });
@@ -135,6 +138,16 @@ export class LifeLabPageComponent {
     }
   }
 
+  protected setBirdStage(stage: BirdStage): void {
+    this.birdStage = stage;
+    this.birdMesh.count = stage === 0 ? 1 : stage === 1 ? 8 : stage === 2 ? 24 : BIRD_COUNT;
+    this.simulation.behaviors.length = 0;
+    if (stage >= 1) this.simulation.behaviors.push(separation(4, 9));
+    if (stage >= 2) this.simulation.behaviors.push(alignment(1.4), cohesion(0.9));
+    if (stage >= 3) this.simulation.behaviors.push(avoidObstacles(15), keepAbove(8, 4));
+    if (stage >= 4) this.simulation.behaviors.push(fleeInfluences(20));
+  }
+
   private update(deltaSeconds: number): void {
     const time = this.engine.elapsedTime$.value;
     this.player.position.set(Math.sin(time * 0.45) * 18, 1.4, Math.cos(time * 0.3) * 14);
@@ -153,7 +166,7 @@ export class LifeLabPageComponent {
       this.birdDummy.position.copy(this.birdPosition);
       this.birdDummy.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), this.birdDirection.normalize());
       this.birdDummy.updateMatrix();
-      this.birdMesh.setMatrixAt(index, this.birdDummy.matrix);
+      if (index < this.birdMesh.count) this.birdMesh.setMatrixAt(index, this.birdDummy.matrix);
     }
     this.birdMesh.instanceMatrix.needsUpdate = true;
   }
