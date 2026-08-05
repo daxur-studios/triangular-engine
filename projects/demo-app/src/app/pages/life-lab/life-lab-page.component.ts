@@ -23,14 +23,18 @@ import {
   keepWithinBounds,
   LifeSimulation,
   separation,
+  type LifeBehavior,
   type LifeInfluence,
 } from 'triangular-engine/life';
 
 const WORLD_SIZE = 80;
 const BIRD_COUNT = 60;
+const FISH_COUNT = 36;
+const HERD_COUNT = 18;
 
 type BirdStage = 0 | 1 | 2 | 3 | 4;
 type TimeScale = 0.5 | 1 | 2 | 5 | 10;
+type LifeMode = 'birds' | 'fish' | 'herd';
 
 @Component({
   selector: 'app-life-lab-page',
@@ -43,12 +47,19 @@ type TimeScale = 0.5 | 1 | 2 | 5 | 10;
 })
 export class LifeLabPageComponent {
   protected birdStage: BirdStage = 4;
+  protected lifeMode: LifeMode = 'birds';
+  protected fishLevel = 2;
+  protected herdLevel = 2;
   protected timeScale: TimeScale = 1;
   protected readonly timeScales: readonly TimeScale[] = [0.5, 1, 2, 5, 10];
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
   private readonly simulation = new LifeSimulation({ neighborRadius: 10 });
   private readonly birdMesh: InstancedMesh;
+  private readonly fishMesh: InstancedMesh;
+  private readonly herdMesh: InstancedMesh;
+  private readonly fishSimulation = new LifeSimulation({ neighborRadius: 8 });
+  private readonly herdSimulation = new LifeSimulation({ neighborRadius: 10 });
   private readonly treeMeshes: Mesh[] = [];
   private readonly player = new Mesh(
     new SphereGeometry(1.4, 16, 12),
@@ -70,9 +81,15 @@ export class LifeLabPageComponent {
       new MeshStandardMaterial({ color: '#f4c26b', roughness: 0.8 }),
       BIRD_COUNT,
     );
-    this.group.add(this.birdMesh);
+    this.fishMesh = new InstancedMesh(new ConeGeometry(0.28, 1.2, 5), new MeshStandardMaterial({ color: '#75c7d9' }), FISH_COUNT);
+    this.herdMesh = new InstancedMesh(new SphereGeometry(0.8, 8, 6), new MeshStandardMaterial({ color: '#c78f61' }), HERD_COUNT);
+    this.group.add(this.birdMesh, this.fishMesh, this.herdMesh);
     this.buildWorld();
     this.buildLife();
+    this.buildFish();
+    this.buildHerd();
+    this.setBirdStage(this.birdStage);
+    this.setLifeMode(this.lifeMode);
     this.engine.scene.add(this.group);
 
     const destroyRef = inject(DestroyRef);
@@ -142,6 +159,51 @@ export class LifeLabPageComponent {
     }
   }
 
+  private buildFish(): void {
+    this.fishSimulation.behaviors.push(separation(2.5, 5), alignment(1), cohesion(0.7), keepWithinBounds({ x: -32, y: 1, z: -32 }, { x: 32, y: 6, z: 32 }, 8));
+    for (let index = 0; index < FISH_COUNT; index++) {
+      const angle = index * 2.399;
+      this.fishSimulation.addAgent({ id: index, position: { x: Math.cos(angle) * (8 + index % 5), y: 2 + (index % 4) * 0.6, z: Math.sin(angle) * (8 + index % 5) }, velocity: { x: Math.sin(angle) * 1.5, y: 0, z: Math.cos(angle) * 1.5 }, maxSpeed: 5, maxAcceleration: 10, radius: 0.3 });
+    }
+  }
+
+  private buildHerd(): void {
+    const graze: LifeBehavior = ({ agent, timeSeconds }, out) => {
+      const phase = agent.id * 2.399;
+      const target = {
+        x: Math.sin(timeSeconds * 0.11 + phase) * 18 + Math.cos(timeSeconds * 0.047 + phase * 1.7) * 7,
+        y: 0.9,
+        z: Math.cos(timeSeconds * 0.083 + phase * 1.3) * 18 + Math.sin(timeSeconds * 0.053 + phase * 0.6) * 7,
+      };
+      out.x += (target.x - agent.position.x) * 0.12;
+      out.y += (target.y - agent.position.y) * 0.8;
+      out.z += (target.z - agent.position.z) * 0.12;
+    };
+
+    this.herdSimulation.behaviors.push(
+      separation(2.4, 18),
+      alignment(0.25),
+      cohesion(0.18),
+      graze,
+      keepAbove(0.9, 12),
+      keepWithinBounds({ x: -28, y: 0.9, z: -28 }, { x: 28, y: 1.4, z: 28 }, 8),
+      avoidObstacles(18),
+    );
+    for (let index = 0; index < HERD_COUNT; index++) {
+      const angle = index * 2.399;
+      this.herdSimulation.addAgent({ id: index, position: { x: Math.cos(angle) * (10 + index % 4), y: 0.9, z: Math.sin(angle) * (10 + index % 4) }, velocity: { x: Math.sin(angle) * 0.35, y: 0, z: Math.cos(angle) * 0.35 }, maxSpeed: 1.8, maxAcceleration: 5, radius: 0.95 });
+    }
+  }
+
+  protected setLifeMode(mode: LifeMode): void {
+    this.lifeMode = mode;
+    this.birdMesh.visible = mode === 'birds';
+    this.fishMesh.visible = mode === 'fish';
+    this.herdMesh.visible = mode === 'herd';
+  }
+  protected setFishLevel(level: number): void { this.fishLevel = level; this.fishMesh.count = level === 0 ? 1 : level === 1 ? 8 : FISH_COUNT; }
+  protected setHerdLevel(level: number): void { this.herdLevel = level; this.herdMesh.count = level === 0 ? 1 : level === 1 ? 6 : HERD_COUNT; }
+
   protected setBirdStage(stage: BirdStage): void {
     this.birdStage = stage;
     this.birdMesh.count = stage === 0 ? 1 : stage === 1 ? 8 : stage === 2 ? 24 : BIRD_COUNT;
@@ -171,6 +233,8 @@ export class LifeLabPageComponent {
     this.simulation.influences.length = 0;
     this.simulation.influences.push(this.playerInfluence);
     this.simulation.step(deltaSeconds * this.timeScale);
+    this.fishSimulation.step(deltaSeconds * this.timeScale);
+    this.herdSimulation.step(deltaSeconds * this.timeScale);
 
     for (let index = 0; index < this.simulation.agents.length; index++) {
       const agent = this.simulation.agents[index];
@@ -183,12 +247,31 @@ export class LifeLabPageComponent {
       if (index < this.birdMesh.count) this.birdMesh.setMatrixAt(index, this.birdDummy.matrix);
     }
     this.birdMesh.instanceMatrix.needsUpdate = true;
+    this.renderAgents(this.fishSimulation, this.fishMesh);
+    this.renderAgents(this.herdSimulation, this.herdMesh);
+  }
+
+  private renderAgents(simulation: LifeSimulation, mesh: InstancedMesh): void {
+    for (let index = 0; index < mesh.count; index++) {
+      const agent = simulation.agents[index];
+      this.birdDummy.position.set(agent.position.x, agent.position.y, agent.position.z);
+      this.birdDirection.set(agent.velocity.x, agent.velocity.y, agent.velocity.z);
+      if (this.birdDirection.lengthSq() < 1e-6) this.birdDirection.set(0, 0, 1);
+      this.birdDummy.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), this.birdDirection.normalize());
+      this.birdDummy.updateMatrix();
+      mesh.setMatrixAt(index, this.birdDummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
   }
 
   private dispose(): void {
     this.group.removeFromParent();
     this.birdMesh.geometry.dispose();
     (this.birdMesh.material as MeshStandardMaterial).dispose();
+    this.fishMesh.geometry.dispose();
+    (this.fishMesh.material as MeshStandardMaterial).dispose();
+    this.herdMesh.geometry.dispose();
+    (this.herdMesh.material as MeshStandardMaterial).dispose();
     this.player.geometry.dispose();
     (this.player.material as MeshStandardMaterial).dispose();
     for (const mesh of this.treeMeshes) {

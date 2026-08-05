@@ -9,12 +9,31 @@
         <strong>A little life</strong>
       </header>
       <nav class="stages" aria-label="Bird complexity stages">
+        <button type="button" [class.active]="lifeMode === 'birds'" (click)="setLifeMode('birds')">Birds</button>
+        <button type="button" [class.active]="lifeMode === 'fish'" (click)="setLifeMode('fish')">Fish</button>
+        <button type="button" [class.active]="lifeMode === 'herd'" (click)="setLifeMode('herd')">Herd</button>
+      </nav>
+      @if (lifeMode === 'birds') {
+      <nav class="stages" aria-label="Bird complexity stages">
         <button type="button" [class.active]="birdStage === 0" (click)="setBirdStage(0)">1. Single bird</button>
         <button type="button" [class.active]="birdStage === 1" (click)="setBirdStage(1)">2. Small group</button>
         <button type="button" [class.active]="birdStage === 2" (click)="setBirdStage(2)">3. Flocking</button>
         <button type="button" [class.active]="birdStage === 3" (click)="setBirdStage(3)">4. Trees + terrain</button>
         <button type="button" [class.active]="birdStage === 4" (click)="setBirdStage(4)">5. Player influence</button>
       </nav>
+      } @else if (lifeMode === 'fish') {
+        <nav class="stages" aria-label="Fish complexity stages">
+          <button type="button" [class.active]="fishLevel === 0" (click)="setFishLevel(0)">1. Single fish</button>
+          <button type="button" [class.active]="fishLevel === 1" (click)="setFishLevel(1)">2. School</button>
+          <button type="button" [class.active]="fishLevel === 2" (click)="setFishLevel(2)">3. Full school</button>
+        </nav>
+      } @else {
+        <nav class="stages" aria-label="Herd complexity stages">
+          <button type="button" [class.active]="herdLevel === 0" (click)="setHerdLevel(0)">1. Single animal</button>
+          <button type="button" [class.active]="herdLevel === 1" (click)="setHerdLevel(1)">2. Small herd</button>
+          <button type="button" [class.active]="herdLevel === 2" (click)="setHerdLevel(2)">3. Full herd</button>
+        </nav>
+      }
       <div class="time-warp" aria-label="Simulation time warp">
         <span>Time warp</span>
         @for (scale of timeScales; track scale) {
