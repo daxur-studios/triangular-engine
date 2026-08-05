@@ -130,19 +130,17 @@ export class OrbitControlsComponent implements OnDestroy {
   #initTargetChanges() {
     effect(() => {
       const target = this.target();
-      if (target) {
-        let position: Vector3Tuple;
-        if (target instanceof Object3D) {
-          const worldPos = new Vector3();
-          target.getWorldPosition(worldPos);
-          position = worldPos.toArray();
+      const orbit = this.orbitControls();
+      if (target && orbit) {
+        if (Array.isArray(target)) {
+          orbit.target.set(...target);
         } else {
-          position = target;
+          orbit.target.copy(target.position);
         }
-        this.orbitControls()?.target.set(...position);
       }
     });
   }
+
   #initCameraPositionChanges() {
     effect(() => {
       const cameraPosition = this.cameraPosition();
