@@ -26,6 +26,15 @@ describe('geological feature terrain', () => {
     expect(Math.abs(outside)).toBeLessThan(1);
   });
 
+  it('keeps the canyon profile coherent at different positions along its path', () => {
+    const { canyon } = defaultGeologicalTerrainSettings();
+    const start = Math.sin(-canyon.pathLength / 2 / canyon.bendWavelength + canyon.seed) * canyon.meander;
+    const end = Math.sin(canyon.pathLength / 2 / canyon.bendWavelength + canyon.seed) * canyon.meander;
+
+    expect(sampleCanyon(start, -canyon.pathLength / 2, canyon)).toBeLessThan(-canyon.depth * 0.8);
+    expect(sampleCanyon(end, canyon.pathLength / 2, canyon)).toBeLessThan(-canyon.depth * 0.8);
+  });
+
   it('is deterministic for a fixed definition', () => {
     const { volcano } = defaultGeologicalTerrainSettings();
     expect(sampleVolcano(12.5, -8.25, volcano)).toBe(

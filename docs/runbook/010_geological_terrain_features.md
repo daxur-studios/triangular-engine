@@ -17,7 +17,7 @@ implemented volcano and canyon fixtures.
 
 The project currently has a working Phase 0 lab, not a reusable public geology
 API yet. Volcano and canyon are deterministic demo-local height functions
-rendered on a high-resolution plane. Volcanoes now combine seeded fine noise
+rendered on high-resolution geometry. Volcanoes now combine seeded fine noise
 with restrained curved ridges whose count, twist, strength, and handedness vary
 by seed. The former `atan2` seam has a regression test and is no longer part of
 the asymmetry function.
@@ -109,6 +109,166 @@ able to expose normalized masks such as crater interior, fresh lava, channel
 floor, cliff, talus, ash, and deposition. Renderers and games may consume these
 masks without the core prescribing a material system.
 
+### 6. Canyon coherence is path-based, not tile-based
+
+A canyon must not be generated independently inside each visible patch. Its
+stable definition owns a world-scale centreline or branching network, while
+terrain patches only sample that definition. This keeps bends, tributaries,
+width, strata, and erosion coherent as the camera moves and as LOD changes.
+
+```ts
+interface CanyonNetworkDefinition {
+  readonly id: string;
+  readonly seed: number;
+  readonly paths: readonly GeologicalPathDefinition[];
+  readonly profile: CanyonProfileDefinition;
+  readonly detail: CanyonDetailDefinition;
+}
+
+interface GeologicalPathDefinition {
+  readonly points: readonly GeologicalAnchor[];
+  readonly closed?: boolean;
+  readonly parentPathId?: string;
+}
+```
+
+The path representation is domain-aware at placement time:
+
+- Plane anchors use stable world coordinates in metres.
+- Sphere anchors use unit directions or latitude/longitude and interpolate on
+  the sphere, never through cube-face UV or wrapped longitude subtraction.
+- Cylinder anchors use axial position plus a periodic angle.
+
+Sampling finds the nearest path segment in the domain's surface metric and
+constructs a local frame from along-path, across-path, and surface-normal
+directions. The shared canyon profile is evaluated from signed distance across
+the path and progress along it. A longitude seam or cube-face edge therefore
+has no geological meaning and cannot terminate or offset the canyon.
+
+### 7. Scale is expressed in physical bands
+
+Map extent and feature scale are independent. Width, depth, bend wavelength,
+tributary spacing, and detail wavelengths are stored in metres. Enlarging a
+map reveals more terrain; it does not stretch an existing canyon or its noise.
+
+Use nested deterministic bands so a feature remains readable at every view:
+
+- **Network scale:** trunk route, drainage direction, major bends, tributaries.
+- **Landform scale:** width, depth, terraces, escarpments, floodplain.
+- **Surface scale:** cliff breakup, strata, talus, gullies, channel roughness.
+- **Render scale:** material and normal detail that does not alter topology.
+
+Each band has an amplitude and wavelength in metres plus an LOD relevance
+range. Coarse patches sample the same network and low-frequency shape as fine
+patches. Fine patches add higher-frequency bands; they must not replace or
+re-route the trunk.
+
+### 8. Regional systems compose related features
+
+A Grand Canyon-style area should be represented as one serialized regional
+system: a primary trunk, major tributaries, shared erosion/profile style, and
+optional local overrides. It is not one enormous noise function and not a set
+of unrelated tile cuts. Independent ravines remain separate feature instances
+when they do not need shared drainage or styling.
+
+This gives two useful authoring levels:
+
+- `CanyonFeature`: one path and cross-section, suitable for a focused fixture
+  or a small authored ravine.
+- `CanyonNetworkFeature`: a trunk and branches sharing a regional style,
+  suitable for large coherent canyon country.
+
+Network generation can come later. The first implementation should accept
+explicit paths so topology, seams, and scale can be tested without committing
+to a procedural drainage algorithm.
+
+## Canyon and scale implementation plan
+
+### Stage A — Prove a path-driven canyon on a plane
+
+- [ ] Replace the demo's implicit side-to-side canyon formula with an explicit
+  polyline/spline centreline and nearest-path sampling.
+- [ ] Separate path controls from cross-section controls: route, width, depth,
+  wall steepness, terraces, channel floor, and edge falloff.
+- [ ] Add a map-size control while keeping all feature values in metres.
+- [ ] Demonstrate the same serialized canyon on small and large planes without
+  changing its local width, detail frequency, or route.
+- [ ] Add a camera-scale/detail-band diagnostic to show which frequencies are
+  contributing.
+
+Exit gate: resizing the plane or changing patch layout cannot alter the canyon
+route, and adjacent samples agree numerically.
+
+### Stage B — Add surface-path adapters
+
+- [ ] Define a small domain-independent path query contract returning nearest
+  point, distance across, progress along, tangent, and local surface frame.
+- [ ] Implement plane queries first, spherical geodesic segment queries second,
+  and periodic cylinder queries third.
+- [ ] Place a spherical test canyon across a cube-face boundary and the
+  longitude/angle wrap used by the demo camera controls.
+- [ ] Ensure antipodal/near-antipodal anchors and pole-adjacent paths either
+  behave deterministically or are rejected with documented validation.
+
+Exit gate: equivalent samples on both sides of every representation seam match
+within a documented epsilon in elevation and masks.
+
+### Stage C — Stream through the existing terrain pipeline
+
+- [ ] Adapt the geological field to `ITerrainField` and render it through
+  `TerrainSurfaceComponent`, rather than rebuilding one monolithic geometry.
+- [ ] Build a spatial index over conservative path-segment bounds so each patch
+  evaluates only nearby feature segments.
+- [ ] Keep feature definitions and spatial-index keys stable across worker and
+  main-thread generation.
+- [ ] Test same-LOD patch edges, mixed-LOD joins, cube-face edges, floating
+  origins, and billion-metre world coordinates.
+- [ ] Specify whether high-frequency displacement is sampled geometrically,
+  represented only in materials/normals, or faded by screen-space error.
+
+Exit gate: moving from an orbital view to canyon-floor range preserves one
+route and silhouette without cracks, popping, or detail swimming.
+
+### Stage D — Add coherent regional canyon networks
+
+- [ ] Add a serializable trunk-plus-branches definition with parent junctions.
+- [ ] Blend tributary profiles into the parent without double-depth cuts or
+  visible union seams.
+- [ ] Add shared regional presets for strata, terrace spacing, erosion age, and
+  material masks, with per-path overrides.
+- [ ] Start with authored or seeded control points; evaluate procedural drainage
+  generation as a separate later feature.
+- [ ] Add a large-plane and large-sphere fixture showing one regional canyon
+  system plus unrelated smaller ravines.
+
+Exit gate: the network reads as one geological region, while independently
+placed canyons still compose predictably.
+
+### Planned demo controls
+
+- Surface: plane, sphere, cylinder; surface/map size; patch and LOD diagnostics.
+- Placement: path anchors, seed, path length, major bend wavelength/strength.
+- Profile: width, depth, wall steepness, floor width, terraces, edge falloff.
+- Network: trunk/branch mode, branch count, junction spacing, regional preset.
+- Detail: erosion scale, strata scale, talus, gullies, and geometric detail cap.
+- Diagnostics: centreline, segment bounds, local frames, patch borders,
+  active detail bands, and seam stress-test placement.
+
+### Acceptance tests
+
+- Determinism: identical definition and surface position yield identical
+  elevation, masks, and path query results.
+- Seamlessness: sphere face edges and periodic cylinder edges agree within
+  epsilon; no longitude-based discontinuity is permitted.
+- Scale invariance: changing map/planet extent alone does not alter a feature's
+  metre-based width, depth, wavelengths, or sampled local profile.
+- LOD stability: coarse and fine patches agree on low-frequency shape and
+  shared vertices; added detail cannot move the centreline.
+- Network cohesion: branches meet their parent continuously and inherit the
+  regional style unless explicitly overridden.
+- Streaming cost: work is proportional to nearby indexed segments rather than
+  every canyon in the world.
+
 ## Initial catalogue
 
 | Feature | Phase | Important parameters |
@@ -159,6 +319,11 @@ the existing terrain entry point rather than a new top-level package.
 - [x] Make ridge count an explicit serialized/demo parameter.
 - [ ] Visually tune profiles, crater rim, gullies, canyon walls, and meanders.
 - [ ] Add export/import of parameter presets for comparing iterations.
+- [x] Replace the canyon's implicit side-to-side cut with a deterministic
+  path-driven nearest-segment sampler.
+- [x] Add metre-based canyon path length and bend-wavelength controls.
+- [x] Add a plane-size control demonstrating that map extent and feature scale
+  are independent.
 
 Exit gate: both fixtures read clearly as their intended landform from several
 camera angles, remain deterministic, and expose a small shared sampling model.
@@ -255,3 +420,25 @@ not leak geometry or materials.
   strength seed-driven so randomized volcanoes do not share one silhouette.
 - Made ridge handedness seed-driven as well, allowing clockwise- and
   anticlockwise-looking volcanic flow patterns.
+
+### 2026-08-06 — Canyon Stage A path sampler
+
+- Replaced the demo canyon's implicit full-width mathematical cut with a
+  deterministic centreline sampled as world-space segments.
+- Kept the cross-section separate from the route so width, depth, wall profile,
+  and erosion can later be reused by plane, sphere, and cylinder adapters.
+- Added path length, bend wavelength, and plane-size controls to test coherence
+  at different extents while retaining metre-based feature dimensions.
+- Added a regression test confirming the channel remains deep at both ends of
+  the sampled path.
+- Kept the implementation demo-local; spherical geodesic path queries and
+  `TerrainSurfaceComponent` streaming remain the next extraction stages.
+
+### 2026-08-06 — Sphere and cylinder canyon displacement fix
+
+- Fixed sphere canyon sampling so negative channel elevations are preserved
+  instead of being discarded by volcano-oriented max blending.
+- Wrapped spherical longitude deltas to the shortest arc, preventing a canyon
+  from disappearing or jumping at the longitude seam.
+- Corrected cylinder radial displacement so canyon floors move toward the
+  cylinder axis, matching the intended inner-surface presentation.

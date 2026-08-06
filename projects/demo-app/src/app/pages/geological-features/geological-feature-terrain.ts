@@ -17,6 +17,8 @@ export interface CanyonSettings {
   readonly depth: number;
   readonly wallSteepness: number;
   readonly meander: number;
+  readonly pathLength: number;
+  readonly bendWavelength: number;
   readonly erosion: number;
   readonly seed: number;
 }
@@ -43,6 +45,8 @@ export function defaultGeologicalTerrainSettings(): GeologicalTerrainSettings {
       depth: 34,
       wallSteepness: 2.4,
       meander: 24,
+      pathLength: 220,
+      bendWavelength: 120,
       erosion: 0.38,
       seed: 11,
     },
@@ -127,10 +131,8 @@ export function sampleCanyon(
   z: number,
   settings: CanyonSettings,
 ): number {
-  const centre =
-    Math.sin(z * 0.026 + settings.seed) * settings.meander +
-    Math.sin(z * 0.061 - settings.seed * 0.3) * settings.meander * 0.22;
-  const distance = Math.abs(x - centre);
+  const nearest = nearestCanyonPathPoint(x, z, settings);
+  const distance = nearest.distance;
   const halfWidth = Math.max(1, settings.width * 0.5);
   const profile = Math.exp(
     -Math.pow(distance / halfWidth, Math.max(0.5, settings.wallSteepness)),
@@ -142,6 +144,50 @@ export function sampleCanyon(
     smoothstep(halfWidth * 0.25, halfWidth * 2.5, distance) *
     (1 - smoothstep(halfWidth * 2, halfWidth * 4, distance));
   return -settings.depth * profile + wallNoise;
+}
+
+/** Samples an explicit, deterministic polyline centreline in world metres. */
+function nearestCanyonPathPoint(
+  x: number,
+  z: number,
+  settings: CanyonSettings,
+): { readonly distance: number; readonly along: number } {
+  const segmentCount = 32;
+  const halfLength = Math.max(1, settings.pathLength * 0.5);
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let bestAlong = 0;
+  let previous = canyonPathPoint(-halfLength, settings);
+
+  for (let index = 1; index <= segmentCount; index++) {
+    const along = -halfLength + (settings.pathLength * index) / segmentCount;
+    const current = canyonPathPoint(along, settings);
+    const dx = current.x - previous.x;
+    const dz = current.z - previous.z;
+    const lengthSquared = dx * dx + dz * dz || 1;
+    const t = Math.max(
+      0,
+      Math.min(1, ((x - previous.x) * dx + (z - previous.z) * dz) / lengthSquared),
+    );
+    const nearestX = previous.x + dx * t;
+    const nearestZ = previous.z + dz * t;
+    const distance = Math.hypot(x - nearestX, z - nearestZ);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestAlong = along - settings.pathLength / segmentCount + t * (settings.pathLength / segmentCount);
+    }
+    previous = current;
+  }
+  return { distance: bestDistance, along: bestAlong };
+}
+
+function canyonPathPoint(along: number, settings: CanyonSettings): { x: number; z: number } {
+  const bend = Math.max(1, settings.bendWavelength);
+  return {
+    x:
+      Math.sin(along / bend + settings.seed) * settings.meander +
+      Math.sin(along / (bend * 0.46) - settings.seed * 0.3) * settings.meander * 0.22,
+    z: along,
+  };
 }
 
 function rollingBase(x: number, z: number): number {

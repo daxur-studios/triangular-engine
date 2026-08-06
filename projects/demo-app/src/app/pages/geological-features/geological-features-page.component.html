@@ -20,6 +20,9 @@
         <button [class.active]="domain() === 'sphere'" (click)="selectDomain('sphere')">Large sphere</button>
         <button [class.active]="domain() === 'cylinder'" (click)="selectDomain('cylinder')">Cylinder</button>
       </nav>
+      @if (domain() === "plane") {
+        <label class="sphere-count"><span>Plane size <output>{{ planeSize() }} m</output></span><input type="range" min="120" max="640" step="20" [value]="planeSize()" (input)="setPlaneSize($event)" /></label>
+      }
       @if (domain() === "sphere" && activeFeature() === "volcano") {
         <label class="sphere-count"><span>Volcanoes on sphere <output>{{ sphereVolcanoCount() }}</output></span><input type="range" min="1" max="8" step="1" [value]="sphereVolcanoCount()" (input)="setSphereVolcanoCount($event)" /></label>
       }
@@ -59,6 +62,8 @@
           <label><span>Depth <output>{{ settings().canyon.depth }} m</output></span><input type="range" min="8" max="65" step="1" [value]="settings().canyon.depth" (input)="updateCanyon('depth', $event)" /></label>
           <label><span>Wall steepness <output>{{ settings().canyon.wallSteepness }}</output></span><input type="range" min="0.7" max="5" step="0.1" [value]="settings().canyon.wallSteepness" (input)="updateCanyon('wallSteepness', $event)" /></label>
           <label><span>Meander <output>{{ settings().canyon.meander }} m</output></span><input type="range" min="0" max="48" step="1" [value]="settings().canyon.meander" (input)="updateCanyon('meander', $event)" /></label>
+          <label><span>Path length <output>{{ settings().canyon.pathLength }} m</output></span><input type="range" min="80" max="640" step="20" [value]="settings().canyon.pathLength" (input)="updateCanyon('pathLength', $event)" /></label>
+          <label><span>Bend wavelength <output>{{ settings().canyon.bendWavelength }} m</output></span><input type="range" min="40" max="280" step="10" [value]="settings().canyon.bendWavelength" (input)="updateCanyon('bendWavelength', $event)" /></label>
           <label><span>Erosion <output>{{ settings().canyon.erosion }}</output></span><input type="range" min="0" max="1" step="0.02" [value]="settings().canyon.erosion" (input)="updateCanyon('erosion', $event)" /></label>
         }
       </section>

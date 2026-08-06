@@ -53,6 +53,7 @@ export class GeologicalFeaturesPageComponent {
   readonly activeFeature = signal<GeologicalFeatureKind>('volcano');
   readonly domain = signal<GeologicalTerrainDomain>('plane');
   readonly sphereVolcanoCount = signal(4);
+  readonly planeSize = signal(WORLD_SIZE);
   readonly settings = signal(defaultGeologicalTerrainSettings());
   readonly wireframe = signal(false);
   readonly catalogue: readonly FeatureCatalogueItem[] = [
@@ -106,6 +107,14 @@ export class GeologicalFeaturesPageComponent {
     this.domain.set(domain);
     this.replaceGeometry();
     this.rebuildTerrain();
+  }
+
+  setPlaneSize(event: Event): void {
+    this.planeSize.set(Number((event.target as HTMLInputElement).value));
+    if (this.domain() === 'plane') {
+      this.replaceGeometry();
+      this.rebuildTerrain();
+    }
   }
 
   setSphereVolcanoCount(event: Event): void {
@@ -162,7 +171,7 @@ export class GeologicalFeaturesPageComponent {
     const previous = this.geometry;
     this.geometry =
       this.domain() === 'plane'
-        ? new PlaneGeometry(WORLD_SIZE, WORLD_SIZE, SEGMENTS, SEGMENTS)
+        ? new PlaneGeometry(this.planeSize(), this.planeSize(), SEGMENTS, SEGMENTS)
         : this.domain() === 'sphere'
           ? new SphereGeometry(SPHERE_RADIUS, 128, 72)
           : new CylinderGeometry(
@@ -258,6 +267,8 @@ export class GeologicalFeaturesPageComponent {
       const surfaceX = y;
       const surfaceZ = angle * CYLINDER_RADIUS;
       const elevation = sampleGeologicalElevation(kind, surfaceX, surfaceZ, settings);
+      // A negative canyon floor must move toward the cylinder axis, not away
+      // from it, so the radial displacement keeps the sampled elevation sign.
       const radius = CYLINDER_RADIUS + elevation * 0.7;
       return {
         elevation,
@@ -273,16 +284,21 @@ export class GeologicalFeaturesPageComponent {
     const latitude = Math.asin(y / length);
     const longitude = Math.atan2(z, x);
     const featureCount = kind === 'volcano' ? this.sphereVolcanoCount() : 1;
-    let elevation = 0;
+    let elevation = kind === 'volcano' ? 0 : Number.NEGATIVE_INFINITY;
     for (let feature = 0; feature < featureCount; feature++) {
       const featureLatitude = -0.42 + feature * 0.28;
       const featureLongitude = -2.3 + feature * 1.37;
-      const dx = (longitude - featureLongitude) * SPHERE_RADIUS * Math.cos(featureLatitude);
-      const dz = (latitude - featureLatitude) * SPHERE_RADIUS;
-      elevation = Math.max(
-        elevation,
-        sampleGeologicalElevation(kind, dx, dz, settings),
+      const longitudeDelta = Math.atan2(
+        Math.sin(longitude - featureLongitude),
+        Math.cos(longitude - featureLongitude),
       );
+      const dx = longitudeDelta * SPHERE_RADIUS * Math.cos(featureLatitude);
+      const dz = (latitude - featureLatitude) * SPHERE_RADIUS;
+      const featureElevation = sampleGeologicalElevation(kind, dx, dz, settings);
+      elevation =
+        kind === 'volcano'
+          ? Math.max(elevation, featureElevation)
+          : featureElevation;
     }
     const radius = SPHERE_RADIUS + elevation * 0.7;
     return {
