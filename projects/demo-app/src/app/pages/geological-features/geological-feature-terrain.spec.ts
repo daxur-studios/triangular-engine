@@ -45,8 +45,8 @@ describe('geological feature terrain', () => {
 
   it('changes the large-scale ridge identity with the seed', () => {
     const { volcano } = defaultGeologicalTerrainSettings();
-    const first = sampleVolcano(31, 12, { ...volcano, seed: 7 });
-    const second = sampleVolcano(31, 12, { ...volcano, seed: 107 });
+    const first = sampleVolcano(31, 12, { ...volcano, ridgeCount: 5 });
+    const second = sampleVolcano(31, 12, { ...volcano, ridgeCount: 12 });
 
     expect(first).not.toBe(second);
   });

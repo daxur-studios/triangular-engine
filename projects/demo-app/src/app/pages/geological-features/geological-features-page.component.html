@@ -43,6 +43,7 @@
           <label><span>Crater radius <output>{{ settings().volcano.craterRadius }} m</output></span><input type="range" min="4" max="28" step="1" [value]="settings().volcano.craterRadius" (input)="updateVolcano('craterRadius', $event)" /></label>
           <label><span>Crater depth <output>{{ settings().volcano.craterDepth }} m</output></span><input type="range" min="0" max="42" step="1" [value]="settings().volcano.craterDepth" (input)="updateVolcano('craterDepth', $event)" /></label>
           <label><span>Erosion <output>{{ settings().volcano.erosion }}</output></span><input type="range" min="0" max="1" step="0.02" [value]="settings().volcano.erosion" (input)="updateVolcano('erosion', $event)" /></label>
+          <label><span>Ridge count <output>{{ settings().volcano.ridgeCount }}</output></span><input type="range" min="3" max="16" step="1" [value]="settings().volcano.ridgeCount" (input)="updateVolcano('ridgeCount', $event)" /></label>
           <label><span>Spiralness <output>{{ settings().volcano.spiralness }}</output></span><input type="range" min="0" max="1" step="0.02" [value]="settings().volcano.spiralness" (input)="updateVolcano('spiralness', $event)" /></label>
         } @else {
           <label><span>Width <output>{{ settings().canyon.width }} m</output></span><input type="range" min="8" max="65" step="1" [value]="settings().canyon.width" (input)="updateCanyon('width', $event)" /></label>

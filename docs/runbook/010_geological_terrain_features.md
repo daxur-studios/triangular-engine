@@ -1,6 +1,6 @@
 # Geological terrain features
 
-Status: proposed, with a demo-local Phase 0 lab.
+Status: Phase 0 in progress, with a demo-local interactive lab.
 
 ## Goal
 
@@ -12,6 +12,42 @@ gameplay, particles, audio, or physics in the terrain package.
 The initial proving ground is `/geological-features-lab` in the demo app. It
 lists implemented and candidate features and exposes live parameters for the
 implemented volcano and canyon fixtures.
+
+## Current position
+
+The project currently has a working Phase 0 lab, not a reusable public geology
+API yet. Volcano and canyon are deterministic demo-local height functions
+rendered on a high-resolution plane. Volcanoes now combine seeded fine noise
+with restrained curved ridges whose count, twist, strength, and handedness vary
+by seed. The former `atan2` seam has a regression test and is no longer part of
+the asymmetry function.
+
+## Desired destination
+
+Extract a small framework-free geology layer inside `triangular-engine/terrain`
+once the shapes and composition rules are proven. The extracted layer should
+feed the existing terrain sampling, patch meshing, LOD, material-mask, and
+collision adapters. Bruno's Space Program can then use the same definitions on
+streamed spherical planetary terrain, while a closer game adds its own lava,
+eruption, destruction, VFX, audio, and gameplay systems.
+
+## Outstanding work
+
+The next work is still Phase 0 quality and contract discovery:
+
+- Visually review volcano and canyon across the full slider ranges and camera
+  angles; tune crater rims, erosion, canyon walls, meanders, and material
+  readability.
+- Add export/import of parameter presets so good landforms can be retained and
+  compared.
+- Define the smallest stable feature sample, bounds, composition, and metadata
+  contracts before extracting code into the library.
+- Add multi-feature composition and patch/LOD tests only after those contracts
+  exist.
+
+Phase 1 extraction, sphere/cylinder integration, BSP integration, active lava,
+runtime terrain mutation, and the planned catalogue features remain
+outstanding.
 
 ## Design decisions
 
@@ -77,7 +113,7 @@ masks without the core prescribing a material system.
 
 | Feature | Phase | Important parameters |
 | --- | --- | --- |
-| Volcano | Phase 0 demo | radius, height, crater radius/depth, asymmetry, erosion, seed |
+| Volcano | Phase 0 demo | radius, height, crater radius/depth, asymmetry, erosion, ridge count, spiralness, seed |
 | Canyon | Phase 0 demo | width, depth, wall steepness, meander, erosion, seed |
 | Crater / impact basin | Candidate | rim radius/height, bowl depth, ejecta, age |
 | Mountain ridge | Candidate | spline, width, height, sharpness, erosion |
@@ -119,6 +155,8 @@ the existing terrain entry point rather than a new top-level package.
 - [x] Add deterministic demo-local volcano and canyon height functions.
 - [x] Add live parameter sliders and reset controls.
 - [x] Render slope/elevation-based diagnostic colours.
+- [x] Add seed-driven ridge count, twist, strength, and handedness variation.
+- [x] Make ridge count an explicit serialized/demo parameter.
 - [ ] Visually tune profiles, crater rim, gullies, canyon walls, and meanders.
 - [ ] Add export/import of parameter presets for comparing iterations.
 

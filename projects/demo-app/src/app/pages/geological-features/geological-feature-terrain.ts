@@ -6,6 +6,7 @@ export interface VolcanoSettings {
   readonly craterRadius: number;
   readonly craterDepth: number;
   readonly erosion: number;
+  readonly ridgeCount: number;
   readonly spiralness: number;
   readonly seed: number;
 }
@@ -32,6 +33,7 @@ export function defaultGeologicalTerrainSettings(): GeologicalTerrainSettings {
       craterRadius: 13,
       craterDepth: 19,
       erosion: 0.42,
+      ridgeCount: 8,
       spiralness: 0.58,
       seed: 7,
     },
@@ -87,7 +89,7 @@ export function sampleVolcano(
   // Seed the large-scale identity as well as the fine noise. Keeping the
   // ridge count integral preserves continuity at the atan2 branch while
   // allowing one seed to make five broad ridges and another to make twelve.
-  const ridgeCount = 5 + Math.floor(seedNoise(settings.seed) * 8);
+  const ridgeCount = Math.max(3, Math.min(16, Math.round(settings.ridgeCount)));
   const twist = 0.035 + seedNoise(settings.seed + 23) * 0.09;
   const direction = seedNoise(settings.seed + 41) < 0.5 ? -1 : 1;
   const spiralPattern =

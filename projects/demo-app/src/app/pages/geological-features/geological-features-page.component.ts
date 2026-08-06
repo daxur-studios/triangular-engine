@@ -117,7 +117,13 @@ export class GeologicalFeaturesPageComponent {
     const feature = this.activeFeature();
     this.settings.update((current) => ({
       ...current,
-      [feature]: { ...current[feature], seed },
+      [feature]: {
+        ...current[feature],
+        seed,
+        ...(feature === 'volcano'
+          ? { ridgeCount: 5 + Math.floor(Math.random() * 8) }
+          : {}),
+      },
     } as GeologicalTerrainSettings));
     this.rebuildTerrain();
   }
