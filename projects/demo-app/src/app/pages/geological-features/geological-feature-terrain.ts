@@ -6,6 +6,7 @@ export interface VolcanoSettings {
   readonly craterRadius: number;
   readonly craterDepth: number;
   readonly erosion: number;
+  readonly spiralness: number;
   readonly seed: number;
 }
 
@@ -31,6 +32,7 @@ export function defaultGeologicalTerrainSettings(): GeologicalTerrainSettings {
       craterRadius: 13,
       craterDepth: 19,
       erosion: 0.42,
+      spiralness: 0.58,
       seed: 7,
     },
     canyon: {
@@ -61,9 +63,15 @@ export function sampleVolcano(
   z: number,
   settings: VolcanoSettings,
 ): number {
-  const angle = Math.atan2(z, x);
-  const asymmetry = 1 + Math.sin(angle * 2.1 + settings.seed) * 0.08;
-  const radius = Math.hypot(x, z) / asymmetry;
+  const distance = Math.hypot(x, z);
+  // Keep the asymmetry in Cartesian space. Angle-based functions with a
+  // non-integer frequency jump at atan2's -PI/PI branch and create a visible
+  // seam through the volcano.
+  const asymmetry =
+    1 +
+    (valueNoise(x * 0.018, z * 0.018, settings.seed + 17) - 0.5) *
+      0.14;
+  const radius = distance / asymmetry;
   const normalized = radius / Math.max(1, settings.radius);
   const cone = settings.height * Math.pow(Math.max(0, 1 - normalized), 1.45);
   const rimDistance = Math.abs(radius - settings.craterRadius);
@@ -71,11 +79,41 @@ export function sampleVolcano(
   const crater =
     settings.craterDepth *
     Math.exp(-(radius * radius) / Math.max(1, settings.craterRadius ** 2 * 0.7));
+  const angle = Math.atan2(z, x);
+  // Retain a subtle directional volcanic structure: the integer harmonic is
+  // continuous at atan2's -PI/PI branch, while the small radial phase creates
+  // gently curving ridges instead of straight spokes. Cartesian noise keeps
+  // the ridges from becoming a repeated procedural pattern.
+  // Seed the large-scale identity as well as the fine noise. Keeping the
+  // ridge count integral preserves continuity at the atan2 branch while
+  // allowing one seed to make five broad ridges and another to make twelve.
+  const ridgeCount = 5 + Math.floor(seedNoise(settings.seed) * 8);
+  const twist = 0.035 + seedNoise(settings.seed + 23) * 0.09;
+  const direction = seedNoise(settings.seed + 41) < 0.5 ? -1 : 1;
+  const spiralPattern =
+    Math.sin(
+      direction * (angle * ridgeCount + radius * twist) + settings.seed * 0.7,
+    ) *
+      (0.35 + settings.spiralness * 0.45) +
+    0.5;
+  const warpX =
+    (valueNoise(x * 0.035 + 4.7, z * 0.035 - 2.1, settings.seed + 31) -
+      0.5) *
+    9;
+  const warpZ =
+    (valueNoise(x * 0.035 - 6.3, z * 0.035 + 5.4, settings.seed + 47) -
+      0.5) *
+    9;
+  const erosionNoise = valueNoise(
+    (x + warpX) * 0.075,
+    (z + warpZ) * 0.075,
+    settings.seed + 61,
+  );
   const gullies =
-    Math.sin(angle * 11 + settings.seed * 0.7 + radius * 0.12) *
+    ((spiralPattern - 0.5) * 0.7 + (erosionNoise - 0.5) * 0.3) *
     settings.erosion *
     settings.height *
-    0.09 *
+    0.14 *
     smoothstep(0.08, 0.85, normalized) *
     (1 - smoothstep(0.82, 1, normalized));
   return cone + rim - crater - gullies;
@@ -121,6 +159,11 @@ function valueNoise(x: number, z: number, seed: number): number {
 
 function hash(x: number, z: number, seed: number): number {
   const value = Math.sin(x * 127.1 + z * 311.7 + seed * 74.7) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function seedNoise(seed: number): number {
+  const value = Math.sin(seed * 91.73 + 17.19) * 43758.5453;
   return value - Math.floor(value);
 }
 

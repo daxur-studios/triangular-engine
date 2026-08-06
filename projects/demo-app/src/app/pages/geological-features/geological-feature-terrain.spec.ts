@@ -32,4 +32,31 @@ describe('geological feature terrain', () => {
       sampleVolcano(12.5, -8.25, volcano),
     );
   });
+
+  it('does not jump across the polar coordinate seam', () => {
+    const { volcano } = defaultGeologicalTerrainSettings();
+    const epsilon = 0.0001;
+    const radius = volcano.radius * 0.7;
+    const left = sampleVolcano(-radius, epsilon, volcano);
+    const right = sampleVolcano(-radius, -epsilon, volcano);
+
+    expect(Math.abs(left - right)).toBeLessThan(0.01);
+  });
+
+  it('changes the large-scale ridge identity with the seed', () => {
+    const { volcano } = defaultGeologicalTerrainSettings();
+    const first = sampleVolcano(31, 12, { ...volcano, seed: 7 });
+    const second = sampleVolcano(31, 12, { ...volcano, seed: 107 });
+
+    expect(first).not.toBe(second);
+  });
+
+  it('allows the seeded ridge flow to change handedness', () => {
+    const { volcano } = defaultGeologicalTerrainSettings();
+    const samples = [3, 7, 19, 41, 107].map((seed) =>
+      sampleVolcano(31, 12, { ...volcano, seed }),
+    );
+
+    expect(new Set(samples).size).toBeGreaterThan(1);
+  });
 });

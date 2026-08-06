@@ -204,3 +204,14 @@ not leak geometry or materials.
 - Separated static landform generation from active-volcano gameplay and VFX.
 - Included a broader catalogue so future work is organized around reusable
   feature composition rather than one-off volcano code.
+
+### 2026-08-06 — Volcano artefact fix
+
+- Replaced polar sinusoidal erosion and non-integer angular asymmetry with
+  domain-warped Cartesian noise. The previous `atan2` branch caused a seam and
+  the radial sinusoid read as highly visible spiral ridges from above.
+- Added a regression test sampling both sides of the former polar branch.
+- Kept a restrained polar ridge component, but made ridge count, twist, and
+  strength seed-driven so randomized volcanoes do not share one silhouette.
+- Made ridge handedness seed-driven as well, allowing clockwise- and
+  anticlockwise-looking volcanic flow patterns.
