@@ -1,5 +1,7 @@
 import {
   defaultGeologicalTerrainSettings,
+  sampleGeologicalComposition,
+  sampleGeologicalTerrain,
   sampleCanyon,
   sampleVolcano,
 } from './geological-feature-terrain';
@@ -67,5 +69,40 @@ describe('geological feature terrain', () => {
     );
 
     expect(new Set(samples).size).toBeGreaterThan(1);
+  });
+
+  it('composes deterministic volcanic fields with multiple instances', () => {
+    const settings = defaultGeologicalTerrainSettings();
+    const first = sampleGeologicalComposition('volcanic-field', 24, -18, settings);
+    const second = sampleGeologicalComposition('volcanic-field', 24, -18, settings);
+
+    expect(first).toBe(second);
+    expect(first).not.toBe(sampleGeologicalComposition('volcanic-field', -180, -180, settings));
+    expect(first).not.toBe(
+      sampleGeologicalComposition('volcanic-field', 24, -18, {
+        ...settings,
+        volcano: { ...settings.volcano, seed: settings.volcano.seed + 1 },
+      }),
+    );
+  });
+
+  it('keeps a canyon network as a negative regional composition', () => {
+    const settings = defaultGeologicalTerrainSettings();
+    const centre = sampleGeologicalComposition('canyon-network', -42, 0, settings);
+    const distant = sampleGeologicalComposition('canyon-network', 180, 180, settings);
+
+    expect(centre).toBeLessThan(distant);
+  });
+
+  it('uses feature order as terrain history', () => {
+    const settings = defaultGeologicalTerrainSettings();
+    const canyonAfterVolcano = sampleGeologicalTerrain(
+      'volcanic-field', ['volcano', 'canyon'], 0, 0, settings,
+    );
+    const volcanoAfterCanyon = sampleGeologicalTerrain(
+      'volcanic-field', ['canyon', 'volcano'], 0, 0, settings,
+    );
+
+    expect(canyonAfterVolcano).toBeLessThan(volcanoAfterCanyon);
   });
 });

@@ -20,6 +20,17 @@
         <button [class.active]="domain() === 'sphere'" (click)="selectDomain('sphere')">Large sphere</button>
         <button [class.active]="domain() === 'cylinder'" (click)="selectDomain('cylinder')">Cylinder</button>
       </nav>
+      <nav class="domain-tabs" aria-label="Terrain composition">
+        <button [class.active]="composition() === 'single'" (click)="selectComposition('single')">Local layers</button>
+        <button [class.active]="composition() === 'volcanic-field'" (click)="selectComposition('volcanic-field')">Volcanic field</button>
+    <button [class.active]="composition() === 'canyon-network'" (click)="selectComposition('canyon-network')">Canyon network</button>
+      </nav>
+      @if (composition() !== "single") {
+        <p class="composition-note">
+          Regional preset: then select a test feature to apply it as the newest
+          geological layer. The selection order is the formation order.
+        </p>
+      }
       @if (domain() === "plane") {
         <label class="sphere-count"><span>Plane size <output>{{ planeSize() }} m</output></span><input type="range" min="120" max="640" step="20" [value]="planeSize()" (input)="setPlaneSize($event)" /></label>
       }
@@ -37,7 +48,7 @@
             <small>{{ feature.description }}</small>
             @if (feature.status === "interactive") {
               <button
-                [class.active]="activeFeature() === feature.kind"
+                [class.active]="isFeatureEnabled(feature.kind)"
                 (click)="selectFeature($any(feature.kind))"
               >
                 Test {{ feature.name }}

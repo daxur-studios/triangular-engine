@@ -1,5 +1,7 @@
 export type GeologicalFeatureKind = 'volcano' | 'canyon';
 export type GeologicalTerrainDomain = 'plane' | 'sphere' | 'cylinder';
+export type GeologicalCompositionPreset = 'single' | 'volcanic-field' | 'canyon-network';
+export type GeologicalCompositionOperation = 'add' | 'max' | 'carve';
 
 export interface VolcanoSettings {
   readonly radius: number;
@@ -26,6 +28,15 @@ export interface CanyonSettings {
 export interface GeologicalTerrainSettings {
   readonly volcano: VolcanoSettings;
   readonly canyon: CanyonSettings;
+}
+
+export interface GeologicalFeatureInstance {
+  readonly kind: GeologicalFeatureKind;
+  readonly offsetX: number;
+  readonly offsetZ: number;
+  readonly operation: GeologicalCompositionOperation;
+  readonly strength: number;
+  readonly seedOffset: number;
 }
 
 export function defaultGeologicalTerrainSettings(): GeologicalTerrainSettings {
@@ -63,6 +74,101 @@ export function sampleGeologicalElevation(
   return kind === 'volcano'
     ? base + sampleVolcano(x, z, settings.volcano)
     : base + sampleCanyon(x, z, settings.canyon);
+}
+
+export function sampleGeologicalFeatures(
+  kinds: readonly GeologicalFeatureKind[],
+  x: number,
+  z: number,
+  settings: GeologicalTerrainSettings,
+): number {
+  return sampleGeologicalTerrain('single', kinds, x, z, settings);
+}
+
+/**
+ * Applies ordered feature layers to a regional preset. A later canyon carves
+ * into what came before it; a later volcano uses its own surface wherever it
+ * rises above the earlier terrain. This makes feature order a terrain-history
+ * decision rather than an arbitrary heightmap addition.
+ */
+export function sampleGeologicalTerrain(
+  preset: GeologicalCompositionPreset,
+  layers: readonly GeologicalFeatureKind[],
+  x: number,
+  z: number,
+  settings: GeologicalTerrainSettings,
+): number {
+  const base = rollingBase(x, z);
+  let elevation = preset === 'single'
+    ? base
+    : sampleGeologicalComposition(preset, x, z, settings);
+
+  for (const kind of layers) {
+    const contribution = sampleGeologicalElevation(kind, x, z, settings) - base;
+    elevation = kind === 'canyon'
+      ? elevation + Math.min(0, contribution)
+      : Math.max(elevation, base + contribution);
+  }
+  return elevation;
+}
+
+/** Samples a deterministic regional arrangement of the existing Phase 0 features. */
+export function sampleGeologicalComposition(
+  preset: GeologicalCompositionPreset,
+  x: number,
+  z: number,
+  settings: GeologicalTerrainSettings,
+): number {
+  if (preset === 'single') {
+    return sampleGeologicalElevation('volcano', x, z, settings);
+  }
+
+  const instances: readonly GeologicalFeatureInstance[] =
+    preset === 'volcanic-field'
+      ? [
+          { kind: 'volcano', offsetX: 0, offsetZ: 0, operation: 'max', strength: 1, seedOffset: 0 },
+          { kind: 'volcano', offsetX: -62, offsetZ: -30, operation: 'max', strength: 0.82, seedOffset: 13 },
+          { kind: 'volcano', offsetX: 58, offsetZ: 42, operation: 'max', strength: 0.68, seedOffset: 29 },
+        ]
+      : [
+          { kind: 'canyon', offsetX: -42, offsetZ: 0, operation: 'carve', strength: 1, seedOffset: 0 },
+          { kind: 'canyon', offsetX: 48, offsetZ: 18, operation: 'carve', strength: 0.72, seedOffset: 19 },
+        ];
+
+  const placementSeed = preset === 'volcanic-field'
+    ? settings.volcano.seed
+    : settings.canyon.seed;
+  const placementX = (index: number, amount: number): number =>
+    (seedNoise(placementSeed + index * 17) - 0.5) * amount;
+  const placementZ = (index: number, amount: number): number =>
+    (seedNoise(placementSeed + index * 29 + 7) - 0.5) * amount;
+
+  let elevation = rollingBase(x, z);
+  for (const [index, instance] of instances.entries()) {
+    const placementRange = preset === 'volcanic-field'
+      ? (index === 0 ? 70 : 56)
+      : 70;
+    const offsetX = instance.offsetX + placementX(index, placementRange);
+    const offsetZ = instance.offsetZ + placementZ(index, placementRange);
+    const localSettings = instance.kind === 'volcano'
+      ? { ...settings, volcano: { ...settings.volcano, seed: settings.volcano.seed + instance.seedOffset } }
+      : { ...settings, canyon: { ...settings.canyon, seed: settings.canyon.seed + instance.seedOffset } };
+    const localX = x - offsetX;
+    const localZ = z - offsetZ;
+    const contribution = sampleGeologicalElevation(
+      instance.kind,
+      localX,
+      localZ,
+      localSettings,
+    ) - rollingBase(localX, localZ);
+    const weighted = contribution * instance.strength;
+    elevation = instance.operation === 'max'
+      ? Math.max(elevation, rollingBase(x, z) + weighted)
+      : instance.operation === 'carve'
+        ? elevation + Math.min(0, weighted)
+        : elevation + weighted;
+  }
+  return elevation;
 }
 
 export function sampleVolcano(

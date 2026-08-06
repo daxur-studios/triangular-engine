@@ -19,9 +19,11 @@ import {
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
   defaultGeologicalTerrainSettings,
-  sampleGeologicalElevation,
+  sampleGeologicalFeatures,
+  sampleGeologicalTerrain,
   type CanyonSettings,
   type GeologicalFeatureKind,
+  type GeologicalCompositionPreset,
   type GeologicalTerrainDomain,
   type GeologicalTerrainSettings,
   type VolcanoSettings,
@@ -51,6 +53,8 @@ const CYLINDER_LENGTH = 420;
 })
 export class GeologicalFeaturesPageComponent {
   readonly activeFeature = signal<GeologicalFeatureKind>('volcano');
+  readonly enabledFeatures = signal<readonly GeologicalFeatureKind[]>(['volcano']);
+  readonly composition = signal<GeologicalCompositionPreset>('single');
   readonly domain = signal<GeologicalTerrainDomain>('plane');
   readonly sphereVolcanoCount = signal(4);
   readonly planeSize = signal(WORLD_SIZE);
@@ -100,6 +104,21 @@ export class GeologicalFeaturesPageComponent {
 
   selectFeature(kind: GeologicalFeatureKind): void {
     this.activeFeature.set(kind);
+    this.enabledFeatures.update((current) => {
+      // Selection is also geological chronology. Selecting Canyon after a
+      // volcano means it cuts through that volcano; selecting Volcano after
+      // Canyon means the later cone covers the earlier incision.
+      return [...current.filter((feature) => feature !== kind), kind];
+    });
+    this.rebuildTerrain();
+  }
+
+  isFeatureEnabled(kind: string): boolean {
+    return this.enabledFeatures().includes(kind as GeologicalFeatureKind);
+  }
+
+  selectComposition(preset: GeologicalCompositionPreset): void {
+    this.composition.set(preset);
     this.rebuildTerrain();
   }
 
@@ -221,7 +240,7 @@ export class GeologicalFeaturesPageComponent {
       const normalized = Math.max(0, Math.min(1, (elevation + 36) / 90));
       color.copy(low).lerp(earth, Math.min(1, normalized * 1.8));
       if (normalized > 0.56) color.lerp(high, (normalized - 0.56) / 0.44);
-      if (kind === 'volcano' && Math.hypot(x, z) < settings.volcano.craterRadius * 1.15) {
+      if (this.composition() === 'single' && kind === 'volcano' && Math.hypot(x, z) < settings.volcano.craterRadius * 1.15) {
         color.lerp(ash, 0.7);
       }
       colors[index * 3] = color.r;
@@ -251,7 +270,10 @@ export class GeologicalFeaturesPageComponent {
     readonly renderZ: number;
   } {
     if (this.domain() === 'plane') {
-      const elevation = sampleGeologicalElevation(kind, x, -y, settings);
+      const sampleZ = -y;
+      const elevation = sampleGeologicalTerrain(
+        this.composition(), this.enabledFeatures(), x, sampleZ, settings,
+      );
       return {
         elevation,
         sampleX: x,
@@ -266,7 +288,9 @@ export class GeologicalFeaturesPageComponent {
       const angle = Math.atan2(z, x);
       const surfaceX = y;
       const surfaceZ = angle * CYLINDER_RADIUS;
-      const elevation = sampleGeologicalElevation(kind, surfaceX, surfaceZ, settings);
+      const elevation = sampleGeologicalTerrain(
+        this.composition(), this.enabledFeatures(), surfaceX, surfaceZ, settings,
+      );
       // A negative canyon floor must move toward the cylinder axis, not away
       // from it, so the radial displacement keeps the sampled elevation sign.
       const radius = CYLINDER_RADIUS + elevation * 0.7;
@@ -283,6 +307,22 @@ export class GeologicalFeaturesPageComponent {
     const length = Math.hypot(x, y, z) || SPHERE_RADIUS;
     const latitude = Math.asin(y / length);
     const longitude = Math.atan2(z, x);
+    if (this.composition() !== 'single') {
+      const surfaceX = longitude * SPHERE_RADIUS;
+      const surfaceZ = latitude * SPHERE_RADIUS;
+      const elevation = sampleGeologicalTerrain(
+        this.composition(), this.enabledFeatures(), surfaceX, surfaceZ, settings,
+      );
+      const radius = SPHERE_RADIUS + elevation * 0.7;
+      return {
+        elevation,
+        sampleX: surfaceX,
+        sampleZ: surfaceZ,
+        renderX: (x / length) * radius,
+        renderY: (y / length) * radius,
+        renderZ: (z / length) * radius,
+      };
+    }
     const featureCount = kind === 'volcano' ? this.sphereVolcanoCount() : 1;
     let elevation = kind === 'volcano' ? 0 : Number.NEGATIVE_INFINITY;
     for (let feature = 0; feature < featureCount; feature++) {
@@ -294,7 +334,9 @@ export class GeologicalFeaturesPageComponent {
       );
       const dx = longitudeDelta * SPHERE_RADIUS * Math.cos(featureLatitude);
       const dz = (latitude - featureLatitude) * SPHERE_RADIUS;
-      const featureElevation = sampleGeologicalElevation(kind, dx, dz, settings);
+      const featureElevation = sampleGeologicalFeatures(
+        this.enabledFeatures(), dx, dz, settings,
+      );
       elevation =
         kind === 'volcano'
           ? Math.max(elevation, featureElevation)

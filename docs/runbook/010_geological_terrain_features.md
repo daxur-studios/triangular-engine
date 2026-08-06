@@ -184,6 +184,40 @@ to a procedural drainage algorithm.
 
 ## Canyon and scale implementation plan
 
+## Large-scale composition plan
+
+The first composition implementation remains demo-local and intentionally
+small. It proves how multiple authored geological instances can form a region
+before a public library API or streamed cube-sphere integration is introduced.
+
+### Composition contract
+
+- A composition is a deterministic ordered set of feature instances.
+- Each instance owns a feature kind, metre-based local offset, strength, and
+  composition operation.
+- Initial operations are `max` for raised landforms, `carve` for negative
+  channels, and `add` for additive contributions.
+- Feature sampling remains local and reusable; composition owns placement and
+  blending.
+- Initial presets are a volcanic field and a canyon network, both with fixed
+  metre-based instances and seed offsets.
+
+### Composition milestones
+
+- [x] Add demo-local feature instances and explicit composition operations.
+- [x] Add deterministic volcanic-field and canyon-network presets.
+- [x] Add basic demo preset controls.
+- [x] Add numeric determinism and regional-carving tests.
+- [ ] Add visible instance bounds and centreline diagnostics.
+- [ ] Add configurable instance count, spacing, and regional seed.
+- [ ] Move the stable contract into framework-free triangular-engine terrain
+  code after visual review.
+- [ ] Reuse the composition contract for mesas, craters, ridges, and rifts.
+
+Exit gate: a large plane can show one coherent regional preset, repeated
+renders agree numerically, and changing the map extent does not stretch the
+individual features.
+
 ### Stage A — Prove a path-driven canyon on a plane
 
 - [ ] Replace the demo's implicit side-to-side canyon formula with an explicit
@@ -442,3 +476,14 @@ not leak geometry or materials.
   from disappearing or jumping at the longitude seam.
 - Corrected cylinder radial displacement so canyon floors move toward the
   cylinder axis, matching the intended inner-surface presentation.
+
+### 2026-08-06 — Ordered terrain composition
+
+- Regional presets and the interactive test features now use one layered
+  sampler rather than replacing one another.
+- Feature selection order is treated as terrain history: a canyon selected
+  after a volcano carves the existing surface, while a later volcano covers an
+  earlier canyon wherever its own terrain is higher.
+- This is a heightfield composition rule, not a full geological simulation;
+  future extracted feature definitions must retain explicit operation and
+  ordering metadata.
