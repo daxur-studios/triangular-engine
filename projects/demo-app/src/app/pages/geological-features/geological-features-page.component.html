@@ -15,6 +15,15 @@
         stable enough to extract into the terrain library.
       </p>
 
+      <nav class="domain-tabs" aria-label="Terrain domain">
+        <button [class.active]="domain() === 'plane'" (click)="selectDomain('plane')">Plane</button>
+        <button [class.active]="domain() === 'sphere'" (click)="selectDomain('sphere')">Large sphere</button>
+        <button [class.active]="domain() === 'cylinder'" (click)="selectDomain('cylinder')">Cylinder</button>
+      </nav>
+      @if (domain() === "sphere" && activeFeature() === "volcano") {
+        <label class="sphere-count"><span>Volcanoes on sphere <output>{{ sphereVolcanoCount() }}</output></span><input type="range" min="1" max="8" step="1" [value]="sphereVolcanoCount()" (input)="setSphereVolcanoCount($event)" /></label>
+      }
+
       <div class="catalogue" aria-label="Geological feature catalogue">
         @for (feature of catalogue; track feature.kind) {
           <article [class.available]="feature.status === 'interactive'">

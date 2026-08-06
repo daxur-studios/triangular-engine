@@ -8,10 +8,13 @@ import {
 import { RouterLink } from '@angular/router';
 import {
   BufferAttribute,
+  BufferGeometry,
   Color,
+  CylinderGeometry,
   Mesh,
   MeshStandardMaterial,
   PlaneGeometry,
+  SphereGeometry,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
@@ -19,6 +22,7 @@ import {
   sampleGeologicalElevation,
   type CanyonSettings,
   type GeologicalFeatureKind,
+  type GeologicalTerrainDomain,
   type GeologicalTerrainSettings,
   type VolcanoSettings,
 } from './geological-feature-terrain';
@@ -32,6 +36,9 @@ interface FeatureCatalogueItem {
 
 const WORLD_SIZE = 220;
 const SEGMENTS = 150;
+const SPHERE_RADIUS = 260;
+const CYLINDER_RADIUS = 180;
+const CYLINDER_LENGTH = 420;
 
 @Component({
   selector: 'app-geological-features-page',
@@ -44,6 +51,8 @@ const SEGMENTS = 150;
 })
 export class GeologicalFeaturesPageComponent {
   readonly activeFeature = signal<GeologicalFeatureKind>('volcano');
+  readonly domain = signal<GeologicalTerrainDomain>('plane');
+  readonly sphereVolcanoCount = signal(4);
   readonly settings = signal(defaultGeologicalTerrainSettings());
   readonly wireframe = signal(false);
   readonly catalogue: readonly FeatureCatalogueItem[] = [
@@ -57,7 +66,12 @@ export class GeologicalFeaturesPageComponent {
   ];
 
   private readonly engine = inject(EngineService);
-  private readonly geometry = new PlaneGeometry(WORLD_SIZE, WORLD_SIZE, SEGMENTS, SEGMENTS);
+  private geometry: BufferGeometry = new PlaneGeometry(
+    WORLD_SIZE,
+    WORLD_SIZE,
+    SEGMENTS,
+    SEGMENTS,
+  );
   private readonly material = new MeshStandardMaterial({
     color: '#ffffff',
     roughness: 0.92,
@@ -85,6 +99,17 @@ export class GeologicalFeaturesPageComponent {
 
   selectFeature(kind: GeologicalFeatureKind): void {
     this.activeFeature.set(kind);
+    this.rebuildTerrain();
+  }
+
+  selectDomain(domain: GeologicalTerrainDomain): void {
+    this.domain.set(domain);
+    this.replaceGeometry();
+    this.rebuildTerrain();
+  }
+
+  setSphereVolcanoCount(event: Event): void {
+    this.sphereVolcanoCount.set(Number((event.target as HTMLInputElement).value));
     this.rebuildTerrain();
   }
 
@@ -133,6 +158,26 @@ export class GeologicalFeaturesPageComponent {
     this.rebuildTerrain();
   }
 
+  private replaceGeometry(): void {
+    const previous = this.geometry;
+    this.geometry =
+      this.domain() === 'plane'
+        ? new PlaneGeometry(WORLD_SIZE, WORLD_SIZE, SEGMENTS, SEGMENTS)
+        : this.domain() === 'sphere'
+          ? new SphereGeometry(SPHERE_RADIUS, 128, 72)
+          : new CylinderGeometry(
+              CYLINDER_RADIUS,
+              CYLINDER_RADIUS,
+              CYLINDER_LENGTH,
+              128,
+              64,
+              true,
+            );
+    this.terrain.geometry = this.geometry;
+    this.terrain.rotation.set(this.domain() === 'plane' ? -Math.PI / 2 : 0, 0, 0);
+    previous.dispose();
+  }
+
   private rebuildTerrain(): void {
     const position = this.geometry.getAttribute('position') as BufferAttribute;
     const colors = new Float32Array(position.count * 3);
@@ -145,10 +190,25 @@ export class GeologicalFeaturesPageComponent {
     const settings = this.settings();
 
     for (let index = 0; index < position.count; index++) {
-      const x = position.getX(index);
-      const z = -position.getY(index);
-      const elevation = sampleGeologicalElevation(kind, x, z, settings);
-      position.setZ(index, elevation);
+      const originalX = position.getX(index);
+      const originalY = position.getY(index);
+      const originalZ = position.getZ(index);
+      const sample = this.sampleSurfaceElevation(
+        kind,
+        originalX,
+        originalY,
+        originalZ,
+        settings,
+      );
+      const x = sample.sampleX;
+      const z = sample.sampleZ;
+      const elevation = sample.elevation;
+      position.setXYZ(
+        index,
+        sample.renderX,
+        sample.renderY,
+        sample.renderZ,
+      );
       const normalized = Math.max(0, Math.min(1, (elevation + 36) / 90));
       color.copy(low).lerp(earth, Math.min(1, normalized * 1.8));
       if (normalized > 0.56) color.lerp(high, (normalized - 0.56) / 0.44);
@@ -165,5 +225,73 @@ export class GeologicalFeaturesPageComponent {
     this.geometry.computeVertexNormals();
     this.geometry.computeBoundingSphere();
     this.engine.requestSingleRender();
+  }
+
+  private sampleSurfaceElevation(
+    kind: GeologicalFeatureKind,
+    x: number,
+    y: number,
+    z: number,
+    settings: GeologicalTerrainSettings,
+  ): {
+    readonly elevation: number;
+    readonly sampleX: number;
+    readonly sampleZ: number;
+    readonly renderX: number;
+    readonly renderY: number;
+    readonly renderZ: number;
+  } {
+    if (this.domain() === 'plane') {
+      const elevation = sampleGeologicalElevation(kind, x, -y, settings);
+      return {
+        elevation,
+        sampleX: x,
+        sampleZ: -y,
+        renderX: x,
+        renderY: y,
+        renderZ: elevation,
+      };
+    }
+
+    if (this.domain() === 'cylinder') {
+      const angle = Math.atan2(z, x);
+      const surfaceX = y;
+      const surfaceZ = angle * CYLINDER_RADIUS;
+      const elevation = sampleGeologicalElevation(kind, surfaceX, surfaceZ, settings);
+      const radius = CYLINDER_RADIUS + elevation * 0.7;
+      return {
+        elevation,
+        sampleX: surfaceX,
+        sampleZ: surfaceZ,
+        renderX: Math.cos(angle) * radius,
+        renderY: y,
+        renderZ: Math.sin(angle) * radius,
+      };
+    }
+
+    const length = Math.hypot(x, y, z) || SPHERE_RADIUS;
+    const latitude = Math.asin(y / length);
+    const longitude = Math.atan2(z, x);
+    const featureCount = kind === 'volcano' ? this.sphereVolcanoCount() : 1;
+    let elevation = 0;
+    for (let feature = 0; feature < featureCount; feature++) {
+      const featureLatitude = -0.42 + feature * 0.28;
+      const featureLongitude = -2.3 + feature * 1.37;
+      const dx = (longitude - featureLongitude) * SPHERE_RADIUS * Math.cos(featureLatitude);
+      const dz = (latitude - featureLatitude) * SPHERE_RADIUS;
+      elevation = Math.max(
+        elevation,
+        sampleGeologicalElevation(kind, dx, dz, settings),
+      );
+    }
+    const radius = SPHERE_RADIUS + elevation * 0.7;
+    return {
+      elevation,
+      sampleX: longitude * SPHERE_RADIUS,
+      sampleZ: latitude * SPHERE_RADIUS,
+      renderX: (x / length) * radius,
+      renderY: (y / length) * radius,
+      renderZ: (z / length) * radius,
+    };
   }
 }

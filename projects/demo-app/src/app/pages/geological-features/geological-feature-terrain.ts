@@ -1,4 +1,5 @@
 export type GeologicalFeatureKind = 'volcano' | 'canyon';
+export type GeologicalTerrainDomain = 'plane' | 'sphere' | 'cylinder';
 
 export interface VolcanoSettings {
   readonly radius: number;

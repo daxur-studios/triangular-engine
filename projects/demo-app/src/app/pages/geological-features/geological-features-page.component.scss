@@ -86,6 +86,24 @@ p {
   border-top: 1px solid #293a31;
 }
 
+.domain-tabs,
+.sphere-count {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0.7rem 0;
+}
+
+.sphere-count {
+  display: grid;
+  grid-template-columns: 13rem 1fr;
+}
+
+.sphere-count input {
+  width: 100%;
+  accent-color: #7fc38f;
+}
+
 .controls h2 {
   margin: 0 0 0.45rem;
   font-size: 0.95rem;

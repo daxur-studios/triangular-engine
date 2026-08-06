@@ -177,6 +177,8 @@ an `ITerrainField` adapter.
 ### Phase 2 — Existing terrain pipeline integration
 
 - [ ] Use features through `TerrainSurfaceComponent` on plane terrain.
+- [x] Add focused demo views for plane, large sphere, and cylinder domains.
+- [x] Add a large-sphere fixture with multiple deterministic volcanoes.
 - [ ] Verify patch boundaries and mixed LOD seams across feature edges.
 - [ ] Add local tangent frames for sphere and cylinder domains.
 - [ ] Verify large-coordinate and floating-origin behaviour.
