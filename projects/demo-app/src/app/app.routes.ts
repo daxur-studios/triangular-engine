@@ -195,6 +195,26 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'geological-features-lab',
+    loadComponent: () =>
+      import(
+        './pages/geological-features/geological-features-page.component'
+      ).then(
+        ({ GeologicalFeaturesPageComponent }) =>
+          GeologicalFeaturesPageComponent,
+      ),
+  },
+  {
+    path: 'geological-features-lab',
+    loadComponent: () =>
+      import(
+        './pages/geological-features/geological-features-page.component'
+      ).then(
+        ({ GeologicalFeaturesPageComponent }) =>
+          GeologicalFeaturesPageComponent,
+      ),
+  },
+  {
     path: 'vehicle-trail-lab',
     canActivate: [
       () =>

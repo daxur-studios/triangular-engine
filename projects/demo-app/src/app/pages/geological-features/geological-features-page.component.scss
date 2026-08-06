@@ -1,0 +1,149 @@
+:host {
+  min-height: 100%;
+  color: #edf3ef;
+  background: #071018;
+}
+
+.panel {
+  width: min(44rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid #40584b;
+  border-radius: 0.8rem;
+  background: rgba(7, 16, 24, 0.94);
+  box-shadow: 0 1rem 3rem #0009;
+  font: 14px/1.4 Inter, system-ui, sans-serif;
+}
+
+header,
+header div,
+.actions,
+.catalogue article div,
+.controls label span {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+header {
+  justify-content: space-between;
+}
+
+header div {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+a,
+small,
+p {
+  color: #aebeb4;
+}
+
+a {
+  text-decoration: none;
+}
+
+p {
+  font-size: 0.84rem;
+}
+
+.catalogue {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.catalogue article {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.65rem;
+  border: 1px solid #293a31;
+  border-radius: 0.45rem;
+  opacity: 0.65;
+}
+
+.catalogue article.available {
+  border-color: #527660;
+  opacity: 1;
+}
+
+.catalogue article div {
+  justify-content: space-between;
+}
+
+.catalogue article div span {
+  color: #8fb69a;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.controls {
+  margin-top: 0.8rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid #293a31;
+}
+
+.controls h2 {
+  margin: 0 0 0.45rem;
+  font-size: 0.95rem;
+}
+
+.controls label {
+  display: grid;
+  grid-template-columns: 13rem 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.35rem 0;
+}
+
+.controls label span {
+  justify-content: space-between;
+}
+
+output {
+  color: #9fcbaa;
+}
+
+input[type='range'] {
+  width: 100%;
+  accent-color: #7fc38f;
+}
+
+.actions {
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
+}
+
+button {
+  padding: 0.4rem 0.65rem;
+  color: #e4eee7;
+  border: 1px solid #496452;
+  border-radius: 0.35rem;
+  background: #14251a;
+  cursor: pointer;
+}
+
+button:hover,
+button.active {
+  border-color: #7fc38f;
+  background: #20432a;
+}
+
+@media (max-width: 44rem) {
+  .panel {
+    width: calc(100vw - 1rem);
+    padding: 0.65rem;
+  }
+
+  .catalogue {
+    grid-template-columns: 1fr;
+  }
+
+  .controls label {
+    grid-template-columns: 1fr;
+    gap: 0.1rem;
+  }
+}

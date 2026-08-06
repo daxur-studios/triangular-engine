@@ -1,0 +1,66 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Geological feature controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>triangular-engine/terrain — geological feature workbench</small>
+        </div>
+        <strong>Geological features</strong>
+      </header>
+
+      <p>
+        Volcano and canyon are interactive Phase 0 fixtures. The generators are
+        demo-local until their shape, composition, and metadata contracts are
+        stable enough to extract into the terrain library.
+      </p>
+
+      <div class="catalogue" aria-label="Geological feature catalogue">
+        @for (feature of catalogue; track feature.kind) {
+          <article [class.available]="feature.status === 'interactive'">
+            <div>
+              <strong>{{ feature.name }}</strong>
+              <span>{{ feature.status }}</span>
+            </div>
+            <small>{{ feature.description }}</small>
+            @if (feature.status === "interactive") {
+              <button
+                [class.active]="activeFeature() === feature.kind"
+                (click)="selectFeature($any(feature.kind))"
+              >
+                Test {{ feature.name }}
+              </button>
+            }
+          </article>
+        }
+      </div>
+
+      <section class="controls">
+        <h2>{{ activeFeature() === "volcano" ? "Volcano" : "Canyon" }} parameters</h2>
+        @if (activeFeature() === "volcano") {
+          <label><span>Radius <output>{{ settings().volcano.radius }} m</output></span><input type="range" min="35" max="105" step="1" [value]="settings().volcano.radius" (input)="updateVolcano('radius', $event)" /></label>
+          <label><span>Height <output>{{ settings().volcano.height }} m</output></span><input type="range" min="12" max="85" step="1" [value]="settings().volcano.height" (input)="updateVolcano('height', $event)" /></label>
+          <label><span>Crater radius <output>{{ settings().volcano.craterRadius }} m</output></span><input type="range" min="4" max="28" step="1" [value]="settings().volcano.craterRadius" (input)="updateVolcano('craterRadius', $event)" /></label>
+          <label><span>Crater depth <output>{{ settings().volcano.craterDepth }} m</output></span><input type="range" min="0" max="42" step="1" [value]="settings().volcano.craterDepth" (input)="updateVolcano('craterDepth', $event)" /></label>
+          <label><span>Erosion <output>{{ settings().volcano.erosion }}</output></span><input type="range" min="0" max="1" step="0.02" [value]="settings().volcano.erosion" (input)="updateVolcano('erosion', $event)" /></label>
+        } @else {
+          <label><span>Width <output>{{ settings().canyon.width }} m</output></span><input type="range" min="8" max="65" step="1" [value]="settings().canyon.width" (input)="updateCanyon('width', $event)" /></label>
+          <label><span>Depth <output>{{ settings().canyon.depth }} m</output></span><input type="range" min="8" max="65" step="1" [value]="settings().canyon.depth" (input)="updateCanyon('depth', $event)" /></label>
+          <label><span>Wall steepness <output>{{ settings().canyon.wallSteepness }}</output></span><input type="range" min="0.7" max="5" step="0.1" [value]="settings().canyon.wallSteepness" (input)="updateCanyon('wallSteepness', $event)" /></label>
+          <label><span>Meander <output>{{ settings().canyon.meander }} m</output></span><input type="range" min="0" max="48" step="1" [value]="settings().canyon.meander" (input)="updateCanyon('meander', $event)" /></label>
+          <label><span>Erosion <output>{{ settings().canyon.erosion }}</output></span><input type="range" min="0" max="1" step="0.02" [value]="settings().canyon.erosion" (input)="updateCanyon('erosion', $event)" /></label>
+        }
+      </section>
+
+      <div class="actions">
+        <button (click)="randomizeSeed()">Randomize seed</button>
+        <button [class.active]="wireframe()" (click)="toggleWireframe()">Wireframe</button>
+        <button (click)="reset()">Reset</button>
+      </div>
+    </section>
+  </ng-template>
+
+  <orbitControls [cameraPosition]="[120, 92, 125]" [target]="[0, 4, 0]" [near]="0.5" />
+  <ambientLight [intensity]="1.25" />
+  <directionalLight [position]="[80, 130, 55]" [intensity]="2.8" />
+</scene>
