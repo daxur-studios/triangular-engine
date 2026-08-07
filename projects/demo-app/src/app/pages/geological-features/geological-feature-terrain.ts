@@ -1,4 +1,4 @@
-export type GeologicalFeatureKind = 'volcano' | 'canyon';
+export type GeologicalFeatureKind = 'volcano' | 'canyon' | 'crater' | 'ridge' | 'mesa' | 'fault' | 'dunes';
 export type GeologicalTerrainDomain = 'plane' | 'sphere' | 'cylinder';
 export type GeologicalCompositionPreset = 'single' | 'volcanic-field' | 'canyon-network';
 export type GeologicalCompositionOperation = 'add' | 'max' | 'carve';
@@ -25,9 +25,20 @@ export interface CanyonSettings {
   readonly seed: number;
 }
 
+export interface CraterSettings { readonly radius: number; readonly rimHeight: number; readonly depth: number; readonly ejecta: number; readonly age: number; readonly seed: number; }
+export interface RidgeSettings { readonly width: number; readonly height: number; readonly sharpness: number; readonly meander: number; readonly seed: number; }
+export interface MesaSettings { readonly radius: number; readonly height: number; readonly wallSteepness: number; readonly talus: number; readonly seed: number; }
+export interface FaultSettings { readonly length: number; readonly throw: number; readonly width: number; readonly roughness: number; readonly seed: number; }
+export interface DuneSettings { readonly wavelength: number; readonly amplitude: number; readonly direction: number; readonly roughness: number; readonly seed: number; }
+
 export interface GeologicalTerrainSettings {
   readonly volcano: VolcanoSettings;
   readonly canyon: CanyonSettings;
+  readonly crater: CraterSettings;
+  readonly ridge: RidgeSettings;
+  readonly mesa: MesaSettings;
+  readonly fault: FaultSettings;
+  readonly dunes: DuneSettings;
 }
 
 export interface GeologicalFeatureInstance {
@@ -61,6 +72,14 @@ export function defaultGeologicalTerrainSettings(): GeologicalTerrainSettings {
       erosion: 0.38,
       seed: 11,
     },
+    crater: { radius: 48, rimHeight: 8, depth: 24, ejecta: 5, age: 0.2, seed: 17 },
+    ridge: { width: 32, height: 28, sharpness: 1.7, meander: 28, seed: 23 },
+    mesa: { radius: 46, height: 24, wallSteepness: 3.2, talus: 8, seed: 31 },
+    // Long enough to cross the complete workbench surface. A local scarp must
+    // leave the sampled area rather than fade back to baseline and form a
+    // second, perpendicular edge of a raised slab.
+    fault: { length: 900, throw: 22, width: 18, roughness: 0.55, seed: 43 },
+    dunes: { wavelength: 34, amplitude: 9, direction: 0.35, roughness: 0.3, seed: 59 },
   };
 }
 
@@ -71,9 +90,118 @@ export function sampleGeologicalElevation(
   settings: GeologicalTerrainSettings,
 ): number {
   const base = rollingBase(x, z);
-  return kind === 'volcano'
-    ? base + sampleVolcano(x, z, settings.volcano)
-    : base + sampleCanyon(x, z, settings.canyon);
+  return base + sampleFeatureContribution(kind, x, z, settings);
+}
+
+function sampleFeatureContribution(kind: GeologicalFeatureKind, x: number, z: number, settings: GeologicalTerrainSettings): number {
+  switch (kind) {
+    case 'volcano': return sampleVolcano(x, z, settings.volcano);
+    case 'canyon': return sampleCanyon(x, z, settings.canyon);
+    case 'crater': return sampleCrater(x, z, settings.crater);
+    case 'ridge': return sampleRidge(x, z, settings.ridge);
+    case 'mesa': return sampleMesa(x, z, settings.mesa);
+    case 'fault': return sampleFault(x, z, settings.fault);
+    case 'dunes': return sampleDunes(x, z, settings.dunes);
+  }
+}
+
+export function sampleCrater(x: number, z: number, s: CraterSettings): number {
+  const r = Math.hypot(x, z); const n = r / Math.max(1, s.radius);
+  const bowl = -s.depth * Math.exp(-n * n * 2.6);
+  const rim = s.rimHeight * Math.exp(-Math.pow((n - 0.82) / 0.14, 2));
+  const ejecta = s.ejecta * Math.exp(-Math.max(0, n - 1) * 2.8) * smoothstep(0.82, 1.2, n);
+  const rough = (valueNoise(x * 0.07, z * 0.07, s.seed) - 0.5) * s.age * 5 * smoothstep(0.2, 1.2, n);
+  return bowl + rim + ejecta + rough;
+}
+
+export function sampleRidge(x: number, z: number, s: RidgeSettings): number {
+  const along = z + Math.sin(z / 70 + s.seed) * s.meander;
+  const across = x - Math.sin(z / 95 + s.seed * 0.17) * s.meander;
+  const profile = Math.exp(-Math.pow(Math.abs(across) / Math.max(1, s.width * 0.5), s.sharpness));
+  return s.height * profile * (0.88 + valueNoise(along * 0.045, across * 0.045, s.seed) * 0.24);
+}
+
+export function sampleMesa(x: number, z: number, s: MesaSettings): number {
+  const r = Math.hypot(x, z); const n = r / Math.max(1, s.radius);
+  const cap = s.height * (1 - smoothstep(0.76, 1.02, n));
+  const talus = s.talus * (1 - smoothstep(0.95, 1.65, n));
+  const edge = -s.height * 0.16 * smoothstep(0.76, 1.05, n);
+  return cap + talus + edge + (valueNoise(x * 0.08, z * 0.08, s.seed) - 0.5) * 2;
+}
+
+export function sampleFault(x: number, z: number, s: FaultSettings): number {
+  const nearest = nearestFaultPathPoint(x, z, s);
+  const halfWidth = Math.max(1, s.width * 0.5);
+  // A fault is one displaced pair of land blocks, not a raised strip. Use one
+  // directional transition across the trace: below it on one side, above it
+  // on the other. The width controls this single transition zone only.
+  const transition = smoothstep(-halfWidth, halfWidth, nearest.signedDistance);
+  const displacement = (transition - 0.5) * s.throw;
+  // Add broken ground only as a shallow depression at the fracture itself.
+  // Keeping this term negative prevents roughness from creating a second rise.
+  const fractureZone =
+    -s.throw *
+    0.08 *
+    (0.7 + valueNoise(x * 0.11, z * 0.11, s.seed + 17) * 0.6) *
+    Math.exp(-Math.pow(nearest.signedDistance / Math.max(1, s.width * 0.7), 2));
+  return displacement + fractureZone;
+}
+
+/** Finds the closest point and oriented distance to a seeded, segmented fault trace. */
+function nearestFaultPathPoint(
+  x: number,
+  z: number,
+  settings: FaultSettings,
+): { readonly along: number; readonly signedDistance: number } {
+  const segmentCount = 28;
+  const halfLength = Math.max(1, settings.length * 0.5);
+  let bestDistanceSquared = Number.POSITIVE_INFINITY;
+  let bestAlong = 0;
+  let bestSignedDistance = 0;
+  let previous = faultPathPoint(-halfLength, settings);
+
+  for (let index = 1; index <= segmentCount; index++) {
+    const along = -halfLength + (settings.length * index) / segmentCount;
+    const current = faultPathPoint(along, settings);
+    const dx = current.x - previous.x;
+    const dz = current.z - previous.z;
+    const lengthSquared = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((x - previous.x) * dx + (z - previous.z) * dz) / lengthSquared));
+    const nearestX = previous.x + dx * t;
+    const nearestZ = previous.z + dz * t;
+    const offsetX = x - nearestX;
+    const offsetZ = z - nearestZ;
+    const distanceSquared = offsetX * offsetX + offsetZ * offsetZ;
+    if (distanceSquared < bestDistanceSquared) {
+      bestDistanceSquared = distanceSquared;
+      bestAlong = along - settings.length / segmentCount + t * (settings.length / segmentCount);
+      // Cross product with the path tangent gives a stable signed normal.
+      bestSignedDistance = (dz * offsetX - dx * offsetZ) / Math.sqrt(lengthSquared);
+    }
+    previous = current;
+  }
+  return { along: bestAlong, signedDistance: bestSignedDistance };
+}
+
+function faultPathPoint(along: number, settings: FaultSettings): { x: number; z: number } {
+  const variation = settings.roughness * 42;
+  const longWavelength = 58 + seedNoise(settings.seed + 3) * 54;
+  const shortWavelength = 25 + seedNoise(settings.seed + 11) * 30;
+  return {
+    x:
+      Math.sin(along / longWavelength + settings.seed * 0.37) * variation +
+      Math.sin(along / shortWavelength + settings.seed * 0.81) * variation * 0.32 +
+      (valueNoise(along * 0.055, settings.seed * 0.13, settings.seed + 29) - 0.5) * variation * 0.55,
+    z: along,
+  };
+}
+
+export function sampleDunes(x: number, z: number, s: DuneSettings): number {
+  const c = Math.cos(s.direction); const si = Math.sin(s.direction);
+  const along = x * c + z * si; const cross = -x * si + z * c;
+  const wave = Math.sin(along / Math.max(1, s.wavelength) * Math.PI * 2 + Math.sin(cross * 0.025 + s.seed) * 0.8);
+  const detail = valueNoise(x * 0.055, z * 0.055, s.seed + 9) - 0.5;
+  return s.amplitude * (wave * 0.7 + detail * s.roughness);
 }
 
 export function sampleGeologicalFeatures(

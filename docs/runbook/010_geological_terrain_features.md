@@ -487,3 +487,15 @@ not leak geometry or materials.
 - This is a heightfield composition rule, not a full geological simulation;
   future extracted feature definitions must retain explicit operation and
   ordering metadata.
+
+### 2026-08-06 — Five additional interactive feature samplers
+
+- Added deterministic demo samplers for impact craters, mountain ridges,
+  mesas/buttes, fault scarps, and dune fields.
+- Added starter parameter groups and controls for each feature so their scale,
+  profile, and seeded variation can be compared in the existing plane, sphere,
+  and cylinder workbench.
+- Kept the five samplers demo-local until their shared bounds, masks, streaming,
+  and composition contracts are extracted into `triangular-engine/terrain`.
+- Added focused regression coverage for the basic positive/negative signatures
+  and deterministic behavior of the new samplers.

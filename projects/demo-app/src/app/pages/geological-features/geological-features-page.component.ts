@@ -63,11 +63,11 @@ export class GeologicalFeaturesPageComponent {
   readonly catalogue: readonly FeatureCatalogueItem[] = [
     { kind: 'volcano', name: 'Volcano', status: 'interactive', description: 'Asymmetric cone, crater rim, caldera, and radial erosion.' },
     { kind: 'canyon', name: 'Canyon', status: 'interactive', description: 'Meandering channel with adjustable depth, width, and wall profile.' },
-    { kind: 'crater', name: 'Impact crater', status: 'planned', description: 'Bowl, raised rim, ejecta blanket, and age-driven erosion.' },
-    { kind: 'ridge', name: 'Mountain ridge', status: 'planned', description: 'Spline-authored ridges with width, sharpness, and branching.' },
-    { kind: 'mesa', name: 'Mesa / butte', status: 'planned', description: 'Flat cap, steep walls, and talus around an authored footprint.' },
-    { kind: 'fault', name: 'Fault scarp / rift', status: 'planned', description: 'Displaced terrain along a line with fractured edge detail.' },
-    { kind: 'dunes', name: 'Dune field', status: 'planned', description: 'Directional repeating landforms with seeded variation.' },
+    { kind: 'crater', name: 'Impact crater', status: 'interactive', description: 'Bowl, raised rim, ejecta blanket, and age-driven erosion.' },
+    { kind: 'ridge', name: 'Mountain ridge', status: 'interactive', description: 'Spline-like ridge with width, sharpness, and seeded variation.' },
+    { kind: 'mesa', name: 'Mesa / butte', status: 'interactive', description: 'Flat cap, steep walls, and talus around an authored footprint.' },
+    { kind: 'fault', name: 'Fault scarp / rift', status: 'interactive', description: 'Displaced terrain along a line with fractured edge detail.' },
+    { kind: 'dunes', name: 'Dune field', status: 'interactive', description: 'Directional repeating landforms with seeded variation.' },
   ];
 
   private readonly engine = inject(EngineService);
@@ -105,16 +105,22 @@ export class GeologicalFeaturesPageComponent {
   selectFeature(kind: GeologicalFeatureKind): void {
     this.activeFeature.set(kind);
     this.enabledFeatures.update((current) => {
-      // Selection is also geological chronology. Selecting Canyon after a
-      // volcano means it cuts through that volcano; selecting Volcano after
-      // Canyon means the later cone covers the earlier incision.
-      return [...current.filter((feature) => feature !== kind), kind];
+      // Selection is also geological chronology. Clicking an active feature
+      // removes that layer; clicking an inactive feature appends it as the
+      // newest layer. This permits an empty/base-terrain state as well.
+      return current.includes(kind)
+        ? current.filter((feature) => feature !== kind)
+        : [...current, kind];
     });
     this.rebuildTerrain();
   }
 
   isFeatureEnabled(kind: string): boolean {
     return this.enabledFeatures().includes(kind as GeologicalFeatureKind);
+  }
+
+  activeFeatureName(): string {
+    return this.catalogue.find((item) => item.kind === this.activeFeature())?.name ?? 'Feature';
   }
 
   selectComposition(preset: GeologicalCompositionPreset): void {
@@ -156,6 +162,16 @@ export class GeologicalFeaturesPageComponent {
       ...current,
       canyon: { ...current.canyon, [key]: value },
     }));
+    this.rebuildTerrain();
+  }
+
+  updateFeature(key: string, event: Event): void {
+    const feature = this.activeFeature();
+    const value = Number((event.target as HTMLInputElement).value);
+    this.settings.update((current) => ({
+      ...current,
+      [feature]: { ...(current as unknown as Record<string, Record<string, number>>)[feature], [key]: value },
+    } as GeologicalTerrainSettings));
     this.rebuildTerrain();
   }
 

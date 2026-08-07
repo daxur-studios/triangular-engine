@@ -10,9 +10,9 @@
       </header>
 
       <p>
-        Volcano and canyon are interactive Phase 0 fixtures. The generators are
-        demo-local until their shape, composition, and metadata contracts are
-        stable enough to extract into the terrain library.
+        Each listed feature is now an interactive deterministic heightfield
+        fixture. The generators remain demo-local while their shared terrain
+        contracts are being stabilized for extraction.
       </p>
 
       <nav class="domain-tabs" aria-label="Terrain domain">
@@ -59,7 +59,7 @@
       </div>
 
       <section class="controls">
-        <h2>{{ activeFeature() === "volcano" ? "Volcano" : "Canyon" }} parameters</h2>
+        <h2>{{ activeFeatureName() }} parameters</h2>
         @if (activeFeature() === "volcano") {
           <label><span>Radius <output>{{ settings().volcano.radius }} m</output></span><input type="range" min="35" max="105" step="1" [value]="settings().volcano.radius" (input)="updateVolcano('radius', $event)" /></label>
           <label><span>Height <output>{{ settings().volcano.height }} m</output></span><input type="range" min="12" max="85" step="1" [value]="settings().volcano.height" (input)="updateVolcano('height', $event)" /></label>
@@ -68,7 +68,7 @@
           <label><span>Erosion <output>{{ settings().volcano.erosion }}</output></span><input type="range" min="0" max="1" step="0.02" [value]="settings().volcano.erosion" (input)="updateVolcano('erosion', $event)" /></label>
           <label><span>Ridge count <output>{{ settings().volcano.ridgeCount }}</output></span><input type="range" min="3" max="16" step="1" [value]="settings().volcano.ridgeCount" (input)="updateVolcano('ridgeCount', $event)" /></label>
           <label><span>Spiralness <output>{{ settings().volcano.spiralness }}</output></span><input type="range" min="0" max="1" step="0.02" [value]="settings().volcano.spiralness" (input)="updateVolcano('spiralness', $event)" /></label>
-        } @else {
+        } @else if (activeFeature() === "canyon") {
           <label><span>Width <output>{{ settings().canyon.width }} m</output></span><input type="range" min="8" max="65" step="1" [value]="settings().canyon.width" (input)="updateCanyon('width', $event)" /></label>
           <label><span>Depth <output>{{ settings().canyon.depth }} m</output></span><input type="range" min="8" max="65" step="1" [value]="settings().canyon.depth" (input)="updateCanyon('depth', $event)" /></label>
           <label><span>Wall steepness <output>{{ settings().canyon.wallSteepness }}</output></span><input type="range" min="0.7" max="5" step="0.1" [value]="settings().canyon.wallSteepness" (input)="updateCanyon('wallSteepness', $event)" /></label>
@@ -76,6 +76,24 @@
           <label><span>Path length <output>{{ settings().canyon.pathLength }} m</output></span><input type="range" min="80" max="640" step="20" [value]="settings().canyon.pathLength" (input)="updateCanyon('pathLength', $event)" /></label>
           <label><span>Bend wavelength <output>{{ settings().canyon.bendWavelength }} m</output></span><input type="range" min="40" max="280" step="10" [value]="settings().canyon.bendWavelength" (input)="updateCanyon('bendWavelength', $event)" /></label>
           <label><span>Erosion <output>{{ settings().canyon.erosion }}</output></span><input type="range" min="0" max="1" step="0.02" [value]="settings().canyon.erosion" (input)="updateCanyon('erosion', $event)" /></label>
+        } @else if (activeFeature() === "crater") {
+          <label><span>Radius <output>{{ settings().crater.radius }} m</output></span><input type="range" min="16" max="100" step="1" [value]="settings().crater.radius" (input)="updateFeature('radius', $event)" /></label>
+          <label><span>Depth <output>{{ settings().crater.depth }} m</output></span><input type="range" min="4" max="60" step="1" [value]="settings().crater.depth" (input)="updateFeature('depth', $event)" /></label>
+          <label><span>Rim height <output>{{ settings().crater.rimHeight }} m</output></span><input type="range" min="0" max="24" step="1" [value]="settings().crater.rimHeight" (input)="updateFeature('rimHeight', $event)" /></label>
+        } @else if (activeFeature() === "ridge") {
+          <label><span>Width <output>{{ settings().ridge.width }} m</output></span><input type="range" min="10" max="80" step="1" [value]="settings().ridge.width" (input)="updateFeature('width', $event)" /></label>
+          <label><span>Height <output>{{ settings().ridge.height }} m</output></span><input type="range" min="4" max="60" step="1" [value]="settings().ridge.height" (input)="updateFeature('height', $event)" /></label>
+          <label><span>Meander <output>{{ settings().ridge.meander }} m</output></span><input type="range" min="0" max="70" step="1" [value]="settings().ridge.meander" (input)="updateFeature('meander', $event)" /></label>
+        } @else if (activeFeature() === "mesa") {
+          <label><span>Radius <output>{{ settings().mesa.radius }} m</output></span><input type="range" min="18" max="100" step="1" [value]="settings().mesa.radius" (input)="updateFeature('radius', $event)" /></label>
+          <label><span>Height <output>{{ settings().mesa.height }} m</output></span><input type="range" min="4" max="55" step="1" [value]="settings().mesa.height" (input)="updateFeature('height', $event)" /></label>
+        } @else if (activeFeature() === "fault") {
+          <label><span>Throw <output>{{ settings().fault.throw }} m</output></span><input type="range" min="4" max="50" step="1" [value]="settings().fault.throw" (input)="updateFeature('throw', $event)" /></label>
+          <label><span>Width <output>{{ settings().fault.width }} m</output></span><input type="range" min="4" max="50" step="1" [value]="settings().fault.width" (input)="updateFeature('width', $event)" /></label>
+          <label><span>Trace variation <output>{{ settings().fault.roughness }}</output></span><input type="range" min="0" max="1" step="0.02" [value]="settings().fault.roughness" (input)="updateFeature('roughness', $event)" /></label>
+        } @else {
+          <label><span>Wavelength <output>{{ settings().dunes.wavelength }} m</output></span><input type="range" min="12" max="90" step="1" [value]="settings().dunes.wavelength" (input)="updateFeature('wavelength', $event)" /></label>
+          <label><span>Amplitude <output>{{ settings().dunes.amplitude }} m</output></span><input type="range" min="1" max="24" step="1" [value]="settings().dunes.amplitude" (input)="updateFeature('amplitude', $event)" /></label>
         }
       </section>
 

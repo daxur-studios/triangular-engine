@@ -3,6 +3,11 @@ import {
   sampleGeologicalComposition,
   sampleGeologicalTerrain,
   sampleCanyon,
+  sampleCrater,
+  sampleRidge,
+  sampleMesa,
+  sampleFault,
+  sampleDunes,
   sampleVolcano,
 } from './geological-feature-terrain';
 
@@ -104,5 +109,32 @@ describe('geological feature terrain', () => {
     );
 
     expect(canyonAfterVolcano).toBeLessThan(volcanoAfterCanyon);
+  });
+
+  it('provides deterministic signatures for the five new feature types', () => {
+    const settings = defaultGeologicalTerrainSettings();
+    expect(sampleCrater(0, 0, settings.crater)).toBeLessThan(0);
+    expect(sampleRidge(0, 0, settings.ridge)).toBeGreaterThan(0);
+    expect(sampleMesa(0, 0, settings.mesa)).toBeGreaterThan(0);
+    expect(sampleFault(8, 0, settings.fault)).not.toBe(0);
+    expect(sampleDunes(12, 18, settings.dunes)).toBe(
+      sampleDunes(12, 18, settings.dunes),
+    );
+  });
+
+  it('gives faults a seeded, curved trace while retaining a coherent scarp', () => {
+    const { fault } = defaultGeologicalTerrainSettings();
+    const straight = { ...fault, roughness: 0 };
+    const curved = { ...fault, roughness: 0.8 };
+
+    expect(sampleFault(20, 55, curved)).not.toBe(sampleFault(20, 55, straight));
+    expect(sampleFault(-28, 0, curved)).toBeLessThan(0);
+    expect(sampleFault(28, 0, curved)).toBeGreaterThan(0);
+  });
+
+  it('keeps a fault scarp displaced to the edge of the workbench surface', () => {
+    const { fault } = defaultGeologicalTerrainSettings();
+    expect(sampleFault(80, 260, fault)).toBeGreaterThan(0);
+    expect(sampleFault(-80, 260, fault)).toBeLessThan(0);
   });
 });
