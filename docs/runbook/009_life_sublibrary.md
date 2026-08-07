@@ -11,7 +11,7 @@
 - Immediate integrations: `terrain`, `scatter`, `water`, `spline`, and `trail`.
 - Blocked on: build/test verification while the local Windows shell process
   session is intermittently failing to spawn child processes.
-- Last updated: 2026-08-05.
+- Last updated: 2026-08-07.
 
 ## Objective
 
@@ -253,6 +253,74 @@ Physics adapters may resolve contacts or promote selected nearby agents to
 physical actors. Presentation adapters convert simulation state into instance
 transforms and animation parameters such as speed, turn rate, grounded state,
 or locomotion mode. Neither concern enters `life/core`.
+
+### 10. Large worlds preserve continuity selectively
+
+`life` must not imply that every creature on a planet is instantiated or
+advanced on every fixed tick. Large worlds use a hierarchy of representations:
+
+1. **Habitat distribution** describes where a species can plausibly occur and
+   the approximate carrying capacity of a region.
+2. **Population cells** retain aggregate counts, activity, disturbance, and a
+   last-updated time without creating individual agents.
+3. **Active groups** represent nearby flocks, schools, herds, pods, or crowds
+   with stable group identity and coarse movement state.
+4. **Persistent individuals** retain identity only when observation,
+   interaction, injury, missions, tagging, or authorship makes continuity
+   meaningful.
+5. **Presented agents** are the bounded nearby subset receiving individual
+   steering, animation, detailed perception, and collision tests.
+
+Promotion and demotion change representation, not world meaning. An observed
+whale may move from an active pod into a persistent individual record; leaving
+the simulation bubble demotes it to route progress and coarse state rather
+than deleting it. Returning later advances that bounded record over elapsed
+world time and reconstructs a plausible current position. It does not replay
+every missed fixed tick and does not leave the whale frozen awaiting the
+player.
+
+Lifecycle policy must include hysteresis beyond the visible region, forbid
+visible pop-in or despawning, and pin followed, targeted, recently interacted,
+or otherwise important actors until a safe transition is available. Ambient
+individuals may be reconstructed deterministically from world seed, habitat,
+group seed, coarse time, and persistent disturbance overlays.
+
+The reusable package may provide representation records, deterministic
+materialization inputs, bounded elapsed-time advancement hooks, and
+promotion/demotion policies. The consuming game owns save schema, authored
+importance, mission relevance, and the exact promise of persistence.
+
+### 11. Vegetation informs habitat without becoming life
+
+`scatter` continues to own deterministic distribution and streaming of mostly
+static trees, shrubs, grass, rocks, coral, and similar world objects. `life`
+reads that world through narrow obstacle and habitat queries; neither package
+imports the other in its core.
+
+Examples include canopy density contributing cover, grass density contributing
+grazing capacity, forest edges influencing herd movement, and individual tree
+or coral bounds acting as obstacles. Persistent removal, burning, or damage is
+a sparse scatter/world overlay supplied to both systems by the consumer.
+
+`life` may consume resulting habitat capacity and disturbance values, but it
+does not own vegetation growth, terrain editing, or the scatter population.
+
+### 12. Interaction uses observations, hazards, and optional physics promotion
+
+Ambient actors remain kinematic by default. Physics adapters expose nearby
+terrain, structures, vehicles, swept collision volumes, and contact results
+without requiring one rigid body per creature. Continuous hazards such as
+rocket exhaust, heat, pressure, noise, toxicity, or dust are sampled as fields
+or volumes rather than modeled as ordinary rigid-body contact.
+
+The reusable layer reports factual events such as detection, avoidance
+attempt, disturbance, exposure, impact, injury, incapacitation, and death. It
+does not decide morality, reputation, mission failure, legal protection, or
+player blame. Those interpretations belong to the consuming game.
+
+An exceptional nearby actor may be temporarily promoted to a physics-backed
+presentation after impact or incapacitation. That is an optional adapter state,
+not the default simulation model and not a dependency of `life/core`.
 
 ## Proposed data model
 
@@ -565,3 +633,43 @@ Also confirm:
 - Deliberately left terrain/scatter adapters for the next phase; the first
   demo uses the same narrow obstacle/influence contracts directly so the core
   remains independent.
+
+### 2026-08-07 — Procedural animal presentation study
+
+- Extended `/life-lab` with a presentation POC comparing the existing
+  primitive agents with articulated cutouts and shallow extruded relief.
+- Built every animal from procedural Three.js `ShapeGeometry` or
+  `ExtrudeGeometry`; the study does not depend on authored SVG, textures,
+  skeletal meshes, or external model assets.
+- Kept rendering efficient by using one `InstancedMesh` per articulated part,
+  rather than one scene object or Angular component per animal. Birds use a
+  body and two wings; fish use a body, tail, and two fins; herd animals use a
+  body, head, tail, and four one-joint legs.
+- Started with birds because a side-view body crossed with top-view wings gives
+  a readable semi-3D silhouette and wing-flap animation with very little rig
+  complexity. This was the strongest result of the study.
+- Added fish to test whether the same technique transfers to free-swimming
+  motion. A side silhouette plus separately animated tail and top-plane fins
+  was sufficient for an abstract school presentation.
+- Added a distant herd to test grounded animals while deliberately avoiding a
+  realistic horse rig. The first version exposed two important failure modes:
+  side silhouettes were mapped onto the wrong local plane, making animals look
+  flattened, and tails rotated around an ineffective axis, making them read as
+  detached paddles. Mapping the silhouettes onto a true vertical longitudinal
+  plane, simplifying the body, reducing gait bounce, and giving the tail a
+  tapered backward curve with lateral swish produced an acceptable distant
+  herd.
+- The visual treatment is intentionally conceptual: recognizable silhouettes,
+  a few semantic joints, flat colour, and restrained motion. It is not intended
+  for close-up quadrupeds, accurate foot planting, or realistic locomotion.
+- Keep the current geometry, proportions, species silhouettes, and animation
+  timing demo-local. They are presentation content, and the study has not yet
+  revealed a stable universal animal-rig API worth publishing.
+- A later `life/three` extraction may own generic allocation-free helpers for
+  writing interpolated agent transforms into multipart instanced meshes and
+  exposing presentation signals such as speed, turn rate, grounded state, and
+  locomotion phase. It should not own bird, fish, horse, or other species
+  definitions.
+- Extraction gate: build at least one more independent consumer using the same
+  multipart instance writer. Extract only the shared transform/presentation
+  mechanism that survives both consumers without species-specific branches.

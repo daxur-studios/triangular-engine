@@ -39,6 +39,25 @@
   margin: 0.5rem 0 0.75rem;
 }
 
+.study {
+  margin: 0.8rem 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(245, 234, 210, 0.14);
+  border-radius: 0.6rem;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.study > span {
+  color: #dce6d8;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.study .stages {
+  margin: 0.45rem 0;
+}
+
 .time-warp span {
   margin-right: 0.25rem;
   opacity: 0.75;

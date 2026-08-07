@@ -9,49 +9,180 @@
         <strong>A little life</strong>
       </header>
       <nav class="stages" aria-label="Bird complexity stages">
-        <button type="button" [class.active]="lifeMode === 'birds'" (click)="setLifeMode('birds')">Birds</button>
-        <button type="button" [class.active]="lifeMode === 'fish'" (click)="setLifeMode('fish')">Fish</button>
-        <button type="button" [class.active]="lifeMode === 'herd'" (click)="setLifeMode('herd')">Herd</button>
+        <button
+          type="button"
+          [class.active]="lifeMode === 'birds'"
+          (click)="setLifeMode('birds')"
+        >
+          Birds
+        </button>
+        <button
+          type="button"
+          [class.active]="lifeMode === 'fish'"
+          (click)="setLifeMode('fish')"
+        >
+          Fish
+        </button>
+        <button
+          type="button"
+          [class.active]="lifeMode === 'herd'"
+          (click)="setLifeMode('herd')"
+        >
+          Herd
+        </button>
       </nav>
-      @if (lifeMode === 'birds') {
-      <nav class="stages" aria-label="Bird complexity stages">
-        <button type="button" [class.active]="birdStage === 0" (click)="setBirdStage(0)">1. Single bird</button>
-        <button type="button" [class.active]="birdStage === 1" (click)="setBirdStage(1)">2. Small group</button>
-        <button type="button" [class.active]="birdStage === 2" (click)="setBirdStage(2)">3. Flocking</button>
-        <button type="button" [class.active]="birdStage === 3" (click)="setBirdStage(3)">4. Trees + terrain</button>
-        <button type="button" [class.active]="birdStage === 4" (click)="setBirdStage(4)">5. Player influence</button>
-      </nav>
-      } @else if (lifeMode === 'fish') {
+      <div class="study" aria-label="Animal rendering study">
+        <span>Visual treatment</span>
+        <nav class="stages">
+          <button
+            type="button"
+            [class.active]="renderStyle === 'primitive'"
+            (click)="setRenderStyle('primitive')"
+          >
+            Primitive
+          </button>
+          <button
+            type="button"
+            [class.active]="renderStyle === 'cutout'"
+            (click)="setRenderStyle('cutout')"
+          >
+            Articulated cutout
+          </button>
+          <button
+            type="button"
+            [class.active]="renderStyle === 'relief'"
+            (click)="setRenderStyle('relief')"
+          >
+            Shallow relief
+          </button>
+        </nav>
+        <small>
+          @if (lifeMode === "fish") {
+            Fish remain primitive in this first presentation study.
+          } @else if (renderStyle === "cutout") {
+            Procedural ShapeGeometry: flat silhouettes on intersecting planes.
+          } @else if (renderStyle === "relief") {
+            The same silhouettes with a small ExtrudeGeometry depth and bevel.
+          } @else {
+            Baseline low-poly primitives with no articulated parts.
+          }
+        </small>
+      </div>
+      @if (lifeMode === "birds") {
+        <nav class="stages" aria-label="Bird complexity stages">
+          <button
+            type="button"
+            [class.active]="birdStage === 0"
+            (click)="setBirdStage(0)"
+          >
+            1. Single bird
+          </button>
+          <button
+            type="button"
+            [class.active]="birdStage === 1"
+            (click)="setBirdStage(1)"
+          >
+            2. Small group
+          </button>
+          <button
+            type="button"
+            [class.active]="birdStage === 2"
+            (click)="setBirdStage(2)"
+          >
+            3. Flocking
+          </button>
+          <button
+            type="button"
+            [class.active]="birdStage === 3"
+            (click)="setBirdStage(3)"
+          >
+            4. Trees + terrain
+          </button>
+          <button
+            type="button"
+            [class.active]="birdStage === 4"
+            (click)="setBirdStage(4)"
+          >
+            5. Player influence
+          </button>
+        </nav>
+      } @else if (lifeMode === "fish") {
         <nav class="stages" aria-label="Fish complexity stages">
-          <button type="button" [class.active]="fishLevel === 0" (click)="setFishLevel(0)">1. Single fish</button>
-          <button type="button" [class.active]="fishLevel === 1" (click)="setFishLevel(1)">2. School</button>
-          <button type="button" [class.active]="fishLevel === 2" (click)="setFishLevel(2)">3. Full school</button>
+          <button
+            type="button"
+            [class.active]="fishLevel === 0"
+            (click)="setFishLevel(0)"
+          >
+            1. Single fish
+          </button>
+          <button
+            type="button"
+            [class.active]="fishLevel === 1"
+            (click)="setFishLevel(1)"
+          >
+            2. School
+          </button>
+          <button
+            type="button"
+            [class.active]="fishLevel === 2"
+            (click)="setFishLevel(2)"
+          >
+            3. Full school
+          </button>
         </nav>
       } @else {
         <nav class="stages" aria-label="Herd complexity stages">
-          <button type="button" [class.active]="herdLevel === 0" (click)="setHerdLevel(0)">1. Single animal</button>
-          <button type="button" [class.active]="herdLevel === 1" (click)="setHerdLevel(1)">2. Small herd</button>
-          <button type="button" [class.active]="herdLevel === 2" (click)="setHerdLevel(2)">3. Full herd</button>
+          <button
+            type="button"
+            [class.active]="herdLevel === 0"
+            (click)="setHerdLevel(0)"
+          >
+            1. Single animal
+          </button>
+          <button
+            type="button"
+            [class.active]="herdLevel === 1"
+            (click)="setHerdLevel(1)"
+          >
+            2. Small herd
+          </button>
+          <button
+            type="button"
+            [class.active]="herdLevel === 2"
+            (click)="setHerdLevel(2)"
+          >
+            3. Full herd
+          </button>
         </nav>
       }
       <div class="time-warp" aria-label="Simulation time warp">
         <span>Time warp</span>
         @for (scale of timeScales; track scale) {
-          <button type="button" [class.active]="timeScale === scale" (click)="setTimeScale(scale)">{{ scale }}×</button>
+          <button
+            type="button"
+            [class.active]="timeScale === scale"
+            (click)="setTimeScale(scale)"
+          >
+            {{ scale }}×
+          </button>
         }
       </div>
       <p class="blurb">
-        Start with one primitive bird, then add group movement, flocking, world
-        constraints, and finally player avoidance. The red sphere is the player.
+        Compare primitive agents with procedural articulated silhouettes. Birds
+        use three parts; herd animals use a body, head, tail, and four one-joint
+        legs. The red sphere is the player.
       </p>
       <p class="blurb note">
-        This is intentionally a small vertical slice: the birds are the test
-        for whether the reusable simulation deserves to grow.
+        This is a presentation POC, not a species or rigging API. Its job is to
+        find the point where simple geometry starts reading as intentional life.
       </p>
     </section>
   </ng-template>
 
-  <orbitControls [cameraPosition]="[0, 42, 54]" [target]="[0, 8, 0]" />
+  <orbitControls
+    [cameraPosition]="lifeMode === 'herd' ? [0, 3.8, 18] : [0, 42, 54]"
+    [target]="lifeMode === 'herd' ? [0, 1.2, 0] : [0, 8, 0]"
+  />
   <ambientLight [intensity]="1.1" />
   <directionalLight [position]="[30, 50, 20]" [intensity]="2.4" />
 </scene>
