@@ -50,6 +50,12 @@ See: ./api/selectors.md
 - Use `instancedRigidBody` or `instancedMesh` when many similar objects exist.
 - Enable BVH for complex meshes to speed raycasting.
 
+## Documentation Naming
+
+- Number every new runbook or design document with a zero-padded sequence prefix, for example `009-dynamic-habitats-seasons-migration.md`.
+- Preserve the existing sequence when adding documents; do not create unnumbered runbooks.
+- Use the numbered filename in links and references.
+
 ## Minimal Example
 
 See: ./examples/basic-scene.md

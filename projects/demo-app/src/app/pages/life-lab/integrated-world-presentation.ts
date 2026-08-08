@@ -41,6 +41,7 @@ export class IntegratedWorldPresentation {
   private readonly migration = new Group();
   private readonly travelers: Mesh[] = [];
   private readonly routePoints: Vector3[] = [];
+  private readonly landRoutePoints: Vector3[] = [];
   private seed: number;
 
   constructor(seed = 909) {
@@ -65,17 +66,20 @@ export class IntegratedWorldPresentation {
   }
 
   update(timeSeconds: number): void {
-    if (this.routePoints.length < 2) return;
+    if (this.routePoints.length < 2 || this.landRoutePoints.length < 2) return;
     for (let index = 0; index < this.travelers.length; index++) {
       const phase = index * 0.8;
       const t = (timeSeconds * 0.012 + phase * 0.04) % 1;
-      const scaled = t * this.routePoints.length;
-      const from = this.routePoints[Math.floor(scaled) % this.routePoints.length];
-      const to = this.routePoints[(Math.floor(scaled) + 1) % this.routePoints.length];
+      const isAirborne = index >= 4;
+      const route = isAirborne ? this.routePoints : this.landRoutePoints;
+      const scaled = t * route.length;
+      const from = route[Math.floor(scaled) % route.length];
+      const to = route[(Math.floor(scaled) + 1) % route.length];
       const blend = scaled - Math.floor(scaled);
       const x = from.x + (to.x - from.x) * blend;
       const z = from.z + (to.z - from.z) * blend;
-      const y = from.y + (to.y - from.y) * blend + 2 + Math.sin(timeSeconds * 4 + phase) * 0.35;
+      const altitude = isAirborne ? 10 : 2;
+      const y = from.y + (to.y - from.y) * blend + altitude + Math.sin(timeSeconds * 4 + phase) * 0.35;
       this.travelers[index].position.set(x, y, z);
       this.travelers[index].rotation.y = Math.atan2(to.x - from.x, to.z - from.z);
     }
@@ -228,6 +232,7 @@ export class IntegratedWorldPresentation {
 
   private buildMigrationRoute(): void {
     this.routePoints.length = 0;
+    this.landRoutePoints.length = 0;
     const routePhase = this.seed * 0.019;
     // A closed route is a useful baseline for migration: it never needs to
     // despawn agents at an endpoint. The seed changes its shape while the
@@ -239,15 +244,24 @@ export class IntegratedWorldPresentation {
       const baseZ = Math.sin(angle) * (28 + Math.cos(routePhase * 0.7) * 7) + Math.sin(angle * 2 + routePhase) * 7;
       const elevation = this.field.sample([baseX, 0, baseZ]).elevationM;
       this.routePoints.push(new Vector3(baseX, elevation + 0.4, baseZ));
+      const landX = Math.cos(angle + routePhase * 0.08) * 38;
+      const landZ = Math.sin(angle) * 15 + Math.sin(angle * 2 + routePhase * 0.5) * 3;
+      const landElevation = this.field.sample([landX, 0, landZ]).elevationM;
+      this.landRoutePoints.push(new Vector3(landX, landElevation + 0.4, landZ));
     }
     const points = [...this.routePoints, this.routePoints[0]];
     const routeGeometry = new BufferGeometry().setFromPoints(points);
     this.geometries.push(routeGeometry);
-    this.migration.add(new Line(routeGeometry, new LineBasicMaterial({ color: '#d5b85a', transparent: true, opacity: 0.65 })));
+    this.migration.add(new Line(routeGeometry, new LineBasicMaterial({ color: '#d5b85a', transparent: true, opacity: 0.45 })));
+    const landPoints = [...this.landRoutePoints, this.landRoutePoints[0]];
+    const landRouteGeometry = new BufferGeometry().setFromPoints(landPoints);
+    this.geometries.push(landRouteGeometry);
+    this.migration.add(new Line(landRouteGeometry, new LineBasicMaterial({ color: '#a96b45', transparent: true, opacity: 0.7 })));
     const travelerGeometry = this.trackGeometry(new ConeGeometry(0.7, 2.4, 4));
-    const travelerMaterial = this.track(new MeshStandardMaterial({ color: '#d98b4a', roughness: 0.8 }));
+    const landMaterial = this.track(new MeshStandardMaterial({ color: '#a96b45', roughness: 0.8 }));
+    const airMaterial = this.track(new MeshStandardMaterial({ color: '#f0d26a', roughness: 0.8 }));
     for (let index = 0; index < 8; index++) {
-      const traveler = new Mesh(travelerGeometry, travelerMaterial);
+      const traveler = new Mesh(travelerGeometry, index < 4 ? landMaterial : airMaterial);
       this.travelers.push(traveler);
       this.migration.add(traveler);
     }
@@ -262,7 +276,7 @@ export class IntegratedWorldPresentation {
 
   private distanceToRoute(x: number, z: number): number {
     let nearest = Number.POSITIVE_INFINITY;
-    for (const point of this.routePoints) {
+    for (const point of this.landRoutePoints) {
       nearest = Math.min(nearest, Math.hypot(x - point.x, z - point.z));
     }
     return nearest;
