@@ -62,6 +62,7 @@ export class LifeLabPageComponent {
   protected herdLevel = 2;
   protected renderStyle: AnimalRenderStyle = 'cutout';
   protected timeScale: TimeScale = 1;
+  protected integratedWorldSeed = 909;
   protected readonly timeScales: readonly TimeScale[] = [0.5, 1, 2, 5, 10];
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
@@ -340,6 +341,11 @@ export class LifeLabPageComponent {
 
   protected setTimeScale(scale: TimeScale): void {
     this.timeScale = scale;
+  }
+
+  protected randomizeIntegratedWorld(): void {
+    this.integratedWorldSeed = Math.floor(Math.random() * 999_999) + 1;
+    this.integratedWorld.setSeed(this.integratedWorldSeed);
   }
 
   private update(deltaSeconds: number): void {

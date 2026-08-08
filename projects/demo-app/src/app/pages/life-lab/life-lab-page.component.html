@@ -76,6 +76,12 @@
         </small>
       </div>
       @if (lifeMode === "world") {
+        <div class="time-warp" aria-label="World scenario controls">
+          <button type="button" (click)="randomizeIntegratedWorld()">
+            Randomize scenario
+          </button>
+          <small>Seed {{ integratedWorldSeed }}</small>
+        </div>
         <p class="blurb">
           Integrated terrain, geological relief, deterministic forest/meadow scatter,
           and a migrating animal route. This is the larger-world composition POC.

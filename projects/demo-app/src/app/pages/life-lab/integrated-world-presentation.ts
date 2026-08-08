@@ -33,14 +33,27 @@ const TERRAIN_RESOLUTION = 20;
 export class IntegratedWorldPresentation {
   readonly group = new Group();
   private readonly domain = new PlaneTerrainDomain(PATCH_SIZE_M);
-  private readonly field: ITerrainField = new IntegratedWorldField();
+  private field: ITerrainField;
   private readonly materials: MeshStandardMaterial[] = [];
   private readonly geometries: BufferGeometry[] = [];
   private readonly migration = new Group();
   private readonly travelers: Mesh[] = [];
+  private seed: number;
 
-  constructor() {
+  constructor(seed = 909) {
+    this.seed = seed;
+    this.field = new IntegratedWorldField(seed);
     this.group.name = 'life-lab-integrated-world';
+    this.buildTerrain();
+    this.buildScatter();
+    this.buildMigrationRoute();
+  }
+
+  /** Rebuild the small world deterministically from a new scenario seed. */
+  setSeed(seed: number): void {
+    this.clearResources();
+    this.seed = seed;
+    this.field = new IntegratedWorldField(seed);
     this.buildTerrain();
     this.buildScatter();
     this.buildMigrationRoute();
@@ -113,7 +126,7 @@ export class IntegratedWorldPresentation {
           domain: this.domain,
           cellAddress: address,
           cellKey: `world:${x}:${z}`,
-          identity: { worldSeed: 909, layerId: 'integrated-life', speciesId: 'forest-meadow', generatorVersion: 1 },
+          identity: { worldSeed: this.seed, layerId: 'integrated-life', speciesId: 'forest-meadow', generatorVersion: 1 },
           rules,
           candidatePoolSize: 30,
         } as const;
@@ -172,7 +185,7 @@ export class IntegratedWorldPresentation {
   }
 
   private biomeDensity(cellX: number, cellZ: number, biome: 'forest' | 'meadow'): number {
-    const ridge = Math.sin(cellX * 0.9 + cellZ * 0.35) * 0.5 + 0.5;
+    const ridge = Math.sin(cellX * 0.9 + cellZ * 0.35 + this.seed * 0.013) * 0.5 + 0.5;
     if (biome === 'forest') return Math.max(0, Math.min(1, ridge * 1.4 - Math.abs(cellZ) * 0.12));
     return Math.max(0, Math.min(1, 1 - ridge * 0.75 + Math.abs(cellZ) * 0.08));
   }
@@ -183,17 +196,32 @@ export class IntegratedWorldPresentation {
 
   private track<T extends MeshStandardMaterial>(material: T): T { this.materials.push(material); return material; }
   private trackGeometry<T extends BufferGeometry>(geometry: T): T { this.geometries.push(geometry); return geometry; }
+
+  private clearResources(): void {
+    for (const child of [...this.group.children]) this.group.remove(child);
+    this.travelers.length = 0;
+    this.migration.clear();
+    for (const geometry of this.geometries) geometry.dispose();
+    for (const material of this.materials) material.dispose();
+    this.geometries.length = 0;
+    this.materials.length = 0;
+  }
 }
 
 class IntegratedWorldField implements ITerrainField {
   readonly minElevationM = -8;
   readonly maxElevationM = 46;
+  private readonly offset: number;
+
+  constructor(seed: number) {
+    this.offset = seed * 0.017;
+  }
 
   sample([x, _y, z]: TerrainVector3): ITerrainFieldSample {
-    const meadow = Math.sin(x / 21) * 3 + Math.cos(z / 28) * 4;
-    const ridge = Math.exp(-Math.pow((x + 42) / 32, 2)) * 28;
-    const mountain = Math.exp(-Math.pow((x - 55) / 38, 2) - Math.pow((z + 8) / 55, 2)) * 34;
-    const crater = -Math.exp(-Math.pow((x - 8) / 27, 2) - Math.pow((z - 24) / 24, 2)) * 12;
+    const meadow = Math.sin(x / 21 + this.offset) * 3 + Math.cos(z / 28 - this.offset * 0.7) * 4;
+    const ridge = Math.exp(-Math.pow((x + 42 + Math.sin(this.offset) * 12) / 32, 2)) * 28;
+    const mountain = Math.exp(-Math.pow((x - 55 + Math.cos(this.offset) * 10) / 38, 2) - Math.pow((z + 8) / 55, 2)) * 34;
+    const crater = -Math.exp(-Math.pow((x - 8) / 27, 2) - Math.pow((z - 24 + Math.sin(this.offset) * 8) / 24, 2)) * 12;
     return { elevationM: meadow + ridge + mountain + crater };
   }
 
