@@ -244,6 +244,23 @@ Transitioning between levels must preserve stable identity and avoid visible
 teleports. Full ecosystem simulation outside the active region is not implied;
 a game may provide its own aggregate population model.
 
+#### Visibility and simulation centres
+
+Consumers with free cameras should separate “can be seen” from “must be
+simulated.” A camera-visible region may request cheap ambient groups,
+silhouettes, or coarse motion so panning across a world still reveals life.
+The gameplay actor, vessel, or player region remains the authoritative bubble
+for individual steering, perception, hazards, collisions, and persistence.
+An importance pin may keep a followed, tagged, injured, authored, or
+mission-relevant actor alive outside both regions. These are consumer policy,
+not additional species state in `life/core`.
+
+Both regions require hysteresis and a protected visible boundary: materialize
+before an actor enters view, retire only beyond a larger range, and preserve
+stable group identity while changing representation. The reusable package may
+expose region inputs and lifecycle transitions, but a game decides camera
+framing, vessel bubbles, importance, and the visual quality budget.
+
 ### 9. Physics and animation are adapters, not foundations
 
 Most birds, fish, and insects should remain kinematic. Creating one rigid body
