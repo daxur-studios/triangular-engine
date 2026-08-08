@@ -5,8 +5,6 @@ import {
   DodecahedronGeometry,
   Float32BufferAttribute,
   Group,
-  Line,
-  LineBasicMaterial,
   Mesh,
   MeshStandardMaterial,
   PlaneGeometry,
@@ -31,15 +29,32 @@ const PATCH_SIZE_M = 48;
 const PATCH_RADIUS = 2;
 const TERRAIN_RESOLUTION = 20;
 
+type IntegratedHabitat = 'land' | 'water' | 'air' | 'unsuitable';
+
+interface IntegratedCreatureProfile {
+  habitat: Exclude<IntegratedHabitat, 'unsuitable'>;
+  altitudeM: number;
+  color: string;
+}
+
+interface IntegratedHabitatSample {
+  kind: IntegratedHabitat;
+  landSuitability01: number;
+  waterSuitability01: number;
+}
+
 /** A deliberately small integrated world: enough space for several biomes and migration routes. */
 export class IntegratedWorldPresentation {
   readonly group = new Group();
   private readonly domain = new PlaneTerrainDomain(PATCH_SIZE_M);
   private field: ITerrainField;
+  private habitatGrid: IntegratedHabitatGrid;
   private readonly materials: MeshStandardMaterial[] = [];
   private readonly geometries: BufferGeometry[] = [];
   private readonly migration = new Group();
   private readonly travelers: Mesh[] = [];
+  private readonly travelerProfiles: IntegratedCreatureProfile[] = [];
+  private readonly travelerStates: Vector3[] = [];
   private readonly routePoints: Vector3[] = [];
   private readonly landRoutePoints: Vector3[] = [];
   private seed: number;
@@ -47,9 +62,11 @@ export class IntegratedWorldPresentation {
   constructor(seed = 909) {
     this.seed = seed;
     this.field = new IntegratedWorldField(seed);
+    this.habitatGrid = new IntegratedHabitatGrid(this.field);
     this.group.name = 'life-lab-integrated-world';
     this.buildTerrain();
     this.buildWaterSurface();
+    this.buildHabitatOverlay();
     this.buildMigrationRoute();
     this.buildScatter();
   }
@@ -59,29 +76,40 @@ export class IntegratedWorldPresentation {
     this.clearResources();
     this.seed = seed;
     this.field = new IntegratedWorldField(seed);
+    this.habitatGrid = new IntegratedHabitatGrid(this.field);
     this.buildTerrain();
     this.buildWaterSurface();
+    this.buildHabitatOverlay();
     this.buildMigrationRoute();
     this.buildScatter();
   }
 
   update(timeSeconds: number): void {
-    if (this.routePoints.length < 2 || this.landRoutePoints.length < 2) return;
     for (let index = 0; index < this.travelers.length; index++) {
-      const phase = index * 0.8;
-      const t = (timeSeconds * 0.012 + phase * 0.04) % 1;
-      const isAirborne = index >= 4;
-      const route = isAirborne ? this.routePoints : this.landRoutePoints;
-      const scaled = t * route.length;
-      const from = route[Math.floor(scaled) % route.length];
-      const to = route[(Math.floor(scaled) + 1) % route.length];
-      const blend = scaled - Math.floor(scaled);
-      const x = from.x + (to.x - from.x) * blend;
-      const z = from.z + (to.z - from.z) * blend;
-      const altitude = isAirborne ? 10 : 2;
-      const y = from.y + (to.y - from.y) * blend + altitude + Math.sin(timeSeconds * 4 + phase) * 0.35;
-      this.travelers[index].position.set(x, y, z);
-      this.travelers[index].rotation.y = Math.atan2(to.x - from.x, to.z - from.z);
+      const profile = this.travelerProfiles[index];
+      const state = this.travelerStates[index];
+      const phase = index * 1.73 + this.seed * 0.017;
+      const t = timeSeconds * (profile.habitat === 'air' ? 0.12 : 0.07) + phase;
+      // Broad, low-frequency wandering targets keep the POC readable without
+      // turning the animals into a train following a spline.
+      let targetX = Math.sin(t * 0.37) * 150 + Math.sin(t * 0.11 + phase) * 42;
+      let targetZ = Math.cos(t * 0.29 + phase) * 105 + Math.sin(t * 0.17) * 55;
+      if (profile.habitat === 'land') {
+        for (let attempt = 0; attempt < 5 && this.habitatGrid.sample(targetX, targetZ).kind === 'water'; attempt++) {
+          targetX *= 0.78;
+          targetZ *= 0.78;
+        }
+      }
+      const terrain = this.field.sample([targetX, 0, targetZ]).elevationM;
+      const targetY = profile.habitat === 'land'
+        ? Math.max(terrain + profile.altitudeM, 0.7)
+        : terrain + profile.altitudeM;
+      const target = new Vector3(targetX, targetY, targetZ);
+      const blend = Math.min(1, 0.018 + (profile.habitat === 'air' ? 0.012 : 0.008));
+      const previous = state.clone();
+      state.lerp(target, blend);
+      this.travelers[index].position.copy(state);
+      this.travelers[index].rotation.y = Math.atan2(state.x - previous.x, state.z - previous.z);
     }
   }
 
@@ -125,7 +153,7 @@ export class IntegratedWorldPresentation {
   private buildWaterSurface(): void {
     // A simple datum plane makes low-elevation water visible in the POC.
     // Terrain above it occludes the surface; valleys reveal the water habitat.
-    const geometry = this.trackGeometry(new PlaneGeometry(220, 150));
+    const geometry = this.trackGeometry(new PlaneGeometry(420, 300));
     const material = this.track(new MeshStandardMaterial({
       color: '#3d83a3',
       roughness: 0.25,
@@ -138,6 +166,28 @@ export class IntegratedWorldPresentation {
     water.name = 'integrated-world-water-habitat';
     water.rotation.x = -Math.PI / 2;
     this.group.add(water);
+  }
+
+  private buildHabitatOverlay(): void {
+    const tileGeometry = this.trackGeometry(new PlaneGeometry(11, 11));
+    const landMaterial = this.track(new MeshStandardMaterial({
+      color: '#a8c46a', transparent: true, opacity: 0.08, depthWrite: false,
+    }));
+    const waterMaterial = this.track(new MeshStandardMaterial({
+      color: '#4c9fc3', transparent: true, opacity: 0.16, depthWrite: false,
+    }));
+    for (let z = -6; z <= 6; z++) {
+      for (let x = -9; x <= 9; x++) {
+        const worldX = x * 12 + 6;
+        const worldZ = z * 12 + 6;
+        const sample = this.habitatGrid.sample(worldX, worldZ);
+        const elevation = this.field.sample([worldX, 0, worldZ]).elevationM;
+        const tile = new Mesh(tileGeometry, sample.kind === 'water' ? waterMaterial : landMaterial);
+        tile.position.set(worldX, Math.max(elevation, 0) + 0.18, worldZ);
+        tile.rotation.x = -Math.PI / 2;
+        this.group.add(tile);
+      }
+    }
   }
 
   private buildScatter(): void {
@@ -163,13 +213,13 @@ export class IntegratedWorldPresentation {
         trees.push(...generateTerrainScatterInstances({
           ...base,
           baseDensity01: this.biomeDensity(x, z, 'forest'),
-          suitability: (sample: IScatterSurfaceSample) => sample.elevationM > 4 && sample.elevationM < 28 ? 1 : 0,
+          suitability: (sample: IScatterSurfaceSample) => this.habitatGrid.sample(sample.worldPositionM[0], sample.worldPositionM[2]).landSuitability01 * (sample.elevationM > 4 && sample.elevationM < 28 ? 1 : 0),
         }));
         meadow.push(...generateTerrainScatterInstances({
           ...base,
           identity: { ...base.identity, speciesId: 'meadow-tuft' },
           baseDensity01: this.biomeDensity(x, z, 'meadow'),
-          suitability: (sample: IScatterSurfaceSample) => sample.elevationM > 0 && sample.elevationM < 16 ? 1 : 0,
+          suitability: (sample: IScatterSurfaceSample) => this.habitatGrid.sample(sample.worldPositionM[0], sample.worldPositionM[2]).landSuitability01 * (sample.elevationM < 16 ? 1 : 0),
         }));
       }
     }
@@ -215,7 +265,7 @@ export class IntegratedWorldPresentation {
             // Keep the migration corridor open; rocks still form natural
             // blockers elsewhere in the terrain.
             const clearOfRoute = this.distanceToRoute(sample.worldPositionM[0], sample.worldPositionM[2]) > 9;
-            return sample.elevationM > -2 && clearOfRoute ? 1 : 0;
+            return this.habitatGrid.sample(sample.worldPositionM[0], sample.worldPositionM[2]).landSuitability01 * (clearOfRoute ? 1 : 0);
           },
         }));
       }
@@ -244,25 +294,41 @@ export class IntegratedWorldPresentation {
       const baseZ = Math.sin(angle) * (28 + Math.cos(routePhase * 0.7) * 7) + Math.sin(angle * 2 + routePhase) * 7;
       const elevation = this.field.sample([baseX, 0, baseZ]).elevationM;
       this.routePoints.push(new Vector3(baseX, elevation + 0.4, baseZ));
-      const landX = Math.cos(angle + routePhase * 0.08) * 38;
-      const landZ = Math.sin(angle) * 15 + Math.sin(angle * 2 + routePhase * 0.5) * 3;
+      const landX = Math.cos(angle + routePhase * 0.08) * 24;
+      // Keep the demo land corridor on the broad northern meadow. The
+      // eventual habitat corridor solver will choose this from the grid.
+      const landZ = -20 + Math.sin(angle) * 8 + Math.sin(angle * 2 + routePhase * 0.5) * 2;
       const landElevation = this.field.sample([landX, 0, landZ]).elevationM;
-      this.landRoutePoints.push(new Vector3(landX, landElevation + 0.4, landZ));
+      this.landRoutePoints.push(new Vector3(landX, Math.max(landElevation, 0.3) + 0.4, landZ));
     }
     const points = [...this.routePoints, this.routePoints[0]];
     const routeGeometry = new BufferGeometry().setFromPoints(points);
     this.geometries.push(routeGeometry);
-    this.migration.add(new Line(routeGeometry, new LineBasicMaterial({ color: '#d5b85a', transparent: true, opacity: 0.45 })));
+    // Keep route geometry as a debug aid for obstacle seeding, but do not
+    // present it as the animal behaviour. The acceptance target is free life.
     const landPoints = [...this.landRoutePoints, this.landRoutePoints[0]];
     const landRouteGeometry = new BufferGeometry().setFromPoints(landPoints);
     this.geometries.push(landRouteGeometry);
-    this.migration.add(new Line(landRouteGeometry, new LineBasicMaterial({ color: '#a96b45', transparent: true, opacity: 0.7 })));
     const travelerGeometry = this.trackGeometry(new ConeGeometry(0.7, 2.4, 4));
-    const landMaterial = this.track(new MeshStandardMaterial({ color: '#a96b45', roughness: 0.8 }));
-    const airMaterial = this.track(new MeshStandardMaterial({ color: '#f0d26a', roughness: 0.8 }));
-    for (let index = 0; index < 8; index++) {
-      const traveler = new Mesh(travelerGeometry, index < 4 ? landMaterial : airMaterial);
+    const profiles: IntegratedCreatureProfile[] = [
+      { habitat: 'land', altitudeM: 2, color: '#a96b45' },
+      { habitat: 'land', altitudeM: 2, color: '#a96b45' },
+      { habitat: 'land', altitudeM: 2, color: '#a96b45' },
+      { habitat: 'land', altitudeM: 2, color: '#a96b45' },
+      { habitat: 'air', altitudeM: 10, color: '#f0d26a' },
+      { habitat: 'air', altitudeM: 10, color: '#f0d26a' },
+      { habitat: 'air', altitudeM: 10, color: '#f0d26a' },
+      { habitat: 'air', altitudeM: 10, color: '#f0d26a' },
+    ];
+    for (const profile of profiles) {
+      this.travelerProfiles.push(profile);
+      const traveler = new Mesh(travelerGeometry, this.track(new MeshStandardMaterial({ color: profile.color, roughness: 0.8 })));
       this.travelers.push(traveler);
+      this.travelerStates.push(new Vector3(
+        (this.seed * 0.17 + this.travelers.length * 19) % 180 - 90,
+        profile.habitat === 'air' ? 16 : 5,
+        (this.seed * 0.11 + this.travelers.length * 27) % 120 - 60,
+      ));
       this.migration.add(traveler);
     }
     this.group.add(this.migration);
@@ -292,11 +358,40 @@ export class IntegratedWorldPresentation {
   private clearResources(): void {
     for (const child of [...this.group.children]) this.group.remove(child);
     this.travelers.length = 0;
+    this.travelerProfiles.length = 0;
+    this.travelerStates.length = 0;
+    this.travelerProfiles.length = 0;
     this.migration.clear();
     for (const geometry of this.geometries) geometry.dispose();
     for (const material of this.materials) material.dispose();
     this.geometries.length = 0;
     this.materials.length = 0;
+  }
+
+}
+
+/** Coarse deterministic environment layer used before a full planetary grid exists. */
+class IntegratedHabitatGrid {
+  private readonly cellSizeM = 12;
+
+  constructor(private readonly field: ITerrainField) {}
+
+  sample(x: number, z: number, knownElevationM?: number): IntegratedHabitatSample {
+    const cellX = Math.floor(x / this.cellSizeM) * this.cellSizeM + this.cellSizeM * 0.5;
+    const cellZ = Math.floor(z / this.cellSizeM) * this.cellSizeM + this.cellSizeM * 0.5;
+    const elevationM = knownElevationM ?? this.field.sample([cellX, 0, cellZ]).elevationM;
+    const landSuitability01 = this.smoothStep(-1.5, 2.5, elevationM);
+    const waterSuitability01 = 1 - this.smoothStep(-2.5, 1.5, elevationM);
+    return {
+      kind: landSuitability01 > 0.5 ? 'land' : waterSuitability01 > 0.5 ? 'water' : 'unsuitable',
+      landSuitability01,
+      waterSuitability01,
+    };
+  }
+
+  private smoothStep(edge0: number, edge1: number, value: number): number {
+    const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
   }
 }
 

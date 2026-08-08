@@ -34,10 +34,25 @@ The environment is sampled from UT, so weather and seasonal changes remain coher
 
 ## Implementation order
 
-1. Add explicit land, water, and air habitat classifications.
-2. Add a small habitat grid and suitability sampler to the Life Lab.
-3. Generate a coarse migration corridor between suitable cells.
-4. Couple suitability to UT, season, and the existing weather fields.
-5. Add local obstacle avoidance and nearby/distant simulation tiers.
+Use the numbered acceptance anchors in
+[`009_life_sublibrary.md`](009_life_sublibrary.md) as the source of truth. The
+next technical slices are:
 
-The current Life Lab routes remain visual test fixtures until the habitat grid and corridor layer replace them.
+1. Replace route-led movement with free local steering and species movement
+   domains (land, water, air).
+2. Add deterministic habitat distribution over streamed cells, including
+   camera-visible materialization and species-specific suitability.
+3. Add natural activities and transitions: wander, feed, rest, flee, land,
+   perch, split, and regroup where applicable.
+4. Add presentation/simulation LOD and scale tests; cull insects sooner than
+   birds, and birds sooner than large animals.
+5. Add player, vessel, vehicle, structure, rock, and hazard observations.
+6. Couple suitability to UT, seasons, and weather fields; verify time warp.
+7. Add broad destination selection for migration from changing suitability
+   fields. Corridors are optional aids, never mandatory visible splines.
+8. Add selective persistence, depletion/recovery, predators, death, growth,
+   and people only as concrete game consumers require them.
+
+The existing Life Lab paths are temporary debug fixtures. They are not the
+target population model and should be removed or isolated once free movement
+is in place.

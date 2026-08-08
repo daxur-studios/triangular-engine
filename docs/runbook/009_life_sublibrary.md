@@ -9,6 +9,8 @@
 - First proving ground: a small flock of low-poly birds above an existing
   terrain demo, avoiding the player and nearby tree canopies.
 - Immediate integrations: `terrain`, `scatter`, `water`, `spline`, and `trail`.
+- Current next slice: replace the Life Lab's visible route fixture with free
+  local steering constrained by species movement domains.
 - Blocked on: build/test verification while the local Windows shell process
   session is intermittently failing to spawn child processes.
 - Last updated: 2026-08-07.
@@ -26,6 +28,33 @@ that notice and move through it.
 The architectural target is:
 
 > A strong body and senses with a replaceable brain.
+
+## Happy-path visual milestones
+
+These are the acceptance anchors for the work. Each milestone must be
+visually verifiable in Life Lab before the next layer is treated as real:
+
+1. **Free life in a varied world** — birds, insects, fish, and land animals
+   move freely through terrain, water, vegetation, and obstacles; no fixed
+   train-like route.
+2. **Habitat-aware distribution** — species appear only in plausible domains
+   and remain visible while the camera moves across the world.
+3. **Scale and LOD** — insects become cheap/culled first, large animals last;
+   distant life uses groups or silhouettes without obvious popping.
+4. **Natural activities** — flock, split, regroup, hover, school, graze,
+   rest, wander, land, or perch as appropriate to the species.
+5. **Player and world interaction** — vessels, vehicles, buildings, rocks,
+   water, and hazards cause avoidance or factual disturbance events.
+6. **Seasonal response** — UT and time warp change climate and habitat;
+   migratory species seek better regions while residents remain local.
+7. **Selective continuity** — followed or important creatures persist across
+   travel; ordinary background life is reconstructed plausibly and cheaply.
+8. **Optional ecology and people** — depletion/recovery, predators, death,
+   growth, and crowds are added only where a game needs them.
+
+The scalable simulation unit may be a flock, herd, school, pod, swarm, crowd,
+pair, family, solitary predator, or other population record. It is not limited
+to social herds.
 
 Simple consumers should be able to create birds, fish, insects, or herds with
 built-in behaviours. More ambitious games should be able to retain movement,
@@ -415,6 +444,10 @@ into consumers that use only `life/core`.
 
 ## Phases
 
+The milestones above are the product order. The technical phases below are
+implementation detail and must not pull migration or ecology ahead of the
+visual acceptance sequence.
+
 ### Phase 0 — Joy-first bird spike
 
 - [ ] Add a demo-local fixed-step flock with separation, alignment, cohesion,
@@ -690,3 +723,14 @@ Also confirm:
 - Extraction gate: build at least one more independent consumer using the same
   multipart instance writer. Extract only the shared transform/presentation
   mechanism that survives both consumers without species-specific branches.
+
+### 2026-08-08 — Free-movement milestone started
+
+- Removed the integrated Life Lab's visible migration splines from the active
+  presentation; they remain only as temporary debug data for scatter seeding.
+- Changed the demo travelers to independent, broad wandering targets instead
+  of interpolating around a shared closed route.
+- Land agents reject water habitat samples while air agents retain a separate
+  altitude band. This is the first step toward explicit movement domains.
+- Build verification was attempted, but the local Windows child-process
+  session failed with error 1312; rerun once the shell session is healthy.
