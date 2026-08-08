@@ -30,10 +30,14 @@ interface InsectModel {
   readonly group: Group;
   readonly leftWing: Mesh;
   readonly rightWing: Mesh;
+  readonly rearLeftWing: Mesh;
+  readonly rearRightWing: Mesh;
 }
 
 const LOCAL_FORWARD = new Vector3(0, 1, 0);
+const INSECT_FORWARD = new Vector3(0, 0, 1);
 const WORLD_UP = new Vector3(0, 1, 0);
+const INSECT_SHOWCASE_COUNT = 12;
 
 /**
  * Demo-local comparison of agent presentation techniques. It deliberately
@@ -75,7 +79,9 @@ export class ProceduralAnimalPresentation {
       cutout: this.createHerdRig(false),
       relief: this.createHerdRig(true),
     };
-    for (let index = 0; index < Math.max(0, this.birdCount - 4); index++) {
+    // A focused insect stage needs a few readable individuals, not a cloud of
+    // bird-count-derived meshes. Four insects form each of three local swarms.
+    for (let index = 0; index < INSECT_SHOWCASE_COUNT; index++) {
       const insect = this.createInsectModel(index % 3);
       this.insectModels.push(insect);
       this.group.add(insect.group);
@@ -191,24 +197,50 @@ export class ProceduralAnimalPresentation {
         mesh.instanceMatrix.needsUpdate = true;
       }
     }
-    this.updateInsectModels(simulation, time);
+    this.updateInsectModels(time);
   }
 
-  private updateInsectModels(simulation: LifeSimulation, time: number): void {
-    const start = Math.min(this.insectStartIndex, simulation.agents.length);
+  private updateInsectModels(time: number): void {
     for (let index = 0; index < this.insectModels.length; index++) {
-      const agent = simulation.agents[start + index];
-      if (!agent) continue;
       const insect = this.insectModels[index];
-      insect.group.position.set(agent.position.x, agent.position.y, agent.position.z);
-      this.direction.set(agent.velocity.x, agent.velocity.y, agent.velocity.z);
-      if (this.direction.lengthSq() > 1e-6) {
-        insect.group.quaternion.setFromUnitVectors(LOCAL_FORWARD, this.direction.normalize());
+      // Three small swarms: each pair usually hovers and wanders locally, then
+      // briefly loops around its partner. The motion never uses a world-sized
+      // patrol path, so an insect cannot shoot across the whole scene.
+      const swarm = Math.floor(index / 4);
+      const member = index % 4;
+      const pair = Math.floor(member / 2);
+      const side = member % 2 === 0 ? -1 : 1;
+      const swarmPhase = time * 0.16 + swarm * 2.3;
+      const pairPhase = time * 0.42 + pair * 2.1 + swarm * 0.7;
+      const interaction = 0.5 - 0.5 * Math.cos(time * 0.34 + swarm * 1.9 + pair);
+      const orbitPhase = time * 2.1 + swarm * 1.7 + pair * 2.8;
+      const centerX = [-3.3, 0.2, 3.5][swarm] + Math.sin(swarmPhase) * 0.38;
+      const centerZ = [0.8, -0.65, 0.45][swarm] + Math.cos(swarmPhase * 1.2) * 0.3;
+      const pairX = pair === 0 ? -0.48 : 0.52;
+      const pairZ = pair === 0 ? -0.18 : 0.25;
+      const hoverX = Math.sin(pairPhase + member * 0.8) * 0.24;
+      const hoverZ = Math.cos(pairPhase * 1.15 + member) * 0.2;
+      const orbitRadius = 0.28 + interaction * 0.22;
+      const x = centerX + pairX + hoverX + Math.cos(orbitPhase) * orbitRadius * interaction * side;
+      const z = centerZ + pairZ + hoverZ + Math.sin(orbitPhase) * orbitRadius * interaction * side;
+      const y = 4.2 + swarm * 0.14 + Math.sin(pairPhase * 1.6 + member) * 0.22
+        + Math.cos(orbitPhase) * 0.1 * interaction;
+      this.direction.set(x, y, z).sub(insect.group.position);
+      insect.group.position.set(x, y, z);
+      // Turn around the vertical axis only: the +Z body heading follows
+      // travel direction while the wings remain level.
+      this.direction.y = 0;
+      if (this.direction.lengthSq() > 0.0001) {
+        // The insect body is elongated along local +Z, unlike the bird rig.
+        insect.group.quaternion.setFromUnitVectors(INSECT_FORWARD, this.direction.normalize());
       }
-      const phase = time * 18 + index * 2.1;
-      const flap = Math.sin(phase) * 0.9;
+      const flap = Math.sin(time * 26 + index * 2.1) * 0.62;
       insect.leftWing.rotation.z = flap;
       insect.rightWing.rotation.z = -flap;
+      // Front and rear pairs counter-rotate, giving the dragonfly-like
+      // four-wing rhythm instead of making all wings mirror one another.
+      insect.rearLeftWing.rotation.z = -flap * 0.82;
+      insect.rearRightWing.rotation.z = flap * 0.82;
     }
   }
 
@@ -365,28 +397,45 @@ export class ProceduralAnimalPresentation {
       side: DoubleSide,
     }));
     const group = new Group();
-    group.scale.setScalar(variant === 2 ? 0.72 : 0.85);
+    // Keep insects clearly smaller than the other showcase creatures.
+    group.scale.setScalar(variant === 2 ? 0.28 : 0.34);
     const bodyGeometry = new SphereGeometry(0.38, 6, 4);
     this.geometries.add(bodyGeometry);
     const body = new Mesh(bodyGeometry, material);
     body.scale.set(variant === 0 ? 0.72 : 0.58, variant === 0 ? 0.72 : 0.5, variant === 2 ? 1.25 : 1.8);
-    const wingGeometry = (side: 1 | -1) => this.makeShape(
-      [[0, -0.8], [side * 0.7, -0.2], [side * 1.9, 0.5], [side * 0.95, 0.9], [side * 0.25, 0.45]],
-      'top',
-      false,
-    );
+    body.position.z = 0.15;
+    const head = new Mesh(bodyGeometry, material);
+    head.scale.setScalar(0.52);
+    head.position.z = 0.72;
+    const wingGeometry = (side: 1 | -1) => {
+      // ShapeGeometry starts in XY. Rotate it into local XZ: X is the
+      // lateral span and Z follows the insect's body, making the surface
+      // horizontal and visible from above.
+      const geometry = this.makeShape(
+        [[0, -0.14], [side * 0.52, -0.04], [side * 1.42, 0.16], [side * 0.8, 0.36], [side * 0.18, 0.24]],
+        'top',
+        false,
+      );
+      geometry.rotateX(Math.PI / 2);
+      return geometry;
+    };
     const leftWing = new Mesh(wingGeometry(1), material);
     const rightWing = new Mesh(wingGeometry(-1), material);
-    leftWing.scale.setScalar(variant === 2 ? 0.8 : 1.05);
-    rightWing.scale.setScalar(variant === 2 ? 0.8 : 1.05);
-    group.add(body, leftWing, rightWing);
-    if (variant === 0) {
-      const abdomen = new Mesh(bodyGeometry, material);
-      abdomen.scale.set(0.55, 0.55, 1.25);
-      abdomen.position.z = -0.75;
-      group.add(abdomen);
-    }
-    return { group, leftWing, rightWing };
+    const rearLeftWing = new Mesh(wingGeometry(1), material);
+    const rearRightWing = new Mesh(wingGeometry(-1), material);
+    leftWing.scale.setScalar(variant === 2 ? 0.58 : 0.66);
+    rightWing.scale.setScalar(variant === 2 ? 0.58 : 0.66);
+    rearLeftWing.scale.setScalar(variant === 2 ? 0.46 : 0.54);
+    rearRightWing.scale.setScalar(variant === 2 ? 0.46 : 0.54);
+    leftWing.position.z = 0.32;
+    rightWing.position.z = 0.32;
+    rearLeftWing.position.z = -0.08;
+    rearRightWing.position.z = -0.08;
+    const abdomen = new Mesh(bodyGeometry, material);
+    abdomen.scale.set(0.46, 0.46, variant === 2 ? 1.15 : 1.45);
+    abdomen.position.z = -0.82;
+    group.add(head, body, abdomen, leftWing, rightWing, rearLeftWing, rearRightWing);
+    return { group, leftWing, rightWing, rearLeftWing, rearRightWing };
   }
 
   private createHerdRig(relief: boolean): Rig {

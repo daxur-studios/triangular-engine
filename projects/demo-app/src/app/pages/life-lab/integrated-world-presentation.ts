@@ -112,9 +112,29 @@ export class IntegratedWorldPresentation {
       let targetX = Math.sin(t * 0.37) * 150 + Math.sin(t * 0.11 + phase) * 42;
       let targetZ = Math.cos(t * 0.29 + phase) * 105 + Math.sin(t * 0.17) * 55;
       if (profile.habitat === 'land') {
-        for (let attempt = 0; attempt < 5 && this.habitatGrid.sample(targetX, targetZ).kind === 'water'; attempt++) {
-          targetX *= 0.78;
-          targetZ *= 0.78;
+        if (this.habitatGrid.sample(targetX, targetZ).kind !== 'land') {
+          let foundLand = false;
+          // Search outward around the free-wander target. Scaling toward the
+          // origin biases every animal into one small area and still fails if
+          // that area is water; a radial search preserves the open movement.
+          for (const radius of [12, 24, 36, 48, 64]) {
+            for (let sampleIndex = 0; sampleIndex < 16; sampleIndex++) {
+              const angle = sampleIndex * (Math.PI * 2 / 16);
+              const candidateX = targetX + Math.cos(angle) * radius;
+              const candidateZ = targetZ + Math.sin(angle) * radius;
+              if (this.habitatGrid.sample(candidateX, candidateZ).kind === 'land') {
+                targetX = candidateX;
+                targetZ = candidateZ;
+                foundLand = true;
+                break;
+              }
+            }
+            if (foundLand) break;
+          }
+          if (!foundLand) {
+            targetX = state.x;
+            targetZ = state.z;
+          }
         }
       } else if (profile.habitat === 'water') {
         for (let attempt = 0; attempt < 8 && this.habitatGrid.sample(targetX, targetZ).kind !== 'water'; attempt++) {
@@ -140,6 +160,34 @@ export class IntegratedWorldPresentation {
       if (distance > maxStep) {
         const scale = maxStep / distance;
         state.copy(previous).addScaledVector(new Vector3(dx, dy, dz), scale);
+      }
+
+      if (profile.habitat === 'land') {
+        // Ground from the creature's actual x/z position, not only from its
+        // target. This prevents interpolation across slopes from tunnelling
+        // underground or hovering above the surface.
+        const currentHabitat = this.habitatGrid.sample(state.x, state.z);
+        if (currentHabitat.kind !== 'land') {
+          // Never let a land agent cross the habitat boundary. Find the last
+          // valid point along this frame's attempted step so it stops at the
+          // shoreline without visibly snapping backwards.
+          let low = 0;
+          let high = 1;
+          for (let iteration = 0; iteration < 7; iteration++) {
+            const middle = (low + high) * 0.5;
+            const candidateX = previous.x + (state.x - previous.x) * middle;
+            const candidateZ = previous.z + (state.z - previous.z) * middle;
+            if (this.habitatGrid.sample(candidateX, candidateZ).kind === 'land') {
+              low = middle;
+            } else {
+              high = middle;
+            }
+          }
+          state.x = previous.x + (state.x - previous.x) * low;
+          state.z = previous.z + (state.z - previous.z) * low;
+        }
+        const surfaceElevation = this.field.sample([state.x, 0, state.z]).elevationM;
+        state.y = surfaceElevation + profile.altitudeM;
       }
       this.travelers[index].position.copy(state);
       this.travelers[index].rotation.y = Math.atan2(state.x - previous.x, state.z - previous.z);
@@ -386,10 +434,29 @@ export class IntegratedWorldPresentation {
       this.travelerProfiles.push(profile);
       const traveler = new Mesh(travelerGeometry, this.track(new MeshStandardMaterial({ color: profile.color, roughness: 0.8 })));
       this.travelers.push(traveler);
+      let startX = (this.seed * 0.17 + this.travelers.length * 19) % 180 - 90;
+      let startZ = (this.seed * 0.11 + this.travelers.length * 27) % 120 - 60;
+      if (profile.habitat === 'land' && this.habitatGrid.sample(startX, startZ).kind !== 'land') {
+        for (const radius of [12, 24, 36, 48]) {
+          let foundLand = false;
+          for (let sampleIndex = 0; sampleIndex < 16; sampleIndex++) {
+            const angle = sampleIndex * (Math.PI * 2 / 16);
+            const candidateX = startX + Math.cos(angle) * radius;
+            const candidateZ = startZ + Math.sin(angle) * radius;
+            if (this.habitatGrid.sample(candidateX, candidateZ).kind === 'land') {
+              startX = candidateX;
+              startZ = candidateZ;
+              foundLand = true;
+              break;
+            }
+          }
+          if (foundLand) break;
+        }
+      }
       this.travelerStates.push(new Vector3(
-        (this.seed * 0.17 + this.travelers.length * 19) % 180 - 90,
-        profile.habitat === 'air' ? 16 : profile.habitat === 'water' ? -1.4 : 5,
-        (this.seed * 0.11 + this.travelers.length * 27) % 120 - 60,
+        startX,
+        profile.habitat === 'air' ? 16 : profile.habitat === 'water' ? -1.4 : this.field.sample([startX, 0, startZ]).elevationM + profile.altitudeM,
+        startZ,
       ));
       const visualSimulation = profile.habitat === 'air'
         ? this.birdVisualSimulation
