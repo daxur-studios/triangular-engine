@@ -9,6 +9,7 @@ import {
   LineBasicMaterial,
   Mesh,
   MeshStandardMaterial,
+  PlaneGeometry,
   Vector3,
 } from 'three';
 import {
@@ -47,6 +48,7 @@ export class IntegratedWorldPresentation {
     this.field = new IntegratedWorldField(seed);
     this.group.name = 'life-lab-integrated-world';
     this.buildTerrain();
+    this.buildWaterSurface();
     this.buildMigrationRoute();
     this.buildScatter();
   }
@@ -57,6 +59,7 @@ export class IntegratedWorldPresentation {
     this.seed = seed;
     this.field = new IntegratedWorldField(seed);
     this.buildTerrain();
+    this.buildWaterSurface();
     this.buildMigrationRoute();
     this.buildScatter();
   }
@@ -113,6 +116,24 @@ export class IntegratedWorldPresentation {
         this.group.add(mesh);
       }
     }
+  }
+
+  private buildWaterSurface(): void {
+    // A simple datum plane makes low-elevation water visible in the POC.
+    // Terrain above it occludes the surface; valleys reveal the water habitat.
+    const geometry = this.trackGeometry(new PlaneGeometry(220, 150));
+    const material = this.track(new MeshStandardMaterial({
+      color: '#3d83a3',
+      roughness: 0.25,
+      metalness: 0.05,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+    }));
+    const water = new Mesh(geometry, material);
+    water.name = 'integrated-world-water-habitat';
+    water.rotation.x = -Math.PI / 2;
+    this.group.add(water);
   }
 
   private buildScatter(): void {
