@@ -730,6 +730,9 @@ Also confirm:
   presentation; they remain only as temporary debug data for scatter seeding.
 - Changed the demo travelers to independent, broad wandering targets instead
   of interpolating around a shared closed route.
+- Reused the existing procedural multipart presentation for the integrated
+  scene, so birds and land animals retain the proven silhouette, wing, leg,
+  and tail treatment while movement work continues independently.
 - Land agents reject water habitat samples while air agents retain a separate
   altitude band. This is the first step toward explicit movement domains.
 - Build verification was attempted, but the local Windows child-process

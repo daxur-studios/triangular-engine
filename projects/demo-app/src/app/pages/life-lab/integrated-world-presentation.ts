@@ -24,6 +24,8 @@ import {
   type IScatterSurfaceSample,
   type ScatterPlacementRules,
 } from 'triangular-engine/scatter';
+import { LifeSimulation } from 'triangular-engine/life';
+import { ProceduralAnimalPresentation } from './procedural-animal-presentation';
 
 const PATCH_SIZE_M = 48;
 const PATCH_RADIUS = 2;
@@ -52,9 +54,15 @@ export class IntegratedWorldPresentation {
   private readonly materials: MeshStandardMaterial[] = [];
   private readonly geometries: BufferGeometry[] = [];
   private readonly migration = new Group();
+  private readonly habitatOverlay = new Group();
   private readonly travelers: Mesh[] = [];
   private readonly travelerProfiles: IntegratedCreatureProfile[] = [];
   private readonly travelerStates: Vector3[] = [];
+  private readonly birdVisualSimulation = new LifeSimulation();
+  private readonly fishVisualSimulation = new LifeSimulation();
+  private readonly herdVisualSimulation = new LifeSimulation();
+  // Four birds plus four tiny winged insects share the instanced wing rig.
+  private readonly animalPresentation = new ProceduralAnimalPresentation(8, 4, 4);
   private readonly routePoints: Vector3[] = [];
   private readonly landRoutePoints: Vector3[] = [];
   private seed: number;
@@ -64,11 +72,15 @@ export class IntegratedWorldPresentation {
     this.field = new IntegratedWorldField(seed);
     this.habitatGrid = new IntegratedHabitatGrid(this.field);
     this.group.name = 'life-lab-integrated-world';
+    this.animalPresentation.setAllVisibility('relief');
+    this.animalPresentation.setInsectStartIndex(4);
+    this.group.add(this.animalPresentation.group);
     this.buildTerrain();
     this.buildWaterSurface();
     this.buildHabitatOverlay();
     this.buildMigrationRoute();
     this.buildScatter();
+    if (!this.animalPresentation.group.parent) this.group.add(this.animalPresentation.group);
   }
 
   /** Rebuild the small world deterministically from a new scenario seed. */
@@ -82,6 +94,11 @@ export class IntegratedWorldPresentation {
     this.buildHabitatOverlay();
     this.buildMigrationRoute();
     this.buildScatter();
+    if (!this.animalPresentation.group.parent) this.group.add(this.animalPresentation.group);
+  }
+
+  setHabitatOverlayVisible(visible: boolean): void {
+    this.habitatOverlay.visible = visible;
   }
 
   update(timeSeconds: number): void {
@@ -99,22 +116,55 @@ export class IntegratedWorldPresentation {
           targetX *= 0.78;
           targetZ *= 0.78;
         }
+      } else if (profile.habitat === 'water') {
+        for (let attempt = 0; attempt < 8 && this.habitatGrid.sample(targetX, targetZ).kind !== 'water'; attempt++) {
+          targetX += Math.sin(phase + attempt) * 18;
+          targetZ += Math.cos(phase * 0.7 + attempt) * 14;
+        }
       }
       const terrain = this.field.sample([targetX, 0, targetZ]).elevationM;
       const targetY = profile.habitat === 'land'
         ? Math.max(terrain + profile.altitudeM, 0.7)
-        : terrain + profile.altitudeM;
+        : profile.habitat === 'water'
+          ? -1.4 + Math.sin(t * 0.8 + phase) * 0.45
+          : terrain + profile.altitudeM;
       const target = new Vector3(targetX, targetY, targetZ);
       const blend = Math.min(1, 0.018 + (profile.habitat === 'air' ? 0.012 : 0.008));
       const previous = state.clone();
       state.lerp(target, blend);
+      const maxStep = profile.habitat === 'land' ? 0.12 : profile.habitat === 'water' ? 0.2 : 0.28;
+      const dx = state.x - previous.x;
+      const dy = state.y - previous.y;
+      const dz = state.z - previous.z;
+      const distance = Math.hypot(dx, dy, dz);
+      if (distance > maxStep) {
+        const scale = maxStep / distance;
+        state.copy(previous).addScaledVector(new Vector3(dx, dy, dz), scale);
+      }
       this.travelers[index].position.copy(state);
       this.travelers[index].rotation.y = Math.atan2(state.x - previous.x, state.z - previous.z);
+      const visualAgent = profile.habitat === 'air'
+        ? this.birdVisualSimulation.agents[this.visualIndex(index, 'air')]
+        : profile.habitat === 'water'
+          ? this.fishVisualSimulation.agents[this.visualIndex(index, 'water')]
+          : this.herdVisualSimulation.agents[this.visualIndex(index, 'land')];
+      if (visualAgent) {
+        visualAgent.position.x = state.x;
+        visualAgent.position.y = state.y;
+        visualAgent.position.z = state.z;
+        visualAgent.velocity.x = state.x - previous.x;
+        visualAgent.velocity.y = state.y - previous.y;
+        visualAgent.velocity.z = state.z - previous.z;
+      }
     }
+    this.animalPresentation.updateHerd(this.herdVisualSimulation, timeSeconds);
+    this.animalPresentation.updateBirds(this.birdVisualSimulation, timeSeconds);
+    this.animalPresentation.updateFish(this.fishVisualSimulation, timeSeconds);
   }
 
   dispose(): void {
     this.group.removeFromParent();
+    this.animalPresentation.dispose();
     for (const geometry of this.geometries) geometry.dispose();
     for (const material of this.materials) material.dispose();
   }
@@ -169,6 +219,9 @@ export class IntegratedWorldPresentation {
   }
 
   private buildHabitatOverlay(): void {
+    this.habitatOverlay.clear();
+    this.habitatOverlay.name = 'integrated-world-habitat-debug-overlay';
+    this.habitatOverlay.visible = false;
     const tileGeometry = this.trackGeometry(new PlaneGeometry(11, 11));
     const landMaterial = this.track(new MeshStandardMaterial({
       color: '#a8c46a', transparent: true, opacity: 0.08, depthWrite: false,
@@ -183,11 +236,12 @@ export class IntegratedWorldPresentation {
         const sample = this.habitatGrid.sample(worldX, worldZ);
         const elevation = this.field.sample([worldX, 0, worldZ]).elevationM;
         const tile = new Mesh(tileGeometry, sample.kind === 'water' ? waterMaterial : landMaterial);
-        tile.position.set(worldX, Math.max(elevation, 0) + 0.18, worldZ);
+        tile.position.set(worldX, Math.max(elevation, 0) + 0.65, worldZ);
         tile.rotation.x = -Math.PI / 2;
-        this.group.add(tile);
+        this.habitatOverlay.add(tile);
       }
     }
+    this.group.add(this.habitatOverlay);
   }
 
   private buildScatter(): void {
@@ -319,6 +373,14 @@ export class IntegratedWorldPresentation {
       { habitat: 'air', altitudeM: 10, color: '#f0d26a' },
       { habitat: 'air', altitudeM: 10, color: '#f0d26a' },
       { habitat: 'air', altitudeM: 10, color: '#f0d26a' },
+      { habitat: 'air', altitudeM: 8, color: '#d6a84b' },
+      { habitat: 'air', altitudeM: 8, color: '#d6a84b' },
+      { habitat: 'air', altitudeM: 8, color: '#d6a84b' },
+      { habitat: 'air', altitudeM: 8, color: '#d6a84b' },
+      { habitat: 'water', altitudeM: -1.4, color: '#63b9c9' },
+      { habitat: 'water', altitudeM: -1.4, color: '#63b9c9' },
+      { habitat: 'water', altitudeM: -1.4, color: '#63b9c9' },
+      { habitat: 'water', altitudeM: -1.4, color: '#63b9c9' },
     ];
     for (const profile of profiles) {
       this.travelerProfiles.push(profile);
@@ -326,9 +388,20 @@ export class IntegratedWorldPresentation {
       this.travelers.push(traveler);
       this.travelerStates.push(new Vector3(
         (this.seed * 0.17 + this.travelers.length * 19) % 180 - 90,
-        profile.habitat === 'air' ? 16 : 5,
+        profile.habitat === 'air' ? 16 : profile.habitat === 'water' ? -1.4 : 5,
         (this.seed * 0.11 + this.travelers.length * 27) % 120 - 60,
       ));
+      const visualSimulation = profile.habitat === 'air'
+        ? this.birdVisualSimulation
+        : profile.habitat === 'water'
+          ? this.fishVisualSimulation
+          : this.herdVisualSimulation;
+      visualSimulation.addAgent({
+        id: visualSimulation.agents.length,
+        position: { x: this.travelerStates[this.travelerStates.length - 1].x, y: this.travelerStates[this.travelerStates.length - 1].y, z: this.travelerStates[this.travelerStates.length - 1].z },
+        maxSpeed: 1,
+      });
+      traveler.visible = false;
       this.migration.add(traveler);
     }
     this.group.add(this.migration);
@@ -360,12 +433,22 @@ export class IntegratedWorldPresentation {
     this.travelers.length = 0;
     this.travelerProfiles.length = 0;
     this.travelerStates.length = 0;
-    this.travelerProfiles.length = 0;
+    this.birdVisualSimulation.agents.length = 0;
+    this.fishVisualSimulation.agents.length = 0;
+    this.herdVisualSimulation.agents.length = 0;
     this.migration.clear();
     for (const geometry of this.geometries) geometry.dispose();
     for (const material of this.materials) material.dispose();
     this.geometries.length = 0;
     this.materials.length = 0;
+  }
+
+  private visualIndex(index: number, habitat: IntegratedCreatureProfile['habitat']): number {
+    let result = 0;
+    for (let i = 0; i < index; i++) {
+      if (this.travelerProfiles[i].habitat === habitat) result++;
+    }
+    return result;
   }
 
 }

@@ -44,7 +44,7 @@ const HERD_COUNT = 18;
 
 type BirdStage = 0 | 1 | 2 | 3 | 4;
 type TimeScale = 0.5 | 1 | 2 | 5 | 10 | 100 | 1000;
-type LifeMode = 'birds' | 'fish' | 'herd' | 'world';
+type LifeMode = 'birds' | 'fish' | 'herd' | 'insects' | 'world';
 
 @Component({
   selector: 'app-life-lab-page',
@@ -63,6 +63,7 @@ export class LifeLabPageComponent {
   protected renderStyle: AnimalRenderStyle = 'cutout';
   protected timeScale: TimeScale = 1;
   protected integratedWorldSeed = 909;
+  protected habitatOverlayVisible = false;
   protected readonly timeScales: readonly TimeScale[] = [0.5, 1, 2, 5, 10, 100, 1000];
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
@@ -346,6 +347,11 @@ export class LifeLabPageComponent {
   protected randomizeIntegratedWorld(): void {
     this.integratedWorldSeed = Math.floor(Math.random() * 999_999) + 1;
     this.integratedWorld.setSeed(this.integratedWorldSeed);
+  }
+
+  protected toggleHabitatOverlay(): void {
+    this.habitatOverlayVisible = !this.habitatOverlayVisible;
+    this.integratedWorld.setHabitatOverlayVisible(this.habitatOverlayVisible);
   }
 
   private update(deltaSeconds: number): void {

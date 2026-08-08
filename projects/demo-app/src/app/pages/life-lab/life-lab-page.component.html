@@ -32,6 +32,13 @@
         </button>
         <button
           type="button"
+          [class.active]="lifeMode === 'insects'"
+          (click)="setLifeMode('insects')"
+        >
+          Insects
+        </button>
+        <button
+          type="button"
           [class.active]="lifeMode === 'world'"
           (click)="setLifeMode('world')"
         >
@@ -80,11 +87,18 @@
           <button type="button" (click)="randomizeIntegratedWorld()">
             Randomize scenario
           </button>
+          <button
+            type="button"
+            [class.active]="habitatOverlayVisible"
+            (click)="toggleHabitatOverlay()"
+          >
+            Habitat squares
+          </button>
           <small>Seed {{ integratedWorldSeed }}</small>
         </div>
         <p class="blurb">
           Integrated terrain, geological relief, deterministic forest/meadow scatter,
-          and a migrating animal route. This is the larger-world composition POC.
+          and free-moving habitat-aware animal groups. This is the larger-world composition POC.
         </p>
       } @else if (lifeMode === "birds") {
         <nav class="stages" aria-label="Bird complexity stages">
@@ -148,6 +162,11 @@
             3. Full school
           </button>
         </nav>
+      } @else if (lifeMode === "insects") {
+        <nav class="stages" aria-label="Insect presentation stages">
+          <button type="button" class="active">Bee / fly silhouettes</button>
+        </nav>
+        <small>Separate procedural insect bodies and wings, with rapid wing beats.</small>
       } @else {
         <nav class="stages" aria-label="Herd complexity stages">
           <button

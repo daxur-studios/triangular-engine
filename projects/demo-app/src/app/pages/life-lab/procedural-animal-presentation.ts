@@ -7,10 +7,12 @@ import {
   Material,
   Matrix4,
   MeshStandardMaterial,
+  Mesh,
   Object3D,
   Quaternion,
   Shape,
   ShapeGeometry,
+  SphereGeometry,
   Vector2,
   Vector3,
 } from 'three';
@@ -24,6 +26,12 @@ interface Rig {
   setCount(count: number): void;
 }
 
+interface InsectModel {
+  readonly group: Group;
+  readonly leftWing: Mesh;
+  readonly rightWing: Mesh;
+}
+
 const LOCAL_FORWARD = new Vector3(0, 1, 0);
 const WORLD_UP = new Vector3(0, 1, 0);
 
@@ -33,10 +41,12 @@ const WORLD_UP = new Vector3(0, 1, 0);
  */
 export class ProceduralAnimalPresentation {
   readonly group = new Group();
+  private insectStartIndex = Number.POSITIVE_INFINITY;
 
   private readonly birdRigs: Record<'cutout' | 'relief', Rig>;
   private readonly fishRigs: Record<'cutout' | 'relief', Rig>;
   private readonly herdRigs: Record<'cutout' | 'relief', Rig>;
+  private readonly insectModels: InsectModel[] = [];
   private readonly geometries = new Set<BufferGeometry>();
   private readonly materials = new Set<Material>();
   private readonly base = new Object3D();
@@ -65,6 +75,11 @@ export class ProceduralAnimalPresentation {
       cutout: this.createHerdRig(false),
       relief: this.createHerdRig(true),
     };
+    for (let index = 0; index < Math.max(0, this.birdCount - 4); index++) {
+      const insect = this.createInsectModel(index % 3);
+      this.insectModels.push(insect);
+      this.group.add(insect.group);
+    }
 
     for (const rig of [
       ...Object.values(this.birdRigs),
@@ -77,13 +92,23 @@ export class ProceduralAnimalPresentation {
   }
 
   setVisibility(
-    mode: 'birds' | 'fish' | 'herd',
+    mode: 'birds' | 'fish' | 'herd' | 'insects',
     style: AnimalRenderStyle,
   ): void {
     for (const rig of Object.values(this.birdRigs)) rig.group.visible = false;
     for (const rig of Object.values(this.fishRigs)) rig.group.visible = false;
     for (const rig of Object.values(this.herdRigs)) rig.group.visible = false;
-    if (style === 'primitive') return;
+    for (const insect of this.insectModels) insect.group.visible = false;
+    if (style === 'primitive') {
+      if (mode === 'insects') {
+        for (const insect of this.insectModels) insect.group.visible = true;
+      }
+      return;
+    }
+    if (mode === 'insects') {
+      for (const insect of this.insectModels) insect.group.visible = true;
+      return;
+    }
     const rigs =
       mode === 'birds'
         ? this.birdRigs
@@ -91,6 +116,23 @@ export class ProceduralAnimalPresentation {
           ? this.fishRigs
           : this.herdRigs;
     rigs[style].group.visible = true;
+  }
+
+  /** Show the reusable silhouettes for a mixed-species scene. */
+  setAllVisibility(style: Exclude<AnimalRenderStyle, 'primitive'>): void {
+    for (const rig of Object.values(this.birdRigs)) rig.group.visible = false;
+    for (const rig of Object.values(this.fishRigs)) rig.group.visible = false;
+    for (const rig of Object.values(this.herdRigs)) rig.group.visible = false;
+    for (const insect of this.insectModels) insect.group.visible = false;
+    this.birdRigs[style].group.visible = true;
+    this.fishRigs[style].group.visible = true;
+    this.herdRigs[style].group.visible = true;
+    for (const insect of this.insectModels) insect.group.visible = true;
+  }
+
+  /** Treat agents from this index onward as tiny fast-winged insects. */
+  setInsectStartIndex(index: number | null): void {
+    this.insectStartIndex = index ?? Number.POSITIVE_INFINITY;
   }
 
   setBirdCount(count: number): void {
@@ -111,6 +153,14 @@ export class ProceduralAnimalPresentation {
       for (let index = 0; index < body.count; index++) {
         const agent = simulation.agents[index];
         this.setFlyingBase(agent.position, agent.velocity);
+        // The integrated world reserves the latter half of the air agents for
+        // insects: same cheap instanced wing rig, smaller silhouette and a
+        // much faster wing beat instead of a second expensive mesh family.
+        const isInsect = index >= this.insectStartIndex;
+        // Keep insects visibly smaller than birds, but large enough to read
+        // in the wide integrated-world camera.
+        this.base.scale.setScalar(isInsect ? 0.72 : 0.82);
+        this.base.updateMatrix();
         body.setMatrixAt(index, this.base.matrix);
 
         const speed = Math.hypot(
@@ -118,16 +168,47 @@ export class ProceduralAnimalPresentation {
           agent.velocity.y,
           agent.velocity.z,
         );
-        const phase = time * (5.5 + speed * 0.18) + index * 2.399;
+        const phase = time * (isInsect ? 18 + speed * 0.3 : 5.5 + speed * 0.18) + index * 2.399;
         const flap = Math.sin(phase) * 0.72;
         this.setPartMatrix(0, 0, 0, 0, flap, 0);
+        if (isInsect) {
+          // A broad, high-contrast wing span makes the tiny agents readable
+          // in the wide scene and separates them from the bird silhouette.
+          this.part.scale.set(1.65, 1.65, 1.65);
+          this.part.updateMatrix();
+        }
         this.composed.multiplyMatrices(this.base.matrix, this.part.matrix);
         leftWing.setMatrixAt(index, this.composed);
         this.setPartMatrix(0, 0, 0, 0, -flap, 0);
+        if (isInsect) {
+          this.part.scale.set(1.65, 1.65, 1.65);
+          this.part.updateMatrix();
+        }
         this.composed.multiplyMatrices(this.base.matrix, this.part.matrix);
         rightWing.setMatrixAt(index, this.composed);
       }
-      for (const mesh of rig.meshes) mesh.instanceMatrix.needsUpdate = true;
+      for (const mesh of rig.meshes) {
+        mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+    this.updateInsectModels(simulation, time);
+  }
+
+  private updateInsectModels(simulation: LifeSimulation, time: number): void {
+    const start = Math.min(this.insectStartIndex, simulation.agents.length);
+    for (let index = 0; index < this.insectModels.length; index++) {
+      const agent = simulation.agents[start + index];
+      if (!agent) continue;
+      const insect = this.insectModels[index];
+      insect.group.position.set(agent.position.x, agent.position.y, agent.position.z);
+      this.direction.set(agent.velocity.x, agent.velocity.y, agent.velocity.z);
+      if (this.direction.lengthSq() > 1e-6) {
+        insect.group.quaternion.setFromUnitVectors(LOCAL_FORWARD, this.direction.normalize());
+      }
+      const phase = time * 18 + index * 2.1;
+      const flap = Math.sin(phase) * 0.9;
+      insect.leftWing.rotation.z = flap;
+      insect.rightWing.rotation.z = -flap;
     }
   }
 
@@ -275,6 +356,37 @@ export class ProceduralAnimalPresentation {
       ],
       (meshes, count) => meshes.forEach((mesh) => (mesh.count = count)),
     );
+  }
+
+  private createInsectModel(variant: number): InsectModel {
+    const material = this.trackMaterial(new MeshStandardMaterial({
+      color: variant === 0 ? '#e0b83e' : variant === 1 ? '#383b42' : '#a9c6d9',
+      roughness: 0.78,
+      side: DoubleSide,
+    }));
+    const group = new Group();
+    group.scale.setScalar(variant === 2 ? 0.72 : 0.85);
+    const bodyGeometry = new SphereGeometry(0.38, 6, 4);
+    this.geometries.add(bodyGeometry);
+    const body = new Mesh(bodyGeometry, material);
+    body.scale.set(variant === 0 ? 0.72 : 0.58, variant === 0 ? 0.72 : 0.5, variant === 2 ? 1.25 : 1.8);
+    const wingGeometry = (side: 1 | -1) => this.makeShape(
+      [[0, -0.8], [side * 0.7, -0.2], [side * 1.9, 0.5], [side * 0.95, 0.9], [side * 0.25, 0.45]],
+      'top',
+      false,
+    );
+    const leftWing = new Mesh(wingGeometry(1), material);
+    const rightWing = new Mesh(wingGeometry(-1), material);
+    leftWing.scale.setScalar(variant === 2 ? 0.8 : 1.05);
+    rightWing.scale.setScalar(variant === 2 ? 0.8 : 1.05);
+    group.add(body, leftWing, rightWing);
+    if (variant === 0) {
+      const abdomen = new Mesh(bodyGeometry, material);
+      abdomen.scale.set(0.55, 0.55, 1.25);
+      abdomen.position.z = -0.75;
+      group.add(abdomen);
+    }
+    return { group, leftWing, rightWing };
   }
 
   private createHerdRig(relief: boolean): Rig {
