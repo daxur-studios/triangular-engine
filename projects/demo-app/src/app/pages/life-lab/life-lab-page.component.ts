@@ -35,6 +35,7 @@ import {
   AnimalRenderStyle,
   ProceduralAnimalPresentation,
 } from './procedural-animal-presentation';
+import { IntegratedWorldPresentation } from './integrated-world-presentation';
 
 const WORLD_SIZE = 80;
 const BIRD_COUNT = 60;
@@ -43,7 +44,7 @@ const HERD_COUNT = 18;
 
 type BirdStage = 0 | 1 | 2 | 3 | 4;
 type TimeScale = 0.5 | 1 | 2 | 5 | 10;
-type LifeMode = 'birds' | 'fish' | 'herd';
+type LifeMode = 'birds' | 'fish' | 'herd' | 'world';
 
 @Component({
   selector: 'app-life-lab-page',
@@ -64,6 +65,7 @@ export class LifeLabPageComponent {
   protected readonly timeScales: readonly TimeScale[] = [0.5, 1, 2, 5, 10];
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
+  private readonly baseWorld = new Group();
   private readonly simulation = new LifeSimulation({ neighborRadius: 10 });
   private readonly birdMesh: InstancedMesh;
   private readonly fishMesh: InstancedMesh;
@@ -75,6 +77,8 @@ export class LifeLabPageComponent {
     FISH_COUNT,
     HERD_COUNT,
   );
+  private readonly integratedWorld = new IntegratedWorldPresentation();
+  private integratedWorldTimeSeconds = 0;
   private readonly herdPhaseOffsets = Array.from(
     { length: HERD_COUNT },
     (_, index) => (index * 3.7) % 18,
@@ -115,7 +119,9 @@ export class LifeLabPageComponent {
       this.fishMesh,
       this.herdMesh,
       this.animalPresentation.group,
+      this.integratedWorld.group,
     );
+    this.group.add(this.baseWorld);
     this.buildWorld();
     this.buildLife();
     this.buildFish();
@@ -137,7 +143,7 @@ export class LifeLabPageComponent {
       new MeshStandardMaterial({ color: '#45634c', roughness: 1 }),
     );
     ground.rotation.x = -Math.PI / 2;
-    this.group.add(ground);
+    this.baseWorld.add(ground);
 
     const treeMaterial = new MeshStandardMaterial({
       color: '#31513b',
@@ -162,7 +168,7 @@ export class LifeLabPageComponent {
         treeMaterial,
       );
       canopy.position.set(x, 5, z);
-      this.group.add(trunk, canopy);
+      this.baseWorld.add(trunk, canopy);
       this.treeMeshes.push(canopy);
       this.simulation.obstacles.push({
         id: `tree-${index}`,
@@ -173,7 +179,7 @@ export class LifeLabPageComponent {
       });
     }
     this.player.position.set(0, 1.4, 0);
-    this.group.add(this.player);
+    this.baseWorld.add(this.player);
   }
 
   private buildLife(): void {
@@ -285,11 +291,14 @@ export class LifeLabPageComponent {
 
   protected setLifeMode(mode: LifeMode): void {
     this.lifeMode = mode;
+    this.baseWorld.visible = mode !== 'world';
     this.birdMesh.visible =
       mode === 'birds' && this.renderStyle === 'primitive';
     this.fishMesh.visible = mode === 'fish' && this.renderStyle === 'primitive';
     this.herdMesh.visible = mode === 'herd' && this.renderStyle === 'primitive';
-    this.animalPresentation.setVisibility(mode, this.renderStyle);
+    this.integratedWorld.group.visible = mode === 'world';
+    this.animalPresentation.setVisibility(mode === 'world' ? 'birds' : mode, this.renderStyle);
+    this.animalPresentation.group.visible = mode !== 'world';
   }
   protected setFishLevel(level: number): void {
     this.fishLevel = level;
@@ -351,6 +360,9 @@ export class LifeLabPageComponent {
     this.animalPresentation.updateBirds(this.simulation, time);
     this.animalPresentation.updateFish(this.fishSimulation, time);
     this.animalPresentation.updateHerd(this.herdSimulation, time);
+    // Integrated-world motion uses the same simulation clock as the agents,
+    // so 0.5×, 10×, and pause-like future scales remain coherent.
+    this.integratedWorld.update(this.integratedWorldTime(deltaSeconds));
 
     for (let index = 0; index < this.simulation.agents.length; index++) {
       const agent = this.simulation.agents[index];
@@ -403,6 +415,11 @@ export class LifeLabPageComponent {
     mesh.instanceMatrix.needsUpdate = true;
   }
 
+  private integratedWorldTime(deltaSeconds: number): number {
+    this.integratedWorldTimeSeconds += deltaSeconds * this.timeScale;
+    return this.integratedWorldTimeSeconds;
+  }
+
   private dispose(): void {
     this.group.removeFromParent();
     this.birdMesh.geometry.dispose();
@@ -412,6 +429,7 @@ export class LifeLabPageComponent {
     this.herdMesh.geometry.dispose();
     (this.herdMesh.material as MeshStandardMaterial).dispose();
     this.animalPresentation.dispose();
+    this.integratedWorld.dispose();
     this.player.geometry.dispose();
     (this.player.material as MeshStandardMaterial).dispose();
     for (const mesh of this.treeMeshes) {

@@ -30,6 +30,13 @@
         >
           Herd
         </button>
+        <button
+          type="button"
+          [class.active]="lifeMode === 'world'"
+          (click)="setLifeMode('world')"
+        >
+          World integration
+        </button>
       </nav>
       <div class="study" aria-label="Animal rendering study">
         <span>Visual treatment</span>
@@ -68,7 +75,12 @@
           }
         </small>
       </div>
-      @if (lifeMode === "birds") {
+      @if (lifeMode === "world") {
+        <p class="blurb">
+          Integrated terrain, geological relief, deterministic forest/meadow scatter,
+          and a migrating animal route. This is the larger-world composition POC.
+        </p>
+      } @else if (lifeMode === "birds") {
         <nav class="stages" aria-label="Bird complexity stages">
           <button
             type="button"
@@ -180,7 +192,7 @@
   </ng-template>
 
   <orbitControls
-    [cameraPosition]="lifeMode === 'herd' ? [0, 3.8, 18] : [0, 42, 54]"
+    [cameraPosition]="lifeMode === 'herd' ? [0, 3.8, 18] : lifeMode === 'world' ? [0, 110, 150] : [0, 42, 54]"
     [target]="lifeMode === 'herd' ? [0, 1.2, 0] : [0, 8, 0]"
   />
   <ambientLight [intensity]="1.1" />
