@@ -2,6 +2,7 @@ import {
   BufferGeometry,
   BufferAttribute,
   ConeGeometry,
+  DodecahedronGeometry,
   Float32BufferAttribute,
   Group,
   Line,
@@ -159,6 +160,44 @@ export class IntegratedWorldPresentation {
       material: this.track(new MeshStandardMaterial({ color: '#8ca85a', roughness: 1 })),
       rules,
       scale: { min: 0.7, max: 1.3 },
+      anchorWorldM: [0, 0, 0],
+    }));
+    this.buildRockBlockers(rules);
+  }
+
+  private buildRockBlockers(rules: ScatterPlacementRules): void {
+    const rocks = [];
+    for (let z = -PATCH_RADIUS; z <= PATCH_RADIUS; z++) {
+      for (let x = -PATCH_RADIUS; x <= PATCH_RADIUS; x++) {
+        const address = { level: 0, x, z };
+        const base = {
+          field: this.field,
+          domain: this.domain,
+          cellAddress: address,
+          cellKey: `rocks:${this.seed}:${x}:${z}`,
+          identity: { worldSeed: this.seed, layerId: 'integrated-rocks', speciesId: 'large-rock', generatorVersion: 1 },
+          rules: { ...rules, embedDepthM: 0.35 },
+          candidatePoolSize: 8,
+        } as const;
+        rocks.push(...generateTerrainScatterInstances({
+          ...base,
+          baseDensity01: 0.22,
+          suitability: (sample: IScatterSurfaceSample) => {
+            // Keep the migration corridor open; rocks still form natural
+            // blockers elsewhere in the terrain.
+            const corridorZ = -18 + Math.sin((sample.worldPositionM[0] + 82) / 164 * Math.PI * 2) * 26;
+            const clearOfRoute = Math.abs(sample.worldPositionM[2] - corridorZ) > 9;
+            return sample.elevationM > -2 && clearOfRoute ? 1 : 0;
+          },
+        }));
+      }
+    }
+    this.group.add(buildScatterInstancedMesh({
+      instances: rocks,
+      geometry: this.trackGeometry(new DodecahedronGeometry(3.2, 0)),
+      material: this.track(new MeshStandardMaterial({ color: '#716b63', roughness: 1, flatShading: true })),
+      rules: { ...rules, embedDepthM: 0.35 },
+      scale: { min: 0.8, max: 1.8 },
       anchorWorldM: [0, 0, 0],
     }));
   }
