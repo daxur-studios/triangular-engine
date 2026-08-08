@@ -39,6 +39,7 @@ export class IntegratedWorldPresentation {
   private readonly geometries: BufferGeometry[] = [];
   private readonly migration = new Group();
   private readonly travelers: Mesh[] = [];
+  private readonly routePoints: Vector3[] = [];
   private seed: number;
 
   constructor(seed = 909) {
@@ -46,8 +47,8 @@ export class IntegratedWorldPresentation {
     this.field = new IntegratedWorldField(seed);
     this.group.name = 'life-lab-integrated-world';
     this.buildTerrain();
-    this.buildScatter();
     this.buildMigrationRoute();
+    this.buildScatter();
   }
 
   /** Rebuild the small world deterministically from a new scenario seed. */
@@ -56,21 +57,24 @@ export class IntegratedWorldPresentation {
     this.seed = seed;
     this.field = new IntegratedWorldField(seed);
     this.buildTerrain();
-    this.buildScatter();
     this.buildMigrationRoute();
+    this.buildScatter();
   }
 
   update(timeSeconds: number): void {
+    if (this.routePoints.length < 2) return;
     for (let index = 0; index < this.travelers.length; index++) {
       const phase = index * 0.8;
-      const t = (timeSeconds * 0.018 + phase * 0.04) % 1;
-      const x = -82 + t * 164 + Math.sin(timeSeconds * 0.22 + phase) * 8;
-      const z = -18 + Math.sin(t * Math.PI * 2) * 26 + Math.cos(timeSeconds * 0.11 + phase) * 4;
-      // Keep the route and the terrain in the same coordinate space. The small
-      // lift prevents the marker from intersecting the surface as it moves.
-      const y = this.field.sample([x, 0, z]).elevationM + 2 + Math.sin(timeSeconds * 4 + phase) * 0.5;
+      const t = (timeSeconds * 0.012 + phase * 0.04) % 1;
+      const scaled = t * this.routePoints.length;
+      const from = this.routePoints[Math.floor(scaled) % this.routePoints.length];
+      const to = this.routePoints[(Math.floor(scaled) + 1) % this.routePoints.length];
+      const blend = scaled - Math.floor(scaled);
+      const x = from.x + (to.x - from.x) * blend;
+      const z = from.z + (to.z - from.z) * blend;
+      const y = from.y + (to.y - from.y) * blend + 2 + Math.sin(timeSeconds * 4 + phase) * 0.35;
       this.travelers[index].position.set(x, y, z);
-      this.travelers[index].rotation.y = Math.atan2(Math.cos(t * Math.PI * 2), 1);
+      this.travelers[index].rotation.y = Math.atan2(to.x - from.x, to.z - from.z);
     }
   }
 
@@ -185,8 +189,7 @@ export class IntegratedWorldPresentation {
           suitability: (sample: IScatterSurfaceSample) => {
             // Keep the migration corridor open; rocks still form natural
             // blockers elsewhere in the terrain.
-            const corridorZ = -18 + Math.sin((sample.worldPositionM[0] + 82) / 164 * Math.PI * 2) * 26;
-            const clearOfRoute = Math.abs(sample.worldPositionM[2] - corridorZ) > 9;
+            const clearOfRoute = this.distanceToRoute(sample.worldPositionM[0], sample.worldPositionM[2]) > 9;
             return sample.elevationM > -2 && clearOfRoute ? 1 : 0;
           },
         }));
@@ -203,13 +206,20 @@ export class IntegratedWorldPresentation {
   }
 
   private buildMigrationRoute(): void {
-    const points: Vector3[] = [];
-    for (let index = 0; index <= 32; index++) {
-      const t = index / 32;
-      const x = -82 + t * 164;
-      const z = -18 + Math.sin(t * Math.PI * 2) * 26;
-      points.push(new Vector3(x, this.field.sample([x, 0, z]).elevationM + 0.4, z));
+    this.routePoints.length = 0;
+    const routePhase = this.seed * 0.019;
+    // A closed route is a useful baseline for migration: it never needs to
+    // despawn agents at an endpoint. The seed changes its shape while the
+    // terrain sample keeps every point above the generated land surface.
+    for (let index = 0; index < 40; index++) {
+      const t = index / 40;
+      const angle = t * Math.PI * 2;
+      const baseX = Math.cos(angle + routePhase * 0.15) * (58 + Math.sin(routePhase) * 8);
+      const baseZ = Math.sin(angle) * (28 + Math.cos(routePhase * 0.7) * 7) + Math.sin(angle * 2 + routePhase) * 7;
+      const elevation = this.field.sample([baseX, 0, baseZ]).elevationM;
+      this.routePoints.push(new Vector3(baseX, elevation + 0.4, baseZ));
     }
+    const points = [...this.routePoints, this.routePoints[0]];
     const routeGeometry = new BufferGeometry().setFromPoints(points);
     this.geometries.push(routeGeometry);
     this.migration.add(new Line(routeGeometry, new LineBasicMaterial({ color: '#d5b85a', transparent: true, opacity: 0.65 })));
@@ -227,6 +237,14 @@ export class IntegratedWorldPresentation {
     const ridge = Math.sin(cellX * 0.9 + cellZ * 0.35 + this.seed * 0.013) * 0.5 + 0.5;
     if (biome === 'forest') return Math.max(0, Math.min(1, ridge * 1.4 - Math.abs(cellZ) * 0.12));
     return Math.max(0, Math.min(1, 1 - ridge * 0.75 + Math.abs(cellZ) * 0.08));
+  }
+
+  private distanceToRoute(x: number, z: number): number {
+    let nearest = Number.POSITIVE_INFINITY;
+    for (const point of this.routePoints) {
+      nearest = Math.min(nearest, Math.hypot(x - point.x, z - point.z));
+    }
+    return nearest;
   }
 
   private attribute(values: Float32Array, itemSize: number): BufferAttribute {

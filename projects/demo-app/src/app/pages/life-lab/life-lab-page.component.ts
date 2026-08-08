@@ -43,7 +43,7 @@ const FISH_COUNT = 36;
 const HERD_COUNT = 18;
 
 type BirdStage = 0 | 1 | 2 | 3 | 4;
-type TimeScale = 0.5 | 1 | 2 | 5 | 10;
+type TimeScale = 0.5 | 1 | 2 | 5 | 10 | 100 | 1000;
 type LifeMode = 'birds' | 'fish' | 'herd' | 'world';
 
 @Component({
@@ -63,7 +63,7 @@ export class LifeLabPageComponent {
   protected renderStyle: AnimalRenderStyle = 'cutout';
   protected timeScale: TimeScale = 1;
   protected integratedWorldSeed = 909;
-  protected readonly timeScales: readonly TimeScale[] = [0.5, 1, 2, 5, 10];
+  protected readonly timeScales: readonly TimeScale[] = [0.5, 1, 2, 5, 10, 100, 1000];
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
   private readonly baseWorld = new Group();
@@ -367,7 +367,7 @@ export class LifeLabPageComponent {
     this.animalPresentation.updateFish(this.fishSimulation, time);
     this.animalPresentation.updateHerd(this.herdSimulation, time);
     // Integrated-world motion uses the same simulation clock as the agents,
-    // so 0.5×, 10×, and pause-like future scales remain coherent.
+    // so low and high warp scales remain coherent.
     this.integratedWorld.update(this.integratedWorldTime(deltaSeconds));
 
     for (let index = 0; index < this.simulation.agents.length; index++) {
