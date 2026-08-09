@@ -1,0 +1,31 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel">
+      <a routerLink="/">← Examples</a>
+      <h1>Destruction POC</h1>
+      <p>{{ status() }}</p>
+      <p>Damage is a controlled rigid-body state change; explosion swaps one crate for separate debris bodies.</p>
+      <div class="actions"><button (click)="reset()">Reset drop</button><button (click)="explode()" [disabled]="exploded()">Explode crate</button></div>
+    </section>
+  </ng-template>
+
+  <orbitControls [cameraPosition]="[11, 8, 14]" [target]="[0, 2, 0]" />
+  <ambientLight [intensity]="1.3" /><directionalLight [position]="[6, 10, 8]" [intensity]="2.2" />
+  <joltPhysics [gravity]="[0, -9.81, 0]">
+    <joltRigidBody [motionType]="0" [position]="[0, -1, 0]"><joltBoxShape [params]="[20, 1, 20]" /><mesh><boxGeometry [params]="[20, 1, 20]" /><meshStandardMaterial [params]="{ color: '#263238', roughness: 0.95 }" /></mesh></joltRigidBody>
+    @if (!exploded()) {
+      @for (attempt of [run()]; track attempt) {
+        <joltRigidBody #crate [motionType]="2" [position]="[0, 8, 0]" [linearDamping]="0.04" (onContactAdded)="onCrateContact($event)">
+          <joltBoxShape [params]="crateSize()" />
+          <mesh><boxGeometry [params]="crateSize()" /><meshStandardMaterial [params]="{ color: squash() ? '#9f4d36' : '#d46d43', roughness: 0.72, metalness: 0.15 }" /></mesh>
+        </joltRigidBody>
+      }
+    } @else {
+      @for (fragment of fragments(); track fragment.id) {
+        <joltRigidBody [motionType]="2" [position]="fragment.position" [rotation]="fragment.rotation" [velocity]="fragment.velocity" [linearDamping]="0.05">
+          <joltBoxShape [params]="fragment.size" /><mesh><boxGeometry [params]="fragment.size" /><meshStandardMaterial [params]="{ color: fragment.color, roughness: 0.75 }" /></mesh>
+        </joltRigidBody>
+      }
+    }
+  </joltPhysics>
+</scene>

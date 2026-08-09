@@ -254,6 +254,19 @@ export const routes: Routes = [
     ),
   },
   {
+    path: 'destruction-poc',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
+    loadComponent: () =>
+      import('./pages/destruction-poc/destruction-poc-page.component').then(
+        ({ DestructionPocPageComponent }) => DestructionPocPageComponent,
+      ),
+  },
+  {
     path: 'soft-body-poc',
     canActivate: [
       () =>
