@@ -5,7 +5,11 @@ export interface LifeRouteSegment {
   readonly to: LifeVector3;
   /** Travel time in universal seconds. Must be greater than zero. */
   readonly durationSeconds: number;
+  /** Optional deterministic activity while traversing this segment. */
+  readonly activity?: LifeRouteActivity;
 }
+
+export type LifeRouteActivity = 'travel' | 'graze' | 'drink' | 'rest' | 'flee';
 
 export interface LifeDeterministicRoute {
   readonly segments: readonly LifeRouteSegment[];
@@ -19,6 +23,7 @@ export interface LifeRouteSample {
   readonly segmentIndex: number;
   readonly progress01: number;
   readonly complete: boolean;
+  readonly activity: LifeRouteActivity;
 }
 
 /**
@@ -38,6 +43,7 @@ export function sampleLifeRouteAtTime(
       segmentIndex: -1,
       progress01: 0,
       complete: true,
+      activity: 'rest',
     };
   }
 
@@ -69,6 +75,7 @@ export function sampleLifeRouteAtTime(
         segmentIndex: index,
         progress01,
         complete: !isClosed && isLast && progress01 >= 1,
+        activity: segment.activity ?? 'travel',
       };
     }
     elapsed += duration;

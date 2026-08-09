@@ -22,6 +22,19 @@ describe('sampleLifeRouteAtTime', () => {
     expect(sample.complete).toBe(true);
   });
 
+  it('reconstructs an activity label from the same universal-time segment', () => {
+    const scheduled: LifeDeterministicRoute = {
+      segments: [{
+        from: { x: 0, y: 0, z: 0 },
+        to: { x: 0, y: 0, z: 0 },
+        durationSeconds: 8,
+        activity: 'drink',
+      }],
+    };
+    expect(sampleLifeRouteAtTime(scheduled, 4).activity).toBe('drink');
+    expect(sampleLifeRouteAtTime(scheduled, 4)).toEqual(sampleLifeRouteAtTime(scheduled, 4));
+  });
+
   it('wraps closed routes without a discontinuous state reset', () => {
     const closed = { ...route, closed: true };
     expect(sampleLifeRouteAtTime(closed, -1)).toEqual(sampleLifeRouteAtTime(closed, 19));

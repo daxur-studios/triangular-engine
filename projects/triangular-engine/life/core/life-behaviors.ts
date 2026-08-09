@@ -7,6 +7,8 @@ import {
   type LifeVector3,
 } from './life-vector';
 import type { LifeAgentState, LifeInfluence, LifeObstacle } from './life-agent';
+import { canTraverseLifeSegment, type LifeHabitatQuery } from './life-habitat';
+import { sampleLifeRouteAtTime, type LifeDeterministicRoute } from './life-deterministic-route';
 
 export interface LifeBehaviorContext {
   readonly agent: LifeAgentState;
@@ -99,6 +101,62 @@ export function avoidObstacles(strength = 14): LifeBehavior {
 export function keepAbove(minY: number, strength = 10): LifeBehavior {
   return ({ agent }, out) => {
     if (agent.position.y < minY) out.y += (minY - agent.position.y) * strength;
+  };
+}
+
+export interface LifeHabitatFollowOptions {
+  readonly clearance?: number;
+  readonly strength?: number;
+  readonly lookAheadSeconds?: number;
+  readonly segmentSamples?: number;
+}
+
+/** Keeps a local agent on its species domain while following sampled terrain. */
+export function followLifeHabitat(
+  query: LifeHabitatQuery,
+  allowedKinds: readonly string[],
+  options: LifeHabitatFollowOptions = {},
+): LifeBehavior {
+  const clearance = options.clearance ?? 0.15;
+  const strength = options.strength ?? 12;
+  const lookAheadSeconds = options.lookAheadSeconds ?? 0.35;
+  const segmentSamples = options.segmentSamples ?? 4;
+  return ({ agent }, out) => {
+    const sample = query.sampleHabitat(agent.position);
+    if (allowedKinds.includes(sample.kind) && sample.suitability01 > 0) {
+      out.y += (sample.surfaceY + clearance - agent.position.y) * strength;
+    }
+    const ahead = {
+      x: agent.position.x + agent.velocity.x * lookAheadSeconds,
+      y: agent.position.y + agent.velocity.y * lookAheadSeconds,
+      z: agent.position.z + agent.velocity.z * lookAheadSeconds,
+    };
+    if (!canTraverseLifeSegment(query, agent.position, ahead, allowedKinds, segmentSamples)) {
+      out.x -= agent.velocity.x * strength;
+      out.y -= agent.velocity.y * strength;
+      out.z -= agent.velocity.z * strength;
+    }
+  };
+}
+
+/** Steers a materialized agent toward the position of a universal-time route. */
+export function followLifeRoute(
+  route: LifeDeterministicRoute,
+  strength = 8,
+  arrivalRadius = 3,
+): LifeBehavior {
+  return ({ agent, timeSeconds }, out) => {
+    const target = sampleLifeRouteAtTime(route, timeSeconds).position;
+    const dx = target.x - agent.position.x;
+    const dy = target.y - agent.position.y;
+    const dz = target.z - agent.position.z;
+    const distance = Math.hypot(dx, dy, dz);
+    if (distance <= 1e-6) return;
+    const speed = agent.maxSpeed * Math.min(1, distance / Math.max(1e-3, arrivalRadius));
+    const desired = { x: (dx / distance) * speed, y: (dy / distance) * speed, z: (dz / distance) * speed };
+    out.x += (desired.x - agent.velocity.x) * strength;
+    out.y += (desired.y - agent.velocity.y) * strength;
+    out.z += (desired.z - agent.velocity.z) * strength;
   };
 }
 

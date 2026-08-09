@@ -9,6 +9,22 @@ import {
   RingGeometry,
   type Material,
 } from 'three';
+import {
+  planLifeRoute,
+  chooseLifeActivityTarget,
+  sampleLifeGroupAtTime,
+  sampleLifeRouteAtTime,
+  classifyLifeCellResidency,
+  enumerateLifeCellsInRadius,
+  lifeCellCenter,
+  FOUR_SEASON_CYCLE,
+  sampleLifeSeasonAtTime,
+  sampleLifeSeasonResponse,
+  sampleLifeCohortAtTime,
+  type LifeDeterministicRoute,
+  type LifeHabitatQuery,
+  type LifeRouteSegment,
+} from 'triangular-engine/life';
 
 export type InspectorActivity =
   | 'grazing'
@@ -24,6 +40,15 @@ export interface LifeWorldInspectorState {
   readonly herdZ: number;
   readonly targetX: number;
   readonly targetZ: number;
+  readonly targetId: string;
+  readonly activeCells: number;
+  readonly residentCells: number;
+  readonly aggregateCells: number;
+  readonly seasonId: string;
+  readonly migrationPressure01: number;
+  readonly juvenileCount: number;
+  readonly adultCount: number;
+  readonly deadCount: number;
 }
 
 /**
@@ -40,13 +65,41 @@ export class LifeWorldInspectorPresentation {
   private readonly dummy = new Object3D();
   private readonly herdMarker: Mesh;
   private readonly targetMarker: Mesh;
+  private readonly cameraResidencyMarker: Mesh;
+  private readonly aggregateResidencyMarker: Mesh;
+  private readonly trackedResidencyMarker: Mesh;
   private readonly herdAnimals: InstancedMesh;
+  private meadowToWater: LifeDeterministicRoute;
+  private meadowToNorthWater: LifeDeterministicRoute;
+  private winterMeadowToWater: LifeDeterministicRoute;
+  private winterMeadowToNorthWater: LifeDeterministicRoute;
+  private waterToShelter: LifeDeterministicRoute;
+  private northWaterToShelter: LifeDeterministicRoute;
+  private shelterToMeadow: LifeDeterministicRoute;
+  private shelterToWinterMeadow: LifeDeterministicRoute;
+  private inspectorSeed = 909;
+  private readonly habitatQuery: LifeHabitatQuery = {
+    sampleHabitat: (position) => ({
+      kind: this.habitatAt(position.x, position.z, this.inspectorSeed),
+      surfaceY: this.surfaceAt(position.x, position.z, this.inspectorSeed),
+      suitability01: 1,
+    }),
+  };
   private readonly state: LifeWorldInspectorState = {
     activity: 'grazing',
     herdX: -58,
     herdZ: -28,
     targetX: -58,
     targetZ: -28,
+    targetId: 'summer-meadow',
+    activeCells: 0,
+    residentCells: 0,
+    aggregateCells: 0,
+    seasonId: 'spring',
+    migrationPressure01: 0,
+    juvenileCount: 0,
+    adultCount: 0,
+    deadCount: 0,
   };
 
   constructor(seed = 909) {
@@ -63,6 +116,9 @@ export class LifeWorldInspectorPresentation {
     );
     this.targetMarker.rotation.x = -Math.PI / 2;
     this.targetMarker.position.y = 0.55;
+    this.cameraResidencyMarker = this.residencyRing(20, '#73e6ef', 0.95);
+    this.aggregateResidencyMarker = this.residencyRing(180, '#5f8bd8', 0.35);
+    this.trackedResidencyMarker = this.residencyRing(16, '#f27b66', 0.9);
     this.herdAnimals = new InstancedMesh(
       new CircleGeometry(2.7, 3),
       this.trackMaterial(new MeshBasicMaterial({ color: '#2d1610', transparent: true, opacity: 1 })),
@@ -70,7 +126,22 @@ export class LifeWorldInspectorPresentation {
     );
     this.herdAnimals.name = 'life-world-inspector-herd-agents';
     this.herdAnimals.position.y = 0.6;
-    this.group.add(this.herdMarker, this.targetMarker, this.herdAnimals);
+    this.group.add(
+      this.aggregateResidencyMarker,
+      this.cameraResidencyMarker,
+      this.trackedResidencyMarker,
+      this.herdMarker,
+      this.targetMarker,
+      this.herdAnimals,
+    );
+    this.meadowToWater = this.route({ x: -58, y: 0, z: -28 }, { x: 13, y: 0, z: 22 }, 40);
+    this.meadowToNorthWater = this.route({ x: -58, y: 0, z: -28 }, { x: 31, y: 0, z: 20 }, 40);
+    this.winterMeadowToWater = this.route({ x: -22, y: 0, z: -20 }, { x: 13, y: 0, z: 22 }, 40);
+    this.winterMeadowToNorthWater = this.route({ x: -22, y: 0, z: -20 }, { x: 31, y: 0, z: 20 }, 40);
+    this.waterToShelter = this.route({ x: 13, y: 0, z: 22 }, { x: -82, y: 0, z: 74 }, 60);
+    this.northWaterToShelter = this.route({ x: 31, y: 0, z: 20 }, { x: -82, y: 0, z: 74 }, 60);
+    this.shelterToMeadow = this.route({ x: -82, y: 0, z: 74 }, { x: -58, y: 0, z: -28 }, 50);
+    this.shelterToWinterMeadow = this.route({ x: -82, y: 0, z: 74 }, { x: -22, y: 0, z: -20 }, 50);
     this.setSeed(seed);
   }
 
@@ -79,6 +150,7 @@ export class LifeWorldInspectorPresentation {
   }
 
   setSeed(seed: number): void {
+    this.inspectorSeed = seed;
     this.clearTiles();
     const cellSize = 10;
     const halfCells = 18;
@@ -107,6 +179,14 @@ export class LifeWorldInspectorPresentation {
       meshes[habitat].count = counts[habitat];
       meshes[habitat].instanceMatrix.needsUpdate = true;
     }
+    this.meadowToWater = this.route({ x: -58, y: 0, z: -28 }, { x: 13, y: 0, z: 22 }, 40);
+    this.meadowToNorthWater = this.route({ x: -58, y: 0, z: -28 }, { x: 31, y: 0, z: 20 }, 40);
+    this.winterMeadowToWater = this.route({ x: -22, y: 0, z: -20 }, { x: 13, y: 0, z: 22 }, 40);
+    this.winterMeadowToNorthWater = this.route({ x: -22, y: 0, z: -20 }, { x: 31, y: 0, z: 20 }, 40);
+    this.waterToShelter = this.route({ x: 13, y: 0, z: 22 }, { x: -82, y: 0, z: 74 }, 60);
+    this.northWaterToShelter = this.route({ x: 31, y: 0, z: 20 }, { x: -82, y: 0, z: 74 }, 60);
+    this.shelterToMeadow = this.route({ x: -82, y: 0, z: 74 }, { x: -58, y: 0, z: -28 }, 50);
+    this.shelterToWinterMeadow = this.route({ x: -82, y: 0, z: 74 }, { x: -22, y: 0, z: -20 }, 50);
   }
 
   update(universalTimeSeconds: number): LifeWorldInspectorState {
@@ -114,29 +194,86 @@ export class LifeWorldInspectorPresentation {
     // than a lead animal; individual markers move independently around it.
     const period = 320;
     const localTime = ((universalTimeSeconds % period) + period) % period;
-    const meadow = { x: -58, z: -28 };
-    // Water is the shore-side drinking point, not the lake centre. A later
-    // local navigator will choose this edge from the habitat query.
-    const water = { x: 13, z: 22 };
+    const seasonSample = sampleLifeSeasonAtTime(
+      { ...FOUR_SEASON_CYCLE, yearLengthSeconds: period },
+      universalTimeSeconds,
+    );
+    const seasonResponse = sampleLifeSeasonResponse(seasonSample, ['spring', 'summer']);
+    const cohort = sampleLifeCohortAtTime({
+      seed: this.inspectorSeed,
+      count: 20,
+      birthTimeSeconds: -80,
+      birthSpreadSeconds: 120,
+      juvenileDurationSeconds: 70,
+      lifespanSeconds: 360,
+    }, universalTimeSeconds);
+    const winter = seasonSample.season.id === 'winter';
+    const meadowTargets = [
+      {
+        id: 'summer-meadow',
+        activity: 'graze' as const,
+        position: { x: -58, y: 0, z: -28 },
+        suitability01: winter ? 0.2 : 1,
+      },
+      {
+        id: 'winter-meadow',
+        activity: 'graze' as const,
+        position: { x: -22, y: 0, z: -20 },
+        suitability01: winter ? 1 : 0.2,
+      },
+    ];
+    const selectedMeadow = chooseLifeActivityTarget(meadowTargets, {
+      seed: this.inspectorSeed,
+      universalTimeSeconds,
+      minimumSuitability01: 0.5,
+      decisionPeriodSeconds: period,
+    }) ?? meadowTargets[0];
+    const meadow = { x: selectedMeadow.position.x, z: selectedMeadow.position.z };
+    // Drinking sites are shore targets, not lake-centre points. Suitability
+    // chooses between them deterministically for the current season/UT.
+    const waterTargets = [
+      {
+        id: 'east-shore',
+        activity: 'drink' as const,
+        position: { x: 13, y: 0, z: 22 },
+        suitability01: winter ? 0.9 : 1,
+      },
+      {
+        id: 'north-shore',
+        activity: 'drink' as const,
+        position: { x: 31, y: 0, z: 20 },
+        suitability01: winter ? 1 : 0.9,
+      },
+    ];
+    const selectedWater = chooseLifeActivityTarget(waterTargets, {
+      seed: this.inspectorSeed + 17,
+      universalTimeSeconds,
+      minimumSuitability01: 0.5,
+      decisionPeriodSeconds: period,
+    }) ?? waterTargets[0];
+    const water = { x: selectedWater.position.x, z: selectedWater.position.z };
     const shelter = { x: -82, z: 74 };
-    const travel = (from: typeof meadow, to: typeof meadow, blend: number) => {
-      // Zero velocity at each activity boundary prevents sharp direction snaps.
-      const eased = blend * blend * (3 - 2 * blend);
-      return {
-        x: from.x + (to.x - from.x) * eased,
-        z: from.z + (to.z - from.z) * eased,
-      };
-    };
-
+    const meadowToWater = winter ? this.winterMeadowToWater : this.meadowToWater;
+    const meadowToSelectedWater = selectedWater.id === 'north-shore'
+      ? (winter ? this.winterMeadowToNorthWater : this.meadowToNorthWater)
+      : meadowToWater;
+    const selectedWaterToShelter = selectedWater.id === 'north-shore'
+      ? this.northWaterToShelter
+      : this.waterToShelter;
+    const shelterToMeadow = winter ? this.shelterToWinterMeadow : this.shelterToMeadow;
     let activity: InspectorActivity;
     let herd = meadow;
     let target = meadow;
+    let activeRoute: LifeDeterministicRoute | undefined;
+    let routeTime = 0;
     if (localTime < 105) {
       activity = 'grazing';
       target = meadow;
     } else if (localTime < 145) {
       activity = 'travelling-to-water';
-      herd = travel(meadow, water, (localTime - 105) / 40);
+      herd = this.routePosition(meadowToSelectedWater, localTime - 105);
+      activeRoute = meadowToSelectedWater;
+      routeTime = localTime - 105;
       target = water;
     } else if (localTime < 175) {
       activity = 'drinking';
@@ -144,7 +281,9 @@ export class LifeWorldInspectorPresentation {
       target = water;
     } else if (localTime < 235) {
       activity = 'travelling-to-rest';
-      herd = travel(water, shelter, (localTime - 175) / 60);
+      herd = this.routePosition(selectedWaterToShelter, localTime - 175);
+      activeRoute = selectedWaterToShelter;
+      routeTime = localTime - 175;
       target = shelter;
     } else if (localTime < 270) {
       activity = 'resting';
@@ -152,13 +291,58 @@ export class LifeWorldInspectorPresentation {
       target = shelter;
     } else {
       activity = 'travelling-to-meadow';
-      herd = travel(shelter, meadow, (localTime - 270) / 50);
+      herd = this.routePosition(shelterToMeadow, localTime - 270);
+      activeRoute = shelterToMeadow;
+      routeTime = localTime - 270;
       target = meadow;
     }
-    Object.assign(this.state, { activity, herdX: herd.x, herdZ: herd.z, targetX: target.x, targetZ: target.z });
+    Object.assign(this.state, {
+      activity,
+      herdX: herd.x,
+      herdZ: herd.z,
+      targetX: target.x,
+      targetZ: target.z,
+      targetId: activity === 'drinking' || activity === 'travelling-to-water'
+        ? selectedWater.id
+        : selectedMeadow.id,
+      seasonId: seasonSample.season.id,
+      migrationPressure01: seasonResponse.migrationPressure01,
+      juvenileCount: cohort.juvenile,
+      adultCount: cohort.adult,
+      deadCount: cohort.dead,
+    });
+    const tracked = {
+      x: Math.cos(universalTimeSeconds * 0.012) * 110,
+      z: Math.sin(universalTimeSeconds * 0.012) * 110,
+    };
+    this.trackedResidencyMarker.position.set(tracked.x, 0.48, tracked.z);
+    const policy = {
+      cellSize: 10,
+      cameraActiveDistance: 60,
+      cameraAggregateDistance: 180,
+      interactionDistance: 30,
+      trackedDistance: 25,
+    };
+    let activeCells = 0;
+    let residentCells = 0;
+    let aggregateCells = 0;
+    for (const cell of enumerateLifeCellsInRadius({ x: 0, y: 0, z: 0 }, 180, policy.cellSize)) {
+      const residency = classifyLifeCellResidency(
+        lifeCellCenter(cell, policy.cellSize),
+        [
+          { kind: 'camera', position: { x: 0, y: 0, z: 0 } },
+          { kind: 'tracked', position: { x: tracked.x, y: 0, z: tracked.z } },
+        ],
+        policy,
+      );
+      if (residency === 'active') activeCells++;
+      else if (residency === 'resident') residentCells++;
+      else if (residency === 'aggregate') aggregateCells++;
+    }
+    Object.assign(this.state, { activeCells, residentCells, aggregateCells });
     this.herdMarker.position.set(herd.x, 0.5, herd.z);
     this.targetMarker.position.set(target.x, 0.55, target.z);
-    this.updateHerdAnimals(universalTimeSeconds, herd);
+    this.updateHerdAnimals(universalTimeSeconds, herd, activeRoute, routeTime);
     return this.state;
   }
 
@@ -166,6 +350,9 @@ export class LifeWorldInspectorPresentation {
     this.clearTiles();
     this.herdMarker.geometry.dispose();
     this.targetMarker.geometry.dispose();
+    this.cameraResidencyMarker.geometry.dispose();
+    this.aggregateResidencyMarker.geometry.dispose();
+    this.trackedResidencyMarker.geometry.dispose();
     this.herdAnimals.geometry.dispose();
     for (const material of this.materials) material.dispose();
   }
@@ -183,33 +370,73 @@ export class LifeWorldInspectorPresentation {
   private updateHerdAnimals(
     universalTimeSeconds: number,
     herd: { x: number; z: number },
+    route: LifeDeterministicRoute | undefined,
+    routeTime: number,
   ): void {
-    for (let index = 0; index < this.herdAnimals.count; index++) {
-      const phase = index * 2.399 + 0.73;
-      const personalSpeed = 0.38 + this.unitNoise(index, 11) * 0.34;
-      const personalPhase = phase + universalTimeSeconds * personalSpeed;
-      const desiredX = Math.cos(phase * 1.73) * (3.5 + this.unitNoise(index, 23) * 7.5);
-      const desiredZ = Math.sin(phase * 1.31) * (3.5 + this.unitNoise(index, 37) * 5.5);
-      // Kept state-independent so a change of activity cannot reposition an
-      // individual marker; grazing spread comes from its personal patch.
-      const wander = 1.25;
-      const scatterX = desiredX + Math.sin(personalPhase * 1.19) * wander;
-      const scatterZ = desiredZ + Math.cos(personalPhase * 0.91) * wander;
-      const heading = Math.atan2(
-        Math.cos(personalPhase * 0.91) * wander * 0.91,
-        -Math.sin(personalPhase * 1.19) * wander * 1.19,
-      );
-      this.dummy.position.set(herd.x + scatterX, 0, herd.z + scatterZ);
-      this.dummy.rotation.set(-Math.PI / 2, 0, heading);
+    const groupRoute = route ?? {
+      segments: [{
+        from: { x: herd.x, y: 0, z: herd.z },
+        to: { x: herd.x, y: 0, z: herd.z },
+        durationSeconds: 1,
+      }],
+    };
+    const group = sampleLifeGroupAtTime({
+      seed: this.inspectorSeed,
+      count: this.herdAnimals.count,
+      route: groupRoute,
+      spread: 7,
+      wanderAmplitude: 1.25,
+      wanderPeriodSeconds: 15,
+    }, route ? routeTime : universalTimeSeconds);
+    for (let index = 0; index < group.members.length; index++) {
+      const member = group.members[index];
+      this.dummy.position.set(member.position.x, member.position.y, member.position.z);
+      this.dummy.rotation.set(-Math.PI / 2, 0, Math.atan2(member.heading.x, member.heading.z));
       this.dummy.updateMatrix();
       this.herdAnimals.setMatrixAt(index, this.dummy.matrix);
     }
     this.herdAnimals.instanceMatrix.needsUpdate = true;
   }
 
-  private unitNoise(index: number, salt: number): number {
-    const value = Math.sin((index + 1) * 12.9898 + salt * 78.233) * 43758.5453;
-    return value - Math.floor(value);
+  private route(from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number }, durationSeconds: number): LifeDeterministicRoute {
+    const planned = planLifeRoute({
+      query: this.habitatQuery,
+      start: from,
+      goal: to,
+      allowedKinds: ['land', 'meadow', 'forest'],
+      cellSize: 10,
+      maxSearchNodes: 2048,
+      travelSpeed: 2,
+    });
+    const segments = planned ?? [{ from, to, durationSeconds }];
+    return { segments: this.retime(segments, durationSeconds) };
+  }
+
+  private retime(segments: readonly LifeRouteSegment[], durationSeconds: number): LifeRouteSegment[] {
+    const total = segments.reduce((sum, segment) => sum + segment.durationSeconds, 0);
+    const scale = total > 1e-6 ? durationSeconds / total : 1;
+    return segments.map((segment) => ({ ...segment, durationSeconds: segment.durationSeconds * scale }));
+  }
+
+  private surfaceAt(x: number, z: number, seed: number): number {
+    const water = this.habitatAt(x, z, seed) === 'water';
+    if (water) return -1;
+    return Math.sin(x * 0.021 + seed * 0.01) * 1.4 + Math.cos(z * 0.017 - seed * 0.008) * 1.1;
+  }
+
+  private residencyRing(radius: number, color: string, opacity: number): Mesh {
+    const marker = new Mesh(
+      new RingGeometry(radius - 0.8, radius, 64),
+      this.trackMaterial(new MeshBasicMaterial({ color, transparent: true, opacity })),
+    );
+    marker.rotation.x = -Math.PI / 2;
+    marker.position.y = 0.45;
+    return marker;
+  }
+
+  private routePosition(route: LifeDeterministicRoute, timeSeconds: number): { x: number; z: number } {
+    const sample = sampleLifeRouteAtTime(route, timeSeconds);
+    return { x: sample.position.x, z: sample.position.z };
   }
 
   private createTileMesh(geometry: PlaneGeometry, color: string, capacity: number): InstancedMesh {

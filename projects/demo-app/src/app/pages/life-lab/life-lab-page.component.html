@@ -94,7 +94,13 @@
           <button type="button" (click)="randomizeIntegratedWorld()">
             Randomize seed
           </button>
-          <small>Seed {{ integratedWorldSeed }} · Herd: {{ inspectorActivity }}</small>
+          <small>
+            Seed {{ integratedWorldSeed }} · Herd: {{ inspectorActivity }} ·
+            Season {{ lifeWorldInspector.currentState.seasonId }} ·
+            Target {{ lifeWorldInspector.currentState.targetId }} ·
+            Migration pressure {{ (lifeWorldInspector.currentState.migrationPressure01 * 100).toFixed(0) }}% ·
+            Cohort J/A/D {{ lifeWorldInspector.currentState.juvenileCount }}/{{ lifeWorldInspector.currentState.adultCount }}/{{ lifeWorldInspector.currentState.deadCount }}
+          </small>
         </div>
         <label class="time-scrubber">
           <span>Scrub universal time</span>
@@ -111,7 +117,11 @@
         <p class="blurb">
           Top-down deterministic habitat diagnostic. Green is meadow, dark green forest,
           blue water; dark triangles are herd animals, the gold ring encloses their population cell,
-          and the pale ring is the current target.
+          and the pale ring is the current target. Cyan is camera-active residency,
+          blue is camera aggregate range, and red follows a tracked vessel interest.
+          Cells: {{ lifeWorldInspector.currentState.activeCells }} active ·
+          {{ lifeWorldInspector.currentState.residentCells }} resident ·
+          {{ lifeWorldInspector.currentState.aggregateCells }} aggregate.
         </p>
       } @else if (lifeMode === "world") {
         <div class="time-warp" aria-label="World scenario controls">
@@ -222,6 +232,36 @@
             3. Full herd
           </button>
         </nav>
+        <label class="time-scrubber">
+          <span>Herd universal time</span>
+          <input
+            type="range"
+            min="0"
+            max="320"
+            step="0.25"
+            [value]="herdScrubTimeSeconds"
+            (input)="setHerdTimeSeconds($any($event.target).value)"
+          />
+          <output>{{ herdScrubTimeSeconds.toFixed(2) }} s</output>
+        </label>
+        <div class="time-warp">
+          <button type="button" (click)="disturbHerd()">
+            Disturb herd
+          </button>
+          <button
+            type="button"
+            [class.active]="herdScrubbing"
+            (click)="resumeHerdTime()"
+          >
+            Resume live herd time
+          </button>
+          <small>
+            Activity: {{ herdActivity }} ·
+            Scrubbing reconstructs the herd from seed + route + universal time;
+            it does not replay frame history. Disturbances are explicit,
+            replayable events layered over that baseline.
+          </small>
+        </div>
       }
       <div class="time-warp" aria-label="Simulation time warp">
         <span>Time warp</span>

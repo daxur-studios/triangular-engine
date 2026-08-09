@@ -22,6 +22,8 @@ export class JoltSoftBodyComponent extends GroupComponent {
   readonly solverIterations = input(5);
   readonly linearDamping = input(0.1);
   readonly gravityFactor = input(1);
+  /** Internal pressure multiplier for closed membranes such as balloons. */
+  readonly pressure = input(0);
   readonly velocity = input<readonly [number, number, number]>([0, 0, 0]);
   readonly edgeCompliance = input(0.0001);
   readonly shearCompliance = input(0.0001);
@@ -93,6 +95,8 @@ export class JoltSoftBodyComponent extends GroupComponent {
     this.#mesh = mesh;
     this.object3D().add(mesh);
     this.#setParticleVelocity(metadata.Jolt, this.velocity());
+    const motion = metadata.Jolt.castObject(this.#body.GetMotionProperties(), metadata.Jolt.SoftBodyMotionProperties);
+    motion.SetPressure(this.pressure());
     this.#syncVertices(metadata.Jolt);
     this.physics.physicsUpdated$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.#syncVertices(metadata.Jolt));
     this.created.emit({ body: this.#body, owner: this, vertexCount: vertices.length });

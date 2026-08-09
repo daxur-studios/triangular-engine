@@ -7,11 +7,15 @@ import {
 } from './life-vector';
 import { createLifeAgent, type LifeAgentState, type LifeInfluence, type LifeObstacle } from './life-agent';
 import type { LifeBehavior, LifeBehaviorContext } from './life-behaviors';
+import { canTraverseLifeSegment, type LifeHabitatQuery } from './life-habitat';
 
 export interface LifeSimulationOptions {
   readonly seed?: number;
   readonly neighborRadius?: number;
   readonly fixedStepSeconds?: number;
+  readonly habitatQuery?: LifeHabitatQuery;
+  readonly allowedHabitatKinds?: readonly string[];
+  readonly habitatSamples?: number;
 }
 
 export class LifeSimulation {
@@ -23,10 +27,16 @@ export class LifeSimulation {
   timeSeconds = 0;
   private readonly neighborRadius: number;
   private readonly acceleration = lifeVector3();
+  private readonly habitatQuery?: LifeHabitatQuery;
+  private readonly allowedHabitatKinds: readonly string[];
+  private readonly habitatSamples: number;
 
   constructor(options: LifeSimulationOptions = {}) {
     this.fixedStepSeconds = options.fixedStepSeconds ?? 1 / 60;
     this.neighborRadius = options.neighborRadius ?? 12;
+    this.habitatQuery = options.habitatQuery;
+    this.allowedHabitatKinds = options.allowedHabitatKinds ?? [];
+    this.habitatSamples = options.habitatSamples ?? 4;
   }
 
   addAgent(options: Parameters<typeof createLifeAgent>[0]): LifeAgentState {
@@ -61,7 +71,24 @@ export class LifeSimulation {
       clampLifeVector3Length(this.acceleration, agent.maxAcceleration);
       addLifeVector3(agent.velocity, scaleLifeVector3(this.acceleration, deltaSeconds));
       clampLifeVector3Length(agent.velocity, agent.maxSpeed);
-      addLifeVector3(agent.position, scaleLifeVector3({ ...agent.velocity }, deltaSeconds));
+      const proposed = {
+        x: agent.position.x + agent.velocity.x * deltaSeconds,
+        y: agent.position.y + agent.velocity.y * deltaSeconds,
+        z: agent.position.z + agent.velocity.z * deltaSeconds,
+      };
+      if (this.habitatQuery && this.allowedHabitatKinds.length > 0 && !canTraverseLifeSegment(
+        this.habitatQuery,
+        agent.position,
+        proposed,
+        this.allowedHabitatKinds,
+        this.habitatSamples,
+      )) {
+        agent.velocity.x *= 0.15;
+        agent.velocity.y *= 0.15;
+        agent.velocity.z *= 0.15;
+      } else {
+        addLifeVector3(agent.position, scaleLifeVector3({ ...agent.velocity }, deltaSeconds));
+      }
     }
   }
 

@@ -21,15 +21,25 @@ import {
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
   avoidObstacles,
+  applyLifeGroupObstacleAvoidance,
+  applyLifeGroupSeparation,
   alignment,
   cohesion,
   fleeInfluences,
+  followLifeRoute,
   keepAbove,
   keepWithinBounds,
   LifeSimulation,
+  LifeSession,
+  planLifeRoute,
+  sampleLifeGroupAtTime,
   separation,
   type LifeBehavior,
+  type LifeHabitatQuery,
+  type LifeRouteSegment,
+  type LifeRouteActivity,
   type LifeInfluence,
+  type LifeDeterministicRoute,
 } from 'triangular-engine/life';
 import {
   AnimalRenderStyle,
@@ -67,6 +77,9 @@ export class LifeLabPageComponent {
   protected habitatOverlayVisible = false;
   protected inspectorActivity = 'grazing';
   protected inspectorScrubTimeSeconds = 0;
+  protected herdScrubTimeSeconds = 0;
+  protected herdScrubbing = false;
+  protected herdActivity: LifeRouteActivity = 'travel';
   protected readonly timeScales: readonly TimeScale[] = [0.5, 1, 2, 5, 10, 100, 1000];
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
@@ -77,13 +90,16 @@ export class LifeLabPageComponent {
   private readonly herdMesh: InstancedMesh;
   private readonly fishSimulation = new LifeSimulation({ neighborRadius: 8 });
   private readonly herdSimulation = new LifeSimulation({ neighborRadius: 10 });
+  private readonly lifeSession = new LifeSession({ seed: 7321 });
+  private herdEventId = 0;
+  private readonly herdRoute: LifeDeterministicRoute;
   private readonly animalPresentation = new ProceduralAnimalPresentation(
     BIRD_COUNT,
     FISH_COUNT,
     HERD_COUNT,
   );
   private readonly integratedWorld = new IntegratedWorldPresentation();
-  private readonly lifeWorldInspector = new LifeWorldInspectorPresentation();
+  protected readonly lifeWorldInspector = new LifeWorldInspectorPresentation();
   private integratedWorldTimeSeconds = 0;
   private readonly herdPhaseOffsets = Array.from(
     { length: HERD_COUNT },
@@ -130,6 +146,7 @@ export class LifeLabPageComponent {
     );
     this.group.add(this.baseWorld);
     this.buildWorld();
+    this.herdRoute = this.createHerdRoute();
     this.buildLife();
     this.buildFish();
     this.buildHerd();
@@ -269,7 +286,9 @@ export class LifeLabPageComponent {
 
     this.herdSimulation.behaviors.push(
       separation(2.4, 18),
-      alignment(0.25),
+      alignment(0.45),
+      cohesion(0.35),
+      followLifeRoute(this.herdRoute, 1.6, 8),
       graze,
       keepAbove(0.9, 12),
       keepWithinBounds({ x: -28, y: 0.9, z: -28 }, { x: 28, y: 1.4, z: 28 }, 8),
@@ -294,6 +313,57 @@ export class LifeLabPageComponent {
         radius: 0.95,
       });
     }
+  }
+
+  /**
+   * The Herd tab uses the same deterministic planner as the larger inspector.
+   * This small adapter deliberately describes only the demo world's land and
+   * tree clearances; a game supplies terrain, water, roads, and buildings via
+   * its own LifeHabitatQuery.
+   */
+  private createHerdRoute(): LifeDeterministicRoute {
+    const query: LifeHabitatQuery = {
+      sampleHabitat: ({ x, z }) => {
+        const blockedByTree = this.treeMeshes.some((tree) => {
+          const dx = x - tree.position.x;
+          const dz = z - tree.position.z;
+          return dx * dx + dz * dz < 4.5 * 4.5;
+        });
+        return {
+          kind: blockedByTree ? 'obstacle' : 'land',
+          surfaceY: 0.9,
+          suitability01: blockedByTree ? 0 : 1,
+        };
+      },
+    };
+    const meadow = [
+      { x: -24, y: 0.9, z: -24 },
+      { x: 24, y: 0.9, z: -24 },
+      { x: 24, y: 0.9, z: 24 },
+      { x: -24, y: 0.9, z: 24 },
+    ];
+    const segments: LifeRouteSegment[] = [];
+    for (let index = 0; index < meadow.length; index++) {
+      const from = meadow[index];
+      const to = meadow[(index + 1) % meadow.length];
+      const planned = planLifeRoute({
+        query,
+        start: from,
+        goal: to,
+        allowedKinds: ['land'],
+        cellSize: 4,
+        maxSearchNodes: 4096,
+        travelSpeed: 2.2,
+        universalTimeSeconds: 0,
+      });
+      if (planned) segments.push(...planned);
+      else segments.push({ from, to, durationSeconds: Math.max(1, Math.hypot(to.x - from.x, to.z - from.z) / 2.2) });
+      // A stationary activity segment is still deterministic route state. A
+      // BSP adapter can label equivalent waypoints as drink/rest/flee based on
+      // streamed resources or explicit events.
+      segments.push({ from: to, to, durationSeconds: 7, activity: 'graze' });
+    }
+    return { closed: true, segments };
   }
 
   protected setLifeMode(mode: LifeMode): void {
@@ -369,8 +439,42 @@ export class LifeLabPageComponent {
     this.updateIntegratedWorldTime(universalTimeSeconds);
   }
 
+  protected setHerdTimeSeconds(value: string): void {
+    const universalTimeSeconds = Number(value);
+    if (!Number.isFinite(universalTimeSeconds)) return;
+    this.herdScrubTimeSeconds = universalTimeSeconds;
+    this.herdScrubbing = true;
+  }
+
+  protected resumeHerdTime(): void {
+    this.herdScrubbing = false;
+  }
+
+  protected disturbHerd(): void {
+    const universalTimeSeconds = this.herdScrubbing
+      ? this.herdScrubTimeSeconds
+      : this.lifeSession.universalTimeSeconds;
+    this.lifeSession.events.recordDisturbance({
+      id: ++this.herdEventId,
+      sourceId: 'life-lab-player',
+      center: {
+        x: this.player.position.x,
+        y: 0.9,
+        z: this.player.position.z,
+      },
+      startTimeSeconds: universalTimeSeconds,
+      durationSeconds: 12,
+      radius: 14,
+      strength: 2.5,
+    });
+  }
+
   private update(deltaSeconds: number): void {
     const time = this.engine.elapsedTime$.value;
+    const universalTimeSeconds = this.herdScrubbing
+      ? this.herdScrubTimeSeconds
+      : this.lifeSession.advance(deltaSeconds * this.timeScale);
+    this.integratedWorldTimeSeconds = universalTimeSeconds;
     this.player.position.set(
       Math.sin(time * 0.45) * 18,
       1.4,
@@ -383,13 +487,56 @@ export class LifeLabPageComponent {
     this.simulation.influences.push(this.playerInfluence);
     this.simulation.step(deltaSeconds * this.timeScale);
     this.fishSimulation.step(deltaSeconds * this.timeScale);
-    this.herdSimulation.step(deltaSeconds * this.timeScale);
+    // The herd baseline is reconstructed directly from universal time. This
+    // keeps fast-forward and rewind semantics separate from the optional
+    // frame-integrated steering layer used by interactive agents.
+    const herdBaseline = sampleLifeGroupAtTime({
+      seed: this.lifeSession.seed,
+      count: this.herdSimulation.agents.length,
+      route: this.herdRoute,
+      spread: 5.5,
+      wanderAmplitude: 1.1,
+      wanderPeriodSeconds: 19,
+      routeLagSeconds: 1.4,
+      lifecycle: {
+        birthTimeSeconds: -80,
+        birthSpreadSeconds: 120,
+        juvenileDurationSeconds: 70,
+        lifespanSeconds: 360,
+      },
+      disturbances: this.lifeSession.events.activeDisturbancesAt(universalTimeSeconds),
+    }, universalTimeSeconds);
+    const herdWithObstacles = applyLifeGroupObstacleAvoidance(
+      herdBaseline,
+      this.treeMeshes.map((tree) => ({
+        position: { x: tree.position.x, y: 2, z: tree.position.z },
+        radius: 2.8,
+        strength: 1,
+      })),
+      0.8,
+    );
+    const herd = applyLifeGroupSeparation(herdWithObstacles, 3.2, 0.45);
+    this.herdActivity = herd.anchor.activity;
+    for (let index = 0; index < herd.members.length; index++) {
+      const member = herd.members[index];
+      const agent = this.herdSimulation.agents[index];
+      agent.position.x = member.position.x;
+      agent.position.y = member.position.y;
+      agent.position.z = member.position.z;
+      agent.velocity.x = member.heading.x * agent.maxSpeed;
+      agent.velocity.y = member.heading.y * agent.maxSpeed;
+      agent.velocity.z = member.heading.z * agent.maxSpeed;
+    }
     this.animalPresentation.updateBirds(this.simulation, time);
     this.animalPresentation.updateFish(this.fishSimulation, time);
-    this.animalPresentation.updateHerd(this.herdSimulation, time);
+    this.animalPresentation.updateHerd(
+      this.herdSimulation,
+      universalTimeSeconds,
+      herd.members.map((member) => member.lifecycle!).filter(Boolean),
+    );
     // Integrated-world motion uses the same simulation clock as the agents,
     // so low and high warp scales remain coherent.
-    this.updateIntegratedWorldTime(this.integratedWorldTime(deltaSeconds));
+    this.updateIntegratedWorldTime(universalTimeSeconds);
 
     for (let index = 0; index < this.simulation.agents.length; index++) {
       const agent = this.simulation.agents[index];

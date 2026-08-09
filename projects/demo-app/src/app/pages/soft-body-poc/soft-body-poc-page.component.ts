@@ -131,10 +131,11 @@ export class SoftBodyPocPageComponent {
   readonly shearCompliance = signal(0.0001);
   readonly bendCompliance = signal(0.001);
   readonly gravity = signal(-9.81);
+  readonly pressure = signal(0);
   readonly showBody = signal(true);
 
   setShape(value: string): void { this.shape.set(value as SoftBodyShape); this.reset(); }
-  setNumber(target: 'solverIterations' | 'linearDamping' | 'edgeCompliance' | 'shearCompliance' | 'bendCompliance' | 'gravity', event: Event): void {
+  setNumber(target: 'solverIterations' | 'linearDamping' | 'edgeCompliance' | 'shearCompliance' | 'bendCompliance' | 'gravity' | 'pressure', event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
     this[target].set(value);
     this.reset();

@@ -16,7 +16,7 @@ import {
   Vector2,
   Vector3,
 } from 'three';
-import type { LifeSimulation } from 'triangular-engine/life';
+import type { LifeLifecycleSample, LifeSimulation } from 'triangular-engine/life';
 
 export type AnimalRenderStyle = 'primitive' | 'cutout' | 'relief';
 
@@ -244,7 +244,11 @@ export class ProceduralAnimalPresentation {
     }
   }
 
-  updateHerd(simulation: LifeSimulation, time: number): void {
+  updateHerd(
+    simulation: LifeSimulation,
+    time: number,
+    lifecycle?: readonly LifeLifecycleSample[],
+  ): void {
     for (const rig of Object.values(this.herdRigs)) {
       const [body, head, legs, tail] = rig.meshes;
       for (let index = 0; index < body.count; index++) {
@@ -254,6 +258,12 @@ export class ProceduralAnimalPresentation {
         const phase = time * (2.2 + speed * 2.1) + index * 1.73;
         const bounce = Math.abs(Math.sin(phase * 2)) * 0.035 * gaitAmount;
         this.setGroundBase(agent.position, agent.velocity, bounce);
+        const lifeState = lifecycle?.[index];
+        const visualScale = lifeState
+          ? (lifeState.alive ? 0.45 + lifeState.growth01 * 0.55 : 0)
+          : 1;
+        this.base.scale.multiplyScalar(visualScale);
+        this.base.updateMatrix();
         body.setMatrixAt(index, this.base.matrix);
 
         this.setPartMatrix(

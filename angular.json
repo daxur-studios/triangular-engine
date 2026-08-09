@@ -31,6 +31,8 @@
             "polyfills": ["zone.js", "zone.js/testing"],
             "include": [
               "**/*.spec.ts",
+              "life/**/*.spec.ts",
+              "projects/triangular-engine/life/**/*.spec.ts",
               "../water/**/*.spec.ts",
               "../terrain/**/*.spec.ts",
               "../scatter/**/*.spec.ts",

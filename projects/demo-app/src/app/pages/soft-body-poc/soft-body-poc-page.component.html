@@ -19,6 +19,9 @@
         <label>Gravity: {{ gravity() }}
           <input type="range" min="-20" max="0" step="0.1" [value]="gravity()" (input)="setNumber('gravity', $event)" />
         </label>
+        <label>Pressure: {{ pressure() | number: '1.2-2' }}
+          <input type="range" min="0" max="2" step="0.05" [value]="pressure()" (input)="setNumber('pressure', $event)" />
+        </label>
         <label>Damping: {{ linearDamping() | number: '1.2-2' }}
           <input type="range" min="0" max="1" step="0.05" [value]="linearDamping()" (input)="setNumber('linearDamping', $event)" />
         </label>
@@ -61,6 +64,7 @@
         [edgeCompliance]="edgeCompliance()"
         [shearCompliance]="shearCompliance()"
         [bendCompliance]="bendCompliance()"
+        [pressure]="pressure()"
         [color]="softBodyColor"
       />
     }

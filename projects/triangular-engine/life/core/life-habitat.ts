@@ -12,7 +12,7 @@ export interface LifeHabitatSample {
 
 /** Adapter boundary between the generic life simulation and a game world. */
 export interface LifeHabitatQuery {
-  sampleHabitat(position: LifeVector3): LifeHabitatSample;
+  sampleHabitat(position: LifeVector3, universalTimeSeconds?: number): LifeHabitatSample;
 }
 
 /**
@@ -25,6 +25,7 @@ export function canTraverseLifeSegment(
   to: LifeVector3,
   allowedKinds: readonly LifeHabitatKind[],
   samples = 6,
+  universalTimeSeconds = 0,
 ): boolean {
   const count = Math.max(1, Math.floor(samples));
   for (let index = 1; index <= count; index++) {
@@ -33,7 +34,7 @@ export function canTraverseLifeSegment(
       x: from.x + (to.x - from.x) * blend,
       y: from.y + (to.y - from.y) * blend,
       z: from.z + (to.z - from.z) * blend,
-    });
+    }, universalTimeSeconds);
     if (!allowedKinds.includes(sample.kind) || sample.suitability01 <= 0) return false;
   }
   return true;

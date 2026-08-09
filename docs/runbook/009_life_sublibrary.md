@@ -754,3 +754,177 @@ Also confirm:
 - The inspector intentionally does not claim streamed planetary terrain,
   individual herd locomotion, or disturbance recovery yet. It is the visible
   contract for those next implementations.
+
+### 2026-08-09 — Universal-time route contract
+
+- Added the reusable `sampleLifeRouteAtTime` API to `triangular-engine/life`.
+  It evaluates open or closed route segments directly from universal time,
+  with smooth segment transitions, stable headings, and no frame-history
+  dependency. Rewind and large time jumps therefore reconstruct the same
+  route state.
+- The World Inspector now uses this library evaluator for its diagnostic
+  travel phases. The visible three-location route remains intentionally
+  illustrative; it is not yet the terrain/obstacle route planner.
+- The next implementation must generate these segments from habitat and
+  terrain data, reject invalid segments, and only then materialize nearby
+  individuals with local steering.
+- Added `planLifeRoute`, a bounded deterministic grid planner that checks
+  every candidate segment against `LifeHabitatQuery`, follows sampled surface
+  elevation, and returns timed route segments (or `null` when no local route
+  exists). It is deliberately a local planner; planetary streaming and
+  hierarchical routing still belong above this API.
+- The inspector now rebuilds its travel routes from that planner whenever the
+  seed changes. Its direct-segment fallback is kept only as a visible
+  diagnostic when no local route exists; production callers should pass that
+  failure to a higher-level regional planner.
+- Added `sampleLifeGroupAtTime` for deterministic nearby materialization. A
+  group anchor follows the route while each member gets a stable seed/index
+  offset and bounded wander, so a flock/herd/school can be reconstructed at
+  arbitrary universal time without simulating every intervening frame. The
+  inspector now uses this API for its diagnostic herd markers.
+- Added the life secondary-entry spec glob to the engine Karma configuration
+  so these contracts are included in the normal engine test run.
+- Added deterministic `LifeGroupDisturbance` events. A disturbance is an
+  explicit time-windowed event (for example a vessel or vehicle encounter)
+  layered over the baseline group sample; its offset fades in and out and
+  disappears after expiry, so evaluating the same universal time remains
+  reproducible and the baseline route is recoverable.
+- Added `selectLifeLod` and default species profiles. Insects use the shortest
+  individual/group/ambient ranges, birds and fish use medium ranges, and land
+  animals remain individual at the greatest distance. This is a rendering and
+  materialization policy; camera visibility and vessel/player persistence can
+  be evaluated independently.
+- Added deterministic population-cell residency helpers. Camera sources can
+  activate or aggregate cells, while interaction/tracked sources keep cells
+  resident even when the camera moves away. Cell keys and enumeration order
+  are stable, allowing planetary streaming to reconstruct dormant background
+  populations from seed and UT rather than retaining every animal.
+- Added `followLifeHabitat` and optional habitat validation to `LifeSimulation`.
+  Agents can follow sampled surface elevation, brake before entering an
+  invalid domain, and reject a proposed segment that would cross water or
+  another disallowed habitat. Species choose their own allowed kinds, so this
+  supports separate land, air, and water movement rules.
+- Added a visible residency overlay to the Life World Inspector. Cyan marks
+  the camera-active range, blue the camera aggregate range, and red a moving
+  tracked-interest source. The inspector also reports active/resident/
+  aggregate cell counts, making camera streaming and persistence distinguishable
+  before a full planetary renderer is connected.
+- Added `followLifeRoute` steering. Materialized agents can now pursue the
+  universal-time route state while existing separation, alignment, cohesion,
+  obstacle, and habitat behaviors remain composable around it. This is the
+  local steering layer; it does not turn the route itself into a train of
+  permanently fixed individuals.
+- Wired the existing Life Lab Herd tab to a broad closed route plus
+  separation, alignment, cohesion, and route-following behaviors. This is the
+  first visible active-group check; it is intentionally separate from the
+  deterministic World Inspector diagnostic.
+- Added deterministic season sampling and response helpers. A season is
+  derived directly from UT and a configurable year length; species can map
+  preferred seasons to habitat suitability and migration pressure without
+  simulating missed frames. This is the climate input for future regional
+  route selection, not yet a complete biome/weather model.
+- The World Inspector now exposes the current UT-derived season and migration
+  pressure beside its scrubber, so seasonal transitions can be checked without
+  running the simulation forward frame by frame.
+- Winter now selects a second meadow patch and separately planned routes in the
+  inspector; spring/summer use the primary meadow. This is a small visible
+  proof that seasonal pressure changes deterministic habitat choice, while the
+  production version will select among streamed biome regions.
+- `LifeHabitatQuery` now accepts optional UT, and `createSeasonalLifeHabitatQuery`
+  composes seasonal suitability over a base terrain/water query. The local
+  planner can therefore reject or accept route cells for the requested season
+  without simulating the intervening year.
+- Added `LifeClimateQuery` and `createClimateAwareLifeHabitatQuery`. Weather
+  providers can supply temperature, precipitation, wind, and a suitability
+  factor from CPU fields, textures, or BSP's wind-particle adapter. Life only
+  consumes the resulting suitability; it does not own weather rendering.
+- Added `LifeEventLog` for ordered, serializable interaction events. Player,
+  vessel, and vehicle disturbances can be recorded in UT, queried at any time,
+  and replayed alongside the deterministic baseline for save/load, rewind, or
+  networking.
+- BSP integration boundary is now documented: its existing analytic
+  `windAt(body, dirBodyFixed, altitudeM, ut)` maps directly to
+  `LifeClimateQuery.wind`; future precipitation/temperature/insolation fields
+  can be added without changing life's clock or storage model. Actual BSP
+  wiring now lives in BSP's app-owned `createBspLifeClimateQuery` adapter;
+  the life package remains engine-generic.
+- Architecture clarification: the Life Lab's hand-authored three-point/loop
+  motion is a temporary visual harness only. It is useful for checking time
+  sampling and instanced presentation, but it is not the production navigation
+  model. Production routes must be generated from a deterministic world
+  snapshot (seed, UT, terrain/biome suitability, and obstacle version), then
+  smoothed/validated and followed by a group-level controller with local
+  steering. Rocks, roads, buildings, elevation, water, and player events are
+  therefore inputs to route generation and replanning—not additional points
+  manually inserted into every animal's path.
+- The deterministic grid planner now performs stable line-of-sight path
+  simplification after A* search and validates each shortcut against the
+  habitat query. Clear terrain therefore produces a direct route, while rocks,
+  water, roads, or buildings can preserve only the necessary waypoints.
+- The Life Lab Herd tab now builds its closed meadow route through that planner
+  using the demo's tree clearances, rather than relying on a hand-authored
+  triangle/loop. This is still a small active-steering presentation (not the
+  final planetary session), but it exercises the same terrain-adapter boundary
+  that BSP will provide.
+- The visible Herd baseline now materializes members directly from
+  `sampleLifeGroupAtTime` using the shared universal-time clock. The old
+  frame-integrated herd remains available as the future local-steering layer,
+  but the baseline presentation no longer accumulates hidden motion error when
+  time is warped or reconstructed.
+- Added a Herd universal-time scrubber to the Life Lab. Scrubbing freezes the
+  baseline at the selected UT and reconstructs it directly; Resume returns to
+  live time. This is the first visual verification control for the
+  deterministic-group contract outside the inspector.
+- Added a replayable `LifeEventLog` disturbance control to the Herd tab. The
+  player can push the group temporarily, and the same event is applied when
+  scrubbing through its UT interval; the baseline route remains unchanged and
+  the event fades out deterministically.
+- Added the reusable `LifeSession` boundary. It owns a seed, universal clock,
+  and event log and can produce a serializable snapshot; terrain, residency,
+  rendering, and species behavior remain external providers. The Life Lab Herd
+  now uses this session for its baseline clock and interactions.
+- Route segments now optionally carry deterministic activity labels: `travel`,
+  `graze`, `drink`, `rest`, or `flee`. The route sampler reconstructs the
+  active phase directly from UT; the Life Lab Herd demonstrates stationary
+  grazing phases at planned meadow waypoints. Resource and water adapters can
+  later label equivalent waypoints as drinking without changing the clock or
+  renderer architecture.
+- Group materialization now supports deterministic per-member route lag. A
+  herd can occupy a spread along a route instead of every member sharing the
+  same anchor, while seed + UT still reconstructs every member exactly. This
+  is the baseline needed before adding nearby boid/local steering.
+- Added `chooseLifeActivityTarget`, a pure resource-selection helper. Species
+  and biome adapters can provide meadow, water, shelter, or escape targets with
+  suitability; the helper chooses reproducibly from seed + UT bucket and
+  returns `null` when a seasonal/resource filter rejects them all.
+- The Life World Inspector now uses that selector for its summer/winter meadow
+  choice and reports the selected target id. This is the first visible check
+  that seasonal suitability chooses a destination rather than a hard-coded
+  waypoint.
+- The inspector now also selects between two deterministic shore targets for
+  the drinking phase and follows the corresponding preplanned route to/from
+  shelter. The target id is visible in the readout, making water selection an
+  explicit suitability decision rather than a hidden fixed coordinate.
+- Added pure `applyLifeGroupObstacleAvoidance` materialization. The macro route
+  remains authoritative, while nearby tree/rock/building snapshots can push
+  active members clear without introducing frame-history state. The Life Lab
+  Herd applies this pass to its tree scatter.
+- Added pure `applyLifeGroupSeparation` for nearby active members. It keeps
+  direct UT materialization readable without requiring a global CPU boid pass;
+  the macro anchor and universal-time route remain unchanged.
+- Added deterministic lifecycle sampling for birth, juvenile growth, adult,
+  and death phases, plus aggregate cohort counts with staggered births. Nearby
+  agents can use the individual sample; distant cells can keep only cohort
+  counts, preserving planetary scale without losing UT-addressable population
+  continuity.
+- The World Inspector now displays deterministic juvenile/adult/dead cohort
+  counts beside its seasonal target and migration state, making lifecycle
+  progression directly scrub-verifiable.
+- Nearby group members can now carry individual lifecycle samples. The Herd
+  presentation scales juveniles down and culls dead members while retaining
+  their deterministic cohort accounting, giving the same lifecycle contract a
+  visible local representation.
+- Added `selectLifePredatorTarget`, a deterministic nearest-viable-prey query
+  for solitary predators or small predator groups. It only consumes a bounded
+  nearby snapshot; the eventual hunt/kill/flee result remains an explicit
+  replayable interaction event rather than hidden mutation of the baseline.
