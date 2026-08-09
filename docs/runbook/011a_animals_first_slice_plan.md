@@ -1,6 +1,8 @@
 # Animals first slice execution plan
 
-Status: ready for Luna/Terra execution; implementation not started.
+Status: first slice implemented; deterministic residency and smooth flock-motion
+follow-ups are implemented and ready for visual review. Camera integration and full
+streaming remain deferred.
 
 Parent design: [011_animals_sublibrary.md](011_animals_sublibrary.md)
 
@@ -540,7 +542,23 @@ be pulled into this slice:
   movement and flee response can be inspected without waiting in real time.
 - Demo residency now applies every step around a fixed `(0,0,0)` observer with
   a 50 m radius, making culling observable before camera integration.
+- Replaced the demo-only distance filter with the exported
+  `updateFlockResidency()` contract. The lab now exposes an observer-distance
+  slider and displays resident/culled state, distance, and visible count.
+- Residency tests cover configured enter/exit thresholds, hysteresis, and
+  observer radius. The simulation state is retained while culled so returning
+  to range restores the same deterministic presentation IDs.
 - `npm run build:triangular-engine` passes, including
   `triangular-engine/animals`.
 - `npx ng build demo-app` passes; it reports only existing style-budget
   warnings.
+
+### 2026-08-09: deterministic flock-motion follow-up
+
+- Replaced straight-line velocity normalization with bounded, snapshot-based
+  cohesion, alignment, separation, and broad directional travel steering.
+- Added renderer-only interpolation between fixed simulation snapshots and a
+  derived banking hint for abstract bird presentation.
+- The lab now exposes 0–100x time scale and renders each bird aligned to its
+  interpolated heading. Terrain semantics, migration, predators, and full
+  streaming remain deferred.

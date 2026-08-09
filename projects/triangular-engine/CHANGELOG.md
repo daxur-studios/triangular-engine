@@ -5,6 +5,10 @@ All notable changes to triangular-engine are documented here.
 ## [Unreleased]
 
 ### Added
+- `triangular-engine/animals` now provides lightweight deterministic flock
+  steering controls (`travelDirection`, neighbour range, turn rate, and steering
+  acceleration) plus `presentInterpolatedFlock()` for smooth renderer-only
+  snapshots and a bounded banking hint.
 - `triangular-engine/spline` secondary entry point (Phase 0A — core geometry
   only). Open/closed splines with linear and cubic Bezier evaluation,
   adaptive arc-length sampling, a brute-force `closestPoint` reference

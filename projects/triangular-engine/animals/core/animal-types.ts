@@ -38,4 +38,6 @@ export interface AnimalPresentation {
   position: AnimalVector3;
   heading: AnimalVector3;
   activity: FlockActivity;
+  /** Renderer-neutral roll hint in radians, derived only from motion. */
+  bank: number;
 }
