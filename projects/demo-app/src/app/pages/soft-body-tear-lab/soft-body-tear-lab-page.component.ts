@@ -1,7 +1,7 @@
-import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { EngineModule, EngineService } from 'triangular-engine';
-import { IJoltSoftBodyCreatedEvent, JoltPhysicsModule, JoltSoftBodyComponent } from 'triangular-engine/jolt';
+import { JoltPhysicsModule, JoltRigidBodyComponent, JoltSoftBodyComponent } from 'triangular-engine/jolt';
 import type { Vector3Tuple } from 'three';
 
 interface SoftMesh {
@@ -52,31 +52,22 @@ const RIGHT_COLOR = 0x70b7ff;
   host: { class: 'flex-page' },
 })
 export class SoftBodyTearLabPageComponent {
-  readonly whole = WHOLE;
+  readonly intactTank = viewChild.required(JoltRigidBodyComponent);
   readonly left = LEFT;
   readonly right = RIGHT;
-  readonly wholeColor = WHOLE_COLOR;
   readonly leftColor = LEFT_COLOR;
   readonly rightColor = RIGHT_COLOR;
   readonly split = signal(false);
   readonly intactPosition = signal<Vector3Tuple>([0, 5, 0]);
   readonly intactVelocity = signal<Vector3Tuple>([0, 0, 0]);
-  private intactOwner?: IJoltSoftBodyCreatedEvent['owner'];
-  private intactBody?: IJoltSoftBodyCreatedEvent['body'];
-
-  captureIntactBody(event: IJoltSoftBodyCreatedEvent): void {
-    this.intactOwner = event.owner;
-    this.intactBody = event.body;
-  }
   detonate(): void {
-    const body = this.intactBody;
-    if (body) {
-      const position = body.GetPosition();
-      this.intactPosition.set([position.GetX(), position.GetY(), position.GetZ()]);
-      const velocity = body.GetLinearVelocity();
-      this.intactVelocity.set([velocity.GetX(), velocity.GetY(), velocity.GetZ()]);
-    }
-    this.intactOwner?.dispose();
+    const body = this.intactTank().body();
+    if (!body) return;
+    const position = body.GetPosition();
+    this.intactPosition.set([position.GetX(), position.GetY(), position.GetZ()]);
+    const velocity = body.GetLinearVelocity();
+    this.intactVelocity.set([velocity.GetX(), velocity.GetY(), velocity.GetZ()]);
+    this.intactTank().dispose();
     this.split.set(true);
   }
   reset(): void { this.split.set(false); }
