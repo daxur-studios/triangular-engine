@@ -5,6 +5,7 @@ export * from './jolt-shapes';
 export * from './constraints';
 export * from './jolt-debug-renderer';
 export * from './jolt-fountain';
+export * from './vehicle';
 export * from './jolt-physics.module';
 export * from './example';
 export * from './jolt.provider';

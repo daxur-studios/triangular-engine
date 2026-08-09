@@ -9,7 +9,7 @@ import { Jolt } from '../jolt-physics/jolt-physics.service';
 type BoxShapeParams = [number, number, number];
 
 @Component({
-  selector: 'jolt-box-shape',
+  selector: 'joltBoxShape',
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideShapeComponent(JoltBoxShapeComponent)],

@@ -11,7 +11,7 @@
 
       <p class="blurb">
         <code>&lt;waterBuoyancy&gt;</code> nested inside a
-        <code>&lt;jolt-rigid-body&gt;</code> samples the registered
+        <code>&lt;joltRigidBody&gt;</code> samples the registered
         <code>WaterSurface</code> each physics substep and calls
         <code>Body#ApplyBuoyancyImpulse</code>. Open water only — shallow-water
         wave accuracy near a shore is a separate, still-open item.
@@ -77,19 +77,19 @@
     [motion]="waveMotion()"
   />
 
-  <jolt-physics [gravity]="[0, -9.81, 0]" [debug]="physicsDebug()">
-    <jolt-rigid-body [motionType]="0" [position]="seafloorPosition">
-      <jolt-box-shape [params]="seafloorBoxParams" />
+  <joltPhysics [gravity]="[0, -9.81, 0]" [debug]="physicsDebug()">
+    <joltRigidBody [motionType]="0" [position]="seafloorPosition">
+      <joltBoxShape [params]="seafloorBoxParams" />
       <mesh [receiveShadow]="true">
         <boxGeometry [params]="seafloorBoxParams" />
         <meshStandardMaterial [params]="{ color: '#2c3b3e', roughness: 0.95 }" />
       </mesh>
-    </jolt-rigid-body>
+    </joltRigidBody>
 
     @for (hull of hulls(); track hull.id) {
-      <jolt-rigid-body [motionType]="2" [position]="hull.spawnPositionM">
+      <joltRigidBody [motionType]="2" [position]="hull.spawnPositionM">
         @if (hull.shape === "box") {
-          <jolt-box-shape [params]="boxParams" />
+          <joltBoxShape [params]="boxParams" />
           <mesh [castShadow]="true">
             <boxGeometry [params]="boxParams" />
             <meshStandardMaterial
@@ -97,7 +97,7 @@
             />
           </mesh>
         } @else {
-          <jolt-sphere-shape [radius]="sphereRadiusM" />
+          <joltSphereShape [radius]="sphereRadiusM" />
           <mesh [castShadow]="true">
             <sphereGeometry
               [params]="{
@@ -118,7 +118,7 @@
           (onEnterWater)="markEntered(hull.id)"
           (onExitWater)="markExited(hull.id)"
         />
-      </jolt-rigid-body>
+      </joltRigidBody>
     }
-  </jolt-physics>
+  </joltPhysics>
 </scene>

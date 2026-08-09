@@ -28,70 +28,71 @@ import {
   Jolt,
   wrapQuat,
   // Other Jolt exports like IJoltMetadata, LAYER_MOVING, etc.
-} from 'triangular-engine/jolt';
+} from "triangular-engine/jolt";
 ```
-
 
 ---
 
 ## 2. Basic Scene Structure
 
-Wrap your physics-enabled components in `<jolt-physics>`. Every object inside this component that needs physical simulation should be defined inside a `<jolt-rigid-body>`.
+Wrap your physics-enabled components in `<joltPhysics>`. Every object inside this component that needs physical simulation should be defined inside a `<joltRigidBody>`.
 
 ```html
 <scene>
   <orbitControls [cameraPosition]="[0, 5, 10]" [isActive]="true" />
-  
-  <jolt-physics [gravity]="[0, -9.81, 0]" [debug]="false" [paused]="false">
+
+  <joltPhysics [gravity]="[0, -9.81, 0]" [debug]="false" [paused]="false">
     <!-- Static Ground -->
-    <jolt-rigid-body [position]="[0, -0.5, 0]" [motionType]="0">
-      <jolt-box-shape [params]="[100, 1, 100]" />
+    <joltRigidBody [position]="[0, -0.5, 0]" [motionType]="0">
+      <joltBoxShape [params]="[100, 1, 100]" />
       <mesh>
         <boxGeometry [params]="[100, 1, 100]" />
         <meshStandardMaterial [params]="{ color: '#666' }" />
       </mesh>
-    </jolt-rigid-body>
+    </joltRigidBody>
 
     <!-- Dynamic Falling Sphere -->
-    <jolt-rigid-body [position]="[0, 5, 0]" [motionType]="2">
-      <jolt-sphere-shape [params]="[0.5]" />
+    <joltRigidBody [position]="[0, 5, 0]" [motionType]="2">
+      <joltSphereShape [params]="[0.5]" />
       <mesh>
         <sphereGeometry [params]="{ radius: 0.5 }" />
         <meshStandardMaterial [params]="{ color: 'springgreen' }" />
       </mesh>
-    </jolt-rigid-body>
-  </jolt-physics>
+    </joltRigidBody>
+  </joltPhysics>
 </scene>
 ```
 
 ### Motion Types
-* `0` — **Static**: Immovable, infinite mass (e.g., floors, terrain).
-* `1` — **Kinematic**: Position/velocity controlled programmatically; ignores external forces.
-* `2` — **Dynamic**: Responds to gravity, impulses, and collisions.
+
+- `0` — **Static**: Immovable, infinite mass (e.g., floors, terrain).
+- `1` — **Kinematic**: Position/velocity controlled programmatically; ignores external forces.
+- `2` — **Dynamic**: Responds to gravity, impulses, and collisions.
 
 ---
 
 ## 3. Shape Components
 
-Jolt shapes must be nested inside `<jolt-rigid-body>` components.
+Jolt shapes must be nested inside `<joltRigidBody>` components.
 
-| Component | Description | Example Parameters |
-| --- | --- | --- |
-| `<jolt-box-shape>` | Box dimensions | `[params]="[width, height, depth]"` |
-| `<jolt-sphere-shape>` | Sphere radius | `[params]="[radius]"` |
-| `<jolt-capsule-shape>` | Capsule properties | `[params]="[halfHeight, radius]"` |
-| `<jolt-cylinder-shape>` | Cylinder properties | `[params]="[halfHeight, radius]"` |
-| `<jolt-hull-shape>` | Convex hull from geometry | `[geometry]="meshGeometry.geometry()"` |
-| `<jolt-mesh-shape>` | Static arbitrary mesh | `[geometry]="meshGeometry.geometry()"` |
-| `<jolt-height-field-shape>`| Heightmap terrain | `[map]="path" [sampleCount]="50" [width]="w" [height]="h" [depth]="d"` |
+| Component                   | Description               | Example Parameters                                                     |
+| --------------------------- | ------------------------- | ---------------------------------------------------------------------- |
+| `<joltBoxShape>`          | Box dimensions            | `[params]="[width, height, depth]"`                                    |
+| `<joltSphereShape>`       | Sphere radius             | `[params]="[radius]"`                                                  |
+| `<joltCapsuleShape>`      | Capsule properties        | `[params]="[halfHeight, radius]"`                                      |
+| `<joltCylinderShape>`     | Cylinder properties       | `[params]="[halfHeight, radius]"`                                      |
+| `<joltHullShape>`         | Convex hull from geometry | `[geometry]="meshGeometry.geometry()"`                                 |
+| `<joltMeshShape>`           | Static arbitrary mesh     | `[geometry]="meshGeometry.geometry()"`                                 |
+| `<joltHeightFieldShape>` | Heightmap terrain         | `[map]="path" [sampleCount]="50" [width]="w" [height]="h" [depth]="d"` |
 
 ### Convex Hull Example:
+
 ```html
 <mesh #myMesh>
   <cylinderGeometry [params]="[1, 1, 3, 8, 1]" />
   <meshStandardMaterial />
 </mesh>
-<jolt-hull-shape [geometry]="myMesh.geometry()" />
+<joltHullShape [geometry]="myMesh.geometry()" />
 ```
 
 ---
@@ -105,7 +106,7 @@ const meta = await this.physicsComponent()?.metaDataPromise;
 if (meta) {
   // RVec3 represents double precision vectors in Jolt Double Precision WASM builds
   const largePosition = new meta.Jolt.RVec3(1000000.0, 0.0, 0.0);
-  console.log('Position type:', typeof largePosition.GetX()); // 'number' (double precision float)
+  console.log("Position type:", typeof largePosition.GetX()); // 'number' (double precision float)
 }
 ```
 
@@ -116,21 +117,19 @@ if (meta) {
 To apply manual forces/impulses to a `JoltRigidBodyComponent` (e.g. vessel propulsion or player movement), access its underlying `Jolt.Body` via the `body$` behavior subject:
 
 ```typescript
-import { Component, HostListener, inject, input } from '@angular/core';
-import { JoltRigidBodyComponent, Jolt, JoltPhysicsService, wrapQuat } from 'triangular-engine/jolt';
-import { Vector3 } from 'three';
-
+import { Component, HostListener, inject, input } from "@angular/core";
+import { JoltRigidBodyComponent, Jolt, JoltPhysicsService, wrapQuat } from "triangular-engine/jolt";
+import { Vector3 } from "three";
 
 @Component({
-  selector: 'app-player-body',
+  selector: "app-player-body",
   template: `
-    <mesh><sphereGeometry [params]="{radius: 1}"/><meshStandardMaterial /></mesh>
-    <jolt-sphere-shape [params]="[1]" />
+    <mesh><sphereGeometry [params]="{ radius: 1 }" /><meshStandardMaterial /></mesh>
+    <joltSphereShape [params]="[1]" />
   `,
-  providers: [provideJoltRigidBodyComponent(PlayerBodyComponent)]
+  providers: [provideJoltRigidBodyComponent(PlayerBodyComponent)],
 })
 export class PlayerBodyComponent extends JoltRigidBodyComponent {
-  
   applyThrust() {
     const body = this.body$.value; // Jolt.Body
     if (!body) return;
@@ -159,23 +158,19 @@ export class PlayerBodyComponent extends JoltRigidBodyComponent {
 Joints constrain the motion of multiple rigid bodies relative to one another. Body IDs are passed as the `[bodies]` array containing the string identifiers of the parent `JoltRigidBodyComponent` components.
 
 ### Fixed Constraint (No Relative Movement)
+
 Prevents all rotation and translation between two bodies. Excellent for assembling multi-part structures like modular spaceships.
 
 ```html
-<jolt-fixed-constraint [bodies]="[body1Id, body2Id]" />
+<joltFixedConstraint [bodies]="[body1Id, body2Id]" />
 ```
 
 ### Hinge Constraint (Rotational Joint)
+
 Restricts movement to a single rotational axis. Perfect for doors, wheels, or robotic joints.
 
 ```html
-<jolt-hinge-constraint 
-  [bodies]="[parentBodyId, childBodyId]" 
-  [point]="[0, 0, 0]" 
-  [axis]="[0, 1, 0]"
-  [limitsMin]="-1.57" 
-  [limitsMax]="1.57" 
-/>
+<joltHingeConstraint [bodies]="[parentBodyId, childBodyId]" [point]="[0, 0, 0]" [axis]="[0, 1, 0]" [limitsMin]="-1.57" [limitsMax]="1.57" />
 ```
 
 ---
@@ -185,11 +180,13 @@ Restricts movement to a single rotational axis. Perfect for doors, wheels, or ro
 Listen to contact events by subscribing to the `JoltEventEmitter` triggers or hooking into the physics service tick loop.
 
 Contact hooks available on `JoltPhysicsService`:
+
 - `contactAdded$`
 - `contactPersisted$`
 - `contactRemoved$`
 
 Example of detecting landing or impacts:
+
 ```typescript
 this.joltPhysicsService.contactAdded$.subscribe((event) => {
   const body1Id = event.body1.GetID();
@@ -203,9 +200,11 @@ this.joltPhysicsService.contactAdded$.subscribe((event) => {
 ## 8. Troubleshooting
 
 ### Long vessel structures wiggle or bend
-* **Cause**: Multi-body physics chains connected via linear constraints naturally wobble under high forces.
-* **Fix**: Provide cross-bracing constraints. Connect not only adjacent parts, but also every other part to create rigid triangulated networks (e.g. jointing index `i` with `i + 2` and `i + 3` where appropriate).
+
+- **Cause**: Multi-body physics chains connected via linear constraints naturally wobble under high forces.
+- **Fix**: Provide cross-bracing constraints. Connect not only adjacent parts, but also every other part to create rigid triangulated networks (e.g. jointing index `i` with `i + 2` and `i + 3` where appropriate).
 
 ### Mesh Shape collisions not registering or throwing errors
-* **Cause**: Mesh shape (`<jolt-mesh-shape>`) is only supported for **Static** (`motionType="0"`) rigid bodies in Jolt.
-* **Fix**: Use `<jolt-hull-shape>` (convex hull) or primitive shapes (`box`, `sphere`) for dynamic/kinematic rigid bodies.
+
+- **Cause**: Mesh shape (`<joltMeshShape>`) is only supported for **Static** (`motionType="0"`) rigid bodies in Jolt.
+- **Fix**: Use `<joltHullShape>` (convex hull) or primitive shapes (`box`, `sphere`) for dynamic/kinematic rigid bodies.

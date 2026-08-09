@@ -44,7 +44,7 @@ export type JoltConstraintTuple =
   | [string, string];
 
 @Component({
-  selector: 'jolt-constraint',
+  selector: 'joltConstraint',
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [],

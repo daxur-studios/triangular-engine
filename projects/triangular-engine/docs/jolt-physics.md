@@ -4,34 +4,27 @@ Jolt Physics is a high-performance physics engine integrated with the triangular
 
 ## Multi-Shape Rigid Bodies
 
-You can create rigid bodies with multiple collision shapes by adding multiple shape components as children of a `jolt-rigid-body`. Each shape can have its own position and rotation relative to the rigid body.
+You can create rigid bodies with multiple collision shapes by adding multiple shape components as children of a `joltRigidBody`. Each shape can have its own position and rotation relative to the rigid body.
 
 ### Example: Compound Shape (Box + Sphere)
 
 ```html
-<jolt-rigid-body [motionType]="2" [position]="[0, 5, 0]">
+<joltRigidBody [motionType]="2" [position]="[0, 5, 0]">
   <!-- Main box shape at the origin -->
-  <jolt-box-shape [params]="[1, 1, 1]"></jolt-box-shape>
+  <joltBoxShape [params]="[1, 1, 1]"></joltBoxShape>
 
   <!-- Sphere shape offset to the right -->
-  <jolt-sphere-shape
-    [params]="[0.5]"
-    [position]="[1.5, 0, 0]">
-  </jolt-sphere-shape>
+  <joltSphereShape [params]="[0.5]" [position]="[1.5, 0, 0]"> </joltSphereShape>
 
   <!-- Another box rotated and positioned -->
-  <jolt-box-shape
-    [params]="[0.5, 2, 0.5]"
-    [position]="[0, 1, 0]"
-    [rotation]="[0, 0, Math.PI/4]">
-  </jolt-box-shape>
+  <joltBoxShape [params]="[0.5, 2, 0.5]" [position]="[0, 1, 0]" [rotation]="[0, 0, Math.PI/4]"> </joltBoxShape>
 
   <!-- Visual mesh -->
   <mesh>
     <boxGeometry [params]="[2, 2, 2]"></boxGeometry>
     <meshStandardMaterial [color]="'red'"></meshStandardMaterial>
   </mesh>
-</jolt-rigid-body>
+</joltRigidBody>
 ```
 
 ### Shape Position and Rotation
@@ -45,25 +38,25 @@ For single-shape bodies, these inputs are ignored since the shape fills the enti
 
 ### Supported Shapes
 
-- `<jolt-box-shape [params]="[width, height, depth]">`
-- `<jolt-sphere-shape [params]="[radius]">`
-- `<jolt-capsule-shape [params]="[halfHeightOfCylinder, radius]">`
-- `<jolt-cylinder-shape [params]="[halfHeight, radius]">`
-- `<jolt-hull-shape>` - Convex hull from points
-- `<jolt-mesh-shape>` - Triangle mesh (static bodies only)
+- `<joltBoxShape [params]="[width, height, depth]">`
+- `<joltSphereShape [params]="[radius]">`
+- `<joltCapsuleShape [params]="[halfHeightOfCylinder, radius]">`
+- `<joltCylinderShape [params]="[halfHeight, radius]">`
+- `<joltHullShape>` - Convex hull from points
+- `<joltMeshShape>` - Triangle mesh (static bodies only)
 
 ### Physics World Setup
 
 ```html
-<jolt-physics [gravity]="[0, -9.81, 0]" [debug]="true">
+<joltPhysics [gravity]="[0, -9.81, 0]" [debug]="true">
   <!-- Your rigid bodies here -->
-</jolt-physics>
+</joltPhysics>
 ```
 
 ### Rigid Body Properties
 
 ```html
-<jolt-rigid-body
+<joltRigidBody
   [motionType]="2"           <!-- 0=Static, 1=Kinematic, 2=Dynamic -->
   [position]="[x, y, z]"
   [rotation]="[x, y, z]"    <!-- Euler angles -->
@@ -71,7 +64,7 @@ For single-shape bodies, these inputs are ignored since the shape fills the enti
   [angularDamping]="0.1"
   [linearDamping]="0.1"
   [id]="'myBody'">
-</jolt-rigid-body>
+</joltRigidBody>
 ```
 
 ## Performance Notes

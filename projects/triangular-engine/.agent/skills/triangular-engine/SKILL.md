@@ -232,14 +232,14 @@ All components are standalone. Import `EngineModule` for convenience.
 
 | Selector              | Key Inputs                                                                                |
 | --------------------- | ----------------------------------------------------------------------------------------- |
-| `jolt-physics`        | `gravity`, `debug`                                                                        |
-| `jolt-rigid-body`     | `motionType` (0=Static, 1=Kinematic, 2=Dynamic), `position`, `rotation`, `velocity`, `id` |
-| `jolt-box-shape`      | `params` `[w, h, d]`                                                                      |
-| `jolt-sphere-shape`   | `params` `[radius]`                                                                       |
-| `jolt-capsule-shape`  | `params` `[halfHeight, radius]`                                                           |
-| `jolt-cylinder-shape` | `params` `[halfHeight, radius]`                                                           |
-| `jolt-hull-shape`     | Convex hull from points                                                                   |
-| `jolt-mesh-shape`     | Triangle mesh (static only)                                                               |
+| `joltPhysics`        | `gravity`, `debug`                                                                        |
+| `joltRigidBody`     | `motionType` (0=Static, 1=Kinematic, 2=Dynamic), `position`, `rotation`, `velocity`, `id` |
+| `joltBoxShape`      | `params` `[w, h, d]`                                                                      |
+| `joltSphereShape`   | `params` `[radius]`                                                                       |
+| `joltCapsuleShape`  | `params` `[halfHeight, radius]`                                                           |
+| `joltCylinderShape` | `params` `[halfHeight, radius]`                                                           |
+| `joltHullShape`     | Convex hull from points                                                                   |
+| `joltMeshShape`     | Triangle mesh (static only)                                                               |
 
 ### Features & UI
 
@@ -412,25 +412,25 @@ export class DemoComponent {}
   <camera [position]="[4, 3, 6]" [lookAt]="[0, 0, 0]" />
   <directionalLight [position]="[3, 5, 2]" />
 
-  <jolt-physics [gravity]="[0, -9.81, 0]" [debug]="false" [paused]="false">
+  <joltPhysics [gravity]="[0, -9.81, 0]" [debug]="false" [paused]="false">
     <!-- Ground (Static) -->
-    <jolt-rigid-body [position]="[0, -0.5, 0]" [motionType]="0">
-      <jolt-box-shape [params]="[100, 1, 100]" />
+    <joltRigidBody [position]="[0, -0.5, 0]" [motionType]="0">
+      <joltBoxShape [params]="[100, 1, 100]" />
       <mesh>
         <boxGeometry [params]="[100, 1, 100]" />
         <meshStandardMaterial [params]="{ color: '#666' }" />
       </mesh>
-    </jolt-rigid-body>
+    </joltRigidBody>
 
     <!-- Falling Ball (Dynamic) -->
-    <jolt-rigid-body [position]="[0, 4, 0]" [motionType]="2">
-      <jolt-sphere-shape [params]="[0.5]" />
+    <joltRigidBody [position]="[0, 4, 0]" [motionType]="2">
+      <joltSphereShape [params]="[0.5]" />
       <mesh>
         <sphereGeometry [params]="{ radius: 0.5, widthSegments: 32, heightSegments: 16 }" />
         <meshNormalMaterial />
       </mesh>
-    </jolt-rigid-body>
-  </jolt-physics>
+    </joltRigidBody>
+  </joltPhysics>
 </scene>
 ```
 

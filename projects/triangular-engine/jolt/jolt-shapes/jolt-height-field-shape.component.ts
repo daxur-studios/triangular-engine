@@ -25,7 +25,7 @@ interface IHeightFieldParams {
 }
 
 @Component({
-  selector: 'jolt-height-field-shape',
+  selector: 'joltHeightFieldShape',
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideShapeComponent(JoltHeightFieldShapeComponent)],

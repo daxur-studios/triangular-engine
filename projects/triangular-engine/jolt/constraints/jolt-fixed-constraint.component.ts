@@ -8,7 +8,7 @@ import {
 import { distinctUntilChanged } from 'rxjs';
 
 @Component({
-  selector: 'jolt-fixed-constraint',
+  selector: 'joltFixedConstraint',
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideJoltConstraintComponent(JoltFixedConstraintComponent)],

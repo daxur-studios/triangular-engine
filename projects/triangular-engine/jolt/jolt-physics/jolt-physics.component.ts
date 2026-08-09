@@ -27,7 +27,7 @@ import {
   JoltEventEmitter,
 } from '../models/contact-events.model';
 @Component({
-  selector: 'jolt-physics',
+  selector: 'joltPhysics',
   imports: [AsyncPipe, JoltDebugRendererComponent],
   templateUrl: './jolt-physics.component.html',
   styleUrl: './jolt-physics.component.scss',

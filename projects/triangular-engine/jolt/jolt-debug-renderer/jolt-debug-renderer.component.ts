@@ -32,7 +32,7 @@ import { JoltPhysicsComponent } from '../jolt-physics/jolt-physics.component';
 import { Jolt, JoltPhysicsService } from '../jolt-physics/jolt-physics.service';
 
 @Component({
-  selector: 'jolt-debug-renderer',
+  selector: 'joltDebugRenderer',
   imports: [],
   templateUrl: './jolt-debug-renderer.component.html',
   styleUrl: './jolt-debug-renderer.component.scss',
@@ -579,7 +579,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
 
     // Enumerate the physics system itself so fallback debug rendering includes
     // every live body, regardless of whether it came from a declarative
-    // <jolt-rigid-body> or an imperative BodyInterface caller. The physics
+    // <joltRigidBody> or an imperative BodyInterface caller. The physics
     // system is the lifecycle authority: added bodies appear automatically and
     // removed bodies disappear without debug-specific registration.
     const bodyIds = new Jolt.BodyIDVector();

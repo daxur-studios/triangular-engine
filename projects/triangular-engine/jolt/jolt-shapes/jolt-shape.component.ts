@@ -33,7 +33,7 @@ export function provideShapeComponent<T extends JoltShapeComponent<any>>(
  * so it can be released when the shape is disposed
  */
 @Component({
-  selector: 'jolt-shape',
+  selector: 'joltShape',
   imports: [],
   template: `<ng-content></ng-content>`,
 })

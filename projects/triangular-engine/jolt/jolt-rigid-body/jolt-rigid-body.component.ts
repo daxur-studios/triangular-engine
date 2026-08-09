@@ -69,7 +69,7 @@ export function provideJoltRigidBodyComponent<T extends JoltRigidBodyComponent>(
 }
 
 @Component({
-  selector: 'jolt-rigid-body',
+  selector: 'joltRigidBody',
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideObject3DComponent(JoltRigidBodyComponent)],

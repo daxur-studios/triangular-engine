@@ -12,6 +12,19 @@ All notable changes to triangular-engine are documented here.
   `docs/runbook/008_spline_sublibrary.md` for the phased plan; surface
   binding, masks, rendering, and editing land in later phases.
 
+### Changed (BREAKING CHANGES)
+- Jolt component selectors renamed kebab-case → camelCase to match the engine
+  convention: `jolt-physics`→`joltPhysics`, `jolt-rigid-body`→`joltRigidBody`,
+  `jolt-box-shape`→`joltBoxShape`, `jolt-sphere-shape`→`joltSphereShape`,
+  `jolt-hull-shape`→`joltHullShape`, `jolt-mesh-shape`→`joltMeshShape`,
+  `jolt-height-field-shape`→`joltHeightFieldShape`, `jolt-soft-body`→`joltSoftBody`,
+  `jolt-constraint`→`joltConstraint`, `jolt-fixed-constraint`→`joltFixedConstraint`,
+  `jolt-hinge-constraint`→`joltHingeConstraint`, `jolt-debug-renderer`→`joltDebugRenderer`,
+  `jolt-vehicle-constraint`→`joltVehicleConstraint`, `jolt-vehicle-wheel`→`joltVehicleWheel`,
+  `jolt-tracked-vehicle`→`joltTrackedVehicle`, `jolt-tracked-wheel`→`joltTrackedWheel`,
+  `jolt-wheeled-vehicle`→`joltWheeledVehicle`, `jolt-wheeled-wheel`→`joltWheeledWheel`,
+  and `jolt-leg`→`joltLeg`.
+
 ## [0.1.0-alpha.1] - 2026-07-12
 
 ### Added

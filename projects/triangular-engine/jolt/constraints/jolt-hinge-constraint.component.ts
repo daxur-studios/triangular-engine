@@ -11,7 +11,7 @@ import { LAYER_NON_MOVING } from '../example';
 import { BehaviorSubject } from 'rxjs';
 
 @Component({
-  selector: 'jolt-hinge-constraint',
+  selector: 'joltHingeConstraint',
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideJoltConstraintComponent(JoltHingeConstraintComponent)],

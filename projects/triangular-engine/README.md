@@ -28,7 +28,7 @@ The library is modularized into several secondary entry points (sub-libraries) s
 | Entry Point | Purpose / What it does | Peer Dependencies |
 | ----------- | ---------------------- | ----------------- |
 | `triangular-engine` | **Core Package**: Declarative Angular components for Three.js scenes (such as `<scene>`, `<camera>`, `<mesh>`, `<directionalLight>`, geometries, materials, CSS2D/3D overlays, skybox, ocean, and GLTF loading). | `three`, `dexie`, `three-mesh-bvh` |
-| `triangular-engine/jolt` | **Jolt Physics**: Integration with Jolt Physics engine. Provides `<jolt-physics>`, `<jolt-rigid-body>`, colliders, constraints, and support for high-precision / double-precision coordinates. | `jolt-physics` |
+| `triangular-engine/jolt` | **Jolt Physics**: Integration with Jolt Physics engine. Provides `<joltPhysics>`, `<joltRigidBody>`, colliders, constraints, and support for high-precision / double-precision coordinates. | `jolt-physics` |
 | `triangular-engine/rapier` | **Rapier Physics**: Integration with Rapier 3D physics. Provides `<physics>`, `<rigidBody>`, colliders, and joints. | `@dimforge/rapier3d-compat` |
 | `triangular-engine/pmndrs` | **PMNDRS Helpers**: Angular wrappers for `@pmndrs/vanilla` visual helper components such as `<billboard>` and `<sparkles>`. | `@pmndrs/vanilla` |
 | `triangular-engine/postprocessing` | **Post-processing**: Staged post-processing passes built using `postprocessing` (e.g. bloom, glitch, SMAA, output, custom shaders). | `postprocessing` |
@@ -254,32 +254,32 @@ Rigid body types: 0 Dynamic, 1 Fixed, 2 KinematicPositionBased, 3 KinematicVeloc
 
 ## Physics (Jolt)
 
-Wrap Jolt physics-enabled content in `<jolt-physics>`:
+Wrap Jolt physics-enabled content in `<joltPhysics>`:
 
 ```html
-<jolt-physics [gravity]="[0, -9.81, 0]" [debug]="false" [paused]="false">
+<joltPhysics [gravity]="[0, -9.81, 0]" [debug]="false" [paused]="false">
   <!-- Ground (Static) -->
-  <jolt-rigid-body [position]="[0, -0.5, 0]" [motionType]="0">
-    <jolt-box-shape [params]="[100, 1, 100]" />
+  <joltRigidBody [position]="[0, -0.5, 0]" [motionType]="0">
+    <joltBoxShape [params]="[100, 1, 100]" />
     <mesh>
       <boxGeometry [params]="[100, 1, 100]" />
       <meshStandardMaterial [params]="{ color: '#666' }" />
     </mesh>
-  </jolt-rigid-body>
+  </joltRigidBody>
 
   <!-- Falling Ball (Dynamic) -->
-  <jolt-rigid-body [position]="[0, 5, 0]" [motionType]="2">
-    <jolt-sphere-shape [params]="[0.5]" />
+  <joltRigidBody [position]="[0, 5, 0]" [motionType]="2">
+    <joltSphereShape [params]="[0.5]" />
     <mesh>
       <sphereGeometry [params]="{ radius: 0.5 }" />
       <meshStandardMaterial [params]="{ color: 'springgreen' }" />
     </mesh>
-  </jolt-rigid-body>
-</jolt-physics>
+  </joltRigidBody>
+</joltPhysics>
 ```
 
 Motion types: 0 Static, 1 Kinematic, 2 Dynamic.
-See `.agent/skills/triangular-engine-jolt/SKILL.md` for advanced Jolt controls, double precision coordinates, and joints/constraints (e.g. `<jolt-fixed-constraint>` or `<jolt-hinge-constraint>`).
+See `.agent/skills/triangular-engine-jolt/SKILL.md` for advanced Jolt controls, double precision coordinates, and joints/constraints (e.g. `<joltFixedConstraint>` or `<joltHingeConstraint>`).
 
 ## Services
 

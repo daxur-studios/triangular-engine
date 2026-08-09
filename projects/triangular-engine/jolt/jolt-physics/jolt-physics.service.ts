@@ -127,6 +127,15 @@ export class JoltPhysicsService {
 
     this.constraints$.next([...this.constraints$.value, { a, b, constraint }]);
   }
+  /**
+   * Registers a `VehicleConstraint` with its chassis body on both ends so the
+   * physics teardown sweep removes it. A wheeled/tracked constraint binds one
+   * vehicle body plus virtual wheels, so there is no meaningful second body —
+   * reusing the chassis keeps the generic constraint teardown working.
+   */
+  registerVehicleConstraint(constraint: Jolt.Constraint, chassis: Jolt.Body) {
+    this.registerConstraint(constraint, chassis, chassis);
+  }
   unregisterConstraint(constraint: Jolt.Constraint) {
     this.constraints$.next(
       this.constraints$.value.filter((c) => c.constraint !== constraint),

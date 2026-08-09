@@ -8,7 +8,7 @@ import { Jolt } from '../jolt-physics/jolt-physics.service';
  * Provide either positions or geometry but not both at the same time to generate the hull shape.
  */
 @Component({
-  selector: 'jolt-hull-shape',
+  selector: 'joltHullShape',
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideShapeComponent(JoltHullShapeComponent)],

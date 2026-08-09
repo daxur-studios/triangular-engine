@@ -15,7 +15,7 @@ import {
 } from './water-buoyancy';
 
 /**
- * Attaches to a parent `<jolt-rigid-body>` (same upward-DI pattern as the
+ * Attaches to a parent `<joltRigidBody>` (same upward-DI pattern as the
  * `jolt-*-shape` components) and, once per physics substep before `Step()`,
  * samples the registered `WaterSurface` at the body's position and applies
  * `Jolt.Body#ApplyBuoyancyImpulse` — see
@@ -53,7 +53,7 @@ export class WaterBuoyancyComponent {
   constructor() {
     if (!this.rigidBodyComponent) {
       console.error(
-        '<waterBuoyancy> must be nested inside a <jolt-rigid-body>.',
+        '<waterBuoyancy> must be nested inside a <joltRigidBody>.',
       );
       return;
     }
@@ -148,7 +148,7 @@ export class WaterBuoyancyComponent {
       depth++;
       if (depth > maxDepth) {
         console.warn(
-          '<waterBuoyancy>: max depth reached, cannot find a parent <jolt-rigid-body>.',
+          '<waterBuoyancy>: max depth reached, cannot find a parent <joltRigidBody>.',
         );
         return undefined;
       }

@@ -13,7 +13,7 @@ interface ITriMeshParams {
 
 /** Must be used with a static motion type rigid body */
 @Component({
-  selector: 'jolt-mesh-shape',
+  selector: 'joltMeshShape',
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideShapeComponent(JoltMeshShapeComponent)],

@@ -11,7 +11,7 @@ interface ISphereShapeParams {
 }
 
 @Component({
-  selector: 'jolt-sphere-shape',
+  selector: 'joltSphereShape',
   imports: [],
   template: `<ng-content></ng-content>`,
   providers: [provideShapeComponent(JoltSphereShapeComponent)],

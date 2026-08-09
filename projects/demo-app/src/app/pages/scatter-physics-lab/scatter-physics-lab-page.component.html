@@ -88,8 +88,8 @@
   <ambientLight [intensity]="1.3" />
   <directionalLight [position]="[220, 260, 140]" [intensity]="2.1" />
 
-  <jolt-physics [gravity]="[0, -9.81, 0]" [debug]="physicsDebug()">
-    <jolt-rigid-body
+  <joltPhysics [gravity]="[0, -9.81, 0]" [debug]="physicsDebug()">
+    <joltRigidBody
       #rover
       [motionType]="2"
       [position]="roverSpawnPositionM"
@@ -97,24 +97,24 @@
       [linearDamping]="0.05"
       (onContactAdded)="onRoverContact($event)"
     >
-      <jolt-box-shape [params]="roverBoxParams" />
+      <joltBoxShape [params]="roverBoxParams" />
       <mesh [castShadow]="true">
         <boxGeometry [params]="roverBoxParams" />
         <meshStandardMaterial
           [params]="{ color: '#ffb347', roughness: 0.5, metalness: 0.15 }"
         />
       </mesh>
-    </jolt-rigid-body>
+    </joltRigidBody>
 
     @for (projectile of projectiles(); track projectile.id) {
-      <jolt-rigid-body
+      <joltRigidBody
         #projBody
         [motionType]="2"
         [position]="projectile.spawnPositionM"
         [velocity]="projectile.velocityMps"
         (onContactAdded)="onProjectileContact($event, projectile, projBody)"
       >
-        <jolt-sphere-shape [radius]="projectile.radiusM" />
+        <joltSphereShape [radius]="projectile.radiusM" />
         <mesh [castShadow]="true">
           <sphereGeometry
             [params]="{
@@ -127,7 +127,7 @@
             [params]="{ color: '#9fb4c7', roughness: 0.6 }"
           />
         </mesh>
-      </jolt-rigid-body>
+      </joltRigidBody>
     }
-  </jolt-physics>
+  </joltPhysics>
 </scene>

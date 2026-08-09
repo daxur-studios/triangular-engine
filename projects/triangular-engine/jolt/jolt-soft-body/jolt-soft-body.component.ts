@@ -9,7 +9,7 @@ export interface IJoltSoftBodyCreatedEvent { readonly body: Jolt.Body; readonly 
 
 /** Declaratively creates a mesh-backed Jolt soft body and keeps its vertices synchronized. */
 @Component({
-  selector: 'jolt-soft-body',
+  selector: 'joltSoftBody',
   imports: [],
   template: '',
   providers: [provideObject3DComponent(JoltSoftBodyComponent)],
