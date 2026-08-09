@@ -177,6 +177,20 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'animals-lab',
+    loadComponent: () =>
+      import('./pages/animals-lab/animals-lab-page.component').then(
+        ({ AnimalsLabPageComponent }) => AnimalsLabPageComponent,
+      ),
+  },
+  {
+    path: 'animals-lab',
+    loadComponent: () =>
+      import('./pages/animals-lab/animals-lab-page.component').then(
+        ({ AnimalsLabPageComponent }) => AnimalsLabPageComponent,
+      ),
+  },
+  {
     path: 'large-world-life-poc',
     loadComponent: () =>
       import('./pages/large-world-life-poc/large-world-life-poc-page.component').then(

@@ -32,7 +32,8 @@
             "include": [
               "**/*.spec.ts",
               "life/**/*.spec.ts",
-              "projects/triangular-engine/life/**/*.spec.ts",
+                "projects/triangular-engine/life/**/*.spec.ts",
+                "projects/triangular-engine/animals/**/*.spec.ts",
               "../water/**/*.spec.ts",
               "../terrain/**/*.spec.ts",
               "../scatter/**/*.spec.ts",

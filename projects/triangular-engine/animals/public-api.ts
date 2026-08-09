@@ -1,0 +1,8 @@
+/** Deterministic, framework-free animal simulation primitives. */
+export * from './core/animal-types';
+export * from './core/animal-hash';
+export * from './core/fixed-step-clock';
+export * from './core/flock-definition';
+export * from './core/flock-materialization';
+export * from './core/flock-step';
+export * from './core/flock-presentation';

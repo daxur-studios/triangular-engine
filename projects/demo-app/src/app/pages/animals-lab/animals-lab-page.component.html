@@ -1,0 +1,32 @@
+<div class="animals-lab-toolbar">
+  <strong>triangular-engine/animals — deterministic flock slice</strong>
+  <button type="button" (click)="toggleFlee()">
+    {{ fleeing() ? "Release vehicle" : "Approach vehicle" }}
+  </button>
+  <label>Time ×{{ timeScale() }} <input type="range" min="0" max="32" step="1" [value]="timeScale()" (input)="setTimeScale($event)" /></label>
+  <span
+    >{{ fleeing() ? "Fleeing" : "Travelling" }} ·
+    {{ flock().length }} birds · {{ simulationTime().toFixed(1) }}s · cull radius {{ 50 }}m</span
+  >
+</div>
+<scene [showFps]="true">
+  <orbitControls [cameraPosition]="[22, 18, 24]" [target]="[0, 4, 0]" />
+  <ambientLight [intensity]="1.4" />
+  <directionalLight [position]="[8, 20, 6]" [intensity]="2" />
+  <mesh [position]="[0, -0.5, 0]"
+    ><boxGeometry [params]="[80, 1, 80]" /><meshStandardMaterial
+      [params]="{ color: '#536b45' }"
+  /></mesh>
+  @for (bird of presentation(); track bird.id) {
+    <mesh [position]="[bird.position.x, bird.position.y, bird.position.z]"
+      ><coneGeometry [params]="[0.28, 0.9, 5]" /><meshStandardMaterial
+        [params]="{ color: bird.activity === 'flee' ? '#ef9a55' : '#d9e8ff' }"
+    /></mesh>
+  }
+  @if (fleeing()) {
+    <mesh [position]="[0, 1, 0]"
+      ><boxGeometry [params]="[2, 1, 3]" /><meshStandardMaterial
+        [params]="{ color: '#a73b3b' }"
+    /></mesh>
+  }
+</scene>

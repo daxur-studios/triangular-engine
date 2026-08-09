@@ -1,0 +1,4 @@
+:host { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.animals-lab-toolbar { display: flex; gap: 1rem; align-items: center; padding: .75rem 1rem; background: #15202b; color: #eaf2ff; }
+.animals-lab-toolbar button { padding: .35rem .7rem; }
+.animals-lab-toolbar label { display: inline-flex; gap: .4rem; align-items: center; }
