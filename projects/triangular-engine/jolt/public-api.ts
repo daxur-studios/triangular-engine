@@ -1,5 +1,6 @@
 export * from './jolt-physics';
 export * from './jolt-rigid-body';
+export * from './jolt-soft-body';
 export * from './jolt-shapes';
 export * from './constraints';
 export * from './jolt-debug-renderer';

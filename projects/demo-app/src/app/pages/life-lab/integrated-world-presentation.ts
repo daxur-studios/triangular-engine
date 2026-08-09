@@ -66,6 +66,7 @@ export class IntegratedWorldPresentation {
   private readonly routePoints: Vector3[] = [];
   private readonly landRoutePoints: Vector3[] = [];
   private seed: number;
+  private lastUpdateTimeSeconds = 0;
 
   constructor(seed = 909) {
     this.seed = seed;
@@ -102,6 +103,19 @@ export class IntegratedWorldPresentation {
   }
 
   update(timeSeconds: number): void {
+    // High warp can advance many seconds between render frames. Simulate that
+    // interval in bounded substeps so target sampling and shoreline checks do
+    // not alias into back-and-forth motion or tunnel through water.
+    const deltaSeconds = Math.max(0, timeSeconds - this.lastUpdateTimeSeconds);
+    this.lastUpdateTimeSeconds = timeSeconds;
+    const stepCount = Math.min(24, Math.max(1, Math.ceil(deltaSeconds / 0.08)));
+    const stepSeconds = deltaSeconds / stepCount;
+    for (let step = 0; step < stepCount; step++) {
+      this.updateStep(timeSeconds - deltaSeconds + stepSeconds * (step + 1), stepSeconds);
+    }
+  }
+
+  private updateStep(timeSeconds: number, stepSeconds: number): void {
     for (let index = 0; index < this.travelers.length; index++) {
       const profile = this.travelerProfiles[index];
       const state = this.travelerStates[index];
@@ -149,10 +163,10 @@ export class IntegratedWorldPresentation {
           ? -1.4 + Math.sin(t * 0.8 + phase) * 0.45
           : terrain + profile.altitudeM;
       const target = new Vector3(targetX, targetY, targetZ);
-      const blend = Math.min(1, 0.018 + (profile.habitat === 'air' ? 0.012 : 0.008));
+      const blend = Math.min(1, 1 - Math.exp(-(profile.habitat === 'air' ? 0.8 : 0.5) * stepSeconds));
       const previous = state.clone();
       state.lerp(target, blend);
-      const maxStep = profile.habitat === 'land' ? 0.12 : profile.habitat === 'water' ? 0.2 : 0.28;
+      const maxStep = stepSeconds * (profile.habitat === 'land' ? 7.5 : profile.habitat === 'water' ? 12 : 17);
       const dx = state.x - previous.x;
       const dy = state.y - previous.y;
       const dz = state.z - previous.z;

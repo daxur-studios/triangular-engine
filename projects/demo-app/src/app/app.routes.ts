@@ -229,4 +229,17 @@ export const routes: Routes = [
         ({ VehicleTrailLabPageComponent }) => VehicleTrailLabPageComponent,
       ),
   },
+  {
+    path: 'soft-body-poc',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
+    loadComponent: () =>
+      import('./pages/soft-body-poc/soft-body-poc-page.component').then(
+        ({ SoftBodyPocPageComponent }) => SoftBodyPocPageComponent,
+      ),
+  },
 ];

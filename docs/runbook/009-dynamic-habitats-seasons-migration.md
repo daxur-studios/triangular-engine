@@ -56,3 +56,12 @@ next technical slices are:
 The existing Life Lab paths are temporary debug fixtures. They are not the
 target population model and should be removed or isolated once free movement
 is in place.
+
+## Current POC caveat: shoreline handling
+
+Land agents currently stop at the last valid land sample when a movement step
+would enter water. This is intentionally simple and visually stable for the
+POC, but group steering may expose it later as shoreline bunching, hesitation,
+or poor flock/herd cohesion. Replace it with continuous habitat-gradient
+steering (and group-aware obstacle avoidance) before treating water boundaries
+as production behaviour.

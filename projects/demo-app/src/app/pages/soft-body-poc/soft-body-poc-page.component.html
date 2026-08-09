@@ -1,0 +1,68 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel">
+      <a routerLink="/">← Examples</a>
+      <h1>Jolt soft-body POC</h1>
+      <p>
+        A declarative <code>&lt;jolt-soft-body&gt;</code> created from a
+        subdivided sphere mesh. This page is for testing deformation, rendering,
+        and lifecycle behavior before vehicle destruction is added.
+      </p>
+      <div class="controls">
+        <label>Shape
+          <select [value]="shape()" (change)="setShape($any($event.target).value)">
+            <option value="sphere">Sphere</option>
+            <option value="cube">Cube</option>
+            <option value="cloth">Cloth</option>
+          </select>
+        </label>
+        <label>Gravity: {{ gravity() }}
+          <input type="range" min="-20" max="0" step="0.1" [value]="gravity()" (input)="setNumber('gravity', $event)" />
+        </label>
+        <label>Damping: {{ linearDamping() | number: '1.2-2' }}
+          <input type="range" min="0" max="1" step="0.05" [value]="linearDamping()" (input)="setNumber('linearDamping', $event)" />
+        </label>
+        <label>Iterations: {{ solverIterations() }}
+          <input type="range" min="1" max="20" step="1" [value]="solverIterations()" (input)="setNumber('solverIterations', $event)" />
+        </label>
+        <label>Edge compliance: {{ edgeCompliance() }}
+          <input type="range" min="0.00001" max="0.001" step="0.00001" [value]="edgeCompliance()" (input)="setNumber('edgeCompliance', $event)" />
+        </label>
+        <label>Shear compliance: {{ shearCompliance() }}
+          <input type="range" min="0.00001" max="0.001" step="0.00001" [value]="shearCompliance()" (input)="setNumber('shearCompliance', $event)" />
+        </label>
+        <label>Bend compliance: {{ bendCompliance() }}
+          <input type="range" min="0.00001" max="0.005" step="0.00001" [value]="bendCompliance()" (input)="setNumber('bendCompliance', $event)" />
+        </label>
+        <button (click)="reset()">Reset experiment</button>
+      </div>
+    </section>
+  </ng-template>
+
+  <orbitControls [cameraPosition]="[10, 7, 12]" [target]="[0, 0, 0]" />
+  <ambientLight [intensity]="1.4" />
+  <directionalLight [position]="[6, 10, 8]" [intensity]="2" />
+
+  <jolt-physics [gravity]="[0, gravity(), 0]" [debug]="false">
+    <jolt-rigid-body [motionType]="0" [position]="[0, -3, 0]">
+      <jolt-box-shape [params]="[12, 1, 12]" />
+      <mesh>
+        <boxGeometry [params]="[12, 1, 12]" />
+        <meshStandardMaterial [params]="{ color: '#263238', roughness: 0.9 }" />
+      </mesh>
+    </jolt-rigid-body>
+    @if (showBody()) {
+      <jolt-soft-body
+        [vertices]="activeMesh.vertices"
+        [faces]="activeMesh.faces"
+        [position]="shape() === 'cloth' ? [0, 6, 0] : [0, 3, 0]"
+        [solverIterations]="solverIterations()"
+        [linearDamping]="linearDamping()"
+        [edgeCompliance]="edgeCompliance()"
+        [shearCompliance]="shearCompliance()"
+        [bendCompliance]="bendCompliance()"
+        [color]="softBodyColor"
+      />
+    }
+  </jolt-physics>
+</scene>
