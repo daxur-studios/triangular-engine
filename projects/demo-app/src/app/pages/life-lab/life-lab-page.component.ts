@@ -66,6 +66,7 @@ export class LifeLabPageComponent {
   protected integratedWorldSeed = 909;
   protected habitatOverlayVisible = false;
   protected inspectorActivity = 'grazing';
+  protected inspectorScrubTimeSeconds = 0;
   protected readonly timeScales: readonly TimeScale[] = [0.5, 1, 2, 5, 10, 100, 1000];
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
@@ -360,6 +361,14 @@ export class LifeLabPageComponent {
     this.integratedWorld.setHabitatOverlayVisible(this.habitatOverlayVisible);
   }
 
+  protected setInspectorTimeSeconds(value: string): void {
+    const universalTimeSeconds = Number(value);
+    if (!Number.isFinite(universalTimeSeconds)) return;
+    this.integratedWorldTimeSeconds = universalTimeSeconds;
+    this.inspectorScrubTimeSeconds = universalTimeSeconds;
+    this.updateIntegratedWorldTime(universalTimeSeconds);
+  }
+
   private update(deltaSeconds: number): void {
     const time = this.engine.elapsedTime$.value;
     this.player.position.set(
@@ -380,9 +389,7 @@ export class LifeLabPageComponent {
     this.animalPresentation.updateHerd(this.herdSimulation, time);
     // Integrated-world motion uses the same simulation clock as the agents,
     // so low and high warp scales remain coherent.
-    this.integratedWorld.update(this.integratedWorldTime(deltaSeconds));
-    const inspectorState = this.lifeWorldInspector.update(this.integratedWorldTimeSeconds);
-    this.inspectorActivity = inspectorState.activity;
+    this.updateIntegratedWorldTime(this.integratedWorldTime(deltaSeconds));
 
     for (let index = 0; index < this.simulation.agents.length; index++) {
       const agent = this.simulation.agents[index];
@@ -409,6 +416,12 @@ export class LifeLabPageComponent {
     this.birdMesh.instanceMatrix.needsUpdate = true;
     this.renderAgents(this.fishSimulation, this.fishMesh);
     this.renderAgents(this.herdSimulation, this.herdMesh);
+  }
+
+  private updateIntegratedWorldTime(universalTimeSeconds: number): void {
+    this.integratedWorld.update(universalTimeSeconds);
+    const inspectorState = this.lifeWorldInspector.update(universalTimeSeconds);
+    this.inspectorActivity = inspectorState.activity;
   }
 
   private renderAgents(simulation: LifeSimulation, mesh: InstancedMesh): void {

@@ -96,9 +96,22 @@
           </button>
           <small>Seed {{ integratedWorldSeed }} · Herd: {{ inspectorActivity }}</small>
         </div>
+        <label class="time-scrubber">
+          <span>Scrub universal time</span>
+          <input
+            type="range"
+            min="0"
+            max="320"
+            step="0.25"
+            [value]="inspectorScrubTimeSeconds"
+            (input)="setInspectorTimeSeconds($any($event.target).value)"
+          />
+          <output>{{ inspectorScrubTimeSeconds.toFixed(2) }} s</output>
+        </label>
         <p class="blurb">
           Top-down deterministic habitat diagnostic. Green is meadow, dark green forest,
-          blue water; the gold disc is the herd population cell and the ring is its current target.
+          blue water; dark triangles are herd animals, the gold ring encloses their population cell,
+          and the pale ring is the current target.
         </p>
       } @else if (lifeMode === "world") {
         <div class="time-warp" aria-label="World scenario controls">
@@ -235,7 +248,7 @@
   </ng-template>
 
   <orbitControls
-    [cameraPosition]="lifeMode === 'herd' ? [0, 3.8, 18] : lifeMode === 'world' ? [0, 110, 150] : lifeMode === 'inspector' ? [0, 220, 0.1] : [0, 42, 54]"
+    [cameraPosition]="lifeMode === 'herd' ? [0, 3.8, 18] : lifeMode === 'world' ? [0, 110, 150] : lifeMode === 'inspector' ? [0, 170, 0.1] : [0, 42, 54]"
     [target]="lifeMode === 'herd' ? [0, 1.2, 0] : lifeMode === 'inspector' ? [0, 0, 0] : [0, 8, 0]"
   />
   <ambientLight [intensity]="1.1" />

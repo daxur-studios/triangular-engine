@@ -77,6 +77,28 @@
   background: rgba(244, 194, 107, 0.2);
 }
 
+.time-scrubber {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.5rem 0 0.75rem;
+  color: #dce6d8;
+  font-size: 0.82rem;
+}
+
+.time-scrubber input {
+  min-width: 0;
+  accent-color: #f4c26b;
+}
+
+.time-scrubber output {
+  min-width: 3.6rem;
+  color: #f4c26b;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 header {
   display: flex;
   align-items: flex-end;
