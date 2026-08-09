@@ -64,11 +64,21 @@ when it arrives.
 
 ## Required environments
 
-The public contracts must not assume a flat world or a single representation.
-They should allow:
+The public contracts must not assume a flat world or use rebased render-space
+coordinates as authoritative navigation positions. The first proofs support a
+plane and a quad-sphere. The contracts should leave other topologies possible
+without implementing them initially.
+
+Every navigation location contains a stable coordinate-frame ID and a position
+in that frame. Frames do not move when the renderer rebases. Tiles and regions
+have stable IDs, and cache keys quantize positions in tile-local coordinates;
+raw floating-point world positions are never route-cache identities. Portals
+connect frames or regions and provide the transform needed to cross them.
+
+The design should allow:
 
 - Heightfield and mesh terrain.
-- Planes, spheres, cylinders, and other world topologies.
+- Planes and quad-sphere planetary surfaces initially.
 - Floating-origin rendering while authoritative navigation coordinates remain
   stable.
 - Ground, road, water, flight, and custom traversal domains.
@@ -87,7 +97,7 @@ bounded volumes unless a use case proves dense voxels are necessary.
 | Navigation mesh | Compact paths on irregular surfaces | Generation and dynamic repair are complex | Local ground navigation |
 | Waypoint/portal graph | Very small and fast | Needs useful nodes supplied or generated | Roads, doors, regions, migration |
 | Sparse voxel/octree | Supports true 3D free space | High memory and generation cost | Bounded air/water spaces |
-| Flow field | Very cheap per follower | Expensive per destination; weak for unique goals | RTS crowds sharing goals |
+| Flow field | Very cheap per follower | Expensive per destination; weak for varied task goals | Experimental hot destinations or army movement |
 | Hybrid hierarchy | Matches representation to scale/domain | More contracts and integration work | Recommended long-term design |
 
 No single representation should be exposed as the meaning of navigation. The
@@ -107,13 +117,16 @@ route.
 Loaded areas provide grid, navmesh, or other local navigation tiles. A route
 through a region produces a corridor appropriate to the traversal profile.
 Tiles are independently versioned so local world edits do not invalidate the
-entire world.
+entire world. The first grid representation carries obstacle clearance so
+multiple agent radii can share one bake. A later navmesh provider may instead
+use profile-specific data.
 
 ### 3. Shared route data
 
 Agents with compatible starts, goals, profiles, and world versions may share
-route corridors. RTS agents heading to common task areas should use cached
-routes or flow fields rather than each running a full search.
+route corridors. RTS agents heading to common task areas should primarily use
+cached region/portal corridors rather than each running a full search. Flow
+fields remain an experiment for unusually hot shared goals.
 
 ### 4. Local avoidance
 
@@ -136,13 +149,27 @@ Changes should be classified by cost and scope:
 - **Regional topology change:** a bridge, tunnel, flood, or large terrain edit
   changes connectivity between regions.
 
-Providers publish changed bounds, stable feature IDs, and version increments.
-The navigation layer invalidates only affected tiles, graph edges, cached
-routes, and flow fields. Agents whose route remains valid should not replan.
+Providers publish changed tile/edge IDs, stable feature IDs, bounds, and
+version increments. Routes record the IDs and versions of the tiles and graph
+edges they depend on. Cached routes are indexed by those dependencies, while
+followers validate the current and look-ahead route segments lazily. A global
+world revision is diagnostic context, not a reason to invalidate every route.
 
-Updates may be asynchronous, but query results must state which world version
-they used. While rebuilding, policy must be explicit: retain the previous safe
-data, return a partial route, or report that navigation data is unavailable.
+If a change leaves an agent inside newly blocked space, following reports
+`displaced`. The consumer can stop, move to a provider-supplied nearest valid
+location, temporarily ignore the obstacle, or reconstruct the agent.
+Navigation must not silently choose gameplay policy.
+
+Updates and searches use an asynchronous incremental queue from the first
+slice. Query results state the data revisions they used. While rebuilding,
+policy must be explicit: retain the previous safe data, return a partial
+route, or report that navigation data is unavailable.
+
+The planner consumes immutable, serializable navigation tiles and graph
+snapshots plus incremental change sets. Terrain sampling and nav-data baking
+are separate adapters. The core planner does not retain arbitrary callbacks,
+which allows the same data to run on the main thread or cross a worker boundary
+using transferable buffers.
 
 ## Scaling model
 
@@ -156,8 +183,8 @@ Initial planning assumptions on an ordinary desktop CPU:
 | ---: | --- |
 | 1–10 | Independent routes and frequent replanning are reasonable |
 | 100 | Cached hierarchical routes and staggered replanning |
-| 1,000 | Shared corridors/flow fields, bounded local avoidance, few new global searches per frame |
-| 10,000+ | Region/task-level movement with only nearby agents individually navigated |
+| 1,000 | Shared corridors, bounded local avoidance, few new global searches per frame |
+| 10,000+ | Out of scope for individual navigation; use region/task-level simulation and navigate only nearby agents |
 
 These are hypotheses to benchmark, not API guarantees. The first benchmark
 suite should measure requests per second and frame-time budget separately from
@@ -176,6 +203,9 @@ All expensive operations need explicit budgets:
 
 Path following should be cheap enough to run for many agents. Path search,
 navigation-data rebuilding, and dense local avoidance are separate budgets.
+Node/work-unit budgets determine reproducible query results. Millisecond frame
+caps only control when queued work completes and are not deterministic across
+machines; the library does not promise simulation-level lockstep timing.
 
 ## Determinism
 
@@ -184,7 +214,9 @@ the planner should produce the same result. Stable IDs and explicit
 tie-breakers must be used where costs are equal.
 
 Asynchronous completion time need not be deterministic. Consumers should not
-depend on the wall-clock frame in which a route becomes available.
+depend on the wall-clock frame in which a route becomes available. Cross-machine
+lockstep is not a v1 requirement; cost functions should nevertheless avoid
+unnecessary engine-sensitive transcendental math.
 
 ## Proposed minimal public concepts
 
@@ -199,6 +231,17 @@ interface NavigationVector3 {
   readonly z: number;
 }
 
+interface NavigationLocation {
+  readonly frameId: string;
+  readonly position: NavigationVector3;
+}
+
+type NavigationGoal =
+  | { readonly kind: 'point'; readonly location: NavigationLocation }
+  | { readonly kind: 'any-of'; readonly locations: readonly NavigationLocation[] }
+  | { readonly kind: 'region'; readonly regionId: string }
+  | { readonly kind: 'adjacent-to'; readonly featureId: string; readonly range: number };
+
 interface TraversalProfile {
   readonly id: string;
   readonly domains: readonly NavigationDomain[];
@@ -210,25 +253,62 @@ interface TraversalProfile {
 
 interface NavigationQuery {
   readonly id: string;
-  readonly start: NavigationVector3;
-  readonly destination: NavigationVector3;
+  readonly start: NavigationLocation;
+  readonly goal: NavigationGoal;
   readonly profile: TraversalProfile;
   readonly maximumCost?: number;
   readonly maximumExpandedNodes?: number;
   readonly allowPartial?: boolean;
 }
 
+interface NavigationDependency {
+  readonly id: string;
+  readonly version: number;
+}
+
+interface NavigationRouteSegment {
+  readonly from: NavigationLocation;
+  readonly to: NavigationLocation;
+  readonly domain: NavigationDomain;
+  readonly tileId?: string;
+  readonly portalId?: string;
+  readonly corridorWidth?: number;
+  readonly surfaceNormal?: NavigationVector3;
+}
+
 interface NavigationRoute {
   readonly queryId: string;
   readonly status: 'complete' | 'partial' | 'unreachable' | 'budget-exceeded';
-  readonly points: readonly NavigationVector3[];
+  readonly segments: readonly NavigationRouteSegment[];
+  readonly dependencies: readonly NavigationDependency[];
   readonly cost: number;
-  readonly worldVersion: string | number;
+}
+
+interface NavigationDataChangeSet {
+  readonly upsertedTiles: readonly NavigationTileSnapshot[];
+  readonly removedTileIds: readonly string[];
+  readonly upsertedEdges: readonly NavigationEdgeSnapshot[];
+  readonly removedEdgeIds: readonly string[];
+}
+
+interface NavigationDataStore {
+  apply(changeSet: NavigationDataChangeSet): void;
+  enqueue(query: NavigationQuery): NavigationRequestHandle;
+  queryReachability(query: NavigationReachabilityQuery): NavigationRequestHandle;
+  process(workBudget: number): readonly NavigationResult[];
 }
 ```
 
 The first public API should avoid exposing Three.js classes, Angular services,
-worker APIs, or a specific grid/navmesh implementation.
+worker APIs, or a specific grid/navmesh implementation. Snapshot, edge,
+request, and result schemas will be fixed in Milestone 0. Public string IDs are
+mapped to compact numeric handles in planner hot paths to avoid repeated string
+comparison and allocation.
+
+Routes are corridors, not bare polylines. Local providers project and smooth
+paths on their surface, using funnel/string-pulling or an equivalent quality
+step where the representation supports it. Portal segments tell consumers
+when a door, gate, bridge, shoreline, or frame transition is crossed.
 
 ## BSP design test
 
@@ -248,11 +328,16 @@ The design succeeds for BSP when:
 The design succeeds for the RTS when:
 
 - Hundreds of villagers travel among homes, resources, workplaces, and storage.
-- Roads affect cost and throughput; walls and buildings affect connectivity.
+- Roads affect cost and traffic distribution; walls and buildings affect
+  connectivity.
 - Placing a wall or opening a gate causes bounded, local invalidation.
-- Agents sharing a task destination can use shared corridors or flow fields.
+- Agents sharing compatible task routes can use cached portal corridors.
 - Different body sizes and traversal permissions can coexist.
 - Congestion avoidance does not trigger global replanning every frame.
+
+Throughput is not promised by static routing. A later optional dynamic-cost
+overlay may publish congestion costs at a deliberately slower cadence; local
+avoidance owns immediate crowd separation.
 
 ## First vertical slice
 
@@ -262,7 +347,8 @@ Build a framework-free local-plane proof using editable heightfield terrain:
 2. Route one rover-like agent with radius and maximum-slope constraints.
 3. Add and remove one building-sized obstacle and invalidate affected routes.
 4. Route 100 agents toward a mixture of shared and unique destinations.
-5. Compare individual A*, cached routes, and a flow-field/shared-corridor mode.
+5. Compare individual A* with cached/shared region corridors; record flow
+   fields only as an optional experiment.
 6. Visualize routes, expanded nodes, invalid tiles, queue depth, and timings in
    an isolated demo.
 
@@ -277,9 +363,12 @@ Run fixed-seed scenarios at 1, 100, and 1,000 agents with:
 - One shared destination.
 - Ten shared destinations.
 - Unique destinations.
+- Small, medium, and large tile/region graphs.
 - No world changes.
 - Repeated local obstacle changes.
 - One connectivity-breaking wall or gate change.
+- A connectivity break while 1,000 agents are travelling, producing a bounded
+  replan storm.
 
 Record:
 
@@ -290,6 +379,8 @@ Record:
 - Route-cache hit rate.
 - Per-agent path-following and local-avoidance cost.
 - Maximum frame/update time, not only averages.
+- Allocation rate and garbage-collection pauses.
+- Snapshot/change-set transfer or structured-clone cost when a worker is used.
 
 No agent-count claim should enter public documentation until these benchmarks
 exist on named hardware and scenario sizes.
@@ -298,7 +389,13 @@ exist on named hardware and scenario sizes.
 
 ### Milestone 0: contracts and benchmark fixtures
 
+**Status: in progress.** This checkpoint is complete when the entry point
+exports serializable contracts, a deterministic bounded-work queue, and fixed
+synthetic fixtures with focused tests. It intentionally includes no pathfinder.
+
 - Finalize coordinates, versions, traversal profiles, providers, and results.
+- Finalize asynchronous queueing, dependency validation, multi-goal and
+  reachability queries, and serializable snapshot/change-set schemas.
 - Create deterministic synthetic terrain and graph fixtures.
 - Add benchmark harnesses before selecting the first planner.
 
@@ -313,7 +410,7 @@ exist on named hardware and scenario sizes.
 
 - Region/portal graph above local tiles.
 - Route cache and compatible-route sharing.
-- Flow-field comparison for common destinations.
+- Optional flow-field experiment for one hot destination.
 - 1,000-agent benchmark with staggered query processing.
 
 ### Milestone 3: local avoidance
@@ -345,19 +442,25 @@ exist on named hardware and scenario sizes.
 6. Dense crowds should share route work where destinations are compatible.
 7. Surface navigation is the first proof; dense unrestricted 3D voxels are not.
 8. Performance claims require reproducible benchmarks and named scenarios.
+9. Stable frame-relative locations, tile-local quantization, and portal
+   transforms are the initial coordinate contract.
+10. Planning starts with an asynchronous incremental work queue over immutable,
+    serializable navigation snapshots and change sets.
+11. Routes carry versioned dependencies and corridor/portal segments.
+12. Point, multi-point, region, adjacency, and reachability queries are v1
+    requirements.
+13. The first grid uses a clearance field for multiple agent radii.
 
 ## Open decisions
 
 - Whether the first local representation should be a grid, polygon navmesh, or
   an abstraction implemented by both.
-- Exact authoritative coordinate contract for planetary worlds.
-- Whether route planning ships synchronously first or starts with an explicit
-  incremental query scheduler.
 - Cache keys and compatibility rules for starts near one another.
 - How much route smoothing belongs in navigation versus consumer steering.
 - Initial congestion and deadlock policy for dense RTS crowds.
 - Whether ORCA-style avoidance is suitable for physics-driven rovers.
-- Worker ownership, serialization cost, and cancellation semantics.
+- Whether the initial queue runs on the main thread, a worker, or supports both;
+  cancellation and serialization semantics remain to be measured.
 - Memory and latency budgets for target hardware.
 
 ## Change log
@@ -369,3 +472,16 @@ exist on named hardware and scenario sizes.
 - Selected a hybrid hierarchical direction for investigation.
 - Recorded dynamic-world invalidation, deterministic scheduling, scale
   hypotheses, benchmark scenarios, and a staged implementation plan.
+
+### 2026-08-09: architecture review
+
+- Made stable coordinate frames and tile-local cache quantization mandatory.
+- Chose serializable snapshots, incremental change sets, and an asynchronous
+  bounded-work queue as Milestone 0 contracts.
+- Added route dependency versions, lazy look-ahead validation, displaced-agent
+  reporting, richer corridor segments, multi-goal queries, and reachability.
+- Made cached portal corridors the primary RTS sharing strategy and demoted
+  flow fields to an experiment.
+- Added map-size, replan-storm, allocation/GC, and worker-transfer benchmarks.
+- Narrowed initial topology support to a plane and quad-sphere while preserving
+  extensibility for later domains.

@@ -36,7 +36,8 @@
         "projects/triangular-engine/spline/public-api"
       ],
         "triangular-engine/life": ["projects/triangular-engine/life/public-api"],
-        "triangular-engine/animals": ["projects/triangular-engine/animals/public-api"]
+        "triangular-engine/animals": ["projects/triangular-engine/animals/public-api"],
+        "triangular-engine/navigation": ["projects/triangular-engine/navigation/public-api"]
     },
     "outDir": "./dist/out-tsc",
     "strict": true,

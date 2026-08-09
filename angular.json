@@ -34,6 +34,7 @@
               "life/**/*.spec.ts",
                 "projects/triangular-engine/life/**/*.spec.ts",
                 "projects/triangular-engine/animals/**/*.spec.ts",
+                "projects/triangular-engine/navigation/**/*.spec.ts",
               "../water/**/*.spec.ts",
               "../terrain/**/*.spec.ts",
               "../scatter/**/*.spec.ts",

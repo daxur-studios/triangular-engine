@@ -5,6 +5,9 @@ All notable changes to triangular-engine are documented here.
 ## [Unreleased]
 
 ### Added
+- `triangular-engine/navigation` provides framework-free, serializable navigation
+  data and query contracts, deterministic bounded-work request scheduling, and
+  synthetic benchmark fixtures. Tiled ground routing follows in the next slice.
 - `getCompoundSubShapeUserData(shape, subShapeId)` (`triangular-engine/jolt`) —
   resolves a compound shape's per-child `AddShapeShape` userData from a
   contact's `SubShapeID`. `Shape.GetSubShapeUserData` always returns 0 in this
