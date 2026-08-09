@@ -1,7 +1,8 @@
 # Animals first slice execution plan
 
-Status: first slice implemented; deterministic residency and smooth flock-motion
-follow-ups are implemented and ready for visual review. Camera integration and full
+Status: Steps 1–6 implemented; deterministic residency, smooth flock motion,
+vehicle flee/recovery, and renderer-neutral presentation snapshots are complete.
+The full demo acceptance gate remains pending. Camera integration and full
 streaming remain deferred.
 
 Parent design: [011_animals_sublibrary.md](011_animals_sublibrary.md)
@@ -562,3 +563,21 @@ be pulled into this slice:
 - The lab now exposes 0–100x time scale and renders each bird aligned to its
   interpolated heading. Terrain semantics, migration, predators, and full
   streaming remain deferred.
+
+### 2026-08-09: Step 5 vehicle response completion
+
+- Added predictive closest-approach detection using optional disturbance velocity.
+- Added deterministic `travel → flee → recover → travel` activity timing with
+  minimum durations and hysteresis.
+- Added bounded flee response so disturbances cannot create rocket-speed birds.
+- Animal test suite passes with 335 successful tests.
+- Step 6 remains the next milestone: renderer-facing presentation verification
+  and interpolation tests.
+
+### 2026-08-09: Step 6 presentation contract completion
+
+- Presentation snapshots now expose normalized forward heading and scalar speed.
+- Stationary animals use a finite, stable `+Z` heading fallback.
+- Snapshot vectors are cloned so renderer mutation cannot affect simulation state.
+- Added tests for zero-speed finiteness, normalized heading, and mutation safety.
+- Step 7, the isolated `/animals-lab` visual acceptance gate, is now next.

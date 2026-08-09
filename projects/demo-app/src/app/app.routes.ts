@@ -242,6 +242,18 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'soft-bend-constraint',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
+    loadComponent: () => import('./pages/soft-bend-constraint/soft-bend-constraint-page.component').then(
+      (m) => m.SoftBendConstraintPageComponent,
+    ),
+  },
+  {
     path: 'soft-body-poc',
     canActivate: [
       () =>

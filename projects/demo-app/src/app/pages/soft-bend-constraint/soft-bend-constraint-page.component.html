@@ -1,0 +1,14 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel"><a routerLink="/">← Examples</a><p>JoltPhysics.js Soft Bend Constraint<br />Red: Bend Type None<br />Green: Bend Type Distance<br />Blue: Bend Type Dihedral</p></section>
+  </ng-template>
+  <orbitControls [cameraPosition]="[11, 8, 18]" [target]="[0, 2, 4]" />
+  <ambientLight [intensity]="1.4" /><directionalLight [position]="[6, 10, 8]" [intensity]="2" />
+    <joltPhysics [gravity]="[0, -9.81, 0]">
+      <joltRigidBody [motionType]="0" [position]="[0, -5, 0]"><joltBoxShape [params]="[50, 5, 50]" /></joltRigidBody>
+    @for (bend of bends; track bend) {
+      <joltSoftBody [vertices]="cloth.vertices" [faces]="cloth.faces" [pinnedVertices]="cloth.pinnedVertices" [bendType]="bend" [position]="[$index * 5 - 5, 5, 0]" [color]="colors[bend]" />
+      <joltSoftBody [vertices]="sphere.vertices" [faces]="sphere.faces" [bendType]="bend" [position]="[$index * 5 - 5, 5, 10]" [color]="colors[bend]" />
+    }
+  </joltPhysics>
+</scene>

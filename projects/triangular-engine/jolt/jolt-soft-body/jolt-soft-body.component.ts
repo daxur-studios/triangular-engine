@@ -6,6 +6,7 @@ import { LAYER_MOVING, wrapVec3 } from '../example';
 import { Jolt, JoltPhysicsComponent, JoltPhysicsService } from '../jolt-physics';
 
 export interface IJoltSoftBodyCreatedEvent { readonly body: Jolt.Body; readonly owner: JoltSoftBodyComponent; readonly vertexCount: number; }
+export type JoltSoftBodyBendType = 'none' | 'distance' | 'dihedral';
 
 /** Declaratively creates a mesh-backed Jolt soft body and keeps its vertices synchronized. */
 @Component({
@@ -19,6 +20,9 @@ export class JoltSoftBodyComponent extends GroupComponent {
   readonly service = inject(JoltPhysicsService);
   readonly vertices = input<ReadonlyArray<readonly [number, number, number]>>([]);
   readonly faces = input<ReadonlyArray<readonly [number, number, number]>>([]);
+  readonly pinnedVertices = input<ReadonlyArray<number>>([]);
+  /** Bend constraint model: `none`, `distance`, or `dihedral`. */
+  readonly bendType = input<JoltSoftBodyBendType>('none');
   readonly solverIterations = input(5);
   readonly linearDamping = input(0.1);
   readonly gravityFactor = input(1);
@@ -51,11 +55,13 @@ export class JoltSoftBodyComponent extends GroupComponent {
 
     const shared = new metadata.Jolt.SoftBodySharedSettings();
     const vertex = new metadata.Jolt.SoftBodySharedSettingsVertex();
-    for (const [x, y, z] of vertices) {
+    const pinned = new Set(this.pinnedVertices());
+    for (let index = 0; index < vertices.length; index++) {
+      const [x, y, z] = vertices[index];
       vertex.mPosition.x = x;
       vertex.mPosition.y = y;
       vertex.mPosition.z = z;
-      vertex.mInvMass = 1;
+      vertex.mInvMass = pinned.has(index) ? 0 : 1;
       shared.mVertices.push_back(vertex);
     }
     metadata.Jolt.destroy(vertex);
@@ -71,7 +77,12 @@ export class JoltSoftBodyComponent extends GroupComponent {
     attributes.mCompliance = this.edgeCompliance();
     attributes.mShearCompliance = this.shearCompliance();
     attributes.mBendCompliance = this.bendCompliance();
-    shared.CreateConstraints(attributes, 1, metadata.Jolt.SoftBodySharedSettings_EBendType_None);
+    const bendTypes = {
+      none: metadata.Jolt.SoftBodySharedSettings_EBendType_None,
+      distance: metadata.Jolt.SoftBodySharedSettings_EBendType_Distance,
+      dihedral: metadata.Jolt.SoftBodySharedSettings_EBendType_Dihedral,
+    } as const;
+    shared.CreateConstraints(attributes, 1, bendTypes[this.bendType()]);
     metadata.Jolt.destroy(attributes);
     shared.Optimize();
 

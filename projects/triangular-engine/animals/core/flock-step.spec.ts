@@ -27,6 +27,20 @@ describe('stepFlock', () => {
     }
   });
 
+  it('bounds extreme flee impulses instead of creating rocket-speed birds', () => {
+    const terrain = { sample: () => ({ height: 0, normal: { x: 0, y: 1, z: 0 } }) };
+    const flock = [{ id: 'a', position: { x: 0, y: 8, z: 0 }, velocity: { x: 0, y: 0, z: 4 }, activity: 'travel' as const, visible: true }];
+    const next = stepFlock(flock, 0.05, 4, terrain, { id: 'vehicle', position: { x: 0, y: 0, z: 0 }, radius: 20, strength: 1000 });
+    expect(Math.hypot(next[0].velocity.x, next[0].velocity.z)).toBeLessThanOrEqual(5.000001);
+  });
+
+  it('detects a fast approaching disturbance before it overlaps', () => {
+    const terrain = { sample: () => ({ height: 0, normal: { x: 0, y: 1, z: 0 } }) };
+    const flock = [{ id: 'a', position: { x: 0, y: 8, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, activity: 'travel' as const, visible: true }];
+    const next = stepFlock(flock, 0.05, 4, terrain, { id: 'vehicle', position: { x: 0, y: 0, z: -30 }, velocity: { x: 0, y: 0, z: 20 }, radius: 6, strength: 2 });
+    expect(next[0].activity).toBe('flee');
+  });
+
 
   it('replays the same habitat trajectory from the same snapshot', () => {
     const terrain = { sample: () => ({ height: 0, normal: { x: 0, y: 1, z: 0 } }) };

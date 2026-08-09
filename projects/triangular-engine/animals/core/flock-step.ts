@@ -27,6 +27,8 @@ export function stepFlock(
   disturbance?: AnimalDisturbance,
   definition: Partial<Pick<FlockDefinition, 'travelDirection' | 'steeringAcceleration' | 'turnRate' | 'neighbourDistance' | 'habitatMinHeight' | 'habitatMaxHeight'>> = {},
 ): FlockState[] {
+  const minimumFleeDuration = 0.5;
+  const minimumRecoverDuration = 0.75;
   const travel = horizontalUnit(definition.travelDirection ?? { x: 0, y: 0, z: 1 });
   const neighbourDistance = Math.max(0.1, definition.neighbourDistance ?? 10);
   const steeringAcceleration = Math.max(0, definition.steeringAcceleration ?? 3);
@@ -36,6 +38,7 @@ export function stepFlock(
     let vy = animal.velocity.y;
     let vz = animal.velocity.z;
     let activity = animal.activity;
+    let activityTime = Math.max(0, animal.activityTime ?? 0) + Math.max(0, dt);
     let cohesionX = 0;
     let cohesionZ = 0;
     let alignmentX = 0;
@@ -70,12 +73,48 @@ export function stepFlock(
       const dx = animal.position.x - disturbance.position.x;
       const dz = animal.position.z - disturbance.position.z;
       const d = Math.sqrt(dx * dx + dz * dz);
-      if (d < disturbance.radius) {
-        const scale = (1 - d / disturbance.radius) * disturbance.strength;
-        vx += (dx / (d || 1)) * scale;
-        vz += (dz / (d || 1)) * scale;
+      const disturbanceVelocity = disturbance.velocity ?? { x: 0, y: 0, z: 0 };
+      const relativeVx = vx - disturbanceVelocity.x;
+      const relativeVz = vz - disturbanceVelocity.z;
+      const relativeSpeedSquared = relativeVx * relativeVx + relativeVz * relativeVz;
+      const closestTime = relativeSpeedSquared > 0
+        ? clamp(-(dx * relativeVx + dz * relativeVz) / relativeSpeedSquared, 0, 1.5)
+        : 0;
+      const closestX = dx + relativeVx * closestTime;
+      const closestZ = dz + relativeVz * closestTime;
+      const closestDistance = Math.hypot(closestX, closestZ);
+      const threatDistance = Math.min(d, closestDistance);
+      if (threatDistance < disturbance.radius) {
+        const fleeX = closestDistance < d ? closestX : dx;
+        const fleeZ = closestDistance < d ? closestZ : dz;
+        const scale = (1 - threatDistance / disturbance.radius) * disturbance.strength;
+        vx += (fleeX / (threatDistance || 1)) * scale;
+        vz += (fleeZ / (threatDistance || 1)) * scale;
         activity = 'flee';
-      } else if (activity === 'flee') activity = 'recover';
+        activityTime = 0;
+      } else if (activity === 'flee' && activityTime >= minimumFleeDuration) {
+        activity = 'recover';
+        activityTime = 0;
+      } else if (activity === 'recover' && activityTime >= minimumRecoverDuration) {
+        activity = 'travel';
+        activityTime = 0;
+      }
+    } else if (activity === 'flee' && activityTime >= minimumFleeDuration) {
+      activity = 'recover';
+      activityTime = 0;
+    } else if (activity === 'recover' && activityTime >= minimumRecoverDuration) {
+      activity = 'travel';
+      activityTime = 0;
+    }
+    // A disturbance may request a strong escape, but it must not create a
+    // rocket. Keep the response bounded before applying normal acceleration
+    // and turn-rate limits.
+    const disturbanceSpeedLimit = Math.max(0, speed) * 1.25;
+    const disturbedSpeed = Math.hypot(vx, vz);
+    if (disturbedSpeed > disturbanceSpeedLimit && disturbedSpeed > 0) {
+      const scale = disturbanceSpeedLimit / disturbedSpeed;
+      vx *= scale;
+      vz *= scale;
     }
     targetX += vx * 0.1;
     targetZ += vz * 0.1;
@@ -95,6 +134,6 @@ export function stepFlock(
     if (maxHeight !== undefined) next.y = Math.min(next.y, maxHeight);
     const sample = terrain.sample(next);
     next.y = Math.max(next.y, sample.height);
-    return { ...animal, position: next, velocity: { x: vx, y: vy, z: vz }, activity };
+    return { ...animal, position: next, velocity: { x: vx, y: vy, z: vz }, activity, activityTime };
   });
 }

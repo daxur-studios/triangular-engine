@@ -19,6 +19,8 @@ export interface AnimalTerrainSampler {
 export interface AnimalDisturbance {
   id: string;
   position: AnimalVector3;
+  /** Optional world velocity used for predictive approach detection. */
+  velocity?: AnimalVector3;
   radius: number;
   strength: number;
 }
@@ -30,6 +32,8 @@ export interface FlockState {
   position: AnimalVector3;
   velocity: AnimalVector3;
   activity: FlockActivity;
+  /** Deterministic time spent in the current activity. */
+  activityTime?: number;
   visible: boolean;
 }
 
