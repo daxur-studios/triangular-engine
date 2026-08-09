@@ -5,6 +5,12 @@ All notable changes to triangular-engine are documented here.
 ## [Unreleased]
 
 ### Added
+- `getCompoundSubShapeUserData(shape, subShapeId)` (`triangular-engine/jolt`) —
+  resolves a compound shape's per-child `AddShapeShape` userData from a
+  contact's `SubShapeID`. `Shape.GetSubShapeUserData` always returns 0 in this
+  binding, even after casting to `CompoundShape`; this decodes the child
+  index from the ID directly instead. See the Jolt skill's "Compound sub-shape
+  user data always reads as 0" troubleshooting entry.
 - `triangular-engine/animals` now provides lightweight deterministic flock
   steering controls (`travelDirection`, neighbour range, turn rate, and steering
   acceleration) plus `presentInterpolatedFlock()` for smooth renderer-only

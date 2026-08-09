@@ -75,14 +75,14 @@ Wrap your physics-enabled components in `<joltPhysics>`. Every object inside thi
 
 Jolt shapes must be nested inside `<joltRigidBody>` components.
 
-| Component                   | Description               | Example Parameters                                                     |
-| --------------------------- | ------------------------- | ---------------------------------------------------------------------- |
-| `<joltBoxShape>`          | Box dimensions            | `[params]="[width, height, depth]"`                                    |
-| `<joltSphereShape>`       | Sphere radius             | `[params]="[radius]"`                                                  |
-| `<joltCapsuleShape>`      | Capsule properties        | `[params]="[halfHeight, radius]"`                                      |
-| `<joltCylinderShape>`     | Cylinder properties       | `[params]="[halfHeight, radius]"`                                      |
-| `<joltHullShape>`         | Convex hull from geometry | `[geometry]="meshGeometry.geometry()"`                                 |
-| `<joltMeshShape>`           | Static arbitrary mesh     | `[geometry]="meshGeometry.geometry()"`                                 |
+| Component                | Description               | Example Parameters                                                     |
+| ------------------------ | ------------------------- | ---------------------------------------------------------------------- |
+| `<joltBoxShape>`         | Box dimensions            | `[params]="[width, height, depth]"`                                    |
+| `<joltSphereShape>`      | Sphere radius             | `[params]="[radius]"`                                                  |
+| `<joltCapsuleShape>`     | Capsule properties        | `[params]="[halfHeight, radius]"`                                      |
+| `<joltCylinderShape>`    | Cylinder properties       | `[params]="[halfHeight, radius]"`                                      |
+| `<joltHullShape>`        | Convex hull from geometry | `[geometry]="meshGeometry.geometry()"`                                 |
+| `<joltMeshShape>`        | Static arbitrary mesh     | `[geometry]="meshGeometry.geometry()"`                                 |
 | `<joltHeightFieldShape>` | Heightmap terrain         | `[map]="path" [sampleCount]="50" [width]="w" [height]="h" [depth]="d"` |
 
 ### Convex Hull Example:
@@ -195,6 +195,31 @@ this.joltPhysicsService.contactAdded$.subscribe((event) => {
 });
 ```
 
+### Identifying which compound child was struck
+
+If a body's shape is a `CompoundShape`/`MutableCompoundShape` (e.g. a modular
+vessel built from `AddShapeShape(pos, rot, shape, userData)` per part), a
+contact event only gives you a `SubShapeID`, not the child index or userData
+directly. Resolve it with `getCompoundSubShapeUserData` — **do not** call
+`shape.GetSubShapeUserData(subShapeId)` for this; see the Troubleshooting
+entry below for why it won't work.
+
+```typescript
+import { getCompoundSubShapeUserData, Jolt } from 'triangular-engine/jolt';
+
+onContactAdded(body: Jolt.Body, event: IContactAddedEvent) {
+  // The manifold's two sub-shape IDs are body1's and body2's respectively;
+  // pick whichever one isn't event.otherSubShapeId to get your own body's.
+  const ownSubShapeId =
+    event.otherSubShapeId.GetValue() === event.manifold.mSubShapeID2.GetValue()
+      ? event.manifold.mSubShapeID1
+      : event.manifold.mSubShapeID2;
+
+  const compoundShape = Jolt.castObject(body.GetShape(), Jolt.CompoundShape);
+  const struckUserData = getCompoundSubShapeUserData(compoundShape, ownSubShapeId);
+}
+```
+
 ---
 
 ## 8. Troubleshooting
@@ -208,3 +233,9 @@ this.joltPhysicsService.contactAdded$.subscribe((event) => {
 
 - **Cause**: Mesh shape (`<joltMeshShape>`) is only supported for **Static** (`motionType="0"`) rigid bodies in Jolt.
 - **Fix**: Use `<joltHullShape>` (convex hull) or primitive shapes (`box`, `sphere`) for dynamic/kinematic rigid bodies.
+
+### Compound sub-shape user data always reads as 0
+
+- **Symptom**: A contact on a `CompoundShape`/`MutableCompoundShape` body always resolves the struck child's userData to `0`, no matter which child was actually hit — often _silently_, because 0 can coincidentally be a valid ID for one shape and get misattributed rather than erroring.
+- **Cause**: `Shape.GetSubShapeUserData(subShapeId)` is a stub that unconditionally returns 0. This holds even after `Jolt.castObject(shape, Jolt.CompoundShape)` — casting does not route the call to a working per-child lookup in this binding, despite `CompoundShapeSettings.AddShapeShape`'s 4th argument (`inUserData`) genuinely storing a distinct value per child.
+- **Fix**: Use `getCompoundSubShapeUserData(compoundShape, subShapeId)` (exported from `triangular-engine/jolt`) instead — it decodes the child index from the `SubShapeID`'s low bits itself and reads `GetSubShape(idx).mUserData`, which does carry the real value.

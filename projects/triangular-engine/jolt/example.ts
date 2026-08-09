@@ -45,6 +45,30 @@ export const wrapQuat = (q: Jolt.Quat) =>
   new Quaternion(q.GetX(), q.GetY(), q.GetZ(), q.GetW());
 const unwrapQuat = (q: Quaternion) => new Jolt.Quat(q.x, q.y, q.z, q.w);
 
+/**
+ * Reads the per-child `userData` a `CompoundShapeSettings.AddShapeShape`
+ * call attached to whichever child a contact's `SubShapeID` points at.
+ *
+ * `Shape.GetSubShapeUserData(subShapeId)` looks like the built-in way to do
+ * this, but across every tested binding (base `Shape`, `CompoundShape`,
+ * `MutableCompoundShape`, even after `Jolt.castObject` to the compound type)
+ * it unconditionally returns 0 — it does not read the `AddShapeShape` slot
+ * data. Decode the child index from the ID's low bits instead (Jolt encodes a
+ * compound SubShapeID as the all-ones 32-bit pattern with its low
+ * `ceil(log2(childCount))` bits replaced by the child index) and read
+ * `GetSubShape(idx).mUserData` directly, which does carry the value.
+ *
+ */
+export function getCompoundSubShapeUserData(
+  shape: Jolt.CompoundShape,
+  subShapeId: Jolt.SubShapeID,
+): number {
+  const childCount = shape.GetNumSubShapes();
+  const indexBits = Math.max(1, Math.ceil(Math.log2(childCount)));
+  const childIndex = subShapeId.GetValue() & ((1 << indexBits) - 1);
+  return shape.GetSubShape(childIndex).mUserData;
+}
+
 // Object layers
 export const LAYER_NON_MOVING = 0;
 export const LAYER_MOVING = 1;
@@ -440,9 +464,9 @@ export function createMeshFloor(
         let v1 = t.get_mV(0),
           v2 = t.get_mV(1),
           v3 = t.get_mV(2);
-        (v1.x = x1), (v1.y = height(x, z)), (v1.z = z1);
-        (v2.x = x1), (v2.y = height(x, z + 1)), (v2.z = z2);
-        (v3.x = x2), (v3.y = height(x + 1, z + 1)), (v3.z = z2);
+        ((v1.x = x1), (v1.y = height(x, z)), (v1.z = z1));
+        ((v2.x = x1), (v2.y = height(x, z + 1)), (v2.z = z2));
+        ((v3.x = x2), (v3.y = height(x + 1, z + 1)), (v3.z = z2));
       }
 
       {
@@ -450,9 +474,9 @@ export function createMeshFloor(
         let v1 = t.get_mV(0),
           v2 = t.get_mV(1),
           v3 = t.get_mV(2);
-        (v1.x = x1), (v1.y = height(x, z)), (v1.z = z1);
-        (v2.x = x2), (v2.y = height(x + 1, z + 1)), (v2.z = z2);
-        (v3.x = x2), (v3.y = height(x + 1, z)), (v3.z = z1);
+        ((v1.x = x1), (v1.y = height(x, z)), (v1.z = z1));
+        ((v2.x = x2), (v2.y = height(x + 1, z + 1)), (v2.z = z2));
+        ((v3.x = x2), (v3.y = height(x + 1, z)), (v3.z = z1));
       }
     }
   let materials = new Jolt.PhysicsMaterialList();
