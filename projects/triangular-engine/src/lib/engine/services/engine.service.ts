@@ -160,6 +160,11 @@ export class EngineService implements IEngine {
   readonly onEndPlaySignal: WritableSignal<boolean> = signal(false);
 
   readonly isPlaying = signal(false);
+
+  /** Emits unhandled exceptions captured during main loop execution phases */
+  readonly error$ = new Subject<{ phase: string; error: unknown }>();
+  /** Set to true when WebGL context loss occurs on canvas */
+  readonly isContextLost = signal(false);
   //#endregion
 
   //#region Input Events
@@ -186,6 +191,19 @@ export class EngineService implements IEngine {
 
   readonly fpsController: FPSController = new FPSController(this);
 
+  private readonly onContextLost = (event: Event) => {
+    event.preventDefault();
+    this.isContextLost.set(true);
+    this.stopLoop();
+    console.warn('⚠️ [TriangularEngine] WebGL context lost. Pausing engine loop.');
+  };
+
+  private readonly onContextRestored = () => {
+    console.log('✅ [TriangularEngine] WebGL context restored. Resuming engine loop.');
+    this.isContextLost.set(false);
+    this.startLoop();
+  };
+
   constructor() {
     EngineService.instance++;
     this.instance = EngineService.instance;
@@ -200,6 +218,9 @@ export class EngineService implements IEngine {
     BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
     BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
     Mesh.prototype.raycast = acceleratedRaycast;
+
+    this.canvas.addEventListener('webglcontextlost', this.onContextLost);
+    this.canvas.addEventListener('webglcontextrestored', this.onContextRestored);
   }
 
   readonly sceneComponent = new BehaviorSubject<SceneComponent | undefined>(
@@ -233,6 +254,11 @@ export class EngineService implements IEngine {
 
   onComponentDestroy(): void {
     this.stopLoop();
+
+    this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
+    this.canvas.removeEventListener('webglcontextrestored', this.onContextRestored);
+
+    this.error$.complete();
 
     this.onDestroy$.next();
     this.onDestroy$.complete();
@@ -511,31 +537,58 @@ export class EngineService implements IEngine {
   stopLoop() {
     this.renderer?.setAnimationLoop(null);
   }
+
+  /** Safely emits a value to a subject, catching unhandled subscriber errors without halting the loop */
+  private safeEmit<T>(phase: string, subject: Subject<T>, value: T) {
+    try {
+      subject.next(value);
+    } catch (err) {
+      console.error(`🔥 [TriangularEngine] Uncaught error during phase '${phase}':`, err);
+      this.error$.next({ phase, error: err });
+    }
+  }
+
   /** Ticker function runs every frame */
   tick(time: number) {
-    const startTime = performance.now();
-    this.timer.update(time);
-    const delta = this.timer.getDelta() * this.speedFactor$.value;
+    if (this.isContextLost()) return;
 
-    this.tick$.next(delta);
-    this.elapsedTime$.next(this.elapsedTime$.value + delta);
+    try {
+      const startTime = performance.now();
+      this.timer.update(time);
 
-    // Update the physics simulation
-    //this.physicsService.update(delta);
+      // Delta Clamping: Cap delta to prevent spiral of death / physics explosions (default: 0.1s max)
+      const rawDelta = this.timer.getDelta();
+      const maxDelta = this.options.maxDeltaTime ?? 0.1;
+      const delta = Math.min(rawDelta, maxDelta) * this.speedFactor$.value;
 
-    // Synchronize physics and rendering
-    //this.syncPhysicsToRender();
+      // Phase 1: Main Update Tick
+      this.safeEmit('tick$', this.tick$, delta);
 
-    //if (this.useOrbitControls) this.orbitControls?.update(delta);
+      try {
+        this.elapsedTime$.next(this.elapsedTime$.value + delta);
+      } catch (err) {
+        console.error("🔥 [TriangularEngine] Uncaught error updating elapsedTime$:", err);
+        this.error$.next({ phase: 'elapsedTime$', error: err });
+      }
 
-    // Allow late subscribers (e.g., camera follow) to update just before render
-    this.postTick$.next();
-    this.beforeRender$.next();
+      // Phase 2: Post-Tick & Before-Render
+      this.safeEmit('postTick$', this.postTick$, undefined);
+      this.safeEmit('beforeRender$', this.beforeRender$, undefined);
 
-    this.render(time, false, delta);
+      // Phase 3: Render Pass
+      try {
+        this.render(time, false, delta);
+      } catch (err) {
+        console.error("🔥 [TriangularEngine] Uncaught error during render pass:", err);
+        this.error$.next({ phase: 'render', error: err });
+      }
 
-    const frameTimeMs = performance.now() - startTime;
-    this.fpsController.recordFrame(frameTimeMs);
+      const frameTimeMs = performance.now() - startTime;
+      this.fpsController.recordFrame(frameTimeMs);
+    } catch (err) {
+      console.error('🔥 [TriangularEngine] Uncaught top-level error in tick loop:', err);
+      this.error$.next({ phase: 'tick_uncaught', error: err });
+    }
   }
 
   public render(time: number, force?: boolean, deltaTime = 0) {

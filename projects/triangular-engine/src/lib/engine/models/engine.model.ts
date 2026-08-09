@@ -1,4 +1,4 @@
-import { BehaviorSubject, ReplaySubject } from 'rxjs';
+import { BehaviorSubject, ReplaySubject, Subject } from 'rxjs';
 import {
   Camera,
   Scene,
@@ -61,6 +61,13 @@ export interface IEngineOptions {
   /** Renderer tone-mapping exposure. Defaults to 1. */
   toneMappingExposure?: number;
 
+  /**
+   * Maximum allowed delta time per frame in seconds.
+   * Prevents physics explosions & spiral of death on lag spikes or tab switching.
+   * Default: 0.1 (100ms).
+   */
+  maxDeltaTime?: number;
+
   transparent?: boolean;
   webGLRendererParameters?: WebGLRendererParameters;
   /** Parameters forwarded to WebGPURenderer constructor. */
@@ -79,6 +86,8 @@ export interface IEngineLifecycle {
 
   readonly fpsController: FPSController;
   readonly tick$: BehaviorSubject<number>;
+  readonly error$?: Subject<{ phase: string; error: unknown }>;
+  readonly isContextLost?: WritableSignal<boolean>;
 
   readonly speedFactor$: BehaviorSubject<number>;
 
