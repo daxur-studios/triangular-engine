@@ -7,10 +7,14 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import {
+  BufferGeometry,
   ConeGeometry,
   CylinderGeometry,
+  Float32BufferAttribute,
   Group,
   InstancedMesh,
+  Line,
+  LineBasicMaterial,
   Mesh,
   MeshStandardMaterial,
   Object3D,
@@ -57,6 +61,14 @@ type BirdStage = 0 | 1 | 2 | 3 | 4;
 type TimeScale = 0.5 | 1 | 2 | 5 | 10 | 100 | 1000;
 type LifeMode = 'birds' | 'fish' | 'herd' | 'insects' | 'world' | 'inspector';
 
+type LifeCatalogueEntry = {
+  readonly id: string;
+  readonly label: string;
+  readonly habitat: string;
+  readonly movement: string;
+  readonly scale: string;
+};
+
 @Component({
   selector: 'app-life-lab-page',
   imports: [RouterLink, EngineModule],
@@ -75,12 +87,19 @@ export class LifeLabPageComponent {
   protected timeScale: TimeScale = 1;
   protected integratedWorldSeed = 909;
   protected habitatOverlayVisible = false;
+  protected routeOverlayVisible = true;
   protected inspectorActivity = 'grazing';
   protected inspectorScrubTimeSeconds = 0;
   protected herdScrubTimeSeconds = 0;
   protected herdScrubbing = false;
   protected herdActivity: LifeRouteActivity = 'travel';
   protected readonly timeScales: readonly TimeScale[] = [0.5, 1, 2, 5, 10, 100, 1000];
+  protected readonly speciesCatalogue: readonly LifeCatalogueEntry[] = [
+    { id: 'birds', label: 'Birds', habitat: 'Air / land', movement: 'Flock', scale: 'Medium' },
+    { id: 'fish', label: 'Fish', habitat: 'Freshwater / ocean', movement: 'School', scale: 'Small' },
+    { id: 'herd', label: 'Herd mammals', habitat: 'Meadow / forest edge', movement: 'Group route', scale: 'Large' },
+    { id: 'insects', label: 'Insects', habitat: 'Air / vegetation', movement: 'Swarm', scale: 'Tiny' },
+  ];
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
   private readonly baseWorld = new Group();
@@ -93,6 +112,7 @@ export class LifeLabPageComponent {
   private readonly lifeSession = new LifeSession({ seed: 7321 });
   private herdEventId = 0;
   private readonly herdRoute: LifeDeterministicRoute;
+  private readonly herdRouteOverlay: Line;
   private readonly animalPresentation = new ProceduralAnimalPresentation(
     BIRD_COUNT,
     FISH_COUNT,
@@ -147,6 +167,8 @@ export class LifeLabPageComponent {
     this.group.add(this.baseWorld);
     this.buildWorld();
     this.herdRoute = this.createHerdRoute();
+    this.herdRouteOverlay = this.createRouteOverlay(this.herdRoute);
+    this.group.add(this.herdRouteOverlay);
     this.buildLife();
     this.buildFish();
     this.buildHerd();
@@ -231,6 +253,22 @@ export class LifeLabPageComponent {
         radius: 0.4,
       });
     }
+  }
+
+  private createRouteOverlay(route: LifeDeterministicRoute): Line {
+    const points: number[] = [];
+    route.segments.forEach((segment, index) => {
+      if (index === 0) {
+        points.push(segment.from.x, 1.04, segment.from.z);
+      }
+      points.push(segment.to.x, 1.04, segment.to.z);
+    });
+    const lineGeometry = new BufferGeometry();
+    lineGeometry.setAttribute('position', new Float32BufferAttribute(points, 3));
+    return new Line(
+      lineGeometry,
+      new LineBasicMaterial({ color: '#f4c26b', transparent: true, opacity: 0.8 }),
+    );
   }
 
   private buildFish(): void {
@@ -375,6 +413,7 @@ export class LifeLabPageComponent {
     this.herdMesh.visible = mode === 'herd' && this.renderStyle === 'primitive';
     this.integratedWorld.group.visible = mode === 'world';
     this.lifeWorldInspector.group.visible = mode === 'inspector';
+    this.herdRouteOverlay.visible = this.routeOverlayVisible && (mode === 'herd' || mode === 'world');
     this.animalPresentation.setVisibility(mode === 'world' || mode === 'inspector' ? 'birds' : mode, this.renderStyle);
     this.animalPresentation.group.visible = mode !== 'world' && mode !== 'inspector';
   }
@@ -429,6 +468,11 @@ export class LifeLabPageComponent {
   protected toggleHabitatOverlay(): void {
     this.habitatOverlayVisible = !this.habitatOverlayVisible;
     this.integratedWorld.setHabitatOverlayVisible(this.habitatOverlayVisible);
+  }
+
+  protected toggleRouteOverlay(): void {
+    this.routeOverlayVisible = !this.routeOverlayVisible;
+    this.herdRouteOverlay.visible = this.routeOverlayVisible && (this.lifeMode === 'herd' || this.lifeMode === 'world');
   }
 
   protected setInspectorTimeSeconds(value: string): void {
@@ -611,6 +655,8 @@ export class LifeLabPageComponent {
     this.animalPresentation.dispose();
     this.integratedWorld.dispose();
     this.lifeWorldInspector.dispose();
+    this.herdRouteOverlay.geometry.dispose();
+    (this.herdRouteOverlay.material as LineBasicMaterial).dispose();
     this.player.geometry.dispose();
     (this.player.material as MeshStandardMaterial).dispose();
     for (const mesh of this.treeMeshes) {

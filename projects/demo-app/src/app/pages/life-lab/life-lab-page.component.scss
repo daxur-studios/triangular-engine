@@ -132,3 +132,38 @@ strong {
   color: #b8c6b8;
   font-size: 0.85rem;
 }
+
+.catalogue {
+  margin-top: 0.8rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(245, 234, 210, 0.14);
+  border-radius: 0.6rem;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.catalogue > strong {
+  display: block;
+  font-size: 0.86rem;
+}
+
+.catalogue-grid {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+}
+
+.catalogue-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #f5ead2;
+  font-size: 0.8rem;
+}
+
+.catalogue-row small {
+  margin-top: 0;
+  color: #b8c6b8;
+  font-size: 0.72rem;
+  text-align: right;
+}

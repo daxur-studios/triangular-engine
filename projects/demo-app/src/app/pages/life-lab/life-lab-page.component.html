@@ -135,12 +135,31 @@
           >
             Habitat squares
           </button>
+          <button
+            type="button"
+            [class.active]="routeOverlayVisible"
+            (click)="toggleRouteOverlay()"
+          >
+            Route paths
+          </button>
           <small>Seed {{ integratedWorldSeed }}</small>
         </div>
         <p class="blurb">
           Integrated terrain, geological relief, deterministic forest/meadow scatter,
           and free-moving habitat-aware animal groups. This is the larger-world composition POC.
         </p>
+        <section class="catalogue" aria-label="Species catalogue">
+          <strong>Species catalogue</strong>
+          <small>Available life types for this world snapshot.</small>
+          <div class="catalogue-grid">
+            @for (species of speciesCatalogue; track species.id) {
+              <div class="catalogue-row">
+                <span>{{ species.label }}</span>
+                <small>{{ species.habitat }} · {{ species.movement }} · {{ species.scale }}</small>
+              </div>
+            }
+          </div>
+        </section>
       } @else if (lifeMode === "birds") {
         <nav class="stages" aria-label="Bird complexity stages">
           <button
@@ -245,6 +264,13 @@
           <output>{{ herdScrubTimeSeconds.toFixed(2) }} s</output>
         </label>
         <div class="time-warp">
+          <button
+            type="button"
+            [class.active]="routeOverlayVisible"
+            (click)="toggleRouteOverlay()"
+          >
+            Show deterministic route
+          </button>
           <button type="button" (click)="disturbHerd()">
             Disturb herd
           </button>

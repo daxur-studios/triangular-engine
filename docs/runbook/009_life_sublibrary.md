@@ -928,3 +928,36 @@ Also confirm:
   for solitary predators or small predator groups. It only consumes a bounded
   nearby snapshot; the eventual hunt/kill/flee result remains an explicit
   replayable interaction event rather than hidden mutation of the baseline.
+
+## Next large-world POC anchor
+
+The next proof should be a visual, planetary-style world harness rather than a
+gameplay integration. It should make the deterministic world model observable:
+
+- Render planned route segments as visible lines/tubes, with activity colours
+  and optional waypoint/obstacle markers. This is presentation over the
+  existing deterministic route data; it does not change simulation authority.
+- Expose a species catalogue for a planet/area/map: species, habitat types,
+  population tier, movement mode, and whether the species is land, water, air,
+  or amphibious.
+- Define larger habitat regions (meadow, forest, coast, lake/ocean, airspace,
+  etc.) as streamed world inputs. Species choose among suitable regions rather
+  than receiving hand-authored three-point routes.
+- Treat 3D terrain, water, mountains, large scatter rocks, roads, buildings,
+  and other construction as versioned obstacles supplied to route planning and
+  local avoidance. Adding/removing an obstacle must produce a deterministic
+  replan for the affected region.
+- Stream life by camera distance/LOD, while keeping seed + UT + world/obstacle
+  versions sufficient to reconstruct a region when revisited.
+
+This is an incremental extension of the current approach, not a rewrite. The
+missing piece is the world-region/tile harness and route visualizer; the core
+clock, habitat boundary, planner, group sampling, obstacles, and lifecycle
+primitives already exist. Keep births, predation, dense boids, and full player
+interaction behind later milestones until this world-scale proof is stable.
+
+POC progress: the Life Lab now renders the deterministic herd route as a
+toggleable diagnostic line and exposes a first species catalogue (habitat,
+movement mode, and scale) in the World integration view. These are deliberately
+presentation-only; the next iteration should replace the static catalogue with
+streamed planet/region metadata and draw routes generated per streamed region.
