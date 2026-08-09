@@ -20,6 +20,8 @@ export class AnimalsLabPageComponent {
   readonly fleeing = signal(true);
   readonly vehicleZ = signal(-10);
   readonly timeScale = signal(1);
+  readonly paused = signal(false);
+  readonly skippedSeconds = signal(0);
   readonly simulationTime = signal(0);
   readonly observerX = signal(0);
   readonly flock = signal<FlockState[]>(materializeFlock(FLOCK_DEFINITION, { position: { x: 0, y: 0, z: 0 }, radius: 1 }));
@@ -29,7 +31,7 @@ export class AnimalsLabPageComponent {
 
   constructor() {
     const timer = window.setInterval(() => {
-      const result = this.clock.advance(1 / 30, this.timeScale());
+      const result = this.clock.advance(1 / 30, this.paused() ? 0 : this.timeScale());
       const observer = { position: { x: this.observerX(), y: 0, z: 0 }, radius: 1 };
       const residency = updateFlockResidency(FLOCK_DEFINITION, observer, this.residency().visible);
       let next = this.flock();
@@ -43,6 +45,7 @@ export class AnimalsLabPageComponent {
       this.interpolationAlpha.set(result.alpha);
       this.residency.set(residency);
       this.simulationTime.set(result.time);
+      this.skippedSeconds.set(result.skippedSeconds);
     }, 33);
     this.destroyRef.onDestroy(() => window.clearInterval(timer));
   }
@@ -54,6 +57,14 @@ export class AnimalsLabPageComponent {
   vehiclePosition() { const z = this.vehicleZ(); return { x: z * 0.35, y: 1, z }; }
   advanceVehicle() { this.vehicleZ.update((z) => z + 6); this.fleeing.set(true); }
   toggleFlee() { this.fleeing.update((value) => !value); }
+  togglePause() { this.paused.update((value) => !value); }
+  reset() {
+    this.clock.reset();
+    const initial = materializeFlock(FLOCK_DEFINITION, { position: { x: 0, y: 0, z: 0 }, radius: 1 });
+    this.flock.set(initial); this.previousFlock.set(initial); this.interpolationAlpha.set(0);
+    this.simulationTime.set(0); this.skippedSeconds.set(0); this.vehicleZ.set(-10); this.observerX.set(0);
+    this.residency.set(updateFlockResidency(FLOCK_DEFINITION, { position: { x: 0, y: 0, z: 0 }, radius: 1 }));
+  }
   setTimeScale(event: Event) { this.timeScale.set(Number((event.target as HTMLInputElement).value)); }
   setObserver(event: Event) { this.observerX.set(Number((event.target as HTMLInputElement).value)); }
 }

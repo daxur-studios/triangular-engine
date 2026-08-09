@@ -23,16 +23,16 @@ terraforming, reproduction, food webs, or rich animal interactions.
 
 ## Agent workflow
 
-Luna is the implementation owner. Terra is the reviewing and verification
-owner.
+Sol is the planning owner. Luna is the implementation owner. The two roles
+are sequential: Sol defines the slice and its gate, then Luna implements only
+that approved slice.
 
 For every numbered step:
 
 1. Luna implements only that step and runs its narrow tests.
-2. Terra reviews the diff against this plan, runs or inspects the stated gate,
-   and reports concrete findings.
+2. Sol reviews the diff against the plan and reports concrete findings.
 3. Luna resolves accepted findings.
-4. Terra confirms the gate before the next step begins.
+4. Sol confirms the gate before the next step begins.
 
 The agents must work sequentially on shared files. Terra should not implement
 an alternative design in parallel. If a contract must change after Step 2,
@@ -186,7 +186,7 @@ Do not add a compatibility export from `triangular-engine/life`.
 - Add a brief implementation-start entry to the change log below.
 - Do not create production code yet.
 
-### Terra gate
+### Sol gate
 
 - Confirm this plan is sufficient to implement without reading `life`.
 - Flag only blockers to the first vertical slice.
@@ -220,7 +220,7 @@ Do not add a compatibility export from `triangular-engine/life`.
 - Asking for an unrelated flock/member does not change existing results.
 - Output ranges and edge inputs are documented and tested.
 
-### Terra gate
+### Sol gate
 
 - Review hash math for JavaScript integer coercion and platform stability.
 - Review the public API for accidental Three.js, Angular, BSP, or `life`
@@ -255,7 +255,7 @@ Do not add a compatibility export from `triangular-engine/life`.
 - Backward time is surfaced deterministically for reconstruction by a higher
   layer.
 
-### Terra gate
+### Sol gate
 
 - Try adversarial deltas: zero, negative, extremely large, and floating-point
   boundary values.
@@ -288,7 +288,7 @@ Do not add a compatibility export from `triangular-engine/life`.
 - Adding an unrelated observer or flock does not reshuffle member state.
 - Culling removes presentation work without destroying the flock definition.
 
-### Terra gate
+### Sol gate
 
 - Review state ownership at materialize/dematerialize boundaries.
 - Confirm no camera-specific assumptions entered the public contracts.
@@ -322,7 +322,7 @@ Do not add a compatibility export from `triangular-engine/life`.
 - No member finishes a step below minimum terrain clearance.
 - Equivalent fixed-step sequences produce identical results.
 
-### Terra gate
+### Sol gate
 
 - Review order-dependence: each step must read a previous-state snapshot rather
   than partially updated neighbours.
@@ -358,7 +358,7 @@ Do not add a compatibility export from `triangular-engine/life`.
 - Equal threats resolve in stable ID order.
 - A fast disturbance cannot tunnel through the detection logic between steps.
 
-### Terra gate
+### Sol gate
 
 - Review the behaviour as a state machine, not scattered booleans.
 - Verify deterministic threat ordering and transition boundaries.
@@ -387,7 +387,7 @@ Do not add a compatibility export from `triangular-engine/life`.
 - Consumer mutation cannot alter simulation state.
 - Culling produces no visible presentation entries.
 
-### Terra gate
+### Sol gate
 
 - Confirm presentation is renderer-neutral and sufficient for an abstract
   Three.js demo.
@@ -470,7 +470,7 @@ script. If the complete test suite contains unrelated failures, record them
 separately and prove the animal specs independently; do not modify unrelated
 tests to make the gate green.
 
-### Terra final gate
+### Sol final gate
 
 - Public imports resolve only through `triangular-engine/animals`.
 - No `life` dependency or compatibility layer exists.
@@ -581,3 +581,15 @@ be pulled into this slice:
 - Snapshot vectors are cloned so renderer mutation cannot affect simulation state.
 - Added tests for zero-speed finiteness, normalized heading, and mutation safety.
 - Step 7, the isolated `/animals-lab` visual acceptance gate, is now next.
+
+### 2026-08-09: Sol Step 7 plan
+
+- Make the lab acceptance script executable by a user without developer tools.
+- Add reset with an explicit seed, pause/resume, and visible coarse catch-up
+  reporting from the bounded fixed-step clock.
+- Replace the visual ground block with an uneven terrain fixture that matches
+  the sampler used by the flock.
+- Keep all controls and presentation choices demo-local; do not expand the
+  public animals API for UI convenience.
+- Luna implements this slice; Sol reviews the diff and records acceptance
+  evidence before Step 8.
