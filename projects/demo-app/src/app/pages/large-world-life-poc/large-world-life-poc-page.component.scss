@@ -1,0 +1,27 @@
+.panel {
+  width: min(31rem, calc(100vw - 2rem));
+  margin: 1rem;
+  padding: 1rem 1.1rem;
+  color: #f5ead2;
+  background: rgba(24, 31, 26, 0.84);
+  border: 1px solid rgba(245, 234, 210, 0.2);
+  border-radius: 0.8rem;
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(0.6rem);
+}
+
+header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }
+a { display: block; color: #f4c26b; font-size: 0.8rem; text-decoration: none; }
+strong { font-size: 1.08rem; }
+small { display: block; margin-top: 0.35rem; color: #b8c6b8; }
+.blurb { line-height: 1.45; color: #dce6d8; }
+.controls, .scales { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; margin: 0.55rem 0; }
+button { border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 0.35rem; padding: 0.3rem 0.55rem; color: inherit; background: rgba(0, 0, 0, 0.22); cursor: pointer; }
+button.active { border-color: #f4c26b; background: rgba(244, 194, 107, 0.2); }
+.scrubber { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.55rem; margin: 0.7rem 0; font-size: 0.82rem; }
+.scrubber input { min-width: 0; accent-color: #f4c26b; }
+.scrubber output { min-width: 3.4rem; color: #f4c26b; text-align: right; }
+.catalogue { margin-top: 0.7rem; padding: 0.65rem 0.75rem; border: 1px solid rgba(245, 234, 210, 0.14); border-radius: 0.6rem; background: rgba(0, 0, 0, 0.14); }
+.species { display: flex; justify-content: space-between; gap: 0.7rem; margin-top: 0.35rem; font-size: 0.8rem; }
+.species small { margin-top: 0; text-align: right; font-size: 0.72rem; }
+.note { color: #b8c6b8; font-size: 0.8rem; line-height: 1.4; }

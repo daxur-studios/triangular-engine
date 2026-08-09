@@ -11,7 +11,8 @@
     "watch": "ng build triangular-engine --watch --configuration development",
     "dev": "npm run watch",
     "start": "npm run link && npm run watch",
-    "local": "npm run link && npm run watch"
+    "local": "npm run link && npm run watch",
+    "format": "prettier --write ."
   },
   "private": true,
   "dependencies": {

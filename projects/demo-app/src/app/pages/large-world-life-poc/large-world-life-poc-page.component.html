@@ -1,0 +1,66 @@
+<scene [logarithmicDepthBuffer]="true">
+  <terrainSurface
+    [field]="worldField"
+    [domain]="terrainDomain"
+    [roots]="terrainRoots"
+    [maxLod]="2"
+    [resolution]="24"
+    [skirtDepth]="6"
+    [createColors]="createTerrainColors"
+    [createMaterial]="createTerrainMaterial"
+  />
+  <ambientLight [intensity]="1.1" />
+  <directionalLight [position]="[-120, 180, 90]" [intensity]="2.4" />
+  <orbitControls
+    [cameraPosition]="[0, 220, 300]"
+    [target]="[0, 0, 0]"
+    [near]="0.1"
+    [far]="1200"
+  />
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Large world life POC">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>triangular-engine terrain + scatter + life</small>
+        </div>
+        <strong>Large world life</strong>
+      </header>
+      <p class="blurb">
+        Seeded grid world: ice → meadow → jungle/desert → meadow → ice.
+        Vertex colours show the biome field; relief, water, scatter, and routes use the same world sampler.
+      </p>
+      <div class="controls">
+        <button type="button" (click)="randomize()">Randomize seed</button>
+        <button type="button" [class.active]="routesVisible" (click)="toggleRoutes()">Routes</button>
+        <button type="button" [class.active]="catalogueVisible" (click)="toggleCatalogue()">Catalogue</button>
+        <small>Seed {{ seed }} · UT {{ universalTimeSeconds.toFixed(1) }} s</small>
+      </div>
+      <nav class="scales" aria-label="Time scale">
+        @for (scale of timeScales; track scale) {
+          <button type="button" [class.active]="timeScale === scale" (click)="setTimeScale(scale)">{{ scale }}×</button>
+        }
+      </nav>
+      <label class="scrubber">
+        <span>Universal time</span>
+        <input type="range" min="0" max="1200" step="1" [value]="universalTimeSeconds" (input)="scrub($any($event.target).value)" />
+        <output>{{ universalTimeSeconds.toFixed(0) }} s</output>
+      </label>
+      @if (catalogueVisible) {
+        <section class="catalogue" aria-label="Species catalogue">
+          <strong>Species in this world</strong>
+          @for (entry of species; track entry.id) {
+            <div class="species">
+              <span>{{ entry.label }}</span>
+              <small>{{ entry.habitat }} · {{ entry.route }} · LOD {{ entry.lod }}</small>
+            </div>
+          }
+        </section>
+      }
+      <p class="note">
+        Gold = meadow route, pale blue = migratory air route, orange = lake fish route.
+        Route lines are deterministic diagnostics; markers show current UT positions.
+      </p>
+    </section>
+  </ng-template>
+</scene>

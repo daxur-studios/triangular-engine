@@ -961,3 +961,16 @@ toggleable diagnostic line and exposes a first species catalogue (habitat,
 movement mode, and scale) in the World integration view. These are deliberately
 presentation-only; the next iteration should replace the static catalogue with
 streamed planet/region metadata and draw routes generated per streamed region.
+
+The clean large-world POC is now available at the demo route
+`/large-world-life-poc`. It is separate from the earlier Life Lab harness and
+composes a seeded ice/meadow/jungle/desert/water grid, coloured relief terrain,
+deterministic scatter candidates, three deterministic life routes, moving route
+markers, time warp, route visibility, and a species catalogue. This page is a
+composition proof for terrain + scatter + life; it is not yet the planetary
+streaming implementation or BSP integration.
+
+The POC terrain now uses the published `terrainSurface` component with
+`PlaneTerrainDomain`, root patches, adaptive LOD, skirts, and a shared field
+colour callback. The page owns only the demo world recipe; terrain meshing and
+camera-driven terrain residency remain engine responsibilities.

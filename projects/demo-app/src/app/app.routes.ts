@@ -177,6 +177,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'large-world-life-poc',
+    loadComponent: () =>
+      import('./pages/large-world-life-poc/large-world-life-poc-page.component').then(
+        ({ LargeWorldLifePocPageComponent }) => LargeWorldLifePocPageComponent,
+      ),
+  },
+  {
     path: 'life-lab',
     loadComponent: () =>
       import('./pages/life-lab/life-lab-page.component').then(
