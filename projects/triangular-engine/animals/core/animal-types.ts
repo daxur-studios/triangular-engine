@@ -40,7 +40,10 @@ export interface FlockState {
 export interface AnimalPresentation {
   id: string;
   position: AnimalVector3;
+  /** Normalized forward direction; falls back to +Z when stationary. */
   heading: AnimalVector3;
+  /** Magnitude of the simulation velocity in world units per second. */
+  speed: number;
   activity: FlockActivity;
   /** Renderer-neutral roll hint in radians, derived only from motion. */
   bank: number;

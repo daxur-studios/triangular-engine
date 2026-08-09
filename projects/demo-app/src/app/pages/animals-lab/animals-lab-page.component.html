@@ -4,6 +4,9 @@
   <button type="button" (click)="toggleFlee()">{{ fleeing() ? "Release vehicle" : "Enable vehicle" }}</button>
   <label>Time ×{{ timeScale() }} <input type="range" min="0" max="100" step="1" [value]="timeScale()" (input)="setTimeScale($event)" /></label>
   <span>{{ fleeing() ? "Fleeing" : "Travelling" }} · {{ residency().visible ? flock().length : 0 }} birds · {{ simulationTime().toFixed(1) }}s · observer {{ residency().distance.toFixed(1) }}m · {{ residency().visible ? 'resident' : 'culled' }}</span>
+  @if (presentation()[0]; as firstBird) {
+    <span>bird[0]: {{ firstBird.activity }} · {{ firstBird.speed.toFixed(2) }} m/s · α {{ interpolationAlpha().toFixed(2) }}</span>
+  }
   <label>observer distance <input type="range" min="0" max="150" step="1" [value]="observerX()" (input)="setObserver($event)" /></label>
 </div>
 <scene [showFps]="true">

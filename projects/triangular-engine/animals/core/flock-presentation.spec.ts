@@ -1,4 +1,4 @@
-import { presentInterpolatedFlock } from './flock-presentation';
+import { presentFlock, presentInterpolatedFlock } from './flock-presentation';
 
 describe('presentInterpolatedFlock', () => {
   const previous = [{ id: 'bird', position: { x: 0, y: 2, z: 0 }, velocity: { x: 0, y: 0, z: 2 }, activity: 'travel' as const, visible: true }];
@@ -15,5 +15,21 @@ describe('presentInterpolatedFlock', () => {
     const presentation = presentInterpolatedFlock(previous, current, 0.5)[0];
     expect(Number.isFinite(presentation.bank)).toBeTrue();
     expect(Math.abs(presentation.bank)).toBeLessThanOrEqual(0.55);
+  });
+
+  it('exposes normalized heading and speed with a finite stationary fallback', () => {
+    const presentation = presentFlock([{ ...previous[0], velocity: { x: 0, y: 0, z: 0 } }])[0];
+    expect(presentation.heading).toEqual({ x: 0, y: 0, z: 1 });
+    expect(presentation.speed).toBe(0);
+    expect(Object.values(presentation).every((value) => typeof value !== 'number' || Number.isFinite(value))).toBeTrue();
+  });
+
+  it('does not expose mutable simulation vectors', () => {
+    const state = { ...previous[0], position: { ...previous[0].position }, velocity: { ...previous[0].velocity } };
+    const presentation = presentFlock([state])[0];
+    presentation.position.x = 99;
+    presentation.heading.z = 99;
+    expect(state.position.x).toBe(0);
+    expect(state.velocity.z).toBe(2);
   });
 });
