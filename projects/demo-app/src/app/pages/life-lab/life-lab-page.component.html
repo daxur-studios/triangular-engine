@@ -44,6 +44,13 @@
         >
           World integration
         </button>
+        <button
+          type="button"
+          [class.active]="lifeMode === 'inspector'"
+          (click)="setLifeMode('inspector')"
+        >
+          World inspector
+        </button>
       </nav>
       <div class="study" aria-label="Animal rendering study">
         <span>Visual treatment</span>
@@ -82,7 +89,18 @@
           }
         </small>
       </div>
-      @if (lifeMode === "world") {
+      @if (lifeMode === "inspector") {
+        <div class="time-warp" aria-label="World inspector controls">
+          <button type="button" (click)="randomizeIntegratedWorld()">
+            Randomize seed
+          </button>
+          <small>Seed {{ integratedWorldSeed }} · Herd: {{ inspectorActivity }}</small>
+        </div>
+        <p class="blurb">
+          Top-down deterministic habitat diagnostic. Green is meadow, dark green forest,
+          blue water; the gold disc is the herd population cell and the ring is its current target.
+        </p>
+      } @else if (lifeMode === "world") {
         <div class="time-warp" aria-label="World scenario controls">
           <button type="button" (click)="randomizeIntegratedWorld()">
             Randomize scenario
@@ -217,8 +235,8 @@
   </ng-template>
 
   <orbitControls
-    [cameraPosition]="lifeMode === 'herd' ? [0, 3.8, 18] : lifeMode === 'world' ? [0, 110, 150] : [0, 42, 54]"
-    [target]="lifeMode === 'herd' ? [0, 1.2, 0] : [0, 8, 0]"
+    [cameraPosition]="lifeMode === 'herd' ? [0, 3.8, 18] : lifeMode === 'world' ? [0, 110, 150] : lifeMode === 'inspector' ? [0, 220, 0.1] : [0, 42, 54]"
+    [target]="lifeMode === 'herd' ? [0, 1.2, 0] : lifeMode === 'inspector' ? [0, 0, 0] : [0, 8, 0]"
   />
   <ambientLight [intensity]="1.1" />
   <directionalLight [position]="[30, 50, 20]" [intensity]="2.4" />

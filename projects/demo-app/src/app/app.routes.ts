@@ -131,9 +131,7 @@ export const routes: Routes = [
         ),
     ],
     loadComponent: () =>
-      import(
-        './pages/water-buoyancy-poc/water-buoyancy-poc-page.component'
-      ).then(
+      import('./pages/water-buoyancy-poc/water-buoyancy-poc-page.component').then(
         ({ WaterBuoyancyPocPageComponent }) => WaterBuoyancyPocPageComponent,
       ),
   },
@@ -160,9 +158,7 @@ export const routes: Routes = [
         ),
     ],
     loadComponent: () =>
-      import(
-        './pages/scatter-physics-lab/scatter-physics-lab-page.component'
-      ).then(
+      import('./pages/scatter-physics-lab/scatter-physics-lab-page.component').then(
         ({ ScatterPhysicsLabPageComponent }) => ScatterPhysicsLabPageComponent,
       ),
   },
@@ -191,15 +187,14 @@ export const routes: Routes = [
     path: 'terrain-composer-lab',
     loadComponent: () =>
       import('./pages/terrain-composer-lab/terrain-composer-lab-page.component').then(
-        ({ TerrainComposerLabPageComponent }) => TerrainComposerLabPageComponent,
+        ({ TerrainComposerLabPageComponent }) =>
+          TerrainComposerLabPageComponent,
       ),
   },
   {
     path: 'geological-features-lab',
     loadComponent: () =>
-      import(
-        './pages/geological-features/geological-features-page.component'
-      ).then(
+      import('./pages/geological-features/geological-features-page.component').then(
         ({ GeologicalFeaturesPageComponent }) =>
           GeologicalFeaturesPageComponent,
       ),
@@ -207,9 +202,7 @@ export const routes: Routes = [
   {
     path: 'geological-features-lab',
     loadComponent: () =>
-      import(
-        './pages/geological-features/geological-features-page.component'
-      ).then(
+      import('./pages/geological-features/geological-features-page.component').then(
         ({ GeologicalFeaturesPageComponent }) =>
           GeologicalFeaturesPageComponent,
       ),
@@ -223,9 +216,7 @@ export const routes: Routes = [
         ),
     ],
     loadComponent: () =>
-      import(
-        './pages/vehicle-trail-lab/vehicle-trail-lab-page.component'
-      ).then(
+      import('./pages/vehicle-trail-lab/vehicle-trail-lab-page.component').then(
         ({ VehicleTrailLabPageComponent }) => VehicleTrailLabPageComponent,
       ),
   },
@@ -240,6 +231,19 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./pages/soft-body-poc/soft-body-poc-page.component').then(
         ({ SoftBodyPocPageComponent }) => SoftBodyPocPageComponent,
+      ),
+  },
+  {
+    path: 'soft-body-tear-lab',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
+    loadComponent: () =>
+      import('./pages/soft-body-tear-lab/soft-body-tear-lab-page.component').then(
+        ({ SoftBodyTearLabPageComponent }) => SoftBodyTearLabPageComponent,
       ),
   },
 ];

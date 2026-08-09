@@ -8,6 +8,10 @@ The core intentionally does not own hunger, combat, reproduction, animation,
 physics, or long-term decision-making. Games can provide those systems and
 feed movement intents into the same agent simulation.
 
+World adapters can expose habitat samples through `LifeHabitatQuery`. The
+`canTraverseLifeSegment` helper checks intermediate samples, so agents cannot
+skip across a narrow invalid region during a large or time-warped step.
+
 ```ts
 import {
   LifeSimulation,

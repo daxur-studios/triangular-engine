@@ -38,18 +38,18 @@ Use the numbered acceptance anchors in
 [`009_life_sublibrary.md`](009_life_sublibrary.md) as the source of truth. The
 next technical slices are:
 
-1. Replace route-led movement with free local steering and species movement
-   domains (land, water, air).
-2. Add deterministic habitat distribution over streamed cells, including
-   camera-visible materialization and species-specific suitability.
-3. Add natural activities and transitions: wander, feed, rest, flee, land,
-   perch, split, and regroup where applicable.
-4. Add presentation/simulation LOD and scale tests; cull insects sooner than
-   birds, and birds sooner than large animals.
-5. Add player, vessel, vehicle, structure, rock, and hazard observations.
-6. Couple suitability to UT, seasons, and weather fields; verify time warp.
-7. Add broad destination selection for migration from changing suitability
-   fields. Corridors are optional aids, never mandatory visible splines.
+1. Build the streamed 2D world inspector: habitat, suitability, population
+   cells, current activities, targets, active/ambient regions, and costs.
+2. Build one deterministic herd timeline: meadow grazing, water drinking,
+   travel, rest, and reconstruction at arbitrary UT.
+3. Add local domain-aware steering only around the materialized herd; routes
+   remain optional macro corridors and never visible mandatory splines.
+4. Add real bird flocks and fish schools with correct air/water domains.
+5. Add GPU-evaluated ambient swarms and presentation/simulation LOD; cull
+   insects sooner than birds, and birds sooner than large animals.
+6. Add player, vessel, vehicle, structure, rock, and hazard disturbances;
+   recover to deterministic baseline after temporary effects decay.
+7. Couple suitability to UT, seasons, and weather fields; verify time warp.
 8. Add selective persistence, depletion/recovery, predators, death, growth,
    and people only as concrete game consumers require them.
 

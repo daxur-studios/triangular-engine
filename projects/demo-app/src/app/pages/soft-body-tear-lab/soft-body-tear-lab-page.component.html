@@ -1,0 +1,29 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel">
+      <a routerLink="/">← Examples</a>
+      <h1>Soft-body tear lab</h1>
+      <p>Manual topology split prototype. Detonate replaces one soft body with two independently simulated fragments.</p>
+      @if (split()) {
+        <p class="status">2 fragments active</p>
+        <button (click)="reset()">Reset intact body</button>
+      } @else {
+        <p class="status">1 intact body</p>
+        <button (click)="detonate()">Detonate seam</button>
+      }
+    </section>
+  </ng-template>
+
+  <orbitControls [cameraPosition]="[10, 7, 12]" [target]="[0, 0, 0]" />
+  <ambientLight [intensity]="1.4" />
+  <directionalLight [position]="[6, 10, 8]" [intensity]="2" />
+  <joltPhysics [gravity]="[0, -9.81, 0]" [debug]="false">
+    @if (!split()) {
+      <joltSoftBody [vertices]="whole.vertices" [faces]="whole.faces" [position]="[0, 5, 0]" [solverIterations]="8" [linearDamping]="0.2" [edgeCompliance]="0.0001" [shearCompliance]="0.0001" [bendCompliance]="0.001" [color]="wholeColor" (created)="captureIntactBody($event)" />
+    } @else {
+      <joltSoftBody [vertices]="left.vertices" [faces]="left.faces" [position]="fragmentPosition(-0.95)" [velocity]="fragmentVelocity(-1)" [solverIterations]="8" [linearDamping]="0.2" [edgeCompliance]="0.0001" [shearCompliance]="0.0001" [bendCompliance]="0.001" [color]="leftColor" />
+      <joltSoftBody [vertices]="right.vertices" [faces]="right.faces" [position]="fragmentPosition(0.95)" [velocity]="fragmentVelocity(1)" [solverIterations]="8" [linearDamping]="0.2" [edgeCompliance]="0.0001" [shearCompliance]="0.0001" [bendCompliance]="0.001" [color]="rightColor" />
+    }
+    <joltRigidBody [motionType]="0" [position]="[0, -3, 0]"><joltBoxShape [params]="[12, 1, 12]" /><mesh><boxGeometry [params]="[12, 1, 12]" /><meshStandardMaterial [params]="{ color: '#263238', roughness: 0.9 }" /></mesh></joltRigidBody>
+  </joltPhysics>
+</scene>

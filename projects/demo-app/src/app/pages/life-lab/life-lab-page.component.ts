@@ -36,6 +36,7 @@ import {
   ProceduralAnimalPresentation,
 } from './procedural-animal-presentation';
 import { IntegratedWorldPresentation } from './integrated-world-presentation';
+import { LifeWorldInspectorPresentation } from './life-world-inspector-presentation';
 
 const WORLD_SIZE = 80;
 const BIRD_COUNT = 60;
@@ -44,7 +45,7 @@ const HERD_COUNT = 18;
 
 type BirdStage = 0 | 1 | 2 | 3 | 4;
 type TimeScale = 0.5 | 1 | 2 | 5 | 10 | 100 | 1000;
-type LifeMode = 'birds' | 'fish' | 'herd' | 'insects' | 'world';
+type LifeMode = 'birds' | 'fish' | 'herd' | 'insects' | 'world' | 'inspector';
 
 @Component({
   selector: 'app-life-lab-page',
@@ -64,6 +65,7 @@ export class LifeLabPageComponent {
   protected timeScale: TimeScale = 1;
   protected integratedWorldSeed = 909;
   protected habitatOverlayVisible = false;
+  protected inspectorActivity = 'grazing';
   protected readonly timeScales: readonly TimeScale[] = [0.5, 1, 2, 5, 10, 100, 1000];
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
@@ -80,6 +82,7 @@ export class LifeLabPageComponent {
     HERD_COUNT,
   );
   private readonly integratedWorld = new IntegratedWorldPresentation();
+  private readonly lifeWorldInspector = new LifeWorldInspectorPresentation();
   private integratedWorldTimeSeconds = 0;
   private readonly herdPhaseOffsets = Array.from(
     { length: HERD_COUNT },
@@ -122,6 +125,7 @@ export class LifeLabPageComponent {
       this.herdMesh,
       this.animalPresentation.group,
       this.integratedWorld.group,
+      this.lifeWorldInspector.group,
     );
     this.group.add(this.baseWorld);
     this.buildWorld();
@@ -293,14 +297,15 @@ export class LifeLabPageComponent {
 
   protected setLifeMode(mode: LifeMode): void {
     this.lifeMode = mode;
-    this.baseWorld.visible = mode !== 'world';
+    this.baseWorld.visible = mode !== 'world' && mode !== 'inspector';
     this.birdMesh.visible =
       mode === 'birds' && this.renderStyle === 'primitive';
     this.fishMesh.visible = mode === 'fish' && this.renderStyle === 'primitive';
     this.herdMesh.visible = mode === 'herd' && this.renderStyle === 'primitive';
     this.integratedWorld.group.visible = mode === 'world';
-    this.animalPresentation.setVisibility(mode === 'world' ? 'birds' : mode, this.renderStyle);
-    this.animalPresentation.group.visible = mode !== 'world';
+    this.lifeWorldInspector.group.visible = mode === 'inspector';
+    this.animalPresentation.setVisibility(mode === 'world' || mode === 'inspector' ? 'birds' : mode, this.renderStyle);
+    this.animalPresentation.group.visible = mode !== 'world' && mode !== 'inspector';
   }
   protected setFishLevel(level: number): void {
     this.fishLevel = level;
@@ -347,6 +352,7 @@ export class LifeLabPageComponent {
   protected randomizeIntegratedWorld(): void {
     this.integratedWorldSeed = Math.floor(Math.random() * 999_999) + 1;
     this.integratedWorld.setSeed(this.integratedWorldSeed);
+    this.lifeWorldInspector.setSeed(this.integratedWorldSeed);
   }
 
   protected toggleHabitatOverlay(): void {
@@ -375,6 +381,8 @@ export class LifeLabPageComponent {
     // Integrated-world motion uses the same simulation clock as the agents,
     // so low and high warp scales remain coherent.
     this.integratedWorld.update(this.integratedWorldTime(deltaSeconds));
+    const inspectorState = this.lifeWorldInspector.update(this.integratedWorldTimeSeconds);
+    this.inspectorActivity = inspectorState.activity;
 
     for (let index = 0; index < this.simulation.agents.length; index++) {
       const agent = this.simulation.agents[index];
@@ -442,6 +450,7 @@ export class LifeLabPageComponent {
     (this.herdMesh.material as MeshStandardMaterial).dispose();
     this.animalPresentation.dispose();
     this.integratedWorld.dispose();
+    this.lifeWorldInspector.dispose();
     this.player.geometry.dispose();
     (this.player.material as MeshStandardMaterial).dispose();
     for (const mesh of this.treeMeshes) {

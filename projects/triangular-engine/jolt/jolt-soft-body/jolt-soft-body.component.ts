@@ -5,7 +5,7 @@ import { GroupComponent, provideObject3DComponent } from 'triangular-engine';
 import { LAYER_MOVING, wrapVec3 } from '../example';
 import { Jolt, JoltPhysicsComponent, JoltPhysicsService } from '../jolt-physics';
 
-export interface IJoltSoftBodyCreatedEvent { readonly body: Jolt.Body; readonly vertexCount: number; }
+export interface IJoltSoftBodyCreatedEvent { readonly body: Jolt.Body; readonly owner: JoltSoftBodyComponent; readonly vertexCount: number; }
 
 /** Declaratively creates a mesh-backed Jolt soft body and keeps its vertices synchronized. */
 @Component({
@@ -22,6 +22,7 @@ export class JoltSoftBodyComponent extends GroupComponent {
   readonly solverIterations = input(5);
   readonly linearDamping = input(0.1);
   readonly gravityFactor = input(1);
+  readonly velocity = input<readonly [number, number, number]>([0, 0, 0]);
   readonly edgeCompliance = input(0.0001);
   readonly shearCompliance = input(0.0001);
   readonly bendCompliance = input(0.001);
@@ -91,9 +92,21 @@ export class JoltSoftBodyComponent extends GroupComponent {
     const mesh = new Mesh(geometry, new MeshStandardMaterial({ color: this.color(), side: DoubleSide, roughness: 0.55 }));
     this.#mesh = mesh;
     this.object3D().add(mesh);
+    this.#setParticleVelocity(metadata.Jolt, this.velocity());
     this.#syncVertices(metadata.Jolt);
     this.physics.physicsUpdated$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.#syncVertices(metadata.Jolt));
-    this.created.emit({ body: this.#body, vertexCount: vertices.length });
+    this.created.emit({ body: this.#body, owner: this, vertexCount: vertices.length });
+  }
+
+  #setParticleVelocity(jolt: typeof Jolt, velocity: readonly [number, number, number]): void {
+    if (!this.#body) return;
+    const motion = jolt.castObject(this.#body.GetMotionProperties(), jolt.SoftBodyMotionProperties);
+    const vertices = motion.GetVertices();
+    const offset = jolt.SoftBodyVertexTraits.prototype.mVelocityOffset;
+    for (let i = 0; i < vertices.size(); i++) {
+      const target = new Float32Array(jolt.HEAPF32.buffer, jolt.getPointer(vertices.at(i)) + offset, 3);
+      target[0] = velocity[0]; target[1] = velocity[1]; target[2] = velocity[2];
+    }
   }
 
   #syncVertices(jolt: typeof Jolt): void {
@@ -112,6 +125,12 @@ export class JoltSoftBodyComponent extends GroupComponent {
   }
 
   override ngOnDestroy(): void {
+    this.dispose();
+    super.ngOnDestroy();
+  }
+
+  /** Removes the live Jolt body before a topology replacement is created. */
+  dispose(): void {
     const body = this.#body;
     const metadata = this.service.metaData$.value;
     if (body && metadata) {
@@ -120,6 +139,5 @@ export class JoltSoftBodyComponent extends GroupComponent {
     }
     if (this.#settings && metadata) metadata.Jolt.destroy(this.#settings);
     this.#body = undefined;
-    super.ngOnDestroy();
   }
 }

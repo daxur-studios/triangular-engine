@@ -4,7 +4,7 @@
       <a routerLink="/">← Examples</a>
       <h1>Jolt soft-body POC</h1>
       <p>
-        A declarative <code>&lt;jolt-soft-body&gt;</code> created from a
+        A declarative <code>&lt;joltSoftBody&gt;</code> created from a
         subdivided sphere mesh. This page is for testing deformation, rendering,
         and lifecycle behavior before vehicle destruction is added.
       </p>
@@ -43,16 +43,16 @@
   <ambientLight [intensity]="1.4" />
   <directionalLight [position]="[6, 10, 8]" [intensity]="2" />
 
-  <jolt-physics [gravity]="[0, gravity(), 0]" [debug]="false">
-    <jolt-rigid-body [motionType]="0" [position]="[0, -3, 0]">
-      <jolt-box-shape [params]="[12, 1, 12]" />
+  <joltPhysics [gravity]="[0, gravity(), 0]" [debug]="false">
+    <joltRigidBody [motionType]="0" [position]="[0, -3, 0]">
+      <joltBoxShape [params]="[12, 1, 12]" />
       <mesh>
         <boxGeometry [params]="[12, 1, 12]" />
         <meshStandardMaterial [params]="{ color: '#263238', roughness: 0.9 }" />
       </mesh>
-    </jolt-rigid-body>
+    </joltRigidBody>
     @if (showBody()) {
-      <jolt-soft-body
+      <joltSoftBody
         [vertices]="activeMesh.vertices"
         [faces]="activeMesh.faces"
         [position]="shape() === 'cloth' ? [0, 6, 0] : [0, 3, 0]"
@@ -64,5 +64,5 @@
         [color]="softBodyColor"
       />
     }
-  </jolt-physics>
+  </joltPhysics>
 </scene>

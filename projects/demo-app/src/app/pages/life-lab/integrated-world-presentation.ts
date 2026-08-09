@@ -24,7 +24,7 @@ import {
   type IScatterSurfaceSample,
   type ScatterPlacementRules,
 } from 'triangular-engine/scatter';
-import { LifeSimulation } from 'triangular-engine/life';
+import { canTraverseLifeSegment, LifeSimulation, type LifeHabitatQuery, type LifeVector3 } from 'triangular-engine/life';
 import { ProceduralAnimalPresentation } from './procedural-animal-presentation';
 
 const PATCH_SIZE_M = 48;
@@ -177,6 +177,11 @@ export class IntegratedWorldPresentation {
       }
 
       if (profile.habitat === 'land') {
+        // Validate the complete attempted segment. Endpoint-only checks can
+        // skip across narrow water strips during high time warp.
+        if (!this.habitatGrid.canTraverseLand(previous, state)) {
+          state.copy(previous);
+        }
         // Ground from the creature's actual x/z position, not only from its
         // target. This prevents interpolation across slopes from tunnelling
         // underground or hovering above the surface.
@@ -535,10 +540,23 @@ export class IntegratedWorldPresentation {
 }
 
 /** Coarse deterministic environment layer used before a full planetary grid exists. */
-class IntegratedHabitatGrid {
+class IntegratedHabitatGrid implements LifeHabitatQuery {
   private readonly cellSizeM = 12;
 
   constructor(private readonly field: ITerrainField) {}
+
+  sampleHabitat(position: LifeVector3) {
+    const sample = this.sample(position.x, position.z);
+    return {
+      kind: sample.kind,
+      surfaceY: this.field.sample([position.x, position.y, position.z]).elevationM,
+      suitability01: sample.kind === 'land' ? sample.landSuitability01 : sample.waterSuitability01,
+    };
+  }
+
+  canTraverseLand(from: Vector3, to: Vector3): boolean {
+    return canTraverseLifeSegment(this, from, to, ['land'], 8);
+  }
 
   sample(x: number, z: number, knownElevationM?: number): IntegratedHabitatSample {
     const cellX = Math.floor(x / this.cellSizeM) * this.cellSizeM + this.cellSizeM * 0.5;

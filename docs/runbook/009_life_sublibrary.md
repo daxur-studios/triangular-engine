@@ -34,19 +34,24 @@ The architectural target is:
 These are the acceptance anchors for the work. Each milestone must be
 visually verifiable in Life Lab before the next layer is treated as real:
 
-1. **Free life in a varied world** — birds, insects, fish, and land animals
-   move freely through terrain, water, vegetation, and obstacles; no fixed
-   train-like route.
-2. **Habitat-aware distribution** — species appear only in plausible domains
-   and remain visible while the camera moves across the world.
-3. **Scale and LOD** — insects become cheap/culled first, large animals last;
-   distant life uses groups or silhouettes without obvious popping.
-4. **Natural activities** — flock, split, regroup, hover, school, graze,
-   rest, wander, land, or perch as appropriate to the species.
-5. **Player and world interaction** — vessels, vehicles, buildings, rocks,
-   water, and hazards cause avoidance or factual disturbance events.
+1. **World inspector** — a streamed top-down habitat view makes land, water,
+   meadow, forest, suitability, population cells, targets, active regions,
+   and performance state visible before 3D polish is judged.
+2. **One deterministic herd** — at any UT, a herd reconstructs into a
+   legible activity: graze in meadow, travel, drink at water, or rest. It is
+   not a visible spline train and does not require replaying every missed tick.
+3. **Real groups and valid domains** — a bird flock, fish school, and herd use
+   air/water/land domains correctly; close groups use local steering while
+   distant ones remain aggregate records.
+4. **Scale and LOD** — GPU-evaluated ambient swarms cover insects and distant
+   life; CPU steering materializes only the bounded nearby subset. Insects
+   become cheap/culled first, large animals last, without visible popping.
+5. **Temporary disturbance** — player, vessel, vehicle, buildings, rocks,
+   water, and hazards produce factual avoidance/disturbance events. Once the
+   event decays, life resumes its deterministic schedule or selects a new
+   valid activity.
 6. **Seasonal response** — UT and time warp change climate and habitat;
-   migratory species seek better regions while residents remain local.
+   migratory species choose better macro regions while residents remain local.
 7. **Selective continuity** — followed or important creatures persist across
    travel; ordinary background life is reconstructed plausibly and cheaply.
 8. **Optional ecology and people** — depletion/recovery, predators, death,
@@ -737,3 +742,15 @@ Also confirm:
   altitude band. This is the first step toward explicit movement domains.
 - Build verification was attempted, but the local Windows child-process
   session failed with error 1312; rerun once the shell session is healthy.
+
+### 2026-08-09 — Deterministic world-inspector reset
+
+- Reordered the visual milestones around a deterministic population baseline:
+  inspect habitat first, prove one herd schedule second, then add local groups,
+  scale/LOD, and temporary disturbances.
+- Started a separate top-down Life Lab world inspector. It renders a seeded
+  diagnostic habitat map and a population-cell herd marker with an
+  UT-evaluated grazing/travel/drinking/resting baseline.
+- The inspector intentionally does not claim streamed planetary terrain,
+  individual herd locomotion, or disturbance recovery yet. It is the visible
+  contract for those next implementations.
