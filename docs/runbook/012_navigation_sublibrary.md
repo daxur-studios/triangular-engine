@@ -1,7 +1,7 @@
 # Navigation sub-library
 
-Status: core M1/M2 implementation checkpoints complete; integration and
-planetary work remain planned.
+Status: core M1/M2 implementation checkpoints complete; M3 visual verification
+demo in progress; planetary work remains planned.
 
 Related plans:
 
@@ -395,12 +395,9 @@ elapsed time. It is a measurement tool, not a performance guarantee.
 
 ### Milestone 0: contracts and benchmark fixtures
 
-**Status: checkpoint verified — implementation scaffold only.** The entry point now
-exports serializable contracts, a deterministic bounded-work queue, and fixed
-synthetic fixtures. The library build passing only confirms that this scaffold
-compiles and packages; it does not mean pathfinding is implemented. This
-checkpoint is verified by `npm run test:triangular-engine:navigation`, which
-passes 3 headless tests. It intentionally includes no pathfinder.
+**Status: historical checkpoint superseded by M1/M2.** The entry point exports
+serializable contracts, a deterministic bounded-work queue, and fixed synthetic
+fixtures. Pathfinding is now implemented in the later milestones below.
 
 - Finalize coordinates, versions, traversal profiles, providers, and results.
 - Finalize asynchronous queueing, dependency validation, multi-goal and
@@ -462,19 +459,41 @@ library contracts, local routing, dynamic invalidation, shared-goal extraction,
 region routing, cache invalidation, and benchmark fixtures. It does not prove
 spherical, navmesh, worker, or local-avoidance support.
 
-### Milestone 3: local avoidance
+### Milestone 3: visual verification demo
+
+**Status: integration checkpoint complete — demo build verified.** The demo page
+at `/navigation-lab` uses the real heightfield grid and A* APIs. It shows the
+same route as a flat plane or height-varied terrain, supports deterministic seed
+changes, and lets a human toggle obstacle editing and click cells to trigger
+versioned grid changes and route recalculation.
+
+Human verification checklist:
+
+- Open `/navigation-lab` from the Examples page.
+- Switch between Flat plane and 3D terrain; the blue route remains coherent.
+- Enable Edit obstacles and click a walkable cell; the route or status changes.
+- Reset seed, then Change seed; terrain and obstacles change deterministically.
+- Confirm the status, route-cell count, and expanded-node count update.
+
+Build checkpoint:
+
+```text
+npx ng build demo-app --configuration development
+```
+
+### Milestone 4: local avoidance
 
 - Spatial index for nearby agents and obstacles.
 - Compare simple steering with velocity-obstacle/ORCA-style approaches.
 - Explicit handling of congestion, deadlock, and replanning thresholds.
 
-### Milestone 4: large and planetary worlds
+### Milestone 5: large and planetary worlds
 
 - Sparse unloaded-region connectivity.
 - Planetary surface and floating-origin contract proof.
 - Rover and animal-group route integration fixture.
 
-### Milestone 5: additional domains
+### Milestone 6: additional domains
 
 - Road-specific costs and portals.
 - Bounded air and connected-water proofs.

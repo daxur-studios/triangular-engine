@@ -38,6 +38,9 @@
       ],
       "triangular-engine/animals": [
         "projects/triangular-engine/animals/public-api"
+      ],
+      "triangular-engine/navigation": [
+        "projects/triangular-engine/navigation/public-api"
       ]
     },
     "outDir": "../../out-tsc/app",

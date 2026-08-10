@@ -74,6 +74,20 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'navigation-lab',
+    loadComponent: () =>
+      import('./pages/navigation-lab/navigation-lab-page.component').then(
+        ({ NavigationLabPageComponent }) => NavigationLabPageComponent,
+      ),
+  },
+  {
+    path: 'navigation-lab',
+    loadComponent: () =>
+      import('./pages/navigation-lab/navigation-lab-page.component').then(
+        ({ NavigationLabPageComponent }) => NavigationLabPageComponent,
+      ),
+  },
+  {
     path: 'river-lab',
     loadComponent: () =>
       import('./pages/river-lab/river-lab-page.component').then(
