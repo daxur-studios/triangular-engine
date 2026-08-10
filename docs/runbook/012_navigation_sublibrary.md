@@ -465,7 +465,9 @@ spherical, navmesh, worker, or local-avoidance support.
 at `/navigation-lab` uses the real heightfield grid and A* APIs. It shows the
 same route as a flat plane or height-varied terrain, supports deterministic seed
 changes, and lets a human toggle obstacle editing and click cells to trigger
-versioned grid changes and route recalculation.
+versioned grid changes and route recalculation. An optional navigation-data
+overlay exposes blocked, clearance-limited, slope-limited, and walkable cells
+using the active rover profile.
 
 Human verification checklist:
 
@@ -474,6 +476,8 @@ Human verification checklist:
 - Enable Edit obstacles and click a walkable cell; the route or status changes.
 - Reset seed, then Change seed; terrain and obstacles change deterministically.
 - Confirm the status, route-cell count, and expanded-node count update.
+- Enable Show nav data; confirm blocked, clearance, slope, and walkable cells
+  are visually distinguishable when a route is absent or unexpected.
 
 Build checkpoint:
 

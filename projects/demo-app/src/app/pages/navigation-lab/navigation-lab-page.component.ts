@@ -43,6 +43,7 @@ export class NavigationLabPageComponent implements AfterViewInit {
   readonly seed = signal(1);
   readonly view = signal<'flat' | 'terrain'>('terrain');
   readonly editingObstacles = signal(false);
+  readonly showDiagnostics = signal(false);
   readonly routeStatus = signal<NavigationGridRouteResult['status']>('complete');
   readonly routeLength = signal(0);
   readonly expandedNodes = signal(0);
@@ -61,6 +62,11 @@ export class NavigationLabPageComponent implements AfterViewInit {
 
   toggleObstacleEditing(): void {
     this.editingObstacles.update((value) => !value);
+  }
+
+  toggleDiagnostics(): void {
+    this.showDiagnostics.update((value) => !value);
+    this.draw();
   }
 
   nextSeed(): void {
@@ -149,7 +155,9 @@ export class NavigationLabPageComponent implements AfterViewInit {
         const x = column * cellWidth;
         const y = row * cellHeight;
         const lift = terrain ? cell.elevation * 0.42 : 0;
-        context.fillStyle = cell.walkable ? this.terrainColor(cell.elevation) : '#29313b';
+        context.fillStyle = this.showDiagnostics()
+          ? this.diagnosticColor(column, row)
+          : (cell.walkable ? this.terrainColor(cell.elevation) : '#29313b');
         context.beginPath();
         context.moveTo(x, y + lift);
         context.lineTo(x + cellWidth, y + lift);
@@ -208,5 +216,30 @@ export class NavigationLabPageComponent implements AfterViewInit {
     if (elevation < -4) return '#315f78';
     if (elevation > 4) return '#806f5b';
     return '#5f9856';
+  }
+
+  private diagnosticColor(column: number, row: number): string {
+    const cell = this.grid.cells[row * COLUMNS + column];
+    if (!cell.walkable) return '#b94a48';
+    if (cell.clearance < PROFILE.radius * 2) return '#9b59b6';
+    if (!this.hasSlopeValidNeighbor(column, row)) return '#d88932';
+    return '#4eaa68';
+  }
+
+  private hasSlopeValidNeighbor(column: number, row: number): boolean {
+    const cell = this.grid.cells[row * COLUMNS + column];
+    for (let rowOffset = -1; rowOffset <= 1; rowOffset += 1) {
+      for (let columnOffset = -1; columnOffset <= 1; columnOffset += 1) {
+        if (columnOffset === 0 && rowOffset === 0) continue;
+        const neighborColumn = column + columnOffset;
+        const neighborRow = row + rowOffset;
+        if (neighborColumn < 0 || neighborColumn >= COLUMNS || neighborRow < 0 || neighborRow >= ROWS) continue;
+        const neighbor = this.grid.cells[neighborRow * COLUMNS + neighborColumn];
+        if (!neighbor.walkable || neighbor.clearance < PROFILE.radius * 2) continue;
+        const slope = Math.atan2(Math.abs(cell.elevation - neighbor.elevation), CELL_SIZE);
+        if (slope <= PROFILE.maxSlopeRadians) return true;
+      }
+    }
+    return false;
   }
 }
