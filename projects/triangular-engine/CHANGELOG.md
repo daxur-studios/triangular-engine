@@ -7,7 +7,13 @@ All notable changes to triangular-engine are documented here.
 ### Added
 - `triangular-engine/navigation` provides framework-free, serializable navigation
   data and query contracts, deterministic bounded-work request scheduling, and
-  synthetic benchmark fixtures. Tiled ground routing follows in the next slice.
+  synthetic benchmark fixtures. It now also exports the explicit Y-up/X-Z
+  coordinate contract and validation helpers, plus a deterministic local
+  heightfield-grid A* planner with slope, clearance, and expansion-budget
+  limits. Grid change sets now advance immutable snapshots and provide
+  per-cell route dependency validation for local invalidation. A deterministic
+  benchmark harness covers 1, 100, and 1,000-agent scenarios and reports
+  expanded work and timing without asserting universal limits.
 - `getCompoundSubShapeUserData(shape, subShapeId)` (`triangular-engine/jolt`) —
   resolves a compound shape's per-child `AddShapeShape` userData from a
   contact's `SubShapeID`. `Shape.GetSubShapeUserData` always returns 0 in this

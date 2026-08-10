@@ -1,6 +1,6 @@
 # Navigation sub-library
 
-Status: design proposal; no implementation started.
+Status: implementation in progress; Milestones 0 and 1 are partially verified.
 
 Related plans:
 
@@ -385,13 +385,21 @@ Record:
 No agent-count claim should enter public documentation until these benchmarks
 exist on named hardware and scenario sizes.
 
+The first benchmark harness is now part of the navigation entry point. It
+generates seeded scenarios for 1, 100, and 1,000 agents and reports completed,
+partial, unreachable, and budget-exceeded routes plus expanded nodes, cost, and
+elapsed time. It is a measurement tool, not a performance guarantee.
+
 ## Implementation order
 
 ### Milestone 0: contracts and benchmark fixtures
 
-**Status: in progress.** This checkpoint is complete when the entry point
+**Status: checkpoint verified — implementation scaffold only.** The entry point now
 exports serializable contracts, a deterministic bounded-work queue, and fixed
-synthetic fixtures with focused tests. It intentionally includes no pathfinder.
+synthetic fixtures. The library build passing only confirms that this scaffold
+compiles and packages; it does not mean pathfinding is implemented. This
+checkpoint is verified by `npm run test:triangular-engine:navigation`, which
+passes 3 headless tests. It intentionally includes no pathfinder.
 
 - Finalize coordinates, versions, traversal profiles, providers, and results.
 - Finalize asynchronous queueing, dependency validation, multi-goal and
@@ -399,7 +407,23 @@ synthetic fixtures with focused tests. It intentionally includes no pathfinder.
 - Create deterministic synthetic terrain and graph fixtures.
 - Add benchmark harnesses before selecting the first planner.
 
+Human checkpoint command:
+
+```text
+npm run test:triangular-engine:navigation
+npm run build:triangular-engine
+```
+
 ### Milestone 1: tiled ground routing
+
+**Status: in progress — coordinate contract and local A* proof locked.**
+Navigation locations use finite coordinates local to a named frame. The first
+terrain provider is Y-up, with X/Z as horizontal axes; renderer rebasing must
+not change route identity. Cross-frame calculations are rejected. The current
+grid proof routes around blocked cells, enforces clearance and slope limits,
+and returns `budget-exceeded` rather than doing unbounded work. Immutable
+versioned cell changes invalidate dependent routes without invalidating every
+route in the world.
 
 - Heightfield/grid provider and deterministic bounded A*.
 - Route simplification and corridor following.
@@ -407,6 +431,10 @@ synthetic fixtures with focused tests. It intentionally includes no pathfinder.
 - One-agent and 100-agent demo scenarios.
 
 ### Milestone 2: hierarchy, sharing, and RTS scale
+
+**Status: not started.** The next implementation slice is a shared-destination
+goal field, which is an early proof of route sharing but is not yet the full
+region/portal hierarchy or route cache.
 
 - Region/portal graph above local tiles.
 - Route cache and compatible-route sharing.
