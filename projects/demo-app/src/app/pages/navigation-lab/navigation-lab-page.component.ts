@@ -14,6 +14,7 @@ import {
   findNavigationGridRoute,
   simplifyNavigationGridRoute,
   calculateNavigationAvoidanceVelocity,
+  calculateNavigationVelocityObstacleVelocity,
   createNavigationSpatialIndex,
   type NavigationAvoidanceObstacle,
   type NavigationVector3,
@@ -61,6 +62,7 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
   readonly showDiagnostics = signal(false);
   readonly avoidanceEnabled = signal(false);
   readonly avoidanceStrength = signal(1.4);
+  readonly avoidanceMode = signal<'separation' | 'velocity-obstacle'>('separation');
   readonly avoidanceSteps = signal(0);
   readonly routeStatus = signal<NavigationGridRouteResult['status']>('complete');
   readonly routeLength = signal(0);
@@ -110,6 +112,12 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
   setAvoidanceStrength(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
     if (Number.isFinite(value)) this.avoidanceStrength.set(value);
+  }
+
+  setAvoidanceMode(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    if (value === 'separation' || value === 'velocity-obstacle') this.avoidanceMode.set(value);
+    this.resetAvoidanceSimulation();
   }
 
   nextSeed(): void {
@@ -290,13 +298,22 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
       const nextDz = nextTarget.z - agent.position.z;
       const nextLength = Math.hypot(nextDx, nextDz) || 1;
       const preferredVelocity = { x: (nextDx / nextLength) * agent.maxSpeed, y: 0, z: (nextDz / nextLength) * agent.maxSpeed };
-      const velocity = calculateNavigationAvoidanceVelocity({
+      const avoidanceRequest = {
         agent: { ...agent, preferredVelocity },
         nearbyAgents: index.queryAgents(agent.position, CELL_SIZE * 2.5),
         nearbyObstacles: index.queryObstacles(agent.position, CELL_SIZE * 1.5),
         separationWeight: this.avoidanceStrength(),
         obstacleWeight: 0.8,
-      });
+      };
+      const velocity = this.avoidanceMode() === 'velocity-obstacle'
+        ? calculateNavigationVelocityObstacleVelocity({
+            agent: avoidanceRequest.agent,
+            nearbyAgents: avoidanceRequest.nearbyAgents,
+            nearbyObstacles: avoidanceRequest.nearbyObstacles,
+            horizonSeconds: 0.8,
+            directionSamples: 16,
+          })
+        : calculateNavigationAvoidanceVelocity(avoidanceRequest);
       agent.preferredVelocity = preferredVelocity;
       agent.position = {
         x: agent.position.x + velocity.x * deltaSeconds,

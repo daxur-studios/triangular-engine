@@ -47,6 +47,13 @@
           />
           <output>{{ avoidanceStrength().toFixed(1) }}</output>
         </label>
+        <label class="avoidance-control"
+          >Mode
+          <select [value]="avoidanceMode()" (change)="setAvoidanceMode($event)">
+            <option value="separation">Separation</option>
+            <option value="velocity-obstacle">Velocity obstacle</option>
+          </select>
+        </label>
       }
       <button (click)="resetSeed()">Reset seed</button>
       <button (click)="nextSeed()">Change seed ({{ seed() }})</button>
@@ -65,7 +72,7 @@
       ><span>Gold: goal</span><span>Blue: route</span>
       @if (avoidanceEnabled()) {
         <span class="diagnostic avoidance"
-          >Avoidance: 8 agents / {{ avoidanceSteps() }} steps</span
+          >Avoidance: 8 agents / {{ avoidanceSteps() }} steps / {{ avoidanceMode() }}</span
         ><span class="diagnostic forward">Orange agents: forward</span
         ><span class="diagnostic reverse">Purple agents: reverse</span>
       }

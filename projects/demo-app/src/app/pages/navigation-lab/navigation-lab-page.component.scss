@@ -7,6 +7,7 @@ a, small { color: #9db4a0; } a { text-decoration: none; } p { color: #c3d3c5; }
 .actions, .stats { flex-wrap: wrap; margin: .75rem 0; } button { padding: .45rem .7rem; color: #e2eee2; border: 1px solid #45664b; border-radius: .35rem; background: #14251a; cursor: pointer; } button.active, button:hover { border-color: #78ce85; background: #20432a; }
 .avoidance-control { display: inline-flex; align-items: center; gap: .4rem; color: #f4dc88; }
 .avoidance-control input { accent-color: #f4dc88; }
+.avoidance-control select { color: #eef5ed; border: 1px solid #45664b; border-radius: .25rem; background: #14251a; padding: .2rem; }
 .avoidance-control output { min-width: 2rem; color: #eef5ed; }
 canvas { display: block; width: 100%; height: auto; border: 1px solid #35503a; border-radius: .35rem; image-rendering: auto; cursor: crosshair; }
 .stats { padding: .55rem .65rem; border: 1px solid #293d2d; border-radius: .35rem; color: #b9cabd; font-size: .78rem; }

@@ -550,6 +550,23 @@ M4.3 manual verification:
 - Edit an obstacle, reset the seed, and change the seed; confirm the route and
   agent simulation rebuild without errors.
 
+**Manual checkpoint result: verified.** The avoidance-strength control was tested
+at `0`, `1`, `5`, and `10`; stronger values made separation visibly clearer.
+The visual lab remains a demonstration of bounded local steering, not a proof
+of zero overlap or collision-free movement.
+
+M4.4 implementation checkpoint: the lab now has a mode selector for the
+velocity-obstacle sampler and runs it against the same route and eight-agent
+scenario as separation steering. This is still a bounded experiment, not full
+ORCA and not a collision guarantee.
+
+M4.4 manual verification:
+
+- Run the demo with `Separation`, then switch to `Velocity obstacle`.
+- Use the same seed, route, eight agents, and avoidance-strength setting.
+- Compare visible overlap, jitter, sticking, and whether agents make progress.
+- Record which mode is the better default; do not decide from one seed only.
+
 Build checkpoint for the visual slice:
 
 ```text
