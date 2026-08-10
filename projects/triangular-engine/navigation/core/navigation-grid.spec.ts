@@ -57,6 +57,19 @@ describe('findNavigationGridRoute', () => {
     expect(result.expandedNodes).toBe(1);
   });
 
+  it('allows a route to climb through gradual elevation changes', () => {
+    const cells = [0, 1, 2, 3, 4].map((elevation) => openCell(elevation));
+    const result = findNavigationGridRoute({
+      grid: grid(cells, 5, 1),
+      start: { column: 0, row: 0 },
+      goal: { column: 4, row: 0 },
+      profile: { ...profile, maxSlopeRadians: 0.8 },
+    });
+
+    expect(result.status).toBe('complete');
+    expect(result.cells).toHaveSize(5);
+  });
+
   it('returns a bounded-work result instead of expanding indefinitely', () => {
     const result = findNavigationGridRoute({
       grid: grid(Array.from({ length: 15 }, () => openCell())),

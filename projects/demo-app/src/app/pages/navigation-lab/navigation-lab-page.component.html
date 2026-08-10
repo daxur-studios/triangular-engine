@@ -10,6 +10,7 @@
       <button [class.active]="view() === 'terrain'" (click)="setView('terrain')">3D terrain</button>
       <button [class.active]="editingObstacles()" (click)="toggleObstacleEditing()">{{ editingObstacles() ? 'Editing obstacles' : 'Edit obstacles' }}</button>
       <button [class.active]="showDiagnostics()" (click)="toggleDiagnostics()">{{ showDiagnostics() ? 'Hide nav data' : 'Show nav data' }}</button>
+      <button [class.active]="avoidanceEnabled()" (click)="toggleAvoidance()">{{ avoidanceEnabled() ? 'Stop avoidance demo' : 'Run avoidance demo' }}</button>
       <button (click)="resetSeed()">Reset seed</button>
       <button (click)="nextSeed()">Change seed ({{ seed() }})</button>
     </div>
@@ -17,6 +18,9 @@
     <div class="stats">
       <span>Status: {{ routeStatus() }}</span><span>Route cells: {{ routeLength() }}</span><span>A* expanded: {{ expandedNodes() }}</span>
       <span>Green: start</span><span>Gold: goal</span><span>Blue: route</span>
+      @if (avoidanceEnabled()) {
+        <span class="diagnostic avoidance">Avoidance: 8 agents / {{ avoidanceSteps() }} steps</span><span class="diagnostic forward">Orange agents: forward</span><span class="diagnostic reverse">Purple agents: reverse</span>
+      }
       @if (showDiagnostics()) {
         <span class="diagnostic obstacle">Red: blocked</span><span class="diagnostic clearance">Purple: clearance</span><span class="diagnostic slope">Orange: slope-limited</span><span class="diagnostic walkable">Green: walkable</span>
       }

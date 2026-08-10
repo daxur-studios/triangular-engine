@@ -17,6 +17,15 @@ All notable changes to triangular-engine are documented here.
   also includes route simplification, shared-destination goal fields, a
   deterministic region/portal graph planner, and dependency-aware route
   caching for the first RTS-scale routing slice.
+  It now also includes the first local-avoidance baseline: a deterministic
+  uniform spatial index and bounded separation steering for ground agents and
+  circular obstacles. This is an experiment, not a collision guarantee or an
+  ORCA implementation.
+  It also exports a bounded velocity-obstacle-style candidate sampler and
+  configurable yielding/stuck/local-replan/global-replan state classification
+  for M4 comparison work.
+  Reproducible 1/100/1,000-agent avoidance benchmark fixtures are also
+  available for hardware-specific measurements.
 - `getCompoundSubShapeUserData(shape, subShapeId)` (`triangular-engine/jolt`) —
   resolves a compound shape's per-child `AddShapeShape` userData from a
   contact's `SubShapeID`. `Shape.GetSubShapeUserData` always returns 0 in this

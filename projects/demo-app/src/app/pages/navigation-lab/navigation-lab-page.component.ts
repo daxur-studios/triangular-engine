@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  OnDestroy,
   ViewChild,
   signal,
 } from '@angular/core';
@@ -12,6 +13,10 @@ import {
   createNavigationHeightfieldGrid,
   findNavigationGridRoute,
   simplifyNavigationGridRoute,
+  calculateNavigationAvoidanceVelocity,
+  createNavigationSpatialIndex,
+  type NavigationAvoidanceObstacle,
+  type NavigationVector3,
   type NavigationGridCell,
   type NavigationHeightfieldGrid,
   type NavigationGridRouteResult,
@@ -30,6 +35,16 @@ const PROFILE = {
   maxSlopeRadians: 0.8,
 } as const;
 
+interface DemoAvoidanceAgent {
+  readonly id: string;
+  position: NavigationVector3;
+  preferredVelocity: NavigationVector3;
+  readonly radius: number;
+  readonly maxSpeed: number;
+  waypointIndex: number;
+  direction: 1 | -1;
+}
+
 @Component({
   selector: 'app-navigation-lab-page',
   imports: [RouterLink],
@@ -37,22 +52,32 @@ const PROFILE = {
   styleUrl: './navigation-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class NavigationLabPageComponent implements AfterViewInit {
+export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
   @ViewChild('map', { static: true }) private readonly map!: ElementRef<HTMLCanvasElement>;
 
   readonly seed = signal(1);
   readonly view = signal<'flat' | 'terrain'>('terrain');
   readonly editingObstacles = signal(false);
   readonly showDiagnostics = signal(false);
+  readonly avoidanceEnabled = signal(false);
+  readonly avoidanceSteps = signal(0);
   readonly routeStatus = signal<NavigationGridRouteResult['status']>('complete');
   readonly routeLength = signal(0);
   readonly expandedNodes = signal(0);
 
   private grid!: NavigationHeightfieldGrid;
   private route!: NavigationGridRouteResult;
+  private avoidanceAgents: DemoAvoidanceAgent[] = [];
+  private avoidanceObstacles: NavigationAvoidanceObstacle[] = [];
+  private avoidanceFrame?: number;
+  private lastAvoidanceTimestamp = 0;
 
   ngAfterViewInit(): void {
     this.rebuild();
+  }
+
+  ngOnDestroy(): void {
+    if (this.avoidanceFrame !== undefined) cancelAnimationFrame(this.avoidanceFrame);
   }
 
   setView(view: 'flat' | 'terrain'): void {
@@ -67,6 +92,18 @@ export class NavigationLabPageComponent implements AfterViewInit {
   toggleDiagnostics(): void {
     this.showDiagnostics.update((value) => !value);
     this.draw();
+  }
+
+  toggleAvoidance(): void {
+    this.avoidanceEnabled.update((value) => !value);
+    if (this.avoidanceEnabled()) {
+      this.resetAvoidanceSimulation();
+      this.scheduleAvoidanceFrame();
+    } else if (this.avoidanceFrame !== undefined) {
+      cancelAnimationFrame(this.avoidanceFrame);
+      this.avoidanceFrame = undefined;
+      this.draw();
+    }
   }
 
   nextSeed(): void {
@@ -135,6 +172,7 @@ export class NavigationLabPageComponent implements AfterViewInit {
     this.routeStatus.set(this.route.status);
     this.routeLength.set(this.route.cells.length);
     this.expandedNodes.set(this.route.expandedNodes);
+    if (this.avoidanceEnabled()) this.resetAvoidanceSimulation();
     this.draw();
   }
 
@@ -171,6 +209,118 @@ export class NavigationLabPageComponent implements AfterViewInit {
     this.drawRoute(context, cellWidth, cellHeight, terrain);
     this.drawMarker(context, START, cellWidth, cellHeight, '#7ee787', terrain);
     this.drawMarker(context, GOAL, cellWidth, cellHeight, '#ffcf70', terrain);
+    if (this.avoidanceEnabled()) this.drawAvoidanceAgents(context, cellWidth, cellHeight, terrain);
+  }
+
+  private resetAvoidanceSimulation(): void {
+    this.avoidanceAgents = [];
+    this.avoidanceObstacles = [];
+    this.lastAvoidanceTimestamp = 0;
+    if (this.route.cells.length < 2) return;
+    for (let index = 0; index < 8; index += 1) {
+      const movingForward = index < 4;
+      const offset = index % 4;
+      const waypointIndex = movingForward
+        ? Math.min(this.route.cells.length - 1, Math.floor((offset * this.route.cells.length) / 8))
+        : Math.max(0, this.route.cells.length - 1 - Math.floor((offset * this.route.cells.length) / 8));
+      this.avoidanceAgents.push({
+        id: `demo-agent-${index}`,
+        position: this.avoidancePosition(this.route.cells[waypointIndex]),
+        preferredVelocity: { x: 0, y: 0, z: 0 },
+        radius: 0.55,
+        maxSpeed: 5,
+        waypointIndex,
+        direction: movingForward ? 1 : -1,
+      });
+    }
+    this.grid.cells.forEach((cell, index) => {
+      if (!cell.walkable) {
+        const column = index % COLUMNS;
+        const row = Math.floor(index / COLUMNS);
+        this.avoidanceObstacles.push({
+          id: `demo-obstacle-${index}`,
+          position: { x: (column + 0.5) * CELL_SIZE, y: cell.elevation, z: (row + 0.5) * CELL_SIZE },
+          radius: CELL_SIZE * 0.45,
+        });
+      }
+    });
+    this.avoidanceSteps.set(0);
+  }
+
+  private scheduleAvoidanceFrame(): void {
+    this.avoidanceFrame = requestAnimationFrame((timestamp) => {
+      this.updateAvoidance(timestamp);
+      this.scheduleAvoidanceFrame();
+    });
+  }
+
+  private updateAvoidance(timestamp: number): void {
+    if (!this.avoidanceAgents.length) {
+      this.draw();
+      return;
+    }
+    const deltaSeconds = Math.min(0.05, this.lastAvoidanceTimestamp === 0 ? 0.016 : (timestamp - this.lastAvoidanceTimestamp) / 1000);
+    this.lastAvoidanceTimestamp = timestamp;
+    const index = createNavigationSpatialIndex({
+      cellSize: CELL_SIZE * 2,
+      agents: this.avoidanceAgents,
+      obstacles: this.avoidanceObstacles,
+    });
+    for (const agent of this.avoidanceAgents) {
+      const target = this.avoidancePosition(this.route.cells[agent.waypointIndex]);
+      const dx = target.x - agent.position.x;
+      const dz = target.z - agent.position.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance < 1.2) {
+        const next = agent.waypointIndex + agent.direction;
+        if (next < 0 || next >= this.route.cells.length) {
+          agent.direction = agent.direction === 1 ? -1 : 1;
+        } else {
+          agent.waypointIndex = next;
+        }
+      }
+      const nextTarget = this.avoidancePosition(this.route.cells[agent.waypointIndex]);
+      const nextDx = nextTarget.x - agent.position.x;
+      const nextDz = nextTarget.z - agent.position.z;
+      const nextLength = Math.hypot(nextDx, nextDz) || 1;
+      const preferredVelocity = { x: (nextDx / nextLength) * agent.maxSpeed, y: 0, z: (nextDz / nextLength) * agent.maxSpeed };
+      const velocity = calculateNavigationAvoidanceVelocity({
+        agent: { ...agent, preferredVelocity },
+        nearbyAgents: index.queryAgents(agent.position, CELL_SIZE * 2.5),
+        nearbyObstacles: index.queryObstacles(agent.position, CELL_SIZE * 1.5),
+        separationWeight: 1.4,
+        obstacleWeight: 0.8,
+      });
+      agent.preferredVelocity = preferredVelocity;
+      agent.position = {
+        x: agent.position.x + velocity.x * deltaSeconds,
+        y: agent.position.y,
+        z: agent.position.z + velocity.z * deltaSeconds,
+      };
+    }
+    this.avoidanceSteps.update((value) => value + 1);
+    this.draw();
+  }
+
+  private drawAvoidanceAgents(context: CanvasRenderingContext2D, cellWidth: number, cellHeight: number, terrain: boolean): void {
+    for (const agent of this.avoidanceAgents) {
+      const column = agent.position.x / CELL_SIZE;
+      const row = agent.position.z / CELL_SIZE;
+      const x = column * cellWidth;
+      const y = row * cellHeight + (terrain ? agent.position.y * 0.42 : 0);
+      context.fillStyle = agent.direction === 1 ? '#f78c6b' : '#c792ea';
+      context.beginPath();
+      context.arc(x, y, 7, 0, Math.PI * 2);
+      context.fill();
+      context.strokeStyle = '#ffffffcc';
+      context.lineWidth = 1;
+      context.stroke();
+    }
+  }
+
+  private avoidancePosition(cell: { column: number; row: number }): NavigationVector3 {
+    const elevation = this.grid.cells[cell.row * COLUMNS + cell.column].elevation;
+    return { x: (cell.column + 0.5) * CELL_SIZE, y: elevation, z: (cell.row + 0.5) * CELL_SIZE };
   }
 
   private drawRoute(context: CanvasRenderingContext2D, cellWidth: number, cellHeight: number, terrain: boolean): void {

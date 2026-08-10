@@ -467,7 +467,13 @@ same route as a flat plane or height-varied terrain, supports deterministic seed
 changes, and lets a human toggle obstacle editing and click cells to trigger
 versioned grid changes and route recalculation. An optional navigation-data
 overlay exposes blocked, clearance-limited, slope-limited, and walkable cells
-using the active rover profile.
+  using the active rover profile.
+
+M3 was manually verified on the navigation lab: flat and height-varied views
+show the same route, seed changes are reproducible, obstacle edits trigger
+versioned recalculation, and the navigation-data overlay distinguishes blocked,
+clearance-limited, slope-limited, and walkable cells. A goal-slope regression
+was also fixed and covered by the headless navigation tests.
 
 Human verification checklist:
 
@@ -487,9 +493,66 @@ npx ng build demo-app --configuration development
 
 ### Milestone 4: local avoidance
 
-- Spatial index for nearby agents and obstacles.
-- Compare simple steering with velocity-obstacle/ORCA-style approaches.
-- Explicit handling of congestion, deadlock, and replanning thresholds.
+**Status: baseline API and visual checkpoint in progress.** M4 starts with a ground-layer
+baseline: a deterministic uniform spatial index and separation steering. It
+does not guarantee collision-free movement and does not replace route planning.
+
+- M4.1: spatial index for nearby agents and circular obstacles.
+- M4.2: deterministic separation steering with speed clamping.
+- M4.3: visual crossing/congestion demo with eight agents travelling in both
+  directions on the real route; the demo now exposes agent positions and
+  steering through the avoidance API.
+- M4.4: compare the baseline with velocity-obstacle/ORCA-style steering before
+  selecting an approach for dense RTS crowds. The library now has a bounded,
+  deterministic velocity-obstacle-style candidate sampler; full ORCA remains a
+  measured option rather than an assumed dependency.
+- M4.5: define congestion, deadlock, local-replan, and global-replan thresholds.
+  `classifyNavigationAvoidanceState()` now provides the explicit baseline state
+  policy.
+
+Human checkpoint for M4.1/M4.2:
+
+```text
+npm run test:triangular-engine:navigation
+npm run build:triangular-engine
+```
+
+Expected result: nearby queries exclude distant objects and return stable ID
+ordering; overlapping agents and obstacles produce a bounded steering velocity.
+This does not yet prove collision guarantees, ORCA suitability, or 1,000-agent
+runtime performance.
+
+M4.4/M4.5 design decision checkpoint:
+
+| Approach | Strength | Limitation | Current role |
+| --- | --- | --- | --- |
+| Separation steering | Very cheap and simple | Can oscillate or deadlock | Default baseline |
+| Velocity-obstacle sampling | Predicts short-horizon conflicts and is bounded | Candidate quality depends on samples | Current comparison experiment |
+| ORCA-style half-planes | Stronger reciprocal crowd behaviour | More complex and needs careful edge-case policy | Defer until benchmark evidence |
+
+State policy: temporary low-speed response is `yielding`; no progress beyond
+0.25 seconds is `stuck`; no progress or blocking beyond 1 second requests a
+local replan; 3 seconds requests a global replan. Thresholds are configurable
+and are defaults for the first proof, not universal gameplay values.
+
+The avoidance benchmark now measures spatial queries and baseline steering for
+1, 100, and 1,000-agent fixtures. Record results on named target hardware
+before making any frame-time or agent-count claim.
+
+M4.3 manual verification:
+
+- Open `/navigation-lab` and click Run avoidance demo.
+- Confirm orange and purple agents move in opposite directions and visibly
+  separate when they approach one another.
+- Switch between Flat plane and 3D terrain while the demo is running.
+- Edit an obstacle, reset the seed, and change the seed; confirm the route and
+  agent simulation rebuild without errors.
+
+Build checkpoint for the visual slice:
+
+```text
+npx ng build demo-app --configuration development
+```
 
 ### Milestone 5: large and planetary worlds
 

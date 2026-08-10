@@ -36,3 +36,16 @@ Use `createNavigationGridBenchmarkScenario()` and
 `runNavigationGridBenchmark()` for reproducible 1, 100, and 1,000-agent
 measurements. The harness reports route outcomes, expanded nodes, cost, and
 elapsed time; it does not make hardware-independent performance promises.
+
+For local ground movement, `createNavigationSpatialIndex()` provides bounded
+nearby-agent and obstacle queries. `calculateNavigationAvoidanceVelocity()` is
+the cheap separation baseline. `calculateNavigationVelocityObstacleVelocity()`
+is a deterministic short-horizon candidate-sampling experiment for comparison;
+it is not a full ORCA solver or collision guarantee. Use
+`classifyNavigationAvoidanceState()` to turn no-progress time into yielding,
+stuck, local-replan, or global-replan states.
+
+`createNavigationAvoidanceBenchmarkScenario()` and
+`runNavigationAvoidanceBenchmark()` measure the same bounded work for 1, 100,
+and 1,000-agent fixtures. Results are hardware-specific measurements, not
+performance guarantees.

@@ -196,7 +196,7 @@ export function findNavigationGridRoute(request: NavigationGridRouteRequest): Na
   const startIndex = indexOf(grid, start);
   const goalIndex = indexOf(grid, goal);
   if (!isTraversable(grid, startIndex, startIndex, profile)
-    || !isTraversable(grid, goalIndex, startIndex, profile)) {
+    || !isTraversable(grid, goalIndex, goalIndex, profile)) {
     return result('unreachable', [], 0, 0, grid);
   }
 

@@ -11,4 +11,7 @@ canvas { display: block; width: 100%; height: auto; border: 1px solid #35503a; b
 .diagnostic.clearance { color: #d7a9e8; }
 .diagnostic.slope { color: #f0b46f; }
 .diagnostic.walkable { color: #8cdda1; }
+.diagnostic.avoidance { color: #f4dc88; }
+.diagnostic.forward { color: #f78c6b; }
+.diagnostic.reverse { color: #c792ea; }
 @media (max-width: 48rem) { .panel { width: calc(100vw - 1rem); padding: .65rem; } header { align-items: flex-start; flex-direction: column; } }
