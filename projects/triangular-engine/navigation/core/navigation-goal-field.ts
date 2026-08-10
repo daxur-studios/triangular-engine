@@ -138,7 +138,8 @@ function addressOf(grid: NavigationHeightfieldGrid, index: number): NavigationGr
 
 function isTraversable(grid: NavigationHeightfieldGrid, index: number, fromIndex: number, profile: TraversalProfile): boolean {
   const cell = grid.cells[index];
-  if (!cell.walkable || cell.clearance < profile.radius * 2) return false;
+  const requiredClearance = Math.max(profile.radius * 2, profile.minimumClearance ?? 0);
+  if (!cell.walkable || cell.clearance < requiredClearance) return false;
   if (profile.maxSlopeRadians === undefined) return true;
   return Math.atan2(Math.abs(cell.elevation - grid.cells[fromIndex].elevation), grid.cellSize)
     <= profile.maxSlopeRadians;

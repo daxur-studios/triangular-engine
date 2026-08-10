@@ -4,6 +4,7 @@ import {
   findNavigationGridRoute,
   isNavigationGridRouteValid,
   NavigationGridCell,
+  simplifyNavigationGridRoute,
 } from './navigation-grid';
 
 const profile = { id: 'rover', domains: ['ground'], radius: 0.5, height: 1 } as const;
@@ -97,5 +98,29 @@ describe('findNavigationGridRoute', () => {
       nextVersion: 2,
       cells: [],
     })).toThrowError('Navigation grid change set expects version 0, current version is 1.');
+  });
+
+  it('simplifies redundant points without changing the endpoints', () => {
+    const route = findNavigationGridRoute({
+      grid: grid(Array.from({ length: 15 }, () => openCell())),
+      start: { column: 0, row: 0 },
+      goal: { column: 4, row: 0 },
+      profile,
+    });
+    const simplified = simplifyNavigationGridRoute(route);
+    expect(simplified.cells).toEqual([
+      { column: 0, row: 0 },
+      { column: 4, row: 0 },
+    ]);
+  });
+
+  it('enforces the explicit minimum clearance profile constraint', () => {
+    const result = findNavigationGridRoute({
+      grid: grid(Array.from({ length: 15 }, () => openCell())),
+      start: { column: 0, row: 0 },
+      goal: { column: 4, row: 0 },
+      profile: { ...profile, minimumClearance: 2 },
+    });
+    expect(result.status).toBe('unreachable');
   });
 });

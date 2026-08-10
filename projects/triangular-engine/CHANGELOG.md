@@ -13,7 +13,10 @@ All notable changes to triangular-engine are documented here.
   limits. Grid change sets now advance immutable snapshots and provide
   per-cell route dependency validation for local invalidation. A deterministic
   benchmark harness covers 1, 100, and 1,000-agent scenarios and reports
-  expanded work and timing without asserting universal limits.
+  expanded work and timing without asserting universal limits. The entry point
+  also includes route simplification, shared-destination goal fields, a
+  deterministic region/portal graph planner, and dependency-aware route
+  caching for the first RTS-scale routing slice.
 - `getCompoundSubShapeUserData(shape, subShapeId)` (`triangular-engine/jolt`) —
   resolves a compound shape's per-child `AddShapeShape` userData from a
   contact's `SubShapeID`. `Shape.GetSubShapeUserData` always returns 0 in this

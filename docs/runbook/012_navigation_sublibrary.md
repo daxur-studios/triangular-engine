@@ -1,6 +1,7 @@
 # Navigation sub-library
 
-Status: implementation in progress; Milestones 0 and 1 are partially verified.
+Status: core M1/M2 implementation checkpoints complete; integration and
+planetary work remain planned.
 
 Related plans:
 
@@ -416,7 +417,7 @@ npm run build:triangular-engine
 
 ### Milestone 1: tiled ground routing
 
-**Status: in progress — coordinate contract and local A* proof locked.**
+**Status: core checkpoint complete — local plane tile proof verified.**
 Navigation locations use finite coordinates local to a named frame. The first
 terrain provider is Y-up, with X/Z as horizontal axes; renderer rebasing must
 not change route identity. Cross-frame calculations are rejected. The current
@@ -426,20 +427,40 @@ versioned cell changes invalidate dependent routes without invalidating every
 route in the world.
 
 - Heightfield/grid provider and deterministic bounded A*.
-- Route simplification and corridor following.
+- Route simplification; corridor following remains a consumer/integration step.
 - Local obstacle insertion and tile-level invalidation.
-- One-agent and 100-agent demo scenarios.
+- One-agent and 100-agent benchmark scenarios.
+
+The current implementation treats each immutable heightfield grid as a local
+tile snapshot. Route simplification is available through
+`simplifyNavigationGridRoute()`. A visual demo and multi-tile provider
+composition remain integration work; spherical navigation is not implemented.
 
 ### Milestone 2: hierarchy, sharing, and RTS scale
 
-**Status: not started.** The next implementation slice is a shared-destination
-goal field, which is an early proof of route sharing but is not yet the full
-region/portal hierarchy or route cache.
+**Status: core checkpoint complete — headless proof verified.** The library now
+has a deterministic region/portal graph route, dependency-aware route cache,
+and shared-destination goal field. One reverse search can serve many compatible
+agents, and the 100-agent test compares shared extraction with independent A*.
+The 1,000-agent harness exists for measurement; this is not a claim of a fixed
+frame-rate limit or completed local avoidance.
 
 - Region/portal graph above local tiles.
 - Route cache and compatible-route sharing.
-- Optional flow-field experiment for one hot destination.
-- 1,000-agent benchmark with staggered query processing.
+- Optional flow-field experiment for one hot destination — deferred.
+- 1,000-agent benchmark harness — available; staggered runtime processing is deferred.
+
+Human verification checkpoint for the current M1/M2 core:
+
+```text
+npm run test:triangular-engine:navigation
+npm run build:triangular-engine
+```
+
+Expected navigation result: 19 headless tests pass. This proves the current
+library contracts, local routing, dynamic invalidation, shared-goal extraction,
+region routing, cache invalidation, and benchmark fixtures. It does not prove
+spherical, navmesh, worker, or local-avoidance support.
 
 ### Milestone 3: local avoidance
 

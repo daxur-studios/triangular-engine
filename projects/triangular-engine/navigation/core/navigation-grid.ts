@@ -61,6 +61,43 @@ export interface NavigationGridRouteResult {
   readonly dependencies: readonly NavigationDependency[];
 }
 
+/** Removes redundant straight-line grid points while preserving the route. */
+export function simplifyNavigationGridRoute(
+  route: NavigationGridRouteResult,
+): NavigationGridRouteResult {
+  if (route.cells.length <= 2) return route;
+  const cells: NavigationGridCellAddress[] = [route.cells[0]];
+  for (let index = 1; index < route.cells.length - 1; index += 1) {
+    const previous = cells[cells.length - 1];
+    const current = route.cells[index];
+    const next = route.cells[index + 1];
+    const previousDirection = {
+      column: Math.sign(current.column - previous.column),
+      row: Math.sign(current.row - previous.row),
+    };
+    const nextDirection = {
+      column: Math.sign(next.column - current.column),
+      row: Math.sign(next.row - current.row),
+    };
+    if (previousDirection.column !== nextDirection.column
+      || previousDirection.row !== nextDirection.row) {
+      cells.push(current);
+    }
+  }
+  cells.push(route.cells[route.cells.length - 1]);
+  return { ...route, cells, locations: route.locations.filter((_, index) => {
+    return index === 0 || index === route.locations.length - 1 || cells.some((cell) => {
+      const original = route.cells[index];
+      return original.column === cell.column && original.row === cell.row;
+    });
+  }), dependencies: route.dependencies.filter((_, index) => {
+    return index === 0 || index === route.dependencies.length - 1 || cells.some((cell) => {
+      const original = route.cells[index];
+      return original.column === cell.column && original.row === cell.row;
+    });
+  }) };
+}
+
 export function createNavigationHeightfieldGrid(options: {
   readonly frameId: string;
   readonly version?: number;
@@ -244,7 +281,8 @@ function isTraversable(
   profile: TraversalProfile,
 ): boolean {
   const cell = grid.cells[index];
-  if (!cell.walkable || cell.clearance < profile.radius * 2) {
+  const requiredClearance = Math.max(profile.radius * 2, profile.minimumClearance ?? 0);
+  if (!cell.walkable || cell.clearance < requiredClearance) {
     return false;
   }
   if (profile.maxSlopeRadians === undefined) {
@@ -267,7 +305,9 @@ function heuristic(grid: NavigationHeightfieldGrid, from: number, goal: number):
   const goalAddress = addressOf(grid, goal);
   const dx = Math.abs(fromAddress.column - goalAddress.column);
   const dz = Math.abs(fromAddress.row - goalAddress.row);
-  return Math.max(dx, dz) * grid.cells[from].cost;
+  let minimumCost = Number.POSITIVE_INFINITY;
+  for (const cell of grid.cells) minimumCost = Math.min(minimumCost, cell.cost);
+  return Math.max(dx, dz) * minimumCost;
 }
 
 function neighbors(grid: NavigationHeightfieldGrid, index: number): number[] {
