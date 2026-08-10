@@ -567,6 +567,28 @@ M4.4 manual verification:
 - Compare visible overlap, jitter, sticking, and whether agents make progress.
 - Record which mode is the better default; do not decide from one seed only.
 
+**Manual checkpoint result: verified.** Across the visual comparison, the
+velocity-obstacle mode began avoidance earlier and produced cleaner crossings;
+the separation baseline tended to react later, closer to contact. Keep
+separation as the cheap baseline and continue evaluating velocity-obstacle
+steering as the preferred crowd-demo approach across more seeds.
+
+M4.5 implementation checkpoint: the visual lab now classifies each agent as
+moving, yielding, stuck, local-replan, or global-replan. It shows state counts
+and replan totals. A local recovery advances the immediate route waypoint;
+global recovery returns the agent to its nearest route waypoint. These are
+bounded demo recovery actions, not yet a full live A* route request from every
+agent.
+
+M4.5 manual verification:
+
+- Run the avoidance demo and confirm the state counts are visible.
+- Increase avoidance strength or edit obstacles to create a crowded crossing.
+- Confirm agents can enter yielding/stuck states and that replan totals remain
+  visible.
+- Confirm stalled agents recover and continue moving; confirm normal movement
+  does not continuously trigger replans.
+
 Build checkpoint for the visual slice:
 
 ```text

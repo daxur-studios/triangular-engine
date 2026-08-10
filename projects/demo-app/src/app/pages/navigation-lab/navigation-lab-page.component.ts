@@ -15,8 +15,10 @@ import {
   simplifyNavigationGridRoute,
   calculateNavigationAvoidanceVelocity,
   calculateNavigationVelocityObstacleVelocity,
+  classifyNavigationAvoidanceState,
   createNavigationSpatialIndex,
   type NavigationAvoidanceObstacle,
+  type NavigationAvoidanceState,
   type NavigationVector3,
   type NavigationGridCell,
   type NavigationHeightfieldGrid,
@@ -44,6 +46,9 @@ interface DemoAvoidanceAgent {
   readonly maxSpeed: number;
   waypointIndex: number;
   direction: 1 | -1;
+  state: NavigationAvoidanceState;
+  noProgressSeconds: number;
+  blockedSeconds: number;
 }
 
 @Component({
@@ -64,6 +69,8 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
   readonly avoidanceStrength = signal(1.4);
   readonly avoidanceMode = signal<'separation' | 'velocity-obstacle'>('separation');
   readonly avoidanceSteps = signal(0);
+  readonly avoidanceStateSummary = signal('moving 0 · yielding 0 · stuck 0 · local 0 · global 0');
+  readonly avoidanceReplans = signal(0);
   readonly routeStatus = signal<NavigationGridRouteResult['status']>('complete');
   readonly routeLength = signal(0);
   readonly expandedNodes = signal(0);
@@ -245,6 +252,9 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
         maxSpeed: 5,
         waypointIndex,
         direction: movingForward ? 1 : -1,
+        state: 'moving',
+        noProgressSeconds: 0,
+        blockedSeconds: 0,
       });
     }
     this.grid.cells.forEach((cell, index) => {
@@ -259,6 +269,8 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
       }
     });
     this.avoidanceSteps.set(0);
+    this.avoidanceReplans.set(0);
+    this.updateAvoidanceStateSummary();
   }
 
   private scheduleAvoidanceFrame(): void {
@@ -315,14 +327,80 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
           })
         : calculateNavigationAvoidanceVelocity(avoidanceRequest);
       agent.preferredVelocity = preferredVelocity;
+      const previousDistance = Math.hypot(
+        nextTarget.x - agent.position.x,
+        nextTarget.z - agent.position.z,
+      );
       agent.position = {
         x: agent.position.x + velocity.x * deltaSeconds,
         y: agent.position.y,
         z: agent.position.z + velocity.z * deltaSeconds,
       };
+      const currentDistance = Math.hypot(
+        nextTarget.x - agent.position.x,
+        nextTarget.z - agent.position.z,
+      );
+      const progressDistance = previousDistance - currentDistance;
+      const actualSpeed = Math.hypot(velocity.x, velocity.z);
+      agent.noProgressSeconds = progressDistance > 0.01
+        ? 0
+        : agent.noProgressSeconds + deltaSeconds;
+      agent.blockedSeconds = actualSpeed < agent.maxSpeed * 0.35
+        ? agent.blockedSeconds + deltaSeconds
+        : Math.max(0, agent.blockedSeconds - deltaSeconds * 2);
+      agent.state = classifyNavigationAvoidanceState({
+        preferredSpeed: Math.hypot(preferredVelocity.x, preferredVelocity.z),
+        actualSpeed,
+        progressDistance: Math.max(0, progressDistance),
+        noProgressSeconds: agent.noProgressSeconds,
+        blockedSeconds: agent.blockedSeconds,
+      });
+      if (agent.state === 'replan-local') {
+        this.replanAvoidanceAgent(agent, false);
+      } else if (agent.state === 'replan-global') {
+        this.replanAvoidanceAgent(agent, true);
+      }
     }
     this.avoidanceSteps.update((value) => value + 1);
+    this.updateAvoidanceStateSummary();
     this.draw();
+  }
+
+  private replanAvoidanceAgent(agent: DemoAvoidanceAgent, global: boolean): void {
+    if (global) {
+      let closestIndex = agent.waypointIndex;
+      let closestDistance = Number.POSITIVE_INFINITY;
+      this.route.cells.forEach((cell, index) => {
+        const point = this.avoidancePosition(cell);
+        const distance = Math.hypot(point.x - agent.position.x, point.z - agent.position.z);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestIndex = index;
+        }
+      });
+      agent.waypointIndex = closestIndex;
+    } else {
+      const next = agent.waypointIndex + agent.direction;
+      if (next >= 0 && next < this.route.cells.length) agent.waypointIndex = next;
+    }
+    agent.noProgressSeconds = 0;
+    agent.blockedSeconds = 0;
+    agent.state = 'moving';
+    this.avoidanceReplans.update((value) => value + 1);
+  }
+
+  private updateAvoidanceStateSummary(): void {
+    const counts: Record<NavigationAvoidanceState, number> = {
+      moving: 0,
+      yielding: 0,
+      stuck: 0,
+      'replan-local': 0,
+      'replan-global': 0,
+    };
+    for (const agent of this.avoidanceAgents) counts[agent.state] += 1;
+    this.avoidanceStateSummary.set(
+      `moving ${counts.moving} · yielding ${counts.yielding} · stuck ${counts.stuck} · local ${counts['replan-local']} · global ${counts['replan-global']}`,
+    );
   }
 
   private drawAvoidanceAgents(context: CanvasRenderingContext2D, cellWidth: number, cellHeight: number, terrain: boolean): void {

@@ -73,6 +73,8 @@
       @if (avoidanceEnabled()) {
         <span class="diagnostic avoidance"
           >Avoidance: 8 agents / {{ avoidanceSteps() }} steps / {{ avoidanceMode() }}</span
+        ><span class="diagnostic avoidance"
+          >States: {{ avoidanceStateSummary() }} / replans {{ avoidanceReplans() }}</span
         ><span class="diagnostic forward">Orange agents: forward</span
         ><span class="diagnostic reverse">Purple agents: reverse</span>
       }
