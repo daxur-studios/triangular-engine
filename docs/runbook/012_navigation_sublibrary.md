@@ -544,6 +544,8 @@ M4.3 manual verification:
 - Open `/navigation-lab` and click Run avoidance demo.
 - Confirm orange and purple agents move in opposite directions and visibly
   separate when they approach one another.
+- Adjust the avoidance-strength slider: `0` disables separation steering, while
+  higher values apply stronger separation.
 - Switch between Flat plane and 3D terrain while the demo is running.
 - Edit an obstacle, reset the seed, and change the seed; confirm the route and
   agent simulation rebuild without errors.

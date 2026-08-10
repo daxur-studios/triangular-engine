@@ -60,6 +60,7 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
   readonly editingObstacles = signal(false);
   readonly showDiagnostics = signal(false);
   readonly avoidanceEnabled = signal(false);
+  readonly avoidanceStrength = signal(1.4);
   readonly avoidanceSteps = signal(0);
   readonly routeStatus = signal<NavigationGridRouteResult['status']>('complete');
   readonly routeLength = signal(0);
@@ -104,6 +105,11 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
       this.avoidanceFrame = undefined;
       this.draw();
     }
+  }
+
+  setAvoidanceStrength(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (Number.isFinite(value)) this.avoidanceStrength.set(value);
   }
 
   nextSeed(): void {
@@ -288,7 +294,7 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
         agent: { ...agent, preferredVelocity },
         nearbyAgents: index.queryAgents(agent.position, CELL_SIZE * 2.5),
         nearbyObstacles: index.queryObstacles(agent.position, CELL_SIZE * 1.5),
-        separationWeight: 1.4,
+        separationWeight: this.avoidanceStrength(),
         obstacleWeight: 0.8,
       });
       agent.preferredVelocity = preferredVelocity;

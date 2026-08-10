@@ -1,28 +1,79 @@
 <main class="page">
   <section class="panel">
     <header>
-      <div><a routerLink="/">← Examples</a><small>triangular-engine/navigation</small></div>
+      <div>
+        <a routerLink="/">← Examples</a
+        ><small>triangular-engine/navigation</small>
+      </div>
       <strong>Navigation lab</strong>
     </header>
-    <p>Same deterministic heightfield route shown as a flat plane or 3D terrain. Turn on obstacle editing, then click cells to invalidate and recalculate the route.</p>
+    <p>
+      Same deterministic heightfield route shown as a flat plane or 3D terrain.
+      Turn on obstacle editing, then click cells to invalidate and recalculate
+      the route.
+    </p>
     <div class="actions">
-      <button [class.active]="view() === 'flat'" (click)="setView('flat')">Flat plane</button>
-      <button [class.active]="view() === 'terrain'" (click)="setView('terrain')">3D terrain</button>
-      <button [class.active]="editingObstacles()" (click)="toggleObstacleEditing()">{{ editingObstacles() ? 'Editing obstacles' : 'Edit obstacles' }}</button>
-      <button [class.active]="showDiagnostics()" (click)="toggleDiagnostics()">{{ showDiagnostics() ? 'Hide nav data' : 'Show nav data' }}</button>
-      <button [class.active]="avoidanceEnabled()" (click)="toggleAvoidance()">{{ avoidanceEnabled() ? 'Stop avoidance demo' : 'Run avoidance demo' }}</button>
+      <button [class.active]="view() === 'flat'" (click)="setView('flat')">
+        Flat plane
+      </button>
+      <button
+        [class.active]="view() === 'terrain'"
+        (click)="setView('terrain')"
+      >
+        3D terrain
+      </button>
+      <button
+        [class.active]="editingObstacles()"
+        (click)="toggleObstacleEditing()"
+      >
+        {{ editingObstacles() ? "Editing obstacles" : "Edit obstacles" }}
+      </button>
+      <button [class.active]="showDiagnostics()" (click)="toggleDiagnostics()">
+        {{ showDiagnostics() ? "Hide nav data" : "Show nav data" }}
+      </button>
+      <button [class.active]="avoidanceEnabled()" (click)="toggleAvoidance()">
+        {{ avoidanceEnabled() ? "Stop avoidance demo" : "Run avoidance demo" }}
+      </button>
+      @if (avoidanceEnabled()) {
+        <label class="avoidance-control"
+          >Avoidance strength
+          <input
+            type="range"
+            min="0"
+            max="10"
+            step="0.1"
+            [value]="avoidanceStrength()"
+            (input)="setAvoidanceStrength($event)"
+          />
+          <output>{{ avoidanceStrength().toFixed(1) }}</output>
+        </label>
+      }
       <button (click)="resetSeed()">Reset seed</button>
       <button (click)="nextSeed()">Change seed ({{ seed() }})</button>
     </div>
-    <canvas #map width="960" height="640" (click)="onMapClick($event)" aria-label="Navigation map"></canvas>
+    <canvas
+      #map
+      width="960"
+      height="640"
+      (click)="onMapClick($event)"
+      aria-label="Navigation map"
+    ></canvas>
     <div class="stats">
-      <span>Status: {{ routeStatus() }}</span><span>Route cells: {{ routeLength() }}</span><span>A* expanded: {{ expandedNodes() }}</span>
-      <span>Green: start</span><span>Gold: goal</span><span>Blue: route</span>
+      <span>Status: {{ routeStatus() }}</span
+      ><span>Route cells: {{ routeLength() }}</span
+      ><span>A* expanded: {{ expandedNodes() }}</span> <span>Green: start</span
+      ><span>Gold: goal</span><span>Blue: route</span>
       @if (avoidanceEnabled()) {
-        <span class="diagnostic avoidance">Avoidance: 8 agents / {{ avoidanceSteps() }} steps</span><span class="diagnostic forward">Orange agents: forward</span><span class="diagnostic reverse">Purple agents: reverse</span>
+        <span class="diagnostic avoidance"
+          >Avoidance: 8 agents / {{ avoidanceSteps() }} steps</span
+        ><span class="diagnostic forward">Orange agents: forward</span
+        ><span class="diagnostic reverse">Purple agents: reverse</span>
       }
       @if (showDiagnostics()) {
-        <span class="diagnostic obstacle">Red: blocked</span><span class="diagnostic clearance">Purple: clearance</span><span class="diagnostic slope">Orange: slope-limited</span><span class="diagnostic walkable">Green: walkable</span>
+        <span class="diagnostic obstacle">Red: blocked</span
+        ><span class="diagnostic clearance">Purple: clearance</span
+        ><span class="diagnostic slope">Orange: slope-limited</span
+        ><span class="diagnostic walkable">Green: walkable</span>
       }
     </div>
   </section>
