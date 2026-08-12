@@ -1,5 +1,5 @@
 import { AsyncPipe } from '@angular/common';
-import { Component, DestroyRef, inject, Injector, input } from '@angular/core';
+import { Component, DestroyRef, inject, input, output } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 
 import { BehaviorSubject, combineLatest, Subject } from 'rxjs';
@@ -26,6 +26,22 @@ import {
   IContactRemovedEvent,
   JoltEventEmitter,
 } from '../models/contact-events.model';
+
+/** Physics run-phase that faulted. */
+export type IJoltPhysicsFaultPhase = 'tick$' | 'step' | 'postTick$';
+
+/**
+ * Emitted when a Jolt physics step (or one of its surrounding subscriber
+ * phases) throws. A `step` fault means the WASM heap is left in an undefined
+ * state, so `joltPhysics` stops stepping that world. This is defensive: a
+ * trapped step can still hard-freeze the page when the trap damages state
+ * the guard cannot repair, so this signal is a "world is dead, rebuild it"
+ * notification more than a guarantee the UI survives.
+ */
+export interface IJoltPhysicsFaultEvent {
+  readonly phase: IJoltPhysicsFaultPhase;
+  readonly error: unknown;
+}
 @Component({
   selector: 'joltPhysics',
   imports: [AsyncPipe, JoltDebugRendererComponent],
@@ -66,6 +82,13 @@ export class JoltPhysicsComponent {
   readonly debug$ = toObservable(this.debug);
   readonly debugActiveBodyColor = input<number>(0xffff00);
   readonly debugSleepingBodyColor = input<number>(0x4b0010);
+
+  /**
+   * Worker threads Jolt may spawn during world creation (read once at init).
+   * 0 = fully single-threaded stepping on the main thread. Default 4 preserves
+   * prior behavior.
+   */
+  readonly maxWorkerThreads = input<number>(4);
   //#endregion
 
   //#region View Children
@@ -85,6 +108,19 @@ export class JoltPhysicsComponent {
   #accumulator = 0;
   #fixedSubstep = 1.0 / 240.0; // ~240 Hz physics
   #maxStepsPerFrame = 300; // safety to avoid spiral of death
+
+  /**
+   * Fires when a Jolt step trap (or a subscriber throw in the tick/postTick
+   * phases) is caught. After a `step` fault the world stops stepping to avoid
+   * re-entering an undefined WASM heap. Caveat: as of testing, a trapped step
+   * can still hard-freeze the page (e.g. the trap smashes shared memory used by
+   * Jolt workers), so treat a `step` fault message followed by a freeze as
+   * cross-thread damage, not a guard failure.
+   */
+  readonly physicsFaulted = output<IJoltPhysicsFaultEvent>();
+
+  /** Set once a Step trap leaves the WASM heap in an undefined state. */
+  #stepFaulted = false;
 
   constructor() {
     this.#init();
@@ -122,7 +158,7 @@ export class JoltPhysicsComponent {
   #initPhysics(loadedJolt: typeof Jolt): IJoltMetadata {
     // Initialize Jolt
     const settings = new loadedJolt.JoltSettings();
-    settings.mMaxWorkerThreads = 4; // Limit the number of worker threads to 3 (for a total of 4 threads working on the simulation). Note that this value will always be clamped against the number of CPUs in the system - 1.
+    settings.mMaxWorkerThreads = Math.max(0, this.maxWorkerThreads()); // Limit consumer-supplied worker threads; 0 = single-threaded stepping
     this.#setupCollisionFiltering(settings);
     const jolt = new loadedJolt.JoltInterface(settings);
     loadedJolt.destroy(settings);
@@ -510,33 +546,41 @@ export class JoltPhysicsComponent {
     const maxBacklog = this.#fixedSubstep * this.#maxStepsPerFrame;
     if (this.#accumulator > maxBacklog) this.#accumulator = maxBacklog;
 
-    // Now update object transforms from the latest physics state
-    for (let i = 0, il = this.dynamicObjects.length; i < il; i++) {
-      const objThree = this.dynamicObjects[i];
-      const body = objThree.userData['body'];
-      if (!body) {
-        // Stale entry; clean up
-        this.dynamicObjects.splice(i, 1);
-        i--;
-        il--;
-        continue;
-      }
-      try {
-        objThree.position.copy(wrapVec3(body.GetPosition()));
-        objThree.quaternion.copy(wrapQuat(body.GetRotation()));
-      } catch (error) {
-        console.warn('Skipping update for potentially destroyed body:', error);
-        // Clear reference and remove from array
-        delete objThree.userData['body'];
-        this.dynamicObjects.splice(i, 1);
-        i--;
-        il--;
+    // Now update object transforms from the latest physics state. Keep the
+    // previously-read body transforms when a step fault has corrupted the heap.
+    if (!this.#stepFaulted) {
+      for (let i = 0, il = this.dynamicObjects.length; i < il; i++) {
+        const objThree = this.dynamicObjects[i];
+        const body = objThree.userData['body'];
+        if (!body) {
+          // Stale entry; clean up
+          this.dynamicObjects.splice(i, 1);
+          i--;
+          il--;
+          continue;
+        }
+        try {
+          objThree.position.copy(wrapVec3(body.GetPosition()));
+          objThree.quaternion.copy(wrapQuat(body.GetRotation()));
+        } catch (error) {
+          console.warn(
+            'Skipping update for potentially destroyed body:',
+            error,
+          );
+          // Clear reference and remove from array
+          delete objThree.userData['body'];
+          this.dynamicObjects.splice(i, 1);
+          i--;
+          il--;
+        }
       }
     }
 
     // Signal that physics + transforms are updated
     this.physicsUpdated$.next();
-    this.engineService.fpsController.recordPhysicsTime(performance.now() - physicsStartedAt);
+    this.engineService.fpsController.recordPhysicsTime(
+      performance.now() - physicsStartedAt,
+    );
   }
 
   #updatePhysics(deltaTime: number, metadata: IJoltMetadata) {
@@ -544,12 +588,42 @@ export class JoltPhysicsComponent {
     const targetSubstep = 1.0 / 240.0; // ~240 Hz substeps
     const numSteps = Math.max(1, Math.ceil(deltaTime / targetSubstep));
     const subDt = deltaTime / numSteps;
+
+    // A Step trap leaves the WASM heap in an undefined state — re-stepping is
+    // unsafe, so the world degrades to "no physics".
+    if (this.#stepFaulted) return;
+
     for (let i = 0; i < numSteps; i++) {
       // Allow systems to apply forces based on the current state before each substep
-      this.physicsService.tick$.next(subDt);
-      metadata.jolt.Step(subDt, 1);
+      try {
+        this.physicsService.tick$.next(subDt);
+      } catch (error) {
+        this.#reportFault('tick$', error);
+        continue;
+      }
+
+      try {
+        metadata.jolt.Step(subDt, 1);
+      } catch (error) {
+        this.#stepFaulted = true;
+        this.#reportFault('step', error);
+        break;
+      }
     }
-    this.physicsService.postTick$.next(subDt);
+
+    if (this.#stepFaulted) return;
+
+    try {
+      this.physicsService.postTick$.next(subDt);
+    } catch (error) {
+      this.#reportFault('postTick$', error);
+    }
+  }
+
+  #reportFault(phase: IJoltPhysicsFaultPhase, error: unknown) {
+    console.error(`[Jolt] Physics fault during 'jolt:${phase}':`, error);
+    this.engineService.error$.next({ phase: `jolt:${phase}`, error });
+    this.physicsFaulted.emit({ phase, error });
   }
 
   #initSyncRigidBodyComponents() {

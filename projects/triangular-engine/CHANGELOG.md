@@ -5,11 +5,26 @@ All notable changes to triangular-engine are documented here.
 ## [Unreleased]
 
 ### Added
+
+- `<joltPhysics>` now emits `(physicsFaulted)` when a Jolt world step (or a
+  subscriber throw during its `tick$`/`postTick$` phases) is caught, and it
+  reports the fault through `EngineService.error$`. A `step` fault means the
+  WASM heap is in an undefined state, so the component stops stepping that
+  world — the render loop survives and degrades to "no physics" instead of
+  freezing the page. Because the guard stops re-entering the corrupted heap,
+  after a `step` fault the component also stops reading body transforms into
+  the render loop. This is defensive only: a trap crushed inside Jolt workers
+  can still hard-freeze the page (see the Jolt skill), so the symptom to watch
+  is whether a page fault message is followed by a freeze.
+- `<joltPhysics>` now accepts `[maxWorkerThreads]` (default `4`): the worker
+  thread count passed to Jolt's `JoltSettings` at world creation (`0` =
+  single-threaded stepping). Read once at init, so switch/restart the world to
+  apply it. Default `4` preserves prior behavior.
 - `triangular-engine/navigation` provides framework-free, serializable navigation
   data and query contracts, deterministic bounded-work request scheduling, and
   synthetic benchmark fixtures. It now also exports the explicit Y-up/X-Z
   coordinate contract and validation helpers, plus a deterministic local
-  heightfield-grid A* planner with slope, clearance, and expansion-budget
+  heightfield-grid A\* planner with slope, clearance, and expansion-budget
   limits. Grid change sets now advance immutable snapshots and provide
   per-cell route dependency validation for local invalidation. A deterministic
   benchmark harness covers 1, 100, and 1,000-agent scenarios and reports
@@ -52,6 +67,7 @@ All notable changes to triangular-engine are documented here.
   binding, masks, rendering, and editing land in later phases.
 
 ### Changed (BREAKING CHANGES)
+
 - Jolt component selectors renamed kebab-case → camelCase to match the engine
   convention: `jolt-physics`→`joltPhysics`, `jolt-rigid-body`→`joltRigidBody`,
   `jolt-box-shape`→`joltBoxShape`, `jolt-sphere-shape`→`joltSphereShape`,
@@ -67,10 +83,12 @@ All notable changes to triangular-engine are documented here.
 ## [0.1.0-alpha.1] - 2026-07-12
 
 ### Added
+
 - Dynamic layout areas/HUD overlay management utilizing TemplatePortals (`@angular/cdk/portal`).
 - `EnginePortalService`, `EnginePortalDirective` (`[enginePortal]`), and `EnginePortalOutletComponent` (`engine-portal-outlet`).
 
 ### Removed (BREAKING CHANGES)
+
 - Removed `EngineSlotDirective` (`[engineSlot]`). UI placement is now managed via `enginePortal` directives rather than custom static slots.
 
 ## [0.0.14] - 2026-05-16
@@ -109,6 +127,7 @@ All notable changes to triangular-engine are documented here.
 ## [0.0.11] - 2025-03-07
 
 Initial changelog. See git history for changes prior to this version.
+
 # Unreleased
 
 - Added framework-free spline editor helpers for axis-constrained point movement and reusable undo/redo keyboard handling.

@@ -224,6 +224,43 @@ onContactAdded(body: Jolt.Body, event: IContactAddedEvent) {
 
 ## 8. Troubleshooting
 
+### Jolt faults never freeze the frame loop
+
+- **Symptom**: A physics step throws (e.g. a WASM memory access out of bounds)
+  or a `tick$`/`postTick$` subscriber throws, and the page freezes or the engine
+  frame loop dies on other engines.
+- **Cause**: `<joltPhysics>` steps the world through `JoltInterface.Step`. If
+  that call throws, the WASM heap is left in an undefined state and stepping it
+  again is unsafe; an uncaught subscriber throw can also interrupt the frame.
+- **Fix**: The engine already catches it — `<joltPhysics>` wraps the Step and
+  its surrounding phases. It emits `(physicsFaulted)` with
+  `{ phase: 'tick$' | 'step' | 'postTick$', error }`, reports the same fault on
+  `EngineService.error$` (phase `jolt:step`, etc.), and after a `step` fault it
+  stops stepping that world permanently (degrade to "no physics", render loop
+  alive). Consume it to surface a banner and rebuild/reset the world:
+
+  ```html
+  <joltPhysics (physicsFaulted)="onPhysicsFaulted($event)"></joltPhysics>
+  ```
+
+  ```typescript
+  onPhysicsFaulted({ phase, error }: IJoltPhysicsFaultEvent) {
+    console.error(`Jolt fault in ${phase}`, error);
+  }
+  ```
+
+  If the page STILL hard-freezes with no `physicsFaulted` and no console error,
+  that is a synchronous main-thread block (for example a WASM heap resize that
+  copies the whole heap), which no try/catch can fix — bound/chunk that work
+  instead.
+
+  If `physicsFaulted` fires but the page still freezes, the trap happened after
+  the guard's catch but inside a system the guard cannot contain (for example a
+  Jolt worker thread smashing shared memory during the same step). Known: the
+  guard's try/catch has never been observed to eliminate the freeze once a
+  `step` trap has occurred; make the Jolt call chain that traps first
+  fault-free instead.
+
 ### Long vessel structures wiggle or bend
 
 - **Cause**: Multi-body physics chains connected via linear constraints naturally wobble under high forces.
