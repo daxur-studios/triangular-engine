@@ -26,6 +26,14 @@ All notable changes to triangular-engine are documented here.
   for M4 comparison work.
   Reproducible 1/100/1,000-agent avoidance benchmark fixtures are also
   available for hardware-specific measurements.
+- The navigation entry point now exports a framework-free recovery strategy
+  contract and deterministic queue/yield baseline for congestion handling.
+- The navigation entry point now exports a bounded decentralised encounter
+  resolver with deterministic right-of-way, transferable priority, expiring
+  retreat signals, and explicit blocked outcomes.
+- The navigation entry point now exports a compact deterministic avoidance
+  scenario harness for headless baseline/priority-yield comparisons, including
+  stationary, oscillation, overlap, and blocked-outcome metrics.
 - `getCompoundSubShapeUserData(shape, subShapeId)` (`triangular-engine/jolt`) —
   resolves a compound shape's per-child `AddShapeShape` userData from a
   contact's `SubShapeID`. `Shape.GetSubShapeUserData` always returns 0 in this
@@ -104,3 +112,7 @@ Initial changelog. See git history for changes prior to this version.
 # Unreleased
 
 - Added framework-free spline editor helpers for axis-constrained point movement and reusable undo/redo keyboard handling.
+- Increased navigation retreat defaults to 6 cells initially, up to 9 after
+  repeated recovery attempts. Active retreat signals remain repeatable on
+  re-evaluation until expiry; the existing 64-hop propagation default is
+  unchanged.

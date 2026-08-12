@@ -41,6 +41,12 @@ The library may own route planning and reusable local-navigation mechanisms.
 The consumer owns why an agent travels, how it accelerates, and what happens
 when it arrives.
 
+Static traversal capability and live congestion behaviour are separate
+concerns. A radius or slope limit can determine whether a route is feasible,
+but it cannot determine whether an agent should squeeze past another agent,
+reverse, queue, retreat, or choose another route. Those decisions require an
+explicit strategy boundary rather than one universal avoidance policy.
+
 ## Scope
 
 ### Navigation owns
@@ -51,6 +57,8 @@ when it arrives.
 - Hierarchical and cached routing.
 - Route invalidation when relevant world data changes.
 - Optional local corridor following and dynamic-obstacle avoidance.
+- Bounded congestion observations, recovery actions, and reusable strategy
+  presets without assuming that every agent behaves like a pedestrian.
 - Deterministic query ordering, tie-breaking, and bounded work.
 - Debug snapshots and benchmark instrumentation without rendering dependencies.
 
@@ -61,6 +69,8 @@ when it arrives.
 - Agent tasks, destinations, schedules, flocking, and group behaviour.
 - Physics integration, acceleration, animation, and collision consequences.
 - Deciding when an abandoned or partial route should be retried.
+- Selecting or supplying gameplay-specific congestion strategy, urgency,
+  social rules, and collision consequences.
 - Supplying navigation-data changes with stable IDs and versions.
 
 ## Required environments
@@ -138,6 +148,29 @@ consumer-specific steering adapters.
 
 Local avoidance should be optional because vehicle physics, flock steering,
 and dense crowds have different movement constraints.
+
+### 5. Capability and congestion strategy boundary
+
+Navigation must not tune one local-avoidance simulation and present it as the
+answer for every agent type. The local layer should expose a bounded,
+deterministic observation of progress, nearby occupancy, route validity, and
+available recovery targets. A pluggable strategy then selects an intent such
+as `continue`, `wait`, `yield`, `retreat`, `replan`, or `blocked`.
+
+Two profiles remain distinct:
+
+- A traversal profile describes where an agent can physically plan: radius,
+  height, clearance, slope, domains, and similar static constraints.
+- A movement/recovery profile describes how an agent responds while following
+  a route: whether it can squeeze, sidestep, reverse, wait, use passing space,
+  or accept an alternative route.
+
+Consumer strategies may use gameplay facts such as urgency or social role,
+but receive navigation observations and return navigation intents rather than
+mutating planner state. Built-in strategies are defaults and examples, not a
+claim that the library owns human, vehicle, or animal behaviour. The strategy
+hook belongs to local following/recovery orchestration and must not introduce
+arbitrary callbacks into immutable planner snapshots or route-cache keys.
 
 ## Dynamic world changes
 
@@ -509,6 +542,44 @@ does not guarantee collision-free movement and does not replace route planning.
 - M4.5: define congestion, deadlock, local-replan, and global-replan thresholds.
   `classifyNavigationAvoidanceState()` now provides the explicit baseline state
   policy.
+- M4.6: define the capability/recovery strategy contract and one deterministic
+  queue-and-yield baseline. Stop tuning the existing crowd fixture as a
+  universal solution.
+- M4.7: turn the visual lab into a scenario harness with pedestrian, vehicle,
+  and animal-oriented profiles and repeatable congestion fixtures.
+- M4.8: add congestion-aware alternative-route recovery and then evaluate
+  bottleneck reservations or directional traffic as separate coordination
+  policies.
+
+M4.6 implementation checkpoint: `navigation-strategy.ts` now exports the
+framework-free `NavigationRecoveryStrategy` contract, bounded observations,
+recovery actions, and `createNavigationQueueYieldStrategy()`. The baseline
+queues lower-priority agents behind right-of-way traffic, returns stable
+staggered retry delays, and escalates to an alternative route, retreat, or
+explicit blockage when its wait budget is exhausted. It does not yet wire
+those decisions into the visual lab; that is the next integration slice.
+
+M4.6 demo integration checkpoint: `/navigation-lab` now offers `Queue / yield`
+and `Baseline` recovery modes. Queue/yield mode uses the strategy for the
+narrow-corridor fixture, sends lower-priority agents to deterministic holding
+targets behind the blocker, keeps them there for staggered retry intervals, and
+reports queued agents separately from yielding and stuck agents. The baseline
+remains available as an A/B comparison. This is still a visual proof fixture,
+not the final generic bottleneck coordinator.
+
+M4.6 manual verification:
+
+- Open `/navigation-lab`, enable avoidance, and select `Narrow corridor`.
+- Select `Queue / yield`, then test 8 and 16 agents with velocity-obstacle
+  mode.
+- Confirm the HUD shows a non-zero `queued` count when the corridor is full.
+- Confirm queued agents move back from the choke point to holding positions,
+  remain there, and retry at visibly different times rather than all reversing
+  and restarting together.
+- Switch to `Baseline` and confirm the previous local-avoidance behaviour is
+  still available for comparison.
+- Confirm a genuinely full corridor remains blocked; queueing does not move
+  agents through occupied space.
 
 Human checkpoint for M4.1/M4.2:
 
@@ -575,19 +646,208 @@ steering as the preferred crowd-demo approach across more seeds.
 
 M4.5 implementation checkpoint: the visual lab now classifies each agent as
 moving, yielding, stuck, local-replan, or global-replan. It shows state counts
-and replan totals. A local recovery advances the immediate route waypoint;
-global recovery returns the agent to its nearest route waypoint. These are
-bounded demo recovery actions, not yet a full live A* route request from every
-agent.
+and replan totals. Local recovery first requests a bounded A* repair route from
+the agent's current cell to its current endpoint, treating dynamic congestion
+as temporarily blocked cells. If no repair route exists, it performs a short,
+bounded back-off before the global fallback. Global recovery returns the agent
+to its nearest route waypoint. These are bounded demo recovery actions, not yet
+a production crowd-routing service or a guarantee that a fully occupied
+corridor can clear. The lab also provides a
+named narrow-corridor fixture and an agent-count control so congestion can be
+reproduced without editing or invalidating the terrain route. The fixture
+barriers are rendered as gold circles, and the lab has a 0.25x–4x
+simulation-speed control for observation.
 
 M4.5 manual verification:
 
 - Run the avoidance demo and confirm the state counts are visible.
-- Increase avoidance strength or edit obstacles to create a crowded crossing.
+- Select `Narrow corridor`, then try 4, 8, and 16 agents.
+- Confirm the gold corridor barriers are visible in both flat and terrain views.
+- Adjust simulation speed to inspect slow interactions or quickly reach a
+  recovery state.
+- Increase avoidance strength to create a crowded crossing.
 - Confirm agents can enter yielding/stuck states and that replan totals remain
   visible.
-- Confirm stalled agents recover and continue moving; confirm normal movement
-  does not continuously trigger replans.
+- Treat recovery as a behavioural checkpoint, not a guarantee yet: some agents
+  should recover, while L-shaped corners and heavily packed groups may remain
+  stuck. Confirm normal movement does not continuously trigger replans.
+
+**Manual checkpoint result: verified with known limitations.** At 16 agents,
+the narrow corridor can produce full blockage and artery-like accumulation.
+Some agents recover, while others remain trapped at L-shaped corners or inside
+dense groups. This validates the congestion/deadlock fixture and exposes the
+remaining limitation of local steering: it cannot reliably escape every
+corner or solve a fully occupied corridor. The repair-route slice now exists.
+A second recovery layer now gives agents a stable priority/yield order,
+progressively wider escape searches, and an increasing cooldown between failed
+replans. Agents with no available escape remain visibly stuck rather than
+oscillating through unlimited replan attempts.
+
+M4.5 is complete as a diagnostic and mechanism proof, not as a universal
+congestion solution. Its completion criteria are explicit state transitions,
+bounded recovery work, visible permanent blockage, and no unlimited replan
+loop. Further tuning of back-off distances or crowd pressure is deferred until
+the strategy/profile slices below, because one setting cannot correctly model
+pedestrians, vehicles, and animals.
+
+#### M4.6: pluggable recovery strategy
+
+Goal: separate reusable navigation observations/actions from game-specific
+behaviour decisions.
+
+Implementation slice:
+
+- Define a framework-free strategy input containing agent identity, stable
+  priority, progress history, blockage duration, nearby occupancy, route
+  status, and bounded recovery candidates.
+- Define decisions for `continue`, `wait`, `yield`, `retreat`, `local-replan`,
+  `alternative-route`, `global-replan`, and `blocked`.
+- Keep the strategy deterministic for the same observation and seed.
+- Allow consumers to provide a strategy while shipping one small
+  queue-and-yield baseline.
+- Stagger retry times deterministically so a whole queue does not resume on
+  the same update.
+- Keep strategy execution out of the path-search hot loop and immutable
+  navigation snapshots.
+
+Headless checkpoint:
+
+- A lower-priority blocked agent waits while the agent with right of way can
+  continue.
+- Waiting agents do not repeatedly alternate between forward and backward
+  motion.
+- Retry decisions are staggered and reproducible.
+- A consumer strategy can choose a different valid action without replacing
+  the planner or avoidance implementation.
+
+Manual checkpoint:
+
+- In the narrow-corridor fixture, queued agents visibly wait instead of all
+  backing off and restarting together.
+- State counts distinguish waiting/queued agents from genuinely stuck agents.
+- Switching back to the existing baseline remains possible for comparison.
+
+#### M4.7: agent profiles and scenario harness
+
+Goal: prove that navigation mechanisms support different movement rules
+without claiming to implement complete human, vehicle, or animal AI.
+
+Initial proof profiles:
+
+| Profile | Permitted recovery behaviour | Explicitly prohibited/limited |
+| --- | --- | --- |
+| Pedestrian | Wait, yield, sidestep, limited squeeze, alternate route | Squeezing below configured clearance |
+| Vehicle/rover | Wait, reverse to a safe point, alternate route | Squeezing, instant turns, lateral sidesteps |
+| Animal | Wait, yield, variable spacing, retreat, alternate route | Universal orderly queueing |
+
+The profiles are data and strategy presets. Games may override them or provide
+their own strategy; they are not behavioural simulations owned by navigation.
+
+Repeatable scenario matrix:
+
+- Open ground crossing.
+- Narrow passage with same-direction traffic.
+- Narrow passage with opposing traffic.
+- L-shaped corner.
+- Dead end and complete blockage.
+- A longer available alternative route.
+- Dynamic obstacle appearing while agents are travelling.
+
+Headless checkpoint:
+
+- Every profile produces only actions allowed by its capability data.
+- A vehicle never selects squeeze or sidestep.
+- Fixed seed, profile, and observations produce the same decisions.
+- Scenario results report progress, waits, replans, route switches, unresolved
+  blockage, and bounded work rather than requiring every scenario to clear.
+
+Manual checkpoint:
+
+- The lab provides profile, scenario, agent-count, and speed controls.
+- The selected profile changes visible recovery behaviour in the expected way.
+- Complete blockage remains visible and truthful; agents do not pass through
+  unavailable space.
+
+#### M4.8: alternative routes and bottleneck coordination
+
+Goal: let persistent congestion escalate beyond local steering without causing
+every agent to run an expensive global search at once.
+
+Implementation slice:
+
+- First add a bounded decentralised encounter protocol. Agents exchange
+  effective priority and retreat intent only through relevant nearby blocker
+  relationships. Retreat requests propagate backward so newly arriving agents
+  do not close space behind an existing retreat wave.
+- Break symmetric encounters by effective priority and then stable identity.
+  Propagated signals carry encounter identity, a hop limit, and absolute expiry;
+  unresolved no-progress becomes explicitly `blocked` after a fixed budget.
+- Request a small bounded set of meaningfully different routes, initially two
+  or three, rather than near-identical shortest paths.
+- Generate alternatives lazily after persistent low progress and cache/share
+  compatible alternatives where possible.
+- Penalize recently failed or congested corridors for a bounded time.
+- Retreat to the nearest safe decision/staging point when required; do not
+  automatically return to the original journey start.
+- Stagger route switching so all agents do not select route B simultaneously.
+- If no alternative exists, return to the active strategy for waiting,
+  retreating, task deferral, or explicit blockage.
+- Evaluate reservations, directional turns, or passing-place ownership for
+  single-width bottlenecks after the alternative-route proof. These are
+  coordination policies, not replacements for A* or local avoidance.
+
+Headless checkpoint:
+
+- Two equal-priority agents meeting in a single-width passage choose one stable
+  winner instead of mirroring each other indefinitely.
+- A retreat request propagates through a blocker chain, including to a newly
+  arriving agent, without accumulating duplicate priority.
+- Expired signals disappear, propagation is hop-bounded, and unsuccessful
+  retreat produces an explicit blocked result instead of silent infinite
+  indecision.
+- Route B is topologically or spatially distinct from route A by a configured
+  diversity threshold.
+- A persistently blocked agent can switch routes within fixed search/work
+  limits.
+- Shared alternatives avoid one independent multi-route search per agent.
+- Recently failed routes and retries expire deterministically.
+
+Manual checkpoint:
+
+- A fixture shows routes A and B and which route each agent currently follows.
+- Blocking route A causes some eligible agents to use route B without every
+  agent switching on the same frame.
+- Vehicle and pedestrian profiles may make different choices from the same
+  congestion observation.
+- If both routes are blocked, agents wait or report blocked instead of
+  oscillating indefinitely.
+
+M4.8 decentralised-encounter implementation checkpoint:
+
+- `navigation-encounter.ts` exports a pure local resolver; it owns no world or
+  agent registry and requires consumers to provide relevant blocker relations
+  from their existing spatial query.
+- Equal encounters resolve by effective priority and stable agent identity.
+  Priority can be inherited through a blocker chain without summing duplicate
+  pressure, while retreat intent propagates backward through that chain.
+- Signals expire and have a hop bound. A configurable no-progress budget
+  returns explicit `blocked`, so the default protocol cannot remain silently
+  undecided forever when physical clearance is unavailable.
+- The headless contract is implemented. Navigation-lab integration is the next
+  visual slice and must preserve route arrival separately from retreat state.
+  The lab retreat search now starts at 6 cells and escalates to a maximum of 9;
+  encounter retreat propagation retains its 64-hop default. Retreat signals are
+  rebroadcast when the consumer re-evaluates the same active encounter, rather
+  than being a one-shot message.
+- The demo keeps journey direction separate from temporary repair-route
+  traversal direction, so local recovery cannot make an agent appear to have
+  reached its destination or create a false third traffic direction.
+- The narrow-corridor fixture leaves valid single-file clearance for the demo
+  agent radius. It intentionally does not allow two agents abreast; a fully
+  occupied one-file corridor remains a coordination test, not a physically
+  impossible zero-clearance test.
+- The lab splits its selected agent count between both journey directions, so
+  a two-agent test is a genuine one-versus-one encounter.
 
 Build checkpoint for the visual slice:
 
@@ -626,6 +886,18 @@ npx ng build demo-app --configuration development
 12. Point, multi-point, region, adjacency, and reachability queries are v1
     requirements.
 13. The first grid uses a clearance field for multiple agent radii.
+14. Traversal feasibility and live congestion behaviour use separate profiles.
+15. Local recovery is pluggable; built-in strategies are bounded defaults, not
+    universal human, vehicle, or animal behaviour.
+16. The navigation lab is a repeatable scenario harness, not the specification
+    of one final crowd simulation.
+17. Persistent congestion may escalate to a small, lazy, diverse route set;
+    coordinated retries prevent every agent choosing the same alternative at
+    once.
+18. The first bottleneck coordination primitive is a decentralised encounter
+    protocol over nearby blocker relationships. It has no persistent global
+    coordinator; consumers may later add reservations for high-throughput
+    scenarios.
 
 ## Open decisions
 
@@ -633,7 +905,11 @@ npx ng build demo-app --configuration development
   an abstraction implemented by both.
 - Cache keys and compatibility rules for starts near one another.
 - How much route smoothing belongs in navigation versus consumer steering.
-- Initial congestion and deadlock policy for dense RTS crowds.
+- Exact built-in pedestrian, vehicle, and animal recovery presets after the
+  scenario matrix has produced evidence.
+- Whether bottleneck coordination starts with reservations, directional turns,
+  passing-place ownership, or a smaller queue policy.
+- Route-diversity metric and cache compatibility rules for alternative routes.
 - Whether ORCA-style avoidance is suitable for physics-driven rovers.
 - Whether the initial queue runs on the main thread, a worker, or supports both;
   cancellation and serialization semantics remain to be measured.
@@ -661,3 +937,100 @@ npx ng build demo-app --configuration development
 - Added map-size, replan-storm, allocation/GC, and worker-transfer benchmarks.
 - Narrowed initial topology support to a plane and quad-sphere while preserving
   extensibility for later domains.
+
+### 2026-08-10: M4.5 congestion checkpoint
+
+- Recorded the narrow-corridor congestion result: visible full blockage at
+  higher agent counts, mixed recovery, and reproducible L-corner deadlocks.
+- Clarified that this is expected for the current local-avoidance proof and is
+  evidence for the next live local/global replanning slice, not a final crowd
+  movement guarantee.
+
+### 2026-08-10: M4.5 bounded local recovery
+
+- Added a short deterministic back-off manoeuvre when an agent reaches the
+  local-replan threshold, allowing it to create steering room at corners.
+- Preserved the route and the global fallback; fully occupied corridors remain
+  legitimately blocked rather than receiving a fabricated escape path.
+
+### 2026-08-11: M4.5 bounded route repair
+
+- Fixed the demo back-off so the temporary recovery waypoint actually drives
+  the preferred velocity.
+- Added a bounded local A* repair request from the agent's current cell to its
+  current route endpoint, with dynamic agents and corridor barriers projected
+  as temporary blocked cells.
+- Kept the repair local and capped; no claim is made that an occupied corridor
+  can always be resolved.
+
+### 2026-08-11: M4.5 recovery escalation
+
+- Added stable agent priority so lower-priority agents can yield during a
+  congestion event instead of all agents choosing symmetric escape motions.
+- Added progressively wider escape-cell searches for repeated failed repairs,
+  including sideways escape targets.
+- Added increasing recovery cooldowns to prevent rapid replan oscillation.
+- Kept genuinely enclosed agents in the explicit `stuck` state; recovery does
+  not fabricate movement through occupied space.
+
+### 2026-08-11: capability and recovery strategy plan
+
+- Closed M4.5 as a bounded diagnostic/recovery-mechanism proof rather than a
+  universal congestion solution.
+- Added M4.6 for a pluggable recovery strategy and deterministic queue/yield
+  baseline.
+- Added M4.7 for pedestrian, vehicle/rover, and animal capability profiles plus
+  a repeatable scenario matrix.
+- Added M4.8 for lazy diverse alternatives, congestion penalties, staggered
+  route switching, and later bottleneck coordination experiments.
+
+### 2026-08-12: decentralised encounter protocol
+
+- Added the first M4.8 coordination primitive as a bounded local protocol
+  rather than a persistent global coordinator.
+- Added transferable effective priority and expiring retreat-wave signals so
+  an agent already backing out can request clearance from agents behind it.
+- Required deterministic tie-breaking, bounded propagation, and explicit
+  blockage after unsuccessful recovery; the visual lab adapter remains a
+  separate checkpoint.
+
+### 2026-08-12: journey-direction recovery fix
+
+- Separated an agent's persistent A-to-B journey direction from the traversal
+  direction of a temporary repair route. Recovery no longer changes the
+  apparent traffic direction before the agent reaches an endpoint.
+- Widened the visual narrow-corridor fixture from zero practical clearance to
+  valid single-file clearance while retaining the one-file bottleneck.
+- Fixed the agent-count fixture so low counts still create opposing traffic;
+  two agents now means one agent from each endpoint.
+
+### 2026-08-12: headless avoidance scenario harness
+
+- Added a deterministic single-lane crossing harness for baseline and
+  priority-yield comparisons without Angular or rendering.
+- Added compact metrics for completion, blockage, stationary agents,
+  oscillation, velocity reversals, and overlap.
+- Added seed sweeps that return aggregate counts and failed seed IDs only, so
+  investigation does not depend on verbose visual descriptions or logs.
+
+After building the library, the compact local comparison can be run with:
+
+```text
+npm run navigation:scenarios -- baseline 2 100
+npm run navigation:scenarios -- priority-yield 2 100
+```
+
+The command prints one line per requested run and limits the displayed failed
+seed list so repeated investigations remain token-efficient.
+
+The navigation lab now prints the same compact fields live beneath the canvas,
+prefixed with `ui=`. Its `blocked`, `stationary`, `overlap`, and `reversals`
+values come from the actual rendered simulation. `completed=na` is intentional:
+the lab continuously reverses agents at route endpoints, while the headless
+fixture ends when agents reach their goals.
+
+This first harness intentionally isolates a single-lane crossing around the
+navigation avoidance primitives. It is not yet a byte-for-byte extraction of
+the Angular lab loop; disagreements between its result and the lab should be
+treated as evidence for the next simulation-extraction slice, not as proof
+that the visual fixture is fixed.

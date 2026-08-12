@@ -9,3 +9,6 @@ export * from './core/navigation-request-queue';
 export * from './core/navigation-fixtures';
 export * from './core/navigation-avoidance';
 export * from './core/navigation-avoidance-benchmarks';
+export * from './core/navigation-avoidance-scenarios';
+export * from './core/navigation-strategy';
+export * from './core/navigation-encounter';

@@ -18,4 +18,5 @@ canvas { display: block; width: 100%; height: auto; border: 1px solid #35503a; b
 .diagnostic.avoidance { color: #f4dc88; }
 .diagnostic.forward { color: #f78c6b; }
 .diagnostic.reverse { color: #c792ea; }
+.diagnostic.report { flex-basis: 100%; overflow-wrap: anywhere; color: #f4dc88; }
 @media (max-width: 48rem) { .panel { width: calc(100vw - 1rem); padding: .65rem; } header { align-items: flex-start; flex-direction: column; } }
