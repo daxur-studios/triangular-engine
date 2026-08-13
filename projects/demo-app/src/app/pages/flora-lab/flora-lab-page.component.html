@@ -1,0 +1,66 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Flora lab controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small>triangular-engine/procedural — M1 tree slice</small>
+        </div>
+        <strong>Procedural flora: tree skeleton + mesh</strong>
+      </header>
+
+      <p class="blurb">
+        Each tree is <code>generateFloraSkeleton</code> +
+        <code>buildFloraMesh</code> from one archetype, one seed per
+        variant. Color goes from trunk-brown to leaf-green following the
+        baked <code>windWeight</code> attribute (0 at the root, rising
+        toward branch tips) — no wind shader yet, just the raw data a
+        wind material would consume. Colored spheres are
+        <code>deriveFloraSockets</code> output — perches, a nest cavity
+        (50% chance per variant), and fruit slots. Trunk collider
+        descriptors are derived too but not visualized here.
+      </p>
+
+      <nav aria-label="Actions">
+        <button (click)="regenerate()">Regenerate (new seed)</button>
+        <button [class.active]="wireframe()" (click)="toggleWireframe()">
+          Wireframe
+        </button>
+        <button [class.active]="showSockets()" (click)="toggleSockets()">
+          Sockets
+        </button>
+      </nav>
+
+      <ul class="legend" aria-label="Socket kind legend">
+        @for (kind of socketKinds; track kind) {
+          <li>
+            <span class="swatch" [style.background]="socketGizmoColorByKind[kind]"></span>
+            {{ kind }}
+          </li>
+        }
+      </ul>
+
+      <label class="seed-field">
+        Seed
+        <input
+          type="number"
+          [value]="seed()"
+          (change)="setSeed($any($event.target).value)"
+        />
+      </label>
+
+      <p class="blurb note">
+        {{ variantCount }} variants from seeds {{ seed() }}–{{ seed() + variantCount - 1 }}.
+        Regenerating with the same seed reproduces the same row exactly.
+      </p>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="[0, 6, 16]"
+    [target]="[0, 2, 0]"
+    [isActive]="true"
+  />
+  <ambientLight [intensity]="1.1" />
+  <directionalLight [position]="[12, 18, 8]" [intensity]="2" [castShadow]="true" />
+</scene>

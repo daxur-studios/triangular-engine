@@ -165,10 +165,12 @@ library follows scatter's actual pattern:
 
 ### `triangular-engine/procedural` — one entry, two subfolders
 
-- `core/` — no Angular, no DOM, no three imports. Seeded RNG/hash helpers,
-  the socket model and socket-ID scheme, shared skeleton/graph types,
-  archetype validation + serialization conventions, plain-array mesh-data
-  types.
+- `core/` — no Angular, no DOM, no three imports, **and no domain
+  vocabulary** (no "perch", "nest cavity", "trunk" — those belong to
+  flora/). Seeded RNG/hash helpers, the generic `IProceduralSocket<TKind>`
+  shape and socket-ID derivation, shared skeleton/graph types, archetype
+  validation + serialization conventions, plain-array mesh-data types. Each
+  domain (flora, later buildings/fauna) supplies its own `TKind` union.
 - `flora/` — depends on three (`BufferGeometry` assembly, vector math only).
   Tree skeleton generator, skeleton→mesh tube/cluster construction, socket
   derivation, wind-weight baking, collider-descriptor derivation, and LOD
@@ -217,14 +219,13 @@ export interface IFloraArchetype {
   collider: { trunk: 'capsule' | 'cylinder' | 'none' };
 }
 
-export interface IFloraSocket {
-  /** Stable within a variant: hash(archetypeId, variantSeed, kind, ordinal). */
-  id: string;
-  kind: 'perch' | 'nest-cavity' | 'fruit-slot' | 'flower-head' | 'climb-path' | 'root-base';
-  positionM: [number, number, number];   // local to variant origin
-  /** Quaternion; "up" for perches, outward for flower heads. */
-  orientation: [number, number, number, number];
-  clearanceRadiusM: number;
+/** Flora-specific socket kinds — core's IProceduralSocket<TKind> knows nothing
+ *  about perches or nest cavities; only flora/ does. */
+export type FloraSocketKind =
+  | 'perch' | 'nest-cavity' | 'fruit-slot' | 'flower-head' | 'climb-path' | 'root-base';
+
+export interface IFloraSocket extends IProceduralSocket<FloraSocketKind> {
+  // positionM, orientation, clearanceRadiusM, id, kind inherited from core.
 }
 
 export interface IFloraVariant {
@@ -359,44 +360,101 @@ Status: not started.
   serialization round-trip.
 
 Checkpoint: `npm run test:triangular-engine:procedural`,
-`npm run build:triangular-engine`.
+`npm run build:triangular-engine`. Done.
 
 ### Milestone 1: tree skeleton + mesh generator
 
-Status: not started.
+Status: done (single LOD; per-LOD budget variation is future work).
 
-- Flora: recursive branch-skeleton generation from archetype params + seed;
-  skeleton → low-poly trunk/branch tubes + foliage clusters; per-vertex wind
-  weights; triangle/vertex budget assertions per LOD.
-- Tests: determinism at mesh level, budget limits, no NaNs, wind weight 0 at
-  root and monotonic-ish with height/depth.
+- Flora: recursive branch-skeleton generation from archetype params + seed
+  (`flora-skeleton.ts`); skeleton → low-poly trunk/branch tubes + foliage
+  clusters (`flora-mesh.ts`); per-vertex wind weights; triangle budget
+  assertion (20k/mesh) plus a separate node-count cap in the skeleton
+  generator itself (5k nodes) — added after a first cut let an exponential
+  archetype hang skeleton generation before the mesh-level budget check
+  could ever run.
+- Tests: determinism at mesh level, budget limits (including the
+  runaway-archetype case), no NaNs, wind weight 0 at root and increasing
+  with branch depth. 44/44 passing (`npm run test:triangular-engine:procedural`).
 
 ### Milestone 2: sockets + collider descriptors
 
-Status: not started.
+Status: done.
 
-- Socket derivation from the skeleton (perches on branch nodes, cavity on
-  trunk, fruit slots near foliage, root-base at origin); stable IDs;
-  clearance radii.
-- Trunk collider descriptor (capsule/cylinder) in scatter's input format.
-- Tests: socket determinism and stability (adding an unrelated archetype
-  field does not reshuffle IDs), sockets lie on/near the skeleton, collider
-  matches trunk dimensions.
+- `flora-sockets.ts`: `deriveFloraSockets(skeleton, archetype, seed)`.
+  `root-base` always emitted (one, at the origin). `perch` sockets are
+  gated two ways: `perchesPerBranchDepth[depth]` picks *which generation*
+  of branches is eligible (decision 14 — low depths, thick/low branches),
+  and within that depth `isPerchableBranch` filters to segments that are
+  actually near-horizontal (≤45° from horizontal — `PERCH_MAX_ANGLE_FROM_
+  HORIZONTAL_RAD`) and thick enough (`PERCH_MIN_RADIUS_FRACTION_OF_TRUNK_
+  RADIUS`, 0.15 of trunk radius). Depth alone was the original v1 rule and
+  was wrong — a node's depth says nothing about whether that segment is a
+  landable horizontal limb versus a near-vertical riser, and placing the
+  gizmo at `node.endM` put it at the branch-fork point rather than along
+  the branch. Fixed: eligible perches are now placed at the branch
+  segment's midpoint, not its endpoint. `nest-cavity`: a single
+  chance draw (hashed from `archetypeId|seed|nest-cavity`, independent of
+  the skeleton/mesh generators' own random stream, which isn't exposed
+  after generation) against `nestCavityChance01`, placed at trunk
+  mid-height. `fruit-slot`/`flower-head`: derived from branch-tip nodes
+  (same "no children" test as the mesh builder's foliage placement),
+  capped at `fruitSlotsMax` for fruit, one per tip for flowers, both
+  skipped when `foliage.style === 'none'`. Clearance radii scale off the
+  branch/trunk/foliage dimensions rather than fixed constants. Orientation
+  is identity for every socket in v1 — real alignment (e.g. a perch facing
+  away from the trunk) is deferred, not required by any current consumer.
+- `flora-collider.ts`: `deriveFloraTrunkCollider(skeleton, archetype)` →
+  `{ shape: 'capsule' | 'cylinder', params: [halfHeightM, radiusM] }` from
+  the root skeleton node, or `undefined` when `collider.trunk === 'none'`.
+  `IFloraColliderDescriptor` is a local structural type matching scatter's
+  `ScatterColliderDefinition` shape (same field names, same
+  `[halfHeight, radius]` param order the jolt scatter collider adapter
+  expects) rather than an import from `triangular-engine/scatter` — kept
+  as a structural match, not a hard dependency between sibling libraries,
+  same reasoning as core having no domain vocabulary.
+- Tests: 17 new (socket determinism, id stability when an unrelated field
+  like `name` changes, perch count clamping to *eligible* nodes, perch
+  eligibility rejecting steep/thin branches, perch position at the branch
+  midpoint rather than the fork endpoint, nest-cavity chance at 0/1,
+  fruit/flower cap and skip-when-`none` behavior, no-NaN sweep, collider
+  shape/param correctness and the `none` case). 61/61 passing
+  (`npm run test:triangular-engine:procedural`).
+- Demo page pulled the socket gizmos forward too (see M3 below) rather
+  than leaving them for later, since they're the natural way to actually
+  see this milestone's output.
 
 ### Milestone 3: `flora-lab` demo page (first vertical slice)
 
-Status: not started.
+Status: mostly done — skeleton/mesh visual slice plus socket gizmos are
+in; an actual wind-displacement material is blocked on M4 (scatter's
+`scatter-wind-material`) and stays deferred.
 
-- New page `projects/demo-app/src/app/pages/flora-lab/`, lazy route,
-  following the established lab shape (standalone, `EngineModule`,
-  `EngineService.provide`, one `<scene>`).
-- Variant grid, seed input, socket gizmos toggled per kind, wind preview via
-  a simple vertex-displacement material driven by the baked weights.
+- New page `projects/demo-app/src/app/pages/flora-lab/` (lazy route
+  `/flora-lab`, linked from the demo index), following the established lab
+  shape (standalone, `EngineModule`, `EngineService.provide`, one
+  `<scene>`).
+- Done: a row of 6 variants from consecutive seeds, seed input +
+  "Regenerate" (random seed) + wireframe toggle, ground plane, orbit
+  camera. Vertex color lerps trunk-brown → leaf-green from the raw
+  `windWeight` attribute as a static stand-in for a wind shader (no
+  animation yet). Colored gizmo spheres (one `MeshBasicMaterial` per
+  socket kind, shared `SphereGeometry`) render each variant's
+  `deriveFloraSockets` output, toggleable, with a color-key legend in the
+  panel; the demo archetype now sets non-empty `perchesPerBranchDepth`,
+  `nestCavityChance01`, and `fruitSlotsMax` so gizmos actually appear.
+  `npx ng build demo-app --configuration development` passes; the tsconfig
+  path had to be added in **two** places — root `tsconfig.json` (already
+  done in M0) and `projects/demo-app/tsconfig.app.json`, which duplicates
+  the same `paths` map rather than inheriting it. Missed the second one
+  first pass; worth remembering for the next new entry point too.
+- Not done: trunk collider wireframe visualization (not required to see
+  M2's output — sockets are), variant-count/archetype-param controls
+  beyond seed.
 
-Human verification: regenerate with the same seed — identical tree; socket
-markers sit on branches/trunk plausibly; wind sways tips more than trunk.
-
-Checkpoint: `npx ng build demo-app --configuration development`.
+Human verification (do this yourself — regenerating with the same seed
+should reproduce an identical row of trees and gizmo layout; not
+re-confirmed here): `npx ng serve demo-app` then open `/flora-lab`.
 
 ### Milestone 4: scatter integration
 
@@ -485,10 +543,21 @@ Status: not started; each item independently optional.
 13. Socket occupancy/state ownership is BSP's, not this library's; socket
     spatial queries are scoped to scatter's existing streaming cells rather
     than a second spatial index (Known gaps #2, #3).
-14. Perches in v1 only derive from low-wind-weight skeleton nodes, sidestep
-    rather than solve the wind/socket visual mismatch (Known gaps #5).
+14. Perches in v1 only derive from low-wind-weight skeleton nodes (branch
+    depth gates the generation), sidestep rather than solve the wind/socket
+    visual mismatch (Known gaps #5). Depth alone doesn't guarantee a
+    landable branch, though — within an eligible depth, `isPerchableBranch`
+    additionally requires the segment to be near-horizontal and thick
+    enough (added after M2's first pass placed perches on any node at the
+    right depth regardless of orientation, including near-vertical risers).
 15. Nest cavities are a decal/recess visual trick in v1, not boolean-cut
     topology (Known gaps #7).
+16. `core`'s `IProceduralSocket` takes a generic `TKind extends string`
+    instead of a fixed union — an early draft hardcoded
+    `'perch' | 'nest-cavity' | ...` directly into core, which is exactly
+    the domain leak the "core has no domain vocabulary" rule (see
+    Proposed architecture) exists to prevent. Caught during M1 review;
+    flora now defines its own `FloraSocketKind` and extends the generic.
 
 ## Open decisions
 

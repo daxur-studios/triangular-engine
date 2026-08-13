@@ -41,6 +41,9 @@
       ],
       "triangular-engine/navigation": [
         "projects/triangular-engine/navigation/public-api"
+      ],
+      "triangular-engine/procedural": [
+        "projects/triangular-engine/procedural/public-api"
       ]
     },
     "outDir": "../../out-tsc/app",

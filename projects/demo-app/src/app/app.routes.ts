@@ -191,6 +191,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'flora-lab',
+    loadComponent: () =>
+      import('./pages/flora-lab/flora-lab-page.component').then(
+        ({ FloraLabPageComponent }) => FloraLabPageComponent,
+      ),
+  },
+  {
     path: 'animals-lab',
     loadComponent: () =>
       import('./pages/animals-lab/animals-lab-page.component').then(
