@@ -7,6 +7,7 @@
     "test": "ng test",
     "build:triangular-engine": "ng build triangular-engine",
     "test:triangular-engine:navigation": "ng run triangular-engine:test-navigation --watch=false --browsers=ChromeHeadless",
+    "test:triangular-engine:procedural": "ng run triangular-engine:test-procedural --watch=false --browsers=ChromeHeadless",
     "navigation:scenarios": "node tools/run-navigation-scenarios.mjs",
     "publish": "npm run build:triangular-engine && cd dist/triangular-engine && npm publish",
     "link": "ng build triangular-engine --configuration development && cd dist/triangular-engine && npm link",

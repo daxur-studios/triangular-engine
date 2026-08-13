@@ -38,7 +38,8 @@
               "../water/**/*.spec.ts",
               "../terrain/**/*.spec.ts",
               "../scatter/**/*.spec.ts",
-              "../spline/**/*.spec.ts"
+              "../spline/**/*.spec.ts",
+              "../procedural/**/*.spec.ts"
             ]
           }
         },
@@ -48,6 +49,14 @@
             "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"],
             "include": ["../navigation/**/*.spec.ts"]
+          }
+        },
+        "test-procedural": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
+            "polyfills": ["zone.js", "zone.js/testing"],
+            "include": ["../procedural/**/*.spec.ts"]
           }
         }
       }
