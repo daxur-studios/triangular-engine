@@ -1,6 +1,11 @@
 # Animals sub-library
 
-Status: planning; no public API or implementation has been approved yet.
+Status: Milestones 0–1 implemented (`triangular-engine/animals`: deterministic
+flocks, residency, presentation). Milestone 2 has one minimal slice —
+single-agent seek-and-land (`stepArrival`) — added to unblock
+[014_procedural_sublibrary.md](014_procedural_sublibrary.md)'s Milestone 5;
+the rest of Milestone 2 (habitat regions, activity selection, reachability)
+is not built. See Roadmap below for per-milestone detail.
 
 ## Goal
 
@@ -361,6 +366,10 @@ are described in this document.
 
 ### Milestone 0: contracts and deterministic primitives
 
+Status: done. `animals/core`: `AnimalVector3`/`AnimalObserver`/`FlockState`
+types (`animal-types.ts`), seeded hashing (`animal-hash.ts`), a fixed-step
+clock with time-warp/skip handling (`fixed-step-clock.ts`).
+
 - Confirm package boundary and dependency rules.
 - Define time, IDs, keyed random sampling, observers, environment queries, and
   presentation output.
@@ -369,6 +378,12 @@ are described in this document.
 
 ### Milestone 1: deterministic visible flocks
 
+Status: done. `stepFlock` (`flock-step.ts`): cohesion/alignment/separation,
+terrain-height clamping, vehicle-disturbance flee/recover with a bounded
+escape response. `materializeFlock`/`updateFlockResidency` handle
+observer-based spawn/cull; `presentFlock`/`presentInterpolatedFlock` give
+frame-rate-independent renderer snapshots. Demo: `/animals-lab`.
+
 - One flying species and stable flock identities.
 - Observer-based materialization and culling.
 - Terrain-relative flight and basic boid steering.
@@ -376,6 +391,31 @@ are described in this document.
 - Abstract demo presentation.
 
 ### Milestone 2: meaningful activities and destinations
+
+Status: one minimal slice done, rest not started. `stepArrival`
+(`flock-arrival.ts`) steers a single agent toward a 3D target point and
+marks it `'landed'` once within a configurable distance — Reynolds-style
+arrival deceleration inside `arrivalRadiusM`, turn-rate-limited horizontal
+heading (shared `rotateTowards` from the new `animal-math.ts`, which
+`stepFlock` was refactored onto too), acceleration-limited horizontal and
+vertical speed. Built specifically to unblock
+[014_procedural_sublibrary.md](014_procedural_sublibrary.md) Milestone 5
+("bird lands on a generated tree's perch socket"), not as a full M2
+implementation — no habitat regions, activity selection, minimum-duration/
+recent-location memory, or reachability checks exist. Demo:
+`/flora-affordance-lab` (in the demo-app, alongside the procedural pages,
+since the design test is procedural's).
+
+Fixed while building this: `rotateTowards`'s turn-rate limiting used the
+agent's *current* horizontal velocity as its "current heading," but a unit
+vector from a zero velocity is itself the zero vector — an agent starting
+at rest (as `stepArrival` naturally does; flocks always start with nonzero
+`velocity.z` so this path was never exercised) got stuck permanently
+turned away from its target, `atan2(0, 0)` always evaluating to a zero
+turn. Fixed by snapping straight to the target heading when the current
+horizontal speed is ~0, since there's no existing direction to rotate away
+from. Covered by `flock-arrival.spec.ts`; `flock-step.spec.ts` still passes
+unchanged since flocks never hit this branch in practice.
 
 - Habitat regions, feeding areas, perches, and resting areas.
 - Activity selection with minimum duration and recent-location memory.

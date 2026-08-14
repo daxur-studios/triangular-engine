@@ -1,22 +1,6 @@
-import { AnimalDisturbance, AnimalTerrainSampler, AnimalVector3, FlockState } from './animal-types';
+import { AnimalDisturbance, AnimalTerrainSampler, FlockState } from './animal-types';
+import { clamp, horizontalUnit, rotateTowards } from './animal-math';
 import { FlockDefinition } from './flock-definition';
-
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-
-function horizontalUnit(vector: AnimalVector3): { x: number; z: number } {
-  const magnitude = Math.hypot(vector.x, vector.z) || 1;
-  return { x: vector.x / magnitude, z: vector.z / magnitude };
-}
-
-function rotateTowards(vx: number, vz: number, targetX: number, targetZ: number, maxAngle: number): { x: number; z: number } {
-  const current = horizontalUnit({ x: vx, y: 0, z: vz });
-  const target = horizontalUnit({ x: targetX, y: 0, z: targetZ });
-  const angle = Math.atan2(target.x * current.z - target.z * current.x, current.x * target.x + current.z * target.z);
-  const turn = clamp(angle, -maxAngle, maxAngle);
-  const cos = Math.cos(turn);
-  const sin = Math.sin(turn);
-  return { x: current.x * cos + current.z * sin, z: current.z * cos - current.x * sin };
-}
 
 /** Steps a flock from one immutable snapshot. Neighbour steering always reads the old snapshot. */
 export function stepFlock(

@@ -116,6 +116,49 @@
       <button (click)="resetSeed()">Reset seed</button>
       <button (click)="nextSeed()">Change seed ({{ seed() }})</button>
     </div>
+    <section class="shared-scenario">
+      <div class="shared-scenario-heading">
+        <div>
+          <strong>Shared deterministic test viewer</strong>
+          <small>The canvas calls the same fixed-step core as the unit tests and CLI runner.</small>
+        </div>
+        <span>Step {{ sharedScenarioSnapshot()?.steps ?? 0 }}</span>
+      </div>
+      <div class="actions shared-controls">
+        <label class="avoidance-control">Fixture
+          <select [value]="sharedScenarioTraffic()" (change)="setSharedScenarioTraffic($event)">
+            <option value="same-direction">Two agents, same direction</option>
+            <option value="opposing">Opposing pair (known failing slice)</option>
+            <option value="opposing-with-staging">Opposing pair with staging</option>
+          </select>
+        </label>
+        <label class="avoidance-control">Mode
+          <select [value]="sharedScenarioMode()" (change)="setSharedScenarioMode($event)">
+            <option value="baseline">Baseline</option>
+            <option value="priority-yield">Priority / yield</option>
+          </select>
+        </label>
+        <label class="avoidance-control">Seed
+          <input type="number" [value]="sharedScenarioSeed()" (change)="setSharedScenarioSeed($event)" />
+        </label>
+        <label class="avoidance-control">Speed
+          <input type="range" min="0.25" max="8" step="0.25" [value]="sharedScenarioSpeed()" (input)="setSharedScenarioSpeed($event)" />
+          <output>{{ sharedScenarioSpeed().toFixed(2) }}x</output>
+        </label>
+        <button [class.active]="sharedScenarioPlaying()" (click)="toggleSharedScenario()">
+          {{ sharedScenarioPlaying() ? "Pause" : "Play" }}
+        </button>
+        <button (click)="stepSharedScenario()" [disabled]="sharedScenarioPlaying() || sharedScenarioSnapshot()?.finished">Single step</button>
+        <button (click)="resetSharedScenario()">Reset</button>
+      </div>
+      <canvas #scenarioMap width="960" height="220" aria-label="Deterministic navigation test scenario"></canvas>
+      <div class="scenario-legend">
+        <span class="diagnostic forward">Orange: forward</span>
+        <span class="diagnostic reverse">Purple: reverse</span>
+        <span>Gold outline: yielding to staging bay</span>
+        <code>{{ sharedScenarioReport() }}</code>
+      </div>
+    </section>
     <canvas
       #map
       width="960"

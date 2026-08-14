@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import {
   BufferGeometry,
@@ -19,6 +20,13 @@ import {
   type FloraSocketKind,
   type IFloraArchetype,
 } from 'triangular-engine/procedural';
+import {
+  enableScatterWindSway,
+  type IScatterWindHandle,
+  type ScatterWindDefinition,
+} from 'triangular-engine/scatter';
+
+const TREE_WIND: ScatterWindDefinition = { strength: 0.06, frequency: 0.8 };
 
 const GROUND_SIZE_M = 60;
 const VARIANT_SPACING_M = 4.5;
@@ -87,10 +95,14 @@ export class FloraLabPageComponent {
   private readonly treeMeshes: Mesh[] = [];
   private readonly socketGizmos: Mesh[] = [];
   private readonly material = new MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+  private readonly windHandle: IScatterWindHandle;
   private readonly socketGizmoGeometry = new SphereGeometry(SOCKET_GIZMO_RADIUS_M, 8, 6);
+  // depthTest off + renderOrder above the tree mesh keeps debug gizmos
+  // visible even when buried inside foliage geometry (fruit-slot/flower-head
+  // sockets sit at the same tip point the foliage cluster is centered on).
   private readonly socketGizmoMaterialByKind = new Map(
     Object.entries(SOCKET_GIZMO_COLOR_BY_KIND).map(
-      ([kind, color]) => [kind as FloraSocketKind, new MeshBasicMaterial({ color })] as const,
+      ([kind, color]) => [kind as FloraSocketKind, new MeshBasicMaterial({ color, depthTest: false })] as const,
     ),
   );
 
@@ -102,10 +114,20 @@ export class FloraLabPageComponent {
     ground.rotation.x = -Math.PI / 2;
     this.group.add(ground);
 
+    // Real wind sway (M4 unblocked this — see docs/runbook/014, Milestone 4):
+    // reads the same baked windWeight attribute the trunk-to-leaf color lerp
+    // below uses, via scatter's material patch rather than a new one here.
+    this.windHandle = enableScatterWindSway(this.material, TREE_WIND, {
+      useVertexWindWeight: true,
+    });
+
     this.engine.scene.add(this.group);
     this.regenerate();
 
     const destroyRef = inject(DestroyRef);
+    this.engine.elapsedTime$
+      .pipe(takeUntilDestroyed(destroyRef))
+      .subscribe((elapsedTimeS) => this.windHandle.setTimeS(elapsedTimeS));
     destroyRef.onDestroy(() => this.dispose());
   }
 
@@ -158,6 +180,7 @@ export class FloraLabPageComponent {
           socket.positionM[1],
           socket.positionM[2],
         );
+        gizmo.renderOrder = 1;
         gizmo.visible = this.showSockets();
         this.group.add(gizmo);
         this.socketGizmos.push(gizmo);

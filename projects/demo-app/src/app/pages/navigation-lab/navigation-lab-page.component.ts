@@ -18,6 +18,7 @@ import {
   classifyNavigationAvoidanceState,
   createNavigationSpatialIndex,
   createNavigationQueueYieldStrategy,
+  createNavigationAvoidanceScenarioSimulation,
   type NavigationAvoidanceObstacle,
   type NavigationAvoidanceState,
   type NavigationVector3,
@@ -26,6 +27,10 @@ import {
   type NavigationHeightfieldGrid,
   type NavigationGridRouteResult,
   type NavigationRecoveryStrategy,
+  type NavigationAvoidanceScenarioMode,
+  type NavigationAvoidanceScenarioSimulation,
+  type NavigationAvoidanceScenarioSnapshot,
+  type NavigationAvoidanceTraffic,
 } from 'triangular-engine/navigation';
 
 const COLUMNS = 24;
@@ -83,6 +88,7 @@ interface DemoAvoidanceAgent {
 })
 export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
   @ViewChild('map', { static: true }) private readonly map!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('scenarioMap', { static: true }) private readonly scenarioMap!: ElementRef<HTMLCanvasElement>;
 
   readonly seed = signal(1);
   readonly view = signal<'flat' | 'terrain'>('terrain');
@@ -104,6 +110,13 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
   readonly routeStatus = signal<NavigationGridRouteResult['status']>('complete');
   readonly routeLength = signal(0);
   readonly expandedNodes = signal(0);
+  readonly sharedScenarioTraffic = signal<NavigationAvoidanceTraffic>('opposing-with-staging');
+  readonly sharedScenarioMode = signal<NavigationAvoidanceScenarioMode>('priority-yield');
+  readonly sharedScenarioSeed = signal(42);
+  readonly sharedScenarioPlaying = signal(false);
+  readonly sharedScenarioSpeed = signal(1);
+  readonly sharedScenarioSnapshot = signal<NavigationAvoidanceScenarioSnapshot | undefined>(undefined);
+  readonly sharedScenarioReport = signal('ready');
 
   private grid!: NavigationHeightfieldGrid;
   private route!: NavigationGridRouteResult;
@@ -111,14 +124,132 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
   private avoidanceObstacles: NavigationAvoidanceObstacle[] = [];
   private avoidanceFrame?: number;
   private lastAvoidanceTimestamp = 0;
+  private sharedScenario?: NavigationAvoidanceScenarioSimulation;
+  private sharedScenarioFrame?: number;
+  private sharedScenarioLastTimestamp = 0;
+  private sharedScenarioAccumulator = 0;
   private readonly queueYieldStrategy: NavigationRecoveryStrategy = createNavigationQueueYieldStrategy();
 
   ngAfterViewInit(): void {
     this.rebuild();
+    this.resetSharedScenario();
   }
 
   ngOnDestroy(): void {
     if (this.avoidanceFrame !== undefined) cancelAnimationFrame(this.avoidanceFrame);
+    if (this.sharedScenarioFrame !== undefined) cancelAnimationFrame(this.sharedScenarioFrame);
+  }
+
+  setSharedScenarioTraffic(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    if (value === 'same-direction' || value === 'opposing' || value === 'opposing-with-staging') {
+      this.sharedScenarioTraffic.set(value);
+      this.resetSharedScenario();
+    }
+  }
+
+  setSharedScenarioMode(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    if (value === 'baseline' || value === 'priority-yield') {
+      this.sharedScenarioMode.set(value);
+      this.resetSharedScenario();
+    }
+  }
+
+  setSharedScenarioSeed(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (Number.isSafeInteger(value)) {
+      this.sharedScenarioSeed.set(value);
+      this.resetSharedScenario();
+    }
+  }
+
+  setSharedScenarioSpeed(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (Number.isFinite(value)) this.sharedScenarioSpeed.set(Math.max(0.25, Math.min(8, value)));
+  }
+
+  toggleSharedScenario(): void {
+    this.sharedScenarioPlaying.update(value => !value);
+    this.sharedScenarioLastTimestamp = 0;
+    if (this.sharedScenarioPlaying()) this.scheduleSharedScenarioFrame();
+  }
+
+  stepSharedScenario(): void {
+    if (!this.sharedScenario) this.resetSharedScenario();
+    this.showSharedScenarioSnapshot(this.sharedScenario!.step());
+  }
+
+  resetSharedScenario(): void {
+    this.sharedScenarioPlaying.set(false);
+    if (this.sharedScenarioFrame !== undefined) cancelAnimationFrame(this.sharedScenarioFrame);
+    this.sharedScenarioFrame = undefined;
+    this.sharedScenarioAccumulator = 0;
+    this.sharedScenarioLastTimestamp = 0;
+    this.sharedScenario = createNavigationAvoidanceScenarioSimulation({
+      mode: this.sharedScenarioMode(),
+      traffic: this.sharedScenarioTraffic(),
+      agentCount: 2,
+      seed: this.sharedScenarioSeed(),
+    });
+    this.showSharedScenarioSnapshot(this.sharedScenario.snapshot());
+  }
+
+  private scheduleSharedScenarioFrame(): void {
+    if (this.sharedScenarioFrame !== undefined || !this.sharedScenarioPlaying()) return;
+    this.sharedScenarioFrame = requestAnimationFrame(timestamp => {
+      this.sharedScenarioFrame = undefined;
+      if (!this.sharedScenarioPlaying() || !this.sharedScenario) return;
+      const elapsed = this.sharedScenarioLastTimestamp === 0
+        ? 0
+        : Math.min(0.1, (timestamp - this.sharedScenarioLastTimestamp) / 1000);
+      this.sharedScenarioLastTimestamp = timestamp;
+      this.sharedScenarioAccumulator += elapsed * this.sharedScenarioSpeed();
+      let snapshot = this.sharedScenario.snapshot();
+      while (this.sharedScenarioAccumulator >= 0.05 && !snapshot.finished) {
+        snapshot = this.sharedScenario.step();
+        this.sharedScenarioAccumulator -= 0.05;
+      }
+      this.showSharedScenarioSnapshot(snapshot);
+      if (snapshot.finished) this.sharedScenarioPlaying.set(false);
+      else this.scheduleSharedScenarioFrame();
+    });
+  }
+
+  private showSharedScenarioSnapshot(snapshot: NavigationAvoidanceScenarioSnapshot): void {
+    this.sharedScenarioSnapshot.set(snapshot);
+    this.sharedScenarioReport.set(snapshot.result?.compactReport ?? `steps=${snapshot.steps} running`);
+    this.drawSharedScenario(snapshot);
+  }
+
+  private drawSharedScenario(snapshot: NavigationAvoidanceScenarioSnapshot): void {
+    const canvas = this.scenarioMap.nativeElement;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    const worldX = (x: number) => 36 + ((x + 12) / 24) * (canvas.width - 72);
+    const worldZ = (z: number) => canvas.height / 2 + z * 38;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = '#0b1822';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = '#263a32';
+    context.fillRect(worldX(-12), worldZ(-0.65), worldX(12) - worldX(-12), worldZ(0.65) - worldZ(-0.65));
+    context.fillStyle = '#324e43';
+    context.fillRect(worldX(7.8), worldZ(0.65), worldX(10.2) - worldX(7.8), worldZ(2.25) - worldZ(0.65));
+    context.fillStyle = '#8cdda1';
+    context.fillRect(worldX(-12) - 3, worldZ(0) - 14, 6, 28);
+    context.fillStyle = '#f4dc88';
+    context.fillRect(worldX(12) - 3, worldZ(0) - 14, 6, 28);
+    for (const agent of snapshot.agents) {
+      context.globalAlpha = agent.completed ? 0.35 : 1;
+      context.fillStyle = agent.journeyDirection === 1 ? '#f78c6b' : '#c792ea';
+      context.beginPath();
+      context.arc(worldX(agent.position.x), worldZ(agent.position.z), 10, 0, Math.PI * 2);
+      context.fill();
+      context.strokeStyle = agent.holding ? '#f4dc88' : '#ffffffcc';
+      context.lineWidth = agent.holding ? 3 : 1;
+      context.stroke();
+    }
+    context.globalAlpha = 1;
   }
 
   setView(view: 'flat' | 'terrain'): void {

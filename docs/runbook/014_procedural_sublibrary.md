@@ -1,6 +1,6 @@
 # Procedural sub-library (flora first)
 
-Status: proposed — no implementation started.
+Status: in progress — M0–M5 done, M6 not started (see Milestones below).
 
 Related plans:
 
@@ -373,6 +373,18 @@ Status: done (single LOD; per-LOD budget variation is future work).
   generator itself (5k nodes) — added after a first cut let an exponential
   archetype hang skeleton generation before the mesh-level budget check
   could ever run.
+- Bug found after M2 (foliage silently never rendered): `appendFloraFoliageCluster`
+  built each tip's `OctahedronGeometry` and copied `template.getIndex()` into
+  the shared index buffer — but `PolyhedronGeometry` (the three.js base class
+  behind `OctahedronGeometry`) always builds **non-indexed** geometry, so
+  `getIndex()` is `null` and the `if (templateIndex)` guard silently skipped
+  every foliage triangle. Foliage vertices/normals were appended and correct;
+  they just had no triangles referencing them, so only the trunk/branch tubes
+  ever drew — visually indistinguishable from "no foliage at all" beyond the
+  windWeight brown→green tint on the branch tips themselves. Fixed by
+  synthesizing sequential indices (`0, 1, 2, ...`) over the non-indexed
+  template's position count instead of reading a template index that never
+  existed.
 - Tests: determinism at mesh level, budget limits (including the
   runaway-archetype case), no NaNs, wind weight 0 at root and increasing
   with branch depth. 44/44 passing (`npm run test:triangular-engine:procedural`).
@@ -426,9 +438,10 @@ Status: done.
 
 ### Milestone 3: `flora-lab` demo page (first vertical slice)
 
-Status: mostly done — skeleton/mesh visual slice plus socket gizmos are
-in; an actual wind-displacement material is blocked on M4 (scatter's
-`scatter-wind-material`) and stays deferred.
+Status: mostly done — skeleton/mesh visual slice plus socket gizmos are in.
+Real wind-displacement sway (previously blocked on M4) is now wired too, via
+`enableScatterWindSway(material, wind, { useVertexWindWeight: true })` —
+see Milestone 4.
 
 - New page `projects/demo-app/src/app/pages/flora-lab/` (lazy route
   `/flora-lab`, linked from the demo index), following the established lab
@@ -458,42 +471,127 @@ re-confirmed here): `npx ng serve demo-app` then open `/flora-lab`.
 
 ### Milestone 4: scatter integration
 
-Status: not started.
+Status: done.
 
-- A flora-generated species registered in scatter (variants as the species'
-  LOD meshes, trunk collider as its collider descriptor); verify in
-  `scatter-lab` or a small extension of it: streaming, instancing, LOD, and
-  physics residency all work unchanged.
-- Instance-level socket query helper: variant sockets × placed-instance
-  transform → world-space sockets for a given `ScatterInstanceId`, scoped to
-  scatter's currently-resident cells (Known gaps #2 — no second spatial
-  index).
-- Wire baked wind weights into scatter's existing `scatter-wind-material`
-  rather than a new material (Known gaps #6) — this is scatter-side work,
-  call it out as such rather than assuming it's free.
-- Confirm scatter's placement already jitters per-instance rotation/scale/
-  tint (Known gaps #10); if not, that's a scatter follow-up, not a
-  procedural one.
+- New page `projects/demo-app/src/app/pages/flora-scatter-lab/` (lazy route
+  `/flora-scatter-lab`, linked from the demo index): registers 6 flora
+  variants (`generateFloraSkeleton` + `buildFloraMesh`, one seed each) as a
+  scatter species. Placement, streaming (`selectFixedLevelScatterCells`),
+  and instancing (`buildScatterInstancedMesh`) are scatter's existing code,
+  used unchanged. **Scatter has no per-instance mesh-variant primitive** —
+  `buildScatterInstancedMesh` takes one geometry per call — so each variant
+  gets its own `InstancedMesh` and instances are bucketed into one
+  deterministically (`hashProceduralKey(instanceId) % variantCount`,
+  demo-local, not a library API). That's the practical shape "variants as
+  the species' LOD meshes" takes given the current scatter API; extending
+  scatter with real per-instance mesh-variant selection is a scatter-side
+  follow-up if a game needs it, not required by this milestone.
+- Trunk colliders: each variant's `deriveFloraTrunkCollider` output feeds
+  `buildScatterColliderDescriptors` (called once per variant, since variants
+  have differing trunk dimensions — `ScatterSpeciesDefinition.collider` is a
+  single shape/params per call) + `ScatterJoltColliderAdapter`, unmodified.
+  The demo's field is small and static (no residency streaming ring — that
+  diffing is already proven in `scatter-physics-lab`); a "drop ball" button
+  spawns a dynamic Jolt sphere that free-falls onto the trees, and
+  `resolveInstanceId` on contact resolves back to the correct instance +
+  variant, shown in the panel.
+- Instance-level socket query helper: added `transformProceduralSocket` +
+  `IProceduralInstanceTransform` to `procedural/core/procedural-socket.ts`
+  — generic over `TKind` (works for fauna/structures sockets later, not
+  flora-specific), pure quaternion/vector math with no three.js dependency
+  so it stays usable from a worker. Takes a decomposed pose
+  (`{ positionM, quaternion, scale }`) rather than a `Matrix4` directly, so
+  callers owning a real matrix (scatter's `computeScatterInstanceMatrix`)
+  just decompose it first — kept the dependency direction one-way
+  (procedural doesn't import scatter). The demo wires the two together on
+  click: resolve the picked instance, `computeScatterInstanceMatrix` →
+  decompose → `transformProceduralSocket` per variant socket → gizmo
+  spheres at the world-space result. Scoping to "resident cells" (Known
+  gaps #2) is moot in this demo (the whole small field is always resident);
+  the real spatial-query-at-scale problem is unsolved, same as before.
+- Wind: `enableScatterWindSway` (scatter-side, `scatter-wind-material.ts`)
+  gained a `{ useVertexWindWeight?: boolean }` option — when set, the shader
+  reads a baked `windWeight` vertex attribute instead of its default
+  object-space-height heuristic. Flora's baked weights (branch-depth-aware,
+  not just "how tall is this vertex") now drive real sway in both
+  `flora-scatter-lab` and `flora-lab` (the latter's wind was the M3 item
+  previously blocked on this). No new material — same file, additive
+  option, existing callers unaffected (covered by new spec cases).
+- Jitter (Known gaps #10): confirmed by reading
+  `scatter-instance-transform.ts` — rotation (yaw around up, from
+  `rotationSeed01`) and uniform scale (`scaleSeed01`) already jitter
+  per-instance, unchanged, reused as-is. **Per-instance tint does not
+  exist** in scatter (no color/tint seed on `ITerrainScatterInstance`, no
+  `setColorAt` usage anywhere in `scatter/three`) — flagged per the runbook
+  gap's own instruction ("if not, that's a scatter follow-up, not a
+  procedural one"), not implemented here.
 
-Human verification: drive a physics body into a generated trunk — collision
-registers against the correct instance (existing contact mapping); a field
-of the same 6–10 variants doesn't read as visibly repeated tiling.
+Tests: 187/187 passing across procedural + scatter
+(`npx ng test triangular-engine --include='../procedural/**/*.spec.ts'
+--include='../scatter/**/*.spec.ts'`) — 8 new cases (`transformProceduralSocket`
+identity/translate/scale/rotate/compose-orientation/id-preservation;
+`enableScatterWindSway` default-vs-attribute shader output and distinct
+program cache keys).
+
+Human verification (do this yourself — not re-confirmed here): `npx ng serve
+demo-app`, open `/flora-scatter-lab`. Click a tree to see socket gizmos
+appear at its world-space perch/fruit/nest positions; "Drop ball" to see a
+Jolt sphere land on/against a trunk and the panel report the resolved
+instance; toggle "Physics debug" to see the trunk collider capsules align
+with the mesh trunks; a field of the 6 variants shouldn't read as visibly
+repeated tiling (rotation/scale jitter only — no tint yet, per the gap
+above).
 
 ### Milestone 5: first affordance consumer
 
-Status: not started.
+Status: done.
 
-- One abstract bird (animals library fixture or a minimal stub) flies to and
-  perches on a queried `perch` socket of a placed tree; fruit-slot pick demo
-  (click a fruit, it detaches).
-- This is the design-test proof; keep it a lab scene, not a game feature.
-- Before committing to this as the M5 proof, confirm the animals library's
-  current slice actually supports targeted point-landing (Known gaps #9); if
-  not, either add the minimal capability there first or narrow M5's scope to
-  a stub that doesn't depend on it.
-- Minimal socket occupancy demo: mark a perch/fruit-slot occupied/picked in a
-  simple in-lab state map, keyed by socket ID — proves the ID-based state
-  contract (Known gaps #3) without building BSP's real save-backed version.
+- Known gaps #9 checked first, per this milestone's own instruction: the
+  animals library's shipped slice (`stepFlock`) only did flock/boid steering
+  toward a constant travel direction — no targeted point-landing. Rather than
+  fake landing inside the flora lab, added a minimal single-agent
+  seek-and-land primitive, `stepArrival`, to `triangular-engine/animals`
+  (`core/flock-arrival.ts`) as the next real step on animals' *own* roadmap
+  (Milestone 2 lists "landing on consumer-provided tree or building anchors"
+  regardless of flora) — see
+  [011_animals_sublibrary.md](011_animals_sublibrary.md) Milestone 2 for the
+  implementation writeup, including a real bug it surfaced and fixed in the
+  shared `rotateTowards` turn-rate-limiting helper (agents starting at rest
+  got stuck unable to turn at all).
+- New page `projects/demo-app/src/app/pages/flora-affordance-lab/` (lazy
+  route `/flora-affordance-lab`): reuses M4's tree registration (species,
+  streaming, instancing, wind) without the Jolt/collider pieces, since this
+  milestone doesn't need physics. Clicking a tree runs the same
+  `transformProceduralSocket` world-space query as M4; "Send bird to perch"
+  picks the tree's first unoccupied `perch` socket and drives one abstract
+  bird (a plain cone mesh, oriented from its velocity heading — "abstract
+  geometry, no animation system" per the animals doc) toward it every tick
+  via `stepArrival`, landing and stopping exactly on the socket position.
+- Fruit-slot pick demo: clicking a red `fruit-slot` gizmo directly detaches it
+  (no flight involved, per the design test's "click a fruit, it detaches").
+  Socket gizmos are raycast-picked via `userData.socketId`/`userData.kind`
+  tagged onto each gizmo mesh.
+- Socket occupancy: a `Map<socketId, 'perch-occupied' | 'fruit-picked'>`
+  (Known gaps #3) — landing sets `'perch-occupied'`, fruit-click sets
+  `'fruit-picked'`; occupied perches render with a muted grey material (the
+  bird is still visibly sitting there), picked fruit stop rendering entirely
+  ("detached"). Proves the ID-keyed state contract without BSP's real
+  save-backed version — exactly the milestone's scope, no more.
+
+Tests: the new `stepArrival` primitive has 20/20 passing in
+`triangular-engine/animals` (determinism, arrival deceleration, exact-landing
+snap, idempotent-once-landed, max-speed and turn-rate bounds, all-finite);
+combined with procedural + scatter, 207/207
+(`npx ng test triangular-engine --include='../animals/**/*.spec.ts'
+--include='../procedural/**/*.spec.ts' --include='../scatter/**/*.spec.ts'`).
+Library build and `npx ng build demo-app --configuration development` both
+clean.
+
+Human verification (do this yourself — not re-confirmed here): `npx ng serve
+demo-app`, open `/flora-affordance-lab`. Click a tree to see its sockets;
+"Send bird to perch" to watch the cone fly in, decelerate, and land exactly
+on a perch marker (which turns grey); click a red fruit-slot marker directly
+to see it vanish immediately.
 
 ### Milestone 6 (stretch, pick by need): more life, more kinds
 

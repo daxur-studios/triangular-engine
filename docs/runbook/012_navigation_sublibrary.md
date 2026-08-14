@@ -1034,3 +1034,70 @@ navigation avoidance primitives. It is not yet a byte-for-byte extraction of
 the Angular lab loop; disagreements between its result and the lab should be
 treated as evidence for the next simulation-extraction slice, not as proof
 that the visual fixture is fixed.
+
+### 2026-08-13: baby-step headless checkpoint
+
+- Established that the existing suite and build were green while both the
+  baseline and priority-yield two-agent opposing fixtures failed 100/100
+  seeds. Report-format tests were therefore not evidence of working corridor
+  behaviour.
+- Fixed the harness so completed agents leave spatial queries and overlap
+  measurements instead of remaining as permanent invisible obstacles.
+- Added an explicit `same-direction` traffic fixture and behavioral tests that
+  require actual completion with no failure categories.
+- Verified 100/100 seeds for one unobstructed agent and two same-direction
+  agents. Both two-agent opposing modes remain 0/100 and are the intentionally
+  red next frontier.
+- Keep the next slices ordered and independently runnable: one opposing pair
+  with a staging area, then a same-direction queue, then an opposing blocker
+  chain. Do not return to large random maps or the Angular lab until each
+  headless fixture has an explicit passing contract.
+
+Fast checkpoint commands after building the library:
+
+```text
+npm run navigation:scenarios -- baseline 1 100 opposing
+npm run navigation:scenarios -- baseline 2 100 same-direction
+npm run navigation:scenarios -- baseline 2 100 opposing
+npm run navigation:scenarios -- priority-yield 2 100 opposing
+```
+
+### 2026-08-13: one opposing pair with staging
+
+- Added the first deliberately solvable opposing-traffic fixture:
+  `opposing-with-staging`. The stable lower-priority agent moves to a real
+  off-corridor holding point while the right-of-way agent crosses, then resumes
+  its journey after that agent exits the simulation.
+- Corrected progress accounting so movement or waiting under an explicit
+  holding assignment is not classified as accidental no-progress. Agents
+  without a holding assignment still accumulate blockage normally.
+- Updated position integration and overlap measurement to use both horizontal
+  axes; the staging bay is physical simulation space, not a special overlap
+  exemption.
+- Verified the staged opposing pair across 100/100 seeds with zero failure
+  categories. The one-dimensional opposing fixture remains 0/100 by design,
+  proving that the staging space and coordination policy are doing necessary
+  work rather than local avoidance silently allowing agents through each
+  other.
+
+Fast checkpoint:
+
+```text
+npm run navigation:scenarios -- priority-yield 2 100 opposing-with-staging
+```
+
+Next narrow frontier: a same-direction queue of three agents through the same
+bounded corridor. Require ordered completion, no overlap, and no false blocked
+classification before adding an opposing blocker chain.
+
+### Shared headed scenario viewer
+
+- The deterministic avoidance harness now exposes a fixed-step simulation via
+  `createNavigationAvoidanceScenarioSimulation`.
+- Unit tests, the CLI one-shot runner, and the navigation-lab canvas all execute
+  that same simulation core.
+- The lab supports play, pause, single-step, reset, seed, speed, mode, and the
+  same-direction, unstaged opposing, and staged opposing fixtures.
+- Focused verification: 50 navigation tests pass; the library and demo app both
+  build successfully. The unstaged opposing fixture remains intentionally
+  visible as the next failing baby-step rather than being treated as solved.

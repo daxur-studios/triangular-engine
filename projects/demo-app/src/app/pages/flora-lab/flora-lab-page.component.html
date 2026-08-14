@@ -14,8 +14,11 @@
         <code>buildFloraMesh</code> from one archetype, one seed per
         variant. Color goes from trunk-brown to leaf-green following the
         baked <code>windWeight</code> attribute (0 at the root, rising
-        toward branch tips) — no wind shader yet, just the raw data a
-        wind material would consume. Colored spheres are
+        toward branch tips), which also drives real sway via scatter's
+        <code>enableScatterWindSway</code> (its
+        <code>useVertexWindWeight</code> option, wired in M4 — see
+        <a routerLink="/flora-scatter-lab">flora scatter lab</a> for the
+        rest of that milestone). Colored spheres are
         <code>deriveFloraSockets</code> output — perches, a nest cavity
         (50% chance per variant), and fruit slots. Trunk collider
         descriptors are derived too but not visualized here.

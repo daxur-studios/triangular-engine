@@ -1,0 +1,103 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Flora scatter lab controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small>triangular-engine/procedural — M4 scatter integration</small>
+        </div>
+        <strong>Flora species registered in scatter</strong>
+      </header>
+
+      <p class="blurb">
+        {{ variantCount }} flora variants (<code>generateFloraSkeleton</code> +
+        <code>buildFloraMesh</code>, one seed each) are registered as a
+        scatter species. Placement, streaming
+        (<code>selectFixedLevelScatterCells</code>), and instancing
+        (<code>buildScatterInstancedMesh</code>) are scatter's existing code,
+        unchanged. Scatter has no per-instance mesh-variant primitive yet, so
+        each variant gets its own <code>InstancedMesh</code> and instances are
+        bucketed into one deterministically by a hash of their instance ID —
+        rotation/scale already jitter per instance via scatter's existing
+        placement math; per-instance tint does not exist yet (flagged, not
+        built here). Wind sway reads flora's baked <code>windWeight</code>
+        vertex attribute via <code>enableScatterWindSway</code>'s new
+        <code>useVertexWindWeight</code> option, instead of scatter's default
+        object-space-height heuristic.
+      </p>
+
+      <p class="blurb">
+        Each variant's trunk collider (<code>deriveFloraTrunkCollider</code>)
+        feeds <code>buildScatterColliderDescriptors</code> +
+        <code>ScatterJoltColliderAdapter</code> exactly like any other
+        species. Click a tree to resolve its instance, then query its
+        world-space sockets via <code>transformProceduralSocket</code>
+        (variant sockets × <code>computeScatterInstanceMatrix</code>) —
+        colored spheres mark the result.
+      </p>
+
+      <nav aria-label="Actions">
+        <button [class.active]="physicsDebug()" (click)="togglePhysicsDebug()">
+          Physics debug
+        </button>
+        <button (click)="dropBall()">Drop ball</button>
+      </nav>
+
+      <ul class="legend" aria-label="Socket kind legend">
+        @for (kind of socketKinds; track kind) {
+          <li>
+            <span class="swatch" [style.background]="socketGizmoColorByKind[kind]"></span>
+            {{ kind }}
+          </li>
+        }
+      </ul>
+
+      <p class="blurb note">
+        {{ treeInstanceCount() }} tree instances across {{ cellCount() }}
+        streaming cells.
+        @if (pickedInstanceId(); as instanceId) {
+          Picked <code>{{ instanceId }}</code> (variant
+          {{ pickedVariantIndex() }}) — {{ pickedSocketCount() }} world-space
+          sockets.
+        } @else {
+          Click a tree to query its sockets.
+        }
+      </p>
+      <p class="blurb note">
+        @if (lastPhysicsContact(); as contact) {
+          Last ball contact: <code>{{ contact.instanceId }}</code> (variant
+          {{ contact.variantIndex }}) — resolved via
+          <code>ScatterJoltColliderAdapter.resolveInstanceId</code>.
+        } @else {
+          No ball contact yet — drop one onto the trees.
+        }
+      </p>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="initialCameraPosition()"
+    [target]="initialTarget()"
+    [near]="0.1"
+  />
+  <ambientLight [intensity]="1.3" />
+  <directionalLight [position]="[24, 32, 16]" [intensity]="2.1" [castShadow]="true" />
+
+  <joltPhysics [gravity]="[0, -9.81, 0]" [debug]="physicsDebug()">
+    @for (ball of balls(); track ball.id) {
+      <joltRigidBody
+        [motionType]="2"
+        [position]="ball.spawnPositionM"
+        (onContactAdded)="onBallContact($event)"
+      >
+        <joltSphereShape [radius]="ballRadiusM" />
+        <mesh [castShadow]="true">
+          <sphereGeometry
+            [params]="{ radius: ballRadiusM, widthSegments: 16, heightSegments: 12 }"
+          />
+          <meshStandardMaterial [params]="{ color: '#9fb4c7', roughness: 0.6 }" />
+        </mesh>
+      </joltRigidBody>
+    }
+  </joltPhysics>
+</scene>

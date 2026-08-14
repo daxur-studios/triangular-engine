@@ -160,7 +160,10 @@ function appendFloraFoliageCluster(
   const template = new OctahedronGeometry(sizeM, style === 'cluster-sphere' ? 1 : 0);
   const templatePositions = template.getAttribute('position');
   const templateNormals = template.getAttribute('normal');
-  const templateIndex = template.getIndex();
+  // PolyhedronGeometry (base of OctahedronGeometry) always builds non-indexed
+  // geometry — getIndex() is null — so the vertex list itself is already
+  // triangle-ordered in consecutive triples; indices must be synthesized
+  // rather than copied from a (nonexistent) template index.
 
   const baseIndex = positions.length / 3;
   const [cx, cy, cz] = node.endM;
@@ -173,10 +176,8 @@ function appendFloraFoliageCluster(
     normals.push(templateNormals.getX(i), templateNormals.getY(i), templateNormals.getZ(i));
     windWeights.push(1);
   }
-  if (templateIndex) {
-    for (let i = 0; i < templateIndex.count; i++) {
-      indices.push(baseIndex + templateIndex.getX(i));
-    }
+  for (let i = 0; i < templatePositions.count; i++) {
+    indices.push(baseIndex + i);
   }
   template.dispose();
 }

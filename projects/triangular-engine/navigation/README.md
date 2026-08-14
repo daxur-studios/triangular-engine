@@ -49,3 +49,10 @@ stuck, local-replan, or global-replan states.
 `runNavigationAvoidanceBenchmark()` measure the same bounded work for 1, 100,
 and 1,000-agent fixtures. Results are hardware-specific measurements, not
 performance guarantees.
+
+For small, reproducible behavior checks,
+`createNavigationAvoidanceScenarioSimulation()` exposes the deterministic
+fixed-timestep scenario harness one `step()` at a time. Tests, scripts, and
+visualizers can therefore use identical state transitions.
+`runNavigationAvoidanceScenario()` is the convenience wrapper that runs that
+same core to completion.

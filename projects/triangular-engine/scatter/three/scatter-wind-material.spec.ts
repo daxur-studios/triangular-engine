@@ -47,4 +47,46 @@ describe('enableScatterWindSway', () => {
     material.onBeforeCompile(fakeShader(), {} as WebGLRenderer);
     expect(previousCalled).toBe(true);
   });
+
+  it('defaults to the object-space-height heuristic and does not declare a windWeight attribute', () => {
+    const material = new MeshStandardMaterial();
+    enableScatterWindSway(material, { strength: 0.2, frequency: 1.5 });
+
+    const shader = fakeShader();
+    material.onBeforeCompile(shader, {} as WebGLRenderer);
+
+    expect(shader.vertexShader).toContain('max(transformed.y, 0.0)');
+    expect(shader.vertexShader).not.toContain('attribute float windWeight;');
+  });
+
+  it('binds a baked windWeight vertex attribute when useVertexWindWeight is set', () => {
+    const material = new MeshStandardMaterial();
+    enableScatterWindSway(
+      material,
+      { strength: 0.2, frequency: 1.5 },
+      { useVertexWindWeight: true },
+    );
+
+    const shader = fakeShader();
+    material.onBeforeCompile(shader, {} as WebGLRenderer);
+
+    expect(shader.vertexShader).toContain('attribute float windWeight;');
+    expect(shader.vertexShader).toContain('float scatterWindWeight = windWeight;');
+    expect(shader.vertexShader).not.toContain('max(transformed.y, 0.0)');
+  });
+
+  it('gives windWeight-driven and height-driven materials distinct program cache keys', () => {
+    const heightMaterial = new MeshStandardMaterial();
+    const attributeMaterial = new MeshStandardMaterial();
+    enableScatterWindSway(heightMaterial, { strength: 0.2, frequency: 1.5 });
+    enableScatterWindSway(
+      attributeMaterial,
+      { strength: 0.2, frequency: 1.5 },
+      { useVertexWindWeight: true },
+    );
+
+    expect(heightMaterial.customProgramCacheKey()).not.toBe(
+      attributeMaterial.customProgramCacheKey(),
+    );
+  });
 });

@@ -1,0 +1,80 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Flora affordance lab controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small>triangular-engine/procedural — M5 first affordance consumer</small>
+        </div>
+        <strong>A bird lands on a queried perch socket</strong>
+      </header>
+
+      <p class="blurb">
+        Click a tree to query its world-space sockets (same
+        <code>transformProceduralSocket</code> query as
+        <a routerLink="/flora-scatter-lab">flora scatter lab</a>). "Send bird"
+        steers one abstract bird with
+        <code>triangular-engine/animals</code>' new <code>stepArrival</code>
+        primitive — a minimal seek-and-land slice of animals' own Milestone 2
+        (targeted point-landing), built because it was the next step on
+        animals' roadmap regardless of flora, and exactly what this design
+        test needed.
+      </p>
+
+      <p class="blurb">
+        Landing marks the perch socket occupied in a
+        <code>Map&lt;socketId, state&gt;</code>, proving the ID-keyed
+        occupancy contract (Known gap #3) without a save system. Click a red
+        fruit-slot socket directly to detach it the same way — instant, no
+        flight needed. Occupied/picked sockets render muted or vanish; a
+        landed bird stays put until you send it elsewhere.
+      </p>
+
+      <nav aria-label="Actions">
+        <button
+          [disabled]="!pickedInstanceId() || availablePerchCount() === 0"
+          (click)="sendBirdToPerch()"
+        >
+          Send bird to perch
+        </button>
+      </nav>
+
+      <ul class="legend" aria-label="Socket kind legend">
+        @for (kind of socketKinds; track kind) {
+          <li>
+            <span class="swatch" [style.background]="socketGizmoColorByKind[kind]"></span>
+            {{ kind }}
+          </li>
+        }
+      </ul>
+
+      <p class="blurb note">
+        {{ treeInstanceCount() }} tree instances across {{ cellCount() }}
+        streaming cells.
+        @if (pickedInstanceId(); as instanceId) {
+          Picked <code>{{ instanceId }}</code> (variant
+          {{ pickedVariantIndex() }}) — {{ pickedSocketCount() }} sockets,
+          {{ availablePerchCount() }} unoccupied perches.
+        } @else {
+          Click a tree to query its sockets.
+        }
+      </p>
+      <p class="blurb note">
+        @switch (birdActivity()) {
+          @case ('seeking') { Bird is flying to <code>{{ birdTargetSocketId() }}</code>… }
+          @case ('landed') { Bird landed on <code>{{ birdTargetSocketId() }}</code>. }
+          @default { Bird idle — pick a tree with a free perch, then send it. }
+        }
+        {{ socketState().size }} socket(s) occupied or picked so far.
+      </p>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="initialCameraPosition()"
+    [target]="initialTarget()"
+    [near]="0.1"
+  />
+  <ambientLight [intensity]="1.3" />
+  <directionalLight [position]="[24, 32, 16]" [intensity]="2.1" [castShadow]="true" />
+</scene>

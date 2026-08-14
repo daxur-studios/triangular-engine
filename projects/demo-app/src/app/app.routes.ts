@@ -198,6 +198,26 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'flora-scatter-lab',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
+    loadComponent: () =>
+      import('./pages/flora-scatter-lab/flora-scatter-lab-page.component').then(
+        ({ FloraScatterLabPageComponent }) => FloraScatterLabPageComponent,
+      ),
+  },
+  {
+    path: 'flora-affordance-lab',
+    loadComponent: () =>
+      import('./pages/flora-affordance-lab/flora-affordance-lab-page.component').then(
+        ({ FloraAffordanceLabPageComponent }) => FloraAffordanceLabPageComponent,
+      ),
+  },
+  {
     path: 'animals-lab',
     loadComponent: () =>
       import('./pages/animals-lab/animals-lab-page.component').then(

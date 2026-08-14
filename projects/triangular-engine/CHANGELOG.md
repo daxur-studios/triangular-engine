@@ -6,6 +6,8 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- Added a step-driven deterministic navigation-avoidance scenario API and a
+  headed navigation-lab viewer that uses the same core as tests and scripts.
 - `<joltPhysics>` now emits `(physicsFaulted)` when a Jolt world step (or a
   subscriber throw during its `tick$`/`postTick$` phases) is caught, and it
   reports the fault through `EngineService.error$`. A `step` fault means the
