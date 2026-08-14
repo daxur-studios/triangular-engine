@@ -81,13 +81,6 @@ export const routes: Routes = [
       ),
   },
   {
-    path: 'navigation-lab',
-    loadComponent: () =>
-      import('./pages/navigation-lab/navigation-lab-page.component').then(
-        ({ NavigationLabPageComponent }) => NavigationLabPageComponent,
-      ),
-  },
-  {
     path: 'river-lab',
     loadComponent: () =>
       import('./pages/river-lab/river-lab-page.component').then(
@@ -225,24 +218,10 @@ export const routes: Routes = [
       ),
   },
   {
-    path: 'animals-lab',
-    loadComponent: () =>
-      import('./pages/animals-lab/animals-lab-page.component').then(
-        ({ AnimalsLabPageComponent }) => AnimalsLabPageComponent,
-      ),
-  },
-  {
     path: 'large-world-life-poc',
     loadComponent: () =>
       import('./pages/large-world-life-poc/large-world-life-poc-page.component').then(
         ({ LargeWorldLifePocPageComponent }) => LargeWorldLifePocPageComponent,
-      ),
-  },
-  {
-    path: 'life-lab',
-    loadComponent: () =>
-      import('./pages/life-lab/life-lab-page.component').then(
-        ({ LifeLabPageComponent }) => LifeLabPageComponent,
       ),
   },
   {
@@ -251,14 +230,6 @@ export const routes: Routes = [
       import('./pages/terrain-composer-lab/terrain-composer-lab-page.component').then(
         ({ TerrainComposerLabPageComponent }) =>
           TerrainComposerLabPageComponent,
-      ),
-  },
-  {
-    path: 'geological-features-lab',
-    loadComponent: () =>
-      import('./pages/geological-features/geological-features-page.component').then(
-        ({ GeologicalFeaturesPageComponent }) =>
-          GeologicalFeaturesPageComponent,
       ),
   },
   {

@@ -133,7 +133,7 @@ function appendFloraTubeSegment(
     const b = baseIndex + next;
     const c = baseIndex + TUBE_RADIAL_SEGMENTS + i;
     const d = baseIndex + TUBE_RADIAL_SEGMENTS + next;
-    indices.push(a, c, b, b, c, d);
+    indices.push(a, b, c, b, d, c);
   }
 
   if (isTip) {
