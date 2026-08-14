@@ -231,10 +231,13 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.fillStyle = '#0b1822';
     context.fillRect(0, 0, canvas.width, canvas.height);
-    context.fillStyle = '#263a32';
-    context.fillRect(worldX(-12), worldZ(-0.65), worldX(12) - worldX(-12), worldZ(0.65) - worldZ(-0.65));
-    context.fillStyle = '#324e43';
-    context.fillRect(worldX(7.8), worldZ(0.65), worldX(10.2) - worldX(7.8), worldZ(2.25) - worldZ(0.65));
+    snapshot.walkableAreas.forEach((area, index) => {
+      context.fillStyle = index === 0 ? '#263a32' : '#324e43';
+      context.fillRect(
+        worldX(area.minX), worldZ(area.minZ),
+        worldX(area.maxX) - worldX(area.minX), worldZ(area.maxZ) - worldZ(area.minZ),
+      );
+    });
     context.fillStyle = '#8cdda1';
     context.fillRect(worldX(-12) - 3, worldZ(0) - 14, 6, 28);
     context.fillStyle = '#f4dc88';

@@ -1,5 +1,6 @@
 import {
   createNavigationAvoidanceScenarioSimulation,
+  isNavigationAvoidanceScenarioPositionWalkable,
   runNavigationAvoidanceScenario,
   runNavigationAvoidanceScenarioSweep,
 } from './navigation-avoidance-scenarios';
@@ -51,14 +52,34 @@ describe('navigation avoidance scenario harness', () => {
     expect(result.failureReasons).toEqual([]);
   });
 
-  it('lets one opposing pair use an off-corridor staging point', () => {
-    const result = runNavigationAvoidanceScenario({
+  it('keeps one staged opposing pair inside the shared walkable geometry', () => {
+    const simulation = createNavigationAvoidanceScenarioSimulation({
       mode: 'priority-yield',
       traffic: 'opposing-with-staging',
       agentCount: 2,
       seed: 42,
     });
+    let snapshot = simulation.snapshot();
+    let maximumStagedZ = 0;
+    const previousPositions = new Map(snapshot.agents.map(agent => [agent.id, agent.position]));
+    while (!snapshot.finished) {
+      snapshot = simulation.step();
+      for (const agent of snapshot.agents) {
+        expect(isNavigationAvoidanceScenarioPositionWalkable(
+          agent.position, agent.radius, snapshot.walkableAreas,
+        )).withContext(`${agent.id} entered a wall at step ${snapshot.steps}`).toBeTrue();
+        const previous = previousPositions.get(agent.id)!;
+        const distanceMoved = Math.hypot(agent.position.x - previous.x, agent.position.z - previous.z);
+        expect(distanceMoved >= 0.01 || agent.waiting || agent.completed)
+          .withContext(`${agent.id} moved only ${distanceMoved} at step ${snapshot.steps}`
+            + ` from (${previous.x},${previous.z}) to (${agent.position.x},${agent.position.z})`).toBeTrue();
+        previousPositions.set(agent.id, agent.position);
+        maximumStagedZ = Math.max(maximumStagedZ, agent.position.z);
+      }
+    }
+    const result = snapshot.result!;
 
+    expect(maximumStagedZ).toBeGreaterThan(1);
     expect(result.completed).toBe(2);
     expect(result.maxOverlap).toBe(0);
     expect(result.failureReasons).toEqual([]);

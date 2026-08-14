@@ -195,10 +195,12 @@ interface ScatterSpeciesDefinition {
 Per species: full mesh → low-poly mesh → billboard/impostor → nothing.
 
 - Grass gets no far LOD — density fades to zero at a cutoff radius.
-- v1 far tiers: cross-billboards from a baked atlas, plus the terrain-shader
-  cheat (density map tints/roughens ground where forest or boulder fields
+- v1 far tiers: cross-billboards from a baked atlas, plus a terrain-shader
+  tint (density map tints/roughens ground where forest or boulder fields
   exist — nearly free and effective from orbit). Individual trees are never
-  rendered from orbit.
+  rendered from orbit. Scatter only supplies the density input; the tint
+  itself is terrain's regional-color layer — owned and scoped in
+  `004_multi_surface_terrain.md`'s Phase 6.
 - Clustered mid-distance "canopy cards" (aggregate billboards per forest
   clump) are a *possible* extra tier — not committed; measure whether the
   billboard tier + terrain tint already covers it.

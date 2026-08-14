@@ -56,3 +56,12 @@ fixed-timestep scenario harness one `step()` at a time. Tests, scripts, and
 visualizers can therefore use identical state transitions.
 `runNavigationAvoidanceScenario()` is the convenience wrapper that runs that
 same core to completion.
+
+Scenario snapshots also expose their shared `walkableAreas`. The staged
+opposing fixture constrains each agent-sized disc to that union and returns the
+yielding agent through authored bay-interior and corridor-entry waypoints before
+it resumes toward its goal. Use `isNavigationAvoidanceScenarioPositionWalkable()` in step-driven
+tests to fail at the exact step where an agent would enter a wall. The staging
+area and waypoint are authored fixture data; automatic staging-area discovery
+is not implemented yet. A yielding agent enters an explicit `waiting` state
+once it reaches the staging point and remains still until right-of-way clears.

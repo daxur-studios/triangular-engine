@@ -1101,3 +1101,25 @@ classification before adding an opposing blocker chain.
 - Focused verification: 50 navigation tests pass; the library and demo app both
   build successfully. The unstaged opposing fixture remains intentionally
   visible as the next failing baby-step rather than being treated as solved.
+
+### 2026-08-14: make the staged viewer geometrically honest
+
+- Moved corridor and staging-bay rectangles into the shared simulation
+  snapshot; the lab now draws those rectangles instead of maintaining a
+  separate visual-only copy.
+- Added agent-radius-aware walkability checks and deterministic collision
+  fallback so scenario movement cannot enter the drawn walls.
+- Added an authored corridor-entry waypoint for the return from staging. Its
+  transition is one-way, preventing the agent from oscillating between the
+  entry waypoint and final goal.
+- Added safe entrance and exit legs through the bay interior. A meaningful-
+  motion assertion now rejects visually stalled steps after the holding
+  assignment is released, while allowing stationary steps anywhere the agent
+  is actively yielding.
+- Replaced that broad stationary allowance with an explicit `waiting` state at
+  the staging point. Entering the arrival radius settles the agent instead of
+  letting fixed-size steps overshoot and rapidly correct around the waypoint;
+  tests allow stationary movement only while `waiting` is true.
+- The staged-pair spec now checks every agent on every fixed step and reports
+  the agent ID and step if a wall crossing occurs. This remains an authored
+  staging fixture, not automatic staging-area discovery.

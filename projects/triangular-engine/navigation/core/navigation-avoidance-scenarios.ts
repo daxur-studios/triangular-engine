@@ -43,11 +43,20 @@ export interface NavigationAvoidanceScenarioAgentSnapshot {
   readonly goalX: number;
   readonly completed: boolean;
   readonly holding: boolean;
+  readonly waiting: boolean;
+}
+
+export interface NavigationAvoidanceScenarioWalkableArea {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
 }
 
 export interface NavigationAvoidanceScenarioSnapshot {
   readonly steps: number;
   readonly finished: boolean;
+  readonly walkableAreas: readonly NavigationAvoidanceScenarioWalkableArea[];
   readonly agents: readonly NavigationAvoidanceScenarioAgentSnapshot[];
   readonly result?: NavigationAvoidanceScenarioResult;
 }
@@ -83,9 +92,37 @@ interface ScenarioAgent extends NavigationAvoidanceAgent {
   previousVelocityX: number;
   completed: boolean;
   holding: boolean;
+  waiting: boolean;
+  usedStaging: boolean;
+  alignedForStaging: boolean;
+  alignedForReentry: boolean;
+  reenteredCorridor: boolean;
 }
 
 const stagingPoint = { x: 9, y: 0, z: 1.5 } as const;
+const corridorReentryPoint = { x: 9, y: 0, z: 0 } as const;
+const scenarioWalkableAreas: readonly NavigationAvoidanceScenarioWalkableArea[] = [
+  { minX: -12.75, maxX: 12.75, minZ: -0.65, maxZ: 0.65 },
+  { minX: 7.8, maxX: 10.2, minZ: 0.65, maxZ: 2.25 },
+];
+
+/** True when an agent-sized disc is wholly inside the scenario's walkable union. */
+export function isNavigationAvoidanceScenarioPositionWalkable(
+  position: Pick<NavigationAvoidanceAgent['position'], 'x' | 'z'>,
+  radius: number,
+  areas: readonly NavigationAvoidanceScenarioWalkableArea[] = scenarioWalkableAreas,
+): boolean {
+  if (!Number.isFinite(position.x) || !Number.isFinite(position.z) || !Number.isFinite(radius) || radius < 0) return false;
+  const sampleCount = 32;
+  for (let sample = 0; sample < sampleCount; sample += 1) {
+    const angle = sample / sampleCount * Math.PI * 2;
+    const x = position.x + Math.cos(angle) * radius;
+    const z = position.z + Math.sin(angle) * radius;
+    if (!areas.some(area => x >= area.minX && x <= area.maxX && z >= area.minZ && z <= area.maxZ)) return false;
+  }
+  return areas.some(area => position.x >= area.minX && position.x <= area.maxX
+    && position.z >= area.minZ && position.z <= area.maxZ);
+}
 
 /**
  * Runs a small deterministic single-lane crossing without Angular or a
@@ -108,6 +145,7 @@ class NavigationAvoidanceScenarioSimulationImpl implements NavigationAvoidanceSc
   private readonly seed: number;
   private readonly traffic: NavigationAvoidanceTraffic;
   private readonly agents: ScenarioAgent[];
+  private readonly walkableAreas: readonly NavigationAvoidanceScenarioWalkableArea[];
   private allStationarySteps = 0;
   private maxOverlap = 0;
   private steps = 0;
@@ -123,12 +161,20 @@ class NavigationAvoidanceScenarioSimulationImpl implements NavigationAvoidanceSc
     this.seed = options.seed ?? 1;
     this.traffic = options.traffic ?? 'opposing';
     this.agents = createAgents(options.agentCount, this.traffic, seededRandom(this.seed));
+    const minimumAgentX = Math.min(...this.agents.map(agent => agent.position.x - agent.radius - 0.2));
+    const maximumAgentX = Math.max(...this.agents.map(agent => agent.position.x + agent.radius + 0.2));
+    this.walkableAreas = [
+      { ...scenarioWalkableAreas[0], minX: Math.min(scenarioWalkableAreas[0].minX, minimumAgentX),
+        maxX: Math.max(scenarioWalkableAreas[0].maxX, maximumAgentX) },
+      scenarioWalkableAreas[1],
+    ];
   }
 
   snapshot(): NavigationAvoidanceScenarioSnapshot {
     return {
       steps: this.steps,
       finished: this.finished,
+      walkableAreas: this.walkableAreas,
       agents: this.agents.map(agent => ({
         id: agent.id,
         position: { ...agent.position },
@@ -137,6 +183,7 @@ class NavigationAvoidanceScenarioSimulationImpl implements NavigationAvoidanceSc
         goalX: agent.goalX,
         completed: agent.completed,
         holding: agent.holding,
+        waiting: agent.waiting,
       })),
       result: this.result,
     };
@@ -163,10 +210,35 @@ class NavigationAvoidanceScenarioSimulationImpl implements NavigationAvoidanceSc
           && candidate.id < agent.id)
         : undefined;
       agent.holding = rightOfWayAgent !== undefined;
-      let preferredVelocity = velocityTowards(agent.position, { x: agent.goalX, y: 0, z: 0 }, 3);
-      if (rightOfWayAgent) {
-        preferredVelocity = velocityTowards(agent.position, stagingPoint, 2.4);
-      } else if (this.options.mode === 'priority-yield' && opposing && Math.abs(opposing.position.x - agent.position.x) < 3) {
+      if (rightOfWayAgent) agent.usedStaging = true;
+      if (rightOfWayAgent && agent.alignedForStaging
+        && Math.hypot(agent.position.x - stagingPoint.x, agent.position.z - stagingPoint.z) < 0.18) {
+        agent.waiting = true;
+      }
+      if (!rightOfWayAgent) agent.waiting = false;
+      if (rightOfWayAgent && !agent.alignedForStaging
+        && Math.hypot(agent.position.x - corridorReentryPoint.x, agent.position.z - corridorReentryPoint.z) < 0.2) {
+        agent.alignedForStaging = true;
+      }
+      if (agent.usedStaging && !rightOfWayAgent && !agent.alignedForReentry
+        && Math.abs(agent.position.x - stagingPoint.x) < 0.1 && agent.position.z > 1) {
+        agent.alignedForReentry = true;
+      }
+      if (agent.usedStaging && !rightOfWayAgent && !agent.reenteredCorridor
+        && Math.hypot(agent.position.x - corridorReentryPoint.x, agent.position.z - corridorReentryPoint.z) < 0.2) {
+        agent.reenteredCorridor = true;
+      }
+      const returningFromStaging = agent.usedStaging && !rightOfWayAgent && !agent.reenteredCorridor;
+      const movementTarget = rightOfWayAgent
+        ? agent.alignedForStaging ? stagingPoint : corridorReentryPoint
+        : returningFromStaging
+          ? agent.alignedForReentry ? corridorReentryPoint : stagingPoint
+          : { x: agent.goalX, y: 0, z: 0 };
+      let preferredVelocity = agent.waiting
+        ? { x: 0, y: 0, z: 0 }
+        : velocityTowards(agent.position, movementTarget, rightOfWayAgent ? 2.4 : 3);
+      if (!rightOfWayAgent && this.options.mode === 'priority-yield' && opposing
+        && Math.abs(opposing.position.x - agent.position.x) < 3) {
         if (agent.id > opposing.id) preferredVelocity = { x: -agent.journeyDirection * 2.4, y: 0, z: 0 };
       }
       const velocity = calculateNavigationAvoidanceVelocity({
@@ -176,13 +248,18 @@ class NavigationAvoidanceScenarioSimulationImpl implements NavigationAvoidanceSc
       });
       const velocityX = Math.max(-3, Math.min(3, velocity.x));
       const velocityZ = Math.max(-3, Math.min(3, velocity.z));
-      const nextX = Math.max(-12, Math.min(12, agent.position.x + velocityX * this.timeStepSeconds));
-      const nextZ = agent.position.z + velocityZ * this.timeStepSeconds;
+      const next = chooseWalkableNextPosition(
+        agent, velocityX, velocityZ, preferredVelocity, this.timeStepSeconds, this.walkableAreas,
+      );
+      const nextX = next.x;
+      const nextZ = next.z;
+      const actualVelocityX = (nextX - agent.position.x) / this.timeStepSeconds;
+      const actualVelocityZ = (nextZ - agent.position.z) / this.timeStepSeconds;
       nextPositions.set(agent.id, { x: nextX, z: nextZ });
-      if (Math.hypot(velocityX, velocityZ) < 0.05) stationaryThisStep += 1;
-      if (Math.abs(velocityX) > 0.05 && Math.sign(velocityX) !== Math.sign(agent.previousVelocityX)
+      if (Math.hypot(actualVelocityX, actualVelocityZ) < 0.05) stationaryThisStep += 1;
+      if (Math.abs(actualVelocityX) > 0.05 && Math.sign(actualVelocityX) !== Math.sign(agent.previousVelocityX)
         && Math.abs(agent.previousVelocityX) > 0.05) agent.velocityReversals += 1;
-      agent.previousVelocityX = velocityX;
+      agent.previousVelocityX = actualVelocityX;
       const previousDistance = Math.hypot(agent.goalX - agent.position.x, agent.position.z);
       const nextDistance = Math.hypot(agent.goalX - nextX, nextZ);
       if (rightOfWayAgent || previousDistance - nextDistance > 0.001) agent.noProgressSteps = 0;
@@ -294,8 +371,33 @@ function createAgents(
       previousVelocityX: 0,
       completed: false,
       holding: false,
+      waiting: false,
+      usedStaging: false,
+      alignedForStaging: false,
+      alignedForReentry: false,
+      reenteredCorridor: false,
     };
   });
+}
+
+function chooseWalkableNextPosition(
+  agent: ScenarioAgent,
+  velocityX: number,
+  velocityZ: number,
+  preferredVelocity: NavigationAvoidanceAgent['preferredVelocity'],
+  timeStepSeconds: number,
+  walkableAreas: readonly NavigationAvoidanceScenarioWalkableArea[],
+): { x: number; z: number } {
+  const candidates = [
+    { x: agent.position.x + velocityX * timeStepSeconds, z: agent.position.z + velocityZ * timeStepSeconds },
+    { x: agent.position.x + preferredVelocity.x * timeStepSeconds, z: agent.position.z + preferredVelocity.z * timeStepSeconds },
+    { x: agent.position.x + preferredVelocity.x * timeStepSeconds, z: agent.position.z },
+    { x: agent.position.x, z: agent.position.z + preferredVelocity.z * timeStepSeconds },
+    { x: agent.position.x, z: agent.position.z },
+  ];
+  return candidates.find(candidate => isNavigationAvoidanceScenarioPositionWalkable(
+    candidate, agent.radius, walkableAreas,
+  ))!;
 }
 
 function measureOverlap(agents: readonly ScenarioAgent[]): number {

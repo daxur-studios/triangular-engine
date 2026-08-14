@@ -5,7 +5,7 @@
 - State: BSP-to-triangular production-terrain parity migration authorised; BSP remains the active reference path
 - Target entry point: `triangular-engine/terrain`
 - Initial consumers: infinite plane, sphere, O'Neill-cylinder interior
-- Last updated: 2026-08-02
+- Last updated: 2026-08-14 (added Phase 6 — surface material detail, not started)
 
 ## Objective
 
@@ -267,6 +267,33 @@ unbounded geometry growth.
 
 Exit gate: bodies rest and travel on visibly matching terrain in plane, sphere,
 and cylinder fixtures; disabling/switching removes every owned physics body.
+
+### Phase 6 — Surface material detail — not started
+
+Two independent gaps, both surfaced while planning planetary-scale forests.
+Water's own crispness (shoreline, depth fade) stays in `002_water_sublibrary.md`
+— separate library, not this phase.
+
+- [ ] **Regional tint, incl. forest-from-space**: extend the existing per-patch
+      biome-color generator (same code already painting ocean/meadow/mountain,
+      already scaled by the patch quadtree so it's coarse from orbit and fine
+      up close for free) with extra density inputs — starting with
+      `triangular-engine/scatter`'s forest/boulder-field density, per
+      `005_scatter_sublibrary.md`'s rendering-ladder note. Terrain owns the
+      color layer; scatter only supplies the density signal, no coupling
+      the other way.
+- [ ] **Detail-texture blend**: vertex color is bounded by mesh subdivision —
+      it can't make one area (a coastline, a forest edge) crisper than another
+      without more geometry. Add a fragment-shader detail layer: tiling
+      material textures (grass, sand, rock) blended by the same biome weights
+      that drive vertex color today, fading in only near the camera. Regional
+      vertex color stays the always-on cheap base at every distance; the
+      detail blend is a local, distance-gated addition on top — never a
+      replacement.
+
+Open questions: whether the detail-texture blend shares atlas/baking
+infrastructure with `007_octahedral_impostors.md`; exact shape of the
+density-input contract from scatter into the regional-color layer.
 
 ## First implementation slice
 
