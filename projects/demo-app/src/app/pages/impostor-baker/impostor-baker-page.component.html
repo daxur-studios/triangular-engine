@@ -1,155 +1,130 @@
-<section class="panel">
-  <header>
-    <div>
-      <a routerLink="/">← Examples</a><small>Generic impostor baker</small>
-    </div>
-    <strong>Impostor POC</strong>
-  </header>
-  <p>
-    Generate a transparent directional atlas from an intentionally asymmetric,
-    six-color cube. Atlas columns are azimuth and rows are elevation, so
-    vertical camera motion cannot select a left or right view.
-  </p>
-  <div class="actions">
-    <label
-      >Model
-      <select
-        [value]="model()"
-        (change)="selectModel($any($event.target).value)"
-      >
-        <option value="cube">Cube</option>
-        <option value="tree">Tree</option>
-      </select></label
-    >
-    <label
-      >Runtime
-      <select
-        [value]="runtimeMode()"
-        (change)="setRuntimeMode($any($event.target).value)"
-      >
-        <option value="discrete">Crisp frame</option>
-        <option value="reference">Reference blend</option>
-      </select></label
-    >
-    <label
-      ><input
-        type="checkbox"
-        [checked]="showWireframe()"
-        (change)="setShowWireframe($any($event.target).checked)"
-      />
-      Wireframe</label
-    >
-    <label
-      ><input
-        type="checkbox"
-        [checked]="showCameraPositions()"
-        (change)="setShowCameraPositions($any($event.target).checked)"
-      />
-      Camera points</label
-    >
-    <label
-      >Stress grid
-      <select
-        [value]="stressGridSize()"
-        (change)="setStressGridSize(+$any($event.target).value)"
-      >
-        <option value="1">Off</option>
-        <option value="10">10 × 10</option>
-        <option value="100">100 × 100</option>
-        <option value="500">500 × 500</option>
-      </select>
-    </label>
-    <label
-      >Debug camera
-      <select
-        [value]="debugCameraCell() ?? ''"
-        (change)="
-          $any($event.target).value
-            ? snapCameraToCell(
-                +$any($event.target).value.split(',')[0],
-                +$any($event.target).value.split(',')[1]
-              )
-            : releaseDebugCamera()
-        "
-      >
-        <option value="">Free orbit</option>
-        @for (cell of debugCells(); track cell) {
-          <option [value]="cell">Cell {{ cell }}</option>
-        }
-      </select>
-    </label>
-    <span class="debug-readout"
-      >active {{ selectedCell()
-      }}{{ debugCameraCell() ? " (locked)" : "" }}</span
-    >
-    <label
-      >Grid
-      <select
-        [value]="columns()"
-        (change)="
-          columns.set(+$any($event.target).value);
-          rows.set(+$any($event.target).value);
-          generateAtlas()
-        "
-      >
-        <option value="4">4 × 4</option>
-        <option value="8">8 × 8</option>
-        <option value="12">12 × 12</option>
-      </select></label
-    >
-    <button (click)="generateAtlas()">Regenerate</button>
-    <button (click)="downloadAtlas()" [disabled]="!atlasUrl()">
-      Download PNG
-    </button>
-    <button (click)="downloadMetadata()" [disabled]="!metadata()">
-      Download JSON
-    </button>
-  </div>
-  <div class="previews">
-    <div>
-      <h3>Atlas</h3>
-      <canvas #atlasCanvas (click)="selectCell(0, 0)"></canvas>
-    </div>
-    <div>
-      <h3>Runtime impostor</h3>
-      <code>cell {{ selectedCell() }}</code>
-      <p>
-        The centered sprite follows the camera; the reference cube is offset to
-        its right. The yellow wireframe is the impostor plane and should remain
-        camera-facing.
-      </p>
-    </div>
-  </div>
-  @if (metadata(); as data) {
-    <pre>{{ data | json }}</pre>
-  }
-</section>
 <scene>
-  <camera [position]="cameraPosition" [lookAt]="cameraTarget" />
-  <orbitControls [cameraPosition]="cameraPosition" [target]="cameraTarget" />
-  <ambientLight [intensity]="1.2" />
-  <directionalLight [position]="[4, 6, 5]" [intensity]="2.4" />
-  @if (model() === "cube") {
-    <mesh [position]="[2.8, 0, 0]">
-      <boxGeometry [params]="[2, 2, 2]" />
-      <meshStandardMaterial [params]="{ color: '#4cc9f0', roughness: 0.55 }" />
-    </mesh>
-  } @else {
-    <mesh [position]="[2.8, -0.35, 0]">
-      <coneGeometry [params]="[0.28, 2.4, 8]" />
-      <meshStandardMaterial [params]="{ color: '#75452a', roughness: 0.9 }" />
-    </mesh>
-    <mesh [position]="[2.8, 0.35, 0]">
-      <coneGeometry [params]="[1.15, 1.7, 10]" />
-      <meshStandardMaterial [params]="{ color: '#2e9f5b', roughness: 0.8 }" />
-    </mesh>
-    <mesh [position]="[2.8, 1.15, 0]">
-      <coneGeometry [params]="[0.9, 1.5, 10]" />
-      <meshStandardMaterial [params]="{ color: '#2e9f5b', roughness: 0.8 }" />
-    </mesh>
-    <mesh [position]="[2.8, 1.85, 0]"
-      ><coneGeometry [params]="[0.62, 1.25, 10]" /><meshStandardMaterial
-        [params]="{ color: '#2e9f5b', roughness: 0.8 }"
-    /></mesh>
-  }
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Octahedral impostor baker controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>triangular-engine/impostor</small>
+        </div>
+        <strong>Octahedral impostor baker</strong>
+      </header>
+
+      <p class="blurb">
+        <code>createOctahedralImpostorAtlas</code> bakes the procedural oak
+        (left) from a grid of camera directions covering the upper
+        hemisphere into the two textures previewed above the scene: albedo
+        and packed normal+depth. <code>buildOctahedralImpostorMesh</code>
+        then patches a real <code>MeshStandardMaterial</code> (still lit by
+        the scene's lights) to pick and blend the 3 nearest baked views at
+        render time — that's the single billboard to the right of the tree.
+        The field stretching into the distance is a plain
+        <code>InstancedMesh</code> sharing that exact geometry/material
+        across thousands of copies, each orienting to the camera
+        independently in the vertex shader.
+      </p>
+
+      <nav aria-label="Bake parameters">
+        <label
+          >Sprites/side
+          <select
+            [value]="spritesPerSide()"
+            (change)="setSpritesPerSide($any($event.target).value)"
+          >
+            <option value="8">8 × 8</option>
+            <option value="12">12 × 12</option>
+            <option value="16">16 × 16</option>
+            <option value="24">24 × 24</option>
+          </select></label
+        >
+        <label
+          >Atlas size
+          <select
+            [value]="textureSizePx()"
+            (change)="setTextureSize($any($event.target).value)"
+          >
+            <option value="1024">1024</option>
+            <option value="2048">2048</option>
+            <option value="4096">4096</option>
+          </select></label
+        >
+        <button (click)="rebake()" [disabled]="baking()">
+          {{ baking() ? "Baking…" : "Rebake" }}
+        </button>
+      </nav>
+
+      <nav aria-label="Live material tuning">
+        <label
+          >Alpha clamp
+          <input
+            type="range"
+            min="0"
+            max="0.9"
+            step="0.01"
+            [value]="alphaClamp()"
+            (input)="setAlphaClamp($any($event.target).value)"
+          />
+          {{ alphaClamp() | number: "1.2-2" }}</label
+        >
+        <label
+          ><input
+            type="checkbox"
+            [checked]="transparent()"
+            (change)="setTransparent($any($event.target).checked)"
+          />
+          Transparent</label
+        >
+      </nav>
+
+      <nav aria-label="Forest field">
+        <label
+          >Forest instances
+          <select
+            [value]="forestCount()"
+            (change)="setForestCount($any($event.target).value)"
+          >
+            <option value="500">500</option>
+            <option value="2000">2,000</option>
+            <option value="4000">4,000</option>
+            <option value="10000">10,000</option>
+          </select></label
+        >
+        <label
+          >Forest spread
+          <select
+            [value]="forestSpreadM()"
+            (change)="setForestSpread($any($event.target).value)"
+          >
+            <option value="30">Tight (30m)</option>
+            <option value="60">Default (60m)</option>
+            <option value="120">Wide (120m)</option>
+            <option value="250">Sparse (250m)</option>
+          </select></label
+        >
+      </nav>
+
+      <nav aria-label="Export">
+        <button (click)="downloadAlbedo()">Download albedo PNG</button>
+        <button (click)="downloadNormalDepth()">
+          Download normal/depth PNG
+        </button>
+      </nav>
+
+      <p class="blurb note">
+        Both PNGs are exactly what a game would ship to skip baking at
+        runtime — load them with a <code>TextureLoader</code> and pass
+        straight into <code>buildOctahedralImpostorMesh</code>'s
+        <code>albedo</code>/<code>normalDepth</code> options instead of
+        calling <code>createOctahedralImpostorAtlas</code>, as long as the
+        same sprites/side number is passed too.
+      </p>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="[16, 10, 26]"
+    [target]="[4, 3, 10]"
+    [isActive]="true"
+  />
+  <ambientLight [intensity]="1.1" />
+  <directionalLight [position]="[12, 18, 8]" [intensity]="2.2" />
 </scene>

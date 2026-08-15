@@ -1,591 +1,334 @@
-import {
-  AfterViewInit,
-  ChangeDetectionStrategy,
-  Component,
-  DestroyRef,
-  ElementRef,
-  ViewChild,
-  inject,
-  signal,
-} from '@angular/core';
-import { JsonPipe } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
+import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
-  AmbientLight,
-  BoxGeometry,
-  ConeGeometry,
-  CanvasTexture,
+  BufferGeometry,
   Color,
-  DirectionalLight,
-  MeshBasicMaterial,
-  Mesh,
-  SphereGeometry,
-  MeshStandardMaterial,
-  PlaneGeometry,
-  EdgesGeometry,
-  LineBasicMaterial,
-  LineSegments,
-  ShaderMaterial,
+  Float32BufferAttribute,
   Group,
   InstancedMesh,
-  OrthographicCamera,
-  WebGLRenderTarget,
-  WebGLRenderer,
-  RGBAFormat,
-  UnsignedByteType,
-  Scene,
-  Sprite,
-  SpriteMaterial,
-  Quaternion,
   Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  PlaneGeometry,
+  Quaternion,
   Vector3,
+  WebGLRenderer,
 } from 'three';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EngineModule, EngineService } from 'triangular-engine';
-import { ImpostorAtlasMetadata, atlasCellForDirection, atlasDirection } from './impostor-atlas.models';
+import {
+  buildFloraMesh,
+  generateFloraSkeleton,
+  type IFloraArchetype,
+} from 'triangular-engine/procedural';
+import {
+  buildOctahedralImpostorMesh,
+  createOctahedralImpostorAtlas,
+  exportOctahedralImpostorAtlas,
+  type IOctahedralImpostorAtlas,
+  type IOctahedralImpostorMaterialHandle,
+} from 'triangular-engine/impostor';
 
-const IMPOSTOR_VERTEX_SHADER = `
-uniform float spritesPerSide;
-varying vec2 vSprite1;
-varying vec2 vSprite2;
-varying vec2 vSprite3;
-varying vec3 vWeights;
-varying vec2 vUv1;
-varying vec2 vUv2;
-varying vec2 vUv3;
+/** One archetype is enough to prove out baking — see triangular-engine/procedural's flora-lab-page for a fuller showcase of the archetype system itself. */
+const TREE_ARCHETYPE: IFloraArchetype = {
+  schemaVersion: 1,
+  id: 'impostor-demo-oak',
+  name: 'Impostor demo oak',
+  kind: 'tree',
+  trunk: { heightM: [3.5, 5], radiusM: [0.28, 0.4], taper01: 0.45 },
+  branching: {
+    maxDepth: 3,
+    childrenPerNode: [2, 3],
+    spreadAngleRad: [0.6, 1.3],
+    lengthFalloff01: 0.68,
+  },
+  foliage: { style: 'cluster-sphere', sizeM: [0.9, 1.5] },
+  sockets: { perchesPerBranchDepth: {}, nestCavityChance01: 0, fruitSlotsMax: 0, flowerHeads: false },
+  collider: { trunk: 'capsule' },
+};
+const TREE_SEED = 7;
+const TRUNK_COLOR = new Color('#6b4a2f');
+const LEAF_COLOR = new Color('#4f8a3d');
 
-vec2 encodeDirection(vec3 d) {
-  d = normalize(d); float s = abs(d.x) + abs(d.y) + abs(d.z);
-  vec2 p = d.xy / s;
-  if (d.z < 0.0) p = (1.0 - abs(p.yx)) * sign(p.xy);
-  return p * 0.5 + 0.5;
-}
-vec3 decodeDirection(vec2 cell, float spritesMinusOne) {
-  // The baker samples cell centers, so decode the same center direction here.
-  vec2 p = ((cell + 0.5) / (spritesMinusOne + 1.0)) * 2.0 - 1.0;
-  vec3 d = vec3(p, 1.0 - abs(p.x) - abs(p.y));
-  if (d.z < 0.0) d.xy = (1.0 - abs(d.yx)) * sign(d.xy);
-  return normalize(d);
-}
-void computePlaneBasis(vec3 n, out vec3 t, out vec3 b) {
-  vec3 up = vec3(0.0, 1.0, 0.0);
-  // This must be identical to getBakeUp().  In particular, the atlas uses
-  // Z as the pole fallback, whereas the reference shader's X fallback is
-  // only correct for atlases baked with that same convention.
-  up -= n * dot(up, n);
-  if (dot(up, up) < 0.000001) {
-    up = vec3(0.0, 0.0, 1.0);
-    up -= n * dot(up, n);
-  }
-  up = normalize(up);
-  t = normalize(cross(up, n));
-  b = normalize(cross(n, t));
-}
-vec3 projectVertex(vec3 n) {
-  vec3 t, b;
-  computePlaneBasis(n, t, b);
-  return t * position.x + b * position.y;
-}
-vec2 projectToPlaneUV(vec3 n, vec3 t, vec3 b, vec3 cameraLocal, vec3 viewDir) {
-  float denom = dot(viewDir, n);
-  float hit = abs(denom) < 0.0001 ? 0.0 : -dot(cameraLocal, n) / denom;
-  vec3 p = cameraLocal + viewDir * hit;
-  return vec2(dot(p, t), dot(p, b)) * 0.5 + 0.5;
-}
-void main() {
-  // For an InstancedMesh, this is each instance's complete local-to-world
-  // transform. That gives every impostor its own camera direction on the GPU.
-  mat4 impostorModelMatrix = modelMatrix;
-  #ifdef USE_INSTANCING
-    impostorModelMatrix = modelMatrix * instanceMatrix;
-  #endif
-  vec3 cameraLocal = (inverse(impostorModelMatrix) * vec4(cameraPosition, 1.0)).xyz;
-  vec3 cameraDir = normalize(cameraLocal);
-  float spritesMinusOne = spritesPerSide - 1.0;
-  // Map the continuous octahedral coordinate onto cell centers.  The old
-  // * (N - 1) mapping sampled atlas directions between the baked frames.
-  vec2 grid = encodeDirection(cameraDir) * spritesPerSide - 0.5;
-  grid = clamp(grid, vec2(0.0), vec2(spritesMinusOne));
-  vec2 base = min(floor(grid), vec2(spritesMinusOne));
-  vec2 f = fract(grid);
-  if (f.x >= f.y) {
-    vWeights = vec3(1.0-f.x, f.x-f.y, f.y);
-    vSprite1 = base;
-    vSprite2 = min(base + vec2(1.0, 0.0), vec2(spritesMinusOne));
-    vSprite3 = min(base + vec2(1.0), vec2(spritesMinusOne));
-  } else {
-    vWeights = vec3(1.0-f.y, f.y-f.x, f.x);
-    vSprite1 = base;
-    vSprite2 = min(base + vec2(0.0, 1.0), vec2(spritesMinusOne));
-    vSprite3 = min(base + vec2(1.0), vec2(spritesMinusOne));
-  }
-  vec3 projectedPosition = projectVertex(cameraDir);
-  vec3 viewDirLocal = normalize(projectedPosition - cameraLocal);
-  vec3 n1 = decodeDirection(vSprite1, spritesMinusOne);
-  vec3 n2 = decodeDirection(vSprite2, spritesMinusOne);
-  vec3 n3 = decodeDirection(vSprite3, spritesMinusOne);
-  vec3 t1, b1, t2, b2, t3, b3;
-  computePlaneBasis(n1, t1, b1);
-  computePlaneBasis(n2, t2, b2);
-  computePlaneBasis(n3, t3, b3);
-  vUv1 = projectToPlaneUV(n1, t1, b1, cameraLocal, viewDirLocal);
-  vUv2 = projectToPlaneUV(n2, t2, b2, cameraLocal, viewDirLocal);
-  vUv3 = projectToPlaneUV(n3, t3, b3, cameraLocal, viewDirLocal);
-  gl_Position = projectionMatrix * viewMatrix * impostorModelMatrix * vec4(projectedPosition, 1.0);
-}
-`;
+/** Big enough to stay under the largest forest-spread option's footprint plus margin. */
+const GROUND_SIZE_M = 700;
+/** The live tree stays at the world origin — it's also the atlas bake source, and `impostorTransform` bakes in its bounding-sphere center as a *world*-space offset (see octahedral-impostor-mesh.ts), so any other object built from the same atlas must be positioned relative to that same anchor. */
+const IMPOSTOR_COMPARISON_POSITION = new Vector3(5, 0, 0);
+const ATLAS_PREVIEW_SIZE_M = 4;
+const ATLAS_PREVIEW_POSITION = new Vector3(0, 6, -6);
+/** Forest instances start this far out (clear of the tree/impostor comparison pair) and scatter across a square of side `2 * forestSpreadM` beyond that. */
+const FOREST_NEAR_Z_M = 12;
+const FOREST_SCALE_RANGE: readonly [number, number] = [0.75, 1.35];
 
-const IMPOSTOR_FRAGMENT_SHADER = `
-uniform sampler2D map;
-uniform float spritesPerSide;
-uniform float alphaClamp;
-uniform bool blendFrames;
-varying vec2 vSprite1;
-varying vec2 vSprite2;
-varying vec2 vSprite3;
-varying vec3 vWeights;
-varying vec2 vUv1;
-varying vec2 vUv2;
-varying vec2 vUv3;
-vec4 sampleSprite(vec2 uv, vec2 cell) {
-  // Canvas rows are written top-to-bottom, while shader texture coordinates
-  // run bottom-to-top. Keep the frame's own V orientation, but invert the
-  // atlas-row address so a camera above the object samples its top-view row.
-  vec2 localUv = clamp(uv, 0.0, 1.0);
-  vec2 atlasUv = vec2(
-    (cell.x + localUv.x) / spritesPerSide,
-    (spritesPerSide - 1.0 - cell.y + localUv.y) / spritesPerSide
-  );
-  return texture2D(map, atlasUv);
-}
-void main() {
-  vec4 color;
-  if (blendFrames) {
-    color = sampleSprite(vUv1, vSprite1) * vWeights.x
-      + sampleSprite(vUv2, vSprite2) * vWeights.y
-      + sampleSprite(vUv3, vSprite3) * vWeights.z;
-  } else if (vWeights.x >= vWeights.y && vWeights.x >= vWeights.z) {
-    color = sampleSprite(vUv1, vSprite1);
-  } else if (vWeights.y >= vWeights.z) {
-    color = sampleSprite(vUv2, vSprite2);
-  } else {
-    color = sampleSprite(vUv3, vSprite3);
-  }
-  if (color.a < alphaClamp) discard;
-  gl_FragColor = color;
-}
-`;
-
+/**
+ * Proves out `triangular-engine/impostor` end to end: bakes a hemispherical
+ * octahedral atlas from a procedural tree, renders one impostor next to the
+ * live mesh for comparison, and scatters a few thousand more across a field
+ * as an InstancedMesh — the forest-scale case the library exists for. See
+ * docs/runbook/005_scatter_sublibrary.md Phase 5 for where this is headed
+ * next (wiring into scatter's reserved `'impostor'` LOD kind).
+ */
 @Component({
   selector: 'app-impostor-baker-page',
-  imports: [RouterLink, EngineModule, JsonPipe],
+  imports: [RouterLink, EngineModule, DecimalPipe],
   templateUrl: './impostor-baker-page.component.html',
   styleUrl: './impostor-baker-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [EngineService.provide({ showFPS: true })],
-  host: { class: 'flex-page' },
 })
-export class ImpostorBakerPageComponent implements AfterViewInit {
-  @ViewChild('atlasCanvas', { static: true }) private readonly atlasCanvas!: ElementRef<HTMLCanvasElement>;
-  readonly columns = signal(8);
-  readonly rows = signal(8);
-  readonly frameSize = signal(96);
-  readonly selectedCell = signal('0,0');
-  readonly debugCameraCell = signal<string | undefined>(undefined);
-  readonly model = signal<'cube' | 'tree'>('cube');
-  readonly runtimeMode = signal<'discrete' | 'reference'>('discrete');
-  readonly metadata = signal<ImpostorAtlasMetadata | undefined>(undefined);
-  readonly atlasUrl = signal('');
-  readonly engine = inject(EngineService);
-  private readonly destroyRef = inject(DestroyRef);
-  readonly cameraPosition: [number, number, number] = [4, 3, 5];
-  readonly cameraTarget: [number, number, number] = [0, 0, 0];
-  private impostorTexture?: CanvasTexture;
-  private impostorSprite?: Mesh<PlaneGeometry, ShaderMaterial> | Sprite;
-  private impostorWireframe?: LineSegments;
-  private debugCameraMarkers = new Group();
-  private stressGrid = new Group();
-  private stressGridMesh?: InstancedMesh;
-  readonly showCameraPositions = signal(false);
-  readonly stressGridSize = signal(1);
-  readonly showWireframe = signal(false);
-  private readonly impostorDirection = new Vector3();
-  private readonly impostorPosition = new Vector3();
-  private readonly bakeUp = new Vector3();
-  private readonly runtimeUp = new Vector3();
-  private readonly cameraQuaternion = new Quaternion();
-  private readonly gridQuaternion = new Quaternion();
-  private readonly gridRollQuaternion = new Quaternion();
-  private readonly gridRollAxis = new Vector3(0, 0, 1);
-  private readonly worldUp = new Vector3(0, 1, 0);
-  private readonly fallbackUp = new Vector3(0, 0, 1);
-  private readonly spriteRight = new Vector3();
+export class ImpostorBakerPageComponent {
+  readonly spritesPerSide = signal(12);
+  readonly textureSizePx = signal(2048);
+  readonly alphaClamp = signal(0.4);
+  readonly transparent = signal(false);
+  readonly forestCount = signal(4000);
+  /** Half-extent (m) of the forest's scatter area — density is forestCount spread over this area, independent of instance count. */
+  readonly forestSpreadM = signal(60);
+  readonly baking = signal(false);
 
-  ngAfterViewInit(): void {
-    this.engine.scene.add(this.debugCameraMarkers);
-    this.engine.scene.add(this.stressGrid);
-    this.engine.tick$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.updateRuntimeImpostor());
-    this.generateAtlas();
+  private readonly engine = inject(EngineService);
+  private readonly group = new Group();
+  private readonly treeSource: Group;
+
+  private atlas?: IOctahedralImpostorAtlas;
+  private impostorMesh?: Mesh<PlaneGeometry, MeshStandardMaterial>;
+  private materialHandle?: IOctahedralImpostorMaterialHandle<MeshStandardMaterial>;
+  private forestMesh?: InstancedMesh;
+  private albedoPreviewMesh?: Mesh<PlaneGeometry, MeshBasicMaterial>;
+  private normalDepthPreviewMesh?: Mesh<PlaneGeometry, MeshBasicMaterial>;
+
+  constructor() {
+    const ground = new Mesh(
+      new PlaneGeometry(GROUND_SIZE_M, GROUND_SIZE_M),
+      new MeshStandardMaterial({ color: '#3c4a33', roughness: 1 }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    this.group.add(ground);
+
+    this.treeSource = this.buildTree(TREE_SEED);
+    this.group.add(this.treeSource);
+
+    this.engine.scene.add(this.group);
+    this.bake();
+
+    inject(DestroyRef).onDestroy(() => this.dispose());
   }
 
-  async generateAtlas(): Promise<void> {
-    const columns = this.columns();
-    const rows = this.rows();
-    const frameSize = this.frameSize();
-    const canvas = this.atlasCanvas.nativeElement;
-    canvas.width = columns * frameSize;
-    canvas.height = rows * frameSize;
-    const context = canvas.getContext('2d');
-    if (!context) return;
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    const renderer = new WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
-    renderer.setSize(frameSize, frameSize, false);
-    renderer.setPixelRatio(1);
-    renderer.setClearColor(0x000000, 0);
-    const renderTarget = new WebGLRenderTarget(frameSize, frameSize, {
-      format: RGBAFormat, type: UnsignedByteType, depthBuffer: true, stencilBuffer: false,
-    });
-    const bakeScene = new Scene();
-    bakeScene.background = null;
-    const sourceModel = this.createSourceModel(this.model());
-    bakeScene.add(sourceModel, new AmbientLight(0xffffff, 1));
-    const cube = sourceModel;
-    const light = new DirectionalLight(0xffffff, 1.5);
-    light.position.set(4, 6, 5);
-    bakeScene.add(light);
-    // Leave room for the cube's diagonal projection at pole-adjacent views.
-    const camera = new OrthographicCamera(-1.8, 1.8, 1.8, -1.8, 0.1, 20);
-    const pixels = new Uint8Array(frameSize * frameSize * 4);
-    const uprightPixels = new Uint8ClampedArray(frameSize * frameSize * 4);
-    for (let row = 0; row < rows; row++) {
-      for (let column = 0; column < columns; column++) {
-        const direction = atlasDirection(column, row, columns, rows);
-        camera.position.copy(direction).multiplyScalar(5);
-        camera.up.copy(this.getBakeUp(direction, this.bakeUp));
-        camera.lookAt(0, 0, 0);
-        camera.updateMatrixWorld();
-        renderer.setRenderTarget(renderTarget);
-        renderer.clear();
-        renderer.render(bakeScene, camera);
-        renderer.readRenderTargetPixels(renderTarget, 0, 0, frameSize, frameSize, pixels);
-        // WebGL readback starts at the bottom-left, whereas ImageData starts at
-        // the top-left. Copy rows in reverse order so frames are not vertically
-        // mirrored (which makes polar camera movement appear backwards).
-        const rowBytes = frameSize * 4;
-        for (let pixelRow = 0; pixelRow < frameSize; pixelRow++) {
-          const sourceOffset = (frameSize - 1 - pixelRow) * rowBytes;
-          uprightPixels.set(pixels.subarray(sourceOffset, sourceOffset + rowBytes), pixelRow * rowBytes);
-        }
-        const image = new ImageData(uprightPixels, frameSize, frameSize);
-        const imageCanvas = document.createElement('canvas');
-        imageCanvas.width = frameSize; imageCanvas.height = frameSize;
-        imageCanvas.getContext('2d')?.putImageData(image, 0, 0);
-        context.drawImage(imageCanvas, column * frameSize, row * frameSize);
-      }
+  rebake(): void {
+    this.bake();
+  }
+
+  setSpritesPerSide(value: string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    this.spritesPerSide.set(parsed);
+    this.bake();
+  }
+
+  setTextureSize(value: string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    this.textureSizePx.set(parsed);
+    this.bake();
+  }
+
+  setAlphaClamp(value: string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    this.alphaClamp.set(parsed);
+    this.materialHandle?.setAlphaClamp(parsed);
+  }
+
+  setTransparent(value: boolean): void {
+    this.transparent.set(value);
+    this.materialHandle?.setTransparent(value);
+  }
+
+  setForestCount(value: string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    this.forestCount.set(parsed);
+    this.rebuildForestIfBaked();
+  }
+
+  setForestSpread(value: string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    this.forestSpreadM.set(parsed);
+    this.rebuildForestIfBaked();
+  }
+
+  private rebuildForestIfBaked(): void {
+    // Reuses the already-baked geometry/material — only the bake params in
+    // bake() (which change the atlas itself) need a full rebake; count and
+    // spread only change instance placement.
+    if (this.impostorMesh && this.materialHandle) {
+      this.rebuildForest(this.impostorMesh.geometry, this.materialHandle.material);
     }
-    renderer.setRenderTarget(null);
-    renderTarget.dispose();
-    cube.traverse((object) => {
-      if (object instanceof Mesh) {
-        object.geometry.dispose();
-        const materials = Array.isArray(object.material) ? object.material : [object.material];
-        materials.forEach((material) => material.dispose());
-      }
-    });
-    renderer.dispose();
-    renderer.domElement.remove();
-    const metadata: ImpostorAtlasMetadata = {
-      version: 1, projection: 'octahedral', columns, rows,
-      viewCount: columns * rows, frameSize, padding: 4, rowOrigin: 'top',
-      sourceBounds: { center: [0, 0, 0], radius: Math.sqrt(3) },
-    };
-    this.metadata.set(metadata);
-    this.rebuildCameraMarkers();
-    this.atlasUrl.set(canvas.toDataURL('image/png'));
-    this.selectedCell.set('0,0');
-    this.createRuntimeImpostor(canvas);
   }
 
-  setStressGridSize(size: number): void {
-    this.stressGridSize.set(size);
-    this.rebuildStressGrid();
+  downloadAlbedo(): void {
+    this.downloadAtlasTexture('albedo', 'octahedral-impostor-albedo');
   }
 
-  private rebuildStressGrid(): void {
-    this.stressGrid.clear();
-    this.stressGridMesh?.geometry.dispose();
-    (this.stressGridMesh?.material as ShaderMaterial | undefined)?.dispose();
-    this.stressGridMesh = undefined;
-    const impostor = this.impostorSprite;
-    // Both runtime modes use the same GPU-instanced geometry path; the shader
-    // chooses between a crisp nearest frame and the reference three-frame blend.
-    if (!(impostor instanceof Mesh) || !this.impostorTexture || this.stressGridSize() <= 1) return;
-    const size = this.stressGridSize();
-    const spacing = 2.5;
-    const material = new ShaderMaterial({
-      uniforms: {
-        map: { value: this.impostorTexture },
-        spritesPerSide: { value: this.columns() },
-        alphaClamp: { value: 0.02 },
-        blendFrames: { value: this.runtimeMode() === 'reference' },
-      },
-      vertexShader: IMPOSTOR_VERTEX_SHADER,
-      fragmentShader: IMPOSTOR_FRAGMENT_SHADER,
-      transparent: true,
-      depthWrite: true,
-      depthTest: true,
-      side: 2,
-    });
-    const grid = new InstancedMesh(new PlaneGeometry(2, 2), material, size * size);
-    const offset = (size - 1) * spacing * 0.5;
-    const matrix = new Matrix4();
-    const rotation = new Quaternion();
-    const scale = new Vector3(0.98, 0.98, 1);
-    const position = new Vector3();
-    for (let z = 0; z < size; z++) {
-      for (let x = 0; x < size; x++) {
-        position.set(x * spacing - offset, 0, z * spacing - offset);
-        grid.setMatrixAt(z * size + x, matrix.compose(position, rotation, scale));
-      }
+  downloadNormalDepth(): void {
+    this.downloadAtlasTexture('normalDepth', 'octahedral-impostor-normal-depth');
+  }
+
+  private downloadAtlasTexture(which: 'albedo' | 'normalDepth', fileName: string): void {
+    const renderer = this.engine.renderer;
+    if (!this.atlas || !(renderer instanceof WebGLRenderer)) return;
+    exportOctahedralImpostorAtlas(renderer, this.atlas, which, fileName);
+  }
+
+  private bake(): void {
+    const renderer = this.engine.renderer;
+    if (!(renderer instanceof WebGLRenderer)) {
+      console.warn('[impostor-baker] Octahedral impostor baking requires a WebGL renderer.');
+      return;
     }
-    grid.instanceMatrix.needsUpdate = true;
-    this.stressGridMesh = grid;
-    this.stressGrid.add(grid);
+
+    this.baking.set(true);
+    this.disposeBaked();
+
+    // computeObjectBoundingSphere (used both by the atlas bake and by
+    // buildOctahedralImpostorMesh) reads matrixWorld directly and does not
+    // update it itself.
+    this.treeSource.updateMatrixWorld(true);
+
+    const atlas = createOctahedralImpostorAtlas({
+      renderer,
+      target: this.treeSource,
+      textureSize: this.textureSizePx(),
+      spritesPerSide: this.spritesPerSide(),
+    });
+    this.atlas = atlas;
+
+    const { mesh, materialHandle } = buildOctahedralImpostorMesh({
+      target: this.treeSource,
+      baseType: MeshStandardMaterial,
+      albedo: atlas.albedo,
+      normalDepth: atlas.normalDepth,
+      spritesPerSide: this.spritesPerSide(),
+      alphaClamp: this.alphaClamp(),
+      transparent: this.transparent(),
+    });
+    mesh.position.copy(IMPOSTOR_COMPARISON_POSITION);
+    this.group.add(mesh);
+    this.impostorMesh = mesh;
+    this.materialHandle = materialHandle;
+
+    this.buildAtlasPreview(atlas);
+    this.rebuildForest(mesh.geometry, materialHandle.material);
+
+    this.baking.set(false);
   }
 
-  selectModel(model: 'cube' | 'tree'): void {
-    this.model.set(model);
-    void this.generateAtlas();
-  }
-
-  private createSourceModel(model: 'cube' | 'tree'): Group {
+  private buildTree(seed: number): Group {
     const group = new Group();
-    if (model === 'cube') {
-      group.add(new Mesh(new BoxGeometry(2, 2, 2), [
-        new MeshBasicMaterial({ color: '#55d6be' }), new MeshBasicMaterial({ color: '#ff6b6b' }),
-        new MeshBasicMaterial({ color: '#6c8cff' }), new MeshBasicMaterial({ color: '#ffd166' }),
-        new MeshBasicMaterial({ color: '#c77dff' }), new MeshBasicMaterial({ color: '#4cc9f0' }),
-      ]));
-      return group;
-    }
-    const trunk = new Mesh(new ConeGeometry(0.28, 2.4, 8), new MeshStandardMaterial({ color: '#75452a' }));
-    trunk.position.y = -0.35;
-    group.add(trunk);
-    for (const [radius, height, y] of [[1.15, 1.7, 0.35], [0.9, 1.5, 1.15], [0.62, 1.25, 1.85]] as const) {
-      const foliage = new Mesh(new ConeGeometry(radius, height, 10), new MeshStandardMaterial({ color: '#2e9f5b' }));
-      foliage.position.y = y;
-      group.add(foliage);
-    }
+    const skeleton = generateFloraSkeleton(TREE_ARCHETYPE, seed);
+    const { geometry } = buildFloraMesh(skeleton, TREE_ARCHETYPE);
+    this.colorizeByWindWeight(geometry);
+    const mesh = new Mesh(geometry, new MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
+    group.add(mesh);
     return group;
   }
 
-  private createRuntimeImpostor(atlas: HTMLCanvasElement): void {
-    this.impostorTexture?.dispose();
-    this.stressGrid.clear();
-    this.impostorSprite?.removeFromParent();
-    this.impostorWireframe?.removeFromParent();
-    this.impostorWireframe?.geometry.dispose();
-    (this.impostorWireframe?.material as LineBasicMaterial | undefined)?.dispose();
-    if (this.impostorSprite instanceof Mesh) {
-      this.impostorSprite.geometry.dispose();
-      this.impostorSprite.material.dispose();
-    } else {
-      this.impostorSprite?.material.dispose();
+  private colorizeByWindWeight(geometry: BufferGeometry): void {
+    const windWeight = geometry.getAttribute('windWeight');
+    const colors = new Float32Array(windWeight.count * 3);
+    const blended = new Color();
+    for (let i = 0; i < windWeight.count; i++) {
+      blended.copy(TRUNK_COLOR).lerp(LEAF_COLOR, windWeight.getX(i));
+      colors[i * 3] = blended.r;
+      colors[i * 3 + 1] = blended.g;
+      colors[i * 3 + 2] = blended.b;
     }
-    this.impostorTexture = new CanvasTexture(atlas);
-    this.impostorTexture.needsUpdate = true;
-    const material = new ShaderMaterial({
-      uniforms: {
-        map: { value: this.impostorTexture },
-        spritesPerSide: { value: this.columns() },
-        alphaClamp: { value: 0.02 },
-        blendFrames: { value: this.runtimeMode() === 'reference' },
-      },
-      vertexShader: IMPOSTOR_VERTEX_SHADER,
-      fragmentShader: IMPOSTOR_FRAGMENT_SHADER,
-      transparent: true,
-      depthWrite: false,
-      side: 2,
-    });
-    this.impostorSprite = new Mesh(new PlaneGeometry(2, 2), material);
-    this.impostorSprite.position.set(0, 0, 0);
-    // The vertex shader derives the camera direction in object space by
-    // applying inverse(modelMatrix). Keep this transform uniform; a z scale
-    // of 1 would skew that direction and make the plane appear compressed at
-    // oblique camera angles.
-    this.impostorSprite.scale.setScalar(2.8);
-    this.engine.scene.add(this.impostorSprite);
-    this.createWireframe(this.impostorSprite);
-    this.rebuildStressGrid();
-    this.updateRuntimeImpostor();
+    geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
   }
 
-  private createWireframe(object: Sprite | Mesh<PlaneGeometry, ShaderMaterial>): void {
-    const geometry = new PlaneGeometry(2, 2);
-    const wireframe = new LineSegments( new EdgesGeometry(geometry), new LineBasicMaterial({ color: 0xffff00 }) );
-    wireframe.position.copy(object.position);
-    wireframe.scale.copy(object.scale);
-    wireframe.visible = this.showWireframe();
-    this.impostorWireframe = wireframe;
-    this.engine.scene.add(wireframe);
-  }
-
-  setShowWireframe(value: boolean): void {
-    this.showWireframe.set(value);
-    if (this.impostorWireframe) this.impostorWireframe.visible = value;
-  }
-
-  setShowCameraPositions(value: boolean): void {
-    this.showCameraPositions.set(value);
-    this.debugCameraMarkers.visible = value;
-  }
-
-  private rebuildCameraMarkers(): void {
-    this.debugCameraMarkers.clear();
-    const geometry = new SphereGeometry(0.075, 8, 6);
-    const count = this.columns() * this.rows();
-    for (let index = 0; index < count; index++) {
-      const column = index % this.columns();
-      const row = Math.floor(index / this.columns());
-      const marker = new Mesh(geometry, new MeshBasicMaterial({ color: 0x6688aa }));
-      marker.position.copy(atlasDirection(column, row, this.columns(), this.rows())).multiplyScalar(5);
-      marker.userData['cell'] = `${column},${row}`;
-      this.debugCameraMarkers.add(marker);
-    }
-    this.debugCameraMarkers.visible = this.showCameraPositions();
-    this.updateCameraMarkerHighlight();
-  }
-
-  private updateCameraMarkerHighlight(): void {
-    const active = this.debugCameraCell() ?? this.selectedCell();
-    this.debugCameraMarkers.children.forEach((child) => {
-      const material = (child as Mesh).material as MeshBasicMaterial;
-      material.color.set(child.userData['cell'] === active ? 0xffff00 : 0x6688aa);
-    });
-  }
-
-  private updateRuntimeImpostor(): void {
-    const sprite = this.impostorSprite;
-    const texture = this.impostorTexture;
-    const camera = this.engine.camera$.value;
-    const data = this.metadata();
-    if (!sprite || !texture || !camera || !data) return;
-    const lockedCell = this.debugCameraCell();
-    if (lockedCell) {
-      const [lockedColumn, lockedRow] = lockedCell.split(',').map(Number);
-      const lockedDirection = atlasDirection(lockedColumn, lockedRow, data.columns, data.rows);
-      camera.position.copy(lockedDirection).multiplyScalar(5);
-      camera.lookAt(0, 0, 0);
-      camera.updateMatrixWorld();
-    }
-    if (this.impostorWireframe) {
-      sprite.getWorldPosition(this.impostorWireframe.position);
-      sprite.getWorldQuaternion(this.impostorWireframe.quaternion);
-      this.impostorWireframe.scale.copy(sprite.scale);
-    }
-    // Atlas views are baked around the source object's center; the runtime
-    // direction is measured from the preview sprite's own world position.
-    // The preview sprite is offset from the source cube, so use the camera
-    // direction relative to the sprite rather than relative to world origin.
-    camera.getWorldPosition(this.impostorDirection);
-    sprite.getWorldPosition(this.impostorPosition);
-    this.impostorDirection.sub(this.impostorPosition).normalize();
-    const { column, row } = atlasCellForDirection(this.impostorDirection, data.columns, data.rows);
-    if (sprite instanceof Sprite) {
-      const material = sprite.material as SpriteMaterial;
-      const uv = atlasCellForDirection(this.impostorDirection, data.columns, data.rows);
-      texture.repeat.set(1 / data.columns, 1 / data.rows);
-      texture.offset.set(uv.column / data.columns, 1 - (uv.row + 1) / data.rows);
-      // SpriteMaterial is camera-facing, but its texture is not automatically
-      // rolled to match the camera's screen-up axis. Align the baked frame's
-      // projected up direction with the current camera up so polar views do
-      // not appear to rotate independently of the reference model.
-      camera.getWorldQuaternion(this.cameraQuaternion);
-      this.runtimeUp.copy(this.worldUp).applyQuaternion(this.cameraQuaternion);
-      this.runtimeUp.projectOnPlane(this.impostorDirection).normalize();
-      this.getBakeUp(this.impostorDirection, this.bakeUp);
-      this.spriteRight.crossVectors(this.impostorDirection, this.bakeUp).normalize();
-      const sin = this.runtimeUp.dot(this.spriteRight);
-      const cos = this.runtimeUp.dot(this.bakeUp);
-      const roll = Math.atan2(sin, cos);
-      // The octahedral lower hemisphere reverses the projected basis winding;
-      // compensate it so semi-polar views keep the same roll direction as the
-      // upper hemisphere. The exact pole uses the fallback bake-up axis and is
-      // already stable.
-      material.rotation = this.impostorDirection.y < -0.001 ? roll : -roll;
-      material.map = texture;
-      material.needsUpdate = true;
-      if (this.stressGridMesh) {
-        const gridMaterial = this.stressGridMesh.material as ShaderMaterial;
-        gridMaterial.uniforms['map'].value = texture;
-        gridMaterial.uniforms['spritesPerSide'].value = data.columns;
-      }
-    } else {
-      sprite.material.uniforms['spritesPerSide'].value = data.columns;
-      sprite.material.uniforms['map'].value = texture;
-      sprite.material.uniforms['blendFrames'].value = this.runtimeMode() === 'reference';
-      if (this.stressGridMesh) {
-        const gridMaterial = this.stressGridMesh.material as ShaderMaterial;
-        gridMaterial.uniforms['map'].value = texture;
-        gridMaterial.uniforms['spritesPerSide'].value = data.columns;
-        gridMaterial.uniforms['blendFrames'].value = this.runtimeMode() === 'reference';
-      }
-    }
-    this.selectedCell.set(`${column},${row}`);
-    this.updateCameraMarkerHighlight();
-  }
-
-  setRuntimeMode(mode: 'discrete' | 'reference'): void {
-    if (this.runtimeMode() === mode) return;
-    this.runtimeMode.set(mode);
-    const canvas = this.atlasCanvas?.nativeElement;
-    if (canvas) this.createRuntimeImpostor(canvas);
-  }
-
-  snapCameraToCell(column: number, row: number): void {
-    this.debugCameraCell.set(`${column},${row}`);
-    this.selectedCell.set(`${column},${row}`);
-    this.updateCameraMarkerHighlight();
-  }
-
-  releaseDebugCamera(): void {
-    this.debugCameraCell.set(undefined);
-    this.updateCameraMarkerHighlight();
-  }
-
-  debugCells(): string[] {
-    return Array.from({ length: this.columns() * this.rows() }, (_, index) =>
-      `${index % this.columns()},${Math.floor(index / this.columns())}`,
+  private buildAtlasPreview(atlas: IOctahedralImpostorAtlas): void {
+    const albedoMesh = new Mesh(
+      new PlaneGeometry(ATLAS_PREVIEW_SIZE_M, ATLAS_PREVIEW_SIZE_M),
+      new MeshBasicMaterial({ map: atlas.albedo, transparent: true }),
     );
+    albedoMesh.position.copy(ATLAS_PREVIEW_POSITION).setX(ATLAS_PREVIEW_POSITION.x - ATLAS_PREVIEW_SIZE_M * 0.6);
+    this.group.add(albedoMesh);
+    this.albedoPreviewMesh = albedoMesh;
+
+    const normalDepthMesh = new Mesh(
+      new PlaneGeometry(ATLAS_PREVIEW_SIZE_M, ATLAS_PREVIEW_SIZE_M),
+      new MeshBasicMaterial({ map: atlas.normalDepth }),
+    );
+    normalDepthMesh.position.copy(ATLAS_PREVIEW_POSITION).setX(ATLAS_PREVIEW_POSITION.x + ATLAS_PREVIEW_SIZE_M * 0.6);
+    this.group.add(normalDepthMesh);
+    this.normalDepthPreviewMesh = normalDepthMesh;
   }
 
-  /** Returns the stable image-up axis used for a given baked camera direction. */
-  private getBakeUp(direction: Vector3, target: Vector3): Vector3 {
-    target.copy(this.worldUp).addScaledVector(direction, -this.worldUp.dot(direction));
-    if (target.lengthSq() < 0.000001) {
-      target.copy(this.fallbackUp).addScaledVector(direction, -this.fallbackUp.dot(direction));
+  /** Scattered separately from the single comparison impostor so its count can change without a full rebake — both share `geometry`/`material` with it (and each other) rather than owning their own copies. */
+  private rebuildForest(geometry: PlaneGeometry, material: MeshStandardMaterial): void {
+    if (this.forestMesh) {
+      this.group.remove(this.forestMesh);
+      this.forestMesh = undefined;
     }
-    return target.normalize();
+
+    const count = this.forestCount();
+    const spreadM = this.forestSpreadM();
+    const forest = new InstancedMesh(geometry, material, count);
+    const matrix = new Matrix4();
+    const position = new Vector3();
+    const quaternion = new Quaternion();
+    const upAxis = new Vector3(0, 1, 0);
+    const scale = new Vector3();
+    const [scaleMin, scaleMax] = FOREST_SCALE_RANGE;
+
+    for (let i = 0; i < count; i++) {
+      position.set(
+        (Math.random() - 0.5) * spreadM * 2,
+        0,
+        FOREST_NEAR_Z_M + Math.random() * spreadM,
+      );
+      quaternion.setFromAxisAngle(upAxis, Math.random() * Math.PI * 2);
+      scale.setScalar(scaleMin + Math.random() * (scaleMax - scaleMin));
+      forest.setMatrixAt(i, matrix.compose(position, quaternion, scale));
+    }
+    forest.instanceMatrix.needsUpdate = true;
+
+    this.group.add(forest);
+    this.forestMesh = forest;
   }
 
-  selectCell(column: number, row: number): void {
-    this.selectedCell.set(`${column},${row}`);
+  private disposeBaked(): void {
+    if (this.forestMesh) {
+      this.group.remove(this.forestMesh);
+      this.forestMesh = undefined;
+    }
+    if (this.impostorMesh) {
+      this.group.remove(this.impostorMesh);
+      // Shared with forestMesh (same geometry/material instances) — safe to
+      // dispose once here since both were just removed from the scene.
+      this.impostorMesh.geometry.dispose();
+      this.impostorMesh = undefined;
+    }
+    this.materialHandle?.material.dispose();
+    this.materialHandle = undefined;
+
+    for (const preview of [this.albedoPreviewMesh, this.normalDepthPreviewMesh]) {
+      if (!preview) continue;
+      this.group.remove(preview);
+      preview.geometry.dispose();
+      preview.material.dispose();
+    }
+    this.albedoPreviewMesh = undefined;
+    this.normalDepthPreviewMesh = undefined;
+
+    this.atlas?.renderTarget.dispose();
+    this.atlas = undefined;
   }
 
-  downloadAtlas(): void {
-    const link = document.createElement('a');
-    link.href = this.atlasUrl();
-    link.download = 'octahedral-cube-atlas.png';
-    link.click();
+  private dispose(): void {
+    this.disposeBaked();
+    this.group.removeFromParent();
   }
-
-  downloadMetadata(): void {
-    const blob = new Blob([JSON.stringify(this.metadata(), null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'octahedral-cube-atlas.json';
-    link.click();
-    URL.revokeObjectURL(link.href);
-  }
-
 }
