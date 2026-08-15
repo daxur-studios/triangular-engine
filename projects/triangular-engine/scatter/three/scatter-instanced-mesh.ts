@@ -45,6 +45,16 @@ export function buildScatterInstancedMesh(
   );
   mesh.instanceMatrix.setUsage(DynamicDrawUsage);
   mesh.castShadow = options.castShadow ?? false;
+  /**
+   * three.js frustum-culls a whole InstancedMesh against one bounding
+   * sphere — the raw geometry's local bounds transformed only by the
+   * object's own matrixWorld (see Frustum.intersectsObject); it has no
+   * idea individual instances are spread across the terrain via
+   * instanceMatrix. Left enabled, the entire batch can vanish in one shot
+   * from angles where that single (tiny, origin-anchored) sphere happens
+   * to miss the frustum, e.g. steep top-down views.
+   */
+  mesh.frustumCulled = false;
 
   const ditherAlpha = options.alpha01ByInstanceId
     ? new Float32Array(options.instances.length)

@@ -56,6 +56,14 @@ export function buildScatterBillboardInstancedMesh(
   );
   mesh.instanceMatrix.setUsage(DynamicDrawUsage);
   mesh.castShadow = options.castShadow ?? false;
+  /**
+   * instanceMatrix is left identity here (position/scale/up live on
+   * separate attributes instead — see above), so three's already-coarse
+   * whole-object frustum check (one bounding sphere for the entire batch,
+   * see `buildScatterInstancedMesh`) would be even less meaningful for
+   * billboards. Same fix.
+   */
+  mesh.frustumCulled = false;
 
   const count = options.instances.length;
   const origins = new Float32Array(count * 3);

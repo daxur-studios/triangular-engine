@@ -24,6 +24,7 @@ import {
   SphereGeometry,
   Vector2,
   Vector3,
+  WebGLRenderer,
   type Vector3Tuple,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
@@ -42,6 +43,7 @@ import {
 import {
   buildScatterBillboardGeometry,
   bucketScatterInstancesByLod,
+  buildScatterImpostorAssets,
   buildScatterInstancedMesh,
   buildScatterInstancedMeshesByLod,
   enableScatterCylindricalBillboard,
@@ -51,6 +53,7 @@ import {
   pickScatterInstanceId,
   selectFixedLevelScatterCells,
   type IScatterBillboardHandle,
+  type IScatterImpostorAssets,
   type IScatterSurfaceSample,
   type IScatterWindHandle,
   type ITerrainScatterInstance,
@@ -95,6 +98,8 @@ const TREE_SCALE = { min: 0.7, max: 1.6 };
  * fades nothing depending on shape.
  */
 const TREE_LOD_NEAR_RATIO = 0.55;
+/** Between near (mesh) and far (billboard) — baked impostor tier for the mid band. */
+const TREE_LOD_IMPOSTOR_RATIO = 1.1;
 const TREE_LOD_FAR_RATIO = 2.2;
 /** Width of the hysteresis band straddling each LOD boundary, as a fraction of scene scale — resists flicker while scrubbing the view-distance slider near a threshold. */
 const TREE_LOD_HYSTERESIS_RATIO = 0.08;
@@ -391,6 +396,8 @@ export class ScatterLabPageComponent {
   private treeWindHandle!: IScatterWindHandle;
   private grassWindHandle!: IScatterWindHandle;
   private treeBillboardHandle!: IScatterBillboardHandle;
+  /** Undefined when the renderer isn't WebGL (e.g. WebGPU) — the impostor LOD tier is skipped in that case. */
+  private treeImpostorAssets?: IScatterImpostorAssets<MeshStandardMaterial>;
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -403,6 +410,7 @@ export class ScatterLabPageComponent {
     this.treeBillboardHandle = enableScatterCylindricalBillboard(
       this.treeBillboardMaterial,
     );
+    this.treeImpostorAssets = this.bakeTreeImpostorAssets();
     this.rebuild();
 
     this.engine.elapsedTime$
@@ -430,6 +438,9 @@ export class ScatterLabPageComponent {
       this.treeBillboardGeometry.dispose();
       this.treeMaterial.dispose();
       this.treeBillboardMaterial.dispose();
+      this.treeImpostorAssets?.atlas.renderTarget.dispose();
+      this.treeImpostorAssets?.geometry.dispose();
+      this.treeImpostorAssets?.material.dispose();
       this.grassGeometry.dispose();
       this.grassMaterial.dispose();
       this.groundMaterial.dispose();
@@ -618,6 +629,21 @@ export class ScatterLabPageComponent {
         maxDistanceM: sceneScaleM * TREE_LOD_NEAR_RATIO * viewDistanceScale,
         castShadow: true,
       },
+      /**
+       * Only present when the impostor atlas could be baked (WebGL
+       * renderer) — falls back to a plain mesh -> billboard ladder
+       * otherwise, same as before this tier existed.
+       */
+      ...(this.treeImpostorAssets
+        ? [
+            {
+              kind: 'impostor' as const,
+              maxDistanceM:
+                sceneScaleM * TREE_LOD_IMPOSTOR_RATIO * viewDistanceScale,
+              castShadow: false,
+            },
+          ]
+        : []),
       {
         kind: 'billboard',
         maxDistanceM: sceneScaleM * TREE_LOD_FAR_RATIO * viewDistanceScale,
@@ -732,12 +758,18 @@ export class ScatterLabPageComponent {
     this.previousTreeTierByInstanceId = treeLods.tierByInstanceId;
     const treeMeshes = buildScatterInstancedMeshesByLod({
       buckets: treeLods.buckets,
-      assetsByTier: (tierIndex) => ({
-        geometry:
-          tierIndex === 0 ? this.treeGeometryNear : this.treeBillboardGeometry,
-        material:
-          tierIndex === 0 ? this.treeMaterial : this.treeBillboardMaterial,
-      }),
+      assetsByTier: (_tierIndex, lod) => {
+        if (lod.kind === 'mesh') {
+          return { geometry: this.treeGeometryNear, material: this.treeMaterial };
+        }
+        if (lod.kind === 'impostor' && this.treeImpostorAssets) {
+          return this.treeImpostorAssets;
+        }
+        return {
+          geometry: this.treeBillboardGeometry,
+          material: this.treeBillboardMaterial,
+        };
+      },
       rules: TREE_RULES,
       scale: TREE_SCALE,
       anchorWorldM: [0, 0, 0],
@@ -770,6 +802,31 @@ export class ScatterLabPageComponent {
     );
     this.grassCount.set(allGrassInstances.length);
     this.cellCount.set(cellCount);
+  }
+
+  /**
+   * One-shot bake for the mid-distance impostor LOD tier, proving
+   * scatter's reserved `'impostor'` LOD kind (see
+   * `docs/runbook/005_scatter_sublibrary.md` Phase 5). Bakes from a
+   * throwaway mesh at the world origin — never added to the scene — since
+   * `createOctahedralImpostorAtlas`/`buildOctahedralImpostorMesh` read the
+   * bake source's own world position into the baked `impostorTransform`,
+   * which must stay independent of any actually-rendered instance's
+   * transform. Skipped entirely when the renderer isn't WebGL (e.g.
+   * WebGPU), same graceful fallback as the impostor-baker demo page.
+   */
+  private bakeTreeImpostorAssets():
+    | IScatterImpostorAssets<MeshStandardMaterial>
+    | undefined {
+    const renderer = this.engine.renderer;
+    if (!(renderer instanceof WebGLRenderer)) return undefined;
+
+    const bakeSource = new Mesh(this.treeGeometryNear, this.treeMaterial);
+    return buildScatterImpostorAssets({
+      renderer,
+      target: bakeSource,
+      baseType: MeshStandardMaterial,
+    });
   }
 
   /**

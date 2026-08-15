@@ -1,4 +1,4 @@
-import { Material, Matrix4, Mesh, PlaneGeometry, Sphere, type Object3D } from 'three';
+import { Box3, Material, Matrix4, Mesh, PlaneGeometry, Sphere, Vector3, type Object3D } from 'three';
 
 import { computeObjectBoundingSphere } from '../core/compute-object-bounding-sphere';
 import {
@@ -46,7 +46,22 @@ export function buildOctahedralImpostorMesh<T extends Material>(
   const transform = new Matrix4().makeScale(diameter, diameter, diameter).setPosition(sphere.center);
 
   const materialHandle = createOctahedralImpostorMaterial<T>({ ...options, transform });
-  const mesh = new Mesh(new PlaneGeometry(), materialHandle.material);
+  const geometry = new PlaneGeometry();
+  /**
+   * The plane's own vertices stay unit-sized (the `impostorTransform`
+   * uniform does the real scale/translate entirely in the vertex shader),
+   * so the geometry's auto-computed bounds default to that tiny unit
+   * size — wrong for anything that reads them directly (raycasting,
+   * frustum culling), which know nothing about the shader-side transform.
+   * Override to the real baked size so those checks aren't testing
+   * against a ~1-unit box for what's actually a `diameter`-sized billboard.
+   */
+  geometry.boundingSphere = new Sphere(sphere.center.clone(), diameter * Math.SQRT1_2);
+  geometry.boundingBox = new Box3().setFromCenterAndSize(
+    sphere.center,
+    new Vector3(diameter, diameter, diameter),
+  );
+  const mesh = new Mesh(geometry, materialHandle.material);
 
   return { mesh, materialHandle };
 }
