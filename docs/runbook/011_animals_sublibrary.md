@@ -7,6 +7,12 @@ single-agent seek-and-land (`stepArrival`) — added to unblock
 the rest of Milestone 2 (habitat regions, activity selection, reachability)
 is not built. See Roadmap below for per-milestone detail.
 
+The next integration checkpoint is the arbitrary-time planetary flock proof in
+[011b_animals_planetary_time_slice.md](011b_animals_planetary_time_slice.md).
+It does not claim planetary migration is implemented; it establishes the time,
+reconstruction, materialization, and consequence boundary needed before that
+work can be trustworthy.
+
 ## Goal
 
 Create a new `triangular-engine/animals` secondary entry point for scalable,
@@ -43,7 +49,8 @@ Possible future entry points are separate concerns:
 - `triangular-engine/navigation` for semantic routes and local navigation
   shared by animals, vehicles, and other consumers.
 - `triangular-engine/ecology` for later coupling of animal populations,
-  vegetation, climate, seasons, and terraforming.
+  vegetation, climate, seasons, and terraforming. Design direction is recorded
+  in [015_ecology_sublibrary.md](015_ecology_sublibrary.md).
 
 Neither is required to begin the first animals milestone.
 
@@ -64,6 +71,19 @@ The intended decision chain is:
 population -> group -> need/activity -> meaningful destination
            -> valid route -> local steering -> presentation output
 ```
+
+### Current milestone status
+
+- Done: Milestone 0 — deterministic contracts and fixed-step primitives.
+- Done: Milestone 1 — visible flock steering, residency, presentation, and
+  vehicle flee/recovery.
+- Partial: Milestone 2 — one-agent arrival/landing only; semantic activities
+  and reachability remain.
+- Active: Milestone 2A — planetary-time single-flock reconstruction proof;
+  stable identity and direct universal-time sampling are implemented, with
+  materialization next.
+- Later: complete meaningful destinations, then ground herds, regional
+  populations, migration, construction effects, aquatic life, and ecology.
 
 ## Scope
 
@@ -422,6 +442,20 @@ unchanged since flocks never hit this branch in practice.
 - Reachability checks and longer semantic travel.
 - Landing on consumer-provided tree or building anchors.
 
+### Milestone 2A: planetary-time single-flock reconstruction
+
+Status: active; detailed checkpoints and acceptance criteria are in
+[011b_animals_planetary_time_slice.md](011b_animals_planetary_time_slice.md).
+
+- Query one stable bird group directly at arbitrary universal time.
+- Materialize and dematerialize stable members around an observer.
+- Reuse the existing flock, disturbance, and perch/landing primitives.
+- Support 1x–10,000x time warp and direct past/future queries without replaying
+  ticks.
+- Persist one vehicle or construction consequence event.
+- Prove the same core through headless tests and the headed animals lab.
+- Keep authored destinations and derived state visibly distinct.
+
 ### Milestone 3: ground herds
 
 - Walkable semantic surfaces, slope and water constraints.
@@ -429,7 +463,10 @@ unchanged since flocks never hit this branch in practice.
 - Grazing, herd movement, and vehicle response.
 - Validate that public contracts are not flight-specific.
 
-### Milestone 4: persistent populations and large time jumps
+### Milestone 4: regional populations and large time jumps
+
+Milestone 2A proves arbitrary-time reconstruction for one group. This
+milestone scales that boundary to population counts and transfers.
 
 - Region-level counts and habitat capacity.
 - Materialization from persistent population state.
@@ -549,3 +586,23 @@ unchanged since flocks never hit this branch in practice.
   history.
 - Fixed the implementation priority: visible flock first; aquatic and dynamic
   habitat-policy proofs only after shared population and movement foundations.
+
+### 2026-08-15: planetary-time integration audit
+
+- Confirmed that the shipped `animals` entry point is sufficient for a local
+  visible flock, vehicle flee/recovery, deterministic identities, culling, and
+  targeted landing, but not yet for planetary arbitrary-time animal life.
+- Made the intended state model explicit: reconstructable deterministic
+  baseline plus a sparse authoritative event overlay for player consequences.
+  Ordinary distant animals are evaluated, not tick-simulated; only nearby or
+  interacting animals materialize into fixed-step local simulation.
+- Added explicit acceptance for 1x–10,000x time warp, direct past/future time
+  selection, unload/reload, and aircraft/rocket/base interactions. Boat/whale
+  and fish cases remain later aquatic-domain consumers of the same boundary.
+- Deliberately reviewed the isolated `triangular-engine/life` experiment. Its
+  universal-time route sampling, session/event, residency, season, and habitat
+  ideas may be ported selectively into `animals`, but `animals` must not depend
+  on or compatibility-export `life`.
+- Recorded timeline branching as an unresolved game policy: querying an old
+  time is deterministic, but acting after rewind requires the game to choose
+  whether history branches, replaces later events, or is read-only.
