@@ -65,3 +65,5 @@ tests to fail at the exact step where an agent would enter a wall. The staging
 area and waypoint are authored fixture data; automatic staging-area discovery
 is not implemented yet. A yielding agent enters an explicit `waiting` state
 once it reaches the staging point and remains still until right-of-way clears.
+The `same-direction` headed fixture uses three agents and has a step-driven
+contract for ordered completion, walkability, zero overlap, and zero blockage.

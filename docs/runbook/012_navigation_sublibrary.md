@@ -1120,6 +1120,16 @@ classification before adding an opposing blocker chain.
   the staging point. Entering the arrival radius settles the agent instead of
   letting fixed-size steps overshoot and rapidly correct around the waypoint;
   tests allow stationary movement only while `waiting` is true.
+
+### 2026-08-14: three-agent same-direction queue
+
+- Added a fixed-step contract for three same-direction agents in the shared
+  bounded corridor.
+- The test records completion transitions and requires front-to-back order,
+  checks every agent disc against shared walkable geometry on every step, and
+  requires zero overlap, zero blocked agents, and no failure categories.
+- The navigation-lab `same-direction` selection now creates those same three
+  agents, so the passing headless slice can be watched directly.
 - The staged-pair spec now checks every agent on every fixed step and reports
   the agent ID and step if a wall crossing occurs. This remains an authored
   staging fixture, not automatic staging-area discovery.

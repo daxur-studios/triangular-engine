@@ -189,7 +189,7 @@ export class NavigationLabPageComponent implements AfterViewInit, OnDestroy {
     this.sharedScenario = createNavigationAvoidanceScenarioSimulation({
       mode: this.sharedScenarioMode(),
       traffic: this.sharedScenarioTraffic(),
-      agentCount: 2,
+      agentCount: this.sharedScenarioTraffic() === 'same-direction' ? 3 : 2,
       seed: this.sharedScenarioSeed(),
     });
     this.showSharedScenarioSnapshot(this.sharedScenario.snapshot());

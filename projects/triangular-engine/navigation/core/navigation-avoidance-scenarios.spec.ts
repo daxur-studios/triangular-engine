@@ -52,6 +52,38 @@ describe('navigation avoidance scenario harness', () => {
     expect(result.failureReasons).toEqual([]);
   });
 
+  it('clears a three-agent same-direction queue in order without overlap or wall entry', () => {
+    const simulation = createNavigationAvoidanceScenarioSimulation({
+      mode: 'baseline',
+      traffic: 'same-direction',
+      agentCount: 3,
+      seed: 42,
+    });
+    let snapshot = simulation.snapshot();
+    const previouslyCompleted = new Set<string>();
+    const completionOrder: string[] = [];
+    while (!snapshot.finished) {
+      snapshot = simulation.step();
+      for (const agent of snapshot.agents) {
+        expect(isNavigationAvoidanceScenarioPositionWalkable(
+          agent.position, agent.radius, snapshot.walkableAreas,
+        )).withContext(`${agent.id} entered a wall at step ${snapshot.steps}`).toBeTrue();
+        if (agent.completed && !previouslyCompleted.has(agent.id)) {
+          previouslyCompleted.add(agent.id);
+          completionOrder.push(agent.id);
+        }
+      }
+    }
+
+    expect(completionOrder).toEqual([
+      'scenario-agent-0', 'scenario-agent-1', 'scenario-agent-2',
+    ]);
+    expect(snapshot.result!.completed).toBe(3);
+    expect(snapshot.result!.maxOverlap).toBe(0);
+    expect(snapshot.result!.blocked).toBe(0);
+    expect(snapshot.result!.failureReasons).toEqual([]);
+  });
+
   it('keeps one staged opposing pair inside the shared walkable geometry', () => {
     const simulation = createNavigationAvoidanceScenarioSimulation({
       mode: 'priority-yield',
