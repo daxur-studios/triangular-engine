@@ -1,5 +1,5 @@
 import { DecimalPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
   BufferGeometry,
@@ -60,6 +60,8 @@ const ATLAS_PREVIEW_POSITION = new Vector3(0, 6, -6);
 /** Forest instances start this far out (clear of the tree/impostor comparison pair) and scatter across a square of side `2 * forestSpreadM` beyond that. */
 const FOREST_NEAR_Z_M = 12;
 const FOREST_SCALE_RANGE: readonly [number, number] = [0.75, 1.35];
+/** Directional light is aimed at the world origin regardless of distance — only its direction from that point matters for lighting. */
+const SUN_DISTANCE_M = 30;
 
 /**
  * Proves out `triangular-engine/impostor` end to end: bakes a hemispherical
@@ -86,6 +88,22 @@ export class ImpostorBakerPageComponent {
   /** Half-extent (m) of the forest's scatter area — density is forestCount spread over this area, independent of instance count. */
   readonly forestSpreadM = signal(60);
   readonly baking = signal(false);
+
+  /** 0 = north, 90 = east, ... — orbits the sun around the vertical axis. */
+  readonly sunAzimuthDeg = signal(55);
+  /** Negative = below the horizon, so the "as it gets dark" case (checking the impostor's normal-blend doesn't do anything weird at a grazing/absent light) is reachable, not just dim. */
+  readonly sunElevationDeg = signal(45);
+  readonly sunIntensity = signal(2.2);
+
+  readonly sunPosition = computed<[number, number, number]>(() => {
+    const azimuthRad = (this.sunAzimuthDeg() * Math.PI) / 180;
+    const elevationRad = (this.sunElevationDeg() * Math.PI) / 180;
+    return [
+      Math.cos(elevationRad) * Math.sin(azimuthRad) * SUN_DISTANCE_M,
+      Math.sin(elevationRad) * SUN_DISTANCE_M,
+      Math.cos(elevationRad) * Math.cos(azimuthRad) * SUN_DISTANCE_M,
+    ];
+  });
 
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
@@ -166,6 +184,24 @@ export class ImpostorBakerPageComponent {
     if (this.impostorMesh && this.materialHandle) {
       this.rebuildForest(this.impostorMesh.geometry, this.materialHandle.material);
     }
+  }
+
+  setSunAzimuth(value: string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    this.sunAzimuthDeg.set(parsed);
+  }
+
+  setSunElevation(value: string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    this.sunElevationDeg.set(parsed);
+  }
+
+  setSunIntensity(value: string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    this.sunIntensity.set(parsed);
   }
 
   downloadAlbedo(): void {
