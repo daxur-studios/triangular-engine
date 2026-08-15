@@ -130,7 +130,7 @@ export class DirectionalLightComponent extends LightComponent {
   }
 
   #initShadowFollow() {
-    this.engineService.tick$
+    this.engineService.postTick$
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => {
         const followed = this.shadowFollow();
