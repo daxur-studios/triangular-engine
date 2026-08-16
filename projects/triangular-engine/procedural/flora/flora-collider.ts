@@ -25,12 +25,14 @@ export function deriveFloraTrunkCollider(
   skeleton: readonly IFloraSkeletonNode[],
   archetype: IFloraArchetype,
 ): IFloraColliderDescriptor | undefined {
-  if (archetype.collider.trunk === 'none') return undefined;
+  if (archetype.collider.trunk === 'none' || skeleton.length === 0) return undefined;
 
-  const trunk: IFloraSkeletonNode = skeleton[0];
-  const heightM = trunk.endM[1] - trunk.startM[1];
+  const root: IFloraSkeletonNode = skeleton[0];
+  const depth0Nodes = skeleton.filter((n) => n.depth === 0);
+  const lastTrunkNode = depth0Nodes[depth0Nodes.length - 1] ?? root;
+  const heightM = lastTrunkNode.endM[1] - root.startM[1];
   return {
     shape: archetype.collider.trunk,
-    params: [heightM / 2, trunk.radiusStartM],
+    params: [heightM / 2, root.radiusStartM],
   };
 }

@@ -58,12 +58,10 @@ export function buildFloraMesh(
   }
 
   if (archetype.foliage.style === 'radial-fronds') {
-    const hubSizeM = (archetype.foliage.sizeM[0] + archetype.foliage.sizeM[1]) / 2;
     const radialFronds = archetype.foliage.radialFronds;
     if (radialFronds) {
       const frondLengthM = (radialFronds.frondLengthM[0] + radialFronds.frondLengthM[1]) / 2;
       for (const node of tipNodes) {
-        appendFloraFoliageCluster(positions, normals, windWeights, indices, node, 'cluster-sphere', hubSizeM);
         appendFloraFrondFan(
           positions,
           normals,
@@ -73,6 +71,9 @@ export function buildFloraMesh(
           radialFronds.frondCount,
           frondLengthM,
           radialFronds.frondDroopRad,
+          radialFronds.tierCount ?? (radialFronds.frondCount >= 10 ? 3 : 1),
+          radialFronds.archRad ?? 0.45,
+          radialFronds.frondWidthFraction ?? 0.14,
         );
       }
     }
@@ -97,9 +98,21 @@ export function buildFloraMesh(
       }
     }
   } else if (archetype.foliage.style !== 'none') {
-    const sizeM = (archetype.foliage.sizeM[0] + archetype.foliage.sizeM[1]) / 2;
-    for (const node of tipNodes) {
-      appendFloraFoliageCluster(positions, normals, windWeights, indices, node, archetype.foliage.style, sizeM);
+    const baseSizeM = (archetype.foliage.sizeM[0] + archetype.foliage.sizeM[1]) / 2;
+    if (archetype.foliage.style === 'cluster-sphere') {
+      // Broadleaf leafy sprays fanning along branches and terminal bouquets at branch tips
+      for (const node of skeleton) {
+        if (node.depth >= 1) {
+          appendFloraBroadleafBough(positions, normals, windWeights, indices, node, baseSizeM);
+        }
+      }
+      for (const node of tipNodes) {
+        appendFloraBroadleafTip(positions, normals, windWeights, indices, node, baseSizeM);
+      }
+    } else {
+      for (const node of tipNodes) {
+        appendFloraFoliageCluster(positions, normals, windWeights, indices, node, archetype.foliage.style, baseSizeM);
+      }
     }
   }
 
@@ -240,19 +253,11 @@ const scratchFrondEdgeB = new Vector3();
 const scratchFrondNormal = new Vector3();
 
 /**
- * Builds a fan of flat, drooping blades radiating from a tip node — the
- * 'radial-fronds' foliage style (palms), distinct from the round
- * cluster-sphere/cluster-cone blobs. Fronds are spaced evenly by azimuth
- * around world +Y with no jitter, so the fan stays deterministic from the
- * skeleton alone (mirrors appendFloraFoliageCluster having no extra
- * randomness of its own). Droop is measured against world down rather than
- * the node's own direction — archetypes using this style have zero/near-zero
- * branching, so the tip is always ~vertical and this stays simple.
- *
- * Each blade is a flat diamond (base → widest point → tip) pushed twice —
- * once with its natural normal, once mirrored with an inverted normal and
- * reversed winding — because the demo materials render with the default
- * FrontSide, and a single-sided blade would vanish from the back.
+ * Builds a multi-tiered fan of curving, arching fronds radiating from a crown node —
+ * the 'radial-fronds' foliage style (palms). Fronds form a wide, majestic tropical fountain:
+ * - Upper tier: fronds rise up and arch outward into the sky
+ * - Middle tier: mature fronds spread wide horizontally and arch gracefully
+ * - Lower tier: older fronds flare outward and droop into a skirt
  */
 function appendFloraFrondFan(
   positions: number[],
@@ -262,55 +267,107 @@ function appendFloraFrondFan(
   node: IFloraSkeletonNode,
   frondCount: number,
   frondLengthM: number,
-  frondDroopRad: number,
+  _baseDroopRad: number,
+  tierCount: number = 3,
+  _archRad: number = 0.45,
+  widthFraction: number = 0.14,
 ): void {
   scratchFrondBase.set(node.endM[0], node.endM[1], node.endM[2]);
 
+  const numTiers = Math.max(1, tierCount);
+  const widthFactors = [0.06, 0.82, 1.0, 0.05] as const;
+
   for (let i = 0; i < frondCount; i++) {
-    const azimuthRad = (i / frondCount) * Math.PI * 2;
+    const tier = numTiers > 1 ? i % numTiers : 0;
+    const tierIndex = Math.floor(i / numTiers);
+    const frondsInTier = Math.ceil(frondCount / numTiers);
+
+    const azimuthRad =
+      (tierIndex / frondsInTier) * Math.PI * 2 +
+      (tier * (Math.PI / Math.max(1, frondsInTier) + 0.35));
     scratchFrondOutward.set(Math.cos(azimuthRad), 0, Math.sin(azimuthRad));
 
-    scratchFrondTipDir
-      .copy(scratchFrondOutward)
-      .multiplyScalar(Math.cos(frondDroopRad))
-      .addScaledVector(WORLD_DOWN, Math.sin(frondDroopRad))
-      .normalize();
+    const u = numTiers > 1 ? tier / (numTiers - 1) : 0.5;
+    const L = frondLengthM;
+    const maxHalfWidth = L * widthFraction;
 
-    scratchFrondPerp.crossVectors(scratchFrondTipDir, WORLD_UP);
-    if (scratchFrondPerp.lengthSq() === 0) continue;
-    scratchFrondPerp.normalize();
-
-    const halfWidthM = frondLengthM * FROND_HALF_WIDTH_FRACTION;
-    scratchFrondMid
-      .copy(scratchFrondBase)
-      .addScaledVector(scratchFrondTipDir, frondLengthM * FROND_WIDTH_MIDPOINT_FRACTION);
-    scratchFrondTip.copy(scratchFrondBase).addScaledVector(scratchFrondTipDir, frondLengthM);
-    scratchFrondLeft.copy(scratchFrondMid).addScaledVector(scratchFrondPerp, halfWidthM);
-    scratchFrondRight.copy(scratchFrondMid).addScaledVector(scratchFrondPerp, -halfWidthM);
-
-    scratchFrondEdgeA.subVectors(scratchFrondLeft, scratchFrondBase);
-    scratchFrondEdgeB.subVectors(scratchFrondTip, scratchFrondBase);
-    scratchFrondNormal.crossVectors(scratchFrondEdgeA, scratchFrondEdgeB);
-    if (scratchFrondNormal.lengthSq() === 0) continue;
-    scratchFrondNormal.normalize();
-
-    const blade = [scratchFrondBase, scratchFrondLeft, scratchFrondTip, scratchFrondRight] as const;
-
-    const frontBase = positions.length / 3;
-    for (const point of blade) {
-      positions.push(point.x, point.y, point.z);
-      normals.push(scratchFrondNormal.x, scratchFrondNormal.y, scratchFrondNormal.z);
-      windWeights.push(1);
+    scratchFrondPerp.crossVectors(scratchFrondOutward, WORLD_UP);
+    if (scratchFrondPerp.lengthSq() === 0) {
+      scratchFrondPerp.set(1, 0, 0);
+    } else {
+      scratchFrondPerp.normalize();
     }
-    indices.push(frontBase, frontBase + 1, frontBase + 2, frontBase, frontBase + 2, frontBase + 3);
 
-    const backBase = positions.length / 3;
-    for (const point of blade) {
-      positions.push(point.x, point.y, point.z);
-      normals.push(-scratchFrondNormal.x, -scratchFrondNormal.y, -scratchFrondNormal.z);
-      windWeights.push(1);
+    const rStations = [
+      0,
+      (0.28 + 0.10 * u) * L,
+      (0.64 + 0.16 * u - 0.08 * u * u) * L,
+      (0.92 + 0.12 * u - 0.20 * u * u) * L,
+    ];
+    const yStations = [
+      -0.08 * u * L,
+      (0.26 - 0.28 * u) * L,
+      (0.44 - 0.70 * u) * L,
+      (0.36 - 1.02 * u) * L,
+    ];
+
+    const spinePts: Vector3[] = [];
+    const leftPts: Vector3[] = [];
+    const rightPts: Vector3[] = [];
+
+    for (let k = 0; k < 4; k++) {
+      const r = rStations[k];
+      const y = yStations[k];
+
+      const center = new Vector3()
+        .copy(scratchFrondBase)
+        .addScaledVector(scratchFrondOutward, r)
+        .add(new Vector3(0, y, 0));
+
+      const w = maxHalfWidth * widthFactors[k];
+      const ridgeH = maxHalfWidth * 0.22 * (1 - (k / 3) * 0.5);
+      const droopY = -maxHalfWidth * 0.20;
+
+      const spine = new Vector3().copy(center).add(new Vector3(0, ridgeH, 0));
+      const left = new Vector3()
+        .copy(center)
+        .addScaledVector(scratchFrondPerp, w)
+        .add(new Vector3(0, droopY, 0));
+      const right = new Vector3()
+        .copy(center)
+        .addScaledVector(scratchFrondPerp, -w)
+        .add(new Vector3(0, droopY, 0));
+
+      spinePts.push(spine);
+      leftPts.push(left);
+      rightPts.push(right);
     }
-    indices.push(backBase, backBase + 2, backBase + 1, backBase, backBase + 3, backBase + 2);
+
+    for (let k = 0; k < 3; k++) {
+      const sA = k / 3;
+      const sB = (k + 1) / 3;
+      const wA = Math.min(1, 0.35 + sA * 0.65);
+      const wB = Math.min(1, 0.35 + sB * 0.65);
+
+      const L0 = leftPts[k];
+      const L1 = leftPts[k + 1];
+      const S0 = spinePts[k];
+      const S1 = spinePts[k + 1];
+      const R0 = rightPts[k];
+      const R1 = rightPts[k + 1];
+
+      // Left wing (Top & Bottom for double-sided visibility)
+      pushFloraTriangle(positions, normals, windWeights, indices, L0, S0, S1, wA, wA, wB);
+      pushFloraTriangle(positions, normals, windWeights, indices, L0, S1, L1, wA, wB, wB);
+      pushFloraTriangle(positions, normals, windWeights, indices, S1, S0, L0, wB, wA, wA);
+      pushFloraTriangle(positions, normals, windWeights, indices, L1, S1, L0, wB, wB, wA);
+
+      // Right wing (Top & Bottom for double-sided visibility)
+      pushFloraTriangle(positions, normals, windWeights, indices, S0, R0, R1, wA, wA, wB);
+      pushFloraTriangle(positions, normals, windWeights, indices, S0, R1, S1, wA, wB, wB);
+      pushFloraTriangle(positions, normals, windWeights, indices, R1, R0, S0, wB, wA, wA);
+      pushFloraTriangle(positions, normals, windWeights, indices, S1, R1, S0, wB, wB, wA);
+    }
   }
 }
 
@@ -354,6 +411,118 @@ function pushFloraTriangle(
   );
   windWeights.push(w1, w2, w3);
   indices.push(base, base + 1, base + 2);
+}
+
+/** Builds double-sided faceted broadleaf leaf clusters fanning along a skeleton branch. */
+function appendFloraBroadleafBough(
+  positions: number[],
+  normals: number[],
+  windWeights: number[],
+  indices: number[],
+  node: IFloraSkeletonNode,
+  foliageSizeM: number,
+): void {
+  const start = new Vector3(node.startM[0], node.startM[1], node.startM[2]);
+  const end = new Vector3(node.endM[0], node.endM[1], node.endM[2]);
+  scratchBoughDir.subVectors(end, start);
+  const length = scratchBoughDir.length();
+  if (length < 0.001) return;
+  scratchBoughDir.normalize();
+
+  scratchArbitrary.set(0, 1, 0);
+  if (Math.abs(scratchBoughDir.dot(scratchArbitrary)) > 0.92) {
+    scratchArbitrary.set(1, 0, 0);
+  }
+  scratchBoughPerp.crossVectors(scratchBoughDir, scratchArbitrary).normalize();
+  scratchBoughUp.crossVectors(scratchBoughPerp, scratchBoughDir).normalize();
+
+  const stations = [0.45, 0.85] as const;
+
+  for (let sIdx = 0; sIdx < stations.length; sIdx++) {
+    const t = stations[sIdx];
+    const stationCenter = new Vector3().copy(start).addScaledVector(scratchBoughDir, length * t);
+    const cardSize = foliageSizeM * (0.7 + t * 0.35);
+    const halfWidth = cardSize * 0.48;
+    const cardLen = cardSize * 0.88;
+
+    const cardDirs = [
+      new Vector3().copy(scratchBoughDir).multiplyScalar(0.6).addScaledVector(scratchBoughUp, 0.7).normalize(),
+      new Vector3()
+        .copy(scratchBoughDir)
+        .multiplyScalar(0.4)
+        .addScaledVector(scratchBoughPerp, 0.75)
+        .addScaledVector(scratchBoughUp, 0.35)
+        .normalize(),
+      new Vector3()
+        .copy(scratchBoughDir)
+        .multiplyScalar(0.4)
+        .addScaledVector(scratchBoughPerp, -0.75)
+        .addScaledVector(scratchBoughUp, 0.35)
+        .normalize(),
+    ];
+
+    const cardPerps = [
+      new Vector3().copy(scratchBoughPerp),
+      new Vector3().crossVectors(cardDirs[1], scratchBoughUp).normalize(),
+      new Vector3().crossVectors(cardDirs[2], scratchBoughUp).normalize(),
+    ];
+
+    const wWeight = Math.min(1, 0.5 + t * 0.5);
+
+    for (let cIdx = 0; cIdx < 3; cIdx++) {
+      const cDir = cardDirs[cIdx];
+      const cPerp = cardPerps[cIdx];
+
+      const cBase = new Vector3().copy(stationCenter);
+      const cMid = new Vector3().copy(cBase).addScaledVector(cDir, cardLen * 0.5);
+      const cTip = new Vector3().copy(cBase).addScaledVector(cDir, cardLen);
+      const cLeft = new Vector3().copy(cMid).addScaledVector(cPerp, halfWidth);
+      const cRight = new Vector3().copy(cMid).addScaledVector(cPerp, -halfWidth);
+
+      // Front:
+      pushFloraTriangle(positions, normals, windWeights, indices, cBase, cLeft, cTip, wWeight, wWeight, wWeight);
+      pushFloraTriangle(positions, normals, windWeights, indices, cBase, cTip, cRight, wWeight, wWeight, wWeight);
+      // Back (inverted winding for double-sided):
+      pushFloraTriangle(positions, normals, windWeights, indices, cBase, cTip, cLeft, wWeight, wWeight, wWeight);
+      pushFloraTriangle(positions, normals, windWeights, indices, cBase, cRight, cTip, wWeight, wWeight, wWeight);
+    }
+  }
+}
+
+/** Builds double-sided terminal crown leaf sprays at the tip of branches. */
+function appendFloraBroadleafTip(
+  positions: number[],
+  normals: number[],
+  windWeights: number[],
+  indices: number[],
+  tipNode: IFloraSkeletonNode,
+  foliageSizeM: number,
+): void {
+  const [cx, cy, cz] = tipNode.endM;
+  const tipBase = new Vector3(cx, cy, cz);
+  const cardCount = 4;
+  const cardLen = foliageSizeM * 1.15;
+  const halfWidth = foliageSizeM * 0.55;
+
+  for (let i = 0; i < cardCount; i++) {
+    const angle = (i / cardCount) * Math.PI * 2;
+    const outward = new Vector3(Math.cos(angle), 0, Math.sin(angle));
+    const cardDir = new Vector3().copy(outward).multiplyScalar(0.7).addScaledVector(WORLD_UP, 0.7).normalize();
+    const cardPerp = new Vector3(-Math.sin(angle), 0, Math.cos(angle)).normalize();
+
+    const cBase = new Vector3().copy(tipBase);
+    const cMid = new Vector3().copy(cBase).addScaledVector(cardDir, cardLen * 0.55);
+    const cTip = new Vector3().copy(cBase).addScaledVector(cardDir, cardLen);
+    const cLeft = new Vector3().copy(cMid).addScaledVector(cardPerp, halfWidth);
+    const cRight = new Vector3().copy(cMid).addScaledVector(cardPerp, -halfWidth);
+
+    // Front:
+    pushFloraTriangle(positions, normals, windWeights, indices, cBase, cLeft, cTip, 0.85, 0.95, 1.0);
+    pushFloraTriangle(positions, normals, windWeights, indices, cBase, cTip, cRight, 0.85, 1.0, 0.95);
+    // Back (inverted winding):
+    pushFloraTriangle(positions, normals, windWeights, indices, cBase, cTip, cLeft, 0.85, 1.0, 0.95);
+    pushFloraTriangle(positions, normals, windWeights, indices, cBase, cRight, cTip, 0.85, 0.95, 1.0);
+  }
 }
 
 /** Builds the pointed conical apex / spire at the pinnacle of the conifer trunk. */

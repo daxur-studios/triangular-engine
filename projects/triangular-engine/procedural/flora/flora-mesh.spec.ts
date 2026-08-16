@@ -211,3 +211,68 @@ describe('buildFloraMesh with conifer-tiered foliage', () => {
     expect(Math.max(...Array.from(windWeight))).toBeGreaterThanOrEqual(0.9);
   });
 });
+
+describe('buildFloraMesh with curved palm and multi-tier radial fronds', () => {
+  function makePalmArchetype(): IFloraArchetype {
+    return makeArchetype({
+      id: 'palm-01',
+      trunk: {
+        heightM: [7, 9],
+        radiusM: [0.2, 0.25],
+        taper01: 0.25,
+        curveRad: [0.15, 0.25],
+        curveSegments: 5,
+        baseFlare01: 0.35,
+      },
+      branching: {
+        maxDepth: 0,
+        childrenPerNode: [0, 0],
+        spreadAngleRad: [0, 0],
+        lengthFalloff01: 0,
+      },
+      foliage: {
+        style: 'radial-fronds',
+        sizeM: [0.35, 0.5],
+        radialFronds: {
+          frondCount: 18,
+          frondLengthM: [3.2, 4.4],
+          frondDroopRad: 0.65,
+          tierCount: 3,
+          archRad: 0.45,
+          frondWidthFraction: 0.13,
+        },
+      },
+    });
+  }
+
+  it('is deterministic for identical skeleton', () => {
+    const archetype = makePalmArchetype();
+    const skeleton = generateFloraSkeleton(archetype, 42);
+    const a = buildFloraMesh(skeleton, archetype);
+    const b = buildFloraMesh(skeleton, archetype);
+    expect(Array.from(a.geometry.getAttribute('position').array)).toEqual(
+      Array.from(b.geometry.getAttribute('position').array),
+    );
+  });
+
+  it('produces valid finite positions, normals, and wind weights', () => {
+    const archetype = makePalmArchetype();
+    const skeleton = generateFloraSkeleton(archetype, 42);
+    const { geometry } = buildFloraMesh(skeleton, archetype);
+    for (const attrName of ['position', 'normal', 'windWeight']) {
+      const attr = geometry.getAttribute(attrName);
+      for (let i = 0; i < attr.array.length; i++) {
+        expect(Number.isFinite(attr.array[i])).toBe(true);
+      }
+    }
+  });
+
+  it('generates multi-faceted arching fronds within budget', () => {
+    const archetype = makePalmArchetype();
+    const skeleton = generateFloraSkeleton(archetype, 42);
+    const result = buildFloraMesh(skeleton, archetype);
+    expect(result.triangleCount).toBeGreaterThan(300);
+    expect(result.triangleCount).toBeLessThan(3000);
+  });
+});
+

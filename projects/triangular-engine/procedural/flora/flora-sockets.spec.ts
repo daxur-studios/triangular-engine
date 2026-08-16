@@ -244,4 +244,47 @@ describe('deriveFloraSockets', () => {
     // Fruit slots should also span across tiers
     expect(maxFruitH - minFruitH).toBeGreaterThan(2.5);
   });
+
+  it('places fruit slots as coconuts under the crown on radial-fronds palm', () => {
+    const palmArchetype = makeArchetype({
+      id: 'palm-sockets-test',
+      trunk: {
+        heightM: [8, 8],
+        radiusM: [0.2, 0.2],
+        taper01: 0.25,
+        curveRad: [0.2, 0.2],
+        curveSegments: 5,
+        baseFlare01: 0.35,
+      },
+      branching: { maxDepth: 0, childrenPerNode: [0, 0], spreadAngleRad: [0, 0], lengthFalloff01: 0 },
+      foliage: {
+        style: 'radial-fronds',
+        sizeM: [0.4, 0.4],
+        radialFronds: { frondCount: 18, frondLengthM: [3.5, 3.5], frondDroopRad: 0.65 },
+      },
+      sockets: { perchesPerBranchDepth: {}, nestCavityChance01: 0, fruitSlotsMax: 4, flowerHeads: false, frondPerches: 4 },
+    });
+
+    const skeleton = generateFloraSkeleton(palmArchetype, 42);
+    const sockets = deriveFloraSockets(skeleton, palmArchetype, 42);
+
+    const coconuts = sockets.filter((s) => s.kind === 'fruit-slot');
+    expect(coconuts.length).toBe(4);
+
+    const tipNode = skeleton[skeleton.length - 1];
+    for (const coconut of coconuts) {
+      // Coconuts should sit slightly below the crown tip
+      expect(coconut.positionM[1]).toBeLessThan(tipNode.endM[1]);
+      expect(coconut.positionM[1]).toBeGreaterThan(tipNode.endM[1] - 0.5);
+    }
+
+    const perches = sockets.filter((s) => s.kind === 'perch');
+    expect(perches.length).toBe(4);
+    for (const perch of perches) {
+      expect(Number.isFinite(perch.positionM[0])).toBe(true);
+      expect(Number.isFinite(perch.positionM[1])).toBe(true);
+      expect(Number.isFinite(perch.positionM[2])).toBe(true);
+    }
+  });
 });
+

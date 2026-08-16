@@ -63,6 +63,18 @@
         />
       </label>
 
+      <label class="seed-field">
+        Spacing ({{ spacing() }}m)
+        <input
+          type="range"
+          min="3"
+          max="14"
+          step="0.5"
+          [value]="spacing()"
+          (input)="setSpacing($any($event.target).value)"
+        />
+      </label>
+
       <p class="blurb note">
         {{ variantCount }} variants from seeds {{ seed() }}–{{ seed() + variantCount - 1 }}.
         Regenerating with the same seed reproduces the same row exactly.

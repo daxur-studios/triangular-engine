@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import {
   BufferGeometry,
   Color,
+  DoubleSide,
   Float32BufferAttribute,
   Group,
   Mesh,
@@ -34,8 +35,8 @@ import {
 
 const TREE_WIND: ScatterWindDefinition = { strength: 0.06, frequency: 0.8 };
 
-const GROUND_SIZE_M = 60;
-const VARIANT_SPACING_M = 4.5;
+const GROUND_SIZE_M = 80;
+const DEFAULT_SPACING_M = 6.5;
 const VARIANT_COUNT = 6;
 
 /** Species picker options — see triangular-engine/procedural's flora-species-catalog for the full archetype definitions. */
@@ -100,6 +101,7 @@ const SOCKET_GIZMO_COLOR_BY_KIND: Record<FloraSocketKind, string> = {
 })
 export class FloraLabPageComponent {
   readonly seed = signal(1);
+  readonly spacing = signal(DEFAULT_SPACING_M);
   readonly wireframe = signal(false);
   readonly showSockets = signal(true);
   readonly species = signal<FloraSpeciesKey>('oak');
@@ -112,7 +114,11 @@ export class FloraLabPageComponent {
   private readonly group = new Group();
   private readonly treeMeshes: Mesh[] = [];
   private readonly socketGizmos: Mesh[] = [];
-  private readonly material = new MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+  private readonly material = new MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.9,
+    side: DoubleSide,
+  });
   private readonly windHandle: IScatterWindHandle;
   private readonly socketGizmoGeometry = new SphereGeometry(SOCKET_GIZMO_RADIUS_M, 8, 6);
   // depthTest off + renderOrder above the tree mesh keeps debug gizmos
@@ -161,6 +167,13 @@ export class FloraLabPageComponent {
     this.rebuildTrees();
   }
 
+  setSpacing(value: number | string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    this.spacing.set(Math.max(2, Math.min(25, parsed)));
+    this.rebuildTrees();
+  }
+
   toggleWireframe(): void {
     this.wireframe.set(!this.wireframe());
     this.material.wireframe = this.wireframe();
@@ -180,13 +193,14 @@ export class FloraLabPageComponent {
   private rebuildTrees(): void {
     this.clearTrees();
     const baseSeed = this.seed();
-    const offsetM = ((this.variantCount - 1) * VARIANT_SPACING_M) / 2;
+    const spacingM = this.spacing();
+    const offsetM = ((this.variantCount - 1) * spacingM) / 2;
     const speciesOption = this.speciesOptions.find((option) => option.key === this.species())!;
     const archetype = speciesOption.archetype;
 
     for (let i = 0; i < this.variantCount; i++) {
       const variantSeed = baseSeed + i;
-      const originXM = i * VARIANT_SPACING_M - offsetM;
+      const originXM = i * spacingM - offsetM;
       const skeleton = generateFloraSkeleton(archetype, variantSeed);
       const { geometry } = buildFloraMesh(skeleton, archetype);
       this.colorizeByWindWeight(geometry, speciesOption.trunkColor, speciesOption.leafColor);

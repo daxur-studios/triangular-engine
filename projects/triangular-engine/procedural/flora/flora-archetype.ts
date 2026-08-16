@@ -60,6 +60,12 @@ export interface IFloraArchetype {
     readonly heightM: readonly [number, number];
     readonly radiusM: readonly [number, number];
     readonly taper01: number;
+    /** Optional lean/curvature angle range in radians (e.g. [0.1, 0.28] for curved palm trunks). */
+    readonly curveRad?: readonly [number, number];
+    /** Number of segments along curved trunk for smooth bend (defaults to 1, e.g. 5 for palms). */
+    readonly curveSegments?: number;
+    /** Root base radius flare fraction (0..1), e.g. 0.35 making the base 35% wider at ground level. */
+    readonly baseFlare01?: number;
   };
   readonly branching: {
     /** Distribution pattern: 'apical' forks at trunk top (oak/deciduous); 'tiered-whorls' distributes tiers along trunk height (pine/conifer). Defaults to 'apical'. */
@@ -81,6 +87,12 @@ export interface IFloraArchetype {
       readonly frondCount: number;
       readonly frondLengthM: readonly [number, number];
       readonly frondDroopRad: number;
+      /** Number of vertical layers/tiers around the crown (e.g. 3: erect, arching, drooping). Defaults to 1. */
+      readonly tierCount?: number;
+      /** Arching curve curvature in radians along each frond's spine (defaults to 0.4). */
+      readonly archRad?: number;
+      /** Width of frond blade relative to length (defaults to 0.14). */
+      readonly frondWidthFraction?: number;
     };
     /** Optional tuning when style === 'conifer-tiered'. */
     readonly coniferTiered?: IFloraConiferTieredFoliageConfig;
@@ -104,6 +116,25 @@ export function validateFloraArchetype(archetype: IFloraArchetype): void {
   validateProceduralFiniteRange(archetype.trunk.heightM, 'Flora archetype trunk heightM');
   validateProceduralFiniteRange(archetype.trunk.radiusM, 'Flora archetype trunk radiusM');
   validateProcedural01(archetype.trunk.taper01, 'Flora archetype trunk taper01');
+
+  if (archetype.trunk.curveRad !== undefined) {
+    validateProceduralFiniteRange(archetype.trunk.curveRad, 'Flora archetype trunk curveRad');
+    if (
+      archetype.trunk.curveRad[0] < 0 ||
+      archetype.trunk.curveRad[1] > Math.PI / 2
+    ) {
+      throw new RangeError('Flora archetype trunk curveRad must be within [0, PI/2].');
+    }
+  }
+  if (
+    archetype.trunk.curveSegments !== undefined &&
+    (!Number.isInteger(archetype.trunk.curveSegments) || archetype.trunk.curveSegments < 1)
+  ) {
+    throw new RangeError('Flora archetype trunk curveSegments must be a positive integer.');
+  }
+  if (archetype.trunk.baseFlare01 !== undefined) {
+    validateProcedural01(archetype.trunk.baseFlare01, 'Flora archetype trunk baseFlare01');
+  }
 
   if (!Number.isInteger(archetype.branching.maxDepth) || archetype.branching.maxDepth < 0) {
     throw new RangeError('Flora archetype branching maxDepth must be a non-negative integer.');
@@ -191,6 +222,24 @@ export function validateFloraArchetype(archetype: IFloraArchetype): void {
       throw new RangeError(
         'Flora archetype foliage radialFronds.frondDroopRad must be a finite number between 0 and PI/2.',
       );
+    }
+    if (
+      radialFronds.tierCount !== undefined &&
+      (!Number.isInteger(radialFronds.tierCount) || radialFronds.tierCount < 1)
+    ) {
+      throw new RangeError('Flora archetype foliage radialFronds.tierCount must be a positive integer.');
+    }
+    if (
+      radialFronds.archRad !== undefined &&
+      (!Number.isFinite(radialFronds.archRad) || radialFronds.archRad < 0)
+    ) {
+      throw new RangeError('Flora archetype foliage radialFronds.archRad must be a non-negative number.');
+    }
+    if (
+      radialFronds.frondWidthFraction !== undefined &&
+      (!Number.isFinite(radialFronds.frondWidthFraction) || radialFronds.frondWidthFraction <= 0)
+    ) {
+      throw new RangeError('Flora archetype foliage radialFronds.frondWidthFraction must be a positive number.');
     }
   }
 

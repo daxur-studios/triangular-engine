@@ -50,25 +50,43 @@ function branchMidpointM(
 }
 
 /**
- * Mirrors appendFloraFrondFan's tipDir/mid-point math in flora-mesh.ts (same
- * azimuth spacing, same droop blend against world down) so a frond perch
- * socket lands exactly on the rendered blade instead of floating near it.
+ * Mirrors appendFloraFrondFan's arching station math in flora-mesh.ts
+ * so a frond perch socket lands exactly on the rendered arching blade.
  */
 function frondPerchPositionM(
   tipNode: IFloraSkeletonNode,
   frondIndex: number,
   frondCount: number,
   frondLengthM: number,
-  frondDroopRad: number,
+  _baseDroopRad: number,
+  tierCount: number = 3,
+  _archRad: number = 0.45,
 ): readonly [number, number, number] {
-  const azimuthRad = (frondIndex / frondCount) * Math.PI * 2;
-  const distanceM = frondLengthM * FROND_PERCH_LENGTH_FRACTION;
-  const cosDroop = Math.cos(frondDroopRad);
-  const sinDroop = Math.sin(frondDroopRad);
+  const numTiers = Math.max(1, tierCount);
+  const tier = numTiers > 1 ? frondIndex % numTiers : 0;
+  const tierIndex = Math.floor(frondIndex / numTiers);
+  const frondsInTier = Math.ceil(frondCount / numTiers);
+
+  const azimuthRad =
+    (tierIndex / frondsInTier) * Math.PI * 2 +
+    (tier * (Math.PI / Math.max(1, frondsInTier) + 0.35));
+
+  const u = numTiers > 1 ? tier / (numTiers - 1) : 0.5;
+  const L = frondLengthM;
+
+  // Mid-frond perch position between stations 1 and 2
+  const r1 = (0.28 + 0.10 * u) * L;
+  const r2 = (0.64 + 0.16 * u - 0.08 * u * u) * L;
+  const y1 = (0.26 - 0.28 * u) * L;
+  const y2 = (0.44 - 0.70 * u) * L;
+
+  const horiz = (r1 + r2) * 0.5;
+  const vert = (y1 + y2) * 0.5;
+
   return [
-    tipNode.endM[0] + Math.cos(azimuthRad) * cosDroop * distanceM,
-    tipNode.endM[1] - sinDroop * distanceM,
-    tipNode.endM[2] + Math.sin(azimuthRad) * cosDroop * distanceM,
+    tipNode.endM[0] + Math.cos(azimuthRad) * horiz,
+    tipNode.endM[1] + vert,
+    tipNode.endM[2] + Math.sin(azimuthRad) * horiz,
   ];
 }
 
@@ -160,7 +178,15 @@ export function deriveFloraSockets(
       for (let i = 0; i < take; i++) {
         pushSocket(
           'perch',
-          frondPerchPositionM(tipNode, i, radialFronds.frondCount, frondLengthM, radialFronds.frondDroopRad),
+          frondPerchPositionM(
+            tipNode,
+            i,
+            radialFronds.frondCount,
+            frondLengthM,
+            radialFronds.frondDroopRad,
+            radialFronds.tierCount ?? (radialFronds.frondCount >= 10 ? 3 : 1),
+            radialFronds.archRad ?? 0.45,
+          ),
           clearanceRadiusM,
         );
       }
@@ -187,14 +213,32 @@ export function deriveFloraSockets(
 
     if (archetype.sockets.fruitSlotsMax > 0 && tipNodes.length > 0) {
       const take = Math.min(archetype.sockets.fruitSlotsMax, tipNodes.length);
-      const step = tipNodes.length / take;
-      for (let i = 0; i < take; i++) {
-        const index = Math.min(tipNodes.length - 1, Math.floor(i * step + step * 0.5));
-        pushSocket(
-          'fruit-slot',
-          tipNodes[index].endM,
-          foliageSizeM * FRUIT_SLOT_CLEARANCE_FRACTION_OF_FOLIAGE_SIZE,
-        );
+      if (archetype.foliage.style === 'radial-fronds') {
+        const tipNode = tipNodes[0];
+        const count = archetype.sockets.fruitSlotsMax;
+        for (let i = 0; i < count; i++) {
+          const angle = (i / count) * Math.PI * 2;
+          const r = 0.24;
+          pushSocket(
+            'fruit-slot',
+            [
+              tipNode.endM[0] + Math.cos(angle) * r,
+              tipNode.endM[1] - 0.22,
+              tipNode.endM[2] + Math.sin(angle) * r,
+            ],
+            foliageSizeM * FRUIT_SLOT_CLEARANCE_FRACTION_OF_FOLIAGE_SIZE,
+          );
+        }
+      } else {
+        const step = tipNodes.length / take;
+        for (let i = 0; i < take; i++) {
+          const index = Math.min(tipNodes.length - 1, Math.floor(i * step + step * 0.5));
+          pushSocket(
+            'fruit-slot',
+            tipNodes[index].endM,
+            foliageSizeM * FRUIT_SLOT_CLEARANCE_FRACTION_OF_FOLIAGE_SIZE,
+          );
+        }
       }
     }
     if (archetype.sockets.flowerHeads) {

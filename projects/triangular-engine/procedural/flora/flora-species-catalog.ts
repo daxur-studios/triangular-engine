@@ -6,30 +6,27 @@ export interface IFloraSpeciesColorHints {
   readonly leafHex: string;
 }
 
-/** Broad crown, wide near-horizontal limbs (good perch candidates), round cluster canopy. */
+/** Broad crown, wide near-horizontal scaffold limbs (ideal perch candidates), and billowing low-poly cloud canopy pads. */
 export const FLORA_OAK_ARCHETYPE: IFloraArchetype = {
   schemaVersion: 1,
   id: 'flora-oak',
   name: 'Oak',
   kind: 'tree',
-  trunk: { heightM: [3.5, 5], radiusM: [0.28, 0.4], taper01: 0.45 },
+  trunk: { heightM: [3.8, 5.2], radiusM: [0.32, 0.45], taper01: 0.38 },
   branching: {
     maxDepth: 3,
     childrenPerNode: [2, 3],
-    // Wide — lower/thicker limbs sticking out closer to horizontal give
-    // deriveFloraSockets' perch filter (near-horizontal, thick enough) real
-    // candidates to find.
-    spreadAngleRad: [0.6, 1.3],
+    spreadAngleRad: [0.65, 1.1],
     lengthFalloff01: 0.68,
   },
-  foliage: { style: 'cluster-sphere', sizeM: [0.9, 1.5] },
-  sockets: { perchesPerBranchDepth: { 1: 3, 2: 2 }, nestCavityChance01: 0.5, fruitSlotsMax: 4, flowerHeads: false },
+  foliage: { style: 'cluster-sphere', sizeM: [1.2, 1.8] },
+  sockets: { perchesPerBranchDepth: { 1: 3, 2: 2 }, nestCavityChance01: 0.6, fruitSlotsMax: 4, flowerHeads: false },
   collider: { trunk: 'capsule' },
 };
 
 export const FLORA_OAK_COLORS: IFloraSpeciesColorHints = {
-  trunkHex: '#6b4a2f',
-  leafHex: '#4f8a3d',
+  trunkHex: '#5c3e24',
+  leafHex: '#3c7e30',
 };
 
 /** Tall conifer — full central trunk with tiered horizontal whorls that taper toward a spire crown, matching classic conifer/spruce morphology. */
@@ -71,15 +68,22 @@ export const FLORA_PINE_COLORS: IFloraSpeciesColorHints = {
   leafHex: '#235235',
 };
 
-/** Zero branching — a single slender low-taper trunk topped with a radiating, drooping frond crown. */
+/** Tropical coconut palm — organic curving trunk with flared root base, topped with a lush multi-tiered arching frond crown and under-crown coconuts. */
 export const FLORA_PALM_ARCHETYPE: IFloraArchetype = {
   schemaVersion: 1,
   id: 'flora-palm',
   name: 'Palm',
   kind: 'tree',
-  trunk: { heightM: [5, 8], radiusM: [0.18, 0.26], taper01: 0.15 },
+  trunk: {
+    heightM: [6.5, 9.5],
+    radiusM: [0.18, 0.26],
+    taper01: 0.25,
+    curveRad: [0.12, 0.28],
+    curveSegments: 5,
+    baseFlare01: 0.35,
+  },
   branching: {
-    // No limbs — the trunk tip is the sole frond anchor.
+    // No limbs — the curving trunk tip is the sole frond anchor.
     maxDepth: 0,
     childrenPerNode: [0, 0],
     spreadAngleRad: [0, 0],
@@ -87,23 +91,28 @@ export const FLORA_PALM_ARCHETYPE: IFloraArchetype = {
   },
   foliage: {
     style: 'radial-fronds',
-    sizeM: [0.3, 0.4],
-    radialFronds: { frondCount: 7, frondLengthM: [1.8, 2.4], frondDroopRad: 0.45 },
+    sizeM: [0.35, 0.5],
+    radialFronds: {
+      frondCount: 18,
+      frondLengthM: [3.2, 4.4],
+      frondDroopRad: 0.65,
+      tierCount: 3,
+      archRad: 0.45,
+      frondWidthFraction: 0.13,
+    },
   },
-  // No limb-based perches (no limbs) or trunk cavities; frondPerches puts birds
-  // on the drooping fronds themselves instead, and fruit slots stand in for
-  // coconuts hanging under the crown.
+  // FrondPerches puts birds on the arching fronds, and fruit slots cluster as coconuts under the crown.
   sockets: {
     perchesPerBranchDepth: {},
     nestCavityChance01: 0,
-    fruitSlotsMax: 3,
+    fruitSlotsMax: 4,
     flowerHeads: false,
-    frondPerches: 3,
+    frondPerches: 4,
   },
   collider: { trunk: 'capsule' },
 };
 
 export const FLORA_PALM_COLORS: IFloraSpeciesColorHints = {
-  trunkHex: '#8a6d4a',
-  leafHex: '#5aa85a',
+  trunkHex: '#735738',
+  leafHex: '#3b9131',
 };

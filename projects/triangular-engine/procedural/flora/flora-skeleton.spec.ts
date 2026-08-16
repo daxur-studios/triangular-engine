@@ -146,3 +146,75 @@ describe('generateFloraSkeleton with tiered-whorls', () => {
     expect(lowLen).toBeGreaterThan(highLen);
   });
 });
+
+describe('generateFloraSkeleton with curved trunk', () => {
+  function makePalmArchetype(): IFloraArchetype {
+    return makeArchetype({
+      id: 'palm-01',
+      trunk: {
+        heightM: [7, 9],
+        radiusM: [0.2, 0.25],
+        taper01: 0.25,
+        curveRad: [0.15, 0.25],
+        curveSegments: 5,
+        baseFlare01: 0.35,
+      },
+      branching: {
+        maxDepth: 0,
+        childrenPerNode: [0, 0],
+        spreadAngleRad: [0, 0],
+        lengthFalloff01: 0,
+      },
+      foliage: {
+        style: 'radial-fronds',
+        sizeM: [0.35, 0.5],
+        radialFronds: {
+          frondCount: 18,
+          frondLengthM: [3.2, 4.4],
+          frondDroopRad: 0.65,
+          tierCount: 3,
+          archRad: 0.45,
+          frondWidthFraction: 0.13,
+        },
+      },
+    });
+  }
+
+  it('is deterministic for identical archetype + seed', () => {
+    const archetype = makePalmArchetype();
+    const a = generateFloraSkeleton(archetype, 42);
+    const b = generateFloraSkeleton(archetype, 42);
+    expect(a).toEqual(b);
+  });
+
+  it('generates the specified number of trunk segments', () => {
+    const archetype = makePalmArchetype();
+    const nodes = generateFloraSkeleton(archetype, 42);
+    expect(nodes.length).toBe(5);
+    for (let i = 0; i < nodes.length; i++) {
+      expect(nodes[i].depth).toBe(0);
+      if (i > 0) {
+        expect(nodes[i].parentId).toBe(i - 1);
+        expect(nodes[i].startM).toEqual(nodes[i - 1].endM);
+      }
+    }
+  });
+
+  it('applies base flare to the root node start radius', () => {
+    const archetype = makePalmArchetype();
+    const nodes = generateFloraSkeleton(archetype, 42);
+    const root = nodes[0];
+    const second = nodes[1];
+    // Root start radius should be flared wider than its taper would predict
+    expect(root.radiusStartM).toBeGreaterThan(root.radiusEndM * 1.2);
+  });
+
+  it('curves laterally away from the vertical axis', () => {
+    const archetype = makePalmArchetype();
+    const nodes = generateFloraSkeleton(archetype, 42);
+    const tip = nodes[nodes.length - 1];
+    const horizOffset = Math.hypot(tip.endM[0], tip.endM[2]);
+    expect(horizOffset).toBeGreaterThan(0.5);
+  });
+});
+

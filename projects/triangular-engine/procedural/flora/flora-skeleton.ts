@@ -46,17 +46,53 @@ export function generateFloraSkeleton(
   const trunkHeightM = sampleProceduralRange(archetype.trunk.heightM, random01());
   const trunkRadiusM = sampleProceduralRange(archetype.trunk.radiusM, random01());
   const trunkTipRadiusM = trunkRadiusM * (1 - archetype.trunk.taper01);
-  const trunkTopM: readonly [number, number, number] = [0, trunkHeightM, 0];
 
-  nodes.push({
-    id: 0,
-    parentId: -1,
-    depth: 0,
-    startM: [0, 0, 0],
-    endM: trunkTopM,
-    radiusStartM: trunkRadiusM,
-    radiusEndM: trunkTipRadiusM,
-  });
+  const curveRad = archetype.trunk.curveRad
+    ? sampleProceduralRange(archetype.trunk.curveRad, random01())
+    : 0;
+  const curveAzimuth = random01() * Math.PI * 2;
+  const curveSegments = Math.max(1, archetype.trunk.curveSegments ?? 1);
+  const baseFlareMult = 1 + (archetype.trunk.baseFlare01 ?? 0);
+
+  const getTrunkPoint = (s01: number): [number, number, number] => {
+    if (s01 === 0) return [0, 0, 0];
+    const y = s01 * trunkHeightM;
+    const horizDist = Math.sin(curveRad) * trunkHeightM * Math.pow(s01, 1.35);
+    const x = Math.cos(curveAzimuth) * horizDist || 0;
+    const z = Math.sin(curveAzimuth) * horizDist || 0;
+    return [x, y, z];
+  };
+
+  for (let i = 0; i < curveSegments; i++) {
+    const s0 = i / curveSegments;
+    const s1 = (i + 1) / curveSegments;
+    const startM = getTrunkPoint(s0);
+    const endM = getTrunkPoint(s1);
+    const radiusStartM =
+      trunkRadiusM * (1 - archetype.trunk.taper01 * s0) * (i === 0 ? baseFlareMult : 1);
+    const radiusEndM = trunkRadiusM * (1 - archetype.trunk.taper01 * s1);
+
+    nodes.push({
+      id: i,
+      parentId: i === 0 ? -1 : i - 1,
+      depth: 0,
+      startM,
+      endM,
+      radiusStartM,
+      radiusEndM,
+    });
+  }
+
+  const lastTrunkNode = nodes[curveSegments - 1];
+  const trunkTopM = lastTrunkNode.endM;
+  const tipDirUnit = scratchDir
+    .set(
+      lastTrunkNode.endM[0] - lastTrunkNode.startM[0],
+      lastTrunkNode.endM[1] - lastTrunkNode.startM[1],
+      lastTrunkNode.endM[2] - lastTrunkNode.startM[2],
+    )
+    .normalize();
+  const trunkTipDir: readonly [number, number, number] = [tipDirUnit.x, tipDirUnit.y, tipDirUnit.z];
 
   if (archetype.branching.distribution === 'tiered-whorls') {
     growTieredWhorlsBranches(
@@ -66,15 +102,15 @@ export function generateFloraSkeleton(
       trunkHeightM,
       trunkRadiusM,
     );
-  } else {
+  } else if (archetype.branching.maxDepth > 0) {
     growFloraBranch(
       nodes,
       archetype,
       random01,
-      /* parentId */ 0,
+      /* parentId */ lastTrunkNode.id,
       /* parentDepth */ 0,
       trunkTopM,
-      UP,
+      trunkTipDir,
       trunkTipRadiusM,
       trunkHeightM,
     );
@@ -222,9 +258,13 @@ function growFloraBranch(
     sampleProceduralRange(archetype.branching.childrenPerNode, random01()),
   );
 
+  const baseAzimuth = random01() * Math.PI * 2;
   for (let i = 0; i < childCount; i++) {
     const spreadRad = sampleProceduralRange(archetype.branching.spreadAngleRad, random01());
-    const azimuthRad = random01() * Math.PI * 2;
+    const azimuthRad =
+      baseAzimuth +
+      (i / Math.max(1, childCount)) * Math.PI * 2 +
+      (random01() - 0.5) * 0.35;
     const childDirection = tiltFloraDirection(directionUnit, spreadRad, azimuthRad);
 
     const lengthM = parentLengthM * archetype.branching.lengthFalloff01 * (0.75 + random01() * 0.5);

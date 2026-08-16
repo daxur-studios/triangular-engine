@@ -149,4 +149,43 @@ describe('validateFloraArchetype', () => {
     });
     expect(() => validateFloraArchetype(archetype)).toThrowError(RangeError);
   });
+
+  it('accepts a valid curved trunk and multi-tier radial fronds config', () => {
+    const archetype = makeArchetype({
+      trunk: {
+        heightM: [6.5, 9.5],
+        radiusM: [0.18, 0.26],
+        taper01: 0.25,
+        curveRad: [0.12, 0.28],
+        curveSegments: 5,
+        baseFlare01: 0.35,
+      },
+      foliage: {
+        style: 'radial-fronds',
+        sizeM: [0.35, 0.5],
+        radialFronds: {
+          frondCount: 18,
+          frondLengthM: [3.2, 4.4],
+          frondDroopRad: 0.65,
+          tierCount: 3,
+          archRad: 0.45,
+          frondWidthFraction: 0.13,
+        },
+      },
+    });
+    expect(() => validateFloraArchetype(archetype)).not.toThrow();
+  });
+
+  it('rejects an out-of-range curveRad in trunk', () => {
+    const archetype = makeArchetype({
+      trunk: {
+        heightM: [6.5, 9.5],
+        radiusM: [0.18, 0.26],
+        taper01: 0.25,
+        curveRad: [-0.1, 0.28],
+      },
+    });
+    expect(() => validateFloraArchetype(archetype)).toThrowError(RangeError);
+  });
 });
+
