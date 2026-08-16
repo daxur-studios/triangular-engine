@@ -4,6 +4,7 @@ import type { AnimalTime, AnimalVector3 } from './animal-types';
 import type { AnimalWorldSurface } from './animal-world-surface';
 
 export type AnimalAirFlockMode = 'flight' | 'approach' | 'holding' | 'perched';
+export type AnimalAirFlightBehavior = 'route' | 'boid3d';
 
 export interface AnimalAirFlockMember extends AnimalMovementState {
   readonly id: string;
@@ -36,6 +37,7 @@ export interface AnimalAirFlockPolicyDefinition {
   readonly minimumAltitudeM: number;
   readonly maximumAltitudeM: number;
   readonly preferredAltitudeM: number;
+  readonly flightBehavior?: AnimalAirFlightBehavior;
   /** Deterministic per-member flight-height variation around preferred altitude. */
   readonly flightAltitudeSpreadM?: number;
   readonly separationRadiusM: number;
@@ -179,9 +181,14 @@ function flockDesiredVelocity(
 ): AnimalVector3 {
   const ground = definition.surface.sample(member.position);
   const altitude = dot(subtract(member.position, ground.position), ground.surfaceUp);
-  let desired = scale(tangentDirection(member.position, target, ground.normal), definition.targetWeight);
-  desired = add(desired, scale(tangentDirection(member.position, center, ground.normal), definition.cohesionWeight));
-  desired = add(desired, scale(reject(averageVelocity, ground.normal), definition.alignmentWeight));
+  const isBoid3d = (definition.flightBehavior ?? 'route') === 'boid3d';
+  let desired = scale(isBoid3d
+    ? normalize(subtract(target, member.position))
+    : tangentDirection(member.position, target, ground.normal), definition.targetWeight);
+  desired = add(desired, scale(isBoid3d
+    ? normalize(subtract(center, member.position))
+    : tangentDirection(member.position, center, ground.normal), definition.cohesionWeight));
+  desired = add(desired, scale(isBoid3d ? averageVelocity : reject(averageVelocity, ground.normal), definition.alignmentWeight));
   let separation = { ...zero };
   for (const other of members) {
     if (other.id === member.id) continue;
@@ -246,6 +253,9 @@ function validateMember(member: AnimalAirFlockMember): void {
   validateVector(member.velocity, `Animal flock ${member.id} velocity`);
 }
 function validateDefinition(value: AnimalAirFlockPolicyDefinition): void {
+  if (value.flightBehavior !== undefined && value.flightBehavior !== 'route' && value.flightBehavior !== 'boid3d') {
+    throw new RangeError('Animal air-flight behavior is invalid.');
+  }
   const nonNegative = [value.maximumSpeedMps, value.maximumAccelerationMps2, value.minimumAltitudeM,
     value.maximumAltitudeM, value.preferredAltitudeM, value.separationRadiusM, value.separationWeight,
     value.cohesionWeight, value.alignmentWeight, value.targetWeight, value.arrivalRadiusM,
@@ -284,6 +294,7 @@ function subtract(a: AnimalVector3, b: AnimalVector3): AnimalVector3 { return { 
 function scale(value: AnimalVector3, amount: number): AnimalVector3 { return { x: value.x * amount, y: value.y * amount, z: value.z * amount }; }
 function dot(a: AnimalVector3, b: AnimalVector3): number { return a.x * b.x + a.y * b.y + a.z * b.z; }
 function magnitude(value: AnimalVector3): number { return Math.hypot(value.x, value.y, value.z); }
+function normalize(value: AnimalVector3): AnimalVector3 { const length = magnitude(value); return length > 1e-9 ? scale(value, 1 / length) : { ...zero }; }
 function clamp(value: number, minimum: number, maximum: number): number { return Math.max(minimum, Math.min(maximum, value)); }
 function distance(a: AnimalVector3, b: AnimalVector3): number { return magnitude(subtract(a, b)); }
 function validateVector(value: AnimalVector3, label: string): void {

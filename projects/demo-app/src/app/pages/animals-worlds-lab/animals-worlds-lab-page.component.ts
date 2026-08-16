@@ -147,6 +147,7 @@ export class AnimalsWorldsLabPageComponent {
       maximumSpeedMps: 6, maximumAccelerationMps2: 8,
       maximumSubstepDistanceM: 0.5, maximumSubsteps: 8,
       minimumAltitudeM: 2, maximumAltitudeM: 18, preferredAltitudeM: 9, flightAltitudeSpreadM: 2.5,
+      flightBehavior: 'boid3d' as const,
       separationRadiusM: 1.4, separationWeight: 3.2, cohesionWeight: 1.1,
       alignmentWeight: 0.8, targetWeight: 1.35, arrivalRadiusM: 0.4,
       holdingRadiusM: 4, holdingSpeedMps: 2.5, roostSlotSpacingM: 0.48,
