@@ -1,70 +1,58 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { EngineModule } from 'triangular-engine';
-import { FixedStepClock, materializeFlock, presentInterpolatedFlock, stepFlock, updateFlockResidency, type FlockState } from 'triangular-engine/animals';
+import { type AnimalGroupTimeline, sampleAnimalGroupTimeline } from 'triangular-engine/animals';
 
-const terrain = { sample: (position: { x: number; y: number; z: number }) => ({ height: Math.sin(position.x * 0.08) * 0.4 + Math.cos(position.z * 0.06) * 0.3, normal: { x: 0, y: 1, z: 0 } }) };
-const FLOCK_DEFINITION = { id: 'demo-birds', seed: 42, origin: { x: 0, y: 8, z: 0 }, count: 8, spacing: 7, speed: 4, cullDistance: 50, hysteresis: 12, habitatMinHeight: 5, habitatMaxHeight: 16, travelDirection: { x: 0.35, y: 0, z: 1 }, steeringAcceleration: 6, turnRate: 2.4, neighbourDistance: 11 };
+const TIMELINE: AnimalGroupTimeline = {
+  key: { worldId: 'demo-world', planetId: 'planet-a', cellId: 'forest-17', speciesId: 'woodland-birds', groupId: 'flock-1', seed: 42 },
+  destinations: [
+    { id: 'forest-region', position: { x: -12, y: 8, z: -5 }, activity: 'rest', dwellDuration: 6 },
+    { id: 'feeding-region', position: { x: 13, y: 11, z: 7 }, activity: 'feed', dwellDuration: 6 },
+    { id: 'ridge-region', position: { x: 2, y: 15, z: -12 }, activity: 'rest', dwellDuration: 6 },
+  ],
+  travelSpeed: 6,
+  travelArcHeight: 5,
+  memberCount: 9,
+};
 
 @Component({
-  selector: 'app-animals-lab-page',
-  imports: [EngineModule],
-  templateUrl: './animals-lab-page.component.html',
-  styleUrl: './animals-lab-page.component.scss',
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [],
-  host: { class: 'flex-page' },
+  selector: 'app-animals-lab-page', imports: [EngineModule],
+  templateUrl: './animals-lab-page.component.html', styleUrl: './animals-lab-page.component.scss',
+  changeDetection: ChangeDetectionStrategy.OnPush, host: { class: 'flex-page' },
 })
 export class AnimalsLabPageComponent {
-  private readonly clock = new FixedStepClock(1 / 20, 240);
   private readonly destroyRef = inject(DestroyRef);
-  readonly fleeing = signal(true);
-  readonly vehicleZ = signal(-10);
+  readonly universalTime = signal(0);
   readonly timeScale = signal(1);
   readonly paused = signal(false);
-  readonly skippedSeconds = signal(0);
-  readonly simulationTime = signal(0);
-  readonly observerX = signal(0);
-  readonly flock = signal<FlockState[]>(materializeFlock(FLOCK_DEFINITION, { position: { x: 0, y: 0, z: 0 }, radius: 1 }));
-  readonly previousFlock = signal<FlockState[]>(this.flock());
-  readonly interpolationAlpha = signal(0);
-  readonly residency = signal(updateFlockResidency(FLOCK_DEFINITION, { position: { x: 0, y: 0, z: 0 }, radius: 1 }));
+  readonly snapshot = computed(() => sampleAnimalGroupTimeline(TIMELINE, this.universalTime()));
+  readonly reconstructionMatches = computed(() =>
+    JSON.stringify(sampleAnimalGroupTimeline(TIMELINE, this.universalTime())) === JSON.stringify(this.snapshot()));
 
   constructor() {
+    let previous = performance.now();
     const timer = window.setInterval(() => {
-      const result = this.clock.advance(1 / 30, this.paused() ? 0 : this.timeScale());
-      const observer = { position: { x: this.observerX(), y: 0, z: 0 }, radius: 1 };
-      const residency = updateFlockResidency(FLOCK_DEFINITION, observer, this.residency().visible);
-      let next = this.flock();
-      let previous = this.previousFlock();
-      if (residency.visible) for (let i = 0; i < result.steps; i += 1) {
-        previous = next;
-        next = stepFlock(next, this.clock.stepSeconds, FLOCK_DEFINITION.speed, terrain, this.fleeing() ? { id: 'vehicle', position: this.vehiclePosition(), radius: 18, strength: 8 } : undefined, FLOCK_DEFINITION);
+      const now = performance.now();
+      const elapsed = Math.min(0.1, Math.max(0, (now - previous) / 1000));
+      previous = now;
+      if (!this.paused() && this.timeScale() !== 0) {
+        this.universalTime.update((time) => time + elapsed * this.timeScale());
       }
-      this.flock.set(next);
-      this.previousFlock.set(previous);
-      this.interpolationAlpha.set(result.alpha);
-      this.residency.set(residency);
-      this.simulationTime.set(result.time);
-      this.skippedSeconds.set(result.skippedSeconds);
     }, 33);
     this.destroyRef.onDestroy(() => window.clearInterval(timer));
   }
 
-  presentation() { return this.residency().visible ? presentInterpolatedFlock(this.previousFlock(), this.flock(), this.interpolationAlpha()) : []; }
-  birdRotation(heading: { x: number; z: number }, bank: number): [number, number, number] {
-    return [Math.PI / 2, Math.atan2(heading.x, heading.z), bank];
+  setUniversalTime(event: Event): void {
+    const time = Number((event.target as HTMLInputElement).value);
+    if (Number.isFinite(time)) this.universalTime.set(time);
   }
-  vehiclePosition() { const z = this.vehicleZ(); return { x: z * 0.35, y: 1, z }; }
-  advanceVehicle() { this.vehicleZ.update((z) => z + 6); this.fleeing.set(true); }
-  toggleFlee() { this.fleeing.update((value) => !value); }
-  togglePause() { this.paused.update((value) => !value); }
-  reset() {
-    this.clock.reset();
-    const initial = materializeFlock(FLOCK_DEFINITION, { position: { x: 0, y: 0, z: 0 }, radius: 1 });
-    this.flock.set(initial); this.previousFlock.set(initial); this.interpolationAlpha.set(0);
-    this.simulationTime.set(0); this.skippedSeconds.set(0); this.vehicleZ.set(-10); this.observerX.set(0);
-    this.residency.set(updateFlockResidency(FLOCK_DEFINITION, { position: { x: 0, y: 0, z: 0 }, radius: 1 }));
+  setTimeScale(scale: number): void {
+    this.timeScale.set(scale);
+    this.paused.set(false);
   }
-  setTimeScale(event: Event) { this.timeScale.set(Number((event.target as HTMLInputElement).value)); }
-  setObserver(event: Event) { this.observerX.set(Number((event.target as HTMLInputElement).value)); }
+  togglePause(): void { this.paused.update((paused) => !paused); }
+  reset(): void {
+    this.universalTime.set(0);
+    this.timeScale.set(1);
+    this.paused.set(false);
+  }
 }

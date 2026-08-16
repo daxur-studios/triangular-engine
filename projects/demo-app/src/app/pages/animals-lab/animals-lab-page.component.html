@@ -1,34 +1,23 @@
-<div class="animals-lab-toolbar">
-  <strong>triangular-engine/animals — deterministic flock slice</strong>
-  <button type="button" (click)="advanceVehicle()">Advance vehicle</button>
-  <button type="button" (click)="toggleFlee()">{{ fleeing() ? "Release vehicle" : "Enable vehicle" }}</button>
-  <button type="button" (click)="togglePause()">{{ paused() ? "Resume" : "Pause" }}</button>
-  <button type="button" (click)="reset()">Reset seed 42</button>
-  <label>Time ×{{ timeScale() }} <input type="range" min="0" max="100" step="1" [value]="timeScale()" (input)="setTimeScale($event)" /></label>
-  <span>{{ paused() ? "Paused" : (fleeing() ? "Fleeing" : "Travelling") }} · {{ residency().visible ? flock().length : 0 }} birds · {{ simulationTime().toFixed(1) }}s · skipped {{ skippedSeconds().toFixed(1) }}s · observer {{ residency().distance.toFixed(1) }}m · {{ residency().visible ? 'resident' : 'culled' }}</span>
-  @if (presentation()[0]; as firstBird) {
-    <span>bird[0]: {{ firstBird.activity }} · {{ firstBird.speed.toFixed(2) }} m/s · α {{ interpolationAlpha().toFixed(2) }}</span>
-  }
-  <label>observer distance <input type="range" min="0" max="150" step="1" [value]="observerX()" (input)="setObserver($event)" /></label>
-</div>
+<header class="page-header">
+  <div><p class="eyebrow">Animal life · clean restart</p><h1>Phase 1: time-addressed aggregate</h1><p class="claim">One abstract group record reconstructed directly at any Universal Time.</p></div>
+  <div class="actions"><button type="button" (click)="togglePause()">{{ paused() ? 'Resume' : 'Pause' }}</button><button type="button" (click)="reset()">Reset time</button></div>
+</header>
+<section class="proof-readout">
+  <label class="time-control"><small>Universal Time</small><input type="range" min="-1000000" max="1000000" step="0.1" [value]="universalTime()" (input)="setUniversalTime($event)" /><input class="time-number" type="number" step="0.1" [value]="universalTime()" (input)="setUniversalTime($event)" /></label>
+  <div><small>Time speed</small><strong>{{ paused() ? 'paused' : timeScale() + '×' }}</strong></div>
+  <div><small>Derived activity</small><strong>{{ snapshot().activity }}</strong></div>
+  <div><small>Aggregate destination</small><strong>{{ snapshot().destinationId }}</strong></div>
+  <div class="result" [class.pass]="reconstructionMatches()"><small>Reconstruction check</small><strong>{{ reconstructionMatches() ? 'exact match' : 'mismatch' }}</strong></div>
+</section>
+<section class="time-speeds" aria-label="Universal Time speed">
+  @for (scale of [-10000, -100, -50, -10, -5, -1, 0, 1, 5, 10, 50, 100, 10000]; track scale) { <button type="button" [class.active]="!paused() && timeScale() === scale" (click)="setTimeScale(scale)">{{ scale === 0 ? 'stop' : scale + '×' }}</button> }
+</section>
+<section class="scope-note">
+  <b>What this proves</b><span>The same world, group and Universal Time reconstruct the same aggregate activity and 3D location without replaying missed ticks.</span>
+  <b>Not present</b><span>No individual birds, flock presentation, tree, sockets, perching, circling, landing or takeoff.</span>
+</section>
 <scene [showFps]="true">
-  <orbitControls [cameraPosition]="[22, 18, 24]" [target]="[0, 4, 0]" />
-  <ambientLight [intensity]="1.4" />
-  <directionalLight [position]="[8, 20, 6]" [intensity]="2" />
-  <mesh [position]="[0, -0.5, 0]" [rotation]="[-1.5707963, 0, 0]"
-    ><planeGeometry [params]="[80, 80, 20, 20]" /><meshStandardMaterial
-      [params]="{ color: '#536b45' }"
-  /></mesh>
-  @for (bird of presentation(); track bird.id) {
-    <mesh [position]="[bird.position.x, bird.position.y, bird.position.z]" [rotation]="birdRotation(bird.heading, bird.bank)"
-      ><coneGeometry [params]="[0.28, 0.9, 5]" /><meshStandardMaterial
-        [params]="{ color: bird.activity === 'flee' ? '#ef9a55' : '#d9e8ff' }"
-    /></mesh>
-  }
-  @if (fleeing()) {
-    <mesh [position]="[vehiclePosition().x, vehiclePosition().y, vehiclePosition().z]"
-      ><boxGeometry [params]="[2, 1, 3]" /><meshStandardMaterial
-        [params]="{ color: '#a73b3b' }"
-    /></mesh>
-  }
+  <orbitControls [cameraPosition]="[31, 25, 35]" [target]="[0, 6, 0]" /><ambientLight [intensity]="1.3" /><directionalLight [position]="[8, 20, 6]" [intensity]="2" />
+  <mesh [position]="[0, -0.5, 0]" [rotation]="[-1.5707963, 0, 0]"><planeGeometry [params]="[70, 70, 16, 16]" /><meshStandardMaterial [params]="{ color: '#385243' }" /></mesh>
+  <mesh [position]="[snapshot().position.x, snapshot().position.y, snapshot().position.z]"><sphereGeometry [params]="{ radius: 0.7, widthSegments: 16, heightSegments: 10 }" /><meshStandardMaterial [params]="{ color: '#d9ecff' }" /></mesh>
 </scene>

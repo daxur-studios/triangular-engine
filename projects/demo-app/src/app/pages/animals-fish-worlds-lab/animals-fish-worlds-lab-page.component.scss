@@ -1,0 +1,12 @@
+:host { min-height: 0; background: #071722; color: #e5f4fb; }
+.page-header, .controls, .speeds, .shape-status, .scope-note { display: flex; gap: .8rem; align-items: center; padding: .55rem 1rem; }
+.page-header { justify-content: space-between; border-bottom: 1px solid #234f63; }
+h1, p { margin: 0; } h1 { font-size: 1.2rem; } .eyebrow, small { color: #8eb9cc; }
+button, input { background: #102b3a; color: inherit; border: 1px solid #39708a; border-radius: .35rem; padding: .35rem .55rem; }
+button.active { background: #28779b; } .actions, .speeds { display: flex; gap: .4rem; }
+.controls label { display: flex; align-items: center; gap: .6rem; flex: 1; } .controls input[type='range'] { flex: 1; } .time-number { width: 9rem; }
+.shape-status { display: grid; grid-template-columns: repeat(3, 1fr); } .shape-status div, .scope-note { background: #0d2330; }
+.shape-status div { display: flex; justify-content: space-between; padding: .45rem .6rem; border-radius: .35rem; } .shape-status span { color: #a8cddd; }
+.scope-note { display: grid; grid-template-columns: max-content 1fr; font-size: .84rem; border-block: 1px solid #234f63; }
+scene { flex: 1 1 auto; min-height: 28rem; }
+@media (max-width: 900px) { .shape-status { grid-template-columns: 1fr; } .page-header { align-items: flex-start; } }

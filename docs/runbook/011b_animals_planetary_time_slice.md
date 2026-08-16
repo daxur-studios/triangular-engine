@@ -1,7 +1,8 @@
 # Animals planetary-time reconstruction slice
 
-Status: active. Milestone 2A checkpoints 1–6 are implemented; the shared headed
-animal-life lab is next.
+Status: active. The deterministic primitives exist, but the headed proof is
+being rebuilt as small additive phases. No headed phase is complete until it
+is both automatically tested and visually accepted.
 
 Parent design: [011_animals_sublibrary.md](011_animals_sublibrary.md).
 Related designs:
@@ -148,41 +149,170 @@ The first runnable tests should prove:
 10. All authoritative coordinates remain stable across floating-origin render
     rebases.
 
-## Headed acceptance
+## Revised target: one animal API across world shapes
 
-Add a small lab using the same core as the tests:
+The supported proof matrix is mandatory, not a later port:
 
-- universal-time scrubber plus 1x–10,000x controls;
-- enter/leave observer range;
-- aircraft disturbance toggle or simple flight path;
-- visible aggregate/materialized/waiting/fleeing/landed state;
-- record one consequence event and scrub before/after it;
-- show stable group/member IDs and bounded-work diagnostics.
+- infinite plane terrain;
+- planet-scale spherical terrain;
+- the inhabited inside wall of a cylinder.
 
-The lab must display authored versus automatically derived inputs explicitly.
+Air flocks, land herds, and aquatic schools must consume the same animal API.
+Shape-specific coordinate mapping belongs in world adapters. Species policies
+must not contain `plane`/`sphere`/`cylinder` branches.
 
-## Ordered implementation
+The headed lab is a thin consumer. It may supply a world seed, Universal Time,
+observer, terrain/water adapters, species definitions, and rendering. It must
+not contain authored routes, destination coordinates, activity schedules,
+movement equations, landing order, or special-case animal decisions. A visual
+claim is accepted only after the same framework-free scenario passes headlessly.
 
-- [x] 1. Freeze stable group identity, universal-time, and stable coordinate
-     contracts. The sparse event contract remains checkpoint 5, where its actual
-     query semantics can be tested.
-- [x] 2. Implement one pure analytical group timeline with bounded direct
-     sampling.
-- [x] 3. Materialize the sampled group through existing flock primitives.
-- [x] 4. Add residency handoff and unload/reload tests.
-- [x] 5. Layer one timed consequence event without mutating the baseline
-     generator.
-- [x] 6. Integrate aircraft disturbance and one deterministic perch affordance.
-- [ ] 7. Add the shared headed lab and documentation.
-- [ ] 8. Only then add automatic habitat selection, seasonal migration, ground
-     herds, aquatic groups, or statistical populations.
+## Revised ordered milestones
+
+Existing identity, bounded-time sampling, residency, and sparse-event code is
+useful foundation, but the caller-authored destination timeline is only a test
+fixture. It is not the game-facing population API.
+
+- [x] 1. **World-domain contract.** Add a framework-free animal world adapter
+     over terrain domain/field sampling. It exposes stable world coordinates,
+     local tangent axes, `surfaceUp`, surface normal, slope, walkability,
+     projection, and movement along a surface. Prove identical contract tests
+     for plane, sphere, and inside-cylinder topology, including angular wrap.
+     Implemented by `AnimalWorldSurface` and the optional
+     `triangular-engine/animals/terrain` adapter. The built-package
+     `animals:surface-scenarios` runner verifies all three shapes without a
+     browser.
+- [x] 2. **Water-volume contract.** Add containment, water surface, bottom,
+     depth, shoreline/blocked state, flow, and segment-clearance queries. Prove
+     that a volume sample can reject land, above-water positions, and positions
+     below terrain for all three shapes.
+     Implemented by `AnimalWaterVolume` and the optional
+     `triangular-engine/animals/water` adapter. Pure water sampling was split
+     from the Angular service, and `animals:water-volume-scenarios` verifies
+     water/air/bottom classification and crossing rejection for all shapes.
+- [x] 3. **Deterministic population query.** Implement a bounded direct query
+     from world seed, region/cell, species definition, habitat version, and
+     Universal Time to aggregate animal groups. Habitat suitability chooses
+     existence, activity, and coarse location; callers do not author routes or
+     destinations. Query order, frame rate, unloading, and revisiting must not
+     change the result.
+     Implemented by `queryAnimalGroups()`. It uses fixed procedural group slots,
+     stable versioned identities, bounded habitat candidates, and direct
+     Universal-Time activity decisions. `animals:population-scenarios` verifies
+     order independence, negative-time revisits, valid habitat positions, and
+     absence when no viable habitat exists on all three shapes.
+- [x] 4. **Generic local materialization.** Materialize aggregate groups into
+     stable nearby individuals and return them to aggregate residency. Keep
+     identity, persistence overlays, and floating-origin coordinates stable.
+     Move flight-specific formation shaping out of the generic layer.
+     Implemented by `materializeLocalAnimalGroup()` and
+     `handoffLocalAnimalGroupResidency()`. The new path branches only on air,
+     land, or water; topology and distance remain adapter-owned. The legacy
+     XZ/Y-up flight helper is explicitly deprecated and isolated from this path.
+     `animals:materialization-scenarios` verifies the full 3 locomotion × 3
+     world-shape matrix, clearances, bounded resident detail, and exact reload.
+- [x] 5. **Shape-neutral movement constraints.** Implement reusable tangent-
+     surface and volume movement kernels before species presentation. Test
+     finite values, clearance, blocked-region avoidance, sphere continuity,
+     cylinder wrap, bounded work, and deterministic fixed-step results.
+     Implemented by `stepConstrainedAnimalMovement()`: desired motion remains
+     policy-owned while the kernel enforces acceleration, speed, bounded
+     substeps, walkability, local-up altitude, and water-column clearances.
+     Water curvature transport is owned by `AnimalWaterVolume`, not the core.
+     `animals:movement-scenarios` executes the 3 locomotion x 3 world-shape
+     matrix, including negative plane coordinates, sphere-frame continuity,
+     cylinder angular wrap, deterministic repeats, and unchanged work-limit
+     rejection. Colocated specs cover invalid origins/configuration and blocked
+     land/water movement.
+- [ ] 6. **Air-flock policy.** Add cohesive bird-like flight, separation,
+     alignment, altitude clearance, habitat choice, and group-level roosting.
+     Trees expose capacity through habitat data. Birds distribute across nearby
+     trees; when capacity is insufficient, overflow keeps a cohesive holding
+     pattern. Landing and departure are policy behavior, never page animation.
+     The framework-free core is implemented by `stepAnimalAirFlock()` and
+     `allocateAnimalRoosts()`. Capacity creates stable, distinct tangent-frame
+     slots rather than stacking birds at one coordinate. The browser-free
+     `animals:air-flock-scenarios` runner verifies deterministic allocation,
+     cohesive constrained flight, six assigned roost slots, two holding
+     overflow members, stationary perching, and unified departure on plane,
+     sphere, and inside-cylinder worlds. Colocated specs cover bounds,
+     input-order independence, altitude enforcement, and duplicate identities.
+     This milestone remains open until a thin headed consumer renders these
+     same scenario states and receives visual acceptance.
+     `sampleAnimalAirFlockCycle()` additionally reconstructs a repeatable local
+     roost/fly/return cycle directly from arbitrary positive or negative
+     Universal Time with work capped to one configured cycle. The same
+     three-shape scenario verifies distant-time equivalence and bounded replay;
+     it does not claim world-scale migration or evolving ecology.
+     The separate `/animals-worlds-lab` route is the thin headed consumer: it
+     calls that sampler for every displayed snapshot, shows all three shapes,
+     supports direct Universal-Time scrubbing and -50x through 50x playback,
+     and derives real perch candidates from reusable procedural oak sockets.
+     It contains rendering fixtures but no routes, member motion equations, or
+     page-owned landing/departure decisions. The demo build passes; human visual
+     acceptance is still pending.
+- [ ] 7. **Land-herd policy.** Add walkable-surface movement, cohesion,
+     grazing/rest activity, grazing-patch choice, slope limits, and blocked
+     terrain avoidance. Prove herds remain on the valid surface in every shape.
+     The framework-free core is implemented by `stepAnimalLandHerd()` and
+     `sampleAnimalLandHerdCycle()`. It adds species slope limits to the shared
+     movement kernel, bounded suitability/range-aware pasture allocation,
+     stable grazing/rest anchors, cohesion/separation/alignment, and bounded
+     local detours without claiming global route discovery. The browser-free
+     `animals:land-herd-scenarios` runner verifies surface confinement,
+     deterministic allocation, settled grazing, still resting, blocked-region
+     response, direct Universal-Time reconstruction, and bounded distant-time
+     queries on plane, sphere, and inside cylinder. Colocated specs cover the
+     same contracts. The separate `/animals-herd-worlds-lab` route is a thin
+     headed consumer of `sampleAnimalLandHerdCycle()`: it supplies only the
+     three terrain adapters, habitat fixtures, Universal-Time controls, and
+     rendering. The demo build passes; the milestone remains open pending human
+     visual acceptance.
+- [ ] 8. **Aquatic-school policy.** Add schooling, connected-water habitat
+     choice, depth-band behavior, shoreline avoidance, and continuous surface/
+     bottom clearance. Prove fish never enter land, leave water, or pass below
+     terrain in every shape.
+     The framework-free core is implemented by `stepAnimalAquaticSchool()` and
+     `sampleAnimalAquaticSchoolCycle()`. It adds same-body habitat selection,
+     stable school slots, cohesion/separation/alignment, flow response, a
+     species depth band, and bounded local shoreline/bottom detours. The
+     browser-free `animals:aquatic-school-scenarios` runner verifies local
+     water-surface transport, body continuity, surface/bottom/depth clearance,
+     settled feeding/rest, invalid-segment response, direct Universal-Time
+     reconstruction, and bounded distant queries on plane, sphere, and inside
+     cylinder. A regression now prevents non-origin plane transport from
+     teleporting toward world zero. Colocated specs cover the same contracts.
+     The separate `/animals-fish-worlds-lab` route is a thin headed consumer of
+     `sampleAnimalAquaticSchoolCycle()` using real terrain/water adapters for
+     all three shapes. It supplies only water/habitat fixtures, Universal-Time
+     controls, and rendering. The demo build passes; the milestone remains open
+     pending human visual acceptance.
+- [ ] 9. **Interaction and consequences.** Apply vehicles, aircraft, boats,
+     construction, terraforming, loss/displacement events, and unload/reload
+     reconstruction through shared APIs. Persistent events layer over the
+     deterministic baseline without replaying all elapsed time.
+     The first shared core slices are implemented. `resolveAnimalDisturbances()`
+     performs bounded, deterministic surface/water proximity queries using the
+     topology adapters; its browser-free runner covers surface height and water
+     depth separation on plane, sphere, and inside cylinder.
+     `queryEffectiveAnimalGroups()` overlays member loss, temporary displacement,
+     and permanent habitat invalidation at explicit Universal Times. Its runner
+     verifies direct rewind/expiry reconstruction and input-order independence
+     on all three shapes. This milestone remains open: the species policies do
+     not yet consume disturbance hits, no game interaction adapter writes the
+     consequence events, and no headed interaction proof has visual acceptance.
+
+Each milestone requires colocated unit tests, a serializable deterministic
+scenario, a browser-free scenario runner, the full three-shape matrix where
+applicable, and a headed view that only renders scenario snapshots. Visual
+acceptance is required before advancing presentation complexity.
 
 ## Explicit deferrals
 
 - Automatic world-scale migration route discovery.
-- Full spherical local navigation and floating-origin adapters beyond the
-  stable contract test.
-- Fish, whales, boats, water-volume connectivity, and shorelines.
+- Detailed world-scale seasonal migration route discovery beyond habitat-driven
+  regional movement.
+- Boats and whales beyond the shared aquatic interaction contracts.
 - Population births/deaths/capacity beyond the one consequence proof.
 - Nest construction, parenting, predators, and detailed ecology.
 - Physics damage and collision resolution; the game reports their outcomes as
@@ -192,8 +322,9 @@ The lab must display authored versus automatically derived inputs explicitly.
 
 ## Definition of done
 
-This slice is complete when the same deterministic core is runnable headlessly
-and watchable in the lab; arbitrary-time reconstruction is bounded; local
-materialization and unload/reload are stable; aircraft disturbance works; one
-persisted consequence survives reconstruction; and every authored shortcut is
-visible and documented.
+This workstream is complete when one public, framework-free animal API drives
+air flocks, land herds, and aquatic schools across infinite plane, planetary
+sphere, and inside-cylinder worlds; direct Universal-Time reconstruction and
+unload/reload are deterministic; surface and water constraints are enforced by
+tests; interactions and one persisted consequence survive reconstruction; and
+headed pages contain no authored movement or behavior shortcuts.

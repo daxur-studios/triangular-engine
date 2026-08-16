@@ -1,0 +1,47 @@
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Animal life · verified phase 3</p>
+    <h1>One land-herd policy, three world shapes</h1>
+    <p>Each frame samples the production herd cycle directly at the requested Universal Time.</p>
+  </div>
+  <div class="actions">
+    <button type="button" (click)="togglePause()">{{ paused() ? 'Resume' : 'Pause' }}</button>
+    <button type="button" (click)="reset()">Reset</button>
+  </div>
+</header>
+
+<section class="controls">
+  <label>
+    <small>Universal Time</small>
+    <input type="range" min="-1000000" max="1000000" step="0.1" [value]="universalTime()" (input)="setUniversalTime($event)" />
+  </label>
+  <input class="time-number" type="number" step="0.1" [value]="universalTime()" (input)="setUniversalTime($event)" />
+  <strong>{{ universalTime().toFixed(1) }}</strong>
+</section>
+
+<section class="speeds" aria-label="Universal Time speed">
+  @for (speed of speedOptions; track speed) {
+    <button type="button" [class.active]="!paused() && timeScale() === speed" (click)="setTimeScale(speed)">
+      {{ speed === 0 ? 'stop' : speed + '×' }}
+    </button>
+  }
+</section>
+
+<section class="shape-status">
+  <div><b>Infinite plane</b><span>{{ phases().plane }} · {{ selectedPatches().plane }} · {{ replaySteps().plane }} steps</span></div>
+  <div><b>Planet sphere</b><span>{{ phases().sphere }} · {{ selectedPatches().sphere }} · {{ replaySteps().sphere }} steps</span></div>
+  <div><b>Inside cylinder</b><span>{{ phases().cylinder }} · {{ selectedPatches().cylinder }} · {{ replaySteps().cylinder }} steps</span></div>
+</section>
+
+<section class="scope-note">
+  <b>What this proves</b>
+  <span>The same land-herd API reconstructs rest, bounded outbound travel, assigned grazing slots, and return travel on all three topologies at any Universal Time.</span>
+  <b>Not present yet</b>
+  <span>No terrain editing response, migration, predators, vegetation consumption, vehicles, buildings, or persistent ecology.</span>
+</section>
+
+<scene [showFps]="true">
+  <orbitControls [cameraPosition]="[0, 27, 58]" [target]="[0, 1, 0]" />
+  <ambientLight [intensity]="1.5" />
+  <directionalLight [position]="[8, 25, 18]" [intensity]="2.2" />
+</scene>

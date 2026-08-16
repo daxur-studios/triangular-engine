@@ -71,6 +71,12 @@ describe('sampleAnimalGroupTimeline', () => {
     );
   });
 
+  it('reports direct progress through dwell activities', () => {
+    expect(sampleAnimalGroupTimeline(timeline, 100).activityProgress).toBe(0);
+    expect(sampleAnimalGroupTimeline(timeline, 105).activityProgress).toBe(0.5);
+    expect(sampleAnimalGroupTimeline(timeline, 125).activityProgress).toBe(0.25);
+  });
+
   it('is deterministic across query order and very large time jumps', () => {
     const distantTime = 100 + 50 * 10_000_000 + 15;
     const expected = sampleAnimalGroupTimeline(timeline, 115);
@@ -80,6 +86,42 @@ describe('sampleAnimalGroupTimeline', () => {
       time: distantTime,
     });
     expect(sampleAnimalGroupTimeline(timeline, 115)).toEqual(expected);
+  });
+
+  it('samples an optional 3D travel arc and its tangent without ticking', () => {
+    const arced = { ...timeline, travelArcHeight: 8 };
+    const midpoint = sampleAnimalGroupTimeline(arced, 115);
+
+    // Progress is eased (smoothstep), so the midpoint still lands exactly
+    // halfway, but velocity there is faster than the naive distance/duration
+    // rate since the group must cover the same distance while gliding away
+    // from zero speed at both ends of the leg.
+    expect(midpoint.position).toEqual({ x: 15, y: 15, z: 0 });
+    expect(midpoint.velocity.x).toBeCloseTo(4.5);
+    expect(midpoint.velocity.y).toBeCloseTo(0.9);
+    expect(midpoint.velocity.z).toBeCloseTo(0);
+    expect(sampleAnimalGroupTimeline(arced, 115)).toEqual(midpoint);
+  });
+
+  it('keeps velocity continuous (zero) across every dwell/travel boundary', () => {
+    const arced = { ...timeline, travelArcHeight: 8 };
+    // cycleTime 20 is the exact instant the group arrives at tree-perch and
+    // switches from 'travel' to 'rest'; cycleTime 40 is the exact instant it
+    // departs again. Velocity must not pop from cruise speed to zero (or
+    // back) at these instants, or materialized members would visibly snap.
+    const arrivalApproach = sampleAnimalGroupTimeline(arced, 100 + 20 - 1e-6);
+    const arrivalDwell = sampleAnimalGroupTimeline(arced, 100 + 20);
+    const departureDwell = sampleAnimalGroupTimeline(arced, 100 + 40 - 1e-6);
+    const departureTravel = sampleAnimalGroupTimeline(arced, 100 + 40);
+
+    for (const speed of [
+      Math.hypot(arrivalApproach.velocity.x, arrivalApproach.velocity.y, arrivalApproach.velocity.z),
+      Math.hypot(arrivalDwell.velocity.x, arrivalDwell.velocity.y, arrivalDwell.velocity.z),
+      Math.hypot(departureDwell.velocity.x, departureDwell.velocity.y, departureDwell.velocity.z),
+      Math.hypot(departureTravel.velocity.x, departureTravel.velocity.y, departureTravel.velocity.z),
+    ]) {
+      expect(speed).toBeCloseTo(0, 3);
+    }
   });
 
   it('rejects invalid timelines instead of producing corrupt state', () => {

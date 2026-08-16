@@ -218,6 +218,27 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'animals-worlds-lab',
+    loadComponent: () =>
+      import('./pages/animals-worlds-lab/animals-worlds-lab-page.component').then(
+        ({ AnimalsWorldsLabPageComponent }) => AnimalsWorldsLabPageComponent,
+      ),
+  },
+  {
+    path: 'animals-herd-worlds-lab',
+    loadComponent: () =>
+      import('./pages/animals-herd-worlds-lab/animals-herd-worlds-lab-page.component').then(
+        ({ AnimalsHerdWorldsLabPageComponent }) => AnimalsHerdWorldsLabPageComponent,
+      ),
+  },
+  {
+    path: 'animals-fish-worlds-lab',
+    loadComponent: () =>
+      import('./pages/animals-fish-worlds-lab/animals-fish-worlds-lab-page.component').then(
+        ({ AnimalsFishWorldsLabPageComponent }) => AnimalsFishWorldsLabPageComponent,
+      ),
+  },
+  {
     path: 'large-world-life-poc',
     loadComponent: () =>
       import('./pages/large-world-life-poc/large-world-life-poc-page.component').then(
