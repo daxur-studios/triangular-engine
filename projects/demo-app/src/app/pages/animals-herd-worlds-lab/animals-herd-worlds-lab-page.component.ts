@@ -25,6 +25,9 @@ interface HerdWorldView {
   readonly label: string;
   readonly root: Group;
   readonly surface: AnimalWorldSurface;
+  readonly populations: readonly HerdPopulation[];
+}
+interface HerdPopulation {
   readonly definition: AnimalLandHerdCycleDefinition;
   readonly playback: AnimalLandHerdCyclePlayback;
   readonly animals: readonly Mesh[];
@@ -178,19 +181,31 @@ export class AnimalsHerdWorldsLabPageComponent {
       travelLineSpacingM: 1.2, leaderFollowDelaySeconds: 0.8,
       maximumAvoidanceAttempts: 4,
     };
-    const definition: AnimalLandHerdCycleDefinition = {
-      groupId: `${shape}-herd`, groupSeed: 91, memberCount: 8,
-      homePatch, grazingPatches,
-      restDurationS: 5, outboundTravelDurationS: 10, grazeDurationS: 10, returnTravelDurationS: 15,
-      // Playback advances incrementally; direct arbitrary-time reads remain bounded.
-      fixedStepSeconds: 0.1, maximumReplaySteps: 400, policy,
-    };
-    const animals = Array.from({ length: definition.memberCount }, () => {
-      const animal = new Mesh(this.animalGeometry, this.animalMaterial);
-      root.add(animal);
-      return animal;
+    const groupSeeds = shape === 'plane' ? [91, 173, 251] : [91];
+    const populations = groupSeeds.map((groupSeed, groupIndex) => {
+      const offset = groupIndex === 0 ? 0 : (groupIndex === 1 ? 4 : -4);
+      const shiftedHome = surface.sample(surface.moveAlongSurface(homeCenter.position, scale(homeCenter.tangentV, offset), 1));
+      const shiftedPatches = grazingPatches.map(patch => ({
+        ...patch,
+        id: `${patch.id}-g${groupIndex}`,
+        position: surface.sample(surface.moveAlongSurface(patch.position, scale(homeCenter.tangentV, offset), 1)).position,
+      }));
+      const definition: AnimalLandHerdCycleDefinition = {
+        groupId: `${shape}-herd-${groupIndex}`, groupSeed, memberCount: 8,
+        homePatch: { ...homePatch, id: `${homePatch.id}-g${groupIndex}`, position: shiftedHome.position },
+        grazingPatches: shiftedPatches,
+        restDurationS: 5, outboundTravelDurationS: 10, grazeDurationS: 10, returnTravelDurationS: 15,
+        // Playback advances incrementally; direct arbitrary-time reads remain bounded.
+        fixedStepSeconds: 0.1, maximumReplaySteps: 400, policy,
+      };
+      const animals = Array.from({ length: definition.memberCount }, () => {
+        const animal = new Mesh(this.animalGeometry, this.animalMaterial);
+        root.add(animal);
+        return animal;
+      });
+      return { definition, playback: createAnimalLandHerdCyclePlayback(definition), animals };
     });
-    return { shape, label, root, surface, definition, playback: createAnimalLandHerdCyclePlayback(definition), animals };
+    return { shape, label, root, surface, populations };
   }
 
   private renderAt(time: number): void {
@@ -198,11 +213,13 @@ export class AnimalsHerdWorldsLabPageComponent {
     const selectedPatches = { ...this.selectedPatches() };
     const replaySteps = { ...this.replaySteps() };
     for (const world of this.worldViews) {
-      const snapshot = world.playback.sample(time);
-      phases[world.shape] = snapshot.phase;
-      selectedPatches[world.shape] = snapshot.selectedGrazingPatchId ?? 'none';
-      replaySteps[world.shape] = snapshot.replaySteps;
-      snapshot.members.forEach((member, index) => this.renderAnimal(world, world.animals[index], member));
+      const snapshots = world.populations.map(population => population.playback.sample(time));
+      phases[world.shape] = snapshots.map(snapshot => snapshot.phase).join(' / ');
+      selectedPatches[world.shape] = snapshots.map(snapshot => snapshot.selectedGrazingPatchId ?? 'none').join(' / ');
+      replaySteps[world.shape] = snapshots.reduce((total, snapshot) => total + snapshot.replaySteps, 0);
+      snapshots.forEach((snapshot, populationIndex) => {
+        snapshot.members.forEach((member, index) => this.renderAnimal(world, world.populations[populationIndex].animals[index], member));
+      });
     }
     this.phases.set(phases);
     this.selectedPatches.set(selectedPatches);
