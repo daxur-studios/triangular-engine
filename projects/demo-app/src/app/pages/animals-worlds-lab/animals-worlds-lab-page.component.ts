@@ -6,7 +6,8 @@ import {
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
-  sampleAnimalAirFlockCycle,
+  createAnimalAirFlockCyclePlayback,
+  type AnimalAirFlockCyclePlayback,
   type AnimalAirFlockCycleDefinition,
   type AnimalAirFlockMember,
   type AnimalVector3,
@@ -28,6 +29,7 @@ interface WorldView {
   readonly root: Group;
   readonly surface: AnimalWorldSurface;
   readonly definition: AnimalAirFlockCycleDefinition;
+  readonly playback: AnimalAirFlockCyclePlayback;
   readonly birds: readonly Mesh[];
 }
 
@@ -152,6 +154,7 @@ export class AnimalsWorldsLabPageComponent {
     const definition: AnimalAirFlockCycleDefinition = {
       groupId: `${shape}-flock`, memberCount: 8, roostSites, flightTarget,
       roostDurationS: 5, flightDurationS: 15, returnDurationS: 30,
+      // Playback advances incrementally; direct arbitrary-time reads remain bounded.
       fixedStepSeconds: 0.1, maximumReplaySteps: 500, policy,
     };
     const birds = Array.from({ length: definition.memberCount }, () => {
@@ -159,14 +162,14 @@ export class AnimalsWorldsLabPageComponent {
       root.add(bird);
       return bird;
     });
-    return { shape, label, root, surface, definition, birds };
+    return { shape, label, root, surface, definition, playback: createAnimalAirFlockCyclePlayback(definition), birds };
   }
 
   private renderAt(time: number): void {
     const phases = { ...this.phases() };
     const steps = { ...this.replaySteps() };
     for (const view of this.worldViews) {
-      const snapshot = sampleAnimalAirFlockCycle(time, view.definition);
+      const snapshot = view.playback.sample(time);
       phases[view.shape] = snapshot.phase;
       steps[view.shape] = snapshot.replaySteps;
       snapshot.members.forEach((member, index) => this.renderBird(view, view.birds[index], member));

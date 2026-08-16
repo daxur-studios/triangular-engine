@@ -34,6 +34,16 @@ export interface AnimalAirFlockCycleSample {
 }
 
 /**
+ * Stateful reader for a materialized flock. Forward time advances from its
+ * previous deterministic state; seeking backwards or into another cycle uses
+ * the stateless sampler as the reconstruction boundary.
+ */
+export interface AnimalAirFlockCyclePlayback {
+  sample(universalTime: AnimalTime): AnimalAirFlockCycleSample;
+  reset(): void;
+}
+
+/**
  * Direct, bounded Universal-Time reconstruction of one repeatable local daily
  * cycle. It never replays elapsed planetary history: at most one configured
  * cycle is stepped from its stable roost state.
@@ -41,6 +51,38 @@ export interface AnimalAirFlockCycleSample {
 export function sampleAnimalAirFlockCycle(
   universalTime: AnimalTime,
   definition: AnimalAirFlockCycleDefinition,
+): AnimalAirFlockCycleSample {
+  return sampleCycle(universalTime, definition);
+}
+
+/** Creates a cached playback reader without changing stateless UT sampling. */
+export function createAnimalAirFlockCyclePlayback(
+  definition: AnimalAirFlockCycleDefinition,
+): AnimalAirFlockCyclePlayback {
+  let checkpoint: AnimalAirFlockCycleSample | undefined;
+  return {
+    sample(universalTime) {
+      const cycleDurationS = definition.roostDurationS + definition.flightDurationS + definition.returnDurationS;
+      const cycleIndex = Math.floor(universalTime / cycleDurationS);
+      const cycleTimeS = positiveModulo(universalTime, cycleDurationS);
+      const canAdvance = checkpoint !== undefined && checkpoint.cycleIndex === cycleIndex
+        && cycleTimeS + 1e-12 >= checkpoint.cycleTimeS;
+      const result = canAdvance
+        ? sampleCycle(universalTime, definition, {
+          cycleIndex, cycleTimeS: checkpoint!.cycleTimeS, members: checkpoint!.members,
+        })
+        : sampleCycle(universalTime, definition);
+      checkpoint = { ...result, members: cloneMembers(result.members) };
+      return result;
+    },
+    reset() { checkpoint = undefined; },
+  };
+}
+
+function sampleCycle(
+  universalTime: AnimalTime,
+  definition: AnimalAirFlockCycleDefinition,
+  start?: { readonly cycleIndex: number; readonly cycleTimeS: number; readonly members: readonly AnimalAirFlockMember[] },
 ): AnimalAirFlockCycleSample {
   validateCycle(definition, universalTime);
   const cycleDurationS = definition.roostDurationS + definition.flightDurationS + definition.returnDurationS;
@@ -58,7 +100,9 @@ export function sampleAnimalAirFlockCycle(
     throw new RangeError('A directly sampled flock cycle requires roost capacity for every member.');
   }
   const siteById = new Map(definition.roostSites.map(site => [site.id, site]));
-  let members: readonly AnimalAirFlockMember[] = assignments.map(assignment => {
+  let members: readonly AnimalAirFlockMember[] = start?.cycleIndex === cycleIndex
+    ? cloneMembers(start.members)
+    : assignments.map(assignment => {
     const site = siteById.get(assignment.perchId!)!;
     return {
       id: assignment.memberId,
@@ -66,9 +110,9 @@ export function sampleAnimalAirFlockCycle(
       velocity: { x: 0, y: 0, z: 0 },
       mode: 'perched', perchId: site.id,
     };
-  });
+    });
   let replaySteps = 0;
-  let stepStart = 0;
+  let stepStart = start?.cycleIndex === cycleIndex ? start.cycleTimeS : 0;
   while (stepStart < cycleTimeS - 1e-12) {
     const boundary = nextPhaseBoundary(stepStart, cycleDurationS, definition);
     const deltaSeconds = Math.min(definition.fixedStepSeconds, cycleTimeS - stepStart, boundary - stepStart);
@@ -92,6 +136,10 @@ export function sampleAnimalAirFlockCycle(
     universalTime, cycleTimeS, cycleDurationS, cycleIndex,
     phase: phaseAt(cycleTimeS, definition), replaySteps, members,
   };
+}
+
+function cloneMembers(members: readonly AnimalAirFlockMember[]): readonly AnimalAirFlockMember[] {
+  return members.map(member => ({ ...member, position: { ...member.position }, velocity: { ...member.velocity } }));
 }
 
 function phaseAt(time: number, definition: AnimalAirFlockCycleDefinition): AnimalAirFlockCyclePhase {

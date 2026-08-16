@@ -35,6 +35,12 @@ export interface AnimalLandHerdCycleSample {
   readonly members: readonly AnimalLandHerdMember[];
 }
 
+/** Stateful deterministic reader for a materialized herd. */
+export interface AnimalLandHerdCyclePlayback {
+  sample(universalTime: AnimalTime): AnimalLandHerdCycleSample;
+  reset(): void;
+}
+
 export function selectAnimalGrazingPatch(
   groupSeed: number,
   cycleIndex: number,
@@ -67,6 +73,39 @@ export function sampleAnimalLandHerdCycle(
   universalTime: AnimalTime,
   definition: AnimalLandHerdCycleDefinition,
 ): AnimalLandHerdCycleSample {
+  return sampleCycle(universalTime, definition);
+}
+
+/**
+ * Keeps the last local-cycle state. Ordinary forward playback therefore costs
+ * only the elapsed fixed steps; arbitrary seeks retain stateless semantics.
+ */
+export function createAnimalLandHerdCyclePlayback(
+  definition: AnimalLandHerdCycleDefinition,
+): AnimalLandHerdCyclePlayback {
+  let checkpoint: AnimalLandHerdCycleSample | undefined;
+  return {
+    sample(universalTime) {
+      const duration = definition.restDurationS + definition.outboundTravelDurationS
+        + definition.grazeDurationS + definition.returnTravelDurationS;
+      const cycleIndex = Math.floor(universalTime / duration);
+      const cycleTimeS = positiveModulo(universalTime, duration);
+      const result = checkpoint !== undefined && checkpoint.cycleIndex === cycleIndex
+        && cycleTimeS + 1e-12 >= checkpoint.cycleTimeS
+        ? sampleCycle(universalTime, definition, { cycleIndex, cycleTimeS: checkpoint.cycleTimeS, members: checkpoint.members })
+        : sampleCycle(universalTime, definition);
+      checkpoint = { ...result, members: cloneMembers(result.members) };
+      return result;
+    },
+    reset() { checkpoint = undefined; },
+  };
+}
+
+function sampleCycle(
+  universalTime: AnimalTime,
+  definition: AnimalLandHerdCycleDefinition,
+  startState?: { readonly cycleIndex: number; readonly cycleTimeS: number; readonly members: readonly AnimalLandHerdMember[] },
+): AnimalLandHerdCycleSample {
   validateCycle(universalTime, definition);
   const cycleDurationS = definition.restDurationS + definition.outboundTravelDurationS
     + definition.grazeDurationS + definition.returnTravelDurationS;
@@ -82,13 +121,15 @@ export function sampleAnimalLandHerdCycle(
     || value.slotIndex === undefined || value.patchId === undefined)) {
     throw new RangeError('A directly sampled herd cycle requires home capacity for every member.');
   }
-  let members: readonly AnimalLandHerdMember[] = homeAssignments.map(assignment => ({
+  let members: readonly AnimalLandHerdMember[] = startState?.cycleIndex === cycleIndex
+    ? cloneMembers(startState.members)
+    : homeAssignments.map(assignment => ({
     id: assignment.memberId,
     position: resolveAnimalHerdPatchPosition(definition.homePatch, assignment.slotIndex!, definition.policy),
     velocity: { x: 0, y: 0, z: 0 }, mode: 'rest', patchId: definition.homePatch.id,
-  }));
+    }));
   let replaySteps = 0;
-  let start = 0;
+  let start = startState?.cycleIndex === cycleIndex ? startState.cycleTimeS : 0;
   while (start < cycleTimeS - 1e-12) {
     const boundary = nextPhaseBoundary(start, cycleDurationS, definition);
     const deltaSeconds = Math.min(definition.fixedStepSeconds, cycleTimeS - start, boundary - start);
@@ -114,6 +155,10 @@ export function sampleAnimalLandHerdCycle(
     ...(selected ? { selectedGrazingPatchId: selected.id } : {}),
     replaySteps, members,
   };
+}
+
+function cloneMembers(members: readonly AnimalLandHerdMember[]): readonly AnimalLandHerdMember[] {
+  return members.map(member => ({ ...member, position: { ...member.position }, velocity: { ...member.velocity } }));
 }
 
 function phaseAt(time: number, definition: AnimalLandHerdCycleDefinition): AnimalLandHerdCyclePhase {

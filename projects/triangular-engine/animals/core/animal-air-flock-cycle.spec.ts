@@ -1,4 +1,5 @@
 import {
+  createAnimalAirFlockCyclePlayback,
   sampleAnimalAirFlockCycle,
   type AnimalAirFlockCycleDefinition,
 } from './animal-air-flock-cycle';
@@ -53,6 +54,18 @@ describe('animal air-flock cycle', () => {
     expect(local.replaySteps).toBe(24);
     expect(farFuture.replaySteps).toBe(24);
     expect(farFuture.replaySteps).toBeLessThanOrEqual(definition.maximumReplaySteps);
+  });
+
+  it('advances playback from the prior state and reconstructs after a backward seek', () => {
+    const definition = cycleDefinition();
+    const playback = createAnimalAirFlockCyclePlayback(definition);
+    playback.sample(5);
+    const incremental = playback.sample(6);
+    const direct = sampleAnimalAirFlockCycle(6, definition);
+
+    expect({ ...incremental, replaySteps: 0 }).toEqual({ ...direct, replaySteps: 0 });
+    expect(incremental.replaySteps).toBeLessThan(direct.replaySteps);
+    expect({ ...playback.sample(2), replaySteps: 0 }).toEqual({ ...sampleAnimalAirFlockCycle(2, definition), replaySteps: 0 });
   });
 
   it('rejects a direct cycle whose flock cannot all be assigned a roost slot', () => {

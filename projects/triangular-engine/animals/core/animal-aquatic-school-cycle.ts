@@ -35,6 +35,12 @@ export interface AnimalAquaticSchoolCycleSample {
   readonly members: readonly AnimalAquaticSchoolMember[];
 }
 
+/** Stateful deterministic reader for a materialized school. */
+export interface AnimalAquaticSchoolCyclePlayback {
+  sample(universalTime: AnimalTime): AnimalAquaticSchoolCycleSample;
+  reset(): void;
+}
+
 export function selectAnimalAquaticHabitat(
   groupSeed: number,
   cycleIndex: number,
@@ -65,6 +71,39 @@ export function sampleAnimalAquaticSchoolCycle(
   universalTime: AnimalTime,
   definition: AnimalAquaticSchoolCycleDefinition,
 ): AnimalAquaticSchoolCycleSample {
+  return sampleCycle(universalTime, definition);
+}
+
+/**
+ * Keeps the last local-cycle state so a playing school never reconstructs its
+ * entire cycle each render. Seeking remains direct and deterministic.
+ */
+export function createAnimalAquaticSchoolCyclePlayback(
+  definition: AnimalAquaticSchoolCycleDefinition,
+): AnimalAquaticSchoolCyclePlayback {
+  let checkpoint: AnimalAquaticSchoolCycleSample | undefined;
+  return {
+    sample(universalTime) {
+      const duration = definition.schoolingDurationS + definition.outboundDurationS
+        + definition.feedingDurationS + definition.returnDurationS;
+      const cycleIndex = Math.floor(universalTime / duration);
+      const cycleTimeS = positiveModulo(universalTime, duration);
+      const result = checkpoint !== undefined && checkpoint.cycleIndex === cycleIndex
+        && cycleTimeS + 1e-12 >= checkpoint.cycleTimeS
+        ? sampleCycle(universalTime, definition, { cycleIndex, cycleTimeS: checkpoint.cycleTimeS, members: checkpoint.members })
+        : sampleCycle(universalTime, definition);
+      checkpoint = { ...result, members: cloneMembers(result.members) };
+      return result;
+    },
+    reset() { checkpoint = undefined; },
+  };
+}
+
+function sampleCycle(
+  universalTime: AnimalTime,
+  definition: AnimalAquaticSchoolCycleDefinition,
+  startState?: { readonly cycleIndex: number; readonly cycleTimeS: number; readonly members: readonly AnimalAquaticSchoolMember[] },
+): AnimalAquaticSchoolCycleSample {
   validateCycle(universalTime, definition);
   const durations = [definition.schoolingDurationS, definition.outboundDurationS,
     definition.feedingDurationS, definition.returnDurationS];
@@ -81,13 +120,15 @@ export function sampleAnimalAquaticSchoolCycle(
     || value.zoneId === undefined || value.slotIndex === undefined)) {
     throw new RangeError('A directly sampled aquatic cycle requires safe home capacity for every member.');
   }
-  let members: readonly AnimalAquaticSchoolMember[] = homeAssignments.map(assignment => ({
+  let members: readonly AnimalAquaticSchoolMember[] = startState?.cycleIndex === cycleIndex
+    ? cloneMembers(startState.members)
+    : homeAssignments.map(assignment => ({
     id: assignment.memberId,
     position: resolveAnimalAquaticZonePosition(definition.homeZone, assignment.slotIndex!, cycleStartTime, definition.policy),
     velocity: { x: 0, y: 0, z: 0 }, mode: 'rest', zoneId: definition.homeZone.id,
-  }));
+    }));
   let replaySteps = 0;
-  let start = 0;
+  let start = startState?.cycleIndex === cycleIndex ? startState.cycleTimeS : 0;
   while (start < cycleTimeS - 1e-12) {
     const boundary = nextPhaseBoundary(start, cycleDurationS, definition);
     const deltaSeconds = Math.min(definition.fixedStepSeconds, cycleTimeS - start, boundary - start);
@@ -110,6 +151,10 @@ export function sampleAnimalAquaticSchoolCycle(
   return { universalTime, cycleTimeS, cycleDurationS, cycleIndex,
     phase: selected ? phaseAt(cycleTimeS, definition) : 'home-schooling',
     ...(selected ? { selectedFeedingZoneId: selected.id } : {}), replaySteps, members };
+}
+
+function cloneMembers(members: readonly AnimalAquaticSchoolMember[]): readonly AnimalAquaticSchoolMember[] {
+  return members.map(member => ({ ...member, position: { ...member.position }, velocity: { ...member.velocity } }));
 }
 
 function phaseAt(time: number, definition: AnimalAquaticSchoolCycleDefinition): AnimalAquaticSchoolCyclePhase {

@@ -5,7 +5,8 @@ import {
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
-  sampleAnimalAquaticSchoolCycle,
+  createAnimalAquaticSchoolCyclePlayback,
+  type AnimalAquaticSchoolCyclePlayback,
   type AnimalAquaticSchoolCycleDefinition,
   type AnimalAquaticSchoolMember,
   type AnimalVector3,
@@ -26,6 +27,7 @@ interface WorldView {
   readonly root: Group;
   readonly water: AnimalWaterVolume;
   readonly definition: AnimalAquaticSchoolCycleDefinition;
+  readonly playback: AnimalAquaticSchoolCyclePlayback;
   readonly fish: readonly Mesh[];
 }
 
@@ -172,6 +174,7 @@ export class AnimalsFishWorldsLabPageComponent {
       groupId: `${shape}-school`, groupSeed: 73, memberCount: 8,
       homeZone: home, feedingZones: [feeding],
       schoolingDurationS: 5, outboundDurationS: 8, feedingDurationS: 8, returnDurationS: 12,
+      // Playback advances incrementally; direct arbitrary-time reads remain bounded.
       fixedStepSeconds: 0.1, maximumReplaySteps: 340, policy,
     };
     const fish = Array.from({ length: definition.memberCount }, () => {
@@ -179,14 +182,14 @@ export class AnimalsFishWorldsLabPageComponent {
       root.add(mesh);
       return mesh;
     });
-    return { shape, root, water, definition, fish };
+    return { shape, root, water, definition, playback: createAnimalAquaticSchoolCyclePlayback(definition), fish };
   }
 
   private renderAt(time: number): void {
     const phases = { ...this.phases() };
     const replaySteps = { ...this.replaySteps() };
     for (const view of this.worldViews) {
-      const snapshot = sampleAnimalAquaticSchoolCycle(time, view.definition);
+      const snapshot = view.playback.sample(time);
       phases[view.shape] = snapshot.phase;
       replaySteps[view.shape] = snapshot.replaySteps;
       snapshot.members.forEach((member, index) => this.renderFish(view, view.fish[index], member, time));

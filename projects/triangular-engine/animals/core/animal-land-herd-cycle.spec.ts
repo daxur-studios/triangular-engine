@@ -1,4 +1,5 @@
 import {
+  createAnimalLandHerdCyclePlayback,
   sampleAnimalLandHerdCycle,
   selectAnimalGrazingPatch,
   type AnimalLandHerdCycleDefinition,
@@ -86,6 +87,18 @@ describe('animal land-herd cycle', () => {
     expect(sample.phase).toBe('resting');
     expect(sample.selectedGrazingPatchId).toBeUndefined();
     expect(sample.members.every(member => member.mode === 'rest' && member.patchId === 'home')).toBeTrue();
+  });
+
+  it('advances playback from the prior state and reconstructs after a backward seek', () => {
+    const definition = cycleDefinition();
+    const playback = createAnimalLandHerdCyclePlayback(definition);
+    playback.sample(5);
+    const incremental = playback.sample(6);
+    const direct = sampleAnimalLandHerdCycle(6, definition);
+
+    expect({ ...incremental, replaySteps: 0 }).toEqual({ ...direct, replaySteps: 0 });
+    expect(incremental.replaySteps).toBeLessThan(direct.replaySteps);
+    expect({ ...playback.sample(2), replaySteps: 0 }).toEqual({ ...sampleAnimalLandHerdCycle(2, definition), replaySteps: 0 });
   });
 
   it('requires enough viable home capacity to directly reconstruct every member', () => {

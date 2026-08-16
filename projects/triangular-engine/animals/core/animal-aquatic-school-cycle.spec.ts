@@ -1,4 +1,5 @@
 import {
+  createAnimalAquaticSchoolCyclePlayback,
   sampleAnimalAquaticSchoolCycle,
   selectAnimalAquaticHabitat,
   type AnimalAquaticSchoolCycleDefinition,
@@ -100,6 +101,18 @@ describe('animal aquatic-school cycle', () => {
     expect(sample.phase).toBe('home-schooling');
     expect(sample.selectedFeedingZoneId).toBeUndefined();
     expect(sample.members.every(member => member.mode === 'rest' && member.zoneId === 'home')).toBeTrue();
+  });
+
+  it('advances playback from the prior state and reconstructs after a backward seek', () => {
+    const definition = cycleDefinition();
+    const playback = createAnimalAquaticSchoolCyclePlayback(definition);
+    playback.sample(5);
+    const incremental = playback.sample(6);
+    const direct = sampleAnimalAquaticSchoolCycle(6, definition);
+
+    expect({ ...incremental, replaySteps: 0 }).toEqual({ ...direct, replaySteps: 0 });
+    expect(incremental.replaySteps).toBeLessThan(direct.replaySteps);
+    expect({ ...playback.sample(2), replaySteps: 0 }).toEqual({ ...sampleAnimalAquaticSchoolCycle(2, definition), replaySteps: 0 });
   });
 
   it('requires safe home capacity for every member before direct reconstruction', () => {

@@ -5,7 +5,8 @@ import {
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
-  sampleAnimalLandHerdCycle,
+  createAnimalLandHerdCyclePlayback,
+  type AnimalLandHerdCyclePlayback,
   type AnimalGrazingPatch,
   type AnimalLandHerdCycleDefinition,
   type AnimalLandHerdMember,
@@ -24,6 +25,7 @@ interface HerdWorldView {
   readonly root: Group;
   readonly surface: AnimalWorldSurface;
   readonly definition: AnimalLandHerdCycleDefinition;
+  readonly playback: AnimalLandHerdCyclePlayback;
   readonly animals: readonly Mesh[];
 }
 
@@ -171,6 +173,7 @@ export class AnimalsHerdWorldsLabPageComponent {
       groupId: `${shape}-herd`, groupSeed: 91, memberCount: 8,
       homePatch, grazingPatches,
       restDurationS: 5, outboundTravelDurationS: 10, grazeDurationS: 10, returnTravelDurationS: 15,
+      // Playback advances incrementally; direct arbitrary-time reads remain bounded.
       fixedStepSeconds: 0.1, maximumReplaySteps: 400, policy,
     };
     const animals = Array.from({ length: definition.memberCount }, () => {
@@ -178,7 +181,7 @@ export class AnimalsHerdWorldsLabPageComponent {
       root.add(animal);
       return animal;
     });
-    return { shape, label, root, surface, definition, animals };
+    return { shape, label, root, surface, definition, playback: createAnimalLandHerdCyclePlayback(definition), animals };
   }
 
   private renderAt(time: number): void {
@@ -186,7 +189,7 @@ export class AnimalsHerdWorldsLabPageComponent {
     const selectedPatches = { ...this.selectedPatches() };
     const replaySteps = { ...this.replaySteps() };
     for (const world of this.worldViews) {
-      const snapshot = sampleAnimalLandHerdCycle(time, world.definition);
+      const snapshot = world.playback.sample(time);
       phases[world.shape] = snapshot.phase;
       selectedPatches[world.shape] = snapshot.selectedGrazingPatchId ?? 'none';
       replaySteps[world.shape] = snapshot.replaySteps;
