@@ -58,19 +58,150 @@ export function generateFloraSkeleton(
     radiusEndM: trunkTipRadiusM,
   });
 
-  growFloraBranch(
-    nodes,
-    archetype,
-    random01,
-    /* parentId */ 0,
-    /* parentDepth */ 0,
-    trunkTopM,
-    UP,
-    trunkTipRadiusM,
-    trunkHeightM,
-  );
+  if (archetype.branching.distribution === 'tiered-whorls') {
+    growTieredWhorlsBranches(
+      nodes,
+      archetype,
+      random01,
+      trunkHeightM,
+      trunkRadiusM,
+    );
+  } else {
+    growFloraBranch(
+      nodes,
+      archetype,
+      random01,
+      /* parentId */ 0,
+      /* parentDepth */ 0,
+      trunkTopM,
+      UP,
+      trunkTipRadiusM,
+      trunkHeightM,
+    );
+  }
 
   return nodes;
+}
+
+function growTieredWhorlsBranches(
+  nodes: IFloraSkeletonNode[],
+  archetype: IFloraArchetype,
+  random01: () => number,
+  trunkHeightM: number,
+  trunkRadiusM: number,
+): void {
+  const config = archetype.branching.tieredWhorls;
+  if (!config || archetype.branching.maxDepth < 1) return;
+
+  const rawTierCount = Math.round(sampleProceduralRange(config.tierCount, random01()));
+  const tierCount = Math.max(1, rawTierCount);
+  const startY = trunkHeightM * config.startHeightFraction01;
+  const availableSpanY = Math.max(0.1, trunkHeightM * 0.94 - startY);
+  const baseBranchLength = trunkHeightM * sampleProceduralRange(config.baseBranchLengthFraction, random01());
+
+  for (let t = 0; t < tierCount; t++) {
+    const tProg = tierCount === 1 ? 0.5 : t / (tierCount - 1);
+    const tierY = startY + tProg * availableSpanY;
+    const normH = Math.min(1, tierY / trunkHeightM);
+    const tierTrunkRadius = trunkRadiusM * (1 - archetype.trunk.taper01 * normH);
+
+    // Conical taper from bottom to top: lower tiers long, top tiers short
+    const conicalScale = Math.pow(1 - tProg, 0.8) * 0.85 + 0.15;
+    const tierBranchLength = baseBranchLength * conicalScale * (0.85 + random01() * 0.3);
+
+    const branchCount = Math.round(sampleProceduralRange(config.branchesPerTier, random01()));
+    const tierAzimuthBase = (t * 0.61803398875 * Math.PI * 2) + (random01() - 0.5) * 0.3;
+
+    for (let b = 0; b < branchCount; b++) {
+      const az = tierAzimuthBase + (b / branchCount) * Math.PI * 2 + (random01() - 0.5) * 0.15;
+      const droop = sampleProceduralRange(config.droopRad, random01());
+
+      const cosDroop = Math.cos(droop);
+      const sinDroop = Math.sin(droop);
+      const dirX = Math.cos(az) * cosDroop;
+      const dirY = -sinDroop;
+      const dirZ = Math.sin(az) * cosDroop;
+
+      const originM: readonly [number, number, number] = [0, tierY, 0];
+      const endM: readonly [number, number, number] = [
+        dirX * tierBranchLength,
+        tierY + dirY * tierBranchLength,
+        dirZ * tierBranchLength,
+      ];
+
+      if (nodes.length >= FLORA_MAX_SKELETON_NODES) {
+        throw new RangeError(
+          `Flora skeleton exceeds ${FLORA_MAX_SKELETON_NODES} nodes. ` +
+            'Reduce branching.maxDepth or childrenPerNode.',
+        );
+      }
+
+      const branchRadiusStart = tierTrunkRadius * 0.48;
+      const branchRadiusEnd = tierTrunkRadius * 0.2;
+      const branchId = nodes.length;
+
+      nodes.push({
+        id: branchId,
+        parentId: 0,
+        depth: 1,
+        startM: originM,
+        endM,
+        radiusStartM: branchRadiusStart,
+        radiusEndM: branchRadiusEnd,
+      });
+
+      if (archetype.branching.maxDepth >= 2) {
+        const subCount = Math.round(sampleProceduralRange(archetype.branching.childrenPerNode, random01()));
+        const perpX = -Math.sin(az);
+        const perpZ = Math.cos(az);
+
+        for (let s = 0; s < subCount; s++) {
+          if (nodes.length >= FLORA_MAX_SKELETON_NODES) {
+            throw new RangeError(
+              `Flora skeleton exceeds ${FLORA_MAX_SKELETON_NODES} nodes. ` +
+                'Reduce branching.maxDepth or childrenPerNode.',
+            );
+          }
+
+          const attachFrac = 0.35 + ((s + 0.5) / Math.max(1, subCount)) * 0.5;
+          const subOriginM: readonly [number, number, number] = [
+            originM[0] + (endM[0] - originM[0]) * attachFrac,
+            originM[1] + (endM[1] - originM[1]) * attachFrac,
+            originM[2] + (endM[2] - originM[2]) * attachFrac,
+          ];
+
+          const side = s % 2 === 0 ? 1 : -1;
+          const fanAngleRad = sampleProceduralRange(archetype.branching.spreadAngleRad, random01());
+          const subLen = tierBranchLength * archetype.branching.lengthFalloff01 * (0.6 + random01() * 0.4);
+
+          const sDirX = dirX * Math.cos(fanAngleRad) + perpX * side * Math.sin(fanAngleRad);
+          const sDirZ = dirZ * Math.cos(fanAngleRad) + perpZ * side * Math.sin(fanAngleRad);
+          const sDirY = dirY * 0.5 + 0.05;
+          const sDirLen = Math.hypot(sDirX, sDirY, sDirZ) || 1;
+
+          const subEndM: readonly [number, number, number] = [
+            subOriginM[0] + (sDirX / sDirLen) * subLen,
+            subOriginM[1] + (sDirY / sDirLen) * subLen,
+            subOriginM[2] + (sDirZ / sDirLen) * subLen,
+          ];
+
+          const subRadiusStart = branchRadiusEnd * 0.8;
+          const subRadiusEnd = branchRadiusEnd * 0.4;
+          const subId = nodes.length;
+
+          nodes.push({
+            id: subId,
+            parentId: branchId,
+            depth: 2,
+            startM: subOriginM,
+            endM: subEndM,
+            radiusStartM: subRadiusStart,
+            radiusEndM: subRadiusEnd,
+          });
+        }
+      }
+    }
+  }
 }
 
 function growFloraBranch(

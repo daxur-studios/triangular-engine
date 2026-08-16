@@ -17,7 +17,9 @@ consumer coordinates, not floating-origin render coordinates.
 primitive with stable member IDs and offsets. Travel uses the consumer-supplied
 local direction; feeding and resting snapshots start stationary. Observer
 residency can unload the members and recreate the same result later without
-persisting every bird.
+persisting every bird. `handoffAnimalGroupResidency()` makes that transition
+explicit: groups are aggregate-only, materialized for a nearby observer, or
+retained as individual members for an active interaction or explicit tracking.
 
 Run the focused headless suite with
 `npm run test:triangular-engine:animals`.

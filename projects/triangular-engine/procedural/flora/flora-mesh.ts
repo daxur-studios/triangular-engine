@@ -76,6 +76,26 @@ export function buildFloraMesh(
         );
       }
     }
+  } else if (archetype.foliage.style === 'conifer-tiered') {
+    const rootNode = skeleton[0];
+    const coniferConfig = archetype.foliage.coniferTiered;
+    const spireHeightM = coniferConfig
+      ? (coniferConfig.spireHeightM[0] + coniferConfig.spireHeightM[1]) / 2
+      : 1.4;
+    const spireRadiusM = coniferConfig
+      ? (coniferConfig.spireRadiusM[0] + coniferConfig.spireRadiusM[1]) / 2
+      : 0.45;
+    const boughWidthScale = coniferConfig?.boughWidthM
+      ? (coniferConfig.boughWidthM[0] + coniferConfig.boughWidthM[1]) / 2
+      : (archetype.foliage.sizeM[0] + archetype.foliage.sizeM[1]) / 2;
+
+    appendFloraConiferApex(positions, normals, windWeights, indices, rootNode.endM, spireRadiusM, spireHeightM);
+
+    for (const node of skeleton) {
+      if (node.depth >= 1) {
+        appendFloraConiferBough(positions, normals, windWeights, indices, node, boughWidthScale);
+      }
+    }
   } else if (archetype.foliage.style !== 'none') {
     const sizeM = (archetype.foliage.sizeM[0] + archetype.foliage.sizeM[1]) / 2;
     for (const node of tipNodes) {
@@ -291,5 +311,191 @@ function appendFloraFrondFan(
       windWeights.push(1);
     }
     indices.push(backBase, backBase + 2, backBase + 1, backBase, backBase + 3, backBase + 2);
+  }
+}
+
+const scratchEdgeA = new Vector3();
+const scratchEdgeB = new Vector3();
+const scratchBoughDir = new Vector3();
+const scratchBoughPerp = new Vector3();
+const scratchBoughUp = new Vector3();
+const scratchStationCenter = new Vector3();
+
+function pushFloraTriangle(
+  positions: number[],
+  normals: number[],
+  windWeights: number[],
+  indices: number[],
+  p1: Vector3,
+  p2: Vector3,
+  p3: Vector3,
+  w1: number,
+  w2: number,
+  w3: number,
+): void {
+  scratchEdgeA.subVectors(p2, p1);
+  scratchEdgeB.subVectors(p3, p1);
+  scratchNormal.crossVectors(scratchEdgeA, scratchEdgeB);
+  if (scratchNormal.lengthSq() > 0) scratchNormal.normalize();
+  else scratchNormal.set(0, 1, 0);
+
+  const base = positions.length / 3;
+  positions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z);
+  normals.push(
+    scratchNormal.x,
+    scratchNormal.y,
+    scratchNormal.z,
+    scratchNormal.x,
+    scratchNormal.y,
+    scratchNormal.z,
+    scratchNormal.x,
+    scratchNormal.y,
+    scratchNormal.z,
+  );
+  windWeights.push(w1, w2, w3);
+  indices.push(base, base + 1, base + 2);
+}
+
+/** Builds the pointed conical apex / spire at the pinnacle of the conifer trunk. */
+function appendFloraConiferApex(
+  positions: number[],
+  normals: number[],
+  windWeights: number[],
+  indices: number[],
+  trunkTopM: readonly [number, number, number],
+  radiusM: number,
+  heightM: number,
+): void {
+  const [cx, cy, cz] = trunkTopM;
+  const segments = 6;
+
+  // Tier 1: Main top spire
+  const spireTip = new Vector3(cx, cy + heightM, cz);
+  const spireBaseY = cy - heightM * 0.15;
+  const spireBasePts: Vector3[] = [];
+  for (let i = 0; i < segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    spireBasePts.push(new Vector3(cx + Math.cos(angle) * radiusM, spireBaseY, cz + Math.sin(angle) * radiusM));
+  }
+  for (let i = 0; i < segments; i++) {
+    const next = (i + 1) % segments;
+    pushFloraTriangle(
+      positions,
+      normals,
+      windWeights,
+      indices,
+      spireBasePts[i],
+      spireTip,
+      spireBasePts[next],
+      0.85,
+      0.95,
+      0.85,
+    );
+  }
+
+  // Tier 2: Lower crown cone skirt
+  const skirtTip = new Vector3(cx, cy + heightM * 0.2, cz);
+  const skirtBaseY = cy - heightM * 0.65;
+  const skirtRadius = radiusM * 1.5;
+  const skirtBasePts: Vector3[] = [];
+  for (let i = 0; i < segments; i++) {
+    const angle = (i / segments) * Math.PI * 2 + Math.PI / segments;
+    skirtBasePts.push(new Vector3(cx + Math.cos(angle) * skirtRadius, skirtBaseY, cz + Math.sin(angle) * skirtRadius));
+  }
+  for (let i = 0; i < segments; i++) {
+    const next = (i + 1) % segments;
+    pushFloraTriangle(
+      positions,
+      normals,
+      windWeights,
+      indices,
+      skirtBasePts[i],
+      skirtTip,
+      skirtBasePts[next],
+      0.75,
+      0.85,
+      0.75,
+    );
+  }
+}
+
+/** Builds a 3D faceted conifer bough mantle along a skeleton branch. */
+function appendFloraConiferBough(
+  positions: number[],
+  normals: number[],
+  windWeights: number[],
+  indices: number[],
+  node: IFloraSkeletonNode,
+  boughWidthScale: number,
+): void {
+  const start = new Vector3(node.startM[0], node.startM[1], node.startM[2]);
+  const end = new Vector3(node.endM[0], node.endM[1], node.endM[2]);
+  scratchBoughDir.subVectors(end, start);
+  const length = scratchBoughDir.length();
+  if (length < 0.001) return;
+  scratchBoughDir.normalize();
+
+  scratchArbitrary.set(0, 1, 0);
+  if (Math.abs(scratchBoughDir.dot(scratchArbitrary)) > 0.92) {
+    scratchArbitrary.set(1, 0, 0);
+  }
+  scratchBoughPerp.crossVectors(scratchBoughDir, scratchArbitrary).normalize();
+  scratchBoughUp.crossVectors(scratchBoughPerp, scratchBoughDir).normalize();
+
+  const wM = boughWidthScale * Math.min(1.3, Math.max(0.45, length * 0.55));
+  const hM = wM * 0.28;
+
+  const stationFracs = [0.15, 0.48, 0.82, 1.05] as const;
+  const widthFactors = [0.35, 1.0, 0.78, 0.08] as const;
+  const heightFactors = [0.4, 1.0, 0.85, 0.12] as const;
+  const droopFactors = [0.2, 0.65, 0.9, 1.0] as const;
+
+  const rings: [Vector3, Vector3, Vector3, Vector3][] = [];
+  const weights: number[] = [];
+
+  for (let k = 0; k < 4; k++) {
+    const frac = stationFracs[k];
+    scratchStationCenter.copy(start).addScaledVector(scratchBoughDir, length * frac);
+
+    const w = wM * widthFactors[k];
+    const rh = hM * heightFactors[k];
+    const droop = -wM * 0.35 * droopFactors[k];
+
+    const ridge = new Vector3().copy(scratchStationCenter).addScaledVector(scratchBoughUp, rh);
+    const right = new Vector3()
+      .copy(scratchStationCenter)
+      .addScaledVector(scratchBoughPerp, w)
+      .add(new Vector3(0, droop, 0));
+    const keel = new Vector3().copy(scratchStationCenter).addScaledVector(scratchBoughUp, -rh * 0.4);
+    const left = new Vector3()
+      .copy(scratchStationCenter)
+      .addScaledVector(scratchBoughPerp, -w)
+      .add(new Vector3(0, droop, 0));
+
+    rings.push([ridge, right, keel, left]);
+    weights.push(Math.min(1, 0.4 + frac * 0.6));
+  }
+
+  for (let k = 0; k < 3; k++) {
+    const [A0, A1, A2, A3] = rings[k];
+    const [B0, B1, B2, B3] = rings[k + 1];
+    const wA = weights[k];
+    const wB = weights[k + 1];
+
+    // Top-Right facet
+    pushFloraTriangle(positions, normals, windWeights, indices, A0, B0, B1, wA, wB, wB);
+    pushFloraTriangle(positions, normals, windWeights, indices, A0, B1, A1, wA, wB, wA);
+
+    // Bottom-Right facet
+    pushFloraTriangle(positions, normals, windWeights, indices, A1, B1, B2, wA, wB, wB);
+    pushFloraTriangle(positions, normals, windWeights, indices, A1, B2, A2, wA, wB, wA);
+
+    // Bottom-Left facet
+    pushFloraTriangle(positions, normals, windWeights, indices, A2, B2, B3, wA, wB, wB);
+    pushFloraTriangle(positions, normals, windWeights, indices, A2, B3, A3, wA, wB, wA);
+
+    // Top-Left facet
+    pushFloraTriangle(positions, normals, windWeights, indices, A3, B3, B0, wA, wB, wB);
+    pushFloraTriangle(positions, normals, windWeights, indices, A3, B0, A0, wA, wB, wA);
   }
 }

@@ -138,10 +138,14 @@ export function deriveFloraSockets(
     const nodesAtDepth = nodesByDepth.get(Number(depthKey)) ?? [];
     const candidates = nodesAtDepth.filter((node) => isPerchableBranch(node, perchMinRadiusM));
     const take = Math.min(count, candidates.length);
-    for (let i = 0; i < take; i++) {
-      const node = candidates[i];
-      const avgRadiusM = (node.radiusStartM + node.radiusEndM) / 2;
-      pushSocket('perch', branchMidpointM(node), avgRadiusM + PERCH_CLEARANCE_MARGIN_M);
+    if (take > 0) {
+      const step = candidates.length / take;
+      for (let i = 0; i < take; i++) {
+        const index = Math.min(candidates.length - 1, Math.floor(i * step + step * 0.5));
+        const node = candidates[index];
+        const avgRadiusM = (node.radiusStartM + node.radiusEndM) / 2;
+        pushSocket('perch', branchMidpointM(node), avgRadiusM + PERCH_CLEARANCE_MARGIN_M);
+      }
     }
   }
 
@@ -181,12 +185,14 @@ export function deriveFloraSockets(
   if (wantsFoliageSockets) {
     const foliageSizeM = (archetype.foliage.sizeM[0] + archetype.foliage.sizeM[1]) / 2;
 
-    if (archetype.sockets.fruitSlotsMax > 0) {
+    if (archetype.sockets.fruitSlotsMax > 0 && tipNodes.length > 0) {
       const take = Math.min(archetype.sockets.fruitSlotsMax, tipNodes.length);
+      const step = tipNodes.length / take;
       for (let i = 0; i < take; i++) {
+        const index = Math.min(tipNodes.length - 1, Math.floor(i * step + step * 0.5));
         pushSocket(
           'fruit-slot',
-          tipNodes[i].endM,
+          tipNodes[index].endM,
           foliageSizeM * FRUIT_SLOT_CLEARANCE_FRACTION_OF_FOLIAGE_SIZE,
         );
       }

@@ -153,6 +153,43 @@ describe('deriveFloraSockets', () => {
     expect(sockets.filter((s) => s.kind === 'flower-head').length).toBe(tipCount);
   });
 
+  it('places frond-base perches for radial-fronds archetypes with no perchable limbs', () => {
+    const archetype = makeArchetype({
+      branching: { maxDepth: 0, childrenPerNode: [0, 0], spreadAngleRad: [0, 0], lengthFalloff01: 0 },
+      foliage: {
+        style: 'radial-fronds',
+        sizeM: [0.3, 0.4],
+        radialFronds: { frondCount: 7, frondLengthM: [1.8, 2.4], frondDroopRad: 0.45 },
+      },
+      sockets: { perchesPerBranchDepth: {}, nestCavityChance01: 0, fruitSlotsMax: 0, flowerHeads: false, frondPerches: 3 },
+    });
+    const skeleton = generateFloraSkeleton(archetype, 2);
+    const sockets = deriveFloraSockets(skeleton, archetype, 2);
+    expect(sockets.filter((s) => s.kind === 'perch').length).toBe(3);
+  });
+
+  it('caps frond perches at frondCount and places none when frondPerches is unset', () => {
+    const archetype = makeArchetype({
+      branching: { maxDepth: 0, childrenPerNode: [0, 0], spreadAngleRad: [0, 0], lengthFalloff01: 0 },
+      foliage: {
+        style: 'radial-fronds',
+        sizeM: [0.3, 0.4],
+        radialFronds: { frondCount: 4, frondLengthM: [1.8, 2.4], frondDroopRad: 0.45 },
+      },
+      sockets: { perchesPerBranchDepth: {}, nestCavityChance01: 0, fruitSlotsMax: 0, flowerHeads: false, frondPerches: 99 },
+    });
+    const skeleton = generateFloraSkeleton(archetype, 2);
+    const capped = deriveFloraSockets(skeleton, archetype, 2);
+    expect(capped.filter((s) => s.kind === 'perch').length).toBe(4);
+
+    const unset = deriveFloraSockets(
+      skeleton,
+      { ...archetype, sockets: { ...archetype.sockets, frondPerches: undefined } },
+      2,
+    );
+    expect(unset.some((s) => s.kind === 'perch')).toBe(false);
+  });
+
   it('produces no NaN positions or clearance radii', () => {
     const archetype = makeArchetype({
       sockets: { perchesPerBranchDepth: { 0: 1, 1: 2 }, nestCavityChance01: 1, fruitSlotsMax: 3, flowerHeads: true },
@@ -164,5 +201,47 @@ describe('deriveFloraSockets', () => {
         expect(Number.isFinite(value)).toBe(true);
       }
     }
+  });
+
+  it('distributes perches and fruit slots across different tier heights on tiered-whorls pine', () => {
+    const pineArchetype = makeArchetype({
+      id: 'pine-sockets-test',
+      trunk: { heightM: [8, 8], radiusM: [0.3, 0.3], taper01: 0.6 },
+      branching: {
+        distribution: 'tiered-whorls',
+        maxDepth: 2,
+        childrenPerNode: [2, 2],
+        spreadAngleRad: [0.4, 0.6],
+        lengthFalloff01: 0.5,
+        tieredWhorls: {
+          tierCount: [6, 6],
+          startHeightFraction01: 0.2,
+          branchesPerTier: [4, 4],
+          droopRad: [0.1, 0.15],
+          baseBranchLengthFraction: [0.4, 0.4],
+        },
+      },
+      foliage: { style: 'conifer-tiered', sizeM: [0.6, 0.8] },
+      sockets: { perchesPerBranchDepth: { 1: 4 }, nestCavityChance01: 0, fruitSlotsMax: 4, flowerHeads: false },
+    });
+
+    const skeleton = generateFloraSkeleton(pineArchetype, 42);
+    const sockets = deriveFloraSockets(skeleton, pineArchetype, 42);
+
+    const perches = sockets.filter((s) => s.kind === 'perch');
+    expect(perches.length).toBe(4);
+    const perchHeights = perches.map((p) => p.positionM[1]);
+    const minPerchH = Math.min(...perchHeights);
+    const maxPerchH = Math.max(...perchHeights);
+    // Perches should not all be at the bottom; they should span across tiers
+    expect(maxPerchH - minPerchH).toBeGreaterThan(2.5);
+
+    const fruits = sockets.filter((s) => s.kind === 'fruit-slot');
+    expect(fruits.length).toBe(4);
+    const fruitHeights = fruits.map((f) => f.positionM[1]);
+    const minFruitH = Math.min(...fruitHeights);
+    const maxFruitH = Math.max(...fruitHeights);
+    // Fruit slots should also span across tiers
+    expect(maxFruitH - minFruitH).toBeGreaterThan(2.5);
   });
 });

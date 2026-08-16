@@ -76,3 +76,73 @@ describe('generateFloraSkeleton', () => {
     }
   });
 });
+
+describe('generateFloraSkeleton with tiered-whorls', () => {
+  function makePineArchetype(): IFloraArchetype {
+    return makeArchetype({
+      id: 'pine-01',
+      trunk: { heightM: [7, 8], radiusM: [0.25, 0.35], taper01: 0.6 },
+      branching: {
+        distribution: 'tiered-whorls',
+        maxDepth: 2,
+        childrenPerNode: [2, 3],
+        spreadAngleRad: [0.4, 0.7],
+        lengthFalloff01: 0.5,
+        tieredWhorls: {
+          tierCount: [5, 6],
+          startHeightFraction01: 0.22,
+          branchesPerTier: [4, 5],
+          droopRad: [0.1, 0.2],
+          baseBranchLengthFraction: [0.4, 0.45],
+        },
+      },
+      foliage: { style: 'conifer-tiered', sizeM: [0.6, 0.9] },
+    });
+  }
+
+  it('is deterministic for identical archetype + seed', () => {
+    const archetype = makePineArchetype();
+    const a = generateFloraSkeleton(archetype, 13);
+    const b = generateFloraSkeleton(archetype, 13);
+    expect(a).toEqual(b);
+  });
+
+  it('generates tier branches distributed along the trunk height', () => {
+    const archetype = makePineArchetype();
+    const nodes = generateFloraSkeleton(archetype, 5);
+    const depth1 = nodes.filter((n) => n.depth === 1);
+    expect(depth1.length).toBeGreaterThanOrEqual(15);
+
+    const attachHeights = depth1.map((n) => n.startM[1]);
+    const minHeight = Math.min(...attachHeights);
+    const maxHeight = Math.max(...attachHeights);
+
+    // Lowest tier starts above ground (startHeightFraction ~0.22 of 7.5m = ~1.65m)
+    expect(minHeight).toBeGreaterThan(1.0);
+    // Highest tier reaches near top of trunk (~6.5m)
+    expect(maxHeight).toBeGreaterThan(minHeight + 3.0);
+  });
+
+  it('lower tier branches are longer than upper tier branches', () => {
+    const archetype = makePineArchetype();
+    const nodes = generateFloraSkeleton(archetype, 5);
+    const depth1 = nodes.filter((n) => n.depth === 1);
+
+    const sortedByHeight = [...depth1].sort((a, b) => a.startM[1] - b.startM[1]);
+    const lowest = sortedByHeight[0];
+    const highest = sortedByHeight[sortedByHeight.length - 1];
+
+    const lowLen = Math.hypot(
+      lowest.endM[0] - lowest.startM[0],
+      lowest.endM[1] - lowest.startM[1],
+      lowest.endM[2] - lowest.startM[2],
+    );
+    const highLen = Math.hypot(
+      highest.endM[0] - highest.startM[0],
+      highest.endM[1] - highest.startM[1],
+      highest.endM[2] - highest.startM[2],
+    );
+
+    expect(lowLen).toBeGreaterThan(highLen);
+  });
+});

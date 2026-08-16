@@ -32,29 +32,43 @@ export const FLORA_OAK_COLORS: IFloraSpeciesColorHints = {
   leafHex: '#4f8a3d',
 };
 
-/** Tall, narrow, upward-swept branches with fast length falloff — a conical silhouette from dense small tip clusters. */
+/** Tall conifer — full central trunk with tiered horizontal whorls that taper toward a spire crown, matching classic conifer/spruce morphology. */
 export const FLORA_PINE_ARCHETYPE: IFloraArchetype = {
   schemaVersion: 1,
   id: 'flora-pine',
   name: 'Pine',
   kind: 'tree',
-  trunk: { heightM: [6, 9], radiusM: [0.22, 0.32], taper01: 0.6 },
+  trunk: { heightM: [6.5, 9.5], radiusM: [0.24, 0.34], taper01: 0.65 },
   branching: {
+    distribution: 'tiered-whorls',
     maxDepth: 2,
-    // Denser branching than oak — many small tip clusters fill out the cone.
-    childrenPerNode: [3, 4],
-    // Narrow and upward-swept, not oak's wide horizontal spread.
-    spreadAngleRad: [0.25, 0.55],
-    lengthFalloff01: 0.55,
+    childrenPerNode: [2, 3],
+    spreadAngleRad: [0.4, 0.7],
+    lengthFalloff01: 0.5,
+    tieredWhorls: {
+      tierCount: [5, 7],
+      startHeightFraction01: 0.22,
+      branchesPerTier: [4, 6],
+      droopRad: [0.1, 0.22],
+      baseBranchLengthFraction: [0.38, 0.48],
+    },
   },
-  foliage: { style: 'cluster-cone', sizeM: [0.5, 0.8] },
-  sockets: { perchesPerBranchDepth: { 1: 2 }, nestCavityChance01: 0.2, fruitSlotsMax: 2, flowerHeads: false },
+  foliage: {
+    style: 'conifer-tiered',
+    sizeM: [0.6, 0.95],
+    coniferTiered: {
+      spireHeightM: [1.3, 1.8],
+      spireRadiusM: [0.42, 0.62],
+      boughWidthM: [0.65, 0.95],
+    },
+  },
+  sockets: { perchesPerBranchDepth: { 1: 4, 2: 3 }, nestCavityChance01: 0.3, fruitSlotsMax: 6, flowerHeads: false },
   collider: { trunk: 'capsule' },
 };
 
 export const FLORA_PINE_COLORS: IFloraSpeciesColorHints = {
-  trunkHex: '#4a3a2c',
-  leafHex: '#2f5233',
+  trunkHex: '#422c1d',
+  leafHex: '#235235',
 };
 
 /** Zero branching — a single slender low-taper trunk topped with a radiating, drooping frond crown. */
@@ -76,8 +90,16 @@ export const FLORA_PALM_ARCHETYPE: IFloraArchetype = {
     sizeM: [0.3, 0.4],
     radialFronds: { frondCount: 7, frondLengthM: [1.8, 2.4], frondDroopRad: 0.45 },
   },
-  // No perches (no limbs) and no trunk cavities; fruit slots stand in for coconuts hanging under the crown.
-  sockets: { perchesPerBranchDepth: {}, nestCavityChance01: 0, fruitSlotsMax: 3, flowerHeads: false },
+  // No limb-based perches (no limbs) or trunk cavities; frondPerches puts birds
+  // on the drooping fronds themselves instead, and fruit slots stand in for
+  // coconuts hanging under the crown.
+  sockets: {
+    perchesPerBranchDepth: {},
+    nestCavityChance01: 0,
+    fruitSlotsMax: 3,
+    flowerHeads: false,
+    frondPerches: 3,
+  },
   collider: { trunk: 'capsule' },
 };
 

@@ -71,6 +71,9 @@ All notable changes to triangular-engine are documented here.
 - `triangular-engine/animals` now exports `materializeAnimalGroup()` to derive
   stable nearby flock members from an arbitrary-time aggregate snapshot. Flock
   materialization also respects its configured horizontal travel direction.
+- `triangular-engine/animals` now exports `handoffAnimalGroupResidency()` to
+  distinguish aggregate-only, nearby materialized, interacting, and explicitly
+  tracked groups while preserving deterministic unload/reload behavior.
 - `triangular-engine/spline` secondary entry point (Phase 0A — core geometry
   only). Open/closed splines with linear and cubic Bezier evaluation,
   adaptive arc-length sampling, a brute-force `closestPoint` reference

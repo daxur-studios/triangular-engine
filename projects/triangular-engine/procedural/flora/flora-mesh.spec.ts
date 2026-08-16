@@ -137,3 +137,77 @@ describe('buildFloraMesh with radial-fronds foliage', () => {
     expect(Math.max(...Array.from(windWeight))).toBe(1);
   });
 });
+
+describe('buildFloraMesh with conifer-tiered foliage', () => {
+  function makePineArchetype(): IFloraArchetype {
+    return makeArchetype({
+      id: 'pine-01',
+      trunk: { heightM: [7, 8], radiusM: [0.25, 0.35], taper01: 0.6 },
+      branching: {
+        distribution: 'tiered-whorls',
+        maxDepth: 2,
+        childrenPerNode: [2, 3],
+        spreadAngleRad: [0.4, 0.7],
+        lengthFalloff01: 0.5,
+        tieredWhorls: {
+          tierCount: [5, 6],
+          startHeightFraction01: 0.22,
+          branchesPerTier: [4, 5],
+          droopRad: [0.1, 0.2],
+          baseBranchLengthFraction: [0.4, 0.45],
+        },
+      },
+      foliage: {
+        style: 'conifer-tiered',
+        sizeM: [0.6, 0.9],
+        coniferTiered: {
+          spireHeightM: [1.3, 1.8],
+          spireRadiusM: [0.4, 0.6],
+          boughWidthM: [0.6, 0.9],
+        },
+      },
+    });
+  }
+
+  it('is deterministic for an identical skeleton', () => {
+    const archetype = makePineArchetype();
+    const skeleton = generateFloraSkeleton(archetype, 11);
+    const a = buildFloraMesh(skeleton, archetype);
+    const b = buildFloraMesh(skeleton, archetype);
+    expect(Array.from(a.geometry.getAttribute('position').array)).toEqual(
+      Array.from(b.geometry.getAttribute('position').array),
+    );
+  });
+
+  it('produces no NaN or infinite values in position/normal/windWeight', () => {
+    const archetype = makePineArchetype();
+    const skeleton = generateFloraSkeleton(archetype, 3);
+    const { geometry } = buildFloraMesh(skeleton, archetype);
+    for (const attrName of ['position', 'normal', 'windWeight']) {
+      const attr = geometry.getAttribute(attrName);
+      for (let i = 0; i < attr.array.length; i++) {
+        expect(Number.isFinite(attr.array[i])).toBe(true);
+      }
+    }
+  });
+
+  it('stays well within triangle budget while providing rich volume', () => {
+    const archetype = makePineArchetype();
+    const skeleton = generateFloraSkeleton(archetype, 7);
+    const result = buildFloraMesh(skeleton, archetype);
+    expect(result.triangleCount).toBeGreaterThan(400);
+    expect(result.triangleCount).toBeLessThan(5000);
+  });
+
+  it('root wind weight is 0 and max wind weight is high at bough tips', () => {
+    const archetype = makePineArchetype();
+    const skeleton = generateFloraSkeleton(archetype, 3);
+    const { geometry } = buildFloraMesh(skeleton, archetype);
+    const windWeight = geometry.getAttribute('windWeight').array;
+
+    for (let i = 0; i < 6; i++) {
+      expect(windWeight[i]).toBe(0);
+    }
+    expect(Math.max(...Array.from(windWeight))).toBeGreaterThanOrEqual(0.9);
+  });
+});

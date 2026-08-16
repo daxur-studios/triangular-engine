@@ -7,7 +7,13 @@ import {
 } from '../core/procedural-validation';
 
 export type FloraArchetypeKind = 'tree' | 'flower' | 'bush';
-export type FloraFoliageStyle = 'cluster-sphere' | 'cluster-cone' | 'radial-fronds' | 'none';
+export type FloraBranchingDistribution = 'apical' | 'tiered-whorls';
+export type FloraFoliageStyle =
+  | 'cluster-sphere'
+  | 'cluster-cone'
+  | 'radial-fronds'
+  | 'conifer-tiered'
+  | 'none';
 export type FloraTrunkColliderShape = 'capsule' | 'cylinder' | 'none';
 
 /** Flora-specific socket kinds — core's IProceduralSocket<TKind> knows nothing
@@ -22,6 +28,28 @@ export type FloraSocketKind =
 
 export interface IFloraSocket extends IProceduralSocket<FloraSocketKind> {}
 
+export interface IFloraTieredWhorlsBranchingConfig {
+  /** [min, max] count of horizontal branch tiers along the trunk. */
+  readonly tierCount: readonly [number, number];
+  /** Fraction from trunk base (0..1) where lowest tier starts, e.g. 0.2 leaving clear lower trunk. */
+  readonly startHeightFraction01: number;
+  /** [min, max] branches radiating per tier, e.g. [4, 6]. */
+  readonly branchesPerTier: readonly [number, number];
+  /** Downward droop angle range in radians for tier branches, e.g. [0.08, 0.25]. */
+  readonly droopRad: readonly [number, number];
+  /** Base branch length as a fraction of total trunk height for the bottom tier, e.g. [0.35, 0.5]. */
+  readonly baseBranchLengthFraction: readonly [number, number];
+}
+
+export interface IFloraConiferTieredFoliageConfig {
+  /** Height range of the apex spire cone atop the trunk tip, e.g. [1.0, 1.6]. */
+  readonly spireHeightM: readonly [number, number];
+  /** Radius range of the apex spire cone, e.g. [0.35, 0.6]. */
+  readonly spireRadiusM: readonly [number, number];
+  /** Lateral width/expansion of bough needle clusters across branch length, e.g. [0.4, 0.8]. */
+  readonly boughWidthM?: readonly [number, number];
+}
+
 export interface IFloraArchetype {
   readonly schemaVersion: 1;
   readonly id: string;
@@ -34,15 +62,19 @@ export interface IFloraArchetype {
     readonly taper01: number;
   };
   readonly branching: {
+    /** Distribution pattern: 'apical' forks at trunk top (oak/deciduous); 'tiered-whorls' distributes tiers along trunk height (pine/conifer). Defaults to 'apical'. */
+    readonly distribution?: FloraBranchingDistribution;
     /** 2-3 keeps it abstract, per the "not a botany simulator" scope note. */
     readonly maxDepth: number;
     readonly childrenPerNode: readonly [number, number];
     readonly spreadAngleRad: readonly [number, number];
     readonly lengthFalloff01: number;
+    /** Required when distribution === 'tiered-whorls'. */
+    readonly tieredWhorls?: IFloraTieredWhorlsBranchingConfig;
   };
   readonly foliage: {
     readonly style: FloraFoliageStyle;
-    /** For 'radial-fronds', this sizes the small hub bulge the fronds radiate from, not the fan itself. */
+    /** For 'radial-fronds' and 'conifer-tiered', this sizes the foliage element bounds. */
     readonly sizeM: readonly [number, number];
     /** Required (and only meaningful) when style === 'radial-fronds'. */
     readonly radialFronds?: {
@@ -50,6 +82,8 @@ export interface IFloraArchetype {
       readonly frondLengthM: readonly [number, number];
       readonly frondDroopRad: number;
     };
+    /** Optional tuning when style === 'conifer-tiered'. */
+    readonly coniferTiered?: IFloraConiferTieredFoliageConfig;
   };
   readonly sockets: {
     readonly perchesPerBranchDepth: Readonly<Record<number, number>>;
@@ -87,6 +121,52 @@ export function validateFloraArchetype(archetype: IFloraArchetype): void {
     'Flora archetype branching lengthFalloff01',
   );
 
+  if (archetype.branching.distribution === 'tiered-whorls') {
+    const tieredWhorls = archetype.branching.tieredWhorls;
+    if (!tieredWhorls) {
+      throw new RangeError(
+        "Flora archetype branching.tieredWhorls is required when distribution is 'tiered-whorls'.",
+      );
+    }
+    validateProceduralFiniteRange(tieredWhorls.tierCount, 'Flora archetype branching tieredWhorls.tierCount');
+    if (
+      !Number.isInteger(tieredWhorls.tierCount[0]) ||
+      !Number.isInteger(tieredWhorls.tierCount[1]) ||
+      tieredWhorls.tierCount[0] < 1
+    ) {
+      throw new RangeError('Flora archetype branching tieredWhorls.tierCount must be positive integers.');
+    }
+    validateProcedural01(
+      tieredWhorls.startHeightFraction01,
+      'Flora archetype branching tieredWhorls.startHeightFraction01',
+    );
+    validateProceduralFiniteRange(
+      tieredWhorls.branchesPerTier,
+      'Flora archetype branching tieredWhorls.branchesPerTier',
+    );
+    if (
+      !Number.isInteger(tieredWhorls.branchesPerTier[0]) ||
+      !Number.isInteger(tieredWhorls.branchesPerTier[1]) ||
+      tieredWhorls.branchesPerTier[0] < 1
+    ) {
+      throw new RangeError('Flora archetype branching tieredWhorls.branchesPerTier must be positive integers.');
+    }
+    validateProceduralFiniteRange(tieredWhorls.droopRad, 'Flora archetype branching tieredWhorls.droopRad');
+    if (
+      tieredWhorls.droopRad[0] < 0 ||
+      tieredWhorls.droopRad[1] > Math.PI / 2
+    ) {
+      throw new RangeError('Flora archetype branching tieredWhorls.droopRad must be within [0, PI/2].');
+    }
+    validateProceduralFiniteRange(
+      tieredWhorls.baseBranchLengthFraction,
+      'Flora archetype branching tieredWhorls.baseBranchLengthFraction',
+    );
+    if (tieredWhorls.baseBranchLengthFraction[0] <= 0) {
+      throw new RangeError('Flora archetype branching tieredWhorls.baseBranchLengthFraction must be positive.');
+    }
+  }
+
   validateProceduralFiniteRange(archetype.foliage.sizeM, 'Flora archetype foliage sizeM');
 
   if (archetype.foliage.style === 'radial-fronds') {
@@ -111,6 +191,30 @@ export function validateFloraArchetype(archetype: IFloraArchetype): void {
       throw new RangeError(
         'Flora archetype foliage radialFronds.frondDroopRad must be a finite number between 0 and PI/2.',
       );
+    }
+  }
+
+  if (archetype.foliage.style === 'conifer-tiered' && archetype.foliage.coniferTiered) {
+    const coniferTiered = archetype.foliage.coniferTiered;
+    validateProceduralFiniteRange(
+      coniferTiered.spireHeightM,
+      'Flora archetype foliage coniferTiered.spireHeightM',
+    );
+    validateProceduralFiniteRange(
+      coniferTiered.spireRadiusM,
+      'Flora archetype foliage coniferTiered.spireRadiusM',
+    );
+    if (coniferTiered.spireHeightM[0] <= 0 || coniferTiered.spireRadiusM[0] <= 0) {
+      throw new RangeError('Flora archetype foliage coniferTiered spire dimensions must be positive.');
+    }
+    if (coniferTiered.boughWidthM) {
+      validateProceduralFiniteRange(
+        coniferTiered.boughWidthM,
+        'Flora archetype foliage coniferTiered.boughWidthM',
+      );
+      if (coniferTiered.boughWidthM[0] <= 0) {
+        throw new RangeError('Flora archetype foliage coniferTiered.boughWidthM must be positive.');
+      }
     }
   }
 
