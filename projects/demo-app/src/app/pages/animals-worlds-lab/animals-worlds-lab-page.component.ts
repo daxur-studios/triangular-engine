@@ -147,8 +147,8 @@ export class AnimalsWorldsLabPageComponent {
       maximumSpeedMps: 6, maximumAccelerationMps2: 8,
       maximumSubstepDistanceM: 0.5, maximumSubsteps: 8,
       minimumAltitudeM: 0.5, maximumAltitudeM: 12, preferredAltitudeM: 6,
-      separationRadiusM: 1.1, separationWeight: 2.2, cohesionWeight: 0.7,
-      alignmentWeight: 0.25, targetWeight: 4, arrivalRadiusM: 0.4,
+      separationRadiusM: 1.4, separationWeight: 3.2, cohesionWeight: 1.1,
+      alignmentWeight: 0.8, targetWeight: 1.35, arrivalRadiusM: 0.4,
       holdingRadiusM: 4, holdingSpeedMps: 2.5, roostSlotSpacingM: 0.48,
     };
     const definition: AnimalAirFlockCycleDefinition = {

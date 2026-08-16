@@ -165,8 +165,8 @@ export class AnimalsFishWorldsLabPageComponent {
       maximumSubstepDistanceM: 0.3, maximumSubsteps: 8,
       minimumSurfaceClearanceM: 0.8, minimumBottomClearanceM: 0.8,
       preferredSurfaceClearanceM: FISH_DEPTH_M, maximumSurfaceClearanceM: 2.2,
-      segmentSampleSpacingM: 0.25, separationRadiusM: 0.9, separationWeight: 2,
-      cohesionWeight: 0.7, alignmentWeight: 0.2, targetWeight: 4,
+      segmentSampleSpacingM: 0.25, separationRadiusM: 1.2, separationWeight: 3,
+      cohesionWeight: 1.1, alignmentWeight: 0.75, targetWeight: 1.35,
       flowWeight: 0.15, depthWeight: 1.5, arrivalRadiusM: 0.3,
       slotSpacingM: 0.65, maximumAvoidanceAttempts: 4,
     };

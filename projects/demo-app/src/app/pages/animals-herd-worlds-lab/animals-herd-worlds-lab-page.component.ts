@@ -165,8 +165,8 @@ export class AnimalsHerdWorldsLabPageComponent {
       maximumSpeedMps: 2.5, maximumAccelerationMps2: 4,
       maximumSubstepDistanceM: 0.3, maximumSubsteps: 8,
       maximumSlope01: 0.6, maximumPatchDistanceM: 30, minimumPatchSuitability01: 0.3,
-      separationRadiusM: 1.3, separationWeight: 2, cohesionWeight: 0.7,
-      alignmentWeight: 0.2, targetWeight: 4, arrivalRadiusM: 0.3,
+      separationRadiusM: 1.6, separationWeight: 3, cohesionWeight: 1.1,
+      alignmentWeight: 0.75, targetWeight: 1.35, arrivalRadiusM: 0.3,
       slotSpacingM: 0.8, maximumAvoidanceAttempts: 4,
     };
     const definition: AnimalLandHerdCycleDefinition = {
