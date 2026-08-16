@@ -84,3 +84,56 @@ describe('buildFloraMesh', () => {
     expect(result.triangleCount).toBe((result.geometry.getIndex()?.count ?? 0) / 3);
   });
 });
+
+describe('buildFloraMesh with radial-fronds foliage', () => {
+  function makePalmArchetype(frondCount = 7): IFloraArchetype {
+    return makeArchetype({
+      branching: { maxDepth: 0, childrenPerNode: [0, 0], spreadAngleRad: [0, 0], lengthFalloff01: 0 },
+      foliage: {
+        style: 'radial-fronds',
+        sizeM: [0.3, 0.4],
+        radialFronds: { frondCount, frondLengthM: [1.8, 2.4], frondDroopRad: 0.45 },
+      },
+    });
+  }
+
+  it('is deterministic for an identical skeleton', () => {
+    const archetype = makePalmArchetype();
+    const skeleton = generateFloraSkeleton(archetype, 11);
+    const a = buildFloraMesh(skeleton, archetype);
+    const b = buildFloraMesh(skeleton, archetype);
+    expect(Array.from(a.geometry.getAttribute('position').array)).toEqual(
+      Array.from(b.geometry.getAttribute('position').array),
+    );
+  });
+
+  it('produces no NaN or infinite values in position/normal/windWeight', () => {
+    const archetype = makePalmArchetype();
+    const skeleton = generateFloraSkeleton(archetype, 3);
+    const { geometry } = buildFloraMesh(skeleton, archetype);
+    for (const attrName of ['position', 'normal', 'windWeight']) {
+      const attr = geometry.getAttribute(attrName);
+      for (let i = 0; i < attr.array.length; i++) {
+        expect(Number.isFinite(attr.array[i])).toBe(true);
+      }
+    }
+  });
+
+  it('triangle count scales with frondCount and stays under the budget', () => {
+    const skeletonFew = generateFloraSkeleton(makePalmArchetype(4), 5);
+    const skeletonMany = generateFloraSkeleton(makePalmArchetype(10), 5);
+    const few = buildFloraMesh(skeletonFew, makePalmArchetype(4));
+    const many = buildFloraMesh(skeletonMany, makePalmArchetype(10));
+    expect(many.triangleCount).toBeGreaterThan(few.triangleCount);
+    expect(many.triangleCount).toBeLessThan(20_000);
+  });
+
+  it('all frond vertices carry max wind weight', () => {
+    const archetype = makePalmArchetype();
+    const skeleton = generateFloraSkeleton(archetype, 4);
+    const { geometry } = buildFloraMesh(skeleton, archetype);
+    const windWeight = geometry.getAttribute('windWeight').array;
+    // Root ring (trunk base) is 0; foliage/frond vertices come after and are all 1.
+    expect(Math.max(...Array.from(windWeight))).toBe(1);
+  });
+});

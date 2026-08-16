@@ -37,11 +37,12 @@ import {
   buildFloraMesh,
   deriveFloraSockets,
   deriveFloraTrunkCollider,
+  FLORA_OAK_ARCHETYPE,
+  FLORA_OAK_COLORS,
   generateFloraSkeleton,
   hashProceduralKey,
   transformProceduralSocket,
   type FloraSocketKind,
-  type IFloraArchetype,
   type IFloraColliderDescriptor,
   type IFloraSocket,
   type IProceduralInstanceTransform,
@@ -80,7 +81,9 @@ const SCATTER_FIXED_LEVEL_DEPTH = 1;
 const WORLD_SEED = 7_331;
 
 const TREE_LAYER_ID = 'flora-trees';
-const TREE_SPECIES_ID = 'demo-oak';
+/** Shared oak archetype from flora-species-catalog — see that page for M1/M2's socket-eligibility tuning notes. */
+const DEMO_OAK_ARCHETYPE = FLORA_OAK_ARCHETYPE;
+const TREE_SPECIES_ID = DEMO_OAK_ARCHETYPE.id;
 const TREE_GENERATOR_VERSION = 1;
 const TREE_CANDIDATE_POOL_SIZE = 12;
 const TREE_DENSITY_01 = 0.45;
@@ -91,29 +94,12 @@ const TREE_RULES: ScatterPlacementRules = {
 const TREE_SCALE: ScatterScaleRange = { min: 0.85, max: 1.3 };
 const TREE_WIND: ScatterWindDefinition = { strength: 0.05, frequency: 0.9 };
 
-/** Same shape family as flora-lab's demo archetype — see that page for M1/M2's socket-eligibility tuning notes. */
-const DEMO_OAK_ARCHETYPE: IFloraArchetype = {
-  schemaVersion: 1,
-  id: TREE_SPECIES_ID,
-  name: 'Demo oak',
-  kind: 'tree',
-  trunk: { heightM: [3.5, 5], radiusM: [0.28, 0.4], taper01: 0.45 },
-  branching: {
-    maxDepth: 3,
-    childrenPerNode: [2, 3],
-    spreadAngleRad: [0.6, 1.3],
-    lengthFalloff01: 0.68,
-  },
-  foliage: { style: 'cluster-sphere', sizeM: [0.9, 1.5] },
-  sockets: { perchesPerBranchDepth: { 1: 3, 2: 2 }, nestCavityChance01: 0.5, fruitSlotsMax: 4, flowerHeads: false },
-  collider: { trunk: 'capsule' },
-};
 /** M4's "6-10 variants" — one skeleton+mesh generation per seed, scatter instances them normally (see docs/runbook/014). */
 const VARIANT_COUNT = 6;
 const FLORA_BASE_SEED = 1;
 
-const TRUNK_COLOR = new Color('#6b4a2f');
-const LEAF_COLOR = new Color('#4f8a3d');
+const TRUNK_COLOR = new Color(FLORA_OAK_COLORS.trunkHex);
+const LEAF_COLOR = new Color(FLORA_OAK_COLORS.leafHex);
 
 const SOCKET_GIZMO_RADIUS_M = 0.14;
 const SOCKET_GIZMO_COLOR_BY_KIND: Record<FloraSocketKind, string> = {

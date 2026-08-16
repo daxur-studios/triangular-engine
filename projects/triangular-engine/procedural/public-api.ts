@@ -8,3 +8,4 @@ export * from './flora/flora-collider';
 export * from './flora/flora-mesh';
 export * from './flora/flora-skeleton';
 export * from './flora/flora-sockets';
+export * from './flora/flora-species-catalog';

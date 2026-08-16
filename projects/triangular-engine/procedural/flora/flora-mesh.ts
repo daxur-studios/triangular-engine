@@ -11,6 +11,10 @@ export interface IFloraMeshResult {
 
 /** Sides per tube ring — low-poly on purpose, see doc "Core principle". */
 const TUBE_RADIAL_SEGMENTS = 6;
+/** Where a frond blade is at its widest, as a fraction of its full length from the base. */
+const FROND_WIDTH_MIDPOINT_FRACTION = 0.4;
+/** Blade half-width at its widest point, as a fraction of the frond's full length. */
+const FROND_HALF_WIDTH_FRACTION = 0.12;
 /**
  * Guards against a misconfigured archetype (e.g. maxDepth + childrenPerNode
  * combined explosively) silently producing an unrenderable mesh.
@@ -53,7 +57,26 @@ export function buildFloraMesh(
     if (isTip) tipNodes.push(node);
   }
 
-  if (archetype.foliage.style !== 'none') {
+  if (archetype.foliage.style === 'radial-fronds') {
+    const hubSizeM = (archetype.foliage.sizeM[0] + archetype.foliage.sizeM[1]) / 2;
+    const radialFronds = archetype.foliage.radialFronds;
+    if (radialFronds) {
+      const frondLengthM = (radialFronds.frondLengthM[0] + radialFronds.frondLengthM[1]) / 2;
+      for (const node of tipNodes) {
+        appendFloraFoliageCluster(positions, normals, windWeights, indices, node, 'cluster-sphere', hubSizeM);
+        appendFloraFrondFan(
+          positions,
+          normals,
+          windWeights,
+          indices,
+          node,
+          radialFronds.frondCount,
+          frondLengthM,
+          radialFronds.frondDroopRad,
+        );
+      }
+    }
+  } else if (archetype.foliage.style !== 'none') {
     const sizeM = (archetype.foliage.sizeM[0] + archetype.foliage.sizeM[1]) / 2;
     for (const node of tipNodes) {
       appendFloraFoliageCluster(positions, normals, windWeights, indices, node, archetype.foliage.style, sizeM);
@@ -180,4 +203,93 @@ function appendFloraFoliageCluster(
     indices.push(baseIndex + i);
   }
   template.dispose();
+}
+
+const WORLD_UP = new Vector3(0, 1, 0);
+const WORLD_DOWN = new Vector3(0, -1, 0);
+const scratchFrondBase = new Vector3();
+const scratchFrondOutward = new Vector3();
+const scratchFrondTipDir = new Vector3();
+const scratchFrondPerp = new Vector3();
+const scratchFrondMid = new Vector3();
+const scratchFrondTip = new Vector3();
+const scratchFrondLeft = new Vector3();
+const scratchFrondRight = new Vector3();
+const scratchFrondEdgeA = new Vector3();
+const scratchFrondEdgeB = new Vector3();
+const scratchFrondNormal = new Vector3();
+
+/**
+ * Builds a fan of flat, drooping blades radiating from a tip node — the
+ * 'radial-fronds' foliage style (palms), distinct from the round
+ * cluster-sphere/cluster-cone blobs. Fronds are spaced evenly by azimuth
+ * around world +Y with no jitter, so the fan stays deterministic from the
+ * skeleton alone (mirrors appendFloraFoliageCluster having no extra
+ * randomness of its own). Droop is measured against world down rather than
+ * the node's own direction — archetypes using this style have zero/near-zero
+ * branching, so the tip is always ~vertical and this stays simple.
+ *
+ * Each blade is a flat diamond (base → widest point → tip) pushed twice —
+ * once with its natural normal, once mirrored with an inverted normal and
+ * reversed winding — because the demo materials render with the default
+ * FrontSide, and a single-sided blade would vanish from the back.
+ */
+function appendFloraFrondFan(
+  positions: number[],
+  normals: number[],
+  windWeights: number[],
+  indices: number[],
+  node: IFloraSkeletonNode,
+  frondCount: number,
+  frondLengthM: number,
+  frondDroopRad: number,
+): void {
+  scratchFrondBase.set(node.endM[0], node.endM[1], node.endM[2]);
+
+  for (let i = 0; i < frondCount; i++) {
+    const azimuthRad = (i / frondCount) * Math.PI * 2;
+    scratchFrondOutward.set(Math.cos(azimuthRad), 0, Math.sin(azimuthRad));
+
+    scratchFrondTipDir
+      .copy(scratchFrondOutward)
+      .multiplyScalar(Math.cos(frondDroopRad))
+      .addScaledVector(WORLD_DOWN, Math.sin(frondDroopRad))
+      .normalize();
+
+    scratchFrondPerp.crossVectors(scratchFrondTipDir, WORLD_UP);
+    if (scratchFrondPerp.lengthSq() === 0) continue;
+    scratchFrondPerp.normalize();
+
+    const halfWidthM = frondLengthM * FROND_HALF_WIDTH_FRACTION;
+    scratchFrondMid
+      .copy(scratchFrondBase)
+      .addScaledVector(scratchFrondTipDir, frondLengthM * FROND_WIDTH_MIDPOINT_FRACTION);
+    scratchFrondTip.copy(scratchFrondBase).addScaledVector(scratchFrondTipDir, frondLengthM);
+    scratchFrondLeft.copy(scratchFrondMid).addScaledVector(scratchFrondPerp, halfWidthM);
+    scratchFrondRight.copy(scratchFrondMid).addScaledVector(scratchFrondPerp, -halfWidthM);
+
+    scratchFrondEdgeA.subVectors(scratchFrondLeft, scratchFrondBase);
+    scratchFrondEdgeB.subVectors(scratchFrondTip, scratchFrondBase);
+    scratchFrondNormal.crossVectors(scratchFrondEdgeA, scratchFrondEdgeB);
+    if (scratchFrondNormal.lengthSq() === 0) continue;
+    scratchFrondNormal.normalize();
+
+    const blade = [scratchFrondBase, scratchFrondLeft, scratchFrondTip, scratchFrondRight] as const;
+
+    const frontBase = positions.length / 3;
+    for (const point of blade) {
+      positions.push(point.x, point.y, point.z);
+      normals.push(scratchFrondNormal.x, scratchFrondNormal.y, scratchFrondNormal.z);
+      windWeights.push(1);
+    }
+    indices.push(frontBase, frontBase + 1, frontBase + 2, frontBase, frontBase + 2, frontBase + 3);
+
+    const backBase = positions.length / 3;
+    for (const point of blade) {
+      positions.push(point.x, point.y, point.z);
+      normals.push(-scratchFrondNormal.x, -scratchFrondNormal.y, -scratchFrondNormal.z);
+      windWeights.push(1);
+    }
+    indices.push(backBase, backBase + 2, backBase + 1, backBase, backBase + 3, backBase + 2);
+  }
 }

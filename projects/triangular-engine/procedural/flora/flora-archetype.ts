@@ -7,7 +7,7 @@ import {
 } from '../core/procedural-validation';
 
 export type FloraArchetypeKind = 'tree' | 'flower' | 'bush';
-export type FloraFoliageStyle = 'cluster-sphere' | 'cluster-cone' | 'none';
+export type FloraFoliageStyle = 'cluster-sphere' | 'cluster-cone' | 'radial-fronds' | 'none';
 export type FloraTrunkColliderShape = 'capsule' | 'cylinder' | 'none';
 
 /** Flora-specific socket kinds — core's IProceduralSocket<TKind> knows nothing
@@ -42,13 +42,22 @@ export interface IFloraArchetype {
   };
   readonly foliage: {
     readonly style: FloraFoliageStyle;
+    /** For 'radial-fronds', this sizes the small hub bulge the fronds radiate from, not the fan itself. */
     readonly sizeM: readonly [number, number];
+    /** Required (and only meaningful) when style === 'radial-fronds'. */
+    readonly radialFronds?: {
+      readonly frondCount: number;
+      readonly frondLengthM: readonly [number, number];
+      readonly frondDroopRad: number;
+    };
   };
   readonly sockets: {
     readonly perchesPerBranchDepth: Readonly<Record<number, number>>;
     readonly nestCavityChance01: number;
     readonly fruitSlotsMax: number;
     readonly flowerHeads: boolean;
+    /** Perches placed along frond bases instead of a branch segment — only meaningful (and only used) when foliage.style === 'radial-fronds', since that style has no perchable limbs. */
+    readonly frondPerches?: number;
   };
   readonly collider: { readonly trunk: FloraTrunkColliderShape };
 }
@@ -80,11 +89,42 @@ export function validateFloraArchetype(archetype: IFloraArchetype): void {
 
   validateProceduralFiniteRange(archetype.foliage.sizeM, 'Flora archetype foliage sizeM');
 
+  if (archetype.foliage.style === 'radial-fronds') {
+    const radialFronds = archetype.foliage.radialFronds;
+    if (!radialFronds) {
+      throw new RangeError(
+        "Flora archetype foliage.radialFronds is required when style is 'radial-fronds'.",
+      );
+    }
+    if (!Number.isInteger(radialFronds.frondCount) || radialFronds.frondCount < 1) {
+      throw new RangeError('Flora archetype foliage radialFronds.frondCount must be a positive integer.');
+    }
+    validateProceduralFiniteRange(
+      radialFronds.frondLengthM,
+      'Flora archetype foliage radialFronds.frondLengthM',
+    );
+    if (
+      !Number.isFinite(radialFronds.frondDroopRad) ||
+      radialFronds.frondDroopRad < 0 ||
+      radialFronds.frondDroopRad > Math.PI / 2
+    ) {
+      throw new RangeError(
+        'Flora archetype foliage radialFronds.frondDroopRad must be a finite number between 0 and PI/2.',
+      );
+    }
+  }
+
   validateProcedural01(
     archetype.sockets.nestCavityChance01,
     'Flora archetype sockets nestCavityChance01',
   );
   if (!Number.isInteger(archetype.sockets.fruitSlotsMax) || archetype.sockets.fruitSlotsMax < 0) {
     throw new RangeError('Flora archetype sockets fruitSlotsMax must be a non-negative integer.');
+  }
+  if (
+    archetype.sockets.frondPerches !== undefined &&
+    (!Number.isInteger(archetype.sockets.frondPerches) || archetype.sockets.frondPerches < 0)
+  ) {
+    throw new RangeError('Flora archetype sockets frondPerches must be a non-negative integer.');
   }
 }

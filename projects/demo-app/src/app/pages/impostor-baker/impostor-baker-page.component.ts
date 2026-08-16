@@ -19,8 +19,9 @@ import {
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
   buildFloraMesh,
+  FLORA_OAK_ARCHETYPE,
+  FLORA_OAK_COLORS,
   generateFloraSkeleton,
-  type IFloraArchetype,
 } from 'triangular-engine/procedural';
 import {
   buildOctahedralImpostorMesh,
@@ -31,25 +32,10 @@ import {
 } from 'triangular-engine/impostor';
 
 /** One archetype is enough to prove out baking — see triangular-engine/procedural's flora-lab-page for a fuller showcase of the archetype system itself. */
-const TREE_ARCHETYPE: IFloraArchetype = {
-  schemaVersion: 1,
-  id: 'impostor-demo-oak',
-  name: 'Impostor demo oak',
-  kind: 'tree',
-  trunk: { heightM: [3.5, 5], radiusM: [0.28, 0.4], taper01: 0.45 },
-  branching: {
-    maxDepth: 3,
-    childrenPerNode: [2, 3],
-    spreadAngleRad: [0.6, 1.3],
-    lengthFalloff01: 0.68,
-  },
-  foliage: { style: 'cluster-sphere', sizeM: [0.9, 1.5] },
-  sockets: { perchesPerBranchDepth: {}, nestCavityChance01: 0, fruitSlotsMax: 0, flowerHeads: false },
-  collider: { trunk: 'capsule' },
-};
+const TREE_ARCHETYPE = FLORA_OAK_ARCHETYPE;
 const TREE_SEED = 7;
-const TRUNK_COLOR = new Color('#6b4a2f');
-const LEAF_COLOR = new Color('#4f8a3d');
+const TRUNK_COLOR = new Color(FLORA_OAK_COLORS.trunkHex);
+const LEAF_COLOR = new Color(FLORA_OAK_COLORS.leafHex);
 
 /** Big enough to stay under the largest forest-spread option's footprint plus margin. */
 const GROUND_SIZE_M = 700;

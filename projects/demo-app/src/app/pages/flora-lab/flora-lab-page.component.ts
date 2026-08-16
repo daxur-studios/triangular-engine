@@ -16,6 +16,12 @@ import { EngineModule, EngineService } from 'triangular-engine';
 import {
   buildFloraMesh,
   deriveFloraSockets,
+  FLORA_OAK_ARCHETYPE,
+  FLORA_OAK_COLORS,
+  FLORA_PALM_ARCHETYPE,
+  FLORA_PALM_COLORS,
+  FLORA_PINE_ARCHETYPE,
+  FLORA_PINE_COLORS,
   generateFloraSkeleton,
   type FloraSocketKind,
   type IFloraArchetype,
@@ -32,29 +38,39 @@ const GROUND_SIZE_M = 60;
 const VARIANT_SPACING_M = 4.5;
 const VARIANT_COUNT = 6;
 
-/** One illustrative species — see docs/runbook/014_procedural_sublibrary.md M1. */
-const DEMO_OAK_ARCHETYPE: IFloraArchetype = {
-  schemaVersion: 1,
-  id: 'demo-oak',
-  name: 'Demo oak',
-  kind: 'tree',
-  trunk: { heightM: [3.5, 5], radiusM: [0.28, 0.4], taper01: 0.45 },
-  branching: {
-    maxDepth: 3,
-    childrenPerNode: [2, 3],
-    // Wider than a "narrow crown" tree would use — lower/thicker limbs
-    // sticking out closer to horizontal gives deriveFloraSockets' perch
-    // filter (near-horizontal, thick enough) real candidates to find.
-    spreadAngleRad: [0.6, 1.3],
-    lengthFalloff01: 0.68,
-  },
-  foliage: { style: 'cluster-sphere', sizeM: [0.9, 1.5] },
-  sockets: { perchesPerBranchDepth: { 1: 3, 2: 2 }, nestCavityChance01: 0.5, fruitSlotsMax: 4, flowerHeads: false },
-  collider: { trunk: 'capsule' },
-};
+/** Species picker options — see triangular-engine/procedural's flora-species-catalog for the full archetype definitions. */
+interface IFloraSpeciesOption {
+  readonly key: 'oak' | 'pine' | 'palm';
+  readonly label: string;
+  readonly archetype: IFloraArchetype;
+  readonly trunkColor: Color;
+  readonly leafColor: Color;
+}
+type FloraSpeciesKey = IFloraSpeciesOption['key'];
 
-const TRUNK_COLOR = new Color('#6b4a2f');
-const LEAF_COLOR = new Color('#4f8a3d');
+const SPECIES_OPTIONS: readonly IFloraSpeciesOption[] = [
+  {
+    key: 'oak',
+    label: 'Oak',
+    archetype: FLORA_OAK_ARCHETYPE,
+    trunkColor: new Color(FLORA_OAK_COLORS.trunkHex),
+    leafColor: new Color(FLORA_OAK_COLORS.leafHex),
+  },
+  {
+    key: 'pine',
+    label: 'Pine',
+    archetype: FLORA_PINE_ARCHETYPE,
+    trunkColor: new Color(FLORA_PINE_COLORS.trunkHex),
+    leafColor: new Color(FLORA_PINE_COLORS.leafHex),
+  },
+  {
+    key: 'palm',
+    label: 'Palm',
+    archetype: FLORA_PALM_ARCHETYPE,
+    trunkColor: new Color(FLORA_PALM_COLORS.trunkHex),
+    leafColor: new Color(FLORA_PALM_COLORS.leafHex),
+  },
+];
 
 const SOCKET_GIZMO_RADIUS_M = 0.12;
 const SOCKET_GIZMO_COLOR_BY_KIND: Record<FloraSocketKind, string> = {
@@ -86,6 +102,8 @@ export class FloraLabPageComponent {
   readonly seed = signal(1);
   readonly wireframe = signal(false);
   readonly showSockets = signal(true);
+  readonly species = signal<FloraSpeciesKey>('oak');
+  readonly speciesOptions = SPECIES_OPTIONS;
   readonly variantCount = VARIANT_COUNT;
   readonly socketKinds = Object.keys(SOCKET_GIZMO_COLOR_BY_KIND) as FloraSocketKind[];
   readonly socketGizmoColorByKind = SOCKET_GIZMO_COLOR_BY_KIND;
@@ -153,24 +171,32 @@ export class FloraLabPageComponent {
     for (const gizmo of this.socketGizmos) gizmo.visible = this.showSockets();
   }
 
+  setSpecies(key: FloraSpeciesKey): void {
+    if (this.species() === key) return;
+    this.species.set(key);
+    this.rebuildTrees();
+  }
+
   private rebuildTrees(): void {
     this.clearTrees();
     const baseSeed = this.seed();
     const offsetM = ((this.variantCount - 1) * VARIANT_SPACING_M) / 2;
+    const speciesOption = this.speciesOptions.find((option) => option.key === this.species())!;
+    const archetype = speciesOption.archetype;
 
     for (let i = 0; i < this.variantCount; i++) {
       const variantSeed = baseSeed + i;
       const originXM = i * VARIANT_SPACING_M - offsetM;
-      const skeleton = generateFloraSkeleton(DEMO_OAK_ARCHETYPE, variantSeed);
-      const { geometry } = buildFloraMesh(skeleton, DEMO_OAK_ARCHETYPE);
-      this.colorizeByWindWeight(geometry);
+      const skeleton = generateFloraSkeleton(archetype, variantSeed);
+      const { geometry } = buildFloraMesh(skeleton, archetype);
+      this.colorizeByWindWeight(geometry, speciesOption.trunkColor, speciesOption.leafColor);
 
       const mesh = new Mesh(geometry, this.material);
       mesh.position.set(originXM, 0, 0);
       this.group.add(mesh);
       this.treeMeshes.push(mesh);
 
-      const sockets = deriveFloraSockets(skeleton, DEMO_OAK_ARCHETYPE, variantSeed);
+      const sockets = deriveFloraSockets(skeleton, archetype, variantSeed);
       for (const socket of sockets) {
         const gizmoMaterial = this.socketGizmoMaterialByKind.get(socket.kind);
         if (!gizmoMaterial) continue;
@@ -188,12 +214,12 @@ export class FloraLabPageComponent {
     }
   }
 
-  private colorizeByWindWeight(geometry: BufferGeometry): void {
+  private colorizeByWindWeight(geometry: BufferGeometry, trunkColor: Color, leafColor: Color): void {
     const windWeight = geometry.getAttribute('windWeight');
     const colors = new Float32Array(windWeight.count * 3);
     const blended = new Color();
     for (let i = 0; i < windWeight.count; i++) {
-      blended.copy(TRUNK_COLOR).lerp(LEAF_COLOR, windWeight.getX(i));
+      blended.copy(trunkColor).lerp(leafColor, windWeight.getX(i));
       colors[i * 3] = blended.r;
       colors[i * 3 + 1] = blended.g;
       colors[i * 3 + 2] = blended.b;

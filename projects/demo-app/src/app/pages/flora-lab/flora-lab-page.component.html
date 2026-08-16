@@ -11,8 +11,11 @@
 
       <p class="blurb">
         Each tree is <code>generateFloraSkeleton</code> +
-        <code>buildFloraMesh</code> from one archetype, one seed per
-        variant. Color goes from trunk-brown to leaf-green following the
+        <code>buildFloraMesh</code> from one archetype (pick a species
+        above — the shared <code>flora-species-catalog</code>), one seed per
+        variant. Palm uses the <code>radial-fronds</code> foliage style
+        instead of a round cluster. Color goes from trunk-brown to leaf-green
+        following the
         baked <code>windWeight</code> attribute (0 at the root, rising
         toward branch tips), which also drives real sway via scatter's
         <code>enableScatterWindSway</code> (its
@@ -23,6 +26,14 @@
         (50% chance per variant), and fruit slots. Trunk collider
         descriptors are derived too but not visualized here.
       </p>
+
+      <nav aria-label="Species">
+        @for (option of speciesOptions; track option.key) {
+          <button [class.active]="species() === option.key" (click)="setSpecies(option.key)">
+            {{ option.label }}
+          </button>
+        }
+      </nav>
 
       <nav aria-label="Actions">
         <button (click)="regenerate()">Regenerate (new seed)</button>

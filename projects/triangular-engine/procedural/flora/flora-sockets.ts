@@ -14,6 +14,9 @@ const PERCH_MIN_RADIUS_FRACTION_OF_TRUNK_RADIUS = 0.15;
 const NEST_CAVITY_CLEARANCE_FRACTION_OF_TRUNK_RADIUS = 0.6;
 const FRUIT_SLOT_CLEARANCE_FRACTION_OF_FOLIAGE_SIZE = 0.2;
 const FLOWER_HEAD_CLEARANCE_FRACTION_OF_FOLIAGE_SIZE = 0.15;
+/** Where along a frond a perch sits, as a fraction of its full length from the base — matches flora-mesh.ts's FROND_WIDTH_MIDPOINT_FRACTION so the socket lands on the blade's widest point. */
+const FROND_PERCH_LENGTH_FRACTION = 0.4;
+const FROND_PERCH_CLEARANCE_FRACTION_OF_FROND_LENGTH = 0.15;
 
 /**
  * A branch segment is perchable when it's close enough to horizontal and
@@ -43,6 +46,29 @@ function branchMidpointM(
     (node.startM[0] + node.endM[0]) / 2,
     (node.startM[1] + node.endM[1]) / 2,
     (node.startM[2] + node.endM[2]) / 2,
+  ];
+}
+
+/**
+ * Mirrors appendFloraFrondFan's tipDir/mid-point math in flora-mesh.ts (same
+ * azimuth spacing, same droop blend against world down) so a frond perch
+ * socket lands exactly on the rendered blade instead of floating near it.
+ */
+function frondPerchPositionM(
+  tipNode: IFloraSkeletonNode,
+  frondIndex: number,
+  frondCount: number,
+  frondLengthM: number,
+  frondDroopRad: number,
+): readonly [number, number, number] {
+  const azimuthRad = (frondIndex / frondCount) * Math.PI * 2;
+  const distanceM = frondLengthM * FROND_PERCH_LENGTH_FRACTION;
+  const cosDroop = Math.cos(frondDroopRad);
+  const sinDroop = Math.sin(frondDroopRad);
+  return [
+    tipNode.endM[0] + Math.cos(azimuthRad) * cosDroop * distanceM,
+    tipNode.endM[1] - sinDroop * distanceM,
+    tipNode.endM[2] + Math.sin(azimuthRad) * cosDroop * distanceM,
   ];
 }
 
@@ -101,6 +127,12 @@ export function deriveFloraSockets(
     if (list) list.push(node);
     else nodesByDepth.set(node.depth, [node]);
   }
+  const hasChildren = new Set<number>();
+  for (const node of skeleton) {
+    if (node.parentId !== -1) hasChildren.add(node.parentId);
+  }
+  const tipNodes = skeleton.filter((node) => !hasChildren.has(node.id));
+
   const perchMinRadiusM = root.radiusStartM * PERCH_MIN_RADIUS_FRACTION_OF_TRUNK_RADIUS;
   for (const [depthKey, count] of Object.entries(archetype.sockets.perchesPerBranchDepth)) {
     const nodesAtDepth = nodesByDepth.get(Number(depthKey)) ?? [];
@@ -110,6 +142,24 @@ export function deriveFloraSockets(
       const node = candidates[i];
       const avgRadiusM = (node.radiusStartM + node.radiusEndM) / 2;
       pushSocket('perch', branchMidpointM(node), avgRadiusM + PERCH_CLEARANCE_MARGIN_M);
+    }
+  }
+
+  // Radial-fronds archetypes (palms) have no perchable limbs — perchesPerBranchDepth
+  // above stays empty for them — so perches are placed on the fronds themselves instead.
+  const radialFronds = archetype.foliage.radialFronds;
+  if (archetype.foliage.style === 'radial-fronds' && archetype.sockets.frondPerches && radialFronds) {
+    const frondLengthM = (radialFronds.frondLengthM[0] + radialFronds.frondLengthM[1]) / 2;
+    const clearanceRadiusM = frondLengthM * FROND_PERCH_CLEARANCE_FRACTION_OF_FROND_LENGTH;
+    const take = Math.min(archetype.sockets.frondPerches, radialFronds.frondCount);
+    for (const tipNode of tipNodes) {
+      for (let i = 0; i < take; i++) {
+        pushSocket(
+          'perch',
+          frondPerchPositionM(tipNode, i, radialFronds.frondCount, frondLengthM, radialFronds.frondDroopRad),
+          clearanceRadiusM,
+        );
+      }
     }
   }
 
@@ -129,11 +179,6 @@ export function deriveFloraSockets(
     archetype.foliage.style !== 'none' &&
     (archetype.sockets.fruitSlotsMax > 0 || archetype.sockets.flowerHeads);
   if (wantsFoliageSockets) {
-    const hasChildren = new Set<number>();
-    for (const node of skeleton) {
-      if (node.parentId !== -1) hasChildren.add(node.parentId);
-    }
-    const tipNodes = skeleton.filter((node) => !hasChildren.has(node.id));
     const foliageSizeM = (archetype.foliage.sizeM[0] + archetype.foliage.sizeM[1]) / 2;
 
     if (archetype.sockets.fruitSlotsMax > 0) {

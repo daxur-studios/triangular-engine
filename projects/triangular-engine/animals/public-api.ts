@@ -2,6 +2,7 @@
 export * from './core/animal-types';
 export * from './core/animal-hash';
 export * from './core/animal-group-timeline';
+export * from './core/animal-group-materialization';
 export * from './core/fixed-step-clock';
 export * from './core/flock-arrival';
 export * from './core/flock-definition';
