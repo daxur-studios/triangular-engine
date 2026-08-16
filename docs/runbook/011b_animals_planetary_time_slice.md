@@ -1,7 +1,7 @@
 # Animals planetary-time reconstruction slice
 
-Status: active. Milestone 2A checkpoints 1–4 are implemented; one timed
-consequence event is next.
+Status: active. Milestone 2A checkpoints 1–5 are implemented; aircraft
+disturbance and one deterministic perch affordance are next.
 
 Parent design: [011_animals_sublibrary.md](011_animals_sublibrary.md).
 Related designs:
@@ -170,7 +170,7 @@ The lab must display authored versus automatically derived inputs explicitly.
      sampling.
 - [x] 3. Materialize the sampled group through existing flock primitives.
 - [x] 4. Add residency handoff and unload/reload tests.
-- [ ] 5. Layer one timed consequence event without mutating the baseline
+- [x] 5. Layer one timed consequence event without mutating the baseline
      generator.
 - [ ] 6. Integrate aircraft disturbance and one deterministic perch affordance.
 - [ ] 7. Add the shared headed lab and documentation.
