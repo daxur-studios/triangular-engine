@@ -16,6 +16,7 @@ import {
 import { TerrainAnimalWorldSurface } from 'triangular-engine/animals/terrain';
 import {
   ConstantTerrainField, CylinderTerrainDomain, PlaneTerrainDomain, SphereTerrainDomain,
+  type ITerrainField, type ITerrainFieldSample, type TerrainVector3,
 } from 'triangular-engine/terrain';
 
 type WorldShape = 'plane' | 'sphere' | 'cylinder';
@@ -66,7 +67,7 @@ export class AnimalsHerdWorldsLabPageComponent {
     this.worldViews = [
       this.createWorld(
         'plane', 'Infinite plane',
-        new TerrainAnimalWorldSurface(new ConstantTerrainField(0), new PlaneTerrainDomain(100)),
+        new TerrainAnimalWorldSurface(new HerdDemoTerrainField(), new PlaneTerrainDomain(100)),
         new Vector3(-28, 0, 0), { x: 0, y: 0, z: 0 },
       ),
       this.createWorld(
@@ -232,7 +233,16 @@ export class AnimalsHerdWorldsLabPageComponent {
 
   private terrainMesh(shape: WorldShape): Mesh {
     if (shape === 'plane') {
-      const mesh = new Mesh(new PlaneGeometry(24, 24, 12, 12), new MeshStandardMaterial({ color: '#304b38', roughness: 1 }));
+      const geometry = new PlaneGeometry(24, 24, 32, 32);
+      const positions = geometry.getAttribute('position');
+      for (let index = 0; index < positions.count; index++) {
+        const x = positions.getX(index);
+        const z = -positions.getY(index);
+        positions.setZ(index, HerdDemoTerrainField.heightAt(x, z));
+      }
+      positions.needsUpdate = true;
+      geometry.computeVertexNormals();
+      const mesh = new Mesh(geometry, new MeshStandardMaterial({ color: '#304b38', roughness: 1 }));
       mesh.rotation.x = -Math.PI / 2;
       return mesh;
     }
@@ -243,6 +253,28 @@ export class AnimalsHerdWorldsLabPageComponent {
       new MeshStandardMaterial({ color: '#416052', wireframe: true, transparent: true, opacity: 0.45, side: BackSide }));
     mesh.rotation.z = Math.PI / 2;
     return mesh;
+  }
+}
+
+/** Deterministic heightfield used by the plane proof; the animal adapter and mesh share this function. */
+class HerdDemoTerrainField implements ITerrainField {
+  readonly minElevationM = -1.5;
+  readonly maxElevationM = 2.5;
+
+  sample(fieldPosition: TerrainVector3): ITerrainFieldSample {
+    return { elevationM: HerdDemoTerrainField.heightAt(fieldPosition[0], fieldPosition[2]) };
+  }
+
+  sampleBatch(fieldPositions: Float64Array, elevationsM?: Float64Array): Float64Array {
+    const output = elevationsM ?? new Float64Array(fieldPositions.length / 3);
+    for (let index = 0; index < output.length; index++) {
+      output[index] = HerdDemoTerrainField.heightAt(fieldPositions[index * 3], fieldPositions[index * 3 + 2]);
+    }
+    return output;
+  }
+
+  static heightAt(x: number, z: number): number {
+    return 0.9 * Math.sin(x * 0.34) + 0.65 * Math.cos(z * 0.27) + 0.35 * Math.sin((x + z) * 0.19);
   }
 }
 
