@@ -141,12 +141,12 @@ export class AnimalsWorldsLabPageComponent {
         });
     });
     const flightGround = surface.sample(surface.moveAlongSurface(origin.position, scale(origin.tangentU, 8), 1));
-    const flightTarget = addScaled(flightGround.position, flightGround.surfaceUp, 6);
+    const flightTarget = addScaled(flightGround.position, flightGround.surfaceUp, 9);
     const policy = {
       surface, maximumMembers: 12, maximumRoostSites: 12,
       maximumSpeedMps: 6, maximumAccelerationMps2: 8,
       maximumSubstepDistanceM: 0.5, maximumSubsteps: 8,
-      minimumAltitudeM: 0.5, maximumAltitudeM: 12, preferredAltitudeM: 6,
+      minimumAltitudeM: 2, maximumAltitudeM: 18, preferredAltitudeM: 9, flightAltitudeSpreadM: 2.5,
       separationRadiusM: 1.4, separationWeight: 3.2, cohesionWeight: 1.1,
       alignmentWeight: 0.8, targetWeight: 1.35, arrivalRadiusM: 0.4,
       holdingRadiusM: 4, holdingSpeedMps: 2.5, roostSlotSpacingM: 0.48,

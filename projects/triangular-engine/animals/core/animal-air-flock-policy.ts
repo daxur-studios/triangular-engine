@@ -36,6 +36,8 @@ export interface AnimalAirFlockPolicyDefinition {
   readonly minimumAltitudeM: number;
   readonly maximumAltitudeM: number;
   readonly preferredAltitudeM: number;
+  /** Deterministic per-member flight-height variation around preferred altitude. */
+  readonly flightAltitudeSpreadM?: number;
   readonly separationRadiusM: number;
   readonly separationWeight: number;
   readonly cohesionWeight: number;
@@ -140,9 +142,13 @@ export function stepAnimalAirFlock(
       ? input.target
       : perchPosition ?? holdingTarget(member.id, input.target, input.universalTime, definition, definition.surface);
     const targetGround = definition.surface.sample(target);
-    const targetAltitude = site
+    const baseAltitude = site
       ? Math.max(0, dot(subtract(site.position, targetGround.position), targetGround.surfaceUp))
       : definition.preferredAltitudeM;
+    const targetAltitude = input.intent === 'fly' && !site
+      ? clamp(baseAltitude + Math.sin(stablePhase(member.id)) * (definition.flightAltitudeSpreadM ?? 0),
+        definition.minimumAltitudeM, definition.maximumAltitudeM)
+      : baseAltitude;
     const desired = flockDesiredVelocity(member, input.members, center, averageVelocity, target, targetAltitude, definition);
     const moved = stepConstrainedAnimalMovement(member, desired, input.deltaSeconds, input.universalTime, {
       domain: 'air', surface: definition.surface,
@@ -243,6 +249,7 @@ function validateDefinition(value: AnimalAirFlockPolicyDefinition): void {
   const nonNegative = [value.maximumSpeedMps, value.maximumAccelerationMps2, value.minimumAltitudeM,
     value.maximumAltitudeM, value.preferredAltitudeM, value.separationRadiusM, value.separationWeight,
     value.cohesionWeight, value.alignmentWeight, value.targetWeight, value.arrivalRadiusM,
+    value.flightAltitudeSpreadM ?? 0,
     value.holdingRadiusM, value.holdingSpeedMps, value.roostSlotSpacingM];
   if (nonNegative.some(number => !Number.isFinite(number) || number < 0)
     || value.maximumAltitudeM < value.minimumAltitudeM
@@ -277,6 +284,7 @@ function subtract(a: AnimalVector3, b: AnimalVector3): AnimalVector3 { return { 
 function scale(value: AnimalVector3, amount: number): AnimalVector3 { return { x: value.x * amount, y: value.y * amount, z: value.z * amount }; }
 function dot(a: AnimalVector3, b: AnimalVector3): number { return a.x * b.x + a.y * b.y + a.z * b.z; }
 function magnitude(value: AnimalVector3): number { return Math.hypot(value.x, value.y, value.z); }
+function clamp(value: number, minimum: number, maximum: number): number { return Math.max(minimum, Math.min(maximum, value)); }
 function distance(a: AnimalVector3, b: AnimalVector3): number { return magnitude(subtract(a, b)); }
 function validateVector(value: AnimalVector3, label: string): void {
   if (![value.x, value.y, value.z].every(Number.isFinite)) throw new RangeError(`${label} must be finite.`);
