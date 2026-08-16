@@ -1,4 +1,5 @@
 import { stepConstrainedAnimalMovement, type AnimalMovementResult, type AnimalMovementState } from './animal-constrained-movement';
+import { animalUnit } from './animal-hash';
 import type { AnimalTime, AnimalVector3 } from './animal-types';
 import type { AnimalWaterVolume } from './animal-water-volume';
 
@@ -47,6 +48,10 @@ export interface AnimalAquaticSchoolPolicyDefinition {
   readonly depthWeight: number;
   readonly arrivalRadiusM: number;
   readonly slotSpacingM: number;
+  /** Optional continuous motion around an assigned habitat anchor. Zero retains a stationary anchor. */
+  readonly loiterRadiusM?: number;
+  /** Radians per second used for deterministic habitat loitering. */
+  readonly loiterAngularSpeedRadPerSecond?: number;
   readonly maximumAvoidanceAttempts: number;
 }
 export interface AnimalAquaticSchoolStepInput {
@@ -126,6 +131,35 @@ export function resolveAnimalAquaticZonePosition(
     ? candidate : { ...zone.position };
 }
 
+/** A deterministic moving target keeps each assigned fish distributed and active. */
+export function resolveAnimalAquaticSchoolLoiterPosition(
+  zone: AnimalAquaticHabitatZone,
+  slotIndex: number,
+  memberId: string,
+  time: AnimalTime,
+  definition: AnimalAquaticSchoolPolicyDefinition,
+): AnimalVector3 {
+  const anchor = resolveAnimalAquaticZonePosition(zone, slotIndex, time, definition);
+  const radius = Math.min(zone.radiusM, loiterRadius(definition));
+  const angularSpeed = definition.loiterAngularSpeedRadPerSecond ?? 0;
+  if (radius === 0 || angularSpeed === 0) return anchor;
+  const sample = definition.water.sample(anchor, time);
+  if (!sample.surface || !sample.bottom || !isSafeWater(sample, definition)) return anchor;
+  const phase = animalUnit(0, `aquatic-loiter:${memberId}`) * Math.PI * 2 + time * angularSpeed;
+  const tangent = add(
+    scale(sample.bottom.tangentU, Math.cos(phase) * radius),
+    scale(sample.bottom.tangentV, Math.sin(phase) * radius),
+  );
+  const surface = definition.water.moveAlongSurface(anchor, tangent, 1, time);
+  if (!surface || surface.bodyId !== sample.surface.bodyId) return anchor;
+  const candidate = add(surface.position, scale(surface.normal, -definition.preferredSurfaceClearanceM));
+  const sampled = definition.water.sample(candidate, time);
+  return isSafeWater(sampled, definition)
+    && sampled.surface?.bodyId === sample.surface.bodyId
+    && definition.water.isSegmentValid(anchor, candidate, time, definition.segmentSampleSpacingM)
+    ? candidate : anchor;
+}
+
 export function stepAnimalAquaticSchool(
   input: AnimalAquaticSchoolStepInput,
   definition: AnimalAquaticSchoolPolicyDefinition,
@@ -146,10 +180,10 @@ export function stepAnimalAquaticSchool(
     const assignment = assignmentById.get(member.id);
     const zone = assignment?.zoneId ? zoneById.get(assignment.zoneId) : undefined;
     const slot = zone && assignment?.slotIndex !== undefined
-      ? resolveAnimalAquaticZonePosition(zone, assignment.slotIndex, input.universalTime, definition) : undefined;
+      ? resolveAnimalAquaticSchoolLoiterPosition(zone, assignment.slotIndex, member.id, input.universalTime, definition) : undefined;
     const target = slot ?? input.target;
     const arrived = definition.water.surfaceDistance(member.position, target) <= definition.arrivalRadiusM;
-    if (arrived && zone && input.intent !== 'travel') {
+    if (arrived && zone && input.intent !== 'travel' && loiterRadius(definition) === 0) {
       const stopped = movement(member.position, zero, false, 'none', 0); constrained.push(stopped);
       return { id: member.id, position: stopped.position, velocity: stopped.velocity,
         mode: input.intent === 'rest' ? 'rest' as const : 'forage' as const, zoneId: zone.id };
@@ -209,7 +243,8 @@ function moveWithAvoidance(member: AnimalAquaticSchoolMember, desired: AnimalVec
 }
 
 function isSafeWater(sample: ReturnType<AnimalWaterVolume['sample']>, definition: AnimalAquaticSchoolPolicyDefinition): boolean { return sample.containsWater && sample.surfaceClearanceM + 1e-9 >= definition.minimumSurfaceClearanceM && sample.surfaceClearanceM <= definition.maximumSurfaceClearanceM + 1e-9 && sample.bottomClearanceM + 1e-9 >= definition.minimumBottomClearanceM; }
-function validateDefinition(value: AnimalAquaticSchoolPolicyDefinition): void { const bounds = [value.maximumMembers, value.maximumZones, value.maximumSubsteps, value.maximumAvoidanceAttempts]; if (bounds.some(number => !Number.isSafeInteger(number) || number < 0) || value.maximumSubsteps < 1) throw new RangeError('Animal aquatic bounded-work limits are invalid.'); const numbers = [value.maximumZoneDistanceM, value.minimumZoneSuitability01, value.maximumSpeedMps, value.maximumAccelerationMps2, value.maximumSubstepDistanceM, value.minimumSurfaceClearanceM, value.minimumBottomClearanceM, value.preferredSurfaceClearanceM, value.maximumSurfaceClearanceM, value.segmentSampleSpacingM, value.separationRadiusM, value.separationWeight, value.cohesionWeight, value.alignmentWeight, value.targetWeight, value.flowWeight, value.depthWeight, value.arrivalRadiusM, value.slotSpacingM]; if (numbers.some(number => !Number.isFinite(number) || number < 0) || value.minimumZoneSuitability01 > 1 || value.preferredSurfaceClearanceM < value.minimumSurfaceClearanceM || value.preferredSurfaceClearanceM > value.maximumSurfaceClearanceM || value.maximumSubstepDistanceM <= 0 || value.segmentSampleSpacingM <= 0) throw new RangeError('Animal aquatic policy limits are invalid.'); }
+function loiterRadius(definition: AnimalAquaticSchoolPolicyDefinition): number { return definition.loiterRadiusM ?? 0; }
+function validateDefinition(value: AnimalAquaticSchoolPolicyDefinition): void { const bounds = [value.maximumMembers, value.maximumZones, value.maximumSubsteps, value.maximumAvoidanceAttempts]; if (bounds.some(number => !Number.isSafeInteger(number) || number < 0) || value.maximumSubsteps < 1) throw new RangeError('Animal aquatic bounded-work limits are invalid.'); const numbers = [value.maximumZoneDistanceM, value.minimumZoneSuitability01, value.maximumSpeedMps, value.maximumAccelerationMps2, value.maximumSubstepDistanceM, value.minimumSurfaceClearanceM, value.minimumBottomClearanceM, value.preferredSurfaceClearanceM, value.maximumSurfaceClearanceM, value.segmentSampleSpacingM, value.separationRadiusM, value.separationWeight, value.cohesionWeight, value.alignmentWeight, value.targetWeight, value.flowWeight, value.depthWeight, value.arrivalRadiusM, value.slotSpacingM, loiterRadius(value), value.loiterAngularSpeedRadPerSecond ?? 0]; if (numbers.some(number => !Number.isFinite(number) || number < 0) || value.minimumZoneSuitability01 > 1 || value.preferredSurfaceClearanceM < value.minimumSurfaceClearanceM || value.preferredSurfaceClearanceM > value.maximumSurfaceClearanceM || value.maximumSubstepDistanceM <= 0 || value.segmentSampleSpacingM <= 0) throw new RangeError('Animal aquatic policy limits are invalid.'); }
 function validateZone(zone: AnimalAquaticHabitatZone): AnimalAquaticHabitatZone { if (zone.id.length === 0 || !Number.isSafeInteger(zone.capacity) || zone.capacity < 0 || !Number.isFinite(zone.radiusM) || zone.radiusM < 0 || !Number.isFinite(zone.suitability01) || zone.suitability01 < 0 || zone.suitability01 > 1) throw new RangeError('Animal aquatic habitat zone is invalid.'); validateVector(zone.position, `Animal aquatic zone ${zone.id}`); return zone; }
 function validateMember(member: AnimalAquaticSchoolMember): void { validateVector(member.position, `Animal aquatic ${member.id} position`); validateVector(member.velocity, `Animal aquatic ${member.id} velocity`); }
 function uniqueIds(ids: readonly string[], label: string): string[] { const ordered = [...ids].sort((a, b) => a.localeCompare(b)); if (ordered.some(id => id.length === 0) || new Set(ordered).size !== ordered.length) throw new Error(`${label} IDs must be unique and non-empty.`); return ordered; }

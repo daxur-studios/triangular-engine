@@ -44,6 +44,12 @@ export interface AnimalLandHerdPolicyDefinition {
   readonly targetWeight: number;
   readonly arrivalRadiusM: number;
   readonly slotSpacingM: number;
+  /** Optional stable, loose line formation used only while travelling. */
+  readonly travelLineSpacingM?: number;
+  /** Small side-to-side separation for a travelling line. */
+  readonly travelLineLateralSpacingM?: number;
+  /** Seconds of deterministic response lag for travelling followers. */
+  readonly leaderFollowDelaySeconds?: number;
   readonly maximumAvoidanceAttempts: number;
 }
 export interface AnimalLandHerdStepInput {
@@ -123,6 +129,54 @@ export function resolveAnimalHerdPatchPosition(
     ? sampled.position : center.position;
 }
 
+/**
+ * Resolves a member's deterministic place in a travelling herd.  The target
+ * remains the route destination; followers trail behind it in the local
+ * surface frame rather than all steering toward the identical world point.
+ */
+export function resolveAnimalHerdTravelPosition(
+  memberId: string,
+  memberIds: readonly string[],
+  center: AnimalVector3,
+  target: AnimalVector3,
+  averageVelocity: AnimalVector3,
+  definition: AnimalLandHerdPolicyDefinition,
+): AnimalVector3 {
+  const spacing = definition.travelLineSpacingM ?? 0;
+  if (spacing === 0 || memberIds.length < 2) return { ...target };
+  const orderedIds = uniqueIds(memberIds, 'Animal herd member');
+  const rank = orderedIds.indexOf(memberId);
+  if (rank < 0) throw new Error('Animal herd travel member must be present in the herd.');
+  const frame = definition.surface.sample(target);
+  let forward = tangentDirection(center, target, frame.normal);
+  if (magnitude(forward) <= 1e-9) forward = normalize(reject(averageVelocity, frame.normal));
+  if (magnitude(forward) <= 1e-9) return { ...target };
+  let side = normalize(reject(subtract(frame.tangentU, scale(forward, dot(frame.tangentU, forward))), frame.normal));
+  if (magnitude(side) <= 1e-9) side = normalize(reject(subtract(frame.tangentV, scale(forward, dot(frame.tangentV, forward))), frame.normal));
+  const lateral = (definition.travelLineLateralSpacingM ?? 0) * (rank % 2 === 0 ? -1 : 1);
+  return definition.surface.moveAlongSurface(target, add(scale(forward, -rank * spacing), scale(side, lateral)), 1);
+}
+
+function resolveAnimalHerdFollowerTarget(
+  memberId: string,
+  memberIds: readonly string[],
+  leader: AnimalLandHerdMember,
+  center: AnimalVector3,
+  routeTarget: AnimalVector3,
+  definition: AnimalLandHerdPolicyDefinition,
+): AnimalVector3 {
+  const orderedIds = uniqueIds(memberIds, 'Animal herd member');
+  const rank = orderedIds.indexOf(memberId);
+  if (rank <= 0) return { ...routeTarget };
+  const frame = definition.surface.sample(leader.position);
+  const route = tangentDirection(center, routeTarget, frame.normal);
+  const velocity = reject(leader.velocity, frame.normal);
+  const delay = definition.leaderFollowDelaySeconds ?? 0;
+  const spacing = definition.travelLineSpacingM ?? 0;
+  const behind = add(scale(velocity, -delay), scale(route, -rank * spacing));
+  return definition.surface.moveAlongSurface(leader.position, behind, 1);
+}
+
 export function stepAnimalLandHerd(
   input: AnimalLandHerdStepInput,
   definition: AnimalLandHerdPolicyDefinition,
@@ -140,6 +194,8 @@ export function stepAnimalLandHerd(
   const patchById = new Map((input.patches ?? []).map(patch => [patch.id, patch]));
   const center = mean(input.members.map(member => member.position), input.target);
   const averageVelocity = mean(input.members.map(member => member.velocity), zero);
+  const orderedIds = uniqueIds(ids, 'Animal herd member');
+  const leader = input.members.find(member => member.id === orderedIds[0]);
   const constrained: AnimalMovementResult[] = [];
   const members = input.members.map(member => {
     validateMember(member);
@@ -149,7 +205,9 @@ export function stepAnimalLandHerd(
       ? resolveAnimalHerdPatchPosition(patch, assignment.slotIndex, definition,
         input.intent === 'graze' ? input.universalTime : undefined)
       : undefined;
-    const target = slot ?? input.target;
+    const target = slot ?? (input.intent === 'travel' && leader
+      ? resolveAnimalHerdFollowerTarget(member.id, ids, leader, center, input.target, definition)
+      : input.target);
     const arrived = definition.surface.surfaceDistance(member.position, target) <= definition.arrivalRadiusM;
     if (arrived && (input.intent === 'rest' || input.intent === 'graze') && patch) {
       const stopped = movement(member.position, zero, false, 'none', 0);
@@ -233,7 +291,8 @@ function validateDefinition(value: AnimalLandHerdPolicyDefinition): void {
   validateBound(value.maximumAvoidanceAttempts, 'Animal maximum avoidance attempts');
   const nonNegative = [value.maximumSpeedMps, value.maximumAccelerationMps2, value.separationRadiusM,
     value.separationWeight, value.cohesionWeight, value.alignmentWeight, value.targetWeight,
-    value.arrivalRadiusM, value.slotSpacingM, value.maximumPatchDistanceM,
+    value.arrivalRadiusM, value.slotSpacingM, value.travelLineSpacingM ?? 0,
+    value.travelLineLateralSpacingM ?? 0, value.leaderFollowDelaySeconds ?? 0, value.maximumPatchDistanceM,
     value.minimumPatchSuitability01, value.maximumSlope01];
   if (nonNegative.some(number => !Number.isFinite(number) || number < 0)
     || value.maximumSlope01 > 1 || value.minimumPatchSuitability01 > 1
@@ -267,6 +326,7 @@ function tangentDirection(from: AnimalVector3, to: AnimalVector3, normal: Animal
   const value = reject(subtract(to, from), normal); const length = magnitude(value);
   return length > 1e-9 ? scale(value, 1 / length) : { ...zero };
 }
+function normalize(value: AnimalVector3): AnimalVector3 { const length = magnitude(value); return length > 1e-9 ? scale(value, 1 / length) : { ...zero }; }
 function stablePhase(id: string): number { let hash = 2166136261; for (let i = 0; i < id.length; i++) hash = Math.imul(hash ^ id.charCodeAt(i), 16777619); return (hash >>> 0) / 0x100000000 * Math.PI * 2; }
 function mean(values: readonly AnimalVector3[], fallback: AnimalVector3): AnimalVector3 { return values.length ? scale(values.reduce((sum, value) => add(sum, value), { ...zero }), 1 / values.length) : { ...fallback }; }
 function scaleTo(value: AnimalVector3, length: number): AnimalVector3 { const current = magnitude(value); return current > 1e-9 ? scale(value, length / current) : { ...zero }; }

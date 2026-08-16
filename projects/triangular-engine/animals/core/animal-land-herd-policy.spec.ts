@@ -1,6 +1,7 @@
 import {
   allocateAnimalHerdPatches,
   resolveAnimalHerdPatchPosition,
+  resolveAnimalHerdTravelPosition,
   stepAnimalLandHerd,
   type AnimalGrazingPatch,
   type AnimalLandHerdMember,
@@ -61,6 +62,24 @@ describe('animal land-herd policy', () => {
     expect(result.members.every(value => value.mode === 'travel')).toBeTrue();
     expect(result.members.every(value => value.position.y === 0 && value.position.x > (value.id === 'a' ? 0 : -1))).toBeTrue();
     expect(result.constrained.every(value => !value.blocked)).toBeTrue();
+  });
+
+  it('gives travelling herd members stable positions in a loose line instead of one shared target', () => {
+    const definition = { ...herdDefinition(), travelLineSpacingM: 2, travelLineLateralSpacingM: 0.4 };
+    const ids = ['zebra-c', 'zebra-a', 'zebra-b'];
+    const targets = ids.map(id => resolveAnimalHerdTravelPosition(
+      id, ids, zero, { x: 10, y: 0, z: 0 }, zero, definition,
+    ));
+    const reordered = [...ids].reverse().map(id => resolveAnimalHerdTravelPosition(
+      id, [...ids].reverse(), zero, { x: 10, y: 0, z: 0 }, zero, definition,
+    ));
+
+    expect(targets).toEqual([
+      { x: 6, y: 0, z: -0.4 }, { x: 10, y: 0, z: -0.4 }, { x: 8, y: 0, z: 0.4 },
+    ]);
+    expect(reordered).toEqual([
+      { x: 8, y: 0, z: 0.4 }, { x: 10, y: 0, z: -0.4 }, { x: 6, y: 0, z: -0.4 },
+    ]);
   });
 
   it('stops grazing and resting members at their assigned patch anchor', () => {

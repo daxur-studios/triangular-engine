@@ -165,9 +165,17 @@ export class AnimalsHerdWorldsLabPageComponent {
       maximumSpeedMps: 2.5, maximumAccelerationMps2: 4,
       maximumSubstepDistanceM: 0.3, maximumSubsteps: 8,
       maximumSlope01: 0.6, maximumPatchDistanceM: 30, minimumPatchSuitability01: 0.3,
-      separationRadiusM: 1.6, separationWeight: 3, cohesionWeight: 1.1,
-      alignmentWeight: 0.75, targetWeight: 1.35, arrivalRadiusM: 0.3,
-      slotSpacingM: 0.8, maximumAvoidanceAttempts: 4,
+      // Land herds coordinate loosely: separation keeps individuals apart,
+      // while cohesion is deliberately softer than the bird/fish schools.
+      separationRadiusM: 1.6, separationWeight: 3, cohesionWeight: 0.2,
+      // Avoid a constant orbital pull toward patch centres; animals should
+      // wander to a slot, then settle instead of sliding like particles.
+      alignmentWeight: 0.25, targetWeight: 0.55, arrivalRadiusM: 0.3,
+      slotSpacingM: 0.8,
+      // Followers respond to the leader with a deterministic lag and spacing;
+      // they are not assigned fixed marching slots.
+      travelLineSpacingM: 1.2, leaderFollowDelaySeconds: 0.8,
+      maximumAvoidanceAttempts: 4,
     };
     const definition: AnimalLandHerdCycleDefinition = {
       groupId: `${shape}-herd`, groupSeed: 91, memberCount: 8,

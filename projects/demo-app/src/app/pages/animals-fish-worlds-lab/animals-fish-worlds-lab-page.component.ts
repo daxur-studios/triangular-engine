@@ -168,7 +168,8 @@ export class AnimalsFishWorldsLabPageComponent {
       segmentSampleSpacingM: 0.25, separationRadiusM: 1.2, separationWeight: 3,
       cohesionWeight: 1.1, alignmentWeight: 0.75, targetWeight: 1.35,
       flowWeight: 0.15, depthWeight: 1.5, arrivalRadiusM: 0.3,
-      slotSpacingM: 0.65, maximumAvoidanceAttempts: 4,
+      slotSpacingM: 0.65, loiterRadiusM: 1.25, loiterAngularSpeedRadPerSecond: 0.7,
+      maximumAvoidanceAttempts: 4,
     };
     const definition: AnimalAquaticSchoolCycleDefinition = {
       groupId: `${shape}-school`, groupSeed: 73, memberCount: 8,

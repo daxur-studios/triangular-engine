@@ -1,5 +1,6 @@
 import {
   allocateAnimalAquaticZones,
+  resolveAnimalAquaticSchoolLoiterPosition,
   resolveAnimalAquaticZonePosition,
   stepAnimalAquaticSchool,
   type AnimalAquaticHabitatZone,
@@ -71,6 +72,23 @@ describe('animal aquatic-school policy', () => {
     expect(forage.members[0]).toEqual(jasmine.objectContaining({ mode: 'forage', zoneId: 'reef', velocity: zero }));
     expect(rest.members[0]).toEqual(jasmine.objectContaining({ mode: 'rest', zoneId: 'reef', velocity: zero }));
     expect(forage.constrained[0]).toEqual(jasmine.objectContaining({ blocked: false, substeps: 0 }));
+  });
+
+  it('gives assigned fish distinct, continuously moving habitat targets when loitering is enabled', () => {
+    const definition = { ...schoolDefinition(water()), loiterRadiusM: 2, loiterAngularSpeedRadPerSecond: 1 };
+    const reef = zone('reef', 10, 1, 2, true, 4);
+    const first = resolveAnimalAquaticSchoolLoiterPosition(reef, 0, 'a', 1, definition);
+    const later = resolveAnimalAquaticSchoolLoiterPosition(reef, 0, 'a', 2, definition);
+    const other = resolveAnimalAquaticSchoolLoiterPosition(reef, 1, 'b', 1, definition);
+    const stepped = stepAnimalAquaticSchool({
+      members: [{ ...member('a', 10), position: first }], intent: 'forage', target: reef.position,
+      zones: [reef], deltaSeconds: 0.5, universalTime: 2,
+    }, definition);
+
+    expect(later).not.toEqual(first);
+    expect(other).not.toEqual(first);
+    expect(stepped.members[0].mode).toBe('approach');
+    expect(stepped.members[0].velocity).not.toEqual(zero);
   });
 
   it('keeps flow and depth steering within the water safety band', () => {
