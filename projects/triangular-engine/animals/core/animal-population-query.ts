@@ -55,12 +55,53 @@ export interface QueryAnimalGroupsOptions {
   readonly universalTime: AnimalTime;
 }
 
+export interface QueryAnimalPopulationOptions {
+  readonly worldSeed: number;
+  readonly region: AnimalGroupRegion;
+  readonly species: readonly AnimalGroupSpeciesDefinition[];
+  readonly habitats: AnimalHabitatCandidates;
+  readonly universalTime: AnimalTime;
+  /** Hard bound protecting callers from accidentally materializing a whole world cell. */
+  readonly maximumGroups: number;
+}
+
 export interface QueriedAnimalGroup extends AnimalGroupSnapshot {
   readonly groupSlot: number;
   readonly habitatId: string;
   readonly habitatKind: string;
   readonly habitatVersion: string;
   readonly decisionBucket: number;
+}
+
+/**
+ * Queries several species in one bounded, order-independent population read.
+ * Each species remains an independent deterministic population; this function
+ * only supplies the composition boundary used by a game cell/region.
+ */
+export function queryAnimalPopulation(
+  options: QueryAnimalPopulationOptions,
+): readonly QueriedAnimalGroup[] {
+  if (!Number.isSafeInteger(options.maximumGroups) || options.maximumGroups < 0) {
+    throw new RangeError('Animal population group bound must be a non-negative safe integer.');
+  }
+  if (options.species.length === 0) return [];
+  const species = [...options.species].sort((a, b) => a.id.localeCompare(b.id));
+  for (let index = 1; index < species.length; index++) {
+    if (species[index - 1].id === species[index].id) {
+      throw new Error(`Animal species IDs must be unique: ${species[index].id}`);
+    }
+  }
+  const groups = species.flatMap((definition) => queryAnimalGroups({
+    worldSeed: options.worldSeed,
+    region: options.region,
+    species: definition,
+    habitats: options.habitats,
+    universalTime: options.universalTime,
+  }));
+  if (groups.length > options.maximumGroups) {
+    throw new RangeError('Animal population group bound exceeded.');
+  }
+  return groups.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /**
