@@ -6,6 +6,9 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- Added deterministic consumer-provided perch selection and a tested planetary
+  animal-group interaction path from reconstruction through aircraft fleeing to
+  bounded landing.
 - Added a step-driven deterministic navigation-avoidance scenario API and a
   headed navigation-lab viewer that uses the same core as tests and scripts.
 - Navigation avoidance scenario snapshots now expose shared walkable geometry;

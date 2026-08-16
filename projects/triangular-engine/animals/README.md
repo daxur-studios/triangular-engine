@@ -26,5 +26,11 @@ mutating the reconstructable baseline. The first deliberately narrow event is
 effective universal time, so rewinding before that time restores the baseline.
 Population recovery and ecology remain separate future layers.
 
+Consumer terrain or flora adapters may provide `AnimalPerchAffordance` sockets.
+`selectAnimalPerch()` automatically chooses the nearest available socket with a
+stable ID tie-break, independent of input order; `stepArrival()` then performs
+the bounded, acceleration-limited flight and landing. The consumer provides the
+possible sockets, but does not script the animal's chosen socket or movement.
+
 Run the focused headless suite with
 `npm run test:triangular-engine:animals`.
