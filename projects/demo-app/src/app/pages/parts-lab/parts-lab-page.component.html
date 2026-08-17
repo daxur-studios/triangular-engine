@@ -1,0 +1,190 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Procedural Parts Lab">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>triangular-engine/procedural — vehicle parts slice</small>
+        </div>
+        <strong>Procedural Parts Lab</strong>
+      </header>
+
+      <p class="blurb">
+        Deterministic vehicle parts: wing, landing leg, rocket engine. Sockets carry load-bearing
+        orientations & role tags. Drag the deploy slider to test kinematic hinge rotation.
+      </p>
+
+      <div class="controls-row">
+        <label for="seed-input">Seed</label>
+        <input
+          id="seed-input"
+          type="number"
+          [value]="seed()"
+          (input)="setSeed(+$any($event.target).value)"
+        />
+        <button type="button" class="btn" (click)="randomizeSeed()">Roll</button>
+      </div>
+
+      <div class="toggles-row">
+        <button
+          type="button"
+          class="btn toggle"
+          [class.active]="wireframe()"
+          (click)="toggleWireframe()"
+        >
+          Wireframe
+        </button>
+        <button
+          type="button"
+          class="btn toggle"
+          [class.active]="showSockets()"
+          (click)="toggleSockets()"
+        >
+          Sockets
+        </button>
+        <button
+          type="button"
+          class="btn toggle"
+          [class.active]="showColliders()"
+          (click)="toggleColliders()"
+        >
+          Jolt Debug Colliders
+        </button>
+      </div>
+
+      <div class="slider-box">
+        <div class="slider-header">
+          <span>Landing Leg Deploy</span>
+          <span class="val">{{ (legDeploy01() * 100).toFixed(0) }}%</span>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          [value]="legDeploy01()"
+          (input)="onDeploySlider($event)"
+        />
+      </div>
+
+      <div class="part-selector">
+        <span class="selector-label">Inspect Mass Properties:</span>
+        <div class="tab-group">
+          <button
+            type="button"
+            class="tab-btn"
+            [class.active]="selectedPartIndex() === 0"
+            (click)="selectPart(0)"
+          >
+            Wing
+          </button>
+          <button
+            type="button"
+            class="tab-btn"
+            [class.active]="selectedPartIndex() === 1"
+            (click)="selectPart(1)"
+          >
+            Leg
+          </button>
+          <button
+            type="button"
+            class="tab-btn"
+            [class.active]="selectedPartIndex() === 2"
+            (click)="selectPart(2)"
+          >
+            Engine
+          </button>
+        </div>
+      </div>
+
+      @if (currentMassProps(); as mass) {
+        <div class="hud-box">
+          <div class="hud-item">
+            <span class="k">Volume:</span>
+            <span class="v">{{ mass.volumeM3.toFixed(3) }} m³</span>
+          </div>
+          <div class="hud-item">
+            <span class="k">Dry Mass:</span>
+            <span class="v">{{ mass.dryMassKg.toFixed(1) }} kg</span>
+          </div>
+          <div class="hud-item">
+            <span class="k">COM:</span>
+            <span class="v">
+              [{{ mass.centerOfMassM[0].toFixed(2) }}, {{ mass.centerOfMassM[1].toFixed(2) }}, {{ mass.centerOfMassM[2].toFixed(2) }}]
+            </span>
+          </div>
+        </div>
+      }
+
+      <div class="physics-box">
+        <button type="button" class="btn primary-action" (click)="dropPhysicsBall()">
+          Drop Ball on Selected Part
+        </button>
+      </div>
+
+      <div class="legend">
+        <div class="legend-row"><span class="dot dot-attach"></span> Attach (Radial/Stack)</div>
+        <div class="legend-row"><span class="dot dot-thrust"></span> Thrust Vector</div>
+        <div class="legend-row"><span class="dot dot-foot"></span> Foot Contact</div>
+        <div class="legend-row"><span class="dot dot-pivot"></span> Hinge Pivot</div>
+        <div class="legend-row"><span class="dot dot-lift"></span> Wing Lift Axis</div>
+      </div>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="[0, 3.5, 9]"
+    [target]="[0, 0.8, 0]"
+    [isActive]="true"
+  />
+  <ambientLight [intensity]="1.2" />
+  <directionalLight [position]="[10, 15, 10]" [intensity]="2.2" [castShadow]="true" />
+  <directionalLight [position]="[-10, 8, -10]" [intensity]="0.8" />
+
+  <joltPhysics [gravity]="[0, -9.81, 0]" [debug]="showColliders()">
+    <!-- Static ground floor -->
+    <joltRigidBody [motionType]="0" [position]="[0, -0.25, 0]">
+      <joltBoxShape [params]="[40, 0.5, 40]" />
+      <mesh [receiveShadow]="true">
+        <boxGeometry [params]="[40, 0.5, 40]" />
+        <meshStandardMaterial [params]="{ color: '#1a1d24', roughness: 0.9 }" />
+      </mesh>
+    </joltRigidBody>
+
+    <!-- Static part physics colliders -->
+    @for (col of activePartColliders(); track col.key) {
+      <joltRigidBody
+        [motionType]="0"
+        [position]="col.position"
+        [quaternion]="col.quaternion"
+      >
+        @if (col.isSphere) {
+          <joltSphereShape [radius]="col.radius" />
+        } @else {
+          <joltBoxShape [params]="col.boxSize" />
+        }
+      </joltRigidBody>
+    }
+
+    <!-- Dynamic dropped balls -->
+    @for (ball of balls(); track ball.id) {
+      <joltRigidBody
+        [motionType]="2"
+        [position]="ball.position"
+        [linearDamping]="0.01"
+      >
+        <joltSphereShape [radius]="ball.radius" />
+        <mesh [castShadow]="true">
+          <sphereGeometry [params]="{ radius: ball.radius, widthSegments: 16, heightSegments: 12 }" />
+          <meshStandardMaterial
+            [params]="{
+              color: ball.color,
+              roughness: 0.25,
+              metalness: 0.35
+            }"
+          />
+        </mesh>
+      </joltRigidBody>
+    }
+  </joltPhysics>
+</scene>

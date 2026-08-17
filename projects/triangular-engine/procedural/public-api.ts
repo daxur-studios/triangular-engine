@@ -13,3 +13,6 @@ export * from './flora/flora-species-catalog';
 export * from './ground-cover/ground-cover-archetype';
 export * from './ground-cover/ground-cover-clump-mesh';
 export * from './ground-cover/ground-cover-species-catalog';
+
+export * from './parts/public-api';
+

@@ -25,14 +25,15 @@ describe('DemoIndexComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should have all 38 demos and 7 categories configured', () => {
-    expect(DEMOS.length).toBe(38);
+  it('should have all 39 demos and 7 categories configured', () => {
+    expect(DEMOS.length).toBe(39);
     expect(CATEGORIES.length).toBe(7);
-    expect(component.totalDemosCount).toBe(38);
+    expect(component.totalDemosCount).toBe(39);
     expect(component.gemsCount).toBeGreaterThan(0);
     expect(component.labsCount).toBeGreaterThan(0);
     expect(component.archivedCount).toBeGreaterThan(0);
   });
+
 
   it('should compute entry-point tags with counts', () => {
     const tags = component.allTags();

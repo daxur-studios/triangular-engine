@@ -330,4 +330,18 @@ export const routes: Routes = [
         ({ SoftBodyTearLabPageComponent }) => SoftBodyTearLabPageComponent,
       ),
   },
+  {
+    path: 'parts-lab',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
+    loadComponent: () =>
+      import('./pages/parts-lab/parts-lab-page.component').then(
+        ({ PartsLabPageComponent }) => PartsLabPageComponent,
+      ),
+  },
 ];
+

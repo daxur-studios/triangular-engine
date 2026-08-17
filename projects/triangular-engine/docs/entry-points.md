@@ -21,6 +21,8 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/animals` | Framework-free deterministic animal flocks: fixed-step time, stable residency, terrain clearance, disturbance flee/recover, and presentation snapshots. | — |
 | `triangular-engine/animals/terrain` | Shape-neutral animal surface adapter for infinite plane, planetary sphere, and inhabited inside-cylinder terrain domains. | `triangular-engine/terrain` |
 | `triangular-engine/animals/water` | Fish-safe water volumes combining sampled water surfaces with terrain bottoms across plane, sphere, and inside-cylinder worlds. | `triangular-engine/water`, `three` |
+| `triangular-engine/procedural` | Deterministic procedural flora (trees, bushes, foliage) and procedural craft parts (wings, landing legs, rocket engines) with functional sockets, colliders, mass, and articulation. | `three` |
+
 
 ## Provider configuration
 

@@ -314,8 +314,22 @@ export const DEMOS: readonly DemoItem[] = [
       'Birds landing on queried tree branch perch sockets via stepArrival; interactive fruit slot detachment.',
   },
   {
+    id: 'parts-lab',
+    number: '20b',
+    title: 'Procedural Parts Lab',
+    route: '/parts-lab',
+    categoryId: 'physics',
+    tier: 'lab',
+    entryPoints: ['procedural', 'jolt'],
+    package: 'triangular-engine/procedural',
+    requiresJolt: true,
+    description:
+      'Deterministic vehicle parts (wings, landing legs, rocket engines), load-bearing sockets, kinematic articulation, and mass properties.',
+  },
+  {
     id: 'scatter-lab',
     number: '21',
+
     title: 'Scatter Lab',
     route: '/scatter-lab',
     categoryId: 'vegetation',
