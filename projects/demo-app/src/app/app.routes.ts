@@ -211,6 +211,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'meadow-lab',
+    loadComponent: () =>
+      import('./pages/meadow-lab/meadow-lab-page.component').then(
+        ({ MeadowLabPageComponent }) => MeadowLabPageComponent,
+      ),
+  },
+  {
     path: 'animals-lab',
     loadComponent: () =>
       import('./pages/animals-lab/animals-lab-page.component').then(

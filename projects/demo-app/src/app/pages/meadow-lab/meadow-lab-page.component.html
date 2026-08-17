@@ -1,0 +1,57 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Meadow lab controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a
+          ><small>triangular-engine/procedural — ground cover, slice 2</small>
+        </div>
+        <strong>Meadow: grass clumps in the wind</strong>
+      </header>
+
+      <p class="blurb">
+        {{ variantCount }} grass clump variants
+        (<code>buildGroundCoverClumpMesh</code>, one seed each — no branching
+        skeleton, unlike flora) are registered as a scatter species on a
+        finer identity cell than trees typically use, so density reads as a
+        field. Placement, streaming
+        (<code>selectFixedLevelScatterCells</code>), and instancing
+        (<code>buildScatterInstancedMesh</code>) are scatter's existing code,
+        unchanged from the flora-scatter-lab pattern.
+      </p>
+
+      <p class="blurb">
+        Every clump now sways in a uniform wind
+        (<code>enableScatterWindSway</code>, phase-desynced per instance) —
+        the same primitive flora-scatter-lab uses for trees. Regional gust
+        variation (wind that travels across the field instead of one shared
+        phase everywhere) isn't here yet — that's the next slice.
+      </p>
+
+      <label class="seed-field">
+        Density ({{ density() | number: '1.0-2' }}x)
+        <input
+          type="range"
+          min="0.05"
+          max="5"
+          step="0.05"
+          [value]="density()"
+          (input)="setDensity($any($event.target).value)"
+        />
+      </label>
+
+      <p class="blurb note">
+        {{ grassInstanceCount() }} grass clump instances across
+        {{ cellCount() }} streaming cells.
+      </p>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="initialCameraPosition()"
+    [target]="initialTarget()"
+    [near]="0.05"
+  />
+  <ambientLight [intensity]="1.4" />
+  <directionalLight [position]="[18, 26, 12]" [intensity]="2.2" [castShadow]="true" />
+</scene>

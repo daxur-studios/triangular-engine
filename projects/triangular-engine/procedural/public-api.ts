@@ -9,3 +9,7 @@ export * from './flora/flora-mesh';
 export * from './flora/flora-skeleton';
 export * from './flora/flora-sockets';
 export * from './flora/flora-species-catalog';
+
+export * from './ground-cover/ground-cover-archetype';
+export * from './ground-cover/ground-cover-clump-mesh';
+export * from './ground-cover/ground-cover-species-catalog';
