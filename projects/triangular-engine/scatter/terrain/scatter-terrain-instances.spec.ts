@@ -116,6 +116,69 @@ describe('generateTerrainScatterInstances', () => {
     expect(instances.length).toBe(16);
   });
 
+  it('drops every candidate outside a view cone facing away from them', () => {
+    const instances = generateTerrainScatterInstances({
+      field: new ConstantTerrainField(0),
+      domain,
+      cellAddress: address,
+      cellKey: 'plane:0:0:0',
+      identity,
+      candidatePoolSize: 16,
+      rules,
+      baseDensity01: 1,
+      viewCull: {
+        viewpointWorldM: [50, 0, 100],
+        viewForwardM: [0, 0, 1], // facing away from the [0,100]x[-100,0] cell
+        coneHalfAngleRad: 0.3,
+      },
+    });
+    expect(instances.length).toBe(0);
+  });
+
+  it('keeps the full pool inside a wide view cone facing the candidates', () => {
+    const instances = generateTerrainScatterInstances({
+      field: new ConstantTerrainField(0),
+      domain,
+      cellAddress: address,
+      cellKey: 'plane:0:0:0',
+      identity,
+      candidatePoolSize: 16,
+      rules,
+      baseDensity01: 1,
+      viewCull: {
+        viewpointWorldM: [50, 0, 100],
+        viewForwardM: [0, 0, -1], // facing toward the cell
+        coneHalfAngleRad: Math.PI / 2,
+      },
+    });
+    expect(instances.length).toBe(16);
+  });
+
+  it('composes distanceFade and viewCull as an AND, not letting either silently discard the other', () => {
+    // distanceFade zeroes every candidate (they're all far beyond fadeEndM);
+    // viewCull, on its own, would accept every candidate (wide cone facing
+    // them). If viewCull's composition read options.suitability instead of
+    // the running local suitability, it would clobber distanceFade's zeroing
+    // and the full pool would wrongly pass.
+    const instances = generateTerrainScatterInstances({
+      field: new ConstantTerrainField(0),
+      domain,
+      cellAddress: address,
+      cellKey: 'plane:0:0:0',
+      identity,
+      candidatePoolSize: 16,
+      rules,
+      baseDensity01: 1,
+      distanceFade: { viewpointWorldM: [50, 0, -50], fadeStartM: 0, fadeEndM: 0 },
+      viewCull: {
+        viewpointWorldM: [50, 0, 100],
+        viewForwardM: [0, 0, -1],
+        coneHalfAngleRad: Math.PI / 2,
+      },
+    });
+    expect(instances.length).toBe(0);
+  });
+
   it('is fully deterministic for identical inputs', () => {
     const options = {
       field: new ConstantTerrainField(3),

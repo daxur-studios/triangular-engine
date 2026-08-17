@@ -34,6 +34,7 @@ export class ScatterStreamingService {
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly scratchCameraWorld = new Vector3();
+  private readonly scratchCameraForward = new Vector3();
   private viewpointOverride:
     | ScatterStreamingViewpoint
     | ScatterStreamingViewpointProvider
@@ -42,9 +43,19 @@ export class ScatterStreamingService {
 
   private readonly viewpointSubject =
     new BehaviorSubject<ScatterStreamingViewpoint>(this.readViewpoint());
+  private readonly viewForwardSubject =
+    new BehaviorSubject<ScatterStreamingViewpoint>(this.readViewForward());
 
   /** Emits only when the viewpoint moves by at least `movementThresholdM`, or is forced. */
   readonly viewpointWorldM$ = this.viewpointSubject.asObservable();
+  /**
+   * Camera forward direction, emitted alongside `viewpointWorldM$` on the
+   * same movement-threshold gate — a simplification (no independent rotation
+   * threshold) that's fine while orbit-controls-driven scenes move position
+   * and look direction together. Not overridable independently of position;
+   * always reads the active engine camera.
+   */
+  readonly viewForwardM$ = this.viewForwardSubject.asObservable();
 
   constructor() {
     this.engine.camera$
@@ -57,6 +68,10 @@ export class ScatterStreamingService {
 
   get viewpointWorldM(): ScatterStreamingViewpoint {
     return this.viewpointSubject.value;
+  }
+
+  get viewForwardM(): ScatterStreamingViewpoint {
+    return this.viewForwardSubject.value;
   }
 
   get movementThreshold(): number {
@@ -109,6 +124,7 @@ export class ScatterStreamingService {
     if (!force && movedM < this.movementThresholdM) return false;
 
     this.viewpointSubject.next([next[0], next[1], next[2]]);
+    this.viewForwardSubject.next(this.readViewForward());
     return true;
   }
 
@@ -151,6 +167,15 @@ export class ScatterStreamingService {
       this.scratchCameraWorld.x,
       this.scratchCameraWorld.y,
       this.scratchCameraWorld.z,
+    ];
+  }
+
+  private readViewForward(): ScatterStreamingViewpoint {
+    this.engine.camera.getWorldDirection(this.scratchCameraForward);
+    return [
+      this.scratchCameraForward.x,
+      this.scratchCameraForward.y,
+      this.scratchCameraForward.z,
     ];
   }
 

@@ -57,6 +57,7 @@ export abstract class MaterialComponent
   readonly materialService = inject(MaterialService);
   readonly parent = inject(Object3DComponent, {
     skipSelf: true,
+    optional: true,
   });
   readonly destroyRef = inject(DestroyRef);
   //#endregion
@@ -119,6 +120,10 @@ export abstract class MaterialComponent
 
   #initCastAndSetMaterial() {
     effect(() => {
+      const parent = this.parent;
+      if (!parent) {
+        return;
+      }
       handleMaterialAndGeometryLinking(this.material(), this.parent);
     });
   }

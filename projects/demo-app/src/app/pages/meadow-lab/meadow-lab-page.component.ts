@@ -10,7 +10,6 @@ import {
   InstancedMesh,
   Mesh,
   MeshStandardMaterial,
-  Vector3,
   type Vector3Tuple,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
@@ -21,8 +20,11 @@ import {
   hashProceduralKey,
 } from 'triangular-engine/procedural';
 import {
+  CylinderTerrainDomain,
   generateTerrainPatchMesh,
   PlaneTerrainDomain,
+  SPHERE_TERRAIN_FACES,
+  SphereTerrainDomain,
   type IPlaneTerrainPatchAddress,
   type ITerrainField,
   type ITerrainFieldSample,
@@ -43,6 +45,8 @@ import {
   type ScatterWindDefinition,
 } from 'triangular-engine/scatter';
 
+type MeadowLabShape = 'plane' | 'sphere' | 'cylinder';
+
 const PLANE_PATCH_SIZE_M = 24;
 const GRID_RADIUS = 1;
 const TERRAIN_RESOLUTION = 12;
@@ -54,6 +58,26 @@ const SCATTER_SELECT_RADIUS_M = 1_000_000;
  */
 const SCATTER_FIXED_LEVEL_DEPTH = 2;
 const WORLD_SEED = 4_211;
+
+/**
+ * Small planet by design — the whole point of a radius slider is to make
+ * sphere-curvature horizon occlusion (see GRASS_VIEW_CONE_HALF_ANGLE_RAD's
+ * neighbour below) visible on foot within a few seconds of walking, not to
+ * simulate a realistic planet.
+ */
+const GRASS_SPHERE_RADIUS_DEFAULT_M = 25;
+const GRASS_SPHERE_RADIUS_MIN_M = 10;
+const GRASS_SPHERE_RADIUS_MAX_M = 150;
+/**
+ * Fixed, unlike the sphere — the ask that motivated a radius slider was
+ * specifically about small *spheres*; the cylinder has no horizon test to
+ * tune against (see docs/runbook/017), so a slider here would just be
+ * another control with nothing new to demonstrate.
+ */
+const GRASS_CYLINDER_RADIUS_M = 20;
+const GRASS_CYLINDER_LENGTH_M = 60;
+const GRASS_CYLINDER_ANGULAR_PATCHES = 6;
+const GRASS_CYLINDER_AXIAL_PATCHES = 3;
 
 const GRASS_LAYER_ID = 'meadow-grass';
 const GRASS_SPECIES_ID = GROUND_COVER_MEADOW_GRASS_ARCHETYPE.id;
@@ -116,18 +140,28 @@ const GRASS_STREAMING_MOVEMENT_THRESHOLD_M = 4;
  * screen edge. Tested per-candidate (not per-cell), so the cone's edge is a
  * smooth boundary through the field rather than a blocky per-cell cutoff.
  *
- * The angle test uses the full 3D direction to each candidate against the
- * full 3D camera-forward vector — not an XZ-only/horizontal approximation.
- * That matters for two reasons: it correctly narrows/rotates the cone when
- * the camera pitches up or down (an XZ-only version stays blind to pitch,
- * so looking straight down neither adds the downward view nor drops what's
- * now behind-and-below), and it makes the test viewer-relative only, with
- * no assumption about which axis is "up" or "horizontal" — so unlike the
- * old XZ version, this works unmodified on a sphere or inside-cylinder
- * world too, not just a flat plane.
+ * The math itself now lives in `scatter/core/scatter-view-cull` (promoted
+ * out of this page — see docs/runbook/017) as a full 3D angle test: the
+ * full 3D direction to each candidate against the full 3D camera-forward
+ * vector, not an XZ-only/horizontal approximation. That matters for two
+ * reasons: it correctly narrows/rotates the cone when the camera pitches up
+ * or down (an XZ-only version stays blind to pitch, so looking straight
+ * down neither adds the downward view nor drops what's now behind-and-
+ * below — a symmetric cone pointed straight down at flat ground reads as a
+ * circle around the point below the camera, which is correct, not a bug),
+ * and it makes the test viewer-relative only, with no assumption about
+ * which axis is "up" or "horizontal" — so it works unmodified on the
+ * sphere/cylinder shapes below, not just this flat plane.
  */
 const GRASS_VIEW_CONE_HALF_ANGLE_RAD = 1.31; // ~75°, conservative half-angle
-const GRASS_VIEW_CONE_COS_HALF_ANGLE = Math.cos(GRASS_VIEW_CONE_HALF_ANGLE_RAD);
+/**
+ * Widens both the cone and (on the sphere) horizon boundary so a clump near
+ * the edge isn't dropped just because its single anchor point tests
+ * outside — grass's own rough footprint, not a dramatic demonstration
+ * object (a large landmark proving this at scale is a `flora-scatter-lab`
+ * follow-up, not this slice — see docs/runbook/017).
+ */
+const GRASS_OBJECT_RADIUS_M = 0.35;
 /**
  * Lighter and quicker than flora's TREE_WIND (strength 0.05, frequency 0.9)
  * — thin blades flutter faster than a canopy sways. `strength`/`frequency`
@@ -161,7 +195,7 @@ function gentleMeadowUndulationM(x: number, z: number): number {
   return Math.sin(x / 34) * 0.6 + Math.cos(z / 41) * 0.45;
 }
 
-class MeadowLabTerrainField implements ITerrainField {
+class MeadowLabPlaneField implements ITerrainField {
   readonly minElevationM = -1.5;
   readonly maxElevationM = 1.5;
 
@@ -180,32 +214,106 @@ class MeadowLabTerrainField implements ITerrainField {
   }
 }
 
+/** `sample`'s input is the unit sphere direction (not world meters) scaled by radiusM into the same field-space `gentleMeadowUndulationM` expects — same convention scatter-lab's SphereScatterField uses. */
+class MeadowLabSphereField implements ITerrainField {
+  readonly minElevationM = -1.5;
+  readonly maxElevationM = 1.5;
+  constructor(private readonly radiusM: number) {}
+
+  sample([x, _y, z]: TerrainVector3): ITerrainFieldSample {
+    return { elevationM: gentleMeadowUndulationM(x * this.radiusM, z * this.radiusM) };
+  }
+
+  sampleBatch(
+    positions: Float64Array,
+    out = new Float64Array(positions.length / 3),
+  ): Float64Array {
+    for (let i = 0; i < out.length; i++) {
+      out[i] = this.sample([
+        positions[i * 3],
+        positions[i * 3 + 1],
+        positions[i * 3 + 2],
+      ]).elevationM;
+    }
+    return out;
+  }
+}
+
+/** Axis runs along world X; `sample`'s second/third components are the (radialY, radialZ) point on the circular cross-section, converted to a circumferential field coordinate via atan2 — same convention scatter-lab's CylinderScatterField uses. */
+class MeadowLabCylinderField implements ITerrainField {
+  readonly minElevationM = -1.5;
+  readonly maxElevationM = 1.5;
+  constructor(private readonly radiusM: number) {}
+
+  sample([axialM, radialY, radialZ]: TerrainVector3): ITerrainFieldSample {
+    const angle = Math.atan2(radialZ, radialY);
+    return { elevationM: gentleMeadowUndulationM(axialM, angle * this.radiusM) };
+  }
+
+  sampleBatch(
+    positions: Float64Array,
+    out = new Float64Array(positions.length / 3),
+  ): Float64Array {
+    for (let i = 0; i < out.length; i++) {
+      out[i] = this.sample([
+        positions[i * 3],
+        positions[i * 3 + 1],
+        positions[i * 3 + 2],
+      ]).elevationM;
+    }
+    return out;
+  }
+}
+
 interface IClumpVariant {
   readonly geometry: BufferGeometry;
 }
 
 interface IGrassScatterCell {
-  readonly address: IPlaneTerrainPatchAddress;
+  readonly address: unknown;
   readonly cellKey: string;
 }
 
 /**
- * Slice 4 of the grass work: grass density fades out toward
- * `GRASS_VIEW_DISTANCE_DEFAULT_M` (`generateTerrainScatterInstances`'s
- * `distanceFade` option) and re-thins as the camera moves
- * (`ScatterStreamingService.viewpointWorldM$`), instead of rendering
- * uniformly all the way to the field's edge — on top of slice 3's
- * curl-noise gust (`GRASS_WIND.gust`, swirling and drifting as a coherent
- * flow, phased off world position + time rather than the per-instance hash)
- * over slice 2's desynced per-instance flutter (`enableScatterWindSway`,
- * same primitive flora-scatter-lab uses for trees), which itself sits on
- * slice 1's geometry + density on scatter's existing pipeline. The gust and
- * distance-fade primitives both live in scatter, not this page, so
- * flora/trees can pick them up too whenever that's the next thing worth
- * doing. See the flora-scatter-lab pattern this mirrors (one InstancedMesh
- * per seeded variant, bucketed by an instance-ID hash) — trees registered a
- * branching flora species the same way this registers a non-branching
- * ground-cover one.
+ * One demo-only fixture per shape: reused for both terrain rendering and
+ * scatter placement/culling. Mirrors scatter-lab's `IShapeFixture`, minus
+ * the bird's-eye-only focus point — meadow-lab's camera always stands near
+ * the surface (see setCameraForShape), so the live camera position doubles
+ * as the culling/fade viewpoint directly, no separate focus point needed.
+ */
+interface IMeadowLabShapeFixture {
+  readonly domain: {
+    getPatchBounds(address: never): {
+      minU: number;
+      maxU: number;
+      minV: number;
+      maxV: number;
+    };
+    getSurfacePosition(
+      address: never,
+      u: number,
+      v: number,
+      elevationM: number,
+    ): TerrainVector3;
+    getChildren(address: never): readonly unknown[];
+  };
+  readonly field: ITerrainField;
+  readonly roots: readonly unknown[];
+  readonly getCellKey: (address: unknown) => string;
+  readonly getLevel: (address: unknown) => number;
+}
+
+/**
+ * Slice 5 of the grass work: the demo now switches between a flat plane, a
+ * sphere, and the inside of a cylinder (`selectShape`), with terrain
+ * generation, scatter placement, and camera-aware culling all working
+ * unmodified across all three — placement was already shape-agnostic
+ * (`sampleTerrainSurface`); culling became shape-agnostic this slice once
+ * promoted into `scatter/core/scatter-view-cull` (full 3D cone test, plus a
+ * sphere-only curvature horizon test — see docs/runbook/017). Slice 4's
+ * distance fade and directional cone culling, slice 3's curl-noise gust,
+ * slice 2's desynced per-instance flutter, and slice 1's density-on-
+ * scatter's-pipeline all carry over unchanged underneath.
  */
 @Component({
   selector: 'app-meadow-lab-page',
@@ -217,6 +325,7 @@ interface IGrassScatterCell {
   host: { class: 'flex-page' },
 })
 export class MeadowLabPageComponent {
+  readonly shape = signal<MeadowLabShape>('plane');
   readonly grassInstanceCount = signal(0);
   readonly cellCount = signal(0);
   readonly variantCount = CLUMP_VARIANT_COUNT;
@@ -234,14 +343,15 @@ export class MeadowLabPageComponent {
   readonly viewDistanceMaxM = GRASS_VIEW_DISTANCE_MAX_M;
   readonly cullBehindCamera = signal(true);
   readonly cullingFrozen = signal(false);
+  readonly sphereRadiusM = signal(GRASS_SPHERE_RADIUS_DEFAULT_M);
+  readonly sphereRadiusMinM = GRASS_SPHERE_RADIUS_MIN_M;
+  readonly sphereRadiusMaxM = GRASS_SPHERE_RADIUS_MAX_M;
 
   readonly initialCameraPosition = signal<Vector3Tuple>([0, 4, 12]);
   readonly initialTarget = signal<Vector3Tuple>([0, 0.3, 0]);
 
   private readonly engine = inject(EngineService);
 
-  private readonly domain = new PlaneTerrainDomain(PLANE_PATCH_SIZE_M);
-  private readonly field = new MeadowLabTerrainField();
   private readonly groundMaterial = new MeshStandardMaterial({
     color: '#5a6b3c',
     roughness: 0.95,
@@ -257,9 +367,9 @@ export class MeadowLabPageComponent {
   private readonly cells: IGrassScatterCell[] = [];
   private readonly windHandle: IScatterWindHandle;
   private readonly scatterStreaming = inject(ScatterStreamingService);
-  private readonly scratchDirection = new Vector3();
+  private fixture!: IMeadowLabShapeFixture;
   private viewpointWorldM: ScatterStreamingViewpoint = [0, 4, 12];
-  private cullForward: readonly [number, number, number] = [0, 0, -1];
+  private viewForwardM: readonly [number, number, number] = [0, 0, -1];
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -268,6 +378,7 @@ export class MeadowLabPageComponent {
 
     this.windHandle = enableScatterWindSway(this.grassMaterial, GRASS_WIND);
 
+    this.fixture = this.getFixture(this.shape());
     this.buildTerrain();
     this.scatterStreaming.setMovementThresholdM(GRASS_STREAMING_MOVEMENT_THRESHOLD_M);
     // BehaviorSubject — fires immediately with the starting camera position,
@@ -280,7 +391,7 @@ export class MeadowLabPageComponent {
       .subscribe((viewpointWorldM) => {
         if (this.cullingFrozen()) return;
         this.viewpointWorldM = viewpointWorldM;
-        this.captureCullForwardDirection();
+        this.viewForwardM = this.scatterStreaming.viewForwardM;
         this.rebuildGrass(this.density());
       });
 
@@ -301,6 +412,15 @@ export class MeadowLabPageComponent {
       this.grassMaterial.dispose();
       this.engine.scene.background = previousBackground;
     });
+  }
+
+  selectShape(shape: MeadowLabShape): void {
+    if (shape === this.shape()) return;
+    this.shape.set(shape);
+    this.fixture = this.getFixture(shape);
+    this.setCameraForShape(shape);
+    this.seedViewpointFromCamera(this.initialCameraPosition(), this.initialTarget());
+    this.rebuildWorld();
   }
 
   setDensity(value: number | string): void {
@@ -362,6 +482,18 @@ export class MeadowLabPageComponent {
     if (!enabled) this.scatterStreaming.update(true);
   }
 
+  setSphereRadius(value: number | string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    const clamped = Math.max(GRASS_SPHERE_RADIUS_MIN_M, Math.min(GRASS_SPHERE_RADIUS_MAX_M, parsed));
+    this.sphereRadiusM.set(clamped);
+    if (this.shape() !== 'sphere') return;
+    this.fixture = this.getFixture('sphere');
+    this.setCameraForShape('sphere');
+    this.seedViewpointFromCamera(this.initialCameraPosition(), this.initialTarget());
+    this.rebuildWorld();
+  }
+
   private buildVariants(): IClumpVariant[] {
     const variants: IClumpVariant[] = [];
     for (let i = 0; i < CLUMP_VARIANT_COUNT; i++) {
@@ -390,61 +522,140 @@ export class MeadowLabPageComponent {
     return hashProceduralKey(instanceId) % CLUMP_VARIANT_COUNT;
   }
 
-  private captureCullForwardDirection(): void {
-    // Already unit length — no degenerate/near-zero case to guard, unlike
-    // an XZ-only projection of this same vector would need.
-    this.engine.camera.getWorldDirection(this.scratchDirection);
-    this.cullForward = [
-      this.scratchDirection.x,
-      this.scratchDirection.y,
-      this.scratchDirection.z,
-    ];
+  /**
+   * Per-shape terrain domain + field + root addresses + cell-key/level
+   * accessors, mirroring `scatter-lab-page.component.ts`'s `getFixture`.
+   * Reads `sphereRadiusM()` live so a radius-slider change picks up the
+   * latest value without a separate cache-invalidation path.
+   */
+  private getFixture(shape: MeadowLabShape): IMeadowLabShapeFixture {
+    if (shape === 'plane') {
+      const domain = new PlaneTerrainDomain(PLANE_PATCH_SIZE_M);
+      const roots: IPlaneTerrainPatchAddress[] = [];
+      for (let z = -GRID_RADIUS; z <= GRID_RADIUS; z++) {
+        for (let x = -GRID_RADIUS; x <= GRID_RADIUS; x++) {
+          roots.push({ level: 0, x, z });
+        }
+      }
+      return {
+        domain: domain as never,
+        field: new MeadowLabPlaneField(),
+        roots,
+        getCellKey: (a) => {
+          const v = a as IPlaneTerrainPatchAddress;
+          return `plane:${v.level}:${v.x}:${v.z}`;
+        },
+        getLevel: (a) => (a as { level: number }).level,
+      };
+    }
+    if (shape === 'sphere') {
+      const radiusM = this.sphereRadiusM();
+      const domain = new SphereTerrainDomain(radiusM);
+      const roots = SPHERE_TERRAIN_FACES.map((face) => ({ face, level: 0, x: 0, y: 0 }));
+      return {
+        domain: domain as never,
+        field: new MeadowLabSphereField(radiusM),
+        roots,
+        getCellKey: (a) => {
+          const v = a as { face: string; level: number; x: number; y: number };
+          return `sphere:${v.face}:${v.level}:${v.x}:${v.y}`;
+        },
+        getLevel: (a) => (a as { level: number }).level,
+      };
+    }
+    const domain = new CylinderTerrainDomain({
+      radiusM: GRASS_CYLINDER_RADIUS_M,
+      lengthM: GRASS_CYLINDER_LENGTH_M,
+      levelZeroAngularPatchCount: GRASS_CYLINDER_ANGULAR_PATCHES,
+      levelZeroAxialPatchCount: GRASS_CYLINDER_AXIAL_PATCHES,
+    });
+    const counts = domain.getPatchCounts(0);
+    const roots = Array.from({ length: counts.axial }, (_, axialIndex) =>
+      Array.from({ length: counts.angular }, (_unused, angularIndex) => ({
+        level: 0,
+        angularIndex,
+        axialIndex,
+      })),
+    ).flat();
+    return {
+      domain: domain as never,
+      field: new MeadowLabCylinderField(GRASS_CYLINDER_RADIUS_M),
+      roots,
+      getCellKey: (a) => {
+        const v = a as { level: number; angularIndex: number; axialIndex: number };
+        return `cylinder:${v.level}:${v.angularIndex}:${v.axialIndex}`;
+      },
+      getLevel: (a) => (a as { level: number }).level,
+    };
   }
 
-  /** 1 inside the forward cone (or culling disabled), 0 outside it — the "pizza slice" cut, applied per-candidate for a smooth boundary. Full 3D angle test, so it correctly follows camera pitch (looking down/up), not just yaw. */
-  private viewConeSuitability(worldPositionM: TerrainVector3): number {
-    const dx = worldPositionM[0] - this.viewpointWorldM[0];
-    const dy = worldPositionM[1] - this.viewpointWorldM[1];
-    const dz = worldPositionM[2] - this.viewpointWorldM[2];
-    const dist = Math.hypot(dx, dy, dz);
-    if (dist < 0.5) return 1;
-    const cosAngle =
-      (dx * this.cullForward[0] + dy * this.cullForward[1] + dz * this.cullForward[2]) / dist;
-    return cosAngle >= GRASS_VIEW_CONE_COS_HALF_ANGLE ? 1 : 0;
+  /**
+   * Near-surface standing points that keep the default `+Y` up-vector on
+   * every shape (see docs/runbook/017): the sphere's `+Y` pole and the
+   * cylinder's `angle = π` point are both surface locations whose local
+   * "up" already equals global `+Y`, so no `upVector` template binding is
+   * needed — unlike scatter-lab's bird's-eye framing, which deliberately
+   * surveys each shape from outside/above instead of standing on it.
+   */
+  private setCameraForShape(shape: MeadowLabShape): void {
+    if (shape === 'plane') {
+      this.initialCameraPosition.set([0, 4, 12]);
+      this.initialTarget.set([0, 0.3, 0]);
+    } else if (shape === 'sphere') {
+      const r = this.sphereRadiusM();
+      this.initialCameraPosition.set([0, r + 4, 12]);
+      this.initialTarget.set([0, r + 0.3, 0]);
+    } else {
+      const r = GRASS_CYLINDER_RADIUS_M;
+      this.initialCameraPosition.set([12, -r + 4, 0]);
+      this.initialTarget.set([0, -r + 0.3, 0]);
+    }
+  }
+
+  /**
+   * Seeds viewpoint/forward directly from the camera/target we just set,
+   * rather than waiting on the live `engine.camera` — `OrbitControlsComponent`
+   * applies `cameraPosition`/`target` input changes via an Angular `effect()`,
+   * which doesn't flush synchronously, so reading `engine.camera` right after
+   * a shape switch could still see the *previous* shape's stale position.
+   * The natural `viewpointWorldM$` subscription re-syncs both fields again
+   * once the camera actually settles, so this is only the bridge for the one
+   * rebuild that happens immediately on switch.
+   */
+  private seedViewpointFromCamera(cameraPositionM: Vector3Tuple, targetM: Vector3Tuple): void {
+    this.viewpointWorldM = cameraPositionM;
+    const dx = targetM[0] - cameraPositionM[0];
+    const dy = targetM[1] - cameraPositionM[1];
+    const dz = targetM[2] - cameraPositionM[2];
+    const lengthM = Math.hypot(dx, dy, dz) || 1;
+    this.viewForwardM = [dx / lengthM, dy / lengthM, dz / lengthM];
   }
 
   private buildTerrain(): void {
-    const roots: IPlaneTerrainPatchAddress[] = [];
-    for (let z = -GRID_RADIUS; z <= GRID_RADIUS; z++) {
-      for (let x = -GRID_RADIUS; x <= GRID_RADIUS; x++) {
-        roots.push({ level: 0, x, z });
-      }
-    }
-
     let cellCount = 0;
 
-    for (const address of roots) {
-      const patch = generateTerrainPatchMesh(this.field, this.domain, {
-        address,
+    for (const address of this.fixture.roots) {
+      const patch = generateTerrainPatchMesh(this.fixture.field, this.fixture.domain as never, {
+        address: address as never,
         resolution: TERRAIN_RESOLUTION,
-      });
+      }) as ITerrainPatchMesh<unknown>;
       const groundMesh = this.buildGroundMesh(patch);
       this.groundMeshes.push(groundMesh);
       this.engine.scene.add(groundMesh);
 
-      const cellAddresses = selectFixedLevelScatterCells(this.domain, {
-        roots: [address],
+      const cellAddresses = selectFixedLevelScatterCells(this.fixture.domain as never, {
+        roots: [address as never],
         anchorWorldM: [0, 0, 0],
         radiusM: SCATTER_SELECT_RADIUS_M,
-        fixedLevel: address.level + SCATTER_FIXED_LEVEL_DEPTH,
-        getLevel: (a) => a.level,
+        fixedLevel: this.fixture.getLevel(address) + SCATTER_FIXED_LEVEL_DEPTH,
+        getLevel: this.fixture.getLevel as never,
       });
       cellCount += cellAddresses.length;
 
       for (const cellAddress of cellAddresses) {
         this.cells.push({
           address: cellAddress,
-          cellKey: `plane:${cellAddress.level}:${cellAddress.x}:${cellAddress.z}`,
+          cellKey: this.fixture.getCellKey(cellAddress),
         });
       }
     }
@@ -452,14 +663,32 @@ export class MeadowLabPageComponent {
     this.cellCount.set(cellCount);
   }
 
+  /** Disposes the current shape's ground meshes and clears streaming cells — grass clump variant geometries are shape-independent and are never touched here. */
+  private teardownTerrain(): void {
+    for (const mesh of this.groundMeshes) {
+      mesh.removeFromParent();
+      mesh.geometry.dispose();
+    }
+    this.groundMeshes.length = 0;
+    this.cells.length = 0;
+  }
+
+  /** Full teardown/rebuild for a shape switch or a fixture-affecting slider (sphere radius) — terrain, cells, and grass all regenerate from the current fixture. */
+  private rebuildWorld(): void {
+    this.teardownTerrain();
+    this.buildTerrain();
+    this.rebuildGrass(this.density());
+  }
+
   /**
    * Re-runs placement + instancing only — terrain and cell addresses (built
-   * once in buildTerrain) stay fixed as density changes. `densityMultiplier`
-   * above 1x grows the candidate pool itself (baseDensity01 pins at 1, fully
-   * accepting it) since baseDensity01 alone can only thin the base pool, not
-   * exceed it. Also re-runs whenever the camera moves past the streaming
-   * service's movement threshold, so `distanceFade` keeps thinning relative
-   * to the *current* viewpoint rather than a startup snapshot.
+   * once in buildTerrain, or on a shape switch via rebuildWorld) stay fixed
+   * as density changes. `densityMultiplier` above 1x grows the candidate
+   * pool itself (baseDensity01 pins at 1, fully accepting it) since
+   * baseDensity01 alone can only thin the base pool, not exceed it. Also
+   * re-runs whenever the camera moves past the streaming service's movement
+   * threshold, so `distanceFade`/`viewCull` keep tracking the *current*
+   * viewpoint rather than a startup snapshot.
    */
   private rebuildGrass(densityMultiplier: number): void {
     for (const mesh of this.grassMeshes) mesh.removeFromParent();
@@ -481,9 +710,9 @@ export class MeadowLabPageComponent {
 
     for (const cell of this.cells) {
       const instances = generateTerrainScatterInstances({
-        field: this.field,
-        domain: this.domain,
-        cellAddress: cell.address,
+        field: this.fixture.field,
+        domain: this.fixture.domain as never,
+        cellAddress: cell.address as never,
         cellKey: cell.cellKey,
         identity: {
           worldSeed: WORLD_SEED,
@@ -499,8 +728,17 @@ export class MeadowLabPageComponent {
           fadeStartM,
           fadeEndM,
         },
-        suitability: this.cullBehindCamera()
-          ? (s) => this.viewConeSuitability(s.worldPositionM)
+        viewCull: this.cullBehindCamera()
+          ? {
+              viewpointWorldM: this.viewpointWorldM,
+              viewForwardM: this.viewForwardM,
+              coneHalfAngleRad: GRASS_VIEW_CONE_HALF_ANGLE_RAD,
+              objectRadiusM: GRASS_OBJECT_RADIUS_M,
+              horizon:
+                this.shape() === 'sphere'
+                  ? { curvatureCenterWorldM: [0, 0, 0], curvatureRadiusM: this.sphereRadiusM() }
+                  : undefined,
+            }
           : undefined,
       });
 
@@ -530,7 +768,7 @@ export class MeadowLabPageComponent {
     this.grassInstanceCount.set(grassInstanceCount);
   }
 
-  private buildGroundMesh(patch: ITerrainPatchMesh<IPlaneTerrainPatchAddress>): Mesh {
+  private buildGroundMesh(patch: ITerrainPatchMesh<unknown>): Mesh {
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(patch.surface.positions, 3));
     geometry.setAttribute('normal', new BufferAttribute(patch.surface.normals, 3));

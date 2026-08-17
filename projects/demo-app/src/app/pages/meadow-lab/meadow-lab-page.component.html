@@ -4,10 +4,34 @@
       <header>
         <div>
           <a routerLink="/">← Examples</a
-          ><small>triangular-engine/procedural — ground cover, slice 4</small>
+          ><small>triangular-engine/procedural — ground cover, slice 5</small>
         </div>
         <strong>Meadow: gusting wind over grass</strong>
       </header>
+
+      <div class="seed-field shape-buttons">
+        <button
+          type="button"
+          [class.active]="shape() === 'plane'"
+          (click)="selectShape('plane')"
+        >
+          Flat plane
+        </button>
+        <button
+          type="button"
+          [class.active]="shape() === 'sphere'"
+          (click)="selectShape('sphere')"
+        >
+          Sphere
+        </button>
+        <button
+          type="button"
+          [class.active]="shape() === 'cylinder'"
+          (click)="selectShape('cylinder')"
+        >
+          Inside cylinder
+        </button>
+      </div>
 
       <p class="blurb">
         {{ variantCount }} grass clump variants
@@ -17,7 +41,10 @@
         field. Placement, streaming
         (<code>selectFixedLevelScatterCells</code>), and instancing
         (<code>buildScatterInstancedMesh</code>) are scatter's existing code,
-        unchanged from the flora-scatter-lab pattern.
+        unchanged from the flora-scatter-lab pattern — and shape-agnostic
+        already, so switching between the flat plane, a sphere, and the
+        inside of a cylinder above needs no placement changes at all, only a
+        different terrain domain + field per shape.
       </p>
 
       <p class="blurb">
@@ -114,18 +141,48 @@
         Freeze culling — orbit out to inspect the boundary
       </label>
 
+      @if (shape() === 'sphere') {
+        <label class="seed-field">
+          Planet radius ({{ sphereRadiusM() | number: '1.0-0' }}m)
+          <input
+            type="range"
+            [attr.min]="sphereRadiusMinM"
+            [attr.max]="sphereRadiusMaxM"
+            step="1"
+            [value]="sphereRadiusM()"
+            (input)="setSphereRadius($any($event.target).value)"
+          />
+        </label>
+      }
+
       <p class="blurb note">
         Grass density fades out toward the view distance
         (<code>generateTerrainScatterInstances</code>'s
         <code>distanceFade</code>) instead of rendering uniformly to the
         field's edge, and re-thins as the camera moves
         (<code>ScatterStreamingService</code>). A second, directional cull
-        drops grass outside a conservative cone in front of the camera — a
-        coarse angle-to-forward test, not a true 6-plane frustum, ported
-        from brunos-space-program's cdlod-terrain-lab. Freeze it to detach
-        the cull boundary from the live camera, then orbit/zoom freely to
-        see exactly where it falls.
+        (<code>scatter/core/scatter-view-cull</code>, promoted out of this
+        page so any game can use it) drops grass outside a conservative cone
+        in front of the camera — a coarse angle-to-forward test, not a true
+        6-plane frustum, ported from brunos-space-program's
+        cdlod-terrain-lab. Freeze it to detach the cull boundary from the
+        live camera, then orbit/zoom freely to see exactly where it falls —
+        on the flat plane that boundary is a literal circle when looking
+        straight down (a symmetric cone sliced by a plane perpendicular to
+        its axis), not a bug.
       </p>
+
+      @if (shape() === 'sphere') {
+        <p class="blurb note">
+          On a small planet, grass also disappears beyond the curved
+          horizon — a second cull test pivoted at the planet's centre rather
+          than the camera, independent of look direction. Shrink the radius
+          above to make the curvature (and the horizon cutoff) more obvious.
+          The inside-cylinder shape skips this test: its curvature only
+          wraps around the circumference, not along its length, so a single
+          centre-point horizon angle would be wrong there.
+        </p>
+      }
 
       <p class="blurb note">
         {{ grassInstanceCount() }} grass clump instances across

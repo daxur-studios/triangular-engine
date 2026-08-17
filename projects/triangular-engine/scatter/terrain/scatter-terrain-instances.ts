@@ -14,6 +14,7 @@ import {
   type ScatterSuitabilityFn,
 } from '../core/scatter-placement';
 import type { ScatterPlacementRules } from '../core/scatter-species-definition';
+import { computeScatterHorizonFade01, computeScatterViewConeFade01 } from '../core/scatter-view-cull';
 
 export interface ITerrainScatterInstance {
   readonly instanceId: ScatterInstanceId;
@@ -32,6 +33,26 @@ export interface IScatterDistanceFadeOptions {
   readonly fadeEndM: number;
 }
 
+/**
+ * Camera-aware culling: a conservative cone in front of the camera, plus an
+ * optional sphere-curvature horizon test. See
+ * `computeScatterViewConeFade01`/`computeScatterHorizonFade01` in
+ * `scatter/core/scatter-view-cull` for the math and docs/runbook/017 for the
+ * design rationale (not a true 6-plane frustum; horizon is sphere-only).
+ */
+export interface IScatterViewCullOptions {
+  readonly viewpointWorldM: TerrainVector3;
+  readonly viewForwardM: TerrainVector3;
+  readonly coneHalfAngleRad: number;
+  /** Widens both the cone and horizon boundary so wide objects near the edge aren't dropped for a single center point. */
+  readonly objectRadiusM?: number;
+  readonly horizon?: {
+    readonly curvatureCenterWorldM: TerrainVector3;
+    readonly curvatureRadiusM: number;
+    readonly marginRad?: number;
+  };
+}
+
 export interface IGenerateTerrainScatterInstancesOptions<TAddress> {
   readonly field: ITerrainField;
   readonly domain: ITerrainSurfaceDomain<TAddress>;
@@ -44,6 +65,8 @@ export interface IGenerateTerrainScatterInstancesOptions<TAddress> {
   readonly suitability?: ScatterSuitabilityFn;
   /** For species with no far LOD (grass): density fades to zero instead of popping. */
   readonly distanceFade?: IScatterDistanceFadeOptions;
+  /** Drops instances outside a camera-relative cone (and optionally beyond a sphere horizon) — composes with distanceFade, not a replacement for it. */
+  readonly viewCull?: IScatterViewCullOptions;
 }
 
 function distanceM(a: TerrainVector3, b: TerrainVector3): number {
@@ -98,8 +121,31 @@ export function generateTerrainScatterInstances<TAddress>(
         fadeStartM,
         fadeEndM,
       );
-      const baseSuitability = options.suitability;
+      const baseSuitability = suitability;
       suitability = (s) => (baseSuitability ? baseSuitability(s) : 1) * fade01;
+    }
+    if (options.viewCull) {
+      const { viewpointWorldM, viewForwardM, coneHalfAngleRad, objectRadiusM, horizon } =
+        options.viewCull;
+      let cullFade01 = computeScatterViewConeFade01(
+        sample.worldPositionM,
+        viewpointWorldM,
+        viewForwardM,
+        coneHalfAngleRad,
+        objectRadiusM,
+      );
+      if (cullFade01 > 0 && horizon) {
+        cullFade01 *= computeScatterHorizonFade01(
+          sample.worldPositionM,
+          viewpointWorldM,
+          horizon.curvatureCenterWorldM,
+          horizon.curvatureRadiusM,
+          objectRadiusM,
+          horizon.marginRad,
+        );
+      }
+      const baseSuitability = suitability;
+      suitability = (s) => (baseSuitability ? baseSuitability(s) : 1) * cullFade01;
     }
 
     const placement = evaluateScatterPlacement(
