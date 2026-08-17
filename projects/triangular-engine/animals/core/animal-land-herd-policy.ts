@@ -20,6 +20,11 @@ export interface AnimalGrazingPatch {
   readonly suitability01: number;
   readonly available?: boolean;
 }
+export interface AnimalLandObstacle {
+  readonly id: string;
+  readonly position: AnimalVector3;
+  readonly radiusM: number;
+}
 export interface AnimalHerdPatchAssignment {
   readonly memberId: string;
   readonly patchId?: string;
@@ -51,6 +56,7 @@ export interface AnimalLandHerdPolicyDefinition {
   /** Seconds of deterministic response lag for travelling followers. */
   readonly leaderFollowDelaySeconds?: number;
   readonly maximumAvoidanceAttempts: number;
+  readonly obstacles?: readonly AnimalLandObstacle[];
 }
 export interface AnimalLandHerdStepInput {
   readonly members: readonly AnimalLandHerdMember[];
@@ -282,6 +288,17 @@ function herdDesiredVelocity(
     }
   }
   desired = add(desired, scale(reject(separation, frame.normal), definition.separationWeight));
+  let obstacleRepulsion = { ...zero };
+  for (const obstacle of definition.obstacles ?? []) {
+    const offset = subtract(member.position, obstacle.position);
+    const distance = magnitude(offset);
+    const clearance = obstacle.radiusM + definition.separationRadiusM;
+    if (distance > 1e-9 && distance < clearance) {
+      obstacleRepulsion = add(obstacleRepulsion,
+        scale(reject(offset, frame.normal), (clearance - distance) / (distance * clearance)));
+    }
+  }
+  desired = add(desired, scale(obstacleRepulsion, definition.separationWeight));
   return scaleTo(desired, definition.maximumSpeedMps);
 }
 
@@ -299,6 +316,12 @@ function validateDefinition(value: AnimalLandHerdPolicyDefinition): void {
     || !Number.isFinite(value.maximumSubstepDistanceM) || value.maximumSubstepDistanceM <= 0
     || !Number.isSafeInteger(value.maximumSubsteps) || value.maximumSubsteps < 1) {
     throw new RangeError('Animal land-herd policy limits are invalid.');
+  }
+  for (const obstacle of value.obstacles ?? []) {
+    if (obstacle.id.length === 0 || !Number.isFinite(obstacle.radiusM) || obstacle.radiusM < 0) {
+      throw new RangeError('Animal land-herd obstacle is invalid.');
+    }
+    validateVector(obstacle.position, `Animal land-herd obstacle ${obstacle.id}`);
   }
 }
 function validatePatch(patch: AnimalGrazingPatch): AnimalGrazingPatch {

@@ -50,6 +50,7 @@ export interface AnimalAirFlockPolicyDefinition {
   readonly holdingSpeedMps: number;
   /** Minimum deterministic spacing between capacity slots at one roost. */
   readonly roostSlotSpacingM: number;
+  readonly obstacles?: readonly { readonly id: string; readonly position: AnimalVector3; readonly radiusM: number }[];
 }
 
 export interface AnimalAirFlockStepInput {
@@ -199,6 +200,18 @@ function flockDesiredVelocity(
     }
   }
   desired = add(desired, scale(reject(separation, ground.normal), definition.separationWeight));
+  let obstacleRepulsion = { ...zero };
+  for (const obstacle of definition.obstacles ?? []) {
+    const offset = subtract(member.position, obstacle.position);
+    const horizontal = reject(offset, ground.surfaceUp);
+    const distance = magnitude(horizontal);
+    const clearance = obstacle.radiusM + definition.separationRadiusM;
+    const altitudeToObstacle = dot(offset, ground.surfaceUp);
+    if (distance > 1e-9 && distance < clearance && altitudeToObstacle < definition.maximumAltitudeM) {
+      obstacleRepulsion = add(obstacleRepulsion, scale(horizontal, (clearance - distance) / (distance * clearance)));
+    }
+  }
+  desired = add(desired, scale(obstacleRepulsion, definition.separationWeight));
   const altitudeError = targetAltitude - altitude;
   desired = add(desired, scale(ground.surfaceUp, altitudeError));
   return scaleTo(desired, definition.maximumSpeedMps);
@@ -268,6 +281,12 @@ function validateDefinition(value: AnimalAirFlockPolicyDefinition): void {
     || !Number.isSafeInteger(value.maximumMembers) || value.maximumMembers < 0
     || !Number.isSafeInteger(value.maximumRoostSites) || value.maximumRoostSites < 0) {
     throw new RangeError('Animal air-flock policy limits are invalid.');
+  }
+  for (const obstacle of value.obstacles ?? []) {
+    if (obstacle.id.length === 0 || !Number.isFinite(obstacle.radiusM) || obstacle.radiusM < 0) {
+      throw new RangeError('Animal air-flock obstacle is invalid.');
+    }
+    validateVector(obstacle.position, `Animal air-flock obstacle ${obstacle.id}`);
   }
 }
 function tangentDirection(from: AnimalVector3, to: AnimalVector3, normal: AnimalVector3): AnimalVector3 {

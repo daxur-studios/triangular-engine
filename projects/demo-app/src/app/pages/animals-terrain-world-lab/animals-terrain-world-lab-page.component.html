@@ -1,0 +1,11 @@
+<section class="lab">
+  <header><h1>Terrain-integrated animal checkpoint</h1><p>Real terrain surfaces + scatter-derived tree habitats/obstacles + deterministic Universal Time herd playback.</p></header>
+  <div class="controls"><button type="button" (click)="togglePause()">{{ paused() ? 'Resume' : 'Pause' }}</button><button type="button" (click)="reset()">Reset</button><label>World <select [value]="selectedShape()" (change)="setShape(($any($event.target)).value)"><option value="plane">Plane</option><option value="sphere">Sphere</option><option value="cylinder">Cylinder</option></select></label><label>Size <select [value]="worldSize()" (change)="setWorldSize(($any($event.target)).value)"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label><label>UT <input type="range" min="-120" max="120" step="0.1" [value]="universalTime()" (input)="setUniversalTime($event)"></label><span>{{ universalTime() | number:'1.1-1' }}s</span><span class="speeds"><button *ngFor="let speed of speedOptions" type="button" (click)="setTimeScale(speed)">{{ speed }}×</button></span></div>
+  <div class="proof"><span>Three terrain domains</span><span>Scatter adapter active</span><span>Movement remains in animals core</span></div>
+  <div class="status"><span>Plane: {{ status().plane }}</span><span>Sphere: {{ status().sphere }}</span><span>Cylinder: {{ status().cylinder }}</span></div>
+</section>
+<scene [showFps]="true">
+  <orbitControls [cameraPosition]="[0, 18, 34]" [target]="[0, 0, 0]" />
+  <ambientLight [intensity]="1.5" />
+  <directionalLight [position]="[8, 20, 12]" [intensity]="2" />
+</scene>

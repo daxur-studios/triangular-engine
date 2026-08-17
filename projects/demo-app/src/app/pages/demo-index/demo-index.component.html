@@ -1,279 +1,295 @@
 <main>
-  <header>
-    <span class="eyebrow">Triangular Engine</span>
-    <h1>Examples</h1>
-    <p>Small, focused scenes for testing the engine and its integrations.</p>
+  <header class="hub-header">
+    <div class="header-content">
+      <span class="eyebrow">Triangular Engine</span>
+      <h1>Demo Hub</h1>
+      <p>
+        Explore interactive scenes, production showcases, feature labs, and engine spikes.
+      </p>
+      <div class="stats-summary">
+        <span class="stat-pill"><strong>{{ totalDemosCount }}</strong> Total Scenes</span>
+        <span class="stat-pill gem-stat"><strong>{{ gemsCount }}</strong> Shining Gems</span>
+        <span class="stat-pill lab-stat"><strong>{{ labsCount }}</strong> Feature Labs</span>
+        <span class="stat-pill archived-stat"><strong>{{ archivedCount }}</strong> Spikes & POCs</span>
+      </div>
+    </div>
+
+    <!-- Search & Command Controls -->
+    <div class="search-bar-container">
+      <div class="search-input-wrapper">
+        <svg class="search-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" />
+        </svg>
+        <input
+          id="demo-search-input"
+          type="text"
+          [value]="searchQuery()"
+          (input)="setSearchQuery($any($event.target).value)"
+          placeholder="Search demos, subsystems, entry points (e.g. water, animals, jolt)..."
+          aria-label="Search demos"
+        />
+        @if (searchQuery()) {
+          <button
+            class="clear-search-btn"
+            type="button"
+            (click)="setSearchQuery('')"
+            aria-label="Clear search"
+          >
+            ✕
+          </button>
+        } @else {
+          <kbd class="shortcut-hint" title="Press / to focus">/</kbd>
+        }
+      </div>
+    </div>
   </header>
 
-  <h2>Core and rendering</h2>
-  <nav aria-label="Core and rendering examples">
-    <a routerLink="/water">
-      <span class="number">★</span>
-      <strong>Water library</strong>
-      <span
-        >Official flat, sphere, and cylinder demo with quality, motion, and
-        underwater controls.</span
-      >
-    </a>
-    <a routerLink="/engine-demo">
-      <span class="number">01</span>
-      <strong>Engine demo</strong>
-      <span
-        >Core scene, lighting, geometry, environment and postprocessing.</span
-      >
-    </a>
-    <a routerLink="/camera-and-floating-origin">
-      <span class="number">02</span>
-      <strong>Camera & floating origin</strong>
-      <span>Authoritative camera follow, rebasing, and large-distance precision.</span>
-    </a>
-    <a routerLink="/takram-clouds">
-      <span class="number">03</span>
-      <strong>Takram clouds</strong>
-      <span>Declarative atmosphere and cloud integration.</span>
-    </a>
-  </nav>
-  <h2>Water, terrain, and scatter</h2>
-  <nav aria-label="World systems examples">
-    <a routerLink="/water">
-      <span class="number">★</span>
-      <strong>Water library</strong>
-      <span>Official flat, sphere, and cylinder water demo.</span>
-    </a>
-    <a routerLink="/animals-lab">
-      <span class="number">09</span>
-      <strong>Animals lab</strong>
-      <span>Deterministic flock slice — Boids-style steering on a seeded population.</span>
-    </a>
-    <a routerLink="/terrain-lab">
-      <span class="number">04</span>
-      <strong>Terrain lab</strong>
-      <span>Multi-surface terrain, streaming, and patch-local precision.</span>
-    </a>
-    <a routerLink="/navigation-lab">
-      <span class="number">07</span>
-      <strong>Navigation lab</strong>
-      <span>Flat and 3D heightfield path finding with seeded terrain and live obstacles.</span>
-    </a>
-    <a routerLink="/river-lab">
-      <span class="number">05</span>
-      <strong>Procedural river lab</strong>
-      <span
-        >One river contract drives terrain carving, width, elevation, and
-        downstream water flow.</span
-      >
-    </a>
-    <a routerLink="/scatter-lab">
-      <span class="number">06</span>
-      <strong>Scatter lab</strong>
-      <span>Deterministic placement, instancing, and LOD rendering.</span>
-    </a>
-    <a routerLink="/water-buoyancy-poc">
-      <span class="number">06</span>
-      <strong>Water buoyancy</strong>
-      <span>Water surface sampling and Jolt buoyancy integration.</span>
-    </a>
-  </nav>
-  <h2>Research and integration spikes</h2>
-  <nav aria-label="Research examples">
-    <a routerLink="/destruction-poc">
-      <span class="number">26</span>
-      <strong>Destruction POC</strong>
-      <span>Impact-driven permanent squash and deterministic rigid-body fracture debris.</span>
-    </a>
-    <a routerLink="/soft-body-poc">
-      <span class="number">23</span>
-      <strong>Jolt soft-body POC</strong>
-      <span>Declarative mesh-backed soft-body creation, deformation, and rendering.</span>
-    </a>
-    <a routerLink="/soft-body-tear-lab">
-      <span class="number">24</span>
-      <strong>Soft-body tear lab</strong>
-      <span>Manual split prototype: replace one deformable body with two fragments.</span>
-    </a>
-    <a routerLink="/soft-bend-constraint">
-      <span class="number">25</span>
-      <strong>Soft bend constraint</strong>
-      <span>Jolt cloth and spheres compared with none, distance, and dihedral bend constraints.</span>
-    </a>
-    <a routerLink="/impostor-baker">
-      <span class="number">18</span>
-      <strong>Octahedral impostor baker</strong>
-      <span>triangular-engine/impostor: bakes a procedural tree into a hemispherical octahedral atlas and renders it as a lit, camera-facing impostor — single billboard next to the source mesh, plus a thousands-strong InstancedMesh field.</span>
-    </a>
-    <a routerLink="/takram-clouds-spike">
-      <span class="number">02</span>
-      <strong>Takram clouds spike</strong>
-      <span>Frozen plain Three.js reference implementation.</span>
-    </a>
-    <a routerLink="/takram-mini-planet">
-      <span class="number">04</span>
-      <strong>Takram mini planet</strong>
-      <span>Small-planet scale and volumetric-to-texture cloud handoff.</span>
-    </a>
-    <a routerLink="/takram-cylinder-clouds">
-      <span class="number">06</span>
-      <strong>O'Neill cylinder clouds</strong>
-      <span>Cylindrical volumetric clouds and internal atmospheric haze.</span>
-    </a>
-    <a routerLink="/water-surface-spike">
-      <span class="number">07</span>
-      <strong>Water surface spike</strong>
-      <span
-        >triangular-engine/water Phase 0: shared Gerstner wave model, CPU/GPU
-        parity.</span
-      >
-    </a>
-    <a routerLink="/water-lod-poc">
-      <span class="number">08</span>
-      <strong>Water LOD POC</strong>
-      <span
-        >triangular-engine/water Phase 1a: large-scale CDLOD-style morphing
-        clipmap, no seams.</span
-      >
-    </a>
-    <a routerLink="/water-material-poc">
-      <span class="number">10</span>
-      <strong>Water material POC</strong>
-      <span
-        >triangular-engine/water Phase 1b: detail-normal chop, fresnel,
-        depth-texture shore fade against a sloped shore.</span
-      >
-    </a>
-    <a routerLink="/water-sphere-poc">
-      <span class="number">11</span>
-      <strong>Water sphere POC</strong>
-      <span
-        >triangular-engine/water Phase 1c: the same flat CDLOD grid and
-        material, curved onto a sphere via a recentring local tangent
-        frame.</span
-      >
-    </a>
-    <a routerLink="/water-cylinder-poc">
-      <span class="number">12</span>
-      <strong>Water cylinder POC</strong>
-      <span
-        >triangular-engine/water Phase 1d: the same grid and material, curved
-        onto the inside of an O'Neill-cylinder wall — opposite curvature from
-        the sphere.</span
-      >
-    </a>
-    <a routerLink="/scatter-physics-lab">
-      <span class="number">14</span>
-      <strong>Scatter physics lab</strong>
-      <span
-        >triangular-engine/scatter Phase 3: Jolt collider ring, removal
-        overlay, and impact-momentum felling — driveable rover plus a
-        mass/speed throwable rock.</span
-      >
-    </a>
-    <a routerLink="/trail-lab">
-      <span class="number">16</span>
-      <strong>Trail lab</strong>
-      <span
-        >triangular-engine/trail G1: ribbon-trail geometry and point-stamp
-        decals for surface marks — drag to lay tracks, click to scorch.</span
-      >
-    </a>
-    <a routerLink="/spline-lab">
-      <span class="number">19</span>
-      <strong>Spline lab</strong>
-      <span
-        >triangular-engine/spline Phase 0A POC: click to place points, drag
-        points and Bezier handles, switch handle type (auto/mirrored/broken/
-        linear), open or closed loops.</span
-      >
-    </a>
-    <a routerLink="/terrain-composer-lab">
-      <span class="number">20</span>
-      <strong>Terrain composer lab</strong>
-      <span>Phase 0B POC: combine an island boundary, mountain ridges, rivers, and seeded noise into a live terrain and heightmap.</span>
-    </a>
-    <a routerLink="/geological-features-lab">
-      <span class="number">22</span>
-      <strong>Geological features lab</strong>
-      <span
-        >Interactive volcano and canyon parameters plus the planned reusable
-        terrain-feature catalogue.</span
-      >
-    </a>
-    <a routerLink="/life-lab">
-      <span class="number">21</span>
-      <strong>A little life</strong>
-      <span
-        >triangular-engine/life Phase 0: a flock of birds avoids a moving
-        player influence and tree canopies.</span
-      >
-    </a>
-    <a routerLink="/flora-lab">
-      <span class="number">27</span>
-      <strong>Flora lab</strong>
-      <span
-        >triangular-engine/procedural M1: seeded tree skeleton + low-poly
-        mesh generator, colored by the baked windWeight attribute.</span
-      >
-    </a>
-    <a routerLink="/flora-scatter-lab">
-      <span class="number">28</span>
-      <strong>Flora scatter lab</strong>
-      <span
-        >triangular-engine/procedural M4: flora variants registered as a
-        scatter species — instancing, wind-weight sway, trunk colliders, and
-        an instance-transform × socket world-space query, all on scatter's
-        existing pipeline.</span
-      >
-    </a>
-    <a routerLink="/meadow-lab">
-      <span class="number">33</span>
-      <strong>Meadow lab</strong>
-      <span
-        >triangular-engine/procedural ground-cover, slice 2: grass clumps (no
-        branching skeleton) registered as a scatter species on a finer
-        identity cell, now swaying in a uniform wind — regional gust
-        variation lands next.</span
-      >
-    </a>
-    <a routerLink="/flora-affordance-lab">
-      <span class="number">29</span>
-      <strong>Flora affordance lab</strong>
-      <span
-        >triangular-engine/procedural M5: one abstract bird flies to and
-        lands on a queried perch socket via animals' new stepArrival
-        primitive; click a fruit-slot socket to detach it — a
-        socket-ID-keyed occupancy map proves the state contract.</span
-      >
-    </a>
-    <a routerLink="/large-world-life-poc">
-      <span class="number">23</span>
-      <strong>Large world life POC</strong>
-      <span
-        >Fresh seeded world composition: ice, meadow, jungle, desert, water,
-        3D relief, deterministic scatter, species catalogue, and route paths.</span
-      >
-    </a>
-    <a routerLink="/animals-worlds-lab">
-      <span class="number">30</span>
-      <strong>Bird worlds lab</strong>
-      <span>Production air-flock policy reconstructed directly from Universal Time on an infinite plane, planet sphere, and inside cylinder.</span>
-    </a>
-    <a routerLink="/animals-herd-worlds-lab">
-      <span class="number">31</span>
-      <strong>Herd worlds lab</strong>
-      <span>Production land-herd policy reconstructed directly from Universal Time on the same three world shapes.</span>
-    </a>
-    <a routerLink="/animals-fish-worlds-lab">
-      <span class="number">32</span>
-      <strong>Fish worlds lab</strong>
-      <span>Production aquatic-school policy constrained to water and reconstructed directly from Universal Time on the same three world shapes.</span>
-    </a>
-    <a routerLink="/vehicle-trail-lab">
-      <span class="number">17</span>
-      <strong>Vehicle trail lab</strong>
-      <span
-        >triangular-engine/trail + jolt: a driven box vehicle leaves a live
-        fading ribbon trail, with radial gravity following the ground onto
-        plane, sphere, and the inside of a cylinder.</span
-      >
-    </a>
-  </nav>
+  <!-- Controls Section: Tiers, Categories & Entry-Point Tags -->
+  <section class="controls-panel" aria-label="Demo Filters">
+    <!-- Tiers Tabs -->
+    <div class="filter-row">
+      <span class="filter-label">Collection:</span>
+      <div class="tier-tabs" role="tablist">
+        <button
+          type="button"
+          class="tier-tab"
+          [class.active]="selectedTier() === 'all'"
+          (click)="selectTier('all')"
+        >
+          All Demos <span class="count-badge">{{ totalDemosCount }}</span>
+        </button>
+        <button
+          type="button"
+          class="tier-tab gem-tab"
+          [class.active]="selectedTier() === 'gem'"
+          (click)="selectTier('gem')"
+        >
+          ★ Shining Gems <span class="count-badge">{{ gemsCount }}</span>
+        </button>
+        <button
+          type="button"
+          class="tier-tab lab-tab"
+          [class.active]="selectedTier() === 'lab'"
+          (click)="selectTier('lab')"
+        >
+          🔬 Feature Labs <span class="count-badge">{{ labsCount }}</span>
+        </button>
+        <button
+          type="button"
+          class="tier-tab archived-tab"
+          [class.active]="selectedTier() === 'archived'"
+          (click)="selectTier('archived')"
+        >
+          📦 Spikes & Archives <span class="count-badge">{{ archivedCount }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Entry-Point Tags Strip -->
+    <div class="filter-row">
+      <span class="filter-label">Entry Points:</span>
+      <div class="tag-pills-list">
+        <button
+          type="button"
+          class="tag-pill"
+          [class.active]="selectedTag() === 'all'"
+          (click)="selectTag('all')"
+        >
+          All Tags
+        </button>
+        @for (item of allTags(); track item.tag) {
+          <button
+            type="button"
+            class="tag-pill"
+            [class.active]="selectedTag() === item.tag"
+            (click)="selectTag(item.tag)"
+          >
+            #{{ item.tag }}
+            <span class="tag-count">{{ item.count }}</span>
+          </button>
+        }
+      </div>
+    </div>
+
+    <!-- Category Filter Chips -->
+    <div class="filter-row">
+      <span class="filter-label">Category:</span>
+      <div class="category-chips">
+        <button
+          type="button"
+          class="cat-chip"
+          [class.active]="selectedCategory() === 'all'"
+          (click)="selectCategory('all')"
+        >
+          All Categories
+        </button>
+        @for (cat of categories; track cat.id) {
+          <button
+            type="button"
+            class="cat-chip"
+            [class.active]="selectedCategory() === cat.id"
+            (click)="selectCategory(cat.id)"
+          >
+            {{ cat.label }}
+          </button>
+        }
+      </div>
+    </div>
+
+    <!-- Active Filters & Reset Bar -->
+    @if (hasActiveFilters()) {
+      <div class="active-filters-bar">
+        <span class="results-count">
+          Showing <strong>{{ filteredDemos().length }}</strong> of {{ totalDemosCount }} demos
+        </span>
+        <div class="active-filter-tags">
+          @if (searchQuery()) {
+            <span class="active-badge">
+              Query: "{{ searchQuery() }}"
+              <button type="button" (click)="setSearchQuery('')">✕</button>
+            </span>
+          }
+          @if (selectedTier() !== 'all') {
+            <span class="active-badge">
+              Tier: {{ selectedTier() === 'gem' ? 'Shining Gems' : selectedTier() === 'lab' ? 'Feature Labs' : 'Spikes & Archives' }}
+              <button type="button" (click)="selectTier('all')">✕</button>
+            </span>
+          }
+          @if (selectedTag() !== 'all') {
+            <span class="active-badge">
+              Tag: #{{ selectedTag() }}
+              <button type="button" (click)="selectTag('all')">✕</button>
+            </span>
+          }
+          @if (selectedCategory() !== 'all') {
+            <span class="active-badge">
+              Category: {{ selectedCategory() }}
+              <button type="button" (click)="selectCategory('all')">✕</button>
+            </span>
+          }
+          <button type="button" class="reset-all-btn" (click)="clearAllFilters()">
+            Reset All Filters
+          </button>
+        </div>
+      </div>
+    }
+  </section>
+
+  <!-- Empty State -->
+  @if (filteredDemos().length === 0) {
+    <div class="empty-state">
+      <div class="empty-icon">🔍</div>
+      <h3>No demos match your criteria</h3>
+      <p>Try searching for a different term or clearing your active filters.</p>
+      <button type="button" class="reset-all-btn primary" (click)="clearAllFilters()">
+        Clear All Filters
+      </button>
+    </div>
+  }
+
+  <!-- Spotlight Section: Shining Gems (Shown on default "All" or "Gems" views when gems match) -->
+  @if ((selectedTier() === 'all' || selectedTier() === 'gem') && featuredGems().length > 0 && selectedCategory() === 'all' && selectedTag() === 'all' && !searchQuery()) {
+    <section class="spotlight-section" aria-label="Flagship Showcases">
+      <div class="section-title-wrap">
+        <div class="title-with-badge">
+          <span class="star-icon">★</span>
+          <h2>Shining Gems & Flagship Showcases</h2>
+        </div>
+        <p class="section-desc">
+          Top-tier, production-grade showcases demonstrating integrated multi-domain systems.
+        </p>
+      </div>
+
+      <div class="spotlight-grid">
+        @for (demo of featuredGems(); track demo.id) {
+          <a [routerLink]="demo.route" class="demo-card spotlight-card">
+            <div class="card-meta">
+              <span class="demo-number">{{ demo.number }}</span>
+              <span class="tier-pill gem-pill">★ Shining Gem</span>
+              @if (demo.requiresJolt) {
+                <span class="jolt-pill" title="Requires Jolt Physics WASM">⚡ Jolt WASM</span>
+              }
+            </div>
+            <strong class="card-title">{{ demo.title }}</strong>
+            <p class="card-desc">{{ demo.description }}</p>
+            <div class="card-footer">
+              <span class="package-name">{{ demo.package }}</span>
+              <div class="card-tags" (click)="$event.stopPropagation()">
+                @for (ep of demo.entryPoints; track ep) {
+                  <button
+                    type="button"
+                    class="card-tag-btn"
+                    [class.active]="selectedTag() === ep"
+                    (click)="selectTag(ep)"
+                    title="Filter by #{{ ep }}"
+                  >
+                    #{{ ep }}
+                  </button>
+                }
+              </div>
+            </div>
+          </a>
+        }
+      </div>
+    </section>
+  }
+
+  <!-- Categorized Demos Grid -->
+  @for (group of categoryGroups(); track group.category.id) {
+    <section class="category-section" [attr.aria-label]="group.category.label">
+      <div class="section-title-wrap">
+        <div class="title-with-badge">
+          <h2>{{ group.category.label }}</h2>
+          <span class="group-count">{{ group.demos.length }}</span>
+        </div>
+        <p class="section-desc">{{ group.category.description }}</p>
+      </div>
+
+      <nav class="demos-grid" [attr.aria-label]="group.category.label + ' examples'">
+        @for (demo of group.demos; track demo.id) {
+          <a
+            [routerLink]="demo.route"
+            class="demo-card"
+            [class.card-gem]="demo.tier === 'gem'"
+            [class.card-lab]="demo.tier === 'lab'"
+            [class.card-archived]="demo.tier === 'archived'"
+          >
+            <div class="card-meta">
+              <span class="demo-number">{{ demo.number }}</span>
+              @if (demo.tier === 'gem') {
+                <span class="tier-pill gem-pill">★ Shining Gem</span>
+              } @else if (demo.tier === 'lab') {
+                <span class="tier-pill lab-pill">🔬 Lab</span>
+              } @else {
+                <span class="tier-pill archived-pill">📦 Spike / POC</span>
+              }
+              @if (demo.requiresJolt) {
+                <span class="jolt-pill" title="Requires Jolt Physics WASM">⚡ Jolt WASM</span>
+              }
+            </div>
+
+            <strong class="card-title">{{ demo.title }}</strong>
+            <p class="card-desc">{{ demo.description }}</p>
+
+            <div class="card-footer">
+              <span class="package-name">{{ demo.package }}</span>
+              <div class="card-tags" (click)="$event.stopPropagation()">
+                @for (ep of demo.entryPoints; track ep) {
+                  <button
+                    type="button"
+                    class="card-tag-btn"
+                    [class.active]="selectedTag() === ep"
+                    (click)="selectTag(ep)"
+                    title="Filter by #{{ ep }}"
+                  >
+                    #{{ ep }}
+                  </button>
+                }
+              </div>
+            </div>
+          </a>
+        }
+      </nav>
+    </section>
+  }
 </main>

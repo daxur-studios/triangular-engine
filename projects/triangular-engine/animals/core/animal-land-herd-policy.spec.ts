@@ -112,6 +112,15 @@ describe('animal land-herd policy', () => {
     expect(blocked.members[0]).toEqual(jasmine.objectContaining({ mode: 'blocked', position: zero }));
   });
 
+  it('repels a travelling member from terrain obstacles supplied by an adapter', () => {
+    const result = stepAnimalLandHerd({
+      members: [member('a', 0)], intent: 'travel', target: { x: 6, y: 0, z: 0 },
+      deltaSeconds: 1, universalTime: 0,
+    }, { ...herdDefinition(), separationRadiusM: 2, separationWeight: 4,
+      obstacles: [{ id: 'tree-1', position: { x: 1, y: 0, z: 0 }, radiusM: 2 }] });
+    expect(result.members[0].position.x).toBeLessThan(1);
+  });
+
   it('rejects duplicate IDs and bounded member or patch input overflow', () => {
     expect(() => allocateAnimalHerdPatches(['same', 'same'], [], zero, planeSurface(), 1)).toThrowError(/unique/);
     expect(() => allocateAnimalHerdPatches(['one'], [patch('same', 1), patch('same', 2)], zero, planeSurface(), 2)).toThrowError(/unique/);

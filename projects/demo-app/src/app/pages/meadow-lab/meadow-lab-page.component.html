@@ -4,9 +4,9 @@
       <header>
         <div>
           <a routerLink="/">← Examples</a
-          ><small>triangular-engine/procedural — ground cover, slice 2</small>
+          ><small>triangular-engine/procedural — ground cover, slice 4</small>
         </div>
-        <strong>Meadow: grass clumps in the wind</strong>
+        <strong>Meadow: gusting wind over grass</strong>
       </header>
 
       <p class="blurb">
@@ -21,11 +21,19 @@
       </p>
 
       <p class="blurb">
-        Every clump now sways in a uniform wind
-        (<code>enableScatterWindSway</code>, phase-desynced per instance) —
-        the same primitive flora-scatter-lab uses for trees. Regional gust
-        variation (wind that travels across the field instead of one shared
-        phase everywhere) isn't here yet — that's the next slice.
+        Every clump flutters on its own desynced timer
+        (<code>enableScatterWindSway</code>, per-instance phase) — the same
+        primitive flora-scatter-lab uses for trees. A gust
+        (<code>GRASS_WIND.gust</code>) adds a second, coherent flow on top:
+        curl noise (a smooth noise field's gradient, crossed with the local
+        surface normal) sampled at world position and time, so nearby clumps
+        bend together while the flow direction itself swirls and drifts
+        instead of pointing one fixed way. The same noise field is also
+        contrast-masked into patches with a visible boundary ("gust
+        fronts"), so it reads as eddies drifting through the field rather
+        than a uniform shimmer. Amplitude, eddy size, and drift speed are
+        all live GPU uniforms (<code>setGustAmplitude</code>,
+        <code>setGustWavelengthM</code>, <code>setGustDriftSpeedMS</code>).
       </p>
 
       <label class="seed-field">
@@ -39,6 +47,85 @@
           (input)="setDensity($any($event.target).value)"
         />
       </label>
+
+      <label class="seed-field">
+        Gust amplitude ({{ gustAmplitude() | number: '1.2-2' }})
+        <input
+          type="range"
+          min="0"
+          [attr.max]="gustAmplitudeMax"
+          step="0.01"
+          [value]="gustAmplitude()"
+          (input)="setGustAmplitude($any($event.target).value)"
+        />
+      </label>
+
+      <label class="seed-field">
+        Gust size ({{ gustWavelengthM() | number: '1.0-0' }}m)
+        <input
+          type="range"
+          [attr.min]="gustWavelengthMinM"
+          [attr.max]="gustWavelengthMaxM"
+          step="1"
+          [value]="gustWavelengthM()"
+          (input)="setGustWavelength($any($event.target).value)"
+        />
+      </label>
+
+      <label class="seed-field">
+        Gust speed ({{ gustDriftSpeedMS() | number: '1.1-1' }}m/s)
+        <input
+          type="range"
+          [attr.min]="gustDriftSpeedMinMS"
+          [attr.max]="gustDriftSpeedMaxMS"
+          step="0.5"
+          [value]="gustDriftSpeedMS()"
+          (input)="setGustDriftSpeed($any($event.target).value)"
+        />
+      </label>
+
+      <label class="seed-field">
+        View distance ({{ viewDistanceM() | number: '1.0-0' }}m)
+        <input
+          type="range"
+          [attr.min]="viewDistanceMinM"
+          [attr.max]="viewDistanceMaxM"
+          step="1"
+          [value]="viewDistanceM()"
+          (input)="setViewDistance($any($event.target).value)"
+        />
+      </label>
+
+      <label class="seed-field">
+        <input
+          type="checkbox"
+          [checked]="cullBehindCamera()"
+          (change)="setCullBehindCamera($any($event.target).checked)"
+        />
+        Cull behind camera (pizza-slice cone)
+      </label>
+
+      <label class="seed-field">
+        <input
+          type="checkbox"
+          [checked]="cullingFrozen()"
+          (change)="setCullingFrozen($any($event.target).checked)"
+        />
+        Freeze culling — orbit out to inspect the boundary
+      </label>
+
+      <p class="blurb note">
+        Grass density fades out toward the view distance
+        (<code>generateTerrainScatterInstances</code>'s
+        <code>distanceFade</code>) instead of rendering uniformly to the
+        field's edge, and re-thins as the camera moves
+        (<code>ScatterStreamingService</code>). A second, directional cull
+        drops grass outside a conservative cone in front of the camera — a
+        coarse angle-to-forward test, not a true 6-plane frustum, ported
+        from brunos-space-program's cdlod-terrain-lab. Freeze it to detach
+        the cull boundary from the live camera, then orbit/zoom freely to
+        see exactly where it falls.
+      </p>
 
       <p class="blurb note">
         {{ grassInstanceCount() }} grass clump instances across

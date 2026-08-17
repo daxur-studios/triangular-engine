@@ -231,8 +231,12 @@ export const routes: Routes = [
         ({ AnimalsWorldsLabPageComponent }) => AnimalsWorldsLabPageComponent,
       ),
   },
-  {
-    path: 'animals-herd-worlds-lab',
+    {
+      path: 'animals-terrain-world-lab',
+      loadComponent: () => import('./pages/animals-terrain-world-lab/animals-terrain-world-lab-page.component').then(({ AnimalsTerrainWorldLabPageComponent }) => AnimalsTerrainWorldLabPageComponent),
+    },
+    {
+      path: 'animals-herd-worlds-lab',
     loadComponent: () =>
       import('./pages/animals-herd-worlds-lab/animals-herd-worlds-lab-page.component').then(
         ({ AnimalsHerdWorldsLabPageComponent }) => AnimalsHerdWorldsLabPageComponent,
@@ -245,13 +249,7 @@ export const routes: Routes = [
         ({ AnimalsFishWorldsLabPageComponent }) => AnimalsFishWorldsLabPageComponent,
       ),
   },
-  {
-    path: 'large-world-life-poc',
-    loadComponent: () =>
-      import('./pages/large-world-life-poc/large-world-life-poc-page.component').then(
-        ({ LargeWorldLifePocPageComponent }) => LargeWorldLifePocPageComponent,
-      ),
-  },
+
   {
     path: 'terrain-composer-lab',
     loadComponent: () =>

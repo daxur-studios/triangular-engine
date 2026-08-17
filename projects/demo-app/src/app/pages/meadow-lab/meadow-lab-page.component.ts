@@ -10,6 +10,7 @@ import {
   InstancedMesh,
   Mesh,
   MeshStandardMaterial,
+  Vector3,
   type Vector3Tuple,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
@@ -32,11 +33,13 @@ import {
   buildScatterInstancedMesh,
   enableScatterWindSway,
   generateTerrainScatterInstances,
+  ScatterStreamingService,
   selectFixedLevelScatterCells,
   type IScatterWindHandle,
   type ITerrainScatterInstance,
   type ScatterPlacementRules,
   type ScatterScaleRange,
+  type ScatterStreamingViewpoint,
   type ScatterWindDefinition,
 } from 'triangular-engine/scatter';
 
@@ -68,8 +71,84 @@ const GRASS_RULES: ScatterPlacementRules = {
   slopeMax01: 0.85,
 };
 const GRASS_SCALE: ScatterScaleRange = { min: 0.75, max: 1.4 };
-/** Lighter and quicker than flora's TREE_WIND (strength 0.05, frequency 0.9) — thin blades flutter faster than a canopy sways. */
-const GRASS_WIND: ScatterWindDefinition = { strength: 0.06, frequency: 2.2 };
+const GRASS_GUST_AMPLITUDE_DEFAULT = 0.12;
+const GRASS_GUST_AMPLITUDE_MAX = 0.5;
+/**
+ * Field is ~72m across (GRID_RADIUS 1 → 3x3 patches of PLANE_PATCH_SIZE_M
+ * 24). Min gives many tight, choppy swirls; max gives a couple of broad,
+ * slow-turning eddies comfortably larger than the field.
+ */
+const GRASS_GUST_WAVELENGTH_DEFAULT_M = 18;
+const GRASS_GUST_WAVELENGTH_MIN_M = 4;
+const GRASS_GUST_WAVELENGTH_MAX_M = 90;
+/**
+ * How fast the curl-noise field's domain drifts (roughly m/s) — higher
+ * makes eddies visibly travel and rotate faster. Default bumped up from an
+ * initial 6 because at low drift speed the gust is technically present but
+ * reads as nearly static over the few seconds someone actually watches it.
+ */
+const GRASS_GUST_DRIFT_SPEED_DEFAULT_MS = 10;
+const GRASS_GUST_DRIFT_SPEED_MIN_MS = 0.5;
+const GRASS_GUST_DRIFT_SPEED_MAX_MS = 60;
+/**
+ * Distance-based density falloff (`generateTerrainScatterInstances`'s
+ * `distanceFade` option) — grass thins out approaching `viewDistanceM` and
+ * is gone past it, instead of popping or rendering uniformly all the way to
+ * the field's edge (~51m at the far corners, GRID_RADIUS 1 of
+ * PLANE_PATCH_SIZE_M 24). `fadeStartM` is a fixed fraction of the slider
+ * value rather than its own control — one slider is enough to demonstrate
+ * and tune the effect without another row of UI.
+ */
+const GRASS_VIEW_DISTANCE_DEFAULT_M = 40;
+const GRASS_VIEW_DISTANCE_MIN_M = 10;
+const GRASS_VIEW_DISTANCE_MAX_M = 100;
+const GRASS_FADE_START_RATIO = 0.55;
+/** Rebuild grass only after the camera moves this far — regenerating every cell on every frame while orbiting would be wasteful. */
+const GRASS_STREAMING_MOVEMENT_THRESHOLD_M = 4;
+/**
+ * Directional ("pizza slice") culling: grass outside a cone in front of the
+ * camera is dropped entirely, on top of (not instead of) the radial
+ * distance fade above — ported from brunos-space-program's cdlod-terrain-lab,
+ * which culls terrain quadtree nodes the same way (angle-to-camera-forward
+ * vs. a fixed half-angle) rather than a true 6-plane frustum. Deliberately
+ * wider than the actual camera FOV ("conservative"), same reasoning as that
+ * reference: cheap to test, and erring wide avoids pop-in right at the
+ * screen edge. Tested per-candidate (not per-cell), so the cone's edge is a
+ * smooth boundary through the field rather than a blocky per-cell cutoff.
+ *
+ * The angle test uses the full 3D direction to each candidate against the
+ * full 3D camera-forward vector — not an XZ-only/horizontal approximation.
+ * That matters for two reasons: it correctly narrows/rotates the cone when
+ * the camera pitches up or down (an XZ-only version stays blind to pitch,
+ * so looking straight down neither adds the downward view nor drops what's
+ * now behind-and-below), and it makes the test viewer-relative only, with
+ * no assumption about which axis is "up" or "horizontal" — so unlike the
+ * old XZ version, this works unmodified on a sphere or inside-cylinder
+ * world too, not just a flat plane.
+ */
+const GRASS_VIEW_CONE_HALF_ANGLE_RAD = 1.31; // ~75°, conservative half-angle
+const GRASS_VIEW_CONE_COS_HALF_ANGLE = Math.cos(GRASS_VIEW_CONE_HALF_ANGLE_RAD);
+/**
+ * Lighter and quicker than flora's TREE_WIND (strength 0.05, frequency 0.9)
+ * — thin blades flutter faster than a canopy sways. `strength`/`frequency`
+ * drive each blade's own desynced flutter; `gust` layers a second, *coherent*
+ * curl-noise flow on top — swirling and drifting rather than sliding one
+ * fixed direction, so it reads as natural eddies moving through the field
+ * instead of the flutter's per-blade shimmer (or a straight traveling wall).
+ * Amplitude, eddy size, and drift speed are all live-adjustable uniforms,
+ * see the density-style sliders wired to
+ * `setGustAmplitude`/`setGustWavelengthM`/`setGustDriftSpeedMS` in the
+ * constructor.
+ */
+const GRASS_WIND: ScatterWindDefinition = {
+  strength: 0.06,
+  frequency: 2.2,
+  gust: {
+    wavelengthM: GRASS_GUST_WAVELENGTH_DEFAULT_M,
+    driftSpeedMS: GRASS_GUST_DRIFT_SPEED_DEFAULT_MS,
+    amplitude: GRASS_GUST_AMPLITUDE_DEFAULT,
+  },
+};
 
 /** One clump mesh per seed, scatter buckets instances into whichever variant its instance ID hashes to — same "no per-instance mesh-variant primitive yet" workaround as flora-scatter-lab. */
 const CLUMP_VARIANT_COUNT = 5;
@@ -111,14 +190,22 @@ interface IGrassScatterCell {
 }
 
 /**
- * Slice 2 of the grass work: clumps now sway in a uniform wind
- * (`enableScatterWindSway`, same primitive flora-scatter-lab uses for trees)
- * on top of slice 1's geometry + density on scatter's existing pipeline.
- * Regional/gust wind variation is not here yet — every blade shares one
- * phase-desynced sway. See the flora-scatter-lab pattern this mirrors (one
- * InstancedMesh per seeded variant, bucketed by an instance-ID hash) — trees
- * registered a branching flora species the same way this registers a
- * non-branching ground-cover one.
+ * Slice 4 of the grass work: grass density fades out toward
+ * `GRASS_VIEW_DISTANCE_DEFAULT_M` (`generateTerrainScatterInstances`'s
+ * `distanceFade` option) and re-thins as the camera moves
+ * (`ScatterStreamingService.viewpointWorldM$`), instead of rendering
+ * uniformly all the way to the field's edge — on top of slice 3's
+ * curl-noise gust (`GRASS_WIND.gust`, swirling and drifting as a coherent
+ * flow, phased off world position + time rather than the per-instance hash)
+ * over slice 2's desynced per-instance flutter (`enableScatterWindSway`,
+ * same primitive flora-scatter-lab uses for trees), which itself sits on
+ * slice 1's geometry + density on scatter's existing pipeline. The gust and
+ * distance-fade primitives both live in scatter, not this page, so
+ * flora/trees can pick them up too whenever that's the next thing worth
+ * doing. See the flora-scatter-lab pattern this mirrors (one InstancedMesh
+ * per seeded variant, bucketed by an instance-ID hash) — trees registered a
+ * branching flora species the same way this registers a non-branching
+ * ground-cover one.
  */
 @Component({
   selector: 'app-meadow-lab-page',
@@ -126,7 +213,7 @@ interface IGrassScatterCell {
   templateUrl: './meadow-lab-page.component.html',
   styleUrl: './meadow-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [EngineService.provide({ showFPS: true })],
+  providers: [EngineService.provide({ showFPS: true }), ScatterStreamingService],
   host: { class: 'flex-page' },
 })
 export class MeadowLabPageComponent {
@@ -134,6 +221,19 @@ export class MeadowLabPageComponent {
   readonly cellCount = signal(0);
   readonly variantCount = CLUMP_VARIANT_COUNT;
   readonly density = signal(GRASS_DENSITY_MULTIPLIER_DEFAULT);
+  readonly gustAmplitude = signal(GRASS_GUST_AMPLITUDE_DEFAULT);
+  readonly gustAmplitudeMax = GRASS_GUST_AMPLITUDE_MAX;
+  readonly gustWavelengthM = signal(GRASS_GUST_WAVELENGTH_DEFAULT_M);
+  readonly gustWavelengthMinM = GRASS_GUST_WAVELENGTH_MIN_M;
+  readonly gustWavelengthMaxM = GRASS_GUST_WAVELENGTH_MAX_M;
+  readonly gustDriftSpeedMS = signal(GRASS_GUST_DRIFT_SPEED_DEFAULT_MS);
+  readonly gustDriftSpeedMinMS = GRASS_GUST_DRIFT_SPEED_MIN_MS;
+  readonly gustDriftSpeedMaxMS = GRASS_GUST_DRIFT_SPEED_MAX_MS;
+  readonly viewDistanceM = signal(GRASS_VIEW_DISTANCE_DEFAULT_M);
+  readonly viewDistanceMinM = GRASS_VIEW_DISTANCE_MIN_M;
+  readonly viewDistanceMaxM = GRASS_VIEW_DISTANCE_MAX_M;
+  readonly cullBehindCamera = signal(true);
+  readonly cullingFrozen = signal(false);
 
   readonly initialCameraPosition = signal<Vector3Tuple>([0, 4, 12]);
   readonly initialTarget = signal<Vector3Tuple>([0, 0.3, 0]);
@@ -156,6 +256,10 @@ export class MeadowLabPageComponent {
   private readonly grassMeshes: InstancedMesh[] = [];
   private readonly cells: IGrassScatterCell[] = [];
   private readonly windHandle: IScatterWindHandle;
+  private readonly scatterStreaming = inject(ScatterStreamingService);
+  private readonly scratchDirection = new Vector3();
+  private viewpointWorldM: ScatterStreamingViewpoint = [0, 4, 12];
+  private cullForward: readonly [number, number, number] = [0, 0, -1];
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -165,7 +269,20 @@ export class MeadowLabPageComponent {
     this.windHandle = enableScatterWindSway(this.grassMaterial, GRASS_WIND);
 
     this.buildTerrain();
-    this.rebuildGrass(this.density());
+    this.scatterStreaming.setMovementThresholdM(GRASS_STREAMING_MOVEMENT_THRESHOLD_M);
+    // BehaviorSubject — fires immediately with the starting camera position,
+    // which does the field's first (and only startup) grass build. While
+    // culling is frozen, skip both the viewpoint update and the rebuild —
+    // same "just stop refreshing" trick cdlod-terrain-lab uses to let the
+    // camera roam freely while inspecting an already-culled boundary.
+    this.scatterStreaming.viewpointWorldM$
+      .pipe(takeUntilDestroyed(destroyRef))
+      .subscribe((viewpointWorldM) => {
+        if (this.cullingFrozen()) return;
+        this.viewpointWorldM = viewpointWorldM;
+        this.captureCullForwardDirection();
+        this.rebuildGrass(this.density());
+      });
 
     this.engine.elapsedTime$
       .pipe(takeUntilDestroyed(destroyRef))
@@ -194,6 +311,57 @@ export class MeadowLabPageComponent {
     this.rebuildGrass(clamped);
   }
 
+  setGustAmplitude(value: number | string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    const clamped = Math.max(0, Math.min(GRASS_GUST_AMPLITUDE_MAX, parsed));
+    this.gustAmplitude.set(clamped);
+    this.windHandle.setGustAmplitude(clamped);
+  }
+
+  setGustWavelength(value: number | string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    const clamped = Math.max(
+      GRASS_GUST_WAVELENGTH_MIN_M,
+      Math.min(GRASS_GUST_WAVELENGTH_MAX_M, parsed),
+    );
+    this.gustWavelengthM.set(clamped);
+    this.windHandle.setGustWavelengthM(clamped);
+  }
+
+  setGustDriftSpeed(value: number | string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    const clamped = Math.max(
+      GRASS_GUST_DRIFT_SPEED_MIN_MS,
+      Math.min(GRASS_GUST_DRIFT_SPEED_MAX_MS, parsed),
+    );
+    this.gustDriftSpeedMS.set(clamped);
+    this.windHandle.setGustDriftSpeedMS(clamped);
+  }
+
+  setViewDistance(value: number | string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    const clamped = Math.max(GRASS_VIEW_DISTANCE_MIN_M, Math.min(GRASS_VIEW_DISTANCE_MAX_M, parsed));
+    this.viewDistanceM.set(clamped);
+    this.rebuildGrass(this.density());
+  }
+
+  setCullBehindCamera(enabled: boolean): void {
+    this.cullBehindCamera.set(enabled);
+    this.rebuildGrass(this.density());
+  }
+
+  setCullingFrozen(enabled: boolean): void {
+    this.cullingFrozen.set(enabled);
+    // Force a fresh viewpoint/forward-direction capture and rebuild on
+    // unfreeze — otherwise nothing happens until the camera next moves past
+    // the streaming movement threshold, which reads as unresponsive.
+    if (!enabled) this.scatterStreaming.update(true);
+  }
+
   private buildVariants(): IClumpVariant[] {
     const variants: IClumpVariant[] = [];
     for (let i = 0; i < CLUMP_VARIANT_COUNT; i++) {
@@ -220,6 +388,29 @@ export class MeadowLabPageComponent {
 
   private variantIndexForInstance(instanceId: string): number {
     return hashProceduralKey(instanceId) % CLUMP_VARIANT_COUNT;
+  }
+
+  private captureCullForwardDirection(): void {
+    // Already unit length — no degenerate/near-zero case to guard, unlike
+    // an XZ-only projection of this same vector would need.
+    this.engine.camera.getWorldDirection(this.scratchDirection);
+    this.cullForward = [
+      this.scratchDirection.x,
+      this.scratchDirection.y,
+      this.scratchDirection.z,
+    ];
+  }
+
+  /** 1 inside the forward cone (or culling disabled), 0 outside it — the "pizza slice" cut, applied per-candidate for a smooth boundary. Full 3D angle test, so it correctly follows camera pitch (looking down/up), not just yaw. */
+  private viewConeSuitability(worldPositionM: TerrainVector3): number {
+    const dx = worldPositionM[0] - this.viewpointWorldM[0];
+    const dy = worldPositionM[1] - this.viewpointWorldM[1];
+    const dz = worldPositionM[2] - this.viewpointWorldM[2];
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist < 0.5) return 1;
+    const cosAngle =
+      (dx * this.cullForward[0] + dy * this.cullForward[1] + dz * this.cullForward[2]) / dist;
+    return cosAngle >= GRASS_VIEW_CONE_COS_HALF_ANGLE ? 1 : 0;
   }
 
   private buildTerrain(): void {
@@ -266,7 +457,9 @@ export class MeadowLabPageComponent {
    * once in buildTerrain) stay fixed as density changes. `densityMultiplier`
    * above 1x grows the candidate pool itself (baseDensity01 pins at 1, fully
    * accepting it) since baseDensity01 alone can only thin the base pool, not
-   * exceed it.
+   * exceed it. Also re-runs whenever the camera moves past the streaming
+   * service's movement threshold, so `distanceFade` keeps thinning relative
+   * to the *current* viewpoint rather than a startup snapshot.
    */
   private rebuildGrass(densityMultiplier: number): void {
     for (const mesh of this.grassMeshes) mesh.removeFromParent();
@@ -277,6 +470,8 @@ export class MeadowLabPageComponent {
       Math.round(GRASS_CANDIDATE_POOL_SIZE_BASE * Math.max(1, densityMultiplier)),
     );
     const baseDensity01 = Math.min(1, densityMultiplier);
+    const fadeEndM = this.viewDistanceM();
+    const fadeStartM = fadeEndM * GRASS_FADE_START_RATIO;
 
     const instancesByVariant: ITerrainScatterInstance[][] = Array.from(
       { length: CLUMP_VARIANT_COUNT },
@@ -299,6 +494,14 @@ export class MeadowLabPageComponent {
         candidatePoolSize,
         rules: GRASS_RULES,
         baseDensity01,
+        distanceFade: {
+          viewpointWorldM: this.viewpointWorldM,
+          fadeStartM,
+          fadeEndM,
+        },
+        suitability: this.cullBehindCamera()
+          ? (s) => this.viewConeSuitability(s.worldPositionM)
+          : undefined,
       });
 
       for (const instance of instances) {

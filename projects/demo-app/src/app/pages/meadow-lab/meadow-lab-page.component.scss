@@ -11,4 +11,5 @@ a { text-decoration: none; }
 .blurb.note { margin: .6rem 0 0; font-size: .78rem; color: #a9c48f; }
 .seed-field { display: flex; align-items: center; gap: .5rem; margin-top: .75rem; font-size: .85rem; color: #dbe6d0; }
 .seed-field input { flex: 1; }
+.seed-field input[type="checkbox"] { flex: 0 0 auto; }
 @media (max-width: 48rem) { .panel { width: calc(100vw - 1rem); padding: .65rem; } header { align-items: flex-start; flex-direction: column; } }

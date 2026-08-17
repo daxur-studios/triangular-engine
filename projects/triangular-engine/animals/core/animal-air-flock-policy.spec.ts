@@ -125,6 +125,15 @@ describe('animal air-flock policy', () => {
     });
   });
 
+  it('applies deterministic horizontal clearance from terrain obstacles while flying', () => {
+    const result = stepAnimalAirFlock({
+      members: [member('bird-a', { x: 0, y: 3, z: 0 })], intent: 'fly', target: { x: 20, y: 3, z: 0 },
+      deltaSeconds: 1, universalTime: 12,
+    }, { ...definition(), separationRadiusM: 3, separationWeight: 20,
+      obstacles: [{ id: 'tree', position: { x: 2, y: 0, z: 0 }, radiusM: 3 }] });
+    expect(result.members[0].position.x).toBeLessThan(1);
+  });
+
   it('rejects duplicate member IDs for both fly and roost intents, and enforces its member bound', () => {
     const duplicates = [member('same', { x: 0, y: 3, z: 0 }), member('same', { x: 2, y: 3, z: 0 })];
     const base = { members: duplicates, target: { x: 10, y: 3, z: 0 }, deltaSeconds: 1, universalTime: 0 };

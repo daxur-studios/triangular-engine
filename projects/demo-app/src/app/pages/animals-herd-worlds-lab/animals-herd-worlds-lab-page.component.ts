@@ -12,6 +12,9 @@ import {
   type AnimalLandHerdMember,
   type AnimalVector3,
   type AnimalWorldSurface,
+  queryAnimalPopulation,
+  type AnimalHabitatCandidates,
+  type AnimalGroupSpeciesDefinition,
 } from 'triangular-engine/animals';
 import { TerrainAnimalWorldSurface } from 'triangular-engine/animals/terrain';
 import {
@@ -181,17 +184,37 @@ export class AnimalsHerdWorldsLabPageComponent {
       travelLineSpacingM: 1.2, leaderFollowDelaySeconds: 0.8,
       maximumAvoidanceAttempts: 4,
     };
-    const groupSeeds = shape === 'plane' ? [91, 173, 251] : [91];
-    const populations = groupSeeds.map((groupSeed, groupIndex) => {
-      const offset = groupIndex === 0 ? 0 : (groupIndex === 1 ? 4 : -4);
-      const shiftedHome = surface.sample(surface.moveAlongSurface(homeCenter.position, scale(homeCenter.tangentV, offset), 1));
+    const candidates: AnimalHabitatCandidates = {
+      version: `${shape}-meadows-v1`,
+      candidates: [
+        { id: `${shape}-home`, kind: 'meadow', position: homeCenter.position, suitability01: 0.9, activities: ['feed', 'rest'] },
+        { id: `${shape}-meadow`, kind: 'meadow', position: pastureCenter.position, suitability01: 1, activities: ['feed', 'rest'] },
+        { id: `${shape}-ridge`, kind: 'meadow', position: sidePastureCenter.position, suitability01: 0.75, activities: ['feed', 'rest'] },
+      ],
+    };
+    const species: readonly AnimalGroupSpeciesDefinition[] = [
+      { id: 'sheep', populationVersion: 'herd-v1', groupPoolSize: 2, occupancy01: 1, memberCount: { min: 6, max: 8 }, allowedHabitatKinds: ['meadow'], minimumSuitability01: 0.7, activityDecisionPeriodSeconds: 600, activities: ['feed', 'rest'], maximumHabitatCandidates: 8 },
+      { id: 'zebra', populationVersion: 'herd-v1', groupPoolSize: 1, occupancy01: 1, memberCount: { min: 5, max: 7 }, allowedHabitatKinds: ['meadow'], minimumSuitability01: 0.7, activityDecisionPeriodSeconds: 600, activities: ['feed', 'rest'], maximumHabitatCandidates: 8 },
+    ];
+    const queried = shape === 'plane' ? queryAnimalPopulation({
+      worldSeed: 0x51eed,
+      region: { worldId: 'animals-herd-lab', surfaceId: shape, cellId: 'origin' },
+      species, habitats: candidates, universalTime: 0, maximumGroups: 8,
+    }) : [];
+    const populationSeeds = queried.length > 0
+      ? queried.map(group => ({ id: `${shape}-${group.id}`, seed: group.seed, memberCount: group.memberCount, position: group.position }))
+      : [{ id: `${shape}-herd-0`, seed: 91, memberCount: 8, position: homeCenter.position }];
+    const populations = populationSeeds.map((record, groupIndex) => {
+      const offset = queried.length > 0 ? 0 : (groupIndex === 0 ? 0 : (groupIndex === 1 ? 4 : -4));
+      const anchor = surface.sample(record.position);
+      const shiftedHome = surface.sample(surface.moveAlongSurface(anchor.position, scale(anchor.tangentV, offset), 1));
       const shiftedPatches = grazingPatches.map(patch => ({
         ...patch,
         id: `${patch.id}-g${groupIndex}`,
         position: surface.sample(surface.moveAlongSurface(patch.position, scale(homeCenter.tangentV, offset), 1)).position,
       }));
       const definition: AnimalLandHerdCycleDefinition = {
-        groupId: `${shape}-herd-${groupIndex}`, groupSeed, memberCount: 8,
+        groupId: record.id, groupSeed: record.seed, memberCount: record.memberCount,
         homePatch: { ...homePatch, id: `${homePatch.id}-g${groupIndex}`, position: shiftedHome.position },
         grazingPatches: shiftedPatches,
         restDurationS: 5, outboundTravelDurationS: 10, grazeDurationS: 10, returnTravelDurationS: 15,
