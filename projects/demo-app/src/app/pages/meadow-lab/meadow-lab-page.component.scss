@@ -12,4 +12,18 @@ a { text-decoration: none; }
 .seed-field { display: flex; align-items: center; gap: .5rem; margin-top: .75rem; font-size: .85rem; color: #dbe6d0; }
 .seed-field input { flex: 1; }
 .seed-field input[type="checkbox"] { flex: 0 0 auto; }
+.shape-buttons { gap: .4rem; }
+.shape-buttons button {
+  flex: 1;
+  padding: .4rem .5rem;
+  border: 1px solid #33472a;
+  border-radius: .4rem;
+  background: #1c2616;
+  color: #dbe6d0;
+  font: 500 .8rem Inter, system-ui, sans-serif;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.shape-buttons button:hover { border-color: #a9c48f; }
+.shape-buttons button.active { background: #c8e29b; border-color: #c8e29b; color: #1c2616; }
 @media (max-width: 48rem) { .panel { width: calc(100vw - 1rem); padding: .65rem; } header { align-items: flex-start; flex-direction: column; } }
