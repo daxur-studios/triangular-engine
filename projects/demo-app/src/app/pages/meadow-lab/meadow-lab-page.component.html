@@ -4,7 +4,7 @@
       <header>
         <div>
           <a routerLink="/">← Examples</a
-          ><small>triangular-engine/procedural — ground cover, slice 5</small>
+          ><small>triangular-engine/procedural — ground cover, slice 6</small>
         </div>
         <strong>Meadow: gusting wind over grass</strong>
       </header>
@@ -141,6 +141,23 @@
         Freeze culling — orbit out to inspect the boundary
       </label>
 
+      <label class="seed-field">
+        <input
+          type="checkbox"
+          [checked]="placingZone()"
+          (change)="setPlacingZone($any($event.target).checked)"
+        />
+        Place no-grass zones — click the ground
+      </label>
+
+      @if (exclusionZoneCount() > 0) {
+        <label class="seed-field">
+          <button type="button" class="exclusion-clear-button" (click)="clearExclusionZones()">
+            Clear {{ exclusionZoneCount() }} zone{{ exclusionZoneCount() === 1 ? '' : 's' }}
+          </button>
+        </label>
+      }
+
       @if (shape() === 'sphere') {
         <label class="seed-field">
           Planet radius ({{ sphereRadiusM() | number: '1.0-0' }}m)
@@ -185,8 +202,25 @@
       }
 
       <p class="blurb note">
+        No-grass zones (<code>scatter/core/scatter-exclusion</code>, docs/runbook/018) prove a
+        "no grass under this building" mechanism: a world-space circle
+        suppresses density with a soft feathered edge, composing with the
+        distance fade and view cull above. Circular, not rectangular — a
+        world-space distance test needs no per-shape surface basis, so it
+        works unmodified on all three shapes here. Permanently removing
+        already-existing grass (a rocket engine scorching the ground) is a
+        different, already-proven mechanism —
+        <code>scatter-removal-overlay</code>, exercised end-to-end in
+        <code>scatter-physics-lab</code> — not duplicated on this page.
+      </p>
+
+      <p class="blurb note">
         {{ grassInstanceCount() }} grass clump instances across
-        {{ cellCount() }} streaming cells.
+        {{ cellCount() }} streaming cells{{
+          exclusionZoneCount() > 0
+            ? ', ' + exclusionZoneCount() + ' no-grass zone' + (exclusionZoneCount() === 1 ? '' : 's')
+            : ''
+        }}.
       </p>
     </section>
   </ng-template>

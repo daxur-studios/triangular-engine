@@ -7,6 +7,7 @@ import { sampleTerrainSurface } from 'triangular-engine/terrain';
 
 import { generateScatterCandidates } from '../core/scatter-candidate';
 import { computeScatterDistanceFade01 } from '../core/scatter-distance-fade';
+import { computeScatterExclusionFade01, type IScatterExclusionZone } from '../core/scatter-exclusion';
 import type { IScatterCellIdentity, ScatterInstanceId } from '../core/scatter-instance-id';
 import {
   evaluateScatterPlacement,
@@ -67,6 +68,8 @@ export interface IGenerateTerrainScatterInstancesOptions<TAddress> {
   readonly distanceFade?: IScatterDistanceFadeOptions;
   /** Drops instances outside a camera-relative cone (and optionally beyond a sphere horizon) — composes with distanceFade, not a replacement for it. */
   readonly viewCull?: IScatterViewCullOptions;
+  /** Static no-scatter areas (building footprints, road corridors) — composes with distanceFade/viewCull. See `computeScatterExclusionFade01` and docs/runbook/018. */
+  readonly exclusion?: readonly IScatterExclusionZone[];
 }
 
 function distanceM(a: TerrainVector3, b: TerrainVector3): number {
@@ -146,6 +149,11 @@ export function generateTerrainScatterInstances<TAddress>(
       }
       const baseSuitability = suitability;
       suitability = (s) => (baseSuitability ? baseSuitability(s) : 1) * cullFade01;
+    }
+    if (options.exclusion && options.exclusion.length > 0) {
+      const exclusionFade01 = computeScatterExclusionFade01(sample.worldPositionM, options.exclusion);
+      const baseSuitability = suitability;
+      suitability = (s) => (baseSuitability ? baseSuitability(s) : 1) * exclusionFade01;
     }
 
     const placement = evaluateScatterPlacement(

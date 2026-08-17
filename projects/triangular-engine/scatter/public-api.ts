@@ -8,6 +8,7 @@ export * from './core/scatter-placement';
 export * from './core/scatter-lod-selection';
 export * from './core/scatter-distance-fade';
 export * from './core/scatter-view-cull';
+export * from './core/scatter-exclusion';
 export * from './core/scatter-physics-residency';
 export * from './core/scatter-removal-overlay';
 export * from './terrain/scatter-terrain-cells';

@@ -5,11 +5,17 @@ import { RouterLink } from '@angular/router';
 import {
   BufferAttribute,
   BufferGeometry,
+  CircleGeometry,
   Color,
+  DoubleSide,
   Float32BufferAttribute,
   InstancedMesh,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
+  Raycaster,
+  Vector2,
+  Vector3,
   type Vector3Tuple,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
@@ -37,6 +43,7 @@ import {
   generateTerrainScatterInstances,
   ScatterStreamingService,
   selectFixedLevelScatterCells,
+  type IScatterExclusionZone,
   type IScatterWindHandle,
   type ITerrainScatterInstance,
   type ScatterPlacementRules,
@@ -174,6 +181,16 @@ const GRASS_OBJECT_RADIUS_M = 0.35;
  * `setGustAmplitude`/`setGustWavelengthM`/`setGustDriftSpeedMS` in the
  * constructor.
  */
+/**
+ * Circular no-grass zones (docs/runbook/018) — a building footprint stand-in.
+ * World-space distance test, so it works unmodified on all three shapes;
+ * a rectangle was considered and deferred (needs a per-shape surface-local
+ * basis, a real problem the circle sidesteps). `featherM` gives the edge a
+ * soft ramp instead of a hard crop, matching distanceFade's visual language.
+ */
+const GRASS_EXCLUSION_RADIUS_M = 2.5;
+const GRASS_EXCLUSION_FEATHER_M = 0.6;
+
 const GRASS_WIND: ScatterWindDefinition = {
   strength: 0.06,
   frequency: 2.2,
@@ -304,11 +321,14 @@ interface IMeadowLabShapeFixture {
 }
 
 /**
- * Slice 5 of the grass work: the demo now switches between a flat plane, a
- * sphere, and the inside of a cylinder (`selectShape`), with terrain
- * generation, scatter placement, and camera-aware culling all working
- * unmodified across all three — placement was already shape-agnostic
- * (`sampleTerrainSurface`); culling became shape-agnostic this slice once
+ * Slice 6 adds click-to-place circular no-grass zones
+ * (`scatter/core/scatter-exclusion`, docs/runbook/018) — a stand-in for
+ * "no grass under a building" — composing with the existing distance fade
+ * and view cull. Slice 5 switches the demo between a flat plane, a sphere,
+ * and the inside of a cylinder (`selectShape`), with terrain generation,
+ * scatter placement, and camera-aware culling all working unmodified
+ * across all three — placement was already shape-agnostic
+ * (`sampleTerrainSurface`); culling became shape-agnostic that slice once
  * promoted into `scatter/core/scatter-view-cull` (full 3D cone test, plus a
  * sphere-only curvature horizon test — see docs/runbook/017). Slice 4's
  * distance fade and directional cone culling, slice 3's curl-noise gust,
@@ -346,6 +366,8 @@ export class MeadowLabPageComponent {
   readonly sphereRadiusM = signal(GRASS_SPHERE_RADIUS_DEFAULT_M);
   readonly sphereRadiusMinM = GRASS_SPHERE_RADIUS_MIN_M;
   readonly sphereRadiusMaxM = GRASS_SPHERE_RADIUS_MAX_M;
+  readonly placingZone = signal(false);
+  readonly exclusionZoneCount = signal(0);
 
   readonly initialCameraPosition = signal<Vector3Tuple>([0, 4, 12]);
   readonly initialTarget = signal<Vector3Tuple>([0, 0.3, 0]);
@@ -360,11 +382,22 @@ export class MeadowLabPageComponent {
     vertexColors: true,
     roughness: 0.85,
   });
+  private readonly exclusionMarkerGeometry = new CircleGeometry(GRASS_EXCLUSION_RADIUS_M, 24);
+  private readonly exclusionMarkerMaterial = new MeshBasicMaterial({
+    color: '#c96a3a',
+    transparent: true,
+    opacity: 0.35,
+    side: DoubleSide,
+    depthWrite: false,
+  });
 
   private readonly variants: IClumpVariant[] = this.buildVariants();
   private readonly groundMeshes: Mesh[] = [];
   private readonly grassMeshes: InstancedMesh[] = [];
   private readonly cells: IGrassScatterCell[] = [];
+  private readonly exclusionZones: IScatterExclusionZone[] = [];
+  private readonly exclusionMarkerMeshes: Mesh[] = [];
+  private readonly pickRaycaster = new Raycaster();
   private readonly windHandle: IScatterWindHandle;
   private readonly scatterStreaming = inject(ScatterStreamingService);
   private fixture!: IMeadowLabShapeFixture;
@@ -399,6 +432,10 @@ export class MeadowLabPageComponent {
       .pipe(takeUntilDestroyed(destroyRef))
       .subscribe((elapsedTimeS) => this.windHandle.setTimeS(elapsedTimeS));
 
+    this.engine.click$
+      .pipe(takeUntilDestroyed(destroyRef))
+      .subscribe((event) => this.onGroundClick(event));
+
     destroyRef.onDestroy(() => {
       for (const mesh of this.groundMeshes) {
         mesh.removeFromParent();
@@ -407,9 +444,14 @@ export class MeadowLabPageComponent {
       for (const mesh of this.grassMeshes) {
         mesh.removeFromParent();
       }
+      for (const mesh of this.exclusionMarkerMeshes) {
+        mesh.removeFromParent();
+      }
       for (const variant of this.variants) variant.geometry.dispose();
       this.groundMaterial.dispose();
       this.grassMaterial.dispose();
+      this.exclusionMarkerGeometry.dispose();
+      this.exclusionMarkerMaterial.dispose();
       this.engine.scene.background = previousBackground;
     });
   }
@@ -480,6 +522,15 @@ export class MeadowLabPageComponent {
     // unfreeze — otherwise nothing happens until the camera next moves past
     // the streaming movement threshold, which reads as unresponsive.
     if (!enabled) this.scatterStreaming.update(true);
+  }
+
+  setPlacingZone(enabled: boolean): void {
+    this.placingZone.set(enabled);
+  }
+
+  clearExclusionZones(): void {
+    this.disposeExclusionZones();
+    this.rebuildGrass(this.density());
   }
 
   setSphereRadius(value: number | string): void {
@@ -631,6 +682,66 @@ export class MeadowLabPageComponent {
     this.viewForwardM = [dx / lengthM, dy / lengthM, dz / lengthM];
   }
 
+  /** Raycasts a click against the ground meshes and drops a no-grass zone there — only while `placingZone()` is on, same NDC-from-offsetX/Y pattern flora-affordance-lab/scatter-physics-lab use for instance picking. */
+  private onGroundClick(event: MouseEvent | null): void {
+    if (!event || !this.placingZone() || this.groundMeshes.length === 0) return;
+    const resolution = this.engine.resolution$.value;
+    const mouseNdc = new Vector2(
+      (event.offsetX / resolution.width) * 2 - 1,
+      -(event.offsetY / resolution.height) * 2 + 1,
+    );
+    this.pickRaycaster.setFromCamera(mouseNdc, this.engine.camera);
+    const hits = this.pickRaycaster.intersectObjects(this.groundMeshes, false);
+    if (hits.length === 0) return;
+    const { x, y, z } = hits[0].point;
+    this.addExclusionZone([x, y, z]);
+  }
+
+  private addExclusionZone(centerWorldM: TerrainVector3): void {
+    this.exclusionZones.push({
+      centerWorldM,
+      radiusM: GRASS_EXCLUSION_RADIUS_M,
+      featherM: GRASS_EXCLUSION_FEATHER_M,
+    });
+    this.exclusionZoneCount.set(this.exclusionZones.length);
+    this.addExclusionMarker(centerWorldM);
+    this.rebuildGrass(this.density());
+  }
+
+  /** Flat translucent disc, oriented to the shape-appropriate surface "up" at that point so it lies flush against the ground on all three shapes. */
+  private addExclusionMarker(centerWorldM: TerrainVector3): void {
+    const marker = new Mesh(this.exclusionMarkerGeometry, this.exclusionMarkerMaterial);
+    const up = this.computeZoneUpVector(centerWorldM);
+    marker.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), new Vector3(up[0], up[1], up[2]));
+    const offsetM = 0.03; // avoid z-fighting with the ground mesh
+    marker.position.set(
+      centerWorldM[0] + up[0] * offsetM,
+      centerWorldM[1] + up[1] * offsetM,
+      centerWorldM[2] + up[2] * offsetM,
+    );
+    this.engine.scene.add(marker);
+    this.exclusionMarkerMeshes.push(marker);
+  }
+
+  /** Plane: world +Y. Sphere: direction from the origin (its center). Cylinder: radial direction from the world-X axis — same conventions setCameraForShape/the shape fixtures use. */
+  private computeZoneUpVector(pointWorldM: TerrainVector3): TerrainVector3 {
+    if (this.shape() === 'plane') return [0, 1, 0];
+    if (this.shape() === 'sphere') {
+      const lengthM = Math.hypot(pointWorldM[0], pointWorldM[1], pointWorldM[2]) || 1;
+      return [pointWorldM[0] / lengthM, pointWorldM[1] / lengthM, pointWorldM[2] / lengthM];
+    }
+    const lengthM = Math.hypot(pointWorldM[1], pointWorldM[2]) || 1;
+    return [0, pointWorldM[1] / lengthM, pointWorldM[2] / lengthM];
+  }
+
+  /** Clears zone state + markers without rebuilding — callers that are about to rebuild anyway (teardownTerrain) skip the redundant rebuildGrass that clearExclusionZones() (the UI-facing version) does. */
+  private disposeExclusionZones(): void {
+    this.exclusionZones.length = 0;
+    this.exclusionZoneCount.set(0);
+    for (const mesh of this.exclusionMarkerMeshes) mesh.removeFromParent();
+    this.exclusionMarkerMeshes.length = 0;
+  }
+
   private buildTerrain(): void {
     let cellCount = 0;
 
@@ -663,7 +774,14 @@ export class MeadowLabPageComponent {
     this.cellCount.set(cellCount);
   }
 
-  /** Disposes the current shape's ground meshes and clears streaming cells — grass clump variant geometries are shape-independent and are never touched here. */
+  /**
+   * Disposes the current shape's ground meshes, clears streaming cells, and
+   * clears no-grass zones — grass clump variant geometries are
+   * shape-independent and are never touched here. Zones are world-space
+   * points that only mean something relative to the shape/radius they were
+   * placed on, so they're invalidated the same moment the terrain under
+   * them is.
+   */
   private teardownTerrain(): void {
     for (const mesh of this.groundMeshes) {
       mesh.removeFromParent();
@@ -671,6 +789,7 @@ export class MeadowLabPageComponent {
     }
     this.groundMeshes.length = 0;
     this.cells.length = 0;
+    this.disposeExclusionZones();
   }
 
   /** Full teardown/rebuild for a shape switch or a fixture-affecting slider (sphere radius) — terrain, cells, and grass all regenerate from the current fixture. */
@@ -740,6 +859,7 @@ export class MeadowLabPageComponent {
                   : undefined,
             }
           : undefined,
+        exclusion: this.exclusionZones.length > 0 ? this.exclusionZones : undefined,
       });
 
       for (const instance of instances) {
