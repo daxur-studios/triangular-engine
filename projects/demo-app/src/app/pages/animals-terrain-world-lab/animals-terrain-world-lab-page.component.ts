@@ -92,9 +92,16 @@ export class AnimalsTerrainWorldLabPageComponent {
       const shiftedPatches = grazingPatches.map(patch => ({ ...patch, position: surface.moveAlongSurface(patch.position, shift, 1) }));
       return { ...definition, groupId: `${shape}-${size}-terrain-herd-${index}`, groupSeed: definition.groupSeed + index, homePatch: shiftedPatches[index % shiftedPatches.length], grazingPatches: shiftedPatches };
     });
+    // Scatter roost sites describe the tree bases/obstacle anchors. Birds need
+    // an elevated branch origin so the air kernel does not (correctly) reject
+    // them as invalid zero-clearance flight origins.
+    const birdRoostSites = adapted.roostSites.map(site => {
+      const frame = surface.sample(site.position);
+      return { ...site, capacity: 1, position: add(site.position, scale(frame.surfaceUp, 3.2)) };
+    });
     const flightTarget = surface.moveAlongSurface(home.position, scale(home.tangentU, 6), 1);
-    const airPolicy = { surface, maximumMembers: 8, maximumRoostSites: 4, maximumSpeedMps: 4, maximumAccelerationMps2: 5, maximumSubstepDistanceM: .35, maximumSubsteps: 10, minimumAltitudeM: 2.5, maximumAltitudeM: 5.5, preferredAltitudeM: 3.5, flightBehavior: 'boid3d' as const, flightAltitudeSpreadM: 1.3, separationRadiusM: 1.4, separationWeight: 1.5, cohesionWeight: .35, alignmentWeight: .4, targetWeight: 1, arrivalRadiusM: .4, holdingRadiusM: 2.5, holdingSpeedMps: .8, roostSlotSpacingM: .8, obstacles: adapted.obstacles };
-    const birdDefinition: AnimalAirFlockCycleDefinition = { groupId: `${shape}-terrain-birds-a`, memberCount: 6, roostSites: adapted.roostSites, flightTarget: surface.sample(flightTarget).position, roostDurationS: 5, flightDurationS: 12, returnDurationS: 12, fixedStepSeconds: .1, maximumReplaySteps: 400, policy: airPolicy };
+    const airPolicy = { surface, maximumMembers: 8, maximumRoostSites: 4, maximumSpeedMps: 4, maximumAccelerationMps2: 5, maximumSubstepDistanceM: .35, maximumSubsteps: 10, minimumAltitudeM: 2.5, maximumAltitudeM: 5.5, preferredAltitudeM: 3.5, flightBehavior: 'boid3d' as const, flightAltitudeSpreadM: 1.3, separationRadiusM: 1.4, separationWeight: 1.5, cohesionWeight: .35, alignmentWeight: .4, targetWeight: 1, arrivalRadiusM: .4, holdingRadiusM: 2.5, holdingSpeedMps: .8, roostSlotSpacingM: 0, obstacles: adapted.obstacles };
+    const birdDefinition: AnimalAirFlockCycleDefinition = { groupId: `${shape}-terrain-birds-a`, memberCount: Math.min(6, birdRoostSites.reduce((sum, site) => sum + site.capacity, 0)), roostSites: birdRoostSites, flightTarget: surface.sample(flightTarget).position, roostDurationS: 5, flightDurationS: 12, returnDurationS: 12, fixedStepSeconds: .1, maximumReplaySteps: 400, policy: airPolicy };
     const birdDefinitions: AnimalAirFlockCycleDefinition[] = Array.from({ length: groupCount }, (_, index) => {
       if (index === 0) return birdDefinition;
       const spreadTangent = shape === 'cylinder' ? home.tangentU : home.tangentV;
@@ -145,11 +152,24 @@ export class AnimalsTerrainWorldLabPageComponent {
   }
   private render(time: number): void { const statuses = { ...this.status() }; const activeShape = this.selectedShape(); const activeSize = this.worldSize(); for (const view of this.views) { if (view.shape !== activeShape || view.size !== activeSize) continue; let animalIndex = 0; let birdIndex = 0; let fishIndex = 0; let phase = ''; let birdPhase = ''; let fishPhase = ''; view.playbacks.forEach(playback => { const snapshot = playback.sample(time); phase += `${snapshot.phase} `; snapshot.members.forEach(member => this.renderAnimal(view, view.animals[animalIndex++], member)); }); view.birdPlaybacks.forEach(playback => { const snapshot = playback.sample(time); birdPhase += `${snapshot.phase} `; snapshot.members.forEach(member => this.renderBird(view, view.birds[birdIndex++], member)); }); view.fishPlaybacks.forEach(playback => { const snapshot = playback.sample(time); fishPhase += `${snapshot.phase} `; snapshot.members.forEach(member => this.renderFish(view, view.fish[fishIndex++], member, time)); }); statuses[view.shape] = `${view.size}: ${phase.trim()} · birds ${birdPhase.trim()} · fish ${fishPhase.trim()} · groups ${view.playbacks.length}`; } this.status.set(statuses); }
   private renderAnimal(view: View, mesh: Mesh, member: AnimalLandHerdMember): void { const frame = view.surface.sample(member.position); mesh.position.set(member.position.x + frame.surfaceUp.x * .35, member.position.y + frame.surfaceUp.y * .35, member.position.z + frame.surfaceUp.z * .35); mesh.up.set(frame.surfaceUp.x, frame.surfaceUp.y, frame.surfaceUp.z); }
-  private renderBird(view: View, mesh: Mesh, member: AnimalAirFlockMember): void { mesh.position.set(member.position.x, member.position.y, member.position.z); }
+  private renderBird(view: View, mesh: Mesh, member: AnimalAirFlockMember): void {
+    mesh.position.set(member.position.x, member.position.y, member.position.z);
+    const direction = new Vector3(member.velocity.x, member.velocity.y, member.velocity.z);
+    if (direction.lengthSq() > 1e-8) {
+      mesh.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), direction.normalize());
+      return;
+    }
+    const frame = view.surface.sample(member.position);
+    const up = new Vector3(frame.surfaceUp.x, frame.surfaceUp.y, frame.surfaceUp.z);
+    mesh.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), up);
+    mesh.rotateOnAxis(up, stableBirdYaw(member.id));
+  }
   private renderFish(view: View, mesh: Mesh, member: AnimalAquaticSchoolMember, time: number): void { mesh.position.set(member.position.x, member.position.y, member.position.z); const sample = view.water.sample(member.position, time); const velocity = new Vector3(member.velocity.x, member.velocity.y, member.velocity.z); if (velocity.lengthSq() > 1e-8) mesh.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), velocity.normalize()); else if (sample.bottom) mesh.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), new Vector3(sample.bottom.tangentU.x, sample.bottom.tangentU.y, sample.bottom.tangentU.z)); }
 }
 
 function scale(value: AnimalVector3, factor: number): AnimalVector3 { return { x: value.x * factor, y: value.y * factor, z: value.z * factor }; }
+function stableBirdYaw(id: string): number { let hash = 2166136261; for (let index = 0; index < id.length; index++) hash = Math.imul(hash ^ id.charCodeAt(index), 16777619); return (hash >>> 0) / 0x100000000 * Math.PI * 2; }
+function add(a: AnimalVector3, b: AnimalVector3): AnimalVector3 { return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }; }
 class TerrainCheckpointField extends ConstantTerrainField {
   constructor() { super(0); }
   override sample([x, _y, z]: TerrainVector3): ITerrainFieldSample { return { elevationM: Math.sin(x / 7) * .35 + Math.cos(z / 9) * .25 }; }

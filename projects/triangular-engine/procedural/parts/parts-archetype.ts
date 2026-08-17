@@ -71,6 +71,10 @@ export interface IPartJointConfig {
   readonly rangeRad: readonly [number, number];
   /** Rest / stowed angle in radians. */
   readonly restRad: number;
+  /** Optional telescoping extension stroke in meters for linkId: 2 elements. */
+  readonly extensionM?: number | readonly [number, number];
+  /** Optional unit axis for telescoping translation. */
+  readonly extensionAxis?: readonly [number, number, number];
 }
 
 export interface IPartColliderConfig {
@@ -123,7 +127,7 @@ export function validatePartArchetype(archetype: IPartArchetype): void {
   const solidIds = archetype.solids.map((s) => s.id);
   validateProceduralUniqueIds(solidIds, 'Part archetype solids');
 
-  let hasLink1 = false;
+  let hasJointSolids = false;
 
   for (const solid of archetype.solids) {
     if (typeof solid.id !== 'string' || solid.id.length === 0) {
@@ -135,7 +139,6 @@ export function validatePartArchetype(archetype: IPartArchetype): void {
 
     const expectedCount = EXPECTED_DIMENSION_COUNTS[solid.shape as PartSolidShape];
     if (!Array.isArray(solid.dimensionsM) || solid.dimensionsM.length !== expectedCount) {
-
       throw new RangeError(
         `Part archetype solid "${solid.id}" shape "${solid.shape}" expects ${expectedCount} dimensions, got ${solid.dimensionsM?.length}.`,
       );
@@ -170,14 +173,14 @@ export function validatePartArchetype(archetype: IPartArchetype): void {
       if (!Number.isInteger(solid.linkId) || solid.linkId < 0) {
         throw new RangeError(`Part archetype solid "${solid.id}" linkId must be a non-negative integer.`);
       }
-      if (solid.linkId === 1) {
-        hasLink1 = true;
+      if (solid.linkId >= 1) {
+        hasJointSolids = true;
       }
     }
   }
 
   if (archetype.joint) {
-    const { anchorM, axis, rangeRad, restRad } = archetype.joint;
+    const { anchorM, axis, rangeRad, restRad, extensionM, extensionAxis } = archetype.joint;
     if (!Array.isArray(anchorM) || anchorM.length !== 3 || anchorM.some((n) => !Number.isFinite(n))) {
       throw new RangeError('Part archetype joint anchorM must be a 3-element finite vector.');
     }
@@ -192,12 +195,35 @@ export function validatePartArchetype(archetype: IPartArchetype): void {
     if (!Number.isFinite(restRad)) {
       throw new RangeError('Part archetype joint restRad must be a finite number.');
     }
-    if (!hasLink1) {
+    if (extensionM !== undefined) {
+      if (Array.isArray(extensionM)) {
+        validateProceduralFiniteRange(extensionM, 'Part archetype joint extensionM');
+      } else if (typeof extensionM === 'number') {
+        if (!Number.isFinite(extensionM) || extensionM < 0) {
+          throw new RangeError('Part archetype joint extensionM must be non-negative.');
+        }
+      }
+    }
+    if (extensionAxis !== undefined) {
+      if (!Array.isArray(extensionAxis) || extensionAxis.length !== 3 || extensionAxis.some((n) => !Number.isFinite(n))) {
+        throw new RangeError('Part archetype joint extensionAxis must be a 3-element finite vector.');
+      }
+      const extLen = Math.sqrt(
+        extensionAxis[0] * extensionAxis[0] +
+        extensionAxis[1] * extensionAxis[1] +
+        extensionAxis[2] * extensionAxis[2],
+      );
+      if (extLen < 1e-6) {
+        throw new RangeError('Part archetype joint extensionAxis must have non-zero length.');
+      }
+    }
+    if (!hasJointSolids) {
       throw new RangeError(
-        `Part archetype "${archetype.id}" declares a joint but has no solids assigned to linkId: 1.`,
+        `Part archetype "${archetype.id}" declares a joint but has no solids assigned to linkId >= 1.`,
       );
     }
   }
+
 
   if (Array.isArray(archetype.sockets)) {
     for (const socket of archetype.sockets) {

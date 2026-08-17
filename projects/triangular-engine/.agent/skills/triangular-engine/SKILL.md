@@ -539,3 +539,19 @@ Use the engine portal system to register UI components on top of the 3D HUD canv
 - `EngineService` is provided per-component (NOT singleton) — each `<scene>` gets its own engine instance
 - Physics runs on the engine tick — `PhysicsService.update()` is called each frame
 - Camera switching is handled via `EngineService.switchCamera()` or the `isActive` / `switchCameraTrigger` inputs on camera/orbit components
+
+---
+
+## 10. Framework-free Sublibraries
+
+Beyond the Angular component layer above, `triangular-engine` also ships pure, framework-free sublibraries (deterministic, no Angular/Three.js coupling in their core logic), each with its own `public-api.ts`:
+
+| Sublibrary   | Import                        | Purpose                                                                                                                                              |
+| ------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scatter`    | `triangular-engine/scatter`    | Deterministic ground-scatter placement (trees, grass, rocks, clutter): species/placement rules, distance fade, view-cone/horizon culling, static exclusion zones, dynamic removal overlay, streaming service — plus Three.js instancing and Jolt collider adapters |
+| `terrain`    | `triangular-engine/terrain`    | Shape-agnostic terrain surface sampling (plane/sphere/cylinder domains)                                                                             |
+| `procedural` | `triangular-engine/procedural` | Procedural mesh/skeleton generation (craft parts, ground-cover clumps, etc.)                                                                        |
+| `spline`     | `triangular-engine/spline`     | Core curve math (early phase; no surface binding yet)                                                                                               |
+| `trail`      | `triangular-engine/trail`      | Ground-mark decal geometry (scorch, tire tracks, footprints)                                                                                        |
+
+Each sublibrary's `public-api.ts` is the source of truth for its surface. Design rationale and scope decisions for these live in the consuming workspace's `docs/runbook/*`.

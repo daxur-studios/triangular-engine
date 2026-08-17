@@ -101,7 +101,7 @@ describe('validatePartArchetype', () => {
     expect(() => validatePartArchetype(invalid)).toThrowError(/positive/);
   });
 
-  it('rejects joint when no solids have linkId: 1', () => {
+  it('rejects joint when no solids have linkId >= 1', () => {
     const invalid: IPartArchetype = {
       ...validLegArchetype,
       solids: [
@@ -109,7 +109,7 @@ describe('validatePartArchetype', () => {
         { ...validLegArchetype.solids[1], linkId: 0 },
       ],
     };
-    expect(() => validatePartArchetype(invalid)).toThrowError(/no solids assigned to linkId: 1/);
+    expect(() => validatePartArchetype(invalid)).toThrowError(/no solids assigned to linkId >= 1/);
   });
 
   it('rejects joint with zero-length axis', () => {
@@ -120,6 +120,14 @@ describe('validatePartArchetype', () => {
     expect(() => validatePartArchetype(invalid)).toThrowError(/non-zero length/);
   });
 
+  it('rejects joint with negative extensionM', () => {
+    const invalid: IPartArchetype = {
+      ...validLegArchetype,
+      joint: { ...validLegArchetype.joint!, extensionM: -0.5 },
+    };
+    expect(() => validatePartArchetype(invalid)).toThrowError(/extensionM must be non-negative/);
+  });
+
   it('rejects sockets referencing non-existent solidId', () => {
     const invalid: IPartArchetype = {
       ...validLegArchetype,
@@ -128,3 +136,4 @@ describe('validatePartArchetype', () => {
     expect(() => validatePartArchetype(invalid)).toThrowError(/non-existent solidId/);
   });
 });
+

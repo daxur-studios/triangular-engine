@@ -4,7 +4,7 @@ import type {
   ScatterInstanceId,
 } from 'triangular-engine/scatter';
 
-import { LAYER_NON_MOVING } from '../example';
+import { getCompoundSubShapeUserData, LAYER_NON_MOVING } from '../example';
 import { type IJoltMetadata, Jolt } from '../jolt-physics/jolt-physics.service';
 
 interface IScatterPhysicsCell {
@@ -166,7 +166,7 @@ export class ScatterJoltColliderAdapter {
     const cell = this.#cellsByKey.get(cellKey);
     if (!cell) return undefined;
 
-    const userData = cell.shape.GetSubShapeUserData(subShapeId);
+    const userData = getCompoundSubShapeUserData(cell.shape, subShapeId);
     if (userData === 0) return undefined;
     return cell.instanceIdByUserData.get(userData);
   }
@@ -189,17 +189,13 @@ export class ScatterJoltColliderAdapter {
     for (let index = 0; index < cell.descriptors.length; index++) {
       const descriptor = cell.descriptors[index];
       const subShapeSettings = createSubShapeSettings(descriptor);
-      // Identity is carried on the LEAF shape, not on the compound child.
-      // CompoundShape::GetSubShapeUserData() returns Shape::GetUserData() of
-      // the leaf it resolves to — it does NOT return the compound child's
-      // SubShape::mUserData (see Jolt's CompoundShape.h note on that field;
-      // reading it back needs GetSubShapeIndexFromID, which JoltPhysics.js
-      // does not bind). Shape's settings constructor copies mUserData onto
-      // the created shape, so tagging the settings is what makes the
-      // contact-time lookup work. Leaf-carried data also survives child
-      // reordering, unlike an index.
+      // Identity is carried on the compound child's own SubShape::mUserData
+      // (AddShapeShapeSettings's 4th arg below), read back at contact time
+      // via getCompoundSubShapeUserData — see docs/case-studies/010 in
+      // brunos-space-program: Shape.GetSubShapeUserData(subShapeId) does not
+      // reliably return this, so resolution must decode the child index
+      // from the SubShapeID itself and read GetSubShape(idx).mUserData.
       const userData = nextSubShapeUserData++;
-      subShapeSettings.mUserData = userData;
       const [relX, relY, relZ] = descriptor.anchorRelativePositionM;
       const [rotX, rotY, rotZ, rotW] = descriptor.rotation;
       const position = new Jolt.Vec3(relX, relY, relZ);

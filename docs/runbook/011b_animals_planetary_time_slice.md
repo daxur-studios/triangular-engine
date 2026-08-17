@@ -328,3 +328,13 @@ sphere, and inside-cylinder worlds; direct Universal-Time reconstruction and
 unload/reload are deterministic; surface and water constraints are enforced by
 tests; interactions and one persisted consequence survive reconstruction; and
 headed pages contain no authored movement or behavior shortcuts.
+
+## Terrain checkpoint perch note (2026-08-18)
+
+The terrain checkpoint briefly used large procedural `roostSlotSpacingM` values
+to separate multiple birds. This was an incorrect page-level workaround: the
+generic slot resolver moves same-roost slots along the sampled surface, which
+can place birds away from the actual tree mesh. Do not use slot spacing to
+invent branch geometry. The checkpoint now allows one bird per tree roost and
+keeps overflow birds airborne in holding until real flora perch sockets and
+ground landing are implemented.

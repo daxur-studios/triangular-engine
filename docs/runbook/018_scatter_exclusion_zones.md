@@ -156,6 +156,18 @@ Explicitly **not** this slice (recorded, not dropped):
   Blocked on `spline/` reaching its surface-binding/mask-sampling phase
   (currently Phase-0A). [008](008_spline_sublibrary.md)'s Phase-4 checklist
   item is the eventual proper version of this.
+- **Radius-based instance query.** `scatter/three/scatter-instance-picking.ts`
+  only supports single-point pick (`pickScatterInstanceId`, one raycast
+  hit). Effects that affect an area — a landing engine flinging both grass
+  and small rocks outward, an explosion — need "every instance within Rm of
+  this point," across possibly multiple species, which nothing currently
+  provides; a game would have to loop candidates itself. Debris
+  spawning/physics/VFX for the flung-out result stays game-owned (same
+  split as burn-away above), but the area query itself is a natural, small
+  library addition: a pure function taking a world point + radius + the
+  cell's instances, returning matching `ScatterInstanceId`s, that a game
+  then feeds into the existing `scatter-removal-overlay` for each hit. Not
+  built here.
 - **Broad-phase spatial index for zones, at high zone counts.**
   `computeScatterExclusionFade01` is a linear scan over every zone for every
   candidate point, called per candidate inside
@@ -263,3 +275,33 @@ current linear scan is fine at demo scale, would need a grid-bucket spatial
 index at high zone counts, and it's a generation-time lookup problem, not a
 per-frame culling problem like grass's view cull. Not built; no code
 changed this entry.
+
+### 2026-08-17: small-rocks-as-debris idea, radius query recorded as deferred
+
+Follow-up idea: an engine landing should fling out both grass and small
+rocks (destruction/debris), same trigger as scorch. Agreed this is
+game-owned (spawning debris bodies + VFX), same split as burn-away — but
+named the one real library gap, "given a point + radius, which instances
+(any species) are nearby," since only single-point pick exists today.
+Recorded above under "Radius-based instance query." Not built; no code
+changed this entry.
+
+### 2026-08-18: fixed unvalidated compound-shape userData resolution
+
+While tracing the debris idea, cross-checked against
+brunos-space-program's [010_compound-shape-subshape-userdata-trap.md](../../../../brunos-space-program/docs/case-studies/010_compound-shape-subshape-userdata-trap.md)
+(Jolt's `Shape.GetSubShapeUserData(subShapeId)` is unreliable for compound
+shapes — that case study's validated fix decodes the child index from the
+`SubShapeID` itself and reads `GetSubShape(idx).mUserData`). Scatter's own
+`ScatterJoltColliderAdapter.resolveInstanceId`
+(`jolt/scatter/scatter-jolt-collider-adapter.ts`) — one compound body per
+streaming cell, one sub-shape per tree/rock instance — hit the exact same
+trap shape, but was calling `GetSubShapeUserData` directly and compensating
+with an unvalidated hypothesis (tagging userData on the leaf shape instead
+of the compound child). Switched it to the same validated
+`getCompoundSubShapeUserData()` helper (`jolt/example.ts`) used by the
+vessel-part fix; removed the now-redundant leaf-level tagging. 551
+triangular-engine specs green, both `tsc --noEmit` clean. No spec exists
+for this adapter (Jolt-dependent, exercised only via scatter-physics-lab
+manually) — in-browser retest of tree removal there is the real
+verification.

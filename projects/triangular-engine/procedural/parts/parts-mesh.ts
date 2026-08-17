@@ -164,8 +164,9 @@ export function buildPartMeshGroup(
   const group = new Group();
   group.name = archetype?.id ?? 'procedural-part';
 
-  const link0Solids = solids.filter((s) => s.linkId === 0);
+  const link0Solids = solids.filter((s) => (s.linkId ?? 0) === 0);
   const link1Solids = solids.filter((s) => s.linkId === 1);
+  const link2Solids = solids.filter((s) => s.linkId === 2);
 
   const sharedMaterial = new MeshStandardMaterial({
     vertexColors: true,
@@ -180,35 +181,60 @@ export function buildPartMeshGroup(
     group.add(mesh0);
   }
 
-  if (link1Solids.length > 0) {
+  if (link1Solids.length > 0 || link2Solids.length > 0) {
     if (archetype?.joint) {
       const jointAnchor = new Vector3(...archetype.joint.anchorM);
       const jointGroup = new Group();
       jointGroup.name = 'joint-pivot';
       jointGroup.position.copy(jointAnchor);
 
-      // Re-center link-1 solids relative to the joint anchor
-      const relativeSolids: IPartSolid[] = link1Solids.map((s) => ({
-        ...s,
-        positionM: [
-          s.positionM[0] - jointAnchor.x,
-          s.positionM[1] - jointAnchor.y,
-          s.positionM[2] - jointAnchor.z,
-        ],
-      }));
+      if (link1Solids.length > 0) {
+        const relativeSolids1: IPartSolid[] = link1Solids.map((s) => ({
+          ...s,
+          positionM: [
+            s.positionM[0] - jointAnchor.x,
+            s.positionM[1] - jointAnchor.y,
+            s.positionM[2] - jointAnchor.z,
+          ],
+        }));
+        const res1 = buildPartMesh(relativeSolids1);
+        const mesh1 = new Mesh(res1.geometry, sharedMaterial);
+        mesh1.name = 'link-1';
+        jointGroup.add(mesh1);
+      }
 
-      const res1 = buildPartMesh(relativeSolids);
-      const mesh1 = new Mesh(res1.geometry, sharedMaterial);
-      mesh1.name = 'link-1';
-      jointGroup.add(mesh1);
+      if (link2Solids.length > 0) {
+        const relativeSolids2: IPartSolid[] = link2Solids.map((s) => ({
+          ...s,
+          positionM: [
+            s.positionM[0] - jointAnchor.x,
+            s.positionM[1] - jointAnchor.y,
+            s.positionM[2] - jointAnchor.z,
+          ],
+        }));
+        const res2 = buildPartMesh(relativeSolids2);
+        const mesh2 = new Mesh(res2.geometry, sharedMaterial);
+        mesh2.name = 'link-2';
+        jointGroup.add(mesh2);
+      }
+
       group.add(jointGroup);
     } else {
-      const res1 = buildPartMesh(link1Solids);
-      const mesh1 = new Mesh(res1.geometry, sharedMaterial);
-      mesh1.name = 'link-1';
-      group.add(mesh1);
+      if (link1Solids.length > 0) {
+        const res1 = buildPartMesh(link1Solids);
+        const mesh1 = new Mesh(res1.geometry, sharedMaterial);
+        mesh1.name = 'link-1';
+        group.add(mesh1);
+      }
+      if (link2Solids.length > 0) {
+        const res2 = buildPartMesh(link2Solids);
+        const mesh2 = new Mesh(res2.geometry, sharedMaterial);
+        mesh2.name = 'link-2';
+        group.add(mesh2);
+      }
     }
   }
 
   return group;
 }
+

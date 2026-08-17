@@ -10,8 +10,8 @@
       </header>
 
       <p class="blurb">
-        Deterministic vehicle parts: wing, landing leg, rocket engine. Sockets carry load-bearing
-        orientations & role tags. Drag the deploy slider to test kinematic hinge rotation.
+        Deterministic vehicle parts with functional sockets, Jolt physics colliders, and articulation.
+        Inspect individual parts or drop a fully assembled multi-part dynamic spacecraft.
       </p>
 
       <div class="controls-row">
@@ -48,27 +48,12 @@
           [class.active]="showColliders()"
           (click)="toggleColliders()"
         >
-          Jolt Debug Colliders
+          Jolt Colliders
         </button>
       </div>
 
-      <div class="slider-box">
-        <div class="slider-header">
-          <span>Landing Leg Deploy</span>
-          <span class="val">{{ (legDeploy01() * 100).toFixed(0) }}%</span>
-        </div>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          [value]="legDeploy01()"
-          (input)="onDeploySlider($event)"
-        />
-      </div>
-
       <div class="part-selector">
-        <span class="selector-label">Inspect Mass Properties:</span>
+        <span class="selector-label">Select Part to Inspect & Pose:</span>
         <div class="tab-group">
           <button
             type="button"
@@ -76,7 +61,7 @@
             [class.active]="selectedPartIndex() === 0"
             (click)="selectPart(0)"
           >
-            Wing
+            Aircraft Wing
           </button>
           <button
             type="button"
@@ -84,7 +69,7 @@
             [class.active]="selectedPartIndex() === 1"
             (click)="selectPart(1)"
           >
-            Leg
+            Landing Leg
           </button>
           <button
             type="button"
@@ -92,10 +77,70 @@
             [class.active]="selectedPartIndex() === 2"
             (click)="selectPart(2)"
           >
-            Engine
+            Rocket Engine
+          </button>
+          <button
+            type="button"
+            class="tab-btn"
+            [class.active]="selectedPartIndex() === 3"
+            (click)="selectPart(3)"
+          >
+            Fuel Tank
           </button>
         </div>
       </div>
+
+      <!-- Contextual Articulation Control Slider -->
+      @if (selectedPartIndex() === 0) {
+        <div class="slider-box">
+          <div class="slider-header">
+            <span>Trailing Flap Deflection</span>
+            <span class="val">{{ (wingFlapDeg()).toFixed(1) }}°</span>
+          </div>
+          <input
+            type="range"
+            min="-25"
+            max="25"
+            step="0.5"
+            [value]="wingFlapDeg()"
+            (input)="onWingFlapSlider($event)"
+          />
+        </div>
+      } @else if (selectedPartIndex() === 1) {
+        <div class="slider-box">
+          <div class="slider-header">
+            <span>Leg Deploy & Extension</span>
+            <span class="val">{{ (legDeploy01() * 100).toFixed(0) }}% ({{ (legDeploy01() * 0.65).toFixed(2) }}m stroke)</span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            [value]="legDeploy01()"
+            (input)="onLegDeploySlider($event)"
+          />
+        </div>
+      } @else if (selectedPartIndex() === 2) {
+        <div class="slider-box">
+          <div class="slider-header">
+            <span>Nozzle Gimbal Pitch</span>
+            <span class="val">{{ (engineGimbalDeg()).toFixed(1) }}°</span>
+          </div>
+          <input
+            type="range"
+            min="-10"
+            max="10"
+            step="0.2"
+            [value]="engineGimbalDeg()"
+            (input)="onEngineGimbalSlider($event)"
+          />
+        </div>
+      } @else if (selectedPartIndex() === 3) {
+        <div class="slider-box static-info">
+          <span>Structural Core: Pressurized Propellant Tank</span>
+        </div>
+      }
 
       @if (currentMassProps(); as mass) {
         <div class="hud-box">
@@ -108,7 +153,7 @@
             <span class="v">{{ mass.dryMassKg.toFixed(1) }} kg</span>
           </div>
           <div class="hud-item">
-            <span class="k">COM:</span>
+            <span class="k">Center of Mass:</span>
             <span class="v">
               [{{ mass.centerOfMassM[0].toFixed(2) }}, {{ mass.centerOfMassM[1].toFixed(2) }}, {{ mass.centerOfMassM[2].toFixed(2) }}]
             </span>
@@ -117,9 +162,17 @@
       }
 
       <div class="physics-box">
-        <button type="button" class="btn primary-action" (click)="dropPhysicsBall()">
-          Drop Ball on Selected Part
+        <button type="button" class="btn primary-action" (click)="dropDynamicVessel()">
+          🚀 Drop Dynamic Test Vessel
         </button>
+        <button type="button" class="btn" (click)="dropPhysicsBall()">
+          Drop Ball
+        </button>
+        @if (vessels().length > 0) {
+          <button type="button" class="btn clear-btn" (click)="clearVessels()">
+            Clear Vessels ({{ vessels().length }})
+          </button>
+        }
       </div>
 
       <div class="legend">
@@ -133,25 +186,25 @@
   </ng-template>
 
   <orbitControls
-    [cameraPosition]="[0, 3.5, 9]"
-    [target]="[0, 0.8, 0]"
+    [cameraPosition]="[0, 4.5, 11]"
+    [target]="[0, 1.0, 0]"
     [isActive]="true"
   />
   <ambientLight [intensity]="1.2" />
-  <directionalLight [position]="[10, 15, 10]" [intensity]="2.2" [castShadow]="true" />
-  <directionalLight [position]="[-10, 8, -10]" [intensity]="0.8" />
+  <directionalLight [position]="[12, 18, 12]" [intensity]="2.2" [castShadow]="true" />
+  <directionalLight [position]="[-12, 10, -12]" [intensity]="0.8" />
 
   <joltPhysics [gravity]="[0, -9.81, 0]" [debug]="showColliders()">
     <!-- Static ground floor -->
     <joltRigidBody [motionType]="0" [position]="[0, -0.25, 0]">
-      <joltBoxShape [params]="[40, 0.5, 40]" />
+      <joltBoxShape [params]="[50, 0.5, 50]" />
       <mesh [receiveShadow]="true">
-        <boxGeometry [params]="[40, 0.5, 40]" />
+        <boxGeometry [params]="[50, 0.5, 50]" />
         <meshStandardMaterial [params]="{ color: '#1a1d24', roughness: 0.9 }" />
       </mesh>
     </joltRigidBody>
 
-    <!-- Static part physics colliders -->
+    <!-- Static inspected part physics colliders -->
     @for (col of activePartColliders(); track col.key) {
       <joltRigidBody
         [motionType]="0"
@@ -166,7 +219,44 @@
       </joltRigidBody>
     }
 
-    <!-- Dynamic dropped balls -->
+    <!-- Dynamic dropped spacecraft vessels (Compound Jolt Rigid Body) -->
+    @for (vessel of vessels(); track vessel.id) {
+      <joltRigidBody
+        [motionType]="2"
+        [position]="vessel.position"
+        [quaternion]="vessel.quaternion"
+        [linearDamping]="0.01"
+        [angularDamping]="0.02"
+      >
+        <!-- Compound sub-shapes with local position and rotation! -->
+        @for (col of vessel.colliders; track col.key) {
+          @if (col.isSphere) {
+            <joltSphereShape
+              [id]="col.key"
+              [position]="col.position"
+              [rotation]="col.rotation"
+              [radius]="col.radius"
+            />
+          } @else {
+            <joltBoxShape
+              [id]="col.key"
+              [position]="col.position"
+              [rotation]="col.rotation"
+              [params]="col.boxSize"
+            />
+          }
+        }
+
+        <!-- Assembled Visual Mesh -->
+        <mesh
+          [geometry]="vessel.geometry"
+          [material]="vesselMaterial"
+          [castShadow]="true"
+        />
+      </joltRigidBody>
+    }
+
+    <!-- Dynamic dropped test balls -->
     @for (ball of balls(); track ball.id) {
       <joltRigidBody
         [motionType]="2"

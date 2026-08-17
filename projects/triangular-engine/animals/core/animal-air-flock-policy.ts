@@ -136,8 +136,12 @@ export function stepAnimalAirFlock(
     const perchPosition = site && assignment?.slotIndex !== undefined
       ? resolveAnimalRoostPosition(site, assignment.slotIndex, definition)
       : undefined;
+    // Do not snap a bird onto a perch while it is still carrying meaningful
+    // approach velocity. Let the constrained step settle it first; the snap
+    // is only a final state transition for an already-arrived member.
     if (input.intent === 'roost' && site && perchPosition
-      && distance(member.position, perchPosition) <= definition.arrivalRadiusM) {
+      && distance(member.position, perchPosition) <= definition.arrivalRadiusM
+      && magnitude(member.velocity) <= definition.maximumAccelerationMps2 * input.deltaSeconds) {
       constrained.push({ position: { ...perchPosition }, velocity: { ...zero }, blocked: false, blockReason: 'none', substeps: 0 });
       return { id: member.id, position: { ...perchPosition }, velocity: { ...zero }, mode: 'perched' as const, perchId: site.id };
     }
@@ -152,7 +156,8 @@ export function stepAnimalAirFlock(
       ? clamp(baseAltitude + Math.sin(stablePhase(member.id)) * (definition.flightAltitudeSpreadM ?? 0),
         definition.minimumAltitudeM, definition.maximumAltitudeM)
       : baseAltitude;
-    const desired = flockDesiredVelocity(member, input.members, center, averageVelocity, target, targetAltitude, definition);
+    const desired = flockDesiredVelocity(member, input.members, center, averageVelocity, target, targetAltitude, definition,
+      input.intent === 'roost' && site !== undefined);
     const moved = stepConstrainedAnimalMovement(member, desired, input.deltaSeconds, input.universalTime, {
       domain: 'air', surface: definition.surface,
       minimumAltitudeM: definition.minimumAltitudeM, maximumAltitudeM: definition.maximumAltitudeM,
@@ -179,6 +184,7 @@ function flockDesiredVelocity(
   target: AnimalVector3,
   targetAltitude: number,
   definition: AnimalAirFlockPolicyDefinition,
+  roostApproach = false,
 ): AnimalVector3 {
   const ground = definition.surface.sample(member.position);
   const altitude = dot(subtract(member.position, ground.position), ground.surfaceUp);
@@ -186,6 +192,16 @@ function flockDesiredVelocity(
   let desired = scale(isBoid3d
     ? normalize(subtract(target, member.position))
     : tangentDirection(member.position, target, ground.normal), definition.targetWeight);
+  if (roostApproach) {
+    // A bird with a reserved slot is no longer participating in group
+    // steering for this tick. Direct slot approach prevents cohesion and
+    // alignment from orbiting the destination indefinitely.
+    const direct = normalize(subtract(target, member.position));
+    const distanceToTarget = magnitude(subtract(target, member.position));
+    const approachSpeed = Math.min(definition.maximumSpeedMps,
+      Math.max(0, distanceToTarget / Math.max(0.001, definition.arrivalRadiusM)) * definition.maximumSpeedMps);
+    return scaleTo(add(direct, scale(ground.surfaceUp, targetAltitude - altitude)), approachSpeed);
+  }
   desired = add(desired, scale(isBoid3d
     ? normalize(subtract(center, member.position))
     : tangentDirection(member.position, center, ground.normal), definition.cohesionWeight));

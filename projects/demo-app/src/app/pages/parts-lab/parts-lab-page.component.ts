@@ -9,6 +9,7 @@ import { RouterLink } from '@angular/router';
 import {
   BufferGeometry,
   DoubleSide,
+  Euler,
   Float32BufferAttribute,
   GridHelper,
   Group,
@@ -33,10 +34,12 @@ import {
   generatePartSkeleton,
   PART_AIRCRAFT_WING_ARCHETYPE,
   PART_ROCKET_ENGINE_ARCHETYPE,
+  PART_ROCKET_FUEL_TANK_ARCHETYPE,
   PART_ROCKET_LANDING_LEG_ARCHETYPE,
   posePartVariant,
   type IPartArchetype,
   type IPartMassProperties,
+  type IPartSolid,
   type IPartVariant,
   type PartSocketKind,
 } from 'triangular-engine/procedural';
@@ -44,7 +47,8 @@ import {
 interface IPartDisplayItem {
   readonly archetype: IPartArchetype;
   readonly baseOffsetM: readonly [number, number, number];
-  variant: IPartVariant;
+  baseVariant: IPartVariant;
+  posedVariant: IPartVariant;
   meshGroup: Group;
   socketGroup: Group;
 }
@@ -53,6 +57,7 @@ interface IActiveColliderItem {
   readonly key: string;
   readonly position: Vector3Tuple;
   readonly quaternion: QuaternionTuple;
+  readonly rotation: Vector3Tuple;
   readonly isSphere: boolean;
   readonly radius: number;
   readonly boxSize: [number, number, number];
@@ -65,6 +70,14 @@ interface IDroppedBall {
   readonly radius: number;
 }
 
+interface IDynamicVesselItem {
+  readonly id: number;
+  readonly position: Vector3Tuple;
+  readonly quaternion: QuaternionTuple;
+  readonly colliders: readonly IActiveColliderItem[];
+  readonly geometry: BufferGeometry;
+}
+
 const SOCKET_GIZMO_COLOR_BY_KIND: Record<PartSocketKind, string> = {
   attach: '#4caf50', // green
   thrust: '#ff9800', // orange
@@ -72,6 +85,8 @@ const SOCKET_GIZMO_COLOR_BY_KIND: Record<PartSocketKind, string> = {
   pivot: '#e91e63', // pink
   lift: '#9c27b0', // purple
 };
+
+const DEG_TO_RAD = Math.PI / 180;
 
 @Component({
   selector: 'app-parts-lab-page',
@@ -90,19 +105,31 @@ export class PartsLabPageComponent {
   readonly wireframe = signal(false);
   readonly showSockets = signal(true);
   readonly showColliders = signal(false);
-  readonly legDeploy01 = signal(0.0);
-  readonly selectedPartIndex = signal(1); // 0 = wing, 1 = leg, 2 = engine
+
+  readonly selectedPartIndex = signal(0); // 0 = wing, 1 = leg, 2 = engine, 3 = tank
+  readonly wingFlapDeg = signal(0.0); // -25 to +25 deg
+  readonly legDeploy01 = signal(0.0); // 0 to 1 (0 to 66 deg + 0.65m stroke)
+  readonly engineGimbalDeg = signal(0.0); // -10 to +10 deg
 
   readonly currentMassProps = signal<IPartMassProperties | null>(null);
   readonly activePartColliders = signal<readonly IActiveColliderItem[]>([]);
   readonly balls = signal<readonly IDroppedBall[]>([]);
+  readonly vessels = signal<readonly IDynamicVesselItem[]>([]);
+
+  readonly vesselMaterial = new MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.45,
+    metalness: 0.35,
+    side: DoubleSide,
+  });
 
   private nextBallId = 1;
+  private nextVesselId = 1;
   private readonly rootGroup = new Group();
   private displayItems: IPartDisplayItem[] = [];
 
   constructor() {
-    const grid = new GridHelper(20, 20, 0x445566, 0x223344);
+    const grid = new GridHelper(24, 24, 0x445566, 0x223344);
     grid.position.y = 0.001;
     this.rootGroup.add(grid);
 
@@ -124,6 +151,7 @@ export class PartsLabPageComponent {
 
   toggleWireframe(): void {
     this.wireframe.update((v) => !v);
+    this.vesselMaterial.wireframe = this.wireframe();
     this.updateMaterials();
   }
 
@@ -138,17 +166,32 @@ export class PartsLabPageComponent {
     this.showColliders.update((v) => !v);
   }
 
-  onDeploySlider(event: Event): void {
+  onWingFlapSlider(event: Event): void {
+    const target = event.target as HTMLInputElement;
+    const value = parseFloat(target.value);
+    this.wingFlapDeg.set(value);
+    this.updatePartPose(0, value * DEG_TO_RAD);
+  }
+
+  onLegDeploySlider(event: Event): void {
     const target = event.target as HTMLInputElement;
     const value = parseFloat(target.value);
     this.legDeploy01.set(value);
-    this.updateLegPose();
+    const maxRad = this.displayItems[1]?.archetype.joint?.rangeRad[1] ?? 1.15;
+    this.updatePartPose(1, value * maxRad);
+  }
+
+  onEngineGimbalSlider(event: Event): void {
+    const target = event.target as HTMLInputElement;
+    const value = parseFloat(target.value);
+    this.engineGimbalDeg.set(value);
+    this.updatePartPose(2, value * DEG_TO_RAD);
   }
 
   selectPart(index: number): void {
     this.selectedPartIndex.set(index);
     if (this.displayItems[index]) {
-      this.currentMassProps.set(this.displayItems[index].variant.mass);
+      this.currentMassProps.set(this.displayItems[index].posedVariant.mass);
     }
   }
 
@@ -163,9 +206,10 @@ export class PartsLabPageComponent {
       archetype: IPartArchetype;
       offset: readonly [number, number, number];
     }[] = [
-      { archetype: PART_AIRCRAFT_WING_ARCHETYPE, offset: [-3.2, 0.8, 0] },
-      { archetype: PART_ROCKET_LANDING_LEG_ARCHETYPE, offset: [0, 1.6, 0] },
-      { archetype: PART_ROCKET_ENGINE_ARCHETYPE, offset: [3.2, 1.2, 0] },
+      { archetype: PART_AIRCRAFT_WING_ARCHETYPE, offset: [-4.5, 0.8, 0] },
+      { archetype: PART_ROCKET_LANDING_LEG_ARCHETYPE, offset: [-1.5, 1.8, 0] },
+      { archetype: PART_ROCKET_ENGINE_ARCHETYPE, offset: [1.5, 1.2, 0] },
+      { archetype: PART_ROCKET_FUEL_TANK_ARCHETYPE, offset: [4.5, 1.5, 0] },
     ];
 
     for (let i = 0; i < archetypes.length; i++) {
@@ -175,7 +219,7 @@ export class PartsLabPageComponent {
       const colliders = derivePartColliders(skeleton, archetype);
       const mass = derivePartMassProperties(skeleton);
 
-      const variant: IPartVariant = {
+      const baseVariant: IPartVariant = {
         solids: skeleton,
         sockets,
         colliders,
@@ -194,55 +238,39 @@ export class PartsLabPageComponent {
       const item: IPartDisplayItem = {
         archetype,
         baseOffsetM: offset,
-        variant,
+        baseVariant,
+        posedVariant: baseVariant,
         meshGroup,
         socketGroup,
       };
 
       this.displayItems.push(item);
+    }
+
+    // 1. Initial render for all 4 items
+    for (const item of this.displayItems) {
       this.renderItemVisuals(item);
     }
 
-    this.updateLegPose();
+    // 2. Apply active joint poses
+    this.updatePartPose(0, this.wingFlapDeg() * DEG_TO_RAD);
+    const maxLegRad = this.displayItems[1]?.archetype.joint?.rangeRad[1] ?? 1.15;
+    this.updatePartPose(1, this.legDeploy01() * maxLegRad);
+    this.updatePartPose(2, this.engineGimbalDeg() * DEG_TO_RAD);
+
     this.selectPart(this.selectedPartIndex());
     this.refreshActiveColliders();
   }
 
-  private updateLegPose(): void {
-    const legItem = this.displayItems[1];
-    if (!legItem || !legItem.archetype.joint) return;
+  private updatePartPose(index: number, angleRad: number): void {
+    const item = this.displayItems[index];
+    if (!item) return;
 
-    const maxRad = legItem.archetype.joint.rangeRad[1];
-    const targetRad = this.legDeploy01() * maxRad;
+    item.posedVariant = posePartVariant(item.baseVariant, angleRad);
+    this.renderItemVisuals(item);
 
-    const initialSkeleton = generatePartSkeleton(
-      legItem.archetype,
-      this.seed() + 37,
-    );
-    const initialSockets = derivePartSockets(
-      initialSkeleton,
-      legItem.archetype,
-      this.seed() + 37,
-    );
-    const initialColliders = derivePartColliders(
-      initialSkeleton,
-      legItem.archetype,
-    );
-    const initialMass = derivePartMassProperties(initialSkeleton);
-
-    const baseVariant: IPartVariant = {
-      solids: initialSkeleton,
-      sockets: initialSockets,
-      colliders: initialColliders,
-      mass: initialMass,
-      joint: legItem.archetype.joint,
-    };
-
-    legItem.variant = posePartVariant(baseVariant, targetRad);
-    this.renderItemVisuals(legItem);
-
-    if (this.selectedPartIndex() === 1) {
-      this.currentMassProps.set(legItem.variant.mass);
+    if (this.selectedPartIndex() === index) {
+      this.currentMassProps.set(item.posedVariant.mass);
     }
 
     this.refreshActiveColliders();
@@ -252,8 +280,8 @@ export class PartsLabPageComponent {
     const colliders: IActiveColliderItem[] = [];
 
     for (const item of this.displayItems) {
-      for (let i = 0; i < item.variant.colliders.length; i++) {
-        const col = item.variant.colliders[i];
+      for (let i = 0; i < item.posedVariant.colliders.length; i++) {
+        const col = item.posedVariant.colliders[i];
         const worldPos: Vector3Tuple = [
           item.baseOffsetM[0] + col.anchorRelativePositionM[0],
           item.baseOffsetM[1] + col.anchorRelativePositionM[1],
@@ -265,6 +293,8 @@ export class PartsLabPageComponent {
           col.rotation[2],
           col.rotation[3],
         ];
+        const euler = new Euler().setFromQuaternion(new Quaternion(...quat));
+        const rotEuler: Vector3Tuple = [euler.x, euler.y, euler.z];
 
         let isSphere = false;
         let radius = 0.1;
@@ -279,8 +309,6 @@ export class PartsLabPageComponent {
             boxSize = [col.params[0], col.params[1], col.params[2]];
             break;
           case 'cylinder':
-            boxSize = [col.params[1] * 2, col.params[0] * 2, col.params[1] * 2];
-            break;
           case 'capsule':
             boxSize = [col.params[1] * 2, col.params[0] * 2, col.params[1] * 2];
             break;
@@ -290,6 +318,7 @@ export class PartsLabPageComponent {
           key: `${item.archetype.id}-${i}`,
           position: worldPos,
           quaternion: quat,
+          rotation: rotEuler,
           isSphere,
           radius,
           boxSize,
@@ -303,11 +332,11 @@ export class PartsLabPageComponent {
   private renderItemVisuals(item: IPartDisplayItem): void {
     // 1. Mesh
     item.meshGroup.clear();
-    const meshResult = buildPartMesh(item.variant.solids, item.archetype);
+    const meshResult = buildPartMesh(item.posedVariant.solids, item.archetype);
     const mat = new MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.5,
-      metalness: 0.3,
+      roughness: 0.45,
+      metalness: 0.35,
       wireframe: this.wireframe(),
       side: DoubleSide,
     });
@@ -317,10 +346,10 @@ export class PartsLabPageComponent {
     // 2. Sockets
     item.socketGroup.clear();
     item.socketGroup.visible = this.showSockets();
-    for (const socket of item.variant.sockets) {
+    for (const socket of item.posedVariant.sockets) {
       const colorHex = SOCKET_GIZMO_COLOR_BY_KIND[socket.kind] ?? '#ffffff';
       const sphereMat = new MeshBasicMaterial({ color: colorHex });
-      const sphereGeom = new SphereGeometry(socket.clearanceRadiusM * 0.25, 8, 8);
+      const sphereGeom = new SphereGeometry(0.035, 12, 8);
       const socketMesh = new Mesh(sphereGeom, sphereMat);
       socketMesh.position.set(...socket.positionM);
       item.socketGroup.add(socketMesh);
@@ -328,7 +357,7 @@ export class PartsLabPageComponent {
       // Orientation pointer line
       const pointerGeom = new BufferGeometry();
       const start = new Vector3(...socket.positionM);
-      const dirVec = new Vector3(0, 0, 0.3).applyQuaternion(
+      const dirVec = new Vector3(0, 0, 0.22).applyQuaternion(
         new Quaternion(...socket.orientation),
       );
       const end = start.clone().add(dirVec);
@@ -340,7 +369,7 @@ export class PartsLabPageComponent {
           3,
         ),
       );
-      const lineMat = new LineBasicMaterial({ color: colorHex });
+      const lineMat = new LineBasicMaterial({ color: colorHex, linewidth: 2 });
       const line = new LineSegments(pointerGeom, lineMat);
       item.socketGroup.add(line);
     }
@@ -357,15 +386,170 @@ export class PartsLabPageComponent {
   }
 
   /**
+   * Assembles the 4 procedural parts into a complete multi-part spacecraft vessel
+   * and drops it as a single dynamic Jolt compound rigid body with accurate local sub-shapes!
+   */
+  dropDynamicVessel(): void {
+    const s = this.seed();
+
+    // 1. Generate & pose individual parts for the vessel
+    const tankSkel = generatePartSkeleton(PART_ROCKET_FUEL_TANK_ARCHETYPE, s);
+    const engineSkel = generatePartSkeleton(PART_ROCKET_ENGINE_ARCHETYPE, s + 1);
+    const wingSkel = generatePartSkeleton(PART_AIRCRAFT_WING_ARCHETYPE, s + 2);
+    const legSkel = generatePartSkeleton(PART_ROCKET_LANDING_LEG_ARCHETYPE, s + 3);
+
+    const posedWing = posePartVariant(
+      {
+        solids: wingSkel,
+        sockets: [],
+        colliders: derivePartColliders(wingSkel, PART_AIRCRAFT_WING_ARCHETYPE),
+        mass: derivePartMassProperties(wingSkel),
+        joint: PART_AIRCRAFT_WING_ARCHETYPE.joint,
+      },
+      this.wingFlapDeg() * DEG_TO_RAD,
+    );
+
+    const posedLeg = posePartVariant(
+      {
+        solids: legSkel,
+        sockets: [],
+        colliders: derivePartColliders(legSkel, PART_ROCKET_LANDING_LEG_ARCHETYPE),
+        mass: derivePartMassProperties(legSkel),
+        joint: PART_ROCKET_LANDING_LEG_ARCHETYPE.joint,
+      },
+      0.65 * (PART_ROCKET_LANDING_LEG_ARCHETYPE.joint?.rangeRad[1] ?? 1.15),
+    );
+
+    const posedEngine = posePartVariant(
+      {
+        solids: engineSkel,
+        sockets: [],
+        colliders: derivePartColliders(engineSkel, PART_ROCKET_ENGINE_ARCHETYPE),
+        mass: derivePartMassProperties(engineSkel),
+        joint: PART_ROCKET_ENGINE_ARCHETYPE.joint,
+      },
+      this.engineGimbalDeg() * DEG_TO_RAD,
+    );
+
+    // 2. Transform parts into vessel-local frame
+    const vesselSolids: IPartSolid[] = [];
+    const vesselColliders: IActiveColliderItem[] = [];
+    let colIndex = 0;
+
+    const addTransformedPart = (
+      solids: readonly IPartSolid[],
+      colliders: readonly any[],
+      offset: readonly [number, number, number],
+      rotYRad = 0,
+    ) => {
+      const qRot = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), rotYRad);
+
+      for (const solid of solids) {
+        const pLocal = new Vector3(...solid.positionM).applyQuaternion(qRot).add(new Vector3(...offset));
+        const qLocal = new Quaternion(...solid.orientation).premultiply(qRot);
+
+        vesselSolids.push({
+          ...solid,
+          id: `${solid.id}-vessel-${colIndex}`,
+          positionM: [pLocal.x, pLocal.y, pLocal.z],
+          orientation: [qLocal.x, qLocal.y, qLocal.z, qLocal.w],
+        });
+      }
+
+      for (const col of colliders) {
+        const pLocal = new Vector3(...col.anchorRelativePositionM).applyQuaternion(qRot).add(new Vector3(...offset));
+        const qLocal = new Quaternion(...col.rotation).premultiply(qRot);
+        const euler = new Euler().setFromQuaternion(qLocal);
+        const rotEuler: Vector3Tuple = [euler.x, euler.y, euler.z];
+
+        let isSphere = false;
+        let radius = 0.1;
+        let boxSize: [number, number, number] = [0.1, 0.1, 0.1];
+
+        switch (col.shape) {
+          case 'sphere':
+            isSphere = true;
+            radius = col.params[0];
+            break;
+          case 'box':
+            boxSize = [col.params[0], col.params[1], col.params[2]];
+            break;
+          case 'cylinder':
+          case 'capsule':
+            boxSize = [col.params[1] * 2, col.params[0] * 2, col.params[1] * 2];
+            break;
+        }
+
+        vesselColliders.push({
+          key: `vessel-col-${colIndex++}`,
+          position: [pLocal.x, pLocal.y, pLocal.z],
+          quaternion: [qLocal.x, qLocal.y, qLocal.z, qLocal.w],
+          rotation: rotEuler,
+          isSphere,
+          radius,
+          boxSize,
+        });
+      }
+    };
+
+    // Core Tank at [0, 0, 0]
+    addTransformedPart(tankSkel, derivePartColliders(tankSkel, PART_ROCKET_FUEL_TANK_ARCHETYPE), [0, 0, 0]);
+
+    // Engine at bottom [0, -1.98, 0]
+    addTransformedPart(posedEngine.solids, posedEngine.colliders, [0, -1.98, 0]);
+
+    // Starboard Wing (+X)
+    addTransformedPart(posedWing.solids, posedWing.colliders, [0.6, 0, 0]);
+
+    // Port Wing (-X, rotated 180 around Y)
+    addTransformedPart(posedWing.solids, posedWing.colliders, [-0.6, 0, 0], Math.PI);
+
+    // Front Landing Leg (+Z)
+    addTransformedPart(posedLeg.solids, posedLeg.colliders, [0, -0.7, 0.6], 0);
+
+    // Rear Landing Leg (-Z, rotated 180 around Y)
+    addTransformedPart(posedLeg.solids, posedLeg.colliders, [0, -0.7, -0.6], Math.PI);
+
+    // 3. Build merged visual mesh geometry
+    const meshResult = buildPartMesh(vesselSolids);
+
+    // 4. Randomize initial spawn pose high in the air
+    const spawnX = (Math.random() - 0.5) * 2.5;
+    const spawnY = 5.5 + Math.random() * 1.5;
+    const spawnZ = (Math.random() - 0.5) * 2.5;
+
+    const randEuler = new Euler(
+      (Math.random() - 0.5) * 1.2,
+      Math.random() * Math.PI * 2,
+      (Math.random() - 0.5) * 1.2,
+    );
+    const randQuat = new Quaternion().setFromEuler(randEuler);
+
+    const vesselItem: IDynamicVesselItem = {
+      id: this.nextVesselId++,
+      position: [spawnX, spawnY, spawnZ],
+      quaternion: [randQuat.x, randQuat.y, randQuat.z, randQuat.w],
+      colliders: vesselColliders,
+      geometry: meshResult.geometry,
+    };
+
+    this.vessels.update((list) => [...list, vesselItem]);
+  }
+
+  clearVessels(): void {
+    this.vessels.set([]);
+  }
+
+  /**
    * Spawns a real dynamic Jolt physics sphere above the selected part declaratively.
    */
   dropPhysicsBall(): void {
     const selectedItem = this.displayItems[this.selectedPartIndex()];
     if (!selectedItem) return;
 
-    const spawnX = selectedItem.baseOffsetM[0] + (Math.random() - 0.5) * 0.3;
+    const spawnX = selectedItem.baseOffsetM[0] + (Math.random() - 0.5) * 0.4;
     const spawnY = selectedItem.baseOffsetM[1] + 2.2;
-    const spawnZ = selectedItem.baseOffsetM[2] + (Math.random() - 0.5) * 0.3;
+    const spawnZ = selectedItem.baseOffsetM[2] + (Math.random() - 0.5) * 0.4;
 
     const hue = Math.floor(Math.random() * 360);
     const color = `hsl(${hue}, 85%, 55%)`;

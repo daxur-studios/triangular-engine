@@ -67,8 +67,11 @@ export function rotateVectorByQuaternion(
 }
 
 /**
- * Poses a part variant at a specified hinge deploy angle (radians).
- * Only solids, sockets, and colliders with linkId: 1 are rotated about the joint anchor.
+ * Poses a part variant at a specified hinge deploy angle (radians) or fractional extension.
+ * - linkId: 0 (or undefined) is fixed at the part root.
+ * - linkId: 1 is rotated about the joint anchor by deployRad.
+ * - linkId: 2 is rotated about the joint anchor AND translated along the rotated extension axis.
+ * Sockets, colliders, and mass properties (volume + COM) are updated consistently.
  * Pure mathematical operation (DOM-free, Three.js-free, worker-safe).
  */
 export function posePartVariant(variant: IPartVariant, deployRad: number): IPartVariant {
@@ -76,15 +79,40 @@ export function posePartVariant(variant: IPartVariant, deployRad: number): IPart
     return variant;
   }
 
-  const { anchorM, axis, rangeRad } = variant.joint;
+  const { anchorM, axis, rangeRad, extensionM, extensionAxis } = variant.joint;
   const clampedAngle = Math.max(rangeRad[0], Math.min(rangeRad[1], deployRad));
   const rotQuat = quaternionFromAxisAngle(axis, clampedAngle);
+
+  // Compute normalized deploy fraction (0..1) for extension interpolation
+  const span = rangeRad[1] - rangeRad[0];
+  const deployFraction01 = span > 1e-6 ? Math.max(0, Math.min(1, (clampedAngle - rangeRad[0]) / span)) : 0;
+
+  // Compute translation vector for linkId: 2
+  let extDistance = 0;
+  if (extensionM !== undefined) {
+    const maxExt = typeof extensionM === 'number' ? extensionM : extensionM[1];
+    extDistance = maxExt * deployFraction01;
+  }
+
+  const rawExtAxis = extensionAxis ?? [0, -1, 0];
+  const lenExt = Math.sqrt(rawExtAxis[0] ** 2 + rawExtAxis[1] ** 2 + rawExtAxis[2] ** 2);
+  const normExtAxis: [number, number, number] = lenExt > 1e-6
+    ? [rawExtAxis[0] / lenExt, rawExtAxis[1] / lenExt, rawExtAxis[2] / lenExt]
+    : [0, -1, 0];
+
+  const localExtDelta: [number, number, number] = [
+    normExtAxis[0] * extDistance,
+    normExtAxis[1] * extDistance,
+    normExtAxis[2] * extDistance,
+  ];
+  const rotatedExtDelta = rotateVectorByQuaternion(localExtDelta, rotQuat);
 
   const [ax, ay, az] = anchorM;
 
   // 1. Pose Solids
   const posedSolids: IPartSolid[] = variant.solids.map((solid) => {
-    if (solid.linkId !== 1) {
+    const link = solid.linkId ?? 0;
+    if (link === 0) {
       return solid;
     }
 
@@ -94,10 +122,12 @@ export function posePartVariant(variant: IPartVariant, deployRad: number): IPart
       solid.positionM[2] - az,
     ];
     const rotatedRel = rotateVectorByQuaternion(relPos, rotQuat);
+    const transOffset = link === 2 ? rotatedExtDelta : [0, 0, 0];
+
     const newPos: [number, number, number] = [
-      rotatedRel[0] + ax,
-      rotatedRel[1] + ay,
-      rotatedRel[2] + az,
+      rotatedRel[0] + ax + transOffset[0],
+      rotatedRel[1] + ay + transOffset[1],
+      rotatedRel[2] + az + transOffset[2],
     ];
     const newQuat = multiplyQuaternions(rotQuat, solid.orientation);
 
@@ -117,8 +147,16 @@ export function posePartVariant(variant: IPartVariant, deployRad: number): IPart
       const rotEnd = rotateVectorByQuaternion(relEnd, rotQuat);
 
       newEndpoints = {
-        startM: [rotStart[0] + ax, rotStart[1] + ay, rotStart[2] + az],
-        endM: [rotEnd[0] + ax, rotEnd[1] + ay, rotEnd[2] + az],
+        startM: [
+          rotStart[0] + ax + transOffset[0],
+          rotStart[1] + ay + transOffset[1],
+          rotStart[2] + az + transOffset[2],
+        ],
+        endM: [
+          rotEnd[0] + ax + transOffset[0],
+          rotEnd[1] + ay + transOffset[1],
+          rotEnd[2] + az + transOffset[2],
+        ],
       };
     }
 
@@ -136,9 +174,9 @@ export function posePartVariant(variant: IPartVariant, deployRad: number): IPart
 
   const posedSockets: IPartSocket[] = variant.sockets.map((socket) => {
     const parentSolid = socket.solidId ? solidMap.get(socket.solidId) : undefined;
-    const isLink1 = parentSolid ? parentSolid.linkId === 1 : socket.kind === 'foot';
+    const link = parentSolid ? (parentSolid.linkId ?? 0) : socket.kind === 'foot' ? 2 : 0;
 
-    if (!isLink1) {
+    if (link === 0) {
       return socket;
     }
 
@@ -148,10 +186,12 @@ export function posePartVariant(variant: IPartVariant, deployRad: number): IPart
       socket.positionM[2] - az,
     ];
     const rotatedRel = rotateVectorByQuaternion(relPos, rotQuat);
+    const transOffset = link === 2 ? rotatedExtDelta : [0, 0, 0];
+
     const newPos: [number, number, number] = [
-      rotatedRel[0] + ax,
-      rotatedRel[1] + ay,
-      rotatedRel[2] + az,
+      rotatedRel[0] + ax + transOffset[0],
+      rotatedRel[1] + ay + transOffset[1],
+      rotatedRel[2] + az + transOffset[2],
     ];
     const newQuat = multiplyQuaternions(rotQuat, socket.orientation);
 
@@ -164,7 +204,8 @@ export function posePartVariant(variant: IPartVariant, deployRad: number): IPart
 
   // 3. Pose Colliders
   const posedColliders: IPartColliderDescriptor[] = variant.colliders.map((collider) => {
-    if (collider.linkId !== 1) {
+    const link = collider.linkId ?? 0;
+    if (link === 0) {
       return collider;
     }
 
@@ -174,10 +215,12 @@ export function posePartVariant(variant: IPartVariant, deployRad: number): IPart
       collider.anchorRelativePositionM[2] - az,
     ];
     const rotatedRel = rotateVectorByQuaternion(relPos, rotQuat);
+    const transOffset = link === 2 ? rotatedExtDelta : [0, 0, 0];
+
     const newPos: [number, number, number] = [
-      rotatedRel[0] + ax,
-      rotatedRel[1] + ay,
-      rotatedRel[2] + az,
+      rotatedRel[0] + ax + transOffset[0],
+      rotatedRel[1] + ay + transOffset[1],
+      rotatedRel[2] + az + transOffset[2],
     ];
     const newQuat = multiplyQuaternions(rotQuat, collider.rotation);
 
@@ -188,14 +231,15 @@ export function posePartVariant(variant: IPartVariant, deployRad: number): IPart
     };
   });
 
-  // 4. Update Mass Properties
-  const posedMass = derivePartMassProperties(posedSolids);
+  // 4. Recalculate closed-form Mass Properties on the posed solids
+  const density = variant.mass.volumeM3 > 1e-6 ? variant.mass.dryMassKg / variant.mass.volumeM3 : 250;
+  const posedMass = derivePartMassProperties(posedSolids, density);
 
   return {
+    ...variant,
     solids: posedSolids,
     sockets: posedSockets,
     colliders: posedColliders,
     mass: posedMass,
-    joint: variant.joint,
   };
 }
