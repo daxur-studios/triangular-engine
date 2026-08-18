@@ -22,8 +22,11 @@ import { EngineModule, EngineService } from 'triangular-engine';
 import {
   GROUND_COVER_MEADOW_GRASS_ARCHETYPE,
   GROUND_COVER_MEADOW_GRASS_COLORS,
+  GROUND_COVER_WILDFLOWER_ARCHETYPE,
+  GROUND_COVER_WILDFLOWER_COLORS,
   buildGroundCoverClumpMesh,
   hashProceduralKey,
+  type IGroundCoverArchetype,
 } from 'triangular-engine/procedural';
 import {
   CylinderTerrainDomain,
@@ -92,7 +95,7 @@ const GRASS_GENERATOR_VERSION = 1;
 /**
  * `baseDensity01` (below) clamps to [0,1] inside scatter's placement math, so
  * it can only ever thin this base pool, never grow past it — density values
- * above 1x scale the pool itself instead, see rebuildGrass().
+ * above 1x scale the pool itself instead, see rebuildVegetation().
  */
 const GRASS_CANDIDATE_POOL_SIZE_BASE = 22;
 const GRASS_DENSITY_MULTIPLIER_DEFAULT = 0.55;
@@ -208,6 +211,31 @@ const CLUMP_BASE_SEED = 1;
 const GRASS_BASE_COLOR = new Color(GROUND_COVER_MEADOW_GRASS_COLORS.baseHex);
 const GRASS_TIP_COLOR = new Color(GROUND_COVER_MEADOW_GRASS_COLORS.tipHex);
 
+/**
+ * Second scatter species, proving a scatter layer isn't grass-specific: same
+ * archetype schema (`IGroundCoverArchetype`), same clump-mesh builder, same
+ * placement/culling/exclusion pipeline as grass — only the archetype
+ * (including its `head` bloom, a real two-crossed-quad shape at each stem's
+ * tip, not just a tinted blade end), colors, and density differ. Wildflowers
+ * use a much smaller candidate pool than grass (below) so they read as
+ * sparse accents through the field rather than a second dense layer, and
+ * deliberately reuse `GRASS_WIND` (see the wind handles in the constructor)
+ * so one set of gust controls visibly drives both species — the "wind
+ * should be shared across systems" idea from docs/runbook/018's design
+ * trace, demonstrated rather than built out.
+ */
+const WILDFLOWER_LAYER_ID = 'meadow-wildflower';
+const WILDFLOWER_SPECIES_ID = GROUND_COVER_WILDFLOWER_ARCHETYPE.id;
+const WILDFLOWER_GENERATOR_VERSION = 1;
+const WILDFLOWER_CANDIDATE_POOL_SIZE_BASE = 3;
+const WILDFLOWER_SCALE: ScatterScaleRange = { min: 0.85, max: 1.25 };
+const WILDFLOWER_VARIANT_COUNT = 3;
+const WILDFLOWER_BASE_SEED = 101;
+
+const WILDFLOWER_BASE_COLOR = new Color(GROUND_COVER_WILDFLOWER_COLORS.baseHex);
+const WILDFLOWER_TIP_COLOR = new Color(GROUND_COVER_WILDFLOWER_COLORS.tipHex);
+const WILDFLOWER_HEAD_COLOR = new Color(GROUND_COVER_WILDFLOWER_COLORS.headHex);
+
 function gentleMeadowUndulationM(x: number, z: number): number {
   return Math.sin(x / 34) * 0.6 + Math.cos(z / 41) * 0.45;
 }
@@ -321,7 +349,14 @@ interface IMeadowLabShapeFixture {
 }
 
 /**
- * Slice 6 adds click-to-place circular no-grass zones
+ * Slice 7 adds wildflowers as a second scatter species (`WILDFLOWER_*`
+ * constants above) sharing this page's terrain/placement/culling/exclusion
+ * pipeline with grass — same archetype schema, same clump-mesh builder, same
+ * per-cell instancing, only the archetype, colors, density, and scale range
+ * differ. Its own `speciesId`/`layerId` gives it an independent deterministic
+ * candidate stream from grass, so the two interleave instead of competing for
+ * the same points, and both wind handles share `GRASS_WIND` so one set of
+ * gust controls visibly drives both. Slice 6 adds click-to-place circular no-grass zones
  * (`scatter/core/scatter-exclusion`, docs/runbook/018) — a stand-in for
  * "no grass under a building" — composing with the existing distance fade
  * and view cull. Slice 5 switches the demo between a flat plane, a sphere,
@@ -347,8 +382,10 @@ interface IMeadowLabShapeFixture {
 export class MeadowLabPageComponent {
   readonly shape = signal<MeadowLabShape>('plane');
   readonly grassInstanceCount = signal(0);
+  readonly wildflowerInstanceCount = signal(0);
   readonly cellCount = signal(0);
   readonly variantCount = CLUMP_VARIANT_COUNT;
+  readonly wildflowerVariantCount = WILDFLOWER_VARIANT_COUNT;
   readonly density = signal(GRASS_DENSITY_MULTIPLIER_DEFAULT);
   readonly gustAmplitude = signal(GRASS_GUST_AMPLITUDE_DEFAULT);
   readonly gustAmplitudeMax = GRASS_GUST_AMPLITUDE_MAX;
@@ -382,6 +419,10 @@ export class MeadowLabPageComponent {
     vertexColors: true,
     roughness: 0.85,
   });
+  private readonly wildflowerMaterial = new MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.85,
+  });
   private readonly exclusionMarkerGeometry = new CircleGeometry(GRASS_EXCLUSION_RADIUS_M, 24);
   private readonly exclusionMarkerMaterial = new MeshBasicMaterial({
     color: '#c96a3a',
@@ -391,14 +432,30 @@ export class MeadowLabPageComponent {
     depthWrite: false,
   });
 
-  private readonly variants: IClumpVariant[] = this.buildVariants();
+  private readonly grassVariants: IClumpVariant[] = this.buildVariants(
+    GROUND_COVER_MEADOW_GRASS_ARCHETYPE,
+    CLUMP_VARIANT_COUNT,
+    CLUMP_BASE_SEED,
+    GRASS_BASE_COLOR,
+    GRASS_TIP_COLOR,
+  );
+  private readonly wildflowerVariants: IClumpVariant[] = this.buildVariants(
+    GROUND_COVER_WILDFLOWER_ARCHETYPE,
+    WILDFLOWER_VARIANT_COUNT,
+    WILDFLOWER_BASE_SEED,
+    WILDFLOWER_BASE_COLOR,
+    WILDFLOWER_TIP_COLOR,
+    WILDFLOWER_HEAD_COLOR,
+  );
   private readonly groundMeshes: Mesh[] = [];
   private readonly grassMeshes: InstancedMesh[] = [];
+  private readonly wildflowerMeshes: InstancedMesh[] = [];
   private readonly cells: IGrassScatterCell[] = [];
   private readonly exclusionZones: IScatterExclusionZone[] = [];
   private readonly exclusionMarkerMeshes: Mesh[] = [];
   private readonly pickRaycaster = new Raycaster();
-  private readonly windHandle: IScatterWindHandle;
+  private readonly grassWindHandle: IScatterWindHandle;
+  private readonly wildflowerWindHandle: IScatterWindHandle;
   private readonly scatterStreaming = inject(ScatterStreamingService);
   private fixture!: IMeadowLabShapeFixture;
   private viewpointWorldM: ScatterStreamingViewpoint = [0, 4, 12];
@@ -409,7 +466,11 @@ export class MeadowLabPageComponent {
     const previousBackground = this.engine.scene.background;
     this.engine.scene.background = new Color('#bcd8ea');
 
-    this.windHandle = enableScatterWindSway(this.grassMaterial, GRASS_WIND);
+    // Both species enable wind sway off the same GRASS_WIND definition —
+    // deliberately shared, not just parallel: setGustAmplitude/etc below
+    // apply to both handles, so one set of controls visibly drives both.
+    this.grassWindHandle = enableScatterWindSway(this.grassMaterial, GRASS_WIND);
+    this.wildflowerWindHandle = enableScatterWindSway(this.wildflowerMaterial, GRASS_WIND);
 
     this.fixture = this.getFixture(this.shape());
     this.buildTerrain();
@@ -425,12 +486,13 @@ export class MeadowLabPageComponent {
         if (this.cullingFrozen()) return;
         this.viewpointWorldM = viewpointWorldM;
         this.viewForwardM = this.scatterStreaming.viewForwardM;
-        this.rebuildGrass(this.density());
+        this.rebuildVegetation(this.density());
       });
 
-    this.engine.elapsedTime$
-      .pipe(takeUntilDestroyed(destroyRef))
-      .subscribe((elapsedTimeS) => this.windHandle.setTimeS(elapsedTimeS));
+    this.engine.elapsedTime$.pipe(takeUntilDestroyed(destroyRef)).subscribe((elapsedTimeS) => {
+      this.grassWindHandle.setTimeS(elapsedTimeS);
+      this.wildflowerWindHandle.setTimeS(elapsedTimeS);
+    });
 
     this.engine.click$
       .pipe(takeUntilDestroyed(destroyRef))
@@ -444,12 +506,17 @@ export class MeadowLabPageComponent {
       for (const mesh of this.grassMeshes) {
         mesh.removeFromParent();
       }
+      for (const mesh of this.wildflowerMeshes) {
+        mesh.removeFromParent();
+      }
       for (const mesh of this.exclusionMarkerMeshes) {
         mesh.removeFromParent();
       }
-      for (const variant of this.variants) variant.geometry.dispose();
+      for (const variant of this.grassVariants) variant.geometry.dispose();
+      for (const variant of this.wildflowerVariants) variant.geometry.dispose();
       this.groundMaterial.dispose();
       this.grassMaterial.dispose();
+      this.wildflowerMaterial.dispose();
       this.exclusionMarkerGeometry.dispose();
       this.exclusionMarkerMaterial.dispose();
       this.engine.scene.background = previousBackground;
@@ -470,7 +537,7 @@ export class MeadowLabPageComponent {
     if (!Number.isFinite(parsed)) return;
     const clamped = Math.max(0.05, Math.min(GRASS_DENSITY_MULTIPLIER_MAX, parsed));
     this.density.set(clamped);
-    this.rebuildGrass(clamped);
+    this.rebuildVegetation(clamped);
   }
 
   setGustAmplitude(value: number | string): void {
@@ -478,7 +545,8 @@ export class MeadowLabPageComponent {
     if (!Number.isFinite(parsed)) return;
     const clamped = Math.max(0, Math.min(GRASS_GUST_AMPLITUDE_MAX, parsed));
     this.gustAmplitude.set(clamped);
-    this.windHandle.setGustAmplitude(clamped);
+    this.grassWindHandle.setGustAmplitude(clamped);
+    this.wildflowerWindHandle.setGustAmplitude(clamped);
   }
 
   setGustWavelength(value: number | string): void {
@@ -489,7 +557,8 @@ export class MeadowLabPageComponent {
       Math.min(GRASS_GUST_WAVELENGTH_MAX_M, parsed),
     );
     this.gustWavelengthM.set(clamped);
-    this.windHandle.setGustWavelengthM(clamped);
+    this.grassWindHandle.setGustWavelengthM(clamped);
+    this.wildflowerWindHandle.setGustWavelengthM(clamped);
   }
 
   setGustDriftSpeed(value: number | string): void {
@@ -500,7 +569,8 @@ export class MeadowLabPageComponent {
       Math.min(GRASS_GUST_DRIFT_SPEED_MAX_MS, parsed),
     );
     this.gustDriftSpeedMS.set(clamped);
-    this.windHandle.setGustDriftSpeedMS(clamped);
+    this.grassWindHandle.setGustDriftSpeedMS(clamped);
+    this.wildflowerWindHandle.setGustDriftSpeedMS(clamped);
   }
 
   setViewDistance(value: number | string): void {
@@ -508,12 +578,12 @@ export class MeadowLabPageComponent {
     if (!Number.isFinite(parsed)) return;
     const clamped = Math.max(GRASS_VIEW_DISTANCE_MIN_M, Math.min(GRASS_VIEW_DISTANCE_MAX_M, parsed));
     this.viewDistanceM.set(clamped);
-    this.rebuildGrass(this.density());
+    this.rebuildVegetation(this.density());
   }
 
   setCullBehindCamera(enabled: boolean): void {
     this.cullBehindCamera.set(enabled);
-    this.rebuildGrass(this.density());
+    this.rebuildVegetation(this.density());
   }
 
   setCullingFrozen(enabled: boolean): void {
@@ -530,7 +600,7 @@ export class MeadowLabPageComponent {
 
   clearExclusionZones(): void {
     this.disposeExclusionZones();
-    this.rebuildGrass(this.density());
+    this.rebuildVegetation(this.density());
   }
 
   setSphereRadius(value: number | string): void {
@@ -545,23 +615,42 @@ export class MeadowLabPageComponent {
     this.rebuildWorld();
   }
 
-  private buildVariants(): IClumpVariant[] {
+  /** Species-agnostic: any `IGroundCoverArchetype` + color set builds its own variant set the same way. `headColor` only matters when the archetype defines `head`. */
+  private buildVariants(
+    archetype: IGroundCoverArchetype,
+    variantCount: number,
+    baseSeed: number,
+    baseColor: Color,
+    tipColor: Color,
+    headColor?: Color,
+  ): IClumpVariant[] {
     const variants: IClumpVariant[] = [];
-    for (let i = 0; i < CLUMP_VARIANT_COUNT; i++) {
-      const seed = CLUMP_BASE_SEED + i;
-      const { geometry } = buildGroundCoverClumpMesh(GROUND_COVER_MEADOW_GRASS_ARCHETYPE, seed);
-      this.colorizeByHeight(geometry);
+    for (let i = 0; i < variantCount; i++) {
+      const seed = baseSeed + i;
+      const { geometry } = buildGroundCoverClumpMesh(archetype, seed);
+      this.colorizeByHeight(geometry, baseColor, tipColor, headColor);
       variants.push({ geometry });
     }
     return variants;
   }
 
-  private colorizeByHeight(geometry: BufferGeometry): void {
+  /** Head-bloom vertices (`headMix01` === 1, see ground-cover-clump-mesh) get a fixed `headColor` instead of the base/tip gradient — that's what makes the bloom read as a distinct color, not just a gradient endpoint. */
+  private colorizeByHeight(
+    geometry: BufferGeometry,
+    baseColor: Color,
+    tipColor: Color,
+    headColor?: Color,
+  ): void {
     const height01 = geometry.getAttribute('height01');
+    const headMix01 = geometry.getAttribute('headMix01');
     const colors = new Float32Array(height01.count * 3);
     const blended = new Color();
     for (let i = 0; i < height01.count; i++) {
-      blended.copy(GRASS_BASE_COLOR).lerp(GRASS_TIP_COLOR, height01.getX(i));
+      if (headColor && headMix01 && headMix01.getX(i) >= 0.5) {
+        blended.copy(headColor);
+      } else {
+        blended.copy(baseColor).lerp(tipColor, height01.getX(i));
+      }
       colors[i * 3] = blended.r;
       colors[i * 3 + 1] = blended.g;
       colors[i * 3 + 2] = blended.b;
@@ -569,8 +658,8 @@ export class MeadowLabPageComponent {
     geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
   }
 
-  private variantIndexForInstance(instanceId: string): number {
-    return hashProceduralKey(instanceId) % CLUMP_VARIANT_COUNT;
+  private variantIndexForInstance(instanceId: string, variantCount: number): number {
+    return hashProceduralKey(instanceId) % variantCount;
   }
 
   /**
@@ -705,7 +794,7 @@ export class MeadowLabPageComponent {
     });
     this.exclusionZoneCount.set(this.exclusionZones.length);
     this.addExclusionMarker(centerWorldM);
-    this.rebuildGrass(this.density());
+    this.rebuildVegetation(this.density());
   }
 
   /** Flat translucent disc, oriented to the shape-appropriate surface "up" at that point so it lies flush against the ground on all three shapes. */
@@ -734,7 +823,7 @@ export class MeadowLabPageComponent {
     return [0, pointWorldM[1] / lengthM, pointWorldM[2] / lengthM];
   }
 
-  /** Clears zone state + markers without rebuilding — callers that are about to rebuild anyway (teardownTerrain) skip the redundant rebuildGrass that clearExclusionZones() (the UI-facing version) does. */
+  /** Clears zone state + markers without rebuilding — callers that are about to rebuild anyway (teardownTerrain) skip the redundant rebuildVegetation that clearExclusionZones() (the UI-facing version) does. */
   private disposeExclusionZones(): void {
     this.exclusionZones.length = 0;
     this.exclusionZoneCount.set(0);
@@ -792,43 +881,73 @@ export class MeadowLabPageComponent {
     this.disposeExclusionZones();
   }
 
-  /** Full teardown/rebuild for a shape switch or a fixture-affecting slider (sphere radius) — terrain, cells, and grass all regenerate from the current fixture. */
+  /** Full teardown/rebuild for a shape switch or a fixture-affecting slider (sphere radius) — terrain, cells, and vegetation all regenerate from the current fixture. */
   private rebuildWorld(): void {
     this.teardownTerrain();
     this.buildTerrain();
-    this.rebuildGrass(this.density());
+    this.rebuildVegetation(this.density());
   }
 
   /**
-   * Re-runs placement + instancing only — terrain and cell addresses (built
-   * once in buildTerrain, or on a shape switch via rebuildWorld) stay fixed
-   * as density changes. `densityMultiplier` above 1x grows the candidate
-   * pool itself (baseDensity01 pins at 1, fully accepting it) since
-   * baseDensity01 alone can only thin the base pool, not exceed it. Also
+   * Re-runs placement + instancing for both scatter species — terrain and
+   * cell addresses (built once in buildTerrain, or on a shape switch via
+   * rebuildWorld) stay fixed as density changes. `densityMultiplier` above 1x
+   * grows each species' candidate pool itself (baseDensity01 pins at 1, fully
+   * accepting it) since baseDensity01 alone can only thin the base pool, not
+   * exceed it — wildflowers use the same derivation off a much smaller base
+   * pool (WILDFLOWER_CANDIDATE_POOL_SIZE_BASE), so they scale with the same
+   * slider but stay sparse relative to grass at every density level. Also
    * re-runs whenever the camera moves past the streaming service's movement
    * threshold, so `distanceFade`/`viewCull` keep tracking the *current*
-   * viewpoint rather than a startup snapshot.
+   * viewpoint rather than a startup snapshot. distanceFade/viewCull/exclusion
+   * are computed once (they don't depend on the cell or the species) and
+   * reused for both `generateTerrainScatterInstances` calls per cell.
    */
-  private rebuildGrass(densityMultiplier: number): void {
+  private rebuildVegetation(densityMultiplier: number): void {
     for (const mesh of this.grassMeshes) mesh.removeFromParent();
     this.grassMeshes.length = 0;
+    for (const mesh of this.wildflowerMeshes) mesh.removeFromParent();
+    this.wildflowerMeshes.length = 0;
 
-    const candidatePoolSize = Math.max(
+    const grassCandidatePoolSize = Math.max(
       1,
       Math.round(GRASS_CANDIDATE_POOL_SIZE_BASE * Math.max(1, densityMultiplier)),
+    );
+    const wildflowerCandidatePoolSize = Math.max(
+      1,
+      Math.round(WILDFLOWER_CANDIDATE_POOL_SIZE_BASE * Math.max(1, densityMultiplier)),
     );
     const baseDensity01 = Math.min(1, densityMultiplier);
     const fadeEndM = this.viewDistanceM();
     const fadeStartM = fadeEndM * GRASS_FADE_START_RATIO;
+    const distanceFade = { viewpointWorldM: this.viewpointWorldM, fadeStartM, fadeEndM };
+    const viewCull = this.cullBehindCamera()
+      ? {
+          viewpointWorldM: this.viewpointWorldM,
+          viewForwardM: this.viewForwardM,
+          coneHalfAngleRad: GRASS_VIEW_CONE_HALF_ANGLE_RAD,
+          objectRadiusM: GRASS_OBJECT_RADIUS_M,
+          horizon:
+            this.shape() === 'sphere'
+              ? { curvatureCenterWorldM: [0, 0, 0] as TerrainVector3, curvatureRadiusM: this.sphereRadiusM() }
+              : undefined,
+        }
+      : undefined;
+    const exclusion = this.exclusionZones.length > 0 ? this.exclusionZones : undefined;
 
-    const instancesByVariant: ITerrainScatterInstance[][] = Array.from(
+    const grassByVariant: ITerrainScatterInstance[][] = Array.from(
       { length: CLUMP_VARIANT_COUNT },
       () => [],
     );
+    const wildflowerByVariant: ITerrainScatterInstance[][] = Array.from(
+      { length: WILDFLOWER_VARIANT_COUNT },
+      () => [],
+    );
     let grassInstanceCount = 0;
+    let wildflowerInstanceCount = 0;
 
     for (const cell of this.cells) {
-      const instances = generateTerrainScatterInstances({
+      const grassInstances = generateTerrainScatterInstances({
         field: this.fixture.field,
         domain: this.fixture.domain as never,
         cellAddress: cell.address as never,
@@ -839,42 +958,53 @@ export class MeadowLabPageComponent {
           speciesId: GRASS_SPECIES_ID,
           generatorVersion: GRASS_GENERATOR_VERSION,
         },
-        candidatePoolSize,
+        candidatePoolSize: grassCandidatePoolSize,
         rules: GRASS_RULES,
         baseDensity01,
-        distanceFade: {
-          viewpointWorldM: this.viewpointWorldM,
-          fadeStartM,
-          fadeEndM,
-        },
-        viewCull: this.cullBehindCamera()
-          ? {
-              viewpointWorldM: this.viewpointWorldM,
-              viewForwardM: this.viewForwardM,
-              coneHalfAngleRad: GRASS_VIEW_CONE_HALF_ANGLE_RAD,
-              objectRadiusM: GRASS_OBJECT_RADIUS_M,
-              horizon:
-                this.shape() === 'sphere'
-                  ? { curvatureCenterWorldM: [0, 0, 0], curvatureRadiusM: this.sphereRadiusM() }
-                  : undefined,
-            }
-          : undefined,
-        exclusion: this.exclusionZones.length > 0 ? this.exclusionZones : undefined,
+        distanceFade,
+        viewCull,
+        exclusion,
       });
-
-      for (const instance of instances) {
-        const variantIndex = this.variantIndexForInstance(instance.instanceId);
-        instancesByVariant[variantIndex].push(instance);
+      for (const instance of grassInstances) {
+        const variantIndex = this.variantIndexForInstance(instance.instanceId, CLUMP_VARIANT_COUNT);
+        grassByVariant[variantIndex].push(instance);
         grassInstanceCount++;
+      }
+
+      // Different speciesId (and layerId) means a different deterministic
+      // candidate stream — wildflowers naturally interleave with grass
+      // instead of competing for the exact same candidate points.
+      const wildflowerInstances = generateTerrainScatterInstances({
+        field: this.fixture.field,
+        domain: this.fixture.domain as never,
+        cellAddress: cell.address as never,
+        cellKey: cell.cellKey,
+        identity: {
+          worldSeed: WORLD_SEED,
+          layerId: WILDFLOWER_LAYER_ID,
+          speciesId: WILDFLOWER_SPECIES_ID,
+          generatorVersion: WILDFLOWER_GENERATOR_VERSION,
+        },
+        candidatePoolSize: wildflowerCandidatePoolSize,
+        rules: GRASS_RULES,
+        baseDensity01,
+        distanceFade,
+        viewCull,
+        exclusion,
+      });
+      for (const instance of wildflowerInstances) {
+        const variantIndex = this.variantIndexForInstance(instance.instanceId, WILDFLOWER_VARIANT_COUNT);
+        wildflowerByVariant[variantIndex].push(instance);
+        wildflowerInstanceCount++;
       }
     }
 
     for (let i = 0; i < CLUMP_VARIANT_COUNT; i++) {
-      const instances = instancesByVariant[i];
+      const instances = grassByVariant[i];
       if (instances.length === 0) continue;
       const mesh = buildScatterInstancedMesh({
         instances,
-        geometry: this.variants[i].geometry,
+        geometry: this.grassVariants[i].geometry,
         material: this.grassMaterial,
         rules: GRASS_RULES,
         scale: GRASS_SCALE,
@@ -885,7 +1015,24 @@ export class MeadowLabPageComponent {
       this.grassMeshes.push(mesh);
     }
 
+    for (let i = 0; i < WILDFLOWER_VARIANT_COUNT; i++) {
+      const instances = wildflowerByVariant[i];
+      if (instances.length === 0) continue;
+      const mesh = buildScatterInstancedMesh({
+        instances,
+        geometry: this.wildflowerVariants[i].geometry,
+        material: this.wildflowerMaterial,
+        rules: GRASS_RULES,
+        scale: WILDFLOWER_SCALE,
+        anchorWorldM: [0, 0, 0],
+        castShadow: false,
+      });
+      this.engine.scene.add(mesh);
+      this.wildflowerMeshes.push(mesh);
+    }
+
     this.grassInstanceCount.set(grassInstanceCount);
+    this.wildflowerInstanceCount.set(wildflowerInstanceCount);
   }
 
   private buildGroundMesh(patch: ITerrainPatchMesh<unknown>): Mesh {
