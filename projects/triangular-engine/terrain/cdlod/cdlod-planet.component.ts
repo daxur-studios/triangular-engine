@@ -10,7 +10,6 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ICelestialBody,
@@ -130,8 +129,8 @@ interface IResidentPatchMesh {
  */
 @Component({
   standalone: true,
-  selector: 'cdlodPlanet',
-  imports: [CommonModule],
+  selector: 'cdlodPlanet, app-cdlod-planet',
+  imports: [],
   template: '',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -171,6 +170,7 @@ export class CdlodPlanetComponent implements OnDestroy {
   readonly showOcean = input(true);
   readonly freezeLod = input(false);
   readonly useWorkers = input(true);
+  readonly workerFactory = input<(() => Worker) | null>(null);
   readonly sunDirection = input<Vector3Tuple>([10, 20, 10]);
   readonly sunColor = input<Vector3Tuple | string>([1, 0.98, 0.92]);
   readonly ambientColor = input<Vector3Tuple | string>([0.22, 0.24, 0.3]);
@@ -235,10 +235,20 @@ export class CdlodPlanetComponent implements OnDestroy {
   readonly #fallbackOceanMaterial = createOceanMaterial({ wireframe: true });
 
   // Worker Pool & Caches
-  readonly #workerPool = new CdlodWorkerPool();
+  #workerPool: CdlodWorkerPool | undefined;
   readonly #inFlightRequests = new Set<string>();
   readonly #readyGeometryIds = new Set<string>();
   #previouslySplitAddresses = new Set<string>();
+
+  #getOrCreateWorkerPool(): CdlodWorkerPool {
+    if (!this.#workerPool) {
+      const factory = this.workerFactory();
+      this.#workerPool = new CdlodWorkerPool(
+        factory ? { workerFactory: factory } : undefined,
+      );
+    }
+    return this.#workerPool;
+  }
 
   readonly #materialCache = new Map<string, ShaderMaterial>();
   readonly #geometryCache = new Map<string, BufferGeometry>();
@@ -320,7 +330,10 @@ export class CdlodPlanetComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.#workerPool.terminate();
+    if (this.#workerPool) {
+      this.#workerPool.terminate();
+      this.#workerPool = undefined;
+    }
     this.engineService.scene.remove(this.rootGroup);
     this.#clearGeometryCache();
     this.#clearMaterialCache();
@@ -477,7 +490,9 @@ export class CdlodPlanetComponent implements OnDestroy {
       featureAdaptive: this.featureAdaptive(),
     };
 
-    const cachedIds = this.useWorkers() ? this.#readyGeometryIds : undefined;
+    const pool = this.useWorkers() ? this.#getOrCreateWorkerPool() : undefined;
+    const isWorkerUsable = this.useWorkers() && pool?.isAvailable;
+    const cachedIds = isWorkerUsable ? this.#readyGeometryIds : undefined;
 
     const selection = selectCdlodPatches({
       body,
@@ -515,8 +530,43 @@ export class CdlodPlanetComponent implements OnDestroy {
     }[],
   ): void {
     const body = this.body();
+    const sampler = this.sampler();
     const maxDispatches = 8;
     let dispatched = 0;
+    const pool = this.#getOrCreateWorkerPool();
+
+    if (!pool.isAvailable) {
+      for (const patch of needed) {
+        if (dispatched >= maxDispatches) break;
+        if (this.#readyGeometryIds.has(patch.id)) continue;
+        dispatched++;
+        const meshRes = generateCdlodPatchGeometry(
+          body,
+          sampler,
+          patch.address,
+          patch.resolution,
+          patch.centerBodyFixedM,
+        );
+        this.#geometryCache.set(patch.id, meshRes.geometry);
+        this.#patchMinElevationM.set(patch.id, meshRes.minElevationM);
+        this.#readyGeometryIds.add(patch.id);
+
+        if (body.terrain?.ocean) {
+          const oceanId = `ocean:${patch.id}`;
+          if (!this.#oceanGeometryCache.has(oceanId)) {
+            const oceanRes = generateCdlodOceanPatchGeometry(
+              body,
+              patch.address,
+              patch.resolution,
+              patch.centerBodyFixedM,
+            );
+            this.#oceanGeometryCache.set(oceanId, oceanRes.geometry);
+          }
+        }
+      }
+      this.#needsImmediateRebuild = true;
+      return;
+    }
 
     for (const patch of needed) {
       if (dispatched >= maxDispatches) break;
@@ -529,7 +579,7 @@ export class CdlodPlanetComponent implements OnDestroy {
       this.#inFlightRequests.add(patch.id);
       dispatched++;
 
-      this.#workerPool
+      pool
         .requestPatch({
           id: patch.id,
           type: 'terrain',
@@ -548,6 +598,18 @@ export class CdlodPlanetComponent implements OnDestroy {
         })
         .catch(() => {
           this.#inFlightRequests.delete(patch.id);
+          // Fallback to synchronous generation on worker error
+          const meshRes = generateCdlodPatchGeometry(
+            body,
+            sampler,
+            patch.address,
+            patch.resolution,
+            patch.centerBodyFixedM,
+          );
+          this.#geometryCache.set(patch.id, meshRes.geometry);
+          this.#patchMinElevationM.set(patch.id, meshRes.minElevationM);
+          this.#readyGeometryIds.add(patch.id);
+          this.#needsImmediateRebuild = true;
         });
 
       if (body.terrain?.ocean) {
@@ -557,7 +619,7 @@ export class CdlodPlanetComponent implements OnDestroy {
           !this.#inFlightRequests.has(oceanId)
         ) {
           this.#inFlightRequests.add(oceanId);
-          this.#workerPool
+          pool
             .requestPatch({
               id: oceanId,
               type: 'ocean',
@@ -574,6 +636,14 @@ export class CdlodPlanetComponent implements OnDestroy {
             })
             .catch(() => {
               this.#inFlightRequests.delete(oceanId);
+              const oceanRes = generateCdlodOceanPatchGeometry(
+                body,
+                patch.address,
+                patch.resolution,
+                patch.centerBodyFixedM,
+              );
+              this.#oceanGeometryCache.set(oceanId, oceanRes.geometry);
+              this.#needsImmediateRebuild = true;
             });
         }
       }

@@ -41,3 +41,4 @@ export * from './orbits/celestial-shadow-shader';
 export * from './orbits/local-solar-lighting';
 export * from './orbits/synchronous';
 export * from './orbits/roche';
+export * from './surfaces/cdlod';

@@ -25,6 +25,7 @@ interface IWorkerSlot {
   worker: Worker;
   busy: boolean;
   currentRequestId?: string;
+  failed?: boolean;
 }
 
 export class CdlodWorkerPool {
@@ -67,7 +68,10 @@ export class CdlodWorkerPool {
     if (typeof Worker !== 'undefined') {
       for (let i = 0; i < count; i++) {
         try {
-          this.#slots.push(this.#createWorkerSlot());
+          const slot = this.#createWorkerSlot();
+          if (slot) {
+            this.#slots.push(slot);
+          }
         } catch {
           // If browser environment or build forbids worker creation at runtime, slots stay empty
           break;
@@ -77,33 +81,45 @@ export class CdlodWorkerPool {
   }
 
   get isAvailable(): boolean {
-    return this.#slots.length > 0 && !this.#isTerminated;
+    return this.#slots.some((s) => !s.failed) && !this.#isTerminated;
   }
 
-  #createWorkerSlot(): IWorkerSlot {
+  #createWorkerSlot(): IWorkerSlot | undefined {
     const slot: IWorkerSlot = {
       worker: undefined as unknown as Worker,
       busy: false,
     };
 
-    const worker = this.#workerFactory
-      ? this.#workerFactory()
-      : new Worker(new URL('./cdlod-patch.worker', import.meta.url), {
-          type: 'module',
-        });
+    try {
+      const worker = this.#workerFactory
+        ? this.#workerFactory()
+        : new Worker(new URL('./cdlod-patch.worker', import.meta.url), {
+            type: 'module',
+          });
 
-    worker.onmessage = (event: MessageEvent<ICdlodWorkerResponse>) => {
-      this.#onWorkerResponse(slot, event.data);
-    };
+      worker.onmessage = (event: MessageEvent<ICdlodWorkerResponse>) => {
+        this.#onWorkerResponse(slot, event.data);
+      };
 
-    worker.onerror = (err) => {
-      console.error('[CdlodWorkerPool] Worker error:', err);
-      slot.busy = false;
-      this.#dispatchNext();
-    };
+      worker.onerror = (err) => {
+        slot.failed = true;
+        slot.busy = false;
+        if (slot.currentRequestId) {
+          const pending = this.#inFlight.get(slot.currentRequestId);
+          if (pending) {
+            this.#inFlight.delete(slot.currentRequestId);
+            pending.reject(new Error('Worker script execution failed'));
+          }
+          slot.currentRequestId = undefined;
+        }
+        this.#dispatchNext();
+      };
 
-    slot.worker = worker;
-    return slot;
+      slot.worker = worker;
+      return slot;
+    } catch {
+      return undefined;
+    }
   }
 
   requestPatch(job: ICdlodWorkerJob): Promise<ICdlodRawPatchBuffers> {
@@ -111,7 +127,7 @@ export class CdlodWorkerPool {
       return Promise.reject(new Error('CdlodWorkerPool is terminated'));
     }
 
-    if (this.#slots.length === 0) {
+    if (!this.isAvailable) {
       return Promise.reject(new Error('Web Workers not available in this environment'));
     }
 
@@ -130,13 +146,24 @@ export class CdlodWorkerPool {
 
   #dispatchNext(): void {
     if (this.#queue.length === 0 || this.#isTerminated) return;
-    const idleSlot = this.#slots.find((s) => !s.busy);
+    const idleSlot = this.#slots.find((s) => !s.busy && !s.failed);
     if (!idleSlot) return;
 
     const request = this.#queue.shift()!;
     idleSlot.busy = true;
     idleSlot.currentRequestId = request.requestId;
-    idleSlot.worker.postMessage(request);
+    try {
+      idleSlot.worker.postMessage(request);
+    } catch (err) {
+      idleSlot.failed = true;
+      idleSlot.busy = false;
+      const pending = this.#inFlight.get(request.requestId);
+      if (pending) {
+        this.#inFlight.delete(request.requestId);
+        pending.reject(err instanceof Error ? err : new Error(String(err)));
+      }
+      this.#dispatchNext();
+    }
   }
 
   #onWorkerResponse(slot: IWorkerSlot, response: ICdlodWorkerResponse): void {
@@ -166,7 +193,11 @@ export class CdlodWorkerPool {
     }
     this.#inFlight.clear();
     for (const slot of this.#slots) {
-      slot.worker?.terminate();
+      try {
+        slot.worker?.terminate();
+      } catch {
+        // ignore
+      }
     }
     this.#slots.length = 0;
   }

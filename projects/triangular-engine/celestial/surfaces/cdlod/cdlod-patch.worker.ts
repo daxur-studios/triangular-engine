@@ -1,6 +1,6 @@
-/// <reference lib="webworker" />
-
-import { createSurfaceSampler, ISurfaceSampler } from 'triangular-engine/celestial';
+import { ICelestialBody } from '../../bodies/celestial-body';
+import { ISurfaceSampler } from '../surface-sampler';
+import { createSurfaceSampler } from '../surface-query';
 import {
   generateCdlodOceanPatchRawBuffers,
   generateCdlodPatchRawBuffers,
@@ -16,7 +16,7 @@ let sampler: ISurfaceSampler | undefined;
 
 export function handleCdlodWorkerMessage(
   data: ICdlodWorkerRequest,
-  customSamplerFactory?: (body: ICdlodWorkerRequest['body']) => ISurfaceSampler,
+  customSamplerFactory?: (body: ICelestialBody) => ISurfaceSampler,
 ): { response: ICdlodWorkerResponse; transfer?: Transferable[] } {
   try {
     if (data.type === 'terrain') {
@@ -29,9 +29,14 @@ export function handleCdlodWorkerMessage(
           : createSurfaceSampler(data.body);
       }
 
+      const activeSampler = sampler;
+      if (!activeSampler) {
+        throw new Error(`Failed to create surface sampler for body: ${data.body.id}`);
+      }
+
       const raw = generateCdlodPatchRawBuffers(
         data.body,
-        sampler,
+        activeSampler,
         data.address,
         data.resolution,
         data.centerBodyFixedM,
