@@ -25,6 +25,16 @@ export interface IGroundCoverArchetype {
     /** Radius blades are scattered within around the clump's local origin. */
     readonly radiusM: readonly [number, number];
   };
+  /**
+   * Optional bloom at each blade's tip — two crossed quads (the standard
+   * cheap foliage-puff impostor), geometrically distinct from the blade
+   * itself. Shape only, like the rest of this archetype — its color is a
+   * caller-side hint (`IGroundCoverColorHints.headHex`), not part of this
+   * schema. Omit for plain grass.
+   */
+  readonly head?: {
+    readonly radiusM: readonly [number, number];
+  };
 }
 
 /** Throws a descriptive RangeError on the first invalid field found. */
@@ -56,5 +66,12 @@ export function validateGroundCoverArchetype(archetype: IGroundCoverArchetype): 
   validateProceduralFiniteRange(archetype.clump.radiusM, 'Ground cover archetype clump radiusM');
   if (archetype.clump.radiusM[0] < 0) {
     throw new RangeError('Ground cover archetype clump radiusM must be non-negative.');
+  }
+
+  if (archetype.head) {
+    validateProceduralFiniteRange(archetype.head.radiusM, 'Ground cover archetype head radiusM');
+    if (archetype.head.radiusM[0] <= 0) {
+      throw new RangeError('Ground cover archetype head radiusM must be positive.');
+    }
   }
 }

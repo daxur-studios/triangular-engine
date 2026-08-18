@@ -47,4 +47,16 @@ describe('validateGroundCoverArchetype', () => {
       validateGroundCoverArchetype(makeArchetype({ clump: { bladeCount: [5, 8], radiusM: [-0.1, 0.1] } })),
     ).toThrow();
   });
+
+  it('accepts a well-formed head', () => {
+    expect(() =>
+      validateGroundCoverArchetype(makeArchetype({ head: { radiusM: [0.05, 0.08] } })),
+    ).not.toThrow();
+  });
+
+  it('rejects a non-positive head radius', () => {
+    expect(() =>
+      validateGroundCoverArchetype(makeArchetype({ head: { radiusM: [0, 0.08] } })),
+    ).toThrow();
+  });
 });

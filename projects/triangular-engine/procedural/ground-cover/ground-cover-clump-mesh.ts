@@ -29,11 +29,15 @@ const scratchRight = new Vector3();
 const scratchEdgeA = new Vector3();
 const scratchEdgeB = new Vector3();
 const scratchNormal = new Vector3();
+const scratchTip = new Vector3();
+const scratchHeadCenter = new Vector3();
+const scratchUp = new Vector3(0, 1, 0);
 
 function pushGroundCoverTriangle(
   positions: number[],
   normals: number[],
   height01s: number[],
+  headMix01s: number[],
   indices: number[],
   p1: Vector3,
   p2: Vector3,
@@ -41,6 +45,7 @@ function pushGroundCoverTriangle(
   h1: number,
   h2: number,
   h3: number,
+  headMix: number,
 ): void {
   scratchEdgeA.subVectors(p2, p1);
   scratchEdgeB.subVectors(p3, p1);
@@ -52,7 +57,37 @@ function pushGroundCoverTriangle(
   positions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z);
   for (let i = 0; i < 3; i++) normals.push(scratchNormal.x, scratchNormal.y, scratchNormal.z);
   height01s.push(h1, h2, h3);
+  headMix01s.push(headMix, headMix, headMix);
   indices.push(base, base + 1, base + 2);
+}
+
+/**
+ * A single double-sided quad, colored via `headMix01=1` so the caller-side
+ * colorizer can pick a fixed head color instead of the base/tip gradient.
+ * `axisH`/`axisV` must be unit vectors; the quad spans ±halfSizeM along each.
+ */
+function pushGroundCoverHeadQuad(
+  positions: number[],
+  normals: number[],
+  height01s: number[],
+  headMix01s: number[],
+  indices: number[],
+  center: Vector3,
+  axisH: Vector3,
+  axisV: Vector3,
+  halfSizeM: number,
+): void {
+  const bottomLeft = new Vector3().copy(center).addScaledVector(axisH, -halfSizeM).addScaledVector(axisV, -halfSizeM);
+  const bottomRight = new Vector3().copy(center).addScaledVector(axisH, halfSizeM).addScaledVector(axisV, -halfSizeM);
+  const topRight = new Vector3().copy(center).addScaledVector(axisH, halfSizeM).addScaledVector(axisV, halfSizeM);
+  const topLeft = new Vector3().copy(center).addScaledVector(axisH, -halfSizeM).addScaledVector(axisV, halfSizeM);
+
+  // Front face.
+  pushGroundCoverTriangle(positions, normals, height01s, headMix01s, indices, bottomLeft, bottomRight, topRight, 1, 1, 1, 1);
+  pushGroundCoverTriangle(positions, normals, height01s, headMix01s, indices, bottomLeft, topRight, topLeft, 1, 1, 1, 1);
+  // Back face (reversed winding, double-sided without a material flag).
+  pushGroundCoverTriangle(positions, normals, height01s, headMix01s, indices, bottomLeft, topRight, bottomRight, 1, 1, 1, 1);
+  pushGroundCoverTriangle(positions, normals, height01s, headMix01s, indices, bottomLeft, topLeft, topRight, 1, 1, 1, 1);
 }
 
 /**
@@ -62,7 +97,9 @@ function pushGroundCoverTriangle(
  * already runs 0 (base) to blade height (tip), which is exactly what
  * `enableScatterWindSway`'s default object-space-height heuristic wants, so
  * unlike flora this doesn't need `useVertexWindWeight`. `height01` is baked
- * only for vertex-color base/tip gradients.
+ * only for vertex-color base/tip gradients; `headMix01` (1 on `archetype.head`
+ * bloom quads, 0 elsewhere) lets the caller pick a fixed head color instead
+ * of the gradient for those vertices.
  */
 export function buildGroundCoverClumpMesh(
   archetype: IGroundCoverArchetype,
@@ -72,6 +109,7 @@ export function buildGroundCoverClumpMesh(
   const positions: number[] = [];
   const normals: number[] = [];
   const height01s: number[] = [];
+  const headMix01s: number[] = [];
   const indices: number[] = [];
 
   const bladeCount = Math.round(sampleProceduralRange(archetype.clump.bladeCount, random01()));
@@ -121,11 +159,45 @@ export function buildGroundCoverClumpMesh(
       const h1 = height01[s + 1];
 
       // Front face.
-      pushGroundCoverTriangle(positions, normals, height01s, indices, L0, R0, R1, h0, h0, h1);
-      pushGroundCoverTriangle(positions, normals, height01s, indices, L0, R1, L1, h0, h1, h1);
+      pushGroundCoverTriangle(positions, normals, height01s, headMix01s, indices, L0, R0, R1, h0, h0, h1, 0);
+      pushGroundCoverTriangle(positions, normals, height01s, headMix01s, indices, L0, R1, L1, h0, h1, h1, 0);
       // Back face (reversed winding, double-sided without a material flag).
-      pushGroundCoverTriangle(positions, normals, height01s, indices, L0, R1, R0, h0, h1, h0);
-      pushGroundCoverTriangle(positions, normals, height01s, indices, L0, L1, R1, h0, h1, h1);
+      pushGroundCoverTriangle(positions, normals, height01s, headMix01s, indices, L0, R1, R0, h0, h1, h0, 0);
+      pushGroundCoverTriangle(positions, normals, height01s, headMix01s, indices, L0, L1, R1, h0, h1, h1, 0);
+    }
+
+    if (archetype.head) {
+      const headRadiusM = sampleProceduralRange(archetype.head.radiusM, random01());
+      // t=1 station center (before the left/right half-width offset) — the blade's tip centerline.
+      scratchTip
+        .copy(scratchBase)
+        .addScaledVector(scratchLean, leanReachM)
+        .add(new Vector3(0, risePerFraction, 0));
+      // Lifted by its own radius so the bloom sits on top of the stem tip rather than straddling it.
+      scratchHeadCenter.copy(scratchTip).addScaledVector(scratchUp, headRadiusM);
+      // Two quads crossed around the vertical axis — the standard cheap foliage-puff impostor, readable from any horizontal angle.
+      pushGroundCoverHeadQuad(
+        positions,
+        normals,
+        height01s,
+        headMix01s,
+        indices,
+        scratchHeadCenter,
+        scratchPerp,
+        scratchUp,
+        headRadiusM,
+      );
+      pushGroundCoverHeadQuad(
+        positions,
+        normals,
+        height01s,
+        headMix01s,
+        indices,
+        scratchHeadCenter,
+        scratchLean,
+        scratchUp,
+        headRadiusM,
+      );
     }
   }
 
@@ -141,6 +213,7 @@ export function buildGroundCoverClumpMesh(
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new Float32BufferAttribute(normals, 3));
   geometry.setAttribute('height01', new Float32BufferAttribute(height01s, 1));
+  geometry.setAttribute('headMix01', new Float32BufferAttribute(headMix01s, 1));
   geometry.setIndex(indices);
 
   return { geometry, triangleCount, vertexCount: positions.length / 3 };

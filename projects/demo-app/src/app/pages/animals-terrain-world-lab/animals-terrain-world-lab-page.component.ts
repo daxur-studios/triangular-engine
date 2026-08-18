@@ -10,7 +10,7 @@ import {
 } from 'triangular-engine/animals';
 import { adaptTerrainScatterForAnimals, TerrainAnimalWorldSurface } from 'triangular-engine/animals/terrain';
 import { TerrainWaterAnimalVolume } from 'triangular-engine/animals/water';
-import { ConstantTerrainField, CylinderTerrainDomain, PlaneTerrainDomain, SphereTerrainDomain, type ITerrainFieldSample, type TerrainVector3 } from 'triangular-engine/terrain';
+import { ConstantTerrainField, CylinderTerrainDomain, PlaneTerrainDomain, SphereTerrainDomain, type ITerrainField, type ITerrainFieldSample, type TerrainVector3 } from 'triangular-engine/terrain';
 import { CylinderWaterDomain, PlaneWaterDomain, SphereWaterDomain, type WaterSurface } from 'triangular-engine/water';
 import { buildFloraMesh, FLORA_OAK_ARCHETYPE, FLORA_OAK_COLORS, generateFloraSkeleton } from 'triangular-engine/procedural';
 
@@ -63,18 +63,30 @@ export class AnimalsTerrainWorldLabPageComponent {
   private updateViewPresentation(): void { const selected = this.selectedShape(); const size = this.worldSize(); for (const view of this.views) view.root.visible = view.shape === selected && view.size === size; }
   private makeSizedView(shape: Shape, size: WorldSize): View {
     const factor = SIZE_FACTOR[size];
-    if (shape === 'plane') return this.makeView(shape, size, `${size} infinite plane`, new TerrainCheckpointField(), new PlaneTerrainDomain(18 * factor), [0, 0, 0], { x: 0, y: 0, z: 0 });
-    if (shape === 'sphere') return this.makeView(shape, size, `${size} planet sphere`, new ConstantTerrainField(0), new SphereTerrainDomain(7 * factor), [0, 0, 0], { x: 7 * factor, y: 0, z: 0 });
+    if (shape === 'plane') return this.makeView(shape, size, `${size} infinite plane`, new TerrainCheckpointField(factor), new PlaneTerrainDomain(18 * factor), [0, 0, 0], { x: 0, y: 0, z: 0 });
+    if (shape === 'sphere') return this.makeView(shape, size, `${size} planet sphere`, new TerrainCheckpointField(factor), new SphereTerrainDomain(7 * factor), [0, 0, 0], { x: 7 * factor, y: 0, z: 0 });
     // The cylinder is an inside-facing tube: Y is its longitudinal axis, so
     // sample from the middle of the volume rather than the capped end.
-    return this.makeView(shape, size, `${size} inside cylinder`, new ConstantTerrainField(0), new CylinderTerrainDomain({ radiusM: 7 * factor, lengthM: 14 * factor }), [0, 0, 0], { x: 0, y: 0, z: 0 });
+    return this.makeView(shape, size, `${size} inside cylinder`, new TerrainCheckpointField(factor), new CylinderTerrainDomain({ radiusM: 7 * factor, lengthM: 14 * factor }), [0, 0, 0], { x: 0, y: 0, z: 0 });
   }
 
-  private makeView(shape: Shape, size: WorldSize, label: string, field: ConstantTerrainField, domain: PlaneTerrainDomain | SphereTerrainDomain | CylinderTerrainDomain, offset: readonly [number, number, number], query: AnimalVector3): View {
+  private makeView(shape: Shape, size: WorldSize, label: string, field: ITerrainField, domain: PlaneTerrainDomain | SphereTerrainDomain | CylinderTerrainDomain, offset: readonly [number, number, number], query: AnimalVector3): View {
     const surface = new TerrainAnimalWorldSurface(field, domain, { maxWalkableSlope01: .75 }) as AnimalWorldSurface;
-    const factor = SIZE_FACTOR[size]; const root = new Group(); root.position.set(...offset); root.add(this.makeTerrain(shape, factor));
+    const factor = SIZE_FACTOR[size]; const root = new Group(); root.position.set(...offset); root.add(this.makeTerrain(shape, factor, field));
     const home = surface.sample(query); const patch = (id: string, position: AnimalVector3, radiusM: number, suitability01: number): AnimalGrazingPatch => ({ id, position, radiusM, capacity: 12, suitability01 });
-    const grazingPatches = [patch(`${shape}-home`, home.position, 2, 1), patch(`${shape}-meadow`, surface.moveAlongSurface(home.position, scale(home.tangentU, 5), 1), 2.5, .9), patch(`${shape}-ridge`, surface.moveAlongSurface(home.position, scale(home.tangentV, 4), 1), 2.5, .75)];
+    // World size changes the sampled habitat footprint, not the scale of an
+    // animal or tree. Keep the small checkpoint compact, then add deterministic
+    // tangent-frame sites around it as the world grows.
+    const patchCount = size === 'small' ? 3 : size === 'medium' ? 9 : 18;
+    const grazingPatches = Array.from({ length: patchCount }, (_, index) => {
+      if (index === 0) return patch(`${shape}-home`, home.position, 2, 1);
+      const column = (index - 1) % 5 - 2;
+      const row = Math.floor((index - 1) / 5) - 1;
+      const spacing = 4.5 * factor;
+      const offset = add(scale(home.tangentU, column * spacing), scale(home.tangentV, row * spacing));
+      const position = surface.moveAlongSurface(home.position, offset, 1);
+      return patch(`${shape}-habitat-${index}`, position, 2.2, index % 3 === 0 ? .75 : .9);
+    });
     const scatterInstances = grazingPatches.map((p, index) => {
       const frame = surface.sample(p.position);
       return { instanceId: `tree-${index}`, worldPositionM: [frame.position.x, frame.position.y, frame.position.z] as [number, number, number], normal: [frame.normal.x, frame.normal.y, frame.normal.z] as [number, number, number], surfaceUp: [frame.surfaceUp.x, frame.surfaceUp.y, frame.surfaceUp.z] as [number, number, number], rotationSeed01: index / 3, scaleSeed01: .5, embedSeed01: 0 };
@@ -82,9 +94,9 @@ export class AnimalsTerrainWorldLabPageComponent {
     const adapted = adaptTerrainScatterForAnimals({ habitatVersion: `${shape}-terrain-v1`, sources: [{ speciesId: 'tree', instances: scatterInstances, habitatKind: 'meadow', activities: ['feed', 'rest'], obstacleRadiusM: .7, blocksLand: true, roostCapacity: 4 }] });
     const trees = adapted.obstacles.map((obstacle, index) => { const seed = 420 + index; const skeleton = generateFloraSkeleton(FLORA_OAK_ARCHETYPE, seed); const { geometry } = buildFloraMesh(skeleton, FLORA_OAK_ARCHETYPE); colorizeTree(geometry); const tree = new Mesh(geometry, this.treeMaterial); tree.position.set(obstacle.position.x, obstacle.position.y, obstacle.position.z); tree.quaternion.copy(new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), new Vector3(obstacle.surfaceUp.x, obstacle.surfaceUp.y, obstacle.surfaceUp.z))); tree.scale.setScalar(.55); root.add(tree); return tree; });
     for (const p of grazingPatches) root.add(this.patchMesh(p, surface));
-    const policy = { surface, maximumMembers: 8, maximumPatches: 3, maximumSpeedMps: 1.8, maximumAccelerationMps2: 3, maximumSubstepDistanceM: .25, maximumSubsteps: 8, maximumSlope01: .75, maximumPatchDistanceM: 20, minimumPatchSuitability01: .5, separationRadiusM: 1.3, separationWeight: 2.5, cohesionWeight: .15, alignmentWeight: .2, targetWeight: .5, arrivalRadiusM: .35, slotSpacingM: .7, travelLineSpacingM: 1.1, leaderFollowDelaySeconds: .8, maximumAvoidanceAttempts: 4, obstacles: adapted.obstacles };
+    const policy = { surface, maximumMembers: 8, maximumPatches: patchCount, maximumSpeedMps: 1.8, maximumAccelerationMps2: 3, maximumSubstepDistanceM: .25, maximumSubsteps: 8, maximumSlope01: .75, maximumPatchDistanceM: Math.max(20, patchCount * 2.5), minimumPatchSuitability01: .5, separationRadiusM: 1.3, separationWeight: 2.5, cohesionWeight: .15, alignmentWeight: .2, targetWeight: .5, arrivalRadiusM: .35, slotSpacingM: .7, travelLineSpacingM: 1.1, leaderFollowDelaySeconds: .8, maximumAvoidanceAttempts: 4, obstacles: adapted.obstacles };
     const definition: AnimalLandHerdCycleDefinition = { groupId: `${shape}-terrain-herd-a`, groupSeed: 0x7a11 + shape.length, memberCount: 6, homePatch: grazingPatches[0], grazingPatches, restDurationS: 6, outboundTravelDurationS: 10, grazeDurationS: 10, returnTravelDurationS: 12, fixedStepSeconds: .1, maximumReplaySteps: 400, policy };
-    const groupCount = size === 'small' ? 2 : size === 'medium' ? 4 : 8;
+    const groupCount = size === 'small' ? 2 : size === 'medium' ? 6 : 12;
     const herdDefinitions: AnimalLandHerdCycleDefinition[] = Array.from({ length: groupCount }, (_, index) => {
       if (index === 0) return definition;
       const spreadTangent = shape === 'cylinder' ? home.tangentU : home.tangentV;
@@ -138,7 +150,7 @@ export class AnimalsTerrainWorldLabPageComponent {
   }
   private fishPosition(shape: Shape, factor = 1): AnimalVector3 { return shape === 'plane' ? { x: 0, y: -1.4, z: 0 } : shape === 'sphere' ? { x: 5.6 * factor, y: 0, z: 0 } : { x: 0, y: 8.4 * factor, z: 0 }; }
   private fishOffset(shape: Shape, position: AnimalVector3, distance: number): AnimalVector3 { return shape === 'plane' ? { x: position.x, y: position.y, z: position.z + distance } : shape === 'sphere' ? { x: position.x, y: distance, z: position.z } : { x: position.x, y: position.y, z: position.z + distance }; }
-  private makeTerrain(shape: Shape, factor = 1): Mesh { if (shape === 'sphere') return new Mesh(new SphereGeometry(7 * factor, 32, 18), new MeshStandardMaterial({ color: '#55784c', side: BackSide })); if (shape === 'cylinder') { const mesh = new Mesh(new CylinderGeometry(7 * factor, 7 * factor, 14 * factor, 32, 1, true), new MeshStandardMaterial({ color: '#55784c', side: BackSide })); mesh.rotation.z = Math.PI / 2; return mesh; } const geometry = new PlaneGeometry(18 * factor, 18 * factor, 20, 20); geometry.rotateX(-Math.PI / 2); return new Mesh(geometry, new MeshStandardMaterial({ color: '#55784c' })); }
+  private makeTerrain(shape: Shape, factor = 1, field?: ITerrainField): Mesh { if (shape === 'sphere') { const mesh = new Mesh(new SphereGeometry(7 * factor, 48, 28), new MeshStandardMaterial({ color: '#55784c', side: BackSide })); const positions = mesh.geometry.getAttribute('position'); for (let i = 0; i < positions.count; i++) { const x = positions.getX(i), y = positions.getY(i), z = positions.getZ(i); const length = Math.hypot(x, y, z) || 1; const relief = field?.sample([x, y, z]).elevationM ?? 0; positions.setXYZ(i, x + x / length * relief, y + y / length * relief, z + z / length * relief); } positions.needsUpdate = true; return mesh; } if (shape === 'cylinder') { const mesh = new Mesh(new CylinderGeometry(7 * factor, 7 * factor, 14 * factor, 48, 24, true), new MeshStandardMaterial({ color: '#55784c', side: BackSide })); const positions = mesh.geometry.getAttribute('position'); for (let i = 0; i < positions.count; i++) { const x = positions.getX(i), y = positions.getY(i), z = positions.getZ(i); const radial = Math.hypot(x, z) || 1; const relief = field?.sample([x, y, z]).elevationM ?? 0; positions.setXYZ(i, x + x / radial * relief, y, z + z / radial * relief); } positions.needsUpdate = true; mesh.rotation.z = Math.PI / 2; return mesh; } const geometry = new PlaneGeometry(18 * factor, 18 * factor, 32, 32); geometry.rotateX(-Math.PI / 2); const positions = geometry.getAttribute('position'); for (let i = 0; i < positions.count; i++) { const x = positions.getX(i), z = positions.getZ(i); positions.setY(i, field?.sample([x, 0, z]).elevationM ?? 0); } positions.needsUpdate = true; return new Mesh(geometry, new MeshStandardMaterial({ color: '#55784c' })); }
   private patchMesh(patch: AnimalGrazingPatch, surface: AnimalWorldSurface): Mesh {
     const mesh = new Mesh(new CylinderGeometry(patch.radiusM, patch.radiusM, .04, 24), new MeshStandardMaterial({ color: '#9bad53', transparent: true, opacity: .45 }));
     const frame = surface.sample(patch.position);
@@ -171,8 +183,8 @@ function scale(value: AnimalVector3, factor: number): AnimalVector3 { return { x
 function stableBirdYaw(id: string): number { let hash = 2166136261; for (let index = 0; index < id.length; index++) hash = Math.imul(hash ^ id.charCodeAt(index), 16777619); return (hash >>> 0) / 0x100000000 * Math.PI * 2; }
 function add(a: AnimalVector3, b: AnimalVector3): AnimalVector3 { return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }; }
 class TerrainCheckpointField extends ConstantTerrainField {
-  constructor() { super(0); }
-  override sample([x, _y, z]: TerrainVector3): ITerrainFieldSample { return { elevationM: Math.sin(x / 7) * .35 + Math.cos(z / 9) * .25 }; }
+  constructor(private readonly scaleFactor = 1) { super(0); }
+  override sample([x, _y, z]: TerrainVector3): ITerrainFieldSample { const scale = Math.max(1, this.scaleFactor); return { elevationM: (Math.sin(x / (7 * scale)) * .35 + Math.cos(z / (9 * scale)) * .25) * Math.min(1.5, scale) }; }
 }
 
 function colorizeTree(geometry: BufferGeometry): void {

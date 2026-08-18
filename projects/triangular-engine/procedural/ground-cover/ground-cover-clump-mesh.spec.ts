@@ -54,4 +54,27 @@ describe('buildGroundCoverClumpMesh', () => {
     const archetype = makeArchetype({ clump: { bladeCount: [5000, 5000], radiusM: [0.05, 0.1] } });
     expect(() => buildGroundCoverClumpMesh(archetype, 1)).toThrow();
   });
+
+  it('headMix01 is all zero when the archetype has no head', () => {
+    const archetype = makeArchetype();
+    const { geometry } = buildGroundCoverClumpMesh(archetype, 3);
+    const headMix01 = Array.from(geometry.getAttribute('headMix01').array);
+    expect(headMix01.every((v) => v === 0)).toBe(true);
+  });
+
+  it('adds head-bloom vertices (headMix01=1) beyond the blade tip when the archetype has a head', () => {
+    const archetype = makeArchetype({ head: { radiusM: [0.05, 0.05] } });
+    const { geometry } = buildGroundCoverClumpMesh(archetype, 3);
+    const headMix01 = Array.from(geometry.getAttribute('headMix01').array);
+    expect(headMix01.some((v) => v === 1)).toBe(true);
+    expect(headMix01.some((v) => v === 0)).toBe(true);
+
+    const positions = geometry.getAttribute('position').array;
+    let maxHeadY = -Infinity;
+    for (let i = 0; i < headMix01.length; i++) {
+      if (headMix01[i] === 1) maxHeadY = Math.max(maxHeadY, positions[i * 3 + 1]);
+    }
+    // Head quads are centered a radius above the blade tip (0.4 max heightM here), so their top edge sits well past it.
+    expect(maxHeadY).toBeGreaterThan(0.4);
+  });
 });
