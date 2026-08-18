@@ -1,0 +1,205 @@
+/**
+ * Compilers for the generator kinds beyond the original `fractal-noise-3d`.
+ * Internal to `celestial` — not re-exported from `public-api.ts`. Only the
+ * def types (`terrain-def.ts`) and the sampler query surface
+ * (`surface-sampler.ts`) are public; `surface-query.ts` is the sole caller
+ * of these compilers.
+ */
+import {
+  ICraterFieldTerrainGeneratorDef,
+  IRidgedFractalTerrainGeneratorDef,
+} from './terrain-def';
+import {
+  assertFinite,
+  assertNoiseParameters,
+  compileMask,
+  hashLattice,
+  ICompiledGenerator,
+  ridgedFractalNoise3d,
+} from './terrain-noise';
+
+export function compileRidgedFractalGenerator(
+  definition: IRidgedFractalTerrainGeneratorDef,
+  seed: number,
+): ICompiledGenerator {
+  assertNoiseParameters(definition);
+  assertFinite('amplitudeM', definition.amplitudeM);
+  if (definition.amplitudeM < 0) {
+    throw new RangeError('Terrain amplitudeM cannot be negative.');
+  }
+  assertFinite('ridgeExponent', definition.ridgeExponent);
+  if (definition.ridgeExponent < 1) {
+    throw new RangeError('Terrain ridgeExponent must be >= 1.');
+  }
+  const generatorSeed = seed + (definition.seedOffset ?? 0);
+  const mask = definition.mask ? compileMask(definition.mask, seed) : undefined;
+  return {
+    sample: (x, y, z) => {
+      const elevationM =
+        ridgedFractalNoise3d(x, y, z, definition, generatorSeed) *
+        definition.amplitudeM;
+      return elevationM * (mask?.sample(x, y, z) ?? 1);
+    },
+  };
+}
+
+/** Fixed hash-channel offsets for the crater field's per-cell decisions. */
+const CRATER_PRESENCE_CHANNEL = 0;
+const CRATER_JITTER_X_CHANNEL = 1;
+const CRATER_JITTER_Y_CHANNEL = 2;
+const CRATER_JITTER_Z_CHANNEL = 3;
+const CRATER_RADIUS_CHANNEL = 4;
+/** Outer rim radius as a multiple of the crater's own radius. */
+const OUTER_RIM_RADIUS_FACTOR = 1.5;
+
+function craterHash01(
+  cellX: number,
+  cellY: number,
+  cellZ: number,
+  seed: number,
+  channel: number,
+): number {
+  return (hashLattice(cellX, cellY, cellZ, seed + channel) + 1) / 2;
+}
+
+/**
+ * C1-continuous radial profile: parabolic bowl to `x = 1`, a raised rim shaped
+ * by the quartic bump `y^2*(1-y)^2` (`y = 2(x-1)`) to `x = 1.5`, then exactly
+ * zero. Value and first derivative agree at both seams (verified by hand and
+ * pinned by the continuity spec) so overlapping craters never introduce a
+ * crease.
+ */
+function craterElevationM(
+  x: number,
+  depthM: number,
+  rimHeightM: number,
+): number {
+  if (x < 1) {
+    const inner = 1 - x * x;
+    return -depthM * inner * inner;
+  }
+  if (x < OUTER_RIM_RADIUS_FACTOR) {
+    const y = 2 * (x - 1);
+    const bump = y * y * (1 - y) * (1 - y);
+    return rimHeightM * 16 * bump;
+  }
+  return 0;
+}
+
+export function compileCraterFieldGenerator(
+  definition: ICraterFieldTerrainGeneratorDef,
+  seed: number,
+): ICompiledGenerator {
+  assertFinite('cellFrequency', definition.cellFrequency);
+  if (definition.cellFrequency <= 0) {
+    throw new RangeError('Crater cellFrequency must be positive.');
+  }
+  assertFinite('craterProbability', definition.craterProbability);
+  if (definition.craterProbability < 0 || definition.craterProbability > 1) {
+    throw new RangeError('Crater craterProbability must be in [0, 1].');
+  }
+  assertFinite('minRadiusCells', definition.minRadiusCells);
+  assertFinite('maxRadiusCells', definition.maxRadiusCells);
+  if (definition.minRadiusCells <= 0 || definition.maxRadiusCells <= 0) {
+    throw new RangeError('Crater radius bounds must be positive.');
+  }
+  if (definition.maxRadiusCells > 0.5) {
+    throw new RangeError('Crater maxRadiusCells cannot exceed 0.5 cell.');
+  }
+  if (definition.minRadiusCells > definition.maxRadiusCells) {
+    throw new RangeError('Crater minRadiusCells cannot exceed maxRadiusCells.');
+  }
+  assertFinite('depthM', definition.depthM);
+  assertFinite('rimHeightM', definition.rimHeightM);
+  if (definition.depthM < 0 || definition.rimHeightM < 0) {
+    throw new RangeError('Crater depthM and rimHeightM cannot be negative.');
+  }
+
+  const generatorSeed = seed + (definition.seedOffset ?? 0);
+  const {
+    cellFrequency,
+    craterProbability,
+    minRadiusCells,
+    maxRadiusCells,
+    depthM,
+    rimHeightM,
+  } = definition;
+  const mask = definition.mask ? compileMask(definition.mask, seed) : undefined;
+
+  return {
+    sample: (x, y, z) => {
+      const px = x * cellFrequency;
+      const py = y * cellFrequency;
+      const pz = z * cellFrequency;
+      const baseX = Math.floor(px);
+      const baseY = Math.floor(py);
+      const baseZ = Math.floor(pz);
+
+      let elevationM = 0;
+      for (let dz = -1; dz <= 1; dz += 1) {
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const cellX = baseX + dx;
+            const cellY = baseY + dy;
+            const cellZ = baseZ + dz;
+            const presence = craterHash01(
+              cellX,
+              cellY,
+              cellZ,
+              generatorSeed,
+              CRATER_PRESENCE_CHANNEL,
+            );
+            if (presence >= craterProbability) continue;
+
+            const centerX =
+              cellX +
+              craterHash01(
+                cellX,
+                cellY,
+                cellZ,
+                generatorSeed,
+                CRATER_JITTER_X_CHANNEL,
+              );
+            const centerY =
+              cellY +
+              craterHash01(
+                cellX,
+                cellY,
+                cellZ,
+                generatorSeed,
+                CRATER_JITTER_Y_CHANNEL,
+              );
+            const centerZ =
+              cellZ +
+              craterHash01(
+                cellX,
+                cellY,
+                cellZ,
+                generatorSeed,
+                CRATER_JITTER_Z_CHANNEL,
+              );
+            const radiusHash = craterHash01(
+              cellX,
+              cellY,
+              cellZ,
+              generatorSeed,
+              CRATER_RADIUS_CHANNEL,
+            );
+            const radiusCells =
+              minRadiusCells + radiusHash * (maxRadiusCells - minRadiusCells);
+
+            const distanceCells = Math.hypot(
+              px - centerX,
+              py - centerY,
+              pz - centerZ,
+            );
+            const unit = distanceCells / radiusCells;
+            if (unit >= OUTER_RIM_RADIUS_FACTOR) continue;
+            elevationM += craterElevationM(unit, depthM, rimHeightM);
+          }
+        }
+      }
+      return elevationM * (mask?.sample(x, y, z) ?? 1);
+    },
+  };
+}

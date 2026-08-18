@@ -94,6 +94,18 @@ export const DEMOS: readonly DemoItem[] = [
       'Multi-surface terrain (plane, sphere, cylinder), streaming worker, screen-space BSP error selector, and Jolt physics integration.',
   },
   {
+    id: 'cdlod-planet-lab',
+    number: '02b',
+    title: 'CDLOD Planet Lab',
+    route: '/cdlod-planet-lab',
+    categoryId: 'terrain',
+    tier: 'gem',
+    entryPoints: ['terrain', 'celestial'],
+    package: 'triangular-engine/terrain',
+    description:
+      'Continuous Distance-Dependent Level of Detail planetary terrain with GPU vertex geomorphing, roughness decimation, and motion prediction.',
+  },
+  {
     id: 'takram-clouds',
     number: '03',
     title: 'Takram Clouds',

@@ -22,6 +22,28 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 See the complete import and dependency matrix in [Secondary Entry Points](docs/entry-points.md).
 
 See the complete import and dependency matrix in [Secondary Entry Points](docs/entry-points.md).
+# Triangular Engine
+
+Angular-first 3D engine powered by Three.js and Rapier. Build interactive 3D scenes using ergonomic standalone Angular components for scenes, cameras, meshes, lights, materials, GLTF loading, physics, and more.
+
+This README contains the full documentation needed to use the library on npm. No external links are required.
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
+
+## Compatibility
+
+| Dependency      | Version  | Notes                                                          |
+| --------------- | -------- | -------------------------------------------------------------- |
+| Angular         | ^20.3.3  | Required - Angular 20.3.3 or higher                            |
+| Three.js        | ^0.183.0 | Required                                                       |
+| Dexie           | ^4.2.1   | Required                                                       |
+| Rapier 3D       | ^0.18.0  | Optional - for physics support                                 |
+| Jolt Physics    | ^0.38.0  | Optional - alternative physics engine                          |
+| @pmndrs/vanilla | ^1.24.0  | Optional - Billboard and Sparkles (`triangular-engine/pmndrs`) |
+
+## Sub-libraries & Entry Points
+
+See the complete import and dependency matrix in [Secondary Entry Points](docs/entry-points.md).
 
 The library is modularized into several secondary entry points (sub-libraries) so you only import and bundle what your app uses:
 
@@ -34,7 +56,8 @@ The library is modularized into several secondary entry points (sub-libraries) s
 | `triangular-engine/postprocessing` | **Post-processing**: Staged post-processing passes built using `postprocessing` (e.g. bloom, glitch, SMAA, output, custom shaders). | `postprocessing` |
 | `triangular-engine/takram` | **Takram Atmosphere**: Physical atmospheric and cloud rendering components (atmosphere, aerial perspective, and clouds). | `@takram/three-atmosphere`, `@takram/three-clouds` |
 | `triangular-engine/water` | **Water**: Declarative large-scale plane, planet, and inside-cylinder water with quality and motion presets. See [water/README.md](./water/README.md). | `three` |
-| `triangular-engine/terrain` | **Terrain**: Domain-aware terrain generation, surface sampling, and LOD streaming. | — |
+| `triangular-engine/terrain` | **Terrain**: Domain-aware terrain generation, surface sampling, and high-performance CDLOD (Continuous Distance-Dependent Level of Detail) planetary rendering with GPU geomorphing. See [terrain/README.md](./terrain/README.md). | — |
+| `triangular-engine/celestial` | **Celestial**: Astrodynamics, Keplerian orbits, atmospheric/gravity models, planetary presets, and procedural surface definitions. See [celestial/README.md](./celestial/README.md). | — |
 | `triangular-engine/scatter` | **Scatter**: Deterministic streamed placement and LOD rendering for vegetation and repeated environment objects. | — |
 | `triangular-engine/animals` | **Animals**: Framework-free deterministic animal flocks and lightweight world responses. | — |
 | `triangular-engine/navigation` | **Navigation**: Framework-free navigation data contracts and deterministic bounded-work route-request scheduling. | — |

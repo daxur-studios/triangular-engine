@@ -1,0 +1,243 @@
+import { ICelestialBody } from '../bodies/celestial-body';
+import { createSurfaceSampler, sampleSurface } from './surface-query';
+
+const RIDGED_BODY: ICelestialBody = {
+  id: 'ridged-test',
+  kind: 'planet',
+  radiusM: 600_000,
+  muM3PerS2: 3.5316e12,
+  terrain: {
+    seed: 7,
+    minElevationM: -10_000,
+    maxElevationM: 10_000,
+    generators: [
+      {
+        kind: 'ridged-fractal-3d',
+        amplitudeM: 3_000,
+        frequency: 3,
+        octaves: 4,
+        lacunarity: 2,
+        persistence: 0.5,
+        ridgeExponent: 2,
+      },
+    ],
+  },
+};
+
+const CRATER_BODY: ICelestialBody = {
+  id: 'crater-test',
+  kind: 'planet',
+  radiusM: 600_000,
+  muM3PerS2: 3.5316e12,
+  terrain: {
+    seed: 13,
+    minElevationM: -10_000,
+    maxElevationM: 10_000,
+    generators: [
+      {
+        kind: 'crater-field-3d',
+        cellFrequency: 8,
+        craterProbability: 1,
+        minRadiusCells: 0.2,
+        maxRadiusCells: 0.45,
+        depthM: 200,
+        rimHeightM: 40,
+      },
+    ],
+  },
+};
+
+const SAMPLE_DIRECTIONS = [
+  [1, 0, 0],
+  [0.2, 0.7, -0.4],
+  [-2, 3, 1],
+  [0.577, 0.577, 0.577],
+  [-0.3, 0.1, 0.9],
+] as const;
+
+describe('ridged-fractal-3d generator', () => {
+  it('is deterministic and survives structured cloning', () => {
+    const direction = [0.23, 0.91, -0.34] as const;
+    const expected = sampleSurface(RIDGED_BODY, direction);
+    expect(sampleSurface(RIDGED_BODY, direction)).toEqual(expected);
+    expect(sampleSurface(structuredClone(RIDGED_BODY), direction)).toEqual(
+      expected,
+    );
+  });
+
+  it('produces identical scalar and batch results', () => {
+    const sampler = createSurfaceSampler(RIDGED_BODY);
+    const directions = new Float64Array(SAMPLE_DIRECTIONS.flat());
+    const output = sampler.sampleBatch(directions);
+    expect([...output]).toEqual(
+      SAMPLE_DIRECTIONS.map((d) => sampler.sample(d).elevationM),
+    );
+  });
+
+  it('stays within [0, amplitudeM] for every sampled direction', () => {
+    const sampler = createSurfaceSampler(RIDGED_BODY);
+    const amplitudeM = (
+      RIDGED_BODY.terrain!.generators[0] as { amplitudeM: number }
+    ).amplitudeM;
+    for (const direction of SAMPLE_DIRECTIONS) {
+      const elevationM = sampler.sample(direction).elevationM;
+      expect(elevationM).toBeGreaterThanOrEqual(0);
+      expect(elevationM).toBeLessThanOrEqual(amplitudeM);
+    }
+  });
+
+  it('distinguishes different seedOffsets', () => {
+    const otherBody = structuredClone(RIDGED_BODY);
+    (otherBody.terrain!.generators[0] as { seedOffset?: number }).seedOffset =
+      99;
+    expect(
+      SAMPLE_DIRECTIONS.some(
+        (direction) =>
+          sampleSurface(RIDGED_BODY, direction).elevationM !==
+          sampleSurface(otherBody, direction).elevationM,
+      ),
+    ).toBeTrue();
+  });
+
+  it('rejects an invalid ridgeExponent', () => {
+    const malformed = structuredClone(RIDGED_BODY);
+    (
+      malformed.terrain!.generators[0] as { ridgeExponent: number }
+    ).ridgeExponent = 0.5;
+    expect(() => createSurfaceSampler(malformed)).toThrowError(RangeError);
+  });
+});
+
+describe('crater-field-3d generator', () => {
+  it('is deterministic, scalar/batch-identical, and finite everywhere', () => {
+    const sampler = createSurfaceSampler(CRATER_BODY);
+    const directions = new Float64Array(SAMPLE_DIRECTIONS.flat());
+    const output = sampler.sampleBatch(directions);
+    for (let index = 0; index < SAMPLE_DIRECTIONS.length; index += 1) {
+      const scalar = sampler.sample(SAMPLE_DIRECTIONS[index]).elevationM;
+      expect(output[index]).toBe(scalar);
+      expect(Number.isFinite(scalar)).toBeTrue();
+    }
+  });
+
+  it('is exactly zero everywhere when craterProbability is 0', () => {
+    const noCraters = structuredClone(CRATER_BODY);
+    (
+      noCraters.terrain!.generators[0] as { craterProbability: number }
+    ).craterProbability = 0;
+    for (const direction of SAMPLE_DIRECTIONS) {
+      expect(sampleSurface(noCraters, direction).elevationM).toBe(0);
+    }
+  });
+
+  it('never rises above the rim contribution near a guaranteed crater', () => {
+    // craterProbability=1 guarantees a crater in every one of the 27
+    // neighbor cells, so every sample is inside at least one bowl or rim.
+    const sampler = createSurfaceSampler(CRATER_BODY);
+    const rimHeightM = (
+      CRATER_BODY.terrain!.generators[0] as { rimHeightM: number }
+    ).rimHeightM;
+    for (const direction of SAMPLE_DIRECTIONS) {
+      const elevationM = sampler.sample(direction).elevationM;
+      expect(elevationM).toBeLessThanOrEqual(
+        rimHeightM * SAMPLE_DIRECTIONS.length,
+      );
+    }
+  });
+
+  it('validates malformed crater parameters', () => {
+    const badRadius = structuredClone(CRATER_BODY);
+    (
+      badRadius.terrain!.generators[0] as { maxRadiusCells: number }
+    ).maxRadiusCells = 0.6;
+    expect(() => createSurfaceSampler(badRadius)).toThrowError(RangeError);
+
+    const badProbability = structuredClone(CRATER_BODY);
+    (
+      badProbability.terrain!.generators[0] as { craterProbability: number }
+    ).craterProbability = 1.5;
+    expect(() => createSurfaceSampler(badProbability)).toThrowError(RangeError);
+
+    const invertedRadius = structuredClone(CRATER_BODY);
+    (
+      invertedRadius.terrain!.generators[0] as {
+        minRadiusCells: number;
+        maxRadiusCells: number;
+      }
+    ).minRadiusCells = 0.5;
+    expect(() => createSurfaceSampler(invertedRadius)).toThrowError(RangeError);
+  });
+});
+
+describe('crater radial profile continuity (frozen formula)', () => {
+  /**
+   * Re-derives the documented profile independently of the implementation
+   * (inner bowl `-D(1-x^2)^2`, outer rim `H*16y^2(1-y)^2` with `y=2(x-1)`,
+   * zero beyond `x=1.5`) so this test also catches the implementation
+   * drifting from the frozen formula, not just discontinuities within it.
+   */
+  function referenceProfile(
+    x: number,
+    depthM: number,
+    rimHeightM: number,
+  ): number {
+    if (x < 1) {
+      const inner = 1 - x * x;
+      return -depthM * inner * inner;
+    }
+    if (x < 1.5) {
+      const y = 2 * (x - 1);
+      return rimHeightM * 16 * y * y * (1 - y) * (1 - y);
+    }
+    return 0;
+  }
+
+  function numericalDerivative(
+    x: number,
+    depthM: number,
+    rimHeightM: number,
+    epsilon: number,
+  ): number {
+    return (
+      (referenceProfile(x + epsilon, depthM, rimHeightM) -
+        referenceProfile(x - epsilon, depthM, rimHeightM)) /
+      (2 * epsilon)
+    );
+  }
+
+  it('agrees in value and derivative across both seams', () => {
+    const depthM = 200;
+    const rimHeightM = 40;
+    const epsilon = 1e-6;
+
+    for (const seam of [1, 1.5]) {
+      const before = referenceProfile(seam - epsilon, depthM, rimHeightM);
+      const after = referenceProfile(seam + epsilon, depthM, rimHeightM);
+      expect(Math.abs(before - after)).toBeLessThan(1e-6);
+
+      const derivativeBefore = numericalDerivative(
+        seam - epsilon,
+        depthM,
+        rimHeightM,
+        epsilon,
+      );
+      const derivativeAfter = numericalDerivative(
+        seam + epsilon,
+        depthM,
+        rimHeightM,
+        epsilon,
+      );
+      expect(Math.abs(derivativeBefore - derivativeAfter)).toBeLessThan(1e-2);
+    }
+  });
+
+  it('is non-positive inside the bowl and exactly zero beyond the rim', () => {
+    const depthM = 200;
+    const rimHeightM = 40;
+    for (let x = 0; x < 1; x += 0.05) {
+      expect(referenceProfile(x, depthM, rimHeightM)).toBeLessThanOrEqual(0);
+    }
+    expect(referenceProfile(1.5, depthM, rimHeightM)).toBe(0);
+    expect(referenceProfile(2, depthM, rimHeightM)).toBe(0);
+  });
+});

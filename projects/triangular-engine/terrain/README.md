@@ -42,5 +42,25 @@ Framework-free consumers can continue composing
 `selectAdaptiveTerrainPatches`, `TerrainGenerationQueue`, and
 `generateTerrainPatchMesh` directly.
 
+## Planetary CDLOD (Continuous Distance-Dependent LOD)
+
+For high-speed planetary bodies and large-scale terrains, `CdlodPlanetComponent`
+provides GPU vertex geomorphing, roughness-based feature decimation, motion look-ahead,
+and multithreaded Web Worker meshing.
+
+```html
+<cdlodPlanet
+  [body]="body"
+  [quality]="'balanced'"
+  [cdlodMorphing]="true"
+  [featureAdaptive]="true"
+  [useWorkers]="true"
+/>
+```
+
+CDLOD eliminates LOD popping by morphing odd grid vertices towards their coarser parent
+locations on the GPU, avoiding geometry skirts and T-junction cracks across LOD boundaries.
+
 Current design and implementation gates are tracked in
-[`docs/runbook/004_multi_surface_terrain.md`](../../../docs/runbook/004_multi_surface_terrain.md).
+[`docs/runbook/004_multi_surface_terrain.md`](../../../docs/runbook/004_multi_surface_terrain.md) and
+[`docs/runbook/019_cdlod_celestial_migration.md`](../../../docs/runbook/019_cdlod_celestial_migration.md).

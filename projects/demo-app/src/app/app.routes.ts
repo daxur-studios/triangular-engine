@@ -74,6 +74,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'cdlod-planet-lab',
+    loadComponent: () =>
+      import('./pages/cdlod-planet-lab/cdlod-planet-lab-page.component').then(
+        ({ CdlodPlanetLabPageComponent }) => CdlodPlanetLabPageComponent,
+      ),
+  },
+  {
     path: 'navigation-lab',
     loadComponent: () =>
       import('./pages/navigation-lab/navigation-lab-page.component').then(

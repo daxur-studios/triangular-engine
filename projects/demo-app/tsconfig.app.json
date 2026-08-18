@@ -53,6 +53,9 @@
       ],
       "triangular-engine/procedural": [
         "projects/triangular-engine/procedural/public-api"
+      ],
+      "triangular-engine/celestial": [
+        "projects/triangular-engine/celestial/public-api"
       ]
     },
     "outDir": "../../out-tsc/app",

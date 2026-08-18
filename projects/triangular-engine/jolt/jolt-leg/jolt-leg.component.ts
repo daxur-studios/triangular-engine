@@ -58,33 +58,32 @@ export class JoltLandingLegComponent implements OnDestroy {
   readonly direction = input<Vector3Tuple>([0, -1, 0]);
 
   /** Full suspension travel, meters (foot is level when stretched this far). */
-  readonly maxLength = input(0.5);
+  readonly travel = input(2.0);
 
-  /** Natural oscillation frequency of the suspension spring, Hz. */
-  readonly frequency = input(2);
+  /**
+   * Undamped natural frequency of the suspension in radians per second (omega).
+   * Defines stiffness independent of mass: k = m * omega^2.
+   * Default: ~8.0 rad/s (approx 1.3 Hz bounce, brisk and stable).
+   */
+  readonly frequency = input(8.0);
 
-  /** Spring damping ratio (0..1; 1 = critically damped). */
-  readonly damping = input(0.5);
+  /**
+   * Damping ratio (zeta). 1.0 is critically damped, 0.7 is slightly underdamped
+   * with quick settle, >1.0 is overdamped. Default: 0.8.
+   */
+  readonly dampingRatio = input(0.8);
 
-  /** Grip coupling that arrests lateral slip of the foot against the ground. */
+  /**
+   * Lateral friction coefficient at the foot. Applies a force opposite the
+   * foot's relative lateral velocity to stop skidding. Default: 0.8.
+   */
   readonly grip = input(0.8);
 
   /** Fires every tick with the solved foot contact (or undefined while lifted). */
   readonly contact = output<ILegContact | undefined>();
   readonly contact$ = new BehaviorSubject<ILegContact | undefined>(undefined);
 
-  #runtime:
-    | {
-        metadata: IJoltMetadata;
-        jolt: typeof Jolt;
-        query: Jolt.NarrowPhaseQuery;
-        broadPhaseFilter: Jolt.BroadPhaseLayerFilter;
-        objectLayerFilter: Jolt.ObjectLayerFilter;
-        shapeFilter: Jolt.ShapeFilter;
-        bodyFilter: Jolt.BodyFilter;
-        bodyFilterHost: Jolt.BodyID | undefined;
-      }
-    | undefined;
+  #runtime: IJoltLegRuntime | undefined;
 
   constructor() {
     this.#initAsync();
@@ -99,7 +98,7 @@ export class JoltLandingLegComponent implements OnDestroy {
     });
   }
 
-  #createRuntime(metadata: IJoltMetadata): NonNullable<typeof this.#runtime> {
+  #createRuntime(metadata: IJoltMetadata): IJoltLegRuntime {
     const J = metadata.Jolt;
 
     // Two accept-all layer filters so the ray sees every surface; the host body

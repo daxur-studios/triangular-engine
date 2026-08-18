@@ -6,6 +6,25 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- Added `triangular-engine/celestial` secondary entry point: Dependency-free astrodynamics,
+  64-bit Keplerian orbit propagation, ephemerides, gravity and atmospheric drag models,
+  stock celestial bodies (`HOME_PLANET`, `EARTH`, `MARS`, `MOON`, `SUN`), and procedural
+  surface definitions.
+- Added CDLOD (Continuous Distance-Dependent Level of Detail) planetary terrain rendering
+  to `triangular-engine/terrain`:
+  - `CdlodPlanetComponent` (`<cdlodPlanet>`): Declarative Angular planetary renderer with GPU
+    vertex geomorphing, feature-adaptive relief decimation, and multi-threaded Web Workers.
+  - `selectCdlodPatches`: Quadtree selection algorithm with screen-space error thresholding,
+    horizon culling, view frustum culling, and 2:1 quadtree level balancing.
+  - `generateCdlodPatchRawBuffers` / `generateCdlodOceanPatchRawBuffers`: High-speed typed array
+    buffer generation with transferable 0-copy ArrayBuffers.
+  - `CdlodWorkerPool` and `handleCdlodWorkerMessage`: Background Web Worker thread pooling for terrain
+    and ocean mesh synthesis.
+  - Motion look-ahead (`CdlodMotionLookAhead`, `resolveMotionLookAhead`) with linear hypersonic
+    and curved Keplerian orbital velocity prediction.
+  - Custom terrain and ocean shader materials (`createCdlodTerrainMaterial`, `createOceanMaterial`)
+    with slope-based cliff strata and logarithmic depth buffer support.
+  - Added interactive `/cdlod-planet-lab` demo in `demo-app`.
 - Added deterministic consumer-provided perch selection and a tested planetary
   animal-group interaction path from reconstruction through aircraft fleeing to
   bounded landing.
