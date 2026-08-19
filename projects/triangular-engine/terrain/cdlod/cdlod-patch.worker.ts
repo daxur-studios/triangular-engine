@@ -1,93 +1,27 @@
 /// <reference lib="webworker" />
 
-import { createSurfaceSampler, ISurfaceSampler } from 'triangular-engine/celestial';
 import {
-  generateCdlodOceanPatchRawBuffers,
-  generateCdlodPatchRawBuffers,
-} from './cdlod-patch-mesher';
-import {
+  handleCdlodWorkerMessage,
   ICdlodWorkerRequest,
-  ICdlodWorkerResponse,
-} from './cdlod-worker-protocol';
+} from 'triangular-engine/celestial';
 
-let currentBodyId = '';
-let currentBodySeed = 0;
-let sampler: ISurfaceSampler | undefined;
+export { handleCdlodWorkerMessage };
 
-export function handleCdlodWorkerMessage(
-  data: ICdlodWorkerRequest,
-  customSamplerFactory?: (body: ICdlodWorkerRequest['body']) => ISurfaceSampler,
-): { response: ICdlodWorkerResponse; transfer?: Transferable[] } {
-  try {
-    if (data.type === 'terrain') {
-      const bodySeed = data.body.terrain?.seed ?? 0;
-      if (!sampler || currentBodyId !== data.body.id || currentBodySeed !== bodySeed) {
-        currentBodyId = data.body.id;
-        currentBodySeed = bodySeed;
-        sampler = customSamplerFactory
-          ? customSamplerFactory(data.body)
-          : createSurfaceSampler(data.body);
-      }
-
-      const raw = generateCdlodPatchRawBuffers(
-        data.body,
-        sampler,
-        data.address,
-        data.resolution,
-        data.centerBodyFixedM,
-      );
-
-      const response: ICdlodWorkerResponse = {
-        requestId: data.requestId,
-        id: data.id,
-        type: 'terrain',
-        raw,
-        success: true,
-      };
-
-      const transfer: Transferable[] = [
-        raw.positions.buffer,
-        raw.coarsePositions.buffer,
-        raw.normals.buffer,
-        raw.uvs.buffer,
-      ];
-      if (raw.colors) transfer.push(raw.colors.buffer);
-      if (raw.elevations) transfer.push(raw.elevations.buffer);
-
-      return { response, transfer };
+if (
+  typeof self !== 'undefined' &&
+  typeof (self as unknown as { postMessage: (msg: unknown) => void }).postMessage === 'function' &&
+  typeof (self as unknown as { document?: unknown }).document === 'undefined'
+) {
+  const workerScope = self as unknown as {
+    postMessage: (msg: unknown, transfer?: Transferable[]) => void;
+    onmessage: ((event: MessageEvent<ICdlodWorkerRequest>) => void) | null;
+  };
+  workerScope.onmessage = (event: MessageEvent<ICdlodWorkerRequest>) => {
+    const { response, transfer } = handleCdlodWorkerMessage(event.data);
+    if (transfer && transfer.length > 0) {
+      workerScope.postMessage(response, transfer);
     } else {
-      const raw = generateCdlodOceanPatchRawBuffers(
-        data.body,
-        data.address,
-        data.resolution,
-        data.centerBodyFixedM,
-      );
-
-      const response: ICdlodWorkerResponse = {
-        requestId: data.requestId,
-        id: data.id,
-        type: 'ocean',
-        raw,
-        success: true,
-      };
-
-      const transfer: Transferable[] = [
-        raw.positions.buffer,
-        raw.coarsePositions.buffer,
-        raw.normals.buffer,
-        raw.uvs.buffer,
-      ];
-
-      return { response, transfer };
+      workerScope.postMessage(response);
     }
-  } catch (err: unknown) {
-    const response: ICdlodWorkerResponse = {
-      requestId: data.requestId,
-      id: data.id,
-      type: data.type,
-      success: false,
-      errorMessage: err instanceof Error ? err.message : String(err),
-    };
-    return { response };
-  }
+  };
 }

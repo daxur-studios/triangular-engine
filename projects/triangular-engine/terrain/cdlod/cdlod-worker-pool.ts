@@ -1,19 +1,22 @@
-import { ICelestialBody, Vec3d } from 'triangular-engine/celestial';
-import { IPlanetPatchAddress } from './cdlod-quadtree';
 import {
+  ICelestialBody,
+  Vec3d,
+  IPlanetPatchAddress,
+  IPlanePatchAddress,
   CdlodPatchType,
   ICdlodWorkerRequest,
   ICdlodWorkerResponse,
-} from './cdlod-worker-protocol';
-import { ICdlodRawPatchBuffers } from './cdlod-patch-mesher';
+  ICdlodRawPatchBuffers,
+} from 'triangular-engine/celestial';
 
 export interface ICdlodWorkerJob {
   id: string;
   type: CdlodPatchType;
-  body: ICelestialBody;
-  address: IPlanetPatchAddress;
+  body?: ICelestialBody;
+  address: IPlanetPatchAddress | IPlanePatchAddress;
   resolution: number;
   centerBodyFixedM: Vec3d;
+  rootPatchSizeM?: number;
 }
 
 export interface ICdlodWorkerPoolOptions {
@@ -200,5 +203,9 @@ export class CdlodWorkerPool {
       }
     }
     this.#slots.length = 0;
+  }
+
+  destroy(): void {
+    this.terminate();
   }
 }
