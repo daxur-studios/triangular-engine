@@ -111,6 +111,13 @@ function sampleCycle(
       mode: 'perched', perchId: site.id,
     };
     });
+  const roostCenter = definition.roostSites.length > 0
+    ? {
+      x: definition.roostSites.reduce((sum, site) => sum + site.position.x, 0) / definition.roostSites.length,
+      y: definition.roostSites.reduce((sum, site) => sum + site.position.y, 0) / definition.roostSites.length,
+      z: definition.roostSites.reduce((sum, site) => sum + site.position.z, 0) / definition.roostSites.length,
+    }
+    : definition.flightTarget;
   let replaySteps = 0;
   let stepStart = start?.cycleIndex === cycleIndex ? start.cycleTimeS : 0;
   while (stepStart < cycleTimeS - 1e-12) {
@@ -122,10 +129,11 @@ function sampleCycle(
       throw new RangeError('Animal flock cycle exceeds its bounded replay-step limit.');
     }
     const phase = phaseAt(stepStart + Math.min(1e-9, deltaSeconds / 2), definition);
+    const target = phase === 'flying' ? definition.flightTarget : roostCenter;
     members = stepAnimalAirFlock({
       members,
       intent: phase === 'flying' ? 'fly' : 'roost',
-      target: definition.flightTarget,
+      target,
       roostSites: definition.roostSites,
       deltaSeconds,
       universalTime: stepStart + deltaSeconds,

@@ -140,10 +140,13 @@ function sampleCycle(
       ? phaseAt(start + Math.min(1e-9, deltaSeconds / 2), definition) : 'resting';
     const intent = phase === 'resting' ? 'rest'
       : phase === 'outbound-travel' ? 'travel'
-        : phase === 'grazing' ? 'graze' : 'rest';
-    const patch = phase === 'resting' || phase === 'return-travel' ? definition.homePatch : selected!;
+        : phase === 'grazing' ? 'graze' : 'travel';
+    const patch = phase === 'resting' ? definition.homePatch : selected!;
+    const target = phase === 'return-travel' || phase === 'resting'
+      ? definition.homePatch.position
+      : selected!.position;
     members = stepAnimalLandHerd({
-      members, intent, target: patch.position,
+      members, intent, target,
       ...(intent === 'travel' ? {} : { patches: [patch] }),
       deltaSeconds, universalTime: start + deltaSeconds,
     }, definition.policy).members;

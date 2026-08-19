@@ -1,9 +1,9 @@
 # Animals first slice execution plan
 
-Status: Steps 1–6 implemented; deterministic residency, smooth flock motion,
-vehicle flee/recovery, and renderer-neutral presentation snapshots are complete.
-The full demo acceptance gate remains pending. Camera integration and full
-streaming remain deferred.
+Status: Complete. Historical baseline execution plan for the initial
+isolated flock slice (Milestones 0–1). Active architecture and planetary-time
+reconstruction milestones are tracked in
+[011b_animals_planetary_time_slice.md](011b_animals_planetary_time_slice.md).
 
 Parent design: [011_animals_sublibrary.md](011_animals_sublibrary.md)
 

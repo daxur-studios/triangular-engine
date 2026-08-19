@@ -1,17 +1,11 @@
 # Animals sub-library
 
-Status: Milestones 0–1 implemented (`triangular-engine/animals`: deterministic
-flocks, residency, presentation). Milestone 2 has one minimal slice —
-single-agent seek-and-land (`stepArrival`) — added to unblock
-[014_procedural_sublibrary.md](014_procedural_sublibrary.md)'s Milestone 5;
-the rest of Milestone 2 (habitat regions, activity selection, reachability)
-is not built. See Roadmap below for per-milestone detail.
-
-The next integration checkpoint is the arbitrary-time planetary flock proof in
+Status: Core architecture implemented (`triangular-engine/animals`,
+`triangular-engine/animals/terrain`, `triangular-engine/animals/water`).
+Shape-neutral movement kernels, population queries, and local materialization
+are proven across plane, sphere, and cylinder worlds. Land herd, aquatic school,
+and air flock policies exist and are stabilized in
 [011b_animals_planetary_time_slice.md](011b_animals_planetary_time_slice.md).
-It does not claim planetary migration is implemented; it establishes the time,
-reconstruction, materialization, and consequence boundary needed before that
-work can be trustworthy.
 
 ## Goal
 
@@ -606,3 +600,17 @@ milestone scales that boundary to population counts and transfers.
 - Recorded timeline branching as an unresolved game policy: querying an old
   time is deterministic, but acting after rewind requires the game to choose
   whether history branches, replaces later events, or is read-only.
+
+### 2026-08-19: POC & cycle stabilization and unified roadmap
+
+- Fixed return-travel herd intent so returning animals maintain travel dynamics
+  without premature resting locks.
+- Re-anchored air flock overflow holding target to the roost canopy centroid,
+  keeping unperched birds circling above the trees rather than in distant empty space.
+- Made policy limits and bathymetry depth calculations dynamic in the combined
+  terrain lab, resolving medium/large world scaling failures across plane,
+  sphere, and cylinder topologies.
+- Replaced rigid grid placements with organic procedural scatter distributions.
+- Aligned active work under [011b_animals_planetary_time_slice.md](011b_animals_planetary_time_slice.md)
+  toward Markov wandering, flora perch sockets, ground landing, and dynamic
+  residency streaming.

@@ -329,12 +329,33 @@ unload/reload are deterministic; surface and water constraints are enforced by
 tests; interactions and one persisted consequence survive reconstruction; and
 headed pages contain no authored movement or behavior shortcuts.
 
-## Terrain checkpoint perch note (2026-08-18)
+## Terrain checkpoint stabilization and realism directive (2026-08-19)
 
-The terrain checkpoint briefly used large procedural `roostSlotSpacingM` values
-to separate multiple birds. This was an incorrect page-level workaround: the
-generic slot resolver moves same-roost slots along the sampled surface, which
-can place birds away from the actual tree mesh. Do not use slot spacing to
-invent branch geometry. The checkpoint now allows one bird per tree roost and
-keeps overflow birds airborne in holding until real flora perch sockets and
-ground landing are implemented.
+The combined terrain checkpoint (`/animals-terrain-world-lab`) and underlying
+cycle playback samplers were stabilized to eliminate unnatural behaviors:
+
+1. **Return-travel herd dynamics**: Fixed `intent` during `return-travel` so
+   returning herds execute active travel movement toward home rather than
+   switching to resting mode upon arrival radius proximity, eliminating
+   cycle-boundary teleportation.
+2. **Roost canopy holding target**: Holding birds during roosting phases now
+   circle the roost canopy centroid above trees rather than orbiting the
+   distant flight waypoint in the sky.
+3. **Dynamic policy limits and water scaling**: Fixed policy limit bounds
+   (`maximumRoostSites`, `maximumPatches`) and corrected water-column depth
+   calculations across all scale factors (`small`, `medium`, `large`) for
+   plane, sphere, and cylinder worlds.
+4. **Natural procedural scattering**: Replaced rigid Cartesian grid placements
+   with organic procedural distributions for meadows, tree groves, and animal
+   territories.
+
+### Next Evolution Steps
+- **Markov / Waypoint Wandering**: Replace rigid 4-phase cyclic loops with
+  continuous wandering and smooth time-warp interpolation.
+- **Flora Perch Socket Integration**: Derive tree branch sockets directly from
+  procedural flora skeletons via `deriveFloraSockets()`.
+- **Ground Bird Landing**: Introduce ground foraging and takeoff/landing transitions.
+- **Disturbance Response**: Connect `resolveAnimalDisturbances()` so vehicles,
+  aircraft, and player movement trigger natural fleeing and group scattering.
+- **Dynamic Residency Streaming**: Seamlessly transition distant aggregate
+  population groups into materialized nearby boid clusters.
