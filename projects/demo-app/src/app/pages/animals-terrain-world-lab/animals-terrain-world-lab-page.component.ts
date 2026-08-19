@@ -77,12 +77,12 @@ export class AnimalsTerrainWorldLabPageComponent {
     // World size changes the sampled habitat footprint, not the scale of an
     // animal or tree. Keep the small checkpoint compact, then add deterministic
     // tangent-frame sites around it as the world grows.
-    const patchCount = size === 'small' ? 3 : size === 'medium' ? 9 : 18;
+    const patchCount = size === 'small' ? 3 : size === 'medium' ? 16 : 36;
     const grazingPatches = Array.from({ length: patchCount }, (_, index) => {
       if (index === 0) return patch(`${shape}-home`, home.position, 2, 1);
-      const column = (index - 1) % 5 - 2;
-      const row = Math.floor((index - 1) / 5) - 1;
-      const spacing = 4.5 * factor;
+      const column = (index - 1) % 6 - 3;
+      const row = Math.floor((index - 1) / 6) - 3;
+      const spacing = 5 * factor;
       const offset = add(scale(home.tangentU, column * spacing), scale(home.tangentV, row * spacing));
       const position = surface.moveAlongSurface(home.position, offset, 1);
       return patch(`${shape}-habitat-${index}`, position, 2.2, index % 3 === 0 ? .75 : .9);
@@ -100,7 +100,7 @@ export class AnimalsTerrainWorldLabPageComponent {
     const herdDefinitions: AnimalLandHerdCycleDefinition[] = Array.from({ length: groupCount }, (_, index) => {
       if (index === 0) return definition;
       const spreadTangent = shape === 'cylinder' ? home.tangentU : home.tangentV;
-      const shift = scale(spreadTangent, (index % 4) * 2.5 + Math.floor(index / 4) * 1.25);
+      const shift = scale(spreadTangent, ((index % 4) * 5 + Math.floor(index / 4) * 3) * factor);
       const shiftedPatches = grazingPatches.map(patch => ({ ...patch, position: surface.moveAlongSurface(patch.position, shift, 1) }));
       return { ...definition, groupId: `${shape}-${size}-terrain-herd-${index}`, groupSeed: definition.groupSeed + index, homePatch: shiftedPatches[index % shiftedPatches.length], grazingPatches: shiftedPatches };
     });
@@ -117,7 +117,7 @@ export class AnimalsTerrainWorldLabPageComponent {
     const birdDefinitions: AnimalAirFlockCycleDefinition[] = Array.from({ length: groupCount }, (_, index) => {
       if (index === 0) return birdDefinition;
       const spreadTangent = shape === 'cylinder' ? home.tangentU : home.tangentV;
-      const shift = scale(spreadTangent, (index % 4) * 2.5 + Math.floor(index / 4) * 1.25);
+      const shift = scale(spreadTangent, ((index % 4) * 5 + Math.floor(index / 4) * 3) * factor);
       return { ...birdDefinition, groupId: `${shape}-${size}-terrain-birds-${index}`, flightTarget: surface.sample(surface.moveAlongSurface(flightTarget, shift, 1)).position };
     });
     const water = this.makeWater(shape, factor);
