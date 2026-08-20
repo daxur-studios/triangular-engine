@@ -332,7 +332,7 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
           // Perform raycasting
           const object3D = this.object3DComponent.object3D();
           if (object3D) {
-            const intersects = this.raycastService.raycaster.intersectObject(
+            const intersects = this.raycaster.intersectObject(
               object3D,
               true,
             );
