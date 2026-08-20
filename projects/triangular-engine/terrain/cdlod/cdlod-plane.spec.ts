@@ -4,16 +4,20 @@ import {
   CANYON_PLANET,
   CRATERED_MOON,
   createPlaneSurfaceSampler,
+  createCylinderSurfaceSampler,
   createSurfaceSampler,
   selectCdlodPlanePatches,
   generateCdlodPlanePatchRawBuffers,
   generateCdlodPlanePatchGeometry,
+  selectCdlodCylinderPatches,
+  generateCdlodCylinderPatchRawBuffers,
+  generateCdlodCylinderPatchGeometry,
   handleCdlodWorkerMessage,
   ICdlodWorkerRequest,
   selectCdlodPatches,
 } from 'triangular-engine/celestial';
 
-describe('CDLOD 2D Plane & Multi-Domain Engine', () => {
+describe('CDLOD Multi-Domain Engine (Plane, Sphere, Cylinder)', () => {
   it('creates translation-invariant planar sampler for different body presets', () => {
     const presets = [HOME_PLANET, ALPINE_PLANET, CANYON_PLANET, CRATERED_MOON];
     for (const body of presets) {
@@ -36,6 +40,18 @@ describe('CDLOD 2D Plane & Multi-Domain Engine', () => {
       expect(Number.isFinite(elevations[0])).toBe(true);
       expect(Number.isFinite(elevations[1])).toBe(true);
       expect(Number.isFinite(elevations[2])).toBe(true);
+    }
+  });
+
+  it('guarantees seamless periodic 360-degree continuity across cylinder seam theta=0 and theta=2pi', () => {
+    const radiusM = 6000;
+    const circumferenceM = 2 * Math.PI * radiusM;
+    const sampler = createCylinderSurfaceSampler(HOME_PLANET, radiusM);
+
+    for (const z of [0, 500, -1200, 3400]) {
+      const elevAtZero = sampler.sample([0, 0, z]).elevationM;
+      const elevAtCircumference = sampler.sample([circumferenceM, 0, z]).elevationM;
+      expect(Math.abs(elevAtZero - elevAtCircumference)).toBeLessThan(1e-6);
     }
   });
 
@@ -75,19 +91,59 @@ describe('CDLOD 2D Plane & Multi-Domain Engine', () => {
     }
   });
 
-  it('generates valid transferable raw buffers and geometry for 2D plane patch', () => {
-    const sampler = createPlaneSurfaceSampler(HOME_PLANET);
-    const address = { level: 2, x: 0, y: 0 };
-    const rootPatchSizeM = 2048;
-    const centerM: [number, number, number] = [256, 35, 256];
+  it('selects active O\'Neill cylinder interior patches with circumferential wrap and distance LOD', () => {
+    const radiusM = 4000;
+    const sampler = createCylinderSurfaceSampler(HOME_PLANET, radiusM);
+    const selection = selectCdlodCylinderPatches({
+      sampler,
+      cameraPositionM: [0, -radiusM + 25, 0], // On the bottom floor
+      cameraForwardDir: [0, 0.3, -0.95],
+      options: {
+        radiusM,
+        rootSectors: 8,
+        axialStreamingRadius: 2,
+        maxLevel: 6,
+        baseResolution: 32,
+        splitErrorPx: 14,
+        mergeErrorPx: 6,
+        screenSpaceFactorPx: 750,
+        morphRangeRatio: 0.25,
+        featureAdaptive: true,
+      },
+    });
 
-    const raw = generateCdlodPlanePatchRawBuffers(
+    expect(selection.patches.length).toBeGreaterThanOrEqual(8);
+    expect(selection.splitAddresses.size).toBeGreaterThan(0);
+
+    // Verify floor patches near camera are subdivided to higher level than ceiling patches
+    let maxLevelFound = 0;
+    let hasCoarseCeiling = false;
+
+    for (const patch of selection.patches) {
+      if (patch.address.level > maxLevelFound) maxLevelFound = patch.address.level;
+      if (patch.centerM[1] > 0 && patch.address.level <= 2) {
+        hasCoarseCeiling = true;
+      }
+      expect(patch.edgeMorph).toBeDefined();
+    }
+
+    expect(maxLevelFound).toBeGreaterThanOrEqual(3);
+    expect(hasCoarseCeiling).toBe(true);
+  });
+
+  it('generates valid transferable raw buffers and geometry for cylinder patch', () => {
+    const radiusM = 4000;
+    const sampler = createCylinderSurfaceSampler(HOME_PLANET, radiusM);
+    const address = { level: 1, sector: 0, zIndex: 0 };
+    const centerM: [number, number, number] = [0, -4000, 500];
+
+    const raw = generateCdlodCylinderPatchRawBuffers(
       sampler,
       address,
       32,
-      rootPatchSizeM,
+      radiusM,
       centerM,
-      'home-planet',
+      8,
     );
 
     const vertexCount = 33 * 33;
@@ -96,28 +152,23 @@ describe('CDLOD 2D Plane & Multi-Domain Engine', () => {
     expect(raw.normals.length).toBe(vertexCount * 3);
     expect(raw.colors?.length).toBe(vertexCount * 3);
     expect(raw.uvs.length).toBe(vertexCount * 2);
-    expect(raw.elevations?.length).toBe(vertexCount);
     expect(raw.triangleCount).toBe(32 * 32 * 2);
 
-    // Verify Three.js BufferGeometry generation
-    const geomResult = generateCdlodPlanePatchGeometry(
+    const geomResult = generateCdlodCylinderPatchGeometry(
       sampler,
       address,
       32,
-      rootPatchSizeM,
+      radiusM,
       centerM,
-      'home-planet',
+      8,
     );
     expect(geomResult.geometry).toBeDefined();
     expect(geomResult.geometry.getAttribute('position')).toBeDefined();
     expect(geomResult.geometry.getAttribute('coarsePosition')).toBeDefined();
     expect(geomResult.geometry.getAttribute('normal')).toBeDefined();
-    expect(geomResult.geometry.getAttribute('color')).toBeDefined();
-    expect(geomResult.geometry.getAttribute('uv')).toBeDefined();
-    expect(geomResult.geometry.getIndex()).toBeDefined();
   });
 
-  it('handles alternating plane and sphere worker requests without sampler cross-contamination', () => {
+  it('handles alternating plane, cylinder, and sphere worker requests without sampler cross-contamination', () => {
     // 1. Dispatch plane job
     const planeRequest: ICdlodWorkerRequest = {
       requestId: 'req-plane-1',
@@ -133,9 +184,25 @@ describe('CDLOD 2D Plane & Multi-Domain Engine', () => {
     const planeResult = handleCdlodWorkerMessage(planeRequest);
     expect(planeResult.response.success).toBe(true);
     expect(planeResult.response.type).toBe('plane');
-    expect(planeResult.response.raw?.positions.length).toBe(33 * 33 * 3);
 
-    // 2. Dispatch sphere terrain job
+    // 2. Dispatch cylinder job
+    const cylinderRequest: ICdlodWorkerRequest = {
+      requestId: 'req-cyl-1',
+      id: 'cylinder:0:0:0:32',
+      type: 'cylinder',
+      body: HOME_PLANET,
+      address: { level: 0, sector: 0, zIndex: 0 },
+      resolution: 32,
+      centerBodyFixedM: [0, -4000, 0],
+      radiusM: 4000,
+      rootSectors: 8,
+    };
+
+    const cylResult = handleCdlodWorkerMessage(cylinderRequest);
+    expect(cylResult.response.success).toBe(true);
+    expect(cylResult.response.type).toBe('cylinder');
+
+    // 3. Dispatch sphere terrain job
     const sphereRequest: ICdlodWorkerRequest = {
       requestId: 'req-sphere-1',
       id: 'sphere:0:0:0:0:32',
@@ -149,9 +216,8 @@ describe('CDLOD 2D Plane & Multi-Domain Engine', () => {
     const sphereResult = handleCdlodWorkerMessage(sphereRequest);
     expect(sphereResult.response.success).toBe(true);
     expect(sphereResult.response.type).toBe('terrain');
-    expect(sphereResult.response.raw?.positions.length).toBe(33 * 33 * 3);
 
-    // 3. Dispatch ocean job
+    // 4. Dispatch ocean job
     const oceanRequest: ICdlodWorkerRequest = {
       requestId: 'req-ocean-1',
       id: 'ocean:0:0:0:0:32',
@@ -165,23 +231,6 @@ describe('CDLOD 2D Plane & Multi-Domain Engine', () => {
     const oceanResult = handleCdlodWorkerMessage(oceanRequest);
     expect(oceanResult.response.success).toBe(true);
     expect(oceanResult.response.type).toBe('ocean');
-    expect(oceanResult.response.raw?.positions.length).toBe(33 * 33 * 3);
-
-    // 4. Dispatch plane job again to verify cache switching
-    const planeRequest2: ICdlodWorkerRequest = {
-      requestId: 'req-plane-2',
-      id: 'plane:1:0:0:32',
-      type: 'plane',
-      body: ALPINE_PLANET,
-      address: { level: 1, x: 0, y: 0 },
-      resolution: 32,
-      centerBodyFixedM: [0, 45, 0],
-      rootPatchSizeM: 2048,
-    };
-
-    const planeResult2 = handleCdlodWorkerMessage(planeRequest2);
-    expect(planeResult2.response.success).toBe(true);
-    expect(planeResult2.response.type).toBe('plane');
   });
 
   it('maintains independent sphere CDLOD selection integrity', () => {

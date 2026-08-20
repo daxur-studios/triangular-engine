@@ -3,6 +3,7 @@ import {
   Vec3d,
   IPlanetPatchAddress,
   IPlanePatchAddress,
+  ICylinderPatchAddress,
   CdlodPatchType,
   ICdlodWorkerRequest,
   ICdlodWorkerResponse,
@@ -13,10 +14,13 @@ export interface ICdlodWorkerJob {
   id: string;
   type: CdlodPatchType;
   body?: ICelestialBody;
-  address: IPlanetPatchAddress | IPlanePatchAddress;
+  address: IPlanetPatchAddress | IPlanePatchAddress | ICylinderPatchAddress;
   resolution: number;
   centerBodyFixedM: Vec3d;
   rootPatchSizeM?: number;
+  radiusM?: number;
+  rootSectors?: number;
+  rootPatchLengthM?: number;
 }
 
 export interface ICdlodWorkerPoolOptions {

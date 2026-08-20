@@ -7,3 +7,4 @@ export * from './cdlod-patch.worker';
 export * from './cdlod-worker-pool';
 export * from './cdlod-planet.component';
 export * from './cdlod-plane.component';
+export * from './cdlod-cylinder.component';

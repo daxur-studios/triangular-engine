@@ -103,6 +103,7 @@ export class FloraLabPageComponent {
   readonly seed = signal(1);
   readonly spacing = signal(DEFAULT_SPACING_M);
   readonly wireframe = signal(false);
+  readonly wireframeMode = signal<'uniform' | 'name-hash'>('uniform');
   readonly showSockets = signal(true);
   readonly species = signal<FloraSpeciesKey>('oak');
   readonly speciesOptions = SPECIES_OPTIONS;
@@ -176,7 +177,12 @@ export class FloraLabPageComponent {
 
   toggleWireframe(): void {
     this.wireframe.set(!this.wireframe());
-    this.material.wireframe = this.wireframe();
+  }
+
+  toggleWireframeMode(): void {
+    this.wireframeMode.update((value) =>
+      value === 'uniform' ? 'name-hash' : 'uniform',
+    );
   }
 
   toggleSockets(): void {

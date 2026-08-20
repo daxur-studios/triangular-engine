@@ -16,14 +16,14 @@ import {
   ICelestialBody,
   ISurfaceSampler,
   Vec3d,
-  createPlaneSurfaceSampler,
+  createCylinderSurfaceSampler,
   HOME_PLANET,
   CdlodMotionLookAhead,
-  IPlanePatchAddress,
-  ICdlodPlanePatch,
-  ICdlodPlaneSelectionOptions,
-  selectCdlodPlanePatches,
-  generateCdlodPlanePatchGeometry,
+  ICylinderPatchAddress,
+  ICdlodCylinderPatch,
+  ICdlodCylinderSelectionOptions,
+  selectCdlodCylinderPatches,
+  generateCdlodCylinderPatchGeometry,
   reconstructCdlodBufferGeometry,
   ICdlodTerrainPalette,
   ICdlodShaderUniforms,
@@ -50,19 +50,20 @@ interface IResidentPatchMesh {
 }
 
 /**
- * Declarative CDLOD 2D Plane Terrain Component.
+ * Declarative CDLOD O'Neill Habitat / Interior Cylinder Terrain Component.
  *
  * Provides Continuous Distance-Dependent Level of Detail with GPU vertex geomorphing,
- * translation-invariant 2D fractal noise, and multi-threaded worker meshing.
+ * circumferential [0, 2pi) periodic quadtree wrapping, inward-curving terrain normal mapping,
+ * seamless 3D circle periodic procedural noise, and multi-threaded worker meshing.
  */
 @Component({
   standalone: true,
-  selector: 'cdlodPlane, app-cdlod-plane',
+  selector: 'cdlodCylinder, app-cdlod-cylinder',
   imports: [],
   template: '',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class CdlodPlaneComponent implements OnDestroy {
+export class CdlodCylinderComponent implements OnDestroy {
   private readonly engineService = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -76,8 +77,10 @@ export class CdlodPlaneComponent implements OnDestroy {
 
   readonly sampler = input<ISurfaceSampler | null>(null);
   readonly body = input<ICelestialBody | null>(null);
-  readonly rootPatchSizeM = input<number>(2048);
-  readonly streamingRadiusTiles = input<number>(2);
+  readonly radiusM = input<number>(4000);
+  readonly rootSectors = input<number>(8);
+  readonly rootPatchLengthM = input<number | null>(null);
+  readonly axialStreamingRadius = input<number>(3);
   readonly maxLevel = input<number>(6);
   readonly baseResolution = input<number>(32);
   readonly splitErrorPx = input<number>(14);
@@ -90,9 +93,9 @@ export class CdlodPlaneComponent implements OnDestroy {
   readonly freezeLod = input(false);
   readonly useWorkers = input(true);
   readonly workerFactory = input<(() => Worker) | null>(null);
-  readonly sunDirection = input<Vector3Tuple>([10, 20, 10]);
+  readonly sunDirection = input<Vector3Tuple>([0, 1, 0]);
   readonly sunColor = input<Vector3Tuple | string>([1, 0.98, 0.92]);
-  readonly ambientColor = input<Vector3Tuple | string>([0.22, 0.24, 0.3]);
+  readonly ambientColor = input<Vector3Tuple | string>([0.3, 0.32, 0.38]);
   readonly palette = input<ICdlodTerrainPalette | null>(null);
   readonly motionLookAhead = input<CdlodMotionLookAhead | null>(null);
 
@@ -116,7 +119,7 @@ export class CdlodPlaneComponent implements OnDestroy {
     const s = this.sampler();
     if (s) return s;
     const b = this.body() ?? HOME_PLANET;
-    return createPlaneSurfaceSampler(b);
+    return createCylinderSurfaceSampler(b, this.radiusM());
   });
 
   readonly activePalette = computed<ICdlodTerrainPalette>(() => {
@@ -124,13 +127,16 @@ export class CdlodPlaneComponent implements OnDestroy {
   });
 
   constructor() {
-    this.rootGroup.name = 'CDLOD_Plane_Root';
-    this.terrainGroup.name = 'CDLOD_Plane_TerrainGroup';
+    this.rootGroup.name = 'CDLOD_Cylinder_Root';
+    this.terrainGroup.name = 'CDLOD_Cylinder_TerrainGroup';
     this.rootGroup.add(this.terrainGroup);
 
-    // Dynamic geometry invalidation effect when plane dimensions or parameters change
+    // Dynamic geometry invalidation effect when cylinder dimensions or parameters change
     effect(() => {
-      this.rootPatchSizeM();
+      // Track dependencies
+      this.radiusM();
+      this.rootSectors();
+      this.rootPatchLengthM();
       this.baseResolution();
       this.body();
       this.palette();
@@ -238,11 +244,16 @@ export class CdlodPlaneComponent implements OnDestroy {
     const camFwdDir: Vec3d = [fwd.x, fwd.y, fwd.z];
 
     const sampler = this.effectiveSampler();
-    const rootSize = this.rootPatchSizeM();
+    const radiusM = this.radiusM();
+    const rootSectors = this.rootSectors();
+    const rootPatchLengthM =
+      this.rootPatchLengthM() ?? (2 * Math.PI * radiusM) / rootSectors;
 
-    const options: ICdlodPlaneSelectionOptions = {
-      rootPatchSizeM: rootSize,
-      streamingRadiusTiles: this.streamingRadiusTiles(),
+    const options: ICdlodCylinderSelectionOptions = {
+      radiusM,
+      rootSectors,
+      rootPatchLengthM,
+      axialStreamingRadius: this.axialStreamingRadius(),
       maxLevel: this.maxLevel(),
       baseResolution: this.baseResolution(),
       splitErrorPx: this.splitErrorPx(),
@@ -253,7 +264,7 @@ export class CdlodPlaneComponent implements OnDestroy {
     };
 
     if (!this.freezeLod()) {
-      const selection = selectCdlodPlanePatches({
+      const selection = selectCdlodCylinderPatches({
         sampler,
         cameraPositionM: camPosM,
         cameraForwardDir: camFwdDir,
@@ -279,13 +290,15 @@ export class CdlodPlaneComponent implements OnDestroy {
             this.inFlightWorkerRequests.add(needed.id);
             this.workerPool
               .requestPatch({
-                type: 'plane',
+                type: 'cylinder',
                 id: needed.id,
                 body: this.body() ?? undefined,
                 address: needed.address,
                 resolution: needed.resolution,
                 centerBodyFixedM: needed.centerM,
-                rootPatchSizeM: rootSize,
+                radiusM,
+                rootSectors,
+                rootPatchLengthM,
               })
               .then((raw) => {
                 this.inFlightWorkerRequests.delete(needed.id);
@@ -301,24 +314,31 @@ export class CdlodPlaneComponent implements OnDestroy {
         }
       }
 
-      this.reconcilePatches(selection.patches, sampler, rootSize);
+      this.reconcilePatches(
+        selection.patches,
+        sampler,
+        radiusM,
+        rootSectors,
+        rootPatchLengthM,
+      );
     } else {
       this.updateExistingPatchUniforms();
     }
 
-    this.emitTelemetry(camPosM[1]);
+    this.emitTelemetry(Math.abs(Math.hypot(camPosM[0], camPosM[1]) - radiusM));
   }
 
   private reconcilePatches(
-    desiredPatches: readonly ICdlodPlanePatch[],
+    desiredPatches: readonly ICdlodCylinderPatch[],
     sampler: ISurfaceSampler,
-    rootSize: number,
+    radiusM: number,
+    rootSectors: number,
+    rootPatchLengthM: number,
   ): void {
     const desiredKeys = new Set<string>();
     const isWire = this.wireframe();
     const doMorph = this.cdlodMorphing();
     const palette = this.activePalette();
-    const bodyId = this.body()?.id ?? 'home-planet';
 
     for (const patch of desiredPatches) {
       const key = patch.id;
@@ -328,13 +348,14 @@ export class CdlodPlaneComponent implements OnDestroy {
       if (!resident) {
         let geom = this.geometryCache.get(key);
         if (!geom) {
-          const res = generateCdlodPlanePatchGeometry(
+          const res = generateCdlodCylinderPatchGeometry(
             sampler,
             patch.address,
             patch.resolution,
-            rootSize,
+            radiusM,
             patch.centerM,
-            bodyId,
+            rootSectors,
+            rootPatchLengthM,
           );
           geom = res.geometry;
           this.geometryCache.set(key, geom);

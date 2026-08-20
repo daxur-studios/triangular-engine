@@ -3,6 +3,8 @@ export * from './cdlod-quadtree';
 export * from './cdlod-patch-mesher';
 export * from './cdlod-plane-quadtree';
 export * from './cdlod-plane-mesher';
+export * from './cdlod-cylinder-quadtree';
+export * from './cdlod-cylinder-mesher';
 export * from './cdlod-materials';
 export * from './cdlod-worker-protocol';
 export * from './cdlod-patch.worker';

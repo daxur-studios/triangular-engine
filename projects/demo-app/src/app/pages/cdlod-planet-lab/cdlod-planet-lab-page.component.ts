@@ -3,7 +3,6 @@ import {
   Component,
   computed,
   signal,
-  viewChild,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -13,9 +12,11 @@ import {
   RaycastFocusContext,
   RaycastOrbitControlsComponent,
 } from 'triangular-engine';
+import { Vector3 } from 'three';
 import {
   CdlodPlanetComponent,
   CdlodPlaneComponent,
+  CdlodCylinderComponent,
   ICdlodTelemetry,
   QualityPresetId,
 } from 'triangular-engine/terrain';
@@ -30,9 +31,8 @@ import {
   ICelestialBody,
   createPlaneSurfaceSampler,
 } from 'triangular-engine/celestial';
-import { Mesh, Object3D } from 'three';
 
-export type CdlodTopology = 'sphere' | 'plane';
+export type CdlodTopology = 'sphere' | 'plane' | 'cylinder';
 
 interface IPlanetOption {
   id: string;
@@ -50,6 +50,7 @@ interface IPlanetOption {
     RaycastOrbitControlsComponent,
     CdlodPlanetComponent,
     CdlodPlaneComponent,
+    CdlodCylinderComponent,
   ],
   providers: [
     ...EngineService.provide({
@@ -105,6 +106,20 @@ interface IPlanetOption {
             [useWorkers]="useWorkers()"
             (telemetry)="onTelemetry($event)"
           />
+        } @else if (topology() === 'cylinder') {
+          <cdlodCylinder
+            [body]="selectedBody()"
+            [radiusM]="cylinderRadiusM()"
+            [rootSectors]="cylinderRootSectors()"
+            [axialStreamingRadius]="cylinderAxialRadius()"
+            [maxLevel]="cylinderMaxLevel()"
+            [wireframe]="wireframe()"
+            [cdlodMorphing]="cdlodMorphing()"
+            [featureAdaptive]="featureAdaptive()"
+            [freezeLod]="freezeLod()"
+            [useWorkers]="useWorkers()"
+            (telemetry)="onTelemetry($event)"
+          />
         }
       </scene>
 
@@ -136,6 +151,14 @@ interface IPlanetOption {
               (click)="setTopology('plane')"
             >
               2D Plane
+            </button>
+            <button
+              type="button"
+              class="pill-btn"
+              [class.active]="topology() === 'cylinder'"
+              (click)="setTopology('cylinder')"
+            >
+              O'Neill Cylinder
             </button>
           </div>
         </section>
@@ -183,7 +206,7 @@ interface IPlanetOption {
               </button>
             </div>
           </section>
-        } @else {
+        } @else if (topology() === 'plane') {
           <section class="control-group">
             <label class="control-label">
               Root Patch Size: {{ (planeRootSizeM() / 1000).toFixed(1) }} km
@@ -228,6 +251,79 @@ interface IPlanetOption {
               step="1"
               [ngModel]="planeMaxLevel()"
               (ngModelChange)="planeMaxLevel.set($event)"
+              class="styled-slider"
+            />
+          </section>
+        } @else if (topology() === 'cylinder') {
+          <section class="control-group">
+            <label class="control-label">
+              Cylinder Radius: {{ (cylinderRadiusM() / 1000).toFixed(1) }} km (Diameter {{
+                ((cylinderRadiusM() * 2) / 1000).toFixed(1)
+              }} km)
+            </label>
+            <input
+              type="range"
+              min="1000"
+              max="12000"
+              step="500"
+              [ngModel]="cylinderRadiusM()"
+              (ngModelChange)="cylinderRadiusM.set($event)"
+              class="styled-slider"
+            />
+          </section>
+
+          <section class="control-group">
+            <label class="control-label">Circumferential Sectors: {{ cylinderRootSectors() }}</label>
+            <div class="pill-group">
+              <button
+                type="button"
+                class="pill-btn"
+                [class.active]="cylinderRootSectors() === 6"
+                (click)="cylinderRootSectors.set(6)"
+              >
+                6
+              </button>
+              <button
+                type="button"
+                class="pill-btn"
+                [class.active]="cylinderRootSectors() === 8"
+                (click)="cylinderRootSectors.set(8)"
+              >
+                8
+              </button>
+              <button
+                type="button"
+                class="pill-btn"
+                [class.active]="cylinderRootSectors() === 12"
+                (click)="cylinderRootSectors.set(12)"
+              >
+                12
+              </button>
+            </div>
+          </section>
+
+          <section class="control-group">
+            <label class="control-label">Axial Length Tiles: {{ cylinderAxialRadius() * 2 + 1 }}</label>
+            <input
+              type="range"
+              min="1"
+              max="8"
+              step="1"
+              [ngModel]="cylinderAxialRadius()"
+              (ngModelChange)="cylinderAxialRadius.set($event)"
+              class="styled-slider"
+            />
+          </section>
+
+          <section class="control-group">
+            <label class="control-label">Max Subdivision Level: {{ cylinderMaxLevel() }}</label>
+            <input
+              type="range"
+              min="1"
+              max="8"
+              step="1"
+              [ngModel]="cylinderMaxLevel()"
+              (ngModelChange)="cylinderMaxLevel.set($event)"
               class="styled-slider"
             />
           </section>
@@ -485,18 +581,6 @@ interface IPlanetOption {
   },
 })
 export class CdlodPlanetLabPageComponent {
-  /** Focuses navigation on generated CDLOD terrain patches, including plane and sphere topology. */
-  readonly terrainRaycastFocus = (context: RaycastFocusContext) => {
-    context.raycaster.setFromCamera(context.ndc, context.camera);
-    const hit = context.raycaster
-      .intersectObjects(context.sceneChildren as Object3D[], true)
-      .find(
-        (candidate) =>
-          candidate.object instanceof Mesh &&
-          candidate.object.geometry.userData['triangular:terrain'] === true,
-      );
-    return hit?.point ?? null;
-  };
   readonly topology = signal<CdlodTopology>('sphere');
 
   readonly planetOptions: readonly IPlanetOption[] = [
@@ -527,10 +611,19 @@ export class CdlodPlanetLabPageComponent {
 
   readonly selectedPlanetId = signal<string>('home-planet');
   readonly selectedQuality = signal<QualityPresetId>('balanced');
+  
+  // Plane state
   readonly planeRootSizeM = signal<number>(4096);
   readonly planeStreamingRadius = signal<number>(4);
   readonly planeMaxLevel = signal<number>(6);
   readonly planeBaseResolution = signal<number>(32);
+
+  // Cylinder state
+  readonly cylinderRadiusM = signal<number>(4000);
+  readonly cylinderRootSectors = signal<number>(8);
+  readonly cylinderAxialRadius = signal<number>(3);
+  readonly cylinderMaxLevel = signal<number>(6);
+
   readonly wireframe = signal(false);
   readonly cdlodMorphing = signal(true);
   readonly featureAdaptive = signal(true);
@@ -540,6 +633,17 @@ export class CdlodPlanetLabPageComponent {
   readonly freezeLod = signal(false);
 
   readonly telemetry = signal<ICdlodTelemetry | null>(null);
+
+  readonly terrainRaycastFocus = (context: RaycastFocusContext): Vector3 | null => {
+    const hits = context.raycaster.intersectObjects(
+      context.sceneChildren as unknown as import('three').Object3D[],
+      true,
+    );
+    if (hits.length > 0) {
+      return hits[0].point;
+    }
+    return null;
+  };
 
   readonly selectedBody = computed<ICelestialBody>(() => {
     const id = this.selectedPlanetId();
@@ -558,6 +662,11 @@ export class CdlodPlanetLabPageComponent {
       const rootSize = this.planeRootSizeM();
       return [0, elev + Math.max(450, rootSize * 0.25), rootSize * 0.6];
     }
+    if (this.topology() === 'cylinder') {
+      const r = this.cylinderRadiusM();
+      // Position inside the habitat, elevated above the bottom floor
+      return [0, -r + 150, 450];
+    }
     const r = this.selectedBody().radiusM;
     return [0, r * 1.5, r * 2.2];
   });
@@ -565,6 +674,11 @@ export class CdlodPlanetLabPageComponent {
   readonly cameraTarget = computed<[number, number, number]>(() => {
     if (this.topology() === 'plane') {
       return [0, this.originElevationM(), 0];
+    }
+    if (this.topology() === 'cylinder') {
+      const r = this.cylinderRadiusM();
+      // Look forward along the cylinder tube
+      return [0, -r + 80, 0];
     }
     return [0, 0, 0];
   });

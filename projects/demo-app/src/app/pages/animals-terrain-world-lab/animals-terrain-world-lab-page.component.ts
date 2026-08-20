@@ -25,6 +25,7 @@ import {
   type ITerrainField, type ITerrainFieldSample, type TerrainVector3,
 } from 'triangular-engine/terrain';
 import { CylinderWaterDomain, PlaneWaterDomain, SphereWaterDomain, type WaterSurface } from 'triangular-engine/water';
+import { generateTerrainScatterInstances, type ITerrainScatterInstance } from 'triangular-engine/scatter';
 import { buildFloraMesh, FLORA_OAK_ARCHETYPE, FLORA_OAK_COLORS, generateFloraSkeleton } from 'triangular-engine/procedural';
 
 type Shape = 'plane' | 'sphere' | 'cylinder';
@@ -398,18 +399,18 @@ export class AnimalsTerrainWorldLabPageComponent {
       debugMeadowGroup.add(ring);
     }
 
-    // 2. Tree Groves (Batched into a single high-performance InstancedMesh)
+    // 2. Tree Groves (Generated as ITerrainScatterInstance and batched into 1 InstancedMesh)
     const targetTreeCount = size === 'small' ? 6 : size === 'medium' ? 14 : size === 'large' ? 28 : 72;
     const treeSeedPositions = filterWithMinDistance(landBiomePositions.slice(2), 4.0 * Math.min(1.5, factor), targetTreeCount);
 
-    const treeInstances = treeSeedPositions.map((pos, index) => {
+    const treeInstances: ITerrainScatterInstance[] = treeSeedPositions.map((pos, index) => {
       const frame = surface.sample(pos);
       return {
-        instanceId: `tree-${index}`,
-        worldPositionM: [frame.position.x, frame.position.y, frame.position.z] as [number, number, number],
-        normal: [frame.normal.x, frame.normal.y, frame.normal.z] as [number, number, number],
-        surfaceUp: [frame.surfaceUp.x, frame.surfaceUp.y, frame.surfaceUp.z] as [number, number, number],
-        rotationSeed01: (index * 23) % 100 / 100,
+        instanceId: `tree-${index}` as any,
+        worldPositionM: [frame.position.x, frame.position.y, frame.position.z],
+        normal: [frame.normal.x, frame.normal.y, frame.normal.z],
+        surfaceUp: [frame.surfaceUp.x, frame.surfaceUp.y, frame.surfaceUp.z],
+        rotationSeed01: ((index * 23) % 100) / 100,
         scaleSeed01: 0.4 + (index % 3) * 0.08,
         embedSeed01: 0,
       };

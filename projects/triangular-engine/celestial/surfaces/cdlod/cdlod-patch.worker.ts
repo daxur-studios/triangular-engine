@@ -9,8 +9,13 @@ import {
   generateCdlodPlanePatchRawBuffers,
   createPlaneSurfaceSampler,
 } from './cdlod-plane-mesher';
+import {
+  generateCdlodCylinderPatchRawBuffers,
+  createCylinderSurfaceSampler,
+} from './cdlod-cylinder-mesher';
 import { IPlanetPatchAddress } from './cdlod-quadtree';
 import { IPlanePatchAddress } from './cdlod-plane-quadtree';
+import { ICylinderPatchAddress } from './cdlod-cylinder-quadtree';
 import {
   ICdlodWorkerRequest,
   ICdlodWorkerResponse,
@@ -24,6 +29,11 @@ let sphereSampler: ISurfaceSampler | undefined;
 let planeBodyId = '';
 let planeBodySeed = 0;
 let planeSampler: ISurfaceSampler | undefined;
+
+let cylinderBodyId = '';
+let cylinderBodySeed = 0;
+let cylinderRadiusM = 0;
+let cylinderSampler: ISurfaceSampler | undefined;
 
 export function handleCdlodWorkerMessage(
   data: ICdlodWorkerRequest,
@@ -62,6 +72,62 @@ export function handleCdlodWorkerMessage(
         requestId: data.requestId,
         id: data.id,
         type: 'plane',
+        raw,
+        success: true,
+      };
+
+      const transfer: Transferable[] = [
+        raw.positions.buffer,
+        raw.coarsePositions.buffer,
+        raw.normals.buffer,
+        raw.uvs.buffer,
+      ];
+      if (raw.colors) transfer.push(raw.colors.buffer);
+      if (raw.elevations) transfer.push(raw.elevations.buffer);
+
+      return { response, transfer };
+    }
+
+    if (data.type === 'cylinder') {
+      const bodySeed = data.body?.terrain?.seed ?? 0;
+      const bodyId = data.body?.id ?? 'cylinder-world';
+      const radiusM = data.radiusM ?? 4000;
+
+      if (
+        !cylinderSampler ||
+        cylinderBodyId !== bodyId ||
+        cylinderBodySeed !== bodySeed ||
+        cylinderRadiusM !== radiusM
+      ) {
+        cylinderBodyId = bodyId;
+        cylinderBodySeed = bodySeed;
+        cylinderRadiusM = radiusM;
+        cylinderSampler = data.body
+          ? customSamplerFactory
+            ? customSamplerFactory(data.body)
+            : createCylinderSurfaceSampler(data.body, radiusM)
+          : createCylinderSurfaceSampler(undefined, radiusM);
+      }
+
+      if (!cylinderSampler) {
+        throw new Error('Surface sampler not initialized for cylinder CDLOD');
+      }
+
+      const rootSectors = data.rootSectors ?? 8;
+      const raw = generateCdlodCylinderPatchRawBuffers(
+        cylinderSampler,
+        data.address as ICylinderPatchAddress,
+        data.resolution,
+        radiusM,
+        data.centerBodyFixedM,
+        rootSectors,
+        data.rootPatchLengthM,
+      );
+
+      const response: ICdlodWorkerResponse = {
+        requestId: data.requestId,
+        id: data.id,
+        type: 'cylinder',
         raw,
         success: true,
       };
@@ -189,4 +255,3 @@ if (
     }
   };
 }
-

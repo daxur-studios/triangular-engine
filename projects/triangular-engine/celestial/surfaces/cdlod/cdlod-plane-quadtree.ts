@@ -46,20 +46,24 @@ export function planePatchNeighbor(
   return { level: address.level, x, y };
 }
 
-export function planePatchAddressKey(addr: IPlanePatchAddress): string {
-  return `plane:${addr.level}:${addr.x}:${addr.y}`;
+export function planePatchAddressKey(
+  addr: IPlanePatchAddress,
+  resolution = 32,
+): string {
+  return `plane:${addr.level}:${addr.x}:${addr.y}:${resolution}`;
 }
 
 export interface ICdlodPlanePatch {
-  address: IPlanePatchAddress;
-  centerM: Vec3d;
-  resolution: number;
-  morphFactor: number;
-  edgeMorph: ICdlodEdgeMorph;
-  roughnessM: number;
-  distanceM: number;
-  minElevationM: number;
-  maxElevationM: number;
+  readonly address: IPlanePatchAddress;
+  readonly id: string;
+  readonly centerM: Vec3d;
+  readonly resolution: number;
+  readonly morphFactor: number;
+  readonly edgeMorph: ICdlodEdgeMorph;
+  readonly roughnessM: number;
+  readonly distanceM: number;
+  readonly minElevationM: number;
+  readonly maxElevationM: number;
 }
 
 export interface ICdlodPlaneSelectionOptions {
@@ -601,6 +605,7 @@ export function selectCdlodPlanePatches(input: ICdlodPlaneSelectionInput): {
     const edgeMorph = computePlaneEdgeMorph(node, rootNodes);
     return {
       address: node.address,
+      id: planePatchAddressKey(node.address, node.resolution),
       centerM: node.centerM,
       resolution: node.resolution,
       morphFactor: node.morphFactor,

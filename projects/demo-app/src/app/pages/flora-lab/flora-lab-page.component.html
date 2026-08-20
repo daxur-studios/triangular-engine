@@ -1,4 +1,4 @@
-<scene>
+<scene [wireframe]="wireframe()" [wireframeMode]="wireframeMode()">
   <ng-template portalTarget="overlay" lane="topStart">
     <section class="panel" aria-label="Flora lab controls">
       <header>
@@ -39,6 +39,9 @@
         <button (click)="regenerate()">Regenerate (new seed)</button>
         <button [class.active]="wireframe()" (click)="toggleWireframe()">
           Wireframe
+        </button>
+        <button [class.active]="wireframeMode() === 'name-hash'" (click)="toggleWireframeMode()">
+          Color by name
         </button>
         <button [class.active]="showSockets()" (click)="toggleSockets()">
           Sockets
