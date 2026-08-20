@@ -1,77 +1,298 @@
-<section class="lab">
-  <header>
-    <h1>Terrain-integrated animal checkpoint</h1>
-    <p>Real terrain surfaces + scatter-derived tree habitats/obstacles + deterministic Universal Time playback for herds, birds, and fish.</p>
-  </header>
-  <div class="controls">
-    <button type="button" (click)="togglePause()">{{ paused() ? 'Resume' : 'Pause' }}</button>
-    <button type="button" (click)="reset()">Reset</button>
-    <label>World 
-      <select [value]="selectedShape()" (change)="setShape(($any($event.target)).value)">
-        <option value="plane">Plane</option>
-        <option value="sphere">Sphere</option>
-        <option value="cylinder">Cylinder</option>
-      </select>
-    </label>
-    <label>Size 
-      <select [value]="worldSize()" (change)="setWorldSize(($any($event.target)).value)">
-        <option value="small">Small</option>
-        <option value="medium">Medium</option>
-        <option value="large">Large</option>
-        <option value="huge">Huge</option>
-      </select>
-    </label>
-    <label>UT 
-      <input type="range" min="-120" max="120" step="0.1" [value]="universalTime()" (input)="setUniversalTime($event)">
-    </label>
-    <span>{{ universalTime() | number:'1.1-1' }}s</span>
-    <span class="speeds">
-      <button *ngFor="let speed of speedOptions" type="button" (click)="setTimeScale(speed)">{{ speed }}×</button>
-    </span>
-  </div>
+<div class="flex-page">
+  <scene>
+    <raycastOrbitControls
+      [cameraPosition]="cameraPosition()"
+      [target]="cameraTarget()"
+      [near]="0.5"
+      [far]="500000000"
+      [isActive]="true"
+      [raycastFocusResolver]="terrainRaycastFocus"
+    />
 
-  <div class="debug-controls">
-    <label class="debug-toggle">
-      <input type="checkbox" [checked]="showDebug()" (change)="toggleDebug()">
-      <strong>🛠️ Debug Overlay</strong>
-    </label>
-    <ng-container *ngIf="showDebug()">
-      <label>
-        <input type="checkbox" [checked]="hideTrees()" (change)="toggleHideTrees()">
-        Hide Tree Foliage (Perches Only)
-      </label>
-      <label>
-        <input type="checkbox" [checked]="showMeadowPatches()" (change)="toggleMeadowPatches()">
-        Meadow Grazing Rings
-      </label>
-      <label>
-        <input type="checkbox" [checked]="showRoostSockets()" (change)="toggleRoostSockets()">
-        Canopy Roost Sockets
-      </label>
-      <label>
-        <input type="checkbox" [checked]="showWaterClearance()" (change)="toggleWaterClearance()">
-        Fish Navigable Volume
-      </label>
-      <label>
-        <input type="checkbox" [checked]="showWaypoints()" (change)="toggleWaypoints()">
-        Leader Waypoint Targets
-      </label>
-    </ng-container>
-  </div>
+    <directionalLight
+      [position]="[10000000, 20000000, 10000000]"
+      [intensity]="2.2"
+    />
+    <ambientLight [intensity]="0.35" />
 
-  <div class="proof">
-    <span>Three terrain domains</span>
-    <span>Batched InstancedMesh (4 draw calls)</span>
-    <span>Camera-proximity observer materialization</span>
+    <!-- CDLOD Multi-Surface Terrain -->
+    @if (selectedShape() === 'sphere') {
+      <cdlodPlanet
+        [body]="selectedBody()"
+        [quality]="selectedQuality()"
+        [wireframe]="wireframe()"
+        [cdlodMorphing]="cdlodMorphing()"
+        [featureAdaptive]="featureAdaptive()"
+        [showTerrain]="showTerrain()"
+        [showOcean]="showOcean()"
+        [freezeLod]="freezeLod()"
+        [useWorkers]="useWorkers()"
+        (telemetry)="onTelemetry($event)"
+      />
+    } @else if (selectedShape() === 'plane') {
+      <cdlodPlane
+        [body]="selectedBody()"
+        [rootPatchSizeM]="planeRootSizeM()"
+        [streamingRadiusTiles]="planeStreamingRadius()"
+        [maxLevel]="planeMaxLevel()"
+        [baseResolution]="planeBaseResolution()"
+        [wireframe]="wireframe()"
+        [cdlodMorphing]="cdlodMorphing()"
+        [featureAdaptive]="featureAdaptive()"
+        [freezeLod]="freezeLod()"
+        [useWorkers]="useWorkers()"
+        (telemetry)="onTelemetry($event)"
+      />
+    } @else if (selectedShape() === 'cylinder') {
+      <cdlodCylinder
+        [body]="selectedBody()"
+        [radiusM]="cylinderRadiusM()"
+        [rootSectors]="cylinderRootSectors()"
+        [axialStreamingRadius]="cylinderAxialRadius()"
+        [maxLevel]="cylinderMaxLevel()"
+        [wireframe]="wireframe()"
+        [cdlodMorphing]="cdlodMorphing()"
+        [featureAdaptive]="featureAdaptive()"
+        [freezeLod]="freezeLod()"
+        [useWorkers]="useWorkers()"
+        (telemetry)="onTelemetry($event)"
+      />
+    }
+  </scene>
+
+  <!-- Control Sidebar -->
+  <div class="overlay-panel">
+    <header class="panel-header">
+      <h2>CDLOD Animal & Scatter World Lab</h2>
+      <p class="subtitle">
+        Planetary CDLOD + Dynamic Scatter Streamer + On-Demand Wildlife
+      </p>
+    </header>
+
+    <!-- World Topology Selector -->
+    <section class="control-group">
+      <label class="control-label">World Topology</label>
+      <div class="pill-group">
+        <button
+          type="button"
+          class="pill-btn"
+          [class.active]="selectedShape() === 'sphere'"
+          (click)="setShape('sphere')"
+        >
+          3D Sphere
+        </button>
+        <button
+          type="button"
+          class="pill-btn"
+          [class.active]="selectedShape() === 'plane'"
+          (click)="setShape('plane')"
+        >
+          2D Plane
+        </button>
+        <button
+          type="button"
+          class="pill-btn"
+          [class.active]="selectedShape() === 'cylinder'"
+          (click)="setShape('cylinder')"
+        >
+          O'Neill Cylinder
+        </button>
+      </div>
+    </section>
+
+    <!-- Celestial Biome Preset Selector -->
+    <section class="control-group">
+      <label class="control-label">Surface / Biome Preset</label>
+      <select
+        [ngModel]="selectedPlanetId()"
+        (ngModelChange)="onSelectPlanet($event)"
+        class="styled-select"
+      >
+        @for (planet of planetOptions; track planet.id) {
+          <option [value]="planet.id">{{ planet.name }}</option>
+        }
+      </select>
+    </section>
+
+    <!-- Quality Preset -->
+    @if (selectedShape() === 'sphere') {
+      <section class="control-group">
+        <label class="control-label">CDLOD Quality</label>
+        <div class="pill-group">
+          <button
+            type="button"
+            class="pill-btn"
+            [class.active]="selectedQuality() === 'laptop'"
+            (click)="selectedQuality.set('laptop')"
+          >
+            Laptop
+          </button>
+          <button
+            type="button"
+            class="pill-btn"
+            [class.active]="selectedQuality() === 'balanced'"
+            (click)="selectedQuality.set('balanced')"
+          >
+            Balanced
+          </button>
+          <button
+            type="button"
+            class="pill-btn"
+            [class.active]="selectedQuality() === 'ultra'"
+            (click)="selectedQuality.set('ultra')"
+          >
+            Ultra
+          </button>
+        </div>
+      </section>
+    }
+
+    <!-- Universal Time Simulation Controls -->
+    <section class="control-group">
+      <label class="control-label">Universal Time & Playback</label>
+      <div class="playback-bar">
+        <button type="button" class="action-btn" (click)="togglePause()">
+          {{ paused() ? '▶ Resume' : '⏸ Pause' }}
+        </button>
+        <button type="button" class="action-btn secondary" (click)="reset()">
+          ↺ Reset
+        </button>
+      </div>
+      <div class="ut-scrubber">
+        <input
+          type="range"
+          min="-120"
+          max="120"
+          step="0.1"
+          [value]="universalTime()"
+          (input)="setUniversalTime($event)"
+        />
+        <span class="ut-value">{{ universalTime() | number:'1.1-1' }}s</span>
+      </div>
+      <div class="speed-buttons">
+        @for (speed of speedOptions; track speed) {
+          <button
+            type="button"
+            class="speed-btn"
+            [class.active]="timeScale() === speed && !paused()"
+            (click)="setTimeScale(speed)"
+          >
+            {{ speed }}×
+          </button>
+        }
+      </div>
+    </section>
+
+    <!-- Scatter & Life Streaming Controls -->
+    <section class="control-group">
+      <label class="control-label">Scatter & Life Systems</label>
+      <div class="toggles-grid">
+        <label class="toggle-item">
+          <input
+            type="checkbox"
+            [checked]="enableScatterStreaming()"
+            (change)="toggleScatterStreaming()"
+          />
+          <span>Tree Scatter Streamer</span>
+        </label>
+        <label class="toggle-item">
+          <input
+            type="checkbox"
+            [checked]="enableLifeSimulation()"
+            (change)="toggleLifeSimulation()"
+          />
+          <span>Wildlife Simulation</span>
+        </label>
+        <label class="toggle-item">
+          <input
+            type="checkbox"
+            [checked]="showDebug()"
+            (change)="toggleDebug()"
+          />
+          <span>Debug Overlay</span>
+        </label>
+        <label class="toggle-item">
+          <input
+            type="checkbox"
+            [checked]="hideTrees()"
+            (change)="toggleHideTrees()"
+          />
+          <span>Hide Tree Foliage</span>
+        </label>
+      </div>
+    </section>
+
+    @if (showDebug()) {
+      <section class="control-group debug-subpanel">
+        <label class="control-label">Debug Sockets & Volumes</label>
+        <div class="toggles-grid">
+          <label class="toggle-item">
+            <input
+              type="checkbox"
+              [checked]="showMeadowPatches()"
+              (change)="toggleMeadowPatches()"
+            />
+            <span>Meadow Rings</span>
+          </label>
+          <label class="toggle-item">
+            <input
+              type="checkbox"
+              [checked]="showRoostSockets()"
+              (change)="toggleRoostSockets()"
+            />
+            <span>Canopy Roosts</span>
+          </label>
+          <label class="toggle-item">
+            <input
+              type="checkbox"
+              [checked]="showWaterClearance()"
+              (change)="toggleWaterClearance()"
+            />
+            <span>Fish Volumes</span>
+          </label>
+          <label class="toggle-item">
+            <input
+              type="checkbox"
+              [checked]="showWaypoints()"
+              (change)="toggleWaypoints()"
+            />
+            <span>Leader Waypoints</span>
+          </label>
+        </div>
+      </section>
+    }
+
+    <!-- Telemetry Panel -->
+    <section class="telemetry-panel">
+      <h3>Simulation & Telemetry</h3>
+      <div class="telemetry-grid">
+        <div class="telemetry-stat">
+          <span class="stat-label">Active Topology</span>
+          <span class="stat-val highlight">{{ selectedShape() }}</span>
+        </div>
+        <div class="telemetry-stat">
+          <span class="stat-label">GPU Draw Calls</span>
+          <span class="stat-val highlight">4 (Batched)</span>
+        </div>
+        <div class="telemetry-stat">
+          <span class="stat-label">Streamed Trees</span>
+          <span class="stat-val">{{ activeTreeCount() }}</span>
+        </div>
+        <div class="telemetry-stat">
+          <span class="stat-label">Active Wildlife</span>
+          <span class="stat-val">{{ activeAnimalCount() }}</span>
+        </div>
+        @if (telemetry(); as t) {
+          <div class="telemetry-stat">
+            <span class="stat-label">CDLOD Patches</span>
+            <span class="stat-val">{{ t.activePatches }}</span>
+          </div>
+          <div class="telemetry-stat">
+            <span class="stat-label">CDLOD Triangles</span>
+            <span class="stat-val">{{ (t.activeTriangles / 1000).toFixed(0) }}k</span>
+          </div>
+        }
+      </div>
+    </section>
   </div>
-  <div class="status">
-    <span>Plane: {{ status().plane }}</span>
-    <span>Sphere: {{ status().sphere }}</span>
-    <span>Cylinder: {{ status().cylinder }}</span>
-  </div>
-</section>
-<scene [showFps]="true">
-  <orbitControls [cameraPosition]="[0, 22, 42]" [target]="[0, 0, 0]" />
-  <ambientLight [intensity]="1.5" />
-  <directionalLight [position]="[18, 32, 16]" [intensity]="2" />
-</scene>
+</div>

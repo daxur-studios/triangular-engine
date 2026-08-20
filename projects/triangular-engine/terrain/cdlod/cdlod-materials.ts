@@ -449,7 +449,8 @@ void main() {
     finalColor = mix(finalColor, vec3(0.0, 0.6, 1.0), 0.5);
   }
 
-  gl_FragColor = vec4(finalColor, 1.0);
+  float alpha = mix(0.70, 0.95, fresnel);
+  gl_FragColor = vec4(finalColor, alpha);
 }
 `;
 
@@ -530,6 +531,6 @@ export function createOceanMaterial(options?: {
     fragmentShader: OCEAN_FRAGMENT_SHADER,
     side: DoubleSide,
     wireframe: options?.wireframe ?? false,
-    transparent: false,
+    transparent: true,
   });
 }

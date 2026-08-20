@@ -1,38 +1,112 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
-import { DecimalPipe, NgFor, NgIf } from '@angular/common';
-import { EngineModule, EngineService } from 'triangular-engine';
 import {
-  AmbientLight, BackSide, BufferGeometry, Color, CylinderGeometry,
-  DirectionalLight, DoubleSide, Float32BufferAttribute, Group, InstancedMesh,
-  LineBasicMaterial, LineSegments, Matrix4, Mesh, MeshBasicMaterial,
-  MeshStandardMaterial, OctahedronGeometry, PlaneGeometry, Quaternion,
-  RingGeometry, SphereGeometry, Vector3,
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { CommonModule, DecimalPipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import {
+  EngineModule,
+  EngineService,
+  RaycastFocusContext,
+  RaycastOrbitControlsComponent,
+} from 'triangular-engine';
+import {
+  BufferGeometry,
+  Color,
+  CylinderGeometry,
+  DoubleSide,
+  Float32BufferAttribute,
+  Group,
+  InstancedMesh,
+  Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  OctahedronGeometry,
+  Quaternion,
+  RingGeometry,
+  SphereGeometry,
+  Vector3,
 } from 'three';
 import {
-  createAnimalTopologyWanderPlayback, type AnimalAirFlockMember,
-  type AnimalAirFlockPolicyDefinition, type AnimalAquaticHabitatZone,
-  type AnimalAquaticSchoolMember, type AnimalAquaticSchoolPolicyDefinition,
-  type AnimalGrazingPatch, type AnimalLandHerdMember,
-  type AnimalLandHerdPolicyDefinition, type AnimalRoostSite,
-  type AnimalTopologyWandererDefinition, type AnimalVector3,
-  type AnimalWaterVolume, type AnimalWorldSurface,
-  stepAnimalAirFlock, stepAnimalAquaticSchool, stepAnimalLandHerd,
+  CdlodPlanetComponent,
+  CdlodPlaneComponent,
+  CdlodCylinderComponent,
+  ICdlodTelemetry,
+  QualityPresetId,
+  PlaneTerrainDomain,
+  SphereTerrainDomain,
+  CylinderTerrainDomain,
+  ConstantTerrainField,
+  type ITerrainFieldSample,
+  type TerrainVector3,
+} from 'triangular-engine/terrain';
+import {
+  ALPINE_PLANET,
+  ARCHIPELAGO_PLANET,
+  CANYON_PLANET,
+  CRATERED_MOON,
+  FAR_MOON,
+  HOME_MOON,
+  HOME_PLANET,
+  ICelestialBody,
+  createSurfaceSampler,
+  createPlaneSurfaceSampler,
+  createCylinderSurfaceSampler,
+  ISurfaceSampler,
+} from 'triangular-engine/celestial';
+import {
+  ScatterStreamingService,
+  type ITerrainScatterInstance,
+} from 'triangular-engine/scatter';
+import {
+  createAnimalTopologyWanderPlayback,
+  type AnimalAirFlockMember,
+  type AnimalAirFlockPolicyDefinition,
+  type AnimalAquaticHabitatZone,
+  type AnimalAquaticSchoolMember,
+  type AnimalAquaticSchoolPolicyDefinition,
+  type AnimalGrazingPatch,
+  type AnimalLandHerdMember,
+  type AnimalLandHerdPolicyDefinition,
+  type AnimalRoostSite,
+  type AnimalTopologyWandererDefinition,
+  type AnimalVector3,
+  type AnimalWaterVolume,
+  type AnimalWorldSurface,
+  stepAnimalAirFlock,
+  stepAnimalAquaticSchool,
+  stepAnimalLandHerd,
 } from 'triangular-engine/animals';
-import { adaptTerrainScatterForAnimals, TerrainAnimalWorldSurface } from 'triangular-engine/animals/terrain';
+import {
+  TerrainAnimalWorldSurface,
+} from 'triangular-engine/animals/terrain';
 import { TerrainWaterAnimalVolume } from 'triangular-engine/animals/water';
 import {
-  ConstantTerrainField, CylinderTerrainDomain, PlaneTerrainDomain, SphereTerrainDomain,
-  type ITerrainField, type ITerrainFieldSample, type TerrainVector3,
-} from 'triangular-engine/terrain';
-import { CylinderWaterDomain, PlaneWaterDomain, SphereWaterDomain, type WaterSurface } from 'triangular-engine/water';
-import { generateTerrainScatterInstances, type ITerrainScatterInstance } from 'triangular-engine/scatter';
-import { buildFloraMesh, FLORA_OAK_ARCHETYPE, FLORA_OAK_COLORS, generateFloraSkeleton } from 'triangular-engine/procedural';
+  CylinderWaterDomain,
+  PlaneWaterDomain,
+  SphereWaterDomain,
+  type WaterSurface,
+} from 'triangular-engine/water';
+import {
+  buildFloraMesh,
+  FLORA_OAK_ARCHETYPE,
+  FLORA_OAK_COLORS,
+  generateFloraSkeleton,
+} from 'triangular-engine/procedural';
 
-type Shape = 'plane' | 'sphere' | 'cylinder';
-type WorldSize = 'small' | 'medium' | 'large' | 'huge';
-const WORLD_SIZES: readonly WorldSize[] = ['small', 'medium', 'large', 'huge'];
-const SIZE_FACTOR: Record<WorldSize, number> = { small: 1, medium: 2.2, large: 5.0, huge: 16.0 };
-const WATER_SURFACE_OFFSET_M = 0;
+export type CdlodTopology = 'sphere' | 'plane' | 'cylinder';
+
+interface IPlanetOption {
+  id: string;
+  name: string;
+  body: ICelestialBody;
+}
 
 interface HerdSimGroup {
   readonly wanderer: ReturnType<typeof createAnimalTopologyWanderPlayback>;
@@ -61,17 +135,15 @@ interface FishSimGroup {
   readonly waypointMesh: Mesh;
 }
 
-interface View {
-  readonly shape: Shape;
-  readonly size: WorldSize;
-  readonly label: string;
+interface TopologyLifeContext {
+  readonly shape: CdlodTopology;
   readonly root: Group;
   readonly surface: AnimalWorldSurface;
   readonly water: AnimalWaterVolume;
   readonly herdGroups: readonly HerdSimGroup[];
   readonly birdGroups: readonly BirdSimGroup[];
   readonly fishGroups: readonly FishSimGroup[];
-  readonly instancedTrees: InstancedMesh | null;
+  readonly instancedTrees: InstancedMesh;
   readonly instancedHerds: InstancedMesh;
   readonly instancedBirds: InstancedMesh;
   readonly instancedFish: InstancedMesh;
@@ -82,84 +154,158 @@ interface View {
 }
 
 @Component({
+  standalone: true,
   selector: 'app-animals-terrain-world-lab-page',
-  imports: [EngineModule, DecimalPipe, NgFor, NgIf],
+  imports: [
+    CommonModule,
+    FormsModule,
+    DecimalPipe,
+    EngineModule,
+    RaycastOrbitControlsComponent,
+    CdlodPlanetComponent,
+    CdlodPlaneComponent,
+    CdlodCylinderComponent,
+  ],
   templateUrl: './animals-terrain-world-lab-page.component.html',
   styleUrl: './animals-terrain-world-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [EngineService.provide({ showFPS: true })],
+  providers: [
+    ...EngineService.provide({
+      showFPS: true,
+      webGLRendererParameters: {
+        antialias: true,
+        logarithmicDepthBuffer: true,
+      },
+    }),
+    ScatterStreamingService,
+  ],
   host: { class: 'flex-page' },
 })
 export class AnimalsTerrainWorldLabPageComponent {
+  readonly selectedShape = signal<CdlodTopology>('sphere');
+
+  readonly planetOptions: readonly IPlanetOption[] = [
+    { id: 'home-planet', name: 'Home Planet (Temperate)', body: HOME_PLANET },
+    { id: 'alpine-planet', name: 'Alpine World (High Peaks)', body: ALPINE_PLANET },
+    { id: 'canyon-planet', name: 'Canyon World (Arid Rifts)', body: CANYON_PLANET },
+    { id: 'archipelago-planet', name: 'Archipelago (Tropical Atolls)', body: ARCHIPELAGO_PLANET },
+    { id: 'cratered-moon', name: 'Cratered Moon (Basalt & Maria)', body: CRATERED_MOON },
+    { id: 'home-moon', name: 'Moon (Gray)', body: HOME_MOON },
+    { id: 'far-moon', name: 'Moon (Icy Cyan Plains)', body: FAR_MOON },
+  ];
+
+  readonly selectedPlanetId = signal<string>('home-planet');
+  readonly selectedQuality = signal<QualityPresetId>('balanced');
+
+  // Plane parameters
+  readonly planeRootSizeM = signal<number>(4096);
+  readonly planeStreamingRadius = signal<number>(4);
+  readonly planeMaxLevel = signal<number>(6);
+  readonly planeBaseResolution = signal<number>(32);
+
+  // Cylinder parameters
+  readonly cylinderRadiusM = signal<number>(4000);
+  readonly cylinderRootSectors = signal<number>(8);
+  readonly cylinderAxialRadius = signal<number>(3);
+  readonly cylinderMaxLevel = signal<number>(6);
+
+  // CDLOD feature toggles
+  readonly wireframe = signal(false);
+  readonly cdlodMorphing = signal(true);
+  readonly featureAdaptive = signal(true);
+  readonly showTerrain = signal(true);
+  readonly showOcean = signal(true);
+  readonly useWorkers = signal(true);
+  readonly freezeLod = signal(false);
+
+  readonly telemetry = signal<ICdlodTelemetry | null>(null);
+
+  // Simulation controls
   readonly universalTime = signal(0);
   readonly timeScale = signal(1);
   readonly paused = signal(false);
-  readonly selectedShape = signal<Shape>('plane');
-  readonly worldSize = signal<WorldSize>('small');
-  readonly status = signal<Record<Shape, string>>({ plane: 'ready', sphere: 'ready', cylinder: 'ready' });
   readonly speedOptions = [-10, -5, -1, 0, 1, 5, 10] as const;
 
-  // Debug overlay controls
-  readonly showDebug = signal(false);
+  // Scatter & Life toggles
+  readonly enableScatterStreaming = signal(true);
+  readonly enableLifeSimulation = signal(true);
   readonly hideTrees = signal(false);
+  readonly showDebug = signal(false);
   readonly showMeadowPatches = signal(true);
   readonly showRoostSockets = signal(true);
   readonly showWaterClearance = signal(true);
   readonly showWaypoints = signal(true);
 
+  // Telemetry counts
+  readonly activeTreeCount = signal(0);
+  readonly activeAnimalCount = signal(0);
+
+  // Initial camera position focused on local terrain surface
+  readonly cameraPosition = computed<[number, number, number]>(() => {
+    const topo = this.selectedShape();
+    if (topo === 'sphere') {
+      const radius = this.selectedBody().radiusM;
+      return [0, radius + 150, 300];
+    }
+    if (topo === 'plane') return [0, 150, 300];
+    return [0, 3900, 300];
+  });
+
+  readonly cameraTarget = computed<[number, number, number]>(() => {
+    const topo = this.selectedShape();
+    if (topo === 'sphere') {
+      const radius = this.selectedBody().radiusM;
+      return [0, radius, 0];
+    }
+    if (topo === 'plane') return [0, 0, 0];
+    return [0, 4000, 0];
+  });
+
+  readonly terrainRaycastFocus = (context: RaycastFocusContext): Vector3 | null => {
+    const hits = context.raycaster.intersectObjects(
+      context.sceneChildren as unknown as import('three').Object3D[],
+      true,
+    );
+    if (hits.length > 0) return hits[0].point;
+    return null;
+  };
+
+  readonly selectedBody = computed<ICelestialBody>(() => {
+    const id = this.selectedPlanetId();
+    return this.planetOptions.find(p => p.id === id)?.body ?? HOME_PLANET;
+  });
+
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly scatterStreamer = inject(ScatterStreamingService);
 
-  // Stylized procedural animal geometries
-  private readonly animalGeometry = new SphereGeometry(0.32, 12, 8);
-  private readonly animalMaterial = new MeshStandardMaterial({ color: '#b87333', roughness: 0.65 });
+  // High-visibility models
+  private readonly animalGeometry = new SphereGeometry(4.0, 14, 10);
+  private readonly animalMaterial = new MeshStandardMaterial({ color: '#f59e0b', roughness: 0.45 });
 
   private readonly birdGeometry = createBirdGeometry();
-  private readonly birdMaterial = new MeshStandardMaterial({ color: '#f7ecd0', roughness: 0.45, side: DoubleSide });
+  private readonly birdMaterial = new MeshStandardMaterial({ color: '#fef08a', roughness: 0.35, side: DoubleSide });
 
   private readonly fishGeometry = createFishGeometry();
-  private readonly fishMaterial = new MeshStandardMaterial({ color: '#e67e22', roughness: 0.35, side: DoubleSide });
+  private readonly fishMaterial = new MeshStandardMaterial({ color: '#fb923c', roughness: 0.25, side: DoubleSide });
 
   private readonly treeGeometry: BufferGeometry;
   private readonly treeMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: DoubleSide });
-  private readonly waterMaterial = new MeshStandardMaterial({
-    color: '#1a82ad',
-    transparent: true,
-    opacity: 0.65,
-    roughness: 0.1,
-    side: DoubleSide,
-    depthWrite: false,
-  });
 
-  private readonly views: readonly View[];
-  private readonly ambientLight: AmbientLight;
-  private readonly sunLight: DirectionalLight;
-
-  // Shared reusable matrix helper for zero allocations in hot loop
+  private contexts: Record<CdlodTopology, TopologyLifeContext> | null = null;
   private readonly tempMatrix = new Matrix4();
-  private readonly zeroMatrix = new Matrix4().makeScale(0, 0, 0);
 
   constructor() {
-    // Generate Master Archetype Tree Geometry with Wind-Weighted Vertex Colors
+    // Generate Tree Mesh Archetype with foliage vertex colors
     const skeleton = generateFloraSkeleton(FLORA_OAK_ARCHETYPE, 777);
     const { geometry } = buildFloraMesh(skeleton, FLORA_OAK_ARCHETYPE);
     colorizeTree(geometry);
     this.treeGeometry = geometry;
 
-    // Atmospheric sky & illumination
-    this.engine.scene.background = new Color('#a6d4eb');
-    this.ambientLight = new AmbientLight('#ffffff', 0.85);
-    this.sunLight = new DirectionalLight('#fff8e7', 1.25);
-    this.sunLight.position.set(25, 45, 20);
-    this.engine.scene.add(this.ambientLight, this.sunLight);
+    // Initialize contexts for the active body
+    this.rebuildContexts();
 
-    const shapes: readonly Shape[] = ['plane', 'sphere', 'cylinder'];
-    this.views = WORLD_SIZES.flatMap(size => shapes.map(shape => this.makeSizedView(shape, size)));
-    for (const view of this.views) this.engine.scene.add(view.root);
-    this.updateViewPresentation();
-    this.resetGroupPositions(0);
-    this.stepSimulation(0, 0.05);
-
+    // Simulation & Scatter Streaming Loop
     let previous = performance.now();
     const timer = window.setInterval(() => {
       const now = performance.now();
@@ -172,21 +318,19 @@ export class AnimalsTerrainWorldLabPageComponent {
       }
     }, 40);
 
+    // Re-stream scatter when camera moves
+    this.scatterStreamer.viewpointWorldM$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.updateScatterStreaming();
+      });
+
     this.destroyRef.onDestroy(() => {
       window.clearInterval(timer);
-      this.ambientLight.removeFromParent();
-      this.sunLight.removeFromParent();
-      for (const view of this.views) {
-        view.root.traverse(object => {
-          if (object instanceof Mesh
-            && object.geometry !== this.animalGeometry
-            && object.geometry !== this.birdGeometry
-            && object.geometry !== this.fishGeometry
-            && object.geometry !== this.treeGeometry) {
-            object.geometry.dispose();
-          }
-        });
-        view.root.removeFromParent();
+      if (this.contexts) {
+        for (const ctx of Object.values(this.contexts)) {
+          ctx.root.removeFromParent();
+        }
       }
       this.animalGeometry.dispose();
       this.animalMaterial.dispose();
@@ -196,8 +340,21 @@ export class AnimalsTerrainWorldLabPageComponent {
       this.fishMaterial.dispose();
       this.treeGeometry.dispose();
       this.treeMaterial.dispose();
-      this.waterMaterial.dispose();
     });
+  }
+
+  setShape(shape: CdlodTopology): void {
+    this.selectedShape.set(shape);
+    this.rebuildContexts();
+  }
+
+  onSelectPlanet(planetId: string): void {
+    this.selectedPlanetId.set(planetId);
+    this.rebuildContexts();
+  }
+
+  onTelemetry(event: ICdlodTelemetry): void {
+    this.telemetry.set(event);
   }
 
   setUniversalTime(event: Event): void {
@@ -214,27 +371,27 @@ export class AnimalsTerrainWorldLabPageComponent {
     this.paused.set(value === 0);
   }
 
-  setShape(shape: Shape): void {
-    this.selectedShape.set(shape);
-    this.updateViewPresentation();
-  }
-
-  setWorldSize(size: WorldSize): void {
-    this.worldSize.set(size);
-    this.updateViewPresentation();
-  }
-
   togglePause(): void {
-    this.paused.update(value => !value);
+    this.paused.update(v => !v);
   }
 
-  toggleDebug(): void {
-    this.showDebug.update(v => !v);
+  toggleScatterStreaming(): void {
+    this.enableScatterStreaming.update(v => !v);
+    this.updateScatterStreaming();
+  }
+
+  toggleLifeSimulation(): void {
+    this.enableLifeSimulation.update(v => !v);
     this.updateViewPresentation();
   }
 
   toggleHideTrees(): void {
     this.hideTrees.update(v => !v);
+    this.updateViewPresentation();
+  }
+
+  toggleDebug(): void {
+    this.showDebug.update(v => !v);
     this.updateViewPresentation();
   }
 
@@ -266,231 +423,264 @@ export class AnimalsTerrainWorldLabPageComponent {
     this.stepSimulation(0, 0.05);
   }
 
+  private rebuildContexts(): void {
+    if (this.contexts) {
+      for (const ctx of Object.values(this.contexts)) {
+        ctx.root.removeFromParent();
+      }
+    }
+
+    const body = this.selectedBody();
+    this.contexts = {
+      sphere: this.buildTopologyLifeContext('sphere', body),
+      plane: this.buildTopologyLifeContext('plane', body),
+      cylinder: this.buildTopologyLifeContext('cylinder', body),
+    };
+
+    for (const ctx of Object.values(this.contexts)) {
+      this.engine.scene.add(ctx.root);
+    }
+
+    this.updateViewPresentation();
+    this.updateScatterStreaming();
+    this.resetGroupPositions(0);
+    this.stepSimulation(0, 0.05);
+  }
+
   private updateViewPresentation(): void {
-    const selected = this.selectedShape();
-    const size = this.worldSize();
+    if (!this.contexts) return;
+    const activeShape = this.selectedShape();
     const isDebug = this.showDebug();
     const hideTreeFoliage = isDebug && this.hideTrees();
+    const lifeEnabled = this.enableLifeSimulation();
+    const scatterEnabled = this.enableScatterStreaming();
 
-    for (const view of this.views) {
-      const active = view.shape === selected && view.size === size;
-      view.root.visible = active;
+    for (const [shape, ctx] of Object.entries(this.contexts) as [CdlodTopology, TopologyLifeContext][]) {
+      const active = shape === activeShape;
+      ctx.root.visible = active;
       if (active) {
-        if (view.instancedTrees) {
-          view.instancedTrees.visible = !hideTreeFoliage;
-        }
-        view.debugMeadowGroup.visible = isDebug && this.showMeadowPatches();
-        view.debugRoostGroup.visible = isDebug && this.showRoostSockets();
-        view.debugWaterGroup.visible = isDebug && this.showWaterClearance();
-        view.debugWaypointGroup.visible = isDebug && this.showWaypoints();
+        ctx.instancedTrees.visible = scatterEnabled && !hideTreeFoliage;
+        ctx.instancedHerds.visible = lifeEnabled;
+        ctx.instancedBirds.visible = lifeEnabled;
+        ctx.instancedFish.visible = lifeEnabled;
+        ctx.debugMeadowGroup.visible = isDebug && this.showMeadowPatches();
+        ctx.debugRoostGroup.visible = isDebug && this.showRoostSockets();
+        ctx.debugWaterGroup.visible = isDebug && this.showWaterClearance();
+        ctx.debugWaypointGroup.visible = isDebug && this.showWaypoints();
       }
     }
   }
 
-  private makeSizedView(shape: Shape, size: WorldSize): View {
-    const factor = SIZE_FACTOR[size];
-    const field = new WorldTerrainElevationField(shape, factor);
-    if (shape === 'plane') {
-      return this.makeView(
-        shape, size, `${size} infinite plane`,
-        field,
-        new PlaneTerrainDomain(24 * factor),
-        [0, 0, 0],
-      );
+  /**
+   * Generates procedural tree scatter instances anchored to fixed world grid cells
+   * so trees remain 100% stationary on the terrain as the camera moves.
+   */
+  private updateScatterStreaming(): void {
+    if (!this.contexts) return;
+    const activeShape = this.selectedShape();
+    const ctx = this.contexts[activeShape];
+    const body = this.selectedBody();
+
+    if (!this.enableScatterStreaming()) {
+      ctx.instancedTrees.count = 0;
+      ctx.instancedTrees.instanceMatrix.needsUpdate = true;
+      this.activeTreeCount.set(0);
+      return;
     }
-    if (shape === 'sphere') {
-      return this.makeView(
-        shape, size, `${size} planet sphere`,
-        field,
-        new SphereTerrainDomain(9 * factor),
-        [0, 0, 0],
-      );
+
+    const camPos = this.engine.camera ? this.engine.camera.position : new Vector3(0, 200, 400);
+    const cellSizeM = 150;
+    const gridRadiusCells = 7; // 15x15 grid of fixed world cells around camera
+    const centerCellX = Math.round(camPos.x / cellSizeM);
+    const centerCellZ = Math.round(camPos.z / cellSizeM);
+    const maxInstances = 256;
+    const treeInstances: ITerrainScatterInstance[] = [];
+
+    for (let dx = -gridRadiusCells; dx <= gridRadiusCells; dx++) {
+      for (let dz = -gridRadiusCells; dz <= gridRadiusCells; dz++) {
+        if (treeInstances.length >= maxInstances) break;
+        const cx = centerCellX + dx;
+        const cz = centerCellZ + dz;
+
+        // Deterministic hash based exclusively on cell coordinates (cx, cz)
+        const hash = Math.abs(Math.sin(cx * 127.1 + cz * 311.7) * 43758.5453) % 1;
+        if (hash > 0.45) continue; // Placement density
+
+        const offsetX = ((hash * 1000) % 1 - 0.5) * (cellSizeM * 0.75);
+        const offsetZ = ((hash * 7919) % 1 - 0.5) * (cellSizeM * 0.75);
+        const wx = cx * cellSizeM + offsetX;
+        const wz = cz * cellSizeM + offsetZ;
+
+        const samplePos = activeShape === 'sphere'
+          ? { x: wx, y: body.radiusM, z: wz }
+          : activeShape === 'cylinder'
+            ? { x: wx, y: 3950, z: wz }
+            : { x: wx, y: 0, z: wz };
+
+        const frame = ctx.surface.sample(samplePos);
+        // Only place trees on walkable land above sea level
+        if (frame.walkable && frame.elevationM > 1.0) {
+          treeInstances.push({
+            instanceId: `cell-${cx}-${cz}` as any,
+            worldPositionM: [frame.position.x, frame.position.y, frame.position.z],
+            normal: [frame.normal.x, frame.normal.y, frame.normal.z],
+            surfaceUp: [frame.surfaceUp.x, frame.surfaceUp.y, frame.surfaceUp.z],
+            rotationSeed01: hash,
+            scaleSeed01: 0.8 + ((hash * 13) % 1) * 0.4,
+            embedSeed01: 0,
+          });
+        }
+      }
     }
-    return this.makeView(
-      shape, size, `${size} inside cylinder`,
-      field,
-      new CylinderTerrainDomain({ radiusM: 9 * factor, lengthM: 20 * factor }),
-      [0, 0, 0],
-    );
+
+    const treeQuat = new Quaternion();
+    const treeMat = new Matrix4();
+    const treeScale = new Vector3(4.0, 4.0, 4.0);
+
+    ctx.instancedTrees.count = treeInstances.length;
+    treeInstances.forEach((inst, idx) => {
+      treeQuat.setFromUnitVectors(
+        new Vector3(0, 1, 0),
+        new Vector3(inst.surfaceUp[0], inst.surfaceUp[1], inst.surfaceUp[2]),
+      );
+      treeMat.compose(
+        new Vector3(inst.worldPositionM[0], inst.worldPositionM[1], inst.worldPositionM[2]),
+        treeQuat,
+        treeScale,
+      );
+      ctx.instancedTrees.setMatrixAt(idx, treeMat);
+    });
+
+    ctx.instancedTrees.instanceMatrix.needsUpdate = true;
+    this.activeTreeCount.set(treeInstances.length);
   }
 
-  private makeView(
-    shape: Shape,
-    size: WorldSize,
-    label: string,
-    field: ITerrainField,
-    domain: PlaneTerrainDomain | SphereTerrainDomain | CylinderTerrainDomain,
-    offset: readonly [number, number, number],
-  ): View {
+  private buildTopologyLifeContext(shape: CdlodTopology, body: ICelestialBody): TopologyLifeContext {
+    const sampler = shape === 'sphere'
+      ? createSurfaceSampler(body)
+      : shape === 'plane'
+        ? createPlaneSurfaceSampler(body)
+        : createCylinderSurfaceSampler(body, 4000);
+
+    const field = new CelestialTerrainField(sampler, shape);
+    const domain = shape === 'sphere'
+      ? new SphereTerrainDomain(body.radiusM)
+      : shape === 'plane'
+        ? new PlaneTerrainDomain(4096)
+        : new CylinderTerrainDomain({ radiusM: 4000, lengthM: 8000 });
+
     const surface = new TerrainAnimalWorldSurface(field, domain, { maxWalkableSlope01: 0.75 });
-    const factor = SIZE_FACTOR[size];
-    const water = this.makeWaterVolume(shape, factor, surface);
+    const water = this.makeWaterVolume(shape, body.radiusM, surface);
 
     const root = new Group();
-    root.position.set(...offset);
-    root.add(this.makeTerrainMesh(shape, factor, field));
-    root.add(this.makeWaterMesh(shape, factor));
-
-    // Debug Groups
     const debugMeadowGroup = new Group();
     const debugRoostGroup = new Group();
     const debugWaterGroup = new Group();
     const debugWaypointGroup = new Group();
     root.add(debugMeadowGroup, debugRoostGroup, debugWaterGroup, debugWaypointGroup);
 
-    // =========================================================================
-    // UNIFIED BIOME CLASSIFIER: Clean Separation of Water vs Land Biomes
-    // =========================================================================
-    const sampleCount = size === 'small' ? 96 : size === 'medium' ? 220 : size === 'large' ? 440 : 950;
-    const candidatePositions = this.generateUniformGlobalSamples(shape, factor, sampleCount);
+    // Pre-allocated Instanced Batches (frustumCulled = false to prevent bounding box drops)
+    const maxStreamedTrees = 256;
+    const instancedTrees = new InstancedMesh(this.treeGeometry, this.treeMaterial, maxStreamedTrees);
+    instancedTrees.count = 0;
+    instancedTrees.frustumCulled = false;
+    root.add(instancedTrees);
+
+    // Generate candidate positions centered around the initial viewport / North Pole
+    const candidatePositions: AnimalVector3[] = [];
+    const sampleCount = 140;
+    const localRadiusM = 2200;
+
+    for (let i = 0; i < sampleCount; i++) {
+      const angle = (i / sampleCount) * Math.PI * 2;
+      const dist = 60 + Math.sqrt((i + 1) / sampleCount) * localRadiusM;
+      const px = Math.cos(angle) * dist;
+      const pz = Math.sin(angle) * dist;
+
+      if (shape === 'sphere') {
+        candidatePositions.push({ x: px, y: body.radiusM, z: pz });
+      } else if (shape === 'cylinder') {
+        candidatePositions.push({ x: px, y: 3950, z: pz });
+      } else {
+        candidatePositions.push({ x: px, y: 0, z: pz });
+      }
+    }
 
     const landBiomePositions: AnimalVector3[] = [];
     const waterBiomePositions: AnimalVector3[] = [];
 
     for (const pos of candidatePositions) {
       const surfSample = surface.sample(pos);
-      if (surfSample.elevationM < -0.65) {
+      if (surfSample.elevationM < 0) {
         waterBiomePositions.push(surfSample.position);
-      } else if (surfSample.walkable && surfSample.elevationM > 0.55) {
+      } else {
         landBiomePositions.push(surfSample.position);
       }
     }
 
-    if (landBiomePositions.length < 4) {
-      const fallbackHome = surface.sample(shape === 'sphere' ? { x: 9 * factor, y: 0, z: 0 } : { x: -4 * factor, y: 0, z: -4 * factor });
-      landBiomePositions.push(fallbackHome.position);
+    // Guarantees diverse locations even if planet has extreme topography
+    if (landBiomePositions.length < 12) {
+      for (const pos of candidatePositions) landBiomePositions.push(surface.sample(pos).position);
     }
-    if (waterBiomePositions.length < 2) {
-      const fallbackWater = shape === 'plane'
-        ? { x: 4.5 * factor, y: 0, z: 4.5 * factor }
-        : shape === 'sphere'
-          ? { x: -9 * factor, y: 0, z: 0 }
-          : { x: 0, y: 9 * factor, z: 0 };
-      waterBiomePositions.push(fallbackWater);
+    if (waterBiomePositions.length < 8) {
+      for (const pos of candidatePositions) {
+        const frame = surface.sample(pos);
+        waterBiomePositions.push(add(frame.position, scale(frame.surfaceUp, -5.0)));
+      }
     }
 
-    // 1. Grazing Meadows (Open Grassy Clearings on Dry Land)
-    const targetMeadowCount = size === 'small' ? 4 : size === 'medium' ? 8 : size === 'large' ? 16 : 36;
-    const meadowPositions = filterWithMinDistance(landBiomePositions, 3.5 * Math.min(1.5, factor), targetMeadowCount);
+    // 1. Grazing Meadows
+    const targetMeadowCount = 12;
+    const meadowPositions = filterWithMinDistance(landBiomePositions, 180, targetMeadowCount);
     const grazingPatches: AnimalGrazingPatch[] = meadowPositions.map((pos, index) => {
       const frame = surface.sample(pos);
       return {
-        id: `${shape}-${size}-meadow-${index}`,
+        id: `${shape}-meadow-${index}`,
         position: frame.position,
-        radiusM: 2.5 + (index % 2) * 0.5,
+        radiusM: 40 + (index % 2) * 15,
         capacity: 10,
         suitability01: 0.9,
       };
     });
 
-    // Build Debug Meadow Rings
     for (const patch of grazingPatches) {
       const frame = surface.sample(patch.position);
       const ring = new Mesh(
-        new RingGeometry(patch.radiusM - 0.1, patch.radiusM, 28),
-        new MeshBasicMaterial({ color: '#70e000', side: DoubleSide, transparent: true, opacity: 0.7 }),
+        new RingGeometry(patch.radiusM - 2, patch.radiusM, 24),
+        new MeshBasicMaterial({ color: '#70e000', side: DoubleSide, transparent: true, opacity: 0.75 }),
       );
       ring.position.set(frame.position.x, frame.position.y, frame.position.z);
       ring.quaternion.copy(new Quaternion().setFromUnitVectors(
         new Vector3(0, 0, 1),
         new Vector3(frame.surfaceUp.x, frame.surfaceUp.y, frame.surfaceUp.z),
       ));
-      ring.position.add(new Vector3(frame.surfaceUp.x, frame.surfaceUp.y, frame.surfaceUp.z).multiplyScalar(0.04));
       debugMeadowGroup.add(ring);
     }
 
-    // 2. Tree Groves (Generated as ITerrainScatterInstance and batched into 1 InstancedMesh)
-    const targetTreeCount = size === 'small' ? 6 : size === 'medium' ? 14 : size === 'large' ? 28 : 72;
-    const treeSeedPositions = filterWithMinDistance(landBiomePositions.slice(2), 4.0 * Math.min(1.5, factor), targetTreeCount);
-
-    const treeInstances: ITerrainScatterInstance[] = treeSeedPositions.map((pos, index) => {
-      const frame = surface.sample(pos);
+    // 2. Tree Canopy Roost Sites
+    const birdRoostSites: AnimalRoostSite[] = grazingPatches.map((patch, index) => {
+      const frame = surface.sample(patch.position);
+      const perchPos = add(patch.position, scale(frame.surfaceUp, 35.0));
       return {
-        instanceId: `tree-${index}` as any,
-        worldPositionM: [frame.position.x, frame.position.y, frame.position.z],
-        normal: [frame.normal.x, frame.normal.y, frame.normal.z],
-        surfaceUp: [frame.surfaceUp.x, frame.surfaceUp.y, frame.surfaceUp.z],
-        rotationSeed01: ((index * 23) % 100) / 100,
-        scaleSeed01: 0.4 + (index % 3) * 0.08,
-        embedSeed01: 0,
-      };
-    });
-
-    const adaptedTrees = adaptTerrainScatterForAnimals({
-      habitatVersion: `${shape}-${size}-trees`,
-      sources: [{
-        speciesId: 'tree',
-        instances: treeInstances,
-        habitatKind: 'grove',
-        activities: ['feed', 'rest'],
-        obstacleRadiusM: 0.7,
-        blocksLand: true,
-        roostCapacity: 3,
-      }],
-    });
-
-    let instancedTrees: InstancedMesh | null = null;
-    if (adaptedTrees.obstacles.length > 0) {
-      instancedTrees = new InstancedMesh(this.treeGeometry, this.treeMaterial, adaptedTrees.obstacles.length);
-      const treeMat = new Matrix4();
-      const treeQuat = new Quaternion();
-      const treeScale = new Vector3(0.42, 0.42, 0.42);
-
-      adaptedTrees.obstacles.forEach((obstacle, index) => {
-        treeQuat.setFromUnitVectors(
-          new Vector3(0, 1, 0),
-          new Vector3(obstacle.surfaceUp.x, obstacle.surfaceUp.y, obstacle.surfaceUp.z),
-        );
-        treeMat.compose(
-          new Vector3(obstacle.position.x, obstacle.position.y, obstacle.position.z),
-          treeQuat,
-          treeScale,
-        );
-        instancedTrees!.setMatrixAt(index, treeMat);
-      });
-
-      instancedTrees.instanceMatrix.needsUpdate = true;
-      instancedTrees.computeBoundingSphere();
-      root.add(instancedTrees);
-    }
-
-    // 3. Tree Canopy Roost Sites (Elevated 2.6m into tree branches)
-    const birdRoostSites: AnimalRoostSite[] = adaptedTrees.obstacles.map((obs, index) => {
-      const perchPos = add(obs.position, scale(obs.surfaceUp, 2.6));
-
-      const socketSphere = new Mesh(
-        new SphereGeometry(0.18, 10, 8),
-        new MeshStandardMaterial({ color: '#ffbe0b', roughness: 0.3, emissive: '#d48b00', emissiveIntensity: 0.5 }),
-      );
-      socketSphere.position.set(perchPos.x, perchPos.y, perchPos.z);
-      debugRoostGroup.add(socketSphere);
-
-      const lineGeom = new BufferGeometry().setFromPoints([
-        new Vector3(obs.position.x, obs.position.y, obs.position.z),
-        new Vector3(perchPos.x, perchPos.y, perchPos.z),
-      ]);
-      const line = new LineSegments(lineGeom, new LineBasicMaterial({ color: '#ffbe0b', transparent: true, opacity: 0.6 }));
-      debugRoostGroup.add(line);
-
-      return {
-        id: `canopy-roost-${index}`,
+        id: `${shape}-roost-${index}`,
         position: perchPos,
-        capacity: 3,
+        capacity: 4,
       };
     });
 
-    // 4. Underwater Feeding Reefs (Shoreline shallows + Deep water column)
-    const targetReefCount = size === 'small' ? 4 : size === 'medium' ? 8 : size === 'large' ? 14 : 32;
-    const reefPositions = filterWithMinDistance(waterBiomePositions, 2.6 * Math.min(1.4, factor), targetReefCount);
+    // 3. Underwater Feeding Reefs
+    const targetReefCount = 8;
+    const reefPositions = filterWithMinDistance(waterBiomePositions, 160, targetReefCount);
     const fishZones: AnimalAquaticHabitatZone[] = reefPositions.map((pos, index) => {
       const frame = surface.sample(pos);
-      const waterDepth = Math.max(0.65, -frame.elevationM);
-      const reefPos = this.projectUnderwater(shape, factor, pos, surface);
-      const zoneRadius = Math.min(1.8, Math.max(0.8, (waterDepth - 0.25) * 1.3));
+      const waterDepth = Math.max(5.0, -frame.elevationM);
+      const cruiseOffset = frame.elevationM + waterDepth * 0.5;
+      const reefPos = add(frame.position, scale(frame.surfaceUp, cruiseOffset));
+      const zoneRadius = Math.min(35, Math.max(12, waterDepth * 1.5));
 
       const volumeCylinder = new Mesh(
-        new CylinderGeometry(zoneRadius, zoneRadius, Math.max(0.3, waterDepth * 0.6), 20, 1, true),
-        new MeshBasicMaterial({ color: '#00f5d4', side: DoubleSide, transparent: true, opacity: 0.25, depthWrite: false }),
+        new CylinderGeometry(zoneRadius, zoneRadius, Math.max(6, waterDepth * 0.8), 16, 1, true),
+        new MeshBasicMaterial({ color: '#00f5d4', side: DoubleSide, transparent: true, opacity: 0.4, depthWrite: false }),
       );
       volumeCylinder.position.set(reefPos.x, reefPos.y, reefPos.z);
       volumeCylinder.quaternion.copy(new Quaternion().setFromUnitVectors(
@@ -500,7 +690,7 @@ export class AnimalsTerrainWorldLabPageComponent {
       debugWaterGroup.add(volumeCylinder);
 
       return {
-        id: `${shape}-${size}-reef-${index}`,
+        id: `${shape}-reef-${index}`,
         position: reefPos,
         radiusM: zoneRadius,
         capacity: 10,
@@ -508,13 +698,13 @@ export class AnimalsTerrainWorldLabPageComponent {
       };
     });
 
-    // 5. Land Herd Simulation Groups (Batched into 1 InstancedMesh)
-    const herdGroupCount = size === 'small' ? 1 : size === 'medium' ? 2 : size === 'large' ? 4 : 10;
+    // 4. Land Herd Groups
+    const herdGroupCount = 4;
     const membersPerHerd = 5;
     const totalHerdMembers = herdGroupCount * membersPerHerd;
     const instancedHerds = new InstancedMesh(this.animalGeometry, this.animalMaterial, Math.max(1, totalHerdMembers));
     instancedHerds.count = totalHerdMembers;
-    instancedHerds.frustumCulled = true;
+    instancedHerds.frustumCulled = false;
     root.add(instancedHerds);
 
     const herdGroups: HerdSimGroup[] = Array.from({ length: herdGroupCount }, (_, groupIdx) => {
@@ -526,11 +716,11 @@ export class AnimalsTerrainWorldLabPageComponent {
       );
 
       const wanderDef: AnimalTopologyWandererDefinition = {
-        groupId: `${shape}-${size}-herd-${groupIdx}`,
-        groupSeed: 0x7101 + groupIdx * 41 + shape.length,
+        groupId: `${shape}-herd-${groupIdx}`,
+        groupSeed: 0x7101 + groupIdx * 41,
         habitats: sectorPatches.map(p => ({ id: p.id, position: p.position, radiusM: p.radiusM })),
         surface,
-        travelSpeedMps: 1.8,
+        travelSpeedMps: 22.0,
         minDwellDurationS: 8,
         maxDwellDurationS: 16,
       };
@@ -540,26 +730,26 @@ export class AnimalsTerrainWorldLabPageComponent {
         surface,
         maximumMembers: 32,
         maximumPatches: Math.max(64, sectorPatches.length + 10),
-        maximumSpeedMps: 2.2,
-        maximumAccelerationMps2: 2.0,
-        maximumSubstepDistanceM: 0.5,
+        maximumSpeedMps: 26.0,
+        maximumAccelerationMps2: 15.0,
+        maximumSubstepDistanceM: 5.0,
         maximumSubsteps: 8,
         maximumSlope01: 0.75,
-        maximumPatchDistanceM: 50 * factor,
+        maximumPatchDistanceM: 5000,
         minimumPatchSuitability01: 0.5,
-        separationRadiusM: 1.6,
+        separationRadiusM: 8.0,
         separationWeight: 1.5,
         cohesionWeight: 0.6,
         alignmentWeight: 0.5,
         targetWeight: 1.0,
-        arrivalRadiusM: 1.4,
-        slotSpacingM: 1.2,
+        arrivalRadiusM: 12.0,
+        slotSpacingM: 6.0,
         maximumAvoidanceAttempts: 4,
       };
 
       const homePos = sectorPatches[0].position;
       const members: AnimalLandHerdMember[] = Array.from({ length: memberCount }, (__, memIdx) => {
-        const offset = surface.moveAlongSurface(homePos, { x: (memIdx - 2) * 1.0, y: 0, z: (memIdx % 2) * 0.8 }, 1);
+        const offset = surface.moveAlongSurface(homePos, { x: (memIdx - 2) * 5.0, y: 0, z: (memIdx % 2) * 4.0 }, 1);
         return {
           id: `herd-${groupIdx}-mem-${memIdx}`,
           position: offset,
@@ -569,7 +759,7 @@ export class AnimalsTerrainWorldLabPageComponent {
       });
 
       const waypointMesh = new Mesh(
-        new OctahedronGeometry(0.35),
+        new OctahedronGeometry(8.0),
         new MeshBasicMaterial({ color: '#ff5400', wireframe: true }),
       );
       debugWaypointGroup.add(waypointMesh);
@@ -581,13 +771,13 @@ export class AnimalsTerrainWorldLabPageComponent {
       };
     });
 
-    // 6. Bird Flock Simulation Groups (Batched into 1 InstancedMesh)
-    const birdGroupCount = size === 'small' ? 1 : size === 'medium' ? 2 : size === 'large' ? 4 : 10;
+    // 5. Bird Flock Groups
+    const birdGroupCount = 4;
     const membersPerBirdFlock = 5;
     const totalBirdMembers = birdGroupCount * membersPerBirdFlock;
     const instancedBirds = new InstancedMesh(this.birdGeometry, this.birdMaterial, Math.max(1, totalBirdMembers));
     instancedBirds.count = totalBirdMembers;
-    instancedBirds.frustumCulled = true;
+    instancedBirds.frustumCulled = false;
     root.add(instancedBirds);
 
     const birdGroups: BirdSimGroup[] = Array.from({ length: birdGroupCount }, (_, groupIdx) => {
@@ -601,18 +791,18 @@ export class AnimalsTerrainWorldLabPageComponent {
         : [];
 
       const wanderHabitats = sectorRoosts.length > 0
-        ? sectorRoosts.map(r => ({ id: r.id, position: r.position, radiusM: 3.5 }))
-        : [{ id: 'sky-base', position: add(landBiomePositions[0], { x: 0, y: 5.0, z: 0 }), radiusM: 4.5 }];
+        ? sectorRoosts.map(r => ({ id: r.id, position: r.position, radiusM: 35 }))
+        : [{ id: 'sky-base', position: add(landBiomePositions[0], { x: 0, y: 50, z: 0 }), radiusM: 45 }];
 
       const wanderDef: AnimalTopologyWandererDefinition = {
-        groupId: `${shape}-${size}-birds-${groupIdx}`,
-        groupSeed: 0x3344 + groupIdx * 29 + shape.length,
+        groupId: `${shape}-birds-${groupIdx}`,
+        groupSeed: 0x3344 + groupIdx * 29,
         habitats: wanderHabitats,
         surface,
-        travelSpeedMps: 4.8,
+        travelSpeedMps: 48.0,
         minDwellDurationS: 6,
         maxDwellDurationS: 12,
-        travelArcHeightM: 3.0,
+        travelArcHeightM: 45.0,
       };
 
       const wanderer = createAnimalTopologyWanderPlayback(wanderDef);
@@ -620,40 +810,40 @@ export class AnimalsTerrainWorldLabPageComponent {
         surface,
         maximumMembers: 32,
         maximumRoostSites: Math.max(64, sectorRoosts.length + 10),
-        maximumSpeedMps: 5.5,
-        maximumAccelerationMps2: 4.0,
-        maximumSubstepDistanceM: 0.8,
+        maximumSpeedMps: 60.0,
+        maximumAccelerationMps2: 32.0,
+        maximumSubstepDistanceM: 8.0,
         maximumSubsteps: 8,
-        minimumAltitudeM: 1.8,
-        maximumAltitudeM: 14.0,
-        preferredAltitudeM: 4.8,
+        minimumAltitudeM: 10.0,
+        maximumAltitudeM: 140.0,
+        preferredAltitudeM: 45.0,
         flightBehavior: 'boid3d',
-        flightAltitudeSpreadM: 1.2,
-        separationRadiusM: 1.8,
+        flightAltitudeSpreadM: 15.0,
+        separationRadiusM: 12.0,
         separationWeight: 1.5,
         cohesionWeight: 0.8,
         alignmentWeight: 1.0,
         targetWeight: 1.2,
-        arrivalRadiusM: 1.5,
-        holdingRadiusM: 3.5,
-        holdingSpeedMps: 2.6,
-        roostSlotSpacingM: 1.3,
+        arrivalRadiusM: 15.0,
+        holdingRadiusM: 40.0,
+        holdingSpeedMps: 24.0,
+        roostSlotSpacingM: 8.0,
       };
 
       const homePos = wanderHabitats[0].position;
       const members: AnimalAirFlockMember[] = Array.from({ length: memberCount }, (__, memIdx) => {
         const frame = surface.sample(homePos);
-        const altPos = add(homePos, scale(frame.surfaceUp, 2.5));
+        const altPos = add(homePos, scale(frame.surfaceUp, 40.0));
         return {
           id: `bird-${groupIdx}-mem-${memIdx}`,
-          position: add(altPos, { x: (memIdx - 2) * 0.8, y: 0, z: (memIdx % 2) * 0.8 }),
+          position: add(altPos, { x: (memIdx - 2) * 10.0, y: 0, z: (memIdx % 2) * 10.0 }),
           velocity: { x: 0, y: 0, z: 0 },
           mode: 'holding' as const,
         };
       });
 
       const waypointMesh = new Mesh(
-        new OctahedronGeometry(0.35),
+        new OctahedronGeometry(8.0),
         new MeshBasicMaterial({ color: '#f72585', wireframe: true }),
       );
       debugWaypointGroup.add(waypointMesh);
@@ -665,13 +855,13 @@ export class AnimalsTerrainWorldLabPageComponent {
       };
     });
 
-    // 7. Fish School Simulation Groups (Batched into 1 InstancedMesh)
-    const fishGroupCount = size === 'small' ? 1 : size === 'medium' ? 2 : size === 'large' ? 3 : 8;
+    // 6. Fish School Groups
+    const fishGroupCount = 3;
     const membersPerFishSchool = 5;
     const totalFishMembers = fishGroupCount * membersPerFishSchool;
     const instancedFish = new InstancedMesh(this.fishGeometry, this.fishMaterial, Math.max(1, totalFishMembers));
     instancedFish.count = totalFishMembers;
-    instancedFish.frustumCulled = true;
+    instancedFish.frustumCulled = false;
     root.add(instancedFish);
 
     const fishGroups: FishSimGroup[] = Array.from({ length: fishGroupCount }, (_, groupIdx) => {
@@ -683,11 +873,11 @@ export class AnimalsTerrainWorldLabPageComponent {
       );
 
       const wanderDef: AnimalTopologyWandererDefinition = {
-        groupId: `${shape}-${size}-fish-${groupIdx}`,
-        groupSeed: 0x9922 + groupIdx * 17 + shape.length,
+        groupId: `${shape}-fish-${groupIdx}`,
+        groupSeed: 0x9922 + groupIdx * 17,
         habitats: sectorZones.map(p => ({ id: p.id, position: p.position, radiusM: p.radiusM })),
         surface,
-        travelSpeedMps: 2.2,
+        travelSpeedMps: 18.0,
         minDwellDurationS: 7,
         maxDwellDurationS: 14,
       };
@@ -697,28 +887,28 @@ export class AnimalsTerrainWorldLabPageComponent {
         water,
         maximumMembers: 32,
         maximumZones: Math.max(32, sectorZones.length + 10),
-        maximumZoneDistanceM: 50 * factor,
+        maximumZoneDistanceM: 5000,
         minimumZoneSuitability01: 0.5,
-        maximumSpeedMps: 2.6,
-        maximumAccelerationMps2: 2.8,
-        maximumSubstepDistanceM: 0.6,
+        maximumSpeedMps: 22.0,
+        maximumAccelerationMps2: 15.0,
+        maximumSubstepDistanceM: 5.0,
         maximumSubsteps: 8,
-        minimumSurfaceClearanceM: 0.08,
-        minimumBottomClearanceM: 0.08,
-        preferredSurfaceClearanceM: 0.22,
-        maximumSurfaceClearanceM: 3.5,
-        segmentSampleSpacingM: 0.4,
-        separationRadiusM: 0.9,
+        minimumSurfaceClearanceM: 1.0,
+        minimumBottomClearanceM: 1.0,
+        preferredSurfaceClearanceM: 3.5,
+        maximumSurfaceClearanceM: 40.0,
+        segmentSampleSpacingM: 3.0,
+        separationRadiusM: 6.0,
         separationWeight: 1.4,
         cohesionWeight: 0.8,
         alignmentWeight: 0.9,
         targetWeight: 1.1,
         flowWeight: 0.2,
         depthWeight: 0.7,
-        arrivalRadiusM: 1.1,
-        slotSpacingM: 0.6,
-        loiterRadiusM: 0.9,
-        loiterAngularSpeedRadPerSecond: 0.9,
+        arrivalRadiusM: 10.0,
+        slotSpacingM: 4.0,
+        loiterRadiusM: 8.0,
+        loiterAngularSpeedRadPerSecond: 0.6,
         maximumAvoidanceAttempts: 4,
       };
 
@@ -726,14 +916,14 @@ export class AnimalsTerrainWorldLabPageComponent {
       const members: AnimalAquaticSchoolMember[] = Array.from({ length: memberCount }, (__, memIdx) => {
         return {
           id: `fish-${groupIdx}-mem-${memIdx}`,
-          position: add(homePos, { x: (memIdx - 2) * 0.25, y: 0, z: (memIdx % 2) * 0.25 }),
+          position: add(homePos, { x: (memIdx - 2) * 4.0, y: 0, z: (memIdx % 2) * 4.0 }),
           velocity: { x: 0, y: 0, z: 0 },
           mode: 'forage' as const,
         };
       });
 
       const waypointMesh = new Mesh(
-        new OctahedronGeometry(0.35),
+        new OctahedronGeometry(8.0),
         new MeshBasicMaterial({ color: '#4cc9f0', wireframe: true }),
       );
       debugWaypointGroup.add(waypointMesh);
@@ -746,104 +936,24 @@ export class AnimalsTerrainWorldLabPageComponent {
     });
 
     return {
-      shape, size, label, root, surface, water,
+      shape, root, surface, water,
       herdGroups, birdGroups, fishGroups,
       instancedTrees, instancedHerds, instancedBirds, instancedFish,
       debugMeadowGroup, debugRoostGroup, debugWaterGroup, debugWaypointGroup,
     };
   }
 
-  private generateUniformGlobalSamples(shape: Shape, factor: number, count: number): AnimalVector3[] {
-    const samples: AnimalVector3[] = [];
-    const phi = Math.PI * (3 - Math.sqrt(5)); // Golden angle
-
-    if (shape === 'sphere') {
-      const radius = 9 * factor;
-      for (let i = 0; i < count; i++) {
-        const y = 1 - (i / Math.max(1, count - 1)) * 2;
-        const rAtY = Math.sqrt(Math.max(0, 1 - y * y));
-        const theta = phi * i;
-        const x = Math.cos(theta) * rAtY;
-        const z = Math.sin(theta) * rAtY;
-        samples.push({ x: x * radius, y: y * radius, z: z * radius });
-      }
-      return samples;
-    }
-
-    if (shape === 'cylinder') {
-      const radius = 9 * factor;
-      const length = 20 * factor;
-      for (let i = 0; i < count; i++) {
-        const x = ((i / Math.max(1, count - 1)) - 0.5) * (0.85 * length);
-        const theta = (phi * i) % (Math.PI * 2);
-        samples.push({ x, y: radius * Math.cos(theta), z: radius * Math.sin(theta) });
-      }
-      return samples;
-    }
-
-    // Plane: comprehensive uniform 2D grid covering entire map and full lake perimeter
-    const halfWidth = 10.5 * factor;
-    const gridDim = Math.ceil(Math.sqrt(count));
-    const step = (halfWidth * 2) / gridDim;
-    for (let ix = 0; ix < gridDim; ix++) {
-      for (let iz = 0; iz < gridDim; iz++) {
-        if (samples.length >= count) break;
-        const jitterX = Math.sin(ix * 13.7 + iz * 9.3) * 0.3 * step;
-        const jitterZ = Math.cos(ix * 7.1 + iz * 17.3) * 0.3 * step;
-        const x = -halfWidth + (ix + 0.5) * step + jitterX;
-        const z = -halfWidth + (iz + 0.5) * step + jitterZ;
-        samples.push({ x, y: 0, z });
-      }
-    }
-    return samples;
-  }
-
-  private projectUnderwater(shape: Shape, factor: number, position: AnimalVector3, surface: AnimalWorldSurface): AnimalVector3 {
-    const frame = surface.sample(position);
-
-    if (shape === 'sphere') {
-      const len = Math.hypot(position.x, position.y, position.z) || 1;
-      const baseRadius = 9 * factor;
-      const waterDepth = Math.max(0.45, -frame.elevationM);
-      const cruiseOffset = frame.elevationM + waterDepth * 0.5;
-      const cruiseRadius = baseRadius + cruiseOffset;
-      return {
-        x: (position.x / len) * cruiseRadius,
-        y: (position.y / len) * cruiseRadius,
-        z: (position.z / len) * cruiseRadius,
-      };
-    }
-
-    if (shape === 'cylinder') {
-      const radial = Math.hypot(position.y, position.z) || 1;
-      const baseRadius = 9 * factor;
-      const waterDepth = Math.max(0.45, -frame.elevationM);
-      const cruiseOffset = frame.elevationM + waterDepth * 0.5;
-      const cruiseRadius = baseRadius - cruiseOffset;
-      return {
-        x: position.x,
-        y: (position.y / radial) * cruiseRadius,
-        z: (position.z / radial) * cruiseRadius,
-      };
-    }
-
-    // Plane: water surface is y = 0, seabed is frame.elevationM (< 0)
-    const waterDepth = Math.max(0.45, -frame.elevationM);
-    const cruiseY = frame.elevationM + waterDepth * 0.5;
-    return { x: frame.position.x, y: cruiseY, z: frame.position.z };
-  }
-
-  private makeWaterVolume(shape: Shape, factor: number, terrainSurface: AnimalWorldSurface): AnimalWaterVolume {
+  private makeWaterVolume(shape: CdlodTopology, radiusM: number, terrainSurface: AnimalWorldSurface): AnimalWaterVolume {
     const surface: WaterSurface = {
-      getHeight: () => WATER_SURFACE_OFFSET_M,
+      getHeight: () => 0,
       getNormal: (_x, _z, _time, out = new Vector3()) => out.set(0, 1, 0),
       getFlow: (_x, _z, _time, out = new Vector3()) => out.set(0.15, 0, 0.05),
     };
     const domain = shape === 'plane'
       ? new PlaneWaterDomain()
       : shape === 'sphere'
-        ? new SphereWaterDomain(9 * factor)
-        : new CylinderWaterDomain(9 * factor, { axis: new Vector3(1, 0, 0), lengthM: 20 * factor });
+        ? new SphereWaterDomain(radiusM)
+        : new CylinderWaterDomain(4000, { axis: new Vector3(1, 0, 0), lengthM: 8000 });
 
     return new TerrainWaterAnimalVolume({
       terrain: terrainSurface,
@@ -851,159 +961,34 @@ export class AnimalsTerrainWorldLabPageComponent {
     });
   }
 
-  private makeTerrainMesh(shape: Shape, factor = 1, field: ITerrainField): Mesh {
-    const segs = factor > 6 ? 120 : 72;
-
-    if (shape === 'sphere') {
-      const baseRadius = 9 * factor;
-      const geometry = new SphereGeometry(baseRadius, segs, Math.round(segs * 0.75));
-      const positions = geometry.getAttribute('position');
-      const colors = new Float32Array(positions.count * 3);
-      const lushGreen = new Color('#528f3c');
-      const warmGrass = new Color('#6ba347');
-      const sandyBeach = new Color('#d4c088');
-      const oceanSeabed = new Color('#1c3f56');
-
-      for (let i = 0; i < positions.count; i++) {
-        const x = positions.getX(i), y = positions.getY(i), z = positions.getZ(i);
-        const len = Math.hypot(x, y, z) || 1;
-        const relief = field.sample([x, y, z]).elevationM;
-        const newRadius = baseRadius + relief;
-        positions.setXYZ(i, (x / len) * newRadius, (y / len) * newRadius, (z / len) * newRadius);
-
-        let color = lushGreen;
-        if (relief < -0.4) {
-          color = oceanSeabed;
-        } else if (relief < 0.25) {
-          color = sandyBeach;
-        } else if (relief < 0.8) {
-          color = warmGrass;
-        }
-        colors[i * 3] = color.r;
-        colors[i * 3 + 1] = color.g;
-        colors[i * 3 + 2] = color.b;
-      }
-      geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
-      positions.needsUpdate = true;
-      geometry.computeVertexNormals();
-      return new Mesh(geometry, new MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
-    }
-
-    if (shape === 'cylinder') {
-      const baseRadius = 9 * factor;
-      const length = 20 * factor;
-      const geometry = new CylinderGeometry(baseRadius, baseRadius, length, segs, Math.round(segs * 0.75), true);
-      geometry.rotateZ(Math.PI / 2);
-
-      const positions = geometry.getAttribute('position');
-      const colors = new Float32Array(positions.count * 3);
-      const lushGreen = new Color('#528f3c');
-      const warmGrass = new Color('#6ba347');
-      const sandyBeach = new Color('#d4c088');
-      const canalSeabed = new Color('#1c3f56');
-
-      for (let i = 0; i < positions.count; i++) {
-        const x = positions.getX(i), y = positions.getY(i), z = positions.getZ(i);
-        const radial = Math.hypot(y, z) || 1;
-        const relief = field.sample([x, y, z]).elevationM;
-        const newRadius = baseRadius - relief;
-        positions.setXYZ(i, x, (y / radial) * newRadius, (z / radial) * newRadius);
-
-        let color = lushGreen;
-        if (relief < -0.4) {
-          color = canalSeabed;
-        } else if (relief < 0.25) {
-          color = sandyBeach;
-        } else if (relief < 0.8) {
-          color = warmGrass;
-        }
-        colors[i * 3] = color.r;
-        colors[i * 3 + 1] = color.g;
-        colors[i * 3 + 2] = color.b;
-      }
-      geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
-      positions.needsUpdate = true;
-      geometry.computeVertexNormals();
-      return new Mesh(geometry, new MeshStandardMaterial({ vertexColors: true, roughness: 0.8, side: BackSide }));
-    }
-
-    // Plane
-    const size = 24 * factor;
-    const geometry = new PlaneGeometry(size, size, segs, segs);
-    geometry.rotateX(-Math.PI / 2);
-    const positions = geometry.getAttribute('position');
-    const colors = new Float32Array(positions.count * 3);
-    const lushGreen = new Color('#528f3c');
-    const warmGrass = new Color('#6ba347');
-    const sandyBeach = new Color('#d4c088');
-    const lakeSeabed = new Color('#1c3f56');
-
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i), z = positions.getZ(i);
-      const relief = field.sample([x, 0, z]).elevationM;
-      positions.setY(i, relief);
-
-      let color = lushGreen;
-      if (relief < -0.4) {
-        color = lakeSeabed;
-      } else if (relief < 0.25) {
-        color = sandyBeach;
-      } else if (relief < 0.8) {
-        color = warmGrass;
-      }
-      colors[i * 3] = color.r;
-      colors[i * 3 + 1] = color.g;
-      colors[i * 3 + 2] = color.b;
-    }
-    geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
-    positions.needsUpdate = true;
-    geometry.computeVertexNormals();
-    return new Mesh(geometry, new MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
-  }
-
-  private makeWaterMesh(shape: Shape, factor = 1): Mesh {
-    const segs = factor > 6 ? 96 : 54;
-    if (shape === 'sphere') {
-      return new Mesh(new SphereGeometry(9 * factor, segs, Math.round(segs * 0.75)), this.waterMaterial);
-    }
-    if (shape === 'cylinder') {
-      const geometry = new CylinderGeometry(9 * factor, 9 * factor, 20 * factor, segs, 1, true);
-      geometry.rotateZ(Math.PI / 2);
-      return new Mesh(geometry, this.waterMaterial);
-    }
-    const mesh = new Mesh(new PlaneGeometry(24 * factor, 24 * factor), this.waterMaterial);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = WATER_SURFACE_OFFSET_M;
-    return mesh;
-  }
-
   private resetGroupPositions(universalTime: number): void {
-    for (const view of this.views) {
-      for (const herd of view.herdGroups) {
+    if (!this.contexts) return;
+    for (const ctx of Object.values(this.contexts)) {
+      for (const herd of ctx.herdGroups) {
         const snap = herd.wanderer.sample(universalTime);
         const center = snap.activity === 'travel' ? snap.position : snap.currentHabitat.position;
         herd.members = herd.members.map((m, idx) => ({
           ...m,
-          position: view.surface.moveAlongSurface(center, { x: (idx - 2) * 0.8, y: 0, z: (idx % 2) * 0.8 }, 1),
+          position: ctx.surface.moveAlongSurface(center, { x: (idx - 2) * 5.0, y: 0, z: (idx % 2) * 4.0 }, 1),
           velocity: { x: 0, y: 0, z: 0 },
         }));
       }
-      for (const bird of view.birdGroups) {
+      for (const bird of ctx.birdGroups) {
         const snap = bird.wanderer.sample(universalTime);
-        const frame = view.surface.sample(snap.position);
-        const center = add(snap.position, scale(frame.surfaceUp, 3.5));
+        const frame = ctx.surface.sample(snap.position);
+        const center = add(snap.position, scale(frame.surfaceUp, 40.0));
         bird.members = bird.members.map((m, idx) => ({
           ...m,
-          position: add(center, { x: (idx - 2) * 0.7, y: 0, z: (idx % 2) * 0.7 }),
+          position: add(center, { x: (idx - 2) * 10.0, y: 0, z: (idx % 2) * 10.0 }),
           velocity: { x: 0, y: 0, z: 0 },
         }));
       }
-      for (const fish of view.fishGroups) {
+      for (const fish of ctx.fishGroups) {
         const snap = fish.wanderer.sample(universalTime);
         const center = snap.currentHabitat.position;
         fish.members = fish.members.map((m, idx) => ({
           ...m,
-          position: add(center, { x: (idx - 2) * 0.25, y: 0, z: (idx % 2) * 0.25 }),
+          position: add(center, { x: (idx - 2) * 4.0, y: 0, z: (idx % 2) * 4.0 }),
           velocity: { x: 0, y: 0, z: 0 },
         }));
       }
@@ -1011,176 +996,144 @@ export class AnimalsTerrainWorldLabPageComponent {
   }
 
   private stepSimulation(universalTime: number, deltaSeconds: number): void {
-    const statuses = { ...this.status() };
+    if (!this.contexts) return;
     const activeShape = this.selectedShape();
-    const activeSize = this.worldSize();
+    const ctx = this.contexts[activeShape];
 
-    // Active camera position for planetary-scale observer culling & life materialization
-    const camPos = this.engine.camera ? this.engine.camera.position : new Vector3(0, 22, 42);
-    const activeObserverRadiusM = activeSize === 'huge' ? 140 : 10000;
-
-    for (const view of this.views) {
-      if (view.shape !== activeShape || view.size !== activeSize) continue;
-
-      let herdAct = '';
-      let birdAct = '';
-      let fishAct = '';
-
-      // 1. Step Land Herds (Instanced Batch + Proximity Culling)
-      for (const group of view.herdGroups) {
-        const snap = group.wanderer.sample(universalTime);
-        herdAct = snap.activity;
-        const target = snap.activity === 'travel' ? snap.position : snap.currentHabitat.position;
-        const intent = snap.activity === 'travel' ? 'travel' as const : 'graze' as const;
-
-        group.waypointMesh.position.set(target.x, target.y + 0.5, target.z);
-
-        const distToCamera = Math.hypot(target.x - camPos.x, target.y - camPos.y, target.z - camPos.z);
-        if (distToCamera > activeObserverRadiusM) {
-          // Beyond observer horizon: Cull instances and skip micro collision substeps
-          for (let i = 0; i < group.members.length; i++) {
-            view.instancedHerds.setMatrixAt(group.memberStartIndex + i, this.zeroMatrix);
-          }
-          continue;
-        }
-
-        // On-demand materialization: if entering observer bubble after being dormant, align members to current target
-        const firstMemDist = Math.hypot(
-          group.members[0].position.x - target.x,
-          group.members[0].position.y - target.y,
-          group.members[0].position.z - target.z,
-        );
-        if (firstMemDist > 12.0) {
-          group.members = group.members.map((m, idx) => ({
-            ...m,
-            position: view.surface.moveAlongSurface(target, { x: (idx - 2) * 1.0, y: 0, z: (idx % 2) * 0.8 }, 1),
-            velocity: { x: 0, y: 0, z: 0 },
-          }));
-        }
-
-        const result = stepAnimalLandHerd({
-          members: group.members,
-          target,
-          intent,
-          universalTime,
-          deltaSeconds,
-          patches: group.patches,
-        }, group.policy);
-
-        group.members = [...result.members];
-        this.writeHerdInstances(view, group);
-      }
-      view.instancedHerds.instanceMatrix.needsUpdate = true;
-
-      // 2. Step Bird Flocks (Instanced Batch + Proximity Culling)
-      for (const group of view.birdGroups) {
-        const snap = group.wanderer.sample(universalTime);
-        birdAct = snap.activity;
-        const target = snap.activity === 'travel' ? snap.position : snap.currentHabitat.position;
-        const intent = snap.activity === 'travel' ? 'fly' as const : 'roost' as const;
-
-        group.waypointMesh.position.set(target.x, target.y, target.z);
-
-        const distToCamera = Math.hypot(target.x - camPos.x, target.y - camPos.y, target.z - camPos.z);
-        if (distToCamera > activeObserverRadiusM) {
-          for (let i = 0; i < group.members.length; i++) {
-            view.instancedBirds.setMatrixAt(group.memberStartIndex + i, this.zeroMatrix);
-          }
-          continue;
-        }
-
-        // On-demand materialization: align boid flock to current macro target
-        const firstMemDist = Math.hypot(
-          group.members[0].position.x - target.x,
-          group.members[0].position.y - target.y,
-          group.members[0].position.z - target.z,
-        );
-        if (firstMemDist > 15.0) {
-          const frame = view.surface.sample(target);
-          const altPos = add(target, scale(frame.surfaceUp, 2.5));
-          group.members = group.members.map((m, idx) => ({
-            ...m,
-            position: add(altPos, { x: (idx - 2) * 0.8, y: 0, z: (idx % 2) * 0.8 }),
-            velocity: { x: 0, y: 0, z: 0 },
-          }));
-        }
-
-        const result = stepAnimalAirFlock({
-          members: group.members,
-          target,
-          intent,
-          universalTime,
-          deltaSeconds,
-          roostSites: group.roostSites,
-        }, group.policy);
-
-        group.members = [...result.members];
-        this.writeBirdInstances(view, group);
-      }
-      view.instancedBirds.instanceMatrix.needsUpdate = true;
-
-      // 3. Step Fish Schools (Instanced Batch + Proximity Culling)
-      const factor = SIZE_FACTOR[view.size];
-      for (const group of view.fishGroups) {
-        const snap = group.wanderer.sample(universalTime);
-        fishAct = snap.activity;
-        const target = snap.activity === 'travel'
-          ? this.projectUnderwater(view.shape, factor, snap.position, view.surface)
-          : snap.currentHabitat.position;
-        const intent = snap.activity === 'travel' ? 'travel' as const : 'forage' as const;
-
-        group.waypointMesh.position.set(target.x, target.y, target.z);
-
-        const distToCamera = Math.hypot(target.x - camPos.x, target.y - camPos.y, target.z - camPos.z);
-        if (distToCamera > activeObserverRadiusM) {
-          for (let i = 0; i < group.members.length; i++) {
-            view.instancedFish.setMatrixAt(group.memberStartIndex + i, this.zeroMatrix);
-          }
-          continue;
-        }
-
-        // On-demand materialization: align fish school to current macro target
-        const firstMemDist = Math.hypot(
-          group.members[0].position.x - target.x,
-          group.members[0].position.y - target.y,
-          group.members[0].position.z - target.z,
-        );
-        if (firstMemDist > 12.0) {
-          group.members = group.members.map((m, idx) => ({
-            ...m,
-            position: add(target, { x: (idx - 2) * 0.25, y: 0, z: (idx % 2) * 0.25 }),
-            velocity: { x: 0, y: 0, z: 0 },
-          }));
-        }
-
-        const result = stepAnimalAquaticSchool({
-          members: group.members,
-          target,
-          intent,
-          universalTime,
-          deltaSeconds,
-          zones: group.zones,
-        }, group.policy);
-
-        group.members = [...result.members];
-        this.writeFishInstances(view, group);
-      }
-      view.instancedFish.instanceMatrix.needsUpdate = true;
-
-      statuses[view.shape] = `${view.size}: herds [${herdAct}] · birds [${birdAct}] · fish [${fishAct}] · 4 draw calls`;
+    if (!this.enableLifeSimulation()) {
+      ctx.instancedHerds.count = 0;
+      ctx.instancedHerds.instanceMatrix.needsUpdate = true;
+      ctx.instancedBirds.count = 0;
+      ctx.instancedBirds.instanceMatrix.needsUpdate = true;
+      ctx.instancedFish.count = 0;
+      ctx.instancedFish.instanceMatrix.needsUpdate = true;
+      this.activeAnimalCount.set(0);
+      return;
     }
 
-    this.status.set(statuses);
+    let totalRenderedAnimals = 0;
+
+    // 1. Step Land Herds
+    for (const group of ctx.herdGroups) {
+      const snap = group.wanderer.sample(universalTime);
+      const target = snap.activity === 'travel' ? snap.position : snap.currentHabitat.position;
+      const intent = snap.activity === 'travel' ? 'travel' as const : 'graze' as const;
+
+      group.waypointMesh.position.set(target.x, target.y + 4.0, target.z);
+      totalRenderedAnimals += group.members.length;
+
+      const firstMemDist = Math.hypot(
+        group.members[0].position.x - target.x,
+        group.members[0].position.y - target.y,
+        group.members[0].position.z - target.z,
+      );
+      if (firstMemDist > 120.0) {
+        group.members = group.members.map((m, idx) => ({
+          ...m,
+          position: ctx.surface.moveAlongSurface(target, { x: (idx - 2) * 5.0, y: 0, z: (idx % 2) * 4.0 }, 1),
+          velocity: { x: 0, y: 0, z: 0 },
+        }));
+      }
+
+      const result = stepAnimalLandHerd({
+        members: group.members,
+        target,
+        intent,
+        universalTime,
+        deltaSeconds,
+        patches: group.patches,
+      }, group.policy);
+
+      group.members = [...result.members];
+      this.writeHerdInstances(ctx, group);
+    }
+    ctx.instancedHerds.instanceMatrix.needsUpdate = true;
+
+    // 2. Step Bird Flocks
+    for (const group of ctx.birdGroups) {
+      const snap = group.wanderer.sample(universalTime);
+      const target = snap.activity === 'travel' ? snap.position : snap.currentHabitat.position;
+      const intent = snap.activity === 'travel' ? 'fly' as const : 'roost' as const;
+
+      group.waypointMesh.position.set(target.x, target.y, target.z);
+      totalRenderedAnimals += group.members.length;
+
+      const firstMemDist = Math.hypot(
+        group.members[0].position.x - target.x,
+        group.members[0].position.y - target.y,
+        group.members[0].position.z - target.z,
+      );
+      if (firstMemDist > 150.0) {
+        const frame = ctx.surface.sample(target);
+        const altPos = add(target, scale(frame.surfaceUp, 40.0));
+        group.members = group.members.map((m, idx) => ({
+          ...m,
+          position: add(altPos, { x: (idx - 2) * 10.0, y: 0, z: (idx % 2) * 10.0 }),
+          velocity: { x: 0, y: 0, z: 0 },
+        }));
+      }
+
+      const result = stepAnimalAirFlock({
+        members: group.members,
+        target,
+        intent,
+        universalTime,
+        deltaSeconds,
+        roostSites: group.roostSites,
+      }, group.policy);
+
+      group.members = [...result.members];
+      this.writeBirdInstances(ctx, group);
+    }
+    ctx.instancedBirds.instanceMatrix.needsUpdate = true;
+
+    // 3. Step Fish Schools
+    for (const group of ctx.fishGroups) {
+      const snap = group.wanderer.sample(universalTime);
+      const target = snap.currentHabitat.position;
+      const intent = snap.activity === 'travel' ? 'travel' as const : 'forage' as const;
+
+      group.waypointMesh.position.set(target.x, target.y, target.z);
+      totalRenderedAnimals += group.members.length;
+
+      const firstMemDist = Math.hypot(
+        group.members[0].position.x - target.x,
+        group.members[0].position.y - target.y,
+        group.members[0].position.z - target.z,
+      );
+      if (firstMemDist > 100.0) {
+        group.members = group.members.map((m, idx) => ({
+          ...m,
+          position: add(target, { x: (idx - 2) * 4.0, y: 0, z: (idx % 2) * 4.0 }),
+          velocity: { x: 0, y: 0, z: 0 },
+        }));
+      }
+
+      const result = stepAnimalAquaticSchool({
+        members: group.members,
+        target,
+        intent,
+        universalTime,
+        deltaSeconds,
+        zones: group.zones,
+      }, group.policy);
+
+      group.members = [...result.members];
+      this.writeFishInstances(ctx, group);
+    }
+    ctx.instancedFish.instanceMatrix.needsUpdate = true;
+
+    this.activeAnimalCount.set(totalRenderedAnimals);
   }
 
-  private writeHerdInstances(view: View, group: HerdSimGroup): void {
+  private writeHerdInstances(ctx: TopologyLifeContext, group: HerdSimGroup): void {
     group.members.forEach((member, index) => {
       const globalIdx = group.memberStartIndex + index;
-      const frame = view.surface.sample(member.position);
+      const frame = ctx.surface.sample(member.position);
       const pos = new Vector3(
-        frame.position.x + frame.surfaceUp.x * 0.32,
-        frame.position.y + frame.surfaceUp.y * 0.32,
-        frame.position.z + frame.surfaceUp.z * 0.32,
+        frame.position.x + frame.surfaceUp.x * 4.0,
+        frame.position.y + frame.surfaceUp.y * 4.0,
+        frame.position.z + frame.surfaceUp.z * 4.0,
       );
 
       const up = new Vector3(frame.surfaceUp.x, frame.surfaceUp.y, frame.surfaceUp.z).normalize();
@@ -1199,15 +1152,15 @@ export class AnimalsTerrainWorldLabPageComponent {
       }
 
       this.tempMatrix.makeTranslation(pos.x, pos.y, pos.z).multiply(rot);
-      view.instancedHerds.setMatrixAt(globalIdx, this.tempMatrix);
+      ctx.instancedHerds.setMatrixAt(globalIdx, this.tempMatrix);
     });
   }
 
-  private writeBirdInstances(view: View, group: BirdSimGroup): void {
+  private writeBirdInstances(ctx: TopologyLifeContext, group: BirdSimGroup): void {
     group.members.forEach((member, index) => {
       const globalIdx = group.memberStartIndex + index;
       const vel = new Vector3(member.velocity.x, member.velocity.y, member.velocity.z);
-      const frame = view.surface.sample(member.position);
+      const frame = ctx.surface.sample(member.position);
       const surfaceUp = new Vector3(frame.surfaceUp.x, frame.surfaceUp.y, frame.surfaceUp.z).normalize();
       const rot = new Matrix4();
 
@@ -1227,15 +1180,15 @@ export class AnimalsTerrainWorldLabPageComponent {
       }
 
       this.tempMatrix.makeTranslation(member.position.x, member.position.y, member.position.z).multiply(rot);
-      view.instancedBirds.setMatrixAt(globalIdx, this.tempMatrix);
+      ctx.instancedBirds.setMatrixAt(globalIdx, this.tempMatrix);
     });
   }
 
-  private writeFishInstances(view: View, group: FishSimGroup): void {
+  private writeFishInstances(ctx: TopologyLifeContext, group: FishSimGroup): void {
     group.members.forEach((member, index) => {
       const globalIdx = group.memberStartIndex + index;
       const vel = new Vector3(member.velocity.x, member.velocity.y, member.velocity.z);
-      const frame = view.surface.sample(member.position);
+      const frame = ctx.surface.sample(member.position);
       const surfaceUp = new Vector3(frame.surfaceUp.x, frame.surfaceUp.y, frame.surfaceUp.z).normalize();
       const rot = new Matrix4();
 
@@ -1255,8 +1208,32 @@ export class AnimalsTerrainWorldLabPageComponent {
       }
 
       this.tempMatrix.makeTranslation(member.position.x, member.position.y, member.position.z).multiply(rot);
-      view.instancedFish.setMatrixAt(globalIdx, this.tempMatrix);
+      ctx.instancedFish.setMatrixAt(globalIdx, this.tempMatrix);
     });
+  }
+}
+
+/**
+ * Connects the celestial body procedural surface samplers to ITerrainField.
+ */
+class CelestialTerrainField extends ConstantTerrainField {
+  constructor(private readonly sampler: ISurfaceSampler, private readonly shape: CdlodTopology) {
+    super(0);
+  }
+
+  override sample([x, y, z]: TerrainVector3): ITerrainFieldSample {
+    if (this.shape === 'sphere') {
+      const len = Math.hypot(x, y, z) || 1;
+      const sample = this.sampler.sample([x / len, y / len, z / len]);
+      return { elevationM: sample.elevationM };
+    }
+    if (this.shape === 'plane') {
+      const sample = this.sampler.sample([x, 0, z]);
+      return { elevationM: sample.elevationM };
+    }
+    // cylinder
+    const sample = this.sampler.sample([x, y, z]);
+    return { elevationM: sample.elevationM };
   }
 }
 
@@ -1266,69 +1243,6 @@ function scale(value: AnimalVector3, factor: number): AnimalVector3 {
 
 function add(a: AnimalVector3, b: AnimalVector3): AnimalVector3 {
   return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
-}
-
-function smoothstep(min: number, max: number, value: number): number {
-  const x = Math.max(0, Math.min(1, (value - min) / (max - min)));
-  return x * x * (3 - 2 * x);
-}
-
-/**
- * Natural C1-continuous terrain elevation field.
- * Smoothly connects deep water basins through gentle sandy beach ramps to elevated green hills.
- */
-class WorldTerrainElevationField extends ConstantTerrainField {
-  constructor(private readonly shape: Shape, private readonly scaleFactor = 1) {
-    super(0);
-  }
-
-  override sample([x, y, z]: TerrainVector3): ITerrainFieldSample {
-    const scale = Math.max(1, this.scaleFactor);
-
-    if (this.shape === 'sphere') {
-      const len = Math.hypot(x, y, z) || 1;
-      const nx = x / len;
-      const ny = y / len;
-      const nz = z / len;
-
-      const oceanTransition = smoothstep(-0.4, 0.05, nx);
-      const seabedDepthM = -2.0 * Math.min(2.5, scale * 0.6);
-      const hillRelief = Math.sin(ny * 3.5) * 0.45 + Math.cos(nz * 3.2) * 0.4;
-      const landHeightM = (0.8 + Math.max(0, hillRelief)) * Math.min(2.0, scale * 0.5);
-
-      const elevationM = seabedDepthM * (1 - oceanTransition) + landHeightM * oceanTransition;
-      return { elevationM };
-    }
-
-    if (this.shape === 'cylinder') {
-      const angle = Math.atan2(z, y);
-      const distFromCanalCenter = Math.abs(Math.atan2(Math.sin(angle - Math.PI), Math.cos(angle - Math.PI)));
-
-      const canalTransition = smoothstep(0.35, 0.95, distFromCanalCenter);
-      const bedDepthM = -2.0 * Math.min(2.5, scale * 0.6);
-      const hillRelief = Math.sin(x / (3.5 * scale)) * 0.4 + Math.cos(angle * 2) * 0.35;
-      const bankHeightM = (0.8 + Math.max(0, hillRelief)) * Math.min(2.0, scale * 0.5);
-
-      const elevationM = bedDepthM * (1 - canalTransition) + bankHeightM * canalTransition;
-      return { elevationM };
-    }
-
-    // Plane: smooth natural lake basin centered at (4.5*scale, 4.5*scale)
-    const cx = 4.5 * scale;
-    const cz = 4.5 * scale;
-    const distToLake = Math.hypot(x - cx, z - cz);
-
-    const lakeBedRadius = 2.5 * scale;
-    const shorelineRadius = 6.2 * scale;
-
-    const lakeTransition = smoothstep(lakeBedRadius, shorelineRadius, distToLake);
-    const lakeBedDepthM = -1.8 * Math.min(2.5, scale * 0.6);
-    const rollingHills = Math.sin(x / (4.0 * scale)) * 0.5 + Math.cos(z / (4.5 * scale)) * 0.45;
-    const landHeightM = (0.8 + Math.max(0, rollingHills)) * Math.min(2.0, scale * 0.5);
-
-    const elevationM = lakeBedDepthM * (1 - lakeTransition) + landHeightM * lakeTransition;
-    return { elevationM };
-  }
 }
 
 function colorizeTree(geometry: BufferGeometry): void {
@@ -1385,21 +1299,21 @@ function createBirdGeometry(): BufferGeometry {
   const geom = new BufferGeometry();
   const vertices = new Float32Array([
     // Beak Top
-    0, 0.02, 0.42,    0, 0.14, 0.16,   -0.09, 0.04, 0.16,
-    0, 0.02, 0.42,    0.09, 0.04, 0.16,  0, 0.14, 0.16,
+    0, 0.6, 6.0,    0, 2.0, 2.0,   -1.5, 0.8, 2.0,
+    0, 0.6, 6.0,    1.5, 0.8, 2.0,  0, 2.0, 2.0,
     // Beak Bottom
-    0, 0.02, 0.42,   -0.09, 0.04, 0.16,  0, -0.08, 0.10,
-    0, 0.02, 0.42,    0, -0.08, 0.10,    0.09, 0.04, 0.16,
-    // Left Wing (Top & Bottom)
-    0, 0.14, 0.16,   -0.65, 0.10, -0.06, 0, 0.09, -0.18,
-    -0.09, 0.04, 0.16, -0.65, 0.10, -0.06, 0, -0.08, 0.10,
-    // Right Wing (Top & Bottom)
-    0, 0.14, 0.16,    0, 0.09, -0.18,    0.65, 0.10, -0.06,
-    0.09, 0.04, 0.16,  0, -0.08, 0.10,   0.65, 0.10, -0.06,
+    0, 0.6, 6.0,   -1.5, 0.8, 2.0,  0, -1.2, 1.5,
+    0, 0.6, 6.0,    0, -1.2, 1.5,   1.5, 0.8, 2.0,
+    // Left Wing
+    0, 2.0, 2.0,   -12.0, 1.5, -1.0, 0, 1.2, -2.8,
+    -1.5, 0.8, 2.0, -12.0, 1.5, -1.0, 0, -1.2, 1.5,
+    // Right Wing
+    0, 2.0, 2.0,    0, 1.2, -2.8,   12.0, 1.5, -1.0,
+    1.5, 0.8, 2.0,  0, -1.2, 1.5,   12.0, 1.5, -1.0,
     // Tail
-    0, 0.09, -0.18,  -0.18, 0.08, -0.42, 0.18, 0.08, -0.42,
-    0, 0.09, -0.18,   0.18, 0.08, -0.42, 0, -0.08, 0.10,
-    0, 0.09, -0.18,   0, -0.08, 0.10,   -0.18, 0.08, -0.42,
+    0, 1.2, -2.8,  -3.0, 1.0, -6.0, 3.0, 1.0, -6.0,
+    0, 1.2, -2.8,   3.0, 1.0, -6.0, 0, -1.2, 1.5,
+    0, 1.2, -2.8,   0, -1.2, 1.5,  -3.0, 1.0, -6.0,
   ]);
   geom.setAttribute('position', new Float32BufferAttribute(vertices, 3));
   geom.computeVertexNormals();
@@ -1410,20 +1324,20 @@ function createFishGeometry(): BufferGeometry {
   const geom = new BufferGeometry();
   const vertices = new Float32Array([
     // Snout / Head Left
-    0, 0.02, 0.35,   -0.14, 0.03, 0.06,  0, 0.18, -0.06,
-    0, 0.02, 0.35,    0, -0.12, 0.0,    -0.14, 0.03, 0.06,
+    0, 0.4, 6.0,   -2.2, 0.5, 1.0,  0, 3.0, -1.0,
+    0, 0.4, 6.0,    0, -2.0, 0.0,   -2.2, 0.5, 1.0,
     // Snout / Head Right
-    0, 0.02, 0.35,    0, 0.18, -0.06,    0.14, 0.03, 0.06,
-    0, 0.02, 0.35,    0.14, 0.03, 0.06,  0, -0.12, 0.0,
+    0, 0.4, 6.0,    0, 3.0, -1.0,    2.2, 0.5, 1.0,
+    0, 0.4, 6.0,    2.2, 0.5, 1.0,  0, -2.0, 0.0,
     // Body to Tail Left
-    -0.14, 0.03, 0.06, 0, 0.02, -0.26,  0, 0.18, -0.06,
-    -0.14, 0.03, 0.06, 0, -0.12, 0.0,   0, 0.02, -0.26,
+    -2.2, 0.5, 1.0, 0, 0.4, -4.0,   0, 3.0, -1.0,
+    -2.2, 0.5, 1.0, 0, -2.0, 0.0,   0, 0.4, -4.0,
     // Body to Tail Right
-    0.14, 0.03, 0.06,  0, 0.18, -0.06,  0, 0.02, -0.26,
-    0.14, 0.03, 0.06,  0, 0.02, -0.26,  0, -0.12, 0.0,
-    // Tail Fin (Double-sided)
-    0, 0.02, -0.26,  0, 0.16, -0.45,   0, -0.14, -0.45,
-    0, 0.02, -0.26,  0, -0.14, -0.45,  0, 0.16, -0.45,
+    2.2, 0.5, 1.0,  0, 3.0, -1.0,   0, 0.4, -4.0,
+    2.2, 0.5, 1.0,  0, 0.4, -4.0,   0, -2.0, 0.0,
+    // Tail Fin
+    0, 0.4, -4.0,   0, 2.8, -7.5,   0, -2.5, -7.5,
+    0, 0.4, -4.0,   0, -2.5, -7.5,  0, 2.8, -7.5,
   ]);
   geom.setAttribute('position', new Float32BufferAttribute(vertices, 3));
   geom.computeVertexNormals();
