@@ -140,24 +140,37 @@ export function resolveAnimalAquaticSchoolLoiterPosition(
   definition: AnimalAquaticSchoolPolicyDefinition,
 ): AnimalVector3 {
   const anchor = resolveAnimalAquaticZonePosition(zone, slotIndex, time, definition);
-  const radius = Math.min(zone.radiusM, loiterRadius(definition));
+  const maxRadius = Math.min(zone.radiusM, loiterRadius(definition));
   const angularSpeed = definition.loiterAngularSpeedRadPerSecond ?? 0;
-  if (radius === 0 || angularSpeed === 0) return anchor;
+  if (maxRadius === 0 || angularSpeed === 0) return anchor;
   const sample = definition.water.sample(anchor, time);
   if (!sample.surface || !sample.bottom || !isSafeWater(sample, definition)) return anchor;
   const phase = animalUnit(0, `aquatic-loiter:${memberId}`) * Math.PI * 2 + time * angularSpeed;
-  const tangent = add(
-    scale(sample.bottom.tangentU, Math.cos(phase) * radius),
-    scale(sample.bottom.tangentV, Math.sin(phase) * radius),
-  );
-  const surface = definition.water.moveAlongSurface(anchor, tangent, 1, time);
-  if (!surface || surface.bodyId !== sample.surface.bodyId) return anchor;
-  const candidate = add(surface.position, scale(surface.normal, -definition.preferredSurfaceClearanceM));
-  const sampled = definition.water.sample(candidate, time);
-  return isSafeWater(sampled, definition)
-    && sampled.surface?.bodyId === sample.surface.bodyId
-    && definition.water.isSegmentValid(anchor, candidate, time, definition.segmentSampleSpacingM)
-    ? candidate : anchor;
+
+  for (let factor = 1.0; factor >= 0.2; factor -= 0.2) {
+    const radius = maxRadius * factor;
+    const tangent = add(
+      scale(sample.bottom.tangentU, Math.cos(phase) * radius),
+      scale(sample.bottom.tangentV, Math.sin(phase) * radius),
+    );
+    const surface = definition.water.moveAlongSurface(anchor, tangent, 1, time);
+    if (!surface || surface.bodyId !== sample.surface.bodyId) continue;
+    const columnProbe = add(surface.position, scale(surface.normal, -definition.minimumSurfaceClearanceM));
+    const column = definition.water.sample(columnProbe, time);
+    const maximumDepth = Math.min(
+      column.waterColumnDepthM - definition.minimumBottomClearanceM,
+      definition.maximumSurfaceClearanceM,
+    );
+    const depth = Math.min(maximumDepth, Math.max(definition.minimumSurfaceClearanceM, definition.preferredSurfaceClearanceM));
+    const candidate = add(surface.position, scale(surface.normal, -depth));
+    const sampled = definition.water.sample(candidate, time);
+    if (isSafeWater(sampled, definition)
+      && sampled.surface?.bodyId === sample.surface.bodyId
+      && definition.water.isSegmentValid(anchor, candidate, time, definition.segmentSampleSpacingM)) {
+      return candidate;
+    }
+  }
+  return anchor;
 }
 
 export function stepAnimalAquaticSchool(

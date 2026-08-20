@@ -7,7 +7,12 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { EngineModule, EngineService } from 'triangular-engine';
+import {
+  EngineModule,
+  EngineService,
+  RaycastFocusContext,
+  RaycastOrbitControlsComponent,
+} from 'triangular-engine';
 import {
   CdlodPlanetComponent,
   CdlodPlaneComponent,
@@ -25,6 +30,7 @@ import {
   ICelestialBody,
   createPlaneSurfaceSampler,
 } from 'triangular-engine/celestial';
+import { Mesh, Object3D } from 'three';
 
 export type CdlodTopology = 'sphere' | 'plane';
 
@@ -41,6 +47,7 @@ interface IPlanetOption {
     CommonModule,
     FormsModule,
     EngineModule,
+    RaycastOrbitControlsComponent,
     CdlodPlanetComponent,
     CdlodPlaneComponent,
   ],
@@ -56,12 +63,13 @@ interface IPlanetOption {
   template: `
     <div class="flex-page">
       <scene>
-        <orbitControls
+        <raycastOrbitControls
           [cameraPosition]="cameraPosition()"
           [target]="cameraTarget()"
           [near]="0.5"
           [far]="500000000"
           [isActive]="true"
+          [raycastFocusResolver]="terrainRaycastFocus"
         />
 
         <directionalLight
@@ -477,6 +485,18 @@ interface IPlanetOption {
   },
 })
 export class CdlodPlanetLabPageComponent {
+  /** Focuses navigation on generated CDLOD terrain patches, including plane and sphere topology. */
+  readonly terrainRaycastFocus = (context: RaycastFocusContext) => {
+    context.raycaster.setFromCamera(context.ndc, context.camera);
+    const hit = context.raycaster
+      .intersectObjects(context.sceneChildren as Object3D[], true)
+      .find(
+        (candidate) =>
+          candidate.object instanceof Mesh &&
+          candidate.object.geometry.userData['triangular:terrain'] === true,
+      );
+    return hit?.point ?? null;
+  };
   readonly topology = signal<CdlodTopology>('sphere');
 
   readonly planetOptions: readonly IPlanetOption[] = [

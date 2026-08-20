@@ -1,11 +1,77 @@
 <section class="lab">
-  <header><h1>Terrain-integrated animal checkpoint</h1><p>Real terrain surfaces + scatter-derived tree habitats/obstacles + deterministic Universal Time playback for herds, birds, and fish.</p></header>
-  <div class="controls"><button type="button" (click)="togglePause()">{{ paused() ? 'Resume' : 'Pause' }}</button><button type="button" (click)="reset()">Reset</button><label>World <select [value]="selectedShape()" (change)="setShape(($any($event.target)).value)"><option value="plane">Plane</option><option value="sphere">Sphere</option><option value="cylinder">Cylinder</option></select></label><label>Size <select [value]="worldSize()" (change)="setWorldSize(($any($event.target)).value)"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label><label>UT <input type="range" min="-120" max="120" step="0.1" [value]="universalTime()" (input)="setUniversalTime($event)"></label><span>{{ universalTime() | number:'1.1-1' }}s</span><span class="speeds"><button *ngFor="let speed of speedOptions" type="button" (click)="setTimeScale(speed)">{{ speed }}×</button></span></div>
-  <div class="proof"><span>Three terrain domains</span><span>Scatter adapter active</span><span>Herd + air flock + aquatic school</span><span>Movement remains in animals core</span></div>
-  <div class="status"><span>Plane: {{ status().plane }}</span><span>Sphere: {{ status().sphere }}</span><span>Cylinder: {{ status().cylinder }}</span></div>
+  <header>
+    <h1>Terrain-integrated animal checkpoint</h1>
+    <p>Real terrain surfaces + scatter-derived tree habitats/obstacles + deterministic Universal Time playback for herds, birds, and fish.</p>
+  </header>
+  <div class="controls">
+    <button type="button" (click)="togglePause()">{{ paused() ? 'Resume' : 'Pause' }}</button>
+    <button type="button" (click)="reset()">Reset</button>
+    <label>World 
+      <select [value]="selectedShape()" (change)="setShape(($any($event.target)).value)">
+        <option value="plane">Plane</option>
+        <option value="sphere">Sphere</option>
+        <option value="cylinder">Cylinder</option>
+      </select>
+    </label>
+    <label>Size 
+      <select [value]="worldSize()" (change)="setWorldSize(($any($event.target)).value)">
+        <option value="small">Small</option>
+        <option value="medium">Medium</option>
+        <option value="large">Large</option>
+        <option value="huge">Huge</option>
+      </select>
+    </label>
+    <label>UT 
+      <input type="range" min="-120" max="120" step="0.1" [value]="universalTime()" (input)="setUniversalTime($event)">
+    </label>
+    <span>{{ universalTime() | number:'1.1-1' }}s</span>
+    <span class="speeds">
+      <button *ngFor="let speed of speedOptions" type="button" (click)="setTimeScale(speed)">{{ speed }}×</button>
+    </span>
+  </div>
+
+  <div class="debug-controls">
+    <label class="debug-toggle">
+      <input type="checkbox" [checked]="showDebug()" (change)="toggleDebug()">
+      <strong>🛠️ Debug Overlay</strong>
+    </label>
+    <ng-container *ngIf="showDebug()">
+      <label>
+        <input type="checkbox" [checked]="hideTrees()" (change)="toggleHideTrees()">
+        Hide Tree Foliage (Perches Only)
+      </label>
+      <label>
+        <input type="checkbox" [checked]="showMeadowPatches()" (change)="toggleMeadowPatches()">
+        Meadow Grazing Rings
+      </label>
+      <label>
+        <input type="checkbox" [checked]="showRoostSockets()" (change)="toggleRoostSockets()">
+        Canopy Roost Sockets
+      </label>
+      <label>
+        <input type="checkbox" [checked]="showWaterClearance()" (change)="toggleWaterClearance()">
+        Fish Navigable Volume
+      </label>
+      <label>
+        <input type="checkbox" [checked]="showWaypoints()" (change)="toggleWaypoints()">
+        Leader Waypoint Targets
+      </label>
+    </ng-container>
+  </div>
+
+  <div class="proof">
+    <span>Three terrain domains</span>
+    <span>Batched InstancedMesh (4 draw calls)</span>
+    <span>Camera-proximity observer materialization</span>
+  </div>
+  <div class="status">
+    <span>Plane: {{ status().plane }}</span>
+    <span>Sphere: {{ status().sphere }}</span>
+    <span>Cylinder: {{ status().cylinder }}</span>
+  </div>
 </section>
 <scene [showFps]="true">
-  <orbitControls [cameraPosition]="[0, 18, 34]" [target]="[0, 0, 0]" />
+  <orbitControls [cameraPosition]="[0, 22, 42]" [target]="[0, 0, 0]" />
   <ambientLight [intensity]="1.5" />
-  <directionalLight [position]="[8, 20, 12]" [intensity]="2" />
+  <directionalLight [position]="[18, 32, 16]" [intensity]="2" />
 </scene>

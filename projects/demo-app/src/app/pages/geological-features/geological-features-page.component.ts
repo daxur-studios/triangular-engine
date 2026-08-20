@@ -60,6 +60,7 @@ export class GeologicalFeaturesPageComponent {
   readonly planeSize = signal(WORLD_SIZE);
   readonly settings = signal(defaultGeologicalTerrainSettings());
   readonly wireframe = signal(false);
+  readonly wireframeMode = signal<'uniform' | 'name-hash'>('uniform');
   readonly catalogue: readonly FeatureCatalogueItem[] = [
     { kind: 'volcano', name: 'Volcano', status: 'interactive', description: 'Asymmetric cone, crater rim, caldera, and radial erosion.' },
     { kind: 'canyon', name: 'Canyon', status: 'interactive', description: 'Meandering channel with adjustable depth, width, and wall profile.' },
@@ -177,8 +178,12 @@ export class GeologicalFeaturesPageComponent {
 
   toggleWireframe(): void {
     this.wireframe.update((value) => !value);
-    this.material.wireframe = this.wireframe();
-    this.material.needsUpdate = true;
+  }
+
+  toggleWireframeMode(): void {
+    this.wireframeMode.update((value) =>
+      value === 'uniform' ? 'name-hash' : 'uniform',
+    );
   }
 
   randomizeSeed(): void {

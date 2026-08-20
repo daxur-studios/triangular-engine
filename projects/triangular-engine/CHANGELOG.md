@@ -6,6 +6,15 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `<scene>` now accepts a `[wireframe]` boolean input. When enabled, every mesh
+  and line in the scene renders with a wireframe material for debugging; original
+  materials are restored when set back to `false`, and objects added while
+  enabled are picked up automatically. Points and sprites are skipped because
+  they require their own material types.
+- `<scene>` also accepts `[wireframeMode]` (`'uniform' | 'name-hash'`, default
+  `'uniform'`) to choose the wireframe coloring: a single shared green material,
+  or a deterministic color hashed per object from its `name` (or `uuid`) with one
+  cached wireframe material per color.
 - Added `triangular-engine/celestial` secondary entry point: Dependency-free astrodynamics,
   64-bit Keplerian orbit propagation, ephemerides, gravity and atmospheric drag models,
   stock celestial bodies (`HOME_PLANET`, `EARTH`, `MARS`, `MOON`, `SUN`), and procedural

@@ -6,6 +6,7 @@ export * from './axes-helper.component';
 export * from './camera-helper.component';
 export * from './group.component';
 export * from './orbit-controls.component';
+export * from './raycast-orbit-controls.component';
 export * from './raycast';
 export * from './sprite.component';
 export * from './primitive.component';

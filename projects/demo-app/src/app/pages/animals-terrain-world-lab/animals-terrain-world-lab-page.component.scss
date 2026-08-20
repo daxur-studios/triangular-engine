@@ -1,2 +1,82 @@
-:host { display:flex; flex-direction:column; min-height:0; height:100%; } .lab { flex:0 0 auto; padding:1.2rem; color:#eef4ec; background:#15221d; } header p { color:#b7cbbb; } .controls,.proof,.status { display:flex; gap:.75rem; align-items:center; flex-wrap:wrap; margin:1rem 0; } button { border:1px solid #6f9472; border-radius:.35rem; background:#233d2d; color:#eef4ec; padding:.35rem .6rem; } input { accent-color:#9bad53; } .proof span,.status span { border:1px solid #36533d; border-radius:999px; padding:.3rem .65rem; color:#c6ddbe; } .speeds { display:flex; gap:.25rem; }
-scene { flex:1 1 auto; min-height:28rem; }
+:host {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.lab {
+  flex: 0 0 auto;
+  padding: 1.2rem;
+  color: #eef4ec;
+  background: #15221d;
+}
+
+header p {
+  color: #b7cbbb;
+  margin: 0.35rem 0 0;
+}
+
+.controls, .debug-controls, .proof, .status {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0.85rem 0;
+}
+
+.debug-controls {
+  padding: 0.5rem 0.8rem;
+  background: #1b2e25;
+  border-radius: 0.4rem;
+  border: 1px solid #2e4a3a;
+
+  .debug-toggle {
+    color: #ffd166;
+    margin-right: 0.5rem;
+  }
+
+  label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.88rem;
+    color: #d8ead4;
+    cursor: pointer;
+  }
+}
+
+button {
+  border: 1px solid #6f9472;
+  border-radius: 0.35rem;
+  background: #233d2d;
+  color: #eef4ec;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+
+  &:hover {
+    background: #2f523c;
+  }
+}
+
+input {
+  accent-color: #9bad53;
+}
+
+.proof span, .status span {
+  border: 1px solid #36533d;
+  border-radius: 999px;
+  padding: 0.3rem 0.65rem;
+  color: #c6ddbe;
+  font-size: 0.85rem;
+}
+
+.speeds {
+  display: flex;
+  gap: 0.25rem;
+}
+
+scene {
+  flex: 1 1 auto;
+  min-height: 28rem;
+}

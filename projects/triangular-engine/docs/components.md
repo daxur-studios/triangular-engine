@@ -9,6 +9,14 @@ All components are standalone and can be nested inside `<scene>`.
 ```
 
 - Hosts the renderer canvas, handles resize, and drives the render loop.
+- `[wireframe]="true"` renders every mesh and line in the scene with a wireframe
+  material for debugging; original materials are restored when set back to
+  `false`. Objects added while enabled are picked up automatically. Points and
+  sprites are skipped because they need their own material types.
+- `[wireframeMode]="'uniform' | 'name-hash'"` (default `'uniform'`) chooses the
+  coloring: `'uniform'` for a single shared green material, or `'name-hash'` for
+  a deterministic per-object color hashed from each object's `name` (or `uuid`)
+  with one cached material per color.
 
 ## Core 3D Nodes
 

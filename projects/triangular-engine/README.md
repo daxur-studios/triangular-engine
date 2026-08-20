@@ -149,6 +149,26 @@ Scene-local debug options can also be set declaratively:
 `showFps` overrides `EngineService.provide({ showFPS: ... })` for the engine
 instance used by that scene. Omit it to retain the provider setting.
 
+Wrap the whole scene in wireframe mode for geometry debugging:
+
+```html
+<scene [wireframe]="true">
+  <!-- scene content -->
+</scene>
+```
+
+When enabled, every mesh and line renders with a wireframe material; original
+materials are restored when set back to `false`. Objects added to the scene
+while wireframe is enabled are picked up automatically. Points and sprites are
+skipped because they require their own material types.
+
+`[wireframeMode]` picks the coloring when enabled:
+
+- `'uniform'` (default): every object gets the same shared green material.
+- `'name-hash'`: each object gets a deterministic color hashed from its `name`
+  (or `uuid`), with one cached wireframe material per color — automatically
+  distinct objects with zero per-scene setup.
+
 ## Frame-synchronous movement and camera follow
 
 Angular template bindings and direct Three.js mutations are different update

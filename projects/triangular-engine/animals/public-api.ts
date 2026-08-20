@@ -27,3 +27,4 @@ export * from './core/flock-materialization';
 export * from './core/flock-residency';
 export * from './core/flock-step';
 export * from './core/flock-presentation';
+export * from './core/animal-topology-wanderer';

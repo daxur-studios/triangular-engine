@@ -94,9 +94,9 @@ describe('CDLOD 2D Plane & Multi-Domain Engine', () => {
     expect(raw.positions.length).toBe(vertexCount * 3);
     expect(raw.coarsePositions.length).toBe(vertexCount * 3);
     expect(raw.normals.length).toBe(vertexCount * 3);
-    expect(raw.colors.length).toBe(vertexCount * 3);
+    expect(raw.colors?.length).toBe(vertexCount * 3);
     expect(raw.uvs.length).toBe(vertexCount * 2);
-    expect(raw.elevations.length).toBe(vertexCount);
+    expect(raw.elevations?.length).toBe(vertexCount);
     expect(raw.triangleCount).toBe(32 * 32 * 2);
 
     // Verify Three.js BufferGeometry generation
@@ -141,7 +141,7 @@ describe('CDLOD 2D Plane & Multi-Domain Engine', () => {
       id: 'sphere:0:0:0:0:32',
       type: 'terrain',
       body: HOME_PLANET,
-      address: { face: 0, level: 0, x: 0, y: 0 },
+      address: { face: 'positive-x', level: 0, x: 0, y: 0 },
       resolution: 32,
       centerBodyFixedM: [HOME_PLANET.radiusM, 0, 0],
     };
@@ -157,7 +157,7 @@ describe('CDLOD 2D Plane & Multi-Domain Engine', () => {
       id: 'ocean:0:0:0:0:32',
       type: 'ocean',
       body: HOME_PLANET,
-      address: { face: 0, level: 0, x: 0, y: 0 },
+      address: { face: 'positive-x', level: 0, x: 0, y: 0 },
       resolution: 32,
       centerBodyFixedM: [HOME_PLANET.radiusM, 0, 0],
     };
@@ -202,8 +202,8 @@ describe('CDLOD 2D Plane & Multi-Domain Engine', () => {
       },
     });
 
-    expect(patches.length).toBeGreaterThanOrEqual(6);
-    for (const patch of patches) {
+    expect(patches.patches.length).toBeGreaterThanOrEqual(6);
+    for (const patch of patches.patches) {
       expect(patch.distanceM).toBeGreaterThan(0);
       expect(patch.morphFactor).toBeGreaterThanOrEqual(0);
       expect(patch.morphFactor).toBeLessThanOrEqual(1);

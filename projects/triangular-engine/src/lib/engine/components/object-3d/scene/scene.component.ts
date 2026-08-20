@@ -28,6 +28,10 @@ import {
   provideObject3DComponent,
 } from '../object-3d.component';
 import { WebGPURenderer } from 'three/webgpu';
+import {
+  SceneMaterialOverride,
+  SceneWireframeMode,
+} from './scene-material-override';
 
 /**
  * Scenarios:
@@ -137,6 +141,23 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   >(undefined);
   readonly rendered = output<this>();
 
+  /**
+   * When true, every mesh/line in this scene renders with a shared wireframe
+   * material. Original materials are restored when set back to false.
+   * Objects added while enabled are picked up automatically.
+   *
+   * Coloring is controlled by `[wireframeMode]`.
+   */
+  readonly wireframe = input<boolean>(false);
+
+  /**
+   * How the wireframe override picks colors when `[wireframe]` is enabled:
+   * - `uniform`: every object gets the same shared green material.
+   * - `name-hash`: each object gets a deterministic color hashed from its
+   *   `name` (or `uuid`), cached one material per color.
+   */
+  readonly wireframeMode = input<SceneWireframeMode>('uniform');
+
   readonly #resizeObserver: ResizeObserver = new ResizeObserver((entries) => {
     const { width, height } = entries[0].contentRect;
     this.#onResize(width, height);
@@ -153,6 +174,10 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   get scene() {
     return this.engineService.scene;
   }
+
+  readonly #materialOverride = new SceneMaterialOverride(
+    this.engineService.scene,
+  );
 
   readonly children = contentChildren(Object3DComponent);
 
@@ -204,6 +229,14 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
       });
     });
 
+    effect(() => {
+      this.#materialOverride.setMode(this.wireframeMode());
+    });
+
+    effect(() => {
+      this.#materialOverride.setEnabled(this.wireframe());
+    });
+
     // Watch for render trigger changes
     effect(() => {
       const shouldRender = this.renderOnlyWhenThisIsTriggered();
@@ -233,6 +266,7 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   }
 
   ngOnDestroy(): void {
+    this.#materialOverride.dispose();
     this.#resizeObserver.disconnect();
     this.engineService.onComponentDestroy();
   }

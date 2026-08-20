@@ -9,6 +9,7 @@ import { GroupComponent } from './group.component';
 import { GltfComponent } from '../gltf';
 import { CameraComponent } from './camera.component';
 import { OrbitControlsComponent } from './orbit-controls.component';
+import { RaycastOrbitControlsComponent } from './raycast-orbit-controls.component';
 import { PrimitiveComponent } from './primitive.component';
 import { RaycastDirective } from './raycast';
 import { SceneComponent } from './scene/scene.component';
@@ -22,6 +23,7 @@ const importExport = [
   GridHelperComponent,
   GroupComponent,
   OrbitControlsComponent,
+  RaycastOrbitControlsComponent,
   PrimitiveComponent,
   RaycastDirective,
   SpriteComponent,

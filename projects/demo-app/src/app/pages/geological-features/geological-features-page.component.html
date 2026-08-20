@@ -1,4 +1,4 @@
-<scene>
+<scene [wireframe]="wireframe()" [wireframeMode]="wireframeMode()">
   <ng-template portalTarget="overlay" lane="topStart">
     <section class="panel" aria-label="Geological feature controls">
       <header>
@@ -100,6 +100,7 @@
       <div class="actions">
         <button (click)="randomizeSeed()">Randomize seed</button>
         <button [class.active]="wireframe()" (click)="toggleWireframe()">Wireframe</button>
+        <button [class.active]="wireframeMode() === 'name-hash'" (click)="toggleWireframeMode()">Color by name</button>
         <button (click)="reset()">Reset</button>
       </div>
     </section>
