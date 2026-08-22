@@ -245,6 +245,9 @@ export class OrthographicCameraComponent
       const camera = this.camera();
       if (this.debug()) {
         this.cameraHelper = new CameraHelper(camera);
+        this.cameraHelper.name = Object3DComponent.nextInstanceName(
+          `${this.constructor.name.replace('Component', '')}DebugHelper`,
+        );
         this.engineService.scene.add(this.cameraHelper);
       } else {
         if (this.cameraHelper) {

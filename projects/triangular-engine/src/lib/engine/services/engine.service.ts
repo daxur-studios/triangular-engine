@@ -208,6 +208,8 @@ export class EngineService implements IEngine {
     EngineService.instance++;
     this.instance = EngineService.instance;
     EngineService.activeInstance = this;
+    this.scene.name = `EngineScene ${this.instance}`;
+    this.camera$.value.name = `EngineDefaultCamera ${this.instance}`;
     console.debug('EngineService created, instance: ', this.instance);
 
     this.cursor = new Cursor(this);

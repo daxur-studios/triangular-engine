@@ -184,6 +184,7 @@ export class RaycastDirective implements OnInit, RaycastEvents, OnDestroy {
               this.raycaster.far,
               0xff0000,
             );
+            arrow.name = Object3DComponent.nextInstanceName('RaycastArrow');
             this.scene.add(arrow);
             setTimeout(() => {
               this.scene.remove(arrow);

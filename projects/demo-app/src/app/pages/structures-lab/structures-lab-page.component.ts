@@ -110,6 +110,7 @@ export class StructuresLabPageComponent {
   readonly benchmarkMode = signal<boolean>(false);
   readonly benchmarkBuildingCount = signal<number>(1200);
   readonly selectedLodMode = signal<'auto' | 0 | 1 | 2 | 3>('auto');
+  readonly lodDistanceScale = signal<number>(2.2);
   readonly activeDrawCalls = signal<number>(3);
   readonly totalTriangles = signal<number>(5550);
   readonly lodBreakdown = signal<string>('');
@@ -204,6 +205,15 @@ export class StructuresLabPageComponent {
     this.benchmarkBuildingCount.set(val);
     if (this.benchmarkMode()) {
       this.rebuildAllStructures();
+    }
+  }
+
+  onLodDistanceScaleChange(event: Event): void {
+    const val = parseFloat((event.target as HTMLInputElement).value);
+    this.lodDistanceScale.set(val);
+    if (this.benchmarkMode() && this.selectedLodMode() === 'auto') {
+      const camPos = this.engine.camera?.position ?? new Vector3(0, 220, 380);
+      this.updateDynamicCameraLod([camPos.x, camPos.y, camPos.z]);
     }
   }
 
@@ -382,34 +392,41 @@ export class StructuresLabPageComponent {
     const currentSeed = this.seed();
     this.batchManager.clear();
 
+    const scale = this.lodDistanceScale();
+    const thresholds = {
+      lod1DistanceM: 140 * scale, // at 2.2x => ~310m
+      lod2DistanceM: 280 * scale, // at 2.2x => ~615m
+      lod3DistanceM: 480 * scale, // at 2.2x => ~1050m
+    };
+
     // Dynamic distance-based LOD partitioning from live camera position
     this.batchManager.addInstancesWithDistanceLod(
       COLONY_SOLAR_PANEL_ARCHETYPE,
       this.cachedSolarTransforms,
       cameraPosition,
       currentSeed,
-      { lod1DistanceM: 160, lod2DistanceM: 320, lod3DistanceM: 520 },
+      thresholds,
     );
     this.batchManager.addInstancesWithDistanceLod(
       COLONY_FUEL_TANK_ARCHETYPE,
       this.cachedFuelTransforms,
       cameraPosition,
       currentSeed,
-      { lod1DistanceM: 160, lod2DistanceM: 320, lod3DistanceM: 520 },
+      thresholds,
     );
     this.batchManager.addInstancesWithDistanceLod(
       COLONY_HAB_MODULE_ARCHETYPE,
       this.cachedHabTransforms,
       cameraPosition,
       currentSeed,
-      { lod1DistanceM: 160, lod2DistanceM: 320, lod3DistanceM: 520 },
+      thresholds,
     );
     this.batchManager.addInstancesWithDistanceLod(
       COLONY_COMM_TOWER_ARCHETYPE,
       this.cachedCommTransforms,
       cameraPosition,
       currentSeed,
-      { lod1DistanceM: 160, lod2DistanceM: 320, lod3DistanceM: 520 },
+      thresholds,
     );
 
     const batchGroup = this.batchManager.build({

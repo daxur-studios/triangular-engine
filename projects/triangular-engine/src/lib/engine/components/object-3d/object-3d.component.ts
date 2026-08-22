@@ -46,6 +46,21 @@ export function provideObject3DComponent<T extends Object3DComponent>(
 export abstract class Object3DComponent implements OnDestroy {
   static InstanceCounts = new Map<string, number>();
 
+  /**
+   * Allocates a stable human-readable name for engine-created Object3D helpers.
+   *
+   * PURPOSE: Extends the declarative component naming convention to imperative
+   * cameras, helpers, and debug objects that do not inherit this class.
+   * VALUE: Scene inspection and debugging can identify internal objects without
+   * requiring every subsystem to maintain its own counter map.
+   */
+  static nextInstanceName(kind: string): string {
+    const shortName = kind.replace('Component', '').replaceAll('_', '');
+    const count = (Object3DComponent.InstanceCounts.get(shortName) ?? 0) + 1;
+    Object3DComponent.InstanceCounts.set(shortName, count);
+    return `${shortName} ${count}`;
+  }
+
   //#region Injected Dependencies
   readonly engineService = inject(EngineService);
   readonly materialService = inject(MaterialService);
@@ -194,14 +209,7 @@ export abstract class Object3DComponent implements OnDestroy {
       'Object3DComponent',
       (Object3DComponent.InstanceCounts.get('Object3DComponent') || 0) + 1,
     );
-    Object3DComponent.InstanceCounts.set(
-      shortName,
-      (Object3DComponent.InstanceCounts.get(shortName) || 0) + 1,
-    );
-
-    this.name.set(
-      `${shortName} ${Object3DComponent.InstanceCounts.get(shortName)}`,
-    );
+    this.name.set(Object3DComponent.nextInstanceName(shortName));
     //#endregion
   }
   ngOnDestroy(): void {

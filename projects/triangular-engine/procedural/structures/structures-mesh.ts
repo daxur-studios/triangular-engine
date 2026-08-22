@@ -49,18 +49,18 @@ function resolveRadialSegments(lod: number): number {
     case 0:
       return 24;
     case 1:
-      return 10;
+      return 12;
     case 2:
-      return 5;
+      return 8;
     default:
-      return 3;
+      return 6; // Minimum 6 points so circles/cylinders always read as round rather than triangular or square
   }
 }
 
 function createSolidGeometry(solid: IStructureSolid, lod = 0): BufferGeometry {
   const [d0, d1, d2] = solid.dimensionsM;
   const radialSegs = resolveRadialSegments(lod);
-  const heightSegs = lod === 0 ? 12 : lod === 1 ? 6 : lod === 2 ? 3 : 2;
+  const heightSegs = lod === 0 ? 12 : lod === 1 ? 8 : lod === 2 ? 5 : 4;
   let geom: BufferGeometry;
 
   switch (solid.shape) {

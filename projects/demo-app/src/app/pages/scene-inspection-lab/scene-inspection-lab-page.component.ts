@@ -73,7 +73,9 @@ export class SceneInspectionLabPageComponent implements AfterViewInit {
     this.diagnosticMarker.position.set(8, 1.2, 0);
     this.sceneRoot.add(this.diagnosticMarker);
 
-    this.engine.scene.add(this.sceneRoot, new DirectionalLight('#ffffff', 2.5));
+    const keyLight = new DirectionalLight('#ffffff', 2.5);
+    keyLight.name = 'inspection-key-light';
+    this.engine.scene.add(this.sceneRoot, keyLight);
 
     this.destroyRef.onDestroy(() => {
       this.engine.scene.remove(this.sceneRoot);

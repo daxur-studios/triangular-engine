@@ -26,6 +26,7 @@ import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { combineLatest, distinctUntilChanged, of, switchMap } from 'rxjs';
 import { AdvancedOrbitControls } from '../../models';
 import { EngineService } from '../../services';
+import { Object3DComponent } from './object-3d.component';
 
 /**
  * - Use input `follow` to follow an Object3D.
@@ -75,6 +76,8 @@ export class OrbitControlsComponent implements OnDestroy {
   readonly isPannedAway = signal(false);
 
   constructor() {
+    const controlName = this.constructor.name.replace('Component', '');
+    this.internalCamera.name = Object3DComponent.nextInstanceName(`${controlName}Camera`);
     this.engineService.scene.add(this.internalCamera);
     this.internalCamera.position.set(0, 2, 5);
 
@@ -268,6 +271,9 @@ export class OrbitControlsComponent implements OnDestroy {
     effect(() => {
       if (this.debug()) {
         this.cameraHelper = new CameraHelper(this.internalCamera);
+        this.cameraHelper.name = Object3DComponent.nextInstanceName(
+          `${this.constructor.name.replace('Component', '')}DebugHelper`,
+        );
         this.engineService.scene.add(this.cameraHelper);
       } else {
         if (this.cameraHelper) {
