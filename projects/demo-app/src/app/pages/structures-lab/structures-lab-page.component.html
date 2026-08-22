@@ -10,9 +10,50 @@
       </header>
 
       <p class="blurb">
-        Deterministic spaceport facilities (runways, launchpads, Mechazilla chopstick catch towers),
-        2D grading footprints, load-bearing sockets, and Jolt compound physics.
+        Deterministic spaceport facilities (runways, launchpads, Mechazilla towers),
+        2D grading footprints, load-bearing sockets, and high-density GPU instancing.
       </p>
+
+      <!-- Benchmark & Performance Scaling Switch -->
+      <div class="benchmark-banner" [class.active]="benchmarkMode()">
+        <div class="benchmark-header">
+          <label class="switch-label">
+            <input
+              type="checkbox"
+              [checked]="benchmarkMode()"
+              (change)="toggleBenchmarkMode()"
+            />
+            <span class="switch-text">Mega-Base Scaling Mode (1,000+ Buildings)</span>
+          </label>
+        </div>
+        @if (benchmarkMode()) {
+          <div class="benchmark-stats">
+            <div class="stat-pill">
+              <span class="stat-num">{{ benchmarkBuildingCount() }}</span>
+              <span class="stat-lbl">Buildings</span>
+            </div>
+            <div class="stat-pill highlight">
+              <span class="stat-num">{{ activeDrawCalls() }}</span>
+              <span class="stat-lbl">Draw Calls</span>
+            </div>
+            <div class="stat-pill">
+              <span class="stat-num">4</span>
+              <span class="stat-lbl">Cached Buffers</span>
+            </div>
+          </div>
+          <div class="slider-row">
+            <label>Building Count: {{ benchmarkBuildingCount() }}</label>
+            <input
+              type="range"
+              min="200"
+              max="3200"
+              step="200"
+              [value]="benchmarkBuildingCount()"
+              (input)="onBenchmarkCountChange($event)"
+            />
+          </div>
+        }
+      </div>
 
       <div class="controls-row">
         <label for="seed-input">Seed</label>
@@ -34,153 +75,158 @@
         >
           Wireframe
         </button>
-        <button
-          type="button"
-          class="btn toggle"
-          [class.active]="showSockets()"
-          (click)="toggleSockets()"
-        >
-          Sockets
-        </button>
-        <button
-          type="button"
-          class="btn toggle"
-          [class.active]="showFootprints()"
-          (click)="toggleFootprints()"
-        >
-          Footprints
-        </button>
-      </div>
-
-      <div class="kinematics-section">
-        <span class="section-label">Parametric Dimensions:</span>
-        <div class="slider-row">
-          <label>Runway Length: {{ runwayLengthM() }}m</label>
-          <input
-            type="range"
-            min="150"
-            max="800"
-            step="25"
-            [value]="runwayLengthM()"
-            (input)="onRunwayLengthChange($event)"
-          />
-        </div>
-        <div class="slider-row">
-          <label>Runway Width: {{ runwayWidthM() }}m</label>
-          <input
-            type="range"
-            min="20"
-            max="60"
-            step="5"
-            [value]="runwayWidthM()"
-            (input)="onRunwayWidthChange($event)"
-          />
-        </div>
-        <div class="slider-row">
-          <label>Launchpad Radius: {{ launchpadRadiusM() }}m ({{ launchpadRadiusM() * 2 }}m Dia)</label>
-          <input
-            type="range"
-            min="15"
-            max="60"
-            step="2.5"
-            [value]="launchpadRadiusM()"
-            (input)="onLaunchpadRadiusChange($event)"
-          />
-        </div>
-        <div class="slider-row">
-          <label>Tower Height: {{ towerHeightM() }}m</label>
-          <input
-            type="range"
-            min="40"
-            max="140"
-            step="5"
-            [value]="towerHeightM()"
-            (input)="onTowerHeightChange($event)"
-          />
-        </div>
-      </div>
-
-      <div class="kinematics-section">
-        <span class="section-label">Tower Articulation (Mechazilla):</span>
-        <div class="slider-row">
-          <label>Carriage Elevation: {{ towerCarriageElevationM() }}m</label>
-          <input
-            type="range"
-            min="5"
-            [max]="maxTowerCarriageElevationM()"
-            step="1"
-            [value]="towerCarriageElevationM()"
-            (input)="onCarriageElevationChange($event)"
-          />
-        </div>
-
-        <div class="slider-row">
-          <label>Chopsticks Angle: {{ (towerChopstickAngleRad() * 57.2958).toFixed(1) }}°</label>
-          <input
-            type="range"
-            min="-0.15"
-            max="0.55"
-            step="0.01"
-            [value]="towerChopstickAngleRad()"
-            (input)="onChopstickAngleChange($event)"
-          />
-        </div>
-      </div>
-
-      <div class="physics-actions">
-        <span class="section-label">Jolt Physics Drop Tests:</span>
-        <div class="action-btn-grid">
-          <button type="button" class="btn action-btn" (click)="dropBall(-80, 40, 0)">
-            Drop on Runway
+        @if (!benchmarkMode()) {
+          <button
+            type="button"
+            class="btn toggle"
+            [class.active]="showSockets()"
+            (click)="toggleSockets()"
+          >
+            Sockets
           </button>
-          <button type="button" class="btn action-btn" (click)="dropBall(0, 40, 0)">
-            Drop on Launchpad
-          </button>
-          <button type="button" class="btn action-btn" (click)="dropBall(78, 80, 0)">
-            Drop in Chopsticks
-          </button>
-        </div>
-        @if (droppedBalls().length > 0) {
-          <button type="button" class="btn danger-btn" (click)="clearBalls()">
-            Clear Balls ({{ droppedBalls().length }})
+          <button
+            type="button"
+            class="btn toggle"
+            [class.active]="showFootprints()"
+            (click)="toggleFootprints()"
+          >
+            Footprints
           </button>
         }
       </div>
 
-      <div class="legend-box">
-        <span class="legend-title">Socket Kinds</span>
-        <div class="legend-items">
-          <span class="legend-tag spawn">spawn-point</span>
-          <span class="legend-tag touchdown">touchdown-zone</span>
-          <span class="legend-tag catch">catch-zone</span>
-          <span class="legend-tag refuel">refuel-dock</span>
+      @if (!benchmarkMode()) {
+        <!-- Single Facility Inspection Controls -->
+        <div class="kinematics-section">
+          <span class="section-label">Parametric Dimensions:</span>
+          <div class="slider-row">
+            <label>Runway Length: {{ runwayLengthM() }}m</label>
+            <input
+              type="range"
+              min="150"
+              max="800"
+              step="25"
+              [value]="runwayLengthM()"
+              (input)="onRunwayLengthChange($event)"
+            />
+          </div>
+          <div class="slider-row">
+            <label>Runway Width: {{ runwayWidthM() }}m</label>
+            <input
+              type="range"
+              min="20"
+              max="60"
+              step="5"
+              [value]="runwayWidthM()"
+              (input)="onRunwayWidthChange($event)"
+            />
+          </div>
+          <div class="slider-row">
+            <label>Launchpad Radius: {{ launchpadRadiusM() }}m ({{ launchpadRadiusM() * 2 }}m Dia)</label>
+            <input
+              type="range"
+              min="15"
+              max="60"
+              step="2.5"
+              [value]="launchpadRadiusM()"
+              (input)="onLaunchpadRadiusChange($event)"
+            />
+          </div>
+          <div class="slider-row">
+            <label>Tower Height: {{ towerHeightM() }}m</label>
+            <input
+              type="range"
+              min="40"
+              max="140"
+              step="5"
+              [value]="towerHeightM()"
+              (input)="onTowerHeightChange($event)"
+            />
+          </div>
         </div>
-      </div>
+
+        <div class="kinematics-section">
+          <span class="section-label">Tower Articulation (Mechazilla):</span>
+          <div class="slider-row">
+            <label>Carriage Elevation: {{ towerCarriageElevationM() }}m</label>
+            <input
+              type="range"
+              min="5"
+              [max]="maxTowerCarriageElevationM()"
+              step="1"
+              [value]="towerCarriageElevationM()"
+              (input)="onCarriageElevationChange($event)"
+            />
+          </div>
+
+          <div class="slider-row">
+            <label>Chopsticks Angle: {{ (towerChopstickAngleRad() * 57.2958).toFixed(1) }}°</label>
+            <input
+              type="range"
+              min="-0.15"
+              max="0.55"
+              step="0.01"
+              [value]="towerChopstickAngleRad()"
+              (input)="onChopstickAngleChange($event)"
+            />
+          </div>
+        </div>
+
+        <div class="physics-actions">
+          <span class="section-label">Jolt Physics Drop Tests:</span>
+          <div class="action-btn-grid">
+            <button type="button" class="btn action-btn" (click)="dropBall(-80, 40, 0)">
+              Drop on Runway
+            </button>
+            <button type="button" class="btn action-btn" (click)="dropBall(0, 40, 0)">
+              Drop on Launchpad
+            </button>
+            <button type="button" class="btn action-btn" (click)="dropBall(78, 80, 0)">
+              Drop in Chopsticks
+            </button>
+          </div>
+          @if (droppedBalls().length > 0) {
+            <button type="button" class="btn danger-btn" (click)="clearBalls()">
+              Clear Balls ({{ droppedBalls().length }})
+            </button>
+          }
+        </div>
+
+        <div class="legend-box">
+          <span class="legend-title">Socket Kinds</span>
+          <div class="legend-items">
+            <span class="legend-tag spawn">spawn-point</span>
+            <span class="legend-tag touchdown">touchdown-zone</span>
+            <span class="legend-tag catch">catch-zone</span>
+            <span class="legend-tag refuel">refuel-dock</span>
+          </div>
+        </div>
+      }
     </section>
   </ng-template>
 
   <!-- Viewport Lighting & Camera -->
   <orbitControls
-    [cameraPosition]="[40, 65, 120]"
+    [cameraPosition]="benchmarkMode() ? [0, 220, 380] : [40, 65, 120]"
     [target]="[0, 15, 0]"
     [isActive]="true"
   />
 
-  <ambientLight [intensity]="1.2" />
+  <ambientLight [intensity]="1.3" />
   <directionalLight
-    [position]="[80, 140, 60]"
-    [intensity]="2.2"
+    [position]="[120, 180, 90]"
+    [intensity]="2.4"
     [castShadow]="true"
   />
-  <directionalLight [position]="[-80, 80, -60]" [intensity]="0.8" />
+  <directionalLight [position]="[-120, 90, -90]" [intensity]="0.8" />
 
   <!-- Jolt Physics Simulation -->
   <joltPhysics [gravity]="[0, -9.81, 0]">
     <!-- Ground plane collider -->
     <joltRigidBody [motionType]="0" [position]="[0, -0.25, 0]">
-      <joltBoxShape [params]="[600, 0.5, 600]" />
+      <joltBoxShape [params]="[1500, 0.5, 1500]" />
       <mesh [receiveShadow]="true">
-        <boxGeometry [params]="[600, 0.5, 600]" />
+        <boxGeometry [params]="[1500, 0.5, 1500]" />
         <meshStandardMaterial [params]="{ color: '#111827', roughness: 0.95 }" />
       </mesh>
     </joltRigidBody>

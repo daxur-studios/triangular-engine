@@ -7,3 +7,5 @@ export * from './structures-colliders';
 export * from './structures-footprint';
 export * from './structures-joint';
 export * from './structures-catalog';
+export * from './structures-cache';
+export * from './structures-batch';

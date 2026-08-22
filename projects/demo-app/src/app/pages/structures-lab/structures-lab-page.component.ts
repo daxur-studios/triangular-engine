@@ -27,6 +27,10 @@ import { EngineModule, EngineService } from 'triangular-engine';
 import { JoltPhysicsModule } from 'triangular-engine/jolt';
 import {
   buildStructureMesh,
+  COLONY_COMM_TOWER_ARCHETYPE,
+  COLONY_FUEL_TANK_ARCHETYPE,
+  COLONY_HAB_MODULE_ARCHETYPE,
+  COLONY_SOLAR_PANEL_ARCHETYPE,
   createChopstickTowerArchetype,
   createLaunchpadArchetype,
   createRunwayArchetype,
@@ -35,6 +39,7 @@ import {
   deriveStructureSockets,
   generateStructureSkeleton,
   poseStructureVariant,
+  StructureBatchManager,
   type IStructureArchetype,
   type IStructureFootprint2D,
   type IStructureVariant,
@@ -98,7 +103,12 @@ export class StructuresLabPageComponent {
   readonly showSockets = signal<boolean>(true);
   readonly showFootprints = signal<boolean>(true);
 
-  // Parametric Dimensions
+  // Scaling / Benchmark Mode
+  readonly benchmarkMode = signal<boolean>(false);
+  readonly benchmarkBuildingCount = signal<number>(1200);
+  readonly activeDrawCalls = signal<number>(3);
+
+  // Parametric Dimensions (Single-facility inspection mode)
   readonly runwayLengthM = signal<number>(400);
   readonly runwayWidthM = signal<number>(40);
   readonly launchpadRadiusM = signal<number>(30);
@@ -113,6 +123,7 @@ export class StructuresLabPageComponent {
   readonly droppedBalls = signal<readonly IDroppedBall[]>([]);
 
   private readonly rootGroup = new Group();
+  private readonly batchManager = new StructureBatchManager();
   private displayItems: IStructureDisplayItem[] = [];
   private ballCounter = 0;
 
@@ -120,7 +131,7 @@ export class StructuresLabPageComponent {
     const previousBackground = this.engine.scene.background;
     this.engine.scene.background = new Color('#0d1527');
 
-    const grid = new GridHelper(600, 60, 0x475569, 0x1e293b);
+    const grid = new GridHelper(1200, 120, 0x475569, 0x1e293b);
     grid.position.y = 0.01;
     this.rootGroup.add(grid);
 
@@ -129,6 +140,7 @@ export class StructuresLabPageComponent {
     this.rebuildAllStructures();
 
     this.destroyRef.onDestroy(() => {
+      this.batchManager.clear();
       this.engine.scene.remove(this.rootGroup);
       this.engine.scene.background = previousBackground;
     });
@@ -147,6 +159,19 @@ export class StructuresLabPageComponent {
     const nextSeed = Math.floor(Math.random() * 90000) + 1000;
     this.seed.set(nextSeed);
     this.rebuildAllStructures();
+  }
+
+  toggleBenchmarkMode(): void {
+    this.benchmarkMode.update((v) => !v);
+    this.rebuildAllStructures();
+  }
+
+  onBenchmarkCountChange(event: Event): void {
+    const val = parseInt((event.target as HTMLInputElement).value, 10);
+    this.benchmarkBuildingCount.set(val);
+    if (this.benchmarkMode()) {
+      this.rebuildAllStructures();
+    }
   }
 
   toggleWireframe(): void {
@@ -189,8 +214,9 @@ export class StructuresLabPageComponent {
   onTowerHeightChange(event: Event): void {
     const val = parseFloat((event.target as HTMLInputElement).value);
     this.towerHeightM.set(val);
-    if (this.towerCarriageElevationM() > val - 15) {
-      this.towerCarriageElevationM.set(Math.max(5, val * 0.45));
+    const maxElev = Math.max(10, val - 15);
+    if (this.towerCarriageElevationM() > maxElev) {
+      this.towerCarriageElevationM.set(maxElev);
     }
     this.rebuildAllStructures();
   }
@@ -224,16 +250,98 @@ export class StructuresLabPageComponent {
   }
 
   private rebuildAllStructures(): void {
+    // 1. Clear previous items
     for (const item of this.displayItems) {
       this.rootGroup.remove(item.itemGroup);
       item.meshGroup.clear();
       item.socketGroup.clear();
       item.footprintGroup.clear();
     }
-
     this.displayItems = [];
+    this.batchManager.clear();
+    this.rootGroup.remove(this.batchManager.group);
+
     const currentSeed = this.seed();
 
+    // 2. Branch: Benchmark Mega-Base Mode (1,000+ Buildings)
+    if (this.benchmarkMode()) {
+      this.buildMegaBaseBenchmark(currentSeed);
+      return;
+    }
+
+    // 3. Single-Facility Inspection Mode
+    this.buildInspectionFacilities(currentSeed);
+  }
+
+  private buildMegaBaseBenchmark(currentSeed: number): void {
+    const total = this.benchmarkBuildingCount();
+    const quarter = Math.floor(total / 4);
+
+    // Sector 1: Solar Power Array (Quarter of buildings)
+    const solarCols = Math.ceil(Math.sqrt(quarter));
+    for (let i = 0; i < quarter; i++) {
+      const row = Math.floor(i / solarCols);
+      const col = i % solarCols;
+      const x = -300 + col * 16;
+      const z = -200 + row * 16;
+      this.batchManager.addInstance(COLONY_SOLAR_PANEL_ARCHETYPE, {
+        position: [x, 0, z],
+      }, currentSeed);
+    }
+
+    // Sector 2: Cryogenic Fuel Silos (Quarter of buildings)
+    const fuelCols = Math.ceil(Math.sqrt(quarter));
+    for (let i = 0; i < quarter; i++) {
+      const row = Math.floor(i / fuelCols);
+      const col = i % fuelCols;
+      const x = 50 + col * 18;
+      const z = -200 + row * 18;
+      this.batchManager.addInstance(COLONY_FUEL_TANK_ARCHETYPE, {
+        position: [x, 0, z],
+      }, currentSeed);
+    }
+
+    // Sector 3: Habitation Biodomes (Quarter of buildings)
+    const habCols = Math.ceil(Math.sqrt(quarter));
+    for (let i = 0; i < quarter; i++) {
+      const row = Math.floor(i / habCols);
+      const col = i % habCols;
+      const x = -300 + col * 26;
+      const z = 50 + row * 26;
+      this.batchManager.addInstance(COLONY_HAB_MODULE_ARCHETYPE, {
+        position: [x, 0, z],
+      }, currentSeed);
+    }
+
+    // Sector 4: Deep Space Communications Relay Masts (Remaining buildings)
+    const commCount = total - quarter * 3;
+    const commCols = Math.ceil(Math.sqrt(commCount));
+    for (let i = 0; i < commCount; i++) {
+      const row = Math.floor(i / commCols);
+      const col = i % commCols;
+      const x = 50 + col * 22;
+      const z = 50 + row * 22;
+      this.batchManager.addInstance(COLONY_COMM_TOWER_ARCHETYPE, {
+        position: [x, 0, z],
+      }, currentSeed);
+    }
+
+    const batchGroup = this.batchManager.build({
+      material: new MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.65,
+        metalness: 0.25,
+        wireframe: this.wireframe(),
+        side: DoubleSide,
+      }),
+    });
+
+    this.rootGroup.add(batchGroup);
+    this.activeDrawCalls.set(this.batchManager.drawCallCount);
+    this.activeStaticColliders.set([]);
+  }
+
+  private buildInspectionFacilities(currentSeed: number): void {
     const offsets: readonly [number, number, number][] = [
       [-90, 0, 0], // Runway
       [0, 0, 0],   // Launchpad
@@ -292,10 +400,13 @@ export class StructuresLabPageComponent {
       });
     });
 
+    this.activeDrawCalls.set(3);
     this.applyJointPoses();
   }
 
   private applyJointPoses(): void {
+    if (this.benchmarkMode()) return;
+
     const collidersList: IActiveColliderItem[] = [];
 
     for (const item of this.displayItems) {
@@ -414,6 +525,10 @@ export class StructuresLabPageComponent {
   }
 
   private updateMaterialWireframe(): void {
+    if (this.benchmarkMode()) {
+      this.rebuildAllStructures();
+      return;
+    }
     for (const item of this.displayItems) {
       for (const child of item.meshGroup.children) {
         if (child instanceof Mesh && child.material instanceof MeshStandardMaterial) {
