@@ -37,10 +37,64 @@
               <span class="stat-lbl">Draw Calls</span>
             </div>
             <div class="stat-pill">
+              <span class="stat-num">{{ (totalTriangles() / 1000).toFixed(0) }}k</span>
+              <span class="stat-lbl">Triangles</span>
+            </div>
+            <div class="stat-pill">
               <span class="stat-num">4</span>
               <span class="stat-lbl">Cached Buffers</span>
             </div>
           </div>
+
+          <div class="lod-selector">
+            <div class="lod-header">
+              <label>LOD Mode:</label>
+              <span class="breakdown-text">{{ lodBreakdown() }}</span>
+            </div>
+            <div class="lod-buttons">
+              <button
+                type="button"
+                class="btn"
+                [class.active]="selectedLodMode() === 'auto'"
+                (click)="setLodMode('auto')"
+              >
+                Auto (Distance)
+              </button>
+              <button
+                type="button"
+                class="btn"
+                [class.active]="selectedLodMode() === 0"
+                (click)="setLodMode(0)"
+              >
+                LOD 0
+              </button>
+              <button
+                type="button"
+                class="btn"
+                [class.active]="selectedLodMode() === 1"
+                (click)="setLodMode(1)"
+              >
+                LOD 1
+              </button>
+              <button
+                type="button"
+                class="btn"
+                [class.active]="selectedLodMode() === 2"
+                (click)="setLodMode(2)"
+              >
+                LOD 2
+              </button>
+              <button
+                type="button"
+                class="btn"
+                [class.active]="selectedLodMode() === 3"
+                (click)="setLodMode(3)"
+              >
+                LOD 3
+              </button>
+            </div>
+          </div>
+
           <div class="slider-row">
             <label>Building Count: {{ benchmarkBuildingCount() }}</label>
             <input

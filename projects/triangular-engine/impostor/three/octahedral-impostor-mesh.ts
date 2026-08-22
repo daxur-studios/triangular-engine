@@ -1,4 +1,14 @@
-import { Box3, Material, Matrix4, Mesh, PlaneGeometry, Sphere, Vector3, type Object3D } from 'three';
+import {
+  Box3,
+  InstancedMesh,
+  Material,
+  Matrix4,
+  Mesh,
+  PlaneGeometry,
+  Sphere,
+  Vector3,
+  type Object3D,
+} from 'three';
 
 import { computeObjectBoundingSphere } from '../core/compute-object-bounding-sphere';
 import {
@@ -64,4 +74,16 @@ export function buildOctahedralImpostorMesh<T extends Material>(
   const mesh = new Mesh(geometry, materialHandle.material);
 
   return { mesh, materialHandle };
+}
+
+/**
+ * Builds an InstancedMesh rendering multiple instances of an octahedral impostor in a single GPU draw call.
+ */
+export function buildOctahedralImpostorInstancedMesh<T extends Material>(
+  options: IBuildOctahedralImpostorMeshOptions<T>,
+  count: number,
+): { instancedMesh: InstancedMesh<PlaneGeometry, T>; materialHandle: IOctahedralImpostorMaterialHandle<T> } {
+  const single = buildOctahedralImpostorMesh(options);
+  const instancedMesh = new InstancedMesh(single.mesh.geometry, single.mesh.material, count);
+  return { instancedMesh, materialHandle: single.materialHandle };
 }

@@ -6,6 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import {
   BufferGeometry,
@@ -21,6 +22,7 @@ import {
   MeshStandardMaterial,
   QuaternionTuple,
   SphereGeometry,
+  Vector3,
   Vector3Tuple,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
@@ -42,6 +44,7 @@ import {
   StructureBatchManager,
   type IStructureArchetype,
   type IStructureFootprint2D,
+  type IStructureInstanceTransform,
   type IStructureVariant,
   type StructureSocketKind,
 } from 'triangular-engine/procedural';
@@ -106,7 +109,10 @@ export class StructuresLabPageComponent {
   // Scaling / Benchmark Mode
   readonly benchmarkMode = signal<boolean>(false);
   readonly benchmarkBuildingCount = signal<number>(1200);
+  readonly selectedLodMode = signal<'auto' | 0 | 1 | 2 | 3>('auto');
   readonly activeDrawCalls = signal<number>(3);
+  readonly totalTriangles = signal<number>(5550);
+  readonly lodBreakdown = signal<string>('');
 
   // Parametric Dimensions (Single-facility inspection mode)
   readonly runwayLengthM = signal<number>(400);
@@ -126,6 +132,13 @@ export class StructuresLabPageComponent {
   private readonly batchManager = new StructureBatchManager();
   private displayItems: IStructureDisplayItem[] = [];
   private ballCounter = 0;
+  private lastCameraPosition = new Vector3(Infinity, Infinity, Infinity);
+
+  // Cached benchmark transforms
+  private cachedSolarTransforms: IStructureInstanceTransform[] = [];
+  private cachedFuelTransforms: IStructureInstanceTransform[] = [];
+  private cachedHabTransforms: IStructureInstanceTransform[] = [];
+  private cachedCommTransforms: IStructureInstanceTransform[] = [];
 
   constructor() {
     const previousBackground = this.engine.scene.background;
@@ -138,6 +151,18 @@ export class StructuresLabPageComponent {
     this.engine.scene.add(this.rootGroup);
 
     this.rebuildAllStructures();
+
+    // Hook live camera movement for real-time Dynamic Distance Auto-LOD streaming
+    this.engine.beforeRender$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      if (!this.benchmarkMode() || this.selectedLodMode() !== 'auto') return;
+
+      const cam = this.engine.camera;
+      if (!cam) return;
+      if (cam.position.distanceToSquared(this.lastCameraPosition) > 64) { // update when camera moves > 8m
+        this.lastCameraPosition.copy(cam.position);
+        this.updateDynamicCameraLod([cam.position.x, cam.position.y, cam.position.z]);
+      }
+    });
 
     this.destroyRef.onDestroy(() => {
       this.batchManager.clear();
@@ -163,7 +188,15 @@ export class StructuresLabPageComponent {
 
   toggleBenchmarkMode(): void {
     this.benchmarkMode.update((v) => !v);
+    this.lastCameraPosition.set(Infinity, Infinity, Infinity);
     this.rebuildAllStructures();
+  }
+
+  setLodMode(mode: 'auto' | 0 | 1 | 2 | 3): void {
+    this.selectedLodMode.set(mode);
+    if (this.benchmarkMode()) {
+      this.rebuildAllStructures();
+    }
   }
 
   onBenchmarkCountChange(event: Event): void {
@@ -276,55 +309,108 @@ export class StructuresLabPageComponent {
   private buildMegaBaseBenchmark(currentSeed: number): void {
     const total = this.benchmarkBuildingCount();
     const quarter = Math.floor(total / 4);
+    const mode = this.selectedLodMode();
 
-    // Sector 1: Solar Power Array (Quarter of buildings)
+    // Generate instance transforms for all 4 base sectors
+    this.cachedSolarTransforms = [];
     const solarCols = Math.ceil(Math.sqrt(quarter));
     for (let i = 0; i < quarter; i++) {
       const row = Math.floor(i / solarCols);
       const col = i % solarCols;
-      const x = -300 + col * 16;
-      const z = -200 + row * 16;
-      this.batchManager.addInstance(COLONY_SOLAR_PANEL_ARCHETYPE, {
-        position: [x, 0, z],
-      }, currentSeed);
+      this.cachedSolarTransforms.push({ position: [-300 + col * 16, 0, -200 + row * 16] });
     }
 
-    // Sector 2: Cryogenic Fuel Silos (Quarter of buildings)
+    this.cachedFuelTransforms = [];
     const fuelCols = Math.ceil(Math.sqrt(quarter));
     for (let i = 0; i < quarter; i++) {
       const row = Math.floor(i / fuelCols);
       const col = i % fuelCols;
-      const x = 50 + col * 18;
-      const z = -200 + row * 18;
-      this.batchManager.addInstance(COLONY_FUEL_TANK_ARCHETYPE, {
-        position: [x, 0, z],
-      }, currentSeed);
+      this.cachedFuelTransforms.push({ position: [50 + col * 18, 0, -200 + row * 18] });
     }
 
-    // Sector 3: Habitation Biodomes (Quarter of buildings)
+    this.cachedHabTransforms = [];
     const habCols = Math.ceil(Math.sqrt(quarter));
     for (let i = 0; i < quarter; i++) {
       const row = Math.floor(i / habCols);
       const col = i % habCols;
-      const x = -300 + col * 26;
-      const z = 50 + row * 26;
-      this.batchManager.addInstance(COLONY_HAB_MODULE_ARCHETYPE, {
-        position: [x, 0, z],
-      }, currentSeed);
+      this.cachedHabTransforms.push({ position: [-300 + col * 26, 0, 50 + row * 26] });
     }
 
-    // Sector 4: Deep Space Communications Relay Masts (Remaining buildings)
+    this.cachedCommTransforms = [];
     const commCount = total - quarter * 3;
     const commCols = Math.ceil(Math.sqrt(commCount));
     for (let i = 0; i < commCount; i++) {
       const row = Math.floor(i / commCols);
       const col = i % commCols;
-      const x = 50 + col * 22;
-      const z = 50 + row * 22;
-      this.batchManager.addInstance(COLONY_COMM_TOWER_ARCHETYPE, {
-        position: [x, 0, z],
-      }, currentSeed);
+      this.cachedCommTransforms.push({ position: [50 + col * 22, 0, 50 + row * 22] });
     }
+
+    const camPos = this.engine.camera?.position ?? new Vector3(0, 220, 380);
+    this.lastCameraPosition.copy(camPos);
+    const focusPoint: [number, number, number] = [camPos.x, camPos.y, camPos.z];
+
+    if (mode === 'auto') {
+      this.updateDynamicCameraLod(focusPoint);
+    } else {
+      const lod = mode as number;
+      this.batchManager.clear();
+      this.batchManager.addInstances(COLONY_SOLAR_PANEL_ARCHETYPE, this.cachedSolarTransforms, currentSeed, lod);
+      this.batchManager.addInstances(COLONY_FUEL_TANK_ARCHETYPE, this.cachedFuelTransforms, currentSeed, lod);
+      this.batchManager.addInstances(COLONY_HAB_MODULE_ARCHETYPE, this.cachedHabTransforms, currentSeed, lod);
+      this.batchManager.addInstances(COLONY_COMM_TOWER_ARCHETYPE, this.cachedCommTransforms, currentSeed, lod);
+
+      const batchGroup = this.batchManager.build({
+        material: new MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.65,
+          metalness: 0.25,
+          wireframe: this.wireframe(),
+          side: DoubleSide,
+        }),
+      });
+
+      this.rootGroup.add(batchGroup);
+      this.activeDrawCalls.set(this.batchManager.drawCallCount);
+      this.activeStaticColliders.set([]);
+      this.lodBreakdown.set(`All ${total} at LOD ${mode}`);
+      const perBuilding = mode === 0 ? 1850 : mode === 1 ? 450 : mode === 2 ? 110 : 2;
+      this.totalTriangles.set(total * perBuilding);
+    }
+  }
+
+  private updateDynamicCameraLod(cameraPosition: [number, number, number]): void {
+    const currentSeed = this.seed();
+    this.batchManager.clear();
+
+    // Dynamic distance-based LOD partitioning from live camera position
+    this.batchManager.addInstancesWithDistanceLod(
+      COLONY_SOLAR_PANEL_ARCHETYPE,
+      this.cachedSolarTransforms,
+      cameraPosition,
+      currentSeed,
+      { lod1DistanceM: 160, lod2DistanceM: 320, lod3DistanceM: 520 },
+    );
+    this.batchManager.addInstancesWithDistanceLod(
+      COLONY_FUEL_TANK_ARCHETYPE,
+      this.cachedFuelTransforms,
+      cameraPosition,
+      currentSeed,
+      { lod1DistanceM: 160, lod2DistanceM: 320, lod3DistanceM: 520 },
+    );
+    this.batchManager.addInstancesWithDistanceLod(
+      COLONY_HAB_MODULE_ARCHETYPE,
+      this.cachedHabTransforms,
+      cameraPosition,
+      currentSeed,
+      { lod1DistanceM: 160, lod2DistanceM: 320, lod3DistanceM: 520 },
+    );
+    this.batchManager.addInstancesWithDistanceLod(
+      COLONY_COMM_TOWER_ARCHETYPE,
+      this.cachedCommTransforms,
+      cameraPosition,
+      currentSeed,
+      { lod1DistanceM: 160, lod2DistanceM: 320, lod3DistanceM: 520 },
+    );
 
     const batchGroup = this.batchManager.build({
       material: new MeshStandardMaterial({
@@ -339,6 +425,11 @@ export class StructuresLabPageComponent {
     this.rootGroup.add(batchGroup);
     this.activeDrawCalls.set(this.batchManager.drawCallCount);
     this.activeStaticColliders.set([]);
+
+    const counts = this.batchManager.getLodCounts();
+    this.lodBreakdown.set(`${counts[0]}@L0 · ${counts[1]}@L1 · ${counts[2]}@L2 · ${counts[3]}@L3`);
+    const sumTriangles = counts[0] * 1850 + counts[1] * 450 + counts[2] * 110 + counts[3] * 2;
+    this.totalTriangles.set(sumTriangles);
   }
 
   private buildInspectionFacilities(currentSeed: number): void {
@@ -401,6 +492,8 @@ export class StructuresLabPageComponent {
     });
 
     this.activeDrawCalls.set(3);
+    this.totalTriangles.set(1850 * 3);
+    this.lodBreakdown.set('Inspection Facilities (LOD 0)');
     this.applyJointPoses();
   }
 

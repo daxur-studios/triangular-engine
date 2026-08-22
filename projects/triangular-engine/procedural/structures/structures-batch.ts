@@ -22,10 +22,40 @@ export interface IStructureInstanceTransform {
 
 export interface IStructureBatchOptions {
   readonly seed?: number;
+  readonly lod?: number;
   readonly material?: Material;
   readonly cache?: StructureGeometryCache;
   readonly castShadow?: boolean;
   readonly receiveShadow?: boolean;
+}
+
+export interface IStructureLodThresholds {
+  readonly lod1DistanceM?: number;
+  readonly lod2DistanceM?: number;
+  readonly lod3DistanceM?: number;
+}
+
+/**
+ * Computes which LOD tier (0, 1, 2, or 3) an instance belongs to based on Euclidean distance to camera/focus point.
+ */
+export function resolveDistanceLod(
+  position: readonly [number, number, number],
+  focusPosition: readonly [number, number, number],
+  thresholds?: IStructureLodThresholds,
+): number {
+  const dx = position[0] - focusPosition[0];
+  const dy = position[1] - focusPosition[1];
+  const dz = position[2] - focusPosition[2];
+  const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+  const t1 = thresholds?.lod1DistanceM ?? 90;
+  const t2 = thresholds?.lod2DistanceM ?? 220;
+  const t3 = thresholds?.lod3DistanceM ?? 420;
+
+  if (dist < t1) return 0;
+  if (dist < t2) return 1;
+  if (dist < t3) return 2;
+  return 3;
 }
 
 /**
@@ -40,7 +70,8 @@ export function createStructureInstancedMesh(
   const count = instances.length;
   const cache = options?.cache ?? defaultStructureGeometryCache;
   const seed = options?.seed ?? 42;
-  const geometry = cache.getOrCreate(archetype, seed);
+  const lod = options?.lod ?? 0;
+  const geometry = cache.getOrCreate(archetype, seed, lod);
 
   const material =
     options?.material ??
@@ -52,7 +83,7 @@ export function createStructureInstancedMesh(
     });
 
   const instancedMesh = new InstancedMesh(geometry, material, count);
-  instancedMesh.name = `instanced-${archetype.id}-count-${count}`;
+  instancedMesh.name = `instanced-${archetype.id}-lod${lod}-count-${count}`;
   instancedMesh.instanceMatrix.setUsage(DynamicDrawUsage);
   instancedMesh.castShadow = options?.castShadow ?? true;
   instancedMesh.receiveShadow = options?.receiveShadow ?? true;
@@ -100,7 +131,7 @@ export function createStructureInstancedMesh(
 
 /**
  * Manages multi-archetype batching for large planetary bases and spaceports.
- * Groups buildings by archetype to minimize GPU draw calls to exactly 1 draw call per unique building type.
+ * Groups buildings by archetype and LOD to minimize GPU draw calls.
  */
 export class StructureBatchManager {
   private readonly batches = new Map<
@@ -108,6 +139,7 @@ export class StructureBatchManager {
     {
       archetype: IStructureArchetype;
       seed: number;
+      lod: number;
       instances: IStructureInstanceTransform[];
       mesh?: InstancedMesh;
     }
@@ -128,11 +160,12 @@ export class StructureBatchManager {
     archetype: IStructureArchetype,
     transform: IStructureInstanceTransform,
     seed = 42,
+    lod = 0,
   ): void {
-    const key = `${archetype.id}-s${seed}`;
+    const key = `${archetype.id}-s${seed}-lod${lod}`;
     let batch = this.batches.get(key);
     if (!batch) {
-      batch = { archetype, seed, instances: [] };
+      batch = { archetype, seed, lod, instances: [] };
       this.batches.set(key, batch);
     }
     batch.instances.push(transform);
@@ -145,26 +178,45 @@ export class StructureBatchManager {
     archetype: IStructureArchetype,
     transforms: readonly IStructureInstanceTransform[],
     seed = 42,
+    lod = 0,
   ): void {
-    const key = `${archetype.id}-s${seed}`;
+    const key = `${archetype.id}-s${seed}-lod${lod}`;
     let batch = this.batches.get(key);
     if (!batch) {
-      batch = { archetype, seed, instances: [] };
+      batch = { archetype, seed, lod, instances: [] };
       this.batches.set(key, batch);
     }
     batch.instances.push(...transforms);
   }
 
   /**
+   * Registers an array of building instances partitioned into LOD tiers based on camera distance.
+   */
+  addInstancesWithDistanceLod(
+    archetype: IStructureArchetype,
+    transforms: readonly IStructureInstanceTransform[],
+    focusPosition: readonly [number, number, number] = [0, 0, 0],
+    seed = 42,
+    thresholds?: IStructureLodThresholds,
+  ): void {
+    for (const transform of transforms) {
+      const lod = resolveDistanceLod(transform.position, focusPosition, thresholds);
+      this.addInstance(archetype, transform, seed, lod);
+    }
+  }
+
+  /**
    * Rebuilds all InstancedMeshes and returns the root Three.js Group.
    */
-  build(options?: { material?: Material }): Group {
+  build(options?: { material?: Material; overrideLod?: number }): Group {
     this.rootGroup.clear();
 
     for (const batch of this.batches.values()) {
       if (batch.instances.length === 0) continue;
+      const activeLod = options?.overrideLod !== undefined ? options.overrideLod : batch.lod;
       const mesh = createStructureInstancedMesh(batch.archetype, batch.instances, {
         seed: batch.seed,
+        lod: activeLod,
         material: options?.material,
         cache: this.cache,
       });
@@ -173,6 +225,17 @@ export class StructureBatchManager {
     }
 
     return this.rootGroup;
+  }
+
+  /**
+   * Returns instance count breakdown per LOD tier.
+   */
+  getLodCounts(): Record<number, number> {
+    const counts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0 };
+    for (const batch of this.batches.values()) {
+      counts[batch.lod] = (counts[batch.lod] ?? 0) + batch.instances.length;
+    }
+    return counts;
   }
 
   /**
@@ -194,7 +257,7 @@ export class StructureBatchManager {
   }
 
   /**
-   * Returns the total count of active GPU draw calls (1 per unique archetype batch).
+   * Returns the total count of active GPU draw calls.
    */
   get drawCallCount(): number {
     let count = 0;

@@ -43,4 +43,14 @@ describe('buildStructureMesh & buildStructureMeshGroup', () => {
     expect(link2).toBeDefined();
     expect(link3).toBeDefined();
   });
+
+  it('reduces triangle counts progressively from LOD 0 to LOD 2', () => {
+    const solids = generateStructureSkeleton(DEMO_RUNWAY_ARCHETYPE, 42);
+    const lod0 = buildStructureMesh(solids, DEMO_RUNWAY_ARCHETYPE, { lod: 0 });
+    const lod1 = buildStructureMesh(solids, DEMO_RUNWAY_ARCHETYPE, { lod: 1 });
+    const lod2 = buildStructureMesh(solids, DEMO_RUNWAY_ARCHETYPE, { lod: 2 });
+
+    expect(lod0.triangleCount).toBeGreaterThan(lod1.triangleCount);
+    expect(lod1.triangleCount).toBeGreaterThan(lod2.triangleCount);
+  });
 });

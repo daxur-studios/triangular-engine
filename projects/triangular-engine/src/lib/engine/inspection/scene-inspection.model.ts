@@ -68,7 +68,6 @@ export interface SceneObjectSnapshot {
 
 export type SceneInspectionWarningCode =
   | 'duplicate-name'
-  | 'unnamed-top-level'
   | 'invalid-transform'
   | 'zero-scale'
   | 'missing-geometry'

@@ -1,11 +1,11 @@
-import { BufferGeometry, Material } from 'three';
+import { BufferGeometry } from 'three';
 import type { IStructureArchetype } from './structures-archetype';
 import { buildStructureMesh } from './structures-mesh';
 import { generateStructureSkeleton } from './structures-skeleton';
 
 /**
  * High-performance memoized geometry cache for procedural structures.
- * Ensures that identical archetypes and seeds reuse a single GPU BufferGeometry across thousands of instances.
+ * Ensures that identical archetypes, seeds, and LOD tiers reuse a single GPU BufferGeometry across thousands of instances.
  */
 export class StructureGeometryCache {
   private readonly cache = new Map<
@@ -17,17 +17,17 @@ export class StructureGeometryCache {
   >();
 
   /**
-   * Generates a deterministic hash key for an archetype and seed.
+   * Generates a deterministic hash key for an archetype, seed, and LOD level.
    */
-  getCacheKey(archetype: IStructureArchetype, seed: number): string {
-    return `${archetype.id}-v${archetype.schemaVersion}-s${seed}`;
+  getCacheKey(archetype: IStructureArchetype, seed = 42, lod = 0): string {
+    return `${archetype.id}-v${archetype.schemaVersion}-s${seed}-lod${lod}`;
   }
 
   /**
    * Retrieves an existing BufferGeometry from cache or builds and stores a new one.
    */
-  getOrCreate(archetype: IStructureArchetype, seed = 42): BufferGeometry {
-    const key = this.getCacheKey(archetype, seed);
+  getOrCreate(archetype: IStructureArchetype, seed = 42, lod = 0): BufferGeometry {
+    const key = this.getCacheKey(archetype, seed, lod);
     const existing = this.cache.get(key);
     if (existing) {
       existing.refCount++;
@@ -35,7 +35,7 @@ export class StructureGeometryCache {
     }
 
     const solids = generateStructureSkeleton(archetype, seed);
-    const { geometry } = buildStructureMesh(solids, archetype);
+    const { geometry } = buildStructureMesh(solids, archetype, { lod });
     this.cache.set(key, { geometry, refCount: 1 });
     return geometry;
   }
@@ -43,8 +43,8 @@ export class StructureGeometryCache {
   /**
    * Decrements reference count and disposes GPU buffers when count reaches zero.
    */
-  release(archetype: IStructureArchetype, seed = 42): void {
-    const key = this.getCacheKey(archetype, seed);
+  release(archetype: IStructureArchetype, seed = 42, lod = 0): void {
+    const key = this.getCacheKey(archetype, seed, lod);
     const entry = this.cache.get(key);
     if (!entry) return;
 

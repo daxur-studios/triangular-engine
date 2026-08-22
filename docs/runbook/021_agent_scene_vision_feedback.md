@@ -226,7 +226,8 @@ interface SceneInspectionOptions {
 ```
 
 Named objects should be prioritized over unnamed implementation objects when
-the output limit is reached. `deep` means a higher bounded limit, not an
+the output limit is reached. Unnamed objects are valid Three.js metadata and
+are not warnings by themselves. `deep` means a higher bounded limit, not an
 unbounded scene serialization.
 
 ## Initial warnings
@@ -235,7 +236,6 @@ Warnings must be deterministic heuristics with stable codes, not model prose.
 Start with cheap checks that are unlikely to mislead:
 
 - duplicate non-empty object names;
-- unnamed top-level groups/meshes;
 - visible mesh with missing geometry or material;
 - non-finite world transform components;
 - zero or near-zero world scale on a visible object;
@@ -333,7 +333,7 @@ second traversal. A brief example:
 Scene "launch-pad": 87 objects, 64 visible, 42 meshes, 3 lights.
 Camera PerspectiveCamera pos=[12.4,8.1,15.2] near=0.1 far=1000000.
 Render: 118 calls, 264k triangles. Returned 12/87 objects.
-Warnings: duplicate-name(2), unnamed-top-level(1).
+Warnings: duplicate-name(2).
 ```
 
 Avoid Markdown tables in routine tool output. Compact lines are easier for

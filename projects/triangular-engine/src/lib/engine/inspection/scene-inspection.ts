@@ -76,16 +76,6 @@ export function inspectScene(
     }
   }
 
-  for (const child of source.scene.children) {
-    if (!child.name.trim() && !isHelper(child)) {
-      warnings.push({
-        code: 'unnamed-top-level',
-        message: `Top-level ${child.type} has no name.`,
-        objectId: child.uuid,
-      });
-    }
-  }
-
   warnings.push(...inspectCameraWarnings(source.camera));
 
   const candidates = allObjects.filter((object) => {

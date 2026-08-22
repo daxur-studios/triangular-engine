@@ -1,4 +1,5 @@
 import {
+  Box3,
   BoxGeometry,
   BufferGeometry,
   CapsuleGeometry,
@@ -22,8 +23,18 @@ export interface IStructureMeshResult {
   readonly vertexCount: number;
 }
 
+export interface IStructureMeshOptions {
+  /**
+   * Level of detail:
+   * 0: Full detail (24-seg cylinders, full micro-solids & decals)
+   * 1: Medium detail (10-seg cylinders, strips non-collidable decals & lights)
+   * 2: Low detail (5-seg cylinders, strips small sub-solids < 1.2m)
+   * 3: Proxy box / simplified bounding envelope
+   */
+  readonly lod?: number;
+}
+
 export const STRUCTURES_MAX_TRIANGLES_PER_MESH = 60_000;
-const RADIAL_SEGMENTS = 16;
 
 function parseHexColor(hex?: string): [number, number, number] {
   if (!hex || typeof hex !== 'string') {
@@ -33,8 +44,23 @@ function parseHexColor(hex?: string): [number, number, number] {
   return [color.r, color.g, color.b];
 }
 
-function createSolidGeometry(solid: IStructureSolid): BufferGeometry {
+function resolveRadialSegments(lod: number): number {
+  switch (lod) {
+    case 0:
+      return 24;
+    case 1:
+      return 10;
+    case 2:
+      return 5;
+    default:
+      return 3;
+  }
+}
+
+function createSolidGeometry(solid: IStructureSolid, lod = 0): BufferGeometry {
   const [d0, d1, d2] = solid.dimensionsM;
+  const radialSegs = resolveRadialSegments(lod);
+  const heightSegs = lod === 0 ? 12 : lod === 1 ? 6 : lod === 2 ? 3 : 2;
   let geom: BufferGeometry;
 
   switch (solid.shape) {
@@ -42,19 +68,19 @@ function createSolidGeometry(solid: IStructureSolid): BufferGeometry {
       geom = new BoxGeometry(d0, d1, d2);
       break;
     case 'cylinder':
-      geom = new CylinderGeometry(d0, d0, d1, RADIAL_SEGMENTS);
+      geom = new CylinderGeometry(d0, d0, d1, radialSegs);
       break;
     case 'cone':
-      geom = new CylinderGeometry(d1, d0, d2, RADIAL_SEGMENTS);
+      geom = new CylinderGeometry(d1, d0, d2, radialSegs);
       break;
     case 'capsule': {
       const capRadius = d0;
       const bodyLength = Math.max(0, d1 - 2 * capRadius);
-      geom = new CapsuleGeometry(capRadius, bodyLength, 4, RADIAL_SEGMENTS);
+      geom = new CapsuleGeometry(capRadius, bodyLength, Math.max(2, Math.floor(heightSegs * 0.5)), radialSegs);
       break;
     }
     case 'sphere':
-      geom = new SphereGeometry(d0, RADIAL_SEGMENTS, RADIAL_SEGMENTS / 2);
+      geom = new SphereGeometry(d0, radialSegs, heightSegs);
       break;
   }
 
@@ -66,10 +92,49 @@ function createSolidGeometry(solid: IStructureSolid): BufferGeometry {
   return geom;
 }
 
+function filterSolidsByLod(solids: readonly IStructureSolid[], lod: number): readonly IStructureSolid[] {
+  if (lod <= 0 || solids.length <= 1) {
+    return solids;
+  }
+
+  // LOD 1: Strip non-collidable decorative details (stripes, light bulbs)
+  let filtered = solids.filter((s) => s.collidable !== false);
+  if (filtered.length === 0) filtered = [solids[0]];
+
+  // LOD 2: Strip tiny sub-solids (< 1.2m)
+  if (lod >= 2 && filtered.length > 1) {
+    const significant = filtered.filter((s) => {
+      const maxDim = Math.max(...s.dimensionsM);
+      return maxDim >= 1.2;
+    });
+    if (significant.length > 0) {
+      filtered = significant;
+    }
+  }
+
+  // LOD 3: If multiple solids remain, keep only the largest core structural solids
+  if (lod >= 3 && filtered.length > 2) {
+    filtered = filtered
+      .slice()
+      .sort((a, b) => {
+        const volA = a.dimensionsM.reduce((acc, v) => acc * v, 1);
+        const volB = b.dimensionsM.reduce((acc, v) => acc * v, 1);
+        return volB - volA;
+      })
+      .slice(0, 2);
+  }
+
+  return filtered;
+}
+
 export function buildStructureMesh(
   solids: readonly IStructureSolid[],
   _archetype?: IStructureArchetype,
+  options?: IStructureMeshOptions,
 ): IStructureMeshResult {
+  const lod = Math.max(0, Math.floor(options?.lod ?? 0));
+  const activeSolids = filterSolidsByLod(solids, lod);
+
   const positions: number[] = [];
   const normals: number[] = [];
   const indices: number[] = [];
@@ -79,8 +144,8 @@ export function buildStructureMesh(
   let indexOffset = 0;
   let triangleCount = 0;
 
-  for (const solid of solids) {
-    const geom = createSolidGeometry(solid);
+  for (const solid of activeSolids) {
+    const geom = createSolidGeometry(solid, lod);
     const posAttr = geom.getAttribute('position');
     const normAttr = geom.getAttribute('normal');
     const idx = geom.getIndex();
@@ -142,6 +207,7 @@ export function buildStructureMesh(
 export function buildStructureMeshGroup(
   solids: readonly IStructureSolid[],
   archetype?: IStructureArchetype,
+  options?: IStructureMeshOptions,
 ): Group {
   const rootGroup = new Group();
   rootGroup.name = archetype?.id ?? 'procedural-structure';
@@ -171,7 +237,7 @@ export function buildStructureMeshGroup(
       ],
     }));
 
-    const res = buildStructureMesh(relativeSolids);
+    const res = buildStructureMesh(relativeSolids, archetype, options);
     const mesh = new Mesh(res.geometry, sharedMaterial);
     mesh.name = `link-${linkId}-mesh`;
     mesh.castShadow = true;

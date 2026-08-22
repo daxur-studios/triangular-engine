@@ -34,6 +34,13 @@ describe('StructureGeometryCache', () => {
     expect(geom1).not.toBe(geom2);
   });
 
+  it('differentiates by LOD level', () => {
+    const lod0 = cache.getOrCreate(COLONY_SOLAR_PANEL_ARCHETYPE, 42, 0);
+    const lod1 = cache.getOrCreate(COLONY_SOLAR_PANEL_ARCHETYPE, 42, 1);
+    expect(cache.size).toBe(2);
+    expect(lod0).not.toBe(lod1);
+  });
+
   it('handles reference counting and release', () => {
     cache.getOrCreate(DEMO_LAUNCHPAD_ARCHETYPE, 42);
     cache.getOrCreate(DEMO_LAUNCHPAD_ARCHETYPE, 42);
