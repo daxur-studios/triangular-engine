@@ -278,6 +278,18 @@ export const DEMOS: readonly DemoItem[] = [
       'Flat and 3D heightfield path finding with seeded terrain elevation and live dynamic obstacles.',
   },
   {
+    id: 'scene-inspection-lab',
+    number: '16b',
+    title: 'Scene Inspection Lab',
+    route: '/scene-inspection-lab',
+    categoryId: 'core',
+    tier: 'lab',
+    entryPoints: ['core'],
+    package: 'triangular-engine',
+    description:
+      'Visualizes bounded scene snapshots, camera facts, deterministic warnings, filters, and truncation for agent-facing inspection.',
+  },
+  {
     id: 'animals-lab',
     number: '17',
     title: 'Animals Lab',

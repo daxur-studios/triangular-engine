@@ -723,9 +723,207 @@ export function createChopstickTowerArchetype(options?: {
   };
 }
 
+export const COLONY_SOLAR_PANEL_ARCHETYPE: IStructureArchetype = {
+  schemaVersion: 1,
+  id: 'colony-solar-panel',
+  name: 'Tracking Solar Array (12m)',
+  footprint: {
+    kind: 'circle',
+    dimensionsM: [4],
+    foundationDepthM: 0.5,
+  },
+  solids: [
+    {
+      id: 'pylon-base',
+      shape: 'cylinder',
+      positionM: [0, 1.5, 0],
+      dimensionsM: [0.4, 3.0],
+      linkId: 0,
+      materialHex: STRUCTURE_PALETTE_COLORS.steelTrussHex,
+      collidable: true,
+    },
+    {
+      id: 'gimbal-hub',
+      shape: 'box',
+      positionM: [0, 3.2, 0],
+      dimensionsM: [1.2, 0.8, 1.2],
+      linkId: 0,
+      materialHex: STRUCTURE_PALETTE_COLORS.machineryHex,
+      collidable: true,
+    },
+    {
+      id: 'solar-wings-panel',
+      shape: 'box',
+      positionM: [0, 3.5, 0],
+      dimensionsM: [12, 0.15, 3.5],
+      linkId: 0,
+      materialHex: STRUCTURE_PALETTE_COLORS.glassBlueHex,
+      collidable: true,
+    },
+  ],
+  sockets: [
+    {
+      kind: 'power-in',
+      role: 'utility',
+      offsetM: [0, 0.2, 0],
+      primaryDirection: [0, -1, 0],
+    },
+  ],
+};
+
+export const COLONY_FUEL_TANK_ARCHETYPE: IStructureArchetype = {
+  schemaVersion: 1,
+  id: 'colony-fuel-tank',
+  name: 'Cryogenic Propellant Silo (18m)',
+  footprint: {
+    kind: 'circle',
+    dimensionsM: [6],
+    foundationDepthM: 0.8,
+  },
+  solids: [
+    {
+      id: 'silo-foundation',
+      shape: 'cylinder',
+      positionM: [0, 0.4, 0],
+      dimensionsM: [5.2, 0.8],
+      linkId: 0,
+      materialHex: STRUCTURE_PALETTE_COLORS.concreteHex,
+      collidable: true,
+    },
+    {
+      id: 'silo-barrel',
+      shape: 'cylinder',
+      positionM: [0, 8.0, 0],
+      dimensionsM: [4.5, 14.4],
+      linkId: 0,
+      materialHex: STRUCTURE_PALETTE_COLORS.stripeWhiteHex,
+      collidable: true,
+    },
+    {
+      id: 'silo-cap-dome',
+      shape: 'sphere',
+      positionM: [0, 15.2, 0],
+      dimensionsM: [4.4],
+      linkId: 0,
+      materialHex: STRUCTURE_PALETTE_COLORS.accentOrangeHex,
+      collidable: true,
+    },
+  ],
+  sockets: [
+    {
+      kind: 'refuel-dock',
+      role: 'docking',
+      offsetM: [4.6, 2.0, 0],
+      primaryDirection: [1, 0, 0],
+    },
+  ],
+};
+
+export const COLONY_HAB_MODULE_ARCHETYPE: IStructureArchetype = {
+  schemaVersion: 1,
+  id: 'colony-hab-module',
+  name: 'Habitat Biodome Module (16m)',
+  footprint: {
+    kind: 'circle',
+    dimensionsM: [9],
+    foundationDepthM: 0.6,
+  },
+  solids: [
+    {
+      id: 'hab-foundation',
+      shape: 'cylinder',
+      positionM: [0, 0.3, 0],
+      dimensionsM: [8.5, 0.6],
+      linkId: 0,
+      materialHex: STRUCTURE_PALETTE_COLORS.concreteHex,
+      collidable: true,
+    },
+    {
+      id: 'hab-dome',
+      shape: 'sphere',
+      positionM: [0, 4.0, 0],
+      dimensionsM: [7.5],
+      linkId: 0,
+      materialHex: STRUCTURE_PALETTE_COLORS.glassBlueHex,
+      collidable: true,
+    },
+    {
+      id: 'airlock-tunnel',
+      shape: 'box',
+      positionM: [7.2, 1.8, 0],
+      dimensionsM: [3.5, 2.4, 2.4],
+      linkId: 0,
+      materialHex: STRUCTURE_PALETTE_COLORS.steelDarkHex,
+      collidable: true,
+    },
+  ],
+  sockets: [
+    {
+      kind: 'corridor-node',
+      role: 'snap',
+      offsetM: [9.0, 1.8, 0],
+      primaryDirection: [1, 0, 0],
+    },
+  ],
+};
+
+export const COLONY_COMM_TOWER_ARCHETYPE: IStructureArchetype = {
+  schemaVersion: 1,
+  id: 'colony-comm-tower',
+  name: 'Deep Space Relay Mast (32m)',
+  footprint: {
+    kind: 'rect',
+    dimensionsM: [4, 4],
+    foundationDepthM: 1.0,
+  },
+  solids: [
+    {
+      id: 'mast-base',
+      shape: 'box',
+      positionM: [0, 0.5, 0],
+      dimensionsM: [6, 1.0, 6],
+      linkId: 0,
+      materialHex: STRUCTURE_PALETTE_COLORS.concreteHex,
+      collidable: true,
+    },
+    {
+      id: 'lattice-column',
+      shape: 'box',
+      positionM: [0, 16, 0],
+      dimensionsM: [1.8, 30, 1.8],
+      linkId: 0,
+      materialHex: STRUCTURE_PALETTE_COLORS.steelTrussHex,
+      collidable: true,
+    },
+    {
+      id: 'relay-dish-reflector',
+      shape: 'cone',
+      positionM: [1.6, 30, 0],
+      dimensionsM: [4.0, 2.0],
+      orientation: [0, 0, 0.7071, 0.7071],
+      linkId: 0,
+      materialHex: STRUCTURE_PALETTE_COLORS.stripeWhiteHex,
+      collidable: true,
+    },
+  ],
+  sockets: [
+    {
+      kind: 'power-in',
+      role: 'utility',
+      offsetM: [0, 0.5, -3],
+      primaryDirection: [0, 0, -1],
+    },
+  ],
+};
+
 export const DEMO_STRUCTURE_CATALOG: readonly IStructureArchetype[] = [
   DEMO_RUNWAY_ARCHETYPE,
   DEMO_LAUNCHPAD_ARCHETYPE,
   DEMO_CHOPSTICK_TOWER_ARCHETYPE,
+  COLONY_SOLAR_PANEL_ARCHETYPE,
+  COLONY_FUEL_TANK_ARCHETYPE,
+  COLONY_HAB_MODULE_ARCHETYPE,
+  COLONY_COMM_TOWER_ARCHETYPE,
 ];
+
 

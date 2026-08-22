@@ -1,0 +1,53 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Scene inspection lab">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>triangular-engine — agent scene inspection</small>
+        </div>
+        <strong>Scene Inspection Lab</strong>
+      </header>
+      <p>Change the live scene, refresh the inspection, and compare the visual result with the bounded agent payload.</p>
+
+      <div class="controls">
+        <label>Detail <select [value]="detail()" (change)="setDetail($event)">
+          <option value="brief">Brief</option><option value="standard">Standard</option><option value="deep">Deep</option>
+        </select></label>
+        <label>Max objects: {{ maxObjects() }} <input type="range" min="1" max="40" [value]="maxObjects()" (input)="setMaxObjects($event)" /></label>
+        <button type="button" (click)="refreshSnapshot()">Refresh snapshot</button>
+        <button type="button" (click)="copySnapshot()">Copy JSON</button>
+      </div>
+
+      <div class="test-controls">
+        <span>Trigger warnings:</span>
+        <button type="button" [class.active]="duplicateNames()" (click)="toggleDuplicateNames()">{{ duplicateNames() ? 'Duplicate names on' : 'Duplicate names' }}</button>
+        <button type="button" [class.active]="hiddenObject()" (click)="toggleHiddenObject()">{{ hiddenObject() ? 'Hidden object on' : 'Hide object' }}</button>
+        <button type="button" [class.active]="zeroScaleObject()" (click)="toggleZeroScale()">{{ zeroScaleObject() ? 'Zero scale on' : 'Zero scale' }}</button>
+      </div>
+
+      @if (snapshot(); as report) {
+        <div class="summary">
+          <strong>{{ report.scene.totalObjectCount }} objects</strong><span>{{ report.scene.visibleObjectCount }} visible</span><span>{{ report.scene.meshCount }} meshes</span><span>{{ report.scene.lightCount }} lights</span><span>{{ report.scene.returnedObjectCount }} returned</span>
+          @if (report.scene.truncated) { <span class="warning">truncated</span> }
+        </div>
+        <div class="report-grid">
+          <section class="report-card"><h2>Warnings</h2>
+            @if (report.warnings.length === 0) { <p class="quiet">No deterministic warnings.</p> } @else {
+              <ul>@for (warning of report.warnings; track warning.code + warning.objectId + warning.message) { <li><code>{{ warning.code }}</code> {{ warning.message }}</li> }</ul>
+            }
+          </section>
+          <section class="report-card"><h2>Objects returned</h2>
+            <ul>@for (object of report.objects; track object.id) { <li><code>{{ object.type }}</code> {{ object.name || '(unnamed)' }} <small>{{ object.path }}</small></li> }</ul>
+          </section>
+        </div>
+        <details><summary>Agent JSON payload</summary><pre>{{ snapshotJson() }}</pre></details>
+      } @else { <p class="quiet">Waiting for the first scene inspection.</p> }
+    </section>
+  </ng-template>
+
+  <orbitControls [cameraPosition]="[18, 14, 24]" [target]="[0, 3, 0]" [isActive]="true" />
+  <ambientLight [intensity]="1.1" />
+  <directionalLight [position]="[10, 18, 12]" [intensity]="2.4" />
+  <gridHelper [size]="40" [divisions]="20" color1="#475569" color2="#1e293b" />
+</scene>

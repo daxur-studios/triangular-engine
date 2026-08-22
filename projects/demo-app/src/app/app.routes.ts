@@ -363,5 +363,12 @@ export const routes: Routes = [
         ({ StructuresLabPageComponent }) => StructuresLabPageComponent,
       ),
   },
+  {
+    path: 'scene-inspection-lab',
+    loadComponent: () =>
+      import('./pages/scene-inspection-lab/scene-inspection-lab-page.component').then(
+        ({ SceneInspectionLabPageComponent }) => SceneInspectionLabPageComponent,
+      ),
+  },
 ];
 
