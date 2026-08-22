@@ -339,6 +339,19 @@ export const DEMOS: readonly DemoItem[] = [
       'Deterministic vehicle parts (wings, landing legs, rocket engines), load-bearing sockets, kinematic articulation, and mass properties.',
   },
   {
+    id: 'structures-lab',
+    number: '20c',
+    title: 'Procedural Structures Lab',
+    route: '/structures-lab',
+    categoryId: 'physics',
+    tier: 'lab',
+    entryPoints: ['procedural', 'jolt'],
+    package: 'triangular-engine/procedural',
+    requiresJolt: true,
+    description:
+      'Deterministic spaceport structures (runways, launchpads, Mechazilla chopstick catch towers), 2D grading footprints, sockets, and Jolt compound physics.',
+  },
+  {
     id: 'scatter-lab',
     number: '21',
 

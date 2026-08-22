@@ -350,5 +350,18 @@ export const routes: Routes = [
         ({ PartsLabPageComponent }) => PartsLabPageComponent,
       ),
   },
+  {
+    path: 'structures-lab',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
+    loadComponent: () =>
+      import('./pages/structures-lab/structures-lab-page.component').then(
+        ({ StructuresLabPageComponent }) => StructuresLabPageComponent,
+      ),
+  },
 ];
 
