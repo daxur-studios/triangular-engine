@@ -18,7 +18,7 @@ import {
   bodyOrientationAt,
   createSurfaceSampler,
 } from 'triangular-engine/celestial';
-import { EngineService } from 'triangular-engine';
+import { EngineService, GroupComponent, provideObject3DComponent } from 'triangular-engine';
 import {
   BufferGeometry,
   Group,
@@ -131,15 +131,12 @@ interface IResidentPatchMesh {
   standalone: true,
   selector: 'cdlodPlanet, app-cdlod-planet',
   imports: [],
-  template: '',
+  template: '<ng-content></ng-content>',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  providers: [provideObject3DComponent(CdlodPlanetComponent)],
 })
-export class CdlodPlanetComponent implements OnDestroy {
-  private readonly engineService = inject(EngineService);
-  private readonly destroyRef = inject(DestroyRef);
-
-  // Scene graph groups
-  private readonly rootGroup = new Group();
+export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
+  // Child scene graph groups
   private readonly terrainGroup = new Group();
   private readonly oceanGroup = new Group();
 
@@ -155,7 +152,8 @@ export class CdlodPlanetComponent implements OnDestroy {
   // ==========================================================================
 
   readonly body = input.required<ICelestialBody>();
-  readonly localPosition = input<Vector3Tuple>([0, 0, 0]);
+  readonly localPosition = input<Vector3Tuple | null>(null);
+  readonly bodyQuaternionOverride = input<QuaternionTuple | null>(null);
   readonly renderOriginBodyFixedM = input<Vec3d | null>(null);
   readonly quality = input<QualityPresetId>('balanced');
   readonly splitErrorPx = input<number | null>(null);
@@ -191,6 +189,8 @@ export class CdlodPlanetComponent implements OnDestroy {
   // ==========================================================================
 
   readonly bodyQuaternion = computed<QuaternionTuple>(() => {
+    const override = this.bodyQuaternionOverride();
+    if (override) return override;
     const b = this.body();
     const q = bodyOrientationAt(b, 0);
     return [q[0], q[1], q[2], q[3]];
@@ -226,7 +226,7 @@ export class CdlodPlanetComponent implements OnDestroy {
   readonly activeRenderOrigin = computed<Vec3d>(() => {
     const override = this.renderOriginBodyFixedM();
     if (override) return override;
-    const pos = this.localPosition();
+    const pos = this.localPosition() ?? this.position();
     return [-pos[0], -pos[1], -pos[2]];
   });
 
@@ -266,9 +266,10 @@ export class CdlodPlanetComponent implements OnDestroy {
   #needsImmediateRebuild = true;
 
   constructor() {
-    this.rootGroup.add(this.terrainGroup);
-    this.rootGroup.add(this.oceanGroup);
-    this.engineService.scene.add(this.rootGroup);
+    super();
+    const group = this.object3D() as Group;
+    group.add(this.terrainGroup);
+    group.add(this.oceanGroup);
 
     // Structural definition changes: Clear all geometry and material caches
     effect(() => {
@@ -301,12 +302,27 @@ export class CdlodPlanetComponent implements OnDestroy {
       }
     });
 
-    // Position and orientation updates
+    // Sync input localPosition / bodyQuaternionOverride to Object3D model signals
     effect(() => {
-      const pos = this.localPosition();
-      this.rootGroup.position.set(pos[0], pos[1], pos[2]);
+      const lp = this.localPosition();
+      if (lp) {
+        this.position.set(lp);
+      }
+    });
+
+    effect(() => {
+      const bq = this.bodyQuaternionOverride();
+      if (bq) {
+        this.quaternion.set(bq);
+      }
+    });
+
+    effect(() => {
       const isHidden = this.hidden();
-      this.rootGroup.scale.setScalar(isHidden ? 0 : 1);
+      const obj = this.object3D();
+      if (obj) {
+        obj.visible = !isHidden;
+      }
     });
 
     // Runtime quadtree & motion updates
@@ -329,12 +345,12 @@ export class CdlodPlanetComponent implements OnDestroy {
       });
   }
 
-  ngOnDestroy(): void {
+  override ngOnDestroy(): void {
+    super.ngOnDestroy();
     if (this.#workerPool) {
       this.#workerPool.terminate();
       this.#workerPool = undefined;
     }
-    this.engineService.scene.remove(this.rootGroup);
     this.#clearGeometryCache();
     this.#clearMaterialCache();
     this.#clearResidentMeshes();
@@ -435,19 +451,46 @@ export class CdlodPlanetComponent implements OnDestroy {
     const camera = this.engineService.camera;
     if (!camera) return;
 
-    const orig = this.activeRenderOrigin();
-    this.#currentCameraBodyFixedM = [
-      camera.position.x + orig[0],
-      camera.position.y + orig[1],
-      camera.position.z + orig[2],
-    ];
+    const renderOriginOverride = this.renderOriginBodyFixedM();
+    let cameraPosBodyFixed: Vec3d;
+    let cameraFwdBodyFixed: Vec3d;
 
-    const cameraFwd = new Vector3();
-    camera.getWorldDirection(cameraFwd);
-    const cameraFwdVec: Vec3d = [cameraFwd.x, cameraFwd.y, cameraFwd.z];
+    if (renderOriginOverride) {
+      cameraPosBodyFixed = renderOriginOverride;
+      const camFwd = new Vector3();
+      camera.getWorldDirection(camFwd);
+      cameraFwdBodyFixed = [camFwd.x, camFwd.y, camFwd.z];
+    } else {
+      const camWorldPos = new Vector3();
+      camera.getWorldPosition(camWorldPos);
+
+      const planetWorldPos = new Vector3();
+      this.object3D().getWorldPosition(planetWorldPos);
+
+      const planetWorldQuat = new Quaternion();
+      this.object3D().getWorldQuaternion(planetWorldQuat);
+      const invPlanetQuat = planetWorldQuat.clone().conjugate();
+
+      const camRelativeWorld = camWorldPos.sub(planetWorldPos);
+      camRelativeWorld.applyQuaternion(invPlanetQuat);
+      cameraPosBodyFixed = [
+        camRelativeWorld.x,
+        camRelativeWorld.y,
+        camRelativeWorld.z,
+      ];
+
+      const camFwd = new Vector3();
+      camera.getWorldDirection(camFwd);
+      camFwd.applyQuaternion(invPlanetQuat);
+      cameraFwdBodyFixed = [camFwd.x, camFwd.y, camFwd.z];
+    }
+
+    this.#currentCameraBodyFixedM = cameraPosBodyFixed;
 
     const camPosDelta = camera.position.distanceTo(this.#lastCameraPos);
-    const camFwdAngle = cameraFwd.angleTo(this.#lastCameraFwd);
+    const camFwdRaw = new Vector3();
+    camera.getWorldDirection(camFwdRaw);
+    const camFwdAngle = camFwdRaw.angleTo(this.#lastCameraFwd);
     const timeSinceSelect = time - this.#lastSelectionTimeMs;
 
     const isNearGround =
@@ -465,10 +508,10 @@ export class CdlodPlanetComponent implements OnDestroy {
     if (shouldSelect) {
       this.#needsImmediateRebuild = false;
       this.#lastCameraPos.copy(camera.position);
-      this.#lastCameraFwd.copy(cameraFwd);
+      this.#lastCameraFwd.copy(camFwdRaw);
       this.#lastSelectionTimeMs = time;
 
-      this.#executeSelection(this.#currentCameraBodyFixedM, cameraFwdVec);
+      this.#executeSelection(this.#currentCameraBodyFixedM, cameraFwdBodyFixed);
     }
 
     this.#updateUniforms();
@@ -705,13 +748,9 @@ export class CdlodPlanetComponent implements OnDestroy {
           this.residentTerrainMeshes.set(id, resident);
         }
 
-        // Update transform
+        // Update transform (body-fixed center relative to body root)
         const c = patch.centerBodyFixedM;
-        resident.mesh.position.set(
-          c[0] - orig[0],
-          c[1] - orig[1],
-          c[2] - orig[2],
-        );
+        resident.mesh.position.set(c[0], c[1], c[2]);
 
         // Update per-patch morph uniforms
         const u = resident.material.uniforms as unknown as ICdlodShaderUniforms;
@@ -771,11 +810,7 @@ export class CdlodPlanetComponent implements OnDestroy {
         }
 
         const c = patch.centerBodyFixedM;
-        resident.mesh.position.set(
-          c[0] - orig[0],
-          c[1] - orig[1],
-          c[2] - orig[2],
-        );
+        resident.mesh.position.set(c[0], c[1], c[2]);
 
         const u = resident.material.uniforms as unknown as IOceanShaderUniforms;
         u.uMorphFactor.value = patch.morphFactor;
@@ -806,7 +841,12 @@ export class CdlodPlanetComponent implements OnDestroy {
   }
 
   #updateUniforms(): void {
-    const orig = this.activeRenderOrigin();
+    const planetWorldPos = new Vector3();
+    this.object3D().getWorldPosition(planetWorldPos);
+    const renderOriginVec = this.renderOriginBodyFixedM()
+      ? new Vector3(...this.renderOriginBodyFixedM()!)
+      : planetWorldPos.clone().negate();
+
     const sunDir = this.sunDirection();
     const sunCol = this.sunColor();
     const ambCol = this.ambientColor();
@@ -822,7 +862,7 @@ export class CdlodPlanetComponent implements OnDestroy {
       }
       u.uWireframeMode.value = wire ? 1.0 : 0.0;
       u.uEnableMorph.value = morphEnabled ? 1.0 : 0.0;
-      u.uRenderOrigin.value.set(orig[0], orig[1], orig[2]);
+      u.uRenderOrigin.value.copy(renderOriginVec);
       u.uSunDirection.value.set(sunDir[0], sunDir[1], sunDir[2]).normalize();
       if (typeof sunCol === 'string') u.uSunColor.value.set(sunCol);
       else u.uSunColor.value.setRGB(sunCol[0], sunCol[1], sunCol[2]);
@@ -850,7 +890,7 @@ export class CdlodPlanetComponent implements OnDestroy {
       }
       u.uWireframeMode.value = wire ? 1.0 : 0.0;
       u.uEnableMorph.value = morphEnabled ? 1.0 : 0.0;
-      u.uRenderOrigin.value.set(orig[0], orig[1], orig[2]);
+      u.uRenderOrigin.value.copy(renderOriginVec);
       u.uSunDirection.value.set(sunDir[0], sunDir[1], sunDir[2]).normalize();
       if (typeof sunCol === 'string') u.uSunColor.value.set(sunCol);
       else u.uSunColor.value.setRGB(sunCol[0], sunCol[1], sunCol[2]);

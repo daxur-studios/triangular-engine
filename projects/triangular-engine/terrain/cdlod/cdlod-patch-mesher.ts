@@ -11,6 +11,7 @@ import {
 import { BufferAttribute, BufferGeometry } from 'three';
 
 export const TERRAIN_GEOMETRY_FLAG = 'triangular:terrain';
+export const BASE_PLACEMENT_TERRAIN_FLAG = 'base-placement-terrain';
 
 export interface ICdlodMeshResult {
   geometry: BufferGeometry;
@@ -366,6 +367,7 @@ export function reconstructCdlodBufferGeometry(
   geometry.setIndex(new BufferAttribute(indices, 1));
   geometry.computeBoundingSphere();
   geometry.userData[TERRAIN_GEOMETRY_FLAG] = true;
+  geometry.userData[BASE_PLACEMENT_TERRAIN_FLAG] = true;
 
   return geometry;
 }

@@ -30,7 +30,7 @@ import {
   TERRAIN_PALETTES,
   createCdlodTerrainMaterial,
 } from 'triangular-engine/celestial';
-import { EngineService } from 'triangular-engine';
+import { EngineService, GroupComponent, provideObject3DComponent } from 'triangular-engine';
 import {
   BufferGeometry,
   Group,
@@ -59,14 +59,11 @@ interface IResidentPatchMesh {
   standalone: true,
   selector: 'cdlodPlane, app-cdlod-plane',
   imports: [],
-  template: '',
+  template: '<ng-content></ng-content>',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  providers: [provideObject3DComponent(CdlodPlaneComponent)],
 })
-export class CdlodPlaneComponent implements OnDestroy {
-  private readonly engineService = inject(EngineService);
-  private readonly destroyRef = inject(DestroyRef);
-
-  private readonly rootGroup = new Group();
+export class CdlodPlaneComponent extends GroupComponent implements OnDestroy {
   private readonly terrainGroup = new Group();
   private readonly residentMeshes = new Map<string, IResidentPatchMesh>();
 
@@ -110,7 +107,6 @@ export class CdlodPlaneComponent implements OnDestroy {
   private readonly geometryCache = new Map<string, BufferGeometry>();
   private readonly inFlightWorkerRequests = new Set<string>();
   private workerPool: CdlodWorkerPool | null = null;
-  private isInitialized = false;
 
   readonly effectiveSampler = computed<ISurfaceSampler>(() => {
     const s = this.sampler();
@@ -124,9 +120,9 @@ export class CdlodPlaneComponent implements OnDestroy {
   });
 
   constructor() {
-    this.rootGroup.name = 'CDLOD_Plane_Root';
+    super();
     this.terrainGroup.name = 'CDLOD_Plane_TerrainGroup';
-    this.rootGroup.add(this.terrainGroup);
+    (this.object3D() as Group).add(this.terrainGroup);
 
     // Dynamic geometry invalidation effect when plane dimensions or parameters change
     effect(() => {
@@ -192,15 +188,6 @@ export class CdlodPlaneComponent implements OnDestroy {
         this.onBeforeRender();
       });
 
-    this.initScene();
-  }
-
-  private initScene(): void {
-    const scene = this.engineService.scene;
-    if (scene && !this.isInitialized) {
-      scene.add(this.rootGroup);
-      this.isInitialized = true;
-    }
   }
 
   private clearCachesAndMeshes(): void {
@@ -220,10 +207,6 @@ export class CdlodPlaneComponent implements OnDestroy {
   }
 
   private onBeforeRender(): void {
-    if (!this.isInitialized) {
-      this.initScene();
-    }
-
     const camera = this.engineService.camera;
     if (!camera) return;
 
@@ -412,17 +395,13 @@ export class CdlodPlaneComponent implements OnDestroy {
     });
   }
 
-  ngOnDestroy(): void {
+  override ngOnDestroy(): void {
+    super.ngOnDestroy();
     if (this.workerPool) {
       this.workerPool.terminate();
       this.workerPool = null;
     }
 
     this.clearCachesAndMeshes();
-
-    const scene = this.engineService.scene;
-    if (scene) {
-      scene.remove(this.rootGroup);
-    }
   }
 }
