@@ -451,46 +451,35 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
     const camera = this.engineService.camera;
     if (!camera) return;
 
-    const renderOriginOverride = this.renderOriginBodyFixedM();
-    let cameraPosBodyFixed: Vec3d;
-    let cameraFwdBodyFixed: Vec3d;
+    const camWorldPos = new Vector3();
+    camera.getWorldPosition(camWorldPos);
 
-    if (renderOriginOverride) {
-      cameraPosBodyFixed = renderOriginOverride;
-      const camFwd = new Vector3();
-      camera.getWorldDirection(camFwd);
-      cameraFwdBodyFixed = [camFwd.x, camFwd.y, camFwd.z];
-    } else {
-      const camWorldPos = new Vector3();
-      camera.getWorldPosition(camWorldPos);
+    const planetWorldPos = new Vector3();
+    this.object3D().getWorldPosition(planetWorldPos);
 
-      const planetWorldPos = new Vector3();
-      this.object3D().getWorldPosition(planetWorldPos);
+    const planetWorldQuat = new Quaternion();
+    this.object3D().getWorldQuaternion(planetWorldQuat);
+    const invPlanetQuat = planetWorldQuat.clone().conjugate();
 
-      const planetWorldQuat = new Quaternion();
-      this.object3D().getWorldQuaternion(planetWorldQuat);
-      const invPlanetQuat = planetWorldQuat.clone().conjugate();
+    const camRelativeWorld = camWorldPos.sub(planetWorldPos);
+    camRelativeWorld.applyQuaternion(invPlanetQuat);
+    const cameraPosBodyFixed: Vec3d = [
+      camRelativeWorld.x,
+      camRelativeWorld.y,
+      camRelativeWorld.z,
+    ];
 
-      const camRelativeWorld = camWorldPos.sub(planetWorldPos);
-      camRelativeWorld.applyQuaternion(invPlanetQuat);
-      cameraPosBodyFixed = [
-        camRelativeWorld.x,
-        camRelativeWorld.y,
-        camRelativeWorld.z,
-      ];
-
-      const camFwd = new Vector3();
-      camera.getWorldDirection(camFwd);
-      camFwd.applyQuaternion(invPlanetQuat);
-      cameraFwdBodyFixed = [camFwd.x, camFwd.y, camFwd.z];
-    }
+    const camFwd = new Vector3();
+    camera.getWorldDirection(camFwd);
+    camFwd.applyQuaternion(invPlanetQuat);
+    const cameraFwdBodyFixed: Vec3d = [camFwd.x, camFwd.y, camFwd.z];
 
     this.#currentCameraBodyFixedM = cameraPosBodyFixed;
 
-    const camPosDelta = camera.position.distanceTo(this.#lastCameraPos);
-    const camFwdRaw = new Vector3();
-    camera.getWorldDirection(camFwdRaw);
-    const camFwdAngle = camFwdRaw.angleTo(this.#lastCameraFwd);
+    const currentCamPosVec = new Vector3(...cameraPosBodyFixed);
+    const currentCamFwdVec = new Vector3(...cameraFwdBodyFixed);
+    const camPosDelta = currentCamPosVec.distanceTo(this.#lastCameraPos);
+    const camFwdAngle = currentCamFwdVec.angleTo(this.#lastCameraFwd);
     const timeSinceSelect = time - this.#lastSelectionTimeMs;
 
     const isNearGround =
@@ -507,8 +496,8 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
 
     if (shouldSelect) {
       this.#needsImmediateRebuild = false;
-      this.#lastCameraPos.copy(camera.position);
-      this.#lastCameraFwd.copy(camFwdRaw);
+      this.#lastCameraPos.copy(currentCamPosVec);
+      this.#lastCameraFwd.copy(currentCamFwdVec);
       this.#lastSelectionTimeMs = time;
 
       this.#executeSelection(this.#currentCameraBodyFixedM, cameraFwdBodyFixed);
