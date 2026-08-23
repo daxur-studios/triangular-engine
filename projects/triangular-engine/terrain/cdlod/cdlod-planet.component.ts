@@ -482,17 +482,25 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
     const camFwdAngle = currentCamFwdVec.angleTo(this.#lastCameraFwd);
     const timeSinceSelect = time - this.#lastSelectionTimeMs;
 
-    const isNearGround =
-      Math.hypot(...this.#currentCameraBodyFixedM) - this.body().radiusM <
-      50_000;
-    const movementThresholdM = isNearGround ? 2.5 : 25.0;
+    const camDistM = Math.hypot(...this.#currentCameraBodyFixedM);
+    const distanceRadii = camDistM / Math.max(1, this.body().radiusM);
+    const isNearGround = camDistM - this.body().radiusM < 50_000;
+    const isFarDistant = distanceRadii > 15.0;
+
+    const selectionIntervalMs = isFarDistant ? 2500 : 100;
+    const movementThresholdM = isNearGround
+      ? 2.5
+      : isFarDistant
+        ? this.body().radiusM * 0.25
+        : 25.0;
+    const fwdAngleThreshold = isFarDistant ? 0.35 : 0.08;
 
     const shouldSelect =
       this.#needsImmediateRebuild ||
       (!this.freezeLod() &&
-        (timeSinceSelect > 100 ||
+        (timeSinceSelect > selectionIntervalMs ||
           camPosDelta > movementThresholdM ||
-          camFwdAngle > 0.08));
+          camFwdAngle > fwdAngleThreshold));
 
     if (shouldSelect) {
       this.#needsImmediateRebuild = false;
