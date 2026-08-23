@@ -9,3 +9,4 @@ export * from './structures-joint';
 export * from './structures-catalog';
 export * from './structures-cache';
 export * from './structures-batch';
+export * from './structures-culling';

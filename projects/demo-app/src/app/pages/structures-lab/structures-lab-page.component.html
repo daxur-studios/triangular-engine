@@ -28,11 +28,11 @@
         </div>
         @if (benchmarkMode()) {
           <div class="benchmark-stats">
-            <div class="stat-pill">
-              <span class="stat-num">{{ benchmarkBuildingCount() }}</span>
-              <span class="stat-lbl">Buildings</span>
-            </div>
             <div class="stat-pill highlight">
+              <span class="stat-num">{{ visibleBuildingCount() }} / {{ benchmarkBuildingCount() }}</span>
+              <span class="stat-lbl">Visible ({{ culledPercent() }}% Culled)</span>
+            </div>
+            <div class="stat-pill">
               <span class="stat-num">{{ activeDrawCalls() }}</span>
               <span class="stat-lbl">Draw Calls</span>
             </div>
@@ -143,6 +143,24 @@
         >
           Wireframe
         </button>
+        @if (benchmarkMode()) {
+          <button
+            type="button"
+            class="btn toggle"
+            [class.active]="enableCulling()"
+            (click)="toggleCulling()"
+          >
+            Frustum Culling ({{ enableCulling() ? 'ON' : 'OFF' }})
+          </button>
+          <button
+            type="button"
+            class="btn toggle"
+            [class.active]="freezeCulling()"
+            (click)="toggleFreezeCulling()"
+          >
+            Freeze Frustum ({{ freezeCulling() ? 'FROZEN' : 'LIVE' }})
+          </button>
+        }
         @if (!benchmarkMode()) {
           <button
             type="button"

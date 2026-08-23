@@ -10,9 +10,11 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import {
   BufferGeometry,
+  CameraHelper,
   Color,
   DoubleSide,
   Float32BufferAttribute,
+  Frustum,
   GridHelper,
   Group,
   LineBasicMaterial,
@@ -20,6 +22,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  PerspectiveCamera,
   QuaternionTuple,
   SphereGeometry,
   Vector3,
@@ -39,9 +42,11 @@ import {
   deriveStructureColliders,
   deriveStructureFootprint2D,
   deriveStructureSockets,
+  extractCameraFrustum,
   generateStructureSkeleton,
   poseStructureVariant,
   StructureBatchManager,
+  StructureSpatialGrid,
   type IStructureArchetype,
   type IStructureFootprint2D,
   type IStructureInstanceTransform,
@@ -111,6 +116,17 @@ export class StructuresLabPageComponent {
   readonly benchmarkBuildingCount = signal<number>(1200);
   readonly selectedLodMode = signal<'auto' | 0 | 1 | 2 | 3>('auto');
   readonly lodDistanceScale = signal<number>(2.2);
+  readonly enableCulling = signal<boolean>(true);
+  readonly freezeCulling = signal<boolean>(false);
+
+  readonly visibleBuildingCount = signal<number>(1200);
+  readonly culledPercent = computed(() => {
+    const total = this.benchmarkBuildingCount();
+    const vis = this.visibleBuildingCount();
+    if (total <= 0) return 0;
+    return Math.max(0, Math.round(((total - vis) / total) * 100));
+  });
+
   readonly activeDrawCalls = signal<number>(3);
   readonly totalTriangles = signal<number>(5550);
   readonly lodBreakdown = signal<string>('');
@@ -135,6 +151,17 @@ export class StructuresLabPageComponent {
   private ballCounter = 0;
   private lastCameraPosition = new Vector3(Infinity, Infinity, Infinity);
 
+  // Frozen frustum debug state
+  private frozenFrustum: Frustum | null = null;
+  private frozenFocusPos: [number, number, number] = [0, 0, 0];
+  private frozenCameraHelper: CameraHelper | null = null;
+
+  // Spatial grids for fast hierarchical chunk culling
+  private readonly gridSolar = new StructureSpatialGrid(80);
+  private readonly gridFuel = new StructureSpatialGrid(80);
+  private readonly gridHab = new StructureSpatialGrid(80);
+  private readonly gridComm = new StructureSpatialGrid(80);
+
   // Cached benchmark transforms
   private cachedSolarTransforms: IStructureInstanceTransform[] = [];
   private cachedFuelTransforms: IStructureInstanceTransform[] = [];
@@ -153,19 +180,23 @@ export class StructuresLabPageComponent {
 
     this.rebuildAllStructures();
 
-    // Hook live camera movement for real-time Dynamic Distance Auto-LOD streaming
+    // Hook live camera movement for real-time Dynamic Distance Auto-LOD and Frustum Culling
     this.engine.beforeRender$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
-      if (!this.benchmarkMode() || this.selectedLodMode() !== 'auto') return;
+      if (!this.benchmarkMode() || this.freezeCulling()) return;
 
       const cam = this.engine.camera;
       if (!cam) return;
-      if (cam.position.distanceToSquared(this.lastCameraPosition) > 64) { // update when camera moves > 8m
+      if (cam.position.distanceToSquared(this.lastCameraPosition) > 36) { // update when camera moves > 6m
         this.lastCameraPosition.copy(cam.position);
         this.updateDynamicCameraLod([cam.position.x, cam.position.y, cam.position.z]);
       }
     });
 
     this.destroyRef.onDestroy(() => {
+      if (this.frozenCameraHelper) {
+        this.rootGroup.remove(this.frozenCameraHelper);
+        this.frozenCameraHelper.dispose();
+      }
       this.batchManager.clear();
       this.engine.scene.remove(this.rootGroup);
       this.engine.scene.background = previousBackground;
@@ -189,8 +220,59 @@ export class StructuresLabPageComponent {
 
   toggleBenchmarkMode(): void {
     this.benchmarkMode.update((v) => !v);
+    this.clearFrozenFrustum();
     this.lastCameraPosition.set(Infinity, Infinity, Infinity);
     this.rebuildAllStructures();
+  }
+
+  toggleCulling(): void {
+    this.enableCulling.update((v) => !v);
+    this.clearFrozenFrustum();
+    this.lastCameraPosition.set(Infinity, Infinity, Infinity);
+    const camPos = this.engine.camera?.position ?? new Vector3(0, 220, 380);
+    this.updateDynamicCameraLod([camPos.x, camPos.y, camPos.z]);
+  }
+
+  toggleFreezeCulling(): void {
+    if (!this.benchmarkMode()) return;
+    const nextVal = !this.freezeCulling();
+    this.freezeCulling.set(nextVal);
+
+    if (this.frozenCameraHelper) {
+      this.rootGroup.remove(this.frozenCameraHelper);
+      this.frozenCameraHelper.dispose();
+      this.frozenCameraHelper = null;
+    }
+
+    if (nextVal && this.engine.camera) {
+      // Freeze the frustum at the current camera pose
+      this.frozenFrustum = extractCameraFrustum(this.engine.camera);
+      const camPos = this.engine.camera.position;
+      this.frozenFocusPos = [camPos.x, camPos.y, camPos.z];
+
+      // Clone camera to create a persistent frustum visual helper
+      const helperCam = this.engine.camera.clone() as PerspectiveCamera;
+      helperCam.updateMatrixWorld(true);
+      this.frozenCameraHelper = new CameraHelper(helperCam);
+      this.rootGroup.add(this.frozenCameraHelper);
+
+      this.updateDynamicCameraLod(this.frozenFocusPos);
+    } else {
+      this.frozenFrustum = null;
+      const camPos = this.engine.camera?.position ?? new Vector3(0, 220, 380);
+      this.lastCameraPosition.copy(camPos);
+      this.updateDynamicCameraLod([camPos.x, camPos.y, camPos.z]);
+    }
+  }
+
+  private clearFrozenFrustum(): void {
+    this.freezeCulling.set(false);
+    this.frozenFrustum = null;
+    if (this.frozenCameraHelper) {
+      this.rootGroup.remove(this.frozenCameraHelper);
+      this.frozenCameraHelper.dispose();
+      this.frozenCameraHelper = null;
+    }
   }
 
   setLodMode(mode: 'auto' | 0 | 1 | 2 | 3): void {
@@ -212,8 +294,10 @@ export class StructuresLabPageComponent {
     const val = parseFloat((event.target as HTMLInputElement).value);
     this.lodDistanceScale.set(val);
     if (this.benchmarkMode() && this.selectedLodMode() === 'auto') {
-      const camPos = this.engine.camera?.position ?? new Vector3(0, 220, 380);
-      this.updateDynamicCameraLod([camPos.x, camPos.y, camPos.z]);
+      const focus = this.freezeCulling()
+        ? this.frozenFocusPos
+        : ((this.engine.camera?.position.toArray() as [number, number, number]) ?? [0, 220, 380]);
+      this.updateDynamicCameraLod(focus);
     }
   }
 
@@ -319,117 +403,133 @@ export class StructuresLabPageComponent {
   private buildMegaBaseBenchmark(currentSeed: number): void {
     const total = this.benchmarkBuildingCount();
     const quarter = Math.floor(total / 4);
-    const mode = this.selectedLodMode();
 
     // Generate instance transforms for all 4 base sectors
     this.cachedSolarTransforms = [];
+    this.gridSolar.clear();
     const solarCols = Math.ceil(Math.sqrt(quarter));
     for (let i = 0; i < quarter; i++) {
       const row = Math.floor(i / solarCols);
       const col = i % solarCols;
-      this.cachedSolarTransforms.push({ position: [-300 + col * 16, 0, -200 + row * 16] });
+      const t: IStructureInstanceTransform = { position: [-300 + col * 16, 0, -200 + row * 16] };
+      this.cachedSolarTransforms.push(t);
+      this.gridSolar.insert(t, 8);
     }
 
     this.cachedFuelTransforms = [];
+    this.gridFuel.clear();
     const fuelCols = Math.ceil(Math.sqrt(quarter));
     for (let i = 0; i < quarter; i++) {
       const row = Math.floor(i / fuelCols);
       const col = i % fuelCols;
-      this.cachedFuelTransforms.push({ position: [50 + col * 18, 0, -200 + row * 18] });
+      const t: IStructureInstanceTransform = { position: [50 + col * 18, 0, -200 + row * 18] };
+      this.cachedFuelTransforms.push(t);
+      this.gridFuel.insert(t, 12);
     }
 
     this.cachedHabTransforms = [];
+    this.gridHab.clear();
     const habCols = Math.ceil(Math.sqrt(quarter));
     for (let i = 0; i < quarter; i++) {
       const row = Math.floor(i / habCols);
       const col = i % habCols;
-      this.cachedHabTransforms.push({ position: [-300 + col * 26, 0, 50 + row * 26] });
+      const t: IStructureInstanceTransform = { position: [-300 + col * 26, 0, 50 + row * 26] };
+      this.cachedHabTransforms.push(t);
+      this.gridHab.insert(t, 14);
     }
 
     this.cachedCommTransforms = [];
+    this.gridComm.clear();
     const commCount = total - quarter * 3;
     const commCols = Math.ceil(Math.sqrt(commCount));
     for (let i = 0; i < commCount; i++) {
       const row = Math.floor(i / commCols);
       const col = i % commCols;
-      this.cachedCommTransforms.push({ position: [50 + col * 22, 0, 50 + row * 22] });
+      const t: IStructureInstanceTransform = { position: [50 + col * 22, 0, 50 + row * 22] };
+      this.cachedCommTransforms.push(t);
+      this.gridComm.insert(t, 10);
     }
 
     const camPos = this.engine.camera?.position ?? new Vector3(0, 220, 380);
     this.lastCameraPosition.copy(camPos);
-    const focusPoint: [number, number, number] = [camPos.x, camPos.y, camPos.z];
-
-    if (mode === 'auto') {
-      this.updateDynamicCameraLod(focusPoint);
-    } else {
-      const lod = mode as number;
-      this.batchManager.clear();
-      this.batchManager.addInstances(COLONY_SOLAR_PANEL_ARCHETYPE, this.cachedSolarTransforms, currentSeed, lod);
-      this.batchManager.addInstances(COLONY_FUEL_TANK_ARCHETYPE, this.cachedFuelTransforms, currentSeed, lod);
-      this.batchManager.addInstances(COLONY_HAB_MODULE_ARCHETYPE, this.cachedHabTransforms, currentSeed, lod);
-      this.batchManager.addInstances(COLONY_COMM_TOWER_ARCHETYPE, this.cachedCommTransforms, currentSeed, lod);
-
-      const batchGroup = this.batchManager.build({
-        material: new MeshStandardMaterial({
-          vertexColors: true,
-          roughness: 0.65,
-          metalness: 0.25,
-          wireframe: this.wireframe(),
-          side: DoubleSide,
-        }),
-      });
-
-      this.rootGroup.add(batchGroup);
-      this.activeDrawCalls.set(this.batchManager.drawCallCount);
-      this.activeStaticColliders.set([]);
-      this.lodBreakdown.set(`All ${total} at LOD ${mode}`);
-      const perBuilding = mode === 0 ? 1850 : mode === 1 ? 450 : mode === 2 ? 110 : 2;
-      this.totalTriangles.set(total * perBuilding);
-    }
+    this.updateDynamicCameraLod([camPos.x, camPos.y, camPos.z]);
   }
 
   private updateDynamicCameraLod(cameraPosition: [number, number, number]): void {
     const currentSeed = this.seed();
+    const total = this.benchmarkBuildingCount();
+    const mode = this.selectedLodMode();
     this.batchManager.clear();
 
     const scale = this.lodDistanceScale();
     const thresholds = {
-      lod1DistanceM: 140 * scale, // at 2.2x => ~310m
-      lod2DistanceM: 280 * scale, // at 2.2x => ~615m
-      lod3DistanceM: 480 * scale, // at 2.2x => ~1050m
+      lod1DistanceM: 140 * scale,
+      lod2DistanceM: 280 * scale,
+      lod3DistanceM: 480 * scale,
     };
 
-    // Dynamic distance-based LOD partitioning from live camera position
-    this.batchManager.addInstancesWithDistanceLod(
-      COLONY_SOLAR_PANEL_ARCHETYPE,
-      this.cachedSolarTransforms,
-      cameraPosition,
-      currentSeed,
-      thresholds,
-    );
-    this.batchManager.addInstancesWithDistanceLod(
-      COLONY_FUEL_TANK_ARCHETYPE,
-      this.cachedFuelTransforms,
-      cameraPosition,
-      currentSeed,
-      thresholds,
-    );
-    this.batchManager.addInstancesWithDistanceLod(
-      COLONY_HAB_MODULE_ARCHETYPE,
-      this.cachedHabTransforms,
-      cameraPosition,
-      currentSeed,
-      thresholds,
-    );
-    this.batchManager.addInstancesWithDistanceLod(
-      COLONY_COMM_TOWER_ARCHETYPE,
-      this.cachedCommTransforms,
-      cameraPosition,
-      currentSeed,
-      thresholds,
-    );
+    // 1. Frustum Culling Filter
+    let solar: IStructureInstanceTransform[];
+    let fuel: IStructureInstanceTransform[];
+    let hab: IStructureInstanceTransform[];
+    let comm: IStructureInstanceTransform[];
+
+    if (this.enableCulling() && (this.frozenFrustum || this.engine.camera)) {
+      const frustum = this.frozenFrustum ?? extractCameraFrustum(this.engine.camera!);
+      solar = this.gridSolar.queryFrustum(frustum);
+      fuel = this.gridFuel.queryFrustum(frustum);
+      hab = this.gridHab.queryFrustum(frustum);
+      comm = this.gridComm.queryFrustum(frustum);
+    } else {
+      solar = this.cachedSolarTransforms;
+      fuel = this.cachedFuelTransforms;
+      hab = this.cachedHabTransforms;
+      comm = this.cachedCommTransforms;
+    }
+
+    const visibleTotal = solar.length + fuel.length + hab.length + comm.length;
+    this.visibleBuildingCount.set(visibleTotal);
+
+    // 2. Batch Registration
+    if (mode === 'auto') {
+      this.batchManager.addInstancesWithDistanceLod(
+        COLONY_SOLAR_PANEL_ARCHETYPE,
+        solar,
+        cameraPosition,
+        currentSeed,
+        thresholds,
+      );
+      this.batchManager.addInstancesWithDistanceLod(
+        COLONY_FUEL_TANK_ARCHETYPE,
+        fuel,
+        cameraPosition,
+        currentSeed,
+        thresholds,
+      );
+      this.batchManager.addInstancesWithDistanceLod(
+        COLONY_HAB_MODULE_ARCHETYPE,
+        hab,
+        cameraPosition,
+        currentSeed,
+        thresholds,
+      );
+      this.batchManager.addInstancesWithDistanceLod(
+        COLONY_COMM_TOWER_ARCHETYPE,
+        comm,
+        cameraPosition,
+        currentSeed,
+        thresholds,
+      );
+    } else {
+      const lod = mode as number;
+      this.batchManager.addInstances(COLONY_SOLAR_PANEL_ARCHETYPE, solar, currentSeed, lod);
+      this.batchManager.addInstances(COLONY_FUEL_TANK_ARCHETYPE, fuel, currentSeed, lod);
+      this.batchManager.addInstances(COLONY_HAB_MODULE_ARCHETYPE, hab, currentSeed, lod);
+      this.batchManager.addInstances(COLONY_COMM_TOWER_ARCHETYPE, comm, currentSeed, lod);
+    }
 
     const batchGroup = this.batchManager.build({
+      overrideLod: mode === 'auto' ? undefined : (mode as number),
       material: new MeshStandardMaterial({
         vertexColors: true,
         roughness: 0.65,
@@ -444,9 +544,15 @@ export class StructuresLabPageComponent {
     this.activeStaticColliders.set([]);
 
     const counts = this.batchManager.getLodCounts();
-    this.lodBreakdown.set(`${counts[0]}@L0 · ${counts[1]}@L1 · ${counts[2]}@L2 · ${counts[3]}@L3`);
-    const sumTriangles = counts[0] * 1850 + counts[1] * 450 + counts[2] * 110 + counts[3] * 2;
-    this.totalTriangles.set(sumTriangles);
+    if (mode === 'auto') {
+      this.lodBreakdown.set(`${counts[0]}@L0 · ${counts[1]}@L1 · ${counts[2]}@L2 · ${counts[3]}@L3`);
+      const sumTriangles = counts[0] * 1850 + counts[1] * 450 + counts[2] * 110 + counts[3] * 2;
+      this.totalTriangles.set(sumTriangles);
+    } else {
+      this.lodBreakdown.set(`All ${visibleTotal} at LOD ${mode}`);
+      const perBuilding = mode === 0 ? 1850 : mode === 1 ? 450 : mode === 2 ? 110 : 2;
+      this.totalTriangles.set(visibleTotal * perBuilding);
+    }
   }
 
   private buildInspectionFacilities(currentSeed: number): void {
@@ -510,6 +616,7 @@ export class StructuresLabPageComponent {
 
     this.activeDrawCalls.set(3);
     this.totalTriangles.set(1850 * 3);
+    this.visibleBuildingCount.set(3);
     this.lodBreakdown.set('Inspection Facilities (LOD 0)');
     this.applyJointPoses();
   }
