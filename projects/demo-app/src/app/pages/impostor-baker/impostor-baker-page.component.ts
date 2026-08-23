@@ -13,6 +13,7 @@ import {
   MeshStandardMaterial,
   PlaneGeometry,
   Quaternion,
+  Texture,
   Vector3,
   WebGLRenderer,
 } from 'three';
@@ -25,10 +26,14 @@ import {
 } from 'triangular-engine/procedural';
 import {
   buildOctahedralImpostorMesh,
+  compressOctahedralImpostorAtlas,
   createOctahedralImpostorAtlas,
   exportOctahedralImpostorAtlas,
+  type ICompressedOctahedralImpostorAtlas,
   type IOctahedralImpostorAtlas,
+  type IOctahedralImpostorCompressionStats,
   type IOctahedralImpostorMaterialHandle,
+  type OctahedralImpostorType,
 } from 'triangular-engine/impostor';
 
 /** One archetype is enough to prove out baking — see triangular-engine/procedural's flora-lab-page for a fuller showcase of the archetype system itself. */
@@ -66,6 +71,7 @@ const SUN_DISTANCE_M = 30;
   providers: [EngineService.provide({ showFPS: true })],
 })
 export class ImpostorBakerPageComponent {
+  readonly impostorType = signal<OctahedralImpostorType>('hemispherical');
   readonly spritesPerSide = signal(12);
   readonly textureSizePx = signal(2048);
   readonly alphaClamp = signal(0.4);
@@ -74,6 +80,14 @@ export class ImpostorBakerPageComponent {
   /** Half-extent (m) of the forest's scatter area — density is forestCount spread over this area, independent of instance count. */
   readonly forestSpreadM = signal(60);
   readonly baking = signal(false);
+
+  // Compression inspection state
+  readonly textureMode = signal<'raw' | 'compressed'>('raw');
+  readonly compressing = signal(false);
+  readonly compressionQuality = signal(0.8);
+  readonly compressionFormat = signal<'image/webp' | 'image/jpeg' | 'image/png'>('image/webp');
+  readonly normalDepthMode = signal<'lossless' | 'lossy'>('lossless');
+  readonly compressionStats = signal<IOctahedralImpostorCompressionStats | null>(null);
 
   /** 0 = north, 90 = east, ... — orbits the sun around the vertical axis. */
   readonly sunAzimuthDeg = signal(55);
@@ -96,6 +110,7 @@ export class ImpostorBakerPageComponent {
   private readonly treeSource: Group;
 
   private atlas?: IOctahedralImpostorAtlas;
+  private compressedAtlas?: ICompressedOctahedralImpostorAtlas;
   private impostorMesh?: Mesh<PlaneGeometry, MeshStandardMaterial>;
   private materialHandle?: IOctahedralImpostorMaterialHandle<MeshStandardMaterial>;
   private forestMesh?: InstancedMesh;
@@ -120,6 +135,11 @@ export class ImpostorBakerPageComponent {
   }
 
   rebake(): void {
+    this.bake();
+  }
+
+  setImpostorType(value: OctahedralImpostorType): void {
+    this.impostorType.set(value);
     this.bake();
   }
 
@@ -190,6 +210,57 @@ export class ImpostorBakerPageComponent {
     this.sunIntensity.set(parsed);
   }
 
+  async setTextureMode(mode: 'raw' | 'compressed'): Promise<void> {
+    if (mode === 'compressed' && !this.compressedAtlas) {
+      await this.compressAtlas();
+    }
+    this.textureMode.set(mode);
+    this.applyActiveTextures();
+  }
+
+  setCompressionQuality(value: string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    this.compressionQuality.set(parsed);
+  }
+
+  setCompressionFormat(value: 'image/webp' | 'image/jpeg' | 'image/png'): void {
+    this.compressionFormat.set(value);
+  }
+
+  setNormalDepthMode(value: 'lossless' | 'lossy'): void {
+    this.normalDepthMode.set(value);
+  }
+
+  async compressAtlas(): Promise<void> {
+    const renderer = this.engine.renderer;
+    if (!this.atlas || !(renderer instanceof WebGLRenderer)) return;
+
+    this.compressing.set(true);
+    try {
+      this.compressedAtlas?.dispose();
+      this.compressedAtlas = undefined;
+
+      const compressed = await compressOctahedralImpostorAtlas(renderer, this.atlas, {
+        quality: this.compressionQuality(),
+        fileType: this.compressionFormat(),
+        normalDepthMode: this.normalDepthMode(),
+        maxSizeMB: 2,
+      });
+
+      this.compressedAtlas = compressed;
+      this.compressionStats.set(compressed.stats);
+
+      if (this.textureMode() === 'compressed') {
+        this.applyActiveTextures();
+      }
+    } catch (err) {
+      console.error('[impostor-baker] Compression error:', err);
+    } finally {
+      this.compressing.set(false);
+    }
+  }
+
   downloadAlbedo(): void {
     this.downloadAtlasTexture('albedo', 'octahedral-impostor-albedo');
   }
@@ -198,10 +269,57 @@ export class ImpostorBakerPageComponent {
     this.downloadAtlasTexture('normalDepth', 'octahedral-impostor-normal-depth');
   }
 
+  downloadCompressedAlbedo(): void {
+    if (!this.compressedAtlas) return;
+    const ext = this.compressionFormat() === 'image/webp' ? 'webp' : this.compressionFormat() === 'image/jpeg' ? 'jpg' : 'png';
+    this.downloadBlob(this.compressedAtlas.albedoBlob, `octahedral-impostor-albedo-compressed.${ext}`);
+  }
+
+  downloadCompressedNormalDepth(): void {
+    if (!this.compressedAtlas) return;
+    const ext = this.normalDepthMode() === 'lossy' && this.compressionFormat() === 'image/webp' ? 'webp' : 'png';
+    this.downloadBlob(this.compressedAtlas.normalDepthBlob, `octahedral-impostor-normal-depth-compressed.${ext}`);
+  }
+
+  private downloadBlob(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   private downloadAtlasTexture(which: 'albedo' | 'normalDepth', fileName: string): void {
     const renderer = this.engine.renderer;
     if (!this.atlas || !(renderer instanceof WebGLRenderer)) return;
     exportOctahedralImpostorAtlas(renderer, this.atlas, which, fileName);
+  }
+
+  private applyActiveTextures(): void {
+    if (!this.atlas || !this.materialHandle) return;
+
+    const useCompressed = this.textureMode() === 'compressed' && !!this.compressedAtlas;
+    const albedo = useCompressed ? this.compressedAtlas!.albedo : this.atlas.albedo;
+    const normalDepth = useCompressed ? this.compressedAtlas!.normalDepth : this.atlas.normalDepth;
+
+    const mat = this.materialHandle.material as unknown as {
+      map: Texture | null;
+      normalMap: Texture | null;
+      needsUpdate: boolean;
+    };
+    mat.map = albedo;
+    mat.normalMap = normalDepth;
+    mat.needsUpdate = true;
+
+    if (this.albedoPreviewMesh) {
+      this.albedoPreviewMesh.material.map = albedo;
+      this.albedoPreviewMesh.material.needsUpdate = true;
+    }
+    if (this.normalDepthPreviewMesh) {
+      this.normalDepthPreviewMesh.material.map = normalDepth;
+      this.normalDepthPreviewMesh.material.needsUpdate = true;
+    }
   }
 
   private bake(): void {
@@ -224,6 +342,7 @@ export class ImpostorBakerPageComponent {
       target: this.treeSource,
       textureSize: this.textureSizePx(),
       spritesPerSide: this.spritesPerSide(),
+      type: this.impostorType(),
     });
     this.atlas = atlas;
 
@@ -235,6 +354,7 @@ export class ImpostorBakerPageComponent {
       spritesPerSide: this.spritesPerSide(),
       alphaClamp: this.alphaClamp(),
       transparent: this.transparent(),
+      type: this.impostorType(),
     });
     mesh.position.copy(IMPOSTOR_COMPARISON_POSITION);
     this.group.add(mesh);
@@ -245,6 +365,11 @@ export class ImpostorBakerPageComponent {
     this.rebuildForest(mesh.geometry, materialHandle.material);
 
     this.baking.set(false);
+
+    // If user was viewing compressed version, auto-recompress the new bake
+    if (this.textureMode() === 'compressed') {
+      this.compressAtlas();
+    }
   }
 
   private buildTree(seed: number): Group {
@@ -344,6 +469,10 @@ export class ImpostorBakerPageComponent {
     }
     this.albedoPreviewMesh = undefined;
     this.normalDepthPreviewMesh = undefined;
+
+    this.compressedAtlas?.dispose();
+    this.compressedAtlas = undefined;
+    this.compressionStats.set(null);
 
     this.atlas?.renderTarget.dispose();
     this.atlas = undefined;

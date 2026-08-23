@@ -23,7 +23,11 @@ import {
 } from 'three';
 
 import { computeObjectBoundingSphere } from '../core/compute-object-bounding-sphere';
-import { hemiOctahedronGridToDirection } from '../core/octahedron-directions';
+import {
+  fullOctahedronGridToDirection,
+  hemiOctahedronGridToDirection,
+  type OctahedralImpostorType,
+} from '../core/octahedron-directions';
 import {
   IMPOSTOR_ATLAS_BAKE_FRAGMENT_GLSL,
   IMPOSTOR_ATLAS_BAKE_VERTEX_GLSL,
@@ -40,6 +44,13 @@ export interface ICreateOctahedralImpostorAtlasOptions {
   readonly spritesPerSide?: number;
   /** Multiplier on the bake camera's distance from the target's bounding sphere. @default 1 */
   readonly cameraFactor?: number;
+  /**
+   * Coverage mode of the baked atlas:
+   * - `'hemispherical'`: 180° upper hemisphere coverage ($y \ge 0$). Optimal for ground objects.
+   * - `'spherical'`: 360° omnidirectional sphere coverage. For airborne/flying/space objects.
+   * @default 'hemispherical'
+   */
+  readonly type?: OctahedralImpostorType;
 }
 
 export interface IOctahedralImpostorAtlas {
@@ -102,9 +113,11 @@ export function createOctahedralImpostorAtlas(
   const snapshot = setupRenderer(renderer, atlasSize);
   overrideTargetMaterials(target);
 
+  const type = options.type ?? 'hemispherical';
+
   for (let row = 0; row < spritesPerSide; row++) {
     for (let col = 0; col < spritesPerSide; col++) {
-      renderBakeView(renderer, target, col, row, spritesPerSide, spriteSize, atlasSize, cameraFactor);
+      renderBakeView(renderer, target, col, row, spritesPerSide, spriteSize, atlasSize, cameraFactor, type);
     }
   }
 
@@ -138,10 +151,20 @@ function renderBakeView(
   spriteSize: number,
   atlasSize: number,
   cameraFactor: number,
+  type: OctahedralImpostorType,
 ): void {
   gridCoord.set(col / (spritesPerSide - 1), row / (spritesPerSide - 1));
-  hemiOctahedronGridToDirection(gridCoord, bakeCamera.position);
+  if (type === 'spherical') {
+    fullOctahedronGridToDirection(gridCoord, bakeCamera.position);
+  } else {
+    hemiOctahedronGridToDirection(gridCoord, bakeCamera.position);
+  }
+  const dirY = bakeCamera.position.y;
   bakeCamera.position.setLength(boundingSphere.radius * cameraFactor).add(boundingSphere.center);
+  bakeCamera.up.set(0, 1, 0);
+  if (Math.abs(dirY) > 0.999) {
+    bakeCamera.up.set(-1, 0, 0);
+  }
   bakeCamera.lookAt(boundingSphere.center);
 
   const xOffset = (col / spritesPerSide) * atlasSize;

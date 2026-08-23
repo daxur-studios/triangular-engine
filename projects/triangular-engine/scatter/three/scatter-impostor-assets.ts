@@ -5,6 +5,7 @@ import {
   createOctahedralImpostorAtlas,
   type IOctahedralImpostorAtlas,
   type IOctahedralImpostorMaterialHandle,
+  type OctahedralImpostorType,
 } from 'triangular-engine/impostor';
 import type { IScatterLodAssets } from './scatter-lod-instanced-meshes';
 
@@ -24,6 +25,13 @@ export interface IBuildScatterImpostorAssetsOptions<T extends Material> {
   readonly spritesPerSide?: number;
   readonly alphaClamp?: number;
   readonly transparent?: boolean;
+  /**
+   * Coverage mode of the octahedral impostor.
+   * - `'hemispherical'`: 180° upper hemisphere coverage.
+   * - `'spherical'`: 360° full sphere coverage.
+   * @default 'hemispherical'
+   */
+  readonly type?: OctahedralImpostorType;
 }
 
 export interface IScatterImpostorAssets<T extends Material> extends IScatterLodAssets {
@@ -51,6 +59,7 @@ export function buildScatterImpostorAssets<T extends Material>(
     target: options.target,
     textureSize: options.textureSize,
     spritesPerSide: options.spritesPerSide,
+    type: options.type,
   });
 
   const { mesh, materialHandle } = buildOctahedralImpostorMesh<T>({
@@ -61,6 +70,7 @@ export function buildScatterImpostorAssets<T extends Material>(
     spritesPerSide: options.spritesPerSide,
     alphaClamp: options.alphaClamp,
     transparent: options.transparent,
+    type: options.type,
   });
 
   return {

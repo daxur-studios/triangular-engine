@@ -31,6 +31,30 @@ varying vec2 vSpriteUV1;
 varying vec2 vSpriteUV2;
 varying vec2 vSpriteUV3;
 
+#ifdef IMPOSTOR_SPHERICAL
+// Direction -> atlas-grid UV, full spherical octahedral projection (360°).
+vec2 encodeDirection(vec3 direction) {
+  vec3 octahedron = direction / (abs(direction.x) + abs(direction.y) + abs(direction.z));
+  vec2 uv = (octahedron.y >= 0.0)
+    ? vec2(octahedron.x, octahedron.z)
+    : vec2((1.0 - abs(octahedron.z)) * (octahedron.x >= 0.0 ? 1.0 : -1.0),
+           (1.0 - abs(octahedron.x)) * (octahedron.z >= 0.0 ? 1.0 : -1.0));
+  return uv * 0.5 + 0.5;
+}
+
+// Inverse of fullOctahedronGridToDirection (see core/octahedron-directions.ts).
+vec3 decodeDirection(vec2 gridIndex, vec2 spriteCountMinusOne) {
+  vec2 uv = (gridIndex / spriteCountMinusOne) * 2.0 - 1.0;
+  vec3 position = vec3(uv.x, 1.0 - abs(uv.x) - abs(uv.y), uv.y);
+  if (position.y < 0.0) {
+    float px = (1.0 - abs(uv.y)) * (uv.x >= 0.0 ? 1.0 : -1.0);
+    float pz = (1.0 - abs(uv.x)) * (uv.y >= 0.0 ? 1.0 : -1.0);
+    position.x = px;
+    position.z = pz;
+  }
+  return normalize(position);
+}
+#else
 // Direction -> atlas-grid UV, hemispherical octahedral projection (upper
 // hemisphere only — a billboarded tree/rock is never viewed from below).
 vec2 encodeDirection(vec3 direction) {
@@ -48,10 +72,11 @@ vec3 decodeDirection(vec2 gridIndex, vec2 spriteCountMinusOne) {
   position.y = 1.0 - abs(position.x) - abs(position.z);
   return normalize(position);
 }
+#endif
 
 void computePlaneBasis(vec3 normal, out vec3 tangent, out vec3 bitangent) {
   vec3 up = vec3(0.0, 1.0, 0.0);
-  if (normal.y > 0.999) up = vec3(-1.0, 0.0, 0.0);
+  if (abs(normal.y) > 0.999) up = vec3(-1.0, 0.0, 0.0);
   tangent = normalize(cross(up, normal));
   bitangent = cross(normal, tangent);
 }

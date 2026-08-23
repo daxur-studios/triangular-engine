@@ -23,7 +23,18 @@
         independently in the vertex shader.
       </p>
 
+      <div class="section-title">Bake parameters</div>
       <nav aria-label="Bake parameters">
+        <label
+          >Coverage
+          <select
+            [value]="impostorType()"
+            (change)="setImpostorType($any($event.target).value)"
+          >
+            <option value="hemispherical">180° (Hemispherical — Ground)</option>
+            <option value="spherical">360° (Full Spherical — Airborne)</option>
+          </select></label
+        >
         <label
           >Sprites/side
           <select
@@ -52,6 +63,95 @@
         </button>
       </nav>
 
+      <div class="section-title">Texture mode & compression</div>
+      <nav aria-label="Texture mode toggle">
+        <div class="mode-toggle">
+          <button
+            type="button"
+            [class.active]="textureMode() === 'raw'"
+            (click)="setTextureMode('raw')"
+          >
+            Raw (RenderTarget)
+          </button>
+          <button
+            type="button"
+            [class.active]="textureMode() === 'compressed'"
+            [disabled]="compressing()"
+            (click)="setTextureMode('compressed')"
+          >
+            {{ compressing() ? "Compressing…" : "Compressed (browser-image-compression)" }}
+          </button>
+        </div>
+      </nav>
+
+      <nav aria-label="Compression settings">
+        <label
+          >Format
+          <select
+            [value]="compressionFormat()"
+            (change)="setCompressionFormat($any($event.target).value)"
+          >
+            <option value="image/webp">WebP</option>
+            <option value="image/jpeg">JPEG</option>
+            <option value="image/png">PNG</option>
+          </select></label
+        >
+        <label
+          >Quality
+          <input
+            type="range"
+            min="0.1"
+            max="1.0"
+            step="0.05"
+            [value]="compressionQuality()"
+            (input)="setCompressionQuality($any($event.target).value)"
+          />
+          {{ compressionQuality() | number: "1.2-2" }}</label
+        >
+        <label
+          >Normal/Depth
+          <select
+            [value]="normalDepthMode()"
+            (change)="setNormalDepthMode($any($event.target).value)"
+          >
+            <option value="lossless">Lossless PNG</option>
+            <option value="lossy">Lossy (Artifact Test)</option>
+          </select></label
+        >
+        <button
+          (click)="compressAtlas()"
+          [disabled]="compressing() || baking()"
+        >
+          {{ compressing() ? "Compressing…" : "Recompress" }}
+        </button>
+      </nav>
+
+      @if (compressionStats(); as stats) {
+        <div class="stats-card">
+          <div class="stat-row">
+            <span>Raw GPU VRAM:</span>
+            <strong>{{ stats.rawGpuSizeBytes / (1024 * 1024) | number: "1.2-2" }} MB</strong>
+          </div>
+          <div class="stat-row">
+            <span>Raw PNG total:</span>
+            <strong>{{ stats.totalRawPngSizeBytes / 1024 | number: "1.0-0" }} KB</strong>
+          </div>
+          <div class="stat-row">
+            <span>Compressed (Albedo + Normal):</span>
+            <strong class="highlight">{{ stats.totalCompressedSizeBytes / 1024 | number: "1.0-0" }} KB (Albedo: {{ stats.compressedAlbedoSizeBytes / 1024 | number: "1.0-0" }} KB)</strong>
+          </div>
+          <div class="stat-row">
+            <span>Savings vs Raw PNG:</span>
+            <strong class="savings">{{ stats.pngSavingsPercent | number: "1.1-1" }}% smaller</strong>
+          </div>
+          <div class="stat-row">
+            <span>Compression time:</span>
+            <span>{{ stats.durationMs | number: "1.0-0" }} ms</span>
+          </div>
+        </div>
+      }
+
+      <div class="section-title">Live material tuning</div>
       <nav aria-label="Live material tuning">
         <label
           >Alpha clamp
@@ -75,6 +175,7 @@
         >
       </nav>
 
+      <div class="section-title">Forest field</div>
       <nav aria-label="Forest field">
         <label
           >Forest instances
@@ -102,6 +203,7 @@
         >
       </nav>
 
+      <div class="section-title">Sun & lighting</div>
       <nav aria-label="Sun">
         <label
           >Azimuth
@@ -141,20 +243,27 @@
         >
       </nav>
 
+      <div class="section-title">Export</div>
       <nav aria-label="Export">
-        <button (click)="downloadAlbedo()">Download albedo PNG</button>
+        <button (click)="downloadAlbedo()">Download raw albedo PNG</button>
         <button (click)="downloadNormalDepth()">
-          Download normal/depth PNG
+          Download raw normal/depth PNG
         </button>
+        @if (textureMode() === 'compressed' || compressionStats()) {
+          <button (click)="downloadCompressedAlbedo()">
+            Download compressed albedo
+          </button>
+          <button (click)="downloadCompressedNormalDepth()">
+            Download compressed normal/depth
+          </button>
+        }
       </nav>
 
       <p class="blurb note">
-        Both PNGs are exactly what a game would ship to skip baking at
+        Both textures are what a game can ship or cache to IndexedDB/Dexie to skip baking at
         runtime — load them with a <code>TextureLoader</code> and pass
         straight into <code>buildOctahedralImpostorMesh</code>'s
-        <code>albedo</code>/<code>normalDepth</code> options instead of
-        calling <code>createOctahedralImpostorAtlas</code>, as long as the
-        same sprites/side number is passed too.
+        <code>albedo</code>/<code>normalDepth</code> options.
       </p>
     </section>
   </ng-template>

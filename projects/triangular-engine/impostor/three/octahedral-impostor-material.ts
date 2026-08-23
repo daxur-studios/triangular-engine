@@ -7,6 +7,7 @@ import type {
   WebGLRenderer,
 } from 'three';
 
+import type { OctahedralImpostorType } from '../core/octahedron-directions';
 import {
   IMPOSTOR_MAP_FRAGMENT_GLSL,
   IMPOSTOR_NORMAL_FRAGMENT_BEGIN_GLSL,
@@ -33,6 +34,13 @@ export interface ICreateOctahedralImpostorMaterialOptions<T extends Material> {
   /** Alpha below which a pixel (and, if every blended sprite is below it, the whole fragment) is discarded. @default 0.4 */
   readonly alphaClamp?: number;
   readonly transparent?: boolean;
+  /**
+   * Coverage mode of the octahedral impostor.
+   * - `'hemispherical'`: 180° upper hemisphere coverage ($y \ge 0$).
+   * - `'spherical'`: 360° full sphere coverage.
+   * @default 'hemispherical'
+   */
+  readonly type?: OctahedralImpostorType;
 }
 
 export interface IOctahedralImpostorMaterialHandle<T extends Material> {
@@ -80,6 +88,9 @@ export function createOctahedralImpostorMaterial<T extends Material>(
     previousOnBeforeCompile(shader, renderer);
 
     if (transparent) shader.defines = { ...shader.defines, EZ_TRANSPARENT: true };
+    if (options.type === 'spherical') {
+      shader.defines = { ...shader.defines, IMPOSTOR_SPHERICAL: true };
+    }
 
     shader.uniforms['spritesPerSide'] = spritesPerSideUniform;
     shader.uniforms['alphaClamp'] = alphaClampUniform;
@@ -109,7 +120,8 @@ export function createOctahedralImpostorMaterial<T extends Material>(
   // (or an impostor material chained after another patch) collide on the
   // same cache key and share a compiled program that's wrong for one of
   // them — see scatter-wind-material.ts for the same fix applied there.
-  material.customProgramCacheKey = () => `${previousCacheKey()}|impostor:${transparent}`;
+  const impostorType = options.type ?? 'hemispherical';
+  material.customProgramCacheKey = () => `${previousCacheKey()}|impostor:${impostorType}:${transparent}`;
   material.needsUpdate = true;
 
   return {

@@ -33,7 +33,8 @@
     "@takram/three-atmosphere": "^0.19.1",
     "@takram/three-clouds": "^0.7.6",
     "@takram/three-geospatial": "^0.9.1",
-    "postprocessing": "^6.39.2"
+    "postprocessing": "^6.39.2",
+    "browser-image-compression": "^2.0.2"
   },
   "peerDependenciesMeta": {
     "@dimforge/rapier3d-compat": {
@@ -55,6 +56,9 @@
       "optional": true
     },
     "postprocessing": {
+      "optional": true
+    },
+    "browser-image-compression": {
       "optional": true
     }
   },
