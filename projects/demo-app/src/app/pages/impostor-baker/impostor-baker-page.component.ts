@@ -22,7 +22,13 @@ import {
   buildFloraMesh,
   FLORA_OAK_ARCHETYPE,
   FLORA_OAK_COLORS,
+  FLORA_PALM_ARCHETYPE,
+  FLORA_PALM_COLORS,
+  FLORA_PINE_ARCHETYPE,
+  FLORA_PINE_COLORS,
   generateFloraSkeleton,
+  type IFloraArchetype,
+  type IFloraSpeciesColorHints,
 } from 'triangular-engine/procedural';
 import {
   buildOctahedralImpostorMesh,
@@ -36,11 +42,35 @@ import {
   type OctahedralImpostorType,
 } from 'triangular-engine/impostor';
 
-/** One archetype is enough to prove out baking — see triangular-engine/procedural's flora-lab-page for a fuller showcase of the archetype system itself. */
-const TREE_ARCHETYPE = FLORA_OAK_ARCHETYPE;
-const TREE_SEED = 7;
-const TRUNK_COLOR = new Color(FLORA_OAK_COLORS.trunkHex);
-const LEAF_COLOR = new Color(FLORA_OAK_COLORS.leafHex);
+export type TreeSpeciesKey = 'oak' | 'pine' | 'palm';
+
+interface ITreeSpeciesOption {
+  readonly key: TreeSpeciesKey;
+  readonly name: string;
+  readonly archetype: IFloraArchetype;
+  readonly colors: IFloraSpeciesColorHints;
+}
+
+const TREE_SPECIES: readonly ITreeSpeciesOption[] = [
+  {
+    key: 'oak',
+    name: 'Oak (Deciduous)',
+    archetype: FLORA_OAK_ARCHETYPE,
+    colors: FLORA_OAK_COLORS,
+  },
+  {
+    key: 'pine',
+    name: 'Pine (Conifer)',
+    archetype: FLORA_PINE_ARCHETYPE,
+    colors: FLORA_PINE_COLORS,
+  },
+  {
+    key: 'palm',
+    name: 'Palm (Tropical)',
+    archetype: FLORA_PALM_ARCHETYPE,
+    colors: FLORA_PALM_COLORS,
+  },
+];
 
 /** Big enough to stay under the largest forest-spread option's footprint plus margin. */
 const GROUND_SIZE_M = 700;
@@ -55,12 +85,10 @@ const FOREST_SCALE_RANGE: readonly [number, number] = [0.75, 1.35];
 const SUN_DISTANCE_M = 30;
 
 /**
- * Proves out `triangular-engine/impostor` end to end: bakes a hemispherical
- * octahedral atlas from a procedural tree, renders one impostor next to the
- * live mesh for comparison, and scatters a few thousand more across a field
- * as an InstancedMesh — the forest-scale case the library exists for. See
- * docs/runbook/005_scatter_sublibrary.md Phase 5 for where this is headed
- * next (wiring into scatter's reserved `'impostor'` LOD kind).
+ * Proves out `triangular-engine/impostor` end to end: bakes a hemispherical or
+ * spherical octahedral atlas from a procedural tree (Oak, Pine, Palm), renders one
+ * impostor next to the live mesh for comparison, and scatters a few thousand more
+ * across a field as an InstancedMesh — the forest-scale case the library exists for.
  */
 @Component({
   selector: 'app-impostor-baker-page',
@@ -71,6 +99,10 @@ const SUN_DISTANCE_M = 30;
   providers: [EngineService.provide({ showFPS: true })],
 })
 export class ImpostorBakerPageComponent {
+  readonly treeSpeciesList = TREE_SPECIES;
+  readonly selectedSpeciesKey = signal<TreeSpeciesKey>('oak');
+  readonly treeSeed = signal(7);
+
   readonly impostorType = signal<OctahedralImpostorType>('hemispherical');
   readonly spritesPerSide = signal(12);
   readonly textureSizePx = signal(2048);
@@ -107,7 +139,7 @@ export class ImpostorBakerPageComponent {
 
   private readonly engine = inject(EngineService);
   private readonly group = new Group();
-  private readonly treeSource: Group;
+  private treeSource!: Group;
 
   private atlas?: IOctahedralImpostorAtlas;
   private compressedAtlas?: ICompressedOctahedralImpostorAtlas;
@@ -125,13 +157,42 @@ export class ImpostorBakerPageComponent {
     ground.rotation.x = -Math.PI / 2;
     this.group.add(ground);
 
-    this.treeSource = this.buildTree(TREE_SEED);
+    this.treeSource = this.buildTree(this.treeSeed());
     this.group.add(this.treeSource);
 
     this.engine.scene.add(this.group);
     this.bake();
 
     inject(DestroyRef).onDestroy(() => this.dispose());
+  }
+
+  setSpecies(key: TreeSpeciesKey): void {
+    if (this.selectedSpeciesKey() === key) return;
+    this.selectedSpeciesKey.set(key);
+    this.rebuildSourceTreeAndBake();
+  }
+
+  setTreeSeed(value: string): void {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 1) return;
+    this.treeSeed.set(parsed);
+    this.rebuildSourceTreeAndBake();
+  }
+
+  private rebuildSourceTreeAndBake(): void {
+    if (this.treeSource) {
+      this.group.remove(this.treeSource);
+      this.treeSource.traverse((child) => {
+        if (child instanceof Mesh) {
+          child.geometry?.dispose();
+          if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
+          else child.material?.dispose();
+        }
+      });
+    }
+    this.treeSource = this.buildTree(this.treeSeed());
+    this.group.add(this.treeSource);
+    this.bake();
   }
 
   rebake(): void {
@@ -184,9 +245,6 @@ export class ImpostorBakerPageComponent {
   }
 
   private rebuildForestIfBaked(): void {
-    // Reuses the already-baked geometry/material — only the bake params in
-    // bake() (which change the atlas itself) need a full rebake; count and
-    // spread only change instance placement.
     if (this.impostorMesh && this.materialHandle) {
       this.rebuildForest(this.impostorMesh.geometry, this.materialHandle.material);
     }
@@ -262,23 +320,23 @@ export class ImpostorBakerPageComponent {
   }
 
   downloadAlbedo(): void {
-    this.downloadAtlasTexture('albedo', 'octahedral-impostor-albedo');
+    this.downloadAtlasTexture('albedo', `octahedral-${this.selectedSpeciesKey()}-albedo`);
   }
 
   downloadNormalDepth(): void {
-    this.downloadAtlasTexture('normalDepth', 'octahedral-impostor-normal-depth');
+    this.downloadAtlasTexture('normalDepth', `octahedral-${this.selectedSpeciesKey()}-normal-depth`);
   }
 
   downloadCompressedAlbedo(): void {
     if (!this.compressedAtlas) return;
     const ext = this.compressionFormat() === 'image/webp' ? 'webp' : this.compressionFormat() === 'image/jpeg' ? 'jpg' : 'png';
-    this.downloadBlob(this.compressedAtlas.albedoBlob, `octahedral-impostor-albedo-compressed.${ext}`);
+    this.downloadBlob(this.compressedAtlas.albedoBlob, `octahedral-${this.selectedSpeciesKey()}-albedo-compressed.${ext}`);
   }
 
   downloadCompressedNormalDepth(): void {
     if (!this.compressedAtlas) return;
     const ext = this.normalDepthMode() === 'lossy' && this.compressionFormat() === 'image/webp' ? 'webp' : 'png';
-    this.downloadBlob(this.compressedAtlas.normalDepthBlob, `octahedral-impostor-normal-depth-compressed.${ext}`);
+    this.downloadBlob(this.compressedAtlas.normalDepthBlob, `octahedral-${this.selectedSpeciesKey()}-normal-depth-compressed.${ext}`);
   }
 
   private downloadBlob(blob: Blob, filename: string): void {
@@ -332,9 +390,6 @@ export class ImpostorBakerPageComponent {
     this.baking.set(true);
     this.disposeBaked();
 
-    // computeObjectBoundingSphere (used both by the atlas bake and by
-    // buildOctahedralImpostorMesh) reads matrixWorld directly and does not
-    // update it itself.
     this.treeSource.updateMatrixWorld(true);
 
     const atlas = createOctahedralImpostorAtlas({
@@ -366,7 +421,6 @@ export class ImpostorBakerPageComponent {
 
     this.baking.set(false);
 
-    // If user was viewing compressed version, auto-recompress the new bake
     if (this.textureMode() === 'compressed') {
       this.compressAtlas();
     }
@@ -374,25 +428,28 @@ export class ImpostorBakerPageComponent {
 
   private buildTree(seed: number): Group {
     const group = new Group();
-    const skeleton = generateFloraSkeleton(TREE_ARCHETYPE, seed);
-    const { geometry } = buildFloraMesh(skeleton, TREE_ARCHETYPE);
-    this.colorizeByWindWeight(geometry);
+    const option = TREE_SPECIES.find((s) => s.key === this.selectedSpeciesKey()) ?? TREE_SPECIES[0];
+    const skeleton = generateFloraSkeleton(option.archetype, seed);
+    const { geometry } = buildFloraMesh(skeleton, option.archetype);
+    this.colorizeByWindWeight(geometry, option.colors);
     const mesh = new Mesh(geometry, new MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
     group.add(mesh);
     return group;
   }
 
-  private colorizeByWindWeight(geometry: BufferGeometry): void {
+  private colorizeByWindWeight(geometry: BufferGeometry, colors: IFloraSpeciesColorHints): void {
     const windWeight = geometry.getAttribute('windWeight');
-    const colors = new Float32Array(windWeight.count * 3);
+    const colorsArray = new Float32Array(windWeight.count * 3);
+    const trunkColor = new Color(colors.trunkHex);
+    const leafColor = new Color(colors.leafHex);
     const blended = new Color();
     for (let i = 0; i < windWeight.count; i++) {
-      blended.copy(TRUNK_COLOR).lerp(LEAF_COLOR, windWeight.getX(i));
-      colors[i * 3] = blended.r;
-      colors[i * 3 + 1] = blended.g;
-      colors[i * 3 + 2] = blended.b;
+      blended.copy(trunkColor).lerp(leafColor, windWeight.getX(i));
+      colorsArray[i * 3] = blended.r;
+      colorsArray[i * 3 + 1] = blended.g;
+      colorsArray[i * 3 + 2] = blended.b;
     }
-    geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
+    geometry.setAttribute('color', new Float32BufferAttribute(colorsArray, 3));
   }
 
   private buildAtlasPreview(atlas: IOctahedralImpostorAtlas): void {
@@ -413,7 +470,7 @@ export class ImpostorBakerPageComponent {
     this.normalDepthPreviewMesh = normalDepthMesh;
   }
 
-  /** Scattered separately from the single comparison impostor so its count can change without a full rebake — both share `geometry`/`material` with it (and each other) rather than owning their own copies. */
+  /** Scattered separately from the single comparison impostor so its count can change without a full rebake. */
   private rebuildForest(geometry: PlaneGeometry, material: MeshStandardMaterial): void {
     if (this.forestMesh) {
       this.group.remove(this.forestMesh);
@@ -453,8 +510,6 @@ export class ImpostorBakerPageComponent {
     }
     if (this.impostorMesh) {
       this.group.remove(this.impostorMesh);
-      // Shared with forestMesh (same geometry/material instances) — safe to
-      // dispose once here since both were just removed from the scene.
       this.impostorMesh.geometry.dispose();
       this.impostorMesh = undefined;
     }

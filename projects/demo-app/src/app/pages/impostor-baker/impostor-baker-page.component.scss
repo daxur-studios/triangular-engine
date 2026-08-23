@@ -139,13 +139,18 @@ nav {
   }
 }
 button,
-select {
+select,
+input[type="number"] {
   padding: 0.45rem 0.7rem;
   color: #dcebf3;
   border: 1px solid #315064;
   border-radius: 0.35rem;
   background: #102330;
   cursor: pointer;
+}
+input[type="number"] {
+  cursor: text;
+  width: 4.5rem;
 }
 button:hover,
 button.active {

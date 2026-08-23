@@ -23,6 +23,32 @@
         independently in the vertex shader.
       </p>
 
+      <div class="section-title">Source flora model</div>
+      <nav aria-label="Source flora model">
+        <label
+          >Species
+          <select
+            [value]="selectedSpeciesKey()"
+            (change)="setSpecies($any($event.target).value)"
+          >
+            @for (species of treeSpeciesList; track species.key) {
+              <option [value]="species.key">{{ species.name }}</option>
+            }
+          </select></label
+        >
+        <label
+          >Seed
+          <input
+            type="number"
+            min="1"
+            max="999"
+            step="1"
+            [value]="treeSeed()"
+            (change)="setTreeSeed($any($event.target).value)"
+          /></label
+        >
+      </nav>
+
       <div class="section-title">Bake parameters</div>
       <nav aria-label="Bake parameters">
         <label
