@@ -1,4 +1,3 @@
-import imageCompression from 'browser-image-compression';
 import {
   CanvasTexture,
   LinearFilter,
@@ -113,6 +112,16 @@ export async function compressOctahedralImpostorAtlas(
   const quality = options?.quality ?? 0.8;
   const maxSizeMB = options?.maxSizeMB ?? 1;
   const maxWidthOrHeight = options?.maxWidthOrHeight ?? width;
+
+  const moduleName = 'browser-image-compression';
+  const imageCompressionModule = await import(/* @vite-ignore */ moduleName).catch(() => {
+    throw new Error(
+      'The "browser-image-compression" library is required for compressOctahedralImpostorAtlas.',
+    );
+  });
+  const imageCompression =
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (imageCompressionModule as any).default ?? imageCompressionModule;
 
   const compressedAlbedoFile = await imageCompression(rawAlbedoFile, {
     maxSizeMB,
