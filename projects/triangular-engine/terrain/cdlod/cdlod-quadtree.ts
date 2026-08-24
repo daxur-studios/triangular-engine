@@ -397,14 +397,26 @@ function selectCdlodNode(
   } else if (resolvedMotion && resolvedMotion.effectiveSpeedMps > 2_500) {
     effectiveMaxLevel = Math.min(effectiveMaxLevel, 5);
   } else if (altitudeM !== undefined) {
-    if (altitudeM > 500_000) {
+    if (altitudeM > 1_000_000) {
       effectiveMaxLevel = Math.min(effectiveMaxLevel, 2);
-    } else if (altitudeM > 100_000) {
+    } else if (altitudeM > 400_000) {
       effectiveMaxLevel = Math.min(effectiveMaxLevel, 3);
-    } else if (altitudeM > 25_000) {
+    } else if (altitudeM > 150_000) {
       effectiveMaxLevel = Math.min(effectiveMaxLevel, 4);
-    } else if (altitudeM > 5_000) {
+    } else if (altitudeM > 50_000) {
       effectiveMaxLevel = Math.min(effectiveMaxLevel, 5);
+    } else if (altitudeM > 20_000) {
+      effectiveMaxLevel = Math.min(effectiveMaxLevel, 6);
+    } else if (altitudeM > 8_000) {
+      effectiveMaxLevel = Math.min(effectiveMaxLevel, 7);
+    } else if (altitudeM > 3_000) {
+      effectiveMaxLevel = Math.min(effectiveMaxLevel, 8);
+    } else if (altitudeM > 1_000) {
+      effectiveMaxLevel = Math.min(effectiveMaxLevel, 9);
+    } else if (altitudeM > 400) {
+      effectiveMaxLevel = Math.min(effectiveMaxLevel, 10);
+    } else if (altitudeM > 150) {
+      effectiveMaxLevel = Math.min(effectiveMaxLevel, 11);
     }
   }
 

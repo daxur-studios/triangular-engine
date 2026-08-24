@@ -74,33 +74,33 @@ export const QUALITY_PRESETS: readonly IQualityPreset[] = [
     name: 'Laptop / Fast',
     description:
       'Lightweight (~25k-60k tris) — 16-quad grids, smooth orbit & high battery life (165+ FPS).',
-    splitErrorPx: 14,
+    splitErrorPx: 12,
     mergeErrorPx: 6,
     screenSpaceFactorPx: 750,
     baseResolution: 16,
-    maxLevel: 6,
+    maxLevel: 10,
   },
   {
     id: 'balanced',
     name: 'Balanced / High',
     description:
-      'Standard (~70k-150k tris) — 32-quad grids, crisp globe from space and sharp ground crags.',
+      'Standard (~70k-150k tris) — 32-quad grids, crisp globe from space and ground crags matching physics.',
     splitErrorPx: 8,
     mergeErrorPx: 4,
     screenSpaceFactorPx: 850,
     baseResolution: 32,
-    maxLevel: 7,
+    maxLevel: 12,
   },
   {
     id: 'ultra',
     name: 'Ultra / Desktop',
     description:
-      'Cinematic LOD (~150k-300k tris) — 64-quad grids, pristine planetary globe and dense rugged mountains.',
+      'Cinematic LOD (~150k-300k tris) — 64-quad grids, pristine planetary globe and ultra dense rugged terrain.',
     splitErrorPx: 5,
     mergeErrorPx: 2,
     screenSpaceFactorPx: 1000,
     baseResolution: 64,
-    maxLevel: 7,
+    maxLevel: 13,
   },
 ];
 
