@@ -100,6 +100,14 @@ export class JoltRigidBodyComponent extends GroupComponent {
   readonly velocity = input<Vector3Tuple>();
   readonly velocity$ = toObservable(this.velocity);
 
+  /**
+   * Optional authored body mass in kilograms. When present, Jolt keeps the
+   * shape-derived inertia but scales it to this mass instead of deriving mass
+   * from collider volume. This is essential for assembled vehicles, whose
+   * physical mass belongs to their parts rather than their render collider.
+   */
+  readonly massKg = input<number>();
+
   // TODO: set up effects to update these when they change
   readonly angularDamping = input<number>();
   readonly linearDamping = input<number>();
@@ -297,6 +305,15 @@ export class JoltRigidBodyComponent extends GroupComponent {
           settings.mAngularDamping = angularDamping() ?? 0.0;
           settings.mLinearDamping = linearDamping() ?? 0.0;
           settings.mMotionQuality = Jolt.EMotionQuality_LinearCast;
+
+          const authoredMassKg = this.massKg();
+          if (authoredMassKg !== undefined && authoredMassKg > 0) {
+            // Use the blueprint's mass while retaining an inertia tensor
+            // calculated from the actual compound collider geometry.
+            settings.mOverrideMassProperties =
+              Jolt.EOverrideMassProperties_CalculateInertia;
+            settings.mMassPropertiesOverride.mMass = authoredMassKg;
+          }
 
           const body = metadata.bodyInterface.CreateBody(settings);
           Jolt.destroy(settings);
