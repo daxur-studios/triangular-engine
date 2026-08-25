@@ -27,6 +27,7 @@ import {
   Quaternion,
   QuaternionTuple,
   ShaderMaterial,
+  SphereGeometry,
   Vector3,
   Vector3Tuple,
   WebGLRenderer,
@@ -41,6 +42,7 @@ import {
 } from './cdlod-quadtree';
 import { CdlodMotionLookAhead } from './cdlod-motion-prediction';
 import {
+  createCubesphereOceanGeometry,
   generateCdlodOceanPatchGeometry,
   generateCdlodPatchGeometry,
   reconstructCdlodBufferGeometry,
@@ -54,6 +56,16 @@ import {
   ICdlodTerrainPalette,
   IOceanShaderUniforms,
 } from './cdlod-materials';
+
+// Minimum spacing between reselects triggered by worker patches arriving.
+// Each in-flight worker patch resolves independently, so bursts of up to
+// ~16 completions can land on separate frames milliseconds apart. Without
+// this, each one bypassed the normal selection throttle (#needsImmediateRebuild
+// short-circuits it), forcing a full quadtree reselect over the whole planet
+// per arrival — readiness state shifts slightly between each of those
+// back-to-back reselects, so the resulting active-patch set can differ each
+// time, which reads as the ground repeatedly popping in and out.
+const WORKER_REBUILD_DEBOUNCE_MS = 80;
 
 export type QualityPresetId = 'laptop' | 'balanced' | 'ultra';
 
@@ -112,6 +124,7 @@ export interface ICdlodTelemetry {
   highDetailCount: number;
   coarseCount: number;
   fps: number;
+  levelCounts?: Record<number, number>;
 }
 
 interface IResidentPatchMesh {
@@ -167,6 +180,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
   readonly cdlodMorphing = input(true);
   readonly showTerrain = input(true);
   readonly showOcean = input(true);
+  readonly debugLodColor = input(false);
   readonly freezeLod = input(false);
   readonly useWorkers = input(true);
   readonly workerFactory = input<(() => Worker) | null>(null);
@@ -259,6 +273,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
   readonly #geometryCache = new Map<string, BufferGeometry>();
   readonly #patchMinElevationM = new Map<string, number>();
   readonly #oceanGeometryCache = new Map<string, BufferGeometry>();
+  #pendingWorkerRebuild = false;
 
   #lastCameraPos = new Vector3(NaN, NaN, NaN);
   #lastCameraFwd = new Vector3(0, 0, -1);
@@ -310,11 +325,15 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
 
     effect(() => {
       const hide = this.hidePatchEdges();
+      const debugLod = this.debugLodColor();
       const u = this.#terrainMaterial?.uniforms as unknown as
         | ICdlodShaderUniforms
         | undefined;
       if (u?.uHidePatchEdges) {
         u.uHidePatchEdges.value = hide ? 1.0 : 0.0;
+      }
+      if (u?.uDebugLodColor) {
+        u.uDebugLodColor.value = debugLod ? 1.0 : 0.0;
       }
     });
 
@@ -397,7 +416,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
         this.#readyGeometryIds.add(id);
       }
 
-      if (body.terrain?.ocean) {
+      if (this.showOcean() && body.terrain?.ocean) {
         const oceanId = `ocean:${id}`;
         if (!this.#oceanGeometryCache.has(oceanId)) {
           const oceanResult = generateCdlodOceanPatchGeometry(
@@ -499,7 +518,6 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
     const isNearGround = camDistM - this.body().radiusM < 50_000;
     const isFarDistant = distanceRadii > 15.0;
 
-    const selectionIntervalMs = isFarDistant ? 2500 : 100;
     const movementThresholdM = isNearGround
       ? 2.5
       : isFarDistant
@@ -509,13 +527,15 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
 
     const shouldSelect =
       this.#needsImmediateRebuild ||
+      (this.#pendingWorkerRebuild &&
+        timeSinceSelect > WORKER_REBUILD_DEBOUNCE_MS) ||
       (!this.freezeLod() &&
-        (timeSinceSelect > selectionIntervalMs ||
-          camPosDelta > movementThresholdM ||
+        (camPosDelta > movementThresholdM ||
           camFwdAngle > fwdAngleThreshold));
 
     if (shouldSelect) {
       this.#needsImmediateRebuild = false;
+      this.#pendingWorkerRebuild = false;
       this.#lastCameraPos.copy(currentCamPosVec);
       this.#lastCameraFwd.copy(currentCamFwdVec);
       this.#lastSelectionTimeMs = time;
@@ -603,7 +623,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
         this.#patchMinElevationM.set(patch.id, meshRes.minElevationM);
         this.#readyGeometryIds.add(patch.id);
 
-        if (body.terrain?.ocean) {
+        if (this.showOcean() && body.terrain?.ocean) {
           const oceanId = `ocean:${patch.id}`;
           if (!this.#oceanGeometryCache.has(oceanId)) {
             const oceanRes = generateCdlodOceanPatchGeometry(
@@ -646,7 +666,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
           this.#geometryCache.set(patch.id, geom);
           this.#patchMinElevationM.set(patch.id, raw.minElevationM);
           this.#readyGeometryIds.add(patch.id);
-          this.#needsImmediateRebuild = true;
+          this.#pendingWorkerRebuild = true;
         })
         .catch(() => {
           this.#inFlightRequests.delete(patch.id);
@@ -661,10 +681,10 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
           this.#geometryCache.set(patch.id, meshRes.geometry);
           this.#patchMinElevationM.set(patch.id, meshRes.minElevationM);
           this.#readyGeometryIds.add(patch.id);
-          this.#needsImmediateRebuild = true;
+          this.#pendingWorkerRebuild = true;
         });
 
-      if (body.terrain?.ocean) {
+      if (this.showOcean() && body.terrain?.ocean) {
         const oceanId = `ocean:${patch.id}`;
         if (
           !this.#oceanGeometryCache.has(oceanId) &&
@@ -684,7 +704,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
               this.#inFlightRequests.delete(oceanId);
               const oceanGeom = reconstructCdlodBufferGeometry(raw);
               this.#oceanGeometryCache.set(oceanId, oceanGeom);
-              this.#needsImmediateRebuild = true;
+              this.#pendingWorkerRebuild = true;
             })
             .catch(() => {
               this.#inFlightRequests.delete(oceanId);
@@ -695,7 +715,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
                 patch.centerBodyFixedM,
               );
               this.#oceanGeometryCache.set(oceanId, oceanRes.geometry);
-              this.#needsImmediateRebuild = true;
+              this.#pendingWorkerRebuild = true;
             });
         }
       }
@@ -758,6 +778,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
           mesh.userData['morphFactor'] = 0;
           mesh.userData['enableMorph'] = 1;
           mesh.userData['edgeMorph'] = [0, 0, 0, 0];
+          mesh.userData['lodLevel'] = 0;
           mesh.onBeforeRender = () => {
             const u = mat.uniforms as unknown as ICdlodShaderUniforms;
             const em = mesh.userData['edgeMorph'] as [
@@ -769,6 +790,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
             u.uMorphFactor.value = mesh.userData['morphFactor'];
             u.uEnableMorph.value = mesh.userData['enableMorph'];
             u.uEdgeMorph.value.set(em[0], em[1], em[2], em[3]);
+            u.uLodLevel.value = mesh.userData['lodLevel'];
           };
           this.terrainGroup.add(mesh);
 
@@ -783,6 +805,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
         // Update per-patch morph state (consumed by this mesh's onBeforeRender)
         resident.mesh.userData['morphFactor'] = patch.morphFactor;
         resident.mesh.userData['enableMorph'] = morphEnabled ? 1.0 : 0.0;
+        resident.mesh.userData['lodLevel'] = patch.address.level;
         resident.mesh.userData['edgeMorph'] = [
           patch.edgeMorph.left,
           patch.edgeMorph.right,
@@ -792,14 +815,14 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
       }
     }
 
-    // 2. Ocean patches
+    // 2. CDLOD ocean patches (exact vertex grid alignment with terrain)
     if (this.showOcean() && body.terrain?.ocean) {
+      const seaLevel = body.terrain.ocean.seaLevelM ?? 0;
       for (const patch of patches) {
         const minElev = this.#patchMinElevationM.get(
           `${patch.address.face}:${patch.address.level}:${patch.address.x}:${patch.address.y}:${patch.resolution}`,
         );
-        const seaLevel = body.terrain.ocean.seaLevelM ?? 0;
-        if (minElev !== undefined && minElev > seaLevel + 50) continue;
+        if (minElev !== undefined && minElev > seaLevel + 5) continue;
 
         const oceanId = `ocean:${patch.address.face}:${patch.address.level}:${patch.address.x}:${patch.address.y}:${patch.resolution}`;
         activeOceanIds.add(oceanId);
@@ -827,7 +850,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
           const mat = this.#oceanMaterial;
 
           const mesh = new Mesh(geom, mat);
-          mesh.castShadow = this.castShadow();
+          mesh.castShadow = false;
           mesh.receiveShadow = this.receiveShadow();
           mesh.renderOrder = 1;
           mesh.userData['morphFactor'] = 0;
@@ -865,7 +888,9 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
       }
     }
 
-    // 3. Remove inactive resident meshes
+    // 3. Remove inactive resident meshes. Geometry stays cached indefinitely
+    // (only cleared wholesale on structural rebuilds via #clearGeometryCache) —
+    // no per-patch eviction.
     for (const [id, resident] of this.residentTerrainMeshes.entries()) {
       if (!activeTerrainIds.has(id)) {
         this.terrainGroup.remove(resident.mesh);
@@ -925,6 +950,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
       u.uCliffSlopeThreshold.value = palette.cliffSlopeThreshold;
       u.uStrataFrequency.value = palette.strataFrequency;
       u.uSnowElevationNorm.value = palette.snowElevationNorm;
+      u.uDebugLodColor.value = this.debugLodColor() ? 1.0 : 0.0;
     }
 
     const oceanMat = this.#oceanMaterial;
@@ -948,9 +974,11 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
     let triCount = 0;
     let highCount = 0;
     let coarseCount = 0;
+    const levelCounts: Record<number, number> = {};
 
     for (const p of patches) {
       triCount += p.resolution * p.resolution * 2;
+      levelCounts[p.address.level] = (levelCounts[p.address.level] || 0) + 1;
       if (p.address.level >= 4) highCount++;
       else coarseCount++;
     }
@@ -972,6 +1000,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
       highDetailCount: highCount,
       coarseCount: coarseCount,
       fps: this.#currentFps,
+      levelCounts,
     });
   }
 }

@@ -465,14 +465,7 @@ function selectCdlodNode(
     );
   }
 
-  let resolution = options.baseResolution;
-  if (options.featureAdaptive) {
-    if (roughnessM < 2.0 && !hasCoastlineOrLake) {
-      resolution = Math.max(8, Math.floor(options.baseResolution / 4));
-    } else if (roughnessM < 8.0 && !hasCoastlineOrLake) {
-      resolution = Math.max(16, Math.floor(options.baseResolution / 2));
-    }
-  }
+  const resolution = options.baseResolution;
 
   if (!shouldSplit) {
     return {
@@ -677,21 +670,99 @@ function balanceNeighborLevels(
           const levelDiff = leaf.address.level - neighborLeaf.address.level;
 
           if (levelDiff > 1) {
-            const splitResult = selectCdlodNode(
-              neighborLeaf.address,
-              body,
-              sampler,
-              cameraBodyFixedM,
-              { ...options, splitErrorPx: 0 },
-              cameraForwardDir,
-              altitudeM,
-              previouslySplitAddresses,
-              cachedGeometries,
-              neededPatches,
-              resolvedMotion,
-            );
-            if (splitResult.children && splitResult.children.length === 4) {
-              neighborLeaf.children = splitResult.children;
+            const res = options.baseResolution;
+            const c00Addr = childAddress(neighborLeaf.address, 0, 0);
+            const c10Addr = childAddress(neighborLeaf.address, 1, 0);
+            const c01Addr = childAddress(neighborLeaf.address, 0, 1);
+            const c11Addr = childAddress(neighborLeaf.address, 1, 1);
+
+            let allChildrenReady = true;
+            if (cachedGeometries) {
+              const checkChild = (cAddr: IPlanetPatchAddress) => {
+                const cId = `${cAddr.face}:${cAddr.level}:${cAddr.x}:${cAddr.y}:${res}`;
+                if (!cachedGeometries.has(cId)) {
+                  allChildrenReady = false;
+                  if (neededPatches && !neededPatches.has(cId)) {
+                    const cCenter = computePatchCenterAndRadii(
+                      body,
+                      sampler,
+                      cAddr,
+                    ).center;
+                    neededPatches.set(cId, {
+                      id: cId,
+                      address: cAddr,
+                      resolution: res,
+                      centerBodyFixedM: cCenter,
+                    });
+                  }
+                }
+              };
+              checkChild(c00Addr);
+              checkChild(c10Addr);
+              checkChild(c01Addr);
+              checkChild(c11Addr);
+            }
+
+            if (allChildrenReady) {
+              const c00 = selectCdlodNode(
+                c00Addr,
+                body,
+                sampler,
+                cameraBodyFixedM,
+                options,
+                cameraForwardDir,
+                altitudeM,
+                previouslySplitAddresses,
+                cachedGeometries,
+                neededPatches,
+                resolvedMotion,
+              );
+              const c10 = selectCdlodNode(
+                c10Addr,
+                body,
+                sampler,
+                cameraBodyFixedM,
+                options,
+                cameraForwardDir,
+                altitudeM,
+                previouslySplitAddresses,
+                cachedGeometries,
+                neededPatches,
+                resolvedMotion,
+              );
+              const c01 = selectCdlodNode(
+                c01Addr,
+                body,
+                sampler,
+                cameraBodyFixedM,
+                options,
+                cameraForwardDir,
+                altitudeM,
+                previouslySplitAddresses,
+                cachedGeometries,
+                neededPatches,
+                resolvedMotion,
+              );
+              const c11 = selectCdlodNode(
+                c11Addr,
+                body,
+                sampler,
+                cameraBodyFixedM,
+                options,
+                cameraForwardDir,
+                altitudeM,
+                previouslySplitAddresses,
+                cachedGeometries,
+                neededPatches,
+                resolvedMotion,
+              );
+
+              c00.children = undefined;
+              c10.children = undefined;
+              c01.children = undefined;
+              c11.children = undefined;
+
+              neighborLeaf.children = [c00, c10, c01, c11];
               didForceSplit = true;
             }
           }

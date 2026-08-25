@@ -4,6 +4,8 @@ import {
   Vec3d,
 } from 'triangular-engine/celestial';
 import {
+  CDLOD_CUBE_FACES,
+  CubeFaceId,
   faceUvToDirection,
   IPlanetPatchAddress,
   planetPatchUvBounds,
@@ -415,4 +417,82 @@ export function generateCdlodOceanPatchGeometry(
     minElevationM: 0,
     maxElevationM: 0,
   };
+}
+
+/**
+ * Generates a unified 6-face Cubesphere Ocean BufferGeometry at sea level matching
+ * the exact Cubesphere face coordinate projection used by CDLOD terrain.
+ */
+export function createCubesphereOceanGeometry(
+  radius: number,
+  resolution = 64,
+): BufferGeometry {
+  const faces: readonly CubeFaceId[] = CDLOD_CUBE_FACES;
+  const vertsPerFace = (resolution + 1) * (resolution + 1);
+  const totalVerts = vertsPerFace * 6;
+  const quadsPerFace = resolution * resolution;
+  const totalIndices = quadsPerFace * 6 * 6;
+
+  const positions = new Float32Array(totalVerts * 3);
+  const normals = new Float32Array(totalVerts * 3);
+  const uvs = new Float32Array(totalVerts * 2);
+  const indices = new Uint32Array(totalIndices);
+
+  const step = 1.0 / resolution;
+  let vIdx = 0;
+  let iIdx = 0;
+
+  for (let f = 0; f < 6; f++) {
+    const face = faces[f];
+    const baseVert = f * vertsPerFace;
+
+    for (let y = 0; y <= resolution; y++) {
+      const v = y * step;
+      for (let x = 0; x <= resolution; x++) {
+        const u = x * step;
+        const dir = faceUvToDirection(face, u, v);
+        const off = vIdx * 3;
+
+        positions[off] = dir[0] * radius;
+        positions[off + 1] = dir[1] * radius;
+        positions[off + 2] = dir[2] * radius;
+
+        normals[off] = dir[0];
+        normals[off + 1] = dir[1];
+        normals[off + 2] = dir[2];
+
+        const uvOff = vIdx * 2;
+        uvs[uvOff] = u;
+        uvs[uvOff + 1] = v;
+
+        vIdx++;
+      }
+    }
+
+    const rowLength = resolution + 1;
+    for (let y = 0; y < resolution; y++) {
+      for (let x = 0; x < resolution; x++) {
+        const v00 = baseVert + y * rowLength + x;
+        const v10 = v00 + 1;
+        const v01 = v00 + rowLength;
+        const v11 = v01 + 1;
+
+        indices[iIdx++] = v00;
+        indices[iIdx++] = v10;
+        indices[iIdx++] = v01;
+
+        indices[iIdx++] = v10;
+        indices[iIdx++] = v11;
+        indices[iIdx++] = v01;
+      }
+    }
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
+  geometry.setIndex(new BufferAttribute(indices, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
 }

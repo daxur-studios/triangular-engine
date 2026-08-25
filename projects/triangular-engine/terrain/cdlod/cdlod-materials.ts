@@ -154,6 +154,8 @@ export interface ICdlodShaderUniforms {
   uCliffSlopeThreshold: { value: number };
   uStrataFrequency: { value: number };
   uSnowElevationNorm: { value: number };
+  uLodLevel: { value: number };
+  uDebugLodColor: { value: number };
 }
 
 export const CDLOD_VERTEX_SHADER = `
@@ -236,6 +238,8 @@ uniform vec3 uSeabedColor;
 uniform float uCliffSlopeThreshold;
 uniform float uStrataFrequency;
 uniform float uSnowElevationNorm;
+uniform float uLodLevel;
+uniform float uDebugLodColor;
 
 varying vec3 vWorldNormal;
 varying vec3 vWorldPosition;
@@ -291,6 +295,24 @@ void main() {
     shadingNormal = normalize(mix(vWorldNormal, vBodyDirection, edgeFade));
   }
   float slope = clamp(dot(shadingNormal, vBodyDirection), 0.0, 1.0);
+
+  if (uDebugLodColor > 0.5) {
+    vec3 lodColor = vec3(0.5);
+    int lvl = int(uLodLevel + 0.5);
+    if (lvl <= 5) lodColor = vec3(0.3, 0.0, 0.6);        // Purple (Space / Coarse globe)
+    else if (lvl == 6) lodColor = vec3(0.0, 0.2, 0.85);  // Deep Blue (~50km)
+    else if (lvl == 7) lodColor = vec3(0.0, 0.75, 0.95); // Cyan (~25km)
+    else if (lvl == 8) lodColor = vec3(0.0, 0.8, 0.45);  // Teal (~12km)
+    else if (lvl == 9) lodColor = vec3(0.3, 0.9, 0.1);   // Green (~6km)
+    else if (lvl == 10) lodColor = vec3(0.95, 0.85, 0.1);// Yellow (~3km)
+    else if (lvl == 11) lodColor = vec3(1.0, 0.48, 0.0); // Orange (~1km)
+    else lodColor = vec3(1.0, 0.05, 0.2);                // Bright Red (< 500m)
+
+    float NdotL = max(0.0, dot(shadingNormal, normalize(uSunDirection)));
+    vec3 lit = lodColor * (uAmbientColor + uSunColor * NdotL);
+    gl_FragColor = vec4(lit, 1.0);
+    return;
+  }
 
   // Global spherical noise: Fixed geographic position across all LOD levels
   float macroNoise  = (noise3(vBodyDirection * 15.0) - 0.5) * 0.2;
@@ -447,17 +469,19 @@ void main() {
 
   vec3 lightDir = normalize(uSunDirection);
   vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+  // Analytical smooth radial normal for perfectly smooth water curvature & specular glints
+  vec3 normal = vBodyDirection;
 
   // Fresnel edge reflection
-  float nDotV = max(0.0, dot(vWorldNormal, viewDir));
+  float nDotV = max(0.0, dot(normal, viewDir));
   float fresnel = pow(1.0 - nDotV, 4.0) * 0.65;
 
   // Specular sun glint
   vec3 halfDir = normalize(lightDir + viewDir);
-  float spec = pow(max(0.0, dot(vWorldNormal, halfDir)), 64.0) * 0.9;
+  float spec = pow(max(0.0, dot(normal, halfDir)), 64.0) * 0.9;
 
   // Diffuse & Ambient
-  float nDotL = max(0.0, dot(vWorldNormal, lightDir));
+  float nDotL = max(0.0, dot(normal, lightDir));
   vec3 baseColor = mix(uDeepOceanColor, uShallowWaterColor, 0.35);
   vec3 diffuse = baseColor * (uSunColor * nDotL + uAmbientColor);
   vec3 finalColor = mix(diffuse, vec3(0.75, 0.88, 1.0), fresnel) + vec3(spec);
@@ -512,6 +536,8 @@ export function createCdlodTerrainMaterial(options?: {
     uCliffSlopeThreshold: { value: palette.cliffSlopeThreshold },
     uStrataFrequency: { value: palette.strataFrequency },
     uSnowElevationNorm: { value: palette.snowElevationNorm },
+    uLodLevel: { value: 0.0 },
+    uDebugLodColor: { value: 0.0 },
   };
 
   return new ShaderMaterial({
