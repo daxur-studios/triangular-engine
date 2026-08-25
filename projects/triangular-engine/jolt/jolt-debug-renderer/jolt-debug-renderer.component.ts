@@ -38,6 +38,16 @@ import { Jolt, JoltPhysicsService } from '../jolt-physics/jolt-physics.service';
   styleUrl: './jolt-debug-renderer.component.scss',
 })
 export class JoltDebugRendererComponent implements OnDestroy {
+  /**
+   * All debug objects use depthTest:false so they're never occluded, but that
+   * only protects them from writing *into* the depth buffer — it does nothing
+   * about draw order. Three.js still sorts opaque objects by distance, so a
+   * CDLOD terrain patch (normal depth test/write) can draw after a debug line
+   * and paint straight over it. A high renderOrder forces debug objects to
+   * draw last regardless of distance sort, guaranteeing they land on top.
+   */
+  private static readonly DEBUG_RENDER_ORDER = 999999;
+
   readonly engineService = inject(EngineService);
   readonly parentPhysics = inject(JoltPhysicsComponent);
   readonly destroyRef = inject(DestroyRef);
@@ -433,6 +443,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
           geometry,
           material,
         ));
+        mesh.renderOrder = JoltDebugRendererComponent.DEBUG_RENDER_ORDER;
         scene.add(mesh);
       }
     });
@@ -454,6 +465,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
               depthWrite: false,
             });
             line = this.batchLineList[i] = new LineSegments(edges, material);
+            line.renderOrder = JoltDebugRendererComponent.DEBUG_RENDER_ORDER;
             scene.add(line);
           } else {
             line.geometry = edges;
@@ -467,6 +479,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
           let mesh = this.meshList[i];
           if (!mesh) {
             mesh = this.meshList[i] = new Mesh(geometry, material);
+            mesh.renderOrder = JoltDebugRendererComponent.DEBUG_RENDER_ORDER;
             scene.add(mesh);
           } else {
             mesh.material = material;
@@ -701,6 +714,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
         );
         this.fallbackActiveLine = new LineSegments(geometry, material);
         this.fallbackActiveLine.frustumCulled = false;
+        this.fallbackActiveLine.renderOrder = JoltDebugRendererComponent.DEBUG_RENDER_ORDER;
         scene.add(this.fallbackActiveLine);
       } else {
         const geometry = this.fallbackActiveLine.geometry as BufferGeometry;
@@ -739,6 +753,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
         );
         this.fallbackSleepingLine = new LineSegments(geometry, material);
         this.fallbackSleepingLine.frustumCulled = false;
+        this.fallbackSleepingLine.renderOrder = JoltDebugRendererComponent.DEBUG_RENDER_ORDER;
         scene.add(this.fallbackSleepingLine);
       } else {
         const geometry = this.fallbackSleepingLine.geometry as BufferGeometry;
@@ -776,6 +791,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
         );
         this.fallbackConstraintsLine = new LineSegments(geometry, material);
         this.fallbackConstraintsLine.frustumCulled = false;
+        this.fallbackConstraintsLine.renderOrder = JoltDebugRendererComponent.DEBUG_RENDER_ORDER;
         scene.add(this.fallbackConstraintsLine);
       } else {
         const geometry = this.fallbackConstraintsLine

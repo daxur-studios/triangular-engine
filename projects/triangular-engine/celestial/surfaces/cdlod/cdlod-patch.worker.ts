@@ -24,16 +24,29 @@ import {
 // Clean isolated caches per domain type to avoid cross-contamination
 let sphereBodyId = '';
 let sphereBodySeed = 0;
+let sphereLocalFlattenKey = '';
 let sphereSampler: ISurfaceSampler | undefined;
 
 let planeBodyId = '';
 let planeBodySeed = 0;
+let planeLocalFlattenKey = '';
 let planeSampler: ISurfaceSampler | undefined;
 
 let cylinderBodyId = '';
 let cylinderBodySeed = 0;
 let cylinderRadiusM = 0;
+let cylinderLocalFlattenKey = '';
 let cylinderSampler: ISurfaceSampler | undefined;
+
+/**
+ * Base-building/landing-site grading replaces `terrain.localFlatten` while
+ * keeping `body.id` and `terrain.seed` unchanged (see BSP's
+ * `world-session.service.ts#reapplyLocalFlattens`), so the id+seed cache key
+ * alone can't detect a grading update — this closes that gap.
+ */
+function localFlattenKey(body: ICelestialBody | undefined): string {
+  return JSON.stringify(body?.terrain?.localFlatten ?? []);
+}
 
 export function handleCdlodWorkerMessage(
   data: ICdlodWorkerRequest,
@@ -43,10 +56,17 @@ export function handleCdlodWorkerMessage(
     if (data.type === 'plane') {
       const bodySeed = data.body?.terrain?.seed ?? 0;
       const bodyId = data.body?.id ?? 'plane-world';
+      const flattenKey = localFlattenKey(data.body);
 
-      if (!planeSampler || planeBodyId !== bodyId || planeBodySeed !== bodySeed) {
+      if (
+        !planeSampler ||
+        planeBodyId !== bodyId ||
+        planeBodySeed !== bodySeed ||
+        planeLocalFlattenKey !== flattenKey
+      ) {
         planeBodyId = bodyId;
         planeBodySeed = bodySeed;
+        planeLocalFlattenKey = flattenKey;
         planeSampler = data.body
           ? customSamplerFactory
             ? customSamplerFactory(data.body)
@@ -92,16 +112,19 @@ export function handleCdlodWorkerMessage(
       const bodySeed = data.body?.terrain?.seed ?? 0;
       const bodyId = data.body?.id ?? 'cylinder-world';
       const radiusM = data.radiusM ?? 4000;
+      const flattenKey = localFlattenKey(data.body);
 
       if (
         !cylinderSampler ||
         cylinderBodyId !== bodyId ||
         cylinderBodySeed !== bodySeed ||
-        cylinderRadiusM !== radiusM
+        cylinderRadiusM !== radiusM ||
+        cylinderLocalFlattenKey !== flattenKey
       ) {
         cylinderBodyId = bodyId;
         cylinderBodySeed = bodySeed;
         cylinderRadiusM = radiusM;
+        cylinderLocalFlattenKey = flattenKey;
         cylinderSampler = data.body
           ? customSamplerFactory
             ? customSamplerFactory(data.body)
@@ -150,10 +173,17 @@ export function handleCdlodWorkerMessage(
       }
       const bodySeed = data.body.terrain?.seed ?? 0;
       const bodyId = data.body.id;
+      const flattenKey = localFlattenKey(data.body);
 
-      if (!sphereSampler || sphereBodyId !== bodyId || sphereBodySeed !== bodySeed) {
+      if (
+        !sphereSampler ||
+        sphereBodyId !== bodyId ||
+        sphereBodySeed !== bodySeed ||
+        sphereLocalFlattenKey !== flattenKey
+      ) {
         sphereBodyId = bodyId;
         sphereBodySeed = bodySeed;
+        sphereLocalFlattenKey = flattenKey;
         sphereSampler = customSamplerFactory
           ? customSamplerFactory(data.body)
           : createSurfaceSampler(data.body);
