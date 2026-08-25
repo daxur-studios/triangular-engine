@@ -6,6 +6,7 @@
  * of these compilers.
  */
 import {
+  IContinentalTerrainGeneratorDef,
   ICraterFieldTerrainGeneratorDef,
   IRidgedFractalTerrainGeneratorDef,
 } from './terrain-def';
@@ -15,8 +16,84 @@ import {
   compileMask,
   hashLattice,
   ICompiledGenerator,
+  fractalNoise3d,
   ridgedFractalNoise3d,
+  smoothstep,
 } from './terrain-noise';
+
+export function compileContinentalGenerator(
+  definition: IContinentalTerrainGeneratorDef,
+  seed: number,
+): ICompiledGenerator {
+  assertNoiseParameters(definition);
+  assertFinite('seaLevelThreshold', definition.seaLevelThreshold);
+  assertFinite('transitionWidth', definition.transitionWidth);
+  assertFinite('oceanDepthM', definition.oceanDepthM);
+  assertFinite('landHeightM', definition.landHeightM);
+  if (definition.seaLevelThreshold <= -1 || definition.seaLevelThreshold >= 1) {
+    throw new RangeError('Continental seaLevelThreshold must be in (-1, 1).');
+  }
+  if (definition.transitionWidth <= 0) {
+    throw new RangeError(
+      'Continental transitionWidth must be greater than zero.',
+    );
+  }
+  if (definition.oceanDepthM <= 0 || definition.landHeightM <= 0) {
+    throw new RangeError(
+      'Continental oceanDepthM and landHeightM must be greater than zero.',
+    );
+  }
+  if (definition.coastVariation) {
+    assertNoiseParameters(definition.coastVariation);
+    assertFinite(
+      'continental coastVariation strength',
+      definition.coastVariation.strength,
+    );
+    if (
+      definition.coastVariation.strength < 0 ||
+      definition.coastVariation.strength >= 1
+    ) {
+      throw new RangeError(
+        'Continental coastVariation strength must be in [0, 1).',
+      );
+    }
+  }
+
+  const generatorSeed = seed + (definition.seedOffset ?? 0);
+  const coastVariationSeed = definition.coastVariation
+    ? seed + (definition.coastVariation.seedOffset ?? 10_000)
+    : 0;
+  const mask = definition.mask ? compileMask(definition.mask, seed) : undefined;
+  return {
+    sample: (x, y, z) => {
+      const continentalness = fractalNoise3d(
+        x,
+        y,
+        z,
+        definition,
+        generatorSeed,
+      );
+      const coastVariation = definition.coastVariation
+        ? fractalNoise3d(x, y, z, definition.coastVariation, coastVariationSeed)
+        : 0;
+      const localTransitionWidth =
+        definition.transitionWidth *
+        (1 + coastVariation * (definition.coastVariation?.strength ?? 0));
+      const signedDistance =
+        (continentalness - definition.seaLevelThreshold) / localTransitionWidth;
+      const shapedDistance = smoothstep(
+        0,
+        1,
+        Math.min(1, Math.abs(signedDistance)),
+      );
+      const elevationM =
+        signedDistance < 0
+          ? -definition.oceanDepthM * shapedDistance
+          : definition.landHeightM * shapedDistance;
+      return elevationM * (mask?.sample(x, y, z) ?? 1);
+    },
+  };
+}
 
 export function compileRidgedFractalGenerator(
   definition: IRidgedFractalTerrainGeneratorDef,

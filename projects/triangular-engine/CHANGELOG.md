@@ -6,6 +6,18 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- Added signed `continental-3d` terrain generation for coherent ocean basins,
+  continental shelves, and broad land masses, plus deterministic batched
+  `coastalSitesFor` placement with buildable-ground, shoreline, and navigable
+  water directions.
+- Re-authored `HOME_PLANET` for approximately 70% ocean coverage and moved the
+  stock home pad/runway to a low-latitude coastal site. The exported
+  `HOME_BASE_COASTAL_ACCESS` provides stable shore and port approach metadata.
+- Varied continental shelf steepness so broad beaches and compact deep-water
+  coasts both occur, added a shallow-water-width constraint to coastal-site
+  placement, and separated the ocean surface from terrain depth to prevent
+  shoreline z-fighting.
+
 - `<scene>` now accepts a `[wireframe]` boolean input. When enabled, every mesh
   and line in the scene renders with a wireframe material for debugging; original
   materials are restored when set back to `false`, and objects added while

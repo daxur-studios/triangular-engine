@@ -32,6 +32,8 @@ export interface ICdlodRawPatchBuffers {
 }
 
 const INDEX_BUFFER_CACHE = new Map<number, Uint16Array | Uint32Array>();
+/** Keeps the ocean decisively above numerically near-zero terrain at shore. */
+export const CDLOD_OCEAN_SURFACE_BIAS_M = 0.75;
 
 export function getOrCreateGridIndices(resolution: number): Uint16Array | Uint32Array {
   let indices = INDEX_BUFFER_CACHE.get(resolution);
@@ -290,7 +292,9 @@ export function generateCdlodOceanPatchRawBuffers(
 
   const stepU = uSpan / resolution;
   const stepV = vSpan / resolution;
-  const r = body.radiusM;
+  const oceanElevationM =
+    (body.terrain?.ocean?.seaLevelM ?? 0) + CDLOD_OCEAN_SURFACE_BIAS_M;
+  const r = body.radiusM + oceanElevationM;
 
   for (let y = 0; y <= resolution; y++) {
     const v = bounds.minV + y * stepV;
@@ -327,8 +331,8 @@ export function generateCdlodOceanPatchRawBuffers(
     normals,
     uvs,
     resolution,
-    minElevationM: 0,
-    maxElevationM: 0,
+    minElevationM: oceanElevationM,
+    maxElevationM: oceanElevationM,
     triangleCount: (resolution * resolution * 2),
   };
 }

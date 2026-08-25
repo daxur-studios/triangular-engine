@@ -162,6 +162,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
   readonly baseResolution = input<number | null>(null);
   readonly maxLevel = input<number | null>(null);
   readonly wireframe = input(false);
+  readonly hidePatchEdges = input(false);
   readonly featureAdaptive = input(true);
   readonly cdlodMorphing = input(true);
   readonly showTerrain = input(true);
@@ -250,10 +251,13 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
     return this.#workerPool;
   }
 
-  readonly #materialCache = new Map<string, ShaderMaterial>();
+  // One shared material per planet instance — every patch reuses it (patch-specific
+  // morph uniforms are pushed via each mesh's onBeforeRender, not baked per-material).
+  // Geometry differs per patch, so it stays keyed by patch id.
+  #terrainMaterial: ShaderMaterial | undefined;
+  #oceanMaterial: ShaderMaterial | undefined;
   readonly #geometryCache = new Map<string, BufferGeometry>();
   readonly #patchMinElevationM = new Map<string, number>();
-  readonly #oceanMaterialCache = new Map<string, ShaderMaterial>();
   readonly #oceanGeometryCache = new Map<string, BufferGeometry>();
 
   #lastCameraPos = new Vector3(NaN, NaN, NaN);
@@ -281,24 +285,36 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
       this.#needsImmediateRebuild = true;
     });
 
-    // Material visual toggles: Instantly update active resident materials
+    // Material visual toggles: Instantly update the shared terrain/ocean materials
     effect(() => {
       const wire = this.wireframe();
-      for (const resident of this.residentTerrainMeshes.values()) {
-        resident.material.wireframe = wire;
-        resident.material.needsUpdate = true;
-        const u = resident.material.uniforms as unknown as ICdlodShaderUniforms;
+      const terrainMat = this.#terrainMaterial;
+      if (terrainMat) {
+        terrainMat.wireframe = wire;
+        terrainMat.needsUpdate = true;
+        const u = terrainMat.uniforms as unknown as ICdlodShaderUniforms;
         if (u?.uWireframeMode) {
           u.uWireframeMode.value = wire ? 1.0 : 0.0;
         }
       }
-      for (const resident of this.residentOceanMeshes.values()) {
-        resident.material.wireframe = wire;
-        resident.material.needsUpdate = true;
-        const u = resident.material.uniforms as unknown as IOceanShaderUniforms;
+      const oceanMat = this.#oceanMaterial;
+      if (oceanMat) {
+        oceanMat.wireframe = wire;
+        oceanMat.needsUpdate = true;
+        const u = oceanMat.uniforms as unknown as IOceanShaderUniforms;
         if (u?.uWireframeMode) {
           u.uWireframeMode.value = wire ? 1.0 : 0.0;
         }
+      }
+    });
+
+    effect(() => {
+      const hide = this.hidePatchEdges();
+      const u = this.#terrainMaterial?.uniforms as unknown as
+        | ICdlodShaderUniforms
+        | undefined;
+      if (u?.uHidePatchEdges) {
+        u.uHidePatchEdges.value = hide ? 1.0 : 0.0;
       }
     });
 
@@ -414,14 +430,10 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
   }
 
   #clearMaterialCache(): void {
-    for (const mat of this.#materialCache.values()) {
-      mat.dispose();
-    }
-    this.#materialCache.clear();
-    for (const mat of this.#oceanMaterialCache.values()) {
-      mat.dispose();
-    }
-    this.#oceanMaterialCache.clear();
+    this.#terrainMaterial?.dispose();
+    this.#terrainMaterial = undefined;
+    this.#oceanMaterial?.dispose();
+    this.#oceanMaterial = undefined;
   }
 
   #clearResidentMeshes(): void {
@@ -701,6 +713,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
     const orig = this.activeRenderOrigin();
     const palette = this.activePalette();
     const wire = this.wireframe();
+    const hidePatchEdges = this.hidePatchEdges();
     const morphEnabled = this.cdlodMorphing();
 
     // 1. Terrain patches
@@ -726,19 +739,37 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
             this.#readyGeometryIds.add(id);
           }
 
-          let mat = this.#materialCache.get(id);
-          if (!mat) {
-            mat = createCdlodTerrainMaterial({
+          if (!this.#terrainMaterial) {
+            this.#terrainMaterial = createCdlodTerrainMaterial({
               wireframe: wire,
+              hidePatchEdges,
               body,
               palette,
             });
-            this.#materialCache.set(id, mat);
           }
+          const mat = this.#terrainMaterial;
 
           const mesh = new Mesh(geom, mat);
           mesh.castShadow = this.castShadow();
           mesh.receiveShadow = this.receiveShadow();
+          // Patch-specific morph uniforms live on the mesh (userData) and are pushed
+          // into the shared material right before this mesh's draw call — the
+          // material itself is reused by every patch, so it can't hold per-patch state.
+          mesh.userData['morphFactor'] = 0;
+          mesh.userData['enableMorph'] = 1;
+          mesh.userData['edgeMorph'] = [0, 0, 0, 0];
+          mesh.onBeforeRender = () => {
+            const u = mat.uniforms as unknown as ICdlodShaderUniforms;
+            const em = mesh.userData['edgeMorph'] as [
+              number,
+              number,
+              number,
+              number,
+            ];
+            u.uMorphFactor.value = mesh.userData['morphFactor'];
+            u.uEnableMorph.value = mesh.userData['enableMorph'];
+            u.uEdgeMorph.value.set(em[0], em[1], em[2], em[3]);
+          };
           this.terrainGroup.add(mesh);
 
           resident = { id, mesh, geometry: geom, material: mat };
@@ -749,16 +780,15 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
         const c = patch.centerBodyFixedM;
         resident.mesh.position.set(c[0], c[1], c[2]);
 
-        // Update per-patch morph uniforms
-        const u = resident.material.uniforms as unknown as ICdlodShaderUniforms;
-        u.uMorphFactor.value = patch.morphFactor;
-        u.uEnableMorph.value = morphEnabled ? 1.0 : 0.0;
-        u.uEdgeMorph.value.set(
+        // Update per-patch morph state (consumed by this mesh's onBeforeRender)
+        resident.mesh.userData['morphFactor'] = patch.morphFactor;
+        resident.mesh.userData['enableMorph'] = morphEnabled ? 1.0 : 0.0;
+        resident.mesh.userData['edgeMorph'] = [
           patch.edgeMorph.left,
           patch.edgeMorph.right,
           patch.edgeMorph.bottom,
           patch.edgeMorph.top,
-        );
+        ];
       }
     }
 
@@ -788,18 +818,33 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
             this.#oceanGeometryCache.set(oceanId, geom);
           }
 
-          let mat = this.#oceanMaterialCache.get(oceanId);
-          if (!mat) {
-            mat = createOceanMaterial({
+          if (!this.#oceanMaterial) {
+            this.#oceanMaterial = createOceanMaterial({
               wireframe: wire,
               body,
             });
-            this.#oceanMaterialCache.set(oceanId, mat);
           }
+          const mat = this.#oceanMaterial;
 
           const mesh = new Mesh(geom, mat);
           mesh.castShadow = this.castShadow();
           mesh.receiveShadow = this.receiveShadow();
+          mesh.renderOrder = 1;
+          mesh.userData['morphFactor'] = 0;
+          mesh.userData['enableMorph'] = 1;
+          mesh.userData['edgeMorph'] = [0, 0, 0, 0];
+          mesh.onBeforeRender = () => {
+            const u = mat.uniforms as unknown as IOceanShaderUniforms;
+            const em = mesh.userData['edgeMorph'] as [
+              number,
+              number,
+              number,
+              number,
+            ];
+            u.uMorphFactor.value = mesh.userData['morphFactor'];
+            u.uEnableMorph.value = mesh.userData['enableMorph'];
+            u.uEdgeMorph.value.set(em[0], em[1], em[2], em[3]);
+          };
           this.oceanGroup.add(mesh);
 
           resident = { id: oceanId, mesh, geometry: geom, material: mat };
@@ -809,15 +854,14 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
         const c = patch.centerBodyFixedM;
         resident.mesh.position.set(c[0], c[1], c[2]);
 
-        const u = resident.material.uniforms as unknown as IOceanShaderUniforms;
-        u.uMorphFactor.value = patch.morphFactor;
-        u.uEnableMorph.value = morphEnabled ? 1.0 : 0.0;
-        u.uEdgeMorph.value.set(
+        resident.mesh.userData['morphFactor'] = patch.morphFactor;
+        resident.mesh.userData['enableMorph'] = morphEnabled ? 1.0 : 0.0;
+        resident.mesh.userData['edgeMorph'] = [
           patch.edgeMorph.left,
           patch.edgeMorph.right,
           patch.edgeMorph.bottom,
           patch.edgeMorph.top,
-        );
+        ];
       }
     }
 
@@ -848,17 +892,21 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
     const sunCol = this.sunColor();
     const ambCol = this.ambientColor();
     const wire = this.wireframe();
-    const morphEnabled = this.cdlodMorphing();
+    const hidePatchEdges = this.hidePatchEdges();
     const palette = this.activePalette();
 
-    for (const resident of this.residentTerrainMeshes.values()) {
-      const u = resident.material.uniforms as unknown as ICdlodShaderUniforms;
-      if (resident.material.wireframe !== wire) {
-        resident.material.wireframe = wire;
-        resident.material.needsUpdate = true;
+    // Global (non-per-patch) uniforms live on the one shared material per group —
+    // no need to loop residents, and uMorphFactor/uEnableMorph/uEdgeMorph are left
+    // alone here since each mesh's onBeforeRender sets them from its own userData.
+    const terrainMat = this.#terrainMaterial;
+    if (terrainMat) {
+      const u = terrainMat.uniforms as unknown as ICdlodShaderUniforms;
+      if (terrainMat.wireframe !== wire) {
+        terrainMat.wireframe = wire;
+        terrainMat.needsUpdate = true;
       }
       u.uWireframeMode.value = wire ? 1.0 : 0.0;
-      u.uEnableMorph.value = morphEnabled ? 1.0 : 0.0;
+      u.uHidePatchEdges.value = hidePatchEdges ? 1.0 : 0.0;
       u.uRenderOrigin.value.copy(renderOriginVec);
       u.uSunDirection.value.set(sunDir[0], sunDir[1], sunDir[2]).normalize();
       if (typeof sunCol === 'string') u.uSunColor.value.set(sunCol);
@@ -879,14 +927,14 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
       u.uSnowElevationNorm.value = palette.snowElevationNorm;
     }
 
-    for (const resident of this.residentOceanMeshes.values()) {
-      const u = resident.material.uniforms as unknown as IOceanShaderUniforms;
-      if (resident.material.wireframe !== wire) {
-        resident.material.wireframe = wire;
-        resident.material.needsUpdate = true;
+    const oceanMat = this.#oceanMaterial;
+    if (oceanMat) {
+      const u = oceanMat.uniforms as unknown as IOceanShaderUniforms;
+      if (oceanMat.wireframe !== wire) {
+        oceanMat.wireframe = wire;
+        oceanMat.needsUpdate = true;
       }
       u.uWireframeMode.value = wire ? 1.0 : 0.0;
-      u.uEnableMorph.value = morphEnabled ? 1.0 : 0.0;
       u.uRenderOrigin.value.copy(renderOriginVec);
       u.uSunDirection.value.set(sunDir[0], sunDir[1], sunDir[2]).normalize();
       if (typeof sunCol === 'string') u.uSunColor.value.set(sunCol);

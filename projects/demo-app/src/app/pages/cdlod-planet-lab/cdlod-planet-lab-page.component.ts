@@ -84,6 +84,7 @@ interface IPlanetOption {
             [body]="selectedBody()"
             [quality]="selectedQuality()"
             [wireframe]="wireframe()"
+            [hidePatchEdges]="hidePatchEdges()"
             [cdlodMorphing]="cdlodMorphing()"
             [featureAdaptive]="featureAdaptive()"
             [showTerrain]="showTerrain()"
@@ -100,6 +101,7 @@ interface IPlanetOption {
             [maxLevel]="planeMaxLevel()"
             [baseResolution]="planeBaseResolution()"
             [wireframe]="wireframe()"
+            [hidePatchEdges]="hidePatchEdges()"
             [cdlodMorphing]="cdlodMorphing()"
             [featureAdaptive]="featureAdaptive()"
             [freezeLod]="freezeLod()"
@@ -114,6 +116,7 @@ interface IPlanetOption {
             [axialStreamingRadius]="cylinderAxialRadius()"
             [maxLevel]="cylinderMaxLevel()"
             [wireframe]="wireframe()"
+            [hidePatchEdges]="hidePatchEdges()"
             [cdlodMorphing]="cdlodMorphing()"
             [featureAdaptive]="featureAdaptive()"
             [freezeLod]="freezeLod()"
@@ -337,6 +340,15 @@ interface IPlanetOption {
               (ngModelChange)="wireframe.set($event)"
             />
             <span>Wireframe</span>
+          </label>
+
+          <label class="toggle-item">
+            <input
+              type="checkbox"
+              [ngModel]="hidePatchEdges()"
+              (ngModelChange)="hidePatchEdges.set($event)"
+            />
+            <span>Hide Patch Edges</span>
           </label>
 
           <label class="toggle-item">
@@ -625,6 +637,7 @@ export class CdlodPlanetLabPageComponent {
   readonly cylinderMaxLevel = signal<number>(6);
 
   readonly wireframe = signal(false);
+  readonly hidePatchEdges = signal(false);
   readonly cdlodMorphing = signal(true);
   readonly featureAdaptive = signal(true);
   readonly showTerrain = signal(true);

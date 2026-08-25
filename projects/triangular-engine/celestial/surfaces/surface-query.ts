@@ -18,6 +18,7 @@ import {
   TerrainGeneratorDef,
 } from './terrain-def';
 import {
+  compileContinentalGenerator,
   compileCraterFieldGenerator,
   compileRidgedFractalGenerator,
 } from './terrain-generators';
@@ -94,6 +95,8 @@ function compileGeneratorDef(
       return compileFractalNoiseGenerator(definition, seed);
     case 'ridged-fractal-3d':
       return compileRidgedFractalGenerator(definition, seed);
+    case 'continental-3d':
+      return compileContinentalGenerator(definition, seed);
     case 'crater-field-3d':
       return compileCraterFieldGenerator(definition, seed);
   }

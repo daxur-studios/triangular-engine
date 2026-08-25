@@ -3,6 +3,7 @@ import { launchSitePose } from '../frames/launch-site';
 import {
   FAR_MOON,
   HOME_BASE_STATIC_FLATTEN_DEFS,
+  HOME_BASE_COASTAL_ACCESS,
   HOME_MOON,
   HOME_PAD,
   HOME_PLANET,
@@ -130,9 +131,10 @@ describe('HOME_PAD', () => {
 
     const flattened = structuredClone(HOME_PLANET);
     flattened.terrain!.localFlatten = HOME_BASE_STATIC_FLATTEN_DEFS;
-    expect(createSurfaceSampler(flattened).sample([1, 0, 0]).elevationM).toBe(
-      flatten.elevationM,
-    );
+    expect(
+      createSurfaceSampler(flattened).sample(flatten.directionBodyFixed)
+        .elevationM,
+    ).toBe(flatten.elevationM);
 
     const pose = launchSitePose(HOME_PAD, flattened);
     expect(Math.hypot(...pose.positionM)).toBeCloseTo(
@@ -166,5 +168,49 @@ describe('HOME_PLANET terrain visual data', () => {
     expect(Number.isFinite(elevationM)).toBeTrue();
     expect(elevationM).toBeGreaterThanOrEqual(sampler.minElevationM);
     expect(elevationM).toBeLessThanOrEqual(sampler.maxElevationM);
+  });
+
+  it('forms an Earth-like majority-ocean world with broad continents', () => {
+    const sampler = createSurfaceSampler(HOME_PLANET);
+    const sampleCount = 8_192;
+    const directions = new Float64Array(sampleCount * 3);
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    for (let index = 0; index < sampleCount; index += 1) {
+      const y = 1 - (2 * (index + 0.5)) / sampleCount;
+      const radial = Math.sqrt(1 - y * y);
+      const azimuth = goldenAngle * index;
+      directions[index * 3] = Math.cos(azimuth) * radial;
+      directions[index * 3 + 1] = y;
+      directions[index * 3 + 2] = Math.sin(azimuth) * radial;
+    }
+    const elevations = sampler.sampleBatch(directions);
+    const seaLevelM = HOME_PLANET.terrain!.ocean!.seaLevelM;
+    const waterFraction =
+      [...elevations].filter((elevationM) => elevationM < seaLevelM).length /
+      sampleCount;
+    expect(waterFraction).toBeGreaterThan(0.65);
+    expect(waterFraction).toBeLessThan(0.75);
+  });
+
+  it('places the stock base on land beside a known shore and navigable water', () => {
+    const sampler = createSurfaceSampler(HOME_PLANET);
+    const seaLevelM = HOME_PLANET.terrain!.ocean!.seaLevelM;
+    const centerElevationM = sampler.sample(
+      HOME_BASE_COASTAL_ACCESS.centerDirectionBodyFixed,
+    ).elevationM;
+    const shoreElevationM = sampler.sample(
+      HOME_BASE_COASTAL_ACCESS.shoreDirectionBodyFixed,
+    ).elevationM;
+    const waterElevationM = sampler.sample(
+      HOME_BASE_COASTAL_ACCESS.waterDirectionBodyFixed,
+    ).elevationM;
+
+    expect(centerElevationM).toBeGreaterThan(seaLevelM + 20);
+    expect(Math.abs(shoreElevationM - seaLevelM)).toBeLessThan(0.01);
+    expect(waterElevationM).toBeLessThan(seaLevelM - 20);
+    expect(HOME_BASE_COASTAL_ACCESS.shoreDistanceM).toBeGreaterThan(1_000);
+    expect(HOME_BASE_COASTAL_ACCESS.shoreDistanceM).toBeLessThan(1_500);
+    expect(HOME_BASE_COASTAL_ACCESS.shallowWaterWidthM).toBeLessThan(800);
+    expect(Math.abs(HOME_PAD.latitude)).toBeLessThan(15);
   });
 });

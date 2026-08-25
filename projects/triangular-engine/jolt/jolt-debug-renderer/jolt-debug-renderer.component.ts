@@ -48,6 +48,15 @@ export class JoltDebugRendererComponent implements OnDestroy {
    */
   private static readonly DEBUG_RENDER_ORDER = 999999;
 
+  /**
+   * Edge-vertex-count cutoff for folding a shape's wireframe into the shared
+   * per-color draw call. Below this it's cheaper to CPU-transform and merge
+   * (fewer draw calls wins); above it, a single dedicated object with a
+   * GPU-side matrix transform is cheaper than copying that many vertices
+   * every frame — e.g. a terrain heightfield collider.
+   */
+  private static readonly MERGE_VERTEX_THRESHOLD = 512;
+
   readonly engineService = inject(EngineService);
   readonly parentPhysics = inject(JoltPhysicsComponent);
   readonly destroyRef = inject(DestroyRef);
@@ -412,6 +421,42 @@ export class JoltDebugRendererComponent implements OnDestroy {
       meshes.forEach((mesh) => (mesh.visible = false));
     });
 
+    // Fold per-body shape-wireframe edges into the same per-color buckets as
+    // raw DrawLine calls, so the whole frame's small shapes (vessel parts,
+    // debris, scatter colliders — most bodies) render as one draw call per
+    // color instead of one LineSegments + one matrix.decompose per body.
+    // Large static shapes (e.g. a terrain heightfield) stay as their own
+    // object below — CPU-transforming thousands of edge vertices every frame
+    // would cost more than the single draw call it would save.
+    const largeLineBatches: Array<{
+      edges: BufferGeometry;
+      color: number;
+      matrix: Matrix4;
+    }> = [];
+    if (this.linesOnly()) {
+      const v = new Vector3();
+      this.geometryList.forEach(({ geometry, color, matrix }) => {
+        let edges = this.edgesCache.get(geometry);
+        if (!edges) {
+          edges = new EdgesGeometry(geometry);
+          this.edgesCache.set(geometry, edges);
+        }
+        const positionAttr = edges.getAttribute('position') as BufferAttribute;
+        if (
+          positionAttr.count >
+          JoltDebugRendererComponent.MERGE_VERTEX_THRESHOLD
+        ) {
+          largeLineBatches.push({ edges, color, matrix });
+          return;
+        }
+        const arr = (this.lineCache[color] = this.lineCache[color] || []);
+        for (let vi = 0; vi < positionAttr.count; vi++) {
+          v.fromBufferAttribute(positionAttr, vi).applyMatrix4(matrix);
+          arr.push(v.clone());
+        }
+      });
+    }
+
     // Lines
     Object.entries(this.lineCache).forEach(([colorU32, points]) => {
       const color = parseInt(colorU32, 10);
@@ -448,33 +493,31 @@ export class JoltDebugRendererComponent implements OnDestroy {
       }
     });
 
-    // Geometry batches
-    this.geometryList.forEach(
-      ({ geometry, color, matrix, cullMode, drawMode }, i) => {
-        if (this.linesOnly()) {
-          let line = this.batchLineList[i];
-          let edges = this.edgesCache.get(geometry);
-          if (!edges) {
-            edges = new EdgesGeometry(geometry);
-            this.edgesCache.set(geometry, edges);
-          }
-          if (!line) {
-            const material = new LineBasicMaterial({
-              color,
-              depthTest: false,
-              depthWrite: false,
-            });
-            line = this.batchLineList[i] = new LineSegments(edges, material);
-            line.renderOrder = JoltDebugRendererComponent.DEBUG_RENDER_ORDER;
-            scene.add(line);
-          } else {
-            line.geometry = edges;
-            const mat = line.material as LineBasicMaterial;
-            mat.color.set(color);
-          }
-          matrix.decompose(line.position, line.quaternion, line.scale);
-          line.visible = true;
+    // Large static line-mode shapes that didn't get merged above.
+    if (this.linesOnly()) {
+      largeLineBatches.forEach(({ edges, color, matrix }, i) => {
+        let line = this.batchLineList[i];
+        if (!line) {
+          const material = new LineBasicMaterial({
+            color,
+            depthTest: false,
+            depthWrite: false,
+          });
+          line = this.batchLineList[i] = new LineSegments(edges, material);
+          line.renderOrder = JoltDebugRendererComponent.DEBUG_RENDER_ORDER;
+          scene.add(line);
         } else {
+          line.geometry = edges;
+          const mat = line.material as LineBasicMaterial;
+          mat.color.set(color);
+        }
+        matrix.decompose(line.position, line.quaternion, line.scale);
+        line.visible = true;
+      });
+    } else {
+      // Solid mesh mode (linesOnly = false): unmerged, one mesh per body.
+      this.geometryList.forEach(
+        ({ geometry, color, matrix, cullMode, drawMode }, i) => {
           const material = this.getMeshMaterial(color, cullMode, drawMode);
           let mesh = this.meshList[i];
           if (!mesh) {
@@ -487,9 +530,9 @@ export class JoltDebugRendererComponent implements OnDestroy {
           }
           matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
           mesh.visible = true;
-        }
-      },
-    );
+        },
+      );
+    }
 
     // Text via CSS2D (simplified)
     if (!this.linesOnly())

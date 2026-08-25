@@ -132,8 +132,8 @@ describe('createStockBodiesForTier', () => {
       const sourceGenerator = HOME_PLANET.terrain!.generators[0];
       const generatedGenerator = planet.terrain!.generators[0];
       if (
-        sourceGenerator.kind === 'fractal-noise-3d' &&
-        generatedGenerator.kind === 'fractal-noise-3d'
+        sourceGenerator.kind === 'continental-3d' &&
+        generatedGenerator.kind === 'continental-3d'
       ) {
         expect(generatedGenerator.frequency).toBeCloseTo(
           sourceGenerator.frequency * (HOME_PLANET.radiusM / planet.radiusM),

@@ -138,6 +138,18 @@ function scaleTerrainFrequency(
         frequency: generator.frequency * inverseScale,
         mask,
       };
+    case 'continental-3d':
+      return {
+        ...generator,
+        frequency: generator.frequency * inverseScale,
+        coastVariation: generator.coastVariation
+          ? {
+              ...generator.coastVariation,
+              frequency: generator.coastVariation.frequency * inverseScale,
+            }
+          : undefined,
+        mask,
+      };
   }
 }
 

@@ -12,15 +12,47 @@ const HOME_PLANET_MU_M3_PER_S2 = muForSurfaceGravity(
   HOME_PLANET_RADIUS_M,
   9.81,
 );
-const HOME_PAD_DIRECTION_BODY_FIXED: [number, number, number] = [1, 0, 0];
-/** Degrees east of the pad, leaving enough separation for both colliders and approach space. */
-const HOME_RUNWAY_LONGITUDE_DEG = 0.03;
+/**
+ * Authored from `coastalSitesFor(HOME_PLANET)`: low-latitude for efficient
+ * launches, on flat land about 1.1 km south of a compact deep-water coast.
+ */
+const HOME_BASE_LATITUDE_DEG = 11.535766065860328;
+const HOME_BASE_LONGITUDE_DEG = -116.26253854777012;
+const HOME_BASE_LATITUDE_RAD = (HOME_BASE_LATITUDE_DEG * Math.PI) / 180;
+const HOME_BASE_LONGITUDE_RAD = (HOME_BASE_LONGITUDE_DEG * Math.PI) / 180;
+const HOME_PAD_DIRECTION_BODY_FIXED: [number, number, number] = [
+  Math.cos(HOME_BASE_LATITUDE_RAD) * Math.cos(HOME_BASE_LONGITUDE_RAD),
+  Math.sin(HOME_BASE_LATITUDE_RAD),
+  Math.cos(HOME_BASE_LATITUDE_RAD) * Math.sin(HOME_BASE_LONGITUDE_RAD),
+];
+/** Degrees inland/south of the pad, leaving separation for colliders and port space. */
+const HOME_RUNWAY_LATITUDE_DEG = HOME_BASE_LATITUDE_DEG - 0.03;
+const HOME_RUNWAY_LATITUDE_RAD = (HOME_RUNWAY_LATITUDE_DEG * Math.PI) / 180;
+const HOME_RUNWAY_LONGITUDE_DEG = HOME_BASE_LONGITUDE_DEG;
 const HOME_RUNWAY_LONGITUDE_RAD = (HOME_RUNWAY_LONGITUDE_DEG * Math.PI) / 180;
 const HOME_RUNWAY_DIRECTION_BODY_FIXED: [number, number, number] = [
-  Math.cos(HOME_RUNWAY_LONGITUDE_RAD),
-  0,
-  Math.sin(HOME_RUNWAY_LONGITUDE_RAD),
+  Math.cos(HOME_RUNWAY_LATITUDE_RAD) * Math.cos(HOME_RUNWAY_LONGITUDE_RAD),
+  Math.sin(HOME_RUNWAY_LATITUDE_RAD),
+  Math.cos(HOME_RUNWAY_LATITUDE_RAD) * Math.sin(HOME_RUNWAY_LONGITUDE_RAD),
 ];
+
+/**
+ * Stable coastal access authored by the deterministic shoreline finder. Port
+ * placement can follow the centre-to-shore direction without searching the
+ * planet again at runtime.
+ */
+export const HOME_BASE_COASTAL_ACCESS = {
+  centerDirectionBodyFixed: HOME_PAD_DIRECTION_BODY_FIXED,
+  shoreDirectionBodyFixed: [
+    -0.43277446209053083, 0.20162298503114995, -0.8786662829933674,
+  ] as [number, number, number],
+  waterDirectionBodyFixed: [
+    -0.4322877910938364, 0.20265665472236596, -0.8786680522062651,
+  ] as [number, number, number],
+  shoreDistanceM: 1_089.495086701645,
+  waterDistanceM: 1_775,
+  shallowWaterWidthM: 685.504913298355,
+} as const;
 
 /**
  * Kerbin-scale so a low orbit is reachable in a short flight instead of a
@@ -52,6 +84,28 @@ const HOME_PLANET_BIOME_MASK_FREQUENCY = 0.5;
 const HOME_PLANET_MASK_THRESHOLDS = {
   lowerThreshold: -0.08,
   upperThreshold: 0.08,
+};
+
+/**
+ * One shared low-frequency field establishes the continent outline and gates
+ * local biome relief. Keeping the masks identical prevents positive-only
+ * mountain ridges from lifting isolated specks out of deep ocean.
+ */
+const HOME_PLANET_CONTINENT_FIELD = {
+  frequency: 0.55,
+  octaves: 4,
+  lacunarity: 2,
+  persistence: 0.5,
+  seaLevelThreshold: 0.15,
+} as const;
+const HOME_PLANET_LAND_MASK = {
+  kind: 'noise-mask-3d' as const,
+  frequency: HOME_PLANET_CONTINENT_FIELD.frequency,
+  octaves: HOME_PLANET_CONTINENT_FIELD.octaves,
+  lacunarity: HOME_PLANET_CONTINENT_FIELD.lacunarity,
+  persistence: HOME_PLANET_CONTINENT_FIELD.persistence,
+  lowerThreshold: HOME_PLANET_CONTINENT_FIELD.seaLevelThreshold,
+  upperThreshold: HOME_PLANET_CONTINENT_FIELD.seaLevelThreshold + 0.09,
 };
 
 /**
@@ -91,6 +145,7 @@ const HOME_PLANET_BIOMES: ITerrainBiomeDef[] = [
         persistence: 0.5,
         ridgeExponent: 3,
         seedOffset: 210,
+        mask: HOME_PLANET_LAND_MASK,
       },
     ],
     visual: {
@@ -118,6 +173,7 @@ const HOME_PLANET_BIOMES: ITerrainBiomeDef[] = [
         lacunarity: 2,
         persistence: 0.5,
         seedOffset: 710,
+        mask: HOME_PLANET_LAND_MASK,
       },
     ],
     visual: {
@@ -129,21 +185,36 @@ const HOME_PLANET_BIOMES: ITerrainBiomeDef[] = [
 
 const HOME_PLANET_BASE_TERRAIN: ITerrainDef = {
   seed: 0x5eed_484f,
-  // Bounds recomputed for the 2026-07-30 richer pass: worst case is
-  // base(+-3_000) + highlands(0..6_500) + detail(+-400), so
-  // -3_650/+9_900 true range; padded to -4_000/+10_200 rather than pinned
-  // exactly to that sum, so this doesn't need re-touching over a rounding
-  // difference the next time a generator amplitude moves.
+  // Continental shelf (-3_500..900) + land-only regional relief (+-600) +
+  // highlands (0..6_500) + detail (+-400), with padding for future tuning.
   minElevationM: -4_000,
-  maxElevationM: 10_200,
+  maxElevationM: 8_700,
   generators: [
     {
+      kind: 'continental-3d',
+      ...HOME_PLANET_CONTINENT_FIELD,
+      transitionWidth: 0.045,
+      oceanDepthM: 3_500,
+      landHeightM: 900,
+      coastVariation: {
+        frequency: 2.4,
+        octaves: 2,
+        lacunarity: 2,
+        persistence: 0.5,
+        seedOffset: 1_200,
+        strength: 0.78,
+      },
+    },
+    /** Regional relief keeps continental interiors from reading as one plateau. */
+    {
       kind: 'fractal-noise-3d',
-      amplitudeM: 3_000,
-      frequency: 0.8,
+      amplitudeM: 600,
+      frequency: 4.5,
       octaves: 4,
       lacunarity: 2,
       persistence: 0.5,
+      seedOffset: 850,
+      mask: HOME_PLANET_LAND_MASK,
     },
     /**
      * Flight-scale detail layer (phase-7-terrain-landing.md C-R2), amplitude
@@ -162,6 +233,7 @@ const HOME_PLANET_BASE_TERRAIN: ITerrainDef = {
       lacunarity: 2,
       persistence: 0.5,
       seedOffset: 900,
+      mask: HOME_PLANET_LAND_MASK,
     },
   ],
   biomes: HOME_PLANET_BIOMES,
@@ -303,10 +375,10 @@ export const HOME_PLANET: ICelestialBody = {
 };
 
 /**
- * Latitude 0 places the pad on the equator, in `HOME_MOON`'s orbital plane
- * (inclination 0) — a real launch can reach the moon with an eastward
- * gravity turn and a prograde burn, the same way it reaches any other
- * inclination. A polar pad (latitude 90) was tried first for a simpler
+ * The coastal finder keeps the pad at a low 11.5-degree latitude, close
+ * enough to `HOME_MOON`'s orbital plane (inclination 0) for a practical
+ * eastward gravity turn and prograde transfer. A polar pad (latitude 90) was
+ * tried first for a simpler
  * "straight up" liftoff, but every orbit launched from a pole is
  * necessarily polar regardless of heading (the launch point sits on the
  * planet's rotation axis) — no amount of in-flight yaw can reach an
@@ -315,8 +387,8 @@ export const HOME_PLANET: ICelestialBody = {
 export const HOME_PAD: ILaunchSite = {
   id: 'home-pad',
   bodyId: HOME_PLANET.id,
-  latitude: 0,
-  longitude: 0,
+  latitude: HOME_BASE_LATITUDE_DEG,
+  longitude: HOME_BASE_LONGITUDE_DEG,
   altitude: 0,
   orientation: 0,
   type: 'pad',
@@ -326,7 +398,7 @@ export const HOME_PAD: ILaunchSite = {
 export const HOME_RUNWAY: ILaunchSite = {
   id: 'home-runway',
   bodyId: HOME_PLANET.id,
-  latitude: 0,
+  latitude: HOME_RUNWAY_LATITUDE_DEG,
   longitude: HOME_RUNWAY_LONGITUDE_DEG,
   altitude: 0,
   orientation: 0,
@@ -339,7 +411,8 @@ export const HOME_RUNWAY: ILaunchSite = {
  * visual-only cratered terrain definition, circular equatorial orbit at 12,000 km —
  * reachable with a single prograde burn from either `HOME_PAD`'s equatorial
  * debug-teleport orbit (`leo-teleport.ts`) or a real equatorial launch
- * (`HOME_PAD` itself now sits on the equator for exactly this reason). SOI ≈
+ * (`HOME_PAD` itself now sits at a low latitude for exactly
+ * this reason). SOI ≈
  * 2.43e6 m, orbital period ≈ 38.6 h — both comfortably inside the rails
  * warp ladder.
  */

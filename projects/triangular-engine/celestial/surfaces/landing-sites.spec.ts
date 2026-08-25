@@ -1,7 +1,7 @@
 import { ICelestialBody } from '../bodies/celestial-body';
 import { Vec3d, vec3Cross, vec3Dot, vec3Normalize } from '../math/vec3';
 import { createSurfaceSampler } from './surface-query';
-import { landingSitesFor } from './landing-sites';
+import { coastalSitesFor, landingSitesFor } from './landing-sites';
 
 const FLAT_BODY: ICelestialBody = {
   id: 'flat-test-body',
@@ -47,6 +47,36 @@ const RUGGED_BODY: ICelestialBody = {
   },
 };
 const RUGGED_PAD_RADIUS_M = 100;
+
+const COASTAL_BODY: ICelestialBody = {
+  id: 'coastal-test-body',
+  kind: 'planet',
+  radiusM: 100_000,
+  muM3PerS2: 9.81e10,
+  terrain: {
+    seed: 47,
+    minElevationM: -2_000,
+    maxElevationM: 1_000,
+    generators: [
+      {
+        kind: 'continental-3d',
+        frequency: 0.8,
+        octaves: 4,
+        lacunarity: 2,
+        persistence: 0.5,
+        seaLevelThreshold: 0.1,
+        transitionWidth: 0.3,
+        oceanDepthM: 2_000,
+        landHeightM: 1_000,
+      },
+    ],
+    ocean: {
+      seaLevelM: 0,
+      shallowColorRgb: [0.1, 0.4, 0.6],
+      deepColorRgb: [0.02, 0.08, 0.2],
+    },
+  },
+};
 
 /** Independent re-derivation of worst edge-to-centre slope, using only the public sampler API — verifies the output *contract*, not `landingSitesFor`'s internals. */
 function worstSlopeAt(
@@ -198,5 +228,83 @@ describe('landingSitesFor', () => {
       minSeparationRadians: (5 * Math.PI) / 180,
     });
     expect(sites.length).toBe(6);
+  });
+});
+
+describe('coastalSitesFor', () => {
+  const options = {
+    count: 3,
+    candidateCount: 8_000,
+    radiusM: 80,
+    blendRadiusM: 120,
+    maxSlopeRadians: (10 * Math.PI) / 180,
+    minSeparationRadians: (8 * Math.PI) / 180,
+    minElevationAboveSeaM: 5,
+    maxElevationAboveSeaM: 250,
+    waterSearchRadiusM: 2_500,
+    maxShoreDistanceM: 1_600,
+    maxShallowWaterWidthM: 1_500,
+    waterBearingCount: 16,
+    waterRingCount: 4,
+    minWaterDepthM: 10,
+  } as const;
+
+  it('returns nothing for a dry body', () => {
+    const dryBody = structuredClone(COASTAL_BODY);
+    dryBody.terrain!.ocean = undefined;
+    expect(coastalSitesFor(dryBody, options)).toEqual([]);
+  });
+
+  it('deterministically pairs buildable land with a refined shore and navigable water', () => {
+    const first = coastalSitesFor(COASTAL_BODY, options);
+    const second = coastalSitesFor(structuredClone(COASTAL_BODY), options);
+    expect(second).toEqual(first);
+    expect(first).toHaveSize(options.count);
+
+    const sampler = createSurfaceSampler(COASTAL_BODY);
+    for (const site of first) {
+      expect(site.elevationAboveSeaM).toBeGreaterThanOrEqual(
+        options.minElevationAboveSeaM,
+      );
+      expect(site.elevationAboveSeaM).toBeLessThanOrEqual(
+        options.maxElevationAboveSeaM,
+      );
+      expect(
+        sampler.sample(site.waterDirectionBodyFixed).elevationM,
+      ).toBeLessThanOrEqual(-options.minWaterDepthM);
+      expect(
+        Math.abs(sampler.sample(site.shoreDirectionBodyFixed).elevationM),
+      ).toBeLessThan(0.01);
+      expect(site.shoreDistanceM).toBeGreaterThan(0);
+      expect(site.shoreDistanceM).toBeLessThan(site.waterDistanceM);
+      expect(site.shoreDistanceM).toBeLessThanOrEqual(
+        options.maxShoreDistanceM,
+      );
+      expect(site.shallowWaterWidthM).toBeCloseTo(
+        site.waterDistanceM - site.shoreDistanceM,
+        6,
+      );
+      expect(site.shallowWaterWidthM).toBeLessThanOrEqual(
+        options.maxShallowWaterWidthM,
+      );
+    }
+  });
+
+  it('rejects a water search radius that overlaps the graded footprint', () => {
+    expect(() =>
+      coastalSitesFor(COASTAL_BODY, {
+        ...options,
+        waterSearchRadiusM: options.radiusM + options.blendRadiusM,
+      }),
+    ).toThrowError(RangeError);
+  });
+
+  it('rejects a maximum shore distance beyond the water search radius', () => {
+    expect(() =>
+      coastalSitesFor(COASTAL_BODY, {
+        ...options,
+        maxShoreDistanceM: options.waterSearchRadiusM + 1,
+      }),
+    ).toThrowError(RangeError);
   });
 });

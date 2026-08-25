@@ -5,6 +5,7 @@ import {
 } from 'triangular-engine/celestial';
 import { selectCdlodPatches } from './cdlod-quadtree';
 import {
+  CDLOD_OCEAN_SURFACE_BIAS_M,
   generateCdlodOceanPatchGeometry,
   generateCdlodPatchGeometry,
 } from './cdlod-patch-mesher';
@@ -76,13 +77,11 @@ describe('CDLOD Planet Engine', () => {
       x: 1,
       y: 1,
     };
-    const meshResult = generateCdlodPatchGeometry(
-      body,
-      sampler,
-      patch,
-      16,
-      [body.radiusM, 0, 0],
-    );
+    const meshResult = generateCdlodPatchGeometry(body, sampler, patch, 16, [
+      body.radiusM,
+      0,
+      0,
+    ]);
 
     expect(meshResult.geometry).toBeDefined();
     expect(meshResult.geometry.getAttribute('position')).toBeDefined();
@@ -94,7 +93,10 @@ describe('CDLOD Planet Engine', () => {
   });
 
   it('creates CDLOD shader material with correct uniforms and edge morph vector', () => {
-    const mat = createCdlodTerrainMaterial({ wireframe: true, elevationScale: 1.5 });
+    const mat = createCdlodTerrainMaterial({
+      wireframe: true,
+      elevationScale: 1.5,
+    });
     expect(mat).toBeDefined();
     expect(mat.uniforms['uMorphFactor']).toBeDefined();
     expect(mat.uniforms['uEnableMorph']).toBeDefined();
@@ -111,6 +113,8 @@ describe('CDLOD Planet Engine', () => {
     expect(mat.uniforms['uSunColor']).toBeDefined();
     expect(mat.vertexShader).toContain('logdepthbuf_pars_vertex');
     expect(mat.fragmentShader).toContain('logdepthbuf_pars_fragment');
+    expect(mat.depthWrite).toBeFalse();
+    expect(mat.polygonOffset).toBeTrue();
   });
 
   it('generates shared-topology ocean patch geometry with coarsePosition matching terrain', () => {
@@ -120,12 +124,11 @@ describe('CDLOD Planet Engine', () => {
       x: 0,
       y: 0,
     };
-    const oceanMesh = generateCdlodOceanPatchGeometry(
-      body,
-      patch,
-      16,
-      [body.radiusM, 0, 0],
-    );
+    const oceanMesh = generateCdlodOceanPatchGeometry(body, patch, 16, [
+      body.radiusM,
+      0,
+      0,
+    ]);
 
     expect(oceanMesh.geometry).toBeDefined();
     expect(oceanMesh.geometry.getAttribute('position')).toBeDefined();
@@ -133,6 +136,18 @@ describe('CDLOD Planet Engine', () => {
     expect(oceanMesh.geometry.getAttribute('normal')).toBeDefined();
     expect(oceanMesh.geometry.getAttribute('uv')).toBeDefined();
     expect(oceanMesh.triangleCount).toBe(16 * 16 * 2);
+
+    const position = oceanMesh.geometry.getAttribute('position');
+    const firstWorldPosition: [number, number, number] = [
+      position.getX(0) + body.radiusM,
+      position.getY(0),
+      position.getZ(0),
+    ];
+    expect(
+      Math.hypot(...firstWorldPosition) -
+        body.radiusM -
+        (body.terrain?.ocean?.seaLevelM ?? 0),
+    ).toBeCloseTo(CDLOD_OCEAN_SURFACE_BIAS_M, 2);
   });
 
   describe('Motion Look-Ahead & Velocity Prediction', () => {
@@ -166,7 +181,11 @@ describe('CDLOD Planet Engine', () => {
     });
 
     it('applies curved Keplerian orbital sampler look-ahead', () => {
-      const cameraPos: [number, number, number] = [body.radiusM + 100_000, 0, 0];
+      const cameraPos: [number, number, number] = [
+        body.radiusM + 100_000,
+        0,
+        0,
+      ];
       let sampledLead = 0;
 
       const patches = selectCdlodPatches({

@@ -47,6 +47,39 @@ const CRATER_BODY: ICelestialBody = {
   },
 };
 
+const CONTINENTAL_BODY: ICelestialBody = {
+  id: 'continental-test',
+  kind: 'planet',
+  radiusM: 600_000,
+  muM3PerS2: 3.5316e12,
+  terrain: {
+    seed: 7,
+    minElevationM: -4_000,
+    maxElevationM: 2_000,
+    generators: [
+      {
+        kind: 'continental-3d',
+        frequency: 1,
+        octaves: 4,
+        lacunarity: 2,
+        persistence: 0.5,
+        seaLevelThreshold: 0.15,
+        transitionWidth: 0.25,
+        oceanDepthM: 4_000,
+        landHeightM: 2_000,
+        coastVariation: {
+          frequency: 2,
+          octaves: 2,
+          lacunarity: 2,
+          persistence: 0.5,
+          seedOffset: 100,
+          strength: 0.75,
+        },
+      },
+    ],
+  },
+};
+
 const SAMPLE_DIRECTIONS = [
   [1, 0, 0],
   [0.2, 0.7, -0.4],
@@ -105,6 +138,85 @@ describe('ridged-fractal-3d generator', () => {
       malformed.terrain!.generators[0] as { ridgeExponent: number }
     ).ridgeExponent = 0.5;
     expect(() => createSurfaceSampler(malformed)).toThrowError(RangeError);
+  });
+});
+
+describe('continental-3d generator', () => {
+  it('is deterministic, scalar/batch-identical, and creates both land and ocean', () => {
+    const sampler = createSurfaceSampler(CONTINENTAL_BODY);
+    const directions = new Float64Array(SAMPLE_DIRECTIONS.flat());
+    const output = sampler.sampleBatch(directions);
+    expect([...output]).toEqual(
+      SAMPLE_DIRECTIONS.map(
+        (direction) => sampler.sample(direction).elevationM,
+      ),
+    );
+    expect([...output].some((elevationM) => elevationM < 0)).toBeTrue();
+    expect([...output].some((elevationM) => elevationM > 0)).toBeTrue();
+    expect(
+      sampleSurface(structuredClone(CONTINENTAL_BODY), SAMPLE_DIRECTIONS[0]),
+    ).toEqual(sampleSurface(CONTINENTAL_BODY, SAMPLE_DIRECTIONS[0]));
+  });
+
+  it('stays inside its authored ocean-depth and land-height range', () => {
+    const sampler = createSurfaceSampler(CONTINENTAL_BODY);
+    for (const direction of SAMPLE_DIRECTIONS) {
+      const elevationM = sampler.sample(direction).elevationM;
+      expect(elevationM).toBeGreaterThanOrEqual(-4_000);
+      expect(elevationM).toBeLessThanOrEqual(2_000);
+    }
+  });
+
+  it('varies shelf steepness without moving the land/ocean boundary', () => {
+    const uniformCoastBody = structuredClone(CONTINENTAL_BODY);
+    delete (
+      uniformCoastBody.terrain!.generators[0] as {
+        coastVariation?: unknown;
+      }
+    ).coastVariation;
+    const variedSampler = createSurfaceSampler(CONTINENTAL_BODY);
+    const uniformSampler = createSurfaceSampler(uniformCoastBody);
+    const pairs = SAMPLE_DIRECTIONS.map((direction) => [
+      variedSampler.sample(direction).elevationM,
+      uniformSampler.sample(direction).elevationM,
+    ]);
+
+    expect(
+      pairs.every(
+        ([varied, uniform]) => Math.sign(varied) === Math.sign(uniform),
+      ),
+    ).toBeTrue();
+    expect(
+      pairs.some(([varied, uniform]) => Math.abs(varied - uniform) > 1),
+    ).toBeTrue();
+  });
+
+  it('validates malformed continental parameters', () => {
+    const zeroWidth = structuredClone(CONTINENTAL_BODY);
+    (
+      zeroWidth.terrain!.generators[0] as { transitionWidth: number }
+    ).transitionWidth = 0;
+    expect(() => createSurfaceSampler(zeroWidth)).toThrowError(RangeError);
+
+    const invalidThreshold = structuredClone(CONTINENTAL_BODY);
+    (
+      invalidThreshold.terrain!.generators[0] as {
+        seaLevelThreshold: number;
+      }
+    ).seaLevelThreshold = 1;
+    expect(() => createSurfaceSampler(invalidThreshold)).toThrowError(
+      RangeError,
+    );
+
+    const invalidCoastVariation = structuredClone(CONTINENTAL_BODY);
+    (
+      invalidCoastVariation.terrain!.generators[0] as {
+        coastVariation: { strength: number };
+      }
+    ).coastVariation.strength = 1;
+    expect(() => createSurfaceSampler(invalidCoastVariation)).toThrowError(
+      RangeError,
+    );
   });
 });
 

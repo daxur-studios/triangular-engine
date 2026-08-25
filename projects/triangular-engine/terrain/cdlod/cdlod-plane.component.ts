@@ -82,6 +82,7 @@ export class CdlodPlaneComponent extends GroupComponent implements OnDestroy {
   readonly screenSpaceFactorPx = input<number>(750);
   readonly morphRangeRatio = input<number>(0.25);
   readonly wireframe = input(false);
+  readonly hidePatchEdges = input(false);
   readonly featureAdaptive = input(true);
   readonly cdlodMorphing = input(true);
   readonly freezeLod = input(false);
@@ -146,6 +147,17 @@ export class CdlodPlaneComponent extends GroupComponent implements OnDestroy {
         ).uWireframeMode;
         if (uWire) uWire.value = isWire ? 1.0 : 0.0;
         resident.material.needsUpdate = true;
+      }
+    });
+
+    // Patch-edge fade dynamic synchronization
+    effect(() => {
+      const hide = this.hidePatchEdges();
+      for (const resident of this.residentMeshes.values()) {
+        const uHide = (
+          resident.material.uniforms as unknown as ICdlodShaderUniforms
+        ).uHidePatchEdges;
+        if (uHide) uHide.value = hide ? 1.0 : 0.0;
       }
     });
 
@@ -299,6 +311,7 @@ export class CdlodPlaneComponent extends GroupComponent implements OnDestroy {
   ): void {
     const desiredKeys = new Set<string>();
     const isWire = this.wireframe();
+    const hidePatchEdges = this.hidePatchEdges();
     const doMorph = this.cdlodMorphing();
     const palette = this.activePalette();
     const bodyId = this.body()?.id ?? 'home-planet';
@@ -325,6 +338,7 @@ export class CdlodPlaneComponent extends GroupComponent implements OnDestroy {
 
         const mat = createCdlodTerrainMaterial({
           wireframe: isWire,
+          hidePatchEdges,
           palette,
         });
 
@@ -350,6 +364,7 @@ export class CdlodPlaneComponent extends GroupComponent implements OnDestroy {
         );
       }
       if (u.uWireframeMode) u.uWireframeMode.value = isWire ? 1.0 : 0.0;
+      if (u.uHidePatchEdges) u.uHidePatchEdges.value = hidePatchEdges ? 1.0 : 0.0;
     }
 
     // Prune stale resident meshes
@@ -364,9 +379,11 @@ export class CdlodPlaneComponent extends GroupComponent implements OnDestroy {
 
   private updateExistingPatchUniforms(): void {
     const isWire = this.wireframe();
+    const hidePatchEdges = this.hidePatchEdges();
     for (const resident of this.residentMeshes.values()) {
       const u = resident.material.uniforms as unknown as ICdlodShaderUniforms;
       if (u.uWireframeMode) u.uWireframeMode.value = isWire ? 1.0 : 0.0;
+      if (u.uHidePatchEdges) u.uHidePatchEdges.value = hidePatchEdges ? 1.0 : 0.0;
     }
   }
 

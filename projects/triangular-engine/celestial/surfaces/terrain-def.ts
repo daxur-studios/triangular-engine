@@ -41,6 +41,42 @@ export interface IRidgedFractalTerrainGeneratorDef {
   mask?: TerrainMaskDef;
 }
 
+/**
+ * Low-frequency signed terrain used to establish ocean basins, continental
+ * shelves, and broad land masses before local relief is added. The sampled
+ * noise value at `seaLevelThreshold` maps to exactly zero elevation.
+ */
+export interface IContinentalTerrainGeneratorDef {
+  kind: 'continental-3d';
+  frequency: number;
+  octaves: number;
+  lacunarity: number;
+  persistence: number;
+  seedOffset?: number;
+  /** Noise values below this threshold form ocean; values above it form land. */
+  seaLevelThreshold: number;
+  /** Noise distance on either side of the threshold over which shelf height/depth ramps to its full value. */
+  transitionWidth: number;
+  /** Positive maximum depth produced below sea level. */
+  oceanDepthM: number;
+  /** Positive broad elevation produced above sea level before local relief. */
+  landHeightM: number;
+  /**
+   * Optional independent low-frequency field that varies shelf width along
+   * the coast. `strength: 0` is uniform; values approaching 1 mix narrow,
+   * steep coasts with wider shallow beaches without moving the coastline.
+   */
+  coastVariation?: {
+    frequency: number;
+    octaves: number;
+    lacunarity: number;
+    persistence: number;
+    seedOffset?: number;
+    strength: number;
+  };
+  mask?: TerrainMaskDef;
+}
+
 /** Jittered-lattice crater field with a parabolic bowl and raised rim. */
 export interface ICraterFieldTerrainGeneratorDef {
   kind: 'crater-field-3d';
@@ -59,6 +95,7 @@ export interface ICraterFieldTerrainGeneratorDef {
 export type TerrainGeneratorDef =
   | IFractalNoiseTerrainGeneratorDef
   | IRidgedFractalTerrainGeneratorDef
+  | IContinentalTerrainGeneratorDef
   | ICraterFieldTerrainGeneratorDef;
 
 /**

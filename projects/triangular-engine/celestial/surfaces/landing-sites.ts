@@ -35,6 +35,56 @@ export interface GeneratedLandingSite {
   def: ILocalFlattenTerrainModifierDef;
 }
 
+/** Tunable knobs for the deterministic two-stage coastal-base search. */
+export interface CoastalSitesOptions {
+  /** Number of coastal sites to return. */
+  count?: number;
+  /** Number of evenly distributed centre samples in the cheap first stage. */
+  candidateCount?: number;
+  /** Radius of buildable ground checked around each base centre. */
+  radiusM?: number;
+  /** Smooth grading distance outside the buildable centre. */
+  blendRadiusM?: number;
+  /** Maximum centre-to-rim slope allowed across the buildable footprint. */
+  maxSlopeRadians?: number;
+  /** Minimum angular separation between returned sites. */
+  minSeparationRadians?: number;
+  /** Number of samples around the buildable footprint. */
+  ringSampleCount?: number;
+  /** Lowest permitted base-centre elevation above sea level. */
+  minElevationAboveSeaM?: number;
+  /** Highest permitted base-centre elevation above sea level. */
+  maxElevationAboveSeaM?: number;
+  /** Furthest distance searched from the base centre for navigable water. */
+  waterSearchRadiusM?: number;
+  /** Furthest permitted great-circle distance from the base centre to the shoreline. */
+  maxShoreDistanceM?: number;
+  /** Furthest permitted distance from the shoreline to the first navigable-water sample. */
+  maxShallowWaterWidthM?: number;
+  /** Bearings checked for water around each candidate. */
+  waterBearingCount?: number;
+  /** Concentric rings checked between the graded footprint and the search radius. */
+  waterRingCount?: number;
+  /** Required water depth at the returned water-access direction. */
+  minWaterDepthM?: number;
+}
+
+/** A buildable land site paired with deterministic shore and water access. */
+export interface GeneratedCoastalSite extends GeneratedLandingSite {
+  /** Height of the base centre above the authored ocean surface. */
+  elevationAboveSeaM: number;
+  /** Nearest sampled navigable-water direction from the site. */
+  waterDirectionBodyFixed: Vec3d;
+  /** Sea-level crossing between the base centre and `waterDirectionBodyFixed`. */
+  shoreDirectionBodyFixed: Vec3d;
+  /** Great-circle distance from the base centre to the refined shoreline. */
+  shoreDistanceM: number;
+  /** Great-circle distance from the base centre to the navigable-water sample. */
+  waterDistanceM: number;
+  /** Distance from the refined shoreline to the navigable-water sample. */
+  shallowWaterWidthM: number;
+}
+
 const DEFAULT_COUNT = 6;
 const DEFAULT_CANDIDATE_COUNT = 2000;
 const DEFAULT_RADIUS_M = 120;
@@ -42,6 +92,18 @@ const DEFAULT_BLEND_RADIUS_MULTIPLE = 5;
 const DEFAULT_MAX_SLOPE_RADIANS = (15 * Math.PI) / 180;
 const DEFAULT_MIN_SEPARATION_RADIANS = (15 * Math.PI) / 180;
 const DEFAULT_RING_SAMPLE_COUNT = 8;
+const DEFAULT_COASTAL_CANDIDATE_COUNT = 12_000;
+const DEFAULT_COASTAL_RADIUS_M = 180;
+const DEFAULT_COASTAL_BLEND_RADIUS_M = 360;
+const DEFAULT_COASTAL_MAX_SLOPE_RADIANS = (8 * Math.PI) / 180;
+const DEFAULT_COASTAL_MIN_ELEVATION_M = 15;
+const DEFAULT_COASTAL_MAX_ELEVATION_M = 300;
+const DEFAULT_WATER_SEARCH_RADIUS_M = 6_000;
+const DEFAULT_MAX_SHORE_DISTANCE_M = 3_000;
+const DEFAULT_MAX_SHALLOW_WATER_WIDTH_M = 1_500;
+const DEFAULT_WATER_BEARING_COUNT = 16;
+const DEFAULT_WATER_RING_COUNT = 4;
+const DEFAULT_MIN_WATER_DEPTH_M = 20;
 
 /** Golden-angle increment for an even, deterministic Fibonacci-sphere sweep — same formula `estimateTerrainElevationSaturation` already uses for deterministic direction coverage. */
 const GOLDEN_ANGLE_RAD = Math.PI * (3 - Math.sqrt(5));
@@ -92,6 +154,20 @@ function ringDirection(
     dir[0] * cosA + rim[0],
     dir[1] * cosA + rim[1],
     dir[2] * cosA + rim[2],
+  ]);
+}
+
+/** Stable spherical interpolation, including the very-short-arc case. */
+function interpolateDirection(from: Vec3d, to: Vec3d, amount: number): Vec3d {
+  const angle = Math.acos(clampDot(vec3Dot(from, to)));
+  if (angle < 1e-9) return from;
+  const sinAngle = Math.sin(angle);
+  const fromWeight = Math.sin((1 - amount) * angle) / sinAngle;
+  const toWeight = Math.sin(amount * angle) / sinAngle;
+  return vec3Normalize([
+    from[0] * fromWeight + to[0] * toWeight,
+    from[1] * fromWeight + to[1] * toWeight,
+    from[2] * fromWeight + to[2] * toWeight,
   ]);
 }
 
@@ -232,6 +308,310 @@ export function landingSitesFor(
         blendRadiusM,
         elevationM: candidate.centerElevationM,
       },
+    };
+  });
+}
+
+interface ScoredCoastalCandidate extends ScoredCandidate {
+  waterDirectionBodyFixed: Vec3d;
+  waterDistanceM: number;
+  shoreDirectionBodyFixed: Vec3d;
+  shoreDistanceM: number;
+  shallowWaterWidthM: number;
+}
+
+/**
+ * Finds flat land close to navigable water without scanning the full detailed
+ * neighbourhood of every sphere sample. Stage one batches centre elevations
+ * and rejects everything outside a narrow above-sea band. Stage two checks
+ * footprint slope and concentric water rings only for that shortlist.
+ *
+ * This is suitable for new-game placement tools and offline stock-site
+ * authoring. A caller can orient a port toward `waterDirectionBodyFixed` and
+ * place inland structures around `def.directionBodyFixed`.
+ */
+export function coastalSitesFor(
+  body: ICelestialBody,
+  options?: CoastalSitesOptions,
+): GeneratedCoastalSite[] {
+  const ocean = body.terrain?.ocean;
+  if (!body.terrain || !ocean) return [];
+
+  const count = options?.count ?? DEFAULT_COUNT;
+  const candidateCount =
+    options?.candidateCount ?? DEFAULT_COASTAL_CANDIDATE_COUNT;
+  const radiusM = options?.radiusM ?? DEFAULT_COASTAL_RADIUS_M;
+  const blendRadiusM = options?.blendRadiusM ?? DEFAULT_COASTAL_BLEND_RADIUS_M;
+  const maxSlopeRadians =
+    options?.maxSlopeRadians ?? DEFAULT_COASTAL_MAX_SLOPE_RADIANS;
+  const minSeparationRadians =
+    options?.minSeparationRadians ?? DEFAULT_MIN_SEPARATION_RADIANS;
+  const ringSampleCount = options?.ringSampleCount ?? DEFAULT_RING_SAMPLE_COUNT;
+  const minElevationAboveSeaM =
+    options?.minElevationAboveSeaM ?? DEFAULT_COASTAL_MIN_ELEVATION_M;
+  const maxElevationAboveSeaM =
+    options?.maxElevationAboveSeaM ?? DEFAULT_COASTAL_MAX_ELEVATION_M;
+  const waterSearchRadiusM =
+    options?.waterSearchRadiusM ?? DEFAULT_WATER_SEARCH_RADIUS_M;
+  const maxShoreDistanceM =
+    options?.maxShoreDistanceM ??
+    Math.min(DEFAULT_MAX_SHORE_DISTANCE_M, waterSearchRadiusM);
+  const maxShallowWaterWidthM =
+    options?.maxShallowWaterWidthM ?? DEFAULT_MAX_SHALLOW_WATER_WIDTH_M;
+  const waterBearingCount =
+    options?.waterBearingCount ?? DEFAULT_WATER_BEARING_COUNT;
+  const waterRingCount = options?.waterRingCount ?? DEFAULT_WATER_RING_COUNT;
+  const minWaterDepthM = options?.minWaterDepthM ?? DEFAULT_MIN_WATER_DEPTH_M;
+
+  if (
+    !Number.isInteger(count) ||
+    count < 1 ||
+    !Number.isInteger(candidateCount) ||
+    candidateCount < 1 ||
+    !Number.isInteger(ringSampleCount) ||
+    ringSampleCount < 1 ||
+    !Number.isInteger(waterBearingCount) ||
+    waterBearingCount < 1 ||
+    !Number.isInteger(waterRingCount) ||
+    waterRingCount < 1 ||
+    radiusM <= 0 ||
+    blendRadiusM <= 0 ||
+    waterSearchRadiusM <= radiusM + blendRadiusM ||
+    maxShoreDistanceM <= 0 ||
+    maxShoreDistanceM > waterSearchRadiusM ||
+    maxShallowWaterWidthM < 0 ||
+    minElevationAboveSeaM < 0 ||
+    maxElevationAboveSeaM < minElevationAboveSeaM ||
+    minWaterDepthM < 0
+  ) {
+    throw new RangeError('Invalid coastal-site search options.');
+  }
+
+  const sampler = createSurfaceSampler(body);
+  const seaLevelM = ocean.seaLevelM;
+  const directions = fibonacciSphereDirections(candidateCount);
+  const packedCenters = new Float64Array(candidateCount * 3);
+  for (let index = 0; index < candidateCount; index += 1) {
+    packedCenters.set(directions[index], index * 3);
+  }
+  const centerElevations = sampler.sampleBatch(packedCenters);
+  const shortlist: Array<{
+    index: number;
+    direction: Vec3d;
+    centerElevationM: number;
+  }> = [];
+  for (let index = 0; index < candidateCount; index += 1) {
+    const elevationAboveSeaM = centerElevations[index] - seaLevelM;
+    if (
+      elevationAboveSeaM >= minElevationAboveSeaM &&
+      elevationAboveSeaM <= maxElevationAboveSeaM
+    ) {
+      shortlist.push({
+        index,
+        direction: directions[index],
+        centerElevationM: centerElevations[index],
+      });
+    }
+  }
+  if (shortlist.length === 0) return [];
+
+  const waterSampleCount = waterBearingCount * waterRingCount;
+  const samplesPerCandidate = ringSampleCount + waterSampleCount;
+  const packedDetail = new Float64Array(
+    shortlist.length * samplesPerCandidate * 3,
+  );
+  const bases = shortlist.map((candidate) => tangentBasis(candidate.direction));
+  for (
+    let candidateIndex = 0;
+    candidateIndex < shortlist.length;
+    candidateIndex += 1
+  ) {
+    const candidate = shortlist[candidateIndex];
+    const { tangent1, tangent2 } = bases[candidateIndex];
+    const sampleBase = candidateIndex * samplesPerCandidate;
+    for (let ringIndex = 0; ringIndex < ringSampleCount; ringIndex += 1) {
+      const direction = ringDirection(
+        candidate.direction,
+        tangent1,
+        tangent2,
+        radiusM / body.radiusM,
+        (2 * Math.PI * ringIndex) / ringSampleCount,
+      );
+      packedDetail.set(direction, (sampleBase + ringIndex) * 3);
+    }
+    for (
+      let waterRingIndex = 0;
+      waterRingIndex < waterRingCount;
+      waterRingIndex += 1
+    ) {
+      const waterDistanceM =
+        radiusM +
+        blendRadiusM +
+        ((waterRingIndex + 1) / waterRingCount) *
+          (waterSearchRadiusM - radiusM - blendRadiusM);
+      for (
+        let bearingIndex = 0;
+        bearingIndex < waterBearingCount;
+        bearingIndex += 1
+      ) {
+        const direction = ringDirection(
+          candidate.direction,
+          tangent1,
+          tangent2,
+          waterDistanceM / body.radiusM,
+          (2 * Math.PI * bearingIndex) / waterBearingCount,
+        );
+        const offset =
+          sampleBase +
+          ringSampleCount +
+          waterRingIndex * waterBearingCount +
+          bearingIndex;
+        packedDetail.set(direction, offset * 3);
+      }
+    }
+  }
+  const detailElevations = sampler.sampleBatch(packedDetail);
+
+  const candidates: ScoredCoastalCandidate[] = [];
+  for (
+    let candidateIndex = 0;
+    candidateIndex < shortlist.length;
+    candidateIndex += 1
+  ) {
+    const candidate = shortlist[candidateIndex];
+    const sampleBase = candidateIndex * samplesPerCandidate;
+    let worstSlopeRadians = 0;
+    for (let ringIndex = 0; ringIndex < ringSampleCount; ringIndex += 1) {
+      const slopeRadians = Math.atan2(
+        Math.abs(
+          detailElevations[sampleBase + ringIndex] - candidate.centerElevationM,
+        ),
+        radiusM,
+      );
+      if (slopeRadians > worstSlopeRadians) worstSlopeRadians = slopeRadians;
+    }
+    if (worstSlopeRadians > maxSlopeRadians) continue;
+
+    let waterDirectionBodyFixed: Vec3d | undefined;
+    let waterDistanceM = Number.POSITIVE_INFINITY;
+    const { tangent1, tangent2 } = bases[candidateIndex];
+    for (
+      let waterRingIndex = 0;
+      waterRingIndex < waterRingCount;
+      waterRingIndex += 1
+    ) {
+      const ringDistanceM =
+        radiusM +
+        blendRadiusM +
+        ((waterRingIndex + 1) / waterRingCount) *
+          (waterSearchRadiusM - radiusM - blendRadiusM);
+      for (
+        let bearingIndex = 0;
+        bearingIndex < waterBearingCount;
+        bearingIndex += 1
+      ) {
+        const offset =
+          sampleBase +
+          ringSampleCount +
+          waterRingIndex * waterBearingCount +
+          bearingIndex;
+        if (detailElevations[offset] > seaLevelM - minWaterDepthM) continue;
+        waterDirectionBodyFixed = ringDirection(
+          candidate.direction,
+          tangent1,
+          tangent2,
+          ringDistanceM / body.radiusM,
+          (2 * Math.PI * bearingIndex) / waterBearingCount,
+        );
+        waterDistanceM = ringDistanceM;
+        break;
+      }
+      if (waterDirectionBodyFixed) break;
+    }
+    if (!waterDirectionBodyFixed) continue;
+
+    let landDirection = candidate.direction;
+    let waterDirection = waterDirectionBodyFixed;
+    for (let iteration = 0; iteration < 24; iteration += 1) {
+      const midpoint = interpolateDirection(landDirection, waterDirection, 0.5);
+      if (sampler.sample(midpoint).elevationM > seaLevelM) {
+        landDirection = midpoint;
+      } else {
+        waterDirection = midpoint;
+      }
+    }
+    const shoreDirectionBodyFixed = interpolateDirection(
+      landDirection,
+      waterDirection,
+      0.5,
+    );
+    const shoreDistanceM =
+      Math.acos(
+        clampDot(vec3Dot(candidate.direction, shoreDirectionBodyFixed)),
+      ) * body.radiusM;
+    const shallowWaterWidthM = waterDistanceM - shoreDistanceM;
+    if (
+      shoreDistanceM > maxShoreDistanceM ||
+      shallowWaterWidthM > maxShallowWaterWidthM
+    ) {
+      continue;
+    }
+    candidates.push({
+      ...candidate,
+      worstSlopeRadians,
+      qualifies: true,
+      waterDirectionBodyFixed,
+      waterDistanceM,
+      shoreDirectionBodyFixed,
+      shoreDistanceM,
+      shallowWaterWidthM,
+    });
+  }
+
+  candidates.sort(
+    (a, b) =>
+      a.worstSlopeRadians - b.worstSlopeRadians ||
+      a.shallowWaterWidthM - b.shallowWaterWidthM ||
+      a.shoreDistanceM - b.shoreDistanceM ||
+      a.centerElevationM - b.centerElevationM ||
+      a.index - b.index,
+  );
+  const selected: ScoredCoastalCandidate[] = [];
+  for (const candidate of candidates) {
+    if (selected.length >= count) break;
+    if (
+      selected.every(
+        (other) =>
+          Math.acos(clampDot(vec3Dot(other.direction, candidate.direction))) >=
+          minSeparationRadians,
+      )
+    ) {
+      selected.push(candidate);
+    }
+  }
+
+  return selected.map((candidate, siteIndex) => {
+    const surfaceRadiusM = body.radiusM + candidate.centerElevationM;
+    return {
+      name: `Coastal Site ${siteIndex + 1}`,
+      positionBodyFrameM: vec3Scale(candidate.direction, surfaceRadiusM),
+      def: {
+        kind: 'circle',
+        directionBodyFixed: [
+          candidate.direction[0],
+          candidate.direction[1],
+          candidate.direction[2],
+        ],
+        radiusM,
+        blendRadiusM,
+        elevationM: candidate.centerElevationM,
+      },
+      elevationAboveSeaM: candidate.centerElevationM - seaLevelM,
+      waterDirectionBodyFixed: candidate.waterDirectionBodyFixed,
+      shoreDirectionBodyFixed: candidate.shoreDirectionBodyFixed,
+      shoreDistanceM: candidate.shoreDistanceM,
+      waterDistanceM: candidate.waterDistanceM,
+      shallowWaterWidthM: candidate.shallowWaterWidthM,
     };
   });
 }

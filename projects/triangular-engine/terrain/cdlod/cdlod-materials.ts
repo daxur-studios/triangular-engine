@@ -133,6 +133,7 @@ export interface ICdlodShaderUniforms {
   uEnableMorph: { value: number };
   uEdgeMorph: { value: Vector4 };
   uWireframeMode: { value: number };
+  uHidePatchEdges: { value: number };
   uSeaLevelM: { value: number };
   uHasOcean: { value: number };
   uMinElevationM: { value: number };
@@ -215,6 +216,7 @@ void main() {
 
 export const CDLOD_FRAGMENT_SHADER = `
 uniform float uWireframeMode;
+uniform float uHidePatchEdges;
 uniform float uSeaLevelM;
 uniform float uHasOcean;
 uniform float uMinElevationM;
@@ -275,6 +277,21 @@ float noise3(vec3 p) {
 void main() {
   #include <logdepthbuf_fragment>
 
+  // Neighboring patches at different LOD depths compute their normals
+  // independently (each from its own finite-difference sample step), so
+  // adjacent patch borders rarely agree exactly — visible as both a dark
+  // lighting seam AND a color seam, since the cliff-rock blend below is also
+  // slope (i.e. normal) derived. When enabled, fade the normal used for both
+  // toward the LOD-independent radial (body-direction) normal near patch UV
+  // edges so neighboring patches converge to the same value at the border.
+  vec3 shadingNormal = vWorldNormal;
+  if (uHidePatchEdges > 0.5) {
+    float edgeDist = min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y));
+    float edgeFade = 1.0 - smoothstep(0.0, 0.05, edgeDist);
+    shadingNormal = normalize(mix(vWorldNormal, vBodyDirection, edgeFade));
+  }
+  float slope = clamp(dot(shadingNormal, vBodyDirection), 0.0, 1.0);
+
   // Global spherical noise: Fixed geographic position across all LOD levels
   float macroNoise  = (noise3(vBodyDirection * 15.0) - 0.5) * 0.2;
   float mediumNoise = (noise3(vBodyDirection * 45.0) - 0.5) * 0.12;
@@ -311,7 +328,7 @@ void main() {
       }
 
       // Slope-dependent rock cliffs (vertical rock faces wherever terrain is steep)
-      float cliffFactor = 1.0 - smoothstep(uCliffSlopeThreshold - 0.15, uCliffSlopeThreshold + 0.05, vSlope);
+      float cliffFactor = 1.0 - smoothstep(uCliffSlopeThreshold - 0.15, uCliffSlopeThreshold + 0.05, slope);
       float strata = sin(vElevation * uStrataFrequency) * 0.5 + 0.5;
       vec3 stratifiedRock = mix(uCliffColor, uCliffHighColor, strata * 0.6);
       surfaceColor = mix(surfaceColor, stratifiedRock, cliffFactor);
@@ -334,7 +351,7 @@ void main() {
       surfaceColor = mix(uHighlandColor, uPeakColor, smoothstep(0.0, 1.0, t + macroNoise));
     }
 
-    float cliffFactor = 1.0 - smoothstep(uCliffSlopeThreshold - 0.15, uCliffSlopeThreshold + 0.05, vSlope);
+    float cliffFactor = 1.0 - smoothstep(uCliffSlopeThreshold - 0.15, uCliffSlopeThreshold + 0.05, slope);
     float strata = sin(vElevation * uStrataFrequency) * 0.5 + 0.5;
     vec3 stratifiedRock = mix(uCliffColor, uCliffHighColor, strata * 0.5);
     surfaceColor = mix(surfaceColor, stratifiedRock, cliffFactor);
@@ -345,7 +362,7 @@ void main() {
 
   // Diffuse directional lighting + ambient
   vec3 lightDir = normalize(uSunDirection);
-  float nDotL = max(0.0, dot(vWorldNormal, lightDir));
+  float nDotL = max(0.0, dot(shadingNormal, lightDir));
   vec3 diffuse = uSunColor * nDotL;
   vec3 finalColor = surfaceColor * (diffuse + uAmbientColor);
 
@@ -456,6 +473,7 @@ void main() {
 
 export function createCdlodTerrainMaterial(options?: {
   wireframe?: boolean;
+  hidePatchEdges?: boolean;
   elevationScale?: number;
   body?: ICelestialBody;
   palette?: ICdlodTerrainPalette;
@@ -473,6 +491,7 @@ export function createCdlodTerrainMaterial(options?: {
     uEnableMorph: { value: 1.0 },
     uEdgeMorph: { value: new Vector4(0, 0, 0, 0) },
     uWireframeMode: { value: options?.wireframe ? 1.0 : 0.0 },
+    uHidePatchEdges: { value: options?.hidePatchEdges ? 1.0 : 0.0 },
     uSeaLevelM: { value: seaLevel },
     uHasOcean: { value: hasOcean },
     uMinElevationM: { value: minElev },
@@ -532,5 +551,9 @@ export function createOceanMaterial(options?: {
     side: DoubleSide,
     wireframe: options?.wireframe ?? false,
     transparent: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
   });
 }
