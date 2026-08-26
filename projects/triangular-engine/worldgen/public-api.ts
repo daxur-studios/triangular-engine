@@ -10,6 +10,7 @@ export * from './core/planet-graph';
 export * from './core/plate-tectonics';
 export * from './core/plate-boundaries';
 export * from './core/elevation';
+export * from './core/sample-elevation';
 export * from './core/tectonics';
 export * from './core/climate';
 export * from './core/biomes';

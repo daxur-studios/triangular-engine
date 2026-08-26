@@ -23,13 +23,16 @@ import {
   MeshStandardMaterial,
   Points,
   PointsMaterial,
+  Vector3Tuple,
 } from 'three';
-import { EngineModule, EngineService } from 'triangular-engine';
+import { EngineModule, EngineService, RaycastFocusContext, RaycastFocusResolver } from 'triangular-engine';
 import {
   buildPlanetEcology,
   buildPlanetGraphCore,
   buildPlanetTectonics,
+  cellCornerElevation,
   IPlanetEcology,
+  IPlanetGraphCell,
   IPlanetGraphCore,
   IPlanetTectonics,
   IVec3,
@@ -126,6 +129,14 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   readonly showPreview3D = signal(false);
   readonly plateCount = signal(10);
   readonly mapMode = signal<MapMode>('graph');
+  /** Visual-only exaggeration of raw elevation (unitless, typically ~-1..1) into a radius
+   * offset — a live debug-preview knob, not a gameplay constant. Deliberately low by default:
+   * a flat-shaded low-poly mesh reads as a lumpy asteroid well before the terrain looks "tall". */
+  readonly elevationScale = signal(2);
+  /** Surface-relative up (radial from planet center) vs. fixed world-Y up for the orbit
+   * camera. Off by default — matches the previous fixed-up behavior. */
+  readonly useSurfaceUp = signal(false);
+  readonly upVectorTuple = signal<Vector3Tuple | undefined>(undefined);
 
   readonly cellTotal = signal(0);
   readonly edgeTotal = signal(0);
@@ -153,6 +164,15 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   });
   private previewMesh: Mesh | null = null;
   private previewCellIdPerVertex = new Int32Array(0);
+  // Undisplaced unit direction + raw elevation per preview vertex, kept around so the
+  // elevation-scale slider can re-displace positions in O(vertices) without recomputing
+  // per-cell/corner elevation or touching the color attribute.
+  private previewDirections = new Float32Array(0);
+  private previewElevationPerVertex = new Float32Array(0);
+  private readonly riverMaterial = new LineBasicMaterial({ color: '#5ec8ff', transparent: true, opacity: 0.95 });
+  private readonly coastlineMaterial = new LineBasicMaterial({ color: '#f4f4f4', transparent: true, opacity: 0.9 });
+  private riverLines: LineSegments | null = null;
+  private coastlineLines: LineSegments | null = null;
 
   // Per-cell source data driving the near-side cull, rebuilt on regenerate() and
   // re-filtered every frame against the live camera position (updateCulling()).
@@ -166,16 +186,23 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.root.name = 'cell-planet-graph';
     this.engine.scene.add(this.root);
 
-    this.engine.tick$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.updateCulling());
+    this.engine.tick$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      this.updateCulling();
+      this.updateSurfaceUp();
+    });
 
     this.destroyRef.onDestroy(() => {
       this.engine.scene.remove(this.root);
       this.sitesPoints?.geometry.dispose();
       this.edgesLines?.geometry.dispose();
       this.previewMesh?.geometry.dispose();
+      this.riverLines?.geometry.dispose();
+      this.coastlineLines?.geometry.dispose();
       this.sitesMaterial.dispose();
       this.edgesMaterial.dispose();
       this.previewMaterial.dispose();
+      this.riverMaterial.dispose();
+      this.coastlineMaterial.dispose();
     });
   }
 
@@ -213,10 +240,17 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.regenerate();
   }
 
+  onElevationScale(event: Event): void {
+    this.elevationScale.set(Number((event.target as HTMLInputElement).value));
+    this.updatePreviewDisplacement();
+  }
+
   setMapMode(mode: MapMode): void {
     this.mapMode.set(mode);
     this.drawMap();
     this.updatePreviewColors();
+    if (this.riverLines) this.riverLines.visible = mode === 'rivers';
+    if (this.coastlineLines) this.coastlineLines.visible = mode === 'rivers';
   }
 
   toggleSites(): void {
@@ -235,6 +269,33 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.showPreview3D.update((value) => !value);
     if (this.previewMesh) this.previewMesh.visible = this.showPreview3D();
   }
+
+  /** Toggles the orbit camera's up vector between fixed world-Y and surface-relative
+   * (radial from the planet center) — surface-relative re-levels every tick in
+   * `updateSurfaceUp()` so horizon stays level while orbiting over any latitude,
+   * including near the poles where a fixed up would otherwise gimbal. */
+  toggleSurfaceUp(): void {
+    const next = !this.useSurfaceUp();
+    this.useSurfaceUp.set(next);
+    if (!next) this.upVectorTuple.set([0, 1, 0]);
+  }
+
+  private updateSurfaceUp(): void {
+    if (!this.useSurfaceUp()) return;
+    const camera = this.engine.camera$.value;
+    if (!camera) return;
+    const len = camera.position.length() || 1;
+    this.upVectorTuple.set([camera.position.x / len, camera.position.y / len, camera.position.z / len]);
+  }
+
+  /** `raycastOrbitControls` focus resolver — hits the preview mesh so wheel-zoom and
+   * rotate-drag pivot on the actual displaced surface under the pointer instead of a
+   * flat distance-scaled guess, which is what let zooming clip through/overshoot terrain. */
+  readonly raycastFocusResolver: RaycastFocusResolver = (context: RaycastFocusContext) => {
+    if (!this.previewMesh?.visible) return null;
+    const hit = context.raycaster.intersectObject(this.previewMesh, false)[0];
+    return hit ? hit.point.toArray() : null;
+  };
 
   jitterValue(): string {
     return (this.jitter() / 100).toFixed(2);
@@ -266,7 +327,8 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.buildMs.set(`${(t1 - t0).toFixed(1)} ms`);
     this.rebuildSites(graph);
     this.rebuildEdges(graph);
-    this.rebuildPreviewMesh(graph);
+    this.rebuildPreviewMesh(graph, this.tectonics);
+    this.rebuildRiverOverlays(this.ecology);
     this.updateStats(graph);
     this.drawMap();
     this.updateCulling();
@@ -397,21 +459,63 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     return tectonics.isLand[cellId] ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
   }
 
-  /** Naive M3 3D preview: one triangle fan per cell (center -> corner k -> corner k+1),
+  /** M3+M4a 3D preview: one triangle fan per cell (center -> corner k -> corner k+1),
    * flat-shaded and colored via `resolveCellColor()` — geometry rebuilds on regenerate(),
-   * only the vertex colors are re-touched on a map-mode change. No fancy elevation
-   * displacement or crack-free stitching here, that's the M4 rendering spike's job. */
-  private rebuildPreviewMesh(graph: IPlanetGraphCore): void {
+   * only the vertex colors are re-touched on a map-mode change. Every fan vertex sits
+   * exactly at a cell center or a cell-polygon corner, so its elevation is looked up
+   * directly (center = the cell's own elevation, corner = `cellCornerElevation()`, the
+   * average of the 3 cells meeting there) instead of going through `sampleElevation()`'s
+   * general `findCellAt()` search — O(1) per vertex instead of O(cellCount), which is what
+   * keeps this affordable as the cell-count slider goes up. Still no subdivision or
+   * crack-free stitching across chunks (that's M4b/c) — `sampleElevation()` stays the
+   * function for arbitrary (non-vertex) queries like future collider patches.
+   *
+   * Every vertex is clamped to sea level from its corner's land/water *consensus* — land
+   * if 2+ of the 3 cells meeting there are land, water otherwise — not from whichever
+   * fan happens to be drawing it. Without this, a corner's raw value is a plain average
+   * of the 3 cells that share it (see `cellCornerElevation()`), so an ocean cell sitting
+   * next to a mountain range got one corner dragged up by that neighbor's elevation —
+   * sometimes past the elevation of unrelated, flatter land cells elsewhere. An earlier
+   * version of this clamp keyed the land/water side off the *owning* cell instead of the
+   * corner consensus; since the mesh isn't vertex-welded (each of the 3 fans meeting at a
+   * corner pushes its own copy of that vertex), that made a coastal corner clamp to two
+   * different heights depending on which fan drew it — a visible gap/cliff at the seam
+   * that was a mesh artifact, not a real elevation feature. Consensus is the same set of
+   * 3 cell ids regardless of which of the 3 fans is asking (same symmetry as
+   * `cellCornerElevation()` itself), so both sides of a shared edge now agree. This is
+   * still a placeholder for the real fix (a separate flat ocean shell, M4+), not a claim
+   * that blended coastal relief is itself wrong — and it doesn't give a real cliff *face*:
+   * a land/water step still meets across a single unsubdivided edge with no vertices for
+   * a vertical wall, so a genuine steep drop needs edge subdivision (M4b/c), not a clamp. */
+  private rebuildPreviewMesh(graph: IPlanetGraphCore, tectonics: IPlanetTectonics): void {
+    const { elevation, isLand, seaLevelElevation } = tectonics;
     const positions: number[] = [];
+    const directions: number[] = [];
+    const elevations: number[] = [];
     const cellIds: number[] = [];
+    const pushVertex = (p: IVec3, e: number, land: boolean): void => {
+      const clamped = land ? Math.max(e, seaLevelElevation) : Math.min(e, seaLevelElevation);
+      directions.push(p.x, p.y, p.z);
+      elevations.push(clamped);
+      positions.push(p.x, p.y, p.z); // overwritten by updatePreviewDisplacement() below
+    };
+    const cornerIsLand = (cell: IPlanetGraphCell, cornerIndex: number): boolean => {
+      const n = cell.neighbors.length;
+      const a = cell.id;
+      const b = cell.neighbors[cornerIndex];
+      const c = cell.neighbors[(cornerIndex + 1) % n];
+      const landCount = (isLand[a] ? 1 : 0) + (isLand[b] ? 1 : 0) + (isLand[c] ? 1 : 0);
+      return landCount >= 2;
+    };
     for (const cell of graph.cells) {
       const n = cell.corners.length;
       if (n < 3) continue;
-      const c = cell.center;
+      const centerElevation = elevation[cell.id];
       for (let k = 0; k < n; k++) {
-        const a = cell.corners[k];
-        const b = cell.corners[(k + 1) % n];
-        positions.push(c.x, c.y, c.z, a.x, a.y, a.z, b.x, b.y, b.z);
+        const k2 = (k + 1) % n;
+        pushVertex(cell.center, centerElevation, isLand[cell.id]);
+        pushVertex(cell.corners[k], cellCornerElevation(cell, k, elevation), cornerIsLand(cell, k));
+        pushVertex(cell.corners[k2], cellCornerElevation(cell, k2, elevation), cornerIsLand(cell, k2));
         cellIds.push(cell.id, cell.id, cell.id);
       }
     }
@@ -421,14 +525,37 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       this.previewMesh.geometry.dispose();
     }
     const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+    const positionAttr = new BufferAttribute(new Float32Array(positions), 3);
+    positionAttr.setUsage(DynamicDrawUsage);
+    geometry.setAttribute('position', positionAttr);
     geometry.setAttribute('color', new BufferAttribute(new Float32Array(positions.length), 3));
-    geometry.computeVertexNormals();
+    this.previewDirections = new Float32Array(directions);
+    this.previewElevationPerVertex = new Float32Array(elevations);
     this.previewCellIdPerVertex = new Int32Array(cellIds);
     this.previewMesh = new Mesh(geometry, this.previewMaterial);
     this.previewMesh.visible = this.showPreview3D();
     this.root.add(this.previewMesh);
+    this.updatePreviewDisplacement();
     this.updatePreviewColors();
+  }
+
+  /** Re-displaces every preview vertex from its stored (direction, elevation) pair using
+   * the current `elevationScale()` slider — cheap enough to run on every slider `input`
+   * event, no geometry rebuild or color re-touch needed. */
+  private updatePreviewDisplacement(): void {
+    if (!this.previewMesh) return;
+    const scale = this.elevationScale() / 100;
+    const positionAttr = this.previewMesh.geometry.getAttribute('position') as BufferAttribute;
+    const positions = positionAttr.array as Float32Array;
+    for (let i = 0; i < this.previewElevationPerVertex.length; i++) {
+      const radius = 1 + this.previewElevationPerVertex[i] * scale;
+      const o = i * 3;
+      positions[o] = this.previewDirections[o] * radius;
+      positions[o + 1] = this.previewDirections[o + 1] * radius;
+      positions[o + 2] = this.previewDirections[o + 2] * radius;
+    }
+    positionAttr.needsUpdate = true;
+    this.previewMesh.geometry.computeVertexNormals();
   }
 
   private updatePreviewColors(): void {
@@ -451,6 +578,48 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       arr[o + 2] = rgb[2];
     }
     colorAttr.needsUpdate = true;
+  }
+
+  /** Mirrors the 2D unwrap's rivers-mode overlay onto the sphere: river paths (open
+   * polylines) and coastline loops (closed), both already unit-sphere point chains from
+   * `buildPlanetEcology()`. Nudged a hair above radius 1 so they don't z-fight the
+   * preview mesh triangles when both are visible at once. */
+  private rebuildRiverOverlays(ecology: IPlanetEcology): void {
+    if (this.riverLines) {
+      this.root.remove(this.riverLines);
+      this.riverLines.geometry.dispose();
+    }
+    const riverGeometry = new BufferGeometry();
+    riverGeometry.setAttribute('position', new BufferAttribute(this.flattenPaths(ecology.riverPaths, false), 3));
+    this.riverLines = new LineSegments(riverGeometry, this.riverMaterial);
+    this.riverLines.visible = this.mapMode() === 'rivers';
+    this.root.add(this.riverLines);
+
+    if (this.coastlineLines) {
+      this.root.remove(this.coastlineLines);
+      this.coastlineLines.geometry.dispose();
+    }
+    const coastGeometry = new BufferGeometry();
+    coastGeometry.setAttribute('position', new BufferAttribute(this.flattenPaths(ecology.coastlines, true), 3));
+    this.coastlineLines = new LineSegments(coastGeometry, this.coastlineMaterial);
+    this.coastlineLines.visible = this.mapMode() === 'rivers';
+    this.root.add(this.coastlineLines);
+  }
+
+  private flattenPaths(paths: IVec3[][], closed: boolean): Float32Array {
+    const bias = 1.004;
+    const out: number[] = [];
+    for (const path of paths) {
+      const n = path.length;
+      if (n < 2) continue;
+      const segments = closed ? n : n - 1;
+      for (let k = 0; k < segments; k++) {
+        const a = path[k];
+        const b = path[(k + 1) % n];
+        out.push(a.x * bias, a.y * bias, a.z * bias, b.x * bias, b.y * bias, b.z * bias);
+      }
+    }
+    return new Float32Array(out);
   }
 
   /** Strokes each consecutive pair of points as its own line segment (not one continuous

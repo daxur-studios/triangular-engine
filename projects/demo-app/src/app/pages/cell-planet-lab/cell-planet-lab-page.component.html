@@ -19,7 +19,7 @@
       <div class="controls">
         <label class="control">
           <span>cell count</span>
-          <input type="range" min="20" max="500" step="10" [value]="cellCount()" (input)="onCellCount($event)" />
+          <input type="range" min="20" max="3000" step="20" [value]="cellCount()" (input)="onCellCount($event)" />
           <span class="control-value">{{ cellCount() }}</span>
         </label>
         <label class="control">
@@ -45,6 +45,12 @@
         <label class="toggle"><input type="checkbox" [checked]="showSites()" (change)="toggleSites()" /><span>sites</span></label>
         <label class="toggle"><input type="checkbox" [checked]="showEdges()" (change)="toggleEdges()" /><span>edges</span></label>
         <label class="toggle"><input type="checkbox" [checked]="showPreview3D()" (change)="togglePreview3D()" /><span>3D preview</span></label>
+        <label class="control">
+          <span>elevation ×</span>
+          <input type="range" min="0" max="15" step="0.5" [value]="elevationScale()" (input)="onElevationScale($event)" />
+          <span class="control-value">{{ elevationScale() }}%</span>
+        </label>
+        <label class="toggle"><input type="checkbox" [checked]="useSurfaceUp()" (change)="toggleSurfaceUp()" /><span>surface-up camera</span></label>
       </div>
 
       <div class="controls">
@@ -66,11 +72,19 @@
         </section>
       </div>
 
-      <p class="note">3D view is M0 (site distribution and cell boundaries from <code>buildPlanetGraphCore()</code>) — the near-side cull only holds up for a far/orbit camera, see runbook 022. The 2D unwrap's plates/elevation/land modes are M1 (<code>buildPlanetTectonics()</code>). The temperature/moisture/biome/rivers modes are M2 (<code>buildPlanetEcology()</code>): latitude+elevation climate, Whittaker biome lookup, river tracing, and coastline extraction — rivers mode overlays traced river paths and closed coastline loops on the land/water base. "3D preview" (M3) is a naive flat-shaded triangle-fan mesh, one fan per cell, colored by whichever 2D mode is active — ugly by design, it's a debug view, not the M4 rendering spike.</p>
+      <p class="note">3D view is M0 (site distribution and cell boundaries from <code>buildPlanetGraphCore()</code>) — the near-side cull only holds up for a far/orbit camera, see runbook 022. The 2D unwrap's plates/elevation/land modes are M1 (<code>buildPlanetTectonics()</code>). The temperature/moisture/biome/rivers modes are M2 (<code>buildPlanetEcology()</code>): latitude+elevation climate, Whittaker biome lookup, river tracing, and coastline extraction — rivers mode overlays traced river paths and closed coastline loops on the land/water base. "3D preview" (M3) is a flat-shaded triangle-fan mesh, one fan per cell, colored by whichever 2D mode is active — a debug view, not a finished renderer. Every vertex is now pushed out by <code>cellCornerElevation()</code> (M4a's O(1) lookup), clamped to sea level from its owning cell's land/water side so no ocean vertex renders above any land vertex; still no chunking, LOD, or crack-free stitching, that's M4b onward. Rivers mode also overlays the same traced river paths and coastline loops directly on the sphere, independent of the 3D preview toggle.</p>
     </section>
   </ng-template>
 
-  <orbitControls [cameraPosition]="[0, 0, 2.6]" [target]="[0, 0, 0]" [isActive]="true" />
+  <raycastOrbitControls
+    [cameraPosition]="[0, 0, 2.6]"
+    [target]="[0, 0, 0]"
+    [isActive]="true"
+    [near]="0.001"
+    [upVector]="upVectorTuple()"
+    [leftMouseAction]="'rotate'"
+    [raycastFocusResolver]="raycastFocusResolver"
+  />
   <ambientLight [intensity]="1.4" />
   <directionalLight [position]="[3, 5, 4]" [intensity]="1.8" />
 </scene>
