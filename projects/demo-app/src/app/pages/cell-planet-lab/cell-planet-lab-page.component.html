@@ -4,13 +4,14 @@
     <section class="scope" aria-label="Cell planet lab">
       <header class="scope-head">
         <div>
-          <span class="scope-kicker">worldgen · runbook 022 · M0</span>
+          <span class="scope-kicker">worldgen · runbook 022 · M0 + M1</span>
           <h1>Cell graph scope</h1>
         </div>
         <div class="stat-strip">
           <div class="stat"><span class="stat-label">cells</span><span class="stat-value">{{ cellTotal() }}</span></div>
           <div class="stat"><span class="stat-label">edges</span><span class="stat-value">{{ edgeTotal() }}</span></div>
           <div class="stat"><span class="stat-label">min/max degree</span><span class="stat-value">{{ degreeRange() }}</span></div>
+          <div class="stat"><span class="stat-label">land</span><span class="stat-value">{{ landFraction() }}</span></div>
           <div class="stat"><span class="stat-label">build time</span><span class="stat-value">{{ buildMs() }}</span></div>
         </div>
       </header>
@@ -36,8 +37,21 @@
           <input type="range" min="0" max="40" step="1" [value]="jitter()" (input)="onJitter($event)" />
           <span class="control-value">{{ jitterValue() }}</span>
         </label>
+        <label class="control">
+          <span>plates</span>
+          <input type="range" min="3" max="24" step="1" [value]="plateCount()" (input)="onPlateCount($event)" />
+          <span class="control-value">{{ plateCount() }}</span>
+        </label>
         <label class="toggle"><input type="checkbox" [checked]="showSites()" (change)="toggleSites()" /><span>sites</span></label>
         <label class="toggle"><input type="checkbox" [checked]="showEdges()" (change)="toggleEdges()" /><span>edges</span></label>
+      </div>
+
+      <div class="controls">
+        <span class="control-group-label">2d unwrap mode</span>
+        <button type="button" [class.active]="mapMode() === 'graph'" (click)="setMapMode('graph')">graph</button>
+        <button type="button" [class.active]="mapMode() === 'plates'" (click)="setMapMode('plates')">plates</button>
+        <button type="button" [class.active]="mapMode() === 'elevation'" (click)="setMapMode('elevation')">elevation</button>
+        <button type="button" [class.active]="mapMode() === 'land'" (click)="setMapMode('land')">land / water</button>
       </div>
 
       <div class="views">
@@ -47,7 +61,7 @@
         </section>
       </div>
 
-      <p class="note">M0 output only — site distribution and cell boundaries from <code>buildPlanetGraphCore()</code>. No plates, elevation, biomes, or rivers yet (that's M1–M2).</p>
+      <p class="note">3D view is M0 (site distribution and cell boundaries from <code>buildPlanetGraphCore()</code>) — the near-side cull only holds up for a far/orbit camera, see runbook 022. The 2D unwrap's plates/elevation/land modes are M1 (<code>buildPlanetTectonics()</code>): plate assignment, boundary classification, and elevation/sea-level shaping. No biomes or rivers yet (that's M2).</p>
     </section>
   </ng-template>
 

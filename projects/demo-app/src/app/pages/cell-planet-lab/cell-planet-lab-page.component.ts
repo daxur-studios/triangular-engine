@@ -22,11 +22,42 @@ import {
   PointsMaterial,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
-import { buildPlanetGraphCore, IPlanetGraphCore, IVec3 } from 'triangular-engine/worldgen';
+import {
+  buildPlanetGraphCore,
+  buildPlanetTectonics,
+  IPlanetGraphCore,
+  IPlanetTectonics,
+  IVec3,
+} from 'triangular-engine/worldgen';
 
 /** dot(siteDirection, viewDirection) cutoff for the near-side cull — a small negative
  * margin past the exact horizon so boundary edges don't clip mid-line at the terminator. */
 const CULL_THRESHOLD = -0.02;
+
+export type MapMode = 'graph' | 'plates' | 'elevation' | 'land';
+
+/** Deterministic, well-spread plate color — golden-angle hue step so adjacent plate ids never land near each other on the wheel. */
+function plateColor(plateId: number): string {
+  const hue = (plateId * 137.508) % 360;
+  return `hsl(${hue.toFixed(1)}, 65%, 55%)`;
+}
+
+/** Elevation -> color ramp: deep ocean blue through to snow-capped peaks, split at sea level. */
+function elevationColor(elevation: number, seaLevel: number, min: number, max: number): string {
+  if (elevation < seaLevel) {
+    const t = max > seaLevel ? (elevation - min) / (seaLevel - min || 1) : 0;
+    const clamped = Math.max(0, Math.min(1, t));
+    const l = 12 + clamped * 28;
+    return `hsl(210, 70%, ${l}%)`;
+  }
+  const t = Math.max(0, Math.min(1, (elevation - seaLevel) / (max - seaLevel || 1)));
+  if (t < 0.6) {
+    const l = 30 + (t / 0.6) * 20;
+    return `hsl(${100 - t * 30}, 45%, ${l}%)`;
+  }
+  const l = 50 + ((t - 0.6) / 0.4) * 40;
+  return `hsl(30, ${Math.max(0, 25 - (t - 0.6) * 40)}%, ${l}%)`;
+}
 
 @Component({
   selector: 'app-cell-planet-lab-page',
@@ -48,11 +79,14 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   readonly jitter = signal(15);
   readonly showSites = signal(true);
   readonly showEdges = signal(true);
+  readonly plateCount = signal(10);
+  readonly mapMode = signal<MapMode>('graph');
 
   readonly cellTotal = signal(0);
   readonly edgeTotal = signal(0);
   readonly degreeRange = signal('—');
   readonly buildMs = signal('—');
+  readonly landFraction = signal('—');
 
   private readonly root = new Group();
   private readonly sitesMaterial = new PointsMaterial({
@@ -120,6 +154,16 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.regenerate();
   }
 
+  onPlateCount(event: Event): void {
+    this.plateCount.set(Number((event.target as HTMLInputElement).value));
+    this.regenerate();
+  }
+
+  setMapMode(mode: MapMode): void {
+    this.mapMode.set(mode);
+    this.drawMap();
+  }
+
   toggleSites(): void {
     this.showSites.update((value) => !value);
     if (this.sitesPoints) this.sitesPoints.visible = this.showSites();
@@ -137,6 +181,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   }
 
   private graph: IPlanetGraphCore | null = null;
+  private tectonics: IPlanetTectonics | null = null;
 
   private regenerate(): void {
     const t0 = performance.now();
@@ -149,6 +194,13 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     const t1 = performance.now();
 
     this.graph = graph;
+    this.tectonics = buildPlanetTectonics(graph, {
+      plateCount: this.plateCount(),
+      seed: this.seed(),
+    });
+    const land = this.tectonics.isLand.filter(Boolean).length / this.tectonics.isLand.length;
+    this.landFraction.set(`${(land * 100).toFixed(0)}%`);
+
     this.buildMs.set(`${(t1 - t0).toFixed(1)} ms`);
     this.rebuildSites(graph);
     this.rebuildEdges(graph);
@@ -318,6 +370,42 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       x: ((ll.lon / Math.PI) * 0.5 + 0.5) * width,
       y: (1 - ((ll.lat / (Math.PI / 2)) * 0.5 + 0.5)) * height,
     });
+
+    const mode = this.mapMode();
+    const tectonics = this.tectonics;
+    if (mode !== 'graph' && tectonics) {
+      const min = Math.min(...tectonics.elevation);
+      const max = Math.max(...tectonics.elevation);
+      const seaLevel = tectonics.seaLevelElevation;
+
+      for (const cell of graph.cells) {
+        const n = cell.corners.length;
+        if (n < 3) continue;
+        const lls = cell.corners.map(lonLat);
+        // A cell whose corners straddle the ±180° seam would smear across the whole
+        // map width if filled naively — skip it, same as the edge-drawing seam guard below.
+        const wraps = lls.some((ll, k) => Math.abs(ll.lon - lls[(k + 1) % n].lon) > Math.PI * 0.9);
+        if (wraps) continue;
+
+        if (mode === 'plates') {
+          ctx.fillStyle = plateColor(tectonics.plateIdByCell[cell.id]);
+        } else if (mode === 'elevation') {
+          ctx.fillStyle = elevationColor(tectonics.elevation[cell.id], seaLevel, min, max);
+        } else {
+          ctx.fillStyle = tectonics.isLand[cell.id] ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
+        }
+
+        ctx.beginPath();
+        const p0 = mapPoint(lls[0]);
+        ctx.moveTo(p0.x, p0.y);
+        for (let k = 1; k < n; k++) {
+          const p = mapPoint(lls[k]);
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
 
     if (this.showEdges()) {
       ctx.strokeStyle = '#6fe3c0';

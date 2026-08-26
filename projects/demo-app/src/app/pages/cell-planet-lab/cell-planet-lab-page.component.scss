@@ -160,6 +160,19 @@ button:hover {
 button:active {
   transform: scale(0.98);
 }
+button.active {
+  border-color: var(--line);
+  color: var(--bg);
+  background: var(--line);
+}
+
+.control-group-label {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
 
 .toggle {
   display: flex;
