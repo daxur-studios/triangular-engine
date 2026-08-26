@@ -42,3 +42,8 @@ export function normalize(a: IVec3): IVec3 {
   if (len === 0) return { x: 0, y: 0, z: 0 };
   return scale(a, 1 / len);
 }
+
+/** Component of `a` lying in the tangent plane of the (assumed unit) `normal` — `a` with its `normal`-aligned part removed. */
+export function projectOnTangentPlane(a: IVec3, normal: IVec3): IVec3 {
+  return sub(a, scale(normal, dot(a, normal)));
+}
