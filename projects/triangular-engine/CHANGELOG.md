@@ -6,17 +6,14 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
-- Added signed `continental-3d` terrain generation for coherent ocean basins,
-  continental shelves, and broad land masses, plus deterministic batched
-  `coastalSitesFor` placement with buildable-ground, shoreline, and navigable
-  water directions.
-- Re-authored `HOME_PLANET` for approximately 70% ocean coverage and moved the
-  stock home pad/runway to a low-latitude coastal site. The exported
-  `HOME_BASE_COASTAL_ACCESS` provides stable shore and port approach metadata.
-- Varied continental shelf steepness so broad beaches and compact deep-water
-  coasts both occur, added a shallow-water-width constraint to coastal-site
-  placement, and separated the ocean surface from terrain depth to prevent
-  shoreline z-fighting.
+- Redesigned the procedural planetary surface architecture for `triangular-engine/celestial`
+  optimized for gameplay, base-building, and exploration:
+  - Added `terrace-fractal-3d` (`ITerraceFractalTerrainGeneratorDef`) for stepped flat-topped tablelands and mesas.
+  - Added `canyon-3d` (`ICanyonTerrainGeneratorDef`) for carved tectonic rifts and gorges with sheer drop walls and flat floors.
+  - Added `dunes-3d` (`IDuneTerrainGeneratorDef`) for wind-swept ripple sand dune fields with asymmetric slip faces.
+  - Added optional 3D domain warping (`IDomainWarpDef`) across fractal, ridged, and continental generators for organic coastlines, bays, straits, and archipelagos.
+  - Rebuilt `HOME_PLANET` with a 6-tier biome hierarchy (`lowland-meadows`, `rolling-hills`, `alpine-ridges`, `tableland-plateaus`, `desert-dunes`, `rift-canyons`), removing chaotic global macro noise to guarantee flat buildable meadow expanses (<1-2° slope) for bases and runways while preserving 70% Earth-like ocean coverage.
+  - Updated deterministic coastal launch pad and runway placement (`HOME_BASE_COASTAL_ACCESS`, `HOME_PAD`, `HOME_RUNWAY`) on a flat coastal meadow site.
 
 - `<scene>` now accepts a `[wireframe]` boolean input. When enabled, every mesh
   and line in the scene renders with a wireframe material for debugging; original

@@ -56,6 +56,7 @@ import {
   ICdlodTerrainPalette,
   IOceanShaderUniforms,
 } from './cdlod-materials';
+import { PlanetaryFeaturePyramid, CdlodV3Selector } from './v3';
 
 // Minimum spacing between reselects triggered by worker patches arriving.
 // Each in-flight worker patch resolves independently, so bursts of up to
@@ -192,6 +193,7 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
   readonly hidden = input(false);
   readonly palette = input<ICdlodTerrainPalette | null>(null);
   readonly motionLookAhead = input<CdlodMotionLookAhead | null>(null);
+  readonly engineVersion = input<'v2' | 'v3'>('v2');
 
   // ==========================================================================
   // Outputs
@@ -274,6 +276,10 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
   readonly #patchMinElevationM = new Map<string, number>();
   readonly #oceanGeometryCache = new Map<string, BufferGeometry>();
   #pendingWorkerRebuild = false;
+
+  #v3Pyramid: PlanetaryFeaturePyramid | undefined;
+  #v3PyramidBody: ICelestialBody | undefined;
+  #v3Selector: CdlodV3Selector | undefined;
 
   #lastCameraPos = new Vector3(NaN, NaN, NaN);
   #lastCameraFwd = new Vector3(0, 0, -1);
@@ -369,6 +375,16 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
       this.useWorkers();
       this.activeRenderOrigin();
       this.motionLookAhead();
+      this.#needsImmediateRebuild = true;
+    });
+
+    // React to body / terrain parameter updates
+    effect(() => {
+      this.body();
+      this.#clearGeometryCache();
+      this.#clearResidentMeshes();
+      this.#v3Selector = undefined;
+      this.#v3Pyramid = undefined;
       this.#needsImmediateRebuild = true;
     });
 
@@ -551,6 +567,55 @@ export class CdlodPlanetComponent extends GroupComponent implements OnDestroy {
     const sampler = this.sampler();
     const quality = this.effectiveQuality();
     const alt = Math.hypot(...cameraPosM) - body.radiusM;
+
+    if (this.engineVersion() === 'v3') {
+      if (!this.#v3Pyramid || this.#v3PyramidBody !== body) {
+        this.#v3Pyramid = new PlanetaryFeaturePyramid(body, sampler, {
+          maxLevel: 6,
+        });
+        this.#v3PyramidBody = body;
+        this.#v3Selector = new CdlodV3Selector(body, this.#v3Pyramid, sampler);
+      }
+      const selector = this.#v3Selector!;
+      const v3Patches = selector.selectPatches(cameraPosM, {
+        splitErrorPx: quality.splitErrorPx,
+        viewportHeightPx: 1080,
+        fovRad: (60 * Math.PI) / 180,
+        maxLevel: quality.maxLevel,
+        baseResolution: quality.baseResolution,
+      });
+
+      const cdlodPatches: ICdlodPatch[] = v3Patches.map((p) => ({
+        address: p.address,
+        centerBodyFixedM: p.centerBodyFixedM,
+        boundingRadiusM: p.boundingRadiusM,
+        resolution: p.resolution,
+        morphFactor: p.morphFactor,
+        edgeMorph: p.edgeMorph,
+        roughnessM: p.varianceM,
+        distanceM: Math.hypot(
+          cameraPosM[0] - p.centerBodyFixedM[0],
+          cameraPosM[1] - p.centerBodyFixedM[1],
+          cameraPosM[2] - p.centerBodyFixedM[2],
+        ),
+        minRadiusM: body.radiusM + p.minElevationM,
+        maxRadiusM: body.radiusM + p.maxElevationM,
+      }));
+
+      for (const p of v3Patches) {
+        const key = `${p.address.face}:${p.address.level}:${p.address.x}:${p.address.y}:${p.resolution}`;
+        this.#patchMinElevationM.set(key, p.minElevationM);
+      }
+
+      this.#updateResidentMeshes(
+        cdlodPatches,
+        body,
+        sampler,
+        quality.baseResolution,
+      );
+      this.#emitTelemetry(cdlodPatches, alt);
+      return;
+    }
 
     const options: ICdlodSelectionOptions = {
       maxLevel: quality.maxLevel,

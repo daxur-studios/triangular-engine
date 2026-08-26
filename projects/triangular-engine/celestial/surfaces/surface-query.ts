@@ -18,14 +18,19 @@ import {
   TerrainGeneratorDef,
 } from './terrain-def';
 import {
+  compileCanyonGenerator,
   compileContinentalGenerator,
   compileCraterFieldGenerator,
+  compileDuneGenerator,
   compileRidgedFractalGenerator,
+  compileTerraceFractalGenerator,
 } from './terrain-generators';
 import {
+  assertDomainWarpParameters,
   assertFinite,
   assertNoiseParameters,
   compileMask,
+  domainWarp3d,
   fractalNoise3d,
   ICompiledGenerator,
 } from './terrain-noise';
@@ -74,12 +79,21 @@ function compileFractalNoiseGenerator(
   if (definition.amplitudeM < 0) {
     throw new RangeError('Terrain amplitudeM cannot be negative.');
   }
+  if (definition.warp) {
+    assertDomainWarpParameters(definition.warp);
+  }
   const generatorSeed = seed + (definition.seedOffset ?? 0);
   const mask = definition.mask ? compileMask(definition.mask, seed) : undefined;
   return {
     sample: (x, y, z) => {
+      let sx = x;
+      let sy = y;
+      let sz = z;
+      if (definition.warp) {
+        [sx, sy, sz] = domainWarp3d(x, y, z, definition.warp, generatorSeed);
+      }
       const elevationM =
-        fractalNoise3d(x, y, z, definition, generatorSeed) *
+        fractalNoise3d(sx, sy, sz, definition, generatorSeed) *
         definition.amplitudeM;
       return elevationM * (mask?.sample(x, y, z) ?? 1);
     },
@@ -99,6 +113,12 @@ function compileGeneratorDef(
       return compileContinentalGenerator(definition, seed);
     case 'crater-field-3d':
       return compileCraterFieldGenerator(definition, seed);
+    case 'terrace-fractal-3d':
+      return compileTerraceFractalGenerator(definition, seed);
+    case 'canyon-3d':
+      return compileCanyonGenerator(definition, seed);
+    case 'dunes-3d':
+      return compileDuneGenerator(definition, seed);
   }
 }
 

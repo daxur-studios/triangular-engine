@@ -16,8 +16,8 @@ const HOME_PLANET_MU_M3_PER_S2 = muForSurfaceGravity(
  * Authored from `coastalSitesFor(HOME_PLANET)`: low-latitude for efficient
  * launches, on flat land about 1.1 km south of a compact deep-water coast.
  */
-const HOME_BASE_LATITUDE_DEG = 11.535766065860328;
-const HOME_BASE_LONGITUDE_DEG = -116.26253854777012;
+const HOME_BASE_LATITUDE_DEG = 13.382037142436814;
+const HOME_BASE_LONGITUDE_DEG = -176.9920359740523;
 const HOME_BASE_LATITUDE_RAD = (HOME_BASE_LATITUDE_DEG * Math.PI) / 180;
 const HOME_BASE_LONGITUDE_RAD = (HOME_BASE_LONGITUDE_DEG * Math.PI) / 180;
 const HOME_PAD_DIRECTION_BODY_FIXED: [number, number, number] = [
@@ -44,14 +44,14 @@ const HOME_RUNWAY_DIRECTION_BODY_FIXED: [number, number, number] = [
 export const HOME_BASE_COASTAL_ACCESS = {
   centerDirectionBodyFixed: HOME_PAD_DIRECTION_BODY_FIXED,
   shoreDirectionBodyFixed: [
-    -0.43277446209053083, 0.20162298503114995, -0.8786662829933674,
+    -0.9711595957236789, 0.23305468962409132, -0.0503443271684003,
   ] as [number, number, number],
   waterDirectionBodyFixed: [
-    -0.4322877910938364, 0.20265665472236596, -0.8786680522062651,
+    -0.9710524870571896, 0.23354695549528773, -0.05012870394224026,
   ] as [number, number, number],
-  shoreDistanceM: 1_089.495086701645,
-  waterDistanceM: 1_775,
-  shallowWaterWidthM: 685.504913298355,
+  shoreDistanceM: 1_076.1554974797072,
+  waterDistanceM: 1_405,
+  shallowWaterWidthM: 328.8445025202928,
 } as const;
 
 /**
@@ -70,33 +70,12 @@ export const HOME_BASE_COASTAL_ACCESS = {
  * shape follows the worlds `VARIED_TERRAIN_SHOWCASE_BODY` precedent so
  * provinces read as continents, not noise-on-noise.
  */
-const HOME_PLANET_BIOME_MASK_FREQUENCY = 0.5;
-/**
- * Narrowed from +-0.15 (2026-07-19 feedback: terrain read as blended/flat
- * rather than showing distinct meadows and mountains). `highlands`/`plains`
- * sample independent noise fields, so `computeBiomeWeights` normalizes two
- * uncorrelated smoothstep outputs — a wide band left most of the surface
- * partway between both fields' 0/1 plateaus, diluting the ridged highlands
- * peaks and un-flattening the plains almost everywhere. A narrower band
- * reaches each field's decisive 0/1 plateau sooner, so more of the surface
- * commits to one biome's generator instead of an even blend of both.
- */
-const HOME_PLANET_MASK_THRESHOLDS = {
-  lowerThreshold: -0.08,
-  upperThreshold: 0.08,
-};
-
-/**
- * One shared low-frequency field establishes the continent outline and gates
- * local biome relief. Keeping the masks identical prevents positive-only
- * mountain ridges from lifting isolated specks out of deep ocean.
- */
 const HOME_PLANET_CONTINENT_FIELD = {
-  frequency: 0.55,
-  octaves: 4,
-  lacunarity: 2,
-  persistence: 0.5,
-  seaLevelThreshold: 0.15,
+  frequency: 0.72,
+  octaves: 5,
+  lacunarity: 2.1,
+  persistence: 0.48,
+  seaLevelThreshold: 0.25,
 } as const;
 const HOME_PLANET_LAND_MASK = {
   kind: 'noise-mask-3d' as const,
@@ -104,146 +83,253 @@ const HOME_PLANET_LAND_MASK = {
   octaves: HOME_PLANET_CONTINENT_FIELD.octaves,
   lacunarity: HOME_PLANET_CONTINENT_FIELD.lacunarity,
   persistence: HOME_PLANET_CONTINENT_FIELD.persistence,
-  lowerThreshold: HOME_PLANET_CONTINENT_FIELD.seaLevelThreshold,
-  upperThreshold: HOME_PLANET_CONTINENT_FIELD.seaLevelThreshold + 0.09,
+  lowerThreshold: HOME_PLANET_CONTINENT_FIELD.seaLevelThreshold - 0.03,
+  upperThreshold: HOME_PLANET_CONTINENT_FIELD.seaLevelThreshold + 0.01,
 };
 
-/**
- * Richer pass (2026-07-30 feedback: still read as flat in actual flight,
- * not just from orbit). Two compounding causes, both fixed here without
- * touching province size/shape (`HOME_PLANET_BIOME_MASK_FREQUENCY` and
- * thresholds stay as-is — continents-not-noise still holds):
- * - `plains` previously used a 240 km wavelength (`frequency: 2.5` on a
- *   600 km-radius body) at only 60 m amplitude — over any normal flight
- *   distance that's imperceptible, effectively flat regardless of the
- *   number on paper. Raised to a ~50 km wavelength (`frequency: 12`) and
- *   250 m amplitude so meadows read as genuine rolling hills within a
- *   normal flight envelope, not just from orbit.
- * - `highlands` amplitude/sharpness raised (4_500 -> 6_500 m,
- *   `ridgeExponent` 2.5 -> 3) for peaks dramatic enough to be unmistakably
- *   "mountains" rather than rough noise, once you're in that province.
- */
 const HOME_PLANET_BIOMES: ITerrainBiomeDef[] = [
   {
-    id: 'highlands',
+    id: 'alpine-ridges',
     mask: {
       kind: 'noise-mask-3d',
-      frequency: HOME_PLANET_BIOME_MASK_FREQUENCY,
-      octaves: 2,
+      frequency: 1.2,
+      octaves: 3,
       lacunarity: 2,
       persistence: 0.5,
-      seedOffset: 200,
-      ...HOME_PLANET_MASK_THRESHOLDS,
+      seedOffset: 500,
+      lowerThreshold: 0.04,
+      upperThreshold: 0.22,
     },
     generators: [
       {
         kind: 'ridged-fractal-3d',
-        amplitudeM: 6_500,
-        frequency: 6,
-        octaves: 5,
+        amplitudeM: 7_800,
+        frequency: 7.0,
+        octaves: 6,
+        lacunarity: 2.15,
+        persistence: 0.52,
+        ridgeExponent: 3.2,
+        seedOffset: 510,
+        mask: HOME_PLANET_LAND_MASK,
+      },
+      {
+        kind: 'ridged-fractal-3d',
+        amplitudeM: 600,
+        frequency: 30,
+        octaves: 4,
         lacunarity: 2,
         persistence: 0.5,
-        ridgeExponent: 3,
-        seedOffset: 210,
+        ridgeExponent: 2.0,
+        seedOffset: 520,
         mask: HOME_PLANET_LAND_MASK,
       },
     ],
     visual: {
-      colorRgb: [0.45, 0.4, 0.35],
-      highColorRgb: [0.95, 0.95, 0.97],
+      colorRgb: [0.28, 0.30, 0.34],
+      highColorRgb: [0.96, 0.97, 1.0],
     },
   },
   {
-    id: 'plains',
+    id: 'rolling-hills',
     mask: {
       kind: 'noise-mask-3d',
-      frequency: HOME_PLANET_BIOME_MASK_FREQUENCY,
-      octaves: 2,
+      frequency: 1.4,
+      octaves: 3,
       lacunarity: 2,
       persistence: 0.5,
-      seedOffset: 700,
-      ...HOME_PLANET_MASK_THRESHOLDS,
+      seedOffset: 300,
+      lowerThreshold: -0.02,
+      upperThreshold: 0.20,
     },
     generators: [
       {
         kind: 'fractal-noise-3d',
-        amplitudeM: 250,
-        frequency: 12,
+        amplitudeM: 95,
+        frequency: 16,
         octaves: 3,
         lacunarity: 2,
         persistence: 0.5,
+        seedOffset: 310,
+        mask: HOME_PLANET_LAND_MASK,
+      },
+    ],
+    visual: {
+      colorRgb: [0.32, 0.48, 0.22],
+      highColorRgb: [0.58, 0.52, 0.32],
+    },
+  },
+  {
+    id: 'tableland-plateaus',
+    mask: {
+      kind: 'noise-mask-3d',
+      frequency: 1.3,
+      octaves: 3,
+      lacunarity: 2,
+      persistence: 0.5,
+      seedOffset: 700,
+      lowerThreshold: 0.06,
+      upperThreshold: 0.26,
+    },
+    generators: [
+      {
+        kind: 'terrace-fractal-3d',
+        amplitudeM: 900,
+        frequency: 5.0,
+        octaves: 4,
+        lacunarity: 2,
+        persistence: 0.5,
+        terraceCount: 4,
+        stepSharpness: 0.88,
         seedOffset: 710,
         mask: HOME_PLANET_LAND_MASK,
       },
     ],
     visual: {
-      colorRgb: [0.25, 0.45, 0.2],
-      highColorRgb: [0.55, 0.5, 0.35],
+      colorRgb: [0.55, 0.42, 0.28],
+      highColorRgb: [0.78, 0.65, 0.48],
+    },
+  },
+  {
+    id: 'desert-dunes',
+    mask: {
+      kind: 'noise-mask-3d',
+      frequency: 1.2,
+      octaves: 3,
+      lacunarity: 2,
+      persistence: 0.5,
+      seedOffset: 850,
+      lowerThreshold: 0.08,
+      upperThreshold: 0.28,
+    },
+    generators: [
+      {
+        kind: 'dunes-3d',
+        amplitudeM: 80,
+        frequency: 24,
+        octaves: 3,
+        lacunarity: 2,
+        persistence: 0.5,
+        windDirectionBodyFixed: [0.8, 0.2, 0.5],
+        waveAsymmetry: 0.65,
+        seedOffset: 860,
+        mask: HOME_PLANET_LAND_MASK,
+      },
+    ],
+    visual: {
+      colorRgb: [0.76, 0.58, 0.32],
+      highColorRgb: [0.88, 0.74, 0.48],
+    },
+  },
+  {
+    id: 'rift-canyons',
+    mask: {
+      kind: 'noise-mask-3d',
+      frequency: 1.3,
+      octaves: 3,
+      lacunarity: 2,
+      persistence: 0.5,
+      seedOffset: 950,
+      lowerThreshold: 0.10,
+      upperThreshold: 0.30,
+    },
+    generators: [
+      {
+        kind: 'canyon-3d',
+        depthM: 700,
+        frequency: 4.2,
+        octaves: 5,
+        lacunarity: 2,
+        persistence: 0.5,
+        canyonWidth: 0.30,
+        wallSteepness: 3.2,
+        seedOffset: 960,
+        mask: HOME_PLANET_LAND_MASK,
+      },
+    ],
+    visual: {
+      colorRgb: [0.48, 0.24, 0.16],
+      highColorRgb: [0.68, 0.42, 0.28],
+    },
+  },
+  {
+    id: 'lowland-meadows',
+    mask: {
+      kind: 'noise-mask-3d',
+      frequency: 1.1,
+      octaves: 3,
+      lacunarity: 2,
+      persistence: 0.5,
+      seedOffset: 100,
+      lowerThreshold: -0.50,
+      upperThreshold: 0.02,
+    },
+    generators: [
+      {
+        kind: 'fractal-noise-3d',
+        amplitudeM: 14,
+        frequency: 4,
+        octaves: 2,
+        lacunarity: 2,
+        persistence: 0.5,
+        seedOffset: 110,
+        mask: HOME_PLANET_LAND_MASK,
+      },
+    ],
+    visual: {
+      colorRgb: [0.22, 0.52, 0.18],
+      highColorRgb: [0.42, 0.62, 0.28],
     },
   },
 ];
 
 const HOME_PLANET_BASE_TERRAIN: ITerrainDef = {
   seed: 0x5eed_484f,
-  // Continental shelf (-3_500..900) + land-only regional relief (+-600) +
-  // highlands (0..6_500) + detail (+-400), with padding for future tuning.
-  minElevationM: -4_000,
-  maxElevationM: 8_700,
+  minElevationM: -5_000,
+  maxElevationM: 10_500,
   generators: [
     {
       kind: 'continental-3d',
       ...HOME_PLANET_CONTINENT_FIELD,
-      transitionWidth: 0.045,
-      oceanDepthM: 3_500,
-      landHeightM: 900,
+      transitionWidth: 0.016,
+      oceanDepthM: 4_500,
+      landHeightM: 160,
       coastVariation: {
-        frequency: 2.4,
-        octaves: 2,
+        frequency: 4.5,
+        octaves: 3,
         lacunarity: 2,
         persistence: 0.5,
         seedOffset: 1_200,
-        strength: 0.78,
+        strength: 0.85,
+      },
+      warp: {
+        frequency: 1.2,
+        octaves: 3,
+        lacunarity: 2,
+        persistence: 0.5,
+        strength: 0.18,
+        seedOffset: 340,
       },
     },
-    /** Regional relief keeps continental interiors from reading as one plateau. */
+    /** Fine ground micro-relief grain without disruptive macro slopes. */
     {
       kind: 'fractal-noise-3d',
-      amplitudeM: 600,
-      frequency: 4.5,
-      octaves: 4,
-      lacunarity: 2,
-      persistence: 0.5,
-      seedOffset: 850,
-      mask: HOME_PLANET_LAND_MASK,
-    },
-    /**
-     * Flight-scale detail layer (phase-7-terrain-landing.md C-R2), amplitude
-     * raised 150 -> 400 m in the 2026-07-30 richer pass so even the flattest
-     * areas keep visible local relief instead of reading as billiard-flat
-     * between province-scale features. Finest octave (frequency x
-     * lacunarity^3 = 960) is a ~625 m wavelength — D12 requires every
-     * layer's finest octave to stay >= 10x the physics triangle edge
-     * (~7 m at L12); 625 m clears that with wide margin.
-     */
-    {
-      kind: 'fractal-noise-3d',
-      amplitudeM: 400,
+      amplitudeM: 2.5,
       frequency: 120,
-      octaves: 4,
+      octaves: 3,
       lacunarity: 2,
       persistence: 0.5,
-      seedOffset: 900,
+      seedOffset: 950,
       mask: HOME_PLANET_LAND_MASK,
     },
   ],
   biomes: HOME_PLANET_BIOMES,
   visual: {
-    colorRgb: [0.25, 0.45, 0.2],
-    highColorRgb: [0.9, 0.9, 0.92],
+    colorRgb: [0.22, 0.52, 0.18],
+    highColorRgb: [0.96, 0.97, 1.0],
   },
   ocean: {
     seaLevelM: 0,
-    shallowColorRgb: [0.1, 0.35, 0.55],
+    shallowColorRgb: [0.1, 0.45, 0.65],
     deepColorRgb: [0.02, 0.08, 0.25],
     depthFalloffM: 1_500,
   },

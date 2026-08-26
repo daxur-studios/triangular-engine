@@ -124,6 +124,13 @@ function scaleTerrainFrequency(
   const mask = generator.mask
     ? { ...generator.mask, frequency: generator.mask.frequency * inverseScale }
     : undefined;
+  const warp =
+    'warp' in generator && generator.warp
+      ? {
+          ...generator.warp,
+          frequency: generator.warp.frequency * inverseScale,
+        }
+      : undefined;
   switch (generator.kind) {
     case 'crater-field-3d':
       return {
@@ -133,9 +140,13 @@ function scaleTerrainFrequency(
       };
     case 'fractal-noise-3d':
     case 'ridged-fractal-3d':
+    case 'terrace-fractal-3d':
+    case 'canyon-3d':
+    case 'dunes-3d':
       return {
         ...generator,
         frequency: generator.frequency * inverseScale,
+        warp,
         mask,
       };
     case 'continental-3d':
@@ -148,6 +159,7 @@ function scaleTerrainFrequency(
               frequency: generator.coastVariation.frequency * inverseScale,
             }
           : undefined,
+        warp,
         mask,
       };
   }

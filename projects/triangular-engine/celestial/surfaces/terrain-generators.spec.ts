@@ -353,3 +353,219 @@ describe('crater radial profile continuity (frozen formula)', () => {
     expect(referenceProfile(2, depthM, rimHeightM)).toBe(0);
   });
 });
+
+describe('terrace-fractal-3d generator', () => {
+  const TERRACE_BODY: ICelestialBody = {
+    id: 'terrace-test',
+    kind: 'planet',
+    radiusM: 600_000,
+    muM3PerS2: 3.5316e12,
+    terrain: {
+      seed: 42,
+      minElevationM: -1_000,
+      maxElevationM: 3_000,
+      generators: [
+        {
+          kind: 'terrace-fractal-3d',
+          amplitudeM: 1_200,
+          frequency: 3,
+          octaves: 4,
+          lacunarity: 2,
+          persistence: 0.5,
+          terraceCount: 4,
+          stepSharpness: 0.85,
+        },
+      ],
+    },
+  };
+
+  it('is deterministic, finite, and bounded within [0, amplitudeM]', () => {
+    const sampler = createSurfaceSampler(TERRACE_BODY);
+    for (const direction of SAMPLE_DIRECTIONS) {
+      const elevationM = sampler.sample(direction).elevationM;
+      expect(Number.isFinite(elevationM)).toBeTrue();
+      expect(elevationM).toBeGreaterThanOrEqual(0);
+      expect(elevationM).toBeLessThanOrEqual(1_200);
+    }
+  });
+
+  it('produces identical scalar and batch results', () => {
+    const sampler = createSurfaceSampler(TERRACE_BODY);
+    const directions = new Float64Array(SAMPLE_DIRECTIONS.flat());
+    const output = sampler.sampleBatch(directions);
+    expect([...output]).toEqual(
+      SAMPLE_DIRECTIONS.map((d) => sampler.sample(d).elevationM),
+    );
+  });
+
+  it('validates invalid terrace parameters', () => {
+    const badCount = structuredClone(TERRACE_BODY);
+    (
+      badCount.terrain!.generators[0] as { terraceCount: number }
+    ).terraceCount = 0;
+    expect(() => createSurfaceSampler(badCount)).toThrowError(RangeError);
+
+    const badSharpness = structuredClone(TERRACE_BODY);
+    (
+      badSharpness.terrain!.generators[0] as { stepSharpness: number }
+    ).stepSharpness = 1.5;
+    expect(() => createSurfaceSampler(badSharpness)).toThrowError(RangeError);
+  });
+});
+
+describe('canyon-3d generator', () => {
+  const CANYON_BODY: ICelestialBody = {
+    id: 'canyon-test',
+    kind: 'planet',
+    radiusM: 600_000,
+    muM3PerS2: 3.5316e12,
+    terrain: {
+      seed: 99,
+      minElevationM: -2_000,
+      maxElevationM: 1_000,
+      generators: [
+        {
+          kind: 'canyon-3d',
+          depthM: 800,
+          frequency: 2.5,
+          octaves: 4,
+          lacunarity: 2,
+          persistence: 0.5,
+          canyonWidth: 0.35,
+          wallSteepness: 3.0,
+        },
+      ],
+    },
+  };
+
+  it('is deterministic, non-positive, and bounded within [-depthM, 0]', () => {
+    const sampler = createSurfaceSampler(CANYON_BODY);
+    for (const direction of SAMPLE_DIRECTIONS) {
+      const elevationM = sampler.sample(direction).elevationM;
+      expect(Number.isFinite(elevationM)).toBeTrue();
+      expect(elevationM).toBeLessThanOrEqual(0);
+      expect(elevationM).toBeGreaterThanOrEqual(-800);
+    }
+  });
+
+  it('produces identical scalar and batch results', () => {
+    const sampler = createSurfaceSampler(CANYON_BODY);
+    const directions = new Float64Array(SAMPLE_DIRECTIONS.flat());
+    const output = sampler.sampleBatch(directions);
+    expect([...output]).toEqual(
+      SAMPLE_DIRECTIONS.map((d) => sampler.sample(d).elevationM),
+    );
+  });
+
+  it('validates invalid canyon parameters', () => {
+    const badDepth = structuredClone(CANYON_BODY);
+    (badDepth.terrain!.generators[0] as { depthM: number }).depthM = -50;
+    expect(() => createSurfaceSampler(badDepth)).toThrowError(RangeError);
+
+    const badWidth = structuredClone(CANYON_BODY);
+    (badWidth.terrain!.generators[0] as { canyonWidth: number }).canyonWidth =
+      0;
+    expect(() => createSurfaceSampler(badWidth)).toThrowError(RangeError);
+  });
+});
+
+describe('dunes-3d generator', () => {
+  const DUNES_BODY: ICelestialBody = {
+    id: 'dunes-test',
+    kind: 'planet',
+    radiusM: 600_000,
+    muM3PerS2: 3.5316e12,
+    terrain: {
+      seed: 77,
+      minElevationM: -100,
+      maxElevationM: 500,
+      generators: [
+        {
+          kind: 'dunes-3d',
+          amplitudeM: 75,
+          frequency: 18,
+          octaves: 3,
+          lacunarity: 2,
+          persistence: 0.5,
+          windDirectionBodyFixed: [1, 0, 0],
+          waveAsymmetry: 0.65,
+        },
+      ],
+    },
+  };
+
+  it('is deterministic, non-negative, and bounded within [0, amplitudeM]', () => {
+    const sampler = createSurfaceSampler(DUNES_BODY);
+    for (const direction of SAMPLE_DIRECTIONS) {
+      const elevationM = sampler.sample(direction).elevationM;
+      expect(Number.isFinite(elevationM)).toBeTrue();
+      expect(elevationM).toBeGreaterThanOrEqual(0);
+      expect(elevationM).toBeLessThanOrEqual(75);
+    }
+  });
+
+  it('produces identical scalar and batch results', () => {
+    const sampler = createSurfaceSampler(DUNES_BODY);
+    const directions = new Float64Array(SAMPLE_DIRECTIONS.flat());
+    const output = sampler.sampleBatch(directions);
+    expect([...output]).toEqual(
+      SAMPLE_DIRECTIONS.map((d) => sampler.sample(d).elevationM),
+    );
+  });
+
+  it('validates invalid dune parameters', () => {
+    const badAmp = structuredClone(DUNES_BODY);
+    (badAmp.terrain!.generators[0] as { amplitudeM: number }).amplitudeM = -10;
+    expect(() => createSurfaceSampler(badAmp)).toThrowError(RangeError);
+
+    const badAsym = structuredClone(DUNES_BODY);
+    (
+      badAsym.terrain!.generators[0] as { waveAsymmetry: number }
+    ).waveAsymmetry = 1.2;
+    expect(() => createSurfaceSampler(badAsym)).toThrowError(RangeError);
+  });
+});
+
+describe('domain warp support', () => {
+  it('alters generator output organically when warp is specified', () => {
+    const unwarped: ICelestialBody = {
+      id: 'unwarped',
+      kind: 'planet',
+      radiusM: 600_000,
+      muM3PerS2: 3.5316e12,
+      terrain: {
+        seed: 123,
+        minElevationM: -1_000,
+        maxElevationM: 1_000,
+        generators: [
+          {
+            kind: 'fractal-noise-3d',
+            amplitudeM: 500,
+            frequency: 2,
+            octaves: 3,
+            lacunarity: 2,
+            persistence: 0.5,
+          },
+        ],
+      },
+    };
+    const warped = structuredClone(unwarped);
+    (warped.terrain!.generators[0] as { warp: unknown }).warp = {
+      frequency: 1.5,
+      octaves: 2,
+      lacunarity: 2,
+      persistence: 0.5,
+      strength: 0.25,
+    };
+    const unwarpedSampler = createSurfaceSampler(unwarped);
+    const warpedSampler = createSurfaceSampler(warped);
+    expect(
+      SAMPLE_DIRECTIONS.some(
+        (dir) =>
+          unwarpedSampler.sample(dir).elevationM !==
+          warpedSampler.sample(dir).elevationM,
+      ),
+    ).toBeTrue();
+  });
+});
+

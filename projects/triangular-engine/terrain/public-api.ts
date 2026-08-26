@@ -16,3 +16,4 @@ export * from './streaming/sphere-terrain-surface-selector';
 export * from './streaming/terrain-surface-patch-selector';
 export * from './streaming/terrain-generation-queue';
 export * from './cdlod';
+export * from './cdlod/v3';

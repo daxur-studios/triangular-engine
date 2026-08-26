@@ -14,6 +14,17 @@ export interface INoiseTerrainMaskDef {
 
 export type TerrainMaskDef = INoiseTerrainMaskDef;
 
+/** Optional domain-warp configuration that perturbs sampling coordinates for organic morphology. */
+export interface IDomainWarpDef {
+  frequency: number;
+  octaves: number;
+  lacunarity: number;
+  persistence: number;
+  /** Displacement magnitude. Must be finite and non-negative. */
+  strength: number;
+  seedOffset?: number;
+}
+
 /** The first deterministic generator in the compositional terrain stack. */
 export interface IFractalNoiseTerrainGeneratorDef {
   kind: 'fractal-noise-3d';
@@ -23,6 +34,7 @@ export interface IFractalNoiseTerrainGeneratorDef {
   lacunarity: number;
   persistence: number;
   seedOffset?: number;
+  warp?: IDomainWarpDef;
   /** Optional region weight; omission means this generator applies globally. */
   mask?: TerrainMaskDef;
 }
@@ -38,6 +50,7 @@ export interface IRidgedFractalTerrainGeneratorDef {
   /** Ridge sharpness: `(1 - |n|)^ridgeExponent`. Must be finite and >= 1. */
   ridgeExponent: number;
   seedOffset?: number;
+  warp?: IDomainWarpDef;
   mask?: TerrainMaskDef;
 }
 
@@ -74,6 +87,7 @@ export interface IContinentalTerrainGeneratorDef {
     seedOffset?: number;
     strength: number;
   };
+  warp?: IDomainWarpDef;
   mask?: TerrainMaskDef;
 }
 
@@ -92,11 +106,66 @@ export interface ICraterFieldTerrainGeneratorDef {
   mask?: TerrainMaskDef;
 }
 
+/** Stepped terrace fractal noise for flat-topped tablelands, plateaus, and mesas. */
+export interface ITerraceFractalTerrainGeneratorDef {
+  kind: 'terrace-fractal-3d';
+  amplitudeM: number;
+  frequency: number;
+  octaves: number;
+  lacunarity: number;
+  persistence: number;
+  /** Number of discrete stepped terraces / tiers. Must be an integer >= 1. */
+  terraceCount: number;
+  /** Smoothness of transitions between steps: 0 is completely linear, 1 is sharp cliffs. In [0, 1]. */
+  stepSharpness?: number;
+  seedOffset?: number;
+  warp?: IDomainWarpDef;
+  mask?: TerrainMaskDef;
+}
+
+/** Carved tectonic rift / canyon with sheer drop walls and flat river canyon floor. */
+export interface ICanyonTerrainGeneratorDef {
+  kind: 'canyon-3d';
+  /** Maximum negative incision depth in meters (positive value). */
+  depthM: number;
+  frequency: number;
+  octaves: number;
+  lacunarity: number;
+  persistence: number;
+  /** Canyon corridor width factor in (0, 1]. Defaults to 0.35. */
+  canyonWidth?: number;
+  /** Wall steepness exponent (>= 1). Higher = steeper gorge walls. Defaults to 3. */
+  wallSteepness?: number;
+  seedOffset?: number;
+  warp?: IDomainWarpDef;
+  mask?: TerrainMaskDef;
+}
+
+/** Wind-swept directional ripple sand dunes with asymmetric slip faces. */
+export interface IDuneTerrainGeneratorDef {
+  kind: 'dunes-3d';
+  amplitudeM: number;
+  frequency: number;
+  octaves: number;
+  lacunarity: number;
+  persistence: number;
+  /** Primary body-fixed wind/propagation vector. */
+  windDirectionBodyFixed?: [number, number, number];
+  /** Wave asymmetry between gentle windward slope and steep slip face in [0, 1). Defaults to 0.6. */
+  waveAsymmetry?: number;
+  seedOffset?: number;
+  warp?: IDomainWarpDef;
+  mask?: TerrainMaskDef;
+}
+
 export type TerrainGeneratorDef =
   | IFractalNoiseTerrainGeneratorDef
   | IRidgedFractalTerrainGeneratorDef
   | IContinentalTerrainGeneratorDef
-  | ICraterFieldTerrainGeneratorDef;
+  | ICraterFieldTerrainGeneratorDef
+  | ITerraceFractalTerrainGeneratorDef
+  | ICanyonTerrainGeneratorDef
+  | IDuneTerrainGeneratorDef;
 
 /**
  * Surface albedo for a terrain layer or biome (`planet-surface-texture.md`).

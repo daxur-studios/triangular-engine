@@ -3,7 +3,7 @@
  * kind. Not part of the library's public API (`public-api.ts` never touches
  * this file) — only `surface-query.ts` and `terrain-generators.ts` import it.
  */
-import { INoiseTerrainMaskDef } from './terrain-def';
+import { IDomainWarpDef, INoiseTerrainMaskDef } from './terrain-def';
 
 const UINT32_MAX_PLUS_ONE = 0x1_0000_0000;
 
@@ -34,6 +34,70 @@ export function assertNoiseParameters(definition: INoiseLikeParams): void {
   if (definition.persistence < 0) {
     throw new RangeError('Noise persistence cannot be negative.');
   }
+}
+
+export function assertDomainWarpParameters(warp: IDomainWarpDef): void {
+  assertNoiseParameters(warp);
+  assertFinite('warp strength', warp.strength);
+  if (warp.strength < 0) {
+    throw new RangeError('Domain warp strength cannot be negative.');
+  }
+}
+
+/** Perturbs 3D coordinates by 3 orthogonal fractal noise fields. */
+export function domainWarp3d(
+  x: number,
+  y: number,
+  z: number,
+  warp: IDomainWarpDef,
+  seed: number,
+): [number, number, number] {
+  const warpSeed = seed + (warp.seedOffset ?? 4_321);
+  const dx = fractalNoise3d(x, y, z, warp, warpSeed) * warp.strength;
+  const dy = fractalNoise3d(x, y, z, warp, warpSeed + 100) * warp.strength;
+  const dz = fractalNoise3d(x, y, z, warp, warpSeed + 200) * warp.strength;
+  return [x + dx, y + dy, z + dz];
+}
+
+/** Quantizes a continuous 0-1 value into stepped terraces with smooth transitions. */
+export function terraceStep(
+  value: number,
+  terraceCount: number,
+  stepSharpness: number = 0.85,
+): number {
+  if (terraceCount <= 1) return value;
+  const clampedValue = Math.max(0, Math.min(1, value));
+  const scaled = clampedValue * terraceCount;
+  const tier = Math.floor(scaled);
+  if (tier >= terraceCount) return 1;
+  const fraction = scaled - tier;
+  const margin = Math.max(0.001, (1 - stepSharpness) * 0.5);
+  const sharpFraction = smoothstep(0.5 - margin, 0.5 + margin, fraction);
+  return (tier + sharpFraction) / terraceCount;
+}
+
+/** Shapes a normalized 0-1 distance into a steep-walled flat-floor canyon drop. */
+export function canyonDrop(
+  distanceFromSpine: number,
+  canyonWidth: number = 0.35,
+  wallSteepness: number = 3.0,
+): number {
+  const width = Math.max(1e-4, canyonWidth);
+  const unit = Math.min(1, Math.abs(distanceFromSpine) / width);
+  const shapedWall = Math.pow(unit, wallSteepness);
+  return 1 - smoothstep(0, 1, shapedWall);
+}
+
+/** Asymmetric periodic dune wave with gentle windward face and steep slip face in [0, 1]. */
+export function duneWave(phase: number, asymmetry: number = 0.6): number {
+  const safeAsymmetry = Math.max(0.05, Math.min(0.95, asymmetry));
+  const p = phase - Math.floor(phase);
+  if (p < safeAsymmetry) {
+    const t = p / safeAsymmetry;
+    return smoothstep(0, 1, t);
+  }
+  const t = (p - safeAsymmetry) / (1 - safeAsymmetry);
+  return 1 - smoothstep(0, 1, t);
 }
 
 /** Deterministic hash of one lattice point to a value in `[-1, 1)`. */

@@ -6,19 +6,27 @@
  * of these compilers.
  */
 import {
+  ICanyonTerrainGeneratorDef,
   IContinentalTerrainGeneratorDef,
   ICraterFieldTerrainGeneratorDef,
+  IDuneTerrainGeneratorDef,
   IRidgedFractalTerrainGeneratorDef,
+  ITerraceFractalTerrainGeneratorDef,
 } from './terrain-def';
 import {
+  assertDomainWarpParameters,
   assertFinite,
   assertNoiseParameters,
+  canyonDrop,
   compileMask,
+  domainWarp3d,
+  duneWave,
+  fractalNoise3d,
   hashLattice,
   ICompiledGenerator,
-  fractalNoise3d,
   ridgedFractalNoise3d,
   smoothstep,
+  terraceStep,
 } from './terrain-noise';
 
 export function compileContinentalGenerator(
@@ -58,6 +66,9 @@ export function compileContinentalGenerator(
       );
     }
   }
+  if (definition.warp) {
+    assertDomainWarpParameters(definition.warp);
+  }
 
   const generatorSeed = seed + (definition.seedOffset ?? 0);
   const coastVariationSeed = definition.coastVariation
@@ -66,15 +77,27 @@ export function compileContinentalGenerator(
   const mask = definition.mask ? compileMask(definition.mask, seed) : undefined;
   return {
     sample: (x, y, z) => {
+      let sx = x;
+      let sy = y;
+      let sz = z;
+      if (definition.warp) {
+        [sx, sy, sz] = domainWarp3d(x, y, z, definition.warp, generatorSeed);
+      }
       const continentalness = fractalNoise3d(
-        x,
-        y,
-        z,
+        sx,
+        sy,
+        sz,
         definition,
         generatorSeed,
       );
       const coastVariation = definition.coastVariation
-        ? fractalNoise3d(x, y, z, definition.coastVariation, coastVariationSeed)
+        ? fractalNoise3d(
+            sx,
+            sy,
+            sz,
+            definition.coastVariation,
+            coastVariationSeed,
+          )
         : 0;
       const localTransitionWidth =
         definition.transitionWidth *
@@ -108,13 +131,165 @@ export function compileRidgedFractalGenerator(
   if (definition.ridgeExponent < 1) {
     throw new RangeError('Terrain ridgeExponent must be >= 1.');
   }
+  if (definition.warp) {
+    assertDomainWarpParameters(definition.warp);
+  }
   const generatorSeed = seed + (definition.seedOffset ?? 0);
   const mask = definition.mask ? compileMask(definition.mask, seed) : undefined;
   return {
     sample: (x, y, z) => {
+      let sx = x;
+      let sy = y;
+      let sz = z;
+      if (definition.warp) {
+        [sx, sy, sz] = domainWarp3d(x, y, z, definition.warp, generatorSeed);
+      }
       const elevationM =
-        ridgedFractalNoise3d(x, y, z, definition, generatorSeed) *
+        ridgedFractalNoise3d(sx, sy, sz, definition, generatorSeed) *
         definition.amplitudeM;
+      return elevationM * (mask?.sample(x, y, z) ?? 1);
+    },
+  };
+}
+
+export function compileTerraceFractalGenerator(
+  definition: ITerraceFractalTerrainGeneratorDef,
+  seed: number,
+): ICompiledGenerator {
+  assertNoiseParameters(definition);
+  assertFinite('amplitudeM', definition.amplitudeM);
+  if (definition.amplitudeM < 0) {
+    throw new RangeError('Terrain amplitudeM cannot be negative.');
+  }
+  if (
+    !Number.isInteger(definition.terraceCount) ||
+    definition.terraceCount < 1
+  ) {
+    throw new RangeError('Terrace count must be a positive integer.');
+  }
+  if (definition.stepSharpness !== undefined) {
+    assertFinite('stepSharpness', definition.stepSharpness);
+    if (definition.stepSharpness < 0 || definition.stepSharpness > 1) {
+      throw new RangeError('Terrace stepSharpness must be in [0, 1].');
+    }
+  }
+  if (definition.warp) {
+    assertDomainWarpParameters(definition.warp);
+  }
+  const generatorSeed = seed + (definition.seedOffset ?? 0);
+  const mask = definition.mask ? compileMask(definition.mask, seed) : undefined;
+  const sharpness = definition.stepSharpness ?? 0.85;
+  return {
+    sample: (x, y, z) => {
+      let sx = x;
+      let sy = y;
+      let sz = z;
+      if (definition.warp) {
+        [sx, sy, sz] = domainWarp3d(x, y, z, definition.warp, generatorSeed);
+      }
+      const rawNoise =
+        (fractalNoise3d(sx, sy, sz, definition, generatorSeed) + 1) * 0.5;
+      const terraced = terraceStep(
+        rawNoise,
+        definition.terraceCount,
+        sharpness,
+      );
+      const elevationM = terraced * definition.amplitudeM;
+      return elevationM * (mask?.sample(x, y, z) ?? 1);
+    },
+  };
+}
+
+export function compileCanyonGenerator(
+  definition: ICanyonTerrainGeneratorDef,
+  seed: number,
+): ICompiledGenerator {
+  assertNoiseParameters(definition);
+  assertFinite('depthM', definition.depthM);
+  if (definition.depthM < 0) {
+    throw new RangeError('Canyon depthM cannot be negative.');
+  }
+  if (definition.canyonWidth !== undefined) {
+    assertFinite('canyonWidth', definition.canyonWidth);
+    if (definition.canyonWidth <= 0 || definition.canyonWidth > 1) {
+      throw new RangeError('Canyon canyonWidth must be in (0, 1].');
+    }
+  }
+  if (definition.wallSteepness !== undefined) {
+    assertFinite('wallSteepness', definition.wallSteepness);
+    if (definition.wallSteepness < 1) {
+      throw new RangeError('Canyon wallSteepness must be >= 1.');
+    }
+  }
+  if (definition.warp) {
+    assertDomainWarpParameters(definition.warp);
+  }
+  const generatorSeed = seed + (definition.seedOffset ?? 0);
+  const mask = definition.mask ? compileMask(definition.mask, seed) : undefined;
+  const width = definition.canyonWidth ?? 0.35;
+  const steepness = definition.wallSteepness ?? 3.0;
+  return {
+    sample: (x, y, z) => {
+      let sx = x;
+      let sy = y;
+      let sz = z;
+      if (definition.warp) {
+        [sx, sy, sz] = domainWarp3d(x, y, z, definition.warp, generatorSeed);
+      }
+      const ridge = ridgedFractalNoise3d(
+        sx,
+        sy,
+        sz,
+        { ...definition, ridgeExponent: 1.5 },
+        generatorSeed,
+      );
+      const incision = canyonDrop(1 - ridge, width, steepness);
+      const elevationM = -incision * definition.depthM;
+      return elevationM * (mask?.sample(x, y, z) ?? 1);
+    },
+  };
+}
+
+export function compileDuneGenerator(
+  definition: IDuneTerrainGeneratorDef,
+  seed: number,
+): ICompiledGenerator {
+  assertNoiseParameters(definition);
+  assertFinite('amplitudeM', definition.amplitudeM);
+  if (definition.amplitudeM < 0) {
+    throw new RangeError('Dune amplitudeM cannot be negative.');
+  }
+  if (definition.waveAsymmetry !== undefined) {
+    assertFinite('waveAsymmetry', definition.waveAsymmetry);
+    if (definition.waveAsymmetry < 0 || definition.waveAsymmetry >= 1) {
+      throw new RangeError('Dune waveAsymmetry must be in [0, 1).');
+    }
+  }
+  if (definition.warp) {
+    assertDomainWarpParameters(definition.warp);
+  }
+  const generatorSeed = seed + (definition.seedOffset ?? 0);
+  const mask = definition.mask ? compileMask(definition.mask, seed) : undefined;
+  const asymmetry = definition.waveAsymmetry ?? 0.6;
+  const wind = definition.windDirectionBodyFixed ?? [1, 0, 0];
+  const windLen = Math.hypot(...wind);
+  const wx = windLen > 0 ? wind[0] / windLen : 1;
+  const wy = windLen > 0 ? wind[1] / windLen : 0;
+  const wz = windLen > 0 ? wind[2] / windLen : 0;
+
+  return {
+    sample: (x, y, z) => {
+      let sx = x;
+      let sy = y;
+      let sz = z;
+      if (definition.warp) {
+        [sx, sy, sz] = domainWarp3d(x, y, z, definition.warp, generatorSeed);
+      }
+      const windCoord = (sx * wx + sy * wy + sz * wz) * definition.frequency;
+      const crossModulation =
+        fractalNoise3d(sx, sy, sz, definition, generatorSeed) * 0.35;
+      const wave = duneWave(windCoord + crossModulation, asymmetry);
+      const elevationM = wave * definition.amplitudeM;
       return elevationM * (mask?.sample(x, y, z) ?? 1);
     },
   };

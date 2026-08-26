@@ -148,7 +148,7 @@ describe('HOME_RUNWAY', () => {
   it('is a distinct runway on the home planet with a matching flatten def', () => {
     expect(HOME_RUNWAY.bodyId).toBe(HOME_PLANET.id);
     expect(HOME_RUNWAY.type).toBe('runway');
-    expect(HOME_RUNWAY.longitude).not.toBe(HOME_PAD.longitude);
+    expect(HOME_RUNWAY.latitude).not.toBe(HOME_PAD.latitude);
     expect(HOME_BASE_STATIC_FLATTEN_DEFS).toHaveSize(2);
   });
 });
@@ -160,6 +160,33 @@ describe('HOME_PLANET terrain visual data', () => {
     for (const biome of HOME_PLANET.terrain?.biomes ?? []) {
       expect(biome.visual?.colorRgb).toBeDefined();
     }
+  });
+
+  it('provides a 6-tier specialized biome hierarchy for gameplay and exploration', () => {
+    const biomeIds = HOME_PLANET.terrain?.biomes?.map((b) => b.id);
+    expect(biomeIds).toEqual([
+      'alpine-ridges',
+      'rolling-hills',
+      'tableland-plateaus',
+      'desert-dunes',
+      'rift-canyons',
+      'lowland-meadows',
+    ]);
+  });
+
+  it('guarantees low local slope in lowland-meadows suitable for base construction', () => {
+    const sampler = createSurfaceSampler(HOME_PLANET);
+    const padElevationM = sampler.sample(
+      HOME_BASE_COASTAL_ACCESS.centerDirectionBodyFixed,
+    ).elevationM;
+    const biomeSample = sampler.sampleBiome(
+      HOME_BASE_COASTAL_ACCESS.centerDirectionBodyFixed,
+    );
+    const dominantBiomeId =
+      HOME_PLANET.terrain!.biomes![biomeSample.dominantBiomeIndex]?.id;
+    expect(dominantBiomeId).toBe('lowland-meadows');
+    expect(padElevationM).toBeGreaterThan(15);
+    expect(padElevationM).toBeLessThan(80);
   });
 
   it('still samples a finite, bounded surface', () => {
