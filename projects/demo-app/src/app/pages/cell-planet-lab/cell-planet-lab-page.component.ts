@@ -23,6 +23,7 @@ import {
   MeshStandardMaterial,
   Points,
   PointsMaterial,
+  SphereGeometry,
   Vector3Tuple,
 } from 'three';
 import { EngineModule, EngineService, RaycastFocusContext, RaycastFocusResolver } from 'triangular-engine';
@@ -32,10 +33,10 @@ import {
   buildPlanetTectonics,
   cellCornerElevation,
   IPlanetEcology,
-  IPlanetGraphCell,
   IPlanetGraphCore,
   IPlanetTectonics,
   IVec3,
+  sampleElevation,
 } from 'triangular-engine/worldgen';
 
 /** dot(siteDirection, viewDirection) cutoff for the near-side cull — a small negative
@@ -127,6 +128,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   readonly showSites = signal(true);
   readonly showEdges = signal(true);
   readonly showPreview3D = signal(false);
+  readonly showOceanShell = signal(true);
   readonly plateCount = signal(10);
   readonly mapMode = signal<MapMode>('graph');
   /** Visual-only exaggeration of raw elevation (unitless, typically ~-1..1) into a radius
@@ -169,10 +171,30 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   // per-cell/corner elevation or touching the color attribute.
   private previewDirections = new Float32Array(0);
   private previewElevationPerVertex = new Float32Array(0);
+  // Flat sea-level shell layered over the (unclamped) terrain mesh so submerged land
+  // reads as underwater without the terrain mesh itself faking a shoreline — see the
+  // rebuildPreviewMesh() doc comment.
+  private readonly oceanMaterial = new MeshStandardMaterial({
+    color: '#1c5f8a',
+    transparent: true,
+    opacity: 0.55,
+    roughness: 0.15,
+    metalness: 0.05,
+    side: DoubleSide,
+  });
+  private oceanMesh: Mesh | null = null;
+  private currentSeaLevelElevation = 0;
   private readonly riverMaterial = new LineBasicMaterial({ color: '#5ec8ff', transparent: true, opacity: 0.95 });
   private readonly coastlineMaterial = new LineBasicMaterial({ color: '#f4f4f4', transparent: true, opacity: 0.9 });
   private riverLines: LineSegments | null = null;
   private coastlineLines: LineSegments | null = null;
+  // Unit directions + per-point sampled elevation for the river overlay, and unit
+  // directions for the coastline overlay (which rides the constant sea-level radius
+  // instead) — cached so onElevationScale() can reposition both cheaply without
+  // re-sampling elevation on every slider tick.
+  private riverDirections = new Float32Array(0);
+  private riverElevations = new Float32Array(0);
+  private coastlineDirections = new Float32Array(0);
 
   // Per-cell source data driving the near-side cull, rebuilt on regenerate() and
   // re-filtered every frame against the live camera position (updateCulling()).
@@ -196,11 +218,13 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       this.sitesPoints?.geometry.dispose();
       this.edgesLines?.geometry.dispose();
       this.previewMesh?.geometry.dispose();
+      this.oceanMesh?.geometry.dispose();
       this.riverLines?.geometry.dispose();
       this.coastlineLines?.geometry.dispose();
       this.sitesMaterial.dispose();
       this.edgesMaterial.dispose();
       this.previewMaterial.dispose();
+      this.oceanMaterial.dispose();
       this.riverMaterial.dispose();
       this.coastlineMaterial.dispose();
     });
@@ -243,6 +267,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   onElevationScale(event: Event): void {
     this.elevationScale.set(Number((event.target as HTMLInputElement).value));
     this.updatePreviewDisplacement();
+    this.updateRiverOverlayDisplacement();
   }
 
   setMapMode(mode: MapMode): void {
@@ -268,6 +293,12 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   togglePreview3D(): void {
     this.showPreview3D.update((value) => !value);
     if (this.previewMesh) this.previewMesh.visible = this.showPreview3D();
+    if (this.oceanMesh) this.oceanMesh.visible = this.showPreview3D() && this.showOceanShell();
+  }
+
+  toggleOceanShell(): void {
+    this.showOceanShell.update((value) => !value);
+    if (this.oceanMesh) this.oceanMesh.visible = this.showPreview3D() && this.showOceanShell();
   }
 
   /** Toggles the orbit camera's up vector between fixed world-Y and surface-relative
@@ -460,7 +491,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   }
 
   /** M3+M4a 3D preview: one triangle fan per cell (center -> corner k -> corner k+1),
-   * flat-shaded and colored via `resolveCellColor()` — geometry rebuilds on regenerate(),
+   * flat-shaded and colored via `resolveVertexColor()` — geometry rebuilds on regenerate(),
    * only the vertex colors are re-touched on a map-mode change. Every fan vertex sits
    * exactly at a cell center or a cell-polygon corner, so its elevation is looked up
    * directly (center = the cell's own elevation, corner = `cellCornerElevation()`, the
@@ -470,42 +501,35 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * crack-free stitching across chunks (that's M4b/c) — `sampleElevation()` stays the
    * function for arbitrary (non-vertex) queries like future collider patches.
    *
-   * Every vertex is clamped to sea level from its corner's land/water *consensus* — land
-   * if 2+ of the 3 cells meeting there are land, water otherwise — not from whichever
-   * fan happens to be drawing it. Without this, a corner's raw value is a plain average
-   * of the 3 cells that share it (see `cellCornerElevation()`), so an ocean cell sitting
-   * next to a mountain range got one corner dragged up by that neighbor's elevation —
-   * sometimes past the elevation of unrelated, flatter land cells elsewhere. An earlier
-   * version of this clamp keyed the land/water side off the *owning* cell instead of the
-   * corner consensus; since the mesh isn't vertex-welded (each of the 3 fans meeting at a
-   * corner pushes its own copy of that vertex), that made a coastal corner clamp to two
-   * different heights depending on which fan drew it — a visible gap/cliff at the seam
-   * that was a mesh artifact, not a real elevation feature. Consensus is the same set of
-   * 3 cell ids regardless of which of the 3 fans is asking (same symmetry as
-   * `cellCornerElevation()` itself), so both sides of a shared edge now agree. This is
-   * still a placeholder for the real fix (a separate flat ocean shell, M4+), not a claim
-   * that blended coastal relief is itself wrong — and it doesn't give a real cliff *face*:
-   * a land/water step still meets across a single unsubdivided edge with no vertices for
-   * a vertical wall, so a genuine steep drop needs edge subdivision (M4b/c), not a clamp. */
+   * Elevation here is the raw blended value, never clamped to sea level. An earlier version
+   * clamped each vertex up/down based on a land/water classification computed *separately*
+   * from height (first the owning cell's flag, then a 3-cell corner consensus) — that made
+   * color and geometry two independently-computed values that were only reconciled after
+   * the fact, so lowering the elevation-scale slider shrank the visible mismatch without
+   * ever removing it, and the same world-space gap got more visible at close range/planet
+   * scale. `resolveVertexColor()` now classifies land/water from this exact same elevation
+   * value (`elevation >= seaLevel`, per vertex), so color and height are the same statement
+   * by construction — the mismatch can't reappear at any scale or elevation-scale setting.
+   * The visual "water covers submerged land" effect now comes from the separate ocean shell
+   * (`ensureOceanShell()`) layered on top, the standard technique instead of forcing the
+   * terrain mesh to fake a shoreline.
+   *
+   * A per-vertex sandy "beach band" was tried and reverted: at this mesh's resolution (one
+   * color sample per cell center/corner, linearly interpolated across a whole triangle) any
+   * band is at minimum a full triangle wide, which reads as a chunk of the cell recolored
+   * sand, not a shoreline — a mesh-resolution limit, not something tunable away with a
+   * narrower threshold. A thin shoreline needs a real line overlay instead; see
+   * `computeMeshWaterlineDirections()`. */
   private rebuildPreviewMesh(graph: IPlanetGraphCore, tectonics: IPlanetTectonics): void {
-    const { elevation, isLand, seaLevelElevation } = tectonics;
+    const { elevation } = tectonics;
     const positions: number[] = [];
     const directions: number[] = [];
     const elevations: number[] = [];
     const cellIds: number[] = [];
-    const pushVertex = (p: IVec3, e: number, land: boolean): void => {
-      const clamped = land ? Math.max(e, seaLevelElevation) : Math.min(e, seaLevelElevation);
+    const pushVertex = (p: IVec3, e: number): void => {
       directions.push(p.x, p.y, p.z);
-      elevations.push(clamped);
+      elevations.push(e);
       positions.push(p.x, p.y, p.z); // overwritten by updatePreviewDisplacement() below
-    };
-    const cornerIsLand = (cell: IPlanetGraphCell, cornerIndex: number): boolean => {
-      const n = cell.neighbors.length;
-      const a = cell.id;
-      const b = cell.neighbors[cornerIndex];
-      const c = cell.neighbors[(cornerIndex + 1) % n];
-      const landCount = (isLand[a] ? 1 : 0) + (isLand[b] ? 1 : 0) + (isLand[c] ? 1 : 0);
-      return landCount >= 2;
     };
     for (const cell of graph.cells) {
       const n = cell.corners.length;
@@ -513,9 +537,9 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       const centerElevation = elevation[cell.id];
       for (let k = 0; k < n; k++) {
         const k2 = (k + 1) % n;
-        pushVertex(cell.center, centerElevation, isLand[cell.id]);
-        pushVertex(cell.corners[k], cellCornerElevation(cell, k, elevation), cornerIsLand(cell, k));
-        pushVertex(cell.corners[k2], cellCornerElevation(cell, k2, elevation), cornerIsLand(cell, k2));
+        pushVertex(cell.center, centerElevation);
+        pushVertex(cell.corners[k], cellCornerElevation(cell, k, elevation));
+        pushVertex(cell.corners[k2], cellCornerElevation(cell, k2, elevation));
         cellIds.push(cell.id, cell.id, cell.id);
       }
     }
@@ -535,8 +559,24 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.previewMesh = new Mesh(geometry, this.previewMaterial);
     this.previewMesh.visible = this.showPreview3D();
     this.root.add(this.previewMesh);
+    this.currentSeaLevelElevation = tectonics.seaLevelElevation;
+    this.ensureOceanShell();
     this.updatePreviewDisplacement();
     this.updatePreviewColors();
+  }
+
+  /** Flat sea-level shell (a plain unit sphere, scaled per-frame-cheap via `scale`, not
+   * regenerated) layered over the terrain mesh. Depth-tests normally against the unclamped
+   * terrain: where land pokes above sea level it renders in front and hides the shell, where
+   * terrain dips below sea level the shell is in front and covers it — the same technique
+   * used for this in Civ-style globes, no per-vertex land/water logic needed here at all. */
+  private ensureOceanShell(): void {
+    if (!this.oceanMesh) {
+      const geometry = new SphereGeometry(1, 96, 48);
+      this.oceanMesh = new Mesh(geometry, this.oceanMaterial);
+      this.root.add(this.oceanMesh);
+    }
+    this.oceanMesh.visible = this.showPreview3D() && this.showOceanShell();
   }
 
   /** Re-displaces every preview vertex from its stored (direction, elevation) pair using
@@ -556,41 +596,98 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     }
     positionAttr.needsUpdate = true;
     this.previewMesh.geometry.computeVertexNormals();
+
+    if (this.oceanMesh) {
+      this.oceanMesh.scale.setScalar(1 + this.currentSeaLevelElevation * scale);
+    }
   }
 
+  /** Per-vertex color for the 3D preview — unlike `resolveCellColor()` (the 2D unwrap's flat
+   * per-cell-polygon fill), this classifies land vs water from each vertex's own already-
+   * blended elevation instead of the cell's coarse `isLand[]` flag, so it can never disagree
+   * with the height at that same vertex — see the `rebuildPreviewMesh()` doc comment. Not
+   * cached per-cell (unlike the old version) since the land/water split and the elevation
+   * ramp both now vary per vertex within a single cell's fan, not just per cell. */
   private updatePreviewColors(): void {
-    if (!this.previewMesh) return;
+    if (!this.previewMesh || !this.tectonics) return;
     const colorAttr = this.previewMesh.geometry.getAttribute('color') as BufferAttribute;
     const arr = colorAttr.array as Float32Array;
     const scratch = new Color();
-    const cache = new Map<number, [number, number, number]>();
+    const mode = this.mapMode();
+    const tectonics = this.tectonics;
+    const elevMin = Math.min(...tectonics.elevation);
+    const elevMax = Math.max(...tectonics.elevation);
     for (let i = 0; i < this.previewCellIdPerVertex.length; i++) {
       const cellId = this.previewCellIdPerVertex[i];
-      let rgb = cache.get(cellId);
-      if (!rgb) {
-        scratch.setStyle(this.resolveCellColor(cellId));
-        rgb = [scratch.r, scratch.g, scratch.b];
-        cache.set(cellId, rgb);
-      }
+      const vertexElevation = this.previewElevationPerVertex[i];
+      scratch.setStyle(this.resolveVertexColor(cellId, vertexElevation, mode, tectonics, elevMin, elevMax));
       const o = i * 3;
-      arr[o] = rgb[0];
-      arr[o + 1] = rgb[1];
-      arr[o + 2] = rgb[2];
+      arr[o] = scratch.r;
+      arr[o + 1] = scratch.g;
+      arr[o + 2] = scratch.b;
     }
     colorAttr.needsUpdate = true;
   }
 
+  /** Land/water split here is `vertexElevation >= seaLevel`, checked per vertex — the same
+   * elevation value that already drives that vertex's height in `updatePreviewDisplacement()`.
+   * A biome-mode vertex above sea level on a cell whose own `isLand[]`/biome say "ocean" (or
+   * vice versa) falls back to a generic land/ocean tone rather than that cell's specific
+   * biome, since the biome itself is only computed per-cell — the goal here is just making
+   * sure color never contradicts geometry at the coastline, not vertex-resolution biomes.
+   * No beach/sand band here — see the `rebuildPreviewMesh()` doc comment for why that was
+   * reverted; the shoreline is drawn as a separate thin line instead
+   * (`computeMeshWaterlineDirections()`), so biome color runs straight to the water's edge. */
+  private resolveVertexColor(
+    cellId: number,
+    vertexElevation: number,
+    mode: MapMode,
+    tectonics: IPlanetTectonics,
+    elevMin: number,
+    elevMax: number,
+  ): string {
+    if (mode === 'plates') return plateColor(tectonics.plateIdByCell[cellId]);
+    if (mode === 'elevation') return elevationColor(vertexElevation, tectonics.seaLevelElevation, elevMin, elevMax);
+
+    const land = vertexElevation >= tectonics.seaLevelElevation;
+
+    const ecology = this.ecology;
+    if (ecology) {
+      if (mode === 'temperature') return temperatureColor(ecology.temperature[cellId]);
+      if (mode === 'moisture') return moistureColor(ecology.moisture[cellId]);
+      if (mode === 'biome') {
+        if (!land) return BIOME_COLORS['ocean'];
+        const biome = ecology.biome[cellId];
+        return biome === 'ocean' ? 'hsl(95, 45%, 45%)' : biomeColor(biome);
+      }
+    }
+    return land ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
+  }
+
   /** Mirrors the 2D unwrap's rivers-mode overlay onto the sphere: river paths (open
    * polylines) and coastline loops (closed), both already unit-sphere point chains from
-   * `buildPlanetEcology()`. Nudged a hair above radius 1 so they don't z-fight the
-   * preview mesh triangles when both are visible at once. */
+   * `buildPlanetEcology()`. Rivers flow on land, so each river point is sampled through
+   * `sampleElevation()` (the same M4a bridge function the preview mesh's corners use) and
+   * repositioned to actually hug the displaced terrain surface — previously these sat at a
+   * fixed ~1.004 radius regardless of elevation-scale, which only happened to line up with
+   * the terrain when elevation-scale was near 0 and otherwise left rivers floating above
+   * peaks or buried under valleys. The coastline loop rides the same constant sea-level
+   * radius as the ocean shell (the "water line") and is now extracted directly from the
+   * preview mesh's own per-vertex elevation (`computeMeshWaterlineDirections()`) instead of
+   * `buildPlanetEcology()`'s coarse per-cell edge chain — that coarse version walked cell
+   * polygon edges classified by each cell's single `isLand[]` flag, which is a different
+   * (and visibly offset) boundary from the per-vertex `elevation >= seaLevel` split the
+   * terrain color/height actually use, so the two lines didn't match. Extracting from the
+   * same triangles the terrain is built from makes them the same boundary by construction. */
   private rebuildRiverOverlays(ecology: IPlanetEcology): void {
     if (this.riverLines) {
       this.root.remove(this.riverLines);
       this.riverLines.geometry.dispose();
     }
+    this.riverDirections = this.flattenPathDirections(ecology.riverPaths, false);
+    this.riverElevations = this.sampleElevationsFor(this.riverDirections);
     const riverGeometry = new BufferGeometry();
-    riverGeometry.setAttribute('position', new BufferAttribute(this.flattenPaths(ecology.riverPaths, false), 3));
+    riverGeometry.setAttribute('position', new BufferAttribute(new Float32Array(this.riverDirections.length), 3));
     this.riverLines = new LineSegments(riverGeometry, this.riverMaterial);
     this.riverLines.visible = this.mapMode() === 'rivers';
     this.root.add(this.riverLines);
@@ -599,15 +696,95 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       this.root.remove(this.coastlineLines);
       this.coastlineLines.geometry.dispose();
     }
+    this.coastlineDirections = this.computeMeshWaterlineDirections();
     const coastGeometry = new BufferGeometry();
-    coastGeometry.setAttribute('position', new BufferAttribute(this.flattenPaths(ecology.coastlines, true), 3));
+    coastGeometry.setAttribute('position', new BufferAttribute(new Float32Array(this.coastlineDirections.length), 3));
     this.coastlineLines = new LineSegments(coastGeometry, this.coastlineMaterial);
     this.coastlineLines.visible = this.mapMode() === 'rivers';
     this.root.add(this.coastlineLines);
+
+    this.updateRiverOverlayDisplacement();
   }
 
-  private flattenPaths(paths: IVec3[][], closed: boolean): Float32Array {
-    const bias = 1.004;
+  /** Re-derives river/coastline positions from their cached (direction, elevation) pairs
+   * for the current `elevationScale()` — cheap, no re-sampling — so it can run on every
+   * elevation-scale slider `input` event alongside `updatePreviewDisplacement()`. */
+  private updateRiverOverlayDisplacement(): void {
+    const scale = this.elevationScale() / 100;
+    const bias = 1.0015; // tiny radial nudge so lines don't z-fight the terrain/ocean surfaces
+
+    if (this.riverLines) {
+      const attr = this.riverLines.geometry.getAttribute('position') as BufferAttribute;
+      const positions = attr.array as Float32Array;
+      for (let i = 0; i < this.riverElevations.length; i++) {
+        const radius = (1 + this.riverElevations[i] * scale) * bias;
+        const o = i * 3;
+        positions[o] = this.riverDirections[o] * radius;
+        positions[o + 1] = this.riverDirections[o + 1] * radius;
+        positions[o + 2] = this.riverDirections[o + 2] * radius;
+      }
+      attr.needsUpdate = true;
+    }
+
+    if (this.coastlineLines && this.tectonics) {
+      const radius = (1 + this.tectonics.seaLevelElevation * scale) * bias;
+      const attr = this.coastlineLines.geometry.getAttribute('position') as BufferAttribute;
+      const positions = attr.array as Float32Array;
+      for (let i = 0; i < this.coastlineDirections.length; i++) {
+        positions[i] = this.coastlineDirections[i] * radius;
+      }
+      attr.needsUpdate = true;
+    }
+  }
+
+  /** Extracts the land/water boundary directly from the preview mesh's own triangles instead
+   * of `buildPlanetEcology()`'s per-cell edge chain — walks each fan triangle's 3 stored
+   * (direction, elevation) vertices (see `rebuildPreviewMesh()`) and, for any edge whose two
+   * endpoints straddle sea level, linearly interpolates the crossing direction. A triangle
+   * crosses sea level along exactly 0 or 2 of its edges in the generic case (a vertex sitting
+   * exactly on sea level is the only way to get 1, ignored here as a measure-zero edge case
+   * for a debug lab), so each qualifying triangle contributes exactly one line segment,
+   * connected across triangles into the mesh's exact waterline. `updateRiverOverlayDisplacement()`
+   * then places these at the same sea-level radius as the ocean shell, since a crossing point's
+   * elevation is exactly `seaLevel` by construction. */
+  private computeMeshWaterlineDirections(): Float32Array<ArrayBuffer> {
+    const tectonics = this.tectonics;
+    const dirs = this.previewDirections;
+    const elevs = this.previewElevationPerVertex;
+    const out: number[] = [];
+    if (!tectonics || dirs.length === 0) return new Float32Array(out);
+    const seaLevel = tectonics.seaLevelElevation;
+
+    const crossing = (a: number, b: number): [number, number, number] | null => {
+      const ea = elevs[a];
+      const eb = elevs[b];
+      if (ea === eb || (ea >= seaLevel) === (eb >= seaLevel)) return null;
+      const t = (seaLevel - ea) / (eb - ea);
+      const ao = a * 3;
+      const bo = b * 3;
+      const x = dirs[ao] + (dirs[bo] - dirs[ao]) * t;
+      const y = dirs[ao + 1] + (dirs[bo + 1] - dirs[ao + 1]) * t;
+      const z = dirs[ao + 2] + (dirs[bo + 2] - dirs[ao + 2]) * t;
+      const len = Math.hypot(x, y, z) || 1;
+      return [x / len, y / len, z / len];
+    };
+
+    for (let i = 0; i + 2 < elevs.length; i += 3) {
+      const hits: [number, number, number][] = [];
+      const c01 = crossing(i, i + 1);
+      if (c01) hits.push(c01);
+      const c12 = crossing(i + 1, i + 2);
+      if (c12) hits.push(c12);
+      const c20 = crossing(i + 2, i);
+      if (c20) hits.push(c20);
+      if (hits.length === 2) {
+        out.push(hits[0][0], hits[0][1], hits[0][2], hits[1][0], hits[1][1], hits[1][2]);
+      }
+    }
+    return new Float32Array(out);
+  }
+
+  private flattenPathDirections(paths: IVec3[][], closed: boolean): Float32Array<ArrayBuffer> {
     const out: number[] = [];
     for (const path of paths) {
       const n = path.length;
@@ -616,10 +793,30 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       for (let k = 0; k < segments; k++) {
         const a = path[k];
         const b = path[(k + 1) % n];
-        out.push(a.x * bias, a.y * bias, a.z * bias, b.x * bias, b.y * bias, b.z * bias);
+        out.push(a.x, a.y, a.z, b.x, b.y, b.z);
       }
     }
     return new Float32Array(out);
+  }
+
+  /** One `sampleElevation()` call per point — O(cellCount) each via `findCellAt()`'s brute
+   * force search, so O(points * cellCount) total. Only runs on regenerate()/mode data
+   * changes, not per frame or per slider tick, which keeps it affordable at this lab's
+   * scale (a few thousand cells, a few thousand path points at most). */
+  private sampleElevationsFor(directions: Float32Array): Float32Array<ArrayBuffer> {
+    const graph = this.graph;
+    const tectonics = this.tectonics;
+    const elevations = new Float32Array(directions.length / 3);
+    if (!graph || !tectonics) return elevations;
+    for (let i = 0; i < elevations.length; i++) {
+      const o = i * 3;
+      elevations[i] = sampleElevation(graph, tectonics.elevation, {
+        x: directions[o],
+        y: directions[o + 1],
+        z: directions[o + 2],
+      });
+    }
+    return elevations;
   }
 
   /** Strokes each consecutive pair of points as its own line segment (not one continuous
