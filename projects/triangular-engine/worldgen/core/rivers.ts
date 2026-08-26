@@ -1,7 +1,7 @@
 import { buildCornerGraph } from './corner-graph';
 import { IPlanetGraphCore } from './planet-graph';
 import { createSeededRandom } from './seeded-random';
-import { IVec3 } from './vec3';
+import { add, IVec3, normalize, scale, sub } from './vec3';
 
 export interface IRiverParams {
   seed?: number;
@@ -42,6 +42,18 @@ const DEFAULTS = {
  * The source elevation cutoff is a fraction of land relief
  * (`seaLevelElevation` .. max land elevation), not an absolute value, since
  * tectonics elevation is an arbitrary unitless scale. See runbook 022.
+ *
+ * A corner counts as land here when its own blended elevation is >=
+ * `seaLevelElevation` — the same per-vertex rule the 3D preview's terrain
+ * color/height and its coastline overlay use (`resolveVertexColor()` /
+ * `computeMeshWaterlineDirections()` in cell-planet-lab-page.component.ts),
+ * not the coarser per-cell `isLand[]` flag. Using the coarse flag here used
+ * to let a river's last corner land one edge short of (or past) the mesh's
+ * true waterline, so the river visibly stopped short of the coast in some
+ * cases. The final downhill step that crosses from land to water is also
+ * clipped to the exact sea-level point on that edge (instead of ending on
+ * the underwater corner), so the river mouth lands exactly on the same
+ * boundary the coastline overlay draws.
  */
 export function traceRivers(
   graph: IPlanetGraphCore,
@@ -62,7 +74,7 @@ export function traceRivers(
   const corners = buildCornerGraph(graph);
   const cornerElevation = corners.cellIds.map(([a, b, c]) => (elevation[a] + elevation[b] + elevation[c]) / 3);
   const cornerMoisture = corners.cellIds.map(([a, b, c]) => (moisture[a] + moisture[b] + moisture[c]) / 3);
-  const cornerIsLand = corners.cellIds.map(([a, b, c]) => isLand[a] && isLand[b] && isLand[c]);
+  const cornerIsLand = cornerElevation.map((e) => e >= seaLevelElevation);
 
   const candidates: number[] = [];
   for (let i = 0; i < corners.count; i++) {
@@ -96,6 +108,19 @@ export function traceRivers(
 
       if (lowest === -1) {
         lakeCorners.push(corners.position[current]);
+        break;
+      }
+
+      if (!cornerIsLand[lowest]) {
+        // This step crosses the coast — end the path exactly on the sea-level
+        // boundary instead of the underwater corner, so it meets the same
+        // waterline the coastline overlay draws (see doc comment above).
+        const eFrom = cornerElevation[current];
+        const eTo = cornerElevation[lowest];
+        const t = eFrom === eTo ? 0 : (seaLevelElevation - eFrom) / (eTo - eFrom);
+        const from = corners.position[current];
+        const to = corners.position[lowest];
+        path.push(normalize(add(from, scale(sub(to, from), t))));
         break;
       }
 
