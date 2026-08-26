@@ -9,6 +9,7 @@
     "test:triangular-engine:navigation": "ng run triangular-engine:test-navigation --watch=false --browsers=ChromeHeadless",
     "test:triangular-engine:animals": "ng run triangular-engine:test-animals --watch=false --browsers=ChromeHeadless",
     "test:triangular-engine:procedural": "ng run triangular-engine:test-procedural --watch=false --browsers=ChromeHeadless",
+    "test:triangular-engine:worldgen": "ng run triangular-engine:test-worldgen --watch=false --browsers=ChromeHeadless",
     "navigation:scenarios": "node tools/run-navigation-scenarios.mjs",
     "animals:surface-scenarios": "node tools/run-animal-surface-scenarios.mjs",
     "animals:water-volume-scenarios": "node tools/run-animal-water-volume-scenarios.mjs",

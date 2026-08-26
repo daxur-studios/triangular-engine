@@ -39,8 +39,17 @@
               "../terrain/**/*.spec.ts",
               "../scatter/**/*.spec.ts",
               "../spline/**/*.spec.ts",
-              "../procedural/**/*.spec.ts"
+              "../procedural/**/*.spec.ts",
+              "../worldgen/**/*.spec.ts"
             ]
+          }
+        },
+        "test-worldgen": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
+            "polyfills": ["zone.js", "zone.js/testing"],
+            "include": ["../worldgen/**/*.spec.ts"]
           }
         },
         "test-navigation": {
