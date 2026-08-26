@@ -8,11 +8,13 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import {
+  BufferAttribute,
   BufferGeometry,
   Color,
-  Float32BufferAttribute,
+  DynamicDrawUsage,
   Group,
   LineBasicMaterial,
   LineSegments,
@@ -21,6 +23,10 @@ import {
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import { buildPlanetGraphCore, IPlanetGraphCore, IVec3 } from 'triangular-engine/worldgen';
+
+/** dot(siteDirection, viewDirection) cutoff for the near-side cull — a small negative
+ * margin past the exact horizon so boundary edges don't clip mid-line at the terminator. */
+const CULL_THRESHOLD = -0.02;
 
 @Component({
   selector: 'app-cell-planet-lab-page',
@@ -62,10 +68,19 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   private sitesPoints: Points | null = null;
   private edgesLines: LineSegments | null = null;
 
+  // Per-cell source data driving the near-side cull, rebuilt on regenerate() and
+  // re-filtered every frame against the live camera position (updateCulling()).
+  private siteDirs = new Float32Array(0);
+  private siteScratch = new Float32Array(0);
+  private cellSegments: Float32Array[] = [];
+  private edgeScratch = new Float32Array(0);
+
   constructor() {
-    this.engine.scene.background = new Color('#050810');
+    this.engine.scene.background = new Color('#0a0d12');
     this.root.name = 'cell-planet-graph';
     this.engine.scene.add(this.root);
+
+    this.engine.tick$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.updateCulling());
 
     this.destroyRef.onDestroy(() => {
       this.engine.scene.remove(this.root);
@@ -139,47 +154,110 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.rebuildEdges(graph);
     this.updateStats(graph);
     this.drawMap();
+    this.updateCulling();
   }
 
   private rebuildSites(graph: IPlanetGraphCore): void {
-    const positions = new Float32Array(graph.cells.length * 3);
+    const n = graph.cells.length;
+    this.siteDirs = new Float32Array(n * 3);
     graph.cells.forEach((cell, i) => {
-      positions[i * 3] = cell.center.x;
-      positions[i * 3 + 1] = cell.center.y;
-      positions[i * 3 + 2] = cell.center.z;
+      this.siteDirs[i * 3] = cell.center.x;
+      this.siteDirs[i * 3 + 1] = cell.center.y;
+      this.siteDirs[i * 3 + 2] = cell.center.z;
     });
+    this.siteScratch = new Float32Array(n * 3);
 
     if (this.sitesPoints) {
       this.root.remove(this.sitesPoints);
       this.sitesPoints.geometry.dispose();
     }
     const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+    const attribute = new BufferAttribute(new Float32Array(n * 3), 3);
+    attribute.setUsage(DynamicDrawUsage);
+    geometry.setAttribute('position', attribute);
+    geometry.setDrawRange(0, 0);
     this.sitesPoints = new Points(geometry, this.sitesMaterial);
     this.sitesPoints.visible = this.showSites();
+    this.sitesPoints.frustumCulled = false;
     this.root.add(this.sitesPoints);
   }
 
   private rebuildEdges(graph: IPlanetGraphCore): void {
-    const segments: number[] = [];
-    for (const cell of graph.cells) {
+    this.cellSegments = graph.cells.map((cell) => {
       const n = cell.corners.length;
+      if (n < 3) return new Float32Array(0);
+      const segments = new Float32Array(n * 6);
       for (let k = 0; k < n; k++) {
         const a = cell.corners[k];
         const b = cell.corners[(k + 1) % n];
-        segments.push(a.x, a.y, a.z, b.x, b.y, b.z);
+        const o = k * 6;
+        segments[o] = a.x;
+        segments[o + 1] = a.y;
+        segments[o + 2] = a.z;
+        segments[o + 3] = b.x;
+        segments[o + 4] = b.y;
+        segments[o + 5] = b.z;
       }
-    }
+      return segments;
+    });
+    const maxVerts = this.cellSegments.reduce((sum, seg) => sum + seg.length / 3, 0);
+    this.edgeScratch = new Float32Array(maxVerts * 3);
 
     if (this.edgesLines) {
       this.root.remove(this.edgesLines);
       this.edgesLines.geometry.dispose();
     }
     const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new Float32BufferAttribute(segments, 3));
+    const attribute = new BufferAttribute(new Float32Array(maxVerts * 3), 3);
+    attribute.setUsage(DynamicDrawUsage);
+    geometry.setAttribute('position', attribute);
+    geometry.setDrawRange(0, 0);
     this.edgesLines = new LineSegments(geometry, this.edgesMaterial);
     this.edgesLines.visible = this.showEdges();
+    this.edgesLines.frustumCulled = false;
     this.root.add(this.edgesLines);
+  }
+
+  /** Re-filters the sites/edges draw ranges every frame to whatever the live orbit
+   * camera currently faces — sites are on a unit sphere centered at the origin, so a
+   * cell's own center direction doubles as its surface normal for the visibility test. */
+  private updateCulling(): void {
+    const camera = this.engine.camera$.value;
+    if (!camera || !this.sitesPoints || !this.edgesLines || this.siteDirs.length === 0) return;
+
+    const camLen = camera.position.length() || 1;
+    const vx = camera.position.x / camLen;
+    const vy = camera.position.y / camLen;
+    const vz = camera.position.z / camLen;
+
+    const cellCount = this.siteDirs.length / 3;
+    let visibleSites = 0;
+    let edgeVerts = 0;
+    for (let i = 0; i < cellCount; i++) {
+      const o = i * 3;
+      const dot = this.siteDirs[o] * vx + this.siteDirs[o + 1] * vy + this.siteDirs[o + 2] * vz;
+      if (dot <= CULL_THRESHOLD) continue;
+
+      const w = visibleSites * 3;
+      this.siteScratch[w] = this.siteDirs[o];
+      this.siteScratch[w + 1] = this.siteDirs[o + 1];
+      this.siteScratch[w + 2] = this.siteDirs[o + 2];
+      visibleSites++;
+
+      const segment = this.cellSegments[i];
+      this.edgeScratch.set(segment, edgeVerts * 3);
+      edgeVerts += segment.length / 3;
+    }
+
+    const sitesAttr = this.sitesPoints.geometry.getAttribute('position') as BufferAttribute;
+    (sitesAttr.array as Float32Array).set(this.siteScratch.subarray(0, visibleSites * 3));
+    sitesAttr.needsUpdate = true;
+    this.sitesPoints.geometry.setDrawRange(0, visibleSites);
+
+    const edgesAttr = this.edgesLines.geometry.getAttribute('position') as BufferAttribute;
+    (edgesAttr.array as Float32Array).set(this.edgeScratch.subarray(0, edgeVerts * 3));
+    edgesAttr.needsUpdate = true;
+    this.edgesLines.geometry.setDrawRange(0, edgeVerts);
   }
 
   private updateStats(graph: IPlanetGraphCore): void {
@@ -214,7 +292,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     if (!ctx) return;
 
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = '#050810';
+    ctx.fillStyle = '#0a0d12';
     ctx.fillRect(0, 0, width, height);
 
     ctx.strokeStyle = '#1b2330';
