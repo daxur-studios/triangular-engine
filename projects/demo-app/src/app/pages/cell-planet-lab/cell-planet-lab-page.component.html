@@ -4,7 +4,7 @@
     <section class="scope" aria-label="Cell planet lab">
       <header class="scope-head">
         <div>
-          <span class="scope-kicker">worldgen · runbook 022 · M0 + M1 + M2</span>
+          <span class="scope-kicker">worldgen · runbook 022 · M0 + M1 + M2 + M3</span>
           <h1>Cell graph scope</h1>
         </div>
         <div class="stat-strip">
@@ -44,6 +44,7 @@
         </label>
         <label class="toggle"><input type="checkbox" [checked]="showSites()" (change)="toggleSites()" /><span>sites</span></label>
         <label class="toggle"><input type="checkbox" [checked]="showEdges()" (change)="toggleEdges()" /><span>edges</span></label>
+        <label class="toggle"><input type="checkbox" [checked]="showPreview3D()" (change)="togglePreview3D()" /><span>3D preview</span></label>
       </div>
 
       <div class="controls">
@@ -55,6 +56,7 @@
         <button type="button" [class.active]="mapMode() === 'temperature'" (click)="setMapMode('temperature')">temperature</button>
         <button type="button" [class.active]="mapMode() === 'moisture'" (click)="setMapMode('moisture')">moisture</button>
         <button type="button" [class.active]="mapMode() === 'biome'" (click)="setMapMode('biome')">biome</button>
+        <button type="button" [class.active]="mapMode() === 'rivers'" (click)="setMapMode('rivers')">rivers</button>
       </div>
 
       <div class="views">
@@ -64,7 +66,7 @@
         </section>
       </div>
 
-      <p class="note">3D view is M0 (site distribution and cell boundaries from <code>buildPlanetGraphCore()</code>) — the near-side cull only holds up for a far/orbit camera, see runbook 022. The 2D unwrap's plates/elevation/land modes are M1 (<code>buildPlanetTectonics()</code>). The temperature/moisture/biome modes are M2 (<code>buildPlanetEcology()</code>): latitude+elevation climate, Whittaker biome lookup, river tracing, and coastline extraction — rivers and coastlines aren't drawn on the map yet, that's the rest of M3.</p>
+      <p class="note">3D view is M0 (site distribution and cell boundaries from <code>buildPlanetGraphCore()</code>) — the near-side cull only holds up for a far/orbit camera, see runbook 022. The 2D unwrap's plates/elevation/land modes are M1 (<code>buildPlanetTectonics()</code>). The temperature/moisture/biome/rivers modes are M2 (<code>buildPlanetEcology()</code>): latitude+elevation climate, Whittaker biome lookup, river tracing, and coastline extraction — rivers mode overlays traced river paths and closed coastline loops on the land/water base. "3D preview" (M3) is a naive flat-shaded triangle-fan mesh, one fan per cell, colored by whichever 2D mode is active — ugly by design, it's a debug view, not the M4 rendering spike.</p>
     </section>
   </ng-template>
 

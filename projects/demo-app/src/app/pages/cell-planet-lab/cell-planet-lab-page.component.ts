@@ -14,10 +14,13 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  DoubleSide,
   DynamicDrawUsage,
   Group,
   LineBasicMaterial,
   LineSegments,
+  Mesh,
+  MeshStandardMaterial,
   Points,
   PointsMaterial,
 } from 'three';
@@ -36,7 +39,7 @@ import {
  * margin past the exact horizon so boundary edges don't clip mid-line at the terminator. */
 const CULL_THRESHOLD = -0.02;
 
-export type MapMode = 'graph' | 'plates' | 'elevation' | 'land' | 'temperature' | 'moisture' | 'biome';
+export type MapMode = 'graph' | 'plates' | 'elevation' | 'land' | 'temperature' | 'moisture' | 'biome' | 'rivers';
 
 /** Deterministic, well-spread plate color — golden-angle hue step so adjacent plate ids never land near each other on the wheel. */
 function plateColor(plateId: number): string {
@@ -120,6 +123,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   readonly jitter = signal(15);
   readonly showSites = signal(true);
   readonly showEdges = signal(true);
+  readonly showPreview3D = signal(false);
   readonly plateCount = signal(10);
   readonly mapMode = signal<MapMode>('graph');
 
@@ -142,6 +146,13 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   });
   private sitesPoints: Points | null = null;
   private edgesLines: LineSegments | null = null;
+  private readonly previewMaterial = new MeshStandardMaterial({
+    vertexColors: true,
+    flatShading: true,
+    side: DoubleSide,
+  });
+  private previewMesh: Mesh | null = null;
+  private previewCellIdPerVertex = new Int32Array(0);
 
   // Per-cell source data driving the near-side cull, rebuilt on regenerate() and
   // re-filtered every frame against the live camera position (updateCulling()).
@@ -161,8 +172,10 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       this.engine.scene.remove(this.root);
       this.sitesPoints?.geometry.dispose();
       this.edgesLines?.geometry.dispose();
+      this.previewMesh?.geometry.dispose();
       this.sitesMaterial.dispose();
       this.edgesMaterial.dispose();
+      this.previewMaterial.dispose();
     });
   }
 
@@ -203,6 +216,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   setMapMode(mode: MapMode): void {
     this.mapMode.set(mode);
     this.drawMap();
+    this.updatePreviewColors();
   }
 
   toggleSites(): void {
@@ -215,6 +229,11 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.showEdges.update((value) => !value);
     if (this.edgesLines) this.edgesLines.visible = this.showEdges();
     this.drawMap();
+  }
+
+  togglePreview3D(): void {
+    this.showPreview3D.update((value) => !value);
+    if (this.previewMesh) this.previewMesh.visible = this.showPreview3D();
   }
 
   jitterValue(): string {
@@ -247,6 +266,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.buildMs.set(`${(t1 - t0).toFixed(1)} ms`);
     this.rebuildSites(graph);
     this.rebuildEdges(graph);
+    this.rebuildPreviewMesh(graph);
     this.updateStats(graph);
     this.drawMap();
     this.updateCulling();
@@ -355,6 +375,113 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.edgesLines.geometry.setDrawRange(0, edgeVerts);
   }
 
+  /** Single source of truth for "what color is this cell", shared by the 2D unwrap
+   * fill and the 3D preview mesh so the two views never drift apart. */
+  private resolveCellColor(cellId: number): string {
+    const mode = this.mapMode();
+    const tectonics = this.tectonics;
+    const ecology = this.ecology;
+    if (!tectonics) return '#888';
+
+    if (mode === 'plates') return plateColor(tectonics.plateIdByCell[cellId]);
+    if (mode === 'elevation') {
+      const min = Math.min(...tectonics.elevation);
+      const max = Math.max(...tectonics.elevation);
+      return elevationColor(tectonics.elevation[cellId], tectonics.seaLevelElevation, min, max);
+    }
+    if (ecology) {
+      if (mode === 'temperature') return temperatureColor(ecology.temperature[cellId]);
+      if (mode === 'moisture') return moistureColor(ecology.moisture[cellId]);
+      if (mode === 'biome') return biomeColor(ecology.biome[cellId]);
+    }
+    return tectonics.isLand[cellId] ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
+  }
+
+  /** Naive M3 3D preview: one triangle fan per cell (center -> corner k -> corner k+1),
+   * flat-shaded and colored via `resolveCellColor()` — geometry rebuilds on regenerate(),
+   * only the vertex colors are re-touched on a map-mode change. No fancy elevation
+   * displacement or crack-free stitching here, that's the M4 rendering spike's job. */
+  private rebuildPreviewMesh(graph: IPlanetGraphCore): void {
+    const positions: number[] = [];
+    const cellIds: number[] = [];
+    for (const cell of graph.cells) {
+      const n = cell.corners.length;
+      if (n < 3) continue;
+      const c = cell.center;
+      for (let k = 0; k < n; k++) {
+        const a = cell.corners[k];
+        const b = cell.corners[(k + 1) % n];
+        positions.push(c.x, c.y, c.z, a.x, a.y, a.z, b.x, b.y, b.z);
+        cellIds.push(cell.id, cell.id, cell.id);
+      }
+    }
+
+    if (this.previewMesh) {
+      this.root.remove(this.previewMesh);
+      this.previewMesh.geometry.dispose();
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+    geometry.setAttribute('color', new BufferAttribute(new Float32Array(positions.length), 3));
+    geometry.computeVertexNormals();
+    this.previewCellIdPerVertex = new Int32Array(cellIds);
+    this.previewMesh = new Mesh(geometry, this.previewMaterial);
+    this.previewMesh.visible = this.showPreview3D();
+    this.root.add(this.previewMesh);
+    this.updatePreviewColors();
+  }
+
+  private updatePreviewColors(): void {
+    if (!this.previewMesh) return;
+    const colorAttr = this.previewMesh.geometry.getAttribute('color') as BufferAttribute;
+    const arr = colorAttr.array as Float32Array;
+    const scratch = new Color();
+    const cache = new Map<number, [number, number, number]>();
+    for (let i = 0; i < this.previewCellIdPerVertex.length; i++) {
+      const cellId = this.previewCellIdPerVertex[i];
+      let rgb = cache.get(cellId);
+      if (!rgb) {
+        scratch.setStyle(this.resolveCellColor(cellId));
+        rgb = [scratch.r, scratch.g, scratch.b];
+        cache.set(cellId, rgb);
+      }
+      const o = i * 3;
+      arr[o] = rgb[0];
+      arr[o + 1] = rgb[1];
+      arr[o + 2] = rgb[2];
+    }
+    colorAttr.needsUpdate = true;
+  }
+
+  /** Strokes each consecutive pair of points as its own line segment (not one continuous
+   * path), skipping any segment that crosses the ±180° seam — same guard as the edge/fill
+   * seam handling above, needed here because rivers/coastlines aren't cell-local. */
+  private drawPolylines(
+    ctx: CanvasRenderingContext2D,
+    paths: IVec3[][],
+    lonLat: (p: IVec3) => { lon: number; lat: number },
+    mapPoint: (ll: { lon: number; lat: number }) => { x: number; y: number },
+    closed: boolean,
+  ): void {
+    for (const path of paths) {
+      const n = path.length;
+      if (n < 2) continue;
+      const lls = path.map(lonLat);
+      const segments = closed ? n : n - 1;
+      for (let k = 0; k < segments; k++) {
+        const a = lls[k];
+        const b = lls[(k + 1) % n];
+        if (Math.abs(a.lon - b.lon) > Math.PI * 0.9) continue;
+        const pa = mapPoint(a);
+        const pb = mapPoint(b);
+        ctx.beginPath();
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+        ctx.stroke();
+      }
+    }
+  }
+
   private updateStats(graph: IPlanetGraphCore): void {
     let edgeSum = 0;
     let min = Infinity;
@@ -418,10 +545,6 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     const tectonics = this.tectonics;
     const ecology = this.ecology;
     if (mode !== 'graph' && tectonics && ecology) {
-      const min = Math.min(...tectonics.elevation);
-      const max = Math.max(...tectonics.elevation);
-      const seaLevel = tectonics.seaLevelElevation;
-
       for (const cell of graph.cells) {
         const n = cell.corners.length;
         if (n < 3) continue;
@@ -431,19 +554,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
         const wraps = lls.some((ll, k) => Math.abs(ll.lon - lls[(k + 1) % n].lon) > Math.PI * 0.9);
         if (wraps) continue;
 
-        if (mode === 'plates') {
-          ctx.fillStyle = plateColor(tectonics.plateIdByCell[cell.id]);
-        } else if (mode === 'elevation') {
-          ctx.fillStyle = elevationColor(tectonics.elevation[cell.id], seaLevel, min, max);
-        } else if (mode === 'temperature') {
-          ctx.fillStyle = temperatureColor(ecology.temperature[cell.id]);
-        } else if (mode === 'moisture') {
-          ctx.fillStyle = moistureColor(ecology.moisture[cell.id]);
-        } else if (mode === 'biome') {
-          ctx.fillStyle = biomeColor(ecology.biome[cell.id]);
-        } else {
-          ctx.fillStyle = tectonics.isLand[cell.id] ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
-        }
+        ctx.fillStyle = this.resolveCellColor(cell.id);
 
         ctx.beginPath();
         const p0 = mapPoint(lls[0]);
@@ -454,6 +565,18 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
         }
         ctx.closePath();
         ctx.fill();
+      }
+
+      if (mode === 'rivers') {
+        ctx.strokeStyle = '#f4f4f4';
+        ctx.lineWidth = Math.max(1, dpr);
+        ctx.globalAlpha = 0.9;
+        this.drawPolylines(ctx, ecology.coastlines, lonLat, mapPoint, true);
+
+        ctx.strokeStyle = '#5ec8ff';
+        ctx.lineWidth = Math.max(1.4, dpr * 1.2);
+        ctx.globalAlpha = 1;
+        this.drawPolylines(ctx, ecology.riverPaths, lonLat, mapPoint, false);
       }
     }
 

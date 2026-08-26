@@ -4,6 +4,7 @@ export * from './core/seeded-random';
 export * from './core/fibonacci-sphere';
 export * from './core/convex-hull3';
 export * from './core/dual-cells';
+export * from './core/corner-graph';
 export * from './core/lloyd-relaxation';
 export * from './core/planet-graph';
 export * from './core/plate-tectonics';
