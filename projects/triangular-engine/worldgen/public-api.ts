@@ -10,3 +10,8 @@ export * from './core/plate-tectonics';
 export * from './core/plate-boundaries';
 export * from './core/elevation';
 export * from './core/tectonics';
+export * from './core/climate';
+export * from './core/biomes';
+export * from './core/rivers';
+export * from './core/coastlines';
+export * from './core/ecology';
