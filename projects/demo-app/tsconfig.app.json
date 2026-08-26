@@ -56,6 +56,9 @@
       ],
       "triangular-engine/celestial": [
         "projects/triangular-engine/celestial/public-api"
+      ],
+      "triangular-engine/worldgen": [
+        "projects/triangular-engine/worldgen/public-api"
       ]
     },
     "outDir": "../../out-tsc/app",

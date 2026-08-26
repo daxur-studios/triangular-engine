@@ -1,0 +1,51 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Cell planet lab">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>triangular-engine/worldgen — V4 cell-graph planets (runbook 022, M0)</small>
+        </div>
+        <strong>Cell Planet Lab</strong>
+      </header>
+      <p>
+        Site points from a Fibonacci sphere, relaxed with Lloyd iterations, then their spherical
+        Voronoi dual — no plates, elevation, biomes, or rivers yet.
+      </p>
+
+      <div class="controls">
+        <label>Cells: {{ cellCount() }}
+          <input type="range" min="20" max="500" step="10" [value]="cellCount()" (input)="onCellCount($event)" />
+        </label>
+        <label>Seed
+          <input type="number" min="0" max="999999" step="1" [value]="seed()" (input)="onSeed($event)" />
+        </label>
+        <button type="button" (click)="shuffleSeed()">Shuffle seed</button>
+        <label>Relax: {{ relax() }}
+          <input type="range" min="0" max="6" step="1" [value]="relax()" (input)="onRelax($event)" />
+        </label>
+        <label>Jitter: {{ jitterValue() }}
+          <input type="range" min="0" max="40" step="1" [value]="jitter()" (input)="onJitter($event)" />
+        </label>
+        <button type="button" [class.active]="showSites()" (click)="toggleSites()">Sites</button>
+        <button type="button" [class.active]="showEdges()" (click)="toggleEdges()">Edges</button>
+      </div>
+
+      <div class="stats">
+        <span><strong>{{ cellTotal() }}</strong> cells</span>
+        <span><strong>{{ edgeTotal() }}</strong> edges</span>
+        <span><strong>{{ degreeRange() }}</strong> min/max degree</span>
+        <span><strong>{{ buildMs() }}</strong> build</span>
+      </div>
+
+      <div class="map">
+        <small>2D equirectangular unwrap (seam at ±180°)</small>
+        <canvas #mapCanvas></canvas>
+      </div>
+    </section>
+  </ng-template>
+
+  <orbitControls [cameraPosition]="[0, 0, 2.6]" [target]="[0, 0, 0]" [isActive]="true" />
+  <ambientLight [intensity]="1.4" />
+  <directionalLight [position]="[3, 5, 4]" [intensity]="1.8" />
+</scene>

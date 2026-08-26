@@ -588,6 +588,18 @@ export const DEMOS: readonly DemoItem[] = [
     description:
       'Jolt cloth and spheres compared with none, distance, and dihedral bend constraints.',
   },
+  {
+    id: 'cell-planet-lab',
+    number: '39',
+    title: 'Cell Planet Lab',
+    route: '/cell-planet-lab',
+    categoryId: 'core',
+    tier: 'lab',
+    entryPoints: ['worldgen'],
+    package: 'triangular-engine/worldgen',
+    description:
+      'V4 structure-first planet generation (runbook 022): Fibonacci sphere sites, Lloyd relaxation, and their spherical Voronoi dual — 3D orbit view plus a 2D equirectangular unwrap.',
+  },
 ];
 
 export interface TagWithCount {

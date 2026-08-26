@@ -81,6 +81,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'cell-planet-lab',
+    loadComponent: () =>
+      import('./pages/cell-planet-lab/cell-planet-lab-page.component').then(
+        ({ CellPlanetLabPageComponent }) => CellPlanetLabPageComponent,
+      ),
+  },
+  {
     path: 'navigation-lab',
     loadComponent: () =>
       import('./pages/navigation-lab/navigation-lab-page.component').then(

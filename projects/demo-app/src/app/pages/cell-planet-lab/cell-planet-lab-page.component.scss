@@ -1,0 +1,18 @@
+:host { min-height: 100%; background: #050810; color: #e5edf7; }
+.panel { width: min(30rem, calc(100vw - 2rem)); margin: 1rem; padding: 1rem; border: 1px solid #232c3a; border-radius: .75rem; background: #0f172add; box-shadow: 0 1rem 3rem #0008; font: 14px/1.4 Inter, system-ui, sans-serif; }
+header, header div { display: flex; align-items: center; gap: .65rem; }
+header { justify-content: space-between; } header div { align-items: flex-start; flex-direction: column; gap: .1rem; }
+a, small { color: #8b96a8; } p { color: #cbd5e1; margin: .5rem 0; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem .9rem; margin: .75rem 0; }
+label { display: flex; flex-direction: column; gap: .25rem; color: #8b96a8; font-size: 12px; }
+input[type='range'] { accent-color: #6fe3c0; width: 9rem; }
+input[type='number'] { width: 6rem; padding: .35rem .5rem; color: #e2e8f0; border: 1px solid #33404f; border-radius: .35rem; background: #11161d; }
+button { align-self: flex-end; padding: .4rem .65rem; color: #e2e8f0; border: 1px solid #33404f; border-radius: .35rem; background: #11161d; cursor: pointer; font-size: 13px; }
+button:hover { border-color: #6fe3c0; color: #6fe3c0; }
+button.active { border-color: #6fe3c0; background: #103028; color: #6fe3c0; }
+.stats { display: flex; flex-wrap: wrap; gap: .5rem 1.1rem; padding: .6rem .75rem; border: 1px solid #232c3a; border-radius: .5rem; background: #02061799; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: #8b96a8; }
+.stats strong { color: #e5edf7; font-variant-numeric: tabular-nums; }
+.map { margin-top: .75rem; }
+.map small { display: block; margin-bottom: .35rem; color: #8b96a8; }
+canvas { display: block; width: 100%; height: auto; aspect-ratio: 2 / 1; border: 1px solid #232c3a; border-radius: .4rem; background: #050810; }
+@media (max-width: 40rem) { .panel { width: calc(100vw - 2rem); } header { align-items: flex-start; flex-direction: column; } }
