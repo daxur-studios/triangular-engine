@@ -93,6 +93,38 @@ describe('traceRivers', () => {
     }
   });
 
+  it('flow is at least 1 everywhere and never decreases going downstream', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 41 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 41 });
+    const climate = computeClimate(graph, tectonics.elevation, tectonics.isLand, tectonics.seaLevelElevation);
+    // A higher source count than the default makes a shared downstream corner likely enough
+    // to actually exercise the merge/accumulation path below, not just the trivial no-merge case.
+    const rivers = traceRivers(
+      graph,
+      tectonics.elevation,
+      tectonics.isLand,
+      tectonics.seaLevelElevation,
+      climate.moisture,
+      { seed: 41, sourceCount: 60 },
+    );
+
+    expect(rivers.riverFlow.length).toBe(rivers.riverPaths.length);
+    for (let p = 0; p < rivers.riverPaths.length; p++) {
+      const path = rivers.riverPaths[p];
+      const flow = rivers.riverFlow[p];
+      expect(flow.length).toBe(path.length);
+      for (let i = 0; i < flow.length; i++) {
+        expect(flow[i]).toBeGreaterThanOrEqual(1);
+        if (i > 0) expect(flow[i]).toBeGreaterThanOrEqual(flow[i - 1]);
+      }
+    }
+
+    // At least one merge should occur across 12 sources on a 300-cell planet — otherwise
+    // this test isn't actually exercising the accumulation logic it's meant to check.
+    const anyMerge = rivers.riverFlow.some((flow) => flow.some((f) => f > 1));
+    expect(anyMerge).toBe(true);
+  });
+
   it('is deterministic for a given seed', () => {
     const graph = buildPlanetGraphCore({ cellCount: 200, seed: 12 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 8, seed: 12 });

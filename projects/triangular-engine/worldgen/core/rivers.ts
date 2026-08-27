@@ -16,6 +16,14 @@ export interface IPlanetRivers {
   riverPaths: IVec3[][];
   /** Corner positions that are land-locked local elevation minima — a river terminating here is a lake outlet. */
   lakeCorners: IVec3[];
+  /**
+   * Accumulated flow at each point of the matching `riverPaths` entry (same shape/length): how
+   * many source paths pass through that point. Downhill stepping is deterministic — always the
+   * single lowest neighbor — so once two rivers reach the same corner they follow an identical
+   * path from there on, meaning flow only ever grows going downstream along any one path. Meant
+   * for width-by-`sqrt(flow)` rendering (the Red Blob Games technique).
+   */
+  riverFlow: number[][];
 }
 
 const DEFAULTS = {
@@ -54,6 +62,17 @@ const DEFAULTS = {
  * clipped to the exact sea-level point on that edge (instead of ending on
  * the underwater corner), so the river mouth lands exactly on the same
  * boundary the coastline overlay draws.
+ *
+ * Flow accumulates as a side effect of the walk itself: every corner a
+ * source's path touches increments that corner's running visit count, and
+ * since two paths that converge on a corner are thereafter identical (the
+ * downhill step is a pure function of the current corner), the count at any
+ * corner is exactly how many sources' rivers are flowing through it — no
+ * separate merge-detection pass needed. Sources are traced in two passes:
+ * first to find every path's corner indices and finalize the flow counts,
+ * then to read those counts back into each path's `riverFlow` entry, so a
+ * source visited later in iteration order doesn't leave an earlier path's
+ * recorded flow stale.
  */
 export function traceRivers(
   graph: IPlanetGraphCore,
@@ -89,12 +108,20 @@ export function traceRivers(
   }
   const sources = candidates.slice(0, Math.min(p.sourceCount, candidates.length));
 
+  interface ISourceTrace {
+    cornerIndices: number[];
+    coastCrossing?: { from: number; to: number; t: number };
+  }
+
+  const cornerFlow = new Array<number>(corners.count).fill(0);
+  const traces: ISourceTrace[] = [];
   const lakeCorners: IVec3[] = [];
-  const riverPaths: IVec3[][] = [];
 
   for (const sourceIndex of sources) {
     let current = sourceIndex;
-    const path: IVec3[] = [corners.position[current]];
+    const cornerIndices: number[] = [current];
+    cornerFlow[current]++;
+    let coastCrossing: ISourceTrace['coastCrossing'];
 
     while (cornerIsLand[current]) {
       let lowest = -1;
@@ -118,18 +145,36 @@ export function traceRivers(
         const eFrom = cornerElevation[current];
         const eTo = cornerElevation[lowest];
         const t = eFrom === eTo ? 0 : (seaLevelElevation - eFrom) / (eTo - eFrom);
-        const from = corners.position[current];
-        const to = corners.position[lowest];
-        path.push(normalize(add(from, scale(sub(to, from), t))));
+        coastCrossing = { from: current, to: lowest, t };
         break;
       }
 
       current = lowest;
-      path.push(corners.position[current]);
+      cornerIndices.push(current);
+      cornerFlow[current]++;
+    }
+
+    traces.push({ cornerIndices, coastCrossing });
+  }
+
+  const riverPaths: IVec3[][] = [];
+  const riverFlow: number[][] = [];
+
+  for (const trace of traces) {
+    const path = trace.cornerIndices.map((index) => corners.position[index]);
+    const flow = trace.cornerIndices.map((index) => cornerFlow[index]);
+
+    if (trace.coastCrossing) {
+      const { from, to, t } = trace.coastCrossing;
+      const fromPos = corners.position[from];
+      const toPos = corners.position[to];
+      path.push(normalize(add(fromPos, scale(sub(toPos, fromPos), t))));
+      flow.push(cornerFlow[from]);
     }
 
     riverPaths.push(path);
+    riverFlow.push(flow);
   }
 
-  return { riverPaths, lakeCorners };
+  return { riverPaths, lakeCorners, riverFlow };
 }

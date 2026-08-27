@@ -1,7 +1,9 @@
 import { IPlanetGraphCore } from './planet-graph';
+import { WaterBodyKind } from './water-bodies';
 
 export type Biome =
   | 'ocean'
+  | 'lake'
   | 'ice_cap'
   | 'tundra'
   | 'taiga'
@@ -44,7 +46,12 @@ const DEFAULTS = {
   alpineElevationFraction: 0.7,
   canyonSlopeFraction: 0.35,
   canyonMoistureThreshold: 0.25,
-  flatnessSlopeFraction: 0.08,
+  // Recalibrated 2026-08-27 alongside computeElevation()'s ridgeFalloffRadius fix: landRelief
+  // used to be inflated by unbounded compounding boundary spread, so 0.08 (8% of that inflated
+  // relief) comfortably captured ordinary background noise as "flat". With landRelief now at
+  // its realistic (un-inflated) scale, empirically the flattest ~20% of temperate/medium-
+  // moisture land sits under ~0.2 — see runbook 022.
+  flatnessSlopeFraction: 0.2,
 };
 
 /**
@@ -56,11 +63,28 @@ const DEFAULTS = {
  * (`seaLevelElevation` .. max land elevation) rather than fixed absolute
  * cutoffs, since tectonics elevation is an arbitrary unitless scale whose
  * range varies with plate/boundary params. See runbook 022.
+ *
+ * `waterBodyKind` (from `classifyWaterBodies()`) splits water cells into
+ * 'ocean'/'lake' so a land-locked pocket doesn't read as open ocean; a frozen
+ * water cell of either kind still reports 'ice_cap', same as before.
+ *
+ * `ridgeCellIds` (continent-continent convergent boundary cells, from
+ * `computeElevation()`) are unconditionally 'alpine', regardless of the
+ * elevation-percentile check below — that check alone used to make 'alpine'
+ * a wide blob wherever the smoothed elevation field happened to be tall,
+ * which is a different (and much wider) area than the actual tectonic
+ * mountain line. `ridgeCellIds` is now the primary driver of "this cell is a
+ * mountain"; the elevation-percentile check still catches other tall terrain
+ * that isn't ridge-adjacent (e.g. compounded subduction uplift). See
+ * `computeElevation()`'s `ridgeFalloffRadius` doc comment for the other half
+ * of this fix, and runbook 022.
  */
 export function computeBiomes(
   graph: IPlanetGraphCore,
   elevation: number[],
   isLand: boolean[],
+  waterBodyKind: (WaterBodyKind | null)[],
+  ridgeCellIds: number[],
   seaLevelElevation: number,
   temperature: number[],
   moisture: number[],
@@ -79,13 +103,14 @@ export function computeBiomes(
   const landElevations = elevation.filter((_, id) => isLand[id]);
   const maxLandElevation = landElevations.length > 0 ? Math.max(...landElevations) : seaLevelElevation;
   const landRelief = Math.max(1e-6, maxLandElevation - seaLevelElevation);
+  const ridgeSet = new Set(ridgeCellIds);
 
   const biome: Biome[] = new Array(cellCount);
   for (let id = 0; id < cellCount; id++) {
     const isFrozen = temperature[id] <= p.coldTemperatureThreshold;
 
     if (!isLand[id]) {
-      biome[id] = isFrozen ? 'ice_cap' : 'ocean';
+      biome[id] = isFrozen ? 'ice_cap' : waterBodyKind[id] === 'lake' ? 'lake' : 'ocean';
       continue;
     }
 
@@ -102,7 +127,7 @@ export function computeBiomes(
     const normalizedElevation = Math.max(0, elevation[id] - seaLevelElevation) / landRelief;
     const normalizedSlope = slope[id] / landRelief;
 
-    if (normalizedElevation >= p.alpineElevationFraction) {
+    if (ridgeSet.has(id) || normalizedElevation >= p.alpineElevationFraction) {
       biome[id] = 'alpine';
       continue;
     }

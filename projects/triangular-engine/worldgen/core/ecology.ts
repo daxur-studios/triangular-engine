@@ -5,8 +5,9 @@ import { IPlanetGraphCore } from './planet-graph';
 import { IPlanetRivers, IRiverParams, traceRivers } from './rivers';
 import { IPlanetTectonics } from './tectonics';
 import { IVec3 } from './vec3';
+import { classifyWaterBodies, IPlanetWaterBodies } from './water-bodies';
 
-export interface IPlanetEcology extends IPlanetClimate, IPlanetBiomes, IPlanetRivers {
+export interface IPlanetEcology extends IPlanetClimate, IPlanetBiomes, IPlanetRivers, IPlanetWaterBodies {
   /** Closed polylines walking every land/water cell boundary. */
   coastlines: IVec3[][];
 }
@@ -27,6 +28,7 @@ export function buildPlanetEcology(
   tectonics: IPlanetTectonics,
   params: IPlanetEcologyParams = {},
 ): IPlanetEcology {
+  const waterBodies = classifyWaterBodies(graph, tectonics.isLand);
   const climate = computeClimate(
     graph,
     tectonics.elevation,
@@ -38,6 +40,8 @@ export function buildPlanetEcology(
     graph,
     tectonics.elevation,
     tectonics.isLand,
+    waterBodies.waterBodyKind,
+    tectonics.ridgeCellIds,
     tectonics.seaLevelElevation,
     climate.temperature,
     climate.moisture,
@@ -53,5 +57,5 @@ export function buildPlanetEcology(
   );
   const coastlines = extractCoastlines(graph, tectonics.isLand);
 
-  return { ...climate, ...biomes, ...rivers, coastlines };
+  return { ...climate, ...biomes, ...rivers, ...waterBodies, coastlines };
 }

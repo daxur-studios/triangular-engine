@@ -88,6 +88,7 @@ function moistureColor(moisture: number): string {
 
 const BIOME_COLORS: Record<string, string> = {
   ocean: 'hsl(210, 55%, 22%)',
+  lake: 'hsl(200, 65%, 42%)',
   ice_cap: 'hsl(195, 40%, 82%)',
   tundra: 'hsl(200, 20%, 55%)',
   taiga: 'hsl(170, 25%, 35%)',
@@ -656,9 +657,9 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       if (mode === 'temperature') return temperatureColor(ecology.temperature[cellId]);
       if (mode === 'moisture') return moistureColor(ecology.moisture[cellId]);
       if (mode === 'biome') {
-        if (!land) return BIOME_COLORS['ocean'];
+        if (!land) return ecology.biome[cellId] === 'lake' ? BIOME_COLORS['lake'] : BIOME_COLORS['ocean'];
         const biome = ecology.biome[cellId];
-        return biome === 'ocean' ? 'hsl(95, 45%, 45%)' : biomeColor(biome);
+        return biome === 'ocean' || biome === 'lake' ? 'hsl(95, 45%, 45%)' : biomeColor(biome);
       }
     }
     return land ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
@@ -822,14 +823,21 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   /** Strokes each consecutive pair of points as its own line segment (not one continuous
    * path), skipping any segment that crosses the ±180° seam — same guard as the edge/fill
    * seam handling above, needed here because rivers/coastlines aren't cell-local. */
+  /** `flows`/`baseLineWidth`, when given, vary the stroke width per segment as
+   * `baseLineWidth * (1 + 0.5 * sqrt(flow - 1))` — the classic Red Blob Games technique for
+   * showing merged rivers widening downstream (see `IPlanetRivers.riverFlow`'s doc comment). */
   private drawPolylines(
     ctx: CanvasRenderingContext2D,
     paths: IVec3[][],
     lonLat: (p: IVec3) => { lon: number; lat: number },
     mapPoint: (ll: { lon: number; lat: number }) => { x: number; y: number },
     closed: boolean,
+    flows?: number[][],
+    baseLineWidth = 1,
   ): void {
-    for (const path of paths) {
+    for (let pathIndex = 0; pathIndex < paths.length; pathIndex++) {
+      const path = paths[pathIndex];
+      const flow = flows?.[pathIndex];
       const n = path.length;
       if (n < 2) continue;
       const lls = path.map(lonLat);
@@ -838,6 +846,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
         const a = lls[k];
         const b = lls[(k + 1) % n];
         if (Math.abs(a.lon - b.lon) > Math.PI * 0.9) continue;
+        if (flow) ctx.lineWidth = baseLineWidth * (1 + 0.5 * Math.sqrt(Math.max(0, flow[(k + 1) % n] - 1)));
         const pa = mapPoint(a);
         const pb = mapPoint(b);
         ctx.beginPath();
@@ -940,9 +949,8 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
         this.drawPolylines(ctx, ecology.coastlines, lonLat, mapPoint, true);
 
         ctx.strokeStyle = '#5ec8ff';
-        ctx.lineWidth = Math.max(1.4, dpr * 1.2);
         ctx.globalAlpha = 1;
-        this.drawPolylines(ctx, ecology.riverPaths, lonLat, mapPoint, false);
+        this.drawPolylines(ctx, ecology.riverPaths, lonLat, mapPoint, false, ecology.riverFlow, Math.max(1.4, dpr * 1.2));
       }
     }
 

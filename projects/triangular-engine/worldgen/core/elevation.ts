@@ -23,6 +23,13 @@ export interface IElevationParams {
   midOceanRidgeBoost?: number;
   /** How many graph hops a boundary's elevation influence reaches. */
   boundaryFalloffRadius?: number;
+  /**
+   * How many graph hops a continent-continent convergent (ridge/mountain-range) boundary's
+   * uplift reaches — separate from `boundaryFalloffRadius` and much smaller by default, so
+   * mountain ranges form as a narrow line tracing the boundary (see `ridgeCellIds`) instead of
+   * compounding into a blob covering a whole continent's interior. See runbook 022.
+   */
+  ridgeFalloffRadius?: number;
   /** Per-hop decay multiplier for boundary influence (0..1). */
   boundaryDecayPerHop?: number;
   /** Per-cell elevation jitter amplitude for texture. */
@@ -49,6 +56,7 @@ const DEFAULTS = {
   riftDepth: -0.25,
   midOceanRidgeBoost: 0.15,
   boundaryFalloffRadius: 3,
+  ridgeFalloffRadius: 0,
   boundaryDecayPerHop: 0.55,
   noiseAmplitude: 0.08,
 };
@@ -118,6 +126,27 @@ function spreadInfluence(
  * height) plus boundary shaping (ridges, trenches, rifts) that decays outward
  * from each boundary edge, then picks a sea-level threshold by percentile so
  * `targetLandFraction` of cells end up as land.
+ *
+ * Continent-continent convergent (ridge) *and* ocean-ocean convergent
+ * (island-arc) edges use `ridgeFalloffRadius` instead of the general
+ * `boundaryFalloffRadius`, and default to 0 hops (no spread beyond the
+ * boundary's own two cells) — both are the same real-world phenomenon,
+ * collision uplift along a line (a continental mountain range or a chain of
+ * volcanic islands), not a broad regional swell. A whole mountain range or
+ * island chain is many adjacent convergent edges in a row, each spreading
+ * independently — with the general (larger) falloff radius, their
+ * overlapping spread used to compound into a blob covering most of a
+ * continent's interior (or, for island arcs, inflating a whole small oceanic
+ * plate well past continental elevations), worse at low cell counts where a
+ * few hops is a big fraction of the landmass. Keeping this uplift tied to
+ * the boundary cells themselves instead produces a narrow line that traces
+ * the actual boundary, independent of cell density or planet size — see
+ * `computeBiomes()`, which now classifies `ridgeCellIds` as `'alpine'`
+ * outright instead of via a global elevation percentile, for the other half
+ * of this fix. Subduction (ocean-continent convergent) and rift/mid-ocean-
+ * ridge (divergent) contributions are unaffected — those realistically are
+ * broader regional features (e.g. the Andes' uplift belt), not a single
+ * line. See runbook 022.
  */
 export function computeElevation(
   graph: IPlanetGraphCore,
@@ -141,14 +170,15 @@ export function computeElevation(
   const ridgeCellIds: number[] = [];
   for (const edge of boundaries) {
     const { deltaA, deltaB } = boundaryContribution(edge, plates, p);
-    spreadInfluence(graph, edge.cellA, deltaA, p.boundaryFalloffRadius, p.boundaryDecayPerHop, elevation);
-    spreadInfluence(graph, edge.cellB, deltaB, p.boundaryFalloffRadius, p.boundaryDecayPerHop, elevation);
+    const typeA = plates[edge.plateA].type;
+    const typeB = plates[edge.plateB].type;
+    const isRidge = edge.type === 'convergent' && typeA === 'continental' && typeB === 'continental';
+    const isIslandArc = edge.type === 'convergent' && typeA === 'oceanic' && typeB === 'oceanic';
+    const falloffRadius = isRidge || isIslandArc ? p.ridgeFalloffRadius : p.boundaryFalloffRadius;
+    spreadInfluence(graph, edge.cellA, deltaA, falloffRadius, p.boundaryDecayPerHop, elevation);
+    spreadInfluence(graph, edge.cellB, deltaB, falloffRadius, p.boundaryDecayPerHop, elevation);
 
-    if (
-      edge.type === 'convergent' &&
-      plates[edge.plateA].type === 'continental' &&
-      plates[edge.plateB].type === 'continental'
-    ) {
+    if (isRidge) {
       ridgeCellIds.push(edge.cellA, edge.cellB);
     }
   }
