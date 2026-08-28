@@ -137,6 +137,13 @@
             (change)="toggleChunkColors()"
           /><span>chunk colors</span></label
         >
+        <label class="toggle"
+          ><input
+            type="checkbox"
+            [checked]="usePinning()"
+            (change)="togglePinning()"
+          /><span>feature pinning ({{ pinnedCellCount() }})</span></label
+        >
         <label class="control">
           <span>elevation ×</span>
           <input
@@ -284,7 +291,16 @@
         inside one cell, so LOD1 there is simply cell polygons minus their fan
         centers (a third fewer triangles); the merge only starts paying off at
         higher cell counts, which is the point — the LOD saves more where there
-        is more to save. The camera-distance threshold for the LOD0/LOD1 switch
+        is more to save. Merging can still make a locally prominent peak,
+        coastline cape, or small island flatten, shift, or vanish when a chunk
+        crosses the LOD0/LOD1 boundary, so a small per-chunk budget of cells —
+        the most prominent peaks, sharpest coastline curvature points, and
+        biggest small islands, ranked and capped rather than pinned past a
+        fixed threshold (a threshold regresses hardest exactly where a chunk
+        is genuinely mountainous, since most of its cells would clear a fixed
+        bar) — is pinned to always render as its own single-cell polygon at
+        both LODs, so those specific features stop popping regardless of
+        camera distance. The camera-distance threshold for the LOD0/LOD1 switch
         is the "LOD distance" slider; the "LOD split" stat shows how many chunks
         are currently at each level, and the "chunk colors" toggle colors each
         chunk mesh flat (one hash color per chunk, shared by both its LOD

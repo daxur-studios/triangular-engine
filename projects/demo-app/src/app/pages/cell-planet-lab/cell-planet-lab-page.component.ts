@@ -39,6 +39,7 @@ import {
   buildPlanetEcology,
   buildPlanetGraphCore,
   buildPlanetTectonics,
+  computeCellPins,
   IPlanetChunk,
   IPlanetEcology,
   IPlanetGraphCore,
@@ -185,6 +186,14 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * attribute and mesh split that already exist for rendering, just changes what gets written
    * into it (see `updatePreviewColors()`), no extra geometry or draw calls. */
   readonly showChunkColors = signal(false);
+  /** Debug A/B toggle for `computeCellPins()` (see `rebuildPreviewMesh()`'s M4c doc comment) —
+   * on by default (the shipped behavior), off reproduces the pre-pinning LOD1 exactly (same
+   * code path as passing `pinned: undefined`) so a feature's pop can be compared side by side
+   * instead of taken on faith. Rebuilds the whole preview mesh on toggle (`togglePinning()`),
+   * same cost as changing any other generation param — infrequent, user-triggered, fine to be
+   * heavier than a per-frame op. */
+  readonly usePinning = signal(true);
+  readonly pinnedCellCount = signal(0);
   /** M4c: camera distance (world units, planet radius ~1) beyond which a chunk switches from
    * LOD0 (full per-cell) to LOD1 (merged cells) — see `updateChunkLod()`. Exposed as a slider
    * since the right value depends on `elevationScale`/camera-range settings that themselves
@@ -390,6 +399,11 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   toggleChunkColors(): void {
     this.showChunkColors.update((value) => !value);
     this.updatePreviewColors();
+  }
+
+  togglePinning(): void {
+    this.usePinning.update((value) => !value);
+    if (this.graph && this.tectonics) this.rebuildPreviewMesh(this.graph, this.tectonics);
   }
 
   onLodDistance(event: Event): void {
@@ -669,7 +683,13 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * `cellCount` the budget already fits inside a single cell, so LOD1 there is just "cell
    * polygons without their fan centers" (a third fewer triangles); the merge only starts
    * paying off at the higher end of the cell-count slider, which is the intended behavior —
-   * an LOD that saves more where there's more to save. Both are added to `previewGroup` and pushed onto the flat
+   * an LOD that saves more where there's more to save. On top of that, `computeCellPins()` is
+   * run once per graph (not per chunk) and its result is passed to every chunk's LOD1 build as
+   * `{ pinned }` — the handful of cells it marks (locally prominent peaks, coastline capes,
+   * small islands) always render as their own single-cell polygon at LOD1 instead of getting
+   * merged away, so those features stop popping (flattening, appearing/disappearing, or
+   * shifting the shoreline) as a chunk crosses the LOD distance threshold. See that function's
+   * doc comment for why it's a per-chunk budget rather than a threshold. Both are added to `previewGroup` and pushed onto the flat
    * `previewMeshes` list (so displacement/color/raycast/waterline-extraction keep working
    * unchanged, looping every mesh regardless of LOD); `chunkLodMeshes[chunk.id]` additionally
    * indexes the `[lod0, lod1]` pair so `updateChunkLod()` can flip `.visible` on exactly one
@@ -690,6 +710,15 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     });
     this.chunks = chunks;
     this.chunkIdByCell = chunkIdByCell;
+    // M4c pinning: computed once here (O(cells), not per frame) rather than inside the LOD1
+    // build loop below — every chunk's buildChunkLod1MeshData() call shares the same pin set,
+    // and recomputing it per chunk would just repeat the same whole-graph coastline/island
+    // flood-fill chunkCount times for no benefit. See computeCellPins()'s doc comment.
+    // `usePinning()` off passes `undefined` through (not an all-zero array) so the "off" state
+    // is bit-for-bit the same code path buildChunkLod1MeshData() already had before pinning
+    // existed, not just a pin set that happens to be empty.
+    const pinned = this.usePinning() ? computeCellPins(graph, tectonics.elevation, tectonics.isLand, chunks).pinned : undefined;
+    this.pinnedCellCount.set(pinned ? pinned.reduce((sum, v) => sum + v, 0) : 0);
 
     const buildMesh = (
       data: {
@@ -737,6 +766,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
           tectonics.elevation,
           chunkIdByCell,
           chunk,
+          { pinned },
         ),
         chunk,
         1,

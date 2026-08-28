@@ -66,12 +66,19 @@ export function buildPlanetChunks(graph: IPlanetGraphCore, params: IChunkParams 
  * `groupIdByCell` is sized to the whole graph and left at `-1` for anything outside
  * `cellIds`, which is exactly what `buildChunkBoundaryLoop()` wants: `-1` never equals a real
  * group id, so an edge leading out of the scope always counts as a group boundary.
+ *
+ * `pinned`, when given, forces every marked cell to be its own singleton group: it's never
+ * absorbed as someone else's neighbor, and if it's a seed itself its frontier never expands.
+ * See `computeCellPins()` in `salience.ts` for why (peaks/coastline capes/small islands that
+ * shouldn't flatten, vanish, or shift as LOD1 merges around them) — this function only
+ * enforces the mechanic, undefined `pinned` pins nothing and reproduces prior behavior exactly.
  */
 function growConnectedGroups(
   graph: IPlanetGraphCore,
   cellIds: number[],
   targetSize: number,
   maxAngleFromSeed = Infinity,
+  pinned?: Uint8Array,
 ): { groups: number[][]; groupIdByCell: number[] } {
   const groupIdByCell = new Array<number>(graph.cells.length).fill(-1);
   const inScope = new Uint8Array(graph.cells.length);
@@ -99,12 +106,13 @@ function growConnectedGroups(
       return true;
     };
 
-    let frontier = [seedId];
+    let frontier = pinned?.[seedId] === 1 ? [] : [seedId];
     while (members.length < targetSize && frontier.length > 0) {
       const next: number[] = [];
       outer: for (const cellId of frontier) {
         for (const neighborId of graph.cells[cellId].neighbors) {
           if (inScope[neighborId] === 0 || groupIdByCell[neighborId] !== -1) continue;
+          if (pinned?.[neighborId] === 1) continue;
           if (!fitsInCap(neighborId)) continue;
           groupIdByCell[neighborId] = groupId;
           members.push(neighborId);
@@ -363,6 +371,11 @@ export interface IChunkLod1Params {
    * another cell would exceed it. See `buildChunkLod1MeshData()` for why this, not a cell
    * count, is the knob that matters. */
   maxSag?: number;
+  /** Cell ids that must always render as their own single-cell polygon, never absorbed into a
+   * merge group regardless of `maxSag`/`maxGroupSize` — see `computeCellPins()` in
+   * `salience.ts`. Indexed by cell id, length = `graph.cells.length`, 1 = pinned. Omitted or
+   * undefined pins nothing, identical to pre-pinning behavior. */
+  pinned?: Uint8Array;
 }
 
 const LOD1_DEFAULTS = {
@@ -421,6 +434,14 @@ const LOD1_DEFAULTS = {
  * Every vertex is tagged with its own group's first member cell id rather than a true owning
  * cell — color resolution coarsens along with geometry, which is the point: a distant chunk
  * doesn't need cell-accurate biome color any more than it needs cell-accurate geometry.
+ *
+ * ## Pinning
+ *
+ * `params.pinned`, when given, forces the marked cells into their own singleton groups (see
+ * `growConnectedGroups()`), so they still go through this same boundary-loop + ear-clipping
+ * path but end up tessellating just their own polygon — a mountain peak, coastline cape, or
+ * small island pinned by `computeCellPins()` renders identically at both LODs, so it can't
+ * flatten, shift, or disappear as the camera crosses the LOD distance threshold.
  */
 export function buildChunkLod1MeshData(
   graph: IPlanetGraphCore,
@@ -436,6 +457,7 @@ export function buildChunkLod1MeshData(
     chunk.cellIds,
     Math.max(1, p.maxGroupSize),
     maxAngle,
+    p.pinned,
   );
 
   const directions: number[] = [];

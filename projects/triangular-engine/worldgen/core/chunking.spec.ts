@@ -282,6 +282,45 @@ describe('buildChunkLod1MeshData', () => {
   });
 });
 
+describe('buildChunkLod1MeshData pinning', () => {
+  it('a pinned cell always renders as its own untouched single-cell polygon, never absorbed into a merge group', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 400, seed: 13 });
+    const { chunks, chunkIdByCell } = buildPlanetChunks(graph, { targetChunkSize: 80 });
+    const elevation = graph.cells.map(() => 0);
+    const chunk = chunks.find((c) => c.cellIds.length > 10)!;
+    const pinnedCellId = chunk.cellIds[Math.floor(chunk.cellIds.length / 2)];
+
+    const pinned = new Uint8Array(graph.cells.length);
+    pinned[pinnedCellId] = 1;
+
+    const lod1 = buildChunkLod1MeshData(graph, elevation, chunkIdByCell, chunk, { pinned });
+
+    let vertexCount = 0;
+    for (let i = 0; i < lod1.cellIds.length; i++) {
+      if (lod1.cellIds[i] === pinnedCellId) vertexCount++;
+    }
+
+    // A singleton group's "merge" boundary is exactly that cell's own corner ring (every edge
+    // is a boundary edge, since every neighbor belongs to a different group), so it triangulates
+    // to n-2 triangles via ear clipping — the same "polygon minus its fan center" shape any
+    // single cell gets at LOD1, never merged wider than its own footprint.
+    const expectedCorners = graph.cells[pinnedCellId].corners.length;
+    expect(vertexCount).toBe((expectedCorners - 2) * 3);
+  });
+
+  it('leaves LOD1 unchanged from the unpinned baseline when no cells are pinned', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 21 });
+    const { chunks, chunkIdByCell } = buildPlanetChunks(graph, { targetChunkSize: 80 });
+    const elevation = graph.cells.map((_, id) => Math.sin(id * 0.37));
+
+    for (const chunk of chunks) {
+      const baseline = buildChunkLod1MeshData(graph, elevation, chunkIdByCell, chunk);
+      const withUndefinedPins = buildChunkLod1MeshData(graph, elevation, chunkIdByCell, chunk, { pinned: undefined });
+      expect(withUndefinedPins.directions).toEqual(baseline.directions);
+    }
+  });
+});
+
 describe('triangulatePolygon2D', () => {
   const shoelaceArea = (pts: { x: number; y: number }[]): number => {
     let sum = 0;

@@ -12,6 +12,7 @@ export * from './core/plate-boundaries';
 export * from './core/elevation';
 export * from './core/sample-elevation';
 export * from './core/chunking';
+export * from './core/salience';
 export * from './core/tectonics';
 export * from './core/climate';
 export * from './core/biomes';
