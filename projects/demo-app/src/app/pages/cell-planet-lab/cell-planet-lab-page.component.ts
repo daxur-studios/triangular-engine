@@ -194,6 +194,12 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * heavier than a per-frame op. */
   readonly usePinning = signal(true);
   readonly pinnedCellCount = signal(0);
+  /** Recolors every pinned cell (see `usePinning`) a fixed bright magenta, overriding whatever
+   * map mode is active — answers "is the specific mountain/island I'm watching even in the
+   * pinned set" directly instead of inferring it from an A/B toggle, which only tells you
+   * *something* changed somewhere, not *what*. Free to toggle: just re-touches the existing
+   * color attribute (`updatePreviewColors()`), no geometry rebuild. */
+  readonly highlightPins = signal(false);
   /** M4c: camera distance (world units, planet radius ~1) beyond which a chunk switches from
    * LOD0 (full per-cell) to LOD1 (merged cells) — see `updateChunkLod()`. Exposed as a slider
    * since the right value depends on `elevationScale`/camera-range settings that themselves
@@ -248,6 +254,10 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   private chunkLodMeshes: Mesh[][] = [];
   private chunks: IPlanetChunk[] = [];
   private chunkIdByCell: number[] = [];
+  /** Cached from the last `rebuildPreviewMesh()`'s `computeCellPins()` call so
+   * `updatePreviewColors()`'s `highlightPins` overlay can read it without recomputing —
+   * empty (all-zero-effective) whenever `usePinning()` is off. */
+  private pinnedCells: Uint8Array = new Uint8Array(0);
   /** Soft target cells/chunk — see `buildPlanetChunks()`'s `targetChunkSize` doc comment.
    * Not yet exposed as a UI control; the draw-call/LOD-granularity tradeoff isn't tuned. */
   private readonly chunkTargetSize = 100;
@@ -404,6 +414,11 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   togglePinning(): void {
     this.usePinning.update((value) => !value);
     if (this.graph && this.tectonics) this.rebuildPreviewMesh(this.graph, this.tectonics);
+  }
+
+  toggleHighlightPins(): void {
+    this.highlightPins.update((value) => !value);
+    this.updatePreviewColors();
   }
 
   onLodDistance(event: Event): void {
@@ -718,6 +733,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     // is bit-for-bit the same code path buildChunkLod1MeshData() already had before pinning
     // existed, not just a pin set that happens to be empty.
     const pinned = this.usePinning() ? computeCellPins(graph, tectonics.elevation, tectonics.isLand, chunks).pinned : undefined;
+    this.pinnedCells = pinned ?? new Uint8Array(graph.cells.length);
     this.pinnedCellCount.set(pinned ? pinned.reduce((sum, v) => sum + v, 0) : 0);
 
     const buildMesh = (
@@ -871,13 +887,21 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * chunk's LOD meshes share the same chunk id, so LOD0/LOD1 always agree on the debug color
    * even as `updateChunkLod()` swaps which one is visible. This is the whole cost of the debug
    * overlay: one `Color.setStyle()` per mesh instead of per vertex, still writing into the
-   * same pre-allocated color attribute — no new geometry, no extra draw calls. */
+   * same pre-allocated color attribute — no new geometry, no extra draw calls.
+   *
+   * When `highlightPins()` is also on, any vertex whose `cellId` is in `pinnedCells` gets
+   * force-overridden to a fixed magenta regardless of mode/chunk-color, on top of whatever
+   * base color was just computed — this is the direct answer to "is the specific feature I'm
+   * looking at actually protected", rather than inferring it indirectly from an A/B toggle. */
   private updatePreviewColors(): void {
     if (!this.tectonics) return;
     const scratch = new Color();
     const mode = this.mapMode();
     const tectonics = this.tectonics;
     const chunkColors = this.showChunkColors();
+    const highlight = this.highlightPins();
+    const pins = this.pinnedCells;
+    const highlightColor = new Color('#ff17e0');
     const elevMin = Math.min(...tectonics.elevation);
     const elevMax = Math.max(...tectonics.elevation);
     this.previewMeshes.forEach((mesh) => {
@@ -889,25 +913,32 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       if (chunkColors) {
         scratch.setStyle(chunkColor(chunkId));
         for (let i = 0; i < cellIds.length; i++) {
+          const pinned = highlight && pins[cellIds[i]] === 1;
+          const c = pinned ? highlightColor : scratch;
           const o = i * 3;
-          arr[o] = scratch.r;
-          arr[o + 1] = scratch.g;
-          arr[o + 2] = scratch.b;
+          arr[o] = c.r;
+          arr[o + 1] = c.g;
+          arr[o + 2] = c.b;
         }
       } else {
         for (let i = 0; i < cellIds.length; i++) {
           const cellId = cellIds[i];
           const vertexElevation = elevations[i];
-          scratch.setStyle(
-            this.resolveVertexColor(
-              cellId,
-              vertexElevation,
-              mode,
-              tectonics,
-              elevMin,
-              elevMax,
-            ),
-          );
+          const pinned = highlight && pins[cellId] === 1;
+          if (pinned) {
+            scratch.copy(highlightColor);
+          } else {
+            scratch.setStyle(
+              this.resolveVertexColor(
+                cellId,
+                vertexElevation,
+                mode,
+                tectonics,
+                elevMin,
+                elevMax,
+              ),
+            );
+          }
           const o = i * 3;
           arr[o] = scratch.r;
           arr[o + 1] = scratch.g;

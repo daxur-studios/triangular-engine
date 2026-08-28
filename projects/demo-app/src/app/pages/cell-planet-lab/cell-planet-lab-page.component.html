@@ -144,6 +144,13 @@
             (change)="togglePinning()"
           /><span>feature pinning ({{ pinnedCellCount() }})</span></label
         >
+        <label class="toggle"
+          ><input
+            type="checkbox"
+            [checked]="highlightPins()"
+            (change)="toggleHighlightPins()"
+          /><span>highlight pinned cells</span></label
+        >
         <label class="control">
           <span>elevation ×</span>
           <input
