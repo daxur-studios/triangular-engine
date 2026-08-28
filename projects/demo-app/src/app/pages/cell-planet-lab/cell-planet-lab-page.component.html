@@ -1,79 +1,300 @@
-<scene>
+<scene [logarithmicDepthBuffer]="true">
   <ng-template portalTarget="overlay" lane="topStart">
     <a class="back-link" routerLink="/">← Examples</a>
     <section class="scope" aria-label="Cell planet lab">
       <header class="scope-head">
         <div>
-          <span class="scope-kicker">worldgen · runbook 022 · M0 + M1 + M2 + M3</span>
+          <span class="scope-kicker"
+            >worldgen · runbook 022 · M0 + M1 + M2 + M3 + M4a-c</span
+          >
           <h1>Cell graph scope</h1>
         </div>
         <div class="stat-strip">
-          <div class="stat"><span class="stat-label">cells</span><span class="stat-value">{{ cellTotal() }}</span></div>
-          <div class="stat"><span class="stat-label">edges</span><span class="stat-value">{{ edgeTotal() }}</span></div>
-          <div class="stat"><span class="stat-label">min/max degree</span><span class="stat-value">{{ degreeRange() }}</span></div>
-          <div class="stat"><span class="stat-label">land</span><span class="stat-value">{{ landFraction() }}</span></div>
-          <div class="stat"><span class="stat-label">build time</span><span class="stat-value">{{ buildMs() }}</span></div>
+          <div class="stat">
+            <span class="stat-label">cells</span
+            ><span class="stat-value">{{ cellTotal() }}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">edges</span
+            ><span class="stat-value">{{ edgeTotal() }}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">min/max degree</span
+            ><span class="stat-value">{{ degreeRange() }}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">land</span
+            ><span class="stat-value">{{ landFraction() }}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">build time</span
+            ><span class="stat-value">{{ buildMs() }}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">chunks</span
+            ><span class="stat-value">{{ chunkTotal() }}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">LOD split</span
+            ><span class="stat-value">{{ lodSplit() }}</span>
+          </div>
         </div>
       </header>
 
       <div class="controls">
         <label class="control">
           <span>cell count</span>
-          <input type="range" min="20" max="3000" step="20" [value]="cellCount()" (input)="onCellCount($event)" />
+          <input
+            type="range"
+            min="20"
+            max="3000"
+            step="20"
+            [value]="cellCount()"
+            (input)="onCellCount($event)"
+          />
           <span class="control-value">{{ cellCount() }}</span>
         </label>
         <label class="control">
           <span>seed</span>
-          <input type="number" min="0" max="999999" step="1" [value]="seed()" (input)="onSeed($event)" />
+          <input
+            type="number"
+            min="0"
+            max="999999"
+            step="1"
+            [value]="seed()"
+            (input)="onSeed($event)"
+          />
         </label>
         <button type="button" (click)="shuffleSeed()">Shuffle seed</button>
         <label class="control">
           <span>relax</span>
-          <input type="range" min="0" max="6" step="1" [value]="relax()" (input)="onRelax($event)" />
+          <input
+            type="range"
+            min="0"
+            max="6"
+            step="1"
+            [value]="relax()"
+            (input)="onRelax($event)"
+          />
           <span class="control-value">{{ relax() }}</span>
         </label>
         <label class="control">
           <span>jitter</span>
-          <input type="range" min="0" max="40" step="1" [value]="jitter()" (input)="onJitter($event)" />
+          <input
+            type="range"
+            min="0"
+            max="40"
+            step="1"
+            [value]="jitter()"
+            (input)="onJitter($event)"
+          />
           <span class="control-value">{{ jitterValue() }}</span>
         </label>
         <label class="control">
           <span>plates</span>
-          <input type="range" min="3" max="24" step="1" [value]="plateCount()" (input)="onPlateCount($event)" />
+          <input
+            type="range"
+            min="3"
+            max="24"
+            step="1"
+            [value]="plateCount()"
+            (input)="onPlateCount($event)"
+          />
           <span class="control-value">{{ plateCount() }}</span>
         </label>
-        <label class="toggle"><input type="checkbox" [checked]="showSites()" (change)="toggleSites()" /><span>sites</span></label>
-        <label class="toggle"><input type="checkbox" [checked]="showEdges()" (change)="toggleEdges()" /><span>edges</span></label>
-        <label class="toggle"><input type="checkbox" [checked]="showPreview3D()" (change)="togglePreview3D()" /><span>3D preview</span></label>
-        <label class="toggle"><input type="checkbox" [checked]="showOceanShell()" (change)="toggleOceanShell()" /><span>water sphere</span></label>
+        <label class="toggle"
+          ><input
+            type="checkbox"
+            [checked]="showSites()"
+            (change)="toggleSites()"
+          /><span>sites</span></label
+        >
+        <label class="toggle"
+          ><input
+            type="checkbox"
+            [checked]="showEdges()"
+            (change)="toggleEdges()"
+          /><span>edges</span></label
+        >
+        <label class="toggle"
+          ><input
+            type="checkbox"
+            [checked]="showPreview3D()"
+            (change)="togglePreview3D()"
+          /><span>3D preview</span></label
+        >
+        <label class="toggle"
+          ><input
+            type="checkbox"
+            [checked]="showOceanShell()"
+            (change)="toggleOceanShell()"
+          /><span>water sphere</span></label
+        >
+        <label class="toggle"
+          ><input
+            type="checkbox"
+            [checked]="showChunkColors()"
+            (change)="toggleChunkColors()"
+          /><span>chunk colors</span></label
+        >
         <label class="control">
           <span>elevation ×</span>
-          <input type="range" min="0" max="15" step="0.5" [value]="elevationScale()" (input)="onElevationScale($event)" />
+          <input
+            type="range"
+            min="0"
+            max="15"
+            step="0.5"
+            [value]="elevationScale()"
+            (input)="onElevationScale($event)"
+          />
           <span class="control-value">{{ elevationScale() }}%</span>
         </label>
-        <label class="toggle"><input type="checkbox" [checked]="useSurfaceUp()" (change)="toggleSurfaceUp()" /><span>surface-up camera</span></label>
+        <label class="toggle"
+          ><input
+            type="checkbox"
+            [checked]="useSurfaceUp()"
+            (change)="toggleSurfaceUp()"
+          /><span>surface-up camera</span></label
+        >
+        <label class="control">
+          <span>LOD distance</span>
+          <input
+            type="range"
+            min="1.1"
+            max="4"
+            step="0.1"
+            [value]="lodDistance()"
+            (input)="onLodDistance($event)"
+          />
+          <span class="control-value">{{ lodDistance() }}</span>
+        </label>
       </div>
 
       <div class="controls">
         <span class="control-group-label">2d unwrap mode</span>
-        <button type="button" [class.active]="mapMode() === 'graph'" (click)="setMapMode('graph')">graph</button>
-        <button type="button" [class.active]="mapMode() === 'plates'" (click)="setMapMode('plates')">plates</button>
-        <button type="button" [class.active]="mapMode() === 'elevation'" (click)="setMapMode('elevation')">elevation</button>
-        <button type="button" [class.active]="mapMode() === 'land'" (click)="setMapMode('land')">land / water</button>
-        <button type="button" [class.active]="mapMode() === 'temperature'" (click)="setMapMode('temperature')">temperature</button>
-        <button type="button" [class.active]="mapMode() === 'moisture'" (click)="setMapMode('moisture')">moisture</button>
-        <button type="button" [class.active]="mapMode() === 'biome'" (click)="setMapMode('biome')">biome</button>
-        <button type="button" [class.active]="mapMode() === 'rivers'" (click)="setMapMode('rivers')">rivers</button>
+        <button
+          type="button"
+          [class.active]="mapMode() === 'graph'"
+          (click)="setMapMode('graph')"
+        >
+          graph
+        </button>
+        <button
+          type="button"
+          [class.active]="mapMode() === 'plates'"
+          (click)="setMapMode('plates')"
+        >
+          plates
+        </button>
+        <button
+          type="button"
+          [class.active]="mapMode() === 'elevation'"
+          (click)="setMapMode('elevation')"
+        >
+          elevation
+        </button>
+        <button
+          type="button"
+          [class.active]="mapMode() === 'land'"
+          (click)="setMapMode('land')"
+        >
+          land / water
+        </button>
+        <button
+          type="button"
+          [class.active]="mapMode() === 'temperature'"
+          (click)="setMapMode('temperature')"
+        >
+          temperature
+        </button>
+        <button
+          type="button"
+          [class.active]="mapMode() === 'moisture'"
+          (click)="setMapMode('moisture')"
+        >
+          moisture
+        </button>
+        <button
+          type="button"
+          [class.active]="mapMode() === 'biome'"
+          (click)="setMapMode('biome')"
+        >
+          biome
+        </button>
+        <button
+          type="button"
+          [class.active]="mapMode() === 'rivers'"
+          (click)="setMapMode('rivers')"
+        >
+          rivers
+        </button>
       </div>
 
       <div class="views">
         <section class="view">
-          <div class="view-label"><span>2d unwrap</span><span class="view-hint">equirectangular, seam at ±180°</span></div>
-          <canvas #mapCanvas role="img" aria-label="2D equirectangular unwrap of the same cell graph"></canvas>
+          <div class="view-label">
+            <span>2d unwrap</span
+            ><span class="view-hint">equirectangular, seam at ±180°</span>
+          </div>
+          <canvas
+            #mapCanvas
+            role="img"
+            aria-label="2D equirectangular unwrap of the same cell graph"
+          ></canvas>
         </section>
       </div>
 
-      <p class="note">3D view is M0 (site distribution and cell boundaries from <code>buildPlanetGraphCore()</code>) — the near-side cull only holds up for a far/orbit camera, see runbook 022. The 2D unwrap's plates/elevation/land modes are M1 (<code>buildPlanetTectonics()</code>). The temperature/moisture/biome/rivers modes are M2 (<code>buildPlanetEcology()</code>): latitude+elevation climate, Whittaker biome lookup, river tracing, and coastline extraction — rivers mode overlays traced river paths and closed coastline loops on the land/water base. "3D preview" (M3) is a flat-shaded triangle-fan mesh, one fan per cell, colored by whichever 2D mode is active — a debug view, not a finished renderer. Every vertex is now pushed out by <code>cellCornerElevation()</code> (M4a's O(1) lookup) using its raw, unclamped blended elevation; land/water color is classified from that same per-vertex value (not a separate coarse per-cell flag) so color can never contradict height, and a separate sea-level ocean shell sits on top to visually cover submerged terrain. No beach/sand band — tried and reverted, since a thin band isn't achievable via vertex color at this mesh resolution (any tint is at least a full triangle wide). Still no chunking, LOD, or crack-free stitching, that's M4b onward. Rivers mode overlays traced river paths (elevation-following) and a coastline "waterline" extracted directly from the preview mesh's own triangles (not the coarser per-cell chain), so it always matches the terrain's land/water edge exactly — independent of the 3D preview toggle.</p>
+      <p class="note">
+        3D view is M0 (site distribution and cell boundaries from
+        <code>buildPlanetGraphCore()</code>) — the near-side cull only holds up
+        for a far/orbit camera, see runbook 022. The 2D unwrap's
+        plates/elevation/land modes are M1
+        (<code>buildPlanetTectonics()</code>). The
+        temperature/moisture/biome/rivers modes are M2
+        (<code>buildPlanetEcology()</code>): latitude+elevation climate,
+        Whittaker biome lookup, river tracing, and coastline extraction — rivers
+        mode overlays traced river paths and closed coastline loops on the
+        land/water base. "3D preview" (M3) is a flat-shaded triangle-fan mesh,
+        one fan per cell, colored by whichever 2D mode is active — a debug view,
+        not a finished renderer. Every vertex is now pushed out by
+        <code>cellCornerElevation()</code> (M4a's O(1) lookup) using its raw,
+        unclamped blended elevation; land/water color is classified from that
+        same per-vertex value (not a separate coarse per-cell flag) so color can
+        never contradict height, and a separate sea-level ocean shell sits on
+        top to visually cover submerged terrain. No beach/sand band — tried and
+        reverted, since a thin band isn't achievable via vertex color at this
+        mesh resolution (any tint is at least a full triangle wide). 3D preview
+        is now chunked (M4b, one draw call per ~100-cell chunk) with 2 discrete
+        LOD levels per chunk (M4c): LOD0 is full per-cell detail, LOD1 merges
+        neighboring cells into single flat polygons over their shared outer
+        boundary, and the two never crack against each other because a merged
+        polygon's boundary vertices are the exact same corner objects (and
+        numerically the same elevation) LOD0's cells use along that border — no
+        skirts, no stitching pass. How far LOD1 merges is bounded by a
+        curvature-error budget, not a cell count: a flat polygon spanning a
+        spherical cap of angular radius <em>r</em> sits
+        <em>1 - cos(r)</em> below the sphere, so collapsing a whole chunk to one
+        polygon (the first thing tried here) buries it deep inside the planet —
+        a sag an order of magnitude past the entire terrain relief, which
+        renders as land sunk under the ocean shell with the chord plate's
+        triangles fanning out through it, not as a recognizably coarse surface.
+        A cell-count cap doesn't bound that either, since BFS-grown groups come
+        out stringy rather than disc-shaped and a short string spans a wide
+        angle. At the low end of the cell-count slider the budget already fits
+        inside one cell, so LOD1 there is simply cell polygons minus their fan
+        centers (a third fewer triangles); the merge only starts paying off at
+        higher cell counts, which is the point — the LOD saves more where there
+        is more to save. The camera-distance threshold for the LOD0/LOD1 switch
+        is the "LOD distance" slider; the "LOD split" stat shows how many chunks
+        are currently at each level, and the "chunk colors" toggle colors each
+        chunk mesh flat (one hash color per chunk, shared by both its LOD
+        meshes) so chunk/LOD boundaries are visible directly. Rivers mode
+        overlays traced river paths (elevation-following) and a coastline
+        "waterline" extracted directly from each chunk's LOD0 mesh triangles
+        (not the coarser per-cell chain, and never LOD1's), so it always matches
+        the terrain's land/water edge exactly and stays stable regardless of the
+        live LOD state — independent of the 3D preview toggle.
+      </p>
     </section>
   </ng-template>
 

@@ -26,12 +26,20 @@ import {
   SphereGeometry,
   Vector3Tuple,
 } from 'three';
-import { EngineModule, EngineService, RaycastFocusContext, RaycastFocusResolver } from 'triangular-engine';
 import {
+  EngineModule,
+  EngineService,
+  RaycastFocusContext,
+  RaycastFocusResolver,
+} from 'triangular-engine';
+import {
+  buildChunkLod1MeshData,
+  buildChunkMeshData,
+  buildPlanetChunks,
   buildPlanetEcology,
   buildPlanetGraphCore,
   buildPlanetTectonics,
-  cellCornerElevation,
+  IPlanetChunk,
   IPlanetEcology,
   IPlanetGraphCore,
   IPlanetTectonics,
@@ -43,7 +51,32 @@ import {
  * margin past the exact horizon so boundary edges don't clip mid-line at the terminator. */
 const CULL_THRESHOLD = -0.02;
 
-export type MapMode = 'graph' | 'plates' | 'elevation' | 'land' | 'temperature' | 'moisture' | 'biome' | 'rivers';
+export type MapMode =
+  | 'graph'
+  | 'plates'
+  | 'elevation'
+  | 'land'
+  | 'temperature'
+  | 'moisture'
+  | 'biome'
+  | 'rivers';
+
+/** Per-chunk-mesh cache stashed on `Mesh.userData` (M4b) — undisplaced unit direction + raw
+ * elevation + owning cell id per vertex, parallel arrays, kept around so the elevation-scale
+ * slider can re-displace one chunk's positions in O(itsVertices) without recomputing
+ * per-cell/corner elevation or touching the color attribute. Mirrors the single flat arrays
+ * the M3/M4a whole-planet mesh used, just scoped per chunk now. */
+interface IChunkMeshUserData {
+  directions: Float32Array;
+  elevations: Float32Array;
+  cellIds: Int32Array;
+  /** Which `IPlanetChunk` this mesh renders — index into `this.chunks`, shared by both of a
+   * chunk's LOD meshes (see `updateChunkLod()`). */
+  chunkId: number;
+  /** 0 = full per-cell resolution (`buildChunkMeshData()`), 1 = merged-cell LOD
+   * (`buildChunkLod1MeshData()`) — see `rebuildPreviewMesh()`'s M4c doc comment. */
+  lod: 0 | 1;
+}
 
 /** Deterministic, well-spread plate color — golden-angle hue step so adjacent plate ids never land near each other on the wheel. */
 function plateColor(plateId: number): string {
@@ -51,15 +84,31 @@ function plateColor(plateId: number): string {
   return `hsl(${hue.toFixed(1)}, 65%, 55%)`;
 }
 
+/** Same golden-angle trick as `plateColor()`, distinct hue offset so chunk-debug colors don't
+ * visually alias plate colors when both are toggled at different times. One flat color per
+ * chunk mesh — see `updatePreviewColors()`'s `showChunkColors` branch. */
+function chunkColor(chunkId: number): string {
+  const hue = (chunkId * 137.508 + 47) % 360;
+  return `hsl(${hue.toFixed(1)}, 70%, 55%)`;
+}
+
 /** Elevation -> color ramp: deep ocean blue through to snow-capped peaks, split at sea level. */
-function elevationColor(elevation: number, seaLevel: number, min: number, max: number): string {
+function elevationColor(
+  elevation: number,
+  seaLevel: number,
+  min: number,
+  max: number,
+): string {
   if (elevation < seaLevel) {
     const t = max > seaLevel ? (elevation - min) / (seaLevel - min || 1) : 0;
     const clamped = Math.max(0, Math.min(1, t));
     const l = 12 + clamped * 28;
     return `hsl(210, 70%, ${l}%)`;
   }
-  const t = Math.max(0, Math.min(1, (elevation - seaLevel) / (max - seaLevel || 1)));
+  const t = Math.max(
+    0,
+    Math.min(1, (elevation - seaLevel) / (max - seaLevel || 1)),
+  );
   if (t < 0.6) {
     const l = 30 + (t / 0.6) * 20;
     return `hsl(${100 - t * 30}, 45%, ${l}%)`;
@@ -120,7 +169,8 @@ function biomeColor(biome: string): string {
 export class CellPlanetLabPageComponent implements AfterViewInit {
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly mapCanvas = viewChild<ElementRef<HTMLCanvasElement>>('mapCanvas');
+  private readonly mapCanvas =
+    viewChild<ElementRef<HTMLCanvasElement>>('mapCanvas');
 
   readonly cellCount = signal(180);
   readonly seed = signal(42);
@@ -130,6 +180,17 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   readonly showEdges = signal(true);
   readonly showPreview3D = signal(false);
   readonly showOceanShell = signal(true);
+  /** Debug overlay: flat hash color per chunk mesh instead of biome/elevation color, so chunk
+   * boundaries (M4b) are visible at a glance. Free to toggle — reuses the same per-chunk color
+   * attribute and mesh split that already exist for rendering, just changes what gets written
+   * into it (see `updatePreviewColors()`), no extra geometry or draw calls. */
+  readonly showChunkColors = signal(false);
+  /** M4c: camera distance (world units, planet radius ~1) beyond which a chunk switches from
+   * LOD0 (full per-cell) to LOD1 (merged cells) — see `updateChunkLod()`. Exposed as a slider
+   * since the right value depends on `elevationScale`/camera-range settings that themselves
+   * vary in this lab; no single default is "correct". */
+  readonly lodDistance = signal(2);
+  readonly lodSplit = signal('—');
   readonly plateCount = signal(10);
   readonly mapMode = signal<MapMode>('graph');
   /** Visual-only exaggeration of raw elevation (unitless, typically ~-1..1) into a radius
@@ -146,6 +207,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   readonly degreeRange = signal('—');
   readonly buildMs = signal('—');
   readonly landFraction = signal('—');
+  readonly chunkTotal = signal(0);
 
   private readonly root = new Group();
   private readonly sitesMaterial = new PointsMaterial({
@@ -165,13 +227,21 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     flatShading: true,
     side: DoubleSide,
   });
-  private previewMesh: Mesh | null = null;
-  private previewCellIdPerVertex = new Int32Array(0);
-  // Undisplaced unit direction + raw elevation per preview vertex, kept around so the
-  // elevation-scale slider can re-displace positions in O(vertices) without recomputing
-  // per-cell/corner elevation or touching the color attribute.
-  private previewDirections = new Float32Array(0);
-  private previewElevationPerVertex = new Float32Array(0);
+  // M4b: one Mesh (draw call) per chunk instead of one mesh for the whole planet — see
+  // rebuildPreviewMesh() doc comment. `previewGroup` is the single object added to `root`;
+  // chunk meshes are its children so toggling visibility/raycasting stays a one-line op
+  // instead of looping `previewMeshes` at every call site.
+  private readonly previewGroup = new Group();
+  private previewMeshes: Mesh[] = [];
+  /** Parallel to `chunks` — `chunkLodMeshes[chunkId]` is that chunk's `[lod0Mesh, lod1Mesh]`
+   * pair, looked up every tick by `updateChunkLod()` to flip `.visible` without touching
+   * `previewMeshes` (which stays the flat list every other call site loops). */
+  private chunkLodMeshes: Mesh[][] = [];
+  private chunks: IPlanetChunk[] = [];
+  private chunkIdByCell: number[] = [];
+  /** Soft target cells/chunk — see `buildPlanetChunks()`'s `targetChunkSize` doc comment.
+   * Not yet exposed as a UI control; the draw-call/LOD-granularity tradeoff isn't tuned. */
+  private readonly chunkTargetSize = 100;
   // Flat sea-level shell layered over the (unclamped) terrain mesh so submerged land
   // reads as underwater without the terrain mesh itself faking a shoreline — see the
   // rebuildPreviewMesh() doc comment.
@@ -185,8 +255,16 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   });
   private oceanMesh: Mesh | null = null;
   private currentSeaLevelElevation = 0;
-  private readonly riverMaterial = new LineBasicMaterial({ color: '#5ec8ff', transparent: true, opacity: 0.95 });
-  private readonly coastlineMaterial = new LineBasicMaterial({ color: '#f4f4f4', transparent: true, opacity: 0.9 });
+  private readonly riverMaterial = new LineBasicMaterial({
+    color: '#5ec8ff',
+    transparent: true,
+    opacity: 0.95,
+  });
+  private readonly coastlineMaterial = new LineBasicMaterial({
+    color: '#f4f4f4',
+    transparent: true,
+    opacity: 0.9,
+  });
   private riverLines: LineSegments | null = null;
   private coastlineLines: LineSegments | null = null;
   // Unit directions + per-point sampled elevation for the river overlay, and unit
@@ -208,17 +286,22 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.engine.scene.background = new Color('#0a0d12');
     this.root.name = 'cell-planet-graph';
     this.engine.scene.add(this.root);
+    this.previewGroup.name = 'cell-planet-preview-chunks';
+    this.root.add(this.previewGroup);
 
-    this.engine.tick$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
-      this.updateCulling();
-      this.updateSurfaceUp();
-    });
+    this.engine.tick$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.updateCulling();
+        this.updateSurfaceUp();
+        this.updateChunkLod();
+      });
 
     this.destroyRef.onDestroy(() => {
       this.engine.scene.remove(this.root);
       this.sitesPoints?.geometry.dispose();
       this.edgesLines?.geometry.dispose();
-      this.previewMesh?.geometry.dispose();
+      for (const mesh of this.previewMeshes) mesh.geometry.dispose();
       this.oceanMesh?.geometry.dispose();
       this.riverLines?.geometry.dispose();
       this.coastlineLines?.geometry.dispose();
@@ -293,13 +376,24 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
 
   togglePreview3D(): void {
     this.showPreview3D.update((value) => !value);
-    if (this.previewMesh) this.previewMesh.visible = this.showPreview3D();
-    if (this.oceanMesh) this.oceanMesh.visible = this.showPreview3D() && this.showOceanShell();
+    this.previewGroup.visible = this.showPreview3D();
+    if (this.oceanMesh)
+      this.oceanMesh.visible = this.showPreview3D() && this.showOceanShell();
   }
 
   toggleOceanShell(): void {
     this.showOceanShell.update((value) => !value);
-    if (this.oceanMesh) this.oceanMesh.visible = this.showPreview3D() && this.showOceanShell();
+    if (this.oceanMesh)
+      this.oceanMesh.visible = this.showPreview3D() && this.showOceanShell();
+  }
+
+  toggleChunkColors(): void {
+    this.showChunkColors.update((value) => !value);
+    this.updatePreviewColors();
+  }
+
+  onLodDistance(event: Event): void {
+    this.lodDistance.set(Number((event.target as HTMLInputElement).value));
   }
 
   /** Toggles the orbit camera's up vector between fixed world-Y and surface-relative
@@ -317,15 +411,28 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     const camera = this.engine.camera$.value;
     if (!camera) return;
     const len = camera.position.length() || 1;
-    this.upVectorTuple.set([camera.position.x / len, camera.position.y / len, camera.position.z / len]);
+    this.upVectorTuple.set([
+      camera.position.x / len,
+      camera.position.y / len,
+      camera.position.z / len,
+    ]);
   }
 
-  /** `raycastOrbitControls` focus resolver — hits the preview mesh so wheel-zoom and
+  /** `raycastOrbitControls` focus resolver — hits the preview chunk meshes so wheel-zoom and
    * rotate-drag pivot on the actual displaced surface under the pointer instead of a
-   * flat distance-scaled guess, which is what let zooming clip through/overshoot terrain. */
-  readonly raycastFocusResolver: RaycastFocusResolver = (context: RaycastFocusContext) => {
-    if (!this.previewMesh?.visible) return null;
-    const hit = context.raycaster.intersectObject(this.previewMesh, false)[0];
+   * flat distance-scaled guess, which is what let zooming clip through/overshoot terrain.
+   * Raycasts `previewMeshes` (two children per chunk since M4c's LOD0/LOD1 pair, see
+   * rebuildPreviewMesh()) rather than a single mesh — Three's raycaster already skips
+   * invisible objects, so this transparently hits whichever LOD `updateChunkLod()` currently
+   * has showing. */
+  readonly raycastFocusResolver: RaycastFocusResolver = (
+    context: RaycastFocusContext,
+  ) => {
+    if (!this.previewGroup.visible) return null;
+    const hit = context.raycaster.intersectObjects(
+      this.previewMeshes,
+      false,
+    )[0];
     return hit ? hit.point.toArray() : null;
   };
 
@@ -352,7 +459,9 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       plateCount: this.plateCount(),
       seed: this.seed(),
     });
-    const land = this.tectonics.isLand.filter(Boolean).length / this.tectonics.isLand.length;
+    const land =
+      this.tectonics.isLand.filter(Boolean).length /
+      this.tectonics.isLand.length;
     this.landFraction.set(`${(land * 100).toFixed(0)}%`);
     this.ecology = buildPlanetEcology(graph, this.tectonics);
 
@@ -409,7 +518,10 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       }
       return segments;
     });
-    const maxVerts = this.cellSegments.reduce((sum, seg) => sum + seg.length / 3, 0);
+    const maxVerts = this.cellSegments.reduce(
+      (sum, seg) => sum + seg.length / 3,
+      0,
+    );
     this.edgeScratch = new Float32Array(maxVerts * 3);
 
     if (this.edgesLines) {
@@ -432,7 +544,13 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * cell's own center direction doubles as its surface normal for the visibility test. */
   private updateCulling(): void {
     const camera = this.engine.camera$.value;
-    if (!camera || !this.sitesPoints || !this.edgesLines || this.siteDirs.length === 0) return;
+    if (
+      !camera ||
+      !this.sitesPoints ||
+      !this.edgesLines ||
+      this.siteDirs.length === 0
+    )
+      return;
 
     const camLen = camera.position.length() || 1;
     const vx = camera.position.x / camLen;
@@ -444,7 +562,10 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     let edgeVerts = 0;
     for (let i = 0; i < cellCount; i++) {
       const o = i * 3;
-      const dot = this.siteDirs[o] * vx + this.siteDirs[o + 1] * vy + this.siteDirs[o + 2] * vz;
+      const dot =
+        this.siteDirs[o] * vx +
+        this.siteDirs[o + 1] * vy +
+        this.siteDirs[o + 2] * vz;
       if (dot <= CULL_THRESHOLD) continue;
 
       const w = visibleSites * 3;
@@ -458,13 +579,21 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       edgeVerts += segment.length / 3;
     }
 
-    const sitesAttr = this.sitesPoints.geometry.getAttribute('position') as BufferAttribute;
-    (sitesAttr.array as Float32Array).set(this.siteScratch.subarray(0, visibleSites * 3));
+    const sitesAttr = this.sitesPoints.geometry.getAttribute(
+      'position',
+    ) as BufferAttribute;
+    (sitesAttr.array as Float32Array).set(
+      this.siteScratch.subarray(0, visibleSites * 3),
+    );
     sitesAttr.needsUpdate = true;
     this.sitesPoints.geometry.setDrawRange(0, visibleSites);
 
-    const edgesAttr = this.edgesLines.geometry.getAttribute('position') as BufferAttribute;
-    (edgesAttr.array as Float32Array).set(this.edgeScratch.subarray(0, edgeVerts * 3));
+    const edgesAttr = this.edgesLines.geometry.getAttribute(
+      'position',
+    ) as BufferAttribute;
+    (edgesAttr.array as Float32Array).set(
+      this.edgeScratch.subarray(0, edgeVerts * 3),
+    );
     edgesAttr.needsUpdate = true;
     this.edgesLines.geometry.setDrawRange(0, edgeVerts);
   }
@@ -481,26 +610,36 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     if (mode === 'elevation') {
       const min = Math.min(...tectonics.elevation);
       const max = Math.max(...tectonics.elevation);
-      return elevationColor(tectonics.elevation[cellId], tectonics.seaLevelElevation, min, max);
+      return elevationColor(
+        tectonics.elevation[cellId],
+        tectonics.seaLevelElevation,
+        min,
+        max,
+      );
     }
     if (ecology) {
-      if (mode === 'temperature') return temperatureColor(ecology.temperature[cellId]);
+      if (mode === 'temperature')
+        return temperatureColor(ecology.temperature[cellId]);
       if (mode === 'moisture') return moistureColor(ecology.moisture[cellId]);
       if (mode === 'biome') return biomeColor(ecology.biome[cellId]);
     }
-    return tectonics.isLand[cellId] ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
+    return tectonics.isLand[cellId]
+      ? 'hsl(100, 40%, 38%)'
+      : 'hsl(210, 60%, 22%)';
   }
 
-  /** M3+M4a 3D preview: one triangle fan per cell (center -> corner k -> corner k+1),
-   * flat-shaded and colored via `resolveVertexColor()` — geometry rebuilds on regenerate(),
-   * only the vertex colors are re-touched on a map-mode change. Every fan vertex sits
+  /** M4b 3D preview: one chunk mesh (draw call) per ~`chunkTargetSize` cells, instead of the
+   * M3/M4a single mesh for the entire planet — `buildPlanetChunks()` groups cells into
+   * contiguous regions by BFS over `cell.neighbors` (cell id order carries no spatial
+   * locality, see that function's doc comment), and `buildChunkMeshData()` tessellates each
+   * chunk into the same triangle-fan-per-cell layout M3/M4a used (center -> corner k ->
+   * corner k+1), flat-shaded and colored via `resolveVertexColor()`. Every fan vertex sits
    * exactly at a cell center or a cell-polygon corner, so its elevation is looked up
-   * directly (center = the cell's own elevation, corner = `cellCornerElevation()`, the
-   * average of the 3 cells meeting there) instead of going through `sampleElevation()`'s
-   * general `findCellAt()` search — O(1) per vertex instead of O(cellCount), which is what
-   * keeps this affordable as the cell-count slider goes up. Still no subdivision or
-   * crack-free stitching across chunks (that's M4b/c) — `sampleElevation()` stays the
-   * function for arbitrary (non-vertex) queries like future collider patches.
+   * directly (O(1), via `buildChunkMeshData()`'s internal `cellCornerElevation()` calls)
+   * instead of going through `sampleElevation()`'s general `findCellAt()` search —
+   * `sampleElevation()` stays the function for arbitrary (non-vertex) queries like future
+   * collider patches. No per-chunk LOD or border stitching between LOD levels yet — that's
+   * M4c; every chunk here renders at full resolution regardless of camera distance.
    *
    * Elevation here is the raw blended value, never clamped to sea level. An earlier version
    * clamped each vertex up/down based on a land/water classification computed *separately*
@@ -520,50 +659,131 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * band is at minimum a full triangle wide, which reads as a chunk of the cell recolored
    * sand, not a shoreline — a mesh-resolution limit, not something tunable away with a
    * narrower threshold. A thin shoreline needs a real line overlay instead; see
-   * `computeMeshWaterlineDirections()`. */
-  private rebuildPreviewMesh(graph: IPlanetGraphCore, tectonics: IPlanetTectonics): void {
-    const { elevation } = tectonics;
-    const positions: number[] = [];
-    const directions: number[] = [];
-    const elevations: number[] = [];
-    const cellIds: number[] = [];
-    const pushVertex = (p: IVec3, e: number): void => {
-      directions.push(p.x, p.y, p.z);
-      elevations.push(e);
-      positions.push(p.x, p.y, p.z); // overwritten by updatePreviewDisplacement() below
-    };
-    for (const cell of graph.cells) {
-      const n = cell.corners.length;
-      if (n < 3) continue;
-      const centerElevation = elevation[cell.id];
-      for (let k = 0; k < n; k++) {
-        const k2 = (k + 1) % n;
-        pushVertex(cell.center, centerElevation);
-        pushVertex(cell.corners[k], cellCornerElevation(cell, k, elevation));
-        pushVertex(cell.corners[k2], cellCornerElevation(cell, k2, elevation));
-        cellIds.push(cell.id, cell.id, cell.id);
-      }
+   * `computeMeshWaterlineDirections()`.
+   *
+   * M4c: each chunk now gets two meshes, LOD0 (`buildChunkMeshData()`, full per-cell detail)
+   * and LOD1 (`buildChunkLod1MeshData()`, which merges neighboring cells into single polygons
+   * under a curvature-error budget — see that function's doc comment for why the merge is
+   * bounded by sag rather than cell count, and why the two LODs never crack against each other
+   * regardless of which one a neighboring chunk is showing). Note that at this lab's default
+   * `cellCount` the budget already fits inside a single cell, so LOD1 there is just "cell
+   * polygons without their fan centers" (a third fewer triangles); the merge only starts
+   * paying off at the higher end of the cell-count slider, which is the intended behavior —
+   * an LOD that saves more where there's more to save. Both are added to `previewGroup` and pushed onto the flat
+   * `previewMeshes` list (so displacement/color/raycast/waterline-extraction keep working
+   * unchanged, looping every mesh regardless of LOD); `chunkLodMeshes[chunk.id]` additionally
+   * indexes the `[lod0, lod1]` pair so `updateChunkLod()` can flip `.visible` on exactly one
+   * of the two per chunk per frame without scanning the flat list. */
+  private rebuildPreviewMesh(
+    graph: IPlanetGraphCore,
+    tectonics: IPlanetTectonics,
+  ): void {
+    for (const mesh of this.previewMeshes) {
+      this.previewGroup.remove(mesh);
+      mesh.geometry.dispose();
     }
+    this.previewMeshes = [];
+    this.chunkLodMeshes = [];
 
-    if (this.previewMesh) {
-      this.root.remove(this.previewMesh);
-      this.previewMesh.geometry.dispose();
+    const { chunks, chunkIdByCell } = buildPlanetChunks(graph, {
+      targetChunkSize: this.chunkTargetSize,
+    });
+    this.chunks = chunks;
+    this.chunkIdByCell = chunkIdByCell;
+
+    const buildMesh = (
+      data: {
+        directions: Float32Array;
+        elevations: Float32Array;
+        cellIds: Int32Array;
+      },
+      chunk: IPlanetChunk,
+      lod: 0 | 1,
+    ): Mesh => {
+      const geometry = new BufferGeometry();
+      const positionAttr = new BufferAttribute(
+        new Float32Array(data.directions.length),
+        3,
+      );
+      positionAttr.setUsage(DynamicDrawUsage);
+      geometry.setAttribute('position', positionAttr);
+      geometry.setAttribute(
+        'color',
+        new BufferAttribute(new Float32Array(data.directions.length), 3),
+      );
+      const mesh = new Mesh(geometry, this.previewMaterial);
+      mesh.name = `preview-chunk-${chunk.id}-lod${lod}`;
+      mesh.userData = {
+        directions: data.directions,
+        elevations: data.elevations,
+        cellIds: data.cellIds,
+        chunkId: chunk.id,
+        lod,
+      } satisfies IChunkMeshUserData;
+      this.previewGroup.add(mesh);
+      this.previewMeshes.push(mesh);
+      return mesh;
+    };
+
+    for (const chunk of chunks) {
+      const lod0 = buildMesh(
+        buildChunkMeshData(graph, tectonics.elevation, chunk),
+        chunk,
+        0,
+      );
+      const lod1 = buildMesh(
+        buildChunkLod1MeshData(
+          graph,
+          tectonics.elevation,
+          chunkIdByCell,
+          chunk,
+        ),
+        chunk,
+        1,
+      );
+      this.chunkLodMeshes[chunk.id] = [lod0, lod1];
     }
-    const geometry = new BufferGeometry();
-    const positionAttr = new BufferAttribute(new Float32Array(positions), 3);
-    positionAttr.setUsage(DynamicDrawUsage);
-    geometry.setAttribute('position', positionAttr);
-    geometry.setAttribute('color', new BufferAttribute(new Float32Array(positions.length), 3));
-    this.previewDirections = new Float32Array(directions);
-    this.previewElevationPerVertex = new Float32Array(elevations);
-    this.previewCellIdPerVertex = new Int32Array(cellIds);
-    this.previewMesh = new Mesh(geometry, this.previewMaterial);
-    this.previewMesh.visible = this.showPreview3D();
-    this.root.add(this.previewMesh);
+    this.previewGroup.visible = this.showPreview3D();
+    this.chunkTotal.set(chunks.length);
+
     this.currentSeaLevelElevation = tectonics.seaLevelElevation;
     this.ensureOceanShell();
     this.updatePreviewDisplacement();
     this.updatePreviewColors();
+    this.updateChunkLod();
+  }
+
+  /** Picks LOD0 vs LOD1 per chunk from the live camera's distance to that chunk's centroid
+   * (`chunk.center`, an undisplaced unit-sphere direction — `previewGroup`/`root` carry no
+   * transform of their own, so this is already world space, and ignoring elevation
+   * displacement here is a fine approximation for a distance *threshold*) against the
+   * `lodDistance()` slider, then flips exactly one of `chunkLodMeshes[chunk.id]`'s two meshes
+   * visible. Cheap: O(chunkCount) distance checks per frame, no geometry touched — the actual
+   * mesh data for both LODs was already built once in `rebuildPreviewMesh()`. Runs even when
+   * the preview is hidden (harmless — `previewGroup.visible = false` already skips rendering
+   * either way) so the `lodSplit` stat stays live for the slider. */
+  private updateChunkLod(): void {
+    if (this.chunks.length === 0) return;
+    const camera = this.engine.camera$.value;
+    if (!camera) return;
+    const threshold = this.lodDistance();
+
+    let nearCount = 0;
+    for (const chunk of this.chunks) {
+      const pair = this.chunkLodMeshes[chunk.id];
+      if (!pair) continue;
+      const [lod0, lod1] = pair;
+      const dx = camera.position.x - chunk.center.x;
+      const dy = camera.position.y - chunk.center.y;
+      const dz = camera.position.z - chunk.center.z;
+      const near = Math.hypot(dx, dy, dz) <= threshold;
+      lod0.visible = near;
+      lod1.visible = !near;
+      if (near) nearCount++;
+    }
+    this.lodSplit.set(
+      `${nearCount} near / ${this.chunks.length - nearCount} far`,
+    );
   }
 
   /** Flat sea-level shell (a plain unit sphere, scaled per-frame-cheap via `scale`, not
@@ -582,21 +802,26 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
 
   /** Re-displaces every preview vertex from its stored (direction, elevation) pair using
    * the current `elevationScale()` slider — cheap enough to run on every slider `input`
-   * event, no geometry rebuild or color re-touch needed. */
+   * event, no geometry rebuild or color re-touch needed. Loops `previewMeshes` (M4b: one
+   * per chunk) instead of touching a single whole-planet mesh. */
   private updatePreviewDisplacement(): void {
-    if (!this.previewMesh) return;
     const scale = this.elevationScale() / 100;
-    const positionAttr = this.previewMesh.geometry.getAttribute('position') as BufferAttribute;
-    const positions = positionAttr.array as Float32Array;
-    for (let i = 0; i < this.previewElevationPerVertex.length; i++) {
-      const radius = 1 + this.previewElevationPerVertex[i] * scale;
-      const o = i * 3;
-      positions[o] = this.previewDirections[o] * radius;
-      positions[o + 1] = this.previewDirections[o + 1] * radius;
-      positions[o + 2] = this.previewDirections[o + 2] * radius;
+    for (const mesh of this.previewMeshes) {
+      const { directions, elevations } = mesh.userData as IChunkMeshUserData;
+      const positionAttr = mesh.geometry.getAttribute(
+        'position',
+      ) as BufferAttribute;
+      const positions = positionAttr.array as Float32Array;
+      for (let i = 0; i < elevations.length; i++) {
+        const radius = 1 + elevations[i] * scale;
+        const o = i * 3;
+        positions[o] = directions[o] * radius;
+        positions[o + 1] = directions[o + 1] * radius;
+        positions[o + 2] = directions[o + 2] * radius;
+      }
+      positionAttr.needsUpdate = true;
+      mesh.geometry.computeVertexNormals();
     }
-    positionAttr.needsUpdate = true;
-    this.previewMesh.geometry.computeVertexNormals();
 
     if (this.oceanMesh) {
       this.oceanMesh.scale.setScalar(1 + this.currentSeaLevelElevation * scale);
@@ -608,26 +833,59 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * blended elevation instead of the cell's coarse `isLand[]` flag, so it can never disagree
    * with the height at that same vertex — see the `rebuildPreviewMesh()` doc comment. Not
    * cached per-cell (unlike the old version) since the land/water split and the elevation
-   * ramp both now vary per vertex within a single cell's fan, not just per cell. */
+   * ramp both now vary per vertex within a single cell's fan, not just per cell. Loops
+   * `previewMeshes` (M4b: one per chunk) instead of touching a single whole-planet mesh.
+   *
+   * When `showChunkColors()` is on, every vertex in a mesh gets the same
+   * `chunkColor(mesh.userData.chunkId)` instead of the biome/elevation color — both of a
+   * chunk's LOD meshes share the same chunk id, so LOD0/LOD1 always agree on the debug color
+   * even as `updateChunkLod()` swaps which one is visible. This is the whole cost of the debug
+   * overlay: one `Color.setStyle()` per mesh instead of per vertex, still writing into the
+   * same pre-allocated color attribute — no new geometry, no extra draw calls. */
   private updatePreviewColors(): void {
-    if (!this.previewMesh || !this.tectonics) return;
-    const colorAttr = this.previewMesh.geometry.getAttribute('color') as BufferAttribute;
-    const arr = colorAttr.array as Float32Array;
+    if (!this.tectonics) return;
     const scratch = new Color();
     const mode = this.mapMode();
     const tectonics = this.tectonics;
+    const chunkColors = this.showChunkColors();
     const elevMin = Math.min(...tectonics.elevation);
     const elevMax = Math.max(...tectonics.elevation);
-    for (let i = 0; i < this.previewCellIdPerVertex.length; i++) {
-      const cellId = this.previewCellIdPerVertex[i];
-      const vertexElevation = this.previewElevationPerVertex[i];
-      scratch.setStyle(this.resolveVertexColor(cellId, vertexElevation, mode, tectonics, elevMin, elevMax));
-      const o = i * 3;
-      arr[o] = scratch.r;
-      arr[o + 1] = scratch.g;
-      arr[o + 2] = scratch.b;
-    }
-    colorAttr.needsUpdate = true;
+    this.previewMeshes.forEach((mesh) => {
+      const { elevations, cellIds, chunkId } =
+        mesh.userData as IChunkMeshUserData;
+      const colorAttr = mesh.geometry.getAttribute('color') as BufferAttribute;
+      const arr = colorAttr.array as Float32Array;
+
+      if (chunkColors) {
+        scratch.setStyle(chunkColor(chunkId));
+        for (let i = 0; i < cellIds.length; i++) {
+          const o = i * 3;
+          arr[o] = scratch.r;
+          arr[o + 1] = scratch.g;
+          arr[o + 2] = scratch.b;
+        }
+      } else {
+        for (let i = 0; i < cellIds.length; i++) {
+          const cellId = cellIds[i];
+          const vertexElevation = elevations[i];
+          scratch.setStyle(
+            this.resolveVertexColor(
+              cellId,
+              vertexElevation,
+              mode,
+              tectonics,
+              elevMin,
+              elevMax,
+            ),
+          );
+          const o = i * 3;
+          arr[o] = scratch.r;
+          arr[o + 1] = scratch.g;
+          arr[o + 2] = scratch.b;
+        }
+      }
+      colorAttr.needsUpdate = true;
+    });
   }
 
   /** Land/water split here is `vertexElevation >= seaLevel`, checked per vertex — the same
@@ -648,18 +906,30 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     elevMax: number,
   ): string {
     if (mode === 'plates') return plateColor(tectonics.plateIdByCell[cellId]);
-    if (mode === 'elevation') return elevationColor(vertexElevation, tectonics.seaLevelElevation, elevMin, elevMax);
+    if (mode === 'elevation')
+      return elevationColor(
+        vertexElevation,
+        tectonics.seaLevelElevation,
+        elevMin,
+        elevMax,
+      );
 
     const land = vertexElevation >= tectonics.seaLevelElevation;
 
     const ecology = this.ecology;
     if (ecology) {
-      if (mode === 'temperature') return temperatureColor(ecology.temperature[cellId]);
+      if (mode === 'temperature')
+        return temperatureColor(ecology.temperature[cellId]);
       if (mode === 'moisture') return moistureColor(ecology.moisture[cellId]);
       if (mode === 'biome') {
-        if (!land) return ecology.biome[cellId] === 'lake' ? BIOME_COLORS['lake'] : BIOME_COLORS['ocean'];
+        if (!land)
+          return ecology.biome[cellId] === 'lake'
+            ? BIOME_COLORS['lake']
+            : BIOME_COLORS['ocean'];
         const biome = ecology.biome[cellId];
-        return biome === 'ocean' || biome === 'lake' ? 'hsl(95, 45%, 45%)' : biomeColor(biome);
+        return biome === 'ocean' || biome === 'lake'
+          ? 'hsl(95, 45%, 45%)'
+          : biomeColor(biome);
       }
     }
     return land ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
@@ -685,10 +955,16 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       this.root.remove(this.riverLines);
       this.riverLines.geometry.dispose();
     }
-    this.riverDirections = this.flattenPathDirections(ecology.riverPaths, false);
+    this.riverDirections = this.flattenPathDirections(
+      ecology.riverPaths,
+      false,
+    );
     this.riverElevations = this.sampleElevationsFor(this.riverDirections);
     const riverGeometry = new BufferGeometry();
-    riverGeometry.setAttribute('position', new BufferAttribute(new Float32Array(this.riverDirections.length), 3));
+    riverGeometry.setAttribute(
+      'position',
+      new BufferAttribute(new Float32Array(this.riverDirections.length), 3),
+    );
     this.riverLines = new LineSegments(riverGeometry, this.riverMaterial);
     this.riverLines.visible = this.mapMode() === 'rivers';
     this.root.add(this.riverLines);
@@ -699,8 +975,14 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     }
     this.coastlineDirections = this.computeMeshWaterlineDirections();
     const coastGeometry = new BufferGeometry();
-    coastGeometry.setAttribute('position', new BufferAttribute(new Float32Array(this.coastlineDirections.length), 3));
-    this.coastlineLines = new LineSegments(coastGeometry, this.coastlineMaterial);
+    coastGeometry.setAttribute(
+      'position',
+      new BufferAttribute(new Float32Array(this.coastlineDirections.length), 3),
+    );
+    this.coastlineLines = new LineSegments(
+      coastGeometry,
+      this.coastlineMaterial,
+    );
     this.coastlineLines.visible = this.mapMode() === 'rivers';
     this.root.add(this.coastlineLines);
 
@@ -715,7 +997,9 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     const bias = 1.0015; // tiny radial nudge so lines don't z-fight the terrain/ocean surfaces
 
     if (this.riverLines) {
-      const attr = this.riverLines.geometry.getAttribute('position') as BufferAttribute;
+      const attr = this.riverLines.geometry.getAttribute(
+        'position',
+      ) as BufferAttribute;
       const positions = attr.array as Float32Array;
       for (let i = 0; i < this.riverElevations.length; i++) {
         const radius = (1 + this.riverElevations[i] * scale) * bias;
@@ -729,7 +1013,9 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
 
     if (this.coastlineLines && this.tectonics) {
       const radius = (1 + this.tectonics.seaLevelElevation * scale) * bias;
-      const attr = this.coastlineLines.geometry.getAttribute('position') as BufferAttribute;
+      const attr = this.coastlineLines.geometry.getAttribute(
+        'position',
+      ) as BufferAttribute;
       const positions = attr.array as Float32Array;
       for (let i = 0; i < this.coastlineDirections.length; i++) {
         positions[i] = this.coastlineDirections[i] * radius;
@@ -738,54 +1024,80 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     }
   }
 
-  /** Extracts the land/water boundary directly from the preview mesh's own triangles instead
-   * of `buildPlanetEcology()`'s per-cell edge chain — walks each fan triangle's 3 stored
-   * (direction, elevation) vertices (see `rebuildPreviewMesh()`) and, for any edge whose two
-   * endpoints straddle sea level, linearly interpolates the crossing direction. A triangle
-   * crosses sea level along exactly 0 or 2 of its edges in the generic case (a vertex sitting
-   * exactly on sea level is the only way to get 1, ignored here as a measure-zero edge case
-   * for a debug lab), so each qualifying triangle contributes exactly one line segment,
-   * connected across triangles into the mesh's exact waterline. `updateRiverOverlayDisplacement()`
-   * then places these at the same sea-level radius as the ocean shell, since a crossing point's
-   * elevation is exactly `seaLevel` by construction. */
+  /** Extracts the land/water boundary directly from the preview chunk meshes' own triangles
+   * instead of `buildPlanetEcology()`'s per-cell edge chain — walks each fan triangle's 3
+   * stored (direction, elevation) vertices (see `rebuildPreviewMesh()`) and, for any edge
+   * whose two endpoints straddle sea level, linearly interpolates the crossing direction. A
+   * triangle crosses sea level along exactly 0 or 2 of its edges in the generic case (a
+   * vertex sitting exactly on sea level is the only way to get 1, ignored here as a
+   * measure-zero edge case for a debug lab), so each qualifying triangle contributes exactly
+   * one line segment. M4b: each chunk's vertex data (`mesh.userData`) is still laid out as
+   * consecutive triangles internally (`buildChunkMeshData()` preserves the fan order), so
+   * this walks every chunk in turn and concatenates their segments — chunk boundaries never
+   * split a triangle, so no cross-chunk stitching is needed here. M4c: only walks each chunk's
+   * LOD0 mesh, never LOD1 — LOD1's merged polygons are a much coarser approximation of
+   * the coastline, and since `updateChunkLod()` swaps LOD per chunk every frame based on
+   * camera distance, extracting from whichever one happens to be visible would make the
+   * coastline overlay redraw itself (and briefly look inconsistent) as the camera moves. This
+   * runs once per `regenerate()`, not per frame, so always sourcing it from the stable,
+   * always-built LOD0 data is both simpler and correct.
+   * `updateRiverOverlayDisplacement()` then places these at the same sea-level radius as the
+   * ocean shell, since a crossing point's elevation is exactly `seaLevel` by construction. */
   private computeMeshWaterlineDirections(): Float32Array<ArrayBuffer> {
     const tectonics = this.tectonics;
-    const dirs = this.previewDirections;
-    const elevs = this.previewElevationPerVertex;
     const out: number[] = [];
-    if (!tectonics || dirs.length === 0) return new Float32Array(out);
+    if (!tectonics) return new Float32Array(out);
     const seaLevel = tectonics.seaLevelElevation;
 
-    const crossing = (a: number, b: number): [number, number, number] | null => {
-      const ea = elevs[a];
-      const eb = elevs[b];
-      if (ea === eb || (ea >= seaLevel) === (eb >= seaLevel)) return null;
-      const t = (seaLevel - ea) / (eb - ea);
-      const ao = a * 3;
-      const bo = b * 3;
-      const x = dirs[ao] + (dirs[bo] - dirs[ao]) * t;
-      const y = dirs[ao + 1] + (dirs[bo + 1] - dirs[ao + 1]) * t;
-      const z = dirs[ao + 2] + (dirs[bo + 2] - dirs[ao + 2]) * t;
-      const len = Math.hypot(x, y, z) || 1;
-      return [x / len, y / len, z / len];
-    };
+    for (const mesh of this.previewMeshes) {
+      const userData = mesh.userData as IChunkMeshUserData;
+      if (userData.lod !== 0) continue;
+      const { directions: dirs, elevations: elevs } = userData;
 
-    for (let i = 0; i + 2 < elevs.length; i += 3) {
-      const hits: [number, number, number][] = [];
-      const c01 = crossing(i, i + 1);
-      if (c01) hits.push(c01);
-      const c12 = crossing(i + 1, i + 2);
-      if (c12) hits.push(c12);
-      const c20 = crossing(i + 2, i);
-      if (c20) hits.push(c20);
-      if (hits.length === 2) {
-        out.push(hits[0][0], hits[0][1], hits[0][2], hits[1][0], hits[1][1], hits[1][2]);
+      const crossing = (
+        a: number,
+        b: number,
+      ): [number, number, number] | null => {
+        const ea = elevs[a];
+        const eb = elevs[b];
+        if (ea === eb || ea >= seaLevel === eb >= seaLevel) return null;
+        const t = (seaLevel - ea) / (eb - ea);
+        const ao = a * 3;
+        const bo = b * 3;
+        const x = dirs[ao] + (dirs[bo] - dirs[ao]) * t;
+        const y = dirs[ao + 1] + (dirs[bo + 1] - dirs[ao + 1]) * t;
+        const z = dirs[ao + 2] + (dirs[bo + 2] - dirs[ao + 2]) * t;
+        const len = Math.hypot(x, y, z) || 1;
+        return [x / len, y / len, z / len];
+      };
+
+      for (let i = 0; i + 2 < elevs.length; i += 3) {
+        const hits: [number, number, number][] = [];
+        const c01 = crossing(i, i + 1);
+        if (c01) hits.push(c01);
+        const c12 = crossing(i + 1, i + 2);
+        if (c12) hits.push(c12);
+        const c20 = crossing(i + 2, i);
+        if (c20) hits.push(c20);
+        if (hits.length === 2) {
+          out.push(
+            hits[0][0],
+            hits[0][1],
+            hits[0][2],
+            hits[1][0],
+            hits[1][1],
+            hits[1][2],
+          );
+        }
       }
     }
     return new Float32Array(out);
   }
 
-  private flattenPathDirections(paths: IVec3[][], closed: boolean): Float32Array<ArrayBuffer> {
+  private flattenPathDirections(
+    paths: IVec3[][],
+    closed: boolean,
+  ): Float32Array<ArrayBuffer> {
     const out: number[] = [];
     for (const path of paths) {
       const n = path.length;
@@ -804,7 +1116,9 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * force search, so O(points * cellCount) total. Only runs on regenerate()/mode data
    * changes, not per frame or per slider tick, which keeps it affordable at this lab's
    * scale (a few thousand cells, a few thousand path points at most). */
-  private sampleElevationsFor(directions: Float32Array): Float32Array<ArrayBuffer> {
+  private sampleElevationsFor(
+    directions: Float32Array,
+  ): Float32Array<ArrayBuffer> {
     const graph = this.graph;
     const tectonics = this.tectonics;
     const elevations = new Float32Array(directions.length / 3);
@@ -846,7 +1160,10 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
         const a = lls[k];
         const b = lls[(k + 1) % n];
         if (Math.abs(a.lon - b.lon) > Math.PI * 0.9) continue;
-        if (flow) ctx.lineWidth = baseLineWidth * (1 + 0.5 * Math.sqrt(Math.max(0, flow[(k + 1) % n] - 1)));
+        if (flow)
+          ctx.lineWidth =
+            baseLineWidth *
+            (1 + 0.5 * Math.sqrt(Math.max(0, flow[(k + 1) % n] - 1)));
         const pa = mapPoint(a);
         const pb = mapPoint(b);
         ctx.beginPath();
@@ -926,7 +1243,9 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
         const lls = cell.corners.map(lonLat);
         // A cell whose corners straddle the ±180° seam would smear across the whole
         // map width if filled naively — skip it, same as the edge-drawing seam guard below.
-        const wraps = lls.some((ll, k) => Math.abs(ll.lon - lls[(k + 1) % n].lon) > Math.PI * 0.9);
+        const wraps = lls.some(
+          (ll, k) => Math.abs(ll.lon - lls[(k + 1) % n].lon) > Math.PI * 0.9,
+        );
         if (wraps) continue;
 
         ctx.fillStyle = this.resolveCellColor(cell.id);
@@ -950,7 +1269,15 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
 
         ctx.strokeStyle = '#5ec8ff';
         ctx.globalAlpha = 1;
-        this.drawPolylines(ctx, ecology.riverPaths, lonLat, mapPoint, false, ecology.riverFlow, Math.max(1.4, dpr * 1.2));
+        this.drawPolylines(
+          ctx,
+          ecology.riverPaths,
+          lonLat,
+          mapPoint,
+          false,
+          ecology.riverFlow,
+          Math.max(1.4, dpr * 1.2),
+        );
       }
     }
 
