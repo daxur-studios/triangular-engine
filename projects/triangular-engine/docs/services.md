@@ -38,3 +38,16 @@ providers: [EngineService, provideEngineOptions({ showFPS: true })];
 
 - `settingsForm` with `debug`/`autoSave` etc.
 - Methods: `setDebugMode(debug)`
+
+## ScreenshotService
+
+High-quality screenshot capture and progressive anti-aliased rendering.
+
+Key features:
+- Instant frame snapshots: `capture(options)`
+- Direct file download: `captureAndDownload(options)` / `download(blob, fileName)`
+- System clipboard copy: `copyToClipboard(blob)`
+- Progressive sub-pixel accumulation (SSAA) across $N$ frames with `samples: 16`
+- Offscreen resolution scaling: `multiplier: 2` or `resolution: { width, height }`
+- Automatic CSS2D / CSS3D DOM overlay marker hiding (`hideOverlays: true`)
+- Custom preparation and quality elevation hooks (`prepare: () => ...`)

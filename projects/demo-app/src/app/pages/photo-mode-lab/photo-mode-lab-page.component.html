@@ -1,0 +1,176 @@
+<scene>
+  <waterSurface [domain]="waterDomain" quality="cinematic" motion="oceanSwell" />
+
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Photo mode controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>triangular-engine — ScreenshotService & Procedural Showcase</small>
+        </div>
+        <strong>Scenic World & Photo Mode Studio</strong>
+      </header>
+
+      <div class="badges">
+        <span class="badge">🌴 Coastal Palms</span>
+        <span class="badge">🌳 Meadow Oaks</span>
+        <span class="badge">🌲 Mountain Pines</span>
+        <span class="badge">🌾 Wind Grass</span>
+        <span class="badge">🌊 3D Water</span>
+        <span class="badge">🚀 Starbase Tower</span>
+      </div>
+
+      <p class="blurb">
+        Multi-biome procedural world combining altitude-aware flora, wind-swaying meadow grass, Gerstner wave ocean water, and a coastal rocket catch tower. Capture frame snapshots or progressive multi-sample anti-aliased (SSAA) high-resolution photos without GPU freezing.
+      </p>
+
+      <!-- Camera & Atmosphere -->
+      <fieldset class="control-group">
+        <legend>Camera & Atmosphere</legend>
+        <div class="slider-row">
+          <label for="fov-slider">Field of View (FOV): <strong>{{ fov() }}°</strong></label>
+          <input
+            id="fov-slider"
+            type="range"
+            min="30"
+            max="85"
+            [value]="fov()"
+            (input)="setFov(+$any($event.target).value)"
+          />
+        </div>
+
+        <div class="slider-row">
+          <label for="sun-slider">Sun Angle / Time of Day: <strong>{{ sunAngle() }}°</strong></label>
+          <input
+            id="sun-slider"
+            type="range"
+            min="10"
+            max="80"
+            [value]="sunAngle()"
+            (input)="setSunAngle(+$any($event.target).value)"
+          />
+        </div>
+      </fieldset>
+
+      <!-- Photo Studio Capture Settings -->
+      <fieldset class="control-group">
+        <legend>Capture Resolution</legend>
+        <div class="button-grid">
+          <button
+            type="button"
+            [class.active]="selectedResolution() === 'native'"
+            (click)="setResolution('native')"
+          >
+            Native
+          </button>
+          <button
+            type="button"
+            [class.active]="selectedResolution() === '1080p'"
+            (click)="setResolution('1080p')"
+          >
+            1080p (FHD)
+          </button>
+          <button
+            type="button"
+            [class.active]="selectedResolution() === '1440p'"
+            (click)="setResolution('1440p')"
+          >
+            1440p (2K)
+          </button>
+          <button
+            type="button"
+            [class.active]="selectedResolution() === '4k'"
+            (click)="setResolution('4k')"
+          >
+            4K UHD
+          </button>
+          <button
+            type="button"
+            [class.active]="selectedResolution() === '8k'"
+            (click)="setResolution('8k')"
+          >
+            8K Master
+          </button>
+        </div>
+      </fieldset>
+
+      <fieldset class="control-group">
+        <legend>Progressive Anti-Aliasing (SSAA)</legend>
+        <div class="button-grid samples-grid">
+          <button
+            type="button"
+            [class.active]="selectedSamples() === 1"
+            (click)="setSamples(1)"
+          >
+            1x (Instant)
+          </button>
+          <button
+            type="button"
+            [class.active]="selectedSamples() === 8"
+            (click)="setSamples(8)"
+          >
+            8x (Smooth)
+          </button>
+          <button
+            type="button"
+            [class.active]="selectedSamples() === 16"
+            (click)="setSamples(16)"
+          >
+            16x (Filmic)
+          </button>
+          <button
+            type="button"
+            [class.active]="selectedSamples() === 32"
+            (click)="setSamples(32)"
+          >
+            32x (Studio)
+          </button>
+        </div>
+      </fieldset>
+
+      <div class="toggle-row">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            [checked]="ultraQualityBoost()"
+            (change)="toggleUltraQuality()"
+          />
+          <span>Elevate shadow resolution (4096) during capture</span>
+        </label>
+      </div>
+
+      <!-- Action & Progress -->
+      <div class="action-section">
+        <button
+          type="button"
+          class="capture-btn"
+          [disabled]="isCapturing()"
+          (click)="takePhoto()"
+        >
+          @if (isCapturing()) {
+            <span class="spinner"></span> Capturing ({{ captureProgress() }}%)...
+          } @else {
+            📷 Take High-Res Photo
+          }
+        </button>
+
+        @if (isCapturing()) {
+          <div class="progress-bar-container">
+            <div class="progress-bar" [style.width.%]="captureProgress()"></div>
+          </div>
+        }
+
+        <p class="status-text">{{ statusMessage() }}</p>
+
+        @if (lastCaptureUrl(); as imgUrl) {
+          <div class="preview-card">
+            <img [src]="imgUrl" alt="Last capture preview" class="thumbnail" />
+            <div class="preview-actions">
+              <button type="button" (click)="copyToClipboard()">📋 Copy to Clipboard</button>
+            </div>
+          </div>
+        }
+      </div>
+    </section>
+  </ng-template>
+</scene>

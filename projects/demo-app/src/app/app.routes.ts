@@ -377,5 +377,12 @@ export const routes: Routes = [
         ({ SceneInspectionLabPageComponent }) => SceneInspectionLabPageComponent,
       ),
   },
+  {
+    path: 'photo-mode-lab',
+    loadComponent: () =>
+      import('./pages/photo-mode-lab/photo-mode-lab-page.component').then(
+        ({ PhotoModeLabPageComponent }) => PhotoModeLabPageComponent,
+      ),
+  },
 ];
 

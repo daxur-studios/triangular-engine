@@ -69,6 +69,18 @@ export const CATEGORIES: readonly DemoCategory[] = [
 export const DEMOS: readonly DemoItem[] = [
   // --- Shining Gems ---
   {
+    id: 'photo-mode-lab',
+    number: '00',
+    title: 'Scenic World & Photo Mode',
+    route: '/photo-mode-lab',
+    categoryId: 'core',
+    tier: 'gem',
+    entryPoints: ['procedural', 'terrain', 'scatter', 'water'],
+    package: 'triangular-engine',
+    description:
+      'Multi-biome procedural landscape (coastal palms, meadow oaks, mountain pines, grass sway, 3D water, catch tower) with progressive anti-aliased (SSAA) 4K/8K photo capture.',
+  },
+  {
     id: 'water',
     number: '01',
     title: 'Water Library',
