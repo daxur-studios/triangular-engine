@@ -89,9 +89,12 @@ describe('computeBiomes', () => {
     expect(alpineCount).toBeLessThan(landCount * 0.5);
   });
 
-  it('deserts never touch the coast (interior/rain-shadow only)', () => {
-    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 35 });
-    const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 35 });
+  it('deserts can be coastal, not just interior (subtropical arid belt)', () => {
+    // Real deserts are frequently coastal (Atacama, Namib, Baja California) — driven by
+    // subtropical high-pressure belts suppressing rainfall independent of distance from the
+    // ocean. See computeClimate()'s aridBelt doc comment and runbook 022.
+    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 45 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 45 });
     const climate = computeClimate(graph, tectonics.elevation, tectonics.isLand, tectonics.seaLevelElevation);
     const biomes = computeBiomes(
       graph,
@@ -105,10 +108,9 @@ describe('computeBiomes', () => {
     );
 
     const desertIds = biomes.biome.map((b, id) => (b === 'desert' ? id : -1)).filter((id) => id >= 0);
-    expect(desertIds.length).toBeGreaterThan(0);
-    for (const id of desertIds) {
-      const isCoastal = graph.cells[id].neighbors.some((n) => !tectonics.isLand[n]);
-      expect(isCoastal).toBe(false);
-    }
+    const coastalDesertIds = desertIds.filter((id) =>
+      graph.cells[id].neighbors.some((n) => !tectonics.isLand[n]),
+    );
+    expect(coastalDesertIds.length).toBeGreaterThan(0);
   });
 });

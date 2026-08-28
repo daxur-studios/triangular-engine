@@ -5,6 +5,12 @@ export interface IClimateParams {
   lapseRate?: number;
   /** How many graph hops moisture spreads inland from the ocean before hitting zero. */
   moistureFalloffRadius?: number;
+  /** |y| latitude (sin(latitude), 0=equator..1=pole) where the subtropical arid belt is centered. */
+  aridBeltCenter?: number;
+  /** Half-width, in the same latitude units, of the arid belt's influence. */
+  aridBeltWidth?: number;
+  /** How much the arid belt multiplies down moisture at its center (0 = no effect, 1 = fully dry). */
+  aridBeltStrength?: number;
 }
 
 export interface IPlanetClimate {
@@ -17,18 +23,35 @@ export interface IPlanetClimate {
 const DEFAULTS = {
   lapseRate: 0.6,
   moistureFalloffRadius: 4,
+  aridBeltCenter: 0.22,
+  aridBeltWidth: 0.28,
+  aridBeltStrength: 0.65,
 };
 
 /**
  * M2 climate pass: temperature from latitude (guaranteeing cold poles/hot
  * equator by construction) minus an elevation lapse, and moisture as a
- * multi-source BFS distance-from-ocean field. See runbook 022.
+ * multi-source BFS distance-from-ocean field, then a latitude-based arid
+ * belt multiplied on top. See runbook 022.
  *
  * Tectonics elevation is an arbitrary unitless scale (boundary contributions
  * stack near dense plate boundaries, so its range varies a lot by params) —
  * the lapse term normalizes elevation against the actual land relief
  * (`seaLevelElevation` .. max land elevation) rather than assuming a fixed
  * absolute range.
+ *
+ * The BFS moisture field alone makes coastal land cells always wet (1 hop
+ * from the ocean source is always well above the desert threshold), so
+ * deserts were structurally confined to continental interiors — real deserts
+ * are frequently coastal (Atacama, Namib, Baja California, Australia's west
+ * coast), driven by subtropical high-pressure belts (~20-30° latitude, both
+ * hemispheres) where descending air suppresses rainfall independent of
+ * distance from the ocean. `aridBeltCenter`/`aridBeltWidth` model that as a
+ * triangular dryness multiplier over `|y|` (sin(latitude)), applied to land
+ * cells after the distance field (ocean stays at moisture 1 regardless of
+ * latitude — water biomes don't consult moisture), so a land cell can be arid
+ * at any distance from the coast if its latitude falls in the belt. See
+ * runbook 022.
  */
 export function computeClimate(
   graph: IPlanetGraphCore,
@@ -75,6 +98,13 @@ export function computeClimate(
       }
     }
     frontier = next;
+  }
+
+  for (let id = 0; id < cellCount; id++) {
+    if (!isLand[id]) continue;
+    const latitude = Math.abs(graph.cells[id].center.y);
+    const beltFactor = Math.max(0, 1 - Math.abs(latitude - p.aridBeltCenter) / p.aridBeltWidth);
+    moisture[id] *= 1 - p.aridBeltStrength * beltFactor;
   }
 
   return { temperature, moisture };
