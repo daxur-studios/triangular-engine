@@ -27,6 +27,12 @@ export interface ICloudPuffWindOptions {
   readonly velocityMPerSecond?: readonly [number, number, number];
   readonly angularVelocityRadPerSecond?: number;
   readonly axialVelocityMPerSecond?: number;
+  /** Whether to enable latitude-dependent alternating zonal winds (e.g. for gas giants / planetary atmospheres). */
+  readonly zonalBanding?: boolean;
+  /** Frequency of zonal bands across latitude (default: 4.0). */
+  readonly zonalFrequency?: number;
+  /** Turbulence / curl noise factor. */
+  readonly curlTurbulence?: number;
 }
 
 export type CloudPuffWindInput =
@@ -35,7 +41,15 @@ export type CloudPuffWindInput =
   | ICloudPuffWindOptions;
 
 export interface ICloudPuffDomainWindController {
-  advanceWind(deltaSeconds: number, wind: CloudPuffWindInput): void;
+  /**
+   * Advances wind drift using delta time and/or absolute simulation time.
+   * Guaranteed to be timewarp-safe and deterministic at any step size (1x - 100x).
+   */
+  advanceWind(deltaSeconds: number, wind: CloudPuffWindInput, simulationTimeSeconds?: number): void;
+  /**
+   * Directly sets the absolute simulation time for 100% deterministic positioning / scrubbing.
+   */
+  setTime?(simulationTimeSeconds: number, wind?: CloudPuffWindInput): void;
 }
 
 /**

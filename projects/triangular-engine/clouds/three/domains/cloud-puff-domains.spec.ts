@@ -1,4 +1,4 @@
-import { Group, Vector3 } from 'three';
+import { Group, InstancedMesh, MeshBasicMaterial, SphereGeometry, Vector3 } from 'three';
 
 import { BOX_CLOUD_PUFF_DOMAIN, wrapAxis } from './box-domain';
 import {
@@ -8,6 +8,13 @@ import {
 } from './cloud-puff-domain-registry';
 import { CYLINDER_INTERIOR_CLOUD_PUFF_DOMAIN } from './cylinder-interior-domain';
 import { SPHERE_SHELL_CLOUD_PUFF_DOMAIN } from './sphere-shell-domain';
+import {
+  advectBoxAlongWind,
+  advectCylinderAlongWind,
+  advectSphereAlongWind,
+  curlNoiseSphere,
+  windFieldSphere3D,
+} from '../../core/cloud-wind-field';
 
 describe('Cloud Puff Domains', () => {
   describe('wrapAxis', () => {
@@ -27,6 +34,69 @@ describe('Cloud Puff Domains', () => {
     it('handles zero or negative ranges gracefully', () => {
       expect(wrapAxis(5, 0)).toBe(0);
       expect(wrapAxis(5, -5)).toBe(0);
+    });
+  });
+
+  describe('RK2 Streamline Advection Engine', () => {
+    it('spherical curl noise is strictly tangential to the sphere at any point', () => {
+      const p = new Vector3(0.577, 0.577, 0.577).normalize();
+      const curl = new Vector3();
+      curlNoiseSphere(p, 2.5, 1.0, curl);
+      expect(Math.abs(curl.dot(p))).toBeLessThan(1e-5);
+    });
+
+    it('spherical wind field is strictly tangential to the sphere', () => {
+      const p = new Vector3(0.2, 0.8, -0.4).normalize();
+      const flow = new Vector3();
+      windFieldSphere3D(p, 2.0, {
+        zonalSpeed: 0.05,
+        zonalFrequency: 3.0,
+        curlFrequency: 2.5,
+        curlStrength: 0.1,
+      }, flow);
+      expect(Math.abs(flow.dot(p))).toBeLessThan(1e-5);
+    });
+
+    it('16-step RK2 sphere advection produces continuous unit-sphere paths', () => {
+      const spawn = new Vector3(1, 0, 0);
+      const out = new Vector3();
+      advectSphereAlongWind(spawn, 0, 15.0, 40.0, {
+        zonalSpeed: 0.05,
+        zonalFrequency: 3.0,
+        curlFrequency: 2.5,
+        curlStrength: 0.1,
+      }, out);
+
+      expect(out.length()).toBeCloseTo(1.0, 5);
+      expect(out.x).not.toBe(spawn.x); // Traveled along streamline
+    });
+
+    it('16-step RK2 cylinder advection stays strictly within cylinder bounds', () => {
+      const lengthM = 200;
+      const { phi, z } = advectCylinderAlongWind(0.5, 40, 0, 20.0, 40.0, {
+        circumferentialSpeed: 0.05,
+        curlFrequency: 2.0,
+        curlStrength: 0.4,
+        lengthM,
+      });
+
+      expect(Math.abs(z)).toBeLessThanOrEqual(lengthM / 2);
+      expect(phi).not.toBe(0.5); // Traveled circumferentially
+    });
+
+    it('16-step RK2 box advection wraps within region', () => {
+      const regionSize: readonly [number, number, number] = [50, 20, 50];
+      const out = new Vector3();
+      advectBoxAlongWind(new Vector3(10, 0, 10), 0, 30.0, 40.0, {
+        velocity: [3, 0, 1],
+        curlFrequency: 0.02,
+        curlStrength: 0.4,
+        regionSizeM: regionSize,
+      }, out);
+
+      expect(Math.abs(out.x)).toBeLessThanOrEqual(regionSize[0]);
+      expect(Math.abs(out.y)).toBeLessThanOrEqual(regionSize[1]);
+      expect(Math.abs(out.z)).toBeLessThanOrEqual(regionSize[2]);
     });
   });
 
@@ -63,31 +133,6 @@ describe('Cloud Puff Domains', () => {
         expect(t.scale.x).toBeLessThanOrEqual(12);
       }
     });
-
-    it('translates group and wraps position on advanceWind', () => {
-      const group = new Group();
-      const controller = BOX_CLOUD_PUFF_DOMAIN.createWindController(group, {
-        instanceCount: 1,
-        seed: 1,
-        puffScaleRangeM: [1, 2],
-        originM: [0, 10, 0],
-        regionSizeM: [20, 5, 20],
-      });
-
-      expect(group.position.x).toBe(0);
-      expect(group.position.y).toBe(10);
-      expect(group.position.z).toBe(0);
-
-      // Advance with scalar speed
-      controller.advanceWind(1.0, 10);
-      expect(group.position.x).toBe(10);
-      expect(group.position.y).toBe(10);
-      expect(group.position.z).toBeCloseTo(3.5, 4);
-
-      // Advance past boundary -> wraps
-      controller.advanceWind(2.0, 10);
-      expect(group.position.x).toBeCloseTo(-10, 4);
-    });
   });
 
   describe('Sphere shell domain', () => {
@@ -110,24 +155,32 @@ describe('Cloud Puff Domains', () => {
         expect(dist).toBeGreaterThanOrEqual(radius - thickness / 2 - 0.001);
         expect(dist).toBeLessThanOrEqual(radius + thickness / 2 + 0.001);
 
-        // Verify puff's local UP transformed by quaternion matches radial outward direction
         const radialDirection = t.position.clone().normalize();
         const orientedUp = localUp.clone().applyQuaternion(t.quaternion);
         expect(orientedUp.dot(radialDirection)).toBeCloseTo(1, 4);
       }
     });
 
-    it('rotates group smoothly on advanceWind', () => {
+    it('advects instances across mesh matrices under wind', () => {
       const group = new Group();
+      const mesh = new InstancedMesh(new SphereGeometry(1), new MeshBasicMaterial(), 10);
+      group.add(mesh);
+
       const controller = SPHERE_SHELL_CLOUD_PUFF_DOMAIN.createWindController(group, {
-        instanceCount: 1,
-        seed: 1,
-        puffScaleRangeM: [1, 2],
-        radiusM: 50,
+        instanceCount: 10,
+        seed: 7,
+        puffScaleRangeM: [2, 4],
+        radiusM: 60,
       });
 
-      controller.advanceWind(1.0, 5); // 5 / 50 = 0.1 rad/s
-      expect(group.rotation.y).toBeCloseTo(0.1, 4);
+      controller.advanceWind(5.0, {
+        speed: 8,
+        curlTurbulence: 0.5,
+        zonalBanding: true,
+        zonalFrequency: 4.0,
+      });
+
+      expect(mesh.instanceMatrix.needsUpdate).toBeTrue();
     });
   });
 
@@ -155,28 +208,31 @@ describe('Cloud Puff Domains', () => {
         expect(radialDist).toBeGreaterThanOrEqual(radius - thickness / 2 - 0.001);
         expect(radialDist).toBeLessThanOrEqual(radius + thickness / 2 + 0.001);
 
-        // Inward direction in XY plane
         const inwardDir = new Vector3(-t.position.x, -t.position.y, 0).normalize();
         const orientedUp = localUp.clone().applyQuaternion(t.quaternion);
         expect(orientedUp.dot(inwardDir)).toBeCloseTo(1, 4);
       }
     });
 
-    it('advances both axial drift and rotation on advanceWind', () => {
+    it('advects instances around cylinder curvature under wind', () => {
       const group = new Group();
+      const mesh = new InstancedMesh(new SphereGeometry(1), new MeshBasicMaterial(), 10);
+      group.add(mesh);
+
       const controller = CYLINDER_INTERIOR_CLOUD_PUFF_DOMAIN.createWindController(group, {
-        instanceCount: 1,
-        seed: 1,
-        puffScaleRangeM: [1, 2],
-        radiusM: 100,
-        lengthM: 100,
+        instanceCount: 10,
+        seed: 12,
+        puffScaleRangeM: [2, 4],
+        radiusM: 65,
+        lengthM: 200,
       });
 
-      controller.advanceWind(1.0, 10);
-      // Axial movement along Z
-      expect(group.position.z).toBeCloseTo(7.0, 3);
-      // Angular rotation around Z
-      expect(group.rotation.z).toBeGreaterThan(0);
+      controller.advanceWind(5.0, {
+        speed: 6,
+        curlTurbulence: 0.4,
+      });
+
+      expect(mesh.instanceMatrix.needsUpdate).toBeTrue();
     });
   });
 });

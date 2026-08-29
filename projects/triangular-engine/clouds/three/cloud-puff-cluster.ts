@@ -62,7 +62,9 @@ export interface ICloudPuffCluster {
   setSunDirection(direction: Vector3): void;
   setPointLights(lights: readonly ICloudPuffPointLight[]): void;
   /** Advances wind drift. Interpretation depends on active domain (translation for box, rotation/drift for angular domains). */
-  advanceWind(deltaSeconds: number, wind: CloudPuffWindInput): void;
+  advanceWind(deltaSeconds: number, wind: CloudPuffWindInput, simulationTimeSeconds?: number): void;
+  /** Directly sets the absolute simulation time for deterministic positioning / timewarp scrubbing. */
+  setTime(simulationTimeSeconds: number, wind?: CloudPuffWindInput): void;
   dispose(): void;
 }
 
@@ -135,7 +137,15 @@ export function buildCloudPuffCluster(options: ICloudPuffClusterOptions): ICloud
     material,
     setSunDirection: (direction) => setCloudPuffSunDirection(material, direction),
     setPointLights: (lights) => setCloudPuffPointLights(material, lights),
-    advanceWind: (deltaSeconds, wind) => windController.advanceWind(deltaSeconds, wind),
+    advanceWind: (deltaSeconds, wind, simulationTimeSeconds) =>
+      windController.advanceWind(deltaSeconds, wind, simulationTimeSeconds),
+    setTime: (simulationTimeSeconds, wind = 0) => {
+      if (windController.setTime) {
+        windController.setTime(simulationTimeSeconds, wind);
+      } else {
+        windController.advanceWind(0, wind, simulationTimeSeconds);
+      }
+    },
     dispose() {
       for (const geometry of geometries) geometry.dispose();
       material.dispose();

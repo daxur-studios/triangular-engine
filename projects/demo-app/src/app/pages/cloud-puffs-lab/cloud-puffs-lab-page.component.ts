@@ -53,7 +53,7 @@ export class CloudPuffsLabPageComponent {
     () => this.domains.find((domain) => domain.id === this.domainId())?.description ?? '',
   );
 
-  readonly puffCount = signal(220);
+  readonly puffCount = signal(240);
   readonly puffScaleMin = signal(6);
   readonly puffScaleMax = signal(15);
   readonly flatShading = signal(true);
@@ -62,7 +62,10 @@ export class CloudPuffsLabPageComponent {
   readonly sunAzimuthDeg = signal(35);
   readonly sunElevationDeg = signal(38);
   readonly rimStrength = signal(1.2);
-  readonly windSpeed = signal(3);
+  readonly windSpeed = signal(3.5);
+  readonly curlTurbulence = signal(0.4);
+  readonly timewarp = signal(1);
+  readonly zonalBanding = signal(false);
 
   readonly rocketEngineEnabled = signal(false);
   readonly lightningEnabled = signal(false);
@@ -90,6 +93,7 @@ export class CloudPuffsLabPageComponent {
   private lightningCooldownS = 3;
   private lightningIntensity = 0;
   private readonly lightningPositionVector = new Vector3();
+  private simulationTimeS = 0;
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -119,8 +123,18 @@ export class CloudPuffsLabPageComponent {
     });
 
     this.engine.tick$.pipe(takeUntilDestroyed(destroyRef)).subscribe((delta) => {
-      this.cluster()?.advanceWind(delta, this.windSpeed());
-      this.updateDynamicLights(delta);
+      const effectiveDelta = delta * this.timewarp();
+      this.simulationTimeS += effectiveDelta;
+      this.cluster()?.advanceWind(
+        effectiveDelta,
+        {
+          speed: this.windSpeed(),
+          curlTurbulence: this.curlTurbulence(),
+          zonalBanding: this.domainId() === 'sphere-shell' && this.zonalBanding(),
+        },
+        this.simulationTimeS,
+      );
+      this.updateDynamicLights(effectiveDelta);
     });
 
     destroyRef.onDestroy(() => this.disposeCluster());
@@ -142,9 +156,9 @@ export class CloudPuffsLabPageComponent {
       seed: options.seed,
       regionSizeM: REGION_SIZE_M,
       originM: isBox ? CLUSTER_ORIGIN_M : [0, 0, 0],
-      radiusM: options.domainId === 'sphere-shell' ? 70 : 90,
+      radiusM: options.domainId === 'sphere-shell' ? 75 : 65,
       lengthM: 260,
-      shellThicknessM: 14,
+      shellThicknessM: 10,
       puffScaleRangeM: [options.scaleMin, options.scaleMax],
       shading: options.shading,
       styleId: options.styleId,
@@ -152,6 +166,11 @@ export class CloudPuffsLabPageComponent {
       material: { rimStrength: this.rimStrength() },
     });
     cluster.setSunDirection(this.sunDirection());
+    cluster.setTime(this.simulationTimeS, {
+      speed: this.windSpeed(),
+      curlTurbulence: this.curlTurbulence(),
+      zonalBanding: options.domainId === 'sphere-shell' && this.zonalBanding(),
+    });
     this.engine.scene.add(cluster.group);
     this.cluster.set(cluster);
   }

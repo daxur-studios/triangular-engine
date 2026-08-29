@@ -59,6 +59,22 @@
     <input type="range" min="0" max="15" step="0.5" [value]="windSpeed()"
       (input)="windSpeed.set(+$any($event.target).value)" />
   </label>
+  <label>Whirly turbulence <output>{{ curlTurbulence() }}</output>
+    <input type="range" min="0" max="1.5" step="0.05" [value]="curlTurbulence()"
+      (input)="curlTurbulence.set(+$any($event.target).value)" />
+  </label>
+  <label>Timewarp <output>{{ timewarp() }}x</output>
+    <input type="range" min="1" max="100" step="1" [value]="timewarp()"
+      (input)="timewarp.set(+$any($event.target).value)" />
+  </label>
+
+  @if (domainId() === 'sphere-shell') {
+    <label class="toggle">
+      <input type="checkbox" [checked]="zonalBanding()"
+        (change)="zonalBanding.set($any($event.target).checked)" />
+      Zonal jet banding (gas giant shear)
+    </label>
+  }
 
   <label class="toggle">
     <input type="checkbox" [checked]="rocketEngineEnabled()"

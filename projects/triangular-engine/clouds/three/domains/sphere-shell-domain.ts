@@ -1,6 +1,10 @@
-import { Quaternion, Vector3, type Group } from 'three';
+import { Matrix4, Quaternion, Vector3, type Group, type InstancedMesh } from 'three';
 
 import { createCloudRandom01 } from '../../core/cloud-puff-shape';
+import {
+  advectSphereAlongWind,
+  ISphereWindFieldParams,
+} from '../../core/cloud-wind-field';
 import type {
   CloudPuffWindInput,
   ICloudPuffDomain,
@@ -11,41 +15,69 @@ import type {
 } from './cloud-puff-domain';
 
 const UP = new Vector3(0, 1, 0);
-const DEFAULT_SPHERE_RADIUS_M = 80;
-const DEFAULT_SHELL_THICKNESS_M = 14;
+const DEFAULT_SPHERE_RADIUS_M = 75;
+const DEFAULT_SHELL_THICKNESS_M = 10;
 
 function isWindOptions(wind: CloudPuffWindInput): wind is ICloudPuffWindOptions {
   return typeof wind === 'object' && !Array.isArray(wind);
 }
 
-function resolveSphereAngularVelocity(
+function resolveSphereWindParams(
   wind: CloudPuffWindInput,
   radiusM: number,
-): number {
+): ISphereWindFieldParams {
   if (typeof wind === 'number') {
-    return radiusM > 0 ? wind / radiusM : 0.02;
+    return {
+      zonalSpeed: radiusM > 0 ? wind / radiusM : 0.05,
+      zonalFrequency: 3.0,
+      curlFrequency: 2.5,
+      curlStrength: 0.08,
+    };
   }
   if (isWindOptions(wind)) {
-    if (wind.angularVelocityRadPerSecond !== undefined) {
-      return wind.angularVelocityRadPerSecond;
-    }
-    const speed = wind.speed ?? 0;
-    return radiusM > 0 ? speed / radiusM : 0.02;
+    const speed = wind.speed ?? 3.5;
+    const zonalSpeed = wind.angularVelocityRadPerSecond ?? (radiusM > 0 ? speed / radiusM : 0.05);
+    const curlStrength = (wind.curlTurbulence ?? 0.4) * 0.18;
+    const zonalFrequency = wind.zonalFrequency ?? (wind.zonalBanding ? 4.0 : 2.5);
+    return {
+      zonalSpeed,
+      zonalFrequency,
+      curlFrequency: 2.5,
+      curlStrength,
+    };
   }
-  // Tuple [x, y, z]
   const speed = Math.hypot(wind[0], wind[2] ?? 0);
-  return radiusM > 0 ? speed / radiusM : 0.02;
+  return {
+    zonalSpeed: radiusM > 0 ? speed / radiusM : 0.05,
+    zonalFrequency: 3.0,
+    curlFrequency: 2.5,
+    curlStrength: 0.08,
+  };
+}
+
+interface IPuffParticleData {
+  readonly spawnDir: Vector3;
+  readonly radius: number;
+  readonly baseScale: Vector3;
+  readonly initialYaw: number;
+  readonly lifespanS: number;
+  readonly birthOffsetS: number;
+}
+
+function smoothstep(min: number, max: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - min) / (max - min)));
+  return t * t * (3 - 2 * t);
 }
 
 /**
- * Spherical shell domain: instances are scattered over a spherical altitude band around a central planet.
- * Each puff is oriented radially outward (puff UP = surface normal).
- * Wind is a continuous rotation of the shell group around the polar axis (wraps seamlessly).
+ * Spherical shell domain: puffs are advected across a planetary sphere via full 16-step RK2
+ * streamline numerical integration over compound velocity fields (zonal jet streams + divergence-free spherical curl noise).
+ * Produces authentic cyclonic storms, vortices, and fluid-like cloud patterns matching planetary weather simulations.
  */
 export const SPHERE_SHELL_CLOUD_PUFF_DOMAIN: ICloudPuffDomain = {
   id: 'sphere-shell',
   label: 'Sphere shell',
-  description: 'Spherical planetary shell with outward-facing puffs and rotational wind.',
+  description: 'Spherical planetary shell with 16-step RK2 streamline advection and cyclonic vortices.',
 
   placeInstances(context: ICloudPuffDomainContext): ICloudPuffTransform[] {
     const random = createCloudRandom01(context.seed ^ 0x27d4_eb2d);
@@ -59,8 +91,7 @@ export const SPHERE_SHELL_CLOUD_PUFF_DOMAIN: ICloudPuffDomain = {
     const normal = new Vector3();
 
     for (let i = 0; i < context.instanceCount; i++) {
-      // Uniform point on sphere
-      const u = random() * 2 - 1; // cos(latitude) in [-1, 1]
+      const u = random() * 2 - 1; // cos(latitude)
       const theta = random() * Math.PI * 2;
       const rXz = Math.sqrt(Math.max(0, 1 - u * u));
       normal.set(rXz * Math.cos(theta), u, rXz * Math.sin(theta)).normalize();
@@ -82,17 +113,104 @@ export const SPHERE_SHELL_CLOUD_PUFF_DOMAIN: ICloudPuffDomain = {
 
   createWindController(group: Group, context: ICloudPuffDomainContext): ICloudPuffDomainWindController {
     const radiusM = context.radiusM ?? DEFAULT_SPHERE_RADIUS_M;
+    const thicknessM = context.shellThicknessM ?? DEFAULT_SHELL_THICKNESS_M;
+    const [scaleMin, scaleMax] = context.puffScaleRangeM;
     const origin = new Vector3(...(context.originM ?? [0, 0, 0]));
-    let rotationAngle = 0;
+    let accumulatedTimeS = 0;
 
     group.position.copy(origin);
     group.rotation.set(0, 0, 0);
 
+    const random = createCloudRandom01(context.seed ^ 0x27d4_eb2d);
+    const particles: IPuffParticleData[] = [];
+    for (let i = 0; i < context.instanceCount; i++) {
+      const u = random() * 2 - 1;
+      const theta = random() * Math.PI * 2;
+      const rXz = Math.sqrt(Math.max(0, 1 - u * u));
+      const norm = new Vector3(rXz * Math.cos(theta), u, rXz * Math.sin(theta)).normalize();
+      const altitude = radiusM + (random() - 0.5) * thicknessM;
+      const puffScale = scaleMin + random() * (scaleMax - scaleMin);
+      const lifespan = 30 + random() * 20; // 30 - 50s lifespan per puff cycle
+      const birthOffset = random() * lifespan;
+      const yaw = random() * Math.PI * 2;
+
+      particles.push({
+        spawnDir: norm,
+        radius: altitude,
+        baseScale: new Vector3(puffScale, puffScale, puffScale),
+        initialYaw: yaw,
+        lifespanS: lifespan,
+        birthOffsetS: birthOffset,
+      });
+    }
+
+    const tempMatrix = new Matrix4();
+    const tempDir = new Vector3();
+    const tempPos = new Vector3();
+    const tempScale = new Vector3();
+    const tempQAlign = new Quaternion();
+    const tempQYaw = new Quaternion();
+
+    function applyWind(timeS: number, wind: CloudPuffWindInput) {
+      const windParams = resolveSphereWindParams(wind, radiusM);
+
+      const instMeshes = group.children.filter(
+        (c): c is InstancedMesh => (c as InstancedMesh).isInstancedMesh,
+      );
+      if (instMeshes.length === 0) return;
+
+      const variantCount = instMeshes.length;
+      const rand = createCloudRandom01(context.seed ^ 0x9e37_79b9);
+      const writeCursors = new Array<number>(variantCount).fill(0);
+
+      for (let i = 0; i < context.instanceCount; i++) {
+        const variant = Math.min(variantCount - 1, Math.floor(rand() * variantCount));
+        const mesh = instMeshes[variant];
+        const cursor = writeCursors[variant]++;
+        const p = particles[i];
+
+        // Periodic lifecycle timing
+        const shiftedTime = timeS + p.birthOffsetS;
+        const cycle = Math.floor(shiftedTime / p.lifespanS);
+        const localT = shiftedTime - cycle * p.lifespanS;
+        const cycleStartTime = shiftedTime - localT;
+        const lifeFrac = localT / p.lifespanS;
+
+        // Smooth cloud lifecycle (birth -> puff billow -> dissipation)
+        const growth = smoothstep(0.0, 0.12, lifeFrac) * (1.0 - smoothstep(0.85, 1.0, lifeFrac));
+        const scaleMul = Math.max(0.05, growth);
+
+        // 16-step RK2 streamline advection along compound spherical wind field
+        advectSphereAlongWind(p.spawnDir, cycleStartTime, localT, p.lifespanS, windParams, tempDir);
+
+        tempPos.copy(tempDir).multiplyScalar(p.radius);
+
+        tempQYaw.setFromAxisAngle(UP, p.initialYaw + localT * 0.05);
+        tempQAlign.setFromUnitVectors(UP, tempDir);
+        const rot = tempQAlign.multiply(tempQYaw);
+
+        tempScale.copy(p.baseScale).multiplyScalar(scaleMul);
+        tempMatrix.compose(tempPos, rot, tempScale);
+        mesh.setMatrixAt(cursor, tempMatrix);
+      }
+
+      for (const mesh of instMeshes) {
+        mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+
     return {
-      advanceWind(deltaSeconds: number, wind: CloudPuffWindInput) {
-        const omega = resolveSphereAngularVelocity(wind, radiusM);
-        rotationAngle = (rotationAngle + omega * deltaSeconds) % (Math.PI * 2);
-        group.rotation.y = rotationAngle;
+      advanceWind(deltaSeconds: number, wind: CloudPuffWindInput, simulationTimeSeconds?: number) {
+        if (simulationTimeSeconds !== undefined) {
+          accumulatedTimeS = simulationTimeSeconds;
+        } else {
+          accumulatedTimeS += deltaSeconds;
+        }
+        applyWind(accumulatedTimeS, wind);
+      },
+      setTime(simulationTimeSeconds: number, wind: CloudPuffWindInput = 0) {
+        accumulatedTimeS = simulationTimeSeconds;
+        applyWind(accumulatedTimeS, wind);
       },
     };
   },
