@@ -283,10 +283,14 @@ describe('buildChunkLod1MeshData', () => {
 });
 
 describe('buildChunkLod1MeshData pinning', () => {
-  it('a pinned cell always renders as its own untouched single-cell polygon, never absorbed into a merge group', () => {
+  it('a pinned cell renders byte-identical to LOD0, not just as its own flattened polygon', () => {
     const graph = buildPlanetGraphCore({ cellCount: 400, seed: 13 });
     const { chunks, chunkIdByCell } = buildPlanetChunks(graph, { targetChunkSize: 80 });
-    const elevation = graph.cells.map(() => 0);
+    // Elevation varies per cell so a peak's raw center value can diverge from its neighbors'
+    // corner-blended average — the exact condition that exposed the fan-center-dropping bug
+    // (a pinned cell rendered through the boundary-loop path lost its raised, distinctly
+    // colored center even though it was correctly kept as its own group).
+    const elevation = graph.cells.map((_, id) => Math.sin(id * 0.53) + Math.cos(id * 0.19));
     const chunk = chunks.find((c) => c.cellIds.length > 10)!;
     const pinnedCellId = chunk.cellIds[Math.floor(chunk.cellIds.length / 2)];
 
@@ -294,18 +298,32 @@ describe('buildChunkLod1MeshData pinning', () => {
     pinned[pinnedCellId] = 1;
 
     const lod1 = buildChunkLod1MeshData(graph, elevation, chunkIdByCell, chunk, { pinned });
+    const chunkOfOne = { ...chunk, cellIds: [pinnedCellId] };
+    const lod0Fan = buildChunkMeshData(graph, elevation, chunkOfOne);
 
-    let vertexCount = 0;
+    const pinnedVertices: { direction: [number, number, number]; elevation: number }[] = [];
     for (let i = 0; i < lod1.cellIds.length; i++) {
-      if (lod1.cellIds[i] === pinnedCellId) vertexCount++;
+      if (lod1.cellIds[i] !== pinnedCellId) continue;
+      const o = i * 3;
+      pinnedVertices.push({
+        direction: [lod1.directions[o], lod1.directions[o + 1], lod1.directions[o + 2]],
+        elevation: lod1.elevations[i],
+      });
     }
 
-    // A singleton group's "merge" boundary is exactly that cell's own corner ring (every edge
-    // is a boundary edge, since every neighbor belongs to a different group), so it triangulates
-    // to n-2 triangles via ear clipping — the same "polygon minus its fan center" shape any
-    // single cell gets at LOD1, never merged wider than its own footprint.
-    const expectedCorners = graph.cells[pinnedCellId].corners.length;
-    expect(vertexCount).toBe((expectedCorners - 2) * 3);
+    // Same vertex count as LOD0's own fan (n triangles, including the center vertex) — not the
+    // n-2 ear-clipped boundary-only polygon a merged/flattened group would produce.
+    expect(pinnedVertices.length).toBe(lod0Fan.elevations.length);
+    for (let i = 0; i < pinnedVertices.length; i++) {
+      expect(pinnedVertices[i].direction).toEqual([lod0Fan.directions[i * 3], lod0Fan.directions[i * 3 + 1], lod0Fan.directions[i * 3 + 2]]);
+      expect(pinnedVertices[i].elevation).toBe(lod0Fan.elevations[i]);
+    }
+
+    // The fan center's raw elevation must actually survive into LOD1 — this is what the
+    // boundary-loop path silently dropped. Compared via Math.fround since `elevations` is a
+    // Float32Array: the stored value is a float32 truncation of the float64 source, not a
+    // bit-identical copy of it.
+    expect(pinnedVertices.some((v) => v.elevation === Math.fround(elevation[pinnedCellId]))).toBe(true);
   });
 
   it('leaves LOD1 unchanged from the unpinned baseline when no cells are pinned', () => {

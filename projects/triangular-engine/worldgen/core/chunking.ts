@@ -438,10 +438,12 @@ const LOD1_DEFAULTS = {
  * ## Pinning
  *
  * `params.pinned`, when given, forces the marked cells into their own singleton groups (see
- * `growConnectedGroups()`), so they still go through this same boundary-loop + ear-clipping
- * path but end up tessellating just their own polygon — a mountain peak, coastline cape, or
- * small island pinned by `computeCellPins()` renders identically at both LODs, so it can't
- * flatten, shift, or disappear as the camera crosses the LOD distance threshold.
+ * `growConnectedGroups()`). Those groups skip the boundary-loop + ear-clipping path entirely
+ * and render with the same fan tessellation `buildChunkMeshData()` uses at LOD0 (center vertex
+ * included) — not just "kept as their own polygon," but byte-identical geometry and elevation
+ * to LOD0. A mountain peak, coastline cape, or small island pinned by `computeCellPins()`
+ * therefore can't flatten, dim, shift, or disappear as the camera crosses the LOD distance
+ * threshold.
  */
 export function buildChunkLod1MeshData(
   graph: IPlanetGraphCore,
@@ -472,6 +474,31 @@ export function buildChunkLod1MeshData(
 
   for (let groupId = 0; groupId < groups.length; groupId++) {
     const members = groups[groupId];
+
+    // A pinned cell's whole point is to render identically at both LODs, but the flattened
+    // boundary-loop polygon below only carries *corner*-blended elevations — it has no vertex
+    // at the fan center, whose elevation is the cell's own raw, unblended `elevation[]` value.
+    // Peak-prominence pinning selects cells exactly where that raw value sits well above the
+    // corner blend (that's what "prominent" means here), so without this branch a pinned peak
+    // still loses its raised, brightly-colored center and reads as flattened/dimmed at LOD1 —
+    // correctly kept as its own polygon, but not actually unchanged. Reusing the exact fan
+    // tessellation `buildChunkMeshData()` uses for this one cell makes LOD1 byte-identical to
+    // LOD0 for every pinned cell, which is what "pinned" is supposed to guarantee.
+    if (members.length === 1 && p.pinned?.[members[0]] === 1) {
+      const cell = graph.cells[members[0]];
+      const n = cell.corners.length;
+      if (n >= 3) {
+        const centerElevation = elevation[cell.id];
+        for (let k = 0; k < n; k++) {
+          const k2 = (k + 1) % n;
+          pushVertex(cell.center, centerElevation, cell.id);
+          pushVertex(cell.corners[k], cellCornerElevation(cell, k, elevation), cell.id);
+          pushVertex(cell.corners[k2], cellCornerElevation(cell, k2, elevation), cell.id);
+        }
+      }
+      continue;
+    }
+
     const groupRegion = buildChunkBounds(graph, groupId, members);
     const loop = buildChunkBoundaryLoop(graph, elevation, groupIdByCell, groupRegion);
 
