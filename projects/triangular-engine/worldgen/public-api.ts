@@ -13,6 +13,7 @@ export * from './core/elevation';
 export * from './core/sample-elevation';
 export * from './core/chunking';
 export * from './core/collider-patch';
+export * from './core/terrain-edits';
 export * from './core/salience';
 export * from './core/tectonics';
 export * from './core/climate';

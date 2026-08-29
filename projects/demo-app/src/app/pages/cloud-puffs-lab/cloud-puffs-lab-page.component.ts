@@ -13,11 +13,13 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Color, MathUtils, NoToneMapping, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
+  buildCloudAtmosphere,
   buildCloudPuffCluster,
   CLOUD_PUFF_DOMAINS,
   CLOUD_PUFF_STYLES,
   DEFAULT_CLOUD_PUFF_DOMAIN_ID,
   DEFAULT_CLOUD_PUFF_STYLE_ID,
+  type ICloudAtmosphere,
   type ICloudPuffCluster,
   type ICloudPuffPointLight,
 } from 'triangular-engine/clouds';
@@ -29,26 +31,17 @@ export type WorldScale = 'small' | 'medium' | 'large';
 export interface IWorldScalePreset {
   readonly id: WorldScale;
   readonly label: string;
-  /** Actual physical half-extents of the Cartesian bounding box (metres). */
   readonly boxRegion: readonly [number, number, number];
   readonly groundPlaneSize: number;
   readonly groundPlaneY: number;
-  /** Radius of the planet sphere (metres). */
   readonly planetRadius: number;
-  /** Altitude of the cloud layer shell above planet center (metres). */
   readonly planetCloudRadius: number;
-  /** Physical thickness of the cloud altitude band (metres) - remains human/atmospheric scale. */
   readonly cloudBandThicknessM: number;
-  /** Inner radius of the O'Neill cylinder hull (metres). */
   readonly cylinderRadius: number;
-  /** Physical length of the cylinder (metres). */
   readonly cylinderLength: number;
-  /** Radius of the interior cloud layer (metres). */
   readonly cylinderCloudRadius: number;
-  /** Number of physical puffs required to populate this world scale. */
-  readonly defaultPuffCount: number;
-  readonly maxPuffCount: number;
-  /** Orbit camera framing position for this world size. */
+  readonly defaultGpuPuffs: number;
+  readonly defaultMeshPuffs: number;
   readonly cameraPos: [number, number, number];
   readonly far: number;
 }
@@ -61,48 +54,48 @@ export const WORLD_SCALE_PRESETS: Record<WorldScale, IWorldScalePreset> = {
     groundPlaneSize: 350,
     groundPlaneY: -18,
     planetRadius: 55,
-    planetCloudRadius: 70,
+    planetCloudRadius: 56.4,
     cloudBandThicknessM: 10,
     cylinderRadius: 96,
     cylinderLength: 260,
     cylinderCloudRadius: 70,
-    defaultPuffCount: 300,
-    maxPuffCount: 1500,
-    cameraPos: [0, 55, 200],
+    defaultGpuPuffs: 800,
+    defaultMeshPuffs: 260,
+    cameraPos: [0, 55, 175],
     far: 6000,
   },
   medium: {
     id: 'medium',
-    label: 'Medium (Regional Habitat / Continent — R=220m)',
+    label: 'Medium (Regional Continent — R=220m)',
     boxRegion: [350, 25, 350],
     groundPlaneSize: 1200,
     groundPlaneY: -45,
     planetRadius: 220,
-    planetCloudRadius: 238,
+    planetCloudRadius: 225.5,
     cloudBandThicknessM: 12,
     cylinderRadius: 350,
     cylinderLength: 1000,
     cylinderCloudRadius: 325,
-    defaultPuffCount: 1200,
-    maxPuffCount: 4000,
-    cameraPos: [0, 220, 750],
+    defaultGpuPuffs: 2400,
+    defaultMeshPuffs: 800,
+    cameraPos: [0, 220, 700],
     far: 20000,
   },
   large: {
     id: 'large',
-    label: 'Large (Global Planet / Megastructure — R=700m)',
+    label: 'Large (Global Planet — R=700m)',
     boxRegion: [1000, 30, 1000],
     groundPlaneSize: 3500,
     groundPlaneY: -90,
     planetRadius: 700,
-    planetCloudRadius: 725,
+    planetCloudRadius: 717.5,
     cloudBandThicknessM: 15,
     cylinderRadius: 1000,
     cylinderLength: 3200,
     cylinderCloudRadius: 965,
-    defaultPuffCount: 3000,
-    maxPuffCount: 8000,
-    cameraPos: [0, 700, 2400],
+    defaultGpuPuffs: 6000,
+    defaultMeshPuffs: 1800,
+    cameraPos: [0, 700, 2200],
     far: 60000,
   },
 };
@@ -127,37 +120,44 @@ const LIGHTNING_COLOR = new Color('#dce8ff');
 export class CloudPuffsLabPageComponent {
   readonly planet = viewChild<PlanetViewComponent>('planet');
 
+  readonly renderMode = signal<'gpu-atmosphere' | 'mesh-cluster'>('gpu-atmosphere');
   readonly scalePresets = WORLD_SCALE_PRESETS;
   readonly scales: WorldScale[] = ['small', 'medium', 'large'];
   readonly worldScale = signal<WorldScale>('small');
   readonly activePreset = computed(() => WORLD_SCALE_PRESETS[this.worldScale()]);
 
+  // Atmospheric Layers
+  readonly showPuffLayer = signal(true);
+  readonly showCirrusLayer = signal(true);
+
+  // Clump & Puff Dynamics (matching planetary-clouds-weather)
+  readonly puffPixelScale = signal(9.0);
+  readonly puffClumpRadius = signal(0.015);
+  readonly puffFollowLag = signal(1.5);
+  readonly particleLifespanS = signal(20.0);
+  readonly gpuParticleCount = signal(800);
+
+  // Wind & Flow Dynamics
+  readonly windSpeed = signal(0.05);
+  readonly curlTurbulence = signal(0.06);
+  readonly curlFrequency = signal(2.0);
+  readonly zonalBanding = signal(true);
+  readonly timewarp = signal(1);
+
+  // Mesh Cluster Options
   readonly styles = CLOUD_PUFF_STYLES;
   readonly styleId = signal(DEFAULT_CLOUD_PUFF_STYLE_ID);
-  readonly selectedStyleDescription = computed(
-    () => this.styles.find((style) => style.id === this.styleId())?.description ?? '',
-  );
-
   readonly domains = CLOUD_PUFF_DOMAINS;
   readonly domainId = signal(DEFAULT_CLOUD_PUFF_DOMAIN_ID);
-  readonly selectedDomainDescription = computed(
-    () => this.domains.find((domain) => domain.id === this.domainId())?.description ?? '',
-  );
-
-  /** Physical puff scale in metres (constant human scale across all worlds). */
-  readonly puffScaleMin = signal(5);
-  readonly puffScaleMax = signal(14);
-  readonly puffCount = signal(300);
+  readonly meshPuffCount = signal(260);
+  readonly meshPuffScaleMin = signal(5);
+  readonly meshPuffScaleMax = signal(14);
   readonly flatShading = signal(true);
-  readonly seed = signal(7);
 
+  // Lighting & Surface
   readonly sunAzimuthDeg = signal(35);
   readonly sunElevationDeg = signal(38);
   readonly rimStrength = signal(1.2);
-  readonly windSpeed = signal(3.5);
-  readonly curlTurbulence = signal(0.4);
-  readonly timewarp = signal(1);
-  readonly zonalBanding = signal(false);
   readonly moistureDriven = signal(true);
   readonly planetRenderMode = signal<'elevation' | 'moisture' | 'biome' | 'temperature' | 'land'>('elevation');
 
@@ -182,6 +182,7 @@ export class CloudPuffsLabPageComponent {
     return [direction.x * radius, direction.y * radius, direction.z * radius];
   });
 
+  private readonly atmosphere = signal<ICloudAtmosphere | null>(null);
   private readonly cluster = signal<ICloudPuffCluster | null>(null);
   private readonly engine = inject(EngineService);
   private rocketAngle = 0;
@@ -193,62 +194,127 @@ export class CloudPuffsLabPageComponent {
   constructor() {
     const destroyRef = inject(DestroyRef);
 
+    // Rebuild GPU Atmosphere or Mesh Cluster
     effect(() => {
-      const ecology = this.planet()?.ecology();
-      const isMoisture = this.moistureDriven();
+      const mode = this.renderMode();
       const preset = this.activePreset();
+      const gpuCount = this.gpuParticleCount();
+      const meshCount = this.meshPuffCount();
+      const styleId = this.styleId();
+      const domainId = this.domainId();
+      const shading = this.flatShading() ? ('flat' as const) : ('smooth' as const);
+      const isMoisture = this.moistureDriven();
+      const ecology = this.planet()?.ecology();
 
-      const options = {
-        count: this.puffCount(),
-        scaleMin: this.puffScaleMin(),
-        scaleMax: this.puffScaleMax(),
-        shading: this.flatShading() ? ('flat' as const) : ('smooth' as const),
-        seed: this.seed(),
-        styleId: this.styleId(),
-        domainId: this.domainId(),
-        isMoisture,
-        ecology,
-        preset,
-      };
-      untracked(() => this.rebuildCluster(options));
+      untracked(() => {
+        if (mode === 'gpu-atmosphere') {
+          this.disposeMeshCluster();
+          this.rebuildAtmosphere(preset, gpuCount);
+        } else {
+          this.disposeAtmosphere();
+          this.rebuildMeshCluster({
+            count: meshCount,
+            scaleMin: this.meshPuffScaleMin(),
+            scaleMax: this.meshPuffScaleMax(),
+            shading,
+            seed: 7,
+            styleId,
+            domainId,
+            isMoisture,
+            ecology,
+            preset,
+          });
+        }
+      });
     });
 
+    // Reactive Updates to GPU Atmosphere Uniforms
     effect(() => {
-      const rim = this.rimStrength();
-      const cluster = this.cluster();
-      if (cluster) cluster.material.uniforms['rimStrength'].value = rim;
+      const atmos = this.atmosphere();
+      if (!atmos) return;
+      atmos.showPuffs(this.showPuffLayer());
+      atmos.showCirrus(this.showCirrusLayer());
+      atmos.setPuffPixelScale(this.puffPixelScale());
+      atmos.setClumpRadius(this.puffClumpRadius());
+      atmos.setFollowLag(this.puffFollowLag());
+      atmos.setLifespan(this.particleLifespanS());
+      atmos.setWindParams({
+        zonalSpeed: this.windSpeed(),
+        curlStrength: this.curlTurbulence(),
+        curlFrequency: this.curlFrequency(),
+      });
+      atmos.setSunDirection(this.sunDirection());
     });
 
-    effect(() => {
-      const direction = this.sunDirection();
-      this.cluster()?.setSunDirection(direction);
-    });
-
+    // Frame Tick
     this.engine.tick$.pipe(takeUntilDestroyed(destroyRef)).subscribe((delta) => {
       const effectiveDelta = delta * this.timewarp();
       this.simulationTimeS += effectiveDelta;
-      this.cluster()?.advanceWind(
-        effectiveDelta,
-        {
-          speed: this.windSpeed(),
-          curlTurbulence: this.curlTurbulence(),
-          zonalBanding: this.domainId() === 'sphere-shell' && this.zonalBanding(),
-        },
-        this.simulationTimeS,
-      );
+
+      const atmos = this.atmosphere();
+      if (atmos) {
+        atmos.update(this.simulationTimeS);
+      }
+
+      const cluster = this.cluster();
+      if (cluster) {
+        cluster.advanceWind(
+          effectiveDelta,
+          {
+            speed: this.windSpeed() * 70,
+            curlTurbulence: this.curlTurbulence() * 8,
+            zonalBanding: this.domainId() === 'sphere-shell' && this.zonalBanding(),
+          },
+          this.simulationTimeS,
+        );
+      }
+
       this.updateDynamicLights(effectiveDelta);
     });
 
-    destroyRef.onDestroy(() => this.disposeCluster());
+    destroyRef.onDestroy(() => {
+      this.disposeAtmosphere();
+      this.disposeMeshCluster();
+    });
   }
 
   onWorldScaleChange(scale: WorldScale): void {
     this.worldScale.set(scale);
     const preset = WORLD_SCALE_PRESETS[scale];
-    this.puffCount.set(preset.defaultPuffCount);
+    this.gpuParticleCount.set(preset.defaultGpuPuffs);
+    this.meshPuffCount.set(preset.defaultMeshPuffs);
   }
 
-  private rebuildCluster(options: {
+  private rebuildAtmosphere(preset: IWorldScalePreset, particleCount: number): void {
+    this.disposeAtmosphere();
+    const atmos = buildCloudAtmosphere({
+      particleCount,
+      planetRadius: preset.planetRadius,
+      puffShellRadius: preset.planetCloudRadius,
+      cirrusShellRadius: preset.planetRadius * 1.055,
+      puffPixelScale: this.puffPixelScale(),
+      clumpRadius: this.puffClumpRadius(),
+      followLag: this.puffFollowLag(),
+      lifespanS: this.particleLifespanS(),
+      zonalSpeed: this.windSpeed(),
+      curlStrength: this.curlTurbulence(),
+      curlFrequency: this.curlFrequency(),
+      rimStrength: this.rimStrength(),
+    });
+    atmos.setSunDirection(this.sunDirection());
+    this.engine.scene.add(atmos.group);
+    this.atmosphere.set(atmos);
+  }
+
+  private disposeAtmosphere(): void {
+    const atmos = this.atmosphere();
+    if (!atmos) return;
+    atmos.group.removeFromParent();
+    atmos.dispose();
+    this.atmosphere.set(null);
+  }
+
+  private rebuildMeshCluster(options: {
     count: number;
     scaleMin: number;
     scaleMax: number;
@@ -257,9 +323,10 @@ export class CloudPuffsLabPageComponent {
     styleId: string;
     domainId: string;
     isMoisture: boolean;
+    ecology: any;
     preset: IWorldScalePreset;
   }): void {
-    this.disposeCluster();
+    this.disposeMeshCluster();
     const isBox = options.domainId === 'box';
     const isSphere = options.domainId === 'sphere-shell';
     const preset = options.preset;
@@ -301,15 +368,15 @@ export class CloudPuffsLabPageComponent {
     });
     cluster.setSunDirection(this.sunDirection());
     cluster.setTime(this.simulationTimeS, {
-      speed: this.windSpeed(),
-      curlTurbulence: this.curlTurbulence(),
+      speed: this.windSpeed() * 70,
+      curlTurbulence: this.curlTurbulence() * 8,
       zonalBanding: options.domainId === 'sphere-shell' && this.zonalBanding(),
     });
     this.engine.scene.add(cluster.group);
     this.cluster.set(cluster);
   }
 
-  private disposeCluster(): void {
+  private disposeMeshCluster(): void {
     const cluster = this.cluster();
     if (!cluster) return;
     cluster.group.removeFromParent();

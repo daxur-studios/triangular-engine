@@ -1,5 +1,4 @@
 import {
-  InstancedMesh,
   NearestFilter,
   PerspectiveCamera,
   Scene,
@@ -92,7 +91,7 @@ describe('WaterSurfaceRenderer', () => {
     renderer.dispose();
   });
 
-  it('retains camera detail while selecting a second grid toward the visible horizon', () => {
+  it('centres its one spherical clipmap on the screen-visible surface point', () => {
     const radius = 600_000;
     const scene = new Scene();
     const renderer = new WaterSurfaceRenderer({
@@ -100,37 +99,49 @@ describe('WaterSurfaceRenderer', () => {
       preset: WATER_RENDER_PRESETS.balanced,
     });
     const camera = new PerspectiveCamera(60, 16 / 9, 0.1, 2_000_000);
+    const visiblePoint = new Vector3(
+      200_000,
+      Math.sqrt(radius * radius - 200_000 * 200_000),
+      0,
+    );
     camera.position.set(0, radius + 10_000, 0);
-    camera.lookAt(new Vector3(200_000, radius, 0));
+    camera.lookAt(visiblePoint);
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld(true);
     renderer.addTo(scene);
     renderer.update(camera, 1);
 
     expect(renderer.meshes.every((mesh) => mesh.count > 0)).toBeTrue();
-    const viewMeshes = scene.children.filter(
-      (child): child is InstancedMesh =>
-        child instanceof InstancedMesh &&
-        child.name.startsWith('water-view-lod-'),
-    );
-    expect(viewMeshes.length).toBe(renderer.meshes.length);
-    expect(viewMeshes.every((mesh) => mesh.count > 0)).toBeTrue();
     expect(
-      renderer.farSurfaceMesh?.material.uniforms['uViewFieldOpacity'].value,
-    ).toBeGreaterThan(0);
+      scene.children.some((child) => child.name.startsWith('water-view-lod-')),
+    ).toBeFalse();
+    const material = renderer.meshes[0].material as ShaderMaterial;
+    expect(material.uniforms['uFrameOrigin'].value.distanceTo(visiblePoint)).toBeLessThan(
+      0.01,
+    );
     renderer.dispose();
   });
 
-  it('partitions camera and view fields instead of drawing their overlap twice', () => {
+  it('centres its one plane clipmap on the screen ray rather than camera or controls target state', () => {
+    const scene = new Scene();
     const renderer = new WaterSurfaceRenderer({
       domain: new PlaneWaterDomain(),
       preset: WATER_RENDER_PRESETS.balanced,
     });
+    const camera = new PerspectiveCamera(50, 1, 0.1, 100_000);
+    camera.position.set(460, 260, 590);
+    camera.lookAt(0, 0, 50);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld(true);
+    renderer.addTo(scene);
+    renderer.update(camera, 1);
     const material = renderer.meshes[0].material as ShaderMaterial;
 
-    expect(material.fragmentShader).toContain('uSecondaryFieldActive');
-    expect(material.fragmentShader).toContain('competingFieldDistance');
-    expect(material.uniforms['uFieldRole'].value).toBe(0);
+    expect(material.uniforms['uLodCameraXZ'].value.x).toBeCloseTo(0);
+    expect(material.uniforms['uLodCameraXZ'].value.y).toBeCloseTo(50);
+    expect(
+      scene.children.some((child) => child.name.startsWith('water-view-lod-')),
+    ).toBeFalse();
     // The renderer adds enough cheap coarse rings that the ordinary plane
     // view cannot expose the former 1 km square boundary.
     expect(renderer.meshes.length).toBeGreaterThan(

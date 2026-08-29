@@ -74,16 +74,16 @@ the performance renderer, while calm water can use cinematic far-field glint.
 Changing these inputs at runtime rebuilds only the renderer state that needs to
 change. No page reload is required.
 
-Plane and spherical domains retain a camera-centred detailed grid and pool a
-second field selected from the camera centre/lower frustum rays. The second
-field is capped to one outer-grid extent from the first, so it remains a
-connected view-biased extension rather than a detached square. When active,
-the fields use a deterministic nearest-anchor partition: only one field owns
-each fragment, including their overlap. Coarse outer rings keep the finite
-edge outside ordinary low/medium-altitude views.
+Plane and spherical domains render exactly one detailed clipmap. Its anchor is
+the active camera's centre-screen ray intersection with the water domain—not
+the camera position and not an orbit-control target. If the centre ray misses,
+the renderer tries a lower-frustum ray and, for a sphere, the visible limb.
+For spherical water that selected surface point also defines the clipmap's
+local tangent frame and local-up. Coarse outer rings keep the finite edge
+outside ordinary low/medium-altitude views.
 
 A spherical domain additionally renders a whole-body far-water surface before
-the detailed fields. It does not write depth and is excluded from the opaque
+the detailed clipmap. It does not write depth and is excluded from the opaque
 scene-depth capture, so it cannot z-fight the waves or masquerade as terrain
 behind them. Geometric detail hands over to that topology-specific fallback at
 planetary/orbital scale. Plane domains have no spherical fallback; inside-

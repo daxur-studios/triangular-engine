@@ -5,7 +5,7 @@
       <header class="scope-head">
         <div>
           <span class="scope-kicker"
-            >worldgen · runbook 022 · M0 + M1 + M2 + M3 + M4a-d</span
+            >worldgen · runbook 022 · M0 + M1 + M2 + M3 + M4a-e</span
           >
           <h1>Cell graph scope</h1>
         </div>
@@ -41,6 +41,14 @@
           <div class="stat">
             <span class="stat-label">collider patch</span
             ><span class="stat-value">{{ colliderPatchBuildMs() }}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">edited cells</span
+            ><span class="stat-value">{{ editedCellCount() }}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">chunks rebuilt (last edit)</span
+            ><span class="stat-value">{{ lastEditChunksRebuilt() }}</span>
           </div>
         </div>
       </header>
@@ -258,6 +266,58 @@
             move here
           </button>
         }
+      </div>
+
+      <div class="controls">
+        <span class="control-group-label">terrain edit (M4e)</span>
+        <button
+          type="button"
+          [class.active]="editMode() === 'flatten'"
+          (click)="setEditMode('flatten')"
+        >
+          flatten
+        </button>
+        <button
+          type="button"
+          [class.active]="editMode() === 'dig'"
+          (click)="setEditMode('dig')"
+        >
+          dig
+        </button>
+        @if (editMode() !== 'off') {
+          <label class="control">
+            <span>brush radius</span>
+            <input
+              type="range"
+              min="0"
+              max="4"
+              step="1"
+              [value]="editBrushHops()"
+              (input)="onEditBrushHops($event)"
+            />
+            <span class="control-value">{{ editBrushHops() }} hop(s)</span>
+          </label>
+          @if (editMode() === 'dig') {
+            <label class="control">
+              <span>dig delta</span>
+              <input
+                type="range"
+                min="-0.5"
+                max="0.5"
+                step="0.02"
+                [value]="editDigDelta()"
+                (input)="onEditDigDelta($event)"
+              />
+              <span class="control-value">{{ editDigDelta() }}</span>
+            </label>
+          }
+          <button type="button" (click)="applyTerrainEdit()">
+            apply at camera look-at
+          </button>
+        }
+        <button type="button" (click)="resetTerrainEdits()">
+          reset edits
+        </button>
       </div>
 
       <div class="controls">

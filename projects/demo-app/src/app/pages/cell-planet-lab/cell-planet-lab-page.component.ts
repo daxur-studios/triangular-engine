@@ -38,20 +38,29 @@ import {
 } from 'triangular-engine';
 import { JoltPhysicsModule } from 'triangular-engine/jolt';
 import {
+  affectedCellIds,
+  affectedChunkIds,
   buildChunkLod1MeshData,
   buildChunkMeshData,
   buildColliderPatch,
+  buildEffectiveElevation,
   buildPlanetChunks,
   buildPlanetEcology,
   buildPlanetGraphCore,
   buildPlanetTectonics,
+  cellsWithinHops,
   colliderPatchIndices,
   computeCellPins,
+  digCells,
+  findCellAt,
+  flattenCells,
+  getEffectiveElevation,
   IColliderPatch,
   IPlanetChunk,
   IPlanetEcology,
   IPlanetGraphCore,
   IPlanetTectonics,
+  ITerrainEditLayer,
   IVec3,
   sampleElevation,
 } from 'triangular-engine/worldgen';
@@ -212,6 +221,22 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     if (!patch) return [0, -g, 0];
     return [-patch.center.x * g, -patch.center.y * g, -patch.center.z * g];
   });
+  /** M4e: sparse player-edit override layer (`cellId -> absolute elevation`) on top of the
+   * graph's own generated elevation — see `terrainEdits.ts`. Kept as a plain field, not a
+   * signal: it's mutated in place by `applyTerrainEdit()` and read only from inside this
+   * component's own mesh-rebuild methods, never bound directly in the template. Cleared on
+   * every `regenerate()` since it's keyed by cell ids from a specific graph. */
+  private terrainEdits: ITerrainEditLayer = new Map();
+  readonly editMode = signal<'off' | 'flatten' | 'dig'>('off');
+  /** Brush radius in graph hops (`cellsWithinHops()`) — 0 edits just the clicked cell. */
+  readonly editBrushHops = signal(1);
+  /** Dig depth per click (unitless, same scale as `elevation[]`); flatten ignores this and
+   * instead levels the brush to the clicked cell's own pre-edit elevation. */
+  readonly editDigDelta = signal(-0.15);
+  readonly editedCellCount = signal(0);
+  /** "chunks touched by the last edit / total chunks" — the actual M4e claim made visible:
+   * an edit's rebuild cost stays a small fraction of the planet, not the whole thing. */
+  readonly lastEditChunksRebuilt = signal('—');
   readonly plateCount = signal(10);
   readonly mapMode = signal<MapMode>('graph');
   /** Visual-only exaggeration of raw elevation (unitless, typically ~-1..1) into a radius
@@ -731,6 +756,12 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   private ecology: IPlanetEcology | null = null;
 
   private regenerate(): void {
+    // A fresh graph means fresh cell ids — any edit layer from a previous graph is meaningless
+    // against it, so M4e's override map doesn't survive a regenerate.
+    this.terrainEdits = new Map();
+    this.editedCellCount.set(0);
+    this.lastEditChunksRebuilt.set('—');
+
     const t0 = performance.now();
     const graph = buildPlanetGraphCore({
       cellCount: this.cellCount(),
@@ -997,50 +1028,24 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.pinnedCells = pinned ?? new Uint8Array(graph.cells.length);
     this.pinnedCellCount.set(pinned ? pinned.reduce((sum, v) => sum + v, 0) : 0);
 
-    const buildMesh = (
-      data: {
-        directions: Float32Array;
-        elevations: Float32Array;
-        cellIds: Int32Array;
-      },
-      chunk: IPlanetChunk,
-      lod: 0 | 1,
-    ): Mesh => {
-      const geometry = new BufferGeometry();
-      const positionAttr = new BufferAttribute(
-        new Float32Array(data.directions.length),
-        3,
-      );
-      positionAttr.setUsage(DynamicDrawUsage);
-      geometry.setAttribute('position', positionAttr);
-      geometry.setAttribute(
-        'color',
-        new BufferAttribute(new Float32Array(data.directions.length), 3),
-      );
-      const mesh = new Mesh(geometry, this.previewMaterial);
-      mesh.name = `preview-chunk-${chunk.id}-lod${lod}`;
-      mesh.userData = {
-        directions: data.directions,
-        elevations: data.elevations,
-        cellIds: data.cellIds,
-        chunkId: chunk.id,
-        lod,
-      } satisfies IChunkMeshUserData;
-      this.previewGroup.add(mesh);
-      this.previewMeshes.push(mesh);
-      return mesh;
-    };
+    // M4e: mesh geometry reads elevation through this effective array (base + terrainEdits),
+    // never tectonics.elevation directly — buildEffectiveElevation() returns the base array
+    // itself when there are no edits, so this costs nothing on the common (unedited) path.
+    // computeCellPins() above deliberately still reads the *base* elevation: prominence-based
+    // pinning going stale after an edit is a minor rendering-quality edge case, not a
+    // correctness bug worth complicating this method for.
+    const elevation = buildEffectiveElevation(tectonics.elevation, this.terrainEdits);
 
     for (const chunk of chunks) {
-      const lod0 = buildMesh(
-        buildChunkMeshData(graph, tectonics.elevation, chunk),
+      const lod0 = this.buildChunkLodMesh(
+        buildChunkMeshData(graph, elevation, chunk),
         chunk,
         0,
       );
-      const lod1 = buildMesh(
+      const lod1 = this.buildChunkLodMesh(
         buildChunkLod1MeshData(
           graph,
-          tectonics.elevation,
+          elevation,
           chunkIdByCell,
           chunk,
           { pinned, isLand: tectonics.isLand },
@@ -1058,6 +1063,140 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.updatePreviewDisplacement();
     this.updatePreviewColors();
     this.updateChunkLod();
+  }
+
+  /** Builds one chunk's LOD0-or-LOD1 mesh from already-tessellated `data`, adds it to
+   * `previewGroup`/`previewMeshes`, and returns it — the shared tail end of both
+   * `rebuildPreviewMesh()` (every chunk, full graph rebuild) and `rebuildAffectedChunks()`
+   * (M4e, just the chunks an edit actually touched). Position/color attributes start zeroed;
+   * `updatePreviewDisplacement()`/`updatePreviewColors()` fill them in afterward, same as
+   * every existing call site already relies on. */
+  private buildChunkLodMesh(
+    data: { directions: Float32Array; elevations: Float32Array; cellIds: Int32Array },
+    chunk: IPlanetChunk,
+    lod: 0 | 1,
+  ): Mesh {
+    const geometry = new BufferGeometry();
+    const positionAttr = new BufferAttribute(new Float32Array(data.directions.length), 3);
+    positionAttr.setUsage(DynamicDrawUsage);
+    geometry.setAttribute('position', positionAttr);
+    geometry.setAttribute('color', new BufferAttribute(new Float32Array(data.directions.length), 3));
+    const mesh = new Mesh(geometry, this.previewMaterial);
+    mesh.name = `preview-chunk-${chunk.id}-lod${lod}`;
+    mesh.userData = {
+      directions: data.directions,
+      elevations: data.elevations,
+      cellIds: data.cellIds,
+      chunkId: chunk.id,
+      lod,
+    } satisfies IChunkMeshUserData;
+    this.previewGroup.add(mesh);
+    this.previewMeshes.push(mesh);
+    return mesh;
+  }
+
+  /** M4e: applies a flatten/dig brush at whatever the camera is currently looking at (reusing
+   * `raycastPlanetDirection()`, the same "where would a vessel/tool be" stand-in M4d's physics
+   * test uses) and rebuilds only the chunks that edit can actually change — not the whole
+   * planet. Brush cells are `cellsWithinHops()` from the hit cell; the *rebuild* scope is wider
+   * than the *edit* scope by one more hop (`affectedCellIds()`), because `cellCornerElevation()`
+   * blends a corner from 3 cells, so editing a cell also moves corners its unedited neighbors
+   * render — see `terrainEdits.ts`'s doc comments for both.
+   *
+   * `flatten` levels the whole brush to the *hit cell's own current effective elevation* (so
+   * clicking picks the target height, rather than a fixed global value); `dig` offsets every
+   * brush cell by `editDigDelta()` from its own current effective elevation, so repeated clicks
+   * on the same spot keep digging deeper instead of resetting each time. */
+  setEditMode(mode: 'off' | 'flatten' | 'dig'): void {
+    this.editMode.update((current) => (current === mode ? 'off' : mode));
+  }
+
+  onEditBrushHops(event: Event): void {
+    this.editBrushHops.set(Number((event.target as HTMLInputElement).value));
+  }
+
+  onEditDigDelta(event: Event): void {
+    this.editDigDelta.set(Number((event.target as HTMLInputElement).value));
+  }
+
+  applyTerrainEdit(): void {
+    const mode = this.editMode();
+    if (mode === 'off' || !this.graph || !this.tectonics) return;
+
+    const direction = this.raycastPlanetDirection();
+    if (!direction) return;
+    const hitCell = findCellAt(this.graph, direction);
+
+    const brushCellIds = cellsWithinHops(this.graph, hitCell.id, this.editBrushHops());
+    if (mode === 'flatten') {
+      const targetElevation = getEffectiveElevation(this.tectonics.elevation, this.terrainEdits, hitCell.id);
+      flattenCells(this.terrainEdits, brushCellIds, targetElevation);
+    } else {
+      digCells(this.terrainEdits, this.tectonics.elevation, brushCellIds, this.editDigDelta());
+    }
+    this.editedCellCount.set(this.terrainEdits.size);
+
+    const rebuildCellIds = affectedCellIds(this.graph, brushCellIds);
+    const rebuildChunkIds = affectedChunkIds(this.chunkIdByCell, rebuildCellIds);
+    this.rebuildAffectedChunks(rebuildChunkIds);
+    this.lastEditChunksRebuilt.set(`${rebuildChunkIds.size} / ${this.chunks.length}`);
+  }
+
+  /** M4e's actual "affordable" claim: rebuilds only the given chunks' LOD0/LOD1 meshes (real
+   * tessellation work, `buildChunkMeshData()`/`buildChunkLod1MeshData()`) instead of every
+   * chunk on the planet, the same way `rebuildPreviewMesh()` builds all of them on a full
+   * regenerate. Disposes each affected chunk's old pair first so their GPU buffers don't leak.
+   * `updatePreviewDisplacement()`/`updatePreviewColors()` still loop the *whole* `previewMeshes`
+   * list afterward — a per-vertex position/color write is already the "cheap, every slider
+   * tick" tier this file's other displacement passes rely on, so re-running it isn't the cost
+   * this method exists to avoid; the chunk-rebuild (BFS regrouping + boundary-loop
+   * triangulation) is. */
+  private rebuildAffectedChunks(chunkIds: ReadonlySet<number>): void {
+    if (!this.graph || !this.tectonics || chunkIds.size === 0) return;
+
+    const elevation = buildEffectiveElevation(this.tectonics.elevation, this.terrainEdits);
+    const pinned = this.usePinning() ? this.pinnedCells : undefined;
+
+    for (const chunkId of chunkIds) {
+      const chunk = this.chunks[chunkId];
+      if (!chunk) continue;
+
+      const pair = this.chunkLodMeshes[chunkId];
+      if (pair) {
+        for (const mesh of pair) {
+          this.previewGroup.remove(mesh);
+          mesh.geometry.dispose();
+          const idx = this.previewMeshes.indexOf(mesh);
+          if (idx !== -1) this.previewMeshes.splice(idx, 1);
+        }
+      }
+
+      const lod0 = this.buildChunkLodMesh(buildChunkMeshData(this.graph, elevation, chunk), chunk, 0);
+      const lod1 = this.buildChunkLodMesh(
+        buildChunkLod1MeshData(this.graph, elevation, this.chunkIdByCell, chunk, {
+          pinned,
+          isLand: this.tectonics.isLand,
+        }),
+        chunk,
+        1,
+      );
+      this.chunkLodMeshes[chunkId] = [lod0, lod1];
+    }
+
+    this.updatePreviewDisplacement();
+    this.updatePreviewColors();
+    this.updateChunkLod();
+  }
+
+  /** Discards every M4e edit and rebuilds the whole preview from the graph's own generated
+   * elevation — a reset action, so a full `rebuildPreviewMesh()` (not the affected-chunks-only
+   * path above) is the right cost here. */
+  resetTerrainEdits(): void {
+    if (!this.graph || !this.tectonics) return;
+    this.terrainEdits = new Map();
+    this.editedCellCount.set(0);
+    this.lastEditChunksRebuilt.set('—');
+    this.rebuildPreviewMesh(this.graph, this.tectonics);
   }
 
   /** Picks LOD0 vs LOD1 per chunk from the live camera's distance to that chunk's centroid
