@@ -89,6 +89,14 @@ behind them. Geometric detail hands over to that topology-specific fallback at
 planetary/orbital scale. Plane domains have no spherical fallback; inside-
 cylinder domains retain their fixed axial frame and wrapped LOD coverage.
 
+Large clocks and large curved domains are precision-rebased inside the shared
+renderer. Per-wave phase origins are evaluated in CPU float64 and wrapped
+before upload, while spherical vertices are composed relative to the selected
+local frame rather than by cancelling planet-radius float32 vectors. Consumers
+may therefore pass an authoritative universal-time value to `timeSeconds`;
+they must not invent a separate render-only wave clock to work around shader
+precision.
+
 ## Domains
 
 Keep a domain instance on the component rather than constructing one in the

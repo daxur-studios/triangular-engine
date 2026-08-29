@@ -116,9 +116,18 @@ describe('WaterSurfaceRenderer', () => {
       scene.children.some((child) => child.name.startsWith('water-view-lod-')),
     ).toBeFalse();
     const material = renderer.meshes[0].material as ShaderMaterial;
-    expect(material.uniforms['uFrameOrigin'].value.distanceTo(visiblePoint)).toBeLessThan(
-      0.01,
+    const ray = visiblePoint.clone().sub(camera.position).normalize();
+    const relative = camera.position.clone();
+    const projected = relative.dot(ray);
+    const root = Math.sqrt(
+      projected * projected - (relative.lengthSq() - radius * radius),
     );
+    const expectedFirstHit = camera.position
+      .clone()
+      .addScaledVector(ray, -projected - root);
+    expect(
+      material.uniforms['uFrameOrigin'].value.distanceTo(expectedFirstHit),
+    ).toBeLessThan(0.01);
     renderer.dispose();
   });
 
@@ -257,6 +266,46 @@ describe('WaterSurfaceRenderer', () => {
     expect(material.uniforms['uDetailNormalMap'].value.magFilter).toBe(
       NearestFilter,
     );
+    renderer.dispose();
+  });
+
+  it('keeps large planetary time and radius values out of float32 wave phase math', () => {
+    const radius = 6_371_000;
+    const domain = new SphereWaterDomain(radius, {
+      center: new Vector3(0, -radius, 0),
+    });
+    const renderer = new WaterSurfaceRenderer({
+      domain,
+      preset: WATER_RENDER_PRESETS.balanced,
+    });
+    const camera = new PerspectiveCamera(60, 1, 0.1, 10_000_000);
+    camera.position.set(0, 100, 300);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld(true);
+
+    const absoluteUt = 1_800_000_000;
+    renderer.update(camera, absoluteUt);
+    const material = renderer.meshes[0].material as ShaderMaterial;
+    const firstPhases = [
+      ...(material.uniforms['uWavePhaseOffset'].value as number[]),
+    ];
+    expect(material.uniforms['uTime'].value).toBe(0);
+    expect(firstPhases.every((phase) => Math.abs(phase) <= Math.PI)).toBeTrue();
+    expect(material.vertexShader).toContain(
+      'gerstnerDisplacePhaseAnchored(base, phaseDeltaXZ)',
+    );
+    expect(material.vertexShader).toContain(
+      'uFrameOrigin\n        + tangentOffset',
+    );
+
+    renderer.update(camera, absoluteUt + 1 / 60);
+    const secondPhases = material.uniforms['uWavePhaseOffset']
+      .value as number[];
+    expect(material.uniforms['uTime'].value).toBeCloseTo(1 / 60, 6);
+    expect(
+      secondPhases.some((phase, index) => phase !== firstPhases[index]),
+    ).toBeTrue();
     renderer.dispose();
   });
 

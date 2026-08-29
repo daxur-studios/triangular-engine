@@ -20,6 +20,8 @@ export interface GerstnerUniforms {
   uWaveDirAmp: { value: Vector4[] };
   /** x = steepness, y = angular frequency (omega). */
   uWaveSteepOmega: { value: Vector2[] };
+  /** Per-wave phase at the current local frame origin, reduced to [-pi, pi]. */
+  uWavePhaseOffset: { value: number[] };
 }
 
 export function createGerstnerUniforms(
@@ -46,6 +48,9 @@ export function createGerstnerUniforms(
     uWaveCount: { value: resolved.length },
     uWaveDirAmp: { value: dirAmp },
     uWaveSteepOmega: { value: steepOmega },
+    uWavePhaseOffset: {
+      value: Array.from({ length: MAX_GERSTNER_WAVES }, () => 0),
+    },
   };
 }
 
@@ -73,11 +78,41 @@ export function updateGerstnerUniforms(
   }
 }
 
+/**
+ * Evaluates the large absolute space/time portion of every wave phase on the
+ * CPU (float64), then sends only a small wrapped angle to the GPU. This keeps
+ * planetary coordinates and universal-time clocks from losing metre- and
+ * frame-scale changes when converted to shader float32 values.
+ */
+export function updateGerstnerPhaseOffsets(
+  uniforms: GerstnerUniforms,
+  surfaceOriginXZ: Vector2,
+  timeSeconds: number,
+): void {
+  const tau = 2 * Math.PI;
+  for (let i = 0; i < MAX_GERSTNER_WAVES; i++) {
+    if (i >= uniforms.uWaveCount.value) {
+      uniforms.uWavePhaseOffset.value[i] = 0;
+      continue;
+    }
+    const directionAndAmplitude = uniforms.uWaveDirAmp.value[i];
+    const omega = uniforms.uWaveSteepOmega.value[i].y;
+    const phase =
+      directionAndAmplitude.z *
+        (directionAndAmplitude.x * surfaceOriginXZ.x +
+          directionAndAmplitude.y * surfaceOriginXZ.y) -
+      omega * timeSeconds;
+    uniforms.uWavePhaseOffset.value[i] =
+      ((((phase + Math.PI) % tau) + tau) % tau) - Math.PI;
+  }
+}
+
 /** Uniform declarations shared by the displacement and normal GLSL chunks. */
 export const GERSTNER_UNIFORMS_GLSL = `
   uniform int uWaveCount;
   uniform vec4 uWaveDirAmp[${MAX_GERSTNER_WAVES}];
   uniform vec2 uWaveSteepOmega[${MAX_GERSTNER_WAVES}];
+  uniform float uWavePhaseOffset[${MAX_GERSTNER_WAVES}];
 `;
 
 /**
@@ -85,6 +120,24 @@ export const GERSTNER_UNIFORMS_GLSL = `
  * undisplaced base (x0, z0), matching `GerstnerSurface.displace()`.
  */
 export const GERSTNER_DISPLACE_GLSL = `
+  vec3 gerstnerDisplacePhaseAnchored(vec2 base, vec2 phaseDelta) {
+    vec3 result = vec3(base.x, 0.0, base.y);
+    for (int i = 0; i < ${MAX_GERSTNER_WAVES}; i++) {
+      if (i >= uWaveCount) break;
+      vec2 dir = uWaveDirAmp[i].xy;
+      float k = uWaveDirAmp[i].z;
+      float amplitude = uWaveDirAmp[i].w;
+      float steepness = uWaveSteepOmega[i].x;
+      float phase = k * dot(dir, phaseDelta) + uWavePhaseOffset[i];
+      float c = cos(phase);
+      float s = sin(phase);
+      result.x += steepness * amplitude * dir.x * c;
+      result.z += steepness * amplitude * dir.y * c;
+      result.y += amplitude * s;
+    }
+    return result;
+  }
+
   vec3 gerstnerDisplaceAnchored(vec2 base, vec2 phaseBase, float t) {
     vec3 result = vec3(base.x, 0.0, base.y);
     for (int i = 0; i < ${MAX_GERSTNER_WAVES}; i++) {
@@ -116,6 +169,34 @@ export const GERSTNER_DISPLACE_GLSL = `
  * needs position (e.g. building the base grid) can skip the extra cos/sin.
  */
 export const GERSTNER_NORMAL_GLSL = `
+  vec3 gerstnerNormalPhaseAnchored(vec2 phaseDelta) {
+    float dYdx0 = 0.0;
+    float dYdz0 = 0.0;
+    float dxdx0 = 1.0;
+    float dzdz0 = 1.0;
+    float cross0 = 0.0;
+    for (int i = 0; i < ${MAX_GERSTNER_WAVES}; i++) {
+      if (i >= uWaveCount) break;
+      vec2 dir = uWaveDirAmp[i].xy;
+      float k = uWaveDirAmp[i].z;
+      float amplitude = uWaveDirAmp[i].w;
+      float steepness = uWaveSteepOmega[i].x;
+      float phase = k * dot(dir, phaseDelta) + uWavePhaseOffset[i];
+      float s = sin(phase);
+      float c = cos(phase);
+      float wa = k * amplitude;
+      dYdx0 += dir.x * wa * c;
+      dYdz0 += dir.y * wa * c;
+      float qwa = steepness * wa;
+      dxdx0 -= qwa * dir.x * dir.x * s;
+      dzdz0 -= qwa * dir.y * dir.y * s;
+      cross0 -= qwa * dir.x * dir.y * s;
+    }
+    vec3 tangentX0 = vec3(dxdx0, dYdx0, cross0);
+    vec3 tangentZ0 = vec3(cross0, dYdz0, dzdz0);
+    return normalize(cross(tangentZ0, tangentX0));
+  }
+
   vec3 gerstnerNormalAnchored(vec2 phaseBase, float t) {
     float dYdx0 = 0.0;
     float dYdz0 = 0.0;

@@ -21,6 +21,7 @@ import {
   GERSTNER_NORMAL_GLSL,
   GERSTNER_UNIFORMS_GLSL,
   updateGerstnerUniforms,
+  updateGerstnerPhaseOffsets,
   type GerstnerUniforms,
 } from '../core/gerstner-glsl';
 import {
@@ -135,6 +136,7 @@ export class WaterSurfaceRenderer {
   private readonly uLodCameraXZ = { value: new Vector2() };
   private readonly uLodPeriodZ = { value: 0 };
   private readonly scratchLocalCamera = new Vector2();
+  private readonly scratchSurfaceOriginXZ = new Vector2();
   private readonly scratchRelative = new Vector3();
   private readonly scratchViewRay = new Vector3();
   private readonly scratchLowerViewRay = new Vector3();
@@ -144,6 +146,7 @@ export class WaterSurfaceRenderer {
   private readonly domainUniforms: WaterDomainUniforms;
   private readonly surfaceDepthUniforms: WaterSurfaceDepthUniforms;
   private readonly uTime = { value: 0 };
+  private shaderTimeOriginSeconds: number | undefined;
   private gerstnerUniforms: GerstnerUniforms;
   private shadingUniforms: WaterShadingUniforms;
   private farFieldUniforms: WaterFarFieldUniforms;
@@ -202,20 +205,14 @@ export class WaterSurfaceRenderer {
     let lodAnchor: Vector2;
     if (this.domain instanceof CylinderWaterDomain) {
       frame = this.getFixedCylinderFrame(this.domain);
-      lodAnchor = this.getCylinderCameraXZ(
-        this.domain,
-        frame,
-        camera.position,
-      );
+      lodAnchor = this.getCylinderCameraXZ(this.domain, frame, camera.position);
     } else if (this.domain instanceof SphereWaterDomain) {
       const visibleSurfacePoint = this.resolveVisibleSpherePoint(
         camera,
         this.domain,
         this.scratchSurfacePoint,
       );
-      frame = this.domain.getLocalFrame(
-        visibleSurfacePoint ?? camera.position,
-      );
+      frame = this.domain.getLocalFrame(visibleSurfacePoint ?? camera.position);
       // A spherical frame selected from the visible surface is tangent at
       // that exact point, so the one clipmap is centred at local (0, 0).
       lodAnchor = this.scratchLocalCamera.set(0, 0);
@@ -252,18 +249,38 @@ export class WaterSurfaceRenderer {
     }
 
     const quantizeHz = this.preset.stylize?.timeQuantizeHz ?? 0;
-    this.uTime.value =
+    const waveTimeSeconds =
       quantizeHz > 0
         ? Math.floor(elapsedSeconds * quantizeHz) / quantizeHz
         : elapsedSeconds;
+    const surfaceOriginXZ =
+      this.domain.getSurfaceXZ?.(frame, 0, 0, this.scratchSurfaceOriginXZ) ??
+      this.scratchSurfaceOriginXZ.set(frame.origin.x, frame.origin.z);
+    updateGerstnerPhaseOffsets(
+      this.gerstnerUniforms,
+      surfaceOriginXZ,
+      waveTimeSeconds,
+    );
+
+    // Detail-normal scrolling has no simulation state to synchronize. Keep
+    // its shader clock session-relative when the authoritative clock is a
+    // large UT value, so float32 still changes smoothly every rendered frame.
+    if (this.shaderTimeOriginSeconds === undefined) {
+      this.shaderTimeOriginSeconds =
+        Math.abs(elapsedSeconds) >= 65_536 ? elapsedSeconds : 0;
+    }
+    const shaderTime = elapsedSeconds - this.shaderTimeOriginSeconds;
+    this.uTime.value =
+      quantizeHz > 0
+        ? Math.floor(shaderTime * quantizeHz) / quantizeHz
+        : shaderTime;
 
     const levels = computeWaterLodLevels(lodAnchor.x, lodAnchor.y, grid);
     const wrappedLevels =
       this.domain instanceof CylinderWaterDomain
         ? computeWaterLodLevels(
             lodAnchor.x,
-            lodAnchor.y +
-              (lodAnchor.y >= 0 ? -1 : 1) * this.uLodPeriodZ.value,
+            lodAnchor.y + (lodAnchor.y >= 0 ? -1 : 1) * this.uLodPeriodZ.value,
             grid,
           )
         : undefined;
@@ -884,10 +901,10 @@ export const WATER_SURFACE_VERTEX_SHADER = `
   void main() {
     vec2 localXZ = (instanceMatrix * vec4(position, 1.0)).xz;
     vec2 base = waterLodMorph(localXZ, uLodCameraXZ, uCellSize, uMorphStart, uMorphEnd);
-    vec2 phaseXZ = waterDomainSurfaceXZ(base);
+    vec2 phaseDeltaXZ = waterDomainSurfaceOffsetXZ(base);
     #ifdef WATER_GERSTNER
-      vec3 localDisplaced = gerstnerDisplaceAnchored(base, phaseXZ, uTime);
-      vLocalNormal = gerstnerNormalAnchored(phaseXZ, uTime);
+      vec3 localDisplaced = gerstnerDisplacePhaseAnchored(base, phaseDeltaXZ);
+      vLocalNormal = gerstnerNormalPhaseAnchored(phaseDeltaXZ);
     #else
       vec3 localDisplaced = vec3(base.x, 0.0, base.y);
       vLocalNormal = vec3(0.0, 1.0, 0.0);
