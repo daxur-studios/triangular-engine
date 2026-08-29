@@ -161,12 +161,19 @@ export class PhotoModeLabPageComponent {
     seaLevelY: 0.0,
   });
 
+  readonly initialCameraPosition = signal<[number, number, number]>([-25, 24, 75]);
+  readonly initialTarget = signal<[number, number, number]>([18, 8, -5]);
+
   // Photo Mode State Signals
   readonly fov = signal<number>(55);
   readonly sunAngle = signal<number>(45); // degrees
   readonly selectedResolution = signal<'native' | '1080p' | '1440p' | '4k' | '8k'>('1080p');
+  readonly selectedFormat = signal<'image/png' | 'image/webp' | 'image/jpeg'>('image/png');
+  readonly quality = signal<number>(85); // 10% to 100%
   readonly selectedSamples = signal<number>(16);
   readonly ultraQualityBoost = signal<boolean>(true);
+  readonly compressOutput = signal<boolean>(false);
+  readonly targetMaxSizeMB = signal<number>(1.0);
 
   // Capture status
   readonly isCapturing = signal<boolean>(false);
@@ -278,39 +285,33 @@ export class PhotoModeLabPageComponent {
 
         const count = patchMesh.surface.positions.length / 3;
         const colors = new Float32Array(count * 3);
-        const tempPos = new Vector3();
+        const center = patchMesh.centerWorldM;
 
         for (let i = 0; i < count; i++) {
-          tempPos.set(
-            patchMesh.surface.positions[i * 3],
-            patchMesh.surface.positions[i * 3 + 1],
-            patchMesh.surface.positions[i * 3 + 2],
-          );
-
-          const y = tempPos.y;
+          const worldY = patchMesh.surface.positions[i * 3 + 1] + center[1];
           let r = 0.35, g = 0.55, b = 0.25; // Default lush meadow green
 
-          if (y < 1.2) {
+          if (worldY < 1.2) {
             // Wet Sand
             r = 0.72; g = 0.65; b = 0.48;
-          } else if (y < 3.8) {
+          } else if (worldY < 3.8) {
             // Beach Sand
             r = 0.88; g = 0.82; b = 0.62;
-          } else if (y < 16.0) {
+          } else if (worldY < 16.0) {
             // Meadow grass gradient
-            const t = (y - 3.8) / 12.2;
+            const t = (worldY - 3.8) / 12.2;
             r = 0.28 + t * 0.12;
             g = 0.52 - t * 0.05;
             b = 0.22 - t * 0.02;
-          } else if (y < 28.0) {
+          } else if (worldY < 28.0) {
             // Highland rock/dirt
-            const t = (y - 16.0) / 12.0;
+            const t = (worldY - 16.0) / 12.0;
             r = 0.40 + t * 0.10;
             g = 0.42 - t * 0.08;
             b = 0.30 - t * 0.05;
           } else {
             // Mountain peak rock
-            const t = Math.min(1.0, (y - 28.0) / 14.0);
+            const t = Math.min(1.0, (worldY - 28.0) / 14.0);
             r = 0.50 + t * 0.35;
             g = 0.52 + t * 0.35;
             b = 0.55 + t * 0.38;
@@ -326,6 +327,7 @@ export class PhotoModeLabPageComponent {
 
         const mesh = new Mesh(geom, terrainMaterial);
         mesh.receiveShadow = true;
+        mesh.position.set(center[0], center[1], center[2]);
         this.sceneGroup.add(mesh);
       }
     }
@@ -672,12 +674,28 @@ export class PhotoModeLabPageComponent {
     this.selectedResolution.set(res);
   }
 
+  public setFormat(fmt: 'image/png' | 'image/webp' | 'image/jpeg') {
+    this.selectedFormat.set(fmt);
+  }
+
+  public setQuality(q: number) {
+    this.quality.set(q);
+  }
+
+  public setTargetMaxSize(mb: number) {
+    this.targetMaxSizeMB.set(mb);
+  }
+
   public setSamples(samples: number) {
     this.selectedSamples.set(samples);
   }
 
   public toggleUltraQuality() {
     this.ultraQualityBoost.update((v) => !v);
+  }
+
+  public toggleCompression() {
+    this.compressOutput.update((v) => !v);
   }
 
   /** Triggers the progressive high-quality photo capture pipeline. */
@@ -689,6 +707,8 @@ export class PhotoModeLabPageComponent {
     this.statusMessage.set('Preparing scene for capture...');
 
     const res = this.selectedResolution();
+    const fmt = this.selectedFormat();
+    const q = this.quality() / 100;
     let resolutionConfig: { width: number; height: number } | undefined = undefined;
     let multiplier = 1;
 
@@ -700,13 +720,23 @@ export class PhotoModeLabPageComponent {
 
     const samples = this.selectedSamples();
     const ultra = this.ultraQualityBoost();
+    const compress = this.compressOutput();
 
     try {
       const blob = await this.screenshot.capture({
-        format: 'image/png',
+        engine: this.engine,
+        format: fmt,
+        quality: q,
         multiplier,
         resolution: resolutionConfig,
         samples,
+        compress: compress
+          ? {
+              maxSizeMB: this.targetMaxSizeMB(),
+              quality: q,
+              fileType: fmt,
+            }
+          : false,
         hideOverlays: true,
         onProgress: (p) => {
           this.captureProgress.set(Math.round(p * 100));
@@ -743,8 +773,9 @@ export class PhotoModeLabPageComponent {
       this.lastCaptureUrl.set(url);
       this.statusMessage.set(`Capture completed successfully (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
 
-      // Automatically trigger download
-      this.screenshot.download(blob, `scenic-capture-${res}-${samples}x-${Date.now()}.png`);
+      // Automatically trigger download with matching extension
+      const ext = fmt === 'image/webp' ? 'webp' : fmt === 'image/jpeg' ? 'jpg' : 'png';
+      this.screenshot.download(blob, `scenic-capture-${res}-${samples}x-${Date.now()}.${ext}`);
     } catch (err) {
       console.error('Capture failed:', err);
       this.statusMessage.set('Capture failed. See console for details.');

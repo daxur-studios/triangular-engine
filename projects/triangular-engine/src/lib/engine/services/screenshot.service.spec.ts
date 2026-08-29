@@ -124,4 +124,16 @@ describe('ScreenshotService', () => {
 
     await expectAsync(detachedService.capture()).toBeRejectedWithError(/No active EngineService instance found/);
   });
+
+  it('should gracefully handle compress option without errors', async () => {
+    const blob = await service.capture({
+      format: 'image/png',
+      compress: {
+        maxSizeMB: 1,
+        quality: 0.8,
+      },
+    });
+
+    expect(blob).toBeTruthy();
+  });
 });

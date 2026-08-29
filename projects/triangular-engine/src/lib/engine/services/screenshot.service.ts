@@ -2,8 +2,26 @@ import { inject, Injectable } from '@angular/core';
 import { Camera, OrthographicCamera, PerspectiveCamera } from 'three';
 import { EngineService } from './engine.service';
 
+/** Configuration options for post-capture compression using `browser-image-compression`. */
+export interface ScreenshotCompressOptions {
+  /** Target maximum file size in MB. Default: 2 */
+  maxSizeMB?: number;
+  /** Max width or height in pixels. Defaults to captured image size. */
+  maxWidthOrHeight?: number;
+  /** Quality factor (0.0 to 1.0). Default: 0.85 */
+  quality?: number;
+  /** Target image MIME type (e.g. 'image/webp', 'image/jpeg', 'image/png'). Defaults to the capture format. */
+  fileType?: string;
+  /** Whether to execute compression inside a Web Worker. Default: true */
+  useWebWorker?: boolean;
+  /** Progress callback during compression (0 to 100). */
+  onProgress?: (progress: number) => void;
+}
+
 /** Configuration options for capturing screenshots. */
 export interface ScreenshotOptions {
+  /** Optional explicit EngineService instance. Defaults to injected engine or EngineService.activeInstance. */
+  engine?: EngineService;
   /** Output image MIME type. Defaults to `'image/png'`. */
   format?: 'image/png' | 'image/jpeg' | 'image/webp';
   /** Image compression quality (0.0 to 1.0) for `'image/jpeg'` and `'image/webp'`. Defaults to 0.92. */
@@ -14,6 +32,14 @@ export interface ScreenshotOptions {
   resolution?: { width: number; height: number };
   /** Number of progressive sub-pixel SSAA accumulation samples (1 = instant single pass, 8..32 = smooth anti-aliasing). Defaults to 1. */
   samples?: number;
+  /**
+   * Optional post-capture image compression using `browser-image-compression`.
+   * Pass `true` or a `ScreenshotCompressOptions` configuration.
+   *
+   * If `browser-image-compression` is not installed by the host project, this will gracefully
+   * log a warning and return the uncompressed capture without throwing an error.
+   */
+  compress?: boolean | ScreenshotCompressOptions;
   /** Automatically hide CSS2D and CSS3D DOM overlay markers/HUD during capture. Defaults to `true`. */
   hideOverlays?: boolean;
   /** Default filename when downloading. Defaults to `'screenshot-<timestamp>.<ext>'`. */
@@ -51,7 +77,7 @@ export class ScreenshotService {
    * @returns A promise resolving to the image `Blob`.
    */
   public async capture(options: ScreenshotOptions = {}): Promise<Blob> {
-    const engine = this.engine;
+    const engine = options.engine ?? this.engine;
     if (!engine) {
       throw new Error('[ScreenshotService] No active EngineService instance found.');
     }
@@ -87,25 +113,31 @@ export class ScreenshotService {
       const targetWidth = Math.max(1, Math.round(resolution ? resolution.width : baseWidth * multiplier));
       const targetHeight = Math.max(1, Math.round(resolution ? resolution.height : baseHeight * multiplier));
 
+      let blob: Blob;
       // 3. Fast path: native resolution, single sample
       if (samples <= 1 && multiplier === 1 && !resolution) {
         engine.render(engine.fpsController.lastRenderTime, true);
         onProgress?.(1);
-        return await this.canvasToBlob(engine.canvas, format, quality);
+        blob = await this.canvasToBlob(engine.canvas, format, quality);
+      } else {
+        // 4. Progressive / Scaled capture path: pause simulation clock to prevent movement during capture
+        engine.setSpeedFactor(0);
+
+        blob = await this.renderProgressive({
+          engine,
+          targetWidth,
+          targetHeight,
+          samples: Math.max(1, samples),
+          format,
+          quality,
+          onProgress,
+        });
       }
 
-      // 4. Progressive / Scaled capture path: pause simulation clock to prevent movement during capture
-      engine.setSpeedFactor(0);
-
-      const blob = await this.renderProgressive({
-        engine,
-        targetWidth,
-        targetHeight,
-        samples: Math.max(1, samples),
-        format,
-        quality,
-        onProgress,
-      });
+      // 5. Optional compression via browser-image-compression if available
+      if (options.compress) {
+        blob = await this.maybeCompressBlob(blob, format, options.compress);
+      }
 
       return blob;
     } finally {
@@ -148,14 +180,21 @@ export class ScreenshotService {
    */
   public download(blob: Blob, fileName?: string): void {
     const ext = blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';
-    const name = fileName ?? `screenshot-${Date.now()}.${ext}`;
+    let name = fileName ?? `screenshot-${Date.now()}.${ext}`;
+    if (blob.type === 'image/webp' && name.endsWith('.png')) {
+      name = name.replace(/\.png$/i, '.webp');
+    } else if (blob.type === 'image/jpeg' && name.endsWith('.png')) {
+      name = name.replace(/\.png$/i, '.jpg');
+    } else if (blob.type === 'image/png' && (name.endsWith('.webp') || name.endsWith('.jpg') || name.endsWith('.jpeg'))) {
+      name = name.replace(/\.(webp|jpg|jpeg)$/i, '.png');
+    }
 
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = name;
     anchor.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   /**
@@ -336,5 +375,71 @@ export class ScreenshotService {
         setTimeout(resolve, 0);
       }
     });
+  }
+
+  /**
+   * Optionally compresses a captured image Blob using `browser-image-compression` if installed.
+   * If `browser-image-compression` is not available in the host environment, logs a notice and returns the original blob.
+   */
+  private async maybeCompressBlob(
+    blob: Blob,
+    format: string,
+    compressOptions: boolean | ScreenshotCompressOptions,
+  ): Promise<Blob> {
+    const config = typeof compressOptions === 'object' ? compressOptions : {};
+    const maxSizeMB = config.maxSizeMB ?? 2;
+    const quality = config.quality ?? 0.85;
+    const fileType = config.fileType ?? format;
+    const useWebWorker = config.useWebWorker ?? true;
+
+    let imageCompression: any;
+    try {
+      const imageCompressionModule = await import('browser-image-compression');
+      imageCompression = (imageCompressionModule as any).default ?? imageCompressionModule;
+    } catch (err) {
+      console.warn(
+        '[ScreenshotService] Optional peer dependency "browser-image-compression" failed to load:',
+        err,
+      );
+      return blob;
+    }
+
+    try {
+      const ext = fileType === 'image/webp' ? 'webp' : fileType === 'image/jpeg' ? 'jpg' : 'png';
+      const file = blob instanceof File ? blob : new File([blob], `capture.${ext}`, { type: blob.type });
+
+      console.log(
+        `[ScreenshotService] Compressing: input=${(blob.size / 1024 / 1024).toFixed(2)} MB, ` +
+          `target=${maxSizeMB} MB, quality=${quality}, fileType=${fileType}, useWebWorker=${useWebWorker}`,
+      );
+
+      const compressedFile = await imageCompression(file, {
+        maxSizeMB,
+        maxWidthOrHeight: config.maxWidthOrHeight,
+        initialQuality: quality,
+        fileType,
+        useWebWorker,
+        onProgress: config.onProgress,
+      });
+
+      const compressedSizeMB = (compressedFile.size / 1024 / 1024).toFixed(2);
+      const originalSizeMB = (blob.size / 1024 / 1024).toFixed(2);
+
+      if (compressedFile && compressedFile.size < blob.size) {
+        console.log(
+          `[ScreenshotService] Compression succeeded: ${originalSizeMB} MB → ${compressedSizeMB} MB ` +
+            `(${((1 - compressedFile.size / blob.size) * 100).toFixed(1)}% reduction)`,
+        );
+        return compressedFile;
+      }
+
+      console.warn(
+        `[ScreenshotService] Compressed output (${compressedSizeMB} MB) was not smaller than original (${originalSizeMB} MB). Returning original.`,
+      );
+      return blob;
+    } catch (err) {
+      console.warn('[ScreenshotService] Compression failed, returning uncompressed image:', err);
+      return blob;
+    }
   }
 }

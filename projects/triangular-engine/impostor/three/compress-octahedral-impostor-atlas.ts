@@ -113,10 +113,9 @@ export async function compressOctahedralImpostorAtlas(
   const maxSizeMB = options?.maxSizeMB ?? 1;
   const maxWidthOrHeight = options?.maxWidthOrHeight ?? width;
 
-  const moduleName = 'browser-image-compression';
-  const imageCompressionModule = await import(/* @vite-ignore */ moduleName).catch(() => {
+  const imageCompressionModule = await import('browser-image-compression').catch((err) => {
     throw new Error(
-      'The "browser-image-compression" library is required for compressOctahedralImpostorAtlas.',
+      `The "browser-image-compression" library is required for compressOctahedralImpostorAtlas: ${err}`,
     );
   });
   const imageCompression =
