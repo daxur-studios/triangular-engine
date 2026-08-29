@@ -55,7 +55,7 @@ describe('CdlodPlanetComponent', () => {
     const fixture = TestBed.createComponent(CdlodPlanetComponent);
     fixture.componentRef.setInput('body', HOME_PLANET);
     fixture.componentRef.setInput('position', [1000, 2000, 3000]);
-    fixture.componentRef.setInput('quaternion', [0, 0.7071, 0, 0.7071]);
+    fixture.componentRef.setInput('quaternion', [0, Math.SQRT1_2, 0, Math.SQRT1_2]);
     fixture.componentRef.setInput('scale', 2);
     fixture.componentRef.setInput('useWorkers', false);
     fixture.detectChanges();

@@ -369,11 +369,7 @@ export class ScreenshotService {
   /** Yields execution to the next animation frame or tick. */
   private yieldNextFrame(): Promise<void> {
     return new Promise((resolve) => {
-      if (typeof requestAnimationFrame !== 'undefined') {
-        requestAnimationFrame(() => resolve());
-      } else {
-        setTimeout(resolve, 0);
-      }
+      setTimeout(resolve, 0);
     });
   }
 

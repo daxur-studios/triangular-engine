@@ -151,7 +151,7 @@ export abstract class Object3DComponent implements OnDestroy {
 
       // convert to euler tuple and set the rotation
       const euler = new Euler().setFromQuaternion(
-        new Quaternion(...quaternion),
+        new Quaternion(...quaternion).normalize(),
       );
       this.rotation.set(euler.toArray());
     });

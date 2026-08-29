@@ -36,8 +36,8 @@ describe('inspectScene', () => {
     expect(snapshot.camera.fov).toBe(45);
     expect(snapshot.objects.map((object) => object.name)).toEqual([
       'main-camera',
-      'payload',
       'vehicle-stack',
+      'payload',
       '',
     ]);
 
