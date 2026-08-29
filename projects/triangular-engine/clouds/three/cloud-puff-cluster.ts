@@ -9,10 +9,7 @@ import {
 } from 'three';
 
 import { createCloudPuffVariantParams, createCloudRandom01 } from '../core/cloud-puff-shape';
-import {
-  buildCloudPuffGeometryVariants,
-  type CloudPuffShading,
-} from './cloud-puff-geometry';
+import type { CloudPuffShading } from './cloud-puff-geometry';
 import {
   createCloudPuffMaterial,
   setCloudPuffPointLights,
@@ -20,6 +17,10 @@ import {
   type ICloudPuffMaterialOptions,
   type ICloudPuffPointLight,
 } from './cloud-puff-material';
+import {
+  DEFAULT_CLOUD_PUFF_STYLE_ID,
+  getCloudPuffStyleById,
+} from './styles/cloud-puff-style-registry';
 
 export interface ICloudPuffClusterOptions {
   readonly instanceCount: number;
@@ -29,10 +30,14 @@ export interface ICloudPuffClusterOptions {
   /** Half-extent (metres) of the box instances are jittered within, per axis. */
   readonly regionSizeM: readonly [number, number, number];
   readonly puffScaleRangeM: readonly [number, number];
+  /** World-space centre the region (and its wind drift) is anchored around. Defaults to the origin. */
+  readonly originM?: readonly [number, number, number];
   /** Icosahedron subdivision level for the base shape before noise displacement. */
   readonly detail?: number;
   /** 'flat' (default) bakes faceted per-face normals for crisp silhouettes; 'smooth' blends them. */
   readonly shading?: CloudPuffShading;
+  /** Which {@link ICloudPuffStyle} builds the puff geometry. Defaults to the low-poly blob look. */
+  readonly styleId?: string;
   readonly material?: ICloudPuffMaterialOptions;
 }
 
@@ -56,11 +61,11 @@ export function buildCloudPuffCluster(options: ICloudPuffClusterOptions): ICloud
   const [scaleMin, scaleMax] = options.puffScaleRangeM;
 
   const variantParams = createCloudPuffVariantParams(variantCount, seed);
-  const geometries = buildCloudPuffGeometryVariants(
-    variantParams,
+  const style = getCloudPuffStyleById(options.styleId ?? DEFAULT_CLOUD_PUFF_STYLE_ID);
+  const geometries = style.buildGeometryVariants(variantParams, {
     detail,
-    options.shading ?? 'flat',
-  );
+    shading: options.shading ?? 'flat',
+  });
   const material = createCloudPuffMaterial(options.material);
 
   const random = createCloudRandom01(seed ^ 0x9e37_79b9);
@@ -72,8 +77,11 @@ export function buildCloudPuffCluster(options: ICloudPuffClusterOptions): ICloud
     instancesPerVariant[variant]++;
   }
 
+  const origin = new Vector3(...(options.originM ?? ([0, 0, 0] as const)));
+
   const group = new Group();
   group.name = 'cloud-puff-cluster';
+  group.position.copy(origin);
   const meshByVariant = geometries.map((geometry, variant) => {
     const count = instancesPerVariant[variant];
     const mesh = new InstancedMesh(geometry, material, Math.max(count, 1));
@@ -117,7 +125,11 @@ export function buildCloudPuffCluster(options: ICloudPuffClusterOptions): ICloud
       windDriftM.x = wrapAxis(windDriftM.x + velocityMPerSecond[0] * deltaSeconds, regionX);
       windDriftM.y = wrapAxis(windDriftM.y + velocityMPerSecond[1] * deltaSeconds, regionY);
       windDriftM.z = wrapAxis(windDriftM.z + velocityMPerSecond[2] * deltaSeconds, regionZ);
-      group.position.copy(windDriftM);
+      group.position.set(
+        origin.x + windDriftM.x,
+        origin.y + windDriftM.y,
+        origin.z + windDriftM.z,
+      );
     },
     dispose() {
       for (const geometry of geometries) geometry.dispose();

@@ -3,3 +3,7 @@ export * from './core/cloud-puff-shape';
 export * from './three/cloud-puff-geometry';
 export * from './three/cloud-puff-material';
 export * from './three/cloud-puff-cluster';
+export * from './three/styles/cloud-puff-style';
+export * from './three/styles/cloud-puff-style-registry';
+export * from './three/styles/low-poly-blob-style';
+export * from './three/styles/card-stack-style';

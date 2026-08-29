@@ -9,15 +9,18 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Color, MathUtils, Vector3 } from 'three';
+import { Color, MathUtils, NoToneMapping, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
   buildCloudPuffCluster,
+  CLOUD_PUFF_STYLES,
+  DEFAULT_CLOUD_PUFF_STYLE_ID,
   type ICloudPuffCluster,
   type ICloudPuffPointLight,
 } from 'triangular-engine/clouds';
 
 const REGION_SIZE_M: readonly [number, number, number] = [110, 22, 110];
+const CLUSTER_ORIGIN_M: readonly [number, number, number] = [0, 20, 0];
 const ROCKET_COLOR = new Color('#7fd9ff');
 const LIGHTNING_COLOR = new Color('#dce8ff');
 
@@ -27,9 +30,21 @@ const LIGHTNING_COLOR = new Color('#dce8ff');
   templateUrl: './cloud-puffs-lab-page.component.html',
   styleUrl: './cloud-puffs-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  providers: [
+    EngineService.provide({
+      showFPS: true,
+      toneMapping: NoToneMapping,
+    }),
+  ],
   host: { class: 'flex-page' },
 })
 export class CloudPuffsLabPageComponent {
+  readonly styles = CLOUD_PUFF_STYLES;
+  readonly styleId = signal(DEFAULT_CLOUD_PUFF_STYLE_ID);
+  readonly selectedStyleDescription = computed(
+    () => this.styles.find((style) => style.id === this.styleId())?.description ?? '',
+  );
+
   readonly puffCount = signal(220);
   readonly puffScaleMin = signal(6);
   readonly puffScaleMax = signal(15);
@@ -78,6 +93,7 @@ export class CloudPuffsLabPageComponent {
         scaleMax: this.puffScaleMax(),
         shading: this.flatShading() ? ('flat' as const) : ('smooth' as const),
         seed: this.seed(),
+        styleId: this.styleId(),
       };
       untracked(() => this.rebuildCluster(options));
     });
@@ -107,14 +123,17 @@ export class CloudPuffsLabPageComponent {
     scaleMax: number;
     shading: 'flat' | 'smooth';
     seed: number;
+    styleId: string;
   }): void {
     this.disposeCluster();
     const cluster = buildCloudPuffCluster({
       instanceCount: options.count,
       seed: options.seed,
       regionSizeM: REGION_SIZE_M,
+      originM: CLUSTER_ORIGIN_M,
       puffScaleRangeM: [options.scaleMin, options.scaleMax],
       shading: options.shading,
+      styleId: options.styleId,
       material: { rimStrength: this.rimStrength() },
     });
     cluster.setSunDirection(this.sunDirection());

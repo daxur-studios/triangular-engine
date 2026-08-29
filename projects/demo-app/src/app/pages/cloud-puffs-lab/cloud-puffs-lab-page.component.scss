@@ -57,9 +57,25 @@ h1 {
   width: 100%;
 }
 
+.controls select {
+  background: #182631;
+  color: #eef6fb;
+  border: 1px solid #263944;
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.4rem;
+  font: inherit;
+}
+
 .controls output {
   color: #eef6fb;
   font-weight: 600;
+}
+
+.style-description {
+  grid-column: 1 / -1;
+  margin: -0.15rem 0 0;
+  font-size: 0.74rem;
+  color: #8fb8cc;
 }
 
 scene {

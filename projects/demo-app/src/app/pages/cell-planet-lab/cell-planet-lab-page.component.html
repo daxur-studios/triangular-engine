@@ -158,6 +158,13 @@
             (change)="toggleWireframe()"
           /><span>wireframe</span></label
         >
+        <label class="toggle"
+          ><input
+            type="checkbox"
+            [checked]="freezeCulling()"
+            (change)="toggleFreezeCulling()"
+          /><span>freeze LOD/culling</span></label
+        >
         <label class="control">
           <span>elevation ×</span>
           <input

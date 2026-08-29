@@ -7,6 +7,15 @@
 </header>
 
 <section class="controls">
+  <label>Style
+    <select [value]="styleId()" (change)="styleId.set($any($event.target).value)">
+      @for (style of styles; track style.id) {
+        <option [value]="style.id">{{ style.label }}</option>
+      }
+    </select>
+  </label>
+  <p class="style-description">{{ selectedStyleDescription() }}</p>
+
   <label>Puff count <output>{{ puffCount() }}</output>
     <input type="range" min="20" max="600" step="10" [value]="puffCount()"
       (input)="puffCount.set(+$any($event.target).value)" />
@@ -54,7 +63,7 @@
   </label>
 </section>
 
-<scene [showFps]="true">
+<scene>
   <orbitControls [cameraPosition]="[0, 55, 200]" [target]="[0, 8, 0]" [far]="5000" />
   <ambientLight [intensity]="0.55" />
   <directionalLight [position]="sunLightPosition()" [intensity]="2.2" />

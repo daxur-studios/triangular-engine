@@ -52,6 +52,11 @@ import {
  * margin past the exact horizon so boundary edges don't clip mid-line at the terminator. */
 const CULL_THRESHOLD = -0.02;
 
+/** Angular form of `CULL_THRESHOLD` (~91.1°) — used for whole-chunk horizon culling, where the
+ * test needs to subtract the chunk's own angular size before comparing, which a plain dot
+ * product against a fixed threshold can't do (see `updateChunkLod()`). */
+const HORIZON_ANGLE = Math.acos(CULL_THRESHOLD);
+
 export type MapMode =
   | 'graph'
   | 'plates'
@@ -205,6 +210,13 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * `highlightPins` for checking a pinned cell's actual triangle layout (fan vs boundary-loop)
    * rather than just its color. */
   readonly showWireframe = signal(false);
+  /** Freezes `updateChunkLod()` (both the near/far LOD split and the horizon cull below) at
+   * its current state so the camera can keep orbiting while the visible/culled set stays
+   * fixed — lets you park on one side, freeze, then rotate to the far side and confirm culled
+   * chunks are the ones actually missing, instead of the cull re-evaluating out from under
+   * you every frame as the camera moves. */
+  readonly freezeCulling = signal(false);
+  readonly chunkCulledCount = signal(0);
   /** M4c: camera distance (world units, planet radius ~1) beyond which a chunk switches from
    * LOD0 (full per-cell) to LOD1 (merged cells) — see `updateChunkLod()`. Exposed as a slider
    * since the right value depends on `elevationScale`/camera-range settings that themselves
@@ -428,6 +440,10 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
 
   toggleWireframe(): void {
     this.showWireframe.update((value) => !value);
+  }
+
+  toggleFreezeCulling(): void {
+    this.freezeCulling.update((value) => !value);
   }
 
   onLodDistance(event: Event): void {
@@ -791,7 +807,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
           tectonics.elevation,
           chunkIdByCell,
           chunk,
-          { pinned },
+          { pinned, isLand: tectonics.isLand },
         ),
         chunk,
         1,
@@ -813,21 +829,60 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * transform of their own, so this is already world space, and ignoring elevation
    * displacement here is a fine approximation for a distance *threshold*) against the
    * `lodDistance()` slider, then flips exactly one of `chunkLodMeshes[chunk.id]`'s two meshes
-   * visible. Cheap: O(chunkCount) distance checks per frame, no geometry touched — the actual
-   * mesh data for both LODs was already built once in `rebuildPreviewMesh()`. Runs even when
-   * the preview is hidden (harmless — `previewGroup.visible = false` already skips rendering
-   * either way) so the `lodSplit` stat stays live for the slider. */
+   * visible. Cheap: O(chunkCount) distance/angle checks per frame, no geometry touched — the
+   * actual mesh data for both LODs was already built once in `rebuildPreviewMesh()`. Runs even
+   * when the preview is hidden (harmless — `previewGroup.visible = false` already skips
+   * rendering either way) so the `lodSplit` stat stays live for the slider.
+   *
+   * Also does whole-chunk horizon culling: a chunk entirely on the far side of the planet from
+   * the camera gets *both* its LOD meshes set `.visible = false`, which drops it from the
+   * draw-call list Three submits to the GPU entirely — unlike `previewMaterial`'s `DoubleSide`
+   * setting (or a `FrontSide` swap), which only discards individual back-facing *triangles* in
+   * the rasterizer after they've already been vertex-shaded and their draw call issued. The
+   * existing per-cell near-side cull (`updateCulling()`, for the sites/edges graph overlay) uses
+   * a flat `dot(direction, view) <= CULL_THRESHOLD` test, which is fine for a single point but
+   * wrong for a whole chunk: a chunk's centroid can already be past the horizon while cells at
+   * its edge are still visible. So this converts the dot product to an angle and subtracts the
+   * chunk's own angular size (`chunk.boundingRadius`, precomputed by `buildPlanetChunks()`
+   * specifically for this) before comparing against `HORIZON_ANGLE` — a chunk is only culled once
+   * even its nearest edge (toward the camera) is past the horizon margin, so a chunk straddling
+   * the terminator stays visible (at whichever LOD distance already picked) rather than popping
+   * off early.
+   *
+   * `freezeCulling()` short-circuits both the LOD pick and the horizon cull at their current
+   * `.visible` state, so a chunk set exactly for testing (see `toggleFreezeCulling()`'s doc
+   * comment) — orbit to confirm the far side stayed correctly culled instead of the cull
+   * silently re-running every frame as the camera moves. */
   private updateChunkLod(): void {
     if (this.chunks.length === 0) return;
+    if (this.freezeCulling()) return;
     const camera = this.engine.camera$.value;
     if (!camera) return;
     const threshold = this.lodDistance();
 
+    const camLen = camera.position.length() || 1;
+    const vx = camera.position.x / camLen;
+    const vy = camera.position.y / camLen;
+    const vz = camera.position.z / camLen;
+
     let nearCount = 0;
+    let culledCount = 0;
     for (const chunk of this.chunks) {
       const pair = this.chunkLodMeshes[chunk.id];
       if (!pair) continue;
       const [lod0, lod1] = pair;
+
+      const dot =
+        chunk.center.x * vx + chunk.center.y * vy + chunk.center.z * vz;
+      const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
+      const behindHorizon = angle - chunk.boundingRadius > HORIZON_ANGLE;
+      if (behindHorizon) {
+        lod0.visible = false;
+        lod1.visible = false;
+        culledCount++;
+        continue;
+      }
+
       const dx = camera.position.x - chunk.center.x;
       const dy = camera.position.y - chunk.center.y;
       const dz = camera.position.z - chunk.center.z;
@@ -836,8 +891,9 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       lod1.visible = !near;
       if (near) nearCount++;
     }
+    this.chunkCulledCount.set(culledCount);
     this.lodSplit.set(
-      `${nearCount} near / ${this.chunks.length - nearCount} far`,
+      `${nearCount} near / ${this.chunks.length - nearCount - culledCount} far / ${culledCount} culled`,
     );
   }
 
