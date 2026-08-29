@@ -20,6 +20,7 @@ import {
   type ICloudPuffCluster,
   type ICloudPuffPointLight,
 } from 'triangular-engine/clouds';
+import { PlanetViewComponent } from 'triangular-engine/worldgen/render';
 
 const REGION_SIZE_M: readonly [number, number, number] = [110, 22, 110];
 const CLUSTER_ORIGIN_M: readonly [number, number, number] = [0, 20, 0];
@@ -28,7 +29,7 @@ const LIGHTNING_COLOR = new Color('#dce8ff');
 
 @Component({
   selector: 'app-cloud-puffs-lab-page',
-  imports: [EngineModule],
+  imports: [EngineModule, PlanetViewComponent],
   templateUrl: './cloud-puffs-lab-page.component.html',
   styleUrl: './cloud-puffs-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

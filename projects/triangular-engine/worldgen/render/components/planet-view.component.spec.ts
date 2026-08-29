@@ -1,0 +1,75 @@
+import { TestBed } from '@angular/core/testing';
+import { Subject } from 'rxjs';
+import { Group, PerspectiveCamera, Scene } from 'three';
+import { EngineService } from 'triangular-engine';
+import { PlanetViewComponent } from './planet-view.component';
+
+describe('PlanetViewComponent', () => {
+  let scene: Scene;
+  let camera: PerspectiveCamera;
+  let tick$: Subject<number>;
+
+  beforeEach(() => {
+    scene = new Scene();
+    camera = new PerspectiveCamera();
+    tick$ = new Subject<number>();
+    TestBed.configureTestingModule({
+      imports: [PlanetViewComponent],
+      providers: [{ provide: EngineService, useValue: { scene, camera, tick$ } }],
+    });
+  });
+
+  it('generates a graph/tectonics/ecology and renders chunk meshes on init', () => {
+    const fixture = TestBed.createComponent(PlanetViewComponent);
+    fixture.componentRef.setInput('cellCount', 60);
+    fixture.componentRef.setInput('seed', 1);
+    fixture.componentRef.setInput('relaxationIterations', 0);
+    fixture.componentRef.setInput('plateCount', 3);
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.graph()).not.toBeNull();
+    expect(fixture.componentInstance.tectonics()).not.toBeNull();
+    expect(fixture.componentInstance.ecology()).not.toBeNull();
+    expect(fixture.componentInstance.buildMs()).not.toBeNull();
+
+    expect(scene.children.length).toBe(1);
+    const root = scene.children[0] as Group;
+    // previewGroup (chunk meshes) + ocean shell + river lines + coastline lines.
+    expect(root.children.length).toBeGreaterThan(0);
+    const previewGroup = root.children.find((child) => child.children.length > 0) as Group;
+    expect(previewGroup).toBeTruthy();
+    expect(previewGroup.children.length).toBeGreaterThan(0);
+
+    fixture.destroy();
+    expect(scene.children.length).toBe(0);
+  });
+
+  it('re-displaces vertices without rebuilding the graph when elevationScale changes', () => {
+    const fixture = TestBed.createComponent(PlanetViewComponent);
+    fixture.componentRef.setInput('cellCount', 60);
+    fixture.componentRef.setInput('seed', 1);
+    fixture.detectChanges();
+
+    const graphBefore = fixture.componentInstance.graph();
+    fixture.componentRef.setInput('elevationScale', 0.1);
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.graph()).toBe(graphBefore);
+
+    fixture.destroy();
+  });
+
+  it('updates upVector from the camera when useSurfaceUp is enabled', () => {
+    camera.position.set(0, 2, 0);
+    const fixture = TestBed.createComponent(PlanetViewComponent);
+    fixture.componentRef.setInput('cellCount', 60);
+    fixture.componentRef.setInput('useSurfaceUp', true);
+    fixture.detectChanges();
+
+    tick$.next(0.016);
+
+    expect(fixture.componentInstance.upVector()).toEqual([0, 1, 0]);
+
+    fixture.destroy();
+  });
+});

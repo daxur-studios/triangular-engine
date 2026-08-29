@@ -40,7 +40,8 @@
               "../scatter/**/*.spec.ts",
               "../spline/**/*.spec.ts",
               "../procedural/**/*.spec.ts",
-              "../worldgen/**/*.spec.ts"
+              "../worldgen/**/*.spec.ts",
+              "../worldgen/render/**/*.spec.ts"
             ]
           }
         },
@@ -50,6 +51,14 @@
             "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"],
             "include": ["../worldgen/**/*.spec.ts"]
+          }
+        },
+        "test-worldgen-render": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
+            "polyfills": ["zone.js", "zone.js/testing"],
+            "include": ["../worldgen/render/**/*.spec.ts"]
           }
         },
         "test-navigation": {

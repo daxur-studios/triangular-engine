@@ -101,10 +101,10 @@
   }
 
   @if (domainId() === 'sphere-shell') {
-    <mesh [position]="[0, 0, 0]">
-      <sphereGeometry [params]="{ radius: 55, widthSegments: 36, heightSegments: 24 }" />
-      <meshStandardMaterial [params]="{ color: '#273822', roughness: 0.85 }" />
-    </mesh>
+    <!-- Reusable Voronoi cell-graph planet (triangular-engine/worldgen/render) standing in for
+         the plain ground sphere — proves <planetView> drops into a page that has nothing to do
+         with /cell-planet-lab, see docs/runbook/022_v4_voronoi_cell_planets.md. -->
+    <planetView [scale]="55" [cellCount]="700" [seed]="7" [elevationScale]="0.02" [showOcean]="true" />
   }
 
   @if (domainId() === 'cylinder-interior') {

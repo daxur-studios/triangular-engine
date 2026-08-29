@@ -62,6 +62,9 @@
       ],
       "triangular-engine/worldgen": [
         "projects/triangular-engine/worldgen/public-api"
+      ],
+      "triangular-engine/worldgen/render": [
+        "projects/triangular-engine/worldgen/render/public-api"
       ]
     },
     "outDir": "../../out-tsc/app",
