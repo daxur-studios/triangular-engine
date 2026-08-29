@@ -7,6 +7,14 @@
 </header>
 
 <section class="controls">
+  <label>World scale
+    <select [value]="worldScale()" (change)="onWorldScaleChange($any($event.target).value)">
+      @for (scale of scales; track scale) {
+        <option [value]="scale">{{ scalePresets[scale].label }}</option>
+      }
+    </select>
+  </label>
+
   <label>Domain
     <select [value]="domainId()" (change)="domainId.set($any($event.target).value)">
       @for (domain of domains; track domain.id) {
@@ -26,15 +34,15 @@
   <p class="style-description">{{ selectedStyleDescription() }}</p>
 
   <label>Puff count <output>{{ puffCount() }}</output>
-    <input type="range" min="20" max="600" step="10" [value]="puffCount()"
+    <input type="range" min="50" [max]="activePreset().maxPuffCount" step="50" [value]="puffCount()"
       (input)="puffCount.set(+$any($event.target).value)" />
   </label>
-  <label>Min scale (m) <output>{{ puffScaleMin() }}</output>
-    <input type="range" min="2" max="20" step="1" [value]="puffScaleMin()"
+  <label>Puff min size (m) <output>{{ puffScaleMin() }}m</output>
+    <input type="range" min="2" max="30" step="1" [value]="puffScaleMin()"
       (input)="puffScaleMin.set(+$any($event.target).value)" />
   </label>
-  <label>Max scale (m) <output>{{ puffScaleMax() }}</output>
-    <input type="range" min="4" max="40" step="1" [value]="puffScaleMax()"
+  <label>Puff max size (m) <output>{{ puffScaleMax() }}m</output>
+    <input type="range" min="4" max="60" step="1" [value]="puffScaleMax()"
       (input)="puffScaleMax.set(+$any($event.target).value)" />
   </label>
   <label class="toggle">
@@ -56,7 +64,7 @@
       (input)="rimStrength.set(+$any($event.target).value)" />
   </label>
   <label>Wind speed (m/s) <output>{{ windSpeed() }}</output>
-    <input type="range" min="0" max="15" step="0.5" [value]="windSpeed()"
+    <input type="range" min="0" max="30" step="0.5" [value]="windSpeed()"
       (input)="windSpeed.set(+$any($event.target).value)" />
   </label>
   <label>Whirly turbulence <output>{{ curlTurbulence() }}</output>
@@ -70,9 +78,25 @@
 
   @if (domainId() === 'sphere-shell') {
     <label class="toggle">
+      <input type="checkbox" [checked]="moistureDriven()"
+        (change)="moistureDriven.set($any($event.target).checked)" />
+      Moisture-driven clouds (from Voronoi planet)
+    </label>
+
+    <label class="toggle">
       <input type="checkbox" [checked]="zonalBanding()"
         (change)="zonalBanding.set($any($event.target).checked)" />
       Zonal jet banding (gas giant shear)
+    </label>
+
+    <label>Planet surface view
+      <select [value]="planetRenderMode()" (change)="planetRenderMode.set($any($event.target).value)">
+        <option value="elevation">Elevation / Natural</option>
+        <option value="moisture">Moisture (Blue = high humidity)</option>
+        <option value="biome">Biomes (Whittaker table)</option>
+        <option value="temperature">Temperature</option>
+        <option value="land">Land vs Water</option>
+      </select>
     </label>
   }
 
@@ -89,40 +113,46 @@
 </section>
 
 <scene>
-  <orbitControls [cameraPosition]="[0, 55, 200]" [target]="[0, 8, 0]" [far]="5000" />
+  <orbitControls [cameraPosition]="activePreset().cameraPos" [target]="[0, 0, 0]" [far]="activePreset().far" />
   <ambientLight [intensity]="0.55" />
   <directionalLight [position]="sunLightPosition()" [intensity]="2.2" />
 
   @if (domainId() === 'box') {
-    <mesh [position]="[0, -18, 0]" [rotation]="[-1.5707963, 0, 0]">
-      <planeGeometry [params]="[400, 400, 8, 8]" />
+    <mesh [position]="[0, activePreset().groundPlaneY, 0]" [rotation]="[-1.5707963, 0, 0]">
+      <planeGeometry [params]="[activePreset().groundPlaneSize, activePreset().groundPlaneSize, 8, 8]" />
       <meshStandardMaterial [params]="{ color: '#33422f' }" />
     </mesh>
   }
 
   @if (domainId() === 'sphere-shell') {
-    <!-- Reusable Voronoi cell-graph planet (triangular-engine/worldgen/render) standing in for
-         the plain ground sphere — proves <planetView> drops into a page that has nothing to do
-         with /cell-planet-lab, see docs/runbook/022_v4_voronoi_cell_planets.md. -->
-    <planetView [scale]="55" [cellCount]="700" [seed]="7" [elevationScale]="0.02" [showOcean]="true" />
+    <!-- Reusable Voronoi cell-graph planet (triangular-engine/worldgen/render) -->
+    <planetView
+      #planet
+      [scale]="activePreset().planetRadius"
+      [cellCount]="worldScale() === 'large' ? 1800 : (worldScale() === 'medium' ? 1200 : 700)"
+      [seed]="7"
+      [elevationScale]="0.02"
+      [renderMode]="planetRenderMode()"
+      [showOcean]="true"
+    />
   }
 
   @if (domainId() === 'cylinder-interior') {
     <mesh [position]="[0, 0, 0]" [rotation]="[1.5707963, 0, 0]">
-      <cylinderGeometry [params]="[96, 96, 260, 48, 1, true]" />
+      <cylinderGeometry [params]="[activePreset().cylinderRadius, activePreset().cylinderRadius, activePreset().cylinderLength, 48, 1, true]" />
       <meshStandardMaterial [params]="{ color: '#273822', side: 2, roughness: 0.9 }" />
     </mesh>
   }
 
   @if (rocketEngineEnabled()) {
     <mesh [position]="rocketPosition()">
-      <sphereGeometry [params]="{ radius: 1.4, widthSegments: 10, heightSegments: 8 }" />
+      <sphereGeometry [params]="{ radius: 1.4 * (activePreset().planetRadius / 55), widthSegments: 10, heightSegments: 8 }" />
       <meshBasicMaterial [params]="{ color: '#7fd9ff' }" />
     </mesh>
   }
   @if (lightningVisible()) {
     <mesh [position]="lightningPosition()">
-      <sphereGeometry [params]="{ radius: 2, widthSegments: 10, heightSegments: 8 }" />
+      <sphereGeometry [params]="{ radius: 2 * (activePreset().planetRadius / 55), widthSegments: 10, heightSegments: 8 }" />
       <meshBasicMaterial [params]="{ color: '#dce8ff' }" />
     </mesh>
   }

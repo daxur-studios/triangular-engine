@@ -113,13 +113,42 @@ describe('WaterSurfaceRenderer', () => {
         child instanceof InstancedMesh &&
         child.name.startsWith('water-view-lod-'),
     );
-    expect(viewMeshes.length).toBe(
-      WATER_RENDER_PRESETS.balanced.grid.ringCount + 1,
-    );
+    expect(viewMeshes.length).toBe(renderer.meshes.length);
     expect(viewMeshes.every((mesh) => mesh.count > 0)).toBeTrue();
     expect(
       renderer.farSurfaceMesh?.material.uniforms['uViewFieldOpacity'].value,
     ).toBeGreaterThan(0);
+    renderer.dispose();
+  });
+
+  it('partitions camera and view fields instead of drawing their overlap twice', () => {
+    const renderer = new WaterSurfaceRenderer({
+      domain: new PlaneWaterDomain(),
+      preset: WATER_RENDER_PRESETS.balanced,
+    });
+    const material = renderer.meshes[0].material as ShaderMaterial;
+
+    expect(material.fragmentShader).toContain('uSecondaryFieldActive');
+    expect(material.fragmentShader).toContain('competingFieldDistance');
+    expect(material.uniforms['uFieldRole'].value).toBe(0);
+    // The renderer adds enough cheap coarse rings that the ordinary plane
+    // view cannot expose the former 1 km square boundary.
+    expect(renderer.meshes.length).toBeGreaterThan(
+      WATER_RENDER_PRESETS.balanced.grid.ringCount + 1,
+    );
+    renderer.dispose();
+  });
+
+  it('keeps the spherical fallback behind detail and out of scene depth', () => {
+    const renderer = new WaterSurfaceRenderer({
+      domain: new SphereWaterDomain(600_000),
+      preset: WATER_RENDER_PRESETS.balanced,
+    });
+
+    expect(renderer.farSurfaceMesh?.material.depthWrite).toBeFalse();
+    expect(renderer.farSurfaceMesh!.renderOrder).toBeLessThan(
+      renderer.meshes[0].renderOrder,
+    );
     renderer.dispose();
   });
 

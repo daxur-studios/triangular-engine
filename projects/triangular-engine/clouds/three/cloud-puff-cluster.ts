@@ -53,6 +53,8 @@ export interface ICloudPuffClusterOptions {
   readonly styleId?: string;
   /** Which {@link ICloudPuffDomain} controls puff placement and wind drift. Defaults to the box domain. */
   readonly domainId?: string;
+  /** Optional density/moisture weight callback returning 0..1 cloud presence probability. */
+  readonly densityAt?: (direction: Vector3) => number;
   readonly material?: ICloudPuffMaterialOptions;
 }
 
@@ -114,6 +116,7 @@ export function buildCloudPuffCluster(options: ICloudPuffClusterOptions): ICloud
     radiusM: options.radiusM,
     lengthM: options.lengthM,
     shellThicknessM: options.shellThicknessM,
+    densityAt: options.densityAt,
   };
 
   const transforms = domain.placeInstances(domainContext);

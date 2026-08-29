@@ -161,6 +161,21 @@ describe('Cloud Puff Domains', () => {
       }
     });
 
+    it('respects densityAt rejection sampling (e.g. northern hemisphere only)', () => {
+      const transforms = SPHERE_SHELL_CLOUD_PUFF_DOMAIN.placeInstances({
+        instanceCount: 25,
+        seed: 42,
+        puffScaleRangeM: [4, 8],
+        radiusM: 75,
+        densityAt: (dir) => (dir.y > 0.05 ? 1.0 : 0.0),
+      });
+
+      expect(transforms.length).toBe(25);
+      for (const t of transforms) {
+        expect(t.position.y).toBeGreaterThanOrEqual(0);
+      }
+    });
+
     it('advects instances across mesh matrices under wind', () => {
       const group = new Group();
       const mesh = new InstancedMesh(new SphereGeometry(1), new MeshBasicMaterial(), 10);

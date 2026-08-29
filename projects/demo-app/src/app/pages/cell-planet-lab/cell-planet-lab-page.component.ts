@@ -2,6 +2,7 @@ import {
   AfterViewInit,
   ChangeDetectionStrategy,
   Component,
+  computed,
   DestroyRef,
   ElementRef,
   inject,
@@ -35,6 +36,7 @@ import {
   RaycastFocusContext,
   RaycastFocusResolver,
 } from 'triangular-engine';
+import { JoltPhysicsModule } from 'triangular-engine/jolt';
 import {
   buildChunkLod1MeshData,
   buildChunkMeshData,
@@ -70,6 +72,13 @@ const CULL_THRESHOLD = -0.02;
  * test needs to subtract the chunk's own angular size before comparing, which a plain dot
  * product against a fixed threshold can't do (see `updateChunkLod()`). */
 const HORIZON_ANGLE = Math.acos(CULL_THRESHOLD);
+
+/** M4d Jolt proof: how far above the patch (unit-sphere radius units, same scale
+ * `elevationScale` displaces in) the dropped test ball spawns. */
+const COLLIDER_PHYSICS_DROP_HEIGHT = 0.06;
+/** Fixed — this is a physics/collision proof, not a tunable gameplay object, so it isn't
+ * wired up as a slider like the rest of this lab's knobs. */
+const COLLIDER_PHYSICS_BALL_RADIUS = 0.015;
 
 export type MapMode =
   | 'graph'
@@ -109,7 +118,7 @@ function chunkColor(chunkId: number): string {
 
 @Component({
   selector: 'app-cell-planet-lab-page',
-  imports: [RouterLink, EngineModule],
+  imports: [RouterLink, EngineModule, JoltPhysicsModule],
   templateUrl: './cell-planet-lab-page.component.html',
   styleUrl: './cell-planet-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -179,6 +188,30 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   readonly colliderPatchSampleCount = signal(17);
   readonly colliderPatchAngularDeg = signal(6);
   readonly colliderPatchBuildMs = signal('—');
+  /** M4d, the actual Jolt half: a static `<joltMeshShape>` built from the same
+   * `buildColliderPatch()` output as the debug overlay above, plus a dynamic ball dropped onto
+   * it — proving the patch can hold weight, not just render at high resolution. Built once per
+   * toggle-on/"drop ball" (see `rebuildColliderPhysics()`), not every tick like the debug
+   * overlay — a resting ball on a shape that keeps changing under it would never settle. Gravity
+   * points toward the planet center at whatever direction the patch is centered on (not a fixed
+   * world -Y), since the patch can sit anywhere on the sphere. */
+  readonly showColliderPhysics = signal(false);
+  readonly physicsGravityMagnitude = signal(0.4);
+  readonly physicsPatch = signal<{
+    geometry: BufferGeometry;
+    center: IVec3;
+    dropPosition: Vector3Tuple;
+  } | null>(null);
+  /** Bumped to force the `@for` in the template to recreate the dynamic ball body — same
+   * re-key-to-recreate pattern `destruction-poc-page.component.html`'s `run()` uses. */
+  readonly dropAttempt = signal(0);
+  readonly colliderPhysicsBallRadius = COLLIDER_PHYSICS_BALL_RADIUS;
+  readonly physicsGravity = computed<Vector3Tuple>(() => {
+    const patch = this.physicsPatch();
+    const g = this.physicsGravityMagnitude();
+    if (!patch) return [0, -g, 0];
+    return [-patch.center.x * g, -patch.center.y * g, -patch.center.z * g];
+  });
   readonly plateCount = signal(10);
   readonly mapMode = signal<MapMode>('graph');
   /** Visual-only exaggeration of raw elevation (unitless, typically ~-1..1) into a radius
@@ -315,6 +348,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       this.riverLines?.geometry.dispose();
       this.coastlineLines?.geometry.dispose();
       this.colliderPatchMesh?.geometry.dispose();
+      this.physicsPatch()?.geometry.dispose();
       this.sitesMaterial.dispose();
       this.edgesMaterial.dispose();
       this.previewMaterial.dispose();
@@ -504,22 +538,8 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * allocation every frame for no visible benefit while the camera is idle. */
   private updateColliderPatch(): void {
     if (!this.showColliderPatch() || !this.graph || !this.tectonics) return;
-    const camera = this.engine.camera$.value;
-    if (!camera || this.previewMeshes.length === 0) return;
-
-    this.colliderPatchRaycaster.setFromCamera(this.colliderPatchNdcCenter, camera);
-    const hit = this.colliderPatchRaycaster.intersectObjects(
-      this.previewMeshes,
-      false,
-    )[0];
-    if (!hit) return;
-
-    const len = hit.point.length() || 1;
-    const direction: IVec3 = {
-      x: hit.point.x / len,
-      y: hit.point.y / len,
-      z: hit.point.z / len,
-    };
+    const direction = this.raycastPlanetDirection();
+    if (!direction) return;
 
     const angularHalfWidth = (this.colliderPatchAngularDeg() * Math.PI) / 180;
     if (this.lastColliderPatchCenter) {
@@ -599,6 +619,107 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     }
     positionAttr.needsUpdate = true;
     this.colliderPatchMesh.geometry.computeVertexNormals();
+  }
+
+  /** Raycasts straight out from the camera (NDC center — whatever it's currently looking at)
+   * against the live `previewMeshes`, returning the hit direction normalized to the unit
+   * sphere. Shared by `updateColliderPatch()`'s per-tick follow and `rebuildColliderPhysics()`'s
+   * one-shot "build the physics test here" — same "where would a vessel be" stand-in
+   * `raycastFocusResolver` uses for orbit pivoting. */
+  private raycastPlanetDirection(): IVec3 | null {
+    const camera = this.engine.camera$.value;
+    if (!camera || this.previewMeshes.length === 0) return null;
+
+    this.colliderPatchRaycaster.setFromCamera(this.colliderPatchNdcCenter, camera);
+    const hit = this.colliderPatchRaycaster.intersectObjects(
+      this.previewMeshes,
+      false,
+    )[0];
+    if (!hit) return null;
+
+    const len = hit.point.length() || 1;
+    return {
+      x: hit.point.x / len,
+      y: hit.point.y / len,
+      z: hit.point.z / len,
+    };
+  }
+
+  toggleColliderPhysics(): void {
+    this.showColliderPhysics.update((visible) => !visible);
+    if (this.showColliderPhysics()) {
+      this.rebuildColliderPhysics();
+    } else {
+      this.physicsPatch()?.geometry.dispose();
+      this.physicsPatch.set(null);
+    }
+  }
+
+  /** Builds a fresh Jolt-ready patch at whatever the camera is currently looking at: the same
+   * `buildColliderPatch()`/`colliderPatchIndices()` pair the M4d debug overlay uses (M4d's core
+   * sampling, done 2026-08-29), displaced by the current `elevationScale()` exactly like
+   * `rebuildColliderPatch()` does for its own mesh. Unlike that debug overlay, this one does NOT
+   * re-run every tick as the camera moves — the template's `<joltMeshShape [geometry]>` would
+   * recreate the Jolt shape out from under any ball resting on it, so a rebuild only happens on
+   * toggle-on or an explicit "drop ball" click (`respawnDrop()` reuses the existing patch). */
+  private rebuildColliderPhysics(): void {
+    if (!this.graph || !this.tectonics) return;
+    const direction = this.raycastPlanetDirection();
+    if (!direction) return;
+
+    const sampleCount = this.colliderPatchSampleCount();
+    const angularHalfWidth = (this.colliderPatchAngularDeg() * Math.PI) / 180;
+    const patch = buildColliderPatch(this.graph, this.tectonics.elevation, direction, {
+      angularHalfWidth,
+      sampleCount,
+    });
+    const indices = colliderPatchIndices(patch);
+    const scale = this.elevationScale() / 100;
+    const positions = new Float32Array(patch.directions.length);
+    for (let i = 0; i < patch.elevations.length; i++) {
+      const radius = 1 + patch.elevations[i] * scale;
+      const o = i * 3;
+      positions[o] = patch.directions[o] * radius;
+      positions[o + 1] = patch.directions[o + 1] * radius;
+      positions[o + 2] = patch.directions[o + 2] * radius;
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(positions, 3));
+    geometry.setIndex(new BufferAttribute(indices, 1));
+
+    const centerElevation = sampleElevation(this.graph, this.tectonics.elevation, direction);
+    const dropRadius = 1 + centerElevation * scale + COLLIDER_PHYSICS_DROP_HEIGHT;
+    const dropPosition: Vector3Tuple = [
+      direction.x * dropRadius,
+      direction.y * dropRadius,
+      direction.z * dropRadius,
+    ];
+
+    this.physicsPatch()?.geometry.dispose();
+    this.physicsPatch.set({ geometry, center: direction, dropPosition });
+    this.dropAttempt.update((n) => n + 1);
+  }
+
+  /** Re-drops the ball from its spawn height above the existing patch, without resampling the
+   * planet or rebuilding the static mesh shape underneath it — just forces the template's
+   * `@for` to recreate the dynamic rigid body (same re-key-to-recreate trick
+   * `destruction-poc-page.component.html`'s `run()` uses for its own crate). */
+  respawnDrop(): void {
+    if (!this.physicsPatch()) return;
+    this.dropAttempt.update((n) => n + 1);
+  }
+
+  /** Rebuilds the whole physics patch at the current camera look-at — use when you've orbited
+   * to a new spot and want the test moved there instead of just re-dropping in place. */
+  moveColliderPhysicsHere(): void {
+    if (!this.showColliderPhysics()) return;
+    this.rebuildColliderPhysics();
+  }
+
+  onPhysicsGravity(event: Event): void {
+    this.physicsGravityMagnitude.set(
+      Number((event.target as HTMLInputElement).value),
+    );
   }
 
   jitterValue(): string {

@@ -89,6 +89,12 @@ export const routes: Routes = [
   },
   {
     path: 'cell-planet-lab',
+    canActivate: [
+      () =>
+        import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
+          JoltPhysicsService.load().then(() => true),
+        ),
+    ],
     loadComponent: () =>
       import('./pages/cell-planet-lab/cell-planet-lab-page.component').then(
         ({ CellPlanetLabPageComponent }) => CellPlanetLabPageComponent,

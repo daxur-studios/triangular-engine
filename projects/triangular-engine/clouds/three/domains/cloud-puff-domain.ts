@@ -20,6 +20,11 @@ export interface ICloudPuffDomainContext {
   readonly lengthM?: number;
   /** Thickness (metres) of the altitude band for sphere/cylinder shells. */
   readonly shellThicknessM?: number;
+  /**
+   * Optional density/moisture weight callback returning 0..1 probability of cloud presence
+   * along a given unit-sphere direction vector (e.g. from planet climate/moisture data).
+   */
+  readonly densityAt?: (direction: Vector3) => number;
 }
 
 export interface ICloudPuffWindOptions {

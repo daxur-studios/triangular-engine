@@ -75,12 +75,19 @@ Changing these inputs at runtime rebuilds only the renderer state that needs to
 change. No page reload is required.
 
 Plane and spherical domains retain a camera-centred detailed grid and pool a
-second grid selected from the camera centre/lower frustum rays. The second grid
-fades in only when it extends useful coverage toward the visible water. A
-spherical domain blends both detailed regions into its complete far-water
-sphere, then fades geometric waves at planetary/orbital scale so no finite
-patch edge becomes the horizon. Inside-cylinder domains retain their fixed
-axial frame and wrapped LOD coverage.
+second field selected from the camera centre/lower frustum rays. The second
+field is capped to one outer-grid extent from the first, so it remains a
+connected view-biased extension rather than a detached square. When active,
+the fields use a deterministic nearest-anchor partition: only one field owns
+each fragment, including their overlap. Coarse outer rings keep the finite
+edge outside ordinary low/medium-altitude views.
+
+A spherical domain additionally renders a whole-body far-water surface before
+the detailed fields. It does not write depth and is excluded from the opaque
+scene-depth capture, so it cannot z-fight the waves or masquerade as terrain
+behind them. Geometric detail hands over to that topology-specific fallback at
+planetary/orbital scale. Plane domains have no spherical fallback; inside-
+cylinder domains retain their fixed axial frame and wrapped LOD coverage.
 
 ## Domains
 
