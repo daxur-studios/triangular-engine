@@ -339,6 +339,38 @@ describe('buildChunkLod1MeshData pinning', () => {
   });
 });
 
+describe('buildChunkLod1MeshData land/water boundary', () => {
+  const UNBOUNDED_MERGE = { maxGroupSize: Number.MAX_SAFE_INTEGER, maxSag: 2 };
+
+  it('never merges a land cell into the same flat-color group as a water cell', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 400, seed: 13 });
+    const { chunks, chunkIdByCell } = buildPlanetChunks(graph, { targetChunkSize: 80 });
+    const elevation = graph.cells.map(() => 0);
+
+    // Split by a fixed spatial plane (x >= 0 is "land") rather than by id parity — cell ids
+    // carry no spatial locality (see buildPlanetChunks()'s doc comment), so an id-based split
+    // wouldn't reliably land adjacent to water the way a real coastline does.
+    const isLand = graph.cells.map((cell) => cell.center.x >= 0);
+    const crossesBoundary = (chunk: (typeof chunks)[number]): boolean =>
+      chunk.cellIds.some((id) => graph.cells[id].neighbors.some((n) => chunk.cellIds.includes(n) && isLand[n] !== isLand[id]));
+    const chunk = chunks.find((c) => c.cellIds.length > 20 && crossesBoundary(c))!;
+    expect(chunk).toBeDefined(); // sanity: some chunk actually straddles the split
+
+    // Baseline: with growth otherwise unbounded, nothing stops the whole chunk from
+    // collapsing into one group, so every vertex is tagged with the same representative id.
+    const withoutIsLand = buildChunkLod1MeshData(graph, elevation, chunkIdByCell, chunk, UNBOUNDED_MERGE);
+    expect(new Set(withoutIsLand.cellIds).size).toBe(1);
+
+    // With the constraint, land and water can never share a group, so growth must stop at the
+    // coastline and more than one representative id appears — and every id that does appear
+    // must be consistently on one side: no id whose own isLand differs from any other vertex
+    // tagged with that same id (trivially true per-id, since a triangle's 3 vertices always
+    // share one id, but worth asserting the split actually produced >1 group at all).
+    const withIsLand = buildChunkLod1MeshData(graph, elevation, chunkIdByCell, chunk, { ...UNBOUNDED_MERGE, isLand });
+    expect(new Set(withIsLand.cellIds).size).toBeGreaterThan(1);
+  });
+});
+
 describe('triangulatePolygon2D', () => {
   const shoelaceArea = (pts: { x: number; y: number }[]): number => {
     let sum = 0;

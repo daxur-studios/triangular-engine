@@ -7,3 +7,8 @@ export * from './three/styles/cloud-puff-style';
 export * from './three/styles/cloud-puff-style-registry';
 export * from './three/styles/low-poly-blob-style';
 export * from './three/styles/card-stack-style';
+export * from './three/domains/cloud-puff-domain';
+export * from './three/domains/cloud-puff-domain-registry';
+export * from './three/domains/box-domain';
+export * from './three/domains/sphere-shell-domain';
+export * from './three/domains/cylinder-interior-domain';

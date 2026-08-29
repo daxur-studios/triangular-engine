@@ -2,7 +2,9 @@
 
 ## Status
 
-- State: In progress (first spike)
+- State: In progress — base spike done and build-verified; style plugin system added; domain
+  (placement-shape) plugin system is the next concrete piece of work, not yet started (see
+  [Handover](#handover--next-session) below).
 - Target entry point: `triangular-engine/clouds`
 - Initial renderer: WebGL
 - Last updated: 2026-08-29
@@ -61,18 +63,48 @@ convention (`core/` = framework-free logic, `three/` = Three.js building, `publi
 ```text
 triangular-engine/clouds
 ├── core/
-│   └── cloud-puff-shape.ts      deterministic RNG + 3D value-noise/FBM + per-variant
-│                                 displacement params (pure math, no three.js)
+│   └── cloud-puff-shape.ts        deterministic RNG (createCloudRandom01) + 3D value-noise/FBM +
+│                                   per-variant displacement params (pure math, no three.js)
 ├── three/
-│   ├── cloud-puff-geometry.ts   icosphere -> noise-displaced -> flat-shaded BufferGeometry
-│   ├── cloud-puff-material.ts   hand-rolled ShaderMaterial: sun (directional) + up to 4
-│   │                             dynamic point lights, rim/fresnel "silver lining" and
-│   │                             from-inside glow terms
-│   └── cloud-puff-cluster.ts    places InstancedMesh batches (one per shape variant) in a
-│                                 region, wind drift via translating the cluster's Group,
-│                                 setSunDirection()/setPointLights() to drive lighting live
+│   ├── cloud-puff-geometry.ts     icosphere -> noise-displaced -> flat-shaded BufferGeometry
+│   │                               (used by the low-poly-blob style)
+│   ├── cloud-puff-material.ts     hand-rolled ShaderMaterial: sun (directional) + up to 4
+│   │                               dynamic point lights, rim/fresnel "silver lining" and
+│   │                               from-inside glow terms
+│   ├── cloud-puff-cluster.ts      places InstancedMesh batches (one per shape variant) in a
+│   │                               region, wind drift via translating the cluster's Group,
+│   │                               setSunDirection()/setPointLights() to drive lighting live
+│   └── styles/
+│       ├── cloud-puff-style.ts            ICloudPuffStyle plugin interface
+│       ├── cloud-puff-style-registry.ts   CLOUD_PUFF_STYLES[] + getCloudPuffStyleById()
+│       ├── low-poly-blob-style.ts         original displaced-icosphere look (default)
+│       └── card-stack-style.ts            flat-shaded slab-stack look (see below)
 └── public-api.ts
 ```
+
+### Style plugin system
+
+`ICloudPuffStyle` (`three/styles/cloud-puff-style.ts`) isolates "how one puff's geometry is
+built" behind `buildGeometryVariants(variantParams, { detail, shading }) -> BufferGeometry[]`.
+Everything else — material, lighting, instancing, wind — is shared and style-agnostic, so a new
+look is just a new file plus one line in the registry
+(`three/styles/cloud-puff-style-registry.ts`). The demo page's style `<select>` reads
+`CLOUD_PUFF_STYLES` and passes `styleId` straight through to `buildCloudPuffCluster()`.
+
+Two styles exist today:
+
+- **Low-poly blob** (`low-poly-blob-style.ts`, default) — the original approach: icosphere
+  vertices displaced radially by 3D value-noise/FBM, then flat-shaded. Round, cauliflower-ish.
+- **Card stack** (`card-stack-style.ts`) — built from flat-shaded slabs instead of a displaced
+  sphere. Each puff is a wide, near-flat **base tier** (mirrors the real cumulus
+  condensation-level base) with 2–4 independent, randomly-offset **turret stacks** rising out of
+  it (4 tapered layers each, increasingly jittered toward the top — mirrors the chaotic/billowing
+  cloud top). Every slab's footprint is an irregular jittered polygon (`Shape` + `ExtrudeGeometry`,
+  5–7 points nudged off a circle) rather than a plain box, so silhouettes read as lumpy, not
+  boxy. All slabs merge into one `BufferGeometry` via `mergeGeometries` and get normalized to a
+  unit bounding sphere, same convention as the blob style, so it drops into the cluster's uniform
+  per-instance scale unchanged. Ignores the flat/smooth shading toggle (always flat — the style is
+  built from flat slab faces, there's nothing to smooth).
 
 ### Lighting model
 
@@ -115,6 +147,52 @@ couple of frames, then decays it).
 Orbital shell-texture layer, bounded local raymarch layer, a weather/density field shared across
 layers, per-planet presets (Earth/Jupiter/Venus), rain particles — all deferred until this puff
 layer is validated.
+
+## Handover / next session
+
+**Task: multi-domain placement.** Right now `buildCloudPuffCluster()`
+(`three/cloud-puff-cluster.ts`) only knows one placement shape — a Cartesian box: instances are
+Cartesian-jittered within `regionSizeM` around `originM`, and `advanceWind(deltaSeconds,
+velocityMPerSecond)` moves the cluster by translating the `Group` and wrapping each axis
+(`wrapAxis`) so it never drifts away. That's fine for a flat/open scene but doesn't fit a
+spherical planet shell or the inside of an O'Neill-style cylinder (see
+`docs/runbook/003_oneill_cylinder_poc.md` and the `takram-cylinder-clouds` demo page for the
+existing cylinder-world precedent).
+
+Agreed approach (not yet built): add a second plugin axis, **`ICloudPuffDomain`**, parallel to
+`ICloudPuffStyle` — style owns puff *shape*, domain owns puff *placement*. Concretely:
+
+- New `three/domains/cloud-puff-domain.ts` — interface with something like
+  `placeInstances(instanceCount, seed, regionParams) -> { position, quaternion }[]` and an
+  `advanceWind(state, deltaSeconds, driftInput)` that each domain interprets its own way, plus a
+  `three/domains/cloud-puff-domain-registry.ts` mirroring the style registry
+  (`CLOUD_PUFF_DOMAINS[]`, `DEFAULT_CLOUD_PUFF_DOMAIN_ID`, `getCloudPuffDomainById`).
+- **Box domain** — extract the current behavior verbatim as the default domain (Cartesian jitter,
+  translate + wrap wind). No behavior change, just a refactor.
+- **Sphere shell domain** — instances scattered over a spherical band at some radius/altitude
+  around a planet center, oriented radially outward (puff's local "up" = surface normal); wind is
+  a slow rotation of the whole shell group around an axis — wraps for free, no seams, unlike
+  trying to translate-and-wrap points on a sphere.
+- **Cylinder interior domain** — instances on the inner surface of a hollow cylinder; wind is
+  axial drift + rotation around the cylinder axis (also wraps for free by construction).
+
+**The one real interface break**, not just an addition: `advanceWind`'s current signature
+(`velocityMPerSecond: [number, number, number]`, interpreted as world-space m/s) is box-specific —
+angular domains (sphere, cylinder) need a rotation rate, not a translation vector. Don't keep the
+box signature and bolt rotation on top; change `advanceWind` to take a generic drift input that
+each domain's implementation interprets (box: m/s per axis; sphere/cylinder: angular rate +
+axial rate where relevant). This is the one place that ripples into `ICloudPuffCluster`'s public
+shape (`three/cloud-puff-cluster.ts`) and the demo page's `engine.tick$` subscription
+(`cloud-puffs-lab-page.component.ts`).
+
+Once the domain plugin exists, wire a domain `<select>` into
+`projects/demo-app/src/app/pages/cloud-puffs-lab/` next to the existing style `<select>`
+(`cloud-puffs-lab-page.component.html`/`.ts`), same pattern as `styleId`/`CLOUD_PUFF_STYLES`
+already does for styles. Verify: box domain behaves identically to today (regression check), then
+visually confirm sphere-shell and cylinder-interior placements orient puffs correctly (radially
+outward / cylinder-normal-inward) and that their wind rotation reads as continuous with no visible
+seam or pop at the wrap point. Per standing instruction, verification is done by the user in their
+own running instance — do not open a browser or start a preview server from this session.
 
 ## Verification
 

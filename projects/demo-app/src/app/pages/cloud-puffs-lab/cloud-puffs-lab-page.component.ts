@@ -13,7 +13,9 @@ import { Color, MathUtils, NoToneMapping, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
   buildCloudPuffCluster,
+  CLOUD_PUFF_DOMAINS,
   CLOUD_PUFF_STYLES,
+  DEFAULT_CLOUD_PUFF_DOMAIN_ID,
   DEFAULT_CLOUD_PUFF_STYLE_ID,
   type ICloudPuffCluster,
   type ICloudPuffPointLight,
@@ -43,6 +45,12 @@ export class CloudPuffsLabPageComponent {
   readonly styleId = signal(DEFAULT_CLOUD_PUFF_STYLE_ID);
   readonly selectedStyleDescription = computed(
     () => this.styles.find((style) => style.id === this.styleId())?.description ?? '',
+  );
+
+  readonly domains = CLOUD_PUFF_DOMAINS;
+  readonly domainId = signal(DEFAULT_CLOUD_PUFF_DOMAIN_ID);
+  readonly selectedDomainDescription = computed(
+    () => this.domains.find((domain) => domain.id === this.domainId())?.description ?? '',
   );
 
   readonly puffCount = signal(220);
@@ -94,6 +102,7 @@ export class CloudPuffsLabPageComponent {
         shading: this.flatShading() ? ('flat' as const) : ('smooth' as const),
         seed: this.seed(),
         styleId: this.styleId(),
+        domainId: this.domainId(),
       };
       untracked(() => this.rebuildCluster(options));
     });
@@ -110,7 +119,7 @@ export class CloudPuffsLabPageComponent {
     });
 
     this.engine.tick$.pipe(takeUntilDestroyed(destroyRef)).subscribe((delta) => {
-      this.cluster()?.advanceWind(delta, [this.windSpeed(), 0, this.windSpeed() * 0.35]);
+      this.cluster()?.advanceWind(delta, this.windSpeed());
       this.updateDynamicLights(delta);
     });
 
@@ -124,16 +133,22 @@ export class CloudPuffsLabPageComponent {
     shading: 'flat' | 'smooth';
     seed: number;
     styleId: string;
+    domainId: string;
   }): void {
     this.disposeCluster();
+    const isBox = options.domainId === 'box';
     const cluster = buildCloudPuffCluster({
       instanceCount: options.count,
       seed: options.seed,
       regionSizeM: REGION_SIZE_M,
-      originM: CLUSTER_ORIGIN_M,
+      originM: isBox ? CLUSTER_ORIGIN_M : [0, 0, 0],
+      radiusM: options.domainId === 'sphere-shell' ? 70 : 90,
+      lengthM: 260,
+      shellThicknessM: 14,
       puffScaleRangeM: [options.scaleMin, options.scaleMax],
       shading: options.shading,
       styleId: options.styleId,
+      domainId: options.domainId,
       material: { rimStrength: this.rimStrength() },
     });
     cluster.setSunDirection(this.sunDirection());

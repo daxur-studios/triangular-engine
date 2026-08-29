@@ -72,6 +72,17 @@ export function buildPlanetChunks(graph: IPlanetGraphCore, params: IChunkParams 
  * See `computeCellPins()` in `salience.ts` for why (peaks/coastline capes/small islands that
  * shouldn't flatten, vanish, or shift as LOD1 merges around them) — this function only
  * enforces the mechanic, undefined `pinned` pins nothing and reproduces prior behavior exactly.
+ *
+ * `isLand`, when given, additionally stops a group from ever absorbing a neighbor whose
+ * land/water classification differs from the seed's — every group stays purely land or purely
+ * water. Without this, a merge group can straddle a coastline (nothing else here considers
+ * land/water at all), and since a merged group renders as one flat polygon with one color from
+ * one representative cell (see `buildChunkLod1MeshData()`), the merged patch's color bleeds
+ * across the true coastline — most visibly a thin land passage "thickening" by swallowing the
+ * water cells it got merged with. The boundary loop itself (`buildChunkBoundaryLoop()`) already
+ * traces exact shared corner vertices for any group, so keeping groups single-classification is
+ * enough to make that boundary the true coastline instead of a merged blob's outline. Undefined
+ * imposes no constraint, identical to prior behavior.
  */
 function growConnectedGroups(
   graph: IPlanetGraphCore,
@@ -79,6 +90,7 @@ function growConnectedGroups(
   targetSize: number,
   maxAngleFromSeed = Infinity,
   pinned?: Uint8Array,
+  isLand?: boolean[],
 ): { groups: number[][]; groupIdByCell: number[] } {
   const groupIdByCell = new Array<number>(graph.cells.length).fill(-1);
   const inScope = new Uint8Array(graph.cells.length);
@@ -113,6 +125,7 @@ function growConnectedGroups(
         for (const neighborId of graph.cells[cellId].neighbors) {
           if (inScope[neighborId] === 0 || groupIdByCell[neighborId] !== -1) continue;
           if (pinned?.[neighborId] === 1) continue;
+          if (isLand && isLand[neighborId] !== isLand[seedId]) continue;
           if (!fitsInCap(neighborId)) continue;
           groupIdByCell[neighborId] = groupId;
           members.push(neighborId);
@@ -376,6 +389,13 @@ export interface IChunkLod1Params {
    * `salience.ts`. Indexed by cell id, length = `graph.cells.length`, 1 = pinned. Omitted or
    * undefined pins nothing, identical to pre-pinning behavior. */
   pinned?: Uint8Array;
+  /** Per-cell land/water classification, indexed by cell id (same array `computeCellPins()`
+   * takes as `isLand`). When given, a merge group never crosses a land/water boundary — see
+   * `growConnectedGroups()`'s `isLand` doc for why (a merged group's single flat color
+   * otherwise bleeds across the coastline, most visibly a thin land passage rendering thicker
+   * at LOD1 than LOD0). Omitted or undefined imposes no constraint, identical to prior
+   * behavior. */
+  isLand?: boolean[];
 }
 
 const LOD1_DEFAULTS = {
@@ -431,6 +451,12 @@ const LOD1_DEFAULTS = {
  * directions: group-to-group inside a chunk, LOD1 chunk to LOD0 chunk across a chunk border,
  * and LOD1 chunk to LOD1 chunk. No skirts, no stitching pass.
  *
+ * That exactness is a promise about the *edge*, not the *color* — a group still renders as one
+ * flat color from one representative cell (see below), so an exact boundary loop that happens
+ * to straddle a coastline would still bleed a merged blob's single land-or-water color across
+ * it. `params.isLand`, when given, is what keeps a group from straddling one at all: see
+ * `growConnectedGroups()`'s `isLand` doc for the failure this prevents.
+ *
  * Every vertex is tagged with its own group's first member cell id rather than a true owning
  * cell — color resolution coarsens along with geometry, which is the point: a distant chunk
  * doesn't need cell-accurate biome color any more than it needs cell-accurate geometry.
@@ -460,6 +486,7 @@ export function buildChunkLod1MeshData(
     Math.max(1, p.maxGroupSize),
     maxAngle,
     p.pinned,
+    p.isLand,
   );
 
   const directions: number[] = [];

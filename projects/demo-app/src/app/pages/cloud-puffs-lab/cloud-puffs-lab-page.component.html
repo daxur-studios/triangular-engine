@@ -7,6 +7,15 @@
 </header>
 
 <section class="controls">
+  <label>Domain
+    <select [value]="domainId()" (change)="domainId.set($any($event.target).value)">
+      @for (domain of domains; track domain.id) {
+        <option [value]="domain.id">{{ domain.label }}</option>
+      }
+    </select>
+  </label>
+  <p class="style-description">{{ selectedDomainDescription() }}</p>
+
   <label>Style
     <select [value]="styleId()" (change)="styleId.set($any($event.target).value)">
       @for (style of styles; track style.id) {
@@ -68,10 +77,26 @@
   <ambientLight [intensity]="0.55" />
   <directionalLight [position]="sunLightPosition()" [intensity]="2.2" />
 
-  <mesh [position]="[0, -18, 0]" [rotation]="[-1.5707963, 0, 0]">
-    <planeGeometry [params]="[400, 400, 8, 8]" />
-    <meshStandardMaterial [params]="{ color: '#33422f' }" />
-  </mesh>
+  @if (domainId() === 'box') {
+    <mesh [position]="[0, -18, 0]" [rotation]="[-1.5707963, 0, 0]">
+      <planeGeometry [params]="[400, 400, 8, 8]" />
+      <meshStandardMaterial [params]="{ color: '#33422f' }" />
+    </mesh>
+  }
+
+  @if (domainId() === 'sphere-shell') {
+    <mesh [position]="[0, 0, 0]">
+      <sphereGeometry [params]="{ radius: 55, widthSegments: 36, heightSegments: 24 }" />
+      <meshStandardMaterial [params]="{ color: '#273822', roughness: 0.85 }" />
+    </mesh>
+  }
+
+  @if (domainId() === 'cylinder-interior') {
+    <mesh [position]="[0, 0, 0]" [rotation]="[1.5707963, 0, 0]">
+      <cylinderGeometry [params]="[96, 96, 260, 48, 1, true]" />
+      <meshStandardMaterial [params]="{ color: '#273822', side: 2, roughness: 0.9 }" />
+    </mesh>
+  }
 
   @if (rocketEngineEnabled()) {
     <mesh [position]="rocketPosition()">
