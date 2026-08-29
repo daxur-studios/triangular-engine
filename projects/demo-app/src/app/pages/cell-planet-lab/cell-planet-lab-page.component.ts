@@ -200,6 +200,11 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * *something* changed somewhere, not *what*. Free to toggle: just re-touches the existing
    * color attribute (`updatePreviewColors()`), no geometry rebuild. */
   readonly highlightPins = signal(false);
+  /** `<scene>`'s built-in `[wireframe]` override (see `SceneComponent`) — swaps every mesh's
+   * material for a shared wireframe one scene-wide, restored on toggle-off. Handy alongside
+   * `highlightPins` for checking a pinned cell's actual triangle layout (fan vs boundary-loop)
+   * rather than just its color. */
+  readonly showWireframe = signal(false);
   /** M4c: camera distance (world units, planet radius ~1) beyond which a chunk switches from
    * LOD0 (full per-cell) to LOD1 (merged cells) — see `updateChunkLod()`. Exposed as a slider
    * since the right value depends on `elevationScale`/camera-range settings that themselves
@@ -419,6 +424,10 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   toggleHighlightPins(): void {
     this.highlightPins.update((value) => !value);
     this.updatePreviewColors();
+  }
+
+  toggleWireframe(): void {
+    this.showWireframe.update((value) => !value);
   }
 
   onLodDistance(event: Event): void {

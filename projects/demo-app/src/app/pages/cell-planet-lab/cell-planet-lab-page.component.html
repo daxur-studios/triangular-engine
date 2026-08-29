@@ -1,4 +1,4 @@
-<scene [logarithmicDepthBuffer]="true">
+<scene [logarithmicDepthBuffer]="true" [wireframe]="showWireframe()">
   <ng-template portalTarget="overlay" lane="topStart">
     <a class="back-link" routerLink="/">← Examples</a>
     <section class="scope" aria-label="Cell planet lab">
@@ -150,6 +150,13 @@
             [checked]="highlightPins()"
             (change)="toggleHighlightPins()"
           /><span>highlight pinned cells</span></label
+        >
+        <label class="toggle"
+          ><input
+            type="checkbox"
+            [checked]="showWireframe()"
+            (change)="toggleWireframe()"
+          /><span>wireframe</span></label
         >
         <label class="control">
           <span>elevation ×</span>
