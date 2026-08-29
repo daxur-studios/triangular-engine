@@ -61,6 +61,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'cloud-puffs-lab',
+    loadComponent: () =>
+      import('./pages/cloud-puffs-lab/cloud-puffs-lab-page.component').then(
+        ({ CloudPuffsLabPageComponent }) => CloudPuffsLabPageComponent,
+      ),
+  },
+  {
     path: 'terrain-lab',
     canActivate: [
       () =>

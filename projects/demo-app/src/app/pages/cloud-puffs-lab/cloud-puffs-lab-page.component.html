@@ -1,0 +1,79 @@
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Clouds · mesh puffs spike</p>
+    <h1>Crisp low-poly puff clouds</h1>
+    <p class="claim">Instanced, flat-shaded, sun + dynamic point-light shading — no raymarching.</p>
+  </div>
+</header>
+
+<section class="controls">
+  <label>Puff count <output>{{ puffCount() }}</output>
+    <input type="range" min="20" max="600" step="10" [value]="puffCount()"
+      (input)="puffCount.set(+$any($event.target).value)" />
+  </label>
+  <label>Min scale (m) <output>{{ puffScaleMin() }}</output>
+    <input type="range" min="2" max="20" step="1" [value]="puffScaleMin()"
+      (input)="puffScaleMin.set(+$any($event.target).value)" />
+  </label>
+  <label>Max scale (m) <output>{{ puffScaleMax() }}</output>
+    <input type="range" min="4" max="40" step="1" [value]="puffScaleMax()"
+      (input)="puffScaleMax.set(+$any($event.target).value)" />
+  </label>
+  <label class="toggle">
+    <input type="checkbox" [checked]="flatShading()"
+      (change)="flatShading.set($any($event.target).checked)" />
+    Flat shading (crisp edges)
+  </label>
+
+  <label>Sun azimuth <output>{{ sunAzimuthDeg() }}&deg;</output>
+    <input type="range" min="0" max="360" step="1" [value]="sunAzimuthDeg()"
+      (input)="sunAzimuthDeg.set(+$any($event.target).value)" />
+  </label>
+  <label>Sun elevation <output>{{ sunElevationDeg() }}&deg;</output>
+    <input type="range" min="-10" max="85" step="1" [value]="sunElevationDeg()"
+      (input)="sunElevationDeg.set(+$any($event.target).value)" />
+  </label>
+  <label>Rim strength <output>{{ rimStrength() }}</output>
+    <input type="range" min="0" max="3" step="0.1" [value]="rimStrength()"
+      (input)="rimStrength.set(+$any($event.target).value)" />
+  </label>
+  <label>Wind speed (m/s) <output>{{ windSpeed() }}</output>
+    <input type="range" min="0" max="15" step="0.5" [value]="windSpeed()"
+      (input)="windSpeed.set(+$any($event.target).value)" />
+  </label>
+
+  <label class="toggle">
+    <input type="checkbox" [checked]="rocketEngineEnabled()"
+      (change)="rocketEngineEnabled.set($any($event.target).checked)" />
+    Rocket engine (moving light)
+  </label>
+  <label class="toggle">
+    <input type="checkbox" [checked]="lightningEnabled()"
+      (change)="lightningEnabled.set($any($event.target).checked)" />
+    Storm lightning (flash light)
+  </label>
+</section>
+
+<scene [showFps]="true">
+  <orbitControls [cameraPosition]="[0, 55, 200]" [target]="[0, 8, 0]" [far]="5000" />
+  <ambientLight [intensity]="0.55" />
+  <directionalLight [position]="sunLightPosition()" [intensity]="2.2" />
+
+  <mesh [position]="[0, -18, 0]" [rotation]="[-1.5707963, 0, 0]">
+    <planeGeometry [params]="[400, 400, 8, 8]" />
+    <meshStandardMaterial [params]="{ color: '#33422f' }" />
+  </mesh>
+
+  @if (rocketEngineEnabled()) {
+    <mesh [position]="rocketPosition()">
+      <sphereGeometry [params]="{ radius: 1.4, widthSegments: 10, heightSegments: 8 }" />
+      <meshBasicMaterial [params]="{ color: '#7fd9ff' }" />
+    </mesh>
+  }
+  @if (lightningVisible()) {
+    <mesh [position]="lightningPosition()">
+      <sphereGeometry [params]="{ radius: 2, widthSegments: 10, heightSegments: 8 }" />
+      <meshBasicMaterial [params]="{ color: '#dce8ff' }" />
+    </mesh>
+  }
+</scene>

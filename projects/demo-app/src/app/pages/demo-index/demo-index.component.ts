@@ -612,6 +612,18 @@ export const DEMOS: readonly DemoItem[] = [
     description:
       'V4 structure-first planet generation (runbook 022): Fibonacci sphere sites, Lloyd relaxation, and their spherical Voronoi dual — 3D orbit view plus a 2D equirectangular unwrap.',
   },
+  {
+    id: 'cloud-puffs-lab',
+    number: '40',
+    title: 'Mesh Puff Clouds',
+    route: '/cloud-puffs-lab',
+    categoryId: 'atmosphere',
+    tier: 'lab',
+    entryPoints: ['clouds'],
+    package: 'triangular-engine/clouds',
+    description:
+      'Instanced, flat-shaded low-poly cloud puffs (runbook 023): crisp sun-lit silhouettes plus dynamic point lights for a rocket engine or storm lightning glowing a cloud from inside.',
+  },
 ];
 
 export interface TagWithCount {

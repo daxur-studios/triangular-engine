@@ -29,6 +29,9 @@
       "triangular-engine/scatter": [
         "projects/triangular-engine/scatter/public-api"
       ],
+      "triangular-engine/clouds": [
+        "projects/triangular-engine/clouds/public-api"
+      ],
       "triangular-engine/impostor": [
         "projects/triangular-engine/impostor/public-api"
       ],

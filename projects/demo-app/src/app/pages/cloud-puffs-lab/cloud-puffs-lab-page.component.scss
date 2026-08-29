@@ -1,0 +1,68 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #0d151b;
+  color: #eef6fb;
+}
+
+.page-header {
+  padding: 1rem 1.2rem 0.8rem;
+  background: #111e27;
+}
+
+.eyebrow {
+  margin: 0 0 0.2rem;
+  color: #8fb8cc;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.claim {
+  margin: 0.25rem 0 0;
+  color: #bfd0d9;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.5rem 1rem;
+  padding: 0.7rem 1.2rem;
+  background: #101a21;
+  border-block: 1px solid #263944;
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  color: #bfd0d9;
+}
+
+.controls label.toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.controls input[type='range'] {
+  width: 100%;
+}
+
+.controls output {
+  color: #eef6fb;
+  font-weight: 600;
+}
+
+scene {
+  flex: 1 1 auto;
+  min-height: 18rem;
+}
