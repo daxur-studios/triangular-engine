@@ -5,7 +5,7 @@
       <header class="scope-head">
         <div>
           <span class="scope-kicker"
-            >worldgen · runbook 022 · M0 + M1 + M2 + M3 + M4a-c</span
+            >worldgen · runbook 022 · M0 + M1 + M2 + M3 + M4a-d</span
           >
           <h1>Cell graph scope</h1>
         </div>
@@ -37,6 +37,10 @@
           <div class="stat">
             <span class="stat-label">LOD split</span
             ><span class="stat-value">{{ lodSplit() }}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">collider patch</span
+            ><span class="stat-value">{{ colliderPatchBuildMs() }}</span>
           </div>
         </div>
       </header>
@@ -196,6 +200,39 @@
           />
           <span class="control-value">{{ lodDistance() }}</span>
         </label>
+        <label class="toggle"
+          ><input
+            type="checkbox"
+            [checked]="showColliderPatch()"
+            (change)="toggleColliderPatch()"
+          /><span>collider patch (M4d)</span></label
+        >
+        <label class="control">
+          <span>patch resolution</span>
+          <input
+            type="range"
+            min="5"
+            max="33"
+            step="2"
+            [value]="colliderPatchSampleCount()"
+            (input)="onColliderPatchSampleCount($event)"
+          />
+          <span class="control-value"
+            >{{ colliderPatchSampleCount() }}²</span
+          >
+        </label>
+        <label class="control">
+          <span>patch width</span>
+          <input
+            type="range"
+            min="1"
+            max="20"
+            step="1"
+            [value]="colliderPatchAngularDeg()"
+            (input)="onColliderPatchAngularWidth($event)"
+          />
+          <span class="control-value">{{ colliderPatchAngularDeg() }}°</span>
+        </label>
       </div>
 
       <div class="controls">
@@ -330,7 +367,17 @@
         "waterline" extracted directly from each chunk's LOD0 mesh triangles
         (not the coarser per-cell chain, and never LOD1's), so it always matches
         the terrain's land/water edge exactly and stays stable regardless of the
-        live LOD state — independent of the 3D preview toggle.
+        live LOD state — independent of the 3D preview toggle. The "collider
+        patch (M4d)" toggle renders a separate magenta wireframe grid built by
+        <code>buildColliderPatch()</code>, sampling <code>sampleElevation()</code>
+        directly at whatever "patch resolution"/"patch width" ask for, centered
+        on wherever the camera is currently looking. It has no relationship to
+        chunk boundaries, chunk LOD, or <code>cellCount</code> at all — that
+        independence is the point (runbook 022 Layer 2/3's camera/physics
+        decoupling): the patch stays uniformly fine underneath the probe point
+        even where the chunk mesh beneath it has dropped to LOD1's merged
+        polygons. This is a rendering proof only so far, not a physics one —
+        no Jolt body yet, that's the next M4d step.
       </p>
     </section>
   </ng-template>

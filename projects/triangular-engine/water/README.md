@@ -27,12 +27,9 @@ npm i triangular-engine three
 Import the standalone component and the domain required by the scene:
 
 ```ts
-import { Component } from '@angular/core';
-import { EngineModule } from 'triangular-engine';
-import {
-  PlaneWaterDomain,
-  WaterSurfaceComponent,
-} from 'triangular-engine/water';
+import { Component } from "@angular/core";
+import { EngineModule } from "triangular-engine";
+import { PlaneWaterDomain, WaterSurfaceComponent } from "triangular-engine/water";
 
 @Component({
   standalone: true,
@@ -40,11 +37,7 @@ import {
   template: `
     <triangular-engine>
       <scene>
-        <waterSurface
-          [domain]="waterDomain"
-          quality="balanced"
-          motion="oceanSwell"
-        />
+        <waterSurface [domain]="waterDomain" quality="balanced" motion="oceanSwell" />
       </scene>
     </triangular-engine>
   `,
@@ -58,31 +51,36 @@ Use the camelCase selector exactly as shown: `<waterSurface>`.
 
 ## Component inputs
 
-| Input | Type | Default | Purpose |
-| --- | --- | --- | --- |
-| `domain` | `WaterSurfaceDomain` | `PlaneWaterDomain` at Y=0 | Shape and world-space datum |
-| `bodyId` | `string` | generated unique ID | Registry identity for sampling and events |
-| `priority` | `number` | `0` | Higher body wins where registered bodies overlap |
-| `quality` | `'performance' \| 'balanced' \| 'cinematic'` | `'balanced'` | Rendering cost and shader features |
-| `motion` | `'calmLake' \| 'oceanSwell' \| 'storm'` | `'oceanSwell'` | Wave character, independent of quality |
-| `presetOverrides` | `WaterRenderPresetOverrides` | `{}` | Typed colour, grid, wave, and far-field overrides |
-| `lodDetail` | `number` greater than 0 | `1` | Retains fine LOD geometry farther from the camera |
-| `wireframe` | `boolean` | `false` | LOD/debug view |
+| Input             | Type                                         | Default                   | Purpose                                                                                  |
+| ----------------- | -------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------- |
+| `domain`          | `WaterSurfaceDomain`                         | `PlaneWaterDomain` at Y=0 | Shape and world-space datum                                                              |
+| `bodyId`          | `string`                                     | generated unique ID       | Registry identity for sampling and events                                                |
+| `priority`        | `number`                                     | `0`                       | Higher body wins where registered bodies overlap                                         |
+| `quality`         | `'performance' \| 'balanced' \| 'cinematic'` | `'balanced'`              | Rendering cost and shader features                                                       |
+| `motion`          | `'calmLake' \| 'oceanSwell' \| 'storm'`      | `'oceanSwell'`            | Wave character, independent of quality                                                   |
+| `presetOverrides` | `WaterRenderPresetOverrides`                 | `{}`                      | Typed colour, grid, wave, and far-field overrides                                        |
+| `lodDetail`       | `number` greater than 0                      | `1`                       | Retains fine LOD geometry farther from the camera                                        |
+| `registerBody`    | `boolean`                                    | `true`                    | Registers this surface with `WaterService`; disable when simulation owns that body       |
+| `timeSeconds`     | `number \| undefined`                        | engine elapsed time       | Uses a simulation clock for wave phase when rendering and physics must stay synchronized |
+| `wireframe`       | `boolean`                                    | `false`                   | LOD/debug view                                                                           |
 
 Quality and motion are deliberately independent. For example, a storm can use
 the performance renderer, while calm water can use cinematic far-field glint.
 
 ```html
-<waterSurface
-  [domain]="waterDomain"
-  quality="performance"
-  motion="storm"
-  [lodDetail]="1.5"
-/>
+<waterSurface [domain]="waterDomain" quality="performance" motion="storm" [lodDetail]="1.5" />
 ```
 
 Changing these inputs at runtime rebuilds only the renderer state that needs to
 change. No page reload is required.
+
+Plane and spherical domains retain a camera-centred detailed grid and pool a
+second grid selected from the camera centre/lower frustum rays. The second grid
+fades in only when it extends useful coverage toward the visible water. A
+spherical domain blends both detailed regions into its complete far-water
+sphere, then fades geometric waves at planetary/orbital scale so no finite
+patch edge becomes the horizon. Inside-cylinder domains retain their fixed
+axial frame and wrapped LOD coverage.
 
 ## Domains
 
@@ -123,7 +121,7 @@ readonly habitatWater = new CylinderWaterDomain(500, {
 });
 ```
 
-This domain represents water on the *inside* wall of an O'Neill-style
+This domain represents water on the _inside_ wall of an O'Neill-style
 cylinder. Its water normal points inward, towards the cylinder axis.
 `lengthM` is optional; omit it for an infinite cylinder.
 
@@ -151,12 +149,7 @@ readonly moonlitWater: WaterRenderPresetOverrides = {
 ```
 
 ```html
-<waterSurface
-  [domain]="ocean"
-  quality="cinematic"
-  motion="calmLake"
-  [presetOverrides]="moonlitWater"
-/>
+<waterSurface [domain]="ocean" quality="cinematic" motion="calmLake" [presetOverrides]="moonlitWater" />
 ```
 
 Overrides are merged by section. A `grid` override changes only supplied grid
@@ -171,10 +164,7 @@ engine's ordered `beforeRender$` phase and depth prepass.
 `GerstnerSurface` implements the shared CPU sampling contract:
 
 ```ts
-import {
-  GerstnerSurface,
-  WATER_WAVE_PRESETS,
-} from 'triangular-engine/water';
+import { GerstnerSurface, WATER_WAVE_PRESETS } from "triangular-engine/water";
 
 const surface = new GerstnerSurface(WATER_WAVE_PRESETS.oceanSwell.waves);
 const height = surface.getHeight(worldX, worldZ, elapsedSeconds);
@@ -207,7 +197,7 @@ tracker.state$.subscribe(({ underwater, sample }) => {
   hud.depth.set(sample?.depth ?? 0);
 });
 tracker.crossings$.subscribe(({ type }) => {
-  if (type === 'enter') playSplash();
+  if (type === "enter") playSplash();
 });
 
 // On owner teardown:
@@ -229,24 +219,13 @@ npm i postprocessing
 ```
 
 ```ts
-import {
-  PostprocessingComposerComponent,
-  ToneMappingEffectComponent,
-} from 'triangular-engine/postprocessing';
-import {
-  WaterUnderwaterEffectComponent,
-} from 'triangular-engine/water/postprocessing';
+import { PostprocessingComposerComponent, ToneMappingEffectComponent } from "triangular-engine/postprocessing";
+import { WaterUnderwaterEffectComponent } from "triangular-engine/water/postprocessing";
 ```
 
 ```html
 <postprocessing-composer>
-  <waterUnderwaterEffect
-    color="#0b6270"
-    [density]="0.035"
-    [distortion]="0.0025"
-    [fadeDistance]="2"
-    [hysteresis]="0.1"
-  />
+  <waterUnderwaterEffect color="#0b6270" [density]="0.035" [distortion]="0.0025" [fadeDistance]="2" [hysteresis]="0.1" />
   <toneMappingEffect />
 </postprocessing-composer>
 ```

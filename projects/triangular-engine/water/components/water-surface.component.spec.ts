@@ -1,8 +1,15 @@
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
-import { PerspectiveCamera, Scene } from 'three';
+import {
+  InstancedMesh,
+  PerspectiveCamera,
+  Scene,
+  ShaderMaterial,
+  Vector3,
+} from 'three';
 import { EngineService } from 'triangular-engine';
 import { PlaneWaterDomain, SphereWaterDomain } from '../core/water-domain';
+import { WaterService } from '../core/water.service';
 import { WaterSurfaceComponent } from './water-surface.component';
 
 describe('WaterSurfaceComponent', () => {
@@ -36,7 +43,7 @@ describe('WaterSurfaceComponent', () => {
     const fixture = TestBed.createComponent(WaterSurfaceComponent);
     fixture.detectChanges();
 
-    expect(scene.children.length).toBe(6);
+    expect(scene.children.length).toBe(12);
     expect(() => beforeRender$.next()).not.toThrow();
 
     fixture.destroy();
@@ -54,7 +61,7 @@ describe('WaterSurfaceComponent', () => {
     fixture.componentRef.setInput('wireframe', true);
     fixture.detectChanges();
 
-    expect(scene.children.length).toBe(2);
+    expect(scene.children.length).toBe(4);
     expect(
       scene.children.every(
         (child) =>
@@ -64,10 +71,30 @@ describe('WaterSurfaceComponent', () => {
 
     fixture.componentRef.setInput('domain', new SphereWaterDomain(100));
     fixture.detectChanges();
-    expect(scene.children.length).toBe(3);
+    expect(scene.children.length).toBe(5);
 
     fixture.componentRef.setInput('domain', new PlaneWaterDomain());
     fixture.detectChanges();
-    expect(scene.children.length).toBe(2);
+    expect(scene.children.length).toBe(4);
+  });
+
+  it('can render without replacing a simulation-owned water body', () => {
+    const fixture = TestBed.createComponent(WaterSurfaceComponent);
+    fixture.componentRef.setInput('registerBody', false);
+    fixture.detectChanges();
+
+    const water = TestBed.inject(WaterService);
+    expect(water.sample(new Vector3(0, -1, 0), 0)).toBeNull();
+  });
+
+  it('uses an authoritative animation time when supplied', () => {
+    const fixture = TestBed.createComponent(WaterSurfaceComponent);
+    fixture.componentRef.setInput('timeSeconds', 123.5);
+    fixture.detectChanges();
+    beforeRender$.next();
+
+    const material = (scene.children[0] as InstancedMesh)
+      .material as ShaderMaterial;
+    expect(material.uniforms['uTime'].value).toBe(123.5);
   });
 });

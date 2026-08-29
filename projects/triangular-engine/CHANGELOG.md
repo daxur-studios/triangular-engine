@@ -190,3 +190,11 @@ Initial changelog. See git history for changes prior to this version.
   repeated recovery attempts. Active retreat signals remain repeatable on
   re-evaluation until expiry; the existing 64-hop propagation default is
   unchanged.
+
+# Unreleased
+
+- Water rendering now retains near-camera CDLOD while selecting a second pooled
+  tile grid from the camera frustum/look direction, with a seamless spherical
+  far-water handoff and mutable-centre support for floating-origin scenes.
+- `<waterSurface>` can use an authoritative `timeSeconds` clock and opt out of
+  `WaterService` registration when simulation already owns the water body.

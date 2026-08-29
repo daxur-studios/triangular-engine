@@ -59,28 +59,20 @@ export function cellCornerElevation(cell: IPlanetGraphCell, cornerIndex: number,
 }
 
 /**
- * Canonical elevation sample at an arbitrary direction on the planet —
- * runbook 022's M4a "bridge" function. Visual chunk meshes, ground-collider
- * patches, and (once built) the terrain-edit override layer all read
- * elevation through this single function so they can never silently
- * disagree with each other, even though they run at completely different
- * resolutions and update on completely different triggers (camera LOD vs.
- * vessel proximity vs. a player edit).
+ * Barycentric-blended elevation of `direction` against an already-resolved
+ * containing `cell` — the shared math behind `sampleElevation()` (brute-force
+ * lookup) and `sampleElevationNear()` (coherent walk): both just need a
+ * different way of finding `cell` first, not a different blend.
  *
  * Interpolates the same way the M3 preview mesh is tessellated: each cell is
  * a fan of triangles (center, corners[k], corners[k+1]); this finds which
- * fan wedge of the containing cell `direction` falls into and blends the
- * center's own elevation with the two corner elevations (each the average
- * of the 3 cells meeting there), so elevation is continuous across cell
- * borders — the corner value is identical from whichever of its 3 cells you
- * approach it from.
+ * fan wedge of `cell` `direction` falls into and blends the center's own
+ * elevation with the two corner elevations (each the average of the 3 cells
+ * meeting there), so elevation is continuous across cell borders — the
+ * corner value is identical from whichever of its 3 cells you approach it
+ * from.
  */
-export function sampleElevation(
-  graph: IPlanetGraphCore,
-  elevation: number[],
-  direction: IVec3,
-): number {
-  const cell = findCellAt(graph, direction);
+function sampleElevationAtCell(cell: IPlanetGraphCell, direction: IVec3, elevation: number[]): number {
   const n = cell.neighbors.length;
   if (n < 3) return elevation[cell.id];
 
@@ -108,4 +100,68 @@ export function sampleElevation(
       w * cellCornerElevation(cell, (bestWedge + 1) % n, elevation)) /
     sum
   );
+}
+
+/**
+ * Canonical elevation sample at an arbitrary direction on the planet —
+ * runbook 022's M4a "bridge" function. Visual chunk meshes, ground-collider
+ * patches, and (once built) the terrain-edit override layer all read
+ * elevation through this single function so they can never silently
+ * disagree with each other, even though they run at completely different
+ * resolutions and update on completely different triggers (camera LOD vs.
+ * vessel proximity vs. a player edit).
+ */
+export function sampleElevation(
+  graph: IPlanetGraphCore,
+  elevation: number[],
+  direction: IVec3,
+): number {
+  return sampleElevationAtCell(findCellAt(graph, direction), direction, elevation);
+}
+
+/**
+ * `findCellAt()`'s own doc comment flagged its brute-force scan as too slow
+ * for a caller sampling many nearby points per query (a dense local grid —
+ * M4d's collider patches, runbook 022) — this is that faster path. Voronoi
+ * cell membership is dot-product-nearest-site, which is unimodal across the
+ * neighbor graph for a convex site set, so greedily stepping to whichever
+ * neighbor of the current guess improves the dot product further always
+ * converges on the true containing cell (a standard Delaunay/Voronoi walk),
+ * without ever visiting a cell far from the walk. Seeded from `hintCellId`
+ * instead of scanning every cell — a caller sampling a grid of nearby
+ * directions passes the previous sample's resolved cell as the next hint, so
+ * each walk after the first one typically resolves in 0-2 hops instead of a
+ * full `cellCount` scan.
+ */
+export function findCellNear(graph: IPlanetGraphCore, direction: IVec3, hintCellId: number): IPlanetGraphCell {
+  let current = graph.cells[hintCellId];
+  let currentDot = dot(current.center, direction);
+  for (;;) {
+    let best = current;
+    let bestDot = currentDot;
+    for (const neighborId of current.neighbors) {
+      const neighbor = graph.cells[neighborId];
+      const d = dot(neighbor.center, direction);
+      if (d > bestDot) {
+        bestDot = d;
+        best = neighbor;
+      }
+    }
+    if (best === current) return current;
+    current = best;
+    currentDot = bestDot;
+  }
+}
+
+/** `sampleElevation()`'s value, plus the resolved cell id so a caller sampling a coherent
+ * sequence of nearby directions (e.g. a grid, row by row) can feed it back in as the next
+ * call's `hintCellId` — see `findCellNear()`. */
+export function sampleElevationNear(
+  graph: IPlanetGraphCore,
+  elevation: number[],
+  direction: IVec3,
+  hintCellId: number,
+): { value: number; cellId: number } {
+  const cell = findCellNear(graph, direction, hintCellId);
+  return { value: sampleElevationAtCell(cell, direction, elevation), cellId: cell.id };
 }

@@ -34,6 +34,7 @@ import {
 import { createWaterLodPatchGeometry } from '../core/water-lod-patch-geometry';
 import {
   CylinderWaterDomain,
+  PlaneWaterDomain,
   SphereWaterDomain,
   type WaterSurfaceDomain,
 } from '../core/water-domain';
@@ -94,6 +95,19 @@ const PLANETARY_FAR_SURFACE_MIN_OFFSET_M = 0.05;
 const NEAR_FIELD_FADE_START_EXTENTS = 2;
 const NEAR_FIELD_FADE_END_EXTENTS = 8;
 const NEAR_FIELD_HOLE_INNER_RATIO = 0.65;
+/** Samples below the frustum centre so a horizon-facing camera still selects visible water. */
+const VIEW_RAY_NDC_Y = -0.55;
+/** Starts the secondary view grid only after it adds meaningful coverage beyond the camera grid. */
+const VIEW_GRID_FADE_START_EXTENTS = 0.45;
+const VIEW_GRID_FADE_END_EXTENTS = 0.8;
+/** A plane has no far sphere, so keep its two detailed grids overlapped instead of opening a gap. */
+const PLANE_VIEW_GRID_MAX_DISTANCE_EXTENTS = 1.5;
+/** Bounds tangent-plane distortion when a spherical camera approaches an orbital limb view. */
+const SPHERE_VIEW_GRID_MAX_DISTANCE_EXTENTS = 512;
+/** Beyond this altitude range geometric waves hand over to the whole-planet far surface. */
+const VIEW_DETAIL_FADE_START_RADIUS_RATIO = 0.1;
+const VIEW_DETAIL_FADE_END_RADIUS_RATIO = 0.75;
+const RAY_INTERSECTION_EPSILON = 1e-5;
 
 export interface WaterSurfaceRendererOptions {
   readonly domain: WaterSurfaceDomain;
@@ -111,11 +125,23 @@ export class WaterSurfaceRenderer {
   private readonly domain: WaterSurfaceDomain;
   private readonly lightDirection: Vector3;
   private readonly levelMeshes: InstancedMesh[] = [];
+  private readonly viewLevelMeshes: InstancedMesh[] = [];
+  private readonly depthMeshes: InstancedMesh[] = [];
   private readonly levelMaterials: ShaderMaterial[] = [];
   private readonly scratchMatrix = new Matrix4();
   private readonly drawingBufferSize = new Vector2();
   private readonly uLodCameraXZ = { value: new Vector2() };
+  private readonly uLodViewXZ = { value: new Vector2() };
   private readonly uLodPeriodZ = { value: 0 };
+  private readonly scratchLocalCamera = new Vector2();
+  private readonly scratchViewAnchor = new Vector2();
+  private readonly scratchViewRay = new Vector3();
+  private readonly scratchLowerViewRay = new Vector3();
+  private readonly scratchRelative = new Vector3();
+  private readonly scratchSurfacePoint = new Vector3();
+  private readonly scratchSurfaceNormal = new Vector3();
+  private readonly scratchTangentDirection = new Vector3();
+  private readonly scratchViewSurfaceNormal = new Vector3(0, 1, 0);
   private readonly domainUniforms: WaterDomainUniforms;
   private readonly surfaceDepthUniforms: WaterSurfaceDepthUniforms;
   private readonly uTime = { value: 0 };
@@ -129,6 +155,7 @@ export class WaterSurfaceRenderer {
   private planetaryFarMesh: Mesh<SphereGeometry, ShaderMaterial> | null = null;
   private planetaryFarNormalMap: Texture | null = null;
   private readonly uNearFieldOpacity = { value: 1 };
+  private readonly uViewFieldOpacity = { value: 0 };
   private scene: Scene | null = null;
   private preset: WaterRenderPreset;
   private wireframe: boolean;
@@ -168,9 +195,11 @@ export class WaterSurfaceRenderer {
     this.scene = scene;
     if (this.planetaryFarMesh) scene.add(this.planetaryFarMesh);
     for (const mesh of this.levelMeshes) scene.add(mesh);
+    for (const mesh of this.viewLevelMeshes) scene.add(mesh);
   }
 
   update(camera: Camera, elapsedSeconds: number): void {
+    this.syncMovingDomain();
     const frame =
       this.domain instanceof CylinderWaterDomain
         ? this.getFixedCylinderFrame(this.domain)
@@ -179,8 +208,6 @@ export class WaterSurfaceRenderer {
     this.domainUniforms.uFrameNormal.value.copy(frame.normal);
     this.domainUniforms.uFrameTangentU.value.copy(frame.tangentU);
     this.domainUniforms.uFrameTangentV.value.copy(frame.tangentV);
-    this.updatePlanetaryFarSurface(camera, frame.normal, elapsedSeconds);
-
     if (this.domain instanceof CylinderWaterDomain) {
       const relative = frame.origin.clone().sub(this.domain.center);
       const radial = relative
@@ -211,46 +238,75 @@ export class WaterSurfaceRenderer {
       this.domain instanceof CylinderWaterDomain
         ? this.getCylinderCameraXZ(this.domain, frame, camera.position)
         : this.domain.kind === 'plane'
-          ? new Vector2(
-              camera.position.clone().sub(frame.origin).dot(frame.tangentU),
-              camera.position.clone().sub(frame.origin).dot(frame.tangentV),
+          ? this.scratchLocalCamera.set(
+              this.scratchRelative
+                .copy(camera.position)
+                .sub(frame.origin)
+                .dot(frame.tangentU),
+              this.scratchRelative.dot(frame.tangentV),
             )
-          : new Vector2(0, 0);
-    const levels = computeWaterLodLevels(
-      localCamera.x,
-      localCamera.y,
-      this.getGridOptions(),
-    );
+          : this.scratchLocalCamera.set(0, 0);
+    const grid = this.getGridOptions();
+    const levels = computeWaterLodLevels(localCamera.x, localCamera.y, grid);
     const wrappedLevels =
       this.domain instanceof CylinderWaterDomain
         ? computeWaterLodLevels(
             localCamera.x,
             localCamera.y +
               (localCamera.y >= 0 ? -1 : 1) * this.uLodPeriodZ.value,
-            this.getGridOptions(),
+            grid,
           )
         : undefined;
     this.uLodCameraXZ.value.copy(localCamera);
+    this.updateLevelInstances(this.levelMeshes, levels, wrappedLevels);
 
-    for (let i = 0; i < levels.length; i++) {
-      const level = levels[i];
-      const mesh = this.levelMeshes[i];
-      const instances = wrappedLevels
-        ? this.mergeLodInstances(level.instances, wrappedLevels[i].instances)
-        : level.instances;
-      mesh.count = instances.length;
-      for (let j = 0; j < instances.length; j++) {
-        const instance = instances[j];
-        this.scratchMatrix.makeScale(
-          level.patchWorldSize,
-          1,
-          level.patchWorldSize,
-        );
-        this.scratchMatrix.setPosition(instance.x, 0, instance.z);
-        mesh.setMatrixAt(j, this.scratchMatrix);
-      }
-      mesh.instanceMatrix.needsUpdate = true;
+    const gridExtent = this.getGridOuterHalfExtent(grid);
+    const hasViewAnchor = this.computeViewAnchor(
+      camera,
+      frame,
+      localCamera,
+      gridExtent,
+      this.scratchViewAnchor,
+      this.scratchViewSurfaceNormal,
+    );
+    const viewDistance = hasViewAnchor
+      ? this.scratchViewAnchor.distanceTo(localCamera)
+      : 0;
+    const viewActivation = hasViewAnchor
+      ? smoothstep(
+          gridExtent * VIEW_GRID_FADE_START_EXTENTS,
+          gridExtent * VIEW_GRID_FADE_END_EXTENTS,
+          viewDistance,
+        )
+      : 0;
+    const viewAltitudeFade =
+      this.domain instanceof SphereWaterDomain
+        ? 1 -
+          smoothstep(
+            this.domain.radiusM * VIEW_DETAIL_FADE_START_RADIUS_RATIO,
+            this.domain.radiusM * VIEW_DETAIL_FADE_END_RADIUS_RATIO,
+            Math.max(
+              0,
+              camera.position.distanceTo(this.domain.center) -
+                this.domain.radiusM,
+            ),
+          )
+        : 1;
+    this.uViewFieldOpacity.value = viewActivation * viewAltitudeFade;
+    if (this.uViewFieldOpacity.value > 0.001) {
+      this.uLodViewXZ.value.copy(this.scratchViewAnchor);
+      this.updateLevelInstances(
+        this.viewLevelMeshes,
+        computeWaterLodLevels(
+          this.scratchViewAnchor.x,
+          this.scratchViewAnchor.y,
+          grid,
+        ),
+      );
+    } else {
+      for (const mesh of this.viewLevelMeshes) mesh.count = 0;
     }
+    this.updatePlanetaryFarSurface(camera, frame.normal, elapsedSeconds);
   }
 
   captureDepth(renderer: WebGLRenderer, scene: Scene, camera: Camera): void {
@@ -262,7 +318,7 @@ export class WaterSurfaceRenderer {
     const height = Math.max(1, this.drawingBufferSize.y);
     this.depthPrepass ??= new WaterDepthPrepass(width, height);
     this.depthPrepass.setSize(width, height);
-    this.depthPrepass.capture(renderer, scene, camera, this.levelMeshes);
+    this.depthPrepass.capture(renderer, scene, camera, this.depthMeshes);
     updateWaterSurfaceDepthCamera(this.surfaceDepthUniforms, camera);
     this.shadingUniforms.uSceneDepthTexture.value = this.depthPrepass.texture;
     this.shadingUniforms.uResolution.value.set(width, height);
@@ -356,12 +412,44 @@ export class WaterSurfaceRenderer {
     };
 
     for (let level = 0; level <= grid.ringCount; level++) {
-      const material = this.createLevelMaterial(level, grid, defines);
+      const material = this.createLevelMaterial(
+        level,
+        grid,
+        defines,
+        this.uLodCameraXZ,
+        this.uNearFieldOpacity,
+      );
       const mesh = new InstancedMesh(this.patchGeometry, material, capacity);
+      mesh.name = `water-camera-lod-${level}`;
       mesh.count = 0;
       mesh.frustumCulled = false;
       this.levelMaterials.push(material);
       this.levelMeshes.push(mesh);
+      this.depthMeshes.push(mesh);
+
+      if (
+        this.domain instanceof PlaneWaterDomain ||
+        this.domain instanceof SphereWaterDomain
+      ) {
+        const viewMaterial = this.createLevelMaterial(
+          level,
+          grid,
+          defines,
+          this.uLodViewXZ,
+          this.uViewFieldOpacity,
+        );
+        const viewMesh = new InstancedMesh(
+          this.patchGeometry,
+          viewMaterial,
+          capacity,
+        );
+        viewMesh.name = `water-view-lod-${level}`;
+        viewMesh.count = 0;
+        viewMesh.frustumCulled = false;
+        this.levelMaterials.push(viewMaterial);
+        this.viewLevelMeshes.push(viewMesh);
+        this.depthMeshes.push(viewMesh);
+      }
     }
     this.buildPlanetaryFarSurface(grid);
   }
@@ -401,6 +489,15 @@ export class WaterSurfaceRenderer {
           ),
         },
         uNearFieldOpacity: this.uNearFieldOpacity,
+        uViewFieldOpacity: this.uViewFieldOpacity,
+        uViewSurfaceNormal: {
+          value: this.scratchViewSurfaceNormal.clone(),
+        },
+        uViewAngularRadius: {
+          value: Math.atan(
+            this.getGridOuterHalfExtent(grid) / this.domain.radiusM,
+          ),
+        },
         uNormalMap: { value: this.planetaryFarNormalMap },
         uTime: this.uTime,
         uLightDirection: { value: this.lightDirection },
@@ -444,6 +541,257 @@ export class WaterSurfaceRenderer {
     this.planetaryFarMesh.material.uniforms['uCameraSurfaceNormal'].value.copy(
       cameraSurfaceNormal,
     );
+    this.planetaryFarMesh.material.uniforms['uViewSurfaceNormal'].value.copy(
+      this.scratchViewSurfaceNormal,
+    );
+  }
+
+  /** Keeps mutable domain centres aligned with floating-origin scene coordinates. */
+  private syncMovingDomain(): void {
+    if (this.domain instanceof SphereWaterDomain) {
+      this.domainUniforms.uSphereCenter.value.copy(this.domain.center);
+      if (this.planetaryFarMesh) {
+        this.planetaryFarMesh.position.copy(this.domain.center);
+        this.planetaryFarMesh.material.uniforms['uSphereCenter'].value.copy(
+          this.domain.center,
+        );
+      }
+    } else if (this.domain instanceof CylinderWaterDomain) {
+      this.domainUniforms.uCylinderCenter.value.copy(this.domain.center);
+    }
+  }
+
+  /** Selects a second LOD anchor from the view ray/frustum while preserving the camera grid. */
+  private computeViewAnchor(
+    camera: Camera,
+    frame: ReturnType<WaterSurfaceDomain['getLocalFrame']>,
+    localCamera: Vector2,
+    gridExtent: number,
+    out: Vector2,
+    outSurfaceNormal: Vector3,
+  ): boolean {
+    if (this.domain instanceof PlaneWaterDomain) {
+      camera.getWorldDirection(this.scratchViewRay);
+      let found = this.intersectPlaneViewRay(
+        camera.position,
+        this.scratchViewRay,
+        frame,
+        out,
+      );
+      if (!found && camera instanceof PerspectiveCamera) {
+        this.lowerFrustumRay(camera, this.scratchLowerViewRay);
+        found = this.intersectPlaneViewRay(
+          camera.position,
+          this.scratchLowerViewRay,
+          frame,
+          out,
+        );
+      }
+      if (!found) {
+        this.scratchTangentDirection
+          .copy(this.scratchViewRay)
+          .addScaledVector(
+            frame.normal,
+            -this.scratchViewRay.dot(frame.normal),
+          );
+        if (
+          this.scratchTangentDirection.lengthSq() < RAY_INTERSECTION_EPSILON
+        ) {
+          return false;
+        }
+        this.scratchTangentDirection.normalize();
+        out.set(
+          localCamera.x +
+            this.scratchTangentDirection.dot(frame.tangentU) * gridExtent,
+          localCamera.y +
+            this.scratchTangentDirection.dot(frame.tangentV) * gridExtent,
+        );
+      }
+      this.clampViewAnchorDistance(
+        out,
+        localCamera,
+        gridExtent * PLANE_VIEW_GRID_MAX_DISTANCE_EXTENTS,
+      );
+      outSurfaceNormal.copy(frame.normal);
+      return true;
+    }
+
+    if (!(this.domain instanceof SphereWaterDomain)) return false;
+    camera.getWorldDirection(this.scratchViewRay);
+    let found = this.intersectSphereViewRay(
+      camera.position,
+      this.scratchViewRay,
+      this.domain,
+      this.scratchSurfacePoint,
+    );
+    if (!found && camera instanceof PerspectiveCamera) {
+      this.lowerFrustumRay(camera, this.scratchLowerViewRay);
+      found = this.intersectSphereViewRay(
+        camera.position,
+        this.scratchLowerViewRay,
+        this.domain,
+        this.scratchSurfacePoint,
+      );
+    }
+    if (!found) {
+      found = this.sphereHorizonTarget(
+        camera.position,
+        this.scratchViewRay,
+        this.domain,
+        this.scratchSurfacePoint,
+      );
+    }
+    if (!found) return false;
+
+    this.scratchSurfaceNormal
+      .copy(this.scratchSurfacePoint)
+      .sub(this.domain.center)
+      .normalize();
+    const frameDenominator = this.scratchSurfaceNormal.dot(frame.normal);
+    if (frameDenominator <= RAY_INTERSECTION_EPSILON) return false;
+    out.set(
+      (this.domain.radiusM * this.scratchSurfaceNormal.dot(frame.tangentU)) /
+        frameDenominator,
+      (this.domain.radiusM * this.scratchSurfaceNormal.dot(frame.tangentV)) /
+        frameDenominator,
+    );
+    this.clampViewAnchorDistance(
+      out,
+      localCamera,
+      Math.min(
+        this.domain.radiusM * 4,
+        gridExtent * SPHERE_VIEW_GRID_MAX_DISTANCE_EXTENTS,
+      ),
+    );
+    this.domain
+      .composeWorldPosition(frame, out.x, out.y, 0, this.scratchSurfacePoint)
+      .sub(this.domain.center)
+      .normalize();
+    outSurfaceNormal.copy(this.scratchSurfacePoint);
+    return true;
+  }
+
+  private lowerFrustumRay(camera: PerspectiveCamera, out: Vector3): Vector3 {
+    return out
+      .set(0, VIEW_RAY_NDC_Y, 0.5)
+      .unproject(camera)
+      .sub(camera.position)
+      .normalize();
+  }
+
+  private intersectPlaneViewRay(
+    origin: Vector3,
+    direction: Vector3,
+    frame: ReturnType<WaterSurfaceDomain['getLocalFrame']>,
+    out: Vector2,
+  ): boolean {
+    const denominator = direction.dot(frame.normal);
+    if (Math.abs(denominator) <= RAY_INTERSECTION_EPSILON) return false;
+    const distance =
+      this.scratchRelative.copy(frame.origin).sub(origin).dot(frame.normal) /
+      denominator;
+    if (distance <= RAY_INTERSECTION_EPSILON) return false;
+    this.scratchSurfacePoint
+      .copy(direction)
+      .multiplyScalar(distance)
+      .add(origin)
+      .sub(frame.origin);
+    out.set(
+      this.scratchSurfacePoint.dot(frame.tangentU),
+      this.scratchSurfacePoint.dot(frame.tangentV),
+    );
+    return true;
+  }
+
+  private intersectSphereViewRay(
+    origin: Vector3,
+    direction: Vector3,
+    domain: SphereWaterDomain,
+    out: Vector3,
+  ): boolean {
+    this.scratchRelative.copy(origin).sub(domain.center);
+    const projected = this.scratchRelative.dot(direction);
+    const discriminant =
+      projected * projected -
+      (this.scratchRelative.lengthSq() - domain.radiusM * domain.radiusM);
+    if (discriminant < 0) return false;
+    const root = Math.sqrt(discriminant);
+    let distance = -projected - root;
+    if (distance <= RAY_INTERSECTION_EPSILON) distance = -projected + root;
+    if (distance <= RAY_INTERSECTION_EPSILON) return false;
+    out.copy(direction).multiplyScalar(distance).add(origin);
+    return true;
+  }
+
+  private sphereHorizonTarget(
+    cameraPosition: Vector3,
+    viewDirection: Vector3,
+    domain: SphereWaterDomain,
+    out: Vector3,
+  ): boolean {
+    this.scratchRelative.copy(cameraPosition).sub(domain.center);
+    const distance = this.scratchRelative.length();
+    if (distance <= domain.radiusM) return false;
+    this.scratchSurfaceNormal.copy(this.scratchRelative).normalize();
+    this.scratchTangentDirection
+      .copy(viewDirection)
+      .addScaledVector(
+        this.scratchSurfaceNormal,
+        -viewDirection.dot(this.scratchSurfaceNormal),
+      );
+    if (this.scratchTangentDirection.lengthSq() < RAY_INTERSECTION_EPSILON) {
+      return false;
+    }
+    this.scratchTangentDirection.normalize();
+    const horizonAngle = Math.acos(
+      Math.max(-1, Math.min(1, domain.radiusM / distance)),
+    );
+    out
+      .copy(this.scratchSurfaceNormal)
+      .multiplyScalar(Math.cos(horizonAngle))
+      .addScaledVector(this.scratchTangentDirection, Math.sin(horizonAngle))
+      .multiplyScalar(domain.radiusM)
+      .add(domain.center);
+    return true;
+  }
+
+  private clampViewAnchorDistance(
+    anchor: Vector2,
+    origin: Vector2,
+    maxDistance: number,
+  ): void {
+    const dx = anchor.x - origin.x;
+    const dy = anchor.y - origin.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance <= maxDistance || distance === 0) return;
+    const scale = maxDistance / distance;
+    anchor.set(origin.x + dx * scale, origin.y + dy * scale);
+  }
+
+  private updateLevelInstances(
+    meshes: readonly InstancedMesh[],
+    levels: ReturnType<typeof computeWaterLodLevels>,
+    wrappedLevels?: ReturnType<typeof computeWaterLodLevels>,
+  ): void {
+    for (let i = 0; i < levels.length; i++) {
+      const level = levels[i];
+      const mesh = meshes[i];
+      const instances = wrappedLevels
+        ? this.mergeLodInstances(level.instances, wrappedLevels[i].instances)
+        : level.instances;
+      mesh.count = instances.length;
+      for (let j = 0; j < instances.length; j++) {
+        const instance = instances[j];
+        this.scratchMatrix.makeScale(
+          level.patchWorldSize,
+          1,
+          level.patchWorldSize,
+        );
+        this.scratchMatrix.setPosition(instance.x, 0, instance.z);
+        mesh.setMatrixAt(j, this.scratchMatrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    }
   }
 
   private getGridOuterHalfExtent(grid: WaterLodGridOptions): number {
@@ -542,6 +890,8 @@ export class WaterSurfaceRenderer {
     level: number,
     grid: WaterLodGridOptions,
     defines: Readonly<Record<string, number>>,
+    lodAnchorUniform: { value: Vector2 },
+    opacityUniform: { value: number },
   ): ShaderMaterial {
     const patchWorldSize = grid.baseCellSize * 2 ** level;
     const outerHalfExtent = (grid.coreSizePatches / 2) * patchWorldSize;
@@ -562,7 +912,7 @@ export class WaterSurfaceRenderer {
         ...this.surfaceDepthUniforms,
         ...this.domainUniforms,
         uTime: this.uTime,
-        uLodCameraXZ: this.uLodCameraXZ,
+        uLodCameraXZ: lodAnchorUniform,
         uLodPeriodZ: this.uLodPeriodZ,
         uCellSize: { value: patchWorldSize / grid.patchResolution },
         uMorphStart: { value: Math.max(morphEnd - 2 * patchWorldSize, 0) },
@@ -570,7 +920,7 @@ export class WaterSurfaceRenderer {
         uInnerCullRadius: { value: innerCullRadius },
         uOuterCullRadius: { value: outerCullRadius },
         uLightDirection: { value: this.lightDirection },
-        uNearFieldOpacity: this.uNearFieldOpacity,
+        uNearFieldOpacity: opacityUniform,
       },
       defines,
       vertexShader: WATER_SURFACE_VERTEX_SHADER,
@@ -587,11 +937,13 @@ export class WaterSurfaceRenderer {
   private removeFromScene(): void {
     this.planetaryFarMesh?.removeFromParent();
     for (const mesh of this.levelMeshes) mesh.removeFromParent();
+    for (const mesh of this.viewLevelMeshes) mesh.removeFromParent();
     this.scene = null;
   }
 
   private disposeGrid(): void {
     for (const mesh of this.levelMeshes) mesh.dispose();
+    for (const mesh of this.viewLevelMeshes) mesh.dispose();
     for (const material of this.levelMaterials) material.dispose();
     this.planetaryFarMesh?.geometry.dispose();
     this.planetaryFarMesh?.material.dispose();
@@ -601,6 +953,8 @@ export class WaterSurfaceRenderer {
     this.patchGeometry?.dispose();
     this.patchGeometry = null;
     this.levelMeshes.length = 0;
+    this.viewLevelMeshes.length = 0;
+    this.depthMeshes.length = 0;
     this.levelMaterials.length = 0;
   }
 }
@@ -754,6 +1108,9 @@ export const PLANETARY_FAR_SURFACE_FRAGMENT_SHADER = `
   uniform vec3 uCameraSurfaceNormal;
   uniform float uNearAngularRadius;
   uniform float uNearFieldOpacity;
+  uniform vec3 uViewSurfaceNormal;
+  uniform float uViewAngularRadius;
+  uniform float uViewFieldOpacity;
   uniform sampler2D uNormalMap;
   uniform float uTime;
   uniform vec3 uLightDirection;
@@ -776,6 +1133,17 @@ export const PLANETARY_FAR_SURFACE_FRAGMENT_SHADER = `
       angularDistance
     );
     float alpha = mix(1.0, localHole, uNearFieldOpacity);
+    float viewAngularDistance = acos(clamp(
+      dot(sphereNormal, normalize(uViewSurfaceNormal)),
+      -1.0,
+      1.0
+    ));
+    float viewHole = smoothstep(
+      uViewAngularRadius * ${NEAR_FIELD_HOLE_INNER_RATIO.toFixed(2)},
+      uViewAngularRadius,
+      viewAngularDistance
+    );
+    alpha *= mix(1.0, viewHole, uViewFieldOpacity);
     if (alpha <= 0.001) discard;
 
     vec2 tiling = vec2(

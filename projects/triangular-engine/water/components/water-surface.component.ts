@@ -50,6 +50,13 @@ export class WaterSurfaceComponent implements OnInit, OnDestroy {
   readonly motion = input<WaterMotionPresetName>('oceanSwell');
   readonly presetOverrides = input<WaterRenderPresetOverrides>({});
   /**
+   * Registers the rendered surface for sampling by default. Set false when
+   * simulation already owns the authoritative WaterService body.
+   */
+  readonly registerBody = input(true);
+  /** Optional authoritative animation clock; defaults to engine elapsed time. */
+  readonly timeSeconds = input<number | undefined>(undefined);
+  /**
    * Multiplies the camera-centred area retained at each LOD level.
    * Values above 1 keep finer geometry farther from the camera, at the cost
    * of more patch instances. This does not alter wave motion or surface size.
@@ -77,10 +84,14 @@ export class WaterSurfaceComponent implements OnInit, OnDestroy {
       const lodDetail = this.lodDetail();
       const bodyId = this.bodyId();
       const priority = this.priority();
-      const basePreset = resolveWaterRenderPreset(WATER_RENDER_PRESETS[quality], {
-        ...overrides,
-        waves: overrides.waves ?? WATER_WAVE_PRESETS[motion],
-      });
+      const registerBody = this.registerBody();
+      const basePreset = resolveWaterRenderPreset(
+        WATER_RENDER_PRESETS[quality],
+        {
+          ...overrides,
+          waves: overrides.waves ?? WATER_WAVE_PRESETS[motion],
+        },
+      );
       const detailMultiplier =
         Number.isFinite(lodDetail) && lodDetail > 0 ? lodDetail : 1;
       const preset = {
@@ -97,12 +108,14 @@ export class WaterSurfaceComponent implements OnInit, OnDestroy {
       };
 
       this.unregisterBody?.();
-      this.unregisterBody = this.water.register({
-        id: bodyId,
-        priority,
-        domain,
-        surface: new GerstnerSurface(preset.waves.waves),
-      });
+      this.unregisterBody = registerBody
+        ? this.water.register({
+            id: bodyId,
+            priority,
+            domain,
+            surface: new GerstnerSurface(preset.waves.waves),
+          })
+        : undefined;
 
       if (this.renderer && this.activeDomain === domain) {
         this.renderer.setPreset(preset);
@@ -128,7 +141,7 @@ export class WaterSurfaceComponent implements OnInit, OnDestroy {
         if (!renderer) return;
 
         const camera = this.engine.camera;
-        const elapsed = this.engine.timer.getElapsed();
+        const elapsed = this.timeSeconds() ?? this.engine.timer.getElapsed();
         renderer.update(camera, elapsed);
         this.water.updateTracked(elapsed);
         if (this.engine.renderer instanceof WebGLRenderer) {

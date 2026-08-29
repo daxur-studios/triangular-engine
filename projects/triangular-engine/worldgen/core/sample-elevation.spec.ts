@@ -1,5 +1,5 @@
 import { buildPlanetGraphCore } from './planet-graph';
-import { findCellAt, sampleElevation } from './sample-elevation';
+import { findCellAt, findCellNear, sampleElevation, sampleElevationNear } from './sample-elevation';
 import { buildPlanetTectonics } from './tectonics';
 
 describe('sampleElevation', () => {
@@ -63,6 +63,51 @@ describe('sampleElevation', () => {
       const sampled = sampleElevation(graph, tectonics.elevation, midCorner);
       expect(sampled).toBeGreaterThanOrEqual(localMin - 1e-6);
       expect(sampled).toBeLessThanOrEqual(localMax + 1e-6);
+    }
+  });
+});
+
+describe('findCellNear / sampleElevationNear', () => {
+  it('resolves the same cell as findCellAt, seeded from any starting hint', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 250, seed: 5 });
+
+    for (const cell of graph.cells) {
+      const expected = findCellAt(graph, cell.center);
+      // Seed the walk from a handful of arbitrary, likely-far starting cells — the walk must
+      // converge on the true containing cell regardless of where it started, not just from a
+      // nearby hint.
+      for (const hintCellId of [0, Math.floor(graph.cells.length / 2), graph.cells.length - 1]) {
+        const found = findCellNear(graph, cell.center, hintCellId);
+        expect(found.id).toBe(expected.id);
+      }
+    }
+  });
+
+  it('matches sampleElevation exactly for the same direction, any hint', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 200, seed: 9 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 7, seed: 9 });
+
+    for (const cell of graph.cells) {
+      const direction = cell.corners[0];
+      const expected = sampleElevation(graph, tectonics.elevation, direction);
+      const { value, cellId } = sampleElevationNear(graph, tectonics.elevation, direction, 0);
+      expect(value).toBeCloseTo(expected, 10);
+      expect(cellId).toBe(findCellAt(graph, direction).id);
+    }
+  });
+
+  it('a coherent row-by-row walk (each hint seeded from the previous sample) still resolves correctly', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 13 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 8, seed: 13 });
+
+    let hintCellId = 0;
+    for (const cell of graph.cells) {
+      for (const corner of cell.corners) {
+        const expected = sampleElevation(graph, tectonics.elevation, corner);
+        const { value, cellId } = sampleElevationNear(graph, tectonics.elevation, corner, hintCellId);
+        expect(value).toBeCloseTo(expected, 10);
+        hintCellId = cellId;
+      }
     }
   });
 });

@@ -20,10 +20,13 @@ import {
   LineBasicMaterial,
   LineSegments,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   Points,
   PointsMaterial,
+  Raycaster,
   SphereGeometry,
+  Vector2,
   Vector3Tuple,
 } from 'three';
 import {
@@ -35,11 +38,14 @@ import {
 import {
   buildChunkLod1MeshData,
   buildChunkMeshData,
+  buildColliderPatch,
   buildPlanetChunks,
   buildPlanetEcology,
   buildPlanetGraphCore,
   buildPlanetTectonics,
+  colliderPatchIndices,
   computeCellPins,
+  IColliderPatch,
   IPlanetChunk,
   IPlanetEcology,
   IPlanetGraphCore,
@@ -223,6 +229,18 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * vary in this lab; no single default is "correct". */
   readonly lodDistance = signal(2);
   readonly lodSplit = signal('—');
+  /** M4d: a small high-res patch built from `buildColliderPatch()` — sampled directly from
+   * `sampleElevation()` at whatever `colliderPatchSampleCount()`/`colliderPatchAngularDeg()` ask
+   * for, independent of the visual chunk mesh's own resolution and current LOD tier at that
+   * spot (see `updateColliderPatch()`). It's a rendering proof, not a physics one yet — no Jolt
+   * body — but it demonstrates the actual claim runbook 022 M4d cares about: the patch stays
+   * uniformly fine-grained under the camera's look-at point even where the underlying chunk has
+   * dropped to LOD1's merged-cell polygons, or where the chunk boundary itself would otherwise
+   * show up as a resolution seam. */
+  readonly showColliderPatch = signal(false);
+  readonly colliderPatchSampleCount = signal(17);
+  readonly colliderPatchAngularDeg = signal(6);
+  readonly colliderPatchBuildMs = signal('—');
   readonly plateCount = signal(10);
   readonly mapMode = signal<MapMode>('graph');
   /** Visual-only exaggeration of raw elevation (unitless, typically ~-1..1) into a radius
@@ -318,6 +336,22 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   private cellSegments: Float32Array[] = [];
   private edgeScratch = new Float32Array(0);
 
+  // M4d collider-patch debug overlay — see showColliderPatch. colliderPatchRaw is the last
+  // buildColliderPatch() result (undisplaced directions + raw elevations), kept around so
+  // applyColliderPatchDisplacement() can re-scale positions on an elevationScale change without
+  // resampling, the same discipline updatePreviewDisplacement()/updateRiverOverlayDisplacement()
+  // already follow for the main terrain/rivers.
+  private readonly colliderPatchMaterial = new MeshBasicMaterial({
+    color: '#ff2fb0',
+    wireframe: true,
+    depthTest: true,
+  });
+  private colliderPatchMesh: Mesh | null = null;
+  private colliderPatchRaw: IColliderPatch | null = null;
+  private lastColliderPatchCenter: IVec3 | null = null;
+  private readonly colliderPatchRaycaster = new Raycaster();
+  private readonly colliderPatchNdcCenter = new Vector2(0, 0);
+
   constructor() {
     this.engine.scene.background = new Color('#0a0d12');
     this.root.name = 'cell-planet-graph';
@@ -331,6 +365,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
         this.updateCulling();
         this.updateSurfaceUp();
         this.updateChunkLod();
+        this.updateColliderPatch();
       });
 
     this.destroyRef.onDestroy(() => {
@@ -341,12 +376,14 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       this.oceanMesh?.geometry.dispose();
       this.riverLines?.geometry.dispose();
       this.coastlineLines?.geometry.dispose();
+      this.colliderPatchMesh?.geometry.dispose();
       this.sitesMaterial.dispose();
       this.edgesMaterial.dispose();
       this.previewMaterial.dispose();
       this.oceanMaterial.dispose();
       this.riverMaterial.dispose();
       this.coastlineMaterial.dispose();
+      this.colliderPatchMaterial.dispose();
     });
   }
 
@@ -388,6 +425,34 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.elevationScale.set(Number((event.target as HTMLInputElement).value));
     this.updatePreviewDisplacement();
     this.updateRiverOverlayDisplacement();
+    this.applyColliderPatchDisplacement();
+  }
+
+  toggleColliderPatch(): void {
+    this.showColliderPatch.update((visible) => !visible);
+    if (this.showColliderPatch()) return;
+    if (this.colliderPatchMesh) {
+      this.root.remove(this.colliderPatchMesh);
+      this.colliderPatchMesh.geometry.dispose();
+      this.colliderPatchMesh = null;
+    }
+    this.colliderPatchRaw = null;
+    this.lastColliderPatchCenter = null;
+    this.colliderPatchBuildMs.set('—');
+  }
+
+  onColliderPatchSampleCount(event: Event): void {
+    this.colliderPatchSampleCount.set(
+      Number((event.target as HTMLInputElement).value),
+    );
+    this.lastColliderPatchCenter = null; // force a resample next tick, not just a redisplacement
+  }
+
+  onColliderPatchAngularWidth(event: Event): void {
+    this.colliderPatchAngularDeg.set(
+      Number((event.target as HTMLInputElement).value),
+    );
+    this.lastColliderPatchCenter = null;
   }
 
   setMapMode(mode: MapMode): void {
@@ -490,6 +555,114 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     return hit ? hit.point.toArray() : null;
   };
 
+  /** M4d debug overlay driver, run every tick while `showColliderPatch()` is on. Raycasts
+   * straight out from the camera (NDC center — whatever the camera is currently looking at,
+   * the same "where would a vessel be" stand-in `raycastFocusResolver` above uses for orbit
+   * pivoting) against the live `previewMeshes`, so the probe point tracks the same displaced
+   * surface the visual mesh is showing regardless of which chunk/LOD is under it. Only
+   * resamples (`rebuildColliderPatch()`) once the probe has actually moved a meaningful
+   * fraction of the patch's own size — re-sampling on every single tick even though it's cheap
+   * (~3-5ms at the lab's default sizes, see runbook 022 M4d) would still churn a BufferGeometry
+   * allocation every frame for no visible benefit while the camera is idle. */
+  private updateColliderPatch(): void {
+    if (!this.showColliderPatch() || !this.graph || !this.tectonics) return;
+    const camera = this.engine.camera$.value;
+    if (!camera || this.previewMeshes.length === 0) return;
+
+    this.colliderPatchRaycaster.setFromCamera(this.colliderPatchNdcCenter, camera);
+    const hit = this.colliderPatchRaycaster.intersectObjects(
+      this.previewMeshes,
+      false,
+    )[0];
+    if (!hit) return;
+
+    const len = hit.point.length() || 1;
+    const direction: IVec3 = {
+      x: hit.point.x / len,
+      y: hit.point.y / len,
+      z: hit.point.z / len,
+    };
+
+    const angularHalfWidth = (this.colliderPatchAngularDeg() * Math.PI) / 180;
+    if (this.lastColliderPatchCenter) {
+      const cosAngle =
+        direction.x * this.lastColliderPatchCenter.x +
+        direction.y * this.lastColliderPatchCenter.y +
+        direction.z * this.lastColliderPatchCenter.z;
+      // Rebuild once the probe has drifted ~1/4 of the patch's own angular half-width — frequent
+      // enough that following the camera reads as live, not so frequent that idling burns a
+      // rebuild every tick.
+      if (cosAngle > Math.cos(angularHalfWidth * 0.25)) return;
+    }
+
+    this.lastColliderPatchCenter = direction;
+    this.rebuildColliderPatch(direction);
+  }
+
+  /** Samples a fresh `IColliderPatch` at `direction` via `buildColliderPatch()` — density and
+   * extent controlled by `colliderPatchSampleCount()`/`colliderPatchAngularDeg()`, entirely
+   * independent of `cellCount`, the current chunk's LOD tier, or chunk boundaries, which is the
+   * whole point of M4d's camera/physics decoupling claim (runbook 022 Layer 2/3). Rendered as a
+   * plain wireframe mesh so it visibly reads as "a separate high-res patch sitting on top of
+   * whatever the chunk mesh underneath is doing" rather than blending into it. */
+  private rebuildColliderPatch(direction: IVec3): void {
+    if (!this.graph || !this.tectonics) return;
+    const t0 = performance.now();
+    const sampleCount = this.colliderPatchSampleCount();
+    const angularHalfWidth = (this.colliderPatchAngularDeg() * Math.PI) / 180;
+    const patch = buildColliderPatch(this.graph, this.tectonics.elevation, direction, {
+      angularHalfWidth,
+      sampleCount,
+    });
+    const indices = colliderPatchIndices(patch);
+    this.colliderPatchBuildMs.set(`${(performance.now() - t0).toFixed(2)} ms`);
+    this.colliderPatchRaw = patch;
+
+    if (this.colliderPatchMesh) {
+      this.root.remove(this.colliderPatchMesh);
+      this.colliderPatchMesh.geometry.dispose();
+      this.colliderPatchMesh = null;
+    }
+
+    const geometry = new BufferGeometry();
+    geometry.setAttribute(
+      'position',
+      new BufferAttribute(new Float32Array(patch.sampleCount * patch.sampleCount * 3), 3),
+    );
+    geometry.setIndex(new BufferAttribute(indices, 1));
+    const mesh = new Mesh(geometry, this.colliderPatchMaterial);
+    mesh.name = 'collider-patch-debug';
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 10;
+    this.colliderPatchMesh = mesh;
+    this.root.add(mesh);
+    this.applyColliderPatchDisplacement();
+  }
+
+  /** Re-scales the cached `colliderPatchRaw` directions/elevations by the current
+   * `elevationScale()` without resampling — mirrors `updatePreviewDisplacement()`'s and
+   * `updateRiverOverlayDisplacement()`'s split between "resample the graph" (expensive-ish,
+   * user-triggered) and "reposition already-sampled vertices" (cheap, safe on every slider
+   * `input` event). */
+  private applyColliderPatchDisplacement(): void {
+    if (!this.colliderPatchMesh || !this.colliderPatchRaw) return;
+    const scale = this.elevationScale() / 100;
+    const { directions, elevations } = this.colliderPatchRaw;
+    const positionAttr = this.colliderPatchMesh.geometry.getAttribute(
+      'position',
+    ) as BufferAttribute;
+    const positions = positionAttr.array as Float32Array;
+    for (let i = 0; i < elevations.length; i++) {
+      const radius = 1 + elevations[i] * scale;
+      const o = i * 3;
+      positions[o] = directions[o] * radius;
+      positions[o + 1] = directions[o + 1] * radius;
+      positions[o + 2] = directions[o + 2] * radius;
+    }
+    positionAttr.needsUpdate = true;
+    this.colliderPatchMesh.geometry.computeVertexNormals();
+  }
+
   jitterValue(): string {
     return (this.jitter() / 100).toFixed(2);
   }
@@ -527,6 +700,10 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.updateStats(graph);
     this.drawMap();
     this.updateCulling();
+    // The graph/elevation array just got replaced — colliderPatchRaw (if any) was sampled from
+    // the old one, so force updateColliderPatch() to resample against the new graph next tick
+    // instead of comparing the stale center and deciding nothing moved.
+    this.lastColliderPatchCenter = null;
   }
 
   private rebuildSites(graph: IPlanetGraphCore): void {

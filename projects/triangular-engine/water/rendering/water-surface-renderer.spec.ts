@@ -1,4 +1,5 @@
 import {
+  InstancedMesh,
   NearestFilter,
   PerspectiveCamera,
   Scene,
@@ -88,6 +89,57 @@ describe('WaterSurfaceRenderer', () => {
     expect(
       renderer.farSurfaceMesh?.material.uniforms['uNearFieldOpacity'].value,
     ).toBe(0);
+    renderer.dispose();
+  });
+
+  it('retains camera detail while selecting a second grid toward the visible horizon', () => {
+    const radius = 600_000;
+    const scene = new Scene();
+    const renderer = new WaterSurfaceRenderer({
+      domain: new SphereWaterDomain(radius),
+      preset: WATER_RENDER_PRESETS.balanced,
+    });
+    const camera = new PerspectiveCamera(60, 16 / 9, 0.1, 2_000_000);
+    camera.position.set(0, radius + 10_000, 0);
+    camera.lookAt(new Vector3(200_000, radius, 0));
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld(true);
+    renderer.addTo(scene);
+    renderer.update(camera, 1);
+
+    expect(renderer.meshes.every((mesh) => mesh.count > 0)).toBeTrue();
+    const viewMeshes = scene.children.filter(
+      (child): child is InstancedMesh =>
+        child instanceof InstancedMesh &&
+        child.name.startsWith('water-view-lod-'),
+    );
+    expect(viewMeshes.length).toBe(
+      WATER_RENDER_PRESETS.balanced.grid.ringCount + 1,
+    );
+    expect(viewMeshes.every((mesh) => mesh.count > 0)).toBeTrue();
+    expect(
+      renderer.farSurfaceMesh?.material.uniforms['uViewFieldOpacity'].value,
+    ).toBeGreaterThan(0);
+    renderer.dispose();
+  });
+
+  it('tracks a mutable spherical centre for floating-origin scenes', () => {
+    const radius = 500;
+    const domain = new SphereWaterDomain(radius);
+    const renderer = new WaterSurfaceRenderer({
+      domain,
+      preset: WATER_RENDER_PRESETS.performance,
+    });
+    const camera = new PerspectiveCamera();
+    domain.center.set(100, 20, -50);
+    camera.position.set(100, radius + 30, -50);
+    renderer.update(camera, 0);
+
+    expect(renderer.farSurfaceMesh?.position.toArray()).toEqual([100, 20, -50]);
+    const material = renderer.meshes[0].material as ShaderMaterial;
+    expect(material.uniforms['uSphereCenter'].value.toArray()).toEqual([
+      100, 20, -50,
+    ]);
     renderer.dispose();
   });
 
