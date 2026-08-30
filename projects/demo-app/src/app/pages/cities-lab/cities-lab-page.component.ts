@@ -239,7 +239,7 @@ export class CitiesLabPageComponent {
       sidewalkWidthM: this.sidewalkWidthM(),
       curbHeightM: this.curbHeightM(),
       greenVergeWidthM: this.greenVergeWidthM(),
-      medianWidthM: 2.0,
+      medianWidthM: 0, // mesh profile has no median; keep collider width identical to rendered width
     };
 
     const nativeElevationFn = this.getNativeTerrainSampler(this.terrainPreset());

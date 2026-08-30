@@ -13,7 +13,7 @@ export interface IRoadColliderDescriptor {
   readonly shape: RoadColliderShape;
   /**
    * Params matching Jolt / Scatter adapters:
-   * - box: [width, height, depth]
+   * - box: [width (lateral), height (vertical slab), depth (along road)]
    * - cylinder: [halfHeight, radius]
    */
   readonly params: readonly number[];
@@ -29,6 +29,16 @@ export interface IRoadColliderOptions {
 
 /**
  * Synthesizes Jolt primitive collider descriptors along a classified road or bridge span.
+ *
+ * Dimension convention:
+ *   - `params[0]` = total cross-section width (lateral, across the road)
+ *   - `params[1]` = slab thickness (vertical)
+ *   - `params[2]` = segment length (along road direction)
+ *
+ * Uses a right-handed basis [left, trueUp, forward] with det = +1 so that:
+ *   - Local +X (width) maps to the lateral left/right direction across the road
+ *   - Local +Y (thickness) maps to trueUp
+ *   - Local +Z (length) maps to the forward road segment direction
  */
 export function deriveRoadSpanColliders(
   span: IClassifiedRoadSpan,
@@ -41,7 +51,14 @@ export function deriveRoadSpanColliders(
 
   const totalWidthM = computeCrossSectionTotalWidth(crossSection);
   const deckThickness = options.bridgeDeckThicknessM ?? 1.4;
-  const thicknessM = options.thicknessM ?? (span.type === 'bridge' ? deckThickness : 0.35);
+
+  // Surface roads: 1.2m slab gives sensible physics footprint and debug visibility.
+  // Bridge deck: use bridgeDeckThicknessM.
+  // Tunnel: 0.5m thin.
+  const thicknessM =
+    options.thicknessM ??
+    (span.type === 'bridge' ? deckThickness : span.type === 'tunnel' ? 0.5 : 1.2);
+
   const pierRadiusM = options.pierRadiusM ?? 1.0;
 
   // 1. Box colliders for each linear segment along road corridor
@@ -54,20 +71,27 @@ export function deriveRoadSpanColliders(
     if (segLength < 1e-3) continue;
 
     const midPoint = new Vector3().addVectors(p0, p1).multiplyScalar(0.5);
-    // Lower slightly so the top of collider matches the road surface
+    // Shift down so the TOP face of the slab is flush with the road surface centerline
     midPoint.y -= thicknessM * 0.5;
 
-    // Calculate rotation quaternion aligning local +Z to segment direction
+    // Right-handed basis (det = +1):
+    //   Basis X = left = worldUp x forward
+    //   Basis Y = trueUp = forward x left
+    //   Basis Z = forward
     const forward = segVector.clone().normalize();
-    const up = new Vector3(0, 1, 0);
-    const right = new Vector3().crossVectors(forward, up).normalize();
-    if (right.lengthSq() < 1e-4) {
-      right.set(1, 0, 0);
+    const worldUp = new Vector3(0, 1, 0);
+    const left = new Vector3().crossVectors(worldUp, forward);
+
+    if (left.lengthSq() < 1e-6) {
+      left.set(0, 0, 1); // vertical road: fallback
+    } else {
+      left.normalize();
     }
-    const trueUp = new Vector3().crossVectors(right, forward).normalize();
+
+    const trueUp = new Vector3().crossVectors(forward, left).normalize();
 
     const quat = new Quaternion().setFromRotationMatrix(
-      new Matrix4().makeBasis(right, trueUp, forward),
+      new Matrix4().makeBasis(left, trueUp, forward),
     );
 
     colliders.push({
