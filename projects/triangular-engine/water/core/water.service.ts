@@ -45,13 +45,18 @@ export class WaterService {
   private lastUpdateTime = Number.NaN;
 
   register(body: WaterBody): () => void {
-    if (this.bodies.has(body.id)) {
-      throw new Error(`WaterService: body "${body.id}" is already registered.`);
-    }
     this.bodies.set(body.id, body);
     return () => {
       if (this.bodies.get(body.id) === body) this.bodies.delete(body.id);
     };
+  }
+
+  unregister(id: string): void {
+    this.bodies.delete(id);
+  }
+
+  has(id: string): boolean {
+    return this.bodies.has(id);
   }
 
   sample(worldPosition: Vector3, elapsedSeconds: number): WaterSample | null {

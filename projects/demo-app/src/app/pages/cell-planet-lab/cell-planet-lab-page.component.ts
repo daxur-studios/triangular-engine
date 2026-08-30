@@ -27,7 +27,6 @@ import {
   Points,
   PointsMaterial,
   Raycaster,
-  SphereGeometry,
   Vector2,
   Vector3Tuple,
 } from 'three';
@@ -338,9 +337,17 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   /** Soft target cells/chunk — see `buildPlanetChunks()`'s `targetChunkSize` doc comment.
    * Not yet exposed as a UI control; the draw-call/LOD-granularity tradeoff isn't tuned. */
   private readonly chunkTargetSize = 100;
-  // Flat sea-level shell layered over the (unclamped) terrain mesh so submerged land
-  // reads as underwater without the terrain mesh itself faking a shoreline — see the
-  // rebuildPreviewMesh() doc comment.
+  // Sea-level shell layered over the (unclamped) terrain mesh so submerged land reads as
+  // underwater without the terrain mesh itself faking a shoreline — see the
+  // rebuildPreviewMesh() doc comment. Split into two meshes (water/lava), each clipped to the
+  // actual ocean+lake cells of that substance (buildChunkMeshData() on a flat sea-level
+  // elevation array), not a single uniform sphere over the whole planet — the old single-sphere
+  // version always rendered blue everywhere below sea level, which was wrong on two counts
+  // Bruno caught: a `protoplanet` world's molten main ocean still looked like translucent
+  // water, and a local `lava_lake` (Feature) sitting on an otherwise water-substance planet was
+  // covered by the same blue shell despite the terrain underneath already coloring it as lava.
+  // Both meshes rebuild only in rebuildOceanShell() (regenerate/profile changes), same
+  // amortized-once-per-graph cost as the rest of the preview mesh — not per frame.
   private readonly oceanMaterial = new MeshStandardMaterial({
     color: '#1c5f8a',
     transparent: true,
@@ -349,7 +356,18 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     metalness: 0.05,
     side: DoubleSide,
   });
-  private oceanMesh: Mesh | null = null;
+  private readonly lavaShellMaterial = new MeshStandardMaterial({
+    color: '#ff5a1f',
+    emissive: '#c23a00',
+    emissiveIntensity: 0.6,
+    transparent: true,
+    opacity: 0.9,
+    roughness: 0.4,
+    metalness: 0,
+    side: DoubleSide,
+  });
+  private waterShellMesh: Mesh | null = null;
+  private lavaShellMesh: Mesh | null = null;
   private currentSeaLevelElevation = 0;
   // World-profile spike: river paths render as real flowing ribbons (worldgen/render's
   // flow-path.ts, relocated from the river-lab POC) instead of a flat debug line — one Mesh
@@ -435,7 +453,8 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       this.sitesPoints?.geometry.dispose();
       this.edgesLines?.geometry.dispose();
       for (const mesh of this.previewMeshes) mesh.geometry.dispose();
-      this.oceanMesh?.geometry.dispose();
+      this.waterShellMesh?.geometry.dispose();
+      this.lavaShellMesh?.geometry.dispose();
       for (const mesh of this.riverRibbons) mesh.geometry.dispose();
       this.coastlineLines?.geometry.dispose();
       this.colliderPatchMesh?.geometry.dispose();
@@ -443,6 +462,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       this.edgesMaterial.dispose();
       this.previewMaterial.dispose();
       this.oceanMaterial.dispose();
+      this.lavaShellMaterial.dispose();
       this.waterFlowMaterial.dispose();
       this.lavaFlowMaterial.dispose();
       this.coastlineMaterial.dispose();
@@ -542,14 +562,18 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   togglePreview3D(): void {
     this.showPreview3D.update((value) => !value);
     this.previewGroup.visible = this.showPreview3D();
-    if (this.oceanMesh)
-      this.oceanMesh.visible = this.showPreview3D() && this.showOceanShell();
+    this.updateOceanShellVisibility();
   }
 
   toggleOceanShell(): void {
     this.showOceanShell.update((value) => !value);
-    if (this.oceanMesh)
-      this.oceanMesh.visible = this.showPreview3D() && this.showOceanShell();
+    this.updateOceanShellVisibility();
+  }
+
+  private updateOceanShellVisibility(): void {
+    const visible = this.showPreview3D() && this.showOceanShell();
+    if (this.waterShellMesh) this.waterShellMesh.visible = visible;
+    if (this.lavaShellMesh) this.lavaShellMesh.visible = visible;
   }
 
   toggleChunkColors(): void {
@@ -982,8 +1006,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       this.terrainEdits,
       cellId,
     );
-    const isLavaOcean =
-      this.worldProfile().oceanSubstance === 'lava' && ecology?.waterBodyKind[cellId] === 'ocean';
+    const isLavaOcean = this.isLavaCell(cellId);
 
     if (mode === 'plates') return plateColor(tectonics.plateIdByCell[cellId]);
     if (mode === 'elevation') {
@@ -1035,8 +1058,8 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * scale. `resolveVertexColor()` now classifies land/water from this exact same elevation
    * value (`elevation >= seaLevel`, per vertex), so color and height are the same statement
    * by construction — the mismatch can't reappear at any scale or elevation-scale setting.
-   * The visual "water covers submerged land" effect now comes from the separate ocean shell
-   * (`ensureOceanShell()`) layered on top, the standard technique instead of forcing the
+   * The visual "water covers submerged land" effect now comes from the separate ocean shell(s)
+   * (`rebuildOceanShell()`) layered on top, the standard technique instead of forcing the
    * terrain mesh to fake a shoreline.
    *
    * A per-vertex sandy "beach band" was tried and reverted: at this mesh's resolution (one
@@ -1123,7 +1146,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.chunkTotal.set(chunks.length);
 
     this.currentSeaLevelElevation = tectonics.seaLevelElevation;
-    this.ensureOceanShell();
+    this.rebuildOceanShell(graph);
     this.updatePreviewDisplacement();
     this.updatePreviewColors();
     this.updateChunkLod();
@@ -1373,18 +1396,64 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     );
   }
 
-  /** Flat sea-level shell (a plain unit sphere, scaled per-frame-cheap via `scale`, not
-   * regenerated) layered over the terrain mesh. Depth-tests normally against the unclamped
-   * terrain: where land pokes above sea level it renders in front and hides the shell, where
-   * terrain dips below sea level the shell is in front and covers it — the same technique
-   * used for this in Civ-style globes, no per-vertex land/water logic needed here at all. */
-  private ensureOceanShell(): void {
-    if (!this.oceanMesh) {
-      const geometry = new SphereGeometry(1, 96, 48);
-      this.oceanMesh = new Mesh(geometry, this.oceanMaterial);
-      this.root.add(this.oceanMesh);
+  /** Sea-level shell(s), clipped to the actual ocean+lake cells rather than a uniform sphere —
+   * split into a water mesh and a lava mesh so substance (global `oceanSubstance` on the main
+   * ocean, or a local `lava_lake` Feature tag) reads correctly regardless of which one a given
+   * planet has, including both on the same planet at once. Rebuilt every `rebuildPreviewMesh()`
+   * call (regenerate, or a profile/feature change) — cheap: cell count here is bounded by
+   * ocean+lake cell count, not display resolution, same as the rest of the chunked mesh.
+   * Depth-tests normally against the unclamped terrain: where land pokes above sea level it
+   * renders in front and hides the shell, where terrain dips below sea level the shell is in
+   * front and covers it (the standard Civ-style-globe technique) — reusing `buildChunkMeshData()`
+   * with every cell's elevation forced to `seaLevelElevation` means every vertex lands at the
+   * same radius, so no further per-vertex land/water logic is needed here either. */
+  private rebuildOceanShell(graph: IPlanetGraphCore): void {
+    this.waterShellMesh?.geometry.dispose();
+    this.lavaShellMesh?.geometry.dispose();
+    this.root.remove(...[this.waterShellMesh, this.lavaShellMesh].filter((m): m is Mesh => m !== null));
+    this.waterShellMesh = null;
+    this.lavaShellMesh = null;
+
+    const ecology = this.ecology;
+    if (!ecology) return;
+
+    const flatElevation = new Array(graph.cells.length).fill(this.currentSeaLevelElevation);
+    const waterCellIds: number[] = [];
+    const lavaCellIds: number[] = [];
+    for (let cellId = 0; cellId < graph.cells.length; cellId++) {
+      const kind = ecology.waterBodyKind[cellId];
+      if (kind !== 'ocean' && kind !== 'lake') continue;
+      (this.isLavaCell(cellId) ? lavaCellIds : waterCellIds).push(cellId);
     }
-    this.oceanMesh.visible = this.showPreview3D() && this.showOceanShell();
+
+    const buildShell = (cellIds: number[], material: MeshStandardMaterial): Mesh | null => {
+      if (cellIds.length === 0) return null;
+      const chunk: IPlanetChunk = { id: -1, cellIds, center: { x: 0, y: 0, z: 0 }, boundingRadius: Math.PI };
+      const { directions } = buildChunkMeshData(graph, flatElevation, chunk);
+      const geometry = new BufferGeometry();
+      geometry.setAttribute('position', new BufferAttribute(directions.slice(), 3));
+      geometry.computeVertexNormals();
+      const mesh = new Mesh(geometry, material);
+      mesh.scale.setScalar(1 + this.currentSeaLevelElevation * (this.elevationScale() / 100));
+      this.root.add(mesh);
+      return mesh;
+    };
+
+    this.waterShellMesh = buildShell(waterCellIds, this.oceanMaterial);
+    this.lavaShellMesh = buildShell(lavaCellIds, this.lavaShellMaterial);
+    this.updateOceanShellVisibility();
+  }
+
+  /** Whether `cellId` should render/shell as molten rather than liquid water — either the whole
+   * planet's main ocean is lava (`WorldProfile.oceanSubstance`) or this specific cell is a local
+   * `lava_lake` Feature instance (a small pocket near a volcano, independent of the planet's
+   * overall ocean substance). Shared by the ocean-shell partition above and the terrain fill
+   * colors (`resolveCellColor()`/`resolveVertexColor()`) so a lava cell never reads as blue
+   * water in one and orange lava in the other. */
+  private isLavaCell(cellId: number): boolean {
+    if (this.features.feature[cellId] === 'lava_lake') return true;
+    if (this.worldProfile().oceanSubstance !== 'lava') return false;
+    return this.ecology?.waterBodyKind[cellId] === 'ocean';
   }
 
   /** Re-displaces every preview vertex from its stored (direction, elevation) pair using
@@ -1410,9 +1479,9 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       mesh.geometry.computeVertexNormals();
     }
 
-    if (this.oceanMesh) {
-      this.oceanMesh.scale.setScalar(1 + this.currentSeaLevelElevation * scale);
-    }
+    const shellRadius = 1 + this.currentSeaLevelElevation * scale;
+    this.waterShellMesh?.scale.setScalar(shellRadius);
+    this.lavaShellMesh?.scale.setScalar(shellRadius);
   }
 
   /** Per-vertex color for the 3D preview — unlike `resolveCellColor()` (the 2D unwrap's flat
@@ -1517,13 +1586,12 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       );
 
     const land = vertexElevation >= tectonics.seaLevelElevation;
-    // Substance override: on a WorldProfile with oceanSubstance 'lava' (the `protoplanet`
-    // preset), the single largest water component reads as molten regardless of map mode —
-    // see world-profile.ts and color-ramps.ts's lavaOceanColor().
-    const isLavaOcean =
-      !land &&
-      this.worldProfile().oceanSubstance === 'lava' &&
-      this.ecology?.waterBodyKind[cellId] === 'ocean';
+    // Substance override: a WorldProfile with oceanSubstance 'lava' (the `protoplanet` preset)
+    // makes the whole main ocean molten, and/or this specific cell may carry a local
+    // `lava_lake` Feature tag — either way it reads as lava regardless of map mode. See
+    // isLavaCell()'s doc comment; shared with the ocean-shell mesh split so the two never
+    // disagree about which cells are lava.
+    const isLavaOcean = !land && this.isLavaCell(cellId);
 
     const ecology = this.ecology;
     if (ecology) {

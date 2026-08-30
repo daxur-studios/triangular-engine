@@ -146,7 +146,7 @@
           <input
             type="range"
             min="20"
-            max="3000"
+            max="9000"
             step="20"
             [value]="cellCount()"
             (input)="onCellCount($event)"
@@ -312,9 +312,7 @@
             [value]="colliderPatchSampleCount()"
             (input)="onColliderPatchSampleCount($event)"
           />
-          <span class="control-value"
-            >{{ colliderPatchSampleCount() }}²</span
-          >
+          <span class="control-value">{{ colliderPatchSampleCount() }}²</span>
         </label>
         <label class="control">
           <span>patch width</span>
@@ -346,7 +344,7 @@
         >
           dig
         </button>
-        @if (editMode() !== 'off') {
+        @if (editMode() !== "off") {
           <label class="control">
             <span>brush radius</span>
             <input
@@ -359,7 +357,7 @@
             />
             <span class="control-value">{{ editBrushHops() }} hop(s)</span>
           </label>
-          @if (editMode() === 'dig') {
+          @if (editMode() === "dig") {
             <label class="control">
               <span>dig delta</span>
               <input
@@ -377,9 +375,7 @@
             apply at camera look-at
           </button>
         }
-        <button type="button" (click)="resetTerrainEdits()">
-          reset edits
-        </button>
+        <button type="button" (click)="resetTerrainEdits()">reset edits</button>
       </div>
 
       <div class="controls">
@@ -521,33 +517,34 @@
         coastline cape, or small island flatten, shift, or vanish when a chunk
         crosses the LOD0/LOD1 boundary, so a small per-chunk budget of cells —
         the most prominent peaks, sharpest coastline curvature points, and
-        biggest small islands, ranked and capped rather than pinned past a
-        fixed threshold (a threshold regresses hardest exactly where a chunk
-        is genuinely mountainous, since most of its cells would clear a fixed
-        bar) — is pinned to always render as its own single-cell polygon at
-        both LODs, so those specific features stop popping regardless of
-        camera distance. The camera-distance threshold for the LOD0/LOD1 switch
-        is the "LOD distance" slider; the "LOD split" stat shows how many chunks
-        are currently at each level, and the "chunk colors" toggle colors each
-        chunk mesh flat (one hash color per chunk, shared by both its LOD
-        meshes) so chunk/LOD boundaries are visible directly. Rivers mode
-        overlays traced river paths (elevation-following) and a coastline
-        "waterline" extracted directly from each chunk's LOD0 mesh triangles
-        (not the coarser per-cell chain, and never LOD1's), so it always matches
-        the terrain's land/water edge exactly and stays stable regardless of the
-        live LOD state — independent of the 3D preview toggle. The "collider
-        patch (M4d)" toggle renders a separate magenta wireframe grid built by
-        <code>buildColliderPatch()</code>, sampling <code>sampleElevation()</code>
-        directly at whatever "patch resolution"/"patch width" ask for, centered
-        on wherever the camera is currently looking. It has no relationship to
-        chunk boundaries, chunk LOD, or <code>cellCount</code> at all — that
-        independence is the point (runbook 022 Layer 2/3's camera/physics
-        decoupling): the patch stays uniformly fine underneath the probe point
-        even where the chunk mesh beneath it has dropped to LOD1's merged
-        polygons. This is a rendering proof only so far, not a physics one —
-        no Jolt body yet — that (plus its ball-drop physics test) moved to
-        <code>/planet-physics-lab</code>, a dedicated lab for real-scale Jolt
-        physics. See runbook 022 M4d's follow-up note.
+        biggest small islands, ranked and capped rather than pinned past a fixed
+        threshold (a threshold regresses hardest exactly where a chunk is
+        genuinely mountainous, since most of its cells would clear a fixed bar)
+        — is pinned to always render as its own single-cell polygon at both
+        LODs, so those specific features stop popping regardless of camera
+        distance. The camera-distance threshold for the LOD0/LOD1 switch is the
+        "LOD distance" slider; the "LOD split" stat shows how many chunks are
+        currently at each level, and the "chunk colors" toggle colors each chunk
+        mesh flat (one hash color per chunk, shared by both its LOD meshes) so
+        chunk/LOD boundaries are visible directly. Rivers mode overlays traced
+        river paths (elevation-following) and a coastline "waterline" extracted
+        directly from each chunk's LOD0 mesh triangles (not the coarser per-cell
+        chain, and never LOD1's), so it always matches the terrain's land/water
+        edge exactly and stays stable regardless of the live LOD state —
+        independent of the 3D preview toggle. The "collider patch (M4d)" toggle
+        renders a separate magenta wireframe grid built by
+        <code>buildColliderPatch()</code>, sampling
+        <code>sampleElevation()</code> directly at whatever "patch
+        resolution"/"patch width" ask for, centered on wherever the camera is
+        currently looking. It has no relationship to chunk boundaries, chunk
+        LOD, or <code>cellCount</code> at all — that independence is the point
+        (runbook 022 Layer 2/3's camera/physics decoupling): the patch stays
+        uniformly fine underneath the probe point even where the chunk mesh
+        beneath it has dropped to LOD1's merged polygons. This is a rendering
+        proof only so far, not a physics one — no Jolt body yet — that (plus its
+        ball-drop physics test) moved to <code>/planet-physics-lab</code>, a
+        dedicated lab for real-scale Jolt physics. See runbook 022 M4d's
+        follow-up note.
       </p>
     </section>
   </ng-template>

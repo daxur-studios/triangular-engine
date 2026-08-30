@@ -1,6 +1,6 @@
 import { Component, effect, input, signal } from '@angular/core';
 
-import { ArrowHelper, ColorRepresentation, Vector3, Vector3Tuple } from 'three';
+import { ArrowHelper, ColorRepresentation, Material, Vector3, Vector3Tuple } from 'three';
 import {
   Object3DComponent,
   provideObject3DComponent,
@@ -33,6 +33,7 @@ export class ArrowHelperComponent extends Object3DComponent {
   readonly length = input.required<number>();
   readonly direction = input.required<Vector3Tuple>();
   readonly color = input<ColorRepresentation>('red');
+  readonly depthTest = input<boolean>(true);
 
   readonly arrow = signal<ArrowHelper>(new ArrowHelper());
   override object3D = this.arrow;
@@ -50,6 +51,24 @@ export class ArrowHelperComponent extends Object3DComponent {
     });
     effect(() => {
       this.arrow().setColor(this.color());
+    });
+    effect(() => {
+      const dt = this.depthTest();
+      const arrow = this.arrow();
+      const setDepthTest = (mat: Material | Material[] | undefined) => {
+        if (Array.isArray(mat)) {
+          for (const m of mat) m.depthTest = dt;
+        } else if (mat) {
+          mat.depthTest = dt;
+        }
+      };
+      setDepthTest(arrow.line.material);
+      setDepthTest(arrow.cone.material);
+      if (!dt) {
+        arrow.line.renderOrder = 999;
+        arrow.cone.renderOrder = 999;
+        arrow.renderOrder = 999;
+      }
     });
   }
 }
