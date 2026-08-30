@@ -7,6 +7,7 @@ import {
   Points,
   ShaderMaterial,
   SrcAlphaFactor,
+  Uniform,
   Vector3,
 } from 'three';
 
@@ -14,9 +15,10 @@ import { createCloudPuffClumpGeometry } from './cloud-puff-gpu-geometry';
 import {
   GPU_CIRRUS_FRAGMENT_SHADER,
   GPU_CIRRUS_VERTEX_SHADER,
-  GPU_PUFF_FRAGMENT_SHADER,
   GPU_PUFF_CLUMP_VERTEX_SHADER,
+  GPU_PUFF_FRAGMENT_SHADER,
 } from './cloud-puff-gpu-shaders';
+import type { ICloudPuffPointLight } from './cloud-puff-material';
 
 export interface ICloudAtmosphereOptions {
   readonly particleCount?: number;
@@ -45,6 +47,7 @@ export interface ICloudAtmosphere {
   update(timeS: number): void;
   updateCamera(cameraPos: Vector3, lodDistanceM?: number): void;
   setSunDirection(direction: Vector3): void;
+  setPointLights(lights: readonly ICloudPuffPointLight[]): void;
   setPuffPixelScale(scale: number): void;
   setClumpRadius(radius: number): void;
   setFollowLag(lag: number): void;
@@ -61,14 +64,18 @@ export interface ICloudAtmosphere {
 }
 
 export function buildCloudAtmosphere(options: ICloudAtmosphereOptions = {}): ICloudAtmosphere {
-  const particleCount = options.particleCount ?? 800;
+  const particleCount = options.particleCount ?? 1200;
   const clumpSize = options.clumpSize ?? 4;
   const planetR = options.planetRadius ?? 55;
-  const puffShellR = options.puffShellRadius ?? (planetR * 1.025);
-  const cirrusShellR = options.cirrusShellRadius ?? (planetR * 1.055);
+  const puffShellR = options.puffShellRadius ?? planetR * 1.025;
+  const cirrusShellR = options.cirrusShellRadius ?? planetR * 1.065;
 
   const group = new Group();
   group.name = 'cloud-atmosphere-system';
+
+  const pointLightPositions = Array.from({ length: 4 }, () => new Vector3());
+  const pointLightColors = Array.from({ length: 4 }, () => new Vector3(0, 0, 0));
+  const pointLightIntensities = new Float32Array(4);
 
   // Lower Cumulus Puff Clump Layer
   const puffGeometry = createCloudPuffClumpGeometry(particleCount, clumpSize);
@@ -91,6 +98,10 @@ export function buildCloudAtmosphere(options: ICloudAtmosphereOptions = {}): ICl
       uPuffColor: { value: new Color(options.puffColor ?? '#f8fafc') },
       uCameraPosition: { value: new Vector3(0, 50, 150) },
       uLodDistance: { value: options.lodDistanceM ?? 0.0 },
+      uPointLightPositions: { value: pointLightPositions },
+      uPointLightColors: { value: pointLightColors },
+      uPointLightIntensities: { value: pointLightIntensities },
+      uPointLightCount: { value: 0 },
     },
     transparent: true,
     depthWrite: false,
@@ -142,8 +153,20 @@ export function buildCloudAtmosphere(options: ICloudAtmosphereOptions = {}): ICl
       }
     },
     setSunDirection(direction: Vector3) {
-      puffMaterial.uniforms['uSunDirection'].value.copy(direction);
-      cirrusMaterial.uniforms['uSunDirection'].value.copy(direction);
+      puffMaterial.uniforms['uSunDirection'].value.copy(direction).normalize();
+      cirrusMaterial.uniforms['uSunDirection'].value.copy(direction).normalize();
+    },
+    setPointLights(lights: readonly ICloudPuffPointLight[]) {
+      const count = Math.min(lights.length, 4);
+      for (let i = 0; i < count; i++) {
+        pointLightPositions[i].copy(lights[i].position);
+        pointLightColors[i].set(lights[i].color.r, lights[i].color.g, lights[i].color.b);
+        pointLightIntensities[i] = lights[i].intensity;
+      }
+      for (let i = count; i < 4; i++) {
+        pointLightIntensities[i] = 0;
+      }
+      puffMaterial.uniforms['uPointLightCount'].value = count;
     },
     setPuffPixelScale(scale: number) {
       puffMaterial.uniforms['uPuffPixelScale'].value = scale;

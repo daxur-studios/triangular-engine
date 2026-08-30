@@ -4,4 +4,5 @@
  * where a graph/tectonics/ecology gets turned into an actual scene-graph object. */
 export * from './color-ramps';
 export * from './world-size-tiers';
+export * from './flow-path';
 export * from './components/planet-view.component';

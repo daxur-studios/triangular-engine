@@ -19,6 +19,7 @@ import {
   DEFAULT_CLOUD_PUFF_DOMAIN_ID,
   DEFAULT_CLOUD_PUFF_STYLE_ID,
   type ICloudPuffLodSystem,
+  type ICloudPuffPointLight,
 } from 'triangular-engine/clouds';
 import { PlanetViewComponent } from 'triangular-engine/worldgen/render';
 
@@ -114,14 +115,17 @@ export class CloudPuffsLabPageComponent {
   readonly domainId = signal(DEFAULT_CLOUD_PUFF_DOMAIN_ID);
 
   readonly styles = CLOUD_PUFF_STYLES;
-  readonly cloudStyleId = signal(DEFAULT_CLOUD_PUFF_STYLE_ID); // 'card-stack' or 'low-poly-blob'
+  readonly cloudStyleId = signal(DEFAULT_CLOUD_PUFF_STYLE_ID);
 
-  // Unified 1-to-1 Cloud System (GPU Puffs <-> 3D Mesh LOD)
+  // GPU Cloud Atmosphere
   readonly gpuParticleCount = signal(600);
   readonly puffPixelScale = signal(10.0);
   readonly puffClumpRadius = signal(0.018);
   readonly puffFollowLag = signal(1.5);
   readonly particleLifespanS = signal(22);
+
+  // Optional Close-Up 3D Mesh LOD (Turned OFF by default)
+  readonly enableMeshLod = signal(false);
   readonly lodDistance = signal(65);
 
   // Wind Dynamics
@@ -170,13 +174,14 @@ export class CloudPuffsLabPageComponent {
   constructor() {
     const destroyRef = inject(DestroyRef);
 
-    // Rebuild Unified 1-to-1 Cloud LOD System
+    // Rebuild Cloud System
     effect(() => {
       const preset = this.activePreset();
       const domainId = this.domainId();
       const styleId = this.cloudStyleId();
 
       const options = {
+        enableMeshLod: this.enableMeshLod(),
         particleCount: this.gpuParticleCount(),
         clumpRadius: this.puffClumpRadius(),
         followLag: this.puffFollowLag(),
@@ -194,7 +199,7 @@ export class CloudPuffsLabPageComponent {
       });
     });
 
-    // Reactive Updates to Material Uniforms
+    // Reactive Updates to Material Uniforms & LOD Toggle
     effect(() => {
       const sun = this.sunDirection();
       const sys = this.cloudLodSystem();
@@ -202,6 +207,7 @@ export class CloudPuffsLabPageComponent {
         sys.setSunDirection(sun);
         sys.setStyle(this.cloudStyleId());
         sys.setLodDistance(this.lodDistance());
+        sys.setEnableMeshLod(this.enableMeshLod());
         sys.setWindParams({
           zonalSpeed: this.windSpeed(),
           curlStrength: this.curlTurbulence(),
@@ -218,7 +224,6 @@ export class CloudPuffsLabPageComponent {
       const camera = this.engine.camera;
       const camPos = camera ? camera.position : new Vector3(0, 55, 175);
 
-      // Single update: advances GPU streamlines and evaluates close-up 3D meshes in 100% sync
       const sys = this.cloudLodSystem();
       if (sys) {
         sys.update(this.simulationTimeS, camPos);
@@ -243,6 +248,7 @@ export class CloudPuffsLabPageComponent {
     preset: IWorldScalePreset,
     domainId: string,
     opts: {
+      enableMeshLod: boolean;
       particleCount: number;
       clumpRadius: number;
       followLag: number;
@@ -259,6 +265,7 @@ export class CloudPuffsLabPageComponent {
 
     if (domainId === 'sphere-shell') {
       const sys = buildCloudPuffLodSystem({
+        enableMeshLod: opts.enableMeshLod,
         particleCount: opts.particleCount,
         clumpSize: 4,
         planetRadius: preset.planetRadius,
@@ -273,7 +280,7 @@ export class CloudPuffsLabPageComponent {
         rimStrength: this.rimStrength(),
         styleId: opts.styleId,
         lodDistanceM: opts.lodDistance,
-        maxCloseUpMeshes: 400,
+        maxCloseUpMeshes: 300,
       });
       sys.setSunDirection(this.sunDirection());
       this.engine.scene.add(sys.group);
@@ -292,6 +299,7 @@ export class CloudPuffsLabPageComponent {
 
   private updateDynamicLights(deltaSeconds: number): void {
     const planetR = this.activePreset().planetRadius;
+    const dynamicLights: ICloudPuffPointLight[] = [];
 
     if (this.rocketEngineEnabled()) {
       this.rocketAngle += deltaSeconds * 0.4;
@@ -299,6 +307,12 @@ export class CloudPuffsLabPageComponent {
       const z = Math.sin(this.rocketAngle) * (planetR * 0.95);
       const y = Math.sin(this.rocketAngle * 1.7) * (planetR * 0.25);
       this.rocketPosition.set([x, y, z]);
+
+      dynamicLights.push({
+        position: new Vector3(x, y, z),
+        color: new Color('#7fd9ff'),
+        intensity: 220,
+      });
     }
 
     if (this.lightningEnabled()) {
@@ -321,9 +335,23 @@ export class CloudPuffsLabPageComponent {
           this.lightningCooldownS = 2 + Math.random() * 4;
         }
       }
-      this.lightningVisible.set(this.lightningIntensity > 30);
+      const isLit = this.lightningIntensity > 30;
+      this.lightningVisible.set(isLit);
+
+      if (isLit) {
+        dynamicLights.push({
+          position: this.lightningPositionVector,
+          color: new Color('#dce8ff'),
+          intensity: this.lightningIntensity,
+        });
+      }
     } else {
       this.lightningVisible.set(false);
+    }
+
+    const sys = this.cloudLodSystem();
+    if (sys) {
+      sys.setPointLights(dynamicLights);
     }
   }
 }

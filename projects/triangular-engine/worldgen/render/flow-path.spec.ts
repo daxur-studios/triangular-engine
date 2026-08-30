@@ -1,5 +1,5 @@
 import { ConstantTerrainField } from 'triangular-engine/terrain';
-import { RiverCarvedTerrainField, RiverPath } from './river-system';
+import { RiverCarvedTerrainField, RiverPath } from './flow-path';
 
 describe('river system', () => {
   const river = new RiverPath([

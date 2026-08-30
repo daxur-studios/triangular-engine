@@ -11,6 +11,10 @@ export interface IClimateParams {
   aridBeltWidth?: number;
   /** How much the arid belt multiplies down moisture at its center (0 = no effect, 1 = fully dry). */
   aridBeltStrength?: number;
+  /** Flat shift applied to every cell's temperature after the latitude/lapse calc — a world-type
+   * knob (e.g. a Moon profile setting this strongly negative for an airless, cold body) rather
+   * than a climate mechanism of its own. Defaults to 0, reproducing prior behavior exactly. */
+  baseTemperatureOffset?: number;
 }
 
 export interface IPlanetClimate {
@@ -26,6 +30,7 @@ const DEFAULTS = {
   aridBeltCenter: 0.22,
   aridBeltWidth: 0.28,
   aridBeltStrength: 0.65,
+  baseTemperatureOffset: 0,
 };
 
 /**
@@ -72,7 +77,7 @@ export function computeClimate(
     const latitude = Math.abs(cell.center.y);
     const base = 1 - latitude * 2;
     const normalizedElevation = isLand[id] ? Math.max(0, elevation[id] - seaLevelElevation) / landRelief : 0;
-    return base - normalizedElevation * p.lapseRate;
+    return base - normalizedElevation * p.lapseRate + p.baseTemperatureOffset;
   });
 
   const moisture = new Array<number>(cellCount).fill(0);

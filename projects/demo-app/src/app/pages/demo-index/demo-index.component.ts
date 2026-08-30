@@ -290,6 +290,18 @@ export const DEMOS: readonly DemoItem[] = [
       'Flat and 3D heightfield path finding with seeded terrain elevation and live dynamic obstacles.',
   },
   {
+    id: 'character-lab',
+    number: '20d',
+    title: 'Character Lab',
+    route: '/character-lab',
+    categoryId: 'core',
+    tier: 'lab',
+    entryPoints: ['core'],
+    package: 'triangular-engine',
+    description:
+      'Scratch sandbox for iterating on character attempts (people and robots) — procedural mesh, svg, and other techniques side by side.',
+  },
+  {
     id: 'scene-inspection-lab',
     number: '16b',
     title: 'Scene Inspection Lab',

@@ -27,7 +27,7 @@ import {
   type GeologicalTerrainDomain,
   type GeologicalTerrainSettings,
   type VolcanoSettings,
-} from './geological-feature-terrain';
+} from 'triangular-engine/worldgen';
 
 interface FeatureCatalogueItem {
   readonly kind: string;

@@ -58,6 +58,10 @@
             <span class="stat-label">last edit footprint</span
             ><span class="stat-value">{{ lastEditFootprintLabel() }}</span>
           </div>
+          <div class="stat">
+            <span class="stat-label">features</span
+            ><span class="stat-value">{{ featureCounts() }}</span>
+          </div>
         </div>
       </header>
 
@@ -99,6 +103,40 @@
           (click)="setWorldSizeTier('extra-large')"
         >
           extra-large (6371 km)
+        </button>
+      </div>
+
+      <div class="controls">
+        <span class="control-group-label"
+          >world profile (spike — see runbook 022)</span
+        >
+        <button
+          type="button"
+          [class.active]="worldProfileKind() === 'terran'"
+          (click)="setWorldProfile('terran')"
+        >
+          terran
+        </button>
+        <button
+          type="button"
+          [class.active]="worldProfileKind() === 'moon'"
+          (click)="setWorldProfile('moon')"
+        >
+          moon
+        </button>
+        <button
+          type="button"
+          [class.active]="worldProfileKind() === 'volcanic'"
+          (click)="setWorldProfile('volcanic')"
+        >
+          volcanic
+        </button>
+        <button
+          type="button"
+          [class.active]="worldProfileKind() === 'protoplanet'"
+          (click)="setWorldProfile('protoplanet')"
+        >
+          protoplanet (molten)
         </button>
       </div>
 
@@ -397,12 +435,33 @@
         </button>
         <button
           type="button"
+          [class.active]="mapMode() === 'feature'"
+          (click)="setMapMode('feature')"
+        >
+          feature
+        </button>
+        <button
+          type="button"
           [class.active]="mapMode() === 'rivers'"
           (click)="setMapMode('rivers')"
         >
           rivers
         </button>
       </div>
+
+      @if (legendEntries().length > 0) {
+        <div class="controls legend">
+          @for (entry of legendEntries(); track entry.label) {
+            <span class="legend-item">
+              <span
+                class="legend-swatch"
+                [style.background]="entry.color"
+              ></span>
+              {{ entry.label }}
+            </span>
+          }
+        </div>
+      }
 
       <div class="views">
         <section class="view">

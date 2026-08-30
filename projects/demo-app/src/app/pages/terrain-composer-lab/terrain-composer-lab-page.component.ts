@@ -50,7 +50,7 @@ import {
   createRiverRibbon,
   RiverPath,
   type RiverControlPoint,
-} from '../river-lab/river-system';
+} from 'triangular-engine/worldgen/render';
 
 type ComposerPickTarget =
   | { kind: 'point'; featureId: string; index: number }

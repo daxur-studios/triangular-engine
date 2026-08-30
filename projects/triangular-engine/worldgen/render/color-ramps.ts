@@ -68,3 +68,23 @@ export const BIOME_COLORS: Record<string, string> = {
 export function biomeColor(biome: string): string {
   return BIOME_COLORS[biome] ?? '#888';
 }
+
+/** `'none'` isn't listed — callers should fall through to biome/elevation color for it, same as
+ * every other map mode does for cells with nothing special to show. */
+export const FEATURE_COLORS: Record<string, string> = {
+  volcano: 'hsl(6, 65%, 32%)',
+  mesa: 'hsl(35, 55%, 48%)',
+  crater: 'hsl(0, 0%, 55%)',
+  lava_lake: 'hsl(22, 100%, 55%)',
+};
+
+export function featureColor(feature: string): string {
+  return FEATURE_COLORS[feature] ?? '#888';
+}
+
+/** Substance-aware water color: a `waterBodyKind === 'ocean'` cell on a `WorldProfile` with
+ * `oceanSubstance: 'lava'` reads as molten rather than water, regardless of biome/temperature —
+ * see `world-profile.ts`'s `protoplanet` profile. */
+export function lavaOceanColor(): string {
+  return 'hsl(18, 95%, 42%)';
+}

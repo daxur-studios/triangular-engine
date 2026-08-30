@@ -9,7 +9,7 @@ import {
   sampleFault,
   sampleDunes,
   sampleVolcano,
-} from './geological-feature-terrain';
+} from './geological-shapes';
 
 describe('geological feature terrain', () => {
   it('creates a raised volcano with a depressed crater', () => {

@@ -391,6 +391,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'character-lab',
+    loadComponent: () =>
+      import('./pages/character-lab/character-lab-page.component').then(
+        ({ CharacterLabPageComponent }) => CharacterLabPageComponent,
+      ),
+  },
+  {
     path: 'scene-inspection-lab',
     loadComponent: () =>
       import('./pages/scene-inspection-lab/scene-inspection-lab-page.component').then(

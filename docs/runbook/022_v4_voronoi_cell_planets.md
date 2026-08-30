@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: In progress — **M0-M4e all implemented and verified** (graph core, tectonics, climate/biomes/rivers/coastlines, debug lab, canonical elevation function, chunking, per-chunk discrete LOD, local collider patches with Jolt physics wiring, and the terrain-edit rebuild path), isolated POC, not integrated with existing terrain/CDLOD; `/cell-planet-lab` now has all planned 2D map modes (graph/plates/elevation/land/temperature/moisture/biome/rivers) plus a chunked, 2-level-LOD 3D preview mesh (one draw call per ~100-cell chunk, each showing full per-cell detail or sag-bounded merged cell polygons depending on camera distance), a debug high-res collider-patch overlay tracking the camera, a flatten/dig terrain-edit tool that rebuilds only the handful of chunks an edit actually touches, and a `worldSizeTier` picker that genuinely rescales the render (not just a label). **M4 reshaped 2026-08-26** from a single "rendering spike" into sub-milestones M4a–M4e (see Layer 2 and Milestones below), all of which are now done — **M5 (write-up & decision) is the next remaining piece.** M4d's actual Jolt ball-drop physics test now lives in its own sibling lab, `/planet-physics-lab` (2026-08-29 follow-up, see M4e's entry below), positioned in real meters via Jolt's double-precision `RVec3`.
+- State: In progress — **M0-M4e all implemented and verified** (graph core, tectonics, climate/biomes/rivers/coastlines, debug lab, canonical elevation function, chunking, per-chunk discrete LOD, local collider patches with Jolt physics wiring, and the terrain-edit rebuild path), isolated POC, not integrated with existing terrain/CDLOD; `/cell-planet-lab` now has all planned 2D map modes (graph/plates/elevation/land/temperature/moisture/biome/feature/rivers) plus a chunked, 2-level-LOD 3D preview mesh (one draw call per ~100-cell chunk, each showing full per-cell detail or sag-bounded merged cell polygons depending on camera distance), a debug high-res collider-patch overlay tracking the camera, a flatten/dig terrain-edit tool that rebuilds only the handful of chunks an edit actually touches, a `worldSizeTier` picker that genuinely rescales the render (not just a label), and (2026-08-29, ahead of M5) a `worldProfile` picker with per-cell geological features and lava rendering — see "World profiles + per-cell terrain features" below. **M4 reshaped 2026-08-26** from a single "rendering spike" into sub-milestones M4a–M4e (see Layer 2 and Milestones below), all of which are now done — **M5 (write-up & decision) is the next remaining piece.** M4d's actual Jolt ball-drop physics test now lives in its own sibling lab, `/planet-physics-lab` (2026-08-29 follow-up, see M4e's entry below), positioned in real meters via Jolt's double-precision `RVec3`.
 - Date: 2026-08-28
 - Naming note: "V4" is Bruno's label (V1–V3 = the noise-first planet attempts in BSP). Sublibrary name `worldgen` below is a **placeholder, not approved**.
 
@@ -185,6 +185,71 @@ Bruno asked where four specific things stand; capturing them here so they surviv
   - Carving an actual channel into the terrain mesh geometry (not just an overlay line) — **not tracked anywhere**, would need scoping once chunk mesh-building (M4b) exists to carve into.
   - **New (2026-08-28)**: rivers currently read as too geometric/mechanical — straight corner-to-corner segments, no natural meander or bank detail. Likely needs the same "noisy edges" treatment M2.5 explicitly deferred for coastlines (jittering the path within a constrained corridor so it doesn't look mechanically straight), applied to river polylines too. **Not tracked anywhere** — new idea, no milestone.
 - **In-game texturing, shoreline shading, biome blending** — shore foam/shallows has a real hook already (Layer 2's optional signed-distance-to-coast attribute), but texturing and blended (non-hard-edged) biome transitions are only named as *excluded from this POC* in Non-goals above, not captured as a future intent. **Not tracked as a real ask anywhere else** — needs its own scoped item once M5 decides on integration.
+
+## World profiles + per-cell terrain features (spike, 2026-08-29)
+
+Bruno's ask, ahead of M5: a civilisation-game feel at large scale, where a single cell can *be*
+a discrete landform (a whole mesa, volcano, crater) rather than only an emergent blend of many
+cooperating cells' tectonic elevation; other world types (starting Moon-like); and — his own
+addition — lava lakes and lava rivers "for some planets," including a planet-scale molten ocean
+on a young/hot world, not just a puddle by a volcano. Explicitly scoped as a spike: prove the
+direction, not a finished system.
+
+- **`IWorldProfile`** (`worldgen/core/world-profile.ts`): named bundles (`terran`/`moon`/
+  `volcanic`/`protoplanet`) of overrides across the *existing* tectonics/climate/biome param
+  bags plus the new feature params and an `oceanSubstance: 'water' | 'lava'` flag — not a new
+  pipeline. `terran` is an intentional no-op. `climate.ts` gained one real addition,
+  `baseTemperatureOffset`, so `moon` reads as cold/airless, not just dry.
+- **`computeFeatures()`** (`worldgen/core/features.ts`): per-cell `Feature` typing
+  (volcano/mesa/crater/lava_lake) plus real shape stamps, reusing **`geological-features-lab`'s
+  analytic height functions** (relocated verbatim, framework-free, into
+  `worldgen/core/geological-shapes.ts` — cone+rim+crater+erosion, bowl+rim+ejecta,
+  cap+talus+edge, far better than a from-scratch flatten/dig) instead of reinventing landform
+  shapes. A feature's footprint is `cellsWithinHops()` (reused from `terrain-edits.ts`) around a
+  seeded-candidate site cell; each footprint cell's own elevation is resampled through the
+  matching geological function, projected onto a local tangent plane (the same gnomonic
+  construction `buildColliderPatch()` uses), and the result materializes into a fresh per-cell
+  array via `buildFeatureElevation()` — same "copy once, overwrite touched indices" shape as
+  M4e's `buildEffectiveElevation()`, composed the same way (features first, player edits win on
+  top). No changes needed to `chunking.ts`/`collider-patch.ts`/`sample-elevation.ts` at all: none
+  of them call `sampleElevation()` internally, they just read whichever `elevation[]` array
+  they're handed, which is exactly the property the M4e edit layer already depended on.
+- **Lava is two different mechanisms, not one** — Bruno's correction mid-spike, since the first
+  draft only modeled a small volcano-adjacent puddle: (1) `Feature: 'lava_lake'` tags an existing
+  `waterBodyKind === 'lake'` cell near a volcano instance — local, small, coexists with an
+  ordinary water ocean elsewhere. (2) `WorldProfile.oceanSubstance: 'lava'` (the `protoplanet`
+  preset) substance-flags the *entire* largest `classifyWaterBodies()` component unconditionally
+  — no volcano-adjacency check, and every `traceRivers()` path already drains into it by
+  construction, so all rivers on that profile are lava rivers for free, no separate
+  source-selection logic needed.
+- **River rendering upgraded from a flat debug line to a flowing ribbon** — relocated
+  `river-lab`'s POC (`river-lab/river-system.ts`, a *different* problem from
+  `rivers.ts::traceRivers()`: that file assumes a path already exists and handles width/flow
+  interpolation + the actual ribbon mesh/shader, `traceRivers()` decides where the path runs) into
+  `worldgen/render/flow-path.ts`. Its flat-plane ribbon math doesn't carry over as-is to a sphere
+  (the perpendicular/width construction assumed a fixed world-up axis), so `cell-planet-lab`
+  builds its own spherical ribbon geometry per river path (`perpendicular = cross(radial,
+  tangent)`) but reuses the relocated file's shader materials unchanged (`createWaterFlowMaterial()`
+  / new `createLavaFlowMaterial()`) since those are UV-based and geometry-agnostic. Width comes
+  from `sqrt(riverFlow)` — `rivers.ts`'s own doc comment already named this as the intended use of
+  that field.
+- **Crater scale**: only small/mid craters this spike (`sampleCrater()`'s flat-tangent-plane
+  approximation holds up to a few percent of planet radius). Giant multi-ring impact basins
+  (lunar-mare scale — real maria are later lava-flooded basins, a natural but separate tie-in to
+  the lava work above) would need a true angular-distance formula or generation closer to
+  tectonics' own multi-hop boundary spreading; not attempted here.
+- **Lab wiring**: `/cell-planet-lab` gained a world-profile button group (mirroring the
+  world-size-tier picker), a `'feature'` 2D/3D map mode, a per-feature-type count stat, and the
+  ribbon river/lava rendering above.
+- **Non-goals for this spike**: no mesh-level vertical cliff faces for mesas (corner-blend skirt
+  only); no lava heat/damage gameplay; no new `Biome` values (features layer on top of, don't
+  replace, climate biomes); no dedup of the new spherical ribbon builder against
+  `flow-path.ts`'s flat one.
+- Verification: `ng build triangular-engine --configuration development` and
+  `ng build demo-app --configuration development` both clean. Bruno's own in-browser check
+  (standing practice for this lab) is the remaining step — pick each profile and confirm visual
+  distinctness, toggle `'feature'` map mode and confirm feature cells are visibly *shaped*
+  differently (raised rims, flat mesa tops), not just recolored.
 
 ## References
 

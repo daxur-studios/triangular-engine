@@ -44,6 +44,7 @@ import {
   buildChunkMeshData,
   buildColliderPatch,
   buildEffectiveElevation,
+  buildFeatureElevation,
   buildPlanetChunks,
   buildPlanetEcology,
   buildPlanetGraphCore,
@@ -51,6 +52,8 @@ import {
   cellsWithinHops,
   colliderPatchIndices,
   computeCellPins,
+  computeFeatures,
+  cross,
   digCells,
   findCellAt,
   flattenCells,
@@ -58,17 +61,26 @@ import {
   IColliderPatch,
   IPlanetChunk,
   IPlanetEcology,
+  IPlanetFeatures,
   IPlanetGraphCore,
   IPlanetTectonics,
   ITerrainEditLayer,
   IVec3,
+  normalize,
   sampleElevation,
+  WORLD_PROFILES,
+  WorldProfileKind,
 } from 'triangular-engine/worldgen';
 import {
   biomeColor,
   BIOME_COLORS,
+  createLavaFlowMaterial,
+  createWaterFlowMaterial,
   elevationColor,
+  featureColor,
+  FEATURE_COLORS,
   formatDistanceM,
+  lavaOceanColor,
   moistureColor,
   plateColor,
   temperatureColor,
@@ -93,6 +105,7 @@ export type MapMode =
   | 'temperature'
   | 'moisture'
   | 'biome'
+  | 'feature'
   | 'rivers';
 
 /** Per-chunk-mesh cache stashed on `Mesh.userData` (M4b) — undisplaced unit direction + raw
@@ -147,6 +160,11 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * together, not just the labels. */
   readonly worldSizeTier = signal<WorldSizeTier>('medium');
   readonly planetRadiusM = computed(() => WORLD_SIZE_TIER_RADIUS_M[this.worldSizeTier()]);
+  /** World-profile spike (see `world-profile.ts` and runbook 022): picks a named bundle of
+   * tectonics/climate/biome overrides plus the new per-cell feature pass and ocean substance —
+   * `'terran'` is an intentional no-op that reproduces default generation exactly. */
+  readonly worldProfileKind = signal<WorldProfileKind>('terran');
+  readonly worldProfile = computed(() => WORLD_PROFILES[this.worldProfileKind()]);
   /** `root`'s camera framing distance, scaled with `planetRadiusM()` so switching tiers keeps
    * the whole sphere in view instead of parking the camera inside it (large tiers) or leaving
    * it absurdly far away (small tiers). `2.6` matches the previous fixed unit-sphere framing. */
@@ -243,6 +261,25 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   readonly lastEditChunksRebuilt = signal('—');
   readonly plateCount = signal(10);
   readonly mapMode = signal<MapMode>('graph');
+  /** Swatch list for whichever 2D mode is currently categorical (fixed named colors, not a
+   * continuous gradient) — 'biome'/'feature' have one, 'plates' doesn't (per-plate hash color,
+   * unbounded count), and the gradient modes (elevation/temperature/moisture/land) don't either. */
+  readonly legendEntries = computed<{ label: string; color: string }[]>(() => {
+    const mode = this.mapMode();
+    if (mode === 'biome') {
+      return Object.entries(BIOME_COLORS).map(([key, color]) => ({
+        label: key.replace(/_/g, ' '),
+        color,
+      }));
+    }
+    if (mode === 'feature') {
+      return Object.entries(FEATURE_COLORS).map(([key, color]) => ({
+        label: key.replace(/_/g, ' '),
+        color,
+      }));
+    }
+    return [];
+  });
   /** Visual-only exaggeration of raw elevation (unitless, typically ~-1..1) into a radius
    * offset — a live debug-preview knob, not a gameplay constant. Deliberately low by default:
    * a flat-shaded low-poly mesh reads as a lumpy asteroid well before the terrain looks "tall". */
@@ -258,6 +295,11 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   readonly buildMs = signal('—');
   readonly landFraction = signal('—');
   readonly chunkTotal = signal(0);
+  /** Per-feature-type instance counts from the world-profile spike's `computeFeatures()` —
+   * set by `updateFeatureStats()`, same "plain signal, set imperatively" pattern as the other
+   * stats above. `lavaLakeCount` counts cells, not instances (a lava lake has no shape stamp
+   * of its own — see `features.ts`), the rest count `IFeatureInstance`s. */
+  readonly featureCounts = signal('—');
 
   private readonly root = new Group();
   private readonly sitesMaterial = new PointsMaterial({
@@ -309,24 +351,28 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   });
   private oceanMesh: Mesh | null = null;
   private currentSeaLevelElevation = 0;
-  private readonly riverMaterial = new LineBasicMaterial({
-    color: '#5ec8ff',
-    transparent: true,
-    opacity: 0.95,
-  });
+  // World-profile spike: river paths render as real flowing ribbons (worldgen/render's
+  // flow-path.ts, relocated from the river-lab POC) instead of a flat debug line — one Mesh
+  // per `ecology.riverPaths` entry, rebuilt whole on regenerate()/elevationScale() change
+  // rather than incrementally repositioned (path counts are small, a few dozen at most, so
+  // this is cheap relative to a chunk rebuild). All rivers use the lava material together when
+  // `worldProfile().oceanSubstance === 'lava'` (every river drains into the molten "ocean" by
+  // construction — see world-profile.ts's `protoplanet` preset and features.ts's doc comment
+  // on why this is a different mechanism from a local volcano-adjacent lava lake), otherwise
+  // all rivers use the water material.
+  private readonly waterFlowMaterial = createWaterFlowMaterial();
+  private readonly lavaFlowMaterial = createLavaFlowMaterial();
+  private flowTime = 0;
+  private riverRibbons: Mesh[] = [];
   private readonly coastlineMaterial = new LineBasicMaterial({
     color: '#f4f4f4',
     transparent: true,
     opacity: 0.9,
   });
-  private riverLines: LineSegments | null = null;
   private coastlineLines: LineSegments | null = null;
-  // Unit directions + per-point sampled elevation for the river overlay, and unit
-  // directions for the coastline overlay (which rides the constant sea-level radius
-  // instead) — cached so onElevationScale() can reposition both cheaply without
-  // re-sampling elevation on every slider tick.
-  private riverDirections = new Float32Array(0);
-  private riverElevations = new Float32Array(0);
+  // Unit directions for the coastline overlay (which rides the constant sea-level radius) —
+  // cached so onElevationScale() can reposition it cheaply without re-sampling elevation on
+  // every slider tick.
   private coastlineDirections = new Float32Array(0);
 
   // Per-cell source data driving the near-side cull, rebuilt on regenerate() and
@@ -374,11 +420,14 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
 
     this.engine.tick$
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => {
+      .subscribe((dt) => {
         this.updateCulling();
         this.updateSurfaceUp();
         this.updateChunkLod();
         this.updateColliderPatch();
+        this.flowTime += dt;
+        this.waterFlowMaterial.uniforms['time'].value = this.flowTime;
+        this.lavaFlowMaterial.uniforms['time'].value = this.flowTime;
       });
 
     this.destroyRef.onDestroy(() => {
@@ -387,14 +436,15 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       this.edgesLines?.geometry.dispose();
       for (const mesh of this.previewMeshes) mesh.geometry.dispose();
       this.oceanMesh?.geometry.dispose();
-      this.riverLines?.geometry.dispose();
+      for (const mesh of this.riverRibbons) mesh.geometry.dispose();
       this.coastlineLines?.geometry.dispose();
       this.colliderPatchMesh?.geometry.dispose();
       this.sitesMaterial.dispose();
       this.edgesMaterial.dispose();
       this.previewMaterial.dispose();
       this.oceanMaterial.dispose();
-      this.riverMaterial.dispose();
+      this.waterFlowMaterial.dispose();
+      this.lavaFlowMaterial.dispose();
       this.coastlineMaterial.dispose();
       this.colliderPatchMaterial.dispose();
     });
@@ -437,6 +487,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   onElevationScale(event: Event): void {
     this.elevationScale.set(Number((event.target as HTMLInputElement).value));
     this.updatePreviewDisplacement();
+    if (this.ecology) this.rebuildRiverRibbons(this.ecology);
     this.updateRiverOverlayDisplacement();
     this.applyColliderPatchDisplacement();
   }
@@ -472,7 +523,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.mapMode.set(mode);
     this.drawMap();
     this.updatePreviewColors();
-    if (this.riverLines) this.riverLines.visible = mode === 'rivers';
+    for (const mesh of this.riverRibbons) mesh.visible = mode === 'rivers';
     if (this.coastlineLines) this.coastlineLines.visible = mode === 'rivers';
   }
 
@@ -609,7 +660,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     const t0 = performance.now();
     const sampleCount = this.colliderPatchSampleCount();
     const angularHalfWidth = (this.colliderPatchAngularDeg() * Math.PI) / 180;
-    const patch = buildColliderPatch(this.graph, this.tectonics.elevation, direction, {
+    const patch = buildColliderPatch(this.graph, this.featureElevation, direction, {
       angularHalfWidth,
       sampleCount,
     });
@@ -696,6 +747,11 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.worldSizeTier.set(tier);
   }
 
+  setWorldProfile(kind: WorldProfileKind): void {
+    this.worldProfileKind.set(kind);
+    this.regenerate();
+  }
+
   /** Mean angle (radians) between every pair of adjacent cell centers, each edge counted once
    * — the graph-shape input to `avgCellSizeLabel()`. Purely descriptive/app-side (not a
    * `worldgen/core` concern, see `WORLD_SIZE_TIER_RADIUS_M`'s doc comment), so it lives here
@@ -726,6 +782,14 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   private graph: IPlanetGraphCore | null = null;
   private tectonics: IPlanetTectonics | null = null;
   private ecology: IPlanetEcology | null = null;
+  /** World-profile spike: per-cell landform typing + geological shape stamps (see
+   * `features.ts`). `featureElevation` is `tectonics.elevation` with every feature instance's
+   * shape composed in (`buildFeatureElevation()`) — every consumer that used to read
+   * `tectonics.elevation` directly now reads this instead, the same "materialize once, hand
+   * everyone the same array" pattern `buildEffectiveElevation()` already uses for M4e edits.
+   * Player edits still compose on top of this, never the other way — see `rebuildPreviewMesh()`. */
+  private features: IPlanetFeatures = { feature: [], instances: [], featureByCellId: new Map() };
+  private featureElevation: number[] = [];
 
   private regenerate(): void {
     // A fresh graph means fresh cell ids — any edit layer from a previous graph is meaningless
@@ -746,15 +810,23 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
 
     this.graph = graph;
     this.avgCellAngleRad.set(this.computeAvgCellAngle(graph));
+    const profile = this.worldProfile();
     this.tectonics = buildPlanetTectonics(graph, {
       plateCount: this.plateCount(),
       seed: this.seed(),
+      ...profile.tectonics,
     });
     const land =
       this.tectonics.isLand.filter(Boolean).length /
       this.tectonics.isLand.length;
     this.landFraction.set(`${(land * 100).toFixed(0)}%`);
-    this.ecology = buildPlanetEcology(graph, this.tectonics);
+    this.ecology = buildPlanetEcology(graph, this.tectonics, {
+      climate: profile.climate,
+      biomes: profile.biomes,
+    });
+    this.features = computeFeatures(graph, this.tectonics, this.ecology.waterBodyKind, profile.features);
+    this.featureElevation = buildFeatureElevation(this.tectonics.elevation, graph, this.features);
+    this.updateFeatureStats();
 
     this.buildMs.set(`${(t1 - t0).toFixed(1)} ms`);
     this.rebuildSites(graph);
@@ -906,10 +978,12 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     // rebuilds the 3D mesh but leaves the 2D unwrap showing pre-edit terrain forever, since
     // this is the only other place elevation feeds into a rendered color.
     const effectiveElevation = getEffectiveElevation(
-      tectonics.elevation,
+      this.featureElevation.length > 0 ? this.featureElevation : tectonics.elevation,
       this.terrainEdits,
       cellId,
     );
+    const isLavaOcean =
+      this.worldProfile().oceanSubstance === 'lava' && ecology?.waterBodyKind[cellId] === 'ocean';
 
     if (mode === 'plates') return plateColor(tectonics.plateIdByCell[cellId]);
     if (mode === 'elevation') {
@@ -922,12 +996,18 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
         max,
       );
     }
+    if (mode === 'feature') {
+      const feature = this.features.feature[cellId];
+      if (feature !== 'none') return featureColor(feature);
+      if (isLavaOcean) return lavaOceanColor();
+    }
     if (ecology) {
       if (mode === 'temperature')
         return temperatureColor(ecology.temperature[cellId]);
       if (mode === 'moisture') return moistureColor(ecology.moisture[cellId]);
-      if (mode === 'biome') return biomeColor(ecology.biome[cellId]);
+      if (mode === 'biome') return isLavaOcean ? lavaOceanColor() : biomeColor(ecology.biome[cellId]);
     }
+    if (isLavaOcean) return lavaOceanColor();
     return effectiveElevation >= tectonics.seaLevelElevation
       ? 'hsl(100, 40%, 38%)'
       : 'hsl(210, 60%, 22%)';
@@ -1018,7 +1098,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     // computeCellPins() above deliberately still reads the *base* elevation: prominence-based
     // pinning going stale after an edit is a minor rendering-quality edge case, not a
     // correctness bug worth complicating this method for.
-    const elevation = buildEffectiveElevation(tectonics.elevation, this.terrainEdits);
+    const elevation = buildEffectiveElevation(this.featureElevation, this.terrainEdits);
 
     for (const chunk of chunks) {
       const lod0 = this.buildChunkLodMesh(
@@ -1166,7 +1246,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   private rebuildAffectedChunks(chunkIds: ReadonlySet<number>): void {
     if (!this.graph || !this.tectonics || chunkIds.size === 0) return;
 
-    const elevation = buildEffectiveElevation(this.tectonics.elevation, this.terrainEdits);
+    const elevation = buildEffectiveElevation(this.featureElevation, this.terrainEdits);
     const pinned = this.usePinning() ? this.pinnedCells : undefined;
 
     for (const chunkId of chunkIds) {
@@ -1437,13 +1517,26 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       );
 
     const land = vertexElevation >= tectonics.seaLevelElevation;
+    // Substance override: on a WorldProfile with oceanSubstance 'lava' (the `protoplanet`
+    // preset), the single largest water component reads as molten regardless of map mode —
+    // see world-profile.ts and color-ramps.ts's lavaOceanColor().
+    const isLavaOcean =
+      !land &&
+      this.worldProfile().oceanSubstance === 'lava' &&
+      this.ecology?.waterBodyKind[cellId] === 'ocean';
 
     const ecology = this.ecology;
     if (ecology) {
       if (mode === 'temperature')
         return temperatureColor(ecology.temperature[cellId]);
       if (mode === 'moisture') return moistureColor(ecology.moisture[cellId]);
+      if (mode === 'feature') {
+        const feature = this.features.feature[cellId];
+        if (feature !== 'none') return featureColor(feature);
+        return isLavaOcean ? lavaOceanColor() : land ? 'hsl(100, 30%, 30%)' : 'hsl(210, 50%, 26%)';
+      }
       if (mode === 'biome') {
+        if (isLavaOcean) return lavaOceanColor();
         if (!land)
           return ecology.biome[cellId] === 'lake'
             ? BIOME_COLORS['lake']
@@ -1454,6 +1547,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
           : biomeColor(biome);
       }
     }
+    if (isLavaOcean) return lavaOceanColor();
     return land ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
   }
 
@@ -1473,23 +1567,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * terrain color/height actually use, so the two lines didn't match. Extracting from the
    * same triangles the terrain is built from makes them the same boundary by construction. */
   private rebuildRiverOverlays(ecology: IPlanetEcology): void {
-    if (this.riverLines) {
-      this.root.remove(this.riverLines);
-      this.riverLines.geometry.dispose();
-    }
-    this.riverDirections = this.flattenPathDirections(
-      ecology.riverPaths,
-      false,
-    );
-    this.riverElevations = this.sampleElevationsFor(this.riverDirections);
-    const riverGeometry = new BufferGeometry();
-    riverGeometry.setAttribute(
-      'position',
-      new BufferAttribute(new Float32Array(this.riverDirections.length), 3),
-    );
-    this.riverLines = new LineSegments(riverGeometry, this.riverMaterial);
-    this.riverLines.visible = this.mapMode() === 'rivers';
-    this.root.add(this.riverLines);
+    this.rebuildRiverRibbons(ecology);
 
     if (this.coastlineLines) {
       this.root.remove(this.coastlineLines);
@@ -1511,27 +1589,86 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.updateRiverOverlayDisplacement();
   }
 
-  /** Re-derives river/coastline positions from their cached (direction, elevation) pairs
-   * for the current `elevationScale()` — cheap, no re-sampling — so it can run on every
-   * elevation-scale slider `input` event alongside `updatePreviewDisplacement()`. */
+  /** Builds one flowing ribbon mesh (`worldgen/render`'s `createFlowRibbon()`) per
+   * `ecology.riverPaths` entry — replaces any previous set wholesale (path count is small, a
+   * handful to a few dozen, so a full rebuild on regenerate()/elevation-scale change is cheap
+   * relative to a chunk rebuild, unlike the old cached-direction incremental reposition this
+   * replaces). Width comes from `sqrt(riverFlow)` — `rivers.ts`'s own doc comment names this as
+   * the intended use of that field — scaled by `avgCellAngleRad()` so width tracks cell size
+   * instead of a fixed constant that would look wrong across `cellCount`/world-size-tier
+   * combinations. All paths share one material, picked once by `worldProfile().oceanSubstance`
+   * (see the field doc comment above for why that's the right granularity, not per-path). */
+  private rebuildRiverRibbons(ecology: IPlanetEcology): void {
+    for (const mesh of this.riverRibbons) {
+      this.root.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    this.riverRibbons = [];
+
+    const graph = this.graph;
+    if (!graph || this.featureElevation.length === 0) return;
+
+    const scale = this.elevationScale() / 100;
+    const bias = 1.002;
+    const widthScale = Math.max(1e-5, this.avgCellAngleRad()) * 0.12;
+    const material =
+      this.worldProfile().oceanSubstance === 'lava' ? this.lavaFlowMaterial : this.waterFlowMaterial;
+    const visible = this.mapMode() === 'rivers';
+
+    ecology.riverPaths.forEach((path, pathIndex) => {
+      const n = path.length;
+      if (n < 2) return;
+      const flow = ecology.riverFlow[pathIndex];
+
+      const positions = new Float32Array(n * 2 * 3);
+      const uvs = new Float32Array(n * 2 * 2);
+      const indices: number[] = [];
+      for (let i = 0; i < n; i++) {
+        const point = path[i];
+        const radial = normalize(point);
+        const elevationHere = sampleElevation(graph, this.featureElevation, point);
+        const radius = (1 + elevationHere * scale) * bias;
+        const previous = path[Math.max(0, i - 1)];
+        const next = path[Math.min(n - 1, i + 1)];
+        const tangent = { x: next.x - previous.x, y: next.y - previous.y, z: next.z - previous.z };
+        const perpendicular = normalize(cross(radial, tangent));
+        const halfWidth = Math.sqrt(Math.max(0, flow[i])) * widthScale;
+
+        for (let side = 0; side < 2; side++) {
+          const sign = side === 0 ? -1 : 1;
+          const vertex = i * 2 + side;
+          positions[vertex * 3] = radial.x * radius + perpendicular.x * halfWidth * sign;
+          positions[vertex * 3 + 1] = radial.y * radius + perpendicular.y * halfWidth * sign;
+          positions[vertex * 3 + 2] = radial.z * radius + perpendicular.z * halfWidth * sign;
+          uvs[vertex * 2] = side;
+          uvs[vertex * 2 + 1] = i / (n - 1);
+        }
+        if (i < n - 1) {
+          const start = i * 2;
+          indices.push(start, start + 2, start + 1, start + 1, start + 2, start + 3);
+        }
+      }
+
+      const geometry = new BufferGeometry();
+      geometry.setAttribute('position', new BufferAttribute(positions, 3));
+      geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      const mesh = new Mesh(geometry, material);
+      mesh.renderOrder = 1;
+      mesh.visible = visible;
+      this.root.add(mesh);
+      this.riverRibbons.push(mesh);
+    });
+  }
+
+  /** Re-derives coastline positions from their cached directions for the current
+   * `elevationScale()` — cheap, no re-sampling — so it can run on every elevation-scale slider
+   * `input` event alongside `updatePreviewDisplacement()`. Rivers rebuild wholesale instead
+   * (`rebuildRiverRibbons()`) since their ribbon width/shape isn't a pure radial reposition. */
   private updateRiverOverlayDisplacement(): void {
     const scale = this.elevationScale() / 100;
     const bias = 1.0015; // tiny radial nudge so lines don't z-fight the terrain/ocean surfaces
-
-    if (this.riverLines) {
-      const attr = this.riverLines.geometry.getAttribute(
-        'position',
-      ) as BufferAttribute;
-      const positions = attr.array as Float32Array;
-      for (let i = 0; i < this.riverElevations.length; i++) {
-        const radius = (1 + this.riverElevations[i] * scale) * bias;
-        const o = i * 3;
-        positions[o] = this.riverDirections[o] * radius;
-        positions[o + 1] = this.riverDirections[o + 1] * radius;
-        positions[o + 2] = this.riverDirections[o + 2] * radius;
-      }
-      attr.needsUpdate = true;
-    }
 
     if (this.coastlineLines && this.tectonics) {
       const radius = (1 + this.tectonics.seaLevelElevation * scale) * bias;
@@ -1616,45 +1753,6 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     return new Float32Array(out);
   }
 
-  private flattenPathDirections(
-    paths: IVec3[][],
-    closed: boolean,
-  ): Float32Array<ArrayBuffer> {
-    const out: number[] = [];
-    for (const path of paths) {
-      const n = path.length;
-      if (n < 2) continue;
-      const segments = closed ? n : n - 1;
-      for (let k = 0; k < segments; k++) {
-        const a = path[k];
-        const b = path[(k + 1) % n];
-        out.push(a.x, a.y, a.z, b.x, b.y, b.z);
-      }
-    }
-    return new Float32Array(out);
-  }
-
-  /** One `sampleElevation()` call per point — O(cellCount) each via `findCellAt()`'s brute
-   * force search, so O(points * cellCount) total. Only runs on regenerate()/mode data
-   * changes, not per frame or per slider tick, which keeps it affordable at this lab's
-   * scale (a few thousand cells, a few thousand path points at most). */
-  private sampleElevationsFor(
-    directions: Float32Array,
-  ): Float32Array<ArrayBuffer> {
-    const graph = this.graph;
-    const tectonics = this.tectonics;
-    const elevations = new Float32Array(directions.length / 3);
-    if (!graph || !tectonics) return elevations;
-    for (let i = 0; i < elevations.length; i++) {
-      const o = i * 3;
-      elevations[i] = sampleElevation(graph, tectonics.elevation, {
-        x: directions[o],
-        y: directions[o + 1],
-        z: directions[o + 2],
-      });
-    }
-    return elevations;
-  }
 
   /** Strokes each consecutive pair of points as its own line segment (not one continuous
    * path), skipping any segment that crosses the ±180° seam — same guard as the edge/fill
@@ -1708,6 +1806,19 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.cellTotal.set(graph.cells.length);
     this.edgeTotal.set(edgeSum / 2);
     this.degreeRange.set(`${min} / ${max}`);
+  }
+
+  private updateFeatureStats(): void {
+    const counts = { volcano: 0, mesa: 0, crater: 0 };
+    for (const instance of this.features.instances) counts[instance.kind]++;
+    const lavaLakes = this.features.feature.filter((f) => f === 'lava_lake').length;
+    const parts = [
+      counts.volcano > 0 ? `${counts.volcano} volcano` : null,
+      counts.mesa > 0 ? `${counts.mesa} mesa` : null,
+      counts.crater > 0 ? `${counts.crater} crater` : null,
+      lavaLakes > 0 ? `${lavaLakes} lava lake` : null,
+    ].filter((p): p is string => p !== null);
+    this.featureCounts.set(parts.length > 0 ? parts.join(', ') : '—');
   }
 
   private drawMap(): void {

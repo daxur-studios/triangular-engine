@@ -43,9 +43,9 @@
 <!-- Floating HUD Sidebar (Does NOT distort or squeeze the 3D scene) -->
 <aside class="scope">
   <header class="scope-head">
-    <span class="scope-kicker">Clouds · Unified 1-to-1 GPU Puff & 3D Mesh LOD</span>
+    <span class="scope-kicker">Clouds · GPU Streamline Atmosphere</span>
     <h1>Cloud Lab</h1>
-    <p class="scope-claim">Every 2D puff maps 1-to-1 to its 3D cloud counterpart with exact position, speed, and size.</p>
+    <p class="scope-claim">16-step RK2 GPU streamline advection with organic billowing clumps.</p>
   </header>
 
   <!-- 1. System & World -->
@@ -69,25 +69,10 @@
     </div>
   </section>
 
-  <!-- 2. 1-to-1 Cloud LOD & 3D Shape -->
+  <!-- 2. GPU Atmosphere Puffs -->
   <section class="control-section">
-    <h3>1-to-1 Cloud LOD & 3D Shape</h3>
+    <h3>GPU Atmosphere Puffs</h3>
     <div class="controls-grid">
-      <label class="control">
-        <span>3D Cloud Shape Style</span>
-        <select [value]="cloudStyleId()" (change)="cloudStyleId.set($any($event.target).value)">
-          @for (style of styles; track style.id) {
-            <option [value]="style.id">{{ style.label }}</option>
-          }
-        </select>
-      </label>
-
-      <label class="control">
-        <span>LOD Distance Threshold <span class="val">{{ lodDistance() }}m</span></span>
-        <input type="range" min="20" max="300" step="5" [value]="lodDistance()"
-          (input)="lodDistance.set(+$any($event.target).value)" />
-      </label>
-
       <label class="control">
         <span>Particle Count <span class="val">{{ gpuParticleCount() }}</span></span>
         <input type="range" min="100" max="3000" step="100" [value]="gpuParticleCount()"
@@ -120,7 +105,36 @@
     </div>
   </section>
 
-  <!-- 3. Wind Dynamics -->
+  <!-- 3. Optional 3D Mesh Close-Up LOD (Turned OFF by default) -->
+  <section class="control-section">
+    <h3>3D Mesh Close-Up LOD (Optional)</h3>
+    <div class="controls-grid">
+      <label class="toggle">
+        <input type="checkbox" [checked]="enableMeshLod()"
+          (change)="enableMeshLod.set($any($event.target).checked)" />
+        <span>Enable 3D Mesh Close-Up LOD</span>
+      </label>
+
+      @if (enableMeshLod()) {
+        <label class="control">
+          <span>3D Cloud Shape Style</span>
+          <select [value]="cloudStyleId()" (change)="cloudStyleId.set($any($event.target).value)">
+            @for (style of styles; track style.id) {
+              <option [value]="style.id">{{ style.label }}</option>
+            }
+          </select>
+        </label>
+
+        <label class="control">
+          <span>LOD Distance Threshold <span class="val">{{ lodDistance() }}m</span></span>
+          <input type="range" min="20" max="300" step="5" [value]="lodDistance()"
+            (input)="lodDistance.set(+$any($event.target).value)" />
+        </label>
+      }
+    </div>
+  </section>
+
+  <!-- 4. Wind Dynamics -->
   <section class="control-section">
     <h3>Wind & Turbulence</h3>
     <div class="controls-grid">
@@ -144,7 +158,7 @@
     </div>
   </section>
 
-  <!-- 4. Lighting & Surface -->
+  <!-- 5. Lighting & Surface -->
   <section class="control-section">
     <h3>Lighting & Surface</h3>
     <div class="controls-grid">

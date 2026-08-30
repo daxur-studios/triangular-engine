@@ -1,0 +1,48 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Character Lab">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>character sandbox — procedural mesh, svg, and more</small>
+        </div>
+        <strong>Character Lab</strong>
+      </header>
+
+      <p class="blurb">
+        Scratch space for iterating on character attempts (people and robots).
+        Add an attempt, select it, and compare against the others side by side.
+      </p>
+
+      <div class="attempt-selector">
+        <span class="selector-label">Attempt</span>
+        <div class="tab-group">
+          @for (attempt of attempts(); track attempt.id) {
+            <button
+              type="button"
+              class="tab-btn"
+              [class.active]="selectedAttemptId() === attempt.id"
+              (click)="selectAttempt(attempt.id)"
+            >
+              {{ attempt.label }}
+            </button>
+          }
+        </div>
+      </div>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="[0, 3.5, 8]"
+    [target]="activeTarget()"
+    [isActive]="true"
+  />
+  <ambientLight [intensity]="1.0" />
+  <directionalLight [position]="[6, 10, 6]" [intensity]="2.2" [castShadow]="true" />
+  <directionalLight [position]="[-6, 6, -4]" [intensity]="0.6" />
+
+  <mesh [position]="[0, -0.25, 0]" [receiveShadow]="true">
+    <boxGeometry [params]="[50, 0.5, 50]" />
+    <meshStandardMaterial [params]="{ color: '#1a1d24', roughness: 0.9 }" />
+  </mesh>
+</scene>

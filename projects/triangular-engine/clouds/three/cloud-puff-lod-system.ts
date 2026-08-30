@@ -20,12 +20,14 @@ import {
   buildCloudAtmosphere,
   type ICloudAtmosphere,
 } from './cloud-atmosphere-layer';
+import type { ICloudPuffPointLight } from './cloud-puff-material';
 import {
   DEFAULT_CLOUD_PUFF_STYLE_ID,
   getCloudPuffStyleById,
 } from './styles/cloud-puff-style-registry';
 
 export interface ICloudPuffLodSystemOptions {
+  readonly enableMeshLod?: boolean;
   readonly particleCount?: number;
   readonly clumpSize?: number;
   readonly planetRadius?: number;
@@ -51,8 +53,10 @@ export interface ICloudPuffLodSystem {
   readonly atmosphere: ICloudAtmosphere;
   update(timeS: number, cameraPosition: Vector3): void;
   setSunDirection(direction: Vector3): void;
+  setPointLights(lights: readonly ICloudPuffPointLight[]): void;
   setStyle(styleId: string): void;
   setLodDistance(distM: number): void;
+  setEnableMeshLod(enabled: boolean): void;
   setWindParams(params: {
     zonalSpeed?: number;
     zonalFrequency?: number;
@@ -63,13 +67,14 @@ export interface ICloudPuffLodSystem {
 }
 
 /**
- * High-Performance Unified 1-to-1 GPU Puff <-> 3D Mesh LOD System:
- * - In Orbit: 0.00ms CPU cost (120 FPS). GPU renders fast 2D billowing particle clumps.
- * - On Zoom-in: Nearby puffs smoothly cross-fade into matching 1-to-1 3D meshes at the exact same coordinates and scale (<0.1ms CPU cost).
+ * Unified Cloud System with Optional 3D Mesh LOD Toggle:
+ * - When enableMeshLod is false (default): Pure GPU particle atmosphere, 0ms CPU overhead, full opacity at all zoom levels.
+ * - When enableMeshLod is true: Close-up puffs cross-fade into 1-to-1 3D meshes near the camera.
  */
 export function buildCloudPuffLodSystem(
   options: ICloudPuffLodSystemOptions = {},
 ): ICloudPuffLodSystem {
+  let isMeshLodEnabled = options.enableMeshLod ?? false;
   const particleCount = options.particleCount ?? 600;
   const clumpSize = options.clumpSize ?? 4;
   const planetR = options.planetRadius ?? 55;
@@ -80,7 +85,9 @@ export function buildCloudPuffLodSystem(
   const group = new Group();
   group.name = 'unified-cloud-lod-system';
 
-  // 1. GPU Atmosphere Layer (Far Distance 2D Billowing Puffs)
+  let activeLodDistanceM = isMeshLodEnabled ? (options.lodDistanceM ?? 65) : 0;
+
+  // 1. GPU Atmosphere Layer (Pure GPU Billboard Puffs)
   const atmosphere = buildCloudAtmosphere({
     particleCount,
     clumpSize,
@@ -96,12 +103,12 @@ export function buildCloudPuffLodSystem(
     curlFrequency: options.curlFrequency ?? 2.0,
     rimStrength: options.rimStrength ?? 1.2,
     puffColor: options.puffColor ?? '#f8fafc',
-    lodDistanceM: options.lodDistanceM ?? 65,
+    lodDistanceM: activeLodDistanceM,
   });
   atmosphere.showCirrus(false);
   group.add(atmosphere.group);
 
-  // 2. Dynamic 3D Mesh Pool for Close-Up 1-to-1 Transitions
+  // 2. 3D Mesh Pool (Only instantiated if LOD is enabled)
   let currentStyleId = options.styleId ?? DEFAULT_CLOUD_PUFF_STYLE_ID;
   const variantCount = 5;
   const variantParams = createCloudPuffVariantParams(variantCount, seed);
@@ -133,7 +140,6 @@ export function buildCloudPuffLodSystem(
     return mesh;
   });
 
-  let activeLodDistanceM = options.lodDistanceM ?? 65;
   let activeZonalSpeed = options.zonalSpeed ?? 0.06;
   let activeZonalFreq = options.zonalFrequency ?? 3.5;
   let activeCurlStr = options.curlStrength ?? 0.05;
@@ -142,7 +148,6 @@ export function buildCloudPuffLodSystem(
   let activeFollowLag = options.followLag ?? 1.5;
   let activeLifespan = options.lifespanS ?? 22.0;
 
-  // Base 3D mesh scale matching 2D puff proportions (~2.2m on 55m planet)
   const baseScaleM = options.baseMeshScaleM ?? (planetR / 55) * 2.2;
 
   const tempResult: IPuffClumpTransformResult = {
@@ -182,9 +187,20 @@ export function buildCloudPuffLodSystem(
     update(timeS: number, cameraPosition: Vector3) {
       // 1. Advance GPU Atmosphere (runs on GPU at 120 FPS)
       atmosphere.update(timeS);
-      atmosphere.updateCamera(cameraPosition, activeLodDistanceM);
+      atmosphere.updateCamera(cameraPosition, isMeshLodEnabled ? activeLodDistanceM : 0);
 
-      // 2. Early-out if camera is in orbit far from the cloud shell (0.00ms CPU cost)
+      // 2. If Mesh LOD is toggled off, 0ms CPU work
+      if (!isMeshLodEnabled) {
+        if (wasAnyMeshVisible) {
+          for (let v = 0; v < variantCount; v++) {
+            instancedMeshes[v].count = 0;
+          }
+          wasAnyMeshVisible = false;
+        }
+        return;
+      }
+
+      // 3. Early-out if camera is in orbit far from the cloud shell
       const camDistFromCenter = cameraPosition.length();
       const camAltitude = camDistFromCenter - shellR;
 
@@ -198,7 +214,7 @@ export function buildCloudPuffLodSystem(
         return;
       }
 
-      // 3. Camera is close to the surface: evaluate only the camera-facing hemisphere (<0.1ms CPU cost)
+      // 4. Camera is close to the surface: evaluate only the camera-facing hemisphere
       camDir.copy(cameraPosition).normalize();
       const simParams: IGpuPuffSimParams = {
         lifespanS: activeLifespan,
@@ -220,7 +236,6 @@ export function buildCloudPuffLodSystem(
           const visible = evaluatePuffClumpTransformFast(p, c, timeS, simParams, tempResult);
           if (!visible) continue;
 
-          // Only keep particles in the camera's forward hemisphere
           if (tempResult.position.dot(camDir) < (shellR * 0.1)) continue;
 
           const distSq = cameraPosition.distanceToSquared(tempResult.position);
@@ -240,7 +255,6 @@ export function buildCloudPuffLodSystem(
         }
       }
 
-      // Update active instance count for each mesh variant (0 wasted vertex rendering)
       for (let v = 0; v < variantCount; v++) {
         const mesh = instancedMeshes[v];
         const count = writeCursors[v];
@@ -254,6 +268,9 @@ export function buildCloudPuffLodSystem(
     setSunDirection(direction: Vector3) {
       atmosphere.setSunDirection(direction);
     },
+    setPointLights(lights: readonly ICloudPuffPointLight[]) {
+      atmosphere.setPointLights(lights);
+    },
     setStyle(styleId: string) {
       if (styleId !== currentStyleId) {
         rebuildMeshGeometries(styleId);
@@ -261,6 +278,15 @@ export function buildCloudPuffLodSystem(
     },
     setLodDistance(distM: number) {
       activeLodDistanceM = distM;
+    },
+    setEnableMeshLod(enabled: boolean) {
+      isMeshLodEnabled = enabled;
+      if (!enabled && wasAnyMeshVisible) {
+        for (let v = 0; v < variantCount; v++) {
+          instancedMeshes[v].count = 0;
+        }
+        wasAnyMeshVisible = false;
+      }
     },
     setWindParams(params) {
       atmosphere.setWindParams(params);
