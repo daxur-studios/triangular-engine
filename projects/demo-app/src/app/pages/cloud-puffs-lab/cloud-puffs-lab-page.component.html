@@ -1,163 +1,7 @@
-<header class="page-header">
-  <div>
-    <p class="eyebrow">Clouds · Multi-Layer GPU Atmosphere & Low-Poly Puffs</p>
-    <h1>Planetary Cloud & Weather Lab</h1>
-    <p class="claim">16-step RK2 GPU streamline advection, procedural clump formations & multi-deck atmosphere.</p>
-  </div>
-</header>
-
-<section class="controls">
-  <div class="control-group">
-    <h3>System & Mode</h3>
-    <label>Cloud Engine
-      <select [value]="renderMode()" (change)="renderMode.set($any($event.target).value)">
-        <option value="gpu-atmosphere">GPU Clump Atmosphere (High Perf / 60+ FPS)</option>
-        <option value="mesh-cluster">Instanced 3D Mesh Puffs (Faceted Low-Poly)</option>
-      </select>
-    </label>
-
-    <label>World Scale
-      <select [value]="worldScale()" (change)="onWorldScaleChange($any($event.target).value)">
-        @for (scale of scales; track scale) {
-          <option [value]="scale">{{ scalePresets[scale].label }}</option>
-        }
-      </select>
-    </label>
-
-    <label>Timewarp <output>{{ timewarp() }}x</output>
-      <input type="range" min="1" max="100" step="1" [value]="timewarp()"
-        (input)="timewarp.set(+$any($event.target).value)" />
-    </label>
-  </div>
-
-  @if (renderMode() === 'gpu-atmosphere') {
-    <div class="control-group">
-      <h3>Atmospheric Layers</h3>
-      <label class="toggle">
-        <input type="checkbox" [checked]="showPuffLayer()"
-          (change)="showPuffLayer.set($any($event.target).checked)" />
-        Lower Cumulus Puff Clumps
-      </label>
-      <label class="toggle">
-        <input type="checkbox" [checked]="showCirrusLayer()"
-          (change)="showCirrusLayer.set($any($event.target).checked)" />
-        Upper Wispy Cirrus Deck
-      </label>
-      <label>Particle Count <output>{{ gpuParticleCount() }}</output>
-        <input type="range" min="200" max="12000" step="200" [value]="gpuParticleCount()"
-          (input)="gpuParticleCount.set(+$any($event.target).value)" />
-      </label>
-    </div>
-
-    <div class="control-group">
-      <h3>Puff & Clump Dynamics</h3>
-      <label>Puff Size <output>{{ puffPixelScale() }}</output>
-        <input type="range" min="2" max="30" step="0.5" [value]="puffPixelScale()"
-          (input)="puffPixelScale.set(+$any($event.target).value)" />
-      </label>
-      <label>Clump Radius <output>{{ puffClumpRadius() }}</output>
-        <input type="range" min="0.003" max="0.06" step="0.002" [value]="puffClumpRadius()"
-          (input)="puffClumpRadius.set(+$any($event.target).value)" />
-      </label>
-      <label>Follow Lag <output>{{ puffFollowLag() }}s</output>
-        <input type="range" min="0.0" max="4.0" step="0.1" [value]="puffFollowLag()"
-          (input)="puffFollowLag.set(+$any($event.target).value)" />
-      </label>
-      <label>Particle Lifespan <output>{{ particleLifespanS() }}s</output>
-        <input type="range" min="5" max="60" step="1" [value]="particleLifespanS()"
-          (input)="particleLifespanS.set(+$any($event.target).value)" />
-      </label>
-    </div>
-
-    <div class="control-group">
-      <h3>Wind & Flow Dynamics</h3>
-      <label>Zonal Wind Speed <output>{{ windSpeed() }}</output>
-        <input type="range" min="0" max="0.25" step="0.01" [value]="windSpeed()"
-          (input)="windSpeed.set(+$any($event.target).value)" />
-      </label>
-      <label>Curl Turbulence Strength <output>{{ curlTurbulence() }}</output>
-        <input type="range" min="0" max="0.20" step="0.005" [value]="curlTurbulence()"
-          (input)="curlTurbulence.set(+$any($event.target).value)" />
-      </label>
-      <label>Curl Frequency <output>{{ curlFrequency() }}</output>
-        <input type="range" min="0.5" max="6.0" step="0.2" [value]="curlFrequency()"
-          (input)="curlFrequency.set(+$any($event.target).value)" />
-      </label>
-    </div>
-  } @else {
-    <div class="control-group">
-      <h3>Mesh Cluster Options</h3>
-      <label>Domain
-        <select [value]="domainId()" (change)="domainId.set($any($event.target).value)">
-          @for (domain of domains; track domain.id) {
-            <option [value]="domain.id">{{ domain.label }}</option>
-          }
-        </select>
-      </label>
-      <label>Style
-        <select [value]="styleId()" (change)="styleId.set($any($event.target).value)">
-          @for (style of styles; track style.id) {
-            <option [value]="style.id">{{ style.label }}</option>
-          }
-        </select>
-      </label>
-      <label>Puff Count <output>{{ meshPuffCount() }}</output>
-        <input type="range" min="50" max="3000" step="50" [value]="meshPuffCount()"
-          (input)="meshPuffCount.set(+$any($event.target).value)" />
-      </label>
-      <label>Min Size (m) <output>{{ meshPuffScaleMin() }}m</output>
-        <input type="range" min="2" max="30" step="1" [value]="meshPuffScaleMin()"
-          (input)="meshPuffScaleMin.set(+$any($event.target).value)" />
-      </label>
-      <label>Max Size (m) <output>{{ meshPuffScaleMax() }}m</output>
-        <input type="range" min="4" max="60" step="1" [value]="meshPuffScaleMax()"
-          (input)="meshPuffScaleMax.set(+$any($event.target).value)" />
-      </label>
-      <label class="toggle">
-        <input type="checkbox" [checked]="flatShading()"
-          (change)="flatShading.set($any($event.target).checked)" />
-        Flat shading (crisp edges)
-      </label>
-    </div>
-  }
-
-  <div class="control-group">
-    <h3>Surface & Lighting</h3>
-    <label>Planet surface view
-      <select [value]="planetRenderMode()" (change)="planetRenderMode.set($any($event.target).value)">
-        <option value="elevation">Elevation / Natural</option>
-        <option value="moisture">Moisture (Blue = high humidity)</option>
-        <option value="biome">Biomes (Whittaker table)</option>
-        <option value="temperature">Temperature</option>
-        <option value="land">Land vs Water</option>
-      </select>
-    </label>
-    <label class="toggle">
-      <input type="checkbox" [checked]="moistureDriven()"
-        (change)="moistureDriven.set($any($event.target).checked)" />
-      Moisture-driven cloud spawn
-    </label>
-    <label>Sun azimuth <output>{{ sunAzimuthDeg() }}&deg;</output>
-      <input type="range" min="0" max="360" step="1" [value]="sunAzimuthDeg()"
-        (input)="sunAzimuthDeg.set(+$any($event.target).value)" />
-    </label>
-    <label>Sun elevation <output>{{ sunElevationDeg() }}&deg;</output>
-      <input type="range" min="-10" max="85" step="1" [value]="sunElevationDeg()"
-        (input)="sunElevationDeg.set(+$any($event.target).value)" />
-    </label>
-    <label>Rim strength <output>{{ rimStrength() }}</output>
-      <input type="range" min="0" max="3" step="0.1" [value]="rimStrength()"
-        (input)="rimStrength.set(+$any($event.target).value)" />
-    </label>
-  </div>
-</section>
-
 <scene>
   <orbitControls [cameraPosition]="activePreset().cameraPos" [target]="[0, 0, 0]" [far]="activePreset().far" />
-  <ambientLight [intensity]="0.55" />
-  <directionalLight [position]="sunLightPosition()" [intensity]="2.2" />
 
-  <!-- Reusable Voronoi cell-graph planet -->
+  <!-- Planet Surface -->
   <planetView
     #planet
     [scale]="activePreset().planetRadius"
@@ -168,10 +12,176 @@
     [showOcean]="true"
   />
 
-  @if (renderMode() === 'mesh-cluster' && domainId() === 'cylinder-interior') {
-    <mesh [position]="[0, 0, 0]" [rotation]="[1.5707963, 0, 0]">
-      <cylinderGeometry [params]="[activePreset().cylinderRadius, activePreset().cylinderRadius, activePreset().cylinderLength, 48, 1, true]" />
-      <meshStandardMaterial [params]="{ color: '#273822', side: 2, roughness: 0.9 }" />
-    </mesh>
+  <!-- Sun Directional Light -->
+  <directionalLight
+    [position]="sunLightPosition()"
+    [intensity]="2.2"
+    color="#fffaf0"
+  />
+  <ambientLight [intensity]="0.45" color="#a0c8e0" />
+
+  <!-- Dynamic Point Lights -->
+  @if (rocketEngineEnabled()) {
+    <pointLight
+      [position]="rocketPosition()"
+      [intensity]="380"
+      [distance]="85"
+      color="#7fd9ff"
+    />
+  }
+
+  @if (lightningEnabled() && lightningVisible()) {
+    <pointLight
+      [position]="lightningPosition()"
+      [intensity]="450"
+      [distance]="140"
+      color="#dce8ff"
+    />
   }
 </scene>
+
+<!-- Floating HUD Sidebar (Does NOT distort or squeeze the 3D scene) -->
+<aside class="scope">
+  <header class="scope-head">
+    <span class="scope-kicker">Clouds · Unified 1-to-1 GPU Puff & 3D Mesh LOD</span>
+    <h1>Cloud Lab</h1>
+    <p class="scope-claim">Every 2D puff maps 1-to-1 to its 3D cloud counterpart with exact position, speed, and size.</p>
+  </header>
+
+  <!-- 1. System & World -->
+  <section class="control-section">
+    <h3>System & World</h3>
+    <div class="controls-grid">
+      <label class="control">
+        <span>World Scale</span>
+        <select [value]="worldScale()" (change)="onWorldScaleChange($any($event.target).value)">
+          @for (scale of scales; track scale) {
+            <option [value]="scale">{{ scalePresets[scale].label }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="control">
+        <span>Timewarp <span class="val">{{ timewarp() }}x</span></span>
+        <input type="range" min="1" max="50" step="1" [value]="timewarp()"
+          (input)="timewarp.set(+$any($event.target).value)" />
+      </label>
+    </div>
+  </section>
+
+  <!-- 2. 1-to-1 Cloud LOD & 3D Shape -->
+  <section class="control-section">
+    <h3>1-to-1 Cloud LOD & 3D Shape</h3>
+    <div class="controls-grid">
+      <label class="control">
+        <span>3D Cloud Shape Style</span>
+        <select [value]="cloudStyleId()" (change)="cloudStyleId.set($any($event.target).value)">
+          @for (style of styles; track style.id) {
+            <option [value]="style.id">{{ style.label }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="control">
+        <span>LOD Distance Threshold <span class="val">{{ lodDistance() }}m</span></span>
+        <input type="range" min="20" max="300" step="5" [value]="lodDistance()"
+          (input)="lodDistance.set(+$any($event.target).value)" />
+      </label>
+
+      <label class="control">
+        <span>Particle Count <span class="val">{{ gpuParticleCount() }}</span></span>
+        <input type="range" min="100" max="3000" step="100" [value]="gpuParticleCount()"
+          (input)="gpuParticleCount.set(+$any($event.target).value)" />
+      </label>
+
+      <label class="control">
+        <span>Puff Size Scale <span class="val">{{ puffPixelScale() }}</span></span>
+        <input type="range" min="4" max="25" step="0.5" [value]="puffPixelScale()"
+          (input)="puffPixelScale.set(+$any($event.target).value)" />
+      </label>
+
+      <label class="control">
+        <span>Clump Radius <span class="val">{{ puffClumpRadius().toFixed(3) }}</span></span>
+        <input type="range" min="0.005" max="0.04" step="0.002" [value]="puffClumpRadius()"
+          (input)="puffClumpRadius.set(+$any($event.target).value)" />
+      </label>
+
+      <label class="control">
+        <span>Follow Lag <span class="val">{{ puffFollowLag().toFixed(1) }}s</span></span>
+        <input type="range" min="0.2" max="3.5" step="0.1" [value]="puffFollowLag()"
+          (input)="puffFollowLag.set(+$any($event.target).value)" />
+      </label>
+
+      <label class="control">
+        <span>Lifespan <span class="val">{{ particleLifespanS() }}s</span></span>
+        <input type="range" min="8" max="50" step="1" [value]="particleLifespanS()"
+          (input)="particleLifespanS.set(+$any($event.target).value)" />
+      </label>
+    </div>
+  </section>
+
+  <!-- 3. Wind Dynamics -->
+  <section class="control-section">
+    <h3>Wind & Turbulence</h3>
+    <div class="controls-grid">
+      <label class="control">
+        <span>Zonal Wind Speed <span class="val">{{ windSpeed().toFixed(3) }}</span></span>
+        <input type="range" min="0.0" max="0.20" step="0.005" [value]="windSpeed()"
+          (input)="windSpeed.set(+$any($event.target).value)" />
+      </label>
+
+      <label class="control">
+        <span>Curl Turbulence <span class="val">{{ curlTurbulence().toFixed(3) }}</span></span>
+        <input type="range" min="0.0" max="0.15" step="0.005" [value]="curlTurbulence()"
+          (input)="curlTurbulence.set(+$any($event.target).value)" />
+      </label>
+
+      <label class="control">
+        <span>Curl Frequency <span class="val">{{ curlFrequency().toFixed(1) }}</span></span>
+        <input type="range" min="0.5" max="5.0" step="0.2" [value]="curlFrequency()"
+          (input)="curlFrequency.set(+$any($event.target).value)" />
+      </label>
+    </div>
+  </section>
+
+  <!-- 4. Lighting & Surface -->
+  <section class="control-section">
+    <h3>Lighting & Surface</h3>
+    <div class="controls-grid">
+      <label class="control">
+        <span>Planet Surface View</span>
+        <select [value]="planetRenderMode()" (change)="planetRenderMode.set($any($event.target).value)">
+          <option value="elevation">Elevation / Natural</option>
+          <option value="moisture">Moisture (Blue = high humidity)</option>
+          <option value="biome">Biomes (Whittaker table)</option>
+          <option value="temperature">Temperature</option>
+          <option value="land">Land vs Water</option>
+        </select>
+      </label>
+
+      <label class="control">
+        <span>Sun Azimuth <span class="val">{{ sunAzimuthDeg() }}°</span></span>
+        <input type="range" min="0" max="360" step="5" [value]="sunAzimuthDeg()"
+          (input)="sunAzimuthDeg.set(+$any($event.target).value)" />
+      </label>
+
+      <label class="control">
+        <span>Sun Elevation <span class="val">{{ sunElevationDeg() }}°</span></span>
+        <input type="range" min="5" max="85" step="2" [value]="sunElevationDeg()"
+          (input)="sunElevationDeg.set(+$any($event.target).value)" />
+      </label>
+
+      <label class="toggle">
+        <input type="checkbox" [checked]="rocketEngineEnabled()"
+          (change)="rocketEngineEnabled.set($any($event.target).checked)" />
+        <span>Rocket Point Light</span>
+      </label>
+
+      <label class="toggle">
+        <input type="checkbox" [checked]="lightningEnabled()"
+          (change)="lightningEnabled.set($any($event.target).checked)" />
+        <span>Storm Lightning</span>
+      </label>
+    </div>
+  </section>
+</aside>

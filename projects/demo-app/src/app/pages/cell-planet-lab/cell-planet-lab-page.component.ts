@@ -4,6 +4,7 @@ import {
   Component,
   computed,
   DestroyRef,
+  effect,
   ElementRef,
   inject,
   signal,
@@ -36,7 +37,6 @@ import {
   RaycastFocusContext,
   RaycastFocusResolver,
 } from 'triangular-engine';
-import { JoltPhysicsModule } from 'triangular-engine/jolt';
 import {
   affectedCellIds,
   affectedChunkIds,
@@ -68,9 +68,12 @@ import {
   biomeColor,
   BIOME_COLORS,
   elevationColor,
+  formatDistanceM,
   moistureColor,
   plateColor,
   temperatureColor,
+  WORLD_SIZE_TIER_RADIUS_M,
+  WorldSizeTier,
 } from 'triangular-engine/worldgen/render';
 
 /** dot(siteDirection, viewDirection) cutoff for the near-side cull — a small negative
@@ -81,13 +84,6 @@ const CULL_THRESHOLD = -0.02;
  * test needs to subtract the chunk's own angular size before comparing, which a plain dot
  * product against a fixed threshold can't do (see `updateChunkLod()`). */
 const HORIZON_ANGLE = Math.acos(CULL_THRESHOLD);
-
-/** M4d Jolt proof: how far above the patch (unit-sphere radius units, same scale
- * `elevationScale` displaces in) the dropped test ball spawns. */
-const COLLIDER_PHYSICS_DROP_HEIGHT = 0.06;
-/** Fixed — this is a physics/collision proof, not a tunable gameplay object, so it isn't
- * wired up as a slider like the rest of this lab's knobs. */
-const COLLIDER_PHYSICS_BALL_RADIUS = 0.015;
 
 export type MapMode =
   | 'graph'
@@ -127,7 +123,7 @@ function chunkColor(chunkId: number): string {
 
 @Component({
   selector: 'app-cell-planet-lab-page',
-  imports: [RouterLink, EngineModule, JoltPhysicsModule],
+  imports: [RouterLink, EngineModule],
   templateUrl: './cell-planet-lab-page.component.html',
   styleUrl: './cell-planet-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -144,6 +140,34 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   readonly seed = signal(42);
   readonly relax = signal(2);
   readonly jitter = signal(15);
+  /** See `world-size-tiers.ts`'s doc comment. Changing this never touches the graph (still a
+   * unit-sphere direction/elevation dataset) — it drives `root`'s own scale transform (see the
+   * constructor's rescale `effect()`) plus the camera framing, so the *rendered* planet and
+   * every real-world label (`avgCellSizeLabel`, `lastEditFootprintLabel`) genuinely change
+   * together, not just the labels. */
+  readonly worldSizeTier = signal<WorldSizeTier>('medium');
+  readonly planetRadiusM = computed(() => WORLD_SIZE_TIER_RADIUS_M[this.worldSizeTier()]);
+  /** `root`'s camera framing distance, scaled with `planetRadiusM()` so switching tiers keeps
+   * the whole sphere in view instead of parking the camera inside it (large tiers) or leaving
+   * it absurdly far away (small tiers). `2.6` matches the previous fixed unit-sphere framing. */
+  readonly cameraPosition = computed<Vector3Tuple>(() => [
+    0,
+    0,
+    2.6 * this.planetRadiusM(),
+  ]);
+  /** Average angular spacing between neighboring cell centers, set once per `regenerate()` —
+   * the graph-shape half of "how big is a cell," independent of `worldSizeTier()`. */
+  private readonly avgCellAngleRad = signal(0);
+  /** `avgCellAngleRad() * planetRadiusM()` in human units — reactive to both the graph
+   * (cell count/seed/etc.) and the size tier, so switching tiers alone updates this without
+   * regenerating. Answers "how big is one cell, right now, at the size I've picked". */
+  readonly avgCellSizeLabel = computed(() =>
+    formatDistanceM(this.avgCellAngleRad() * this.planetRadiusM()),
+  );
+  /** Set by `applyTerrainEdit()` to the actual angular extent of the last edit's brush,
+   * converted through the current `planetRadiusM()` — the direct answer to "how big a real
+   * area did that flatten/dig just cover". */
+  readonly lastEditFootprintLabel = signal('—');
   readonly showSites = signal(true);
   readonly showEdges = signal(true);
   readonly showPreview3D = signal(false);
@@ -179,10 +203,11 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
    * you every frame as the camera moves. */
   readonly freezeCulling = signal(false);
   readonly chunkCulledCount = signal(0);
-  /** M4c: camera distance (world units, planet radius ~1) beyond which a chunk switches from
-   * LOD0 (full per-cell) to LOD1 (merged cells) — see `updateChunkLod()`. Exposed as a slider
-   * since the right value depends on `elevationScale`/camera-range settings that themselves
-   * vary in this lab; no single default is "correct". */
+  /** M4c: camera distance, in planet radii (multiplied by `planetRadiusM()` at the one
+   * comparison site in `updateChunkLod()`) beyond which a chunk switches from LOD0 (full
+   * per-cell) to LOD1 (merged cells). Exposed as a slider since the right value depends on
+   * `elevationScale`/camera-range settings that themselves vary in this lab; no single default
+   * is "correct". */
   readonly lodDistance = signal(2);
   readonly lodSplit = signal('—');
   /** M4d: a small high-res patch built from `buildColliderPatch()` — sampled directly from
@@ -197,30 +222,9 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   readonly colliderPatchSampleCount = signal(17);
   readonly colliderPatchAngularDeg = signal(6);
   readonly colliderPatchBuildMs = signal('—');
-  /** M4d, the actual Jolt half: a static `<joltMeshShape>` built from the same
-   * `buildColliderPatch()` output as the debug overlay above, plus a dynamic ball dropped onto
-   * it — proving the patch can hold weight, not just render at high resolution. Built once per
-   * toggle-on/"drop ball" (see `rebuildColliderPhysics()`), not every tick like the debug
-   * overlay — a resting ball on a shape that keeps changing under it would never settle. Gravity
-   * points toward the planet center at whatever direction the patch is centered on (not a fixed
-   * world -Y), since the patch can sit anywhere on the sphere. */
-  readonly showColliderPhysics = signal(false);
-  readonly physicsGravityMagnitude = signal(0.4);
-  readonly physicsPatch = signal<{
-    geometry: BufferGeometry;
-    center: IVec3;
-    dropPosition: Vector3Tuple;
-  } | null>(null);
-  /** Bumped to force the `@for` in the template to recreate the dynamic ball body — same
-   * re-key-to-recreate pattern `destruction-poc-page.component.html`'s `run()` uses. */
-  readonly dropAttempt = signal(0);
-  readonly colliderPhysicsBallRadius = COLLIDER_PHYSICS_BALL_RADIUS;
-  readonly physicsGravity = computed<Vector3Tuple>(() => {
-    const patch = this.physicsPatch();
-    const g = this.physicsGravityMagnitude();
-    if (!patch) return [0, -g, 0];
-    return [-patch.center.x * g, -patch.center.y * g, -patch.center.z * g];
-  });
+  /** M4d's actual Jolt/ball-drop physics proof moved out to the dedicated
+   * `/planet-physics-lab` (real-scale Jolt RVec3 positions) — this page keeps only the
+   * rendering-only collider-patch debug overlay above. See runbook 022 M4d's follow-up note. */
   /** M4e: sparse player-edit override layer (`cellId -> absolute elevation`) on top of the
    * graph's own generated elevation — see `terrainEdits.ts`. Kept as a plain field, not a
    * signal: it's mutated in place by `applyTerrainEdit()` and read only from inside this
@@ -355,6 +359,19 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.previewGroup.name = 'cell-planet-preview-chunks';
     this.root.add(this.previewGroup);
 
+    // Makes the world-size tier picker actually rescale the render instead of only feeding
+    // labels (`avgCellSizeLabel`/`lastEditFootprintLabel`) — `root` parents every visible piece
+    // (previewGroup, ocean, sites/edges, river/coastline overlays, the collider-patch debug
+    // mesh), so one scale transform here rescales all of them together. `sitesMaterial.size` is
+    // a world-unit point size (`sizeAttenuation: true`), so it needs the same factor or the
+    // graph-overlay points would shrink to invisible specks once `root` scales up to real
+    // planet-radius magnitudes.
+    effect(() => {
+      const radiusM = this.planetRadiusM();
+      this.root.scale.setScalar(radiusM);
+      this.sitesMaterial.size = 0.022 * radiusM;
+    });
+
     this.engine.tick$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
@@ -373,7 +390,6 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       this.riverLines?.geometry.dispose();
       this.coastlineLines?.geometry.dispose();
       this.colliderPatchMesh?.geometry.dispose();
-      this.physicsPatch()?.geometry.dispose();
       this.sitesMaterial.dispose();
       this.edgesMaterial.dispose();
       this.previewMaterial.dispose();
@@ -648,9 +664,11 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
 
   /** Raycasts straight out from the camera (NDC center — whatever it's currently looking at)
    * against the live `previewMeshes`, returning the hit direction normalized to the unit
-   * sphere. Shared by `updateColliderPatch()`'s per-tick follow and `rebuildColliderPhysics()`'s
-   * one-shot "build the physics test here" — same "where would a vessel be" stand-in
-   * `raycastFocusResolver` uses for orbit pivoting. */
+   * sphere (dividing by the hit's own length cancels out `root`'s real-world scale, so this
+   * stays a plain unit vector regardless of the current `worldSizeTier()`). Drives
+   * `updateColliderPatch()`'s per-tick follow — same "where would a vessel be" stand-in
+   * `raycastFocusResolver` uses for orbit pivoting. `/planet-physics-lab` has its own copy of
+   * this same logic for its own physics-test raycasts. */
   private raycastPlanetDirection(): IVec3 | null {
     const camera = this.engine.camera$.value;
     if (!camera || this.previewMeshes.length === 0) return null;
@@ -670,85 +688,39 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     };
   }
 
-  toggleColliderPhysics(): void {
-    this.showColliderPhysics.update((visible) => !visible);
-    if (this.showColliderPhysics()) {
-      this.rebuildColliderPhysics();
-    } else {
-      this.physicsPatch()?.geometry.dispose();
-      this.physicsPatch.set(null);
-    }
-  }
-
-  /** Builds a fresh Jolt-ready patch at whatever the camera is currently looking at: the same
-   * `buildColliderPatch()`/`colliderPatchIndices()` pair the M4d debug overlay uses (M4d's core
-   * sampling, done 2026-08-29), displaced by the current `elevationScale()` exactly like
-   * `rebuildColliderPatch()` does for its own mesh. Unlike that debug overlay, this one does NOT
-   * re-run every tick as the camera moves — the template's `<joltMeshShape [geometry]>` would
-   * recreate the Jolt shape out from under any ball resting on it, so a rebuild only happens on
-   * toggle-on or an explicit "drop ball" click (`respawnDrop()` reuses the existing patch). */
-  private rebuildColliderPhysics(): void {
-    if (!this.graph || !this.tectonics) return;
-    const direction = this.raycastPlanetDirection();
-    if (!direction) return;
-
-    const sampleCount = this.colliderPatchSampleCount();
-    const angularHalfWidth = (this.colliderPatchAngularDeg() * Math.PI) / 180;
-    const patch = buildColliderPatch(this.graph, this.tectonics.elevation, direction, {
-      angularHalfWidth,
-      sampleCount,
-    });
-    const indices = colliderPatchIndices(patch);
-    const scale = this.elevationScale() / 100;
-    const positions = new Float32Array(patch.directions.length);
-    for (let i = 0; i < patch.elevations.length; i++) {
-      const radius = 1 + patch.elevations[i] * scale;
-      const o = i * 3;
-      positions[o] = patch.directions[o] * radius;
-      positions[o + 1] = patch.directions[o + 1] * radius;
-      positions[o + 2] = patch.directions[o + 2] * radius;
-    }
-    const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new BufferAttribute(positions, 3));
-    geometry.setIndex(new BufferAttribute(indices, 1));
-
-    const centerElevation = sampleElevation(this.graph, this.tectonics.elevation, direction);
-    const dropRadius = 1 + centerElevation * scale + COLLIDER_PHYSICS_DROP_HEIGHT;
-    const dropPosition: Vector3Tuple = [
-      direction.x * dropRadius,
-      direction.y * dropRadius,
-      direction.z * dropRadius,
-    ];
-
-    this.physicsPatch()?.geometry.dispose();
-    this.physicsPatch.set({ geometry, center: direction, dropPosition });
-    this.dropAttempt.update((n) => n + 1);
-  }
-
-  /** Re-drops the ball from its spawn height above the existing patch, without resampling the
-   * planet or rebuilding the static mesh shape underneath it — just forces the template's
-   * `@for` to recreate the dynamic rigid body (same re-key-to-recreate trick
-   * `destruction-poc-page.component.html`'s `run()` uses for its own crate). */
-  respawnDrop(): void {
-    if (!this.physicsPatch()) return;
-    this.dropAttempt.update((n) => n + 1);
-  }
-
-  /** Rebuilds the whole physics patch at the current camera look-at — use when you've orbited
-   * to a new spot and want the test moved there instead of just re-dropping in place. */
-  moveColliderPhysicsHere(): void {
-    if (!this.showColliderPhysics()) return;
-    this.rebuildColliderPhysics();
-  }
-
-  onPhysicsGravity(event: Event): void {
-    this.physicsGravityMagnitude.set(
-      Number((event.target as HTMLInputElement).value),
-    );
-  }
-
   jitterValue(): string {
     return (this.jitter() / 100).toFixed(2);
+  }
+
+  setWorldSizeTier(tier: WorldSizeTier): void {
+    this.worldSizeTier.set(tier);
+  }
+
+  /** Mean angle (radians) between every pair of adjacent cell centers, each edge counted once
+   * — the graph-shape input to `avgCellSizeLabel()`. Purely descriptive/app-side (not a
+   * `worldgen/core` concern, see `WORLD_SIZE_TIER_RADIUS_M`'s doc comment), so it lives here
+   * rather than as a library export. */
+  private computeAvgCellAngle(graph: IPlanetGraphCore): number {
+    let totalAngle = 0;
+    let edgeCount = 0;
+    for (const cell of graph.cells) {
+      for (const neighborId of cell.neighbors) {
+        if (neighborId <= cell.id) continue; // count each edge once
+        const neighbor = graph.cells[neighborId];
+        const d = Math.min(
+          1,
+          Math.max(
+            -1,
+            cell.center.x * neighbor.center.x +
+              cell.center.y * neighbor.center.y +
+              cell.center.z * neighbor.center.z,
+          ),
+        );
+        totalAngle += Math.acos(d);
+        edgeCount++;
+      }
+    }
+    return edgeCount > 0 ? totalAngle / edgeCount : 0;
   }
 
   private graph: IPlanetGraphCore | null = null;
@@ -761,6 +733,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.terrainEdits = new Map();
     this.editedCellCount.set(0);
     this.lastEditChunksRebuilt.set('—');
+    this.lastEditFootprintLabel.set('—');
 
     const t0 = performance.now();
     const graph = buildPlanetGraphCore({
@@ -772,6 +745,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     const t1 = performance.now();
 
     this.graph = graph;
+    this.avgCellAngleRad.set(this.computeAvgCellAngle(graph));
     this.tectonics = buildPlanetTectonics(graph, {
       plateCount: this.plateCount(),
       seed: this.seed(),
@@ -927,12 +901,22 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     const ecology = this.ecology;
     if (!tectonics) return '#888';
 
+    // M4e: reads through the same effective (base + terrainEdits) elevation the 3D preview's
+    // resolveVertexColor() uses, not tectonics.elevation directly — otherwise a flatten/dig
+    // rebuilds the 3D mesh but leaves the 2D unwrap showing pre-edit terrain forever, since
+    // this is the only other place elevation feeds into a rendered color.
+    const effectiveElevation = getEffectiveElevation(
+      tectonics.elevation,
+      this.terrainEdits,
+      cellId,
+    );
+
     if (mode === 'plates') return plateColor(tectonics.plateIdByCell[cellId]);
     if (mode === 'elevation') {
       const min = Math.min(...tectonics.elevation);
       const max = Math.max(...tectonics.elevation);
       return elevationColor(
-        tectonics.elevation[cellId],
+        effectiveElevation,
         tectonics.seaLevelElevation,
         min,
         max,
@@ -944,7 +928,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       if (mode === 'moisture') return moistureColor(ecology.moisture[cellId]);
       if (mode === 'biome') return biomeColor(ecology.biome[cellId]);
     }
-    return tectonics.isLand[cellId]
+    return effectiveElevation >= tectonics.seaLevelElevation
       ? 'hsl(100, 40%, 38%)'
       : 'hsl(210, 60%, 22%)';
   }
@@ -1128,6 +1112,25 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     const hitCell = findCellAt(this.graph, direction);
 
     const brushCellIds = cellsWithinHops(this.graph, hitCell.id, this.editBrushHops());
+
+    // How big was that, really? Max angle from the clicked cell to any brush-member cell,
+    // converted through the current worldSizeTier() — the direct answer to "so this is what I
+    // mean about world size": the same brush-hop count means wildly different real footprints
+    // depending on cell density and the chosen planet radius, and this makes that visible
+    // instead of leaving it to be inferred from the 3D view.
+    let maxAngle = 0;
+    for (const cellId of brushCellIds) {
+      const c = this.graph.cells[cellId].center;
+      const d = Math.min(
+        1,
+        Math.max(-1, hitCell.center.x * c.x + hitCell.center.y * c.y + hitCell.center.z * c.z),
+      );
+      maxAngle = Math.max(maxAngle, Math.acos(d));
+    }
+    this.lastEditFootprintLabel.set(
+      `${formatDistanceM(maxAngle * this.planetRadiusM())} radius (${brushCellIds.size} cells)`,
+    );
+
     if (mode === 'flatten') {
       const targetElevation = getEffectiveElevation(this.tectonics.elevation, this.terrainEdits, hitCell.id);
       flattenCells(this.terrainEdits, brushCellIds, targetElevation);
@@ -1140,6 +1143,15 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     const rebuildChunkIds = affectedChunkIds(this.chunkIdByCell, rebuildCellIds);
     this.rebuildAffectedChunks(rebuildChunkIds);
     this.lastEditChunksRebuilt.set(`${rebuildChunkIds.size} / ${this.chunks.length}`);
+
+    // Both of these read a stale snapshot otherwise: the 2D unwrap only redraws from
+    // setMapMode()/toggleSites()/toggleEdges()/regenerate(), none of which an edit triggers on
+    // its own; and updateColliderPatch() only resamples once the camera's look-at direction has
+    // drifted from lastColliderPatchCenter, which an edit alone never changes (the camera hasn't
+    // moved), so the M4d debug patch would otherwise keep showing pre-edit terrain until the
+    // user happens to orbit enough to trip the drift check.
+    this.drawMap();
+    this.lastColliderPatchCenter = null;
   }
 
   /** M4e's actual "affordable" claim: rebuilds only the given chunks' LOD0/LOD1 meshes (real
@@ -1196,7 +1208,10 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     this.terrainEdits = new Map();
     this.editedCellCount.set(0);
     this.lastEditChunksRebuilt.set('—');
+    this.lastEditFootprintLabel.set('—');
     this.rebuildPreviewMesh(this.graph, this.tectonics);
+    this.drawMap();
+    this.lastColliderPatchCenter = null;
   }
 
   /** Picks LOD0 vs LOD1 per chunk from the live camera's distance to that chunk's centroid
@@ -1233,7 +1248,13 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     if (this.freezeCulling()) return;
     const camera = this.engine.camera$.value;
     if (!camera) return;
-    const threshold = this.lodDistance();
+    // `root` now carries a real `planetRadiusM()` scale (see the constructor's rescale
+    // `effect()`), but `chunk.center` is still an undisplaced *local* unit-sphere direction —
+    // both the slider threshold and `chunk.center` itself need that same factor to compare
+    // against `camera.position`, which is world space (the camera is a scene sibling of
+    // `root`, not a child, so it's never itself scaled).
+    const radiusM = this.planetRadiusM();
+    const threshold = this.lodDistance() * radiusM;
 
     const camLen = camera.position.length() || 1;
     const vx = camera.position.x / camLen;
@@ -1258,9 +1279,9 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
         continue;
       }
 
-      const dx = camera.position.x - chunk.center.x;
-      const dy = camera.position.y - chunk.center.y;
-      const dz = camera.position.z - chunk.center.z;
+      const dx = camera.position.x - chunk.center.x * radiusM;
+      const dy = camera.position.y - chunk.center.y * radiusM;
+      const dz = camera.position.z - chunk.center.z * radiusM;
       const near = Math.hypot(dx, dy, dz) <= threshold;
       lod0.visible = near;
       lod1.visible = !near;

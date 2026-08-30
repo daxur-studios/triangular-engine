@@ -35,6 +35,7 @@ export interface ICloudAtmosphereOptions {
   readonly rimStrength?: number;
   readonly puffColor?: Color | string;
   readonly cirrusColor?: Color | string;
+  readonly lodDistanceM?: number;
 }
 
 export interface ICloudAtmosphere {
@@ -42,6 +43,7 @@ export interface ICloudAtmosphere {
   readonly puffMaterial: ShaderMaterial;
   readonly cirrusMaterial: ShaderMaterial;
   update(timeS: number): void;
+  updateCamera(cameraPos: Vector3, lodDistanceM?: number): void;
   setSunDirection(direction: Vector3): void;
   setPuffPixelScale(scale: number): void;
   setClumpRadius(radius: number): void;
@@ -87,6 +89,8 @@ export function buildCloudAtmosphere(options: ICloudAtmosphereOptions = {}): ICl
       uRimStrength: { value: options.rimStrength ?? 1.2 },
       uSunDirection: { value: new Vector3(0.6, 0.7, 0.4).normalize() },
       uPuffColor: { value: new Color(options.puffColor ?? '#f8fafc') },
+      uCameraPosition: { value: new Vector3(0, 50, 150) },
+      uLodDistance: { value: options.lodDistanceM ?? 0.0 },
     },
     transparent: true,
     depthWrite: false,
@@ -113,7 +117,7 @@ export function buildCloudAtmosphere(options: ICloudAtmosphereOptions = {}): ICl
       uPuffPixelScale: { value: (options.puffPixelScale ?? 9.0) * 1.8 },
       uShellRadius: { value: cirrusShellR },
       uSunDirection: { value: new Vector3(0.6, 0.7, 0.4).normalize() },
-      uPuffColor: { value: new Color(options.cirrusColor ?? '#e2e8f0') },
+      uCirrusColor: { value: new Color(options.cirrusColor ?? '#e2e8f0') },
     },
     transparent: true,
     depthWrite: false,
@@ -130,6 +134,12 @@ export function buildCloudAtmosphere(options: ICloudAtmosphereOptions = {}): ICl
     update(timeS: number) {
       puffMaterial.uniforms['uTime'].value = timeS;
       cirrusMaterial.uniforms['uTime'].value = timeS;
+    },
+    updateCamera(cameraPos: Vector3, lodDistanceM?: number) {
+      puffMaterial.uniforms['uCameraPosition'].value.copy(cameraPos);
+      if (lodDistanceM !== undefined) {
+        puffMaterial.uniforms['uLodDistance'].value = lodDistanceM;
+      }
     },
     setSunDirection(direction: Vector3) {
       puffMaterial.uniforms['uSunDirection'].value.copy(direction);

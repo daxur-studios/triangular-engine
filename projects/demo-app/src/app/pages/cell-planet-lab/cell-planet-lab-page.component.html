@@ -50,8 +50,57 @@
             <span class="stat-label">chunks rebuilt (last edit)</span
             ><span class="stat-value">{{ lastEditChunksRebuilt() }}</span>
           </div>
+          <div class="stat">
+            <span class="stat-label">avg cell size</span
+            ><span class="stat-value">{{ avgCellSizeLabel() }}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">last edit footprint</span
+            ><span class="stat-value">{{ lastEditFootprintLabel() }}</span>
+          </div>
         </div>
       </header>
+
+      <div class="controls">
+        <span class="control-group-label"
+          >world size (rescales the render — doesn't resample)</span
+        >
+        <button
+          type="button"
+          [class.active]="worldSizeTier() === 'mini'"
+          (click)="setWorldSizeTier('mini')"
+        >
+          mini (6.4 km)
+        </button>
+        <button
+          type="button"
+          [class.active]="worldSizeTier() === 'small'"
+          (click)="setWorldSizeTier('small')"
+        >
+          small (190 km)
+        </button>
+        <button
+          type="button"
+          [class.active]="worldSizeTier() === 'medium'"
+          (click)="setWorldSizeTier('medium')"
+        >
+          medium (600 km)
+        </button>
+        <button
+          type="button"
+          [class.active]="worldSizeTier() === 'large'"
+          (click)="setWorldSizeTier('large')"
+        >
+          large (1900 km)
+        </button>
+        <button
+          type="button"
+          [class.active]="worldSizeTier() === 'extra-large'"
+          (click)="setWorldSizeTier('extra-large')"
+        >
+          extra-large (6371 km)
+        </button>
+      </div>
 
       <div class="controls">
         <label class="control">
@@ -241,31 +290,6 @@
           />
           <span class="control-value">{{ colliderPatchAngularDeg() }}°</span>
         </label>
-        <label class="toggle"
-          ><input
-            type="checkbox"
-            [checked]="showColliderPhysics()"
-            (change)="toggleColliderPhysics()"
-          /><span>physics test (M4d)</span></label
-        >
-        @if (showColliderPhysics()) {
-          <label class="control">
-            <span>gravity</span>
-            <input
-              type="range"
-              min="0.05"
-              max="2"
-              step="0.05"
-              [value]="physicsGravityMagnitude()"
-              (input)="onPhysicsGravity($event)"
-            />
-            <span class="control-value">{{ physicsGravityMagnitude() }}</span>
-          </label>
-          <button type="button" (click)="respawnDrop()">drop ball</button>
-          <button type="button" (click)="moveColliderPhysicsHere()">
-            move here
-          </button>
-        }
       </div>
 
       <div class="controls">
@@ -462,53 +486,23 @@
         decoupling): the patch stays uniformly fine underneath the probe point
         even where the chunk mesh beneath it has dropped to LOD1's merged
         polygons. This is a rendering proof only so far, not a physics one —
-        no Jolt body yet, that's the next M4d step.
+        no Jolt body yet — that (plus its ball-drop physics test) moved to
+        <code>/planet-physics-lab</code>, a dedicated lab for real-scale Jolt
+        physics. See runbook 022 M4d's follow-up note.
       </p>
     </section>
   </ng-template>
 
   <raycastOrbitControls
-    [cameraPosition]="[0, 0, 2.6]"
+    [cameraPosition]="cameraPosition()"
     [target]="[0, 0, 0]"
     [isActive]="true"
-    [near]="0.001"
+    [near]="0.5"
+    [far]="500000000"
     [upVector]="upVectorTuple()"
     [leftMouseAction]="'rotate'"
     [raycastFocusResolver]="raycastFocusResolver"
   />
   <ambientLight [intensity]="1.4" />
   <directionalLight [position]="[3, 5, 4]" [intensity]="1.8" />
-
-  @if (physicsPatch(); as patch) {
-    <!-- M4d Jolt proof: a static body built straight from buildColliderPatch()'s own output,
-         plus a dynamic ball dropped onto it under gravity pointed at this patch's own local
-         "down" (radially toward the planet center). See runbook 022 M4d and
-         rebuildColliderPhysics()'s doc comment. -->
-    <joltPhysics [gravity]="physicsGravity()">
-      <joltRigidBody [motionType]="0">
-        <joltMeshShape [geometry]="patch.geometry" />
-      </joltRigidBody>
-      @for (attempt of [dropAttempt()]; track attempt) {
-        <joltRigidBody
-          [motionType]="2"
-          [position]="patch.dropPosition"
-          [linearDamping]="0.05"
-        >
-          <joltSphereShape [radius]="colliderPhysicsBallRadius" />
-          <mesh [castShadow]="true">
-            <sphereGeometry
-              [params]="{
-                radius: colliderPhysicsBallRadius,
-                widthSegments: 16,
-                heightSegments: 12,
-              }"
-            />
-            <meshStandardMaterial
-              [params]="{ color: '#ffb703', roughness: 0.5 }"
-            />
-          </mesh>
-        </joltRigidBody>
-      }
-    </joltPhysics>
-  }
 </scene>

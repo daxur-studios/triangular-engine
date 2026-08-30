@@ -87,6 +87,32 @@ export interface ISphereWindFieldParams {
   curlStrength: number;
 }
 
+export function curlNoiseSphere(
+  P: Vector3,
+  frequency: number,
+  time: number,
+  out: Vector3 = new Vector3(),
+): Vector3 {
+  const qx = P.x * frequency + time * 0.04;
+  const qy = P.y * frequency + time * 0.017;
+  const qz = P.z * frequency + time * 0.011;
+
+  const nx = valueNoise3D(qx + EPS, qy, qz) - valueNoise3D(qx - EPS, qy, qz);
+  const ny = valueNoise3D(qx, qy + EPS, qz) - valueNoise3D(qx, qy - EPS, qz);
+  const nz = valueNoise3D(qx, qy, qz + EPS) - valueNoise3D(qx, qy - EPS, qz);
+
+  const gradX = nx * INV_TWO_EPS;
+  const gradY = ny * INV_TWO_EPS;
+  const gradZ = nz * INV_TWO_EPS;
+
+  const curlX = P.y * gradZ - P.z * gradY;
+  const curlY = P.z * gradX - P.x * gradZ;
+  const curlZ = P.x * gradY - P.y * gradX;
+
+  out.set(curlX, curlY, curlZ);
+  return out;
+}
+
 /**
  * Evaluates the 3D instantaneous velocity vector strictly tangential to the unit sphere.
  * Combines latitude-banded zonal jets + multi-octave 3D spherical curl noise.

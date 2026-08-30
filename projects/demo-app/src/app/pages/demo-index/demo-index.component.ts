@@ -624,6 +624,18 @@ export const DEMOS: readonly DemoItem[] = [
     description:
       'Instanced, flat-shaded low-poly cloud puffs (runbook 023): crisp sun-lit silhouettes plus dynamic point lights for a rocket engine or storm lightning glowing a cloud from inside.',
   },
+  {
+    id: 'planet-physics-lab',
+    number: '41',
+    title: 'Planet Physics Lab',
+    route: '/planet-physics-lab',
+    categoryId: 'physics',
+    tier: 'lab',
+    entryPoints: ['worldgen', 'jolt'],
+    package: 'triangular-engine/jolt',
+    description:
+      'Real-scale Jolt physics on a Voronoi-cell planet (runbook 022 M4d, split out of Cell Planet Lab): a collider patch and dropped ball positioned in true meters via RVec3 double precision, across the same world-size tiers as Cell Planet Lab.',
+  },
 ];
 
 export interface TagWithCount {

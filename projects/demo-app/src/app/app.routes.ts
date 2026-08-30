@@ -89,6 +89,13 @@ export const routes: Routes = [
   },
   {
     path: 'cell-planet-lab',
+    loadComponent: () =>
+      import('./pages/cell-planet-lab/cell-planet-lab-page.component').then(
+        ({ CellPlanetLabPageComponent }) => CellPlanetLabPageComponent,
+      ),
+  },
+  {
+    path: 'planet-physics-lab',
     canActivate: [
       () =>
         import('triangular-engine/jolt').then(({ JoltPhysicsService }) =>
@@ -96,8 +103,8 @@ export const routes: Routes = [
         ),
     ],
     loadComponent: () =>
-      import('./pages/cell-planet-lab/cell-planet-lab-page.component').then(
-        ({ CellPlanetLabPageComponent }) => CellPlanetLabPageComponent,
+      import('./pages/planet-physics-lab/planet-physics-lab-page.component').then(
+        ({ PlanetPhysicsLabPageComponent }) => PlanetPhysicsLabPageComponent,
       ),
   },
   {

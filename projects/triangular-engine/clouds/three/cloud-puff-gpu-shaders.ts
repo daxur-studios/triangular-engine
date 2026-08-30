@@ -58,51 +58,6 @@ export const GPU_WIND_CORE_GLSL = `
   }
 `;
 
-export const GPU_SPHERE_WIND_FIELD_GLSL = `
-  vec3 windField3D(vec3 P, float t) {
-    float lat = asin(clamp(P.y, -1.0, 1.0));
-    vec3 east = cross(vec3(0.0, 1.0, 0.0), P);
-    float eastLen = length(east);
-    east = eastLen > 1e-5 ? east / eastLen : vec3(0.0);
-
-    float zonalFactor = sin(uZonalFrequency * lat);
-    vec3 base = east * (uZonalSpeed * (1.0 + 0.85 * zonalFactor));
-    vec3 curl = curlNoiseSphere(P, uCurlFrequency, t) * uCurlStrength;
-    vec3 flow = base + curl;
-
-    // Tangential projection onto sphere surface
-    flow -= P * dot(flow, P);
-    return flow;
-  }
-`;
-
-export const GPU_WIND_ADVECTION_GLSL = `
-  #define ADVECT_STEPS 16
-  #define ADVECT_MAX_STEP 0.12
-
-  vec3 advectAlongWind(vec3 spawnDir, float cycleStartTime, float localT, float lifespan) {
-    vec3 pos3D = spawnDir;
-    float fixedDt = lifespan / float(ADVECT_STEPS);
-    for (int i = 0; i < ADVECT_STEPS; i++) {
-      float stepStart = float(i) * fixedDt;
-      float dt = clamp(localT - stepStart, 0.0, fixedDt);
-      if (dt <= 0.0) continue;
-      float ti = cycleStartTime + stepStart;
-
-      vec3 k1 = windField3D(pos3D, ti);
-      vec3 midPos = normalize(pos3D + k1 * dt * 0.5);
-      vec3 step = windField3D(midPos, ti + dt * 0.5) * dt;
-
-      float stepLen = length(step);
-      if (stepLen > ADVECT_MAX_STEP) {
-        step *= ADVECT_MAX_STEP / stepLen;
-      }
-      pos3D = normalize(pos3D + step);
-    }
-    return pos3D;
-  }
-`;
-
 export const GPU_PUFF_CLUMP_VERTEX_SHADER = `
   precision highp float;
 
@@ -120,6 +75,8 @@ export const GPU_PUFF_CLUMP_VERTEX_SHADER = `
   uniform float uFollowLag;
   uniform float uShellRadius;
   uniform vec3 uSunDirection;
+  uniform vec3 uCameraPosition;
+  uniform float uLodDistance;
 
   varying float vAlpha;
   varying float vSeed;
@@ -127,16 +84,62 @@ export const GPU_PUFF_CLUMP_VERTEX_SHADER = `
   varying vec3 vSunDir;
 
   ${GPU_WIND_CORE_GLSL}
-  ${GPU_SPHERE_WIND_FIELD_GLSL}
-  ${GPU_WIND_ADVECTION_GLSL}
 
-  vec2 pickSpawn(float pId, float cycle) {
-    return hashCombine2(pId * 17.0 + 13.0, cycle * 7.0 + 3.0);
+  vec3 windField(vec3 P, float t) {
+    float lat = asin(clamp(P.y, -1.0, 1.0));
+    float jet = sin(lat * uZonalFrequency) * cos(lat);
+    float speed = uZonalSpeed * (0.8 + 0.4 * abs(jet));
+    if (abs(lat) < 0.22) speed = -speed * 0.6;
+
+    vec3 north = vec3(0.0, 1.0, 0.0);
+    vec3 east = cross(north, P);
+    float len = length(east);
+    east = len > 1e-5 ? east / len : vec3(1.0, 0.0, 0.0);
+
+    vec3 baseFlow = east * speed;
+    vec3 curl = curlNoiseSphere(P, uCurlFrequency, t) * uCurlStrength;
+    return baseFlow + curl;
+  }
+
+  vec3 advectStepRK2(vec3 P, float t, float dt) {
+    vec3 v1 = windField(P, t);
+    vec3 pMid = normalize(P + v1 * (dt * 0.5));
+    vec3 v2 = windField(pMid, t + dt * 0.5);
+    return normalize(P + v2 * dt);
+  }
+
+  vec3 advectAlongWind(vec3 initialDir, float startTime, float localT, float lifespan) {
+    const int NUM_STEPS = 16;
+    float dt = lifespan / float(NUM_STEPS);
+    float stepsFloat = localT / dt;
+    int fullSteps = int(floor(stepsFloat));
+    float stepFrac = fract(stepsFloat);
+
+    vec3 P = initialDir;
+    float t = startTime;
+
+    for (int s = 0; s < NUM_STEPS; s++) {
+      if (s >= fullSteps) break;
+      P = advectStepRK2(P, t, dt);
+      t += dt;
+    }
+
+    if (stepFrac > 0.001) {
+      P = advectStepRK2(P, t, dt * stepFrac);
+    }
+    return normalize(P);
+  }
+
+  vec2 pickSpawn(float particleId, float cycle) {
+    vec2 randUV = hashCombine2(particleId * 7.13, cycle * 13.37 + 1.0);
+    float u = randUV.x;
+    float phi = acos(clamp(1.0 - 2.0 * randUV.y, -1.0, 1.0));
+    float v = phi / PI;
+    return vec2(u, v);
   }
 
   void main() {
-    float lifespan = max(0.5, uLifespan);
-
+    float lifespan = max(1.0, uLifespan);
     vec2 lagSeed = hashCombine2(
       aParticleId * 13.0 + aClumpIndex * 29.0,
       aClumpIndex * 61.0 + 5.0
@@ -182,6 +185,16 @@ export const GPU_PUFF_CLUMP_VERTEX_SHADER = `
     vSunDir = normalize(uSunDirection);
 
     vec3 worldPos = memberDir * shellRadius;
+
+    // Cross-fade close-up GPU puffs when 3D detailed meshes take over
+    if (uLodDistance > 0.0) {
+      float camDist = distance(worldPos, uCameraPosition);
+      if (camDist < uLodDistance) {
+        float fade = smoothstep(uLodDistance * 0.7, uLodDistance, camDist);
+        vAlpha *= fade;
+      }
+    }
+
     vec4 mvPosition = modelViewMatrix * vec4(worldPos, 1.0);
     gl_Position = projectionMatrix * mvPosition;
     gl_PointSize = clamp((uPuffPixelScale * 40.0) / max(0.001, -mvPosition.z), 1.0, 800.0) * sizeMul;
@@ -202,6 +215,8 @@ export const GPU_PUFF_FRAGMENT_SHADER = `
   }
 
   void main() {
+    if (vAlpha < 0.01) discard;
+
     vec2 c = gl_PointCoord - vec2(0.5);
     float d = length(c);
     float angle = atan(c.y, c.x);
@@ -249,61 +264,105 @@ export const GPU_CIRRUS_VERTEX_SHADER = `
   uniform vec3 uSunDirection;
 
   varying float vAlpha;
-  varying float vSeed;
-  varying vec3 vSunDir;
   varying vec3 vWorldNormal;
+  varying vec3 vSunDir;
 
   ${GPU_WIND_CORE_GLSL}
-  ${GPU_SPHERE_WIND_FIELD_GLSL}
-  ${GPU_WIND_ADVECTION_GLSL}
 
-  vec2 pickCirrusSpawn(float pId, float cycle) {
-    return hashCombine2(pId * 31.0 + 7.0, cycle * 11.0 + 19.0);
+  vec3 windField(vec3 P, float t) {
+    float lat = asin(clamp(P.y, -1.0, 1.0));
+    float jet = sin(lat * uZonalFrequency) * cos(lat);
+    float speed = uZonalSpeed * (0.9 + 0.5 * abs(jet));
+    if (abs(lat) < 0.22) speed = -speed * 0.6;
+
+    vec3 north = vec3(0.0, 1.0, 0.0);
+    vec3 east = cross(north, P);
+    float len = length(east);
+    east = len > 1e-5 ? east / len : vec3(1.0, 0.0, 0.0);
+
+    vec3 baseFlow = east * speed;
+    vec3 curl = curlNoiseSphere(P, uCurlFrequency, t) * uCurlStrength;
+    return baseFlow + curl;
+  }
+
+  vec3 advectStepRK2(vec3 P, float t, float dt) {
+    vec3 v1 = windField(P, t);
+    vec3 pMid = normalize(P + v1 * (dt * 0.5));
+    vec3 v2 = windField(pMid, t + dt * 0.5);
+    return normalize(P + v2 * dt);
+  }
+
+  vec3 advectAlongWind(vec3 initialDir, float startTime, float localT, float lifespan) {
+    const int NUM_STEPS = 16;
+    float dt = lifespan / float(NUM_STEPS);
+    float stepsFloat = localT / dt;
+    int fullSteps = int(floor(stepsFloat));
+    float stepFrac = fract(stepsFloat);
+
+    vec3 P = initialDir;
+    float t = startTime;
+
+    for (int s = 0; s < NUM_STEPS; s++) {
+      if (s >= fullSteps) break;
+      P = advectStepRK2(P, t, dt);
+      t += dt;
+    }
+
+    if (stepFrac > 0.001) {
+      P = advectStepRK2(P, t, dt * stepFrac);
+    }
+    return normalize(P);
+  }
+
+  vec2 pickSpawn(float particleId, float cycle) {
+    vec2 randUV = hashCombine2(particleId * 11.17, cycle * 17.29 + 3.0);
+    float u = randUV.x;
+    float phi = acos(clamp(1.0 - 2.0 * randUV.y, -1.0, 1.0));
+    float v = phi / PI;
+    return vec2(u, v);
   }
 
   void main() {
     float lifespan = max(1.0, uLifespan * 1.5);
-    float birthOffset = hash2(aParticleId * 3.0).x * lifespan;
-    float shiftedTime = (uTime * 1.35) + birthOffset;
+    float birthOffset = hash2(aParticleId * 19.0).x * lifespan;
+    float shiftedTime = uTime + birthOffset;
     float cycle = floor(shiftedTime / lifespan);
     float localT = shiftedTime - cycle * lifespan;
     float cycleStartTime = shiftedTime - localT;
 
-    vec2 spawnUV = pickCirrusSpawn(aParticleId, mod(cycle, 4096.0));
+    vec2 spawnUV = pickSpawn(aParticleId, mod(cycle, 4096.0));
     vec3 pos3D = advectAlongWind(uvToDir(spawnUV), cycleStartTime, localT, lifespan);
 
     float lifeFrac = localT / lifespan;
-    vAlpha = smoothstep(0.0, 0.15, lifeFrac) * (1.0 - smoothstep(0.75, 1.0, lifeFrac)) * 0.45;
+    vAlpha = smoothstep(0.0, 0.12, lifeFrac) * (1.0 - smoothstep(0.78, 1.0, lifeFrac)) * 0.55;
 
-    float sizeSeed = hash2(aParticleId * 41.0 + aClumpIndex * 73.0).x;
-    vSeed = sizeSeed;
     vWorldNormal = pos3D;
     vSunDir = normalize(uSunDirection);
 
     vec3 worldPos = pos3D * uShellRadius;
     vec4 mvPosition = modelViewMatrix * vec4(worldPos, 1.0);
     gl_Position = projectionMatrix * mvPosition;
-    gl_PointSize = clamp((uPuffPixelScale * 75.0) / max(0.001, -mvPosition.z), 1.0, 900.0);
+    gl_PointSize = clamp((uPuffPixelScale * 25.0) / max(0.001, -mvPosition.z), 1.0, 400.0);
   }
 `;
 
 export const GPU_CIRRUS_FRAGMENT_SHADER = `
   precision highp float;
   varying float vAlpha;
-  varying float vSeed;
   varying vec3 vWorldNormal;
   varying vec3 vSunDir;
-  uniform vec3 uPuffColor;
+  uniform vec3 uCirrusColor;
 
   void main() {
+    if (vAlpha < 0.01) discard;
+
     vec2 c = gl_PointCoord - vec2(0.5);
-    // Stretched wispy cirrus streaks along horizontal wind axis
-    float d = length(vec2(c.x * 0.65, c.y * 1.8));
+    float d = length(c);
     if (d > 0.5) discard;
 
     float edge = 1.0 - smoothstep(0.1, 0.5, d);
     float NdotL = max(0.0, dot(vWorldNormal, vSunDir));
-    vec3 litColor = uPuffColor * (0.65 + 0.35 * NdotL);
+    vec3 litColor = uCirrusColor * (0.6 + 0.4 * NdotL);
 
     gl_FragColor = vec4(litColor, edge * vAlpha);
   }

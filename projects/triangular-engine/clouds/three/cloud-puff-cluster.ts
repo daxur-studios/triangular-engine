@@ -3,12 +3,13 @@ import {
   Group,
   InstancedMesh,
   Matrix4,
+  Quaternion,
+  Vector3,
   type ShaderMaterial,
-  type Vector3,
 } from 'three';
 
 import { createCloudPuffVariantParams, createCloudRandom01 } from '../core/cloud-puff-shape';
-import type { CloudPuffShading } from './cloud-puff-geometry';
+import { type CloudPuffShading } from './cloud-puff-geometry';
 import {
   createCloudPuffMaterial,
   setCloudPuffPointLights,
@@ -31,29 +32,19 @@ import {
 
 export interface ICloudPuffClusterOptions {
   readonly instanceCount: number;
-  /** Number of distinct puff shapes to generate and distribute across instances. */
   readonly variantCount?: number;
   readonly seed?: number;
   readonly puffScaleRangeM: readonly [number, number];
-  /** Half-extent (metres) of the box instances are jittered within, per axis (used by box domain). */
   readonly regionSizeM?: readonly [number, number, number];
-  /** World-space centre the domain is anchored around. Defaults to [0, 0, 0]. */
   readonly originM?: readonly [number, number, number];
-  /** Radius (metres) for spherical shell or cylindrical domains. */
   readonly radiusM?: number;
-  /** Length / height (metres) for cylindrical domain along its primary axis. */
   readonly lengthM?: number;
-  /** Thickness (metres) of the altitude band for sphere/cylinder shells. */
   readonly shellThicknessM?: number;
-  /** Icosahedron subdivision level for the base shape before noise displacement. */
   readonly detail?: number;
-  /** 'flat' (default) bakes faceted per-face normals for crisp silhouettes; 'smooth' blends them. */
   readonly shading?: CloudPuffShading;
-  /** Which {@link ICloudPuffStyle} builds the puff geometry. Defaults to the low-poly blob look. */
   readonly styleId?: string;
-  /** Which {@link ICloudPuffDomain} controls puff placement and wind drift. Defaults to the box domain. */
   readonly domainId?: string;
-  /** Optional density/moisture weight callback returning 0..1 cloud presence probability. */
+  readonly lodDistanceM?: number;
   readonly densityAt?: (direction: Vector3) => number;
   readonly material?: ICloudPuffMaterialOptions;
 }
@@ -63,9 +54,8 @@ export interface ICloudPuffCluster {
   readonly material: ShaderMaterial;
   setSunDirection(direction: Vector3): void;
   setPointLights(lights: readonly ICloudPuffPointLight[]): void;
-  /** Advances wind drift. Interpretation depends on active domain (translation for box, rotation/drift for angular domains). */
+  updateLod(cameraPosition: Vector3, lodDistanceM?: number): void;
   advanceWind(deltaSeconds: number, wind: CloudPuffWindInput, simulationTimeSeconds?: number): void;
-  /** Directly sets the absolute simulation time for deterministic positioning / timewarp scrubbing. */
   setTime(simulationTimeSeconds: number, wind?: CloudPuffWindInput): void;
   dispose(): void;
 }
@@ -79,10 +69,12 @@ export function buildCloudPuffCluster(options: ICloudPuffClusterOptions): ICloud
   const style = getCloudPuffStyleById(options.styleId ?? DEFAULT_CLOUD_PUFF_STYLE_ID);
   const domain = getCloudPuffDomainById(options.domainId ?? DEFAULT_CLOUD_PUFF_DOMAIN_ID);
 
+  // Build full 3D detailed shape variants (card stack, low-poly blob, etc.)
   const geometries = style.buildGeometryVariants(variantParams, {
     detail,
     shading: options.shading ?? 'flat',
   });
+
   const material = createCloudPuffMaterial(options.material);
 
   const random = createCloudRandom01(seed ^ 0x9e37_79b9);
@@ -95,14 +87,15 @@ export function buildCloudPuffCluster(options: ICloudPuffClusterOptions): ICloud
   }
 
   const group = new Group();
-  group.name = 'cloud-puff-cluster';
+  group.name = 'cloud-puff-3d-cluster';
 
-  const meshByVariant = geometries.map((geometry, variant) => {
+  const meshes = geometries.map((geometry, variant) => {
     const count = instancesPerVariant[variant];
     const mesh = new InstancedMesh(geometry, material, Math.max(count, 1));
     mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     mesh.frustumCulled = false;
     mesh.count = count;
+    mesh.name = `cloud-puff-3d-v${variant}`;
     group.add(mesh);
     return mesh;
   });
@@ -119,38 +112,106 @@ export function buildCloudPuffCluster(options: ICloudPuffClusterOptions): ICloud
     densityAt: options.densityAt,
   };
 
-  const transforms = domain.placeInstances(domainContext);
-  const matrix = new Matrix4();
+  // Map each instance index to its mesh variant and slot
+  const instanceSlots: Array<{ variant: number; slot: number }> = new Array(options.instanceCount);
   const writeCursor = new Array<number>(variantCount).fill(0);
-
   for (let i = 0; i < options.instanceCount; i++) {
     const variant = variantIndexPerInstance[i];
-    const mesh = meshByVariant[variant];
-    const index = writeCursor[variant]++;
-    const transform = transforms[i];
-    matrix.compose(transform.position, transform.quaternion, transform.scale);
-    mesh.setMatrixAt(index, matrix);
+    const slot = writeCursor[variant]++;
+    instanceSlots[i] = { variant, slot };
   }
-  for (const mesh of meshByVariant) mesh.instanceMatrix.needsUpdate = true;
+
+  // Active runtime state per instance
+  const currentPositions: Vector3[] = [];
+  const currentRotations: Quaternion[] = [];
+  const currentScales: Vector3[] = [];
+  for (let i = 0; i < options.instanceCount; i++) {
+    currentPositions.push(new Vector3(0, 0, 0));
+    currentRotations.push(new Quaternion());
+    currentScales.push(new Vector3(0, 0, 0));
+  }
+
+  const initialTransforms = domain.placeInstances(domainContext);
+  const matrix = new Matrix4();
+  const zeroMatrix = new Matrix4().makeScale(0, 0, 0);
+
+  for (let i = 0; i < options.instanceCount; i++) {
+    const t = initialTransforms[i];
+    currentPositions[i].copy(t.position);
+    currentRotations[i].copy(t.quaternion);
+    currentScales[i].copy(t.scale);
+
+    const { variant, slot } = instanceSlots[i];
+    // Start initially culled until camera LOD update
+    meshes[variant].setMatrixAt(slot, zeroMatrix);
+  }
+  for (const m of meshes) m.instanceMatrix.needsUpdate = true;
 
   const windController = domain.createWindController(group, domainContext);
+
+  let activeLodDistanceM = options.lodDistanceM ?? 80;
+  let lastCameraPos = new Vector3(0, 50, 150);
+
+  function applyLod(cameraPosition: Vector3, lodThresholdM: number) {
+    lastCameraPos.copy(cameraPosition);
+    const thresholdSq = lodThresholdM * lodThresholdM;
+
+    for (let i = 0; i < options.instanceCount; i++) {
+      const { variant, slot } = instanceSlots[i];
+      const pos = currentPositions[i];
+      const distSq = cameraPosition.distanceToSquared(pos);
+
+      if (distSq <= thresholdSq && lodThresholdM > 0) {
+        matrix.compose(pos, currentRotations[i], currentScales[i]);
+        meshes[variant].setMatrixAt(slot, matrix);
+      } else {
+        meshes[variant].setMatrixAt(slot, zeroMatrix);
+      }
+    }
+
+    for (const m of meshes) {
+      m.instanceMatrix.needsUpdate = true;
+    }
+  }
 
   return {
     group,
     material,
     setSunDirection: (direction) => setCloudPuffSunDirection(material, direction),
     setPointLights: (lights) => setCloudPuffPointLights(material, lights),
-    advanceWind: (deltaSeconds, wind, simulationTimeSeconds) =>
-      windController.advanceWind(deltaSeconds, wind, simulationTimeSeconds),
-    setTime: (simulationTimeSeconds, wind = 0) => {
+    updateLod(cameraPosition: Vector3, lodDistanceM?: number) {
+      if (lodDistanceM !== undefined) activeLodDistanceM = lodDistanceM;
+      applyLod(cameraPosition, activeLodDistanceM);
+    },
+    advanceWind(deltaSeconds, wind, simulationTimeSeconds) {
+      windController.advanceWind(deltaSeconds, wind, simulationTimeSeconds);
+
+      // Read back dynamic matrices updated by wind controller if any
+      for (let i = 0; i < options.instanceCount; i++) {
+        const { variant, slot } = instanceSlots[i];
+        meshes[variant].getMatrixAt(slot, matrix);
+        matrix.decompose(currentPositions[i], currentRotations[i], currentScales[i]);
+      }
+
+      applyLod(lastCameraPos, activeLodDistanceM);
+    },
+    setTime(simulationTimeSeconds, wind = 0) {
       if (windController.setTime) {
         windController.setTime(simulationTimeSeconds, wind);
       } else {
         windController.advanceWind(0, wind, simulationTimeSeconds);
       }
+
+      for (let i = 0; i < options.instanceCount; i++) {
+        const { variant, slot } = instanceSlots[i];
+        meshes[variant].getMatrixAt(slot, matrix);
+        matrix.decompose(currentPositions[i], currentRotations[i], currentScales[i]);
+      }
+
+      applyLod(lastCameraPos, activeLodDistanceM);
     },
     dispose() {
-      for (const geometry of geometries) geometry.dispose();
+      for (const g of geometries) g.dispose();
       material.dispose();
       group.clear();
     },

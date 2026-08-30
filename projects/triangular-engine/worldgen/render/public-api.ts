@@ -3,4 +3,5 @@
  * `worldgen/core` never gains a Three.js/Angular dependency — this package is the boundary
  * where a graph/tectonics/ecology gets turned into an actual scene-graph object. */
 export * from './color-ramps';
+export * from './world-size-tiers';
 export * from './components/planet-view.component';

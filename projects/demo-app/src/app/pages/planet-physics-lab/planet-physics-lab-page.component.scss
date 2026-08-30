@@ -1,0 +1,214 @@
+:host {
+  --bg: #0a0d12;
+  --panel: #121824;
+  --panel-2: #161d29;
+  --border: #232c3a;
+  --border-strong: #33404f;
+  --text: #e8edf4;
+  --text-dim: #8b96a8;
+  --line: #6fe3c0;
+  --line-dim: #2f5f52;
+  --site: #f4b860;
+  --accent: #ff6b57;
+  --grid: #1b2330;
+
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.back-link {
+  display: inline-block;
+  margin: 0.9rem 0 0 0.9rem;
+  color: var(--text-dim);
+  font:
+    12px "IBM Plex Sans",
+    system-ui,
+    sans-serif;
+  text-decoration: none;
+}
+.back-link:hover {
+  color: var(--line);
+}
+
+.scope {
+  width: min(30rem, calc(100vw - 1.8rem));
+  margin: 0.6rem 0.9rem 0.9rem;
+  padding: 1.1rem;
+  background: var(--panel);
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 1rem 3rem #0008;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.scope-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 0.5px solid var(--border);
+  padding-bottom: 0.9rem;
+}
+
+.scope-kicker {
+  display: block;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--line);
+  margin-bottom: 4px;
+}
+
+.scope h1 {
+  font-size: 20px;
+  font-weight: 500;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.stat-strip {
+  display: flex;
+  gap: 1.4rem;
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 56px;
+}
+.stat-label {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.stat-value {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.25rem;
+  background: var(--panel);
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1.1rem;
+}
+
+.control {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.control > span:first-child {
+  min-width: 66px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.control input[type="range"] {
+  width: 120px;
+  accent-color: var(--line);
+}
+.control input[type="number"] {
+  width: 82px;
+  background: var(--panel-2);
+  border: 0.5px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px;
+  padding: 5px 8px;
+}
+.control-value {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--text);
+  min-width: 34px;
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  background: var(--panel-2);
+  border: 0.5px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 13px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+button:hover {
+  border-color: var(--line);
+  color: var(--line);
+}
+button:active {
+  transform: scale(0.98);
+}
+button.active {
+  border-color: var(--line);
+  color: var(--bg);
+  background: var(--line);
+}
+
+.control-group-label {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.toggle input {
+  accent-color: var(--line);
+}
+
+.note {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  margin: 0;
+}
+.note code {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  background: var(--panel-2);
+  border: 0.5px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 11px;
+  color: var(--line);
+}
+
+@media (max-width: 40rem) {
+  .scope {
+    width: calc(100vw - 1.8rem);
+  }
+  .scope-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

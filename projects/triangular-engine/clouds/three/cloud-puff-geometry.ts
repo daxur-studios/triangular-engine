@@ -21,7 +21,13 @@ export function buildCloudPuffGeometry(
   shading: CloudPuffShading = 'flat',
 ): BufferGeometry {
   const base = new IcosahedronGeometry(1, detail);
-  const geometry = shading === 'flat' ? base.toNonIndexed() : base;
+  let geometry: BufferGeometry = base;
+  if (shading === 'flat') {
+    if (base.index !== null) {
+      geometry = base.toNonIndexed();
+      base.dispose();
+    }
+  }
   const position = geometry.getAttribute('position') as BufferAttribute;
   for (let i = 0; i < position.count; i++) {
     const x = position.getX(i);
