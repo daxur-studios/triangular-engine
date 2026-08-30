@@ -4,18 +4,18 @@
       <header>
         <div>
           <a routerLink="/">← Examples</a>
-          <small>character sandbox — procedural mesh, svg, and more</small>
+          <small>character sandbox — procedural mesh & svg styles</small>
         </div>
         <strong>Character Lab</strong>
       </header>
 
       <p class="blurb">
-        Scratch space for iterating on character attempts (people and robots).
-        Add an attempt, select it, and compare against the others side by side.
+        Compare character rendering approaches side by side: procedural 3D baselines vs
+        three distinct Three.js SVG techniques.
       </p>
 
       <div class="attempt-selector">
-        <span class="selector-label">Attempt</span>
+        <span class="selector-label">Select Character Attempt</span>
         <div class="tab-group">
           @for (attempt of attempts(); track attempt.id) {
             <button
@@ -29,6 +29,16 @@
           }
         </div>
       </div>
+
+      @if (selectedAttempt(); as current) {
+        <div class="technique-card">
+          <div class="technique-header">
+            <span class="technique-tag">{{ current.technique }}</span>
+            <span class="coord-tag">x = {{ current.x }}</span>
+          </div>
+          <p class="technique-desc">{{ current.description }}</p>
+        </div>
+      }
     </section>
   </ng-template>
 
@@ -46,3 +56,4 @@
     <meshStandardMaterial [params]="{ color: '#1a1d24', roughness: 0.9 }" />
   </mesh>
 </scene>
+

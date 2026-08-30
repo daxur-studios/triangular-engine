@@ -782,9 +782,9 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
   private graph: IPlanetGraphCore | null = null;
   private tectonics: IPlanetTectonics | null = null;
   private ecology: IPlanetEcology | null = null;
-  /** World-profile spike: per-cell landform typing + geological shape stamps (see
+  /** World-profile spike: per-cell landform typing + a flat single-cell elevation stamp (see
    * `features.ts`). `featureElevation` is `tectonics.elevation` with every feature instance's
-   * shape composed in (`buildFeatureElevation()`) — every consumer that used to read
+   * stamp composed in (`buildFeatureElevation()`) — every consumer that used to read
    * `tectonics.elevation` directly now reads this instead, the same "materialize once, hand
    * everyone the same array" pattern `buildEffectiveElevation()` already uses for M4e edits.
    * Player edits still compose on top of this, never the other way — see `rebuildPreviewMesh()`. */
@@ -825,7 +825,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       biomes: profile.biomes,
     });
     this.features = computeFeatures(graph, this.tectonics, this.ecology.waterBodyKind, profile.features);
-    this.featureElevation = buildFeatureElevation(this.tectonics.elevation, graph, this.features);
+    this.featureElevation = buildFeatureElevation(this.tectonics.elevation, this.features);
     this.updateFeatureStats();
 
     this.buildMs.set(`${(t1 - t0).toFixed(1)} ms`);

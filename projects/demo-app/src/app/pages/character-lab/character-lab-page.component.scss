@@ -5,7 +5,7 @@
 }
 
 .panel {
-  width: min(30rem, calc(100vw - 2rem));
+  width: min(32rem, calc(100vw - 2rem));
   padding: 1rem;
   border: 1px solid #2d3748;
   border-radius: 0.75rem;
@@ -51,35 +51,91 @@ a {
 .attempt-selector {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.35rem;
 
   .selector-label {
-    font-size: 0.78rem;
+    font-size: 0.76rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     color: #94a3b8;
   }
 
   .tab-group {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.3rem;
     background: #111827;
-    padding: 0.2rem;
-    border-radius: 0.35rem;
+    padding: 0.3rem;
+    border-radius: 0.45rem;
+    border: 1px solid #1f2937;
 
     .tab-btn {
-      flex: 1;
+      flex: 1 1 calc(33.333% - 0.3rem);
+      min-width: 5.5rem;
       background: transparent;
-      border: none;
-      border-radius: 0.25rem;
-      padding: 0.3rem;
+      border: 1px solid transparent;
+      border-radius: 0.3rem;
+      padding: 0.4rem 0.5rem;
       color: #94a3b8;
       font-size: 0.78rem;
       cursor: pointer;
+      text-align: center;
+      transition: all 0.15s ease;
+
+      &:hover {
+        color: #f1f5f9;
+        background: #1e293b;
+      }
 
       &.active {
-        background: #334155;
-        color: #f8fafc;
+        background: #3b82f6;
+        border-color: #60a5fa;
+        color: #ffffff;
         font-weight: 600;
+        box-shadow: 0 0.15rem 0.5rem rgba(59, 130, 246, 0.35);
       }
     }
   }
 }
+
+.technique-card {
+  margin-top: 0.15rem;
+  padding: 0.65rem 0.8rem;
+  background: #141b26;
+  border: 1px solid #233044;
+  border-radius: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+
+  .technique-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    .technique-tag {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      padding: 0.15rem 0.45rem;
+      border-radius: 0.25rem;
+    }
+
+    .coord-tag {
+      font-size: 0.72rem;
+      font-family: ui-monospace, monospace;
+      color: #64748b;
+    }
+  }
+
+  .technique-desc {
+    margin: 0;
+    color: #94a3b8;
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+}
+
