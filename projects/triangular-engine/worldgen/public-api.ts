@@ -12,6 +12,7 @@ export * from './core/plate-boundaries';
 export * from './core/elevation';
 export * from './core/sample-elevation';
 export * from './core/chunking';
+export * from './core/sub-cells';
 export * from './core/collider-patch';
 export * from './core/terrain-edits';
 export * from './core/salience';

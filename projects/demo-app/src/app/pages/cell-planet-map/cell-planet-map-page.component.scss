@@ -1,0 +1,120 @@
+:host {
+  position: relative;
+}
+
+.map-page {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  background: #0a0d12;
+  color: #e8e4da;
+  font-family: system-ui, sans-serif;
+}
+
+.panel {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  overflow-y: auto;
+  background: #10141d;
+  border-right: 1px solid #232a38;
+
+  h1 {
+    font-size: 1.1rem;
+    margin: 0;
+  }
+
+  .hint {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #8b93a3;
+  }
+
+  .back-link {
+    font-size: 0.8rem;
+    color: #8b93a3;
+    text-decoration: none;
+
+    &:hover {
+      color: #e8e4da;
+    }
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+
+  input,
+  select {
+    width: 100%;
+  }
+}
+
+.button-row {
+  display: flex;
+  gap: 0.5rem;
+
+  button {
+    flex: 1 1 auto;
+  }
+}
+
+button {
+  padding: 0.4rem 0.6rem;
+  background: #1c2433;
+  color: #e8e4da;
+  border: 1px solid #2f3a4f;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+
+  &:hover {
+    background: #263149;
+  }
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.stats {
+  margin-top: auto;
+  padding-top: 0.75rem;
+  border-top: 1px solid #232a38;
+  font-size: 0.75rem;
+  color: #8b93a3;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.viewport {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background: #0a0d12;
+
+  &:active {
+    cursor: grabbing;
+  }
+
+  canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    transform-origin: 0 0;
+  }
+}

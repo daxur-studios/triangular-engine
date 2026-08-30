@@ -1,5 +1,6 @@
 import { IPlanetGraphCell, IPlanetGraphCore } from './planet-graph';
 import { cellCornerElevation } from './sample-elevation';
+import { buildSubdividedCellMeshData } from './sub-cells';
 import { cross, dot, IVec3, normalize, projectOnTangentPlane, sub, vec3 } from './vec3';
 
 export interface IPlanetChunk {
@@ -183,8 +184,18 @@ export interface IChunkMeshData {
  * M3/M4a preview mesh's tessellation, but scoped to a single chunk's cells and returned as
  * plain typed arrays rather than a Three.js `BufferGeometry` — this module stays framework-
  * free; the caller wraps the result into whatever GPU buffer type it uses.
+ *
+ * `subdividedCellIds`, when given, swaps the plain fan for `buildSubdividedCellMeshData()`'s
+ * real interior sub-cells on exactly those cells — see that function's doc comment. Meant for
+ * a small, bounded, explicitly-chosen cell set (a feature instance, or a handful of cells near
+ * the camera), never a planet-wide set.
  */
-export function buildChunkMeshData(graph: IPlanetGraphCore, elevation: number[], chunk: IPlanetChunk): IChunkMeshData {
+export function buildChunkMeshData(
+  graph: IPlanetGraphCore,
+  elevation: number[],
+  chunk: IPlanetChunk,
+  subdividedCellIds?: ReadonlySet<number>,
+): IChunkMeshData {
   const directions: number[] = [];
   const elevations: number[] = [];
   const cellIds: number[] = [];
@@ -199,6 +210,10 @@ export function buildChunkMeshData(graph: IPlanetGraphCore, elevation: number[],
     const cell: IPlanetGraphCell = graph.cells[cellId];
     const n = cell.corners.length;
     if (n < 3) continue;
+    if (subdividedCellIds?.has(cellId)) {
+      buildSubdividedCellMeshData(cell, elevation, pushVertex);
+      continue;
+    }
     const centerElevation = elevation[cell.id];
     for (let k = 0; k < n; k++) {
       const k2 = (k + 1) % n;
@@ -396,6 +411,11 @@ export interface IChunkLod1Params {
    * at LOD1 than LOD0). Omitted or undefined imposes no constraint, identical to prior
    * behavior. */
   isLand?: boolean[];
+  /** Same set `buildChunkMeshData()` takes — a pinned singleton subdivided cell renders via
+   * `buildSubdividedCellMeshData()` here too, so it stays byte-identical between LOD0 and LOD1
+   * the same way a plain pinned cell's fan already does (see the pinning doc section below).
+   * Omitted renders every pinned singleton as a plain fan, identical to prior behavior. */
+  subdividedCellIds?: ReadonlySet<number>;
 }
 
 const LOD1_DEFAULTS = {
@@ -515,12 +535,16 @@ export function buildChunkLod1MeshData(
       const cell = graph.cells[members[0]];
       const n = cell.corners.length;
       if (n >= 3) {
-        const centerElevation = elevation[cell.id];
-        for (let k = 0; k < n; k++) {
-          const k2 = (k + 1) % n;
-          pushVertex(cell.center, centerElevation, cell.id);
-          pushVertex(cell.corners[k], cellCornerElevation(cell, k, elevation), cell.id);
-          pushVertex(cell.corners[k2], cellCornerElevation(cell, k2, elevation), cell.id);
+        if (p.subdividedCellIds?.has(cell.id)) {
+          buildSubdividedCellMeshData(cell, elevation, pushVertex);
+        } else {
+          const centerElevation = elevation[cell.id];
+          for (let k = 0; k < n; k++) {
+            const k2 = (k + 1) % n;
+            pushVertex(cell.center, centerElevation, cell.id);
+            pushVertex(cell.corners[k], cellCornerElevation(cell, k, elevation), cell.id);
+            pushVertex(cell.corners[k2], cellCornerElevation(cell, k2, elevation), cell.id);
+          }
         }
       }
       continue;

@@ -95,6 +95,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'cell-planet-map',
+    loadComponent: () =>
+      import('./pages/cell-planet-map/cell-planet-map-page.component').then(
+        ({ CellPlanetMapPageComponent }) => CellPlanetMapPageComponent,
+      ),
+  },
+  {
     path: 'planet-physics-lab',
     canActivate: [
       () =>

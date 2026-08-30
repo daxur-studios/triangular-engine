@@ -1,0 +1,84 @@
+<div class="map-page">
+  <aside class="panel">
+    <a routerLink="/" class="back-link">&larr; Demo index</a>
+    <h1>Cell Planet Map</h1>
+    <p class="hint">Drag to pan, scroll to zoom.</p>
+
+    <label class="field">
+      <span>Cell count: {{ cellCount() }}</span>
+      <input
+        type="range"
+        min="200"
+        max="6000"
+        step="100"
+        [value]="cellCount()"
+        (input)="cellCount.set($any($event.target).valueAsNumber)"
+      />
+    </label>
+
+    <label class="field">
+      <span>World profile</span>
+      <select
+        [value]="worldProfileKind()"
+        (change)="worldProfileKind.set($any($event.target).value)"
+      >
+        @for (kind of worldProfileKinds; track kind) {
+          <option [value]="kind">{{ kind }}</option>
+        }
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Icon density: {{ iconBudget() }}</span>
+      <input
+        type="range"
+        min="0"
+        max="4000"
+        step="100"
+        [value]="iconBudget()"
+        (input)="onIconDensityInput($any($event.target).valueAsNumber)"
+      />
+    </label>
+
+    <div class="button-row">
+      <button type="button" (click)="regenerate()">Regenerate</button>
+      <button type="button" (click)="randomizeSeed()">Random seed</button>
+    </div>
+
+    <label class="checkbox">
+      <input type="checkbox" [checked]="showIcons()" (change)="onIconsToggle()" />
+      Icons
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" [checked]="showRivers()" (change)="onRiversToggle()" />
+      Rivers
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" [checked]="showCellEdges()" (change)="onEdgesToggle()" />
+      Cell edges
+    </label>
+
+    <button type="button" (click)="resetView()">Reset view</button>
+
+    <div class="stats">
+      <div>Seed: {{ seed() }}</div>
+      <div>Build: {{ buildMs() }}</div>
+      <div>Zoom: {{ zoom().toFixed(1) }}x</div>
+    </div>
+  </aside>
+
+  <div
+    class="viewport"
+    #viewport
+    (wheel)="onWheel($event)"
+    (pointerdown)="onPointerDown($event)"
+    (pointermove)="onPointerMove($event)"
+    (pointerup)="onPointerUp()"
+    (pointerleave)="onPointerUp()"
+  >
+    <canvas
+      #mapCanvas
+      [style.transform]="'translate(' + panX() + 'px,' + panY() + 'px) scale(' + zoom() + ')'"
+    ></canvas>
+  </div>
+</div>

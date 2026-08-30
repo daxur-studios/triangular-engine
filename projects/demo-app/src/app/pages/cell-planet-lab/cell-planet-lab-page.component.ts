@@ -1112,6 +1112,13 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     // is bit-for-bit the same code path buildChunkLod1MeshData() already had before pinning
     // existed, not just a pin set that happens to be empty.
     const pinned = this.usePinning() ? computeCellPins(graph, tectonics.elevation, tectonics.isLand, chunks).pinned : undefined;
+    // A shaped feature cell (see rebuildPreviewMesh()'s mesh-build loop below) needs to stay a
+    // pinned LOD1 singleton regardless of whether it happened to win the salience budget's
+    // top-K peaks/coastal slots — otherwise it can get merged away at LOD1 and lose its
+    // multi-ring landform even though it still shows one at LOD0.
+    if (pinned) {
+      for (const cellId of this.features.featureByCellId.keys()) pinned[cellId] = 1;
+    }
     this.pinnedCells = pinned ?? new Uint8Array(graph.cells.length);
     this.pinnedCellCount.set(pinned ? pinned.reduce((sum, v) => sum + v, 0) : 0);
 
@@ -1122,10 +1129,11 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
     // pinning going stale after an edit is a minor rendering-quality edge case, not a
     // correctness bug worth complicating this method for.
     const elevation = buildEffectiveElevation(this.featureElevation, this.terrainEdits);
+    const subdividedCellIds = new Set(this.features.featureByCellId.keys());
 
     for (const chunk of chunks) {
       const lod0 = this.buildChunkLodMesh(
-        buildChunkMeshData(graph, elevation, chunk),
+        buildChunkMeshData(graph, elevation, chunk, subdividedCellIds),
         chunk,
         0,
       );
@@ -1135,7 +1143,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
           elevation,
           chunkIdByCell,
           chunk,
-          { pinned, isLand: tectonics.isLand },
+          { pinned, isLand: tectonics.isLand, subdividedCellIds },
         ),
         chunk,
         1,
@@ -1271,6 +1279,7 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
 
     const elevation = buildEffectiveElevation(this.featureElevation, this.terrainEdits);
     const pinned = this.usePinning() ? this.pinnedCells : undefined;
+    const subdividedCellIds = new Set(this.features.featureByCellId.keys());
 
     for (const chunkId of chunkIds) {
       const chunk = this.chunks[chunkId];
@@ -1286,11 +1295,12 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
         }
       }
 
-      const lod0 = this.buildChunkLodMesh(buildChunkMeshData(this.graph, elevation, chunk), chunk, 0);
+      const lod0 = this.buildChunkLodMesh(buildChunkMeshData(this.graph, elevation, chunk, subdividedCellIds), chunk, 0);
       const lod1 = this.buildChunkLodMesh(
         buildChunkLod1MeshData(this.graph, elevation, this.chunkIdByCell, chunk, {
           pinned,
           isLand: this.tectonics.isLand,
+          subdividedCellIds,
         }),
         chunk,
         1,
