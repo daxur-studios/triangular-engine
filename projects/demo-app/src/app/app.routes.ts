@@ -398,6 +398,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'cities-lab',
+    loadComponent: () =>
+      import('./pages/cities-lab/cities-lab-page.component').then(
+        ({ CitiesLabPageComponent }) => CitiesLabPageComponent,
+      ),
+  },
+  {
     path: 'character-lab',
     loadComponent: () =>
       import('./pages/character-lab/character-lab-page.component').then(

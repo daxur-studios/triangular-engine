@@ -1,0 +1,278 @@
+<scene [logarithmicDepthBuffer]="logarithmicDepthBuffer()" [wireframe]="wireframe()">
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Cities lab controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>triangular-engine/procedural — cities & roads</small>
+        </div>
+        <strong>Procedural Cities & Multi-Modal Roads Lab</strong>
+      </header>
+
+      <p class="blurb">
+        Procedural city blocks & instanced building envelopes, 3D transit graphs, dynamic terrain adaptation, and Jolt-compatible physics colliders.
+      </p>
+
+      <!-- Layout Mode -->
+      <fieldset class="control-group">
+        <legend>City Typology & Layout Mode</legend>
+        <div class="button-row">
+          <button
+            [class.active]="layoutMode() === 'organic-voronoi'"
+            (click)="setLayoutMode('organic-voronoi')"
+          >
+            🏛️ Rome / Venice (Voronoi)
+          </button>
+          <button
+            [class.active]="layoutMode() === 'grid-metropolis'"
+            (click)="setLayoutMode('grid-metropolis')"
+          >
+            🏙️ Grid Metropolis
+          </button>
+          <button
+            [class.active]="layoutMode() === 'valley-bridge'"
+            (click)="setLayoutMode('valley-bridge')"
+          >
+            🌉 Valley Bridge Span
+          </button>
+          <button
+            [class.active]="layoutMode() === 'mountain-tunnel'"
+            (click)="setLayoutMode('mountain-tunnel')"
+          >
+            🚇 Mountain Tunnel
+          </button>
+        </div>
+      </fieldset>
+
+      <!-- Voronoi Parameters -->
+      @if (layoutMode() === 'organic-voronoi') {
+        <fieldset class="control-group">
+          <legend>Old Town Quarters (2–3 Story Buildings)</legend>
+          <label class="slider-row">
+            <span>City Quarters (Seeds): {{ voronoiCellCount() }}</span>
+            <input
+              type="range"
+              min="12"
+              max="52"
+              step="2"
+              [value]="voronoiCellCount()"
+              (input)="updateVoronoiCells(+$any($event.target).value)"
+            />
+          </label>
+          <label class="slider-row">
+            <span>Lloyd Relaxation: {{ lloydPasses() }} passes (Street Curvature)</span>
+            <input
+              type="range"
+              min="0"
+              max="4"
+              step="1"
+              [value]="lloydPasses()"
+              (input)="updateLloydPasses(+$any($event.target).value)"
+            />
+          </label>
+          <label class="slider-row">
+            <span>Lot Density: {{ (buildingDensity() * 100).toFixed(0) }}%</span>
+            <input
+              type="range"
+              min="0.3"
+              max="1.0"
+              step="0.05"
+              [value]="buildingDensity()"
+              (input)="updateBuildingDensity(+$any($event.target).value)"
+            />
+          </label>
+          <div class="action-row">
+            <button type="button" class="action-btn" (click)="randomizeSeed()">
+              🎲 Randomize Seed ({{ seed() }})
+            </button>
+          </div>
+        </fieldset>
+      }
+
+      <!-- Grid Parameters -->
+      @if (layoutMode() === 'grid-metropolis') {
+        <fieldset class="control-group">
+          <legend>Metropolis Grid Parameters</legend>
+          <label class="slider-row">
+            <span>Grid Blocks: {{ gridBlockSize() }}x{{ gridBlockSize() }} ({{ gridBlockSize() * gridBlockSize() }} blocks)</span>
+            <input
+              type="range"
+              min="3"
+              max="8"
+              step="1"
+              [value]="gridBlockSize()"
+              (input)="updateGridSize(+$any($event.target).value)"
+            />
+          </label>
+          <label class="slider-row">
+            <span>Max Downtown Height: {{ maxBuildingHeightM() }}m</span>
+            <input
+              type="range"
+              min="25"
+              max="160"
+              step="5"
+              [value]="maxBuildingHeightM()"
+              (input)="updateMaxHeight(+$any($event.target).value)"
+            />
+          </label>
+          <label class="slider-row">
+            <span>Lot Density: {{ (buildingDensity() * 100).toFixed(0) }}%</span>
+            <input
+              type="range"
+              min="0.3"
+              max="1.0"
+              step="0.05"
+              [value]="buildingDensity()"
+              (input)="updateBuildingDensity(+$any($event.target).value)"
+            />
+          </label>
+          <div class="action-row">
+            <button type="button" class="action-btn" (click)="randomizeSeed()">
+              🎲 Randomize Seed ({{ seed() }})
+            </button>
+          </div>
+        </fieldset>
+      }
+
+      <!-- Terrain Preset -->
+      <fieldset class="control-group">
+        <legend>Terrain Topography</legend>
+        <div class="button-row">
+          <button
+            [class.active]="terrainPreset() === 'rolling-hills'"
+            (click)="setTerrainPreset('rolling-hills')"
+          >
+            Rolling Hills
+          </button>
+          <button
+            [class.active]="terrainPreset() === 'flat'"
+            (click)="setTerrainPreset('flat')"
+          >
+            Flat Ground
+          </button>
+          <button
+            [class.active]="terrainPreset() === 'deep-valley'"
+            (click)="setTerrainPreset('deep-valley')"
+          >
+            Canyon Valley
+          </button>
+          <button
+            [class.active]="terrainPreset() === 'mountain-ridge'"
+            (click)="setTerrainPreset('mountain-ridge')"
+          >
+            Mountain Ridge
+          </button>
+        </div>
+      </fieldset>
+
+      <!-- Road Parameters -->
+      <fieldset class="control-group">
+        <legend>Road Corridor Parameters</legend>
+        <label class="slider-row">
+          <span>Roadway Width: {{ roadwayWidthM() }}m</span>
+          <input
+            type="range"
+            min="4"
+            max="24"
+            step="1"
+            [value]="roadwayWidthM()"
+            (input)="updateRoadwayWidth(+$any($event.target).value)"
+          />
+        </label>
+        <label class="slider-row">
+          <span>Bridge Trigger Drop: {{ bridgeThresholdM() }}m</span>
+          <input
+            type="range"
+            min="1.5"
+            max="8.0"
+            step="0.5"
+            [value]="bridgeThresholdM()"
+            (input)="updateBridgeThreshold(+$any($event.target).value)"
+          />
+        </label>
+      </fieldset>
+
+      <!-- Visualization Toggles -->
+      <fieldset class="control-group">
+        <legend>Visualization Toggles</legend>
+        <div class="toggle-row">
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              [checked]="showBuildings()"
+              (change)="toggleBuildings()"
+            />
+            <span>Show Buildings</span>
+          </label>
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              [checked]="showTerrainGrading()"
+              (change)="toggleTerrainGrading()"
+            />
+            <span>Cut & Fill Earth Grading</span>
+          </label>
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              [checked]="showColliders()"
+              (change)="toggleColliders()"
+            />
+            <span>Jolt 3D Physics Colliders</span>
+          </label>
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              [checked]="wireframe()"
+              (change)="toggleWireframe()"
+            />
+            <span>Wireframe</span>
+          </label>
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              [checked]="logarithmicDepthBuffer()"
+              (change)="toggleLogarithmicDepthBuffer()"
+            />
+            <span>Logarithmic Depth Buffer</span>
+          </label>
+        </div>
+      </fieldset>
+
+      <!-- Real-time City Metrics -->
+      <div class="metrics-card">
+        <strong>City Performance & Metrics</strong>
+        <div class="metric-line">
+          <span>Building Count:</span>
+          <b class="text-accent">{{ cityMetrics().buildingCount }}</b>
+        </div>
+        <div class="metric-line">
+          <span>GPU Draw Calls:</span>
+          <b class="text-green">{{ cityMetrics().drawCalls }} (Batched!)</b>
+        </div>
+        @if (layoutMode() === 'organic-voronoi') {
+          <div class="metric-line">
+            <span>Voronoi Quarters:</span>
+            <b>{{ cityMetrics().cellCount }}</b>
+          </div>
+        }
+        <div class="metric-line">
+          <span>Road Spans (Surface / Bridge / Tunnel):</span>
+          <b>{{ cityMetrics().surfaceSpans }} / {{ cityMetrics().bridgeSpans }} / {{ cityMetrics().tunnelSpans }}</b>
+        </div>
+        <div class="metric-line">
+          <span>Bridge Support Piers:</span>
+          <b>{{ cityMetrics().pierCount }}</b>
+        </div>
+      </div>
+    </section>
+  </ng-template>
+
+  <orbitControls
+    [cameraPosition]="[0, 110, 160]"
+    [target]="[0, 10, 0]"
+    [near]="0.1"
+  />
+  <ambientLight [intensity]="1.2" />
+  <directionalLight [position]="[80, 140, 60]" [intensity]="2.2" />
+</scene>

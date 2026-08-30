@@ -388,6 +388,18 @@ export const DEMOS: readonly DemoItem[] = [
       'Deterministic spaceport structures (runways, launchpads, Mechazilla chopstick catch towers), 2D grading footprints, sockets, and Jolt compound physics.',
   },
   {
+    id: 'cities-lab',
+    number: '26',
+    title: 'Procedural Cities & Roads Lab',
+    route: '/cities-lab',
+    categoryId: 'terrain',
+    tier: 'lab',
+    entryPoints: ['procedural', 'terrain', 'city', 'roads'],
+    package: 'triangular-engine/procedural',
+    description:
+      'Procedural city and multi-modal transit graphs (runbook 026): dynamic 3D terrain adaptation (cut-and-fill, valley bridges, mountain tunnels), and procedural road mesh/collider synthesis.',
+  },
+  {
     id: 'scatter-lab',
     number: '21',
 
@@ -623,6 +635,18 @@ export const DEMOS: readonly DemoItem[] = [
     package: 'triangular-engine/worldgen',
     description:
       'V4 structure-first planet generation (runbook 022): Fibonacci sphere sites, Lloyd relaxation, and their spherical Voronoi dual — 3D orbit view plus a 2D equirectangular unwrap.',
+  },
+  {
+    id: 'cell-planet-map',
+    number: '42',
+    title: 'Cell Planet Map',
+    route: '/cell-planet-map',
+    categoryId: 'core',
+    tier: 'lab',
+    entryPoints: ['worldgen'],
+    package: 'triangular-engine/worldgen',
+    description:
+      'Standalone, pan/zoomable fantasy-style 2D map of the same V4 planet graph — smooth coastline/river curves at full cell-edge resolution plus scattered biome/feature icons, decoupled from the 3D sphere mesh entirely.',
   },
   {
     id: 'cloud-puffs-lab',
