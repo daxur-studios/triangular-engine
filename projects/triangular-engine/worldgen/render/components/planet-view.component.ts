@@ -20,6 +20,7 @@ import {
   Mesh,
   MeshStandardMaterial,
   SphereGeometry,
+  Vector3,
   Vector3Tuple,
 } from 'three';
 import {
@@ -197,6 +198,10 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
   private riverDirections = new Float32Array(0);
   private riverElevations = new Float32Array(0);
   private coastlineDirections = new Float32Array(0);
+  /** Camera position expressed in this planet's unit-sphere coordinate system. Reused every
+   * frame so translated/scaled consumers (for example BSP's body-fixed surface frame) do not
+   * allocate while updating LOD. */
+  private readonly localCameraPosition = new Vector3();
 
   constructor() {
     super();
@@ -364,10 +369,11 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
     if (!camera) return;
     const threshold = this.lodNearDistance();
 
-    const camLen = camera.position.length() || 1;
-    const vx = camera.position.x / camLen;
-    const vy = camera.position.y / camLen;
-    const vz = camera.position.z / camLen;
+    const cameraPosition = this.#cameraPositionInPlanetSpace(camera);
+    const camLen = cameraPosition.length() || 1;
+    const vx = cameraPosition.x / camLen;
+    const vy = cameraPosition.y / camLen;
+    const vz = cameraPosition.z / camLen;
 
     for (const chunk of this.chunks) {
       const pair = this.chunkLodMeshes[chunk.id];
@@ -382,9 +388,9 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
         continue;
       }
 
-      const dx = camera.position.x - chunk.center.x;
-      const dy = camera.position.y - chunk.center.y;
-      const dz = camera.position.z - chunk.center.z;
+      const dx = cameraPosition.x - chunk.center.x;
+      const dy = cameraPosition.y - chunk.center.y;
+      const dz = cameraPosition.z - chunk.center.z;
       const near = Math.hypot(dx, dy, dz) <= threshold;
       lod0.visible = near;
       lod1.visible = !near;
@@ -620,11 +626,24 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
   #updateSurfaceUp(): void {
     const camera = this.engineService.camera;
     if (!camera) return;
-    const len = camera.position.length() || 1;
+    const cameraPosition = this.#cameraPositionInPlanetSpace(camera);
+    const len = cameraPosition.length() || 1;
     this.upVector.set([
-      camera.position.x / len,
-      camera.position.y / len,
-      camera.position.z / len,
+      cameraPosition.x / len,
+      cameraPosition.y / len,
+      cameraPosition.z / len,
     ]);
+  }
+
+  /** Converts the camera's world position through the planet root's inverse world transform.
+   * Planet meshes are authored around a unit sphere, so all horizon/LOD math must happen in
+   * that same space rather than assuming the planet is unscaled at the scene origin. */
+  #cameraPositionInPlanetSpace(camera: {
+    getWorldPosition(target: Vector3): Vector3;
+  }): Vector3 {
+    const root = this.object3D();
+    camera.getWorldPosition(this.localCameraPosition);
+    root.updateWorldMatrix(true, false);
+    return root.worldToLocal(this.localCameraPosition);
   }
 }

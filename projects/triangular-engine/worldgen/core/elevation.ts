@@ -187,6 +187,25 @@ function removeSmallRegions(graph: IPlanetGraphCore, isLand: boolean[], minSize:
 }
 
 /**
+ * Re-derives `isLand` from an already-computed elevation field at a given sea-level threshold,
+ * reusing the same small-region cleanup as the initial cut in `computeElevation()`. Exposed so a
+ * caller can shift sea level on an already-generated planet (a water-level slider, or a game
+ * simulating rising/falling seas over time) by re-thresholding the fixed `elevation` array —
+ * without re-rolling plates or elevation itself, the same "same terrain, new classification"
+ * pattern `computeClimate()`/`computeBiomes()` already support for climate.
+ */
+export function deriveIsLand(
+  graph: IPlanetGraphCore,
+  elevation: number[],
+  seaLevelElevation: number,
+  minRegionCellFraction: number = DEFAULTS.minRegionCellFraction,
+): boolean[] {
+  const isLand = elevation.map((e) => e >= seaLevelElevation);
+  removeSmallRegions(graph, isLand, Math.max(2, Math.round(graph.cells.length * minRegionCellFraction)));
+  return isLand;
+}
+
+/**
  * Builds per-cell elevation from plate type (continental vs. oceanic base
  * height) plus boundary shaping (ridges, trenches, rifts) that decays outward
  * from each boundary edge, then picks a sea-level threshold by percentile so
@@ -271,8 +290,7 @@ export function computeElevation(
     Math.max(0, Math.floor((1 - p.targetLandFraction) * cellCount)),
   );
   const seaLevelElevation = sorted[seaLevelIndex];
-  const isLand = elevation.map((e) => e >= seaLevelElevation);
-  removeSmallRegions(graph, isLand, Math.max(2, Math.round(cellCount * p.minRegionCellFraction)));
+  const isLand = deriveIsLand(graph, elevation, seaLevelElevation, p.minRegionCellFraction);
 
   return { elevation, isLand, seaLevelElevation, ridgeCellIds: [...new Set(ridgeCellIds)] };
 }

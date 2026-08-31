@@ -72,4 +72,51 @@ describe('PlanetViewComponent', () => {
 
     fixture.destroy();
   });
+
+  it('culls chunks in planet-local space when the planet is translated and scaled', () => {
+    camera.position.set(1, 0, 0);
+    const fixture = TestBed.createComponent(PlanetViewComponent);
+    fixture.componentRef.setInput('cellCount', 600);
+    fixture.componentRef.setInput('relaxationIterations', 0);
+    fixture.detectChanges();
+
+    const root = scene.children[0] as Group;
+    tick$.next(0.016);
+    const previewGroup = root.children.find(
+      (child) => child.children.length > 0,
+    ) as Group;
+    const atOriginVisibility = previewGroup.children.map(
+      (child) => child.visible,
+    );
+
+    root.position.set(-10, 0, 0);
+    root.scale.setScalar(10);
+    root.updateMatrixWorld(true);
+    camera.position.set(0, 0, 0);
+    tick$.next(0.016);
+
+    expect(previewGroup.children.map((child) => child.visible)).toEqual(
+      atOriginVisibility,
+    );
+
+    fixture.destroy();
+  });
+
+  it('derives surface up in planet-local space', () => {
+    camera.position.set(0, 0, 0);
+    const fixture = TestBed.createComponent(PlanetViewComponent);
+    fixture.componentRef.setInput('cellCount', 60);
+    fixture.componentRef.setInput('useSurfaceUp', true);
+    fixture.detectChanges();
+
+    const root = scene.children[0] as Group;
+    root.position.set(-20, 0, 0);
+    root.scale.setScalar(10);
+    root.updateMatrixWorld(true);
+    tick$.next(0.016);
+
+    expect(fixture.componentInstance.upVector()).toEqual([1, 0, 0]);
+
+    fixture.destroy();
+  });
 });

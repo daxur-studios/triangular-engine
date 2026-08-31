@@ -13,6 +13,7 @@ import {
   buildPlanetTectonics,
   computeFeatures,
   createSeededRandom,
+  deriveIsLand,
   IPlanetEcology,
   IPlanetFeatures,
   IPlanetGraphCore,
@@ -47,6 +48,11 @@ const SEASON_TEMPERATURE_OFFSET: Record<Season, number> = {
   autumn: -0.18,
   winter: -0.32,
 };
+
+/** Elevation-units-per-slider-unit for `waterLevel` — same order of magnitude as `noiseAmplitude`
+ * (0.08) and the continental/oceanic base gap (0.85) in `elevation.ts`'s `DEFAULTS`, so the full
+ * -1..1 range visibly drowns/exposes coastal terrain without swallowing whole continents. */
+const WATER_LEVEL_ELEVATION_SCALE = 0.3;
 
 type IconDrawer = (ctx: CanvasRenderingContext2D, x: number, y: number, size: number, rng: () => number) => void;
 
@@ -301,6 +307,12 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
   readonly season = signal<Season>('summer');
   readonly seasons: Season[] = ['winter', 'spring', 'summer', 'autumn'];
 
+  /** -1 (seas fall) .. 1 (seas rise) — shifts the land/ocean threshold on the *same* fixed
+   * elevation field via `deriveIsLand()`, same "restyle, don't reroll" pattern as
+   * `climateExtreme`. Coastlines/rivers/biomes/features all re-derive from `tectonics.isLand`
+   * once it's re-thresholded, via the normal `rebuildEcology()` path. */
+  readonly waterLevel = signal(0);
+
   readonly zoom = signal(1);
   readonly panX = signal(0);
   readonly panY = signal(0);
@@ -310,6 +322,10 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
   private graph: IPlanetGraphCore | null = null;
   private tectonics: IPlanetTectonics | null = null;
   private ecology: IPlanetEcology | null = null;
+  /** `tectonics.seaLevelElevation` as generated, before any `waterLevel` shift — the fixed
+   * baseline `rebuildEcology()` re-thresholds from each time, so repeated slider moves never
+   * compound. */
+  private baseSeaLevelElevation = 0;
   private features: IPlanetFeatures = { feature: [], instances: [], featureByCellId: new Map() };
 
   private dragging = false;
@@ -334,6 +350,7 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
 
     const tectonics = buildPlanetTectonics(graph, { plateCount: 14, seed: this.seed(), ...profile.tectonics });
     this.tectonics = tectonics;
+    this.baseSeaLevelElevation = tectonics.seaLevelElevation;
 
     this.rebuildEcology();
 
@@ -356,16 +373,31 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
     this.rebuildEcology();
   }
 
+  onWaterLevelInput(value: number): void {
+    this.waterLevel.set(value);
+    this.rebuildEcology();
+  }
+
   /** Recomputes climate/biomes/rivers/features from the existing terrain (graph + tectonics)
-   * without rebuilding plates/elevation — so the climate-extremes slider and season toggle
-   * restyle the *same* map instead of rerolling a new one on every change. `regenerate()` also
-   * routes through here after building fresh terrain. */
+   * without rebuilding plates/elevation — so the climate-extremes slider, season toggle, and
+   * water-level slider all restyle the *same* map instead of rerolling a new one on every change.
+   * `regenerate()` also routes through here after building fresh terrain. */
   private rebuildEcology(): void {
     const graph = this.graph;
     const tectonics = this.tectonics;
     if (!graph || !tectonics) return;
 
     const profile = WORLD_PROFILES[this.worldProfileKind()];
+
+    const seaLevelElevation = this.baseSeaLevelElevation + this.waterLevel() * WATER_LEVEL_ELEVATION_SCALE;
+    tectonics.seaLevelElevation = seaLevelElevation;
+    tectonics.isLand = deriveIsLand(
+      graph,
+      tectonics.elevation,
+      seaLevelElevation,
+      profile.tectonics?.minRegionCellFraction,
+    );
+
     const ecology = buildPlanetEcology(graph, tectonics, {
       climate: { ...profile.climate, baseTemperatureOffset: this.effectiveTemperatureOffset(profile) },
       biomes: profile.biomes,
