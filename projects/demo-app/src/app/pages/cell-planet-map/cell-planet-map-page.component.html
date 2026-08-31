@@ -29,6 +29,33 @@
     </label>
 
     <label class="field">
+      <span>Climate: {{ climateExtreme() > 0 ? 'Hot/arid +' : climateExtreme() < 0 ? 'Ice age ' : 'Baseline ' }}{{ climateExtreme().toFixed(2) }}</span>
+      <input
+        type="range"
+        min="-1"
+        max="1"
+        step="0.05"
+        [value]="climateExtreme()"
+        (input)="onClimateExtremeInput($any($event.target).valueAsNumber)"
+      />
+    </label>
+
+    <div class="field">
+      <span>Season</span>
+      <div class="button-row">
+        @for (s of seasons; track s) {
+          <button
+            type="button"
+            [class.active]="season() === s"
+            (click)="onSeasonChange(s)"
+          >
+            {{ s }}
+          </button>
+        }
+      </div>
+    </div>
+
+    <label class="field">
       <span>Icon density: {{ iconBudget() }}</span>
       <input
         type="range"

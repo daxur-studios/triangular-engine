@@ -18,6 +18,7 @@ import {
   IPlanetGraphCore,
   IPlanetTectonics,
   IVec3,
+  IWorldProfile,
   WORLD_PROFILES,
   WorldProfileKind,
 } from 'triangular-engine/worldgen';
@@ -31,6 +32,21 @@ const BASE_HEIGHT = 1500;
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 14;
+
+export type Season = 'winter' | 'spring' | 'summer' | 'autumn';
+
+/** Uniform global temperature swing per season, additive on top of the world profile's own
+ * `baseTemperatureOffset` and the climate-extremes slider. `summer` is 0 (today's baseline
+ * generation, unchanged) since it's the default. This is deliberately *not* a hemisphere/axial-
+ * tilt model — `computeClimate()`'s latitude term uses `abs(y)`, so north and south are already
+ * symmetric; a real winter-in-one-hemisphere effect needs that changed in the library itself,
+ * not just here. */
+const SEASON_TEMPERATURE_OFFSET: Record<Season, number> = {
+  summer: 0,
+  spring: -0.12,
+  autumn: -0.18,
+  winter: -0.32,
+};
 
 type IconDrawer = (ctx: CanvasRenderingContext2D, x: number, y: number, size: number, rng: () => number) => void;
 
@@ -278,6 +294,13 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
   readonly iconBudget = signal(1400);
   readonly buildMs = signal('—');
 
+  /** -1 (ice age) .. 1 (extreme heat/desertification) — a demo-page testing knob, not a world
+   * profile setting. Restyles the existing terrain via `rebuildEcology()` rather than rerolling
+   * a new map, so dragging this slider changes climate on the *same* planet. */
+  readonly climateExtreme = signal(0);
+  readonly season = signal<Season>('summer');
+  readonly seasons: Season[] = ['winter', 'spring', 'summer', 'autumn'];
+
   readonly zoom = signal(1);
   readonly panX = signal(0);
   readonly panY = signal(0);
@@ -312,22 +335,51 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
     const tectonics = buildPlanetTectonics(graph, { plateCount: 14, seed: this.seed(), ...profile.tectonics });
     this.tectonics = tectonics;
 
-    const ecology = buildPlanetEcology(graph, tectonics, {
-      climate: profile.climate,
-      biomes: profile.biomes,
-    });
-    this.ecology = ecology;
-
-    this.features = computeFeatures(graph, tectonics, ecology.waterBodyKind, profile.features);
+    this.rebuildEcology();
 
     this.buildMs.set(`${(performance.now() - t0).toFixed(1)} ms`);
     this.resetView();
-    this.draw();
   }
 
   randomizeSeed(): void {
     this.seed.set(Math.floor(Math.random() * 1_000_000));
     this.regenerate();
+  }
+
+  onClimateExtremeInput(value: number): void {
+    this.climateExtreme.set(value);
+    this.rebuildEcology();
+  }
+
+  onSeasonChange(season: Season): void {
+    this.season.set(season);
+    this.rebuildEcology();
+  }
+
+  /** Recomputes climate/biomes/rivers/features from the existing terrain (graph + tectonics)
+   * without rebuilding plates/elevation — so the climate-extremes slider and season toggle
+   * restyle the *same* map instead of rerolling a new one on every change. `regenerate()` also
+   * routes through here after building fresh terrain. */
+  private rebuildEcology(): void {
+    const graph = this.graph;
+    const tectonics = this.tectonics;
+    if (!graph || !tectonics) return;
+
+    const profile = WORLD_PROFILES[this.worldProfileKind()];
+    const ecology = buildPlanetEcology(graph, tectonics, {
+      climate: { ...profile.climate, baseTemperatureOffset: this.effectiveTemperatureOffset(profile) },
+      biomes: profile.biomes,
+    });
+    this.ecology = ecology;
+    this.features = computeFeatures(graph, tectonics, ecology.waterBodyKind, profile.features);
+    this.draw();
+  }
+
+  /** Sums the world profile's own offset (a world-type knob, e.g. Moon's cold baseline) with the
+   * climate-extremes slider and the season toggle. */
+  private effectiveTemperatureOffset(profile: IWorldProfile): number {
+    const base = profile.climate.baseTemperatureOffset ?? 0;
+    return base + this.climateExtreme() * 0.8 + SEASON_TEMPERATURE_OFFSET[this.season()];
   }
 
   resetView(): void {

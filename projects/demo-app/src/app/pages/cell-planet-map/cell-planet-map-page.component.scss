@@ -58,6 +58,7 @@
 
 .button-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 
   button {
@@ -73,9 +74,15 @@ button {
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.8rem;
+  text-transform: capitalize;
 
   &:hover {
     background: #263149;
+  }
+
+  &.active {
+    background: #3a5f8a;
+    border-color: #5c8bc4;
   }
 }
 
