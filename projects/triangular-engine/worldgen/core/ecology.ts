@@ -60,7 +60,7 @@ export function buildPlanetEcology(
     tectonics.seaLevelElevation,
     climate.temperature,
     climate.moisture,
-    params.biomes,
+    { seed: (tectonics.seed + 2) >>> 0, ...params.biomes },
   );
   const rivers = traceRivers(
     graph,

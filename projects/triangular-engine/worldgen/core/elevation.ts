@@ -34,6 +34,17 @@ export interface IElevationParams {
   boundaryDecayPerHop?: number;
   /** Per-cell elevation jitter amplitude for texture. */
   noiseAmplitude?: number;
+  /**
+   * Graph-smoothing passes applied to the per-cell noise before it's added to elevation, so the
+   * jitter forms coherent patches instead of independent per-cell spikes. See the "salt-and-pepper
+   * islands/lakes" doc comment on `computeElevation()` for why this matters.
+   */
+  noiseSmoothingPasses?: number;
+  /**
+   * Minimum size, as a fraction of total cell count, for a connected land or water region to
+   * survive — anything smaller is merged into whatever surrounds it. See `removeSmallRegions()`.
+   */
+  minRegionCellFraction?: number;
 }
 
 export interface IElevationResult {
@@ -59,6 +70,8 @@ const DEFAULTS = {
   ridgeFalloffRadius: 0,
   boundaryDecayPerHop: 0.55,
   noiseAmplitude: 0.08,
+  noiseSmoothingPasses: 2,
+  minRegionCellFraction: 0.0015,
 };
 
 /** Per-side elevation deltas a single boundary edge contributes to its `cellA`/`cellB` endpoints. */
@@ -121,6 +134,58 @@ function spreadInfluence(
   }
 }
 
+/** Averages each cell with its neighbors, `passes` times, so a noisy per-cell field gains spatial coherence (patches) instead of staying independent per-cell white noise. */
+function smoothField(graph: IPlanetGraphCore, values: number[], passes: number): number[] {
+  let current = values;
+  for (let pass = 0; pass < passes; pass++) {
+    current = current.map((value, id) => {
+      const neighbors = graph.cells[id].neighbors;
+      if (neighbors.length === 0) return value;
+      const neighborAvg = neighbors.reduce((sum, n) => sum + current[n], 0) / neighbors.length;
+      return (value + neighborAvg) / 2;
+    });
+  }
+  return current;
+}
+
+/**
+ * Flood-fills connected land/water components and flips any component smaller than `minSize` to
+ * the opposite type, merging it into whatever surrounds it. A component's every neighbor is (by
+ * definition of "connected component") the opposite type, so flipping the whole component always
+ * merges cleanly regardless of how many distinct neighbor regions border it.
+ *
+ * Even with `smoothField()` softening the noise driving `isLand`'s percentile cutoff (see
+ * `computeElevation()`'s doc comment), the cutoff can still clip a handful of stray cells — this
+ * is the backstop that guarantees no single-cell islands/lakes survive.
+ */
+function removeSmallRegions(graph: IPlanetGraphCore, isLand: boolean[], minSize: number): void {
+  const cellCount = graph.cells.length;
+  const visited = new Array<boolean>(cellCount).fill(false);
+
+  for (let start = 0; start < cellCount; start++) {
+    if (visited[start]) continue;
+    const kind = isLand[start];
+    const component = [start];
+    visited[start] = true;
+    let frontier = [start];
+    while (frontier.length > 0) {
+      const next: number[] = [];
+      for (const id of frontier) {
+        for (const neighborId of graph.cells[id].neighbors) {
+          if (visited[neighborId] || isLand[neighborId] !== kind) continue;
+          visited[neighborId] = true;
+          component.push(neighborId);
+          next.push(neighborId);
+        }
+      }
+      frontier = next;
+    }
+    if (component.length < minSize) {
+      for (const id of component) isLand[id] = !kind;
+    }
+  }
+}
+
 /**
  * Builds per-cell elevation from plate type (continental vs. oceanic base
  * height) plus boundary shaping (ridges, trenches, rifts) that decays outward
@@ -147,6 +212,18 @@ function spreadInfluence(
  * ridge (divergent) contributions are unaffected — those realistically are
  * broader regional features (e.g. the Andes' uplift belt), not a single
  * line. See runbook 022.
+ *
+ * The per-cell noise (`noiseAmplitude`) is spatially smoothed (`smoothField()`,
+ * `noiseSmoothingPasses`) before being added, and `removeSmallRegions()` strips any surviving
+ * sub-`minRegionCellFraction` land/water speck after the sea-level cut. Fixed 2026-08-31:
+ * `targetLandFraction` picks sea level by a global percentile, but continental-plate area rarely
+ * lands exactly on that fraction (plate type is assigned per-plate by count via `oceanicFraction`,
+ * not by area, and plate sizes are an unbalanced random flood-fill) — so the cutoff routinely falls
+ * *inside* one base elevation's noise band (`continentalBase ± noiseAmplitude` or
+ * `oceanicBase ± noiseAmplitude`). With independent per-cell white noise, every cell whose roll
+ * crosses that line becomes an isolated single-cell speck — denser and more visible at high cell
+ * counts (more independent rolls), which read as a salt-and-pepper dotting of islands/lakes across
+ * otherwise-solid continents/oceans. See runbook 022.
  */
 export function computeElevation(
   graph: IPlanetGraphCore,
@@ -163,8 +240,13 @@ export function computeElevation(
   );
 
   const noiseRng = createSeededRandom(((params.seed ?? graph.seed) + 1) >>> 0);
+  const rawNoise = new Array<number>(cellCount);
   for (let i = 0; i < cellCount; i++) {
-    elevation[i] += (noiseRng() * 2 - 1) * p.noiseAmplitude;
+    rawNoise[i] = (noiseRng() * 2 - 1) * p.noiseAmplitude;
+  }
+  const noise = p.noiseSmoothingPasses > 0 ? smoothField(graph, rawNoise, p.noiseSmoothingPasses) : rawNoise;
+  for (let i = 0; i < cellCount; i++) {
+    elevation[i] += noise[i];
   }
 
   const ridgeCellIds: number[] = [];
@@ -190,6 +272,7 @@ export function computeElevation(
   );
   const seaLevelElevation = sorted[seaLevelIndex];
   const isLand = elevation.map((e) => e >= seaLevelElevation);
+  removeSmallRegions(graph, isLand, Math.max(2, Math.round(cellCount * p.minRegionCellFraction)));
 
   return { elevation, isLand, seaLevelElevation, ridgeCellIds: [...new Set(ridgeCellIds)] };
 }

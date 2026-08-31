@@ -27,8 +27,17 @@ export interface IPlanetClimate {
 const DEFAULTS = {
   lapseRate: 0.6,
   moistureFalloffRadius: 4,
-  aridBeltCenter: 0.22,
-  aridBeltWidth: 0.28,
+  // Recalibrated 2026-08-31: was 0.22/0.28, which put the belt's dry influence over almost the
+  // entire hot/tropical band (isHot ~|y|<=0.325 in biomes.ts) with zero latitude left wet enough
+  // for rainforest — every generation's tropics read as uniformly desert/savanna regardless of
+  // seed, since neither the belt's position nor the tropical band's position varies by seed. Real
+  // subtropical deserts sit poleward of the tropics, not on top of them. 0.32/0.22 pushes the
+  // belt's zero-influence edge out to |y|=0.10 (leaving a genuinely wet equatorial ring where
+  // rainforest can form) and centers peak dryness at |y|=0.32 (~19°, right at the hot/not-hot
+  // boundary), so the progression reads equator(wet) -> tropical desert -> subtropical steppe
+  // instead of one uniform arid band. See runbook 022.
+  aridBeltCenter: 0.32,
+  aridBeltWidth: 0.22,
   aridBeltStrength: 0.65,
   baseTemperatureOffset: 0,
 };

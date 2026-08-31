@@ -93,24 +93,80 @@ describe('computeBiomes', () => {
     // Real deserts are frequently coastal (Atacama, Namib, Baja California) — driven by
     // subtropical high-pressure belts suppressing rainfall independent of distance from the
     // ocean. See computeClimate()'s aridBelt doc comment and runbook 022.
-    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 45 });
-    const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 45 });
+    //
+    // The belt was recalibrated 2026-08-31 to sit poleward of the tropics instead of on top of
+    // them (see climate.ts's DEFAULTS comment) specifically so desert stops being the dominant
+    // biome every generation — as a result it's now a comparatively rare, targeted biome rather
+    // than a wide band, so any single seed may legitimately produce zero of it. Checking across
+    // several seeds (same pattern as this file's other "at any seed" tests) confirms the
+    // capability without depending on one seed happening to roll a coastal desert.
+    let coastalDesertCount = 0;
+    for (const seed of [3, 12, 41, 45, 60, 77, 88, 101]) {
+      const graph = buildPlanetGraphCore({ cellCount: 300, seed });
+      const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed });
+      const climate = computeClimate(graph, tectonics.elevation, tectonics.isLand, tectonics.seaLevelElevation);
+      const biomes = computeBiomes(
+        graph,
+        tectonics.elevation,
+        tectonics.isLand,
+        classifyWaterBodies(graph, tectonics.isLand).waterBodyKind,
+        tectonics.ridgeCellIds,
+        tectonics.seaLevelElevation,
+        climate.temperature,
+        climate.moisture,
+      );
+
+      const desertIds = biomes.biome.map((b, id) => (b === 'desert' ? id : -1)).filter((id) => id >= 0);
+      coastalDesertCount += desertIds.filter((id) =>
+        graph.cells[id].neighbors.some((n) => !tectonics.isLand[n]),
+      ).length;
+    }
+    expect(coastalDesertCount).toBeGreaterThan(0);
+  });
+
+  it('ice cap extent varies by seed but never exceeds the coldTemperatureThreshold baseline', () => {
+    // Fixed 2026-08-31: temperature has no seed/noise term (see computeClimate()), so before this
+    // fix every generation produced an identical ice cap. `iceCapVariability` draws one seeded
+    // scalar per planet that only ever shrinks the effective threshold — see biomes.ts's doc
+    // comment — so the unseeded (`seed` omitted) call is always the largest any generation can be.
+    const graph = buildPlanetGraphCore({ cellCount: 400, seed: 20 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 12, seed: 20 });
     const climate = computeClimate(graph, tectonics.elevation, tectonics.isLand, tectonics.seaLevelElevation);
-    const biomes = computeBiomes(
+    const waterBodyKind = classifyWaterBodies(graph, tectonics.isLand).waterBodyKind;
+
+    const countCold = (biome: string[]) => biome.filter((b) => COLD_BIOMES.has(b)).length;
+
+    const baseline = computeBiomes(
       graph,
       tectonics.elevation,
       tectonics.isLand,
-      classifyWaterBodies(graph, tectonics.isLand).waterBodyKind,
+      waterBodyKind,
       tectonics.ridgeCellIds,
       tectonics.seaLevelElevation,
       climate.temperature,
       climate.moisture,
     );
+    const baselineColdCount = countCold(baseline.biome);
 
-    const desertIds = biomes.biome.map((b, id) => (b === 'desert' ? id : -1)).filter((id) => id >= 0);
-    const coastalDesertIds = desertIds.filter((id) =>
-      graph.cells[id].neighbors.some((n) => !tectonics.isLand[n]),
+    const seededColdCounts = [1, 2, 3, 4, 5].map((seed) =>
+      countCold(
+        computeBiomes(
+          graph,
+          tectonics.elevation,
+          tectonics.isLand,
+          waterBodyKind,
+          tectonics.ridgeCellIds,
+          tectonics.seaLevelElevation,
+          climate.temperature,
+          climate.moisture,
+          { seed },
+        ).biome,
+      ),
     );
-    expect(coastalDesertIds.length).toBeGreaterThan(0);
+
+    for (const count of seededColdCounts) {
+      expect(count).toBeLessThanOrEqual(baselineColdCount);
+    }
+    expect(Math.min(...seededColdCounts)).toBeLessThan(baselineColdCount);
   });
 });

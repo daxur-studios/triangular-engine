@@ -39,4 +39,42 @@ describe('computeElevation', () => {
 
     expect(mean(continental)).toBeGreaterThan(mean(oceanic));
   });
+
+  it('never leaves a land/water region smaller than the configured minimum (no salt-and-pepper islands/lakes)', () => {
+    // Fixed 2026-08-31: independent per-cell noise crossing the percentile-based sea-level cutoff
+    // used to produce isolated single-cell islands/lakes, worse at higher cell counts — see
+    // computeElevation()'s doc comment. Checked at 1500 cells specifically because the bug's
+    // reporter observed it getting worse with scale.
+    for (const seed of [4, 17, 33]) {
+      const graph = buildPlanetGraphCore({ cellCount: 1500, seed });
+      const { plates, plateIdByCell } = buildPlates(graph, { plateCount: Math.round(1500 / 30), seed });
+      const boundaries = classifyBoundaries(graph, plates, plateIdByCell);
+      const { isLand } = computeElevation(graph, plates, plateIdByCell, boundaries, { seed });
+
+      const cellCount = graph.cells.length;
+      const minSize = Math.max(2, Math.round(cellCount * 0.0015));
+      const visited = new Array<boolean>(cellCount).fill(false);
+
+      for (let start = 0; start < cellCount; start++) {
+        if (visited[start]) continue;
+        const kind = isLand[start];
+        let size = 0;
+        let frontier = [start];
+        visited[start] = true;
+        while (frontier.length > 0) {
+          const next: number[] = [];
+          for (const id of frontier) {
+            size++;
+            for (const neighborId of graph.cells[id].neighbors) {
+              if (visited[neighborId] || isLand[neighborId] !== kind) continue;
+              visited[neighborId] = true;
+              next.push(neighborId);
+            }
+          }
+          frontier = next;
+        }
+        expect(size).toBeGreaterThanOrEqual(minSize);
+      }
+    }
+  });
 });

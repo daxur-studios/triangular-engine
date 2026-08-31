@@ -380,6 +380,75 @@ pragmatic given the above:**
   confirm the map's navigable/spring color split reads correctly and rivers still look reasonable
   end-to-end, per this workspace's standing "visual acceptance is a user check" practice.
 
+## Terrain variety fixes: island/lake dotting, arid-belt calibration, ice-cap variability (2026-08-31)
+
+**TL;DR:** Bruno flagged three symptoms after the rivers rework: (1) high-cell-count continents get
+speckled with single-cell islands/lakes, (2) almost every generation is desert/savanna-dominated
+regardless of seed, (3) the ice cap is always exactly the same size. All three traced to real,
+independent root causes in `elevation.ts`/`climate.ts`/`biomes.ts` — fixed below, all defaults,
+no new params required from callers, `test:triangular-engine:worldgen` and both builds clean.
+
+- **Island/lake dotting** — `computeElevation()`'s per-cell noise (`noiseAmplitude`) was applied
+  fully independently per cell (pure white noise, zero spatial correlation), and the sea-level cut
+  is a global elevation percentile (`targetLandFraction`) that has no relationship to how much area
+  continental-type plates actually cover (plate type is assigned per-plate by *count* via
+  `oceanicFraction`, not by area, and plate sizes are an unbalanced random flood-fill — see
+  `plate-tectonics.ts`). Whenever continental area doesn't land near exactly `targetLandFraction`
+  (the common case), the percentile cutoff falls *inside* one base elevation's noise band
+  (`continentalBase ± noiseAmplitude` or `oceanicBase ± noiseAmplitude`), and since the noise has no
+  spatial coherence, every cell whose roll crosses that line becomes an isolated single-cell speck —
+  more of them, and more visible, at higher cell counts (more independent rolls). Fixed two ways:
+  the noise is now run through `smoothField()` (a couple of neighbor-averaging passes,
+  `noiseSmoothingPasses`) before being added, so it forms coherent patches instead of white noise;
+  and `removeSmallRegions()` flood-fills connected land/water components after the sea-level cut and
+  merges anything under `minRegionCellFraction` of total cells into whatever surrounds it — a
+  backstop that guarantees no stray specks survive even from other sources (e.g. a boundary
+  contribution landing right on the cutoff). `elevation.spec.ts` gained a test asserting no
+  component below the configured minimum survives, checked at 1500 cells across three seeds.
+- **Desert/savanna dominance, same every generation** — `aridBeltCenter`/`aridBeltWidth`
+  (`climate.ts`) are fixed global constants, not seeded, and the old values (0.22/0.28) put the
+  belt's dry influence over almost the *entire* tropical band (`hotTemperatureThreshold`'s `isHot`
+  cutoff is ~`|y|<=0.325`) with essentially no latitude left wet enough to ever read as rainforest —
+  even the literal equator got a ~21% moisture cut. Since neither the belt's position nor the
+  tropical band's position varies by seed, this happened identically in every generation regardless
+  of where continents landed. Real subtropical deserts sit poleward of the tropics, not stacked on
+  top of them. Recalibrated to 0.32/0.22 — the belt's zero-influence edge now sits at `|y|=0.10`,
+  leaving a genuinely wet equatorial ring where rainforest can form, and peak dryness centers at
+  `|y|=0.32` (~19°), right at the hot/not-hot boundary, giving a realistic equator(wet) → tropical
+  desert → subtropical steppe progression instead of one uniform arid band. Verified via a throwaway
+  script across 6 seeds at 300 cells: desert dropped from dominant to a rare, targeted biome (0-2
+  cells per seed) while rainforest/jungle/steppe all became consistently present — the actual
+  variety goal, not just smaller numbers. `biomes.spec.ts`'s existing "deserts can be coastal" test
+  was checking a single seed for a now-rare biome and needed updating to check across several seeds
+  (matches this file's existing "at any seed" test pattern) rather than depending on one seed
+  happening to roll a coastal desert.
+- **Ice cap always identical** — `computeClimate()`'s temperature is a pure function of latitude
+  (`1 - 2·|y|`) plus a small elevation lapse, with zero seed/noise term at all, so
+  `coldTemperatureThreshold` always carved out exactly `|y| >= 0.675` as ice cap, every single
+  generation. Fixed in `biomes.ts` (not climate.ts — freezing is a biome-classification decision,
+  not a climate one): `IBiomeParams` gained `seed`/`iceCapVariability` (default `0.25`); when a seed
+  is given, one random scalar is drawn *once per planet* (not per-cell — a per-cell jitter would
+  make the cap boundary jagged instead of just a different size) and subtracted from
+  `coldTemperatureThreshold`, so the effective threshold is always at or colder than the configured
+  default — `coldTemperatureThreshold` is the *largest* extent any generation can produce, matching
+  Bruno's ask that "the current level should be the max." `ecology.ts` now always passes a
+  decorrelated seed (`tectonics.seed + 2`) into `computeBiomes()`, so the actual game always gets
+  variability; direct unit tests calling `computeBiomes()` without a seed keep today's exact
+  deterministic behavior unchanged. `biomes.spec.ts` gained a test asserting seeded runs are never
+  larger than the unseeded baseline and that at least one seeded run is smaller.
+- Known minor gap, not fixed this pass: `rivers.ts`'s own `frozenTemperatureThreshold` (routes
+  rivers around ice) doesn't share the same per-generation draw as `biomes.ts`'s effective cold
+  threshold, so on a generation with a shrunk ice cap a river could still terminate slightly inside
+  what's now tundra/taiga rather than literal ice — a small single-source-of-truth gap, not
+  incorrect-looking terrain (tundra ground is still cold). Not in scope for this pass; flag if it
+  becomes visible in practice.
+- Verification: `test:triangular-engine:worldgen` — 138/140 passing (2 new tests added this pass,
+  both passing; the 2 failures are `sample-elevation.spec.ts` and
+  `planet-view.component.spec.ts`, both pre-existing/unrelated, confirmed via `git status` showing
+  neither file touched this session). `ng build triangular-engine` and `ng build demo-app` both
+  clean. Bruno's own in-browser check is the remaining step, per this workspace's standing "visual
+  acceptance is a user check" practice.
+
 ## References
 
 - Amit Patel, *Polygonal Map Generation for Games* (Red Blob Games) — cell-graph elevation, moisture, biomes, rivers; V4 is this on a sphere with plates added.

@@ -1,4 +1,5 @@
 import { IPlanetGraphCore } from './planet-graph';
+import { createSeededRandom } from './seeded-random';
 import { WaterBodyKind } from './water-bodies';
 
 export type Biome =
@@ -30,6 +31,16 @@ export interface IBiomeParams {
   canyonMoistureThreshold?: number;
   /** Fraction of land relief below which temperate/medium-moisture land is 'meadow' rather than 'hills'. */
   flatnessSlopeFraction?: number;
+  /** Seed for this generation's ice-cap-extent draw (see `iceCapVariability`). Omit to always use `coldTemperatureThreshold` exactly (today's fixed extent). */
+  seed?: number;
+  /**
+   * Max amount a single seeded-per-generation draw can push the effective cold threshold *below*
+   * `coldTemperatureThreshold` (i.e. colder/harder to reach), shrinking that generation's ice cap.
+   * The draw is one global scalar per planet, not per-cell noise, so the cap stays a clean latitude
+   * band — just a smaller one — rather than a jagged edge. `coldTemperatureThreshold` is always the
+   * *largest* extent any generation can produce.
+   */
+  iceCapVariability?: number;
 }
 
 export interface IPlanetBiomes {
@@ -52,6 +63,7 @@ const DEFAULTS = {
   // its realistic (un-inflated) scale, empirically the flattest ~20% of temperate/medium-
   // moisture land sits under ~0.2 — see runbook 022.
   flatnessSlopeFraction: 0.2,
+  iceCapVariability: 0.25,
 };
 
 /**
@@ -78,6 +90,14 @@ const DEFAULTS = {
  * that isn't ridge-adjacent (e.g. compounded subduction uplift). See
  * `computeElevation()`'s `ridgeFalloffRadius` doc comment for the other half
  * of this fix, and runbook 022.
+ *
+ * `coldTemperatureThreshold` alone made ice-cap extent a pure function of latitude (`temperature`
+ * has no seed/noise term — see `computeClimate()`), so every generation produced an identical ice
+ * cap regardless of seed. `iceCapVariability`/`seed` (fixed 2026-08-31) draw one random scalar per
+ * planet and subtract it from the threshold, so each generation's effective threshold is
+ * `coldTemperatureThreshold` minus 0..`iceCapVariability` — always at or colder than the configured
+ * default, meaning `coldTemperatureThreshold` is the largest cap any generation can produce, never
+ * exceeded, only shrunk. See runbook 022.
  */
 export function computeBiomes(
   graph: IPlanetGraphCore,
@@ -93,6 +113,11 @@ export function computeBiomes(
   const p = { ...DEFAULTS, ...params };
   const cellCount = graph.cells.length;
 
+  const effectiveColdThreshold =
+    p.seed !== undefined
+      ? p.coldTemperatureThreshold - createSeededRandom(p.seed)() * p.iceCapVariability
+      : p.coldTemperatureThreshold;
+
   const slope = graph.cells.map((cell, id) =>
     cell.neighbors.reduce(
       (max, neighborId) => Math.max(max, Math.abs(elevation[id] - elevation[neighborId])),
@@ -107,7 +132,7 @@ export function computeBiomes(
 
   const biome: Biome[] = new Array(cellCount);
   for (let id = 0; id < cellCount; id++) {
-    const isFrozen = temperature[id] <= p.coldTemperatureThreshold;
+    const isFrozen = temperature[id] <= effectiveColdThreshold;
 
     if (!isLand[id]) {
       biome[id] = isFrozen ? 'ice_cap' : waterBodyKind[id] === 'lake' ? 'lake' : 'ocean';
