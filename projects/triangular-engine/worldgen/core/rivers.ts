@@ -37,6 +37,12 @@ export interface IPlanetRivers {
    * stream (see `riverParent`) — the shared trunk below a confluence is never repeated across
    * multiple entries. */
   riverPaths: IVec3[][];
+  /** Index into the planet's corner graph (`buildCornerGraph()`) of each entry's own headwater —
+   * same shape/order as `riverPaths`. A corner index is stable across recomputes on the *same*
+   * graph (climate/season/water-level all restyle without rebuilding the corner graph), so this
+   * is the identity to diff two `IPlanetRivers` snapshots by — `riverPaths` array position is
+   * NOT stable, since a headwater that freezes out or thaws in shifts every later entry's index. */
+  riverHeadwaterCornerId: number[];
   /** Corner positions that are land-locked local elevation minima the trace passed through —
    * either as a final dead end (no reachable outlet was found) or a small basin the walk spilled
    * over on its way further downhill (see the "priority flood" step in `traceRivers()`). A
@@ -320,6 +326,7 @@ export function traceRivers(
   // apply its contribution below, without re-searching the trunk's array.
   const hopIndexInOwnerPath = new Array<number>(corners.count).fill(-1);
   const riverPaths: IVec3[][] = [];
+  const riverHeadwaterCornerId: number[] = [];
   const riverParent: (number | null)[] = [];
   const pathCornerIndices: number[][] = [];
   const pathCoastCrossing: ({ from: number; to: number; t: number } | undefined)[] = [];
@@ -359,6 +366,7 @@ export function traceRivers(
     }
 
     riverPaths.push(cornerIndices.map((index) => corners.position[index]));
+    riverHeadwaterCornerId.push(headwater);
     pathCornerIndices.push(cornerIndices);
     pathCoastCrossing.push(coastCrossing);
     riverParent.push(mergedInto);
@@ -423,5 +431,13 @@ export function traceRivers(
   const maxRiverFlow = riverFlow.reduce((m, flows) => flows.reduce((m2, f) => Math.max(m2, f), m), 0);
   const minNavigableFlow = p.minNavigableFlowFraction * maxRiverFlow;
 
-  return { riverPaths, lakeCorners, riverFlow, riverParent, riverBasin, minNavigableFlow };
+  return {
+    riverPaths,
+    riverHeadwaterCornerId,
+    lakeCorners,
+    riverFlow,
+    riverParent,
+    riverBasin,
+    minNavigableFlow,
+  };
 }

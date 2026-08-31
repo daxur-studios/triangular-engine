@@ -2,7 +2,7 @@
   <aside class="panel">
     <a routerLink="/" class="back-link">&larr; Demo index</a>
     <h1>Cell Planet Map</h1>
-    <p class="hint">Drag to pan, scroll to zoom.</p>
+    <p class="hint">Drag to pan, scroll to zoom, double-click to recenter the projection there.</p>
 
     <label class="field">
       <span>Cell count: {{ cellCount() }}</span>
@@ -98,6 +98,7 @@
     </label>
 
     <button type="button" (click)="resetView()">Reset view</button>
+    <button type="button" (click)="resetProjectionCenter()">Reset projection center</button>
 
     <div class="stats">
       <div>Seed: {{ seed() }}</div>
@@ -114,6 +115,7 @@
     (pointermove)="onPointerMove($event)"
     (pointerup)="onPointerUp()"
     (pointerleave)="onPointerUp()"
+    (dblclick)="onMapDoubleClick($event)"
   >
     <canvas
       #mapCanvas

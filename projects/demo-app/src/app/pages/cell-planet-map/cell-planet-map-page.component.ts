@@ -8,18 +8,25 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
+  add,
   buildPlanetEcology,
   buildPlanetGraphCore,
   buildPlanetTectonics,
   computeFeatures,
   createSeededRandom,
+  cross,
   deriveIsLand,
+  dot,
   IPlanetEcology,
   IPlanetFeatures,
   IPlanetGraphCore,
   IPlanetTectonics,
   IVec3,
   IWorldProfile,
+  normalize,
+  projectOnTangentPlane,
+  scale,
+  vec3,
   WORLD_PROFILES,
   WorldProfileKind,
 } from 'triangular-engine/worldgen';
@@ -317,6 +324,13 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
   readonly panX = signal(0);
   readonly panY = signal(0);
 
+  /** Sphere-space point (unit length) that projects to the center of the equirectangular map —
+   * default `(1,0,0)` reproduces the original untranslated projection exactly. Double-clicking
+   * the map recenters here via `onMapDoubleClick()`, so whatever region is currently distorted
+   * near the poles/seam can be rotated into the low-distortion middle instead of redesigning the
+   * projection itself. */
+  readonly projectionCenter = signal<IVec3>({ x: 1, y: 0, z: 0 });
+
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
 
   private graph: IPlanetGraphCore | null = null;
@@ -484,6 +498,57 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
     this.dragging = false;
   }
 
+  /** Rotates the clicked map point to the projection center (see `projectionCenter`), so the
+   * area under the cursor moves to the low-distortion middle of the equirectangular map instead
+   * of wherever it happened to land. Inverts the same pixel -> lon/lat -> sphere-point chain
+   * `draw()`'s `lonLat`/`mapPoint` use, then un-rotates through the *current* basis to recover
+   * the true sphere-space point before storing it as the new center. */
+  onMapDoubleClick(event: MouseEvent): void {
+    const viewport = this.viewportRef()?.nativeElement;
+    if (!viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    const cssX = (event.clientX - rect.left - this.panX()) / this.zoom();
+    const cssY = (event.clientY - rect.top - this.panY()) / this.zoom();
+    if (cssX < 0 || cssX > viewport.clientWidth || cssY < 0 || cssY > viewport.clientHeight) return;
+
+    // The canvas backing store is BASE_WIDTH x BASE_HEIGHT, but its CSS box is stretched to fill
+    // the viewport (`.scss`'s `canvas { width: 100%; height: 100% }`) *before* the pan/zoom
+    // transform applies — cssX/cssY above are in that stretched CSS-pixel space, not
+    // BASE_WIDTH/BASE_HEIGHT space, so they need converting before the lon/lat math below, which
+    // assumes canvas-native pixels. Skipping this was the earlier bug: on any viewport narrower
+    // than BASE_WIDTH (always, in practice), it made every click resolve to a near-constant lon
+    // regardless of where you actually clicked.
+    const canvasX = (cssX / viewport.clientWidth) * BASE_WIDTH;
+    const canvasY = (cssY / viewport.clientHeight) * BASE_HEIGHT;
+
+    const lon = ((canvasX / BASE_WIDTH) * 2 - 1) * Math.PI;
+    const lat = (1 - (2 * canvasY) / BASE_HEIGHT) * (Math.PI / 2);
+    const local = vec3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon));
+
+    const { forward, up, right } = this.projectionBasis();
+    const clicked = add(add(scale(forward, local.x), scale(up, local.y)), scale(right, local.z));
+    this.projectionCenter.set(normalize(clicked));
+    this.draw();
+  }
+
+  resetProjectionCenter(): void {
+    this.projectionCenter.set({ x: 1, y: 0, z: 0 });
+    this.draw();
+  }
+
+  /** Orthonormal basis rotating `projectionCenter` to local +X (map center). `forward` becomes
+   * the new lon=0/lat=0 axis, `up` the new pole axis (world +Y projected onto the tangent plane
+   * at `forward`, so "north" stays "up" on the map except right at the projection's own poles),
+   * `right` the new lon=+90° axis. At the default center `(1,0,0)` this reduces to the original
+   * unrotated `{forward:(1,0,0), up:(0,1,0), right:(0,0,1)}` exactly. */
+  private projectionBasis(): { forward: IVec3; up: IVec3; right: IVec3 } {
+    const forward = normalize(this.projectionCenter());
+    const worldUp = Math.abs(forward.y) > 0.999 ? vec3(0, 0, 1) : vec3(0, 1, 0);
+    const up = normalize(projectOnTangentPlane(worldUp, forward));
+    const right = cross(forward, up);
+    return { forward, up, right };
+  }
+
   /** One full redraw of the fixed `BASE_WIDTH x BASE_HEIGHT` bitmap — pan/zoom afterward is a
    * CSS transform on this canvas, never a re-render, so this only runs on regenerate or a
    * layer toggle, not per frame/per pan tick. Public: the icon-density slider's template
@@ -503,9 +568,10 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
     ctx.fillStyle = '#141d2e';
     ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
 
+    const { forward, up, right } = this.projectionBasis();
     const lonLat = (p: IVec3): { lon: number; lat: number } => ({
-      lon: Math.atan2(p.z, p.x),
-      lat: Math.asin(Math.max(-1, Math.min(1, p.y))),
+      lon: Math.atan2(dot(p, right), dot(p, forward)),
+      lat: Math.asin(Math.max(-1, Math.min(1, dot(p, up)))),
     });
     const mapPoint = (ll: { lon: number; lat: number }): { x: number; y: number } => ({
       x: ((ll.lon / Math.PI) * 0.5 + 0.5) * BASE_WIDTH,

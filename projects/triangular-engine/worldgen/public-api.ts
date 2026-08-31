@@ -23,6 +23,7 @@ export * from './core/rivers';
 export * from './core/coastlines';
 export * from './core/polyline-detail';
 export * from './core/ecology';
+export * from './core/ecology-diff';
 export * from './core/geological-shapes';
 export * from './core/features';
 export * from './core/world-profile';
