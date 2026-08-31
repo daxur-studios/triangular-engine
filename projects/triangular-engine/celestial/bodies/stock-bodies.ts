@@ -383,8 +383,8 @@ export const HOME_BASE_STATIC_FLATTEN_DEFS: ILocalFlattenTerrainModifierDef[] =
     {
       kind: 'circle',
       directionBodyFixed: HOME_RUNWAY_DIRECTION_BODY_FIXED,
-      radiusM: 450,
-      blendRadiusM: 100,
+      radiusM: 230,
+      blendRadiusM: 80,
       elevationM: HOME_RUNWAY_FLATTEN_ELEVATION_M,
     },
   ];

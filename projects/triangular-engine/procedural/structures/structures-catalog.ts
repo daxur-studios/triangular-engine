@@ -122,15 +122,15 @@ export const DEMO_LAUNCHPAD_ARCHETYPE: IStructureArchetype = {
       materialHex: STRUCTURE_PALETTE_COLORS.concreteHex,
       collidable: true,
     },
-    // Center flame trench blast ring collar
+    // Center flame trench blast ring collar (flat visual floor decal)
     {
       id: 'flame-trench-collar',
       shape: 'cylinder',
-      positionM: [0, 0.9, 0],
-      dimensionsM: [8, 0.4],
+      positionM: [0, 0.805, 0],
+      dimensionsM: [8, 0.01],
       linkId: 0,
       materialHex: STRUCTURE_PALETTE_COLORS.steelDarkHex,
-      collidable: true,
+      collidable: false,
     },
     // Outer perimeter blast protection berm wall (4 corner quadrants)
     {
@@ -148,7 +148,7 @@ export const DEMO_LAUNCHPAD_ARCHETYPE: IStructureArchetype = {
     {
       id: 'deluge-pylon-1',
       shape: 'cylinder',
-      positionM: [18, 6.0, 18],
+      positionM: [22, 6.0, 22],
       dimensionsM: [0.9, 12],
       linkId: 0,
       materialHex: STRUCTURE_PALETTE_COLORS.accentOrangeHex,
@@ -157,31 +157,31 @@ export const DEMO_LAUNCHPAD_ARCHETYPE: IStructureArchetype = {
     {
       id: 'deluge-pylon-2',
       shape: 'cylinder',
-      positionM: [-18, 6.0, 18],
+      positionM: [-22, 6.0, 22],
       dimensionsM: [0.9, 12],
       linkId: 0,
       materialHex: STRUCTURE_PALETTE_COLORS.accentOrangeHex,
       collidable: true,
     },
-    // Umbilical service tower mast
+    // Umbilical service tower mast (placed along outer perimeter)
     {
       id: 'service-tower-column',
       shape: 'box',
-      positionM: [-16, 15, 0],
+      positionM: [-25, 15, 0],
       dimensionsM: [3, 30, 3],
       linkId: 0,
       materialHex: STRUCTURE_PALETTE_COLORS.steelTrussHex,
       collidable: true,
     },
-    // Umbilical swing arm
+    // Umbilical swing arm (retracted along perimeter, non-collidable)
     {
       id: 'umbilical-swing-arm',
       shape: 'box',
-      positionM: [-8, 26, 0],
-      dimensionsM: [14, 1.2, 1.2],
+      positionM: [-25, 26, 4],
+      dimensionsM: [1.2, 1.2, 8],
       linkId: 0,
       materialHex: STRUCTURE_PALETTE_COLORS.machineryHex,
-      collidable: true,
+      collidable: false,
     },
   ],
   sockets: [
@@ -502,11 +502,11 @@ export function createLaunchpadArchetype(options?: {
       {
         id: 'flame-trench-collar',
         shape: 'cylinder',
-        positionM: [0, slabHeight + 0.1, 0],
-        dimensionsM: [radius * 0.25, 0.4],
+        positionM: [0, slabHeight + 0.005, 0],
+        dimensionsM: [radius * 0.25, 0.01],
         linkId: 0,
         materialHex: STRUCTURE_PALETTE_COLORS.steelDarkHex,
-        collidable: true,
+        collidable: false,
       },
       {
         id: 'deluge-pylon-1',
@@ -529,7 +529,7 @@ export function createLaunchpadArchetype(options?: {
       {
         id: 'service-tower-column',
         shape: 'box',
-        positionM: [-radius * 0.55, 15, 0],
+        positionM: [-radius * 0.85, 15, 0],
         dimensionsM: [3, 30, 3],
         linkId: 0,
         materialHex: STRUCTURE_PALETTE_COLORS.steelTrussHex,
@@ -538,11 +538,11 @@ export function createLaunchpadArchetype(options?: {
       {
         id: 'umbilical-swing-arm',
         shape: 'box',
-        positionM: [-radius * 0.25, 26, 0],
-        dimensionsM: [radius * 0.5, 1.2, 1.2],
+        positionM: [-radius * 0.85, 26, 4],
+        dimensionsM: [1.2, 1.2, 8],
         linkId: 0,
         materialHex: STRUCTURE_PALETTE_COLORS.machineryHex,
-        collidable: true,
+        collidable: false,
       },
     ],
     sockets: [
