@@ -117,9 +117,6 @@
     (pointerleave)="onPointerUp()"
     (dblclick)="onMapDoubleClick($event)"
   >
-    <canvas
-      #mapCanvas
-      [style.transform]="'translate(' + panX() + 'px,' + panY() + 'px) scale(' + zoom() + ')'"
-    ></canvas>
+    <canvas #mapCanvas></canvas>
   </div>
 </div>

@@ -2,7 +2,9 @@ import {
   AfterViewInit,
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ElementRef,
+  inject,
   signal,
   viewChild,
 } from '@angular/core';
@@ -32,9 +34,9 @@ import {
 } from 'triangular-engine/worldgen';
 import { biomeColor, lavaOceanColor } from 'triangular-engine/worldgen/render';
 
-/** Base render resolution the world is drawn at, once, on every regenerate — pan/zoom is a CSS
- * transform on this fixed bitmap afterward (see `onWheel()`/`onPointerMove()`), never a redraw
- * per frame. Wide enough that zooming in a few steps still reads crisp. */
+/** Coordinate space every shape is drawn in via `mapPoint()` before `draw()`'s `ctx.setTransform()`
+ * maps it onto the actual device-pixel-resolution canvas (see `draw()`) — not a bitmap resolution
+ * in its own right, just the fixed logical space world-space lon/lat gets projected into. */
 const BASE_WIDTH = 3000;
 const BASE_HEIGHT = 1500;
 
@@ -346,8 +348,30 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
   private lastPointerX = 0;
   private lastPointerY = 0;
 
+  private readonly destroyRef = inject(DestroyRef);
+  /** rAF handle for `scheduleDraw()` — coalesces the redraws `onWheel()`/`onPointerMove()`
+   * trigger every pan/zoom tick into at most one per frame, now that pan/zoom is baked into the
+   * canvas's own transform (see `draw()`) instead of a free CSS transform. */
+  private drawRafHandle: number | null = null;
+  private readonly onWindowResize = (): void => this.scheduleDraw();
+
   ngAfterViewInit(): void {
+    window.addEventListener('resize', this.onWindowResize);
+    this.destroyRef.onDestroy(() => {
+      window.removeEventListener('resize', this.onWindowResize);
+      if (this.drawRafHandle !== null) cancelAnimationFrame(this.drawRafHandle);
+    });
     this.regenerate();
+  }
+
+  /** Coalesces multiple redraw requests within the same frame (e.g. several `pointermove`
+   * events during a drag) into a single `draw()` call. */
+  private scheduleDraw(): void {
+    if (this.drawRafHandle !== null) return;
+    this.drawRafHandle = requestAnimationFrame(() => {
+      this.drawRafHandle = null;
+      this.draw();
+    });
   }
 
   regenerate(): void {
@@ -432,6 +456,7 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
     this.zoom.set(1);
     this.panX.set(0);
     this.panY.set(0);
+    this.draw();
   }
 
   onIconsToggle(): void {
@@ -475,6 +500,7 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
     this.panX.set(cursorX - worldX * newZoom);
     this.panY.set(cursorY - worldY * newZoom);
     this.zoom.set(newZoom);
+    this.scheduleDraw();
   }
 
   onPointerDown(event: PointerEvent): void {
@@ -492,6 +518,7 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
     this.lastPointerY = event.clientY;
     this.panX.update((v) => v + dx);
     this.panY.update((v) => v + dy);
+    this.scheduleDraw();
   }
 
   onPointerUp(): void {
@@ -549,21 +576,55 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
     return { forward, up, right };
   }
 
-  /** One full redraw of the fixed `BASE_WIDTH x BASE_HEIGHT` bitmap — pan/zoom afterward is a
-   * CSS transform on this canvas, never a re-render, so this only runs on regenerate or a
-   * layer toggle, not per frame/per pan tick. Public: the icon-density slider's template
-   * binding calls this directly (see `onIconDensityInput()`). */
+  /** Redraws the world into a canvas backing store sized to the *actual viewport* at device-pixel
+   * density, with pan/zoom baked into a `ctx.setTransform()` applied once up front — everything
+   * below still emits plain `BASE_WIDTH`/`BASE_HEIGHT`-space coordinates via `mapPoint()`,
+   * unchanged, but the canvas itself is never a fixed-resolution bitmap stretched/rescaled by
+   * CSS afterward, so there's nothing left to go soft when zooming in. Runs on regenerate, a
+   * layer toggle, *and* every pan/zoom tick (via `scheduleDraw()`) and window resize — replacing
+   * the previous design where the canvas was drawn once at a fixed `BASE_WIDTH x BASE_HEIGHT`
+   * resolution and pan/zoom was a free CSS `transform` on top, which read crisp near zoom=1 but
+   * visibly blurred out by the time zoom approached `MAX_ZOOM` since it was just upscaling the
+   * same fixed bitmap. Public: the icon-density slider's template binding calls this directly
+   * (see `onIconDensityInput()`). */
   draw(): void {
     const graph = this.graph;
     const tectonics = this.tectonics;
     const ecology = this.ecology;
     const canvas = this.canvasRef()?.nativeElement;
-    if (!graph || !tectonics || !ecology || !canvas) return;
+    const viewport = this.viewportRef()?.nativeElement;
+    if (!graph || !tectonics || !ecology || !canvas || !viewport) return;
 
-    canvas.width = BASE_WIDTH;
-    canvas.height = BASE_HEIGHT;
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = viewport.clientWidth || 1;
+    const cssHeight = viewport.clientHeight || 1;
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    // Clear the whole backing store first (identity transform) — the map itself only fills
+    // [0,BASE_WIDTH]x[0,BASE_HEIGHT] in world space, so panned/zoomed-out gaps around it need to
+    // read as transparent (showing `.viewport`'s own dark background), not stale pixels.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Bakes pan/zoom, the world-to-viewport-CSS-size stretch, and DPR into one matrix so every
+    // draw call below — unchanged, still in BASE_WIDTH/BASE_HEIGHT space — rasterizes straight
+    // to full device-pixel resolution. Mirrors exactly what the old CSS
+    // `translate(panX,panY) scale(zoom)` on top of a `width:100%;height:100%`-stretched canvas
+    // computed, just evaluated by the canvas matrix instead of the DOM/CSS box model.
+    const baseScaleX = cssWidth / BASE_WIDTH;
+    const baseScaleY = cssHeight / BASE_HEIGHT;
+    const zoom = this.zoom();
+    ctx.setTransform(
+      dpr * zoom * baseScaleX,
+      0,
+      0,
+      dpr * zoom * baseScaleY,
+      dpr * this.panX(),
+      dpr * this.panY(),
+    );
 
     ctx.fillStyle = '#141d2e';
     ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
