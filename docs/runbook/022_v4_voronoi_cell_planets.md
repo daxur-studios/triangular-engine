@@ -185,6 +185,7 @@ Bruno asked where four specific things stand; capturing them here so they surviv
   - Carving an actual channel into the terrain mesh geometry (not just an overlay line) — **not tracked anywhere**, would need scoping once chunk mesh-building (M4b) exists to carve into.
   - **New (2026-08-28)**: rivers currently read as too geometric/mechanical — straight corner-to-corner segments, no natural meander or bank detail. Likely needs the same "noisy edges" treatment M2.5 explicitly deferred for coastlines (jittering the path within a constrained corridor so it doesn't look mechanically straight), applied to river polylines too. **Not tracked anywhere** — new idea, no milestone.
 - **In-game texturing, shoreline shading, biome blending** — shore foam/shallows has a real hook already (Layer 2's optional signed-distance-to-coast attribute), but texturing and blended (non-hard-edged) biome transitions are only named as *excluded from this POC* in Non-goals above, not captured as a future intent. **Not tracked as a real ask anywhere else** — needs its own scoped item once M5 decides on integration.
+- **New (2026-08-31) — continent geometry, not river tracing, is what's really capping river length.** Surfaced while implementing the "River hydrology rework" entry below: at default tectonics settings (`plateCount: 10`, default `targetLandFraction`), a full corner-to-nearest-coast BFS showed max hop-distance from any land corner to the coast was only 5-15 even at 3000 cells, average under 2 — landmasses are geometrically narrow relative to the corner graph's resolution, so *no* river-tracing algorithm can produce a much longer river than that allows. Fixing this is a tectonics/land-generation lever (bigger single continents via fewer, larger plates; a higher `targetLandFraction`; or a broader continent-interior swell radius), not a `rivers.ts` one. **Not tracked as a milestone anywhere** — new finding, no scoping done yet.
 
 ## World profiles + per-cell terrain features (spike, 2026-08-29)
 
@@ -250,6 +251,134 @@ direction, not a finished system.
   (standing practice for this lab) is the remaining step — pick each profile and confirm visual
   distinctness, toggle `'feature'` map mode and confirm feature cells are visibly *shaped*
   differently (raised rims, flat mesa tops), not just recolored.
+
+## River hydrology rework: flux accumulation & navigability (scoped + implemented 2026-08-31)
+
+Ahead of M5, and following the 3 river-tracing bug fixes noted in M2.5/M3 above (rivers no
+longer skirt lake/ocean edges, cross ice caps, or dead-end mid-nowhere): Bruno wants a real
+gameplay distinction between **boat-navigable rivers** and **springs/creeks that aren't**, plus
+generally longer/more-connected rivers than the current source-sampling model produces. Before
+scoping a fix, compared our approach against **Azgaar's Fantasy Map Generator**
+(`https://github.com/Azgaar/Fantasy-Map-Generator`, cloned read-only to
+`D:\external\Fantasy-Map-Generator` for this comparison — not a dependency, not vendored) per
+Bruno's explicit "don't reinvent the wheel" ask, with the constraint that any resulting design
+stays single-source-of-truth in `worldgen/core` (both `cell-planet-map-page` and
+`cell-planet-lab-page` already consume one `buildPlanetEcology()` output — see Architecture
+above — and this must not fork per-renderer).
+
+**What the comparison found** (full detail in that session's chat, condensed here):
+
+- **Root cause of short/sparse rivers**: `rivers.ts::traceRivers()` seeds a fixed `sourceCount`
+  of random qualifying corners and walks each downhill independently. Azgaar instead runs
+  precipitation-driven flow accumulation across *every* land cell (a D8-style flow-accumulation
+  pass) — a cell only becomes a river once its accumulated flux crosses a threshold. River
+  network shape emerges from climate + terrain slope everywhere, not from how many random
+  corners happened to qualify. This is the structural fix for "rivers are too short" and the
+  main item scoped below.
+- **Navigability**: Azgaar ships exactly the pattern already proposed for Bruno's ask before the
+  clone happened — a single global constant (`MIN_NAVIGABLE_FLUX`) and `isNavigable(cellId)`
+  checking accumulated flux against it. Directly validates building navigability as a flow
+  threshold on our existing `riverFlow` field; folded into the scope below rather than shipped
+  standalone, since it's far more meaningful once flux comes from real accumulation than from
+  the current per-source walk (a "big" river today is just an accident of overlapping source
+  paths, not a real drainage basin).
+- **Explicit tributary/parent tracking**: Azgaar marks which of two converging flux paths is the
+  tributary at a confluence (parent/basin ids). We currently only get merged-looking rivers
+  because two independent source-walks happen to land on the identical deterministic downhill
+  path afterward — no real relationship is recorded. Falls out for free once Phase 1 below tracks
+  per-cell flux directly, so it's bundled in rather than deferred again.
+- **Deliberately not carried forward**: Azgaar's full iterative global depression-filling
+  (heavier than our targeted per-pit `findSpillExit`, which already fixed the dead-end bug
+  adequately); their tapered-polygon ribbon rendering (`getRiverPath()`) — we already have
+  spherical ribbon rendering from the World Profiles spike above (`flow-path.ts` /
+  `createWaterFlowMaterial()`); their length-percentile name/type taxonomy (Creek/River/Brook/
+  Fork) — cosmetic naming, not the gameplay distinction Bruno actually asked for.
+
+**Scope (own milestone, sequenced, none of it started):**
+
+**What actually shipped diverges from the scope above — the planned "Phase 1" (real D8-style flux
+accumulation, catchment-threshold classification) was built, measured, and abandoned in the same
+session, for a concrete, empirically-confirmed reason:**
+
+- **This generator's terrain doesn't have valley structure for flow to converge into.** Tectonics
+  elevation (see Layer 1 above) is shaped by plate-boundary uplift + continent-interior swell —
+  broad domes and ridge lines, not the carved dendritic drainage networks real DEMs have (from
+  actual geologic erosion). A downhill walk needs *convergence* (multiple points funneling into
+  the same corner) to build a meaningfully-sized catchment; domes don't have that. Verified with a
+  throwaway `tsx` script (not committed): even after 8 passes of neighbor-averaging smoothing
+  before routing (to rule out the per-cell 0.08-amplitude texture-noise term in `elevation.ts`
+  as the culprit), the largest observed catchment stayed under ~3% of a planet's land corners, at
+  every tested cell count from 300 to 3000. Switching the accumulation graph from corners (always
+  exactly 3 neighbors) to cells (5-7 neighbors, much friendlier to convergence in principle) made
+  no measurable difference either — confirming the bottleneck is the elevation *field's shape*,
+  not the graph's branching factor. Real D8 accumulation is a well-understood, correct technique;
+  it just needs terrain with valleys to work on, which this generator doesn't produce.
+- **A second, independent finding, since it was needed to explain why length barely improved
+  either way: candidate river sources were geometrically capped at ~2 hops from the coast,
+  regardless of algorithm.** The pre-existing `minSourceMoisture: 0.4` gate (unchanged from the
+  original model, kept in the final design below) requires a source corner's moisture — a BFS
+  distance-from-ocean field with a *fixed* `moistureFalloffRadius: 4` graph-hop falloff (see
+  `climate.ts`) — to be >= 0.4, which algebraically caps a qualifying corner at ~2 hops from
+  water, at any cell count. On top of that, a full corner-to-nearest-coast BFS (also a throwaway
+  script) showed the actual generated continents at default settings (`plateCount: 10`,
+  `targetLandFraction` default) are themselves geometrically narrow: max hop-distance from any
+  land corner to the nearest coast was only 5-15 even at 3000 cells, average under 2. **No source
+  selection or accumulation model can produce a longer river than the landmass's own geometric
+  depth allows** — this is a continent-generation/tectonics-parameter property, not a
+  `rivers.ts` one, and is now the real, correctly-identified next lever for "rivers feel short" if
+  Bruno wants to pursue it further (see the new Deferred-asks bullet below) — not the moisture
+  gate, which only mattered a little once actually measured (avg river length 2.5→2.8 corners at
+  300 cells with the gate removed entirely; not the dominant factor either).
+
+**What shipped instead — same file, same public API shape (`traceRivers()`/`IPlanetRivers`),
+pragmatic given the above:**
+
+- Headwaters are chosen deterministically (candidates ranked by elevation, tallest first) instead
+  of randomly sampled, up from the old fixed `sourceCount: 12` default to `40` — a real,
+  measurable improvement over random sampling (a random pick was just as likely to land barely
+  above the elevation gate as near the top of it), even though it can't beat the geometric cap
+  above.
+- **Explicit confluence/tributary tracking survived the pivot intact** — `computeDownhillStep()`
+  (the per-corner stepping logic: water-cell awareness, frozen termination, pit spill-over, all
+  unchanged from before this rework) is now computed once and shared, and each headwater's walk
+  stops the moment it reaches a corner an earlier (taller-sourced) river already claimed, recording
+  that river as its parent (`riverParent`/`riverBasin`, new fields) instead of re-tracing the
+  shared trunk. Real confluences are rare on this terrain (same root cause as above) but do occur
+  and are now recorded properly when they do, including a found-and-fixed self-loop edge case
+  (a chained pit-spill occasionally routed a headwater's walk back into its own already-claimed
+  path, previously recorded a corner as its own parent — fixed by treating a walk revisiting its
+  own claim as a plain dead end instead of a merge).
+- **`riverFlow` is now confluence-count x a within-river length-progression term**, not a bare
+  visit count. Since real confluence is rare here, a river widening only at rare merges would
+  mostly look like a flat line with an occasional jump; the length term (1x at each river's own
+  source, `1 + lengthGrowthFactor`x at its own mouth, normalized to *that river's own length* so
+  a short spring and a long trunk both read as "widening downstream" at a comparable rate) stands
+  in for the countless small unmodeled tributaries/groundwater inflow a real river also widens
+  from. Confluence contributions propagate downstream of the merge point too (a subtree-size
+  aggregation over the parent/basin tree), not just at the exact corner they occur.
+- **`minNavigableFlow`** (mirrors Fantasy Map Generator's `MIN_NAVIGABLE_FLUX`/`isNavigable()`):
+  resolved to a concrete number (`minNavigableFlowFraction` x the largest flow actually observed
+  among a planet's river points, not diluted by all land corners) and exposed on `IPlanetRivers`
+  rather than a boolean array, so both `cell-planet-map-page` and `cell-planet-lab-page` compare
+  the exact same threshold against the exact same `riverFlow` field — including after either
+  resamples it for fractal detail (`ecology.ts`'s `addFractalDetailWithFlow()`), which a
+  precomputed boolean array would have had to be threaded through in lockstep to stay correct.
+  `cell-planet-map-page`'s river overlay now strokes navigable segments in a deeper, more
+  saturated blue than spring/creek segments — the concrete visual answer to Bruno's original
+  boat-vs-spring ask. `cell-planet-lab-page`'s 3D ribbon and 2D overlay width formulas were left
+  untouched (already safe against the new flow units — no NaN risk, no hardcoded assumption that
+  broke), but don't yet carry the navigable/spring color split; flagged, not done this pass.
+- Deliberately not carried forward from Fantasy Map Generator (unchanged from the original scoping
+  above): full iterative global depression-filling, tapered-polygon ribbon rendering (already have
+  spherical ribbons from the World Profiles spike), length-percentile name/type taxonomy.
+- Verification: `rivers.spec.ts` rewritten for the new API/semantics (flow monotonicity, basin/
+  parent consistency, a real-confluence-exercising test at a calibrated seed/cell-count, a
+  navigability-threshold-splits-the-range test) — 136/138 `test:triangular-engine:worldgen` passing
+  (the 2 failures are `sample-elevation.spec.ts`, pre-existing/unrelated, confirmed via `git
+  status` showing that file untouched). `ng build triangular-engine` and `ng build demo-app`
+  (`--configuration development`) both clean. Bruno's own in-browser check is the remaining step —
+  confirm the map's navigable/spring color split reads correctly and rivers still look reasonable
+  end-to-end, per this workspace's standing "visual acceptance is a user check" practice.
 
 ## References
 

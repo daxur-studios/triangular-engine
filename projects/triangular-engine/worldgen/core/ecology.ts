@@ -68,7 +68,9 @@ export function buildPlanetEcology(
     tectonics.isLand,
     tectonics.seaLevelElevation,
     climate.moisture,
-    { seed: tectonics.seed, ...params.rivers },
+    climate.temperature,
+    waterBodies.waterBodyKind,
+    params.rivers,
   );
   const coastlines = extractCoastlines(graph, tectonics.isLand).map((loop) =>
     addFractalDetail(loop, true, { seed: tectonics.seed, ...params.coastlineDetail }),

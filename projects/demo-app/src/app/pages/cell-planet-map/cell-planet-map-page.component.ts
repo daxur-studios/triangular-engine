@@ -481,7 +481,14 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
     this.drawSmoothLoops(ctx, ecology.coastlines, lonLat, mapPoint, '#f4ecd8', 3.2, true);
 
     if (this.showRivers()) {
-      this.drawSmoothPaths(ctx, ecology.riverPaths, ecology.riverFlow, lonLat, mapPoint);
+      this.drawSmoothPaths(
+        ctx,
+        ecology.riverPaths,
+        ecology.riverFlow,
+        ecology.minNavigableFlow,
+        lonLat,
+        mapPoint,
+      );
     }
 
     if (this.showIcons()) {
@@ -557,15 +564,20 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
    * side of a seam cut, where it lands on the real point instead since there's no neighbor to
    * share a midpoint with. Every segment except the ones crossing the seam is drawn directly by
    * original index — simpler and index-safe than reusing splitAtSeam()'s generic run output
-   * here, since that drops the cut segment and would otherwise desync the flow-array lookup. */
+   * here, since that drops the cut segment and would otherwise desync the flow-array lookup.
+   *
+   * Segments at/above `minNavigableFlow` (`IPlanetRivers.minNavigableFlow` — see the runbook
+   * 022 "River hydrology rework" entry and `rivers.ts`'s doc comment) stroke in a deeper,
+   * more saturated blue than the spring/creek color below it, so the boat-navigable/spring
+   * distinction reads directly off the map instead of needing a separate mode or legend. */
   private drawSmoothPaths(
     ctx: CanvasRenderingContext2D,
     paths: IVec3[][],
     flow: number[][],
+    minNavigableFlow: number,
     lonLat: (p: IVec3) => { lon: number; lat: number },
     mapPoint: (ll: { lon: number; lat: number }) => { x: number; y: number },
   ): void {
-    ctx.strokeStyle = '#5ec8ff';
     for (let i = 0; i < paths.length; i++) {
       const path = paths[i];
       if (path.length < 2) continue;
@@ -581,7 +593,8 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
         const start = prevValid ? { x: (pts[k - 1].x + cur.x) / 2, y: (pts[k - 1].y + cur.y) / 2 } : cur;
         const nextValid = k < n - 2 && Math.abs(lls[k + 1].lon - lls[k + 2].lon) <= SEAM_THRESHOLD;
         const end = nextValid ? { x: (cur.x + next.x) / 2, y: (cur.y + next.y) / 2 } : next;
-        const f = flows?.[k] ?? 1;
+        const f = flows?.[k] ?? 0;
+        ctx.strokeStyle = f >= minNavigableFlow ? '#2f8fd6' : '#8fd8ff';
         ctx.lineWidth = Math.min(9, 1.6 + Math.sqrt(f) * 1.3);
         ctx.beginPath();
         ctx.moveTo(start.x, start.y);
