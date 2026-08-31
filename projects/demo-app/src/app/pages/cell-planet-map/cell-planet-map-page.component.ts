@@ -548,6 +548,16 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
     ctx.stroke();
   }
 
+  /** Curves each river edge through a quadratic bulging toward its real start corner (`cur`),
+   * same family of trick as `strokeSmoothRun` — but stroked one edge at a time, each with its
+   * own width from `flow[k]`, since a river's width has to vary along its length and a single
+   * `stroke()` call can't carry more than one `lineWidth`. Each edge's curve starts/ends at the
+   * midpoint shared with its neighbor (so adjacent edges join with matching endpoints, just
+   * different widths/curvature either side), except at the two ends of the path and on either
+   * side of a seam cut, where it lands on the real point instead since there's no neighbor to
+   * share a midpoint with. Every segment except the ones crossing the seam is drawn directly by
+   * original index — simpler and index-safe than reusing splitAtSeam()'s generic run output
+   * here, since that drops the cut segment and would otherwise desync the flow-array lookup. */
   private drawSmoothPaths(
     ctx: CanvasRenderingContext2D,
     paths: IVec3[][],
@@ -561,17 +571,21 @@ export class CellPlanetMapPageComponent implements AfterViewInit {
       if (path.length < 2) continue;
       const lls = path.map(lonLat);
       const flows = flow[i];
-      // Every segment except the ones crossing the seam is drawn directly by original index —
-      // simpler and index-safe than reusing splitAtSeam()'s generic run output here, since that
-      // drops the cut segment and would otherwise desync the flow-array lookup.
       const pts = lls.map(mapPoint);
-      for (let k = 0; k < pts.length - 1; k++) {
+      const n = pts.length;
+      for (let k = 0; k < n - 1; k++) {
         if (Math.abs(lls[k].lon - lls[k + 1].lon) > SEAM_THRESHOLD) continue;
+        const cur = pts[k];
+        const next = pts[k + 1];
+        const prevValid = k > 0 && Math.abs(lls[k - 1].lon - lls[k].lon) <= SEAM_THRESHOLD;
+        const start = prevValid ? { x: (pts[k - 1].x + cur.x) / 2, y: (pts[k - 1].y + cur.y) / 2 } : cur;
+        const nextValid = k < n - 2 && Math.abs(lls[k + 1].lon - lls[k + 2].lon) <= SEAM_THRESHOLD;
+        const end = nextValid ? { x: (cur.x + next.x) / 2, y: (cur.y + next.y) / 2 } : next;
         const f = flows?.[k] ?? 1;
         ctx.lineWidth = Math.min(9, 1.6 + Math.sqrt(f) * 1.3);
         ctx.beginPath();
-        ctx.moveTo(pts[k].x, pts[k].y);
-        ctx.lineTo(pts[k + 1].x, pts[k + 1].y);
+        ctx.moveTo(start.x, start.y);
+        ctx.quadraticCurveTo(cur.x, cur.y, end.x, end.y);
         ctx.stroke();
       }
     }

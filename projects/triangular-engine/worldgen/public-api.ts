@@ -21,6 +21,7 @@ export * from './core/climate';
 export * from './core/biomes';
 export * from './core/rivers';
 export * from './core/coastlines';
+export * from './core/polyline-detail';
 export * from './core/ecology';
 export * from './core/geological-shapes';
 export * from './core/features';
