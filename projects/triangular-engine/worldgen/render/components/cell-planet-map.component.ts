@@ -61,21 +61,35 @@ const MAX_ZOOM = 14;
 
 /** Largest dimension the offscreen raster canvas is allowed to grow to at high zoom — a `zoom`
  * past this point stops gaining raster detail and just magnifies the capped texture, same
- * "inherent detail ceiling" trade `PlanetViewComponent`'s own mesh LOD makes. 8192 is the safe
- * floor for "common GPU 2D-texture size limit" (virtually all GPUs from the last decade, including
- * mobile, support at least this; many support 16384) so `CanvasTexture` upload never risks
- * silently failing. Even so, this is a real ceiling, not just a safety margin: at `BASE_WIDTH`
- * 3000 this caps crisp rendering at ~2.7x zoom (dpr=1) — `MAX_ZOOM` (14) goes well past that, so
- * high zoom levels necessarily read soft. A single whole-map texture fundamentally can't stay
- * crisp across a 14x range (that would need a >40000px-wide texture); fixing that for real means
- * re-rasterizing only the visible viewport region at high zoom, not a bigger constant here. */
-const MAX_RASTER_DIM = 8192;
+ * "inherent detail ceiling" trade `PlanetViewComponent`'s own mesh LOD makes. Every re-rasterize
+ * (see `#rasterize()`) redraws the *entire* map — every cell, river, icon — at this resolution, so
+ * this constant directly sets how long each one takes; 8192 (quadruple the pixel-fill cost of the
+ * previous 4096) measurably reintroduced interaction lag (see `PARAM_DEBOUNCE_MS`/
+ * `RASTERIZE_DEBOUNCE_MS` above — debouncing *when* a rasterize fires doesn't shrink how long the
+ * one that does fire takes). Back at 4096 the crisp-zoom ceiling is ~1.4x (dpr=1) instead of
+ * ~2.7x, i.e. more of the zoom range reads soft — a real trade against `MAX_ZOOM` (14), made in
+ * favor of interactivity. A single whole-map texture fundamentally can't stay crisp across a 14x
+ * range regardless of this constant (that would need a >40000px-wide texture); fixing that for
+ * real means re-rasterizing only the visible viewport region at high zoom. */
+const MAX_RASTER_DIM = 4096;
 
-/** Trailing debounce, applied only while zoom is *increasing*, before re-rasterizing the terrain
- * texture at the new (higher) resolution — see `#requestRasterize()`. Re-uploading a multi-MB
- * `CanvasTexture` on every wheel-delta frame during a zoom gesture would be wasteful; the texture
- * is magnified (briefly soft) mid-gesture and snaps sharp once this fires. */
+/** Trailing debounce applied to every wheel-driven zoom change before re-rasterizing the terrain
+ * texture at the new resolution — see `#requestRasterize()`. Re-rasterizing the whole map on every
+ * wheel-delta frame during a zoom gesture would be wasteful; the texture is magnified (briefly
+ * soft) mid-gesture and snaps sharp once this fires. */
 const RASTERIZE_DEBOUNCE_MS = 150;
+
+/** Leading+trailing throttle interval applied to the generation/ecology/layer-toggle effects below
+ * (cellCount, waterLevel, iconBudget, etc.). Every one of those inputs is driven by a
+ * `<input type="range">` in the demo page, which fires an `input` event per pixel of drag - without
+ * *some* limit, dragging a slider re-runs the full (expensive - graph rebuild, ecology rebuild, or
+ * full-map rasterize) pipeline dozens of times a second. A trailing-only debounce was tried first
+ * and reads as dead/unresponsive while dragging - the whole point of a live slider is seeing the
+ * map update *as you drag*, not only once you let go. Throttle instead: the first change in a burst
+ * runs immediately (leading edge), then at most once every `PARAM_THROTTLE_MS` while the burst
+ * continues, plus one final trailing run so the settled value is never dropped. Kept short/
+ * "generous" on purpose so dragging still reads as live, not periodic. */
+const PARAM_THROTTLE_MS = 120;
 
 /** Screen-pixel drag distance below which a pointerdown->pointerup is treated as a click
  * (`cellClick`) rather than a pan gesture — see `onPointerMove()`/`#dragDistance`. */
@@ -319,6 +333,12 @@ function splitAtSeam(lls: ILonLat[], closed: boolean): ISeamRun[] {
   return splitLinearAtSeam(rotated).map((pts) => ({ pts, closed: false }));
 }
 
+/** Mutable state for one `#throttleRun()` call site - see `PARAM_THROTTLE_MS`. */
+interface IThrottleState {
+  lastRun: number;
+  handle: number | null;
+}
+
 export interface ICellClickEvent {
   cellId: number;
   direction: IVec3;
@@ -451,6 +471,13 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
 
   private rasterizeDebounceHandle: number | null = null;
 
+  /** Per-effect throttle state for `#throttleRun()` - see `PARAM_THROTTLE_MS`. Plain mutable
+   * objects (rather than three more scalar fields) so `#throttleRun()` can take one and mutate it
+   * by reference instead of needing a field name per call site. */
+  private readonly regenerateThrottle: IThrottleState = { lastRun: 0, handle: null };
+  private readonly ecologyThrottle: IThrottleState = { lastRun: 0, handle: null };
+  private readonly layersThrottle: IThrottleState = { lastRun: 0, handle: null };
+
   constructor() {
     super();
 
@@ -482,14 +509,14 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
       this.jitter();
       this.plateCount();
       this.worldProfileKind();
-      untracked(() => this.#regenerate());
+      untracked(() => this.#throttleRun(this.regenerateThrottle, () => this.#regenerate()));
     });
 
     effect(() => {
       this.climateExtreme();
       this.season();
       this.waterLevel();
-      untracked(() => this.#rebuildEcology());
+      untracked(() => this.#throttleRun(this.ecologyThrottle, () => this.#rebuildEcology()));
     });
 
     effect(() => {
@@ -504,7 +531,7 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
       this.showCellEdges();
       this.highlightedCellIds();
       this.highlightColor();
-      untracked(() => this.#requestRasterize('other'));
+      untracked(() => this.#throttleRun(this.layersThrottle, () => this.#requestRasterize('other')));
     });
 
     effect(() => {
@@ -520,6 +547,9 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
 
   override ngOnDestroy(): void {
     if (this.rasterizeDebounceHandle !== null) clearTimeout(this.rasterizeDebounceHandle);
+    if (this.regenerateThrottle.handle !== null) clearTimeout(this.regenerateThrottle.handle);
+    if (this.ecologyThrottle.handle !== null) clearTimeout(this.ecologyThrottle.handle);
+    if (this.layersThrottle.handle !== null) clearTimeout(this.layersThrottle.handle);
     this.planeGeometry.dispose();
     this.planeMaterial.dispose();
     this.texture.dispose();
@@ -761,6 +791,29 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     return base + this.climateExtreme() * 0.8 + SEASON_TEMPERATURE_OFFSET[this.season()];
   }
 
+  /** Leading+trailing throttle - see `PARAM_THROTTLE_MS`'s doc comment for why this replaced a
+   * plain trailing debounce. Runs `fn` immediately if `state` hasn't run within the last
+   * `PARAM_THROTTLE_MS`, otherwise schedules exactly one trailing run for when that window
+   * elapses (re-scheduling, not stacking, on repeated calls within the window). */
+  #throttleRun(state: IThrottleState, fn: () => void): void {
+    if (state.handle !== null) {
+      clearTimeout(state.handle);
+      state.handle = null;
+    }
+    const now = performance.now();
+    const elapsed = now - state.lastRun;
+    if (elapsed >= PARAM_THROTTLE_MS) {
+      state.lastRun = now;
+      fn();
+    } else {
+      state.handle = window.setTimeout(() => {
+        state.handle = null;
+        state.lastRun = performance.now();
+        fn();
+      }, PARAM_THROTTLE_MS - elapsed);
+    }
+  }
+
   // ==========================================================================
   // Terrain rasterization
   // ==========================================================================
@@ -789,13 +842,14 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
   }
 
   /** Draws the map into the offscreen canvas backing the terrain `CanvasTexture`. The canvas
-   * backing store is sized to `BASE_WIDTH`/`BASE_HEIGHT * zoomLevel * devicePixelRatio` (clamped
-   * to `MAX_RASTER_DIM`) rather than fixed at `BASE_WIDTH x BASE_HEIGHT` - a `CanvasTexture`
-   * uploaded once at a fixed pixel size and then magnified by zooming `scale` up is exactly the
-   * "fixed-resolution bitmap stretched by a transform" bug the demo page's own `ctx.setTransform`
-   * fix eliminated for the DOM-canvas case; this is the same discipline applied to the texture
-   * source instead. All drawing below still emits plain `BASE_WIDTH`/`BASE_HEIGHT`-space
-   * coordinates via `mapPoint()`, unchanged - only the top-level sizing/transform differs.
+   * backing store is sized to the renderer's actual on-screen device-pixel width, scaled by
+   * `zoomLevel` and clamped to `MAX_RASTER_DIM` (see the `displayPixelWidth` comment below) -
+   * rather than fixed at `BASE_WIDTH x BASE_HEIGHT` - a `CanvasTexture` uploaded once at a fixed
+   * pixel size and then magnified by zooming `scale` up is exactly the "fixed-resolution bitmap
+   * stretched by a transform" bug the demo page's own `ctx.setTransform` fix eliminated for the
+   * DOM-canvas case; this is the same discipline applied to the texture source instead. All
+   * drawing below still emits plain `BASE_WIDTH`/`BASE_HEIGHT`-space coordinates via `mapPoint()`,
+   * unchanged - only the top-level sizing/transform differs.
    *
    * When the raster's *pixel dimensions* actually change, `this.texture` is replaced rather than
    * just marked `needsUpdate` - three.js only allocates GPU texture storage (`texStorage2D`) the
@@ -811,9 +865,20 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     const ecology = this.ecology();
     if (!graph || !tectonics || !ecology) return;
 
-    const dpr = window.devicePixelRatio || 1;
+    // The plane spans BASE_WIDTH world units at zoom 1 inside the consumer's fixed-frustum ortho
+    // camera, so the raster resolution that's actually needed for a crisp render is however many
+    // *device* pixels the renderer's own canvas occupies on screen - not BASE_WIDTH itself. Using
+    // `zoomLevel * dpr` alone (as an earlier revision did) silently assumed the displayed viewport
+    // is exactly BASE_WIDTH CSS pixels wide, which is essentially never true (this demo page's
+    // viewport is narrower still, sharing width with a side panel) - it was rasterizing several
+    // times more pixels than the page ever shows, on every regenerate/ecology-rebuild/rasterize.
+    // That's the real reason this got much slower than the old direct-canvas page: that page sized
+    // its canvas to `viewport.clientWidth * dpr` exactly; falling back to BASE_WIDTH here (instead
+    // of 0) only matters for a rasterize that lands before the renderer canvas has been sized.
+    const displayPixelWidth = this.engineService.renderer.domElement.width || BASE_WIDTH;
+    const pixelsPerBaseUnit = displayPixelWidth / BASE_WIDTH;
     const maxScale = MAX_RASTER_DIM / BASE_WIDTH;
-    const effScale = Math.min(this.zoomLevel() * dpr, maxScale);
+    const effScale = Math.min(this.zoomLevel() * pixelsPerBaseUnit, maxScale);
     const rasterWidth = Math.max(1, Math.round(BASE_WIDTH * effScale));
     const rasterHeight = Math.max(1, Math.round(BASE_HEIGHT * effScale));
 
