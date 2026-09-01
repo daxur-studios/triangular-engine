@@ -27,16 +27,16 @@ The architectural target is:
 
 ## Feasibility summary (why this is possible with no downloaded data)
 
-| Capability | Source | Data needed? |
-| --- | --- | --- |
-| Skeleton / bone visualization | procedural `THREE.Bone` hierarchy + lines/spheres | none |
-| Walking / running | analytic sine-based gait generator | none |
-| Looking at a target | head/neck/spine rotation toward a point | none |
-| Poses (sit, idle, hands-on-hips) | named joint-rotation targets + transitions | none |
-| Reach / interact | analytic two-bone IK | none |
-| Emotion (posture/head) | pose + head deltas | none |
-| Emotion (facial) | blendshape channels | **needs a face mesh** |
-| Authored locomotion (mixamo/VRM clips) | keyframe retargeting | optional, swap-in |
+| Capability                             | Source                                            | Data needed?          |
+| -------------------------------------- | ------------------------------------------------- | --------------------- |
+| Skeleton / bone visualization          | procedural `THREE.Bone` hierarchy + lines/spheres | none                  |
+| Walking / running                      | analytic sine-based gait generator                | none                  |
+| Looking at a target                    | head/neck/spine rotation toward a point           | none                  |
+| Poses (sit, idle, hands-on-hips)       | named joint-rotation targets + transitions        | none                  |
+| Reach / interact                       | analytic two-bone IK                              | none                  |
+| Emotion (posture/head)                 | pose + head deltas                                | none                  |
+| Emotion (facial)                       | blendshape channels                               | **needs a face mesh** |
+| Authored locomotion (mixamo/VRM clips) | keyframe retargeting                              | optional, swap-in     |
 
 Everything in the Phase 0 POC is procedural. Downloaded data is only required
 when a consumer adds a rendered face (for facial emotion) or authored animation
@@ -102,8 +102,10 @@ standard set of 52 (`mouthSmile`, `browDownLeft`, `jawOpen`, …); Oculus define
 
 ```ts
 const angry = {
-  browDownLeft: 0.6, browDownRight: 0.6,
-  mouthFrownLeft: 0.7, jawForward: 0.3,
+  browDownLeft: 0.6,
+  browDownRight: 0.6,
+  mouthFrownLeft: 0.7,
+  jawForward: 0.3,
 };
 ```
 
@@ -300,8 +302,8 @@ Also confirm:
 ### 2026-09-01 — Exploration and proposal
 
 - Cloned [TalkingHead](https://github.com/met4citizen/TalkingHead) and
-  [vrm-game-starter](https://github.com/norio/vrm-game-starter) into
-  `D:\external\` and reviewed their approaches for humanoid characters,
+  [vrm-game-starter](https://github.com/norio/vrm-game-starter)
+  and reviewed their approaches for humanoid characters,
   speech/emotion, and movement.
 - Targeted **simple/abstract/functional** characters that agents can handle,
   explicitly not hyper-realistic humans.

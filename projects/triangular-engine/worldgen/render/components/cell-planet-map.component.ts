@@ -9,6 +9,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   CanvasTexture,
   DoubleSide,
@@ -90,6 +91,17 @@ const RASTERIZE_DEBOUNCE_MS = 150;
  * continues, plus one final trailing run so the settled value is never dropped. Kept short/
  * "generous" on purpose so dragging still reads as live, not periodic. */
 const PARAM_THROTTLE_MS = 120;
+
+/** How many cells' worth of fill drawing `#rasterize()` does per `requestAnimationFrame` tick
+ * before yielding back to the browser - see `#runChunked()`. A full rasterize used to draw every
+ * cell synchronously in one call, which at high `cellCount`/raster resolution is long enough to
+ * read as an input stall (the exact "blocks the main thread" complaint this exists to fix). This
+ * is deliberately *not* a worker/OffscreenCanvas move - the per-cell draw logic, `this` context,
+ * and canvas 2D calls stay exactly where they are; only the loop that drives them now spreads
+ * across frames instead of running to completion in one. Small enough that even a single frame's
+ * worth of work stays well under a 16ms budget at default settings, large enough that a full
+ * rasterize still finishes in a handful of frames rather than trickling in visibly slowly. */
+const RASTERIZE_CHUNK_SIZE = 400;
 
 /** Screen-pixel drag distance below which a pointerdown->pointerup is treated as a click
  * (`cellClick`) rather than a pan gesture — see `onPointerMove()`/`#dragDistance`. */
@@ -451,8 +463,14 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
   // Three.js resources
   // ==========================================================================
   private readonly offscreenCanvas = document.createElement('canvas');
-  /** Not `readonly` - `#rasterize()` replaces this instance whenever the raster canvas actually
-   * changes size (see its own doc comment for why an in-place `needsUpdate` isn't safe then). */
+  /** Draw target for `#rasterize()` itself - see `#commitScratchCanvas()`. Keeping the live
+   * `offscreenCanvas`/`texture` untouched until a rasterize fully completes (cells + edges +
+   * coastlines + rivers + icons) means the plane only ever shows a *complete* frame, old or new -
+   * never a just-cleared background or a partially cell-filled in-progress one. */
+  private readonly scratchCanvas = document.createElement('canvas');
+  /** Not `readonly` - `#commitScratchCanvas()` replaces this instance whenever the raster canvas
+   * actually changes size (see its own doc comment for why an in-place `needsUpdate` isn't safe
+   * then). */
   private texture: CanvasTexture;
   private readonly planeGeometry = new PlaneGeometry(BASE_WIDTH, BASE_HEIGHT);
   private readonly planeMaterial: MeshBasicMaterial;
@@ -470,6 +488,13 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
   private lastPointerY = 0;
 
   private rasterizeDebounceHandle: number | null = null;
+
+  /** Bumped by every `#rasterize()` call; `#runChunked()`'s in-flight `requestAnimationFrame`
+   * chain checks this each tick and bails the moment it no longer matches - the cancellation
+   * mechanism for "a newer rasterize (or component destroy) superseded this chunked one mid-draw".
+   * Without it, a slider drag that retriggers `#rasterize()` before the previous chunked run
+   * finished would keep drawing stale cells into the (possibly now wrong-sized) canvas. */
+  private rasterizeToken = 0;
 
   /** Per-effect throttle state for `#throttleRun()` - see `PARAM_THROTTLE_MS`. Plain mutable
    * objects (rather than three more scalar fields) so `#throttleRun()` can take one and mutate it
@@ -543,9 +568,23 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     effect(() => {
       this.scale.set(this.zoomLevel());
     });
+
+    // The very first #rasterize() (triggered by the generation effect above) almost always runs
+    // before the consuming <scene>'s ResizeObserver has fired even once - EngineService.resolution$
+    // starts at a placeholder {width:50,height:50} (see its own field doc) until the real viewport
+    // size is measured, so that first rasterize bakes at a tiny, wrong resolution. Nothing
+    // previously re-rasterized once the real size became known, so the map stayed wrong until some
+    // unrelated interaction (a slider, a double-click) happened to trigger another #rasterize() -
+    // this is the "looks wrong until you click something" bug. Re-rasterizing on every resolution$
+    // change (debounced like a zoom - see #requestRasterize()) fixes it at the source instead of
+    // relying on an incidental later trigger.
+    this.engineService.resolution$.pipe(takeUntilDestroyed()).subscribe(() => this.#requestRasterize('resize'));
   }
 
   override ngOnDestroy(): void {
+    // Supersede any in-flight chunked rasterize so its requestAnimationFrame chain bails on its
+    // next tick instead of continuing to draw into a canvas whose owning component is gone.
+    this.rasterizeToken++;
     if (this.rasterizeDebounceHandle !== null) clearTimeout(this.rasterizeDebounceHandle);
     if (this.regenerateThrottle.handle !== null) clearTimeout(this.regenerateThrottle.handle);
     if (this.ecologyThrottle.handle !== null) clearTimeout(this.ecologyThrottle.handle);
@@ -818,20 +857,23 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
   // Terrain rasterization
   // ==========================================================================
 
-  /** Immediate for anything other than a zoom gesture (regenerate, layer toggle, highlight
-   * change, projection recenter). Any zoom change is trailing-debounced, regardless of direction
-   * - re-rasterizing the whole map (all cells/rivers/icons, up to `MAX_RASTER_DIM` pixels) is
-   * genuinely expensive, not just "risky to upload", so firing it synchronously on every
-   * wheel-delta tick (as a zoom-decrease used to) reads as lag mid-gesture: trackpads and mice
+  /** Immediate for anything other than a zoom gesture or a viewport resize (regenerate, layer
+   * toggle, highlight change, projection recenter). Zoom and resize are both trailing-debounced,
+   * regardless of direction - re-rasterizing the whole map (all cells/rivers/icons, up to
+   * `MAX_RASTER_DIM` pixels) is genuinely expensive, not just "risky to upload", so firing it
+   * synchronously on every wheel-delta tick (as a zoom-decrease used to) or every intermediate
+   * `ResizeObserver` callback during a window drag reads as lag mid-gesture: trackpads and mice
    * routinely emit a stray opposite-sign tick inside what the user experiences as one continuous
-   * zoom-in. The texture reads magnified (briefly soft) mid-gesture and snaps sharp once the
-   * debounce fires. Panning never calls this at all - see `onPointerMove()`. */
-  #requestRasterize(reason: 'zoom' | 'other'): void {
+   * zoom-in, and a resize drag fires many `resolution$` updates in quick succession. The displayed
+   * texture keeps showing the previous complete frame until the debounce fires and the new one
+   * finishes (see `#commitScratchCanvas()`). Panning never calls this at all - see
+   * `onPointerMove()`. */
+  #requestRasterize(reason: 'zoom' | 'resize' | 'other'): void {
     if (this.rasterizeDebounceHandle !== null) {
       clearTimeout(this.rasterizeDebounceHandle);
       this.rasterizeDebounceHandle = null;
     }
-    if (reason === 'zoom') {
+    if (reason === 'zoom' || reason === 'resize') {
       this.rasterizeDebounceHandle = window.setTimeout(() => {
         this.rasterizeDebounceHandle = null;
         this.#rasterize();
@@ -841,29 +883,25 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     }
   }
 
-  /** Draws the map into the offscreen canvas backing the terrain `CanvasTexture`. The canvas
-   * backing store is sized to the renderer's actual on-screen device-pixel width, scaled by
-   * `zoomLevel` and clamped to `MAX_RASTER_DIM` (see the `displayPixelWidth` comment below) -
-   * rather than fixed at `BASE_WIDTH x BASE_HEIGHT` - a `CanvasTexture` uploaded once at a fixed
-   * pixel size and then magnified by zooming `scale` up is exactly the "fixed-resolution bitmap
-   * stretched by a transform" bug the demo page's own `ctx.setTransform` fix eliminated for the
-   * DOM-canvas case; this is the same discipline applied to the texture source instead. All
-   * drawing below still emits plain `BASE_WIDTH`/`BASE_HEIGHT`-space coordinates via `mapPoint()`,
-   * unchanged - only the top-level sizing/transform differs.
-   *
-   * When the raster's *pixel dimensions* actually change, `this.texture` is replaced rather than
-   * just marked `needsUpdate` - three.js only allocates GPU texture storage (`texStorage2D`) the
-   * very first time a texture uploads; every later `needsUpdate` reuses that storage via
-   * `texSubImage2D`. Growing the backing canvas after that first upload (which happens on almost
-   * any non-1 `devicePixelRatio`, or on any zoom-driven resize) makes Chrome's canvas-upload fast
-   * path try to copy more pixels than the allocated storage holds - `GL_INVALID_VALUE:
-   * glCopySubTextureCHROMIUM: Offset overflows texture dimensions` - which fails the upload and
-   * leaves the plane black. A fresh `CanvasTexture` forces fresh, correctly-sized GPU storage. */
+  /** Draws the map into `scratchCanvas`, never touching the live `offscreenCanvas`/`texture`
+   * until `#commitScratchCanvas()` publishes the finished result - see `scratchCanvas`'s own field
+   * doc comment for why. The scratch canvas is sized to the renderer's actual on-screen
+   * device-pixel width, scaled by `zoomLevel` and clamped to `MAX_RASTER_DIM` (see the
+   * `displayPixelWidth` comment below) - rather than fixed at `BASE_WIDTH x BASE_HEIGHT` - a
+   * `CanvasTexture` uploaded once at a fixed pixel size and then magnified by zooming `scale` up
+   * is exactly the "fixed-resolution bitmap stretched by a transform" bug the demo page's own
+   * `ctx.setTransform` fix eliminated for the DOM-canvas case; this is the same discipline applied
+   * to the texture source instead. All drawing below still emits plain `BASE_WIDTH`/`BASE_HEIGHT`-
+   * space coordinates via `mapPoint()`, unchanged - only the top-level sizing/transform differs. */
   #rasterize(): void {
     const graph = this.graph();
     const tectonics = this.tectonics();
     const ecology = this.ecology();
     if (!graph || !tectonics || !ecology) return;
+
+    // Supersede any still-running chunked rasterize from a previous call - its `#runChunked()`
+    // step() bails on its next tick once it sees this.
+    const token = ++this.rasterizeToken;
 
     // The plane spans BASE_WIDTH world units at zoom 1 inside the consumer's fixed-frustum ortho
     // camera, so the raster resolution that's actually needed for a crisp render is however many
@@ -874,7 +912,9 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     // times more pixels than the page ever shows, on every regenerate/ecology-rebuild/rasterize.
     // That's the real reason this got much slower than the old direct-canvas page: that page sized
     // its canvas to `viewport.clientWidth * dpr` exactly; falling back to BASE_WIDTH here (instead
-    // of 0) only matters for a rasterize that lands before the renderer canvas has been sized.
+    // of 0) only matters for a rasterize that lands before the renderer canvas has been sized -
+    // which is also handled at the source now (see the `resolution$` subscription in the
+    // constructor), so this fallback is a last-resort guard, not the normal path.
     const displayPixelWidth = this.engineService.renderer.domElement.width || BASE_WIDTH;
     const pixelsPerBaseUnit = displayPixelWidth / BASE_WIDTH;
     const maxScale = MAX_RASTER_DIM / BASE_WIDTH;
@@ -882,9 +922,8 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     const rasterWidth = Math.max(1, Math.round(BASE_WIDTH * effScale));
     const rasterHeight = Math.max(1, Math.round(BASE_HEIGHT * effScale));
 
-    const canvas = this.offscreenCanvas;
-    const dimensionsChanged = canvas.width !== rasterWidth || canvas.height !== rasterHeight;
-    if (dimensionsChanged) {
+    const canvas = this.scratchCanvas;
+    if (canvas.width !== rasterWidth || canvas.height !== rasterHeight) {
       canvas.width = rasterWidth;
       canvas.height = rasterHeight;
     }
@@ -913,62 +952,108 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     const highlighted = highlightIdsInput instanceof Set ? highlightIdsInput : new Set(highlightIdsInput);
     const highlightColor = this.highlightColor();
 
-    // Cell fill.
-    for (const cell of graph.cells) {
-      const n = cell.corners.length;
-      if (n < 3) continue;
-      const lls = cell.corners.map(lonLat);
-      const wraps = lls.some((ll, k) => Math.abs(ll.lon - lls[(k + 1) % n].lon) > Math.PI * 0.9);
-      if (wraps) continue;
-
-      ctx.fillStyle = highlighted.has(cell.id)
-        ? highlightColor
-        : this.#resolveFillColor(cell.id, ecology, profile.oceanSubstance);
-      ctx.beginPath();
-      const p0 = mapPoint(lls[0]);
-      ctx.moveTo(p0.x, p0.y);
-      for (let k = 1; k < n; k++) {
-        const p = mapPoint(lls[k]);
-        ctx.lineTo(p.x, p.y);
-      }
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    if (this.showCellEdges()) {
-      ctx.strokeStyle = 'rgba(20,14,8,0.25)';
-      ctx.lineWidth = 1;
-      for (const cell of graph.cells) {
-        const n = cell.corners.length;
-        if (n < 3) continue;
-        const lls = cell.corners.map(lonLat);
-        for (let k = 0; k < n; k++) {
-          const a = lls[k];
-          const b = lls[(k + 1) % n];
-          if (Math.abs(a.lon - b.lon) > Math.PI * 0.9) continue;
-          const pa = mapPoint(a);
-          const pb = mapPoint(b);
-          ctx.beginPath();
-          ctx.moveTo(pa.x, pa.y);
-          ctx.lineTo(pb.x, pb.y);
-          ctx.stroke();
+    // Cell fill - the dominant cost of a rasterize (one fill() per cell, up to `cellCount`), so
+    // this is the loop that actually gets chunked; everything drawn on top of it below (edges,
+    // coastlines, rivers, icons) only runs once every cell has been filled, in `onCellFillDone`.
+    const onCellFillDone = (): void => {
+      if (this.showCellEdges()) {
+        ctx.strokeStyle = 'rgba(20,14,8,0.25)';
+        ctx.lineWidth = 1;
+        for (const cell of graph.cells) {
+          const n = cell.corners.length;
+          if (n < 3) continue;
+          const lls = cell.corners.map(lonLat);
+          for (let k = 0; k < n; k++) {
+            const a = lls[k];
+            const b = lls[(k + 1) % n];
+            if (Math.abs(a.lon - b.lon) > Math.PI * 0.9) continue;
+            const pa = mapPoint(a);
+            const pb = mapPoint(b);
+            ctx.beginPath();
+            ctx.moveTo(pa.x, pa.y);
+            ctx.lineTo(pb.x, pb.y);
+            ctx.stroke();
+          }
         }
       }
-    }
 
-    // Shorelines (every water body - ocean and every lake alike) and rivers, drawn as smoothed
-    // curves through the same exact corner points the cell fill above uses.
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    this.#drawSmoothLoops(ctx, ecology.coastlines, lonLat, mapPoint, '#f4ecd8', 3.2, true);
+      // Shorelines (every water body - ocean and every lake alike) and rivers, drawn as smoothed
+      // curves through the same exact corner points the cell fill above uses.
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      this.#drawSmoothLoops(ctx, ecology.coastlines, lonLat, mapPoint, '#f4ecd8', 3.2, true);
 
-    if (this.showRivers()) {
-      this.#drawSmoothPaths(ctx, ecology.riverPaths, ecology.riverFlow, ecology.minNavigableFlow, lonLat, mapPoint);
-    }
+      if (this.showRivers()) {
+        this.#drawSmoothPaths(ctx, ecology.riverPaths, ecology.riverFlow, ecology.minNavigableFlow, lonLat, mapPoint);
+      }
 
-    if (this.showIcons()) {
-      this.#drawIcons(ctx, graph, tectonics, ecology, lonLat, mapPoint);
+      if (this.showIcons()) {
+        this.#drawIcons(ctx, graph, tectonics, ecology, lonLat, mapPoint);
+      }
+
+      this.#commitScratchCanvas(rasterWidth, rasterHeight);
+    };
+
+    this.#runChunked(
+      token,
+      graph.cells,
+      RASTERIZE_CHUNK_SIZE,
+      (cell) => {
+        const n = cell.corners.length;
+        if (n < 3) return;
+        const lls = cell.corners.map(lonLat);
+        const wraps = lls.some((ll, k) => Math.abs(ll.lon - lls[(k + 1) % n].lon) > Math.PI * 0.9);
+        if (wraps) return;
+
+        ctx.fillStyle = highlighted.has(cell.id)
+          ? highlightColor
+          : this.#resolveFillColor(cell.id, ecology, profile.oceanSubstance);
+        ctx.beginPath();
+        const p0 = mapPoint(lls[0]);
+        ctx.moveTo(p0.x, p0.y);
+        for (let k = 1; k < n; k++) {
+          const p = mapPoint(lls[k]);
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+      },
+      onCellFillDone,
+    );
+  }
+
+  /** Publishes a just-finished `scratchCanvas` draw to the live `offscreenCanvas`/`texture` in one
+   * shot - the plane only ever shows either the previous complete frame or the new complete one,
+   * never a just-cleared background or a partially cell-filled in-progress frame (the "black
+   * flicker" a leaner in-place-clear version of `#rasterize()` used to show on every regenerate,
+   * layer toggle, or zoom snap). `width`/`height` are `#rasterize()`'s already-computed raster
+   * dimensions, passed through rather than re-read off `scratchCanvas` for clarity at the call
+   * site.
+   *
+   * When the raster's *pixel dimensions* actually change, `this.texture` is replaced rather than
+   * just marked `needsUpdate` - three.js only allocates GPU texture storage (`texStorage2D`) the
+   * very first time a texture uploads; every later `needsUpdate` reuses that storage via
+   * `texSubImage2D`. Growing the backing canvas after that first upload (which happens on almost
+   * any non-1 `devicePixelRatio`, or on any zoom/resize-driven change) makes Chrome's canvas-upload
+   * fast path try to copy more pixels than the allocated storage holds - `GL_INVALID_VALUE:
+   * glCopySubTextureCHROMIUM: Offset overflows texture dimensions` - which fails the upload and
+   * leaves the plane black. A fresh `CanvasTexture` forces fresh, correctly-sized GPU storage. */
+  #commitScratchCanvas(width: number, height: number): void {
+    const canvas = this.offscreenCanvas;
+    const dimensionsChanged = canvas.width !== width || canvas.height !== height;
+    if (dimensionsChanged) {
+      canvas.width = width;
+      canvas.height = height;
     }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    // The scratch canvas is already exactly `width x height`, fully opaque (its own background
+    // fill covers every pixel before anything else draws) - a 1:1 identity-transform copy fully
+    // overwrites the previous frame, no separate clear needed. The identity reset matters even so:
+    // this context's transform otherwise still carries the `rasterWidth/BASE_WIDTH` scale a
+    // previous #rasterize() left on it (context state persists across calls on the same canvas).
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(this.scratchCanvas, 0, 0);
 
     if (dimensionsChanged) {
       this.texture.dispose();
@@ -979,6 +1064,27 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     } else {
       this.texture.needsUpdate = true;
     }
+  }
+
+  /** Runs `draw` for every item in `items`, `chunkSize` at a time, yielding to
+   * `requestAnimationFrame` between chunks instead of running the whole loop in one synchronous
+   * pass - see `RASTERIZE_CHUNK_SIZE`. Bails on its next tick the moment `token` no longer matches
+   * `this.rasterizeToken` (a newer `#rasterize()` call, or `ngOnDestroy`, superseded it) rather
+   * than continuing to draw stale cells into a canvas that may have since been resized or torn
+   * down. */
+  #runChunked<T>(token: number, items: readonly T[], chunkSize: number, draw: (item: T) => void, onDone: () => void): void {
+    let i = 0;
+    const step = (): void => {
+      if (token !== this.rasterizeToken) return;
+      const end = Math.min(items.length, i + chunkSize);
+      for (; i < end; i++) draw(items[i]);
+      if (i < items.length) {
+        requestAnimationFrame(step);
+      } else {
+        onDone();
+      }
+    };
+    step();
   }
 
   #resolveFillColor(cellId: number, ecology: IPlanetEcology, oceanSubstance: 'water' | 'lava'): string {
