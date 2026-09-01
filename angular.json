@@ -35,6 +35,7 @@
               "life/**/*.spec.ts",
               "projects/triangular-engine/life/**/*.spec.ts",
               "projects/triangular-engine/animals/**/*.spec.ts",
+              "projects/triangular-engine/characters/**/*.spec.ts",
               "../navigation/**/*.spec.ts",
               "../water/**/*.spec.ts",
               "../terrain/**/*.spec.ts",
@@ -80,6 +81,15 @@
             "polyfills": ["zone.js", "zone.js/testing"],
             "browsers": ["ChromeHeadless"],
             "include": ["../animals/**/*.spec.ts"]
+          }
+        },
+        "test-characters": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
+            "polyfills": ["zone.js", "zone.js/testing"],
+            "browsers": ["ChromeHeadless"],
+            "include": ["../characters/**/*.spec.ts"]
           }
         },
         "test-procedural": {
