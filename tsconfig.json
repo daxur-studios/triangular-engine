@@ -46,6 +46,7 @@
         "triangular-engine/animals/terrain": ["projects/triangular-engine/animals/terrain/public-api"],
         "triangular-engine/animals/water": ["projects/triangular-engine/animals/water/public-api"],
         "triangular-engine/characters": ["projects/triangular-engine/characters/public-api"],
+        "triangular-engine/characters/three": ["projects/triangular-engine/characters/three/public-api"],
         "triangular-engine/navigation": ["projects/triangular-engine/navigation/public-api"],
         "triangular-engine/procedural": ["projects/triangular-engine/procedural/public-api"],
         "triangular-engine/celestial": [

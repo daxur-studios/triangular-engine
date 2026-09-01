@@ -2,12 +2,14 @@
 
 ## Status
 
-- State: **Design recorded; implementation not started.** This runbook traces the
-  exploration and decisions so far. No code exists yet.
-- Proposed entry point: `triangular-engine/characters`.
-- First proving ground: a bones-only `/characters-lab` demo page with a
-  procedural humanoid rig, emotion/look/walk controls, and no authored mesh or
-  animation data.
+- State: **Phase 0 in progress.** Core rig, forward kinematics, locomotion,
+  look-at, poses, and the Three.js binding are implemented and verified; reach
+  IK and the emotion vocabulary are still pending. No authored mesh or
+  animation data is required.
+- Entry point: `triangular-engine/characters` (core) and
+  `triangular-engine/characters/three` (Three.js binding).
+- Proving ground: a bones-only `/characters-lab` demo page with a procedural
+  humanoid rig, walk/run gait, sit pose, and head look-at — no authored assets.
 - Reference repos examined (cloned to `D:\external\`, not vendored):
   [TalkingHead](https://github.com/met4citizen/TalkingHead) and
   [vrm-game-starter](https://github.com/norio/vrm-game-starter).
@@ -237,13 +239,14 @@ projects/triangular-engine/characters/
 
 ### Phase 0 — Bones-only procedural POC
 
-- [ ] Add the `triangular-engine/characters` secondary entry point.
-- [ ] Define the canonical humanoid bone names/hierarchy.
-- [ ] Build a procedural `HumanoidRig` (no mesh; bones drawn as lines/joints).
-- [ ] Implement analytic walk/run gait, idle, look-at, sit pose, and reach IK.
+- [x] Add the `triangular-engine/characters` secondary entry point.
+- [x] Define the canonical humanoid bone names/hierarchy.
+- [x] Build a procedural `HumanoidRig` (no mesh; bones drawn as lines/joints).
+- [x] Implement analytic walk/run gait, idle, look-at, and sit pose.
+- [ ] Implement reach IK (two-bone arm/hand).
 - [ ] Implement the emotion vocabulary + a small mood table (posture/head only).
-- [ ] Add `/characters-lab` demo route: bones view + controls for mood, look
-      target, walk/run, sit, reach.
+- [x] Add `/characters-lab` demo route: bones view + controls for look target,
+      walk/run, sit.
 - [ ] Record which contracts were genuinely required.
 
 Exit gate: the page visibly shows bones; an operator (or agent) can drive mood,
@@ -318,3 +321,23 @@ Also confirm:
   mood/pose/gesture data model, cue queue, and tiny viseme interface;
   vrm-game-starter's rest-pose retargeting contract and analytic IK.
 - Decided to trace the work in this runbook before writing any code.
+
+### 2026-09-01 — Phase 0 implementation (bones, gait, look, poses)
+
+- Added `triangular-engine/characters` with a framework-free `core/`:
+  `character-vector`, `character-quaternion`, `humanoid-bones`,
+  `character-rig`, `forward-kinematics`, `poses`, `locomotion`, `look-at`.
+- Chose a pure FK model over `THREE.Bone`/`THREE.Skeleton`: each bone stores a
+  world-space rest offset from its parent, and `solveForwardKinematics` resolves
+  a `RigPose` (per-bone XYZ Euler) into world-space joint positions. This keeps
+  `core` free of Three.js and makes motion pure data, unit-testable without a
+  renderer.
+- Added `triangular-engine/characters/three` as a separate secondary entry
+  point holding `HumanoidRigVisualization` (joint spheres + bone cylinders),
+  isolating the Three.js dependency from the core entry point.
+- Added `/characters-lab`: walk/run gait, sit-pose blend, and head look-at that
+  resolves the target in the character's local frame (so yaw/pitch stay correct
+  while the character turns).
+- Verified: 29 character specs pass and the library + demo app build clean.
+- Left for later: reach IK, emotion vocabulary/mood table, and the authored-clip
+  rest-pose retargeting seam.

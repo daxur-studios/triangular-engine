@@ -54,6 +54,9 @@
       "triangular-engine/characters": [
         "projects/triangular-engine/characters/public-api"
       ],
+      "triangular-engine/characters/three": [
+        "projects/triangular-engine/characters/three/public-api"
+      ],
       "triangular-engine/navigation": [
         "projects/triangular-engine/navigation/public-api"
       ],
