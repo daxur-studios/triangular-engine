@@ -2,7 +2,7 @@
   <aside class="panel">
     <a routerLink="/" class="back-link">&larr; Demo index</a>
     <h1>Cell Planet Map</h1>
-    <p class="hint">Drag to pan, scroll to zoom, double-click to recenter the projection there.</p>
+    <p class="hint">Drag to pan, scroll to zoom, click a cell to select it, double-click to recenter the projection there.</p>
 
     <label class="field">
       <span>Cell count: {{ cellCount() }}</span>
@@ -36,7 +36,7 @@
         max="1"
         step="0.05"
         [value]="climateExtreme()"
-        (input)="onClimateExtremeInput($any($event.target).valueAsNumber)"
+        (input)="climateExtreme.set($any($event.target).valueAsNumber)"
       />
     </label>
 
@@ -48,7 +48,7 @@
         max="1"
         step="0.05"
         [value]="waterLevel()"
-        (input)="onWaterLevelInput($any($event.target).valueAsNumber)"
+        (input)="waterLevel.set($any($event.target).valueAsNumber)"
       />
     </label>
 
@@ -75,25 +75,24 @@
         max="4000"
         step="100"
         [value]="iconBudget()"
-        (input)="onIconDensityInput($any($event.target).valueAsNumber)"
+        (input)="iconBudget.set($any($event.target).valueAsNumber)"
       />
     </label>
 
     <div class="button-row">
-      <button type="button" (click)="regenerate()">Regenerate</button>
       <button type="button" (click)="randomizeSeed()">Random seed</button>
     </div>
 
     <label class="checkbox">
-      <input type="checkbox" [checked]="showIcons()" (change)="onIconsToggle()" />
+      <input type="checkbox" [checked]="showIcons()" (change)="showIcons.set($any($event.target).checked)" />
       Icons
     </label>
     <label class="checkbox">
-      <input type="checkbox" [checked]="showRivers()" (change)="onRiversToggle()" />
+      <input type="checkbox" [checked]="showRivers()" (change)="showRivers.set($any($event.target).checked)" />
       Rivers
     </label>
     <label class="checkbox">
-      <input type="checkbox" [checked]="showCellEdges()" (change)="onEdgesToggle()" />
+      <input type="checkbox" [checked]="showCellEdges()" (change)="showCellEdges.set($any($event.target).checked)" />
       Cell edges
     </label>
 
@@ -102,21 +101,49 @@
 
     <div class="stats">
       <div>Seed: {{ seed() }}</div>
-      <div>Build: {{ buildMs() }}</div>
-      <div>Zoom: {{ zoom().toFixed(1) }}x</div>
+      <div>Build: {{ map()?.buildMs()?.toFixed(1) ?? '—' }} ms</div>
+      <div>Zoom: {{ (map()?.zoomLevel() ?? 1).toFixed(1) }}x</div>
+      <div>Selected cell: {{ selectedCellId() ?? '—' }}</div>
     </div>
   </aside>
 
   <div
     class="viewport"
     #viewport
-    (wheel)="onWheel($event)"
-    (pointerdown)="onPointerDown($event)"
-    (pointermove)="onPointerMove($event)"
-    (pointerup)="onPointerUp()"
-    (pointerleave)="onPointerUp()"
-    (dblclick)="onMapDoubleClick($event)"
+    (wheel)="map()?.onWheel($event, viewport)"
+    (pointerdown)="map()?.onPointerDown($event)"
+    (pointermove)="map()?.onPointerMove($event, viewport)"
+    (pointerup)="map()?.onPointerUp()"
+    (pointerleave)="map()?.onPointerUp()"
+    (click)="map()?.onClick($event, viewport)"
+    (dblclick)="map()?.onDoubleClick($event, viewport)"
   >
-    <canvas #mapCanvas></canvas>
+    <scene>
+      <orthographicCamera
+        [position]="[0, 0, 10]"
+        [lookAt]="[0, 0, 0]"
+        [left]="-mapHalfWidth"
+        [right]="mapHalfWidth"
+        [top]="mapHalfHeight"
+        [bottom]="-mapHalfHeight"
+        [isActive]="true"
+      />
+
+      <cellPlanetMap
+        #mapComp
+        [cellCount]="cellCount()"
+        [seed]="seed()"
+        [worldProfileKind]="worldProfileKind()"
+        [climateExtreme]="climateExtreme()"
+        [season]="season()"
+        [waterLevel]="waterLevel()"
+        [showIcons]="showIcons()"
+        [iconBudget]="iconBudget()"
+        [showRivers]="showRivers()"
+        [showCellEdges]="showCellEdges()"
+        [highlightedCellIds]="highlightedCellIds()"
+        (cellClick)="onCellClick($event)"
+      />
+    </scene>
   </div>
 </div>

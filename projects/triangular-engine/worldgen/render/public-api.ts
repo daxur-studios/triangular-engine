@@ -6,3 +6,4 @@ export * from './color-ramps';
 export * from './world-size-tiers';
 export * from './flow-path';
 export * from './components/planet-view.component';
+export * from './components/cell-planet-map.component';
