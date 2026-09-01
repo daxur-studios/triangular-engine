@@ -29,6 +29,18 @@
     </label>
 
     <label class="field">
+      <span>Data layer</span>
+      <select
+        [value]="fillMode()"
+        (change)="fillMode.set($any($event.target).value)"
+      >
+        @for (mode of fillModes; track mode) {
+          <option [value]="mode">{{ mode }}</option>
+        }
+      </select>
+    </label>
+
+    <label class="field">
       <span>Climate: {{ climateExtreme() > 0 ? 'Hot/arid +' : climateExtreme() < 0 ? 'Ice age ' : 'Baseline ' }}{{ climateExtreme().toFixed(2) }}</span>
       <input
         type="range"
@@ -134,6 +146,7 @@
         [cellCount]="cellCount()"
         [seed]="seed()"
         [worldProfileKind]="worldProfileKind()"
+        [fillMode]="fillMode()"
         [climateExtreme]="climateExtreme()"
         [season]="season()"
         [waterLevel]="waterLevel()"

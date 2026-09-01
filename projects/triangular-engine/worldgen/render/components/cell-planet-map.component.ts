@@ -48,7 +48,7 @@ import {
   WORLD_PROFILES,
   WorldProfileKind,
 } from 'triangular-engine/worldgen';
-import { biomeColor, lavaOceanColor } from '../color-ramps';
+import { biomeColor, elevationColor, lavaOceanColor, moistureColor, plateColor, temperatureColor } from '../color-ramps';
 
 /** Fixed logical space every shape is drawn in via `mapPoint()` before `#rasterize()` maps it
  * onto the offscreen canvas backing the terrain `CanvasTexture` — not a bitmap resolution in its
@@ -65,14 +65,15 @@ const MAX_ZOOM = 14;
  * "inherent detail ceiling" trade `PlanetViewComponent`'s own mesh LOD makes. Every re-rasterize
  * (see `#rasterize()`) redraws the *entire* map — every cell, river, icon — at this resolution, so
  * this constant directly sets how long each one takes; 8192 (quadruple the pixel-fill cost of the
- * previous 4096) measurably reintroduced interaction lag (see `PARAM_DEBOUNCE_MS`/
+ * original 4096) measurably reintroduced interaction lag (see `PARAM_DEBOUNCE_MS`/
  * `RASTERIZE_DEBOUNCE_MS` above — debouncing *when* a rasterize fires doesn't shrink how long the
- * one that does fire takes). Back at 4096 the crisp-zoom ceiling is ~1.4x (dpr=1) instead of
- * ~2.7x, i.e. more of the zoom range reads soft — a real trade against `MAX_ZOOM` (14), made in
- * favor of interactivity. A single whole-map texture fundamentally can't stay crisp across a 14x
- * range regardless of this constant (that would need a >40000px-wide texture); fixing that for
- * real means re-rasterizing only the visible viewport region at high zoom. */
-const MAX_RASTER_DIM = 4096;
+ * one that does fire takes). 6144 (~2.25x the pixel-fill cost of 4096, still well under 8192's 4x)
+ * pushes the crisp-zoom ceiling to ~2.1x (dpr=1) instead of 4096's ~1.4x — most of the low/mid zoom
+ * range is crisp now, but a lot of `MAX_ZOOM` (14) still reads soft at this dimension. A single
+ * whole-map texture fundamentally can't stay crisp across a 14x range regardless of this constant
+ * (that would need a >40000px-wide texture); fixing that for real means re-rasterizing only the
+ * visible viewport region at high zoom. */
+const MAX_RASTER_DIM = 6144;
 
 /** Trailing debounce applied to every wheel-driven zoom change before re-rasterizing the terrain
  * texture at the new resolution — see `#requestRasterize()`. Re-rasterizing the whole map on every
@@ -385,6 +386,8 @@ export interface IProjectionRecenteredEvent {
  * Game-icon layer (bulk add/remove + smooth per-frame "follow") is a separate follow-up, not
  * built here — nothing above precludes adding it as a second object inside this component later.
  */
+export type CellPlanetMapFillMode = 'biome' | 'elevation' | 'plates' | 'temperature' | 'moisture' | 'land';
+
 @Component({
   selector: 'cellPlanetMap',
   imports: [],
@@ -418,6 +421,13 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
   // ==========================================================================
   // Rendering inputs
   // ==========================================================================
+  /** Which per-cell data drives the base terrain fill color - same mode set as `<planetView>`'s
+   * `renderMode` (`PlanetRenderMode`), independent named type here since the two components don't
+   * share an input contract. Lava (`oceanSubstance: 'lava'` worlds, or a `lava_lake` feature cell)
+   * always overrides the chosen mode - it isn't a fill mode itself, just a substance override that
+   * applies regardless of what data layer you're looking at. */
+  readonly fillMode = input<CellPlanetMapFillMode>('biome');
+
   /** Decorative, deterministic biome/feature glyphs (trees/mountains/etc.) baked into the
    * terrain raster - unrelated to any future game-marker icon layer. */
   readonly showIcons = input(true);
@@ -550,6 +560,7 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     });
 
     effect(() => {
+      this.fillMode();
       this.showIcons();
       this.iconBudget();
       this.showRivers();
@@ -948,6 +959,14 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     });
 
     const profile = WORLD_PROFILES[this.worldProfileKind()];
+    // Only actually read by 'elevation' fill mode, but cheap next to the per-cell fill loop below
+    // (the dominant cost of a rasterize) - not worth gating behind fillMode() === 'elevation'.
+    let elevMin = Infinity;
+    let elevMax = -Infinity;
+    for (const e of tectonics.elevation) {
+      if (e < elevMin) elevMin = e;
+      if (e > elevMax) elevMax = e;
+    }
     const highlightIdsInput = this.highlightedCellIds();
     const highlighted = highlightIdsInput instanceof Set ? highlightIdsInput : new Set(highlightIdsInput);
     const highlightColor = this.highlightColor();
@@ -1007,7 +1026,7 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
 
         ctx.fillStyle = highlighted.has(cell.id)
           ? highlightColor
-          : this.#resolveFillColor(cell.id, ecology, profile.oceanSubstance);
+          : this.#resolveFillColor(cell.id, tectonics, ecology, profile.oceanSubstance, elevMin, elevMax);
         ctx.beginPath();
         const p0 = mapPoint(lls[0]);
         ctx.moveTo(p0.x, p0.y);
@@ -1087,11 +1106,27 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     step();
   }
 
-  #resolveFillColor(cellId: number, ecology: IPlanetEcology, oceanSubstance: 'water' | 'lava'): string {
+  #resolveFillColor(
+    cellId: number,
+    tectonics: IPlanetTectonics,
+    ecology: IPlanetEcology,
+    oceanSubstance: 'water' | 'lava',
+    elevMin: number,
+    elevMax: number,
+  ): string {
     const feature = this.features.feature[cellId];
     const isLava =
       feature === 'lava_lake' || (oceanSubstance === 'lava' && ecology.waterBodyKind[cellId] === 'ocean');
     if (isLava) return lavaOceanColor();
+
+    const mode = this.fillMode();
+    if (mode === 'plates') return plateColor(tectonics.plateIdByCell[cellId]);
+    if (mode === 'elevation') {
+      return elevationColor(tectonics.elevation[cellId], tectonics.seaLevelElevation, elevMin, elevMax);
+    }
+    if (mode === 'temperature') return temperatureColor(ecology.temperature[cellId]);
+    if (mode === 'moisture') return moistureColor(ecology.moisture[cellId]);
+    if (mode === 'land') return tectonics.isLand[cellId] ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
     return biomeColor(ecology.biome[cellId]);
   }
 

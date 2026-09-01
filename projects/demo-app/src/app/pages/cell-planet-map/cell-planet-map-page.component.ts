@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, signal, viewChild } from 
 import { RouterLink } from '@angular/router';
 import { EngineModule, EngineService } from 'triangular-engine';
 import { WorldProfileKind } from 'triangular-engine/worldgen';
-import { CellPlanetMapComponent, ICellClickEvent, Season } from 'triangular-engine/worldgen/render';
+import { CellPlanetMapComponent, CellPlanetMapFillMode, ICellClickEvent, Season } from 'triangular-engine/worldgen/render';
 
 /** Half-extent (world units, = texture pixels at zoom 1) of `<cellPlanetMap>`'s fixed
  * `BASE_WIDTH`/`BASE_HEIGHT` map plane - must match the component's own internal constants (not
@@ -36,6 +36,8 @@ export class CellPlanetMapPageComponent {
   readonly cellCount = signal(1500);
   readonly seed = signal(1);
   readonly worldProfileKind = signal<WorldProfileKind>('terran');
+  readonly fillMode = signal<CellPlanetMapFillMode>('biome');
+  readonly fillModes: CellPlanetMapFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture', 'land'];
   readonly showIcons = signal(true);
   readonly showRivers = signal(true);
   readonly showCellEdges = signal(false);
