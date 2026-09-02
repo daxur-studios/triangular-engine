@@ -394,3 +394,17 @@ Also confirm:
 - Verified: 65 character specs pass. Demo wiring (emotion/speech controls) is
   deferred until the procedural face mesh lands in `triangular-engine/procedural`.
 
+### 2026-09-02 — Procedural body mesh + demo emotion/speech
+
+- The `procedural` side landed `buildCharacterBodyMesh` (skinned humanoid body,
+  finger-count LODs, ARKit-compatible face morphs). Added `procedural/characters/
+  character-face.ts` (`arkitToCharacterFace`/`applyCharacterFacePose`) to project
+  the ARKit weights from `characters` onto the body mesh's seven morph targets.
+- Wired `/characters-lab`: the body mesh is skinned to the same `Skeleton` the
+  visualization drives, and an emotion `<select>` plus a speech input/Speak button
+  drive `morphTargetInfluences` from `sampleEmotion` + text-estimated visemes
+  (browser `speechSynthesis` supplies the voice; viseme timing is grapheme-based).
+- Verified: 66 character specs + 224 procedural specs pass; library and demo app
+  build clean.
+
+

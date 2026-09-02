@@ -291,3 +291,15 @@ export function blendBlendShapeWeights(
   }
   return result;
 }
+
+/** Combines weight maps by taking the max per key (emotion + speech, blinks, …). */
+export function mergeBlendShapeWeights(...maps: BlendShapeWeights[]): BlendShapeWeights {
+  const result: Record<BlendshapeName, number> = {} as Record<BlendshapeName, number>;
+  for (const map of maps) {
+    for (const key of Object.keys(map) as BlendshapeName[]) {
+      const value = map[key] ?? 0;
+      result[key] = Math.max(result[key] ?? 0, value);
+    }
+  }
+  return result;
+}

@@ -21,6 +21,13 @@ All notable changes to triangular-engine are documented here.
   `triangular-engine/characters/three` gained `applyPoseToSkeleton` to retarget a
   `RigPose` onto any `THREE.Skeleton` sharing the canonical VRM/Mixamo bone names.
 
+- `triangular-engine/procedural` now builds a skinned humanoid body
+  (`buildCharacterBodyMesh`) with configurable finger-count LODs and an
+  ARKit-compatible face, plus `arkitToCharacterFace`/`applyCharacterFacePose` to
+  drive its seven face morph targets from emotion/viseme blendshape weights. The
+  `/characters-lab` demo now renders that body and exposes emotion and
+  browser-TTS speech controls.
+
 - Redesigned the procedural planetary surface architecture for `triangular-engine/celestial`
   optimized for gameplay, base-building, and exploration:
   - Added `terrace-fractal-3d` (`ITerraceFractalTerrainGeneratorDef`) for stepped flat-topped tablelands and mesas.

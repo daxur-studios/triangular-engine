@@ -2,6 +2,7 @@ import {
   ARKIT_BLENDSHAPE_NAMES,
   blendBlendShapeWeights,
   EMOTION_NAMES,
+  mergeBlendShapeWeights,
   OCULUS_TO_ARKIT,
   sampleEmotion,
 } from './blend-shapes';
@@ -40,5 +41,15 @@ describe('blend-shapes', () => {
     expect(result.jawOpen).toBeCloseTo(0.5, 6);
     expect(result.mouthPucker).toBeCloseTo(0.25, 6);
     expect(blendBlendShapeWeights({ jawOpen: 1 }, { jawOpen: 1 }, 1).jawOpen).toBeCloseTo(1, 6);
+  });
+
+  it('merges weight maps by taking the max per key', () => {
+    const merged = mergeBlendShapeWeights(
+      { jawOpen: 0.4, mouthSmileLeft: 0.6 },
+      { jawOpen: 0.8, browInnerUp: 0.3 },
+    );
+    expect(merged.jawOpen).toBeCloseTo(0.8, 6);
+    expect(merged.mouthSmileLeft).toBeCloseTo(0.6, 6);
+    expect(merged.browInnerUp).toBeCloseTo(0.3, 6);
   });
 });

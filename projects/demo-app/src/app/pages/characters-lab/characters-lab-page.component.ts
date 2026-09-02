@@ -1,19 +1,30 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, inject } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Group, Mesh, MeshStandardMaterial, PlaneGeometry, SphereGeometry, Vector3 } from 'three';
+import { Group, Mesh, MeshStandardMaterial, PlaneGeometry, SkinnedMesh, SphereGeometry, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
   applyLookAt,
   blendPoses,
   createHumanoidRig,
+  EMOTION_NAMES,
   HUMAN_BONE_NAMES,
+  mergeBlendShapeWeights,
+  preProcessText,
+  sampleEmotion,
   sampleLocomotion,
+  sampleVisemeTrack,
   SIT_POSE,
   solveTwoBoneIk,
+  visemeToBlendShapes,
+  wordsToVisemes,
+  type BlendShapeWeights,
+  type EmotionName,
   type LocomotionMode,
   type RigPose,
+  type VisemeKeyframe,
 } from 'triangular-engine/characters';
 import { HumanoidRigVisualization } from 'triangular-engine/characters/three';
+import { applyCharacterFacePose, buildCharacterBodyMesh } from 'triangular-engine/procedural';
 
 const WALK_RADIUS = 1.6;
 const TARGET_RADIUS = 2.5;
@@ -34,10 +45,15 @@ export class CharactersLabPageComponent {
   protected lookEnabled = true;
   protected reachEnabled = false;
 
+  protected emotion: EmotionName = 'happy';
+  protected speechText = 'Hello there, welcome to the characters lab!';
+  protected readonly emotions = EMOTION_NAMES;
+
   private readonly engine = inject(EngineService);
   private readonly rig = createHumanoidRig();
   private readonly visualization = new HumanoidRigVisualization(this.rig);
   private readonly character = new Group();
+  private readonly bodyMesh: SkinnedMesh;
   private readonly ground: Mesh;
   private readonly target: Mesh;
 
@@ -46,6 +62,11 @@ export class CharactersLabPageComponent {
   private targetSwing = 0;
   private elapsed = 0;
   private sitBlend = 0;
+
+  private visemeTrack: readonly VisemeKeyframe[] = [];
+  private speechStartedAt = 0;
+  private speechTrackDuration = 0;
+  private speaking = false;
 
   constructor() {
     this.ground = new Mesh(
@@ -58,6 +79,13 @@ export class CharactersLabPageComponent {
       new SphereGeometry(0.09, 16, 12),
       new MeshStandardMaterial({ color: '#ff6b6b', roughness: 0.4, emissive: 0x330000 }),
     );
+
+    this.bodyMesh = buildCharacterBodyMesh(this.rig, this.visualization.skeleton, {
+      seed: 'characters-lab',
+      fingerCount: 5,
+      includeFaceMorphs: true,
+    });
+    this.visualization.group.add(this.bodyMesh);
 
     this.character.add(this.visualization.group);
     this.engine.scene.add(this.character, this.ground, this.target);
@@ -83,6 +111,30 @@ export class CharactersLabPageComponent {
 
   protected toggleReach(): void {
     this.reachEnabled = !this.reachEnabled;
+  }
+
+  protected setEmotion(emotion: EmotionName): void {
+    this.emotion = emotion;
+  }
+
+  protected speak(): void {
+    const words = preProcessText(this.speechText);
+    if (words.length === 0) return;
+
+    this.visemeTrack = wordsToVisemes(words);
+    this.speechTrackDuration = this.visemeTrack.reduce((total, keyframe) => total + keyframe.duration, 0);
+    this.speechStartedAt = performance.now();
+    this.speaking = true;
+
+    const utterance = new SpeechSynthesisUtterance(this.speechText);
+    utterance.onend = () => {
+      this.speaking = false;
+    };
+    utterance.onerror = () => {
+      this.speaking = false;
+    };
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
   }
 
   private update(deltaSeconds: number): void {
@@ -113,6 +165,29 @@ export class CharactersLabPageComponent {
     }
 
     this.visualization.setPose(pose);
+    this.applyFace();
+  }
+
+  private applyFace(): void {
+    const emotion = sampleEmotion(this.emotion);
+
+    let visemeWeights: BlendShapeWeights = {};
+    if (this.speaking) {
+      const elapsed = (performance.now() - this.speechStartedAt) / 1000;
+      if (elapsed > this.speechTrackDuration) {
+        this.speaking = false;
+      } else {
+        visemeWeights = visemeToBlendShapes(sampleVisemeTrack(this.visemeTrack, elapsed));
+      }
+    }
+
+    const blinkPhase = this.elapsed % 3.5;
+    const blink = blinkPhase < 0.12 ? 1 - Math.abs((blinkPhase - 0.06) / 0.06) : 0;
+
+    applyCharacterFacePose(
+      this.bodyMesh,
+      mergeBlendShapeWeights(emotion, visemeWeights, { eyeBlinkLeft: blink, eyeBlinkRight: blink }),
+    );
   }
 
   private updateTarget(deltaSeconds: number): Vector3 {
@@ -167,10 +242,13 @@ export class CharactersLabPageComponent {
   }
 
   private dispose(): void {
+    window.speechSynthesis.cancel();
     this.character.removeFromParent();
     this.ground.removeFromParent();
     this.target.removeFromParent();
     this.visualization.dispose();
+    this.bodyMesh.geometry.dispose();
+    (this.bodyMesh.material as MeshStandardMaterial).dispose();
     this.ground.geometry.dispose();
     (this.ground.material as MeshStandardMaterial).dispose();
     this.target.geometry.dispose();
