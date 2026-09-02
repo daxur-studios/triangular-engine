@@ -7,6 +7,7 @@ export * from './core/dual-cells';
 export * from './core/corner-graph';
 export * from './core/lloyd-relaxation';
 export * from './core/planet-graph';
+export * from './core/cell-path';
 export * from './core/plate-tectonics';
 export * from './core/plate-boundaries';
 export * from './core/elevation';
