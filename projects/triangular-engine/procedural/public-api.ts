@@ -17,4 +17,5 @@ export * from './ground-cover/ground-cover-species-catalog';
 export * from './parts/public-api';
 export * from './structures/public-api';
 export * from './cities/public-api';
+export * from './characters/public-api';
 

@@ -13,6 +13,14 @@ All notable changes to triangular-engine are documented here.
   and shortest-arc/Euler helpers that IK depends on, and
   `solveForwardKinematics` now also returns per-bone world orientations by name.
 
+- `triangular-engine/characters` now ships facial emotion and speech primitives:
+  the ARKit 52 blendshape vocabulary (with an Oculus/VRM name translation),
+  a small emotion vocabulary with `sampleEmotion`/`blendBlendShapeWeights`, and
+  `preProcessText`/`wordsToVisemes`/`sampleVisemeTrack`/`visemeToBlendShapes` for
+  deterministic text → timed-viseme → blendshape lipsync that works with any TTS.
+  `triangular-engine/characters/three` gained `applyPoseToSkeleton` to retarget a
+  `RigPose` onto any `THREE.Skeleton` sharing the canonical VRM/Mixamo bone names.
+
 - Redesigned the procedural planetary surface architecture for `triangular-engine/celestial`
   optimized for gameplay, base-building, and exploration:
   - Added `terrace-fractal-3d` (`ITerraceFractalTerrainGeneratorDef`) for stepped flat-topped tablelands and mesas.

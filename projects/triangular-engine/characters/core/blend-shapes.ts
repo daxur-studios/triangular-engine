@@ -266,6 +266,7 @@ export function sampleEmotion(emotion: EmotionName, intensity = 1): BlendShapeWe
   const scale = clampWeight(intensity);
   const base = EMOTION_WEIGHTS[emotion];
   if (scale === 1) return base;
+  if (scale === 0) return EMOTION_WEIGHTS.neutral;
   const result: Record<BlendshapeName, number> = {} as Record<BlendshapeName, number>;
   for (const key of Object.keys(base) as BlendshapeName[]) {
     result[key] = base[key]! * scale;

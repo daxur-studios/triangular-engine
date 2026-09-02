@@ -7,3 +7,5 @@ export * from './core/poses';
 export * from './core/locomotion';
 export * from './core/look-at';
 export * from './core/reach-ik';
+export * from './core/blend-shapes';
+export * from './core/visemes';

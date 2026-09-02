@@ -2,8 +2,8 @@
 
 `triangular-engine/characters` provides framework-free humanoid-character
 primitives: a canonical humanoid bone vocabulary, a procedural rig, forward
-kinematics, locomotion, look-at, poses, and two-bone reach IK. Emotion is
-planned.
+kinematics, locomotion, look-at, poses, two-bone reach IK, and facial emotion
+(ARKit blendshapes) plus speech visemes.
 
 The core intentionally does not own authored animation content, game locomotion
 state machines, AI, or rendering. Games drive characters through intents and
@@ -61,6 +61,34 @@ view.setPose(sampleLocomotion('run', 2).pose);
 
 // Exposed for skinned-mesh / authored-clip integration later.
 const { bones, skeleton } = view;
+```
+
+`applyPoseToSkeleton` retargets a `RigPose` onto any `THREE.Skeleton` whose bones
+use the canonical VRM/Mixamo names, so a GLB/glTF character can be driven by the
+same motion (with an optional bone-name mapper for non-standard rigs):
+
+```ts
+import { applyPoseToSkeleton } from 'triangular-engine/characters/three';
+applyPoseToSkeleton(pose, gltfSkeleton);
+```
+
+### Facial emotion and speech
+
+The core emits ARKit blendshape weights (`0..1`) and a deterministic
+text → timed-viseme track, so a head with morph targets can smile or talk without
+a TTS-specific viseme source:
+
+```ts
+import {
+  sampleEmotion,
+  visemeToBlendShapes,
+  wordsToVisemes,
+  sampleVisemeTrack,
+} from 'triangular-engine/characters';
+
+const emotion = sampleEmotion('happy', 0.8);          // ARKit weight map
+const track = wordsToVisemes(['hello', 'there']);     // timed viseme keyframes
+const speaking = visemeToBlendShapes(sampleVisemeTrack(track, 0.3));
 ```
 
 See the demo app's `/characters-lab` route for the bones-only slice and

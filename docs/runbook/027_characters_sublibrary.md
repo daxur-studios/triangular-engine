@@ -375,3 +375,22 @@ Also confirm:
   summed to 2.0 (pitch 1.75), so the accumulated chain doubled the head turn.
   Normalized the weights to sum to 1.0 and added FK-based regression tests.
 - Verified: 47 character specs pass and the library + demo app build clean.
+
+### 2026-09-02 — Emotion, visemes, and skeleton retargeting
+
+- Added `core/blend-shapes.ts`: the canonical ARKit 52 blendshape names, an
+  Oculus/VRM → ARKit translation map, a small emotion vocabulary
+  (`neutral`/`happy`/`sad`/`angry`/`surprised`/`fearful`/`disgusted`), and
+  `sampleEmotion`/`blendBlendShapeWeights`. Weights are plain `0..1` data, so the
+  Three.js layer just writes `morphTargetInfluences`.
+- Added `core/visemes.ts`: a 15-viseme articulatory set with `preProcessText`,
+  `wordsToVisemes` (grapheme → timed keyframes at a speaking rate), and
+  `sampleVisemeTrack`/`visemeToBlendShapes`. Deliberately approximate so lipsync
+  works with `speechSynthesis` (which exposes no viseme timestamps); real TTS
+  viseme events can feed `visemeToBlendShapes` directly.
+- Added `three/pose-to-skeleton.ts`: `applyPoseToSkeleton` retargets a `RigPose`
+  onto any `THREE.Skeleton` by canonical bone name (with an optional name mapper),
+  bridging the procedural motion to authored GLB/glTF characters.
+- Verified: 65 character specs pass. Demo wiring (emotion/speech controls) is
+  deferred until the procedural face mesh lands in `triangular-engine/procedural`.
+
