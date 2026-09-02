@@ -68,7 +68,12 @@ export class CellPlanetMapUnitsComponent extends Object3DComponent implements On
   readonly units = input<readonly ICellPlanetMapUnitInstance[]>([]);
 
   readonly #geometry = new PlaneGeometry(ICON_SIZE, ICON_SIZE);
-  readonly #material = new MeshBasicMaterial({ vertexColors: true });
+  // No `vertexColors: true` here: that flag makes three.js read a per-vertex `color` geometry
+  // attribute, which `PlaneGeometry` doesn't have - the unbound attribute defaults to (0,0,0),
+  // zeroing every instance to black. Per-instance color via `setColorAt`/`instanceColor` is a
+  // separate three.js pathway (`USE_INSTANCING_COLOR`) that applies automatically whenever
+  // `instanceColor` exists, with no material flag needed.
+  readonly #material = new MeshBasicMaterial();
 
   readonly #mesh = signal<InstancedMesh>(this.#createMesh(INITIAL_CAPACITY));
   override object3D: WritableSignal<Object3D> = this.#mesh;

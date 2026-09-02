@@ -139,7 +139,7 @@
     (click)="map()?.onClick($event, viewport)"
     (dblclick)="map()?.onDoubleClick($event, viewport)"
   >
-    <scene>
+    <scene [showFps]="true">
       <orthographicCamera
         [position]="[0, 0, 10]"
         [lookAt]="[0, 0, 0]"
