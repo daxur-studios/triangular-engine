@@ -1,8 +1,15 @@
 import { ChangeDetectionStrategy, Component, computed, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { EngineModule, EngineService } from 'triangular-engine';
-import { WorldProfileKind } from 'triangular-engine/worldgen';
-import { CellPlanetMapComponent, CellPlanetMapFillMode, ICellClickEvent, Season } from 'triangular-engine/worldgen/render';
+import { IVec3, WorldProfileKind } from 'triangular-engine/worldgen';
+import {
+  CellPlanetMapComponent,
+  CellPlanetMapFillMode,
+  CellPlanetMapUnitsComponent,
+  ICellClickEvent,
+  ICellPlanetMapUnitInstance,
+  Season,
+} from 'triangular-engine/worldgen/render';
 
 /** Half-extent (world units, = texture pixels at zoom 1) of `<cellPlanetMap>`'s fixed
  * `BASE_WIDTH`/`BASE_HEIGHT` map plane - must match the component's own internal constants (not
@@ -10,6 +17,25 @@ import { CellPlanetMapComponent, CellPlanetMapFillMode, ICellClickEvent, Season 
  * the map at zoom 1. */
 const MAP_HALF_WIDTH = 1500;
 const MAP_HALF_HEIGHT = 750;
+
+const UNIT_COLORS = ['#ff6b6b', '#4dabf7', '#69db7c', '#ffd43b', '#da77f2', '#ff922b'];
+
+/** Rejection-sampled uniform point on the unit sphere - demo-only, just to scatter spawned units
+ * around; not part of any shared worldgen sampling utility. */
+function randomSphereDirection(): IVec3 {
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  let lengthSq = 0;
+  do {
+    x = Math.random() * 2 - 1;
+    y = Math.random() * 2 - 1;
+    z = Math.random() * 2 - 1;
+    lengthSq = x * x + y * y + z * z;
+  } while (lengthSq === 0 || lengthSq > 1);
+  const length = Math.sqrt(lengthSq);
+  return { x: x / length, y: y / length, z: z / length };
+}
 
 /**
  * Thin wrapper around `<cellPlanetMap>` (`triangular-engine/worldgen/render`) - this page owns
@@ -20,7 +46,7 @@ const MAP_HALF_HEIGHT = 750;
  */
 @Component({
   selector: 'app-cell-planet-map-page',
-  imports: [RouterLink, EngineModule, CellPlanetMapComponent],
+  imports: [RouterLink, EngineModule, CellPlanetMapComponent, CellPlanetMapUnitsComponent],
   templateUrl: './cell-planet-map-page.component.html',
   styleUrl: './cell-planet-map-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -58,6 +84,12 @@ export class CellPlanetMapPageComponent {
     return id === null ? [] : [id];
   });
 
+  /** First-slice proof-out of `<cellPlanetMapUnits>`: "Spawn units" scatters a batch at random
+   * sphere positions, then clicking any cell sends every current unit gliding toward it - reusing
+   * the map's existing click-to-cell output, no new interaction plumbing needed. */
+  readonly units = signal<ICellPlanetMapUnitInstance[]>([]);
+  #nextUnitId = 0;
+
   randomizeSeed(): void {
     this.seed.set(Math.floor(Math.random() * 1_000_000));
   }
@@ -68,6 +100,20 @@ export class CellPlanetMapPageComponent {
 
   onCellClick(event: ICellClickEvent): void {
     this.selectedCellId.set(event.cellId);
+    this.units.update((current) => current.map((unit) => ({ ...unit, targetPosition: event.direction })));
+  }
+
+  spawnUnits(count = 50): void {
+    const spawned: ICellPlanetMapUnitInstance[] = Array.from({ length: count }, () => ({
+      id: `unit-${this.#nextUnitId++}`,
+      position: randomSphereDirection(),
+      color: UNIT_COLORS[Math.floor(Math.random() * UNIT_COLORS.length)],
+    }));
+    this.units.update((current) => [...current, ...spawned]);
+  }
+
+  clearUnits(): void {
+    this.units.set([]);
   }
 
   resetView(): void {

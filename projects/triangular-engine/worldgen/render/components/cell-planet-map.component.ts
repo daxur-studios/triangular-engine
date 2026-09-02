@@ -776,6 +776,34 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     return { forward, up, right };
   }
 
+  /** Sphere direction -> canvas-space `{x,y}` (`0..BASE_WIDTH`/`0..BASE_HEIGHT`, y-down, origin
+   * top-left), through the given basis - the same lon/lat + mapPoint composition `#rasterize()`'s
+   * own `lonLat()`/`mapPoint()` closures use (kept separate there since a few callers need the
+   * intermediate lon/lat, e.g. seam-splitting). Factored out so `projectDirectionToLocalPoint()`
+   * below doesn't duplicate it. Canvas space, not plane-local space - see that method for the
+   * distinction (same one `#sphereDirectionFromLocalPoint()`'s `canvasX`/`canvasY` locals draw). */
+  #directionToCanvasPoint(direction: IVec3, basis: { forward: IVec3; up: IVec3; right: IVec3 }): { x: number; y: number } {
+    const lon = Math.atan2(dot(direction, basis.right), dot(direction, basis.forward));
+    const lat = Math.asin(Math.max(-1, Math.min(1, dot(direction, basis.up))));
+    return {
+      x: ((lon / Math.PI) * 0.5 + 0.5) * BASE_WIDTH,
+      y: (1 - ((lat / (Math.PI / 2)) * 0.5 + 0.5)) * BASE_HEIGHT,
+    };
+  }
+
+  /** Sphere direction -> plane-local `{x,y}` (`BASE_WIDTH`/`BASE_HEIGHT` space, origin at map
+   * center, +Y = north = up) - the same space `resolveCellAt()`'s `localPoint` parameter and
+   * `#screenToLocalPoint()` use, and the space a sibling Object3D (e.g. `<cellPlanetMapUnits>`)
+   * should position itself in, since it shares this component's own local coordinate frame (both
+   * are children of the same `Group`). Uses the *current* `projectionCenter()` basis, recomputed
+   * fresh on every call (cheap - this is meant for a handful of per-tick calls, not the
+   * thousands-of-corners rasterize loop), so a caller re-projecting every frame automatically stays
+   * correct across a `recenterProjection()` with no extra invalidation wiring. */
+  projectDirectionToLocalPoint(direction: IVec3): { x: number; y: number } {
+    const canvas = this.#directionToCanvasPoint(direction, this.#projectionBasis());
+    return { x: canvas.x - BASE_WIDTH / 2, y: BASE_HEIGHT / 2 - canvas.y };
+  }
+
   // ==========================================================================
   // Generation / ecology
   // ==========================================================================

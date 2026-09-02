@@ -111,6 +111,15 @@
     <button type="button" (click)="resetView()">Reset view</button>
     <button type="button" (click)="resetProjectionCenter()">Reset projection center</button>
 
+    <div class="field">
+      <span>Units ({{ units().length }})</span>
+      <div class="button-row">
+        <button type="button" (click)="spawnUnits(50)">Spawn 50</button>
+        <button type="button" (click)="clearUnits()">Clear</button>
+      </div>
+      <p class="hint">Click a cell to send every unit gliding toward it.</p>
+    </div>
+
     <div class="stats">
       <div>Seed: {{ seed() }}</div>
       <div>Build: {{ map()?.buildMs()?.toFixed(1) ?? '—' }} ms</div>
@@ -156,7 +165,9 @@
         [showCellEdges]="showCellEdges()"
         [highlightedCellIds]="highlightedCellIds()"
         (cellClick)="onCellClick($event)"
-      />
+      >
+        <cellPlanetMapUnits [units]="units()" />
+      </cellPlanetMap>
     </scene>
   </div>
 </div>
