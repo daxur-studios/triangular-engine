@@ -32,3 +32,27 @@ export function normalizeCharacterVector3(out: CharacterVector3): CharacterVecto
   }
   return out;
 }
+
+export function characterVectorAdd(a: CharacterVector3, b: CharacterVector3): CharacterVector3 {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
+
+export function characterVectorSubtract(a: CharacterVector3, b: CharacterVector3): CharacterVector3 {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+
+export function characterVectorScale(a: CharacterVector3, scale: number): CharacterVector3 {
+  return { x: a.x * scale, y: a.y * scale, z: a.z * scale };
+}
+
+export function characterVectorDot(a: CharacterVector3, b: CharacterVector3): number {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+export function characterVectorCross(a: CharacterVector3, b: CharacterVector3): CharacterVector3 {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  };
+}

@@ -1,18 +1,16 @@
 import {
-  BufferAttribute,
-  BufferGeometry,
+  Bone,
+  Color,
+  Euler,
   Group,
-  LineBasicMaterial,
-  LineSegments,
   Mesh,
   MeshBasicMaterial,
+  Quaternion,
+  Skeleton,
+  SkeletonHelper,
   SphereGeometry,
 } from 'three';
-import {
-  solveForwardKinematics,
-  type HumanoidRig,
-  type RigPose,
-} from 'triangular-engine/characters';
+import type { HumanoidRig, RigPose } from 'triangular-engine/characters';
 
 export interface BonesVisualizationOptions {
   readonly jointRadius?: number;
@@ -21,24 +19,27 @@ export interface BonesVisualizationOptions {
 }
 
 /**
- * Draws a `HumanoidRig` the way three.js debug skeletons look: a thin line from
- * each joint to its parent (like `THREE.SkeletonHelper`), plus a small joint
- * marker per bone. `setPose` re-resolves the rig through forward kinematics and
- * rewrites every line vertex and marker position.
+ * Builds a real `THREE.Bone` tree that mirrors a `HumanoidRig`, wrapped with a
+ * `THREE.Skeleton` for later `SkinnedMesh`/`AnimationMixer` use. The rig's
+ * per-bone XYZ Euler pose is applied as local bone quaternions and three.js
+ * resolves the hierarchy, while `THREE.SkeletonHelper` draws the parent→child
+ * lines and a small sphere marks each joint.
  */
 export class HumanoidRigVisualization {
   readonly group = new Group();
+  /** The bone tree, in rig order (parent before child). */
+  readonly bones: Bone[] = [];
+  /** A `THREE.Skeleton` over `bones`, inversed in the rest pose. */
+  readonly skeleton: Skeleton;
 
   private readonly rig: HumanoidRig;
-  private readonly indexByName = new Map<string, number>();
-  private readonly jointMeshes: Mesh[] = [];
-
-  private readonly lineGeometry: BufferGeometry;
-  private readonly lineMaterial: LineBasicMaterial;
+  private readonly rootBone: Bone;
+  private readonly helper: SkeletonHelper;
   private readonly jointGeometry: SphereGeometry;
   private readonly jointMaterial: MeshBasicMaterial;
 
-  private readonly vertices: Float32Array;
+  private readonly euler = new Euler(0, 0, 0, 'XYZ');
+  private readonly quaternion = new Quaternion();
 
   constructor(rig: HumanoidRig, options: BonesVisualizationOptions = {}) {
     this.rig = rig;
@@ -46,54 +47,63 @@ export class HumanoidRigVisualization {
     const jointColor = options.jointColor ?? 0x9ad6ff;
     const lineColor = options.lineColor ?? 0x4fc3f7;
 
-    const segmentCount = rig.bones.filter((bone) => bone.parent !== null).length;
-    this.vertices = new Float32Array(segmentCount * 2 * 3);
-    this.lineGeometry = new BufferGeometry();
-    this.lineGeometry.setAttribute('position', new BufferAttribute(this.vertices, 3));
-    this.lineMaterial = new LineBasicMaterial({ color: lineColor });
+    const boneByName = new Map<string, Bone>();
+    for (const bone of rig.bones) {
+      const threeBone = new Bone();
+      threeBone.name = bone.name;
+      this.bones.push(threeBone);
+      boneByName.set(bone.name, threeBone);
+    }
+
+    for (const bone of rig.bones) {
+      const threeBone = boneByName.get(bone.name)!;
+      const parentPosition = bone.parent === null
+        ? { x: 0, y: 0, z: 0 }
+        : rig.boneByName.get(bone.parent)!.restPosition;
+      threeBone.position.set(
+        bone.restPosition.x - parentPosition.x,
+        bone.restPosition.y - parentPosition.y,
+        bone.restPosition.z - parentPosition.z,
+      );
+      if (bone.parent !== null) boneByName.get(bone.parent)!.add(threeBone);
+    }
+
+    this.rootBone = this.bones[0];
+    this.rootBone.updateMatrixWorld(true);
+    this.skeleton = new Skeleton(this.bones);
+
+    this.helper = new SkeletonHelper(this.rootBone);
+    this.helper.setColors(new Color(lineColor), new Color(lineColor));
+    this.helper.frustumCulled = false;
+    // `SkeletonHelper` stores `matrix = root.matrixWorld` and is meant to live at
+    // the scene root. Because we parent it under `group` (which the caller may
+    // transform), point its matrix at the root bone's *local* matrix instead, so
+    // `matrixWorld = group.matrixWorld * root.matrix` resolves to the same space
+    // as the root bone and avoids double-applying `group`'s transform.
+    this.helper.matrix = this.rootBone.matrix;
 
     this.jointGeometry = new SphereGeometry(jointRadius, 8, 6);
     this.jointMaterial = new MeshBasicMaterial({ color: jointColor });
+    for (const bone of this.bones) {
+      bone.add(new Mesh(this.jointGeometry, this.jointMaterial));
+    }
 
-    const lines = new LineSegments(this.lineGeometry, this.lineMaterial);
-    lines.frustumCulled = false;
-    this.group.add(lines);
-
-    rig.bones.forEach((bone, index) => {
-      this.indexByName.set(bone.name, index);
-      const joint = new Mesh(this.jointGeometry, this.jointMaterial);
-      joint.position.set(bone.restPosition.x, bone.restPosition.y, bone.restPosition.z);
-      this.group.add(joint);
-      this.jointMeshes.push(joint);
-    });
+    this.group.add(this.rootBone, this.helper);
 
     this.setPose({});
   }
 
   setPose(pose: RigPose = {}): void {
-    const solved = solveForwardKinematics(this.rig, pose);
-    let offset = 0;
-    for (const bone of this.rig.bones) {
-      if (bone.parent === null) continue;
-      const parent = solved.positions[this.indexByName.get(bone.parent)!];
-      const position = solved.positions[this.indexByName.get(bone.name)!];
-      this.vertices[offset++] = parent.x;
-      this.vertices[offset++] = parent.y;
-      this.vertices[offset++] = parent.z;
-      this.vertices[offset++] = position.x;
-      this.vertices[offset++] = position.y;
-      this.vertices[offset++] = position.z;
+    for (let index = 0; index < this.rig.bones.length; index++) {
+      const rotation = pose[this.rig.bones[index].name];
+      this.euler.set(rotation?.[0] ?? 0, rotation?.[1] ?? 0, rotation?.[2] ?? 0, 'XYZ');
+      this.quaternion.setFromEuler(this.euler);
+      this.bones[index].quaternion.copy(this.quaternion);
     }
-    this.lineGeometry.getAttribute('position').needsUpdate = true;
-
-    solved.positions.forEach((position, index) => {
-      this.jointMeshes[index].position.set(position.x, position.y, position.z);
-    });
   }
 
   dispose(): void {
-    this.lineGeometry.dispose();
-    this.lineMaterial.dispose();
+    this.helper.dispose();
     this.jointGeometry.dispose();
     this.jointMaterial.dispose();
     this.group.removeFromParent();

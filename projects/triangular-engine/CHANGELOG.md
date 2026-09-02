@@ -6,6 +6,13 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `triangular-engine/characters` now exports analytic two-bone reach IK
+  (`solveTwoBoneIk`) over any parent→mid→end bone chain, with elbow pole
+  control, out-of-range/folded clamping, and `reached`/`elbow`/`end` results.
+  `character-vector` and `character-quaternion` gained the dot/cross/arithmetic
+  and shortest-arc/Euler helpers that IK depends on, and
+  `solveForwardKinematics` now also returns per-bone world orientations by name.
+
 - Redesigned the procedural planetary surface architecture for `triangular-engine/celestial`
   optimized for gameplay, base-building, and exploration:
   - Added `terrace-fractal-3d` (`ITerraceFractalTerrainGeneratorDef`) for stepped flat-topped tablelands and mesas.

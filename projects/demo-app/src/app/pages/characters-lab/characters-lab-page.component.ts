@@ -6,8 +6,10 @@ import {
   applyLookAt,
   blendPoses,
   createHumanoidRig,
+  HUMAN_BONE_NAMES,
   sampleLocomotion,
   SIT_POSE,
+  solveTwoBoneIk,
   type LocomotionMode,
   type RigPose,
 } from 'triangular-engine/characters';
@@ -30,6 +32,7 @@ export class CharactersLabPageComponent {
   protected mode: LocomotionMode = 'idle';
   protected sitEnabled = false;
   protected lookEnabled = true;
+  protected reachEnabled = false;
 
   private readonly engine = inject(EngineService);
   private readonly rig = createHumanoidRig();
@@ -78,6 +81,10 @@ export class CharactersLabPageComponent {
     this.lookEnabled = !this.lookEnabled;
   }
 
+  protected toggleReach(): void {
+    this.reachEnabled = !this.reachEnabled;
+  }
+
   private update(deltaSeconds: number): void {
     this.elapsed += deltaSeconds;
     const speed = this.sitEnabled ? 0 : this.mode === 'run' ? 2.1 : this.mode === 'walk' ? 0.9 : 0;
@@ -99,7 +106,11 @@ export class CharactersLabPageComponent {
     let pose = locomotion.pose;
     if (this.sitBlend > 0.0005) pose = blendPoses(pose, SIT_POSE, this.sitBlend);
 
-    if (this.lookEnabled) pose = this.applyLook(pose, this.updateTarget(deltaSeconds));
+    if (this.lookEnabled || this.reachEnabled) {
+      const localTarget = this.toLocal(this.updateTarget(deltaSeconds));
+      if (this.lookEnabled) pose = this.applyLook(pose, localTarget);
+      if (this.reachEnabled) pose = this.applyReach(pose, localTarget);
+    }
 
     this.visualization.setPose(pose);
   }
@@ -117,16 +128,42 @@ export class CharactersLabPageComponent {
   }
 
   private applyLook(basePose: RigPose, target: Vector3): RigPose {
-    const dx = target.x - this.character.position.x;
-    const dy = target.y - (this.character.position.y + this.headRestY);
-    const dz = target.z - this.character.position.z;
+    const yaw = Math.atan2(target.x, target.z);
+    const pitch = -Math.atan2(target.y - this.headRestY, Math.hypot(target.x, target.z));
+    return applyLookAt(basePose, { yaw, pitch });
+  }
+
+  private applyReach(basePose: RigPose, target: Vector3): RigPose {
+    const shoulder = this.rig.boneByName.get(HUMAN_BONE_NAMES.rightUpperArm)!.restPosition;
+    const dx = target.x - shoulder.x;
+    const dy = target.y - shoulder.y;
+    const dz = target.z - shoulder.z;
+    const distance = Math.hypot(dx, dy, dz);
+    const reachDistance = 0.45;
+    const reachTarget = distance > 1e-8
+      ? {
+          x: shoulder.x + (dx / distance) * reachDistance,
+          y: shoulder.y + (dy / distance) * reachDistance,
+          z: shoulder.z + (dz / distance) * reachDistance,
+        }
+      : { x: shoulder.x, y: shoulder.y - reachDistance, z: shoulder.z };
+    return solveTwoBoneIk(
+      this.rig,
+      basePose,
+      HUMAN_BONE_NAMES.rightUpperArm,
+      HUMAN_BONE_NAMES.rightLowerArm,
+      HUMAN_BONE_NAMES.rightHand,
+      reachTarget,
+    ).pose;
+  }
+
+  private toLocal(world: Vector3): Vector3 {
     const cosA = Math.cos(this.angle);
     const sinA = Math.sin(this.angle);
-    const localX = dx * cosA + dz * sinA;
-    const localZ = -dx * sinA + dz * cosA;
-    const yaw = Math.atan2(localX, localZ);
-    const pitch = -Math.atan2(dy, Math.hypot(localX, localZ));
-    return applyLookAt(basePose, { yaw, pitch });
+    const dx = world.x - this.character.position.x;
+    const dy = world.y - this.character.position.y;
+    const dz = world.z - this.character.position.z;
+    return new Vector3(dx * cosA + dz * sinA, dy, -dx * sinA + dz * cosA);
   }
 
   private dispose(): void {

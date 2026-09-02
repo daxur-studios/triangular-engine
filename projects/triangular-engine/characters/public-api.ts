@@ -6,3 +6,4 @@ export * from './core/forward-kinematics';
 export * from './core/poses';
 export * from './core/locomotion';
 export * from './core/look-at';
+export * from './core/reach-ik';

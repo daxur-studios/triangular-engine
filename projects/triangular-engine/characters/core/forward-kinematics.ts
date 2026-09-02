@@ -24,6 +24,7 @@ export interface RigWorldPose {
   /** World-space bone orientations, aligned with `rig.bones`. */
   readonly orientations: readonly CharacterQuaternion[];
   readonly positionByName: ReadonlyMap<HumanoidBoneName, CharacterVector3>;
+  readonly orientationByName: ReadonlyMap<HumanoidBoneName, CharacterQuaternion>;
 }
 
 /**
@@ -69,5 +70,5 @@ export function solveForwardKinematics(rig: HumanoidRig, pose: RigPose = IDENTIT
     orientationByName.set(bone.name, orientations[index]);
   }
 
-  return { positions, orientations, positionByName };
+  return { positions, orientations, positionByName, orientationByName };
 }

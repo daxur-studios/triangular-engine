@@ -3,8 +3,8 @@
 ## Status
 
 - State: **Phase 0 in progress.** Core rig, forward kinematics, locomotion,
-  look-at, poses, and the Three.js binding are implemented and verified; reach
-  IK and the emotion vocabulary are still pending. No authored mesh or
+  look-at, poses, reach IK, and the Three.js binding are implemented and
+  verified; the emotion vocabulary is still pending. No authored mesh or
   animation data is required.
 - Entry point: `triangular-engine/characters` (core) and
   `triangular-engine/characters/three` (Three.js binding).
@@ -243,7 +243,7 @@ projects/triangular-engine/characters/
 - [x] Define the canonical humanoid bone names/hierarchy.
 - [x] Build a procedural `HumanoidRig` (no mesh; bones drawn as lines/joints).
 - [x] Implement analytic walk/run gait, idle, look-at, and sit pose.
-- [ ] Implement reach IK (two-bone arm/hand).
+- [x] Implement reach IK (two-bone arm/hand).
 - [ ] Implement the emotion vocabulary + a small mood table (posture/head only).
 - [x] Add `/characters-lab` demo route: bones view + controls for look target,
       walk/run, sit.
@@ -341,3 +341,37 @@ Also confirm:
 - Verified: 29 character specs pass and the library + demo app build clean.
 - Left for later: reach IK, emotion vocabulary/mood table, and the authored-clip
   rest-pose retargeting seam.
+
+### 2026-09-02 — Reach IK, look-at clamps, line bones
+
+- Added `core/reach-ik.ts` with `solveTwoBoneIk`: analytic two-bone IK over any
+  parent→mid→end chain (arms today, legs for foot IK later). It solves the elbow
+  in the root→target/pole plane, clamps out-of-range and folded targets, and
+  reports `reached`/`elbow`/`end`. Rotations are produced as local XYZ Euler by
+  shortest-arc quaternions from each segment's rest direction, then composed
+  against the parent's solved orientation.
+- Extended `character-vector` (dot/cross/add/subtract/scale) and
+  `character-quaternion` (conjugate, `fromUnitVectors`, `toEulerXYZ`) to support
+  IK without any framework dependency. `solveForwardKinematics` now also returns
+  `orientationByName`.
+- Clamped head look-at yaw (±80°) and pitch (−52°/+40°); the demo target now
+  swings in a frontal arc ahead of the character and gait freezes while seated.
+- Switched `HumanoidRigVisualization` from spheres+cylinders to the conventional
+  skeleton look: parent→child `LineSegments` plus small joint dots.
+- Added a `Reach` toggle to `/characters-lab` so the right arm points at the
+  tracked target with two-bone IK.
+- Verified: 43 character specs pass and the library + demo app build clean.
+
+### 2026-09-02 — Real `THREE.Bone` skeleton + look-at overshoot fix
+
+- Reworked `HumanoidRigVisualization` to build an actual `THREE.Bone` tree from
+  the rig (local positions = rest offsets), wrapped with a `THREE.Skeleton`
+  inversed in the rest pose, and rendered via `THREE.SkeletonHelper` plus small
+  joint spheres. Poses are applied as local `THREE.Quaternion`s (intrinsic XYZ
+  Euler), so three.js resolves the hierarchy instead of the core FK solver, and
+  `view.bones`/`view.skeleton` are exposed for later `SkinnedMesh`/`AnimationMixer`
+  use. Added a binding spec asserting the bone tree matches `solveForwardKinematics`.
+- Fixed look-at overshoot: the yaw/pitch weights across spine→chest→neck→head
+  summed to 2.0 (pitch 1.75), so the accumulated chain doubled the head turn.
+  Normalized the weights to sum to 1.0 and added FK-based regression tests.
+- Verified: 47 character specs pass and the library + demo app build clean.

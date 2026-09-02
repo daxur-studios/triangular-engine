@@ -1,6 +1,8 @@
 import {
   characterQuaternionIdentity,
   characterQuaternionFromEuler,
+  characterQuaternionFromUnitVectors,
+  characterQuaternionToEulerXYZ,
   multiplyCharacterQuaternions,
   rotateCharacterVector3,
 } from './character-quaternion';
@@ -37,5 +39,28 @@ describe('characterQuaternion', () => {
     expect(out.y).toBeCloseTo(q.y, 6);
     expect(out.z).toBeCloseTo(q.z, 6);
     expect(out.w).toBeCloseTo(q.w, 6);
+  });
+
+  it('round-trips Euler through the quaternion and back', () => {
+    const euler = characterQuaternionToEulerXYZ(characterQuaternionFromEuler(0.3, -0.4, 0.7));
+    expect(euler[0]).toBeCloseTo(0.3, 6);
+    expect(euler[1]).toBeCloseTo(-0.4, 6);
+    expect(euler[2]).toBeCloseTo(0.7, 6);
+  });
+
+  it('builds the shortest arc between unit vectors', () => {
+    const q = characterQuaternionFromUnitVectors({ x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 });
+    const out = rotateCharacterVector3(q, { x: 0, y: 1, z: 0 });
+    expect(out.x).toBeCloseTo(0, 6);
+    expect(out.y).toBeCloseTo(0, 6);
+    expect(out.z).toBeCloseTo(1, 6);
+  });
+
+  it('builds an identity arc for equal vectors', () => {
+    const q = characterQuaternionFromUnitVectors({ x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: 1 });
+    expect(q.x).toBeCloseTo(0, 6);
+    expect(q.y).toBeCloseTo(0, 6);
+    expect(q.z).toBeCloseTo(0, 6);
+    expect(q.w).toBeCloseTo(1, 6);
   });
 });

@@ -31,16 +31,23 @@ export function computeLookAtAngles(from: CharacterVector3, target: CharacterVec
   return { yaw, pitch };
 }
 
-/** Spread a look direction up the spine so the neck and chest help the head. */
+/**
+ * Spread a look direction up the spine so the neck and chest help the head.
+ *
+ * `yaw`/`pitch` are the total head rotation. The per-bone weights below sum to
+ * 1.0 (head 0.5 + neck 0.25 + chest 0.15 + spine 0.1 for yaw; head 0.5 +
+ * neck 0.3 + chest 0.2 for pitch) so the accumulated chain rotation nets out
+ * to exactly the requested angle instead of overshooting it.
+ */
 export function applyLookAt(pose: RigPose, angles: LookAtAngles): RigPose {
   const yaw = clamp(angles.yaw, -HEAD_YAW_LIMIT, HEAD_YAW_LIMIT);
   const pitch = clamp(angles.pitch, -HEAD_PITCH_UP_LIMIT, HEAD_PITCH_DOWN_LIMIT);
   return {
     ...pose,
-    [HUMAN_BONE_NAMES.head]: [pitch, yaw, 0],
-    [HUMAN_BONE_NAMES.neck]: [pitch * 0.55, yaw * 0.55, 0],
-    [HUMAN_BONE_NAMES.chest]: [pitch * 0.2, yaw * 0.3, 0],
-    [HUMAN_BONE_NAMES.spine]: [0, yaw * 0.15, 0],
+    [HUMAN_BONE_NAMES.head]: [pitch * 0.5, yaw * 0.5, 0],
+    [HUMAN_BONE_NAMES.neck]: [pitch * 0.3, yaw * 0.25, 0],
+    [HUMAN_BONE_NAMES.chest]: [pitch * 0.2, yaw * 0.15, 0],
+    [HUMAN_BONE_NAMES.spine]: [0, yaw * 0.1, 0],
   };
 }
 
