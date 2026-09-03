@@ -28,6 +28,18 @@ All notable changes to triangular-engine are documented here.
   `/characters-lab` demo now renders that body and exposes emotion and
   browser-TTS speech controls.
 
+- `triangular-engine/characters/three` gained `retargetMixamoClip` (with the
+  `MIXAMO_BONE_MAP` name table) to retarget a Mixamo-authored `AnimationClip`
+  onto the canonical skeleton via three.js `SkeletonUtils.retargetClip`,
+  reconciling Mixamo's T-pose with the rig's A-pose and folding the extra
+  `Spine1`/`Spine2` segments into `chest`. It resolves both `mixamorig*` and
+  bare Mixamo bone names and swaps every left/right pair to undo Mixamo's X
+  mirror (its `Left*` bones sit on +X while the canonical rig's `left*` sit on
+  −X), so retargeted clips no longer look cross-limbed.
+  `HumanoidRigVisualization` also gained `setOverlayVisible` to hide the
+  skeleton helper lines and joint spheres. The `/characters-lab` demo lets you
+  pick a `.fbx` from disk and drive the procedural body with it.
+
 - Redesigned the procedural planetary surface architecture for `triangular-engine/celestial`
   optimized for gameplay, base-building, and exploration:
   - Added `terrace-fractal-3d` (`ITerraceFractalTerrainGeneratorDef`) for stepped flat-topped tablelands and mesas.

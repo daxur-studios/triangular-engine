@@ -26,6 +26,15 @@
     <button type="button" [class.active]="reachEnabled" (click)="toggleReach()">Arm to target</button>
   </div>
   <div class="control-group">
+    <span>Debug</span>
+    <button type="button" [class.active]="showBones" (click)="toggleBones()">Bones</button>
+  </div>
+  <div class="control-group">
+    <span>Dance</span>
+    <input type="file" accept=".fbx" (change)="onDanceFile($event)" />
+    <button type="button" [disabled]="!dancing" (click)="stopDance()">Stop</button>
+  </div>
+  <div class="control-group">
     <span>Emotion</span>
     <select (change)="setEmotion($any($event.target).value)">
       @for (e of emotions; track e) {
@@ -40,8 +49,8 @@
   </div>
 </section>
 <section class="scope-note">
-  <b>What this proves</b><span>A single SkinnedMesh is generated procedurally and skinned to the same rig the gait, sit, look, and reach intents drive. Emotion and speech lipsync map onto the face's ARKit morph targets (browser speech synthesis supplies the voice; visemes are estimated from text).</span>
-  <b>Still to come</b><span>Retargeting onto authored GLB/glTF characters and real TTS viseme events.</span>
+  <b>What this proves</b><span>A single SkinnedMesh is generated procedurally and skinned to the same rig the gait, sit, look, and reach intents drive. Emotion and speech lipsync map onto the face's ARKit morph targets, and a Mixamo FBX dance picked from disk is retargeted onto the same skeleton via three's SkeletonUtils.</span>
+  <b>Still to come</b><span>GLB/glTF retargeting, finger/face bone detail, and real TTS viseme events.</span>
 </section>
 <scene>
   <orbitControls [cameraPosition]="[3.4, 2.4, 4.2]" [target]="[0, 0.9, 0]" />

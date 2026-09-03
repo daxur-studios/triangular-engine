@@ -16,6 +16,8 @@ export interface BonesVisualizationOptions {
   readonly jointRadius?: number;
   readonly jointColor?: number;
   readonly lineColor?: number;
+  /** Whether the skeleton helper lines and joint spheres start visible. */
+  readonly overlayVisible?: boolean;
 }
 
 /**
@@ -37,6 +39,7 @@ export class HumanoidRigVisualization {
   private readonly helper: SkeletonHelper;
   private readonly jointGeometry: SphereGeometry;
   private readonly jointMaterial: MeshBasicMaterial;
+  private readonly jointMeshes: Mesh[] = [];
 
   private readonly euler = new Euler(0, 0, 0, 'XYZ');
   private readonly quaternion = new Quaternion();
@@ -46,6 +49,7 @@ export class HumanoidRigVisualization {
     const jointRadius = options.jointRadius ?? 0.025;
     const jointColor = options.jointColor ?? 0x9ad6ff;
     const lineColor = options.lineColor ?? 0x4fc3f7;
+    const overlayVisible = options.overlayVisible ?? true;
 
     const boneByName = new Map<string, Bone>();
     for (const bone of rig.bones) {
@@ -85,12 +89,25 @@ export class HumanoidRigVisualization {
     this.jointGeometry = new SphereGeometry(jointRadius, 8, 6);
     this.jointMaterial = new MeshBasicMaterial({ color: jointColor });
     for (const bone of this.bones) {
-      bone.add(new Mesh(this.jointGeometry, this.jointMaterial));
+      const jointMesh = new Mesh(this.jointGeometry, this.jointMaterial);
+      this.jointMeshes.push(jointMesh);
+      bone.add(jointMesh);
     }
 
     this.group.add(this.rootBone, this.helper);
 
+    this.setOverlayVisible(overlayVisible);
     this.setPose({});
+  }
+
+  /**
+   * Shows or hides the debug overlay: the `SkeletonHelper` bone lines and the
+   * per-joint spheres. The underlying skeleton and any skinned meshes are
+   * unaffected, so this is safe to toggle while the body is visible.
+   */
+  setOverlayVisible(visible: boolean): void {
+    this.helper.visible = visible;
+    for (const mesh of this.jointMeshes) mesh.visible = visible;
   }
 
   setPose(pose: RigPose = {}): void {

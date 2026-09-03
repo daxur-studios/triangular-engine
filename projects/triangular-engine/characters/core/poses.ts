@@ -8,19 +8,23 @@ function rotation(x: number, y: number, z: number): BoneRotation {
 /** Relaxed standing pose: the rig's A-pose rest state. */
 export const IDLE_POSE: RigPose = {};
 
-/** Approximate seated pose: hips/legs fold, knees bend, arms rest forward. */
+/**
+ * Approximate seated pose: the thighs flex forward (negative X) while the knees
+ * flex the opposite way (positive X) so the shins hang straight down, the torso
+ * leans slightly forward, and the arms rest on the lap.
+ */
 export const SIT_POSE: RigPose = {
-  hips: rotation(-0.22, 0, 0),
-  spine: rotation(0.08, 0, 0),
+  hips: rotation(-0.2, 0, 0),
+  spine: rotation(0.12, 0, 0),
   chest: rotation(0.05, 0, 0),
-  leftUpperLeg: rotation(-1.25, 0, 0),
-  leftLowerLeg: rotation(-1.35, 0, 0),
-  rightUpperLeg: rotation(-1.25, 0, 0),
-  rightLowerLeg: rotation(-1.35, 0, 0),
-  leftUpperArm: rotation(-0.4, 0, 0.3),
-  leftLowerArm: rotation(-0.6, 0, 0),
-  rightUpperArm: rotation(-0.4, 0, -0.3),
-  rightLowerArm: rotation(-0.6, 0, 0),
+  leftUpperLeg: rotation(-1.3, 0, 0),
+  leftLowerLeg: rotation(1.5, 0, 0),
+  rightUpperLeg: rotation(-1.3, 0, 0),
+  rightLowerLeg: rotation(1.5, 0, 0),
+  leftUpperArm: rotation(-0.5, 0, 0.35),
+  leftLowerArm: rotation(-0.7, 0, 0),
+  rightUpperArm: rotation(-0.5, 0, -0.35),
+  rightLowerArm: rotation(-0.7, 0, 0),
 };
 
 function blendRotation(from: BoneRotation | undefined, to: BoneRotation | undefined, t: number): BoneRotation {

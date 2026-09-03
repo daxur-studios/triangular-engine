@@ -1,6 +1,20 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, inject } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Group, Mesh, MeshStandardMaterial, PlaneGeometry, SkinnedMesh, SphereGeometry, Vector3 } from 'three';
+import {
+  AnimationMixer,
+  Bone,
+  Group,
+  Mesh,
+  MeshStandardMaterial,
+  Object3D,
+  PlaneGeometry,
+  Skeleton,
+  SkinnedMesh,
+  SphereGeometry,
+  Vector3,
+  type AnimationClip,
+} from 'three';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
   applyLookAt,
@@ -23,12 +37,13 @@ import {
   type RigPose,
   type VisemeKeyframe,
 } from 'triangular-engine/characters';
-import { HumanoidRigVisualization } from 'triangular-engine/characters/three';
+import { HumanoidRigVisualization, retargetMixamoClip } from 'triangular-engine/characters/three';
 import { applyCharacterFacePose, buildCharacterBodyMesh } from 'triangular-engine/procedural';
 
 const WALK_RADIUS = 1.6;
 const TARGET_RADIUS = 2.5;
 const TARGET_HEIGHT = 1.5;
+const SIT_DROP = 0.4;
 
 @Component({
   selector: 'app-characters-lab-page',
@@ -44,6 +59,7 @@ export class CharactersLabPageComponent {
   protected sitEnabled = false;
   protected lookEnabled = true;
   protected reachEnabled = false;
+  protected showBones = true;
 
   protected emotion: EmotionName = 'happy';
   protected speechText = 'Hello there, welcome to the characters lab!';
@@ -67,6 +83,11 @@ export class CharactersLabPageComponent {
   private speechStartedAt = 0;
   private speechTrackDuration = 0;
   private speaking = false;
+
+  protected dancing = false;
+  private danceMixer?: AnimationMixer;
+  private danceMixerRoot?: Object3D;
+  private readonly fbxLoader = new FBXLoader();
 
   constructor() {
     this.ground = new Mesh(
@@ -113,6 +134,69 @@ export class CharactersLabPageComponent {
     this.reachEnabled = !this.reachEnabled;
   }
 
+  protected toggleBones(): void {
+    this.showBones = !this.showBones;
+    this.visualization.setOverlayVisible(this.showBones);
+  }
+
+  protected onDanceFile(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    void file.arrayBuffer().then((buffer) => this.startDance(buffer));
+    input.value = '';
+  }
+
+  protected stopDance(): void {
+    this.danceMixer?.stopAllAction();
+    this.danceMixer = undefined;
+    this.danceMixerRoot = undefined;
+    this.dancing = false;
+    this.visualization.setPose({});
+    this.character.position.set(0, 0, 0);
+    this.character.rotation.y = 0;
+    this.angle = 0;
+  }
+
+  private startDance(buffer: ArrayBuffer): void {
+    const group = this.fbxLoader.parse(buffer, '');
+    const clip = group.animations[0] as AnimationClip | undefined;
+    if (!clip) return;
+
+    const bones: Bone[] = [];
+    group.traverse((object) => {
+      if ((object as Bone).isBone) bones.push(object as Bone);
+    });
+    if (bones.length === 0) return;
+
+    const ordered: Bone[] = [];
+    const visited = new Set<Bone>();
+    const visit = (bone: Bone): void => {
+      if (visited.has(bone)) return;
+      visited.add(bone);
+      const parent = bone.parent;
+      if (parent && (parent as Bone).isBone) visit(parent as Bone);
+      ordered.push(bone);
+    };
+    for (const bone of bones) visit(bone);
+
+    const retargetedClip = retargetMixamoClip(this.visualization.skeleton, new Skeleton(ordered), clip);
+
+    this.danceMixer?.stopAllAction();
+    this.danceMixerRoot = new Object3D();
+    (this.danceMixerRoot as Object3D & { skeleton: Skeleton }).skeleton = this.visualization.skeleton;
+    (this.danceMixerRoot as Object3D & { bones: Bone[] }).bones = this.visualization.skeleton.bones;
+    this.danceMixer = new AnimationMixer(this.danceMixerRoot);
+    this.danceMixer.clipAction(retargetedClip).play();
+
+    this.dancing = true;
+    this.mode = 'idle';
+    this.sitEnabled = false;
+    this.angle = 0;
+    this.character.position.set(0, 0, 0);
+    this.character.rotation.y = 0;
+  }
+
   protected setEmotion(emotion: EmotionName): void {
     this.emotion = emotion;
   }
@@ -139,6 +223,13 @@ export class CharactersLabPageComponent {
 
   private update(deltaSeconds: number): void {
     this.elapsed += deltaSeconds;
+
+    if (this.dancing && this.danceMixer) {
+      this.danceMixer.update(deltaSeconds);
+      this.applyFace();
+      return;
+    }
+
     const speed = this.sitEnabled ? 0 : this.mode === 'run' ? 2.1 : this.mode === 'walk' ? 0.9 : 0;
     if (speed > 0) this.angle += (speed / WALK_RADIUS) * deltaSeconds;
 
@@ -147,7 +238,7 @@ export class CharactersLabPageComponent {
       : sampleLocomotion(this.mode, this.elapsed);
     this.character.position.set(
       Math.cos(this.angle) * WALK_RADIUS,
-      locomotion.bounce,
+      locomotion.bounce - this.sitBlend * SIT_DROP,
       Math.sin(this.angle) * WALK_RADIUS,
     );
     this.character.rotation.y = -this.angle;
@@ -243,6 +334,7 @@ export class CharactersLabPageComponent {
 
   private dispose(): void {
     window.speechSynthesis.cancel();
+    this.danceMixer?.stopAllAction();
     this.character.removeFromParent();
     this.ground.removeFromParent();
     this.target.removeFromParent();

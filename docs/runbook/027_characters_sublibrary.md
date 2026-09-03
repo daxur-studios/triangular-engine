@@ -407,4 +407,29 @@ Also confirm:
 - Verified: 66 character specs + 224 procedural specs pass; library and demo app
   build clean.
 
+### 2026-09-02 — Mixamo clip retargeting + demo file picker
+
+- Added `three/retarget-clip.ts`: `retargetMixamoClip(targetSkeleton,
+  sourceSkeleton, clip)` delegates to three's `SkeletonUtils.retargetClip` with a
+  canonical→Mixamo `names` table (`MIXAMO_BONE_MAP`) and per-bone `localOffsets`
+  that reconcile Mixamo's T-pose with our A-pose. Root motion is dropped (in-place),
+  and Mixamo's extra `Spine1`/`Spine2` fold into `chest`.
+- Key detail 1 — naming: Mixamo exports are inconsistent. Some name bones
+  `mixamorig:Hips` (`FBXLoader` sanitizes the `:` away → `mixamorigHips`), others
+  use bare `Hips`. The map stores bare names and `retargetMixamoClip` strips a
+  leading `mixamorig` from each source bone before matching, so both resolve.
+- Key detail 2 — mirror: Mixamo places `Left*` bones on +X and `Right*` on −X,
+  while the canonical rig has `left*` on −X and `right*` on +X (both face +Z).
+  Left/right are therefore swapped in `MIXAMO_BONE_MAP`, otherwise retargeted
+  motion appears cross-limbed (legs "cross" left/right). Verified against the
+  actual FBX rest poses (`mixamorigLeftUpLeg` at +X, `mixamorigRightUpLeg` at −X).
+- Added `setOverlayVisible` to `HumanoidRigVisualization` (hide helper lines +
+  joint spheres) and a Debug/Bones toggle; fixed the sit pose's knee sign (shins
+  now hang down instead of curling forward) and dropped the body to ground feet.
+- `/characters-lab` gains a file picker that parses a `.fbx` (FBXLoader), rebuilds
+  the source `Skeleton`, retargets the first clip, and drives the procedural body
+  via `AnimationMixer`.
+- Verified: 71 character specs pass; library + demo app build clean.
+
+
 
