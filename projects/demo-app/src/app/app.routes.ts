@@ -102,6 +102,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'cell-subdivision-lod-lab',
+    loadComponent: () =>
+      import('./pages/cell-subdivision-lod-lab/cell-subdivision-lod-lab-page.component').then(
+        ({ CellSubdivisionLodLabPageComponent }) => CellSubdivisionLodLabPageComponent,
+      ),
+  },
+  {
     path: 'cell-planet-map',
     loadComponent: () =>
       import('./pages/cell-planet-map/cell-planet-map-page.component').then(

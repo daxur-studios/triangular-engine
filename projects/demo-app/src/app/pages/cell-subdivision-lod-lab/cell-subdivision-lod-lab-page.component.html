@@ -1,0 +1,195 @@
+<scene [wireframe]="showWireframe()" [logarithmicDepthBuffer]="true">
+  <raycastOrbitControls
+    [cameraPosition]="cameraPosition()"
+    [target]="cameraTarget()"
+    [near]="1"
+    [far]="50000000"
+    [isActive]="true"
+  />
+
+  <directionalLight
+    [position]="[3000000, 4000000, 2000000]"
+    [intensity]="2.2"
+  />
+  <ambientLight [intensity]="0.4" />
+</scene>
+
+<div class="overlay-panel">
+  <header class="panel-header">
+    <a routerLink="/" class="back-link">&larr; Index</a>
+    <h2>Cell Subdivision LOD Lab</h2>
+    <p class="subtitle">
+      Boundary POC for buildSubdividedRegionMeshData() — mutually in-range cells
+      share one joint Voronoi diagram; an out-of-range edge stays a plain
+      straight line, no skirts, no cracks.
+    </p>
+  </header>
+
+  <section class="control-group">
+    <label class="control-label">Cell Count: {{ cellCount() }}</label>
+    <input
+      type="range"
+      min="60"
+      max="1500"
+      step="20"
+      [value]="cellCount()"
+      (input)="onCellCount($event)"
+      class="styled-slider"
+    />
+  </section>
+
+  <section class="control-group">
+    <div class="flex-between">
+      <label class="control-label">Seed: {{ seed() }}</label>
+      <button type="button" class="pill-btn seed-btn" (click)="shuffleSeed()">
+        Shuffle
+      </button>
+    </div>
+  </section>
+
+  <section class="control-group">
+    <label class="control-label"
+      >LOD Distance (planet radii): {{ lodDistance().toFixed(2) }}</label
+    >
+    <input
+      type="range"
+      min="1.02"
+      max="4"
+      step="0.02"
+      [value]="lodDistance()"
+      (input)="onLodDistance($event)"
+      class="styled-slider"
+    />
+  </section>
+
+  <section class="control-group">
+    <label class="control-label">
+      Elevation Scale: {{ elevationScale()
+      }}{{ elevationScale() === 0 ? " (flat / 2D map)" : "" }}
+    </label>
+    <input
+      type="range"
+      min="0"
+      max="15"
+      step="0.5"
+      [value]="elevationScale()"
+      (input)="onElevationScale($event)"
+      class="styled-slider"
+    />
+  </section>
+
+  <section class="control-group">
+    <label class="control-label"
+      >Sub-cells per cell: {{ subCellCount() }}</label
+    >
+    <input
+      type="range"
+      min="3"
+      max="20"
+      step="1"
+      [value]="subCellCount()"
+      (input)="onSubCellCount($event)"
+      class="styled-slider"
+    />
+  </section>
+
+  <section class="control-group">
+    <label class="control-label"
+      >Relax Iterations: {{ relaxIterations() }}</label
+    >
+    <input
+      type="range"
+      min="0"
+      max="5"
+      step="1"
+      [value]="relaxIterations()"
+      (input)="onRelaxIterations($event)"
+      class="styled-slider"
+    />
+  </section>
+
+  <section class="control-group">
+    <label class="control-label">Camera</label>
+    <div class="pill-group">
+      <button
+        type="button"
+        class="pill-btn"
+        [class.active]="cameraPreset() === 'top'"
+        (click)="setCameraPreset('top')"
+      >
+        Top-down (2D)
+      </button>
+      <button
+        type="button"
+        class="pill-btn"
+        [class.active]="cameraPreset() === 'angled'"
+        (click)="setCameraPreset('angled')"
+      >
+        Angled (Civ)
+      </button>
+      <button
+        type="button"
+        class="pill-btn"
+        [class.active]="cameraPreset() === 'free'"
+        (click)="setCameraPreset('free')"
+      >
+        Free
+      </button>
+    </div>
+  </section>
+
+  <section class="control-group">
+    <label class="control-label">Color Mode</label>
+    <div class="pill-group">
+      <button
+        type="button"
+        class="pill-btn"
+        [class.active]="colorMode() === 'owner'"
+        (click)="setColorMode('owner')"
+      >
+        By owning cell
+      </button>
+      <button
+        type="button"
+        class="pill-btn"
+        [class.active]="colorMode() === 'elevation'"
+        (click)="setColorMode('elevation')"
+      >
+        By elevation
+      </button>
+    </div>
+  </section>
+
+  <section class="control-group toggles-grid">
+    <label class="toggle-item">
+      <input
+        type="checkbox"
+        [checked]="showWireframe()"
+        (change)="toggleWireframe()"
+      />
+      <span>Wireframe</span>
+    </label>
+  </section>
+
+  <section class="telemetry-panel">
+    <h3>Stats</h3>
+    <div class="telemetry-grid">
+      <div class="telemetry-stat">
+        <span class="stat-label">Graph build</span>
+        <span class="stat-val">{{ buildMs() }}</span>
+      </div>
+      <div class="telemetry-stat">
+        <span class="stat-label">LOD rebuild</span>
+        <span class="stat-val">{{ rebuildMs() }}</span>
+      </div>
+      <div class="telemetry-stat">
+        <span class="stat-label">Active cells</span>
+        <span class="stat-val">{{ activeCellCount() }}</span>
+      </div>
+      <div class="telemetry-stat">
+        <span class="stat-label">Triangles</span>
+        <span class="stat-val">{{ triangleCount().toLocaleString() }}</span>
+      </div>
+    </div>
+  </section>
+</div>

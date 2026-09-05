@@ -1,4 +1,4 @@
-import { IPlanetGraphCell } from './planet-graph';
+import { IPlanetGraphCell, IPlanetGraphCore } from './planet-graph';
 import { cellCornerElevation } from './sample-elevation';
 import { createSeededRandom } from './seeded-random';
 import { cross, dot, IVec3, normalize, projectOnTangentPlane, vec3 } from './vec3';
@@ -298,6 +298,230 @@ export function buildSubdividedCellMeshData(
       pushVertex(site3D, siteElevation, cell.id);
       pushVertex(resolved[k].pos, resolved[k].elev, cell.id);
       pushVertex(resolved[k2].pos, resolved[k2].elev, cell.id);
+    }
+  }
+}
+
+/** Local copy of `chunking.ts`'s `buildChunkBoundaryLoop()` walk, scoped to a plain `cellIds`
+ * list instead of a full `IPlanetChunk`/`chunkIdByCell` pair — kept as a separate small
+ * function here rather than imported, because `chunking.ts` already imports
+ * `buildSubdividedCellMeshData` from this module and importing the other way would create a
+ * circular module dependency. Same technique, same guarantee as the original: the returned
+ * positions are the graph's own shared corner objects (`===`-identical to whatever a
+ * neighboring, non-subdivided cell renders for that corner), never recomputed points — see
+ * `chunking.ts`'s `IChunkBoundaryLoop` doc comment for why that's what makes a boundary
+ * crack-free by construction. Returns `null` under the same conditions the original does (no
+ * boundary, degenerate loop, non-simple region) — callers fall back to skipping the region. */
+function walkRegionBoundary(
+  graph: IPlanetGraphCore,
+  elevation: number[],
+  cellIds: readonly number[],
+): { positions: IVec3[]; elevations: number[] } | null {
+  const inRegion = new Set(cellIds);
+  const nextByStart = new Map<IVec3, IVec3>();
+  const elevationByVertex = new Map<IVec3, number>();
+
+  for (const cellId of cellIds) {
+    const cell = graph.cells[cellId];
+    const n = cell.corners.length;
+    if (n < 3) continue;
+    for (let k = 0; k < n; k++) {
+      const k2 = (k + 1) % n;
+      if (inRegion.has(cell.neighbors[k2])) continue;
+      nextByStart.set(cell.corners[k], cell.corners[k2]);
+      elevationByVertex.set(cell.corners[k], cellCornerElevation(cell, k, elevation));
+      elevationByVertex.set(cell.corners[k2], cellCornerElevation(cell, k2, elevation));
+    }
+  }
+
+  if (nextByStart.size < 3) return null;
+
+  const start = nextByStart.keys().next().value as IVec3;
+  const positions: IVec3[] = [start];
+  let cur = start;
+  for (let steps = 0; steps < nextByStart.size; steps++) {
+    const nxt = nextByStart.get(cur);
+    if (!nxt || nxt === start) break;
+    positions.push(nxt);
+    cur = nxt;
+  }
+  if (positions.length < 3 || positions.length !== nextByStart.size) return null;
+
+  const elevations = positions.map((pos) => elevationByVertex.get(pos) ?? 0);
+  return { positions, elevations };
+}
+
+/**
+ * Region-scoped generalization of `buildSubdividedCellMeshData()`: joins several mutually
+ * in-range coarse cells into one shared interior Voronoi diagram, so the boundary between two
+ * subdivided neighbors becomes a real interior bisector instead of the hard straight parent
+ * edge each cell's own independent clip (the single-cell function above) otherwise produces —
+ * this is the fix for the "straight-line seam between two subdivided cells" artifact.
+ *
+ * A cell's edge against a neighbor that is *not* part of `cellIds` is untouched by this: the
+ * region's own outer boundary (`walkRegionBoundary()`) reuses the graph's real shared corner
+ * objects there too, so it stays exactly the same straight edge an out-of-range/unsubdivided
+ * neighbor renders. There is no separate "snap to straight" branch for that case — the single
+ * outer clip boundary produces straight behavior at the region's edge and organic jagged
+ * behavior in its interior, automatically, the same way `buildChunkLod1MeshData()`'s merged
+ * group boundaries never crack against a neighboring chunk without any stitching pass (see that
+ * function's doc comment).
+ *
+ * A 1-cell region reproduces `buildSubdividedCellMeshData()`'s own output for that cell bit for
+ * bit (same per-cell seeding formula, same corner-snap discipline, same elevation blend) — this
+ * function subsumes it. `buildSubdividedCellMeshData()` stays around as the cheaper path for a
+ * lone subdivided cell with no in-range neighbor (no boundary-loop walk, no multi-cell pooling).
+ */
+export function buildSubdividedRegionMeshData(
+  graph: IPlanetGraphCore,
+  elevation: number[],
+  cellIds: readonly number[],
+  pushVertex: (p: IVec3, e: number, cellId: number) => void,
+  params: ISubCellParams = {},
+): void {
+  const p = { ...DEFAULTS, ...params };
+  if (cellIds.length === 0) return;
+
+  // One shared tangent plane, centered on the region's own centroid direction — not any single
+  // member cell's own center — so every member's seeds and the outer boundary project into the
+  // same frame. Same "one shared frame, not N independently-recomputed ones" discipline
+  // `buildChunkLod1MeshData()` already uses for its own boundary-loop triangulation.
+  let sx = 0;
+  let sy = 0;
+  let sz = 0;
+  for (const id of cellIds) {
+    const c = graph.cells[id].center;
+    sx += c.x;
+    sy += c.y;
+    sz += c.z;
+  }
+  const centerLen = Math.hypot(sx, sy, sz) || 1;
+  const planeNormal: IVec3 = { x: sx / centerLen, y: sy / centerLen, z: sz / centerLen };
+  const arbitrary = Math.abs(planeNormal.y) < 0.99 ? vec3(0, 1, 0) : vec3(1, 0, 0);
+  const tangentU = normalize(cross(arbitrary, planeNormal));
+  const tangentV = cross(planeNormal, tangentU);
+  const to2D = (v: IVec3): IPoint2D => {
+    const proj = projectOnTangentPlane(v, planeNormal);
+    return { x: dot(proj, tangentU), y: dot(proj, tangentV) };
+  };
+  const to3D = (v: IPoint2D): IVec3 => {
+    const r2 = v.x * v.x + v.y * v.y;
+    const z = Math.sqrt(Math.max(0, 1 - r2));
+    return normalize({
+      x: planeNormal.x * z + v.x * tangentU.x + v.y * tangentV.x,
+      y: planeNormal.y * z + v.x * tangentU.y + v.y * tangentV.y,
+      z: planeNormal.z * z + v.x * tangentU.z + v.y * tangentV.z,
+    });
+  };
+
+  const loop = walkRegionBoundary(graph, elevation, cellIds);
+  if (!loop) return;
+  const regionBoundary2D = loop.positions.map(to2D);
+  const CORNER_EPS2 = 1e-12;
+  const resolvePos = (pt: IPoint2D): { pos: IVec3; cornerIndex: number } => {
+    for (let k = 0; k < regionBoundary2D.length; k++) {
+      const dx = pt.x - regionBoundary2D[k].x;
+      const dy = pt.y - regionBoundary2D[k].y;
+      if (dx * dx + dy * dy < CORNER_EPS2) return { pos: loop.positions[k], cornerIndex: k };
+    }
+    return { pos: to3D(pt), cornerIndex: -1 };
+  };
+
+  // Per-member-cell data: own footprint (for seeding + elevation blend), same corner-elevation
+  // formula `buildSubdividedCellMeshData()` uses, just projected into the shared region frame
+  // above instead of each cell's own. Seeds are still scattered per `cell.id`-keyed RNG within
+  // that cell's *own* footprint (unchanged determinism from the single-cell function) — what's
+  // new is the joint clip below, not the seeding.
+  interface IMember {
+    cell: IPlanetGraphCell;
+    corners2D: IPoint2D[];
+    site2D: IPoint2D;
+    cornerElevations: number[];
+    centerElevation: number;
+  }
+  const members: IMember[] = cellIds.map((id) => {
+    const cell = graph.cells[id];
+    return {
+      cell,
+      corners2D: cell.corners.map(to2D),
+      site2D: to2D(cell.center),
+      cornerElevations: cell.corners.map((_, k) => cellCornerElevation(cell, k, elevation)),
+      centerElevation: elevation[cell.id],
+    };
+  });
+
+  // `fanElevationAt2D()` assumes its fan site sits at the local origin (true by construction in
+  // the single-cell function, where the whole 2D frame is centered on that one cell) — here the
+  // shared frame is centered on the *region's* centroid instead, so a member's own site is
+  // offset from the origin. Barycentric weights are translation-invariant, so translating both
+  // the query point and the member's own boundary by `-site2D` before calling it reproduces
+  // exactly the same per-member fan blend the single-cell function would compute, just relative
+  // to whichever member cell owns this particular point rather than always "the" one cell.
+  const elevationForOwner = (pt2D: IPoint2D, owner: IMember): number => {
+    const rel: IPoint2D = { x: pt2D.x - owner.site2D.x, y: pt2D.y - owner.site2D.y };
+    const boundaryRel = owner.corners2D.map((c) => ({ x: c.x - owner.site2D.x, y: c.y - owner.site2D.y }));
+    return fanElevationAt2D(rel, boundaryRel, owner.cornerElevations, owner.centerElevation);
+  };
+
+  // Seeds pooled from every member's own footprint, then clipped jointly against the *region's*
+  // outer boundary — this pooling + joint clip (instead of each member clipping only against
+  // its own corners, as the single-cell function does) is what turns the shared interior edge
+  // between two members into a real Voronoi bisector instead of the region's internal
+  // cell-graph edges.
+  let seeds: IPoint2D[] = [];
+  let seedOwner: IMember[] = [];
+  for (const member of members) {
+    const rng = createSeededRandom(((p.seed ?? 0) + member.cell.id * 104729 + 17) >>> 0);
+    const memberSeeds = seedPointsInPolygon(member.corners2D, Math.max(1, p.subCellCount), rng);
+    for (const s of memberSeeds) {
+      seeds.push(s);
+      seedOwner.push(member);
+    }
+  }
+  if (seeds.length === 0) return;
+
+  let subCellPolygons: IPoint2D[][] = [];
+  const relaxIterations = Math.max(0, p.relaxIterations);
+  for (let iter = 0; iter <= relaxIterations; iter++) {
+    subCellPolygons = voronoiWithinPolygon2D(regionBoundary2D, seeds);
+    if (iter < relaxIterations) {
+      seeds = subCellPolygons.map((poly, i) => (poly.length >= 3 ? polygonCentroid2D(poly) : seeds[i]));
+    }
+  }
+
+  for (let i = 0; i < seeds.length; i++) {
+    const poly2D = subCellPolygons[i];
+    if (poly2D.length < 3) continue;
+
+    // Ownership is by final geometric position (nearest member center, compared as a true
+    // angular/dot-product distance on the sphere rather than in the distortion-prone 2D
+    // projection), not by which member's RNG originally produced this seed — a seed born for
+    // one cell can end up geometrically closer to a neighbor after the joint clip, and that
+    // cross-over is exactly what makes the shared boundary read as organic instead of snapped
+    // to the coarse cell shape.
+    const site3D = to3D(seeds[i]);
+    let owner = seedOwner[i];
+    let bestDot = dot(site3D, owner.cell.center);
+    for (const member of members) {
+      const d = dot(site3D, member.cell.center);
+      if (d > bestDot) {
+        bestDot = d;
+        owner = member;
+      }
+    }
+
+    const siteElevation = elevationForOwner(seeds[i], owner);
+    const resolved = poly2D.map((pt) => {
+      const { pos, cornerIndex } = resolvePos(pt);
+      const elev = cornerIndex >= 0 ? loop.elevations[cornerIndex] : elevationForOwner(pt, owner);
+      return { pos, elev };
+    });
+    const m = resolved.length;
+    for (let k = 0; k < m; k++) {
+      const k2 = (k + 1) % m;
+      pushVertex(site3D, siteElevation, owner.cell.id);
+      pushVertex(resolved[k].pos, resolved[k].elev, owner.cell.id);
+      pushVertex(resolved[k2].pos, resolved[k2].elev, owner.cell.id);
     }
   }
 }

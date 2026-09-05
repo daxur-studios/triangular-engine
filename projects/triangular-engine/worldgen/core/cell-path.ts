@@ -7,17 +7,35 @@ function angularDistance(a: IPlanetGraphCell, b: IPlanetGraphCell): number {
   return Math.acos(Math.max(-1, Math.min(1, dot(a.center, b.center))));
 }
 
+/** Cost of moving from `from` to a *neighboring* cell `to`. Defaults to `angularDistance`
+ * (uniform, terrain-blind travel). A caller-supplied cost lets different movement rules share this
+ * one search - e.g. weighting rough terrain higher, returning `Infinity` for impassable cells (ocean
+ * for a land unit), or discounting roads once those exist. Not yet used by any caller - this is the
+ * extension point for the per-unit-kind/per-game movement rules noted in runbook 23; nothing wires
+ * a non-default cost through today. */
+export type CellEdgeCost = (from: IPlanetGraphCell, to: IPlanetGraphCell) => number;
+
 /**
  * Shortest path between two cells of a planet graph, walking `neighbors` adjacency only (see
  * runbook 23/24 - the 2D strategy-layer unit-movement prototype needs units to travel cell-to-cell
- * rather than in a straight line through the sphere interior). A* with edge cost and heuristic both
- * equal to `angularDistance` - optimal, not just fast, since that heuristic never overestimates the
- * true remaining cost.
+ * rather than in a straight line through the sphere interior). A* using `edgeCost` for real cost and
+ * `angularDistance` as the heuristic.
+ *
+ * The heuristic is only admissible (and the result only guaranteed shortest, not just *a* path) when
+ * `edgeCost` never returns less than the angular distance between adjacent cells - true for the
+ * default and for any "multiply by a >= 1 terrain factor" cost, but not for a cost that can make an
+ * edge cheaper than crow-flies (e.g. roads discounted below open-ground travel). That tradeoff is
+ * left to the caller for now rather than solved here.
  *
  * Returns cell ids from `fromCellId` to `toCellId` inclusive, or `null` if no path exists (a fully
  * connected planet graph should always have one, but this doesn't assume it).
  */
-export function findCellPath(graph: IPlanetGraphCore, fromCellId: number, toCellId: number): number[] | null {
+export function findCellPath(
+  graph: IPlanetGraphCore,
+  fromCellId: number,
+  toCellId: number,
+  edgeCost: CellEdgeCost = angularDistance,
+): number[] | null {
   if (fromCellId === toCellId) return [fromCellId];
 
   const goal = graph.cells[toCellId];
@@ -78,7 +96,7 @@ export function findCellPath(graph: IPlanetGraphCore, fromCellId: number, toCell
     const currentG = gScore.get(current)!;
     for (const neighborId of currentCell.neighbors) {
       if (closed.has(neighborId)) continue;
-      const tentativeG = currentG + angularDistance(currentCell, graph.cells[neighborId]);
+      const tentativeG = currentG + edgeCost(currentCell, graph.cells[neighborId]);
       if (tentativeG < (gScore.get(neighborId) ?? Infinity)) {
         cameFrom.set(neighborId, current);
         gScore.set(neighborId, tentativeG);
