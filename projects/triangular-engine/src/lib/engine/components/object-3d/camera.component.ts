@@ -22,7 +22,7 @@ import {
 
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { combineLatest, of, switchMap } from 'rxjs';
-import { EngineService } from '../../services';
+import { EngineService, MultiViewportService } from '../../services';
 import {
   Object3DComponent,
   provideObject3DComponent,
@@ -39,6 +39,9 @@ export class CameraComponent extends Object3DComponent implements OnDestroy {
 
   readonly debug = input<boolean | undefined>();
   readonly isActive = model<boolean | undefined>(true);
+
+  /** Render this camera to a viewport rectangle: [x, y, width, height] normalized (0-1). Origin is bottom-left. */
+  readonly viewport = input<[x: number, y: number, width: number, height: number] | undefined>();
 
   /** Camera frustum far plane. @remarks — Must be greater than the current value of .near plane. @remarks — Expects a Float @defaultValue — 2000 */
   readonly far = input<number>();
@@ -59,6 +62,8 @@ export class CameraComponent extends Object3DComponent implements OnDestroy {
 
   readonly upVector = input<Vector3Tuple>();
 
+  readonly #multiViewportService = inject(MultiViewportService, { optional: true });
+
   constructor() {
     super();
 
@@ -77,6 +82,7 @@ export class CameraComponent extends Object3DComponent implements OnDestroy {
 
     this.#initSwitchCameraChanges();
     this.#initFarClippingPlaneChanges();
+    this.#initViewportRegistration();
   }
 
   #initFarClippingPlaneChanges() {
@@ -154,8 +160,21 @@ export class CameraComponent extends Object3DComponent implements OnDestroy {
     });
   }
 
+  #initViewportRegistration() {
+    effect(() => {
+      const vp = this.viewport();
+      const cam = this.camera();
+      if (vp && this.#multiViewportService) {
+        this.#multiViewportService.registerViewportCamera(cam, vp);
+      }
+    });
+  }
+
   override ngOnDestroy(): void {
     super.ngOnDestroy();
+    if (this.#multiViewportService) {
+      this.#multiViewportService.unregisterViewportCamera(this.camera());
+    }
     this.camera().removeFromParent();
   }
 

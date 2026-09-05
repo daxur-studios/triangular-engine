@@ -5,3 +5,4 @@ export * from './material.service';
 export * from './audio-cache.service';
 export * from './engine-input.service';
 export * from './screenshot.service';
+export * from './multi-viewport.service';

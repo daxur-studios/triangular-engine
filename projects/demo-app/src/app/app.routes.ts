@@ -32,6 +32,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'multi-viewport-lab',
+    loadComponent: () =>
+      import('./pages/multi-viewport-lab/multi-viewport-lab-page.component').then(
+        ({ MultiViewportLabPageComponent }) => MultiViewportLabPageComponent,
+      ),
+  },
+  {
     path: 'takram-clouds-spike',
     loadComponent: () =>
       import('./takram-clouds-spike/takram-clouds-spike.component').then(

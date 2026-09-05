@@ -29,7 +29,7 @@
           "options": {
             "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"],
-            "browsers": ["ChromeHeadless"],
+            "browsers": "ChromeHeadless",
             "include": [
               "**/*.spec.ts",
               "life/**/*.spec.ts",

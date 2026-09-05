@@ -20,7 +20,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { WebGLRenderer } from 'three';
 import { IKeyBindingOptions, IPerformanceThresholds, IUserInterfaceOptions } from '../../../models';
-import { EngineService, EngineSettingsService } from '../../../services';
+import { EngineService, EngineSettingsService, MultiViewportService } from '../../../services';
 import { ENGINE_OPTIONS, IEngineOptions } from '../../../models';
 import { EngineUiComponent } from '../../engine-ui/engine-ui.component';
 import {
@@ -97,7 +97,7 @@ function optionallyProvideEngineService(): Provider[] {
   host: {
     class: 'flex-page',
   },
-  providers: [optionallyProvideEngineService()],
+  providers: [optionallyProvideEngineService(), MultiViewportService],
 })
 export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   static instance = 1;
@@ -105,6 +105,15 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   //#region Injected Dependencies
   readonly #destroyRef = inject(DestroyRef);
   readonly engineService: EngineService = inject(EngineService);
+  /**
+   * The EngineService an ancestor already provides, if any — used only to
+   * detect whether `engineService` above is that shared instance (reused via
+   * `optionallyProvideEngineService()`) or one this scene created for itself.
+   */
+  readonly #ancestorEngineService = inject(EngineService, {
+    skipSelf: true,
+    optional: true,
+  });
 
   readonly engineSettingsService = inject(EngineSettingsService);
 
@@ -268,7 +277,19 @@ export class SceneComponent implements OnInit, OnDestroy, AfterViewInit {
   ngOnDestroy(): void {
     this.#materialOverride.dispose();
     this.#resizeObserver.disconnect();
-    this.engineService.onComponentDestroy();
+
+    // Detach canvas from this scene's wrapper so it doesn't linger in a detached DOM element
+    this.engineService.canvas.remove();
+
+    // Only tear down the renderer/engine when this scene actually owns the
+    // EngineService instance. When a parent component provides EngineService
+    // (e.g. `providers: [EngineService.provide(...)]` above a template that
+    // swaps between multiple `<scene>` elements), every `<scene>` reuses that
+    // same shared instance — disposing it here would kill the renderer out
+    // from under the next `<scene>` that's about to reuse it.
+    if (this.#ancestorEngineService !== this.engineService) {
+      this.engineService.onComponentDestroy();
+    }
   }
 
   ngAfterViewInit() {

@@ -16,6 +16,7 @@ Useful starting points:
 - Secondary Entry Points: [entry-points.md](./entry-points.md)
 - Examples:
   - Basic Scene: [examples/basic-scene.md](./examples/basic-scene.md)
+  - Multi-Viewport Rendering: [examples/multi-viewport.md](./examples/multi-viewport.md)
 
 Tech stack:
 

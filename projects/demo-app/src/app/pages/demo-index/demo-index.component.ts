@@ -242,6 +242,18 @@ export const DEMOS: readonly DemoItem[] = [
       'Authoritative camera follow, coordinate rebasing, and floating origin large-distance precision.',
   },
   {
+    id: 'multi-viewport-lab',
+    number: '12b',
+    title: 'Multi-Viewport Lab',
+    route: '/multi-viewport-lab',
+    categoryId: 'core',
+    tier: 'lab',
+    entryPoints: ['core', 'camera'],
+    package: 'triangular-engine',
+    description:
+      'Split a single scene into multiple camera viewports: side-by-side, quadrants, or custom layouts. Same scene, multiple angles.',
+  },
+  {
     id: 'river-lab',
     number: '13',
     title: 'Procedural River Lab',

@@ -62,6 +62,7 @@ See also: src/lib/engine/components/light/LIGHT.md
 
 - `<camera [isActive]="true" [lookAt]="[0,0,0]" />`
 - `<orbitControls [isActive]="true" [target]="[0,0,0]" [cameraPosition]="[0,2,5]" />`
+- `[viewport]` on either one splits the scene into multiple simultaneous camera rectangles (split-screen); see [examples/multi-viewport.md](./examples/multi-viewport.md)
 
 ## GLTF
 

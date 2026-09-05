@@ -243,7 +243,7 @@ All components are standalone and can be nested inside `<scene>`.
 - Geometry: `boxGeometry`, `sphereGeometry`, `planeGeometry`, `bufferGeometry`, `capsuleGeometry`, `bufferAttribute`
 - Materials: `meshStandardMaterial`, `meshNormalMaterial`, `meshBasicMaterial`, `shaderMaterial`, `rawShaderMaterial`, `pointsMaterial`, `spriteMaterial`
 - Lights: `ambientLight`, `directionalLight`, `pointLight`
-- Camera & Controls: `camera`, `orbitControls`
+- Camera & Controls: `camera`, `orbitControls` (bind `[viewport]` for split-screen multi-camera rendering — see [docs/examples/multi-viewport.md](docs/examples/multi-viewport.md))
 - GLTF: `gltf`
 - CSS: `css2d`, `css3d`
 - Physics: `physics`, `rigidBody`, `collider` family, `fixedJoint`, `sphericalJoint`, `instancedRigidBody`

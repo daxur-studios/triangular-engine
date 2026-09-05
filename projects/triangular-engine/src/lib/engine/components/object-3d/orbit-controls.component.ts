@@ -25,7 +25,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { combineLatest, distinctUntilChanged, of, switchMap } from 'rxjs';
 import { AdvancedOrbitControls } from '../../models';
-import { EngineService } from '../../services';
+import { EngineService, MultiViewportService } from '../../services';
 import { Object3DComponent } from './object-3d.component';
 
 /**
@@ -41,11 +41,15 @@ import { Object3DComponent } from './object-3d.component';
 export class OrbitControlsComponent implements OnDestroy {
   readonly engineService = inject(EngineService);
   readonly destroyRef = inject(DestroyRef);
+  readonly multiViewportService = inject(MultiViewportService, { optional: true });
 
   readonly internalCamera = new PerspectiveCamera();
 
   readonly debug = input<boolean | undefined>();
   readonly isActive = input<boolean | undefined>(true);
+
+  /** Render this camera to a viewport rectangle: [x, y, width, height] normalized (0-1). Origin is bottom-left. */
+  readonly viewport = input<[x: number, y: number, width: number, height: number] | undefined>();
 
   /** Set to eg a timeStamp, so when this changes, it witches the engine's rendering camera to this orbit control's camera */
   readonly switchCameraTrigger = model<number>();
@@ -101,6 +105,18 @@ export class OrbitControlsComponent implements OnDestroy {
     this.#initUpVectorChanges();
 
     this.#initIsDraggingTransformControls();
+
+    this.#initViewportRegistration();
+  }
+
+  #initViewportRegistration() {
+    effect(() => {
+      const vp = this.viewport();
+      const cam = this.internalCamera;
+      if (vp && this.multiViewportService) {
+        this.multiViewportService.registerViewportCamera(cam, vp);
+      }
+    });
   }
 
   #initIsDraggingTransformControls() {
@@ -212,6 +228,10 @@ export class OrbitControlsComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    if (this.multiViewportService) {
+      this.multiViewportService.unregisterViewportCamera(this.internalCamera);
+    }
+    this.#teardownViewportOverlay();
     this.internalCamera.removeFromParent();
     this.orbitControls()?.dispose();
   }
@@ -249,20 +269,75 @@ export class OrbitControlsComponent implements OnDestroy {
   #initIsActive() {
     effect(() => {
       const isActive = this.isActive();
-      if (isActive) {
-        const orbit = new AdvancedOrbitControls(
-          this.internalCamera,
-          this.engineService.renderer.domElement,
-        );
-        this.#makeOrbitControlsBetter(orbit);
-        this.orbitControls.set(orbit);
+      const vp = this.viewport();
 
-        this.switchCameraTrigger.update((v) => (v || 0) + 1);
-      } else {
-        this.orbitControls()?.dispose();
-        this.orbitControls.set(undefined);
-      }
+      this.orbitControls()?.dispose();
+      this.orbitControls.set(undefined);
+      this.#teardownViewportOverlay();
+
+      if (!isActive) return;
+
+      const domElement = vp
+        ? this.#createViewportOverlay(vp)
+        : this.engineService.renderer.domElement;
+
+      const orbit = new AdvancedOrbitControls(this.internalCamera, domElement);
+      this.#makeOrbitControlsBetter(orbit);
+      this.orbitControls.set(orbit);
+
+      this.switchCameraTrigger.update((v) => (v || 0) + 1);
     });
+  }
+
+  #viewportOverlayEl: HTMLDivElement | undefined;
+
+  /**
+   * Gives this instance's OrbitControls its own DOM element scoped to its
+   * viewport rectangle, instead of the shared full-canvas domElement. This
+   * lets each viewport orbit independently via native browser hit-testing —
+   * no custom pointer routing or click-to-activate state needed, and no risk
+   * of two OrbitControls instances racing over the same pointerdown event.
+   */
+  #createViewportOverlay(
+    viewport: [x: number, y: number, width: number, height: number],
+  ): HTMLElement {
+    const div = document.createElement('div');
+    div.style.position = 'absolute';
+    div.style.pointerEvents = 'auto';
+    div.style.touchAction = 'none';
+
+    const [x, y, w, h] = viewport;
+    div.style.left = `${x * 100}%`;
+    div.style.width = `${w * 100}%`;
+    // Three.js viewport origin is bottom-left; CSS `top` is measured from
+    // the top, so the y-axis needs flipping.
+    div.style.top = `${(1 - y - h) * 100}%`;
+    div.style.height = `${h * 100}%`;
+
+    this.#viewportOverlayEl = div;
+    this.#attachViewportOverlay(div);
+    return div;
+  }
+
+  /**
+   * SceneComponent appends the canvas to its wrapper in ngAfterViewInit,
+   * which may not have run yet when this effect first fires. Retry until
+   * the canvas has a parent to append this overlay next to.
+   */
+  #attachViewportOverlay(div: HTMLDivElement): void {
+    if (this.#viewportOverlayEl !== div) return; // torn down or replaced since
+
+    const container = this.engineService.canvas.parentElement;
+    if (container) {
+      container.appendChild(div);
+    } else {
+      requestAnimationFrame(() => this.#attachViewportOverlay(div));
+    }
+  }
+
+  #teardownViewportOverlay(): void {
+    this.#viewportOverlayEl?.remove();
+    this.#viewportOverlayEl = undefined;
   }
 
   cameraHelper: CameraHelper | undefined;
