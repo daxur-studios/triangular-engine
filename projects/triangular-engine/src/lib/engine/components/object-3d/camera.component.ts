@@ -164,8 +164,12 @@ export class CameraComponent extends Object3DComponent implements OnDestroy {
     effect(() => {
       const vp = this.viewport();
       const cam = this.camera();
-      if (vp && this.#multiViewportService) {
-        this.#multiViewportService.registerViewportCamera(cam, vp);
+      if (this.#multiViewportService) {
+        if (vp) {
+          this.#multiViewportService.registerViewportCamera(cam, vp);
+        } else {
+          this.#multiViewportService.unregisterViewportCamera(cam);
+        }
       }
     });
   }

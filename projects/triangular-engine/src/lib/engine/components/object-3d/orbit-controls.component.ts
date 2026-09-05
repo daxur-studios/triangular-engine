@@ -113,8 +113,12 @@ export class OrbitControlsComponent implements OnDestroy {
     effect(() => {
       const vp = this.viewport();
       const cam = this.internalCamera;
-      if (vp && this.multiViewportService) {
-        this.multiViewportService.registerViewportCamera(cam, vp);
+      if (this.multiViewportService) {
+        if (vp) {
+          this.multiViewportService.registerViewportCamera(cam, vp);
+        } else {
+          this.multiViewportService.unregisterViewportCamera(cam);
+        }
       }
     });
   }
@@ -266,12 +270,23 @@ export class OrbitControlsComponent implements OnDestroy {
     });
   }
 
+  /**
+   * Tracks the live orbit instance outside the `orbitControls` signal so
+   * `#initIsActive`'s effect never reads that signal itself — reading it
+   * there while also writing a fresh (non-equal) instance later in the same
+   * run would make the effect depend on its own write, re-triggering itself
+   * every time isActive/viewport are truthy: dispose → create → write →
+   * re-run → dispose → create..., forever, before anything can render.
+   */
+  #currentOrbit: AdvancedOrbitControls | undefined;
+
   #initIsActive() {
     effect(() => {
       const isActive = this.isActive();
       const vp = this.viewport();
 
-      this.orbitControls()?.dispose();
+      this.#currentOrbit?.dispose();
+      this.#currentOrbit = undefined;
       this.orbitControls.set(undefined);
       this.#teardownViewportOverlay();
 
@@ -283,6 +298,7 @@ export class OrbitControlsComponent implements OnDestroy {
 
       const orbit = new AdvancedOrbitControls(this.internalCamera, domElement);
       this.#makeOrbitControlsBetter(orbit);
+      this.#currentOrbit = orbit;
       this.orbitControls.set(orbit);
 
       this.switchCameraTrigger.update((v) => (v || 0) + 1);
@@ -322,13 +338,13 @@ export class OrbitControlsComponent implements OnDestroy {
   /**
    * SceneComponent appends the canvas to its wrapper in ngAfterViewInit,
    * which may not have run yet when this effect first fires. Retry until
-   * the canvas has a parent to append this overlay next to.
+   * the canvas has a connected parent to append this overlay next to.
    */
   #attachViewportOverlay(div: HTMLDivElement): void {
     if (this.#viewportOverlayEl !== div) return; // torn down or replaced since
 
     const container = this.engineService.canvas.parentElement;
-    if (container) {
+    if (container && container.isConnected) {
       container.appendChild(div);
     } else {
       requestAnimationFrame(() => this.#attachViewportOverlay(div));
