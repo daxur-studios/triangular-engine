@@ -27,7 +27,7 @@ export const SPIKES: readonly ISpikeItem[] = [
     number: '1',
     title: 'GPU Morph LOD (shared buffer + per-vertex world-space morph)',
     route: '/gpu-morph-lod-spike',
-    status: 'pending',
+    status: 'passed',
     hypothesis:
       'One shared vertex buffer + per-mip index buffers + per-vertex world-space height/morph, with a neighbour-LOD-aware border clamp closing the T-junction at ring boundaries, can replace CDLOD\'s CPU-remeshed patches: crack-free by construction, draw calls bounded to one InstancedMesh per LOD level, and no geometry cache to evict or race — the failure class behind CS-019\'s flicker.',
     description:

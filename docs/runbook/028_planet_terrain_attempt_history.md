@@ -472,3 +472,18 @@ There are two procedural tensions:
 ## Response 2
 
 ---
+
+## Findings
+
+**gpu-morph-lod-spike — Spike 5 (crack-free geometry and altitude transitions), clipmap-ring-boundary fixture only**
+
+- **Fixture:** `projects/demo-app/src/app/gpu-morph-lod-spike` — plain Three.js, shared vertex buffer + per-level index buffer, flat instanced clipmap (4 levels, base tile 16 m, grid resolution 32). Only the "clipmap ring/recentring boundary" case from Spike 5's three listed fixture types; cubesphere 2:1 and explicit-feature patch boundaries are untested here.
+- **Revision:** the initial per-vertex `continuousLevel` morph (a circular, distance-based isoline) left a T-junction gap at the clipmap's square ring boundary, worst at block corners — a fine tile's edge vertices have no counterpart in a coarser neighbour's sparser index buffer. Fixed with a second, level-aware border-clamp blend: near the outer edge of a tile's own ring, force its vertices onto the next-coarser level's grid so both sides converge on identical coarse vertex positions.
+- **Raw capture:** a standalone Node re-implementation of `clipmap-layout.ts`'s tile placement and `shader.ts`'s vertex-shader math found a real fine/coarse tile pair from the actual layout function and checked every fine-edge vertex against the coarse mesh's real (stride-selected) vertices, at both a mid-edge case and a diagonal corner (fine tile bordering two coarser neighbours at once). Max 3D gap: **0.000000 m**. Matched by manual visual check (wireframe, frozen camera, oblique far-looking-toward-center view — the exact condition the crack was first reported under).
+- **Threshold:** Spike 5 requires zero boundary gaps >1 mm. Cleared by orders of magnitude in this fixture.
+- **Draw calls:** 4 (one `InstancedMesh` per level), independent of camera distance — within Spike 5's ≤30 combined-handoff bound and the spike's own ≤4 target.
+- **Disqualified path / open bug (tracked separately, not fixed here):** `clipmap-layout.ts`'s "fullyCovered" ring-skip check never fires — a coarser candidate box can never be a strict superset of an already-placed finer box under this algorithm — so every level currently renders across its *entire* block instead of just an outer ring; all 4 levels sit at `MAX_INSTANCES_PER_LEVEL` (64) simultaneously. This inflates triangle count/overdraw but does not affect the draw-call bound or the crack-freeness result above, since the border-clamp operates per-tile at the real ring boundary regardless of how much of the ring is redundantly covered.
+- **Remaining uncertainty:** terrain shape/quality and altitude-based height picking are out of scope for this spike (analytic placeholder heightfield, see `shader.ts`'s doc comment). Cubesphere and explicit-feature-patch boundary fixtures (Spike 5's other two cases) are untested.
+- **Result: PASSED** for the scope this spike's hypothesis claims (shared-buffer + per-vertex morph + border clamp closes the T-junction; draw calls bounded). Status updated in `pages/spikes-index/spikes-index.component.ts`.
+
+---
