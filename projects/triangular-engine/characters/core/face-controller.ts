@@ -283,6 +283,18 @@ export class FacialAnimationController {
   }
 
   /**
+   * Immediately stops any active viseme sequence and resets speech damping articulators to zero.
+   */
+  public stopSpeech(): void {
+    this.activeVisemes = [];
+    this.speechElapsed = 0;
+    this.speechTotalDuration = 0;
+    for (const key of Object.keys(this.speechMouthDamping)) {
+      this.speechMouthDamping[key] = 0;
+    }
+  }
+
+  /**
    * Smoothly reset all expressions, channel overrides, speech, and gaze back to neutral rest.
    */
   public resetToNeutral(transitionSeconds = 0.25): void {
@@ -402,12 +414,12 @@ export class FacialAnimationController {
       };
 
       const speechJaw = damp('jawOpen', visemeWeights.jawOpen ?? 0, 18);
-      const speechCloseTarget = Math.max(
-        visemeWeights.mouthClose ?? 0,
+      const speechPressTarget = Math.max(
         visemeWeights.mouthPressLeft ?? 0,
         visemeWeights.mouthPressRight ?? 0,
       );
-      const speechClose = damp('mouthClose', speechCloseTarget, 22);
+      const speechPress = damp('mouthPress', speechPressTarget, 22);
+      const speechClose = damp('mouthClose', visemeWeights.mouthClose ?? 0, 22);
       const speechPucker = damp('mouthPucker', visemeWeights.mouthPucker ?? 0, 18);
       const speechFunnel = damp('mouthFunnel', visemeWeights.mouthFunnel ?? 0, 18);
       const speechWiden = damp(
@@ -420,14 +432,15 @@ export class FacialAnimationController {
       // Smile corners remain lifted; speech jaw and rounding modulate mouth opening.
       // If lip closure is high (e.g. M/B/P bilabial sounds), lipClose seals the mouth.
       evaluated['mouth.jawOpen'] = Math.max(evaluated['mouth.jawOpen'] ?? 0, speechJaw);
-      evaluated['mouth.lipClose'] = Math.max(evaluated['mouth.lipClose'] ?? 0, speechClose);
+      evaluated['mouth.lipClose'] = Math.max(evaluated['mouth.lipClose'] ?? 0, speechPress, speechClose);
       evaluated['mouth.pucker'] = Math.max(evaluated['mouth.pucker'] ?? 0, speechPucker);
       evaluated['mouth.funnel'] = Math.max(evaluated['mouth.funnel'] ?? 0, speechFunnel);
       evaluated['mouth.widen'] = Math.max(evaluated['mouth.widen'] ?? 0, speechWiden);
 
-      // If lipClose is strongly active, suppress wide/round to form clean bilabial seal
-      if (speechClose > 0.4) {
-        evaluated['mouth.jawOpen'] *= 1 - speechClose * 0.7;
+      // If lip closure is strongly active, suppress wide/round to form clean bilabial seal
+      if (speechPress > 0.4 || speechClose > 0.4) {
+        const seal = Math.max(speechPress, speechClose);
+        evaluated['mouth.jawOpen'] *= 1 - seal * 0.7;
       }
     } else {
       // Decay speech articulators to zero at rest
@@ -440,7 +453,22 @@ export class FacialAnimationController {
     }
 
     // 6. Convert fully layered semantic channels to ARKit 52 blendshape weights
-    const blendShapes = semanticChannelsToBlendShapes(evaluated);
+    const blendShapes: Record<string, number> = { ...semanticChannelsToBlendShapes(evaluated) };
+
+    // If speaking, layer canonical speech blendshapes:
+    // When lips are pressed for bilabials ('M', 'B', 'P'), use mouthPressLeft and mouthPressRight.
+    // In Apple ARKit, mouthClose is only used when the jaw is open to counteract jawOpen;
+    // applying mouthClose when jawOpen is 0 pulls the lower lip abnormally high into the chin/nose.
+    if (isSpeaking) {
+      const activePress = this.speechMouthDamping['mouthPress'] ?? 0;
+      if (activePress > 0.02) {
+        blendShapes['mouthPressLeft'] = activePress;
+        blendShapes['mouthPressRight'] = activePress;
+        if ((evaluated['mouth.jawOpen'] ?? 0) < 0.1) {
+          delete blendShapes['mouthClose'];
+        }
+      }
+    }
 
     return {
       channels: evaluated,

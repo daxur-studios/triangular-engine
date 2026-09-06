@@ -378,6 +378,13 @@ export class CharacterLabPageComponent {
         metalness: isMetallic ? 0.7 : 0.2,
         emissive: isGlowing ? color : new Color(0x000000),
         emissiveIntensity: isGlowing ? 0.9 : 0,
+        // Parts sharing collinear SVG edges (power pack & chassis at x=24/76)
+        // get coplanar side walls that no z-stagger can separate; bias depth
+        // per part so later-drawn parts win, matching SVG paint order.
+        // Note: ignored while logarithmicDepthBuffer is enabled.
+        polygonOffset: true,
+        polygonOffsetFactor: -(pathIndex + 1) * 0.05,
+        polygonOffsetUnits: -(pathIndex + 1),
       });
 
       // Per-part thickness: data-depth is authored in world meters

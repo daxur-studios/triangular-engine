@@ -1,4 +1,4 @@
-import { BoxGeometry, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, Object3D } from 'three';
+import { BoxGeometry, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, Object3D, Quaternion, Vector3 } from 'three';
 import {
   bindCharacterFace,
   normalizeMorphTargetName,
@@ -147,6 +147,55 @@ describe('bindCharacterFace', () => {
     // eyeLookOut_L and eyeLookIn_R should be 0
     expect(inf[1]).toBe(0);
     expect(inf[2]).toBe(0);
+  });
+
+  it('rotates eye nodes correctly in nested hierarchies with parent rotation', () => {
+    const root = new Group();
+    const parent = new Object3D();
+    // Simulate glTF / Maya coordinate orientation on parent
+    parent.rotation.x = Math.PI / 2;
+    root.add(parent);
+
+    const leftEye = new Object3D();
+    leftEye.name = 'grp_eyeLeft';
+    // Oriented to face +Z forward in character space at rest
+    leftEye.rotation.x = -Math.PI / 2;
+    parent.add(leftEye);
+
+    const binding = bindCharacterFace(root);
+    expect(binding.leftEyeNode).toBe(leftEye);
+
+    // Apply look left (yaw: -0.3 rad)
+    binding.applyPose({}, { yaw: -0.3, pitch: 0 });
+
+    // Compute ray in root space
+    root.updateMatrixWorld(true);
+    const rootInv = root.getWorldQuaternion(new Quaternion()).invert();
+    const eyeInRoot = rootInv.clone().multiply(leftEye.getWorldQuaternion(new Quaternion()));
+    const forwardInRoot = new Vector3(0, 0, 1).applyQuaternion(eyeInRoot);
+
+    // Turning left in root space means forward vector points towards negative X
+    expect(forwardInRoot.x).toBeLessThan(-0.25);
+    expect(forwardInRoot.z).toBeGreaterThan(0.9);
+  });
+
+  it('supports independent left and right eye gaze inputs', () => {
+    const root = new Group();
+    const leftEye = new Object3D();
+    leftEye.name = 'grp_eyeLeft';
+    const rightEye = new Object3D();
+    rightEye.name = 'grp_eyeRight';
+    root.add(leftEye, rightEye);
+
+    const binding = bindCharacterFace(root);
+    binding.applyPose({}, {
+      left: { yaw: -0.3, pitch: 0 },
+      right: { yaw: 0.3, pitch: 0 },
+    });
+
+    // Left eye turned left (negative yaw), right eye turned right (positive yaw)
+    expect(leftEye.quaternion.y).toBeLessThan(0);
+    expect(rightEye.quaternion.y).toBeGreaterThan(0);
   });
 
   it('resets all morph influences to 0 on reset()', () => {

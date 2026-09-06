@@ -110,14 +110,13 @@ export interface CharacterFaceBindingOptions {
   readonly maxGazePitchRad?: number;
 
   /**
-   * Horizontal gaze rotation multiplier for eye nodes.
-   * In standard Three.js coordinates, looking right (yaw > 0) corresponds to negative Y rotation (-1.0).
-   * Defaults to `-1.0`.
+   * Horizontal gaze rotation multiplier for eye nodes in root coordinate space.
+   * Defaults to `1.0`.
    */
   readonly gazeYawMultiplier?: number;
 
   /**
-   * Vertical gaze rotation multiplier for eye nodes.
+   * Vertical gaze rotation multiplier for eye nodes in root coordinate space.
    * Defaults to `1.0`.
    */
   readonly gazePitchMultiplier?: number;
@@ -151,9 +150,15 @@ export interface CharacterFaceBinding {
    * Applies the given ARKit blendshape weights and gaze angles to the face.
    *
    * @param weights Normalized 0..1 weights keyed by canonical ARKit blendshape names.
-   * @param gaze Optional gaze orientation with `yaw` (horizontal) and `pitch` (vertical) in radians.
+   * @param gaze Optional gaze orientation with `yaw` (horizontal) and `pitch` (vertical) in radians,
+   *             or independent `{ left, right }` eye gaze pairs.
    */
-  applyPose(weights: BlendShapeWeights, gaze?: { yaw: number; pitch: number }): void;
+  applyPose(
+    weights: BlendShapeWeights,
+    gaze?:
+      | { yaw: number; pitch: number }
+      | { left: { yaw: number; pitch: number }; right: { yaw: number; pitch: number } },
+  ): void;
 
   /**
    * Resets all morph target influences to 0 and restores eye nodes to their rest orientations.
@@ -255,17 +260,35 @@ export function bindCharacterFace(
   const leftEyeNode = findNodeByPattern(root, options.leftEyeNodeName, DEFAULT_LEFT_EYE_PATTERNS);
   const rightEyeNode = findNodeByPattern(root, options.rightEyeNodeName, DEFAULT_RIGHT_EYE_PATTERNS);
 
-  const leftEyeRestQuat = leftEyeNode ? leftEyeNode.quaternion.clone() : undefined;
-  const rightEyeRestQuat = rightEyeNode ? rightEyeNode.quaternion.clone() : undefined;
+  const leftEyeRestLocalQuat = leftEyeNode ? leftEyeNode.quaternion.clone() : undefined;
+  const rightEyeRestLocalQuat = rightEyeNode ? rightEyeNode.quaternion.clone() : undefined;
+
+  // Capture rest orientations relative to root coordinate space to avoid distortions
+  // from intermediate parent groups, scaling, or coordinate axis conversions (e.g. glTF/Blender/Maya imports).
+  root.updateMatrixWorld(true);
+  const rootWorldQuat = new Quaternion();
+  const rootWorldQuatInv = new Quaternion();
+  root.getWorldQuaternion(rootWorldQuat);
+  rootWorldQuatInv.copy(rootWorldQuat).invert();
+
+  const leftEyeRestInRoot = leftEyeNode
+    ? rootWorldQuatInv.clone().multiply(leftEyeNode.getWorldQuaternion(new Quaternion()))
+    : undefined;
+  const rightEyeRestInRoot = rightEyeNode
+    ? rootWorldQuatInv.clone().multiply(rightEyeNode.getWorldQuaternion(new Quaternion()))
+    : undefined;
 
   const driveEyeMorphs = options.driveEyeMorphsFromGaze ?? true;
   const maxYaw = options.maxGazeYawRad ?? 0.523;
   const maxPitch = options.maxGazePitchRad ?? 0.349;
-  const yawMult = options.gazeYawMultiplier ?? -1.0;
+  const yawMult = options.gazeYawMultiplier ?? 1.0;
   const pitchMult = options.gazePitchMultiplier ?? 1.0;
 
   const euler = new Euler(0, 0, 0, 'YXZ');
   const gazeQuat = new Quaternion();
+  const tempQuat = new Quaternion();
+  const targetInRoot = new Quaternion();
+  const parentInRoot = new Quaternion();
 
   const binding: CharacterFaceBinding = {
     root,
@@ -275,33 +298,46 @@ export function bindCharacterFace(
     recognizedMorphCount: allRecognizedNames.size,
     targetDictionary,
 
-    applyPose(weights: BlendShapeWeights, gaze?: { yaw: number; pitch: number }): void {
-      // 1. Prepare combined weights, optionally computing gaze eye morphs
+    applyPose(
+      weights: BlendShapeWeights,
+      gaze?:
+        | { yaw: number; pitch: number }
+        | { left: { yaw: number; pitch: number }; right: { yaw: number; pitch: number } },
+    ): void {
+      const leftGaze = gaze ? ('left' in gaze ? gaze.left : gaze) : undefined;
+      const rightGaze = gaze ? ('right' in gaze ? gaze.right : gaze) : undefined;
       const effectiveWeights: Record<string, number> = { ...weights };
 
-      if (gaze && driveEyeMorphs) {
-        const clampedYaw = Math.max(-maxYaw, Math.min(maxYaw, gaze.yaw));
-        const clampedPitch = Math.max(-maxPitch, Math.min(maxPitch, gaze.pitch));
+      // 1. Optionally compute gaze eye morphs
+      if (driveEyeMorphs && (leftGaze || rightGaze)) {
+        const refGaze = leftGaze ?? rightGaze!;
+        const clampedYaw = Math.max(-maxYaw, Math.min(maxYaw, refGaze.yaw));
+        const clampedPitch = Math.max(-maxPitch, Math.min(maxPitch, refGaze.pitch));
 
         // Horizontal gaze
+        // Positive yaw is looking viewer-right (+X), which from the character's perspective is:
+        // Left eye looks towards nose (in), right eye looks towards ear (out).
         if (clampedYaw > 0) {
-          // Looking character right
-          effectiveWeights['eyeLookInLeft'] = effectiveWeights['eyeLookInLeft'] ?? (clampedYaw / maxYaw);
-          effectiveWeights['eyeLookOutRight'] = effectiveWeights['eyeLookOutRight'] ?? (clampedYaw / maxYaw);
+          const mag = clampedYaw / maxYaw;
+          effectiveWeights['eyeLookInLeft'] = effectiveWeights['eyeLookInLeft'] ?? mag;
+          effectiveWeights['eyeLookOutRight'] = effectiveWeights['eyeLookOutRight'] ?? mag;
         } else if (clampedYaw < 0) {
-          // Looking character left
+          // Negative yaw is looking viewer-left (-X):
+          // Left eye looks towards ear (out), right eye looks towards nose (in).
           const mag = -clampedYaw / maxYaw;
           effectiveWeights['eyeLookOutLeft'] = effectiveWeights['eyeLookOutLeft'] ?? mag;
           effectiveWeights['eyeLookInRight'] = effectiveWeights['eyeLookInRight'] ?? mag;
         }
 
         // Vertical gaze
-        if (clampedPitch > 0) {
-          const mag = clampedPitch / maxPitch;
+        // Negative pitch is looking UP (+Y)
+        if (clampedPitch < 0) {
+          const mag = -clampedPitch / maxPitch;
           effectiveWeights['eyeLookUpLeft'] = effectiveWeights['eyeLookUpLeft'] ?? mag;
           effectiveWeights['eyeLookUpRight'] = effectiveWeights['eyeLookUpRight'] ?? mag;
-        } else if (clampedPitch < 0) {
-          const mag = -clampedPitch / maxPitch;
+        } else if (clampedPitch > 0) {
+          // Positive pitch is looking DOWN (-Y)
+          const mag = clampedPitch / maxPitch;
           effectiveWeights['eyeLookDownLeft'] = effectiveWeights['eyeLookDownLeft'] ?? mag;
           effectiveWeights['eyeLookDownRight'] = effectiveWeights['eyeLookDownRight'] ?? mag;
         }
@@ -320,18 +356,41 @@ export function bindCharacterFace(
         }
       }
 
-      // 3. Apply eye node rotations if nodes exist
-      if (gaze) {
-        const clampedYaw = Math.max(-maxYaw, Math.min(maxYaw, gaze.yaw));
-        const clampedPitch = Math.max(-maxPitch, Math.min(maxPitch, gaze.pitch));
-        euler.set(clampedPitch * pitchMult, clampedYaw * yawMult, 0, 'YXZ');
-        gazeQuat.setFromEuler(euler);
+      // 3. Apply eye node rotations in character root coordinate space
+      if (leftGaze || rightGaze) {
+        root.getWorldQuaternion(rootWorldQuat);
+        rootWorldQuatInv.copy(rootWorldQuat).invert();
 
-        if (leftEyeNode && leftEyeRestQuat) {
-          leftEyeNode.quaternion.copy(leftEyeRestQuat).multiply(gazeQuat);
+        if (leftEyeNode && leftEyeRestInRoot && leftGaze) {
+          const clampedYaw = Math.max(-maxYaw, Math.min(maxYaw, leftGaze.yaw));
+          const clampedPitch = Math.max(-maxPitch, Math.min(maxPitch, leftGaze.pitch));
+          euler.set(clampedPitch * pitchMult, clampedYaw * yawMult, 0, 'YXZ');
+          gazeQuat.setFromEuler(euler);
+
+          targetInRoot.copy(gazeQuat).multiply(leftEyeRestInRoot);
+          if (leftEyeNode.parent && leftEyeNode.parent !== root) {
+            leftEyeNode.parent.getWorldQuaternion(tempQuat);
+            parentInRoot.copy(rootWorldQuatInv).multiply(tempQuat);
+            leftEyeNode.quaternion.copy(parentInRoot.invert().multiply(targetInRoot));
+          } else {
+            leftEyeNode.quaternion.copy(targetInRoot);
+          }
         }
-        if (rightEyeNode && rightEyeRestQuat) {
-          rightEyeNode.quaternion.copy(rightEyeRestQuat).multiply(gazeQuat);
+
+        if (rightEyeNode && rightEyeRestInRoot && rightGaze) {
+          const clampedYaw = Math.max(-maxYaw, Math.min(maxYaw, rightGaze.yaw));
+          const clampedPitch = Math.max(-maxPitch, Math.min(maxPitch, rightGaze.pitch));
+          euler.set(clampedPitch * pitchMult, clampedYaw * yawMult, 0, 'YXZ');
+          gazeQuat.setFromEuler(euler);
+
+          targetInRoot.copy(gazeQuat).multiply(rightEyeRestInRoot);
+          if (rightEyeNode.parent && rightEyeNode.parent !== root) {
+            rightEyeNode.parent.getWorldQuaternion(tempQuat);
+            parentInRoot.copy(rootWorldQuatInv).multiply(tempQuat);
+            rightEyeNode.quaternion.copy(parentInRoot.invert().multiply(targetInRoot));
+          } else {
+            rightEyeNode.quaternion.copy(targetInRoot);
+          }
         }
       }
     },
@@ -342,11 +401,11 @@ export function bindCharacterFace(
           mesh.morphTargetInfluences.fill(0);
         }
       }
-      if (leftEyeNode && leftEyeRestQuat) {
-        leftEyeNode.quaternion.copy(leftEyeRestQuat);
+      if (leftEyeNode && leftEyeRestLocalQuat) {
+        leftEyeNode.quaternion.copy(leftEyeRestLocalQuat);
       }
-      if (rightEyeNode && rightEyeRestQuat) {
-        rightEyeNode.quaternion.copy(rightEyeRestQuat);
+      if (rightEyeNode && rightEyeRestLocalQuat) {
+        rightEyeNode.quaternion.copy(rightEyeRestLocalQuat);
       }
     },
 

@@ -82,9 +82,12 @@ describe('FacialAnimationController', () => {
     expect(frame.channels['mouth.jawOpen']).toBeGreaterThan(0.3);
     expect(frame.channels['mouth.smile.left']).toBeCloseTo(baseSmile, 1);
 
-    // During 'M', lip closure activates
+    // During 'M', lip closure activates via mouthPressLeft/Right without mouthClose
     frame = controller.update(0.15);
     expect(frame.channels['mouth.lipClose']).toBeGreaterThan(0.3);
+    expect(frame.blendShapes.mouthPressLeft).toBeGreaterThan(0.3);
+    expect(frame.blendShapes.mouthPressRight).toBeGreaterThan(0.3);
+    expect(frame.blendShapes.mouthClose).toBeUndefined();
   });
 
   it('returns mouth smoothly to rest when speech sequence completes', () => {

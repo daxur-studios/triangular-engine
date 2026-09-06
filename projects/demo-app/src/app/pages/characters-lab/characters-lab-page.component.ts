@@ -492,7 +492,11 @@ export class CharactersLabPageComponent {
   }
 
   protected setManualViseme(viseme: Viseme): void {
-    this.facialController.playVisemes([{ time: 0, viseme, duration: 1.2 }]);
+    if (viseme === 'sil') {
+      this.facialController.stopSpeech();
+    } else {
+      this.facialController.playVisemes([{ time: 0, viseme, duration: 1.2 }]);
+    }
   }
 
   protected playCombinedPerformance(): void {
@@ -695,7 +699,7 @@ export class CharactersLabPageComponent {
       if (this.faceModelSource === 'reference-model' && this.referenceModelBinding) {
         this.referenceModelBinding.applyPose(
           frame.blendShapes,
-          frame.gaze ? frame.gaze.left : undefined,
+          frame.gaze,
         );
       } else {
         this.referenceFace.applyPose(frame.blendShapes, frame.gaze);

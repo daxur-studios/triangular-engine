@@ -568,7 +568,7 @@ export function buildReferenceFaceMesh(options: IReferenceFaceOptions = {}): IRe
       influences[1] = Math.max(weights.mouthFunnel ?? 0, weights.mouthPucker ?? 0) * 0.5;
       influences[2] = Math.max(weights.mouthSmileLeft ?? 0, weights.mouthSmileRight ?? 0);
       influences[3] = Math.max(weights.mouthFrownLeft ?? 0, weights.mouthFrownRight ?? 0);
-      influences[4] = weights.mouthClose ?? 0;
+      influences[4] = Math.max(weights.mouthClose ?? 0, weights.mouthPressLeft ?? 0, weights.mouthPressRight ?? 0);
       influences[5] = Math.max(weights.mouthPucker ?? 0, weights.mouthFunnel ?? 0);
       influences[6] = Math.max(weights.mouthStretchLeft ?? 0, weights.mouthStretchRight ?? 0);
 

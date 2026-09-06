@@ -51,7 +51,7 @@ const DEFAULT_WORD_GAP_SECONDS = 0.08;
 
 /** Mouth-shape targets for each viseme (ARKit names). */
 const VISEME_BLENDSHAPES: Readonly<Record<Viseme, BlendShapeWeights>> = {
-  sil: { mouthClose: 0.6 },
+  sil: {},
   A: { jawOpen: 0.75 },
   E: { jawOpen: 0.4, mouthStretchLeft: 0.25, mouthStretchRight: 0.25 },
   I: { mouthStretchLeft: 0.55, mouthStretchRight: 0.55, jawOpen: 0.15 },
@@ -61,8 +61,8 @@ const VISEME_BLENDSHAPES: Readonly<Record<Viseme, BlendShapeWeights>> = {
   F: { mouthPressLeft: 0.5, mouthPressRight: 0.5, jawOpen: 0.15 },
   M: { mouthPressLeft: 0.7, mouthPressRight: 0.7 },
   L: { jawOpen: 0.5, tongueOut: 0.5 },
-  S: { mouthStretchLeft: 0.35, mouthStretchRight: 0.35, mouthClose: 0.4 },
-  T: { mouthClose: 0.7 },
+  S: { mouthStretchLeft: 0.35, mouthStretchRight: 0.35, jawOpen: 0.15 },
+  T: { jawOpen: 0.2, mouthStretchLeft: 0.15, mouthStretchRight: 0.15 },
   R: { mouthFunnel: 0.55, jawOpen: 0.25 },
   W: { mouthPucker: 0.6 },
   TH: { jawOpen: 0.3, tongueOut: 0.6 },
