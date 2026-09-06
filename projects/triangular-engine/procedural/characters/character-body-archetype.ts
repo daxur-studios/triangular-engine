@@ -14,9 +14,23 @@ export interface IProceduralCharacterPalette {
   readonly hair?: string;
 }
 
+export type CharacterBodyStyle =
+  | 'villager'
+  | 'faceted-vector'
+  | 'extruded-silhouette'
+  | 'mannequin';
+
+export const CHARACTER_BODY_STYLES: readonly CharacterBodyStyle[] = [
+  'villager',
+  'faceted-vector',
+  'extruded-silhouette',
+  'mannequin',
+];
+
 export interface IProceduralCharacterOptions {
   readonly schemaVersion?: 1;
   readonly id?: string;
+  readonly style?: CharacterBodyStyle;
   readonly seed?: string | number;
   readonly radialSegments?: number;
   readonly fingerCount?: number;
@@ -66,6 +80,14 @@ export function validateProceduralCharacterOptions(
 
   if (options.id !== undefined) {
     validateProceduralId(options.id, 'Character options');
+  }
+
+  if (options.style !== undefined) {
+    if (!CHARACTER_BODY_STYLES.includes(options.style)) {
+      throw new RangeError(
+        `Character style must be one of: ${CHARACTER_BODY_STYLES.join(', ')}. Got "${options.style}".`,
+      );
+    }
   }
 
   if (options.radialSegments !== undefined) {

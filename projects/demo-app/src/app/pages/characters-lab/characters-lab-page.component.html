@@ -7,6 +7,14 @@
 </header>
 <section class="controls">
   <div class="control-group">
+    <span>Style</span>
+    <select (change)="setStyle($any($event.target).value)">
+      @for (s of styles; track s) {
+        <option [value]="s" [selected]="s === style">{{ s }}</option>
+      }
+    </select>
+  </div>
+  <div class="control-group">
     <span>Locomotion</span>
     <button type="button" [class.active]="mode === 'idle'" (click)="setMode('idle')">Idle</button>
     <button type="button" [class.active]="mode === 'walk'" (click)="setMode('walk')">Walk</button>
@@ -49,8 +57,8 @@
   </div>
 </section>
 <section class="scope-note">
-  <b>What this proves</b><span>A single SkinnedMesh is generated procedurally and skinned to the same rig the gait, sit, look, and reach intents drive. Emotion and speech lipsync map onto the face's ARKit morph targets, and a Mixamo FBX dance picked from disk is retargeted onto the same skeleton via three's SkeletonUtils.</span>
-  <b>Still to come</b><span>GLB/glTF retargeting, finger/face bone detail, and real TTS viseme events.</span>
+  <b>What this proves</b><span>Multiple procedural humanoid styles (Black &amp; White 2 low-poly villager, Yakudoo/Wind Waker faceted-vector with dynamic canvas face, extruded 2D papercraft silhouette, and mannequin) all skin seamlessly to the same rig. Locomotion, sitting, look-at, reach, emotion, speech lipsync visemes, and retargeted Mixamo animations work identically across all body styles without authored 3D assets.</span>
+  <b>Styles</b><span>'villager' (organic sculpted anatomy, mouth cleft &amp; eyelid morphs), 'faceted-vector' (faceted body + live dynamic vector canvas face), 'extruded-silhouette' (papercraft 2D profile extrusion), and 'mannequin' (primitive debug).</span>
 </section>
 <scene>
   <orbitControls [cameraPosition]="[3.4, 2.4, 4.2]" [target]="[0, 0.9, 0]" />

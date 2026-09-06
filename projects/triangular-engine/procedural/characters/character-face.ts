@@ -46,12 +46,17 @@ export function arkitToCharacterFace(weights: BlendShapeWeights): CharacterFaceW
   };
 }
 
-/** Writes ARKit blendshape weights into a skinned mesh's morph influences. */
+/** Writes ARKit blendshape weights into a skinned mesh's morph influences or vector face canvas. */
 export function applyCharacterFacePose(mesh: SkinnedMesh, weights: BlendShapeWeights): void {
+  const face = arkitToCharacterFace(weights);
+
+  if (typeof mesh.userData?.['vectorFace'] === 'function') {
+    mesh.userData['vectorFace'](face);
+  }
+
   const influences = mesh.morphTargetInfluences;
   if (!influences || !mesh.morphTargetDictionary) return;
 
-  const face = arkitToCharacterFace(weights);
   for (const name of CHARACTER_FACE_MORPH_NAMES) {
     const index = mesh.morphTargetDictionary[name];
     if (index !== undefined && index >= 0 && index < influences.length) {

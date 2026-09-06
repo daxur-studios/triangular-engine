@@ -38,7 +38,12 @@ import {
   type VisemeKeyframe,
 } from 'triangular-engine/characters';
 import { HumanoidRigVisualization, retargetMixamoClip } from 'triangular-engine/characters/three';
-import { applyCharacterFacePose, buildCharacterBodyMesh } from 'triangular-engine/procedural';
+import {
+  applyCharacterFacePose,
+  buildCharacterBodyMesh,
+  CHARACTER_BODY_STYLES,
+  type CharacterBodyStyle,
+} from 'triangular-engine/procedural';
 
 const WALK_RADIUS = 1.6;
 const TARGET_RADIUS = 2.5;
@@ -55,6 +60,9 @@ const SIT_DROP = 0.4;
   host: { class: 'flex-page' },
 })
 export class CharactersLabPageComponent {
+  protected style: CharacterBodyStyle = 'villager';
+  protected readonly styles = CHARACTER_BODY_STYLES;
+
   protected mode: LocomotionMode = 'idle';
   protected sitEnabled = false;
   protected lookEnabled = true;
@@ -69,7 +77,7 @@ export class CharactersLabPageComponent {
   private readonly rig = createHumanoidRig();
   private readonly visualization = new HumanoidRigVisualization(this.rig);
   private readonly character = new Group();
-  private readonly bodyMesh: SkinnedMesh;
+  private bodyMesh!: SkinnedMesh;
   private readonly ground: Mesh;
   private readonly target: Mesh;
 
@@ -101,12 +109,7 @@ export class CharactersLabPageComponent {
       new MeshStandardMaterial({ color: '#ff6b6b', roughness: 0.4, emissive: 0x330000 }),
     );
 
-    this.bodyMesh = buildCharacterBodyMesh(this.rig, this.visualization.skeleton, {
-      seed: 'characters-lab',
-      fingerCount: 5,
-      includeFaceMorphs: true,
-    });
-    this.visualization.group.add(this.bodyMesh);
+    this.rebuildBodyMesh();
 
     this.character.add(this.visualization.group);
     this.engine.scene.add(this.character, this.ground, this.target);
@@ -116,6 +119,32 @@ export class CharactersLabPageComponent {
       .pipe(takeUntilDestroyed(destroyRef))
       .subscribe((deltaSeconds) => this.update(deltaSeconds));
     destroyRef.onDestroy(() => this.dispose());
+  }
+
+  protected setStyle(style: CharacterBodyStyle): void {
+    if (this.style === style) return;
+    this.style = style;
+    this.rebuildBodyMesh();
+  }
+
+  private rebuildBodyMesh(): void {
+    if (this.bodyMesh) {
+      this.visualization.group.remove(this.bodyMesh);
+      this.bodyMesh.geometry.dispose();
+      if (Array.isArray(this.bodyMesh.material)) {
+        this.bodyMesh.material.forEach((m) => m.dispose());
+      } else {
+        (this.bodyMesh.material as MeshStandardMaterial).dispose();
+      }
+    }
+
+    this.bodyMesh = buildCharacterBodyMesh(this.rig, this.visualization.skeleton, {
+      seed: 'characters-lab',
+      fingerCount: 5,
+      includeFaceMorphs: true,
+      style: this.style,
+    });
+    this.visualization.group.add(this.bodyMesh);
   }
 
   protected setMode(mode: LocomotionMode): void {
@@ -339,8 +368,14 @@ export class CharactersLabPageComponent {
     this.ground.removeFromParent();
     this.target.removeFromParent();
     this.visualization.dispose();
-    this.bodyMesh.geometry.dispose();
-    (this.bodyMesh.material as MeshStandardMaterial).dispose();
+    if (this.bodyMesh) {
+      this.bodyMesh.geometry.dispose();
+      if (Array.isArray(this.bodyMesh.material)) {
+        this.bodyMesh.material.forEach((m) => m.dispose());
+      } else {
+        (this.bodyMesh.material as MeshStandardMaterial).dispose();
+      }
+    }
     this.ground.geometry.dispose();
     (this.ground.material as MeshStandardMaterial).dispose();
     this.target.geometry.dispose();

@@ -28,6 +28,9 @@ import {
   type IProceduralCharacterPalette,
   validateProceduralCharacterOptions,
 } from './character-body-archetype';
+import { buildExtrudedSilhouetteBodyMesh } from './builders/extruded-silhouette-builder';
+import { buildFacetedVectorBodyMesh } from './builders/faceted-vector-builder';
+import { buildVillagerBodyMesh } from './builders/villager-builder';
 
 export interface ICharacterMeshResult {
   readonly mesh: SkinnedMesh;
@@ -156,11 +159,33 @@ export function buildCharacterBodyMesh(
 ): SkinnedMesh {
   validateProceduralCharacterOptions(options);
 
+  const style = options?.style ?? 'villager';
+  const palette = resolveDeterministicPalette(options);
+
+  switch (style) {
+    case 'villager':
+      return buildVillagerBodyMesh(rig, skeleton, options, palette);
+    case 'faceted-vector':
+      return buildFacetedVectorBodyMesh(rig, skeleton, options, palette);
+    case 'extruded-silhouette':
+      return buildExtrudedSilhouetteBodyMesh(rig, skeleton, options, palette);
+    case 'mannequin':
+    default:
+      return buildMannequinBodyMesh(rig, skeleton, options, palette);
+  }
+}
+
+function buildMannequinBodyMesh(
+  rig: HumanoidRig,
+  skeleton: Skeleton,
+  options?: IProceduralCharacterOptions,
+  paletteResolved?: Required<IProceduralCharacterPalette>,
+): SkinnedMesh {
   const radialSegments = options?.radialSegments ?? DEFAULT_CHARACTER_RADIAL_SEGMENTS;
   const fingerCount = options?.fingerCount ?? DEFAULT_CHARACTER_FINGER_COUNT;
   const maxTriangles = options?.maxTriangles ?? DEFAULT_CHARACTER_MAX_TRIANGLES;
   const includeFaceMorphs = options?.includeFaceMorphs ?? false;
-  const palette = resolveDeterministicPalette(options);
+  const palette = paletteResolved ?? resolveDeterministicPalette(options);
 
   // Validate required bones exist on skeleton
   const boneIndices = new Map<HumanoidBoneName, number>();

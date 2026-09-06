@@ -1,18 +1,40 @@
 import {
+  CHARACTER_BODY_STYLES,
   CHARACTER_MAX_TRIANGLES_PER_MESH,
   DEFAULT_CHARACTER_FINGER_COUNT,
   DEFAULT_CHARACTER_MAX_TRIANGLES,
   DEFAULT_CHARACTER_RADIAL_SEGMENTS,
+  type CharacterBodyStyle,
   validateCharacterBodyArchetype,
   validateProceduralCharacterOptions,
 } from './character-body-archetype';
 
 describe('Character Body Archetype', () => {
-  it('exposes default constants', () => {
+  it('exposes default constants and styles', () => {
     expect(CHARACTER_MAX_TRIANGLES_PER_MESH).toBe(25_000);
     expect(DEFAULT_CHARACTER_MAX_TRIANGLES).toBe(10_000);
     expect(DEFAULT_CHARACTER_RADIAL_SEGMENTS).toBe(8);
     expect(DEFAULT_CHARACTER_FINGER_COUNT).toBe(5);
+    expect(CHARACTER_BODY_STYLES).toEqual([
+      'villager',
+      'faceted-vector',
+      'extruded-silhouette',
+      'mannequin',
+    ]);
+  });
+
+  it('validates supported character styles', () => {
+    for (const style of CHARACTER_BODY_STYLES) {
+      expect(() => validateProceduralCharacterOptions({ style })).not.toThrow();
+    }
+  });
+
+  it('throws RangeError on unknown style', () => {
+    expect(() =>
+      validateProceduralCharacterOptions({
+        style: 'unknown-style' as CharacterBodyStyle,
+      }),
+    ).toThrowError(RangeError, /Character style must be one of/);
   });
 
   it('validates empty or undefined options without throwing', () => {

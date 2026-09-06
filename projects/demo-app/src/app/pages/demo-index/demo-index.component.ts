@@ -684,6 +684,18 @@ export const DEMOS: readonly DemoItem[] = [
     description:
       'Real-scale Jolt physics on a Voronoi-cell planet (runbook 022 M4d, split out of Cell Planet Lab): a collider patch and dropped ball positioned in true meters via RVec3 double precision, across the same world-size tiers as Cell Planet Lab.',
   },
+  {
+    id: 'cell-subdivision-lod-lab',
+    number: '43',
+    title: 'Cell Subdivision LOD Lab',
+    route: '/cell-subdivision-lod-lab',
+    categoryId: 'core',
+    tier: 'lab',
+    entryPoints: ['worldgen'],
+    package: 'triangular-engine/worldgen',
+    description:
+      'Boundary POC for region-scoped cell subdivision: mutually in-range coarse cells share one joint interior Voronoi diagram (a real jagged bisector between them), while an out-of-range edge stays a plain straight line — no skirts, no cracks, at any elevation scale.',
+  },
 ];
 
 export interface TagWithCount {

@@ -204,4 +204,67 @@ describe('Character Body Mesh Builder', () => {
       }),
     ).toThrowError(RangeError, /triangle count/);
   });
+
+  it('builds villager style with sculpted facial features and morph targets', () => {
+    const mesh = buildCharacterBodyMesh(rig, skeleton, {
+      style: 'villager',
+      includeFaceMorphs: true,
+    });
+    expect(mesh.name).toBe('villager-body-mesh');
+    expect(mesh.isSkinnedMesh).toBeTrue();
+    expect(mesh.morphTargetDictionary!['jawOpen']).toBeDefined();
+
+    const skinIndexAttr = mesh.geometry.getAttribute('skinIndex');
+    const skinWeightAttr = mesh.geometry.getAttribute('skinWeight');
+    expect(skinIndexAttr.count).toBeGreaterThan(0);
+
+    // Verify all weights sum to 1.0
+    for (let i = 0; i < skinWeightAttr.count; i++) {
+      const sum = skinWeightAttr.getX(i) + skinWeightAttr.getY(i) + skinWeightAttr.getZ(i) + skinWeightAttr.getW(i);
+      expect(sum).toBeCloseTo(1.0, 3);
+    }
+  });
+
+  it('builds faceted-vector style with dynamic vectorFace canvas texture callback', () => {
+    const mesh = buildCharacterBodyMesh(rig, skeleton, {
+      style: 'faceted-vector',
+      includeFaceMorphs: true,
+    });
+    expect(mesh.name).toBe('faceted-vector-mesh');
+    expect(mesh.isSkinnedMesh).toBeTrue();
+    expect(typeof mesh.userData['vectorFace']).toBe('function');
+
+    // Verify calling vectorFace does not throw
+    expect(() => mesh.userData['vectorFace']({ jawOpen: 0.5, mouthSmile: 0.8 })).not.toThrow();
+
+    const skinWeightAttr = mesh.geometry.getAttribute('skinWeight');
+    for (let i = 0; i < skinWeightAttr.count; i++) {
+      const sum = skinWeightAttr.getX(i) + skinWeightAttr.getY(i) + skinWeightAttr.getZ(i) + skinWeightAttr.getW(i);
+      expect(sum).toBeCloseTo(1.0, 3);
+    }
+  });
+
+  it('builds extruded-silhouette style with valid geometry and skinning', () => {
+    const mesh = buildCharacterBodyMesh(rig, skeleton, {
+      style: 'extruded-silhouette',
+      includeFaceMorphs: true,
+    });
+    expect(mesh.name).toBe('extruded-silhouette-mesh');
+    expect(mesh.isSkinnedMesh).toBeTrue();
+
+    const skinWeightAttr = mesh.geometry.getAttribute('skinWeight');
+    for (let i = 0; i < skinWeightAttr.count; i++) {
+      const sum = skinWeightAttr.getX(i) + skinWeightAttr.getY(i) + skinWeightAttr.getZ(i) + skinWeightAttr.getW(i);
+      expect(sum).toBeCloseTo(1.0, 3);
+    }
+  });
+
+  it('builds mannequin style for backward compatibility', () => {
+    const mesh = buildCharacterBodyMesh(rig, skeleton, {
+      style: 'mannequin',
+      includeFaceMorphs: true,
+    });
+    expect(mesh.isSkinnedMesh).toBeTrue();
+    expect(mesh.geometry.getAttribute('position').count).toBeGreaterThan(0);
+  });
 });
