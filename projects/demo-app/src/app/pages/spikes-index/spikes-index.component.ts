@@ -29,7 +29,7 @@ export const SPIKES: readonly ISpikeItem[] = [
     route: '/gpu-morph-lod-spike',
     status: 'pending',
     hypothesis:
-      'One shared vertex buffer + per-mip index buffers + per-vertex world-space height/morph (modelled on Unreal Landscape\'s LandscapeVertexFactory.ush) can replace CDLOD\'s CPU-remeshed patches: crack-free by construction, draw calls bounded to one InstancedMesh per LOD level, and no geometry cache to evict or race — the failure class behind CS-019\'s flicker.',
+      'One shared vertex buffer + per-mip index buffers + per-vertex world-space height/morph, with a neighbour-LOD-aware border clamp closing the T-junction at ring boundaries, can replace CDLOD\'s CPU-remeshed patches: crack-free by construction, draw calls bounded to one InstancedMesh per LOD level, and no geometry cache to evict or race — the failure class behind CS-019\'s flicker.',
     description:
       'Plain Three.js, zero triangular-engine imports. Toggle morph off to see the cracks it normally hides; freeze the camera to repeat the attempt-2 static-camera flicker check.',
     runbookPath: 'docs/runbook/028_planet_terrain_attempt_history.md',

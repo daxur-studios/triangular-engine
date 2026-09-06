@@ -64,10 +64,19 @@ const TERRAIN_HEIGHT_GLSL = `
  * fraction. Because it is a pure function of world position, two neighbouring
  * tiles evaluated at a shared boundary vertex compute IDENTICAL results
  * regardless of which tile "owns" that vertex or which discrete level each
- * tile is instanced at — this is what makes *that* case crack-free, though it
- * does not by itself close the T-junction gap where a finer tile's edge has
- * vertices with no counterpart on a coarser neighbour (see clipmap-layout.ts
- * and shared-grid-geometry.ts).
+ * tile is instanced at — this is what makes *that* case crack-free.
+ *
+ * It does not by itself close the T-junction gap where a finer tile's edge
+ * has vertices with no counterpart on a coarser neighbour: this continuousLevel
+ * blend follows a circular (distance-based) isoline, while the clipmap ring
+ * boundary (clipmap-layout.ts) is a square tile-block edge — the two diverge
+ * most at the block's corners, which is where the T-junction crack showed up.
+ * The second blend below (`borderBlend`) fixes that directly: near the outer
+ * edge of a tile's own clipmap ring, force its vertices onto the *next-coarser*
+ * grid (this tile's own level + 1), so both sides of the ring boundary
+ * converge on the identical coarse vertex positions instead of the finer side
+ * sampling the true nonlinear height field while the coarser side only
+ * linearly interpolates between its own sparser vertices.
  */
 const VERTEX_SHADER_BODY = `
   uniform vec3 uCameraWorldPos;
@@ -76,6 +85,7 @@ const VERTEX_SHADER_BODY = `
   uniform float uMaxLevel;
   uniform float uFinestSwitchDistanceM;
   uniform float uHeightScale;
+  uniform float uBlockRadiusTiles;
   uniform bool uMorphEnabled;
 
   attribute vec3 instanceOffset;
@@ -112,6 +122,37 @@ const VERTEX_SHADER_BODY = `
 
     vec2 morphedXZ = mix(fineXZ, coarseXZ, morphAlpha);
     float morphedHeight = mix(heightFine, heightCoarse, morphAlpha);
+
+    // Border clamp: this tile's own instanced level (recovered from
+    // instanceScale, which buildClipmapTiles sets to uBaseTileSizeM * 2^level)
+    // and the exact same box math buildClipmapTiles used to place it, so the
+    // "am I near my ring's outer edge" test matches the CPU layout precisely
+    // rather than approximating it with distance-to-camera.
+    float myLevel = floor(log2(instanceScale / uBaseTileSizeM) + 0.5);
+    if (myLevel < uMaxLevel - 0.5) {
+      float tileSizeAtMyLevel = uBaseTileSizeM * pow(2.0, myLevel);
+      vec2 centerTileAtMyLevel = floor(uCameraWorldPos.xz / tileSizeAtMyLevel);
+      vec2 boxMin = (centerTileAtMyLevel - uBlockRadiusTiles) * tileSizeAtMyLevel;
+      vec2 boxMax = (centerTileAtMyLevel + uBlockRadiusTiles) * tileSizeAtMyLevel;
+      vec2 distToEdge = min(seedWorldXZ - boxMin, boxMax - seedWorldXZ);
+      float nearestEdgeDist = min(distToEdge.x, distToEdge.y);
+
+      // The neighbour's rendered vertex spacing, NOT vertexSpacingM * 2^level:
+      // shared-grid-geometry.ts strides its index buffer by 2^level over a
+      // grid whose own per-step world size already doubles by 2^level (tile
+      // size doubles too), so the two 2^level factors compound to 4^level.
+      float borderCoarseCell = vertexSpacingM * pow(4.0, myLevel + 1.0);
+      float borderBlend = uMorphEnabled
+        ? (1.0 - clamp(nearestEdgeDist / borderCoarseCell, 0.0, 1.0))
+        : 0.0;
+
+      if (borderBlend > 0.0) {
+        vec2 borderCoarseXZ = snapToGrid(seedWorldXZ, borderCoarseCell);
+        float borderCoarseHeight = terrainHeight(borderCoarseXZ) * uHeightScale;
+        morphedXZ = mix(morphedXZ, borderCoarseXZ, borderBlend);
+        morphedHeight = mix(morphedHeight, borderCoarseHeight, borderBlend);
+      }
+    }
 
     vWorldPos = vec3(morphedXZ.x, morphedHeight, morphedXZ.y);
     vContinuousLevel = continuousLevel;
@@ -165,6 +206,7 @@ export function createGpuMorphLodMaterial(): ShaderMaterial {
       uMaxLevel: { value: 0 },
       uFinestSwitchDistanceM: { value: 0 },
       uHeightScale: { value: 1 },
+      uBlockRadiusTiles: { value: 0 },
       uMorphEnabled: { value: true },
       uShowLevelTint: { value: true },
       uTerrainKind: { value: 0 },

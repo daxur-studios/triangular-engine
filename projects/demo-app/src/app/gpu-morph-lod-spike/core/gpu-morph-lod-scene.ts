@@ -63,6 +63,7 @@ export function createGpuMorphLodScene(
   material.uniforms['uMaxLevel']!.value = LEVEL_COUNT - 1;
   material.uniforms['uFinestSwitchDistanceM']!.value = FINEST_SWITCH_DISTANCE_M;
   material.uniforms['uHeightScale']!.value = TERRAIN_HEIGHT_SCALE_M;
+  material.uniforms['uBlockRadiusTiles']!.value = BLOCK_RADIUS_TILES;
 
   const levelMeshes: InstancedMesh[] = [];
   const levelOffsetAttributes: InstancedBufferAttribute[] = [];
