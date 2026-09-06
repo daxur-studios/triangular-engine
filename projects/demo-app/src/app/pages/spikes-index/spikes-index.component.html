@@ -1,0 +1,98 @@
+<main>
+  <header class="hub-header">
+    <div class="header-content">
+      <span class="eyebrow">Triangular Engine</span>
+      <h1>Spikes</h1>
+      <p>
+        Disposable, timeboxed falsification tests — each one either passes its
+        stated threshold or kills a specific architecture. See
+        <a routerLink="/">Demo Hub</a> for polished, ongoing demos instead.
+      </p>
+      <div class="stats-summary">
+        <span class="stat-pill"><strong>{{ totalCount }}</strong> Total Spikes</span>
+        <span class="stat-pill passed-stat"><strong>{{ passedCount }}</strong> Passed</span>
+        <span class="stat-pill failed-stat"><strong>{{ failedCount }}</strong> Failed</span>
+        <span class="stat-pill pending-stat"><strong>{{ pendingCount }}</strong> Pending</span>
+      </div>
+    </div>
+
+    <div class="search-bar-container">
+      <div class="search-input-wrapper">
+        <svg class="search-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" />
+        </svg>
+        <input
+          id="spike-search-input"
+          type="text"
+          [value]="searchQuery()"
+          (input)="setSearchQuery($any($event.target).value)"
+          placeholder="Search spikes, hypotheses..."
+          aria-label="Search spikes"
+        />
+        @if (searchQuery()) {
+          <button class="clear-search-btn" type="button" (click)="setSearchQuery('')" aria-label="Clear search">
+            ✕
+          </button>
+        }
+      </div>
+    </div>
+  </header>
+
+  <section class="controls-panel" aria-label="Spike Filters">
+    <div class="filter-row">
+      <span class="filter-label">Status:</span>
+      <div class="status-tabs" role="tablist">
+        <button type="button" class="status-tab" [class.active]="selectedStatus() === 'all'" (click)="selectStatus('all')">
+          All <span class="count-badge">{{ totalCount }}</span>
+        </button>
+        <button type="button" class="status-tab passed-tab" [class.active]="selectedStatus() === 'passed'" (click)="selectStatus('passed')">
+          ✓ Passed <span class="count-badge">{{ passedCount }}</span>
+        </button>
+        <button type="button" class="status-tab failed-tab" [class.active]="selectedStatus() === 'failed'" (click)="selectStatus('failed')">
+          ✕ Failed <span class="count-badge">{{ failedCount }}</span>
+        </button>
+        <button type="button" class="status-tab pending-tab" [class.active]="selectedStatus() === 'pending'" (click)="selectStatus('pending')">
+          ⏳ Pending <span class="count-badge">{{ pendingCount }}</span>
+        </button>
+      </div>
+    </div>
+
+    @if (hasActiveFilters()) {
+      <div class="active-filters-bar">
+        <span class="results-count">
+          Showing <strong>{{ filteredSpikes().length }}</strong> of {{ totalCount }} spikes
+        </span>
+        <button type="button" class="reset-all-btn" (click)="clearFilters()">Reset Filters</button>
+      </div>
+    }
+  </section>
+
+  @if (filteredSpikes().length === 0) {
+    <div class="empty-state">
+      <div class="empty-icon">🔍</div>
+      <h3>No spikes match your criteria</h3>
+      <p>Try clearing your active filters.</p>
+      <button type="button" class="reset-all-btn primary" (click)="clearFilters()">Clear Filters</button>
+    </div>
+  }
+
+  <nav class="spikes-grid" aria-label="Spikes">
+    @for (spike of filteredSpikes(); track spike.id) {
+      <a [routerLink]="spike.route" class="spike-card" [class]="'status-' + spike.status">
+        <div class="card-meta">
+          <span class="spike-number">Spike {{ spike.number }}</span>
+          <span class="status-pill" [class]="'status-' + spike.status">
+            {{ statusLabel[spike.status] }}
+          </span>
+        </div>
+        <strong class="card-title">{{ spike.title }}</strong>
+        <p class="card-hypothesis"><em>Hypothesis:</em> {{ spike.hypothesis }}</p>
+        <p class="card-desc">{{ spike.description }}</p>
+        <div class="card-footer">
+          <span class="runbook-path">{{ spike.runbookPath }}</span>
+          <span class="spike-date">{{ spike.dateISO }}</span>
+        </div>
+      </a>
+    }
+  </nav>
+</main>

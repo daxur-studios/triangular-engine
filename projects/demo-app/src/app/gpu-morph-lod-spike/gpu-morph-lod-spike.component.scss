@@ -1,0 +1,59 @@
+:host {
+  background: #12181f;
+  display: block;
+  inset: 0;
+  position: fixed;
+  z-index: 10;
+}
+
+canvas {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.diagnostics {
+  background: rgb(8 14 23 / 82%);
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 0.5rem;
+  color: #dce9f5;
+  display: grid;
+  font: 12px/1.5 ui-monospace, monospace;
+  gap: 0.4rem;
+  left: 1rem;
+  max-width: 22rem;
+  padding: 0.75rem 0.9rem;
+  position: absolute;
+  top: 1rem;
+}
+
+strong {
+  color: white;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+button {
+  background: rgb(255 255 255 / 8%);
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 0.3rem;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0.3rem 0.55rem;
+
+  &.active {
+    background: #3d7bd6;
+    border-color: #3d7bd6;
+    color: white;
+  }
+}
+
+p {
+  color: #a9bccd;
+  margin: 0;
+}

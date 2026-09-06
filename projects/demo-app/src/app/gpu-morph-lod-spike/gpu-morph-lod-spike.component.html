@@ -1,0 +1,29 @@
+<canvas #canvas aria-label="GPU morph LOD terrain spike"></canvas>
+
+<aside class="diagnostics">
+  <strong>Attempt #5 · Spike 1 · GPU morph LOD (plain Three.js)</strong>
+  <span>{{ fps() }} fps · draw calls: {{ drawCalls() }} · triangles: {{ triangles().toLocaleString() }}</span>
+  <span>Instances by level: {{ instanceCountsLabel() }}</span>
+  <div class="actions">
+    <button [class.active]="wireframe()" (click)="toggleWireframe()">
+      Wireframe
+    </button>
+    <button [class.active]="showLevelTint()" (click)="toggleShowLevelTint()">
+      Level tint
+    </button>
+    <button [class.active]="morphEnabled()" (click)="toggleMorph()">
+      Morph
+    </button>
+    <button [class.active]="frozen()" (click)="toggleFrozen()">
+      {{ frozen() ? "Unfreeze camera" : "Freeze camera (flicker check)" }}
+    </button>
+  </div>
+  <p>
+    Draw calls should stay ≤4 (one InstancedMesh per LOD level) regardless of
+    camera distance. Toggle level tint to see LOD boundaries; toggle morph
+    off to see the "hard pop" cracks the per-vertex world-space snap normally
+    hides. Freeze camera to check for CDLOD-style flicker under a static
+    view — there is no periodic reselect timer or geometry cache here, so
+    none is expected.
+  </p>
+</aside>

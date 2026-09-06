@@ -46,6 +46,20 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'gpu-morph-lod-spike',
+    loadComponent: () =>
+      import('./gpu-morph-lod-spike/gpu-morph-lod-spike.component').then(
+        ({ GpuMorphLodSpikeComponent }) => GpuMorphLodSpikeComponent,
+      ),
+  },
+  {
+    path: 'spikes',
+    loadComponent: () =>
+      import('./pages/spikes-index/spikes-index.component').then(
+        ({ SpikesIndexComponent }) => SpikesIndexComponent,
+      ),
+  },
+  {
     path: 'takram-clouds',
     loadComponent: () =>
       import('./pages/takram-clouds/takram-clouds-page.component').then(

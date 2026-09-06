@@ -1,0 +1,130 @@
+import { ShaderMaterial, Vector3 } from 'three';
+
+/**
+ * Stand-in for a real `sampleElevation()`/`height(dir)`. Texture-backed
+ * heightmaps are a separate concern (see constants.ts doc comment) — this
+ * spike is only about the LOD/morph mechanism, so an analytic function keeps
+ * the fixture boundless and avoids atlas/streaming complexity entirely.
+ */
+const TERRAIN_HEIGHT_GLSL = `
+  float terrainHeight(vec2 xz) {
+    float continental = sin(xz.x / 340.0) * 6.0 + cos(xz.y / 260.0) * 5.0;
+    float ridges = abs(sin(xz.x / 55.0 + xz.y / 70.0)) * 14.0;
+    return continental + ridges;
+  }
+`;
+
+/**
+ * The core mechanism under test. Every vertex, from every tile at every
+ * discrete instancing level, computes its own fractional LOD purely from its
+ * own world-space position and the camera position — mirroring
+ * LandscapeVertexFactory.ush's per-vertex `MorphAlpha` lerp between a
+ * vertex's LOD and LOD+1 sampled height (confirmed at lines 657/680 of that
+ * file). Because it is a pure function of world position, two neighbouring
+ * tiles evaluated at a shared boundary vertex compute IDENTICAL results
+ * regardless of which tile "owns" that vertex or which discrete level each
+ * tile is instanced at — this is what makes the boundary crack-free, not any
+ * per-tile bookkeeping.
+ */
+const VERTEX_SHADER_BODY = `
+  uniform vec3 uCameraWorldPos;
+  uniform float uBaseTileSizeM;
+  uniform float uGridResolution;
+  uniform float uMaxLevel;
+  uniform float uFinestSwitchDistanceM;
+  uniform float uHeightScale;
+  uniform bool uMorphEnabled;
+
+  attribute vec3 instanceOffset;
+  attribute float instanceScale;
+
+  varying float vContinuousLevel;
+  varying vec3 vWorldPos;
+
+  vec2 snapToGrid(vec2 p, float cell) {
+    return floor(p / cell + 0.5) * cell;
+  }
+
+  void main() {
+    vec2 localXZ = position.xz;
+    vec2 seedWorldXZ = instanceOffset.xz + localXZ * instanceScale;
+
+    float dist = distance(uCameraWorldPos.xz, seedWorldXZ);
+    float continuousLevel = clamp(
+      log2(max(dist, 1.0) / uFinestSwitchDistanceM),
+      0.0,
+      uMaxLevel
+    );
+    float levelFloor = floor(continuousLevel);
+    float morphAlpha = uMorphEnabled ? (continuousLevel - levelFloor) : 0.0;
+
+    float vertexSpacingM = uBaseTileSizeM / uGridResolution;
+    float fineCell = vertexSpacingM * pow(2.0, levelFloor);
+    float coarseCell = vertexSpacingM * pow(2.0, levelFloor + 1.0);
+    vec2 fineXZ = snapToGrid(seedWorldXZ, fineCell);
+    vec2 coarseXZ = snapToGrid(seedWorldXZ, coarseCell);
+
+    float heightFine = terrainHeight(fineXZ) * uHeightScale;
+    float heightCoarse = terrainHeight(coarseXZ) * uHeightScale;
+
+    vec2 morphedXZ = mix(fineXZ, coarseXZ, morphAlpha);
+    float morphedHeight = mix(heightFine, heightCoarse, morphAlpha);
+
+    vWorldPos = vec3(morphedXZ.x, morphedHeight, morphedXZ.y);
+    vContinuousLevel = continuousLevel;
+
+    vec4 mvPosition = modelViewMatrix * vec4(vWorldPos, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const FRAGMENT_SHADER_BODY = `
+  uniform bool uShowLevelTint;
+  uniform float uMaxLevel;
+  varying float vContinuousLevel;
+  varying vec3 vWorldPos;
+
+  vec3 levelTint(float level) {
+    vec3 colors[4];
+    colors[0] = vec3(0.36, 0.78, 0.42);
+    colors[1] = vec3(0.32, 0.62, 0.86);
+    colors[2] = vec3(0.92, 0.75, 0.28);
+    colors[3] = vec3(0.86, 0.34, 0.34);
+    float t = clamp(level, 0.0, 3.0);
+    int i0 = int(floor(t));
+    int i1 = min(i0 + 1, 3);
+    return mix(colors[i0], colors[i1], fract(t));
+  }
+
+  void main() {
+    float eps = 0.5;
+    float hL = terrainHeight(vWorldPos.xz + vec2(-eps, 0.0));
+    float hR = terrainHeight(vWorldPos.xz + vec2(eps, 0.0));
+    float hD = terrainHeight(vWorldPos.xz + vec2(0.0, -eps));
+    float hU = terrainHeight(vWorldPos.xz + vec2(0.0, eps));
+    vec3 normal = normalize(vec3(hL - hR, 2.0 * eps, hD - hU));
+    vec3 lightDir = normalize(vec3(0.5, 0.8, 0.3));
+    float diffuse = max(dot(normal, lightDir), 0.15);
+
+    vec3 base = uShowLevelTint ? levelTint(vContinuousLevel) : vec3(0.55, 0.58, 0.45);
+    gl_FragColor = vec4(base * diffuse, 1.0);
+  }
+`;
+
+export function createGpuMorphLodMaterial(): ShaderMaterial {
+  return new ShaderMaterial({
+    vertexShader: TERRAIN_HEIGHT_GLSL + VERTEX_SHADER_BODY,
+    fragmentShader: TERRAIN_HEIGHT_GLSL + FRAGMENT_SHADER_BODY,
+    uniforms: {
+      uCameraWorldPos: { value: new Vector3() },
+      uBaseTileSizeM: { value: 0 },
+      uGridResolution: { value: 1 },
+      uMaxLevel: { value: 0 },
+      uFinestSwitchDistanceM: { value: 0 },
+      uHeightScale: { value: 1 },
+      uMorphEnabled: { value: true },
+      uShowLevelTint: { value: true },
+    },
+    wireframe: false,
+  });
+}
