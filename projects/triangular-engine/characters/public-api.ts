@@ -10,3 +10,5 @@ export * from './core/reach-ik';
 export * from './core/blend-shapes';
 export * from './core/visemes';
 export * from './core/character-affordance';
+export * from './core/face-semantic-channels';
+export * from './core/face-controller';

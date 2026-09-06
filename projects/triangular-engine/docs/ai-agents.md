@@ -56,6 +56,35 @@ See: ./api/selectors.md
 - Preserve the existing sequence when adding documents; do not create unnumbered runbooks.
 - Use the numbered filename in links and references.
 
+## Semantic Facial Animation & Character Controls
+
+Use `FacialAnimationController` from `triangular-engine/characters` to direct facial performances via serializable commands (`FaceCommand`):
+
+```ts
+import { FacialAnimationController } from 'triangular-engine/characters';
+
+const face = new FacialAnimationController();
+
+// 1. Direct gaze (yaw/pitch clamped to safe limits ±30°/±20°)
+face.execute({ type: 'lookAt', target: { x: 0.2, y: 0.1, z: 0.8 }, transitionSeconds: 0.15 });
+
+// 2. Set emotion presets (happy, sad, surprised, angry, skeptical, neutral)
+face.execute({ type: 'setExpression', expression: 'happy', intensity: 0.8, transitionSeconds: 0.2 });
+
+// 3. Fine semantic channel control (e.g. raise only right eyebrow)
+face.execute({ type: 'setChannel', channel: 'brow.right.raise', value: 0.9, transitionSeconds: 0.1 });
+
+// 4. Trigger natural or independent eyelid blinks
+face.execute({ type: 'blink', eye: 'both', durationSeconds: 0.18 });
+
+// 5. Play timed articulatory speech viseme tracks (smooth transitions & rest return)
+face.execute({ type: 'playVisemes', sequence: timedKeyframes });
+
+// 6. Each frame, evaluate state and apply to reference face or skinned mesh
+const frameState = face.update(deltaSeconds);
+referenceFace.applyPose(frameState.blendShapes, frameState.gaze);
+```
+
 ## Minimal Example
 
 See: ./examples/basic-scene.md

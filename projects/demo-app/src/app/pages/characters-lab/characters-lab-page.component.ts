@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, inject } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   AnimationMixer,
@@ -21,6 +22,8 @@ import {
   blendPoses,
   createHumanoidRig,
   EMOTION_NAMES,
+  EXTENDED_EMOTION_NAMES,
+  FacialAnimationController,
   HUMAN_BONE_NAMES,
   mergeBlendShapeWeights,
   preProcessText,
@@ -33,8 +36,12 @@ import {
   wordsToVisemes,
   type BlendShapeWeights,
   type EmotionName,
+  type ExtendedEmotionName,
+  type FaceSemanticChannelName,
+  type FacialFrameState,
   type LocomotionMode,
   type RigPose,
+  type Viseme,
   type VisemeKeyframe,
 } from 'triangular-engine/characters';
 import { HumanoidRigVisualization, retargetMixamoClip } from 'triangular-engine/characters/three';
@@ -43,13 +50,17 @@ import {
   buildCharacterBodyMesh,
   buildProceduralChair,
   buildProceduralDoor,
+  buildReferenceFaceMesh,
   CHARACTER_BODY_STYLES,
   type CharacterBodyStyle,
   type IProceduralChairResult,
   type IProceduralDoorResult,
+  type IReferenceFaceResult,
 } from 'triangular-engine/procedural';
 
 export type TargetSourceMode = 'door-knob' | 'chair' | 'manual';
+export type CharactersLabViewMode = 'face-studio' | 'full-body';
+export type CameraFramingPreset = 'front' | 'three-quarter' | 'profile';
 
 const WALK_RADIUS = 1.6;
 const TARGET_SWING_RADIUS = 2.5;
@@ -67,7 +78,7 @@ function lerpAngle(from: number, to: number, t: number): number {
 
 @Component({
   selector: 'app-characters-lab-page',
-  imports: [EngineModule],
+  imports: [EngineModule, DecimalPipe],
   templateUrl: './characters-lab-page.component.html',
   styleUrl: './characters-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -75,15 +86,51 @@ function lerpAngle(from: number, to: number, t: number): number {
   host: { class: 'flex-page' },
 })
 export class CharactersLabPageComponent {
+  // View mode
+  protected viewMode: CharactersLabViewMode = 'face-studio';
+  protected cameraFraming: CameraFramingPreset = 'three-quarter';
+  protected cameraPosition: [number, number, number] = [0.28, 1.63, 0.44];
+  protected cameraTarget: [number, number, number] = [0, 1.58, 0];
+
+  // Face Studio state
+  protected readonly facialController = new FacialAnimationController({
+    autoBlink: false,
+    defaultTransitionSeconds: 0.2,
+  });
+  private referenceFace: IReferenceFaceResult;
+  private gazeMarker: Mesh;
+  protected wanderGaze = false;
+  protected gazeTargetPos = new Vector3(0, 1.58, 0.65);
+
+  protected readonly extendedEmotions = EXTENDED_EMOTION_NAMES;
+  protected activeEmotion: ExtendedEmotionName = 'neutral';
+  protected currentFrameState?: FacialFrameState;
+
+  // Manual channel slider models
+  protected channelValues: Record<string, number> = {
+    'brow.right.raise': 0,
+    'brow.left.raise': 0,
+    'brow.lower': 0,
+    'eye.blink.left': 0,
+    'eye.blink.right': 0,
+    'eye.squint': 0,
+    'eye.wide': 0,
+    'mouth.smile': 0,
+    'mouth.frown': 0,
+    'mouth.jawOpen': 0,
+    'mouth.lipClose': 0,
+    'mouth.round': 0,
+    'mouth.widen': 0,
+  };
+
+  // Full-body character state
   protected style: CharacterBodyStyle = 'villager';
   protected readonly styles = CHARACTER_BODY_STYLES;
-
   protected mode: LocomotionMode = 'idle';
   protected sitEnabled = false;
   protected lookEnabled = true;
   protected reachEnabled = true;
-  protected showBones = true;
-
+  protected showBones = false;
   protected targetSource: TargetSourceMode = 'door-knob';
   protected doorOpen = false;
 
@@ -151,16 +198,37 @@ export class CharactersLabPageComponent {
     this.door.group.position.set(-1.5, 0, 0);
     this.door.group.rotation.y = Math.PI / 2;
 
+    // Reference Face for Face Studio
+    this.referenceFace = buildReferenceFaceMesh({
+      headRadius: 0.12,
+      skinColorHex: '#f0c8a0',
+      browColorHex: '#261710',
+      eyeColorHex: '#1e3a5f',
+      lipColorHex: '#c25a66',
+    });
+    this.referenceFace.root.position.set(0, 1.58, 0);
+
+    // Gaze target visual reticle
+    this.gazeMarker = new Mesh(
+      new SphereGeometry(0.016, 12, 8),
+      new MeshStandardMaterial({ color: '#38bdf8', emissive: 0x0284c7, roughness: 0.2 }),
+    );
+    this.gazeMarker.position.copy(this.gazeTargetPos);
+
     this.rebuildBodyMesh();
 
     this.character.add(this.visualization.group);
     this.engine.scene.add(
       this.character,
+      this.referenceFace.root,
+      this.gazeMarker,
       this.ground,
       this.target,
       this.chair.group,
       this.door.group,
     );
+
+    this.applyViewMode(this.viewMode);
 
     const destroyRef = inject(DestroyRef);
     this.engine.tick$
@@ -168,6 +236,186 @@ export class CharactersLabPageComponent {
       .subscribe((deltaSeconds) => this.update(deltaSeconds));
     destroyRef.onDestroy(() => this.dispose());
   }
+
+  // ===========================================================================
+  // VIEW MODE & CAMERA FRAMING CONTROLS
+  // ===========================================================================
+
+  protected setViewMode(mode: CharactersLabViewMode): void {
+    this.viewMode = mode;
+    this.applyViewMode(mode);
+  }
+
+  private applyViewMode(mode: CharactersLabViewMode): void {
+    const isStudio = mode === 'face-studio';
+    this.referenceFace.root.visible = isStudio;
+    this.gazeMarker.visible = isStudio;
+
+    this.character.visible = !isStudio;
+    this.ground.visible = !isStudio;
+    this.target.visible = !isStudio;
+    this.chair.group.visible = !isStudio;
+    this.door.group.visible = !isStudio;
+
+    if (isStudio) {
+      this.setCameraFraming(this.cameraFraming);
+    } else {
+      this.cameraPosition = [3.4, 2.4, 4.2];
+      this.cameraTarget = [0, 0.9, 0];
+    }
+  }
+
+  protected setCameraFraming(framing: CameraFramingPreset): void {
+    this.cameraFraming = framing;
+    if (framing === 'front') {
+      this.cameraPosition = [0, 1.60, 0.48];
+    } else if (framing === 'three-quarter') {
+      this.cameraPosition = [0.28, 1.63, 0.44];
+    } else {
+      this.cameraPosition = [0.46, 1.60, 0.04];
+    }
+    this.cameraTarget = [0, 1.58, 0];
+  }
+
+  // ===========================================================================
+  // FACE STUDIO: EXPRESSION PRESETS & CHANNELS
+  // ===========================================================================
+
+  protected setFaceExpression(emotion: ExtendedEmotionName): void {
+    this.activeEmotion = emotion;
+    this.facialController.setExpression(emotion, 1.0, 0.25);
+    this.syncSlidersFromExpression(emotion);
+  }
+
+  protected onChannelChange(channel: FaceSemanticChannelName, rawValue: string | number): void {
+    const val = typeof rawValue === 'string' ? parseFloat(rawValue) : rawValue;
+    this.channelValues[channel] = val;
+    this.facialController.setFaceChannel(channel, val, 0.08);
+  }
+
+  protected triggerBlink(): void {
+    this.facialController.blink('both', 0.18);
+  }
+
+  protected triggerLeftBlink(): void {
+    this.facialController.blink('left', 0.22);
+  }
+
+  protected triggerRightBlink(): void {
+    this.facialController.blink('right', 0.22);
+  }
+
+  private syncSlidersFromExpression(emotion: ExtendedEmotionName): void {
+    if (emotion === 'neutral') {
+      for (const k of Object.keys(this.channelValues)) {
+        this.channelValues[k] = 0;
+      }
+    } else if (emotion === 'happy') {
+      this.channelValues['mouth.smile'] = 0.75;
+      this.channelValues['eye.squint'] = 0.25;
+      this.channelValues['brow.right.raise'] = 0.15;
+      this.channelValues['brow.left.raise'] = 0.15;
+      this.channelValues['mouth.frown'] = 0;
+    } else if (emotion === 'sad') {
+      this.channelValues['mouth.frown'] = 0.65;
+      this.channelValues['brow.lower'] = 0.25;
+      this.channelValues['mouth.smile'] = 0;
+    } else if (emotion === 'surprised') {
+      this.channelValues['brow.right.raise'] = 0.85;
+      this.channelValues['brow.left.raise'] = 0.85;
+      this.channelValues['eye.wide'] = 0.85;
+      this.channelValues['mouth.jawOpen'] = 0.65;
+      this.channelValues['mouth.round'] = 0.35;
+    } else if (emotion === 'angry') {
+      this.channelValues['brow.lower'] = 0.8;
+      this.channelValues['eye.squint'] = 0.5;
+      this.channelValues['mouth.frown'] = 0.35;
+      this.channelValues['mouth.widen'] = 0.3;
+    } else if (emotion === 'skeptical') {
+      this.channelValues['brow.right.raise'] = 0.9;
+      this.channelValues['brow.left.raise'] = 0;
+      this.channelValues['brow.lower'] = 0.25;
+      this.channelValues['mouth.smile'] = 0.3;
+    }
+  }
+
+  // ===========================================================================
+  // FACE STUDIO: GAZE CONTROL
+  // ===========================================================================
+
+  protected setGazePreset(preset: 'center' | 'left' | 'right' | 'up' | 'down'): void {
+    this.wanderGaze = false;
+    switch (preset) {
+      case 'center':
+        this.gazeTargetPos.set(0, 1.58, 0.65);
+        break;
+      case 'left':
+        this.gazeTargetPos.set(-0.25, 1.58, 0.55);
+        break;
+      case 'right':
+        this.gazeTargetPos.set(0.25, 1.58, 0.55);
+        break;
+      case 'up':
+        this.gazeTargetPos.set(0, 1.76, 0.55);
+        break;
+      case 'down':
+        this.gazeTargetPos.set(0, 1.40, 0.55);
+        break;
+    }
+    this.gazeMarker.position.copy(this.gazeTargetPos);
+    this.facialController.lookAt(
+      {
+        x: this.gazeTargetPos.x,
+        y: this.gazeTargetPos.y - 1.58,
+        z: this.gazeTargetPos.z,
+      },
+      0.15,
+    );
+  }
+
+  protected toggleWanderGaze(): void {
+    this.wanderGaze = !this.wanderGaze;
+  }
+
+  // ===========================================================================
+  // FACE STUDIO: SPEECH & VISEMES
+  // ===========================================================================
+
+  protected playArticulationSequence(): void {
+    this.facialController.playVisemes(FacialAnimationController.createArticulationFixture());
+  }
+
+  protected setManualViseme(viseme: Viseme): void {
+    this.facialController.playVisemes([{ time: 0, viseme, duration: 1.2 }]);
+  }
+
+  protected playCombinedPerformance(): void {
+    // 1. Smiling
+    this.setFaceExpression('happy');
+
+    // 2. Speaking text
+    const words = preProcessText('Hello there, smiling while speaking with clear visemes and natural gaze!');
+    this.facialController.playVisemes(wordsToVisemes(words));
+
+    // 3. Wandering gaze and periodic blinks
+    this.wanderGaze = true;
+    this.facialController.blink('both', 0.18);
+  }
+
+  protected resetFaceToNeutral(): void {
+    this.wanderGaze = false;
+    this.gazeTargetPos.set(0, 1.58, 0.65);
+    this.gazeMarker.position.copy(this.gazeTargetPos);
+    this.facialController.resetToNeutral(0.25);
+    this.activeEmotion = 'neutral';
+    for (const k of Object.keys(this.channelValues)) {
+      this.channelValues[k] = 0;
+    }
+  }
+
+  // ===========================================================================
+  // FULL-BODY SCENE CONTROLS
+  // ===========================================================================
 
   protected setStyle(style: CharacterBodyStyle): void {
     if (this.style === style) return;
@@ -295,6 +543,9 @@ export class CharactersLabPageComponent {
     this.speechStartedAt = performance.now();
     this.speaking = true;
 
+    // Also feed to the facial controller so face studio or full body moves identically
+    this.facialController.playVisemes(this.visemeTrack);
+
     const utterance = new SpeechSynthesisUtterance(this.speechText);
     utterance.onend = () => {
       this.speaking = false;
@@ -306,76 +557,98 @@ export class CharactersLabPageComponent {
     window.speechSynthesis.speak(utterance);
   }
 
+  // ===========================================================================
+  // FRAME UPDATE LOOP
+  // ===========================================================================
+
   private update(deltaSeconds: number): void {
     this.elapsed += deltaSeconds;
 
-    // 1. Animate door opening angle smoothly
-    const targetDoorAngle = this.doorOpen ? Math.PI / 2 : 0;
-    const currentDoorAngle = this.door.getOpenAngle();
-    if (Math.abs(targetDoorAngle - currentDoorAngle) > 0.001) {
-      const step = (targetDoorAngle - currentDoorAngle) * Math.min(1, deltaSeconds * 5);
-      this.door.setOpenAngle(currentDoorAngle + step);
+    // 1. Update Facial Controller
+    if (this.wanderGaze) {
+      this.gazeTargetPos.x = Math.sin(this.elapsed * 1.6) * 0.22;
+      this.gazeTargetPos.y = 1.58 + Math.cos(this.elapsed * 2.2) * 0.12;
+      this.gazeMarker.position.copy(this.gazeTargetPos);
+      this.facialController.lookAt(
+        {
+          x: this.gazeTargetPos.x,
+          y: this.gazeTargetPos.y - 1.58,
+          z: this.gazeTargetPos.z,
+        },
+        0.1,
+      );
     }
 
-    if (this.dancing && this.danceMixer) {
-      this.danceMixer.update(deltaSeconds);
-      this.applyFace();
-      return;
+    const frame = this.facialController.update(deltaSeconds);
+    this.currentFrameState = frame;
+
+    // Apply to Reference Face in Face Studio
+    this.referenceFace.applyPose(frame.blendShapes, frame.gaze);
+
+    // If in full body scene, animate door, locomotion, affordances, and body face
+    if (this.viewMode === 'full-body') {
+      const targetDoorAngle = this.doorOpen ? Math.PI / 2 : 0;
+      const currentDoorAngle = this.door.getOpenAngle();
+      if (Math.abs(targetDoorAngle - currentDoorAngle) > 0.001) {
+        const step = (targetDoorAngle - currentDoorAngle) * Math.min(1, deltaSeconds * 5);
+        this.door.setOpenAngle(currentDoorAngle + step);
+      }
+
+      if (this.dancing && this.danceMixer) {
+        this.danceMixer.update(deltaSeconds);
+        applyCharacterFacePose(this.bodyMesh, frame.blendShapes);
+        return;
+      }
+
+      const isSittingOrTransitioning = this.sitEnabled || this.sitBlend > 0.005;
+      const speed = isSittingOrTransitioning ? 0 : this.mode === 'run' ? 2.1 : this.mode === 'walk' ? 0.9 : 0;
+      if (speed > 0) {
+        this.angle = (this.angle + (speed / WALK_RADIUS) * deltaSeconds) % (Math.PI * 2);
+      }
+
+      const locomotion = isSittingOrTransitioning
+        ? sampleLocomotion('idle', this.elapsed)
+        : sampleLocomotion(this.mode, this.elapsed);
+
+      const sitTarget = this.sitEnabled ? 1 : 0;
+      this.sitBlend += (sitTarget - this.sitBlend) * Math.min(1, deltaSeconds * 6);
+
+      const chairAffordance = this.chair.getSitAffordance();
+      const chairYaw = Math.atan2(chairAffordance.facingDirection.x, chairAffordance.facingDirection.z);
+
+      const normalWalkX = Math.cos(this.angle) * WALK_RADIUS;
+      const normalWalkZ = Math.sin(this.angle) * WALK_RADIUS;
+      const normalRotY = -this.angle;
+
+      const seatDrop = 0.80 - chairAffordance.seatHeight;
+      const seatedY = locomotion.bounce * (1 - this.sitBlend) - this.sitBlend * seatDrop;
+
+      const charX = normalWalkX + (chairAffordance.seatPosition.x - normalWalkX) * this.sitBlend;
+      const charZ = normalWalkZ + (chairAffordance.seatPosition.z - normalWalkZ) * this.sitBlend;
+      const charRotY = lerpAngle(normalRotY, chairYaw, this.sitBlend);
+
+      this.character.position.set(charX, seatedY, charZ);
+      this.character.rotation.y = charRotY;
+
+      if (this.sitBlend > 0.999) {
+        this.angle = 0;
+      }
+
+      let pose = locomotion.pose;
+      if (this.sitBlend > 0.0005) pose = blendPoses(pose, SIT_POSE, this.sitBlend);
+
+      const worldTarget = this.resolveTarget(deltaSeconds);
+      this.target.position.copy(worldTarget);
+
+      if (this.lookEnabled || this.reachEnabled) {
+        const localTarget = this.toLocal(worldTarget);
+        if (this.lookEnabled) pose = this.applyLook(pose, localTarget);
+        if (this.reachEnabled) pose = this.applyReach(pose, localTarget);
+      }
+
+      this.visualization.setPose(pose);
+      applyCharacterFacePose(this.bodyMesh, frame.blendShapes);
     }
-
-    // Only advance walk/run circle when not seated and not transitioning to/from sit
-    const isSittingOrTransitioning = this.sitEnabled || this.sitBlend > 0.005;
-    const speed = isSittingOrTransitioning ? 0 : this.mode === 'run' ? 2.1 : this.mode === 'walk' ? 0.9 : 0;
-    if (speed > 0) {
-      this.angle = (this.angle + (speed / WALK_RADIUS) * deltaSeconds) % (Math.PI * 2);
-    }
-
-    const locomotion = isSittingOrTransitioning
-      ? sampleLocomotion('idle', this.elapsed)
-      : sampleLocomotion(this.mode, this.elapsed);
-
-    // 2. Sitting transition and positioning (grounded to chair)
-    const sitTarget = this.sitEnabled ? 1 : 0;
-    this.sitBlend += (sitTarget - this.sitBlend) * Math.min(1, deltaSeconds * 6);
-
-    const chairAffordance = this.chair.getSitAffordance();
-    const chairYaw = Math.atan2(chairAffordance.facingDirection.x, chairAffordance.facingDirection.z);
-
-    const normalWalkX = Math.cos(this.angle) * WALK_RADIUS;
-    const normalWalkZ = Math.sin(this.angle) * WALK_RADIUS;
-    const normalRotY = -this.angle;
-
-    // When sitting, character drops hips onto chair seat (standing hips = 0.80m, drop = 0.80 - seatHeight = 0.35m)
-    const seatDrop = 0.80 - chairAffordance.seatHeight;
-    const seatedY = locomotion.bounce * (1 - this.sitBlend) - this.sitBlend * seatDrop;
-
-    const charX = normalWalkX + (chairAffordance.seatPosition.x - normalWalkX) * this.sitBlend;
-    const charZ = normalWalkZ + (chairAffordance.seatPosition.z - normalWalkZ) * this.sitBlend;
-    const charRotY = lerpAngle(normalRotY, chairYaw, this.sitBlend);
-
-    this.character.position.set(charX, seatedY, charZ);
-    this.character.rotation.y = charRotY;
-
-    if (this.sitBlend > 0.999) {
-      // While seated on the chair, synchronize angle so standing up resumes directly in front of the chair
-      this.angle = 0;
-    }
-
-    let pose = locomotion.pose;
-    if (this.sitBlend > 0.0005) pose = blendPoses(pose, SIT_POSE, this.sitBlend);
-
-    // 3. Target position and Look / Reach IK
-    const worldTarget = this.resolveTarget(deltaSeconds);
-    this.target.position.copy(worldTarget);
-
-    if (this.lookEnabled || this.reachEnabled) {
-      const localTarget = this.toLocal(worldTarget);
-      if (this.lookEnabled) pose = this.applyLook(pose, localTarget);
-      if (this.reachEnabled) pose = this.applyReach(pose, localTarget);
-    }
-
-    this.visualization.setPose(pose);
-    this.applyFace();
   }
 
   private resolveTarget(deltaSeconds: number): Vector3 {
@@ -402,28 +675,6 @@ export class CharactersLabPageComponent {
     }
   }
 
-  private applyFace(): void {
-    const emotion = sampleEmotion(this.emotion);
-
-    let visemeWeights: BlendShapeWeights = {};
-    if (this.speaking) {
-      const elapsed = (performance.now() - this.speechStartedAt) / 1000;
-      if (elapsed > this.speechTrackDuration) {
-        this.speaking = false;
-      } else {
-        visemeWeights = visemeToBlendShapes(sampleVisemeTrack(this.visemeTrack, elapsed));
-      }
-    }
-
-    const blinkPhase = this.elapsed % 3.5;
-    const blink = blinkPhase < 0.12 ? 1 - Math.abs((blinkPhase - 0.06) / 0.06) : 0;
-
-    applyCharacterFacePose(
-      this.bodyMesh,
-      mergeBlendShapeWeights(emotion, visemeWeights, { eyeBlinkLeft: blink, eyeBlinkRight: blink }),
-    );
-  }
-
   private applyLook(basePose: RigPose, target: Vector3): RigPose {
     const yaw = Math.atan2(target.x, target.z);
     const pitch = -Math.atan2(target.y - this.headRestY, Math.hypot(target.x, target.z));
@@ -436,7 +687,7 @@ export class CharactersLabPageComponent {
     const dy = target.y - shoulder.y;
     const dz = target.z - shoulder.z;
     const distance = Math.hypot(dx, dy, dz);
-    const maxReach = 0.56; // Max two-bone arm span (upperArm 0.30 + lowerArm 0.28 - small elbow cushion)
+    const maxReach = 0.56;
     const reachTarget = distance > maxReach
       ? {
           x: shoulder.x + (dx / distance) * maxReach,
@@ -462,6 +713,8 @@ export class CharactersLabPageComponent {
     window.speechSynthesis.cancel();
     this.danceMixer?.stopAllAction();
     this.character.removeFromParent();
+    this.referenceFace.root.removeFromParent();
+    this.gazeMarker.removeFromParent();
     this.ground.removeFromParent();
     this.target.removeFromParent();
     this.chair.group.removeFromParent();

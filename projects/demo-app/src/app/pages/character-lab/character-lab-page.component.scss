@@ -99,6 +99,21 @@ a {
   }
 }
 
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: #e2e8f0;
+  cursor: pointer;
+
+  input[type='checkbox'] {
+    accent-color: #3b82f6;
+    width: 15px;
+    height: 15px;
+  }
+}
+
 .technique-card {
   margin-top: 0.15rem;
   padding: 0.65rem 0.8rem;

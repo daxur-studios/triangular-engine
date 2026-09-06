@@ -522,3 +522,36 @@ Also confirm:
   and real door-knob reaching with two-bone IK as the door swings open.
 - Verified: 80 character specs + 237 procedural specs pass; library and demo app
   build clean.
+
+### 2026-09-06 — Focused facial functionality milestone & Face Studio
+
+- Added framework-free semantic facial channel contracts and serializable commands
+  to `triangular-engine/characters/core/face-semantic-channels.ts`:
+  - Canonical channel names for brows (`brow.left.raise`, `brow.right.raise`,
+    `brow.lower`), eyelids (`eye.blink.left`, `eye.blink.right`, `eye.squint`,
+    `eye.wide`), mouth (`mouth.smile`, `mouth.frown`, `mouth.jawOpen`, `mouth.lipClose`,
+    `mouth.round`, `mouth.widen`), and cheeks (`cheek.puff`).
+  - Bidirectional projection between semantic channels and ARKit 52 blendshapes.
+  - Expression presets: `neutral`, `happy`, `sad`, `angry`, `surprised`, `skeptical`
+    (single right eyebrow raised alone), `fearful`, and `disgusted`.
+  - Typed serializable `FaceCommand` interfaces (`lookAt`, `setExpression`,
+    `setChannel`, `blink`, `playVisemes`, `reset`).
+- Added framework-free `FacialAnimationController` in `face-controller.ts`:
+  - 5-layer composition model combining expressions, manual channel overrides,
+    procedural/triggered blinks with attack/hold/release envelopes, articulatory
+    speech viseme blending (smile remains lifted while jaw opens; lip closure seals
+    for bilabials M/B/P; clean decay back to rest), and gaze targeting clamped to
+    physiological limits (yaw: ±30°, pitch: ±20°).
+  - Repeatable deterministic speech articulation fixture (`createArticulationFixture()`).
+- Added art-directed `buildReferenceFaceMesh` in `triangular-engine/procedural`:
+  - Sculpted head mesh with recessed eye sockets, seated eyeball spheres with 2-DOF
+    independent rotation pivots (eyeballs never slide out of orbits), upper/lower
+    eyelid morphs for clean blinks, high-contrast expressive eyebrows with independent
+    raise/lower, and full mouth articulation (smile, frown, jaw open, sealed lip closure,
+    rounding, widening) with zero tearing across extreme ranges.
+- Upgraded `/characters-lab`:
+  - Added dedicated **Face Studio (Close-Up)** mode with three-point portrait lighting,
+    front, 3/4, and profile framing presets, interactive gaze reticle, channel sliders,
+    instant viseme testing, repeatable articulation playback, combined performance
+    (smiling while speaking, looking around, and blinking), and clean reset to neutral.
+- Verified: 95 character specs + 241 procedural specs pass; library and demo app build clean.

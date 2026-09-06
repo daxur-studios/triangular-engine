@@ -1,4 +1,4 @@
-<scene>
+<scene [logarithmicDepthBuffer]="logarithmicDepthBuffer()">
   <ng-template portalTarget="overlay" lane="topStart">
     <section class="panel" aria-label="Character Lab">
       <header>
@@ -39,6 +39,15 @@
           <p class="technique-desc">{{ current.description }}</p>
         </div>
       }
+
+      <label class="checkbox-label">
+        <input
+          type="checkbox"
+          [checked]="logarithmicDepthBuffer()"
+          (change)="toggleLogarithmicDepthBuffer()"
+        />
+        <span>Logarithmic Depth Buffer</span>
+      </label>
     </section>
   </ng-template>
 

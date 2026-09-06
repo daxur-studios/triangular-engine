@@ -170,6 +170,7 @@ export class CharacterLabPageComponent {
 
   readonly attempts = signal<readonly ICharacterAttempt[]>([]);
   readonly selectedAttemptId = signal('svg-flat-cutout');
+  readonly logarithmicDepthBuffer = signal<boolean>(false);
 
   readonly selectedAttempt = computed<ICharacterAttempt | undefined>(() => {
     return this.attempts().find((a) => a.id === this.selectedAttemptId());
@@ -195,6 +196,10 @@ export class CharacterLabPageComponent {
 
   selectAttempt(id: string): void {
     this.selectedAttemptId.set(id);
+  }
+
+  toggleLogarithmicDepthBuffer(): void {
+    this.logarithmicDepthBuffer.update((v) => !v);
   }
 
   private registerAttempts(): void {
@@ -346,7 +351,7 @@ export class CharacterLabPageComponent {
     const targetHeight = 1.7;
     const characterGroup = new Group();
 
-    const extrudeDepth = 0.24;
+    const extrudeDepth = 1.2;
 
     svgData.paths.forEach((path) => {
       const fillColor = path.userData?.['style']?.['fill'];
@@ -371,8 +376,8 @@ export class CharacterLabPageComponent {
         depth: extrudeDepth,
         bevelEnabled: true,
         bevelSegments: 3,
-        bevelThickness: 0.03,
-        bevelSize: 0.02,
+        bevelThickness: 0.15,
+        bevelSize: 0.1,
       });
 
       const mesh = new Mesh(geom, mat);

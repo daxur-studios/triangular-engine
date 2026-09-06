@@ -62,7 +62,8 @@ The library is modularized into several secondary entry points (sub-libraries) s
 | `triangular-engine/animals` | **Animals**: Framework-free deterministic animal flocks and lightweight world responses. | — |
 | `triangular-engine/navigation` | **Navigation**: Framework-free navigation data contracts and deterministic bounded-work route-request scheduling. | — |
 | `triangular-engine/spline` | **Spline**: Authoring-neutral open/closed curves, arc-length sampling, and nearest-point queries for rivers, roads, and area outlines. Core geometry only so far. See [spline/README.md](./spline/README.md). | — |
-| `triangular-engine/procedural` | **Procedural**: Deterministic procedural flora (trees, foliage, wind sway) and procedural craft parts (wings, landing legs, engines) with functional sockets, colliders, mass, and articulation. | `three` |
+| `triangular-engine/characters` | **Characters**: Framework-free humanoid bone hierarchies, rig FK, procedural gait, two-bone reach IK, semantic facial animation channels, and layered facial controllers. See [docs/facial-animation.md](./docs/facial-animation.md). | — |
+| `triangular-engine/procedural` | **Procedural**: Deterministic procedural flora (trees, foliage, wind sway), stylized reference faces, and procedural craft parts with functional sockets, colliders, mass, and articulation. | `three` |
 
 
 ## Features

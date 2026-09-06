@@ -6,6 +6,26 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `triangular-engine/characters` now exports framework-free semantic facial channel contracts
+  and serializable command types (`face-semantic-channels.ts`) and a 5-layer composition
+  controller (`FacialAnimationController`). Features include:
+  - Canonical semantic channels for brows (`brow.left.raise`, `brow.right.raise`, `brow.lower`),
+    eyelids (`eye.blink.left`, `eye.blink.right`, `eye.squint`, `eye.wide`), mouth (`mouth.smile`,
+    `mouth.frown`, `mouth.jawOpen`, `mouth.lipClose`, `mouth.round`, `mouth.widen`), and cheeks.
+  - Expression presets (`happy`, `sad`, `angry`, `surprised`, `skeptical`, `fearful`, `disgusted`, `neutral`).
+  - Physiological eye gaze limit clamping (yaw: ±30°, pitch: ±20°).
+  - Layered multi-channel blending: smiling while speaking preserves smile corners; bilabial sounds
+    (`M`, `B`, `P`) seal lips via `lipClose`; timed visemes decay smoothly back to rest.
+  - Repeatable deterministic articulation fixture testing distinct silhouettes (`M`, `A`, `O`, `U`, `E`, `sil`).
+  - Serializable `FaceCommand` interfaces for AI agent and script control.
+- `triangular-engine/procedural` now builds an art-directed reference face (`buildReferenceFaceMesh`)
+  with seated eyeball spheres that rotate on local pivots (guaranteed never to leave eye sockets),
+  independent upper/lower eyelid morphs for left/right blinks, high-contrast expressive eyebrows
+  with independent raise/lower, and fully articulated mouth morphs with zero tearing across extreme ranges.
+- Upgraded the `/characters-lab` demo with a dedicated **Face Studio (Close-Up)** mode featuring
+  three-point portrait lighting, front, 3/4, and profile camera framing presets, interactive gaze reticle,
+  individual channel sliders, expression presets, instant viseme testing, and a combined performance example.
+
 - `triangular-engine/characters` now exports analytic two-bone reach IK
   (`solveTwoBoneIk`) over any parent→mid→end bone chain, with elbow pole
   control, out-of-range/folded clamping, and `reached`/`elbow`/`end` results.

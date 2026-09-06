@@ -1,79 +1,297 @@
 <header class="page-header">
   <div>
-    <p class="eyebrow">Characters · procedural body &amp; furniture affordances</p>
-    <h1>Procedural humanoid character &amp; furniture</h1>
-    <p class="claim">A skinned body driven by gait, look-at, reach, emotion, and speech visemes, interacting with procedural chair &amp; door affordances.</p>
+    <p class="eyebrow">Characters · Facial Functionality &amp; Semantic Controls</p>
+    <h1>Reference Face Studio &amp; Articulation</h1>
+    <p class="claim">Focused stylized reference face featuring independent brows, seated eye gaze, eyelid blinks, expressive mouth shapes, viseme articulation, and layered semantic controls.</p>
   </div>
 </header>
+
+<!-- TOP NAVIGATION: VIEW MODE & FRAMING -->
 <section class="controls">
   <div class="control-group">
-    <span>Style</span>
-    <select (change)="setStyle($any($event.target).value)">
-      @for (s of styles; track s) {
-        <option [value]="s" [selected]="s === style">{{ s }}</option>
-      }
-    </select>
+    <span>View Mode</span>
+    <button type="button" [class.active]="viewMode === 'face-studio'" (click)="setViewMode('face-studio')">Face Studio (Close-Up)</button>
+    <button type="button" [class.active]="viewMode === 'full-body'" (click)="setViewMode('full-body')">Full Body Scene</button>
   </div>
-  <div class="control-group">
-    <span>Locomotion</span>
-    <button type="button" [class.active]="mode === 'idle'" (click)="setMode('idle')">Idle</button>
-    <button type="button" [class.active]="mode === 'walk'" (click)="setMode('walk')">Walk</button>
-    <button type="button" [class.active]="mode === 'run'" (click)="setMode('run')">Run</button>
-  </div>
-  <div class="control-group">
-    <span>Pose</span>
-    <button type="button" [class.active]="!sitEnabled" (click)="setSit(false)">Stand</button>
-    <button type="button" [class.active]="sitEnabled" (click)="setSit(true)">Sit on chair</button>
-  </div>
-  <div class="control-group">
-    <span>Target</span>
-    <select (change)="setTargetSource($any($event.target).value)">
-      <option value="door-knob" [selected]="targetSource === 'door-knob'">Door knob</option>
-      <option value="chair" [selected]="targetSource === 'chair'">Chair</option>
-      <option value="manual" [selected]="targetSource === 'manual'">Free orb</option>
-    </select>
-  </div>
-  <div class="control-group">
-    <span>Door</span>
-    <button type="button" [class.active]="doorOpen" (click)="toggleDoor()">{{ doorOpen ? 'Close door' : 'Open door' }}</button>
-  </div>
-  <div class="control-group">
-    <span>Look</span>
-    <button type="button" [class.active]="lookEnabled" (click)="toggleLook()">Track target</button>
-  </div>
-  <div class="control-group">
-    <span>Reach</span>
-    <button type="button" [class.active]="reachEnabled" (click)="toggleReach()">Arm to target</button>
-  </div>
-  <div class="control-group">
-    <span>Debug</span>
-    <button type="button" [class.active]="showBones" (click)="toggleBones()">Bones</button>
-  </div>
-  <div class="control-group">
-    <span>Dance</span>
-    <input type="file" accept=".fbx" (change)="onDanceFile($event)" />
-    <button type="button" [disabled]="!dancing" (click)="stopDance()">Stop</button>
-  </div>
-  <div class="control-group">
-    <span>Emotion</span>
-    <select (change)="setEmotion($any($event.target).value)">
-      @for (e of emotions; track e) {
-        <option [value]="e" [selected]="e === emotion">{{ e }}</option>
-      }
-    </select>
-  </div>
-  <div class="control-group control-group--grow">
-    <span>Speech</span>
-    <input type="text" [value]="speechText" (input)="speechText = $any($event.target).value" />
-    <button type="button" (click)="speak()">Speak</button>
-  </div>
+
+  @if (viewMode === 'face-studio') {
+    <div class="control-group">
+      <span>Framing</span>
+      <button type="button" [class.active]="cameraFraming === 'front'" (click)="setCameraFraming('front')">Front</button>
+      <button type="button" [class.active]="cameraFraming === 'three-quarter'" (click)="setCameraFraming('three-quarter')">3/4 View</button>
+      <button type="button" [class.active]="cameraFraming === 'profile'" (click)="setCameraFraming('profile')">Profile</button>
+    </div>
+
+    <div class="control-group control-group--highlight">
+      <span>Key Actions</span>
+      <button type="button" class="primary" (click)="playArticulationSequence()">Play Viseme Sequence</button>
+      <button type="button" class="action" (click)="playCombinedPerformance()">Combined Performance</button>
+      <button type="button" (click)="resetFaceToNeutral()">Reset to Neutral</button>
+    </div>
+  }
 </section>
+
+<!-- FACE STUDIO PANELS: PRESETS, GAZE, CHANNELS, SPEECH -->
+@if (viewMode === 'face-studio') {
+  <section class="controls">
+    <div class="control-group">
+      <span>Expression Presets</span>
+      @for (e of extendedEmotions; track e) {
+        <button
+          type="button"
+          [class.active]="activeEmotion === e"
+          (click)="setFaceExpression(e)"
+        >
+          {{ e }}
+        </button>
+      }
+    </div>
+
+    <div class="control-group">
+      <span>Interactive Gaze</span>
+      <button type="button" (click)="setGazePreset('center')">Center</button>
+      <button type="button" (click)="setGazePreset('left')">Look Left</button>
+      <button type="button" (click)="setGazePreset('right')">Look Right</button>
+      <button type="button" (click)="setGazePreset('up')">Look Up</button>
+      <button type="button" (click)="setGazePreset('down')">Look Down</button>
+      <button type="button" [class.active]="wanderGaze" (click)="toggleWanderGaze()">
+        {{ wanderGaze ? 'Wander: ON' : 'Wander: OFF' }}
+      </button>
+    </div>
+
+    <div class="control-group">
+      <span>Instant Visemes</span>
+      <button type="button" (click)="setManualViseme('sil')">Rest (sil)</button>
+      <button type="button" (click)="setManualViseme('M')">M (Closed Lip)</button>
+      <button type="button" (click)="setManualViseme('A')">A (Open Jaw)</button>
+      <button type="button" (click)="setManualViseme('O')">O (Round)</button>
+      <button type="button" (click)="setManualViseme('U')">U (Pucker)</button>
+      <button type="button" (click)="setManualViseme('E')">E (Wide Smile)</button>
+    </div>
+  </section>
+
+  <!-- INDIVIDUAL CHANNEL SLIDERS -->
+  <section class="face-panels">
+    <!-- BROWS -->
+    <div class="channel-section">
+      <h4>Eyebrows</h4>
+      <div class="slider-group">
+        <label>Right Brow Raise</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['brow.right.raise']"
+          (input)="onChannelChange('brow.right.raise', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['brow.right.raise'] | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Left Brow Raise</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['brow.left.raise']"
+          (input)="onChannelChange('brow.left.raise', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['brow.left.raise'] | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Brows Lower</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['brow.lower']"
+          (input)="onChannelChange('brow.lower', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['brow.lower'] | number:'1.2-2' }}</span>
+      </div>
+    </div>
+
+    <!-- EYELIDS & EYES -->
+    <div class="channel-section">
+      <h4>Eyelids &amp; Eyes</h4>
+      <div class="slider-group">
+        <label>Left Blink</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['eye.blink.left']"
+          (input)="onChannelChange('eye.blink.left', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['eye.blink.left'] | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Right Blink</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['eye.blink.right']"
+          (input)="onChannelChange('eye.blink.right', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['eye.blink.right'] | number:'1.2-2' }}</span>
+      </div>
+      <button type="button" (click)="triggerBlink()">Blink Both</button>
+      <div class="slider-group">
+        <label>Squint</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['eye.squint']"
+          (input)="onChannelChange('eye.squint', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['eye.squint'] | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Wide</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['eye.wide']"
+          (input)="onChannelChange('eye.wide', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['eye.wide'] | number:'1.2-2' }}</span>
+      </div>
+    </div>
+
+    <!-- MOUTH & JAW -->
+    <div class="channel-section">
+      <h4>Mouth &amp; Jaw</h4>
+      <div class="slider-group">
+        <label>Smile</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['mouth.smile']"
+          (input)="onChannelChange('mouth.smile', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['mouth.smile'] | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Frown</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['mouth.frown']"
+          (input)="onChannelChange('mouth.frown', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['mouth.frown'] | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Jaw Open</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['mouth.jawOpen']"
+          (input)="onChannelChange('mouth.jawOpen', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['mouth.jawOpen'] | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Lip Close</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['mouth.lipClose']"
+          (input)="onChannelChange('mouth.lipClose', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['mouth.lipClose'] | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Round (Pucker)</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['mouth.round']"
+          (input)="onChannelChange('mouth.round', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['mouth.round'] | number:'1.2-2' }}</span>
+      </div>
+      <div class="slider-group">
+        <label>Widen (Stretch)</label>
+        <input
+          type="range" min="0" max="1" step="0.05"
+          [value]="channelValues['mouth.widen']"
+          (input)="onChannelChange('mouth.widen', $any($event.target).value)"
+        />
+        <span class="val">{{ channelValues['mouth.widen'] | number:'1.2-2' }}</span>
+      </div>
+    </div>
+  </section>
+}
+
+<!-- FULL BODY SCENE CONTROLS -->
+@if (viewMode === 'full-body') {
+  <section class="controls">
+    <div class="control-group">
+      <span>Style</span>
+      <select (change)="setStyle($any($event.target).value)">
+        @for (s of styles; track s) {
+          <option [value]="s" [selected]="s === style">{{ s }}</option>
+        }
+      </select>
+    </div>
+    <div class="control-group">
+      <span>Locomotion</span>
+      <button type="button" [class.active]="mode === 'idle'" (click)="setMode('idle')">Idle</button>
+      <button type="button" [class.active]="mode === 'walk'" (click)="setMode('walk')">Walk</button>
+      <button type="button" [class.active]="mode === 'run'" (click)="setMode('run')">Run</button>
+    </div>
+    <div class="control-group">
+      <span>Pose</span>
+      <button type="button" [class.active]="!sitEnabled" (click)="setSit(false)">Stand</button>
+      <button type="button" [class.active]="sitEnabled" (click)="setSit(true)">Sit on chair</button>
+    </div>
+    <div class="control-group">
+      <span>Target</span>
+      <select (change)="setTargetSource($any($event.target).value)">
+        <option value="door-knob" [selected]="targetSource === 'door-knob'">Door knob</option>
+        <option value="chair" [selected]="targetSource === 'chair'">Chair</option>
+        <option value="manual" [selected]="targetSource === 'manual'">Free orb</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <span>Door</span>
+      <button type="button" [class.active]="doorOpen" (click)="toggleDoor()">{{ doorOpen ? 'Close door' : 'Open door' }}</button>
+    </div>
+    <div class="control-group">
+      <span>Look</span>
+      <button type="button" [class.active]="lookEnabled" (click)="toggleLook()">Track target</button>
+    </div>
+    <div class="control-group">
+      <span>Reach</span>
+      <button type="button" [class.active]="reachEnabled" (click)="toggleReach()">Arm to target</button>
+    </div>
+    <div class="control-group">
+      <span>Debug</span>
+      <button type="button" [class.active]="showBones" (click)="toggleBones()">Bones</button>
+    </div>
+    <div class="control-group">
+      <span>Dance</span>
+      <input type="file" accept=".fbx" (change)="onDanceFile($event)" />
+      <button type="button" [disabled]="!dancing" (click)="stopDance()">Stop</button>
+    </div>
+    <div class="control-group">
+      <span>Emotion</span>
+      <select (change)="setEmotion($any($event.target).value)">
+        @for (e of emotions; track e) {
+          <option [value]="e" [selected]="e === emotion">{{ e }}</option>
+        }
+      </select>
+    </div>
+    <div class="control-group control-group--grow">
+      <span>Speech</span>
+      <input type="text" [value]="speechText" (input)="speechText = $any($event.target).value" />
+      <button type="button" (click)="speak()">Speak</button>
+    </div>
+  </section>
+}
+
 <section class="scope-note">
-  <b>Furniture affordances</b><span>Procedural chair and door expose formal CharacterSitAffordance and CharacterDoorAffordance. The humanoid character sits directly on the chair seat surface and reaches to the door knob with two-bone IK, dynamically tracking the knob as the door swings open.</span>
-  <b>Styles</b><span>'villager' (organic sculpted anatomy, mouth cleft &amp; eyelid morphs), 'faceted-vector' (faceted body + live dynamic vector canvas face), 'extruded-silhouette' (papercraft 2D profile extrusion), and 'mannequin' (primitive debug).</span>
+  <b>Reference Face Capabilities</b>
+  <span>Seated eyeball rotation with physical limits (±30° yaw, ±20° pitch); independent left/right eyelid blinking &amp; squinting; independent brow raising (including single right brow raise); smile, frown, jaw open, sealed lip closure, rounding (O/U), and widening (E/I); smooth viseme sequences with rest return.</span>
+  <b>Semantic Control API</b>
+  <span>Framework-free typed intentions (<code>lookAt</code>, <code>setExpression</code>, <code>setFaceChannel</code>, <code>playVisemes</code>, <code>blink</code>, <code>reset</code>) decoupled from geometry for script, game, and AI agent control.</span>
 </section>
+
+<!-- 3D VIEWPORT WITH DEDICATED LIGHTING -->
 <scene>
-  <orbitControls [cameraPosition]="[3.4, 2.4, 4.2]" [target]="[0, 0.9, 0]" />
-  <ambientLight [intensity]="1.3" />
-  <directionalLight [position]="[6, 9, 5]" [intensity]="2.4" />
+  <orbitControls [cameraPosition]="cameraPosition" [target]="cameraTarget" />
+  @if (viewMode === 'face-studio') {
+    <!-- Three-point portrait lighting -->
+    <ambientLight [intensity]="1.1" />
+    <directionalLight [position]="[1.2, 2.2, 1.2]" [intensity]="2.2" />
+    <directionalLight [position]="[-1.2, 1.8, 0.8]" [intensity]="1.2" />
+    <directionalLight [position]="[0, 2.4, -1.2]" [intensity]="1.6" />
+  } @else {
+    <ambientLight [intensity]="1.3" />
+    <directionalLight [position]="[6, 9, 5]" [intensity]="2.4" />
+  }
 </scene>
