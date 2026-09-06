@@ -1,10 +1,9 @@
 import { BufferAttribute, BufferGeometry, Sphere } from 'three';
 
 /**
- * One shared vertex buffer for every LOD level (Unreal's
- * "shared across components — one vertex buffer reused, only index buffers
- * change per mip", LandscapeRender.cpp). Positions are in local unit space
- * [-0.5, 0.5] on X/Z; Y is overwritten in the vertex shader.
+ * One shared vertex buffer for every LOD level — reused as-is, only the index
+ * buffer changes per level. Positions are in local unit space [-0.5, 0.5] on
+ * X/Z; Y is overwritten in the vertex shader.
  */
 export interface ISharedGridBuffers {
   readonly positionAttribute: BufferAttribute;
@@ -14,8 +13,7 @@ export interface ISharedGridBuffers {
 
 /**
  * Builds the shared position buffer plus one index-only geometry per LOD
- * level, each level striding by 2^level over the same high-res vertex grid —
- * literally Unreal's per-mip index buffer trick applied to a plain grid.
+ * level, each level striding by 2^level over the same high-res vertex grid.
  */
 export function buildSharedGridBuffers(
   resolution: number,

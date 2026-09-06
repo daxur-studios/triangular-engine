@@ -1,6 +1,6 @@
 <scene>
   <orbitControls
-    [cameraPosition]="[60, 45, 60]"
+    [cameraPosition]="cameraPosition()"
     [target]="[0, 0, 0]"
     [isActive]="true"
   />
@@ -35,6 +35,16 @@
     >
       Terrain: noise
     </button>
+    <button
+      [disabled]="isCapturingDiagnostics()"
+      (click)="runDiagnosticsCapture()"
+    >
+      {{
+        isCapturingDiagnostics()
+          ? "Capturing…"
+          : "Copy diagnostics report"
+      }}
+    </button>
   </div>
   <p>
     Draw calls should stay ≤4 (one InstancedMesh per LOD level) regardless of
@@ -44,4 +54,10 @@
     view — there is no periodic reselect timer or geometry cache here, so
     none is expected.
   </p>
+  @if (diagnosticsReport(); as report) {
+    <pre class="diagnostics-report">{{ report }}</pre>
+    @if (diagnosticsCopied()) {
+      <span class="copied-hint">Copied to clipboard</span>
+    }
+  }
 </aside>

@@ -30,6 +30,13 @@ export interface IGpuMorphLodSceneHandle {
   setMorphEnabled(enabled: boolean): void;
   setFrozen(enabled: boolean): void;
   setTerrainKind(kind: 'wave' | 'noise'): void;
+  /**
+   * Synchronous, unthrottled read of the same counters `onDiagnostics`
+   * reports every 500ms — for an automated capture script that needs a
+   * fresh sample immediately after moving the camera, not whatever the
+   * throttled UI display last saw.
+   */
+  getDiagnosticsSnapshot(): IGpuMorphLodDiagnostics;
   dispose(): void;
 }
 
@@ -147,6 +154,14 @@ export function createGpuMorphLodScene(
     },
     setTerrainKind(kind: 'wave' | 'noise'): void {
       material.uniforms['uTerrainKind']!.value = kind === 'noise' ? 1 : 0;
+    },
+    getDiagnosticsSnapshot(): IGpuMorphLodDiagnostics {
+      return {
+        drawCalls: engine.renderer.info.render.calls,
+        triangles: engine.renderer.info.render.triangles,
+        instanceCountsByLevel: levelMeshes.map((mesh) => mesh.count),
+        frozen,
+      };
     },
     dispose(): void {
       tickSubscription.unsubscribe();

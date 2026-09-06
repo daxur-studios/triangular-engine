@@ -59,14 +59,15 @@ const TERRAIN_HEIGHT_GLSL = `
 /**
  * The core mechanism under test. Every vertex, from every tile at every
  * discrete instancing level, computes its own fractional LOD purely from its
- * own world-space position and the camera position — mirroring
- * LandscapeVertexFactory.ush's per-vertex `MorphAlpha` lerp between a
- * vertex's LOD and LOD+1 sampled height (confirmed at lines 657/680 of that
- * file). Because it is a pure function of world position, two neighbouring
+ * own world-space position and the camera position, then lerps between its
+ * own LOD's sampled height and the next-coarser LOD's sampled height by that
+ * fraction. Because it is a pure function of world position, two neighbouring
  * tiles evaluated at a shared boundary vertex compute IDENTICAL results
  * regardless of which tile "owns" that vertex or which discrete level each
- * tile is instanced at — this is what makes the boundary crack-free, not any
- * per-tile bookkeeping.
+ * tile is instanced at — this is what makes *that* case crack-free, though it
+ * does not by itself close the T-junction gap where a finer tile's edge has
+ * vertices with no counterpart on a coarser neighbour (see clipmap-layout.ts
+ * and shared-grid-geometry.ts).
  */
 const VERTEX_SHADER_BODY = `
   uniform vec3 uCameraWorldPos;

@@ -44,3 +44,21 @@ p {
   color: #a9bccd;
   margin: 0;
 }
+
+.diagnostics-report {
+  background: rgb(0 0 0 / 35%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 0.3rem;
+  color: #c8f0c8;
+  font: 11px/1.4 ui-monospace, monospace;
+  margin: 0;
+  max-height: 12rem;
+  overflow: auto;
+  padding: 0.5rem;
+  user-select: text;
+  white-space: pre-wrap;
+}
+
+.copied-hint {
+  color: #7fd88f;
+}

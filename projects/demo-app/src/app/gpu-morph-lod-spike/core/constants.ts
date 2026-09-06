@@ -1,7 +1,7 @@
 /**
- * Attempt #5 spike: shared-vertex-buffer + GPU vertex-shader height/morph LOD,
- * modelled on Unreal's Landscape technique (LandscapeVertexFactory.ush —
- * MorphAlpha lerp between a vertex's own LOD and LOD+1 sampled height).
+ * Attempt #5 spike: shared-vertex-buffer + GPU vertex-shader height/morph LOD —
+ * a per-vertex distance-based blend between a vertex's own LOD and LOD+1
+ * sampled height, in the spirit of CDLOD-style continuous LOD morphing.
  *
  * Scope: proves the *rendering* mechanism only (shared geometry, index-buffer
  * LOD, per-vertex world-space morph, bounded draw calls, crack-free
