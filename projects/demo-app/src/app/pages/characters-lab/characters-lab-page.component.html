@@ -1,8 +1,8 @@
 <header class="page-header">
   <div>
-    <p class="eyebrow">Characters · procedural body</p>
-    <h1>Procedural humanoid character</h1>
-    <p class="claim">A skinned body driven by gait, look-at, reach, emotion, and speech visemes — no authored assets.</p>
+    <p class="eyebrow">Characters · procedural body &amp; furniture affordances</p>
+    <h1>Procedural humanoid character &amp; furniture</h1>
+    <p class="claim">A skinned body driven by gait, look-at, reach, emotion, and speech visemes, interacting with procedural chair &amp; door affordances.</p>
   </div>
 </header>
 <section class="controls">
@@ -23,7 +23,19 @@
   <div class="control-group">
     <span>Pose</span>
     <button type="button" [class.active]="!sitEnabled" (click)="setSit(false)">Stand</button>
-    <button type="button" [class.active]="sitEnabled" (click)="setSit(true)">Sit</button>
+    <button type="button" [class.active]="sitEnabled" (click)="setSit(true)">Sit on chair</button>
+  </div>
+  <div class="control-group">
+    <span>Target</span>
+    <select (change)="setTargetSource($any($event.target).value)">
+      <option value="door-knob" [selected]="targetSource === 'door-knob'">Door knob</option>
+      <option value="chair" [selected]="targetSource === 'chair'">Chair</option>
+      <option value="manual" [selected]="targetSource === 'manual'">Free orb</option>
+    </select>
+  </div>
+  <div class="control-group">
+    <span>Door</span>
+    <button type="button" [class.active]="doorOpen" (click)="toggleDoor()">{{ doorOpen ? 'Close door' : 'Open door' }}</button>
   </div>
   <div class="control-group">
     <span>Look</span>
@@ -57,7 +69,7 @@
   </div>
 </section>
 <section class="scope-note">
-  <b>What this proves</b><span>Multiple procedural humanoid styles (Black &amp; White 2 low-poly villager, Yakudoo/Wind Waker faceted-vector with dynamic canvas face, extruded 2D papercraft silhouette, and mannequin) all skin seamlessly to the same rig. Locomotion, sitting, look-at, reach, emotion, speech lipsync visemes, and retargeted Mixamo animations work identically across all body styles without authored 3D assets.</span>
+  <b>Furniture affordances</b><span>Procedural chair and door expose formal CharacterSitAffordance and CharacterDoorAffordance. The humanoid character sits directly on the chair seat surface and reaches to the door knob with two-bone IK, dynamically tracking the knob as the door swings open.</span>
   <b>Styles</b><span>'villager' (organic sculpted anatomy, mouth cleft &amp; eyelid morphs), 'faceted-vector' (faceted body + live dynamic vector canvas face), 'extruded-silhouette' (papercraft 2D profile extrusion), and 'mannequin' (primitive debug).</span>
 </section>
 <scene>

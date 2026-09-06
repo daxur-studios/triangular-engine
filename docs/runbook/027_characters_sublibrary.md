@@ -2,30 +2,40 @@
 
 ## Status
 
-- State: **Phase 0 in progress.** Core rig, forward kinematics, locomotion,
-  look-at, poses, reach IK, and the Three.js binding are implemented and
-  verified; the emotion vocabulary is still pending. No authored mesh or
-  animation data is required.
+- State: **Reoriented after the first implementation pass.** The mechanical
+  foundations and several procedural body experiments exist, but the current
+  result is not yet a satisfactory game character. The next milestone is a
+  single, coherent reference character that can complete a small interaction
+  loop and can be driven through the same API by game code or a local AI agent.
 - Entry point: `triangular-engine/characters` (core) and
   `triangular-engine/characters/three` (Three.js binding).
-- Proving ground: a bones-only `/characters-lab` demo page with a procedural
-  humanoid rig, walk/run gait, sit pose, and head look-at — no authored assets.
+- Proving ground: `/characters-lab`, currently an integration demo with a
+  procedural body, rig, gait, sit, look-at, reach, emotion, speech, and an
+  optional Mixamo clip picker. It is an integration testbed, not yet the
+  reference-character quality bar.
 - Reference repos examined (cloned to `D:\external\`, not vendored):
   [TalkingHead](https://github.com/met4citizen/TalkingHead) and
   [vrm-game-starter](https://github.com/norio/vrm-game-starter).
-- Last updated: 2026-09-01.
+- Last updated: 2026-09-06.
 
 ## Objective
 
-Add reusable, extendable humanoid-character primitives to the engine: a rig,
-locomotion, looking, poses, reach/interaction, and emotion — aimed at
-**simple, abstract, functional** characters that agents can drive, not
-hyper-realistic humans.
+Build reusable, extendable humanoid-character primitives for **simple,
+abstract, functional** characters that games and local AI agents can direct.
+The first quality target is one complete reference character: it must walk,
+look, sit, speak with readable expression, reach for a supported object, grip
+it, carry it, and release it. Variation and additional visual styles follow
+only after that loop works.
 
 The architectural target is:
 
-> A strong procedural body with a replaceable presentation, and a replaceable
-> brain that only ever talks in intents.
+> A tested character capability layer with replaceable presentation, and a
+> replaceable brain that only ever talks in validated intents.
+
+The API must support a progression from high-level scene actions to precise
+performance controls, such as `walkTo`, `sitOn`, `lookAt`, `reachTo`, `grasp`,
+`speak`, `setExpression`, and bounded channels such as
+`brow.right.raise`. Raw per-bone control is an advanced escape hatch.
 
 ## Feasibility summary (why this is possible with no downloaded data)
 
@@ -158,6 +168,11 @@ vocabulary, so one channel system serves both speech and expression.
 - the emotion vocabulary and mood tables;
 - the viseme interface and a minimal English mapper;
 - a cue/timeline queue for scheduled gestures and expressions;
+- an intent/action layer shared by games, scripted scenes, and AI agents;
+- capability discovery, action handles, cancellation, completion events, and
+  structured failure reasons;
+- interaction targets and affordances for supported props (sit points, hand
+  grips, carry/release anchors);
 - rest-pose retargeting helpers for authored clips (later);
 - optional Angular hosts (`<humanoidCharacter>` / `<character>`) as a thin
   binding over the framework-free core.
@@ -173,14 +188,22 @@ The scope alarm is "`Character` acquired hunger, inventory, combat, faction."
 A game decides an intent; `characters` turns it into plausible motion and
 expression.
 
+The AI boundary is narrower than a general autonomous-agent framework. A local
+model proposes structured scene commands; the engine owns pathing, timing,
+blending, IK, collision checks, and capability validation. Commands are
+observable and interruptible so an agent can react to completion or failure.
+
 ## Core decisions
 
-### 1. POC before package extraction
+### 1. Rebuild the proving ground around one reference character
 
-The first implementation is a `/characters-lab` demo page, not scaffolding.
-It shows bones, tests emotion/look/walk/sit, with no complex mesh. The spike
-discovers the smallest useful contracts; only then extract into
-`triangular-engine/characters`.
+Keep `/character-lab` as a historical comparison sandbox and `/characters-lab`
+as the integration proving ground, but stop treating the existing style
+catalogue as the quality target. Create one deliberately art-directed,
+procedural reference character with close-up inspection and a scripted
+interaction loop. Retain the rig, FK, gait, look-at, pose, IK, emotion,
+viseme, and retargeting utilities provisionally; replace presentation code
+when it prevents the reference character from looking and behaving well.
 
 ### 2. Procedural by default, authored as a swappable source
 
@@ -214,6 +237,25 @@ format.
 default. Rig math and gait can be pure data + `update(dt)`; Three.js binding
 lives in a `three/` or `engine/` layer, matching the `life` convention.
 
+### 6. Actions are semantic, layered, and observable
+
+Expose semantic channels and actions instead of asking an agent to author
+continuous joint rotations. High-level actions compose with performance
+controls; overlapping controls have explicit ownership and smooth release.
+Every action has duration and interruption rules and returns a handle with
+running, completed, cancelled, or failed state plus a machine-readable reason.
+A character reports the expressions, grips, and motion capabilities it
+actually supports.
+
+### 7. Build faces, hands, clothes, and hair as focused systems
+
+Faces and hands are quality-critical subsystems, not incidental geometry in a
+generic body builder. Start with a small supported set of face controls,
+hand/palm orientations, grip poses, hairstyles, and clothing constructions.
+Seeded variation may combine only validated parts. Add a second visual style
+after the reference character proves that shared intents can drive different
+presentations.
+
 ## Proposed package layout
 
 ```text
@@ -237,7 +279,7 @@ projects/triangular-engine/characters/
 
 ## Phases
 
-### Phase 0 — Bones-only procedural POC
+### Phase 0 — Foundation audit and reference-character slice
 
 - [x] Add the `triangular-engine/characters` secondary entry point.
 - [x] Define the canonical humanoid bone names/hierarchy.
@@ -249,8 +291,9 @@ projects/triangular-engine/characters/
       walk/run, sit.
 - [ ] Record which contracts were genuinely required.
 
-Exit gate: the page visibly shows bones; an operator (or agent) can drive mood,
-look, and locomotion from simple intents without any downloaded assets.
+Exit gate: one reference character completes a scripted walk → look → sit →
+speak → reach → grasp → carry → release sequence, with visible quality review
+and the same sequence executable through structured commands.
 
 ### Phase 1 — Extraction + authored swap-in
 
@@ -265,6 +308,18 @@ look, and locomotion from simple intents without any downloaded assets.
       viseme interface.
 - [ ] Cue queue for scheduled gestures/expressions mid-speech.
 
+### Phase 3 — Agent control and scene composition
+
+- [ ] Define versioned semantic command schemas and capability reporting.
+- [ ] Add action handles, cancellation, completion events, and failure codes.
+- [ ] Add prop affordances: sit points, reach targets, grip poses, and release
+      anchors.
+- [ ] Execute a deterministic scripted scene through the command API.
+- [ ] Add a local-model adapter that validates model output before execution;
+      keep the model optional and outside the core package.
+- [ ] Support bounded fine control for expression channels, gaze, hand targets,
+      timed poses, and custom trajectories.
+
 ## Non-goals
 
 - A universal human species class or realistic human model.
@@ -273,6 +328,10 @@ look, and locomotion from simple intents without any downloaded assets.
 - TalkingHead's dynamic bones or geometry-mutating Mixamo retargeter.
 - Making every character a physics rigid body or Angular component.
 - Claiming the bones POC proves convincing close-up humans.
+- Letting a local model write arbitrary per-frame joint rotations as the normal
+  control path.
+- Adding broad clothing, hair, face, or species combinatorics before the
+  reference character and interaction loop are reliable.
 
 ## Risks
 
@@ -431,5 +490,35 @@ Also confirm:
   via `AnimationMixer`.
 - Verified: 71 character specs pass; library + demo app build clean.
 
+### 2026-09-06 — Reorientation toward a complete reference character and AI control
 
+- Reviewed the current `/character-lab`, `/characters-lab`, `characters`, and
+  `procedural/characters` work as a whole. The engine has useful rigging,
+  motion, IK, expression, viseme, retargeting, and several procedural body
+  builders, but the result is a collection of demonstrations rather than a
+  coherent character quality bar.
+- Chose a staged replacement: preserve the mechanical foundations provisionally
+  while rebuilding the presentation around one simple reference character and
+  one complete interaction loop. Archive older visual experiments as reference
+  rather than expanding their catalogue.
+- Added the requirement that game code, scripted scenes, and local AI agents
+  use the same semantic intent/action interface. The engine executes and
+  validates commands; agents select commands and respond to observable results.
+- Identified faces, hands, clothing, and hair as dedicated quality workstreams.
+  Procedural variation is deferred until each supported part works reliably in
+  the reference character and across its core actions.
 
+### 2026-09-06 — Procedural furniture (chair, door) and character affordances
+
+- Added framework-free `CharacterSitAffordance`, `CharacterReachAffordance`, and
+  `CharacterDoorAffordance` to `triangular-engine/characters/core/character-affordance.ts`,
+  with runtime validators.
+- Added `triangular-engine/procedural/furniture` with art-directed procedural
+  builders: `buildProceduralChair` (seat, tapered legs, backrest, sit affordance)
+  and `buildProceduralDoor` (frame, hinged panel, doorknob, dynamic knob reach
+  affordance tracking door swing).
+- Updated `/characters-lab`: replaced empty-air sitting and arbitrary floating
+  reach with grounded chair sitting (matching humanoid hip drop to chair seat)
+  and real door-knob reaching with two-bone IK as the door swings open.
+- Verified: 80 character specs + 237 procedural specs pass; library and demo app
+  build clean.

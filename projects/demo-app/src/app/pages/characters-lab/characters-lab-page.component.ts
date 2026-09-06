@@ -41,14 +41,29 @@ import { HumanoidRigVisualization, retargetMixamoClip } from 'triangular-engine/
 import {
   applyCharacterFacePose,
   buildCharacterBodyMesh,
+  buildProceduralChair,
+  buildProceduralDoor,
   CHARACTER_BODY_STYLES,
   type CharacterBodyStyle,
+  type IProceduralChairResult,
+  type IProceduralDoorResult,
 } from 'triangular-engine/procedural';
 
+export type TargetSourceMode = 'door-knob' | 'chair' | 'manual';
+
 const WALK_RADIUS = 1.6;
-const TARGET_RADIUS = 2.5;
-const TARGET_HEIGHT = 1.5;
-const SIT_DROP = 0.4;
+const TARGET_SWING_RADIUS = 2.5;
+const TARGET_SWING_HEIGHT = 1.5;
+
+function lerpAngle(from: number, to: number, t: number): number {
+  let diff = (to - from) % (Math.PI * 2);
+  if (diff > Math.PI) {
+    diff -= Math.PI * 2;
+  } else if (diff < -Math.PI) {
+    diff += Math.PI * 2;
+  }
+  return from + diff * t;
+}
 
 @Component({
   selector: 'app-characters-lab-page',
@@ -66,8 +81,11 @@ export class CharactersLabPageComponent {
   protected mode: LocomotionMode = 'idle';
   protected sitEnabled = false;
   protected lookEnabled = true;
-  protected reachEnabled = false;
+  protected reachEnabled = true;
   protected showBones = true;
+
+  protected targetSource: TargetSourceMode = 'door-knob';
+  protected doorOpen = false;
 
   protected emotion: EmotionName = 'happy';
   protected speechText = 'Hello there, welcome to the characters lab!';
@@ -80,6 +98,9 @@ export class CharactersLabPageComponent {
   private bodyMesh!: SkinnedMesh;
   private readonly ground: Mesh;
   private readonly target: Mesh;
+
+  protected readonly chair: IProceduralChairResult;
+  protected readonly door: IProceduralDoorResult;
 
   private readonly headRestY = this.rig.boneByName.get('head')!.restPosition.y;
   private angle = 0;
@@ -105,14 +126,41 @@ export class CharactersLabPageComponent {
     this.ground.rotation.x = -Math.PI / 2;
 
     this.target = new Mesh(
-      new SphereGeometry(0.09, 16, 12),
-      new MeshStandardMaterial({ color: '#ff6b6b', roughness: 0.4, emissive: 0x330000 }),
+      new SphereGeometry(0.06, 16, 12),
+      new MeshStandardMaterial({ color: '#ff4757', roughness: 0.3, emissive: 0x440000 }),
     );
+
+    // Procedural chair at X = 1.5, facing -X towards room center
+    this.chair = buildProceduralChair({
+      style: 'dining',
+      frameColorHex: '#78350f',
+      cushionColorHex: '#1e3a8a',
+    });
+    this.chair.group.position.set(1.5, 0, 0);
+    this.chair.group.rotation.y = -Math.PI / 2;
+
+    // Procedural door at X = -1.5, facing +X towards room center
+    this.door = buildProceduralDoor({
+      frameWidthM: 0.96,
+      frameHeightM: 2.15,
+      knobStyle: 'round',
+      frameColorHex: '#1e293b',
+      doorColorHex: '#92400e',
+      knobColorHex: '#f59e0b',
+    });
+    this.door.group.position.set(-1.5, 0, 0);
+    this.door.group.rotation.y = Math.PI / 2;
 
     this.rebuildBodyMesh();
 
     this.character.add(this.visualization.group);
-    this.engine.scene.add(this.character, this.ground, this.target);
+    this.engine.scene.add(
+      this.character,
+      this.ground,
+      this.target,
+      this.chair.group,
+      this.door.group,
+    );
 
     const destroyRef = inject(DestroyRef);
     this.engine.tick$
@@ -166,6 +214,14 @@ export class CharactersLabPageComponent {
   protected toggleBones(): void {
     this.showBones = !this.showBones;
     this.visualization.setOverlayVisible(this.showBones);
+  }
+
+  protected setTargetSource(mode: TargetSourceMode): void {
+    this.targetSource = mode;
+  }
+
+  protected toggleDoor(): void {
+    this.doorOpen = !this.doorOpen;
   }
 
   protected onDanceFile(event: Event): void {
@@ -253,39 +309,97 @@ export class CharactersLabPageComponent {
   private update(deltaSeconds: number): void {
     this.elapsed += deltaSeconds;
 
+    // 1. Animate door opening angle smoothly
+    const targetDoorAngle = this.doorOpen ? Math.PI / 2 : 0;
+    const currentDoorAngle = this.door.getOpenAngle();
+    if (Math.abs(targetDoorAngle - currentDoorAngle) > 0.001) {
+      const step = (targetDoorAngle - currentDoorAngle) * Math.min(1, deltaSeconds * 5);
+      this.door.setOpenAngle(currentDoorAngle + step);
+    }
+
     if (this.dancing && this.danceMixer) {
       this.danceMixer.update(deltaSeconds);
       this.applyFace();
       return;
     }
 
-    const speed = this.sitEnabled ? 0 : this.mode === 'run' ? 2.1 : this.mode === 'walk' ? 0.9 : 0;
-    if (speed > 0) this.angle += (speed / WALK_RADIUS) * deltaSeconds;
+    // Only advance walk/run circle when not seated and not transitioning to/from sit
+    const isSittingOrTransitioning = this.sitEnabled || this.sitBlend > 0.005;
+    const speed = isSittingOrTransitioning ? 0 : this.mode === 'run' ? 2.1 : this.mode === 'walk' ? 0.9 : 0;
+    if (speed > 0) {
+      this.angle = (this.angle + (speed / WALK_RADIUS) * deltaSeconds) % (Math.PI * 2);
+    }
 
-    const locomotion = this.sitEnabled
+    const locomotion = isSittingOrTransitioning
       ? sampleLocomotion('idle', this.elapsed)
       : sampleLocomotion(this.mode, this.elapsed);
-    this.character.position.set(
-      Math.cos(this.angle) * WALK_RADIUS,
-      locomotion.bounce - this.sitBlend * SIT_DROP,
-      Math.sin(this.angle) * WALK_RADIUS,
-    );
-    this.character.rotation.y = -this.angle;
 
+    // 2. Sitting transition and positioning (grounded to chair)
     const sitTarget = this.sitEnabled ? 1 : 0;
-    this.sitBlend += (sitTarget - this.sitBlend) * Math.min(1, deltaSeconds * 8);
+    this.sitBlend += (sitTarget - this.sitBlend) * Math.min(1, deltaSeconds * 6);
+
+    const chairAffordance = this.chair.getSitAffordance();
+    const chairYaw = Math.atan2(chairAffordance.facingDirection.x, chairAffordance.facingDirection.z);
+
+    const normalWalkX = Math.cos(this.angle) * WALK_RADIUS;
+    const normalWalkZ = Math.sin(this.angle) * WALK_RADIUS;
+    const normalRotY = -this.angle;
+
+    // When sitting, character drops hips onto chair seat (standing hips = 0.80m, drop = 0.80 - seatHeight = 0.35m)
+    const seatDrop = 0.80 - chairAffordance.seatHeight;
+    const seatedY = locomotion.bounce * (1 - this.sitBlend) - this.sitBlend * seatDrop;
+
+    const charX = normalWalkX + (chairAffordance.seatPosition.x - normalWalkX) * this.sitBlend;
+    const charZ = normalWalkZ + (chairAffordance.seatPosition.z - normalWalkZ) * this.sitBlend;
+    const charRotY = lerpAngle(normalRotY, chairYaw, this.sitBlend);
+
+    this.character.position.set(charX, seatedY, charZ);
+    this.character.rotation.y = charRotY;
+
+    if (this.sitBlend > 0.999) {
+      // While seated on the chair, synchronize angle so standing up resumes directly in front of the chair
+      this.angle = 0;
+    }
 
     let pose = locomotion.pose;
     if (this.sitBlend > 0.0005) pose = blendPoses(pose, SIT_POSE, this.sitBlend);
 
+    // 3. Target position and Look / Reach IK
+    const worldTarget = this.resolveTarget(deltaSeconds);
+    this.target.position.copy(worldTarget);
+
     if (this.lookEnabled || this.reachEnabled) {
-      const localTarget = this.toLocal(this.updateTarget(deltaSeconds));
+      const localTarget = this.toLocal(worldTarget);
       if (this.lookEnabled) pose = this.applyLook(pose, localTarget);
       if (this.reachEnabled) pose = this.applyReach(pose, localTarget);
     }
 
     this.visualization.setPose(pose);
     this.applyFace();
+  }
+
+  private resolveTarget(deltaSeconds: number): Vector3 {
+    switch (this.targetSource) {
+      case 'door-knob': {
+        const knobReach = this.door.getKnobReachAffordance();
+        return new Vector3(knobReach.targetPosition.x, knobReach.targetPosition.y, knobReach.targetPosition.z);
+      }
+      case 'chair': {
+        const chairSit = this.chair.getSitAffordance();
+        return new Vector3(chairSit.seatPosition.x, chairSit.seatPosition.y + 0.1, chairSit.seatPosition.z);
+      }
+      case 'manual':
+      default: {
+        this.targetSwing += deltaSeconds * 0.8;
+        const forward = new Vector3(-Math.sin(this.angle), 0, Math.cos(this.angle));
+        const right = new Vector3(Math.cos(this.angle), 0, Math.sin(this.angle));
+        return this.character.position
+          .clone()
+          .addScaledVector(forward, TARGET_SWING_RADIUS)
+          .addScaledVector(right, Math.sin(this.targetSwing) * TARGET_SWING_RADIUS * 0.7)
+          .setY(TARGET_SWING_HEIGHT);
+      }
+    }
   }
 
   private applyFace(): void {
@@ -310,18 +424,6 @@ export class CharactersLabPageComponent {
     );
   }
 
-  private updateTarget(deltaSeconds: number): Vector3 {
-    this.targetSwing += deltaSeconds * 0.8;
-    const forward = new Vector3(-Math.sin(this.angle), 0, Math.cos(this.angle));
-    const right = new Vector3(Math.cos(this.angle), 0, Math.sin(this.angle));
-    this.target.position
-      .copy(this.character.position)
-      .addScaledVector(forward, TARGET_RADIUS)
-      .addScaledVector(right, Math.sin(this.targetSwing) * TARGET_RADIUS * 0.7);
-    this.target.position.y = TARGET_HEIGHT;
-    return this.target.position;
-  }
-
   private applyLook(basePose: RigPose, target: Vector3): RigPose {
     const yaw = Math.atan2(target.x, target.z);
     const pitch = -Math.atan2(target.y - this.headRestY, Math.hypot(target.x, target.z));
@@ -334,14 +436,14 @@ export class CharactersLabPageComponent {
     const dy = target.y - shoulder.y;
     const dz = target.z - shoulder.z;
     const distance = Math.hypot(dx, dy, dz);
-    const reachDistance = 0.45;
-    const reachTarget = distance > 1e-8
+    const maxReach = 0.56; // Max two-bone arm span (upperArm 0.30 + lowerArm 0.28 - small elbow cushion)
+    const reachTarget = distance > maxReach
       ? {
-          x: shoulder.x + (dx / distance) * reachDistance,
-          y: shoulder.y + (dy / distance) * reachDistance,
-          z: shoulder.z + (dz / distance) * reachDistance,
+          x: shoulder.x + (dx / distance) * maxReach,
+          y: shoulder.y + (dy / distance) * maxReach,
+          z: shoulder.z + (dz / distance) * maxReach,
         }
-      : { x: shoulder.x, y: shoulder.y - reachDistance, z: shoulder.z };
+      : { x: target.x, y: target.y, z: target.z };
     return solveTwoBoneIk(
       this.rig,
       basePose,
@@ -353,12 +455,7 @@ export class CharactersLabPageComponent {
   }
 
   private toLocal(world: Vector3): Vector3 {
-    const cosA = Math.cos(this.angle);
-    const sinA = Math.sin(this.angle);
-    const dx = world.x - this.character.position.x;
-    const dy = world.y - this.character.position.y;
-    const dz = world.z - this.character.position.z;
-    return new Vector3(dx * cosA + dz * sinA, dy, -dx * sinA + dz * cosA);
+    return this.character.worldToLocal(world.clone());
   }
 
   private dispose(): void {
@@ -367,6 +464,10 @@ export class CharactersLabPageComponent {
     this.character.removeFromParent();
     this.ground.removeFromParent();
     this.target.removeFromParent();
+    this.chair.group.removeFromParent();
+    this.door.group.removeFromParent();
+    this.chair.dispose();
+    this.door.dispose();
     this.visualization.dispose();
     if (this.bodyMesh) {
       this.bodyMesh.geometry.dispose();

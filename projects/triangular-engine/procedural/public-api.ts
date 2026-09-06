@@ -18,4 +18,5 @@ export * from './parts/public-api';
 export * from './structures/public-api';
 export * from './cities/public-api';
 export * from './characters/public-api';
+export * from './furniture/public-api';
 

@@ -9,3 +9,4 @@ export * from './core/look-at';
 export * from './core/reach-ik';
 export * from './core/blend-shapes';
 export * from './core/visemes';
+export * from './core/character-affordance';
