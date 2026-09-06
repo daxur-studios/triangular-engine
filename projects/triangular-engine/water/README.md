@@ -283,3 +283,7 @@ runtime limitation must update this page in the same change.
 Implementation history and unfinished engineering gates remain in
 [`docs/runbook/002_water_sublibrary.md`](../../../docs/runbook/002_water_sublibrary.md);
 game-facing instructions belong here.
+
+<!-- doc-section section-id="sec_961cc877cce7" path="projects/triangular-engine/water" baseline-tokens="57165" -->
+Camera-centred clipmap water surface renderer supporting planar, spherical (planetary), and inner-cylindrical (O'Neill habitat) domains. Decouples render quality tiers from wave motion presets, integrates with the engine's ordered `beforeRender$` loop and depth prepass, and synchronizes CPU sampling (`WaterService` / `GerstnerSurface`) with GPU vertex displacement using precision-rebased 64-bit wave clocks. Isolated as an optional secondary entry point so games without water do not incur bundle or runtime overhead.
+<!-- /doc-section -->

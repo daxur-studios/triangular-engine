@@ -72,3 +72,7 @@ For single-shape bodies, these inputs are ignored since the shape fills the enti
 - Compound shapes are more expensive than single shapes
 - Use the minimum number of shapes needed for your collision requirements
 - Consider using simplified collision shapes that approximate your visual geometry
+
+<!-- doc-section section-id="sec_4c6a72dc5409" path="projects/triangular-engine/jolt" baseline-tokens="50847" -->
+High-performance Jolt physics integration providing compound rigid bodies, convex hulls, kinematic/dynamic motion types, and declarative collision shape components. Isolated as an optional secondary entry point (`triangular-engine/jolt`) to separate WASM memory management, debug renderers, and native collision pipelines from the lightweight core engine.
+<!-- /doc-section -->

@@ -8,6 +8,7 @@
 - `docs/runbook/` — design notes and implementation history for larger features.
 - `instructions/` — maintainer workflows and historical project notes.
 - `.cursor/skills/` — Cursor-specific task guidance; keep it aligned with the public API.
+- `.daxur/token-map.json` — repository token documentation manifest (see `docs/runbook/029_token_map_usage_guide.md`).
 
 ## First steps
 
@@ -23,6 +24,8 @@ npm install
 npm run build:triangular-engine
 npm test -- --watch=false --browsers=ChromeHeadless
 npx ng serve demo-app
+daxur tokens map --floor 50000
+daxur tokens map status
 ```
 
 For a library-only edit loop, use `npm run watch`. `npm run start` prepares a linked library and starts its watch build; it does not serve the demo app.
@@ -34,6 +37,7 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 - Update user-facing docs and `CHANGELOG.md` for public API changes.
 - Keep optional integrations isolated from the core entry point.
 - Do not edit generated output in `dist/` or `out-tsc/`; rebuild it instead.
+- Check `daxur tokens map status` when adding or expanding sublibraries to keep architecture docs in sync.
 
 ## Verification checklist
 
@@ -44,4 +48,4 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 
 ## Documentation source of truth
 
-The package README and `projects/triangular-engine/docs/` describe the current consumer API. Treat `instructions/summary.md` and old runbooks as historical context unless they explicitly describe a current workflow.
+The package README and `projects/triangular-engine/docs/` describe the current consumer API. Treat `instructions/summary.md` and old runbooks as historical context unless they explicitly describe a current workflow. For repository documentation coverage and drift tracking, see `docs/runbook/029_token_map_usage_guide.md`.
