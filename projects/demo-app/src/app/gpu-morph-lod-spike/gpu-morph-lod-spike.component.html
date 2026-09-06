@@ -1,8 +1,14 @@
-<canvas #canvas aria-label="GPU morph LOD terrain spike"></canvas>
+<scene>
+  <orbitControls
+    [cameraPosition]="[60, 45, 60]"
+    [target]="[0, 0, 0]"
+    [isActive]="true"
+  />
+</scene>
 
 <aside class="diagnostics">
   <strong>Attempt #5 · Spike 1 · GPU morph LOD (plain Three.js)</strong>
-  <span>{{ fps() }} fps · draw calls: {{ drawCalls() }} · triangles: {{ triangles().toLocaleString() }}</span>
+  <span>draw calls: {{ drawCalls() }} · triangles: {{ triangles().toLocaleString() }}</span>
   <span>Instances by level: {{ instanceCountsLabel() }}</span>
   <div class="actions">
     <button [class.active]="wireframe()" (click)="toggleWireframe()">
@@ -16,6 +22,18 @@
     </button>
     <button [class.active]="frozen()" (click)="toggleFrozen()">
       {{ frozen() ? "Unfreeze camera" : "Freeze camera (flicker check)" }}
+    </button>
+    <button
+      [class.active]="terrainKind() === 'wave'"
+      (click)="setTerrainKind('wave')"
+    >
+      Terrain: wave
+    </button>
+    <button
+      [class.active]="terrainKind() === 'noise'"
+      (click)="setTerrainKind('noise')"
+    >
+      Terrain: noise
     </button>
   </div>
   <p>

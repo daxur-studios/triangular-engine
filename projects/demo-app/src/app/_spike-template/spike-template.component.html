@@ -1,0 +1,21 @@
+<scene>
+  <orbitControls
+    [cameraPosition]="[3, 2, 3]"
+    [target]="[0, 0, 0]"
+    [isActive]="true"
+  />
+</scene>
+
+<aside class="diagnostics">
+  <strong>Spike name · one-line hypothesis under test</strong>
+  <span>draw calls: {{ drawCalls() }} · triangles: {{ triangles().toLocaleString() }}</span>
+  <div class="actions">
+    <button [class.active]="wireframe()" (click)="toggleWireframe()">
+      Wireframe
+    </button>
+  </div>
+  <p>
+    Replace this panel's copy with what a reviewer needs to judge pass/fail
+    at a glance, and add whatever toggles the spike's mechanism needs.
+  </p>
+</aside>

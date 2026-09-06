@@ -7,10 +7,52 @@ import { ShaderMaterial, Vector3 } from 'three';
  * the fixture boundless and avoids atlas/streaming complexity entirely.
  */
 const TERRAIN_HEIGHT_GLSL = `
-  float terrainHeight(vec2 xz) {
+  uniform float uTerrainKind; // 0 = wave (original), 1 = noise (fbm)
+
+  float terrainHeightWave(vec2 xz) {
     float continental = sin(xz.x / 340.0) * 6.0 + cos(xz.y / 260.0) * 5.0;
     float ridges = abs(sin(xz.x / 55.0 + xz.y / 70.0)) * 14.0;
     return continental + ridges;
+  }
+
+  float terrainHash(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+  }
+
+  float terrainValueNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = terrainHash(i);
+    float b = terrainHash(i + vec2(1.0, 0.0));
+    float c = terrainHash(i + vec2(0.0, 1.0));
+    float d = terrainHash(i + vec2(1.0, 1.0));
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+  }
+
+  float terrainFbm(vec2 p) {
+    float value = 0.0;
+    float amplitude = 1.0;
+    float frequency = 1.0;
+    for (int i = 0; i < 5; i++) {
+      value += amplitude * terrainValueNoise(p * frequency);
+      frequency *= 2.02;
+      amplitude *= 0.5;
+    }
+    return value;
+  }
+
+  float terrainHeightNoise(vec2 xz) {
+    float continental = terrainFbm(xz / 400.0) * 26.0 - 13.0;
+    float ridgeNoise = terrainFbm(xz / 90.0 + vec2(31.7, -14.2));
+    float ridges = pow(1.0 - abs(ridgeNoise * 2.0 - 1.0), 2.0) * 18.0;
+    return continental + ridges;
+  }
+
+  float terrainHeight(vec2 xz) {
+    return uTerrainKind < 0.5 ? terrainHeightWave(xz) : terrainHeightNoise(xz);
   }
 `;
 
@@ -124,6 +166,7 @@ export function createGpuMorphLodMaterial(): ShaderMaterial {
       uHeightScale: { value: 1 },
       uMorphEnabled: { value: true },
       uShowLevelTint: { value: true },
+      uTerrainKind: { value: 0 },
     },
     wireframe: false,
   });
