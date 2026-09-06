@@ -30,6 +30,7 @@ FacialFrameState (Per-frame evaluated state)
   │
   ▼
 Presentation Adapter
+  ├── Universal Three.js Binding (bindCharacterFace in triangular-engine/characters/three)
   ├── Reference Face Mesh (buildReferenceFaceMesh in triangular-engine/procedural)
   └── SkinnedMesh / Vector Face Canvas (applyCharacterFacePose)
 ```
@@ -69,9 +70,35 @@ Overlapping controls combine without overwriting each other:
 3. **Blinking + Squint**: Procedural blinks modulate the eyelid position using `Math.max(expressionBlink, blinkEnvelope)`, preventing sudden pops.
 4. **Speech Completion**: When a speech viseme track finishes, articulators decay smoothly back to zero, returning the mouth cleanly to the expression baseline.
 
+## Three.js Presentation Binding (`bindCharacterFace`)
+
+The `triangular-engine/characters/three` secondary entry point provides `bindCharacterFace`:
+
+```ts
+import { bindCharacterFace } from 'triangular-engine/characters/three';
+
+const faceBinding = bindCharacterFace(gltfModel, {
+  driveEyeMorphsFromGaze: true,
+});
+
+// In animation loop:
+faceBinding.applyPose(frameState.blendShapes, frameState.gaze.left);
+```
+
+### Supported Morph Target Standards
+`bindCharacterFace` inspects child meshes and automatically normalizes diverse naming conventions to canonical ARKit 52:
+- **Canonical ARKit**: `eyeBlinkLeft`, `mouthSmileRight`, `jawOpen`
+- **Suffix variants**: `eyeBlink_L`, `eyeBlink_R`, `mouthSmile_l`, `browDown.R` (used by Three.js `facecap.glb` and Blender)
+- **Prefixed identifiers**: `blendShape1.eyeBlink_L`, `BS_jawOpen`, `head.mouthSmile_R`
+- **Oculus / VRM conventions**: `Eye_Blink_L`, `Mouth_Smile_R`, `Jaw_Open`
+
+### Eye Gaze Orientation
+When eye pivot nodes are present (e.g. `grp_eyeLeft`, `grp_eyeRight`, `eyeLeft`, `eyeRight`), `bindCharacterFace` rotates them relative to their rest quaternion. When standard ARKit eye morphs exist (`eyeLookInLeft`, `eyeLookOutRight`, `eyeLookUpLeft`, `eyeLookDownLeft`), it drives their weights from horizontal and vertical gaze angles.
+
 ## Proving Ground Demo
 
 Open `/characters-lab` in the demo application:
+- **Face Model Toggle**: Switch between the authored **FaceCap ARKit 52 Reference Model** and the **Procedural Head** to compare deformation fidelity side-by-side.
 - **Face Studio Mode**: Close-up portrait camera with front, 3/4, and profile view angles, and three-point portrait lighting.
 - **Interactive Gaze Reticle**: Directs eye pupils within anatomical limits.
 - **Individual Channel Sliders**: Test fine controls for brows, eyelids, and mouth.

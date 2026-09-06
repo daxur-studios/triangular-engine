@@ -2,7 +2,15 @@
   <div>
     <p class="eyebrow">Characters · Facial Functionality &amp; Semantic Controls</p>
     <h1>Reference Face Studio &amp; Articulation</h1>
-    <p class="claim">Focused stylized reference face featuring independent brows, seated eye gaze, eyelid blinks, expressive mouth shapes, viseme articulation, and layered semantic controls.</p>
+    <p class="claim">
+      @if (viewMode === 'face-studio' && faceModelSource === 'reference-model') {
+        Active Baseline: <strong>FaceCap ARKit 52 Model</strong> ({{ recognizedMorphCount }} recognized morph targets). Realistic facial deformation, eyelid sliding, and viseme articulation.
+      } @else if (viewMode === 'face-studio' && faceModelSource === 'procedural') {
+        Active Baseline: <strong>Procedural Parametric Head</strong>. Parametric geometry deformation with socket eyes and mouth shape keys.
+      } @else {
+        Full body character scene featuring procedural humanoid rig, IK reach, door/chair affordances, and speech articulation.
+      }
+    </p>
   </div>
 </header>
 
@@ -15,6 +23,25 @@
   </div>
 
   @if (viewMode === 'face-studio') {
+    <div class="control-group">
+      <span>Face Model</span>
+      <button
+        type="button"
+        [class.active]="faceModelSource === 'reference-model'"
+        (click)="setFaceModelSource('reference-model')"
+      >
+        Authored Model (ARKit 52)
+        @if (referenceModelLoading) { <em>(loading...)</em> }
+      </button>
+      <button
+        type="button"
+        [class.active]="faceModelSource === 'procedural'"
+        (click)="setFaceModelSource('procedural')"
+      >
+        Procedural Head
+      </button>
+    </div>
+
     <div class="control-group">
       <span>Framing</span>
       <button type="button" [class.active]="cameraFraming === 'front'" (click)="setCameraFraming('front')">Front</button>
@@ -283,7 +310,7 @@
 
 <!-- 3D VIEWPORT WITH DEDICATED LIGHTING -->
 <scene>
-  <orbitControls [cameraPosition]="cameraPosition" [target]="cameraTarget" />
+  <orbitControls [cameraPosition]="cameraPosition()" [target]="cameraTarget()" />
   @if (viewMode === 'face-studio') {
     <!-- Three-point portrait lighting -->
     <ambientLight [intensity]="1.1" />

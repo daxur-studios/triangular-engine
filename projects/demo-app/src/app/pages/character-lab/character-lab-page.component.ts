@@ -81,41 +81,42 @@ const SVG_COSMONAUT = `
 `;
 
 // SVG Archetype 2: Industrial Scrap-Bot / Mining Mech (viewBox: 0 0 100 120)
+// data-depth = per-part extrusion thickness in meters (default 0.5)
 const SVG_SCRAP_BOT = `
 <svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
   <!-- Power Pack / Chimney -->
   <rect x="24" y="22" width="52" height="46" rx="4" fill="#1e293b" />
-  <rect x="30" y="10" width="8" height="14" fill="#475569" />
-  <rect x="62" y="10" width="8" height="14" fill="#475569" />
+  <rect x="30" y="10" width="8" height="14" fill="#475569" data-depth="0.3" />
+  <rect x="62" y="10" width="8" height="14" fill="#475569" data-depth="0.3" />
 
   <!-- Heavy Piston Legs & Feet -->
-  <rect x="30" y="70" width="14" height="34" fill="#475569" />
-  <rect x="24" y="104" width="22" height="14" rx="3" fill="#0f172a" />
-  <rect x="56" y="70" width="14" height="34" fill="#475569" />
-  <rect x="54" y="104" width="22" height="14" rx="3" fill="#0f172a" />
+  <rect x="30" y="70" width="14" height="34" fill="#475569" data-depth="0.25" />
+  <rect x="24" y="104" width="22" height="14" rx="3" fill="#0f172a" data-depth="0.32" />
+  <rect x="56" y="70" width="14" height="34" fill="#475569" data-depth="0.25" />
+  <rect x="54" y="104" width="22" height="14" rx="3" fill="#0f172a" data-depth="0.32" />
 
   <!-- Heavy Armored Chassis -->
   <rect x="24" y="34" width="52" height="40" rx="4" fill="#eab308" />
   <!-- Hazard Stripes -->
-  <path d="M30,62 L38,62 L46,70 L38,70 Z" fill="#1e293b" />
-  <path d="M46,62 L54,62 L62,70 L54,70 Z" fill="#1e293b" />
-  <path d="M62,62 L70,62 L70,70 L62,70 Z" fill="#1e293b" />
+  <path d="M30,62 L38,62 L46,70 L38,70 Z" fill="#1e293b" data-depth="0.54" />
+  <path d="M46,62 L54,62 L62,70 L54,70 Z" fill="#1e293b" data-depth="0.54" />
+  <path d="M62,62 L70,62 L70,70 L62,70 Z" fill="#1e293b" data-depth="0.54" />
 
   <!-- Heavy Shoulders & Hydraulic Arms -->
-  <rect x="12" y="34" width="14" height="12" rx="3" fill="#64748b" />
-  <path d="M16,46 L14,72 L22,76 L24,46 Z" fill="#475569" />
-  <path d="M10,74 L24,74 L26,86 L8,86 Z" fill="#0f172a" />
+  <rect x="12" y="34" width="14" height="12" rx="3" fill="#64748b" data-depth="0.4" />
+  <path d="M16,46 L14,72 L22,76 L24,46 Z" fill="#475569" data-depth="0.25" />
+  <path d="M10,74 L24,74 L26,86 L8,86 Z" fill="#0f172a" data-depth="0.32" />
 
-  <rect x="74" y="34" width="14" height="12" rx="3" fill="#64748b" />
-  <path d="M84,46 L86,72 L78,76 L76,46 Z" fill="#475569" />
-  <path d="M76,74 L90,74 L92,86 L74,86 Z" fill="#0f172a" />
+  <rect x="74" y="34" width="14" height="12" rx="3" fill="#64748b" data-depth="0.4" />
+  <path d="M84,46 L86,72 L78,76 L76,46 Z" fill="#475569" data-depth="0.25" />
+  <path d="M76,74 L90,74 L92,86 L74,86 Z" fill="#0f172a" data-depth="0.32" />
 
   <!-- Robot Head & Sensor Array -->
-  <rect x="32" y="14" width="36" height="22" rx="3" fill="#334155" />
+  <rect x="32" y="14" width="36" height="22" rx="3" fill="#334155" data-depth="0.45" />
   <!-- Glowing Optic Visor -->
-  <rect x="36" y="20" width="28" height="8" rx="2" fill="#22c55e" />
-  <circle cx="50" cy="24" r="3" fill="#86efac" />
-  <circle cx="38" cy="17" r="2" fill="#ef4444" />
+  <rect x="36" y="20" width="28" height="8" rx="2" fill="#22c55e" data-depth="0.5" />
+  <circle cx="50" cy="24" r="3" fill="#86efac" data-depth="0.52" />
+  <circle cx="38" cy="17" r="2" fill="#ef4444" data-depth="0.52" />
 </svg>
 `;
 
@@ -232,7 +233,7 @@ export class CharacterLabPageComponent {
         id: 'svg-extruded-toy',
         label: 'SVG Extruded Figurine',
         technique: 'Beveled 3D ExtrudeGeometry',
-        description: 'Chunky tactile figurine with rounded bevels, metallic chassis, and glossy specular highlights.',
+        description: 'Chunky tactile figurine with per-part extrusion depths, rounded bevels, metallic chassis, and glossy highlights.',
         x: ATTEMPT_SPACING,
         build: (group) => this.buildSvgExtrudedToy(group, SVG_SCRAP_BOT),
       },
@@ -349,11 +350,18 @@ export class CharacterLabPageComponent {
   private buildSvgExtrudedToy(group: Group, svgText: string): void {
     const svgData = this.svgLoader.parse(svgText);
     const targetHeight = 1.7;
+    const svgBoxHeight = 120;
+    const svgScale = targetHeight / svgBoxHeight;
     const characterGroup = new Group();
 
-    const extrudeDepth = 1.2;
+    // Default slab thickness in world meters; individual parts override it
+    // via a data-depth attribute on their SVG element
+    const defaultDepthM = 0.5;
+    // Overlapping paths extruded to identical depth z-fight on their caps,
+    // so each successive path sits slightly deeper (~1mm world-space offset)
+    const layerStagger = 0.15;
 
-    svgData.paths.forEach((path) => {
+    svgData.paths.forEach((path, pathIndex) => {
       const fillColor = path.userData?.['style']?.['fill'];
       if (!fillColor || fillColor === 'none') return;
 
@@ -372,16 +380,21 @@ export class CharacterLabPageComponent {
         emissiveIntensity: isGlowing ? 0.9 : 0,
       });
 
+      // Per-part thickness: data-depth is authored in world meters
+      const depthAttr: string | null = path.userData?.['node']?.getAttribute?.('data-depth') ?? null;
+      const depthM = Number.parseFloat(depthAttr ?? '') || defaultDepthM;
+      const depth = depthM / svgScale + pathIndex * layerStagger;
+
       const geom = new ExtrudeGeometry(shapes, {
-        depth: extrudeDepth,
+        depth,
         bevelEnabled: true,
         bevelSegments: 3,
-        bevelThickness: 0.15,
-        bevelSize: 0.1,
+        bevelThickness: 0.7,
+        bevelSize: 0.5,
       });
 
       const mesh = new Mesh(geom, mat);
-      mesh.position.z = -extrudeDepth / 2;
+      mesh.position.z = -depth / 2;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       characterGroup.add(mesh);

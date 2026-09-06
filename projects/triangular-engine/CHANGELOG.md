@@ -25,6 +25,11 @@ All notable changes to triangular-engine are documented here.
 - Upgraded the `/characters-lab` demo with a dedicated **Face Studio (Close-Up)** mode featuring
   three-point portrait lighting, front, 3/4, and profile camera framing presets, interactive gaze reticle,
   individual channel sliders, expression presets, instant viseme testing, and a combined performance example.
+- `triangular-engine/characters/three` now exports `bindCharacterFace`, `CharacterFaceBinding`, and `normalizeMorphTargetName`:
+  - Automatically inspects any loaded Three.js hierarchy (GLTF, GLB, VRM, procedural) for ARKit 52 morph targets.
+  - Normalizes diverse naming schemes (canonical camelCase, `_L`/`_R` suffixes, namespace prefixes, and Oculus conventions) to the canonical ARKit standard.
+  - Detects eye pivot groups (`grp_eyeLeft`, `eyeLeft`, etc.) to drive gaze orientation, and projects gaze angles to standard ARKit eye morphs (`eyeLookInLeft`, `eyeLookOutRight`, etc.).
+  - Bundled Three.js reference model baseline (`facecap.glb`) with KTX2/Meshopt decoding in `/characters-lab`, establishing an authored ground truth alongside procedural generation.
 
 - `triangular-engine/characters` now exports analytic two-bone reach IK
   (`solveTwoBoneIk`) over any parent→mid→end bone chain, with elbow pole

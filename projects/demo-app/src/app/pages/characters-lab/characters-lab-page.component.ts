@@ -1,9 +1,10 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, inject } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, inject, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   AnimationMixer,
   Bone,
+  Box3,
   Group,
   Mesh,
   MeshStandardMaterial,
@@ -16,6 +17,9 @@ import {
   type AnimationClip,
 } from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
   applyLookAt,
@@ -44,7 +48,12 @@ import {
   type Viseme,
   type VisemeKeyframe,
 } from 'triangular-engine/characters';
-import { HumanoidRigVisualization, retargetMixamoClip } from 'triangular-engine/characters/three';
+import {
+  bindCharacterFace,
+  HumanoidRigVisualization,
+  retargetMixamoClip,
+  type CharacterFaceBinding,
+} from 'triangular-engine/characters/three';
 import {
   applyCharacterFacePose,
   buildCharacterBodyMesh,
@@ -89,8 +98,17 @@ export class CharactersLabPageComponent {
   // View mode
   protected viewMode: CharactersLabViewMode = 'face-studio';
   protected cameraFraming: CameraFramingPreset = 'three-quarter';
-  protected cameraPosition: [number, number, number] = [0.28, 1.63, 0.44];
-  protected cameraTarget: [number, number, number] = [0, 1.58, 0];
+  protected readonly cameraPosition = signal<[number, number, number]>([0.26, 1.62, 0.38]);
+  protected readonly cameraTarget = signal<[number, number, number]>([0, 1.58, 0]);
+
+  // Face Studio model selection & binding
+  protected faceModelSource: 'reference-model' | 'procedural' = 'reference-model';
+  protected referenceModelLoading = true;
+  protected referenceModelError?: string;
+  protected recognizedMorphCount = 0;
+  private readonly referenceModelGroup = new Group();
+  private referenceModelBinding?: CharacterFaceBinding;
+  private readonly cdr = inject(ChangeDetectorRef);
 
   // Face Studio state
   protected readonly facialController = new FacialAnimationController({
@@ -200,7 +218,7 @@ export class CharactersLabPageComponent {
 
     // Reference Face for Face Studio
     this.referenceFace = buildReferenceFaceMesh({
-      headRadius: 0.12,
+      headRadius: 0.17,
       skinColorHex: '#f0c8a0',
       browColorHex: '#261710',
       eyeColorHex: '#1e3a5f',
@@ -221,6 +239,7 @@ export class CharactersLabPageComponent {
     this.engine.scene.add(
       this.character,
       this.referenceFace.root,
+      this.referenceModelGroup,
       this.gazeMarker,
       this.ground,
       this.target,
@@ -229,6 +248,7 @@ export class CharactersLabPageComponent {
     );
 
     this.applyViewMode(this.viewMode);
+    this.loadReferenceModel();
 
     const destroyRef = inject(DestroyRef);
     this.engine.tick$
@@ -246,10 +266,96 @@ export class CharactersLabPageComponent {
     this.applyViewMode(mode);
   }
 
+  protected setFaceModelSource(source: 'reference-model' | 'procedural'): void {
+    this.faceModelSource = source;
+    this.applyFaceModelVisibility();
+  }
+
+  private applyFaceModelVisibility(): void {
+    const isStudio = this.viewMode === 'face-studio';
+    const isRef = isStudio && this.faceModelSource === 'reference-model';
+    const isProc = isStudio && this.faceModelSource === 'procedural';
+
+    this.referenceModelGroup.visible = isRef;
+    this.referenceFace.root.visible = isProc;
+    this.gazeMarker.visible = isStudio;
+  }
+
+  private loadReferenceModel(): void {
+    this.referenceModelLoading = true;
+    this.referenceModelError = undefined;
+
+    try {
+      const ktx2Loader = new KTX2Loader()
+        .setTranscoderPath('/basis/')
+        .detectSupport(this.engine.renderer);
+
+      const gltfLoader = new GLTFLoader()
+        .setKTX2Loader(ktx2Loader)
+        .setMeshoptDecoder(MeshoptDecoder);
+
+      gltfLoader.load(
+        '/characters/facecap.glb',
+        (gltf) => {
+          const model = gltf.scene;
+          this.referenceModelGroup.add(model);
+
+          // Reset model transforms
+          model.position.set(0, 0, 0);
+          model.scale.set(1, 1, 1);
+          model.rotation.set(0, 0, 0);
+          this.engine.scene.updateMatrixWorld(true);
+
+          // Measure natural size in scene
+          const naturalBox = new Box3().setFromObject(model);
+          const naturalSize = new Vector3();
+          naturalBox.getSize(naturalSize);
+          const naturalCenter = new Vector3();
+          naturalBox.getCenter(naturalCenter);
+
+          // Scale to prominent portrait head height (~0.36m chin to crown)
+          const targetHeight = 0.36;
+          const scale = naturalSize.y > 0 ? targetHeight / naturalSize.y : 0.108;
+          model.scale.setScalar(scale);
+
+          // Center the face at (0, 1.58, 0)
+          model.position.x = -naturalCenter.x * scale;
+          model.position.y = 1.58 - naturalCenter.y * scale;
+          model.position.z = -naturalCenter.z * scale;
+
+          this.engine.scene.updateMatrixWorld(true);
+
+          this.referenceModelBinding = bindCharacterFace(model, {
+            driveEyeMorphsFromGaze: true,
+          });
+          this.recognizedMorphCount = this.referenceModelBinding.recognizedMorphCount;
+          this.referenceModelLoading = false;
+          this.applyFaceModelVisibility();
+          this.cdr.markForCheck();
+        },
+        undefined,
+        (err) => {
+          console.error('Failed to load facecap.glb:', err);
+          this.referenceModelError = 'Failed to load reference model';
+          this.referenceModelLoading = false;
+          this.faceModelSource = 'procedural';
+          this.applyFaceModelVisibility();
+          this.cdr.markForCheck();
+        },
+      );
+    } catch (err) {
+      console.error('Error creating GLTF/KTX2 loaders:', err);
+      this.referenceModelError = String(err);
+      this.referenceModelLoading = false;
+      this.faceModelSource = 'procedural';
+      this.applyFaceModelVisibility();
+      this.cdr.markForCheck();
+    }
+  }
+
   private applyViewMode(mode: CharactersLabViewMode): void {
     const isStudio = mode === 'face-studio';
-    this.referenceFace.root.visible = isStudio;
-    this.gazeMarker.visible = isStudio;
+    this.applyFaceModelVisibility();
 
     this.character.visible = !isStudio;
     this.ground.visible = !isStudio;
@@ -260,21 +366,21 @@ export class CharactersLabPageComponent {
     if (isStudio) {
       this.setCameraFraming(this.cameraFraming);
     } else {
-      this.cameraPosition = [3.4, 2.4, 4.2];
-      this.cameraTarget = [0, 0.9, 0];
+      this.cameraPosition.set([3.4, 2.4, 4.2]);
+      this.cameraTarget.set([0, 0.9, 0]);
     }
   }
 
   protected setCameraFraming(framing: CameraFramingPreset): void {
     this.cameraFraming = framing;
     if (framing === 'front') {
-      this.cameraPosition = [0, 1.60, 0.48];
+      this.cameraPosition.set([0, 1.58, 0.46]);
     } else if (framing === 'three-quarter') {
-      this.cameraPosition = [0.28, 1.63, 0.44];
+      this.cameraPosition.set([0.26, 1.62, 0.38]);
     } else {
-      this.cameraPosition = [0.46, 1.60, 0.04];
+      this.cameraPosition.set([0.46, 1.58, 0.0]);
     }
-    this.cameraTarget = [0, 1.58, 0];
+    this.cameraTarget.set([0, 1.58, 0]);
   }
 
   // ===========================================================================
@@ -407,6 +513,8 @@ export class CharactersLabPageComponent {
     this.gazeTargetPos.set(0, 1.58, 0.65);
     this.gazeMarker.position.copy(this.gazeTargetPos);
     this.facialController.resetToNeutral(0.25);
+    this.referenceModelBinding?.reset();
+    this.referenceFace.applyPose({});
     this.activeEmotion = 'neutral';
     for (const k of Object.keys(this.channelValues)) {
       this.channelValues[k] = 0;
@@ -582,8 +690,17 @@ export class CharactersLabPageComponent {
     const frame = this.facialController.update(deltaSeconds);
     this.currentFrameState = frame;
 
-    // Apply to Reference Face in Face Studio
-    this.referenceFace.applyPose(frame.blendShapes, frame.gaze);
+    // Apply to active Face model in Face Studio
+    if (this.viewMode === 'face-studio') {
+      if (this.faceModelSource === 'reference-model' && this.referenceModelBinding) {
+        this.referenceModelBinding.applyPose(
+          frame.blendShapes,
+          frame.gaze ? frame.gaze.left : undefined,
+        );
+      } else {
+        this.referenceFace.applyPose(frame.blendShapes, frame.gaze);
+      }
+    }
 
     // If in full body scene, animate door, locomotion, affordances, and body face
     if (this.viewMode === 'full-body') {
@@ -713,6 +830,8 @@ export class CharactersLabPageComponent {
     window.speechSynthesis.cancel();
     this.danceMixer?.stopAllAction();
     this.character.removeFromParent();
+    this.referenceModelBinding?.dispose();
+    this.referenceModelGroup.removeFromParent();
     this.referenceFace.root.removeFromParent();
     this.gazeMarker.removeFromParent();
     this.ground.removeFromParent();

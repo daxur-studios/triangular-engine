@@ -2,3 +2,4 @@
 export * from './bones-visualization';
 export * from './pose-to-skeleton';
 export * from './retarget-clip';
+export * from './face-mesh-binding';

@@ -555,3 +555,25 @@ Also confirm:
     instant viseme testing, repeatable articulation playback, combined performance
     (smiling while speaking, looking around, and blinking), and clean reset to neutral.
 - Verified: 95 character specs + 241 procedural specs pass; library and demo app build clean.
+
+### 2026-09-06 — Three.js Character Face Binding & ARKit 52 Model Baseline
+
+- Recognized the visual limitations of pure procedural parametric facial geometry (uncanny appearance)
+  and established an authored 3D model baseline as ground truth for anatomical deformation.
+- Integrated `facecap.glb` (Three.js standard ARKit model) into `/characters-lab` with KTX2 texture
+  transcoding and Meshopt decoding.
+- Added `triangular-engine/characters/three/face-mesh-binding.ts`:
+  - `bindCharacterFace`: inspects any loaded Three.js hierarchy (GLTF/GLB/VRM or procedural)
+    and maps morph targets to canonical ARKit 52 blendshapes.
+  - `normalizeMorphTargetName`: automatically recognizes diverse morph naming styles:
+    canonical camelCase (`eyeBlinkLeft`), suffix notation (`eyeBlink_L`, `mouthSmile_R`),
+    namespace/mesh prefixes (`blendShape1.eyeBlink_L`), and Oculus/VRM names (`Eye_Blink_L`).
+  - Gaze orientation: binds eye pivot nodes (`grp_eyeLeft`, `grp_eyeRight`, `eyeLeft`, etc.)
+    for natural eyeball rotation relative to rest quaternions, and drives ARKit eye morphs
+    (`eyeLookInLeft`, `eyeLookOutRight`, etc.) within physiological bounds.
+- Upgraded Face Studio in `/characters-lab`:
+  - Added "Face Model" toggle allowing side-by-side comparison between the authored
+    **FaceCap ARKit 52 Model** (52 active morphs) and the **Procedural Head**.
+  - All existing semantic controls (expression presets, independent brow raise, blinks,
+    channel sliders, viseme playback sequence, and gaze tracking) drive both models seamlessly.
+- Verified: 104 character specs pass; library and demo app build clean with 0 errors.
