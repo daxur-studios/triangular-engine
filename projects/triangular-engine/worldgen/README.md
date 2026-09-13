@@ -93,7 +93,7 @@ The climate/biome/river/ridge/water pass. This is what a cloud/weather system an
   coastlines: IVec3[][];      // closed polylines along every land/water edge
 
   // mountain ridges
-  ridgePaths: IVec3[][];       // open ridge paths: tectonic boundary spines and high-cell skeletons
+  ridgePaths: IVec3[][];       // open paths through adjacent mountain-cell centres
   ridgePathStrength: number[]; // normalized strength matching ridgePaths
   ridgePeaks: IVec3[];         // isolated/local summit directions
   ridgePeakCellIds: number[];  // stable cell ids matching ridgePeaks

@@ -19,11 +19,19 @@ describe('buildPlanetRidges', () => {
     const graph = buildPlanetGraphCore({ cellCount: 300, seed: 27 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 27 });
     const ridges = buildPlanetRidges(graph, tectonics);
+    const cellIdByCenter = new Map(graph.cells.map((cell) => [cell.center, cell.id]));
 
     for (const path of ridges.ridgePaths) {
       expect(path.length).toBeGreaterThanOrEqual(2);
       for (const point of path) {
         expect(Math.hypot(point.x, point.y, point.z)).toBeCloseTo(1, 8);
+      }
+      for (let i = 0; i < path.length - 1; i++) {
+        const from = cellIdByCenter.get(path[i]);
+        const to = cellIdByCenter.get(path[i + 1]);
+        expect(from).toBeDefined();
+        expect(to).toBeDefined();
+        expect(graph.cells[from!].neighbors).toContain(to);
       }
     }
     for (const peak of ridges.ridgePeaks) {

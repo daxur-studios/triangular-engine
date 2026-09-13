@@ -1,4 +1,3 @@
-import { buildCornerGraph } from './corner-graph';
 import { IPlanetGraphCore } from './planet-graph';
 import type { IPlanetTectonics } from './tectonics';
 import { IVec3, normalize } from './vec3';
@@ -13,8 +12,9 @@ export interface IRidgeParams {
 }
 
 export interface IPlanetRidges {
-  /** Ordered open polylines. Tectonic paths follow shared Voronoi edges; terrain paths follow
-   * the centres of connected high cells. Paths split at branches and junctions. */
+  /** Ordered open polylines through mountain-cell centres. Each segment joins adjacent cells,
+   * leaving Voronoi cell edges available for rivers and coastlines. Paths split at branches and
+   * junctions. */
   ridgePaths: IVec3[][];
   /** Relative strength for each `ridgePaths` entry, normalized to roughly 0..1. */
   ridgePathStrength: number[];
@@ -119,29 +119,10 @@ function hopsWithin(graph: IPlanetGraphCore, start: number, target: number, maxH
   return false;
 }
 
-function buildCornerPairMap(graph: IPlanetGraphCore): Map<string, number[]> {
-  const corners = buildCornerGraph(graph);
-  const byCellPair = new Map<string, number[]>();
-  for (let cornerId = 0; cornerId < corners.count; cornerId++) {
-    const ids = corners.cellIds[cornerId];
-    for (let a = 0; a < ids.length; a++) {
-      for (let b = a + 1; b < ids.length; b++) {
-        const key = pairKey(ids[a], ids[b]);
-        const entries = byCellPair.get(key) ?? [];
-        entries.push(cornerId);
-        byCellPair.set(key, entries);
-      }
-    }
-  }
-  return byCellPair;
-}
-
 function buildTectonicPaths(
   graph: IPlanetGraphCore,
   tectonics: IPlanetTectonics,
 ): { paths: IVec3[][]; strengths: number[]; coveredCells: Set<number> } {
-  const corners = buildCornerGraph(graph);
-  const byCellPair = buildCornerPairMap(graph);
   const adjacency = new Map<number, Set<number>>();
   const strengthByEdge = new Map<string, number>();
   const coveredCells = new Set<number>();
@@ -159,18 +140,17 @@ function buildTectonicPaths(
   const maxConvergence = Math.max(1e-6, ...candidateEdges.map((edge) => Math.max(0, edge.convergence)));
 
   for (const boundary of candidateEdges) {
-    const cornerIds = byCellPair.get(pairKey(boundary.cellA, boundary.cellB));
-    if (!cornerIds || cornerIds.length < 2) continue;
-    const a = cornerIds[0];
-    const b = cornerIds[1];
-    addEdge(adjacency, a, b);
-    strengthByEdge.set(edgeKey(a, b), Math.max(0, boundary.convergence) / maxConvergence);
+    addEdge(adjacency, boundary.cellA, boundary.cellB);
+    strengthByEdge.set(
+      edgeKey(boundary.cellA, boundary.cellB),
+      Math.max(0, boundary.convergence) / maxConvergence,
+    );
     coveredCells.add(boundary.cellA);
     coveredCells.add(boundary.cellB);
   }
 
   const nodePaths = walkNetwork(adjacency);
-  const paths = nodePaths.map((path) => path.map((id) => corners.position[id]));
+  const paths = nodePaths.map((path) => path.map((id) => graph.cells[id].center));
   const strengths = nodePaths.map((path) => {
     let total = 0;
     let count = 0;

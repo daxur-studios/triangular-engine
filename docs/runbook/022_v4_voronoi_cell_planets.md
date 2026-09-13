@@ -389,9 +389,10 @@ The existing `ridgeCellIds` correctly marked cells touching continent-continent 
 boundaries, but there was no explicit line network to render between those mountain cells. Added a
 compact ridge pass in `worldgen/core/ridges.ts`:
 
-- **Tectonic spines**: convergent continental boundary edges are converted from cell adjacencies
-  into shared Voronoi-corner segments, then stitched into open paths. Endpoints and junctions split
-  the network, so a chain, branch/star, or parallel boundary produces separate readable paths.
+- **Tectonic spines**: convergent continental boundary adjacencies are stitched through the centres
+  of their mountain cells. Endpoints and junctions split the network, so a chain, branch/star, or
+  parallel boundary produces separate readable paths. This deliberately occupies cell-to-cell
+  links, leaving shared Voronoi edges for rivers and coastlines.
 - **Terrain skeletons**: connected high land cells outside the tectonic paths are reduced to a
   deterministic maximum-spanning forest. This preserves narrow mountain chains and branches
   without drawing every edge of a broad alpine patch.
