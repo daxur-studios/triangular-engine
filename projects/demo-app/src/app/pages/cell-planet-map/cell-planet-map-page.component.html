@@ -41,6 +41,18 @@
     </label>
 
     <label class="field">
+      <span>Relaxation: {{ relaxationIterations() }}</span>
+      <input
+        type="range"
+        min="0"
+        max="6"
+        step="1"
+        [value]="relaxationIterations()"
+        (input)="relaxationIterations.set($any($event.target).valueAsNumber)"
+      />
+    </label>
+
+    <label class="field">
       <span>Map projection</span>
       <select
         [value]="projectionType()"
@@ -182,6 +194,9 @@
         #mapComp
         [cellCount]="cellCount()"
         [seed]="seed()"
+        [relaxationIterations]="relaxationIterations()"
+        [jitter]="generationDefaults.jitter"
+        [plateCount]="generationDefaults.plateCount"
         [worldProfileKind]="worldProfileKind()"
         [projectionType]="projectionType()"
         [fillMode]="fillMode()"

@@ -133,6 +133,13 @@ alone does not establish visual acceptance. Record unresolved test-environment f
 
 ## Progress
 
+### 2026-09-13 — 2D/2.5D generation parity
+
+- Fixed a comparison bug where the 2D raster and 2.5D terrain used different hidden world inputs: the 2D renderer's `jitter = 0.35` and `plateCount = 14` are now shared with the 2.5D bake, alongside the query-preserved cell count, seed, profile, projection, and relaxation passes. Fresh page loads also use the same `1500` cells / seed `1` defaults.
+- Added the relaxation control to the 2D page and preserved it in the comparison query, so changing it intentionally changes both views rather than silently reverting to the 2D default.
+- Applied the shared water-level land/ocean threshold to the 2.5D bake as well; the comparison switch no longer drops a 2D sea-level adjustment.
+- Kept the shared values in `projects/demo-app/src/app/pages/cell-planet-generation-config.ts` so future renderer changes do not drift.
+
 - **2026-09-13 — Design recorded:** inspected the promoted library implementation and
   existing map sampler/projections. Selected reuse through `triangular-engine/terrain`;
   identified texture input, focus/zoom, GPU-height picking and feature preservation as

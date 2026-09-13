@@ -15,6 +15,7 @@ import {
   Season,
 } from 'triangular-engine/worldgen/render';
 import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
+import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
 
 /** Half-extent (world units, = texture pixels at zoom 1) of `<cellPlanetMap>`'s fixed
  * `BASE_WIDTH`/`BASE_HEIGHT` map plane - must match the component's own internal constants (not
@@ -66,8 +67,9 @@ export class CellPlanetMapPageComponent {
 
   readonly map = viewChild<CellPlanetMapComponent>('mapComp');
 
-  readonly cellCount = signal(1500);
-  readonly seed = signal(1);
+  readonly cellCount = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.cellCount);
+  readonly seed = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.seed);
+  readonly relaxationIterations = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.relaxationIterations);
   readonly worldProfileKind = signal<WorldProfileKind>('terran');
   readonly fillMode = signal<CellPlanetMapFillMode>('biome');
   readonly fillModes: CellPlanetMapFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture', 'land'];
@@ -87,11 +89,13 @@ export class CellPlanetMapPageComponent {
   readonly projectionType = signal<MapProjectionKind>('equirectangular');
   readonly projectionKinds = MAP_PROJECTION_KINDS;
   readonly projectionLabels = MAP_PROJECTION_LABELS;
+  readonly generationDefaults = CELL_PLANET_GENERATION_DEFAULTS;
   private readonly preservedQueryParams = signal<CellPlanetQuery>({});
   readonly comparisonQueryParams = computed(() => ({
     ...this.preservedQueryParams(),
     cellCount: this.cellCount(),
     seed: this.seed(),
+    relaxation: this.relaxationIterations(),
     worldProfile: this.worldProfileKind(),
     projection: this.projectionType(),
     fillMode: this.fillMode(),
@@ -166,6 +170,8 @@ export class CellPlanetMapPageComponent {
     if (cellCount !== null) this.cellCount.set(Math.max(200, Math.min(6000, Math.round(cellCount))));
     const seed = this.numberQuery(query.seed);
     if (seed !== null) this.seed.set(Math.max(0, Math.min(999999, Math.round(seed))));
+    const relaxation = this.numberQuery(query.relaxation);
+    if (relaxation !== null) this.relaxationIterations.set(Math.max(0, Math.min(6, Math.round(relaxation))));
     if (query.worldProfile && this.worldProfileKinds.includes(query.worldProfile as WorldProfileKind)) {
       this.worldProfileKind.set(query.worldProfile as WorldProfileKind);
     }

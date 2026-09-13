@@ -11,6 +11,7 @@ import {
   buildPlanetSurfaceBake,
   buildPlanetTectonics,
   createPlanetSurfaceSampler,
+  deriveIsLand,
 } from 'triangular-engine/worldgen';
 import {
   MAP_PROJECTIONS,
@@ -24,6 +25,7 @@ import {
   IClipmapTerrainSceneHandle,
 } from 'triangular-engine/terrain';
 import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
+import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
 
 function makeHeightTexture(values: Float32Array, min: number, max: number, width: number, height: number): DataTexture {
   const range = Math.max(0.000001, max - min);
@@ -133,6 +135,10 @@ function makeLandTexture(landMask: Uint8Array, width: number, height: number): D
           }
         </select>
       </label>
+      <label>
+        <span>Water level: {{ waterLevel() > 0 ? 'Rising +' : waterLevel() < 0 ? 'Falling ' : 'Baseline ' }}{{ waterLevel().toFixed(2) }}</span>
+        <input type="range" min="-1" max="1" step="0.05" [value]="waterLevel()" (input)="onWaterLevelInput($event)" />
+      </label>
       <button type="button" (click)="randomizeSeed()">Randomize seed</button>
       @if (isRebuilding()) {
         <span>Rebuilding world…</span>
@@ -156,14 +162,15 @@ export class CellPlanet25dMapPageComponent {
   readonly drawCalls = signal(0);
   readonly triangles = signal(0);
   readonly instances = signal('');
-  readonly cellCount = signal(600);
-  readonly seed = signal(51);
-  readonly relaxationIterations = signal(2);
+  readonly cellCount = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.cellCount);
+  readonly seed = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.seed);
+  readonly relaxationIterations = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.relaxationIterations);
   readonly worldProfileKind = signal<WorldProfileKind>('terran');
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
   readonly projectionType = signal<MapProjectionKind>('equirectangular');
   readonly projectionKinds = MAP_PROJECTION_KINDS;
   readonly projectionLabels = MAP_PROJECTION_LABELS;
+  readonly waterLevel = signal(0);
   readonly isRebuilding = signal(false);
   private readonly preservedQueryParams = signal<CellPlanetQuery>({});
   readonly comparisonQueryParams = signal<Record<string, string | number | boolean>>({});
@@ -250,6 +257,15 @@ export class CellPlanet25dMapPageComponent {
     }
   }
 
+  onWaterLevelInput(event: Event): void {
+    const value = this.inputNumber(event);
+    if (Number.isFinite(value) && value !== this.waterLevel()) {
+      this.waterLevel.set(Math.max(-1, Math.min(1, value)));
+      this.updateComparisonQueryParams();
+      this.rebuildWorld();
+    }
+  }
+
   randomizeSeed(): void {
     this.seed.set(Math.floor(Math.random() * 1_000_000));
     this.updateComparisonQueryParams();
@@ -264,12 +280,21 @@ export class CellPlanet25dMapPageComponent {
       cellCount: this.cellCount(),
       seed,
       relaxationIterations: this.relaxationIterations(),
+      jitter: CELL_PLANET_GENERATION_DEFAULTS.jitter,
     });
     const tectonics = buildPlanetTectonics(graph, {
-      plateCount: 10,
+      plateCount: CELL_PLANET_GENERATION_DEFAULTS.plateCount,
       seed,
       ...profile.tectonics,
     });
+    const seaLevelElevation = tectonics.seaLevelElevation + this.waterLevel() * 0.3;
+    tectonics.seaLevelElevation = seaLevelElevation;
+    tectonics.isLand = deriveIsLand(
+      graph,
+      tectonics.elevation,
+      seaLevelElevation,
+      profile.tectonics?.minRegionCellFraction,
+    );
     const ecology = buildPlanetEcology(graph, tectonics, {
       climate: profile.climate,
       biomes: profile.biomes,
@@ -329,6 +354,8 @@ export class CellPlanet25dMapPageComponent {
     if (query.projection && this.projectionKinds.includes(query.projection as MapProjectionKind)) {
       this.projectionType.set(query.projection as MapProjectionKind);
     }
+    const waterLevel = this.numberQuery(query.waterLevel);
+    if (waterLevel !== null) this.waterLevel.set(Math.max(-1, Math.min(1, waterLevel)));
   }
 
   private updateComparisonQueryParams(): void {
@@ -339,6 +366,7 @@ export class CellPlanet25dMapPageComponent {
       relaxation: this.relaxationIterations(),
       worldProfile: this.worldProfileKind(),
       projection: this.projectionType(),
+      waterLevel: this.waterLevel(),
     });
   }
 
