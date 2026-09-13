@@ -11,6 +11,8 @@ export interface IMeshoptimizerSimplifyOptions {
   readonly targetIndexCount?: number;
   /** Relative geometric error in the [0, 1] Meshoptimizer range. */
   readonly targetError?: number;
+  /** Optional per-vertex locks for semantic features such as ridges or rivers. */
+  readonly lockedVertices?: Uint8Array;
   readonly flags?: readonly MeshoptimizerSimplifyFlag[];
 }
 
@@ -57,16 +59,36 @@ export async function simplifyIndexedGeometry(
   const targetError = Math.max(0, Math.min(1, options.targetError ?? 1));
   const indices = toUint32Array(index.array);
   const positions = toFloat32Array(position.array);
+  const lockedVertices = options.lockedVertices;
+  if (lockedVertices && lockedVertices.length !== position.count) {
+    throw new RangeError(
+      'Meshoptimizer vertex locks must contain one value per position.',
+    );
+  }
 
   await meshoptimizerReady();
-  const [simplifiedIndices, error] = MeshoptSimplifier.simplify(
-    indices,
-    positions,
-    position.itemSize,
-    requestedIndexCount,
-    targetError,
-    [...(options.flags ?? [])],
-  );
+  const flags = [...(options.flags ?? [])];
+  const [simplifiedIndices, error] = lockedVertices
+    ? MeshoptSimplifier.simplifyWithAttributes(
+        indices,
+        positions,
+        position.itemSize,
+        new Float32Array(),
+        0,
+        [],
+        lockedVertices,
+        requestedIndexCount,
+        targetError,
+        flags,
+      )
+    : MeshoptSimplifier.simplify(
+        indices,
+        positions,
+        position.itemSize,
+        requestedIndexCount,
+        targetError,
+        flags,
+      );
   const geometry = source.clone();
   geometry.setIndex(new BufferAttribute(simplifiedIndices, 1));
 

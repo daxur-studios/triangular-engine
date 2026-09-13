@@ -127,3 +127,12 @@ findings. Do not duplicate the full progress log across documents.
   2.5D runtime inspection slider to its indexed simplifier; the base terrain entry point
   remains dependency-free. Next: C0 fixture and measured simplification/feature-preservation
   results.
+- **2026-09-13 — C0 fixture implemented:** added the browser route
+  `/terrain-chunk-optimizer-lab` with four adjacent planar chunks sampled from one
+  deterministic ridge/river field. Each chunk is simplified independently with a different
+  reduction level. `LockBorder` protects topological chunk boundaries, while the optional
+  `lockedVertices` mask protects semantic ridge/river samples. The fixture reports source and
+  achieved triangle counts plus missing referenced boundary vertices, and exposes toggles for
+  both protection layers. Library and demo builds pass; visual seam checks and measured
+  simplification/feature-error results are still pending. Next: run the C0 visual matrix,
+  then add explicit mixed-resolution stitching if border locking alone leaves T-junctions.

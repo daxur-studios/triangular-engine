@@ -106,6 +106,18 @@ export const DEMOS: readonly DemoItem[] = [
       'Multi-surface terrain (plane, sphere, cylinder), streaming worker, screen-space BSP error selector, and Jolt physics integration.',
   },
   {
+    id: 'terrain-chunk-optimizer-lab',
+    number: '02a',
+    title: 'Terrain Chunk Optimizer',
+    route: '/terrain-chunk-optimizer-lab',
+    categoryId: 'terrain',
+    tier: 'lab',
+    entryPoints: ['terrain', 'meshoptimizer'],
+    package: 'triangular-engine/terrain + meshoptimizer',
+    description:
+      'C0 fixture for independently simplified neighbouring terrain chunks, border locking, and ridge/river feature preservation.',
+  },
+  {
     id: 'cdlod-planet-lab',
     number: '02b',
     title: 'CDLOD Planet Lab',

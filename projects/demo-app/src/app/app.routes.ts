@@ -144,6 +144,22 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'terrain-chunk-optimizer-lab',
+    loadComponent: () =>
+      import('./pages/terrain-chunk-optimizer-lab/terrain-chunk-optimizer-lab-page.component').then(
+        ({ TerrainChunkOptimizerLabPageComponent }) =>
+          TerrainChunkOptimizerLabPageComponent,
+      ),
+  },
+  {
+    path: 'terrain-chunk-optimizer-lab',
+    loadComponent: () =>
+      import('./pages/terrain-chunk-optimizer-lab/terrain-chunk-optimizer-lab-page.component').then(
+        ({ TerrainChunkOptimizerLabPageComponent }) =>
+          TerrainChunkOptimizerLabPageComponent,
+      ),
+  },
+  {
     path: 'planet-physics-lab',
     canActivate: [
       () =>

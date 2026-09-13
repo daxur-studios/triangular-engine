@@ -1,0 +1,61 @@
+<scene>
+  <ng-template portalTarget="overlay" lane="topStart">
+    <section class="panel" aria-label="Meshoptimizer terrain chunk fixture controls">
+      <header>
+        <div>
+          <a routerLink="/">← Examples</a>
+          <small>triangular-engine/meshoptimizer + terrain</small>
+        </div>
+        <strong>C0 terrain chunk fixture</strong>
+      </header>
+      <p>
+        Four adjacent terrain chunks share the same sampled surface. Each has a
+        different reduction level so the ridge and river cross chunk borders
+        while Meshoptimizer simplifies them independently.
+      </p>
+      <div class="actions">
+        <button [class.active]="lockBoundaries()" (click)="toggleBoundaries()">
+          {{ lockBoundaries() ? "Lock chunk borders" : "Borders unlocked" }}
+        </button>
+        <button [class.active]="protectFeatures()" (click)="toggleFeatures()">
+          {{ protectFeatures() ? "Protect ridge + river" : "Feature locks off" }}
+        </button>
+        <button [class.active]="wireframe()" (click)="toggleWireframe()">
+          Wireframe
+        </button>
+        <button [class.active]="showGuides()" (click)="toggleGuides()">
+          Feature guides
+        </button>
+      </div>
+      <label class="control">
+        <span>Maximum reduction: {{ (maxReduction() * 100).toFixed(0) }}%</span>
+        <input
+          type="range"
+          min="0"
+          max="0.9"
+          step="0.05"
+          [value]="maxReduction()"
+          (input)="setMaxReduction($event)"
+        />
+        <small>Chunks use 0%, 35%, 65% and the selected maximum.</small>
+      </label>
+      <div class="stats">
+        <span>Status: {{ buildLabel() }}</span>
+        <span>Source triangles: {{ sourceTriangleLabel() }}</span>
+        <span>Rendered triangles: {{ triangleLabel() }}</span>
+        <span>Achieved reduction: {{ reductionLabel() }}</span>
+        <span>Boundary check: {{ boundaryLabel() }}</span>
+        <span>Feature check: {{ featureLabel() }}</span>
+        <span>Yellow outlines: chunk boundaries</span>
+        <span>Gold/blue lines: ridge and river reference paths</span>
+      </div>
+    </section>
+  </ng-template>
+  <orbitControls
+    [cameraPosition]="[1050, 900, 1050]"
+    [target]="[0, 80, 0]"
+    [near]="1"
+  />
+  <ambientLight [intensity]="1.35" />
+  <directionalLight [position]="[500, 900, 400]" [intensity]="2.6" />
+</scene>
