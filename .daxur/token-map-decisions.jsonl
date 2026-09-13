@@ -3,3 +3,8 @@
 {"ts":"2026-09-06T23:47:55.791Z","sectionId":"sec_4c6a72dc5409","actor":"agent","kind":"acknowledge","text":"acknowledged at 50847 tokens"}
 {"ts":"2026-09-06T23:48:41.121Z","sectionId":"sec_2e04ee384dbd","actor":"agent","kind":"acknowledge","text":"acknowledged at 403464 tokens"}
 {"ts":"2026-09-06T23:49:19.240Z","sectionId":"sec_1051eb08db18","actor":"agent","kind":"acknowledge","text":"acknowledged at 171834 tokens"}
+{"ts":"2026-09-13T21:13:51.134Z","sectionId":"sec_5b4c880fbd93","actor":"agent","kind":"migrate-baselines","text":"re-baselined at 203290 tokens after a tokenizer/exclusion rule change (reviewState unchanged: dismissed)"}
+{"ts":"2026-09-13T21:13:51.135Z","sectionId":"sec_961cc877cce7","actor":"agent","kind":"migrate-baselines","text":"re-baselined at 57166 tokens after a tokenizer/exclusion rule change (reviewState unchanged: documented)"}
+{"ts":"2026-09-13T21:13:51.136Z","sectionId":"sec_4c6a72dc5409","actor":"agent","kind":"migrate-baselines","text":"re-baselined at 50847 tokens after a tokenizer/exclusion rule change (reviewState unchanged: documented)"}
+{"ts":"2026-09-13T21:13:51.137Z","sectionId":"sec_2e04ee384dbd","actor":"agent","kind":"migrate-baselines","text":"re-baselined at 414819 tokens after a tokenizer/exclusion rule change (reviewState unchanged: documented)"}
+{"ts":"2026-09-13T21:13:51.137Z","sectionId":"sec_1051eb08db18","actor":"agent","kind":"migrate-baselines","text":"re-baselined at 171834 tokens after a tokenizer/exclusion rule change (reviewState unchanged: documented)"}

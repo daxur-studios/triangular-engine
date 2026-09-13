@@ -14,6 +14,7 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/water/jolt` | Water buoyancy integration with Jolt. | `jolt-physics` |
 | `triangular-engine/water/postprocessing` | Water-specific post-processing effects. | `postprocessing` |
 | `triangular-engine/terrain` | Domain-aware terrain fields, patch meshing, surface sampling, and streamed LOD selection. | — |
+| `triangular-engine/meshoptimizer` | Optional generic indexed-geometry simplification and Meshoptimizer readiness helpers. | `meshoptimizer` |
 | `triangular-engine/scatter` | Deterministic streamed placement, instanced LOD rendering, billboard/wind materials, picking, and collider descriptors. | — |
 | `triangular-engine/trail` | Ribbon trails, stamp decals, and surface-track geometry/materials. | — |
 | `triangular-engine/spline` | Authoring-neutral open/closed curves, arc-length sampling, and nearest-point queries. Core geometry only so far. | — |

@@ -2,8 +2,8 @@ import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { BufferGeometry, ClampToEdgeWrapping, DataTexture, Float32BufferAttribute, FloatType, LinearFilter, Mesh, MeshStandardMaterial, RGBAFormat, SRGBColorSpace, UnsignedByteType } from 'three';
-import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
 import { EngineModule, EngineService } from 'triangular-engine';
+import { simplifyIndexedGeometry } from 'triangular-engine/meshoptimizer';
 import {
   WORLD_PROFILES,
   IPlanetEcology,
@@ -394,7 +394,7 @@ function makeColorTexture(
         <span>Runtime simplification: {{ (runtimeSimplificationRatio() * 100).toFixed(0) }}%</span>
         <input type="range" min="0" max="0.95" step="0.05" [value]="runtimeSimplificationRatio()" (change)="onRuntimeSimplificationInput($event)" />
       </label>
-      <span>Experimental preview: above 0% swaps the clipmap for a simplified baked surface.</span>
+        <span>Experimental preview: above 0% swaps the clipmap for a simplified baked surface.</span>
       <button type="button" (click)="randomizeSeed()">Randomize seed</button>
       <button type="button" (click)="exportTerrainForBlender()" [disabled]="isRebuilding() || !hasTerrain()">
         Export OBJ for Blender
@@ -438,7 +438,7 @@ export class CellPlanet25dMapPageComponent {
   readonly waterLevel = signal(0);
   /** Display-only relief scale. Canonical planet elevations remain unchanged. */
   readonly terrainHeightScale = signal(4);
-  /** Experimental runtime-only vertex removal ratio; canonical terrain is unchanged. */
+  /** Experimental runtime-only triangle reduction ratio; canonical terrain is unchanged. */
   readonly runtimeSimplificationRatio = signal(0);
   readonly isRebuilding = signal(false);
   private readonly preservedQueryParams = signal<CellPlanetQuery>({});
@@ -455,6 +455,7 @@ export class CellPlanet25dMapPageComponent {
 
   private activeTextures: { height: DataTexture; color: DataTexture } | undefined;
   private simplifiedTerrainMesh: Mesh<BufferGeometry, MeshStandardMaterial> | undefined;
+  private simplificationRevision = 0;
   private colorContext:
     | {
         bake: IPlanetSurfaceBake;
@@ -488,6 +489,7 @@ export class CellPlanet25dMapPageComponent {
 
     this.destroyRef.onDestroy(() => {
       this.terrain.dispose();
+      this.simplificationRevision++;
       this.disposeSimplifiedTerrain();
       this.activeTextures?.height.dispose();
       this.activeTextures?.color.dispose();
@@ -583,7 +585,7 @@ export class CellPlanet25dMapPageComponent {
     if (Number.isFinite(value) && value !== this.runtimeSimplificationRatio()) {
       this.runtimeSimplificationRatio.set(Math.max(0, Math.min(0.95, value)));
       this.updateComparisonQueryParams();
-      this.rebuildSimplifiedTerrain();
+      void this.rebuildSimplifiedTerrain();
     }
   }
 
@@ -693,7 +695,7 @@ export class CellPlanet25dMapPageComponent {
     const previousTextures = this.activeTextures;
     this.activeTextures = { height: heightTexture, color: colorTexture };
     this.terrain.setHeightSource(source);
-    this.rebuildSimplifiedTerrain();
+    void this.rebuildSimplifiedTerrain();
     previousTextures?.height.dispose();
     previousTextures?.color.dispose();
     this.hasTerrain.set(true);
@@ -723,12 +725,16 @@ export class CellPlanet25dMapPageComponent {
       bounds: { minX: -128, minZ: -64, maxX: 128, maxZ: 64 },
     });
     active.color.dispose();
-    this.rebuildSimplifiedTerrain();
+    void this.rebuildSimplifiedTerrain();
   }
 
-  private rebuildSimplifiedTerrain(): void {
+  private async rebuildSimplifiedTerrain(): Promise<void> {
+    const revision = ++this.simplificationRevision;
     this.disposeSimplifiedTerrain();
-    if (this.runtimeSimplificationRatio() <= 0 || !this.colorContext || !this.activeTextures) {
+    const ratio = this.runtimeSimplificationRatio();
+    const context = this.colorContext;
+    const active = this.activeTextures;
+    if (ratio <= 0 || !context || !active) {
       this.terrain.setVisible(true);
       return;
     }
@@ -737,36 +743,39 @@ export class CellPlanet25dMapPageComponent {
     // morphing and crack-free LOD assumptions. This alternate mesh is therefore
     // intentionally a standalone runtime inspection mode.
     this.terrain.setVisible(false);
-    const geometry = makeBakedTerrainGeometry(this.colorContext.bake, {
+    const sourceGeometry = makeBakedTerrainGeometry(context.bake, {
       minX: -128,
       minZ: -64,
       maxX: 128,
       maxZ: 64,
-    }, this.activeTextures.color);
-    this.isRebuilding.set(true);
+    }, active.color);
     try {
-      const modifier = new SimplifyModifier();
-      const positionCount = geometry.getAttribute('position').count;
-      const removeCount = Math.floor(positionCount * this.runtimeSimplificationRatio());
-      const simplified = modifier.modify(geometry, removeCount);
-      geometry.dispose();
-      simplified.computeVertexNormals();
+      const result = await simplifyIndexedGeometry(sourceGeometry, {
+        ratio,
+        targetError: 1,
+        flags: ['LockBorder'],
+      });
+      sourceGeometry.dispose();
+      if (revision !== this.simplificationRevision || this.runtimeSimplificationRatio() !== ratio ||
+          this.colorContext !== context || this.activeTextures !== active) {
+        result.geometry.dispose();
+        return;
+      }
+      result.geometry.computeVertexNormals();
       const material = new MeshStandardMaterial({
         vertexColors: true,
         roughness: 1,
         metalness: 0,
         flatShading: false,
       });
-      const mesh = new Mesh(simplified, material);
+      const mesh = new Mesh(result.geometry, material);
       mesh.name = 'cell-planet-runtime-simplified-terrain';
       this.engine.scene.add(mesh);
       this.simplifiedTerrainMesh = mesh;
     } catch (error) {
-      geometry.dispose();
-      this.terrain.setVisible(true);
+      sourceGeometry.dispose();
+      if (revision === this.simplificationRevision) this.terrain.setVisible(true);
       console.error('Runtime terrain simplification failed; restored clipmap.', error);
-    } finally {
-      this.isRebuilding.set(false);
     }
   }
 

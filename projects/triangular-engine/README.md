@@ -57,6 +57,7 @@ The library is modularized into several secondary entry points (sub-libraries) s
 | `triangular-engine/takram` | **Takram Atmosphere**: Physical atmospheric and cloud rendering components (atmosphere, aerial perspective, and clouds). | `@takram/three-atmosphere`, `@takram/three-clouds` |
 | `triangular-engine/water` | **Water**: Declarative large-scale plane, planet, and inside-cylinder water with quality and motion presets. See [water/README.md](./water/README.md). | `three` |
 | `triangular-engine/terrain` | **Terrain**: Domain-aware terrain generation, surface sampling, and high-performance CDLOD (Continuous Distance-Dependent Level of Detail) planetary rendering with GPU geomorphing. See [terrain/README.md](./terrain/README.md). | — |
+| `triangular-engine/meshoptimizer` | **Meshoptimizer**: Optional indexed-geometry simplification helpers for runtime meshes, terrain chunks and other geometry pipelines. | `meshoptimizer` |
 | `triangular-engine/celestial` | **Celestial**: Astrodynamics, Keplerian orbits, atmospheric/gravity models, planetary presets, and procedural surface definitions. See [celestial/README.md](./celestial/README.md). | — |
 | `triangular-engine/scatter` | **Scatter**: Deterministic streamed placement and LOD rendering for vegetation and repeated environment objects. | — |
 | `triangular-engine/animals` | **Animals**: Framework-free deterministic animal flocks and lightweight world responses. | — |
@@ -105,7 +106,9 @@ Optional peer dependencies:
   OR
   "jolt-physics": "^0.38.0",
   AND
-  "@pmndrs/vanilla": "^1.24.0"
+  "@pmndrs/vanilla": "^1.24.0",
+  AND
+  "meshoptimizer": "^1.0.1"
 }
 ```
 

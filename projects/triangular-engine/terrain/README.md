@@ -53,6 +53,11 @@ the clipmap while inspecting an alternate runtime surface. This is useful for
 experiments such as CPU mesh simplification, but simplified geometry is not a
 replacement for the clipmap's crack-free LOD lattice.
 
+Generic Meshoptimizer helpers are available separately from
+`triangular-engine/meshoptimizer`. That entry point is optional and does not
+become part of the base terrain bundle; install the `meshoptimizer` peer only
+when an application opts into those helpers.
+
 For high-speed planetary bodies and large-scale terrains, `CdlodPlanetComponent`
 provides GPU vertex geomorphing, roughness-based feature decimation, motion look-ahead,
 and multithreaded Web Worker meshing.

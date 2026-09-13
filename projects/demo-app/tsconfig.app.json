@@ -17,6 +17,9 @@
       "triangular-engine/terrain": [
         "projects/triangular-engine/terrain/public-api"
       ],
+      "triangular-engine/meshoptimizer": [
+        "projects/triangular-engine/meshoptimizer/public-api"
+      ],
       "triangular-engine/water": ["projects/triangular-engine/water/public-api"],
       "triangular-engine/water/postprocessing": [
         "projects/triangular-engine/water/postprocessing/public-api"

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added optional `triangular-engine/meshoptimizer` secondary entry point with
+  indexed geometry simplification helpers backed by `meshoptimizer`.
+
 All notable changes to triangular-engine are documented here.
 
 ## [Unreleased]

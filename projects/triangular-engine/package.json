@@ -34,7 +34,8 @@
     "@takram/three-clouds": "^0.7.6",
     "@takram/three-geospatial": "^0.9.1",
     "postprocessing": "^6.39.2",
-    "browser-image-compression": "^2.0.2"
+    "browser-image-compression": "^2.0.2",
+    "meshoptimizer": "^1.0.1"
   },
   "peerDependenciesMeta": {
     "@dimforge/rapier3d-compat": {
@@ -59,6 +60,9 @@
       "optional": true
     },
     "browser-image-compression": {
+      "optional": true
+    },
+    "meshoptimizer": {
       "optional": true
     }
   },

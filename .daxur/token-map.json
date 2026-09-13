@@ -40,12 +40,20 @@
     "dir:out",
     "dir:target",
     "dir:vendor",
+    "ext:.c",
+    "ext:.cc",
+    "ext:.cpp",
     "ext:.cs",
     "ext:.css",
+    "ext:.cxx",
     "ext:.env",
     "ext:.go",
     "ext:.graphql",
+    "ext:.h",
+    "ext:.hh",
+    "ext:.hpp",
     "ext:.html",
+    "ext:.hxx",
     "ext:.java",
     "ext:.js",
     "ext:.json",
@@ -70,7 +78,7 @@
     "ext:.yaml",
     "ext:.yml"
   ],
-  "exclusionHash": "5e4f8103ebd034a8",
+  "exclusionHash": "7cfbbb6c05d74352",
   "sections": [
     {
       "sectionId": "sec_5b4c880fbd93",
@@ -78,11 +86,11 @@
       "docPath": "docs/runbook/README.md",
       "excludedScopes": [],
       "reviewState": "dismissed",
-      "baselineTokens": 195778,
-      "baselineAt": "2026-09-06T23:46:28.275Z",
+      "baselineTokens": 203290,
+      "baselineAt": "2026-09-13T21:13:51.132Z",
       "dismissReason": "Runbooks are self-contained design logs and implementation traces",
       "tokenizerVersionAtBaseline": "1.0.0",
-      "exclusionHashAtBaseline": "5e4f8103ebd034a8"
+      "exclusionHashAtBaseline": "7cfbbb6c05d74352"
     },
     {
       "sectionId": "sec_961cc877cce7",
@@ -90,11 +98,11 @@
       "docPath": "projects/triangular-engine/water/README.md",
       "excludedScopes": [],
       "reviewState": "documented",
-      "baselineTokens": 57165,
-      "baselineAt": "2026-09-06T23:47:07.220Z",
+      "baselineTokens": 57166,
+      "baselineAt": "2026-09-13T21:13:51.132Z",
       "dismissReason": null,
       "tokenizerVersionAtBaseline": "1.0.0",
-      "exclusionHashAtBaseline": "5e4f8103ebd034a8"
+      "exclusionHashAtBaseline": "7cfbbb6c05d74352"
     },
     {
       "sectionId": "sec_4c6a72dc5409",
@@ -103,10 +111,10 @@
       "excludedScopes": [],
       "reviewState": "documented",
       "baselineTokens": 50847,
-      "baselineAt": "2026-09-06T23:47:55.789Z",
+      "baselineAt": "2026-09-13T21:13:51.132Z",
       "dismissReason": null,
       "tokenizerVersionAtBaseline": "1.0.0",
-      "exclusionHashAtBaseline": "5e4f8103ebd034a8"
+      "exclusionHashAtBaseline": "7cfbbb6c05d74352"
     },
     {
       "sectionId": "sec_2e04ee384dbd",
@@ -114,11 +122,11 @@
       "docPath": "projects/demo-app/src/app/pages/README.md",
       "excludedScopes": [],
       "reviewState": "documented",
-      "baselineTokens": 403464,
-      "baselineAt": "2026-09-06T23:48:41.119Z",
+      "baselineTokens": 414819,
+      "baselineAt": "2026-09-13T21:13:51.132Z",
       "dismissReason": null,
       "tokenizerVersionAtBaseline": "1.0.0",
-      "exclusionHashAtBaseline": "5e4f8103ebd034a8"
+      "exclusionHashAtBaseline": "7cfbbb6c05d74352"
     },
     {
       "sectionId": "sec_1051eb08db18",
@@ -127,10 +135,10 @@
       "excludedScopes": [],
       "reviewState": "documented",
       "baselineTokens": 171834,
-      "baselineAt": "2026-09-06T23:49:19.238Z",
+      "baselineAt": "2026-09-13T21:13:51.132Z",
       "dismissReason": null,
       "tokenizerVersionAtBaseline": "1.0.0",
-      "exclusionHashAtBaseline": "5e4f8103ebd034a8"
+      "exclusionHashAtBaseline": "7cfbbb6c05d74352"
     }
   ]
 }

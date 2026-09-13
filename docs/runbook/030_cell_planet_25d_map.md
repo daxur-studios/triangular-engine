@@ -204,13 +204,13 @@ alone does not establish visual acceptance. Record unresolved test-environment f
   for WebGL compatibility, and made the height function return one initialized value on every
   path; library and demo builds pass. These checks validate the reusable clipmap, not yet the
   2.5D map's visual acceptance.
-- **2026-09-13 — Simplification experiment:** added a runtime-only 0–95% vertex-removal slider
-  using Three.js `SimplifyModifier`. At 0% the normal clipmap remains active; above 0% the
-  clipmap is hidden and the current baked surface is decimated into a standalone inspection
-  mesh. This deliberately does not modify the canonical sampler or clipmap lattice, because
-  arbitrary decimation would invalidate crack-free LOD morphing. The Blender OBJ export remains
-  unchanged. Validate Ultra-quality cost and feature retention before considering a feature-aware
-  decimator or production use.
+- **2026-09-13 — Simplification experiment:** added a runtime-only 0–95% triangle-reduction
+  slider through the optional `triangular-engine/meshoptimizer` entry point. At 0% the normal
+  clipmap remains active; above 0% the clipmap is hidden and the current indexed baked surface
+  is simplified into a standalone inspection mesh with border locking. This deliberately does
+  not modify the canonical sampler or clipmap lattice, because arbitrary decimation would
+  invalidate crack-free LOD morphing. The Blender OBJ export remains unchanged. Validate Ultra
+  cost and feature retention before considering a feature-aware decimator or production use.
 - **2026-09-13 — Handoff refined:** added explicit planet-space units, cache identity and
   plane/sphere reuse requirements. M0 now precedes planar baking; M2 consumes and tunes
   that shared relief. Next: M2 relief/river/ridge visual tuning, then M3 selection and
