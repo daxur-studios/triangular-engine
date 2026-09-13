@@ -2,6 +2,18 @@
   <aside class="panel">
     <a routerLink="/" class="back-link">&larr; Demo index</a>
     <h1>Cell Planet Map</h1>
+    <nav class="view-switch" aria-label="Map view">
+      <a
+        [routerLink]="['/cell-planet-map']"
+        [queryParams]="comparisonQueryParams()"
+        class="active"
+        aria-current="page"
+      >2D map</a>
+      <a
+        [routerLink]="['/cell-planet-25d-map']"
+        [queryParams]="comparisonQueryParams()"
+      >2.5D terrain</a>
+    </nav>
     <p class="hint">Drag to pan, scroll to zoom, click a cell to select it, double-click to recenter the projection there.</p>
 
     <label class="field">

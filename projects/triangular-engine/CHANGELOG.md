@@ -6,9 +6,23 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `buildPlanetSurfaceBake()` now accepts an optional projection direction adapter, allowing
+  planar caches to use a map projection footprint while keeping the canonical surface sampler
+  projection-independent.
+
+- `createPlanetSurfaceSampler()` now preserves below-sea terrain elevations for bathymetry while
+  keeping land river channels clamped to the shoreline datum.
+
 - `triangular-engine/terrain` clipmap scenes now expose `setHeightSource()` so
   bounded texture-backed terrain can be regenerated and swapped without
   rebuilding the clipmap mesh set.
+
+- `triangular-engine/terrain` clipmap LOD renderer now enforces an immutable horizontal
+  mesh lattice (`seedWorldXZ`), eliminating triangle folding, wave-bridging slivers, and
+  horizontal gaps. Boundary T-junctions are closed via exact linear height interpolation
+  along coarse neighbor edges ($0.000000\,\text{m}$ mathematical match), with bilinear
+  height morphing in the tile interior. Added `setDebugFlatTerrain()` and `setDebugViewMode()`
+  to `IClipmapTerrainSceneHandle`.
 
 - `triangular-engine/worldgen` now derives deterministic mountain ridge networks from
   elevation crest relief, continent-continent collision strength, and connected high cells.

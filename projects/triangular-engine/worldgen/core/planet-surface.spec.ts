@@ -49,4 +49,25 @@ describe('createPlanetSurfaceSampler', () => {
       expect(river.elevation).toBeGreaterThanOrEqual(river.seaLevel);
     }
   });
+
+  it('preserves below-sea terrain for bathymetry', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 51 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 51 });
+    const ecology = buildPlanetEcology(graph, tectonics);
+    const waterCellId = tectonics.isLand.reduce((bestId, isLand, cellId) => {
+      if (isLand) return bestId;
+      return bestId < 0 || tectonics.elevation[cellId]! < tectonics.elevation[bestId]!
+        ? cellId
+        : bestId;
+    }, -1);
+    expect(waterCellId).toBeGreaterThanOrEqual(0);
+
+    if (waterCellId >= 0) {
+      const sample = createPlanetSurfaceSampler(graph, tectonics, ecology).sample(
+        graph.cells[waterCellId]!.center,
+      );
+      expect(sample.isLand).toBe(false);
+      expect(sample.elevation).toBeLessThan(sample.seaLevel);
+    }
+  });
 });

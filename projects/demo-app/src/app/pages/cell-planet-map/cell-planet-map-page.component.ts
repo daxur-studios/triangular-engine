@@ -1,5 +1,6 @@
-import { ChangeDetectionStrategy, Component, computed, signal, viewChild } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signal, viewChild } from '@angular/core';
+import { ActivatedRoute, RouterLink } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EngineModule, EngineService } from 'triangular-engine';
 import { IVec3, WorldProfileKind } from 'triangular-engine/worldgen';
 import {
@@ -13,6 +14,7 @@ import {
   MapProjectionKind,
   Season,
 } from 'triangular-engine/worldgen/render';
+import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
 
 /** Half-extent (world units, = texture pixels at zoom 1) of `<cellPlanetMap>`'s fixed
  * `BASE_WIDTH`/`BASE_HEIGHT` map plane - must match the component's own internal constants (not
@@ -57,6 +59,8 @@ function randomSphereDirection(): IVec3 {
   host: { class: 'flex-page' },
 })
 export class CellPlanetMapPageComponent {
+  private readonly route = inject(ActivatedRoute);
+  private readonly destroyRef = inject(DestroyRef);
   protected readonly mapHalfWidth = MAP_HALF_WIDTH;
   protected readonly mapHalfHeight = MAP_HALF_HEIGHT;
 
@@ -83,6 +87,23 @@ export class CellPlanetMapPageComponent {
   readonly projectionType = signal<MapProjectionKind>('equirectangular');
   readonly projectionKinds = MAP_PROJECTION_KINDS;
   readonly projectionLabels = MAP_PROJECTION_LABELS;
+  private readonly preservedQueryParams = signal<CellPlanetQuery>({});
+  readonly comparisonQueryParams = computed(() => ({
+    ...this.preservedQueryParams(),
+    cellCount: this.cellCount(),
+    seed: this.seed(),
+    worldProfile: this.worldProfileKind(),
+    projection: this.projectionType(),
+    fillMode: this.fillMode(),
+    climate: this.climateExtreme(),
+    season: this.season(),
+    waterLevel: this.waterLevel(),
+    showIcons: this.showIcons(),
+    showRivers: this.showRivers(),
+    showRidges: this.showRidges(),
+    showCellEdges: this.showCellEdges(),
+    iconBudget: this.iconBudget(),
+  }));
 
   /** Demo of the component's click-to-cell + highlight capabilities together: clicking a cell
    * selects it, which highlights it via `[highlightedCellIds]`. */
@@ -97,6 +118,14 @@ export class CellPlanetMapPageComponent {
    * the map's existing click-to-cell output, no new interaction plumbing needed. */
   readonly units = signal<ICellPlanetMapUnitInstance[]>([]);
   #nextUnitId = 0;
+
+  constructor() {
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      const query = readCellPlanetQuery(params);
+      this.preservedQueryParams.set(query);
+      this.restoreQuery(query);
+    });
+  }
 
   randomizeSeed(): void {
     this.seed.set(Math.floor(Math.random() * 1_000_000));
@@ -130,5 +159,42 @@ export class CellPlanetMapPageComponent {
 
   resetProjectionCenter(): void {
     this.map()?.resetProjectionCenter();
+  }
+
+  private restoreQuery(query: CellPlanetQuery): void {
+    const cellCount = this.numberQuery(query.cellCount);
+    if (cellCount !== null) this.cellCount.set(Math.max(200, Math.min(6000, Math.round(cellCount))));
+    const seed = this.numberQuery(query.seed);
+    if (seed !== null) this.seed.set(Math.max(0, Math.min(999999, Math.round(seed))));
+    if (query.worldProfile && this.worldProfileKinds.includes(query.worldProfile as WorldProfileKind)) {
+      this.worldProfileKind.set(query.worldProfile as WorldProfileKind);
+    }
+    if (query.projection && this.projectionKinds.includes(query.projection as MapProjectionKind)) {
+      this.projectionType.set(query.projection as MapProjectionKind);
+    }
+    if (query.fillMode && this.fillModes.includes(query.fillMode as CellPlanetMapFillMode)) {
+      this.fillMode.set(query.fillMode as CellPlanetMapFillMode);
+    }
+    const climate = this.numberQuery(query.climate);
+    if (climate !== null) this.climateExtreme.set(Math.max(-1, Math.min(1, climate)));
+    if (query.season && this.seasons.includes(query.season as Season)) this.season.set(query.season as Season);
+    const waterLevel = this.numberQuery(query.waterLevel);
+    if (waterLevel !== null) this.waterLevel.set(Math.max(-1, Math.min(1, waterLevel)));
+    this.showIcons.set(this.booleanQuery(query.showIcons, this.showIcons()));
+    this.showRivers.set(this.booleanQuery(query.showRivers, this.showRivers()));
+    this.showRidges.set(this.booleanQuery(query.showRidges, this.showRidges()));
+    this.showCellEdges.set(this.booleanQuery(query.showCellEdges, this.showCellEdges()));
+    const iconBudget = this.numberQuery(query.iconBudget);
+    if (iconBudget !== null) this.iconBudget.set(Math.max(0, Math.min(4000, Math.round(iconBudget))));
+  }
+
+  private numberQuery(value: string | undefined): number | null {
+    if (value === undefined) return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  private booleanQuery(value: string | undefined, fallback: boolean): boolean {
+    return value === 'true' ? true : value === 'false' ? false : fallback;
   }
 }

@@ -22,3 +22,22 @@
 strong {
   color: white;
 }
+
+.view-switch {
+  display: flex;
+  gap: 0.4rem;
+
+  a {
+    padding: 0.25rem 0.45rem;
+    border: 1px solid rgb(255 255 255 / 18%);
+    border-radius: 0.25rem;
+    color: #a9c9e4;
+    text-decoration: none;
+
+    &:hover,
+    &.active {
+      background: rgb(70 130 180 / 30%);
+      color: white;
+    }
+  }
+}

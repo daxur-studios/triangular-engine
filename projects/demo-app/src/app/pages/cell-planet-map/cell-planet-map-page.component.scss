@@ -42,6 +42,26 @@
       color: #e8e4da;
     }
   }
+
+  .view-switch {
+    display: flex;
+    gap: 0.4rem;
+
+    a {
+      padding: 0.3rem 0.45rem;
+      border: 1px solid #2f3a4f;
+      border-radius: 4px;
+      color: #a9b7c9;
+      font-size: 0.78rem;
+      text-decoration: none;
+
+      &:hover,
+      &.active {
+        background: #263149;
+        color: #e8e4da;
+      }
+    }
+  }
 }
 
 .field {

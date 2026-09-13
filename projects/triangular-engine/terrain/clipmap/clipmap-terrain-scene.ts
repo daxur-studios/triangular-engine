@@ -67,6 +67,8 @@ export interface IClipmapTerrainSceneHandle {
   setMorphEnabled(enabled: boolean): void;
   setFrozen(enabled: boolean): void;
   setTerrainKind(kind: 'wave' | 'noise'): void;
+  setDebugFlatTerrain(enabled: boolean): void;
+  setDebugViewMode(mode: number): void;
   /**
    * Synchronous, unthrottled read of the same counters `onDiagnostics`
    * reports every 500ms — for automated capture that needs a fresh sample
@@ -233,6 +235,12 @@ export function createClipmapTerrainScene(
     },
     setTerrainKind(kind: 'wave' | 'noise'): void {
       material.uniforms['uTerrainKind']!.value = kind === 'noise' ? 1 : 0;
+    },
+    setDebugFlatTerrain(enabled: boolean): void {
+      material.uniforms['uDebugFlatTerrain']!.value = enabled;
+    },
+    setDebugViewMode(mode: number): void {
+      material.uniforms['uDebugViewMode']!.value = mode;
     },
     getDiagnosticsSnapshot(): IClipmapTerrainDiagnostics {
       return {

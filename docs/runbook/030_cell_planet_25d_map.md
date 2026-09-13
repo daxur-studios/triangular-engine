@@ -162,6 +162,15 @@ alone does not establish visual acceptance. Record unresolved test-environment f
   controls. Changes rebuild the shared graph → tectonics → ecology → surface bake chain and use
   `setHeightSource()` to replace textures without rebuilding clipmap meshes. The 2D-only icon,
   cell-edge and overlay controls remain intentionally deferred until equivalent 2.5D layers exist.
+- **2026-09-13 — Projection control:** added the same two-option projection selector as the 2D map
+  (Equirectangular and Equal Earth). The selected projection now drives the planar bake; invalid
+  Equal Earth corner texels are sea datum rather than sampled terrain. The planet-space sampler
+  remains projection-independent for future spherical rendering.
+- **2026-09-13 — Bathymetry and comparison switch:** preserved below-sea elevations in the shared
+  surface sampler so the 2.5D clipmap renders seabed relief, while land river channels remain
+  above the shoreline datum. Added reciprocal 2D map / 2.5D terrain switches that carry the
+  current world and 2D display settings through query parameters, so comparison does not reset
+  the generated data.
 - **2026-09-13 — Handoff refined:** added explicit planet-space units, cache identity and
   plane/sphere reuse requirements. M0 now precedes planar baking; M2 consumes and tunes
   that shared relief. Next: M0 shared sampler, then M1–M4. Concurrent clipmap work must be

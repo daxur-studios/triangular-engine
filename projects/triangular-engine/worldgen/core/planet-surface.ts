@@ -25,7 +25,7 @@ export interface IPlanetSurfaceSample {
   ridgeRelief: number;
   /** Downward channel contribution. This is zero over ocean cells. */
   riverCarve: number;
-  /** Final canonical surface elevation, clamped to the sea datum. */
+  /** Final canonical terrain elevation, including below-sea bathymetry. */
   elevation: number;
   seaLevel: number;
   isLand: boolean;
@@ -121,10 +121,13 @@ export function createPlanetSurfaceSampler(
       const riverCarve = isLand
         ? nearestRiverInfluence(unitDirection, ecology.riverPaths, p.riverWidthRadians) * p.riverDepth
         : 0;
-      const elevation = Math.max(
-        tectonics.seaLevelElevation,
-        baseElevation + ridgeRelief - riverCarve,
-      );
+      const shapedElevation = baseElevation + ridgeRelief - riverCarve;
+      // Keep land channels from falling through the shoreline, but preserve the
+      // ocean floor below the sea datum so planar and spherical consumers can
+      // visualize bathymetry instead of receiving a flat water plane.
+      const elevation = isLand
+        ? Math.max(tectonics.seaLevelElevation, shapedElevation)
+        : Math.min(tectonics.seaLevelElevation, shapedElevation);
 
       return {
         baseElevation,

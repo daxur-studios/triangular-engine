@@ -107,28 +107,20 @@ const VERTEX_SHADER_BODY = `
   uniform float uHeightScale;
   uniform float uBlockRadiusTiles;
   uniform bool uMorphEnabled;
+  uniform bool uDebugFlatTerrain;
 
   attribute vec3 instanceOffset;
   attribute float instanceScale;
 
   varying float vContinuousLevel;
   varying vec3 vWorldPos;
-
-  vec2 snapToGrid(vec2 p, float cell) {
-    return floor(p / cell + 0.5) * cell;
-  }
+  varying float vTileLevel;
+  varying float vBorderBlend;
 
   // A level's real rendered vertex spacing: clipmap-grid-geometry.ts strides
   // its shared index buffer by 2^level, but clamps that stride at
   // uGridResolution (levels whose stride would exceed it just reuse the
   // coarsest 1-quad-per-tile geometry — see that file's per-level loop).
-  // Below the clamp this compounds with the tile-size doubling into 4^level;
-  // at/above it, the tile is one quad, so spacing is simply its own tile
-  // size (2^level), not 4^level. Must mirror that clamp exactly, or this
-  // (and borderCoarseCell below, which assumes it) overshoots the real
-  // neighbour spacing at high levels by whatever factor got clamped away —
-  // collapsing far vertices onto a handful of shared coarse grid points
-  // instead of their true positions.
   float realVertexSpacingM(float level) {
     float clampedStride = min(pow(2.0, level), uGridResolution);
     return (clampedStride / uGridResolution) * uBaseTileSizeM * pow(2.0, level);
@@ -136,66 +128,108 @@ const VERTEX_SHADER_BODY = `
 
   void main() {
     vec2 localXZ = position.xz;
-    vec2 seedWorldXZ = instanceOffset.xz + localXZ * instanceScale;
+    // IMMUTABLE HORIZONTAL LATTICE: Vertices NEVER move horizontally in X/Z.
+    // seedWorldXZ is the exact ground-truth horizontal coordinate.
+    vec2 worldXZ = instanceOffset.xz + localXZ * instanceScale;
 
-    float dist = distance(uCameraWorldPos.xz, seedWorldXZ);
+    // Recover this tile's own instanced level from instanceScale
+    float myLevel = floor(log2(instanceScale / uBaseTileSizeM) + 0.5);
+    vTileLevel = myLevel;
+
+    if (uDebugFlatTerrain) {
+      vWorldPos = vec3(worldXZ.x, 0.0, worldXZ.y);
+      vContinuousLevel = 0.0;
+      vBorderBlend = 0.0;
+      vec4 mvPosition = modelViewMatrix * vec4(vWorldPos, 1.0);
+      gl_Position = projectionMatrix * mvPosition;
+      return;
+    }
+
+    // Continuous distance LOD for shading/level tinting
+    float dist = distance(uCameraWorldPos.xz, worldXZ);
     float continuousLevel = clamp(
       log2(max(dist, 1.0) / uFinestSwitchDistanceM),
       0.0,
       uMaxLevel
     );
-    float levelFloor = floor(continuousLevel);
-    float morphAlpha = uMorphEnabled ? (continuousLevel - levelFloor) : 0.0;
 
-    // Keyed off continuousLevel (a pure function of world position and the
-    // camera), NEVER off this tile's own instanced level. That is the whole
-    // load-bearing invariant: two tiles instanced at different levels, both
-    // owning a copy of the same shared boundary vertex, must compute the
-    // identical result for it. Keying any of this off myLevel instead makes
-    // those two copies disagree and opens a gap between the tiles.
-    float vertexSpacingM = uBaseTileSizeM / uGridResolution;
-    float fineCell = vertexSpacingM * pow(2.0, levelFloor);
-    float coarseCell = vertexSpacingM * pow(2.0, levelFloor + 1.0);
-    vec2 fineXZ = snapToGrid(seedWorldXZ, fineCell);
-    vec2 coarseXZ = snapToGrid(seedWorldXZ, coarseCell);
+    // Monotonic ring morph: a tile of level myLevel only morphs in the outer
+    // portion of its own ring towards myLevel + 1. It never resets to 0 within
+    // its own ring, eliminating the sawtooth detail pop at integer level boundaries.
+    float morphAlpha = 0.0;
+    if (uMorphEnabled && myLevel < uMaxLevel - 0.5) {
+      float rOuter = uFinestSwitchDistanceM * pow(2.0, myLevel);
+      float rInner = myLevel > 0.5 ? (uFinestSwitchDistanceM * pow(2.0, myLevel - 1.0)) : 0.0;
+      float rMorphStart = mix(rInner, rOuter, 0.5);
+      morphAlpha = clamp((dist - rMorphStart) / max(rOuter - rMorphStart, 1.0), 0.0, 1.0);
+    }
 
-    float heightFine = terrainHeight(fineXZ) * uHeightScale;
-    float heightCoarse = terrainHeight(coarseXZ) * uHeightScale;
+    // 1. Fine height sample at exact vertex coordinate
+    float fineHeight = terrainHeight(worldXZ) * uHeightScale;
 
-    vec2 morphedXZ = mix(fineXZ, coarseXZ, morphAlpha);
-    float morphedHeight = mix(heightFine, heightCoarse, morphAlpha);
+    // 2. Coarse grid spacing for this level's coarser neighbor (myLevel + 1)
+    float coarseCell = realVertexSpacingM(min(myLevel + 1.0, uMaxLevel));
 
-    // Border clamp: this tile's own instanced level (recovered from
-    // instanceScale, which buildClipmapTiles sets to uBaseTileSizeM * 2^level)
-    // and the exact same box math buildClipmapTiles used to place it, so the
-    // "am I near my ring's outer edge" test matches the CPU layout precisely
-    // rather than approximating it with distance-to-camera. This is the one
-    // place myLevel may be used: it targets the coarse neighbour's real
-    // vertex positions, which is what closes the T-junction.
-    float myLevel = floor(log2(instanceScale / uBaseTileSizeM) + 0.5);
+    // Bilinear coarse height in the tile interior
+    float cX0 = floor(worldXZ.x / coarseCell) * coarseCell;
+    float cX1 = cX0 + coarseCell;
+    float cZ0 = floor(worldXZ.y / coarseCell) * coarseCell;
+    float cZ1 = cZ0 + coarseCell;
+    float uX = clamp((worldXZ.x - cX0) / coarseCell, 0.0, 1.0);
+    float uZ = clamp((worldXZ.y - cZ0) / coarseCell, 0.0, 1.0);
+
+    float ch00 = terrainHeight(vec2(cX0, cZ0)) * uHeightScale;
+    float ch10 = terrainHeight(vec2(cX1, cZ0)) * uHeightScale;
+    float ch01 = terrainHeight(vec2(cX0, cZ1)) * uHeightScale;
+    float ch11 = terrainHeight(vec2(cX1, cZ1)) * uHeightScale;
+
+    float coarseInteriorHeight = mix(mix(ch00, ch10, uX), mix(ch01, ch11, uX), uZ);
+    float interiorHeight = mix(fineHeight, coarseInteriorHeight, morphAlpha);
+
+    // 3. Exact linear edge height calculation for ring boundary touching myLevel + 1
+    float finalHeight = interiorHeight;
+    float borderBlend = 0.0;
+
     if (myLevel < uMaxLevel - 0.5) {
       float tileSizeAtMyLevel = uBaseTileSizeM * pow(2.0, myLevel);
       vec2 centerTileAtMyLevel = floor(uCameraWorldPos.xz / tileSizeAtMyLevel);
       vec2 boxMin = (centerTileAtMyLevel - uBlockRadiusTiles) * tileSizeAtMyLevel;
       vec2 boxMax = (centerTileAtMyLevel + uBlockRadiusTiles) * tileSizeAtMyLevel;
-      vec2 distToEdge = min(seedWorldXZ - boxMin, boxMax - seedWorldXZ);
+
+      vec2 distToMin = worldXZ - boxMin;
+      vec2 distToMax = boxMax - worldXZ;
+      vec2 distToEdge = min(distToMin, distToMax);
       float nearestEdgeDist = min(distToEdge.x, distToEdge.y);
 
-      float borderCoarseCell = realVertexSpacingM(myLevel + 1.0);
-      float borderBlend = uMorphEnabled
-        ? (1.0 - clamp(nearestEdgeDist / borderCoarseCell, 0.0, 1.0))
+      // The coarse neighbor edge is a straight 3D line segment connecting coarse vertices.
+      // Fine boundary vertices evaluate the exact linear interpolation along that segment.
+      float coarseEdgeH = interiorHeight;
+      if (distToEdge.y < distToEdge.x) {
+        // Closer to North or South boundary: edge is parallel to X, Z is constant
+        float edgeZ = (distToMin.y < distToMax.y) ? boxMin.y : boxMax.y;
+        float h0 = terrainHeight(vec2(cX0, edgeZ)) * uHeightScale;
+        float h1 = terrainHeight(vec2(cX1, edgeZ)) * uHeightScale;
+        coarseEdgeH = mix(h0, h1, uX);
+      } else {
+        // Closer to West or East boundary: edge is parallel to Z, X is constant
+        float edgeX = (distToMin.x < distToMax.x) ? boxMin.x : boxMax.x;
+        float h0 = terrainHeight(vec2(edgeX, cZ0)) * uHeightScale;
+        float h1 = terrainHeight(vec2(edgeX, cZ1)) * uHeightScale;
+        coarseEdgeH = mix(h0, h1, uZ);
+      }
+
+      borderBlend = uMorphEnabled
+        ? (1.0 - clamp(nearestEdgeDist / coarseCell, 0.0, 1.0))
         : 0.0;
 
       if (borderBlend > 0.0) {
-        vec2 borderCoarseXZ = snapToGrid(seedWorldXZ, borderCoarseCell);
-        float borderCoarseHeight = terrainHeight(borderCoarseXZ) * uHeightScale;
-        morphedXZ = mix(morphedXZ, borderCoarseXZ, borderBlend);
-        morphedHeight = mix(morphedHeight, borderCoarseHeight, borderBlend);
+        finalHeight = mix(interiorHeight, coarseEdgeH, borderBlend);
       }
     }
 
-    vWorldPos = vec3(morphedXZ.x, morphedHeight, morphedXZ.y);
+    vWorldPos = vec3(worldXZ.x, finalHeight, worldXZ.y);
     vContinuousLevel = continuousLevel;
+    vBorderBlend = borderBlend;
 
     vec4 mvPosition = modelViewMatrix * vec4(vWorldPos, 1.0);
     gl_Position = projectionMatrix * mvPosition;
@@ -205,8 +239,30 @@ const VERTEX_SHADER_BODY = `
 const FRAGMENT_SHADER_BODY = `
   uniform bool uShowLevelTint;
   uniform float uMaxLevel;
+  uniform bool uDebugFlatTerrain;
+  uniform int uDebugViewMode;
   varying float vContinuousLevel;
   varying vec3 vWorldPos;
+  varying float vTileLevel;
+  varying float vBorderBlend;
+
+  vec3 discreteLevelColor(float level) {
+    vec3 colors[12];
+    colors[0]  = vec3(0.2, 0.8, 0.2); // green
+    colors[1]  = vec3(0.2, 0.7, 0.9); // cyan
+    colors[2]  = vec3(0.9, 0.8, 0.2); // yellow
+    colors[3]  = vec3(0.9, 0.4, 0.2); // orange
+    colors[4]  = vec3(0.9, 0.2, 0.3); // red
+    colors[5]  = vec3(0.7, 0.2, 0.9); // purple
+    colors[6]  = vec3(0.3, 0.3, 0.9); // blue
+    colors[7]  = vec3(0.1, 0.9, 0.7); // teal
+    colors[8]  = vec3(0.9, 0.2, 0.7); // pink
+    colors[9]  = vec3(0.6, 0.9, 0.2); // lime
+    colors[10] = vec3(0.9, 0.6, 0.5); // salmon
+    colors[11] = vec3(0.5, 0.5, 0.5); // gray
+    int idx = int(clamp(floor(level + 0.5), 0.0, 11.0));
+    return colors[idx];
+  }
 
   vec3 levelTint(float level) {
     vec3 colors[4];
@@ -214,12 +270,7 @@ const FRAGMENT_SHADER_BODY = `
     colors[1] = vec3(0.32, 0.62, 0.86);
     colors[2] = vec3(0.92, 0.75, 0.28);
     colors[3] = vec3(0.86, 0.34, 0.34);
-    // Spread the 4-color gradient across the whole 0..uMaxLevel range rather
-    // than clamping at level 3: with LEVEL_COUNT=4 (uMaxLevel=3) this is
-    // exactly the old per-level mapping (t == level), but it keeps far
-    // levels visually distinguishable instead of all reading as pure red
-    // once a scene configures more than 4 levels (see clipmap-far-coverage-
-    // spike, which needs to judge detail across 12).
+    // Spread the 4-color gradient across the whole 0..uMaxLevel range
     float t = clamp(level / max(uMaxLevel, 1.0) * 3.0, 0.0, 3.0);
     int i0 = int(floor(t));
     int i1 = min(i0 + 1, 3);
@@ -227,14 +278,20 @@ const FRAGMENT_SHADER_BODY = `
   }
 
   void main() {
-    float eps = 0.5;
-    float hL = terrainHeight(vWorldPos.xz + vec2(-eps, 0.0));
-    float hR = terrainHeight(vWorldPos.xz + vec2(eps, 0.0));
-    float hD = terrainHeight(vWorldPos.xz + vec2(0.0, -eps));
-    float hU = terrainHeight(vWorldPos.xz + vec2(0.0, eps));
-    vec3 normal = normalize(vec3(hL - hR, 2.0 * eps, hD - hU));
     vec3 lightDir = normalize(vec3(0.5, 0.8, 0.3));
-    float diffuse = max(dot(normal, lightDir), 0.15);
+    float diffuse = 1.0;
+
+    if (uDebugFlatTerrain) {
+      diffuse = max(dot(vec3(0.0, 1.0, 0.0), lightDir), 0.35);
+    } else {
+      float eps = 0.5;
+      float hL = terrainHeight(vWorldPos.xz + vec2(-eps, 0.0));
+      float hR = terrainHeight(vWorldPos.xz + vec2(eps, 0.0));
+      float hD = terrainHeight(vWorldPos.xz + vec2(0.0, -eps));
+      float hU = terrainHeight(vWorldPos.xz + vec2(0.0, eps));
+      vec3 normal = normalize(vec3(hL - hR, 2.0 * eps, hD - hU));
+      diffuse = max(dot(normal, lightDir), 0.15);
+    }
 
     vec2 mapSize = uHeightMapBounds.zw - uHeightMapBounds.xy;
     vec2 mapUv = (vWorldPos.xz - uHeightMapBounds.xy) / mapSize;
@@ -242,6 +299,17 @@ const FRAGMENT_SHADER_BODY = `
       ? texture2D(uColorMap, mapUv).rgb
       : vec3(0.067, 0.243, 0.463);
     vec3 base = uShowLevelTint ? levelTint(vContinuousLevel) : mapBase;
+
+    // Diagnostic view overrides
+    if (uDebugViewMode == 1) {
+      base = discreteLevelColor(vTileLevel);
+    } else if (uDebugViewMode == 2) {
+      base = levelTint(vContinuousLevel);
+    } else if (uDebugViewMode == 3) {
+      // Highlight border blend region in bright magenta
+      base = mix(base, vec3(1.0, 0.0, 1.0), vBorderBlend);
+    }
+
     gl_FragColor = vec4(base * diffuse, 1.0);
   }
 `;
@@ -260,6 +328,8 @@ export function createClipmapTerrainMaterial(): ShaderMaterial {
       uBlockRadiusTiles: { value: 0 },
       uMorphEnabled: { value: true },
       uShowLevelTint: { value: true },
+      uDebugFlatTerrain: { value: false },
+      uDebugViewMode: { value: 0 },
       uTerrainKind: { value: 0 },
       uUseHeightMap: { value: false },
       uHeightMap: { value: null },

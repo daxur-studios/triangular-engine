@@ -53,6 +53,8 @@ export class GpuMorphLodSpikeComponent {
   readonly morphEnabled = signal(true);
   readonly frozen = signal(false);
   readonly terrainKind = signal<'wave' | 'noise'>('wave');
+  readonly debugFlat = signal(false);
+  readonly debugViewMode = signal<number>(0);
 
   readonly drawCalls = signal(0);
   readonly triangles = signal(0);
@@ -100,6 +102,16 @@ export class GpuMorphLodSpikeComponent {
   setTerrainKind(kind: 'wave' | 'noise'): void {
     this.terrainKind.set(kind);
     this.scene.setTerrainKind(kind);
+  }
+
+  toggleDebugFlat(): void {
+    this.debugFlat.update((flat) => !flat);
+    this.scene.setDebugFlatTerrain(this.debugFlat());
+  }
+
+  setDebugViewMode(mode: number): void {
+    this.debugViewMode.set(mode);
+    this.scene.setDebugViewMode(mode);
   }
 
   instanceCountsLabel(): string {

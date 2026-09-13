@@ -37,6 +37,24 @@
     >
       Noise
     </button>
+    <button
+      [class.active]="debugFlat()"
+      (click)="toggleDebugFlat()"
+    >
+      Flat (Topology Test)
+    </button>
+    <button
+      [class.active]="debugViewMode() === 1"
+      (click)="setDebugViewMode(debugViewMode() === 1 ? 0 : 1)"
+    >
+      Debug: Discrete Levels
+    </button>
+    <button
+      [class.active]="debugViewMode() === 3"
+      (click)="setDebugViewMode(debugViewMode() === 3 ? 0 : 3)"
+    >
+      Debug: Border Blend
+    </button>
   </div>
 
   <p>Fly camera outward to inspect outer-ring detail/popping:</p>
