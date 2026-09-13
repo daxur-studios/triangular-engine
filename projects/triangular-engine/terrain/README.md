@@ -44,6 +44,11 @@ Framework-free consumers can continue composing
 
 ## Planetary CDLOD (Continuous Distance-Dependent LOD)
 
+The clipmap terrain scene also accepts a bounded `heightSource` and exposes
+`setHeightSource(source)` on its returned handle. Consumers can rebuild a
+worldgen bake, for example after changing seed or cell count, and replace the
+GPU source without rebuilding the clipmap meshes.
+
 For high-speed planetary bodies and large-scale terrains, `CdlodPlanetComponent`
 provides GPU vertex geomorphing, roughness-based feature decimation, motion look-ahead,
 and multithreaded Web Worker meshing.

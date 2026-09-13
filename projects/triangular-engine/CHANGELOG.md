@@ -6,6 +6,10 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `triangular-engine/terrain` clipmap scenes now expose `setHeightSource()` so
+  bounded texture-backed terrain can be regenerated and swapped without
+  rebuilding the clipmap mesh set.
+
 - `triangular-engine/worldgen` now derives deterministic mountain ridge networks from
   elevation crest relief, continent-continent collision strength, and connected high cells.
   `IPlanetEcology` exposes `ridgePaths`, normalized `ridgePathStrength`, and isolated `ridgePeaks`;

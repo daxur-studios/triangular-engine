@@ -1,0 +1,24 @@
+:host {
+  position: relative;
+  background: #111820;
+}
+
+.readout {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 5;
+  display: grid;
+  gap: 0.35rem;
+  max-width: 28rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 0.5rem;
+  background: rgb(8 14 23 / 86%);
+  color: #dce9f5;
+  font: 12px/1.5 ui-monospace, monospace;
+}
+
+strong {
+  color: white;
+}

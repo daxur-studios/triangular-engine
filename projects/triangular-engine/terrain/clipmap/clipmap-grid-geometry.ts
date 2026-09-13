@@ -13,7 +13,9 @@ export interface ISharedGridBuffers {
 
 /**
  * Builds the shared position buffer plus one index-only geometry per LOD
- * level, each level striding by 2^level over the same high-res vertex grid.
+ * level, each level striding by 2^level over the same high-res vertex grid
+ * (levels past log2(resolution) clamp to a single quad per tile — see the
+ * per-level loop below).
  */
 export function buildSharedGridBuffers(
   resolution: number,
@@ -31,14 +33,21 @@ export function buildSharedGridBuffers(
   }
   const positionAttribute = new BufferAttribute(positions, 3);
 
+  if ((resolution & (resolution - 1)) !== 0) {
+    throw new Error(
+      `GRID_RESOLUTION (${resolution}) must be a power of two so every level's stride (2^level) either divides it evenly or can be clamped to it.`,
+    );
+  }
+
   const levelGeometries: BufferGeometry[] = [];
   for (let level = 0; level < levelCount; level++) {
-    const stride = 2 ** level;
-    if (resolution % stride !== 0) {
-      throw new Error(
-        `GRID_RESOLUTION (${resolution}) must be divisible by 2^level (level ${level} => stride ${stride}).`,
-      );
-    }
+    // Levels beyond log2(resolution) would need stride > resolution, which
+    // has no meaning for a single shared tile grid (there's only one quad
+    // left to give). Clamp to resolution instead of requiring resolution to
+    // grow with levelCount: those far levels just reuse the coarsest
+    // 1-quad-per-tile geometry, which is the right amount of detail for
+    // tiles that are already huge and distant by the time a level gets there.
+    const stride = Math.min(2 ** level, resolution);
     const quadsPerEdge = resolution / stride;
     const cellsPerEdge = quadsPerEdge;
     const indices = new Uint32Array(cellsPerEdge * cellsPerEdge * 6);
@@ -68,8 +77,8 @@ export function buildSharedGridBuffers(
     // clipmap; three's auto-computed bounding sphere (from local unit-space
     // positions only) would cull the whole thing at a glance. CS-015 traced
     // exactly this mistake in the BatchedMesh attempt. Disabling frustum
-    // culling is the deliberate spike-scope stand-in for real per-instance
-    // culling (out of scope here — see constants.ts doc comment).
+    // culling is the deliberate stand-in for real per-instance culling (out
+    // of scope here — see clipmap-constants.ts doc comment).
     geometry.boundingSphere = new Sphere(undefined, Infinity);
     levelGeometries.push(geometry);
   }

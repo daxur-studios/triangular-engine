@@ -35,6 +35,19 @@ export const SPIKES: readonly ISpikeItem[] = [
     runbookPath: 'docs/runbook/028_planet_terrain_attempt_history.md',
     dateISO: '2026-09-06',
   },
+  {
+    id: 'clipmap-far-coverage-spike',
+    number: '2',
+    title: 'Clipmap far coverage (horizon-scale LOD ring extension)',
+    route: '/clipmap-far-coverage-spike',
+    status: 'passed',
+    hypothesis:
+      'Extending gpu-morph-lod-spike\'s shared-vertex-buffer + per-mip-index-buffer clipmap rings outward with several more LOD levels reaching horizon-scale radii keeps draw calls bounded to one InstancedMesh per LOD level (not growing with ring count) and keeps outer-ring visual detail acceptable — the untested "far coverage" half of runbook 028\'s Candidate B / Spike 4, distinct from the near-boundary case the passed spike already covers.',
+    description:
+      'Built on the shared triangular-engine/terrain clipmap builder, extended to 12 levels (~131km outer ring). Draw calls stayed bounded at one InstancedMesh per level (12 total) across the full sweep from 30m to past the outer ring, with no per-frame flicker on a frozen camera. Found and fixed two real bugs along the way: (1) analytic hash-noise terrain loses float precision at horizon-scale coordinates — defaults to wave-based terrain for legible far-field visuals, noise kept as a toggle to demonstrate the limit; (2) the border-blend T-junction fix assumed unbounded stride doubling (4^level), which broke once far levels\' stride got clamped to GRID_RESOLUTION — collapsed far-tile vertices onto a shared coarse grid. Fixed with a realVertexSpacingM() helper mirroring the CPU-side clamp.',
+    runbookPath: 'docs/runbook/028_planet_terrain_attempt_history.md',
+    dateISO: '2026-09-13',
+  },
 ];
 
 const STATUS_LABEL: Record<SpikeStatus, string> = {

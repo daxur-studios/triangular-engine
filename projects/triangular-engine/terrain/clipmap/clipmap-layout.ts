@@ -24,7 +24,7 @@ interface ITileBox {
  *
  * Total tile count is bounded by levelCount * (2*blockRadiusTiles)^2,
  * independent of world/camera range — the property that matters for
- * attempt #5's scale-range requirement.
+ * horizon-scale coverage.
  */
 export function buildClipmapTiles(
   cameraXM: number,

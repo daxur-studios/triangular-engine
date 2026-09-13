@@ -1,0 +1,70 @@
+<scene>
+  <orbitControls
+    [cameraPosition]="cameraPosition()"
+    [target]="[0, 0, 0]"
+    [isActive]="true"
+  />
+</scene>
+
+<aside class="diagnostics">
+  <strong>clipmap-far-coverage · does horizon-scale LOD stay bounded &amp; legible</strong>
+  <span
+    >levels: {{ levelCount }} · outer ring: {{ outerRadiusM | number: '1.0-0' }}m · draw
+    calls: {{ drawCalls() }} · triangles: {{ triangles().toLocaleString() }}</span
+  >
+  <span>instances by level: {{ instanceCountsLabel() }}</span>
+
+  <div class="actions">
+    <button [class.active]="wireframe()" (click)="toggleWireframe()">
+      Wireframe
+    </button>
+    <button [class.active]="showLevelTint()" (click)="toggleShowLevelTint()">
+      Level tint
+    </button>
+    <button [class.active]="morphEnabled()" (click)="toggleMorph()">
+      Morph
+    </button>
+    <button [class.active]="frozen()" (click)="toggleFrozen()">Frozen</button>
+    <button
+      [class.active]="terrainKind() === 'wave'"
+      (click)="setTerrainKind('wave')"
+    >
+      Wave
+    </button>
+    <button
+      [class.active]="terrainKind() === 'noise'"
+      (click)="setTerrainKind('noise')"
+    >
+      Noise
+    </button>
+  </div>
+
+  <p>Fly camera outward to inspect outer-ring detail/popping:</p>
+  <div class="actions">
+    <button (click)="flyToDistance(60)">60m</button>
+    <button (click)="flyToDistance(500)">500m</button>
+    <button (click)="flyToDistance(4000)">4km</button>
+    <button (click)="flyToDistance(20000)">20km</button>
+    <button (click)="flyToDistance(outerRadiusM * 1.2)">
+      {{ (outerRadiusM * 1.2 / 1000) | number: '1.0-0' }}km (past outer ring)
+    </button>
+  </div>
+  @if (cameraDistanceM() > 0) {
+    <span>camera distance: {{ cameraDistanceM() | number: '1.0-0' }}m</span>
+  }
+
+  <div class="actions">
+    <button
+      [disabled]="isCapturingDiagnostics()"
+      (click)="runDiagnosticsCapture()"
+    >
+      {{ isCapturingDiagnostics() ? 'Capturing…' : 'Run diagnostics capture' }}
+    </button>
+  </div>
+  @if (diagnosticsCopied()) {
+    <span>Copied report to clipboard.</span>
+  }
+  @if (diagnosticsReport(); as report) {
+    <pre class="report">{{ report }}</pre>
+  }
+</aside>

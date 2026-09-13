@@ -1,3 +1,4 @@
+import { DecimalPipe } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -5,53 +6,70 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { Color, Vector3 } from 'three';
+import { Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
-  createClipmapTerrainScene,
-  LEVEL_COUNT,
-  type IClipmapTerrainSceneHandle,
-} from 'triangular-engine/terrain';
+  createClipmapFarCoverageSpikeScene,
+  FAR_COVERAGE_LEVEL_COUNT,
+  FAR_COVERAGE_OUTER_RADIUS_M,
+  type IClipmapFarCoverageSpikeSceneHandle,
+} from './core';
 
 /**
- * Camera distances (metres from the origin) probed by
- * `runDiagnosticsCapture()`'s draw-call sweep. Chosen to straddle the
- * clipmap's level rings (see triangular-engine/terrain/clipmap's
- * clipmap-constants.ts `FINEST_SWITCH_DISTANCE_M` doc comment: level radii
- * are 64/128/256/512m) from well inside level 0 to past the coarsest level.
+ * Camera distances (metres from the origin) probed by the draw-call sweep —
+ * spans from well inside the finest ring out past the outermost one, so the
+ * bounded-draw-call claim is checked at horizon scale, not just near field.
  */
-const DIAGNOSTICS_SWEEP_DISTANCES_M = [30, 150, 600, 3000] as const;
+const DIAGNOSTICS_SWEEP_DISTANCES_M = [
+  30, 500, 4000, 20000, FAR_COVERAGE_OUTER_RADIUS_M * 1.2,
+] as const;
 
 /** ~2s of samples at 60fps, used by the frozen-camera stability check. */
 const DIAGNOSTICS_STABILITY_FRAME_COUNT = 120;
 
 /**
- * Attempt #5, Spike 1: shared-vertex-buffer + GPU vertex-shader height/morph
- * LOD (see docs/runbook/028_planet_terrain_attempt_history.md). Passed —
- * the mechanism has since been promoted to `triangular-engine/terrain`'s
- * `clipmap` module (see createClipmapTerrainScene) so this spike and any
- * consuming app/POC share one implementation instead of diverging copies.
- * This component now only wires that library scene into `<scene>`'s
- * renderer/camera/tick-loop plumbing and its `showFPS` overlay.
+ * Falsifies: horizon-scale clipmap coverage can add outward LOD rings past
+ * the already-passed near-boundary case (gpu-morph-lod-spike) while keeping
+ * draw calls bounded to one InstancedMesh per LOD level and visual detail
+ * acceptable at long range — the "far coverage" half of runbook 028's
+ * Candidate B (Spike 4 territory) that the near-boundary spike never tested.
+ *
+ * What this file is responsible for and nothing more: providing
+ * `EngineService` (so `<scene>` in the template owns the renderer, camera,
+ * tick loop, resize handling, and the free `showFPS` overlay) and wiring UI
+ * toggles through to the `core/` factory's handle. The actual mechanism
+ * under test belongs entirely in `core/`, which is a thin configuration of
+ * the already-promoted `triangular-engine/terrain` clipmap scene builder.
  */
 @Component({
-  selector: 'app-gpu-morph-lod-spike',
-  imports: [EngineModule],
-  templateUrl: './gpu-morph-lod-spike.component.html',
-  styleUrl: './gpu-morph-lod-spike.component.scss',
+  selector: 'app-clipmap-far-coverage-spike',
+  imports: [EngineModule, DecimalPipe],
+  templateUrl: './clipmap-far-coverage-spike.component.html',
+  styleUrl: './clipmap-far-coverage-spike.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [EngineService.provide({ showFPS: true })],
   host: { class: 'flex-page' },
 })
-export class GpuMorphLodSpikeComponent {
+export class ClipmapFarCoverageSpikeComponent {
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly scene: IClipmapTerrainSceneHandle;
+  private readonly scene: IClipmapFarCoverageSpikeSceneHandle;
+
+  readonly levelCount = FAR_COVERAGE_LEVEL_COUNT;
+  readonly outerRadiusM = FAR_COVERAGE_OUTER_RADIUS_M;
 
   readonly wireframe = signal(false);
   readonly showLevelTint = signal(true);
   readonly morphEnabled = signal(true);
   readonly frozen = signal(false);
+  // 'wave' (sin/cos) stays visually sane at horizon-scale world coordinates;
+  // 'noise' is fbm/hash-based and its fract()-heavy hash loses precision in
+  // single-precision GLSL floats well before 100km, degenerating into flat
+  // bands/spikes — a known limitation of this analytic stand-in height
+  // function (see clipmap-terrain-material.ts's doc header), not of the
+  // clipmap ring-extension mechanism itself. Default to 'wave' here so the
+  // far-field view is legible; 'noise' is still available to toggle and
+  // demonstrates the precision limit directly.
   readonly terrainKind = signal<'wave' | 'noise'>('wave');
 
   readonly drawCalls = signal(0);
@@ -59,17 +77,19 @@ export class GpuMorphLodSpikeComponent {
   readonly instanceCountsByLevel = signal<readonly number[]>([]);
 
   /** Bound to `<orbitControls [cameraPosition]>`; only mutated by the user's
-   * initial camera and by `runDiagnosticsCapture()`'s sweep — never read
-   * every change-detection cycle, so it never fights live orbit dragging. */
+   * initial camera and by `flyToDistance()` / the diagnostics sweep — never
+   * read every change-detection cycle, so it never fights live orbit
+   * dragging. `far` is set to Number.MAX_SAFE_INTEGER by orbitControls by
+   * default, so no far-plane clipping at these ranges. */
   readonly cameraPosition = signal<[number, number, number]>([60, 45, 60]);
+  readonly cameraDistanceM = signal(0);
 
   readonly isCapturingDiagnostics = signal(false);
   readonly diagnosticsReport = signal<string | null>(null);
   readonly diagnosticsCopied = signal(false);
 
   constructor() {
-    this.engine.scene.background = new Color('#12181f');
-    this.scene = createClipmapTerrainScene(this.engine, (diagnostics) => {
+    this.scene = createClipmapFarCoverageSpikeScene(this.engine, (diagnostics) => {
       this.drawCalls.set(diagnostics.drawCalls);
       this.triangles.set(diagnostics.triangles);
       this.instanceCountsByLevel.set(diagnostics.instanceCountsByLevel);
@@ -102,6 +122,21 @@ export class GpuMorphLodSpikeComponent {
     this.scene.setTerrainKind(kind);
   }
 
+  /** Flies the camera outward along its current direction, for eyeballing
+   * outer-ring detail/popping at a chosen distance. */
+  flyToDistance(distanceM: number): void {
+    const camera = this.engine.camera$.value;
+    const direction = camera
+      ? camera.position.clone().normalize()
+      : new Vector3(1, 0.5, 1).normalize();
+    this.cameraPosition.set([
+      direction.x * distanceM,
+      direction.y * distanceM,
+      direction.z * distanceM,
+    ]);
+    this.cameraDistanceM.set(distanceM);
+  }
+
   instanceCountsLabel(): string {
     return this.instanceCountsByLevel()
       .map((count, level) => `L${level}: ${count}`)
@@ -110,18 +145,16 @@ export class GpuMorphLodSpikeComponent {
 
   /**
    * Automated, token-efficient stand-in for eyeballing the diagnostics
-   * panel: sweeps the camera through fixed distances to check the draw-call
-   * bound holds at every LOD level, then freezes the camera to check for
-   * the CS-019-style flicker (any per-frame draw-call/triangle variation
-   * with a static view and no edits). Produces a compact plain-text report
-   * instead of raw per-frame logs, copied to the clipboard so it can be
-   * pasted back for review before marking this spike's status 'passed' in
+   * panel: sweeps the camera through fixed distances (near field out to past
+   * the outermost ring) to check the draw-call bound holds at every
+   * distance, then freezes the camera to check for per-frame draw-call/
+   * triangle flicker. Produces a compact plain-text report instead of raw
+   * per-frame logs, copied to the clipboard so it can be pasted back for
+   * review before marking this spike's status in
    * `pages/spikes-index/spikes-index.component.ts`.
    *
-   * Does NOT check crack-freeness (a visual property — use the wireframe +
-   * morph toggles for that) or terrain-shape quality (out of scope here,
-   * see clipmap-terrain-material.ts's doc comment in
-   * triangular-engine/terrain/clipmap).
+   * Does NOT check outer-ring visual popping (a visual property — use
+   * `flyToDistance()` plus the level-tint/wireframe toggles for that).
    */
   async runDiagnosticsCapture(): Promise<void> {
     if (this.isCapturingDiagnostics()) return;
@@ -130,25 +163,17 @@ export class GpuMorphLodSpikeComponent {
 
     const wasFrozen = this.frozen();
     const restorePosition = this.cameraPosition();
-    const camera = this.engine.camera$.value;
-    const direction = camera
-      ? camera.position.clone().normalize()
-      : new Vector3(1, 1, 1).normalize();
 
     const sweepLines: string[] = [];
     let maxSweepDrawCalls = 0;
 
     for (const distanceM of DIAGNOSTICS_SWEEP_DISTANCES_M) {
-      this.cameraPosition.set([
-        direction.x * distanceM,
-        direction.y * distanceM,
-        direction.z * distanceM,
-      ]);
+      this.flyToDistance(distanceM);
       await this.waitFrames(30); // let the clipmap settle at the new distance
       const d = this.scene.getDiagnosticsSnapshot();
       maxSweepDrawCalls = Math.max(maxSweepDrawCalls, d.drawCalls);
       sweepLines.push(
-        `  ${distanceM}m -> calls=${d.drawCalls} tris=${d.triangles} instances=[${d.instanceCountsByLevel.join(',')}]`,
+        `  ${Math.round(distanceM)}m -> calls=${d.drawCalls} tris=${d.triangles} instances=[${d.instanceCountsByLevel.join(',')}]`,
       );
     }
 
@@ -171,15 +196,16 @@ export class GpuMorphLodSpikeComponent {
     this.scene.setFrozen(wasFrozen);
 
     const report = [
-      `=== gpu-morph-lod-spike diagnostics ===`,
+      `=== clipmap-far-coverage-spike diagnostics ===`,
+      `LevelCount: ${this.levelCount} | Outer ring radius: ${Math.round(this.outerRadiusM)}m`,
       `Terrain: ${this.terrainKind()} | Morph: ${this.morphEnabled() ? 'ON' : 'OFF'} | LevelTint: ${this.showLevelTint() ? 'ON' : 'OFF'} | Wireframe: ${this.wireframe() ? 'ON' : 'OFF'}`,
       `Draw-call sweep (camera distance from origin):`,
       ...sweepLines,
-      `Max draw calls across sweep: ${maxSweepDrawCalls} (bound: <=${LEVEL_COUNT}) -> ${maxSweepDrawCalls <= LEVEL_COUNT ? 'PASS' : 'FAIL'}`,
+      `Max draw calls across sweep: ${maxSweepDrawCalls} (bound: <=${this.levelCount}) -> ${maxSweepDrawCalls <= this.levelCount ? 'PASS' : 'FAIL'}`,
       `Frozen-camera stability (${DIAGNOSTICS_STABILITY_FRAME_COUNT} frames @ static view):`,
       `  drawCalls min/max: ${minCalls}/${maxCalls} (delta ${maxCalls - minCalls}) -> ${maxCalls === minCalls ? 'STABLE' : 'FLICKER DETECTED'}`,
       `  triangles min/max: ${minTris}/${maxTris} (delta ${maxTris - minTris}) -> ${maxTris === minTris ? 'STABLE' : 'FLICKER DETECTED'}`,
-      `(Not checked here — judge visually: crack-freeness with morph on/off, terrain shape/quality)`,
+      `(Not checked here — judge visually with flyToDistance() + wireframe/level-tint toggles: outer-ring popping/coarseness)`,
       `========================================`,
     ].join('\n');
 

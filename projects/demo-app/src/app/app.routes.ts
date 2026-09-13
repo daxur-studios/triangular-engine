@@ -53,6 +53,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'clipmap-far-coverage-spike',
+    loadComponent: () =>
+      import('./clipmap-far-coverage-spike/clipmap-far-coverage-spike.component').then(
+        ({ ClipmapFarCoverageSpikeComponent }) => ClipmapFarCoverageSpikeComponent,
+      ),
+  },
+  {
     path: 'spikes',
     loadComponent: () =>
       import('./pages/spikes-index/spikes-index.component').then(
@@ -127,6 +134,13 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./pages/cell-planet-map/cell-planet-map-page.component').then(
         ({ CellPlanetMapPageComponent }) => CellPlanetMapPageComponent,
+      ),
+  },
+  {
+    path: 'cell-planet-25d-map',
+    loadComponent: () =>
+      import('./pages/cell-planet-25d-map/cell-planet-25d-map-page.component').then(
+        ({ CellPlanet25dMapPageComponent }) => CellPlanet25dMapPageComponent,
       ),
   },
   {

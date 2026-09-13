@@ -1,13 +1,21 @@
-import { ShaderMaterial, Vector3 } from 'three';
+import { ShaderMaterial, Vector3, Vector4 } from 'three';
 
 /**
  * Stand-in for a real `sampleElevation()`/`height(dir)`. Texture-backed
- * heightmaps are a separate concern (see constants.ts doc comment) — this
- * spike is only about the LOD/morph mechanism, so an analytic function keeps
- * the fixture boundless and avoids atlas/streaming complexity entirely.
+ * heightmaps are a separate concern (see clipmap-constants.ts doc comment) —
+ * this module is only about the LOD/morph mechanism, so an analytic function
+ * keeps the fixture boundless and avoids atlas/streaming complexity entirely.
+ * Extend or replace this GLSL block to plug in real terrain sampling.
  */
 const TERRAIN_HEIGHT_GLSL = `
   uniform float uTerrainKind; // 0 = wave (original), 1 = noise (fbm)
+  uniform bool uUseHeightMap;
+  uniform sampler2D uHeightMap;
+  uniform vec4 uHeightMapBounds; // minX, minZ, maxX, maxZ
+  uniform float uHeightMapMinM;
+  uniform float uHeightMapRangeM;
+  uniform bool uUseColorMap;
+  uniform sampler2D uColorMap;
 
   float terrainHeightWave(vec2 xz) {
     float continental = sin(xz.x / 340.0) * 6.0 + cos(xz.y / 260.0) * 5.0;
@@ -52,6 +60,18 @@ const TERRAIN_HEIGHT_GLSL = `
   }
 
   float terrainHeight(vec2 xz) {
+    vec2 mapSize = uHeightMapBounds.zw - uHeightMapBounds.xy;
+    vec2 mapUv = (xz - uHeightMapBounds.xy) / mapSize;
+    if (uUseHeightMap) {
+      // A bounded real source owns the map. Do not leak the analytic spike
+      // terrain outside its bounds; the clipmap can cover a larger area than
+      // a first-pass bake. Keep the exterior at the shared sea datum until a
+      // streamed/larger source is available.
+      if (all(greaterThanEqual(mapUv, vec2(0.0))) && all(lessThanEqual(mapUv, vec2(1.0)))) {
+        return uHeightMapMinM + texture2D(uHeightMap, mapUv).r * uHeightMapRangeM;
+      }
+      return 0.0;
+    }
     return uTerrainKind < 0.5 ? terrainHeightWave(xz) : terrainHeightNoise(xz);
   }
 `;
@@ -98,6 +118,22 @@ const VERTEX_SHADER_BODY = `
     return floor(p / cell + 0.5) * cell;
   }
 
+  // A level's real rendered vertex spacing: clipmap-grid-geometry.ts strides
+  // its shared index buffer by 2^level, but clamps that stride at
+  // uGridResolution (levels whose stride would exceed it just reuse the
+  // coarsest 1-quad-per-tile geometry — see that file's per-level loop).
+  // Below the clamp this compounds with the tile-size doubling into 4^level;
+  // at/above it, the tile is one quad, so spacing is simply its own tile
+  // size (2^level), not 4^level. Must mirror that clamp exactly, or this
+  // (and borderCoarseCell below, which assumes it) overshoots the real
+  // neighbour spacing at high levels by whatever factor got clamped away —
+  // collapsing far vertices onto a handful of shared coarse grid points
+  // instead of their true positions.
+  float realVertexSpacingM(float level) {
+    float clampedStride = min(pow(2.0, level), uGridResolution);
+    return (clampedStride / uGridResolution) * uBaseTileSizeM * pow(2.0, level);
+  }
+
   void main() {
     vec2 localXZ = position.xz;
     vec2 seedWorldXZ = instanceOffset.xz + localXZ * instanceScale;
@@ -111,6 +147,12 @@ const VERTEX_SHADER_BODY = `
     float levelFloor = floor(continuousLevel);
     float morphAlpha = uMorphEnabled ? (continuousLevel - levelFloor) : 0.0;
 
+    // Keyed off continuousLevel (a pure function of world position and the
+    // camera), NEVER off this tile's own instanced level. That is the whole
+    // load-bearing invariant: two tiles instanced at different levels, both
+    // owning a copy of the same shared boundary vertex, must compute the
+    // identical result for it. Keying any of this off myLevel instead makes
+    // those two copies disagree and opens a gap between the tiles.
     float vertexSpacingM = uBaseTileSizeM / uGridResolution;
     float fineCell = vertexSpacingM * pow(2.0, levelFloor);
     float coarseCell = vertexSpacingM * pow(2.0, levelFloor + 1.0);
@@ -127,7 +169,9 @@ const VERTEX_SHADER_BODY = `
     // instanceScale, which buildClipmapTiles sets to uBaseTileSizeM * 2^level)
     // and the exact same box math buildClipmapTiles used to place it, so the
     // "am I near my ring's outer edge" test matches the CPU layout precisely
-    // rather than approximating it with distance-to-camera.
+    // rather than approximating it with distance-to-camera. This is the one
+    // place myLevel may be used: it targets the coarse neighbour's real
+    // vertex positions, which is what closes the T-junction.
     float myLevel = floor(log2(instanceScale / uBaseTileSizeM) + 0.5);
     if (myLevel < uMaxLevel - 0.5) {
       float tileSizeAtMyLevel = uBaseTileSizeM * pow(2.0, myLevel);
@@ -137,11 +181,7 @@ const VERTEX_SHADER_BODY = `
       vec2 distToEdge = min(seedWorldXZ - boxMin, boxMax - seedWorldXZ);
       float nearestEdgeDist = min(distToEdge.x, distToEdge.y);
 
-      // The neighbour's rendered vertex spacing, NOT vertexSpacingM * 2^level:
-      // shared-grid-geometry.ts strides its index buffer by 2^level over a
-      // grid whose own per-step world size already doubles by 2^level (tile
-      // size doubles too), so the two 2^level factors compound to 4^level.
-      float borderCoarseCell = vertexSpacingM * pow(4.0, myLevel + 1.0);
+      float borderCoarseCell = realVertexSpacingM(myLevel + 1.0);
       float borderBlend = uMorphEnabled
         ? (1.0 - clamp(nearestEdgeDist / borderCoarseCell, 0.0, 1.0))
         : 0.0;
@@ -174,7 +214,13 @@ const FRAGMENT_SHADER_BODY = `
     colors[1] = vec3(0.32, 0.62, 0.86);
     colors[2] = vec3(0.92, 0.75, 0.28);
     colors[3] = vec3(0.86, 0.34, 0.34);
-    float t = clamp(level, 0.0, 3.0);
+    // Spread the 4-color gradient across the whole 0..uMaxLevel range rather
+    // than clamping at level 3: with LEVEL_COUNT=4 (uMaxLevel=3) this is
+    // exactly the old per-level mapping (t == level), but it keeps far
+    // levels visually distinguishable instead of all reading as pure red
+    // once a scene configures more than 4 levels (see clipmap-far-coverage-
+    // spike, which needs to judge detail across 12).
+    float t = clamp(level / max(uMaxLevel, 1.0) * 3.0, 0.0, 3.0);
     int i0 = int(floor(t));
     int i1 = min(i0 + 1, 3);
     return mix(colors[i0], colors[i1], fract(t));
@@ -190,12 +236,17 @@ const FRAGMENT_SHADER_BODY = `
     vec3 lightDir = normalize(vec3(0.5, 0.8, 0.3));
     float diffuse = max(dot(normal, lightDir), 0.15);
 
-    vec3 base = uShowLevelTint ? levelTint(vContinuousLevel) : vec3(0.55, 0.58, 0.45);
+    vec2 mapSize = uHeightMapBounds.zw - uHeightMapBounds.xy;
+    vec2 mapUv = (vWorldPos.xz - uHeightMapBounds.xy) / mapSize;
+    vec3 mapBase = uUseColorMap && all(greaterThanEqual(mapUv, vec2(0.0))) && all(lessThanEqual(mapUv, vec2(1.0)))
+      ? texture2D(uColorMap, mapUv).rgb
+      : vec3(0.067, 0.243, 0.463);
+    vec3 base = uShowLevelTint ? levelTint(vContinuousLevel) : mapBase;
     gl_FragColor = vec4(base * diffuse, 1.0);
   }
 `;
 
-export function createGpuMorphLodMaterial(): ShaderMaterial {
+export function createClipmapTerrainMaterial(): ShaderMaterial {
   return new ShaderMaterial({
     vertexShader: TERRAIN_HEIGHT_GLSL + VERTEX_SHADER_BODY,
     fragmentShader: TERRAIN_HEIGHT_GLSL + FRAGMENT_SHADER_BODY,
@@ -210,6 +261,13 @@ export function createGpuMorphLodMaterial(): ShaderMaterial {
       uMorphEnabled: { value: true },
       uShowLevelTint: { value: true },
       uTerrainKind: { value: 0 },
+      uUseHeightMap: { value: false },
+      uHeightMap: { value: null },
+      uHeightMapBounds: { value: new Vector4() },
+      uHeightMapMinM: { value: 0 },
+      uHeightMapRangeM: { value: 1 },
+      uUseColorMap: { value: false },
+      uColorMap: { value: null },
     },
     wireframe: false,
   });

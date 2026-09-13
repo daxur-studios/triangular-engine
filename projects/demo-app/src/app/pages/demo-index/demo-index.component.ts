@@ -118,6 +118,18 @@ export const DEMOS: readonly DemoItem[] = [
       'Continuous Distance-Dependent Level of Detail planetary terrain with GPU vertex geomorphing, roughness decimation, and motion prediction.',
   },
   {
+    id: 'cell-planet-25d-map',
+    number: '02c',
+    title: 'Cell Planet 2.5D Map',
+    route: '/cell-planet-25d-map',
+    categoryId: 'terrain',
+    tier: 'lab',
+    entryPoints: ['worldgen', 'terrain'],
+    package: 'triangular-engine/worldgen + terrain',
+    description:
+      'Civilization-style oblique map preview using the shared cell planet sampler, baked ridge and river relief, and GPU-morphed clipmap terrain.',
+  },
+  {
     id: 'takram-clouds',
     number: '03',
     title: 'Takram Clouds',

@@ -25,10 +25,10 @@ describe('DemoIndexComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should have all 39 demos and 7 categories configured', () => {
-    expect(DEMOS.length).toBe(39);
+  it('should have all 40 demos and 7 categories configured', () => {
+    expect(DEMOS.length).toBe(40);
     expect(CATEGORIES.length).toBe(7);
-    expect(component.totalDemosCount).toBe(39);
+    expect(component.totalDemosCount).toBe(40);
     expect(component.gemsCount).toBeGreaterThan(0);
     expect(component.labsCount).toBeGreaterThan(0);
     expect(component.archivedCount).toBeGreaterThan(0);
@@ -94,6 +94,9 @@ describe('DemoIndexComponent', () => {
     expect(
       filtered.some((d) => d.description.toLowerCase().includes('boids')),
     ).toBeTrue();
+
+    component.setSearchQuery('2.5D');
+    expect(component.filteredDemos().some((d) => d.route === '/cell-planet-25d-map')).toBeTrue();
   });
 
   it('should detect when filters are active and clear them', () => {

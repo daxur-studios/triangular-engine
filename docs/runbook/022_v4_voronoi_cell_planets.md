@@ -497,6 +497,8 @@ no new params required from callers, `test:triangular-engine:worldgen` and both 
 
 ## References
 
+- Runbook [030_cell_planet_25d_map.md](030_cell_planet_25d_map.md) — planned tilted planar
+  map using the shared cell world and reusable GPU-morph clipmap; tracks integration separately.
 - Amit Patel, *Polygonal Map Generation for Games* (Red Blob Games) — cell-graph elevation, moisture, biomes, rivers; V4 is this on a sphere with plates added.
 - Runbook [019_cdlod_celestial_migration.md](019_cdlod_celestial_migration.md) — the CDLOD pipeline V4 deliberately does not assume.
 - Runbook [004_multi_surface_terrain.md](004_multi_surface_terrain.md) — shape-agnostic surface domains (relevant for the later flat/infinite variant).
