@@ -2,7 +2,7 @@
 
 ## Status and ownership
 
-- **2026-09-13: M0 implemented; M1 core bake and first demo integration implemented; visual acceptance pending.**
+- **2026-09-13: M0 and M1 implemented; M2+ visual acceptance pending.**
 - Goal: a Civilization-style map on a plane, viewed about 45 degrees above the ground,
   with visible mountain crests, river valleys, biome colours and cell selection.
 - [022 — Cell planets](022_v4_voronoi_cell_planets.md) owns world generation and shared
@@ -14,8 +14,14 @@
 
 ## Reuse decision
 
-Use the GPU-morph clipmap exported by `triangular-engine/terrain` as the rendering
-mechanism. Keep the cell graph authoritative for gameplay: rectangular clipmap tiles
+The GPU-morph clipmap exported by `triangular-engine/terrain` is the current rendering
+baseline. [031 — Shared planet terrain chunks](031_shared_planet_terrain_chunks.md)
+tracks the proposed Meshoptimizer + quadtree alternative for this map and a later globe,
+including flattening edits, seams, LOD and caching. It is an unvalidated experiment;
+this runbook retains ownership of the planar adapter and map experience. The clipmap
+contracts below describe the current implementation, not requirements for that candidate.
+
+Keep the cell graph authoritative for gameplay: rectangular clipmap tiles
 are temporary rendering patches, not replacement map cells.
 
 Verified source entry points:
@@ -30,11 +36,14 @@ Verified source entry points:
 - [Map projections](../../projects/triangular-engine/worldgen/render/map-projections.ts):
   shared forward/inverse mapping between planet directions and the flat map.
 
-The scene currently fixes four levels through module constants. `buildClipmapTiles`
-already takes sizing/level arguments; configuration needs threading through the scene,
-geometry and material with validation. Preserve the wave/noise fixtures as defaults.
-The current terrain fixture uses one mesh per level; renderer diagnostics count the
-whole scene, so water, overlays and additional passes must be measured separately.
+The scene now accepts optional level count, tile size, block radius, grid resolution,
+switch distance, height scale, ground-focus and texture-source settings; module
+constants remain the defaults for existing consumers. The 2.5D quality presets use
+these options to rebuild only when mesh resolution/LOD topology changes, and replace
+the bounded height/colour source in place for ordinary data-layer changes. Preserve
+the wave/noise fixtures as defaults. The current terrain fixture uses one mesh per
+level; renderer diagnostics count the whole scene, so water, overlays and additional
+passes must be measured separately.
 
 ## Data and rendering contract
 
@@ -97,8 +106,9 @@ texture coordinates must not become the authoritative world representation.
   original cell graph; a hit selects a world cell, never a clipmap tile.
 - **Material/lifecycle:** normals must reflect height scale and the chosen displacement.
   The current shader uses its own lighting; adding scene lights alone will not change it.
-  Ensure all owned scene objects are removed on disposal (the current helper adds a light
-  that its handle does not remove). Revisit culling only with displacement-aware bounds.
+  The scene handle removes its owned light, meshes, geometries and material on disposal;
+  retain repeated mount/dispose checks as a regression. Revisit culling only with
+  displacement-aware bounds.
 
 ## Milestones and acceptance
 
@@ -133,11 +143,20 @@ alone does not establish visual acceptance. Record unresolved test-environment f
 
 ## Progress
 
+- **2026-09-13 — Alternative renderer scoped:** created
+  [031](031_shared_planet_terrain_chunks.md) for shared optimised terrain chunks.
+  Start with mixed-LOD ridge/river and flattening fixtures; integrate a comparison here
+  after those checks. No renderer replacement or dependency installation in this step.
+
 ### 2026-09-13 — 2D/2.5D generation parity
 
 - Fixed a comparison bug where the 2D raster and 2.5D terrain used different hidden world inputs: the 2D renderer's `jitter = 0.35` and `plateCount = 14` are now shared with the 2.5D bake, alongside the query-preserved cell count, seed, profile, projection, and relaxation passes. Fresh page loads also use the same `1500` cells / seed `1` defaults.
 - Added the relaxation control to the 2D page and preserved it in the comparison query, so changing it intentionally changes both views rather than silently reverting to the 2D default.
 - Applied the shared water-level land/ocean threshold to the 2.5D bake as well; the comparison switch no longer drops a 2D sea-level adjustment.
+- Replaced the fixed 2.5D display bake scale (`14`) with a `0–14` vertical-scale control, defaulting to `4`; this changes only rendered relief, so the canonical terrain and future sphere path remain unchanged.
+- Added a 2.5D `Data layer` selector for the shared `biome`, `elevation`, `plates`, `temperature`, `moisture` and `land` colour modes. The modes reuse the same exported colour ramps and per-cell world data as the 2D renderer; changing a mode swaps only the colour texture and preserves the current height/LOD state. `fillMode` is carried through the comparison query.
+- Added a 2.5D terrain-quality selector: Preview, Standard, High and Ultra change both the planar bake resolution and clipmap grid resolution. Standard preserves the previous default; higher presets rebuild the clipmap mesh and source texture for more visible relief detail. `terrainQuality` is query-preserved.
+- Added a Blender handoff button that exports the current baked terrain as an OBJ plus matching MTL. Geometry follows the selected projection footprint, skips invalid projection texels, and quantizes the active data-layer colours into Blender materials; keep the two downloaded files together when importing the OBJ.
 - Kept the shared values in `projects/demo-app/src/app/pages/cell-planet-generation-config.ts` so future renderer changes do not drift.
 
 - **2026-09-13 — Design recorded:** inspected the promoted library implementation and
@@ -178,7 +197,21 @@ alone does not establish visual acceptance. Record unresolved test-environment f
   above the shoreline datum. Added reciprocal 2D map / 2.5D terrain switches that carry the
   current world and 2D display settings through query parameters, so comparison does not reset
   the generated data.
+- **2026-09-13 — Clipmap integration hardening:** threaded configurable LOD count, tile size,
+  block radius, grid resolution, switch distance, height scale and ground focus through the
+  reusable scene. Added deterministic benchmark fixtures/probes for retention, seam/gap and
+  popping checks. Replaced shader dynamic uniform-array indexing with constant-index branches
+  for WebGL compatibility, and made the height function return one initialized value on every
+  path; library and demo builds pass. These checks validate the reusable clipmap, not yet the
+  2.5D map's visual acceptance.
+- **2026-09-13 — Simplification experiment:** added a runtime-only 0–95% vertex-removal slider
+  using Three.js `SimplifyModifier`. At 0% the normal clipmap remains active; above 0% the
+  clipmap is hidden and the current baked surface is decimated into a standalone inspection
+  mesh. This deliberately does not modify the canonical sampler or clipmap lattice, because
+  arbitrary decimation would invalidate crack-free LOD morphing. The Blender OBJ export remains
+  unchanged. Validate Ultra-quality cost and feature retention before considering a feature-aware
+  decimator or production use.
 - **2026-09-13 — Handoff refined:** added explicit planet-space units, cache identity and
   plane/sphere reuse requirements. M0 now precedes planar baking; M2 consumes and tunes
-  that shared relief. Next: M0 shared sampler, then M1–M4. Concurrent clipmap work must be
-  inspected before integration; this document does not certify its latest revision.
+  that shared relief. Next: M2 relief/river/ridge visual tuning, then M3 selection and
+  production camera/2D comparison polish, followed by M4 performance and acceptance.

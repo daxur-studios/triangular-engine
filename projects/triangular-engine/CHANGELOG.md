@@ -6,6 +6,9 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `IClipmapTerrainSceneHandle.setVisible()` now allows consumers to temporarily hide
+  the clipmap meshes while displaying an alternate inspection surface.
+
 - `buildPlanetSurfaceBake()` now accepts an optional projection direction adapter, allowing
   planar caches to use a map projection footprint while keeping the canonical surface sampler
   projection-independent.

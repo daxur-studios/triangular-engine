@@ -10,6 +10,7 @@ import { EngineModule, EngineService } from 'triangular-engine';
 import {
   createClipmapTerrainScene,
   LEVEL_COUNT,
+  probeSeamsAndGaps,
   type IClipmapTerrainSceneHandle,
 } from 'triangular-engine/terrain';
 
@@ -68,6 +69,10 @@ export class GpuMorphLodSpikeComponent {
   readonly isCapturingDiagnostics = signal(false);
   readonly diagnosticsReport = signal<string | null>(null);
   readonly diagnosticsCopied = signal(false);
+
+  readonly isProbingSeams = signal(false);
+  readonly seamProbeReport = signal<string | null>(null);
+  readonly seamProbeCopied = signal(false);
 
   constructor() {
     this.engine.scene.background = new Color('#12181f');
@@ -206,6 +211,30 @@ export class GpuMorphLodSpikeComponent {
           setTimeout(() => this.diagnosticsCopied.set(false), 2000);
         })
         .catch(() => undefined);
+    }
+  }
+
+  async runSeamProbe(): Promise<void> {
+    if (this.isProbingSeams()) return;
+    this.isProbingSeams.set(true);
+    this.seamProbeReport.set(null);
+
+    try {
+      const result = await probeSeamsAndGaps(this.engine, {
+        levelCount: LEVEL_COUNT,
+      });
+      this.seamProbeReport.set(result.textReport);
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        navigator.clipboard
+          .writeText(result.textReport)
+          .then(() => {
+            this.seamProbeCopied.set(true);
+            setTimeout(() => this.seamProbeCopied.set(false), 2000);
+          })
+          .catch(() => undefined);
+      }
+    } finally {
+      this.isProbingSeams.set(false);
     }
   }
 

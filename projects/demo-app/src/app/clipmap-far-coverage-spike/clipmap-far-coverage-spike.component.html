@@ -78,11 +78,20 @@
     >
       {{ isCapturingDiagnostics() ? 'Capturing…' : 'Run diagnostics capture' }}
     </button>
+    <button
+      [disabled]="isProbingSeams()"
+      (click)="runSeamProbe()"
+    >
+      {{ isProbingSeams() ? 'Probing Seams…' : 'Probe Seams & Gaps' }}
+    </button>
   </div>
-  @if (diagnosticsCopied()) {
+  @if (diagnosticsCopied() || seamProbeCopied()) {
     <span>Copied report to clipboard.</span>
   }
   @if (diagnosticsReport(); as report) {
+    <pre class="report">{{ report }}</pre>
+  }
+  @if (seamProbeReport(); as report) {
     <pre class="report">{{ report }}</pre>
   }
 </aside>

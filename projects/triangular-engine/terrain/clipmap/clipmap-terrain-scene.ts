@@ -3,6 +3,7 @@ import {
   InstancedBufferAttribute,
   InstancedMesh,
   Texture,
+  Vector4,
 } from 'three';
 import { EngineService } from 'triangular-engine';
 import { buildClipmapTiles, groupTilesByLevel } from './clipmap-layout';
@@ -17,6 +18,10 @@ import {
 } from './clipmap-constants';
 import { buildSharedGridBuffers } from './clipmap-grid-geometry';
 import { createClipmapTerrainMaterial } from './clipmap-terrain-material';
+import {
+  CLIPMAP_TERRAIN_KIND,
+  type ClipmapTerrainKindName,
+} from './clipmap-benchmark-fixtures';
 
 export interface IClipmapTerrainDiagnostics {
   readonly drawCalls: number;
@@ -62,11 +67,13 @@ export interface IClipmapTerrainHeightSource {
 export interface IClipmapTerrainSceneHandle {
   /** Replace the bounded texture-backed source without rebuilding clipmap meshes. */
   setHeightSource(source: IClipmapTerrainHeightSource): void;
+  /** Show or hide the clipmap meshes while an alternate debug surface is displayed. */
+  setVisible(enabled: boolean): void;
   setWireframe(enabled: boolean): void;
   setShowLevelTint(enabled: boolean): void;
   setMorphEnabled(enabled: boolean): void;
   setFrozen(enabled: boolean): void;
-  setTerrainKind(kind: 'wave' | 'noise'): void;
+  setTerrainKind(kind: ClipmapTerrainKindName): void;
   setDebugFlatTerrain(enabled: boolean): void;
   setDebugViewMode(mode: number): void;
   /**
@@ -106,7 +113,8 @@ export function createClipmapTerrainScene(
   const heightScaleM = options?.heightScaleM ?? TERRAIN_HEIGHT_SCALE_M;
   const maxInstancesPerLevel = (2 * blockRadiusTiles) ** 2;
 
-  engine.scene.add(new HemisphereLight('#cfe8ff', '#2b2318', 1.1));
+  const terrainLight = new HemisphereLight('#cfe8ff', '#2b2318', 1.1);
+  engine.scene.add(terrainLight);
 
   const { levelGeometries } = buildSharedGridBuffers(gridResolution, levelCount);
   const material = createClipmapTerrainMaterial();
@@ -182,8 +190,20 @@ export function createClipmapTerrainScene(
       blockRadiusTiles,
     );
     const groups = groupTilesByLevel(tiles, levelCount);
+    const boundsArray = material.uniforms['uLevelBounds']?.value as Vector4[] | undefined;
 
     for (let level = 0; level < levelCount; level++) {
+      if (boundsArray && boundsArray[level]) {
+        const tileSizeM = baseTileSizeM * 2 ** level;
+        const centerTileX = Math.floor(lodFocus.x / (2 * tileSizeM)) * 2;
+        const centerTileZ = Math.floor(lodFocus.z / (2 * tileSizeM)) * 2;
+        boundsArray[level].set(
+          (centerTileX - blockRadiusTiles) * tileSizeM,
+          (centerTileZ - blockRadiusTiles) * tileSizeM,
+          (centerTileX + blockRadiusTiles) * tileSizeM,
+          (centerTileZ + blockRadiusTiles) * tileSizeM,
+        );
+      }
       const group = groups[level]!;
       const mesh = levelMeshes[level]!;
       const offsets = levelOffsetAttributes[level]!;
@@ -221,6 +241,9 @@ export function createClipmapTerrainScene(
     setHeightSource(source: IClipmapTerrainHeightSource): void {
       applyHeightSource(source);
     },
+    setVisible(enabled: boolean): void {
+      for (const mesh of levelMeshes) mesh.visible = enabled;
+    },
     setWireframe(enabled: boolean): void {
       material.wireframe = enabled;
     },
@@ -233,8 +256,8 @@ export function createClipmapTerrainScene(
     setFrozen(enabled: boolean): void {
       frozen = enabled;
     },
-    setTerrainKind(kind: 'wave' | 'noise'): void {
-      material.uniforms['uTerrainKind']!.value = kind === 'noise' ? 1 : 0;
+    setTerrainKind(kind: ClipmapTerrainKindName): void {
+      material.uniforms['uTerrainKind']!.value = CLIPMAP_TERRAIN_KIND[kind];
     },
     setDebugFlatTerrain(enabled: boolean): void {
       material.uniforms['uDebugFlatTerrain']!.value = enabled;
@@ -252,6 +275,7 @@ export function createClipmapTerrainScene(
     },
     dispose(): void {
       tickSubscription.unsubscribe();
+      engine.scene.remove(terrainLight);
       for (const mesh of levelMeshes) engine.scene.remove(mesh);
       for (const geometry of levelGeometries) geometry.dispose();
       material.dispose();

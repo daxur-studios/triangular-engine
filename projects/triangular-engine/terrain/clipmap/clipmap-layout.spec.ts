@@ -79,4 +79,50 @@ describe('clipmap-layout', () => {
       expect(groups[0]!.length).toBe(maxInstancesPerLevel);
     }
   });
+
+  it('guarantees Level L bounding box aligns to Level L+1 tile size (zero partial overlap)', () => {
+    const testCameras = [
+      [0, 0],
+      [15.5, 31.2],
+      [60, 60],
+      [-123.4, 567.8],
+      [999.9, -888.8],
+    ];
+
+    for (const [camX, camZ] of testCameras) {
+      const tiles = buildClipmapTiles(camX, camZ, baseTileSizeM, 6, blockRadiusTiles);
+      for (let l = 0; l < 5; l++) {
+        const lTiles = tiles.filter((t) => t.level === l);
+        const minX = Math.min(...lTiles.map((t) => t.centerXM - t.sizeM / 2));
+        const maxX = Math.max(...lTiles.map((t) => t.centerXM + t.sizeM / 2));
+        const minZ = Math.min(...lTiles.map((t) => t.centerZM - t.sizeM / 2));
+        const maxZ = Math.max(...lTiles.map((t) => t.centerZM + t.sizeM / 2));
+
+        const nextTileSizeM = baseTileSizeM * 2 ** (l + 1);
+        expect(Math.abs(minX % nextTileSizeM)).toBe(0);
+        expect(Math.abs(maxX % nextTileSizeM)).toBe(0);
+        expect(Math.abs(minZ % nextTileSizeM)).toBe(0);
+        expect(Math.abs(maxZ % nextTileSizeM)).toBe(0);
+
+        // Check that no Level L+1 tile partially cuts through Level L's box
+        const nextTiles = tiles.filter((t) => t.level === l + 1);
+        for (const nt of nextTiles) {
+          const ntMinX = nt.centerXM - nt.sizeM / 2;
+          const ntMaxX = nt.centerXM + nt.sizeM / 2;
+          const ntMinZ = nt.centerZM - nt.sizeM / 2;
+          const ntMaxZ = nt.centerZM + nt.sizeM / 2;
+
+          const insideX = ntMinX >= minX && ntMaxX <= maxX;
+          const insideZ = ntMinZ >= minZ && ntMaxZ <= maxZ;
+          // Tile must NOT be strictly inside the finer level's box
+          expect(insideX && insideZ).toBeFalse();
+
+          // And must not cross into the box partially
+          const xIntersect = Math.max(0, Math.min(ntMaxX, maxX) - Math.max(ntMinX, minX));
+          const zIntersect = Math.max(0, Math.min(ntMaxZ, maxZ) - Math.max(ntMinZ, minZ));
+          expect(xIntersect > 0 && zIntersect > 0).toBeFalse();
+        }
+      }
+    }
+  });
 });

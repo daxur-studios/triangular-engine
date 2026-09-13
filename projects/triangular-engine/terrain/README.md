@@ -48,6 +48,10 @@ The clipmap terrain scene also accepts a bounded `heightSource` and exposes
 `setHeightSource(source)` on its returned handle. Consumers can rebuild a
 worldgen bake, for example after changing seed or cell count, and replace the
 GPU source without rebuilding the clipmap meshes.
+The handle also exposes `setVisible(enabled)` so a consumer can temporarily hide
+the clipmap while inspecting an alternate runtime surface. This is useful for
+experiments such as CPU mesh simplification, but simplified geometry is not a
+replacement for the clipmap's crack-free LOD lattice.
 
 For high-speed planetary bodies and large-scale terrains, `CdlodPlanetComponent`
 provides GPU vertex geomorphing, roughness-based feature decimation, motion look-ahead,

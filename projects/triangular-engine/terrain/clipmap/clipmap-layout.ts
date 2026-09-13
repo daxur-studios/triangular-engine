@@ -47,8 +47,14 @@ export function buildClipmapTiles(
 
   for (let level = 0; level < levelCount; level++) {
     const tileSizeM = baseTileSizeM * 2 ** level;
-    const centerTileX = Math.floor(cameraXM / tileSizeM);
-    const centerTileZ = Math.floor(cameraZM / tileSizeM);
+    // Snap centerTile to an even integer so that outer boundaries:
+    // (centerTile +/- blockRadiusTiles) * tileSizeM
+    // are exact multiples of the next coarser level's tile size (2 * tileSizeM).
+    // This ensures that the outer perimeter of level L and the inner perimeter of
+    // level L+1 share identical rectilinear boundaries, eliminating mid-quad cuts,
+    // tile overlap, and edge tearing.
+    const centerTileX = Math.floor(cameraXM / (2 * tileSizeM)) * 2;
+    const centerTileZ = Math.floor(cameraZM / (2 * tileSizeM)) * 2;
 
     for (let dz = -blockRadiusTiles; dz < blockRadiusTiles; dz++) {
       for (let dx = -blockRadiusTiles; dx < blockRadiusTiles; dx++) {

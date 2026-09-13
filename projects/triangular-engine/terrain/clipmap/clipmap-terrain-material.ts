@@ -1,4 +1,5 @@
 import { ShaderMaterial, Vector3, Vector4 } from 'three';
+import { BENCHMARK_TERRAIN_GLSL } from './clipmap-benchmark-fixtures';
 
 /**
  * Stand-in for a real `sampleElevation()`/`height(dir)`. Texture-backed
@@ -8,7 +9,7 @@ import { ShaderMaterial, Vector3, Vector4 } from 'three';
  * Extend or replace this GLSL block to plug in real terrain sampling.
  */
 const TERRAIN_HEIGHT_GLSL = `
-  uniform float uTerrainKind; // 0 = wave (original), 1 = noise (fbm)
+  uniform float uTerrainKind; // 0=wave, 1=noise, 2=peaks, 3=ridges, 4=terraces, 5=field
   uniform bool uUseHeightMap;
   uniform sampler2D uHeightMap;
   uniform vec4 uHeightMapBounds; // minX, minZ, maxX, maxZ
@@ -62,17 +63,32 @@ const TERRAIN_HEIGHT_GLSL = `
   float terrainHeight(vec2 xz) {
     vec2 mapSize = uHeightMapBounds.zw - uHeightMapBounds.xy;
     vec2 mapUv = (xz - uHeightMapBounds.xy) / mapSize;
+    // Use one initialized result for every path. ANGLE's HLSL translator can
+    // otherwise report its generated function return variable as potentially
+    // uninitialized even though the early-return branches are logically total.
+    float height = 0.0;
     if (uUseHeightMap) {
       // A bounded real source owns the map. Do not leak the analytic spike
       // terrain outside its bounds; the clipmap can cover a larger area than
       // a first-pass bake. Keep the exterior at the shared sea datum until a
       // streamed/larger source is available.
       if (all(greaterThanEqual(mapUv, vec2(0.0))) && all(lessThanEqual(mapUv, vec2(1.0)))) {
-        return uHeightMapMinM + texture2D(uHeightMap, mapUv).r * uHeightMapRangeM;
+        height = uHeightMapMinM + texture2D(uHeightMap, mapUv).r * uHeightMapRangeM;
       }
-      return 0.0;
+    } else {
+      if (uTerrainKind < 0.5) height = terrainHeightWave(xz);
+      else if (uTerrainKind < 1.5) height = terrainHeightNoise(xz);
+      else {
+        // Deterministic benchmark fixtures (clipmap-benchmark-fixtures.ts).
+        // These are generated from the same constants the CPU fidelity harness
+        // evaluates, so the rendered mesh and ground truth cannot diverge.
+        if (uTerrainKind < 2.5) height = terrainHeightBenchmarkPeaks(xz);
+        else if (uTerrainKind < 3.5) height = terrainHeightBenchmarkRidges(xz);
+        else if (uTerrainKind < 4.5) height = terrainHeightBenchmarkTerraces(xz);
+        else height = terrainHeightBenchmarkField(xz);
+      }
     }
-    return uTerrainKind < 0.5 ? terrainHeightWave(xz) : terrainHeightNoise(xz);
+    return height;
   }
 `;
 
@@ -109,6 +125,8 @@ const VERTEX_SHADER_BODY = `
   uniform bool uMorphEnabled;
   uniform bool uDebugFlatTerrain;
 
+  uniform vec4 uLevelBounds[16];
+
   attribute vec3 instanceOffset;
   attribute float instanceScale;
 
@@ -124,6 +142,29 @@ const VERTEX_SHADER_BODY = `
   float realVertexSpacingM(float level) {
     float clampedStride = min(pow(2.0, level), uGridResolution);
     return (clampedStride / uGridResolution) * uBaseTileSizeM * pow(2.0, level);
+  }
+
+  // WebGL 1 / GLES 2 shader compilers commonly require uniform-array indices
+  // to be compile-time constants. Keep the level bounds in a uniform array so
+  // the CPU can update them, but select entries through constant-index
+  // branches instead of a runtime array index.
+  vec4 levelBounds(float level) {
+    if (level < 0.5) return uLevelBounds[0];
+    if (level < 1.5) return uLevelBounds[1];
+    if (level < 2.5) return uLevelBounds[2];
+    if (level < 3.5) return uLevelBounds[3];
+    if (level < 4.5) return uLevelBounds[4];
+    if (level < 5.5) return uLevelBounds[5];
+    if (level < 6.5) return uLevelBounds[6];
+    if (level < 7.5) return uLevelBounds[7];
+    if (level < 8.5) return uLevelBounds[8];
+    if (level < 9.5) return uLevelBounds[9];
+    if (level < 10.5) return uLevelBounds[10];
+    if (level < 11.5) return uLevelBounds[11];
+    if (level < 12.5) return uLevelBounds[12];
+    if (level < 13.5) return uLevelBounds[13];
+    if (level < 14.5) return uLevelBounds[14];
+    return uLevelBounds[15];
   }
 
   void main() {
@@ -191,10 +232,16 @@ const VERTEX_SHADER_BODY = `
     float borderBlend = 0.0;
 
     if (myLevel < uMaxLevel - 0.5) {
-      float tileSizeAtMyLevel = uBaseTileSizeM * pow(2.0, myLevel);
-      vec2 centerTileAtMyLevel = floor(uCameraWorldPos.xz / tileSizeAtMyLevel);
-      vec2 boxMin = (centerTileAtMyLevel - uBlockRadiusTiles) * tileSizeAtMyLevel;
-      vec2 boxMax = (centerTileAtMyLevel + uBlockRadiusTiles) * tileSizeAtMyLevel;
+      vec4 levelBox = levelBounds(myLevel);
+      vec2 boxMin = levelBox.xy;
+      vec2 boxMax = levelBox.zw;
+      if (boxMin.x == boxMax.x) {
+        float tileSizeAtMyLevel = uBaseTileSizeM * pow(2.0, myLevel);
+        float nextTileSize = tileSizeAtMyLevel * 2.0;
+        vec2 centerTileAtMyLevel = floor(uCameraWorldPos.xz / nextTileSize) * 2.0;
+        boxMin = (centerTileAtMyLevel - uBlockRadiusTiles) * tileSizeAtMyLevel;
+        boxMax = (centerTileAtMyLevel + uBlockRadiusTiles) * tileSizeAtMyLevel;
+      }
 
       vec2 distToMin = worldXZ - boxMin;
       vec2 distToMax = boxMax - worldXZ;
@@ -316,8 +363,9 @@ const FRAGMENT_SHADER_BODY = `
 
 export function createClipmapTerrainMaterial(): ShaderMaterial {
   return new ShaderMaterial({
-    vertexShader: TERRAIN_HEIGHT_GLSL + VERTEX_SHADER_BODY,
-    fragmentShader: TERRAIN_HEIGHT_GLSL + FRAGMENT_SHADER_BODY,
+    vertexShader: BENCHMARK_TERRAIN_GLSL + TERRAIN_HEIGHT_GLSL + VERTEX_SHADER_BODY,
+    fragmentShader:
+      BENCHMARK_TERRAIN_GLSL + TERRAIN_HEIGHT_GLSL + FRAGMENT_SHADER_BODY,
     uniforms: {
       uCameraWorldPos: { value: new Vector3() },
       uBaseTileSizeM: { value: 0 },
@@ -338,6 +386,9 @@ export function createClipmapTerrainMaterial(): ShaderMaterial {
       uHeightMapRangeM: { value: 1 },
       uUseColorMap: { value: false },
       uColorMap: { value: null },
+      uLevelBounds: {
+        value: Array.from({ length: 16 }, () => new Vector4()),
+      },
     },
     wireframe: false,
   });

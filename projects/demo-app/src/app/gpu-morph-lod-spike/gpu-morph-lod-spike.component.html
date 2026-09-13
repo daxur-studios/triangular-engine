@@ -63,6 +63,12 @@
           : "Copy diagnostics report"
       }}
     </button>
+    <button
+      [disabled]="isProbingSeams()"
+      (click)="runSeamProbe()"
+    >
+      {{ isProbingSeams() ? 'Probing Seams…' : 'Probe Seams & Gaps' }}
+    </button>
   </div>
   <p>
     Draw calls should stay ≤4 (one InstancedMesh per LOD level) regardless of
@@ -75,6 +81,12 @@
   @if (diagnosticsReport(); as report) {
     <pre class="diagnostics-report">{{ report }}</pre>
     @if (diagnosticsCopied()) {
+      <span class="copied-hint">Copied to clipboard</span>
+    }
+  }
+  @if (seamProbeReport(); as report) {
+    <pre class="diagnostics-report">{{ report }}</pre>
+    @if (seamProbeCopied()) {
       <span class="copied-hint">Copied to clipboard</span>
     }
   }

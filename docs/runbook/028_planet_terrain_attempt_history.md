@@ -8,6 +8,11 @@
 
 ## Why this doc exists
 
+Follow-up experiment: [031 — Shared planet terrain chunks](031_shared_planet_terrain_chunks.md)
+records the 2026-09-13 Meshoptimizer + quadtree proposal for the cell planet's 2.5D and
+future globe views, including terrain edits. **Planned, not validated**; its acceptance
+checks must address the failures recorded here. Detailed progress belongs in 031.
+
 Four distinct architectures have been built for planetary terrain. All four work well enough to demo; none has survived contact with the actual game at real planet scale. The three named pain points going into attempt #5:
 
 1. **Cubesphere quadtree (attempt 1)** — high draw calls in-game; seams at LOD boundaries and cube-face edges.
