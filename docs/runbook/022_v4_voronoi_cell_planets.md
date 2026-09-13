@@ -383,7 +383,7 @@ pragmatic given the above:**
   confirm the map's navigable/spring color split reads correctly and rivers still look reasonable
   end-to-end, per this workspace's standing "visual acceptance is a user check" practice.
 
-## Mountain ridge network pass (implemented 2026-09-12)
+## Mountain ridge network pass (implemented 2026-09-12; refined 2026-09-13)
 
 The existing `ridgeCellIds` correctly marked cells touching continent-continent collision
 boundaries, but there was no explicit line network to render between those mountain cells. Added a
@@ -403,14 +403,28 @@ compact ridge pass in `worldgen/core/ridges.ts`:
 - **Rendering**: `/cell-planet-map` has a `Mountain ridges` toggle and draws brown ridge paths plus
   summit dots. `<planetView>` also accepts `[showRidges]` and renders the same ecology paths on the
   globe. The public worldgen README and changelog were updated.
+- **Shared visual detail**: each cell-to-cell link now receives a deterministic local Voronoi-style
+  corridor route. Jittered candidate sites are sampled between the two exact cell-centre anchors,
+  then a short lowest-cost route is selected. The resulting unit-sphere points are shared by the
+  2D and 3D overlays, so added bends cannot make the map and globe disagree. `IRidgeParams.ridgeDetail`
+  exposes station count, lane count, corridor width, and site jitter for tuning.
+- **Terrain and river awareness**: ridge extraction now scores each candidate link using cell height,
+  lateral crest relief, and convergent plate strength. It builds one maximum-spanning mountain
+  skeleton from that combined score, which avoids treating every high-cell connection as equal and
+  reduces the arbitrary zigzags seen in the earlier boundary-first network. Ecology traces rivers
+  first and passes their paths into ridge extraction; a candidate ridge link that touches a river
+  corridor is removed, allowing the river to cut a visible gap in the ridge. `riverClearance` on
+  `IRidgeParams` controls the local corridor margin.
 - **Verification**: added `ridges.spec.ts`; the library and demo builds pass, and a direct generated
   planet smoke check confirmed non-empty paths/peaks, aligned strength arrays, and unit-sphere
-  points. The Karma worldgen bundle built, but ChromeHeadless could not start in the local
+  points. The detail smoke check also confirmed paths keep cell-centre anchors and gain inserted
+  unit points. The Karma worldgen bundle built, but ChromeHeadless could not start in the local
   environment because of its GPU/process setup.
 
-This pass establishes ridge topology and visualization. It does not yet carve channels into the
-terrain, make rivers respond to ridge geometry, or add constrained fractal/meander detail; those
-remain the next visual/geological refinement once the ridge layouts have been reviewed in the map.
+This pass establishes ridge topology, shared detail geometry, elevation-aware selection, and river
+compatibility. It does not yet carve channels into the terrain, alter river routing from ridge
+geometry, or add separate parallel crest branches; those remain the next visual/geological
+refinements once the layouts have been reviewed in the map.
 
 ## Terrain variety fixes: island/lake dotting, arid-belt calibration, ice-cap variability (2026-08-31)
 

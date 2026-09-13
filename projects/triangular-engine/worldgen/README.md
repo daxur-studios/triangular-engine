@@ -93,12 +93,18 @@ The climate/biome/river/ridge/water pass. This is what a cloud/weather system an
   coastlines: IVec3[][];      // closed polylines along every land/water edge
 
   // mountain ridges
-  ridgePaths: IVec3[][];       // open paths through adjacent mountain-cell centres
+  ridgePaths: IVec3[][];       // detailed open paths anchored at adjacent mountain-cell centres
   ridgePathStrength: number[]; // normalized strength matching ridgePaths
   ridgePeaks: IVec3[];         // isolated/local summit directions
   ridgePeakCellIds: number[];  // stable cell ids matching ridgePeaks
 }
 ```
+
+Ridge paths include a deterministic local Voronoi-style detail route between their exact cell-centre
+anchors. Tune it through `buildPlanetEcology(..., { ridges: { ridgeDetail: { ... } } })`; the shared
+unit-sphere points are consumed by both the 2D map and 3D globe overlays. Ridge links are selected
+from elevation crest relief plus convergent plate strength, and ecology removes links that touch a
+river corridor. Pass `ridges: { riverClearance: 0.16 }` to tune that river margin.
 
 `temperature`/`moisture`/`biome`/`slope` are the fields relevant to **cloud/weather placement**
 (coverage, storm intensity, rain-shadow) — everything else here is terrain/hydrology.

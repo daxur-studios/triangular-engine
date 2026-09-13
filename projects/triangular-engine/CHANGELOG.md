@@ -7,8 +7,10 @@ All notable changes to triangular-engine are documented here.
 ### Added
 
 - `triangular-engine/worldgen` now derives deterministic mountain ridge networks from
-  continent-continent collision boundaries and connected high cells. `IPlanetEcology` exposes
-  `ridgePaths`, normalized `ridgePathStrength`, and isolated `ridgePeaks`; the worldgen map and
+  elevation crest relief, continent-continent collision strength, and connected high cells.
+  `IPlanetEcology` exposes `ridgePaths`, normalized `ridgePathStrength`, and isolated `ridgePeaks`;
+  ridge paths include shared deterministic Voronoi-style corridor detail between cell-centre
+  anchors and avoid river corridors when assembled through ecology. The worldgen map and
   `<planetView>` expose matching `showRidges` overlays.
 
 - `triangular-engine/characters` now exports framework-free semantic facial channel contracts

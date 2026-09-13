@@ -74,7 +74,6 @@ export function buildPlanetEcology(
     waterBodies.waterBodyKind,
     params.rivers,
   );
-  const ridges = buildPlanetRidges(graph, tectonics, params.ridges);
   const coastlines = extractCoastlines(graph, tectonics.isLand).map((loop) =>
     addFractalDetail(loop, true, { seed: tectonics.seed, ...params.coastlineDetail }),
   );
@@ -89,6 +88,9 @@ export function buildPlanetEcology(
   );
   const riverPaths = detailedRivers.map((d) => d.points);
   const riverFlow = detailedRivers.map((d) => d.flow);
+  // Ridges use the final rendered river geometry so a river crossing can break a ridge link
+  // instead of producing a coincident-looking line in either the 2D map or 3D globe.
+  const ridges = buildPlanetRidges(graph, tectonics, params.ridges, riverPaths);
 
   return { ...climate, ...biomes, ...rivers, ...ridges, ...waterBodies, coastlines, riverPaths, riverFlow };
 }
