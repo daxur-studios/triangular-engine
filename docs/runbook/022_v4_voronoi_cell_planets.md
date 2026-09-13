@@ -4,6 +4,9 @@
 
 - State: In progress — **M0-M4e all implemented and verified** (graph core, tectonics, climate/biomes/rivers/coastlines, debug lab, canonical elevation function, chunking, per-chunk discrete LOD, local collider patches with Jolt physics wiring, and the terrain-edit rebuild path), isolated POC, not integrated with existing terrain/CDLOD; `/cell-planet-lab` now has all planned 2D map modes (graph/plates/elevation/land/temperature/moisture/biome/feature/rivers) plus a chunked, 2-level-LOD 3D preview mesh (one draw call per ~100-cell chunk, each showing full per-cell detail or sag-bounded merged cell polygons depending on camera distance), a debug high-res collider-patch overlay tracking the camera, a flatten/dig terrain-edit tool that rebuilds only the handful of chunks an edit actually touches, a `worldSizeTier` picker that genuinely rescales the render (not just a label), and (2026-08-29, ahead of M5) a `worldProfile` picker with per-cell geological features and lava rendering — see "World profiles + per-cell terrain features" below. **M4 reshaped 2026-08-26** from a single "rendering spike" into sub-milestones M4a–M4e (see Layer 2 and Milestones below), all of which are now done — **M5 (write-up & decision) is the next remaining piece.** M4d's actual Jolt ball-drop physics test now lives in its own sibling lab, `/planet-physics-lab` (2026-08-29 follow-up, see M4e's entry below), positioned in real meters via Jolt's double-precision `RVec3`.
 - Date: 2026-08-28
+- Ahead-of-M5 addition (2026-09-12): deterministic mountain ridge paths and summit markers are now
+  derived from tectonic collision boundaries plus connected high cells and are visible in the map
+  and reusable globe renderer; see "Mountain ridge network pass" below.
 - Naming note: "V4" is Bruno's label (V1–V3 = the noise-first planet attempts in BSP). Sublibrary name `worldgen` below is a **placeholder, not approved**.
 
 ## TL;DR
@@ -379,6 +382,34 @@ pragmatic given the above:**
   (`--configuration development`) both clean. Bruno's own in-browser check is the remaining step —
   confirm the map's navigable/spring color split reads correctly and rivers still look reasonable
   end-to-end, per this workspace's standing "visual acceptance is a user check" practice.
+
+## Mountain ridge network pass (implemented 2026-09-12)
+
+The existing `ridgeCellIds` correctly marked cells touching continent-continent collision
+boundaries, but there was no explicit line network to render between those mountain cells. Added a
+compact ridge pass in `worldgen/core/ridges.ts`:
+
+- **Tectonic spines**: convergent continental boundary edges are converted from cell adjacencies
+  into shared Voronoi-corner segments, then stitched into open paths. Endpoints and junctions split
+  the network, so a chain, branch/star, or parallel boundary produces separate readable paths.
+- **Terrain skeletons**: connected high land cells outside the tectonic paths are reduced to a
+  deterministic maximum-spanning forest. This preserves narrow mountain chains and branches
+  without drawing every edge of a broad alpine patch.
+- **Summits**: locally highest land cells above a normalized relief threshold become `ridgePeaks`;
+  isolated mountain cells therefore remain points instead of receiving an invented line.
+- **Public ecology data**: `IPlanetEcology` now exposes `ridgePaths`, `ridgePathStrength`,
+  `ridgePeaks`, and `ridgePeakCellIds`. The core remains deterministic and unit-sphere based.
+- **Rendering**: `/cell-planet-map` has a `Mountain ridges` toggle and draws brown ridge paths plus
+  summit dots. `<planetView>` also accepts `[showRidges]` and renders the same ecology paths on the
+  globe. The public worldgen README and changelog were updated.
+- **Verification**: added `ridges.spec.ts`; the library and demo builds pass, and a direct generated
+  planet smoke check confirmed non-empty paths/peaks, aligned strength arrays, and unit-sphere
+  points. The Karma worldgen bundle built, but ChromeHeadless could not start in the local
+  environment because of its GPU/process setup.
+
+This pass establishes ridge topology and visualization. It does not yet carve channels into the
+terrain, make rivers respond to ridge geometry, or add constrained fractal/meander detail; those
+remain the next visual/geological refinement once the ridge layouts have been reviewed in the map.
 
 ## Terrain variety fixes: island/lake dotting, arid-belt calibration, ice-cap variability (2026-08-31)
 

@@ -4,11 +4,12 @@ import { extractCoastlines } from './coastlines';
 import { addFractalDetail, addFractalDetailWithFlow, IFractalDetailParams } from './polyline-detail';
 import { IPlanetGraphCore } from './planet-graph';
 import { IPlanetRivers, IRiverParams, traceRivers } from './rivers';
+import { buildPlanetRidges, IPlanetRidges, IRidgeParams } from './ridges';
 import { IPlanetTectonics } from './tectonics';
 import { IVec3 } from './vec3';
 import { classifyWaterBodies, IPlanetWaterBodies } from './water-bodies';
 
-export interface IPlanetEcology extends IPlanetClimate, IPlanetBiomes, IPlanetRivers, IPlanetWaterBodies {
+export interface IPlanetEcology extends IPlanetClimate, IPlanetBiomes, IPlanetRivers, IPlanetWaterBodies, IPlanetRidges {
   /** Closed polylines walking every land/water cell boundary, with fractal midpoint-displacement
    * detail already baked in (see `polyline-detail.ts`) — real added points, not just a smoothed
    * curve through the raw Voronoi corners. */
@@ -31,6 +32,7 @@ export interface IPlanetEcologyParams {
    * a thin line, not a filled silhouette, so it doesn't need as much wobble to read as organic.
    * Pass `{ levels: 0 }` to keep the raw corner-graph paths. */
   riverDetail?: IFractalDetailParams;
+  ridges?: IRidgeParams;
 }
 
 /**
@@ -72,6 +74,7 @@ export function buildPlanetEcology(
     waterBodies.waterBodyKind,
     params.rivers,
   );
+  const ridges = buildPlanetRidges(graph, tectonics, params.ridges);
   const coastlines = extractCoastlines(graph, tectonics.isLand).map((loop) =>
     addFractalDetail(loop, true, { seed: tectonics.seed, ...params.coastlineDetail }),
   );
@@ -87,5 +90,5 @@ export function buildPlanetEcology(
   const riverPaths = detailedRivers.map((d) => d.points);
   const riverFlow = detailedRivers.map((d) => d.flow);
 
-  return { ...climate, ...biomes, ...rivers, ...waterBodies, coastlines, riverPaths, riverFlow };
+  return { ...climate, ...biomes, ...rivers, ...ridges, ...waterBodies, coastlines, riverPaths, riverFlow };
 }

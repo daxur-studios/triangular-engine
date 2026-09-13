@@ -68,7 +68,7 @@ params. Always normalize against land relief: `(elevation[i] - seaLevelElevation
 
 ### `ecology = buildPlanetEcology(graph, tectonics, ...)` → `IPlanetEcology`
 
-The climate/biome/river/water pass. This is what a cloud/weather system wants.
+The climate/biome/river/ridge/water pass. This is what a cloud/weather system and terrain overlay want.
 
 ```ts
 {
@@ -91,6 +91,12 @@ The climate/biome/river/water pass. This is what a cloud/weather system wants.
 
   // coastlines (also corner-point polylines, not per-cell)
   coastlines: IVec3[][];      // closed polylines along every land/water edge
+
+  // mountain ridges
+  ridgePaths: IVec3[][];       // open ridge paths: tectonic boundary spines and high-cell skeletons
+  ridgePathStrength: number[]; // normalized strength matching ridgePaths
+  ridgePeaks: IVec3[];         // isolated/local summit directions
+  ridgePeakCellIds: number[];  // stable cell ids matching ridgePeaks
 }
 ```
 
@@ -144,7 +150,7 @@ Layer 2 for *why* it's chunked instead of one mesh.
   [scale]="55"
   [cellCount]="700" [seed]="7" [relaxationIterations]="2" [jitter]="0.15" [plateCount]="10"
   [elevationScale]="0.02" [renderMode]="'elevation'"
-  [showOcean]="true" [showRivers]="false" [showCoastlines]="false"
+  [showOcean]="true" [showRivers]="false" [showRidges]="false" [showCoastlines]="false"
   #planet
 />
 ```
@@ -158,7 +164,7 @@ Layer 2 for *why* it's chunked instead of one mesh.
 | `plateCount` | 10 | regenerate-triggering |
 | `elevationScale` | 0.02 | cheap reposition, no resample |
 | `renderMode` | `'elevation'` | `'elevation'\|'plates'\|'biome'\|'temperature'\|'moisture'\|'land'` |
-| `showOcean`/`showRivers`/`showCoastlines` | `true`/`false`/`false` | visibility toggles only |
+| `showOcean`/`showRivers`/`showRidges`/`showCoastlines` | `true`/`false`/`false`/`false` | visibility toggles only |
 | `usePinning` | `true` | silhouette-preserving LOD1 (peaks/coastline/islands never flatten away) |
 | `lodNearDistance` | 2 | camera distance (planet-radii) below which a chunk shows LOD0 |
 | `frozen` | `false` | pauses the per-frame LOD/cull pass |

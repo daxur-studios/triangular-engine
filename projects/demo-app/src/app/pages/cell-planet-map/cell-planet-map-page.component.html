@@ -104,6 +104,10 @@
       Rivers
     </label>
     <label class="checkbox">
+      <input type="checkbox" [checked]="showRidges()" (change)="showRidges.set($any($event.target).checked)" />
+      Mountain ridges
+    </label>
+    <label class="checkbox">
       <input type="checkbox" [checked]="showCellEdges()" (change)="showCellEdges.set($any($event.target).checked)" />
       Cell edges
     </label>
@@ -162,6 +166,7 @@
         [showIcons]="showIcons()"
         [iconBudget]="iconBudget()"
         [showRivers]="showRivers()"
+        [showRidges]="showRidges()"
         [showCellEdges]="showCellEdges()"
         [highlightedCellIds]="highlightedCellIds()"
         (cellClick)="onCellClick($event)"

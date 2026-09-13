@@ -66,6 +66,7 @@ export class CellPlanetMapPageComponent {
   readonly fillModes: CellPlanetMapFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture', 'land'];
   readonly showIcons = signal(true);
   readonly showRivers = signal(true);
+  readonly showRidges = signal(true);
   readonly showCellEdges = signal(false);
   readonly iconBudget = signal(1400);
 

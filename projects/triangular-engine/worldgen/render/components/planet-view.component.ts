@@ -125,6 +125,7 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
   readonly renderMode = input<PlanetRenderMode>('elevation');
   readonly showOcean = input(true);
   readonly showRivers = input(false);
+  readonly showRidges = input(false);
   readonly showCoastlines = input(false);
   /** Silhouette-preserving LOD1 pins (`computeCellPins()`) — a mesh-quality knob, not a debug
    * toggle; off reproduces the pre-pinning LOD1 merge exactly. */
@@ -193,10 +194,18 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
     transparent: true,
     opacity: 0.9,
   });
+  private readonly ridgeMaterial = new LineBasicMaterial({
+    color: '#8b573e',
+    transparent: true,
+    opacity: 0.95,
+  });
   private riverLines: LineSegments | null = null;
+  private ridgeLines: LineSegments | null = null;
   private coastlineLines: LineSegments | null = null;
   private riverDirections = new Float32Array(0);
   private riverElevations = new Float32Array(0);
+  private ridgeDirections = new Float32Array(0);
+  private ridgeElevations = new Float32Array(0);
   private coastlineDirections = new Float32Array(0);
   /** Camera position expressed in this planet's unit-sphere coordinate system. Reused every
    * frame so translated/scaled consumers (for example BSP's body-fixed surface frame) do not
@@ -246,6 +255,10 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
       if (this.riverLines) this.riverLines.visible = visible;
     });
     effect(() => {
+      const visible = this.showRidges();
+      if (this.ridgeLines) this.ridgeLines.visible = visible;
+    });
+    effect(() => {
       const visible = this.showCoastlines();
       if (this.coastlineLines) this.coastlineLines.visible = visible;
     });
@@ -262,10 +275,12 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
     for (const mesh of this.previewMeshes) mesh.geometry.dispose();
     this.oceanMesh?.geometry.dispose();
     this.riverLines?.geometry.dispose();
+    this.ridgeLines?.geometry.dispose();
     this.coastlineLines?.geometry.dispose();
     this.previewMaterial.dispose();
     this.oceanMaterial.dispose();
     this.riverMaterial.dispose();
+    this.ridgeMaterial.dispose();
     this.coastlineMaterial.dispose();
     super.ngOnDestroy();
   }
@@ -502,6 +517,21 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
     this.riverLines.visible = this.showRivers();
     this.object3D().add(this.riverLines);
 
+    if (this.ridgeLines) {
+      this.object3D().remove(this.ridgeLines);
+      this.ridgeLines.geometry.dispose();
+    }
+    this.ridgeDirections = this.#flattenPathDirections(ecology.ridgePaths, false);
+    this.ridgeElevations = this.#sampleElevationsFor(this.ridgeDirections);
+    const ridgeGeometry = new BufferGeometry();
+    ridgeGeometry.setAttribute(
+      'position',
+      new BufferAttribute(new Float32Array(this.ridgeDirections.length), 3),
+    );
+    this.ridgeLines = new LineSegments(ridgeGeometry, this.ridgeMaterial);
+    this.ridgeLines.visible = this.showRidges();
+    this.object3D().add(this.ridgeLines);
+
     if (this.coastlineLines) {
       this.object3D().remove(this.coastlineLines);
       this.coastlineLines.geometry.dispose();
@@ -532,6 +562,19 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
         positions[o] = this.riverDirections[o] * radius;
         positions[o + 1] = this.riverDirections[o + 1] * radius;
         positions[o + 2] = this.riverDirections[o + 2] * radius;
+      }
+      attr.needsUpdate = true;
+    }
+
+    if (this.ridgeLines) {
+      const attr = this.ridgeLines.geometry.getAttribute('position') as BufferAttribute;
+      const positions = attr.array as Float32Array;
+      for (let i = 0; i < this.ridgeElevations.length; i++) {
+        const radius = (1 + this.ridgeElevations[i] * scale) * bias;
+        const o = i * 3;
+        positions[o] = this.ridgeDirections[o] * radius;
+        positions[o + 1] = this.ridgeDirections[o + 1] * radius;
+        positions[o + 2] = this.ridgeDirections[o + 2] * radius;
       }
       attr.needsUpdate = true;
     }

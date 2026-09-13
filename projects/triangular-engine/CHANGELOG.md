@@ -6,6 +6,11 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `triangular-engine/worldgen` now derives deterministic mountain ridge networks from
+  continent-continent collision boundaries and connected high cells. `IPlanetEcology` exposes
+  `ridgePaths`, normalized `ridgePathStrength`, and isolated `ridgePeaks`; the worldgen map and
+  `<planetView>` expose matching `showRidges` overlays.
+
 - `triangular-engine/characters` now exports framework-free semantic facial channel contracts
   and serializable command types (`face-semantic-channels.ts`) and a 5-layer composition
   controller (`FacialAnimationController`). Features include:

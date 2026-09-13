@@ -3,7 +3,7 @@ import { buildPlanetGraphCore } from './planet-graph';
 import { buildPlanetTectonics } from './tectonics';
 
 describe('buildPlanetEcology', () => {
-  it('combines climate, biomes, rivers, and coastlines from a tectonics result', () => {
+  it('combines climate, biomes, rivers, ridges, and coastlines from a tectonics result', () => {
     const graph = buildPlanetGraphCore({ cellCount: 300, seed: 50 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 50 });
     const ecology = buildPlanetEcology(graph, tectonics);
@@ -13,6 +13,7 @@ describe('buildPlanetEcology', () => {
     expect(ecology.biome.length).toBe(graph.cells.length);
     expect(ecology.slope.length).toBe(graph.cells.length);
     expect(ecology.riverPaths.length).toBeGreaterThan(0);
+    expect(ecology.ridgePaths.length + ecology.ridgePeaks.length).toBeGreaterThan(0);
     expect(ecology.coastlines.length).toBeGreaterThan(0);
   });
 

@@ -433,6 +433,7 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
   readonly showIcons = input(true);
   readonly iconBudget = input(1400);
   readonly showRivers = input(true);
+  readonly showRidges = input(true);
   readonly showCellEdges = input(false);
 
   // ==========================================================================
@@ -564,6 +565,7 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
       this.showIcons();
       this.iconBudget();
       this.showRivers();
+      this.showRidges();
       this.showCellEdges();
       this.highlightedCellIds();
       this.highlightColor();
@@ -1030,6 +1032,10 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
       ctx.lineCap = 'round';
       this.#drawSmoothLoops(ctx, ecology.coastlines, lonLat, mapPoint, '#f4ecd8', 3.2, true);
 
+      if (this.showRidges()) {
+        this.#drawRidges(ctx, ecology.ridgePaths, ecology.ridgePathStrength, ecology.ridgePeaks, lonLat, mapPoint);
+      }
+
       if (this.showRivers()) {
         this.#drawSmoothPaths(ctx, ecology.riverPaths, ecology.riverFlow, ecology.minNavigableFlow, lonLat, mapPoint);
       }
@@ -1230,6 +1236,36 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
         ctx.quadraticCurveTo(cur.x, cur.y, end.x, end.y);
         ctx.stroke();
       }
+    }
+  }
+
+  #drawRidges(
+    ctx: CanvasRenderingContext2D,
+    paths: IVec3[][],
+    strengths: number[],
+    peaks: IVec3[],
+    lonLat: (p: IVec3) => ILonLat,
+    mapPoint: (ll: ILonLat) => { x: number; y: number },
+  ): void {
+    ctx.strokeStyle = '#6b3f2a';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < paths.length; i++) {
+      const path = paths[i];
+      if (path.length < 2) continue;
+      const lls = path.map(lonLat);
+      ctx.lineWidth = 2.1 + Math.min(1, strengths[i] ?? 0.5) * 2.2;
+      for (const run of splitAtSeam(lls, false)) {
+        this.#strokeSmoothRun(ctx, run.pts.map(mapPoint), false);
+      }
+    }
+
+    ctx.fillStyle = '#4a2a1d';
+    for (const peak of peaks) {
+      const point = mapPoint(lonLat(peak));
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 3.2, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
