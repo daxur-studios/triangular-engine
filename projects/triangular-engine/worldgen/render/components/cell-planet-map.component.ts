@@ -49,11 +49,13 @@ import {
   WorldProfileKind,
 } from 'triangular-engine/worldgen';
 import { biomeColor, elevationColor, lavaOceanColor, moistureColor, plateColor, temperatureColor } from '../color-ramps';
+import { MAP_PROJECTIONS, MapProjectionKind } from '../map-projections';
 
 /** Fixed logical space every shape is drawn in via `mapPoint()` before `#rasterize()` maps it
  * onto the offscreen canvas backing the terrain `CanvasTexture` — not a bitmap resolution in its
- * own right, just the coordinate space world-space lon/lat gets projected into. 2:1 aspect,
- * matching the equirectangular projection. */
+ * own right, just the coordinate space world-space lon/lat gets projected into. 2:1 aspect - the
+ * default equirectangular projection fills it exactly; a non-rectangular one (e.g. Equal Earth, see
+ * `projectionType`/`../map-projections.ts`) fits inside it with background showing at the edges. */
 const BASE_WIDTH = 3000;
 const BASE_HEIGHT = 1500;
 
@@ -363,7 +365,7 @@ export interface IProjectionRecenteredEvent {
 }
 
 /**
- * Reusable Voronoi cell-graph equirectangular map renderer (runbook 022/024's 2D counterpart to
+ * Reusable Voronoi cell-graph flat map renderer (runbook 022/024's 2D counterpart to
  * `PlanetViewComponent`). Generates a graph + tectonics + ecology from the generation inputs
  * below, exactly like `<planetView>`, but renders it as a flat map instead of a sphere: the
  * existing canvas-2D cell-fill/river/coastline/decorative-icon drawing is rasterized into an
@@ -427,6 +429,12 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
    * always overrides the chosen mode - it isn't a fill mode itself, just a substance override that
    * applies regardless of what data layer you're looking at. */
   readonly fillMode = input<CellPlanetMapFillMode>('biome');
+
+  /** Which lon/lat -> canvas-space projection draws (and hit-tests) the map - see
+   * `worldgen/render/map-projections.ts`. Changing this re-rasterizes (below) but does not move
+   * `projectionCenter` - the two are independent (center = which point on the sphere is centered,
+   * type = how the sphere unwraps onto the plane around it). */
+  readonly projectionType = input<MapProjectionKind>('equirectangular');
 
   /** Decorative, deterministic biome/feature glyphs (trees/mountains/etc.) baked into the
    * terrain raster - unrelated to any future game-marker icon layer. */
@@ -569,6 +577,7 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
       this.showCellEdges();
       this.highlightedCellIds();
       this.highlightColor();
+      this.projectionType();
       untracked(() => this.#throttleRun(this.layersThrottle, () => this.#requestRasterize('other')));
     });
 
@@ -640,6 +649,7 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     if (Math.abs(localPoint.x) > BASE_WIDTH / 2 || Math.abs(localPoint.y) > BASE_HEIGHT / 2) return null;
 
     const direction = this.#sphereDirectionFromLocalPoint(localPoint);
+    if (!direction) return null;
     const cell = findCellAt(graph, direction);
     return { cellId: cell.id, direction };
   }
@@ -706,13 +716,14 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
   }
 
   /** Rotates the clicked map point to the projection center (`recenterProjection()`), so the
-   * area under the cursor moves to the low-distortion middle of the equirectangular map instead
-   * of wherever it happened to land. */
+   * area under the cursor moves to the low-distortion middle of the map instead of wherever it
+   * happened to land. */
   onDoubleClick(event: MouseEvent, viewportEl: HTMLElement): void {
     const local = this.#screenToLocalPoint(event.clientX, event.clientY, viewportEl);
     if (!local) return;
     if (Math.abs(local.x) > BASE_WIDTH / 2 || Math.abs(local.y) > BASE_HEIGHT / 2) return;
     const direction = this.#sphereDirectionFromLocalPoint(local);
+    if (!direction) return;
     this.recenterProjection(direction, 'doubleClick');
   }
 
@@ -750,14 +761,17 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
   }
 
   /** Inverts a plane-local point (`BASE_WIDTH`/`BASE_HEIGHT` space, origin at map center) back to
-   * canvas space, then through the exact lon/lat -> sphere-direction chain `#rasterize()`'s
-   * `mapPoint()`/`lonLat()` use, un-rotated through the *current* projection basis to recover the
-   * true sphere-space point. */
-  #sphereDirectionFromLocalPoint(localPoint: { x: number; y: number }): IVec3 {
+   * canvas space, then through the selected `projectionType()`'s `unproject()` and the exact
+   * lon/lat -> sphere-direction chain `#rasterize()`'s `mapPoint()`/`lonLat()` use, un-rotated
+   * through the *current* projection basis to recover the true sphere-space point. Returns `null`
+   * where `unproject()` does - a rectangular-canvas point outside a non-rectangular projection's
+   * (e.g. Equal Earth's lens-shaped) valid area. */
+  #sphereDirectionFromLocalPoint(localPoint: { x: number; y: number }): IVec3 | null {
     const canvasX = localPoint.x + BASE_WIDTH / 2;
     const canvasY = BASE_HEIGHT / 2 - localPoint.y;
-    const lon = ((canvasX / BASE_WIDTH) * 2 - 1) * Math.PI;
-    const lat = (1 - (2 * canvasY) / BASE_HEIGHT) * (Math.PI / 2);
+    const lonLat = MAP_PROJECTIONS[this.projectionType()].unproject(canvasX, canvasY, BASE_WIDTH, BASE_HEIGHT);
+    if (!lonLat) return null;
+    const { lon, lat } = lonLat;
     const local = vec3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon));
 
     const { forward, up, right } = this.#projectionBasis();
@@ -787,10 +801,7 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
   #directionToCanvasPoint(direction: IVec3, basis: { forward: IVec3; up: IVec3; right: IVec3 }): { x: number; y: number } {
     const lon = Math.atan2(dot(direction, basis.right), dot(direction, basis.forward));
     const lat = Math.asin(Math.max(-1, Math.min(1, dot(direction, basis.up))));
-    return {
-      x: ((lon / Math.PI) * 0.5 + 0.5) * BASE_WIDTH,
-      y: (1 - ((lat / (Math.PI / 2)) * 0.5 + 0.5)) * BASE_HEIGHT,
-    };
+    return MAP_PROJECTIONS[this.projectionType()].project(lon, lat, BASE_WIDTH, BASE_HEIGHT);
   }
 
   /** Sphere direction -> plane-local `{x,y}` (`BASE_WIDTH`/`BASE_HEIGHT` space, origin at map
@@ -983,10 +994,8 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
       lon: Math.atan2(dot(p, right), dot(p, forward)),
       lat: Math.asin(Math.max(-1, Math.min(1, dot(p, up)))),
     });
-    const mapPoint = (ll: ILonLat): { x: number; y: number } => ({
-      x: ((ll.lon / Math.PI) * 0.5 + 0.5) * BASE_WIDTH,
-      y: (1 - ((ll.lat / (Math.PI / 2)) * 0.5 + 0.5)) * BASE_HEIGHT,
-    });
+    const projection = MAP_PROJECTIONS[this.projectionType()];
+    const mapPoint = (ll: ILonLat): { x: number; y: number } => projection.project(ll.lon, ll.lat, BASE_WIDTH, BASE_HEIGHT);
 
     const profile = WORLD_PROFILES[this.worldProfileKind()];
     // Only actually read by 'elevation' fill mode, but cheap next to the per-cell fill loop below

@@ -29,6 +29,18 @@
     </label>
 
     <label class="field">
+      <span>Map projection</span>
+      <select
+        [value]="projectionType()"
+        (change)="projectionType.set($any($event.target).value)"
+      >
+        @for (kind of projectionKinds; track kind) {
+          <option [value]="kind">{{ projectionLabels[kind] }}</option>
+        }
+      </select>
+    </label>
+
+    <label class="field">
       <span>Data layer</span>
       <select
         [value]="fillMode()"
@@ -159,6 +171,7 @@
         [cellCount]="cellCount()"
         [seed]="seed()"
         [worldProfileKind]="worldProfileKind()"
+        [projectionType]="projectionType()"
         [fillMode]="fillMode()"
         [climateExtreme]="climateExtreme()"
         [season]="season()"

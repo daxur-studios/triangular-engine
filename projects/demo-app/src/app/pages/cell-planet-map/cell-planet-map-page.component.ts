@@ -8,6 +8,9 @@ import {
   CellPlanetMapUnitsComponent,
   ICellClickEvent,
   ICellPlanetMapUnitInstance,
+  MAP_PROJECTION_KINDS,
+  MAP_PROJECTION_LABELS,
+  MapProjectionKind,
   Season,
 } from 'triangular-engine/worldgen/render';
 
@@ -76,6 +79,10 @@ export class CellPlanetMapPageComponent {
   readonly waterLevel = signal(0);
 
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
+
+  readonly projectionType = signal<MapProjectionKind>('equirectangular');
+  readonly projectionKinds = MAP_PROJECTION_KINDS;
+  readonly projectionLabels = MAP_PROJECTION_LABELS;
 
   /** Demo of the component's click-to-cell + highlight capabilities together: clicking a cell
    * selects it, which highlights it via `[highlightedCellIds]`. */
