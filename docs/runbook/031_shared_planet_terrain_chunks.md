@@ -166,3 +166,14 @@ findings. Do not duplicate the full progress log across documents.
   and reports missing samples plus maximum height delta. Library and demo builds pass. This is
   still a bounded C0 fixture; camera-driven quadtree residency, worker scheduling and larger
   area stress evidence remain outstanding.
+- **2026-09-14 — mixed footprint corrected:** the mixed fixture now keeps three level-zero root
+  chunks and replaces the fourth root with its four level-one children. This gives the same
+  footprint as the four-root reference, keeps the ridge, river and flattening area visible, and
+  exercises coarse/fine joins on both axes. Added a separate coverage diagnostic for missing and
+  overlapping cells; seam validation now checks every shared fine/coarse edge.
+- **2026-09-14 — C0 fixture clarified:** fixed reduction assignment for all seven mixed-layout
+  chunks, added per-level source/rendered triangle counts, and colour-coded coarse L0 versus fine
+  L1 boundaries. Added a compact in-panel explanation and suggested test order so the fixture's
+  purpose is explicit: it validates footprint coverage, parent/child seams, simplification and
+  feature/edit preservation before camera-driven quadtree streaming. Next: add a camera-driven
+  selection fixture only after this controlled lab's measurements are understood.

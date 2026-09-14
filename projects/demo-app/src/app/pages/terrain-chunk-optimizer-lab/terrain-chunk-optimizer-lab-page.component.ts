@@ -42,10 +42,12 @@ const SAME_LEVEL_CHUNKS: readonly IPlaneTerrainPatchAddress[] = [
 ];
 const MIXED_LEVEL_CHUNKS: readonly IPlaneTerrainPatchAddress[] = [
   { level: 0, x: -1, z: -1 },
-  { level: 1, x: 0, z: -2 },
-  { level: 1, x: 0, z: -1 },
-  { level: 1, x: 1, z: -2 },
-  { level: 1, x: 1, z: -1 },
+  { level: 0, x: 0, z: -1 },
+  { level: 0, x: -1, z: 0 },
+  { level: 1, x: 0, z: 0 },
+  { level: 1, x: 1, z: 0 },
+  { level: 1, x: 0, z: 1 },
+  { level: 1, x: 1, z: 1 },
 ];
 
 type FlattenShape = 'circle' | 'rectangle';
@@ -218,8 +220,10 @@ export class TerrainChunkOptimizerLabPageComponent {
   readonly showGuides = signal(true);
   readonly sourceTriangleLabel = signal('—');
   readonly triangleLabel = signal('—');
+  readonly levelTriangleLabel = signal('—');
   readonly reductionLabel = signal('—');
   readonly boundaryLabel = signal('—');
+  readonly coverageLabel = signal('—');
   readonly seamLabel = signal('—');
   readonly featureLabel = signal('—');
   readonly padLabel = signal('—');
@@ -300,13 +304,10 @@ export class TerrainChunkOptimizerLabPageComponent {
     const addresses = this.mixedResolution()
       ? MIXED_LEVEL_CHUNKS
       : SAME_LEVEL_CHUNKS;
-    const reductions = [
-      0,
-      this.maxReduction() * 0.35,
-      this.maxReduction() * 0.65,
-      this.maxReduction(),
-      this.maxReduction(),
-    ];
+    const reductionSteps = [0, 0.35, 0.65, 1];
+    const reductions = addresses.map((_address, index) =>
+      this.maxReduction() * reductionSteps[Math.min(index, reductionSteps.length - 1)],
+    );
     const results = await Promise.all(
       addresses.map((address, index) =>
         this.buildChunk(address, reductions[index]),
@@ -325,14 +326,31 @@ export class TerrainChunkOptimizerLabPageComponent {
       0,
     );
     const seam = this.measureMixedSeam(results);
+    const coverage = this.measureCoverage(addresses);
     const padErrorM = Math.max(...results.map((result) => result.padErrorM));
     const sourceVertices = results.reduce((sum, result) => sum + result.sourceVertices, 0);
     const referencedVertices = results.reduce(
       (sum, result) => sum + result.referencedVertices,
       0,
     );
+    const levelTriangles = new Map<number, { source: number; rendered: number }>();
+    results.forEach((result) => {
+      const current = levelTriangles.get(result.address.level) ?? { source: 0, rendered: 0 };
+      current.source += result.sourceTriangles;
+      current.rendered += result.triangles;
+      levelTriangles.set(result.address.level, current);
+    });
     this.sourceTriangleLabel.set(sourceTriangles.toLocaleString());
     this.triangleLabel.set(triangles.toLocaleString());
+    this.levelTriangleLabel.set(
+      [...levelTriangles.entries()]
+        .sort(([left], [right]) => left - right)
+        .map(
+          ([level, counts]) =>
+            `L${level} ${counts.rendered.toLocaleString()}/${counts.source.toLocaleString()}`,
+        )
+        .join(' · '),
+    );
     this.reductionLabel.set(`${((1 - triangles / sourceTriangles) * 100).toFixed(1)}%`);
     this.boundaryLabel.set(
       this.lockBoundaries()
@@ -340,6 +358,9 @@ export class TerrainChunkOptimizerLabPageComponent {
           ? 'all boundary vertices retained'
           : `${missingBoundaryVertices} boundary vertices missing`
         : 'unlocked test mode',
+    );
+    this.coverageLabel.set(
+      `${coverage.missingCells} missing cells; ${coverage.overlapCells} overlaps`,
     );
     this.seamLabel.set(
       this.mixedResolution()
@@ -467,48 +488,126 @@ export class TerrainChunkOptimizerLabPageComponent {
     maxHeightDeltaM: number;
   } {
     if (!this.mixedResolution()) return { missingSamples: 0, maxHeightDeltaM: 0 };
-    const coarse = results.find(
-      (result) => result.address.level === 0 && result.address.x === -1,
-    );
-    if (!coarse) return { missingSamples: 0, maxHeightDeltaM: 0 };
-    const coarseEdge = this.referencedWorldVertices(coarse, 'right');
     let missingSamples = 0;
     let maxHeightDeltaM = 0;
     results
-      .filter((result) => result.address.level === 1 && result.address.x === 0)
-      .forEach((child) => {
-        const childEdge = this.referencedWorldVertices(child, 'left');
-        childEdge.forEach((childVertex, key) => {
-          const coarseVertex = coarseEdge.get(key);
-          if (!coarseVertex) {
-            missingSamples += 1;
-            return;
-          }
-          maxHeightDeltaM = Math.max(
-            maxHeightDeltaM,
-            Math.abs(coarseVertex[1] - childVertex[1]),
-          );
-        });
+      .filter((result) => result.address.level > 0)
+      .forEach((fine) => {
+        const fineBounds = this.domain.getPatchBounds(fine.address);
+        results
+          .filter((result) => result.address.level === fine.address.level - 1)
+          .forEach((coarse) => {
+            const sharedEdges = this.findSharedEdges(fineBounds, this.domain.getPatchBounds(coarse.address));
+            sharedEdges.forEach(([fineEdge, coarseEdge]) => {
+              const fineVertices = this.referencedWorldVertices(fine, fineEdge);
+              const coarseVertices = this.referencedWorldVertices(coarse, coarseEdge);
+              fineVertices.forEach((fineVertex, key) => {
+                const coarseVertex = coarseVertices.get(key);
+                if (!coarseVertex) {
+                  missingSamples += 1;
+                  return;
+                }
+                maxHeightDeltaM = Math.max(
+                  maxHeightDeltaM,
+                  Math.abs(coarseVertex[1] - fineVertex[1]),
+                );
+              });
+            });
+          });
       });
     return { missingSamples, maxHeightDeltaM };
   }
 
+  private measureCoverage(
+    addresses: readonly IPlaneTerrainPatchAddress[],
+  ): { missingCells: number; overlapCells: number } {
+    const expectedBounds = SAME_LEVEL_CHUNKS.map((address) =>
+      this.domain.getPatchBounds(address),
+    );
+    const minU = Math.min(...expectedBounds.map((bounds) => bounds.minU));
+    const maxU = Math.max(...expectedBounds.map((bounds) => bounds.maxU));
+    const minV = Math.min(...expectedBounds.map((bounds) => bounds.minV));
+    const maxV = Math.max(...expectedBounds.map((bounds) => bounds.maxV));
+    const finestLevel = Math.max(...addresses.map((address) => address.level));
+    const cellSize = this.domain.getPatchSizeM({ level: finestLevel, x: 0, z: 0 });
+    const columns = Math.round((maxU - minU) / cellSize);
+    const rows = Math.round((maxV - minV) / cellSize);
+    const chunks = addresses.map((address) => this.domain.getPatchBounds(address));
+    let missingCells = 0;
+    let overlapCells = 0;
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const u = minU + (column + 0.5) * cellSize;
+        const v = minV + (row + 0.5) * cellSize;
+        const coveringChunks = chunks.filter(
+          (bounds) =>
+            u >= bounds.minU &&
+            u < bounds.maxU &&
+            v >= bounds.minV &&
+            v < bounds.maxV,
+        ).length;
+        if (coveringChunks === 0) missingCells += 1;
+        if (coveringChunks > 1) overlapCells += coveringChunks - 1;
+      }
+    }
+    return { missingCells, overlapCells };
+  }
+
+  private findSharedEdges(
+    fine: ReturnType<PlaneTerrainDomain['getPatchBounds']>,
+    coarse: ReturnType<PlaneTerrainDomain['getPatchBounds']>,
+  ): Array<[
+    'left' | 'right' | 'top' | 'bottom',
+    'left' | 'right' | 'top' | 'bottom',
+  ]> {
+    const epsilon = 0.001;
+    const shared: Array<[
+      'left' | 'right' | 'top' | 'bottom',
+      'left' | 'right' | 'top' | 'bottom',
+    ]> = [];
+    const verticalOverlap =
+      Math.min(fine.maxV, coarse.maxV) - Math.max(fine.minV, coarse.minV);
+    const horizontalOverlap =
+      Math.min(fine.maxU, coarse.maxU) - Math.max(fine.minU, coarse.minU);
+    if (Math.abs(fine.minU - coarse.maxU) < epsilon && verticalOverlap > epsilon)
+      shared.push(['left', 'right']);
+    if (Math.abs(fine.maxU - coarse.minU) < epsilon && verticalOverlap > epsilon)
+      shared.push(['right', 'left']);
+    if (Math.abs(fine.minV - coarse.maxV) < epsilon && horizontalOverlap > epsilon)
+      shared.push(['top', 'bottom']);
+    if (Math.abs(fine.maxV - coarse.minV) < epsilon && horizontalOverlap > epsilon)
+      shared.push(['bottom', 'top']);
+    return shared;
+  }
+
   private referencedWorldVertices(
     result: IChunkResult,
-    edge: 'left' | 'right',
+    edge: 'left' | 'right' | 'top' | 'bottom',
   ): Map<string, TerrainVector3> {
     const positions = result.geometry.getAttribute('position');
     const referenced = new Set<number>();
     const index = result.geometry.index;
     if (index) for (const value of index.array) referenced.add(Number(value));
     const bounds = this.domain.getPatchBounds(result.address);
-    const edgeU = edge === 'left' ? bounds.minU : bounds.maxU;
+    const edgeValue =
+      edge === 'left' || edge === 'right'
+        ? edge === 'left'
+          ? bounds.minU
+          : bounds.maxU
+        : edge === 'top'
+          ? bounds.minV
+          : bounds.maxV;
     const vertices = new Map<string, TerrainVector3>();
     referenced.forEach((vertex) => {
       const x = result.patch.centerWorldM[0] + positions.getX(vertex);
       const y = result.patch.centerWorldM[1] + positions.getY(vertex);
       const z = result.patch.centerWorldM[2] + positions.getZ(vertex);
-      if (Math.abs(x - edgeU) < 0.01) {
+      const v = -z;
+      const onEdge =
+        edge === 'left' || edge === 'right'
+          ? Math.abs(x - edgeValue) < 0.01
+          : Math.abs(v - edgeValue) < 0.01;
+      if (onEdge) {
         vertices.set(worldKey(x, z), [x, y, z]);
       }
     });
@@ -587,7 +686,10 @@ export class TerrainChunkOptimizerLabPageComponent {
     const geometry = new BufferGeometry().setFromPoints(points);
     return new LineLoop(
       geometry,
-      new LineBasicMaterial({ color: '#d7f08a', depthTest: false }),
+      new LineBasicMaterial({
+        color: patch.address.level === 0 ? '#d7f08a' : '#78c7ff',
+        depthTest: false,
+      }),
     );
   }
 

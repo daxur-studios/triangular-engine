@@ -9,10 +9,22 @@
         <strong>C0 terrain chunk fixture</strong>
       </header>
       <p>
-        The fixture can show same-level neighbours or one coarse chunk beside
-        four finer children. All chunks share one sampled ridge, river and
-        optional flattening edit while Meshoptimizer simplifies them independently.
+        This is a small controlled lab, not the full planet. It compares four equal
+        chunks with the same footprint where one chunk is replaced by four finer
+        children. The terrain, ridge, river and optional build pad are sampled from
+        the same world field in both cases.
       </p>
+      <details class="help">
+        <summary>What each test is proving</summary>
+        <div class="help-content">
+          <span><b>Layout:</b> mixed mode tests parent/child coverage and seams.</span>
+          <span><b>Reduction:</b> the slider tests triangle reduction per chunk.</span>
+          <span><b>Borders:</b> locks edge vertices to prevent holes.</span>
+          <span><b>Features:</b> protects ridge and river samples from simplification.</span>
+          <span><b>Flattening:</b> tests an edit crossing chunk boundaries.</span>
+          <span><b>Suggested order:</b> mixed on → borders on → reduction 0% → increase reduction → toggle one protection at a time.</span>
+        </div>
+      </details>
       <div class="actions">
         <button [class.active]="mixedResolution()" (click)="toggleLayout()">
           {{ mixedResolution() ? "Mixed LOD layout" : "Same-level layout" }}
@@ -52,13 +64,15 @@
         <span>Status: {{ buildLabel() }}</span>
         <span>Source triangles: {{ sourceTriangleLabel() }}</span>
         <span>Rendered triangles: {{ triangleLabel() }}</span>
+        <span>Rendered/source by level: {{ levelTriangleLabel() }}</span>
         <span>Achieved reduction: {{ reductionLabel() }}</span>
         <span>Boundary check: {{ boundaryLabel() }}</span>
+        <span>Coverage: {{ coverageLabel() }}</span>
         <span>Mixed seam: {{ seamLabel() }}</span>
         <span>Feature check: {{ featureLabel() }}</span>
         <span>Flattening: {{ padLabel() }}</span>
-        <span>Yellow outlines: chunk boundaries</span>
-        <span>Gold/blue lines: ridge and river reference paths</span>
+        <span>Chunk outlines: pale green = coarse L0; blue = fine L1</span>
+        <span>Gold/blue guide lines: ridge and river reference paths</span>
         <span>Mixed seams use matching fine edge samples on the coarse chunk</span>
       </div>
     </section>
