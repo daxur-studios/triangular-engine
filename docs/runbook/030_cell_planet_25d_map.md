@@ -215,3 +215,36 @@ alone does not establish visual acceptance. Record unresolved test-environment f
   plane/sphere reuse requirements. M0 now precedes planar baking; M2 consumes and tunes
   that shared relief. Next: M2 relief/river/ridge visual tuning, then M3 selection and
   production camera/2D comparison polish, followed by M4 performance and acceptance.
+
+### 2026-09-13 — M3 selection slice
+
+- Added reusable planar picking in `triangular-engine/worldgen/render`
+  (`planet-map-picking.ts`): `intersectPlanarHeightField()` clips a camera ray to the bake
+  bounds, ray-marches the *baked* height grid with bisection, and
+  `mapXZToPlanetDirection()` inverse-projects the hit to a canonical graph cell via
+  `findCellAt()`. Picking uses the fine bake only — it does not evaluate clipmap LOD morph
+  or ring-border blend, so a distant hit can differ from the coarser rendered surface by that
+  level's interpolation error. Near-camera hits match the rendered surface. A ray starting
+  below the sampled surface returns `null`.
+- Added demo selection wiring in new focused files: `cell-planet-terrain-selection.ts`
+  (camera-ray pick, drag-vs-click threshold, canonical cell data, ring + vertical-pin
+  indicator anchored at the sampled surface height) and
+  `cell-planet-selection-panel.component.ts` (readout). The shared 2.5D page change is
+  limited to injecting the controller, applying the route selection, and rendering the panel.
+- Selection is keyed by canonical world cell id and survives 2D↔2.5D via the `selectedCell`
+  query key (added to `CELL_PLANET_QUERY_KEYS`, written by both pages). Projection, height
+  scale, water level, terrain quality and fill-mode changes keep the cell and refresh its
+  values/position; changing cell count, seed, relaxation or world profile clears it.
+- Checks: 12 new `planet-map-picking.spec.ts` cases pass (flat/sloped hits, misses, start
+  below surface, equirectangular round trip, Equal Earth lens rejection). Library and demo
+  builds pass. Interactive browser verification (drag rejection, both projections, height
+  scales, simplified preview) was **not** run because the standing instruction forbids
+  starting a dev server; that remains the M3 visual-acceptance gate.
+- Known test-environment failures: the default `triangular-engine:test-worldgen-render`
+  compilation includes every spec and fails in `worldgen/core/planet-surface-bake.spec.ts`
+  (`toHaveLength` missing on the typed-array matcher type); with a render-only include the
+  suite runs and has one pre-existing `planet-view.component.spec.ts` failure (`toBe` used
+  for deep equality). Neither is caused by this change.
+- Unsupported parity: the 2.5D page still ignores the 2D `climate`/`season` restyle inputs,
+  so selected-cell biome/temperature can differ between views for a non-default climate.
+  Equal Earth is exercised only by unit tests here, not visually.

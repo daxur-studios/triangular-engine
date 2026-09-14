@@ -85,13 +85,53 @@
       {{ isProbingSeams() ? 'Probing Seams…' : 'Probe Seams & Gaps' }}
     </button>
   </div>
-  @if (diagnosticsCopied() || seamProbeCopied()) {
+
+  <p>Deterministic benchmark terrain (analytic ground truth):</p>
+  <div class="actions">
+    <button
+      [class.active]="benchmarkKind() === 'peaks'"
+      (click)="setBenchmarkKind('peaks')"
+    >
+      Peaks
+    </button>
+    <button
+      [class.active]="benchmarkKind() === 'ridges'"
+      (click)="setBenchmarkKind('ridges')"
+    >
+      Ridges
+    </button>
+    <button
+      [class.active]="benchmarkKind() === 'terraces'"
+      (click)="setBenchmarkKind('terraces')"
+    >
+      Terraces
+    </button>
+    <button
+      [class.active]="benchmarkKind() === 'field'"
+      (click)="setBenchmarkKind('field')"
+    >
+      Field
+    </button>
+    <button
+      [disabled]="isRunningBenchmark()"
+      (click)="runFidelityBenchmark()"
+    >
+      {{ isRunningBenchmark() ? 'Benchmarking…' : 'Run Fidelity Benchmark' }}
+    </button>
+    @if (terrainKind() === benchmarkKind()) {
+      <span class="active">(benchmark map live)</span>
+    }
+  </div>
+  @if (diagnosticsCopied() || seamProbeCopied() || benchmarkCopied()) {
     <span>Copied report to clipboard.</span>
   }
   @if (diagnosticsReport(); as report) {
     <pre class="report">{{ report }}</pre>
   }
   @if (seamProbeReport(); as report) {
+    <pre class="report">{{ report }}</pre>
+  }
+  @if (benchmarkReport(); as report) {
     <pre class="report">{{ report }}</pre>
   }
 </aside>

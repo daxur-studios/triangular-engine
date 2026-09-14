@@ -196,6 +196,44 @@ from the constructor.
 (`plateColor`, `elevationColor`, `temperatureColor`, `moistureColor`, `biomeColor`,
 `BIOME_COLORS`) in case a consumer wants matching colors for its own UI (a legend, a 2D map).
 
+## Planar (2.5D) picking
+
+An undisplaced clipmap lattice is not the rendered surface, so the 2.5D map picks against the
+baked height field instead. `planet-map-picking.ts` (same entry point) provides:
+
+- `samplePlanarHeight(field, x, z)` — bilinear sample matching the height texture's
+  `LinearFilter`/`ClampToEdge` lookup; `0` outside the map footprint.
+- `intersectPlanarHeightField(field, ray)` — clips the ray to the field AABB, ray-marches the
+  sampled surface with bisection, and returns the world-space hit.
+- `mapXZToPlanetDirection()` / `mapPlanetDirectionToMapXZ()` — the bake's planar ↔ planet
+  direction round trip through an `IMapProjection`.
+
+`IPlanarHeightField` wraps a `buildPlanetSurfaceBake()` result (`width`, `height`,
+`elevations`, `bounds`, `minY`, `maxY`). Resolve the hit's world XZ to a cell with
+`findCellAt(graph, direction)`. The intersection uses the fine bake only, so at distances where
+the clipmap morphs to a coarser level the visible hit can differ by that level's interpolation
+error.
+
+## Fixed-resolution globe geometry
+
+`globe-geometry.ts` (same entry point) turns the canonical surface sampler into a plain,
+fixed-resolution displaced sphere — no LOD, streaming, simplification or caching (those belong
+to runbook 031):
+
+- `buildPlanetGlobeGeometry({ sampler, cellIdAt?, radius?, heightScale?, longitudeSegments?, latitudeRings? })`
+  — samples each latitude/longitude grid vertex direction once and positions it at
+  `direction * (radius + elevation * heightScale)`. Returns typed arrays (`positions`,
+  `normals`, `directions`, `elevations`, `landMask`, `cellIds`, `indices`) plus metadata.
+  `directions`/`elevations` can be re-displaced without resampling.
+- `writePlanetGlobePositions(out, directions, elevations, radius, heightScale)` and
+  `writePlanetGlobeNormals(out, positions, indices)` — the displacement/normalization helpers
+  behind a display height-exaggeration control.
+- `cellIdAt` records discrete cell identity per vertex (`findCellAt(graph, direction).id`);
+  colour modes stay independent of mesh topology.
+
+The grid starts at longitude `-PI`, so the antimeridian is one shared column (no seam crack);
+each pole is a single fan vertex (no degenerate triangles); winding is outward.
+
 ## What's NOT in the render layer
 
 Ported deliberately narrower than `/cell-planet-lab`'s 1620-line debug harness — see the plan

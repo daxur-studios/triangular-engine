@@ -1,0 +1,458 @@
+import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, RouterLink } from '@angular/router';
+import {
+  BufferAttribute,
+  BufferGeometry,
+  Color,
+  FrontSide,
+  Mesh,
+  MeshStandardMaterial,
+  SphereGeometry,
+} from 'three';
+import { EngineModule, EngineService } from 'triangular-engine';
+import {
+  IPlanetEcology,
+  IPlanetGraphCore,
+  IPlanetSurfaceSampler,
+  IPlanetTectonics,
+  WORLD_PROFILES,
+  WorldProfileKind,
+  buildPlanetEcology,
+  buildPlanetGraphCore,
+  buildPlanetTectonics,
+  createPlanetSurfaceSampler,
+  deriveIsLand,
+  findCellAt,
+} from 'triangular-engine/worldgen';
+import {
+  CellPlanetMapFillMode,
+  IPlanetGlobeGeometry,
+  biomeColor,
+  buildPlanetGlobeGeometry,
+  elevationColor,
+  lavaOceanColor,
+  moistureColor,
+  plateColor,
+  temperatureColor,
+  writePlanetGlobeNormals,
+  writePlanetGlobePositions,
+} from 'triangular-engine/worldgen/render';
+import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
+import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
+
+/** Base radius of the prototype globe. Canonical elevations stay unitless; this is display space. */
+const GLOBE_RADIUS = 1;
+
+/** Modest fixed tessellation: 96 x 48 quads → ~9.2k triangles. No LOD, by design (runbook 032). */
+const GLOBE_LONGITUDE_SEGMENTS = 96;
+const GLOBE_LATITUDE_RINGS = 48;
+
+/** Display-only radial exaggeration default; the canonical sampler output is unchanged. */
+const GLOBE_DEFAULT_HEIGHT_SCALE = 0.25;
+
+/** Shared water colour for ocean shell and invalid-cell fallback, mirroring the 2.5D map. */
+const OCEAN_COLOR = 'hsl(210, 55%, 22%)';
+
+/**
+ * Cell Planet globe prototype (runbook 032).
+ *
+ * A deliberately simple fixed-resolution sphere that displaces the **shared** world snapshot's
+ * canonical surface sampler radially. It exists to validate geography, colour-mode parity with the
+ * 2D/2.5D maps, height exaggeration and seabed relief before the runbook 031 chunked/quadtree
+ * infrastructure is ready. All streaming, Meshoptimizer, quadtree LOD, seam stitching, scheduling
+ * and caching are owned by 031 and intentionally absent here.
+ *
+ * Generation reuses the same graph → tectonics → ecology → `createPlanetSurfaceSampler` chain and
+ * `CELL_PLANET_GENERATION_DEFAULTS` as the map pages, so equivalent directions agree. Rendering is
+ * added to `EngineService.scene` imperatively because the mesh is a custom `BufferGeometry`; the
+ * declarative `<scene>`/`<orbitControls>`/light components own the renderer, camera and RAF loop.
+ */
+@Component({
+  selector: 'app-cell-planet-globe-page',
+  imports: [EngineModule, RouterLink],
+  templateUrl: './cell-planet-globe-page.component.html',
+  styleUrl: './cell-planet-globe-page.component.scss',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  providers: [EngineService.provide({ showFPS: true })],
+  host: { class: 'flex-page' },
+})
+export class CellPlanetGlobePageComponent {
+  private readonly route = inject(ActivatedRoute);
+  private readonly engine = inject(EngineService);
+  private readonly destroyRef = inject(DestroyRef);
+
+  readonly cellCount = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.cellCount);
+  readonly seed = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.seed);
+  readonly relaxationIterations = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.relaxationIterations);
+  readonly worldProfileKind = signal<WorldProfileKind>('terran');
+  readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
+  readonly waterLevel = signal(0);
+  readonly fillMode = signal<CellPlanetMapFillMode>('biome');
+  readonly fillModes: CellPlanetMapFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture', 'land'];
+  readonly heightScale = signal(GLOBE_DEFAULT_HEIGHT_SCALE);
+  readonly seabedRelief = signal(true);
+  readonly showOcean = signal(true);
+
+  readonly longitudeSegments = GLOBE_LONGITUDE_SEGMENTS;
+  readonly latitudeRings = GLOBE_LATITUDE_RINGS;
+
+  readonly triangles = signal(0);
+  readonly vertices = signal(0);
+  readonly buildMs = signal(0);
+  readonly drawCalls = signal(0);
+
+  private readonly preservedQueryParams = signal<CellPlanetQuery>({});
+  readonly comparisonQueryParams = signal<Record<string, string | number | boolean>>({});
+
+  private graph!: IPlanetGraphCore;
+  private tectonics!: IPlanetTectonics;
+  private ecology!: IPlanetEcology;
+  private geometry!: IPlanetGlobeGeometry;
+  /** Display elevations — canonical `geometry.elevations`, or sea-clamped when seabed relief is off. */
+  private displayElevations!: Float32Array;
+  private mesh: Mesh<BufferGeometry, MeshStandardMaterial> | undefined;
+  private oceanMesh: Mesh<BufferGeometry, MeshStandardMaterial> | undefined;
+  private seaLevelElevation = 0;
+  private elevationMin = 0;
+  private elevationMax = 0;
+  private readonly colorScratch = new Color();
+
+  constructor() {
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      const query = readCellPlanetQuery(params);
+      this.preservedQueryParams.set(query);
+      this.restoreQuery(query);
+      this.updateComparisonQueryParams();
+      this.rebuildWorld();
+    });
+
+    this.destroyRef.onDestroy(() => {
+      this.disposeMesh();
+      this.disposeOceanMesh();
+    });
+  }
+
+  onCellCountInput(event: Event): void {
+    const value = this.inputNumber(event);
+    if (Number.isFinite(value) && value !== this.cellCount()) {
+      this.cellCount.set(Math.max(200, Math.min(6000, Math.round(value))));
+      this.updateComparisonQueryParams();
+      this.rebuildWorld();
+    }
+  }
+
+  onSeedInput(event: Event): void {
+    const value = this.inputNumber(event);
+    if (Number.isFinite(value) && value !== this.seed()) {
+      this.seed.set(Math.max(0, Math.min(999999, Math.round(value))));
+      this.updateComparisonQueryParams();
+      this.rebuildWorld();
+    }
+  }
+
+  onRelaxationInput(event: Event): void {
+    const value = this.inputNumber(event);
+    if (Number.isFinite(value) && value !== this.relaxationIterations()) {
+      this.relaxationIterations.set(Math.max(0, Math.min(6, Math.round(value))));
+      this.updateComparisonQueryParams();
+      this.rebuildWorld();
+    }
+  }
+
+  onWorldProfileChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as WorldProfileKind;
+    if (this.worldProfileKinds.includes(value) && value !== this.worldProfileKind()) {
+      this.worldProfileKind.set(value);
+      this.updateComparisonQueryParams();
+      this.rebuildWorld();
+    }
+  }
+
+  onWaterLevelInput(event: Event): void {
+    const value = this.inputNumber(event);
+    if (Number.isFinite(value) && value !== this.waterLevel()) {
+      this.waterLevel.set(Math.max(-1, Math.min(1, value)));
+      this.updateComparisonQueryParams();
+      this.rebuildWorld();
+    }
+  }
+
+  onFillModeChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as CellPlanetMapFillMode;
+    if (this.fillModes.includes(value) && value !== this.fillMode()) {
+      this.fillMode.set(value);
+      this.updateComparisonQueryParams();
+      this.rebuildColors();
+    }
+  }
+
+  onHeightScaleInput(event: Event): void {
+    const value = this.inputNumber(event);
+    if (Number.isFinite(value) && value !== this.heightScale()) {
+      this.heightScale.set(Math.max(0, Math.min(1, value)));
+      this.refreshDisplacement();
+    }
+  }
+
+  onSeabedReliefChange(event: Event): void {
+    this.seabedRelief.set((event.target as HTMLInputElement).checked);
+    this.applySeabedRelief();
+    this.refreshDisplacement();
+  }
+
+  onOceanChange(event: Event): void {
+    this.showOcean.set((event.target as HTMLInputElement).checked);
+    this.updateOceanMesh();
+  }
+
+  randomizeSeed(): void {
+    this.seed.set(Math.floor(Math.random() * 1_000_000));
+    this.updateComparisonQueryParams();
+    this.rebuildWorld();
+  }
+
+  private rebuildWorld(): void {
+    const startedAt = performance.now();
+    const seed = this.seed();
+    const profile = WORLD_PROFILES[this.worldProfileKind()];
+
+    // Same shared generation chain and defaults as the 2D map and 2.5D terrain pages.
+    const graph = buildPlanetGraphCore({
+      cellCount: this.cellCount(),
+      seed,
+      relaxationIterations: this.relaxationIterations(),
+      jitter: CELL_PLANET_GENERATION_DEFAULTS.jitter,
+    });
+    const tectonics = buildPlanetTectonics(graph, {
+      plateCount: CELL_PLANET_GENERATION_DEFAULTS.plateCount,
+      seed,
+      ...profile.tectonics,
+    });
+    const seaLevelElevation = tectonics.seaLevelElevation + this.waterLevel() * 0.3;
+    tectonics.seaLevelElevation = seaLevelElevation;
+    tectonics.isLand = deriveIsLand(
+      graph,
+      tectonics.elevation,
+      seaLevelElevation,
+      profile.tectonics?.minRegionCellFraction,
+    );
+    const ecology = buildPlanetEcology(graph, tectonics, {
+      climate: profile.climate,
+      biomes: profile.biomes,
+    });
+    const sampler: IPlanetSurfaceSampler = createPlanetSurfaceSampler(graph, tectonics, ecology);
+
+    let elevationMin = Infinity;
+    let elevationMax = -Infinity;
+    for (const elevation of tectonics.elevation) {
+      elevationMin = Math.min(elevationMin, elevation);
+      elevationMax = Math.max(elevationMax, elevation);
+    }
+
+    this.graph = graph;
+    this.tectonics = tectonics;
+    this.ecology = ecology;
+    this.seaLevelElevation = seaLevelElevation;
+    this.elevationMin = elevationMin;
+    this.elevationMax = elevationMax;
+
+    this.geometry = buildPlanetGlobeGeometry({
+      sampler,
+      cellIdAt: (direction) => findCellAt(graph, direction).id,
+      radius: GLOBE_RADIUS,
+      heightScale: this.heightScale(),
+      longitudeSegments: GLOBE_LONGITUDE_SEGMENTS,
+      latitudeRings: GLOBE_LATITUDE_RINGS,
+    });
+    this.displayElevations = Float32Array.from(this.geometry.elevations);
+    this.applySeabedRelief();
+
+    this.installMesh(this.geometry);
+    this.rebuildColors();
+    this.updateOceanMesh();
+    this.triangles.set(this.geometry.triangleCount);
+    this.vertices.set(this.geometry.vertexCount);
+    this.buildMs.set(performance.now() - startedAt);
+  }
+
+  private installMesh(geometry: IPlanetGlobeGeometry): void {
+    this.disposeMesh();
+    const buffer = new BufferGeometry();
+    buffer.setAttribute('position', new BufferAttribute(geometry.positions, 3));
+    buffer.setAttribute('normal', new BufferAttribute(geometry.normals, 3));
+    buffer.setAttribute('color', new BufferAttribute(new Float32Array(geometry.vertexCount * 3), 3));
+    buffer.setIndex(new BufferAttribute(geometry.indices, 1));
+    buffer.computeBoundingSphere();
+
+    const material = new MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 1,
+      metalness: 0,
+      flatShading: false,
+      // Winding is verified outward in the adapter spec; front side makes a regression visible.
+      side: FrontSide,
+    });
+    const mesh = new Mesh(buffer, material);
+    mesh.name = 'cell-planet-globe-terrain';
+    this.engine.scene.add(mesh);
+    this.mesh = mesh;
+  }
+
+  private disposeMesh(): void {
+    if (!this.mesh) return;
+    this.engine.scene.remove(this.mesh);
+    this.mesh.geometry.dispose();
+    this.mesh.material.dispose();
+    this.mesh = undefined;
+  }
+
+  /**
+   * Re-displaces canonical directions/elevations for a new exaggeration or seabed-relief setting.
+   * No sampler pass and no graph rebuild — geography is unchanged, only display radius/normals.
+   */
+  private refreshDisplacement(): void {
+    if (!this.mesh || !this.geometry) return;
+    writePlanetGlobePositions(
+      this.geometry.positions,
+      this.geometry.directions,
+      this.displayElevations,
+      this.geometry.radius,
+      this.heightScale(),
+    );
+    writePlanetGlobeNormals(this.geometry.normals, this.geometry.positions, this.geometry.indices);
+
+    const position = this.mesh.geometry.getAttribute('position') as BufferAttribute;
+    const normal = this.mesh.geometry.getAttribute('normal') as BufferAttribute;
+    position.needsUpdate = true;
+    normal.needsUpdate = true;
+    this.mesh.geometry.computeBoundingSphere();
+    this.updateOceanMesh();
+  }
+
+  /**
+   * Seabed relief on: underwater vertices keep their below-sea bathymetry (the shared sampler
+   * preserves it). Off: they are clamped to the sea datum for a flat ocean floor.
+   */
+  private applySeabedRelief(): void {
+    if (!this.geometry) return;
+    const relief = this.seabedRelief();
+    for (let i = 0; i < this.geometry.vertexCount; i++) {
+      this.displayElevations[i] =
+        !relief && this.geometry.landMask[i] === 0 ? this.seaLevelElevation : this.geometry.elevations[i];
+    }
+  }
+
+  private rebuildColors(): void {
+    if (!this.mesh || !this.geometry) return;
+    const color = this.mesh.geometry.getAttribute('color') as BufferAttribute;
+    const values = color.array as Float32Array;
+    const mode = this.fillMode();
+    const oceanSubstance = WORLD_PROFILES[this.worldProfileKind()].oceanSubstance;
+
+    for (let i = 0; i < this.geometry.vertexCount; i++) {
+      this.colorScratch.setStyle(this.resolveCellColor(this.geometry.cellIds[i], mode, oceanSubstance));
+      const o = i * 3;
+      values[o] = this.colorScratch.r;
+      values[o + 1] = this.colorScratch.g;
+      values[o + 2] = this.colorScratch.b;
+    }
+    color.needsUpdate = true;
+  }
+
+  /** Mirrors the 2.5D map's data-layer precedence so equivalent cells read the same colour. */
+  private resolveCellColor(
+    cellId: number,
+    mode: CellPlanetMapFillMode,
+    oceanSubstance: 'water' | 'lava',
+  ): string {
+    if (cellId < 0 || cellId >= this.tectonics.elevation.length) {
+      return oceanSubstance === 'lava' ? lavaOceanColor() : OCEAN_COLOR;
+    }
+    if (oceanSubstance === 'lava' && this.ecology.waterBodyKind[cellId] === 'ocean') {
+      return lavaOceanColor();
+    }
+    if (mode === 'plates') return plateColor(this.tectonics.plateIdByCell[cellId]);
+    if (mode === 'elevation') {
+      return elevationColor(
+        this.tectonics.elevation[cellId],
+        this.tectonics.seaLevelElevation,
+        this.elevationMin,
+        this.elevationMax,
+      );
+    }
+    if (mode === 'temperature') return temperatureColor(this.ecology.temperature[cellId]);
+    if (mode === 'moisture') return moistureColor(this.ecology.moisture[cellId]);
+    if (mode === 'land') {
+      return this.tectonics.isLand[cellId] ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
+    }
+    return biomeColor(this.ecology.biome[cellId]);
+  }
+
+  /** Translucent shell at the (display-scaled) sea datum so bathymetry reads as underwater relief. */
+  private updateOceanMesh(): void {
+    if (!this.oceanMesh) {
+      const material = new MeshStandardMaterial({
+        color: '#1c5f8a',
+        transparent: true,
+        opacity: 0.45,
+        roughness: 0.2,
+        metalness: 0.05,
+      });
+      this.oceanMesh = new Mesh(new SphereGeometry(1, GLOBE_LONGITUDE_SEGMENTS, GLOBE_LATITUDE_RINGS), material);
+      this.oceanMesh.name = 'cell-planet-globe-ocean';
+      this.engine.scene.add(this.oceanMesh);
+    }
+    const oceanRadius = GLOBE_RADIUS + this.seaLevelElevation * this.heightScale();
+    this.oceanMesh.scale.setScalar(Math.max(0.0001, oceanRadius));
+    this.oceanMesh.visible = this.showOcean();
+    this.drawCalls.set(this.mesh ? (this.showOcean() ? 2 : 1) : 0);
+  }
+
+  private disposeOceanMesh(): void {
+    if (!this.oceanMesh) return;
+    this.engine.scene.remove(this.oceanMesh);
+    this.oceanMesh.geometry.dispose();
+    this.oceanMesh.material.dispose();
+    this.oceanMesh = undefined;
+  }
+
+  private inputNumber(event: Event): number {
+    return (event.target as HTMLInputElement).valueAsNumber;
+  }
+
+  private restoreQuery(query: CellPlanetQuery): void {
+    const cellCount = this.numberQuery(query.cellCount);
+    if (cellCount !== null) this.cellCount.set(Math.max(200, Math.min(6000, Math.round(cellCount))));
+    const seed = this.numberQuery(query.seed);
+    if (seed !== null) this.seed.set(Math.max(0, Math.min(999999, Math.round(seed))));
+    const relaxation = this.numberQuery(query.relaxation);
+    if (relaxation !== null) this.relaxationIterations.set(Math.max(0, Math.min(6, Math.round(relaxation))));
+    if (query.worldProfile && this.worldProfileKinds.includes(query.worldProfile as WorldProfileKind)) {
+      this.worldProfileKind.set(query.worldProfile as WorldProfileKind);
+    }
+    if (query.fillMode && this.fillModes.includes(query.fillMode as CellPlanetMapFillMode)) {
+      this.fillMode.set(query.fillMode as CellPlanetMapFillMode);
+    }
+    const waterLevel = this.numberQuery(query.waterLevel);
+    if (waterLevel !== null) this.waterLevel.set(Math.max(-1, Math.min(1, waterLevel)));
+  }
+
+  private updateComparisonQueryParams(): void {
+    this.comparisonQueryParams.set({
+      ...this.preservedQueryParams(),
+      cellCount: this.cellCount(),
+      seed: this.seed(),
+      relaxation: this.relaxationIterations(),
+      worldProfile: this.worldProfileKind(),
+      fillMode: this.fillMode(),
+      waterLevel: this.waterLevel(),
+    });
+  }
+
+  private numberQuery(value: string | undefined): number | null {
+    if (value === undefined) return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+}

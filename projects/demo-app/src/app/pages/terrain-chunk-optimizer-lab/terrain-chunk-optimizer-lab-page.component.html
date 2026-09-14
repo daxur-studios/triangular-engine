@@ -9,16 +9,25 @@
         <strong>C0 terrain chunk fixture</strong>
       </header>
       <p>
-        Four adjacent terrain chunks share the same sampled surface. Each has a
-        different reduction level so the ridge and river cross chunk borders
-        while Meshoptimizer simplifies them independently.
+        The fixture can show same-level neighbours or one coarse chunk beside
+        four finer children. All chunks share one sampled ridge, river and
+        optional flattening edit while Meshoptimizer simplifies them independently.
       </p>
       <div class="actions">
+        <button [class.active]="mixedResolution()" (click)="toggleLayout()">
+          {{ mixedResolution() ? "Mixed LOD layout" : "Same-level layout" }}
+        </button>
         <button [class.active]="lockBoundaries()" (click)="toggleBoundaries()">
           {{ lockBoundaries() ? "Lock chunk borders" : "Borders unlocked" }}
         </button>
         <button [class.active]="protectFeatures()" (click)="toggleFeatures()">
           {{ protectFeatures() ? "Protect ridge + river" : "Feature locks off" }}
+        </button>
+        <button [class.active]="flattenEnabled()" (click)="toggleFlattening()">
+          {{ flattenEnabled() ? "Flattening on" : "Flattening off" }}
+        </button>
+        <button [class.active]="flattenShape() === 'rectangle'" (click)="toggleFlattenShape()">
+          {{ flattenShape() === 'circle' ? "Pad: circle" : "Pad: rectangle" }}
         </button>
         <button [class.active]="wireframe()" (click)="toggleWireframe()">
           Wireframe
@@ -45,9 +54,12 @@
         <span>Rendered triangles: {{ triangleLabel() }}</span>
         <span>Achieved reduction: {{ reductionLabel() }}</span>
         <span>Boundary check: {{ boundaryLabel() }}</span>
+        <span>Mixed seam: {{ seamLabel() }}</span>
         <span>Feature check: {{ featureLabel() }}</span>
+        <span>Flattening: {{ padLabel() }}</span>
         <span>Yellow outlines: chunk boundaries</span>
         <span>Gold/blue lines: ridge and river reference paths</span>
+        <span>Mixed seams use matching fine edge samples on the coarse chunk</span>
       </div>
     </section>
   </ng-template>

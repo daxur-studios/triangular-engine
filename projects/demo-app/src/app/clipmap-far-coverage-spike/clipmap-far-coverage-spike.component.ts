@@ -8,9 +8,18 @@ import {
 } from '@angular/core';
 import { Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
-import { probeSeamsAndGaps } from 'triangular-engine/terrain';
+import {
+  probeSeamsAndGaps,
+  runClipmapBenchmarkSuite,
+  type ClipmapBenchmarkKindName,
+  type ClipmapTerrainKindName,
+} from 'triangular-engine/terrain';
 import {
   createClipmapFarCoverageSpikeScene,
+  FAR_COVERAGE_BASE_TILE_SIZE_M,
+  FAR_COVERAGE_BLOCK_RADIUS_TILES,
+  FAR_COVERAGE_FINEST_SWITCH_DISTANCE_M,
+  FAR_COVERAGE_GRID_RESOLUTION,
   FAR_COVERAGE_LEVEL_COUNT,
   FAR_COVERAGE_OUTER_RADIUS_M,
   type IClipmapFarCoverageSpikeSceneHandle,
@@ -70,8 +79,10 @@ export class ClipmapFarCoverageSpikeComponent {
   // function (see clipmap-terrain-material.ts's doc header), not of the
   // clipmap ring-extension mechanism itself. Default to 'wave' here so the
   // far-field view is legible; 'noise' is still available to toggle and
-  // demonstrates the precision limit directly.
-  readonly terrainKind = signal<'wave' | 'noise'>('wave');
+  // demonstrates the precision limit directly. The `peaks`/`ridges`/
+  // `terraces`/`field` kinds are the deterministic benchmark fixtures.
+  readonly terrainKind = signal<ClipmapTerrainKindName>('wave');
+  readonly benchmarkKind = signal<ClipmapBenchmarkKindName>('peaks');
   readonly debugFlat = signal(false);
   readonly debugViewMode = signal<number>(0);
 
@@ -94,6 +105,10 @@ export class ClipmapFarCoverageSpikeComponent {
   readonly isProbingSeams = signal(false);
   readonly seamProbeReport = signal<string | null>(null);
   readonly seamProbeCopied = signal(false);
+
+  readonly isRunningBenchmark = signal(false);
+  readonly benchmarkReport = signal<string | null>(null);
+  readonly benchmarkCopied = signal(false);
 
   constructor() {
     this.scene = createClipmapFarCoverageSpikeScene(this.engine, (diagnostics) => {
@@ -124,9 +139,13 @@ export class ClipmapFarCoverageSpikeComponent {
     this.scene.setFrozen(this.frozen());
   }
 
-  setTerrainKind(kind: 'wave' | 'noise'): void {
+  setTerrainKind(kind: ClipmapTerrainKindName): void {
     this.terrainKind.set(kind);
     this.scene.setTerrainKind(kind);
+  }
+
+  setBenchmarkKind(kind: ClipmapBenchmarkKindName): void {
+    this.benchmarkKind.set(kind);
   }
 
   toggleDebugFlat(): void {
@@ -262,6 +281,50 @@ export class ClipmapFarCoverageSpikeComponent {
       }
     } finally {
       this.isProbingSeams.set(false);
+    }
+  }
+
+  /**
+   * Runs the deterministic fidelity suite on the selected benchmark terrain:
+   * analytic ground-truth peak/ridge/terrace retention, temporal pop
+   * acceleration, structural draw calls and the GPU seam sentinel. Switches
+   * the live material to the benchmark map so the seam probe evaluates the
+   * same geometry the CPU metrics model.
+   */
+  async runFidelityBenchmark(): Promise<void> {
+    if (this.isRunningBenchmark()) return;
+    this.isRunningBenchmark.set(true);
+    this.benchmarkReport.set(null);
+
+    try {
+      this.setTerrainKind(this.benchmarkKind());
+      await this.waitFrames(3);
+      const observedDrawCalls = this.engine.renderer.info.render.calls;
+
+      const result = await runClipmapBenchmarkSuite(this.engine, {
+        terrainKind: this.benchmarkKind(),
+        levelCount: FAR_COVERAGE_LEVEL_COUNT,
+        baseTileSizeM: FAR_COVERAGE_BASE_TILE_SIZE_M,
+        blockRadiusTiles: FAR_COVERAGE_BLOCK_RADIUS_TILES,
+        gridResolution: FAR_COVERAGE_GRID_RESOLUTION,
+        finestSwitchDistanceM: FAR_COVERAGE_FINEST_SWITCH_DISTANCE_M,
+        maxObservedDrawCalls: observedDrawCalls,
+        seamProbeRenderTargetResolution: 128,
+        setTerrainKind: (kind) => this.setTerrainKind(kind),
+      });
+
+      this.benchmarkReport.set(result.scorecard);
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        navigator.clipboard
+          .writeText(result.scorecard)
+          .then(() => {
+            this.benchmarkCopied.set(true);
+            setTimeout(() => this.benchmarkCopied.set(false), 2000);
+          })
+          .catch(() => undefined);
+      }
+    } finally {
+      this.isRunningBenchmark.set(false);
     }
   }
 

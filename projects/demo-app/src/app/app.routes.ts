@@ -490,5 +490,12 @@ export const routes: Routes = [
         ({ PhotoModeLabPageComponent }) => PhotoModeLabPageComponent,
       ),
   },
+  {
+    path: 'cell-planet-globe',
+    loadComponent: () =>
+      import('./pages/cell-planet-globe/cell-planet-globe-page.component').then(
+        ({ CellPlanetGlobePageComponent }) => CellPlanetGlobePageComponent,
+      ),
+  },
 ];
 

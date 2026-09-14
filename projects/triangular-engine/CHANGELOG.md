@@ -11,6 +11,17 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `triangular-engine/worldgen/render` now exports planar cell-picking helpers
+  (`samplePlanarHeight`, `intersectPlanarHeightField`, `mapXZToPlanetDirection`,
+  `mapPlanetDirectionToMapXZ`) that resolve a camera ray against a baked 2.5D height field
+  back to a canonical graph cell.
+
+- `triangular-engine/worldgen/render` now exports a fixed-resolution spherical geometry
+  adapter (`buildPlanetGlobeGeometry`, `writePlanetGlobePositions`,
+  `writePlanetGlobeNormals`) that samples the shared planet surface sampler per vertex and
+  applies radial displacement. The `/cell-planet-globe` demo validates geography parity,
+  height exaggeration and seabed relief; chunked LOD/streaming remains runbook 031.
+
 - `IClipmapTerrainSceneHandle.setVisible()` now allows consumers to temporarily hide
   the clipmap meshes while displaying an alternate inspection surface.
 

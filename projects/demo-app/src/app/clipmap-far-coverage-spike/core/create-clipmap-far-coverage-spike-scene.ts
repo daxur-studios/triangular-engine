@@ -19,6 +19,8 @@ const FAR_COVERAGE_LEVEL_COUNT = 12;
 const FAR_COVERAGE_BASE_TILE_SIZE_M = 16;
 const FAR_COVERAGE_BLOCK_RADIUS_TILES = 4;
 const FAR_COVERAGE_GRID_RESOLUTION = 32;
+const FAR_COVERAGE_FINEST_SWITCH_DISTANCE_M =
+  FAR_COVERAGE_BASE_TILE_SIZE_M * FAR_COVERAGE_BLOCK_RADIUS_TILES;
 
 /** Outer edge of the coarsest (outermost) LOD ring, in metres from camera. */
 export const FAR_COVERAGE_OUTER_RADIUS_M =
@@ -26,7 +28,13 @@ export const FAR_COVERAGE_OUTER_RADIUS_M =
   2 ** (FAR_COVERAGE_LEVEL_COUNT - 1) *
   FAR_COVERAGE_BLOCK_RADIUS_TILES;
 
-export { FAR_COVERAGE_LEVEL_COUNT };
+export {
+  FAR_COVERAGE_LEVEL_COUNT,
+  FAR_COVERAGE_BASE_TILE_SIZE_M,
+  FAR_COVERAGE_BLOCK_RADIUS_TILES,
+  FAR_COVERAGE_GRID_RESOLUTION,
+  FAR_COVERAGE_FINEST_SWITCH_DISTANCE_M,
+};
 
 export type IClipmapFarCoverageSpikeDiagnostics = IClipmapTerrainDiagnostics;
 export type IClipmapFarCoverageSpikeSceneHandle = IClipmapTerrainSceneHandle;

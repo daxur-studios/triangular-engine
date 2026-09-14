@@ -142,6 +142,18 @@ export const DEMOS: readonly DemoItem[] = [
       'Civilization-style oblique map preview using the shared cell planet sampler, baked ridge and river relief, and GPU-morphed clipmap terrain.',
   },
   {
+    id: 'cell-planet-globe',
+    number: '02d',
+    title: 'Cell Planet Globe',
+    route: '/cell-planet-globe',
+    categoryId: 'terrain',
+    tier: 'lab',
+    entryPoints: ['worldgen'],
+    package: 'triangular-engine/worldgen + worldgen/render',
+    description:
+      'Fixed-resolution prototype globe that radially displaces the shared cell planet surface sampler (runbook 032): orbit/zoom, shared colour modes, height exaggeration and seabed relief. Defers chunked LOD/streaming to runbook 031.',
+  },
+  {
     id: 'takram-clouds',
     number: '03',
     title: 'Takram Clouds',

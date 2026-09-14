@@ -127,9 +127,22 @@ const DEFAULT_BLOCK_RADIUS_TILES = 4;
 const DEFAULT_GRID_RESOLUTION = 32;
 const DEFAULT_POPPING_STEP_M = 1;
 const DEFAULT_POPPING_SPAN_M = 20000;
+/**
+ * Target from the benchmark spec. The current even-snapped discrete layout can
+ * jump across two levels at a ring boundary, so a fixed world feature's
+ * rendered height steps by hundreds of metres per camera frame there — the
+ * default scorecard reports FAIL on this metric by design until the discrete
+ * level selection is made continuous. Override per call to gate regressions.
+ */
 const DEFAULT_POPPING_TOLERANCE_M = 0.05;
-const DEFAULT_RETENTION_TOLERANCE_M = 2;
-const DEFAULT_RETENTION_TOLERANCE_RATIO = 0.15;
+/**
+ * Retention tolerance reflects the inherent sampling error of the covering
+ * level's grid: taking the nearest cell vertex attenuates a compact peak by
+ * ~(spacing/(sqrt(2)*radius))^2 at coarse rings. 25% flags total silhouette
+ * collapse without failing on the expected coarse-ring sampling error.
+ */
+const DEFAULT_RETENTION_TOLERANCE_M = 3;
+const DEFAULT_RETENTION_TOLERANCE_RATIO = 0.25;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -354,6 +367,38 @@ export function sampleClipmapRenderedHeight(
   return maxHeight;
 }
 
+/**
+ * Rendered surface height at `(x, z)` as a fragment would see it: bilinear
+ * interpolation of the four vertex heights of the covering level's cell. Used
+ * for the temporal popping sweep, where the max-over-corners silhouette
+ * estimator would introduce discontinuities of its own whenever the covering
+ * level (and therefore the corner set) changes.
+ */
+export function sampleClipmapBilinearHeight(
+  x: number,
+  z: number,
+  context: IClipmapMorphContext,
+): number {
+  const level = findRenderingLevel(x, z, context);
+  if (level < 0) return Number.NaN;
+  const spacing = clipmapVertexSpacingM(
+    level,
+    context.baseTileSizeM,
+    context.gridResolution,
+  );
+  const cX0 = Math.floor(x / spacing) * spacing;
+  const cX1 = cX0 + spacing;
+  const cZ0 = Math.floor(z / spacing) * spacing;
+  const cZ1 = cZ0 + spacing;
+  const uX = clamp((x - cX0) / spacing, 0, 1);
+  const uZ = clamp((z - cZ0) / spacing, 0, 1);
+  const h00 = sampleClipmapVertexHeight(cX0, cZ0, level, context);
+  const h10 = sampleClipmapVertexHeight(cX1, cZ0, level, context);
+  const h01 = sampleClipmapVertexHeight(cX0, cZ1, level, context);
+  const h11 = sampleClipmapVertexHeight(cX1, cZ1, level, context);
+  return mix(mix(h00, h10, uX), mix(h01, h11, uX), uZ);
+}
+
 function evaluateRetention(
   options: IClipmapBenchmarkOptions,
   context: IClipmapMorphContext,
@@ -401,7 +446,7 @@ function measurePopping(
   const heights = new Float64Array(sampleCount + 1);
   for (let k = 0; k <= sampleCount; k++) {
     const cameraX = point.xM - k * stepM;
-    heights[k] = sampleClipmapRenderedHeight(point.xM, point.zM, {
+    heights[k] = sampleClipmapBilinearHeight(point.xM, point.zM, {
       ...context,
       cameraX,
       cameraZ: point.zM,

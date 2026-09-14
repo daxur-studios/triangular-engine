@@ -1,0 +1,86 @@
+<scene [showFps]="true">
+  <orbitControls
+    [cameraPosition]="[0, 1.2, 2.8]"
+    [target]="[0, 0, 0]"
+    [near]="0.01"
+    [far]="100"
+  />
+  <ambientLight [intensity]="1.15" />
+  <directionalLight [position]="[3, 5, 4]" [intensity]="2" />
+</scene>
+
+<aside class="readout">
+  <strong>Cell planet · globe prototype</strong>
+  <nav class="view-switch" aria-label="Map view">
+    <a [routerLink]="['/cell-planet-map']" [queryParams]="comparisonQueryParams()">2D map</a>
+    <a [routerLink]="['/cell-planet-25d-map']" [queryParams]="comparisonQueryParams()">2.5D terrain</a>
+    <span class="active" aria-current="page">Globe</span>
+  </nav>
+  <span>shared sampler → fixed {{ longitudeSegments }}×{{ latitudeRings }} sphere → radial displacement</span>
+
+  <label>
+    <span>Cell count: {{ cellCount() }}</span>
+    <input type="range" min="200" max="6000" step="100" [value]="cellCount()" (input)="onCellCountInput($event)" />
+  </label>
+  <label>
+    <span>Seed: {{ seed() }}</span>
+    <input type="number" min="0" max="999999" step="1" [value]="seed()" (input)="onSeedInput($event)" />
+  </label>
+  <label>
+    <span>Relaxation: {{ relaxationIterations() }}</span>
+    <input
+      type="range"
+      min="0"
+      max="6"
+      step="1"
+      [value]="relaxationIterations()"
+      (input)="onRelaxationInput($event)"
+    />
+  </label>
+  <label>
+    <span>World profile</span>
+    <select [value]="worldProfileKind()" (change)="onWorldProfileChange($event)">
+      @for (profile of worldProfileKinds; track profile) {
+        <option [value]="profile">{{ profile }}</option>
+      }
+    </select>
+  </label>
+  <label>
+    <span>Water level: {{ waterLevel() > 0 ? 'Rising +' : waterLevel() < 0 ? 'Falling ' : 'Baseline ' }}{{ waterLevel().toFixed(2) }}</span>
+    <input type="range" min="-1" max="1" step="0.05" [value]="waterLevel()" (input)="onWaterLevelInput($event)" />
+  </label>
+  <label>
+    <span>Data layer</span>
+    <select [value]="fillMode()" (change)="onFillModeChange($event)">
+      @for (mode of fillModes; track mode) {
+        <option [value]="mode">{{ mode }}</option>
+      }
+    </select>
+  </label>
+  <label>
+    <span>Height exaggeration: {{ heightScale().toFixed(2) }}×</span>
+    <input
+      type="range"
+      min="0"
+      max="1"
+      step="0.01"
+      [value]="heightScale()"
+      (input)="onHeightScaleInput($event)"
+    />
+  </label>
+  <label class="checkbox">
+    <input type="checkbox" [checked]="seabedRelief()" (change)="onSeabedReliefChange($event)" />
+    Seabed relief (shared bathymetry)
+  </label>
+  <label class="checkbox">
+    <input type="checkbox" [checked]="showOcean()" (change)="onOceanChange($event)" />
+    Ocean shell at sea level
+  </label>
+
+  <button type="button" (click)="randomizeSeed()">Randomize seed</button>
+
+  <span>triangles: {{ triangles().toLocaleString() }} · vertices: {{ vertices().toLocaleString() }}</span>
+  <span>build: {{ buildMs().toFixed(0) }} ms · draw calls: {{ drawCalls() }}</span>
+  <span>Prototype: fixed resolution, no LOD/streaming — runbook 031 owns chunked terrain.</span>
+  <span>Drag to orbit · wheel to zoom</span>
+</aside>

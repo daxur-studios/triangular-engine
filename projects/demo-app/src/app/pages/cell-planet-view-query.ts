@@ -18,6 +18,7 @@ export const CELL_PLANET_QUERY_KEYS = [
   'showRidges',
   'showCellEdges',
   'iconBudget',
+  'selectedCell',
 ] as const;
 
 export type CellPlanetQueryKey = (typeof CELL_PLANET_QUERY_KEYS)[number];

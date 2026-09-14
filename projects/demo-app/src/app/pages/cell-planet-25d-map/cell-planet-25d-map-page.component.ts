@@ -37,6 +37,12 @@ import {
 } from 'triangular-engine/terrain';
 import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
 import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
+import {
+  createCellPlanetSelection,
+  ICellPlanetSelection,
+  ICellPlanetSelectionController,
+} from './cell-planet-terrain-selection';
+import { CellPlanetSelectionPanelComponent } from './cell-planet-selection-panel.component';
 
 type TerrainQuality = 'preview' | 'standard' | 'high' | 'ultra';
 
@@ -56,6 +62,9 @@ const TERRAIN_QUALITY_PRESETS: Record<TerrainQuality, ITerrainQualityPreset> = {
 };
 
 const TERRAIN_QUALITY_KINDS: TerrainQuality[] = ['preview', 'standard', 'high', 'ultra'];
+
+/** Planar world-space footprint of the equirectangular terrain bake and its clipmap. */
+const TERRAIN_MAP_BOUNDS = { minX: -128, minZ: -64, maxX: 128, maxZ: 64 } as const;
 
 interface IObjTerrainExport {
   readonly obj: string;
@@ -299,7 +308,7 @@ function makeColorTexture(
 
 @Component({
   selector: 'app-cell-planet-25d-map-page',
-  imports: [EngineModule, RouterLink],
+  imports: [EngineModule, RouterLink, CellPlanetSelectionPanelComponent],
   template: `
     <scene [showFps]="true">
       <orthographicCamera
@@ -406,6 +415,10 @@ function makeColorTexture(
       <span>draw calls: {{ drawCalls() }} · triangles: {{ triangles().toLocaleString() }}</span>
       <span>LOD instances: {{ instances() }}</span>
       <span>Debug orbit view · drag to rotate · wheel to zoom</span>
+      <app-cell-planet-selection-panel
+        [selection]="selection()"
+        (clearSelection)="clearSelection()"
+      />
     </aside>
   `,
   styleUrl: './cell-planet-25d-map-page.component.scss',
@@ -443,6 +456,12 @@ export class CellPlanet25dMapPageComponent {
   readonly isRebuilding = signal(false);
   private readonly preservedQueryParams = signal<CellPlanetQuery>({});
   readonly comparisonQueryParams = signal<Record<string, string | number | boolean>>({});
+
+  /** Currently selected canonical world cell, preserved across views via the route query. */
+  readonly selection = signal<ICellPlanetSelection | null>(null);
+  private selectionController: ICellPlanetSelectionController | undefined;
+  private pendingSelectedCellId: number | null = null;
+  private hasPendingSelection = false;
 
   /**
    * Temporary terrain-inspection camera. The orthographic camera remains in
@@ -484,16 +503,27 @@ export class CellPlanet25dMapPageComponent {
       }
     });
     this.terrain = this.createTerrainScene();
+    this.selectionController = createCellPlanetSelection(this.engine, {
+      onChange: (selection) => {
+        this.selection.set(selection);
+        this.updateComparisonQueryParams();
+      },
+    });
     this.terrainReady = true;
     this.rebuildWorld();
 
     this.destroyRef.onDestroy(() => {
+      this.selectionController?.dispose();
       this.terrain.dispose();
       this.simplificationRevision++;
       this.disposeSimplifiedTerrain();
       this.activeTextures?.height.dispose();
       this.activeTextures?.color.dispose();
     });
+  }
+
+  clearSelection(): void {
+    this.selectionController?.clearSelection();
   }
 
   onCellCountInput(event: Event): void {
@@ -698,6 +728,32 @@ export class CellPlanet25dMapPageComponent {
     void this.rebuildSimplifiedTerrain();
     previousTextures?.height.dispose();
     previousTextures?.color.dispose();
+
+    const generationKey = [
+      this.cellCount(),
+      this.seed(),
+      this.relaxationIterations(),
+      this.worldProfileKind(),
+    ].join(':');
+    this.selectionController?.setContext({
+      graph,
+      tectonics,
+      ecology,
+      bake,
+      projection,
+      bounds: TERRAIN_MAP_BOUNDS,
+      minHeightM,
+      maxHeightM,
+      generationKey,
+    });
+    if (this.hasPendingSelection) {
+      this.hasPendingSelection = false;
+      const pendingCellId = this.pendingSelectedCellId;
+      this.pendingSelectedCellId = null;
+      if (pendingCellId === null) this.selectionController?.clearSelection();
+      else this.selectionController?.selectCell(pendingCellId);
+    }
+
     this.hasTerrain.set(true);
     this.isRebuilding.set(false);
   }
@@ -843,6 +899,10 @@ export class CellPlanet25dMapPageComponent {
     if (terrainHeightScale !== null) this.terrainHeightScale.set(Math.max(0, Math.min(14, terrainHeightScale)));
     const runtimeSimplificationRatio = this.numberQuery(query.runtimeSimplificationRatio);
     if (runtimeSimplificationRatio !== null) this.runtimeSimplificationRatio.set(Math.max(0, Math.min(0.95, runtimeSimplificationRatio)));
+    const selectedCell = this.numberQuery(query.selectedCell);
+    this.pendingSelectedCellId =
+      selectedCell !== null && Number.isInteger(selectedCell) && selectedCell >= 0 ? selectedCell : null;
+    this.hasPendingSelection = true;
   }
 
   private updateComparisonQueryParams(): void {
@@ -858,11 +918,12 @@ export class CellPlanet25dMapPageComponent {
       waterLevel: this.waterLevel(),
       terrainHeightScale: this.terrainHeightScale(),
       runtimeSimplificationRatio: this.runtimeSimplificationRatio(),
+      selectedCell: this.selection()?.cellId ?? '',
     });
   }
 
   private numberQuery(value: string | undefined): number | null {
-    if (value === undefined) return null;
+    if (value === undefined || value === '') return null;
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
   }

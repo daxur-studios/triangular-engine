@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EngineModule, EngineService } from 'triangular-engine';
@@ -91,6 +91,7 @@ export class CellPlanetMapPageComponent {
   readonly projectionLabels = MAP_PROJECTION_LABELS;
   readonly generationDefaults = CELL_PLANET_GENERATION_DEFAULTS;
   private readonly preservedQueryParams = signal<CellPlanetQuery>({});
+  private lastGenerationKey: string | null = null;
   readonly comparisonQueryParams = computed(() => ({
     ...this.preservedQueryParams(),
     cellCount: this.cellCount(),
@@ -107,6 +108,7 @@ export class CellPlanetMapPageComponent {
     showRidges: this.showRidges(),
     showCellEdges: this.showCellEdges(),
     iconBudget: this.iconBudget(),
+    selectedCell: this.selectedCellId() ?? '',
   }));
 
   /** Demo of the component's click-to-cell + highlight capabilities together: clicking a cell
@@ -129,6 +131,23 @@ export class CellPlanetMapPageComponent {
       this.preservedQueryParams.set(query);
       this.restoreQuery(query);
     });
+
+    // A selection only means something for the world it was picked in. Clear it when the
+    // user changes a generation input, but not when a navigation restores a new world plus
+    // its carried selection (restoreQuery updates lastGenerationKey first).
+    effect(() => {
+      const key = this.generationKey();
+      untracked(() => {
+        if (this.lastGenerationKey !== null && this.lastGenerationKey !== key) {
+          this.selectedCellId.set(null);
+        }
+        this.lastGenerationKey = key;
+      });
+    });
+  }
+
+  private generationKey(): string {
+    return [this.cellCount(), this.seed(), this.relaxationIterations(), this.worldProfileKind()].join(':');
   }
 
   randomizeSeed(): void {
@@ -192,10 +211,17 @@ export class CellPlanetMapPageComponent {
     this.showCellEdges.set(this.booleanQuery(query.showCellEdges, this.showCellEdges()));
     const iconBudget = this.numberQuery(query.iconBudget);
     if (iconBudget !== null) this.iconBudget.set(Math.max(0, Math.min(4000, Math.round(iconBudget))));
+    const selectedCell = this.numberQuery(query.selectedCell);
+    this.selectedCellId.set(
+      selectedCell !== null && Number.isInteger(selectedCell) && selectedCell >= 0 ? selectedCell : null,
+    );
+    // Record the restored world so the generation-watch effect above does not clear the
+    // selection we just carried in from the other view.
+    this.lastGenerationKey = this.generationKey();
   }
 
   private numberQuery(value: string | undefined): number | null {
-    if (value === undefined) return null;
+    if (value === undefined || value === '') return null;
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
   }

@@ -136,3 +136,33 @@ findings. Do not duplicate the full progress log across documents.
   both protection layers. Library and demo builds pass; visual seam checks and measured
   simplification/feature-error results are still pending. Next: run the C0 visual matrix,
   then add explicit mixed-resolution stitching if border locking alone leaves T-junctions.
+- **2026-09-13 — C0 visual check passed:** manually tested the fixture with boundary locking
+  on/off and feature protection on/off. Locked borders showed no holes; unlocked borders
+  exposed the expected seam/hole risk. Higher reduction produced visibly more decimated
+  chunks, while protection kept the ridge/river detail available. Same-level boundary
+  protection is therefore behaving as intended. Next: test a mixed-resolution parent/child
+  boundary, because `LockBorder` does not by itself stitch one coarse edge to two finer edges.
+- **2026-09-13 — C0 mixed fixture added:** extended the lab with a mixed layout containing one
+  level-zero chunk beside two level-one children, an optional visual skirt, and a toggle for
+  same-level versus mixed-level coverage. Added a deterministic circle/rectangle flattening
+  edit with a blend band and a maximum pad-error diagnostic. The panel now reports source and
+  referenced vertices, mixed seam samples, pad error, and the existing triangle/boundary/
+  feature results. Library and demo builds plus `git diff --check` pass. Next: visually inspect
+  the mixed layout with skirts off/on and record whether explicit transition stitching is
+  required; then add a dense-reference error comparison before moving to quadtree streaming.
+- **2026-09-13 — C0 mixed visual check passed:** browser smoke-tested the existing demo route
+  without starting a server. Mixed LOD with borders locked reported `0` missing seam samples;
+  flattening reported `0.00m` maximum pad error for both circle and rectangle modes. With
+  borders unlocked and skirts off, the fixture reported `37` missing seam samples, confirming
+  the diagnostic failure path. The next seam question is now visual T-junction and shading
+  quality, rather than basic coverage holes. Next: add dense-reference height/feature error
+  measurements and decide whether explicit transition triangles are needed beyond skirts.
+- **2026-09-14 — C0 seam fixture corrected:** removed skirts from the optimizer lab render path
+  because they added a second draw per chunk and extruded along terrain normals, producing
+  sideways protrusions on steep mountains. The mixed layout now covers the same 1,024m square
+  as the same-level layout: one coarse half plus four fine children. The coarse boundary uses
+  the fine child sample spacing, with `LockBorder` retaining the shared samples, so the seam
+  remains in the surface mesh. The diagnostic now compares referenced world-space edge samples
+  and reports missing samples plus maximum height delta. Library and demo builds pass. This is
+  still a bounded C0 fixture; camera-driven quadtree residency, worker scheduling and larger
+  area stress evidence remain outstanding.
