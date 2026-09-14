@@ -1,11 +1,12 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { BufferGeometry, ClampToEdgeWrapping, DataTexture, Float32BufferAttribute, FloatType, LinearFilter, Mesh, MeshStandardMaterial, RGBAFormat, SRGBColorSpace, UnsignedByteType } from 'three';
+import { BufferGeometry, ClampToEdgeWrapping, DataTexture, Float32BufferAttribute, FloatType, LinearFilter, Mesh, MeshStandardMaterial, PlaneGeometry, RGBAFormat, SRGBColorSpace, UnsignedByteType } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import { simplifyIndexedGeometry } from 'triangular-engine/meshoptimizer';
 import {
   WORLD_PROFILES,
+  IPlanetGraphCore,
   IPlanetEcology,
   IPlanetSurfaceBake,
   IPlanetTectonics,
@@ -30,6 +31,7 @@ import {
   plateColor,
   temperatureColor,
 } from 'triangular-engine/worldgen/render';
+import { evaluateTerrainMaterial, ITerrainMaterialSample } from 'triangular-engine/terrain';
 import {
   createClipmapTerrainScene,
   IClipmapTerrainHeightSource,
@@ -69,6 +71,72 @@ const TERRAIN_MAP_BOUNDS = { minX: -128, minZ: -64, maxX: 128, maxZ: 64 } as con
 interface IObjTerrainExport {
   readonly obj: string;
   readonly mtl: string;
+}
+
+type CellPlanet25dFillMode = CellPlanetMapFillMode | 'material';
+
+function terrainMaterialRgb(sample: ITerrainMaterialSample, oceanSubstance: 'water' | 'lava'): [number, number, number] {
+  const palette: Record<'water' | 'sand' | 'grass' | 'rock' | 'snow', [number, number, number]> = {
+    water: hslToRgb(oceanSubstance === 'lava' ? lavaOceanColor() : 'hsl(210, 55%, 22%)') as [number, number, number],
+    sand: hslToRgb('hsl(35, 32%, 53%)') as [number, number, number],
+    grass: hslToRgb('hsl(103, 50%, 38%)') as [number, number, number],
+    rock: hslToRgb('hsl(28, 18%, 43%)') as [number, number, number],
+    snow: hslToRgb('hsl(0, 0%, 96%)') as [number, number, number],
+  };
+  const layers = ['water', 'sand', 'grass', 'rock', 'snow'] as const;
+  const desertSand = hslToRgb('hsl(29, 48%, 50%)') as [number, number, number];
+  const sandRgb: [number, number, number] = [
+    palette.sand[0] * (1 - sample.arid01) + desertSand[0] * sample.arid01,
+    palette.sand[1] * (1 - sample.arid01) + desertSand[1] * sample.arid01,
+    palette.sand[2] * (1 - sample.arid01) + desertSand[2] * sample.arid01,
+  ];
+  const rgb: [number, number, number] = [0, 0, 0];
+  for (const layer of layers) {
+    const weight = sample.weights[layer];
+    const layerRgb = layer === 'sand' ? sandRgb : palette[layer];
+    rgb[0] += layerRgb[0] * weight;
+    rgb[1] += layerRgb[1] * weight;
+    rgb[2] += layerRgb[2] * weight;
+  }
+  return rgb;
+}
+
+function buildRiverMaterialMask(graph: IPlanetGraphCore, ecology: IPlanetEcology): Uint8Array {
+  const mask = new Uint8Array(graph.cells.length);
+  const thresholdCos = Math.cos(0.09);
+  for (const cell of graph.cells) {
+    for (const path of ecology.riverPaths) {
+      if (path.some((point) => cell.center.x * point.x + cell.center.y * point.y + cell.center.z * point.z >= thresholdCos)) {
+        mask[cell.id] = 1;
+        break;
+      }
+    }
+  }
+  return mask;
+}
+
+function makeOceanMaskTexture(bake: IPlanetSurfaceBake, oceanSubstance: 'water' | 'lava'): DataTexture {
+  const rgb = hslToRgb(oceanSubstance === 'lava' ? lavaOceanColor() : 'hsl(205, 65%, 32%)');
+  const rgba = new Uint8Array(bake.cellIds.length * 4);
+  for (let index = 0; index < bake.cellIds.length; index++) {
+    const offset = index * 4;
+    rgba[offset] = rgb[0];
+    rgba[offset + 1] = rgb[1];
+    rgba[offset + 2] = rgb[2];
+    // Invalid projection pixels and land are transparent; water cells form the sea surface.
+    rgba[offset + 3] = bake.cellIds[index] >= 0 && bake.landMask[index] === 0 ? 255 : 0;
+  }
+  const texture = new DataTexture(rgba, bake.width, bake.height, RGBAFormat, UnsignedByteType);
+  texture.minFilter = LinearFilter;
+  texture.magFilter = LinearFilter;
+  texture.wrapS = ClampToEdgeWrapping;
+  texture.wrapT = ClampToEdgeWrapping;
+  // Bake row 0 is the minimum world-Z row used by the clipmap's mapUv. Keep the
+  // typed-array convention explicit; the plane geometry corrects its own V axis below.
+  texture.flipY = false;
+  texture.colorSpace = SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 function getElevationRange(elevations: ArrayLike<number>): { readonly min: number; readonly max: number } {
@@ -254,41 +322,79 @@ function hslToRgb(value: string): [number, number, number] {
 
 function makeColorTexture(
   bake: IPlanetSurfaceBake,
+  graph: IPlanetGraphCore,
   tectonics: IPlanetTectonics,
   ecology: IPlanetEcology,
-  fillMode: CellPlanetMapFillMode,
+  fillMode: CellPlanet25dFillMode,
   oceanSubstance: 'water' | 'lava',
   elevationMin: number,
   elevationMax: number,
 ): DataTexture {
   const rgba = new Uint8Array(bake.cellIds.length * 4);
   const waterRgb = hslToRgb(oceanSubstance === 'lava' ? lavaOceanColor() : 'hsl(210, 55%, 22%)');
+  const riverMask = fillMode === 'material' ? buildRiverMaterialMask(graph, ecology) : undefined;
+  const ridgeCellSet = fillMode === 'material' ? new Set(tectonics.ridgeCellIds) : undefined;
+  let maxSlope = 0;
+  if (fillMode === 'material') {
+    for (const slope of ecology.slope) maxSlope = Math.max(maxSlope, slope);
+  }
+  const landRange = Math.max(1, elevationMax - tectonics.seaLevelElevation);
+  const materialOptions = {
+    snowlineM: tectonics.seaLevelElevation + landRange * 0.68,
+    snowlineBlendM: Math.max(0.05, landRange * 0.16),
+  };
   for (let i = 0; i < bake.cellIds.length; i++) {
     const cellId = bake.cellIds[i];
     let rgb = waterRgb;
     if (cellId >= 0 && cellId < tectonics.elevation.length) {
-      let color: string;
-      if (oceanSubstance === 'lava' && ecology.waterBodyKind[cellId] === 'ocean') {
-        color = lavaOceanColor();
-      } else if (fillMode === 'plates') {
-        color = plateColor(tectonics.plateIdByCell[cellId]);
-      } else if (fillMode === 'elevation') {
-        color = elevationColor(
-          tectonics.elevation[cellId],
-          tectonics.seaLevelElevation,
-          elevationMin,
-          elevationMax,
+      if (fillMode === 'material') {
+        const material = evaluateTerrainMaterial(
+          {
+            elevationM: tectonics.elevation[cellId] ?? tectonics.seaLevelElevation,
+            seaLevelM: tectonics.seaLevelElevation,
+            minElevationM: elevationMin,
+            maxElevationM: elevationMax,
+            slope01: maxSlope > 0 ? (ecology.slope[cellId] ?? 0) / maxSlope : 0,
+            moisture01: ecology.moisture[cellId],
+            temperature01: ((ecology.temperature[cellId] ?? 0) + 1) * 0.5,
+            snowIce01:
+              ecology.biome[cellId] === 'ice_cap' ? 1 :
+              ecology.biome[cellId] === 'glacier' ? 0.9 :
+              ecology.biome[cellId] === 'tundra' ? 0.35 : 0,
+            arid01:
+              ecology.biome[cellId] === 'desert' ? 1 :
+              ecology.biome[cellId] === 'steppe' ? 0.45 :
+              ecology.biome[cellId] === 'savanna' ? 0.25 : 0,
+            ridge01: ridgeCellSet?.has(cellId) ? 1 : 0,
+            river01: riverMask?.[cellId] ?? 0,
+          },
+          materialOptions,
         );
-      } else if (fillMode === 'temperature') {
-        color = temperatureColor(ecology.temperature[cellId]);
-      } else if (fillMode === 'moisture') {
-        color = moistureColor(ecology.moisture[cellId]);
-      } else if (fillMode === 'land') {
-        color = tectonics.isLand[cellId] ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
+        rgb = terrainMaterialRgb(material, oceanSubstance);
       } else {
-        color = biomeColor(ecology.biome[cellId]);
+        let color: string;
+        if (oceanSubstance === 'lava' && ecology.waterBodyKind[cellId] === 'ocean') {
+          color = lavaOceanColor();
+        } else if (fillMode === 'plates') {
+          color = plateColor(tectonics.plateIdByCell[cellId]);
+        } else if (fillMode === 'elevation') {
+          color = elevationColor(
+            tectonics.elevation[cellId],
+            tectonics.seaLevelElevation,
+            elevationMin,
+            elevationMax,
+          );
+        } else if (fillMode === 'temperature') {
+          color = temperatureColor(ecology.temperature[cellId]);
+        } else if (fillMode === 'moisture') {
+          color = moistureColor(ecology.moisture[cellId]);
+        } else if (fillMode === 'land') {
+          color = tectonics.isLand[cellId] ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
+        } else {
+          color = biomeColor(ecology.biome[cellId]);
+        }
+        rgb = hslToRgb(color);
       }
-      rgb = hslToRgb(color);
     }
     const offset = i * 4;
     rgba[offset] = rgb[0];
@@ -399,6 +505,10 @@ function makeColorTexture(
         <span>Water level: {{ waterLevel() > 0 ? 'Rising +' : waterLevel() < 0 ? 'Falling ' : 'Baseline ' }}{{ waterLevel().toFixed(2) }}</span>
         <input type="range" min="-1" max="1" step="0.05" [value]="waterLevel()" (input)="onWaterLevelInput($event)" />
       </label>
+      <label class="checkbox-row">
+        <input type="checkbox" [checked]="showOcean()" (change)="onOceanChange($event)" />
+        <span>Ocean surface at sea level</span>
+      </label>
       <label>
         <span>Terrain vertical scale: {{ terrainHeightScale().toFixed(1) }}</span>
         <input type="range" min="0" max="14" step="0.5" [value]="terrainHeightScale()" (input)="onTerrainHeightScaleInput($event)" />
@@ -447,12 +557,13 @@ export class CellPlanet25dMapPageComponent {
   readonly projectionType = signal<MapProjectionKind>('equirectangular');
   readonly projectionKinds = MAP_PROJECTION_KINDS;
   readonly projectionLabels = MAP_PROJECTION_LABELS;
-  readonly fillMode = signal<CellPlanetMapFillMode>('biome');
-  readonly fillModes: CellPlanetMapFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture', 'land'];
+  readonly fillMode = signal<CellPlanet25dFillMode>('biome');
+  readonly fillModes: CellPlanet25dFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture', 'land', 'material'];
   readonly terrainQuality = signal<TerrainQuality>('standard');
   readonly terrainQualityKinds = TERRAIN_QUALITY_KINDS;
   readonly terrainQualityPresets = TERRAIN_QUALITY_PRESETS;
   readonly waterLevel = signal(0);
+  readonly showOcean = signal(true);
   /** Display-only relief scale. Canonical planet elevations remain unchanged. */
   readonly terrainHeightScale = signal(4);
   /** Experimental runtime-only triangle reduction ratio; canonical terrain is unchanged. */
@@ -477,11 +588,13 @@ export class CellPlanet25dMapPageComponent {
   private terrainReady = false;
 
   private activeTextures: { height: DataTexture; color: DataTexture } | undefined;
+  private oceanMesh: Mesh<PlaneGeometry, MeshStandardMaterial> | undefined;
   private simplifiedTerrainMesh: Mesh<BufferGeometry, MeshStandardMaterial> | undefined;
   private simplificationRevision = 0;
   private colorContext:
     | {
         bake: IPlanetSurfaceBake;
+        graph: IPlanetGraphCore;
         tectonics: IPlanetTectonics;
         ecology: IPlanetEcology;
         oceanSubstance: 'water' | 'lava';
@@ -521,6 +634,7 @@ export class CellPlanet25dMapPageComponent {
       this.terrain.dispose();
       this.simplificationRevision++;
       this.disposeSimplifiedTerrain();
+      this.disposeOceanMesh();
       this.activeTextures?.height.dispose();
       this.activeTextures?.color.dispose();
     });
@@ -576,7 +690,7 @@ export class CellPlanet25dMapPageComponent {
   }
 
   onFillModeChange(event: Event): void {
-    const value = (event.target as HTMLSelectElement).value as CellPlanetMapFillMode;
+    const value = (event.target as HTMLSelectElement).value as CellPlanet25dFillMode;
     if (this.fillModes.includes(value) && value !== this.fillMode()) {
       this.fillMode.set(value);
       this.updateComparisonQueryParams();
@@ -603,6 +717,12 @@ export class CellPlanet25dMapPageComponent {
       this.updateComparisonQueryParams();
       this.rebuildWorld();
     }
+  }
+
+  onOceanChange(event: Event): void {
+    this.showOcean.set((event.target as HTMLInputElement).checked);
+    this.updateOceanSurfaceVisibility();
+    this.updateComparisonQueryParams();
   }
 
   onTerrainHeightScaleInput(event: Event): void {
@@ -704,14 +824,17 @@ export class CellPlanet25dMapPageComponent {
     }
     this.colorContext = {
       bake,
+      graph,
       tectonics,
       ecology,
       oceanSubstance: profile.oceanSubstance,
       elevationMin,
       elevationMax,
     };
+    this.updateOceanSurface(bake, seaLevelElevation, profile.oceanSubstance);
     const colorTexture = makeColorTexture(
       bake,
+      graph,
       tectonics,
       ecology,
       this.fillMode(),
@@ -768,6 +891,7 @@ export class CellPlanet25dMapPageComponent {
     if (!context || !active) return;
     const colorTexture = makeColorTexture(
       context.bake,
+      context.graph,
       context.tectonics,
       context.ecology,
       this.fillMode(),
@@ -847,6 +971,62 @@ export class CellPlanet25dMapPageComponent {
     this.simplifiedTerrainMesh = undefined;
   }
 
+  private updateOceanSurface(
+    bake: IPlanetSurfaceBake,
+    seaLevelElevation: number,
+    oceanSubstance: 'water' | 'lava',
+  ): void {
+    const maskTexture = makeOceanMaskTexture(bake, oceanSubstance);
+    if (!this.oceanMesh) {
+      const material = new MeshStandardMaterial({
+        color: '#ffffff',
+        map: maskTexture,
+        transparent: true,
+        opacity: 0.45,
+        depthWrite: false,
+        roughness: 0.2,
+        metalness: 0.05,
+      });
+      const width = TERRAIN_MAP_BOUNDS.maxX - TERRAIN_MAP_BOUNDS.minX;
+      const depth = TERRAIN_MAP_BOUNDS.maxZ - TERRAIN_MAP_BOUNDS.minZ;
+      const geometry = new PlaneGeometry(width, depth);
+      const uv = geometry.getAttribute('uv');
+      // PlaneGeometry's rotated local +Y points toward world -Z, so its default
+      // V axis is opposite to the bake/clipmap world-Z convention.
+      for (let index = 0; index < uv.count; index++) uv.setY(index, 1 - uv.getY(index));
+      uv.needsUpdate = true;
+      this.oceanMesh = new Mesh(geometry, material);
+      this.oceanMesh.name = 'cell-planet-25d-ocean';
+      this.oceanMesh.rotation.x = -Math.PI / 2;
+      this.engine.scene.add(this.oceanMesh);
+    } else {
+      const material = this.oceanMesh.material;
+      const previousMap = material.map;
+      material.map = maskTexture;
+      material.needsUpdate = true;
+      previousMap?.dispose();
+    }
+    this.oceanMesh.position.set(
+      (TERRAIN_MAP_BOUNDS.minX + TERRAIN_MAP_BOUNDS.maxX) * 0.5,
+      seaLevelElevation,
+      (TERRAIN_MAP_BOUNDS.minZ + TERRAIN_MAP_BOUNDS.maxZ) * 0.5,
+    );
+    this.oceanMesh.visible = this.showOcean();
+  }
+
+  private updateOceanSurfaceVisibility(): void {
+    if (this.oceanMesh) this.oceanMesh.visible = this.showOcean();
+  }
+
+  private disposeOceanMesh(): void {
+    if (!this.oceanMesh) return;
+    this.engine.scene.remove(this.oceanMesh);
+    this.oceanMesh.geometry.dispose();
+    this.oceanMesh.material.map?.dispose();
+    this.oceanMesh.material.dispose();
+    this.oceanMesh = undefined;
+  }
+
   private inputNumber(event: Event): number {
     return (event.target as HTMLInputElement).valueAsNumber;
   }
@@ -894,8 +1074,8 @@ export class CellPlanet25dMapPageComponent {
     if (query.terrainQuality && this.terrainQualityKinds.includes(query.terrainQuality as TerrainQuality)) {
       this.terrainQuality.set(query.terrainQuality as TerrainQuality);
     }
-    if (query.fillMode && this.fillModes.includes(query.fillMode as CellPlanetMapFillMode)) {
-      this.fillMode.set(query.fillMode as CellPlanetMapFillMode);
+    if (query.fillMode && this.fillModes.includes(query.fillMode as CellPlanet25dFillMode)) {
+      this.fillMode.set(query.fillMode as CellPlanet25dFillMode);
     }
     const waterLevel = this.numberQuery(query.waterLevel);
     if (waterLevel !== null) this.waterLevel.set(Math.max(-1, Math.min(1, waterLevel)));
@@ -903,6 +1083,8 @@ export class CellPlanet25dMapPageComponent {
     if (terrainHeightScale !== null) this.terrainHeightScale.set(Math.max(0, Math.min(14, terrainHeightScale)));
     const runtimeSimplificationRatio = this.numberQuery(query.runtimeSimplificationRatio);
     if (runtimeSimplificationRatio !== null) this.runtimeSimplificationRatio.set(Math.max(0, Math.min(0.95, runtimeSimplificationRatio)));
+    if (query.showOcean === 'false' || query.showOcean === '0') this.showOcean.set(false);
+    if (query.showOcean === 'true' || query.showOcean === '1') this.showOcean.set(true);
     const selectedCell = this.numberQuery(query.selectedCell);
     this.pendingSelectedCellId =
       selectedCell !== null && Number.isInteger(selectedCell) && selectedCell >= 0 ? selectedCell : null;
@@ -922,6 +1104,7 @@ export class CellPlanet25dMapPageComponent {
       waterLevel: this.waterLevel(),
       terrainHeightScale: this.terrainHeightScale(),
       runtimeSimplificationRatio: this.runtimeSimplificationRatio(),
+      showOcean: this.showOcean(),
       selectedCell: this.selection()?.cellId ?? '',
     });
   }

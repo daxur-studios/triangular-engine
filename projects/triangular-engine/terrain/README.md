@@ -23,14 +23,26 @@ queues, generates, and retires patches as the active engine camera moves.
 />
 ```
 
-The defaults provide camera-following LOD, bounded per-frame generation, mixed
-LOD seam skirts, and a standard Three.js terrain material. Override
+The defaults provide camera-following LOD, bounded per-frame generation, parent
+fallback during asynchronous replacement, and a standard Three.js terrain material.
+Visual seam skirts are opt-in rather than enabled by default. Override
 `lodPosition` to follow a character or vehicle instead of the camera. The
 `maxLod`, `refinementDistance`, `resolution`, `generationBudget`, `skirtDepth`,
-`lodHysteresis`, `getKey`, `getLevel`, `createMaterial`, and `createColors`
+`lodHysteresis`, `getKey`, `getLevel`, `createMaterial`, `createColors`,
+`colorRevision`, and `freezeLod`
 inputs customize the policy and rendering without replacing the streaming
 loop. `lodHysteresis` defaults to `0.15`, preventing an already-refined branch
 from repeatedly flipping at its distance boundary.
+
+For rectangular hierarchical domains, mixed LOD cuts automatically detect
+coarse edges beside finer selected neighbours. Those coarse patches are sampled
+at the finest required spacing before an optional mesh simplifier runs. Each
+edge is then conformed to its own neighbour spacing: a refined edge retains the
+matching fine samples, while the other edges follow their ordinary neighbour's
+piecewise boundary. Transition data is exposed through `baseResolution`,
+`edgeRefinementMask`, `edgeRefinementLevel`, `edgeRefinementLevels`, and
+`edgeRefinementSegments` in the mesh-generation request. This keeps every
+shared surface aligned without skirts or seam draw calls.
 
 Mesh generation is synchronous by default because arbitrary JavaScript field
 and domain instances cannot be cloned into a Web Worker. Set `meshGenerator`
@@ -41,6 +53,25 @@ patch retention, Three.js geometry creation, and GPU upload.
 Framework-free consumers can continue composing
 `selectAdaptiveTerrainPatches`, `TerrainGenerationQueue`, and
 `generateTerrainPatchMesh` directly.
+
+## Shared material sampling
+
+`evaluateTerrainMaterial` provides a renderer-independent first-pass material
+sample from elevation, slope, climate, ridge, river, and wetness signals. It
+returns normalized weights for water, sand, grass, rock, and snow, plus feature
+masks, including `arid01`, that can later be baked into streamed material tiles
+or evaluated in a shader. The contract is independent of mesh topology, so it
+can be used by planar chunks and cube-sphere patches at different geometry LODs.
+
+Adapters may also provide explicit `snowIce01` and `arid01` signals for
+discrete worldgen results such as ice caps, glaciers, deserts, and steppes.
+Those signals let a material remain visually faithful when elevation alone
+does not explain the biome.
+
+Use the returned weights as semantic data rather than treating them as final
+colours. A renderer may blend authored detail textures, procedural detail, or a
+stylized palette from the same sample. `packTerrainMaterialWeights` provides a
+stable order for vertex attributes and GPU tile formats.
 
 ## Planetary CDLOD (Continuous Distance-Dependent LOD)
 

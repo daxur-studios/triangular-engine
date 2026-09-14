@@ -20,6 +20,7 @@ import {
 import { EngineService } from 'triangular-engine';
 import type { ITerrainField } from '../core/terrain-field';
 import type {
+  TerrainPatchEdgeSegments,
   ITerrainPatchGeometry,
   ITerrainPatchMesh,
 } from '../core/terrain-patch';
@@ -28,12 +29,15 @@ import type { IHierarchicalTerrainSurfaceDomain } from '../domains/terrain-surfa
 import { generateTerrainPatchMesh } from '../meshing/terrain-patch-mesher';
 import { TerrainGenerationQueue } from '../streaming/terrain-generation-queue';
 import { selectAdaptiveTerrainPatches } from '../streaming/terrain-patch-selection';
+import { calculateTerrainPatchEdgeRefinementMasks } from '../streaming/terrain-patch-edge-masks';
 export interface ITerrainSurfaceLodStats {
   readonly desired: number;
   readonly resident: number;
   readonly queued: number;
   /** One draw per resident surface, plus one when its visual skirt is present. */
   readonly drawCalls: number;
+  /** Indexed surface triangles currently resident. */
+  readonly triangles: number;
   /** CPU-side typed-array bytes currently referenced by resident geometries. */
   readonly geometryBytes: number;
   readonly levels: Readonly<Record<number, number>>;
@@ -50,7 +54,17 @@ export interface ITerrainSurfaceGenerationRequest<TAddress> {
   readonly field: ITerrainField;
   readonly domain: IHierarchicalTerrainSurfaceDomain<TAddress>;
   readonly address: TAddress;
+  /** Normal number of quads per patch axis before transition refinement. */
+  readonly baseResolution: number;
   readonly resolution: number;
+  /** Bit mask of coarse edges that use finer-neighbour sample spacing. */
+  readonly edgeRefinementMask: number;
+  /** Number of quadtree levels between this patch and its finest neighbour. */
+  readonly edgeRefinementLevel: number;
+  /** Per-edge level deltas in north, east, south, west order. */
+  readonly edgeRefinementLevels: readonly [number, number, number, number];
+  /** Refined sections for each edge in north, east, south, west order. */
+  readonly edgeRefinementSegments: TerrainPatchEdgeSegments;
   readonly skirtDepthM: number;
 }
 
@@ -72,6 +86,7 @@ interface IResidentPatch {
   readonly material: Material;
   readonly drawCalls: number;
   readonly geometryBytes: number;
+  readonly triangles: number;
 }
 
 /**
@@ -99,6 +114,15 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     { readonly address: TAddress; readonly patch: ITerrainPatchMesh<TAddress> }
   >();
   private desiredPriorities = new Map<string, number>();
+  private desiredEdgeMasks = new Map<
+    string,
+    {
+      readonly mask: number;
+      readonly levelDelta: number;
+      readonly edgeLevelDeltas: readonly [number, number, number, number];
+      readonly edgeSegments: TerrainPatchEdgeSegments;
+    }
+  >();
   private selectionSignature = '';
   private refinedKeys = new Set<string>();
   private generationEpoch = 0;
@@ -117,10 +141,13 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   readonly maxLod = input(3);
   readonly refinementDistance = input<number | undefined>(undefined);
   readonly resolution = input(48);
-  readonly skirtDepth = input(5);
+  /** Optional visual gap cover. Keep disabled unless a consumer explicitly requests skirts. */
+  readonly skirtDepth = input(0);
   readonly generationBudget = input(4);
   /** Prevents LOD oscillation near a refinement boundary. */
   readonly lodHysteresis = input(0.15);
+  /** Keeps the current selected cut while allowing the camera to move. */
+  readonly freezeLod = input(false);
   /** Uses the built-in adaptive distance selector when omitted. */
   readonly patchSelector = input<
     TerrainSurfacePatchSelector<TAddress> | undefined
@@ -146,6 +173,8 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     | ((context: ITerrainSurfaceColorContext<TAddress>) => Float32Array)
     | undefined
   >(undefined);
+  /** Increment to rebuild resident geometry when a colour mode changes. */
+  readonly colorRevision = input(0);
   readonly lodChange = output<ITerrainSurfaceLodStats>();
 
   constructor() {
@@ -173,6 +202,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       this.getKey();
       this.createMaterial();
       this.createColors();
+      this.colorRevision();
       this.resetSelection();
     });
   }
@@ -190,6 +220,10 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   }
 
   private update(): void {
+    if (this.freezeLod() && this.selectionSignature !== '') {
+      this.processGenerationQueue();
+      return;
+    }
     const domain = this.domain();
     const roots = this.roots();
     const position = this.lodPosition() ?? this.cameraPosition();
@@ -200,36 +234,73 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       this.refinementDistance() ?? estimateRefinementDistance(domain, roots);
     const hysteresis = Math.min(0.95, Math.max(0, this.lodHysteresis()));
     const patchSelector = this.patchSelector();
-    const selected = patchSelector
-      ? this.selectCustomPatches(patchSelector, {
-          domain,
-          roots,
-          cameraWorldM: position,
-          getLevel,
-          getKey,
-          maxLevel,
-          refinementDistanceM,
-          hysteresis,
-          wasRefined: (address) => this.refinedKeys.has(getKey(address)),
-        })
-      : this.selectDefaultPatches({
-          domain,
-          roots,
-          cameraWorldM: position,
-          getLevel,
-          getKey,
-          maxLevel,
-          refinementDistanceM,
-          hysteresis,
-        });
-    const entries = selected.map((address) => ({
-      address,
-      key: getKey(address),
-    }));
+    // Establish a complete coarse cover before asking for a refined cut. This
+    // gives the renderer a parent fallback during the first asynchronous build
+    // and prevents the initial view from refining into an empty scene.
+    const selected = this.residents.size === 0
+      ? roots
+      : patchSelector
+        ? this.selectCustomPatches(patchSelector, {
+            domain,
+            roots,
+            cameraWorldM: position,
+            getLevel,
+            getKey,
+            maxLevel,
+            refinementDistanceM,
+            hysteresis,
+            wasRefined: (address) => this.refinedKeys.has(getKey(address)),
+          })
+        : this.selectDefaultPatches({
+            domain,
+            roots,
+            cameraWorldM: position,
+            getLevel,
+            getKey,
+            maxLevel,
+            refinementDistanceM,
+            hysteresis,
+          });
+    const edgeMasks = calculateTerrainPatchEdgeRefinementMasks(
+      domain,
+      selected,
+      getLevel,
+    );
+    const entries = selected.map((address, index) => {
+      const baseKey = getKey(address);
+      const edgeRefinement = edgeMasks[index] ?? {
+        mask: 0,
+        levelDelta: 0,
+        edgeLevelDeltas: [0, 0, 0, 0] as const,
+        edgeSegments: [[], [], [], []] as const,
+      };
+      const edgeMask = edgeRefinement.mask;
+      const edgeLevelDelta = edgeRefinement.levelDelta;
+      return {
+        address,
+        baseKey,
+        edgeMask,
+        edgeLevelDelta,
+        edgeLevelDeltas: edgeRefinement.edgeLevelDeltas,
+        edgeSegments: edgeRefinement.edgeSegments,
+        key: `${baseKey}|edge:${JSON.stringify(edgeRefinement.edgeSegments)}`,
+      };
+    });
     this.desiredPriorities = new Map(
       entries.map(({ address, key }) => [
         key,
         patchDistance(domain, address, position),
+      ]),
+    );
+    this.desiredEdgeMasks = new Map(
+      entries.map(({ key, edgeMask, edgeLevelDelta, edgeLevelDeltas, edgeSegments }) => [
+        key,
+        {
+          mask: edgeMask,
+          levelDelta: edgeLevelDelta,
+          edgeLevelDeltas,
+          edgeSegments,
+        },
       ]),
     );
     this.desiredPatchCount = entries.length;
@@ -251,6 +322,10 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       );
     }
 
+    this.processGenerationQueue();
+  }
+
+  private processGenerationQueue(): void {
     const generationBudget = Math.max(0, Math.floor(this.generationBudget()));
     const availableGenerationSlots = this.meshGenerator()
       ? Math.max(0, generationBudget - this.generating.size)
@@ -258,26 +333,34 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     this.queue.drain(availableGenerationSlots, ({ key, value }) =>
       this.generatePatch(key, value),
     );
-    this.installCompletedPatches(generationBudget);
-    if (
-      this.queue.pendingCount === 0 &&
-      this.generating.size === 0 &&
-      this.completed.size === 0 &&
-      this.desiredPatchesAreResident()
-    ) {
-      for (const [key, patch] of this.residents) {
-        if (!this.queue.desired.has(key)) this.removePatch(key, patch);
-      }
-    }
+    this.installCompletedPatches();
     this.emitStats();
   }
 
   private generatePatch(key: string, address: TAddress): void {
+    const edgeRefinement = this.desiredEdgeMasks.get(key) ?? {
+      mask: 0,
+      levelDelta: 0,
+      edgeLevelDeltas: [0, 0, 0, 0] as const,
+      edgeSegments: [[], [], [], []] as const,
+    };
+    const edgeRefinementMask = edgeRefinement.mask;
+    const edgeRefinementLevel = edgeRefinement.levelDelta;
+    const baseResolution = Math.max(2, Math.floor(this.resolution()));
     const request: ITerrainSurfaceGenerationRequest<TAddress> = {
       field: this.field(),
       domain: this.domain(),
       address,
-      resolution: Math.max(2, Math.floor(this.resolution())),
+      baseResolution,
+      // A uniform doubled grid is the first shared transition topology: it
+      // gives a coarse edge the same sample spacing as adjacent fine patches.
+      // The simplifier can still remove interior vertices independently.
+      resolution:
+        baseResolution * 2 ** edgeRefinementLevel,
+      edgeRefinementMask,
+      edgeRefinementLevel,
+      edgeRefinementLevels: edgeRefinement.edgeLevelDeltas,
+      edgeRefinementSegments: edgeRefinement.edgeSegments,
       skirtDepthM: Math.max(0, this.skirtDepth()),
     };
     const generator =
@@ -309,22 +392,26 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       .finally(() => this.generating.delete(key));
   }
 
-  private installCompletedPatches(maxInstalls: number): void {
-    if (maxInstalls <= 0 || this.completed.size === 0) return;
-    const completed = Array.from(this.completed.entries())
-      .filter(([key]) => this.queue.desired.has(key))
-      .sort(
-        ([a], [b]) =>
-          (this.desiredPriorities.get(a) ?? Number.POSITIVE_INFINITY) -
-          (this.desiredPriorities.get(b) ?? Number.POSITIVE_INFINITY),
-      )
-      .slice(0, maxInstalls);
-    for (const [key, { address, patch }] of completed) {
-      this.completed.delete(key);
-      if (!this.residents.has(key)) this.installPatch(key, address, patch);
+  private installCompletedPatches(): void {
+    if (this.completed.size === 0) return;
+
+    // A cut is committed as one unit. Until every selected replacement is
+    // ready, the previous resident cut stays visible, so a slow or failed
+    // child cannot expose a hole or produce a parent/child overlap.
+    for (const key of this.queue.desired) {
+      if (!this.residents.has(key) && !this.completed.has(key)) return;
     }
-    for (const [key] of this.completed) {
-      if (!this.queue.desired.has(key)) this.completed.delete(key);
+
+    for (const [key, patch] of this.residents) {
+      if (!this.queue.desired.has(key)) this.removePatch(key, patch);
+    }
+    for (const [key, { address, patch }] of this.completed) {
+      if (!this.queue.desired.has(key)) {
+        this.completed.delete(key);
+        continue;
+      }
+      this.installPatch(key, address, patch);
+      this.completed.delete(key);
     }
   }
 
@@ -380,6 +467,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     const mesh = new Mesh(surfaceGeometry, material);
     let drawCalls = 1;
     let geometryBytes = geometryByteCount(surfaceGeometry);
+    let triangles = (surfaceGeometry.index?.count ?? 0) / 3;
     if (patch.skirt) {
       const skirtGeometry = this.createGeometry(
         patch,
@@ -390,6 +478,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       mesh.add(new Mesh(skirtGeometry, material));
       drawCalls += 1;
       geometryBytes += geometryByteCount(skirtGeometry);
+      triangles += (skirtGeometry.index?.count ?? 0) / 3;
     }
     mesh.position.fromArray(patch.centerWorldM);
     this.group.add(mesh);
@@ -398,6 +487,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       material,
       drawCalls,
       geometryBytes,
+      triangles,
     });
   }
 
@@ -446,6 +536,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     this.generating.clear();
     this.completed.clear();
     this.desiredPriorities.clear();
+    this.desiredEdgeMasks.clear();
     this.queue.clear();
     this.disposeResidents();
   }
@@ -459,11 +550,13 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     const queued = this.queue.pendingCount + this.generating.size;
     let drawCalls = 0;
     let geometryBytes = 0;
+    let triangles = 0;
     for (const patch of this.residents.values()) {
       drawCalls += patch.drawCalls;
       geometryBytes += patch.geometryBytes;
+      triangles += patch.triangles;
     }
-    const signature = `${this.desiredPatchCount}:${this.residents.size}:${queued}:${drawCalls}:${geometryBytes}:${JSON.stringify(this.selectedLevels)}`;
+    const signature = `${this.desiredPatchCount}:${this.residents.size}:${queued}:${drawCalls}:${triangles}:${geometryBytes}:${JSON.stringify(this.selectedLevels)}`;
     if (signature === this.statsSignature) return;
     this.statsSignature = signature;
     this.lodChange.emit({
@@ -471,6 +564,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       resident: this.residents.size,
       queued,
       drawCalls,
+      triangles,
       geometryBytes,
       levels: this.selectedLevels,
     });

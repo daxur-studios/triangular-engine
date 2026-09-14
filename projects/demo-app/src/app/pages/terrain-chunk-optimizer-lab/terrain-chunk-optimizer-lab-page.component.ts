@@ -310,7 +310,7 @@ export class TerrainChunkOptimizerLabPageComponent {
 
   setMaxReduction(event: Event): void {
     this.maxReduction.set(
-      Math.max(0, Math.min(0.9, Number((event.target as HTMLInputElement).value))),
+      Math.max(0, Math.min(0.95, Number((event.target as HTMLInputElement).value))),
     );
     void this.rebuild();
   }

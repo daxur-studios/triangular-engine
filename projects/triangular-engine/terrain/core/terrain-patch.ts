@@ -3,6 +3,21 @@ import { TerrainVector3 } from './terrain-math';
 /** Index storage selected according to generated patch vertex count. */
 export type TerrainPatchIndexArray = Uint16Array | Uint32Array;
 
+/** A normalized section of one patch edge that borders a finer selected patch. */
+export interface ITerrainPatchEdgeSegment {
+  readonly start: number;
+  readonly end: number;
+  readonly levelDelta: number;
+}
+
+/** Edge sections in north, east, south, west order. */
+export type TerrainPatchEdgeSegments = readonly [
+  readonly ITerrainPatchEdgeSegment[],
+  readonly ITerrainPatchEdgeSegment[],
+  readonly ITerrainPatchEdgeSegment[],
+  readonly ITerrainPatchEdgeSegment[],
+];
+
 /** Transferable patch geometry with no renderer or physics ownership. */
 export interface ITerrainPatchGeometry {
   positions: Float32Array;

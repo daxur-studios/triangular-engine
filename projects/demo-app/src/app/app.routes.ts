@@ -152,11 +152,11 @@ export const routes: Routes = [
       ),
   },
   {
-    path: 'terrain-chunk-optimizer-lab',
+    path: 'terrain-chunk-streaming-lab',
     loadComponent: () =>
-      import('./pages/terrain-chunk-optimizer-lab/terrain-chunk-optimizer-lab-page.component').then(
-        ({ TerrainChunkOptimizerLabPageComponent }) =>
-          TerrainChunkOptimizerLabPageComponent,
+      import('./pages/terrain-chunk-streaming-lab/terrain-chunk-streaming-lab-page.component').then(
+        ({ TerrainChunkStreamingLabPageComponent }) =>
+          TerrainChunkStreamingLabPageComponent,
       ),
   },
   {

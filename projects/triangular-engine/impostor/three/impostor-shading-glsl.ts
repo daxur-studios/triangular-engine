@@ -109,9 +109,9 @@ vec2 spritesMinusOne = vec2(spritesPerSide - 1.0);
 
 #if defined USE_INSTANCING || defined USE_INSTANCING_INDIRECT
 mat4 transformedInstanceMatrix = instanceMatrix * impostorTransform;
-vec3 cameraPosLocal = (inverse(transformedInstanceMatrix * modelMatrix) * vec4(cameraPosition, 1.0)).xyz;
+vec3 cameraPosLocal = (inverse(modelMatrix * transformedInstanceMatrix) * vec4(cameraPosition, 1.0)).xyz;
 #else
-vec3 cameraPosLocal = (inverse(impostorTransform * modelMatrix) * vec4(cameraPosition, 1.0)).xyz;
+vec3 cameraPosLocal = (inverse(modelMatrix * impostorTransform) * vec4(cameraPosition, 1.0)).xyz;
 #endif
 
 vec3 cameraDir = normalize(cameraPosLocal);

@@ -2,6 +2,7 @@ import { ITerrainField } from '../core/terrain-field';
 import { TerrainVector3 } from '../core/terrain-math';
 import {
   ITerrainPatchGeometry,
+  TerrainPatchEdgeSegments,
   ITerrainPatchMesh,
   TerrainPatchIndexArray,
 } from '../core/terrain-patch';
@@ -15,6 +16,16 @@ export interface ITerrainPatchMeshOptions<TAddress> {
   address: TAddress;
   /** Number of surface quads along each patch axis. */
   resolution: number;
+  /**
+   * Normal patch resolution before mixed-LOD refinement. When `resolution` is
+   * higher, edges use the requested per-edge detail and otherwise follow this
+   * coarser piecewise boundary exactly.
+   */
+  baseResolution?: number;
+  /** Per-edge level deltas in north, east, south, west order. */
+  edgeRefinementLevels?: readonly [number, number, number, number];
+  /** Refined sections for each edge in north, east, south, west order. */
+  edgeRefinementSegments?: TerrainPatchEdgeSegments;
   /** Optional visual-only edge extrusion used to cover mixed-LOD joins. */
   skirtDepthM?: number;
 }
@@ -130,16 +141,130 @@ function createIndices(
   return indices;
 }
 
+function conformPatchEdges(
+  positions: Float32Array,
+  normals: Float32Array,
+  resolution: number,
+  baseResolution: number,
+  edgeLevelDeltas: readonly [number, number, number, number],
+  edgeSegments: TerrainPatchEdgeSegments,
+): void {
+  const row = resolution + 1;
+  const edgeVertices = [
+    (offset: number) => offset,
+    (offset: number) => offset * row + resolution,
+    (offset: number) => resolution * row + offset,
+    (offset: number) => offset * row,
+  ] as const;
+
+  for (let edge = 0; edge < edgeVertices.length; edge += 1) {
+    const anchors = new Set<number>();
+    const baseStride = resolution / baseResolution;
+    for (let sample = 0; sample <= resolution; sample += baseStride) {
+      anchors.add(sample);
+    }
+    const requestedSegments = edgeSegments[edge].length
+      ? edgeSegments[edge]
+      : edgeLevelDeltas[edge] > 0
+        ? [{ start: 0, end: 1, levelDelta: edgeLevelDeltas[edge] }]
+        : [];
+    for (const segment of requestedSegments) {
+      const targetSegments = baseResolution * 2 ** segment.levelDelta;
+      const stride = resolution / targetSegments;
+      if (!Number.isInteger(stride)) {
+        throw new RangeError(
+          'Terrain transition resolution must be divisible by every edge resolution.',
+        );
+      }
+      const start = Math.round(segment.start * resolution);
+      const end = Math.round(segment.end * resolution);
+      anchors.add(start);
+      anchors.add(end);
+      for (let sample = start; sample <= end; sample += stride) {
+        anchors.add(sample);
+      }
+    }
+    const orderedAnchors = [...anchors].sort((left, right) => left - right);
+    const vertexAt = edgeVertices[edge];
+    for (let anchor = 0; anchor < orderedAnchors.length - 1; anchor += 1) {
+      const lowerSample = orderedAnchors[anchor];
+      const upperSample = orderedAnchors[anchor + 1];
+      for (let sample = lowerSample + 1; sample < upperSample; sample += 1) {
+        const alpha = (sample - lowerSample) / (upperSample - lowerSample);
+        interpolateVector(
+          positions,
+          vertexAt(sample),
+          vertexAt(lowerSample),
+          vertexAt(upperSample),
+          alpha,
+          false,
+        );
+        interpolateVector(
+          normals,
+          vertexAt(sample),
+          vertexAt(lowerSample),
+          vertexAt(upperSample),
+          alpha,
+          true,
+        );
+      }
+    }
+  }
+}
+
+function interpolateVector(
+  values: Float32Array,
+  target: number,
+  lower: number,
+  upper: number,
+  alpha: number,
+  normalize: boolean,
+): void {
+  const targetOffset = target * XYZ_COUNT;
+  const lowerOffset = lower * XYZ_COUNT;
+  const upperOffset = upper * XYZ_COUNT;
+  let lengthSquared = 0;
+  for (let axis = 0; axis < XYZ_COUNT; axis += 1) {
+    const value =
+      values[lowerOffset + axis] * (1 - alpha) +
+      values[upperOffset + axis] * alpha;
+    values[targetOffset + axis] = value;
+    lengthSquared += value * value;
+  }
+  if (!normalize || lengthSquared === 0) return;
+  const inverseLength = 1 / Math.sqrt(lengthSquared);
+  for (let axis = 0; axis < XYZ_COUNT; axis += 1) {
+    values[targetOffset + axis] *= inverseLength;
+  }
+}
+
 /** Generates a domain-independent patch with f64 sampling and f32 local offsets. */
 export function generateTerrainPatchMesh<TAddress>(
   field: ITerrainField,
   domain: ITerrainSurfaceDomain<TAddress>,
   options: ITerrainPatchMeshOptions<TAddress>,
 ): ITerrainPatchMesh<TAddress> {
-  const { address, resolution, skirtDepthM = 0 } = options;
+  const {
+    address,
+    resolution,
+    baseResolution = resolution,
+    edgeRefinementLevels = [0, 0, 0, 0],
+    edgeRefinementSegments = [[], [], [], []],
+    skirtDepthM = 0,
+  } = options;
   if (!Number.isInteger(resolution) || resolution < 2) {
     throw new RangeError(
       'Terrain patch resolution must be an integer of at least two quads.',
+    );
+  }
+  if (
+    !Number.isInteger(baseResolution) ||
+    baseResolution < 2 ||
+    baseResolution > resolution ||
+    resolution % baseResolution !== 0
+  ) {
+    throw new RangeError(
+      'Terrain base resolution must divide the generated resolution.',
     );
   }
   const bounds = domain.getPatchBounds(address);
@@ -232,6 +357,14 @@ export function generateTerrainPatchMesh<TAddress>(
       uvs[vertex * UV_COUNT + 1] = vi / resolution;
     }
   }
+  conformPatchEdges(
+    positions,
+    normals,
+    resolution,
+    baseResolution,
+    edgeRefinementLevels,
+    edgeRefinementSegments,
+  );
   const surface: ITerrainPatchGeometry = {
     positions,
     normals,

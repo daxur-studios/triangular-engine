@@ -183,3 +183,64 @@ findings. Do not duplicate the full progress log across documents.
   and can show those locked points. Added deterministic ridge/river, volcano/crater, mesa and
   branching-channel presets so protection can be evaluated against sharper geological features.
   Library and demo builds pass; visual comparison across presets is the next evidence to record.
+- **2026-09-14 — reduction range aligned:** raised the C0 fixture's maximum reduction slider from
+  90% to 95%, matching the optional Meshoptimizer entry point's documented and enforced limit.
+- **2026-09-14 — C1 streaming slice started:** the shared terrain surface now establishes a complete
+  coarse root cover before camera refinement and commits a replacement cut atomically, keeping the
+  previous resident cut visible until every selected patch is ready. Default visual skirts are now
+  disabled; they remain an explicit opt-in for consumers that need them. Added
+  `/terrain-chunk-streaming-lab`, a 16 km planar fixture with 16 roots, up to five LOD levels,
+  asynchronous Meshoptimizer simplification/vertex compaction, quality presets, LOD colouring,
+  wireframe inspection, configurable build delay and live desired/resident/queue/draw/triangle/byte
+  diagnostics. This is an initial C1
+  coverage and residency experiment; worker execution, exact transition stitching, bounded eviction
+  and spherical coverage remain outstanding. Next: validate camera movement and delayed replacement,
+  then add focused tests for atomic commits and stale-result rejection.
+### 2026-09-14 — Mixed LOD edge sampling wired into C1 streaming
+
+The shared `TerrainSurfaceComponent` now compares the selected rectangular
+patch bounds each update. A coarse patch beside finer selected neighbours gets a
+generation key containing its edge mask and level delta, and is generated at
+matching edge sample spacing (`resolution * 2^delta`). `LockBorder` then keeps
+those shared samples during independent Meshoptimizer simplification. This
+removes the streaming lab's mixed LOD seam gaps without skirts or seam draw
+calls. The first implementation uses a uniform higher-resolution grid for the
+affected coarse patch; edge-only transition topology remains a later memory
+optimization.
+
+### 2026-09-14 — Streaming seam and LOD colour diagnostics corrected
+
+The streaming material now enables vertex colours and a colour revision rebuilds
+resident chunks when the LOD-colour toggle changes. Transition chunks temporarily
+retain their full matching-edge topology while the mixed-LOD seam is validated;
+ordinary chunks continue using the selected Meshoptimizer reduction. This keeps
+the seam test free of skirt geometry and extra draw calls while isolating any
+remaining gap from interior simplification.
+
+### 2026-09-14 — Streaming transition boundary correction
+
+The first C1 transition pass raised an affected coarse chunk's whole grid to its
+finest neighbouring spacing. That fixed its coarse/fine side but also curved its
+other edges more densely than same-level neighbours, creating new cracks. Patch
+generation now records the level and normalized span of every finer neighbour
+along each edge, then conforms each section to its required piecewise boundary.
+This also handles one edge bordering different neighbour levels. `LockBorder` can therefore
+preserve matching topology while all chunks use their configured Meshoptimizer
+reduction. Added a `freezeLod` surface input and streaming-lab toggle for fixed-cut
+inspection. Automated mesher coverage compares both a refined coarse/fine edge
+and an ordinary edge on the same transition chunk. Next: visually verify frozen
+overview and close-detail cuts, then measure transition geometry overhead.
+
+### 2026-09-15 — C1 seam fix verified
+
+The frozen overview and close-detail cuts now render without the reported black
+openings, including mixed LOD cuts around the ridge and river test features. The
+LOD-colour mode is now flat and unlit so dark feature shading cannot be confused
+with a missing surface. The freeze control is retained as a repeatable inspection
+tool. The main lesson is that `LockBorder` only preserves vertices that already
+belong to a compatible boundary; it cannot repair mismatched sampling by itself.
+The streaming implementation must keep coverage, per-span boundary sampling,
+and simplification as separate checks. Library build, demo type-check and diff
+validation pass; the full terrain test command remains blocked by the unrelated
+existing `planet-surface-bake.spec.ts` `toHaveLength` type errors. Next: measure
+transition geometry overhead and test worker-backed generation at larger coverage.

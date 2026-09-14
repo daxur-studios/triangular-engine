@@ -1,6 +1,11 @@
-import { ConstantTerrainField } from '../core/terrain-field';
+import {
+  ConstantTerrainField,
+  ITerrainField,
+  ITerrainFieldSample,
+} from '../core/terrain-field';
 import { TerrainVector3 } from '../core/terrain-math';
 import { ITerrainSurfaceDomain } from '../domains/terrain-surface-domain';
+import { PlaneTerrainDomain } from '../domains/plane-terrain-domain';
 import { generateTerrainPatchMesh } from './terrain-patch-mesher';
 
 interface IFakePatchAddress {
@@ -39,6 +44,29 @@ class FakePlaneDomain implements ITerrainSurfaceDomain<IFakePatchAddress> {
     maxElevationM: number,
   ): number {
     return maxElevationM - minElevationM + 2 / resolution;
+  }
+}
+
+class CurvedTerrainField implements ITerrainField {
+  readonly minElevationM = 0;
+  readonly maxElevationM = 100;
+
+  sample([x, _y, z]: TerrainVector3): ITerrainFieldSample {
+    return { elevationM: (x * x + z * z * 0.7) / 1_000 };
+  }
+
+  sampleBatch(
+    positions: Float64Array,
+    output = new Float64Array(positions.length / 3),
+  ): Float64Array {
+    for (let index = 0; index < output.length; index += 1) {
+      output[index] = this.sample([
+        positions[index * 3],
+        positions[index * 3 + 1],
+        positions[index * 3 + 2],
+      ]).elevationM;
+    }
+    return output;
   }
 }
 
@@ -136,4 +164,104 @@ describe('multi-surface terrain foundation', () => {
     expect(mesh.skirt!.positions.length).toBeGreaterThan(0);
     expect(mesh.skirt!.indices.length).toBeGreaterThan(0);
   });
+
+  it('matches ordinary and differently refined sections around one transition patch', () => {
+    const plane = new PlaneTerrainDomain(100);
+    const field = new CurvedTerrainField();
+    const transition = generateTerrainPatchMesh(field, plane, {
+      address: { level: 0, x: 0, z: 0 },
+      resolution: 16,
+      baseResolution: 4,
+      edgeRefinementLevels: [0, 2, 0, 0],
+      edgeRefinementSegments: [
+        [],
+        [
+          { start: 0, end: 0.5, levelDelta: 1 },
+          { start: 0.5, end: 1, levelDelta: 2 },
+        ],
+        [],
+        [],
+      ],
+    });
+    const sameLevelNorth = generateTerrainPatchMesh(field, plane, {
+      address: { level: 0, x: 0, z: -1 },
+      resolution: 4,
+    });
+    const fineEastNorth = generateTerrainPatchMesh(field, plane, {
+      address: { level: 1, x: 2, z: 0 },
+      resolution: 4,
+    });
+    const fineEastSouthA = generateTerrainPatchMesh(field, plane, {
+      address: { level: 2, x: 4, z: 2 },
+      resolution: 4,
+    });
+    const fineEastSouthB = generateTerrainPatchMesh(field, plane, {
+      address: { level: 2, x: 4, z: 3 },
+      resolution: 4,
+    });
+
+    for (let sample = 0; sample <= 16; sample += 1) {
+      const transitionNorth = worldVertex(transition, sample);
+      const lower = Math.floor(sample / 4);
+      const alpha = (sample % 4) / 4;
+      const northLeft = worldVertex(sameLevelNorth, 4 * 5 + lower);
+      const northRight = worldVertex(
+        sameLevelNorth,
+        4 * 5 + Math.min(4, lower + 1),
+      );
+      expectVectorClose(
+        transitionNorth,
+        interpolate(northLeft, northRight, alpha),
+      );
+
+      let expectedEast: TerrainVector3;
+      if (sample <= 8) {
+        const fineCoordinate = sample / 2;
+        const fineLower = Math.floor(fineCoordinate);
+        expectedEast = interpolate(
+          worldVertex(fineEastNorth, fineLower * 5),
+          worldVertex(fineEastNorth, Math.min(4, fineLower + 1) * 5),
+          fineCoordinate - fineLower,
+        );
+      } else {
+        const finePatch = sample <= 12 ? fineEastSouthA : fineEastSouthB;
+        const fineSample = sample <= 12 ? sample - 8 : sample - 12;
+        expectedEast = worldVertex(finePatch, fineSample * 5);
+      }
+      expectVectorClose(
+        worldVertex(transition, sample * 17 + 16),
+        expectedEast,
+      );
+    }
+  });
 });
+
+function worldVertex(
+  patch: ReturnType<typeof generateTerrainPatchMesh>,
+  vertex: number,
+): TerrainVector3 {
+  const offset = vertex * 3;
+  return [
+    patch.centerWorldM[0] + patch.surface.positions[offset],
+    patch.centerWorldM[1] + patch.surface.positions[offset + 1],
+    patch.centerWorldM[2] + patch.surface.positions[offset + 2],
+  ];
+}
+
+function interpolate(
+  left: TerrainVector3,
+  right: TerrainVector3,
+  alpha: number,
+): TerrainVector3 {
+  return [
+    left[0] * (1 - alpha) + right[0] * alpha,
+    left[1] * (1 - alpha) + right[1] * alpha,
+    left[2] * (1 - alpha) + right[2] * alpha,
+  ];
+}
+
+function expectVectorClose(actual: TerrainVector3, expected: TerrainVector3): void {
+  for (let axis = 0; axis < 3; axis += 1) {
+    expect(actual[axis]).toBeCloseTo(expected[axis], 5);
+  }
+}

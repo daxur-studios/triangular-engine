@@ -4,7 +4,10 @@ import { PerspectiveCamera, Scene } from 'three';
 import { EngineService } from 'triangular-engine';
 import { ConstantTerrainField } from '../core/terrain-field';
 import { PlaneTerrainDomain } from '../domains/plane-terrain-domain';
+import type { IPlaneTerrainPatchAddress } from '../domains/plane-terrain-domain';
+import { generateTerrainPatchMesh } from '../meshing/terrain-patch-mesher';
 import {
+  ITerrainSurfaceGenerationRequest,
   ITerrainSurfaceLodStats,
   TerrainSurfaceComponent,
 } from './terrain-surface.component';
@@ -66,6 +69,66 @@ describe('TerrainSurfaceComponent', () => {
     camera.position.set(5_000, 100, 5_000);
     fixture.detectChanges();
 
+    beforeRender$.next();
+    expect(scene.children[0].children.length).toBe(4);
+  });
+
+  it('freezes the selected LOD cut while the camera moves', () => {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', [{ level: 0, x: 0, z: 0 }]);
+    fixture.componentRef.setInput('maxLod', 1);
+    fixture.componentRef.setInput('refinementDistance', 1_200);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('generationBudget', 100);
+    camera.position.set(5_000, 100, 5_000);
+    fixture.detectChanges();
+    beforeRender$.next();
+    expect(scene.children[0].children.length).toBe(1);
+
+    fixture.componentRef.setInput('freezeLod', true);
+    fixture.detectChanges();
+    camera.position.set(400, 100, -400);
+    beforeRender$.next();
+    expect(scene.children[0].children.length).toBe(1);
+
+    fixture.componentRef.setInput('freezeLod', false);
+    fixture.detectChanges();
+    beforeRender$.next();
+    expect(scene.children[0].children.length).toBe(4);
+  });
+
+  it('keeps the previous cut visible until an asynchronous replacement is complete', async () => {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    const generator = async (
+      request: ITerrainSurfaceGenerationRequest<IPlaneTerrainPatchAddress>,
+    ) => {
+      await Promise.resolve();
+      return generateTerrainPatchMesh(request.field, request.domain, request);
+    };
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', [{ level: 0, x: 0, z: 0 }]);
+    fixture.componentRef.setInput('maxLod', 1);
+    fixture.componentRef.setInput('refinementDistance', 1_200);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('generationBudget', 100);
+    fixture.componentRef.setInput('meshGenerator', generator);
+    camera.position.set(5_000, 100, 5_000);
+    fixture.detectChanges();
+
+    beforeRender$.next();
+    expect(scene.children[0]?.children.length ?? 0).toBe(0);
+    await Promise.resolve();
+    beforeRender$.next();
+    expect(scene.children[0].children.length).toBe(1);
+
+    camera.position.set(400, 100, -400);
+    beforeRender$.next();
+    expect(scene.children[0].children.length).toBe(1);
+    await Promise.resolve();
+    await Promise.resolve();
     beforeRender$.next();
     expect(scene.children[0].children.length).toBe(4);
   });

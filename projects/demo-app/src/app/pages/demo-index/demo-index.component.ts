@@ -118,6 +118,18 @@ export const DEMOS: readonly DemoItem[] = [
       'C0 fixture for independently simplified neighbouring terrain chunks, border locking, and ridge/river feature preservation.',
   },
   {
+    id: 'terrain-chunk-streaming-lab',
+    number: '02aa',
+    title: 'Terrain Chunk Streaming',
+    route: '/terrain-chunk-streaming-lab',
+    categoryId: 'terrain',
+    tier: 'lab',
+    entryPoints: ['terrain', 'meshoptimizer'],
+    package: 'triangular-engine/terrain + meshoptimizer',
+    description:
+      'C1 large-area terrain coverage with camera-driven quadtree refinement, asynchronous chunk replacement, parent fallback and live residency diagnostics.',
+  },
+  {
     id: 'cdlod-planet-lab',
     number: '02b',
     title: 'CDLOD Planet Lab',
