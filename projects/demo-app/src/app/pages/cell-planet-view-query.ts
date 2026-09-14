@@ -19,6 +19,9 @@ export const CELL_PLANET_QUERY_KEYS = [
   'showCellEdges',
   'iconBudget',
   'selectedCell',
+  'globeHeightScale',
+  'seabedRelief',
+  'showOcean',
 ] as const;
 
 export type CellPlanetQueryKey = (typeof CELL_PLANET_QUERY_KEYS)[number];

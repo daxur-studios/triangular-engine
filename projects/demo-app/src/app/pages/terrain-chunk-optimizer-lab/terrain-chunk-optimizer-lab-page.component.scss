@@ -68,6 +68,23 @@ p {
   color: #eef5ed;
 }
 
+.preset-control {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+  color: #c3d3c5;
+}
+
+select {
+  min-width: 12rem;
+  padding: 0.4rem 0.55rem;
+  color: #e2eee2;
+  border: 1px solid #45664b;
+  border-radius: 0.35rem;
+  background: #14251a;
+}
+
 .actions,
 .stats {
   flex-wrap: wrap;

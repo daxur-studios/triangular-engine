@@ -14,7 +14,12 @@
   <nav class="view-switch" aria-label="Map view">
     <a [routerLink]="['/cell-planet-map']" [queryParams]="comparisonQueryParams()">2D map</a>
     <a [routerLink]="['/cell-planet-25d-map']" [queryParams]="comparisonQueryParams()">2.5D terrain</a>
-    <span class="active" aria-current="page">Globe</span>
+    <a
+      [routerLink]="['/cell-planet-globe']"
+      [queryParams]="comparisonQueryParams()"
+      class="active"
+      aria-current="page"
+    >Globe</a>
   </nav>
   <span>shared sampler → fixed {{ longitudeSegments }}×{{ latitudeRings }} sphere → radial displacement</span>
 

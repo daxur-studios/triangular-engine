@@ -177,3 +177,9 @@ findings. Do not duplicate the full progress log across documents.
   purpose is explicit: it validates footprint coverage, parent/child seams, simplification and
   feature/edit preservation before camera-driven quadtree streaming. Next: add a camera-driven
   selection fixture only after this controlled lab's measurements are understood.
+- **2026-09-14 — C0 quality comparison added:** the fixture now applies one selected reduction
+  target to every chunk, keeps source and simplified meshes available for a same-camera swap,
+  supports neutral shading, reports dense-sample overall and feature-region surface error, counts semantic locked vertices,
+  and can show those locked points. Added deterministic ridge/river, volcano/crater, mesa and
+  branching-channel presets so protection can be evaluated against sharper geological features.
+  Library and demo builds pass; visual comparison across presets is the next evidence to record.

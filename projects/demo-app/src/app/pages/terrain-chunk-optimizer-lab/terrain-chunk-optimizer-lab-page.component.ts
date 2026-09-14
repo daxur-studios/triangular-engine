@@ -16,6 +16,8 @@ import {
   LineLoop,
   Mesh,
   MeshStandardMaterial,
+  Points,
+  PointsMaterial,
   Vector3,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
@@ -34,6 +36,7 @@ import {
 const PATCH_SIZE_M = 512;
 const PATCH_RESOLUTION = 48;
 const FEATURE_LOCK_THRESHOLD = 0.28;
+type TerrainPreset = 'ridge-river' | 'volcano' | 'mesa' | 'channels';
 const SAME_LEVEL_CHUNKS: readonly IPlaneTerrainPatchAddress[] = [
   { level: 0, x: -1, z: -1 },
   { level: 0, x: 0, z: -1 },
@@ -66,6 +69,7 @@ interface IFlattenEdit {
 interface IChunkResult {
   readonly address: IPlaneTerrainPatchAddress;
   readonly patch: ITerrainPatchMesh<IPlaneTerrainPatchAddress>;
+  readonly sourceGeometry: BufferGeometry;
   readonly geometry: BufferGeometry;
   readonly resolution: number;
   readonly sourceTriangles: number;
@@ -74,6 +78,10 @@ interface IChunkResult {
   readonly referencedVertices: number;
   readonly missingBoundaryVertices: number;
   readonly padErrorM: number;
+  readonly surfaceErrorM: number;
+  readonly featureErrorM: number;
+  readonly lockedVertices?: Uint8Array;
+  readonly lockedVertexCount: number;
 }
 
 /** One deterministic ridge and river crossing four independently simplified chunks. */
@@ -81,6 +89,11 @@ class ChunkFeatureField implements ITerrainField {
   readonly minElevationM = -80;
   readonly maxElevationM = 240;
   private flattening?: IFlattenEdit;
+  private preset: TerrainPreset = 'ridge-river';
+
+  setPreset(preset: TerrainPreset): void {
+    this.preset = preset;
+  }
 
   setFlattening(flattening: IFlattenEdit | undefined): void {
     this.flattening = flattening;
@@ -101,23 +114,64 @@ class ChunkFeatureField implements ITerrainField {
   }
 
   featureWeights(x: number, z: number): { ridge: number; river: number } {
-    const ridgeDistance = Math.abs(z - ridgeLineZ(x));
-    const riverDistance = Math.abs(z - riverLineZ(x));
-    return {
-      ridge: gaussian(ridgeDistance, 34),
-      river: gaussian(riverDistance, 21),
-    };
+    switch (this.preset) {
+      case 'volcano': {
+        const radius = Math.hypot(x + 80, z + 40);
+        const body = gaussian(radius, 180);
+        const craterRim = gaussian(radius - 76, 18);
+        return {
+          ridge: Math.min(1, body * 0.55 + craterRim),
+          river: gaussian(z - (0.42 * x - 240), 20),
+        };
+      }
+      case 'mesa': {
+        const edge = Math.min(160 - Math.abs(x - 120), 120 - Math.abs(z + 80));
+        const plateau = smoothstep(0, 30, edge);
+        const rim = gaussian(edge, 18);
+        return {
+          ridge: Math.max(plateau * 0.65, rim * 0.8),
+          river: gaussian(z - (-0.34 * x - 180), 20),
+        };
+      }
+      case 'channels':
+        return {
+          ridge: gaussian(z - (0.2 * x + 80), 42) * 0.3,
+          river: Math.max(
+            gaussian(z - (0.45 * x - 150), 19),
+            gaussian(z - (-0.36 * x + 115), 17),
+          ),
+        };
+      case 'ridge-river':
+      default:
+        return {
+          ridge: gaussian(Math.abs(z - ridgeLineZ(x)), 34),
+          river: gaussian(Math.abs(z - riverLineZ(x)), 21),
+        };
+    }
   }
 
   private elevation(x: number, z: number): number {
     const features = this.featureWeights(x, z);
     const rollingBase =
       12 + Math.sin(x / 105) * 5 + Math.cos(z / 135) * 4;
-    const baseElevation =
-      rollingBase +
-      features.ridge * 185 -
-      features.river * 105 +
-      Math.sin((x + z) / 38) * features.ridge * 7;
+    let baseElevation = rollingBase;
+    if (this.preset === 'volcano') {
+      const radius = Math.hypot(x + 80, z + 40);
+      baseElevation +=
+        gaussian(radius, 180) * 175 -
+        gaussian(radius, 30) * 130 +
+        gaussian(radius - 76, 18) * 42 -
+        features.river * 105;
+    } else if (this.preset === 'mesa') {
+      const edge = Math.min(160 - Math.abs(x - 120), 120 - Math.abs(z + 80));
+      const plateau = smoothstep(0, 30, edge);
+      baseElevation += plateau * 165 + gaussian(edge, 18) * 28 - features.river * 105;
+    } else {
+      baseElevation +=
+        features.ridge * (this.preset === 'channels' ? 55 : 185) -
+        features.river * 105 +
+        Math.sin((x + z) / 38) * features.ridge * 7;
+    }
     const edit = this.flattening;
     if (!edit?.enabled) return baseElevation;
     const influence = flattenInfluence(x, z, edit);
@@ -213,7 +267,11 @@ export class TerrainChunkOptimizerLabPageComponent {
   readonly mixedResolution = signal(true);
   readonly maxReduction = signal(0.7);
   readonly lockBoundaries = signal(true);
-  readonly protectFeatures = signal(true);
+  readonly protectFeatures = signal(false);
+  readonly showProtectedVertices = signal(false);
+  readonly showOptimized = signal(true);
+  readonly neutralShading = signal(false);
+  readonly terrainPreset = signal<TerrainPreset>('ridge-river');
   readonly flattenEnabled = signal(false);
   readonly flattenShape = signal<FlattenShape>('circle');
   readonly wireframe = signal(false);
@@ -221,6 +279,8 @@ export class TerrainChunkOptimizerLabPageComponent {
   readonly sourceTriangleLabel = signal('—');
   readonly triangleLabel = signal('—');
   readonly levelTriangleLabel = signal('—');
+  readonly lockedVertexLabel = signal('—');
+  readonly surfaceErrorLabel = signal('—');
   readonly reductionLabel = signal('—');
   readonly boundaryLabel = signal('—');
   readonly coverageLabel = signal('—');
@@ -233,6 +293,7 @@ export class TerrainChunkOptimizerLabPageComponent {
   private readonly field = new ChunkFeatureField();
   private readonly domain = new PlaneTerrainDomain(PATCH_SIZE_M);
   private readonly terrain = new Group();
+  private currentResults: IChunkResult[] = [];
   private revision = 0;
 
   constructor() {
@@ -269,6 +330,47 @@ export class TerrainChunkOptimizerLabPageComponent {
     void this.rebuild();
   }
 
+  toggleProtectedVertices(): void {
+    this.showProtectedVertices.update((value) => !value);
+    this.terrain.traverse((object) => {
+      if (object.name === 'protected-vertices')
+        object.visible = this.showProtectedVertices() && this.protectFeatures();
+    });
+  }
+
+  toggleOptimized(): void {
+    this.showOptimized.update((value) => !value);
+    this.terrain.traverse((object) => {
+      if (object instanceof Mesh && object.userData['chunkVariant']) {
+        object.visible =
+          object.userData['chunkVariant'] === 'optimized'
+            ? this.showOptimized()
+            : !this.showOptimized();
+      }
+    });
+  }
+
+  toggleNeutralShading(): void {
+    this.neutralShading.update((value) => !value);
+    this.terrain.traverse((object) => {
+      if (object instanceof Mesh && object.userData['chunkVariant']) {
+        const material = object.material;
+        if (material instanceof MeshStandardMaterial) {
+          material.vertexColors = !this.neutralShading();
+          material.color.set(this.neutralShading() ? '#aeb8b0' : '#ffffff');
+          material.needsUpdate = true;
+        }
+      }
+    });
+  }
+
+  setTerrainPreset(event: Event): void {
+    const preset = (event.target as HTMLSelectElement).value as TerrainPreset;
+    this.terrainPreset.set(preset);
+    this.field.setPreset(preset);
+    void this.rebuild();
+  }
+
   toggleFlattening(): void {
     this.flattenEnabled.update((value) => !value);
     this.updateFlattening();
@@ -299,24 +401,24 @@ export class TerrainChunkOptimizerLabPageComponent {
   private async rebuild(): Promise<void> {
     const revision = ++this.revision;
     this.disposeTerrain();
+    this.currentResults = [];
     this.buildLabel.set('Building…');
     this.updateFlattening();
+    this.field.setPreset(this.terrainPreset());
     const addresses = this.mixedResolution()
       ? MIXED_LEVEL_CHUNKS
       : SAME_LEVEL_CHUNKS;
-    const reductionSteps = [0, 0.35, 0.65, 1];
-    const reductions = addresses.map((_address, index) =>
-      this.maxReduction() * reductionSteps[Math.min(index, reductionSteps.length - 1)],
-    );
+    const reductions = addresses.map(() => this.maxReduction());
     const results = await Promise.all(
       addresses.map((address, index) =>
         this.buildChunk(address, reductions[index]),
       ),
     );
     if (revision !== this.revision) {
-      results.forEach((result) => result.geometry.dispose());
+      results.forEach((result) => this.disposeResult(result));
       return;
     }
+    this.currentResults = results;
     results.forEach((result) => this.installChunk(result));
     this.installFeatureGuides();
     const sourceTriangles = results.reduce((sum, result) => sum + result.sourceTriangles, 0);
@@ -333,6 +435,16 @@ export class TerrainChunkOptimizerLabPageComponent {
       (sum, result) => sum + result.referencedVertices,
       0,
     );
+    const lockedVertices = results.reduce(
+      (sum, result) => sum + result.lockedVertexCount,
+      0,
+    );
+    const maximumSurfaceErrorM = Math.max(
+      ...results.map((result) => result.surfaceErrorM),
+    );
+    const maximumFeatureErrorM = Math.max(
+      ...results.map((result) => result.featureErrorM),
+    );
     const levelTriangles = new Map<number, { source: number; rendered: number }>();
     results.forEach((result) => {
       const current = levelTriangles.get(result.address.level) ?? { source: 0, rendered: 0 };
@@ -342,6 +454,12 @@ export class TerrainChunkOptimizerLabPageComponent {
     });
     this.sourceTriangleLabel.set(sourceTriangles.toLocaleString());
     this.triangleLabel.set(triangles.toLocaleString());
+    this.lockedVertexLabel.set(
+      this.protectFeatures() ? `${lockedVertices.toLocaleString()} locked vertices` : 'protection off',
+    );
+    this.surfaceErrorLabel.set(
+      `max ${maximumSurfaceErrorM.toFixed(2)}m; feature ${maximumFeatureErrorM.toFixed(2)}m`,
+    );
     this.levelTriangleLabel.set(
       [...levelTriangles.entries()]
         .sort(([left], [right]) => left - right)
@@ -407,16 +525,17 @@ export class TerrainChunkOptimizerLabPageComponent {
       flags: this.lockBoundaries() ? ['LockBorder'] : [],
       lockedVertices,
     });
-    sourceGeometry.dispose();
     result.geometry.computeVertexNormals();
     const missingBoundaryVertices = this.countMissingBoundaryVertices(
       result.geometry,
       resolution,
     );
     const referencedVertices = this.countReferencedVertices(result.geometry);
+    const surfaceError = this.measureSurfaceError(result.geometry, patch);
     return {
       address,
       patch,
+      sourceGeometry,
       geometry: result.geometry,
       resolution,
       sourceTriangles,
@@ -425,7 +544,81 @@ export class TerrainChunkOptimizerLabPageComponent {
       referencedVertices,
       missingBoundaryVertices,
       padErrorM: this.measurePadError(result.geometry, patch),
+      surfaceErrorM: surfaceError.maximumM,
+      featureErrorM: surfaceError.featureMaximumM,
+      lockedVertices,
+      lockedVertexCount: lockedVertices
+        ? lockedVertices.reduce((sum, value) => sum + (value ? 1 : 0), 0)
+        : 0,
     };
+  }
+
+  private measureSurfaceError(
+    geometry: BufferGeometry,
+    patch: ITerrainPatchMesh<IPlaneTerrainPatchAddress>,
+  ): { maximumM: number; featureMaximumM: number } {
+    const bounds = this.domain.getPatchBounds(patch.address);
+    const positions = geometry.getAttribute('position');
+    const index = geometry.index;
+    if (!index) return { maximumM: 0, featureMaximumM: 0 };
+    let maximum = 0;
+    let featureMaximum = 0;
+    const samplesPerSide = 13;
+    for (let row = 0; row < samplesPerSide; row += 1) {
+      const v = bounds.minV + ((row + 0.5) / samplesPerSide) * (bounds.maxV - bounds.minV);
+      const z = -v;
+      for (let column = 0; column < samplesPerSide; column += 1) {
+        const x =
+          bounds.minU +
+          ((column + 0.5) / samplesPerSide) * (bounds.maxU - bounds.minU);
+        const renderedHeight = this.interpolateMeshHeight(
+          geometry,
+          x - patch.centerWorldM[0],
+          z - patch.centerWorldM[2],
+        );
+        if (renderedHeight === undefined) continue;
+        const referenceHeight = this.field.sample([x, 0, z]).elevationM;
+        const error = Math.abs(renderedHeight + patch.centerWorldM[1] - referenceHeight);
+        maximum = Math.max(maximum, error);
+        const features = this.field.featureWeights(x, z);
+        if (Math.max(features.ridge, features.river) >= 0.3)
+          featureMaximum = Math.max(featureMaximum, error);
+      }
+    }
+    return { maximumM: maximum, featureMaximumM: featureMaximum };
+  }
+
+  private interpolateMeshHeight(
+    geometry: BufferGeometry,
+    x: number,
+    z: number,
+  ): number | undefined {
+    const positions = geometry.getAttribute('position');
+    const index = geometry.index;
+    if (!index) return undefined;
+    for (let offset = 0; offset < index.count; offset += 3) {
+      const a = Number(index.getX(offset));
+      const b = Number(index.getX(offset + 1));
+      const c = Number(index.getX(offset + 2));
+      const ax = positions.getX(a);
+      const az = positions.getZ(a);
+      const bx = positions.getX(b);
+      const bz = positions.getZ(b);
+      const cx = positions.getX(c);
+      const cz = positions.getZ(c);
+      const denominator = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+      if (Math.abs(denominator) < 1e-8) continue;
+      const weightA = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / denominator;
+      const weightB = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / denominator;
+      const weightC = 1 - weightA - weightB;
+      if (weightA < -1e-5 || weightB < -1e-5 || weightC < -1e-5) continue;
+      return (
+        weightA * positions.getY(a) +
+        weightB * positions.getY(b) +
+        weightC * positions.getY(c)
+      );
+    }
+    return undefined;
   }
 
   private createFeatureLocks(
@@ -655,15 +848,57 @@ export class TerrainChunkOptimizerLabPageComponent {
   }
 
   private installChunk(result: IChunkResult): void {
-    const material = new MeshStandardMaterial({
+    const materialOptions = {
       color: '#ffffff',
-      vertexColors: true,
+      vertexColors: !this.neutralShading(),
       roughness: 0.9,
       wireframe: this.wireframe(),
-    });
-    const mesh = new Mesh(result.geometry, material);
-    mesh.position.set(...result.patch.centerWorldM);
-    this.terrain.add(mesh);
+    } as const;
+    const optimizedMesh = new Mesh(
+      result.geometry,
+      new MeshStandardMaterial(materialOptions),
+    );
+    optimizedMesh.name = 'optimized-chunk';
+    optimizedMesh.userData['chunkVariant'] = 'optimized';
+    optimizedMesh.visible = this.showOptimized();
+    optimizedMesh.position.set(...result.patch.centerWorldM);
+    this.terrain.add(optimizedMesh);
+
+    const sourceMesh = new Mesh(
+      result.sourceGeometry,
+      new MeshStandardMaterial(materialOptions),
+    );
+    sourceMesh.name = 'source-chunk';
+    sourceMesh.userData['chunkVariant'] = 'source';
+    sourceMesh.visible = !this.showOptimized();
+    sourceMesh.position.set(...result.patch.centerWorldM);
+    this.terrain.add(sourceMesh);
+
+    if (result.lockedVertices && result.lockedVertexCount > 0) {
+      const positions = result.sourceGeometry.getAttribute('position');
+      const lockedPositions: number[] = [];
+      for (let vertex = 0; vertex < result.lockedVertices.length; vertex += 1) {
+        if (!result.lockedVertices[vertex]) continue;
+        lockedPositions.push(
+          positions.getX(vertex),
+          positions.getY(vertex),
+          positions.getZ(vertex),
+        );
+      }
+      const protectedGeometry = new BufferGeometry();
+      protectedGeometry.setAttribute(
+        'position',
+        new BufferAttribute(new Float32Array(lockedPositions), 3),
+      );
+      const protectedPoints = new Points(
+        protectedGeometry,
+        new PointsMaterial({ color: '#fff3a1', size: 8, sizeAttenuation: false }),
+      );
+      protectedPoints.name = 'protected-vertices';
+      protectedPoints.visible = this.showProtectedVertices() && this.protectFeatures();
+      protectedPoints.position.set(...result.patch.centerWorldM);
+      this.terrain.add(protectedPoints);
+    }
 
     const border = this.createBorder(result.patch);
     border.position.set(...result.patch.centerWorldM);
@@ -712,8 +947,19 @@ export class TerrainChunkOptimizerLabPageComponent {
   private installFeatureGuides(): void {
     const material = new LineBasicMaterial({ color: '#f0c36a', depthTest: false });
     const riverMaterial = new LineBasicMaterial({ color: '#70c9ff', depthTest: false });
-    this.installGuide('ridge', material, ridgeLineZ);
-    this.installGuide('river', riverMaterial, riverLineZ);
+    if (this.terrainPreset() === 'volcano') {
+      this.installGuide('volcano-rim-reference', material, () => -40);
+      this.installGuide('river', riverMaterial, (x) => 0.42 * x - 240);
+    } else if (this.terrainPreset() === 'mesa') {
+      this.installGuide('mesa-centre-reference', material, () => -80);
+      this.installGuide('river', riverMaterial, (x) => -0.34 * x - 180);
+    } else if (this.terrainPreset() === 'channels') {
+      this.installGuide('channel-a', riverMaterial, (x) => 0.45 * x - 150);
+      this.installGuide('channel-b', riverMaterial, (x) => -0.36 * x + 115);
+    } else {
+      this.installGuide('ridge', material, ridgeLineZ);
+      this.installGuide('river', riverMaterial, riverLineZ);
+    }
   }
 
   private installGuide(
@@ -734,13 +980,18 @@ export class TerrainChunkOptimizerLabPageComponent {
 
   private disposeTerrain(): void {
     this.terrain.traverse((object) => {
-      if (object instanceof Mesh || object instanceof Line) {
+      if (object instanceof Mesh || object instanceof Line || object instanceof Points) {
         object.geometry.dispose();
         if (Array.isArray(object.material)) object.material.forEach((material) => material.dispose());
         else object.material.dispose();
       }
     });
     while (this.terrain.children.length) this.terrain.remove(this.terrain.children[0]);
+  }
+
+  private disposeResult(result: IChunkResult): void {
+    result.geometry.dispose();
+    result.sourceGeometry.dispose();
   }
 }
 

@@ -25,6 +25,15 @@
           <span><b>Suggested order:</b> mixed on → borders on → reduction 0% → increase reduction → toggle one protection at a time.</span>
         </div>
       </details>
+      <label class="preset-control">
+        <span>Terrain test</span>
+        <select [value]="terrainPreset()" (change)="setTerrainPreset($event)">
+          <option value="ridge-river">Ridge + river</option>
+          <option value="volcano">Volcano + crater river</option>
+          <option value="mesa">Mesa + river</option>
+          <option value="channels">Branching channels</option>
+        </select>
+      </label>
       <div class="actions">
         <button [class.active]="mixedResolution()" (click)="toggleLayout()">
           {{ mixedResolution() ? "Mixed LOD layout" : "Same-level layout" }}
@@ -34,6 +43,15 @@
         </button>
         <button [class.active]="protectFeatures()" (click)="toggleFeatures()">
           {{ protectFeatures() ? "Protect ridge + river" : "Feature locks off" }}
+        </button>
+        <button [class.active]="showProtectedVertices()" (click)="toggleProtectedVertices()">
+          {{ showProtectedVertices() ? "Hide locked vertices" : "Show locked vertices" }}
+        </button>
+        <button [class.active]="showOptimized()" (click)="toggleOptimized()">
+          {{ showOptimized() ? "Show source" : "Show optimised" }}
+        </button>
+        <button [class.active]="neutralShading()" (click)="toggleNeutralShading()">
+          {{ neutralShading() ? "Neutral shading" : "Feature colours" }}
         </button>
         <button [class.active]="flattenEnabled()" (click)="toggleFlattening()">
           {{ flattenEnabled() ? "Flattening on" : "Flattening off" }}
@@ -58,7 +76,7 @@
           [value]="maxReduction()"
           (input)="setMaxReduction($event)"
         />
-        <small>Chunks use 0%, 35%, 65% and the selected maximum.</small>
+        <small>All chunks use the selected reduction, making the comparison easier to read.</small>
       </label>
       <div class="stats">
         <span>Status: {{ buildLabel() }}</span>
@@ -66,13 +84,15 @@
         <span>Rendered triangles: {{ triangleLabel() }}</span>
         <span>Rendered/source by level: {{ levelTriangleLabel() }}</span>
         <span>Achieved reduction: {{ reductionLabel() }}</span>
+        <span>Feature protection: {{ lockedVertexLabel() }}</span>
+        <span>Surface check: {{ surfaceErrorLabel() }}</span>
         <span>Boundary check: {{ boundaryLabel() }}</span>
         <span>Coverage: {{ coverageLabel() }}</span>
         <span>Mixed seam: {{ seamLabel() }}</span>
         <span>Feature check: {{ featureLabel() }}</span>
         <span>Flattening: {{ padLabel() }}</span>
         <span>Chunk outlines: pale green = coarse L0; blue = fine L1</span>
-        <span>Gold/blue guide lines: ridge and river reference paths</span>
+        <span>Gold/blue guide lines: the active preset's reference paths</span>
         <span>Mixed seams use matching fine edge samples on the coarse chunk</span>
       </div>
     </section>

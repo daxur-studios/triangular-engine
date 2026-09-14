@@ -192,6 +192,7 @@ export class CellPlanetGlobePageComponent {
     if (Number.isFinite(value) && value !== this.heightScale()) {
       this.heightScale.set(Math.max(0, Math.min(1, value)));
       this.refreshDisplacement();
+      this.updateComparisonQueryParams();
     }
   }
 
@@ -199,11 +200,13 @@ export class CellPlanetGlobePageComponent {
     this.seabedRelief.set((event.target as HTMLInputElement).checked);
     this.applySeabedRelief();
     this.refreshDisplacement();
+    this.updateComparisonQueryParams();
   }
 
   onOceanChange(event: Event): void {
     this.showOcean.set((event.target as HTMLInputElement).checked);
     this.updateOceanMesh();
+    this.updateComparisonQueryParams();
   }
 
   randomizeSeed(): void {
@@ -436,6 +439,10 @@ export class CellPlanetGlobePageComponent {
     }
     const waterLevel = this.numberQuery(query.waterLevel);
     if (waterLevel !== null) this.waterLevel.set(Math.max(-1, Math.min(1, waterLevel)));
+    const globeHeightScale = this.numberQuery(query.globeHeightScale ?? (query as Record<string, string | undefined>)['heightScale']);
+    if (globeHeightScale !== null) this.heightScale.set(Math.max(0, Math.min(1, globeHeightScale)));
+    this.seabedRelief.set(this.booleanQuery(query.seabedRelief, this.seabedRelief()));
+    this.showOcean.set(this.booleanQuery(query.showOcean, this.showOcean()));
   }
 
   private updateComparisonQueryParams(): void {
@@ -447,12 +454,19 @@ export class CellPlanetGlobePageComponent {
       worldProfile: this.worldProfileKind(),
       fillMode: this.fillMode(),
       waterLevel: this.waterLevel(),
+      globeHeightScale: this.heightScale(),
+      seabedRelief: this.seabedRelief(),
+      showOcean: this.showOcean(),
     });
   }
 
   private numberQuery(value: string | undefined): number | null {
-    if (value === undefined) return null;
+    if (value === undefined || value === '') return null;
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
+  }
+
+  private booleanQuery(value: string | undefined, fallback: boolean): boolean {
+    return value === 'true' ? true : value === 'false' ? false : fallback;
   }
 }

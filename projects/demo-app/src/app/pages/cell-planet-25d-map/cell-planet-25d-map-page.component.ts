@@ -345,6 +345,10 @@ function makeColorTexture(
           class="active"
           aria-current="page"
         >2.5D terrain</a>
+        <a
+          [routerLink]="['/cell-planet-globe']"
+          [queryParams]="comparisonQueryParams()"
+        >Globe</a>
       </nav>
       <span>shared planet sampler → baked height source → clipmap</span>
       <label>
