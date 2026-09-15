@@ -17,6 +17,9 @@ const TERRAIN_HEIGHT_GLSL = `
   uniform float uHeightMapRangeM;
   uniform bool uUseColorMap;
   uniform sampler2D uColorMap;
+  uniform bool uMacroVariationEnabled;
+  uniform float uMacroVariationStrength;
+  uniform float uMacroVariationScaleM;
 
   float terrainHeightWave(vec2 xz) {
     float continental = sin(xz.x / 340.0) * 6.0 + cos(xz.y / 260.0) * 5.0;
@@ -324,6 +327,20 @@ const FRAGMENT_SHADER_BODY = `
     return mix(colors[i0], colors[i1], fract(t));
   }
 
+  // A low-frequency, planet-space breakup signal. The second sample uses a
+  // rotated coordinate basis so the two scales do not form an obvious grid.
+  // The coordinates are world X/Z on the plane and can become a planet-space
+  // direction in the spherical adapter without depending on mesh UVs.
+  float terrainMacroVariation(vec2 xz) {
+    float scaleM = max(uMacroVariationScaleM, 1.0);
+    vec2 broadP = xz / scaleM + vec2(17.3, -9.1);
+    mat2 rotate = mat2(0.8, -0.6, 0.6, 0.8);
+    vec2 breakupP = rotate * (xz / (scaleM * 1.73)) + vec2(-23.1, 5.7);
+    float broad = terrainValueNoise(broadP);
+    float breakup = terrainValueNoise(breakupP);
+    return mix(broad, breakup, 0.35);
+  }
+
   void main() {
     vec3 lightDir = normalize(vec3(0.5, 0.8, 0.3));
     float diffuse = 1.0;
@@ -346,6 +363,19 @@ const FRAGMENT_SHADER_BODY = `
       ? texture2D(uColorMap, mapUv).rgb
       : vec3(0.067, 0.243, 0.463);
     vec3 base = uShowLevelTint ? levelTint(vContinuousLevel) : mapBase;
+
+    if (!uShowLevelTint && uMacroVariationEnabled && uUseColorMap) {
+      float signedVariation = (terrainMacroVariation(vWorldPos.xz) - 0.5) * 2.0;
+      // The first material pass has a colour map rather than a packed weight
+      // map. These conservative colour heuristics keep macro breakup on land,
+      // while avoiding dirtying blue water or whitening/darkening snow.
+      float waterLike = smoothstep(0.16, 0.42, mapBase.b - mapBase.r);
+      float snowLike = smoothstep(0.72, 0.94, dot(mapBase, vec3(0.333333)));
+      float landFactor = 1.0 - clamp(waterLike + snowLike * 0.75, 0.0, 1.0);
+      float amount = uMacroVariationStrength * landFactor;
+      vec3 warmVariation = vec3(1.0) + signedVariation * vec3(0.12, 0.09, 0.055);
+      base = mix(base, base * warmVariation, amount);
+    }
 
     // Diagnostic view overrides
     if (uDebugViewMode == 1) {
@@ -386,6 +416,9 @@ export function createClipmapTerrainMaterial(): ShaderMaterial {
       uHeightMapRangeM: { value: 1 },
       uUseColorMap: { value: false },
       uColorMap: { value: null },
+      uMacroVariationEnabled: { value: false },
+      uMacroVariationStrength: { value: 0.0 },
+      uMacroVariationScaleM: { value: 32.0 },
       uLevelBounds: {
         value: Array.from({ length: 16 }, () => new Vector4()),
       },

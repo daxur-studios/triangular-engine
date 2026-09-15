@@ -493,6 +493,20 @@ function makeColorTexture(
           }
         </select>
       </label>
+      @if (fillMode() === 'material') {
+        <label class="checkbox-row">
+          <input type="checkbox" [checked]="macroVariationEnabled()" (change)="onMacroVariationChange($event)" />
+          <span>Macro surface variation</span>
+        </label>
+        <label>
+          <span>Macro strength: {{ macroVariationStrength().toFixed(2) }}</span>
+          <input type="range" min="0" max="1" step="0.05" [value]="macroVariationStrength()" (input)="onMacroVariationStrengthInput($event)" />
+        </label>
+        <label>
+          <span>Macro scale: {{ macroVariationScaleM().toFixed(0) }}m</span>
+          <input type="range" min="8" max="128" step="4" [value]="macroVariationScaleM()" (input)="onMacroVariationScaleInput($event)" />
+        </label>
+      }
       <label>
         <span>Terrain quality</span>
         <select [value]="terrainQuality()" (change)="onTerrainQualityChange($event)">
@@ -559,6 +573,9 @@ export class CellPlanet25dMapPageComponent {
   readonly projectionLabels = MAP_PROJECTION_LABELS;
   readonly fillMode = signal<CellPlanet25dFillMode>('biome');
   readonly fillModes: CellPlanet25dFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture', 'land', 'material'];
+  readonly macroVariationEnabled = signal(true);
+  readonly macroVariationStrength = signal(0.35);
+  readonly macroVariationScaleM = signal(48);
   readonly terrainQuality = signal<TerrainQuality>('standard');
   readonly terrainQualityKinds = TERRAIN_QUALITY_KINDS;
   readonly terrainQualityPresets = TERRAIN_QUALITY_PRESETS;
@@ -695,6 +712,31 @@ export class CellPlanet25dMapPageComponent {
       this.fillMode.set(value);
       this.updateComparisonQueryParams();
       this.rebuildColorTexture();
+      this.updateMacroVariation();
+    }
+  }
+
+  onMacroVariationChange(event: Event): void {
+    this.macroVariationEnabled.set((event.target as HTMLInputElement).checked);
+    this.updateMacroVariation();
+    this.updateComparisonQueryParams();
+  }
+
+  onMacroVariationStrengthInput(event: Event): void {
+    const value = this.inputNumber(event);
+    if (Number.isFinite(value)) {
+      this.macroVariationStrength.set(Math.max(0, Math.min(1, value)));
+      this.updateMacroVariation();
+      this.updateComparisonQueryParams();
+    }
+  }
+
+  onMacroVariationScaleInput(event: Event): void {
+    const value = this.inputNumber(event);
+    if (Number.isFinite(value)) {
+      this.macroVariationScaleM.set(Math.max(8, Math.min(128, value)));
+      this.updateMacroVariation();
+      this.updateComparisonQueryParams();
     }
   }
 
@@ -1046,6 +1088,11 @@ export class CellPlanet25dMapPageComponent {
       lodFocus: { x: 0, z: 0 },
     });
     terrain.setShowLevelTint(false);
+    terrain.setMacroVariation(
+      this.fillMode() === 'material' && this.macroVariationEnabled(),
+      this.macroVariationStrength(),
+      this.macroVariationScaleM(),
+    );
     return terrain;
   }
 
@@ -1083,6 +1130,12 @@ export class CellPlanet25dMapPageComponent {
     if (terrainHeightScale !== null) this.terrainHeightScale.set(Math.max(0, Math.min(14, terrainHeightScale)));
     const runtimeSimplificationRatio = this.numberQuery(query.runtimeSimplificationRatio);
     if (runtimeSimplificationRatio !== null) this.runtimeSimplificationRatio.set(Math.max(0, Math.min(0.95, runtimeSimplificationRatio)));
+    if (query.macroVariation === 'false' || query.macroVariation === '0') this.macroVariationEnabled.set(false);
+    if (query.macroVariation === 'true' || query.macroVariation === '1') this.macroVariationEnabled.set(true);
+    const macroVariationStrength = this.numberQuery(query.macroVariationStrength);
+    if (macroVariationStrength !== null) this.macroVariationStrength.set(Math.max(0, Math.min(1, macroVariationStrength)));
+    const macroVariationScaleM = this.numberQuery(query.macroVariationScaleM);
+    if (macroVariationScaleM !== null) this.macroVariationScaleM.set(Math.max(8, Math.min(128, macroVariationScaleM)));
     if (query.showOcean === 'false' || query.showOcean === '0') this.showOcean.set(false);
     if (query.showOcean === 'true' || query.showOcean === '1') this.showOcean.set(true);
     const selectedCell = this.numberQuery(query.selectedCell);
@@ -1104,6 +1157,9 @@ export class CellPlanet25dMapPageComponent {
       waterLevel: this.waterLevel(),
       terrainHeightScale: this.terrainHeightScale(),
       runtimeSimplificationRatio: this.runtimeSimplificationRatio(),
+      macroVariation: this.macroVariationEnabled(),
+      macroVariationStrength: this.macroVariationStrength(),
+      macroVariationScaleM: this.macroVariationScaleM(),
       showOcean: this.showOcean(),
       selectedCell: this.selection()?.cellId ?? '',
     });
@@ -1113,5 +1169,14 @@ export class CellPlanet25dMapPageComponent {
     if (value === undefined || value === '') return null;
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
+  }
+
+  private updateMacroVariation(): void {
+    if (!this.terrain) return;
+    this.terrain.setMacroVariation(
+      this.fillMode() === 'material' && this.macroVariationEnabled(),
+      this.macroVariationStrength(),
+      this.macroVariationScaleM(),
+    );
   }
 }

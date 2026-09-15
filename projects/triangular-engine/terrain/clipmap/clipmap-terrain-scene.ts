@@ -76,6 +76,8 @@ export interface IClipmapTerrainSceneHandle {
   setTerrainKind(kind: ClipmapTerrainKindName): void;
   setDebugFlatTerrain(enabled: boolean): void;
   setDebugViewMode(mode: number): void;
+  /** Configure the world-anchored material breakup layer. */
+  setMacroVariation(enabled: boolean, strength: number, scaleM: number): void;
   /**
    * Synchronous, unthrottled read of the same counters `onDiagnostics`
    * reports every 500ms — for automated capture that needs a fresh sample
@@ -264,6 +266,11 @@ export function createClipmapTerrainScene(
     },
     setDebugViewMode(mode: number): void {
       material.uniforms['uDebugViewMode']!.value = mode;
+    },
+    setMacroVariation(enabled: boolean, strength: number, scaleM: number): void {
+      material.uniforms['uMacroVariationEnabled']!.value = enabled;
+      material.uniforms['uMacroVariationStrength']!.value = Math.max(0, Math.min(1, strength));
+      material.uniforms['uMacroVariationScaleM']!.value = Math.max(1, scaleM);
     },
     getDiagnosticsSnapshot(): IClipmapTerrainDiagnostics {
       return {

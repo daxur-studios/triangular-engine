@@ -1,6 +1,7 @@
 # Terrain material texturing
 
-Status: material contract started; visual material lab and streamed tiles are next.
+Status: material contract, 2.5D coverage preview, and first macro variation
+prototype are in place; detailed layers and streamed material tiles are next.
 
 This runbook tracks the shared surface appearance system for the 2.5D Cell
 Planet map and the later cube-sphere planet. Geometry LOD, Meshoptimizer,
@@ -23,6 +24,21 @@ Use three appearance scales:
 - streamed or baked macro material weights per terrain patch;
 - procedural or authored high-frequency colour, normal, and roughness detail
   in the shader, anchored to planet-space coordinates.
+
+Add a shared macro-variation mask between coverage and fine detail. It is a
+low-frequency, irregular grayscale signal sampled in planet space and used to
+vary hue, value, roughness, and detail strength inside a material layer. It
+should be sampled at more than one physical scale, with a small amount of
+rotation or coordinate offset where the mapping allows it, so tiled grass,
+sand, rock, and snow do not reveal a repeating pattern at regional or planet
+scale. Macro variation changes appearance; it must not move biome boundaries or
+replace the semantic material weights.
+
+Macro variation is material-aware: snow stays clean and cold, desert sand gets
+dry colour variation, and grass can vary between greener and drier patches. Use
+the same masks for foliage density later, so visible grass and spawned grass
+agree. Keep the first shader pass to one shared macro lookup plus inexpensive
+procedural detail; measure additional per-layer samples before adding them.
 
 Material data stays independent of mesh topology. Geometry simplification and
 LOD replacement must not destroy material detail. Plane renderers may use patch
@@ -52,17 +68,21 @@ the CDLOD v3 shader or to a streamed texture provider.
 ## Next steps
 
 1. Add a material lab using the existing fixed patch meshes. Show current palette
-   versus blended weights and procedural detail at overview, regional, and close
-   camera distances. Include ridge/river/coast/seabed and flattened-pad cases.
-2. Add debug modes for each weight and mask, cube-face seams, patch borders,
-   texture coordinates, and material mip selection.
-3. Define a `TerrainMaterialTileProvider` only after the lab identifies the
+   versus blended weights, macro variation, and procedural detail at overview,
+   regional, and close camera distances. Include ridge/river/coast/seabed and
+   flattened-pad cases.
+2. Prototype one shared planet-space macro mask with strength and scale controls.
+   Compare it disabled, single-scale, and multi-scale, checking that the pattern
+   stays fixed while the camera and geometry LOD change.
+3. Add debug modes for each weight and mask, macro coordinates, cube-face seams,
+   patch borders, texture coordinates, and material mip selection.
+4. Define a `TerrainMaterialTileProvider` only after the lab identifies the
    required sampling density and shader cost. Use cube-face tiles for the globe
    and a projection adapter for the 2.5D view.
-4. Integrate material tiles with the active LOD scheduler using independent
+5. Integrate material tiles with the active LOD scheduler using independent
    material LOD and coarse-parent fallback. Invalidate tiles for the same edit
    support and blend margin as terrain chunks.
-5. Add authored detail textures, normal/roughness channels, texture arrays or
+6. Add authored detail textures, normal/roughness channels, texture arrays or
    atlases, and optional compressed GPU formats after measuring the target
    browser path.
 
@@ -109,3 +129,16 @@ Record visual captures and measurements for matched plane/sphere locations:
   to dry ground, while steppe and savanna retain partial grass coverage. The
   2.5D material palette also uses the returned arid mask for a warmer desert
   tint. Next: compare these weights against a close-up detail treatment.
+- **2026-09-15 — Macro variation direction:** recorded a planet-space,
+  material-aware macro mask as the next detail prototype. It will break up
+  repeated grass, sand, rock, and snow tiling across regional views while leaving
+  semantic coverage and geometry unchanged. The first version should expose
+  strength and scale controls and be tested across camera distances and geometry
+  LOD changes before material streaming is designed.
+- **2026-09-15 — Macro variation prototype:** added the first world-space shader
+  breakup layer to the clipmap handle and 2.5D material view. It combines two
+  rotated value-noise samples, exposes enabled/strength/scale controls, and
+  persists those controls in comparison query parameters. It is restricted to
+  the material view and conservatively suppresses variation over water and snow.
+  This is still a visual prototype; packed material weights and streamed detail
+  tiles remain future work.

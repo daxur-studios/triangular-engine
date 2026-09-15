@@ -244,3 +244,16 @@ and simplification as separate checks. Library build, demo type-check and diff
 validation pass; the full terrain test command remains blocked by the unrelated
 existing `planet-surface-bake.spec.ts` `toHaveLength` type errors. Next: measure
 transition geometry overhead and test worker-backed generation at larger coverage.
+
+### 2026-09-15 — C1 coverage comparison added
+
+The streaming lab now has an explicit Coverage control for the original 16 km
+root footprint and a 32 km footprint made from 64 level-zero roots. Both use
+the same deterministic ridge, river and volcano field, while the overview
+preset scales with the selected footprint. This makes larger-area residency,
+parent fallback and generation-queue behaviour observable without changing
+the terrain source or the seam algorithm. The 16 km view remains the default
+for quick inspection. The panel also reports the last and peak mesh-build time
+so coverage and quality comparisons have a direct timing signal. Next: record
+resident-chunk, generation-time and memory measurements while moving between
+the two coverage sizes, then move generation work into workers.

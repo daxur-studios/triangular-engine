@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   DestroyRef,
   inject,
   signal,
@@ -31,6 +32,7 @@ import {
 import type { TerrainVector3 } from 'triangular-engine/terrain';
 
 type Quality = 'standard' | 'high' | 'ultra';
+type CoverageKm = 16 | 32;
 
 const QUALITY: Record<
   Quality,
@@ -46,14 +48,25 @@ const QUALITY: Record<
   ultra: { label: 'Ultra', maxLod: 4, resolution: 40, reduction: 0.15 },
 };
 
-const ROOTS: readonly IPlaneTerrainPatchAddress[] = Array.from(
-  { length: 16 },
-  (_, index) => ({
+const COVERAGE_OPTIONS: readonly CoverageKm[] = [16, 32];
+
+function createRootAddresses(
+  axisCount: number,
+): readonly IPlaneTerrainPatchAddress[] {
+  const half = axisCount / 2;
+  return Array.from({ length: axisCount * axisCount }, (_, index) => ({
     level: 0,
-    x: -2 + (index % 4),
-    z: -2 + Math.floor(index / 4),
-  }),
-);
+    x: -half + (index % axisCount),
+    z: -half + Math.floor(index / axisCount),
+  }));
+}
+
+const ROOTS_BY_COVERAGE: Readonly<
+  Record<CoverageKm, readonly IPlaneTerrainPatchAddress[]>
+> = {
+  16: createRootAddresses(4),
+  32: createRootAddresses(8),
+};
 
 class StreamingTerrainField implements ITerrainField {
   readonly minElevationM = -120;
@@ -180,7 +193,7 @@ function levelOf(address: IPlaneTerrainPatchAddress): number {
       <terrainSurface
         [field]="field"
         [domain]="domain"
-        [roots]="roots"
+        [roots]="roots()"
         [maxLod]="qualityConfig().maxLod"
         [refinementDistance]="5200"
         [resolution]="qualityConfig().resolution"
@@ -202,7 +215,7 @@ function levelOf(address: IPlaneTerrainPatchAddress): number {
       <a routerLink="/">← Examples</a>
       <h2>Terrain chunk streaming lab</h2>
       <p class="subtitle">
-        C1 camera-driven quadtree coverage over a 16 km square.
+        C1 camera-driven quadtree coverage over a {{ coverageKm() }} km square.
       </p>
       <p class="explanation">
         The camera selects detail. A complete parent cut stays visible until all
@@ -215,6 +228,14 @@ function levelOf(address: IPlaneTerrainPatchAddress): number {
         <select [value]="quality()" (change)="setQuality($event)">
           @for (option of qualityOptions; track option) {
             <option [value]="option">{{ qualityLabels[option] }}</option>
+          }
+        </select>
+      </label>
+      <label>
+        <span>Coverage</span>
+        <select [value]="coverageKm()" (change)="setCoverage($event)">
+          @for (coverage of coverageOptions; track coverage) {
+            <option [value]="coverage">{{ coverage }} km square</option>
           }
         </select>
       </label>
@@ -254,12 +275,19 @@ function levelOf(address: IPlaneTerrainPatchAddress): number {
       <button type="button" (click)="setView('close')">Close detail</button>
 
       <div class="stats">
+        <span
+          >Root cover: {{ coverageKm() }} km · {{ roots().length }} roots</span
+        >
         <span>Selection: {{ stats().desired }} chunks</span>
         <span>Displayed: {{ stats().resident }} chunks</span>
         <span>Pending: {{ stats().queued }} jobs</span>
         <span>Draw calls: {{ stats().drawCalls }}</span>
         <span>Triangles: {{ stats().triangles.toLocaleString() }}</span>
         <span>Geometry: {{ formatBytes(stats().geometryBytes) }}</span>
+        <span
+          >Mesh build: {{ formatMilliseconds(generationStats().lastMs) }} last ·
+          {{ formatMilliseconds(generationStats().peakMs) }} peak</span
+        >
         <span>Levels: {{ formatLevels(stats().levels) }}</span>
       </div>
 
@@ -268,8 +296,9 @@ function levelOf(address: IPlaneTerrainPatchAddress): number {
         <p>
           This is the first large-area streaming test. It measures parent
           fallback, camera-driven refinement, asynchronous replacement and
-          bounded visible coverage. It does not yet represent the full cell
-          planet or spherical globe.
+          bounded visible coverage. Use Coverage to compare the original 16 km
+          fixture with a 32 km root cover; both use the same deterministic field.
+          It does not yet represent the full cell planet or spherical globe.
         </p>
       </details>
     </aside>
@@ -282,7 +311,9 @@ function levelOf(address: IPlaneTerrainPatchAddress): number {
 export class TerrainChunkStreamingLabPageComponent {
   readonly field = new StreamingTerrainField();
   readonly domain = new PlaneTerrainDomain(4_096);
-  readonly roots = ROOTS;
+  readonly coverageKm = signal<CoverageKm>(16);
+  readonly coverageOptions = COVERAGE_OPTIONS;
+  readonly roots = computed(() => ROOTS_BY_COVERAGE[this.coverageKm()]);
   readonly quality = signal<Quality>('standard');
   readonly qualityOptions: Quality[] = ['standard', 'high', 'ultra'];
   readonly qualityLabels = Object.fromEntries(
@@ -303,6 +334,7 @@ export class TerrainChunkStreamingLabPageComponent {
     geometryBytes: 0,
     levels: {} as Readonly<Record<number, number>>,
   });
+  readonly generationStats = signal({ lastMs: 0, peakMs: 0 });
 
   private readonly engine = inject(EngineService);
   private disposed = false;
@@ -357,6 +389,7 @@ export class TerrainChunkStreamingLabPageComponent {
     const delayMs = this.generationDelayMs();
     if (delayMs > 0)
       await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    const startedAt = performance.now();
     const generated = generateTerrainPatchMesh(request.field, request.domain, {
       address: request.address,
       resolution: request.resolution,
@@ -373,6 +406,11 @@ export class TerrainChunkStreamingLabPageComponent {
         flags: ['LockBorder'],
       },
     );
+    const elapsedMs = performance.now() - startedAt;
+    this.generationStats.update(({ peakMs }) => ({
+      lastMs: elapsedMs,
+      peakMs: Math.max(peakMs, elapsedMs),
+    }));
     if (this.disposed) return generated;
     return {
       ...generated,
@@ -389,6 +427,13 @@ export class TerrainChunkStreamingLabPageComponent {
 
   setQuality(event: Event): void {
     this.quality.set((event.target as HTMLSelectElement).value as Quality);
+  }
+
+  setCoverage(event: Event): void {
+    const value = Number((event.target as HTMLSelectElement).value);
+    if (value !== 16 && value !== 32) return;
+    this.coverageKm.set(value);
+    this.setView('overview');
   }
 
   toggleWireframe(): void {
@@ -414,7 +459,8 @@ export class TerrainChunkStreamingLabPageComponent {
 
   setView(view: 'overview' | 'close'): void {
     if (view === 'overview') {
-      this.cameraPosition.set([0, 2_900, 4_800]);
+      const scale = this.coverageKm() / 16;
+      this.cameraPosition.set([0, 2_900 * scale, 4_800 * scale]);
       this.cameraTarget.set([0, 0, 0]);
     } else {
       this.cameraPosition.set([-720, 720, 880]);
@@ -438,6 +484,10 @@ export class TerrainChunkStreamingLabPageComponent {
     if (bytes < 1_024) return `${bytes} B`;
     if (bytes < 1_048_576) return `${(bytes / 1_024).toFixed(1)} KiB`;
     return `${(bytes / 1_048_576).toFixed(1)} MiB`;
+  }
+
+  formatMilliseconds(milliseconds: number): string {
+    return milliseconds > 0 ? `${milliseconds.toFixed(1)} ms` : '—';
   }
 
   formatLevels(levels: Readonly<Record<number, number>>): string {
