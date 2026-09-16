@@ -125,6 +125,11 @@ Recorded separately, per the runbook convention:
   vertex colours, while the 2.5D clipmap applies the equivalent variation in its shader. The
   canvas 2D page is intentionally unchanged; sphere LOD material streaming remains future work.
 
+- **2026-09-16 — Globe material colour-space fix:** the shared palette is authored in sRGB, but
+  the globe stores lit vertex colours in Three.js's working colour space. The material path now
+  converts palette RGB with `SRGBColorSpace` before upload, matching the 2.5D colour texture and
+  preventing the globe's material view from appearing whitewashed.
+
 ## Verification commands
 
 ```powershell

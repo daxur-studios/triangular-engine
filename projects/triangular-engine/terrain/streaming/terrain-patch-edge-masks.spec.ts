@@ -77,4 +77,20 @@ describe('calculateTerrainPatchEdgeRefinementMasks', () => {
       { start: 0, end: 1, levelDelta: 1 },
     ]);
   });
+
+  it('maps sphere bottom and top seams to the matching mesh edge slots', () => {
+    const sphere = new SphereTerrainDomain(100);
+    const coarse = { face: 'positive-x' as const, level: 0, x: 0, y: 0 };
+    const neighbour = sphere.getPatchNeighbor(coarse, 'bottom');
+    const fine = sphere.getChildren(neighbour)[0];
+
+    const result = calculateTerrainPatchEdgeRefinementMasks(
+      sphere,
+      [coarse, fine],
+      (address) => address.level,
+    );
+
+    expect(result[0].mask).toBe(1);
+    expect(result[0].edgeLevelDeltas).toEqual([1, 0, 0, 0]);
+  });
 });

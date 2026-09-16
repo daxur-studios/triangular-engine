@@ -162,7 +162,10 @@ function calculateNeighbourAwareMasks<TAddress>(
     ],
   }));
   const addressByKey = new Map(addresses.map((address) => [addressKey(address), address]));
-  const edges = ['top', 'right', 'bottom', 'left'] as const;
+  // Mesh edge slots are north, east, south, west. Sphere-domain UV edges use
+  // bottom=minV, right=maxU, top=maxV, left=minU, so keep the slot mapping
+  // explicit instead of relying on the visual names being in the same order.
+  const edges = ['bottom', 'right', 'top', 'left'] as const;
   for (let index = 0; index < addresses.length; index += 1) {
     const address = addresses[index];
     const level = getLevel(address);

@@ -38,10 +38,10 @@ const PLANET_SIZES: Readonly<Record<PlanetSize, number>> = {
   moon: 1_737_400,
   earth: 6_371_000,
 };
-const QUALITY: Readonly<Record<Quality, { maxLod: number; resolution: number; budget: number; maxPatches: number }>> = {
-  standard: { maxLod: 5, resolution: 20, budget: 4, maxPatches: 48 },
-  high: { maxLod: 7, resolution: 28, budget: 6, maxPatches: 96 },
-  ultra: { maxLod: 9, resolution: 36, budget: 8, maxPatches: 96 },
+const QUALITY: Readonly<Record<Quality, { maxLod: number; resolution: number; budget: number; maxPatches: number; reduction: number }>> = {
+  standard: { maxLod: 5, resolution: 20, budget: 4, maxPatches: 48, reduction: 0.55 },
+  high: { maxLod: 7, resolution: 28, budget: 6, maxPatches: 96, reduction: 0.35 },
+  ultra: { maxLod: 9, resolution: 36, budget: 8, maxPatches: 96, reduction: 0.15 },
 };
 
 const VIEWS: Readonly<Record<View, { position: [number, number, number]; target: [number, number, number] }>> = {
@@ -357,6 +357,8 @@ export class PlanetTerrainSphereLabPageComponent {
         edgeRefinementLevels: request.edgeRefinementLevels,
         edgeRefinementSegments: request.edgeRefinementSegments,
         skirtDepthM: request.skirtDepthM,
+        reduction: this.qualityConfig().reduction,
+        targetError: 0.08,
       });
     });
   }

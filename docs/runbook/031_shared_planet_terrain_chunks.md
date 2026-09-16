@@ -365,3 +365,15 @@ while waiting behind work ordered for an earlier camera position. Queue
 reconciliation now runs on every update, preserves still-wanted pending jobs,
 and applies their latest priorities. Running jobs and completed compatible
 results remain governed by the existing epoch and replacement checks.
+
+### 2026-09-16 — sphere parity and seam correction
+
+The sphere lab was slower and showed gaps because it exercised the harder
+six-face path while also bypassing the plane lab's Meshoptimizer pass. Sphere
+edge-mask lookup used `top, right, bottom, left` against mesh slots ordered by
+minimum-V, east, maximum-V, west; the first and third slots were reversed. The
+lookup now maps `bottom, right, top, left`, with a regression test for the
+minimum-V seam. Sphere worker patches now use the same border-locked
+Meshoptimizer reduction policy and compact their attributes before transfer.
+The demo and library builds pass; visual confirmation of sphere seams remains
+the next manual check.
