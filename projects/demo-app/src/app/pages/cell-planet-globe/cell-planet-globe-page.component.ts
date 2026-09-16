@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
@@ -37,6 +37,8 @@ import {
   plateColor,
   temperatureColor,
   WORLD_SIZE_TIER_RADIUS_M,
+  WorldSizeTier,
+  formatDistanceM,
   writePlanetGlobeNormals,
   writePlanetGlobePositions,
 } from 'triangular-engine/worldgen/render';
@@ -49,18 +51,14 @@ import {
 } from 'triangular-engine/terrain';
 import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
 import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
-
-/** Base radius of the prototype globe. Canonical elevations stay unitless; this is display space. */
-const GLOBE_RADIUS = 1;
+import { getTerrainHeightScaleM } from '../cell-planet-25d-map/cell-planet-terrain-scale';
 
 /** Modest fixed tessellation: 96 x 48 quads → ~9.2k triangles. No LOD, by design (runbook 032). */
 const GLOBE_LONGITUDE_SEGMENTS = 96;
 const GLOBE_LATITUDE_RINGS = 48;
 
-/** Display-only radial exaggeration default; the canonical sampler output is unchanged. */
-const GLOBE_DEFAULT_HEIGHT_SCALE = 0.25;
-/** The fixed globe is unit-sized, so material coordinates use the selected map's medium-body metres. */
-const GLOBE_MATERIAL_RADIUS_M = WORLD_SIZE_TIER_RADIUS_M.medium;
+/** Match the 2.5D page's default stylized relief control. */
+const DEFAULT_TERRAIN_RELIEF = 4;
 
 /** Shared water colour for ocean shell and invalid-cell fallback, mirroring the 2.5D map. */
 const OCEAN_COLOR = 'hsl(210, 55%, 22%)';
@@ -100,15 +98,32 @@ export class CellPlanetGlobePageComponent {
   readonly relaxationIterations = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.relaxationIterations);
   readonly worldProfileKind = signal<WorldProfileKind>('terran');
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
+  /** Same physical body-size tiers as the 2.5D page. */
+  readonly worldSizeTier = signal<WorldSizeTier>('medium');
+  readonly worldSizeKinds: WorldSizeTier[] = ['mini', 'small', 'medium', 'large', 'extra-large'];
   readonly waterLevel = signal(0);
   readonly fillMode = signal<CellPlanetGlobeFillMode>('biome');
   readonly fillModes: CellPlanetGlobeFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture', 'land', 'material'];
   readonly macroVariationEnabled = signal(true);
   readonly macroVariationStrength = signal(0.35);
   readonly macroVariationScaleM = signal(48);
-  readonly heightScale = signal(GLOBE_DEFAULT_HEIGHT_SCALE);
+  /** Stylized relief multiplier; in planet mode this is converted to metres like 2.5D. */
+  readonly terrainHeightScale = signal(DEFAULT_TERRAIN_RELIEF);
   readonly seabedRelief = signal(true);
   readonly showOcean = signal(true);
+
+  readonly planetRadiusM = computed(() => WORLD_SIZE_TIER_RADIUS_M[this.worldSizeTier()]);
+  readonly globeRadiusM = computed(() => this.planetRadiusM());
+  readonly terrainHeightScaleM = computed(() =>
+    getTerrainHeightScaleM(this.planetRadiusM(), this.terrainHeightScale()),
+  );
+  readonly orbitCameraPosition = computed(() => {
+    const radius = this.globeRadiusM();
+    return [0, radius * 1.2, radius * 2.8] as [number, number, number];
+  });
+  readonly cameraNearM = computed(() => Math.max(0.1, this.globeRadiusM() * 1e-6));
+  readonly cameraFarM = computed(() => Math.max(2_000, this.globeRadiusM() * 8));
+  readonly formatDistanceM = formatDistanceM;
 
   readonly longitudeSegments = GLOBE_LONGITUDE_SEGMENTS;
   readonly latitudeRings = GLOBE_LATITUDE_RINGS;
@@ -188,6 +203,15 @@ export class CellPlanetGlobePageComponent {
     }
   }
 
+  onWorldSizeChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as WorldSizeTier;
+    if (this.worldSizeKinds.includes(value) && value !== this.worldSizeTier()) {
+      this.worldSizeTier.set(value);
+      this.updateComparisonQueryParams();
+      this.rebuildWorld();
+    }
+  }
+
   onWaterLevelInput(event: Event): void {
     const value = this.inputNumber(event);
     if (Number.isFinite(value) && value !== this.waterLevel()) {
@@ -230,10 +254,10 @@ export class CellPlanetGlobePageComponent {
     }
   }
 
-  onHeightScaleInput(event: Event): void {
+  onTerrainHeightScaleInput(event: Event): void {
     const value = this.inputNumber(event);
-    if (Number.isFinite(value) && value !== this.heightScale()) {
-      this.heightScale.set(Math.max(0, Math.min(1, value)));
+    if (Number.isFinite(value) && value !== this.terrainHeightScale()) {
+      this.terrainHeightScale.set(Math.max(0, Math.min(14, value)));
       this.refreshDisplacement();
       this.updateComparisonQueryParams();
     }
@@ -310,8 +334,8 @@ export class CellPlanetGlobePageComponent {
     this.geometry = buildPlanetGlobeGeometry({
       sampler,
       cellIdAt: (direction) => findCellAt(graph, direction).id,
-      radius: GLOBE_RADIUS,
-      heightScale: this.heightScale(),
+      radius: this.globeRadiusM(),
+      heightScale: this.terrainHeightScaleM(),
       longitudeSegments: GLOBE_LONGITUDE_SEGMENTS,
       latitudeRings: GLOBE_LATITUDE_RINGS,
     });
@@ -368,7 +392,7 @@ export class CellPlanetGlobePageComponent {
       this.geometry.directions,
       this.displayElevations,
       this.geometry.radius,
-      this.heightScale(),
+      this.terrainHeightScaleM(),
     );
     writePlanetGlobeNormals(this.geometry.normals, this.geometry.positions, this.geometry.indices);
 
@@ -493,7 +517,7 @@ export class CellPlanetGlobePageComponent {
         rgb,
         sample,
         sampleTerrainMacroVariation(
-          [direction[0] * GLOBE_MATERIAL_RADIUS_M, direction[1] * GLOBE_MATERIAL_RADIUS_M, direction[2] * GLOBE_MATERIAL_RADIUS_M],
+          [direction[0] * this.planetRadiusM(), direction[1] * this.planetRadiusM(), direction[2] * this.planetRadiusM()],
           this.macroVariationScaleM(),
         ),
         this.macroVariationStrength(),
@@ -516,7 +540,7 @@ export class CellPlanetGlobePageComponent {
       this.oceanMesh.name = 'cell-planet-globe-ocean';
       this.engine.scene.add(this.oceanMesh);
     }
-    const oceanRadius = GLOBE_RADIUS + this.seaLevelElevation * this.heightScale();
+    const oceanRadius = this.globeRadiusM() + this.seaLevelElevation * this.terrainHeightScaleM();
     this.oceanMesh.scale.setScalar(Math.max(0.0001, oceanRadius));
     this.oceanMesh.visible = this.showOcean();
     this.drawCalls.set(this.mesh ? (this.showOcean() ? 2 : 1) : 0);
@@ -544,13 +568,23 @@ export class CellPlanetGlobePageComponent {
     if (query.worldProfile && this.worldProfileKinds.includes(query.worldProfile as WorldProfileKind)) {
       this.worldProfileKind.set(query.worldProfile as WorldProfileKind);
     }
+    if (query.worldSize && this.worldSizeKinds.includes(query.worldSize as WorldSizeTier)) {
+      this.worldSizeTier.set(query.worldSize as WorldSizeTier);
+    }
     if (query.fillMode && this.fillModes.includes(query.fillMode as CellPlanetMapFillMode)) {
       this.fillMode.set(query.fillMode as CellPlanetMapFillMode);
     }
     const waterLevel = this.numberQuery(query.waterLevel);
     if (waterLevel !== null) this.waterLevel.set(Math.max(-1, Math.min(1, waterLevel)));
-    const globeHeightScale = this.numberQuery(query.globeHeightScale ?? (query as Record<string, string | undefined>)['heightScale']);
-    if (globeHeightScale !== null) this.heightScale.set(Math.max(0, Math.min(1, globeHeightScale)));
+    const terrainHeightScale = this.numberQuery(query.terrainHeightScale);
+    if (terrainHeightScale !== null) {
+      this.terrainHeightScale.set(Math.max(0, Math.min(14, terrainHeightScale)));
+    } else {
+      // Accept URLs from the former unit-sphere prototype. Its 0.25 default maps to
+      // the current 4x stylized relief default without changing the shared geography.
+      const globeHeightScale = this.numberQuery(query.globeHeightScale ?? (query as Record<string, string | undefined>)['heightScale']);
+      if (globeHeightScale !== null) this.terrainHeightScale.set(Math.max(0, Math.min(14, globeHeightScale * 16)));
+    }
     this.macroVariationEnabled.set(this.booleanQuery(query.macroVariation, this.macroVariationEnabled()));
     const macroStrength = this.numberQuery(query.macroVariationStrength);
     if (macroStrength !== null) this.macroVariationStrength.set(Math.max(0, Math.min(1, macroStrength)));
@@ -567,9 +601,10 @@ export class CellPlanetGlobePageComponent {
       seed: this.seed(),
       relaxation: this.relaxationIterations(),
       worldProfile: this.worldProfileKind(),
+      worldSize: this.worldSizeTier(),
       fillMode: this.fillMode(),
       waterLevel: this.waterLevel(),
-      globeHeightScale: this.heightScale(),
+      terrainHeightScale: this.terrainHeightScale(),
       macroVariation: this.macroVariationEnabled(),
       macroVariationStrength: this.macroVariationStrength(),
       macroVariationScaleM: this.macroVariationScaleM(),

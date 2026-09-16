@@ -130,6 +130,14 @@ Recorded separately, per the runbook convention:
   converts palette RGB with `SRGBColorSpace` before upload, matching the 2.5D colour texture and
   preventing the globe's material view from appearing whitewashed.
 
+- **2026-09-16 — Globe physical scale alignment:** the globe now follows the 2.5D page's real-scale
+  display model. Its selected `worldSize` tier supplies the sphere radius in metres, terrain relief
+  uses the shared `getTerrainHeightScaleM(radius, relief)` conversion, the ocean shell uses the same
+  metre-based displacement, and logarithmic depth plus radius-derived orbit near/far values are
+  enabled. The former unit-sphere `globeHeightScale` query is accepted as a compatibility fallback;
+  the comparison links now use `worldSize` and `terrainHeightScale`. The fixed 96×48 globe remains a
+  prototype without spherical chunk LOD or local-origin rendering; those remain runbook 031 work.
+
 ## Verification commands
 
 ```powershell
