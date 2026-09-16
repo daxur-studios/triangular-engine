@@ -377,3 +377,26 @@ minimum-V seam. Sphere worker patches now use the same border-locked
 Meshoptimizer reduction policy and compact their attributes before transfer.
 The demo and library builds pass; visual confirmation of sphere seams remains
 the next manual check.
+
+### 2026-09-16 — sphere colour detail decoupled from mesh reduction
+
+The sphere lab now keeps Meshoptimizer as the runtime mesh reduction path and
+adds a 0–95% reduction slider. Standard, high and ultra still provide starting
+values, while changing the slider rebuilds the selected terrain cut after the
+change is committed. Natural, elevation and geology colours no longer use
+per-vertex colours on simplified chunks. The demo now evaluates the same
+spherical field rules per fragment in one shared `MeshStandardMaterial`, using
+the interpolated world-space planet direction. This removes the fixed
+planet-wide texture resolution that made close-up lakes blurry while preserving
+chunk simplification and batched rendering; LOD mode remains vertex-coloured
+for quadtree inspection.
+
+The worker reports generation and simplification time for the last completed
+patch, and the demo reports the worker round-trip time. Geometry memory now
+converts bytes to MiB correctly. Procedural fragment colouring is suitable for
+this bounded fixture because the field is compact and analytic. A production
+field with expensive sampling should move the same idea to streamed local
+texture tiles or a baked material cache; physical lake or ridge shape still
+depends on the mesh error target.
+The procedural colour constants are authored as sRGB-style values and are
+converted to linear space before entering the standard material lighting path.

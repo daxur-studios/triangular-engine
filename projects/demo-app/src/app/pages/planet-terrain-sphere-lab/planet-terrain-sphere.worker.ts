@@ -26,6 +26,11 @@ interface PlanetTerrainWorkerRequest {
   readonly targetError: number;
 }
 
+interface PlanetTerrainWorkerTimings {
+  readonly generationMs: number;
+  readonly simplificationMs: number;
+}
+
 const field = new PlanetTerrainField();
 
 function createGeometry(
@@ -92,19 +97,27 @@ addEventListener(
         edgeRefinementSegments: data.edgeRefinementSegments,
         skirtDepthM: data.skirtDepthM,
       };
+      const generationStartedAt = performance.now();
       const generated = generateTerrainPatchMesh(field, domain, request);
+      const generationMs = performance.now() - generationStartedAt;
       const sourceGeometry = createGeometry(generated);
+      const simplificationStartedAt = performance.now();
       const simplified = await simplifyIndexedGeometry(sourceGeometry, {
         ratio: data.reduction,
         targetError: data.targetError,
         flags: ['LockBorder'],
       });
+      const simplificationMs = performance.now() - simplificationStartedAt;
       const surface = compactSimplifiedGeometry(simplified.geometry);
       sourceGeometry.dispose();
       simplified.geometry.dispose();
       const patch = { ...generated, surface };
       postMessage(
-        { id: data.id, patch },
+        {
+          id: data.id,
+          patch,
+          timings: { generationMs, simplificationMs } satisfies PlanetTerrainWorkerTimings,
+        },
         [
           patch.surface.positions.buffer,
           patch.surface.normals.buffer,

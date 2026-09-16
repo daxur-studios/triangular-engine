@@ -44,9 +44,7 @@ import {
 } from 'triangular-engine/worldgen/render';
 import {
   DEFAULT_TERRAIN_MATERIAL_PALETTE,
-  applyTerrainMacroVariation,
   evaluateTerrainMaterial,
-  sampleTerrainMacroVariation,
   terrainMaterialColorRgb,
 } from 'triangular-engine/terrain';
 import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
@@ -64,6 +62,76 @@ const DEFAULT_TERRAIN_RELIEF = 4;
 const OCEAN_COLOR = 'hsl(210, 55%, 22%)';
 
 type CellPlanetGlobeFillMode = CellPlanetMapFillMode | 'material';
+
+interface IGlobeMacroUniforms {
+  readonly enabled: { value: number };
+  readonly strength: { value: number };
+  readonly scaleM: { value: number };
+}
+
+interface IGlobeMaterialColour {
+  readonly rgb: readonly [number, number, number];
+  readonly macroLandFactor: number;
+}
+
+/**
+ * The fixed globe is intentionally coarse, so macro variation must be evaluated per fragment.
+ * This mirrors the 2.5D shader's metre-based sampling instead of baking 48m detail into a
+ * 96×48 vertex-colour grid, where interpolation would turn it into large polygon patches.
+ */
+const GLOBE_MACRO_FRAGMENT_FUNCTIONS = `
+uniform float uTerrainMacroEnabled;
+uniform float uTerrainMacroStrength;
+uniform float uTerrainMacroScaleM;
+varying vec3 vTerrainMacroPositionM;
+varying float vTerrainMacroLandFactor;
+
+float terrainMacroHash3(vec3 p) {
+  return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+}
+
+float terrainMacroValueNoise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float x00 = mix(terrainMacroHash3(i + vec3(0.0, 0.0, 0.0)), terrainMacroHash3(i + vec3(1.0, 0.0, 0.0)), f.x);
+  float x10 = mix(terrainMacroHash3(i + vec3(0.0, 1.0, 0.0)), terrainMacroHash3(i + vec3(1.0, 1.0, 0.0)), f.x);
+  float x01 = mix(terrainMacroHash3(i + vec3(0.0, 0.0, 1.0)), terrainMacroHash3(i + vec3(1.0, 0.0, 1.0)), f.x);
+  float x11 = mix(terrainMacroHash3(i + vec3(0.0, 1.0, 1.0)), terrainMacroHash3(i + vec3(1.0, 1.0, 1.0)), f.x);
+  return mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
+}
+
+float terrainMacroVariation3(vec3 positionM) {
+  float scale = max(uTerrainMacroScaleM, 1.0);
+  vec3 broad = positionM / scale + vec3(17.3, -9.1, 4.7);
+  vec3 breakup = vec3(
+    (0.8 * positionM.x - 0.6 * positionM.z) / (scale * 1.73) - 23.1,
+    positionM.y / (scale * 1.73) + 5.7,
+    (0.6 * positionM.x + 0.8 * positionM.z) / (scale * 1.73) + 11.9
+  );
+  return terrainMacroValueNoise3(broad) * 0.65 + terrainMacroValueNoise3(breakup) * 0.35;
+}
+`;
+
+const GLOBE_MACRO_VERTEX_DECLARATIONS = `
+attribute float terrainMacroLandFactor;
+varying vec3 vTerrainMacroPositionM;
+varying float vTerrainMacroLandFactor;
+`;
+
+const GLOBE_MACRO_VERTEX_ASSIGNMENT = `
+vTerrainMacroPositionM = (modelMatrix * vec4(transformed, 1.0)).xyz;
+vTerrainMacroLandFactor = terrainMacroLandFactor;
+`;
+
+const GLOBE_MACRO_FRAGMENT_APPLICATION = `
+if (uTerrainMacroEnabled > 0.5) {
+  float signedVariation = (terrainMacroVariation3(vTerrainMacroPositionM) - 0.5) * 2.0;
+  vec3 warmVariation = 1.0 + signedVariation * vec3(0.12, 0.09, 0.055);
+  float amount = clamp(uTerrainMacroStrength, 0.0, 1.0) * clamp(vTerrainMacroLandFactor, 0.0, 1.0);
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * warmVariation, amount);
+}
+`;
 
 /**
  * Cell Planet globe prototype (runbook 032).
@@ -151,6 +219,7 @@ export class CellPlanetGlobePageComponent {
   private readonly colorScratch = new Color();
   private materialRiverMask: ArrayLike<number> = new Uint8Array(0);
   private ridgeCellSet = new Set<number>();
+  private globeMacroUniforms: IGlobeMacroUniforms | undefined;
 
   constructor() {
     this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
@@ -356,9 +425,15 @@ export class CellPlanetGlobePageComponent {
     buffer.setAttribute('position', new BufferAttribute(geometry.positions, 3));
     buffer.setAttribute('normal', new BufferAttribute(geometry.normals, 3));
     buffer.setAttribute('color', new BufferAttribute(new Float32Array(geometry.vertexCount * 3), 3));
+    buffer.setAttribute('terrainMacroLandFactor', new BufferAttribute(new Float32Array(geometry.vertexCount), 1));
     buffer.setIndex(new BufferAttribute(geometry.indices, 1));
     buffer.computeBoundingSphere();
 
+    const macroUniforms: IGlobeMacroUniforms = {
+      enabled: { value: 0 },
+      strength: { value: this.macroVariationStrength() },
+      scaleM: { value: this.macroVariationScaleM() },
+    };
     const material = new MeshStandardMaterial({
       vertexColors: true,
       roughness: 1,
@@ -367,10 +442,23 @@ export class CellPlanetGlobePageComponent {
       // Winding is verified outward in the adapter spec; front side makes a regression visible.
       side: FrontSide,
     });
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms['uTerrainMacroEnabled'] = macroUniforms.enabled;
+      shader.uniforms['uTerrainMacroStrength'] = macroUniforms.strength;
+      shader.uniforms['uTerrainMacroScaleM'] = macroUniforms.scaleM;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>\n${GLOBE_MACRO_VERTEX_DECLARATIONS}`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>\n${GLOBE_MACRO_VERTEX_ASSIGNMENT}`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${GLOBE_MACRO_FRAGMENT_FUNCTIONS}`)
+        .replace('#include <color_fragment>', `#include <color_fragment>\n${GLOBE_MACRO_FRAGMENT_APPLICATION}`);
+    };
+    material.customProgramCacheKey = () => 'cell-planet-globe-material-macro-v1';
     const mesh = new Mesh(buffer, material);
     mesh.name = 'cell-planet-globe-terrain';
     this.engine.scene.add(mesh);
     this.mesh = mesh;
+    this.globeMacroUniforms = macroUniforms;
   }
 
   private disposeMesh(): void {
@@ -379,6 +467,7 @@ export class CellPlanetGlobePageComponent {
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();
     this.mesh = undefined;
+    this.globeMacroUniforms = undefined;
   }
 
   /**
@@ -421,23 +510,22 @@ export class CellPlanetGlobePageComponent {
     if (!this.mesh || !this.geometry) return;
     const color = this.mesh.geometry.getAttribute('color') as BufferAttribute;
     const values = color.array as Float32Array;
+    const macroLandFactor = this.mesh.geometry.getAttribute('terrainMacroLandFactor') as BufferAttribute;
+    const macroLandValues = macroLandFactor.array as Float32Array;
     const mode = this.fillMode();
     const oceanSubstance = WORLD_PROFILES[this.worldProfileKind()].oceanSubstance;
 
     for (let i = 0; i < this.geometry.vertexCount; i++) {
       const cellId = this.geometry.cellIds[i];
       if (mode === 'material') {
-        const offset = i * 3;
-        const direction: [number, number, number] = [
-          this.geometry.directions[offset],
-          this.geometry.directions[offset + 1],
-          this.geometry.directions[offset + 2],
-        ];
-        const rgb = this.resolveMaterialColor(cellId, direction, oceanSubstance);
+        const materialColour = this.resolveMaterialColor(cellId, oceanSubstance);
+        const rgb = materialColour.rgb;
+        macroLandValues[i] = materialColour.macroLandFactor;
         // The shared palette is authored in sRGB, while Color stores the
         // renderer's working-space value used by vertex-colour lighting.
         this.colorScratch.setRGB(rgb[0], rgb[1], rgb[2], SRGBColorSpace);
       } else {
+        macroLandValues[i] = 0;
         this.colorScratch.setStyle(this.resolveCellColor(cellId, mode, oceanSubstance));
       }
       const o = i * 3;
@@ -446,6 +534,8 @@ export class CellPlanetGlobePageComponent {
       values[o + 2] = this.colorScratch.b;
     }
     color.needsUpdate = true;
+    macroLandFactor.needsUpdate = true;
+    this.updateGlobeMacroUniforms();
   }
 
   /** Mirrors the 2.5D map's data-layer precedence so equivalent cells read the same colour. */
@@ -479,13 +569,15 @@ export class CellPlanetGlobePageComponent {
 
   private resolveMaterialColor(
     cellId: number,
-    direction: [number, number, number],
     oceanSubstance: 'water' | 'lava',
-  ): readonly [number, number, number] {
+  ): IGlobeMaterialColour {
     if (cellId < 0 || cellId >= this.tectonics.elevation.length) {
-      return oceanSubstance === 'lava'
-        ? DEFAULT_TERRAIN_MATERIAL_PALETTE.lavaWater
-        : DEFAULT_TERRAIN_MATERIAL_PALETTE.water;
+      return {
+        rgb: oceanSubstance === 'lava'
+          ? DEFAULT_TERRAIN_MATERIAL_PALETTE.lavaWater
+          : DEFAULT_TERRAIN_MATERIAL_PALETTE.water,
+        macroLandFactor: 0,
+      };
     }
     const elevationM = this.tectonics.elevation[cellId] ?? this.seaLevelElevation;
     const temperature01 = Math.max(0, Math.min(1, ((this.ecology.temperature[cellId] ?? 0) + 1) * 0.5));
@@ -511,19 +603,17 @@ export class CellPlanetGlobePageComponent {
       snowlineM: this.seaLevelElevation + Math.max(1, this.elevationMax - this.seaLevelElevation) * 0.68,
       snowlineBlendM: Math.max(0.05, (this.elevationMax - this.seaLevelElevation) * 0.16),
     });
-    let rgb = terrainMaterialColorRgb(sample, { oceanSubstance });
-    if (this.macroVariationEnabled()) {
-      rgb = applyTerrainMacroVariation(
-        rgb,
-        sample,
-        sampleTerrainMacroVariation(
-          [direction[0] * this.planetRadiusM(), direction[1] * this.planetRadiusM(), direction[2] * this.planetRadiusM()],
-          this.macroVariationScaleM(),
-        ),
-        this.macroVariationStrength(),
-      );
-    }
-    return rgb;
+    return {
+      rgb: terrainMaterialColorRgb(sample, { oceanSubstance }),
+      macroLandFactor: 1 - Math.min(1, sample.weights.water + sample.snow01 * 0.75),
+    };
+  }
+
+  private updateGlobeMacroUniforms(): void {
+    if (!this.globeMacroUniforms) return;
+    this.globeMacroUniforms.enabled.value = this.fillMode() === 'material' && this.macroVariationEnabled() ? 1 : 0;
+    this.globeMacroUniforms.strength.value = Math.max(0, Math.min(1, this.macroVariationStrength()));
+    this.globeMacroUniforms.scaleM.value = Math.max(1, this.macroVariationScaleM());
   }
 
   /** Translucent shell at the (display-scaled) sea datum so bathymetry reads as underwater relief. */

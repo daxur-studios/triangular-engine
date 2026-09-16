@@ -7,7 +7,13 @@ import {
   signal,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { Color, DoubleSide, MeshBasicMaterial, MeshStandardMaterial, Vector3 } from 'three';
+import {
+  Color,
+  DoubleSide,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  Vector3,
+} from 'three';
 import {
   EngineModule,
   EngineService,
@@ -26,7 +32,7 @@ import {
   type ITerrainSurfaceLodStats,
   type TerrainSurfaceMeshGenerator,
 } from 'triangular-engine/terrain';
-import { PlanetTerrainField, type PlanetTerrainFeatures } from './planet-terrain-field';
+import { PlanetTerrainField } from './planet-terrain-field';
 
 type Quality = 'standard' | 'high' | 'ultra';
 type ColourMode = 'natural' | 'elevation' | 'geology' | 'lod';
@@ -43,6 +49,11 @@ const QUALITY: Readonly<Record<Quality, { maxLod: number; resolution: number; bu
   high: { maxLod: 7, resolution: 28, budget: 6, maxPatches: 96, reduction: 0.35 },
   ultra: { maxLod: 9, resolution: 36, budget: 8, maxPatches: 96, reduction: 0.15 },
 };
+
+interface IWorkerTimings {
+  readonly generationMs: number;
+  readonly simplificationMs: number;
+}
 
 const VIEWS: Readonly<Record<View, { position: [number, number, number]; target: [number, number, number] }>> = {
   whole: { position: [8_200, 5_900, 8_700], target: [0, 0, 0] },
@@ -89,8 +100,8 @@ function keyOf(address: ISphereTerrainPatchAddress): string {
         [patchSelector]="patchSelector()"
         [meshGenerator]="meshGenerator"
         [createMaterial]="createMaterial"
-        [createColors]="createColors"
-        [colorRevision]="colourRevision()"
+        [createColors]="createColors()"
+        [colorRevision]="rebuildRevision()"
         [getLevel]="getLevel"
         [getKey]="getKey"
         (lodChange)="onLodChange($event)"
@@ -130,6 +141,16 @@ function keyOf(address: ISphereTerrainPatchAddress): string {
           }
         </select>
       </label>
+      <label><span>Mesh reduction: {{ reductionPercent() }}%</span>
+        <input
+          type="range"
+          min="0"
+          max="95"
+          step="1"
+          [value]="reductionPercent()"
+          (change)="setReduction($event)"
+        />
+      </label>
 
       <div class="button-row">
         @for (view of viewOptions; track view) {
@@ -157,6 +178,7 @@ function keyOf(address: ISphereTerrainPatchAddress): string {
         <span>Draw calls: {{ stats().drawCalls }} · triangles: {{ stats().triangles.toLocaleString() }}</span>
         <span>Geometry: {{ formatBytes(stats().geometryBytes) }}</span>
         <span>LOD distribution: {{ formatLevels(stats().levels) }}</span>
+        <span>Last patch: generate {{ formatMs(timings().generationMs) }} · simplify {{ formatMs(timings().simplificationMs) }} · worker {{ formatMs(timings().workerMs) }}</span>
       </div>
 
       <details open>
@@ -187,6 +209,7 @@ export class PlanetTerrainSphereLabPageComponent {
     {
       readonly resolve: (patch: ITerrainPatchMesh<ISphereTerrainPatchAddress>) => void;
       readonly reject: (error: Error) => void;
+      readonly startedAt: number;
     }
   >();
   readonly field = new PlanetTerrainField();
@@ -212,9 +235,9 @@ export class PlanetTerrainSphereLabPageComponent {
   readonly radiusLabel = computed(() => `${this.radiusM().toLocaleString()} m`);
   readonly quality = signal<Quality>('high');
   readonly qualityOptions: readonly Quality[] = ['standard', 'high', 'ultra'];
+  readonly reductionPercent = signal(Math.round(QUALITY.high.reduction * 100));
+  readonly rebuildRevision = signal(0);
   readonly colourMode = signal<ColourMode>('natural');
-  readonly colourRevision = () =>
-    this.colourModes.indexOf(this.colourMode()) + 1;
   readonly colourModes: readonly ColourMode[] = ['natural', 'elevation', 'geology', 'lod'];
   readonly activeView = signal<View>('whole');
   readonly viewOptions: readonly View[] = ['whole', 'region', 'close'];
@@ -239,38 +262,32 @@ export class PlanetTerrainSphereLabPageComponent {
     geometryBytes: 0,
     levels: {},
   });
+  readonly timings = signal<IWorkerTimings & { readonly workerMs: number }>({
+    generationMs: 0,
+    simplificationMs: 0,
+    workerMs: 0,
+  });
   readonly meshGenerator: TerrainSurfaceMeshGenerator<ISphereTerrainPatchAddress> =
     (request) => this.generatePatchInWorker(request);
   readonly getLevel = levelOf;
   readonly getKey = keyOf;
   readonly qualityConfig = () => QUALITY[this.quality()];
-  readonly createMaterial = () =>
-    this.colourMode() === 'lod'
+  readonly createMaterial = () => {
+    const mode = this.colourMode();
+    return mode === 'lod'
       ? new MeshBasicMaterial({ vertexColors: true, side: DoubleSide })
-      : new MeshStandardMaterial({
-          vertexColors: true,
+      : createPlanetColourMaterial(mode, {
           roughness: 0.94,
           side: DoubleSide,
         });
-  readonly createColors = (
-    context: ITerrainSurfaceColorContext<ISphereTerrainPatchAddress>,
-  ): Float32Array => {
-    const colors = new Float32Array(context.surface.positions.length);
-    const color = new Color();
-    for (let offset = 0; offset < colors.length; offset += 3) {
-      const direction = normalize([
-        context.centerWorldM[0] + context.surface.positions[offset],
-        context.centerWorldM[1] + context.surface.positions[offset + 1],
-        context.centerWorldM[2] + context.surface.positions[offset + 2],
-      ]);
-      const features = this.field.features(direction);
-      color.copy(colourFor(features, context.address.level, this.colourMode()));
-      colors[offset] = color.r;
-      colors[offset + 1] = color.g;
-      colors[offset + 2] = color.b;
-    }
-    return colors;
   };
+  readonly createColors = computed<
+    ((context: ITerrainSurfaceColorContext<ISphereTerrainPatchAddress>) => Float32Array) | undefined
+  >(() =>
+    this.colourMode() === 'lod'
+      ? (context) => createLodColors(context.surface.positions.length, context.address.level)
+      : undefined,
+  );
 
   constructor() {
     this.terrainWorker.onmessage = ({
@@ -278,13 +295,22 @@ export class PlanetTerrainSphereLabPageComponent {
     }: MessageEvent<{
       readonly id: number;
       readonly patch?: ITerrainPatchMesh<ISphereTerrainPatchAddress>;
+      readonly timings?: IWorkerTimings;
       readonly error?: string;
     }>) => {
       const pending = this.workerRequests.get(data.id);
       if (!pending) return;
       this.workerRequests.delete(data.id);
       if (data.error) pending.reject(new Error(data.error));
-      else if (data.patch) pending.resolve(data.patch);
+      else if (data.patch) {
+        if (data.timings) {
+          this.timings.set({
+            ...data.timings,
+            workerMs: performance.now() - pending.startedAt,
+          });
+        }
+        pending.resolve(data.patch);
+      }
       else pending.reject(new Error('Planet terrain worker returned no patch.'));
     };
     this.terrainWorker.onerror = () => {
@@ -302,7 +328,18 @@ export class PlanetTerrainSphereLabPageComponent {
 
   setQuality(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as Quality;
-    if (value in QUALITY) this.quality.set(value);
+    if (value in QUALITY) {
+      this.quality.set(value);
+      this.reductionPercent.set(Math.round(QUALITY[value].reduction * 100));
+      this.rebuildRevision.update((revision) => revision + 1);
+    }
+  }
+
+  setReduction(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (!Number.isFinite(value)) return;
+    this.reductionPercent.set(Math.min(95, Math.max(0, Math.round(value))));
+    this.rebuildRevision.update((revision) => revision + 1);
   }
 
   setPlanetSize(event: Event): void {
@@ -318,7 +355,10 @@ export class PlanetTerrainSphereLabPageComponent {
 
   setColourMode(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as ColourMode;
-    if (this.colourModes.includes(value)) this.colourMode.set(value);
+    if (this.colourModes.includes(value)) {
+      this.colourMode.set(value);
+      this.rebuildRevision.update((revision) => revision + 1);
+    }
   }
 
   setView(view: View): void {
@@ -345,7 +385,7 @@ export class PlanetTerrainSphereLabPageComponent {
   ): Promise<ITerrainPatchMesh<ISphereTerrainPatchAddress>> {
     const id = this.nextWorkerRequestId++;
     return new Promise((resolve, reject) => {
-      this.workerRequests.set(id, { resolve, reject });
+      this.workerRequests.set(id, { resolve, reject, startedAt: performance.now() });
       this.terrainWorker.postMessage({
         id,
         address: request.address,
@@ -357,7 +397,7 @@ export class PlanetTerrainSphereLabPageComponent {
         edgeRefinementLevels: request.edgeRefinementLevels,
         edgeRefinementSegments: request.edgeRefinementSegments,
         skirtDepthM: request.skirtDepthM,
-        reduction: this.qualityConfig().reduction,
+        reduction: this.reductionPercent() / 100,
         targetError: 0.08,
       });
     });
@@ -369,7 +409,12 @@ export class PlanetTerrainSphereLabPageComponent {
 
   formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
-    return `${(bytes / 1024).toFixed(bytes < 1024 * 1024 ? 1 : 2)} ${bytes < 1024 * 1024 ? 'KiB' : 'MiB'}`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MiB`;
+  }
+
+  formatMs(value: number): string {
+    return `${value.toFixed(1)} ms`;
   }
 
   formatLevels(levels: Readonly<Record<number, number>>): string {
@@ -380,29 +425,182 @@ export class PlanetTerrainSphereLabPageComponent {
   }
 }
 
-function colourFor(features: PlanetTerrainFeatures, level: number, mode: ColourMode): Color {
-  if (mode === 'lod') return new Color().setHSL(0.1 + level * 0.055, 0.72, 0.46);
-  if (mode === 'elevation') {
-    if (features.elevationM < -320) return new Color('#123f70');
-    if (features.elevationM < -40) return new Color('#2d83b7');
-    if (features.elevationM < 80) return new Color('#c7b778');
-    if (features.elevationM < 420) return new Color('#5e974f');
-    if (features.elevationM < 850) return new Color('#7e7667');
-    return new Color('#e8e5db');
+function createPlanetColourMaterial(
+  mode: Exclude<ColourMode, 'lod'>,
+  options: { readonly roughness: number; readonly side: typeof DoubleSide },
+): MeshStandardMaterial {
+  const modeValue = mode === 'elevation' ? 1 : mode === 'geology' ? 2 : 0;
+  const material = new MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: options.roughness,
+    side: options.side,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['planetColourMode'] = { value: modeValue };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nvarying vec3 vPlanetWorldPosition;',
+      )
+      .replace(
+        '#include <worldpos_vertex>',
+        '#include <worldpos_vertex>\nvPlanetWorldPosition = worldPosition.xyz;',
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+          varying vec3 vPlanetWorldPosition;
+          uniform int planetColourMode;
+
+          float planetClamp(float value, float lower, float upper) {
+            return min(upper, max(lower, value));
+          }
+
+          float planetSrgbToLinear(float value) {
+            return value <= 0.04045
+              ? value / 12.92
+              : pow((value + 0.055) / 1.055, 2.4);
+          }
+
+          vec3 planetSrgbToLinear(vec3 value) {
+            return vec3(
+              planetSrgbToLinear(value.r),
+              planetSrgbToLinear(value.g),
+              planetSrgbToLinear(value.b)
+            );
+          }
+
+          float planetInverseSmoothstep(float outer, float inner, float value) {
+            float t = planetClamp((value - outer) / (inner - outer), 0.0, 1.0);
+            return t * t * (3.0 - 2.0 * t);
+          }
+
+          float planetAngularDistance(vec3 a, vec3 b) {
+            return acos(planetClamp(dot(normalize(a), normalize(b)), -1.0, 1.0));
+          }
+
+          float planetBump(vec3 direction, vec3 center, float outerAngle, float innerAngle) {
+            return planetInverseSmoothstep(
+              outerAngle,
+              innerAngle,
+              planetAngularDistance(direction, center)
+            );
+          }
+
+          float planetBelt(vec3 direction, vec3 normal, float width) {
+            float distance = asin(abs(dot(direction, normalize(normal))));
+            return exp(-pow(distance / width, 2.0));
+          }
+
+          float planetRiverChannel(vec3 direction, vec3 from, vec3 to) {
+            vec3 a = normalize(from);
+            vec3 b = normalize(to);
+            vec3 lineNormal = normalize(cross(a, b));
+            float lineDistance = asin(planetClamp(abs(dot(direction, lineNormal)), 0.0, 1.0));
+            float endpointDistance = min(
+              planetAngularDistance(direction, a),
+              planetAngularDistance(direction, b)
+            );
+            float distance = max(0.0, min(lineDistance, endpointDistance + 0.035));
+            return exp(-pow(distance / 0.018, 2.0));
+          }
+
+          vec3 planetFeatureColour(vec3 direction) {
+            float continental = 0.0;
+            continental += planetBump(direction, vec3(0.86, 0.18, 0.47), 1.05, 0.441) * 0.72;
+            continental += planetBump(direction, vec3(-0.22, 0.64, 0.74), 0.78, 0.328) * 0.56;
+            continental += planetBump(direction, vec3(-0.76, -0.2, 0.61), 0.68, 0.286) * 0.48;
+            continental += planetBump(direction, vec3(0.2, -0.82, 0.54), 0.62, 0.2604) * 0.42;
+            continental += planetBump(direction, vec3(0.45, 0.73, -0.5), 0.46, 0.1932) * 0.35;
+
+            float land = smoothstep(0.28, 0.62, continental);
+            float shelf = -410.0 + land * 420.0 + continental * 70.0;
+            float beltA = planetBelt(direction, vec3(0.08, 0.92, 0.38), 0.095);
+            float beltB = planetBelt(direction, vec3(-0.84, 0.16, 0.52), 0.075);
+            float beltC = planetBelt(direction, vec3(0.45, -0.2, 0.87), 0.052);
+            float beltVariation = 0.55 + 0.45 * abs(
+              sin(direction.x * 17.0 + direction.y * 9.0) *
+              cos(direction.z * 13.0 - direction.x * 5.0)
+            );
+            float mountain = land * min(
+              1.0,
+              (beltA * 0.95 + beltB * 0.75 + beltC * 0.55) * beltVariation
+            );
+            float ridgeDetail =
+              0.55 * abs(sin(direction.x * 43.0 + direction.z * 29.0)) +
+              0.30 * abs(cos(direction.y * 61.0 - direction.x * 17.0)) +
+              0.15 * abs(sin((direction.x + direction.y - direction.z) * 97.0));
+            float mountains = mountain * (380.0 + ridgeDetail * 340.0);
+
+            float volcano = 0.0;
+            volcano += planetBump(direction, vec3(0.8, 0.33, 0.5), 0.13, 0.0234) * 720.0;
+            volcano += planetBump(direction, vec3(-0.34, 0.76, 0.56), 0.10, 0.018) * 560.0;
+            volcano += planetBump(direction, vec3(-0.72, -0.27, 0.64), 0.085, 0.0153) * 480.0;
+            volcano += planetBump(direction, vec3(0.18, -0.7, 0.69), 0.075, 0.0135) * 420.0;
+            float crater = planetBump(direction, vec3(0.68, 0.5, -0.53), 0.12, 0.065) * -260.0;
+            float mesa = planetBump(direction, vec3(-0.44, 0.24, -0.86), 0.16, 0.1) * 260.0;
+            float river = max(
+              planetRiverChannel(direction, vec3(0.82, 0.48, 0.3), vec3(0.73, 0.08, 0.68)),
+              max(
+                planetRiverChannel(direction, vec3(-0.32, 0.88, 0.34), vec3(-0.78, 0.18, 0.6)),
+                planetRiverChannel(direction, vec3(0.33, -0.72, 0.61), vec3(-0.12, -0.88, 0.45))
+              )
+            );
+            float elevation = planetClamp(
+              shelf + mountains + volcano + mesa + crater - river * land * 210.0 +
+              sin(direction.x * 31.0 + direction.z * 19.0) * 9.0 +
+              sin(direction.y * 47.0 - direction.x * 23.0) * 6.0,
+              -520.0,
+              1360.0
+            );
+
+            if (planetColourMode == 1) {
+              if (elevation < -320.0) return vec3(0.071, 0.247, 0.439);
+              if (elevation < -40.0) return vec3(0.176, 0.514, 0.718);
+              if (elevation < 80.0) return vec3(0.780, 0.718, 0.471);
+              if (elevation < 420.0) return vec3(0.369, 0.592, 0.310);
+              if (elevation < 850.0) return vec3(0.494, 0.463, 0.404);
+              return vec3(0.906, 0.898, 0.859);
+            }
+            if (planetColourMode == 2) {
+              if (volcano / 720.0 > 0.12) return vec3(0.776, 0.373, 0.220);
+              if (-crater / 260.0 > 0.12) return vec3(0.541, 0.416, 0.447);
+              if (mesa / 260.0 > 0.12) return vec3(0.757, 0.576, 0.329);
+              if (mountain > 0.18) return vec3(0.596, 0.482, 0.408);
+              if (river > 0.25) return vec3(0.294, 0.600, 0.784);
+              return land > 0.45 ? vec3(0.392, 0.600, 0.345) : vec3(0.114, 0.322, 0.482);
+            }
+            if (elevation < 0.0) return vec3(0.137, 0.369, 0.569);
+            if (river > 0.4) return vec3(0.271, 0.616, 0.816);
+            if (elevation > 920.0) return vec3(0.894, 0.878, 0.820);
+            if (mountain > 0.2) return vec3(0.549, 0.455, 0.373);
+            return elevation < 100.0 ? vec3(0.612, 0.682, 0.361) : vec3(0.420, 0.608, 0.318);
+          }`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `
+          diffuseColor *= vec4(
+            planetSrgbToLinear(planetFeatureColour(normalize(vPlanetWorldPosition))),
+            1.0
+          );
+        `,
+      );
+  };
+  material.customProgramCacheKey = () => `planet-procedural-colour-v2-${mode}`;
+  return material;
+}
+
+function createLodColors(vertexValueCount: number, level: number): Float32Array {
+  const color = new Color().setHSL(0.1 + level * 0.055, 0.72, 0.46);
+  const colors = new Float32Array(vertexValueCount);
+  for (let offset = 0; offset < colors.length; offset += 3) {
+    colors[offset] = color.r;
+    colors[offset + 1] = color.g;
+    colors[offset + 2] = color.b;
   }
-  if (mode === 'geology') {
-    if (features.volcano > 0.12) return new Color('#c65f38');
-    if (features.crater > 0.12) return new Color('#8a6a72');
-    if (features.mesa > 0.12) return new Color('#c19354');
-    if (features.mountain > 0.18) return new Color('#987b68');
-    if (features.river > 0.25) return new Color('#4b99c8');
-    return features.land > 0.45 ? new Color('#649958') : new Color('#1d527b');
-  }
-  if (features.elevationM < 0) return new Color('#235e91');
-  if (features.river > 0.4) return new Color('#459dd0');
-  if (features.elevationM > 920) return new Color('#e4e0d1');
-  if (features.mountain > 0.2) return new Color('#8c745f');
-  return features.elevationM < 100 ? new Color('#9cae5c') : new Color('#6b9b51');
+  return colors;
 }
 
 function normalize(value: [number, number, number]): [number, number, number] {

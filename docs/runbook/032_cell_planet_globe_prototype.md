@@ -138,6 +138,15 @@ Recorded separately, per the runbook convention:
   the comparison links now use `worldSize` and `terrainHeightScale`. The fixed 96×48 globe remains a
   prototype without spherical chunk LOD or local-origin rendering; those remain runbook 031 work.
 
+- **2026-09-16 — Globe macro-material sampling:** physical scaling exposed an important difference
+  between the adapters. The 2.5D path evaluates macro variation per fragment in its terrain shader,
+  while the fixed globe had been baking the same 48m control into a sparse 96×48 vertex-colour grid.
+  That undersampled signal appeared as very large polygon patches. The globe now uploads the base
+  material colour and an interpolated land-only mask, then evaluates the metre-based macro signal
+  per fragment through `MeshStandardMaterial.onBeforeCompile`. Its strength, scale and enabled state
+  remain uniforms, so the material controls stay live and the effect is no longer tied to globe
+  tessellation. This is the intended bridge until 031 supplies spherical chunk LOD.
+
 ## Verification commands
 
 ```powershell
