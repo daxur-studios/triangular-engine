@@ -333,3 +333,35 @@ continuous movement. `npx ng build demo-app` and
 `npm run build:triangular-engine` pass. The full library test command remains
 blocked by the existing `planet-surface-bake.spec.ts` `toHaveLength` typing
 errors.
+
+The follow-up review found two boundary cases in the first progressive version:
+an early root result could trigger refinement before all sphere faces had coarse
+coverage, and a fine replacement could commit before its neighbouring
+edge-conforming patch. The renderer now keeps every level-zero root selected
+until all roots are resident, and merges replacement groups across shared
+mixed-LOD edges. Focused regression tests were added for both cases; the
+complete library test command remains blocked by the same unrelated matcher
+typing errors.
+
+The coarse coverage state is latched after bootstrap. Refining a resident root
+therefore cannot cause the renderer to request that old root again, which
+prevents a repeated coarse/detail flicker during camera movement. The latch is
+cleared only when the terrain selection is reset by a field, domain, root, or
+other terrain configuration change.
+
+### 2026-09-16 — progressive LOD experiment paused
+
+The follow-up latch and edge-group changes were rolled back after continuous
+camera movement remained difficult to verify and showed possible LOD regression.
+Keep the previous chunk streaming path while broader planet and terrain work
+continues; revisit this only with a reproducible motion test.
+
+### 2026-09-16 — camera movement reprioritizes waiting detail
+
+The movement test identified a smaller scheduler issue: the surface recomputed
+patch distances on every camera update, but only reconciled the generation queue
+when the selected patch keys changed. A lake could therefore remain selected
+while waiting behind work ordered for an earlier camera position. Queue
+reconciliation now runs on every update, preserves still-wanted pending jobs,
+and applies their latest priorities. Running jobs and completed compatible
+results remain governed by the existing epoch and replacement checks.

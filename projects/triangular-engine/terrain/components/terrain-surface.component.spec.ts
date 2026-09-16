@@ -9,6 +9,7 @@ import { generateTerrainPatchMesh } from '../meshing/terrain-patch-mesher';
 import {
   ITerrainSurfaceGenerationRequest,
   ITerrainSurfaceLodStats,
+  ITerrainSurfaceSelectionRequest,
   TerrainSurfaceComponent,
 } from './terrain-surface.component';
 
@@ -131,6 +132,45 @@ describe('TerrainSurfaceComponent', () => {
     await Promise.resolve();
     beforeRender$.next();
     expect(scene.children[0].children.length).toBe(4);
+  });
+
+  it('reprioritizes a still-selected patch while the camera keeps moving', () => {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    const generated: IPlaneTerrainPatchAddress[] = [];
+    const generator = (
+      request: ITerrainSurfaceGenerationRequest<IPlaneTerrainPatchAddress>,
+    ) => {
+      generated.push(request.address);
+      return generateTerrainPatchMesh(request.field, request.domain, request);
+    };
+    const roots = [
+      { level: 0, x: 0, z: 0 },
+      { level: 0, x: 2, z: 0 },
+      { level: 0, x: 0, z: 2 },
+    ];
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', roots);
+    fixture.componentRef.setInput('maxLod', 0);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('generationBudget', 1);
+    fixture.componentRef.setInput(
+      'patchSelector',
+      ({ roots: selected }: ITerrainSurfaceSelectionRequest<IPlaneTerrainPatchAddress>) =>
+        selected,
+    );
+    fixture.componentRef.setInput('meshGenerator', generator);
+    camera.position.set(2_000, 100, -2_000);
+    fixture.detectChanges();
+
+    beforeRender$.next();
+    expect(generated.length).toBe(1);
+
+    camera.position.set(400, 100, -400);
+    beforeRender$.next();
+
+    expect(generated[1]).toEqual({ level: 0, x: 0, z: 0 });
+    fixture.destroy();
   });
 
   it('commits a ready child group during movement without exposing a partial replacement', async () => {

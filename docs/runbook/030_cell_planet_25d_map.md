@@ -325,3 +325,11 @@ alone does not establish visual acceptance. Record unresolved test-environment f
   clipmap now derives that sample distance from the physical size of the baked height texel,
   sampling across roughly two texels to prevent the bake's cell boundaries becoming visible
   normal bands when the same bake covers a real-world planet footprint.
+
+- **2026-09-16 — Procedural material baseline accepted; compression parity is next:** the current
+  world-space macro noise variation is satisfactory for the stylized terrain direction, with
+  adjustable strength and scale. A higher-priority issue remains in the runtime compressed /
+  simplified terrain path: enabling mesh compression or simplification changes the visible
+  material, removes the procedural noise overlay and makes the surface appear more opaque. The
+  next investigation must make the compressed path preserve the same colour-space handling,
+  material uniforms, blending and opacity as the normal clipmap before adding more texture detail.

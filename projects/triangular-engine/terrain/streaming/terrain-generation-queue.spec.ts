@@ -32,6 +32,34 @@ describe('TerrainGenerationQueue', () => {
     expect(generated).toEqual([3]);
   });
 
+  it('reprioritizes waiting work when the camera moves without restarting it', () => {
+    const queue = new TerrainGenerationQueue<number>();
+    queue.reconcile(
+      [
+        { key: 'lake', value: 1, priority: 20 },
+        { key: 'periphery', value: 2, priority: 10 },
+      ],
+      new Set(),
+    );
+
+    const firstGenerated: number[] = [];
+    queue.drain(1, ({ value }) => firstGenerated.push(value));
+    expect(firstGenerated).toEqual([2]);
+
+    queue.reconcile(
+      [
+        { key: 'lake', value: 1, priority: 1 },
+        { key: 'periphery', value: 2, priority: 100 },
+      ],
+      new Set(),
+    );
+
+    const secondGenerated: number[] = [];
+    queue.drain(1, ({ value }) => secondGenerated.push(value));
+    expect(secondGenerated).toEqual([1]);
+    expect(queue.pendingCount).toBe(1);
+  });
+
   it('validates the drain budget', () => {
     const queue = new TerrainGenerationQueue<number>();
     expect(() => queue.drain(-1, () => undefined)).toThrowError(RangeError);

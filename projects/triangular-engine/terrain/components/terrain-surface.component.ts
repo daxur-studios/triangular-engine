@@ -342,21 +342,22 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       this.selectedLevels[level] = (this.selectedLevels[level] ?? 0) + 1;
     }
     const signature = entries.map(({ key }) => key).join('|');
-    if (signature !== this.selectionSignature) {
-      this.selectionSignature = signature;
-      this.queue.reconcile(
-        entries.map(({ address, key }) => ({
-          key,
-          value: address,
-          priority: this.desiredPriorities.get(key) ?? 0,
-        })),
-        new Set([
-          ...this.residents.keys(),
-          ...this.generating,
-          ...this.completed.keys(),
-        ]),
-      );
-    }
+    this.selectionSignature = signature;
+    // Reconcile on every camera update. The selected cut may be unchanged,
+    // but distances can change while orbiting; the queue must see those new
+    // priorities so a patch that remains under the view can finish refining.
+    this.queue.reconcile(
+      entries.map(({ address, key }) => ({
+        key,
+        value: address,
+        priority: this.desiredPriorities.get(key) ?? 0,
+      })),
+      new Set([
+        ...this.residents.keys(),
+        ...this.generating,
+        ...this.completed.keys(),
+      ]),
+    );
 
     this.processGenerationQueue();
   }
