@@ -119,6 +119,12 @@ Recorded separately, per the runbook convention:
   this fixed mesh with sphere-specific chunk geometry and error handling. This prototype must
   not be cited as whole-planet evidence.
 
+- **2026-09-16 — Shared material adapter:** the globe now exposes a `material` data layer and
+  consumes the terrain entry point's shared semantic material evaluator, stylized palette and
+  deterministic planet-space macro variation. Its fixed sphere still applies the result as
+  vertex colours, while the 2.5D clipmap applies the equivalent variation in its shader. The
+  canvas 2D page is intentionally unchanged; sphere LOD material streaming remains future work.
+
 ## Verification commands
 
 ```powershell

@@ -89,6 +89,13 @@ colours. A renderer may blend authored detail textures, procedural detail, or a
 stylized palette from the same sample. `packTerrainMaterialWeights` provides a
 stable order for vertex attributes and GPU tile formats.
 
+`terrainMaterialColorRgb` converts a sample into the shared stylized water, sand,
+grass, rock and snow palette. `sampleTerrainMacroVariation` and
+`applyTerrainMacroVariation` provide deterministic world-space colour breakup
+that can be evaluated by a planar or spherical adapter. The current 2.5D clipmap
+also exposes the equivalent shader-side `setMacroVariation` controls. These APIs
+do not depend on mesh topology, UV layout or a demo page.
+
 ## Planetary CDLOD (Continuous Distance-Dependent LOD)
 
 The clipmap terrain scene also accepts a bounded `heightSource` and exposes

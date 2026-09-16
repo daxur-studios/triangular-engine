@@ -333,3 +333,9 @@ alone does not establish visual acceptance. Record unresolved test-environment f
   material, removes the procedural noise overlay and makes the surface appear more opaque. The
   next investigation must make the compressed path preserve the same colour-space handling,
   material uniforms, blending and opacity as the normal clipmap before adding more texture detail.
+
+- **2026-09-16 — Shared material extraction:** moved the stylized material palette conversion and
+  deterministic planet-safe macro variation helpers into `triangular-engine/terrain`. The 2.5D
+  page now consumes the shared palette API; the canvas 2D page remains unchanged. The globe can
+  use the same semantic material weights, palette and macro controls through its spherical
+  adapter. Renderer-specific shader/material application remains local to each surface type.

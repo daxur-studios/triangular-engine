@@ -20,6 +20,41 @@ export const TERRAIN_MATERIAL_LAYER_COUNT = TERRAIN_MATERIAL_LAYERS.length;
 
 export type TerrainMaterialWeights = Record<TerrainMaterialLayer, number>;
 
+/** Normalized RGB colour used by renderer adapters (each channel is in the 0..1 range). */
+export type TerrainMaterialRgb = readonly [number, number, number];
+
+export interface ITerrainMaterialPalette {
+  readonly water: TerrainMaterialRgb;
+  readonly sand: TerrainMaterialRgb;
+  readonly grass: TerrainMaterialRgb;
+  readonly rock: TerrainMaterialRgb;
+  readonly snow: TerrainMaterialRgb;
+  readonly desertSand: TerrainMaterialRgb;
+  readonly lavaWater: TerrainMaterialRgb;
+}
+
+/**
+ * Stylized default palette shared by the planar and spherical adapters.
+ * Values are deliberately broad and readable rather than photorealistic.
+ */
+export const DEFAULT_TERRAIN_MATERIAL_PALETTE: ITerrainMaterialPalette = {
+  water: [0.099, 0.22, 0.341],
+  sand: [0.6804, 0.5551, 0.3796],
+  grass: [0.2977, 0.57, 0.19],
+  rock: [0.5074, 0.4248, 0.3526],
+  snow: [0.96, 0.96, 0.96],
+  desertSand: [0.74, 0.492, 0.26],
+  lavaWater: [0.819, 0.2604, 0.021],
+};
+
+export interface ITerrainMaterialColorOptions {
+  readonly oceanSubstance?: 'water' | 'lava';
+  readonly palette?: ITerrainMaterialPalette;
+}
+
+/** Position in display metres used for deterministic procedural material variation. */
+export type TerrainMaterialPosition = readonly [number, number, number];
+
 /** Inputs that can be supplied by any canonical terrain/world sampler. */
 export interface ITerrainMaterialQuery {
   readonly elevationM: number;
@@ -204,4 +239,109 @@ export function packTerrainMaterialWeights(
     target[index] = sample.weights[TERRAIN_MATERIAL_LAYERS[index]];
   }
   return target;
+}
+
+/**
+ * Converts semantic material weights into the shared stylized palette.
+ * Keeping this conversion in the terrain entry point lets plane and sphere
+ * renderers choose their own GPU representation without changing the rules.
+ */
+export function terrainMaterialColorRgb(
+  sample: ITerrainMaterialSample,
+  options: ITerrainMaterialColorOptions = {},
+): TerrainMaterialRgb {
+  const palette = options.palette ?? DEFAULT_TERRAIN_MATERIAL_PALETTE;
+  const water = options.oceanSubstance === 'lava' ? palette.lavaWater : palette.water;
+  const sand: TerrainMaterialRgb = [
+    palette.sand[0] * (1 - sample.arid01) + palette.desertSand[0] * sample.arid01,
+    palette.sand[1] * (1 - sample.arid01) + palette.desertSand[1] * sample.arid01,
+    palette.sand[2] * (1 - sample.arid01) + palette.desertSand[2] * sample.arid01,
+  ];
+  const layers: readonly [TerrainMaterialRgb, number][] = [
+    [water, sample.weights.water],
+    [sand, sample.weights.sand],
+    [palette.grass, sample.weights.grass],
+    [palette.rock, sample.weights.rock],
+    [palette.snow, sample.weights.snow],
+  ];
+  return [
+    layers.reduce((sum, [color, weight]) => sum + color[0] * weight, 0),
+    layers.reduce((sum, [color, weight]) => sum + color[1] * weight, 0),
+    layers.reduce((sum, [color, weight]) => sum + color[2] * weight, 0),
+  ];
+}
+
+function fract(value: number): number {
+  return value - Math.floor(value);
+}
+
+function hash3(x: number, y: number, z: number): number {
+  return fract(Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453);
+}
+
+function smoothNoiseCurve(value: number): number {
+  return value * value * (3 - 2 * value);
+}
+
+function valueNoise3(position: TerrainMaterialPosition): number {
+  const x0 = Math.floor(position[0]);
+  const y0 = Math.floor(position[1]);
+  const z0 = Math.floor(position[2]);
+  const tx = smoothNoiseCurve(fract(position[0]));
+  const ty = smoothNoiseCurve(fract(position[1]));
+  const tz = smoothNoiseCurve(fract(position[2]));
+  const sample = (x: number, y: number, z: number): number => hash3(x, y, z);
+  const x00 = sample(x0, y0, z0) * (1 - tx) + sample(x0 + 1, y0, z0) * tx;
+  const x10 = sample(x0, y0 + 1, z0) * (1 - tx) + sample(x0 + 1, y0 + 1, z0) * tx;
+  const x01 = sample(x0, y0, z0 + 1) * (1 - tx) + sample(x0 + 1, y0, z0 + 1) * tx;
+  const x11 = sample(x0, y0 + 1, z0 + 1) * (1 - tx) + sample(x0 + 1, y0 + 1, z0 + 1) * tx;
+  const y0Value = x00 * (1 - ty) + x10 * ty;
+  const y1Value = x01 * (1 - ty) + x11 * ty;
+  return y0Value * (1 - tz) + y1Value * tz;
+}
+
+/**
+ * Samples a deterministic, planet-safe macro breakup signal in display metres.
+ * Passing sphere positions in metres makes the same scale control meaningful on
+ * a plane and on a globe; it does not depend on mesh UVs or patch boundaries.
+ */
+export function sampleTerrainMacroVariation(
+  positionM: TerrainMaterialPosition,
+  scaleM: number,
+): number {
+  const scale = Math.max(1, Number.isFinite(scaleM) ? scaleM : 1);
+  const broad: TerrainMaterialPosition = [
+    positionM[0] / scale + 17.3,
+    positionM[1] / scale - 9.1,
+    positionM[2] / scale + 4.7,
+  ];
+  const breakup: TerrainMaterialPosition = [
+    (0.8 * positionM[0] - 0.6 * positionM[2]) / (scale * 1.73) - 23.1,
+    positionM[1] / (scale * 1.73) + 5.7,
+    (0.6 * positionM[0] + 0.8 * positionM[2]) / (scale * 1.73) + 11.9,
+  ];
+  return valueNoise3(broad) * 0.65 + valueNoise3(breakup) * 0.35;
+}
+
+/** Applies the shared land-only macro colour breakup to a base material colour. */
+export function applyTerrainMacroVariation(
+  baseRgb: TerrainMaterialRgb,
+  sample: ITerrainMaterialSample,
+  variation01: number,
+  strength: number,
+): TerrainMaterialRgb {
+  const snowOrWater = Math.min(1, sample.weights.water + sample.snow01 * 0.75);
+  const landFactor = 1 - snowOrWater;
+  const amount = clamp01(strength) * landFactor;
+  const signedVariation = (clamp01(variation01) - 0.5) * 2;
+  const warmVariation: TerrainMaterialRgb = [
+    1 + signedVariation * 0.12,
+    1 + signedVariation * 0.09,
+    1 + signedVariation * 0.055,
+  ];
+  return [
+    baseRgb[0] * (1 - amount) + baseRgb[0] * warmVariation[0] * amount,
+    baseRgb[1] * (1 - amount) + baseRgb[1] * warmVariation[1] * amount,
+    baseRgb[2] * (1 - amount) + baseRgb[2] * warmVariation[2] * amount,
+  ];
 }

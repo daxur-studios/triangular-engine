@@ -1,4 +1,10 @@
-import { evaluateTerrainMaterial, packTerrainMaterialWeights } from './terrain-material';
+import {
+  applyTerrainMacroVariation,
+  evaluateTerrainMaterial,
+  packTerrainMaterialWeights,
+  sampleTerrainMacroVariation,
+  terrainMaterialColorRgb,
+} from './terrain-material';
 
 function query(overrides: Partial<Parameters<typeof evaluateTerrainMaterial>[0]> = {}) {
   return {
@@ -72,5 +78,28 @@ describe('terrain material evaluation', () => {
     const target = new Float32Array(5);
     expect(packTerrainMaterialWeights(sample, target)).toBe(target);
     expect(Array.from(target)).toEqual(Array.from(packTerrainMaterialWeights(sample)));
+  });
+
+  it('converts the same semantic sample into a bounded shared stylized colour', () => {
+    const sample = evaluateTerrainMaterial(query({ elevationM: 1000, slope01: 0.8 }));
+    const color = terrainMaterialColorRgb(sample);
+
+    expect(color.every((channel) => channel >= 0 && channel <= 1)).toBe(true);
+    expect(terrainMaterialColorRgb(sample, { oceanSubstance: 'lava' })).not.toEqual(color);
+  });
+
+  it('provides deterministic world-space macro variation and keeps water unchanged', () => {
+    const sample = evaluateTerrainMaterial(query({ elevationM: 800 }));
+    const variationA = sampleTerrainMacroVariation([100, 20, -40], 48);
+    const variationB = sampleTerrainMacroVariation([100, 20, -40], 48);
+    const base = terrainMaterialColorRgb(sample);
+    const varied = applyTerrainMacroVariation(base, sample, variationA, 0.35);
+    const waterSample = evaluateTerrainMaterial(query({ elevationM: -900 }));
+    const waterBase = terrainMaterialColorRgb(waterSample);
+    const waterVaried = applyTerrainMacroVariation(waterBase, waterSample, variationA, 1);
+
+    expect(variationA).toBe(variationB);
+    expect(varied).not.toEqual(base);
+    expect(waterVaried).toEqual(waterBase);
   });
 });

@@ -36,7 +36,7 @@ import {
   IPlanarHeightField,
   intersectPlanarHeightField,
 } from 'triangular-engine/worldgen/render';
-import { evaluateTerrainMaterial, ITerrainMaterialSample } from 'triangular-engine/terrain';
+import { evaluateTerrainMaterial, terrainMaterialColorRgb } from 'triangular-engine/terrain';
 import {
   createClipmapTerrainScene,
   IClipmapTerrainHeightSource,
@@ -128,32 +128,6 @@ interface IObjTerrainExport {
 }
 
 type CellPlanet25dFillMode = CellPlanetMapFillMode | 'material';
-
-function terrainMaterialRgb(sample: ITerrainMaterialSample, oceanSubstance: 'water' | 'lava'): [number, number, number] {
-  const palette: Record<'water' | 'sand' | 'grass' | 'rock' | 'snow', [number, number, number]> = {
-    water: hslToRgb(oceanSubstance === 'lava' ? lavaOceanColor() : 'hsl(210, 55%, 22%)') as [number, number, number],
-    sand: hslToRgb('hsl(35, 32%, 53%)') as [number, number, number],
-    grass: hslToRgb('hsl(103, 50%, 38%)') as [number, number, number],
-    rock: hslToRgb('hsl(28, 18%, 43%)') as [number, number, number],
-    snow: hslToRgb('hsl(0, 0%, 96%)') as [number, number, number],
-  };
-  const layers = ['water', 'sand', 'grass', 'rock', 'snow'] as const;
-  const desertSand = hslToRgb('hsl(29, 48%, 50%)') as [number, number, number];
-  const sandRgb: [number, number, number] = [
-    palette.sand[0] * (1 - sample.arid01) + desertSand[0] * sample.arid01,
-    palette.sand[1] * (1 - sample.arid01) + desertSand[1] * sample.arid01,
-    palette.sand[2] * (1 - sample.arid01) + desertSand[2] * sample.arid01,
-  ];
-  const rgb: [number, number, number] = [0, 0, 0];
-  for (const layer of layers) {
-    const weight = sample.weights[layer];
-    const layerRgb = layer === 'sand' ? sandRgb : palette[layer];
-    rgb[0] += layerRgb[0] * weight;
-    rgb[1] += layerRgb[1] * weight;
-    rgb[2] += layerRgb[2] * weight;
-  }
-  return rgb;
-}
 
 function buildRiverMaterialMask(graph: IPlanetGraphCore, ecology: IPlanetEcology): Uint8Array {
   const mask = new Uint8Array(graph.cells.length);
@@ -428,7 +402,12 @@ function makeColorTexture(
           },
           materialOptions,
         );
-        rgb = terrainMaterialRgb(material, oceanSubstance);
+        const color = terrainMaterialColorRgb(material, { oceanSubstance });
+        rgb = [
+          Math.round(color[0] * 255),
+          Math.round(color[1] * 255),
+          Math.round(color[2] * 255),
+        ];
       } else {
         let color: string;
         if (oceanSubstance === 'lava' && ecology.waterBodyKind[cellId] === 'ocean') {

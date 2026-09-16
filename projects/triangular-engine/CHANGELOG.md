@@ -19,6 +19,11 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `triangular-engine/terrain` now exports shared stylized material palette and
+  procedural variation helpers (`terrainMaterialColorRgb`,
+  `sampleTerrainMacroVariation`, and `applyTerrainMacroVariation`) so planar and
+  spherical terrain adapters can use the same material rules.
+
 - `triangular-engine/worldgen/render` now exports planar cell-picking helpers
   (`samplePlanarHeight`, `intersectPlanarHeightField`, `mapXZToPlanetDirection`,
   `mapPlanetDirectionToMapXZ`) that resolve a camera ray against a baked 2.5D height field

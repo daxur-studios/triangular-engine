@@ -8,6 +8,7 @@ import {
   FrontSide,
   Mesh,
   MeshStandardMaterial,
+  SRGBColorSpace,
   SphereGeometry,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
@@ -35,9 +36,17 @@ import {
   moistureColor,
   plateColor,
   temperatureColor,
+  WORLD_SIZE_TIER_RADIUS_M,
   writePlanetGlobeNormals,
   writePlanetGlobePositions,
 } from 'triangular-engine/worldgen/render';
+import {
+  DEFAULT_TERRAIN_MATERIAL_PALETTE,
+  applyTerrainMacroVariation,
+  evaluateTerrainMaterial,
+  sampleTerrainMacroVariation,
+  terrainMaterialColorRgb,
+} from 'triangular-engine/terrain';
 import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
 import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
 
@@ -50,9 +59,13 @@ const GLOBE_LATITUDE_RINGS = 48;
 
 /** Display-only radial exaggeration default; the canonical sampler output is unchanged. */
 const GLOBE_DEFAULT_HEIGHT_SCALE = 0.25;
+/** The fixed globe is unit-sized, so material coordinates use the selected map's medium-body metres. */
+const GLOBE_MATERIAL_RADIUS_M = WORLD_SIZE_TIER_RADIUS_M.medium;
 
 /** Shared water colour for ocean shell and invalid-cell fallback, mirroring the 2.5D map. */
 const OCEAN_COLOR = 'hsl(210, 55%, 22%)';
+
+type CellPlanetGlobeFillMode = CellPlanetMapFillMode | 'material';
 
 /**
  * Cell Planet globe prototype (runbook 032).
@@ -88,8 +101,11 @@ export class CellPlanetGlobePageComponent {
   readonly worldProfileKind = signal<WorldProfileKind>('terran');
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
   readonly waterLevel = signal(0);
-  readonly fillMode = signal<CellPlanetMapFillMode>('biome');
-  readonly fillModes: CellPlanetMapFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture', 'land'];
+  readonly fillMode = signal<CellPlanetGlobeFillMode>('biome');
+  readonly fillModes: CellPlanetGlobeFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture', 'land', 'material'];
+  readonly macroVariationEnabled = signal(true);
+  readonly macroVariationStrength = signal(0.35);
+  readonly macroVariationScaleM = signal(48);
   readonly heightScale = signal(GLOBE_DEFAULT_HEIGHT_SCALE);
   readonly seabedRelief = signal(true);
   readonly showOcean = signal(true);
@@ -116,7 +132,10 @@ export class CellPlanetGlobePageComponent {
   private seaLevelElevation = 0;
   private elevationMin = 0;
   private elevationMax = 0;
+  private maxSlope = 0;
   private readonly colorScratch = new Color();
+  private materialRiverMask: ArrayLike<number> = new Uint8Array(0);
+  private ridgeCellSet = new Set<number>();
 
   constructor() {
     this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
@@ -179,9 +198,33 @@ export class CellPlanetGlobePageComponent {
   }
 
   onFillModeChange(event: Event): void {
-    const value = (event.target as HTMLSelectElement).value as CellPlanetMapFillMode;
+    const value = (event.target as HTMLSelectElement).value as CellPlanetGlobeFillMode;
     if (this.fillModes.includes(value) && value !== this.fillMode()) {
       this.fillMode.set(value);
+      this.updateComparisonQueryParams();
+      this.rebuildColors();
+    }
+  }
+
+  onMacroVariationChange(event: Event): void {
+    this.macroVariationEnabled.set((event.target as HTMLInputElement).checked);
+    this.updateComparisonQueryParams();
+    this.rebuildColors();
+  }
+
+  onMacroVariationStrengthInput(event: Event): void {
+    const value = this.inputNumber(event);
+    if (Number.isFinite(value)) {
+      this.macroVariationStrength.set(Math.max(0, Math.min(1, value)));
+      this.updateComparisonQueryParams();
+      this.rebuildColors();
+    }
+  }
+
+  onMacroVariationScaleInput(event: Event): void {
+    const value = this.inputNumber(event);
+    if (Number.isFinite(value)) {
+      this.macroVariationScaleM.set(Math.max(8, Math.min(128, value)));
       this.updateComparisonQueryParams();
       this.rebuildColors();
     }
@@ -246,6 +289,9 @@ export class CellPlanetGlobePageComponent {
     });
     const sampler: IPlanetSurfaceSampler = createPlanetSurfaceSampler(graph, tectonics, ecology);
 
+    this.materialRiverMask = buildRiverMaterialMask(graph, ecology);
+    this.ridgeCellSet = new Set(tectonics.ridgeCellIds);
+
     let elevationMin = Infinity;
     let elevationMax = -Infinity;
     for (const elevation of tectonics.elevation) {
@@ -259,6 +305,7 @@ export class CellPlanetGlobePageComponent {
     this.seaLevelElevation = seaLevelElevation;
     this.elevationMin = elevationMin;
     this.elevationMax = elevationMax;
+    this.maxSlope = ecology.slope.reduce((max, slope) => Math.max(max, slope), 0);
 
     this.geometry = buildPlanetGlobeGeometry({
       sampler,
@@ -354,7 +401,21 @@ export class CellPlanetGlobePageComponent {
     const oceanSubstance = WORLD_PROFILES[this.worldProfileKind()].oceanSubstance;
 
     for (let i = 0; i < this.geometry.vertexCount; i++) {
-      this.colorScratch.setStyle(this.resolveCellColor(this.geometry.cellIds[i], mode, oceanSubstance));
+      const cellId = this.geometry.cellIds[i];
+      if (mode === 'material') {
+        const offset = i * 3;
+        const direction: [number, number, number] = [
+          this.geometry.directions[offset],
+          this.geometry.directions[offset + 1],
+          this.geometry.directions[offset + 2],
+        ];
+        const rgb = this.resolveMaterialColor(cellId, direction, oceanSubstance);
+        // The shared palette is authored in sRGB, while Color stores the
+        // renderer's working-space value used by vertex-colour lighting.
+        this.colorScratch.setRGB(rgb[0], rgb[1], rgb[2], SRGBColorSpace);
+      } else {
+        this.colorScratch.setStyle(this.resolveCellColor(cellId, mode, oceanSubstance));
+      }
       const o = i * 3;
       values[o] = this.colorScratch.r;
       values[o + 1] = this.colorScratch.g;
@@ -390,6 +451,55 @@ export class CellPlanetGlobePageComponent {
       return this.tectonics.isLand[cellId] ? 'hsl(100, 40%, 38%)' : 'hsl(210, 60%, 22%)';
     }
     return biomeColor(this.ecology.biome[cellId]);
+  }
+
+  private resolveMaterialColor(
+    cellId: number,
+    direction: [number, number, number],
+    oceanSubstance: 'water' | 'lava',
+  ): readonly [number, number, number] {
+    if (cellId < 0 || cellId >= this.tectonics.elevation.length) {
+      return oceanSubstance === 'lava'
+        ? DEFAULT_TERRAIN_MATERIAL_PALETTE.lavaWater
+        : DEFAULT_TERRAIN_MATERIAL_PALETTE.water;
+    }
+    const elevationM = this.tectonics.elevation[cellId] ?? this.seaLevelElevation;
+    const temperature01 = Math.max(0, Math.min(1, ((this.ecology.temperature[cellId] ?? 0) + 1) * 0.5));
+    const snowIce01 = this.ecology.biome[cellId] === 'ice_cap' ? 1
+      : this.ecology.biome[cellId] === 'glacier' ? 0.9
+      : this.ecology.biome[cellId] === 'tundra' ? 0.35 : 0;
+    const arid01 = this.ecology.biome[cellId] === 'desert' ? 1
+      : this.ecology.biome[cellId] === 'steppe' ? 0.45
+      : this.ecology.biome[cellId] === 'savanna' ? 0.25 : 0;
+    const sample = evaluateTerrainMaterial({
+      elevationM,
+      seaLevelM: this.seaLevelElevation,
+      minElevationM: this.elevationMin,
+      maxElevationM: this.elevationMax,
+      slope01: this.maxSlope > 0 ? (this.ecology.slope[cellId] ?? 0) / this.maxSlope : 0,
+      moisture01: this.ecology.moisture[cellId],
+      temperature01,
+      snowIce01,
+      arid01,
+      ridge01: this.ridgeCellSet.has(cellId) ? 1 : 0,
+      river01: this.materialRiverMask[cellId] ?? 0,
+    }, {
+      snowlineM: this.seaLevelElevation + Math.max(1, this.elevationMax - this.seaLevelElevation) * 0.68,
+      snowlineBlendM: Math.max(0.05, (this.elevationMax - this.seaLevelElevation) * 0.16),
+    });
+    let rgb = terrainMaterialColorRgb(sample, { oceanSubstance });
+    if (this.macroVariationEnabled()) {
+      rgb = applyTerrainMacroVariation(
+        rgb,
+        sample,
+        sampleTerrainMacroVariation(
+          [direction[0] * GLOBE_MATERIAL_RADIUS_M, direction[1] * GLOBE_MATERIAL_RADIUS_M, direction[2] * GLOBE_MATERIAL_RADIUS_M],
+          this.macroVariationScaleM(),
+        ),
+        this.macroVariationStrength(),
+      );
+    }
+    return rgb;
   }
 
   /** Translucent shell at the (display-scaled) sea datum so bathymetry reads as underwater relief. */
@@ -441,6 +551,11 @@ export class CellPlanetGlobePageComponent {
     if (waterLevel !== null) this.waterLevel.set(Math.max(-1, Math.min(1, waterLevel)));
     const globeHeightScale = this.numberQuery(query.globeHeightScale ?? (query as Record<string, string | undefined>)['heightScale']);
     if (globeHeightScale !== null) this.heightScale.set(Math.max(0, Math.min(1, globeHeightScale)));
+    this.macroVariationEnabled.set(this.booleanQuery(query.macroVariation, this.macroVariationEnabled()));
+    const macroStrength = this.numberQuery(query.macroVariationStrength);
+    if (macroStrength !== null) this.macroVariationStrength.set(Math.max(0, Math.min(1, macroStrength)));
+    const macroScale = this.numberQuery(query.macroVariationScaleM);
+    if (macroScale !== null) this.macroVariationScaleM.set(Math.max(8, Math.min(128, macroScale)));
     this.seabedRelief.set(this.booleanQuery(query.seabedRelief, this.seabedRelief()));
     this.showOcean.set(this.booleanQuery(query.showOcean, this.showOcean()));
   }
@@ -455,6 +570,9 @@ export class CellPlanetGlobePageComponent {
       fillMode: this.fillMode(),
       waterLevel: this.waterLevel(),
       globeHeightScale: this.heightScale(),
+      macroVariation: this.macroVariationEnabled(),
+      macroVariationStrength: this.macroVariationStrength(),
+      macroVariationScaleM: this.macroVariationScaleM(),
       seabedRelief: this.seabedRelief(),
       showOcean: this.showOcean(),
     });
@@ -469,4 +587,18 @@ export class CellPlanetGlobePageComponent {
   private booleanQuery(value: string | undefined, fallback: boolean): boolean {
     return value === 'true' ? true : value === 'false' ? false : fallback;
   }
+}
+
+function buildRiverMaterialMask(graph: IPlanetGraphCore, ecology: IPlanetEcology): Uint8Array {
+  const mask = new Uint8Array(graph.cells.length);
+  const thresholdCos = Math.cos(0.09);
+  for (const cell of graph.cells) {
+    for (const path of ecology.riverPaths) {
+      if (path.some((point) => cell.center.x * point.x + cell.center.y * point.y + cell.center.z * point.z >= thresholdCos)) {
+        mask[cell.id] = 1;
+        break;
+      }
+    }
+  }
+  return mask;
 }
