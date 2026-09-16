@@ -4,6 +4,14 @@
 
 - Added optional `triangular-engine/meshoptimizer` secondary entry point with
   indexed geometry simplification helpers backed by `meshoptimizer`.
+- Added topology-aware sphere edge refinement through the optional
+  `ITerrainSurfaceDomain.getPatchNeighbor()` hook, plus cached terrain-surface
+  selection and edge-mask work for stationary cameras.
+- Added bounded sphere quadtree selection through an optional `maxPatches`
+  budget, refining the highest-error leaves first for predictable close-view
+  work.
+- Added optional `TerrainSurfaceComponent.batching`, which renders same-material
+  resident surfaces through a shared Three.js `BatchedMesh`.
 
 All notable changes to triangular-engine are documented here.
 

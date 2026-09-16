@@ -160,6 +160,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'planet-terrain-sphere-lab',
+    loadComponent: () =>
+      import('./pages/planet-terrain-sphere-lab/planet-terrain-sphere-lab-page.component').then(
+        ({ PlanetTerrainSphereLabPageComponent }) =>
+          PlanetTerrainSphereLabPageComponent,
+      ),
+  },
+  {
     path: 'planet-physics-lab',
     canActivate: [
       () =>

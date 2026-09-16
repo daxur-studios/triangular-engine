@@ -1,4 +1,5 @@
 import { PlaneTerrainDomain } from '../domains/plane-terrain-domain';
+import { SphereTerrainDomain } from '../domains/sphere-terrain-domain';
 import {
   calculateTerrainPatchEdgeRefinementMasks,
   TERRAIN_PATCH_EDGE_EAST,
@@ -55,6 +56,25 @@ describe('calculateTerrainPatchEdgeRefinementMasks', () => {
         edgeLevelDeltas: [0, 0, 0, 0],
         edgeSegments: [[], [], [], []],
       },
+    ]);
+  });
+
+  it('uses sphere topology across cube-face seams', () => {
+    const sphere = new SphereTerrainDomain(100);
+    const coarse = { face: 'positive-x' as const, level: 0, x: 0, y: 0 };
+    const neighbour = sphere.getPatchNeighbor(coarse, 'right');
+    const fine = sphere.getChildren(neighbour)[0];
+
+    const result = calculateTerrainPatchEdgeRefinementMasks(
+      sphere,
+      [coarse, fine],
+      (address) => address.level,
+    );
+
+    expect(result[0].mask).toBe(TERRAIN_PATCH_EDGE_EAST);
+    expect(result[0].edgeLevelDeltas).toEqual([0, 1, 0, 0]);
+    expect(result[0].edgeSegments[1]).toEqual([
+      { start: 0, end: 1, levelDelta: 1 },
     ]);
   });
 });

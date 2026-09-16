@@ -257,3 +257,79 @@ for quick inspection. The panel also reports the last and peak mesh-build time
 so coverage and quality comparisons have a direct timing signal. Next: record
 resident-chunk, generation-time and memory measurements while moving between
 the two coverage sizes, then move generation work into workers.
+
+### 2026-09-15 — whole-sphere scale fixture added
+
+Added `/planet-terrain-sphere-lab` as the next C1-scale test. It covers all six
+cube faces with `SphereTerrainDomain` and the production sphere quadtree selector,
+using one deterministic `PlanetTerrainField` sampled from unit-sphere directions.
+The fixture deliberately includes several continent masses, two long mountain
+belts plus an island belt, volcanic peaks, a mesa, a crater, and river-valley
+channels, so whole-planet, regional and close-detail views exercise more than a
+single flat planar feature. It has standard/high/ultra resolution presets,
+whole/region/close camera presets, freeze LOD, wireframe, LOD/elevation/geology
+colour modes, and live residency/triangle/geometry/LOD diagnostics. Skirts are
+disabled. The field is currently demo-owned and main-thread generated; it is a
+shared-sampler candidate for the 2.5D cell map after its geography is accepted,
+not yet the production cell-planet worldgen source.
+
+Verification: `npx ng build demo-app` passes. The field has colocated deterministic,
+batch-sampling and feature-channel tests; visual acceptance and performance
+measurements still require the user's existing local demo session. Next: inspect
+whole/region/close sphere coverage, then move patch generation to a worker and
+measure globe residency before adapting the same field to the 2.5D view.
+
+### 2026-09-15 — sphere lab frame-time correction
+
+The first sphere lab build exposed a frame-time problem: its generic rectangular
+edge-mask pass ran on every frame and could compare unrelated cube faces because
+their UV bounds overlap. The sphere domain now supplies exact same-level
+neighbours, so sphere edge refinement uses topology-aware lookup and direct child
+checks. TerrainSurface also caches edge masks and skips selection when the camera
+and LOD inputs are unchanged. The sphere lab's patch generation now runs through
+a worker, with typed-array buffers transferred back to the renderer; colour-mode
+changes increment the colour revision so resident patches refresh correctly.
+
+Measured in a local Node fixture with the previous whole/region/close camera
+positions: sphere edge-mask work fell from about 23/23/61 ms to about 6/8/18 ms
+for the tested cuts. `npx ng build demo-app` passes. Browser FPS and worker
+residency still need visual confirmation in the user's existing demo session.
+
+### 2026-09-15 — sphere detail budget and planet scale controls
+
+The first close-surface test still allowed the sphere selector to expand toward
+the configured maximum level, producing thousands of desired patches and an
+8,000-job queue. Sphere selection now refines the highest screen-error leaf
+first and enforces an explicit patch budget before seam balancing. The sphere
+lab uses 48, 96 and 96 selected-patch caps for standard, high and ultra; this
+keeps the initial experiment bounded while leaving the maximum LOD available
+for later tests. A regression test verifies the selector stays within a
+configured budget.
+
+The lab also adds small (5 km radius), Moon-scale and Earth-scale presets. View
+camera positions scale with the selected radius, worker domain construction
+uses the selected radius, and the scene enables logarithmic depth buffering.
+These controls test planetary scale and depth precision separately from terrain
+detail. Each patch still has its own render mesh, so batching remains the next
+draw-call reduction step after this bounded-selection pass. The follow-up now
+uses an optional shared Three.js `BatchedMesh` in `TerrainSurfaceComponent`;
+the sphere lab enables it by default and exposes a comparison toggle. The
+resident patch meshes remain independently generated, but same-material
+surfaces share one render batch. Skirt geometry is still excluded from this
+batch path.
+
+### 2026-09-16 — progressive worker-backed LOD commits
+
+The sphere lab could remain visually unchanged while the camera moved because
+TerrainSurface waited for every patch in the next complete cut before replacing
+the current cut. A moving camera could therefore keep invalidating a large
+replacement before the slowest worker result arrived. Completed worker patches
+are now retained across selection changes and excluded from duplicate queue
+work. Replacement commits are progressive but coverage-safe: all desired
+children replacing one resident parent must be ready together, while a ready
+parent can replace its resident children as one group. This keeps parent/child
+seams covered while allowing independent nearby regions to sharpen during
+continuous movement. `npx ng build demo-app` and
+`npm run build:triangular-engine` pass. The full library test command remains
+blocked by the existing `planet-surface-bake.spec.ts` `toHaveLength` typing
+errors.

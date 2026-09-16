@@ -69,6 +69,17 @@ describe('selectSphereTerrainQuadtreePatches', () => {
     );
   });
 
+  it('keeps close refinement within the configured patch budget', () => {
+    const leaves = selectSphereTerrainQuadtreePatches({
+      ...input,
+      cameraWorldM: [600_100, 0, 0],
+      options: { ...input.options, maxPatches: 48 },
+    });
+
+    expect(leaves.length).toBeLessThanOrEqual(48);
+    expect(leaves.length).toBeGreaterThan(6);
+  });
+
   it('keeps the hidden hemisphere coarse while refining camera-facing terrain', () => {
     const leaves = selectSphereTerrainQuadtreePatches({
       ...input,

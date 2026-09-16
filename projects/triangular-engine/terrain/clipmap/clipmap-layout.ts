@@ -1,5 +1,8 @@
 export interface IClipmapTile {
   readonly level: number;
+  /** Integer tile coordinates at this level, used for stable GPU reconstruction. */
+  readonly gridX: number;
+  readonly gridZ: number;
   readonly centerXM: number;
   readonly centerZM: number;
   readonly sizeM: number;
@@ -73,6 +76,8 @@ export function buildClipmapTiles(
 
         tiles.push({
           level,
+          gridX: centerTileX + dx,
+          gridZ: centerTileZ + dz,
           centerXM: minX + tileSizeM / 2,
           centerZM: minZ + tileSizeM / 2,
           sizeM: tileSizeM,

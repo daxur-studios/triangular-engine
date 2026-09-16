@@ -7,6 +7,7 @@ export interface ISphereTerrainSurfaceSelectorOptions {
   readonly minElevationM: number;
   readonly maxElevationM: number;
   readonly patchResolution: number;
+  readonly maxPatches?: number;
   readonly splitErrorPx: number;
   readonly mergeErrorPx: number;
   readonly screenSpaceErrorFactorPx: number;
@@ -36,6 +37,7 @@ export function createSphereTerrainSurfaceSelector(
         cameraWorldM: request.cameraWorldM,
         options: {
           maxLevel: request.maxLevel,
+          maxPatches: options.maxPatches,
           patchResolution: options.patchResolution,
           splitErrorPx: options.splitErrorPx,
           mergeErrorPx: options.mergeErrorPx,

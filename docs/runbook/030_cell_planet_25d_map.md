@@ -45,6 +45,23 @@ the wave/noise fixtures as defaults. The current terrain fixture uses one mesh p
 level; renderer diagnostics count the whole scene, so water, overlays and additional
 passes must be measured separately.
 
+The 2.5D adapter now has a real display-space body radius using the shared
+`WORLD_SIZE_TIER_RADIUS_M` tiers. Its planar footprint is derived in metres from the
+full equirectangular circumference (`2πR × πR`), and the same bounds drive the height
+source, ocean, selection, simplified preview and Blender export. The page also enables
+the scene's `[logarithmicDepthBuffer]` input and scales camera framing/clipping to the
+selected body. The current clipmap supports full-origin coverage through its sixteen
+explicit shader levels for the medium tier; larger tiers are intentionally local-view
+previews until the quadtree terrain path owns horizon-scale coverage. This fixes the
+adapter's unit scale, but does not make the low-resolution bake a close-up detail source:
+streamed material/height tiles remain the next step.
+
+Relief uses the original miniature map's proportions: `heightScaleM = verticalScale ×
+(2πR / 256)`. Both surface elevations and the ocean datum use that conversion, including
+picking, the simplified preview and export through the shared bake. This is stylized,
+radius-proportional relief, not a physically calibrated mountain-height model. The existing
+`terrainHeightScale` query/slider retains its previous visual meaning.
+
 ## Data and rendering contract
 
 1. Share one world snapshot (graph, tectonics, ecology and generation identity) between
@@ -248,3 +265,63 @@ alone does not establish visual acceptance. Record unresolved test-environment f
 - Unsupported parity: the 2.5D page still ignores the 2D `climate`/`season` restyle inputs,
   so selected-cell biome/temperature can differ between views for a non-default climate.
   Equal Earth is exercised only by unit tests here, not visually.
+
+- **2026-09-15 — Real-scale planar adapter:** added a shared planet-size selector to the
+  2.5D page (default `medium`, radius `600 km`) and derived the planar bounds from that
+  radius instead of the previous `256 × 128` miniature footprint (about `40.7 m` radius).
+  Height-source bounds, ocean surface, picking context, simplified runtime mesh and OBJ
+  export now use the same physical bounds. Enabled `[logarithmicDepthBuffer]` and scaled
+  camera framing/clipping. The clipmap's finest tile and morph distance now scale with the
+  map width, preserving the old `256 × 128` ring proportions instead of leaving the real-size
+  planet in ultra-coarse outer rings. `worldSize` is preserved in comparison query parameters.
+- **2026-09-15 — Restore relief after the unit migration:** horizontal extent had grown
+  while vertical offsets remained in miniature units. Scale baked elevation by the same
+  circumference-to-256 ratio to restore mountain/seabed proportions at every size tier.
+  Scale the ocean datum by the bake conversion and resize an existing water plane when
+  changing size. Added regression checks for relative relief across tiers, negative seabed
+  elevation and the zero/adjustable relief control. Visual acceptance remains pending.
+
+- **2026-09-15 — Real-scale depth path:** the visible overlap/flicker persisted with the
+  optional ocean layer disabled, so the terrain clipmap was the active suspect. Added
+  Three.js logarithmic-depth shader chunks to the custom clipmap material's vertex and
+  fragment paths, including the early flat-debug return. The renderer-level logarithmic
+  depth setting now applies consistently to this ShaderMaterial as well as built-in scene
+  materials. The existing clipmap layout tests continue to cover tile interior exclusion
+  and boundary alignment; browser visual confirmation remains pending.
+
+- **2026-09-15 — Legacy display comparison:** added a `Display scale` selector to the 2.5D page.
+  `Planet scale (real metres)` remains the default and uses the selected body radius; `Legacy
+  preview (old compact units)` restores the pre-real-scale `256 × 128` display bounds, direct
+  relief units, camera framing and clipmap ring count. Both modes consume the same generated
+  graph, elevations, ecology, colours and ocean mask, and the choice is preserved in the
+  comparison query as `displayScale`.
+
+- **2026-09-15 — Surface-focused debug camera:** replaced the plain `orbitControls` with the
+  shared `raycastOrbitControls` used by `cdlod-planet-lab`. Its focus resolver intersects the
+  CPU-baked planar height field (matching cell picking and GPU displacement), prefers the nearer
+  visible ocean plane over seabed when applicable, and falls back to scene geometry before the
+  first bake. Wheel zoom and rotate gestures therefore move toward the surface under the cursor;
+  this remains temporary inspection navigation, separate from the future Civ-style camera.
+
+- **2026-09-16 — Restore 0% clipmap detail at planet scale:** fixed the physical-scale terrain
+  regression where the runtime clipmap still used a fixed `16 m` finest tile. At the default
+  real-size footprint, that caused almost the whole visible map to render through very coarse
+  far rings; the runtime simplification preview appeared to fix it only because it switches to
+  the full baked surface. The 0% clipmap now derives its finest tile and morph distance from the
+  map footprint, retaining the legacy fine/coarse coverage ratio while keeping the same quality
+  preset grid resolution. The simplified preview also decodes the sRGB bake into linear vertex
+  colours and explicitly uses opaque depth-writing material settings, reducing tint/brightness
+  changes when toggling the preview.
+
+- **2026-09-16 — Real-scale tile seam fix:** close inspection exposed a regular grid of dark
+  lines after the tile footprint was scaled to planetary metres. Neighbouring instances were
+  reconstructing a shared edge from separate large world-space float expressions, which can
+  round to slightly different positions at real scale. Clipmap instances now carry their tile
+  centre in tile-grid units; the shader adds the shared local coordinate first and multiplies by
+  tile size once. This keeps same-level tile edges coincident while retaining the existing LOD
+  layout and bounded draw count.
+- **2026-09-16 — Scale-aware terrain normals:** the regular pattern remained in close planetary
+  views because the custom material estimated slope with a fixed `0.5 m` height sample. The
+  clipmap now derives that sample distance from the physical size of the baked height texel,
+  sampling across roughly two texels to prevent the bake's cell boundaries becoming visible
+  normal bands when the same bake covers a real-world planet footprint.

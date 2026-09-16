@@ -15,6 +15,7 @@ const TERRAIN_HEIGHT_GLSL = `
   uniform vec4 uHeightMapBounds; // minX, minZ, maxX, maxZ
   uniform float uHeightMapMinM;
   uniform float uHeightMapRangeM;
+  uniform float uHeightSampleStepM;
   uniform bool uUseColorMap;
   uniform sampler2D uColorMap;
   uniform bool uMacroVariationEnabled;
@@ -118,6 +119,15 @@ const TERRAIN_HEIGHT_GLSL = `
  * linearly interpolates between its own sparser vertices.
  */
 const VERTEX_SHADER_BODY = `
+  // logdepthbuf_vertex uses isPerspectiveMatrix(), supplied by common.
+  #include <common>
+
+  // The scene enables logarithmic depth for the real-scale planet. Custom
+  // ShaderMaterials must include the renderer chunks explicitly; otherwise
+  // they continue writing ordinary depth while the rest of the scene uses the
+  // logarithmic depth path.
+  #include <logdepthbuf_pars_vertex>
+
   uniform vec3 uCameraWorldPos;
   uniform float uBaseTileSizeM;
   uniform float uGridResolution;
@@ -173,8 +183,11 @@ const VERTEX_SHADER_BODY = `
   void main() {
     vec2 localXZ = position.xz;
     // IMMUTABLE HORIZONTAL LATTICE: Vertices NEVER move horizontally in X/Z.
-    // seedWorldXZ is the exact ground-truth horizontal coordinate.
-    vec2 worldXZ = instanceOffset.xz + localXZ * instanceScale;
+    // instanceOffset stores the tile centre in tile units, not metres. Adjacent
+    // tiles therefore reconstruct a shared edge from the same grid coordinate
+    // before multiplying by the large real-world tile size, avoiding visible
+    // real-scale cracks caused by separately rounded metre expressions.
+    vec2 worldXZ = (instanceOffset.xz + localXZ) * instanceScale;
 
     // Recover this tile's own instanced level from instanceScale
     float myLevel = floor(log2(instanceScale / uBaseTileSizeM) + 0.5);
@@ -186,6 +199,7 @@ const VERTEX_SHADER_BODY = `
       vBorderBlend = 0.0;
       vec4 mvPosition = modelViewMatrix * vec4(vWorldPos, 1.0);
       gl_Position = projectionMatrix * mvPosition;
+      #include <logdepthbuf_vertex>
       return;
     }
 
@@ -283,10 +297,16 @@ const VERTEX_SHADER_BODY = `
 
     vec4 mvPosition = modelViewMatrix * vec4(vWorldPos, 1.0);
     gl_Position = projectionMatrix * mvPosition;
+    #include <logdepthbuf_vertex>
   }
 `;
 
 const FRAGMENT_SHADER_BODY = `
+  #include <common>
+
+  // Keep fragment depth generation paired with the vertex shader above.
+  #include <logdepthbuf_pars_fragment>
+
   uniform bool uShowLevelTint;
   uniform float uMaxLevel;
   uniform bool uDebugFlatTerrain;
@@ -348,7 +368,12 @@ const FRAGMENT_SHADER_BODY = `
     if (uDebugFlatTerrain) {
       diffuse = max(dot(vec3(0.0, 1.0, 0.0), lightDir), 0.35);
     } else {
-      float eps = 0.5;
+      // A fixed metre-sized finite difference becomes effectively sub-texel
+      // once the same bake is displayed over a real planetary footprint. Use
+      // the physical size of a height texel instead, which keeps the normal
+      // stable across legacy and planet-scale displays and avoids a regular
+      // lighting pattern at the source texture's sampling boundaries.
+      float eps = max(uHeightSampleStepM, 0.5);
       float hL = terrainHeight(vWorldPos.xz + vec2(-eps, 0.0));
       float hR = terrainHeight(vWorldPos.xz + vec2(eps, 0.0));
       float hD = terrainHeight(vWorldPos.xz + vec2(0.0, -eps));
@@ -388,6 +413,7 @@ const FRAGMENT_SHADER_BODY = `
     }
 
     gl_FragColor = vec4(base * diffuse, 1.0);
+    #include <logdepthbuf_fragment>
   }
 `;
 
@@ -414,6 +440,7 @@ export function createClipmapTerrainMaterial(): ShaderMaterial {
       uHeightMapBounds: { value: new Vector4() },
       uHeightMapMinM: { value: 0 },
       uHeightMapRangeM: { value: 1 },
+      uHeightSampleStepM: { value: 0.5 },
       uUseColorMap: { value: false },
       uColorMap: { value: null },
       uMacroVariationEnabled: { value: false },

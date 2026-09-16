@@ -20,6 +20,8 @@ const MIN_ERROR_DISTANCE_M = 1;
 
 export interface ISphereTerrainQuadtreeSelectionOptions {
   readonly maxLevel: number;
+  /** Maximum number of selected leaves before neighbour balancing. */
+  readonly maxPatches?: number;
   readonly patchResolution: number;
   readonly splitErrorPx: number;
   readonly mergeErrorPx: number;
@@ -227,12 +229,18 @@ function isPotentiallyVisible(
   );
 }
 
-function selectNode(
+interface ISplitCandidate {
+  readonly address: ISphereTerrainPatchAddress;
+  readonly errorPx: number;
+}
+
+function splitCandidate(
   address: ISphereTerrainPatchAddress,
   input: ISphereTerrainQuadtreeSelectionInput,
   previousRoot: IQuadtreeNode,
-): IQuadtreeNode {
-  if (!isPotentiallyVisible(input, address)) return { address };
+): ISplitCandidate | undefined {
+  if (!isPotentiallyVisible(input, address)) return undefined;
+  if (address.level >= input.options.maxLevel) return undefined;
   const errorPx = estimateSphereTerrainPatchScreenSpaceErrorPx(
     input,
     address,
@@ -249,14 +257,7 @@ function selectNode(
     previousCoverage.kind === 'finer'
       ? input.options.mergeErrorPx
       : input.options.splitErrorPx;
-  if (address.level >= input.options.maxLevel || errorPx <= threshold)
-    return { address };
-  return {
-    address,
-    children: createChildren(address).map((child) =>
-      selectNode(child.address, input, previousRoot),
-    ),
-  };
+  return errorPx > threshold ? { address, errorPx } : undefined;
 }
 
 function collectLeaves(
@@ -272,6 +273,7 @@ function collectLeaves(
 
 function balanceNeighborLevels(
   roots: Map<SphereTerrainFace, IQuadtreeNode>,
+  maxPatches: number,
 ): void {
   const domain = new SphereTerrainDomain(1);
   for (let pass = 0; pass < MAX_BALANCE_PASS_COUNT; pass += 1) {
@@ -290,7 +292,8 @@ function balanceNeighborLevels(
         if (
           coverage.kind === 'leaf' &&
           leaf.level - coverage.node.address.level > 1 &&
-          !coverage.node.children
+          !coverage.node.children &&
+          countLeaves(roots) + 3 <= maxPatches
         ) {
           coverage.node.children = createChildren(coverage.node.address);
           changed = true;
@@ -298,6 +301,57 @@ function balanceNeighborLevels(
       }
     if (!changed) return;
   }
+}
+
+function countLeaves(roots: Map<SphereTerrainFace, IQuadtreeNode>): number {
+  const leaves: ISphereTerrainPatchAddress[] = [];
+  for (const root of roots.values()) collectLeaves(root, leaves);
+  return leaves.length;
+}
+
+/** Refines the highest-error visible leaf while keeping the cut bounded. */
+function selectBudgetedRoots(
+  input: ISphereTerrainQuadtreeSelectionInput,
+  previousRoots: Map<SphereTerrainFace, IQuadtreeNode>,
+  maxPatches: number,
+): Map<SphereTerrainFace, IQuadtreeNode> {
+  const roots = new Map<SphereTerrainFace, IQuadtreeNode>();
+  const leaves = new Map<string, IQuadtreeNode>();
+  const candidates: ISplitCandidate[] = [];
+  const key = (address: ISphereTerrainPatchAddress): string =>
+    `${address.face}:${address.level}:${address.x}:${address.y}`;
+
+  for (const face of SPHERE_TERRAIN_FACES) {
+    const address = { face, level: 0, x: 0, y: 0 } as const;
+    const node = { address };
+    roots.set(face, node);
+    leaves.set(key(address), node);
+    const candidate = splitCandidate(
+      address,
+      input,
+      previousRoots.get(face) as IQuadtreeNode,
+    );
+    if (candidate) candidates.push(candidate);
+  }
+
+  while (leaves.size + 3 <= maxPatches && candidates.length > 0) {
+    candidates.sort((a, b) => b.errorPx - a.errorPx);
+    const candidate = candidates.shift() as ISplitCandidate;
+    const parent = leaves.get(key(candidate.address));
+    if (!parent) continue;
+    parent.children = createChildren(candidate.address);
+    leaves.delete(key(candidate.address));
+    for (const child of parent.children) {
+      leaves.set(key(child.address), child);
+      const childCandidate = splitCandidate(
+        child.address,
+        input,
+        previousRoots.get(child.address.face) as IQuadtreeNode,
+      );
+      if (childCandidate) candidates.push(childCandidate);
+    }
+  }
+  return roots;
 }
 
 /**
@@ -326,16 +380,16 @@ export function selectSphereTerrainQuadtreePatches(
     !(options.screenSpaceErrorFactorPx > 0)
   )
     throw new RangeError('Sphere terrain quadtree options are invalid.');
+  if (
+    options.maxPatches !== undefined &&
+    (!Number.isInteger(options.maxPatches) ||
+      options.maxPatches < SPHERE_TERRAIN_FACES.length)
+  )
+    throw new RangeError('Sphere terrain quadtree patch budget is invalid.');
+  const maxPatches = options.maxPatches ?? Number.MAX_SAFE_INTEGER;
   const previousRoots = buildTreeFromLeaves(input.previousLeaves ?? []);
-  const roots = new Map<SphereTerrainFace, IQuadtreeNode>();
-  for (const face of SPHERE_TERRAIN_FACES) {
-    const address = { face, level: 0, x: 0, y: 0 } as const;
-    roots.set(
-      face,
-      selectNode(address, input, previousRoots.get(face) as IQuadtreeNode),
-    );
-  }
-  balanceNeighborLevels(roots);
+  const roots = selectBudgetedRoots(input, previousRoots, maxPatches);
+  balanceNeighborLevels(roots, maxPatches);
   const leaves: ISphereTerrainPatchAddress[] = [];
   for (const face of SPHERE_TERRAIN_FACES)
     collectLeaves(roots.get(face) as IQuadtreeNode, leaves);

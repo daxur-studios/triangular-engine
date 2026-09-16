@@ -34,6 +34,11 @@ export interface ITerrainSurfaceDomain<TAddress> {
     stepU: number,
     stepV: number,
   ): TerrainVector3;
+  /** Optional exact same-level neighbour lookup for periodic or wrapped domains. */
+  getPatchNeighbor?(
+    address: TAddress,
+    edge: 'left' | 'right' | 'bottom' | 'top',
+  ): TAddress;
   /** Conservative domain-specific geometric error for LOD selection. */
   getGeometricErrorM(
     address: TAddress,

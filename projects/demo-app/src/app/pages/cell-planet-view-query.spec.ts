@@ -10,6 +10,7 @@ describe('cell-planet-view-query', () => {
     expect(CELL_PLANET_QUERY_KEYS).toContain('seed');
     expect(CELL_PLANET_QUERY_KEYS).toContain('relaxation');
     expect(CELL_PLANET_QUERY_KEYS).toContain('worldProfile');
+    expect(CELL_PLANET_QUERY_KEYS).toContain('displayScale');
     expect(CELL_PLANET_QUERY_KEYS).toContain('fillMode');
     expect(CELL_PLANET_QUERY_KEYS).toContain('waterLevel');
   });
@@ -20,6 +21,7 @@ describe('cell-planet-view-query', () => {
       seed: '1',
       relaxation: '2',
       worldProfile: 'terran',
+      displayScale: 'legacy',
       fillMode: 'biome',
       waterLevel: '0',
       globeHeightScale: '0.3',
@@ -32,6 +34,7 @@ describe('cell-planet-view-query', () => {
     expect(query.seed).toBe('1');
     expect(query.relaxation).toBe('2');
     expect(query.worldProfile).toBe('terran');
+    expect(query.displayScale).toBe('legacy');
     expect(query.fillMode).toBe('biome');
     expect(query.waterLevel).toBe('0');
     expect(query.globeHeightScale).toBe('0.3');

@@ -141,6 +141,19 @@ export function createClipmapTerrainScene(
     );
     material.uniforms['uHeightMapMinM']!.value = source.minHeightM;
     material.uniforms['uHeightMapRangeM']!.value = Math.max(0.000001, source.maxHeightM - source.minHeightM);
+    const image = source.texture.image as { width?: number; height?: number } | undefined;
+    const width = Math.max(1, image?.width ?? 1);
+    const height = Math.max(1, image?.height ?? 1);
+    const mapWidthM = source.bounds.maxX - source.bounds.minX;
+    const mapHeightM = source.bounds.maxZ - source.bounds.minZ;
+    // Sample across roughly two texels in world space. One texel can still
+    // turn the bake's bilinear cell boundaries into visible bands when viewed
+    // close to the surface; the wider difference gives the normal a small
+    // amount of scale-aware smoothing.
+    material.uniforms['uHeightSampleStepM']!.value = Math.max(
+      0.5,
+      2 * Math.min(mapWidthM / width, mapHeightM / height),
+    );
     material.uniforms['uUseHeightMap']!.value = true;
     if (source.colorTexture) {
       material.uniforms['uColorMap']!.value = source.colorTexture;
@@ -214,7 +227,12 @@ export function createClipmapTerrainScene(
 
       for (let i = 0; i < count; i++) {
         const tile = group[i]!;
-        offsets.setXYZ(i, tile.centerXM, 0, tile.centerZM);
+        // Store the tile centre in tile units rather than as a large world-space
+        // metre value. The shader then reconstructs world X/Z from the shared
+        // tile-grid coordinate. This makes a shared edge use the same expression
+        // on both neighbouring instances, avoiding real-scale floating-point
+        // cracks at planetary dimensions.
+        offsets.setXYZ(i, tile.gridX + 0.5, 0, tile.gridZ + 0.5);
         scales.setX(i, tile.sizeM);
       }
       mesh.count = count;

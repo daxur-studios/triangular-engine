@@ -9,6 +9,8 @@ export interface ITerrainSurfaceSelectionRequest<TAddress> {
   readonly getLevel: (address: TAddress) => number;
   readonly getKey: (address: TAddress) => string;
   readonly maxLevel: number;
+  /** Optional workload cap for selectors that support bounded refinement. */
+  readonly maxPatches?: number;
   readonly refinementDistanceM: number;
   readonly hysteresis: number;
   /** Whether the default selector refined this address on its previous update. */

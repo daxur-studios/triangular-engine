@@ -27,12 +27,23 @@ The defaults provide camera-following LOD, bounded per-frame generation, parent
 fallback during asynchronous replacement, and a standard Three.js terrain material.
 Visual seam skirts are opt-in rather than enabled by default. Override
 `lodPosition` to follow a character or vehicle instead of the camera. The
-`maxLod`, `refinementDistance`, `resolution`, `generationBudget`, `skirtDepth`,
+`maxLod`, `maxPatches`, `refinementDistance`, `resolution`, `generationBudget`, `skirtDepth`,
 `lodHysteresis`, `getKey`, `getLevel`, `createMaterial`, `createColors`,
 `colorRevision`, and `freezeLod`
 inputs customize the policy and rendering without replacing the streaming
 loop. `lodHysteresis` defaults to `0.15`, preventing an already-refined branch
 from repeatedly flipping at its distance boundary.
+
+Set `batching` to combine resident patches that use the same material into a
+Three.js `BatchedMesh`. Patch generation and replacement remain independent,
+while the renderer can submit the batch as one draw instead of one draw per
+patch. Keep it disabled when a consumer needs separate per-patch materials or
+uses skirt geometry.
+
+Sphere selectors accept `maxPatches` as a hard leaf budget. They refine the
+highest-error visible patches first and stop when the budget is reached, so a
+close camera cannot create an unbounded queue. Neighbour balancing consumes
+budget as needed to preserve compatible cube-face seams.
 
 For rectangular hierarchical domains, mixed LOD cuts automatically detect
 coarse edges beside finer selected neighbours. Those coarse patches are sampled
@@ -43,6 +54,11 @@ piecewise boundary. Transition data is exposed through `baseResolution`,
 `edgeRefinementMask`, `edgeRefinementLevel`, `edgeRefinementLevels`, and
 `edgeRefinementSegments` in the mesh-generation request. This keeps every
 shared surface aligned without skirts or seam draw calls.
+
+Wrapped domains can implement the optional `getPatchNeighbor` method to provide
+topology-aware seam checks. `SphereTerrainDomain` uses this for cube-face
+boundaries, avoiding false matches between unrelated faces that share the same
+rectangular UV bounds.
 
 Mesh generation is synchronous by default because arbitrary JavaScript field
 and domain instances cannot be cloned into a Web Worker. Set `meshGenerator`

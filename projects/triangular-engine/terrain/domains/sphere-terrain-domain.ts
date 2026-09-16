@@ -240,6 +240,13 @@ export class SphereTerrainDomain implements ITerrainSurfaceDomain<ISphereTerrain
     );
   }
 
+  getPatchNeighbor(
+    address: ISphereTerrainPatchAddress,
+    edge: SphereTerrainPatchEdge,
+  ): ISphereTerrainPatchAddress {
+    return sphereTerrainPatchNeighbor(this, address, edge);
+  }
+
   getGeometricErrorM(
     address: ISphereTerrainPatchAddress,
     resolution: number,

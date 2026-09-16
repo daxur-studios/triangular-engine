@@ -5,6 +5,8 @@ export const CELL_PLANET_QUERY_KEYS = [
   'seed',
   'relaxation',
   'worldProfile',
+  'worldSize',
+  'displayScale',
   'projection',
   'terrainQuality',
   'terrainHeightScale',

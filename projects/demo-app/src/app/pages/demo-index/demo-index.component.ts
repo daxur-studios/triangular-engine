@@ -130,6 +130,18 @@ export const DEMOS: readonly DemoItem[] = [
       'C1 large-area terrain coverage with camera-driven quadtree refinement, asynchronous chunk replacement, parent fallback and live residency diagnostics.',
   },
   {
+    id: 'planet-terrain-sphere-lab',
+    number: '02ab',
+    title: 'Planet Terrain Sphere',
+    route: '/planet-terrain-sphere-lab',
+    categoryId: 'terrain',
+    tier: 'lab',
+    entryPoints: ['terrain'],
+    package: 'triangular-engine/terrain',
+    description:
+      'Whole-sphere terrain streaming with global continents, mountain belts, volcanic features, river valleys, and adaptive six-face LOD.',
+  },
+  {
     id: 'cdlod-planet-lab',
     number: '02b',
     title: 'CDLOD Planet Lab',

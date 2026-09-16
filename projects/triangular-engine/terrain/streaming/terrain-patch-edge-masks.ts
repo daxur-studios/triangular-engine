@@ -36,6 +36,16 @@ export function calculateTerrainPatchEdgeRefinementMasks<TAddress>(
   addresses: readonly TAddress[],
   getLevel: (address: TAddress) => number,
 ): readonly ITerrainPatchEdgeRefinement[] {
+  if (domain.getPatchNeighbor && 'getChildren' in domain) {
+    return calculateNeighbourAwareMasks(
+      domain,
+      addresses,
+      getLevel,
+      domain.getPatchNeighbor,
+      (domain as { getChildren: (address: TAddress) => readonly TAddress[] })
+        .getChildren,
+    );
+  }
   const refinements = addresses.map(() => ({
     mask: 0,
     levelDelta: 0,
@@ -126,6 +136,62 @@ export function calculateTerrainPatchEdgeRefinementMasks<TAddress>(
   }
 
   return refinements;
+}
+
+/**
+ * Uses the domain's topology for wrapped surfaces such as a sphere. The flat
+ * bounds comparison below cannot distinguish two unrelated cube faces that
+ * happen to have identical UV ranges.
+ */
+function calculateNeighbourAwareMasks<TAddress>(
+  domain: ITerrainSurfaceDomain<TAddress>,
+  addresses: readonly TAddress[],
+  getLevel: (address: TAddress) => number,
+  getNeighbor: NonNullable<ITerrainSurfaceDomain<TAddress>['getPatchNeighbor']>,
+  getChildren: (address: TAddress) => readonly TAddress[],
+): readonly ITerrainPatchEdgeRefinement[] {
+  const refinements = addresses.map(() => ({
+    mask: 0,
+    levelDelta: 0,
+    edgeLevelDeltas: [0, 0, 0, 0] as [number, number, number, number],
+    edgeSegments: [[], [], [], []] as [
+      ITerrainPatchEdgeSegment[],
+      ITerrainPatchEdgeSegment[],
+      ITerrainPatchEdgeSegment[],
+      ITerrainPatchEdgeSegment[],
+    ],
+  }));
+  const addressByKey = new Map(addresses.map((address) => [addressKey(address), address]));
+  const edges = ['top', 'right', 'bottom', 'left'] as const;
+  for (let index = 0; index < addresses.length; index += 1) {
+    const address = addresses[index];
+    const level = getLevel(address);
+    for (let edge = 0; edge < edges.length; edge += 1) {
+      const neighbor = getNeighbor.call(domain, address, edges[edge]);
+      if (addressByKey.has(addressKey(neighbor))) continue;
+      const finerChild = getChildren.call(domain, neighbor).find(
+        (child) => (getLevel(child) > level) && addressByKey.has(addressKey(child)),
+      );
+      if (!finerChild) continue;
+      const delta = Math.max(1, getLevel(finerChild) - level);
+      refinements[index].mask |= 1 << edge;
+      refinements[index].levelDelta = Math.max(refinements[index].levelDelta, delta);
+      refinements[index].edgeLevelDeltas[edge] = Math.max(
+        refinements[index].edgeLevelDeltas[edge],
+        delta,
+      );
+      refinements[index].edgeSegments[edge].push({
+        start: 0,
+        end: 1,
+        levelDelta: delta,
+      });
+    }
+  }
+  return refinements;
+}
+
+function addressKey(address: unknown): string {
+  return JSON.stringify(address);
 }
 
 function markCoarseEdge(

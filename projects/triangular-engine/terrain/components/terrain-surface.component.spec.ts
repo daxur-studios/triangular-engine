@@ -133,6 +133,59 @@ describe('TerrainSurfaceComponent', () => {
     expect(scene.children[0].children.length).toBe(4);
   });
 
+  it('commits a ready child group during movement without exposing a partial replacement', async () => {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    const completions = new Map<string, () => void>();
+    const generator = (
+      request: ITerrainSurfaceGenerationRequest<IPlaneTerrainPatchAddress>,
+    ) =>
+      new Promise((resolve) => {
+        const key = JSON.stringify(request.address);
+        completions.set(key, () => {
+          completions.delete(key);
+          resolve(generateTerrainPatchMesh(request.field, request.domain, request));
+        });
+      });
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', [{ level: 0, x: 0, z: 0 }]);
+    fixture.componentRef.setInput('maxLod', 1);
+    fixture.componentRef.setInput('refinementDistance', 1_200);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('generationBudget', 100);
+    fixture.componentRef.setInput('meshGenerator', generator);
+    camera.position.set(5_000, 100, 5_000);
+    fixture.detectChanges();
+
+    beforeRender$.next();
+    completions.get(JSON.stringify({ level: 0, x: 0, z: 0 }))!();
+    await Promise.resolve();
+    await Promise.resolve();
+    beforeRender$.next();
+    expect(scene.children[0].children.length).toBe(1);
+
+    camera.position.set(400, 100, -400);
+    beforeRender$.next();
+    const childAddresses = [
+      { level: 1, x: 0, z: 0 },
+      { level: 1, x: 1, z: 0 },
+      { level: 1, x: 0, z: 1 },
+      { level: 1, x: 1, z: 1 },
+    ];
+    completions.get(JSON.stringify(childAddresses[0]))!();
+    await Promise.resolve();
+    await Promise.resolve();
+    beforeRender$.next();
+    expect(scene.children[0].children.length).toBe(1);
+
+    for (const address of childAddresses.slice(1))
+      completions.get(JSON.stringify(address))!();
+    await Promise.resolve();
+    await Promise.resolve();
+    beforeRender$.next();
+    expect(scene.children[0].children.length).toBe(4);
+  });
+
   it('uses an opt-in patch selector while retaining shared mesh streaming', () => {
     const fixture = TestBed.createComponent(TerrainSurfaceComponent);
     const selector = jasmine

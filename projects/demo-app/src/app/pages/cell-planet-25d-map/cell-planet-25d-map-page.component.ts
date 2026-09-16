@@ -1,8 +1,8 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { BufferGeometry, ClampToEdgeWrapping, DataTexture, Float32BufferAttribute, FloatType, LinearFilter, Mesh, MeshStandardMaterial, PlaneGeometry, RGBAFormat, SRGBColorSpace, UnsignedByteType } from 'three';
-import { EngineModule, EngineService } from 'triangular-engine';
+import { BufferGeometry, ClampToEdgeWrapping, DataTexture, Float32BufferAttribute, FloatType, LinearFilter, Mesh, MeshStandardMaterial, PlaneGeometry, RGBAFormat, SRGBColorSpace, UnsignedByteType, Vector3 } from 'three';
+import { EngineModule, EngineService, RaycastFocusContext, RaycastOrbitControlsComponent } from 'triangular-engine';
 import { simplifyIndexedGeometry } from 'triangular-engine/meshoptimizer';
 import {
   WORLD_PROFILES,
@@ -30,6 +30,11 @@ import {
   moistureColor,
   plateColor,
   temperatureColor,
+  WORLD_SIZE_TIER_RADIUS_M,
+  WorldSizeTier,
+  formatDistanceM,
+  IPlanarHeightField,
+  intersectPlanarHeightField,
 } from 'triangular-engine/worldgen/render';
 import { evaluateTerrainMaterial, ITerrainMaterialSample } from 'triangular-engine/terrain';
 import {
@@ -45,8 +50,10 @@ import {
   ICellPlanetSelectionController,
 } from './cell-planet-terrain-selection';
 import { CellPlanetSelectionPanelComponent } from './cell-planet-selection-panel.component';
+import { getTerrainHeightScaleM } from './cell-planet-terrain-scale';
 
 type TerrainQuality = 'preview' | 'standard' | 'high' | 'ultra';
+type TerrainDisplayScale = 'planet' | 'legacy';
 
 interface ITerrainQualityPreset {
   readonly label: string;
@@ -65,8 +72,55 @@ const TERRAIN_QUALITY_PRESETS: Record<TerrainQuality, ITerrainQualityPreset> = {
 
 const TERRAIN_QUALITY_KINDS: TerrainQuality[] = ['preview', 'standard', 'high', 'ultra'];
 
-/** Planar world-space footprint of the equirectangular terrain bake and its clipmap. */
-const TERRAIN_MAP_BOUNDS = { minX: -128, minZ: -64, maxX: 128, maxZ: 64 } as const;
+/** The fixed display rectangle used by the 2.5D page before physical planet units were added. */
+const LEGACY_TERRAIN_MAP_BOUNDS = { minX: -128, minZ: -64, maxX: 128, maxZ: 64 } as const;
+
+/**
+ * Physical footprint of the full equirectangular unwrap. The map is still a projection (so
+ * local scale varies with latitude), but its equatorial horizontal and meridional scales are in
+ * metres and agree with the sphere's chosen radius. Keep this adapter here rather than in
+ * worldgen/core: the generator remains dimensionless and consumers choose the body size.
+ */
+function makeTerrainMapBounds(radiusM: number): {
+  readonly minX: number;
+  readonly minZ: number;
+  readonly maxX: number;
+  readonly maxZ: number;
+} {
+  const halfWidthM = Math.PI * radiusM;
+  const halfHeightM = halfWidthM * 0.5;
+  return { minX: -halfWidthM, minZ: -halfHeightM, maxX: halfWidthM, maxZ: halfHeightM };
+}
+
+/**
+ * The current clipmap shader has sixteen explicitly branched level bounds. Keep enough rings to
+ * cover a medium-size planet from the origin while retaining the quality preset's near detail.
+ * Larger tiers intentionally remain a local-view preview until the quadtree terrain path owns
+ * horizon-scale coverage; silently enlarging the finest tile would destroy close-up detail.
+ */
+function getClipmapLevelCount(radiusM: number, qualityLevelCount: number): number {
+  const mapWidthM = 2 * Math.PI * radiusM;
+  const baseTileSizeM = mapWidthM / 16;
+  const required = Math.ceil(Math.log2((mapWidthM * 0.5) / (baseTileSizeM * 4))) + 1;
+  return Math.min(16, Math.max(qualityLevelCount, required));
+}
+
+/**
+ * Preserve the old clipmap layout when the dimensionless map is displayed in metres.
+ * The legacy map was 256 units wide with 16-unit finest tiles, so its first ring covered
+ * half the map and the next ring covered the remaining footprint. Keeping that ratio avoids
+ * collapsing the entire physical planet into the coarse outer rings.
+ */
+function getTerrainBaseTileSizeM(mapWidthM: number): number {
+  return mapWidthM / 16;
+}
+
+function srgbChannelToLinear(channel: number): number {
+  const value = Math.max(0, Math.min(1, channel));
+  return value <= 0.04045
+    ? value / 12.92
+    : Math.pow((value + 0.055) / 1.055, 2.4);
+}
 
 interface IObjTerrainExport {
   readonly obj: string;
@@ -247,9 +301,13 @@ function makeBakedTerrainGeometry(
       if (colors && colorData) {
         const colorOffset = vertex * 3;
         const pixelOffset = vertex * 4;
-        colors[colorOffset] = (colorData[pixelOffset] ?? 0) / 255;
-        colors[colorOffset + 1] = (colorData[pixelOffset + 1] ?? 0) / 255;
-        colors[colorOffset + 2] = (colorData[pixelOffset + 2] ?? 0) / 255;
+        // The clipmap samples an sRGB DataTexture, while Three.js vertex colors
+        // are consumed as linear values by MeshStandardMaterial. Decode here so
+        // the simplified inspection mesh keeps the same visible tint and does
+        // not appear artificially brighter/washed out than the clipmap.
+        colors[colorOffset] = srgbChannelToLinear((colorData[pixelOffset] ?? 0) / 255);
+        colors[colorOffset + 1] = srgbChannelToLinear((colorData[pixelOffset + 1] ?? 0) / 255);
+        colors[colorOffset + 2] = srgbChannelToLinear((colorData[pixelOffset + 2] ?? 0) / 255);
       }
     }
   }
@@ -414,28 +472,30 @@ function makeColorTexture(
 
 @Component({
   selector: 'app-cell-planet-25d-map-page',
-  imports: [EngineModule, RouterLink, CellPlanetSelectionPanelComponent],
+  imports: [EngineModule, RouterLink, RaycastOrbitControlsComponent, CellPlanetSelectionPanelComponent],
   template: `
-    <scene [showFps]="true">
+    <scene [showFps]="true" [logarithmicDepthBuffer]="true">
       <orthographicCamera
-        [position]="[0, 110, 110]"
+        [position]="orthographicCameraPosition()"
         [lookAt]="[0, 0, 0]"
-        [left]="-160"
-        [right]="160"
-        [top]="100"
-        [bottom]="-100"
-        [far]="1000"
+        [left]="-mapHalfWidthM()"
+        [right]="mapHalfWidthM()"
+        [top]="mapHalfHeightM()"
+        [bottom]="-mapHalfHeightM()"
+        [far]="cameraFarM()"
         [isActive]="!debugOrbitEnabled"
       />
       <!-- Temporary inspection camera. Keep this separate from the future
            Civ-style top-down camera so terrain work can be inspected from
            arbitrary angles without committing to the final map controls. -->
-      <orbitControls
-        [cameraPosition]="[150, 130, 150]"
+      <raycastOrbitControls
+        [cameraPosition]="orbitCameraPosition()"
         [target]="[0, 0, 0]"
         [near]="0.1"
-        [far]="2000"
+        [far]="cameraFarM()"
         [isActive]="debugOrbitEnabled"
+        [raycastFocusResolver]="terrainRaycastFocus"
+        [leftMouseAction]="'rotate'"
       />
     </scene>
     <aside class="readout">
@@ -477,6 +537,26 @@ function makeColorTexture(
           }
         </select>
       </label>
+      <label>
+        <span>Planet size: {{ worldSizeTier() }} (radius {{ formatDistanceM(planetRadiusM()) }})</span>
+        <select [value]="worldSizeTier()" (change)="onWorldSizeChange($event)">
+          @for (size of worldSizeKinds; track size) {
+            <option [value]="size">{{ size }}</option>
+          }
+        </select>
+      </label>
+      <label>
+        <span>Display scale</span>
+        <select [value]="displayScale()" (change)="onDisplayScaleChange($event)">
+          <option value="planet">Planet scale (real metres)</option>
+          <option value="legacy">Legacy preview (old compact units)</option>
+        </select>
+      </label>
+      @if (displayScale() === 'planet') {
+        <span>Map footprint: {{ formatDistanceM(mapWidthM()) }} × {{ formatDistanceM(mapHeightM()) }}</span>
+      } @else {
+        <span>Legacy footprint: {{ mapWidthM() }} × {{ mapHeightM() }} display units</span>
+      }
       <label>
         <span>Map projection</span>
         <select [value]="projectionType()" (change)="onProjectionTypeChange($event)">
@@ -524,7 +604,8 @@ function makeColorTexture(
         <span>Ocean surface at sea level</span>
       </label>
       <label>
-        <span>Terrain vertical scale: {{ terrainHeightScale().toFixed(1) }}</span>
+        <span>Terrain relief: {{ terrainHeightScale().toFixed(1) }}
+          ({{ displayScale() === 'planet' ? 'proportional to planet size' : 'legacy direct scale' }})</span>
         <input type="range" min="0" max="14" step="0.5" [value]="terrainHeightScale()" (input)="onTerrainHeightScaleInput($event)" />
       </label>
       <label>
@@ -542,7 +623,7 @@ function makeColorTexture(
       }
       <span>draw calls: {{ drawCalls() }} · triangles: {{ triangles().toLocaleString() }}</span>
       <span>LOD instances: {{ instances() }}</span>
-      <span>Debug orbit view · drag to rotate · wheel to zoom</span>
+      <span>Raycast orbit view · drag to rotate · wheel zooms toward the surface</span>
       <app-cell-planet-selection-panel
         [selection]="selection()"
         (clearSelection)="clearSelection()"
@@ -568,6 +649,37 @@ export class CellPlanet25dMapPageComponent {
   readonly relaxationIterations = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.relaxationIterations);
   readonly worldProfileKind = signal<WorldProfileKind>('terran');
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
+  /** Shared display-space body size. Worldgen remains direction/elevation based and dimensionless. */
+  readonly worldSizeTier = signal<WorldSizeTier>('medium');
+  readonly worldSizeKinds: WorldSizeTier[] = ['mini', 'small', 'medium', 'large', 'extra-large'];
+  readonly planetRadiusM = computed(() => WORLD_SIZE_TIER_RADIUS_M[this.worldSizeTier()]);
+  /** Selectable only for comparing the current physical view with the pre-real-scale POC. */
+  readonly displayScale = signal<TerrainDisplayScale>('planet');
+  readonly displayScaleKinds: TerrainDisplayScale[] = ['planet', 'legacy'];
+  readonly terrainMapBounds = computed(() =>
+    this.displayScale() === 'legacy' ? LEGACY_TERRAIN_MAP_BOUNDS : makeTerrainMapBounds(this.planetRadiusM()),
+  );
+  readonly mapHalfWidthM = computed(() => (this.terrainMapBounds().maxX - this.terrainMapBounds().minX) * 0.5);
+  readonly mapHalfHeightM = computed(() => (this.terrainMapBounds().maxZ - this.terrainMapBounds().minZ) * 0.5);
+  readonly mapWidthM = computed(() => this.mapHalfWidthM() * 2);
+  readonly mapHeightM = computed(() => this.mapHalfHeightM() * 2);
+  readonly orbitCameraPosition = computed(() => {
+    if (this.displayScale() === 'legacy') return [150, 130, 150] as [number, number, number];
+    const radius = this.planetRadiusM();
+    return [radius * 4.8, radius * 4.2, radius * 4.8] as [number, number, number];
+  });
+  readonly orthographicCameraPosition = computed(() => {
+    if (this.displayScale() === 'legacy') return [0, 110, 110] as [number, number, number];
+    const radius = this.planetRadiusM();
+    return [0, radius * 4, radius * 4] as [number, number, number];
+  });
+  readonly cameraFarM = computed(() => this.displayScale() === 'legacy' ? 2_000 : Math.max(2_000, this.planetRadiusM() * 64));
+  readonly terrainHeightScaleM = computed(() =>
+    this.displayScale() === 'legacy'
+      ? this.terrainHeightScale()
+      : getTerrainHeightScaleM(this.planetRadiusM(), this.terrainHeightScale()),
+  );
+  readonly formatDistanceM = formatDistanceM;
   readonly projectionType = signal<MapProjectionKind>('equirectangular');
   readonly projectionKinds = MAP_PROJECTION_KINDS;
   readonly projectionLabels = MAP_PROJECTION_LABELS;
@@ -603,6 +715,7 @@ export class CellPlanet25dMapPageComponent {
   readonly debugOrbitEnabled = true;
   readonly hasTerrain = signal(false);
   private terrainReady = false;
+  private activeHeightField: IPlanarHeightField | undefined;
 
   private activeTextures: { height: DataTexture; color: DataTexture } | undefined;
   private oceanMesh: Mesh<PlaneGeometry, MeshStandardMaterial> | undefined;
@@ -620,15 +733,48 @@ export class CellPlanet25dMapPageComponent {
       }
     | undefined;
 
+  /**
+   * Raycast target used by the debug camera. The clipmap's height displacement happens in the
+   * vertex shader, so its Three.js mesh intersection is only the undisplaced lattice. Prefer
+   * the same CPU-baked height field used by cell picking, while retaining a scene-mesh fallback
+   * for the short period before the first bake is ready.
+   */
+  readonly terrainRaycastFocus = (context: RaycastFocusContext): Vector3 | null => {
+    const field = this.activeHeightField;
+    if (field) {
+      const hit = intersectPlanarHeightField(field, {
+        origin: context.raycaster.ray.origin,
+        direction: context.raycaster.ray.direction,
+      });
+      const oceanHit = this.showOcean() && this.oceanMesh?.visible
+        ? context.raycaster.intersectObject(this.oceanMesh, false)[0]
+        : undefined;
+      if (hit && (!oceanHit || hit.distance <= oceanHit.distance)) {
+        return new Vector3(hit.x, hit.y, hit.z);
+      }
+      if (oceanHit) return oceanHit.point;
+    }
+
+    const hits = context.raycaster.intersectObjects(
+      context.sceneChildren as unknown as import('three').Object3D[],
+      true,
+    );
+    return hits[0]?.point ?? null;
+  };
+
   constructor() {
     this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       const query = readCellPlanetQuery(params);
       this.preservedQueryParams.set(query);
       const previousQuality = this.terrainQuality();
+      const previousWorldSize = this.worldSizeTier();
+      const previousDisplayScale = this.displayScale();
       this.restoreQuery(query);
       this.updateComparisonQueryParams();
       if (this.terrainReady) {
-        if (previousQuality !== this.terrainQuality()) {
+        if (previousQuality !== this.terrainQuality() ||
+            previousWorldSize !== this.worldSizeTier() ||
+            previousDisplayScale !== this.displayScale()) {
           const previousTerrain = this.terrain;
           this.terrain = this.createTerrainScene();
           previousTerrain.dispose();
@@ -693,6 +839,35 @@ export class CellPlanet25dMapPageComponent {
     if (this.worldProfileKinds.includes(value) && value !== this.worldProfileKind()) {
       this.worldProfileKind.set(value);
       this.updateComparisonQueryParams();
+      this.rebuildWorld();
+    }
+  }
+
+  onWorldSizeChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as WorldSizeTier;
+    if (this.worldSizeKinds.includes(value) && value !== this.worldSizeTier()) {
+      this.worldSizeTier.set(value);
+      this.updateComparisonQueryParams();
+      // The clipmap's level topology depends on the physical footprint, so recreate it along
+      // with the baked source when the body size changes. Existing scene input bindings update
+      // the camera's numeric framing and logarithmic-depth far range automatically.
+      const previousTerrain = this.terrain;
+      this.terrain = this.createTerrainScene();
+      previousTerrain.dispose();
+      this.rebuildWorld();
+    }
+  }
+
+  onDisplayScaleChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as TerrainDisplayScale;
+    if (this.displayScaleKinds.includes(value) && value !== this.displayScale()) {
+      this.displayScale.set(value);
+      this.updateComparisonQueryParams();
+      // Bounds, camera framing, relief units and clipmap ring topology all change with the
+      // display mode. The canonical generated world remains exactly the same.
+      const previousTerrain = this.terrain;
+      this.terrain = this.createTerrainScene();
+      previousTerrain.dispose();
       this.rebuildWorld();
     }
   }
@@ -798,10 +973,7 @@ export class CellPlanet25dMapPageComponent {
     const baseName = `cell-planet-${this.seed()}-${this.terrainQuality()}`;
     const materialFileName = `${baseName}.mtl`;
     const exported = makeObjTerrainExport(context.bake, active.color, {
-      minX: -128,
-      minZ: -64,
-      maxX: 128,
-      maxZ: 64,
+      ...this.terrainMapBounds(),
     }, materialFileName);
     this.downloadTextFile(`${baseName}.obj`, exported.obj, 'text/plain;charset=utf-8');
     this.downloadTextFile(materialFileName, exported.mtl, 'text/plain;charset=utf-8');
@@ -840,7 +1012,7 @@ export class CellPlanet25dMapPageComponent {
     const bake = buildPlanetSurfaceBake(graph, sampler, {
       width: quality.bakeWidth,
       height: quality.bakeHeight,
-      heightScale: this.terrainHeightScale(),
+      heightScale: this.terrainHeightScaleM(),
       projection: {
         directionAt: (x, y, width, height) => {
           const lonLat = projection.unproject(x, y, width, height);
@@ -873,6 +1045,14 @@ export class CellPlanet25dMapPageComponent {
       elevationMin,
       elevationMax,
     };
+    this.activeHeightField = {
+      width: bake.width,
+      height: bake.height,
+      elevations: bake.elevations,
+      bounds: this.terrainMapBounds(),
+      minY: minHeightM,
+      maxY: maxHeightM,
+    };
     this.updateOceanSurface(bake, seaLevelElevation, profile.oceanSubstance);
     const colorTexture = makeColorTexture(
       bake,
@@ -889,7 +1069,7 @@ export class CellPlanet25dMapPageComponent {
       colorTexture,
       minHeightM,
       maxHeightM,
-      bounds: { minX: -128, minZ: -64, maxX: 128, maxZ: 64 },
+      bounds: this.terrainMapBounds(),
     };
     const previousTextures = this.activeTextures;
     this.activeTextures = { height: heightTexture, color: colorTexture };
@@ -910,7 +1090,7 @@ export class CellPlanet25dMapPageComponent {
       ecology,
       bake,
       projection,
-      bounds: TERRAIN_MAP_BOUNDS,
+      bounds: this.terrainMapBounds(),
       minHeightM,
       maxHeightM,
       generationKey,
@@ -948,7 +1128,7 @@ export class CellPlanet25dMapPageComponent {
       colorTexture,
       minHeightM: bakeRange.min,
       maxHeightM: bakeRange.max,
-      bounds: { minX: -128, minZ: -64, maxX: 128, maxZ: 64 },
+      bounds: this.terrainMapBounds(),
     });
     active.color.dispose();
     void this.rebuildSimplifiedTerrain();
@@ -969,12 +1149,7 @@ export class CellPlanet25dMapPageComponent {
     // morphing and crack-free LOD assumptions. This alternate mesh is therefore
     // intentionally a standalone runtime inspection mode.
     this.terrain.setVisible(false);
-    const sourceGeometry = makeBakedTerrainGeometry(context.bake, {
-      minX: -128,
-      minZ: -64,
-      maxX: 128,
-      maxZ: 64,
-    }, active.color);
+    const sourceGeometry = makeBakedTerrainGeometry(context.bake, this.terrainMapBounds(), active.color);
     try {
       const result = await simplifyIndexedGeometry(sourceGeometry, {
         ratio,
@@ -990,9 +1165,13 @@ export class CellPlanet25dMapPageComponent {
       result.geometry.computeVertexNormals();
       const material = new MeshStandardMaterial({
         vertexColors: true,
+        color: '#ffffff',
         roughness: 1,
         metalness: 0,
         flatShading: false,
+        transparent: false,
+        opacity: 1,
+        depthWrite: true,
       });
       const mesh = new Mesh(result.geometry, material);
       mesh.name = 'cell-planet-runtime-simplified-terrain';
@@ -1029,8 +1208,9 @@ export class CellPlanet25dMapPageComponent {
         roughness: 0.2,
         metalness: 0.05,
       });
-      const width = TERRAIN_MAP_BOUNDS.maxX - TERRAIN_MAP_BOUNDS.minX;
-      const depth = TERRAIN_MAP_BOUNDS.maxZ - TERRAIN_MAP_BOUNDS.minZ;
+      const bounds = this.terrainMapBounds();
+      const width = bounds.maxX - bounds.minX;
+      const depth = bounds.maxZ - bounds.minZ;
       const geometry = new PlaneGeometry(width, depth);
       const uv = geometry.getAttribute('uv');
       // PlaneGeometry's rotated local +Y points toward world -Z, so its default
@@ -1042,6 +1222,15 @@ export class CellPlanet25dMapPageComponent {
       this.oceanMesh.rotation.x = -Math.PI / 2;
       this.engine.scene.add(this.oceanMesh);
     } else {
+      // The existing water plane must follow changes to the selected planet size.
+      const bounds = this.terrainMapBounds();
+      const originalWidth = this.oceanMesh.geometry.parameters.width;
+      const originalDepth = this.oceanMesh.geometry.parameters.height;
+      this.oceanMesh.scale.set(
+        (bounds.maxX - bounds.minX) / originalWidth,
+        (bounds.maxZ - bounds.minZ) / originalDepth,
+        1,
+      );
       const material = this.oceanMesh.material;
       const previousMap = material.map;
       material.map = maskTexture;
@@ -1049,9 +1238,9 @@ export class CellPlanet25dMapPageComponent {
       previousMap?.dispose();
     }
     this.oceanMesh.position.set(
-      (TERRAIN_MAP_BOUNDS.minX + TERRAIN_MAP_BOUNDS.maxX) * 0.5,
-      seaLevelElevation,
-      (TERRAIN_MAP_BOUNDS.minZ + TERRAIN_MAP_BOUNDS.maxZ) * 0.5,
+      (this.terrainMapBounds().minX + this.terrainMapBounds().maxX) * 0.5,
+      seaLevelElevation * bake.heightScale,
+      (this.terrainMapBounds().minZ + this.terrainMapBounds().maxZ) * 0.5,
     );
     this.oceanMesh.visible = this.showOcean();
   }
@@ -1075,15 +1264,19 @@ export class CellPlanet25dMapPageComponent {
 
   private createTerrainScene(): IClipmapTerrainSceneHandle {
     const quality = this.terrainQualityPresets[this.terrainQuality()];
+    const baseTileSizeM = getTerrainBaseTileSizeM(this.mapWidthM());
     const terrain = createClipmapTerrainScene(this.engine, (diagnostics) => {
       this.drawCalls.set(diagnostics.drawCalls);
       this.triangles.set(diagnostics.triangles);
       this.instances.set(diagnostics.instanceCountsByLevel.join(' · '));
     }, {
-      levelCount: quality.levelCount,
-      baseTileSizeM: 16,
+      levelCount: this.displayScale() === 'legacy'
+        ? quality.levelCount
+        : getClipmapLevelCount(this.planetRadiusM(), quality.levelCount),
+      baseTileSizeM,
       blockRadiusTiles: 4,
       gridResolution: quality.gridResolution,
+      finestSwitchDistanceM: baseTileSizeM * 4,
       heightScaleM: 1,
       lodFocus: { x: 0, z: 0 },
     });
@@ -1114,6 +1307,12 @@ export class CellPlanet25dMapPageComponent {
     if (relaxation !== null) this.relaxationIterations.set(Math.max(0, Math.min(6, Math.round(relaxation))));
     if (query.worldProfile && this.worldProfileKinds.includes(query.worldProfile as WorldProfileKind)) {
       this.worldProfileKind.set(query.worldProfile as WorldProfileKind);
+    }
+    if (query.worldSize && this.worldSizeKinds.includes(query.worldSize as WorldSizeTier)) {
+      this.worldSizeTier.set(query.worldSize as WorldSizeTier);
+    }
+    if (query.displayScale && this.displayScaleKinds.includes(query.displayScale as TerrainDisplayScale)) {
+      this.displayScale.set(query.displayScale as TerrainDisplayScale);
     }
     if (query.projection && this.projectionKinds.includes(query.projection as MapProjectionKind)) {
       this.projectionType.set(query.projection as MapProjectionKind);
@@ -1151,6 +1350,8 @@ export class CellPlanet25dMapPageComponent {
       seed: this.seed(),
       relaxation: this.relaxationIterations(),
       worldProfile: this.worldProfileKind(),
+      worldSize: this.worldSizeTier(),
+      displayScale: this.displayScale(),
       projection: this.projectionType(),
       terrainQuality: this.terrainQuality(),
       fillMode: this.fillMode(),

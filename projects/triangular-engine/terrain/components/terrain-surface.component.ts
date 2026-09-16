@@ -12,7 +12,9 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   BufferAttribute,
   BufferGeometry,
+  BatchedMesh,
   Material,
+  Matrix4,
   Mesh,
   MeshStandardMaterial,
   Object3D,
@@ -81,9 +83,12 @@ export type TerrainSurfaceMeshGenerator<TAddress> = (
   request: ITerrainSurfaceGenerationRequest<TAddress>,
 ) => ITerrainPatchMesh<TAddress> | Promise<ITerrainPatchMesh<TAddress>>;
 
-interface IResidentPatch {
-  readonly object: Mesh;
+interface IResidentPatch<TAddress> {
+  readonly address: TAddress;
+  readonly object: Mesh | BatchedMesh;
   readonly material: Material;
+  readonly batchGeometryId?: number;
+  readonly batchInstanceId?: number;
   readonly drawCalls: number;
   readonly geometryBytes: number;
   readonly triangles: number;
@@ -107,13 +112,15 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly group = new Object3D();
-  private readonly residents = new Map<string, IResidentPatch>();
+  private batchedRender?: { readonly object: BatchedMesh; readonly material: Material };
+  private readonly residents = new Map<string, IResidentPatch<TAddress>>();
   private readonly queue = new TerrainGenerationQueue<TAddress>();
   private readonly completed = new Map<
     string,
     { readonly address: TAddress; readonly patch: ITerrainPatchMesh<TAddress> }
   >();
   private desiredPriorities = new Map<string, number>();
+  private desiredAddresses = new Map<string, TAddress>();
   private desiredEdgeMasks = new Map<
     string,
     {
@@ -130,6 +137,11 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   private selectedLevels: Record<number, number> = {};
   private desiredPatchCount = 0;
   private statsSignature = '';
+  private lastSelectionInputSignature = '';
+  private edgeMaskSelectionSignature = '';
+  private cachedEdgeMasks: readonly ReturnType<
+    typeof calculateTerrainPatchEdgeRefinementMasks
+  >[number][] = [];
 
   readonly field = input.required<ITerrainField>();
   readonly domain =
@@ -144,6 +156,10 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   /** Optional visual gap cover. Keep disabled unless a consumer explicitly requests skirts. */
   readonly skirtDepth = input(0);
   readonly generationBudget = input(4);
+  /** Optional selector hint used to cap selected patches for bounded work. */
+  readonly maxPatches = input<number | undefined>(undefined);
+  /** Combines same-material resident patches into one multi-draw batch. */
+  readonly batching = input(false);
   /** Prevents LOD oscillation near a refinement boundary. */
   readonly lodHysteresis = input(0.15);
   /** Keeps the current selected cut while allowing the camera to move. */
@@ -196,6 +212,8 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       this.resolution();
       this.skirtDepth();
       this.lodHysteresis();
+      this.maxPatches();
+      this.batching();
       this.patchSelector();
       this.meshGenerator();
       this.getLevel();
@@ -234,6 +252,12 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       this.refinementDistance() ?? estimateRefinementDistance(domain, roots);
     const hysteresis = Math.min(0.95, Math.max(0, this.lodHysteresis()));
     const patchSelector = this.patchSelector();
+    const selectionInputSignature = `${position.join(',')}|${maxLevel}|${refinementDistanceM}|${hysteresis}|${this.residents.size === 0}`;
+    if (selectionInputSignature === this.lastSelectionInputSignature) {
+      this.processGenerationQueue();
+      return;
+    }
+    this.lastSelectionInputSignature = selectionInputSignature;
     // Establish a complete coarse cover before asking for a refined cut. This
     // gives the renderer a parent fallback during the first asynchronous build
     // and prevents the initial view from refining into an empty scene.
@@ -247,6 +271,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
             getLevel,
             getKey,
             maxLevel,
+            maxPatches: this.maxPatches(),
             refinementDistanceM,
             hysteresis,
             wasRefined: (address) => this.refinedKeys.has(getKey(address)),
@@ -258,14 +283,20 @@ export class TerrainSurfaceComponent<TAddress = unknown>
             getLevel,
             getKey,
             maxLevel,
+            maxPatches: this.maxPatches(),
             refinementDistanceM,
             hysteresis,
           });
-    const edgeMasks = calculateTerrainPatchEdgeRefinementMasks(
-      domain,
-      selected,
-      getLevel,
-    );
+    const selectedSignature = selected.map(getKey).join('|');
+    if (selectedSignature !== this.edgeMaskSelectionSignature) {
+      this.cachedEdgeMasks = calculateTerrainPatchEdgeRefinementMasks(
+        domain,
+        selected,
+        getLevel,
+      );
+      this.edgeMaskSelectionSignature = selectedSignature;
+    }
+    const edgeMasks = this.cachedEdgeMasks;
     const entries = selected.map((address, index) => {
       const baseKey = getKey(address);
       const edgeRefinement = edgeMasks[index] ?? {
@@ -292,6 +323,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
         patchDistance(domain, address, position),
       ]),
     );
+    this.desiredAddresses = new Map(entries.map(({ address, key }) => [key, address]));
     this.desiredEdgeMasks = new Map(
       entries.map(({ key, edgeMask, edgeLevelDelta, edgeLevelDeltas, edgeSegments }) => [
         key,
@@ -318,7 +350,11 @@ export class TerrainSurfaceComponent<TAddress = unknown>
           value: address,
           priority: this.desiredPriorities.get(key) ?? 0,
         })),
-        new Set([...this.residents.keys(), ...this.generating]),
+        new Set([
+          ...this.residents.keys(),
+          ...this.generating,
+          ...this.completed.keys(),
+        ]),
       );
     }
 
@@ -395,24 +431,106 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   private installCompletedPatches(): void {
     if (this.completed.size === 0) return;
 
-    // A cut is committed as one unit. Until every selected replacement is
-    // ready, the previous resident cut stays visible, so a slow or failed
-    // child cannot expose a hole or produce a parent/child overlap.
-    for (const key of this.queue.desired) {
-      if (!this.residents.has(key) && !this.completed.has(key)) return;
+    // A whole cut no longer has to wait for its slowest patch. Each group is
+    // committed when it has complete coverage for one old patch: all four
+    // children replace a resident parent together, or a ready parent replaces
+    // all of its resident children. This keeps the surface covered while
+    // allowing nearby completed worker results to become visible during motion.
+    const groups = this.completedReplacementGroups();
+    let removedResident = false;
+    for (const group of groups) {
+      if (!group.every((key) => this.residents.has(key) || this.completed.has(key)))
+        continue;
+
+      const groupKeys = new Set(group);
+      for (const [key, resident] of this.residents) {
+        if (groupKeys.has(key) || this.replacedByGroup(key, group)) {
+          this.removePatch(key, resident);
+          removedResident = true;
+        }
+      }
+      for (const key of group) {
+        const completed = this.completed.get(key);
+        if (!completed || !this.queue.desired.has(key)) continue;
+        this.installPatch(key, completed.address, completed.patch);
+        this.completed.delete(key);
+      }
     }
 
-    for (const [key, patch] of this.residents) {
-      if (!this.queue.desired.has(key)) this.removePatch(key, patch);
+    // Dispose completed results that are no longer part of the desired cut.
+    // Their typed arrays are then eligible for collection instead of building
+    // up while the camera is moving.
+    for (const key of this.completed.keys()) {
+      if (!this.queue.desired.has(key)) this.completed.delete(key);
     }
-    for (const [key, { address, patch }] of this.completed) {
-      if (!this.queue.desired.has(key)) {
-        this.completed.delete(key);
-        continue;
-      }
-      this.installPatch(key, address, patch);
-      this.completed.delete(key);
+    if (removedResident && this.batchedRender) this.batchedRender.object.optimize();
+  }
+
+  private completedReplacementGroups(): string[][] {
+    const groups: string[][] = [];
+    const grouped = new Set<string>();
+    const desiredKeys = [...this.queue.desired];
+
+    // A resident parent must be replaced by all of its desired children in
+    // one operation. Conversely, a desired parent can replace all of its
+    // resident children once that parent is ready. Include unfinished members
+    // in the group so one completed child cannot expose a hole.
+    for (const [, resident] of this.residents) {
+      const group = desiredKeys.filter((key) => {
+        if (grouped.has(key) || this.residents.has(key)) return false;
+        const completed = this.completed.get(key);
+        const address = completed?.address ?? this.addressForDesiredKey(key);
+        return address !== undefined &&
+          (this.patchContains(resident.address, address) ||
+            this.patchContains(address, resident.address));
+      });
+      if (group.length === 0) continue;
+      for (const key of group) grouped.add(key);
+      groups.push(group);
     }
+    for (const key of desiredKeys) {
+      if (grouped.has(key) || !this.completed.has(key)) continue;
+      grouped.add(key);
+      groups.push([key]);
+    }
+    return groups;
+  }
+
+  private addressForDesiredKey(key: string): TAddress | undefined {
+    return this.completed.get(key)?.address ?? this.desiredAddresses.get(key);
+  }
+
+  private replacedByGroup(residentKey: string, group: readonly string[]): boolean {
+    const resident = this.residents.get(residentKey);
+    if (!resident) return false;
+    return group.some((key) => {
+      const completed = this.completed.get(key);
+      return completed !== undefined &&
+        (this.patchContains(resident.address, completed.address) ||
+          this.patchContains(completed.address, resident.address));
+    });
+  }
+
+  private patchContains(outer: TAddress, inner: TAddress): boolean {
+    const outerFace = (outer as { face?: unknown })?.face;
+    const innerFace = (inner as { face?: unknown })?.face;
+    // Cube sphere faces reuse the same UV bounds, so bounds alone must not
+    // treat patches on different faces as parent/child replacements.
+    if (outerFace !== undefined && innerFace !== undefined && outerFace !== innerFace)
+      return false;
+    const outerBounds = this.domain().getPatchBounds(outer);
+    const innerBounds = this.domain().getPatchBounds(inner);
+    const tolerance = 1e-7 * Math.max(
+      1,
+      Math.abs(outerBounds.maxU - outerBounds.minU),
+      Math.abs(outerBounds.maxV - outerBounds.minV),
+    );
+    return (
+      innerBounds.minU >= outerBounds.minU - tolerance &&
+      innerBounds.maxU <= outerBounds.maxU + tolerance &&
+      innerBounds.minV >= outerBounds.minV - tolerance &&
+      innerBounds.maxV <= outerBounds.maxV + tolerance
+    );
   }
 
   private desiredPatchesAreResident(): boolean {
@@ -454,6 +572,10 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     address: TAddress,
     patch: ITerrainPatchMesh<TAddress>,
   ): void {
+    if (this.batching() && !patch.skirt) {
+      this.installBatchedPatch(key, address, patch);
+      return;
+    }
     const material = this.createMaterial()();
     if ('wireframe' in material) {
       (material as MeshStandardMaterial).wireframe = this.wireframe();
@@ -483,12 +605,59 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     mesh.position.fromArray(patch.centerWorldM);
     this.group.add(mesh);
     this.residents.set(key, {
+      address,
       object: mesh,
       material,
       drawCalls,
       geometryBytes,
       triangles,
     });
+  }
+
+  private installBatchedPatch(
+    key: string,
+    address: TAddress,
+    patch: ITerrainPatchMesh<TAddress>,
+  ): void {
+    const batch = this.getBatchedRender();
+    const geometry = this.createGeometry(patch, address, patch.surface, false);
+    const geometryId = batch.object.addGeometry(geometry);
+    const instanceId = batch.object.addInstance(geometryId);
+    const matrix = new Matrix4().makeTranslation(...patch.centerWorldM);
+    batch.object.setMatrixAt(instanceId, matrix);
+    const geometryBytes = geometryByteCount(geometry);
+    geometry.dispose();
+    this.residents.set(key, {
+      address,
+      object: batch.object,
+      material: batch.material,
+      batchGeometryId: geometryId,
+      batchInstanceId: instanceId,
+      drawCalls: 0,
+      geometryBytes,
+      triangles: patch.surface.indices.length / 3,
+    });
+  }
+
+  private getBatchedRender(): { readonly object: BatchedMesh; readonly material: Material } {
+    if (this.batchedRender) return this.batchedRender;
+    const material = this.createMaterial()();
+    if ('wireframe' in material) {
+      (material as MeshStandardMaterial).wireframe = this.wireframe();
+    }
+    const maxInstances = Math.max(256, Math.floor(this.maxPatches() ?? 1024));
+    const transitionResolution = Math.max(2, Math.floor(this.resolution())) * 2;
+    const verticesPerPatch = (transitionResolution + 1) ** 2;
+    const indicesPerPatch = transitionResolution ** 2 * 6;
+    const object = new BatchedMesh(
+      maxInstances,
+      maxInstances * verticesPerPatch,
+      maxInstances * indicesPerPatch,
+      material,
+    );
+    this.group.add(object);
+    this.batchedRender = { object, material };
+    return this.batchedRender;
   }
 
   private createGeometry(
@@ -515,27 +684,46 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     return geometry;
   }
 
-  private removePatch(key: string, patch: IResidentPatch): void {
-    patch.object.removeFromParent();
-    patch.object.traverse((object) => {
-      if (object instanceof Mesh) object.geometry.dispose();
-    });
-    patch.material.dispose();
+  private removePatch(key: string, patch: IResidentPatch<TAddress>): void {
+    if (
+      patch.batchGeometryId !== undefined &&
+      patch.batchInstanceId !== undefined &&
+      this.batchedRender
+    ) {
+      this.batchedRender.object.deleteInstance(patch.batchInstanceId);
+      this.batchedRender.object.deleteGeometry(patch.batchGeometryId);
+    } else {
+      patch.object.removeFromParent();
+      patch.object.traverse((object) => {
+        if (object instanceof Mesh) object.geometry.dispose();
+      });
+      patch.material.dispose();
+    }
     this.residents.delete(key);
   }
 
   private disposeResidents(): void {
     for (const [key, patch] of this.residents) this.removePatch(key, patch);
+    if (this.batchedRender) {
+      this.batchedRender.object.removeFromParent();
+      this.batchedRender.object.dispose();
+      this.batchedRender.material.dispose();
+      this.batchedRender = undefined;
+    }
   }
 
   private resetSelection(): void {
     this.selectionSignature = '';
     this.refinedKeys.clear();
     this.statsSignature = '';
+    this.lastSelectionInputSignature = '';
+    this.edgeMaskSelectionSignature = '';
+    this.cachedEdgeMasks = [];
     this.generationEpoch++;
     this.generating.clear();
     this.completed.clear();
     this.desiredPriorities.clear();
+    this.desiredAddresses.clear();
     this.desiredEdgeMasks.clear();
     this.queue.clear();
     this.disposeResidents();
@@ -556,6 +744,8 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       geometryBytes += patch.geometryBytes;
       triangles += patch.triangles;
     }
+    if (this.batchedRender && this.batchedRender.object.instanceCount > 0)
+      drawCalls += 1;
     const signature = `${this.desiredPatchCount}:${this.residents.size}:${queued}:${drawCalls}:${triangles}:${geometryBytes}:${JSON.stringify(this.selectedLevels)}`;
     if (signature === this.statsSignature) return;
     this.statsSignature = signature;
