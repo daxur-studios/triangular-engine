@@ -505,5 +505,11 @@ export const routes: Routes = [
         ({ CellPlanetGlobePageComponent }) => CellPlanetGlobePageComponent,
       ),
   },
+  {
+    path: 'cell-planet-morph-spike',
+    loadComponent: () =>
+      import('./pages/cell-planet-morph-spike/cell-planet-morph-spike-page.component').then(
+        ({ CellPlanetMorphSpikePageComponent }) => CellPlanetMorphSpikePageComponent,
+      ),
+  },
 ];
-

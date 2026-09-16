@@ -1,0 +1,156 @@
+<scene [showFps]="true" [logarithmicDepthBuffer]="true">
+  <orbitControls
+    [cameraPosition]="cameraPosition()"
+    [target]="cameraTarget()"
+    [near]="0.05"
+    [far]="500"
+  />
+  <ambientLight [intensity]="1.2" />
+  <directionalLight [position]="[5, 8, 6]" [intensity]="2.2" />
+  <directionalLight [position]="[-5, -3, -4]" [intensity]="0.4" />
+</scene>
+
+<aside class="readout">
+  <strong>Cell planet · 2.5D ↔ 3D morph spike</strong>
+  <nav class="view-switch" aria-label="Map view">
+    <a [routerLink]="['/cell-planet-map']">2D map</a>
+    <a [routerLink]="['/cell-planet-25d-map']">2.5D terrain</a>
+    <a [routerLink]="['/cell-planet-globe']">Globe</a>
+    <a [routerLink]="['/cell-planet-morph-spike']" class="active" aria-current="page">Seamless morph</a>
+  </nav>
+
+  <div class="transition-actions">
+    <button
+      type="button"
+      class="primary-action"
+      [disabled]="isAnimating()"
+      (click)="toggleView()"
+    >
+      @if (targetView() === 'globe') {
+        <span>Morph to 2.5D Map (Unroll)</span>
+      } @else {
+        <span>Morph to 3D Globe (Fold)</span>
+      }
+    </button>
+  </div>
+
+  <label class="scrubber-label">
+    <div class="scrubber-header">
+      <span>Morph progress</span>
+      <strong>{{ (morphProgress() * 100).toFixed(0) }}% ({{ targetView() === 'map' ? '2.5D Map' : '3D Globe' }})</strong>
+    </div>
+    <input
+      type="range"
+      min="0"
+      max="1"
+      step="0.005"
+      [value]="morphProgress()"
+      [disabled]="isAnimating()"
+      (input)="onMorphSliderInput($event)"
+    />
+    <div class="scrubber-endpoints">
+      <small>0% 3D Sphere</small>
+      <small>100% 2.5D Plane</small>
+    </div>
+  </label>
+
+  <fieldset class="control-group">
+    <legend>Projection & Style</legend>
+    <label>
+      <span>Projection</span>
+      <select [value]="projectionKind()" (change)="onProjectionChange($event)">
+        @for (kind of projectionKinds; track kind) {
+          <option [value]="kind">{{ projectionLabels[kind] }}</option>
+        }
+      </select>
+    </label>
+
+    <label>
+      <span>Data layer</span>
+      <select [value]="fillMode()" (change)="onFillModeChange($event)">
+        @for (mode of fillModes; track mode) {
+          <option [value]="mode">{{ mode }}</option>
+        }
+      </select>
+    </label>
+
+    <label>
+      <span>Height scale: {{ heightScale().toFixed(2) }}</span>
+      <input
+        type="range"
+        min="0.0"
+        max="0.4"
+        step="0.02"
+        [value]="heightScale()"
+        (input)="onHeightScaleInput($event)"
+      />
+    </label>
+
+    <div class="checkbox-row">
+      <label>
+        <input
+          type="checkbox"
+          [checked]="seabedRelief()"
+          (change)="onSeabedReliefChange($event)"
+        />
+        <span>Seabed bathymetry</span>
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          [checked]="showOcean()"
+          (change)="onShowOceanChange($event)"
+        />
+        <span>Ocean surface</span>
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset class="control-group">
+    <legend>Game Units ({{ activeUnitsCount() }} active)</legend>
+    <div class="checkbox-row">
+      <label>
+        <input
+          type="checkbox"
+          [checked]="autoPatrol()"
+          (change)="onAutoPatrolChange($event)"
+        />
+        <span>Live unit patrol</span>
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset class="control-group">
+    <legend>Camera Focus Anchor</legend>
+    <div class="focus-buttons">
+      <button
+        type="button"
+        class="focus-btn"
+        [class.active-focus]="focusMode() === 'overview'"
+        (click)="selectFocus('overview')"
+      >
+        World Center
+      </button>
+      @for (unit of availableUnits(); track unit.id) {
+        <button
+          type="button"
+          class="focus-btn"
+          [class.active-focus]="focusMode() === 'unit' && focusedUnitId() === unit.id"
+          (click)="selectFocus(unit.id)"
+        >
+          <span class="color-dot" [style.background-color]="unit.color"></span>
+          {{ unit.name }}
+        </button>
+      }
+    </div>
+    <small class="hint">
+      Pinned to: <strong>{{ focusMode() === 'overview' ? 'World Center' : focusedUnitId() }}</strong>.
+      Toggling between 2.5D and 3D stays centered on this exact unit/location without jumping.
+    </small>
+  </fieldset>
+
+  <footer class="stats">
+    <span>Vertices: {{ vertices().toLocaleString() }} · Triangles: {{ triangles().toLocaleString() }}</span>
+    <span>Drag to orbit · Scroll to zoom</span>
+  </footer>
+</aside>

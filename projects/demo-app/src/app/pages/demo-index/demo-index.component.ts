@@ -178,6 +178,18 @@ export const DEMOS: readonly DemoItem[] = [
       'Fixed-resolution prototype globe that radially displaces the shared cell planet surface sampler (runbook 032): orbit/zoom, shared colour modes, height exaggeration and seabed relief. Defers chunked LOD/streaming to runbook 031.',
   },
   {
+    id: 'cell-planet-morph-spike',
+    number: '02e',
+    title: 'Cell Planet 2.5D ↔ 3D Morph Spike',
+    route: '/cell-planet-morph-spike',
+    categoryId: 'terrain',
+    tier: 'lab',
+    entryPoints: ['worldgen'],
+    package: 'triangular-engine/worldgen + worldgen/render',
+    description:
+      'Seamless animated transition between a 3D spherical planet and a 2.5D flat map (Equal Earth/Equirectangular) with live game units that adapt positions and surface orientation in real time.',
+  },
+  {
     id: 'takram-clouds',
     number: '03',
     title: 'Takram Clouds',

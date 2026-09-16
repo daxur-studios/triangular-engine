@@ -20,6 +20,10 @@
       class="active"
       aria-current="page"
     >Globe</a>
+    <a
+      [routerLink]="['/cell-planet-morph-spike']"
+      [queryParams]="comparisonQueryParams()"
+    >Morph</a>
   </nav>
   <span>shared sampler → fixed {{ longitudeSegments }}×{{ latitudeRings }} sphere → radial displacement</span>
 

@@ -494,6 +494,10 @@ function makeColorTexture(
           [routerLink]="['/cell-planet-globe']"
           [queryParams]="comparisonQueryParams()"
         >Globe</a>
+        <a
+          [routerLink]="['/cell-planet-morph-spike']"
+          [queryParams]="comparisonQueryParams()"
+        >Morph</a>
       </nav>
       <span>shared planet sampler → baked height source → clipmap</span>
       <label>
