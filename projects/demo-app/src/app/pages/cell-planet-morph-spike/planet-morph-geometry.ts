@@ -45,6 +45,8 @@ export interface ISurfaceTransform {
  * +Y is North, +X is East, +Z faces toward the viewer.
  * The front center point (lon=0, lat=0) sits tangent at Z = 0, and as t -> 0 (Globe),
  * the sides and back curl monotonically backwards into -Z away from the camera.
+ *
+ * An optional `centralLon` can be supplied to dynamically center the projection on a moving unit.
  */
 export function evaluateSurfaceTransform(
   direction: IVec3,
@@ -55,19 +57,28 @@ export function evaluateSurfaceTransform(
   mapWidth: number,
   mapHeight: number,
   t: number,
+  centralLon = 0,
 ): ISurfaceTransform {
   const normDir = normalize(direction);
   const lat = Math.asin(Math.max(-1, Math.min(1, normDir.y)));
-  const lon = Math.atan2(normDir.x, normDir.z);
+  const rawLon = Math.atan2(normDir.x, normDir.z);
+  const lon = centralLon === 0
+    ? rawLon
+    : Math.atan2(Math.sin(rawLon - centralLon), Math.cos(rawLon - centralLon));
 
   // 3D Sphere state: front point at Z = 0, center at (0, 0, -radius)
   const displacedRadius = radius + elevation * heightScale;
+  const cosLat = Math.cos(lat);
+  const dirX = cosLat * Math.sin(lon);
+  const dirY = Math.sin(lat);
+  const dirZ = cosLat * Math.cos(lon);
+
   const spherePos = new Vector3(
-    normDir.x * displacedRadius,
-    normDir.y * displacedRadius,
-    normDir.z * displacedRadius - radius,
+    dirX * displacedRadius,
+    dirY * displacedRadius,
+    dirZ * displacedRadius - radius,
   );
-  const sphereNorm = new Vector3(normDir.x, normDir.y, normDir.z);
+  const sphereNorm = new Vector3(dirX, dirY, dirZ);
 
   // 2.5D Flat map state: in XY plane facing +Z
   const proj = projection.project(lon, lat, mapWidth, mapHeight);

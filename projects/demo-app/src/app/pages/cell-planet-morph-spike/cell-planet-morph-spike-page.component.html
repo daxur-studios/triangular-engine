@@ -139,13 +139,29 @@
           (click)="selectFocus(unit.id)"
         >
           <span class="color-dot" [style.background-color]="unit.color"></span>
-          {{ unit.name }}
+          <span>{{ unit.isAir ? '✈' : unit.isNaval ? '⛵' : '⚑' }} {{ unit.name }}</span>
         </button>
       }
     </div>
+
+    <div class="checkbox-row" style="margin-top: 0.35rem;">
+      <label>
+        <input
+          type="checkbox"
+          [checked]="dynamicCenterOfProjection()"
+          (change)="onDynamicCenterToggle($event)"
+        />
+        <span>Dynamic center of projection (Follow Unit)</span>
+      </label>
+    </div>
+
     <small class="hint">
       Pinned to: <strong>{{ focusMode() === 'overview' ? 'World Center' : focusedUnitId() }}</strong>.
-      Toggling between 2.5D and 3D stays centered on this exact unit/location without jumping.
+      @if (dynamicCenterOfProjection()) {
+        <em>Dynamic projection active:</em> The world projection dynamically scrolls/rotates to keep this unit in the horizontal center with infinite wrap-around.
+      } @else {
+        Camera stays centered on this unit across 2.5D and 3D.
+      }
     </small>
   </fieldset>
 

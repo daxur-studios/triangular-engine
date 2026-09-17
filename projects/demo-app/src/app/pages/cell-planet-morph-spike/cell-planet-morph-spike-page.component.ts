@@ -9,10 +9,14 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
+  BoxGeometry,
   Color,
+  ConeGeometry,
   CylinderGeometry,
+  Euler,
   Group,
   IUniform,
+  Matrix4,
   Mesh,
   MeshStandardMaterial,
   OctahedronGeometry,
@@ -69,7 +73,7 @@ const MORPH_RINGS = 64;
 interface IGameUnit {
   id: string;
   name: string;
-  kind: 'scout' | 'pioneer' | 'legion' | 'frigate';
+  kind: 'scout' | 'pioneer' | 'legion' | 'frigate' | 'airplane';
   color: string;
   currentCellId: number;
   targetCellId: number;
@@ -77,8 +81,16 @@ interface IGameUnit {
   targetDirection: IVec3;
   elevation: number;
   isNaval: boolean;
+  isAir: boolean;
   group: Group;
   moveProgress: number;
+  // Airplane flight fields
+  flightAngle?: number;
+  flightSpeed?: number;
+  flightType?: 'greatCircle' | 'arcticCircuit' | 'southernCircuit';
+  orbitBasisP?: Vector3;
+  orbitBasisV?: Vector3;
+  velocityDir?: Vector3;
 }
 
 export type CellPlanetMorphFillMode =
@@ -116,6 +128,7 @@ export class CellPlanetMorphSpikePageComponent {
   readonly seabedRelief = signal(true);
   readonly showOcean = signal(true);
   readonly autoPatrol = signal(true);
+  readonly dynamicCenterOfProjection = signal(false);
 
   /** 0 = 3D Globe, 1 = 2.5D Map */
   readonly morphProgress = signal(0.0);
@@ -129,12 +142,14 @@ export class CellPlanetMorphSpikePageComponent {
 
   // Focus & Camera tracking
   readonly focusMode = signal<'unit' | 'overview'>('unit');
-  readonly focusedUnitId = signal<string>('Scout Vanguard');
-  readonly availableUnits = signal<Array<{ id: string; name: string; color: string; isNaval: boolean }>>([]);
+  readonly focusedUnitId = signal<string>('Skyward One (Transcontinental)');
+  readonly availableUnits = signal<Array<{ id: string; name: string; color: string; isNaval: boolean; isAir: boolean }>>([]);
 
   // Camera signals for OrbitControls
   readonly cameraPosition = signal<[number, number, number]>([0, 0, 4.4]);
   readonly cameraTarget = signal<[number, number, number]>([0, 0, 0]);
+
+  private currentCentralLon = 0;
 
   private graph!: IPlanetGraphCore;
   private tectonics!: IPlanetTectonics;
@@ -146,6 +161,7 @@ export class CellPlanetMorphSpikePageComponent {
 
   private terrainGeometryData?: IPlanetMorphGeometryData;
   private oceanGeometryData?: IPlanetMorphGeometryData;
+  private mapWorldGroup?: Group;
   private terrainMesh?: Mesh;
   private oceanMesh?: Mesh;
   private readonly morphUniform: IUniform<number> = { value: 0 };
@@ -249,6 +265,12 @@ export class CellPlanetMorphSpikePageComponent {
     this.autoPatrol.set((event.target as HTMLInputElement).checked);
   }
 
+  onDynamicCenterToggle(event: Event): void {
+    this.dynamicCenterOfProjection.set((event.target as HTMLInputElement).checked);
+    this.updateUnitsPositions();
+    this.updateCameraForProgress(this.morphProgress());
+  }
+
   selectFocus(target: 'overview' | string): void {
     if (target === 'overview') {
       this.focusMode.set('overview');
@@ -292,6 +314,10 @@ export class CellPlanetMorphSpikePageComponent {
     if (this.focusMode() === 'unit') {
       const unit = this.units.find((u) => u.id === this.focusedUnitId()) ?? this.units[0];
       if (unit) {
+        // Retrieve true world-space position of unit (reflects mapWorldGroup position and rotation)
+        const unitWorldPos = new Vector3();
+        unit.group.getWorldPosition(unitWorldPos);
+
         const projection = MAP_PROJECTIONS[this.projectionKind()];
         const mapWidth = this.terrainGeometryData?.mapWidth ?? 2 * Math.PI * GLOBE_RADIUS;
         const mapHeight = this.terrainGeometryData?.mapHeight ?? Math.PI * GLOBE_RADIUS;
@@ -305,22 +331,24 @@ export class CellPlanetMorphSpikePageComponent {
           mapWidth,
           mapHeight,
           t,
+          0,
         );
 
-        const target = transform.position;
-        const normal = transform.normal;
+        // World-oriented surface normal
+        const rotEuler = this.mapWorldGroup ? this.mapWorldGroup.rotation : new Euler();
+        const worldNormal = transform.normal.clone().applyEuler(rotEuler).normalize();
 
         // In 3D Globe: look at the unit from outward along its surface normal
-        const globeOffset = normal.clone().multiplyScalar(2.6);
+        const globeOffset = worldNormal.clone().multiplyScalar(2.6);
 
         // In 2.5D Map: look at the unit from slightly south (-Y) and elevated (+Z) at a 45-deg oblique angle
         const mapOffset = new Vector3(0, -1.8, 2.4);
 
         const offset = new Vector3().lerpVectors(globeOffset, mapOffset, t);
-        const camPos = new Vector3().addVectors(target, offset);
+        const camPos = new Vector3().addVectors(unitWorldPos, offset);
 
         this.cameraPosition.set([camPos.x, camPos.y, camPos.z]);
-        this.cameraTarget.set([target.x, target.y, target.z]);
+        this.cameraTarget.set([unitWorldPos.x, unitWorldPos.y, unitWorldPos.z]);
         return;
       }
     }
@@ -412,15 +440,22 @@ export class CellPlanetMorphSpikePageComponent {
       },
     });
 
+    this.mapWorldGroup = new Group();
+    this.mapWorldGroup.name = 'map-world-group';
+    this.engine.scene.add(this.mapWorldGroup);
+
+    const mapWidth = this.terrainGeometryData.mapWidth;
+
     const { material: terrainMat } = createPlanetMorphMaterial(
       { vertexColors: true, roughness: 0.9, metalness: 0.05 },
       { uMorph: this.morphUniform },
     );
+
     this.terrainMesh = new Mesh(this.terrainGeometryData.geometry, terrainMat);
     this.terrainMesh.name = 'morph-terrain';
-    this.engine.scene.add(this.terrainMesh);
+    this.mapWorldGroup.add(this.terrainMesh);
 
-    // Ocean mesh
+    // Ocean mesh (single map)
     this.oceanGeometryData = buildOceanMorphGeometry(
       GLOBE_RADIUS,
       this.heightScale(),
@@ -440,10 +475,11 @@ export class CellPlanetMorphSpikePageComponent {
       },
       { uMorph: this.morphUniform },
     );
+
     this.oceanMesh = new Mesh(this.oceanGeometryData.geometry, oceanMat);
     this.oceanMesh.name = 'morph-ocean';
     this.oceanMesh.visible = this.showOcean();
-    this.engine.scene.add(this.oceanMesh);
+    this.mapWorldGroup.add(this.oceanMesh);
 
     this.triangles.set(this.terrainGeometryData.triangleCount * 2);
     this.vertices.set(this.terrainGeometryData.vertexCount * 2);
@@ -461,12 +497,56 @@ export class CellPlanetMorphSpikePageComponent {
       else oceanCells.push(cell.id);
     }
 
-    const configs: Array<{ name: string; kind: IGameUnit['kind']; color: string; isNaval: boolean; cellId: number }> = [
+    const configs: Array<{
+      name: string;
+      kind: IGameUnit['kind'];
+      color: string;
+      isNaval: boolean;
+      isAir: boolean;
+      cellId: number;
+      flightType?: IGameUnit['flightType'];
+      orbitBasisP?: Vector3;
+      orbitBasisV?: Vector3;
+      flightSpeed?: number;
+    }> = [
+      {
+        name: 'Skyward One (Transcontinental)',
+        kind: 'airplane',
+        color: '#38bdf8', // Electric Sky Blue
+        isNaval: false,
+        isAir: true,
+        cellId: 0,
+        flightType: 'greatCircle',
+        orbitBasisP: new Vector3(1.0, 0.15, 0.0).normalize(),
+        orbitBasisV: new Vector3(0.0, 0.42, 1.0).normalize(),
+        flightSpeed: 0.35,
+      },
+      {
+        name: 'Polar Express (Arctic Patrol)',
+        kind: 'airplane',
+        color: '#f59e0b', // Amber Gold
+        isNaval: false,
+        isAir: true,
+        cellId: 0,
+        flightType: 'arcticCircuit',
+        flightSpeed: 0.40,
+      },
+      {
+        name: 'Pacific Phantom (Southern Express)',
+        kind: 'airplane',
+        color: '#c084fc', // Bright Purple
+        isNaval: false,
+        isAir: true,
+        cellId: 0,
+        flightType: 'southernCircuit',
+        flightSpeed: 0.38,
+      },
       {
         name: 'Scout Vanguard',
         kind: 'scout',
         color: '#ffcc00', // Gold
         isNaval: false,
+        isAir: false,
         cellId: landCells[Math.floor(landCells.length * 0.15)] ?? 0,
       },
       {
@@ -474,6 +554,7 @@ export class CellPlanetMorphSpikePageComponent {
         kind: 'pioneer',
         color: '#00e5ff', // Cyan
         isNaval: false,
+        isAir: false,
         cellId: landCells[Math.floor(landCells.length * 0.45)] ?? 10,
       },
       {
@@ -481,6 +562,7 @@ export class CellPlanetMorphSpikePageComponent {
         kind: 'legion',
         color: '#ff3d71', // Crimson
         isNaval: false,
+        isAir: false,
         cellId: landCells[Math.floor(landCells.length * 0.75)] ?? 20,
       },
       {
@@ -488,55 +570,71 @@ export class CellPlanetMorphSpikePageComponent {
         kind: 'frigate',
         color: '#00e676', // Emerald Sea Green
         isNaval: true,
+        isAir: false,
         cellId: oceanCells[Math.floor(oceanCells.length * 0.5)] ?? 30,
       },
     ];
 
     for (const config of configs) {
-      const cell = this.graph.cells[config.cellId];
+      const cell = this.graph.cells[config.cellId] ?? this.graph.cells[0];
       if (!cell) continue;
 
-      const group = new Group();
+      let group: Group;
+      if (config.kind === 'airplane') {
+        group = this.createAirplaneModel(config.color);
+      } else {
+        group = new Group();
+
+        // Base disc
+        const baseGeo = new CylinderGeometry(0.08, 0.08, 0.02, 16);
+        const baseMat = new MeshStandardMaterial({ color: '#22272e', roughness: 0.5, metalness: 0.8 });
+        const baseMesh = new Mesh(baseGeo, baseMat);
+        baseMesh.position.y = 0.01;
+        group.add(baseMesh);
+
+        // Token figure
+        const tokenGeo = new OctahedronGeometry(0.075);
+        const tokenMat = new MeshStandardMaterial({
+          color: config.color,
+          roughness: 0.2,
+          metalness: 0.3,
+          emissive: config.color,
+          emissiveIntensity: 0.25,
+        });
+        const tokenMesh = new Mesh(tokenGeo, tokenMat);
+        tokenMesh.position.y = 0.10;
+        group.add(tokenMesh);
+
+        // Aura / Selection ring
+        const ringGeo = new TorusGeometry(0.11, 0.012, 8, 24);
+        const ringMat = new MeshStandardMaterial({
+          color: config.color,
+          roughness: 0.3,
+          emissive: config.color,
+          emissiveIntensity: 0.5,
+        });
+        const ringMesh = new Mesh(ringGeo, ringMat);
+        ringMesh.rotation.x = Math.PI / 2;
+        ringMesh.position.y = 0.02;
+        group.add(ringMesh);
+      }
+
       group.name = `unit-${config.name}`;
+      if (this.mapWorldGroup) {
+        this.mapWorldGroup.add(group);
+      } else {
+        this.engine.scene.add(group);
+      }
 
-      // Base disc
-      const baseGeo = new CylinderGeometry(0.08, 0.08, 0.02, 16);
-      const baseMat = new MeshStandardMaterial({ color: '#22272e', roughness: 0.5, metalness: 0.8 });
-      const baseMesh = new Mesh(baseGeo, baseMat);
-      baseMesh.position.y = 0.01;
-      group.add(baseMesh);
+      const elev = config.isAir
+        ? this.seaLevelElevation + 0.18
+        : config.isNaval
+          ? this.seaLevelElevation
+          : Math.max(this.seaLevelElevation, this.sampler.sample(cell.center).elevation);
 
-      // Token figure
-      const tokenGeo = new OctahedronGeometry(0.075);
-      const tokenMat = new MeshStandardMaterial({
-        color: config.color,
-        roughness: 0.2,
-        metalness: 0.3,
-        emissive: config.color,
-        emissiveIntensity: 0.25,
-      });
-      const tokenMesh = new Mesh(tokenGeo, tokenMat);
-      tokenMesh.position.y = 0.10;
-      group.add(tokenMesh);
-
-      // Aura / Selection ring
-      const ringGeo = new TorusGeometry(0.11, 0.012, 8, 24);
-      const ringMat = new MeshStandardMaterial({
-        color: config.color,
-        roughness: 0.3,
-        emissive: config.color,
-        emissiveIntensity: 0.5,
-      });
-      const ringMesh = new Mesh(ringGeo, ringMat);
-      ringMesh.rotation.x = Math.PI / 2;
-      ringMesh.position.y = 0.02;
-      group.add(ringMesh);
-
-      this.engine.scene.add(group);
-
-      const elev = config.isNaval
-        ? this.seaLevelElevation
-        : Math.max(this.seaLevelElevation, this.sampler.sample(cell.center).elevation);
+      const initDir = config.isAir && config.orbitBasisP
+        ? { x: config.orbitBasisP.x, y: config.orbitBasisP.y, z: config.orbitBasisP.z }
+        : { ...cell.center };
 
       this.units.push({
         id: config.name,
@@ -545,21 +643,68 @@ export class CellPlanetMorphSpikePageComponent {
         color: config.color,
         currentCellId: cell.id,
         targetCellId: cell.id,
-        direction: { ...cell.center },
+        direction: initDir,
         targetDirection: { ...cell.center },
         elevation: elev,
         isNaval: config.isNaval,
+        isAir: config.isAir,
         group,
         moveProgress: 1.0,
+        flightAngle: 0,
+        flightSpeed: config.flightSpeed,
+        flightType: config.flightType,
+        orbitBasisP: config.orbitBasisP,
+        orbitBasisV: config.orbitBasisV,
+        velocityDir: config.orbitBasisV ? config.orbitBasisV.clone() : undefined,
       });
     }
 
     this.activeUnitsCount.set(this.units.length);
     this.availableUnits.set(
-      this.units.map((u) => ({ id: u.id, name: u.name, color: u.color, isNaval: u.isNaval })),
+      this.units.map((u) => ({ id: u.id, name: u.name, color: u.color, isNaval: u.isNaval, isAir: u.isAir })),
     );
     this.updateUnitsPositions();
     this.updateCameraForProgress(this.morphProgress());
+  }
+
+  private createAirplaneModel(color: string): Group {
+    const group = new Group();
+
+    // Fuselage (needle nose cone pointing along +Z)
+    const bodyGeo = new ConeGeometry(0.045, 0.28, 8);
+    bodyGeo.rotateX(Math.PI / 2);
+    const bodyMat = new MeshStandardMaterial({ color: '#f8fafc', roughness: 0.2, metalness: 0.7 });
+    const bodyMesh = new Mesh(bodyGeo, bodyMat);
+    bodyMesh.position.y = 0.05;
+    group.add(bodyMesh);
+
+    // Delta Wings
+    const wingGeo = new BoxGeometry(0.32, 0.012, 0.12);
+    const wingMat = new MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.5 });
+    const wingMesh = new Mesh(wingGeo, wingMat);
+    wingMesh.position.set(0, 0.048, -0.02);
+    group.add(wingMesh);
+
+    // Vertical Stabilizer / Tail
+    const tailGeo = new BoxGeometry(0.012, 0.07, 0.06);
+    const tailMat = new MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.5 });
+    const tailMesh = new Mesh(tailGeo, tailMat);
+    tailMesh.position.set(0, 0.085, -0.09);
+    group.add(tailMesh);
+
+    // Jet Thruster Glow
+    const engineGeo = new CylinderGeometry(0.015, 0.015, 0.03, 8);
+    engineGeo.rotateX(Math.PI / 2);
+    const engineMat = new MeshStandardMaterial({
+      color: '#38bdf8',
+      emissive: '#38bdf8',
+      emissiveIntensity: 1.2,
+    });
+    const engineMesh = new Mesh(engineGeo, engineMat);
+    engineMesh.position.set(0, 0.05, -0.14);
+    group.add(engineMesh);
+
+    return group;
   }
 
   private updateUnitsPositions(): void {
@@ -581,11 +726,39 @@ export class CellPlanetMorphSpikePageComponent {
         mapWidth,
         mapHeight,
         t,
+        0,
       );
 
       // Lift slightly above surface to prevent clipping
       unit.group.position.copy(transform.position).addScaledVector(transform.normal, 0.02);
-      unit.group.quaternion.setFromUnitVectors(upVector, transform.normal);
+
+      if (unit.isAir && unit.velocityDir) {
+        // Forward lookahead point along velocity
+        const fwdPoint: IVec3 = {
+          x: unit.direction.x + unit.velocityDir.x * 0.05,
+          y: unit.direction.y + unit.velocityDir.y * 0.05,
+          z: unit.direction.z + unit.velocityDir.z * 0.05,
+        };
+        const fwdTrans = evaluateSurfaceTransform(
+          fwdPoint,
+          unit.elevation,
+          GLOBE_RADIUS,
+          this.heightScale(),
+          projection,
+          mapWidth,
+          mapHeight,
+          t,
+          0,
+        );
+        const fwdDir = new Vector3().subVectors(fwdTrans.position, transform.position).normalize();
+        const up = transform.normal;
+        const right = new Vector3().crossVectors(fwdDir, up).normalize();
+        const correctedUp = new Vector3().crossVectors(right, fwdDir).normalize();
+        const rotMat = new Matrix4().makeBasis(right, correctedUp, fwdDir);
+        unit.group.quaternion.setFromRotationMatrix(rotMat);
+      } else {
+        unit.group.quaternion.setFromUnitVectors(upVector, transform.normal);
+      }
     }
   }
 
@@ -598,46 +771,131 @@ export class CellPlanetMorphSpikePageComponent {
 
       if (this.autoPatrol() && this.units.length > 0) {
         for (const unit of this.units) {
-          // If stationary, occasionally pick a neighbor
-          if (unit.moveProgress >= 1.0 && Math.random() < deltaSec * 0.5) {
-            const currentCell = this.graph.cells[unit.currentCellId];
-            if (currentCell) {
-              const eligibleNeighbors = currentCell.neighbors.filter((nId) => {
-                const isLand = this.tectonics.isLand[nId];
-                return unit.isNaval ? !isLand : isLand;
-              });
+          if (unit.isAir) {
+            unit.flightAngle = (unit.flightAngle ?? 0) + deltaSec * (unit.flightSpeed ?? 0.35);
+            const ang = unit.flightAngle;
 
-              if (eligibleNeighbors.length > 0) {
-                const pick = eligibleNeighbors[Math.floor(Math.random() * eligibleNeighbors.length)];
-                unit.targetCellId = pick;
-                unit.targetDirection = { ...this.graph.cells[pick].center };
-                unit.moveProgress = 0.0;
+            if (unit.flightType === 'greatCircle' && unit.orbitBasisP && unit.orbitBasisV) {
+              const p = unit.orbitBasisP;
+              const v = unit.orbitBasisV;
+              const curP = new Vector3().addScaledVector(p, Math.cos(ang)).addScaledVector(v, Math.sin(ang)).normalize();
+              const curV = new Vector3().addScaledVector(p, -Math.sin(ang)).addScaledVector(v, Math.cos(ang)).normalize();
+
+              unit.direction = { x: curP.x, y: curP.y, z: curP.z };
+              unit.velocityDir = curV;
+            } else if (unit.flightType === 'arcticCircuit') {
+              // High northern circumpolar circuit between 55 deg and 68 deg North
+              const latRad = (61.5 + 6.5 * Math.sin(ang * 2)) * (Math.PI / 180);
+              const lonRad = ang;
+              const cosLat = Math.cos(latRad);
+              const sinLat = Math.sin(latRad);
+
+              unit.direction = {
+                x: cosLat * Math.sin(lonRad),
+                y: sinLat,
+                z: cosLat * Math.cos(lonRad),
+              };
+
+              const dLon = 1.0;
+              const dLat = (13.0 * Math.cos(ang * 2)) * (Math.PI / 180);
+              const vx = -sinLat * dLat * Math.sin(lonRad) + cosLat * Math.cos(lonRad) * dLon;
+              const vy = cosLat * dLat;
+              const vz = -sinLat * dLat * Math.cos(lonRad) - cosLat * Math.sin(lonRad) * dLon;
+              unit.velocityDir = new Vector3(vx, vy, vz).normalize();
+            } else if (unit.flightType === 'southernCircuit') {
+              // Southern hemisphere patrol between -24 deg and -36 deg South
+              const latRad = (-30.0 + 6.0 * Math.cos(ang * 2)) * (Math.PI / 180);
+              const lonRad = -ang;
+              const cosLat = Math.cos(latRad);
+              const sinLat = Math.sin(latRad);
+
+              unit.direction = {
+                x: cosLat * Math.sin(lonRad),
+                y: sinLat,
+                z: cosLat * Math.cos(lonRad),
+              };
+
+              const dLon = -1.0;
+              const dLat = (-12.0 * Math.sin(ang * 2)) * (Math.PI / 180);
+              const vx = -sinLat * dLat * Math.sin(lonRad) + cosLat * Math.cos(lonRad) * dLon;
+              const vy = cosLat * dLat;
+              const vz = -sinLat * dLat * Math.cos(lonRad) - cosLat * Math.sin(lonRad) * dLon;
+              unit.velocityDir = new Vector3(vx, vy, vz).normalize();
+            }
+            unit.elevation = this.seaLevelElevation + 0.18;
+          } else {
+            // Ground / naval patrol logic
+            if (unit.moveProgress >= 1.0 && Math.random() < deltaSec * 0.5) {
+              const currentCell = this.graph.cells[unit.currentCellId];
+              if (currentCell) {
+                const eligibleNeighbors = currentCell.neighbors.filter((nId) => {
+                  const isLand = this.tectonics.isLand[nId];
+                  return unit.isNaval ? !isLand : isLand;
+                });
+
+                if (eligibleNeighbors.length > 0) {
+                  const pick = eligibleNeighbors[Math.floor(Math.random() * eligibleNeighbors.length)];
+                  unit.targetCellId = pick;
+                  unit.targetDirection = { ...this.graph.cells[pick].center };
+                  unit.moveProgress = 0.0;
+                }
+              }
+            }
+
+            // Move along spherical arc between cells
+            if (unit.moveProgress < 1.0) {
+              unit.moveProgress = Math.min(1.0, unit.moveProgress + deltaSec * 0.8);
+              const p = unit.moveProgress;
+
+              // Slerp-like direction interpolation
+              const interpDir = normalize({
+                x: unit.direction.x * (1 - p) + unit.targetDirection.x * p,
+                y: unit.direction.y * (1 - p) + unit.targetDirection.y * p,
+                z: unit.direction.z * (1 - p) + unit.targetDirection.z * p,
+              });
+              unit.direction = interpDir;
+
+              const targetElevation = unit.isNaval
+                ? this.seaLevelElevation
+                : Math.max(this.seaLevelElevation, this.sampler.sample(interpDir).elevation);
+              unit.elevation = unit.elevation * (1 - p) + targetElevation * p;
+
+              if (unit.moveProgress >= 1.0) {
+                unit.currentCellId = unit.targetCellId;
               }
             }
           }
+        }
 
-          // Move along spherical arc between cells
-          if (unit.moveProgress < 1.0) {
-            unit.moveProgress = Math.min(1.0, unit.moveProgress + deltaSec * 0.8);
-            const p = unit.moveProgress;
+        const t = this.morphProgress();
+        const mapWidth = this.terrainGeometryData?.mapWidth ?? 2 * Math.PI * GLOBE_RADIUS;
 
-            // Slerp-like direction interpolation
-            const interpDir = normalize({
-              x: unit.direction.x * (1 - p) + unit.targetDirection.x * p,
-              y: unit.direction.y * (1 - p) + unit.targetDirection.y * p,
-              z: unit.direction.z * (1 - p) + unit.targetDirection.z * p,
-            });
-            unit.direction = interpDir;
+        if (this.oceanMesh) this.oceanMesh.visible = this.showOcean();
 
-            const targetElevation = unit.isNaval
-              ? this.seaLevelElevation
-              : Math.max(this.seaLevelElevation, this.sampler.sample(interpDir).elevation);
-            unit.elevation = unit.elevation * (1 - p) + targetElevation * p;
-
-            if (unit.moveProgress >= 1.0) {
-              unit.currentCellId = unit.targetCellId;
-            }
+        // Dynamic center of projection tracking
+        if (this.dynamicCenterOfProjection() && this.focusMode() === 'unit') {
+          const focused = this.units.find((u) => u.id === this.focusedUnitId()) ?? this.units[0];
+          if (focused) {
+            const targetLon = Math.atan2(focused.direction.x, focused.direction.z);
+            const diff = Math.atan2(Math.sin(targetLon - this.currentCentralLon), Math.cos(targetLon - this.currentCentralLon));
+            this.currentCentralLon += diff * Math.min(1.0, deltaSec * 6.0);
           }
+        } else if (!this.dynamicCenterOfProjection()) {
+          // Smoothly return to Greenwich meridian (0) when disabled
+          const diff = Math.atan2(Math.sin(-this.currentCentralLon), Math.cos(-this.currentCentralLon));
+          this.currentCentralLon += diff * Math.min(1.0, deltaSec * 3.0);
+        }
+
+        if (this.mapWorldGroup) {
+          // In 3D Globe: Rotate mapWorldGroup around Y by -currentCentralLon
+          this.mapWorldGroup.rotation.y = -this.currentCentralLon * (1 - t);
+
+          // In 2.5D Map: Scroll mapWorldGroup along X by -projX(currentCentralLon)
+          const flatShift = (this.currentCentralLon / (2 * Math.PI)) * mapWidth;
+          const wrappedShift = ((flatShift % mapWidth) + mapWidth) % mapWidth;
+          const centeredShift = wrappedShift > mapWidth / 2 ? wrappedShift - mapWidth : wrappedShift;
+
+          this.mapWorldGroup.position.x = -centeredShift * t;
         }
 
         this.updateUnitsPositions();
@@ -678,23 +936,30 @@ export class CellPlanetMorphSpikePageComponent {
   }
 
   private disposeMeshes(): void {
-    if (this.terrainMesh) {
-      this.engine.scene.remove(this.terrainMesh);
-      this.terrainMesh.geometry.dispose();
-      (this.terrainMesh.material as MeshStandardMaterial).dispose();
-      this.terrainMesh = undefined;
+    if (this.mapWorldGroup) {
+      this.engine.scene.remove(this.mapWorldGroup);
+      this.mapWorldGroup.clear();
+      this.mapWorldGroup = undefined;
     }
-    if (this.oceanMesh) {
-      this.engine.scene.remove(this.oceanMesh);
-      this.oceanMesh.geometry.dispose();
-      (this.oceanMesh.material as MeshStandardMaterial).dispose();
-      this.oceanMesh = undefined;
+    if (this.terrainGeometryData) {
+      this.terrainGeometryData.geometry.dispose();
+      this.terrainGeometryData = undefined;
     }
+    if (this.oceanGeometryData) {
+      this.oceanGeometryData.geometry.dispose();
+      this.oceanGeometryData = undefined;
+    }
+    this.terrainMesh = undefined;
+    this.oceanMesh = undefined;
   }
 
   private disposeUnits(): void {
     for (const unit of this.units) {
-      this.engine.scene.remove(unit.group);
+      if (this.mapWorldGroup) {
+        this.mapWorldGroup.remove(unit.group);
+      } else {
+        this.engine.scene.remove(unit.group);
+      }
       unit.group.traverse((obj) => {
         if (obj instanceof Mesh) {
           obj.geometry.dispose();
