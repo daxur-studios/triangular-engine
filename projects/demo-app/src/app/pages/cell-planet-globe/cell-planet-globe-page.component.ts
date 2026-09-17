@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
@@ -49,6 +50,12 @@ import {
 } from 'triangular-engine/terrain';
 import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
 import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
+import {
+  CELL_PLANET_U0_BOOKMARK_IDS,
+  CELL_PLANET_U0_FIXTURE,
+  CellPlanetU0BookmarkId,
+  getCellPlanetU0Bookmark,
+} from '../cell-planet-u0-fixture';
 import { getTerrainHeightScaleM } from '../cell-planet-25d-map/cell-planet-terrain-scale';
 
 /** Modest fixed tessellation: 96 x 48 quads → ~9.2k triangles. No LOD, by design (runbook 032). */
@@ -149,7 +156,7 @@ if (uTerrainMacroEnabled > 0.5) {
  */
 @Component({
   selector: 'app-cell-planet-globe-page',
-  imports: [EngineModule, RouterLink],
+  imports: [FormsModule, EngineModule, RouterLink],
   templateUrl: './cell-planet-globe-page.component.html',
   styleUrl: './cell-planet-globe-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -169,6 +176,10 @@ export class CellPlanetGlobePageComponent {
   /** Same physical body-size tiers as the 2.5D page. */
   readonly worldSizeTier = signal<WorldSizeTier>('medium');
   readonly worldSizeKinds: WorldSizeTier[] = ['mini', 'small', 'medium', 'large', 'extra-large'];
+  readonly u0Fixture = CELL_PLANET_U0_FIXTURE;
+  readonly u0BookmarkIds = CELL_PLANET_U0_BOOKMARK_IDS;
+  readonly u0BookmarkId = signal<CellPlanetU0BookmarkId>('overview');
+  readonly u0Bookmark = computed(() => getCellPlanetU0Bookmark(this.u0BookmarkId()));
   readonly waterLevel = signal(0);
   readonly fillMode = signal<CellPlanetGlobeFillMode>('biome');
   readonly fillModes: CellPlanetGlobeFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture', 'land', 'material'];
@@ -187,7 +198,26 @@ export class CellPlanetGlobePageComponent {
   );
   readonly orbitCameraPosition = computed(() => {
     const radius = this.globeRadiusM();
+    const bookmark = this.u0Bookmark();
+    if (bookmark.id !== 'overview') {
+      const distance = radius * (1 + bookmark.cameraRadiusFactor);
+      return [
+        bookmark.direction.x * distance,
+        bookmark.direction.y * distance,
+        bookmark.direction.z * distance,
+      ] as [number, number, number];
+    }
     return [0, radius * 1.2, radius * 2.8] as [number, number, number];
+  });
+  readonly orbitCameraTarget = computed(() => {
+    const bookmark = this.u0Bookmark();
+    if (bookmark.id === 'overview') return [0, 0, 0] as [number, number, number];
+    const radius = this.globeRadiusM() * 0.98;
+    return [
+      bookmark.direction.x * radius,
+      bookmark.direction.y * radius,
+      bookmark.direction.z * radius,
+    ] as [number, number, number];
   });
   readonly cameraNearM = computed(() => Math.max(0.1, this.globeRadiusM() * 1e-6));
   readonly cameraFarM = computed(() => Math.max(2_000, this.globeRadiusM() * 8));
@@ -281,6 +311,13 @@ export class CellPlanetGlobePageComponent {
     }
   }
 
+  onWorldSizeValueChange(value: string): void {
+    if (!this.worldSizeKinds.includes(value as WorldSizeTier) || value === this.worldSizeTier()) return;
+    this.worldSizeTier.set(value as WorldSizeTier);
+    this.updateComparisonQueryParams();
+    this.rebuildWorld();
+  }
+
   onWaterLevelInput(event: Event): void {
     const value = this.inputNumber(event);
     if (Number.isFinite(value) && value !== this.waterLevel()) {
@@ -349,6 +386,27 @@ export class CellPlanetGlobePageComponent {
     this.seed.set(Math.floor(Math.random() * 1_000_000));
     this.updateComparisonQueryParams();
     this.rebuildWorld();
+  }
+
+  applyU0Baseline(): void {
+    this.cellCount.set(this.u0Fixture.cellCount);
+    this.seed.set(this.u0Fixture.seed);
+    this.relaxationIterations.set(this.u0Fixture.relaxationIterations);
+    this.worldProfileKind.set(this.u0Fixture.worldProfile);
+    this.worldSizeTier.set(this.u0Fixture.worldSize);
+    this.terrainHeightScale.set(this.u0Fixture.terrainHeightScale);
+    this.waterLevel.set(this.u0Fixture.waterLevel);
+    this.showOcean.set(this.u0Fixture.showOcean);
+    this.u0BookmarkId.set('overview');
+    this.updateComparisonQueryParams();
+    this.rebuildWorld();
+  }
+
+  onU0BookmarkChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as CellPlanetU0BookmarkId;
+    if (!this.u0BookmarkIds.includes(value)) return;
+    this.u0BookmarkId.set(value);
+    this.updateComparisonQueryParams();
   }
 
   private rebuildWorld(): void {
@@ -682,6 +740,9 @@ export class CellPlanetGlobePageComponent {
     if (macroScale !== null) this.macroVariationScaleM.set(Math.max(8, Math.min(128, macroScale)));
     this.seabedRelief.set(this.booleanQuery(query.seabedRelief, this.seabedRelief()));
     this.showOcean.set(this.booleanQuery(query.showOcean, this.showOcean()));
+    if (query.u0Bookmark && this.u0BookmarkIds.includes(query.u0Bookmark as CellPlanetU0BookmarkId)) {
+      this.u0BookmarkId.set(query.u0Bookmark as CellPlanetU0BookmarkId);
+    }
   }
 
   private updateComparisonQueryParams(): void {
@@ -700,6 +761,7 @@ export class CellPlanetGlobePageComponent {
       macroVariationScaleM: this.macroVariationScaleM(),
       seabedRelief: this.seabedRelief(),
       showOcean: this.showOcean(),
+      u0Bookmark: this.u0BookmarkId(),
     });
   }
 

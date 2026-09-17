@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { BufferGeometry, ClampToEdgeWrapping, DataTexture, Float32BufferAttribute, FloatType, LinearFilter, Mesh, MeshStandardMaterial, PlaneGeometry, RGBAFormat, SRGBColorSpace, UnsignedByteType, Vector3 } from 'three';
@@ -44,6 +45,12 @@ import {
 } from 'triangular-engine/terrain';
 import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
 import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
+import {
+  CELL_PLANET_U0_BOOKMARK_IDS,
+  CELL_PLANET_U0_FIXTURE,
+  CellPlanetU0BookmarkId,
+  getCellPlanetU0Bookmark,
+} from '../cell-planet-u0-fixture';
 import {
   createCellPlanetSelection,
   ICellPlanetSelection,
@@ -451,7 +458,7 @@ function makeColorTexture(
 
 @Component({
   selector: 'app-cell-planet-25d-map-page',
-  imports: [EngineModule, RouterLink, RaycastOrbitControlsComponent, CellPlanetSelectionPanelComponent],
+  imports: [FormsModule, EngineModule, RouterLink, RaycastOrbitControlsComponent, CellPlanetSelectionPanelComponent],
   template: `
     <scene [showFps]="true" [logarithmicDepthBuffer]="true">
       <orthographicCamera
@@ -469,7 +476,7 @@ function makeColorTexture(
            arbitrary angles without committing to the final map controls. -->
       <raycastOrbitControls
         [cameraPosition]="orbitCameraPosition()"
-        [target]="[0, 0, 0]"
+        [target]="orbitCameraTarget()"
         [near]="0.1"
         [far]="cameraFarM()"
         [isActive]="debugOrbitEnabled"
@@ -499,6 +506,20 @@ function makeColorTexture(
           [queryParams]="comparisonQueryParams()"
         >Morph</a>
       </nav>
+      <div class="u0-harness">
+        <strong>U0 review fixture</strong>
+        <span>{{ u0Fixture.id }} · v{{ u0Fixture.version }}</span>
+        <small>Volcano, mesa, ridge, river and shore anchors use this fixture's generated world. Canyon is a U2 placeholder.</small>
+        <button type="button" (click)="applyU0Baseline()">Apply U0 baseline</button>
+        <label>
+          <span>Review bookmark</span>
+          <select [value]="u0BookmarkId()" (change)="onU0BookmarkChange($event)">
+            @for (bookmarkId of u0BookmarkIds; track bookmarkId) {
+              <option [value]="bookmarkId" [selected]="u0BookmarkId() === bookmarkId">{{ bookmarkId }}</option>
+            }
+          </select>
+        </label>
+      </div>
       <span>shared planet sampler → baked height source → clipmap</span>
       <label>
         <span>Cell count: {{ cellCount() }}</span>
@@ -516,23 +537,23 @@ function makeColorTexture(
         <span>World profile</span>
         <select [value]="worldProfileKind()" (change)="onWorldProfileChange($event)">
           @for (profile of worldProfileKinds; track profile) {
-            <option [value]="profile">{{ profile }}</option>
+            <option [value]="profile" [selected]="worldProfileKind() === profile">{{ profile }}</option>
           }
         </select>
       </label>
       <label>
         <span>Planet size: {{ worldSizeTier() }} (radius {{ formatDistanceM(planetRadiusM()) }})</span>
-        <select [value]="worldSizeTier()" (change)="onWorldSizeChange($event)">
+        <select [ngModel]="worldSizeTier()" (ngModelChange)="onWorldSizeValueChange($event)">
           @for (size of worldSizeKinds; track size) {
-            <option [value]="size">{{ size }}</option>
+            <option [value]="size" [selected]="worldSizeTier() === size">{{ size }}</option>
           }
         </select>
       </label>
       <label>
         <span>Display scale</span>
         <select [value]="displayScale()" (change)="onDisplayScaleChange($event)">
-          <option value="planet">Planet scale (real metres)</option>
-          <option value="legacy">Legacy preview (old compact units)</option>
+          <option value="planet" [selected]="displayScale() === 'planet'">Planet scale (real metres)</option>
+          <option value="legacy" [selected]="displayScale() === 'legacy'">Legacy preview (old compact units)</option>
         </select>
       </label>
       @if (displayScale() === 'planet') {
@@ -544,7 +565,7 @@ function makeColorTexture(
         <span>Map projection</span>
         <select [value]="projectionType()" (change)="onProjectionTypeChange($event)">
           @for (kind of projectionKinds; track kind) {
-            <option [value]="kind">{{ projectionLabels[kind] }}</option>
+            <option [value]="kind" [selected]="projectionType() === kind">{{ projectionLabels[kind] }}</option>
           }
         </select>
       </label>
@@ -552,7 +573,7 @@ function makeColorTexture(
         <span>Data layer</span>
         <select [value]="fillMode()" (change)="onFillModeChange($event)">
           @for (mode of fillModes; track mode) {
-            <option [value]="mode">{{ mode }}</option>
+            <option [value]="mode" [selected]="fillMode() === mode">{{ mode }}</option>
           }
         </select>
       </label>
@@ -572,9 +593,9 @@ function makeColorTexture(
       }
       <label>
         <span>Terrain quality</span>
-        <select [value]="terrainQuality()" (change)="onTerrainQualityChange($event)">
+        <select [ngModel]="terrainQuality()" (ngModelChange)="onTerrainQualityValueChange($event)">
           @for (quality of terrainQualityKinds; track quality) {
-            <option [value]="quality">{{ terrainQualityPresets[quality].label }}</option>
+            <option [value]="quality" [selected]="terrainQuality() === quality">{{ terrainQualityPresets[quality].label }}</option>
           }
         </select>
       </label>
@@ -632,6 +653,10 @@ export class CellPlanet25dMapPageComponent {
   readonly relaxationIterations = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.relaxationIterations);
   readonly worldProfileKind = signal<WorldProfileKind>('terran');
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
+  readonly u0Fixture = CELL_PLANET_U0_FIXTURE;
+  readonly u0BookmarkIds = CELL_PLANET_U0_BOOKMARK_IDS;
+  readonly u0BookmarkId = signal<CellPlanetU0BookmarkId>('overview');
+  readonly u0Bookmark = computed(() => getCellPlanetU0Bookmark(this.u0BookmarkId()));
   /** Shared display-space body size. Worldgen remains direction/elevation based and dimensionless. */
   readonly worldSizeTier = signal<WorldSizeTier>('medium');
   readonly worldSizeKinds: WorldSizeTier[] = ['mini', 'small', 'medium', 'large', 'extra-large'];
@@ -648,8 +673,28 @@ export class CellPlanet25dMapPageComponent {
   readonly mapHeightM = computed(() => this.mapHalfHeightM() * 2);
   readonly orbitCameraPosition = computed(() => {
     if (this.displayScale() === 'legacy') return [150, 130, 150] as [number, number, number];
+    const bookmark = this.u0Bookmark();
+    if (bookmark.id !== 'overview') {
+      const target = this.orbitCameraTarget();
+      const distance = this.planetRadiusM() * bookmark.cameraRadiusFactor;
+      return [
+        target[0] + distance * 0.75,
+        target[1] + distance,
+        target[2] + distance * 0.75,
+      ] as [number, number, number];
+    }
     const radius = this.planetRadiusM();
     return [radius * 4.8, radius * 4.2, radius * 4.8] as [number, number, number];
+  });
+  readonly orbitCameraTarget = computed(() => {
+    const bookmark = this.u0Bookmark();
+    if (bookmark.id === 'overview') return [0, 0, 0] as [number, number, number];
+    const bounds = this.terrainMapBounds();
+    return [
+      bookmark.mapPosition[0] * (bounds.maxX - bounds.minX) * 0.5,
+      0,
+      bookmark.mapPosition[1] * (bounds.maxZ - bounds.minZ) * 0.5,
+    ] as [number, number, number];
   });
   readonly orthographicCameraPosition = computed(() => {
     if (this.displayScale() === 'legacy') return [0, 110, 110] as [number, number, number];
@@ -841,6 +886,16 @@ export class CellPlanet25dMapPageComponent {
     }
   }
 
+  onWorldSizeValueChange(value: string): void {
+    if (!this.worldSizeKinds.includes(value as WorldSizeTier) || value === this.worldSizeTier()) return;
+    this.worldSizeTier.set(value as WorldSizeTier);
+    this.updateComparisonQueryParams();
+    const previousTerrain = this.terrain;
+    this.terrain = this.createTerrainScene();
+    previousTerrain.dispose();
+    this.rebuildWorld();
+  }
+
   onDisplayScaleChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as TerrainDisplayScale;
     if (this.displayScaleKinds.includes(value) && value !== this.displayScale()) {
@@ -910,6 +965,16 @@ export class CellPlanet25dMapPageComponent {
     }
   }
 
+  onTerrainQualityValueChange(value: string): void {
+    if (!this.terrainQualityKinds.includes(value as TerrainQuality) || value === this.terrainQuality()) return;
+    this.terrainQuality.set(value as TerrainQuality);
+    this.updateComparisonQueryParams();
+    const previousTerrain = this.terrain;
+    this.terrain = this.createTerrainScene();
+    previousTerrain.dispose();
+    this.rebuildWorld();
+  }
+
   onWaterLevelInput(event: Event): void {
     const value = this.inputNumber(event);
     if (Number.isFinite(value) && value !== this.waterLevel()) {
@@ -947,6 +1012,33 @@ export class CellPlanet25dMapPageComponent {
     this.seed.set(Math.floor(Math.random() * 1_000_000));
     this.updateComparisonQueryParams();
     this.rebuildWorld();
+  }
+
+  applyU0Baseline(): void {
+    this.cellCount.set(this.u0Fixture.cellCount);
+    this.seed.set(this.u0Fixture.seed);
+    this.relaxationIterations.set(this.u0Fixture.relaxationIterations);
+    this.worldProfileKind.set(this.u0Fixture.worldProfile);
+    this.worldSizeTier.set(this.u0Fixture.worldSize);
+    this.displayScale.set(this.u0Fixture.displayScale);
+    this.projectionType.set(this.u0Fixture.projection);
+    this.terrainQuality.set(this.u0Fixture.terrainQuality);
+    this.terrainHeightScale.set(this.u0Fixture.terrainHeightScale);
+    this.waterLevel.set(this.u0Fixture.waterLevel);
+    this.showOcean.set(this.u0Fixture.showOcean);
+    this.u0BookmarkId.set('overview');
+    this.updateComparisonQueryParams();
+    const previousTerrain = this.terrain;
+    this.terrain = this.createTerrainScene();
+    previousTerrain.dispose();
+    this.rebuildWorld();
+  }
+
+  onU0BookmarkChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as CellPlanetU0BookmarkId;
+    if (!this.u0BookmarkIds.includes(value)) return;
+    this.u0BookmarkId.set(value);
+    this.updateComparisonQueryParams();
   }
 
   exportTerrainForBlender(): void {
@@ -1324,6 +1416,9 @@ export class CellPlanet25dMapPageComponent {
     this.pendingSelectedCellId =
       selectedCell !== null && Number.isInteger(selectedCell) && selectedCell >= 0 ? selectedCell : null;
     this.hasPendingSelection = true;
+    if (query.u0Bookmark && this.u0BookmarkIds.includes(query.u0Bookmark as CellPlanetU0BookmarkId)) {
+      this.u0BookmarkId.set(query.u0Bookmark as CellPlanetU0BookmarkId);
+    }
   }
 
   private updateComparisonQueryParams(): void {
@@ -1346,6 +1441,7 @@ export class CellPlanet25dMapPageComponent {
       macroVariationScaleM: this.macroVariationScaleM(),
       showOcean: this.showOcean(),
       selectedCell: this.selection()?.cellId ?? '',
+      u0Bookmark: this.u0BookmarkId(),
     });
   }
 

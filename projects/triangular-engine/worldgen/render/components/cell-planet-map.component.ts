@@ -628,6 +628,14 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     this.#requestRasterize('other');
   }
 
+  /** Applies a reproducible consumer-owned view for visual comparison harnesses. */
+  setView(view: { readonly panX: number; readonly panY: number; readonly zoom: number }): void {
+    this.zoomLevel.set(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, view.zoom)));
+    this.panX.set(view.panX);
+    this.panY.set(view.panY);
+    this.#requestRasterize('other');
+  }
+
   resetProjectionCenter(): void {
     this.recenterProjection({ x: 1, y: 0, z: 0 }, 'programmatic');
   }

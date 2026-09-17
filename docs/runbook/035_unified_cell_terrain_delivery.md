@@ -7,7 +7,7 @@ small, inspectable increments. This is the coding agent execution plan. The comp
 and live milestone summary are at the top of 034. This document owns the U gates, acceptance
 protocol and current handoff; older milestones are not a competing work queue.
 
-Status at plan creation, 2026-09-17: **U0 next; U1–U7 not started; no U gate accepted.**
+Status at plan creation, 2026-09-17: **U0 in progress; U1–U7 not started; no U gate accepted.**
 These are integration statuses, not a claim that the existing code is absent.
 
 Read the repository AGENTS.md, package README and agent conventions first. Preserve existing
@@ -85,8 +85,16 @@ each gate. Keep a small acceptance fixture and a separately named larger scale-t
 
 Implement stable camera bookmarks: `overview`, `local-mountain`, `volcano`, `mesa`, `canyon`,
 `ridge-crossing`, `river-bend`, `river-junction`, `river-mouth`, `shore`, `chunk-seam`,
-`sphere-face-edge`, `sphere-face-corner`. Record coordinates/target, not only screenshots.
-Bookmarks are requirements to implement, not controls claimed to exist today.
+`sphere-face-edge`, `sphere-face-corner`. Record coordinates/target, not only screenshots. U0
+provides the selectors and resolves the anchors that already exist in the generator; U2/U3 must
+make the remaining named landforms and fine river/coast geometry visible in every renderer.
+
+The initial U0 implementation now resolves `volcano`, `mesa`, `ridge-crossing`, river and shore
+bookmarks from the frozen generator snapshot. Those anchors identify the existing generated cell
+tags or paths, but the planar and spherical renderers still do not apply true within-cell volcano,
+mesa or canyon geometry. `canyon` remains an explicit U2 placeholder. An ordinary-looking result
+at that anchor is therefore still possible until the renderer consumes the shared feature
+definitions; the UI must label this clearly so it is not mistaken for a failed terrain lookup.
 
 Use existing routes: `/cell-planet-map` as identity reference, `/cell-planet-25d-map` as planar
 consumer, and `/cell-planet-globe` as spherical consumer. Preserve comparison access to the
@@ -309,20 +317,30 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
 
 ## Current handoff — update at every session end
 
-- Updated: 2026-09-17, plan creation only.
-- Active gate: U0, next; no implementation performed by this planning change.
+- Updated: 2026-09-17, U0 harness packet.
+- Active gate: U0, in progress; fixture and bookmark controls are implemented, baseline capture and
+  user review are still outstanding.
 - Accepted gates: none. Existing labs have not been re-evaluated against this plan.
-- Latest completed packet: compact roadmap and detailed U0–U7 delivery plan recorded.
-- Next packet: inspect existing preset/diagnostic controls; implement fixture manifest and
-  replayable overview/close bookmarks across the existing pages, then capture current baseline.
+- Latest completed packet: shared fixture manifest v2 using the volcanic profile, with deterministic
+  anchors resolved from generated volcano/mesa cells, ridge/river paths and a coastline; baseline
+  action and bookmark selectors are wired into the 2D, 2.5D and globe routes; 2D pan/zoom and 3D
+  inspection camera views respond to the selected bookmark.
+- Next packet: capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
+  cold and warm timings, frame-time percentiles, draw/triangle counts, residency and memory fields.
 - First user review: U0 cell scale, close/strategic zoom range and baseline conditions.
 - Reference hardware/browser/canvas/DPR/build mode: not yet recorded.
-- Fixture seed/cell count/radius/relief/version/IDs: not yet frozen.
+- Fixture seed/cell count/radius/relief/version/IDs: fixture manifest frozen at v2; volcano/mesa
+  cell and path anchors are derived deterministically from the manifest's generator snapshot.
+  Exact numeric IDs can be recorded in the evidence record after the user's baseline capture.
 - Numeric caps to freeze in U0: resident patches, worker jobs, tracked bytes, cold coverage,
   warm build latency, canonical metre error, seam error and near/far pixel error.
-- Performance evidence: none collected for U gates; defaults above are proposals only.
-- Blocking decisions: none for starting U0. User visual review is pending future implementation.
-- Evidence records: none yet. Link subsystem findings and captures here as work proceeds.
+- Performance evidence: no U0 performance capture yet; defaults above are proposals only.
+- Agent verification: `npm run build:triangular-engine` passed and `npx ng build demo-app` passed.
+  The U0 controls and route persistence were visually exercised earlier in the dev server on
+  `/cell-planet-map`, `/cell-planet-25d-map` and `/cell-planet-globe`; no U gate is accepted from
+  that check alone.
+- Blocking decisions: none for continuing U0. User visual review is pending baseline capture.
+- Evidence records: browser check completed, but no saved capture/metrics record yet.
 
 ## Resume instruction
 

@@ -20,6 +20,21 @@
     </nav>
     <p class="hint">Drag to pan, scroll to zoom, click a cell to select it, double-click to recenter the projection there.</p>
 
+    <div class="u0-harness">
+      <strong>U0 review fixture</strong>
+      <span>{{ u0Fixture.id }} · v{{ u0Fixture.version }}</span>
+      <small>Volcano, mesa, ridge, river and shore anchors use this fixture's generated world. Canyon is a U2 placeholder.</small>
+      <button type="button" (click)="applyU0Baseline()">Apply U0 baseline</button>
+      <label class="field">
+        <span>Review bookmark</span>
+        <select [value]="u0BookmarkId()" (change)="onU0BookmarkChange($event)">
+          @for (bookmarkId of u0BookmarkIds; track bookmarkId) {
+            <option [value]="bookmarkId" [selected]="u0BookmarkId() === bookmarkId">{{ bookmarkId }}</option>
+          }
+        </select>
+      </label>
+    </div>
+
     <label class="field">
       <span>Cell count: {{ cellCount() }}</span>
       <input
@@ -39,7 +54,7 @@
         (change)="worldProfileKind.set($any($event.target).value)"
       >
         @for (kind of worldProfileKinds; track kind) {
-          <option [value]="kind">{{ kind }}</option>
+          <option [value]="kind" [selected]="worldProfileKind() === kind">{{ kind }}</option>
         }
       </select>
     </label>
@@ -63,7 +78,7 @@
         (change)="projectionType.set($any($event.target).value)"
       >
         @for (kind of projectionKinds; track kind) {
-          <option [value]="kind">{{ projectionLabels[kind] }}</option>
+          <option [value]="kind" [selected]="projectionType() === kind">{{ projectionLabels[kind] }}</option>
         }
       </select>
     </label>
@@ -75,7 +90,7 @@
         (change)="fillMode.set($any($event.target).value)"
       >
         @for (mode of fillModes; track mode) {
-          <option [value]="mode">{{ mode }}</option>
+          <option [value]="mode" [selected]="fillMode() === mode">{{ mode }}</option>
         }
       </select>
     </label>

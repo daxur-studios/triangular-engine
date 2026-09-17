@@ -16,6 +16,12 @@ import {
 } from 'triangular-engine/worldgen/render';
 import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
 import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
+import {
+  CELL_PLANET_U0_BOOKMARK_IDS,
+  CELL_PLANET_U0_FIXTURE,
+  CellPlanetU0BookmarkId,
+  getCellPlanetU0Bookmark,
+} from '../cell-planet-u0-fixture';
 
 /** Half-extent (world units, = texture pixels at zoom 1) of `<cellPlanetMap>`'s fixed
  * `BASE_WIDTH`/`BASE_HEIGHT` map plane - must match the component's own internal constants (not
@@ -90,6 +96,9 @@ export class CellPlanetMapPageComponent {
   readonly projectionKinds = MAP_PROJECTION_KINDS;
   readonly projectionLabels = MAP_PROJECTION_LABELS;
   readonly generationDefaults = CELL_PLANET_GENERATION_DEFAULTS;
+  readonly u0Fixture = CELL_PLANET_U0_FIXTURE;
+  readonly u0BookmarkIds = CELL_PLANET_U0_BOOKMARK_IDS;
+  readonly u0BookmarkId = signal<CellPlanetU0BookmarkId>('overview');
   private readonly preservedQueryParams = signal<CellPlanetQuery>({});
   private lastGenerationKey: string | null = null;
   readonly comparisonQueryParams = computed(() => ({
@@ -109,6 +118,7 @@ export class CellPlanetMapPageComponent {
     showCellEdges: this.showCellEdges(),
     iconBudget: this.iconBudget(),
     selectedCell: this.selectedCellId() ?? '',
+    u0Bookmark: this.u0BookmarkId(),
   }));
 
   /** Demo of the component's click-to-cell + highlight capabilities together: clicking a cell
@@ -184,6 +194,29 @@ export class CellPlanetMapPageComponent {
     this.map()?.resetProjectionCenter();
   }
 
+  applyU0Baseline(): void {
+    this.cellCount.set(this.u0Fixture.cellCount);
+    this.seed.set(this.u0Fixture.seed);
+    this.relaxationIterations.set(this.u0Fixture.relaxationIterations);
+    this.worldProfileKind.set(this.u0Fixture.worldProfile);
+    this.projectionType.set(this.u0Fixture.projection);
+    this.waterLevel.set(this.u0Fixture.waterLevel);
+    this.u0BookmarkId.set('overview');
+    this.map()?.setView({ panX: 0, panY: 0, zoom: 1 });
+  }
+
+  onU0BookmarkChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as CellPlanetU0BookmarkId;
+    if (!this.u0BookmarkIds.includes(value)) return;
+    this.u0BookmarkId.set(value);
+    const bookmark = getCellPlanetU0Bookmark(value);
+    this.map()?.setView({
+      panX: bookmark.mapPosition[0] * MAP_HALF_WIDTH,
+      panY: bookmark.mapPosition[1] * MAP_HALF_HEIGHT,
+      zoom: bookmark.mapZoom,
+    });
+  }
+
   private restoreQuery(query: CellPlanetQuery): void {
     const cellCount = this.numberQuery(query.cellCount);
     if (cellCount !== null) this.cellCount.set(Math.max(200, Math.min(6000, Math.round(cellCount))));
@@ -215,6 +248,9 @@ export class CellPlanetMapPageComponent {
     this.selectedCellId.set(
       selectedCell !== null && Number.isInteger(selectedCell) && selectedCell >= 0 ? selectedCell : null,
     );
+    if (query.u0Bookmark && this.u0BookmarkIds.includes(query.u0Bookmark as CellPlanetU0BookmarkId)) {
+      this.u0BookmarkId.set(query.u0Bookmark as CellPlanetU0BookmarkId);
+    }
     // Record the restored world so the generation-watch effect above does not clear the
     // selection we just carried in from the other view.
     this.lastGenerationKey = this.generationKey();

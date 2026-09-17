@@ -27,7 +27,7 @@ Existing prototypes are reusable evidence, not acceptance of these integrated mi
 
 | Gate | What you should see and test | Status |
 | --- | --- | --- |
-| U0 — Repeatable baseline | Saved views, cell boundaries, scale reference and performance capture; confirm intended zoom range | Next |
+| U0 — Repeatable baseline | Saved views, cell boundaries, scale reference and performance capture; confirm intended zoom range | In progress |
 | U1 — One world in every view | Switch 2D / 2.5D / globe; same selected cell, ridge, river and coast | Not started |
 | U2 — Landforms inside cells | A mountain, volcano, mesa and canyon have real shape inside their cells; a ridge still spans cells | Not started |
 | U3 — Detailed waterways | Low-angle views show carved river bed/banks, connected mouth and detailed shore, following cell edges | Not started |
