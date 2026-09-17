@@ -2,6 +2,10 @@
 
 This guide provides conventions and reliable entry points to control the engine programmatically.
 
+## Git & Workspace Conventions
+
+- **DO NOT COMMIT**: Never execute `git commit`. Multiple agents and developers work simultaneously in this repository. All changes must remain uncommitted in the working tree.
+
 ## Import/Provide
 
 - Always import `EngineModule` in the host component.

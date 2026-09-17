@@ -16,6 +16,7 @@
 2. Read `projects/triangular-engine/docs/ai-agents.md` for implementation conventions.
 3. Inspect the relevant secondary entry point before changing it.
 4. Check `git status --short` and preserve unrelated working-tree changes.
+5. **DO NOT COMMIT**: Never create git commits (`git commit`). Multiple agents and developers work concurrently in the workspace; creating commits interferes with concurrent branches, worktrees, and tasks. Leave all changes uncommitted in the working tree.
 
 ## Common commands
 
@@ -33,6 +34,7 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 
 ## Change conventions
 
+- **Do not commit**: Never run `git commit`. Leave all changes in the working tree for the user/maintainer.
 - Keep public exports and secondary-entry-point `public-api.ts` files intentional.
 - Add or update a colocated `*.spec.ts` for behavior changes.
 - Update user-facing docs and `CHANGELOG.md` for public API changes.
