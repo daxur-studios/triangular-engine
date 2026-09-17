@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { PerspectiveCamera, Scene } from 'three';
 import { EngineService } from 'triangular-engine';
-import { IPlanetSurfaceSampler, IVec3 } from 'triangular-engine/worldgen';
+import { buildPlanetGraphCore, IPlanetSurfaceSampler, IVec3 } from 'triangular-engine/worldgen';
 import { CellPlanetMorphViewComponent } from './cell-planet-morph-view.component';
 
 describe('CellPlanetMorphViewComponent', () => {
@@ -94,5 +94,38 @@ describe('CellPlanetMorphViewComponent', () => {
     expect(obliqueBasis?.forward.y).toBeCloseTo(1, 4);
 
     fixture.destroy();
+  });
+
+  it('renders cell borders, territory borders, and tactical overlays when enabled', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 30, seed: 1, relaxationIterations: 1 });
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', mockSampler);
+    fixture.componentRef.setInput('graph', graph);
+    fixture.componentRef.setInput('showCellBorders', true);
+    fixture.componentRef.setInput('showTerritoryBorders', true);
+    fixture.componentRef.setInput('showTacticalOverlay', true);
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    const children = comp.object3D().children;
+
+    // Expected meshes: morph-terrain, morph-ocean, morph-cell-borders, morph-territory-ribbons, morph-cell-overlay
+    expect(children.length).toBe(5);
+    expect(children.some((c) => c.name === 'morph-cell-borders')).toBeTrue();
+    expect(children.some((c) => c.name === 'morph-territory-ribbons')).toBeTrue();
+    expect(children.some((c) => c.name === 'morph-cell-overlay')).toBeTrue();
+
+    // Check tactical overlay instance
+    const overlay = comp.tacticalOverlay();
+    expect(overlay).toBeDefined();
+    expect(overlay?.cellCount).toBe(graph.cells.length);
+
+    // Dynamic update of highlight without rebuilding meshes
+    overlay?.setCellHighlight(0, '#ff0000', 0.8);
+    overlay?.update();
+    expect(comp.object3D().children.length).toBe(5); // unchanged
+
+    fixture.destroy();
+    expect(comp.object3D().children.length).toBe(0);
   });
 });

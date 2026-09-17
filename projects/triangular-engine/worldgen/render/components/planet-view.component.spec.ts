@@ -119,4 +119,19 @@ describe('PlanetViewComponent', () => {
 
     fixture.destroy();
   });
+
+  it('toggles cell borders and territory borders overlays', () => {
+    const fixture = TestBed.createComponent(PlanetViewComponent);
+    fixture.componentRef.setInput('cellCount', 60);
+    fixture.componentRef.setInput('showCellBorders', true);
+    fixture.componentRef.setInput('showTerritoryBorders', true);
+    fixture.detectChanges();
+
+    const root = scene.children[0] as Group;
+    // Verify lines were added to root
+    const lineSegments = root.children.filter((c) => c.type === 'LineSegments');
+    expect(lineSegments.length).toBeGreaterThanOrEqual(2);
+
+    fixture.destroy();
+  });
 });

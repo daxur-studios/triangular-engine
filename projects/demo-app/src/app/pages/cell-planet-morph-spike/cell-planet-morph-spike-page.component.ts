@@ -30,6 +30,7 @@ import {
   createPlanetSurfaceSampler,
   deriveIsLand,
   findCellAt,
+  findReachableCells,
   IPlanetEcology,
   IPlanetGraphCore,
   IPlanetSurfaceSampler,
@@ -123,6 +124,17 @@ export class CellPlanetMorphSpikePageComponent {
   readonly projectionTrackingMode = signal<ProjectionTrackingMode>('none');
   readonly projectionCenterInfo = signal<{ lonDeg: string; latDeg: string }>({ lonDeg: '0.0°', latDeg: '0.0°' });
 
+  // Border & Tactical Overlay signals
+  readonly showCellBorders = signal(true);
+  readonly showTerritoryBorders = signal(true);
+  readonly tacticalRangeMode = signal(true);
+  readonly selectedCellId = signal<number | null>(null);
+  readonly hoveredCellId = signal<number | null>(null);
+
+  get plateIdByCell(): number[] | null {
+    return this.tectonics?.plateIdByCell ?? null;
+  }
+
   readonly globeRadius = GLOBE_RADIUS;
 
   /** 0 = 3D Globe, 1 = 2.5D Map */
@@ -166,18 +178,25 @@ export class CellPlanetMorphSpikePageComponent {
   private animationFrameId?: number;
   private readonly colorScratch = new Color();
 
-  readonly resolveColorCallback = (
-    direction: IVec3,
-    effectiveElevation: number,
-    isLand: boolean,
-  ): [number, number, number] => {
-    if (!this.graph) return [0.3, 0.5, 0.3];
-    const cell = findCellAt(this.graph, direction);
-    const colorHex = this.resolveCellColor(cell.id, this.fillMode(), this.oceanSubstance());
-    this.colorScratch.setStyle(colorHex);
-    this.colorScratch.convertSRGBToLinear();
-    return [this.colorScratch.r, this.colorScratch.g, this.colorScratch.b];
-  };
+  readonly resolveColor = computed(() => {
+    const mode = this.fillMode();
+    const substance = this.oceanSubstance();
+    const graph = this.graph;
+    const scratch = new Color();
+
+    return (
+      direction: IVec3,
+      effectiveElevation: number,
+      isLand: boolean,
+    ): [number, number, number] => {
+      if (!graph) return [0.3, 0.5, 0.3];
+      const cell = findCellAt(graph, direction);
+      const colorHex = this.resolveCellColor(cell.id, mode, substance);
+      scratch.setStyle(colorHex);
+      scratch.convertSRGBToLinear();
+      return [scratch.r, scratch.g, scratch.b];
+    };
+  });
 
   constructor() {
     this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
@@ -246,8 +265,6 @@ export class CellPlanetMorphSpikePageComponent {
     const value = (event.target as HTMLSelectElement).value as CellPlanetMorphFillMode;
     if (this.fillModes.includes(value) && value !== this.fillMode()) {
       this.fillMode.set(value);
-      // Re-trigger color update on the morph view
-      this.surfaceSampler.set(this.sampler);
     }
   }
 
@@ -322,6 +339,58 @@ export class CellPlanetMorphSpikePageComponent {
     };
 
     requestAnimationFrame(step);
+  }
+
+  onCellClicked(hit: { cellId: number; direction: IVec3; point: Vector3 }): void {
+    if (hit.cellId < 0 || !this.graph || !this.tectonics) return;
+    this.selectedCellId.set(hit.cellId);
+
+    const view = this.morphView();
+    const overlay = view?.tacticalOverlay();
+    if (!overlay) return;
+
+    if (this.tacticalRangeMode()) {
+      const isLand = this.tectonics.isLand[hit.cellId];
+      const reachable = findReachableCells(
+        this.graph,
+        hit.cellId,
+        2,
+        (id) => this.tectonics.isLand[id] === isLand,
+      );
+      overlay.clearAll();
+      overlay.setReachableRange(reachable, isLand ? '#22c55e' : '#38bdf8', 0.45);
+      overlay.setSelectedCell(hit.cellId, '#f59e0b', 0.85);
+      overlay.update();
+    } else {
+      overlay.clearAll();
+      overlay.setSelectedCell(hit.cellId, '#f59e0b', 0.85);
+      overlay.update();
+    }
+  }
+
+  onCellHovered(hit: { cellId: number | null; direction: IVec3 | null }): void {
+    this.hoveredCellId.set(hit.cellId);
+  }
+
+  toggleCellBorders(): void {
+    this.showCellBorders.update((v) => !v);
+  }
+
+  toggleTerritoryBorders(): void {
+    this.showTerritoryBorders.update((v) => !v);
+  }
+
+  toggleTacticalRangeMode(): void {
+    this.tacticalRangeMode.update((v) => !v);
+    if (!this.tacticalRangeMode()) {
+      this.morphView()?.tacticalOverlay()?.clearAll();
+    } else if (this.selectedCellId() !== null) {
+      this.onCellClicked({
+        cellId: this.selectedCellId()!,
+        direction: this.graph.cells[this.selectedCellId()!].center,
+        point: new Vector3(),
+      });
+    }
   }
 
   private updateCameraForProgress(t: number): void {

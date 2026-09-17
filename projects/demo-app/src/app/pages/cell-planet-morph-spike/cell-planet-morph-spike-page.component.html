@@ -19,7 +19,13 @@
       [showOcean]="showOcean()"
       [oceanSubstance]="oceanSubstance()"
       [seaLevelElevation]="seaLevelElevation"
-      [resolveColor]="resolveColorCallback"
+      [resolveColor]="resolveColor()"
+      [showCellBorders]="showCellBorders()"
+      [showTerritoryBorders]="showTerritoryBorders()"
+      [factionByCell]="plateIdByCell"
+      [showTacticalOverlay]="true"
+      (cellClick)="onCellClicked($event)"
+      (cellHover)="onCellHovered($event)"
     />
   }
 </scene>
@@ -127,6 +133,43 @@
         <span>Ocean surface</span>
       </label>
     </div>
+  </fieldset>
+
+  <fieldset class="control-group">
+    <legend>Borders & Tactical Overlays</legend>
+    <div class="checkbox-row">
+      <label>
+        <input
+          type="checkbox"
+          [checked]="showCellBorders()"
+          (change)="toggleCellBorders()"
+        />
+        <span>Cell outlines</span>
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          [checked]="showTerritoryBorders()"
+          (change)="toggleTerritoryBorders()"
+        />
+        <span>Territory borders</span>
+      </label>
+    </div>
+    <div class="checkbox-row">
+      <label>
+        <input
+          type="checkbox"
+          [checked]="tacticalRangeMode()"
+          (change)="toggleTacticalRangeMode()"
+        />
+        <span>Move range on click</span>
+      </label>
+    </div>
+    @if (selectedCellId() !== null) {
+      <div style="font-size: 0.8rem; color: #38bdf8; margin-top: 4px;">
+        Selected: <strong>Cell #{{ selectedCellId() }}</strong>
+      </div>
+    }
   </fieldset>
 
   <fieldset class="control-group">

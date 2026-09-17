@@ -5,9 +5,12 @@ import {
   input,
   OnDestroy,
   output,
+  signal,
   untracked,
 } from '@angular/core';
 import {
+  BufferGeometry,
+  LineSegments,
   Mesh,
   Raycaster,
   Vector2,
@@ -15,12 +18,20 @@ import {
 } from 'three';
 import { GroupComponent, provideObject3DComponent } from 'triangular-engine';
 import {
+  classifyCellBorders,
+  extractCellBorders,
   findCellAt,
   IPlanetGraphCore,
   IPlanetSurfaceSampler,
   IVec3,
   normalize,
 } from 'triangular-engine/worldgen';
+import {
+  buildCellBorderLineGeometry,
+  buildCellOverlayGeometry,
+  buildTerritoryRibbonGeometry,
+} from '../cell-border-geometry';
+import { CellTacticalOverlay } from '../cell-tactical-overlay';
 import {
   MAP_PROJECTIONS,
   MapProjectionKind,
@@ -34,6 +45,8 @@ import {
   ISurfaceTransform,
 } from '../planet-morph-geometry';
 import {
+  createPlanetBorderMorphMaterial,
+  createPlanetCellOverlayMaterial,
   createPlanetMorphMaterial,
   IDynamicProjectionUniforms,
 } from '../planet-morph-material';
@@ -85,6 +98,17 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
 
   readonly resolveColor = input<((direction: IVec3, elevation: number, isLand: boolean) => [number, number, number]) | undefined>(undefined);
 
+  // Border & Tactical Overlay inputs
+  readonly showCellBorders = input<boolean>(false);
+  readonly cellBorderColor = input<string>('#38bdf8');
+  readonly cellBorderOpacity = input<number>(0.4);
+  readonly showTerritoryBorders = input<boolean>(false);
+  readonly territoryBorderColor = input<string>('#facc15');
+  readonly territoryBorderWidth = input<number>(0.015);
+  readonly factionByCell = input<ArrayLike<number> | null | undefined>(null);
+  readonly factionColors = input<Record<number, string> | null | undefined>(null);
+  readonly showTacticalOverlay = input<boolean>(false);
+
   // ==========================================================================
   // Outputs
   // ==========================================================================
@@ -92,12 +116,21 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
   readonly cellHover = output<{ cellId: number | null; direction: IVec3 | null }>();
 
   // ==========================================================================
-  // Internal State
+  // Internal State & Public Tactical Handle
   // ==========================================================================
+  readonly tacticalOverlay = signal<CellTacticalOverlay | null>(null);
+
   private terrainGeometryData?: IPlanetMorphGeometryData;
   private oceanGeometryData?: IPlanetMorphGeometryData;
   private terrainMesh?: Mesh;
   private oceanMesh?: Mesh;
+
+  private cellBorderGeometry?: BufferGeometry;
+  private cellBorderMesh?: LineSegments;
+  private territoryRibbonGeometry?: BufferGeometry;
+  private territoryRibbonMesh?: Mesh;
+  private cellOverlayGeometry?: BufferGeometry;
+  private cellOverlayMesh?: Mesh;
 
   private readonly dynamicUniforms: IDynamicProjectionUniforms = {
     uMorph: { value: 0 },
@@ -159,11 +192,34 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
         }
       });
     });
+
+    // Rebuild or update borders and tactical overlay when their inputs change
+    effect(() => {
+      this.graph();
+      this.sampler();
+      this.radius();
+      this.heightScale();
+      this.projectionKind();
+      this.showCellBorders();
+      this.cellBorderColor();
+      this.cellBorderOpacity();
+      this.showTerritoryBorders();
+      this.territoryBorderColor();
+      this.territoryBorderWidth();
+      this.factionByCell();
+      this.factionColors();
+      this.showTacticalOverlay();
+
+      untracked(() => {
+        this.rebuildOverlayMeshes();
+      });
+    });
   }
 
   override ngOnDestroy(): void {
     super.ngOnDestroy();
     this.disposeMeshes();
+    this.tacticalOverlay()?.dispose();
   }
 
   // ==========================================================================
@@ -350,6 +406,7 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
     );
     this.terrainMesh = new Mesh(this.terrainGeometryData.geometry, terrainMat);
     this.terrainMesh.name = 'morph-terrain';
+    this.terrainMesh.renderOrder = 0;
     this.object3D().add(this.terrainMesh);
 
     // Ocean shell
@@ -375,10 +432,145 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
     this.oceanMesh = new Mesh(this.oceanGeometryData.geometry, oceanMat);
     this.oceanMesh.name = 'morph-ocean';
     this.oceanMesh.visible = this.showOcean();
+    this.oceanMesh.renderOrder = 1;
     this.object3D().add(this.oceanMesh);
+
+    // Overlay & border meshes
+    this.rebuildOverlayMeshes();
+  }
+
+  private rebuildOverlayMeshes(): void {
+    this.disposeOverlayMeshes();
+
+    const graph = this.graph();
+    if (!graph) return;
+
+    const radius = this.radius();
+    const heightScale = this.heightScale();
+    const projectionKind = this.projectionKind();
+    const sampler = this.sampler();
+    const seabedRelief = this.seabedRelief();
+    const seaLevelElevation = this.seaLevelElevation();
+
+    // Ensure tactical overlay is initialized for this graph
+    let overlay = this.tacticalOverlay();
+    if (!overlay || overlay.cellCount !== graph.cells.length) {
+      overlay = new CellTacticalOverlay(graph.cells.length);
+      this.tacticalOverlay.set(overlay);
+    }
+
+    // 1. Cell borders (thin floating straight lines)
+    if (this.showCellBorders()) {
+      this.cellBorderGeometry = buildCellBorderLineGeometry({
+        graph,
+        sampler,
+        radius,
+        heightScale,
+        projectionKind,
+        seabedRelief,
+        seaLevelElevation,
+      });
+      const borderMat = createPlanetBorderMorphMaterial(this.dynamicUniforms, {
+        color: this.cellBorderColor(),
+        opacity: this.cellBorderOpacity(),
+      });
+      this.cellBorderMesh = new LineSegments(this.cellBorderGeometry, borderMat);
+      this.cellBorderMesh.name = 'morph-cell-borders';
+      this.cellBorderMesh.renderOrder = 3;
+      this.object3D().add(this.cellBorderMesh);
+    }
+
+    // 2. Territory borders (thick quads)
+    if (this.showTerritoryBorders()) {
+      const factions = this.factionByCell();
+      const allEdges = extractCellBorders(graph);
+      const territoryEdges = factions
+        ? classifyCellBorders(allEdges, factions).territoryEdges
+        : allEdges;
+
+      this.territoryRibbonGeometry = buildTerritoryRibbonGeometry({
+        edges: territoryEdges,
+        sampler,
+        radius,
+        heightScale,
+        ribbonWidth: this.territoryBorderWidth(),
+        projectionKind,
+        seabedRelief,
+        seaLevelElevation,
+      });
+      const ribbonMat = createPlanetBorderMorphMaterial(this.dynamicUniforms, {
+        color: this.territoryBorderColor(),
+        opacity: 0.9,
+        ribbonWidth: this.territoryBorderWidth(),
+      });
+      this.territoryRibbonMesh = new Mesh(this.territoryRibbonGeometry, ribbonMat);
+      this.territoryRibbonMesh.name = 'morph-territory-ribbons';
+      this.territoryRibbonMesh.renderOrder = 4;
+      this.object3D().add(this.territoryRibbonMesh);
+    }
+
+    // 3. Tactical cell overlay
+    if (this.showTacticalOverlay() && overlay) {
+      this.cellOverlayGeometry = buildCellOverlayGeometry({
+        graph,
+        sampler,
+        radius,
+        heightScale,
+        projectionKind,
+        seabedRelief,
+        seaLevelElevation,
+      });
+      const overlayMat = createPlanetCellOverlayMaterial(
+        this.dynamicUniforms,
+        { value: overlay.texture },
+        overlay.texWidth,
+        overlay.texHeight,
+      );
+      this.cellOverlayMesh = new Mesh(this.cellOverlayGeometry, overlayMat);
+      this.cellOverlayMesh.name = 'morph-cell-overlay';
+      this.cellOverlayMesh.renderOrder = 2;
+      this.object3D().add(this.cellOverlayMesh);
+    }
+  }
+
+  private disposeOverlayMeshes(): void {
+    if (this.cellBorderMesh) {
+      this.object3D().remove(this.cellBorderMesh);
+      this.cellBorderGeometry?.dispose();
+      if (Array.isArray(this.cellBorderMesh.material)) {
+        this.cellBorderMesh.material.forEach((m) => m.dispose());
+      } else {
+        this.cellBorderMesh.material.dispose();
+      }
+      this.cellBorderMesh = undefined;
+      this.cellBorderGeometry = undefined;
+    }
+    if (this.territoryRibbonMesh) {
+      this.object3D().remove(this.territoryRibbonMesh);
+      this.territoryRibbonGeometry?.dispose();
+      if (Array.isArray(this.territoryRibbonMesh.material)) {
+        this.territoryRibbonMesh.material.forEach((m) => m.dispose());
+      } else {
+        this.territoryRibbonMesh.material.dispose();
+      }
+      this.territoryRibbonMesh = undefined;
+      this.territoryRibbonGeometry = undefined;
+    }
+    if (this.cellOverlayMesh) {
+      this.object3D().remove(this.cellOverlayMesh);
+      this.cellOverlayGeometry?.dispose();
+      if (Array.isArray(this.cellOverlayMesh.material)) {
+        this.cellOverlayMesh.material.forEach((m) => m.dispose());
+      } else {
+        this.cellOverlayMesh.material.dispose();
+      }
+      this.cellOverlayMesh = undefined;
+      this.cellOverlayGeometry = undefined;
+    }
   }
 
   private disposeMeshes(): void {
+    this.disposeOverlayMeshes();
     if (this.terrainMesh) {
       this.object3D().remove(this.terrainMesh);
       this.terrainMesh.geometry.dispose();

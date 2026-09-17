@@ -1,9 +1,11 @@
 import {
+  Color,
   DoubleSide,
   FrontSide,
   IUniform,
   MeshStandardMaterial,
   MeshStandardMaterialParameters,
+  ShaderMaterial,
   Vector3,
 } from 'three';
 
@@ -168,4 +170,342 @@ export function createPlanetMorphMaterial(
   };
 
   return { material, uniforms };
+}
+
+export function createPlanetBorderMorphMaterial(
+  uniformHolder: IDynamicProjectionUniforms,
+  options: { color?: string | Color; opacity?: number; ribbonWidth?: number } = {},
+): ShaderMaterial {
+  const color = options.color instanceof Color ? options.color : new Color(options.color ?? '#ffffff');
+  const opacity = options.opacity ?? 0.6;
+  const ribbonWidth = options.ribbonWidth ?? 0;
+
+  return new ShaderMaterial({
+    uniforms: {
+      uMorph: uniformHolder.uMorph,
+      uProjForward: uniformHolder.uProjForward,
+      uProjUp: uniformHolder.uProjUp,
+      uProjRight: uniformHolder.uProjRight,
+      uProjMode: uniformHolder.uProjMode,
+      uMapWidth: uniformHolder.uMapWidth,
+      uMapHeight: uniformHolder.uMapHeight,
+      uRadius: uniformHolder.uRadius,
+      uProjectionType: uniformHolder.uProjectionType,
+      uRibbonWidth: { value: ribbonWidth },
+      uColor: { value: color },
+      uOpacity: { value: opacity },
+    },
+    vertexShader: `
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
+
+      attribute vec3 aSpherePos;
+      attribute vec3 aFlatPos;
+      attribute vec3 aSphereNorm;
+      attribute vec3 aFlatNorm;
+      attribute vec3 aOtherDir;
+
+      uniform float uMorph;
+      uniform vec3 uProjForward;
+      uniform vec3 uProjUp;
+      uniform vec3 uProjRight;
+      uniform float uProjMode;
+      uniform float uMapWidth;
+      uniform float uMapHeight;
+      uniform float uRadius;
+      uniform float uProjectionType;
+      uniform float uRibbonWidth;
+
+      varying float vProjLon;
+      varying float vProjMode;
+      varying float vMorph;
+
+      void main() {
+        vec3 dynSpherePos = aSpherePos;
+        vec3 dynFlatPos = aFlatPos;
+
+        if (uProjMode > 0.5) {
+          vec3 dir = aSphereNorm;
+          float dotFwd = dot(dir, uProjForward);
+          float dotRight = dot(dir, uProjRight);
+          float dotUp = dot(dir, uProjUp);
+
+          float pLon = atan(dotRight, dotFwd);
+          float pLat = asin(clamp(dotUp, -1.0, 1.0));
+
+          float oFwd = dot(aOtherDir, uProjForward);
+          float oRight = dot(aOtherDir, uProjRight);
+          float oLon = atan(oRight, oFwd);
+
+          if (uMorph > 0.05 && abs(pLon - oLon) > 3.14159) {
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+            return;
+          }
+
+          vProjLon = pLon;
+          vProjMode = 1.0;
+
+          float flatX = 0.0;
+          float flatY = 0.0;
+
+          if (uProjectionType < 0.5) {
+            // Equirectangular
+            flatX = (pLon / 3.141592653589793) * (uMapWidth * 0.5);
+            flatY = (pLat / 1.5707963267948966) * (uMapHeight * 0.5);
+          } else {
+            // Equal Earth
+            float EE_M = 0.8660254037844386;
+            float EE_A1 = 1.340264;
+            float EE_A2 = -0.081106;
+            float EE_A3 = 0.000893;
+            float EE_A4 = 0.003796;
+            float EE_RAW_X_MAX = 2.7066299836960748;
+
+            float theta = asin(clamp(EE_M * sin(pLat), -1.0, 1.0));
+            float theta2 = theta * theta;
+            float theta6 = theta2 * theta2 * theta2;
+            float rawX = (pLon * cos(theta)) / (EE_M * (EE_A1 + 3.0 * EE_A2 * theta2 + theta6 * (7.0 * EE_A3 + 9.0 * EE_A4 * theta2)));
+            float rawY = theta * (EE_A1 + EE_A2 * theta2 + theta6 * (EE_A3 + EE_A4 * theta2));
+
+            float scale = uMapWidth / (2.0 * EE_RAW_X_MAX);
+            flatX = rawX * scale;
+            flatY = rawY * scale;
+          }
+
+          if (uRibbonWidth > 0.0001) {
+            float oUp = dot(aOtherDir, uProjUp);
+            float oLat = asin(clamp(oUp, -1.0, 1.0));
+
+            float oFlatX = 0.0;
+            float oFlatY = 0.0;
+
+            if (uProjectionType < 0.5) {
+              oFlatX = (oLon / 3.141592653589793) * (uMapWidth * 0.5);
+              oFlatY = (oLat / 1.5707963267948966) * (uMapHeight * 0.5);
+            } else {
+              float EE_M = 0.8660254037844386;
+              float EE_A1 = 1.340264;
+              float EE_A2 = -0.081106;
+              float EE_A3 = 0.000893;
+              float EE_A4 = 0.003796;
+              float EE_RAW_X_MAX = 2.7066299836960748;
+
+              float theta = asin(clamp(EE_M * sin(oLat), -1.0, 1.0));
+              float theta2 = theta * theta;
+              float theta6 = theta2 * theta2 * theta2;
+              float rawX = (oLon * cos(theta)) / (EE_M * (EE_A1 + 3.0 * EE_A2 * theta2 + theta6 * (7.0 * EE_A3 + 9.0 * EE_A4 * theta2)));
+              float rawY = theta * (EE_A1 + EE_A2 * theta2 + theta6 * (EE_A3 + EE_A4 * theta2));
+
+              float scale = uMapWidth / (2.0 * EE_RAW_X_MAX);
+              oFlatX = rawX * scale;
+              oFlatY = rawY * scale;
+            }
+
+            vec2 d = vec2(oFlatX - flatX, oFlatY - flatY);
+            float dLen = length(d);
+            if (dLen > 0.00001) {
+              float flip = uv.y < 0.5 ? 1.0 : -1.0;
+              vec2 segDir = (d / dLen) * flip;
+              vec2 sideDir = vec2(-segDir.y, segDir.x);
+              float sideSign = (uv.x < 0.5) ? -1.0 : 1.0;
+              vec2 flatOffset = sideDir * (uRibbonWidth * 0.5) * sideSign;
+              flatX += flatOffset.x;
+              flatY += flatOffset.y;
+            }
+          }
+
+          dynFlatPos = vec3(flatX, flatY, aFlatPos.z);
+        } else {
+          vProjLon = 0.0;
+          vProjMode = 0.0;
+        }
+
+        vMorph = uMorph;
+        vec3 morphedPos = mix(dynSpherePos, dynFlatPos, uMorph);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(morphedPos, 1.0);
+        #include <logdepthbuf_vertex>
+      }
+    `,
+    fragmentShader: `
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      varying float vProjLon;
+      varying float vProjMode;
+      varying float vMorph;
+
+      void main() {
+        if (vProjMode > 0.5 && vMorph > 0.05 && fwidth(vProjLon) > 2.8) {
+          discard;
+        }
+        gl_FragColor = vec4(uColor, uOpacity);
+        #include <logdepthbuf_fragment>
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1.0,
+    polygonOffsetUnits: -4.0,
+    side: DoubleSide,
+  });
+}
+
+export function createPlanetCellOverlayMaterial(
+  uniformHolder: IDynamicProjectionUniforms,
+  overlayTextureUniform: IUniform<any>,
+  texWidth: number,
+  texHeight: number,
+): ShaderMaterial {
+  return new ShaderMaterial({
+    uniforms: {
+      uMorph: uniformHolder.uMorph,
+      uProjForward: uniformHolder.uProjForward,
+      uProjUp: uniformHolder.uProjUp,
+      uProjRight: uniformHolder.uProjRight,
+      uProjMode: uniformHolder.uProjMode,
+      uMapWidth: uniformHolder.uMapWidth,
+      uMapHeight: uniformHolder.uMapHeight,
+      uRadius: uniformHolder.uRadius,
+      uProjectionType: uniformHolder.uProjectionType,
+      uCellOverlayTex: overlayTextureUniform,
+      uTexWidth: { value: texWidth },
+      uTexHeight: { value: texHeight },
+    },
+    vertexShader: `
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
+
+      attribute vec3 aSpherePos;
+      attribute vec3 aFlatPos;
+      attribute vec3 aSphereNorm;
+      attribute vec3 aFlatNorm;
+      attribute vec3 aOtherDir;
+      attribute float aCellId;
+      attribute float aDist;
+
+      uniform float uMorph;
+      uniform vec3 uProjForward;
+      uniform vec3 uProjUp;
+      uniform vec3 uProjRight;
+      uniform float uProjMode;
+      uniform float uMapWidth;
+      uniform float uMapHeight;
+      uniform float uRadius;
+      uniform float uProjectionType;
+
+      varying float vProjLon;
+      varying float vProjMode;
+      varying float vMorph;
+      varying float vCellId;
+      varying float vDist;
+
+      void main() {
+        vCellId = aCellId;
+        vDist = aDist;
+
+        vec3 dynSpherePos = aSpherePos;
+        vec3 dynFlatPos = aFlatPos;
+
+        if (uProjMode > 0.5) {
+          vec3 dir = aSphereNorm;
+          float dotFwd = dot(dir, uProjForward);
+          float dotRight = dot(dir, uProjRight);
+          float dotUp = dot(dir, uProjUp);
+
+          float pLon = atan(dotRight, dotFwd);
+          float pLat = asin(clamp(dotUp, -1.0, 1.0));
+
+          float oFwd = dot(aOtherDir, uProjForward);
+          float oRight = dot(aOtherDir, uProjRight);
+          float oLon = atan(oRight, oFwd);
+
+          if (uMorph > 0.05 && abs(pLon - oLon) > 3.14159) {
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+            return;
+          }
+
+          vProjLon = pLon;
+          vProjMode = 1.0;
+
+          float flatX = 0.0;
+          float flatY = 0.0;
+
+          if (uProjectionType < 0.5) {
+            flatX = (pLon / 3.141592653589793) * (uMapWidth * 0.5);
+            flatY = (pLat / 1.5707963267948966) * (uMapHeight * 0.5);
+          } else {
+            float EE_M = 0.8660254037844386;
+            float EE_A1 = 1.340264;
+            float EE_A2 = -0.081106;
+            float EE_A3 = 0.000893;
+            float EE_A4 = 0.003796;
+            float EE_RAW_X_MAX = 2.7066299836960748;
+
+            float theta = asin(clamp(EE_M * sin(pLat), -1.0, 1.0));
+            float theta2 = theta * theta;
+            float theta6 = theta2 * theta2 * theta2;
+            float rawX = (pLon * cos(theta)) / (EE_M * (EE_A1 + 3.0 * EE_A2 * theta2 + theta6 * (7.0 * EE_A3 + 9.0 * EE_A4 * theta2)));
+            float rawY = theta * (EE_A1 + EE_A2 * theta2 + theta6 * (EE_A3 + EE_A4 * theta2));
+
+            float scale = uMapWidth / (2.0 * EE_RAW_X_MAX);
+            flatX = rawX * scale;
+            flatY = rawY * scale;
+          }
+
+          dynFlatPos = vec3(flatX, flatY, aFlatPos.z);
+        } else {
+          vProjLon = 0.0;
+          vProjMode = 0.0;
+        }
+
+        vMorph = uMorph;
+        vec3 morphedPos = mix(dynSpherePos, dynFlatPos, uMorph);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(morphedPos, 1.0);
+        #include <logdepthbuf_vertex>
+      }
+    `,
+    fragmentShader: `
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+
+      uniform sampler2D uCellOverlayTex;
+      uniform float uTexWidth;
+      uniform float uTexHeight;
+
+      varying float vProjLon;
+      varying float vProjMode;
+      varying float vMorph;
+      varying float vCellId;
+      varying float vDist;
+
+      void main() {
+        if (vProjMode > 0.5 && vMorph > 0.05 && fwidth(vProjLon) > 2.8) {
+          discard;
+        }
+
+        int id = int(vCellId);
+        int tw = int(uTexWidth);
+        int th = int(uTexHeight);
+        ivec2 coord = ivec2(id % tw, id / tw);
+        vec4 style = texelFetch(uCellOverlayTex, coord, 0);
+
+        if (style.a <= 0.001) {
+          discard;
+        }
+
+        float edgeGlow = mix(0.7, 1.0, smoothstep(0.4, 0.98, vDist));
+        gl_FragColor = vec4(style.rgb * edgeGlow, style.a);
+        #include <logdepthbuf_fragment>
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -0.5,
+    polygonOffsetUnits: -2.0,
+    side: DoubleSide,
+  });
 }

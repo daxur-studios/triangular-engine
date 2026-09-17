@@ -37,7 +37,10 @@ import {
   buildPlanetEcology,
   buildPlanetGraphCore,
   buildPlanetTectonics,
+  classifyCellBorders,
   computeCellPins,
+  computeEdgeSagitta,
+  extractCellBorders,
   IPlanetChunk,
   IPlanetEcology,
   IPlanetGraphCore,
@@ -127,6 +130,10 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
   readonly showRivers = input(false);
   readonly showRidges = input(false);
   readonly showCoastlines = input(false);
+  readonly showCellBorders = input(false);
+  readonly showTerritoryBorders = input(false);
+  readonly cellBorderColor = input('#ffffff');
+  readonly territoryBorderColor = input('#ffd166');
   /** Silhouette-preserving LOD1 pins (`computeCellPins()`) — a mesh-quality knob, not a debug
    * toggle; off reproduces the pre-pinning LOD1 merge exactly. */
   readonly usePinning = input(true);
@@ -207,6 +214,32 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
   private ridgeDirections = new Float32Array(0);
   private ridgeElevations = new Float32Array(0);
   private coastlineDirections = new Float32Array(0);
+
+  private readonly cellBorderMaterial = new LineBasicMaterial({
+    color: '#ffffff',
+    transparent: true,
+    opacity: 0.5,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1.0,
+    polygonOffsetUnits: -4.0,
+  });
+  private readonly territoryBorderMaterial = new LineBasicMaterial({
+    color: '#ffd166',
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1.0,
+    polygonOffsetUnits: -4.0,
+  });
+  private cellBorderLines: LineSegments | null = null;
+  private territoryBorderLines: LineSegments | null = null;
+  private cellBorderDirections = new Float32Array(0);
+  private cellBorderElevations = new Float32Array(0);
+  private territoryBorderDirections = new Float32Array(0);
+  private territoryBorderElevations = new Float32Array(0);
+
   /** Camera position expressed in this planet's unit-sphere coordinate system. Reused every
    * frame so translated/scaled consumers (for example BSP's body-fixed surface frame) do not
    * allocate while updating LOD. */
@@ -241,6 +274,7 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
       this.elevationScale();
       this.#applyDisplacement();
       this.#applyRiverDisplacement();
+      this.#applyBorderDisplacement();
     });
 
     effect(() => {
@@ -264,6 +298,22 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
       const visible = this.showCoastlines();
       if (this.coastlineLines) this.coastlineLines.visible = visible;
     });
+    effect(() => {
+      const visible = this.showCellBorders();
+      if (this.cellBorderLines) this.cellBorderLines.visible = visible;
+    });
+    effect(() => {
+      const visible = this.showTerritoryBorders();
+      if (this.territoryBorderLines) this.territoryBorderLines.visible = visible;
+    });
+    effect(() => {
+      this.cellBorderColor();
+      this.cellBorderMaterial.color.set(this.cellBorderColor());
+    });
+    effect(() => {
+      this.territoryBorderColor();
+      this.territoryBorderMaterial.color.set(this.territoryBorderColor());
+    });
 
     this.engineService.tick$
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -279,11 +329,15 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
     this.riverLines?.geometry.dispose();
     this.ridgeLines?.geometry.dispose();
     this.coastlineLines?.geometry.dispose();
+    this.cellBorderLines?.geometry.dispose();
+    this.territoryBorderLines?.geometry.dispose();
     this.previewMaterial.dispose();
     this.oceanMaterial.dispose();
     this.riverMaterial.dispose();
     this.ridgeMaterial.dispose();
     this.coastlineMaterial.dispose();
+    this.cellBorderMaterial.dispose();
+    this.territoryBorderMaterial.dispose();
     super.ngOnDestroy();
   }
 
@@ -308,6 +362,7 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
 
     this.#rebuildPreviewMesh();
     this.#rebuildRiverOverlays();
+    this.#rebuildBorderOverlays();
   }
 
   #rebuildPreviewMesh(): void {
@@ -588,6 +643,133 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
       const positions = attr.array as Float32Array;
       for (let i = 0; i < this.coastlineDirections.length; i++) {
         positions[i] = this.coastlineDirections[i] * radius;
+      }
+      attr.needsUpdate = true;
+    }
+  }
+
+  #rebuildBorderOverlays(): void {
+    const graph = this.graph();
+    const tectonics = this.tectonics();
+    if (!graph || !tectonics) return;
+
+    if (this.cellBorderLines) {
+      this.object3D().remove(this.cellBorderLines);
+      this.cellBorderLines.geometry.dispose();
+      this.cellBorderLines = null;
+    }
+    if (this.territoryBorderLines) {
+      this.object3D().remove(this.territoryBorderLines);
+      this.territoryBorderLines.geometry.dispose();
+      this.territoryBorderLines = null;
+    }
+
+    const allEdges = extractCellBorders(graph);
+    const { territoryEdges } = classifyCellBorders(allEdges, tectonics.plateIdByCell);
+
+    // Cell borders
+    const borderDirs: number[] = [];
+    const borderElevs: number[] = [];
+    for (const edge of allEdges) {
+      const eA = tectonics.elevation[edge.cellA] ?? 0;
+      const eB = tectonics.elevation[edge.cellB] ?? 0;
+      borderDirs.push(edge.a.x, edge.a.y, edge.a.z, edge.b.x, edge.b.y, edge.b.z);
+      borderElevs.push(eA, eB);
+    }
+    this.cellBorderDirections = new Float32Array(borderDirs);
+    this.cellBorderElevations = new Float32Array(borderElevs);
+
+    const borderGeo = new BufferGeometry();
+    borderGeo.setAttribute('position', new BufferAttribute(new Float32Array(this.cellBorderDirections.length), 3));
+    this.cellBorderMaterial.color.set(this.cellBorderColor());
+    this.cellBorderLines = new LineSegments(borderGeo, this.cellBorderMaterial);
+    this.cellBorderLines.name = 'cell-borders';
+    this.cellBorderLines.renderOrder = 3;
+    this.cellBorderLines.visible = this.showCellBorders();
+    this.object3D().add(this.cellBorderLines);
+
+    // Territory borders
+    const terrDirs: number[] = [];
+    const terrElevs: number[] = [];
+    for (const edge of territoryEdges) {
+      const eA = tectonics.elevation[edge.cellA] ?? 0;
+      const eB = tectonics.elevation[edge.cellB] ?? 0;
+      terrDirs.push(edge.a.x, edge.a.y, edge.a.z, edge.b.x, edge.b.y, edge.b.z);
+      terrElevs.push(eA, eB);
+    }
+    this.territoryBorderDirections = new Float32Array(terrDirs);
+    this.territoryBorderElevations = new Float32Array(terrElevs);
+
+    const terrGeo = new BufferGeometry();
+    terrGeo.setAttribute('position', new BufferAttribute(new Float32Array(this.territoryBorderDirections.length), 3));
+    this.territoryBorderMaterial.color.set(this.territoryBorderColor());
+    this.territoryBorderLines = new LineSegments(terrGeo, this.territoryBorderMaterial);
+    this.territoryBorderLines.name = 'territory-borders';
+    this.territoryBorderLines.renderOrder = 4;
+    this.territoryBorderLines.visible = this.showTerritoryBorders();
+    this.object3D().add(this.territoryBorderLines);
+
+    this.#applyBorderDisplacement();
+  }
+
+  #applyBorderDisplacement(): void {
+    const scale = this.elevationScale();
+    const minClearance = 0.003;
+
+    if (this.cellBorderLines) {
+      const attr = this.cellBorderLines.geometry.getAttribute('position') as BufferAttribute;
+      const positions = attr.array as Float32Array;
+      for (let i = 0; i < this.cellBorderElevations.length; i += 2) {
+        const oA = i * 3;
+        const oB = (i + 1) * 3;
+        const ax = this.cellBorderDirections[oA];
+        const ay = this.cellBorderDirections[oA + 1];
+        const az = this.cellBorderDirections[oA + 2];
+        const bx = this.cellBorderDirections[oB];
+        const by = this.cellBorderDirections[oB + 1];
+        const bz = this.cellBorderDirections[oB + 2];
+
+        const sagitta = computeEdgeSagitta({ x: ax, y: ay, z: az }, { x: bx, y: by, z: bz }, 1.0);
+        const clearance = minClearance + sagitta;
+
+        const rA = 1 + this.cellBorderElevations[i] * scale + clearance;
+        const rB = 1 + this.cellBorderElevations[i + 1] * scale + clearance;
+
+        positions[oA] = ax * rA;
+        positions[oA + 1] = ay * rA;
+        positions[oA + 2] = az * rA;
+        positions[oB] = bx * rB;
+        positions[oB + 1] = by * rB;
+        positions[oB + 2] = bz * rB;
+      }
+      attr.needsUpdate = true;
+    }
+
+    if (this.territoryBorderLines) {
+      const attr = this.territoryBorderLines.geometry.getAttribute('position') as BufferAttribute;
+      const positions = attr.array as Float32Array;
+      for (let i = 0; i < this.territoryBorderElevations.length; i += 2) {
+        const oA = i * 3;
+        const oB = (i + 1) * 3;
+        const ax = this.territoryBorderDirections[oA];
+        const ay = this.territoryBorderDirections[oA + 1];
+        const az = this.territoryBorderDirections[oA + 2];
+        const bx = this.territoryBorderDirections[oB];
+        const by = this.territoryBorderDirections[oB + 1];
+        const bz = this.territoryBorderDirections[oB + 2];
+
+        const sagitta = computeEdgeSagitta({ x: ax, y: ay, z: az }, { x: bx, y: by, z: bz }, 1.0);
+        const clearance = minClearance * 1.5 + sagitta;
+
+        const rA = 1 + this.territoryBorderElevations[i] * scale + clearance;
+        const rB = 1 + this.territoryBorderElevations[i + 1] * scale + clearance;
+
+        positions[oA] = ax * rA;
+        positions[oA + 1] = ay * rA;
+        positions[oA + 2] = az * rA;
+        positions[oB] = bx * rB;
+        positions[oB + 1] = by * rB;
+        positions[oB + 2] = bz * rB;
       }
       attr.needsUpdate = true;
     }

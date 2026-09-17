@@ -14,3 +14,5 @@ export * from './components/cell-planet-map-units.component';
 export * from './components/cell-planet-morph-view.component';
 export * from './planet-morph-geometry';
 export * from './planet-morph-material';
+export * from './cell-border-geometry';
+export * from './cell-tactical-overlay';
