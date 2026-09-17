@@ -27,6 +27,7 @@
         "test": {
           "builder": "@angular/build:karma",
           "options": {
+            "watch": false,
             "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"],
             "browsers": "ChromeHeadless",
@@ -50,54 +51,60 @@
         "test-worldgen": {
           "builder": "@angular/build:karma",
           "options": {
+            "watch": false,
             "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"],
-            "browsers": ["ChromeHeadless"],
+            "browsers": "ChromeHeadless",
             "include": ["../worldgen/**/*.spec.ts"]
           }
         },
         "test-worldgen-render": {
           "builder": "@angular/build:karma",
           "options": {
+            "watch": false,
             "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"],
-            "browsers": ["ChromeHeadless"],
+            "browsers": "ChromeHeadless",
             "include": ["../worldgen/render/**/*.spec.ts"]
           }
         },
         "test-navigation": {
           "builder": "@angular/build:karma",
           "options": {
+            "watch": false,
             "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"],
-            "browsers": ["ChromeHeadless"],
+            "browsers": "ChromeHeadless",
             "include": ["../navigation/**/*.spec.ts"]
           }
         },
         "test-animals": {
           "builder": "@angular/build:karma",
           "options": {
+            "watch": false,
             "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"],
-            "browsers": ["ChromeHeadless"],
+            "browsers": "ChromeHeadless",
             "include": ["../animals/**/*.spec.ts"]
           }
         },
         "test-characters": {
           "builder": "@angular/build:karma",
           "options": {
+            "watch": false,
             "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"],
-            "browsers": ["ChromeHeadless"],
+            "browsers": "ChromeHeadless",
             "include": ["../characters/**/*.spec.ts"]
           }
         },
         "test-procedural": {
           "builder": "@angular/build:karma",
           "options": {
+            "watch": false,
             "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"],
-            "browsers": ["ChromeHeadless"],
+            "browsers": "ChromeHeadless",
             "include": ["../procedural/**/*.spec.ts"]
           }
         }
@@ -215,10 +222,11 @@
         "test": {
           "builder": "@angular/build:karma",
           "options": {
+            "watch": false,
             "polyfills": ["zone.js", "zone.js/testing"],
             "tsConfig": "projects/demo-app/tsconfig.spec.json",
             "inlineStyleLanguage": "scss",
-            "browsers": ["ChromeHeadless"],
+            "browsers": "ChromeHeadless",
             "assets": [
               {
                 "glob": "**/*",

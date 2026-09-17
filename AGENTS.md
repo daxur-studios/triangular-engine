@@ -22,7 +22,8 @@
 ```powershell
 npm install
 npm run build:triangular-engine
-npm test -- --watch=false --browsers=ChromeHeadless
+npm test
+npm run test:triangular-engine:worldgen
 npx ng serve demo-app
 daxur tokens map --floor 50000
 daxur tokens map status
