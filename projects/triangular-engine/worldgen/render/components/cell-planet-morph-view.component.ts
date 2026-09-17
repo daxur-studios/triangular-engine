@@ -170,6 +170,8 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
   // Public Methods
   // ==========================================================================
 
+  private cachedBasis?: IProjectionBasis;
+
   /**
    * Evaluates the exact 3D world position and surface normal for any unit/marker on the planet
    * matching the current morph state, active projection, and dynamic tracking basis.
@@ -178,7 +180,7 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
     const projection = MAP_PROJECTIONS[this.projectionKind()];
     const mapWidth = this.terrainGeometryData?.mapWidth ?? 2 * Math.PI * this.radius();
     const mapHeight = this.terrainGeometryData?.mapHeight ?? Math.PI * this.radius();
-    const basis = this.computeActiveBasis();
+    const basis = this.cachedBasis ?? this.computeActiveBasis();
 
     return evaluateSurfaceTransform(
       direction,
@@ -194,15 +196,39 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
   }
 
   /**
+   * Synchronously updates the dynamic projection tracking frame every frame (for smooth
+   * 60 FPS real-time moving aircraft/units without depending on Angular zone microtasks).
+   */
+  updateTracking(direction: IVec3 | null, mode?: ProjectionTrackingMode): void {
+    const activeMode = mode ?? this.trackingMode();
+    if (activeMode === 'none' || !direction) {
+      this.cachedBasis = undefined;
+      this.dynamicUniforms.uProjMode.value = 0;
+      return;
+    }
+
+    const basis = this.computeBasisFor(activeMode, direction);
+    this.cachedBasis = basis;
+    this.dynamicUniforms.uProjMode.value = 1;
+    this.dynamicUniforms.uProjForward.value.set(basis.forward.x, basis.forward.y, basis.forward.z);
+    this.dynamicUniforms.uProjUp.value.set(basis.up.x, basis.up.y, basis.up.z);
+    this.dynamicUniforms.uProjRight.value.set(basis.right.x, basis.right.y, basis.right.z);
+  }
+
+  /**
    * Computes the current orthonormal projection basis based on tracking mode and direction.
    */
   computeActiveBasis(): IProjectionBasis | undefined {
+    if (this.cachedBasis) return this.cachedBasis;
     const mode = this.trackingMode();
     const dir = this.trackingDirection();
     if (mode === 'none' || !dir) {
       return undefined;
     }
+    return this.computeBasisFor(mode, dir);
+  }
 
+  computeBasisFor(mode: ProjectionTrackingMode, dir: IVec3): IProjectionBasis {
     if (mode === 'meridian') {
       const normDir = normalize(dir);
       const lon = Math.atan2(normDir.x, normDir.z);

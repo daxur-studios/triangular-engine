@@ -3,6 +3,25 @@
   <ambientLight [intensity]="1.2" />
   <directionalLight [position]="[5, 8, 6]" [intensity]="2.2" />
   <directionalLight [position]="[-5, -3, -4]" [intensity]="0.4" />
+
+  @if (surfaceSampler()) {
+    <cellPlanetMorphView
+      #morphView
+      [sampler]="surfaceSampler()!"
+      [graph]="graph"
+      [morphProgress]="morphProgress()"
+      [projectionKind]="projectionKind()"
+      [trackingMode]="projectionTrackingMode()"
+      [trackingDirection]="activeTrackingDirection()"
+      [radius]="globeRadius"
+      [heightScale]="heightScale()"
+      [seabedRelief]="seabedRelief()"
+      [showOcean]="showOcean()"
+      [oceanSubstance]="oceanSubstance()"
+      [seaLevelElevation]="seaLevelElevation"
+      [resolveColor]="resolveColorCallback"
+    />
+  }
 </scene>
 
 <aside class="readout">
