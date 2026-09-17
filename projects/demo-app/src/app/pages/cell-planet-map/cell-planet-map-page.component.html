@@ -26,10 +26,10 @@
       <small>Volcano, mesa, ridge, river and shore anchors use this fixture's generated world. Canyon is a U2 placeholder.</small>
       <button type="button" (click)="applyU0Baseline()">Apply U0 baseline</button>
       <label class="field">
-        <span>Review bookmark</span>
+        <span>Review bookmark and select its cell</span>
         <select [value]="u0BookmarkId()" (change)="onU0BookmarkChange($event)">
-          @for (bookmarkId of u0BookmarkIds; track bookmarkId) {
-            <option [value]="bookmarkId" [selected]="u0BookmarkId() === bookmarkId">{{ bookmarkId }}</option>
+          @for (bookmark of u0Bookmarks; track bookmark.id) {
+            <option [value]="bookmark.id" [selected]="u0BookmarkId() === bookmark.id">{{ bookmark.label }} · cell {{ bookmark.cellId }}</option>
           }
         </select>
       </label>

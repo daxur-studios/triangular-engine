@@ -8,6 +8,7 @@ import {
   buildPlanetTectonics,
   computeFeatures,
   deriveIsLand,
+  findCellAt,
   IVec3,
 } from 'triangular-engine/worldgen';
 import { CELL_PLANET_GENERATION_DEFAULTS } from './cell-planet-generation-config';
@@ -31,6 +32,8 @@ export type CellPlanetU0BookmarkId =
 export interface ICellPlanetU0Bookmark {
   readonly id: CellPlanetU0BookmarkId;
   readonly label: string;
+  /** Exact cell selected by this bookmark in the fixture snapshot. */
+  readonly cellId: number;
   /** Normalized map position. The map adapter scales this to its current footprint. */
   readonly mapPosition: readonly [xFraction: number, yFraction: number];
   /** Stable planet direction. Later feature instances should use these same anchors. */
@@ -122,7 +125,15 @@ function resolveFixtureBookmarks(): readonly ICellPlanetU0Bookmark[] {
     mapZoom: number,
   ): ICellPlanetU0Bookmark => {
     const stableDirection = direction(point);
-    return { id, label, mapPosition: mapPosition(stableDirection), direction: stableDirection, cameraRadiusFactor, mapZoom };
+    return {
+      id,
+      label,
+      cellId: findCellAt(graph, stableDirection).id,
+      mapPosition: mapPosition(stableDirection),
+      direction: stableDirection,
+      cameraRadiusFactor,
+      mapZoom,
+    };
   };
 
   return [

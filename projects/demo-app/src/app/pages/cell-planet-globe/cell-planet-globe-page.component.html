@@ -31,10 +31,10 @@
     <small>Volcano, mesa, ridge, river and shore anchors use this fixture's generated world. Canyon is a U2 placeholder.</small>
     <button type="button" (click)="applyU0Baseline()">Apply U0 baseline</button>
     <label>
-      <span>Review bookmark</span>
+      <span>Review bookmark and select its cell</span>
       <select [value]="u0BookmarkId()" (change)="onU0BookmarkChange($event)">
-        @for (bookmarkId of u0BookmarkIds; track bookmarkId) {
-          <option [value]="bookmarkId" [selected]="u0BookmarkId() === bookmarkId">{{ bookmarkId }}</option>
+        @for (bookmark of u0Bookmarks; track bookmark.id) {
+          <option [value]="bookmark.id" [selected]="u0BookmarkId() === bookmark.id">{{ bookmark.label }} · cell {{ bookmark.cellId }}</option>
         }
       </select>
     </label>
@@ -127,6 +127,7 @@
 
   <span>triangles: {{ triangles().toLocaleString() }} · vertices: {{ vertices().toLocaleString() }}</span>
   <span>build: {{ buildMs().toFixed(0) }} ms · draw calls: {{ drawCalls() }}</span>
+  <span>Selected cell: {{ selectedCellId() ?? '—' }}</span>
   <span>Prototype: fixed resolution, no LOD/streaming — runbook 031 owns chunked terrain.</span>
   <span>Drag to orbit · wheel to zoom</span>
 </aside>

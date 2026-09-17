@@ -88,6 +88,10 @@ Implement stable camera bookmarks: `overview`, `local-mountain`, `volcano`, `mes
 `sphere-face-edge`, `sphere-face-corner`. Record coordinates/target, not only screenshots. U0
 provides the selectors and resolves the anchors that already exist in the generator; U2/U3 must
 make the remaining named landforms and fine river/coast geometry visible in every renderer.
+Each resolved bookmark also carries the exact fixture `cellId`. Selecting one automatically aligns
+the page with the fixture inputs, then selects or highlights that cell in the active view, so a
+camera landing over an ordinary area is diagnosable as a terrain/feature problem rather than being
+confused with a camera problem.
 
 The initial U0 implementation now resolves `volcano`, `mesa`, `ridge-crossing`, river and shore
 bookmarks from the frozen generator snapshot. Those anchors identify the existing generated cell
@@ -322,16 +326,17 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
   user review are still outstanding.
 - Accepted gates: none. Existing labs have not been re-evaluated against this plan.
 - Latest completed packet: shared fixture manifest v2 using the volcanic profile, with deterministic
-  anchors resolved from generated volcano/mesa cells, ridge/river paths and a coastline; baseline
-  action and bookmark selectors are wired into the 2D, 2.5D and globe routes; 2D pan/zoom and 3D
-  inspection camera views respond to the selected bookmark.
+  anchors resolved from generated volcano/mesa cells, ridge/river paths and a coastline; bookmark
+  selection now carries the exact cell ID into the 2D highlight, 2.5D selection indicator and
+  globe colour highlight; baseline action and selectors are wired into all three routes.
 - Next packet: capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
   cold and warm timings, frame-time percentiles, draw/triangle counts, residency and memory fields.
 - First user review: U0 cell scale, close/strategic zoom range and baseline conditions.
 - Reference hardware/browser/canvas/DPR/build mode: not yet recorded.
 - Fixture seed/cell count/radius/relief/version/IDs: fixture manifest frozen at v2; volcano/mesa
-  cell and path anchors are derived deterministically from the manifest's generator snapshot.
-  Exact numeric IDs can be recorded in the evidence record after the user's baseline capture.
+  cell and path anchors plus their selected cell IDs are derived deterministically from the
+  manifest's generator snapshot. Exact numeric IDs can be recorded in the evidence record after
+  the user's baseline capture.
 - Numeric caps to freeze in U0: resident patches, worker jobs, tracked bytes, cold coverage,
   warm build latency, canonical metre error, seam error and near/far pixel error.
 - Performance evidence: no U0 performance capture yet; defaults above are proposals only.

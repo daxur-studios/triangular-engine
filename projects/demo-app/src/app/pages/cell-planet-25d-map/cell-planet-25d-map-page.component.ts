@@ -512,10 +512,10 @@ function makeColorTexture(
         <small>Volcano, mesa, ridge, river and shore anchors use this fixture's generated world. Canyon is a U2 placeholder.</small>
         <button type="button" (click)="applyU0Baseline()">Apply U0 baseline</button>
         <label>
-          <span>Review bookmark</span>
+          <span>Review bookmark and select its cell</span>
           <select [value]="u0BookmarkId()" (change)="onU0BookmarkChange($event)">
-            @for (bookmarkId of u0BookmarkIds; track bookmarkId) {
-              <option [value]="bookmarkId" [selected]="u0BookmarkId() === bookmarkId">{{ bookmarkId }}</option>
+            @for (bookmark of u0Bookmarks; track bookmark.id) {
+              <option [value]="bookmark.id" [selected]="u0BookmarkId() === bookmark.id">{{ bookmark.label }} · cell {{ bookmark.cellId }}</option>
             }
           </select>
         </label>
@@ -654,6 +654,7 @@ export class CellPlanet25dMapPageComponent {
   readonly worldProfileKind = signal<WorldProfileKind>('terran');
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
   readonly u0Fixture = CELL_PLANET_U0_FIXTURE;
+  readonly u0Bookmarks = CELL_PLANET_U0_FIXTURE.bookmarks;
   readonly u0BookmarkIds = CELL_PLANET_U0_BOOKMARK_IDS;
   readonly u0BookmarkId = signal<CellPlanetU0BookmarkId>('overview');
   readonly u0Bookmark = computed(() => getCellPlanetU0Bookmark(this.u0BookmarkId()));
@@ -1027,6 +1028,7 @@ export class CellPlanet25dMapPageComponent {
     this.waterLevel.set(this.u0Fixture.waterLevel);
     this.showOcean.set(this.u0Fixture.showOcean);
     this.u0BookmarkId.set('overview');
+    this.selectionController?.clearSelection();
     this.updateComparisonQueryParams();
     const previousTerrain = this.terrain;
     this.terrain = this.createTerrainScene();
@@ -1037,7 +1039,23 @@ export class CellPlanet25dMapPageComponent {
   onU0BookmarkChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as CellPlanetU0BookmarkId;
     if (!this.u0BookmarkIds.includes(value)) return;
+    if (
+      this.cellCount() !== this.u0Fixture.cellCount ||
+      this.seed() !== this.u0Fixture.seed ||
+      this.relaxationIterations() !== this.u0Fixture.relaxationIterations ||
+      this.worldProfileKind() !== this.u0Fixture.worldProfile ||
+      this.worldSizeTier() !== this.u0Fixture.worldSize ||
+      this.displayScale() !== this.u0Fixture.displayScale ||
+      this.projectionType() !== this.u0Fixture.projection ||
+      this.terrainQuality() !== this.u0Fixture.terrainQuality ||
+      this.terrainHeightScale() !== this.u0Fixture.terrainHeightScale ||
+      this.waterLevel() !== this.u0Fixture.waterLevel ||
+      this.showOcean() !== this.u0Fixture.showOcean
+    ) {
+      this.applyU0Baseline();
+    }
     this.u0BookmarkId.set(value);
+    this.selectionController?.selectCell(getCellPlanetU0Bookmark(value).cellId);
     this.updateComparisonQueryParams();
   }
 
@@ -1418,6 +1436,9 @@ export class CellPlanet25dMapPageComponent {
     this.hasPendingSelection = true;
     if (query.u0Bookmark && this.u0BookmarkIds.includes(query.u0Bookmark as CellPlanetU0BookmarkId)) {
       this.u0BookmarkId.set(query.u0Bookmark as CellPlanetU0BookmarkId);
+      if (this.pendingSelectedCellId === null) {
+        this.pendingSelectedCellId = getCellPlanetU0Bookmark(query.u0Bookmark as CellPlanetU0BookmarkId).cellId;
+      }
     }
   }
 

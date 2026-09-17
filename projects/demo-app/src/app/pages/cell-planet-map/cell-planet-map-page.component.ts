@@ -97,6 +97,7 @@ export class CellPlanetMapPageComponent {
   readonly projectionLabels = MAP_PROJECTION_LABELS;
   readonly generationDefaults = CELL_PLANET_GENERATION_DEFAULTS;
   readonly u0Fixture = CELL_PLANET_U0_FIXTURE;
+  readonly u0Bookmarks = CELL_PLANET_U0_FIXTURE.bookmarks;
   readonly u0BookmarkIds = CELL_PLANET_U0_BOOKMARK_IDS;
   readonly u0BookmarkId = signal<CellPlanetU0BookmarkId>('overview');
   private readonly preservedQueryParams = signal<CellPlanetQuery>({});
@@ -202,14 +203,26 @@ export class CellPlanetMapPageComponent {
     this.projectionType.set(this.u0Fixture.projection);
     this.waterLevel.set(this.u0Fixture.waterLevel);
     this.u0BookmarkId.set('overview');
+    this.selectedCellId.set(null);
     this.map()?.setView({ panX: 0, panY: 0, zoom: 1 });
   }
 
   onU0BookmarkChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as CellPlanetU0BookmarkId;
     if (!this.u0BookmarkIds.includes(value)) return;
+    if (
+      this.cellCount() !== this.u0Fixture.cellCount ||
+      this.seed() !== this.u0Fixture.seed ||
+      this.relaxationIterations() !== this.u0Fixture.relaxationIterations ||
+      this.worldProfileKind() !== this.u0Fixture.worldProfile ||
+      this.projectionType() !== this.u0Fixture.projection ||
+      this.waterLevel() !== this.u0Fixture.waterLevel
+    ) {
+      this.applyU0Baseline();
+    }
     this.u0BookmarkId.set(value);
     const bookmark = getCellPlanetU0Bookmark(value);
+    this.selectedCellId.set(bookmark.cellId);
     this.map()?.setView({
       panX: bookmark.mapPosition[0] * MAP_HALF_WIDTH,
       panY: bookmark.mapPosition[1] * MAP_HALF_HEIGHT,
@@ -250,6 +263,9 @@ export class CellPlanetMapPageComponent {
     );
     if (query.u0Bookmark && this.u0BookmarkIds.includes(query.u0Bookmark as CellPlanetU0BookmarkId)) {
       this.u0BookmarkId.set(query.u0Bookmark as CellPlanetU0BookmarkId);
+      if (selectedCell === null) {
+        this.selectedCellId.set(getCellPlanetU0Bookmark(query.u0Bookmark as CellPlanetU0BookmarkId).cellId);
+      }
     }
     // Record the restored world so the generation-watch effect above does not clear the
     // selection we just carried in from the other view.

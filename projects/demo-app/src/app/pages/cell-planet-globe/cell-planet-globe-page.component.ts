@@ -177,6 +177,7 @@ export class CellPlanetGlobePageComponent {
   readonly worldSizeTier = signal<WorldSizeTier>('medium');
   readonly worldSizeKinds: WorldSizeTier[] = ['mini', 'small', 'medium', 'large', 'extra-large'];
   readonly u0Fixture = CELL_PLANET_U0_FIXTURE;
+  readonly u0Bookmarks = CELL_PLANET_U0_FIXTURE.bookmarks;
   readonly u0BookmarkIds = CELL_PLANET_U0_BOOKMARK_IDS;
   readonly u0BookmarkId = signal<CellPlanetU0BookmarkId>('overview');
   readonly u0Bookmark = computed(() => getCellPlanetU0Bookmark(this.u0BookmarkId()));
@@ -230,6 +231,7 @@ export class CellPlanetGlobePageComponent {
   readonly vertices = signal(0);
   readonly buildMs = signal(0);
   readonly drawCalls = signal(0);
+  readonly selectedCellId = signal<number | null>(null);
 
   private readonly preservedQueryParams = signal<CellPlanetQuery>({});
   readonly comparisonQueryParams = signal<Record<string, string | number | boolean>>({});
@@ -398,6 +400,7 @@ export class CellPlanetGlobePageComponent {
     this.waterLevel.set(this.u0Fixture.waterLevel);
     this.showOcean.set(this.u0Fixture.showOcean);
     this.u0BookmarkId.set('overview');
+    this.selectedCellId.set(null);
     this.updateComparisonQueryParams();
     this.rebuildWorld();
   }
@@ -405,7 +408,21 @@ export class CellPlanetGlobePageComponent {
   onU0BookmarkChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as CellPlanetU0BookmarkId;
     if (!this.u0BookmarkIds.includes(value)) return;
+    if (
+      this.cellCount() !== this.u0Fixture.cellCount ||
+      this.seed() !== this.u0Fixture.seed ||
+      this.relaxationIterations() !== this.u0Fixture.relaxationIterations ||
+      this.worldProfileKind() !== this.u0Fixture.worldProfile ||
+      this.worldSizeTier() !== this.u0Fixture.worldSize ||
+      this.terrainHeightScale() !== this.u0Fixture.terrainHeightScale ||
+      this.waterLevel() !== this.u0Fixture.waterLevel ||
+      this.showOcean() !== this.u0Fixture.showOcean
+    ) {
+      this.applyU0Baseline();
+    }
     this.u0BookmarkId.set(value);
+    this.selectedCellId.set(getCellPlanetU0Bookmark(value).cellId);
+    this.rebuildColors();
     this.updateComparisonQueryParams();
   }
 
@@ -572,9 +589,19 @@ export class CellPlanetGlobePageComponent {
     const macroLandValues = macroLandFactor.array as Float32Array;
     const mode = this.fillMode();
     const oceanSubstance = WORLD_PROFILES[this.worldProfileKind()].oceanSubstance;
+    const selectedCellId = this.selectedCellId();
 
     for (let i = 0; i < this.geometry.vertexCount; i++) {
       const cellId = this.geometry.cellIds[i];
+      if (cellId === selectedCellId) {
+        macroLandValues[i] = 1;
+        this.colorScratch.set('#ffe066');
+        const o = i * 3;
+        values[o] = this.colorScratch.r;
+        values[o + 1] = this.colorScratch.g;
+        values[o + 2] = this.colorScratch.b;
+        continue;
+      }
       if (mode === 'material') {
         const materialColour = this.resolveMaterialColor(cellId, oceanSubstance);
         const rgb = materialColour.rgb;
@@ -740,8 +767,15 @@ export class CellPlanetGlobePageComponent {
     if (macroScale !== null) this.macroVariationScaleM.set(Math.max(8, Math.min(128, macroScale)));
     this.seabedRelief.set(this.booleanQuery(query.seabedRelief, this.seabedRelief()));
     this.showOcean.set(this.booleanQuery(query.showOcean, this.showOcean()));
+    const selectedCell = this.numberQuery(query.selectedCell);
+    this.selectedCellId.set(
+      selectedCell !== null && Number.isInteger(selectedCell) && selectedCell >= 0 ? selectedCell : null,
+    );
     if (query.u0Bookmark && this.u0BookmarkIds.includes(query.u0Bookmark as CellPlanetU0BookmarkId)) {
       this.u0BookmarkId.set(query.u0Bookmark as CellPlanetU0BookmarkId);
+      if (selectedCell === null) {
+        this.selectedCellId.set(getCellPlanetU0Bookmark(query.u0Bookmark as CellPlanetU0BookmarkId).cellId);
+      }
     }
   }
 
@@ -761,6 +795,7 @@ export class CellPlanetGlobePageComponent {
       macroVariationScaleM: this.macroVariationScaleM(),
       seabedRelief: this.seabedRelief(),
       showOcean: this.showOcean(),
+      selectedCell: this.selectedCellId() ?? '',
       u0Bookmark: this.u0BookmarkId(),
     });
   }
