@@ -329,7 +329,18 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
   anchors resolved from generated volcano/mesa cells, ridge/river paths and a coastline; bookmark
   selection now carries the exact cell ID into the 2D highlight, 2.5D selection indicator and
   globe colour highlight; baseline action and selectors are wired into all three routes.
-- Next packet: capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
+- Latest user review: the volcano cell is selected correctly in 2D, but the view centres on ocean.
+  The bookmark adapter incorrectly treated target coordinates as map translation and omitted zoom.
+  It now projects the anchor through the map's current projection/basis after inputs settle and
+  uses `pan = -projectedTarget * zoom`. Baseline application also preserves the subsequent selection
+  across the generation-change effect. User visual confirmation of this correction is pending.
+- Renderer recommendation (proposed, not a migration commitment): use native Three.js geometry for
+  the unified terrain, with top-down orthographic, tilted planar and globe views sharing world and
+  feature identity. The current 2D renderer already uses Three.js but displays one CanvasTexture,
+  capped at 6144 pixels wide; increasing zoom eventually magnifies that bitmap. Keep it as a reference
+  during delivery. SVG remains an option for overlays/export rather than another terrain renderer.
+  Flat and spherical projection/camera adapters remain necessary even with a common renderer.
+- Next packet: user retest of 2D bookmark centring, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
   cold and warm timings, frame-time percentiles, draw/triangle counts, residency and memory fields.
 - First user review: U0 cell scale, close/strategic zoom range and baseline conditions.
 - Reference hardware/browser/canvas/DPR/build mode: not yet recorded.
@@ -340,7 +351,11 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
 - Numeric caps to freeze in U0: resident patches, worker jobs, tracked bytes, cold coverage,
   warm build latency, canonical metre error, seam error and near/far pixel error.
 - Performance evidence: no U0 performance capture yet; defaults above are proposals only.
-- Agent verification: `npm run build:triangular-engine` passed and `npx ng build demo-app` passed.
+- Agent verification: earlier `npm run build:triangular-engine` and `npx ng build demo-app` passed.
+  Latest bookmark correction: isolated checks of the actual handler passed for three projected
+  targets, deferred input propagation and superseded selection. Latest demo build is blocked by
+  separate `cell-planet-morph-view.component.ts` errors (private inherited engineService, missing
+  override modifiers and object3d versus object3D). No browser or app server was opened for this fix.
   The U0 controls and route persistence were visually exercised earlier in the dev server on
   `/cell-planet-map`, `/cell-planet-25d-map` and `/cell-planet-globe`; no U gate is accepted from
   that check alone.

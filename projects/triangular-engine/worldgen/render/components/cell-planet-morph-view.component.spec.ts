@@ -1,0 +1,98 @@
+import { TestBed } from '@angular/core/testing';
+import { PerspectiveCamera, Scene } from 'three';
+import { EngineService } from 'triangular-engine';
+import { IPlanetSurfaceSampler, IVec3 } from 'triangular-engine/worldgen';
+import { CellPlanetMorphViewComponent } from './cell-planet-morph-view.component';
+
+describe('CellPlanetMorphViewComponent', () => {
+  let scene: Scene;
+  let camera: PerspectiveCamera;
+
+  const mockSampler: IPlanetSurfaceSampler = {
+    sample: (dir: IVec3) => ({
+      elevation: 0.1,
+      baseElevation: 0.1,
+      ridgeRelief: 0,
+      riverCarve: 0,
+      seaLevel: 0,
+      isLand: true,
+    }),
+  };
+
+  beforeEach(() => {
+    scene = new Scene();
+    camera = new PerspectiveCamera();
+    TestBed.configureTestingModule({
+      imports: [CellPlanetMorphViewComponent],
+      providers: [{ provide: EngineService, useValue: { scene, camera } }],
+    });
+  });
+
+  it('instantiates and builds terrain and ocean meshes on init', () => {
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', mockSampler);
+    fixture.componentRef.setInput('longitudeSegments', 16);
+    fixture.componentRef.setInput('latitudeRings', 8);
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    expect(comp.object3D().children.length).toBe(2); // terrain + ocean
+
+    fixture.destroy();
+    expect(comp.object3D().children.length).toBe(0);
+  });
+
+  it('evaluates surface transform for units in 3D and 2.5D view modes', () => {
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', mockSampler);
+    fixture.componentRef.setInput('longitudeSegments', 16);
+    fixture.componentRef.setInput('latitudeRings', 8);
+    fixture.componentRef.setInput('radius', 2.0);
+    fixture.componentRef.setInput('heightScale', 0.1);
+    fixture.componentRef.setInput('morphProgress', 0); // 3D globe
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    const dir: IVec3 = { x: 0, y: 0, z: 1 };
+    const transform3D = comp.evaluateUnitTransform(dir, 0);
+    // At center (0, 0, 1), position should be at Z = 0 (tangent to camera)
+    expect(transform3D.position.x).toBeCloseTo(0, 3);
+    expect(transform3D.position.y).toBeCloseTo(0, 3);
+    expect(transform3D.position.z).toBeCloseTo(0, 3);
+
+    // Switch to 2.5D map
+    fixture.componentRef.setInput('morphProgress', 1.0);
+    fixture.detectChanges();
+
+    const transformFlat = comp.evaluateUnitTransform(dir, 0);
+    expect(transformFlat.position.x).toBeCloseTo(0, 3);
+    expect(transformFlat.position.y).toBeCloseTo(0, 3);
+    expect(transformFlat.normal.z).toBeCloseTo(1, 3);
+
+    fixture.destroy();
+  });
+
+  it('computes orthonormal basis in meridian and oblique tracking modes', () => {
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', mockSampler);
+    fixture.componentRef.setInput('trackingMode', 'meridian');
+    fixture.componentRef.setInput('trackingDirection', { x: 1, y: 0, z: 0 }); // 90 deg East
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    const meridianBasis = comp.computeActiveBasis();
+    expect(meridianBasis).toBeDefined();
+    expect(meridianBasis?.up.y).toBeCloseTo(1, 4); // Poles locked to +Y
+    expect(meridianBasis?.forward.x).toBeCloseTo(1, 4);
+
+    fixture.componentRef.setInput('trackingMode', 'oblique');
+    fixture.componentRef.setInput('trackingDirection', { x: 0, y: 1, z: 0 }); // North Pole
+    fixture.detectChanges();
+
+    const obliqueBasis = comp.computeActiveBasis();
+    expect(obliqueBasis).toBeDefined();
+    expect(obliqueBasis?.forward.y).toBeCloseTo(1, 4);
+
+    fixture.destroy();
+  });
+});

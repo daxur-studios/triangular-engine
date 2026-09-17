@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, signal, untracked, viewChild } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, Injector, signal, untracked, viewChild } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EngineModule, EngineService } from 'triangular-engine';
@@ -68,6 +68,7 @@ function randomSphereDirection(): IVec3 {
 export class CellPlanetMapPageComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly injector = inject(Injector);
   protected readonly mapHalfWidth = MAP_HALF_WIDTH;
   protected readonly mapHalfHeight = MAP_HALF_HEIGHT;
 
@@ -200,6 +201,7 @@ export class CellPlanetMapPageComponent {
     this.seed.set(this.u0Fixture.seed);
     this.relaxationIterations.set(this.u0Fixture.relaxationIterations);
     this.worldProfileKind.set(this.u0Fixture.worldProfile);
+    this.lastGenerationKey = this.generationKey();
     this.projectionType.set(this.u0Fixture.projection);
     this.waterLevel.set(this.u0Fixture.waterLevel);
     this.u0BookmarkId.set('overview');
@@ -223,11 +225,20 @@ export class CellPlanetMapPageComponent {
     this.u0BookmarkId.set(value);
     const bookmark = getCellPlanetU0Bookmark(value);
     this.selectedCellId.set(bookmark.cellId);
-    this.map()?.setView({
-      panX: bookmark.mapPosition[0] * MAP_HALF_WIDTH,
-      panY: bookmark.mapPosition[1] * MAP_HALF_HEIGHT,
-      zoom: bookmark.mapZoom,
-    });
+    // Wait for baseline projection inputs to reach the map before projecting the anchor.
+    // Use its current basis too: double-clicking may have rotated the map projection.
+    afterNextRender(() => {
+      const map = this.map();
+      if (!map || this.u0BookmarkId() !== value) return;
+      const target = map.projectDirectionToLocalPoint(bookmark.direction);
+      // The map moves under a fixed camera: screen = local * zoom + pan.
+      // Centre the anchor by cancelling its scaled position, in the map's Y-up space.
+      map.setView({
+        panX: -target.x * bookmark.mapZoom,
+        panY: -target.y * bookmark.mapZoom,
+        zoom: bookmark.mapZoom,
+      });
+    }, { injector: this.injector });
   }
 
   private restoreQuery(query: CellPlanetQuery): void {

@@ -14,8 +14,8 @@ describe('buildPlanetSurfaceBake', () => {
     const b = buildPlanetSurfaceBake(graph, sampler, { width: 24, height: 12, heightScale: 3 });
 
     expect(a).toEqual(b);
-    expect(a.elevations).toHaveLength(24 * 12);
-    expect(a.cellIds).toHaveLength(24 * 12);
+    expect(a.elevations.length).toBe(24 * 12);
+    expect(a.cellIds.length).toBe(24 * 12);
     expect(Array.from(a.cellIds).every((id) => id >= 0 && id < graph.cells.length)).toBe(true);
     expect(Array.from(a.landMask).every((value) => value === 0 || value === 1)).toBe(true);
   });
