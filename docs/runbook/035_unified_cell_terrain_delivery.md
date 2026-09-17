@@ -340,7 +340,11 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
   capped at 6144 pixels wide; increasing zoom eventually magnifies that bitmap. Keep it as a reference
   during delivery. SVG remains an option for overlays/export rather than another terrain renderer.
   Flat and spherical projection/camera adapters remain necessary even with a common renderer.
-- Next packet: user retest of 2D bookmark centring, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
+- Latest 2.5D selection packet: the selection controller already raycasts the baked height field,
+  but its visual ring was capped at 30 m. On the physical medium planet that made a correct
+  selection appear missing. The ring and pin now scale from the selected cell footprint, with a
+  bounded fraction of the map span for safety. `npm run build:triangular-engine` passes.
+- Next packet: user retest of 2.5D click selection and bookmark selection, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
   cold and warm timings, frame-time percentiles, draw/triangle counts, residency and memory fields.
 - First user review: U0 cell scale, close/strategic zoom range and baseline conditions.
 - Reference hardware/browser/canvas/DPR/build mode: not yet recorded.

@@ -156,8 +156,17 @@ export function createCellPlanetSelection(
       const cornerPoint = mapPlanetDirectionToMapXZ(active.projection, activeField, corner);
       radius = Math.hypot(cornerPoint.x - centre.x, cornerPoint.z - centre.z);
     }
-    radius = Math.min(30, Math.max(1, radius * 1.15));
-    const pinHeight = Math.min(40, Math.max(3, radius * 3));
+    // The planar page uses physical planet units. A fixed 30 m cap made the
+    // indicator effectively invisible on the medium planet, where one cell is
+    // hundreds of kilometres wide. Keep the old useful range for the legacy
+    // 256-unit map while scaling the marker with the actual cell footprint.
+    const mapSpan = Math.min(
+      active.bounds.maxX - active.bounds.minX,
+      active.bounds.maxZ - active.bounds.minZ,
+    );
+    const maxMarkerRadius = Math.max(10, mapSpan * 0.08);
+    radius = Math.min(maxMarkerRadius, Math.max(1, radius * 1.15));
+    const pinHeight = Math.min(maxMarkerRadius * 2, Math.max(3, radius * 1.8));
 
     ring.scale.set(radius, 1, radius);
     pin.scale.set(radius, pinHeight, radius);
