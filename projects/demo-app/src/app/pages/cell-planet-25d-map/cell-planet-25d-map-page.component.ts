@@ -691,6 +691,10 @@ export class CellPlanet25dMapPageComponent {
     const bookmark = this.u0Bookmark();
     if (bookmark.id === 'overview') return [0, 0, 0] as [number, number, number];
     const bounds = this.terrainMapBounds();
+    const selected = this.selection();
+    // Use exactly the same projected XYZ as the visible selection marker.
+    // River/shore bookmarks can be on an edge rather than at their cell centre.
+    if (selected?.cellId === bookmark.cellId) return [...selected.surfacePosition] as [number, number, number];
     return [
       bookmark.mapPosition[0] * (bounds.maxX - bounds.minX) * 0.5,
       0,

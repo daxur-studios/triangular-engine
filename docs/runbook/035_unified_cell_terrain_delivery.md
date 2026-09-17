@@ -344,6 +344,20 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
   but its visual ring was capped at 30 m. On the physical medium planet that made a correct
   selection appear missing. The ring and pin now scale from the selected cell footprint, with a
   bounded fraction of the map span for safety. `npm run build:triangular-engine` passes.
+- Latest 2.5D camera packet (2026-09-17): user rejected the previous surface-height adjustment;
+  bookmark jumps still left the camera looking outside the map. Reproduced the actual control bug:
+  `RaycastOrbitControlsComponent` compared the bookmark's new camera distance with the previous
+  frame's distance, treated it as a cursor dolly, and shifted both camera and target toward the
+  stale cursor. Returning to overview could extrapolate far beyond that cursor. Camera/target
+  input changes now invalidate the cached cursor and distance and cancel pending rotate handoffs.
+  The page also uses the selection marker's exact projected XYZ for its bookmark pivot, including
+  river/shore cells whose centre differs from the feature anchor. No new public API is needed.
+  An isolated Node regression exercised the real component source with mocked Angular scheduling
+  and base controls: original code fails; corrected close/overview jumps remain fixed for 20 ticks;
+  pending rotation is cancelled; fresh cursor zoom still works. Colocated Angular regression specs
+  cover these cases but were not browser-run (user owns browser verification).
+  The new spec and its imports type-check; library and demo builds pass; `git diff --check` passes.
+  User visual confirmation remains pending; do not mark this gate accepted from a build.
 - Next packet: user retest of 2.5D click selection and bookmark selection, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
   cold and warm timings, frame-time percentiles, draw/triangle counts, residency and memory fields.
 - First user review: U0 cell scale, close/strategic zoom range and baseline conditions.

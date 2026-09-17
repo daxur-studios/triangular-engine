@@ -222,7 +222,9 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
       this.relaxationIterations();
       this.jitter();
       this.plateCount();
-      this.#regenerate();
+      untracked(() => {
+        this.#regenerate();
+      });
     });
 
     // usePinning affects LOD1 geometry, not just color, so it needs a mesh rebuild — but only

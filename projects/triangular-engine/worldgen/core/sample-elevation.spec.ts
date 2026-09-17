@@ -88,7 +88,11 @@ describe('findCellNear / sampleElevationNear', () => {
     const tectonics = buildPlanetTectonics(graph, { plateCount: 7, seed: 9 });
 
     for (const cell of graph.cells) {
-      const direction = cell.corners[0];
+      const direction = {
+        x: cell.corners[0].x * 0.5 + cell.center.x * 0.5,
+        y: cell.corners[0].y * 0.5 + cell.center.y * 0.5,
+        z: cell.corners[0].z * 0.5 + cell.center.z * 0.5,
+      };
       const expected = sampleElevation(graph, tectonics.elevation, direction);
       const { value, cellId } = sampleElevationNear(graph, tectonics.elevation, direction, 0);
       expect(value).toBeCloseTo(expected, 10);

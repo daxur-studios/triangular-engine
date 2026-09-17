@@ -29,7 +29,7 @@ describe('buildPlanetSurfaceBake', () => {
       width: 4,
       height: 2,
       projection: {
-        directionAt: (x) => (x < 2.5 ? { x: 1, y: 0, z: 0 } : null),
+        directionAt: (x, y) => (y < 1 && x < 2.5 ? { x: 1, y: 0, z: 0 } : null),
       },
     });
 

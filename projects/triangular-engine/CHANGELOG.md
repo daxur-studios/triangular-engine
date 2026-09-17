@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed `raycastOrbitControls` treating declarative camera/target changes as cursor
+  zoom, which could displace bookmark cameras outside the map. Camera input changes
+  now clear cached cursor, zoom distance and pending rotate handoff state.
 - Added optional `triangular-engine/meshoptimizer` secondary entry point with
   indexed geometry simplification helpers backed by `meshoptimizer`.
 - Added topology-aware sphere edge refinement through the optional

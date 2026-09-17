@@ -37,6 +37,8 @@ export interface ICellPlanetSelection {
   readonly moisture: number;
   readonly isLand: boolean;
   readonly surfaceHeightM: number;
+  /** Exact rendered anchor shared by the selection indicator and bookmark camera. */
+  readonly surfacePosition: readonly [x: number, y: number, z: number];
   readonly direction: IVec3;
 }
 
@@ -191,6 +193,7 @@ export function createCellPlanetSelection(
       moisture: active.ecology.moisture[cellId] ?? 0,
       isLand: active.tectonics.isLand[cellId] ?? false,
       surfaceHeightM,
+      surfacePosition: [centre.x, surfaceHeightM, centre.z],
       direction: cell.center,
     };
     selection.set(next);

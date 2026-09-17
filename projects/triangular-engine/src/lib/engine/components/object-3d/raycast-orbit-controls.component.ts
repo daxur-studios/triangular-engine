@@ -76,10 +76,30 @@ export class RaycastOrbitControlsComponent extends OrbitControlsComponent {
 
   constructor() {
     super();
+    this.#initExternalPoseChanges();
     this.#initMouseButtons();
     this.#initCursorTracking();
     this.#initRotateTowardCursor();
     this.#initZoomAnchorCompensation();
+  }
+
+  #initExternalPoseChanges(): void {
+    effect(() => {
+      // A declarative camera jump is not a cursor dolly. Otherwise the next
+      // tick compares the new bookmark distance with the old distance and
+      // translates BOTH camera and target toward a stale cursor (or far past
+      // it when returning to overview). Cancel a pending rotate handoff too.
+      this.target();
+      this.cameraPosition();
+      this.moveBy();
+      this.follow();
+      this.orbitControls();
+      this.isActive();
+      this.zoomToCursor();
+      this.#lastDistanceToTargetM = null;
+      this.#rotateLockHandoff = null;
+      this.#cursorPositionM.set(null);
+    });
   }
 
   #initMouseButtons(): void {
