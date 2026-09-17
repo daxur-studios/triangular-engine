@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Moved browser image compression behind the opt-in
+  `triangular-engine/image-compression` entry point so core engine consumers do
+  not need to install `browser-image-compression`.
 - Fixed `raycastOrbitControls` treating declarative camera/target changes as cursor
   zoom, which could displace bookmark cameras outside the map. Camera input changes
   now clear cached cursor, zoom distance and pending rotate handoff state.

@@ -11,6 +11,7 @@ import {
 } from 'three';
 
 import type { IOctahedralImpostorAtlas } from './create-octahedral-impostor-atlas';
+import type { ImageCompressionFunction } from 'triangular-engine';
 
 export interface ICompressOctahedralImpostorAtlasOptions {
   /** Target maximum size in MB for albedo compression. @default 1 */
@@ -29,8 +30,10 @@ export interface ICompressOctahedralImpostorAtlasOptions {
   readonly normalDepthMode?: 'lossless' | 'lossy';
   /** Custom quality for normalDepth if lossy mode is enabled. @default 0.95 */
   readonly normalDepthQuality?: number;
-  /** Progress callback from browser-image-compression (0 - 100). */
+  /** Progress callback from the configured image compression implementation (0 - 100). */
   readonly onProgress?: (progress: number) => void;
+  /** Compression implementation supplied by `triangular-engine/image-compression`. */
+  readonly imageCompression?: ImageCompressionFunction;
 }
 
 export interface IOctahedralImpostorCompressionStats {
@@ -77,7 +80,8 @@ const ATLAS_TEXTURE_INDEX: { readonly albedo: 0; readonly normalDepth: 1 } = {
 };
 
 /**
- * Compresses a baked octahedral impostor atlas using `browser-image-compression`.
+ * Compresses a baked octahedral impostor atlas using a caller-provided image
+ * compression implementation.
  *
  * Reads back both albedo and normal/depth textures from the GPU WebGLRenderTarget,
  * compresses albedo to a lightweight web format (e.g. WebP / JPEG), handles
@@ -113,14 +117,14 @@ export async function compressOctahedralImpostorAtlas(
   const maxSizeMB = options?.maxSizeMB ?? 1;
   const maxWidthOrHeight = options?.maxWidthOrHeight ?? width;
 
-  const imageCompressionModule = await import('browser-image-compression').catch((err) => {
+  const imageCompression = options?.imageCompression;
+  if (!imageCompression) {
     throw new Error(
-      `The "browser-image-compression" library is required for compressOctahedralImpostorAtlas: ${err}`,
+      'compressOctahedralImpostorAtlas requires an image compression implementation. ' +
+        'Install browser-image-compression and import browserImageCompression from ' +
+        'triangular-engine/image-compression.',
     );
-  });
-  const imageCompression =
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (imageCompressionModule as any).default ?? imageCompressionModule;
+  }
 
   const compressedAlbedoFile = await imageCompression(rawAlbedoFile, {
     maxSizeMB,

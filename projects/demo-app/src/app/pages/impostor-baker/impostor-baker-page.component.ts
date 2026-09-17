@@ -18,6 +18,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
+import { browserImageCompression } from 'triangular-engine/image-compression';
 import {
   buildFloraMesh,
   FLORA_OAK_ARCHETYPE,
@@ -300,6 +301,7 @@ export class ImpostorBakerPageComponent {
       this.compressedAtlas = undefined;
 
       const compressed = await compressOctahedralImpostorAtlas(renderer, this.atlas, {
+        imageCompression: browserImageCompression,
         quality: this.compressionQuality(),
         fileType: this.compressionFormat(),
         normalDepthMode: this.normalDepthMode(),

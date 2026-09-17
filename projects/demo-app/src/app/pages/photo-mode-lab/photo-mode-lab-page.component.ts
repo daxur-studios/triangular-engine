@@ -24,6 +24,7 @@ import {
   Vector3,
 } from 'three';
 import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
+import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import {
   buildFloraMesh,
   buildGroundCoverClumpMesh,
@@ -149,7 +150,10 @@ interface IFloraVariant {
   templateUrl: './photo-mode-lab-page.component.html',
   styleUrl: './photo-mode-lab-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [EngineService.provide({ showFPS: true })],
+  providers: [
+    EngineService.provide({ showFPS: true }),
+    provideBrowserImageCompression(),
+  ],
   host: { class: 'flex-page' },
 })
 export class PhotoModeLabPageComponent {

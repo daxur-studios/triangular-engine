@@ -9,3 +9,4 @@ export * from './third-person-controls.model';
 export * from './floating-origin.model';
 export * from './engine-database.model';
 export * from './object-map.model';
+export * from './image-compression.model';

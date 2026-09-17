@@ -51,4 +51,12 @@ Key features:
 - Offscreen resolution scaling: `multiplier: 2` or `resolution: { width, height }`
 - Automatic CSS2D / CSS3D DOM overlay marker hiding (`hideOverlays: true`)
 - Custom preparation and quality elevation hooks (`prepare: () => ...`)
-- Optional Web Worker image compression via `browser-image-compression` (`compress: { maxSizeMB: 2, quality: 0.85 }`), with graceful fallback if the peer dependency is not installed
+- Optional Web Worker image compression via the `triangular-engine/image-compression` adapter (`compress: { maxSizeMB: 2, quality: 0.85 }`). Core screenshot capture does not require `browser-image-compression`; when compression is requested without an adapter, it returns the uncompressed capture with a warning.
+
+To enable the built-in adapter, install `browser-image-compression` and provide it in the application injector:
+
+```ts
+import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
+
+providers: [provideBrowserImageCompression()]
+```

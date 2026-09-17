@@ -5,6 +5,9 @@
   "compilerOptions": {
     "paths": {
       "triangular-engine": ["projects/triangular-engine/src/public-api"],
+      "triangular-engine/image-compression": [
+        "projects/triangular-engine/image-compression/public-api"
+      ],
       "triangular-engine/postprocessing": [
         "projects/triangular-engine/postprocessing/public-api"
       ],

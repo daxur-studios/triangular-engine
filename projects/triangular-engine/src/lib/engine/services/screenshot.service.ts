@@ -1,8 +1,9 @@
 import { inject, Injectable } from '@angular/core';
 import { Camera, OrthographicCamera, PerspectiveCamera } from 'three';
 import { EngineService } from './engine.service';
+import { IMAGE_COMPRESSION_FUNCTION } from '../models/image-compression.model';
 
-/** Configuration options for post-capture compression using `browser-image-compression`. */
+/** Configuration options for post-capture compression using a configured adapter. */
 export interface ScreenshotCompressOptions {
   /** Target maximum file size in MB. Default: 2 */
   maxSizeMB?: number;
@@ -33,11 +34,12 @@ export interface ScreenshotOptions {
   /** Number of progressive sub-pixel SSAA accumulation samples (1 = instant single pass, 8..32 = smooth anti-aliasing). Defaults to 1. */
   samples?: number;
   /**
-   * Optional post-capture image compression using `browser-image-compression`.
+   * Optional post-capture image compression using the configured image compression adapter.
    * Pass `true` or a `ScreenshotCompressOptions` configuration.
    *
-   * If `browser-image-compression` is not installed by the host project, this will gracefully
-   * log a warning and return the uncompressed capture without throwing an error.
+   * If no adapter is provided, this will log a warning and return the uncompressed capture
+   * without throwing an error. Use `provideBrowserImageCompression` from
+   * `triangular-engine/image-compression` to enable the built-in adapter.
    */
   compress?: boolean | ScreenshotCompressOptions;
   /** Automatically hide CSS2D and CSS3D DOM overlay markers/HUD during capture. Defaults to `true`. */
@@ -64,6 +66,7 @@ export interface ScreenshotOptions {
 })
 export class ScreenshotService {
   private readonly injectedEngine = inject(EngineService, { optional: true });
+  private readonly imageCompression = inject(IMAGE_COMPRESSION_FUNCTION);
 
   /** Returns the active EngineService instance. */
   get engine(): EngineService | undefined {
@@ -134,7 +137,7 @@ export class ScreenshotService {
         });
       }
 
-      // 5. Optional compression via browser-image-compression if available
+      // 5. Optional compression via the configured image compression adapter
       if (options.compress) {
         blob = await this.maybeCompressBlob(blob, format, options.compress);
       }
@@ -373,10 +376,7 @@ export class ScreenshotService {
     });
   }
 
-  /**
-   * Optionally compresses a captured image Blob using `browser-image-compression` if installed.
-   * If `browser-image-compression` is not available in the host environment, logs a notice and returns the original blob.
-   */
+  /** Optionally compresses a captured image Blob using the configured adapter. */
   private async maybeCompressBlob(
     blob: Blob,
     format: string,
@@ -388,14 +388,11 @@ export class ScreenshotService {
     const fileType = config.fileType ?? format;
     const useWebWorker = config.useWebWorker ?? true;
 
-    let imageCompression: any;
-    try {
-      const imageCompressionModule = await import('browser-image-compression');
-      imageCompression = (imageCompressionModule as any).default ?? imageCompressionModule;
-    } catch (err) {
+    const imageCompression = this.imageCompression;
+    if (!imageCompression) {
       console.warn(
-        '[ScreenshotService] Optional peer dependency "browser-image-compression" failed to load:',
-        err,
+        '[ScreenshotService] Compression was requested, but no image compression adapter is configured. ' +
+          'Install browser-image-compression and provide the adapter from triangular-engine/image-compression.',
       );
       return blob;
     }

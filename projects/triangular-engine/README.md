@@ -58,6 +58,7 @@ The library is modularized into several secondary entry points (sub-libraries) s
 | `triangular-engine/water` | **Water**: Declarative large-scale plane, planet, and inside-cylinder water with quality and motion presets. See [water/README.md](./water/README.md). | `three` |
 | `triangular-engine/terrain` | **Terrain**: Domain-aware terrain generation, surface sampling, and high-performance CDLOD (Continuous Distance-Dependent Level of Detail) planetary rendering with GPU geomorphing. See [terrain/README.md](./terrain/README.md). | — |
 | `triangular-engine/meshoptimizer` | **Meshoptimizer**: Optional indexed-geometry simplification helpers for runtime meshes, terrain chunks and other geometry pipelines. | `meshoptimizer` |
+| `triangular-engine/image-compression` | **Image Compression**: Opt-in `browser-image-compression` adapter for screenshot and impostor compression. | `browser-image-compression` |
 | `triangular-engine/celestial` | **Celestial**: Astrodynamics, Keplerian orbits, atmospheric/gravity models, planetary presets, and procedural surface definitions. See [celestial/README.md](./celestial/README.md). | — |
 | `triangular-engine/scatter` | **Scatter**: Deterministic streamed placement and LOD rendering for vegetation and repeated environment objects. | — |
 | `triangular-engine/animals` | **Animals**: Framework-free deterministic animal flocks and lightweight world responses. | — |
@@ -108,9 +109,15 @@ Optional peer dependencies:
   AND
   "@pmndrs/vanilla": "^1.24.0",
   AND
-  "meshoptimizer": "^1.0.1"
+  "meshoptimizer": "^1.0.1",
+  AND
+  "browser-image-compression": "^2.0.2"
 }
 ```
+
+`browser-image-compression` is only needed when using
+`triangular-engine/image-compression`. Core engine consumers do not need to
+install it.
 
 See [docs/pmndrs.md](docs/pmndrs.md) for Billboard and Sparkles usage.
 
