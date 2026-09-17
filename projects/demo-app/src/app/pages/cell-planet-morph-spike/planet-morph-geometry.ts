@@ -37,16 +37,22 @@ export interface ISurfaceTransform {
   readonly normal: Vector3;
 }
 
+export interface IProjectionBasis {
+  readonly forward: IVec3;
+  readonly up: IVec3;
+  readonly right: IVec3;
+}
+
 /**
  * Computes world position and surface normal for a point given its spherical unit direction
  * and elevation at morph progress `t` (0 = 3D globe, 1 = 2.5D flat map).
  *
  * Both representations share the exact same orientation:
  * +Y is North, +X is East, +Z faces toward the viewer.
- * The front center point (lon=0, lat=0) sits tangent at Z = 0, and as t -> 0 (Globe),
+ * The front center point sits tangent at Z = 0, and as t -> 0 (Globe),
  * the sides and back curl monotonically backwards into -Z away from the camera.
  *
- * An optional `centralLon` can be supplied to dynamically center the projection on a moving unit.
+ * An optional `basis` can be supplied to dynamically center the projection on a moving unit.
  */
 export function evaluateSurfaceTransform(
   direction: IVec3,
@@ -57,31 +63,36 @@ export function evaluateSurfaceTransform(
   mapWidth: number,
   mapHeight: number,
   t: number,
-  centralLon = 0,
+  basis?: IProjectionBasis,
 ): ISurfaceTransform {
   const normDir = normalize(direction);
-  const lat = Math.asin(Math.max(-1, Math.min(1, normDir.y)));
-  const rawLon = Math.atan2(normDir.x, normDir.z);
-  const lon = centralLon === 0
-    ? rawLon
-    : Math.atan2(Math.sin(rawLon - centralLon), Math.cos(rawLon - centralLon));
+
+  let pLon: number;
+  let pLat: number;
+
+  if (basis) {
+    const dotFwd = normDir.x * basis.forward.x + normDir.y * basis.forward.y + normDir.z * basis.forward.z;
+    const dotRight = normDir.x * basis.right.x + normDir.y * basis.right.y + normDir.z * basis.right.z;
+    const dotUp = normDir.x * basis.up.x + normDir.y * basis.up.y + normDir.z * basis.up.z;
+
+    pLon = Math.atan2(dotRight, dotFwd);
+    pLat = Math.asin(Math.max(-1, Math.min(1, dotUp)));
+  } else {
+    pLat = Math.asin(Math.max(-1, Math.min(1, normDir.y)));
+    pLon = Math.atan2(normDir.x, normDir.z);
+  }
 
   // 3D Sphere state: front point at Z = 0, center at (0, 0, -radius)
   const displacedRadius = radius + elevation * heightScale;
-  const cosLat = Math.cos(lat);
-  const dirX = cosLat * Math.sin(lon);
-  const dirY = Math.sin(lat);
-  const dirZ = cosLat * Math.cos(lon);
-
   const spherePos = new Vector3(
-    dirX * displacedRadius,
-    dirY * displacedRadius,
-    dirZ * displacedRadius - radius,
+    normDir.x * displacedRadius,
+    normDir.y * displacedRadius,
+    normDir.z * displacedRadius - radius,
   );
-  const sphereNorm = new Vector3(dirX, dirY, dirZ);
+  const sphereNorm = new Vector3(normDir.x, normDir.y, normDir.z);
 
   // 2.5D Flat map state: in XY plane facing +Z
-  const proj = projection.project(lon, lat, mapWidth, mapHeight);
+  const proj = projection.project(pLon, pLat, mapWidth, mapHeight);
   const flatX = (proj.x / mapWidth - 0.5) * mapWidth;
   const flatY = -(proj.y / mapHeight - 0.5) * mapHeight;
   const flatZ = elevation * heightScale;

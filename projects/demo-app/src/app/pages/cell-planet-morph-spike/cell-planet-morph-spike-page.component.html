@@ -1,10 +1,5 @@
 <scene [showFps]="true" [logarithmicDepthBuffer]="true">
-  <orbitControls
-    [cameraPosition]="cameraPosition()"
-    [target]="cameraTarget()"
-    [near]="0.05"
-    [far]="500"
-  />
+  <orbitControls [target]="cameraTarget()" [near]="0.05" />
   <ambientLight [intensity]="1.2" />
   <directionalLight [position]="[5, 8, 6]" [intensity]="2.2" />
   <directionalLight [position]="[-5, -3, -4]" [intensity]="0.4" />
@@ -16,7 +11,12 @@
     <a [routerLink]="['/cell-planet-map']">2D map</a>
     <a [routerLink]="['/cell-planet-25d-map']">2.5D terrain</a>
     <a [routerLink]="['/cell-planet-globe']">Globe</a>
-    <a [routerLink]="['/cell-planet-morph-spike']" class="active" aria-current="page">Seamless morph</a>
+    <a
+      [routerLink]="['/cell-planet-morph-spike']"
+      class="active"
+      aria-current="page"
+      >Seamless morph</a
+    >
   </nav>
 
   <div class="transition-actions">
@@ -26,7 +26,7 @@
       [disabled]="isAnimating()"
       (click)="toggleView()"
     >
-      @if (targetView() === 'globe') {
+      @if (targetView() === "globe") {
         <span>Morph to 2.5D Map (Unroll)</span>
       } @else {
         <span>Morph to 3D Globe (Fold)</span>
@@ -37,7 +37,11 @@
   <label class="scrubber-label">
     <div class="scrubber-header">
       <span>Morph progress</span>
-      <strong>{{ (morphProgress() * 100).toFixed(0) }}% ({{ targetView() === 'map' ? '2.5D Map' : '3D Globe' }})</strong>
+      <strong
+        >{{ (morphProgress() * 100).toFixed(0) }}% ({{
+          targetView() === "map" ? "2.5D Map" : "3D Globe"
+        }})</strong
+      >
     </div>
     <input
       type="range"
@@ -135,38 +139,89 @@
         <button
           type="button"
           class="focus-btn"
-          [class.active-focus]="focusMode() === 'unit' && focusedUnitId() === unit.id"
+          [class.active-focus]="
+            focusMode() === 'unit' && focusedUnitId() === unit.id
+          "
           (click)="selectFocus(unit.id)"
         >
           <span class="color-dot" [style.background-color]="unit.color"></span>
-          <span>{{ unit.isAir ? '✈' : unit.isNaval ? '⛵' : '⚑' }} {{ unit.name }}</span>
+          <span
+            >{{ unit.isAir ? "✈" : unit.isNaval ? "⛵" : "⚑" }}
+            {{ unit.name }}</span
+          >
         </button>
       }
     </div>
 
-    <div class="checkbox-row" style="margin-top: 0.35rem;">
-      <label>
-        <input
-          type="checkbox"
-          [checked]="dynamicCenterOfProjection()"
-          (change)="onDynamicCenterToggle($event)"
-        />
-        <span>Dynamic center of projection (Follow Unit)</span>
-      </label>
+    <label
+      style="
+        margin-top: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      "
+    >
+      <span
+        style="
+          font-size: 0.75rem;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          opacity: 0.8;
+        "
+        >2.5D Projection Tracking</span
+      >
+      <select
+        [value]="projectionTrackingMode()"
+        (change)="onProjectionTrackingChange($event)"
+      >
+        <option value="none">Static (Greenwich / 0° lon, 0° lat)</option>
+        <option value="meridian">
+          Meridian-Only (Center Unit Longitude; Poles Locked)
+        </option>
+        <option value="oblique">
+          Full Oblique (Center Unit Lat + Lon / Cross-Polar)
+        </option>
+      </select>
+    </label>
+
+    <div
+      style="
+        font-size: 0.75rem;
+        color: #38bdf8;
+        margin-top: 0.25rem;
+        font-family: monospace;
+      "
+    >
+      Center: <strong>{{ projectionCenterInfo().lonDeg }}</strong
+      >, <strong>{{ projectionCenterInfo().latDeg }}</strong>
     </div>
 
-    <small class="hint">
-      Pinned to: <strong>{{ focusMode() === 'overview' ? 'World Center' : focusedUnitId() }}</strong>.
-      @if (dynamicCenterOfProjection()) {
-        <em>Dynamic projection active:</em> The world projection dynamically scrolls/rotates to keep this unit in the horizontal center with infinite wrap-around.
+    <small class="hint" style="margin-top: 0.35rem">
+      Pinned to:
+      <strong>{{
+        focusMode() === "overview" ? "World Center" : focusedUnitId()
+      }}</strong
+      >.
+      @if (projectionTrackingMode() === "meridian") {
+        <em>Meridian Tracking:</em> Central meridian dynamically shifts
+        East/West to center this unit horizontally. Poles remain locked at
+        top/bottom.
+      } @else if (projectionTrackingMode() === "oblique") {
+        <em>Full Oblique Tracking:</em> Map re-centers both latitude and
+        longitude around the unit. Transverse flight over North/South poles is
+        seamless with no edge teleportation.
       } @else {
-        Camera stays centered on this unit across 2.5D and 3D.
+        <em>Static Map:</em> Camera tracks the unit across 2.5D and 3D with
+        standard Greenwich center.
       }
     </small>
   </fieldset>
 
   <footer class="stats">
-    <span>Vertices: {{ vertices().toLocaleString() }} · Triangles: {{ triangles().toLocaleString() }}</span>
+    <span
+      >Vertices: {{ vertices().toLocaleString() }} · Triangles:
+      {{ triangles().toLocaleString() }}</span
+    >
     <span>Drag to orbit · Scroll to zoom</span>
   </footer>
 </aside>

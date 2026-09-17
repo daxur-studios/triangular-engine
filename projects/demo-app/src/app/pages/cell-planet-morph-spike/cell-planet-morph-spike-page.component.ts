@@ -62,13 +62,19 @@ import {
   buildPlanetMorphGeometry,
   evaluateSurfaceTransform,
   IPlanetMorphGeometryData,
+  IProjectionBasis,
 } from './planet-morph-geometry';
-import { createPlanetMorphMaterial } from './planet-morph-material';
+import {
+  createPlanetMorphMaterial,
+  IDynamicProjectionUniforms,
+} from './planet-morph-material';
 
 const GLOBE_RADIUS = 2.0;
 const DEFAULT_HEIGHT_SCALE = 0.16;
 const MORPH_SEGMENTS = 128;
 const MORPH_RINGS = 64;
+
+export type ProjectionTrackingMode = 'none' | 'meridian' | 'oblique';
 
 interface IGameUnit {
   id: string;
@@ -128,7 +134,8 @@ export class CellPlanetMorphSpikePageComponent {
   readonly seabedRelief = signal(true);
   readonly showOcean = signal(true);
   readonly autoPatrol = signal(true);
-  readonly dynamicCenterOfProjection = signal(false);
+  readonly projectionTrackingMode = signal<ProjectionTrackingMode>('none');
+  readonly projectionCenterInfo = signal<{ lonDeg: string; latDeg: string }>({ lonDeg: '0.0°', latDeg: '0.0°' });
 
   /** 0 = 3D Globe, 1 = 2.5D Map */
   readonly morphProgress = signal(0.0);
@@ -142,14 +149,12 @@ export class CellPlanetMorphSpikePageComponent {
 
   // Focus & Camera tracking
   readonly focusMode = signal<'unit' | 'overview'>('unit');
-  readonly focusedUnitId = signal<string>('Skyward One (Transcontinental)');
+  readonly focusedUnitId = signal<string>('Equatorial Express (Horizontal)');
   readonly availableUnits = signal<Array<{ id: string; name: string; color: string; isNaval: boolean; isAir: boolean }>>([]);
 
   // Camera signals for OrbitControls
   readonly cameraPosition = signal<[number, number, number]>([0, 0, 4.4]);
   readonly cameraTarget = signal<[number, number, number]>([0, 0, 0]);
-
-  private currentCentralLon = 0;
 
   private graph!: IPlanetGraphCore;
   private tectonics!: IPlanetTectonics;
@@ -164,7 +169,18 @@ export class CellPlanetMorphSpikePageComponent {
   private mapWorldGroup?: Group;
   private terrainMesh?: Mesh;
   private oceanMesh?: Mesh;
-  private readonly morphUniform: IUniform<number> = { value: 0 };
+
+  private readonly dynamicUniforms: IDynamicProjectionUniforms = {
+    uMorph: { value: 0 },
+    uProjForward: { value: new Vector3(0, 0, 1) },
+    uProjUp: { value: new Vector3(0, 1, 0) },
+    uProjRight: { value: new Vector3(1, 0, 0) },
+    uProjMode: { value: 0 },
+    uMapWidth: { value: 12.56637 },
+    uMapHeight: { value: 6.28318 },
+    uRadius: { value: GLOBE_RADIUS },
+    uProjectionType: { value: 1 },
+  };
 
   private units: IGameUnit[] = [];
   private animationFrameId?: number;
@@ -214,7 +230,7 @@ export class CellPlanetMorphSpikePageComponent {
   setMorphProgress(value: number): void {
     const clamped = Math.max(0, Math.min(1, value));
     this.morphProgress.set(clamped);
-    this.morphUniform.value = clamped;
+    this.dynamicUniforms.uMorph.value = clamped;
     this.targetView.set(clamped > 0.5 ? 'map' : 'globe');
     this.updateCameraForProgress(clamped);
     this.updateUnitsPositions();
@@ -229,6 +245,7 @@ export class CellPlanetMorphSpikePageComponent {
     const value = (event.target as HTMLSelectElement).value as MapProjectionKind;
     if (this.projectionKinds.includes(value) && value !== this.projectionKind()) {
       this.projectionKind.set(value);
+      this.dynamicUniforms.uProjectionType.value = value === 'equirectangular' ? 0 : 1;
       this.rebuildMeshes();
       this.updateUnitsPositions();
     }
@@ -265,8 +282,9 @@ export class CellPlanetMorphSpikePageComponent {
     this.autoPatrol.set((event.target as HTMLInputElement).checked);
   }
 
-  onDynamicCenterToggle(event: Event): void {
-    this.dynamicCenterOfProjection.set((event.target as HTMLInputElement).checked);
+  onProjectionTrackingChange(event: Event): void {
+    const val = (event.target as HTMLSelectElement).value as ProjectionTrackingMode;
+    this.projectionTrackingMode.set(val);
     this.updateUnitsPositions();
     this.updateCameraForProgress(this.morphProgress());
   }
@@ -279,6 +297,46 @@ export class CellPlanetMorphSpikePageComponent {
       this.focusedUnitId.set(target);
     }
     this.updateCameraForProgress(this.morphProgress());
+  }
+
+  computeActiveProjectionBasis(unit?: IGameUnit): IProjectionBasis | undefined {
+    const mode = this.projectionTrackingMode();
+    if (mode === 'none' || !unit) {
+      return undefined;
+    }
+
+    if (mode === 'meridian') {
+      // Rotate longitude only: Africa vs America in center; poles stay fixed at top/bottom (+Y / -Y)
+      const normDir = normalize(unit.direction);
+      const lon = Math.atan2(normDir.x, normDir.z);
+      const forward: IVec3 = { x: Math.sin(lon), y: 0, z: Math.cos(lon) };
+      const up: IVec3 = { x: 0, y: 1, z: 0 };
+      const right: IVec3 = { x: Math.cos(lon), y: 0, z: -Math.sin(lon) };
+      return { forward, up, right };
+    }
+
+    // Full Oblique / Transverse: unit's 3D direction becomes the forward axis
+    const forward = normalize(unit.direction);
+    const worldUp: IVec3 = forward.y > 0.999
+      ? { x: 0, y: 0, z: -1 }
+      : forward.y < -0.999
+        ? { x: 0, y: 0, z: 1 }
+        : { x: 0, y: 1, z: 0 };
+    // Project worldUp onto tangent plane at forward
+    const dot = worldUp.x * forward.x + worldUp.y * forward.y + worldUp.z * forward.z;
+    const tanUp = {
+      x: worldUp.x - dot * forward.x,
+      y: worldUp.y - dot * forward.y,
+      z: worldUp.z - dot * forward.z,
+    };
+    const up = normalize(tanUp);
+    // right = up x forward
+    const right: IVec3 = {
+      x: up.y * forward.z - up.z * forward.y,
+      y: up.z * forward.x - up.x * forward.z,
+      z: up.x * forward.y - up.y * forward.x,
+    };
+    return { forward, up, right };
   }
 
   private animateToView(target: 'globe' | 'map'): void {
@@ -314,14 +372,12 @@ export class CellPlanetMorphSpikePageComponent {
     if (this.focusMode() === 'unit') {
       const unit = this.units.find((u) => u.id === this.focusedUnitId()) ?? this.units[0];
       if (unit) {
-        // Retrieve true world-space position of unit (reflects mapWorldGroup position and rotation)
-        const unitWorldPos = new Vector3();
-        unit.group.getWorldPosition(unitWorldPos);
-
+        const unitPos = unit.group.position;
         const projection = MAP_PROJECTIONS[this.projectionKind()];
         const mapWidth = this.terrainGeometryData?.mapWidth ?? 2 * Math.PI * GLOBE_RADIUS;
         const mapHeight = this.terrainGeometryData?.mapHeight ?? Math.PI * GLOBE_RADIUS;
 
+        const activeBasis = this.computeActiveProjectionBasis(unit);
         const transform = evaluateSurfaceTransform(
           unit.direction,
           unit.elevation,
@@ -331,12 +387,11 @@ export class CellPlanetMorphSpikePageComponent {
           mapWidth,
           mapHeight,
           t,
-          0,
+          activeBasis,
         );
 
         // World-oriented surface normal
-        const rotEuler = this.mapWorldGroup ? this.mapWorldGroup.rotation : new Euler();
-        const worldNormal = transform.normal.clone().applyEuler(rotEuler).normalize();
+        const worldNormal = transform.normal.clone().normalize();
 
         // In 3D Globe: look at the unit from outward along its surface normal
         const globeOffset = worldNormal.clone().multiplyScalar(2.6);
@@ -345,10 +400,10 @@ export class CellPlanetMorphSpikePageComponent {
         const mapOffset = new Vector3(0, -1.8, 2.4);
 
         const offset = new Vector3().lerpVectors(globeOffset, mapOffset, t);
-        const camPos = new Vector3().addVectors(unitWorldPos, offset);
+        const camPos = new Vector3().addVectors(unitPos, offset);
 
         this.cameraPosition.set([camPos.x, camPos.y, camPos.z]);
-        this.cameraTarget.set([unitWorldPos.x, unitWorldPos.y, unitWorldPos.z]);
+        this.cameraTarget.set([unitPos.x, unitPos.y, unitPos.z]);
         return;
       }
     }
@@ -445,10 +500,16 @@ export class CellPlanetMorphSpikePageComponent {
     this.engine.scene.add(this.mapWorldGroup);
 
     const mapWidth = this.terrainGeometryData.mapWidth;
+    const mapHeight = this.terrainGeometryData.mapHeight;
+
+    this.dynamicUniforms.uMapWidth.value = mapWidth;
+    this.dynamicUniforms.uMapHeight.value = mapHeight;
+    this.dynamicUniforms.uRadius.value = GLOBE_RADIUS;
+    this.dynamicUniforms.uProjectionType.value = this.projectionKind() === 'equirectangular' ? 0 : 1;
 
     const { material: terrainMat } = createPlanetMorphMaterial(
       { vertexColors: true, roughness: 0.9, metalness: 0.05 },
-      { uMorph: this.morphUniform },
+      this.dynamicUniforms,
     );
 
     this.terrainMesh = new Mesh(this.terrainGeometryData.geometry, terrainMat);
@@ -473,7 +534,7 @@ export class CellPlanetMorphSpikePageComponent {
         metalness: 0.1,
         depthWrite: false,
       },
-      { uMorph: this.morphUniform },
+      this.dynamicUniforms,
     );
 
     this.oceanMesh = new Mesh(this.oceanGeometryData.geometry, oceanMat);
@@ -481,8 +542,8 @@ export class CellPlanetMorphSpikePageComponent {
     this.oceanMesh.visible = this.showOcean();
     this.mapWorldGroup.add(this.oceanMesh);
 
-    this.triangles.set(this.terrainGeometryData.triangleCount * 2);
-    this.vertices.set(this.terrainGeometryData.vertexCount * 2);
+    this.triangles.set(this.terrainGeometryData.triangleCount + (this.oceanGeometryData?.triangleCount ?? 0));
+    this.vertices.set(this.terrainGeometryData.vertexCount + (this.oceanGeometryData?.vertexCount ?? 0));
   }
 
   private spawnGameUnits(): void {
@@ -509,6 +570,30 @@ export class CellPlanetMorphSpikePageComponent {
       orbitBasisV?: Vector3;
       flightSpeed?: number;
     }> = [
+      {
+        name: 'Equatorial Express (Horizontal)',
+        kind: 'airplane',
+        color: '#06b6d4', // Cyan
+        isNaval: false,
+        isAir: true,
+        cellId: 0,
+        flightType: 'greatCircle',
+        orbitBasisP: new Vector3(0, 0, 1),
+        orbitBasisV: new Vector3(1, 0, 0),
+        flightSpeed: 0.45,
+      },
+      {
+        name: 'Polar Valkyrie (Vertical / Poles)',
+        kind: 'airplane',
+        color: '#f43f5e', // Rose
+        isNaval: false,
+        isAir: true,
+        cellId: 0,
+        flightType: 'greatCircle',
+        orbitBasisP: new Vector3(0, 0, 1),
+        orbitBasisV: new Vector3(0, 1, 0),
+        flightSpeed: 0.45,
+      },
       {
         name: 'Skyward One (Transcontinental)',
         kind: 'airplane',
@@ -714,6 +799,11 @@ export class CellPlanetMorphSpikePageComponent {
     const mapWidth = this.terrainGeometryData.mapWidth;
     const mapHeight = this.terrainGeometryData.mapHeight;
 
+    const focusedUnit = this.focusMode() === 'unit'
+      ? this.units.find((u) => u.id === this.focusedUnitId())
+      : undefined;
+    const activeBasis = this.computeActiveProjectionBasis(focusedUnit);
+
     const upVector = new Vector3(0, 1, 0);
 
     for (const unit of this.units) {
@@ -726,7 +816,7 @@ export class CellPlanetMorphSpikePageComponent {
         mapWidth,
         mapHeight,
         t,
-        0,
+        activeBasis,
       );
 
       // Lift slightly above surface to prevent clipping
@@ -748,7 +838,7 @@ export class CellPlanetMorphSpikePageComponent {
           mapWidth,
           mapHeight,
           t,
-          0,
+          activeBasis,
         );
         const fwdDir = new Vector3().subVectors(fwdTrans.position, transform.position).normalize();
         const up = transform.normal;
@@ -868,34 +958,31 @@ export class CellPlanetMorphSpikePageComponent {
         }
 
         const t = this.morphProgress();
-        const mapWidth = this.terrainGeometryData?.mapWidth ?? 2 * Math.PI * GLOBE_RADIUS;
-
         if (this.oceanMesh) this.oceanMesh.visible = this.showOcean();
 
         // Dynamic center of projection tracking
-        if (this.dynamicCenterOfProjection() && this.focusMode() === 'unit') {
-          const focused = this.units.find((u) => u.id === this.focusedUnitId()) ?? this.units[0];
+        const focused = this.focusMode() === 'unit'
+          ? this.units.find((u) => u.id === this.focusedUnitId())
+          : undefined;
+        const activeBasis = this.computeActiveProjectionBasis(focused);
+
+        if (activeBasis) {
+          this.dynamicUniforms.uProjMode.value = 1;
+          this.dynamicUniforms.uProjForward.value.set(activeBasis.forward.x, activeBasis.forward.y, activeBasis.forward.z);
+          this.dynamicUniforms.uProjUp.value.set(activeBasis.up.x, activeBasis.up.y, activeBasis.up.z);
+          this.dynamicUniforms.uProjRight.value.set(activeBasis.right.x, activeBasis.right.y, activeBasis.right.z);
+
           if (focused) {
-            const targetLon = Math.atan2(focused.direction.x, focused.direction.z);
-            const diff = Math.atan2(Math.sin(targetLon - this.currentCentralLon), Math.cos(targetLon - this.currentCentralLon));
-            this.currentCentralLon += diff * Math.min(1.0, deltaSec * 6.0);
+            const latDeg = (Math.asin(Math.max(-1, Math.min(1, focused.direction.y))) * 180 / Math.PI).toFixed(1);
+            const lonDeg = (Math.atan2(focused.direction.x, focused.direction.z) * 180 / Math.PI).toFixed(1);
+            this.projectionCenterInfo.set({
+              lonDeg: `${lonDeg}°`,
+              latDeg: this.projectionTrackingMode() === 'meridian' ? '0.0° (Poles Locked)' : `${latDeg}°`,
+            });
           }
-        } else if (!this.dynamicCenterOfProjection()) {
-          // Smoothly return to Greenwich meridian (0) when disabled
-          const diff = Math.atan2(Math.sin(-this.currentCentralLon), Math.cos(-this.currentCentralLon));
-          this.currentCentralLon += diff * Math.min(1.0, deltaSec * 3.0);
-        }
-
-        if (this.mapWorldGroup) {
-          // In 3D Globe: Rotate mapWorldGroup around Y by -currentCentralLon
-          this.mapWorldGroup.rotation.y = -this.currentCentralLon * (1 - t);
-
-          // In 2.5D Map: Scroll mapWorldGroup along X by -projX(currentCentralLon)
-          const flatShift = (this.currentCentralLon / (2 * Math.PI)) * mapWidth;
-          const wrappedShift = ((flatShift % mapWidth) + mapWidth) % mapWidth;
-          const centeredShift = wrappedShift > mapWidth / 2 ? wrappedShift - mapWidth : wrappedShift;
-
-          this.mapWorldGroup.position.x = -centeredShift * t;
+        } else {
+          this.dynamicUniforms.uProjMode.value = 0;
+          this.projectionCenterInfo.set({ lonDeg: '0.0° (Greenwich)', latDeg: '0.0° (Equator)' });
         }
 
         this.updateUnitsPositions();
