@@ -2,7 +2,9 @@
 
 ## Status and ownership
 
-- **2026-09-13: design recorded; implementation and acceptance pending.**
+- **2026-09-16: C0 and initial C1 implementations exist; real cell-map integration,
+  cache acceptance and final globe acceptance remain pending.** See [034 — Cell planet
+  map roadmap](034_cell_planet_map_roadmap.md) for the product order.
 - Goal: evaluate irregular, simplified terrain meshes in a quadtree for the 2.5D
   cell map and a later spherical map, including local terrain flattening.
 - [022 — Cell planets](022_v4_voronoi_cell_planets.md) owns world generation and

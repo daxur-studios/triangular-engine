@@ -205,19 +205,17 @@ direction, not a finished system.
   pipeline. `terran` is an intentional no-op. `climate.ts` gained one real addition,
   `baseTemperatureOffset`, so `moon` reads as cold/airless, not just dry.
 - **`computeFeatures()`** (`worldgen/core/features.ts`): per-cell `Feature` typing
-  (volcano/mesa/crater/lava_lake) plus real shape stamps, reusing **`geological-features-lab`'s
-  analytic height functions** (relocated verbatim, framework-free, into
-  `worldgen/core/geological-shapes.ts` — cone+rim+crater+erosion, bowl+rim+ejecta,
-  cap+talus+edge, far better than a from-scratch flatten/dig) instead of reinventing landform
-  shapes. A feature's footprint is `cellsWithinHops()` (reused from `terrain-edits.ts`) around a
-  seeded-candidate site cell; each footprint cell's own elevation is resampled through the
-  matching geological function, projected onto a local tangent plane (the same gnomonic
-  construction `buildColliderPatch()` uses), and the result materializes into a fresh per-cell
-  array via `buildFeatureElevation()` — same "copy once, overwrite touched indices" shape as
-  M4e's `buildEffectiveElevation()`, composed the same way (features first, player edits win on
-  top). No changes needed to `chunking.ts`/`collider-patch.ts`/`sample-elevation.ts` at all: none
-  of them call `sampleElevation()` internally, they just read whichever `elevation[]` array
-  they're handed, which is exactly the property the M4e edit layer already depended on.
+  (volcano/mesa/crater/lava_lake) plus the current deliberately narrowed single-cell elevation
+  stamp, with its magnitude derived from **`geological-features-lab`'s analytic shape settings**
+  (the framework-free cone/rim/crater/cap samplers remain in `worldgen/core/geological-shapes.ts`).
+  This is the discrete-cell proof, not yet a real sub-cell landform mesh/detail evaluator: a
+  feature instance owns one site cell and `buildFeatureElevation()` adds its representative delta
+  to that cell. `cellCornerElevation()` then blends that value with neighbouring cells at shared
+  corners. The future unified terrain POC must promote the smallest stable local shape/mask
+  contract from runbook 010 if a volcano/mesa/canyon needs an actual raised rim, flat top, bank or
+  channel within one irregular cell. The existing `chunking.ts`, `collider-patch.ts` and
+  `sample-elevation.ts` can already consume a supplied elevation array, but they do not create
+  that missing sub-cell detail themselves.
 - **Lava is two different mechanisms, not one** — Bruno's correction mid-spike, since the first
   draft only modeled a small volcano-adjacent puddle: (1) `Feature: 'lava_lake'` tags an existing
   `waterBodyKind === 'lake'` cell near a volcano instance — local, small, coexists with an

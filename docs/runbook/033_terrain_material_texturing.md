@@ -1,7 +1,9 @@
 # Terrain material texturing
 
-Status: material contract, 2.5D coverage preview, and first macro variation
-prototype are in place; detailed layers and streamed material tiles are next.
+Status: shared material contract, 2.5D coverage, globe material parity and first
+macro variation prototype are in place; real cell terrain integration and streamed
+material tiles are next. The overall product order is in [034 — Cell planet map
+roadmap](034_cell_planet_map_roadmap.md).
 
 This runbook tracks the shared surface appearance system for the 2.5D Cell
 Planet map and the later cube-sphere planet. Geometry LOD, Meshoptimizer,

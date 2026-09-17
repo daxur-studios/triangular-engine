@@ -2,8 +2,9 @@
 
 ## Status and ownership
 
-- **2026-09-13: prototype implemented; automated geometry checks pass; browser visual
-  acceptance not run.**
+- **2026-09-16: fixed-resolution prototype and automated geometry checks are complete;
+  production spherical chunk LOD remains pending.** See [034 — Cell planet map roadmap](034_cell_planet_map_roadmap.md)
+  and [031 — Shared terrain chunks](031_shared_planet_terrain_chunks.md).
 - Goal: validate that the shared world snapshot's geography reads correctly when wrapped onto
   a fixed-resolution sphere and displaced radially, before committing to the shared chunked
   terrain infrastructure.

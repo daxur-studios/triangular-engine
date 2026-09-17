@@ -2,7 +2,9 @@
 
 ## Status and ownership
 
-- **2026-09-13: M0 and M1 implemented; M2+ visual acceptance pending.**
+- **2026-09-16: integration slice exists; map-specific M2–M4 acceptance and chunk-path
+  adoption remain pending.** See [034 — Cell planet map roadmap](034_cell_planet_map_roadmap.md)
+  for the cross-project order of work.
 - Goal: a Civilization-style map on a plane, viewed about 45 degrees above the ground,
   with visible mountain crests, river valleys, biome colours and cell selection.
 - [022 — Cell planets](022_v4_voronoi_cell_planets.md) owns world generation and shared
@@ -16,8 +18,8 @@
 
 The GPU-morph clipmap exported by `triangular-engine/terrain` is the current rendering
 baseline. [031 — Shared planet terrain chunks](031_shared_planet_terrain_chunks.md)
-tracks the proposed Meshoptimizer + quadtree alternative for this map and a later globe,
-including flattening edits, seams, LOD and caching. It is an unvalidated experiment;
+tracks the Meshoptimizer + quadtree candidate for this map and a later globe, including
+flattening edits, seams, LOD and caching. It is validated only in fixture/lab scopes;
 this runbook retains ownership of the planar adapter and map experience. The clipmap
 contracts below describe the current implementation, not requirements for that candidate.
 
