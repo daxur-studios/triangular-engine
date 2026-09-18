@@ -358,6 +358,14 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
   cover these cases but were not browser-run (user owns browser verification).
   The new spec and its imports type-check; library and demo builds pass; `git diff --check` passes.
   User visual confirmation remains pending; do not mark this gate accepted from a build.
+- Latest 2.5D geography debug packet (2026-09-18): the planar clipmap now has independent
+  `Debug river paths` and `Debug coastlines` toggles. Both are generated from the shared
+  `ecology.riverPaths`/`riverFlow` and `ecology.coastlines` data, projected with the same map
+  projection and world bounds as the terrain, and rendered as lightweight physical-width ribbon
+  overlays. Coastline loops close; antimeridian segments are omitted rather than stretched across
+  the map. This is a location/reference layer only: it does not carve terrain or change water
+  ownership. A pure geometry spec covers closed loops and seam rejection. Library and demo builds
+  pass; browser review is still required.
 - Next packet: user retest of 2.5D click selection and bookmark selection, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
   cold and warm timings, frame-time percentiles, draw/triangle counts, residency and memory fields.
 - First user review: U0 cell scale, close/strategic zoom range and baseline conditions.
@@ -371,9 +379,9 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
 - Performance evidence: no U0 performance capture yet; defaults above are proposals only.
 - Agent verification: earlier `npm run build:triangular-engine` and `npx ng build demo-app` passed.
   Latest bookmark correction: isolated checks of the actual handler passed for three projected
-  targets, deferred input propagation and superseded selection. Latest demo build is blocked by
-  separate `cell-planet-morph-view.component.ts` errors (private inherited engineService, missing
-  override modifiers and object3d versus object3D). No browser or app server was opened for this fix.
+  targets, deferred input propagation and superseded selection. The latest library and demo builds
+  pass after the concurrent morph/border work was included. No browser or app server was opened for
+  this fix.
   The U0 controls and route persistence were visually exercised earlier in the dev server on
   `/cell-planet-map`, `/cell-planet-25d-map` and `/cell-planet-globe`; no U gate is accepted from
   that check alone.

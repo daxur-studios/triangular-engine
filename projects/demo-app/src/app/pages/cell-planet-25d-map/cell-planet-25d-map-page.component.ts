@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signa
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { BufferGeometry, ClampToEdgeWrapping, DataTexture, Float32BufferAttribute, FloatType, LinearFilter, Mesh, MeshStandardMaterial, PlaneGeometry, RGBAFormat, SRGBColorSpace, UnsignedByteType, Vector3 } from 'three';
+import { BufferGeometry, ClampToEdgeWrapping, DataTexture, DoubleSide, Float32BufferAttribute, FloatType, LinearFilter, Mesh, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, RGBAFormat, SRGBColorSpace, UnsignedByteType, Vector3 } from 'three';
 import { EngineModule, EngineService, RaycastFocusContext, RaycastOrbitControlsComponent } from 'triangular-engine';
 import { simplifyIndexedGeometry } from 'triangular-engine/meshoptimizer';
 import {
@@ -58,6 +58,7 @@ import {
 } from './cell-planet-terrain-selection';
 import { CellPlanetSelectionPanelComponent } from './cell-planet-selection-panel.component';
 import { getTerrainHeightScaleM } from './cell-planet-terrain-scale';
+import { buildPlanarDebugRibbonGeometry } from './cell-planet-debug-geography';
 
 type TerrainQuality = 'preview' | 'standard' | 'high' | 'ultra';
 type TerrainDisplayScale = 'planet' | 'legacy';
@@ -607,6 +608,14 @@ function makeColorTexture(
         <input type="checkbox" [checked]="showOcean()" (change)="onOceanChange($event)" />
         <span>Ocean surface at sea level</span>
       </label>
+      <label class="checkbox-row">
+        <input type="checkbox" [checked]="showRivers()" (change)="onRiversChange($event)" />
+        <span>Debug river paths</span>
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" [checked]="showCoastlines()" (change)="onCoastlinesChange($event)" />
+        <span>Debug coastlines</span>
+      </label>
       <label>
         <span>Terrain relief: {{ terrainHeightScale().toFixed(1) }}
           ({{ displayScale() === 'planet' ? 'proportional to planet size' : 'legacy direct scale' }})</span>
@@ -726,6 +735,8 @@ export class CellPlanet25dMapPageComponent {
   readonly terrainQualityPresets = TERRAIN_QUALITY_PRESETS;
   readonly waterLevel = signal(0);
   readonly showOcean = signal(true);
+  readonly showRivers = signal(true);
+  readonly showCoastlines = signal(true);
   /** Display-only relief scale. Canonical planet elevations remain unchanged. */
   readonly terrainHeightScale = signal(4);
   /** Experimental runtime-only triangle reduction ratio; canonical terrain is unchanged. */
@@ -752,6 +763,22 @@ export class CellPlanet25dMapPageComponent {
 
   private activeTextures: { height: DataTexture; color: DataTexture } | undefined;
   private oceanMesh: Mesh<PlaneGeometry, MeshStandardMaterial> | undefined;
+  private debugRiverMesh: Mesh<BufferGeometry, MeshBasicMaterial> | undefined;
+  private debugCoastlineMesh: Mesh<BufferGeometry, MeshBasicMaterial> | undefined;
+  private readonly debugRiverMaterial = new MeshBasicMaterial({
+    color: '#4fc3f7',
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+    side: DoubleSide,
+  });
+  private readonly debugCoastlineMaterial = new MeshBasicMaterial({
+    color: '#fff0b3',
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false,
+    side: DoubleSide,
+  });
   private simplifiedTerrainMesh: Mesh<BufferGeometry, MeshStandardMaterial> | undefined;
   private simplificationRevision = 0;
   private colorContext:
@@ -831,6 +858,9 @@ export class CellPlanet25dMapPageComponent {
       this.simplificationRevision++;
       this.disposeSimplifiedTerrain();
       this.disposeOceanMesh();
+      this.disposeDebugGeography();
+      this.debugRiverMaterial.dispose();
+      this.debugCoastlineMaterial.dispose();
       this.activeTextures?.height.dispose();
       this.activeTextures?.color.dispose();
     });
@@ -995,6 +1025,18 @@ export class CellPlanet25dMapPageComponent {
     this.updateComparisonQueryParams();
   }
 
+  onRiversChange(event: Event): void {
+    this.showRivers.set((event.target as HTMLInputElement).checked);
+    this.updateDebugGeographyVisibility();
+    this.updateComparisonQueryParams();
+  }
+
+  onCoastlinesChange(event: Event): void {
+    this.showCoastlines.set((event.target as HTMLInputElement).checked);
+    this.updateDebugGeographyVisibility();
+    this.updateComparisonQueryParams();
+  }
+
   onTerrainHeightScaleInput(event: Event): void {
     const value = this.inputNumber(event);
     if (Number.isFinite(value) && value !== this.terrainHeightScale()) {
@@ -1150,6 +1192,7 @@ export class CellPlanet25dMapPageComponent {
       minY: minHeightM,
       maxY: maxHeightM,
     };
+    this.rebuildDebugGeography(sampler, ecology, tectonics);
     this.updateOceanSurface(bake, seaLevelElevation, profile.oceanSubstance);
     const colorTexture = makeColorTexture(
       bake,
@@ -1287,6 +1330,82 @@ export class CellPlanet25dMapPageComponent {
     this.simplifiedTerrainMesh.geometry.dispose();
     this.simplifiedTerrainMesh.material.dispose();
     this.simplifiedTerrainMesh = undefined;
+  }
+
+  private rebuildDebugGeography(
+    sampler: ReturnType<typeof createPlanetSurfaceSampler>,
+    ecology: IPlanetEcology,
+    tectonics: IPlanetTectonics,
+  ): void {
+    this.disposeDebugGeography();
+
+    const bounds = this.terrainMapBounds();
+    const mapWidth = bounds.maxX - bounds.minX;
+    const mapHeight = bounds.maxZ - bounds.minZ;
+    const projection = MAP_PROJECTIONS[this.projectionType()];
+    const heightScale = this.terrainHeightScaleM();
+    const clearance = Math.max(0.5, heightScale * 0.0005);
+    const riverWidth = Math.max(30, mapWidth * 0.00065);
+    const coastlineWidth = Math.max(30, mapWidth * 0.00035);
+    const maxRiverFlow = Math.max(1, ...ecology.riverFlow.flat());
+    const riverWidths = ecology.riverFlow.map((flow) =>
+      flow.map((value) => riverWidth * (0.7 + 0.3 * Math.sqrt(Math.max(0, value) / maxRiverFlow))),
+    );
+
+    const common = {
+      projection,
+      mapWidth,
+      mapHeight,
+      minX: bounds.minX,
+      minZ: bounds.minZ,
+      maxX: bounds.maxX,
+      maxZ: bounds.maxZ,
+      clearance,
+    };
+    const riverGeometry = buildPlanarDebugRibbonGeometry({
+      ...common,
+      paths: ecology.riverPaths,
+      closed: false,
+      defaultWidth: riverWidth,
+      pointWidths: riverWidths,
+      heightAt: (direction) => sampler.sample(direction).elevation * heightScale,
+    });
+    this.debugRiverMesh = new Mesh(riverGeometry, this.debugRiverMaterial);
+    this.debugRiverMesh.name = 'cell-planet-25d-debug-river-paths';
+    this.debugRiverMesh.renderOrder = 6;
+    this.debugRiverMesh.visible = this.showRivers();
+    this.engine.scene.add(this.debugRiverMesh);
+
+    const coastlineGeometry = buildPlanarDebugRibbonGeometry({
+      ...common,
+      paths: ecology.coastlines,
+      closed: true,
+      defaultWidth: coastlineWidth,
+      heightAt: () => tectonics.seaLevelElevation * heightScale,
+    });
+    this.debugCoastlineMesh = new Mesh(coastlineGeometry, this.debugCoastlineMaterial);
+    this.debugCoastlineMesh.name = 'cell-planet-25d-debug-coastlines';
+    this.debugCoastlineMesh.renderOrder = 7;
+    this.debugCoastlineMesh.visible = this.showCoastlines();
+    this.engine.scene.add(this.debugCoastlineMesh);
+  }
+
+  private updateDebugGeographyVisibility(): void {
+    if (this.debugRiverMesh) this.debugRiverMesh.visible = this.showRivers();
+    if (this.debugCoastlineMesh) this.debugCoastlineMesh.visible = this.showCoastlines();
+  }
+
+  private disposeDebugGeography(): void {
+    if (this.debugRiverMesh) {
+      this.engine.scene.remove(this.debugRiverMesh);
+      this.debugRiverMesh.geometry.dispose();
+      this.debugRiverMesh = undefined;
+    }
+    if (this.debugCoastlineMesh) {
+      this.engine.scene.remove(this.debugCoastlineMesh);
+      this.debugCoastlineMesh.geometry.dispose();
+      this.debugCoastlineMesh = undefined;
+    }
   }
 
   private updateOceanSurface(
@@ -1434,6 +1553,10 @@ export class CellPlanet25dMapPageComponent {
     if (macroVariationScaleM !== null) this.macroVariationScaleM.set(Math.max(8, Math.min(128, macroVariationScaleM)));
     if (query.showOcean === 'false' || query.showOcean === '0') this.showOcean.set(false);
     if (query.showOcean === 'true' || query.showOcean === '1') this.showOcean.set(true);
+    if (query.showRivers === 'false' || query.showRivers === '0') this.showRivers.set(false);
+    if (query.showRivers === 'true' || query.showRivers === '1') this.showRivers.set(true);
+    if (query.showCoastlines === 'false' || query.showCoastlines === '0') this.showCoastlines.set(false);
+    if (query.showCoastlines === 'true' || query.showCoastlines === '1') this.showCoastlines.set(true);
     const selectedCell = this.numberQuery(query.selectedCell);
     this.pendingSelectedCellId =
       selectedCell !== null && Number.isInteger(selectedCell) && selectedCell >= 0 ? selectedCell : null;
@@ -1465,6 +1588,8 @@ export class CellPlanet25dMapPageComponent {
       macroVariationStrength: this.macroVariationStrength(),
       macroVariationScaleM: this.macroVariationScaleM(),
       showOcean: this.showOcean(),
+      showRivers: this.showRivers(),
+      showCoastlines: this.showCoastlines(),
       selectedCell: this.selection()?.cellId ?? '',
       u0Bookmark: this.u0BookmarkId(),
     });

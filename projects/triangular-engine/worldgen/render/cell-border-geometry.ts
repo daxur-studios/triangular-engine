@@ -13,6 +13,10 @@ import {
   MAP_PROJECTIONS,
   MapProjectionKind,
 } from './map-projections';
+import {
+  edgeCrossesAntimeridian,
+  projectedLongitude,
+} from './antimeridian-seam';
 
 export interface ICellBorderLineGeometryParams {
   readonly graph: IPlanetGraphCore;
@@ -122,9 +126,9 @@ function splitEdgesForProjection(
     );
 
     const latA = Math.asin(Math.max(-1, Math.min(1, a.y)));
-    const lonA = Math.atan2(a.x, a.z);
+    const lonA = projectedLongitude(a);
     const latB = Math.asin(Math.max(-1, Math.min(1, b.y)));
-    const lonB = Math.atan2(b.x, b.z);
+    const lonB = projectedLongitude(b);
 
     const vA: ISplitVertex = {
       dir: a,
@@ -144,8 +148,7 @@ function splitEdgesForProjection(
     };
 
     // Check antimeridian seam crossing
-    const dLon = lonB - lonA;
-    if (Math.abs(dLon) > Math.PI) {
+    if (edgeCrossesAntimeridian(a, b)) {
       // Crosses the seam. Determine which is left and which is right
       if (lonA > 0 && lonB < 0) {
         // lonA is near +PI, lonB is near -PI
@@ -596,7 +599,7 @@ export function buildCellOverlayGeometry(
     const rCenter = radius + centerElev * heightScale + minClearance;
 
     const cLat = Math.asin(Math.max(-1, Math.min(1, centerDir.y)));
-    const cLon = Math.atan2(centerDir.x, centerDir.z);
+    const cLon = projectedLongitude(centerDir);
     const cProj = projection.project(cLon, cLat, mapWidth, mapHeight);
     const cFx = (cProj.x / mapWidth - 0.5) * mapWidth;
     const cFy = -(cProj.y / mapHeight - 0.5) * mapHeight;
@@ -627,14 +630,14 @@ export function buildCellOverlayGeometry(
       const rK2 = radius + k2Elev * heightScale + minClearance;
 
       const k1Lat = Math.asin(Math.max(-1, Math.min(1, k1Dir.y)));
-      const k1Lon = Math.atan2(k1Dir.x, k1Dir.z);
+      const k1Lon = projectedLongitude(k1Dir);
       const k1Proj = projection.project(k1Lon, k1Lat, mapWidth, mapHeight);
       const k1Fx = (k1Proj.x / mapWidth - 0.5) * mapWidth;
       const k1Fy = -(k1Proj.y / mapHeight - 0.5) * mapHeight;
       const k1Fz = k1Elev * heightScale + minClearance;
 
       const k2Lat = Math.asin(Math.max(-1, Math.min(1, k2Dir.y)));
-      const k2Lon = Math.atan2(k2Dir.x, k2Dir.z);
+      const k2Lon = projectedLongitude(k2Dir);
       const k2Proj = projection.project(k2Lon, k2Lat, mapWidth, mapHeight);
       const k2Fx = (k2Proj.x / mapWidth - 0.5) * mapWidth;
       const k2Fy = -(k2Proj.y / mapHeight - 0.5) * mapHeight;

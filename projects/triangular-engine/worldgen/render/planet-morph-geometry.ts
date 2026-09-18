@@ -9,6 +9,7 @@ import {
   MAP_PROJECTIONS,
   MapProjectionKind,
 } from './map-projections';
+import { IProjectionBasis } from './antimeridian-seam';
 
 export interface IPlanetMorphGeometryParams {
   readonly sampler: IPlanetSurfaceSampler;
@@ -19,7 +20,11 @@ export interface IPlanetMorphGeometryParams {
   readonly projectionKind?: MapProjectionKind;
   readonly seabedRelief?: boolean;
   readonly seaLevelElevation?: number;
-  readonly resolveColor?: (direction: IVec3, elevation: number, isLand: boolean) => [number, number, number];
+  readonly resolveColor?: (
+    direction: IVec3,
+    elevation: number,
+    isLand: boolean,
+  ) => [number, number, number];
 }
 
 export interface IPlanetMorphGeometryData {
@@ -35,12 +40,6 @@ export interface IPlanetMorphGeometryData {
 export interface ISurfaceTransform {
   readonly position: Vector3;
   readonly normal: Vector3;
-}
-
-export interface IProjectionBasis {
-  readonly forward: IVec3;
-  readonly up: IVec3;
-  readonly right: IVec3;
 }
 
 /**
@@ -71,9 +70,16 @@ export function evaluateSurfaceTransform(
   let pLat: number;
 
   if (basis) {
-    const dotFwd = normDir.x * basis.forward.x + normDir.y * basis.forward.y + normDir.z * basis.forward.z;
-    const dotRight = normDir.x * basis.right.x + normDir.y * basis.right.y + normDir.z * basis.right.z;
-    const dotUp = normDir.x * basis.up.x + normDir.y * basis.up.y + normDir.z * basis.up.z;
+    const dotFwd =
+      normDir.x * basis.forward.x +
+      normDir.y * basis.forward.y +
+      normDir.z * basis.forward.z;
+    const dotRight =
+      normDir.x * basis.right.x +
+      normDir.y * basis.right.y +
+      normDir.z * basis.right.z;
+    const dotUp =
+      normDir.x * basis.up.x + normDir.y * basis.up.y + normDir.z * basis.up.z;
 
     pLon = Math.atan2(dotRight, dotFwd);
     pLat = Math.asin(Math.max(-1, Math.min(1, dotUp)));
@@ -110,7 +116,9 @@ export function evaluateSurfaceTransform(
  * Builds a parametric dual-position BufferGeometry with duplicated seam and pole vertices,
  * allowing seamless interpolation between 3D sphere and 2.5D planar projection.
  */
-export function buildPlanetMorphGeometry(params: IPlanetMorphGeometryParams): IPlanetMorphGeometryData {
+export function buildPlanetMorphGeometry(
+  params: IPlanetMorphGeometryParams,
+): IPlanetMorphGeometryData {
   const segments = Math.max(8, Math.floor(params.longitudeSegments ?? 128));
   const rings = Math.max(4, Math.floor(params.latitudeRings ?? 64));
   const radius = params.radius ?? 2.0;
@@ -153,7 +161,8 @@ export function buildPlanetMorphGeometry(params: IPlanetMorphGeometryParams): IP
 
       const sample = params.sampler.sample(direction);
       const rawElevation = sample.elevation;
-      const effectiveElevation = (!seabedRelief && !sample.isLand) ? seaLevel : rawElevation;
+      const effectiveElevation =
+        !seabedRelief && !sample.isLand ? seaLevel : rawElevation;
 
       const idx = r * cols + c;
       const o3 = idx * 3;
@@ -194,7 +203,11 @@ export function buildPlanetMorphGeometry(params: IPlanetMorphGeometryParams): IP
 
       // Colors
       if (params.resolveColor) {
-        const rgb = params.resolveColor(direction, effectiveElevation, sample.isLand);
+        const rgb = params.resolveColor(
+          direction,
+          effectiveElevation,
+          sample.isLand,
+        );
         gridColors[o3] = rgb[0];
         gridColors[o3 + 1] = rgb[1];
         gridColors[o3 + 2] = rgb[2];

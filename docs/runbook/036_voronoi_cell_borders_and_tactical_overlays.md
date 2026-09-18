@@ -94,7 +94,16 @@ Rather than regenerating geometry when selecting a unit or viewing a 30-cell mov
 When an edge crosses the antimeridian ($\text{lon} \approx \pm\pi$), `buildCellBorderLineGeometry` splits it into two segments meeting at $\pm\pi$ at the same latitude. In 3D sphere space, the split point is mathematically identical, preserving a continuous unbroken line, while in the 2.5D flat map unrolling, each segment cleanly touches the left/right map margin without stretching across the entire width.
 
 ### 2.5 Seam Culling for Cell Overlay Fans
-`buildCellOverlayGeometry` emits one triangle fan per cell ($\text{center}, k, k{+}1$). Unlike border edges, a fan triangle cannot be CPU-split at the seam because it is a filled area rather than a line. Instead each vertex carries **two** counterpart corner directions (`aOtherDir1`, `aOtherDir2`), and `createPlanetCellOverlayMaterial` discards any triangle where any pairwise projected-longitude span exceeds $\pi$ (see the antimeridian case study). The test runs unconditionally — in static mode the basis uniforms hold the identity frame, so `pLon` matches the true longitude the CPU-baked `aFlatPos` was projected from.
+`buildCellOverlayGeometry` emits one triangle fan per cell ($\text{center}, k, k{+}1$). Unlike border edges, a fan triangle cannot be CPU-split at the seam because it is a filled area rather than a line. Instead each vertex carries **two** counterpart corner directions (`aOtherDir1`, `aOtherDir2`), and `createPlanetCellOverlayMaterial` discards any triangle where any pairwise projected-longitude span exceeds $\pi$ (see the antimeridian case study). The test runs unconditionally — in static mode the basis uniforms hold the identity frame, so the projected longitude matches the true longitude the CPU-baked `aFlatPos` was projected from.
+
+### 2.6 Shared Antimeridian Seam Module (`antimeridian-seam.ts`)
+The seam invariant was previously reimplemented in each geometry builder and vertex shader, which let one copy drift (single counterpart, `uProjMode`-gated) and reintroduce the streak. It now lives in one tested module:
+
+- **CPU**: `projectedLongitude(dir, basis?)`, `edgeCrossesAntimeridian(a, b, basis?)`, `triangleCrossesAntimeridian(d0, d1, d2, basis?)`, `IDENTITY_PROJECTION_BASIS`.
+- **GPU**: `SEAM_GLSL_FUNCTIONS` (`seamProjectedLon` / `seamEdgeCrosses` / `seamTriangleCrosses`), injected into the terrain, border-ribbon, and cell-overlay vertex shaders.
+- `IProjectionBasis` is defined here and re-exported through the render public API; `splitEdgesForProjection` uses `projectedLongitude` / `edgeCrossesAntimeridian`.
+
+**Rule for new filled geometry**: attach both counterpart directions per vertex, inject `SEAM_GLSL_FUNCTIONS`, and call `seamTriangleCrosses` unconditionally. Use CPU splitting (`splitEdgesForProjection`) instead when the seam is static and the geometry is cell-based — it is lossless, whereas culling drops a wedge of the fill.
 
 ---
 

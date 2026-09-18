@@ -39,9 +39,9 @@ import {
   buildPlanetMorphGeometry,
   evaluateSurfaceTransform,
   IPlanetMorphGeometryData,
-  IProjectionBasis,
   ISurfaceTransform,
 } from '../planet-morph-geometry';
+import { IProjectionBasis } from '../antimeridian-seam';
 import {
   createPlanetBorderMorphMaterial,
   createPlanetCellOverlayMaterial,

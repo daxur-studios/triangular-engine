@@ -20,6 +20,7 @@ export const CELL_PLANET_QUERY_KEYS = [
   'waterLevel',
   'showIcons',
   'showRivers',
+  'showCoastlines',
   'showRidges',
   'showCellEdges',
   'iconBudget',

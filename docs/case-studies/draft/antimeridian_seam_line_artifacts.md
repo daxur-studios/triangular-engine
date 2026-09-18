@@ -121,6 +121,27 @@ Setting `gl_Position` outside the normalized device coordinate (NDC) cube $[-1, 
 - **Fix**: Store **two** counterpart directions per vertex (`aOtherDir1`, `aOtherDir2`) and test all three pairwise angular spans against $\pi$ — matching `buildPlanetMorphGeometry`'s terrain approach. Run the cull unconditionally (not just when `uProjMode > 0.5`): when tracking is off the projection-basis uniforms hold the identity frame (`forward=+Z`, `right=+X`, `up=+Y`), so the computed `pLon` equals the true longitude that the CPU-baked `aFlatPos` was built from.
 - **Lesson**: Any per-primitive seam test must consider every edge of the primitive. Deriving the counterpart from the shared vertex list once (as terrain does) avoids per-vertex omissions.
 
+### Pitfall 0b: The Test Was Reimplemented Per Material Instead of Shared
+- **Symptom**: The same seam bug class recurred in the overlay because each material carried its own copy of the angular-span test, and one copy drifted (single counterpart, `uProjMode`-gated).
+- **Cause**: The predicate lived inline in three vertex shaders plus `splitEdgesForProjection`, so "test every edge" was folklore rather than an enforced contract.
+- **Fix**: Extract `antimeridian-seam.ts` as the single source of truth:
+  - CPU: `projectedLongitude(dir, basis?)`, `edgeCrossesAntimeridian(a, b, basis?)`, `triangleCrossesAntimeridian(d0, d1, d2, basis?)`, plus `IDENTITY_PROJECTION_BASIS`.
+  - GPU: `SEAM_GLSL_FUNCTIONS` (`seamProjectedLon` / `seamEdgeCrosses` / `seamTriangleCrosses`) injected into every morph vertex shader.
+  - `splitEdgesForProjection`, terrain, border-ribbon, and overlay materials all now call the shared helper. `IProjectionBasis` moved here too (re-exported through the render public API).
+- **Lesson**: A cross-cutting geometric invariant belongs in one tested module. A new overlay material that forgets an edge should now be *hard* to write, because the helper does the three-edge test for you.
+
+### Splitting vs. Culling: Pick the Right Tool
+The two mechanisms are not interchangeable:
+
+| | CPU split (`splitEdgesForProjection`) | GPU cull (`seamTriangleCrosses`) |
+| :--- | :--- | :--- |
+| **Applies to** | 1D line edges (cell borders, territory ribbons) | Filled 2D primitives (terrain, cell overlay fans) |
+| **Result at the seam** | Renders both halves, losslessly | Drops the whole crossing primitive |
+| **Cost** | One-time CPU, geometry rebuild | ~5 ALU ops/vertex, zero CPU |
+| **Trade-off** | Geometry depends on the seam location | Lossy for area fills: a straddling cell loses a wedge |
+
+For **static** cell-based fills the overlay geometry is only rebuilt when the graph changes, so CPU polygon splitting would be effectively free *and* lossless — the correct long-term fix for gameplay area fills (selection, movement range, faction territory). GPU culling remains right for the terrain grid, which is too large to re-split per frame in dynamic tracking.
+
 ### Pitfall 1: Dynamic Quad Width Collapse on Territory Ribbons
 - **Symptom**: Light blue 1D lines rendered correctly, but yellow/orange territory ribbons disappeared in dynamic tracking mode.
 - **Cause**: Territory ribbons are physical quads with 4 vertices per segment. Projecting each vertex purely from its spherical center without re-evaluating the 2D perpendicular offset in dynamic map space caused both sides of the quad to collapse to the same point (width = 0), producing zero-area triangles.
@@ -150,4 +171,23 @@ Setting `gl_Position` outside the normalized device coordinate (NDC) cube $[-1, 
 | **CPU Frame Overhead** | ~4.8 ms / frame (allocations + GC) | **0.00 ms** (fully static buffers) |
 | **GPU Instruction Overhead** | None | ~5 scalar ALU ops per vertex |
 | **Artifact Lines Across Map** | Eliminated on static Greenwich | **Eliminated on all dynamic tracking modes** |
-| **Unit Test Coverage** | 200 / 200 passing | **205 / 205 passing** |
+| **Unit Test Coverage** | 200 / 200 passing | **211 / 211 passing** |
+
+### 6.1 Forward-Looking Rule
+
+Any sphere → plane projection has an antimeridian branch cut; the discontinuity is unavoidable. The *bugs* are avoidable with one rule:
+
+> **Never reason spatially in projected 2D space. Project only for rendering; reason on the sphere/graph.**
+
+Consequences for future features:
+
+| Feature | Exposure | Handling |
+| :--- | :--- | :--- |
+| Faction/territory fills | Culled wedges at the map edge (uses the overlay mesh) | CPU-split the overlay fan (recommended follow-up) |
+| Movement range / selection | Same as above for edge cells | Same |
+| Pathfinding / reachability | None if graph-based | Use `findReachableCells`, never flat coords |
+| Fog of war | None if cell-id / visibility-graph based | Do not derive from map pixels |
+| Unit markers (`evaluateUnitTransform`) | Minor popping across the seam | Snap to cell side, not projected center |
+| CPU picking | Fixed, but must mirror GPU seam logic for dynamic bases | Reuse `edgeCrossesAntimeridian` / `projectedLongitude` |
+
+New filled geometry should: (1) attach both counterpart directions per vertex, (2) inject `SEAM_GLSL_FUNCTIONS`, (3) call `seamTriangleCrosses` unconditionally, and (4) prefer CPU splitting when the seam location is static and the geometry is cell-based.

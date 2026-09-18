@@ -8,6 +8,7 @@ import {
   ShaderMaterial,
   Vector3,
 } from 'three';
+import { SEAM_GLSL_FUNCTIONS } from './antimeridian-seam';
 
 export interface IDynamicProjectionUniforms {
   uMorph: IUniform<number>;
@@ -81,6 +82,8 @@ export function createPlanetMorphMaterial(
       varying float vProjMode;
       varying float vMorph;
       varying float vSeamCull;
+
+      ${SEAM_GLSL_FUNCTIONS}
     ` + shader.vertexShader;
 
     shader.vertexShader = shader.vertexShader.replace(
@@ -110,25 +113,13 @@ export function createPlanetMorphMaterial(
 
       if (uProjMode > 0.5) {
         vec3 dir = aSphereNorm;
-        float dotFwd = dot(dir, uProjForward);
-        float dotRight = dot(dir, uProjRight);
         float dotUp = dot(dir, uProjUp);
 
-        float pLon = atan(dotRight, dotFwd);
+        float pLon = seamProjectedLon(dir, uProjForward, uProjRight);
         float pLat = asin(clamp(dotUp, -1.0, 1.0));
 
         if (length(aOtherDir1) > 0.001 && length(aOtherDir2) > 0.001) {
-          float oFwd1 = dot(aOtherDir1, uProjForward);
-          float oRight1 = dot(aOtherDir1, uProjRight);
-          float oLon1 = atan(oRight1, oFwd1);
-
-          float oFwd2 = dot(aOtherDir2, uProjForward);
-          float oRight2 = dot(aOtherDir2, uProjRight);
-          float oLon2 = atan(oRight2, oFwd2);
-
-          if (abs(pLon - oLon1) > 3.14159265 ||
-              abs(pLon - oLon2) > 3.14159265 ||
-              abs(oLon1 - oLon2) > 3.14159265) {
+          if (seamTriangleCrosses(dir, aOtherDir1, aOtherDir2, uProjForward, uProjRight)) {
             seamCull = 1.0;
           }
         }
@@ -263,24 +254,22 @@ export function createPlanetBorderMorphMaterial(
       varying float vProjMode;
       varying float vMorph;
 
+      ${SEAM_GLSL_FUNCTIONS}
+
       void main() {
         vec3 dynSpherePos = aSpherePos;
         vec3 dynFlatPos = aFlatPos;
 
         if (uProjMode > 0.5) {
           vec3 dir = aSphereNorm;
-          float dotFwd = dot(dir, uProjForward);
-          float dotRight = dot(dir, uProjRight);
           float dotUp = dot(dir, uProjUp);
 
-          float pLon = atan(dotRight, dotFwd);
+          float pLon = seamProjectedLon(dir, uProjForward, uProjRight);
           float pLat = asin(clamp(dotUp, -1.0, 1.0));
 
-          float oFwd = dot(aOtherDir, uProjForward);
-          float oRight = dot(aOtherDir, uProjRight);
-          float oLon = atan(oRight, oFwd);
+          float oLon = seamProjectedLon(aOtherDir, uProjForward, uProjRight);
 
-          if (uMorph > 0.05 && abs(pLon - oLon) > 3.14159) {
+          if (uMorph > 0.05 && seamEdgeCrosses(dir, aOtherDir, uProjForward, uProjRight)) {
             gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
             return;
           }
@@ -446,6 +435,8 @@ export function createPlanetCellOverlayMaterial(
       varying float vCellId;
       varying float vDist;
 
+      ${SEAM_GLSL_FUNCTIONS}
+
       void main() {
         vCellId = aCellId;
         vDist = aDist;
@@ -454,29 +445,15 @@ export function createPlanetCellOverlayMaterial(
         vec3 dynFlatPos = aFlatPos;
 
         // Seam culling runs in both static and dynamic modes: when tracking is off the projection
-        // basis uniforms hold the identity frame (forward=+Z, right=+X, up=+Y), so pLon is the true
-        // longitude matching the CPU-baked aFlatPos. Testing all three triangle edges is required
+        // basis uniforms hold the identity frame (forward=+Z, right=+X, up=+Y), so the projected
+        // longitude matches the CPU-baked aFlatPos. Testing all three triangle edges is required
         // because a cell fan can straddle the antimeridian without any single vertex knowing it.
         vec3 dir = aSphereNorm;
-        float dotFwd = dot(dir, uProjForward);
-        float dotRight = dot(dir, uProjRight);
-        float dotUp = dot(dir, uProjUp);
-
-        float pLon = atan(dotRight, dotFwd);
-        float pLat = asin(clamp(dotUp, -1.0, 1.0));
-
-        float oFwd1 = dot(aOtherDir1, uProjForward);
-        float oRight1 = dot(aOtherDir1, uProjRight);
-        float oLon1 = atan(oRight1, oFwd1);
-
-        float oFwd2 = dot(aOtherDir2, uProjForward);
-        float oRight2 = dot(aOtherDir2, uProjRight);
-        float oLon2 = atan(oRight2, oFwd2);
+        float pLon = seamProjectedLon(dir, uProjForward, uProjRight);
+        float pLat = asin(clamp(dot(dir, uProjUp), -1.0, 1.0));
 
         if (uMorph > 0.05 &&
-            (abs(pLon - oLon1) > 3.14159 ||
-             abs(pLon - oLon2) > 3.14159 ||
-             abs(oLon1 - oLon2) > 3.14159)) {
+            seamTriangleCrosses(dir, aOtherDir1, aOtherDir2, uProjForward, uProjRight)) {
           gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
           return;
         }
