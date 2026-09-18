@@ -102,16 +102,46 @@ function splitEdgesForProjection(
     const a = edge.a;
     const b = edge.b;
 
-    const elevA = resolveElevation(a, sampler, elevation, edge.cellA, edge.cellB, seabedRelief, seaLevelElevation);
-    const elevB = resolveElevation(b, sampler, elevation, edge.cellA, edge.cellB, seabedRelief, seaLevelElevation);
+    const elevA = resolveElevation(
+      a,
+      sampler,
+      elevation,
+      edge.cellA,
+      edge.cellB,
+      seabedRelief,
+      seaLevelElevation,
+    );
+    const elevB = resolveElevation(
+      b,
+      sampler,
+      elevation,
+      edge.cellA,
+      edge.cellB,
+      seabedRelief,
+      seaLevelElevation,
+    );
 
     const latA = Math.asin(Math.max(-1, Math.min(1, a.y)));
     const lonA = Math.atan2(a.x, a.z);
     const latB = Math.asin(Math.max(-1, Math.min(1, b.y)));
     const lonB = Math.atan2(b.x, b.z);
 
-    const vA: ISplitVertex = { dir: a, elev: elevA, pLon: lonA, pLat: latA, cellA: edge.cellA, cellB: edge.cellB };
-    const vB: ISplitVertex = { dir: b, elev: elevB, pLon: lonB, pLat: latB, cellA: edge.cellA, cellB: edge.cellB };
+    const vA: ISplitVertex = {
+      dir: a,
+      elev: elevA,
+      pLon: lonA,
+      pLat: latA,
+      cellA: edge.cellA,
+      cellB: edge.cellB,
+    };
+    const vB: ISplitVertex = {
+      dir: b,
+      elev: elevB,
+      pLon: lonB,
+      pLat: latB,
+      cellA: edge.cellA,
+      cellB: edge.cellB,
+    };
 
     // Check antimeridian seam crossing
     const dLon = lonB - lonA;
@@ -119,11 +149,15 @@ function splitEdgesForProjection(
       // Crosses the seam. Determine which is left and which is right
       if (lonA > 0 && lonB < 0) {
         // lonA is near +PI, lonB is near -PI
-        const t = (Math.PI - lonA) / ((lonB + 2 * Math.PI) - lonA);
+        const t = (Math.PI - lonA) / (lonB + 2 * Math.PI - lonA);
         const latCross = latA + t * (latB - latA);
         const elevCross = elevA + t * (elevB - elevA);
         const cosLatCross = Math.cos(latCross);
-        const dirCross: IVec3 = { x: 0, y: Math.sin(latCross), z: -cosLatCross };
+        const dirCross: IVec3 = {
+          x: 0,
+          y: Math.sin(latCross),
+          z: -cosLatCross,
+        };
 
         const crossPos: ISplitVertex = {
           dir: dirCross,
@@ -146,11 +180,15 @@ function splitEdgesForProjection(
         segmentPairs.push([crossNeg, vB]);
       } else if (lonA < 0 && lonB > 0) {
         // lonA is near -PI, lonB is near +PI
-        const t = (Math.PI - lonB) / ((lonA + 2 * Math.PI) - lonB);
+        const t = (Math.PI - lonB) / (lonA + 2 * Math.PI - lonB);
         const latCross = latB + t * (latA - latB);
         const elevCross = elevB + t * (elevA - elevB);
         const cosLatCross = Math.cos(latCross);
-        const dirCross: IVec3 = { x: 0, y: Math.sin(latCross), z: -cosLatCross };
+        const dirCross: IVec3 = {
+          x: 0,
+          y: Math.sin(latCross),
+          z: -cosLatCross,
+        };
 
         const crossPos: ISplitVertex = {
           dir: dirCross,
@@ -189,7 +227,9 @@ function splitEdgesForProjection(
  * sagitta clearance compensation. Antimeridian crossings are split into two segments so flat
  * 2.5D unrolling remains perfectly clean without artifacts.
  */
-export function buildCellBorderLineGeometry(params: ICellBorderLineGeometryParams): BufferGeometry {
+export function buildCellBorderLineGeometry(
+  params: ICellBorderLineGeometryParams,
+): BufferGeometry {
   const radius = params.radius ?? 2.0;
   const heightScale = params.heightScale ?? 0.16;
   const minClearance = params.minClearance ?? 0.004;
@@ -279,7 +319,10 @@ export function buildCellBorderLineGeometry(params: ICellBorderLineGeometryParam
   geometry.setAttribute('aSphereNorm', new BufferAttribute(sphereNormals, 3));
   geometry.setAttribute('aFlatNorm', new BufferAttribute(flatNormals, 3));
   geometry.setAttribute('aOtherDir', new BufferAttribute(otherDirs, 3));
-  geometry.setAttribute('uv', new BufferAttribute(new Float32Array(vertexCount * 2), 2));
+  geometry.setAttribute(
+    'uv',
+    new BufferAttribute(new Float32Array(vertexCount * 2), 2),
+  );
   geometry.setAttribute('aCellIds', new BufferAttribute(cellIds, 2));
 
   geometry.computeBoundingSphere();
@@ -296,7 +339,9 @@ export function buildCellBorderLineGeometry(params: ICellBorderLineGeometryParam
  * Each edge is expanded into a flat ribbon tangent to the surface with true physical width
  * in world units, ensuring consistent thickness across all graphics platforms.
  */
-export function buildTerritoryRibbonGeometry(params: ITerritoryRibbonGeometryParams): BufferGeometry {
+export function buildTerritoryRibbonGeometry(
+  params: ITerritoryRibbonGeometryParams,
+): BufferGeometry {
   const radius = params.radius ?? 2.0;
   const heightScale = params.heightScale ?? 0.16;
   const ribbonWidth = params.ribbonWidth ?? 0.015;
@@ -368,7 +413,12 @@ export function buildTerritoryRibbonGeometry(params: ITerritoryRibbonGeometryPar
     const p11Sphere = new Vector3().addVectors(vB3, sideVec);
 
     // Flat map projected points
-    const projA = projection.project(start.pLon, start.pLat, mapWidth, mapHeight);
+    const projA = projection.project(
+      start.pLon,
+      start.pLat,
+      mapWidth,
+      mapHeight,
+    );
     const projB = projection.project(end.pLon, end.pLat, mapWidth, mapHeight);
 
     const fAx = (projA.x / mapWidth - 0.5) * mapWidth;
@@ -380,7 +430,9 @@ export function buildTerritoryRibbonGeometry(params: ITerritoryRibbonGeometryPar
     const fBz = elevB * heightScale + clearance;
 
     const flatDir = new Vector3(fBx - fAx, fBy - fAy, 0).normalize();
-    const flatSide = new Vector3(-flatDir.y, flatDir.x, 0).multiplyScalar(halfW);
+    const flatSide = new Vector3(-flatDir.y, flatDir.x, 0).multiplyScalar(
+      halfW,
+    );
 
     const baseVertexIndex = s * 4;
 
@@ -492,7 +544,9 @@ export function buildTerritoryRibbonGeometry(params: ITerritoryRibbonGeometryPar
  * Builds a cell polygon fan BufferGeometry for GPU tactical highlight overlays
  * (movement range, reachable cells, territory fill, selection halo).
  */
-export function buildCellOverlayGeometry(params: ICellOverlayGeometryParams): BufferGeometry {
+export function buildCellOverlayGeometry(
+  params: ICellOverlayGeometryParams,
+): BufferGeometry {
   const radius = params.radius ?? 2.0;
   const heightScale = params.heightScale ?? 0.16;
   const minClearance = params.minClearance ?? 0.003;
@@ -515,7 +569,8 @@ export function buildCellOverlayGeometry(params: ICellOverlayGeometryParams): Bu
   const flatPositions = new Float32Array(vertexCount * 3);
   const sphereNormals = new Float32Array(vertexCount * 3);
   const flatNormals = new Float32Array(vertexCount * 3);
-  const otherDirs = new Float32Array(vertexCount * 3);
+  const otherDirs1 = new Float32Array(vertexCount * 3);
+  const otherDirs2 = new Float32Array(vertexCount * 3);
   const cellIds = new Float32Array(vertexCount);
   const distFromCenter = new Float32Array(vertexCount);
   const uvs = new Float32Array(vertexCount * 2);
@@ -586,9 +641,42 @@ export function buildCellOverlayGeometry(params: ICellOverlayGeometryParams): Bu
       const k2Fz = k2Elev * heightScale + minClearance;
 
       const triVertices = [
-        { dir: centerDir, other: k1Dir, r: rCenter, fx: cFx, fy: cFy, fz: cFz, dist: 0.0, u: 0.5, v: 0.5 },
-        { dir: k1Dir, other: centerDir, r: rK1, fx: k1Fx, fy: k1Fy, fz: k1Fz, dist: 1.0, u: 0.0, v: 1.0 },
-        { dir: k2Dir, other: centerDir, r: rK2, fx: k2Fx, fy: k2Fy, fz: k2Fz, dist: 1.0, u: 1.0, v: 1.0 },
+        {
+          dir: centerDir,
+          other1: k1Dir,
+          other2: k2Dir,
+          r: rCenter,
+          fx: cFx,
+          fy: cFy,
+          fz: cFz,
+          dist: 0.0,
+          u: 0.5,
+          v: 0.5,
+        },
+        {
+          dir: k1Dir,
+          other1: centerDir,
+          other2: k2Dir,
+          r: rK1,
+          fx: k1Fx,
+          fy: k1Fy,
+          fz: k1Fz,
+          dist: 1.0,
+          u: 0.0,
+          v: 1.0,
+        },
+        {
+          dir: k2Dir,
+          other1: centerDir,
+          other2: k1Dir,
+          r: rK2,
+          fx: k2Fx,
+          fy: k2Fy,
+          fz: k2Fz,
+          dist: 1.0,
+          u: 1.0,
+          v: 1.0,
+        },
       ];
 
       for (const tv of triVertices) {
@@ -604,9 +692,13 @@ export function buildCellOverlayGeometry(params: ICellOverlayGeometryParams): Bu
         sphereNormals[ptr3 + 1] = tv.dir.y;
         sphereNormals[ptr3 + 2] = tv.dir.z;
 
-        otherDirs[ptr3] = tv.other.x;
-        otherDirs[ptr3 + 1] = tv.other.y;
-        otherDirs[ptr3 + 2] = tv.other.z;
+        otherDirs1[ptr3] = tv.other1.x;
+        otherDirs1[ptr3 + 1] = tv.other1.y;
+        otherDirs1[ptr3 + 2] = tv.other1.z;
+
+        otherDirs2[ptr3] = tv.other2.x;
+        otherDirs2[ptr3 + 1] = tv.other2.y;
+        otherDirs2[ptr3 + 2] = tv.other2.z;
 
         flatPositions[ptr3] = tv.fx;
         flatPositions[ptr3 + 1] = tv.fy;
@@ -639,7 +731,8 @@ export function buildCellOverlayGeometry(params: ICellOverlayGeometryParams): Bu
   geometry.setAttribute('aFlatPos', new BufferAttribute(flatPositions, 3));
   geometry.setAttribute('aSphereNorm', new BufferAttribute(sphereNormals, 3));
   geometry.setAttribute('aFlatNorm', new BufferAttribute(flatNormals, 3));
-  geometry.setAttribute('aOtherDir', new BufferAttribute(otherDirs, 3));
+  geometry.setAttribute('aOtherDir1', new BufferAttribute(otherDirs1, 3));
+  geometry.setAttribute('aOtherDir2', new BufferAttribute(otherDirs2, 3));
   geometry.setAttribute('aCellId', new BufferAttribute(cellIds, 1));
   geometry.setAttribute('aDist', new BufferAttribute(distFromCenter, 1));
   geometry.setAttribute('uv', new BufferAttribute(uvs, 2));

@@ -27,7 +27,9 @@ export function createPlanetMorphMaterial(
 ): { material: MeshStandardMaterial; uniforms: IDynamicProjectionUniforms } {
   const uniforms: IDynamicProjectionUniforms = {
     uMorph: uniformHolder?.uMorph ?? { value: 0 },
-    uProjForward: uniformHolder?.uProjForward ?? { value: new Vector3(0, 0, 1) },
+    uProjForward: uniformHolder?.uProjForward ?? {
+      value: new Vector3(0, 0, 1),
+    },
     uProjUp: uniformHolder?.uProjUp ?? { value: new Vector3(0, 1, 0) },
     uProjRight: uniformHolder?.uProjRight ?? { value: new Vector3(1, 0, 0) },
     uProjMode: uniformHolder?.uProjMode ?? { value: 0 },
@@ -56,7 +58,8 @@ export function createPlanetMorphMaterial(
     shader.uniforms['uRadius'] = uniforms.uRadius;
     shader.uniforms['uProjectionType'] = uniforms.uProjectionType;
 
-    shader.vertexShader = `
+    shader.vertexShader =
+      `
       attribute vec3 aSpherePos;
       attribute vec3 aFlatPos;
       attribute vec3 aSphereNorm;
@@ -183,7 +186,8 @@ export function createPlanetMorphMaterial(
     );
 
     // Fragment shader: discard seam-spanning triangles when unrolled
-    shader.fragmentShader = `
+    shader.fragmentShader =
+      `
       varying float vProjLon;
       varying float vProjMode;
       varying float vMorph;
@@ -206,9 +210,16 @@ export function createPlanetMorphMaterial(
 
 export function createPlanetBorderMorphMaterial(
   uniformHolder: IDynamicProjectionUniforms,
-  options: { color?: string | Color; opacity?: number; ribbonWidth?: number } = {},
+  options: {
+    color?: string | Color;
+    opacity?: number;
+    ribbonWidth?: number;
+  } = {},
 ): ShaderMaterial {
-  const color = options.color instanceof Color ? options.color : new Color(options.color ?? '#ffffff');
+  const color =
+    options.color instanceof Color
+      ? options.color
+      : new Color(options.color ?? '#ffffff');
   const opacity = options.opacity ?? 0.6;
   const ribbonWidth = options.ribbonWidth ?? 0;
 
@@ -414,7 +425,8 @@ export function createPlanetCellOverlayMaterial(
       attribute vec3 aFlatPos;
       attribute vec3 aSphereNorm;
       attribute vec3 aFlatNorm;
-      attribute vec3 aOtherDir;
+      attribute vec3 aOtherDir1;
+      attribute vec3 aOtherDir2;
       attribute float aCellId;
       attribute float aDist;
 
@@ -441,24 +453,35 @@ export function createPlanetCellOverlayMaterial(
         vec3 dynSpherePos = aSpherePos;
         vec3 dynFlatPos = aFlatPos;
 
+        // Seam culling runs in both static and dynamic modes: when tracking is off the projection
+        // basis uniforms hold the identity frame (forward=+Z, right=+X, up=+Y), so pLon is the true
+        // longitude matching the CPU-baked aFlatPos. Testing all three triangle edges is required
+        // because a cell fan can straddle the antimeridian without any single vertex knowing it.
+        vec3 dir = aSphereNorm;
+        float dotFwd = dot(dir, uProjForward);
+        float dotRight = dot(dir, uProjRight);
+        float dotUp = dot(dir, uProjUp);
+
+        float pLon = atan(dotRight, dotFwd);
+        float pLat = asin(clamp(dotUp, -1.0, 1.0));
+
+        float oFwd1 = dot(aOtherDir1, uProjForward);
+        float oRight1 = dot(aOtherDir1, uProjRight);
+        float oLon1 = atan(oRight1, oFwd1);
+
+        float oFwd2 = dot(aOtherDir2, uProjForward);
+        float oRight2 = dot(aOtherDir2, uProjRight);
+        float oLon2 = atan(oRight2, oFwd2);
+
+        if (uMorph > 0.05 &&
+            (abs(pLon - oLon1) > 3.14159 ||
+             abs(pLon - oLon2) > 3.14159 ||
+             abs(oLon1 - oLon2) > 3.14159)) {
+          gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+          return;
+        }
+
         if (uProjMode > 0.5) {
-          vec3 dir = aSphereNorm;
-          float dotFwd = dot(dir, uProjForward);
-          float dotRight = dot(dir, uProjRight);
-          float dotUp = dot(dir, uProjUp);
-
-          float pLon = atan(dotRight, dotFwd);
-          float pLat = asin(clamp(dotUp, -1.0, 1.0));
-
-          float oFwd = dot(aOtherDir, uProjForward);
-          float oRight = dot(aOtherDir, uProjRight);
-          float oLon = atan(oRight, oFwd);
-
-          if (uMorph > 0.05 && abs(pLon - oLon) > 3.14159) {
-            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-            return;
-          }
-
           vProjLon = pLon;
           vProjMode = 1.0;
 

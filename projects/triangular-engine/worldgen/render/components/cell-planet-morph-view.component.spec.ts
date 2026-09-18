@@ -1,7 +1,11 @@
 import { TestBed } from '@angular/core/testing';
-import { PerspectiveCamera, Scene } from 'three';
+import { BufferAttribute, Mesh, PerspectiveCamera, Scene } from 'three';
 import { EngineService } from 'triangular-engine';
-import { buildPlanetGraphCore, IPlanetSurfaceSampler, IVec3 } from 'triangular-engine/worldgen';
+import {
+  buildPlanetGraphCore,
+  IPlanetSurfaceSampler,
+  IVec3,
+} from 'triangular-engine/worldgen';
 import { CellPlanetMorphViewComponent } from './cell-planet-morph-view.component';
 
 describe('CellPlanetMorphViewComponent', () => {
@@ -97,7 +101,11 @@ describe('CellPlanetMorphViewComponent', () => {
   });
 
   it('renders cell borders, territory borders, and tactical overlays when enabled', () => {
-    const graph = buildPlanetGraphCore({ cellCount: 30, seed: 1, relaxationIterations: 1 });
+    const graph = buildPlanetGraphCore({
+      cellCount: 30,
+      seed: 1,
+      relaxationIterations: 1,
+    });
     const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
     fixture.componentRef.setInput('sampler', mockSampler);
     fixture.componentRef.setInput('graph', graph);
@@ -112,7 +120,9 @@ describe('CellPlanetMorphViewComponent', () => {
     // Expected meshes: morph-terrain, morph-ocean, morph-cell-borders, morph-territory-ribbons, morph-cell-overlay
     expect(children.length).toBe(5);
     expect(children.some((c) => c.name === 'morph-cell-borders')).toBeTrue();
-    expect(children.some((c) => c.name === 'morph-territory-ribbons')).toBeTrue();
+    expect(
+      children.some((c) => c.name === 'morph-territory-ribbons'),
+    ).toBeTrue();
     expect(children.some((c) => c.name === 'morph-cell-overlay')).toBeTrue();
 
     // Check tactical overlay instance
@@ -127,5 +137,56 @@ describe('CellPlanetMorphViewComponent', () => {
 
     fixture.destroy();
     expect(comp.object3D().children.length).toBe(0);
+  });
+
+  it('morphs the CPU pick geometry so flat-map picking matches the rendered surface', () => {
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', mockSampler);
+    fixture.componentRef.setInput('longitudeSegments', 16);
+    fixture.componentRef.setInput('latitudeRings', 8);
+    fixture.componentRef.setInput('radius', 2.0);
+    fixture.componentRef.setInput('morphProgress', 1.0); // 2.5D flat map
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    const terrain = comp
+      .object3D()
+      .children.find((c) => c.name === 'morph-terrain') as Mesh;
+    const position = terrain.geometry.getAttribute(
+      'position',
+    ) as BufferAttribute;
+    const sphere = terrain.geometry.getAttribute(
+      'aSpherePos',
+    ) as BufferAttribute;
+    const flat = terrain.geometry.getAttribute('aFlatPos') as BufferAttribute;
+
+    // Raycast through a viewport-sized rect; resolveCellAtScreen is what triggers the sync.
+    const viewport = {
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 400,
+      }),
+    } as unknown as HTMLElement;
+    comp.resolveCellAtScreen(200, 200, viewport);
+
+    let differsFromSphere = false;
+    for (let i = 0; i < position.count; i++) {
+      if (Math.abs(position.getX(i) - sphere.getX(i)) > 1e-6) {
+        differsFromSphere = true;
+        break;
+      }
+    }
+    expect(differsFromSphere).toBeTrue();
+
+    // At full morph the CPU positions should equal the flat positions exactly.
+    for (let i = 0; i < position.count; i++) {
+      expect(position.getX(i)).toBeCloseTo(flat.getX(i), 5);
+      expect(position.getY(i)).toBeCloseTo(flat.getY(i), 5);
+      expect(position.getZ(i)).toBeCloseTo(flat.getZ(i), 5);
+    }
+
+    fixture.destroy();
   });
 });

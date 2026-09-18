@@ -113,6 +113,14 @@ Setting `gl_Position` outside the normalized device coordinate (NDC) cube $[-1, 
 
 ## 5. Related Pitfalls & Technical Learnings
 
+### Pitfall 0: Single Counterpart Attribute Misses the Seam-Crossing Edge
+- **Symptom**: Tactical overlays (selected cell halo, movement range) streaked lines across the full map width when a highlighted cell sat near the antimeridian, even though cell borders and territory ribbons were already clean.
+- **Cause**: Two independent gaps compounded:
+  1. `buildCellOverlayGeometry` stored only a single `aOtherDir` per vertex, and the shader tested just the one `(self, other)` pair. A cell fan triangle `(center, k1, k2)` can straddle the seam on the `k1–k2` edge while neither `center–k1` nor `center–k2` crosses it, so the test never fired.
+  2. The seam cull in `createPlanetCellOverlayMaterial` was gated behind `uProjMode > 0.5` (dynamic tracking). In static mode (`trackingMode: 'none'`) the cull was skipped entirely, and the CPU-baked `aFlatPos` for the straddling triangle already spanned both map margins.
+- **Fix**: Store **two** counterpart directions per vertex (`aOtherDir1`, `aOtherDir2`) and test all three pairwise angular spans against $\pi$ — matching `buildPlanetMorphGeometry`'s terrain approach. Run the cull unconditionally (not just when `uProjMode > 0.5`): when tracking is off the projection-basis uniforms hold the identity frame (`forward=+Z`, `right=+X`, `up=+Y`), so the computed `pLon` equals the true longitude that the CPU-baked `aFlatPos` was built from.
+- **Lesson**: Any per-primitive seam test must consider every edge of the primitive. Deriving the counterpart from the shared vertex list once (as terrain does) avoids per-vertex omissions.
+
 ### Pitfall 1: Dynamic Quad Width Collapse on Territory Ribbons
 - **Symptom**: Light blue 1D lines rendered correctly, but yellow/orange territory ribbons disappeared in dynamic tracking mode.
 - **Cause**: Territory ribbons are physical quads with 4 vertices per segment. Projecting each vertex purely from its spherical center without re-evaluating the 2D perpendicular offset in dynamic map space caused both sides of the quad to collapse to the same point (width = 0), producing zero-area triangles.

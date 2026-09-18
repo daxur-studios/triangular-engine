@@ -9,6 +9,7 @@ import {
   untracked,
 } from '@angular/core';
 import {
+  BufferAttribute,
   BufferGeometry,
   LineSegments,
   Mesh,
@@ -32,10 +33,7 @@ import {
   buildTerritoryRibbonGeometry,
 } from '../cell-border-geometry';
 import { CellTacticalOverlay } from '../cell-tactical-overlay';
-import {
-  MAP_PROJECTIONS,
-  MapProjectionKind,
-} from '../map-projections';
+import { MAP_PROJECTIONS, MapProjectionKind } from '../map-projections';
 import {
   buildOceanMorphGeometry,
   buildPlanetMorphGeometry,
@@ -65,7 +63,10 @@ export type ProjectionTrackingMode = 'none' | 'meridian' | 'oblique';
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [provideObject3DComponent(CellPlanetMorphViewComponent)],
 })
-export class CellPlanetMorphViewComponent extends GroupComponent implements OnDestroy {
+export class CellPlanetMorphViewComponent
+  extends GroupComponent
+  implements OnDestroy
+{
   private readonly raycaster = new Raycaster();
 
   // ==========================================================================
@@ -96,7 +97,14 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
   readonly longitudeSegments = input<number>(128);
   readonly latitudeRings = input<number>(64);
 
-  readonly resolveColor = input<((direction: IVec3, elevation: number, isLand: boolean) => [number, number, number]) | undefined>(undefined);
+  readonly resolveColor = input<
+    | ((
+        direction: IVec3,
+        elevation: number,
+        isLand: boolean,
+      ) => [number, number, number])
+    | undefined
+  >(undefined);
 
   // Border & Tactical Overlay inputs
   readonly showCellBorders = input<boolean>(false);
@@ -106,14 +114,23 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
   readonly territoryBorderColor = input<string>('#facc15');
   readonly territoryBorderWidth = input<number>(0.015);
   readonly factionByCell = input<ArrayLike<number> | null | undefined>(null);
-  readonly factionColors = input<Record<number, string> | null | undefined>(null);
+  readonly factionColors = input<Record<number, string> | null | undefined>(
+    null,
+  );
   readonly showTacticalOverlay = input<boolean>(false);
 
   // ==========================================================================
   // Outputs
   // ==========================================================================
-  readonly cellClick = output<{ cellId: number; direction: IVec3; point: Vector3 }>();
-  readonly cellHover = output<{ cellId: number | null; direction: IVec3 | null }>();
+  readonly cellClick = output<{
+    cellId: number;
+    direction: IVec3;
+    point: Vector3;
+  }>();
+  readonly cellHover = output<{
+    cellId: number | null;
+    direction: IVec3 | null;
+  }>();
 
   // ==========================================================================
   // Internal State & Public Tactical Handle
@@ -175,7 +192,8 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
 
       untracked(() => {
         this.dynamicUniforms.uMorph.value = Math.max(0, Math.min(1, morph));
-        this.dynamicUniforms.uProjectionType.value = projectionKind === 'equirectangular' ? 0 : 1;
+        this.dynamicUniforms.uProjectionType.value =
+          projectionKind === 'equirectangular' ? 0 : 1;
 
         if (this.oceanMesh) {
           this.oceanMesh.visible = showOcean;
@@ -184,9 +202,21 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
         const activeBasis = this.computeActiveBasis();
         if (activeBasis) {
           this.dynamicUniforms.uProjMode.value = 1;
-          this.dynamicUniforms.uProjForward.value.set(activeBasis.forward.x, activeBasis.forward.y, activeBasis.forward.z);
-          this.dynamicUniforms.uProjUp.value.set(activeBasis.up.x, activeBasis.up.y, activeBasis.up.z);
-          this.dynamicUniforms.uProjRight.value.set(activeBasis.right.x, activeBasis.right.y, activeBasis.right.z);
+          this.dynamicUniforms.uProjForward.value.set(
+            activeBasis.forward.x,
+            activeBasis.forward.y,
+            activeBasis.forward.z,
+          );
+          this.dynamicUniforms.uProjUp.value.set(
+            activeBasis.up.x,
+            activeBasis.up.y,
+            activeBasis.up.z,
+          );
+          this.dynamicUniforms.uProjRight.value.set(
+            activeBasis.right.x,
+            activeBasis.right.y,
+            activeBasis.right.z,
+          );
         } else {
           this.dynamicUniforms.uProjMode.value = 0;
         }
@@ -227,6 +257,94 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
   // ==========================================================================
 
   private cachedBasis?: IProjectionBasis;
+  private pickSyncKey = '';
+
+  /**
+   * CPU-side morph of the terrain `position` attribute for picking.
+   *
+   * The GPU morphs vertices in the vertex shader from `aSpherePos` to `aFlatPos` via `uMorph`,
+   * so `terrainMesh.geometry.attributes.position` stays pinned at the sphere while the rendered
+   * surface unrolls. A raycast against it therefore only matches the globe: in flat view the
+   * center is approximately right (small divergence) and the map edges miss entirely.
+   *
+   * This rewrites `position` to the exact morphed surface before picking, using the same basis
+   * (tracking) the shader uses. Cheap enough to run per pick at interactive rates.
+   */
+  private syncPickGeometry(): void {
+    const geometry = this.terrainMesh?.geometry;
+    const sphere = geometry?.getAttribute('aSpherePos') as
+      | BufferAttribute
+      | undefined;
+    const sphereNorm = geometry?.getAttribute('aSphereNorm') as
+      | BufferAttribute
+      | undefined;
+    const flat = geometry?.getAttribute('aFlatPos') as
+      | BufferAttribute
+      | undefined;
+    const position = geometry?.getAttribute('position') as
+      | BufferAttribute
+      | undefined;
+    if (!geometry || !sphere || !sphereNorm || !flat || !position) return;
+
+    const morph = Math.max(0, Math.min(1, this.morphProgress()));
+    const projection = MAP_PROJECTIONS[this.projectionKind()];
+    const mapWidth =
+      this.terrainGeometryData?.mapWidth ?? 2 * Math.PI * this.radius();
+    const mapHeight =
+      this.terrainGeometryData?.mapHeight ?? Math.PI * this.radius();
+    const basis = this.cachedBasis ?? this.computeActiveBasis();
+
+    // Cheap early-out: only rewrite the buffer when the morph frame actually changed.
+    const key = `${morph}|${this.projectionKind()}|${this.radius()}|${mapWidth}|${mapHeight}|${
+      basis
+        ? `${basis.forward.x},${basis.forward.y},${basis.forward.z},${basis.up.x},${basis.up.y},${basis.up.z},${basis.right.x},${basis.right.y},${basis.right.z}`
+        : 'none'
+    }`;
+    if (key === this.pickSyncKey) return;
+    this.pickSyncKey = key;
+
+    const sphereArray = sphere.array as Float32Array;
+    const sphereNormArray = sphereNorm.array as Float32Array;
+    const flatArray = flat.array as Float32Array;
+    const positionArray = position.array as Float32Array;
+
+    for (let i = 0; i < positionArray.length; i += 3) {
+      const sx = sphereArray[i];
+      const sy = sphereArray[i + 1];
+      const sz = sphereArray[i + 2];
+      const fx = flatArray[i];
+      const fy = flatArray[i + 1];
+      const fz = flatArray[i + 2];
+
+      let flatX = fx;
+      let flatY = fy;
+
+      if (basis) {
+        // Mirror the shader's dynamic-basis reprojection: re-derive lon/lat in the tracking
+        // frame, then re-project so picking agrees with a recentered map.
+        const nx = sphereNormArray[i];
+        const ny = sphereNormArray[i + 1];
+        const nz = sphereNormArray[i + 2];
+        const dotFwd =
+          nx * basis.forward.x + ny * basis.forward.y + nz * basis.forward.z;
+        const dotRight =
+          nx * basis.right.x + ny * basis.right.y + nz * basis.right.z;
+        const dotUp = nx * basis.up.x + ny * basis.up.y + nz * basis.up.z;
+        const pLon = Math.atan2(dotRight, dotFwd);
+        const pLat = Math.asin(Math.max(-1, Math.min(1, dotUp)));
+        const proj = projection.project(pLon, pLat, mapWidth, mapHeight);
+        flatX = (proj.x / mapWidth - 0.5) * mapWidth;
+        flatY = -(proj.y / mapHeight - 0.5) * mapHeight;
+      }
+
+      positionArray[i] = sx + (flatX - sx) * morph;
+      positionArray[i + 1] = sy + (flatY - sy) * morph;
+      positionArray[i + 2] = sz + (fz - sz) * morph;
+    }
+
+    position.needsUpdate = true;
+    geometry.computeBoundingSphere();
+  }
 
   /**
    * Evaluates the exact 3D world position and surface normal for any unit/marker on the planet
@@ -234,8 +352,10 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
    */
   evaluateUnitTransform(direction: IVec3, elevation = 0): ISurfaceTransform {
     const projection = MAP_PROJECTIONS[this.projectionKind()];
-    const mapWidth = this.terrainGeometryData?.mapWidth ?? 2 * Math.PI * this.radius();
-    const mapHeight = this.terrainGeometryData?.mapHeight ?? Math.PI * this.radius();
+    const mapWidth =
+      this.terrainGeometryData?.mapWidth ?? 2 * Math.PI * this.radius();
+    const mapHeight =
+      this.terrainGeometryData?.mapHeight ?? Math.PI * this.radius();
     const basis = this.cachedBasis ?? this.computeActiveBasis();
 
     return evaluateSurfaceTransform(
@@ -266,9 +386,17 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
     const basis = this.computeBasisFor(activeMode, direction);
     this.cachedBasis = basis;
     this.dynamicUniforms.uProjMode.value = 1;
-    this.dynamicUniforms.uProjForward.value.set(basis.forward.x, basis.forward.y, basis.forward.z);
+    this.dynamicUniforms.uProjForward.value.set(
+      basis.forward.x,
+      basis.forward.y,
+      basis.forward.z,
+    );
     this.dynamicUniforms.uProjUp.value.set(basis.up.x, basis.up.y, basis.up.z);
-    this.dynamicUniforms.uProjRight.value.set(basis.right.x, basis.right.y, basis.right.z);
+    this.dynamicUniforms.uProjRight.value.set(
+      basis.right.x,
+      basis.right.y,
+      basis.right.z,
+    );
   }
 
   /**
@@ -296,12 +424,14 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
 
     // Full Oblique / Transverse: direction becomes forward axis
     const forward = normalize(dir);
-    const worldUp: IVec3 = forward.y > 0.999
-      ? { x: 0, y: 0, z: -1 }
-      : forward.y < -0.999
-        ? { x: 0, y: 0, z: 1 }
-        : { x: 0, y: 1, z: 0 };
-    const dot = worldUp.x * forward.x + worldUp.y * forward.y + worldUp.z * forward.z;
+    const worldUp: IVec3 =
+      forward.y > 0.999
+        ? { x: 0, y: 0, z: -1 }
+        : forward.y < -0.999
+          ? { x: 0, y: 0, z: 1 }
+          : { x: 0, y: 1, z: 0 };
+    const dot =
+      worldUp.x * forward.x + worldUp.y * forward.y + worldUp.z * forward.z;
     const tanUp = {
       x: worldUp.x - dot * forward.x,
       y: worldUp.y - dot * forward.y,
@@ -331,6 +461,8 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
     const camera = this.engineService.camera;
     if (!camera) return null;
 
+    this.syncPickGeometry();
+
     const ndc = new Vector2(
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -(((clientY - rect.top) / rect.height) * 2 - 1),
@@ -355,14 +487,25 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
   }
 
   onClick(event: MouseEvent, viewportEl: HTMLElement): void {
-    const hit = this.resolveCellAtScreen(event.clientX, event.clientY, viewportEl);
+    const hit = this.resolveCellAtScreen(
+      event.clientX,
+      event.clientY,
+      viewportEl,
+    );
     if (hit) {
       this.cellClick.emit(hit);
     }
   }
 
-  onPointerMove(event: PointerEvent | MouseEvent, viewportEl: HTMLElement): void {
-    const hit = this.resolveCellAtScreen(event.clientX, event.clientY, viewportEl);
+  onPointerMove(
+    event: PointerEvent | MouseEvent,
+    viewportEl: HTMLElement,
+  ): void {
+    const hit = this.resolveCellAtScreen(
+      event.clientX,
+      event.clientY,
+      viewportEl,
+    );
     if (hit) {
       this.cellHover.emit({ cellId: hit.cellId, direction: hit.direction });
     } else {
@@ -394,11 +537,18 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
       resolveColor: this.resolveColor(),
     });
 
+    // New geometry means the cached pick buffer is stale; force the next pick to resync.
+    this.pickSyncKey = '';
+
     this.dynamicUniforms.uMapWidth.value = this.terrainGeometryData.mapWidth;
     this.dynamicUniforms.uMapHeight.value = this.terrainGeometryData.mapHeight;
     this.dynamicUniforms.uRadius.value = radius;
-    this.dynamicUniforms.uProjectionType.value = projectionKind === 'equirectangular' ? 0 : 1;
-    this.dynamicUniforms.uMorph.value = Math.max(0, Math.min(1, this.morphProgress()));
+    this.dynamicUniforms.uProjectionType.value =
+      projectionKind === 'equirectangular' ? 0 : 1;
+    this.dynamicUniforms.uMorph.value = Math.max(
+      0,
+      Math.min(1, this.morphProgress()),
+    );
 
     const { material: terrainMat } = createPlanetMorphMaterial(
       { vertexColors: true, roughness: 0.9, metalness: 0.05 },
@@ -474,7 +624,10 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
         color: this.cellBorderColor(),
         opacity: this.cellBorderOpacity(),
       });
-      this.cellBorderMesh = new LineSegments(this.cellBorderGeometry, borderMat);
+      this.cellBorderMesh = new LineSegments(
+        this.cellBorderGeometry,
+        borderMat,
+      );
       this.cellBorderMesh.name = 'morph-cell-borders';
       this.cellBorderMesh.renderOrder = 3;
       this.object3D().add(this.cellBorderMesh);
@@ -503,7 +656,10 @@ export class CellPlanetMorphViewComponent extends GroupComponent implements OnDe
         opacity: 0.9,
         ribbonWidth: this.territoryBorderWidth(),
       });
-      this.territoryRibbonMesh = new Mesh(this.territoryRibbonGeometry, ribbonMat);
+      this.territoryRibbonMesh = new Mesh(
+        this.territoryRibbonGeometry,
+        ribbonMat,
+      );
       this.territoryRibbonMesh.name = 'morph-territory-ribbons';
       this.territoryRibbonMesh.renderOrder = 4;
       this.object3D().add(this.territoryRibbonMesh);
