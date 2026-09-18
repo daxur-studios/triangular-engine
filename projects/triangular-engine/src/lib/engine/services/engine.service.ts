@@ -150,6 +150,9 @@ export class EngineService implements IEngine {
    * rendering. Camera-relative render systems should update here.
    */
   readonly beforeRender$ = new Subject<void>();
+  /** Emits after the renderer and optional overlay renderers complete successfully. */
+  readonly renderComplete$ = new Subject<{ frameId: number; renderedAt: number }>();
+  private renderFrameId = 0;
 
   /** Triggered when the SceneComponent is destroyed */
   readonly onDestroy$ = new ReplaySubject<void>();
@@ -617,6 +620,10 @@ export class EngineService implements IEngine {
         this.CSS3DRenderer.render(this.scene, this.camera);
 
       this.fpsController.lastRenderTime = time;
+      this.safeEmit('renderComplete$', this.renderComplete$, {
+        frameId: ++this.renderFrameId,
+        renderedAt: performance.now(),
+      });
     }
   }
   public setSpeedFactor(timeSpeed: number) {

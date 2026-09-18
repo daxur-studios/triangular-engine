@@ -4,6 +4,7 @@ import {
   Component,
   DestroyRef,
   inject,
+  isDevMode,
   signal,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
@@ -16,6 +17,7 @@ import {
   MeshStandardMaterial,
   SphereGeometry,
 } from 'three';
+import { SceneTestAdapter, type SceneTestBridge, type SceneTestObject } from '../../testing/scene-test-adapter/scene-test-adapter';
 import {
   EngineModule,
   EngineService,
@@ -51,6 +53,9 @@ export class SceneInspectionLabPageComponent implements AfterViewInit {
     new SphereGeometry(1.2, 20, 12),
     new MeshStandardMaterial({ color: '#f59e0b' }),
   );
+  private testAdapter?: SceneTestAdapter;
+  private testObjects: SceneTestObject[] = [];
+  private testClickHandler?: (event: PointerEvent) => void;
 
   constructor() {
     const previousBackground = this.engine.scene.background;
@@ -77,9 +82,77 @@ export class SceneInspectionLabPageComponent implements AfterViewInit {
     keyLight.name = 'inspection-key-light';
     this.engine.scene.add(this.sceneRoot, keyLight);
 
+    if (isDevMode() && new URLSearchParams(window.location.search).get('sceneTest') === 'agent-reference-v1') {
+      this.installAgentReference();
+    }
+
     this.destroyRef.onDestroy(() => {
       this.engine.scene.remove(this.sceneRoot);
       this.engine.scene.background = previousBackground;
+      if (this.testClickHandler) window.removeEventListener('pointerdown', this.testClickHandler, true);
+      if (this.testAdapter) {
+        this.engine.scene.remove(...this.testObjects.map(({ object }) => object));
+        delete (window as Window & { __sceneTest?: SceneTestBridge }).__sceneTest;
+      }
+    });
+  }
+
+  private installAgentReference(): void {
+    const reference = new Group();
+    reference.name = 'agent-reference-v1';
+    const sphere = new Mesh(new SphereGeometry(5, 32, 20), new MeshStandardMaterial({ color: '#38bdf8' }));
+    sphere.name = 'large-sphere';
+    sphere.position.set(-7, 5, 0);
+    const box = new Mesh(new BoxGeometry(0.5, 0.5, 0.5), new MeshStandardMaterial({ color: '#f97316' }));
+    box.name = 'small-box';
+    box.position.set(2, 0.25, 0);
+    const transformedParent = new Group();
+    transformedParent.name = 'transformed-box-parent';
+    transformedParent.position.set(7, 1, -2);
+    transformedParent.rotation.y = Math.PI / 5;
+    const transformedBox = new Mesh(new BoxGeometry(1, 2, 0.75), new MeshStandardMaterial({ color: '#a78bfa' }));
+    transformedBox.name = 'transformed-box';
+    transformedParent.add(transformedBox);
+    reference.add(sphere, box, transformedParent);
+    this.engine.scene.add(reference);
+    this.testObjects = [
+      { id: 'large-sphere', label: 'Large sphere', object: sphere },
+      { id: 'small-box', label: 'Small box', object: box },
+      { id: 'transformed-box', label: 'Transformed box', object: transformedParent },
+    ];
+    this.testAdapter = new SceneTestAdapter(
+      this.engine.scene,
+      () => this.engine.camera,
+      this.engine.renderer,
+      this.testObjects,
+      () => this.waitForRender(),
+    );
+    const testWindow = window as Window & { __sceneTest?: SceneTestBridge };
+    testWindow.__sceneTest = this.testAdapter;
+    this.testClickHandler = (event) => {
+      const target = this.testAdapter?.hit(event.clientX, event.clientY);
+      if (target) window.dispatchEvent(new CustomEvent('scene-test-hit', { detail: { target } }));
+    };
+    window.addEventListener('pointerdown', this.testClickHandler, true);
+  }
+
+  private waitForRender(): Promise<{ frameId: number; renderedAt: number }> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const subscription = this.engine.renderComplete$.subscribe((frame) => {
+        if (settled) return;
+        settled = true;
+        subscription.unsubscribe();
+        resolve(frame);
+      });
+      const timeout = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        subscription.unsubscribe();
+        reject(new Error('TIMEOUT: engine render did not complete'));
+      }, 2000);
+      this.engine.requestSingleRender();
+      subscription.add(() => window.clearTimeout(timeout));
     });
   }
 

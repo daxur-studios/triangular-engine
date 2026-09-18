@@ -60,6 +60,19 @@ See: ./api/selectors.md
 - Preserve the existing sequence when adding documents; do not create unnumbered runbooks.
 - Use the numbered filename in links and references.
 
+## Browser, Visual and Performance Test Planning
+
+See [037 — Agent-driven visual and performance testing](../../../docs/runbook/037_agent_driven_visual_and_performance_testing.md)
+for the proposed shared test infrastructure, text-only agent authoring workflow,
+scene-control contract, evidence storage and baseline policy. The runbook distinguishes
+existing inspection/capture capabilities from planned tools; its proposed commands
+are not yet available.
+
+Implementation starts with **M1 only** in
+[038 — Agent testing implementation plan](../../../docs/runbook/038_agent_testing_implementation_plan.md).
+That document owns the milestone checklist, bounded Playwright/scene-adapter handoff
+and acceptance evidence; follow it instead of implementing the full design at once.
+
 ## Semantic Facial Animation & Character Controls
 
 Use `FacialAnimationController` from `triangular-engine/characters` to direct facial performances via serializable commands (`FaceCommand`):
