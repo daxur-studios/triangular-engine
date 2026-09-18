@@ -61,6 +61,8 @@ export function createPlanetMorphMaterial(
       attribute vec3 aFlatPos;
       attribute vec3 aSphereNorm;
       attribute vec3 aFlatNorm;
+      attribute vec3 aOtherDir1;
+      attribute vec3 aOtherDir2;
 
       uniform float uMorph;
       uniform vec3 uProjForward;
@@ -75,6 +77,7 @@ export function createPlanetMorphMaterial(
       varying float vProjLon;
       varying float vProjMode;
       varying float vMorph;
+      varying float vSeamCull;
     ` + shader.vertexShader;
 
     shader.vertexShader = shader.vertexShader.replace(
@@ -100,6 +103,7 @@ export function createPlanetMorphMaterial(
       `
       vec3 dynSpherePos = aSpherePos;
       vec3 dynFlatPos = aFlatPos;
+      float seamCull = 0.0;
 
       if (uProjMode > 0.5) {
         vec3 dir = aSphereNorm;
@@ -109,6 +113,22 @@ export function createPlanetMorphMaterial(
 
         float pLon = atan(dotRight, dotFwd);
         float pLat = asin(clamp(dotUp, -1.0, 1.0));
+
+        if (length(aOtherDir1) > 0.001 && length(aOtherDir2) > 0.001) {
+          float oFwd1 = dot(aOtherDir1, uProjForward);
+          float oRight1 = dot(aOtherDir1, uProjRight);
+          float oLon1 = atan(oRight1, oFwd1);
+
+          float oFwd2 = dot(aOtherDir2, uProjForward);
+          float oRight2 = dot(aOtherDir2, uProjRight);
+          float oLon2 = atan(oRight2, oFwd2);
+
+          if (abs(pLon - oLon1) > 3.14159265 ||
+              abs(pLon - oLon2) > 3.14159265 ||
+              abs(oLon1 - oLon2) > 3.14159265) {
+            seamCull = 1.0;
+          }
+        }
 
         vProjLon = pLon;
         vProjMode = 1.0;
@@ -147,7 +167,18 @@ export function createPlanetMorphMaterial(
       }
 
       vMorph = uMorph;
+      vSeamCull = seamCull;
       vec3 transformed = mix(dynSpherePos, dynFlatPos, uMorph);
+      `,
+    );
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <fog_vertex>',
+      `
+      #include <fog_vertex>
+      if (uProjMode > 0.5 && uMorph > 0.05 && seamCull > 0.5) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      }
       `,
     );
 
@@ -156,13 +187,14 @@ export function createPlanetMorphMaterial(
       varying float vProjLon;
       varying float vProjMode;
       varying float vMorph;
+      varying float vSeamCull;
     ` + shader.fragmentShader;
 
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <dithering_fragment>',
       `
       #include <dithering_fragment>
-      if (vProjMode > 0.5 && vMorph > 0.05 && fwidth(vProjLon) > 2.8) {
+      if (vProjMode > 0.5 && vMorph > 0.05 && (vSeamCull > 0.5 || fwidth(vProjLon) > 2.8)) {
         discard;
       }
       `,

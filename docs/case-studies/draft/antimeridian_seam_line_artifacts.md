@@ -1,4 +1,4 @@
-﻿# Case Study: Antimeridian Seam-Crossing Line Artifacts in Dynamic 2.5D Planetary Projections
+# Case Study: Antimeridian Seam-Crossing Line Artifacts in Dynamic 2.5D Planetary Projections
 
 ## Executive Summary
 
@@ -128,6 +128,11 @@ Setting `gl_Position` outside the normalized device coordinate (NDC) cube $[-1, 
 - **Cause**: `resolveColorCallback` was declared as a static arrow function reference. When `fillMode` changed, Angular's `effect()` saw the same function reference and skipped re-rendering.
 - **Fix**: Wrap dynamic color generation in an Angular `computed()` signal: `readonly resolveColor = computed(...)`, ensuring a new callback reference triggers component re-execution whenever the data layer changes.
 
+### Pitfall 4: 2.5D Terrain & Ocean Mesh Triangle Seam Stretching
+- **Symptom**: Terrain and ocean triangles straddling the dynamic antimeridian seam stretched all the way from one side of the map to the other ($x \approx -W/2$ to $+W/2$) during dynamic projection tracking when zoomed in or panned.
+- **Cause**: In an indexed grid mesh, vertices were shared across triangles, and fragment discard via `fwidth(vProjLon) > 2.8` failed because wide triangles over many screen pixels produced minute screen derivatives ($2\pi / 200 \approx 0.03 \ll 2.8$).
+- **Fix**: Build terrain and ocean meshes as non-indexed triangle geometries with two counterpart direction attributes per vertex (`aOtherDir1` and `aOtherDir2`). In the vertex shader, test all three pairwise angular differences against $\pi$; if any edge crosses the antimeridian, set `gl_Position = vec4(2.0, 2.0, 2.0, 1.0)` to cleanly discard the primitive before rasterization without relying on screen-space derivatives.
+
 ---
 
 ## 6. Performance & Verification Metrics
@@ -137,4 +142,4 @@ Setting `gl_Position` outside the normalized device coordinate (NDC) cube $[-1, 
 | **CPU Frame Overhead** | ~4.8 ms / frame (allocations + GC) | **0.00 ms** (fully static buffers) |
 | **GPU Instruction Overhead** | None | ~5 scalar ALU ops per vertex |
 | **Artifact Lines Across Map** | Eliminated on static Greenwich | **Eliminated on all dynamic tracking modes** |
-| **Unit Test Coverage** | 200 / 200 passing | 200 / 200 passing |
+| **Unit Test Coverage** | 200 / 200 passing | **205 / 205 passing** |

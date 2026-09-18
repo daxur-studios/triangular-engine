@@ -125,15 +125,15 @@ export function buildPlanetMorphGeometry(params: IPlanetMorphGeometryParams): IP
 
   const cols = segments + 1;
   const rows = rings + 1;
-  const vertexCount = cols * rows;
+  const gridVertexCount = cols * rows;
 
-  const positions = new Float32Array(vertexCount * 3);
-  const spherePositions = new Float32Array(vertexCount * 3);
-  const flatPositions = new Float32Array(vertexCount * 3);
-  const sphereNormals = new Float32Array(vertexCount * 3);
-  const flatNormals = new Float32Array(vertexCount * 3);
-  const colors = new Float32Array(vertexCount * 3);
-  const uvs = new Float32Array(vertexCount * 2);
+  const gridPositions = new Float32Array(gridVertexCount * 3);
+  const gridSpherePositions = new Float32Array(gridVertexCount * 3);
+  const gridFlatPositions = new Float32Array(gridVertexCount * 3);
+  const gridSphereNormals = new Float32Array(gridVertexCount * 3);
+  const gridFlatNormals = new Float32Array(gridVertexCount * 3);
+  const gridColors = new Float32Array(gridVertexCount * 3);
+  const gridUvs = new Float32Array(gridVertexCount * 2);
 
   for (let r = 0; r <= rings; r++) {
     const latFrac = r / rings;
@@ -160,18 +160,18 @@ export function buildPlanetMorphGeometry(params: IPlanetMorphGeometryParams): IP
       const o2 = idx * 2;
 
       // UV
-      uvs[o2] = lonFrac;
-      uvs[o2 + 1] = 1 - latFrac;
+      gridUvs[o2] = lonFrac;
+      gridUvs[o2 + 1] = 1 - latFrac;
 
       // 3D Sphere coordinates (tangent at Z=0, curving into -Z)
       const displacedRadius = radius + effectiveElevation * heightScale;
-      spherePositions[o3] = dirX * displacedRadius;
-      spherePositions[o3 + 1] = dirY * displacedRadius;
-      spherePositions[o3 + 2] = dirZ * displacedRadius - radius;
+      gridSpherePositions[o3] = dirX * displacedRadius;
+      gridSpherePositions[o3 + 1] = dirY * displacedRadius;
+      gridSpherePositions[o3 + 2] = dirZ * displacedRadius - radius;
 
-      sphereNormals[o3] = dirX;
-      sphereNormals[o3 + 1] = dirY;
-      sphereNormals[o3 + 2] = dirZ;
+      gridSphereNormals[o3] = dirX;
+      gridSphereNormals[o3 + 1] = dirY;
+      gridSphereNormals[o3 + 2] = dirZ;
 
       // 2.5D Flat coordinates (in XY plane facing +Z)
       const proj = projection.project(lon, lat, mapWidth, mapHeight);
@@ -179,37 +179,102 @@ export function buildPlanetMorphGeometry(params: IPlanetMorphGeometryParams): IP
       const flatY = -(proj.y / mapHeight - 0.5) * mapHeight;
       const flatZ = effectiveElevation * heightScale;
 
-      flatPositions[o3] = flatX;
-      flatPositions[o3 + 1] = flatY;
-      flatPositions[o3 + 2] = flatZ;
+      gridFlatPositions[o3] = flatX;
+      gridFlatPositions[o3 + 1] = flatY;
+      gridFlatPositions[o3 + 2] = flatZ;
 
-      flatNormals[o3] = 0;
-      flatNormals[o3 + 1] = 0;
-      flatNormals[o3 + 2] = 1;
+      gridFlatNormals[o3] = 0;
+      gridFlatNormals[o3 + 1] = 0;
+      gridFlatNormals[o3 + 2] = 1;
 
       // Default active position attribute starts at sphere
-      positions[o3] = spherePositions[o3];
-      positions[o3 + 1] = spherePositions[o3 + 1];
-      positions[o3 + 2] = spherePositions[o3 + 2];
+      gridPositions[o3] = gridSpherePositions[o3];
+      gridPositions[o3 + 1] = gridSpherePositions[o3 + 1];
+      gridPositions[o3 + 2] = gridSpherePositions[o3 + 2];
 
       // Colors
       if (params.resolveColor) {
         const rgb = params.resolveColor(direction, effectiveElevation, sample.isLand);
-        colors[o3] = rgb[0];
-        colors[o3 + 1] = rgb[1];
-        colors[o3 + 2] = rgb[2];
+        gridColors[o3] = rgb[0];
+        gridColors[o3 + 1] = rgb[1];
+        gridColors[o3 + 2] = rgb[2];
       } else {
-        colors[o3] = sample.isLand ? 0.35 : 0.15;
-        colors[o3 + 1] = sample.isLand ? 0.65 : 0.35;
-        colors[o3 + 2] = sample.isLand ? 0.25 : 0.75;
+        gridColors[o3] = sample.isLand ? 0.35 : 0.15;
+        gridColors[o3 + 1] = sample.isLand ? 0.65 : 0.35;
+        gridColors[o3 + 2] = sample.isLand ? 0.25 : 0.75;
       }
     }
   }
 
-  // Indices
+  // Build non-indexed triangles with endpoint / triangle neighbor attributes for GPU seam culling
   const triangleCount = segments * rings * 2;
-  const indices = new Uint32Array(triangleCount * 3);
-  let cursor = 0;
+  const totalVertices = triangleCount * 3;
+
+  const positions = new Float32Array(totalVertices * 3);
+  const spherePositions = new Float32Array(totalVertices * 3);
+  const flatPositions = new Float32Array(totalVertices * 3);
+  const sphereNormals = new Float32Array(totalVertices * 3);
+  const flatNormals = new Float32Array(totalVertices * 3);
+  const otherDirs1 = new Float32Array(totalVertices * 3);
+  const otherDirs2 = new Float32Array(totalVertices * 3);
+  const colors = new Float32Array(totalVertices * 3);
+  const uvs = new Float32Array(totalVertices * 2);
+
+  let vPtr3 = 0;
+  let vPtr2 = 0;
+
+  const addTriangle = (i0: number, i1: number, i2: number): void => {
+    const tri = [
+      { self: i0, other1: i1, other2: i2 },
+      { self: i1, other1: i2, other2: i0 },
+      { self: i2, other1: i0, other2: i1 },
+    ];
+
+    for (let k = 0; k < 3; k++) {
+      const s3 = tri[k].self * 3;
+      const s2 = tri[k].self * 2;
+      const o1_3 = tri[k].other1 * 3;
+      const o2_3 = tri[k].other2 * 3;
+
+      positions[vPtr3] = gridPositions[s3];
+      positions[vPtr3 + 1] = gridPositions[s3 + 1];
+      positions[vPtr3 + 2] = gridPositions[s3 + 2];
+
+      spherePositions[vPtr3] = gridSpherePositions[s3];
+      spherePositions[vPtr3 + 1] = gridSpherePositions[s3 + 1];
+      spherePositions[vPtr3 + 2] = gridSpherePositions[s3 + 2];
+
+      flatPositions[vPtr3] = gridFlatPositions[s3];
+      flatPositions[vPtr3 + 1] = gridFlatPositions[s3 + 1];
+      flatPositions[vPtr3 + 2] = gridFlatPositions[s3 + 2];
+
+      sphereNormals[vPtr3] = gridSphereNormals[s3];
+      sphereNormals[vPtr3 + 1] = gridSphereNormals[s3 + 1];
+      sphereNormals[vPtr3 + 2] = gridSphereNormals[s3 + 2];
+
+      flatNormals[vPtr3] = gridFlatNormals[s3];
+      flatNormals[vPtr3 + 1] = gridFlatNormals[s3 + 1];
+      flatNormals[vPtr3 + 2] = gridFlatNormals[s3 + 2];
+
+      otherDirs1[vPtr3] = gridSphereNormals[o1_3];
+      otherDirs1[vPtr3 + 1] = gridSphereNormals[o1_3 + 1];
+      otherDirs1[vPtr3 + 2] = gridSphereNormals[o1_3 + 2];
+
+      otherDirs2[vPtr3] = gridSphereNormals[o2_3];
+      otherDirs2[vPtr3 + 1] = gridSphereNormals[o2_3 + 1];
+      otherDirs2[vPtr3 + 2] = gridSphereNormals[o2_3 + 2];
+
+      colors[vPtr3] = gridColors[s3];
+      colors[vPtr3 + 1] = gridColors[s3 + 1];
+      colors[vPtr3 + 2] = gridColors[s3 + 2];
+
+      uvs[vPtr2] = gridUvs[s2];
+      uvs[vPtr2 + 1] = gridUvs[s2 + 1];
+
+      vPtr3 += 3;
+      vPtr2 += 2;
+    }
+  };
 
   for (let r = 0; r < rings; r++) {
     for (let c = 0; c < segments; c++) {
@@ -219,14 +284,10 @@ export function buildPlanetMorphGeometry(params: IPlanetMorphGeometryParams): IP
       const bottomRight = bottomLeft + 1;
 
       // Triangle 1
-      indices[cursor++] = topLeft;
-      indices[cursor++] = bottomLeft;
-      indices[cursor++] = topRight;
+      addTriangle(topLeft, bottomLeft, topRight);
 
       // Triangle 2
-      indices[cursor++] = bottomLeft;
-      indices[cursor++] = bottomRight;
-      indices[cursor++] = topRight;
+      addTriangle(bottomLeft, bottomRight, topRight);
     }
   }
 
@@ -236,9 +297,10 @@ export function buildPlanetMorphGeometry(params: IPlanetMorphGeometryParams): IP
   geometry.setAttribute('aFlatPos', new BufferAttribute(flatPositions, 3));
   geometry.setAttribute('aSphereNorm', new BufferAttribute(sphereNormals, 3));
   geometry.setAttribute('aFlatNorm', new BufferAttribute(flatNormals, 3));
+  geometry.setAttribute('aOtherDir1', new BufferAttribute(otherDirs1, 3));
+  geometry.setAttribute('aOtherDir2', new BufferAttribute(otherDirs2, 3));
   geometry.setAttribute('color', new BufferAttribute(colors, 3));
   geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
-  geometry.setIndex(new BufferAttribute(indices, 1));
   geometry.computeBoundingSphere();
 
   // Expand bounding sphere so frustum culling does not clip during morph
@@ -248,7 +310,7 @@ export function buildPlanetMorphGeometry(params: IPlanetMorphGeometryParams): IP
 
   return {
     geometry,
-    vertexCount,
+    vertexCount: totalVertices,
     triangleCount,
     radius,
     heightScale,
