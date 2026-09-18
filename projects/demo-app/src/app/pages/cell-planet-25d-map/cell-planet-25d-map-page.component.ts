@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signa
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { BufferGeometry, ClampToEdgeWrapping, DataTexture, DoubleSide, Float32BufferAttribute, FloatType, LinearFilter, Mesh, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, RGBAFormat, SRGBColorSpace, UnsignedByteType, Vector3 } from 'three';
+import { BufferGeometry, CanvasTexture, ClampToEdgeWrapping, DataTexture, DoubleSide, Float32BufferAttribute, FloatType, LinearFilter, Mesh, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, RGBAFormat, Sprite, SpriteMaterial, SRGBColorSpace, UnsignedByteType, Vector3 } from 'three';
 import { EngineModule, EngineService, RaycastFocusContext, RaycastOrbitControlsComponent } from 'triangular-engine';
 import { simplifyIndexedGeometry } from 'triangular-engine/meshoptimizer';
 import {
@@ -16,6 +16,7 @@ import {
   buildPlanetGraphCore,
   buildPlanetSurfaceBake,
   buildPlanetTectonics,
+  computeFeatures,
   createPlanetSurfaceSampler,
   deriveIsLand,
 } from 'triangular-engine/worldgen';
@@ -58,7 +59,7 @@ import {
 } from './cell-planet-terrain-selection';
 import { CellPlanetSelectionPanelComponent } from './cell-planet-selection-panel.component';
 import { getTerrainHeightScaleM } from './cell-planet-terrain-scale';
-import { buildPlanarDebugRibbonGeometry } from './cell-planet-debug-geography';
+import { buildPlanarDebugRibbonGeometry, projectPlanarDebugPoint } from './cell-planet-debug-geography';
 
 type TerrainQuality = 'preview' | 'standard' | 'high' | 'ultra';
 type TerrainDisplayScale = 'planet' | 'legacy';
@@ -328,6 +329,52 @@ function makeHeightTexture(values: Float32Array, min: number, max: number, width
   texture.magFilter = LinearFilter;
   texture.wrapS = ClampToEdgeWrapping;
   texture.wrapT = ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function makeVolcanoIconTexture(): CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const context = canvas.getContext('2d');
+  if (context) {
+    context.translate(32, 32);
+    context.fillStyle = 'rgba(255, 224, 102, 0.24)';
+    context.beginPath();
+    context.arc(0, 0, 29, 0, Math.PI * 2);
+    context.fill();
+
+    context.fillStyle = '#2d2020';
+    context.beginPath();
+    context.moveTo(-24, 22);
+    context.lineTo(-7, -10);
+    context.lineTo(0, -19);
+    context.lineTo(8, -10);
+    context.lineTo(24, 22);
+    context.closePath();
+    context.fill();
+
+    context.fillStyle = '#e85d2a';
+    context.beginPath();
+    context.moveTo(-7, -10);
+    context.lineTo(0, -19);
+    context.lineTo(8, -10);
+    context.lineTo(3, 2);
+    context.lineTo(0, 11);
+    context.lineTo(-3, 2);
+    context.closePath();
+    context.fill();
+
+    context.fillStyle = '#fff1a8';
+    context.beginPath();
+    context.arc(0, -22, 3, 0, Math.PI * 2);
+    context.fill();
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.minFilter = LinearFilter;
+  texture.magFilter = LinearFilter;
   texture.needsUpdate = true;
   return texture;
 }
@@ -616,6 +663,10 @@ function makeColorTexture(
         <input type="checkbox" [checked]="showCoastlines()" (change)="onCoastlinesChange($event)" />
         <span>Debug coastlines</span>
       </label>
+      <label class="checkbox-row">
+        <input type="checkbox" [checked]="showVolcano()" (change)="onVolcanoChange($event)" />
+        <span>Debug volcano marker</span>
+      </label>
       <label>
         <span>Terrain relief: {{ terrainHeightScale().toFixed(1) }}
           ({{ displayScale() === 'planet' ? 'proportional to planet size' : 'legacy direct scale' }})</span>
@@ -737,6 +788,7 @@ export class CellPlanet25dMapPageComponent {
   readonly showOcean = signal(true);
   readonly showRivers = signal(true);
   readonly showCoastlines = signal(true);
+  readonly showVolcano = signal(true);
   /** Display-only relief scale. Canonical planet elevations remain unchanged. */
   readonly terrainHeightScale = signal(4);
   /** Experimental runtime-only triangle reduction ratio; canonical terrain is unchanged. */
@@ -765,6 +817,7 @@ export class CellPlanet25dMapPageComponent {
   private oceanMesh: Mesh<PlaneGeometry, MeshStandardMaterial> | undefined;
   private debugRiverMesh: Mesh<BufferGeometry, MeshBasicMaterial> | undefined;
   private debugCoastlineMesh: Mesh<BufferGeometry, MeshBasicMaterial> | undefined;
+  private volcanoMarker: Sprite | undefined;
   private readonly debugRiverMaterial = new MeshBasicMaterial({
     color: '#4fc3f7',
     transparent: true,
@@ -778,6 +831,13 @@ export class CellPlanet25dMapPageComponent {
     opacity: 0.95,
     depthWrite: false,
     side: DoubleSide,
+  });
+  private readonly volcanoMarkerTexture = makeVolcanoIconTexture();
+  private readonly volcanoMarkerMaterial = new SpriteMaterial({
+    map: this.volcanoMarkerTexture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
   });
   private simplifiedTerrainMesh: Mesh<BufferGeometry, MeshStandardMaterial> | undefined;
   private simplificationRevision = 0;
@@ -859,8 +919,11 @@ export class CellPlanet25dMapPageComponent {
       this.disposeSimplifiedTerrain();
       this.disposeOceanMesh();
       this.disposeDebugGeography();
+      this.disposeVolcanoMarker();
       this.debugRiverMaterial.dispose();
       this.debugCoastlineMaterial.dispose();
+      this.volcanoMarkerMaterial.dispose();
+      this.volcanoMarkerTexture.dispose();
       this.activeTextures?.height.dispose();
       this.activeTextures?.color.dispose();
     });
@@ -1037,6 +1100,12 @@ export class CellPlanet25dMapPageComponent {
     this.updateComparisonQueryParams();
   }
 
+  onVolcanoChange(event: Event): void {
+    this.showVolcano.set((event.target as HTMLInputElement).checked);
+    if (this.volcanoMarker) this.volcanoMarker.visible = this.showVolcano();
+    this.updateComparisonQueryParams();
+  }
+
   onTerrainHeightScaleInput(event: Event): void {
     const value = this.inputNumber(event);
     if (Number.isFinite(value) && value !== this.terrainHeightScale()) {
@@ -1145,6 +1214,7 @@ export class CellPlanet25dMapPageComponent {
       climate: profile.climate,
       biomes: profile.biomes,
     });
+    const features = computeFeatures(graph, tectonics, ecology.waterBodyKind, profile.features);
     const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology);
     const projection = MAP_PROJECTIONS[this.projectionType()];
     const quality = this.terrainQualityPresets[this.terrainQuality()];
@@ -1193,6 +1263,7 @@ export class CellPlanet25dMapPageComponent {
       maxY: maxHeightM,
     };
     this.rebuildDebugGeography(sampler, ecology, tectonics);
+    this.rebuildVolcanoMarker(graph, features, sampler);
     this.updateOceanSurface(bake, seaLevelElevation, profile.oceanSubstance);
     const colorTexture = makeColorTexture(
       bake,
@@ -1408,6 +1479,49 @@ export class CellPlanet25dMapPageComponent {
     }
   }
 
+  private rebuildVolcanoMarker(
+    graph: IPlanetGraphCore,
+    features: ReturnType<typeof computeFeatures>,
+    sampler: ReturnType<typeof createPlanetSurfaceSampler>,
+  ): void {
+    this.disposeVolcanoMarker();
+    const volcano = features.instances.find((instance) => instance.kind === 'volcano');
+    const cell = volcano ? graph.cells[volcano.siteCellId] : undefined;
+    if (!volcano || !cell) return;
+
+    const bounds = this.terrainMapBounds();
+    const direction = cell.center;
+    const projected = projectPlanarDebugPoint(direction, {
+      projection: MAP_PROJECTIONS[this.projectionType()],
+      mapWidth: bounds.maxX - bounds.minX,
+      mapHeight: bounds.maxZ - bounds.minZ,
+      minX: bounds.minX,
+      minZ: bounds.minZ,
+      maxX: bounds.maxX,
+      maxZ: bounds.maxZ,
+    });
+    const size = Math.max(2, (bounds.maxX - bounds.minX) * 0.0075);
+    const marker = new Sprite(this.volcanoMarkerMaterial);
+    marker.name = `cell-planet-25d-volcano-${volcano.siteCellId}`;
+    marker.position.set(
+      projected.x,
+      sampler.sample(direction).elevation * this.terrainHeightScaleM() + size * 0.04,
+      projected.z,
+    );
+    marker.scale.set(size, size, 1);
+    marker.center.set(0.5, 0.08);
+    marker.renderOrder = 8;
+    marker.visible = this.showVolcano();
+    this.engine.scene.add(marker);
+    this.volcanoMarker = marker;
+  }
+
+  private disposeVolcanoMarker(): void {
+    if (!this.volcanoMarker) return;
+    this.engine.scene.remove(this.volcanoMarker);
+    this.volcanoMarker = undefined;
+  }
+
   private updateOceanSurface(
     bake: IPlanetSurfaceBake,
     seaLevelElevation: number,
@@ -1557,6 +1671,8 @@ export class CellPlanet25dMapPageComponent {
     if (query.showRivers === 'true' || query.showRivers === '1') this.showRivers.set(true);
     if (query.showCoastlines === 'false' || query.showCoastlines === '0') this.showCoastlines.set(false);
     if (query.showCoastlines === 'true' || query.showCoastlines === '1') this.showCoastlines.set(true);
+    if (query.showVolcano === 'false' || query.showVolcano === '0') this.showVolcano.set(false);
+    if (query.showVolcano === 'true' || query.showVolcano === '1') this.showVolcano.set(true);
     const selectedCell = this.numberQuery(query.selectedCell);
     this.pendingSelectedCellId =
       selectedCell !== null && Number.isInteger(selectedCell) && selectedCell >= 0 ? selectedCell : null;
@@ -1590,6 +1706,7 @@ export class CellPlanet25dMapPageComponent {
       showOcean: this.showOcean(),
       showRivers: this.showRivers(),
       showCoastlines: this.showCoastlines(),
+      showVolcano: this.showVolcano(),
       selectedCell: this.selection()?.cellId ?? '',
       u0Bookmark: this.u0BookmarkId(),
     });

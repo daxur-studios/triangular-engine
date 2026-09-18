@@ -369,6 +369,12 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
   atan2(direction.z, direction.x)`); the previous X/Z-reversed inverse caused a horizontal
   rotation/shift of the overlays against the terrain. Library and demo builds pass; browser review
   is still required.
+- Latest 2.5D volcano marker packet (2026-09-18): the page now computes the current world's
+  generated feature instances and displays the first volcano as a lightweight billboard icon. It
+  uses the same planar projection and CPU surface sampler as the debug geography layer, has an
+  independent `Debug volcano marker` toggle/query value, and is intentionally presentation-only;
+  it does not yet carve or model a volcano-shaped cell. Demo build passes; browser review is still
+  required.
 - Next packet: user retest of 2.5D click selection and bookmark selection, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
   cold and warm timings, frame-time percentiles, draw/triangle counts, residency and memory fields.
 - First user review: U0 cell scale, close/strategic zoom range and baseline conditions.

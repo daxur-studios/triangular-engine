@@ -18,6 +18,16 @@ export interface IPlanarDebugRibbonOptions {
   readonly heightAt: (direction: IVec3) => number;
 }
 
+export interface IPlanarDebugMapPointOptions {
+  readonly projection: IMapProjection;
+  readonly mapWidth: number;
+  readonly mapHeight: number;
+  readonly minX: number;
+  readonly minZ: number;
+  readonly maxX: number;
+  readonly maxZ: number;
+}
+
 interface IProjectedPoint {
   readonly lon: number;
   readonly x: number;
@@ -30,7 +40,10 @@ function normalize(direction: IVec3): IVec3 {
   return { x: direction.x / length, y: direction.y / length, z: direction.z / length };
 }
 
-function projectPoint(direction: IVec3, options: IPlanarDebugRibbonOptions): IProjectedPoint {
+export function projectPlanarDebugPoint(
+  direction: IVec3,
+  options: IPlanarDebugMapPointOptions,
+): { readonly x: number; readonly z: number } {
   const unit = normalize(direction);
   // Keep this inverse paired with the 2.5D bake's directionAt convention:
   // x = cos(lat) * cos(lon), z = cos(lat) * sin(lon).
@@ -38,10 +51,19 @@ function projectPoint(direction: IVec3, options: IPlanarDebugRibbonOptions): IPr
   const lat = Math.asin(Math.max(-1, Math.min(1, unit.y)));
   const projected = options.projection.project(lon, lat, options.mapWidth, options.mapHeight);
   return {
-    lon,
     x: options.minX + (projected.x / options.mapWidth) * (options.maxX - options.minX),
     // The clipmap stores bake row 0 at world-Z min, so preserve its y-down map convention.
     z: options.minZ + (projected.y / options.mapHeight) * (options.maxZ - options.minZ),
+  };
+}
+
+function projectPoint(direction: IVec3, options: IPlanarDebugRibbonOptions): IProjectedPoint {
+  const unit = normalize(direction);
+  const projected = projectPlanarDebugPoint(unit, options);
+  return {
+    lon: Math.atan2(unit.z, unit.x),
+    x: projected.x,
+    z: projected.z,
     y: options.heightAt(unit) + options.clearance,
   };
 }
