@@ -1,6 +1,6 @@
 # 038 — Agent testing implementation plan
 
-Status: M1 implementation in progress; core browser slice and acceptance smoke pass.
+Status: M1 automated acceptance pass; visual approval and formal baselines remain open.
 Updated 2026-09-18. Design context and original reviews: [037](037_agent_driven_visual_and_performance_testing.md).
 
 ## Goal and progress
@@ -40,18 +40,43 @@ adapter waits for that event rather than a browser animation frame.
 The passing smoke test also attaches `m1-run-manifest.json` with fixture/run
 identity, command, browser/viewport, completed frame and capture metadata,
 error sources (`pageerror`, `console.error`, failed resources), and explicit
-`baseline: not-created`. Source/build hashes are recorded as unavailable until
-the runner gains a build digest step. Reports and test results are retained for
-review and may be cleaned after copying them to durable CI storage; no automatic
-baseline promotion is performed.
+`baseline: not-created`. It records a deterministic source hash and the
+development-server mode; a compiled build hash remains unavailable. Reports
+and test results are retained for review and may be cleaned after copying them
+to durable CI storage; no automatic baseline promotion is performed.
 
-The current implementation evidence is five passing Playwright specs, including
+The current implementation evidence is 12 passing Playwright tests, including
 30 rendered-frame pose stability, portrait framing, bounded injected failures,
-fresh-context capture equality and production adapter absence. Development and
-production demo builds plus the library build pass. M1 remains open until the
-structured run manifest/build identity, full failure-source collection and clean
-artifact retention policy are implemented and linked. This slice does not claim
-performance safety, aesthetic approval or completeness of feature coverage.
+fresh-context capture equality, defect fixtures and production adapter absence.
+Development and production demo builds plus the library build pass. M1 remains
+open for human visual approval and the remaining compiled-build identity and
+formal baseline decisions. This slice does not claim performance safety or
+completeness of feature coverage.
+
+The local visual slice now also passes a sixth Playwright spec that records a
+real canvas walkthrough to WebM. Open it with `npx playwright show-report
+playwright-report` (or `npm run test:scene:report`); the report contains the video without sending its frames to
+the agent. Run only this recording with `npm run test:scene:walkthrough`. The
+walkthrough hides the inspection panel, uses a 1280x720 viewport, enables
+canvas pointer input and pauses between focus, orbit and zoom states so the
+recorded motion is visible. Video is intentionally kept out of performance measurements. The
+adapter now receives an explicit optional camera-controller interface from the
+fixture host; it no longer depends on `camera.userData`, so future camera types
+can provide their own controller implementation without engine-wide test fields.
+
+### Automated verification update — 2026-09-18
+
+`npm run test:scene` passes all 12 Chromium tests, covering discovery, focus,
+30-frame stability, landscape and portrait framing, real pointer hit testing,
+orbit checkpoints, opt-in gating, repeatable PNG captures, runtime/readiness/
+duplicate/visual/stale/subscriber failure diagnostics, three defect-gallery
+fixtures, and the real-canvas walkthrough video. Repeatability now retains both
+PNG attachments and `m1-repeatability.json` with exact PNG byte-difference
+results. `npm run build:triangular-engine` and `npx ng build demo-app` pass.
+Generated defect captures are written under ignored `artifacts/scene-defects/`.
+The remaining M1 review action is a human visual check of the report captures;
+M1.4 remains open until build identity/diff retention is durable and formal
+baseline policy is deliberately accepted.
 
 ## Decisions settled for M1
 
@@ -239,12 +264,12 @@ images. Record known limitations and update the library agent guide with real co
 
 ## M1 completion checklist
 
-- [ ] **M1.1 Boot:** one documented command runs Chromium against the real test build and saves a nonblank capture; normal production has no usable adapter.
-- [ ] **M1.2 Address/control:** IDs survive reload; unknown/duplicate IDs fail clearly; focus and projection work for both object sizes and transformed groups.
-- [ ] **M1.3 Camera/input:** focus stays stable 30 rendered frames later; a 360-degree orbit fits the target at every checkpoint in 960x540 and 540x960 canvases; a real click hits the box.
+- [x] **M1.1 Boot:** one documented command runs Chromium against the real test build and saves a nonblank capture; normal production has no usable adapter.
+- [x] **M1.2 Address/control:** IDs survive reload; unknown/duplicate IDs fail clearly; focus and projection work for both object sizes and transformed groups.
+- [x] **M1.3 Camera/input:** focus stays stable 30 rendered frames later; a 360-degree orbit fits the target at every checkpoint in 960x540 and 540x960 canvases; a real click hits the box.
 - [ ] **M1.4 Evidence:** two same-build runs retain JSON, images and difference results; rerun/build identity is recorded; no accepted baseline is silently created.
-- [ ] **M1.5 Failure detection:** visual mutation, stale render, render error, asynchronous subscriber error and readiness timeout are diagnosed; teardown restores clean operation.
-- [ ] **M1.6 Handoff:** isolated browser tests and relevant unit tests pass; library/demo builds pass; authoring guide and measured limitations are linked here.
+- [x] **M1.5 Failure detection:** visual mutation, stale render, render error, asynchronous subscriber error and readiness timeout are diagnosed; teardown restores clean operation.
+- [x] **M1.6 Handoff:** isolated browser tests and relevant unit tests pass; library/demo builds pass; authoring guide and measured limitations are linked here.
 
 Run the narrow unit tests for changed engine helpers, then the browser acceptance
 suite and library/demo builds per repository rules. Verify browser specs are excluded

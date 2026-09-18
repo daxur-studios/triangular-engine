@@ -288,7 +288,6 @@ export class OrbitControlsComponent implements OnDestroy {
       this.#currentOrbit?.dispose();
       this.#currentOrbit = undefined;
       this.orbitControls.set(undefined);
-      delete this.internalCamera.userData['sceneTestOrbitControls'];
       this.#teardownViewportOverlay();
 
       if (!isActive) return;
@@ -300,9 +299,6 @@ export class OrbitControlsComponent implements OnDestroy {
       const orbit = new AdvancedOrbitControls(this.internalCamera, domElement);
       this.#makeOrbitControlsBetter(orbit);
       this.#currentOrbit = orbit;
-      // Opt-in test adapters can coordinate camera framing with the live
-      // controls without reaching into Angular component instances.
-      this.internalCamera.userData['sceneTestOrbitControls'] = orbit;
       this.orbitControls.set(orbit);
 
       this.switchCameraTrigger.update((v) => (v || 0) + 1);

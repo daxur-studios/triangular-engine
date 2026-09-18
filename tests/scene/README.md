@@ -15,3 +15,12 @@ PNG. Manifests explicitly record unavailable identity fields and are retained
 with the report; generated `playwright-report/` and `test-results/` may be
 deleted after evidence is copied to durable CI storage. It does not establish
 visual baselines or measure performance.
+
+The `local visual walkthrough` test enables Playwright video recording for that
+test only. After a run, open the report with `npm run test:scene:report`; the
+report contains the WebM recording alongside the test
+steps and captures. Video is visual evidence and is not used for performance
+measurements. Run only this recording with `npm run test:scene:walkthrough`;
+it hides the inspection panel, uses a 1280x720 viewport, enables canvas pointer
+input, and pauses between focus, orbit, and zoom states so the motion is visible
+in the WebM.

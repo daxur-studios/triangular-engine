@@ -26,6 +26,21 @@
         <button type="button" [class.active]="zeroScaleObject()" (click)="toggleZeroScale()">{{ zeroScaleObject() ? 'Zero scale on' : 'Zero scale' }}</button>
       </div>
 
+      <div class="test-controls">
+        <span>Visual defect fixture:</span>
+        <select [value]="visualDefect()" (change)="onDefectChange($event)">
+          <option value="none">None</option>
+          <option value="z-fighting">Z-Fighting</option>
+          <option value="inverted-normals">Inverted Normals</option>
+          <option value="terrain-gap">Terrain Gap</option>
+        </select>
+        @if (visualDefect() !== 'none') {
+          <button type="button" [class.active]="defectActive()" (click)="toggleDefectActive()">
+            {{ defectActive() ? 'State: Defect (Broken)' : 'State: Clean (Fixed)' }}
+          </button>
+        }
+      </div>
+
       @if (snapshot(); as report) {
         <div class="summary">
           <strong>{{ report.scene.totalObjectCount }} objects</strong><span>{{ report.scene.visibleObjectCount }} visible</span><span>{{ report.scene.meshCount }} meshes</span><span>{{ report.scene.lightCount }} lights</span><span>{{ report.scene.returnedObjectCount }} returned</span>

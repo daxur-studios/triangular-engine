@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
 type Bridge = {
   discover(): Promise<{ fixture: string; objects: Array<{ id: string }> }>;
@@ -12,6 +15,23 @@ type Bridge = {
   clearFailure(): Promise<unknown>;
   stability(target: string, frames?: number): Promise<{ frames: number; poses: Array<{ position: number[]; quaternion: number[] }> }>;
 };
+
+function sourceIdentity(): { sourceHash: string; files: string[] } {
+  const root = path.resolve(__dirname, '../../../');
+  const files = [
+    'package-lock.json',
+    'projects/demo-app/src/app/pages/scene-inspection-lab/scene-inspection-lab-page.component.ts',
+    'projects/demo-app/src/app/pages/scene-inspection-lab/scene-inspection-lab-page.component.html',
+    'projects/demo-app/src/app/testing/scene-test-adapter/scene-test-adapter.ts',
+    'projects/triangular-engine/src/lib/engine/components/object-3d/orbit-controls.component.ts',
+  ];
+  const hash = createHash('sha256');
+  for (const relativePath of files) {
+    hash.update(relativePath);
+    hash.update(fs.readFileSync(path.join(root, relativePath)));
+  }
+  return { sourceHash: hash.digest('hex'), files };
+}
 
 async function bridge(page: import('@playwright/test').Page): Promise<Bridge> {
   await page.evaluate(() => {
@@ -62,7 +82,8 @@ test('agent can discover, frame, orbit, click and capture the reference scene', 
   expect(capture.height).toBeGreaterThan(0);
   expect(capture.image.startsWith('data:image/png;base64,')).toBe(true);
   await testInfo.attach('m1-reference.png', { body: Buffer.from(capture.image.split(',')[1], 'base64'), contentType: 'image/png' });
-  await testInfo.attach('m1-run-manifest.json', { body: JSON.stringify({ schema: 'scene-test-run-v1', runId: testInfo.testId, fixture: found.fixture, command: 'npx playwright test -c playwright.config.ts', build: { sourceHash: 'unavailable', buildHash: 'unavailable' }, browser: { name: testInfo.project.name, backend: 'unavailable' }, viewport: { width: 960, height: 540, dpr: 1 }, frames: [capture.frame], captures: [{ checkpoint: 'm1-reference', width: capture.width, height: capture.height }], errors: failures, status: 'needs-review', baseline: 'not-created' }, null, 2), contentType: 'application/json' });
+  const identity = sourceIdentity();
+  await testInfo.attach('m1-run-manifest.json', { body: JSON.stringify({ schema: 'scene-test-run-v1', runId: testInfo.testId, fixture: found.fixture, command: 'npx playwright test -c playwright.config.ts', build: { mode: 'ng-serve-development', sourceHash: identity.sourceHash, buildHash: 'unavailable', sourceFiles: identity.files }, browser: { name: testInfo.project.name, backend: 'unavailable' }, viewport: { width: 960, height: 540, dpr: 1 }, frames: [capture.frame], captures: [{ checkpoint: 'm1-reference', width: capture.width, height: capture.height }], errors: failures, status: 'needs-review', baseline: 'not-created' }, null, 2), contentType: 'application/json' });
   expect((await scene.diagnostics()).errors).toEqual([]);
 });
 
@@ -83,6 +104,9 @@ test('agent IDs survive reload and failures produce bounded diagnostics', async 
   await scene.clearFailure();
   await scene.injectFailure('stale-render');
   await expect(scene.focus({ target: 'small-box' })).rejects.toThrow('TIMEOUT');
+  await scene.clearFailure();
+  await scene.injectFailure('runtime-error');
+  await expect(scene.focus({ target: 'small-box' })).rejects.toThrow('RUNTIME_ERROR');
   await scene.clearFailure();
   await scene.injectFailure('subscriber-error');
   await expect(scene.focus({ target: 'small-box' })).rejects.toThrow('RUNTIME_ERROR');
@@ -106,7 +130,7 @@ test.describe('portrait viewport', () => {
   });
 });
 
-test('same-build captures are repeatable and adapter is opt-in', async ({ page }) => {
+test('same-build captures are repeatable and adapter is opt-in', async ({ page }, testInfo) => {
   await page.goto('/scene-inspection-lab');
   await expect.poll(() => page.evaluate(() => Boolean((window as Window & { __sceneTest?: Bridge }).__sceneTest))).toBe(false);
   await page.goto('/scene-inspection-lab?sceneTest=agent-reference-v1');
@@ -116,6 +140,23 @@ test('same-build captures are repeatable and adapter is opt-in', async ({ page }
   const first = await scene.capture('repeat-1');
   const second = await scene.capture('repeat-2');
   expect(second.image).toBe(first.image);
+  const firstPng = Buffer.from(first.image.split(',')[1], 'base64');
+  const secondPng = Buffer.from(second.image.split(',')[1], 'base64');
+  await testInfo.attach('m1-repeat-1.png', { body: firstPng, contentType: 'image/png' });
+  await testInfo.attach('m1-repeat-2.png', { body: secondPng, contentType: 'image/png' });
+  await testInfo.attach('m1-repeatability.json', {
+    body: JSON.stringify({
+      schema: 'scene-test-repeatability-v1',
+      fixture: 'agent-reference-v1',
+      captures: ['repeat-1', 'repeat-2'],
+      dimensions: { width: first.width, height: first.height },
+      sourceHash: sourceIdentity().sourceHash,
+      comparison: { method: 'exact-png-byte-equality', differingBytes: 0, equal: first.image === second.image },
+      baseline: 'not-created',
+      status: 'needs-review',
+    }, null, 2),
+    contentType: 'application/json',
+  });
 });
 
 test('fresh browser contexts produce the same capture', async ({ browser }) => {

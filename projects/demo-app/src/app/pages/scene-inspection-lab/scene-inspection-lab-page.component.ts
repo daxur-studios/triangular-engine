@@ -6,6 +6,7 @@ import {
   inject,
   isDevMode,
   signal,
+  viewChild,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
@@ -15,9 +16,12 @@ import {
   Group,
   Mesh,
   MeshStandardMaterial,
+  PlaneGeometry,
   SphereGeometry,
+  Vector3,
 } from 'three';
-import { SceneTestAdapter, type SceneTestBridge, type SceneTestObject } from '../../testing/scene-test-adapter/scene-test-adapter';
+import { OrbitControlsComponent } from 'triangular-engine';
+import { SceneTestAdapter, type SceneTestBridge, type SceneTestCameraController, type SceneTestObject } from '../../testing/scene-test-adapter/scene-test-adapter';
 import {
   EngineModule,
   EngineService,
@@ -44,9 +48,12 @@ export class SceneInspectionLabPageComponent implements AfterViewInit {
   readonly duplicateNames = signal(false);
   readonly hiddenObject = signal(false);
   readonly zeroScaleObject = signal(false);
+  readonly visualDefect = signal<'none' | 'z-fighting' | 'inverted-normals' | 'terrain-gap'>('none');
+  readonly defectActive = signal(true);
   readonly snapshot = signal<SceneSnapshot | null>(null);
 
   private readonly sceneRoot = new Group();
+  private readonly defectGroup = new Group();
   private readonly serviceArmSecondary = new Group();
   private readonly hiddenHangar = new Group();
   private readonly diagnosticMarker = new Mesh(
@@ -56,6 +63,8 @@ export class SceneInspectionLabPageComponent implements AfterViewInit {
   private testAdapter?: SceneTestAdapter;
   private testObjects: SceneTestObject[] = [];
   private testClickHandler?: (event: PointerEvent) => void;
+  private readonly testFixtureEnabled = isDevMode() && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('sceneTest') === 'agent-reference-v1';
+  private readonly agentOrbitControls = viewChild(OrbitControlsComponent);
 
   constructor() {
     const previousBackground = this.engine.scene.background;
@@ -78,13 +87,24 @@ export class SceneInspectionLabPageComponent implements AfterViewInit {
     this.diagnosticMarker.position.set(8, 1.2, 0);
     this.sceneRoot.add(this.diagnosticMarker);
 
+    this.defectGroup.name = 'visual-defect-group';
+    this.sceneRoot.add(this.defectGroup);
+
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const defect = urlParams.get('defect') as 'z-fighting' | 'inverted-normals' | 'terrain-gap' | null;
+      if (defect && ['z-fighting', 'inverted-normals', 'terrain-gap'].includes(defect)) {
+        this.visualDefect.set(defect);
+        if (urlParams.get('defectActive') === 'false') {
+          this.defectActive.set(false);
+        }
+        this.updateDefectGeometry();
+      }
+    }
+
     const keyLight = new DirectionalLight('#ffffff', 2.5);
     keyLight.name = 'inspection-key-light';
     this.engine.scene.add(this.sceneRoot, keyLight);
-
-    if (isDevMode() && new URLSearchParams(window.location.search).get('sceneTest') === 'agent-reference-v1') {
-      this.installAgentReference();
-    }
 
     this.destroyRef.onDestroy(() => {
       this.engine.scene.remove(this.sceneRoot);
@@ -119,6 +139,9 @@ export class SceneInspectionLabPageComponent implements AfterViewInit {
       { id: 'large-sphere', label: 'Large sphere', object: sphere },
       { id: 'small-box', label: 'Small box', object: box },
       { id: 'transformed-box', label: 'Transformed box', object: transformedParent },
+      ...(this.visualDefect() !== 'none'
+        ? [{ id: 'defect-target', label: 'Visual defect target', object: this.defectGroup }]
+        : []),
     ];
     this.testAdapter = new SceneTestAdapter(
       this.engine.scene,
@@ -126,6 +149,7 @@ export class SceneInspectionLabPageComponent implements AfterViewInit {
       this.engine.renderer,
       this.testObjects,
       () => this.waitForRender(),
+      this.createCameraController(),
     );
     const testWindow = window as Window & { __sceneTest?: SceneTestBridge };
     testWindow.__sceneTest = this.testAdapter;
@@ -157,7 +181,24 @@ export class SceneInspectionLabPageComponent implements AfterViewInit {
   }
 
   ngAfterViewInit(): void {
+    if (this.testFixtureEnabled) this.installAgentReference();
     queueMicrotask(() => this.refreshSnapshot());
+  }
+
+  private createCameraController(): SceneTestCameraController {
+    return {
+      isEnabled: () => this.agentOrbitControls()?.orbitControls()?.enabled ?? true,
+      setEnabled: (enabled) => {
+        const controls = this.agentOrbitControls()?.orbitControls();
+        if (controls) controls.enabled = enabled;
+      },
+      setTarget: (target: Vector3) => {
+        this.agentOrbitControls()?.orbitControls()?.target.copy(target);
+      },
+      update: () => {
+        this.agentOrbitControls()?.orbitControls()?.update();
+      },
+    };
   }
 
   refreshSnapshot(): void {
@@ -201,6 +242,93 @@ export class SceneInspectionLabPageComponent implements AfterViewInit {
     this.zeroScaleObject.update((value) => !value);
     this.diagnosticMarker.scale.setScalar(this.zeroScaleObject() ? 0 : 1);
     this.refreshSnapshot();
+  }
+
+  setVisualDefect(defect: 'none' | 'z-fighting' | 'inverted-normals' | 'terrain-gap'): void {
+    this.visualDefect.set(defect);
+    this.updateDefectGeometry();
+    this.refreshSnapshot();
+  }
+
+  onDefectChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as 'none' | 'z-fighting' | 'inverted-normals' | 'terrain-gap';
+    this.setVisualDefect(value);
+  }
+
+  toggleDefectActive(): void {
+    this.defectActive.update((value) => !value);
+    this.updateDefectGeometry();
+    this.refreshSnapshot();
+  }
+
+  private updateDefectGeometry(): void {
+    this.defectGroup.clear();
+    const mode = this.visualDefect();
+    const isBroken = this.defectActive();
+    if (mode === 'none') return;
+
+    if (mode === 'z-fighting') {
+      const base = new Mesh(
+        new PlaneGeometry(4, 4),
+        new MeshStandardMaterial({ color: '#2563eb', roughness: 0.4 }),
+      );
+      base.name = 'z-fight-base';
+      base.rotation.x = -Math.PI / 2;
+
+      const overlay = new Mesh(
+        new PlaneGeometry(3, 3),
+        new MeshStandardMaterial({ color: '#dc2626', roughness: 0.4 }),
+      );
+      overlay.name = 'z-fight-overlay';
+      overlay.rotation.x = -Math.PI / 2;
+      overlay.position.y = isBroken ? 0.0 : 0.05;
+
+      this.defectGroup.position.set(0, 1.5, 4);
+      this.defectGroup.add(base, overlay);
+    } else if (mode === 'inverted-normals') {
+      const geom = new SphereGeometry(2.5, 32, 16);
+      if (isBroken) {
+        const normals = geom.attributes['normal'];
+        for (let i = 0; i < normals.count; i++) {
+          normals.setXYZ(i, -normals.getX(i), -normals.getY(i), -normals.getZ(i));
+        }
+        normals.needsUpdate = true;
+      }
+      const mat = new MeshStandardMaterial({
+        color: '#38bdf8',
+        roughness: 0.3,
+        metalness: 0.1,
+      });
+      const sphere = new Mesh(geom, mat);
+      sphere.name = 'normals-sphere';
+      this.defectGroup.position.set(0, 3, 4);
+      this.defectGroup.add(sphere);
+    } else if (mode === 'terrain-gap') {
+      const width = 3;
+      const height = 3;
+      const left = new Mesh(
+        new PlaneGeometry(width, height, 8, 8),
+        new MeshStandardMaterial({ color: '#15803d', roughness: 0.8 }),
+      );
+      left.name = 'terrain-left';
+      left.rotation.x = -Math.PI / 2;
+      left.position.set(-width / 2, 0, 0);
+
+      const right = new Mesh(
+        new PlaneGeometry(width, height, 8, 8),
+        new MeshStandardMaterial({ color: '#16a34a', roughness: 0.8 }),
+      );
+      right.name = 'terrain-right';
+      right.rotation.x = -Math.PI / 2;
+      if (isBroken) {
+        right.position.set(width / 2 + 0.35, -0.4, 0);
+      } else {
+        right.position.set(width / 2, 0, 0);
+      }
+
+      this.defectGroup.position.set(0, 1, 4);
+      this.defectGroup.add(left, right);
+    }
   }
 
   async copySnapshot(): Promise<void> {

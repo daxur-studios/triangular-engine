@@ -14,6 +14,18 @@ export interface SceneTestObject {
   object: Object3D;
 }
 
+/**
+ * Optional controller bridge for cameras that have a separate controller
+ * (OrbitControls, first-person controls, game cameras, etc.). The adapter can
+ * still operate on a plain Three.js camera when this is omitted.
+ */
+export interface SceneTestCameraController {
+  isEnabled(): boolean;
+  setEnabled(enabled: boolean): void;
+  setTarget(target: Vector3): void;
+  update(): void;
+}
+
 export interface SceneTestBridge {
   version: 'scene-test-v1';
   discover(): unknown;
@@ -47,6 +59,7 @@ export class SceneTestAdapter implements SceneTestBridge {
     private readonly renderer: SceneTestRenderer,
     private readonly objects: readonly SceneTestObject[],
     private readonly render: () => Promise<Frame>,
+    private readonly cameraController?: SceneTestCameraController,
   ) {
     this.initialCamera.position.copy(this.camera.position);
     this.initialCamera.target.set(0, 0, 0);
@@ -89,15 +102,22 @@ export class SceneTestAdapter implements SceneTestBridge {
       center.z + Math.cos(azimuth) * Math.cos(elevation) * distance,
     );
     this.camera.lookAt(center);
-    const controls = (this.camera.userData as { sceneTestOrbitControls?: { target: Vector3; update: () => void; enabled: boolean } }).sceneTestOrbitControls;
-    if (controls) {
-      controls.enabled = false;
-      controls.target.copy(center);
-      controls.update();
+    const previousControllerState = this.cameraController?.isEnabled();
+    if (this.cameraController) {
+      this.cameraController.setEnabled(false);
+      this.cameraController.setTarget(center);
+      this.cameraController.update();
     }
     (this.camera as PerspectiveCamera).updateProjectionMatrix();
-    const frame = await this.render();
-    return { target: request.target, pose: this.pose(), bounds: this.bounds(entry.object), frame };
+    try {
+      const frame = await this.render();
+      return { target: request.target, pose: this.pose(), bounds: this.bounds(entry.object), frame };
+    } finally {
+      if (this.cameraController && previousControllerState !== undefined) {
+        this.cameraController.setEnabled(previousControllerState);
+        this.cameraController.update();
+      }
+    }
   }
 
   async orbit(request: { target: string; checkpointsDeg?: number[]; elevationDeg?: number }): Promise<unknown> {
