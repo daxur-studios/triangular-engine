@@ -32,7 +32,9 @@ function normalize(direction: IVec3): IVec3 {
 
 function projectPoint(direction: IVec3, options: IPlanarDebugRibbonOptions): IProjectedPoint {
   const unit = normalize(direction);
-  const lon = Math.atan2(unit.x, unit.z);
+  // Keep this inverse paired with the 2.5D bake's directionAt convention:
+  // x = cos(lat) * cos(lon), z = cos(lat) * sin(lon).
+  const lon = Math.atan2(unit.z, unit.x);
   const lat = Math.asin(Math.max(-1, Math.min(1, unit.y)));
   const projected = options.projection.project(lon, lat, options.mapWidth, options.mapHeight);
   return {

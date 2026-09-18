@@ -15,6 +15,23 @@ describe('buildPlanarDebugRibbonGeometry', () => {
     heightAt: () => 1,
   };
 
+  it('uses the same longitude axis as the 2.5D bake', () => {
+    const geometry = buildPlanarDebugRibbonGeometry({
+      ...base,
+      paths: [[
+        { x: 1, y: 0, z: 0 },
+        { x: 0, y: 0, z: 1 },
+      ]],
+      closed: false,
+    });
+
+    const positions = geometry.getAttribute('position');
+    // (1, 0, 0) is lon 0 -> map X 0; (0, 0, 1) is lon pi/2 -> map X pi/2.
+    expect(positions.getX(0)).toBeCloseTo(0, 5);
+    expect(positions.getX(2)).toBeCloseTo(Math.PI / 2, 5);
+    geometry.dispose();
+  });
+
   it('closes coastline loops and preserves per-point widths', () => {
     const geometry = buildPlanarDebugRibbonGeometry({
       ...base,
@@ -36,8 +53,8 @@ describe('buildPlanarDebugRibbonGeometry', () => {
     const geometry = buildPlanarDebugRibbonGeometry({
       ...base,
       paths: [[
-        { x: Math.sin(Math.PI - 0.01), y: 0, z: Math.cos(Math.PI - 0.01) },
-        { x: -Math.sin(Math.PI - 0.01), y: 0, z: Math.cos(Math.PI - 0.01) },
+        { x: Math.cos(Math.PI - 0.01), y: 0, z: Math.sin(Math.PI - 0.01) },
+        { x: Math.cos(-Math.PI + 0.01), y: 0, z: Math.sin(-Math.PI + 0.01) },
       ]],
       closed: false,
     });

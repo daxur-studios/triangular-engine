@@ -364,8 +364,11 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
   projection and world bounds as the terrain, and rendered as lightweight physical-width ribbon
   overlays. Coastline loops close; antimeridian segments are omitted rather than stretched across
   the map. This is a location/reference layer only: it does not carve terrain or change water
-  ownership. A pure geometry spec covers closed loops and seam rejection. Library and demo builds
-  pass; browser review is still required.
+  ownership. A pure geometry spec covers closed loops and seam rejection. A follow-up alignment
+  correction keeps the direction-to-longitude inverse paired with the 2.5D bake (`lon =
+  atan2(direction.z, direction.x)`); the previous X/Z-reversed inverse caused a horizontal
+  rotation/shift of the overlays against the terrain. Library and demo builds pass; browser review
+  is still required.
 - Next packet: user retest of 2.5D click selection and bookmark selection, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
   cold and warm timings, frame-time percentiles, draw/triangle counts, residency and memory fields.
 - First user review: U0 cell scale, close/strategic zoom range and baseline conditions.
