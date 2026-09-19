@@ -17,52 +17,57 @@ decision, milestone gates and next action.
 
 ## Start here — compact delivery checklist
 
-**Destination:** a Civilization-style irregular-cell world, shown in 2.5D and on a sphere,
-with recognisable landforms inside cells, ridges across cells, edge-following carved rivers
-and detailed coasts, retaining their identity from close view to distant LOD.
+**Destination:** one cell-terrain renderer with dynamic LOD in flat 2.5D, globe and every
+intermediate morph state. Choose either today's blended landscape or a Civ-style landscape
+with recognisable landforms inside individual irregular cells. Both retain cross-cell ridges,
+edge-following rivers and coasts.
 
 **Active execution plan:** [035 — Unified cell terrain delivery](035_unified_cell_terrain_delivery.md).
-Its U0–U7 milestones are the current work order; P0–P5 below remain longer-term product goals.
-Existing prototypes are reusable evidence, not acceptance of these integrated milestones.
+Its **L0–L6 plan, revised 2026-09-19**, replaces the earlier U0–U7 execution order. P0–P5 below
+remain longer-term product goals. Existing work and user confirmations are retained; the
+new order brings integrated LOD and morph testing ahead of the remaining geology/water work.
 
 | Gate | What you should see and test | Status |
 | --- | --- | --- |
-| U0 — Repeatable baseline | Saved views, cell boundaries, scale reference and performance capture; confirm intended zoom range | In progress |
-| U1 — One world in every view | Switch 2D / 2.5D / globe/morph; same selected cell, ridge, river and coast | In progress |
-| U2 — Landforms inside cells | A mountain, volcano, mesa and canyon have real shape inside their cells; a ridge still spans cells | Not started |
-| U3 — Detailed waterways | Low-angle views show carved river bed/banks, connected mouth and detailed shore, following cell edges | Not started |
-| U4 — Planar LOD | Zoom and pan in 2.5D; shapes survive simplification, terrain stays covered, performance meets budget | Not started |
-| U5 — Spherical and morph LOD | Repeat on globe and through the morph slider, including intermediate states and cube-face edges/corners | Not started |
-| U6 — Readable unified map | Materials, water, selection and borders agree with terrain at close and strategic distances | Not started |
-| U7 — Accepted POC | Repeat the tour at agreed world sizes; stable performance and memory, all earlier gates still pass | Not started |
+| L0 — Shared inputs and baseline | Reuse the existing volcano/bookmarks; freeze world, terrain-style definition and comparison settings | Implemented; awaiting user test |
+| L1 — First integrated LOD | In the morph page, zoom toward the real volcano at 0%, 50%, 100%; see detail increase and compare simplification | Not started |
+| L2 — Global coverage and cost | Travel across patches, poles and the map cut while morphing; no gaps, bounded work, measured responsiveness | Not started |
+| L3 — All routes share it | 2.5D and globe use the same renderer endpoints; selection/settings survive navigation; moving projection tracking works | Not started |
+| L4 — Two terrain styles | Toggle blended / cell-features; review mountain/volcano/plain, then mesa, then canyon within their cells | Not started; existing volcano reused |
+| L5 — Actual rivers and shores | Inspect carved bed/banks/junction/mouth and shore detail with and without water, near/far and through morph | Not started; existing paths/carve reused |
+| L6 — Accepted integrated result | Repeat the tour for both styles and supported world sizes; stable performance/memory and documented game API | Not started |
 
-**Your review points:** a short visual review at each U gate. Agents first supply a reproducible
+**Your review points:** a short visual review at each L gate (and each L4/L5 feature packet).
+You serve the app and perform browser checks. Agents first supply a reproducible
 route/preset, what changed, what to look for, before/after performance and known issues.
 Screenshots establish appearance; a moving camera is required for LOD/streaming acceptance.
 “Build passes” does not mean “looks right.”
 
-**Current next action:** U0 — establish the fixture, camera bookmarks, measurements and numeric
-budgets. No U gate is accepted yet. Update this table and the handoff in 035 after each work
-session. The next agent resumes the earliest unfinished gate, without starting another POC.
+**Current next action:** L0's minimal versioned surface/style and worker contract, then L1's
+coarse/fine volcano integration in the existing morph route. Capture baseline alongside it.
+Do not restart completed camera/bookmark work or require all geological types before LOD.
+No L gate is accepted yet. Update this table and 035's active handoff after each work session.
 
 ## Current decision
 
-Keep one authoritative, deterministic cell world and surface sampler. Build both views from
-that source:
+Keep one authoritative, deterministic cell world with selectable surface strategies. Build
+the terrain views through a shared renderer:
 
 ```text
 seed/settings
   -> cell graph, plates, elevation, water, climate, biomes, rivers, coastlines, ridges
-  -> edited canonical surface
-  -> plane adapter or cube-sphere adapter
-  -> streamed terrain chunks with LOD
+  -> terrain style (blended / cell-features) + edited canonical surface
+  -> shared streamed terrain chunks with LOD
+  -> globe <-> projected-map display transform (including intermediate states)
   -> material, overlays, picking and game queries
 ```
 
 The cell graph remains the gameplay representation. Terrain chunks are rendering and physics
-representations and must not replace cell identity. A plane and a sphere may have different
-patch boundaries, LOD selection and projection math, but they must query the same world and
-surface definitions.
+representations and must not replace cell identity. A morphable patch retains compatible
+topology and canonical samples for both display shapes. The active plan tests a hierarchical
+longitude/latitude domain first, using the existing morph mesh conventions; pole/seam/error
+tests determine whether it is suitable before full migration. Cube-face reuse with explicit
+projection-cut handling is a fallback, not a second mandatory renderer.
 
 The current clipmap is a working 2.5D baseline. The Meshoptimizer/quadtree path is the shared
 candidate for large areas, local edits and the morphing sphere. It is not adopted for the actual
@@ -89,17 +94,19 @@ recognisable local landform without breaking the larger geography around it:
 The current implementation is not yet at that unified state. The 2D map and
 `cell-planet-lab` exercise per-cell feature tags, feature elevation and lava/profile display;
 `worldgen/core/features.ts` currently narrows those features to a single-cell elevation stamp.
-The analytic volcano/mesa/crater/canyon samplers still exist, but they are not yet a sub-cell
-mesh/detail evaluator; canyon is currently a geological-shape/biome concept, not a per-cell
-`Feature` instance. The 2.5D, fixed globe and morph pages now consume a shared demo-world snapshot
+The analytic volcano/mesa/crater/canyon samplers still exist. The shared surface now evaluates
+the volcano inside its cell; equivalent mesa/canyon integration remains outstanding, and
+canyon is currently a geological-shape/biome concept, not a per-cell `Feature` instance.
+The 2.5D, fixed globe and morph pages now consume a shared demo-world snapshot
 and feature-aware sampler, and the 2D canvas now consumes the same shared graph/tectonics/ecology/
 feature snapshot through an adapter while retaining its own raster generation. The
 Meshoptimizer/quadtree labs prove streaming, simplification and seams against synthetic fields,
-not against this cell world.
+not against this cell world. The current sampler already reuses the geology-lab volcano shape;
+the complete selectable Civ-style strategy and remaining landforms are outstanding.
 
 The separate implementations have not yet proved one shared snapshot, local geology,
 edge-following river/coast detail, planar and spherical adapters, and near/far LOD parity
-together. The U0–U7 plan in 035 now defines that combined proof and its review checkpoints.
+together. The active L0–L6 plan in 035 defines that combined proof and its review checkpoints.
 
 ## What is already usable
 
@@ -109,7 +116,7 @@ together. The U0–U7 plan in 035 now defines that combined proof and its review
 | 2D map | Cell map layers and cell-oriented geography | It is the reference view, not the terrain renderer |
 | 2.5D map | `030`: shared world, projection, relief and seabed, colour layers, selection, comparison links and current clipmap LOD | Current detailed terrain streaming path is not yet the real cell map renderer |
 | Fixed cell globe | `032`: shared sampler displacement, sphere seam/pole checks and material parity | Fixed resolution; not suitable as the final whole-planet renderer |
-| Planar chunk streaming | `031` C0/C1 labs: workers, parent fallback, mixed LOD edge handling, no-skirt seam path, batching/diagnostics | Uses fixture terrain; large-scale and real-cell acceptance remain |
+| Planar chunk streaming | `031` C0/C1 labs: parent fallback, mixed LOD edge handling, no-skirt seam path, diagnostics and shared renderer | The inspected planar generator builds on the main thread despite its async signature; uses fixture terrain; real-cell acceptance remains |
 | Sphere chunk streaming | `031` sphere lab: cube-face selection, workers, bounded selection, batching and material experiments | It needs real cell data and repeatable seam/performance acceptance |
 | Material foundation | `033`: shared semantic material evaluator, palette, macro variation and crisp procedural material prototype | Production tile streaming and full material integration remain |
 | Interaction | Planar cell picking exists; 2D/2.5D selection can be preserved | Sphere picking, terrain-accurate queries and game-facing API need consolidation |
@@ -117,7 +124,7 @@ together. The U0–U7 plan in 035 now defines that combined proof and its review
 ## Product milestones
 
 These P milestones describe the broader product destination, not the current execution queue.
-Run 035's U0–U7 first. Physics, building pads, unit movement and production API consolidation
+Run 035's active L0–L6 first. Physics, building pads, unit movement and production API consolidation
 remain follow-on work unless needed to close a specific U gate.
 
 ### P0 — Freeze the shared world contract
@@ -208,15 +215,14 @@ consumer can load a world, render a view, select a cell, query height and apply 
 
 ## Recommended order from here
 
-1. Complete U0, then carry the shared world into the existing morph page while adding the first
-   local landform. Use bounded reference meshes to judge the shape before renderer
-   simplification.
-2. Complete U3, then carry the accepted surface through Meshoptimizer/quadtree LOD in the plane,
-   sphere and every supported intermediate morph state, retaining the fixed morph mesh for
-   comparison.
-3. Complete U6–U7: integrated material/selection readability and measured acceptance.
-4. Resume remaining P1/P3/P5 gameplay, physics, edits and public API work. U5 supplies evidence
-   for P4, but does not by itself accept P4's edit, physics or full production requirements.
+1. L0–L1: reuse the real cell world and volcano; prove two LOD bands in the morph route at
+   globe, halfway and flat. Retain fixed geometry for comparison.
+2. L2–L3: complete coverage, morph-aware selection, seams and resource limits; use the same
+   renderer in the standalone 2.5D/globe routes and restore supported moving projection tracking.
+3. L4–L5: accept the two terrain styles, expand local geology one feature at a time, then
+   detailed carved waterways and shores on the working LOD path.
+4. L6: measured acceptance and game-facing documentation. Resume remaining P-level physics,
+   edits and production work afterwards; L acceptance does not imply production physics acceptance.
 
 Do not treat another isolated demo feature as progress unless it closes one of these gates or
 produces a measured result that changes the renderer decision.
@@ -235,34 +241,20 @@ produces a measured result that changes the renderer decision.
 
 ## Current next action — unified cell-terrain POC
 
-Execute this scope incrementally through [035](035_unified_cell_terrain_delivery.md), starting
-at U0. This section describes the combined destination; it is not one session-sized task.
-
-Build one bounded vertical slice that is consumed by both the planar and spherical adapters,
-rather than adding another independent terrain demo. The fixture should contain an irregular
-cell boundary with a coast, a river on/near that edge, a ridge crossing several cells, and
-individual cells containing a volcano, mesa and canyon. It should use one immutable snapshot with
-one canonical sampler and one versioned detail definition, then exercise:
-
-1. planar `TerrainSurface` generation through the Meshoptimizer/quadtree path;
-2. spherical cube-face chunk generation through the corresponding sphere path; and
-3. the existing 2D map as the cell-identity/reference view.
-
-The first pass only needs one close-detail band and one coarse band. At both bands, assert that
-the same direction returns the same cell id, sea datum, feature ownership, river/coast topology
-and canonical height within the documented approximation bound. Near detail must show a real
-river channel/bank and local geology inside the owning cell; far detail may simplify it but must
-retain the ridge/coast/river edge and feature silhouette. Record seam, feature-retention,
-residency, build-latency, draw-call, frame-time and memory evidence in 031, and record the map
-selection/comparison result in 030. Keep the current clipmap and fixed globe available as
-comparison controls until the unified slice passes.
-
-Do not add caching, more geological types or another standalone POC before this slice has passed
-the no-gap, cross-view parity and close-detail checks. If the current single-cell feature stamp
-cannot provide the required close shape, promote the smallest framework-free sub-cell feature
-contract from runbook 010 and make it part of the shared sampler before tuning renderer LOD.
+Follow L0, then L1 in [035](035_unified_cell_terrain_delivery.md). The first new visible
+deliverable is coarse/fine terrain around the existing volcano in the morph page at 0%, 50%
+and 100%, sampled from the real cell world. It does not require mesas, canyons or finished
+rivers. Preserve the existing renderer comparison and canvas reference. Reuse `TerrainSurface`
+and its compatible-edge machinery, testing both displayed shapes before expanding coverage.
+Record actual seam, responsiveness and feature-retention evidence, then proceed through L2–L6.
 
 ## Progress log
+
+- **2026-09-19 — LOD-first delivery revision:** replaced the U execution order with L0–L6
+  in 035. Both blended and Civ-style terrain are explicit supported strategies. Morph enters
+  the first LOD integration slice; remaining geology and river detail follow working streamed
+  terrain. Corrected the planar-lab worker claim after source inspection. Existing user
+  confirmations and older U history remain recorded; no L gate is marked accepted.
 
 - **2026-09-16 — Roadmap consolidated:** added this document after reviewing the current map,
   terrain, globe and material runbooks. The project now has explicit Civ-map and surface-game

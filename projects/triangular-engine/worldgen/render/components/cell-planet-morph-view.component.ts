@@ -11,7 +11,9 @@ import {
 import {
   BufferAttribute,
   BufferGeometry,
+  Color,
   LineSegments,
+  Material,
   Mesh,
   Raycaster,
   Vector2,
@@ -43,10 +45,15 @@ import {
 } from '../planet-morph-geometry';
 import { IProjectionBasis } from '../antimeridian-seam';
 import {
+  computeSunDirectionFromTime,
+  createDefaultPlanetDayNightUniforms,
   createPlanetBorderMorphMaterial,
   createPlanetCellOverlayMaterial,
   createPlanetMorphMaterial,
+  enablePlanetDayNightLighting,
+  enablePlanetMorphProjection,
   IDynamicProjectionUniforms,
+  IPlanetDayNightUniforms,
 } from '../planet-morph-material';
 
 export type ProjectionTrackingMode = 'none' | 'meridian' | 'oblique';
@@ -122,6 +129,35 @@ export class CellPlanetMorphViewComponent
   readonly adaptiveReliefSubdivision = input<boolean>(true);
   readonly reliefThreshold = input<number>(0.008);
 
+  // Custom Material inputs (allowing consumers to provide their own materials)
+  readonly customTerrainMaterial = input<
+    | Material
+    | ((
+        uniforms: IDynamicProjectionUniforms,
+        dayNightUniforms: IPlanetDayNightUniforms,
+      ) => Material)
+    | null
+  >(null);
+  readonly customOceanMaterial = input<
+    | Material
+    | ((
+        uniforms: IDynamicProjectionUniforms,
+        dayNightUniforms: IPlanetDayNightUniforms,
+      ) => Material)
+    | null
+  >(null);
+
+  // Day / Night Cycle inputs
+  readonly dayNightEnabled = input<boolean>(false);
+  readonly sunDirection = input<IVec3 | Vector3 | null>(null);
+  readonly timeOfDay = input<number | null>(null); // hours [0..24), e.g. 12 = noon
+  readonly axialTiltDeg = input<number>(23.44);
+  readonly seasonPhase = input<number>(0.25); // 0.25 = equinox, 0.5 = summer solstice
+  readonly nightAmbient = input<number>(0.2);
+  readonly twilightWidth = input<number>(0.12);
+  readonly sunsetGlow = input<number>(0.5);
+  readonly nightColor = input<string | Vector3>('#18243e');
+
   // ==========================================================================
   // Outputs
   // ==========================================================================
@@ -139,6 +175,7 @@ export class CellPlanetMorphViewComponent
   // Internal State & Public Tactical Handle
   // ==========================================================================
   readonly tacticalOverlay = signal<CellTacticalOverlay | null>(null);
+  readonly effectiveSunDirection = signal<Vector3>(new Vector3(0, 0, 1));
 
   private terrainGeometryData?: IPlanetMorphGeometryData;
   private oceanGeometryData?: IPlanetMorphGeometryData;
@@ -164,6 +201,9 @@ export class CellPlanetMorphViewComponent
     uProjectionType: { value: 1 },
   };
 
+  private readonly dayNightUniforms: IPlanetDayNightUniforms =
+    createDefaultPlanetDayNightUniforms();
+
   constructor() {
     super();
 
@@ -179,9 +219,56 @@ export class CellPlanetMorphViewComponent
       this.latitudeRings();
       this.resolveColor();
       this.oceanSubstance();
+      this.customTerrainMaterial();
+      this.customOceanMaterial();
 
       untracked(() => {
         this.rebuildMeshes();
+      });
+    });
+
+    // Update Day/Night GPU uniforms when solar parameters change
+    effect(() => {
+      const enabled = this.dayNightEnabled();
+      const explicitDir = this.sunDirection();
+      const time = this.timeOfDay();
+      const tilt = this.axialTiltDeg();
+      const season = this.seasonPhase();
+      const ambient = this.nightAmbient();
+      const twilight = this.twilightWidth();
+      const glow = this.sunsetGlow();
+      const nc = this.nightColor();
+
+      untracked(() => {
+        let sunDir: Vector3;
+        if (explicitDir) {
+          sunDir =
+            explicitDir instanceof Vector3
+              ? explicitDir.clone().normalize()
+              : new Vector3(
+                  explicitDir.x,
+                  explicitDir.y,
+                  explicitDir.z,
+                ).normalize();
+        } else if (time !== null && time !== undefined) {
+          sunDir = computeSunDirectionFromTime(time, tilt, season);
+        } else {
+          sunDir = new Vector3(0, 0, 1);
+        }
+
+        this.effectiveSunDirection.set(sunDir);
+        this.dayNightUniforms.uDayNightEnabled.value = enabled ? 1 : 0;
+        this.dayNightUniforms.uSunDirection.value.copy(sunDir);
+        this.dayNightUniforms.uNightAmbient.value = ambient;
+        this.dayNightUniforms.uTwilightWidth.value = twilight;
+        this.dayNightUniforms.uSunsetGlow.value = glow;
+
+        if (nc instanceof Vector3) {
+          this.dayNightUniforms.uNightColor.value.copy(nc);
+        } else {
+          const c = new Color(nc);
+          this.dayNightUniforms.uNightColor.value.set(c.r, c.g, c.b);
+        }
       });
     });
 
@@ -556,10 +643,23 @@ export class CellPlanetMorphViewComponent
       Math.min(1, this.morphProgress()),
     );
 
-    const { material: terrainMat } = createPlanetMorphMaterial(
-      { vertexColors: true, roughness: 0.9, metalness: 0.05 },
-      this.dynamicUniforms,
-    );
+    // Terrain material
+    let terrainMat: Material;
+    const customTerrain = this.customTerrainMaterial();
+    if (typeof customTerrain === 'function') {
+      terrainMat = customTerrain(this.dynamicUniforms, this.dayNightUniforms);
+    } else if (customTerrain instanceof Material) {
+      terrainMat = customTerrain;
+      enablePlanetMorphProjection(terrainMat, this.dynamicUniforms);
+      enablePlanetDayNightLighting(terrainMat, this.dayNightUniforms);
+    } else {
+      const created = createPlanetMorphMaterial(
+        { vertexColors: true, roughness: 0.9, metalness: 0.05 },
+        this.dynamicUniforms,
+        this.dayNightUniforms,
+      );
+      terrainMat = created.material;
+    }
     this.terrainMesh = new Mesh(this.terrainGeometryData.geometry, terrainMat);
     this.terrainMesh.name = 'morph-terrain';
     this.terrainMesh.renderOrder = 0;
@@ -574,17 +674,29 @@ export class CellPlanetMorphViewComponent
       this.longitudeSegments(),
       this.latitudeRings(),
     );
-    const { material: oceanMat } = createPlanetMorphMaterial(
-      {
-        color: oceanSubstance === 'lava' ? '#e04010' : '#146299',
-        transparent: true,
-        opacity: 0.68,
-        roughness: 0.12,
-        metalness: 0.1,
-        depthWrite: false,
-      },
-      this.dynamicUniforms,
-    );
+    let oceanMat: Material;
+    const customOcean = this.customOceanMaterial();
+    if (typeof customOcean === 'function') {
+      oceanMat = customOcean(this.dynamicUniforms, this.dayNightUniforms);
+    } else if (customOcean instanceof Material) {
+      oceanMat = customOcean;
+      enablePlanetMorphProjection(oceanMat, this.dynamicUniforms);
+      enablePlanetDayNightLighting(oceanMat, this.dayNightUniforms);
+    } else {
+      const created = createPlanetMorphMaterial(
+        {
+          color: oceanSubstance === 'lava' ? '#e04010' : '#146299',
+          transparent: true,
+          opacity: 0.68,
+          roughness: 0.12,
+          metalness: 0.1,
+          depthWrite: false,
+        },
+        this.dynamicUniforms,
+        this.dayNightUniforms,
+      );
+      oceanMat = created.material;
+    }
     this.oceanMesh = new Mesh(this.oceanGeometryData.geometry, oceanMat);
     this.oceanMesh.name = 'morph-ocean';
     this.oceanMesh.visible = this.showOcean();

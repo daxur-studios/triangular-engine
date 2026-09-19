@@ -38,6 +38,7 @@ import {
 import {
   biomeColor,
   CellPlanetMorphViewComponent,
+  computeSunDirectionFromTime,
   elevationColor,
   lavaOceanColor,
   MAP_PROJECTION_KINDS,
@@ -50,6 +51,13 @@ import {
 } from 'triangular-engine/worldgen/render';
 import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
 import { CellPlanetWorldService } from '../cell-planet-world.service';
+import {
+  CELL_PLANET_TERRAIN_STYLE_KINDS,
+  CELL_PLANET_TERRAIN_STYLE_LABELS,
+  CellPlanetTerrainStyle,
+  isCellPlanetTerrainStyle,
+  selectCellPlanetSurfaceSampler,
+} from '../cell-planet-terrain-style';
 import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
 
 const OCEAN_COLOR = 'hsl(210, 55%, 22%)';
@@ -110,6 +118,9 @@ export class CellPlanetMorphSpikePageComponent {
   readonly relaxationIterations = signal<number>(CELL_PLANET_U0_FIXTURE.relaxationIterations);
   readonly worldProfileKind = signal<WorldProfileKind>(CELL_PLANET_U0_FIXTURE.worldProfile);
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
+  readonly terrainStyle = signal<CellPlanetTerrainStyle>('blended');
+  readonly terrainStyleKinds = CELL_PLANET_TERRAIN_STYLE_KINDS;
+  readonly terrainStyleLabels = CELL_PLANET_TERRAIN_STYLE_LABELS;
   readonly fillMode = signal<CellPlanetMorphFillMode>('biome');
   readonly fillModes: CellPlanetMorphFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture'];
   readonly projectionKind = signal<MapProjectionKind>('equalEarth');
@@ -149,9 +160,49 @@ export class CellPlanetMorphSpikePageComponent {
     seed: this.seed(),
     relaxation: this.relaxationIterations(),
     worldProfile: this.worldProfileKind(),
+    terrainStyle: this.terrainStyle(),
     projection: this.projectionKind(),
     fillMode: this.fillMode(),
   }));
+
+  // Day / Night Cycle signals
+  readonly dayNightEnabled = signal(false);
+  readonly timeOfDay = signal(12.0); // hours [0..24), starts at noon
+  readonly isPlayingDayNight = signal(false);
+  readonly dayNightSpeed = signal(1.0); // 1x = 30s per 24h day
+  readonly axialTiltDeg = signal(23.44);
+  readonly seasonPreset = signal<'equinox' | 'summer' | 'winter'>('equinox');
+  readonly seasonPhase = computed(() => {
+    switch (this.seasonPreset()) {
+      case 'summer':
+        return 0.5;
+      case 'winter':
+        return 0.0;
+      case 'equinox':
+      default:
+        return 0.25;
+    }
+  });
+  readonly nightAmbient = signal(0.2);
+
+  readonly sunLightPosition = computed<[number, number, number]>(() => {
+    if (!this.dayNightEnabled()) {
+      return [5, 8, 6];
+    }
+    const dir = computeSunDirectionFromTime(
+      this.timeOfDay(),
+      this.axialTiltDeg(),
+      this.seasonPhase(),
+    );
+    const morph = this.morphProgress();
+    // In 3D globe mode (morph=0): directional light shines from the sun position * 10
+    // In 2.5D flat mode (morph=1): transitions to frontal studio light [5, 8, 6]
+    // so flat map has even illumination while shader renders the day/night terminator wave.
+    const lx = dir.x * 10 * (1 - morph) + 5 * morph;
+    const ly = dir.y * 10 * (1 - morph) + 8 * morph;
+    const lz = dir.z * 10 * (1 - morph) + 6 * morph;
+    return [lx, ly, lz];
+  });
 
   // Stats
   readonly triangles = computed(() => MORPH_SEGMENTS * MORPH_RINGS * 2 * 2);
@@ -234,6 +285,12 @@ export class CellPlanetMorphSpikePageComponent {
       const profileParam = params.get('worldProfile');
       if (profileParam && this.worldProfileKinds.includes(profileParam as WorldProfileKind)) {
         this.worldProfileKind.set(profileParam as WorldProfileKind);
+      }
+
+      const terrainStyleParam = params.get('terrainStyle');
+      const terrainStyle = terrainStyleParam ?? undefined;
+      if (isCellPlanetTerrainStyle(terrainStyle)) {
+        this.terrainStyle.set(terrainStyle);
       }
 
       const fillParam = params.get('fillMode');
@@ -320,6 +377,13 @@ export class CellPlanetMorphSpikePageComponent {
     }
   }
 
+  onTerrainStyleChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    if (!isCellPlanetTerrainStyle(value) || value === this.terrainStyle()) return;
+    this.terrainStyle.set(value);
+    this.rebuildWorld();
+  }
+
   onAutoPatrolChange(event: Event): void {
     this.autoPatrol.set((event.target as HTMLInputElement).checked);
   }
@@ -333,6 +397,57 @@ export class CellPlanetMorphSpikePageComponent {
     this.morphView()?.updateTracking(focused ? focused.direction : null, val);
     this.updateUnitsPositions();
     this.updateCameraForProgress(this.morphProgress());
+  }
+
+  // Day / Night Cycle handlers
+  onDayNightToggle(event: Event): void {
+    this.dayNightEnabled.set((event.target as HTMLInputElement).checked);
+  }
+
+  togglePlayDayNight(): void {
+    this.isPlayingDayNight.update((p) => !p);
+  }
+
+  onTimeOfDayInput(event: Event): void {
+    const val = (event.target as HTMLInputElement).valueAsNumber;
+    if (Number.isFinite(val)) {
+      this.timeOfDay.set(val);
+    }
+  }
+
+  onDayNightSpeedChange(event: Event): void {
+    const val = parseFloat((event.target as HTMLSelectElement).value);
+    if (Number.isFinite(val)) {
+      this.dayNightSpeed.set(val);
+    }
+  }
+
+  onSeasonPresetChange(event: Event): void {
+    const val = (event.target as HTMLSelectElement).value as
+      | 'equinox'
+      | 'summer'
+      | 'winter';
+    this.seasonPreset.set(val);
+  }
+
+  onNightAmbientInput(event: Event): void {
+    const val = (event.target as HTMLInputElement).valueAsNumber;
+    if (Number.isFinite(val)) {
+      this.nightAmbient.set(val);
+    }
+  }
+
+  formatTimeOfDay(hours: number): string {
+    const h = Math.floor(hours) % 24;
+    const m = Math.floor((hours - Math.floor(hours)) * 60);
+    const hh = h.toString().padStart(2, '0');
+    const mm = m.toString().padStart(2, '0');
+    let label = '';
+    if (h >= 5 && h < 8) label = 'Dawn';
+    else if (h >= 8 && h < 17) label = 'Day';
+    else if (h >= 17 && h < 20) label = 'Dusk';
+    else label = 'Night';
+    return `${hh}:${mm} (${label})`;
   }
 
   selectFocus(target: 'overview' | string): void {
@@ -495,7 +610,11 @@ export class CellPlanetMorphSpikePageComponent {
     this.seaLevelElevation = seaLevelElevation;
     this.elevationMin = eMin;
     this.elevationMax = eMax;
-    this.sampler = this.showVolcanoTerrain() ? world.featureSampler : world.baseSampler;
+    this.sampler = selectCellPlanetSurfaceSampler(
+      world,
+      this.terrainStyle(),
+      this.showVolcanoTerrain(),
+    );
 
     this.surfaceSampler.set(this.sampler);
     this.spawnGameUnits();
@@ -771,6 +890,13 @@ export class CellPlanetMorphSpikePageComponent {
     const tick = (now: number) => {
       const deltaSec = Math.min(0.1, (now - lastTime) / 1000);
       lastTime = now;
+
+      // Advance time of day when playing Day/Night cycle
+      if (this.dayNightEnabled() && this.isPlayingDayNight()) {
+        const hoursPerSec = (24 / 30) * this.dayNightSpeed();
+        const nextTime = (this.timeOfDay() + deltaSec * hoursPerSec) % 24;
+        this.timeOfDay.set(nextTime);
+      }
 
       if (this.autoPatrol() && this.units.length > 0) {
         for (const unit of this.units) {

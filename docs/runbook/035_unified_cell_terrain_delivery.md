@@ -1,6 +1,335 @@
 # 035 — Unified cell terrain delivery
 
-## Purpose and authority
+## Active delivery plan — revised 2026-09-19
+
+This section supersedes the U0–U7 execution order below. The older plan and session log are
+retained as history, not another queue. [034](034_cell_planet_map_roadmap.md) contains the
+compact checklist; this document owns implementation detail and the current handoff.
+New gates use **L0–L6** so old U-gate evidence cannot be mistaken for new acceptance.
+
+**Immediate objective:** camera-driven terrain detail in the real cell-planet views, with
+one renderer that supports a flat map, a globe and every intermediate morph value. Deliver
+this before expanding the geology catalogue or polishing debug river ribbons.
+
+**Terrain style is independently selectable:** preserve the current blended landscape and
+add a Civ-style landscape whose mountain/volcano/mesa/canyon is shaped inside its owning cell.
+Both styles use the same gameplay graph, renderer, LOD machinery and projection controls.
+
+### Why the order changed
+
+The earlier plan put all local landforms and detailed waterways before LOD integration.
+That delayed the capability the user wants to test. Building separate planar and spherical
+renderers before considering morph also risks another integration rewrite. Prove a small
+morph-capable LOD slice first, then expand coverage and content on that same path.
+
+Morph adds real requirements: moving projection seams, deformed bounds, screen-space error,
+normals and picking must match the current displayed surface. Matching endpoint positions
+alone does not solve these. Test them early rather than treating morph as a final shader swap.
+
+### Verified starting point
+
+Source inspection on 2026-09-19; performance statements below are user reports unless measured.
+
+| Component | What exists | What is still missing |
+| --- | --- | --- |
+| Shared cell world | `CellPlanetWorldService` caches graph, tectonics, ecology, features and base/feature samplers; the four views consume the snapshot | Serializable worker identity, explicit terrain strategy and shared view configuration |
+| 2.5D map | Camera-driven clipmap mesh LOD sampling a bounded height bake; Standard bake is 256 × 128, Ultra 1024 × 512 | Sampling additional canonical detail when zooming; the simplification slider is a static baked-mesh preview, not streaming LOD |
+| Fixed cell globe | Shared sampler at fixed mesh resolution | Camera-driven local refinement |
+| Morph view | Fixed 128 × 64 defaults, shared sampler, GPU reprojection, picking and tracking support | Adaptive patch topology, morph-aware selection/bounds and proven seam coverage |
+| Planar streaming lab | Shared `TerrainSurface`, mixed-edge sampling, Meshoptimizer, asynchronous generator; user reports fast and gap-free | Its generator currently samples/builds on the main thread, not in a Worker; real cell-world integration |
+| Sphere streaming lab | Same `TerrainSurface` infrastructure with sphere-specific selector/domain and a Worker | User reports holes and lower performance; those are unresolved acceptance failures |
+| Volcano | `planet-surface.ts` reuses `sampleVolcano` in a local tangent frame | Complete per-cell strategy, polygon containment checks and fine-LOD retention |
+
+Do not label the whole project “no LOD”, call the labs different complete engines, or call an
+async function worker-backed. Reuse the shared terrain machinery; inspect current code because
+031 records scheduler experiments and rollbacks, and historical status can lag implementation.
+
+### Architecture and constraints
+
+```text
+immutable cell world + feature/path definitions + edit revision
+                 |
+       terrain style: blended | cell-features
+                 |
+       canonical surface(direction) + semantic metadata
+                 |
+       shared chunk sampling / workers / simplification / residency
+                 |
+       display transform: globe <-> projected map (0..1)
+                 |
+       shared renderer, picking, water and reference overlays
+```
+
+1. **World and surface:** retain `IPlanetSurfaceSampler` as the compatibility boundary and
+   adapt it to terrain's `ITerrainField`. Compile a serializable style/settings definition
+   once per revision; workers reconstruct it once, not for every patch. Camera/LOD must not
+   change canonical height, feature ownership, river routing or cell IDs. Sampling density
+   approximates that surface; it does not generate a new landscape at every level.
+2. **Two styles:** `blended` reproduces the existing landscape, including the existing optional
+   volcano stamp. `cell-features` controls cell interiors and shared transitions explicitly;
+   do not implement it by adding a peak on top of the same broad mountain hump. Preserve
+   continent/sea structure, define a local base/platform, local feature footprint and edge
+   transition, and apply shared ridge corridors and reserved rivers in a documented order.
+   Broad mountain blending becomes a style setting. Switching style must not regenerate the
+   graph or feature assignments. A cell-owned feature does not require one draw call per cell.
+3. **Polygon ownership:** calculate support from actual polygon edges/inside tests. The
+   current nearest-corner radius heuristic is not proof of containment in an irregular cell.
+   Interior features fade before shared boundaries; intentional cross-cell ridges use a
+   shared path. True overhangs/caves are outside this height-surface POC.
+4. **Shared display renderer:** make flat and globe modes endpoints of the morph-capable
+   renderer. Existing routes become thin hosts with their cameras and relevant controls.
+   Keep the current clipmap/fixed globe/fixed morph available for A/B comparison until accepted.
+   Keep canvas as the 2D identity reference. A route switch may remount the renderer but must
+   retain the world key, selected cell, terrain style, quality and projection.
+5. **Patch topology decision:** first try a hierarchical longitude/latitude domain aligned
+   with the existing morph mesh and a fixed map cut. It shares samples across both shapes and
+   makes the static cut explicit. Reuse `TerrainSurface`, meshing and edge contracts rather
+   than copying the labs. Polar distortion/degenerate triangles and transition boundaries
+   are mandatory L1/L2 checks. This is a bounded candidate, not an assertion that it wins.
+   If it fails those checks or has unacceptable pole cost, record the failing fixture and
+   evaluate the existing cube-face domain with explicit projection-seam splitting inside the
+   same route. Decide before full route migration; do not maintain two new production paths.
+6. **Seams and geometry:** preserve canonical direction/elevation and both endpoint mappings
+   through simplification. Lock compatible shared boundaries; border locking alone does not
+   make coarse/fine edges match. Retain the proven per-span edge sampling. Duplicate/split at
+   the map cut and handle poles explicitly. Dropping every seam-crossing terrain triangle is
+   not a gap-free implementation. A flat map's outer boundary is intentional; missing coverage
+   inside its valid footprint is a defect.
+7. **LOD and morph:** evaluate error, visibility and bounds on the displayed geometry, with
+   actual camera projection/viewport and orthographic zoom. Extend the selection context as
+   needed: its current camera-position-only contract is insufficient for this claim. Include
+   sampling, simplification, curvature and map-projection distortion in the error check.
+   Validate at 0, .25, .5, .75, 1 and in motion. Sphere-only horizon culling cannot remain active
+   while it would discard visible unrolled terrain. Use conservative bounds first.
+8. **Simplification:** preserve paired attributes and test the result in both endpoint spaces
+   and intermediate display states. A mesh simplified solely against spherical positions can
+   lose its flat-map shape. Start the first geometry check unsimplified; add Meshoptimizer
+   behind the comparison toggle, accepting a lower reduction when error demands it. Skipping
+   simplification temporarily must be explicit and cannot count as accepted optimized LOD.
+9. **Streaming:** keep coarse coverage while children and their edge-compatible neighbours
+   build. Version jobs/results by world, style, feature/edit revision, domain/chart, patch,
+   resolution, boundary topology and simplification policy. Exclude morph progress from
+   canonical shape identity; chart/basis belongs in derived geometry keys when it affects
+   topology. Pure slider movement should update transforms and selection, not rebuild the world.
+   Bound pending work, resident/completed bytes and uploads, including neighbour balancing.
+   `maxPatches` before balancing is not a hard final memory/patch cap.
+10. **Queries and layers:** distinguish canonical height from a ray hit on the resident
+    approximating mesh. Selection/focus must use the displayed transform, including 50% morph.
+    Adapt debug river/coast/ridge layers to this transform and keep depth testing enabled.
+    They are location aids, not final river water. Their cosmetic polish does not block LOD
+    unless it prevents diagnosis. Geometry-only and cell-outline views remain available.
+
+### Milestones and user review points
+
+Each milestone can take several sessions. End each work packet with the visible result,
+checks performed, missing evidence and exact next task. Do not promise a session count.
+
+#### L0 — Freeze the shared inputs and comparison conditions
+
+Status: **next**, existing U0/U1 work is reusable; no new L gate accepted.
+
+- Reuse U0 fixture v2, seed 1 / 1500 cells / volcanic profile and its real volcano bookmark;
+  record the resolved cell ID, radius, display relief and close/overview camera poses.
+  Do not recreate the bookmark UI or repair already accepted camera fixes without a regression.
+- Add a versioned surface/style descriptor and worker initialization contract; retain old
+  sampler behavior as `blended`. Define `cell-features` composition and add the first minimal
+  volcano case. Reuse the geology function, checking polygon support and no double application.
+- Centralize comparison state (world key, style, renderer mode, projection, quality, selected
+  cell and morph) through the existing service/query helpers. Keep view-specific cameras local.
+- Establish diagnostics for frame time, desired/resident levels, queued/running jobs,
+  build/refinement latency and tracked bytes. Save a baseline; user measurements may remain
+  pending while implementation continues. Do not build a new testing platform for this packet.
+- Automated checks: style determinism, unchanged blended samples, stable graph/feature IDs,
+  worker/main sample parity, sea datum and explicit unit/axis conversion. 2.5D currently uses
+  an XZ plane and a different longitude convention from morph's XY plane; test adapters.
+
+User check: replay the existing volcano and overview; confirm comparison uses the same cell
+and current terrain. This is a brief baseline check, not a new camera-design exercise.
+
+#### L1 — First real cell-terrain LOD through the morph slider
+
+Dependency: L0 contracts. **First new visible capability and highest priority.**
+
+- In `/cell-planet-morph-spike`, add a `streamed` comparison mode consuming the real snapshot.
+  Keep coarse global coverage; refine a bounded region containing the existing volcano.
+- L1a: paired sphere/map patch geometry with fixed projection basis, one coarse and one fine
+  band, compatible boundaries, initially unsimplified. Use existing transform conventions.
+- L1b: camera-driven switching, shared queue/coverage management, worker-backed cell sampling
+  and Meshoptimizer with paired-shape error validation. Do not use the whole-map height bake
+  as the close-detail source. Profile sampler lookup/path scans before raising resolution.
+- Show LOD colours/wireframe, freeze LOD, simplification on/off and geometry-only mode.
+  Refine source samples enough that the volcano rim changes visibly from coarse to fine.
+- Test patch boundary agreement in both endpoint spaces and intermediate morph; test
+  selection and bounds, stale results and parent retention. Exercise a polar patch and a
+  static map-cut patch to choose the domain before committing to broader migration.
+
+User check: overview -> volcano -> overview at 0%, 50%, 100%; scrub the slider while zoomed
+close. Expect visibly changing tessellation/detail, the same selected volcano and no openings
+within this slice. Compare simplification on/off and record frame time. L1 is a bounded
+integration proof, not global seam/performance acceptance.
+
+#### L2 — Whole-world LOD correctness and bounded cost
+
+Dependency: L1 topology decision. Keep working in the same renderer/route.
+
+- Extend refinement everywhere with balanced neighbour transitions, stable merge/split
+  hysteresis and bounded workers/cache/uploads. Record limits for the actual final cut.
+- Cover the static map seam, poles, patch corners and both projections (Equirectangular and
+  Equal Earth). If cube faces were chosen, include all face edges and three-face corners.
+- Compute bounds and error for the current morph/camera; verify the surface normals, water
+  datum, material coordinates and picking remain aligned. Do not CPU-rewrite the entire
+  planet every frame merely to make picking work; restrict work to candidates/on demand.
+- Test slow/failed/out-of-order jobs, fast zoom/pan/orbit/teleport, continuous movement,
+  style/world changes during builds and disposal. Near patches must eventually sharpen
+  while moving, not just after stopping; capture time-to-refine.
+
+User check: repeat near/far travel at 0/25/50/75/100%, cross the map seam and poles, use
+delayed generation. Gate: complete coverage, no visible mixed-LOD cracks, no incorrect culling,
+bounded work and performance within the recorded test budget. Report pops separately from gaps.
+
+#### L3 — All cell-map routes use the shared renderer
+
+Dependency: L2. This completes the requested LOD integration across the views.
+
+- Wire `/cell-planet-25d-map` to the flat endpoint, `/cell-planet-globe` to the globe endpoint,
+  and keep `/cell-planet-morph-spike` as the adjustable view. Reuse the renderer, no copied
+  schedulers/material forks. Preserve camera feel, comparison links and old renderer toggles.
+- Share terrain/view/debug control groups and marker/selection layer construction. Preserve
+  world, selected cell, style and relevant quality/projection state through navigation.
+- Add moving meridian/oblique tracking to streamed geometry, with a real seam split/coverage
+  policy. Test a tracking basis crossing a patch and map cut. Freeze the basis only as a
+  clearly labelled earlier diagnostic, not as silent loss of an existing morph capability.
+- Keep colours independent of topology where possible; colour-layer changes must not
+  regenerate the world. Track any temporary colour-resolution limit separately from height.
+
+User check: choose the volcano in 2D, visit each terrain view, zoom close/far, return; same
+cell and feature, working LOD everywhere. On morph, track a unit across the seam at 50% and
+100%. Acceptance requires both projections and tracking modes, or an explicit recorded user
+scope change. First milestones may support only the labelled fixed basis.
+
+#### L4 — Two useful terrain styles, then remaining local landforms
+
+Dependency: L3. The L0 minimal volcano strategy becomes the full Civ-style implementation.
+
+- First review an adjacent plain/mountain/volcano group in `cell-features` against `blended`.
+  A mountain must read as a landform in its cell while the adjacent plain stays usable.
+  Connected ridge cells still form an intentional shared range. Freeze that style before
+  adding the next shape; “all cells are perfectly flat” is not an assumed requirement.
+- Add mesa, then canyon using the existing geology samplers where applicable. Each packet
+  includes canonical shape, feature metadata, masks, protected samples/error checks and a
+  bookmark in the same world. Avoid a separate POC or a blanket renderer rewrite.
+- Test real polygon ownership, shared-boundary continuity, seed determinism and LOD feature
+  retention; bound sampling work by local spatial candidates rather than all features/paths.
+
+User checks: (a) mountain/volcano/plain, (b) flat-topped mesa, (c) canyon floor/walls. At each,
+inspect cell outlines and neutral shading near/far at globe/50%/map. Toggle styles: existing
+blended mountains remain available, and Civ-style terrain reads as individual cells.
+
+#### L5 — Actual river channels and detailed shores
+
+Dependency: L4 style composition. Debug paths remain independently available.
+
+- Define continuous corridor sampling along segments, shared bend/junction/mouth geometry,
+  physical widths/depths and water profiles in canonical coordinates. Current nearest-path-
+  point influence is a starting approximation, not acceptance of a continuous riverbed.
+- Protect river/shore corridors from conflicting local features and preserve the logical
+  edge network. Add banks, shallows and a connected coast/mouth without moving ownership.
+- Apply detail through the same chunk pipeline; test coarse/fine retention and update
+  geometric error where new narrow features demand it. Add water after the channel can
+  be inspected without a water surface hiding it.
+
+User checks: river bend/junction, then mouth/shore; geometry-only and water-on near/far at
+globe/50%/map. Gate: connected carved terrain and contained water, aligned with the reference
+paths, no LOD cracks and acceptable added cost. River visual effects are follow-on work.
+
+#### L6 — Integrated acceptance and documented consumer path
+
+Dependency: L3–L5 and their review criteria.
+
+- Repeat the same tour for both styles, both projections, endpoint/intermediate morph,
+  supported tracking and the small plus agreed larger world presets.
+- Verify cold start, warm navigation, regeneration, failed-job recovery and five identical
+  mount/dispose cycles. Confirm stable resource counts and no monotonic retained growth.
+- Document how a game supplies a world/style and selects flat, sphere or morph mode;
+  shared renderer lifecycle, diagnostics, queries and public entry points. Keep optional
+  Meshoptimizer isolated. Physics, persistent caching, building edits and more geology
+  remain follow-on work unless needed for an explicit failed criterion.
+- Remove old implementations only in separately scoped cleanup after comparison acceptance.
+
+User check: one short repeatable acceptance tour; record supported scale/zoom/quality and
+known limitations. Passing a build or a single screenshot never completes this milestone.
+
+### Performance, reviews and session discipline
+
+- The user serves the app and performs browser verification. Do not open a browser or start
+  a server. Run relevant non-browser tests/type-checks/builds; disclose unavailable checks.
+- Use the existing fixture and short overview -> volcano -> seam -> overview tour at each
+  review. Record machine/browser, viewport/DPR, build mode, world/style/quality and camera.
+  Compare the same source and visible quality. The planar lab is a useful responsiveness
+  reference, but its synthetic field is not a matched cell-world performance baseline.
+- During development, record p50/p95/p99 frame time, >50 ms / >100 ms frames, time-to-refine,
+  draws, triangles, desired/resident patches, pending/running jobs and tracked CPU/GPU resource
+  bytes where available. Label estimates; do not invent GPU memory figures. A missing capture
+  leaves performance acceptance pending; it does not require pausing independent coding.
+- Retain the earlier provisional ceilings (warm p95 <=33.3 ms, p99 <=50 ms; investigate p95
+  regression >max(2 ms, 10%)). These are proposals, not measured or user-approved targets.
+  Preserve the user's expectation of the fast planar lab; obtain matched measurements before
+  calling a slower renderer accepted. L0 records baseline; L1 records initial hard resource
+  caps; L2 verifies them after balancing and during replacement. No silent budget increases.
+- For final performance acceptance: 10-second warm-up, three repetitions of a fixed 60-second
+  tour; report median run and spread. Five lifecycle cycles belong to L6, not every small fix.
+- States: `next`, `in progress`, `implemented; awaiting user test`, `needs revision`, `accepted`.
+  Record implementation, automated checks, user visual verdict and performance separately.
+  Pending reviews allow independent preparation, never assumed acceptance of dependent style.
+- Report to the user in a few lines: `L# / packet; visible change; open/preset; three test
+  actions and expected result; checks/metrics or pending; known issue; next packet`.
+  If work drifts to icons/ribbons/UI polish, explain which L acceptance criterion requires it.
+
+### Current handoff — 2026-09-19 L0 style packet
+
+- Active work: **L0 style contract implemented; L1a is next**.
+- Accepted L gates: none. Do not erase prior user confirmations: 2D/2.5D bookmark focus,
+  overlay alignment and the visible volcano were confirmed in this conversation. Complete
+  cross-view, streaming and quantitative performance acceptance is still missing.
+- L0 result: added a versioned `blended` / `cell-features` descriptor and shared sampler
+  resolver in `cell-planet-terrain-style.ts`; added the `terrainStyle` comparison query;
+  exposed the selector in 2.5D, globe and morph. Both styles intentionally resolve to the
+  current feature-aware sampler until L4 changes the cell-features composition policy, so
+  the current visual terrain remains stable. Added a colocated descriptor test.
+- Validation: `npx ng build demo-app --optimization=false` passes. `git diff --check` passes.
+  Browser review and performance capture remain pending; the user serves the app.
+- Next coding packet: expose a coarse/fine volcano region in the morph page's streamed
+  comparison mode. Deliver an actual 0/50/100% review before expanding the feature catalogue.
+  Baseline capture can proceed alongside this packet.
+- Code entry points: `projects/demo-app/src/app/pages/cell-planet-world.service.ts`,
+  `cell-planet-view-query.ts`, `cell-planet-u0-fixture.ts` in the same directory;
+  `projects/triangular-engine/worldgen/core/planet-surface.ts`, `geological-shapes.ts`;
+  `projects/triangular-engine/terrain/components/terrain-surface.component.ts`,
+  `terrain/domains/terrain-surface-domain.ts`, `terrain/meshing/terrain-patch-mesher.ts`,
+  `terrain/streaming/terrain-surface-patch-selector.ts` under `projects/triangular-engine`;
+  `projects/triangular-engine/worldgen/render/planet-morph-geometry.ts`,
+  `planet-morph-material.ts`, `components/cell-planet-morph-view.component.ts` in that entry point.
+- Primary risks to resolve in L1/L2: pole/map-cut topology, morph-aware simplification and
+  bounds, coarse/fine residency edge compatibility, cell sampler cost and projection axes.
+  These are engineering checks with fixtures, not reasons to restart another open-ended POC.
+
+Resume prompt:
+
+> Continue the active L0–L6 plan at the top of docs/runbook/035_unified_cell_terrain_delivery.md.
+> Read its current handoff and 034's compact checklist. Work on the recorded next packet,
+> reuse the existing cell world and streaming infrastructure, and demonstrate progress in
+> the morph route before expanding content. I serve the app and do browser checks. Give me
+> a short review card and update the handoff, including unresolved evidence. Do not follow
+> the superseded U0–U7 queue in the historical section below.
+
+---
+
+## Historical U0–U7 plan and session records — superseded 2026-09-19
+
+Everything below preserves the earlier decisions and evidence. Its “current”, “next”,
+dependencies and resume instructions are historical; the active L plan above takes precedence.
+
+### Former purpose and authority
 
 Deliver the terrain experience described in [034](034_cell_planet_map_roadmap.md) through
 small, inspectable increments. This is the coding agent execution plan. The compact checklist
@@ -323,7 +652,7 @@ For each gate append evidence under a dated record with implementation revision,
 automated results, capture/metrics links, user verdict/date and open issues. A failed earlier gate
 reopens that gate and any affected dependent acceptance; preserve prior evidence for comparison.
 
-## Current handoff — update at every session end
+## Historical U-plan handoff — retained as prior evidence
 
 - Updated: 2026-09-17, U0 harness packet.
 - Active gate: U0, in progress; fixture and bookmark controls are implemented, baseline capture and
@@ -442,7 +771,7 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
 - Blocking decisions: none for continuing U0. User visual review is pending baseline capture.
 - Evidence records: browser check completed, but no saved capture/metrics record yet.
 
-## Resume instruction
+## Historical resume instruction — use the active L-plan prompt above instead
 
 Copy into a future coding session if useful:
 

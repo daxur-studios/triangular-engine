@@ -1,8 +1,8 @@
 <scene [showFps]="true" [logarithmicDepthBuffer]="true">
   <orbitControls [target]="cameraTarget()" [near]="0.05" />
-  <ambientLight [intensity]="1.2" />
-  <directionalLight [position]="[5, 8, 6]" [intensity]="2.2" />
-  <directionalLight [position]="[-5, -3, -4]" [intensity]="0.4" />
+  <ambientLight [intensity]="dayNightEnabled() ? 0.6 : 1.2" />
+  <directionalLight [position]="sunLightPosition()" [intensity]="2.2" />
+  <directionalLight [position]="[-5, -3, -4]" [intensity]="dayNightEnabled() ? 0.1 : 0.4" />
 
   @if (surfaceSampler()) {
     <cellPlanetMorphView
@@ -26,6 +26,11 @@
       [adaptiveReliefSubdivision]="adaptiveReliefSubdivision()"
       [factionByCell]="plateIdByCell"
       [showTacticalOverlay]="true"
+      [dayNightEnabled]="dayNightEnabled()"
+      [timeOfDay]="timeOfDay()"
+      [axialTiltDeg]="axialTiltDeg()"
+      [seasonPhase]="seasonPhase()"
+      [nightAmbient]="nightAmbient()"
       (cellClick)="onCellClicked($event)"
       (cellHover)="onCellHovered($event)"
     />
@@ -115,6 +120,15 @@
     </label>
 
     <label>
+      <span>Terrain style</span>
+      <select [value]="terrainStyle()" (change)="onTerrainStyleChange($event)">
+        @for (style of terrainStyleKinds; track style) {
+          <option [value]="style">{{ terrainStyleLabels[style] }}</option>
+        }
+      </select>
+    </label>
+
+    <label>
       <span>Height scale: {{ heightScale().toFixed(2) }}</span>
       <input
         type="range"
@@ -152,6 +166,82 @@
         <span>Volcano terrain stamp</span>
       </label>
     </div>
+  </fieldset>
+
+  <fieldset class="control-group">
+    <legend>Day / Night Cycle</legend>
+    <div class="checkbox-row">
+      <label>
+        <input
+          type="checkbox"
+          [checked]="dayNightEnabled()"
+          (change)="onDayNightToggle($event)"
+        />
+        <span>Enable day/night cycle</span>
+      </label>
+    </div>
+
+    @if (dayNightEnabled()) {
+      <div class="play-controls-row" style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
+        <button
+          type="button"
+          class="small-action"
+          (click)="togglePlayDayNight()"
+          style="padding: 4px 10px; font-size: 0.8rem; cursor: pointer; border-radius: 4px; border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.1); color: inherit;"
+        >
+          {{ isPlayingDayNight() ? '⏸ Pause' : '▶ Play' }}
+        </button>
+        <label style="display: flex; align-items: center; gap: 4px; font-size: 0.8rem; flex: 1;">
+          <span>Speed</span>
+          <select [value]="dayNightSpeed()" (change)="onDayNightSpeedChange($event)" style="font-size: 0.8rem; flex: 1;">
+            <option [value]="0.25">0.25x</option>
+            <option [value]="0.5">0.5x</option>
+            <option [value]="1.0">1.0x (30s)</option>
+            <option [value]="2.0">2.0x (15s)</option>
+            <option [value]="5.0">5.0x (6s)</option>
+          </select>
+        </label>
+      </div>
+
+      <label style="margin-top: 8px;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+          <span>Time: <strong>{{ formatTimeOfDay(timeOfDay()) }}</strong></span>
+          <small>{{ (timeOfDay() / 24 * 360 - 180).toFixed(0) }}° lon</small>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="24"
+          step="0.05"
+          [value]="timeOfDay()"
+          (input)="onTimeOfDayInput($event)"
+        />
+      </label>
+
+      <label style="margin-top: 4px;">
+        <span>Season / Declination</span>
+        <select [value]="seasonPreset()" (change)="onSeasonPresetChange($event)" style="font-size: 0.8rem;">
+          <option value="equinox">Equinox (0° declination)</option>
+          <option value="summer">Summer Solstice (+23.4° N midnight sun)</option>
+          <option value="winter">Winter Solstice (-23.4° S midnight sun)</option>
+        </select>
+      </label>
+
+      <label style="margin-top: 4px;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+          <span>Night ambient: <strong>{{ (nightAmbient() * 100).toFixed(0) }}%</strong></span>
+          <small>Readability floor</small>
+        </div>
+        <input
+          type="range"
+          min="0.05"
+          max="0.45"
+          step="0.01"
+          [value]="nightAmbient()"
+          (input)="onNightAmbientInput($event)"
+        />
+      </label>
+    }
   </fieldset>
 
   <fieldset class="control-group">

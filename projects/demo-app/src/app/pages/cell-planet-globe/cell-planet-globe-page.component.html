@@ -69,6 +69,14 @@
     </select>
   </label>
   <label>
+    <span>Terrain style</span>
+    <select [value]="terrainStyle()" (change)="onTerrainStyleChange($event)">
+      @for (style of terrainStyleKinds; track style) {
+        <option [value]="style">{{ terrainStyleLabels[style] }}</option>
+      }
+    </select>
+  </label>
+  <label>
     <span>Planet size: {{ worldSizeTier() }} (radius {{ formatDistanceM(planetRadiusM()) }})</span>
         <select [ngModel]="worldSizeTier()" (ngModelChange)="onWorldSizeValueChange($event)">
       @for (size of worldSizeKinds; track size) {

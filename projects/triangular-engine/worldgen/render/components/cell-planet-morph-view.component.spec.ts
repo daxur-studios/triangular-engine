@@ -3,8 +3,10 @@ import {
   BufferAttribute,
   LineSegments,
   Mesh,
+  MeshBasicMaterial,
   PerspectiveCamera,
   Scene,
+  Vector3,
 } from 'three';
 import { EngineService } from 'triangular-engine';
 import {
@@ -301,4 +303,53 @@ describe('CellPlanetMorphViewComponent', () => {
 
     fixture.destroy();
   });
+
+  it('updates effectiveSunDirection reactively when day/night inputs change', () => {
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', mockSampler);
+    fixture.componentRef.setInput('longitudeSegments', 16);
+    fixture.componentRef.setInput('latitudeRings', 8);
+    fixture.componentRef.setInput('dayNightEnabled', true);
+    fixture.componentRef.setInput('timeOfDay', 12);
+    fixture.componentRef.setInput('seasonPhase', 0.25); // equinox
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    expect(comp.effectiveSunDirection().z).toBeCloseTo(1, 3);
+
+    // Change time of day to dawn (06:00)
+    fixture.componentRef.setInput('timeOfDay', 6);
+    fixture.detectChanges();
+    expect(comp.effectiveSunDirection().x).toBeCloseTo(1, 3);
+
+    // Provide explicit sun direction vector
+    fixture.componentRef.setInput('sunDirection', new Vector3(0, 1, 0));
+    fixture.detectChanges();
+    expect(comp.effectiveSunDirection().y).toBeCloseTo(1, 3);
+
+    fixture.destroy();
+  });
+
+  it('supports custom terrain and ocean materials via input', () => {
+    const customTerrain = new MeshBasicMaterial({ color: 0xff0000 });
+    const customOcean = new MeshBasicMaterial({ color: 0x0000ff });
+
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', mockSampler);
+    fixture.componentRef.setInput('longitudeSegments', 16);
+    fixture.componentRef.setInput('latitudeRings', 8);
+    fixture.componentRef.setInput('customTerrainMaterial', customTerrain);
+    fixture.componentRef.setInput('customOceanMaterial', customOcean);
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    const terrain = comp.object3D().getObjectByName('morph-terrain') as Mesh;
+    const ocean = comp.object3D().getObjectByName('morph-ocean') as Mesh;
+
+    expect(terrain.material).toBe(customTerrain);
+    expect(ocean.material).toBe(customOcean);
+
+    fixture.destroy();
+  });
 });
+

@@ -59,6 +59,13 @@ import { CellPlanetSelectionPanelComponent } from './cell-planet-selection-panel
 import { getTerrainHeightScaleM } from './cell-planet-terrain-scale';
 import { buildPlanarDebugRibbonGeometry, projectPlanarDebugPoint } from './cell-planet-debug-geography';
 import { CellPlanetWorldService } from '../cell-planet-world.service';
+import {
+  CELL_PLANET_TERRAIN_STYLE_KINDS,
+  CELL_PLANET_TERRAIN_STYLE_LABELS,
+  CellPlanetTerrainStyle,
+  isCellPlanetTerrainStyle,
+  selectCellPlanetSurfaceSampler,
+} from '../cell-planet-terrain-style';
 
 type TerrainQuality = 'preview' | 'standard' | 'high' | 'ultra';
 type TerrainDisplayScale = 'planet' | 'legacy';
@@ -589,6 +596,14 @@ function makeColorTexture(
         </select>
       </label>
       <label>
+        <span>Terrain style</span>
+        <select [value]="terrainStyle()" (change)="onTerrainStyleChange($event)">
+          @for (style of terrainStyleKinds; track style) {
+            <option [value]="style">{{ terrainStyleLabels[style] }}</option>
+          }
+        </select>
+      </label>
+      <label>
         <span>Planet size: {{ worldSizeTier() }} (radius {{ formatDistanceM(planetRadiusM()) }})</span>
         <select [ngModel]="worldSizeTier()" (ngModelChange)="onWorldSizeValueChange($event)">
           @for (size of worldSizeKinds; track size) {
@@ -721,6 +736,9 @@ export class CellPlanet25dMapPageComponent {
   readonly relaxationIterations = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.relaxationIterations);
   readonly worldProfileKind = signal<WorldProfileKind>(CELL_PLANET_GENERATION_DEFAULTS.worldProfile);
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
+  readonly terrainStyle = signal<CellPlanetTerrainStyle>('blended');
+  readonly terrainStyleKinds = CELL_PLANET_TERRAIN_STYLE_KINDS;
+  readonly terrainStyleLabels = CELL_PLANET_TERRAIN_STYLE_LABELS;
   readonly u0Fixture = CELL_PLANET_U0_FIXTURE;
   readonly u0Bookmarks = CELL_PLANET_U0_FIXTURE.bookmarks;
   readonly u0BookmarkIds = CELL_PLANET_U0_BOOKMARK_IDS;
@@ -833,9 +851,6 @@ export class CellPlanet25dMapPageComponent {
     color: '#4fc3f7',
     transparent: true,
     opacity: 0.9,
-    // These are geography reference paths. Keep them readable while inspecting the
-    // terrain, even when the clipmap's current LOD is slightly above the CPU path sample.
-    depthTest: false,
     depthWrite: false,
     side: DoubleSide,
   });
@@ -843,7 +858,6 @@ export class CellPlanet25dMapPageComponent {
     color: '#f0a05a',
     transparent: true,
     opacity: 0.9,
-    depthTest: false,
     depthWrite: false,
     side: DoubleSide,
   });
@@ -851,7 +865,6 @@ export class CellPlanet25dMapPageComponent {
     color: '#fff0b3',
     transparent: true,
     opacity: 0.95,
-    depthTest: false,
     depthWrite: false,
     side: DoubleSide,
   });
@@ -991,6 +1004,14 @@ export class CellPlanet25dMapPageComponent {
       this.updateComparisonQueryParams();
       this.rebuildWorld();
     }
+  }
+
+  onTerrainStyleChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    if (!isCellPlanetTerrainStyle(value) || value === this.terrainStyle()) return;
+    this.terrainStyle.set(value);
+    this.updateComparisonQueryParams();
+    this.rebuildWorld();
   }
 
   onWorldSizeChange(event: Event): void {
@@ -1235,7 +1256,11 @@ export class CellPlanet25dMapPageComponent {
       waterLevel: this.waterLevel(),
     });
     const { graph, tectonics, ecology, features, seaLevelElevation } = world;
-    const sampler = this.showVolcanoTerrain() ? world.featureSampler : world.baseSampler;
+    const sampler = selectCellPlanetSurfaceSampler(
+      world,
+      this.terrainStyle(),
+      this.showVolcanoTerrain(),
+    );
     const projection = MAP_PROJECTIONS[this.projectionType()];
     const quality = this.terrainQualityPresets[this.terrainQuality()];
     const bake = buildPlanetSurfaceBake(graph, sampler, {
@@ -1439,6 +1464,7 @@ export class CellPlanet25dMapPageComponent {
     // Keep enough separation from the clipmap interpolation to avoid z-fighting and to remain
     // visible in the compact legacy preview as well as at physical planet scale.
     const clearance = Math.max(2, heightScale * 0.025);
+    const riverClearance = clearance + Math.abs(heightScale) * 0.1;
     const riverWidth = Math.max(30, mapWidth * 0.00065);
     const ridgeWidth = Math.max(24, mapWidth * 0.00045);
     const coastlineWidth = Math.max(30, mapWidth * 0.00035);
@@ -1475,6 +1501,7 @@ export class CellPlanet25dMapPageComponent {
     };
     const riverGeometry = buildPlanarDebugRibbonGeometry({
       ...common,
+      clearance: riverClearance,
       paths: ecology.riverPaths,
       closed: false,
       defaultWidth: riverWidth,
@@ -1711,6 +1738,7 @@ export class CellPlanet25dMapPageComponent {
     if (query.worldProfile && this.worldProfileKinds.includes(query.worldProfile as WorldProfileKind)) {
       this.worldProfileKind.set(query.worldProfile as WorldProfileKind);
     }
+    if (isCellPlanetTerrainStyle(query.terrainStyle)) this.terrainStyle.set(query.terrainStyle);
     if (query.worldSize && this.worldSizeKinds.includes(query.worldSize as WorldSizeTier)) {
       this.worldSizeTier.set(query.worldSize as WorldSizeTier);
     }
@@ -1773,6 +1801,7 @@ export class CellPlanet25dMapPageComponent {
       seed: this.seed(),
       relaxation: this.relaxationIterations(),
       worldProfile: this.worldProfileKind(),
+      terrainStyle: this.terrainStyle(),
       worldSize: this.worldSizeTier(),
       displayScale: this.displayScale(),
       projection: this.projectionType(),

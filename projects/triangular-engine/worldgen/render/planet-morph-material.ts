@@ -3,10 +3,13 @@ import {
   DoubleSide,
   FrontSide,
   IUniform,
+  Material,
   MeshStandardMaterial,
   MeshStandardMaterialParameters,
   ShaderMaterial,
   Vector3,
+  WebGLProgramParametersWithUniforms,
+  WebGLRenderer,
 } from 'three';
 import { SEAM_GLSL_FUNCTIONS } from './antimeridian-seam';
 
@@ -22,33 +25,79 @@ export interface IDynamicProjectionUniforms {
   uProjectionType: IUniform<number>; // 0 = equirectangular, 1 = equalEarth
 }
 
-export function createPlanetMorphMaterial(
-  parameters: MeshStandardMaterialParameters = {},
-  uniformHolder?: Partial<IDynamicProjectionUniforms>,
-): { material: MeshStandardMaterial; uniforms: IDynamicProjectionUniforms } {
-  const uniforms: IDynamicProjectionUniforms = {
-    uMorph: uniformHolder?.uMorph ?? { value: 0 },
-    uProjForward: uniformHolder?.uProjForward ?? {
-      value: new Vector3(0, 0, 1),
+export interface IPlanetDayNightUniforms {
+  uDayNightEnabled: IUniform<number>; // 0 = disabled, 1 = enabled
+  uSunDirection: IUniform<Vector3>; // normalized sun vector in body frame
+  uNightAmbient: IUniform<number>; // default 0.20
+  uTwilightWidth: IUniform<number>; // default 0.12
+  uSunsetGlow: IUniform<number>; // default 0.50
+  uNightColor: IUniform<Vector3>; // default vec3(0.09, 0.14, 0.24)
+}
+
+export function createDefaultPlanetDayNightUniforms(
+  holder?: Partial<IPlanetDayNightUniforms>,
+): IPlanetDayNightUniforms {
+  return {
+    uDayNightEnabled: holder?.uDayNightEnabled ?? { value: 0 },
+    uSunDirection: holder?.uSunDirection ?? { value: new Vector3(0, 0, 1) },
+    uNightAmbient: holder?.uNightAmbient ?? { value: 0.2 },
+    uTwilightWidth: holder?.uTwilightWidth ?? { value: 0.12 },
+    uSunsetGlow: holder?.uSunsetGlow ?? { value: 0.5 },
+    uNightColor: holder?.uNightColor ?? {
+      value: new Vector3(0.09, 0.14, 0.24),
     },
-    uProjUp: uniformHolder?.uProjUp ?? { value: new Vector3(0, 1, 0) },
-    uProjRight: uniformHolder?.uProjRight ?? { value: new Vector3(1, 0, 0) },
-    uProjMode: uniformHolder?.uProjMode ?? { value: 0 },
-    uMapWidth: uniformHolder?.uMapWidth ?? { value: 12.56637 },
-    uMapHeight: uniformHolder?.uMapHeight ?? { value: 6.28318 },
-    uRadius: uniformHolder?.uRadius ?? { value: 2.0 },
-    uProjectionType: uniformHolder?.uProjectionType ?? { value: 1 },
   };
+}
 
-  const material = new MeshStandardMaterial({
-    roughness: 0.9,
-    metalness: 0.05,
-    flatShading: false,
-    side: FrontSide,
-    ...parameters,
-  });
+/**
+ * Computes the normalized subsolar unit vector in the planet's body-fixed reference frame
+ * (+Y North, +X East, +Z Prime Meridian) from time of day (0..24h), axial tilt, and seasonal phase.
+ */
+export function computeSunDirectionFromTime(
+  timeOfDayHours: number,
+  axialTiltDeg = 23.44,
+  seasonPhase = 0.25,
+): Vector3 {
+  // Longitude: noon (12:00) is at prime meridian (lon = 0)
+  // Earth rotates eastward, so the subsolar point moves westward over time (-lon)
+  const lonRad = ((12 - timeOfDayHours) / 24) * 2 * Math.PI;
 
-  material.onBeforeCompile = (shader) => {
+  // Seasonal declination: ±axialTilt (at seasonPhase 0.25=equinox, 0.5=summer solstice)
+  const axialTiltRad = (axialTiltDeg * Math.PI) / 180;
+  const declinationRad =
+    axialTiltRad * Math.sin(2 * Math.PI * (seasonPhase - 0.25));
+
+  const cosDec = Math.cos(declinationRad);
+  const sinDec = Math.sin(declinationRad);
+
+  const x = cosDec * Math.sin(lonRad);
+  const y = sinDec;
+  const z = cosDec * Math.cos(lonRad);
+
+  return new Vector3(x, y, z).normalize();
+}
+
+/**
+ * Patches any Three.js material via `onBeforeCompile` to support seamless 3D Globe <-> 2.5D Flat Map
+ * vertex reprojection (Equal Earth / Equirectangular), antimeridian seam discard, and dynamic
+ * unit tracking basis.
+ *
+ * Conforms to triangular-engine's composable-material-patch idiom: chains any previous
+ * `onBeforeCompile` and updates `customProgramCacheKey` without overwriting prior patches.
+ */
+export function enablePlanetMorphProjection(
+  material: Material,
+  uniforms: IDynamicProjectionUniforms,
+): void {
+  const previousOnBeforeCompile = material.onBeforeCompile.bind(material);
+  const previousCacheKey = material.customProgramCacheKey.bind(material);
+
+  material.onBeforeCompile = (
+    shader: WebGLProgramParametersWithUniforms,
+    renderer: WebGLRenderer,
+  ) => {
+    previousOnBeforeCompile(shader, renderer);
+
     shader.uniforms['uMorph'] = uniforms.uMorph;
     shader.uniforms['uProjForward'] = uniforms.uProjForward;
     shader.uniforms['uProjUp'] = uniforms.uProjUp;
@@ -59,32 +108,38 @@ export function createPlanetMorphMaterial(
     shader.uniforms['uRadius'] = uniforms.uRadius;
     shader.uniforms['uProjectionType'] = uniforms.uProjectionType;
 
-    shader.vertexShader =
-      `
-      attribute vec3 aSpherePos;
-      attribute vec3 aFlatPos;
-      attribute vec3 aSphereNorm;
-      attribute vec3 aFlatNorm;
-      attribute vec3 aOtherDir1;
-      attribute vec3 aOtherDir2;
+    if (!shader.vertexShader.includes('uniform float uMorph;')) {
+      shader.vertexShader =
+        `
+        attribute vec3 aSpherePos;
+        attribute vec3 aFlatPos;
+        attribute vec3 aSphereNorm;
+        attribute vec3 aFlatNorm;
+        attribute vec3 aOtherDir1;
+        attribute vec3 aOtherDir2;
 
-      uniform float uMorph;
-      uniform vec3 uProjForward;
-      uniform vec3 uProjUp;
-      uniform vec3 uProjRight;
-      uniform float uProjMode;
-      uniform float uMapWidth;
-      uniform float uMapHeight;
-      uniform float uRadius;
-      uniform float uProjectionType;
+        uniform float uMorph;
+        uniform vec3 uProjForward;
+        uniform vec3 uProjUp;
+        uniform vec3 uProjRight;
+        uniform float uProjMode;
+        uniform float uMapWidth;
+        uniform float uMapHeight;
+        uniform float uRadius;
+        uniform float uProjectionType;
 
-      varying float vProjLon;
-      varying float vProjMode;
-      varying float vMorph;
-      varying float vSeamCull;
+        varying float vProjLon;
+        varying float vProjMode;
+        varying float vMorph;
+        varying float vSeamCull;
+        #ifndef V_SPHERE_NORM_DECLARED
+        #define V_SPHERE_NORM_DECLARED
+        varying vec3 vSphereNorm;
+        #endif
 
-      ${SEAM_GLSL_FUNCTIONS}
-    ` + shader.vertexShader;
+        ${SEAM_GLSL_FUNCTIONS}
+      ` + shader.vertexShader;
+    }
 
     shader.vertexShader = shader.vertexShader.replace(
       '#include <beginnormal_vertex>',
@@ -98,6 +153,7 @@ export function createPlanetMorphMaterial(
 
       vec3 morphedNormal = normalize(mix(dynSphereNorm, dynFlatNorm, uMorph));
       vec3 objectNormal = morphedNormal;
+      vSphereNorm = dynSphereNorm;
       #ifdef USE_TANGENT
         vec3 objectTangent = vec3( tangent.xyz );
       #endif
@@ -177,13 +233,19 @@ export function createPlanetMorphMaterial(
     );
 
     // Fragment shader: discard seam-spanning triangles when unrolled
-    shader.fragmentShader =
-      `
-      varying float vProjLon;
-      varying float vProjMode;
-      varying float vMorph;
-      varying float vSeamCull;
-    ` + shader.fragmentShader;
+    if (!shader.fragmentShader.includes('varying float vProjLon;')) {
+      shader.fragmentShader =
+        `
+        varying float vProjLon;
+        varying float vProjMode;
+        varying float vMorph;
+        varying float vSeamCull;
+        #ifndef V_SPHERE_NORM_DECLARED
+        #define V_SPHERE_NORM_DECLARED
+        varying vec3 vSphereNorm;
+        #endif
+      ` + shader.fragmentShader;
+    }
 
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <dithering_fragment>',
@@ -196,7 +258,146 @@ export function createPlanetMorphMaterial(
     );
   };
 
-  return { material, uniforms };
+  material.customProgramCacheKey = () =>
+    `${previousCacheKey()}|planetMorphProjection`;
+  material.needsUpdate = true;
+}
+
+/**
+ * Patches any Three.js material via `onBeforeCompile` to add optional Day/Night cycle
+ * solar lighting, including planetary solar insolation, twilight penumbra, golden-hour
+ * sunset/sunrise rim glow, and configurable night ambient floor.
+ *
+ * Conforms to triangular-engine's composable-material-patch idiom: chains any previous
+ * `onBeforeCompile` and updates `customProgramCacheKey`.
+ */
+export function enablePlanetDayNightLighting(
+  material: Material,
+  uniforms: IPlanetDayNightUniforms,
+): void {
+  const previousOnBeforeCompile = material.onBeforeCompile.bind(material);
+  const previousCacheKey = material.customProgramCacheKey.bind(material);
+
+  material.onBeforeCompile = (
+    shader: WebGLProgramParametersWithUniforms,
+    renderer: WebGLRenderer,
+  ) => {
+    previousOnBeforeCompile(shader, renderer);
+
+    shader.uniforms['uDayNightEnabled'] = uniforms.uDayNightEnabled;
+    shader.uniforms['uSunDirection'] = uniforms.uSunDirection;
+    shader.uniforms['uNightAmbient'] = uniforms.uNightAmbient;
+    shader.uniforms['uTwilightWidth'] = uniforms.uTwilightWidth;
+    shader.uniforms['uSunsetGlow'] = uniforms.uSunsetGlow;
+    shader.uniforms['uNightColor'] = uniforms.uNightColor;
+
+    // Ensure vSphereNorm varying is declared in vertex shader if not already added
+    if (!shader.vertexShader.includes('vSphereNorm')) {
+      shader.vertexShader =
+        `
+        attribute vec3 aSphereNorm;
+        #ifndef V_SPHERE_NORM_DECLARED
+        #define V_SPHERE_NORM_DECLARED
+        varying vec3 vSphereNorm;
+        #endif
+        ` + shader.vertexShader;
+
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <beginnormal_vertex>',
+        `
+        #include <beginnormal_vertex>
+        vSphereNorm = aSphereNorm;
+        `,
+      );
+    }
+
+    // Fragment shader declarations
+    if (!shader.fragmentShader.includes('uDayNightEnabled')) {
+      shader.fragmentShader =
+        `
+        uniform float uDayNightEnabled;
+        uniform vec3 uSunDirection;
+        uniform float uNightAmbient;
+        uniform float uTwilightWidth;
+        uniform float uSunsetGlow;
+        uniform vec3 uNightColor;
+        #ifndef V_SPHERE_NORM_DECLARED
+        #define V_SPHERE_NORM_DECLARED
+        varying vec3 vSphereNorm;
+        #endif
+        ` + shader.fragmentShader;
+    }
+
+    // Hook fragment lighting after dithering_fragment
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <dithering_fragment>',
+      `
+      #include <dithering_fragment>
+      if (uDayNightEnabled > 0.5) {
+        float sunDot = dot(normalize(vSphereNorm), normalize(uSunDirection));
+        float tw = max(0.01, uTwilightWidth);
+        float dayFactor = smoothstep(-tw, tw, sunDot);
+
+        // Sunset / sunrise golden-hour rim glow peaking at the terminator (sunDot ~ 0)
+        float sunsetRim = exp(-pow(sunDot / (tw * 1.5), 2.0)) * uSunsetGlow;
+        vec3 sunsetTint = vec3(1.0, 0.52, 0.22);
+
+        // Ambient night color floor
+        vec3 ambientNight = uNightColor * uNightAmbient;
+
+        // Surface lighting modulation across day, twilight, and night
+        vec3 lightMod = mix(ambientNight, vec3(1.0), dayFactor);
+        lightMod += sunsetTint * sunsetRim * (1.0 - dayFactor * 0.6);
+
+        gl_FragColor.rgb *= lightMod;
+      }
+      `,
+    );
+  };
+
+  material.customProgramCacheKey = () =>
+    `${previousCacheKey()}|planetDayNight`;
+  material.needsUpdate = true;
+}
+
+export function createPlanetMorphMaterial(
+  parameters: MeshStandardMaterialParameters = {},
+  uniformHolder?: Partial<IDynamicProjectionUniforms>,
+  dayNightUniformHolder?: Partial<IPlanetDayNightUniforms>,
+): {
+  material: MeshStandardMaterial;
+  uniforms: IDynamicProjectionUniforms;
+  dayNightUniforms: IPlanetDayNightUniforms;
+} {
+  const uniforms: IDynamicProjectionUniforms = {
+    uMorph: uniformHolder?.uMorph ?? { value: 0 },
+    uProjForward: uniformHolder?.uProjForward ?? {
+      value: new Vector3(0, 0, 1),
+    },
+    uProjUp: uniformHolder?.uProjUp ?? { value: new Vector3(0, 1, 0) },
+    uProjRight: uniformHolder?.uProjRight ?? { value: new Vector3(1, 0, 0) },
+    uProjMode: uniformHolder?.uProjMode ?? { value: 0 },
+    uMapWidth: uniformHolder?.uMapWidth ?? { value: 12.56637 },
+    uMapHeight: uniformHolder?.uMapHeight ?? { value: 6.28318 },
+    uRadius: uniformHolder?.uRadius ?? { value: 2.0 },
+    uProjectionType: uniformHolder?.uProjectionType ?? { value: 1 },
+  };
+
+  const dayNightUniforms =
+    createDefaultPlanetDayNightUniforms(dayNightUniformHolder);
+
+  const material = new MeshStandardMaterial({
+    roughness: 0.9,
+    metalness: 0.05,
+    flatShading: false,
+    side: FrontSide,
+    ...parameters,
+  });
+
+  enablePlanetMorphProjection(material, uniforms);
+  enablePlanetDayNightLighting(material, dayNightUniforms);
+
+  return { material, uniforms, dayNightUniforms };
 }
 
 export function createPlanetBorderMorphMaterial(

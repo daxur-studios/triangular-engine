@@ -53,6 +53,13 @@ import {
 } from '../cell-planet-u0-fixture';
 import { getTerrainHeightScaleM } from '../cell-planet-25d-map/cell-planet-terrain-scale';
 import { CellPlanetWorldService } from '../cell-planet-world.service';
+import {
+  CELL_PLANET_TERRAIN_STYLE_KINDS,
+  CELL_PLANET_TERRAIN_STYLE_LABELS,
+  CellPlanetTerrainStyle,
+  isCellPlanetTerrainStyle,
+  selectCellPlanetSurfaceSampler,
+} from '../cell-planet-terrain-style';
 
 /** Modest fixed tessellation: 96 x 48 quads → ~9.2k triangles. No LOD, by design (runbook 032). */
 const GLOBE_LONGITUDE_SEGMENTS = 96;
@@ -170,6 +177,9 @@ export class CellPlanetGlobePageComponent {
   readonly relaxationIterations = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.relaxationIterations);
   readonly worldProfileKind = signal<WorldProfileKind>(CELL_PLANET_GENERATION_DEFAULTS.worldProfile);
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
+  readonly terrainStyle = signal<CellPlanetTerrainStyle>('blended');
+  readonly terrainStyleKinds = CELL_PLANET_TERRAIN_STYLE_KINDS;
+  readonly terrainStyleLabels = CELL_PLANET_TERRAIN_STYLE_LABELS;
   /** Same physical body-size tiers as the 2.5D page. */
   readonly worldSizeTier = signal<WorldSizeTier>('medium');
   readonly worldSizeKinds: WorldSizeTier[] = ['mini', 'small', 'medium', 'large', 'extra-large'];
@@ -299,6 +309,14 @@ export class CellPlanetGlobePageComponent {
       this.updateComparisonQueryParams();
       this.rebuildWorld();
     }
+  }
+
+  onTerrainStyleChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    if (!isCellPlanetTerrainStyle(value) || value === this.terrainStyle()) return;
+    this.terrainStyle.set(value);
+    this.updateComparisonQueryParams();
+    this.rebuildWorld();
   }
 
   onWorldSizeChange(event: Event): void {
@@ -434,7 +452,11 @@ export class CellPlanetGlobePageComponent {
       waterLevel: this.waterLevel(),
     });
     const { graph, tectonics, ecology, seaLevelElevation } = world;
-    const sampler: IPlanetSurfaceSampler = world.featureSampler;
+    const sampler: IPlanetSurfaceSampler = selectCellPlanetSurfaceSampler(
+      world,
+      this.terrainStyle(),
+      true,
+    );
     const profile = WORLD_PROFILES[this.worldProfileKind()];
 
     this.materialRiverMask = buildRiverMaterialMask(graph, ecology);
@@ -723,6 +745,7 @@ export class CellPlanetGlobePageComponent {
     if (query.worldProfile && this.worldProfileKinds.includes(query.worldProfile as WorldProfileKind)) {
       this.worldProfileKind.set(query.worldProfile as WorldProfileKind);
     }
+    if (isCellPlanetTerrainStyle(query.terrainStyle)) this.terrainStyle.set(query.terrainStyle);
     if (query.worldSize && this.worldSizeKinds.includes(query.worldSize as WorldSizeTier)) {
       this.worldSizeTier.set(query.worldSize as WorldSizeTier);
     }
@@ -766,6 +789,7 @@ export class CellPlanetGlobePageComponent {
       seed: this.seed(),
       relaxation: this.relaxationIterations(),
       worldProfile: this.worldProfileKind(),
+      terrainStyle: this.terrainStyle(),
       worldSize: this.worldSizeTier(),
       fillMode: this.fillMode(),
       waterLevel: this.waterLevel(),
