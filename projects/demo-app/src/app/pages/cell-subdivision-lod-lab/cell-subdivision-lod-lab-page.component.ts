@@ -82,10 +82,13 @@ function setsEqual(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
 }
 
 /**
- * POC for `buildSubdividedRegionMeshData()` (runbook TODO): a distance-based LOD boundary lab
- * to visually confirm the "Option B, no skirts" behavior this session designed — two mutually
- * in-range subdivided cells get an organic jagged shared boundary, a subdivided cell against an
- * out-of-range neighbor stays a plain straight edge with no crack, at any `elevationScale`.
+ * Spike 3: Boundary POC for `buildSubdividedRegionMeshData()` (runbook 028).
+ *
+ * NOT PERFORMANT: Demoted from an example to an experimental spike. While geometrically
+ * sound for crack-free LOD boundaries without skirts ("Option B"), dynamic CPU-side Voronoi
+ * construction, Delaunay triangulation, and fan re-meshing create severe frame stalls during
+ * camera motion and LOD swaps, failing real-time planetary terrain requirements.
+ *
  * Deliberately trimmed down from `cell-planet-lab`'s full pipeline (no ecology/rivers/biomes/
  * features — irrelevant to testing this one claim): just a graph, elevation, and this one LOD
  * mechanism.

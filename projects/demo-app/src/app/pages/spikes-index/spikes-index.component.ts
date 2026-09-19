@@ -48,6 +48,19 @@ export const SPIKES: readonly ISpikeItem[] = [
     runbookPath: 'docs/runbook/028_planet_terrain_attempt_history.md',
     dateISO: '2026-09-13',
   },
+  {
+    id: 'cell-subdivision-lod-lab',
+    number: '3',
+    title: 'Cell Subdivision LOD (joint interior Voronoi diagram)',
+    route: '/cell-subdivision-lod-lab',
+    status: 'failed',
+    hypothesis:
+      'Region-scoped Voronoi cell subdivision (mutually in-range coarse cells sharing one joint interior Voronoi diagram while keeping outer boundaries straight) can eliminate LOD crack artifacts without skirts across arbitrary elevation scales while meeting real-time rendering performance.',
+    description:
+      'Boundary proof-of-concept for buildSubdividedRegionMeshData(). Falsified on performance: while geometrically crack-free without skirts, CPU-side Voronoi diagram construction, Delaunay triangulation, and dynamic re-meshing are not performant for real-time terrain, causing severe frame-time spikes during camera movement and LOD swaps.',
+    runbookPath: 'docs/runbook/028_planet_terrain_attempt_history.md',
+    dateISO: '2026-09-19',
+  },
 ];
 
 const STATUS_LABEL: Record<SpikeStatus, string> = {

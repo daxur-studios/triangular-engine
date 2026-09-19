@@ -173,13 +173,13 @@ h1 {
   letter-spacing: 0.06em;
 }
 
-.tier-tabs, .tag-pills-list, .category-chips {
+.tier-tabs, .tag-pills-list, .category-chips, .sort-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
 }
 
-.tier-tab, .cat-chip, .tag-pill {
+.tier-tab, .cat-chip, .tag-pill, .sort-tab {
   display: inline-flex;
   align-items: center;
   background: #0f1c23;
@@ -200,6 +200,13 @@ h1 {
     color: #ffffff;
     font-weight: 600;
   }
+}
+
+.sort-tab {
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.82rem;
 }
 
 .tier-tab {
@@ -447,6 +454,28 @@ h1 {
   color: #c084fc;
   border: 1px solid rgba(168, 85, 247, 0.25);
   border-radius: 0.3rem;
+}
+
+.cat-pill {
+  font-size: 0.68rem;
+  font-weight: 500;
+  padding: 0.12rem 0.45rem;
+  background: rgba(30, 53, 65, 0.7);
+  color: #a7c4d1;
+  border: 1px solid #233b47;
+  border-radius: 0.3rem;
+}
+
+.date-pill {
+  margin-left: auto;
+  font-family: monospace;
+  font-size: 0.68rem;
+  color: #8fa3af;
+  padding: 0.12rem 0.45rem;
+  background: rgba(14, 26, 33, 0.9);
+  border: 1px solid #1b2f3a;
+  border-radius: 0.3rem;
+  white-space: nowrap;
 }
 
 .card-title {

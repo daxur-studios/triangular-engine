@@ -20,7 +20,8 @@ Houses the interactive feature showcases, proof-of-concept (POC) spikes, and eng
 - **Water & Hydrodynamics**:
   - `water`, `water-buoyancy-poc`, `water-cylinder-poc`, `water-lod-poc`, `water-surface-spike`: Clipmap LOD validation across planar, spherical, and O'Neill cylindrical domains.
 - **Planetary Terrain & Meshing**:
-  - `cell-planet-lab`, `cdlod-planet-lab`, `cell-subdivision-lod-lab`, `terrain-composer-lab`: Evaluation of Voronoi cell partitioning, quadtree LOD, and GPU heightfield rendering.
+  - `cell-planet-lab`, `cdlod-planet-lab`, `terrain-composer-lab`: Evaluation of Voronoi cell partitioning, quadtree LOD, and GPU heightfield rendering.
+  - `cell-subdivision-lod-lab`: Spike 3 (not performant) evaluating region-scoped Voronoi cell subdivision for crack-free LOD boundaries.
 - **Procedural Generation & Ecology**:
   - `animals-lab`, `animals-herd-worlds-lab`, `flora-lab`, `structures-lab`, `cities-lab`, `life-lab`: Generative ecosystems, flocking behaviours, and procedural asset synthesis.
 - **Atmosphere & Physics**:

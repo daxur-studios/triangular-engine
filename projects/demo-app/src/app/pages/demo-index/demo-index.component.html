@@ -87,6 +87,45 @@
       </div>
     </div>
 
+    <!-- Sort Controls -->
+    <div class="filter-row">
+      <span class="filter-label">Sort:</span>
+      <div class="sort-tabs" role="tablist">
+        <button
+          type="button"
+          class="sort-tab"
+          [class.active]="selectedSort() === 'default'"
+          (click)="selectSort('default')"
+        >
+          Default (Categorized)
+        </button>
+        <button
+          type="button"
+          class="sort-tab"
+          [class.active]="selectedSort() === 'newest'"
+          (click)="selectSort('newest')"
+        >
+          ⏱ Newest First
+        </button>
+        <button
+          type="button"
+          class="sort-tab"
+          [class.active]="selectedSort() === 'oldest'"
+          (click)="selectSort('oldest')"
+        >
+          Oldest First
+        </button>
+        <button
+          type="button"
+          class="sort-tab"
+          [class.active]="selectedSort() === 'title'"
+          (click)="selectSort('title')"
+        >
+          Title (A–Z)
+        </button>
+      </div>
+    </div>
+
     <!-- Entry-Point Tags Strip -->
     <div class="filter-row">
       <span class="filter-label">Entry Points:</span>
@@ -169,6 +208,12 @@
               <button type="button" (click)="selectCategory('all')">✕</button>
             </span>
           }
+          @if (selectedSort() !== 'default') {
+            <span class="active-badge">
+              Sort: {{ selectedSort() === 'newest' ? 'Newest First' : selectedSort() === 'oldest' ? 'Oldest First' : 'Title (A–Z)' }}
+              <button type="button" (click)="selectSort('default')">✕</button>
+            </span>
+          }
           <button type="button" class="reset-all-btn" (click)="clearAllFilters()">
             Reset All Filters
           </button>
@@ -189,8 +234,8 @@
     </div>
   }
 
-  <!-- Spotlight Section: Shining Gems (Shown on default "All" or "Gems" views when gems match) -->
-  @if ((selectedTier() === 'all' || selectedTier() === 'gem') && featuredGems().length > 0 && selectedCategory() === 'all' && selectedTag() === 'all' && !searchQuery()) {
+  <!-- Spotlight Section: Shining Gems (Shown on default "All" or "Gems" views when gems match and sort is default) -->
+  @if (selectedSort() === 'default' && (selectedTier() === 'all' || selectedTier() === 'gem') && featuredGems().length > 0 && selectedCategory() === 'all' && selectedTag() === 'all' && !searchQuery()) {
     <section class="spotlight-section" aria-label="Flagship Showcases">
       <div class="section-title-wrap">
         <div class="title-with-badge">
@@ -211,6 +256,7 @@
               @if (demo.requiresJolt) {
                 <span class="jolt-pill" title="Requires Jolt Physics WASM">⚡ Jolt WASM</span>
               }
+              <span class="date-pill" title="Created date">📅 {{ demo.createdAt }}</span>
             </div>
             <strong class="card-title">{{ demo.title }}</strong>
             <p class="card-desc">{{ demo.description }}</p>
@@ -236,19 +282,19 @@
     </section>
   }
 
-  <!-- Categorized Demos Grid -->
-  @for (group of categoryGroups(); track group.category.id) {
-    <section class="category-section" [attr.aria-label]="group.category.label">
+  <!-- Sorted Demos Grid (when sorting by Newest, Oldest, Title) -->
+  @if (selectedSort() !== 'default') {
+    <section class="category-section sorted-section" aria-label="Sorted Demos">
       <div class="section-title-wrap">
         <div class="title-with-badge">
-          <h2>{{ group.category.label }}</h2>
-          <span class="group-count">{{ group.demos.length }}</span>
+          <h2>{{ sortTitle() }}</h2>
+          <span class="group-count">{{ sortedFilteredDemos().length }}</span>
         </div>
-        <p class="section-desc">{{ group.category.description }}</p>
+        <p class="section-desc">Showing {{ sortedFilteredDemos().length }} scenes ordered by {{ sortDescription() }}.</p>
       </div>
 
-      <nav class="demos-grid" [attr.aria-label]="group.category.label + ' examples'">
-        @for (demo of group.demos; track demo.id) {
+      <nav class="demos-grid" [attr.aria-label]="sortTitle()">
+        @for (demo of sortedFilteredDemos(); track demo.id) {
           <a
             [routerLink]="demo.route"
             class="demo-card"
@@ -265,9 +311,11 @@
               } @else {
                 <span class="tier-pill archived-pill">📦 Spike / POC</span>
               }
+              <span class="cat-pill">{{ getCategoryLabel(demo.categoryId) }}</span>
               @if (demo.requiresJolt) {
                 <span class="jolt-pill" title="Requires Jolt Physics WASM">⚡ Jolt WASM</span>
               }
+              <span class="date-pill" title="Created date">📅 {{ demo.createdAt }}</span>
             </div>
 
             <strong class="card-title">{{ demo.title }}</strong>
@@ -293,5 +341,65 @@
         }
       </nav>
     </section>
+  } @else {
+    <!-- Categorized Demos Grid -->
+    @for (group of categoryGroups(); track group.category.id) {
+      <section class="category-section" [attr.aria-label]="group.category.label">
+        <div class="section-title-wrap">
+          <div class="title-with-badge">
+            <h2>{{ group.category.label }}</h2>
+            <span class="group-count">{{ group.demos.length }}</span>
+          </div>
+          <p class="section-desc">{{ group.category.description }}</p>
+        </div>
+
+        <nav class="demos-grid" [attr.aria-label]="group.category.label + ' examples'">
+          @for (demo of group.demos; track demo.id) {
+            <a
+              [routerLink]="demo.route"
+              class="demo-card"
+              [class.card-gem]="demo.tier === 'gem'"
+              [class.card-lab]="demo.tier === 'lab'"
+              [class.card-archived]="demo.tier === 'archived'"
+            >
+              <div class="card-meta">
+                <span class="demo-number">{{ demo.number }}</span>
+                @if (demo.tier === 'gem') {
+                  <span class="tier-pill gem-pill">★ Shining Gem</span>
+                } @else if (demo.tier === 'lab') {
+                  <span class="tier-pill lab-pill">🔬 Lab</span>
+                } @else {
+                  <span class="tier-pill archived-pill">📦 Spike / POC</span>
+                }
+                @if (demo.requiresJolt) {
+                  <span class="jolt-pill" title="Requires Jolt Physics WASM">⚡ Jolt WASM</span>
+                }
+                <span class="date-pill" title="Created date">📅 {{ demo.createdAt }}</span>
+              </div>
+
+              <strong class="card-title">{{ demo.title }}</strong>
+              <p class="card-desc">{{ demo.description }}</p>
+
+              <div class="card-footer">
+                <span class="package-name">{{ demo.package }}</span>
+                <div class="card-tags" (click)="$event.stopPropagation()">
+                  @for (ep of demo.entryPoints; track ep) {
+                    <button
+                      type="button"
+                      class="card-tag-btn"
+                      [class.active]="selectedTag() === ep"
+                      (click)="selectTag(ep)"
+                      title="Filter by #{{ ep }}"
+                    >
+                      #{{ ep }}
+                    </button>
+                  }
+                </div>
+              </div>
+            </a>
+          }
+        </nav>
+      </section>
+    }
   }
 </main>

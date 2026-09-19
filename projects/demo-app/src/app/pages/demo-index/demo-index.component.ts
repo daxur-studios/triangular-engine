@@ -8,6 +8,7 @@ import {
 import { RouterLink } from '@angular/router';
 
 export type DemoTier = 'gem' | 'lab' | 'archived';
+export type DemoSort = 'default' | 'newest' | 'oldest' | 'title';
 
 export interface DemoCategory {
   readonly id: string;
@@ -22,6 +23,7 @@ export interface DemoItem {
   readonly route: string;
   readonly categoryId: string;
   readonly tier: DemoTier;
+  readonly createdAt: string;
   readonly entryPoints: readonly string[];
   readonly package: string;
   readonly description: string;
@@ -75,6 +77,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/photo-mode-lab',
     categoryId: 'core',
     tier: 'gem',
+    createdAt: '2026-08-28',
     entryPoints: ['procedural', 'terrain', 'scatter', 'water'],
     package: 'triangular-engine',
     description:
@@ -87,6 +90,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/water',
     categoryId: 'water',
     tier: 'gem',
+    createdAt: '2026-07-25',
     entryPoints: ['water', 'terrain', 'postprocessing'],
     package: 'triangular-engine/water',
     description:
@@ -99,6 +103,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/terrain-lab',
     categoryId: 'terrain',
     tier: 'gem',
+    createdAt: '2026-07-22',
     entryPoints: ['terrain', 'jolt'],
     package: 'triangular-engine/terrain',
     requiresJolt: true,
@@ -112,6 +117,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/terrain-chunk-optimizer-lab',
     categoryId: 'terrain',
     tier: 'lab',
+    createdAt: '2026-09-13',
     entryPoints: ['terrain', 'meshoptimizer'],
     package: 'triangular-engine/terrain + meshoptimizer',
     description:
@@ -124,6 +130,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/terrain-chunk-streaming-lab',
     categoryId: 'terrain',
     tier: 'lab',
+    createdAt: '2026-09-15',
     entryPoints: ['terrain', 'meshoptimizer'],
     package: 'triangular-engine/terrain + meshoptimizer',
     description:
@@ -136,6 +143,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/planet-terrain-sphere-lab',
     categoryId: 'terrain',
     tier: 'lab',
+    createdAt: '2026-09-16',
     entryPoints: ['terrain'],
     package: 'triangular-engine/terrain',
     description:
@@ -148,6 +156,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/cdlod-planet-lab',
     categoryId: 'terrain',
     tier: 'gem',
+    createdAt: '2026-08-18',
     entryPoints: ['terrain', 'celestial'],
     package: 'triangular-engine/terrain',
     description:
@@ -160,6 +169,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/cell-planet-25d-map',
     categoryId: 'terrain',
     tier: 'lab',
+    createdAt: '2026-09-13',
     entryPoints: ['worldgen', 'terrain'],
     package: 'triangular-engine/worldgen + terrain',
     description:
@@ -172,6 +182,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/cell-planet-globe',
     categoryId: 'terrain',
     tier: 'lab',
+    createdAt: '2026-09-14',
     entryPoints: ['worldgen'],
     package: 'triangular-engine/worldgen + worldgen/render',
     description:
@@ -184,6 +195,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/cell-planet-morph-spike',
     categoryId: 'terrain',
     tier: 'lab',
+    createdAt: '2026-09-16',
     entryPoints: ['worldgen'],
     package: 'triangular-engine/worldgen + worldgen/render',
     description:
@@ -196,6 +208,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/takram-clouds',
     categoryId: 'atmosphere',
     tier: 'gem',
+    createdAt: '2026-07-14',
     entryPoints: ['takram'],
     package: 'triangular-engine/takram',
     description:
@@ -208,6 +221,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/meadow-lab',
     categoryId: 'vegetation',
     tier: 'gem',
+    createdAt: '2026-08-17',
     entryPoints: ['procedural', 'scatter'],
     package: 'triangular-engine/procedural',
     description:
@@ -220,6 +234,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/flora-scatter-lab',
     categoryId: 'vegetation',
     tier: 'gem',
+    createdAt: '2026-08-14',
     entryPoints: ['procedural', 'scatter', 'jolt'],
     package: 'triangular-engine/procedural',
     requiresJolt: true,
@@ -233,6 +248,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/animals-worlds-lab',
     categoryId: 'fauna',
     tier: 'gem',
+    createdAt: '2026-08-16',
     entryPoints: ['animals'],
     package: 'triangular-engine/animals',
     description:
@@ -245,6 +261,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/animals-herd-worlds-lab',
     categoryId: 'fauna',
     tier: 'gem',
+    createdAt: '2026-08-16',
     entryPoints: ['animals'],
     package: 'triangular-engine/animals',
     description:
@@ -257,6 +274,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/animals-fish-worlds-lab',
     categoryId: 'fauna',
     tier: 'gem',
+    createdAt: '2026-08-16',
     entryPoints: ['animals', 'water'],
     package: 'triangular-engine/animals',
     description:
@@ -269,6 +287,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/impostor-baker',
     categoryId: 'vegetation',
     tier: 'gem',
+    createdAt: '2026-07-31',
     entryPoints: ['impostor', 'procedural'],
     package: 'triangular-engine/impostor',
     description:
@@ -281,6 +300,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/vehicle-trail-lab',
     categoryId: 'physics',
     tier: 'gem',
+    createdAt: '2026-07-28',
     entryPoints: ['trail', 'jolt', 'terrain'],
     package: 'triangular-engine/trail',
     requiresJolt: true,
@@ -296,6 +316,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/engine-demo',
     categoryId: 'core',
     tier: 'lab',
+    createdAt: '2026-07-13',
     entryPoints: ['core', 'postprocessing'],
     package: 'triangular-engine',
     description:
@@ -308,6 +329,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/camera-and-floating-origin',
     categoryId: 'core',
     tier: 'lab',
+    createdAt: '2026-07-17',
     entryPoints: ['core'],
     package: 'triangular-engine',
     description:
@@ -320,6 +342,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/multi-viewport-lab',
     categoryId: 'core',
     tier: 'lab',
+    createdAt: '2026-09-05',
     entryPoints: ['core', 'camera'],
     package: 'triangular-engine',
     description:
@@ -332,6 +355,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/river-lab',
     categoryId: 'terrain',
     tier: 'lab',
+    createdAt: '2026-08-01',
     entryPoints: ['terrain', 'water'],
     package: 'triangular-engine/terrain',
     description:
@@ -344,6 +368,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/terrain-composer-lab',
     categoryId: 'terrain',
     tier: 'lab',
+    createdAt: '2026-08-02',
     entryPoints: ['terrain'],
     package: 'triangular-engine/terrain',
     description:
@@ -356,6 +381,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/geological-features-lab',
     categoryId: 'terrain',
     tier: 'lab',
+    createdAt: '2026-08-06',
     entryPoints: ['terrain'],
     package: 'triangular-engine/terrain',
     description:
@@ -368,6 +394,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/navigation-lab',
     categoryId: 'core',
     tier: 'lab',
+    createdAt: '2026-08-10',
     entryPoints: ['navigation', 'terrain'],
     package: 'triangular-engine/navigation',
     description:
@@ -380,6 +407,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/character-lab',
     categoryId: 'core',
     tier: 'lab',
+    createdAt: '2026-08-30',
     entryPoints: ['core'],
     package: 'triangular-engine',
     description:
@@ -392,6 +420,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/scene-inspection-lab',
     categoryId: 'core',
     tier: 'lab',
+    createdAt: '2026-08-22',
     entryPoints: ['core'],
     package: 'triangular-engine',
     description:
@@ -404,6 +433,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/animals-lab',
     categoryId: 'fauna',
     tier: 'lab',
+    createdAt: '2026-08-09',
     entryPoints: ['animals'],
     package: 'triangular-engine/animals',
     description:
@@ -416,6 +446,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/animals-terrain-world-lab',
     categoryId: 'fauna',
     tier: 'lab',
+    createdAt: '2026-08-17',
     entryPoints: ['animals', 'terrain'],
     package: 'triangular-engine/animals',
     description:
@@ -428,6 +459,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/flora-lab',
     categoryId: 'vegetation',
     tier: 'lab',
+    createdAt: '2026-08-13',
     entryPoints: ['procedural'],
     package: 'triangular-engine/procedural',
     description:
@@ -440,6 +472,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/flora-affordance-lab',
     categoryId: 'vegetation',
     tier: 'lab',
+    createdAt: '2026-08-14',
     entryPoints: ['procedural', 'animals'],
     package: 'triangular-engine/procedural',
     description:
@@ -452,6 +485,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/parts-lab',
     categoryId: 'physics',
     tier: 'lab',
+    createdAt: '2026-08-17',
     entryPoints: ['procedural', 'jolt'],
     package: 'triangular-engine/procedural',
     requiresJolt: true,
@@ -465,6 +499,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/structures-lab',
     categoryId: 'physics',
     tier: 'lab',
+    createdAt: '2026-08-22',
     entryPoints: ['procedural', 'jolt'],
     package: 'triangular-engine/procedural',
     requiresJolt: true,
@@ -478,6 +513,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/cities-lab',
     categoryId: 'terrain',
     tier: 'lab',
+    createdAt: '2026-08-30',
     entryPoints: ['procedural', 'terrain', 'city', 'roads'],
     package: 'triangular-engine/procedural',
     description:
@@ -491,6 +527,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/scatter-lab',
     categoryId: 'vegetation',
     tier: 'lab',
+    createdAt: '2026-07-24',
     entryPoints: ['scatter', 'terrain'],
     package: 'triangular-engine/scatter',
     description:
@@ -503,6 +540,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/scatter-physics-lab',
     categoryId: 'vegetation',
     tier: 'lab',
+    createdAt: '2026-07-25',
     entryPoints: ['scatter', 'jolt'],
     package: 'triangular-engine/scatter',
     requiresJolt: true,
@@ -516,6 +554,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/trail-lab',
     categoryId: 'physics',
     tier: 'lab',
+    createdAt: '2026-07-28',
     entryPoints: ['trail'],
     package: 'triangular-engine/trail',
     description:
@@ -528,6 +567,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/water-buoyancy-poc',
     categoryId: 'water',
     tier: 'lab',
+    createdAt: '2026-07-26',
     entryPoints: ['water', 'jolt'],
     package: 'triangular-engine/water',
     requiresJolt: true,
@@ -541,6 +581,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/spline-lab',
     categoryId: 'core',
     tier: 'lab',
+    createdAt: '2026-08-02',
     entryPoints: ['spline'],
     package: 'triangular-engine/spline',
     description:
@@ -553,6 +594,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/takram-mini-planet',
     categoryId: 'atmosphere',
     tier: 'lab',
+    createdAt: '2026-07-16',
     entryPoints: ['takram'],
     package: 'triangular-engine/takram',
     description:
@@ -565,6 +607,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/takram-cylinder-clouds',
     categoryId: 'atmosphere',
     tier: 'lab',
+    createdAt: '2026-07-21',
     entryPoints: ['takram'],
     package: 'triangular-engine/takram',
     description:
@@ -579,6 +622,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/takram-clouds-spike',
     categoryId: 'atmosphere',
     tier: 'archived',
+    createdAt: '2026-07-13',
     entryPoints: ['takram'],
     package: 'triangular-engine/takram',
     description:
@@ -591,6 +635,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/water-surface-spike',
     categoryId: 'water',
     tier: 'archived',
+    createdAt: '2026-07-22',
     entryPoints: ['water'],
     package: 'triangular-engine/water',
     description:
@@ -603,6 +648,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/water-lod-poc',
     categoryId: 'water',
     tier: 'archived',
+    createdAt: '2026-07-22',
     entryPoints: ['water'],
     package: 'triangular-engine/water',
     description:
@@ -615,6 +661,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/water-material-poc',
     categoryId: 'water',
     tier: 'archived',
+    createdAt: '2026-07-22',
     entryPoints: ['water'],
     package: 'triangular-engine/water',
     description:
@@ -627,6 +674,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/water-sphere-poc',
     categoryId: 'water',
     tier: 'archived',
+    createdAt: '2026-07-23',
     entryPoints: ['water'],
     package: 'triangular-engine/water',
     description:
@@ -639,6 +687,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/water-cylinder-poc',
     categoryId: 'water',
     tier: 'archived',
+    createdAt: '2026-07-23',
     entryPoints: ['water'],
     package: 'triangular-engine/water',
     description:
@@ -651,6 +700,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/life-lab',
     categoryId: 'fauna',
     tier: 'archived',
+    createdAt: '2026-08-05',
     entryPoints: ['life'],
     package: 'triangular-engine/life',
     description:
@@ -663,6 +713,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/destruction-poc',
     categoryId: 'physics',
     tier: 'archived',
+    createdAt: '2026-08-09',
     entryPoints: ['jolt'],
     package: 'triangular-engine/jolt',
     requiresJolt: true,
@@ -676,6 +727,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/soft-body-poc',
     categoryId: 'physics',
     tier: 'archived',
+    createdAt: '2026-08-09',
     entryPoints: ['jolt'],
     package: 'triangular-engine/jolt',
     requiresJolt: true,
@@ -689,6 +741,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/soft-body-tear-lab',
     categoryId: 'physics',
     tier: 'archived',
+    createdAt: '2026-08-09',
     entryPoints: ['jolt'],
     package: 'triangular-engine/jolt',
     requiresJolt: true,
@@ -702,6 +755,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/soft-bend-constraint',
     categoryId: 'physics',
     tier: 'archived',
+    createdAt: '2026-08-09',
     entryPoints: ['jolt'],
     package: 'triangular-engine/jolt',
     requiresJolt: true,
@@ -715,6 +769,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/cell-planet-lab',
     categoryId: 'core',
     tier: 'lab',
+    createdAt: '2026-08-26',
     entryPoints: ['worldgen'],
     package: 'triangular-engine/worldgen',
     description:
@@ -727,6 +782,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/cell-planet-map',
     categoryId: 'core',
     tier: 'lab',
+    createdAt: '2026-08-30',
     entryPoints: ['worldgen'],
     package: 'triangular-engine/worldgen',
     description:
@@ -739,6 +795,7 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/cloud-puffs-lab',
     categoryId: 'atmosphere',
     tier: 'lab',
+    createdAt: '2026-08-29',
     entryPoints: ['clouds'],
     package: 'triangular-engine/clouds',
     description:
@@ -751,22 +808,11 @@ export const DEMOS: readonly DemoItem[] = [
     route: '/planet-physics-lab',
     categoryId: 'physics',
     tier: 'lab',
+    createdAt: '2026-08-30',
     entryPoints: ['worldgen', 'jolt'],
     package: 'triangular-engine/jolt',
     description:
       'Real-scale Jolt physics on a Voronoi-cell planet (runbook 022 M4d, split out of Cell Planet Lab): a collider patch and dropped ball positioned in true meters via RVec3 double precision, across the same world-size tiers as Cell Planet Lab.',
-  },
-  {
-    id: 'cell-subdivision-lod-lab',
-    number: '43',
-    title: 'Cell Subdivision LOD Lab',
-    route: '/cell-subdivision-lod-lab',
-    categoryId: 'core',
-    tier: 'lab',
-    entryPoints: ['worldgen'],
-    package: 'triangular-engine/worldgen',
-    description:
-      'Boundary POC for region-scoped cell subdivision: mutually in-range coarse cells share one joint interior Voronoi diagram (a real jagged bisector between them), while an out-of-range edge stays a plain straight line — no skirts, no cracks, at any elevation scale.',
   },
 ];
 
@@ -795,6 +841,7 @@ export class DemoIndexComponent {
   readonly selectedTier = signal<'all' | DemoTier>('all');
   readonly selectedCategory = signal<string>('all');
   readonly selectedTag = signal<string>('all');
+  readonly selectedSort = signal<DemoSort>('default');
 
   /** All unique entry point tags with demo counts. */
   readonly allTags = computed<readonly TagWithCount[]>(() => {
@@ -862,6 +909,58 @@ export class DemoIndexComponent {
     });
   });
 
+  /** Demos matching active search, tier, category, and tag filters, ordered by selectedSort. */
+  readonly sortedFilteredDemos = computed<readonly DemoItem[]>(() => {
+    const demos = [...this.filteredDemos()];
+    const sort = this.selectedSort();
+
+    switch (sort) {
+      case 'newest':
+        return demos.sort(
+          (a, b) =>
+            b.createdAt.localeCompare(a.createdAt) ||
+            a.number.localeCompare(b.number),
+        );
+      case 'oldest':
+        return demos.sort(
+          (a, b) =>
+            a.createdAt.localeCompare(b.createdAt) ||
+            a.number.localeCompare(b.number),
+        );
+      case 'title':
+        return demos.sort((a, b) => a.title.localeCompare(b.title));
+      case 'default':
+      default:
+        return demos;
+    }
+  });
+
+  readonly sortTitle = computed<string>(() => {
+    switch (this.selectedSort()) {
+      case 'newest':
+        return 'Sorted: Newest First';
+      case 'oldest':
+        return 'Sorted: Oldest First';
+      case 'title':
+        return 'Sorted: Title (A–Z)';
+      default:
+        return 'All Demos';
+    }
+  });
+
+  readonly sortDescription = computed<string>(() => {
+    switch (this.selectedSort()) {
+      case 'newest':
+        return 'creation date (most recent first)';
+      case 'oldest':
+        return 'creation date (oldest first)';
+      case 'title':
+        return 'alphabetical title order';
+      default:
+        return 'default catalog ordering';
+    }
+  });
+
   /** Shining Gems spotlight items (when no restrictive filter/search is active, or matching current search). */
   readonly featuredGems = computed<readonly DemoItem[]>(() => {
     return this.filteredDemos().filter((demo) => demo.tier === 'gem');
@@ -884,13 +983,14 @@ export class DemoIndexComponent {
     return groups;
   });
 
-  /** Whether any non-default filter is currently active. */
+  /** Whether any non-default filter or sort is currently active. */
   readonly hasActiveFilters = computed<boolean>(() => {
     return (
       this.searchQuery().trim().length > 0 ||
       this.selectedTier() !== 'all' ||
       this.selectedCategory() !== 'all' ||
-      this.selectedTag() !== 'all'
+      this.selectedTag() !== 'all' ||
+      this.selectedSort() !== 'default'
     );
   });
 
@@ -920,11 +1020,20 @@ export class DemoIndexComponent {
     this.selectedTag.update((current) => (current === tag ? 'all' : tag));
   }
 
+  selectSort(sort: DemoSort): void {
+    this.selectedSort.set(sort);
+  }
+
+  getCategoryLabel(categoryId: string): string {
+    return this.categories.find((c) => c.id === categoryId)?.label ?? categoryId;
+  }
+
   clearAllFilters(): void {
     this.searchQuery.set('');
     this.selectedTier.set('all');
     this.selectedCategory.set('all');
     this.selectedTag.set('all');
+    this.selectedSort.set('default');
   }
 
   private isInputElement(target: EventTarget | null): boolean {

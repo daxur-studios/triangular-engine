@@ -16,14 +16,22 @@
 
 <div class="overlay-panel">
   <header class="panel-header">
-    <a routerLink="/" class="back-link">&larr; Index</a>
-    <h2>Cell Subdivision LOD Lab</h2>
+    <div class="header-nav">
+      <a routerLink="/spikes" class="back-link">&larr; Spikes</a>
+      <a routerLink="/" class="back-link secondary">Demo Hub</a>
+    </div>
+    <div class="spike-badge">Spike 3 · Not Performant</div>
+    <h2>Cell Subdivision LOD Spike</h2>
     <p class="subtitle">
       Boundary POC for buildSubdividedRegionMeshData() — mutually in-range cells
       share one joint Voronoi diagram; an out-of-range edge stays a plain
       straight line, no skirts, no cracks.
     </p>
   </header>
+
+  <div class="performance-warning" role="alert">
+    <strong>⚠️ Performance Notice:</strong> This architecture is not performant for real-time planetary LOD. Dynamic CPU-side Voronoi re-meshing and fan triangulation introduce significant frame stalls during camera motion and LOD swaps. Kept as an experimental spike falsifying CPU cell subdivision.
+  </div>
 
   <section class="control-group">
     <label class="control-label">Cell Count: {{ cellCount() }}</label>
