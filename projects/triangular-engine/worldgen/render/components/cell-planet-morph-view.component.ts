@@ -43,17 +43,23 @@ import {
   IPlanetMorphGeometryData,
   ISurfaceTransform,
 } from '../planet-morph-geometry';
+import {
+  buildPlanetMorphBorderGeometry,
+  IPlanetMorphBorderGeometryData,
+} from '../planet-morph-border-geometry';
 import { IProjectionBasis } from '../antimeridian-seam';
 import {
   computeSunDirectionFromTime,
   createDefaultPlanetDayNightUniforms,
   createPlanetBorderMorphMaterial,
   createPlanetCellOverlayMaterial,
+  createPlanetMapBorderMaterial,
   createPlanetMorphMaterial,
   enablePlanetDayNightLighting,
   enablePlanetMorphProjection,
   IDynamicProjectionUniforms,
   IPlanetDayNightUniforms,
+  PlanetMapBorderStyle,
 } from '../planet-morph-material';
 
 export type ProjectionTrackingMode = 'none' | 'meridian' | 'oblique';
@@ -129,6 +135,15 @@ export class CellPlanetMorphViewComponent
   readonly adaptiveReliefSubdivision = input<boolean>(true);
   readonly reliefThreshold = input<number>(0.008);
 
+  // Map Frame / Perimeter Border inputs
+  readonly showMapBorder = input<boolean>(false);
+  readonly mapBorderStyle = input<PlanetMapBorderStyle>('cartographic');
+  readonly mapBorderColor = input<string>('#38bdf8');
+  readonly mapBorderOpacity = input<number>(0.85);
+  readonly mapBorderWidth = input<number>(0.07);
+  readonly mapBorderFadeStart = input<number>(0.60);
+  readonly mapBorderFadeEnd = input<number>(0.40);
+
   // Custom Material inputs (allowing consumers to provide their own materials)
   readonly customTerrainMaterial = input<
     | Material
@@ -188,6 +203,9 @@ export class CellPlanetMorphViewComponent
   private territoryRibbonMesh?: Mesh;
   private cellOverlayGeometry?: BufferGeometry;
   private cellOverlayMesh?: Mesh;
+
+  private mapBorderGeometryData?: IPlanetMorphBorderGeometryData;
+  private mapBorderMesh?: Mesh;
 
   private readonly dynamicUniforms: IDynamicProjectionUniforms = {
     uMorph: { value: 0 },
@@ -335,6 +353,25 @@ export class CellPlanetMorphViewComponent
 
       untracked(() => {
         this.rebuildOverlayMeshes();
+      });
+    });
+
+    // Rebuild map border when its parameters change
+    effect(() => {
+      this.showMapBorder();
+      this.mapBorderStyle();
+      this.mapBorderColor();
+      this.mapBorderOpacity();
+      this.mapBorderWidth();
+      this.mapBorderFadeStart();
+      this.mapBorderFadeEnd();
+      this.radius();
+      this.projectionKind();
+      this.longitudeSegments();
+      this.latitudeRings();
+
+      untracked(() => {
+        this.rebuildMapBorderMesh();
       });
     });
   }
@@ -878,5 +915,54 @@ export class CellPlanetMorphViewComponent
     }
     this.terrainGeometryData = undefined;
     this.oceanGeometryData = undefined;
+    this.disposeMapBorderMesh();
+  }
+
+  private rebuildMapBorderMesh(): void {
+    this.disposeMapBorderMesh();
+    if (!this.showMapBorder()) return;
+
+    const radius = this.radius();
+    const projectionKind = this.projectionKind();
+    const borderWidth = this.mapBorderWidth();
+
+    this.mapBorderGeometryData = buildPlanetMorphBorderGeometry({
+      radius,
+      borderWidth,
+      projectionKind,
+      longitudeSegments: this.longitudeSegments(),
+      latitudeRings: this.latitudeRings(),
+    });
+
+    const borderMat = createPlanetMapBorderMaterial(this.dynamicUniforms, {
+      color: this.mapBorderColor(),
+      opacity: this.mapBorderOpacity(),
+      borderStyle: this.mapBorderStyle(),
+      fadeStart: this.mapBorderFadeStart(),
+      fadeEnd: this.mapBorderFadeEnd(),
+    });
+
+    this.mapBorderMesh = new Mesh(
+      this.mapBorderGeometryData.geometry,
+      borderMat,
+    );
+    this.mapBorderMesh.name = 'morph-map-border';
+    this.mapBorderMesh.renderOrder = 5;
+    this.object3D().add(this.mapBorderMesh);
+  }
+
+  private disposeMapBorderMesh(): void {
+    if (this.mapBorderMesh) {
+      this.object3D().remove(this.mapBorderMesh);
+      this.mapBorderMesh.geometry.dispose();
+      if (Array.isArray(this.mapBorderMesh.material)) {
+        this.mapBorderMesh.material.forEach((m) => m.dispose());
+      } else {
+        this.mapBorderMesh.material.dispose();
+      }
+      this.mapBorderMesh = undefined;
+      this.mapBorderGeometryData = undefined;
+    }
   }
 }
+

@@ -351,5 +351,27 @@ describe('CellPlanetMorphViewComponent', () => {
 
     fixture.destroy();
   });
+
+  it('builds and disposes map border mesh when showMapBorder is toggled', () => {
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', mockSampler);
+    fixture.componentRef.setInput('longitudeSegments', 16);
+    fixture.componentRef.setInput('latitudeRings', 8);
+    fixture.componentRef.setInput('showMapBorder', true);
+    fixture.componentRef.setInput('mapBorderStyle', 'cartographic');
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    const border = comp.object3D().getObjectByName('morph-map-border') as Mesh;
+    expect(border).toBeDefined();
+    expect(border.name).toBe('morph-map-border');
+
+    // Toggle off
+    fixture.componentRef.setInput('showMapBorder', false);
+    fixture.detectChanges();
+    expect(comp.object3D().getObjectByName('morph-map-border')).toBeUndefined();
+
+    fixture.destroy();
+  });
 });
 

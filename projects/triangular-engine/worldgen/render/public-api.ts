@@ -17,3 +17,4 @@ export * from './planet-morph-geometry';
 export * from './planet-morph-material';
 export * from './cell-border-geometry';
 export * from './cell-tactical-overlay';
+export * from './planet-morph-border-geometry';

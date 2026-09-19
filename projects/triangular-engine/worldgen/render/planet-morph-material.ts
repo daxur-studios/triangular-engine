@@ -742,3 +742,146 @@ export function createPlanetCellOverlayMaterial(
     side: DoubleSide,
   });
 }
+
+export type PlanetMapBorderStyle = 'simple' | 'cartographic' | 'tactical';
+
+export interface IPlanetMapBorderMaterialOptions {
+  color?: string | Color;
+  opacity?: number;
+  borderStyle?: PlanetMapBorderStyle;
+  fadeStart?: number;
+  fadeEnd?: number;
+}
+
+export function createPlanetMapBorderMaterial(
+  uniformHolder: IDynamicProjectionUniforms,
+  options: IPlanetMapBorderMaterialOptions = {},
+): ShaderMaterial {
+  const color =
+    options.color instanceof Color
+      ? options.color
+      : new Color(options.color ?? '#38bdf8');
+  const opacity = options.opacity ?? 0.85;
+  const fadeStart = options.fadeStart ?? 0.60;
+  const fadeEnd = options.fadeEnd ?? 0.40;
+  const styleCode =
+    options.borderStyle === 'cartographic'
+      ? 1
+      : options.borderStyle === 'tactical'
+        ? 2
+        : 0;
+
+  return new ShaderMaterial({
+    uniforms: {
+      uMorph: uniformHolder.uMorph,
+      uProjForward: uniformHolder.uProjForward,
+      uProjUp: uniformHolder.uProjUp,
+      uProjRight: uniformHolder.uProjRight,
+      uProjMode: uniformHolder.uProjMode,
+      uMapWidth: uniformHolder.uMapWidth,
+      uMapHeight: uniformHolder.uMapHeight,
+      uRadius: uniformHolder.uRadius,
+      uProjectionType: uniformHolder.uProjectionType,
+      uColor: { value: color },
+      uOpacity: { value: opacity },
+      uFadeStart: { value: fadeStart },
+      uFadeEnd: { value: fadeEnd },
+      uBorderStyle: { value: styleCode },
+    },
+    vertexShader: `
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
+
+      attribute vec3 aSpherePos;
+      attribute vec3 aFlatPos;
+      attribute vec3 aSphereNorm;
+      attribute vec3 aFlatNorm;
+      attribute float aTick;
+
+      uniform float uMorph;
+      uniform vec3 uProjForward;
+      uniform vec3 uProjUp;
+      uniform vec3 uProjRight;
+      uniform float uProjMode;
+      uniform float uRadius;
+
+      varying vec2 vUv;
+      varying float vTick;
+      varying float vMorph;
+
+      void main() {
+        vUv = uv;
+        vTick = aTick;
+        vMorph = uMorph;
+
+        vec3 dynSpherePos = aSpherePos;
+        vec3 dynFlatPos = aFlatPos;
+
+        if (uProjMode > 0.5) {
+          vec3 rotatedNorm = aSphereNorm.x * uProjRight + aSphereNorm.y * uProjUp + aSphereNorm.z * uProjForward;
+          float rDisplaced = length(aSpherePos + vec3(0.0, 0.0, uRadius));
+          dynSpherePos = rotatedNorm * rDisplaced - vec3(0.0, 0.0, uRadius);
+        }
+
+        vec3 morphedPos = mix(dynSpherePos, dynFlatPos, uMorph);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(morphedPos, 1.0);
+        #include <logdepthbuf_vertex>
+      }
+    `,
+    fragmentShader: `
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      uniform float uFadeStart;
+      uniform float uFadeEnd;
+      uniform int uBorderStyle;
+
+      varying vec2 vUv;
+      varying float vTick;
+      varying float vMorph;
+
+      void main() {
+        float fade = clamp((vMorph - uFadeEnd) / (uFadeStart - uFadeEnd), 0.0, 1.0);
+        if (fade <= 0.001) {
+          discard;
+        }
+
+        vec3 col = uColor;
+        float alpha = uOpacity * fade;
+
+        if (uBorderStyle == 1) {
+          // Cartographic: double neatline with coordinate tick marks
+          float innerNeatline = 1.0 - smoothstep(0.04, 0.12, abs(vUv.y - 0.15));
+          float outerNeatline = 1.0 - smoothstep(0.04, 0.12, abs(vUv.y - 0.85));
+          float neatlines = max(innerNeatline, outerNeatline);
+
+          float tickMark = vTick > 0.5 ? 1.0 : 0.0;
+          float tickSpan = tickMark * (1.0 - smoothstep(0.12, 0.55, vUv.y));
+
+          col = mix(col * 0.55, col * 1.35, max(neatlines, tickSpan));
+          alpha = mix(alpha * 0.45, alpha, max(neatlines, tickSpan));
+        } else if (uBorderStyle == 2) {
+          // Tactical HUD: high-contrast neon styling with ticks
+          float innerGlow = 1.0 - smoothstep(0.0, 0.25, vUv.y);
+          float outerGlow = smoothstep(0.75, 1.0, vUv.y);
+          float tick = vTick > 0.5 ? 1.0 : 0.0;
+
+          col = mix(col * 0.8, vec3(1.0), max(outerGlow, tick));
+          alpha = mix(alpha * 0.3, alpha, max(max(innerGlow, outerGlow), tick));
+        }
+
+        gl_FragColor = vec4(col, alpha);
+        #include <logdepthbuf_fragment>
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1.5,
+    polygonOffsetUnits: -4.0,
+    side: DoubleSide,
+  });
+}
+

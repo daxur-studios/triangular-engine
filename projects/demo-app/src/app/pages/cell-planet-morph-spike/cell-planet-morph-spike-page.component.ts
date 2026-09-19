@@ -45,6 +45,7 @@ import {
   MAP_PROJECTION_LABELS,
   MapProjectionKind,
   moistureColor,
+  PlanetMapBorderStyle,
   plateColor,
   ProjectionTrackingMode,
   temperatureColor,
@@ -143,6 +144,13 @@ export class CellPlanetMorphSpikePageComponent {
   readonly tacticalRangeMode = signal(true);
   readonly selectedCellId = signal<number | null>(null);
   readonly hoveredCellId = signal<number | null>(null);
+
+  // Map Frame Border signals
+  readonly showMapBorder = signal(true);
+  readonly mapBorderStyle = signal<PlanetMapBorderStyle>('cartographic');
+  readonly mapBorderStyles: PlanetMapBorderStyle[] = ['cartographic', 'tactical', 'simple'];
+  readonly mapBorderColor = signal('#38bdf8');
+  readonly mapBorderWidth = signal(0.07);
 
   get plateIdByCell(): number[] | null {
     return this.tectonics?.plateIdByCell ?? null;
@@ -555,6 +563,24 @@ export class CellPlanetMorphSpikePageComponent {
         direction: this.graph.cells[this.selectedCellId()!].center,
         point: new Vector3(),
       });
+    }
+  }
+
+  toggleMapBorder(): void {
+    this.showMapBorder.update((v) => !v);
+  }
+
+  onMapBorderStyleChange(event: Event): void {
+    const val = (event.target as HTMLSelectElement).value as PlanetMapBorderStyle;
+    if (this.mapBorderStyles.includes(val)) {
+      this.mapBorderStyle.set(val);
+    }
+  }
+
+  onMapBorderWidthInput(event: Event): void {
+    const val = (event.target as HTMLInputElement).valueAsNumber;
+    if (Number.isFinite(val)) {
+      this.mapBorderWidth.set(val);
     }
   }
 
