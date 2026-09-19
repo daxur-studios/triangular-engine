@@ -735,7 +735,7 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
         const bz = this.cellBorderDirections[oB + 2];
 
         const sagitta = computeEdgeSagitta({ x: ax, y: ay, z: az }, { x: bx, y: by, z: bz }, 1.0);
-        const clearance = minClearance + sagitta;
+        const clearance = minClearance + sagitta + scale * 0.025;
 
         const elevA = clamp && this.cellBorderElevations[i] < seaLevel
           ? seaLevel
@@ -771,7 +771,7 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
         const bz = this.territoryBorderDirections[oB + 2];
 
         const sagitta = computeEdgeSagitta({ x: ax, y: ay, z: az }, { x: bx, y: by, z: bz }, 1.0);
-        const clearance = minClearance * 1.5 + sagitta;
+        const clearance = minClearance * 1.5 + sagitta + scale * 0.025;
 
         const elevA = clamp && this.territoryBorderElevations[i] < seaLevel
           ? seaLevel

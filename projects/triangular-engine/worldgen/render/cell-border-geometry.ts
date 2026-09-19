@@ -63,6 +63,7 @@ export interface ICellOverlayGeometryParams {
   readonly seabedRelief?: boolean;
   readonly seaLevelElevation?: number;
   readonly clampToSeaLevel?: boolean;
+  readonly adaptiveReliefSubdivision?: boolean;
 }
 
 interface ISplitVertex {
@@ -199,7 +200,7 @@ function splitEdgesForProjection(
   clampToSeaLevel = true,
   adaptiveReliefSubdivision = true,
   reliefThreshold = 0.008,
-  maxSubdivisionDepth = 1,
+  maxSubdivisionDepth = 2,
 ): [ISplitVertex, ISplitVertex][] {
   const segmentPairs: [ISplitVertex, ISplitVertex][] = [];
 
@@ -374,7 +375,7 @@ export function buildCellBorderLineGeometry(
     params.clampToSeaLevel ?? true,
     params.adaptiveReliefSubdivision ?? true,
     params.reliefThreshold ?? 0.008,
-    params.maxSubdivisionDepth ?? 1,
+    params.maxSubdivisionDepth ?? 2,
   );
 
   const vertexCount = segmentPairs.length * 2;
@@ -391,7 +392,8 @@ export function buildCellBorderLineGeometry(
 
   for (const [start, end] of segmentPairs) {
     const sagitta = computeEdgeSagitta(start.dir, end.dir, radius);
-    const clearance = minClearance + sagitta;
+    const heightClearance = heightScale * 0.025;
+    const clearance = minClearance + sagitta + heightClearance;
 
     for (const v of [start, end]) {
       const other = v === start ? end.dir : start.dir;
@@ -491,7 +493,7 @@ export function buildTerritoryRibbonGeometry(
     params.clampToSeaLevel ?? true,
     params.adaptiveReliefSubdivision ?? true,
     params.reliefThreshold ?? 0.008,
-    params.maxSubdivisionDepth ?? 1,
+    params.maxSubdivisionDepth ?? 2,
   );
 
   const segmentCount = segmentPairs.length;
@@ -527,7 +529,8 @@ export function buildTerritoryRibbonGeometry(
     const elevB = end.elev;
 
     const sagitta = computeEdgeSagitta(a, b, radius);
-    const clearance = minClearance + sagitta;
+    const heightClearance = heightScale * 0.025;
+    const clearance = minClearance + sagitta + heightClearance;
 
     const rA = radius + elevA * heightScale + clearance;
     const rB = radius + elevB * heightScale + clearance;
@@ -688,13 +691,18 @@ export function buildCellOverlayGeometry(
   const projection: IMapProjection = MAP_PROJECTIONS[projectionKind];
   const mapWidth = 2 * Math.PI * radius;
   const mapHeight = Math.PI * radius;
+  const isSubdivided =
+    (params.adaptiveReliefSubdivision ?? true) && !!params.sampler;
+  const trianglesPerSector = isSubdivided ? 4 : 1;
 
   const graph = params.graph;
 
   // Count total triangles and vertices across all cells
   let totalTriangles = 0;
   for (const cell of graph.cells) {
-    totalTriangles += cell.corners.length;
+    if (cell.corners.length >= 3) {
+      totalTriangles += cell.corners.length * trianglesPerSector;
+    }
   }
 
   const vertexCount = totalTriangles * 3;
@@ -713,132 +721,144 @@ export function buildCellOverlayGeometry(
   let ptr1 = 0;
   let ptr2 = 0;
 
+  const seabedRelief = params.seabedRelief ?? true;
+  const seaLevelElevation = params.seaLevelElevation ?? 0;
+  const clampToSeaLevel = params.clampToSeaLevel ?? true;
+
   for (const cell of graph.cells) {
     const n = cell.corners.length;
     if (n < 3) continue;
 
     const centerDir = cell.center;
+    const cornerDirs = cell.corners;
+
+    // Estimate cell sagitta across diagonal
+    const oppositeIdx = Math.floor(n / 2);
+    const cellSagitta = computeEdgeSagitta(
+      cornerDirs[0],
+      cornerDirs[oppositeIdx],
+      radius,
+    );
+
     const centerElev = resolveElevation(
       centerDir,
       params.sampler,
       params.elevation,
       cell.id,
       cell.id,
-      params.seabedRelief ?? true,
-      params.seaLevelElevation ?? 0,
-      params.clampToSeaLevel ?? true,
+      seabedRelief,
+      seaLevelElevation,
+      clampToSeaLevel,
     );
-    const rCenter = radius + centerElev * heightScale + minClearance;
 
-    const cLat = Math.asin(Math.max(-1, Math.min(1, centerDir.y)));
-    const cLon = projectedLongitude(centerDir);
-    const cProj = projection.project(cLon, cLat, mapWidth, mapHeight);
-    const cFx = (cProj.x / mapWidth - 0.5) * mapWidth;
-    const cFy = -(cProj.y / mapHeight - 0.5) * mapHeight;
-    const cFz = centerElev * heightScale + minClearance;
-
-    const cornerDirs = cell.corners;
-    const cornerElevs = cornerDirs.map((c) =>
-      resolveElevation(
-        c,
+    const cornerElevs = new Float64Array(n);
+    for (let k = 0; k < n; k++) {
+      cornerElevs[k] = resolveElevation(
+        cornerDirs[k],
         params.sampler,
         params.elevation,
         cell.id,
         cell.id,
-        params.seabedRelief ?? true,
-        params.seaLevelElevation ?? 0,
-        params.clampToSeaLevel ?? true,
-      ),
-    );
+        seabedRelief,
+        seaLevelElevation,
+        clampToSeaLevel,
+      );
+    }
 
+    // Measure maximum interior relief bulge across sectors to elevate overlay over summits
+    let maxReliefDelta = 0;
+    if (params.sampler) {
+      for (let k = 0; k < n; k++) {
+        const kNext = (k + 1) % n;
+        const c1 = cornerDirs[k];
+        const c2 = cornerDirs[kNext];
+        const midDir = normalize({
+          x: centerDir.x + c1.x + c2.x,
+          y: centerDir.y + c1.y + c2.y,
+          z: centerDir.z + c1.z + c2.z,
+        });
+        const midElev = resolveElevation(
+          midDir,
+          params.sampler,
+          params.elevation,
+          cell.id,
+          cell.id,
+          seabedRelief,
+          seaLevelElevation,
+          clampToSeaLevel,
+        );
+        const expectedElev =
+          (centerElev + cornerElevs[k] + cornerElevs[kNext]) / 3;
+        const delta = midElev - expectedElev;
+        if (delta > maxReliefDelta) maxReliefDelta = delta;
+      }
+    }
+
+    const heightClearance = heightScale * 0.025;
+    const cellReliefLift = Math.min(0.04, maxReliefDelta * heightScale * 0.6);
+    const cellClearance =
+      minClearance + cellSagitta + heightClearance + cellReliefLift;
+
+    const evalVertex = (
+      dir: IVec3,
+      elev: number,
+      dist: number,
+      u: number,
+      v: number,
+    ) => {
+      const r = radius + elev * heightScale + cellClearance;
+      const lat = Math.asin(Math.max(-1, Math.min(1, dir.y)));
+      const lon = projectedLongitude(dir);
+      const proj = projection.project(lon, lat, mapWidth, mapHeight);
+      const fx = (proj.x / mapWidth - 0.5) * mapWidth;
+      const fy = -(proj.y / mapHeight - 0.5) * mapHeight;
+      const fz = elev * heightScale + cellClearance;
+      return { dir, r, fx, fy, fz, dist, u, v };
+    };
+
+    const vCenter = evalVertex(centerDir, centerElev, 0.0, 0.5, 0.5);
+
+    const vCorners = [];
     for (let k = 0; k < n; k++) {
-      const kNext = (k + 1) % n;
+      vCorners.push(evalVertex(cornerDirs[k], cornerElevs[k], 1.0, 0.0, 1.0));
+    }
 
-      const k1Dir = cornerDirs[k];
-      const k2Dir = cornerDirs[kNext];
-      const k1Elev = cornerElevs[k];
-      const k2Elev = cornerElevs[kNext];
-
-      const rK1 = radius + k1Elev * heightScale + minClearance;
-      const rK2 = radius + k2Elev * heightScale + minClearance;
-
-      const k1Lat = Math.asin(Math.max(-1, Math.min(1, k1Dir.y)));
-      const k1Lon = projectedLongitude(k1Dir);
-      const k1Proj = projection.project(k1Lon, k1Lat, mapWidth, mapHeight);
-      const k1Fx = (k1Proj.x / mapWidth - 0.5) * mapWidth;
-      const k1Fy = -(k1Proj.y / mapHeight - 0.5) * mapHeight;
-      const k1Fz = k1Elev * heightScale + minClearance;
-
-      const k2Lat = Math.asin(Math.max(-1, Math.min(1, k2Dir.y)));
-      const k2Lon = projectedLongitude(k2Dir);
-      const k2Proj = projection.project(k2Lon, k2Lat, mapWidth, mapHeight);
-      const k2Fx = (k2Proj.x / mapWidth - 0.5) * mapWidth;
-      const k2Fy = -(k2Proj.y / mapHeight - 0.5) * mapHeight;
-      const k2Fz = k2Elev * heightScale + minClearance;
-
-      const triVertices = [
-        {
-          dir: centerDir,
-          other1: k1Dir,
-          other2: k2Dir,
-          r: rCenter,
-          fx: cFx,
-          fy: cFy,
-          fz: cFz,
-          dist: 0.0,
-          u: 0.5,
-          v: 0.5,
-        },
-        {
-          dir: k1Dir,
-          other1: centerDir,
-          other2: k2Dir,
-          r: rK1,
-          fx: k1Fx,
-          fy: k1Fy,
-          fz: k1Fz,
-          dist: 1.0,
-          u: 0.0,
-          v: 1.0,
-        },
-        {
-          dir: k2Dir,
-          other1: centerDir,
-          other2: k1Dir,
-          r: rK2,
-          fx: k2Fx,
-          fy: k2Fy,
-          fz: k2Fz,
-          dist: 1.0,
-          u: 1.0,
-          v: 1.0,
-        },
+    const pushTriangle = (
+      v0: ReturnType<typeof evalVertex>,
+      v1: ReturnType<typeof evalVertex>,
+      v2: ReturnType<typeof evalVertex>,
+    ) => {
+      const tri = [
+        { v: v0, other1: v1.dir, other2: v2.dir },
+        { v: v1, other1: v0.dir, other2: v2.dir },
+        { v: v2, other1: v0.dir, other2: v1.dir },
       ];
 
-      for (const tv of triVertices) {
-        const sx = tv.dir.x * tv.r;
-        const sy = tv.dir.y * tv.r;
-        const sz = tv.dir.z * tv.r - radius;
+      for (const item of tri) {
+        const vert = item.v;
+        const sx = vert.dir.x * vert.r;
+        const sy = vert.dir.y * vert.r;
+        const sz = vert.dir.z * vert.r - radius;
 
         spherePositions[ptr3] = sx;
         spherePositions[ptr3 + 1] = sy;
         spherePositions[ptr3 + 2] = sz;
 
-        sphereNormals[ptr3] = tv.dir.x;
-        sphereNormals[ptr3 + 1] = tv.dir.y;
-        sphereNormals[ptr3 + 2] = tv.dir.z;
+        sphereNormals[ptr3] = vert.dir.x;
+        sphereNormals[ptr3 + 1] = vert.dir.y;
+        sphereNormals[ptr3 + 2] = vert.dir.z;
 
-        otherDirs1[ptr3] = tv.other1.x;
-        otherDirs1[ptr3 + 1] = tv.other1.y;
-        otherDirs1[ptr3 + 2] = tv.other1.z;
+        otherDirs1[ptr3] = item.other1.x;
+        otherDirs1[ptr3 + 1] = item.other1.y;
+        otherDirs1[ptr3 + 2] = item.other1.z;
 
-        otherDirs2[ptr3] = tv.other2.x;
-        otherDirs2[ptr3 + 1] = tv.other2.y;
-        otherDirs2[ptr3 + 2] = tv.other2.z;
+        otherDirs2[ptr3] = item.other2.x;
+        otherDirs2[ptr3 + 1] = item.other2.y;
+        otherDirs2[ptr3 + 2] = item.other2.z;
 
-        flatPositions[ptr3] = tv.fx;
-        flatPositions[ptr3 + 1] = tv.fy;
-        flatPositions[ptr3 + 2] = tv.fz;
+        flatPositions[ptr3] = vert.fx;
+        flatPositions[ptr3 + 1] = vert.fy;
+        flatPositions[ptr3 + 2] = vert.fz;
 
         flatNormals[ptr3] = 0;
         flatNormals[ptr3 + 1] = 0;
@@ -849,14 +869,73 @@ export function buildCellOverlayGeometry(
         positions[ptr3 + 2] = sz;
 
         cellIds[ptr1] = cell.id;
-        distFromCenter[ptr1] = tv.dist;
+        distFromCenter[ptr1] = vert.dist;
 
-        uvs[ptr2] = tv.u;
-        uvs[ptr2 + 1] = tv.v;
+        uvs[ptr2] = vert.u;
+        uvs[ptr2 + 1] = vert.v;
 
         ptr3 += 3;
         ptr1 += 1;
         ptr2 += 2;
+      }
+    };
+
+    if (isSubdivided) {
+      const vSpokes = [];
+      for (let k = 0; k < n; k++) {
+        const spDir = normalize({
+          x: centerDir.x + cornerDirs[k].x,
+          y: centerDir.y + cornerDirs[k].y,
+          z: centerDir.z + cornerDirs[k].z,
+        });
+        const spElev = resolveElevation(
+          spDir,
+          params.sampler,
+          params.elevation,
+          cell.id,
+          cell.id,
+          seabedRelief,
+          seaLevelElevation,
+          clampToSeaLevel,
+        );
+        vSpokes.push(evalVertex(spDir, spElev, 0.5, 0.25, 0.75));
+      }
+
+      for (let k = 0; k < n; k++) {
+        const kNext = (k + 1) % n;
+        const vK1 = vCorners[k];
+        const vK2 = vCorners[kNext];
+        const vSp1 = vSpokes[k];
+        const vSp2 = vSpokes[kNext];
+
+        const edgeDir = normalize({
+          x: cornerDirs[k].x + cornerDirs[kNext].x,
+          y: cornerDirs[k].y + cornerDirs[kNext].y,
+          z: cornerDirs[k].z + cornerDirs[kNext].z,
+        });
+        const edgeElev = resolveElevation(
+          edgeDir,
+          params.sampler,
+          params.elevation,
+          cell.id,
+          cell.id,
+          seabedRelief,
+          seaLevelElevation,
+          clampToSeaLevel,
+        );
+        const vEdge = evalVertex(edgeDir, edgeElev, 1.0, 0.5, 1.0);
+
+        pushTriangle(vCenter, vSp1, vSp2);
+        pushTriangle(vSp1, vK1, vEdge);
+        pushTriangle(vEdge, vK2, vSp2);
+        pushTriangle(vSp1, vEdge, vSp2);
+      }
+    } else {
+      for (let k = 0; k < n; k++) {
+        const kNext = (k + 1) % n;
+        const vK1 = vCorners[k];
+        const vK2 = vCorners[kNext];
+        pushTriangle(vCenter, vK1, vK2);
       }
     }
   }

@@ -691,6 +691,7 @@ export class CellPlanetMorphViewComponent
         seabedRelief,
         seaLevelElevation,
         clampToSeaLevel,
+        adaptiveReliefSubdivision,
       });
       const overlayMat = createPlanetCellOverlayMaterial(
         this.dynamicUniforms,

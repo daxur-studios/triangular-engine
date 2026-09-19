@@ -283,4 +283,116 @@ describe('cell-border-geometry', () => {
     expect(geoMountainUnsubdivided.getAttribute('position').count).toBe(2);
     geoMountainUnsubdivided.dispose();
   });
+
+  it('subdivides cell overlay geometry into 4 subtriangles per sector with sampler', () => {
+    const flatSampler = {
+      sample: () => ({
+        elevation: 0.2,
+        baseElevation: 0.2,
+        ridgeRelief: 0,
+        riverCarve: 0,
+        seaLevel: 0,
+        isLand: true,
+      }),
+    };
+
+    const geoSubdivided = buildCellOverlayGeometry({
+      graph,
+      sampler: flatSampler,
+      adaptiveReliefSubdivision: true,
+    });
+    const geoUnsubdivided = buildCellOverlayGeometry({
+      graph,
+      sampler: flatSampler,
+      adaptiveReliefSubdivision: false,
+    });
+
+    const posSub = geoSubdivided.getAttribute('position');
+    const posUnsub = geoUnsubdivided.getAttribute('position');
+
+    // 4 subtriangles per sector when subdivided
+    expect(posSub.count).toBe(posUnsub.count * 4);
+
+    // Verify distance attribute contains center (0.0), spoke midpoints (0.5), and outer boundary (1.0)
+    const distAttr = geoSubdivided.getAttribute('aDist');
+    let hasZero = false;
+    let hasHalf = false;
+    let hasOne = false;
+    for (let i = 0; i < distAttr.count; i++) {
+      const d = distAttr.getX(i);
+      if (Math.abs(d - 0.0) < 1e-4) hasZero = true;
+      if (Math.abs(d - 0.5) < 1e-4) hasHalf = true;
+      if (Math.abs(d - 1.0) < 1e-4) hasOne = true;
+    }
+    expect(hasZero).toBeTrue();
+    expect(hasHalf).toBeTrue();
+    expect(hasOne).toBeTrue();
+
+    geoSubdivided.dispose();
+    geoUnsubdivided.dispose();
+  });
+
+  it('elevates cell overlay geometry to clear interior mountain peaks and scales with heightScale', () => {
+    const cell0 = graph.cells[0];
+    const center = cell0.center;
+
+    // Peak at cell0 center
+    const mountainSampler = {
+      sample: (dir: { x: number; y: number; z: number }) => {
+        const dotCenter = dir.x * center.x + dir.y * center.y + dir.z * center.z;
+        const isNearCenter = dotCenter > 0.99;
+        const elev = isNearCenter ? 0.8 : 0.1;
+        return {
+          elevation: elev,
+          baseElevation: elev,
+          ridgeRelief: 0,
+          riverCarve: 0,
+          seaLevel: 0,
+          isLand: true,
+        };
+      },
+    };
+
+    const geoScale01 = buildCellOverlayGeometry({
+      graph,
+      sampler: mountainSampler,
+      heightScale: 0.1,
+    });
+    const geoScale03 = buildCellOverlayGeometry({
+      graph,
+      sampler: mountainSampler,
+      heightScale: 0.3,
+    });
+
+    const flatZ01 = geoScale01.getAttribute('aFlatPos').getZ(0);
+    const flatZ03 = geoScale03.getAttribute('aFlatPos').getZ(0);
+
+    // flatZ = elev * heightScale + clearance, where clearance also scales with heightScale
+    expect(flatZ03).toBeGreaterThan(flatZ01);
+
+    geoScale01.dispose();
+    geoScale03.dispose();
+  });
+
+  it('scales border line and ribbon clearance dynamically with heightScale', () => {
+    const geoLine01 = buildCellBorderLineGeometry({
+      graph,
+      radius: 2.0,
+      heightScale: 0.1,
+      minClearance: 0.004,
+    });
+    const geoLine03 = buildCellBorderLineGeometry({
+      graph,
+      radius: 2.0,
+      heightScale: 0.3,
+      minClearance: 0.004,
+    });
+
+    const flatZLine01 = geoLine01.getAttribute('aFlatPos').getZ(0);
+    const flatZLine03 = geoLine03.getAttribute('aFlatPos').getZ(0);
+    expect(flatZLine03).toBeGreaterThan(flatZLine01);
+
+    geoLine01.dispose();
+    geoLine03.dispose();
+  });
 });
