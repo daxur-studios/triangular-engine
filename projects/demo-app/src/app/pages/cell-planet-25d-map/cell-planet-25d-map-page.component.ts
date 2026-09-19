@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { BufferGeometry, CanvasTexture, ClampToEdgeWrapping, DataTexture, DoubleSide, Float32BufferAttribute, FloatType, LinearFilter, Mesh, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, RGBAFormat, Sprite, SpriteMaterial, SRGBColorSpace, UnsignedByteType, Vector3 } from 'three';
 import { EngineModule, EngineService, RaycastFocusContext, RaycastOrbitControlsComponent } from 'triangular-engine';
@@ -599,7 +599,7 @@ function makeColorTexture(
         <span>Terrain style</span>
         <select [value]="terrainStyle()" (change)="onTerrainStyleChange($event)">
           @for (style of terrainStyleKinds; track style) {
-            <option [value]="style">{{ terrainStyleLabels[style] }}</option>
+            <option [value]="style" [selected]="terrainStyle() === style">{{ terrainStyleLabels[style] }}</option>
           }
         </select>
       </label>
@@ -723,6 +723,7 @@ function makeColorTexture(
 })
 export class CellPlanet25dMapPageComponent {
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly worldService = inject(CellPlanetWorldService);
@@ -1795,7 +1796,7 @@ export class CellPlanet25dMapPageComponent {
   }
 
   private updateComparisonQueryParams(): void {
-    this.comparisonQueryParams.set({
+    const queryParams = {
       ...this.preservedQueryParams(),
       cellCount: this.cellCount(),
       seed: this.seed(),
@@ -1821,6 +1822,16 @@ export class CellPlanet25dMapPageComponent {
       showVolcanoTerrain: this.showVolcanoTerrain(),
       selectedCell: this.selection()?.cellId ?? '',
       u0Bookmark: this.u0BookmarkId(),
+    };
+    this.comparisonQueryParams.set(queryParams);
+
+    // Keep the current page and the comparison links on the same world state. Previously this
+    // only updated the link bindings, so selecting a terrain style appeared to work until a
+    // refresh silently restored the default `blended` signal value.
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      replaceUrl: true,
     });
   }
 

@@ -34,9 +34,9 @@ export function createCellPlanetTerrainStyleDescriptor(
 }
 
 /**
- * Resolves the sampler used by a terrain view. Both styles intentionally share the current
- * feature-aware sampler during L0. L4 will change only the `cell-features` composition policy;
- * keeping the selection here gives workers and all renderers one stable handoff point.
+ * Resolves the sampler used by a terrain view. Blended preserves the existing authored relief;
+ * cell-features uses the explicit single-owning-cell composition. Keeping the selection here
+ * gives workers and all renderers one stable handoff point.
  */
 export function selectCellPlanetSurfaceSampler(
   world: ICellPlanetWorldSnapshot,
@@ -47,7 +47,8 @@ export function selectCellPlanetSurfaceSampler(
 
   switch (style) {
     case 'blended':
-    case 'cell-features':
       return world.featureSampler;
+    case 'cell-features':
+      return world.cellFeatureSampler;
   }
 }

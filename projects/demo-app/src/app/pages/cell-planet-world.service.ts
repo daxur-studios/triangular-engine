@@ -26,6 +26,8 @@ export interface ICellPlanetWorldSnapshot extends ICellPlanetMapWorldData {
   readonly baseSampler: IPlanetSurfaceSampler;
   /** Canonical surface with the generated cell-owned features applied. */
   readonly featureSampler: IPlanetSurfaceSampler;
+  /** Civ-like surface where a generated feature is owned by exactly one Voronoi cell. */
+  readonly cellFeatureSampler: IPlanetSurfaceSampler;
   readonly seaLevelElevation: number;
 }
 
@@ -82,6 +84,10 @@ export class CellPlanetWorldService {
       features,
       baseSampler: createPlanetSurfaceSampler(graph, tectonics, ecology),
       featureSampler: createPlanetSurfaceSampler(graph, tectonics, ecology, { features }),
+      cellFeatureSampler: createPlanetSurfaceSampler(graph, tectonics, ecology, {
+        features,
+        featureComposition: 'cell',
+      }),
       seaLevelElevation,
     };
     this.#cache.set(key, snapshot);

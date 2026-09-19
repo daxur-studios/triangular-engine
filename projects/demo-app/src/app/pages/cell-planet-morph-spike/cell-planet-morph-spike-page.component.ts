@@ -8,7 +8,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import {
   BoxGeometry,
   Color,
@@ -107,6 +107,7 @@ export type CellPlanetMorphFillMode =
 })
 export class CellPlanetMorphSpikePageComponent {
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly worldService = inject(CellPlanetWorldService);
@@ -381,6 +382,11 @@ export class CellPlanetMorphSpikePageComponent {
     const value = (event.target as HTMLSelectElement).value;
     if (!isCellPlanetTerrainStyle(value) || value === this.terrainStyle()) return;
     this.terrainStyle.set(value);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { ...this.route.snapshot.queryParams, terrainStyle: value },
+      replaceUrl: true,
+    });
     this.rebuildWorld();
   }
 

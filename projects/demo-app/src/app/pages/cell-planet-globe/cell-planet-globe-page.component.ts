@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import {
   BufferAttribute,
   BufferGeometry,
@@ -168,6 +168,7 @@ if (uTerrainMacroEnabled > 0.5) {
 })
 export class CellPlanetGlobePageComponent {
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly worldService = inject(CellPlanetWorldService);
@@ -783,7 +784,7 @@ export class CellPlanetGlobePageComponent {
   }
 
   private updateComparisonQueryParams(): void {
-    this.comparisonQueryParams.set({
+    const queryParams = {
       ...this.preservedQueryParams(),
       cellCount: this.cellCount(),
       seed: this.seed(),
@@ -801,6 +802,12 @@ export class CellPlanetGlobePageComponent {
       showOcean: this.showOcean(),
       selectedCell: this.selectedCellId() ?? '',
       u0Bookmark: this.u0BookmarkId(),
+    };
+    this.comparisonQueryParams.set(queryParams);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      replaceUrl: true,
     });
   }
 

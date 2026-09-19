@@ -72,7 +72,7 @@
     <span>Terrain style</span>
     <select [value]="terrainStyle()" (change)="onTerrainStyleChange($event)">
       @for (style of terrainStyleKinds; track style) {
-        <option [value]="style">{{ terrainStyleLabels[style] }}</option>
+        <option [value]="style" [selected]="terrainStyle() === style">{{ terrainStyleLabels[style] }}</option>
       }
     </select>
   </label>

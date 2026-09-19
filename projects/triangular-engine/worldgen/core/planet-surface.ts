@@ -2,7 +2,7 @@ import { IPlanetEcology } from './ecology';
 import { IPlanetFeatures } from './features';
 import { defaultGeologicalTerrainSettings, sampleVolcano, VolcanoSettings } from './geological-shapes';
 import { IPlanetGraphCore } from './planet-graph';
-import { sampleElevation } from './sample-elevation';
+import { findCellAt, sampleElevation } from './sample-elevation';
 import { IPlanetTectonics } from './tectonics';
 import { cross, dot, IVec3, normalize } from './vec3';
 
@@ -22,6 +22,15 @@ export interface IPlanetSurfaceParams {
   features?: IPlanetFeatures;
   /** Fraction of the containing cell's centre-to-corner radius used by volcanoes. */
   featureRadiusFraction?: number;
+  /**
+   * 'shaped' blends elevation across neighbouring cells (barycentric-interpolated base
+   * elevation, plus ridge/river corridors that shape relief across many cells together — e.g.
+   * one mountain range spanning several cells). 'cell' makes each Voronoi cell its own flat,
+   * self-contained terrain unit: no blending with neighbours and no cross-cell ridge/river
+   * shaping, so a cell's terrain (and any feature instance stamped on it) never depends on or
+   * affects an adjacent cell — the Civ-like "one discrete tile" read.
+   */
+  featureComposition?: 'shaped' | 'cell';
 }
 
 export interface IPlanetSurfaceSample {
@@ -49,6 +58,7 @@ const DEFAULTS: Omit<Required<IPlanetSurfaceParams>, 'features'> = {
   riverWidthRadians: 0.018,
   riverDepth: 0.08,
   featureRadiusFraction: 0.72,
+  featureComposition: 'shaped',
 };
 
 function angularDistance(a: IVec3, b: IVec3): number {
@@ -137,57 +147,82 @@ export function createPlanetSurfaceSampler(
   params: IPlanetSurfaceParams = {},
 ): IPlanetSurfaceSampler {
   const p = { ...DEFAULTS, ...params };
+  const isDiscreteCell = p.featureComposition === 'cell';
   const volcanoSettings = defaultGeologicalTerrainSettings().volcano;
-  const volcanoStamps: IVolcanoStamp[] = (params.features?.instances ?? [])
-    .filter((instance) => instance.kind === 'volcano')
-    .map((instance) => {
-      const cell = graph.cells[instance.siteCellId];
-      if (!cell) return undefined;
-      const reference = Math.abs(cell.center.y) < 0.92 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
-      const tangentX = normalize(cross(reference, cell.center));
-      return {
-        cell,
-        elevationDelta: instance.elevationDelta,
-        tangentX,
-        tangentZ: normalize(cross(cell.center, tangentX)),
-        settings: { ...volcanoSettings, seed: volcanoSettings.seed + instance.siteCellId },
-      };
-    })
-    .filter(
-      (stamp): stamp is IVolcanoStamp => stamp !== undefined,
-    );
+  const volcanoStamps: IVolcanoStamp[] = isDiscreteCell
+    ? []
+    : (params.features?.instances ?? [])
+        .filter((instance) => instance.kind === 'volcano')
+        .map((instance) => {
+          const cell = graph.cells[instance.siteCellId];
+          if (!cell) return undefined;
+          const reference = Math.abs(cell.center.y) < 0.92 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
+          const tangentX = normalize(cross(reference, cell.center));
+          return {
+            cell,
+            elevationDelta: instance.elevationDelta,
+            tangentX,
+            tangentZ: normalize(cross(cell.center, tangentX)),
+            settings: { ...volcanoSettings, seed: volcanoSettings.seed + instance.siteCellId },
+          };
+        })
+        .filter((stamp): stamp is IVolcanoStamp => stamp !== undefined);
 
   return {
     sample(direction: IVec3): IPlanetSurfaceSample {
       const unitDirection = normalize(direction);
-      const baseElevation = sampleElevation(graph, tectonics.elevation, unitDirection);
+      // A discrete cell is its own flat, self-contained terrain unit: its elevation comes
+      // straight from the Voronoi site it belongs to, with no barycentric blend toward
+      // neighbouring cells' corner-averaged elevation. That is what makes adjacent cells meet
+      // at a hard edge instead of the smooth shared shoreline/ridge 'shaped' mode produces.
+      const siteCell = isDiscreteCell ? findCellAt(graph, unitDirection) : undefined;
+      const baseElevation = siteCell
+        ? siteCell.id < tectonics.elevation.length
+          ? tectonics.elevation[siteCell.id]!
+          : tectonics.seaLevelElevation
+        : sampleElevation(graph, tectonics.elevation, unitDirection);
+
       let featureRelief = 0;
-      for (const stamp of volcanoStamps) {
-        featureRelief = Math.max(
-          featureRelief,
-          volcanoRelief(unitDirection, stamp, p.featureRadiusFraction),
-        );
+      if (siteCell) {
+        const instance = params.features?.featureByCellId.get(siteCell.id);
+        if (instance) featureRelief = instance.elevationDelta;
+      } else {
+        for (const stamp of volcanoStamps) {
+          featureRelief = Math.max(
+            featureRelief,
+            volcanoRelief(unitDirection, stamp, p.featureRadiusFraction),
+          );
+        }
       }
       const isLand = baseElevation >= tectonics.seaLevelElevation;
-      const ridgeInfluence = nearestPathInfluence(
-        unitDirection,
-        ecology.ridgePaths,
-        ecology.ridgePathStrength,
-        p.ridgeWidthRadians,
-      );
-      let ridgeRelief = ridgeInfluence * p.ridgeRelief;
-      for (const peak of ecology.ridgePeaks) {
-        ridgeRelief = Math.max(
-          ridgeRelief,
-          smoothFalloff(angularDistance(unitDirection, peak), p.summitWidthRadians) * p.summitRelief,
+
+      // Ridge and river corridors are continuous shaping that stretches across many cells by
+      // design (one mountain range or channel built from several cells acting together) — the
+      // opposite of a discrete cell's self-contained terrain, so a discrete cell skips both.
+      let ridgeRelief = 0;
+      let riverCarve = 0;
+      if (!isDiscreteCell) {
+        const ridgeInfluence = nearestPathInfluence(
+          unitDirection,
+          ecology.ridgePaths,
+          ecology.ridgePathStrength,
+          p.ridgeWidthRadians,
         );
+        ridgeRelief = ridgeInfluence * p.ridgeRelief;
+        for (const peak of ecology.ridgePeaks) {
+          ridgeRelief = Math.max(
+            ridgeRelief,
+            smoothFalloff(angularDistance(unitDirection, peak), p.summitWidthRadians) * p.summitRelief,
+          );
+        }
+
+        // Rivers own their corridors. Keeping their carve below the sea datum would deepen
+        // ocean cells and make river crossings ambiguous at the coast.
+        riverCarve = isLand
+          ? nearestRiverInfluence(unitDirection, ecology.riverPaths, p.riverWidthRadians) * p.riverDepth
+          : 0;
       }
 
-      // Rivers own their corridors. Keeping their carve below the sea datum would deepen
-      // ocean cells and make river crossings ambiguous at the coast.
-      const riverCarve = isLand
-        ? nearestRiverInfluence(unitDirection, ecology.riverPaths, p.riverWidthRadians) * p.riverDepth
-        : 0;
       const shapedElevation = baseElevation + ridgeRelief + featureRelief - riverCarve;
       // Keep land channels from falling through the shoreline, but preserve the
       // ocean floor below the sea datum so planar and spherical consumers can

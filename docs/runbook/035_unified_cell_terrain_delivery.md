@@ -293,9 +293,9 @@ known limitations. Passing a build or a single screenshot never completes this m
   cross-view, streaming and quantitative performance acceptance is still missing.
 - L0 result: added a versioned `blended` / `cell-features` descriptor and shared sampler
   resolver in `cell-planet-terrain-style.ts`; added the `terrainStyle` comparison query;
-  exposed the selector in 2.5D, globe and morph. Both styles intentionally resolve to the
-  current feature-aware sampler until L4 changes the cell-features composition policy, so
-  the current visual terrain remains stable. Added a colocated descriptor test.
+  exposed the selector in 2.5D, globe and morph. Blended preserves the authored relief while
+  cell-features now resolves to a shared single-owning-cell feature sampler, so the selector
+  has a visible terrain effect. Added a colocated descriptor/routing test.
 - Validation: `npx ng build demo-app --optimization=false` passes. `git diff --check` passes.
   Browser review and performance capture remain pending; the user serves the app.
 - Next coding packet: expose a coarse/fine volcano region in the morph page's streamed

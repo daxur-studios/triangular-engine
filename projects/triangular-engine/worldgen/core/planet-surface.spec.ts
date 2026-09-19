@@ -17,6 +17,10 @@ describe('createPlanetSurfaceSampler', () => {
     };
     const baselineSampler = createPlanetSurfaceSampler(graph, tectonics, ecology);
     const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, { features });
+    const cellSampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+      features,
+      featureComposition: 'cell',
+    });
 
     const centre = sampler.sample(site.center);
     const nearCorner = sampler.sample(
@@ -39,6 +43,7 @@ describe('createPlanetSurfaceSampler', () => {
     expect(nearCorner.elevation - baselineNearCorner.elevation).toBeLessThan(
       centre.elevation - baselineCentre.elevation,
     );
+    expect(cellSampler.sample(site.center).elevation - baselineCentre.elevation).toBeCloseTo(0.7, 5);
   });
 
   it('is deterministic and projection-independent', () => {
