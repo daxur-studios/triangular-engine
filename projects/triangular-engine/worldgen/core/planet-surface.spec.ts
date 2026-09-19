@@ -17,9 +17,11 @@ describe('createPlanetSurfaceSampler', () => {
     };
     const baselineSampler = createPlanetSurfaceSampler(graph, tectonics, ecology);
     const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, { features });
+    // cellDetailAmplitude: 0 keeps this assertion exact; the noise layer itself is covered below.
     const cellSampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
       features,
       featureComposition: 'cell',
+      cellDetailAmplitude: 0,
     });
 
     const centre = sampler.sample(site.center);
@@ -44,6 +46,77 @@ describe('createPlanetSurfaceSampler', () => {
       centre.elevation - baselineCentre.elevation,
     );
     expect(cellSampler.sample(site.center).elevation - baselineCentre.elevation).toBeCloseTo(0.7, 5);
+  });
+
+  it('discrete cell mode anchors base elevation to the site cell with no neighbour blend, plus bounded local detail', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 240, seed: 71 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 71 });
+    const ecology = buildPlanetEcology(graph, tectonics);
+    const site = graph.cells[0]!;
+    const nearCornerDirection = normalize({
+      x: site.center.x * 0.8 + site.corners[0]!.x * 0.2,
+      y: site.center.y * 0.8 + site.corners[0]!.y * 0.2,
+      z: site.center.z * 0.8 + site.corners[0]!.z * 0.2,
+    });
+
+    const blendedSampler = createPlanetSurfaceSampler(graph, tectonics, ecology);
+    const flatCellSampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+      featureComposition: 'cell',
+      cellDetailAmplitude: 0,
+    });
+    const detailedCellSampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+      featureComposition: 'cell',
+    });
+
+    // Near a corner, 'shaped' blends toward the neighbours' corner-averaged elevation while
+    // 'cell' stays flat at the site's own value — the "hard edge" the Civ-like mode is for.
+    const blendedNearCorner = blendedSampler.sample(nearCornerDirection).baseElevation;
+    const flatNearCorner = flatCellSampler.sample(nearCornerDirection).baseElevation;
+    expect(flatNearCorner).toBeCloseTo(tectonics.elevation[site.id]!, 10);
+    expect(blendedNearCorner).not.toBeCloseTo(flatNearCorner, 5);
+
+    // The detail layer adds bounded, non-constant roughness on top of that flat anchor.
+    const detailedCentre = detailedCellSampler.sample(site.center).baseElevation;
+    const detailedNearCorner = detailedCellSampler.sample(nearCornerDirection).baseElevation;
+    expect(detailedCentre).not.toBeCloseTo(detailedNearCorner, 5);
+    expect(Math.abs(detailedCentre - tectonics.elevation[site.id]!)).toBeLessThanOrEqual(0.05 + 1e-9);
+    expect(Math.abs(detailedNearCorner - tectonics.elevation[site.id]!)).toBeLessThanOrEqual(0.05 + 1e-9);
+  });
+
+  it('keeps ridge and river shaping identical between shaped and discrete cell modes', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 51 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 51 });
+    const ecology = buildPlanetEcology(graph, tectonics, {
+      riverDetail: { levels: 0 },
+      ridges: { ridgeDetail: { stationCount: 2 } },
+    });
+    const shapedSampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+      ridgeWidthRadians: 0.2,
+      riverWidthRadians: 0.2,
+    });
+    const cellSampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+      ridgeWidthRadians: 0.2,
+      riverWidthRadians: 0.2,
+      featureComposition: 'cell',
+    });
+
+    const ridgePoint = ecology.ridgePaths[0]?.[0] ?? ecology.ridgePeaks[0];
+    expect(ridgePoint).toBeDefined();
+    if (ridgePoint) {
+      expect(cellSampler.sample(ridgePoint).ridgeRelief).toBeCloseTo(
+        shapedSampler.sample(ridgePoint).ridgeRelief,
+        10,
+      );
+    }
+
+    const riverPoint = ecology.riverPaths[0]?.[0];
+    expect(riverPoint).toBeDefined();
+    if (riverPoint) {
+      expect(cellSampler.sample(riverPoint).riverCarve).toBeCloseTo(
+        shapedSampler.sample(riverPoint).riverCarve,
+        10,
+      );
+    }
   });
 
   it('is deterministic and projection-independent', () => {

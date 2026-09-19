@@ -23,14 +23,21 @@ export interface IPlanetSurfaceParams {
   /** Fraction of the containing cell's centre-to-corner radius used by volcanoes. */
   featureRadiusFraction?: number;
   /**
-   * 'shaped' blends elevation across neighbouring cells (barycentric-interpolated base
-   * elevation, plus ridge/river corridors that shape relief across many cells together — e.g.
-   * one mountain range spanning several cells). 'cell' makes each Voronoi cell its own flat,
-   * self-contained terrain unit: no blending with neighbours and no cross-cell ridge/river
-   * shaping, so a cell's terrain (and any feature instance stamped on it) never depends on or
-   * affects an adjacent cell — the Civ-like "one discrete tile" read.
+   * 'shaped' blends base elevation across neighbouring cells (barycentric-interpolated, so a
+   * mountain's peak sits between cell centres rather than snapping to one). 'cell' anchors base
+   * elevation to the containing Voronoi cell's own tectonic value with no blend toward
+   * neighbours — adjacent cells at different elevations meet at a hard edge, the Civ-like
+   * "one discrete tile" read — plus small-scale local noise so a cell reads as natural ground
+   * rather than a dead-flat plateau. Ridge/summit/river shaping still spans cells in both modes:
+   * only the base elevation (and any feature instance stamped on a cell) is cell-local.
    */
   featureComposition?: 'shaped' | 'cell';
+  /** 'cell' mode only: amplitude (unitless elevation, same scale as tectonics) of the local
+   * detail noise layered onto each cell's flat base elevation. */
+  cellDetailAmplitude?: number;
+  /** 'cell' mode only: spatial frequency of the detail noise, in bumps per unit chord length on
+   * the unit sphere — higher values give finer-grained texture within a cell. */
+  cellDetailFrequency?: number;
 }
 
 export interface IPlanetSurfaceSample {
@@ -59,6 +66,8 @@ const DEFAULTS: Omit<Required<IPlanetSurfaceParams>, 'features'> = {
   riverDepth: 0.08,
   featureRadiusFraction: 0.72,
   featureComposition: 'shaped',
+  cellDetailAmplitude: 0.05,
+  cellDetailFrequency: 40,
 };
 
 function angularDistance(a: IVec3, b: IVec3): number {
@@ -98,6 +107,52 @@ function nearestPathInfluence(
 
 function nearestRiverInfluence(direction: IVec3, paths: readonly IVec3[][], width: number): number {
   return smoothFalloff(nearestPathDistance(direction, paths), width);
+}
+
+function hash3(x: number, y: number, z: number, seed: number): number {
+  const value = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + seed * 269.5) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function smoothstep01(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Coherent value noise sampled directly in the unit sphere's Cartesian XYZ, not a lat/long
+ * projection — so it has no pole seam or singularity and stays isotropic everywhere a discrete
+ * cell can be. Used only to give a flat, unblended cell some natural small-scale roughness; not
+ * meant to place or shape a named landform (that is `volcanoRelief`'s job).
+ */
+function cellDetailNoise(direction: IVec3, frequency: number, seed: number): number {
+  const x = direction.x * frequency;
+  const y = direction.y * frequency;
+  const z = direction.z * frequency;
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const z0 = Math.floor(z);
+  const tx = smoothstep01(x - x0);
+  const ty = smoothstep01(y - y0);
+  const tz = smoothstep01(z - z0);
+  const c000 = hash3(x0, y0, z0, seed);
+  const c100 = hash3(x0 + 1, y0, z0, seed);
+  const c010 = hash3(x0, y0 + 1, z0, seed);
+  const c110 = hash3(x0 + 1, y0 + 1, z0, seed);
+  const c001 = hash3(x0, y0, z0 + 1, seed);
+  const c101 = hash3(x0 + 1, y0, z0 + 1, seed);
+  const c011 = hash3(x0, y0 + 1, z0 + 1, seed);
+  const c111 = hash3(x0 + 1, y0 + 1, z0 + 1, seed);
+  const x00 = lerp(c000, c100, tx);
+  const x10 = lerp(c010, c110, tx);
+  const x01 = lerp(c001, c101, tx);
+  const x11 = lerp(c011, c111, tx);
+  const y0v = lerp(x00, x10, ty);
+  const y1v = lerp(x01, x11, ty);
+  return lerp(y0v, y1v, tz);
 }
 
 interface IVolcanoStamp {
@@ -174,12 +229,12 @@ export function createPlanetSurfaceSampler(
       // A discrete cell is its own flat, self-contained terrain unit: its elevation comes
       // straight from the Voronoi site it belongs to, with no barycentric blend toward
       // neighbouring cells' corner-averaged elevation. That is what makes adjacent cells meet
-      // at a hard edge instead of the smooth shared shoreline/ridge 'shaped' mode produces.
+      // at a hard edge instead of the smooth shared shoreline/ridge 'shaped' mode produces. A
+      // small local noise layer keeps that flat anchor from reading as a dead-flat plateau.
       const siteCell = isDiscreteCell ? findCellAt(graph, unitDirection) : undefined;
       const baseElevation = siteCell
-        ? siteCell.id < tectonics.elevation.length
-          ? tectonics.elevation[siteCell.id]!
-          : tectonics.seaLevelElevation
+        ? (siteCell.id < tectonics.elevation.length ? tectonics.elevation[siteCell.id]! : tectonics.seaLevelElevation) +
+          (cellDetailNoise(unitDirection, p.cellDetailFrequency, tectonics.seed) - 0.5) * 2 * p.cellDetailAmplitude
         : sampleElevation(graph, tectonics.elevation, unitDirection);
 
       let featureRelief = 0;
@@ -196,32 +251,28 @@ export function createPlanetSurfaceSampler(
       }
       const isLand = baseElevation >= tectonics.seaLevelElevation;
 
-      // Ridge and river corridors are continuous shaping that stretches across many cells by
-      // design (one mountain range or channel built from several cells acting together) — the
-      // opposite of a discrete cell's self-contained terrain, so a discrete cell skips both.
-      let ridgeRelief = 0;
-      let riverCarve = 0;
-      if (!isDiscreteCell) {
-        const ridgeInfluence = nearestPathInfluence(
-          unitDirection,
-          ecology.ridgePaths,
-          ecology.ridgePathStrength,
-          p.ridgeWidthRadians,
+      // Ridges and rivers stay shared, cross-cell corridors in both modes — a mountain crest or
+      // a river still runs through several cells the same way it does in 'shaped'. Only the
+      // base elevation (and any feature stamp) is cell-local.
+      const ridgeInfluence = nearestPathInfluence(
+        unitDirection,
+        ecology.ridgePaths,
+        ecology.ridgePathStrength,
+        p.ridgeWidthRadians,
+      );
+      let ridgeRelief = ridgeInfluence * p.ridgeRelief;
+      for (const peak of ecology.ridgePeaks) {
+        ridgeRelief = Math.max(
+          ridgeRelief,
+          smoothFalloff(angularDistance(unitDirection, peak), p.summitWidthRadians) * p.summitRelief,
         );
-        ridgeRelief = ridgeInfluence * p.ridgeRelief;
-        for (const peak of ecology.ridgePeaks) {
-          ridgeRelief = Math.max(
-            ridgeRelief,
-            smoothFalloff(angularDistance(unitDirection, peak), p.summitWidthRadians) * p.summitRelief,
-          );
-        }
-
-        // Rivers own their corridors. Keeping their carve below the sea datum would deepen
-        // ocean cells and make river crossings ambiguous at the coast.
-        riverCarve = isLand
-          ? nearestRiverInfluence(unitDirection, ecology.riverPaths, p.riverWidthRadians) * p.riverDepth
-          : 0;
       }
+
+      // Rivers own their corridors. Keeping their carve below the sea datum would deepen
+      // ocean cells and make river crossings ambiguous at the coast.
+      const riverCarve = isLand
+        ? nearestRiverInfluence(unitDirection, ecology.riverPaths, p.riverWidthRadians) * p.riverDepth
+        : 0;
 
       const shapedElevation = baseElevation + ridgeRelief + featureRelief - riverCarve;
       // Keep land channels from falling through the shoreline, but preserve the
