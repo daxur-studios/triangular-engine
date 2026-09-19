@@ -6,14 +6,11 @@ import {
   computeFeatures,
   createPlanetSurfaceSampler,
   deriveIsLand,
-  IPlanetEcology,
-  IPlanetFeatures,
-  IPlanetGraphCore,
   IPlanetSurfaceSampler,
-  IPlanetTectonics,
   WorldProfileKind,
   WORLD_PROFILES,
 } from 'triangular-engine/worldgen';
+import { ICellPlanetMapWorldData } from 'triangular-engine/worldgen/render';
 import { CELL_PLANET_GENERATION_DEFAULTS } from './cell-planet-generation-config';
 
 export interface ICellPlanetWorldOptions {
@@ -24,11 +21,7 @@ export interface ICellPlanetWorldOptions {
   readonly waterLevel?: number;
 }
 
-export interface ICellPlanetWorldSnapshot {
-  readonly graph: IPlanetGraphCore;
-  readonly tectonics: IPlanetTectonics;
-  readonly ecology: IPlanetEcology;
-  readonly features: IPlanetFeatures;
+export interface ICellPlanetWorldSnapshot extends ICellPlanetMapWorldData {
   /** Surface without authored cell feature relief, useful for an A/B debug toggle. */
   readonly baseSampler: IPlanetSurfaceSampler;
   /** Canonical surface with the generated cell-owned features applied. */

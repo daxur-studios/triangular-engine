@@ -16,6 +16,7 @@ import {
 } from 'triangular-engine/worldgen/render';
 import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
 import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
+import { CellPlanetWorldService } from '../cell-planet-world.service';
 import {
   CELL_PLANET_U0_BOOKMARK_IDS,
   CELL_PLANET_U0_FIXTURE,
@@ -69,6 +70,7 @@ export class CellPlanetMapPageComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
   private readonly injector = inject(Injector);
+  private readonly worldService = inject(CellPlanetWorldService);
   protected readonly mapHalfWidth = MAP_HALF_WIDTH;
   protected readonly mapHalfHeight = MAP_HALF_HEIGHT;
 
@@ -97,6 +99,15 @@ export class CellPlanetMapPageComponent {
   readonly projectionKinds = MAP_PROJECTION_KINDS;
   readonly projectionLabels = MAP_PROJECTION_LABELS;
   readonly generationDefaults = CELL_PLANET_GENERATION_DEFAULTS;
+  readonly world = computed(() =>
+    this.worldService.build({
+      cellCount: this.cellCount(),
+      seed: this.seed(),
+      relaxationIterations: this.relaxationIterations(),
+      worldProfileKind: this.worldProfileKind(),
+      waterLevel: this.waterLevel(),
+    }),
+  );
   readonly u0Fixture = CELL_PLANET_U0_FIXTURE;
   readonly u0Bookmarks = CELL_PLANET_U0_FIXTURE.bookmarks;
   readonly u0BookmarkIds = CELL_PLANET_U0_BOOKMARK_IDS;

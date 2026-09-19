@@ -404,11 +404,11 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
   It caches snapshots by generation inputs, exposes base and feature-aware surface samplers, and
   applies the same U0 volcanic default/profile and water-level adjustment to each terrain view.
   The globe now receives the same feature-aware sampler as 2.5D and morph. Morph navigation now
-  carries the shared generation/projection query state into the other routes. The 2D canvas remains
-  a separate renderer and still needs to consume this snapshot contract in a later adapter packet.
-  Library and demo builds pass; browser review should confirm the same bookmark/cell and volcano
-  relief remain aligned when switching among the three terrain routes.
-- Next packet: user visual review of the shared volcano in the morph route, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
+  carries the shared generation/projection query state into the other routes, and the 2D canvas
+  consumes the same snapshot through an optional `worldData` input while retaining its own
+  raster/pan/zoom renderer. Library and demo builds pass; browser review should confirm the same
+  bookmark/cell and volcano relief remain aligned across all four routes.
+- Next packet: user visual review of the shared world across all four routes, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
   cold and warm timings, frame-time percentiles, draw/triangle counts, residency and memory fields.
 - First user review: U0 cell scale, close/strategic zoom range and baseline conditions.
 - Reference hardware/browser/canvas/DPR/build mode: not yet recorded.

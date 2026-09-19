@@ -364,6 +364,15 @@ export interface IProjectionRecenteredEvent {
   source: 'doubleClick' | 'programmatic';
 }
 
+/** Optional host-owned world data shared by several planet renderers. */
+export interface ICellPlanetMapWorldData {
+  readonly graph: IPlanetGraphCore;
+  readonly tectonics: IPlanetTectonics;
+  readonly ecology: IPlanetEcology;
+  readonly features: IPlanetFeatures;
+  readonly seaLevelElevation: number;
+}
+
 /**
  * Reusable Voronoi cell-graph flat map renderer (runbook 022/024's 2D counterpart to
  * `PlanetViewComponent`). Generates a graph + tectonics + ecology from the generation inputs
@@ -398,6 +407,8 @@ export type CellPlanetMapFillMode = 'biome' | 'elevation' | 'plates' | 'temperat
   providers: [provideObject3DComponent(CellPlanetMapComponent)],
 })
 export class CellPlanetMapComponent extends GroupComponent implements OnDestroy {
+  /** When supplied, adopt this graph/terrain instead of generating a second world. */
+  readonly worldData = input<ICellPlanetMapWorldData | null>(null);
   // ==========================================================================
   // Generation inputs
   // ==========================================================================
@@ -500,6 +511,7 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
 
   private baseSeaLevelElevation = 0;
   private features: IPlanetFeatures = { feature: [], instances: [], featureByCellId: new Map() };
+  private worldDataSource: ICellPlanetMapWorldData | null = null;
 
   private dragging = false;
   private dragDistance = 0;
@@ -547,13 +559,18 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     // each run's own write reads back as "changed", rescheduling the effect forever. Same
     // discipline as PlanetViewComponent's usePinning effect (see its own doc comment).
     effect(() => {
+      const worldData = this.worldData();
       this.cellCount();
       this.seed();
       this.relaxationIterations();
       this.jitter();
       this.plateCount();
       this.worldProfileKind();
-      untracked(() => this.#throttleRun(this.regenerateThrottle, () => this.#regenerate()));
+      untracked(() =>
+        this.#throttleRun(this.regenerateThrottle, () =>
+          worldData ? this.#adoptWorldData(worldData) : this.#regenerate(),
+        ),
+      );
     });
 
     effect(() => {
@@ -831,6 +848,7 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
 
   #regenerate(): void {
     const t0 = performance.now();
+    this.worldDataSource = null;
     const profile = WORLD_PROFILES[this.worldProfileKind()];
 
     const graph = buildPlanetGraphCore({
@@ -854,14 +872,34 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
     this.buildMs.set(performance.now() - t0);
   }
 
+  /** Adopts shared world data while keeping canvas rasterization and interaction local. */
+  #adoptWorldData(worldData: ICellPlanetMapWorldData): void {
+    const t0 = performance.now();
+    this.worldDataSource = worldData;
+    this.graph.set(worldData.graph);
+    // The ecology controls below mutate sea level/land flags, so give this renderer its own
+    // mutable tectonics shell and leave the shared snapshot safe for globe/morph consumers.
+    this.tectonics.set({ ...worldData.tectonics, isLand: worldData.tectonics.isLand.slice() });
+    // The shared snapshot already contains this page's water-level shift. Keep the unshifted
+    // baseline here because #rebuildEcology() applies the control once when it derives land.
+    this.baseSeaLevelElevation =
+      worldData.seaLevelElevation - this.waterLevel() * WATER_LEVEL_ELEVATION_SCALE;
+    this.#rebuildEcology();
+    this.buildMs.set(performance.now() - t0);
+  }
+
   /** Recomputes climate/biomes/rivers/features from the existing terrain (graph + tectonics)
    * without rebuilding plates/elevation - so `climateExtreme`/`season`/`waterLevel` all restyle
    * the *same* map instead of rerolling a new one on every change. `#regenerate()` also routes
    * through here after building fresh terrain. */
   #rebuildEcology(): void {
     const graph = this.graph();
-    const tectonics = this.tectonics();
-    if (!graph || !tectonics) return;
+    const currentTectonics = this.tectonics();
+    if (!graph || !currentTectonics) return;
+
+    const tectonics = this.worldDataSource
+      ? { ...currentTectonics, isLand: currentTectonics.isLand.slice() }
+      : currentTectonics;
 
     const profile = WORLD_PROFILES[this.worldProfileKind()];
 
@@ -873,6 +911,7 @@ export class CellPlanetMapComponent extends GroupComponent implements OnDestroy 
       seaLevelElevation,
       profile.tectonics?.minRegionCellFraction,
     );
+    if (this.worldDataSource) this.tectonics.set(tectonics);
 
     const ecology = buildPlanetEcology(graph, tectonics, {
       climate: { ...profile.climate, baseTemperatureOffset: this.#effectiveTemperatureOffset(profile) },

@@ -92,7 +92,8 @@ The current implementation is not yet at that unified state. The 2D map and
 The analytic volcano/mesa/crater/canyon samplers still exist, but they are not yet a sub-cell
 mesh/detail evaluator; canyon is currently a geological-shape/biome concept, not a per-cell
 `Feature` instance. The 2.5D, fixed globe and morph pages now consume a shared demo-world snapshot
-and feature-aware sampler, while the 2D map still owns its canvas raster generation. The
+and feature-aware sampler, and the 2D canvas now consumes the same shared graph/tectonics/ecology/
+feature snapshot through an adapter while retaining its own raster generation. The
 Meshoptimizer/quadtree labs prove streaming, simplification and seams against synthetic fields,
 not against this cell world.
 
