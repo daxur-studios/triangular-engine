@@ -1,9 +1,10 @@
 import { IPlanetEcology } from './ecology';
 import { IPlanetFeatures } from './features';
+import { defaultGeologicalTerrainSettings, sampleVolcano, VolcanoSettings } from './geological-shapes';
 import { IPlanetGraphCore } from './planet-graph';
 import { sampleElevation } from './sample-elevation';
 import { IPlanetTectonics } from './tectonics';
-import { dot, IVec3, normalize } from './vec3';
+import { cross, dot, IVec3, normalize } from './vec3';
 
 /**
  * Camera-independent shaping controls for the detailed planet surface. Widths are angular
@@ -89,12 +90,16 @@ function nearestRiverInfluence(direction: IVec3, paths: readonly IVec3[][], widt
   return smoothFalloff(nearestPathDistance(direction, paths), width);
 }
 
-function volcanoRelief(
-  direction: IVec3,
-  cell: IPlanetGraphCore['cells'][number],
-  elevationDelta: number,
-  radiusFraction: number,
-): number {
+interface IVolcanoStamp {
+  readonly cell: IPlanetGraphCore['cells'][number];
+  readonly elevationDelta: number;
+  readonly tangentX: IVec3;
+  readonly tangentZ: IVec3;
+  readonly settings: VolcanoSettings;
+}
+
+function volcanoRelief(direction: IVec3, stamp: IVolcanoStamp, radiusFraction: number): number {
+  const { cell, elevationDelta, tangentX, tangentZ, settings } = stamp;
   if (cell.corners.length === 0 || elevationDelta === 0) return 0;
 
   // Keep the analytic shape inside the site cell. The centre-to-nearest-corner distance is a
@@ -102,15 +107,21 @@ function volcanoRelief(
   // boundary keeps the feature owned by one cell and leaves neighbouring cell terrain intact.
   const nearestCornerRadius = Math.min(...cell.corners.map((corner) => angularDistance(cell.center, corner)));
   const radius = Math.max(1e-4, nearestCornerRadius * radiusFraction);
-  const normalized = angularDistance(direction, cell.center) / radius;
+  const angularDistanceFromCentre = angularDistance(direction, cell.center);
+  const normalized = angularDistanceFromCentre / radius;
   if (normalized >= 1) return 0;
 
-  // A cone with a shallow bowl in the middle and a raised rim. The peak relief is controlled by
-  // the generated feature instance, so feature placement remains data-driven and deterministic.
-  const cone = Math.pow(1 - normalized, 1.35);
-  const rim = 0.18 * Math.exp(-Math.pow((normalized - 0.34) / 0.13, 2));
-  const crater = 0.48 * Math.exp(-Math.pow(normalized / 0.18, 2));
-  return Math.max(0, cone + rim - crater) * elevationDelta;
+  // Reuse the geological-features lab's authored volcano in a local tangent frame. The POC's
+  // metre-sized radius is remapped to this cell's angular footprint; its seeded asymmetry,
+  // crater rim and erosion gullies therefore remain the source of truth for both views.
+  const centreAlignment = Math.max(1e-4, dot(direction, cell.center));
+  const tangentScale = settings.radius / Math.max(1e-4, Math.tan(radius));
+  const localX = (dot(direction, tangentX) / centreAlignment) * tangentScale;
+  const localZ = (dot(direction, tangentZ) / centreAlignment) * tangentScale;
+  const authoredElevation = sampleVolcano(localX, localZ, settings);
+  const authoredHeightScale = elevationDelta / Math.max(1, settings.height);
+  const edgeEnvelope = smoothFalloff(angularDistanceFromCentre, radius);
+  return authoredElevation * authoredHeightScale * edgeEnvelope;
 }
 
 /**
@@ -126,15 +137,24 @@ export function createPlanetSurfaceSampler(
   params: IPlanetSurfaceParams = {},
 ): IPlanetSurfaceSampler {
   const p = { ...DEFAULTS, ...params };
-  const volcanoStamps = (params.features?.instances ?? [])
+  const volcanoSettings = defaultGeologicalTerrainSettings().volcano;
+  const volcanoStamps: IVolcanoStamp[] = (params.features?.instances ?? [])
     .filter((instance) => instance.kind === 'volcano')
-    .map((instance) => ({
-      cell: graph.cells[instance.siteCellId],
-      elevationDelta: instance.elevationDelta,
-    }))
+    .map((instance) => {
+      const cell = graph.cells[instance.siteCellId];
+      if (!cell) return undefined;
+      const reference = Math.abs(cell.center.y) < 0.92 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
+      const tangentX = normalize(cross(reference, cell.center));
+      return {
+        cell,
+        elevationDelta: instance.elevationDelta,
+        tangentX,
+        tangentZ: normalize(cross(cell.center, tangentX)),
+        settings: { ...volcanoSettings, seed: volcanoSettings.seed + instance.siteCellId },
+      };
+    })
     .filter(
-      (stamp): stamp is { cell: IPlanetGraphCore['cells'][number]; elevationDelta: number } =>
-        stamp.cell !== undefined,
+      (stamp): stamp is IVolcanoStamp => stamp !== undefined,
     );
 
   return {
@@ -145,7 +165,7 @@ export function createPlanetSurfaceSampler(
       for (const stamp of volcanoStamps) {
         featureRelief = Math.max(
           featureRelief,
-          volcanoRelief(unitDirection, stamp.cell, stamp.elevationDelta, p.featureRadiusFraction),
+          volcanoRelief(unitDirection, stamp, p.featureRadiusFraction),
         );
       }
       const isLand = baseElevation >= tectonics.seaLevelElevation;
