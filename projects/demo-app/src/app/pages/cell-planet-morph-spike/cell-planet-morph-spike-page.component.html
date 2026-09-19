@@ -23,6 +23,7 @@
       [showCellBorders]="showCellBorders()"
       [showTerritoryBorders]="showTerritoryBorders()"
       [clampBordersToSeaLevel]="clampBordersToSeaLevel()"
+      [adaptiveReliefSubdivision]="adaptiveReliefSubdivision()"
       [factionByCell]="plateIdByCell"
       [showTacticalOverlay]="true"
       (cellClick)="onCellClicked($event)"
@@ -180,8 +181,18 @@
           [checked]="clampBordersToSeaLevel()"
           (change)="toggleClampBordersToSeaLevel()"
         />
-        <span>Float on water surface</span>
+        <span>Float on water</span>
       </label>
+      <label>
+        <input
+          type="checkbox"
+          [checked]="adaptiveReliefSubdivision()"
+          (change)="toggleAdaptiveReliefSubdivision()"
+        />
+        <span>Adaptive relief</span>
+      </label>
+    </div>
+    <div class="checkbox-row">
       <label>
         <input
           type="checkbox"

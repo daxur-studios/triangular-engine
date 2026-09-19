@@ -207,4 +207,80 @@ describe('cell-border-geometry', () => {
     expect(foundNegative).toBeTrue();
     geoUnclamped.dispose();
   });
+
+  it('adaptively subdivides edges over mountain relief and stays unsubdivided over flat terrain', () => {
+    const singleEdge = extractCellBorders(graph).slice(0, 1);
+    const edgeA = singleEdge[0].a;
+    const edgeB = singleEdge[0].b;
+
+    // 1. Flat sampler: constant elevation (0.1)
+    const flatSampler = {
+      sample: () => ({
+        elevation: 0.1,
+        baseElevation: 0.1,
+        ridgeRelief: 0,
+        riverCarve: 0,
+        seaLevel: 0,
+        isLand: true,
+      }),
+    };
+
+    const geoFlat = buildCellBorderLineGeometry({
+      graph,
+      edges: singleEdge,
+      sampler: flatSampler,
+      adaptiveReliefSubdivision: true,
+      reliefThreshold: 0.008,
+    });
+    // For 1 flat edge without antimeridian crossing: exactly 2 vertices (1 segment)
+    expect(geoFlat.getAttribute('position').count).toBe(2);
+    geoFlat.dispose();
+
+    // 2. Mountain peak sampler: midpoints bulge upward significantly
+    const mountainSampler = {
+      sample: (dir: { x: number; y: number; z: number }) => {
+        // Dot product with midpoint direction to create a peak between A and B
+        const midX = (edgeA.x + edgeB.x) * 0.5;
+        const midY = (edgeA.y + edgeB.y) * 0.5;
+        const midZ = (edgeA.z + edgeB.z) * 0.5;
+        const len = Math.hypot(midX, midY, midZ);
+        const normMid = { x: midX / len, y: midY / len, z: midZ / len };
+
+        const d = dir.x * normMid.x + dir.y * normMid.y + dir.z * normMid.z;
+        // Peak at midpoint (d ~ 1.0)
+        const isNearMid = d > 0.999;
+        const elev = isNearMid ? 0.5 : 0.1;
+        return {
+          elevation: elev,
+          baseElevation: elev,
+          ridgeRelief: 0,
+          riverCarve: 0,
+          seaLevel: 0,
+          isLand: true,
+        };
+      },
+    };
+
+    // Subdivided when adaptiveReliefSubdivision: true
+    const geoMountainSubdivided = buildCellBorderLineGeometry({
+      graph,
+      edges: singleEdge,
+      sampler: mountainSampler,
+      adaptiveReliefSubdivision: true,
+      reliefThreshold: 0.008,
+    });
+    // Edge is split into 2 segments (4 vertices)
+    expect(geoMountainSubdivided.getAttribute('position').count).toBe(4);
+    geoMountainSubdivided.dispose();
+
+    // Not subdivided when adaptiveReliefSubdivision: false
+    const geoMountainUnsubdivided = buildCellBorderLineGeometry({
+      graph,
+      edges: singleEdge,
+      sampler: mountainSampler,
+      adaptiveReliefSubdivision: false,
+    });
+    expect(geoMountainUnsubdivided.getAttribute('position').count).toBe(2);
+    geoMountainUnsubdivided.dispose();
+  });
 });

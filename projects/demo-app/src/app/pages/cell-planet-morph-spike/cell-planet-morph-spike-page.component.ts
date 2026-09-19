@@ -127,6 +127,7 @@ export class CellPlanetMorphSpikePageComponent {
   readonly showCellBorders = signal(true);
   readonly showTerritoryBorders = signal(true);
   readonly clampBordersToSeaLevel = signal(true);
+  readonly adaptiveReliefSubdivision = signal(true);
   readonly tacticalRangeMode = signal(true);
   readonly selectedCellId = signal<number | null>(null);
   readonly hoveredCellId = signal<number | null>(null);
@@ -417,6 +418,10 @@ export class CellPlanetMorphSpikePageComponent {
 
   toggleClampBordersToSeaLevel(): void {
     this.clampBordersToSeaLevel.update((v) => !v);
+  }
+
+  toggleAdaptiveReliefSubdivision(): void {
+    this.adaptiveReliefSubdivision.update((v) => !v);
   }
 
   toggleTacticalRangeMode(): void {

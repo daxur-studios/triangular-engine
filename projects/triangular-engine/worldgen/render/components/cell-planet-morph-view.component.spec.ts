@@ -203,6 +203,54 @@ describe('CellPlanetMorphViewComponent', () => {
     fixture.destroy();
   });
 
+  it('updates border geometries when adaptiveReliefSubdivision is toggled', () => {
+    const mountainSampler: IPlanetSurfaceSampler = {
+      sample: (dir: IVec3) => {
+        // High frequency noise / relief
+        const elev = Math.sin(dir.x * 20) * 0.4 + 0.3;
+        return {
+          elevation: elev,
+          baseElevation: elev,
+          ridgeRelief: 0,
+          riverCarve: 0,
+          seaLevel: 0,
+          isLand: true,
+        };
+      },
+    };
+    const graph = buildPlanetGraphCore({
+      cellCount: 15,
+      seed: 5,
+      relaxationIterations: 1,
+    });
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', mountainSampler);
+    fixture.componentRef.setInput('graph', graph);
+    fixture.componentRef.setInput('showCellBorders', true);
+    fixture.componentRef.setInput('adaptiveReliefSubdivision', true);
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    const borderMeshSubdivided = comp
+      .object3D()
+      .children.find((c) => c.name === 'morph-cell-borders') as LineSegments;
+    const vertexCountSubdivided = borderMeshSubdivided.geometry.getAttribute('position').count;
+
+    // Toggle off
+    fixture.componentRef.setInput('adaptiveReliefSubdivision', false);
+    fixture.detectChanges();
+
+    const borderMeshUnsubdivided = comp
+      .object3D()
+      .children.find((c) => c.name === 'morph-cell-borders') as LineSegments;
+    const vertexCountUnsubdivided = borderMeshUnsubdivided.geometry.getAttribute('position').count;
+
+    // When adaptiveReliefSubdivision is true on mountain terrain, edges subdivide so vertex count is higher
+    expect(vertexCountSubdivided).toBeGreaterThan(vertexCountUnsubdivided);
+
+    fixture.destroy();
+  });
+
   it('morphs the CPU pick geometry so flat-map picking matches the rendered surface', () => {
     const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
     fixture.componentRef.setInput('sampler', mockSampler);

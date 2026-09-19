@@ -30,6 +30,9 @@ export interface ICellBorderLineGeometryParams {
   readonly seabedRelief?: boolean;
   readonly seaLevelElevation?: number;
   readonly clampToSeaLevel?: boolean;
+  readonly adaptiveReliefSubdivision?: boolean;
+  readonly reliefThreshold?: number;
+  readonly maxSubdivisionDepth?: number;
 }
 
 export interface ITerritoryRibbonGeometryParams {
@@ -44,6 +47,9 @@ export interface ITerritoryRibbonGeometryParams {
   readonly seabedRelief?: boolean;
   readonly seaLevelElevation?: number;
   readonly clampToSeaLevel?: boolean;
+  readonly adaptiveReliefSubdivision?: boolean;
+  readonly reliefThreshold?: number;
+  readonly maxSubdivisionDepth?: number;
 }
 
 export interface ICellOverlayGeometryParams {
@@ -100,6 +106,90 @@ function resolveElevation(
   return elev;
 }
 
+function appendAdaptiveReliefSegments(
+  v0: ISplitVertex,
+  v1: ISplitVertex,
+  out: [ISplitVertex, ISplitVertex][],
+  depth: number,
+  maxDepth: number,
+  reliefThreshold: number,
+  sampler?: IPlanetSurfaceSampler,
+  elevation?: number[],
+  seabedRelief = true,
+  seaLevelElevation = 0,
+  clampToSeaLevel = true,
+): void {
+  if (depth < maxDepth && sampler) {
+    const midX = (v0.dir.x + v1.dir.x) * 0.5;
+    const midY = (v0.dir.y + v1.dir.y) * 0.5;
+    const midZ = (v0.dir.z + v1.dir.z) * 0.5;
+    const midDir = normalize({ x: midX, y: midY, z: midZ });
+
+    const midElev = resolveElevation(
+      midDir,
+      sampler,
+      elevation,
+      v0.cellA,
+      v0.cellB,
+      seabedRelief,
+      seaLevelElevation,
+      clampToSeaLevel,
+    );
+
+    const expectedElev = (v0.elev + v1.elev) * 0.5;
+    const reliefDelta = midElev - expectedElev;
+
+    if (reliefDelta > reliefThreshold) {
+      const latMid = Math.asin(Math.max(-1, Math.min(1, midDir.y)));
+      let midLon = projectedLongitude(midDir);
+      if (Math.abs(v0.pLon - Math.PI) < 1e-4 || Math.abs(v1.pLon - Math.PI) < 1e-4) {
+        if (v0.pLon > 0 || v1.pLon > 0) midLon = Math.abs(midLon);
+      } else if (Math.abs(v0.pLon + Math.PI) < 1e-4 || Math.abs(v1.pLon + Math.PI) < 1e-4) {
+        if (v0.pLon < 0 || v1.pLon < 0) midLon = -Math.abs(midLon);
+      }
+
+      const vMid: ISplitVertex = {
+        dir: midDir,
+        elev: midElev,
+        pLon: midLon,
+        pLat: latMid,
+        cellA: v0.cellA,
+        cellB: v0.cellB,
+      };
+
+      appendAdaptiveReliefSegments(
+        v0,
+        vMid,
+        out,
+        depth + 1,
+        maxDepth,
+        reliefThreshold,
+        sampler,
+        elevation,
+        seabedRelief,
+        seaLevelElevation,
+        clampToSeaLevel,
+      );
+      appendAdaptiveReliefSegments(
+        vMid,
+        v1,
+        out,
+        depth + 1,
+        maxDepth,
+        reliefThreshold,
+        sampler,
+        elevation,
+        seabedRelief,
+        seaLevelElevation,
+        clampToSeaLevel,
+      );
+      return;
+    }
+  }
+
+  out.push([v0, v1]);
+}
+
 function splitEdgesForProjection(
   edges: readonly ICellBorderEdge[],
   sampler?: IPlanetSurfaceSampler,
@@ -107,8 +197,31 @@ function splitEdgesForProjection(
   seabedRelief = true,
   seaLevelElevation = 0,
   clampToSeaLevel = true,
+  adaptiveReliefSubdivision = true,
+  reliefThreshold = 0.008,
+  maxSubdivisionDepth = 1,
 ): [ISplitVertex, ISplitVertex][] {
   const segmentPairs: [ISplitVertex, ISplitVertex][] = [];
+
+  const pushSegment = (s0: ISplitVertex, s1: ISplitVertex): void => {
+    if (adaptiveReliefSubdivision && sampler) {
+      appendAdaptiveReliefSegments(
+        s0,
+        s1,
+        segmentPairs,
+        0,
+        maxSubdivisionDepth,
+        reliefThreshold,
+        sampler,
+        elevation,
+        seabedRelief,
+        seaLevelElevation,
+        clampToSeaLevel,
+      );
+    } else {
+      segmentPairs.push([s0, s1]);
+    }
+  };
 
   for (const edge of edges) {
     const a = edge.a;
@@ -189,8 +302,8 @@ function splitEdgesForProjection(
           cellB: edge.cellB,
         };
 
-        segmentPairs.push([vA, crossPos]);
-        segmentPairs.push([crossNeg, vB]);
+        pushSegment(vA, crossPos);
+        pushSegment(crossNeg, vB);
       } else if (lonA < 0 && lonB > 0) {
         // lonA is near -PI, lonB is near +PI
         const t = (Math.PI - lonB) / (lonA + 2 * Math.PI - lonB);
@@ -220,13 +333,13 @@ function splitEdgesForProjection(
           cellB: edge.cellB,
         };
 
-        segmentPairs.push([vA, crossNeg]);
-        segmentPairs.push([crossPos, vB]);
+        pushSegment(vA, crossNeg);
+        pushSegment(crossPos, vB);
       } else {
-        segmentPairs.push([vA, vB]);
+        pushSegment(vA, vB);
       }
     } else {
-      segmentPairs.push([vA, vB]);
+      pushSegment(vA, vB);
     }
   }
 
@@ -259,6 +372,9 @@ export function buildCellBorderLineGeometry(
     params.seabedRelief ?? true,
     params.seaLevelElevation ?? 0,
     params.clampToSeaLevel ?? true,
+    params.adaptiveReliefSubdivision ?? true,
+    params.reliefThreshold ?? 0.008,
+    params.maxSubdivisionDepth ?? 1,
   );
 
   const vertexCount = segmentPairs.length * 2;
@@ -373,6 +489,9 @@ export function buildTerritoryRibbonGeometry(
     params.seabedRelief ?? true,
     params.seaLevelElevation ?? 0,
     params.clampToSeaLevel ?? true,
+    params.adaptiveReliefSubdivision ?? true,
+    params.reliefThreshold ?? 0.008,
+    params.maxSubdivisionDepth ?? 1,
   );
 
   const segmentCount = segmentPairs.length;
