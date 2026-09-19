@@ -6,6 +6,8 @@ export interface IPlanetMorphBorderGeometryParams {
   readonly radius?: number;
   readonly borderWidth?: number;
   readonly clearance?: number;
+  readonly seaLevelElevation?: number;
+  readonly heightScale?: number;
   readonly projectionKind?: MapProjectionKind;
   readonly longitudeSegments?: number;
   readonly latitudeRings?: number;
@@ -40,7 +42,10 @@ export function buildPlanetMorphBorderGeometry(
 ): IPlanetMorphBorderGeometryData {
   const radius = params.radius ?? 2.0;
   const borderWidth = params.borderWidth ?? 0.07;
-  const clearance = params.clearance ?? 0.02;
+  const seaLevel = params.seaLevelElevation ?? 0;
+  const heightScale = params.heightScale ?? 0.16;
+  const baseElevation = seaLevel * heightScale;
+  const clearance = baseElevation + (params.clearance ?? 0.04);
   const projectionKind = params.projectionKind ?? 'equalEarth';
   const projection = MAP_PROJECTIONS[projectionKind];
   const lonSegments = Math.max(16, Math.floor(params.longitudeSegments ?? 128));
@@ -308,3 +313,93 @@ export function buildPlanetMorphBorderGeometry(
     borderWidth,
   };
 }
+
+export interface IBorderTrackTransform {
+  position: Vector3;
+  normal: Vector3;
+}
+
+/**
+ * Evaluates the 3D position and surface normal of a point on the top border track (lat = +PI/2)
+ * for a given longitude in radians [-PI, PI].
+ */
+export function evaluateTopBorderTrack(
+  lonRad: number,
+  radius: number,
+  projectionKind: MapProjectionKind,
+  morphProgress: number,
+  clearance = 0.04,
+  seaLevelElevation = 0,
+  heightScale = 0.16,
+): IBorderTrackTransform {
+  const totalClearance = clearance + seaLevelElevation * heightScale;
+  const mapWidth = 2 * Math.PI * radius;
+  const mapHeight = Math.PI * radius;
+  const projection = MAP_PROJECTIONS[projectionKind];
+
+  const proj = projection.project(lonRad, Math.PI / 2, mapWidth, mapHeight);
+  const flatX = (proj.x / mapWidth - 0.5) * mapWidth;
+  const flatY = -(proj.y / mapHeight - 0.5) * mapHeight;
+  const flatPos = new Vector3(flatX, flatY, totalClearance);
+
+  const sphereLat = (84 * Math.PI) / 180;
+  const cosLat = Math.cos(sphereLat);
+  const sinLat = Math.sin(sphereLat);
+  const dirX = cosLat * Math.sin(lonRad);
+  const dirY = sinLat;
+  const dirZ = cosLat * Math.cos(lonRad);
+  const dir = new Vector3(dirX, dirY, dirZ).normalize();
+
+  const rDisplaced = radius + totalClearance;
+  const spherePos = new Vector3(
+    dir.x * rDisplaced,
+    dir.y * rDisplaced,
+    dir.z * rDisplaced - radius,
+  );
+
+  const position = new Vector3().lerpVectors(spherePos, flatPos, morphProgress);
+  const normal = new Vector3().lerpVectors(dir, new Vector3(0, 0, 1), morphProgress).normalize();
+
+  return { position, normal };
+}
+
+/**
+ * Evaluates the 3D position and surface normal of a point on the left border track (lon = -PI)
+ * for a given latitude in radians [-PI/2, PI/2].
+ */
+export function evaluateLeftBorderTrack(
+  latRad: number,
+  radius: number,
+  projectionKind: MapProjectionKind,
+  morphProgress: number,
+  clearance = 0.04,
+  seaLevelElevation = 0,
+  heightScale = 0.16,
+): IBorderTrackTransform {
+  const totalClearance = clearance + seaLevelElevation * heightScale;
+  const mapWidth = 2 * Math.PI * radius;
+  const mapHeight = Math.PI * radius;
+  const projection = MAP_PROJECTIONS[projectionKind];
+
+  const proj = projection.project(-Math.PI, latRad, mapWidth, mapHeight);
+  const flatX = (proj.x / mapWidth - 0.5) * mapWidth;
+  const flatY = -(proj.y / mapHeight - 0.5) * mapHeight;
+  const flatPos = new Vector3(flatX, flatY, totalClearance);
+
+  const cosLat = Math.cos(latRad);
+  const sinLat = Math.sin(latRad);
+  const dir = new Vector3(0, sinLat, -cosLat).normalize();
+
+  const rDisplaced = radius + totalClearance;
+  const spherePos = new Vector3(
+    dir.x * rDisplaced,
+    dir.y * rDisplaced,
+    dir.z * rDisplaced - radius,
+  );
+
+  const position = new Vector3().lerpVectors(spherePos, flatPos, morphProgress);
+  const normal = new Vector3().lerpVectors(dir, new Vector3(0, 0, 1), morphProgress).normalize();
+
+  return { position, normal };
+}
+

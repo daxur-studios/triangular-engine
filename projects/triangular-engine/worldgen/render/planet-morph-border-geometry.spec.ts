@@ -1,4 +1,8 @@
-import { buildPlanetMorphBorderGeometry } from './planet-morph-border-geometry';
+import {
+  buildPlanetMorphBorderGeometry,
+  evaluateLeftBorderTrack,
+  evaluateTopBorderTrack,
+} from './planet-morph-border-geometry';
 
 describe('buildPlanetMorphBorderGeometry', () => {
   it('generates a valid BufferGeometry with required attributes for equalEarth', () => {
@@ -58,4 +62,43 @@ describe('buildPlanetMorphBorderGeometry', () => {
     }
     expect(tickCount).toBeGreaterThan(0);
   });
+
+  describe('evaluateTopBorderTrack', () => {
+    it('evaluates top track position in 2.5D flat mode', () => {
+      const topCenter = evaluateTopBorderTrack(0, 2.0, 'equalEarth', 1.0);
+      expect(topCenter.position.x).toBeCloseTo(0, 3);
+      expect(topCenter.position.y).toBeCloseTo(3.058, 2);
+      expect(topCenter.normal.z).toBeCloseTo(1, 3);
+    });
+
+    it('evaluates top track position in 3D sphere mode', () => {
+      const topCenter = evaluateTopBorderTrack(0, 2.0, 'equalEarth', 0.0);
+      expect(topCenter.position.y).toBeGreaterThan(1.5); // near North Pole
+    });
+  });
+
+  describe('evaluateLeftBorderTrack', () => {
+    it('curves along Equal Earth arc in flat mode', () => {
+      // Equator (lat = 0) is at widest extent: -mapWidth / 2 = -2 * PI = -6.283
+      const equator = evaluateLeftBorderTrack(0, 2.0, 'equalEarth', 1.0);
+      expect(equator.position.x).toBeCloseTo(-2 * Math.PI, 2);
+      expect(equator.position.y).toBeCloseTo(0, 3);
+
+      // North Pole (lat = PI/2) narrows inward in Equal Earth
+      const northPole = evaluateLeftBorderTrack(Math.PI / 2, 2.0, 'equalEarth', 1.0);
+      expect(Math.abs(northPole.position.x)).toBeLessThan(Math.abs(equator.position.x));
+      expect(northPole.position.y).toBeCloseTo(3.058, 2);
+    });
+
+    it('stays along a straight vertical line in Equirectangular', () => {
+      const equator = evaluateLeftBorderTrack(0, 2.0, 'equirectangular', 1.0);
+      const northPole = evaluateLeftBorderTrack(Math.PI / 2, 2.0, 'equirectangular', 1.0);
+      const southPole = evaluateLeftBorderTrack(-Math.PI / 2, 2.0, 'equirectangular', 1.0);
+
+      expect(equator.position.x).toBeCloseTo(-2 * Math.PI, 3);
+      expect(northPole.position.x).toBeCloseTo(-2 * Math.PI, 3);
+      expect(southPole.position.x).toBeCloseTo(-2 * Math.PI, 3);
+    });
+  });
 });
+

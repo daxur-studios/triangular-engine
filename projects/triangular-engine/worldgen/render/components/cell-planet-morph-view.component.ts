@@ -12,9 +12,13 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  ConeGeometry,
   LineSegments,
   Material,
   Mesh,
+  MeshStandardMaterial,
+  OctahedronGeometry,
+  Plane,
   Raycaster,
   Vector2,
   Vector3,
@@ -45,6 +49,8 @@ import {
 } from '../planet-morph-geometry';
 import {
   buildPlanetMorphBorderGeometry,
+  evaluateLeftBorderTrack,
+  evaluateTopBorderTrack,
   IPlanetMorphBorderGeometryData,
 } from '../planet-morph-border-geometry';
 import { IProjectionBasis } from '../antimeridian-seam';
@@ -143,6 +149,11 @@ export class CellPlanetMorphViewComponent
   readonly mapBorderWidth = input<number>(0.07);
   readonly mapBorderFadeStart = input<number>(0.60);
   readonly mapBorderFadeEnd = input<number>(0.40);
+  readonly mapBorderClearance = input<number>(0.04);
+  readonly showBorderSliders = input<boolean>(true);
+  readonly projectionCenterLon = input<number>(0);
+  readonly projectionCenterLat = input<number>(0);
+  readonly borderSliderColor = input<string>('#f59e0b');
 
   // Custom Material inputs (allowing consumers to provide their own materials)
   readonly customTerrainMaterial = input<
@@ -185,6 +196,10 @@ export class CellPlanetMorphViewComponent
     cellId: number | null;
     direction: IVec3 | null;
   }>();
+  readonly projectionCenterChange = output<{
+    lonDeg: number;
+    latDeg: number;
+  }>();
 
   // ==========================================================================
   // Internal State & Public Tactical Handle
@@ -206,6 +221,9 @@ export class CellPlanetMorphViewComponent
 
   private mapBorderGeometryData?: IPlanetMorphBorderGeometryData;
   private mapBorderMesh?: Mesh;
+  private topSliderKnobMesh?: Mesh;
+  private leftSliderKnobMesh?: Mesh;
+  private isDraggingSlider: 'top' | 'left' | null = null;
 
   private readonly dynamicUniforms: IDynamicProjectionUniforms = {
     uMorph: { value: 0 },
@@ -296,6 +314,11 @@ export class CellPlanetMorphViewComponent
       const projectionKind = this.projectionKind();
       this.trackingMode();
       this.trackingDirection();
+      this.projectionCenterLon();
+      this.projectionCenterLat();
+      this.seaLevelElevation();
+      this.heightScale();
+      this.mapBorderClearance();
       const showOcean = this.showOcean();
 
       untracked(() => {
@@ -328,6 +351,8 @@ export class CellPlanetMorphViewComponent
         } else {
           this.dynamicUniforms.uProjMode.value = 0;
         }
+
+        this.updateSliderKnobsPositions();
       });
     });
 
@@ -365,6 +390,11 @@ export class CellPlanetMorphViewComponent
       this.mapBorderWidth();
       this.mapBorderFadeStart();
       this.mapBorderFadeEnd();
+      this.mapBorderClearance();
+      this.seaLevelElevation();
+      this.heightScale();
+      this.showBorderSliders();
+      this.borderSliderColor();
       this.radius();
       this.projectionKind();
       this.longitudeSegments();
@@ -536,10 +566,56 @@ export class CellPlanetMorphViewComponent
     if (this.cachedBasis) return this.cachedBasis;
     const mode = this.trackingMode();
     const dir = this.trackingDirection();
-    if (mode === 'none' || !dir) {
-      return undefined;
+    if (mode !== 'none' && dir) {
+      return this.computeBasisFor(mode, dir);
     }
-    return this.computeBasisFor(mode, dir);
+    const lonDeg = this.projectionCenterLon();
+    const latDeg = this.projectionCenterLat();
+    if (Math.abs(lonDeg) > 0.001 || Math.abs(latDeg) > 0.001) {
+      return this.computeManualBasis(lonDeg, latDeg);
+    }
+    return undefined;
+  }
+
+  computeManualBasis(lonDeg: number, latDeg: number): IProjectionBasis {
+    const lonRad = (lonDeg * Math.PI) / 180;
+    const latRad = (latDeg * Math.PI) / 180;
+
+    const cosLat = Math.cos(latRad);
+    const sinLat = Math.sin(latRad);
+
+    const forward: IVec3 = {
+      x: cosLat * Math.sin(lonRad),
+      y: sinLat,
+      z: cosLat * Math.cos(lonRad),
+    };
+
+    if (Math.abs(latDeg) < 0.001) {
+      const up: IVec3 = { x: 0, y: 1, z: 0 };
+      const right: IVec3 = { x: Math.cos(lonRad), y: 0, z: -Math.sin(lonRad) };
+      return { forward, up, right };
+    }
+
+    const worldUp: IVec3 =
+      forward.y > 0.999
+        ? { x: 0, y: 0, z: -1 }
+        : forward.y < -0.999
+          ? { x: 0, y: 0, z: 1 }
+          : { x: 0, y: 1, z: 0 };
+    const dot =
+      worldUp.x * forward.x + worldUp.y * forward.y + worldUp.z * forward.z;
+    const tanUp = {
+      x: worldUp.x - dot * forward.x,
+      y: worldUp.y - dot * forward.y,
+      z: worldUp.z - dot * forward.z,
+    };
+    const up = normalize(tanUp);
+    const right: IVec3 = {
+      x: up.y * forward.z - up.z * forward.y,
+      y: up.z * forward.x - up.x * forward.z,
+      z: up.x * forward.y - up.y * forward.x,
+    };
+    return { forward, up, right };
   }
 
   computeBasisFor(mode: ProjectionTrackingMode, dir: IVec3): IProjectionBasis {
@@ -616,7 +692,151 @@ export class CellPlanetMorphViewComponent
     return { cellId, direction, point: hits[0].point };
   }
 
+  get isDragging(): boolean {
+    return this.isDraggingSlider !== null;
+  }
+
+  onPointerDown(
+    event: PointerEvent | MouseEvent,
+    viewportEl: HTMLElement,
+  ): boolean {
+    if (
+      !this.showMapBorder() ||
+      !this.showBorderSliders() ||
+      this.morphProgress() < 0.4
+    ) {
+      return false;
+    }
+    const rect = viewportEl.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+    const camera = this.engineService.camera;
+    if (!camera) return false;
+
+    const ndc = new Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+    );
+    this.raycaster.setFromCamera(ndc, camera);
+
+    // 1. Check direct knob hits
+    const knobCandidates: Mesh[] = [];
+    if (this.topSliderKnobMesh) knobCandidates.push(this.topSliderKnobMesh);
+    if (this.leftSliderKnobMesh) knobCandidates.push(this.leftSliderKnobMesh);
+
+    if (knobCandidates.length > 0) {
+      const hits = this.raycaster.intersectObjects(knobCandidates);
+      if (hits.length > 0) {
+        if (hits[0].object === this.topSliderKnobMesh) {
+          this.isDraggingSlider = 'top';
+          return true;
+        } else if (hits[0].object === this.leftSliderKnobMesh) {
+          this.isDraggingSlider = 'left';
+          return true;
+        }
+      }
+    }
+
+    // 2. Check track (border mesh) hits
+    if (this.mapBorderMesh) {
+      const borderHits = this.raycaster.intersectObject(this.mapBorderMesh);
+      if (borderHits.length > 0 && borderHits[0].uv) {
+        const u = borderHits[0].uv.x;
+        const lonSegs = this.longitudeSegments();
+        const latRings = this.latitudeRings();
+        const loopCount = 2 * lonSegs + 2 * latRings;
+        const topFracEnd = lonSegs / loopCount;
+        const leftFracStart = (2 * lonSegs + latRings) / loopCount;
+
+        if (u <= topFracEnd) {
+          const frac = u / topFracEnd;
+          const lonDeg = Math.round((frac * 2 - 1) * 180);
+          this.isDraggingSlider = 'top';
+          this.projectionCenterChange.emit({
+            lonDeg,
+            latDeg: this.projectionCenterLat(),
+          });
+          return true;
+        } else if (u >= leftFracStart) {
+          const frac = (u - leftFracStart) / (1 - leftFracStart);
+          const latDeg = Math.round((frac * 2 - 1) * 90);
+          this.isDraggingSlider = 'left';
+          this.projectionCenterChange.emit({
+            lonDeg: this.projectionCenterLon(),
+            latDeg,
+          });
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  onPointerDrag(
+    event: PointerEvent | MouseEvent,
+    viewportEl: HTMLElement,
+  ): boolean {
+    if (!this.isDraggingSlider) return false;
+
+    const rect = viewportEl.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+    const camera = this.engineService.camera;
+    if (!camera) return false;
+
+    const ndc = new Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+    );
+    this.raycaster.setFromCamera(ndc, camera);
+
+    const radius = this.radius();
+    const mapWidth = 2 * Math.PI * radius;
+    const mapHeight = Math.PI * radius;
+
+    const planeNormal = new Vector3(0, 0, 1).applyQuaternion(
+      this.object3D().quaternion,
+    );
+    const plane = new Plane().setFromNormalAndCoplanarPoint(
+      planeNormal,
+      this.object3D().position,
+    );
+    const hitPoint = new Vector3();
+
+    if (this.raycaster.ray.intersectPlane(plane, hitPoint)) {
+      const localHit = this.object3D().worldToLocal(hitPoint);
+
+      if (this.isDraggingSlider === 'top') {
+        const halfWidth = mapWidth / 2;
+        const normX = Math.max(-1, Math.min(1, localHit.x / halfWidth));
+        const lonDeg = Math.round(normX * 180);
+        this.projectionCenterChange.emit({
+          lonDeg,
+          latDeg: this.projectionCenterLat(),
+        });
+        return true;
+      } else if (this.isDraggingSlider === 'left') {
+        const halfHeight = mapHeight / 2;
+        const normY = Math.max(-1, Math.min(1, localHit.y / halfHeight));
+        const latDeg = Math.round(normY * 90);
+        this.projectionCenterChange.emit({
+          lonDeg: this.projectionCenterLon(),
+          latDeg,
+        });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  onPointerUp(): void {
+    this.isDraggingSlider = null;
+  }
+
   onClick(event: MouseEvent, viewportEl: HTMLElement): void {
+    if (this.isDraggingSlider) {
+      this.isDraggingSlider = null;
+      return;
+    }
     const hit = this.resolveCellAtScreen(
       event.clientX,
       event.clientY,
@@ -631,6 +851,10 @@ export class CellPlanetMorphViewComponent
     event: PointerEvent | MouseEvent,
     viewportEl: HTMLElement,
   ): void {
+    if (this.isDraggingSlider) {
+      this.onPointerDrag(event, viewportEl);
+      return;
+    }
     const hit = this.resolveCellAtScreen(
       event.clientX,
       event.clientY,
@@ -932,6 +1156,9 @@ export class CellPlanetMorphViewComponent
       projectionKind,
       longitudeSegments: this.longitudeSegments(),
       latitudeRings: this.latitudeRings(),
+      seaLevelElevation: this.seaLevelElevation(),
+      heightScale: this.heightScale(),
+      clearance: this.mapBorderClearance(),
     });
 
     const borderMat = createPlanetMapBorderMaterial(this.dynamicUniforms, {
@@ -949,9 +1176,54 @@ export class CellPlanetMorphViewComponent
     this.mapBorderMesh.name = 'morph-map-border';
     this.mapBorderMesh.renderOrder = 5;
     this.object3D().add(this.mapBorderMesh);
+
+    if (this.showBorderSliders()) {
+      const sliderColor = this.borderSliderColor();
+      const knobMat = new MeshStandardMaterial({
+        color: sliderColor,
+        roughness: 0.25,
+        metalness: 0.4,
+        emissive: sliderColor,
+        emissiveIntensity: 0.7,
+        transparent: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -1.0,
+        polygonOffsetUnits: -2.0,
+      });
+
+      // Top slider knob: Diamond pointer pointing towards the map
+      const topGeo = new OctahedronGeometry(0.09);
+      topGeo.scale(1.2, 0.7, 0.7);
+      this.topSliderKnobMesh = new Mesh(topGeo, knobMat);
+      this.topSliderKnobMesh.name = 'morph-border-top-knob';
+      this.topSliderKnobMesh.renderOrder = 6;
+      this.object3D().add(this.topSliderKnobMesh);
+
+      // Left slider knob: Diamond pointer pointing right towards the map
+      const leftGeo = new OctahedronGeometry(0.09);
+      leftGeo.scale(0.7, 1.2, 0.7);
+      this.leftSliderKnobMesh = new Mesh(leftGeo, knobMat.clone());
+      this.leftSliderKnobMesh.name = 'morph-border-left-knob';
+      this.leftSliderKnobMesh.renderOrder = 6;
+      this.object3D().add(this.leftSliderKnobMesh);
+    }
+
+    this.updateSliderKnobsPositions();
   }
 
   private disposeMapBorderMesh(): void {
+    if (this.topSliderKnobMesh) {
+      this.object3D().remove(this.topSliderKnobMesh);
+      this.topSliderKnobMesh.geometry.dispose();
+      (this.topSliderKnobMesh.material as Material).dispose();
+      this.topSliderKnobMesh = undefined;
+    }
+    if (this.leftSliderKnobMesh) {
+      this.object3D().remove(this.leftSliderKnobMesh);
+      this.leftSliderKnobMesh.geometry.dispose();
+      (this.leftSliderKnobMesh.material as Material).dispose();
+      this.leftSliderKnobMesh = undefined;
+    }
     if (this.mapBorderMesh) {
       this.object3D().remove(this.mapBorderMesh);
       this.mapBorderMesh.geometry.dispose();
@@ -964,5 +1236,66 @@ export class CellPlanetMorphViewComponent
       this.mapBorderGeometryData = undefined;
     }
   }
+
+  updateSliderKnobsPositions(): void {
+    if (!this.topSliderKnobMesh || !this.leftSliderKnobMesh) return;
+
+    const morph = this.morphProgress();
+    if (morph < 0.40 || !this.showMapBorder() || !this.showBorderSliders()) {
+      this.topSliderKnobMesh.visible = false;
+      this.leftSliderKnobMesh.visible = false;
+      return;
+    }
+
+    this.topSliderKnobMesh.visible = true;
+    this.leftSliderKnobMesh.visible = true;
+
+    const fade = Math.max(0, Math.min(1, (morph - 0.40) / 0.20));
+    (this.topSliderKnobMesh.material as MeshStandardMaterial).opacity = 0.95 * fade;
+    (this.leftSliderKnobMesh.material as MeshStandardMaterial).opacity = 0.95 * fade;
+
+    const radius = this.radius();
+    const projKind = this.projectionKind();
+    const seaLevel = this.seaLevelElevation();
+    const heightScale = this.heightScale();
+    const knobClearance = this.mapBorderClearance() + 0.02;
+
+    const lonRad = (this.projectionCenterLon() * Math.PI) / 180;
+    const topTrans = evaluateTopBorderTrack(
+      lonRad,
+      radius,
+      projKind,
+      morph,
+      knobClearance,
+      seaLevel,
+      heightScale,
+    );
+    this.topSliderKnobMesh.position.copy(topTrans.position);
+    if (topTrans.normal.lengthSq() > 0.001) {
+      this.topSliderKnobMesh.quaternion.setFromUnitVectors(
+        new Vector3(0, 0, 1),
+        topTrans.normal,
+      );
+    }
+
+    const latRad = (this.projectionCenterLat() * Math.PI) / 180;
+    const leftTrans = evaluateLeftBorderTrack(
+      latRad,
+      radius,
+      projKind,
+      morph,
+      knobClearance,
+      seaLevel,
+      heightScale,
+    );
+    this.leftSliderKnobMesh.position.copy(leftTrans.position);
+    if (leftTrans.normal.lengthSq() > 0.001) {
+      this.leftSliderKnobMesh.quaternion.setFromUnitVectors(
+        new Vector3(0, 0, 1),
+        leftTrans.normal,
+      );
+    }
+  }
 }
+
 

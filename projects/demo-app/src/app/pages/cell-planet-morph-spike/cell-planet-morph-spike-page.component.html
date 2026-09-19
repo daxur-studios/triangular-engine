@@ -1,5 +1,5 @@
 <scene [showFps]="true" [logarithmicDepthBuffer]="true">
-  <orbitControls [target]="cameraTarget()" [near]="0.05" />
+  <orbitControls [target]="cameraTarget()" [near]="0.05" [isActive]="orbitControlsActive()" />
   <ambientLight [intensity]="dayNightEnabled() ? 0.6 : 1.2" />
   <directionalLight [position]="sunLightPosition()" [intensity]="2.2" />
   <directionalLight [position]="[-5, -3, -4]" [intensity]="dayNightEnabled() ? 0.1 : 0.4" />
@@ -28,6 +28,10 @@
       [mapBorderStyle]="mapBorderStyle()"
       [mapBorderColor]="mapBorderColor()"
       [mapBorderWidth]="mapBorderWidth()"
+      [mapBorderClearance]="mapBorderClearance()"
+      [showBorderSliders]="showBorderSliders()"
+      [projectionCenterLon]="manualCenterLon()"
+      [projectionCenterLat]="manualCenterLat()"
       [factionByCell]="plateIdByCell"
       [showTacticalOverlay]="true"
       [dayNightEnabled]="dayNightEnabled()"
@@ -37,6 +41,7 @@
       [nightAmbient]="nightAmbient()"
       (cellClick)="onCellClicked($event)"
       (cellHover)="onCellHovered($event)"
+      (projectionCenterChange)="onProjectionCenterChanged($event)"
     />
   }
 </scene>
@@ -340,6 +345,73 @@
           (input)="onMapBorderWidthInput($event)"
         />
       </label>
+
+      <label style="margin-top: 4px;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+          <span>Border elevation: <strong>{{ mapBorderClearance() === 0 ? 'Sea level' : '+' + mapBorderClearance().toFixed(2) + ' above sea' }}</strong></span>
+          <small>Height offset</small>
+        </div>
+        <input
+          type="range"
+          min="0.00"
+          max="0.12"
+          step="0.01"
+          [value]="mapBorderClearance()"
+          (input)="onMapBorderClearanceInput($event)"
+        />
+      </label>
+
+      <div class="checkbox-row" style="margin-top: 6px;">
+        <label>
+          <input
+            type="checkbox"
+            [checked]="showBorderSliders()"
+            (change)="toggleBorderSliders()"
+          />
+          <span>Border slider handles (λ₀, φ₀)</span>
+        </label>
+      </div>
+
+      @if (showBorderSliders()) {
+        <label style="margin-top: 6px;">
+          <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+            <span>Top slider (Center Lon λ₀): <strong>{{ manualCenterLon() > 0 ? '+' : '' }}{{ manualCenterLon() }}°</strong></span>
+            <small>-180° to +180°</small>
+          </div>
+          <input
+            type="range"
+            min="-180"
+            max="180"
+            step="1"
+            [value]="manualCenterLon()"
+            (input)="onManualCenterLonInput($event)"
+          />
+        </label>
+
+        <label style="margin-top: 4px;">
+          <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+            <span>Left slider (Center Lat φ₀): <strong>{{ manualCenterLat() > 0 ? '+' : '' }}{{ manualCenterLat() }}°</strong></span>
+            <small>-90° (SP) to +90° (NP)</small>
+          </div>
+          <input
+            type="range"
+            min="-90"
+            max="90"
+            step="1"
+            [value]="manualCenterLat()"
+            (input)="onManualCenterLatInput($event)"
+          />
+        </label>
+
+        <button
+          type="button"
+          class="small-action"
+          (click)="resetProjectionCenter()"
+          style="margin-top: 6px; padding: 4px 10px; font-size: 0.75rem; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: inherit; cursor: pointer;"
+        >
+          Reset Center (0°, 0°)
+        </button>
+      }
     }
   </fieldset>
 

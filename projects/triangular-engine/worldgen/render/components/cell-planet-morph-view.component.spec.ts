@@ -373,5 +373,70 @@ describe('CellPlanetMorphViewComponent', () => {
 
     fixture.destroy();
   });
+
+  it('builds border slider knobs and computes manual basis from projectionCenterLon/Lat', () => {
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', mockSampler);
+    fixture.componentRef.setInput('longitudeSegments', 16);
+    fixture.componentRef.setInput('latitudeRings', 8);
+    fixture.componentRef.setInput('showMapBorder', true);
+    fixture.componentRef.setInput('showBorderSliders', true);
+    fixture.componentRef.setInput('projectionCenterLon', 45);
+    fixture.componentRef.setInput('projectionCenterLat', 15);
+    fixture.componentRef.setInput('morphProgress', 1.0); // flat view
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    const topKnob = comp.object3D().getObjectByName('morph-border-top-knob') as Mesh;
+    const leftKnob = comp.object3D().getObjectByName('morph-border-left-knob') as Mesh;
+
+    expect(topKnob).toBeDefined();
+    expect(leftKnob).toBeDefined();
+    expect(topKnob.visible).toBeTrue();
+    expect(leftKnob.visible).toBeTrue();
+
+    const basis = comp.computeActiveBasis();
+    expect(basis).toBeDefined();
+    // 45 deg lon and 15 deg lat should produce an active oblique forward vector
+    expect(basis!.forward.x).toBeGreaterThan(0);
+    expect(basis!.forward.y).toBeGreaterThan(0);
+
+    fixture.destroy();
+  });
+
+  it('handles pointer down, drag, and up interactions on border slider knobs', () => {
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', mockSampler);
+    fixture.componentRef.setInput('longitudeSegments', 16);
+    fixture.componentRef.setInput('latitudeRings', 8);
+    fixture.componentRef.setInput('showMapBorder', true);
+    fixture.componentRef.setInput('showBorderSliders', true);
+    fixture.componentRef.setInput('morphProgress', 1.0);
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    expect(comp.isDragging).toBeFalse();
+
+    const viewport = {
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 600,
+      }),
+    } as unknown as HTMLElement;
+
+    // When clicking outside knobs and borders, pointerdown returns false
+    const missEvent = { clientX: 10, clientY: 10 } as MouseEvent;
+    expect(comp.onPointerDown(missEvent, viewport)).toBeFalse();
+    expect(comp.isDragging).toBeFalse();
+
+    // Calling onPointerUp resets any drag state
+    comp.onPointerUp();
+    expect(comp.isDragging).toBeFalse();
+
+    fixture.destroy();
+  });
 });
+
 

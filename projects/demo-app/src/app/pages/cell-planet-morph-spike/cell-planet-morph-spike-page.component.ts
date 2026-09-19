@@ -151,6 +151,10 @@ export class CellPlanetMorphSpikePageComponent {
   readonly mapBorderStyles: PlanetMapBorderStyle[] = ['cartographic', 'tactical', 'simple'];
   readonly mapBorderColor = signal('#38bdf8');
   readonly mapBorderWidth = signal(0.07);
+  readonly mapBorderClearance = signal(0.04);
+  readonly showBorderSliders = signal(true);
+  readonly manualCenterLon = signal(0);
+  readonly manualCenterLat = signal(0);
 
   get plateIdByCell(): number[] | null {
     return this.tectonics?.plateIdByCell ?? null;
@@ -226,6 +230,7 @@ export class CellPlanetMorphSpikePageComponent {
   // Camera signals for OrbitControls
   readonly cameraPosition = signal<[number, number, number]>([0, 0, 4.4]);
   readonly cameraTarget = signal<[number, number, number]>([0, 0, 0]);
+  readonly orbitControlsActive = signal(true);
 
   readonly surfaceSampler = signal<IPlanetSurfaceSampler | null>(null);
   readonly oceanSubstance = computed<'water' | 'lava'>(() => WORLD_PROFILES[this.worldProfileKind()].oceanSubstance ?? 'water');
@@ -312,6 +317,57 @@ export class CellPlanetMorphSpikePageComponent {
 
     // Start live game unit animation loop
     this.startUnitTickLoop();
+
+    // Forward scene clicks to cellPlanetMorphView for picking / selection
+    this.engine.click$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((event) => {
+        if (event && this.engine.renderer?.domElement) {
+          this.morphView()?.onClick(event, this.engine.renderer.domElement);
+        }
+      });
+
+    // 3D border slider drag handling: disables OrbitControls during slider drag
+    if (typeof window !== 'undefined') {
+      const handlePointerDown = (e: PointerEvent) => {
+        const dom = this.engine.renderer?.domElement;
+        if (!dom || e.target !== dom) return;
+        const handled = this.morphView()?.onPointerDown(e, dom);
+        if (handled) {
+          this.orbitControlsActive.set(false);
+        }
+      };
+
+      const handlePointerMove = (e: PointerEvent) => {
+        const dom = this.engine.renderer?.domElement;
+        if (!dom) return;
+        const view = this.morphView();
+        if (view) {
+          if (view.isDragging) {
+            view.onPointerDrag(e, dom);
+          } else if (e.target === dom) {
+            view.onPointerMove(e, dom);
+          }
+        }
+      };
+
+      const handlePointerUp = () => {
+        if (!this.orbitControlsActive()) {
+          this.morphView()?.onPointerUp();
+          this.orbitControlsActive.set(true);
+        }
+      };
+
+      window.addEventListener('pointerdown', handlePointerDown);
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', handlePointerUp);
+
+      this.destroyRef.onDestroy(() => {
+        window.removeEventListener('pointerdown', handlePointerDown);
+        window.removeEventListener('pointermove', handlePointerMove);
+        window.removeEventListener('pointerup', handlePointerUp);
+      });
+    }
 
     this.destroyRef.onDestroy(() => {
       if (this.animationFrameId !== undefined) cancelAnimationFrame(this.animationFrameId);
@@ -581,6 +637,55 @@ export class CellPlanetMorphSpikePageComponent {
     const val = (event.target as HTMLInputElement).valueAsNumber;
     if (Number.isFinite(val)) {
       this.mapBorderWidth.set(val);
+    }
+  }
+
+  onMapBorderClearanceInput(event: Event): void {
+    const val = (event.target as HTMLInputElement).valueAsNumber;
+    if (Number.isFinite(val)) {
+      this.mapBorderClearance.set(val);
+    }
+  }
+
+  toggleBorderSliders(): void {
+    this.showBorderSliders.update((v) => !v);
+  }
+
+  onManualCenterLonInput(event: Event): void {
+    const val = (event.target as HTMLInputElement).valueAsNumber;
+    if (Number.isFinite(val)) {
+      this.manualCenterLon.set(val);
+      this.syncProjectionCenterInfo();
+    }
+  }
+
+  onManualCenterLatInput(event: Event): void {
+    const val = (event.target as HTMLInputElement).valueAsNumber;
+    if (Number.isFinite(val)) {
+      this.manualCenterLat.set(val);
+      this.syncProjectionCenterInfo();
+    }
+  }
+
+  resetProjectionCenter(): void {
+    this.manualCenterLon.set(0);
+    this.manualCenterLat.set(0);
+    this.syncProjectionCenterInfo();
+  }
+
+  onProjectionCenterChanged(event: { lonDeg: number; latDeg: number }): void {
+    this.manualCenterLon.set(event.lonDeg);
+    this.manualCenterLat.set(event.latDeg);
+    this.syncProjectionCenterInfo();
+  }
+
+  private syncProjectionCenterInfo(): void {
+    if (this.projectionTrackingMode() === 'none') {
+      const lon = this.manualCenterLon();
+      const lat = this.manualCenterLat();
+      const lonStr = Math.abs(lon) < 0.01 ? '0.0°' : `${lon > 0 ? '+' : ''}${lon.toFixed(1)}°`;
+      const latStr = Math.abs(lat) < 0.01 ? '0.0°' : `${lat > 0 ? '+' : ''}${lat.toFixed(1)}°`;
+      this.projectionCenterInfo.set({ lonDeg: lonStr, latDeg: latStr });
     }
   }
 

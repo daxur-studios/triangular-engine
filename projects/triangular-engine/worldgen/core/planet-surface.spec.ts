@@ -17,8 +17,11 @@ describe('createPlanetSurfaceSampler', () => {
     };
     const baselineSampler = createPlanetSurfaceSampler(graph, tectonics, ecology);
     const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, { features });
-    // cellDetailAmplitude: 0 keeps this assertion exact; the noise layer itself is covered below.
-    const cellSampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+    // Forcing 'meadow' (the flat landform tier, no dome exaggeration) plus cellDetailAmplitude: 0
+    // isolates the feature stamp from the landform shaping/noise covered by the tests below, so
+    // this assertion stays exact regardless of which tier the generated site actually landed on.
+    const flatEcology = { ...ecology, biome: ecology.biome.map(() => 'meadow' as const) };
+    const cellSampler = createPlanetSurfaceSampler(graph, tectonics, flatEcology, {
       features,
       featureComposition: 'cell',
       cellDetailAmplitude: 0,
@@ -48,7 +51,7 @@ describe('createPlanetSurfaceSampler', () => {
     expect(cellSampler.sample(site.center).elevation - baselineCentre.elevation).toBeCloseTo(0.7, 5);
   });
 
-  it('discrete cell mode anchors base elevation to the site cell with no neighbour blend, plus bounded local detail', () => {
+  it('discrete cell mode blends only a little toward neighbours, and lets cellBlendFraction control how much', () => {
     const graph = buildPlanetGraphCore({ cellCount: 240, seed: 71 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 71 });
     const ecology = buildPlanetEcology(graph, tectonics);
@@ -58,29 +61,96 @@ describe('createPlanetSurfaceSampler', () => {
       y: site.center.y * 0.8 + site.corners[0]!.y * 0.2,
       z: site.center.z * 0.8 + site.corners[0]!.z * 0.2,
     });
+    // Force the flat landform tier so this test isolates blending from landform shaping.
+    const flatEcology = { ...ecology, biome: ecology.biome.map(() => 'meadow' as const) };
 
     const blendedSampler = createPlanetSurfaceSampler(graph, tectonics, ecology);
-    const flatCellSampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+    const noBlendSampler = createPlanetSurfaceSampler(graph, tectonics, flatEcology, {
+      featureComposition: 'cell',
+      cellBlendFraction: 0,
+      cellDetailAmplitude: 0,
+    });
+    const partialBlendSampler = createPlanetSurfaceSampler(graph, tectonics, flatEcology, {
       featureComposition: 'cell',
       cellDetailAmplitude: 0,
     });
-    const detailedCellSampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+
+    const blendedNearCorner = blendedSampler.sample(nearCornerDirection).baseElevation;
+    const noBlendNearCorner = noBlendSampler.sample(nearCornerDirection).baseElevation;
+    const partialNearCorner = partialBlendSampler.sample(nearCornerDirection).baseElevation;
+
+    // cellBlendFraction: 0 stays flat at the site's own value...
+    expect(noBlendNearCorner).toBeCloseTo(tectonics.elevation[site.id]!, 10);
+    // ...while the default blend fraction sits strictly between that flat anchor and the full
+    // 'shaped' blend — some neighbour influence, but nowhere near as much as 'shaped'.
+    expect(partialNearCorner).not.toBeCloseTo(noBlendNearCorner, 5);
+    expect(partialNearCorner).not.toBeCloseTo(blendedNearCorner, 5);
+    const [lo, hi] =
+      noBlendNearCorner < blendedNearCorner
+        ? [noBlendNearCorner, blendedNearCorner]
+        : [blendedNearCorner, noBlendNearCorner];
+    expect(partialNearCorner).toBeGreaterThan(lo);
+    expect(partialNearCorner).toBeLessThan(hi);
+  });
+
+  it('shapes a mountain-tier cell with a peak at its centre that falls off toward its edge', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 240, seed: 71 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 71 });
+    const ecology = buildPlanetEcology(graph, tectonics);
+    // Use the planet's actual highest cell so it is meaningfully above sea level — the dome only
+    // exaggerates height above the sea datum (see planet-surface.ts), so forcing 'alpine' onto an
+    // arbitrary (possibly oceanic) cell wouldn't exercise the peak shape at all.
+    const highestElevation = Math.max(...tectonics.elevation);
+    const site = graph.cells[tectonics.elevation.indexOf(highestElevation)]!;
+    const nearCornerDirection = normalize({
+      x: site.center.x * 0.8 + site.corners[0]!.x * 0.2,
+      y: site.center.y * 0.8 + site.corners[0]!.y * 0.2,
+      z: site.center.z * 0.8 + site.corners[0]!.z * 0.2,
+    });
+    const mountainEcology = { ...ecology, biome: ecology.biome.map(() => 'alpine' as const) };
+
+    // cellDetailAmplitude: 0 isolates the dome shape from the texture noise layer.
+    const sampler = createPlanetSurfaceSampler(graph, tectonics, mountainEcology, {
       featureComposition: 'cell',
+      cellDetailAmplitude: 0,
     });
 
-    // Near a corner, 'shaped' blends toward the neighbours' corner-averaged elevation while
-    // 'cell' stays flat at the site's own value — the "hard edge" the Civ-like mode is for.
-    const blendedNearCorner = blendedSampler.sample(nearCornerDirection).baseElevation;
-    const flatNearCorner = flatCellSampler.sample(nearCornerDirection).baseElevation;
-    expect(flatNearCorner).toBeCloseTo(tectonics.elevation[site.id]!, 10);
-    expect(blendedNearCorner).not.toBeCloseTo(flatNearCorner, 5);
+    const ownElevation = tectonics.elevation[site.id]!;
+    const centre = sampler.sample(site.center).baseElevation;
+    const nearCorner = sampler.sample(nearCornerDirection).baseElevation;
 
-    // The detail layer adds bounded, non-constant roughness on top of that flat anchor.
-    const detailedCentre = detailedCellSampler.sample(site.center).baseElevation;
-    const detailedNearCorner = detailedCellSampler.sample(nearCornerDirection).baseElevation;
-    expect(detailedCentre).not.toBeCloseTo(detailedNearCorner, 5);
-    expect(Math.abs(detailedCentre - tectonics.elevation[site.id]!)).toBeLessThanOrEqual(0.05 + 1e-9);
-    expect(Math.abs(detailedNearCorner - tectonics.elevation[site.id]!)).toBeLessThanOrEqual(0.05 + 1e-9);
+    // A whole mountain cell crests above its own tectonic value at the centre and falls off
+    // toward the edge — not a flat-topped plateau at a uniform height.
+    expect(centre).toBeGreaterThan(ownElevation);
+    expect(centre).toBeGreaterThan(nearCorner);
+  });
+
+  it('keeps a flat-tier cell within a small bound of its own elevation, with non-constant local detail', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 240, seed: 71 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 71 });
+    const ecology = buildPlanetEcology(graph, tectonics);
+    const site = graph.cells[0]!;
+    const nearCornerDirection = normalize({
+      x: site.center.x * 0.8 + site.corners[0]!.x * 0.2,
+      y: site.center.y * 0.8 + site.corners[0]!.y * 0.2,
+      z: site.center.z * 0.8 + site.corners[0]!.z * 0.2,
+    });
+    const flatEcology = { ...ecology, biome: ecology.biome.map(() => 'meadow' as const) };
+
+    // Zero blend fraction so this test's bound is purely about the flat tier's own detail noise,
+    // not blending toward a neighbour that could push it outside that bound.
+    const sampler = createPlanetSurfaceSampler(graph, tectonics, flatEcology, {
+      featureComposition: 'cell',
+      cellBlendFraction: 0,
+    });
+
+    const ownElevation = tectonics.elevation[site.id]!;
+    const centre = sampler.sample(site.center).baseElevation;
+    const nearCorner = sampler.sample(nearCornerDirection).baseElevation;
+
+    expect(centre).not.toBeCloseTo(nearCorner, 5);
+    expect(Math.abs(centre - ownElevation)).toBeLessThanOrEqual(0.015 + 1e-9);
+    expect(Math.abs(nearCorner - ownElevation)).toBeLessThanOrEqual(0.015 + 1e-9);
   });
 
   it('keeps ridge and river shaping identical between shaped and discrete cell modes', () => {

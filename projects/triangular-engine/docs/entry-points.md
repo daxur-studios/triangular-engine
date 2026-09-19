@@ -24,6 +24,8 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/animals/terrain` | Shape-neutral animal surface adapter for infinite plane, planetary sphere, and inhabited inside-cylinder terrain domains. | `triangular-engine/terrain` |
 | `triangular-engine/animals/water` | Fish-safe water volumes combining sampled water surfaces with terrain bottoms across plane, sphere, and inside-cylinder worlds. | `triangular-engine/water`, `three` |
 | `triangular-engine/procedural` | Deterministic procedural flora (trees, bushes, foliage) and procedural craft parts (wings, landing legs, rocket engines) with functional sockets, colliders, mass, and articulation. | `three` |
+| `triangular-engine/worldgen` | Framework-free Voronoi cell-graph planets, tectonics, ecology, climate, cell connectivity, and elevation samplers. | — |
+| `triangular-engine/worldgen/render` | Angular/Three.js 3D Globe ↔ 2.5D Map seamless GPU morphing, dynamic tracking, 2D canvas maps, borders, and tactical overlays (see [cell-planets.md](./cell-planets.md)). | `three` |
 
 
 ## Provider configuration

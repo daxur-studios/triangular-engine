@@ -10,7 +10,11 @@
   z-index: 5;
   display: grid;
   gap: 0.35rem;
-  max-width: 28rem;
+  width: min(28rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  box-sizing: border-box;
+  overscroll-behavior: contain;
   padding: 0.75rem 0.9rem;
   border: 1px solid rgb(255 255 255 / 15%);
   border-radius: 0.5rem;

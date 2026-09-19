@@ -1,3 +1,4 @@
+import { Biome } from './biomes';
 import { IPlanetEcology } from './ecology';
 import { IPlanetFeatures } from './features';
 import { defaultGeologicalTerrainSettings, sampleVolcano, VolcanoSettings } from './geological-shapes';
@@ -25,18 +26,29 @@ export interface IPlanetSurfaceParams {
   /**
    * 'shaped' blends base elevation across neighbouring cells (barycentric-interpolated, so a
    * mountain's peak sits between cell centres rather than snapping to one). 'cell' anchors base
-   * elevation to the containing Voronoi cell's own tectonic value with no blend toward
-   * neighbours — adjacent cells at different elevations meet at a hard edge, the Civ-like
-   * "one discrete tile" read — plus small-scale local noise so a cell reads as natural ground
-   * rather than a dead-flat plateau. Ridge/summit/river shaping still spans cells in both modes:
-   * only the base elevation (and any feature instance stamped on a cell) is cell-local.
+   * elevation to the containing Voronoi cell's own tectonic value — mostly un-blended toward
+   * neighbours (see `cellBlendFraction`), so each cell still reads as its own discrete tile —
+   * then shapes it per the cell's landform (from `ecology.biome`): 'alpine' cells get an
+   * exaggerated peak centred on the site with a footprint-relative falloff so a whole cell reads
+   * as one mountain cresting near its middle, not a flat-topped plateau; 'hills' get a gentler,
+   * still-walkable bump; everything else stays close to flat. Each tier also gets its own local
+   * detail-noise texture so cells read as natural ground rather than a dead-flat plateau. Ridge/
+   * summit/river shaping still spans cells in both modes: only the base elevation (and any
+   * feature instance stamped on a cell) is cell-local.
    */
   featureComposition?: 'shaped' | 'cell';
-  /** 'cell' mode only: amplitude (unitless elevation, same scale as tectonics) of the local
-   * detail noise layered onto each cell's flat base elevation. */
+  /** 'cell' mode only: how much of the barycentric-blended neighbour elevation (0 = none, 1 =
+   * the full 'shaped' blend) mixes into each cell's own tectonic value before landform shaping.
+   * A small amount keeps adjacent tiles from meeting at a stark cliff while each cell still reads
+   * as its own tile. */
+  cellBlendFraction?: number;
+  /** 'cell' mode only: overrides the landform's default local-detail-noise amplitude (unitless
+   * elevation, same scale as tectonics) for every cell regardless of tier. Leave unset to use
+   * each cell's landform-appropriate default (mountains rockier than meadows). */
   cellDetailAmplitude?: number;
-  /** 'cell' mode only: spatial frequency of the detail noise, in bumps per unit chord length on
-   * the unit sphere — higher values give finer-grained texture within a cell. */
+  /** 'cell' mode only: overrides the landform's default local-detail-noise spatial frequency (in
+   * bumps per unit chord length on the unit sphere) for every cell regardless of tier. Leave
+   * unset to use each cell's landform-appropriate default. */
   cellDetailFrequency?: number;
 }
 
@@ -57,7 +69,10 @@ export interface IPlanetSurfaceSampler {
   sample(direction: IVec3): IPlanetSurfaceSample;
 }
 
-const DEFAULTS: Omit<Required<IPlanetSurfaceParams>, 'features'> = {
+const DEFAULTS: Omit<
+  Required<IPlanetSurfaceParams>,
+  'features' | 'cellDetailAmplitude' | 'cellDetailFrequency'
+> = {
   ridgeWidthRadians: 0.045,
   ridgeRelief: 0.18,
   summitWidthRadians: 0.028,
@@ -66,8 +81,40 @@ const DEFAULTS: Omit<Required<IPlanetSurfaceParams>, 'features'> = {
   riverDepth: 0.08,
   featureRadiusFraction: 0.72,
   featureComposition: 'shaped',
-  cellDetailAmplitude: 0.05,
-  cellDetailFrequency: 40,
+  cellBlendFraction: 0.25,
+};
+
+/** Per-cell landform tier a discrete cell is shaped as, derived from its `ecology.biome`. */
+type CellLandform = 'mountain' | 'hill' | 'flat';
+
+const LANDFORM_BY_BIOME: Partial<Record<Biome, CellLandform>> = {
+  alpine: 'mountain',
+  hills: 'hill',
+  canyon: 'hill',
+};
+
+function resolveLandform(biome: Biome | undefined): CellLandform {
+  return (biome && LANDFORM_BY_BIOME[biome]) || 'flat';
+}
+
+interface ILandformShape {
+  /** How much taller than its own value the cell's centre peaks, as a multiple of its height
+   * above sea level (1 = no exaggeration). */
+  readonly exaggeration: number;
+  /** Falloff exponent from cell centre to edge: >1 concentrates height near the centre (a
+   * pointed peak), 1 is a linear ramp (a gentle bump), <1 stays high for most of the cell. */
+  readonly peakSharpness: number;
+  readonly detailAmplitude: number;
+  readonly detailFrequency: number;
+}
+
+const LANDFORM_SHAPE: Record<CellLandform, ILandformShape> = {
+  // A whole cell is one mountain cresting near its centre, not a flat-topped mesa.
+  mountain: { exaggeration: 1.6, peakSharpness: 1.6, detailAmplitude: 0.035, detailFrequency: 55 },
+  // Rolling, still-walkable relief — a bump, not a peak.
+  hill: { exaggeration: 1.2, peakSharpness: 0.9, detailAmplitude: 0.035, detailFrequency: 30 },
+  // Meadow/plains/etc: buildable, close to flat, only fine ground texture.
+  flat: { exaggeration: 1, peakSharpness: 1, detailAmplitude: 0.015, detailFrequency: 45 },
 };
 
 function angularDistance(a: IVec3, b: IVec3): number {
@@ -79,6 +126,13 @@ function smoothFalloff(distance: number, width: number): number {
   const t = distance / width;
   const smooth = 1 - t * t * (3 - 2 * t);
   return smooth * smooth;
+}
+
+/** 1 at the cell centre (`t=0`), 0 at/beyond the cell's footprint radius (`t>=1`); `sharpness`
+ * controls how concentrated the peak is (see `ILandformShape.peakSharpness`). */
+function domeFalloff(t: number, sharpness: number): number {
+  const clamped = Math.max(0, Math.min(1, 1 - t));
+  return Math.pow(clamped, sharpness);
 }
 
 function nearestPathDistance(direction: IVec3, paths: readonly IVec3[][]): number {
@@ -198,7 +252,7 @@ function volcanoRelief(direction: IVec3, stamp: IVolcanoStamp, radiusFraction: n
 export function createPlanetSurfaceSampler(
   graph: IPlanetGraphCore,
   tectonics: IPlanetTectonics,
-  ecology: Pick<IPlanetEcology, 'ridgePaths' | 'ridgePathStrength' | 'ridgePeaks' | 'riverPaths'>,
+  ecology: Pick<IPlanetEcology, 'ridgePaths' | 'ridgePathStrength' | 'ridgePeaks' | 'riverPaths' | 'biome'>,
   params: IPlanetSurfaceParams = {},
 ): IPlanetSurfaceSampler {
   const p = { ...DEFAULTS, ...params };
@@ -226,16 +280,42 @@ export function createPlanetSurfaceSampler(
   return {
     sample(direction: IVec3): IPlanetSurfaceSample {
       const unitDirection = normalize(direction);
-      // A discrete cell is its own flat, self-contained terrain unit: its elevation comes
-      // straight from the Voronoi site it belongs to, with no barycentric blend toward
-      // neighbouring cells' corner-averaged elevation. That is what makes adjacent cells meet
-      // at a hard edge instead of the smooth shared shoreline/ridge 'shaped' mode produces. A
-      // small local noise layer keeps that flat anchor from reading as a dead-flat plateau.
+      // A discrete cell is its own self-contained terrain unit: its elevation is anchored to the
+      // Voronoi site it belongs to (`cellBlendFraction` mixes in only a little of the
+      // barycentric-blended neighbour value, so tiles don't meet at a stark cliff), then shaped
+      // per its landform — a mountain cell crests near its own centre and falls off toward its
+      // edge instead of sitting as a flat-topped plateau; a hill gets a gentler, still-walkable
+      // bump; flatter biomes stay close to their anchor. A landform-appropriate noise layer keeps
+      // every tier from reading as a dead-flat plateau.
       const siteCell = isDiscreteCell ? findCellAt(graph, unitDirection) : undefined;
-      const baseElevation = siteCell
-        ? (siteCell.id < tectonics.elevation.length ? tectonics.elevation[siteCell.id]! : tectonics.seaLevelElevation) +
-          (cellDetailNoise(unitDirection, p.cellDetailFrequency, tectonics.seed) - 0.5) * 2 * p.cellDetailAmplitude
-        : sampleElevation(graph, tectonics.elevation, unitDirection);
+      let baseElevation: number;
+      if (siteCell) {
+        const ownElevation =
+          siteCell.id < tectonics.elevation.length ? tectonics.elevation[siteCell.id]! : tectonics.seaLevelElevation;
+        const blendedElevation = sampleElevation(graph, tectonics.elevation, unitDirection);
+        const crossCellBase = lerp(ownElevation, blendedElevation, p.cellBlendFraction);
+
+        const shape = LANDFORM_SHAPE[resolveLandform(ecology.biome?.[siteCell.id])];
+        const detailAmplitude = p.cellDetailAmplitude ?? shape.detailAmplitude;
+        const detailFrequency = p.cellDetailFrequency ?? shape.detailFrequency;
+
+        const cellRadius =
+          siteCell.corners.length > 0
+            ? Math.max(1e-4, Math.min(...siteCell.corners.map((corner) => angularDistance(siteCell.center, corner))))
+            : 0;
+        const t = cellRadius > 0 ? angularDistance(unitDirection, siteCell.center) / cellRadius : 0;
+        const dome = domeFalloff(t, shape.peakSharpness);
+
+        // Exaggerate only the cell's height above sea level, never a below-sea dip — otherwise a
+        // cell whose own value sits (or briefly blends) below the sea datum would have that dip
+        // deepened into a trench instead of getting a peak.
+        const heightAboveSea = Math.max(0, crossCellBase - tectonics.seaLevelElevation);
+        const peaked = crossCellBase + heightAboveSea * (shape.exaggeration - 1) * dome;
+        const detail = (cellDetailNoise(unitDirection, detailFrequency, tectonics.seed) - 0.5) * 2 * detailAmplitude;
+        baseElevation = peaked + detail;
+      } else {
+        baseElevation = sampleElevation(graph, tectonics.elevation, unitDirection);
+      }
 
       let featureRelief = 0;
       if (siteCell) {

@@ -40,11 +40,23 @@ Selector: `cellPlanetMorphView` (exported by `triangular-engine/worldgen/render`
 | `trackingDirection`| `IVec3 \| null` | Direction vector on the sphere to center the projection on. |
 | `showMapBorder` | `boolean` | Outer perimeter frame in 2.5D mode. Fades at 60%→40% morph. |
 | `mapBorderStyle` | `'cartographic' \| 'tactical' \| 'simple'` | Frame style preset. |
+| `mapBorderClearance` | `number` | Elevation clearance above sea level (default 0.04) so border/knobs float proud of terrain. |
+| `showBorderSliders` | `boolean` | 3D diamond slider knobs that ride along the curved/straight border tracks. |
+| `projectionCenterLon` | `number` | Central longitude $\lambda_0 \in [-180^\circ, +180^\circ]$ for manual projection framing. |
+| `projectionCenterLat` | `number` | Central latitude $\phi_0 \in [-90^\circ, +90^\circ]$ for manual projection framing. |
+| `borderSliderColor` | `string` | Emissive color for the 3D border slider diamond knobs. |
 | `dayNightEnabled` | `boolean` | Solar cycle with penumbra twilight, sunset glow, and night ambient. |
 | `timeOfDay` | `number` | Hours $[0..24)$, e.g. 12 = noon at prime meridian. |
 | `showCellBorders` | `boolean` | Fine Voronoi cell outlines. |
 | `showTerritoryBorders` | `boolean` | Thick territory border ribbons between factions (`factionByCell`). |
 | `showTacticalOverlay` | `boolean` | GPU texture-based cell highlight and movement range overlay. |
+
+### Outputs
+| Output | Payload | Description |
+| --- | --- | --- |
+| `cellClick` | `{ cellId: number, direction: IVec3, point: Vector3 }` | Emitted on click/tap over surface. |
+| `cellHover` | `{ cellId: number \| null, direction: IVec3 \| null }` | Emitted when cursor hovers over cells. |
+| `projectionCenterChange` | `{ lonDeg: number, latDeg: number }` | Emitted when dragging 3D border sliders or tracks. |
 
 ### Tracking Modes
 * `'none'`: Static map centered on Greenwich ($0^\circ$ lon, $0^\circ$ lat).
