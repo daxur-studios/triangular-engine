@@ -118,6 +118,7 @@ export class CellPlanetMorphViewComponent
     null,
   );
   readonly showTacticalOverlay = input<boolean>(false);
+  readonly clampBordersToSeaLevel = input<boolean>(true);
 
   // ==========================================================================
   // Outputs
@@ -239,6 +240,7 @@ export class CellPlanetMorphViewComponent
       this.factionByCell();
       this.factionColors();
       this.showTacticalOverlay();
+      this.clampBordersToSeaLevel();
 
       untracked(() => {
         this.rebuildOverlayMeshes();
@@ -601,6 +603,7 @@ export class CellPlanetMorphViewComponent
     const sampler = this.sampler();
     const seabedRelief = this.seabedRelief();
     const seaLevelElevation = this.seaLevelElevation();
+    const clampToSeaLevel = this.clampBordersToSeaLevel();
 
     // Ensure tactical overlay is initialized for this graph
     let overlay = this.tacticalOverlay();
@@ -619,6 +622,7 @@ export class CellPlanetMorphViewComponent
         projectionKind,
         seabedRelief,
         seaLevelElevation,
+        clampToSeaLevel,
       });
       const borderMat = createPlanetBorderMorphMaterial(this.dynamicUniforms, {
         color: this.cellBorderColor(),
@@ -650,6 +654,7 @@ export class CellPlanetMorphViewComponent
         projectionKind,
         seabedRelief,
         seaLevelElevation,
+        clampToSeaLevel,
       });
       const ribbonMat = createPlanetBorderMorphMaterial(this.dynamicUniforms, {
         color: this.territoryBorderColor(),
@@ -675,6 +680,7 @@ export class CellPlanetMorphViewComponent
         projectionKind,
         seabedRelief,
         seaLevelElevation,
+        clampToSeaLevel,
       });
       const overlayMat = createPlanetCellOverlayMaterial(
         this.dynamicUniforms,

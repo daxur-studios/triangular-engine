@@ -27,6 +27,7 @@ import {
   buildPlanetEcology,
   buildPlanetGraphCore,
   buildPlanetTectonics,
+  computeFeatures,
   createPlanetSurfaceSampler,
   deriveIsLand,
   findCellAt,
@@ -54,6 +55,7 @@ import {
   temperatureColor,
 } from 'triangular-engine/worldgen/render';
 import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
+import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
 
 const OCEAN_COLOR = 'hsl(210, 55%, 22%)';
 const GLOBE_RADIUS = 2.0;
@@ -107,10 +109,10 @@ export class CellPlanetMorphSpikePageComponent {
 
   readonly morphView = viewChild(CellPlanetMorphViewComponent);
 
-  readonly cellCount = signal<number>(1500);
-  readonly seed = signal<number>(5);
-  readonly relaxationIterations = signal<number>(2);
-  readonly worldProfileKind = signal<WorldProfileKind>('terran');
+  readonly cellCount = signal<number>(CELL_PLANET_U0_FIXTURE.cellCount);
+  readonly seed = signal<number>(CELL_PLANET_U0_FIXTURE.seed);
+  readonly relaxationIterations = signal<number>(CELL_PLANET_U0_FIXTURE.relaxationIterations);
+  readonly worldProfileKind = signal<WorldProfileKind>(CELL_PLANET_U0_FIXTURE.worldProfile);
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
   readonly fillMode = signal<CellPlanetMorphFillMode>('biome');
   readonly fillModes: CellPlanetMorphFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture'];
@@ -120,6 +122,7 @@ export class CellPlanetMorphSpikePageComponent {
   readonly heightScale = signal(DEFAULT_HEIGHT_SCALE);
   readonly seabedRelief = signal(true);
   readonly showOcean = signal(true);
+  readonly showVolcanoTerrain = signal(true);
   readonly autoPatrol = signal(true);
   readonly projectionTrackingMode = signal<ProjectionTrackingMode>('none');
   readonly projectionCenterInfo = signal<{ lonDeg: string; latDeg: string }>({ lonDeg: '0.0°', latDeg: '0.0°' });
@@ -127,6 +130,7 @@ export class CellPlanetMorphSpikePageComponent {
   // Border & Tactical Overlay signals
   readonly showCellBorders = signal(true);
   readonly showTerritoryBorders = signal(true);
+  readonly clampBordersToSeaLevel = signal(true);
   readonly tacticalRangeMode = signal(true);
   readonly selectedCellId = signal<number | null>(null);
   readonly hoveredCellId = signal<number | null>(null);
@@ -213,6 +217,11 @@ export class CellPlanetMorphSpikePageComponent {
         this.projectionKind.set(projParam);
       }
 
+      const profileParam = params.get('worldProfile');
+      if (profileParam && this.worldProfileKinds.includes(profileParam as WorldProfileKind)) {
+        this.worldProfileKind.set(profileParam as WorldProfileKind);
+      }
+
       const fillParam = params.get('fillMode');
       if (fillParam && this.fillModes.includes(fillParam as CellPlanetMorphFillMode)) {
         this.fillMode.set(fillParam as CellPlanetMorphFillMode);
@@ -282,6 +291,19 @@ export class CellPlanetMorphSpikePageComponent {
 
   onShowOceanChange(event: Event): void {
     this.showOcean.set((event.target as HTMLInputElement).checked);
+  }
+
+  onVolcanoTerrainChange(event: Event): void {
+    this.showVolcanoTerrain.set((event.target as HTMLInputElement).checked);
+    this.rebuildWorld();
+  }
+
+  onWorldProfileChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as WorldProfileKind;
+    if (this.worldProfileKinds.includes(value) && value !== this.worldProfileKind()) {
+      this.worldProfileKind.set(value);
+      this.rebuildWorld();
+    }
   }
 
   onAutoPatrolChange(event: Event): void {
@@ -380,6 +402,10 @@ export class CellPlanetMorphSpikePageComponent {
     this.showTerritoryBorders.update((v) => !v);
   }
 
+  toggleClampBordersToSeaLevel(): void {
+    this.clampBordersToSeaLevel.update((v) => !v);
+  }
+
   toggleTacticalRangeMode(): void {
     this.tacticalRangeMode.update((v) => !v);
     if (!this.tacticalRangeMode()) {
@@ -458,6 +484,13 @@ export class CellPlanetMorphSpikePageComponent {
       biomes: profile.biomes,
     });
 
+    const features = computeFeatures(
+      graph,
+      tectonics,
+      ecology.waterBodyKind,
+      profile.features,
+    );
+
     let eMin = Infinity;
     let eMax = -Infinity;
     for (const e of tectonics.elevation) {
@@ -471,7 +504,9 @@ export class CellPlanetMorphSpikePageComponent {
     this.seaLevelElevation = seaLevelElevation;
     this.elevationMin = eMin;
     this.elevationMax = eMax;
-    this.sampler = createPlanetSurfaceSampler(graph, tectonics, ecology);
+    this.sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+      features: this.showVolcanoTerrain() ? features : undefined,
+    });
 
     this.surfaceSampler.set(this.sampler);
     this.spawnGameUnits();

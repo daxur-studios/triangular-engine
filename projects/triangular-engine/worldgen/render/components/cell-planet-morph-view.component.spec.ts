@@ -139,6 +139,64 @@ describe('CellPlanetMorphViewComponent', () => {
     expect(comp.object3D().children.length).toBe(0);
   });
 
+  it('updates border geometries when clampBordersToSeaLevel is toggled', () => {
+    const underwaterSampler: IPlanetSurfaceSampler = {
+      sample: () => ({
+        elevation: -0.5,
+        baseElevation: -0.5,
+        ridgeRelief: 0,
+        riverCarve: 0,
+        seaLevel: 0,
+        isLand: false,
+      }),
+    };
+    const graph = buildPlanetGraphCore({
+      cellCount: 20,
+      seed: 1,
+      relaxationIterations: 1,
+    });
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', underwaterSampler);
+    fixture.componentRef.setInput('graph', graph);
+    fixture.componentRef.setInput('showCellBorders', true);
+    fixture.componentRef.setInput('seabedRelief', true);
+    fixture.componentRef.setInput('clampBordersToSeaLevel', true);
+    fixture.detectChanges();
+
+    const comp = fixture.componentInstance;
+    const borderMeshClamped = comp
+      .object3D()
+      .children.find((c) => c.name === 'morph-cell-borders') as LineSegments;
+    expect(borderMeshClamped).toBeDefined();
+    const flatPosClamped = borderMeshClamped.geometry.getAttribute(
+      'aFlatPos',
+    ) as BufferAttribute;
+    for (let i = 0; i < flatPosClamped.count; i++) {
+      expect(flatPosClamped.getZ(i)).toBeGreaterThanOrEqual(0.0);
+    }
+
+    // Toggle clampBordersToSeaLevel to false
+    fixture.componentRef.setInput('clampBordersToSeaLevel', false);
+    fixture.detectChanges();
+
+    const borderMeshUnclamped = comp
+      .object3D()
+      .children.find((c) => c.name === 'morph-cell-borders') as LineSegments;
+    const flatPosUnclamped = borderMeshUnclamped.geometry.getAttribute(
+      'aFlatPos',
+    ) as BufferAttribute;
+    let foundNegative = false;
+    for (let i = 0; i < flatPosUnclamped.count; i++) {
+      if (flatPosUnclamped.getZ(i) < 0) {
+        foundNegative = true;
+        break;
+      }
+    }
+    expect(foundNegative).toBeTrue();
+
+    fixture.destroy();
+  });
+
   it('morphs the CPU pick geometry so flat-map picking matches the rendered surface', () => {
     const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
     fixture.componentRef.setInput('sampler', mockSampler);

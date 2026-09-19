@@ -29,6 +29,7 @@ export interface ICellBorderLineGeometryParams {
   readonly projectionKind?: MapProjectionKind;
   readonly seabedRelief?: boolean;
   readonly seaLevelElevation?: number;
+  readonly clampToSeaLevel?: boolean;
 }
 
 export interface ITerritoryRibbonGeometryParams {
@@ -42,6 +43,7 @@ export interface ITerritoryRibbonGeometryParams {
   readonly projectionKind?: MapProjectionKind;
   readonly seabedRelief?: boolean;
   readonly seaLevelElevation?: number;
+  readonly clampToSeaLevel?: boolean;
 }
 
 export interface ICellOverlayGeometryParams {
@@ -54,6 +56,7 @@ export interface ICellOverlayGeometryParams {
   readonly projectionKind?: MapProjectionKind;
   readonly seabedRelief?: boolean;
   readonly seaLevelElevation?: number;
+  readonly clampToSeaLevel?: boolean;
 }
 
 interface ISplitVertex {
@@ -73,24 +76,28 @@ function resolveElevation(
   cellB = 0,
   seabedRelief = true,
   seaLevelElevation = 0,
+  clampToSeaLevel = true,
 ): number {
+  let elev = 0;
   if (sampler) {
     const s = sampler.sample(dir);
     if (!seabedRelief && !s.isLand) {
       return seaLevelElevation;
     }
-    return s.elevation;
-  }
-  if (elevation && cellA >= 0 && cellB >= 0) {
+    elev = s.elevation;
+  } else if (elevation && cellA >= 0 && cellB >= 0) {
     const eA = elevation[cellA] ?? 0;
     const eB = elevation[cellB] ?? 0;
     const avg = (eA + eB) * 0.5;
     if (!seabedRelief && avg < seaLevelElevation) {
       return seaLevelElevation;
     }
-    return avg;
+    elev = avg;
   }
-  return 0;
+  if (clampToSeaLevel && elev < seaLevelElevation) {
+    return seaLevelElevation;
+  }
+  return elev;
 }
 
 function splitEdgesForProjection(
@@ -99,6 +106,7 @@ function splitEdgesForProjection(
   elevation?: number[],
   seabedRelief = true,
   seaLevelElevation = 0,
+  clampToSeaLevel = true,
 ): [ISplitVertex, ISplitVertex][] {
   const segmentPairs: [ISplitVertex, ISplitVertex][] = [];
 
@@ -114,6 +122,7 @@ function splitEdgesForProjection(
       edge.cellB,
       seabedRelief,
       seaLevelElevation,
+      clampToSeaLevel,
     );
     const elevB = resolveElevation(
       b,
@@ -123,6 +132,7 @@ function splitEdgesForProjection(
       edge.cellB,
       seabedRelief,
       seaLevelElevation,
+      clampToSeaLevel,
     );
 
     const latA = Math.asin(Math.max(-1, Math.min(1, a.y)));
@@ -248,6 +258,7 @@ export function buildCellBorderLineGeometry(
     params.elevation,
     params.seabedRelief ?? true,
     params.seaLevelElevation ?? 0,
+    params.clampToSeaLevel ?? true,
   );
 
   const vertexCount = segmentPairs.length * 2;
@@ -361,6 +372,7 @@ export function buildTerritoryRibbonGeometry(
     params.elevation,
     params.seabedRelief ?? true,
     params.seaLevelElevation ?? 0,
+    params.clampToSeaLevel ?? true,
   );
 
   const segmentCount = segmentPairs.length;
@@ -595,6 +607,7 @@ export function buildCellOverlayGeometry(
       cell.id,
       params.seabedRelief ?? true,
       params.seaLevelElevation ?? 0,
+      params.clampToSeaLevel ?? true,
     );
     const rCenter = radius + centerElev * heightScale + minClearance;
 
@@ -615,6 +628,7 @@ export function buildCellOverlayGeometry(
         cell.id,
         params.seabedRelief ?? true,
         params.seaLevelElevation ?? 0,
+        params.clampToSeaLevel ?? true,
       ),
     );
 

@@ -22,6 +22,7 @@
       [resolveColor]="resolveColor()"
       [showCellBorders]="showCellBorders()"
       [showTerritoryBorders]="showTerritoryBorders()"
+      [clampBordersToSeaLevel]="clampBordersToSeaLevel()"
       [factionByCell]="plateIdByCell"
       [showTacticalOverlay]="true"
       (cellClick)="onCellClicked($event)"
@@ -104,6 +105,15 @@
     </label>
 
     <label>
+      <span>World profile</span>
+      <select [value]="worldProfileKind()" (change)="onWorldProfileChange($event)">
+        @for (profile of worldProfileKinds; track profile) {
+          <option [value]="profile">{{ profile }}</option>
+        }
+      </select>
+    </label>
+
+    <label>
       <span>Height scale: {{ heightScale().toFixed(2) }}</span>
       <input
         type="range"
@@ -132,6 +142,14 @@
         />
         <span>Ocean surface</span>
       </label>
+      <label>
+        <input
+          type="checkbox"
+          [checked]="showVolcanoTerrain()"
+          (change)="onVolcanoTerrainChange($event)"
+        />
+        <span>Volcano terrain stamp</span>
+      </label>
     </div>
   </fieldset>
 
@@ -156,6 +174,14 @@
       </label>
     </div>
     <div class="checkbox-row">
+      <label>
+        <input
+          type="checkbox"
+          [checked]="clampBordersToSeaLevel()"
+          (change)="toggleClampBordersToSeaLevel()"
+        />
+        <span>Float on water surface</span>
+      </label>
       <label>
         <input
           type="checkbox"

@@ -28,11 +28,11 @@ Existing prototypes are reusable evidence, not acceptance of these integrated mi
 | Gate | What you should see and test | Status |
 | --- | --- | --- |
 | U0 — Repeatable baseline | Saved views, cell boundaries, scale reference and performance capture; confirm intended zoom range | In progress |
-| U1 — One world in every view | Switch 2D / 2.5D / globe; same selected cell, ridge, river and coast | Not started |
+| U1 — One world in every view | Switch 2D / 2.5D / globe/morph; same selected cell, ridge, river and coast | In progress |
 | U2 — Landforms inside cells | A mountain, volcano, mesa and canyon have real shape inside their cells; a ridge still spans cells | Not started |
 | U3 — Detailed waterways | Low-angle views show carved river bed/banks, connected mouth and detailed shore, following cell edges | Not started |
 | U4 — Planar LOD | Zoom and pan in 2.5D; shapes survive simplification, terrain stays covered, performance meets budget | Not started |
-| U5 — Spherical LOD | Repeat on globe, including cube-face edges/corners and orbit-to-ground travel | Not started |
+| U5 — Spherical and morph LOD | Repeat on globe and through the morph slider, including intermediate states and cube-face edges/corners | Not started |
 | U6 — Readable unified map | Materials, water, selection and borders agree with terrain at close and strategic distances | Not started |
 | U7 — Accepted POC | Repeat the tour at agreed world sizes; stable performance and memory, all earlier gates still pass | Not started |
 
@@ -65,7 +65,7 @@ patch boundaries, LOD selection and projection math, but they must query the sam
 surface definitions.
 
 The current clipmap is a working 2.5D baseline. The Meshoptimizer/quadtree path is the shared
-candidate for large areas, local edits and the later sphere. It is not adopted for the actual
+candidate for large areas, local edits and the morphing sphere. It is not adopted for the actual
 cell maps until it renders the real cell sampler with measured seam, residency and frame-time
 evidence.
 
@@ -207,10 +207,12 @@ consumer can load a world, render a view, select a cell, query height and apply 
 
 ## Recommended order from here
 
-1. Complete U0–U3 in 035: reproducible comparison, one shared world, local geology and water
-   geometry. Use bounded reference meshes to judge shapes before renderer simplification.
-2. Complete U4–U5: carry the accepted surface through Meshoptimizer/quadtree LOD in the plane
-   and sphere, retaining the reference views for comparison.
+1. Complete U0, then carry the shared world into the existing morph page while adding the first
+   local landform. Use bounded reference meshes to judge the shape before renderer
+   simplification.
+2. Complete U3, then carry the accepted surface through Meshoptimizer/quadtree LOD in the plane,
+   sphere and every supported intermediate morph state, retaining the fixed morph mesh for
+   comparison.
 3. Complete U6–U7: integrated material/selection readability and measured acceptance.
 4. Resume remaining P1/P3/P5 gameplay, physics, edits and public API work. U5 supplies evidence
    for P4, but does not by itself accept P4's edit, physics or full production requirements.
@@ -226,7 +228,9 @@ produces a measured result that changes the renderer decision.
 - `/terrain-chunk-optimizer-lab`: controlled simplification, feature and seam evidence.
 - `/terrain-chunk-streaming-lab`: planar quadtree residency, workers and mixed LOD.
 - `/planet-terrain-sphere-lab`: sphere chunk selection, scale and performance fixture.
-- `/cell-planet-morph-spike`: separate geometry/morph experiment; not on the critical path.
+- `/cell-planet-morph-spike`: primary integration target for the shared plane/sphere surface and
+  morph slider. Its existing geometry is the transition reference; streaming LOD must eventually
+  work at both endpoints and at intermediate morph values.
 
 ## Current next action — unified cell-terrain POC
 

@@ -120,4 +120,91 @@ describe('cell-border-geometry', () => {
 
     geo.dispose();
   });
+
+  it('clamps underwater border line vertices to sea level when clampToSeaLevel is true', () => {
+    // Negative elevation for all cells (-0.4)
+    const elevations = new Array(graph.cells.length).fill(-0.4);
+    const heightScale = 0.2;
+    const seaLevel = 0.0;
+
+    const geoClamped = buildCellBorderLineGeometry({
+      graph,
+      elevation: elevations,
+      radius: 2.0,
+      heightScale,
+      seaLevelElevation: seaLevel,
+      seabedRelief: true,
+      clampToSeaLevel: true,
+    });
+
+    const flatPosClamped = geoClamped.getAttribute('aFlatPos');
+    // In flat map coordinates, flatZ is elev * heightScale + clearance
+    // With clampToSeaLevel=true, elev must be >= seaLevel (0.0)
+    for (let i = 0; i < flatPosClamped.count; i++) {
+      expect(flatPosClamped.getZ(i)).toBeGreaterThanOrEqual(0.0);
+    }
+    geoClamped.dispose();
+
+    const geoUnclamped = buildCellBorderLineGeometry({
+      graph,
+      elevation: elevations,
+      radius: 2.0,
+      heightScale,
+      seaLevelElevation: seaLevel,
+      seabedRelief: true,
+      clampToSeaLevel: false,
+    });
+
+    const flatPosUnclamped = geoUnclamped.getAttribute('aFlatPos');
+    // With clampToSeaLevel=false, elev is -0.4, so flatZ = -0.4 * 0.2 + clearance (< 0)
+    let foundNegative = false;
+    for (let i = 0; i < flatPosUnclamped.count; i++) {
+      if (flatPosUnclamped.getZ(i) < 0) {
+        foundNegative = true;
+        break;
+      }
+    }
+    expect(foundNegative).toBeTrue();
+    geoUnclamped.dispose();
+  });
+
+  it('clamps underwater territory ribbon vertices to sea level when clampToSeaLevel is true', () => {
+    const elevations = new Array(graph.cells.length).fill(-0.4);
+    const edges = extractCellBorders(graph).slice(0, 5);
+
+    const geoClamped = buildTerritoryRibbonGeometry({
+      edges,
+      elevation: elevations,
+      radius: 2.0,
+      heightScale: 0.2,
+      seaLevelElevation: 0.0,
+      seabedRelief: true,
+      clampToSeaLevel: true,
+    });
+    const flatPosClamped = geoClamped.getAttribute('aFlatPos');
+    for (let i = 0; i < flatPosClamped.count; i++) {
+      expect(flatPosClamped.getZ(i)).toBeGreaterThanOrEqual(0.0);
+    }
+    geoClamped.dispose();
+
+    const geoUnclamped = buildTerritoryRibbonGeometry({
+      edges,
+      elevation: elevations,
+      radius: 2.0,
+      heightScale: 0.2,
+      seaLevelElevation: 0.0,
+      seabedRelief: true,
+      clampToSeaLevel: false,
+    });
+    const flatPosUnclamped = geoUnclamped.getAttribute('aFlatPos');
+    let foundNegative = false;
+    for (let i = 0; i < flatPosUnclamped.count; i++) {
+      if (flatPosUnclamped.getZ(i) < 0) {
+        foundNegative = true;
+        break;
+      }
+    }
+    expect(foundNegative).toBeTrue();
+    geoUnclamped.dispose();
+  });
 });

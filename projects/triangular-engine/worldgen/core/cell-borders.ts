@@ -111,12 +111,19 @@ export function computeFloatingEdgeEndpoints(
   radius: number,
   heightScale: number,
   minClearance = 0.004,
+  clampToSeaLevel = false,
+  seaLevelElevation = 0,
 ): IFloatingEndpoints {
   const sagitta = computeEdgeSagitta(a, b, radius);
   const totalOffset = minClearance + sagitta;
 
-  const rA = radius + elevA * heightScale + totalOffset;
-  const rB = radius + elevB * heightScale + totalOffset;
+  const effectiveElevA =
+    clampToSeaLevel && elevA < seaLevelElevation ? seaLevelElevation : elevA;
+  const effectiveElevB =
+    clampToSeaLevel && elevB < seaLevelElevation ? seaLevelElevation : elevB;
+
+  const rA = radius + effectiveElevA * heightScale + totalOffset;
+  const rB = radius + effectiveElevB * heightScale + totalOffset;
 
   return {
     posA: { x: a.x * rA, y: a.y * rA, z: a.z * rA },

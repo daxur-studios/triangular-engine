@@ -134,4 +134,40 @@ describe('PlanetViewComponent', () => {
 
     fixture.destroy();
   });
+
+  it('updates border vertex radius when clampBordersToSeaLevel is toggled', () => {
+    const fixture = TestBed.createComponent(PlanetViewComponent);
+    fixture.componentRef.setInput('cellCount', 60);
+    fixture.componentRef.setInput('elevationScale', 0.1);
+    fixture.componentRef.setInput('showCellBorders', true);
+    fixture.componentRef.setInput('clampBordersToSeaLevel', true);
+    fixture.detectChanges();
+
+    const root = scene.children[0] as Group;
+    const borderLines = root.children.find((c) => c.name === 'cell-borders') as LineSegments;
+    expect(borderLines).toBeDefined();
+
+    const posAttr = borderLines.geometry.getAttribute('position') as BufferAttribute;
+    const posClamped = (posAttr.array as Float32Array).slice();
+
+    // Toggle clamp to false -> underwater edges will sink below 1.0 + clearance
+    fixture.componentRef.setInput('clampBordersToSeaLevel', false);
+    fixture.detectChanges();
+
+    const posUnclamped = (posAttr.array as Float32Array).slice();
+
+    // Verify at least one underwater vertex position changed to a lower radius
+    let foundSubmergedDiff = false;
+    for (let i = 0; i < posClamped.length; i += 3) {
+      const lenClamped = Math.hypot(posClamped[i], posClamped[i + 1], posClamped[i + 2]);
+      const lenUnclamped = Math.hypot(posUnclamped[i], posUnclamped[i + 1], posUnclamped[i + 2]);
+      if (lenUnclamped < lenClamped - 1e-4) {
+        foundSubmergedDiff = true;
+        break;
+      }
+    }
+    expect(foundSubmergedDiff).toBeTrue();
+
+    fixture.destroy();
+  });
 });

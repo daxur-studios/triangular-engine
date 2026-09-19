@@ -74,6 +74,58 @@ describe('cell-borders', () => {
     expect(lenA).toBeCloseTo(expectedLenA, 5);
   });
 
+  it('clamps underwater endpoints to sea level when clampToSeaLevel is true', () => {
+    const a = { x: 0, y: 0, z: 1 };
+    const b = { x: 0.1, y: 0, z: Math.sqrt(1 - 0.01) };
+    const radius = 2.0;
+    const heightScale = 0.16;
+    const minClearance = 0.005;
+
+    // Unclamped (default): follows seabed negative elevation (-0.5)
+    const unclamped = computeFloatingEdgeEndpoints(
+      a,
+      b,
+      -0.5,
+      0.3,
+      radius,
+      heightScale,
+      minClearance,
+      false,
+      0,
+    );
+    const lenAUnclamped = Math.hypot(
+      unclamped.posA.x,
+      unclamped.posA.y,
+      unclamped.posA.z,
+    );
+    expect(lenAUnclamped).toBeCloseTo(
+      radius + -0.5 * heightScale + minClearance + unclamped.sagitta,
+      5,
+    );
+
+    // Clamped: negative elevation clamped to seaLevelElevation (0)
+    const clamped = computeFloatingEdgeEndpoints(
+      a,
+      b,
+      -0.5,
+      0.3,
+      radius,
+      heightScale,
+      minClearance,
+      true,
+      0,
+    );
+    const lenAClamped = Math.hypot(
+      clamped.posA.x,
+      clamped.posA.y,
+      clamped.posA.z,
+    );
+    expect(lenAClamped).toBeCloseTo(
+      radius + 0 * heightScale + minClearance + clamped.sagitta,
+      5,
+    );
+  });
+
   it('performs BFS reachable cells search within max hops', () => {
     const reachable0 = findReachableCells(graph, 0, 0);
     expect(reachable0).toEqual([0]);

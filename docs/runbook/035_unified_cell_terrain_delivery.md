@@ -8,7 +8,8 @@ and live milestone summary are at the top of 034. This document owns the U gates
 protocol and current handoff; older milestones are not a competing work queue.
 
 Status at plan creation, 2026-09-17: **U0 in progress; U1–U7 not started; no U gate accepted.**
-These are integration statuses, not a claim that the existing code is absent.
+These are integration statuses, not a claim that the existing code is absent. U1 is now in
+progress because the existing morph route is being connected to the shared cell feature sampler.
 
 Read the repository AGENTS.md, package README and agent conventions first. Preserve existing
 worktree changes. Inspect current implementation and reuse it before creating new abstractions.
@@ -242,16 +243,19 @@ movement and delayed refinement. Gate: no holes, objectionable pops, lost channe
 feature identity; error and performance budgets pass. If they fail, repair U4 and record the
 cause instead of treating successful compilation or fewer triangles as renderer adoption.
 
-## U5 — Spherical Meshoptimizer/quadtree integration
+## U5 — Spherical and morph Meshoptimizer/quadtree integration
 
-Dependency: U4. Goal: the same accepted world works from globe to close terrain.
+Dependency: U4. Goal: the same accepted world works from globe to close terrain and through the
+full morph slider, including intermediate states.
 
 - Feed the identical definitions through cube-face domain adapters and the existing spherical
-  selector/worker path, exposed in the cell globe page with the fixed globe reference retained.
+  selector/worker path, then expose the accepted surface through the morph page with the fixed
+  morph mesh retained as a reference.
 - Keep feature coordinates independent of cube-face UVs. Include curvature in error selection,
   bounded whole-planet coverage, horizon handling and precision appropriate to the fixed radius.
-- Test face edges, three-face corners, poles, mixed LOD, rapid orbit/zoom and delayed/failed
-  builds. Keep river/coast/feature geometry, normals and material masks aligned across faces.
+- Test face edges, three-face corners, poles, mixed LOD, rapid orbit/zoom, slider positions from
+  0% through 100%, and delayed/failed builds. Keep river/coast/feature geometry, normals and
+  material masks aligned across faces and intermediate morph states.
 - Run numeric plane/sphere parity at the same world sample points and record projection-specific
   approximation errors separately from canonical sampler differences.
 
@@ -387,7 +391,15 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
   only; mesa/canyon shapes, spherical wiring and LOD preservation remain outstanding. Library and
   demo builds pass. Worldgen browser tests built successfully but ChromeHeadless could not start on
   the reference machine because its GPU process exited; user browser review is required.
-- Next packet: user visual review of the 2.5D volcano terrain stamp, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
+- Latest morph integration packet (2026-09-19): `/cell-planet-morph-spike` is now connected to
+  the same U0 fixture defaults and runs `computeFeatures()` before creating its shared surface
+  sampler. Its default profile is the U0 volcanic profile, and it exposes a `World profile`
+  selector plus an independent `Volcano terrain stamp` toggle. This means the fixed morph mesh
+  now samples the same cell-owned volcano relief as the 2.5D page; the route still uses fixed
+  resolution geometry, so streamed LOD and intermediate-morph patching remain outstanding.
+  Library/demo build verification is pending after this packet; browser review must compare the
+  same seed/profile and inspect the volcano at 0%, 50% and 100% morph.
+- Next packet: user visual review of the shared volcano in the morph route, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
   cold and warm timings, frame-time percentiles, draw/triangle counts, residency and memory fields.
 - First user review: U0 cell scale, close/strategic zoom range and baseline conditions.
 - Reference hardware/browser/canvas/DPR/build mode: not yet recorded.
