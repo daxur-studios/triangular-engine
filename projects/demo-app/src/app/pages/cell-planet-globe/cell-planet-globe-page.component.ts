@@ -20,11 +20,6 @@ import {
   IPlanetTectonics,
   WORLD_PROFILES,
   WorldProfileKind,
-  buildPlanetEcology,
-  buildPlanetGraphCore,
-  buildPlanetTectonics,
-  createPlanetSurfaceSampler,
-  deriveIsLand,
   findCellAt,
 } from 'triangular-engine/worldgen';
 import {
@@ -57,6 +52,7 @@ import {
   getCellPlanetU0Bookmark,
 } from '../cell-planet-u0-fixture';
 import { getTerrainHeightScaleM } from '../cell-planet-25d-map/cell-planet-terrain-scale';
+import { CellPlanetWorldService } from '../cell-planet-world.service';
 
 /** Modest fixed tessellation: 96 x 48 quads → ~9.2k triangles. No LOD, by design (runbook 032). */
 const GLOBE_LONGITUDE_SEGMENTS = 96;
@@ -167,11 +163,12 @@ export class CellPlanetGlobePageComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly worldService = inject(CellPlanetWorldService);
 
   readonly cellCount = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.cellCount);
   readonly seed = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.seed);
   readonly relaxationIterations = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.relaxationIterations);
-  readonly worldProfileKind = signal<WorldProfileKind>('terran');
+  readonly worldProfileKind = signal<WorldProfileKind>(CELL_PLANET_GENERATION_DEFAULTS.worldProfile);
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
   /** Same physical body-size tiers as the 2.5D page. */
   readonly worldSizeTier = signal<WorldSizeTier>('medium');
@@ -429,33 +426,16 @@ export class CellPlanetGlobePageComponent {
   private rebuildWorld(): void {
     const startedAt = performance.now();
     const seed = this.seed();
-    const profile = WORLD_PROFILES[this.worldProfileKind()];
-
-    // Same shared generation chain and defaults as the 2D map and 2.5D terrain pages.
-    const graph = buildPlanetGraphCore({
+    const world = this.worldService.build({
       cellCount: this.cellCount(),
       seed,
       relaxationIterations: this.relaxationIterations(),
-      jitter: CELL_PLANET_GENERATION_DEFAULTS.jitter,
+      worldProfileKind: this.worldProfileKind(),
+      waterLevel: this.waterLevel(),
     });
-    const tectonics = buildPlanetTectonics(graph, {
-      plateCount: CELL_PLANET_GENERATION_DEFAULTS.plateCount,
-      seed,
-      ...profile.tectonics,
-    });
-    const seaLevelElevation = tectonics.seaLevelElevation + this.waterLevel() * 0.3;
-    tectonics.seaLevelElevation = seaLevelElevation;
-    tectonics.isLand = deriveIsLand(
-      graph,
-      tectonics.elevation,
-      seaLevelElevation,
-      profile.tectonics?.minRegionCellFraction,
-    );
-    const ecology = buildPlanetEcology(graph, tectonics, {
-      climate: profile.climate,
-      biomes: profile.biomes,
-    });
-    const sampler: IPlanetSurfaceSampler = createPlanetSurfaceSampler(graph, tectonics, ecology);
+    const { graph, tectonics, ecology, seaLevelElevation } = world;
+    const sampler: IPlanetSurfaceSampler = world.featureSampler;
+    const profile = WORLD_PROFILES[this.worldProfileKind()];
 
     this.materialRiverMask = buildRiverMaterialMask(graph, ecology);
     this.ridgeCellSet = new Set(tectonics.ridgeCellIds);

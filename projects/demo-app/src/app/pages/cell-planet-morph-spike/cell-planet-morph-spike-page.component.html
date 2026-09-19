@@ -34,9 +34,9 @@
 <aside class="readout">
   <strong>Cell planet · 2.5D ↔ 3D morph spike</strong>
   <nav class="view-switch" aria-label="Map view">
-    <a [routerLink]="['/cell-planet-map']">2D map</a>
-    <a [routerLink]="['/cell-planet-25d-map']">2.5D terrain</a>
-    <a [routerLink]="['/cell-planet-globe']">Globe</a>
+    <a [routerLink]="['/cell-planet-map']" [queryParams]="comparisonQueryParams()">2D map</a>
+    <a [routerLink]="['/cell-planet-25d-map']" [queryParams]="comparisonQueryParams()">2.5D terrain</a>
+    <a [routerLink]="['/cell-planet-globe']" [queryParams]="comparisonQueryParams()">Globe</a>
     <a
       [routerLink]="['/cell-planet-morph-spike']"
       class="active"

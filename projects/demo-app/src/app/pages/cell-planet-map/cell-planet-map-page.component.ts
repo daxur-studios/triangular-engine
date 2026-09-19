@@ -77,7 +77,7 @@ export class CellPlanetMapPageComponent {
   readonly cellCount = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.cellCount);
   readonly seed = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.seed);
   readonly relaxationIterations = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.relaxationIterations);
-  readonly worldProfileKind = signal<WorldProfileKind>('terran');
+  readonly worldProfileKind = signal<WorldProfileKind>(CELL_PLANET_GENERATION_DEFAULTS.worldProfile);
   readonly fillMode = signal<CellPlanetMapFillMode>('biome');
   readonly fillModes: CellPlanetMapFillMode[] = ['biome', 'elevation', 'plates', 'temperature', 'moisture', 'land'];
   readonly showIcons = signal(true);

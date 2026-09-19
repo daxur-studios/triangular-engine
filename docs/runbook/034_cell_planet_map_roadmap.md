@@ -91,10 +91,10 @@ The current implementation is not yet at that unified state. The 2D map and
 `worldgen/core/features.ts` currently narrows those features to a single-cell elevation stamp.
 The analytic volcano/mesa/crater/canyon samplers still exist, but they are not yet a sub-cell
 mesh/detail evaluator; canyon is currently a geological-shape/biome concept, not a per-cell
-`Feature` instance. The 2.5D page and fixed globe use `createPlanetSurfaceSampler()` for base elevation,
-ridge relief and river carving, but do not currently apply `computeFeatures()`/
-`buildFeatureElevation()` to their terrain geometry. The Meshoptimizer/quadtree labs prove
-streaming, simplification and seams against synthetic fields, not against this cell world.
+`Feature` instance. The 2.5D, fixed globe and morph pages now consume a shared demo-world snapshot
+and feature-aware sampler, while the 2D map still owns its canvas raster generation. The
+Meshoptimizer/quadtree labs prove streaming, simplification and seams against synthetic fields,
+not against this cell world.
 
 The separate implementations have not yet proved one shared snapshot, local geology,
 edge-following river/coast detail, planar and spherical adapters, and near/far LOD parity

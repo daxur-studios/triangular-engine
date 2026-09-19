@@ -1,6 +1,12 @@
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
-import { Group, PerspectiveCamera, Scene } from 'three';
+import {
+  BufferAttribute,
+  Group,
+  LineSegments,
+  PerspectiveCamera,
+  Scene,
+} from 'three';
 import { EngineService } from 'triangular-engine';
 import { PlanetViewComponent } from './planet-view.component';
 

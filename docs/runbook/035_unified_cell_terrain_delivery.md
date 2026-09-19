@@ -397,8 +397,17 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
   selector plus an independent `Volcano terrain stamp` toggle. This means the fixed morph mesh
   now samples the same cell-owned volcano relief as the 2.5D page; the route still uses fixed
   resolution geometry, so streamed LOD and intermediate-morph patching remain outstanding.
-  Library/demo build verification is pending after this packet; browser review must compare the
-  same seed/profile and inspect the volcano at 0%, 50% and 100% morph.
+  Library/demo build verification passed; browser review must compare the same seed/profile and
+  inspect the volcano at 0%, 50% and 100% morph.
+- Latest shared-world packet (2026-09-19): `cell-planet-world.service.ts` now owns the common
+  graph → tectonics → ecology → features pipeline for the 2.5D, fixed globe and morph pages.
+  It caches snapshots by generation inputs, exposes base and feature-aware surface samplers, and
+  applies the same U0 volcanic default/profile and water-level adjustment to each terrain view.
+  The globe now receives the same feature-aware sampler as 2.5D and morph. Morph navigation now
+  carries the shared generation/projection query state into the other routes. The 2D canvas remains
+  a separate renderer and still needs to consume this snapshot contract in a later adapter packet.
+  Library and demo builds pass; browser review should confirm the same bookmark/cell and volcano
+  relief remain aligned when switching among the three terrain routes.
 - Next packet: user visual review of the shared volcano in the morph route, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
   cold and warm timings, frame-time percentiles, draw/triangle counts, residency and memory fields.
 - First user review: U0 cell scale, close/strategic zoom range and baseline conditions.

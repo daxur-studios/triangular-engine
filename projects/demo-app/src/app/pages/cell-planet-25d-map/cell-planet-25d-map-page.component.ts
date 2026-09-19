@@ -9,16 +9,12 @@ import {
   WORLD_PROFILES,
   IPlanetGraphCore,
   IPlanetEcology,
+  IPlanetFeatures,
   IPlanetSurfaceBake,
   IPlanetTectonics,
   WorldProfileKind,
-  buildPlanetEcology,
-  buildPlanetGraphCore,
   buildPlanetSurfaceBake,
-  buildPlanetTectonics,
-  computeFeatures,
   createPlanetSurfaceSampler,
-  deriveIsLand,
 } from 'triangular-engine/worldgen';
 import {
   MAP_PROJECTIONS,
@@ -60,6 +56,7 @@ import {
 import { CellPlanetSelectionPanelComponent } from './cell-planet-selection-panel.component';
 import { getTerrainHeightScaleM } from './cell-planet-terrain-scale';
 import { buildPlanarDebugRibbonGeometry, projectPlanarDebugPoint } from './cell-planet-debug-geography';
+import { CellPlanetWorldService } from '../cell-planet-world.service';
 
 type TerrainQuality = 'preview' | 'standard' | 'high' | 'ultra';
 type TerrainDisplayScale = 'planet' | 'legacy';
@@ -707,6 +704,7 @@ export class CellPlanet25dMapPageComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly worldService = inject(CellPlanetWorldService);
   private terrain!: IClipmapTerrainSceneHandle;
 
   readonly drawCalls = signal(0);
@@ -715,7 +713,7 @@ export class CellPlanet25dMapPageComponent {
   readonly cellCount = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.cellCount);
   readonly seed = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.seed);
   readonly relaxationIterations = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.relaxationIterations);
-  readonly worldProfileKind = signal<WorldProfileKind>('terran');
+  readonly worldProfileKind = signal<WorldProfileKind>(CELL_PLANET_GENERATION_DEFAULTS.worldProfile);
   readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
   readonly u0Fixture = CELL_PLANET_U0_FIXTURE;
   readonly u0Bookmarks = CELL_PLANET_U0_FIXTURE.bookmarks;
@@ -1202,33 +1200,15 @@ export class CellPlanet25dMapPageComponent {
     this.isRebuilding.set(true);
     const seed = this.seed();
     const profile = WORLD_PROFILES[this.worldProfileKind()];
-    const graph = buildPlanetGraphCore({
+    const world = this.worldService.build({
       cellCount: this.cellCount(),
       seed,
       relaxationIterations: this.relaxationIterations(),
-      jitter: CELL_PLANET_GENERATION_DEFAULTS.jitter,
+      worldProfileKind: this.worldProfileKind(),
+      waterLevel: this.waterLevel(),
     });
-    const tectonics = buildPlanetTectonics(graph, {
-      plateCount: CELL_PLANET_GENERATION_DEFAULTS.plateCount,
-      seed,
-      ...profile.tectonics,
-    });
-    const seaLevelElevation = tectonics.seaLevelElevation + this.waterLevel() * 0.3;
-    tectonics.seaLevelElevation = seaLevelElevation;
-    tectonics.isLand = deriveIsLand(
-      graph,
-      tectonics.elevation,
-      seaLevelElevation,
-      profile.tectonics?.minRegionCellFraction,
-    );
-    const ecology = buildPlanetEcology(graph, tectonics, {
-      climate: profile.climate,
-      biomes: profile.biomes,
-    });
-    const features = computeFeatures(graph, tectonics, ecology.waterBodyKind, profile.features);
-    const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
-      features: this.showVolcanoTerrain() ? features : undefined,
-    });
+    const { graph, tectonics, ecology, features, seaLevelElevation } = world;
+    const sampler = this.showVolcanoTerrain() ? world.featureSampler : world.baseSampler;
     const projection = MAP_PROJECTIONS[this.projectionType()];
     const quality = this.terrainQualityPresets[this.terrainQuality()];
     const bake = buildPlanetSurfaceBake(graph, sampler, {
@@ -1494,7 +1474,7 @@ export class CellPlanet25dMapPageComponent {
 
   private rebuildVolcanoMarker(
     graph: IPlanetGraphCore,
-    features: ReturnType<typeof computeFeatures>,
+    features: IPlanetFeatures,
     sampler: ReturnType<typeof createPlanetSurfaceSampler>,
   ): void {
     this.disposeVolcanoMarker();

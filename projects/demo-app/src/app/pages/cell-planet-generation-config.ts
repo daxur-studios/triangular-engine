@@ -11,4 +11,5 @@ export const CELL_PLANET_GENERATION_DEFAULTS = {
   relaxationIterations: 2,
   jitter: 0.35,
   plateCount: 14,
+  worldProfile: 'volcanic' as const,
 } as const;

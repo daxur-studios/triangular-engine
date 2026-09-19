@@ -1,5 +1,11 @@
 import { TestBed } from '@angular/core/testing';
-import { BufferAttribute, Mesh, PerspectiveCamera, Scene } from 'three';
+import {
+  BufferAttribute,
+  LineSegments,
+  Mesh,
+  PerspectiveCamera,
+  Scene,
+} from 'three';
 import { EngineService } from 'triangular-engine';
 import {
   buildPlanetGraphCore,

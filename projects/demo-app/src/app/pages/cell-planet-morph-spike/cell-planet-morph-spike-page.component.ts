@@ -24,12 +24,6 @@ import {
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import {
-  buildPlanetEcology,
-  buildPlanetGraphCore,
-  buildPlanetTectonics,
-  computeFeatures,
-  createPlanetSurfaceSampler,
-  deriveIsLand,
   findCellAt,
   findReachableCells,
   IPlanetEcology,
@@ -54,8 +48,9 @@ import {
   ProjectionTrackingMode,
   temperatureColor,
 } from 'triangular-engine/worldgen/render';
-import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
 import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
+import { CellPlanetWorldService } from '../cell-planet-world.service';
+import { CellPlanetQuery, readCellPlanetQuery } from '../cell-planet-view-query';
 
 const OCEAN_COLOR = 'hsl(210, 55%, 22%)';
 const GLOBE_RADIUS = 2.0;
@@ -106,6 +101,7 @@ export class CellPlanetMorphSpikePageComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly worldService = inject(CellPlanetWorldService);
 
   readonly morphView = viewChild(CellPlanetMorphViewComponent);
 
@@ -145,6 +141,16 @@ export class CellPlanetMorphSpikePageComponent {
   readonly morphProgress = signal(0.0);
   readonly isAnimating = signal(false);
   readonly targetView = signal<'globe' | 'map'>('globe');
+  private readonly preservedQueryParams = signal<CellPlanetQuery>({});
+  readonly comparisonQueryParams = computed(() => ({
+    ...this.preservedQueryParams(),
+    cellCount: this.cellCount(),
+    seed: this.seed(),
+    relaxation: this.relaxationIterations(),
+    worldProfile: this.worldProfileKind(),
+    projection: this.projectionKind(),
+    fillMode: this.fillMode(),
+  }));
 
   // Stats
   readonly triangles = computed(() => MORPH_SEGMENTS * MORPH_RINGS * 2 * 2);
@@ -204,12 +210,19 @@ export class CellPlanetMorphSpikePageComponent {
 
   constructor() {
     this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      const query = readCellPlanetQuery(params);
+      this.preservedQueryParams.set(query);
       const seedParam = params.get('seed');
       if (seedParam !== null && Number.isFinite(+seedParam)) this.seed.set(+seedParam);
 
       const cellCountParam = params.get('cellCount');
       if (cellCountParam !== null && Number.isFinite(+cellCountParam)) {
         this.cellCount.set(Math.max(200, Math.min(6000, +cellCountParam)));
+      }
+
+      const relaxationParam = params.get('relaxation');
+      if (relaxationParam !== null && Number.isFinite(+relaxationParam)) {
+        this.relaxationIterations.set(Math.max(0, Math.min(6, Math.round(+relaxationParam))));
       }
 
       const projParam = params.get('projection');
@@ -456,40 +469,13 @@ export class CellPlanetMorphSpikePageComponent {
 
   private rebuildWorld(): void {
     const seed = this.seed();
-    const profile = WORLD_PROFILES[this.worldProfileKind()];
-
-    const graph = buildPlanetGraphCore({
+    const world = this.worldService.build({
       cellCount: this.cellCount(),
       seed,
       relaxationIterations: this.relaxationIterations(),
-      jitter: CELL_PLANET_GENERATION_DEFAULTS.jitter,
+      worldProfileKind: this.worldProfileKind(),
     });
-
-    const tectonics = buildPlanetTectonics(graph, {
-      plateCount: CELL_PLANET_GENERATION_DEFAULTS.plateCount,
-      seed,
-      ...profile.tectonics,
-    });
-
-    const seaLevelElevation = tectonics.seaLevelElevation;
-    tectonics.isLand = deriveIsLand(
-      graph,
-      tectonics.elevation,
-      seaLevelElevation,
-      profile.tectonics?.minRegionCellFraction,
-    );
-
-    const ecology = buildPlanetEcology(graph, tectonics, {
-      climate: profile.climate,
-      biomes: profile.biomes,
-    });
-
-    const features = computeFeatures(
-      graph,
-      tectonics,
-      ecology.waterBodyKind,
-      profile.features,
-    );
+    const { graph, tectonics, ecology, features, seaLevelElevation } = world;
 
     let eMin = Infinity;
     let eMax = -Infinity;
@@ -504,9 +490,7 @@ export class CellPlanetMorphSpikePageComponent {
     this.seaLevelElevation = seaLevelElevation;
     this.elevationMin = eMin;
     this.elevationMax = eMax;
-    this.sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
-      features: this.showVolcanoTerrain() ? features : undefined,
-    });
+    this.sampler = this.showVolcanoTerrain() ? world.featureSampler : world.baseSampler;
 
     this.surfaceSampler.set(this.sampler);
     this.spawnGameUnits();
