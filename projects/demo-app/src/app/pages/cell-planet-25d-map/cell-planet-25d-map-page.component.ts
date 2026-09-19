@@ -667,6 +667,10 @@ function makeColorTexture(
         <input type="checkbox" [checked]="showVolcano()" (change)="onVolcanoChange($event)" />
         <span>Debug volcano marker</span>
       </label>
+      <label class="checkbox-row">
+        <input type="checkbox" [checked]="showVolcanoTerrain()" (change)="onVolcanoTerrainChange($event)" />
+        <span>Volcano terrain stamp</span>
+      </label>
       <label>
         <span>Terrain relief: {{ terrainHeightScale().toFixed(1) }}
           ({{ displayScale() === 'planet' ? 'proportional to planet size' : 'legacy direct scale' }})</span>
@@ -789,6 +793,7 @@ export class CellPlanet25dMapPageComponent {
   readonly showRivers = signal(true);
   readonly showCoastlines = signal(true);
   readonly showVolcano = signal(true);
+  readonly showVolcanoTerrain = signal(true);
   /** Display-only relief scale. Canonical planet elevations remain unchanged. */
   readonly terrainHeightScale = signal(4);
   /** Experimental runtime-only triangle reduction ratio; canonical terrain is unchanged. */
@@ -1106,6 +1111,12 @@ export class CellPlanet25dMapPageComponent {
     this.updateComparisonQueryParams();
   }
 
+  onVolcanoTerrainChange(event: Event): void {
+    this.showVolcanoTerrain.set((event.target as HTMLInputElement).checked);
+    this.updateComparisonQueryParams();
+    this.rebuildWorld();
+  }
+
   onTerrainHeightScaleInput(event: Event): void {
     const value = this.inputNumber(event);
     if (Number.isFinite(value) && value !== this.terrainHeightScale()) {
@@ -1215,7 +1226,9 @@ export class CellPlanet25dMapPageComponent {
       biomes: profile.biomes,
     });
     const features = computeFeatures(graph, tectonics, ecology.waterBodyKind, profile.features);
-    const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology);
+    const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+      features: this.showVolcanoTerrain() ? features : undefined,
+    });
     const projection = MAP_PROJECTIONS[this.projectionType()];
     const quality = this.terrainQualityPresets[this.terrainQuality()];
     const bake = buildPlanetSurfaceBake(graph, sampler, {
@@ -1673,6 +1686,12 @@ export class CellPlanet25dMapPageComponent {
     if (query.showCoastlines === 'true' || query.showCoastlines === '1') this.showCoastlines.set(true);
     if (query.showVolcano === 'false' || query.showVolcano === '0') this.showVolcano.set(false);
     if (query.showVolcano === 'true' || query.showVolcano === '1') this.showVolcano.set(true);
+    if (query.showVolcanoTerrain === 'false' || query.showVolcanoTerrain === '0') {
+      this.showVolcanoTerrain.set(false);
+    }
+    if (query.showVolcanoTerrain === 'true' || query.showVolcanoTerrain === '1') {
+      this.showVolcanoTerrain.set(true);
+    }
     const selectedCell = this.numberQuery(query.selectedCell);
     this.pendingSelectedCellId =
       selectedCell !== null && Number.isInteger(selectedCell) && selectedCell >= 0 ? selectedCell : null;
@@ -1707,6 +1726,7 @@ export class CellPlanet25dMapPageComponent {
       showRivers: this.showRivers(),
       showCoastlines: this.showCoastlines(),
       showVolcano: this.showVolcano(),
+      showVolcanoTerrain: this.showVolcanoTerrain(),
       selectedCell: this.selection()?.cellId ?? '',
       u0Bookmark: this.u0BookmarkId(),
     });

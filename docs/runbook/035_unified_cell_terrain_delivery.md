@@ -375,7 +375,19 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
   independent `Debug volcano marker` toggle/query value, and is intentionally presentation-only;
   it does not yet carve or model a volcano-shaped cell. Demo build passes; browser review is still
   required.
-- Next packet: user retest of 2.5D click selection and bookmark selection, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
+- Latest volcano terrain packet (2026-09-19): the shared surface sampler now accepts the generated
+  feature set and reuses the existing `sampleVolcano()` geology-lab shape in a bounded tangent
+  frame inside each volcano site's irregular cell. This preserves the POC's cone, crater rim and
+  erosion detail while adapting its footprint to the cell. The 2.5D page passes the same feature set into its sampler,
+  so the baked height field, marker height and future spherical consumers share the definition.
+  The page also exposes an independent `Volcano terrain stamp` toggle so the user can compare the
+  same selected cell with the sampled relief enabled and disabled.
+  The stamp is precomputed once per sampler and checks only generated volcano instances while
+  sampling; it does not add a full graph search per bake pixel. The current packet covers volcanoes
+  only; mesa/canyon shapes, spherical wiring and LOD preservation remain outstanding. Library and
+  demo builds pass. Worldgen browser tests built successfully but ChromeHeadless could not start on
+  the reference machine because its GPU process exited; user browser review is required.
+- Next packet: user visual review of the 2.5D volcano terrain stamp, then capture U0 baseline on the reference machine/browser, including canvas/DPR/build mode,
   cold and warm timings, frame-time percentiles, draw/triangle counts, residency and memory fields.
 - First user review: U0 cell scale, close/strategic zoom range and baseline conditions.
 - Reference hardware/browser/canvas/DPR/build mode: not yet recorded.

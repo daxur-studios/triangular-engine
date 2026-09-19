@@ -131,6 +131,13 @@ For actual surface height (not the raw per-cell scalar), use `sampleElevation`/`
 — they barycentric-blend the containing cell + its 2 nearest corners rather than returning the
 flat per-cell value, so a displaced mesh doesn't facet.
 
+For detailed generated geology, pass the result of `computeFeatures()` as `features` in
+`createPlanetSurfaceSampler()`'s optional params. Volcano instances then reuse the authored
+`sampleVolcano()` shape from `geological-shapes.ts` in a bounded tangent frame inside their
+owning irregular cell. The sampler keeps this relief separate from the raw per-cell elevation
+array, so the same surface query can feed a planar bake and a spherical mesh.
+`buildFeatureElevation()` remains available for cell-resolution consumers.
+
 ## Radius is app-owned
 
 Nothing in `worldgen/core` knows about metres. The convention every consumer follows (lab page,

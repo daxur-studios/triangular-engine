@@ -1,4 +1,5 @@
 import { IPlanetEcology } from './ecology';
+import { IPlanetFeatures } from './features';
 import { IPlanetGraphCore } from './planet-graph';
 import { sampleElevation } from './sample-elevation';
 import { IPlanetTectonics } from './tectonics';
@@ -16,6 +17,10 @@ export interface IPlanetSurfaceParams {
   summitRelief?: number;
   riverWidthRadians?: number;
   riverDepth?: number;
+  /** Optional generated per-cell geology applied as local sampled terrain relief. */
+  features?: IPlanetFeatures;
+  /** Fraction of the containing cell's centre-to-corner radius used by volcanoes. */
+  featureRadiusFraction?: number;
 }
 
 export interface IPlanetSurfaceSample {
@@ -35,13 +40,14 @@ export interface IPlanetSurfaceSampler {
   sample(direction: IVec3): IPlanetSurfaceSample;
 }
 
-const DEFAULTS: Required<IPlanetSurfaceParams> = {
+const DEFAULTS: Omit<Required<IPlanetSurfaceParams>, 'features'> = {
   ridgeWidthRadians: 0.045,
   ridgeRelief: 0.18,
   summitWidthRadians: 0.028,
   summitRelief: 0.16,
   riverWidthRadians: 0.018,
   riverDepth: 0.08,
+  featureRadiusFraction: 0.72,
 };
 
 function angularDistance(a: IVec3, b: IVec3): number {
@@ -83,6 +89,30 @@ function nearestRiverInfluence(direction: IVec3, paths: readonly IVec3[][], widt
   return smoothFalloff(nearestPathDistance(direction, paths), width);
 }
 
+function volcanoRelief(
+  direction: IVec3,
+  cell: IPlanetGraphCore['cells'][number],
+  elevationDelta: number,
+  radiusFraction: number,
+): number {
+  if (cell.corners.length === 0 || elevationDelta === 0) return 0;
+
+  // Keep the analytic shape inside the site cell. The centre-to-nearest-corner distance is a
+  // conservative local footprint for an irregular Voronoi polygon; fading to zero before that
+  // boundary keeps the feature owned by one cell and leaves neighbouring cell terrain intact.
+  const nearestCornerRadius = Math.min(...cell.corners.map((corner) => angularDistance(cell.center, corner)));
+  const radius = Math.max(1e-4, nearestCornerRadius * radiusFraction);
+  const normalized = angularDistance(direction, cell.center) / radius;
+  if (normalized >= 1) return 0;
+
+  // A cone with a shallow bowl in the middle and a raised rim. The peak relief is controlled by
+  // the generated feature instance, so feature placement remains data-driven and deterministic.
+  const cone = Math.pow(1 - normalized, 1.35);
+  const rim = 0.18 * Math.exp(-Math.pow((normalized - 0.34) / 0.13, 2));
+  const crater = 0.48 * Math.exp(-Math.pow(normalized / 0.18, 2));
+  return Math.max(0, cone + rim - crater) * elevationDelta;
+}
+
 /**
  * Creates the canonical detailed surface query shared by the planar map, spherical views,
  * CPU picking and future terrain colliders. It deliberately accepts normalized planet
@@ -96,11 +126,28 @@ export function createPlanetSurfaceSampler(
   params: IPlanetSurfaceParams = {},
 ): IPlanetSurfaceSampler {
   const p = { ...DEFAULTS, ...params };
+  const volcanoStamps = (params.features?.instances ?? [])
+    .filter((instance) => instance.kind === 'volcano')
+    .map((instance) => ({
+      cell: graph.cells[instance.siteCellId],
+      elevationDelta: instance.elevationDelta,
+    }))
+    .filter(
+      (stamp): stamp is { cell: IPlanetGraphCore['cells'][number]; elevationDelta: number } =>
+        stamp.cell !== undefined,
+    );
 
   return {
     sample(direction: IVec3): IPlanetSurfaceSample {
       const unitDirection = normalize(direction);
       const baseElevation = sampleElevation(graph, tectonics.elevation, unitDirection);
+      let featureRelief = 0;
+      for (const stamp of volcanoStamps) {
+        featureRelief = Math.max(
+          featureRelief,
+          volcanoRelief(unitDirection, stamp.cell, stamp.elevationDelta, p.featureRadiusFraction),
+        );
+      }
       const isLand = baseElevation >= tectonics.seaLevelElevation;
       const ridgeInfluence = nearestPathInfluence(
         unitDirection,
@@ -121,7 +168,7 @@ export function createPlanetSurfaceSampler(
       const riverCarve = isLand
         ? nearestRiverInfluence(unitDirection, ecology.riverPaths, p.riverWidthRadians) * p.riverDepth
         : 0;
-      const shapedElevation = baseElevation + ridgeRelief - riverCarve;
+      const shapedElevation = baseElevation + ridgeRelief + featureRelief - riverCarve;
       // Keep land channels from falling through the shoreline, but preserve the
       // ocean floor below the sea datum so planar and spherical consumers can
       // visualize bathymetry instead of receiving a flat water plane.

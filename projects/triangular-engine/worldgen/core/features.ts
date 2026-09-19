@@ -65,8 +65,11 @@ const DEFAULTS = {
 const ELEVATION_PER_SAMPLER_UNIT = 1 / 70;
 
 /**
- * M-spike: assigns a discrete per-cell `Feature` and a flat elevation stamp to exactly one site
- * cell per instance — no neighbor spillover.
+ * M-spike: assigns a discrete per-cell `Feature` and a flat cell-level elevation stamp to exactly
+ * one site cell per instance — no neighbor spillover in the cell data. The detailed surface
+ * sampler may turn a volcano instance into a bounded analytic cone/crater relief inside that
+ * owning cell; `buildFeatureElevation()` remains the flat cell-resolution fallback for consumers
+ * that only operate on per-cell elevation arrays.
  *
  * ## Why a flat single-cell stamp, not a sampled multi-cell shape
  *

@@ -50,6 +50,10 @@ All notable changes to triangular-engine are documented here.
 
 - `createPlanetSurfaceSampler()` now preserves below-sea terrain elevations for bathymetry while
   keeping land river channels clamped to the shoreline datum.
+- `createPlanetSurfaceSampler()` accepts generated feature data and reuses the authored
+  `sampleVolcano()` cone/crater/rim/erosion shape inside each volcano's owning irregular cell. The
+  optional detail is shared by planar bakes and spherical consumers; the existing cell-level
+  feature elevation helper remains available for lower-resolution consumers.
 
 - `triangular-engine/terrain` clipmap scenes now expose `setHeightSource()` so
   bounded texture-backed terrain can be regenerated and swapped without

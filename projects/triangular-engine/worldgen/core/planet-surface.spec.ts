@@ -5,6 +5,42 @@ import { buildPlanetTectonics } from './tectonics';
 import { normalize } from './vec3';
 
 describe('createPlanetSurfaceSampler', () => {
+  it('applies a volcano shape inside its owning cell and fades before the cell edge', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 240, seed: 71 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 71 });
+    const ecology = buildPlanetEcology(graph, tectonics);
+    const site = graph.cells[0]!;
+    const features = {
+      feature: graph.cells.map((cell) => (cell.id === site.id ? 'volcano' : 'none')) as Array<'none' | 'volcano'>,
+      instances: [{ kind: 'volcano' as const, siteCellId: site.id, elevationDelta: 0.7 }],
+      featureByCellId: new Map([[site.id, { kind: 'volcano' as const, siteCellId: site.id, elevationDelta: 0.7 }]]),
+    };
+    const baselineSampler = createPlanetSurfaceSampler(graph, tectonics, ecology);
+    const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, { features });
+
+    const centre = sampler.sample(site.center);
+    const nearCorner = sampler.sample(
+      normalize({
+        x: site.center.x * 0.8 + site.corners[0]!.x * 0.2,
+        y: site.center.y * 0.8 + site.corners[0]!.y * 0.2,
+        z: site.center.z * 0.8 + site.corners[0]!.z * 0.2,
+      }),
+    );
+
+    const baselineCentre = baselineSampler.sample(site.center);
+    const baselineNearCorner = baselineSampler.sample(
+      normalize({
+        x: site.center.x * 0.8 + site.corners[0]!.x * 0.2,
+        y: site.center.y * 0.8 + site.corners[0]!.y * 0.2,
+        z: site.center.z * 0.8 + site.corners[0]!.z * 0.2,
+      }),
+    );
+    expect(centre.elevation).toBeGreaterThan(baselineCentre.elevation);
+    expect(nearCorner.elevation - baselineNearCorner.elevation).toBeLessThan(
+      centre.elevation - baselineCentre.elevation,
+    );
+  });
+
   it('is deterministic and projection-independent', () => {
     const graph = buildPlanetGraphCore({ cellCount: 240, seed: 61 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 61 });
