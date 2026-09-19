@@ -16,6 +16,11 @@ export interface IPlanarDebugRibbonOptions {
   readonly defaultWidth: number;
   readonly pointWidths?: readonly (readonly number[])[];
   readonly heightAt: (direction: IVec3) => number;
+  readonly seaLevelElevation?: number;
+  readonly clampToSeaLevel?: boolean;
+  readonly adaptiveReliefSubdivision?: boolean;
+  readonly reliefThreshold?: number;
+  readonly maxSubdivisionDepth?: number;
 }
 
 export interface IPlanarDebugMapPointOptions {
@@ -29,6 +34,7 @@ export interface IPlanarDebugMapPointOptions {
 }
 
 interface IProjectedPoint {
+  readonly direction: IVec3;
   readonly lon: number;
   readonly x: number;
   readonly z: number;
@@ -60,12 +66,28 @@ export function projectPlanarDebugPoint(
 function projectPoint(direction: IVec3, options: IPlanarDebugRibbonOptions): IProjectedPoint {
   const unit = normalize(direction);
   const projected = projectPlanarDebugPoint(unit, options);
+  const rawHeight = options.heightAt(unit);
+  const seaLevel = options.seaLevelElevation ?? -Infinity;
   return {
+    direction: unit,
     lon: Math.atan2(unit.z, unit.x),
     x: projected.x,
     z: projected.z,
-    y: options.heightAt(unit) + options.clearance,
+    y: Math.max(options.clampToSeaLevel ? seaLevel : -Infinity, rawHeight) + options.clearance,
   };
+}
+
+function midpointPoint(
+  start: IProjectedPoint,
+  end: IProjectedPoint,
+  options: IPlanarDebugRibbonOptions,
+): IProjectedPoint {
+  const direction = normalize({
+    x: start.direction.x + end.direction.x,
+    y: start.direction.y + end.direction.y,
+    z: start.direction.z + end.direction.z,
+  });
+  return projectPoint(direction, options);
 }
 
 /**
@@ -104,6 +126,29 @@ export function buildPlanarDebugRibbonGeometry(options: IPlanarDebugRibbonOption
     vertexCount += 4;
   };
 
+  const appendAdaptiveSegments = (
+    start: IProjectedPoint,
+    end: IProjectedPoint,
+    width: number,
+    depth: number,
+  ): void => {
+    if (Math.abs(end.lon - start.lon) > Math.PI) return;
+
+    const maxDepth = options.maxSubdivisionDepth ?? 2;
+    const reliefThreshold = options.reliefThreshold ?? 0.008;
+    if (options.adaptiveReliefSubdivision !== false && depth < maxDepth) {
+      const midpoint = midpointPoint(start, end, options);
+      const expectedHeight = (start.y + end.y) * 0.5;
+      if (midpoint.y - expectedHeight > reliefThreshold) {
+        appendAdaptiveSegments(start, midpoint, width, depth + 1);
+        appendAdaptiveSegments(midpoint, end, width, depth + 1);
+        return;
+      }
+    }
+
+    addSegment(start, end, width);
+  };
+
   for (let pathIndex = 0; pathIndex < options.paths.length; pathIndex++) {
     const path = options.paths[pathIndex];
     if (path.length < 2) continue;
@@ -114,7 +159,12 @@ export function buildPlanarDebugRibbonGeometry(options: IPlanarDebugRibbonOption
       const nextIndex = (index + 1) % path.length;
       const startWidth = widths?.[index] ?? options.defaultWidth;
       const endWidth = widths?.[nextIndex] ?? startWidth;
-      addSegment(projected[index], projected[nextIndex], (startWidth + endWidth) * 0.5);
+      appendAdaptiveSegments(
+        projected[index],
+        projected[nextIndex],
+        (startWidth + endWidth) * 0.5,
+        0,
+      );
     }
   }
 

@@ -12,6 +12,7 @@ import {
   IPlanetFeatures,
   IPlanetSurfaceBake,
   IPlanetTectonics,
+  IVec3,
   WorldProfileKind,
   buildPlanetSurfaceBake,
   createPlanetSurfaceSampler,
@@ -33,6 +34,7 @@ import {
   formatDistanceM,
   IPlanarHeightField,
   intersectPlanarHeightField,
+  samplePlanarHeight,
 } from 'triangular-engine/worldgen/render';
 import { evaluateTerrainMaterial, terrainMaterialColorRgb } from 'triangular-engine/terrain';
 import {
@@ -657,6 +659,10 @@ function makeColorTexture(
         <span>Debug river paths</span>
       </label>
       <label class="checkbox-row">
+        <input type="checkbox" [checked]="showRidges()" (change)="onRidgesChange($event)" />
+        <span>Debug mountain ridges</span>
+      </label>
+      <label class="checkbox-row">
         <input type="checkbox" [checked]="showCoastlines()" (change)="onCoastlinesChange($event)" />
         <span>Debug coastlines</span>
       </label>
@@ -789,6 +795,7 @@ export class CellPlanet25dMapPageComponent {
   readonly waterLevel = signal(0);
   readonly showOcean = signal(true);
   readonly showRivers = signal(true);
+  readonly showRidges = signal(true);
   readonly showCoastlines = signal(true);
   readonly showVolcano = signal(true);
   readonly showVolcanoTerrain = signal(true);
@@ -819,12 +826,24 @@ export class CellPlanet25dMapPageComponent {
   private activeTextures: { height: DataTexture; color: DataTexture } | undefined;
   private oceanMesh: Mesh<PlaneGeometry, MeshStandardMaterial> | undefined;
   private debugRiverMesh: Mesh<BufferGeometry, MeshBasicMaterial> | undefined;
+  private debugRidgeMesh: Mesh<BufferGeometry, MeshBasicMaterial> | undefined;
   private debugCoastlineMesh: Mesh<BufferGeometry, MeshBasicMaterial> | undefined;
   private volcanoMarker: Sprite | undefined;
   private readonly debugRiverMaterial = new MeshBasicMaterial({
     color: '#4fc3f7',
     transparent: true,
     opacity: 0.9,
+    // These are geography reference paths. Keep them readable while inspecting the
+    // terrain, even when the clipmap's current LOD is slightly above the CPU path sample.
+    depthTest: false,
+    depthWrite: false,
+    side: DoubleSide,
+  });
+  private readonly debugRidgeMaterial = new MeshBasicMaterial({
+    color: '#f0a05a',
+    transparent: true,
+    opacity: 0.9,
+    depthTest: false,
     depthWrite: false,
     side: DoubleSide,
   });
@@ -832,6 +851,7 @@ export class CellPlanet25dMapPageComponent {
     color: '#fff0b3',
     transparent: true,
     opacity: 0.95,
+    depthTest: false,
     depthWrite: false,
     side: DoubleSide,
   });
@@ -924,6 +944,7 @@ export class CellPlanet25dMapPageComponent {
       this.disposeDebugGeography();
       this.disposeVolcanoMarker();
       this.debugRiverMaterial.dispose();
+      this.debugRidgeMaterial.dispose();
       this.debugCoastlineMaterial.dispose();
       this.volcanoMarkerMaterial.dispose();
       this.volcanoMarkerTexture.dispose();
@@ -1093,6 +1114,12 @@ export class CellPlanet25dMapPageComponent {
 
   onRiversChange(event: Event): void {
     this.showRivers.set((event.target as HTMLInputElement).checked);
+    this.updateDebugGeographyVisibility();
+    this.updateComparisonQueryParams();
+  }
+
+  onRidgesChange(event: Event): void {
+    this.showRidges.set((event.target as HTMLInputElement).checked);
     this.updateDebugGeographyVisibility();
     this.updateComparisonQueryParams();
   }
@@ -1408,9 +1435,29 @@ export class CellPlanet25dMapPageComponent {
     const mapHeight = bounds.maxZ - bounds.minZ;
     const projection = MAP_PROJECTIONS[this.projectionType()];
     const heightScale = this.terrainHeightScaleM();
-    const clearance = Math.max(0.5, heightScale * 0.0005);
+    // These are intentionally readable reference ribbons, not the future carved channels.
+    // Keep enough separation from the clipmap interpolation to avoid z-fighting and to remain
+    // visible in the compact legacy preview as well as at physical planet scale.
+    const clearance = Math.max(2, heightScale * 0.025);
     const riverWidth = Math.max(30, mapWidth * 0.00065);
+    const ridgeWidth = Math.max(24, mapWidth * 0.00045);
     const coastlineWidth = Math.max(30, mapWidth * 0.00035);
+    const displayHeightAt = (direction: IVec3): number => {
+      const projected = projectPlanarDebugPoint(direction, {
+        projection,
+        mapWidth,
+        mapHeight,
+        minX: bounds.minX,
+        minZ: bounds.minZ,
+        maxX: bounds.maxX,
+        maxZ: bounds.maxZ,
+      });
+      // The clipmap samples this baked field in the vertex shader. Sampling it here keeps
+      // the debug path on the same surface instead of the higher-level cell sampler.
+      return this.activeHeightField
+        ? samplePlanarHeight(this.activeHeightField, projected.x, projected.z)
+        : sampler.sample(direction).elevation * heightScale;
+    };
     const maxRiverFlow = Math.max(1, ...ecology.riverFlow.flat());
     const riverWidths = ecology.riverFlow.map((flow) =>
       flow.map((value) => riverWidth * (0.7 + 0.3 * Math.sqrt(Math.max(0, value) / maxRiverFlow))),
@@ -1432,13 +1479,40 @@ export class CellPlanet25dMapPageComponent {
       closed: false,
       defaultWidth: riverWidth,
       pointWidths: riverWidths,
-      heightAt: (direction) => sampler.sample(direction).elevation * heightScale,
+      heightAt: displayHeightAt,
+      seaLevelElevation: tectonics.seaLevelElevation * heightScale,
+      clampToSeaLevel: true,
+      adaptiveReliefSubdivision: true,
+      reliefThreshold: Math.max(0.5, heightScale * 0.008),
+      maxSubdivisionDepth: 2,
     });
     this.debugRiverMesh = new Mesh(riverGeometry, this.debugRiverMaterial);
     this.debugRiverMesh.name = 'cell-planet-25d-debug-river-paths';
     this.debugRiverMesh.renderOrder = 6;
     this.debugRiverMesh.visible = this.showRivers();
     this.engine.scene.add(this.debugRiverMesh);
+
+    const ridgeWidths = ecology.ridgePaths.map((path, pathIndex) => {
+      const strength = ecology.ridgePathStrength[pathIndex] ?? 0.5;
+      const width = ridgeWidth * (0.7 + 0.5 * Math.max(0, Math.min(1, strength)));
+      return path.map(() => width);
+    });
+    const ridgeGeometry = buildPlanarDebugRibbonGeometry({
+      ...common,
+      paths: ecology.ridgePaths,
+      closed: false,
+      defaultWidth: ridgeWidth,
+      pointWidths: ridgeWidths,
+      heightAt: displayHeightAt,
+      adaptiveReliefSubdivision: true,
+      reliefThreshold: Math.max(0.5, heightScale * 0.008),
+      maxSubdivisionDepth: 2,
+    });
+    this.debugRidgeMesh = new Mesh(ridgeGeometry, this.debugRidgeMaterial);
+    this.debugRidgeMesh.name = 'cell-planet-25d-debug-ridge-paths';
+    this.debugRidgeMesh.renderOrder = 7;
+    this.debugRidgeMesh.visible = this.showRidges();
+    this.engine.scene.add(this.debugRidgeMesh);
 
     const coastlineGeometry = buildPlanarDebugRibbonGeometry({
       ...common,
@@ -1449,13 +1523,14 @@ export class CellPlanet25dMapPageComponent {
     });
     this.debugCoastlineMesh = new Mesh(coastlineGeometry, this.debugCoastlineMaterial);
     this.debugCoastlineMesh.name = 'cell-planet-25d-debug-coastlines';
-    this.debugCoastlineMesh.renderOrder = 7;
+    this.debugCoastlineMesh.renderOrder = 8;
     this.debugCoastlineMesh.visible = this.showCoastlines();
     this.engine.scene.add(this.debugCoastlineMesh);
   }
 
   private updateDebugGeographyVisibility(): void {
     if (this.debugRiverMesh) this.debugRiverMesh.visible = this.showRivers();
+    if (this.debugRidgeMesh) this.debugRidgeMesh.visible = this.showRidges();
     if (this.debugCoastlineMesh) this.debugCoastlineMesh.visible = this.showCoastlines();
   }
 
@@ -1464,6 +1539,11 @@ export class CellPlanet25dMapPageComponent {
       this.engine.scene.remove(this.debugRiverMesh);
       this.debugRiverMesh.geometry.dispose();
       this.debugRiverMesh = undefined;
+    }
+    if (this.debugRidgeMesh) {
+      this.engine.scene.remove(this.debugRidgeMesh);
+      this.debugRidgeMesh.geometry.dispose();
+      this.debugRidgeMesh = undefined;
     }
     if (this.debugCoastlineMesh) {
       this.engine.scene.remove(this.debugCoastlineMesh);
@@ -1662,6 +1742,8 @@ export class CellPlanet25dMapPageComponent {
     if (query.showOcean === 'true' || query.showOcean === '1') this.showOcean.set(true);
     if (query.showRivers === 'false' || query.showRivers === '0') this.showRivers.set(false);
     if (query.showRivers === 'true' || query.showRivers === '1') this.showRivers.set(true);
+    if (query.showRidges === 'false' || query.showRidges === '0') this.showRidges.set(false);
+    if (query.showRidges === 'true' || query.showRidges === '1') this.showRidges.set(true);
     if (query.showCoastlines === 'false' || query.showCoastlines === '0') this.showCoastlines.set(false);
     if (query.showCoastlines === 'true' || query.showCoastlines === '1') this.showCoastlines.set(true);
     if (query.showVolcano === 'false' || query.showVolcano === '0') this.showVolcano.set(false);
@@ -1704,6 +1786,7 @@ export class CellPlanet25dMapPageComponent {
       macroVariationScaleM: this.macroVariationScaleM(),
       showOcean: this.showOcean(),
       showRivers: this.showRivers(),
+      showRidges: this.showRidges(),
       showCoastlines: this.showCoastlines(),
       showVolcano: this.showVolcano(),
       showVolcanoTerrain: this.showVolcanoTerrain(),

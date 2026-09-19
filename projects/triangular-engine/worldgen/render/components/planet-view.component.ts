@@ -46,6 +46,7 @@ import {
   IPlanetGraphCore,
   IPlanetTectonics,
   IVec3,
+  normalize,
   sampleElevation,
 } from 'triangular-engine/worldgen';
 import {
@@ -565,8 +566,9 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
       this.object3D().remove(this.riverLines);
       this.riverLines.geometry.dispose();
     }
-    this.riverDirections = this.#flattenPathDirections(ecology.riverPaths, false);
-    this.riverElevations = this.#sampleElevationsFor(this.riverDirections);
+    const riverPathData = this.#flattenAdaptivePathDirections(ecology.riverPaths, false);
+    this.riverDirections = riverPathData.directions;
+    this.riverElevations = riverPathData.elevations;
     const riverGeometry = new BufferGeometry();
     riverGeometry.setAttribute(
       'position',
@@ -610,17 +612,38 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
 
   #applyRiverDisplacement(): void {
     const scale = this.elevationScale();
+    const minClearance = 0.003;
     const bias = 1.0015;
+    const seaLevel = this.currentSeaLevelElevation;
+    const clampToSeaLevel = this.clampBordersToSeaLevel();
 
     if (this.riverLines) {
       const attr = this.riverLines.geometry.getAttribute('position') as BufferAttribute;
       const positions = attr.array as Float32Array;
-      for (let i = 0; i < this.riverElevations.length; i++) {
-        const radius = (1 + this.riverElevations[i] * scale) * bias;
-        const o = i * 3;
-        positions[o] = this.riverDirections[o] * radius;
-        positions[o + 1] = this.riverDirections[o + 1] * radius;
-        positions[o + 2] = this.riverDirections[o + 2] * radius;
+      for (let i = 0; i + 1 < this.riverElevations.length; i += 2) {
+        const oA = i * 3;
+        const oB = (i + 1) * 3;
+        const a = {
+          x: this.riverDirections[oA],
+          y: this.riverDirections[oA + 1],
+          z: this.riverDirections[oA + 2],
+        };
+        const b = {
+          x: this.riverDirections[oB],
+          y: this.riverDirections[oB + 1],
+          z: this.riverDirections[oB + 2],
+        };
+        const clearance = minClearance + computeEdgeSagitta(a, b, 1.0) + scale * 0.025;
+        const elevA = clampToSeaLevel ? Math.max(seaLevel, this.riverElevations[i]) : this.riverElevations[i];
+        const elevB = clampToSeaLevel ? Math.max(seaLevel, this.riverElevations[i + 1]) : this.riverElevations[i + 1];
+        const radiusA = 1 + elevA * scale + clearance;
+        const radiusB = 1 + elevB * scale + clearance;
+        positions[oA] = a.x * radiusA;
+        positions[oA + 1] = a.y * radiusA;
+        positions[oA + 2] = a.z * radiusA;
+        positions[oB] = b.x * radiusB;
+        positions[oB + 1] = b.y * radiusB;
+        positions[oB + 2] = b.z * radiusB;
       }
       attr.needsUpdate = true;
     }
@@ -851,6 +874,53 @@ export class PlanetViewComponent extends GroupComponent implements OnDestroy {
       }
     }
     return new Float32Array(out);
+  }
+
+  #flattenAdaptivePathDirections(
+    paths: IVec3[][],
+    closed: boolean,
+  ): { directions: Float32Array<ArrayBuffer>; elevations: Float32Array<ArrayBuffer> } {
+    const directions: number[] = [];
+    const elevations: number[] = [];
+    const graph = this.graph();
+    const tectonics = this.tectonics();
+    const sample = (direction: IVec3): number =>
+      graph && tectonics ? sampleElevation(graph, tectonics.elevation, direction) : 0;
+
+    const append = (a: IVec3, b: IVec3, depth: number): void => {
+      const aUnit = normalize(a);
+      const bUnit = normalize(b);
+      const aElevation = sample(aUnit);
+      const bElevation = sample(bUnit);
+      if (depth < 2) {
+        const midpoint = normalize({
+          x: aUnit.x + bUnit.x,
+          y: aUnit.y + bUnit.y,
+          z: aUnit.z + bUnit.z,
+        });
+        const midpointElevation = sample(midpoint);
+        if (midpointElevation - (aElevation + bElevation) * 0.5 > 0.008) {
+          append(aUnit, midpoint, depth + 1);
+          append(midpoint, bUnit, depth + 1);
+          return;
+        }
+      }
+      directions.push(aUnit.x, aUnit.y, aUnit.z, bUnit.x, bUnit.y, bUnit.z);
+      elevations.push(aElevation, bElevation);
+    };
+
+    for (const path of paths) {
+      if (path.length < 2) continue;
+      const segmentCount = closed ? path.length : path.length - 1;
+      for (let index = 0; index < segmentCount; index++) {
+        append(path[index], path[(index + 1) % path.length], 0);
+      }
+    }
+
+    return {
+      directions: new Float32Array(directions),
+      elevations: new Float32Array(elevations),
+    };
   }
 
   #sampleElevationsFor(directions: Float32Array): Float32Array<ArrayBuffer> {

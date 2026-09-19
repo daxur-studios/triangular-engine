@@ -373,6 +373,18 @@ reopens that gate and any affected dependent acceptance; preserve prior evidence
   atan2(direction.z, direction.x)`); the previous X/Z-reversed inverse caused a horizontal
   rotation/shift of the overlays against the terrain. Library and demo builds pass; browser review
   is still required.
+- Latest 2.5D ridge/debug-clearance packet (2026-09-19): the planar debug layer now also exposes
+  `Debug mountain ridges`, built from the shared `ecology.ridgePaths` and `ridgePathStrength` data.
+  River and ridge ribbons use the sampled terrain height plus a larger debug-only clearance so
+  they remain visibly above the clipmap in both physical planet and compact legacy scales. This
+  is still a reference overlay, not carved river/ridge geometry; browser review should confirm
+  visibility and alignment before the later U3/U2 terrain work.
+- Latest river overlay robustness packet (2026-09-19): river debug ribbons now clamp sampled
+  heights to sea level at underwater mouths and adaptively subdivide segments when midpoint
+  relief rises above the interpolated endpoint height, up to two levels. The reusable 3D
+  `PlanetView` river lines now use the same midpoint refinement plus sagitta clearance and
+  `minClearance + heightScale * 0.025` displacement. This addresses overlay clipping only; it
+  does not yet create carved riverbeds or bank geometry.
 - Latest 2.5D volcano marker packet (2026-09-18): the page now computes the current world's
   generated feature instances and displays the first volcano as a lightweight billboard icon. It
   uses the same planar projection and CPU surface sampler as the debug geography layer, has an

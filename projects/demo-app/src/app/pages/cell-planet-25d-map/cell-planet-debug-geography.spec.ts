@@ -53,4 +53,29 @@ describe('buildPlanarDebugRibbonGeometry', () => {
     expect(geometry.getAttribute('position').count).toBe(0);
     expect(geometry.index?.count).toBe(0);
   });
+
+  it('clamps underwater paths and subdivides over midpoint relief', () => {
+    const geometry = buildPlanarDebugRibbonGeometry({
+      ...base,
+      paths: [[
+        { x: 1, y: 0, z: 0 },
+        { x: 0, y: 0, z: 1 },
+      ]],
+      closed: false,
+      seaLevelElevation: 0,
+      clampToSeaLevel: true,
+      adaptiveReliefSubdivision: true,
+      reliefThreshold: 0.5,
+      maxSubdivisionDepth: 1,
+      heightAt: (direction) => direction.x > 0.9 || direction.z > 0.9 ? -1 : 1,
+    });
+
+    // The elevated midpoint forces two ribbon segments, while both underwater endpoints are
+    // lifted to sea level before the debug clearance is applied.
+    expect(geometry.getAttribute('position').count).toBe(8);
+    const positions = geometry.getAttribute('position').array as Float32Array;
+    for (let index = 1; index < positions.length; index += 3) {
+      expect(positions[index]).toBeGreaterThanOrEqual(0.1);
+    }
+  });
 });
