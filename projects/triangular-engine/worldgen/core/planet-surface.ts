@@ -1,7 +1,13 @@
 import { Biome } from './biomes';
 import { IPlanetEcology } from './ecology';
 import { IPlanetFeatures } from './features';
-import { defaultGeologicalTerrainSettings, sampleVolcano, VolcanoSettings } from './geological-shapes';
+import {
+  defaultGeologicalTerrainSettings,
+  sampleCrater,
+  sampleMesa,
+  sampleVolcano,
+  VolcanoSettings,
+} from './geological-shapes';
 import { IPlanetGraphCore } from './planet-graph';
 import { findCellAt, sampleElevation } from './sample-elevation';
 import { IPlanetTectonics } from './tectonics';
@@ -50,6 +56,8 @@ export interface IPlanetSurfaceParams {
    * bumps per unit chord length on the unit sphere) for every cell regardless of tier. Leave
    * unset to use each cell's landform-appropriate default. */
   cellDetailFrequency?: number;
+  /** Freeboard thickness of floating sea ice / ice caps above sea level. Defaults to 0.02. Set to 0 to disable. */
+  iceShelfFreeboard?: number;
 }
 
 export interface IPlanetSurfaceSample {
@@ -63,6 +71,8 @@ export interface IPlanetSurfaceSample {
   elevation: number;
   seaLevel: number;
   isLand: boolean;
+  /** True if the sampled point sits on a floating sea ice / polar ice cap shelf. */
+  isIce?: boolean;
 }
 
 export interface IPlanetSurfaceSampler {
@@ -82,6 +92,7 @@ const DEFAULTS: Omit<
   featureRadiusFraction: 0.72,
   featureComposition: 'shaped',
   cellBlendFraction: 0.25,
+  iceShelfFreeboard: 0.02,
 };
 
 /** Per-cell landform tier a discrete cell is shaped as, derived from its `ecology.biome`. */
@@ -98,23 +109,21 @@ function resolveLandform(biome: Biome | undefined): CellLandform {
 }
 
 interface ILandformShape {
-  /** How much taller than its own value the cell's centre peaks, as a multiple of its height
-   * above sea level (1 = no exaggeration). */
-  readonly exaggeration: number;
-  /** Falloff exponent from cell centre to edge: >1 concentrates height near the centre (a
-   * pointed peak), 1 is a linear ramp (a gentle bump), <1 stays high for most of the cell. */
+  /** Local relief added above the continuous cell ground, in sampler elevation units. */
+  readonly relief: number;
+  /** Exponent applied to the smooth centre-to-edge falloff. */
   readonly peakSharpness: number;
   readonly detailAmplitude: number;
   readonly detailFrequency: number;
 }
 
 const LANDFORM_SHAPE: Record<CellLandform, ILandformShape> = {
-  // A whole cell is one mountain cresting near its centre, not a flat-topped mesa.
-  mountain: { exaggeration: 1.6, peakSharpness: 1.6, detailAmplitude: 0.035, detailFrequency: 55 },
-  // Rolling, still-walkable relief — a bump, not a peak.
-  hill: { exaggeration: 1.2, peakSharpness: 0.9, detailAmplitude: 0.035, detailFrequency: 30 },
+  // The ground remains continuous across the Voronoi edge. This is only local landform relief,
+  // so it cannot turn a whole cell into a raised block.
+  mountain: { relief: 0.2, peakSharpness: 1.15, detailAmplitude: 0.035, detailFrequency: 55 },
+  hill: { relief: 0.07, peakSharpness: 0.9, detailAmplitude: 0.035, detailFrequency: 30 },
   // Meadow/plains/etc: buildable, close to flat, only fine ground texture.
-  flat: { exaggeration: 1, peakSharpness: 1, detailAmplitude: 0.015, detailFrequency: 45 },
+  flat: { relief: 0, peakSharpness: 1, detailAmplitude: 0.015, detailFrequency: 45 },
 };
 
 function angularDistance(a: IVec3, b: IVec3): number {
@@ -126,13 +135,6 @@ function smoothFalloff(distance: number, width: number): number {
   const t = distance / width;
   const smooth = 1 - t * t * (3 - 2 * t);
   return smooth * smooth;
-}
-
-/** 1 at the cell centre (`t=0`), 0 at/beyond the cell's footprint radius (`t>=1`); `sharpness`
- * controls how concentrated the peak is (see `ILandformShape.peakSharpness`). */
-function domeFalloff(t: number, sharpness: number): number {
-  const clamped = Math.max(0, Math.min(1, 1 - t));
-  return Math.pow(clamped, sharpness);
 }
 
 function nearestPathDistance(direction: IVec3, paths: readonly IVec3[][]): number {
@@ -217,6 +219,69 @@ interface IVolcanoStamp {
   readonly settings: VolcanoSettings;
 }
 
+function sampleFeatureShape(
+  kind: 'volcano' | 'mesa' | 'crater',
+  x: number,
+  z: number,
+  settings: ReturnType<typeof defaultGeologicalTerrainSettings>,
+): number {
+  switch (kind) {
+    case 'volcano':
+      return sampleVolcano(x, z, settings.volcano);
+    case 'mesa':
+      return sampleMesa(x, z, settings.mesa);
+    case 'crater':
+      return sampleCrater(x, z, settings.crater);
+  }
+}
+
+function cellFeatureRelief(
+  direction: IVec3,
+  cell: IPlanetGraphCore['cells'][number],
+  instance: NonNullable<IPlanetFeatures['instances'][number]>,
+  settings: ReturnType<typeof defaultGeologicalTerrainSettings>,
+  radiusFraction: number,
+): number {
+  if (cell.corners.length === 0 || instance.elevationDelta === 0) return 0;
+
+  const footprintRadius = Math.max(
+    1e-4,
+    Math.min(...cell.corners.map((corner) => angularDistance(cell.center, corner))) * radiusFraction,
+  );
+  const distanceFromCentre = angularDistance(direction, cell.center);
+  if (distanceFromCentre >= footprintRadius) return 0;
+
+  const reference = Math.abs(cell.center.y) < 0.92 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
+  const tangentX = normalize(cross(reference, cell.center));
+  const tangentZ = normalize(cross(cell.center, tangentX));
+  const alignment = Math.max(1e-4, dot(direction, cell.center));
+  const featureRadius =
+    instance.kind === 'volcano'
+      ? settings.volcano.radius
+      : instance.kind === 'mesa'
+        ? settings.mesa.radius
+        : settings.crater.radius;
+  const tangentScale = featureRadius / Math.max(1e-4, Math.tan(footprintRadius));
+  const localX = (dot(direction, tangentX) / alignment) * tangentScale;
+  const localZ = (dot(direction, tangentZ) / alignment) * tangentScale;
+  const featureSettings = {
+    ...settings,
+    ...(instance.kind === 'volcano'
+      ? { volcano: { ...settings.volcano, seed: settings.volcano.seed + instance.siteCellId } }
+      : instance.kind === 'mesa'
+        ? { mesa: { ...settings.mesa, seed: settings.mesa.seed + instance.siteCellId } }
+        : { crater: { ...settings.crater, seed: settings.crater.seed + instance.siteCellId } }),
+  };
+  const peak = sampleFeatureShape(instance.kind, 0, 0, featureSettings);
+  if (Math.abs(peak) < 1e-5) return 0;
+
+  // The authored geological shape supplies the silhouette and local detail. The envelope is
+  // cell-specific and makes the feature return to the cell's ground before the Voronoi edge.
+  const edgeEnvelope = smoothFalloff(distanceFromCentre, footprintRadius);
+  return (sampleFeatureShape(instance.kind, localX, localZ, featureSettings) / peak) *
+    instance.elevationDelta * edgeEnvelope;
+}
+
 function volcanoRelief(direction: IVec3, stamp: IVolcanoStamp, radiusFraction: number): number {
   const { cell, elevationDelta, tangentX, tangentZ, settings } = stamp;
   if (cell.corners.length === 0 || elevationDelta === 0) return 0;
@@ -287,30 +352,39 @@ export function createPlanetSurfaceSampler(
       // edge instead of sitting as a flat-topped plateau; a hill gets a gentler, still-walkable
       // bump; flatter biomes stay close to their anchor. A landform-appropriate noise layer keeps
       // every tier from reading as a dead-flat plateau.
-      const siteCell = isDiscreteCell ? findCellAt(graph, unitDirection) : undefined;
+      const siteCell = findCellAt(graph, unitDirection);
+      const cellFeature = isDiscreteCell && siteCell ? params.features?.featureByCellId.get(siteCell.id) : undefined;
       let baseElevation: number;
-      if (siteCell) {
+      if (isDiscreteCell) {
         const ownElevation =
           siteCell.id < tectonics.elevation.length ? tectonics.elevation[siteCell.id]! : tectonics.seaLevelElevation;
         const blendedElevation = sampleElevation(graph, tectonics.elevation, unitDirection);
-        const crossCellBase = lerp(ownElevation, blendedElevation, p.cellBlendFraction);
+        const cellRadius =
+          siteCell.corners.length > 0
+            ? Math.max(
+                1e-4,
+                Math.min(...siteCell.corners.map((corner) => angularDistance(siteCell.center, corner))),
+              )
+            : 0;
+        const t = cellRadius > 0 ? angularDistance(unitDirection, siteCell.center) / cellRadius : 0;
 
-        const shape = LANDFORM_SHAPE[resolveLandform(ecology.biome?.[siteCell.id])];
+        // Keep the authored cell value near the site, then join the shared surface before the
+        // Voronoi boundary. This removes the raised-cell/platform silhouette.
+        const edgeBlend = smoothstep01(Math.max(0, Math.min(1, t)));
+        const groundBlend = Math.max(p.cellBlendFraction, edgeBlend);
+        const continuousCellGround = lerp(ownElevation, blendedElevation, groundBlend);
+
+        // A named volcano/mesa/crater owns the cell's local landform. The biome tier remains the
+        // fallback for ordinary cells, so a feature is not stacked on a second generic extrusion.
+        const shape = LANDFORM_SHAPE[cellFeature ? 'flat' : resolveLandform(ecology.biome?.[siteCell.id])];
         const detailAmplitude = p.cellDetailAmplitude ?? shape.detailAmplitude;
         const detailFrequency = p.cellDetailFrequency ?? shape.detailFrequency;
 
-        const cellRadius =
-          siteCell.corners.length > 0
-            ? Math.max(1e-4, Math.min(...siteCell.corners.map((corner) => angularDistance(siteCell.center, corner))))
-            : 0;
-        const t = cellRadius > 0 ? angularDistance(unitDirection, siteCell.center) / cellRadius : 0;
-        const dome = domeFalloff(t, shape.peakSharpness);
-
-        // Exaggerate only the cell's height above sea level, never a below-sea dip — otherwise a
-        // cell whose own value sits (or briefly blends) below the sea datum would have that dip
-        // deepened into a trench instead of getting a peak.
-        const heightAboveSea = Math.max(0, crossCellBase - tectonics.seaLevelElevation);
-        const peaked = crossCellBase + heightAboveSea * (shape.exaggeration - 1) * dome;
+        const dome = Math.pow(
+          smoothFalloff(angularDistance(unitDirection, siteCell.center), cellRadius),
+          shape.peakSharpness,
+        );
+        const peaked = continuousCellGround + shape.relief * dome;
         const detail = (cellDetailNoise(unitDirection, detailFrequency, tectonics.seed) - 0.5) * 2 * detailAmplitude;
         baseElevation = peaked + detail;
       } else {
@@ -318,9 +392,16 @@ export function createPlanetSurfaceSampler(
       }
 
       let featureRelief = 0;
-      if (siteCell) {
-        const instance = params.features?.featureByCellId.get(siteCell.id);
-        if (instance) featureRelief = instance.elevationDelta;
+      if (isDiscreteCell) {
+        if (cellFeature) {
+          featureRelief = cellFeatureRelief(
+            unitDirection,
+            siteCell,
+            cellFeature,
+            defaultGeologicalTerrainSettings(),
+            p.featureRadiusFraction,
+          );
+        }
       } else {
         for (const stamp of volcanoStamps) {
           featureRelief = Math.max(
@@ -329,7 +410,14 @@ export function createPlanetSurfaceSampler(
           );
         }
       }
-      const isLand = baseElevation >= tectonics.seaLevelElevation;
+
+      const cellBiome = siteCell && ecology.biome ? ecology.biome[siteCell.id] : undefined;
+      const isTectonicLand = baseElevation >= tectonics.seaLevelElevation;
+      const isIce = !isTectonicLand && cellBiome === 'ice_cap';
+
+      const freeboard = p.iceShelfFreeboard ?? 0.02;
+      const iceMicroRelief = (cellDetailNoise(unitDirection, 40, tectonics.seed) - 0.5) * 2 * 0.003;
+      const iceElevation = tectonics.seaLevelElevation + freeboard + iceMicroRelief;
 
       // Ridges and rivers stay shared, cross-cell corridors in both modes — a mountain crest or
       // a river still runs through several cells the same way it does in 'shaped'. Only the
@@ -350,25 +438,27 @@ export function createPlanetSurfaceSampler(
 
       // Rivers own their corridors. Keeping their carve below the sea datum would deepen
       // ocean cells and make river crossings ambiguous at the coast.
-      const riverCarve = isLand
+      const riverCarve = isTectonicLand
         ? nearestRiverInfluence(unitDirection, ecology.riverPaths, p.riverWidthRadians) * p.riverDepth
         : 0;
 
-      const shapedElevation = baseElevation + ridgeRelief + featureRelief - riverCarve;
+      const effectiveBaseElevation = isIce ? iceElevation : baseElevation;
+      const shapedElevation = effectiveBaseElevation + ridgeRelief + featureRelief - riverCarve;
       // Keep land channels from falling through the shoreline, but preserve the
       // ocean floor below the sea datum so planar and spherical consumers can
       // visualize bathymetry instead of receiving a flat water plane.
-      const elevation = isLand
+      const elevation = isTectonicLand || isIce
         ? Math.max(tectonics.seaLevelElevation, shapedElevation)
         : Math.min(tectonics.seaLevelElevation, shapedElevation);
 
       return {
-        baseElevation,
+        baseElevation: effectiveBaseElevation,
         ridgeRelief,
         riverCarve,
         elevation,
         seaLevel: tectonics.seaLevelElevation,
-        isLand,
+        isLand: isTectonicLand,
+        isIce,
       };
     },
   };

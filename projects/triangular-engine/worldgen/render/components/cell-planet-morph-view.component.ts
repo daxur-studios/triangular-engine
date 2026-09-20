@@ -121,6 +121,7 @@ export class CellPlanetMorphViewComponent
         direction: IVec3,
         elevation: number,
         isLand: boolean,
+        isIce?: boolean,
       ) => [number, number, number])
     | undefined
   >(undefined);

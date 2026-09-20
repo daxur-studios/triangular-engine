@@ -24,6 +24,7 @@ export interface IPlanetMorphGeometryParams {
     direction: IVec3,
     elevation: number,
     isLand: boolean,
+    isIce?: boolean,
   ) => [number, number, number];
 }
 
@@ -162,7 +163,7 @@ export function buildPlanetMorphGeometry(
       const sample = params.sampler.sample(direction);
       const rawElevation = sample.elevation;
       const effectiveElevation =
-        !seabedRelief && !sample.isLand ? seaLevel : rawElevation;
+        !seabedRelief && !sample.isLand && !sample.isIce ? seaLevel : rawElevation;
 
       const idx = r * cols + c;
       const o3 = idx * 3;
@@ -207,14 +208,25 @@ export function buildPlanetMorphGeometry(
           direction,
           effectiveElevation,
           sample.isLand,
+          sample.isIce,
         );
         gridColors[o3] = rgb[0];
         gridColors[o3 + 1] = rgb[1];
         gridColors[o3 + 2] = rgb[2];
       } else {
-        gridColors[o3] = sample.isLand ? 0.35 : 0.15;
-        gridColors[o3 + 1] = sample.isLand ? 0.65 : 0.35;
-        gridColors[o3 + 2] = sample.isLand ? 0.25 : 0.75;
+        if (sample.isIce) {
+          gridColors[o3] = 0.92;
+          gridColors[o3 + 1] = 0.95;
+          gridColors[o3 + 2] = 0.98;
+        } else if (sample.isLand) {
+          gridColors[o3] = 0.35;
+          gridColors[o3 + 1] = 0.65;
+          gridColors[o3 + 2] = 0.25;
+        } else {
+          gridColors[o3] = 0.15;
+          gridColors[o3 + 1] = 0.35;
+          gridColors[o3 + 2] = 0.75;
+        }
       }
     }
   }

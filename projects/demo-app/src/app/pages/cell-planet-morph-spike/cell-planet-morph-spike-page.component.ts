@@ -264,6 +264,7 @@ export class CellPlanetMorphSpikePageComponent {
       direction: IVec3,
       effectiveElevation: number,
       isLand: boolean,
+      isIce?: boolean,
     ): [number, number, number] => {
       if (!graph) return [0.3, 0.5, 0.3];
       const cell = findCellAt(graph, direction);
@@ -572,14 +573,21 @@ export class CellPlanetMorphSpikePageComponent {
 
     if (this.tacticalRangeMode()) {
       const isLand = this.tectonics.isLand[hit.cellId];
+      const isIce = !isLand && this.ecology?.biome[hit.cellId] === 'ice_cap';
+      const isWalkable = isLand || isIce;
       const reachable = findReachableCells(
         this.graph,
         hit.cellId,
         2,
-        (id) => this.tectonics.isLand[id] === isLand,
+        (id) => {
+          const land = this.tectonics!.isLand[id];
+          const ice = !land && this.ecology?.biome[id] === 'ice_cap';
+          const walkable = land || ice;
+          return walkable === isWalkable;
+        },
       );
       overlay.clearAll();
-      overlay.setReachableRange(reachable, isLand ? '#22c55e' : '#38bdf8', 0.45);
+      overlay.setReachableRange(reachable, isWalkable ? '#22c55e' : '#38bdf8', 0.45);
       overlay.setSelectedCell(hit.cellId, '#f59e0b', 0.85);
       overlay.update();
     } else {
@@ -764,8 +772,10 @@ export class CellPlanetMorphSpikePageComponent {
     const oceanCells: number[] = [];
 
     for (const cell of this.graph.cells) {
-      if (this.tectonics.isLand[cell.id]) landCells.push(cell.id);
-      else oceanCells.push(cell.id);
+      const isLand = this.tectonics.isLand[cell.id];
+      const isIce = !isLand && this.ecology?.biome[cell.id] === 'ice_cap';
+      if (isLand || isIce) landCells.push(cell.id);
+      if (!isLand && !isIce) oceanCells.push(cell.id);
     }
 
     const configs: Array<{
@@ -1093,7 +1103,8 @@ export class CellPlanetMorphSpikePageComponent {
               if (currentCell) {
                 const eligibleNeighbors = currentCell.neighbors.filter((nId) => {
                   const isLand = this.tectonics.isLand[nId];
-                  return unit.isNaval ? !isLand : isLand;
+                  const isIce = !isLand && this.ecology?.biome[nId] === 'ice_cap';
+                  return unit.isNaval ? (!isLand && !isIce) : (isLand || isIce);
                 });
 
                 if (eligibleNeighbors.length > 0) {
@@ -1172,7 +1183,7 @@ export class CellPlanetMorphSpikePageComponent {
     if (cellId < 0 || cellId >= this.tectonics.elevation.length) {
       return oceanSubstance === 'lava' ? lavaOceanColor() : OCEAN_COLOR;
     }
-    if (oceanSubstance === 'lava' && this.ecology.waterBodyKind[cellId] === 'ocean') {
+    if (oceanSubstance === 'lava' && this.ecology.waterBodyKind[cellId] === 'ocean' && this.ecology.biome[cellId] !== 'ice_cap') {
       return lavaOceanColor();
     }
     if (mode === 'plates') return plateColor(this.tectonics.plateIdByCell[cellId]);

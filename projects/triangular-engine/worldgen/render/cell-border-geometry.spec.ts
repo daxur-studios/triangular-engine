@@ -395,4 +395,34 @@ describe('cell-border-geometry', () => {
     geoLine01.dispose();
     geoLine03.dispose();
   });
+
+  it('preserves floating ice shelf border elevation when seabedRelief is false', () => {
+    const iceSampler = {
+      sample: () => ({
+        elevation: 0.05,
+        baseElevation: 0.05,
+        ridgeRelief: 0,
+        riverCarve: 0,
+        seaLevel: 0,
+        isLand: false,
+        isIce: true,
+      }),
+    };
+
+    const geo = buildCellBorderLineGeometry({
+      graph,
+      sampler: iceSampler,
+      seabedRelief: false,
+      seaLevelElevation: 0,
+      heightScale: 0.1,
+      minClearance: 0.004,
+    });
+
+    const flatZ = geo.getAttribute('aFlatPos').getZ(0);
+    // Should be at elev * heightScale + clearance = 0.05 * 0.1 + clearance > 0.005, not clamped to 0
+    expect(flatZ).toBeGreaterThan(0.005);
+
+    geo.dispose();
+  });
 });
+

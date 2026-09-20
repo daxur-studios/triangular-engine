@@ -88,7 +88,7 @@ function resolveElevation(
   let elev = 0;
   if (sampler) {
     const s = sampler.sample(dir);
-    if (!seabedRelief && !s.isLand) {
+    if (!seabedRelief && !s.isLand && !s.isIce) {
       return seaLevelElevation;
     }
     elev = s.elevation;

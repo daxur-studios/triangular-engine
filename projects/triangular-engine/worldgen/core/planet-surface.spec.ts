@@ -9,7 +9,7 @@ describe('createPlanetSurfaceSampler', () => {
     const graph = buildPlanetGraphCore({ cellCount: 240, seed: 71 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 71 });
     const ecology = buildPlanetEcology(graph, tectonics);
-    const site = graph.cells[0]!;
+    const site = graph.cells.find((cell) => tectonics.isLand[cell.id]) ?? graph.cells[0]!;
     const features = {
       feature: graph.cells.map((cell) => (cell.id === site.id ? 'volcano' : 'none')) as Array<'none' | 'volcano'>,
       instances: [{ kind: 'volcano' as const, siteCellId: site.id, elevationDelta: 0.7 }],
@@ -48,10 +48,21 @@ describe('createPlanetSurfaceSampler', () => {
     expect(nearCorner.elevation - baselineNearCorner.elevation).toBeLessThan(
       centre.elevation - baselineCentre.elevation,
     );
-    expect(cellSampler.sample(site.center).elevation - baselineCentre.elevation).toBeCloseTo(0.7, 5);
+    const cellCentre = cellSampler.sample(site.center);
+    const cellNearCorner = cellSampler.sample(
+      normalize({
+        x: site.center.x * 0.8 + site.corners[0]!.x * 0.2,
+        y: site.center.y * 0.8 + site.corners[0]!.y * 0.2,
+        z: site.center.z * 0.8 + site.corners[0]!.z * 0.2,
+      }),
+    );
+    expect(cellCentre.elevation).toBeGreaterThan(baselineCentre.elevation);
+    expect(cellCentre.elevation - baselineCentre.elevation).toBeGreaterThan(
+      cellNearCorner.elevation - baselineNearCorner.elevation,
+    );
   });
 
-  it('discrete cell mode blends only a little toward neighbours, and lets cellBlendFraction control how much', () => {
+  it('discrete cell mode keeps a local anchor while joining the shared ground at cell edges', () => {
     const graph = buildPlanetGraphCore({ cellCount: 240, seed: 71 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 71 });
     const ecology = buildPlanetEcology(graph, tectonics);
@@ -79,10 +90,11 @@ describe('createPlanetSurfaceSampler', () => {
     const noBlendNearCorner = noBlendSampler.sample(nearCornerDirection).baseElevation;
     const partialNearCorner = partialBlendSampler.sample(nearCornerDirection).baseElevation;
 
-    // cellBlendFraction: 0 stays flat at the site's own value...
-    expect(noBlendNearCorner).toBeCloseTo(tectonics.elevation[site.id]!, 10);
-    // ...while the default blend fraction sits strictly between that flat anchor and the full
-    // 'shaped' blend — some neighbour influence, but nowhere near as much as 'shaped'.
+    // The edge transition applies even when the centre blend is zero: the cell must not remain a
+    // raised platform at its Voronoi boundary.
+    expect(noBlendNearCorner).not.toBeCloseTo(tectonics.elevation[site.id]!, 5);
+    // The configured centre blend still changes the local result, while both samples remain
+    // between the cell's own value and the shared shaped surface.
     expect(partialNearCorner).not.toBeCloseTo(noBlendNearCorner, 5);
     expect(partialNearCorner).not.toBeCloseTo(blendedNearCorner, 5);
     const [lo, hi] =
@@ -109,7 +121,7 @@ describe('createPlanetSurfaceSampler', () => {
     });
     const mountainEcology = { ...ecology, biome: ecology.biome.map(() => 'alpine' as const) };
 
-    // cellDetailAmplitude: 0 isolates the dome shape from the texture noise layer.
+    // cellDetailAmplitude: 0 isolates the local landform shape from the texture noise layer.
     const sampler = createPlanetSurfaceSampler(graph, tectonics, mountainEcology, {
       featureComposition: 'cell',
       cellDetailAmplitude: 0,
@@ -119,13 +131,13 @@ describe('createPlanetSurfaceSampler', () => {
     const centre = sampler.sample(site.center).baseElevation;
     const nearCorner = sampler.sample(nearCornerDirection).baseElevation;
 
-    // A whole mountain cell crests above its own tectonic value at the centre and falls off
-    // toward the edge — not a flat-topped plateau at a uniform height.
+    // A mountain cell gets local relief at the centre and falls toward the shared ground near its
+    // edge, rather than holding one raised elevation across the entire polygon.
     expect(centre).toBeGreaterThan(ownElevation);
     expect(centre).toBeGreaterThan(nearCorner);
   });
 
-  it('keeps a flat-tier cell within a small bound of its own elevation, with non-constant local detail', () => {
+  it('keeps a flat-tier cell free of added macro relief, with non-constant local detail', () => {
     const graph = buildPlanetGraphCore({ cellCount: 240, seed: 71 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 71 });
     const ecology = buildPlanetEcology(graph, tectonics);
@@ -137,8 +149,7 @@ describe('createPlanetSurfaceSampler', () => {
     });
     const flatEcology = { ...ecology, biome: ecology.biome.map(() => 'meadow' as const) };
 
-    // Zero blend fraction so this test's bound is purely about the flat tier's own detail noise,
-    // not blending toward a neighbour that could push it outside that bound.
+    // Zero centre blend isolates the continuous edge transition from the local detail noise.
     const sampler = createPlanetSurfaceSampler(graph, tectonics, flatEcology, {
       featureComposition: 'cell',
       cellBlendFraction: 0,
@@ -147,10 +158,15 @@ describe('createPlanetSurfaceSampler', () => {
     const ownElevation = tectonics.elevation[site.id]!;
     const centre = sampler.sample(site.center).baseElevation;
     const nearCorner = sampler.sample(nearCornerDirection).baseElevation;
+    const blendedNearCorner = createPlanetSurfaceSampler(graph, tectonics, flatEcology).sample(
+      nearCornerDirection,
+    ).baseElevation;
 
     expect(centre).not.toBeCloseTo(nearCorner, 5);
     expect(Math.abs(centre - ownElevation)).toBeLessThanOrEqual(0.015 + 1e-9);
-    expect(Math.abs(nearCorner - ownElevation)).toBeLessThanOrEqual(0.015 + 1e-9);
+    expect(Math.abs(nearCorner - ownElevation)).toBeLessThanOrEqual(
+      Math.abs(blendedNearCorner - ownElevation) + 0.015 + 1e-9,
+    );
   });
 
   it('keeps ridge and river shaping identical between shaped and discrete cell modes', () => {
@@ -253,5 +269,49 @@ describe('createPlanetSurfaceSampler', () => {
       expect(sample.isLand).toBe(false);
       expect(sample.elevation).toBeLessThan(sample.seaLevel);
     }
+  });
+
+  it('elevates polar ice / sea ice cells above sea level with freeboard', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 51 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 51 });
+    const baseEcology = buildPlanetEcology(graph, tectonics);
+
+    // Find an oceanic water cell
+    const waterCellId = tectonics.isLand.findIndex((isLand) => !isLand);
+    expect(waterCellId).toBeGreaterThanOrEqual(0);
+
+    const waterCell = graph.cells[waterCellId]!;
+    // Set this cell to 'ice_cap'
+    const biomes = [...baseEcology.biome];
+    biomes[waterCellId] = 'ice_cap';
+    const iceEcology = { ...baseEcology, biome: biomes };
+
+    const sampler = createPlanetSurfaceSampler(graph, tectonics, iceEcology);
+    const sample = sampler.sample(waterCell.center);
+
+    expect(sample.isIce).toBe(true);
+    expect(sample.isLand).toBe(false);
+    expect(sample.elevation).toBeGreaterThan(sample.seaLevel);
+    expect(sample.elevation - sample.seaLevel).toBeCloseTo(0.02, 2);
+  });
+
+  it('respects custom iceShelfFreeboard parameter', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 51 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 51 });
+    const baseEcology = buildPlanetEcology(graph, tectonics);
+
+    const waterCellId = tectonics.isLand.findIndex((isLand) => !isLand);
+    const waterCell = graph.cells[waterCellId]!;
+    const biomes = [...baseEcology.biome];
+    biomes[waterCellId] = 'ice_cap';
+    const iceEcology = { ...baseEcology, biome: biomes };
+
+    const customSampler = createPlanetSurfaceSampler(graph, tectonics, iceEcology, {
+      iceShelfFreeboard: 0.06,
+    });
+    const sample = customSampler.sample(waterCell.center);
+
+    expect(sample.isIce).toBe(true);
+    expect(sample.elevation - sample.seaLevel).toBeCloseTo(0.06, 2);
   });
 });

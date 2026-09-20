@@ -190,4 +190,40 @@ describe('PlanetMorphGeometry', () => {
     expect(transformDynamic.position.x).toBeCloseTo(transformStatic.position.x, 3);
     expect(transformDynamic.position.y).toBeCloseTo(transformStatic.position.y, 3);
   });
+
+  it('preserves floating ice shelf elevation and assigns ice color when seabedRelief is false', () => {
+    const iceSampler: IPlanetSurfaceSampler = {
+      sample: () => ({
+        elevation: 0.05,
+        baseElevation: 0.05,
+        ridgeRelief: 0,
+        riverCarve: 0,
+        seaLevel: 0,
+        isLand: false,
+        isIce: true,
+      }),
+    };
+
+    const data = buildPlanetMorphGeometry({
+      sampler: iceSampler,
+      seabedRelief: false,
+      seaLevelElevation: 0,
+      longitudeSegments: 8,
+      latitudeRings: 4,
+      radius: 1.0,
+      heightScale: 0.1,
+    });
+
+    const flatPos = data.geometry.getAttribute('aFlatPos') as BufferAttribute;
+    const color = data.geometry.getAttribute('color') as BufferAttribute;
+
+    // Elevation should be 0.05 * 0.1 = 0.005, NOT flattened to seaLevel (0.0)
+    expect(flatPos.getZ(0)).toBeCloseTo(0.005, 5);
+
+    // Default fallback color for ice should be light whitish ice color
+    expect(color.getX(0)).toBeCloseTo(0.92, 2);
+    expect(color.getY(0)).toBeCloseTo(0.95, 2);
+    expect(color.getZ(0)).toBeCloseTo(0.98, 2);
+  });
 });
+
