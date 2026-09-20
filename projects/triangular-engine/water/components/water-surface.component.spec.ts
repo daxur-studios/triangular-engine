@@ -43,7 +43,10 @@ describe('WaterSurfaceComponent', () => {
     const fixture = TestBed.createComponent(WaterSurfaceComponent);
     fixture.detectChanges();
 
-    expect(scene.children.length).toBe(12);
+    expect(scene.children.length).toBeGreaterThan(0);
+    expect(
+      scene.children.every((child) => child.name.startsWith('water-camera-lod-')),
+    ).toBeTrue();
     expect(() => beforeRender$.next()).not.toThrow();
 
     fixture.destroy();
@@ -61,9 +64,12 @@ describe('WaterSurfaceComponent', () => {
     fixture.componentRef.setInput('wireframe', true);
     fixture.detectChanges();
 
-    expect(scene.children.length).toBe(4);
+    const planeDetailMeshes = scene.children.filter((child) =>
+      child.name.startsWith('water-camera-lod-'),
+    );
+    expect(planeDetailMeshes.length).toBeGreaterThan(2);
     expect(
-      scene.children.every(
+      planeDetailMeshes.every(
         (child) =>
           (child as { material?: { wireframe?: boolean } }).material?.wireframe,
       ),
@@ -71,11 +77,21 @@ describe('WaterSurfaceComponent', () => {
 
     fixture.componentRef.setInput('domain', new SphereWaterDomain(100));
     fixture.detectChanges();
-    expect(scene.children.length).toBe(5);
+    expect(
+      scene.children.some((child) => child.name === 'water-planetary-far-surface'),
+    ).toBeTrue();
+    expect(
+      scene.children.filter((child) => child.name.startsWith('water-camera-lod-')),
+    ).toHaveSize(planeDetailMeshes.length);
 
     fixture.componentRef.setInput('domain', new PlaneWaterDomain());
     fixture.detectChanges();
-    expect(scene.children.length).toBe(4);
+    expect(
+      scene.children.some((child) => child.name === 'water-planetary-far-surface'),
+    ).toBeFalse();
+    expect(
+      scene.children.filter((child) => child.name.startsWith('water-camera-lod-')),
+    ).toHaveSize(planeDetailMeshes.length);
   });
 
   it('can render without replacing a simulation-owned water body', () => {

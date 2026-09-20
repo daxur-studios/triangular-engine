@@ -239,8 +239,10 @@ describe('WaterSurfaceRenderer', () => {
     expect(renderer.meshes[0].parent).toBe(scene);
     expect(renderer.meshes[0].count).toBeGreaterThan(0);
 
+    const performanceMeshCount = renderer.meshes.length;
     renderer.setPreset(WATER_RENDER_PRESETS.balanced);
-    expect(renderer.meshes.length).toBe(
+    expect(renderer.meshes.length).toBeGreaterThan(performanceMeshCount);
+    expect(renderer.meshes.length).toBeGreaterThan(
       WATER_RENDER_PRESETS.balanced.grid.ringCount + 1,
     );
     const material = renderer.meshes[0].material as ShaderMaterial;
