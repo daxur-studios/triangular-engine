@@ -18,6 +18,19 @@ This skill provides comprehensive guidance for working with the `triangular-engi
 
 ---
 
+## Public entry points
+
+Use public package entry points in consumer apps; do not import internal source paths:
+
+- Core: `triangular-engine`
+- Rapier physics: `triangular-engine/rapier`
+- Jolt physics: `triangular-engine/jolt`
+- PMNDRS helpers: `triangular-engine/pmndrs`
+- Post-processing: `triangular-engine/postprocessing`
+- Takram atmosphere/clouds: `triangular-engine/takram`
+
+---
+
 ## 1. Installation & Setup
 
 ### Install Dependencies
@@ -34,6 +47,9 @@ npm i @dimforge/rapier3d-compat
 
 # OR Jolt
 npm i jolt-physics
+
+# PMNDRS helpers (optional)
+npm i @pmndrs/vanilla
 ```
 
 ### Peer Dependencies (must be in your app)
@@ -42,7 +58,7 @@ npm i jolt-physics
 | ----------------- | ---------- |
 | `@angular/common` | `^20.3.3`  |
 | `@angular/core`   | `^20.3.3`  |
-| `three`           | `^0.181.0` |
+| `three`           | `^0.183.0` |
 | `dexie`           | `^4.2.1`   |
 
 ### Configure `angular.json` Assets
@@ -132,6 +148,12 @@ EngineService.provide({
 - Always import `EngineModule` — it re-exports all engine components.
 - Provide `EngineService` at the component level, NOT at the root/module level.
 
+### Camera clipping and depth
+
+- Preserve the engine's camera and controls defaults. Do not add `[near]`, `[far]`, or arbitrary large clip-plane values as generic 3D or z-fighting fixes.
+- Omit those inputs unless the user explicitly requests a clipping change or diagnostics show that the existing defaults actually clip required geometry.
+- If a change is justified, derive both planes from the real scene bounds and camera movement, explain the reason, and keep `far / near` as small as practical. `logarithmicDepthBuffer` does not make an unnecessarily large far plane harmless.
+
 ---
 
 ## 3. Component Selectors Reference
@@ -156,6 +178,7 @@ All components are standalone. Import `EngineModule` for convenience.
 | Selector        | Key Inputs                                                 |
 | --------------- | ---------------------------------------------------------- |
 | `camera`        | `position`, `lookAt`, `isActive`, `far`                    |
+| `orthographicCamera` | Orthographic camera with `left`, `right`, `top`, `bottom`, `near`, `far` |
 | `orbitControls` | `target`, `cameraPosition`, `isActive`, `follow`, `moveBy` |
 
 ### Geometry
@@ -289,6 +312,7 @@ private readonly engineService = inject(EngineService);
 - `camera$` — `BehaviorSubject<Camera>` for the active camera
 - `tick$` — `BehaviorSubject<number>` emitting delta time each frame
 - `elapsedTime$` — `BehaviorSubject<number>` total elapsed time
+- `setSpeedFactor(timeSpeed)` — Scale engine time progression, including `0` to pause simulation time
 - `switchCamera(camera)` — Switch active camera
 - `requestSingleRender()` — Trigger a single render frame
 - `setFPSLimit(fps)` — Limit rendering FPS

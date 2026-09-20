@@ -4,6 +4,7 @@ export * from './core/terrain-field';
 export * from './core/terrain-math';
 export * from './core/terrain-patch';
 export * from './core/terrain-surface-sample';
+export * from './core/terrain-batched-mesh-instance-registry';
 export * from './materials/terrain-material';
 export * from './materials/terrain-macro-variation-material';
 export * from './materials/tiles/terrain-material-tile';

@@ -3,7 +3,6 @@
     [cameraPosition]="cameraPosition()"
     [target]="cameraTarget()"
     [near]="0.5"
-    [far]="10000000"
     [raycastFocusResolver]="terrainRaycastFocus"
   />
   <ambientLight [intensity]="1.2" />
@@ -39,7 +38,9 @@
     Gap-free quadtree LOD chunk streaming with 2.5D map ↔ 3D sphere morphing.
   </p>
 
-  <p class="subtitle">Planet radius: {{ formatDistanceM(radius()) }} (shared medium scale)</p>
+  <p class="subtitle">
+    Planet radius: {{ formatDistanceM(radius()) }} (shared medium scale)
+  </p>
 
   <div class="control-section">
     <h3>Morph Transition</h3>
@@ -78,11 +79,7 @@
       >
         Flat Map
       </button>
-      <button
-        type="button"
-        class="action-btn"
-        (click)="toggleMorph()"
-      >
+      <button type="button" class="action-btn" (click)="toggleMorph()">
         Animate
       </button>
     </div>
@@ -147,12 +144,15 @@
     </label>
 
     <label>
-        <span>Terrain relief: {{ heightScale().toFixed(1) }} (proportional to planet size)</span>
-        <input
-          type="range"
-          min="0"
-          max="14"
-          step="0.5"
+      <span
+        >Terrain relief: {{ heightScale().toFixed(1) }} (proportional to planet
+        size)</span
+      >
+      <input
+        type="range"
+        min="0"
+        max="14"
+        step="0.5"
         [value]="heightScale()"
         (input)="setHeightScale($event)"
         (change)="onHeightScaleChange($event)"
@@ -168,7 +168,7 @@
       </select>
     </label>
 
-    @if (colourMode() === 'material') {
+    @if (colourMode() === "material") {
       <label class="checkbox-row">
         <input
           type="checkbox"
@@ -223,7 +223,12 @@
     <h3>Telemetry & Diagnostics</h3>
     <dl>
       <dt>Resident Patches</dt>
-      <dd>{{ stats().resident }} / {{ stats().desired }} ({{ stats().queued }} queued)</dd>
+      <dd>
+        {{ stats().resident }} / {{ stats().desired }} ({{
+          stats().queued
+        }}
+        queued)
+      </dd>
       <dt>Triangles</dt>
       <dd>{{ stats().triangles.toLocaleString() }}</dd>
       <dt>Draw Calls</dt>

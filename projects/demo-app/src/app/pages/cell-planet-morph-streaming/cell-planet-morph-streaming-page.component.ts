@@ -28,6 +28,7 @@ import {
   ITerrainSurfaceLodStats,
   ITerrainSurfaceSelectionRequest,
   LatLonTerrainDomain,
+  getTerrainBatchInstanceIds,
   TerrainSurfaceComponent,
   type ILatLonTerrainPatchAddress,
   type TerrainSurfaceMeshGenerator,
@@ -370,7 +371,7 @@ export class CellPlanetMorphStreamingPageComponent {
           morph,
         );
 
-        for (let instanceId = 0; instanceId < mesh.instanceCount; instanceId++) {
+        for (const instanceId of getTerrainBatchInstanceIds(mesh)) {
           if (!mesh.getVisibleAt(instanceId)) continue;
           const geometryId = mesh.getGeometryIdAt(instanceId);
           const bounds = boundsByGeometry.get(geometryId);
@@ -457,7 +458,7 @@ export class CellPlanetMorphStreamingPageComponent {
     }
 
     const geometryIds = new Set<number>();
-    for (let instanceId = 0; instanceId < mesh.instanceCount; instanceId++) {
+    for (const instanceId of getTerrainBatchInstanceIds(mesh)) {
       if (mesh.getVisibleAt(instanceId)) {
         geometryIds.add(mesh.getGeometryIdAt(instanceId));
       }

@@ -25,6 +25,10 @@ import {
 } from 'three';
 import { EngineService } from 'triangular-engine';
 import type { ITerrainField } from '../core/terrain-field';
+import {
+  registerTerrainBatchInstance,
+  unregisterTerrainBatchInstance,
+} from '../core/terrain-batched-mesh-instance-registry';
 import type {
   TerrainPatchEdgeSegments,
   ITerrainPatchGeometry,
@@ -660,6 +664,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     const geometry = this.createGeometry(patch, address, patch.surface, false);
     const geometryId = batch.object.addGeometry(geometry);
     const instanceId = batch.object.addInstance(geometryId);
+    registerTerrainBatchInstance(batch.object, instanceId);
     const matrix = new Matrix4().makeTranslation(...patch.centerWorldM);
     batch.object.setMatrixAt(instanceId, matrix);
     const geometryBytes = geometryByteCount(geometry);
@@ -740,6 +745,10 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       patch.batchInstanceId !== undefined &&
       this.batchedRender
     ) {
+      unregisterTerrainBatchInstance(
+        this.batchedRender.object,
+        patch.batchInstanceId,
+      );
       this.batchedRender.object.deleteInstance(patch.batchInstanceId);
       this.batchedRender.object.deleteGeometry(patch.batchGeometryId);
     } else {

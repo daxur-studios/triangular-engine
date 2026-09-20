@@ -8,6 +8,7 @@ import {
   Object3D,
   Vector3,
 } from 'three';
+import { getTerrainBatchInstanceIds } from 'triangular-engine/terrain';
 import { CELL_PLANET_MORPH_ATTRIBUTES } from './cell-planet-morph-attributes';
 
 type MorphRaycastAttribute = BufferAttribute | InterleavedBufferAttribute;
@@ -89,7 +90,7 @@ export function createCellPlanetMorphRaycastFocus(
     }
 
     const geometryIds = new Set<number>();
-    for (let instanceId = 0; instanceId < mesh.instanceCount; instanceId += 1) {
+    for (const instanceId of getTerrainBatchInstanceIds(mesh)) {
       if (mesh.getVisibleAt(instanceId)) {
         geometryIds.add(mesh.getGeometryIdAt(instanceId));
       }
@@ -142,7 +143,7 @@ export function createCellPlanetMorphRaycastFocus(
         mesh.updateMatrixWorld(true);
         const boundsByGeometry = getMorphedGeometryBounds(mesh, sphere, flat, morph);
 
-        for (let instanceId = 0; instanceId < mesh.instanceCount; instanceId += 1) {
+        for (const instanceId of getTerrainBatchInstanceIds(mesh)) {
           if (!mesh.getVisibleAt(instanceId)) continue;
           const geometryId = mesh.getGeometryIdAt(instanceId);
           const bounds = boundsByGeometry.get(geometryId);

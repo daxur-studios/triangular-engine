@@ -8,5 +8,6 @@ export * from './terrain-surface-sample';
 export * from './lat-lon-terrain-domain';
 export * from './terrain-patch-mesher';
 export * from './terrain-material';
+export * from './terrain-batched-mesh-instance-registry';
 export * from './tiles/terrain-material-tile';
 export * from './tiles/terrain-material-tile-baker';

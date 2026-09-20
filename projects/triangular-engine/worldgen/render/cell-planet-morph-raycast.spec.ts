@@ -11,6 +11,10 @@ import {
   Vector2,
   Vector3,
 } from 'three';
+import {
+  registerTerrainBatchInstance,
+  unregisterTerrainBatchInstance,
+} from 'triangular-engine/terrain';
 import { createCellPlanetMorphRaycastFocus } from './cell-planet-morph-raycast';
 
 /** A single quad whose sphere position sits centred at x=0 and flat position at x=10, so
@@ -120,5 +124,32 @@ describe('createCellPlanetMorphRaycastFocus', () => {
       createContext(new Vector3(50, 50, 5), new Vector3(0, 0, -1), [mesh]),
     );
     expect(miss).toBeNull();
+  });
+
+  it('skips deleted batch IDs when the live IDs are no longer contiguous', () => {
+    const geometry = new BufferGeometry();
+    const positions = new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]);
+    geometry.setAttribute('position', new BufferAttribute(positions, 3));
+    geometry.setAttribute('aSpherePos', new BufferAttribute(positions.slice(), 3));
+    geometry.setAttribute('aFlatPos', new BufferAttribute(positions.slice(), 3));
+    geometry.setIndex([0, 1, 2, 0, 2, 3]);
+
+    const mesh = new BatchedMesh(3, 12, 18, new MeshBasicMaterial());
+    const geometryId = mesh.addGeometry(geometry);
+    const instanceIds = [0, 1, 2].map(() => mesh.addInstance(geometryId));
+    for (const instanceId of instanceIds) {
+      registerTerrainBatchInstance(mesh, instanceId);
+      mesh.setVisibleAt(instanceId, true);
+    }
+    unregisterTerrainBatchInstance(mesh, instanceIds[1]);
+    mesh.deleteInstance(instanceIds[1]);
+
+    const resolve = createCellPlanetMorphRaycastFocus({
+      morph: () => 0.5,
+      surfaceRevision: () => 0,
+    });
+    expect(() =>
+      resolve(createContext(new Vector3(0, 0, 5), new Vector3(0, 0, -1), [mesh])),
+    ).not.toThrow();
   });
 });
