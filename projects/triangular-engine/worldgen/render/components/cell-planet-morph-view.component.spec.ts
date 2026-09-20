@@ -5,7 +5,9 @@ import {
   Mesh,
   MeshBasicMaterial,
   PerspectiveCamera,
+  Raycaster,
   Scene,
+  Vector2,
   Vector3,
 } from 'three';
 import { EngineService } from 'triangular-engine';
@@ -304,6 +306,33 @@ describe('CellPlanetMorphViewComponent', () => {
     fixture.destroy();
   });
 
+  it('exposes a raycast resolver that uses the visible morphed terrain', () => {
+    const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
+    fixture.componentRef.setInput('sampler', mockSampler);
+    fixture.componentRef.setInput('longitudeSegments', 16);
+    fixture.componentRef.setInput('latitudeRings', 8);
+    fixture.componentRef.setInput('radius', 2.0);
+    fixture.componentRef.setInput('morphProgress', 1.0);
+    fixture.detectChanges();
+
+    camera.position.set(0, 0, 10);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    const raycaster = new Raycaster();
+    raycaster.setFromCamera(new Vector2(0, 0), camera);
+
+    const hit = fixture.componentInstance.raycastFocusResolver({
+      raycaster,
+      camera,
+      ndc: new Vector2(0, 0),
+      sceneChildren: scene.children,
+    });
+
+    expect(hit).not.toBeNull();
+    expect(hit?.z).toBeCloseTo(0.1, 2);
+    fixture.destroy();
+  });
+
   it('updates effectiveSunDirection reactively when day/night inputs change', () => {
     const fixture = TestBed.createComponent(CellPlanetMorphViewComponent);
     fixture.componentRef.setInput('sampler', mockSampler);
@@ -438,5 +467,4 @@ describe('CellPlanetMorphViewComponent', () => {
     fixture.destroy();
   });
 });
-
 

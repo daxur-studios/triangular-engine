@@ -23,7 +23,12 @@ import {
   Vector2,
   Vector3,
 } from 'three';
-import { GroupComponent, provideObject3DComponent } from 'triangular-engine';
+import {
+  GroupComponent,
+  provideObject3DComponent,
+  RaycastFocusContext,
+  RaycastFocusResolver,
+} from 'triangular-engine';
 import {
   classifyCellBorders,
   extractCellBorders,
@@ -156,6 +161,21 @@ export class CellPlanetMorphViewComponent
   readonly projectionCenterLon = input<number>(0);
   readonly projectionCenterLat = input<number>(0);
   readonly borderSliderColor = input<string>('#f59e0b');
+
+  /**
+   * Focus resolver for RaycastOrbitControls. It synchronizes the CPU pick
+   * position with the same morphed surface rendered by the vertex shader
+   * before returning the current visible terrain hit.
+   */
+  readonly raycastFocusResolver: RaycastFocusResolver = (
+    context: RaycastFocusContext,
+  ) => {
+    if (!this.terrainMesh?.visible) return null;
+
+    this.syncPickGeometry();
+    const hit = context.raycaster.intersectObject(this.terrainMesh, false)[0];
+    return hit?.point ?? null;
+  };
 
   // Custom Material inputs (allowing consumers to provide their own materials)
   readonly customTerrainMaterial = input<
@@ -1304,5 +1324,4 @@ export class CellPlanetMorphViewComponent
     }
   }
 }
-
 

@@ -22,7 +22,12 @@ import {
   TorusGeometry,
   Vector3,
 } from 'three';
-import { EngineModule, EngineService } from 'triangular-engine';
+import {
+  EngineModule,
+  EngineService,
+  RaycastFocusContext,
+  RaycastFocusResolver,
+} from 'triangular-engine';
 import {
   findCellAt,
   findReachableCells,
@@ -123,6 +128,11 @@ export class CellPlanetMorphSpikePageComponent {
   private readonly worldService = inject(CellPlanetWorldService);
 
   readonly morphView = viewChild(CellPlanetMorphViewComponent);
+
+  /** Keep orbit zoom focused on the same morphed terrain used for cell picking. */
+  readonly raycastFocusResolver: RaycastFocusResolver = (
+    context: RaycastFocusContext,
+  ) => this.morphView()?.raycastFocusResolver(context) ?? null;
 
   readonly cellCount = signal<number>(CELL_PLANET_U0_FIXTURE.cellCount);
   readonly seed = signal<number>(CELL_PLANET_U0_FIXTURE.seed);

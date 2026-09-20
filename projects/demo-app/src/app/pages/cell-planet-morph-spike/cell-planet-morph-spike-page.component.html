@@ -1,5 +1,11 @@
 <scene [showFps]="true" [logarithmicDepthBuffer]="true">
-  <orbitControls [target]="cameraTarget()" [near]="0.05" [isActive]="orbitControlsActive()" />
+  <raycastOrbitControls
+    [target]="cameraTarget()"
+    [near]="0.05"
+    [isActive]="orbitControlsActive()"
+    [leftMouseAction]="'rotate'"
+    [raycastFocusResolver]="raycastFocusResolver"
+  />
   <ambientLight [intensity]="dayNightEnabled() ? 0.6 : 1.2" />
   <directionalLight [position]="sunLightPosition()" [intensity]="2.2" />
   <directionalLight [position]="[-5, -3, -4]" [intensity]="dayNightEnabled() ? 0.1 : 0.4" />
