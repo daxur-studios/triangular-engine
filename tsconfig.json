@@ -20,6 +20,9 @@
       "triangular-engine/terrain": [
         "projects/triangular-engine/terrain/public-api"
       ],
+      "triangular-engine/terrain/core": [
+        "projects/triangular-engine/terrain/core/public-api"
+      ],
       "triangular-engine/meshoptimizer": [
         "projects/triangular-engine/meshoptimizer/public-api"
       ],
@@ -63,6 +66,9 @@
         ],
         "triangular-engine/worldgen/render": [
           "projects/triangular-engine/worldgen/render/public-api"
+        ],
+        "triangular-engine/worldgen/render/core": [
+          "projects/triangular-engine/worldgen/render/core/public-api"
         ]
     },
     "outDir": "./dist/out-tsc",

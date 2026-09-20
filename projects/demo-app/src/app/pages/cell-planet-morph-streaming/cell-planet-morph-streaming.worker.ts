@@ -5,14 +5,16 @@ import { simplifyIndexedGeometry } from 'triangular-engine/meshoptimizer';
 import {
   conformPatchEdges,
   createIndices,
+  bakeTerrainMaterialTile,
   LatLonTerrainDomain,
   evaluateTerrainMaterial,
   terrainMaterialColorRgb,
   type ILatLonTerrainPatchAddress,
+  type ITerrainMaterialTilePayload,
   type ITerrainPatchGeometry,
   type ITerrainPatchMesh,
   type ITerrainSurfaceGenerationRequest,
-} from 'triangular-engine/terrain';
+} from 'triangular-engine/terrain/core';
 import {
   buildPlanetEcology,
   buildPlanetGraphCore,
@@ -41,7 +43,7 @@ import {
   EQUIRECTANGULAR_PROJECTION,
   type ICellPerPixelLookupPayload,
   type MapProjectionKind,
-} from 'triangular-engine/worldgen/render';
+} from 'triangular-engine/worldgen/render/core';
 import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
 import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
 
@@ -97,6 +99,7 @@ let cachedMaxSlope = 0;
 let cachedRiverMask: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
 let cachedRidgeCellSet = new Set<number>();
 let cachedLookupKey = '';
+let cachedMaterialTileKey = '';
 
 function buildCellPerPixelLookup(
   world: ReturnType<typeof getOrCreateWorld>,
@@ -311,6 +314,73 @@ function srgbRgbToLinear(rgb: readonly [number, number, number]): [number, numbe
   ];
 }
 
+function evaluateWorldMaterial(
+  world: ReturnType<typeof getOrCreateWorld>,
+  sample: ReturnType<IPlanetSurfaceSampler['sample']>,
+  cell: IPlanetGraphCell,
+) {
+  const { ecology, eMin, eMax, tectonics, maxSlope, riverMask, ridgeCellSet } = world;
+  return evaluateTerrainMaterial({
+    elevationM: sample.elevation,
+    seaLevelM: sample.seaLevel,
+    minElevationM: eMin,
+    maxElevationM: eMax,
+    slope01: maxSlope > 0 ? (ecology.slope[cell.id] ?? 0) / maxSlope : 0,
+    moisture01: ecology.moisture[cell.id],
+    temperature01: ((ecology.temperature[cell.id] ?? 0) + 1) * 0.5,
+    snowIce01:
+      ecology.biome[cell.id] === 'ice_cap' ? 1 :
+      ecology.biome[cell.id] === 'glacier' ? 0.9 :
+      ecology.biome[cell.id] === 'tundra' ? 0.35 : 0,
+    arid01:
+      ecology.biome[cell.id] === 'desert' ? 1 :
+      ecology.biome[cell.id] === 'steppe' ? 0.45 :
+      ecology.biome[cell.id] === 'savanna' ? 0.25 : 0,
+    ridge01: ridgeCellSet.has(cell.id) ? 1 : 0,
+    river01: riverMask[cell.id] ?? 0,
+  }, {
+    snowlineM: tectonics.seaLevelElevation + Math.max(1, eMax - tectonics.seaLevelElevation) * 0.68,
+    snowlineBlendM: Math.max(0.05, (eMax - tectonics.seaLevelElevation) * 0.16),
+  });
+}
+
+function buildMaterialTile(
+  world: ReturnType<typeof getOrCreateWorld>,
+  colorMode: CellPlanetMorphWorkerRequest['colorMode'],
+): ITerrainMaterialTilePayload | undefined {
+  if (colorMode !== 'material') return undefined;
+  const key = `${cachedWorldKey}:${colorMode}`;
+  if (cachedMaterialTileKey === key) return undefined;
+  cachedMaterialTileKey = key;
+  const domain = new LatLonTerrainDomain(1, 4, 2);
+  let previousCell: IPlanetGraphCell | null = null;
+  return bakeTerrainMaterialTile(
+    {
+      worldRevision: cachedWorldKey,
+      address: { level: 0, x: 0, y: 0 },
+      styleRevision: 'cell-planet-material-v1',
+      samplingVersion: 1,
+      format: 'rgba8-linear',
+    },
+    {
+      sample: (localU, localV) => {
+        const longitude = (localU - Math.floor(localU)) * Math.PI * 2 - Math.PI;
+        const latitude = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, localV * Math.PI - Math.PI / 2));
+        const direction = domain.getFieldPosition({ level: 0, x: 0, y: 0 }, longitude, latitude);
+        const dir3: IVec3 = { x: direction[0], y: direction[1], z: direction[2] };
+        const sample = world.sampler.sample(dir3);
+        const cell = findNearestCellFast(world.graph, dir3, previousCell);
+        previousCell = cell;
+        const material = evaluateWorldMaterial(world, sample, cell);
+        return srgbRgbToLinear(terrainMaterialColorRgb(material, {
+          oceanSubstance: world.profile.oceanSubstance,
+        }));
+      },
+    },
+    { interiorSize: 256, gutterSize: 2, mipLevels: 7 },
+  );
+}
+
 function parseColorToLinearRgb(color: string): [number, number, number] {
 
   if (color.startsWith('hsl')) {
@@ -490,6 +560,22 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
             colorMode,
           );
     cachedLookupKey = lookupKey;
+    const materialTile = buildMaterialTile(
+      {
+        graph,
+        tectonics,
+        ecology,
+        features,
+        sampler,
+        eMin,
+        eMax,
+        profile,
+        maxSlope,
+        riverMask,
+        ridgeCellSet,
+      },
+      colorMode,
+    );
 
     const domain = new LatLonTerrainDomain(radius, 4, 2);
     const bounds = domain.getPatchBounds(address);
@@ -595,31 +681,11 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
           colors[o3 + 1] = rgb[1];
           colors[o3 + 2] = rgb[2];
         } else if (colorMode === 'material') {
-          const material = evaluateTerrainMaterial({
-            // The mesh is displaced from this continuous sample. Using the
-            // cell-centre elevation here made colour and relief disagree near
-            // shorelines and strong local relief.
-            elevationM: sample.elevation,
-            seaLevelM: sample.seaLevel,
-            minElevationM: eMin,
-            maxElevationM: eMax,
-            slope01: maxSlope > 0 ? (ecology.slope[cell.id] ?? 0) / maxSlope : 0,
-            moisture01: ecology.moisture[cell.id],
-            temperature01: ((ecology.temperature[cell.id] ?? 0) + 1) * 0.5,
-            snowIce01:
-              ecology.biome[cell.id] === 'ice_cap' ? 1 :
-              ecology.biome[cell.id] === 'glacier' ? 0.9 :
-              ecology.biome[cell.id] === 'tundra' ? 0.35 : 0,
-            arid01:
-              ecology.biome[cell.id] === 'desert' ? 1 :
-              ecology.biome[cell.id] === 'steppe' ? 0.45 :
-              ecology.biome[cell.id] === 'savanna' ? 0.25 : 0,
-            ridge01: ridgeCellSet.has(cell.id) ? 1 : 0,
-            river01: riverMask[cell.id] ?? 0,
-          }, {
-            snowlineM: tectonics.seaLevelElevation + Math.max(1, eMax - tectonics.seaLevelElevation) * 0.68,
-            snowlineBlendM: Math.max(0.05, (eMax - tectonics.seaLevelElevation) * 0.16),
-          });
+          const material = evaluateWorldMaterial(
+            { graph, tectonics, ecology, features, sampler, eMin, eMax, profile, maxSlope, riverMask, ridgeCellSet },
+            sample,
+            cell,
+          );
           // terrainMaterialColorRgb returns display/sRGB palette values. Vertex
           // colors on MeshStandardMaterial are linear working-space inputs, so
           // decode them here before the renderer applies lighting and sRGB output.
@@ -777,12 +843,18 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
         asTransferable(cellLookup.cellIdData.buffer),
       );
     }
+    if (materialTile) {
+      for (const mip of materialTile.mipData) {
+        transferables.push(asTransferable(mip.buffer));
+      }
+    }
 
     postMessage(
       {
         id,
         patch,
         cellLookup,
+        materialTile,
         timings: { generationMs, simplificationMs } satisfies CellPlanetMorphWorkerTimings,
       },
       transferables,

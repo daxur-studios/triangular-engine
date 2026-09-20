@@ -14,6 +14,7 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/water/jolt` | Water buoyancy integration with Jolt. | `jolt-physics` |
 | `triangular-engine/water/postprocessing` | Water-specific post-processing effects. | `postprocessing` |
 | `triangular-engine/terrain` | Domain-aware terrain fields, patch meshing, surface sampling, and streamed LOD selection. | — |
+| `triangular-engine/terrain/core` | Framework-free terrain contracts, domains, patch meshing, material evaluation, and worker tile baking. Use this entry from web workers. | — |
 | `triangular-engine/meshoptimizer` | Optional generic indexed-geometry simplification and Meshoptimizer readiness helpers. | `meshoptimizer` |
 | `triangular-engine/image-compression` | Opt-in adapter for ScreenshotService and impostor image compression. | `browser-image-compression` |
 | `triangular-engine/scatter` | Deterministic streamed placement, instanced LOD rendering, billboard/wind materials, picking, and collider descriptors. | — |
@@ -26,6 +27,7 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/procedural` | Deterministic procedural flora (trees, bushes, foliage) and procedural craft parts (wings, landing legs, rocket engines) with functional sockets, colliders, mass, and articulation. | `three` |
 | `triangular-engine/worldgen` | Framework-free Voronoi cell-graph planets, tectonics, ecology, climate, cell connectivity, and elevation samplers. | — |
 | `triangular-engine/worldgen/render` | Angular/Three.js 3D Globe ↔ 2.5D Map seamless GPU morphing, dynamic tracking, 2D canvas maps, borders, and tactical overlays (see [cell-planets.md](./cell-planets.md)). | `three` |
+| `triangular-engine/worldgen/render/core` | Framework-free colour ramps, projections, world-size helpers, and worker lookup payloads. Use this entry from web workers. | — |
 
 
 ## Provider configuration

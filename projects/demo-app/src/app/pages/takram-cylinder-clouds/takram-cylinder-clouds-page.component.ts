@@ -455,7 +455,11 @@ export class TakramCylinderCloudsPageComponent {
         ),
       );
     }
-    mesh.position.set(...patch.centerWorldM);
+    mesh.position.set(
+      patch.centerWorldM[0],
+      patch.centerWorldM[1],
+      patch.centerWorldM[2],
+    );
     this.terrainGroup.add(mesh);
     this.terrainPatches.set(key, mesh);
   }

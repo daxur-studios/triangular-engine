@@ -49,9 +49,15 @@ import {
   type MapProjectionKind,
 } from 'triangular-engine/worldgen/render';
 import {
+  createTerrainMaterialTileUniforms,
+  enableTerrainMaterialTileLookup,
+  setTerrainMaterialTileEnabled,
+  updateTerrainMaterialTile,
   enableTerrainMacroVariation,
   evaluateTerrainMaterial,
   terrainMaterialColorRgb,
+  type ITerrainMaterialTilePayload,
+  type ITerrainMaterialTileUniforms,
   type ITerrainMacroVariationUniforms,
 } from 'triangular-engine/terrain';
 import type { IVec3, WorldProfileKind } from 'triangular-engine/worldgen';
@@ -298,6 +304,9 @@ export class CellPlanetMorphStreamingPageComponent {
     uTerrainMacroScaleM: { value: 48 },
   };
   private readonly cellPerPixelUniforms = createCellPerPixelLookupUniforms();
+  private readonly terrainMaterialTileUniforms: ITerrainMaterialTileUniforms =
+    createTerrainMaterialTileUniforms();
+  private terrainMaterialTileReady = false;
 
   readonly getKey = addressKey;
   readonly getLevel = addressLevel;
@@ -636,6 +645,7 @@ export class CellPlanetMorphStreamingPageComponent {
     });
     enablePlanetMorphProjection(material, this.morphUniforms);
     enableCellPerPixelLookup(material, this.cellPerPixelUniforms);
+    enableTerrainMaterialTileLookup(material, this.terrainMaterialTileUniforms);
     return material;
   };
 
@@ -646,6 +656,7 @@ export class CellPlanetMorphStreamingPageComponent {
       readonly id: number;
       readonly patch?: ITerrainPatchMesh<ILatLonTerrainPatchAddress>;
       readonly cellLookup?: ICellPerPixelLookupPayload;
+      readonly materialTile?: ITerrainMaterialTilePayload;
       readonly timings?: CellPlanetMorphWorkerTimings;
       readonly error?: string;
     }>) => {
@@ -656,12 +667,23 @@ export class CellPlanetMorphStreamingPageComponent {
       if (data.error) {
         pending.reject(new Error(data.error));
       } else if (data.patch) {
-        if (data.cellLookup) {
-          updateCellPerPixelLookup(this.cellPerPixelUniforms, data.cellLookup);
-        } else {
-          // Material mode is the continuous visual prototype and uses the
-          // interpolated vertex colours produced from sampler.sample().
+        if (data.materialTile) {
+          updateTerrainMaterialTile(this.terrainMaterialTileUniforms, data.materialTile);
+          this.terrainMaterialTileReady = true;
           setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, false);
+        } else if (data.cellLookup) {
+          updateCellPerPixelLookup(this.cellPerPixelUniforms, data.cellLookup);
+          setTerrainMaterialTileEnabled(this.terrainMaterialTileUniforms, false);
+        } else {
+          if (this.colourMode() === 'material') {
+            setTerrainMaterialTileEnabled(
+              this.terrainMaterialTileUniforms,
+              this.terrainMaterialTileReady,
+            );
+          } else {
+            setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, false);
+            setTerrainMaterialTileEnabled(this.terrainMaterialTileUniforms, false);
+          }
         }
         if (data.timings) {
           this.timings.set({
@@ -888,6 +910,10 @@ export class CellPlanetMorphStreamingPageComponent {
     const value = (event.target as HTMLSelectElement).value as ColourMode;
     if (this.colourModes.includes(value)) {
       this.colourMode.set(value);
+      setTerrainMaterialTileEnabled(
+        this.terrainMaterialTileUniforms,
+        value === 'material' && this.terrainMaterialTileReady,
+      );
       this.rebuildRevision.update((r) => r + 1);
     }
   }

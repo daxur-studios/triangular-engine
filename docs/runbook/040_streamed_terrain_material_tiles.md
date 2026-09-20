@@ -382,3 +382,20 @@ Defer authored PBR texture libraries, unbounded material layers, all terrain
 backends, disk-cache formats, multiplayer paint synchronization, animated river
 water and geometry editing tools. Provide extension boundaries for them without
 implementing speculative systems. No new browser automation infrastructure.
+
+## Progress
+
+- **2026-09-20 — M1/M2 core slice:** added serializable tile identity and payload
+  contracts, a linear-RGB RGBA8 baker with sampled gutters and CPU-generated
+  mip levels, a byte-bounded pinned LRU cache, and a single-tile Three.js
+  material adapter. These are exported from `triangular-engine/terrain` and
+  are ready for a fixed-geometry harness. The production page-table storage
+  and streaming worker integration remain M3 work. `npm run
+  build:triangular-engine` and `npx ng build demo-app` pass for this slice;
+  browser/GPU evidence is still pending.
+- **2026-09-20 — Fixed-geometry demo prototype:** material mode in
+  `cell-planet-morph-streaming` now receives one worker-baked 256×256 global
+  colour tile with gutters and mips, and samples it through the shared material
+  while the mesh remains unchanged. The tile is generated once per world/style
+  revision and macro variation remains a separate shader layer. This proves the
+  independent texture path; it is intentionally not the final close-up solution.

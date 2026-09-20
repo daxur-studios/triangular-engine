@@ -1,6 +1,6 @@
 import type { ITerrainField } from './terrain-field';
 import { TerrainVector3 } from './terrain-math';
-import type { ITerrainSurfaceDomain } from '../domains/terrain-surface-domain';
+import type { ITerrainSurfaceDomain } from './terrain-surface-domain';
 
 /**
  * Canonical single-point terrain surface sample. Shared by meshing, ground
