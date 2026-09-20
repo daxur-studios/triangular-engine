@@ -18,8 +18,10 @@ import {
   Mesh,
   MeshStandardMaterial,
   Object3D,
+  QuaternionTuple,
   Sphere,
   Vector3,
+  Vector3Tuple,
 } from 'three';
 import { EngineService } from 'triangular-engine';
 import type { ITerrainField } from '../core/terrain-field';
@@ -180,6 +182,15 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   >(undefined);
   readonly wireframe = input(false);
   readonly frustumCulled = input(true);
+  /**
+   * Scene-space transform applied to the renderer's patch group. Patch
+   * `centerWorldM` values are interpreted relative to it, so a parent can own
+   * the recentering scheme — e.g. a celestial body group offset from the scene
+   * origin by the floating origin. Defaults to identity, which keeps the
+   * historical behaviour where `centerWorldM` is already scene-relative.
+   */
+  readonly renderOriginM = input<Vector3Tuple>([0, 0, 0]);
+  readonly renderQuaternion = input<QuaternionTuple>([0, 0, 0, 1]);
   readonly getLevel = input<(address: TAddress) => number>(defaultAddressLevel);
   readonly getKey = input<(address: TAddress) => string>(defaultAddressKey);
   readonly createMaterial = input<() => Material>(
@@ -199,6 +210,12 @@ export class TerrainSurfaceComponent<TAddress = unknown>
 
   constructor() {
     this.engine.scene.add(this.group);
+    effect(() => {
+      const [x, y, z] = this.renderOriginM();
+      this.group.position.set(x, y, z);
+      const [qx, qy, qz, qw] = this.renderQuaternion();
+      this.group.quaternion.set(qx, qy, qz, qw);
+    });
     effect(() => {
       const wireframe = this.wireframe();
       for (const { material } of this.residents.values()) {

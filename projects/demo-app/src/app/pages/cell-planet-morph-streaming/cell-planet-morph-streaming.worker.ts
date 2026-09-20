@@ -39,6 +39,7 @@ import {
   lavaOceanColor,
   EQUAL_EARTH_PROJECTION,
   EQUIRECTANGULAR_PROJECTION,
+  type ICellPerPixelLookupPayload,
   type MapProjectionKind,
 } from 'triangular-engine/worldgen/render';
 import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
@@ -95,6 +96,85 @@ let cachedProfile = WORLD_PROFILES.volcanic;
 let cachedMaxSlope = 0;
 let cachedRiverMask: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
 let cachedRidgeCellSet = new Set<number>();
+let cachedLookupKey = '';
+
+function buildCellPerPixelLookup(
+  world: ReturnType<typeof getOrCreateWorld>,
+  colorMode: CellPlanetMorphWorkerRequest['colorMode'],
+): ICellPerPixelLookupPayload | undefined {
+  // Material mode is the visual prototype: it uses the continuous surface
+  // sample and interpolated vertex colours. The atlas remains for explicit
+  // cell-data views where sharp cell boundaries are useful.
+  if (colorMode === 'lod' || colorMode === 'material') return undefined;
+
+  const { graph, tectonics, ecology, sampler, eMin, eMax, profile, maxSlope, riverMask, ridgeCellSet } = world;
+  const cellCount = graph.cells.length;
+  const cellIdWidth = 1024;
+  const cellIdHeight = 512;
+  const cellData = new Float32Array(cellCount * 4);
+
+  for (const cell of graph.cells) {
+    let colour: [number, number, number];
+    if (colorMode === 'elevation') {
+      colour = parseColorToLinearRgb(
+        elevationColor(
+          tectonics.elevation[cell.id] ?? sampler.sample(cell.center).seaLevel,
+          tectonics.seaLevelElevation,
+          eMin,
+          eMax,
+        ),
+      );
+    } else if (colorMode === 'plates') {
+      colour = parseColorToLinearRgb(plateColor(tectonics.plateIdByCell[cell.id] ?? 0));
+    } else {
+      const sample = sampler.sample(cell.center);
+      colour = sample.isLand
+        ? parseColorToLinearRgb(biomeColor(ecology.biome[cell.id]))
+        : parseColorToLinearRgb(profile.oceanSubstance === 'lava' ? lavaOceanColor() : OCEAN_COLOR);
+    }
+
+    const colourOffset = cell.id * 4;
+    cellData[colourOffset] = colour[0];
+    cellData[colourOffset + 1] = colour[1];
+    cellData[colourOffset + 2] = colour[2];
+    cellData[colourOffset + 3] = 1;
+
+  }
+
+  const cellIdData = new Uint8Array(cellIdWidth * cellIdHeight * 4);
+  for (let y = 0; y < cellIdHeight; y += 1) {
+    const latitude = -Math.PI / 2 + ((y + 0.5) / cellIdHeight) * Math.PI;
+    const cosLatitude = Math.cos(latitude);
+    let previousCell = findCellAt(graph, {
+      x: cosLatitude * Math.sin(-Math.PI),
+      y: Math.sin(latitude),
+      z: cosLatitude * Math.cos(-Math.PI),
+    });
+    for (let x = 0; x < cellIdWidth; x += 1) {
+      const longitude = -Math.PI + ((x + 0.5) / cellIdWidth) * Math.PI * 2;
+      const direction: IVec3 = {
+        x: cosLatitude * Math.sin(longitude),
+        y: Math.sin(latitude),
+        z: cosLatitude * Math.cos(longitude),
+      };
+      previousCell = findNearestCellFast(graph, direction, previousCell);
+      // DataTexture keeps row zero at the bottom, matching latitude -PI/2 at
+      // shader v=0. Reversing this row was the north/south alignment bug.
+      const offset = (y * cellIdWidth + x) * 4;
+      cellIdData[offset] = previousCell.id & 255;
+      cellIdData[offset + 1] = (previousCell.id >> 8) & 255;
+      cellIdData[offset + 3] = 255;
+    }
+  }
+
+  return {
+    cellData,
+    cellTextureWidth: cellCount,
+    cellIdData,
+    cellIdWidth,
+    cellIdHeight,
+  };
+}
 
 function buildRiverMaterialMask(graph: IPlanetGraphCore, ecology: IPlanetEcology): Uint8Array {
   const mask = new Uint8Array(graph.cells.length);
@@ -389,6 +469,28 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
     } =
       getOrCreateWorld(worldProfile, seed);
 
+    const lookupKey = `${worldProfile}:${seed}:${colorMode}`;
+    const cellLookup =
+      cachedLookupKey === lookupKey
+        ? undefined
+        : buildCellPerPixelLookup(
+            {
+              graph,
+              tectonics,
+              ecology,
+              features,
+              sampler,
+              eMin,
+              eMax,
+              profile,
+              maxSlope,
+              riverMask,
+              ridgeCellSet,
+            },
+            colorMode,
+          );
+    cachedLookupKey = lookupKey;
+
     const domain = new LatLonTerrainDomain(radius, 4, 2);
     const bounds = domain.getPatchBounds(address);
     const stepU = (bounds.maxU - bounds.minU) / resolution;
@@ -494,8 +596,11 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
           colors[o3 + 2] = rgb[2];
         } else if (colorMode === 'material') {
           const material = evaluateTerrainMaterial({
-            elevationM: tectonics.elevation[cell.id] ?? sample.seaLevel,
-            seaLevelM: tectonics.seaLevelElevation,
+            // The mesh is displaced from this continuous sample. Using the
+            // cell-centre elevation here made colour and relief disagree near
+            // shorelines and strong local relief.
+            elevationM: sample.elevation,
+            seaLevelM: sample.seaLevel,
             minElevationM: eMin,
             maxElevationM: eMax,
             slope01: maxSlope > 0 ? (ecology.slope[cell.id] ?? 0) / maxSlope : 0,
@@ -652,25 +757,35 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
       geometricErrorM: domain.getGeometricErrorM(address, resolution, -100, 300),
     };
 
+    const asTransferable = (buffer: ArrayBufferLike): ArrayBuffer => buffer as ArrayBuffer;
+    const transferables: ArrayBuffer[] = [
+      asTransferable(compacted.positions.buffer),
+      asTransferable(compacted.normals.buffer),
+      asTransferable(compacted.uvs.buffer),
+      asTransferable(compacted.indices.buffer),
+      asTransferable(compacted.spherePositions.buffer),
+      asTransferable(compacted.flatPositions.buffer),
+      asTransferable(compacted.sphereNormals.buffer),
+      asTransferable(compacted.flatNormals.buffer),
+      asTransferable(compacted.colors.buffer),
+      asTransferable(compacted.macroLandFactors.buffer),
+      asTransferable(otherDirs.buffer),
+    ];
+    if (cellLookup) {
+      transferables.push(
+        asTransferable(cellLookup.cellData.buffer),
+        asTransferable(cellLookup.cellIdData.buffer),
+      );
+    }
+
     postMessage(
       {
         id,
         patch,
+        cellLookup,
         timings: { generationMs, simplificationMs } satisfies CellPlanetMorphWorkerTimings,
       },
-      [
-        compacted.positions.buffer,
-        compacted.normals.buffer,
-        compacted.uvs.buffer,
-        compacted.indices.buffer,
-        compacted.spherePositions.buffer,
-        compacted.flatPositions.buffer,
-        compacted.sphereNormals.buffer,
-        compacted.flatNormals.buffer,
-        compacted.colors.buffer,
-        compacted.macroLandFactors.buffer,
-        otherDirs.buffer,
-      ],
+      transferables,
     );
   } catch (error) {
     postMessage({

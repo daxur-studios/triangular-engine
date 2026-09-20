@@ -38,7 +38,12 @@ import {
   enablePlanetMorphProjection,
   EQUAL_EARTH_PROJECTION,
   EQUIRECTANGULAR_PROJECTION,
+  createCellPerPixelLookupUniforms,
+  enableCellPerPixelLookup,
+  setCellPerPixelLookupEnabled,
   formatDistanceM,
+  updateCellPerPixelLookup,
+  type ICellPerPixelLookupPayload,
   WORLD_SIZE_TIER_RADIUS_M,
   type IDynamicProjectionUniforms,
   type MapProjectionKind,
@@ -292,6 +297,7 @@ export class CellPlanetMorphStreamingPageComponent {
     uTerrainMacroStrength: { value: 0.35 },
     uTerrainMacroScaleM: { value: 48 },
   };
+  private readonly cellPerPixelUniforms = createCellPerPixelLookupUniforms();
 
   readonly getKey = addressKey;
   readonly getLevel = addressLevel;
@@ -629,6 +635,7 @@ export class CellPlanetMorphStreamingPageComponent {
       positionSpace: 'viewM',
     });
     enablePlanetMorphProjection(material, this.morphUniforms);
+    enableCellPerPixelLookup(material, this.cellPerPixelUniforms);
     return material;
   };
 
@@ -638,6 +645,7 @@ export class CellPlanetMorphStreamingPageComponent {
     }: MessageEvent<{
       readonly id: number;
       readonly patch?: ITerrainPatchMesh<ILatLonTerrainPatchAddress>;
+      readonly cellLookup?: ICellPerPixelLookupPayload;
       readonly timings?: CellPlanetMorphWorkerTimings;
       readonly error?: string;
     }>) => {
@@ -648,6 +656,13 @@ export class CellPlanetMorphStreamingPageComponent {
       if (data.error) {
         pending.reject(new Error(data.error));
       } else if (data.patch) {
+        if (data.cellLookup) {
+          updateCellPerPixelLookup(this.cellPerPixelUniforms, data.cellLookup);
+        } else {
+          // Material mode is the continuous visual prototype and uses the
+          // interpolated vertex colours produced from sampler.sample().
+          setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, false);
+        }
         if (data.timings) {
           this.timings.set({
             ...data.timings,
