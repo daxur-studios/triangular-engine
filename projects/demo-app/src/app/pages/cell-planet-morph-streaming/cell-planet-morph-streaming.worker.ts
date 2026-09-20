@@ -6,6 +6,8 @@ import {
   conformPatchEdges,
   createIndices,
   LatLonTerrainDomain,
+  evaluateTerrainMaterial,
+  terrainMaterialColorRgb,
   type ILatLonTerrainPatchAddress,
   type ITerrainPatchGeometry,
   type ITerrainPatchMesh,
@@ -57,7 +59,7 @@ export interface CellPlanetMorphWorkerRequest {
   readonly reduction: number;
   readonly targetError: number;
   readonly projectionKind: MapProjectionKind;
-  readonly colorMode: 'natural' | 'elevation' | 'lod' | 'plates';
+  readonly colorMode: 'natural' | 'elevation' | 'lod' | 'plates' | 'material';
   readonly heightScale?: number;
   readonly worldProfile?: WorldProfileKind;
   readonly seed?: number;
@@ -90,6 +92,23 @@ let cachedSampler: IPlanetSurfaceSampler;
 let cachedEMin = -0.4;
 let cachedEMax = 0.8;
 let cachedProfile = WORLD_PROFILES.volcanic;
+let cachedMaxSlope = 0;
+let cachedRiverMask: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
+let cachedRidgeCellSet = new Set<number>();
+
+function buildRiverMaterialMask(graph: IPlanetGraphCore, ecology: IPlanetEcology): Uint8Array {
+  const mask = new Uint8Array(graph.cells.length);
+  const thresholdCos = Math.cos(0.09);
+  for (const cell of graph.cells) {
+    for (const path of ecology.riverPaths) {
+      if (path.some((point) => cell.center.x * point.x + cell.center.y * point.y + cell.center.z * point.z >= thresholdCos)) {
+        mask[cell.id] = 1;
+        break;
+      }
+    }
+  }
+  return mask;
+}
 
 function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: number = 1) {
   const key = `${profileKind}:${seed}`;
@@ -103,6 +122,9 @@ function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: numb
       eMin: cachedEMin,
       eMax: cachedEMax,
       profile: cachedProfile,
+      maxSlope: cachedMaxSlope,
+      riverMask: cachedRiverMask,
+      ridgeCellSet: cachedRidgeCellSet,
     };
   }
 
@@ -140,6 +162,9 @@ function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: numb
     eMin = Math.min(eMin, e);
     eMax = Math.max(eMax, e);
   }
+  cachedMaxSlope = ecology.slope.reduce((max, slope) => Math.max(max, slope), 0);
+  cachedRiverMask = buildRiverMaterialMask(graph, ecology);
+  cachedRidgeCellSet = new Set(tectonics.ridgeCellIds);
 
   cachedWorldKey = key;
   cachedGraph = graph;
@@ -160,6 +185,9 @@ function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: numb
     eMin,
     eMax,
     profile,
+    maxSlope: cachedMaxSlope,
+    riverMask: cachedRiverMask,
+    ridgeCellSet: cachedRidgeCellSet,
   };
 }
 
@@ -190,9 +218,20 @@ function findNearestCellFast(
   return current;
 }
 
+function srgbChannelToLinear(channel: number): number {
+  const c = Math.max(0, Math.min(1, channel));
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function srgbRgbToLinear(rgb: readonly [number, number, number]): [number, number, number] {
+  return [
+    srgbChannelToLinear(rgb[0]),
+    srgbChannelToLinear(rgb[1]),
+    srgbChannelToLinear(rgb[2]),
+  ];
+}
+
 function parseColorToLinearRgb(color: string): [number, number, number] {
-  const toLinear = (c: number) =>
-    c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 
   if (color.startsWith('hsl')) {
     const match = /hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*\)/.exec(color);
@@ -220,7 +259,7 @@ function parseColorToLinearRgb(color: string): [number, number, number] {
         g = hue2rgb(p, q, h);
         b = hue2rgb(p, q, h - 1 / 3);
       }
-      return [toLinear(r), toLinear(g), toLinear(b)];
+      return [srgbChannelToLinear(r), srgbChannelToLinear(g), srgbChannelToLinear(b)];
     }
   }
 
@@ -233,7 +272,7 @@ function parseColorToLinearRgb(color: string): [number, number, number] {
   const sR = ((num >> 16) & 255) / 255;
   const sG = ((num >> 8) & 255) / 255;
   const sB = (num & 255) / 255;
-  return [toLinear(sR), toLinear(sG), toLinear(sB)];
+  return [srgbChannelToLinear(sR), srgbChannelToLinear(sG), srgbChannelToLinear(sB)];
 }
 
 interface CompactedMeshAttributes {
@@ -245,6 +284,7 @@ interface CompactedMeshAttributes {
   readonly sphereNormals: Float32Array;
   readonly flatNormals: Float32Array;
   readonly colors: Float32Array;
+  readonly macroLandFactors: Float32Array;
   readonly indices: Uint16Array | Uint32Array;
 }
 
@@ -258,8 +298,9 @@ function compactGeometryAttributes(geometry: BufferGeometry): CompactedMeshAttri
   const sNormAttr = geometry.getAttribute('aSphereNorm');
   const fNormAttr = geometry.getAttribute('aFlatNorm');
   const colAttr = geometry.getAttribute('color');
+  const macroAttr = geometry.getAttribute('terrainMacroLandFactor');
 
-  if (!index || !posAttr || !normAttr || !uvAttr || !sPosAttr || !fPosAttr || !sNormAttr || !fNormAttr || !colAttr) {
+  if (!index || !posAttr || !normAttr || !uvAttr || !sPosAttr || !fPosAttr || !sNormAttr || !fNormAttr || !colAttr || !macroAttr) {
     throw new Error('Morph patch simplification returned incomplete geometry attributes.');
   }
 
@@ -273,6 +314,7 @@ function compactGeometryAttributes(geometry: BufferGeometry): CompactedMeshAttri
   const sphereNormals: number[] = [];
   const flatNormals: number[] = [];
   const colors: number[] = [];
+  const macroLandFactors: number[] = [];
 
   for (let i = 0; i < index.count; i += 1) {
     const src = Number(index.array[i]);
@@ -290,6 +332,7 @@ function compactGeometryAttributes(geometry: BufferGeometry): CompactedMeshAttri
         flatNormals.push(fNormAttr.getComponent(src, ax));
         colors.push(colAttr.getComponent(src, ax));
       }
+      macroLandFactors.push(macroAttr.getComponent(src, 0));
       for (let ax = 0; ax < 2; ax += 1) {
         uvs.push(uvAttr.getComponent(src, ax));
       }
@@ -306,6 +349,7 @@ function compactGeometryAttributes(geometry: BufferGeometry): CompactedMeshAttri
     sphereNormals: Float32Array.from(sphereNormals),
     flatNormals: Float32Array.from(flatNormals),
     colors: Float32Array.from(colors),
+    macroLandFactors: Float32Array.from(macroLandFactors),
     indices: remap.size <= 65_535 ? new Uint16Array(indices) : indices,
   };
 }
@@ -330,7 +374,19 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
     } = data;
 
     const generationStartedAt = performance.now();
-    const { graph, tectonics, ecology, features, sampler, eMin, eMax, profile } =
+    const {
+      graph,
+      tectonics,
+      ecology,
+      features,
+      sampler,
+      eMin,
+      eMax,
+      profile,
+      maxSlope,
+      riverMask,
+      ridgeCellSet,
+    } =
       getOrCreateWorld(worldProfile, seed);
 
     const domain = new LatLonTerrainDomain(radius, 4, 2);
@@ -347,6 +403,7 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
     const flatNormals = new Float32Array(vertexCount * 3);
     const uvs = new Float32Array(vertexCount * 2);
     const colors = new Float32Array(vertexCount * 3);
+    const macroLandFactors = new Float32Array(vertexCount);
 
     const mapWidth = 2 * Math.PI * radius;
     const mapHeight = Math.PI * radius;
@@ -435,6 +492,39 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
           colors[o3] = rgb[0];
           colors[o3 + 1] = rgb[1];
           colors[o3 + 2] = rgb[2];
+        } else if (colorMode === 'material') {
+          const material = evaluateTerrainMaterial({
+            elevationM: tectonics.elevation[cell.id] ?? sample.seaLevel,
+            seaLevelM: tectonics.seaLevelElevation,
+            minElevationM: eMin,
+            maxElevationM: eMax,
+            slope01: maxSlope > 0 ? (ecology.slope[cell.id] ?? 0) / maxSlope : 0,
+            moisture01: ecology.moisture[cell.id],
+            temperature01: ((ecology.temperature[cell.id] ?? 0) + 1) * 0.5,
+            snowIce01:
+              ecology.biome[cell.id] === 'ice_cap' ? 1 :
+              ecology.biome[cell.id] === 'glacier' ? 0.9 :
+              ecology.biome[cell.id] === 'tundra' ? 0.35 : 0,
+            arid01:
+              ecology.biome[cell.id] === 'desert' ? 1 :
+              ecology.biome[cell.id] === 'steppe' ? 0.45 :
+              ecology.biome[cell.id] === 'savanna' ? 0.25 : 0,
+            ridge01: ridgeCellSet.has(cell.id) ? 1 : 0,
+            river01: riverMask[cell.id] ?? 0,
+          }, {
+            snowlineM: tectonics.seaLevelElevation + Math.max(1, eMax - tectonics.seaLevelElevation) * 0.68,
+            snowlineBlendM: Math.max(0.05, (eMax - tectonics.seaLevelElevation) * 0.16),
+          });
+          // terrainMaterialColorRgb returns display/sRGB palette values. Vertex
+          // colors on MeshStandardMaterial are linear working-space inputs, so
+          // decode them here before the renderer applies lighting and sRGB output.
+          const rgb = srgbRgbToLinear(terrainMaterialColorRgb(material, {
+            oceanSubstance: profile.oceanSubstance,
+          }));
+          colors[o3] = rgb[0];
+          colors[o3 + 1] = rgb[1];
+          colors[o3 + 2] = rgb[2];
+          macroLandFactors[idx] = 1 - Math.min(1, material.weights.water + material.snow01 * 0.75);
         } else {
           // Natural Biome mode
           if (!sample.isLand) {
@@ -503,6 +593,7 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
       geometry.setAttribute('aSphereNorm', new BufferAttribute(sphereNormals, 3));
       geometry.setAttribute('aFlatNorm', new BufferAttribute(flatNormals, 3));
       geometry.setAttribute('color', new BufferAttribute(colors, 3));
+      geometry.setAttribute('terrainMacroLandFactor', new BufferAttribute(macroLandFactors, 1));
       geometry.setIndex(new BufferAttribute(indices, 1));
 
       const simplified = await simplifyIndexedGeometry(geometry, {
@@ -524,6 +615,7 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
         sphereNormals,
         flatNormals,
         colors,
+        macroLandFactors,
         indices,
       };
     }
@@ -545,6 +637,10 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
         aOtherDir1: otherDirs,
         aOtherDir2: otherDirs,
         color: compacted.colors,
+        terrainMacroLandFactor: {
+          array: compacted.macroLandFactors,
+          itemSize: 1,
+        },
       },
     };
 
@@ -572,6 +668,7 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
         compacted.sphereNormals.buffer,
         compacted.flatNormals.buffer,
         compacted.colors.buffer,
+        compacted.macroLandFactors.buffer,
         otherDirs.buffer,
       ],
     );

@@ -66,6 +66,10 @@ to an async worker-backed function to offload sampling and typed-array
 construction. The component continues to handle selection, cancellation,
 patch retention, Three.js geometry creation, and GPU upload.
 
+> **Worker caveat**: an Angular app's worker entry that imports this entry point must start with
+> `import '@angular/compiler';`, or its unlinked partial declarations throw at load and silently
+> yield no patches. See the root README's Web Worker troubleshooting note.
+
 Framework-free consumers can continue composing
 `selectAdaptiveTerrainPatches`, `TerrainGenerationQueue`, and
 `generateTerrainPatchMesh` directly.

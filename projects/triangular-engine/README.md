@@ -543,6 +543,21 @@ Error: `NullInjectorError: No provider for _EngineService`
 
 Fix: Provide `EngineService.provide(...)` in every component that hosts a `<scene>`.
 
+### Web Worker importing an engine entry point is silently empty
+
+**Symptom**: A worker that imports `triangular-engine/terrain`, `.../worldgen/render`,
+`.../jolt`, `.../takram`, etc. throws on load (`ɵɵngDeclareComponent` →
+"The injectable ... needs to be compiled using the JIT compiler") and produces nothing. The
+same import works on the main thread.
+
+**Cause**: Angular's `bundleWebWorker` builds the worker with esbuild `buildSync({ plugins: undefined })`,
+so the Angular linker never runs on workers. Partially-compiled libraries keep their `ɵɵngDeclare*`
+calls, which throw when the module is evaluated. Main bundles *are* linked, so only workers break.
+
+**Fix**: Add `import '@angular/compiler';` as the first import of the worker entry file to register
+the JIT facade (bundles the compiler into that worker). Entry points with no partial declarations
+(verified: `worldgen` core, `celestial`) don't need it.
+
 ### Working locally with npm link
 
 If serving both `triangular-engine` and your app locally, link the package:

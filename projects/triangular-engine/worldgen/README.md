@@ -9,9 +9,11 @@ how to get at it).
 Two entry points:
 
 - **`triangular-engine/worldgen`** (`core/`) — pure, framework-free generation + query functions.
-  No Three.js, no Angular. Deterministic: same params → same planet.
+  No Three.js, no Angular. Deterministic: same params → same planet. **Worker-safe** (no partial
+  declarations), so it's the entry point to import from a Web Worker.
 - **`triangular-engine/worldgen/render`** (`render/`) — the Angular/Three.js rendering layer,
-  currently one component: `<planetView>`.
+  currently one component: `<planetView>`. **Not worker-safe**: importing it from a worker needs
+  `import '@angular/compiler';` first (see the root README's Web Worker troubleshooting note).
 
 ## Generation pipeline (three calls, each layered on the last)
 

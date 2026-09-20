@@ -31,22 +31,26 @@ import {
   enablePlanetMorphProjection,
   EQUAL_EARTH_PROJECTION,
   EQUIRECTANGULAR_PROJECTION,
+  formatDistanceM,
+  WORLD_SIZE_TIER_RADIUS_M,
   type IDynamicProjectionUniforms,
   type MapProjectionKind,
 } from 'triangular-engine/worldgen/render';
+import { evaluateTerrainMaterial, terrainMaterialColorRgb } from 'triangular-engine/terrain';
 import type { IVec3, WorldProfileKind } from 'triangular-engine/worldgen';
 import {
   CELL_PLANET_U0_FIXTURE,
   type CellPlanetU0BookmarkId,
   type ICellPlanetU0Bookmark,
 } from '../cell-planet-u0-fixture';
+import { getTerrainHeightScaleM } from '../cell-planet-25d-map/cell-planet-terrain-scale';
 import type {
   CellPlanetMorphWorkerRequest,
   CellPlanetMorphWorkerTimings,
 } from './cell-planet-morph-streaming.worker';
 
 type Quality = 'standard' | 'high' | 'ultra';
-type ColourMode = 'natural' | 'elevation' | 'plates' | 'lod';
+type ColourMode = 'natural' | 'elevation' | 'plates' | 'lod' | 'material';
 
 interface QualityPreset {
   readonly maxLod: number;
@@ -145,11 +149,16 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly worldProfileKind = signal<WorldProfileKind>(
     CELL_PLANET_U0_FIXTURE.worldProfile,
   );
-  readonly heightScale = signal(40);
+  /** Stylized relief control, kept proportional to the physical planet radius like 25D. */
+  readonly heightScale = signal(4);
+  readonly terrainHeightScaleM = computed(() =>
+    getTerrainHeightScaleM(this.radius(), this.heightScale()),
+  );
   private heightScaleDebounceTimer?: number;
 
   // Planet dimensions
-  readonly radius = signal(1000);
+  /** Keep this POC on the same physical medium-planet scale as the 25D reference. */
+  readonly radius = signal(WORLD_SIZE_TIER_RADIUS_M.medium);
   readonly domain = computed(
     () => new LatLonTerrainDomain(this.radius(), 4, 2),
   );
@@ -182,7 +191,12 @@ export class CellPlanetMorphStreamingPageComponent {
     'elevation',
     'plates',
     'lod',
+    'material',
   ];
+  readonly macroVariationEnabled = signal(true);
+  // Match the reference page's visible macro-variation starting point.
+  readonly macroVariationStrength = signal(1);
+  readonly macroVariationScaleM = signal(128);
   readonly wireframe = signal(false);
   readonly freezeLod = signal(false);
 
@@ -191,8 +205,13 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly activeBookmarkId = signal<CellPlanetU0BookmarkId>('overview');
 
   // Camera state
-  readonly cameraPosition = signal<[number, number, number]>([0, 0, 2600]);
+  readonly cameraPosition = signal<[number, number, number]>([
+    0,
+    0,
+    WORLD_SIZE_TIER_RADIUS_M.medium * 2.6,
+  ]);
   readonly cameraTarget = signal<[number, number, number]>([0, 0, 0]);
+  readonly formatDistanceM = formatDistanceM;
 
   // Telemetry signals
   readonly stats = signal<ITerrainSurfaceLodStats>({
@@ -224,6 +243,12 @@ export class CellPlanetMorphStreamingPageComponent {
     uMapHeight: { value: Math.PI * 1000 },
     uRadius: { value: 1000 },
     uProjectionType: { value: 1 },
+  };
+
+  private readonly macroUniforms = {
+    enabled: { value: 1 },
+    strength: { value: 0.35 },
+    scaleM: { value: 48 },
   };
 
   readonly getKey = addressKey;
@@ -369,6 +394,77 @@ export class CellPlanetMorphStreamingPageComponent {
       side: DoubleSide,
       vertexColors: true,
     });
+
+    const previousOnBeforeCompile = material.onBeforeCompile.bind(material);
+    const previousCacheKey = material.customProgramCacheKey.bind(material);
+    material.onBeforeCompile = (shader, renderer) => {
+      previousOnBeforeCompile(shader, renderer);
+      shader.uniforms['uTerrainMacroEnabled'] = this.macroUniforms.enabled;
+      shader.uniforms['uTerrainMacroStrength'] = this.macroUniforms.strength;
+      shader.uniforms['uTerrainMacroScaleM'] = this.macroUniforms.scaleM;
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+            attribute float terrainMacroLandFactor;
+            varying vec3 vTerrainMacroPositionM;
+            varying float vTerrainMacroLandFactor;`,
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+            vTerrainMacroPositionM = (modelMatrix * vec4(transformed, 1.0)).xyz;
+            vTerrainMacroLandFactor = terrainMacroLandFactor;`,
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+            uniform float uTerrainMacroEnabled;
+            uniform float uTerrainMacroStrength;
+            uniform float uTerrainMacroScaleM;
+            varying vec3 vTerrainMacroPositionM;
+            varying float vTerrainMacroLandFactor;
+
+            float terrainMacroHash3(vec3 p) {
+              return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+            }
+
+            float terrainMacroValueNoise3(vec3 p) {
+              vec3 i = floor(p);
+              vec3 f = fract(p);
+              f = f * f * (3.0 - 2.0 * f);
+              float x00 = mix(terrainMacroHash3(i), terrainMacroHash3(i + vec3(1.0, 0.0, 0.0)), f.x);
+              float x10 = mix(terrainMacroHash3(i + vec3(0.0, 1.0, 0.0)), terrainMacroHash3(i + vec3(1.0, 1.0, 0.0)), f.x);
+              float x01 = mix(terrainMacroHash3(i + vec3(0.0, 0.0, 1.0)), terrainMacroHash3(i + vec3(1.0, 0.0, 1.0)), f.x);
+              float x11 = mix(terrainMacroHash3(i + vec3(0.0, 1.0, 1.0)), terrainMacroHash3(i + vec3(1.0, 1.0, 1.0)), f.x);
+              return mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
+            }
+
+            float terrainMacroVariation3(vec3 positionM) {
+              float scale = max(uTerrainMacroScaleM, 1.0);
+              vec3 broad = positionM / scale + vec3(17.3, -9.1, 4.7);
+              vec3 breakup = vec3(
+                (0.8 * positionM.x - 0.6 * positionM.z) / (scale * 1.73) - 23.1,
+                positionM.y / (scale * 1.73) + 5.7,
+                (0.6 * positionM.x + 0.8 * positionM.z) / (scale * 1.73) + 11.9
+              );
+              return terrainMacroValueNoise3(broad) * 0.65 + terrainMacroValueNoise3(breakup) * 0.35;
+            }`,
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+            if (uTerrainMacroEnabled > 0.5) {
+              float signedVariation = (terrainMacroVariation3(vTerrainMacroPositionM) - 0.5) * 2.0;
+              vec3 warmVariation = 1.0 + signedVariation * vec3(0.12, 0.09, 0.055);
+              float amount = clamp(uTerrainMacroStrength, 0.0, 1.0) * clamp(vTerrainMacroLandFactor, 0.0, 1.0);
+              diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * warmVariation, amount);
+            }`,
+        );
+    };
+    material.customProgramCacheKey = () =>
+      `${previousCacheKey()}-cell-planet-material-macro-v1`;
     enablePlanetMorphProjection(material, this.morphUniforms);
     return material;
   };
@@ -437,6 +533,16 @@ export class CellPlanetMorphStreamingPageComponent {
       const kind = this.projectionKind();
       this.morphUniforms.uProjectionType.value = kind === 'equalEarth' ? 1 : 0;
     });
+
+    effect(() => {
+      this.macroUniforms.enabled.value =
+        this.colourMode() === 'material' && this.macroVariationEnabled() ? 1 : 0;
+      this.macroUniforms.strength.value = Math.max(
+        0,
+        Math.min(1, this.macroVariationStrength()),
+      );
+      this.macroUniforms.scaleM.value = Math.max(1, this.macroVariationScaleM());
+    });
   }
 
   private generatePatchInWorker(
@@ -464,7 +570,7 @@ export class CellPlanetMorphStreamingPageComponent {
         targetError: 0.08,
         projectionKind: this.projectionKind(),
         colorMode: this.colourMode(),
-        heightScale: this.heightScale(),
+        heightScale: this.terrainHeightScaleM(),
         worldProfile: this.worldProfileKind(),
         seed: this.seed(),
       };
@@ -573,7 +679,7 @@ export class CellPlanetMorphStreamingPageComponent {
   setHeightScale(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
     if (!Number.isFinite(value)) return;
-    const clamped = Math.max(0, Math.min(200, Math.round(value)));
+    const clamped = Math.max(0, Math.min(14, value));
     this.heightScale.set(clamped);
 
     if (this.heightScaleDebounceTimer !== undefined) {
@@ -588,7 +694,7 @@ export class CellPlanetMorphStreamingPageComponent {
   onHeightScaleChange(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
     if (!Number.isFinite(value)) return;
-    const clamped = Math.max(0, Math.min(200, Math.round(value)));
+    const clamped = Math.max(0, Math.min(14, value));
     if (this.heightScaleDebounceTimer !== undefined) {
       clearTimeout(this.heightScaleDebounceTimer);
     }
@@ -602,6 +708,24 @@ export class CellPlanetMorphStreamingPageComponent {
     if (this.colourModes.includes(value)) {
       this.colourMode.set(value);
       this.rebuildRevision.update((r) => r + 1);
+    }
+  }
+
+  setMacroVariationEnabled(event: Event): void {
+    this.macroVariationEnabled.set((event.target as HTMLInputElement).checked);
+  }
+
+  setMacroVariationStrength(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (Number.isFinite(value)) {
+      this.macroVariationStrength.set(Math.max(0, Math.min(1, value)));
+    }
+  }
+
+  setMacroVariationScale(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (Number.isFinite(value)) {
+      this.macroVariationScaleM.set(Math.max(8, Math.min(128, value)));
     }
   }
 
@@ -631,8 +755,8 @@ export class CellPlanetMorphStreamingPageComponent {
         : EQUAL_EARTH_PROJECTION;
 
     if (bookmark.id === 'overview') {
-      const spherePos: [number, number, number] = [0, 0, 2600];
-      const flatPos: [number, number, number] = [0, 0, 3600];
+      const spherePos: [number, number, number] = [0, 0, radius * 2.6];
+      const flatPos: [number, number, number] = [0, 0, radius * 3.6];
       this.cameraPosition.set([
         (1 - morph) * spherePos[0] + morph * flatPos[0],
         (1 - morph) * spherePos[1] + morph * flatPos[1],
@@ -644,7 +768,7 @@ export class CellPlanetMorphStreamingPageComponent {
 
     const dir: IVec3 = bookmark.direction;
     // Feature height and camera distance scaled with heightScale
-    const featureElevation = Math.max(5, this.heightScale() * 0.35);
+    const featureElevation = Math.max(5, this.terrainHeightScaleM() * 0.35);
     const cameraAltitude = radius * (bookmark.cameraRadiusFactor - 1.0) * 0.65;
     const camOffset: [number, number, number] = [-60, 110, 80];
 
