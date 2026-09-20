@@ -447,7 +447,8 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
             const feature = features.featureByCellId.get(cell.id);
             if (feature?.kind === 'volcano') {
               // Highlight the volcano cell: caldera lava floor vs cone rim
-              if (h > 45) {
+              const volcanoThreshold = Math.max(3, heightScale * 0.28);
+              if (h > volcanoThreshold) {
                 colors[o3] = 0.46; // oxidized reddish basalt rim
                 colors[o3 + 1] = 0.22;
                 colors[o3 + 2] = 0.16;

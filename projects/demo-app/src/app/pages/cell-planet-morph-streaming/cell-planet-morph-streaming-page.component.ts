@@ -145,7 +145,8 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly worldProfileKind = signal<WorldProfileKind>(
     CELL_PLANET_U0_FIXTURE.worldProfile,
   );
-  readonly heightScale = signal(160);
+  readonly heightScale = signal(40);
+  private heightScaleDebounceTimer?: number;
 
   // Planet dimensions
   readonly radius = signal(1000);
@@ -375,6 +376,9 @@ export class CellPlanetMorphStreamingPageComponent {
       if (this.morphLodDebounceTimer !== undefined) {
         clearTimeout(this.morphLodDebounceTimer);
       }
+      if (this.heightScaleDebounceTimer !== undefined) {
+        clearTimeout(this.heightScaleDebounceTimer);
+      }
       this.terrainWorker.terminate();
       const error = new Error('Morph terrain worker terminated.');
       for (const pending of this.workerRequests.values()) pending.reject(error);
@@ -531,6 +535,33 @@ export class CellPlanetMorphStreamingPageComponent {
     this.rebuildRevision.update((r) => r + 1);
   }
 
+  setHeightScale(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (!Number.isFinite(value)) return;
+    const clamped = Math.max(0, Math.min(200, Math.round(value)));
+    this.heightScale.set(clamped);
+
+    if (this.heightScaleDebounceTimer !== undefined) {
+      clearTimeout(this.heightScaleDebounceTimer);
+    }
+    this.heightScaleDebounceTimer = window.setTimeout(() => {
+      this.rebuildRevision.update((r) => r + 1);
+      this.updateCameraForActiveBookmark(this.morphProgress());
+    }, 150);
+  }
+
+  onHeightScaleChange(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (!Number.isFinite(value)) return;
+    const clamped = Math.max(0, Math.min(200, Math.round(value)));
+    if (this.heightScaleDebounceTimer !== undefined) {
+      clearTimeout(this.heightScaleDebounceTimer);
+    }
+    this.heightScale.set(clamped);
+    this.rebuildRevision.update((r) => r + 1);
+    this.updateCameraForActiveBookmark(this.morphProgress());
+  }
+
   setColourMode(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as ColourMode;
     if (this.colourModes.includes(value)) {
@@ -577,8 +608,8 @@ export class CellPlanetMorphStreamingPageComponent {
     }
 
     const dir: IVec3 = bookmark.direction;
-    // Feature height and camera distance
-    const featureElevation = 50;
+    // Feature height and camera distance scaled with heightScale
+    const featureElevation = Math.max(5, this.heightScale() * 0.35);
     const cameraAltitude = radius * (bookmark.cameraRadiusFactor - 1.0) * 0.65;
     const camOffset: [number, number, number] = [-60, 110, 80];
 

@@ -18,6 +18,8 @@ import {
   Mesh,
   MeshStandardMaterial,
   Object3D,
+  Sphere,
+  Vector3,
 } from 'three';
 import { EngineService } from 'triangular-engine';
 import type { ITerrainField } from '../core/terrain-field';
@@ -32,6 +34,7 @@ import { generateTerrainPatchMesh } from '../meshing/terrain-patch-mesher';
 import { TerrainGenerationQueue } from '../streaming/terrain-generation-queue';
 import { selectAdaptiveTerrainPatches } from '../streaming/terrain-patch-selection';
 import { calculateTerrainPatchEdgeRefinementMasks } from '../streaming/terrain-patch-edge-masks';
+
 export interface ITerrainSurfaceLodStats {
   readonly desired: number;
   readonly resident: number;
@@ -176,6 +179,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     TerrainSurfaceMeshGenerator<TAddress> | undefined
   >(undefined);
   readonly wireframe = input(false);
+  readonly frustumCulled = input(true);
   readonly getLevel = input<(address: TAddress) => number>(defaultAddressLevel);
   readonly getKey = input<(address: TAddress) => string>(defaultAddressKey);
   readonly createMaterial = input<() => Material>(
@@ -201,6 +205,18 @@ export class TerrainSurfaceComponent<TAddress = unknown>
         if ('wireframe' in material) {
           (material as MeshStandardMaterial).wireframe = wireframe;
         }
+      }
+    });
+    effect(() => {
+      const culled = this.frustumCulled();
+      for (const { object } of this.residents.values()) {
+        object.frustumCulled = culled;
+        object.traverse((child) => {
+          child.frustumCulled = culled;
+        });
+      }
+      if (this.batchedRender) {
+        this.batchedRender.object.frustumCulled = culled;
       }
     });
     effect(() => {
@@ -588,6 +604,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       false,
     );
     const mesh = new Mesh(surfaceGeometry, material);
+    mesh.frustumCulled = this.frustumCulled();
     let drawCalls = 1;
     let geometryBytes = geometryByteCount(surfaceGeometry);
     let triangles = (surfaceGeometry.index?.count ?? 0) / 3;
@@ -598,7 +615,9 @@ export class TerrainSurfaceComponent<TAddress = unknown>
         patch.skirt,
         true,
       );
-      mesh.add(new Mesh(skirtGeometry, material));
+      const skirtMesh = new Mesh(skirtGeometry, material);
+      skirtMesh.frustumCulled = this.frustumCulled();
+      mesh.add(skirtMesh);
       drawCalls += 1;
       geometryBytes += geometryByteCount(skirtGeometry);
       triangles += (skirtGeometry.index?.count ?? 0) / 3;
@@ -692,6 +711,9 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       }
     }
     geometry.setIndex(new BufferAttribute(surface.indices, 1));
+    if (!this.frustumCulled()) {
+      geometry.boundingSphere = new Sphere(new Vector3(0, 0, 0), Infinity);
+    }
     return geometry;
   }
 
