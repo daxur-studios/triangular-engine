@@ -1,4 +1,4 @@
-import { TestBed } from '@angular/core/testing';
+import { fakeAsync, flushMicrotasks, TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { PerspectiveCamera, Scene } from 'three';
 import { EngineService } from 'triangular-engine';
@@ -71,6 +71,9 @@ describe('TerrainSurfaceComponent', () => {
     fixture.detectChanges();
 
     beforeRender$.next();
+    expect(scene.children[0].children.length).toBe(1);
+
+    beforeRender$.next();
     expect(scene.children[0].children.length).toBe(4);
   });
 
@@ -100,7 +103,7 @@ describe('TerrainSurfaceComponent', () => {
     expect(scene.children[0].children.length).toBe(4);
   });
 
-  it('keeps the previous cut visible until an asynchronous replacement is complete', async () => {
+  it('keeps the previous cut visible until an asynchronous replacement is complete', fakeAsync(() => {
     const fixture = TestBed.createComponent(TerrainSurfaceComponent);
     const generator = async (
       request: ITerrainSurfaceGenerationRequest<IPlaneTerrainPatchAddress>,
@@ -121,18 +124,17 @@ describe('TerrainSurfaceComponent', () => {
 
     beforeRender$.next();
     expect(scene.children[0]?.children.length ?? 0).toBe(0);
-    await Promise.resolve();
+    flushMicrotasks();
     beforeRender$.next();
     expect(scene.children[0].children.length).toBe(1);
 
     camera.position.set(400, 100, -400);
     beforeRender$.next();
     expect(scene.children[0].children.length).toBe(1);
-    await Promise.resolve();
-    await Promise.resolve();
+    flushMicrotasks();
     beforeRender$.next();
     expect(scene.children[0].children.length).toBe(4);
-  });
+  }));
 
   it('reprioritizes a still-selected patch while the camera keeps moving', () => {
     const fixture = TestBed.createComponent(TerrainSurfaceComponent);
@@ -239,6 +241,9 @@ describe('TerrainSurfaceComponent', () => {
     fixture.componentRef.setInput('generationBudget', 100);
     fixture.componentRef.setInput('patchSelector', selector);
     fixture.detectChanges();
+
+    beforeRender$.next();
+    expect(selector).not.toHaveBeenCalled();
 
     beforeRender$.next();
 

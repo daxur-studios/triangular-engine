@@ -206,7 +206,7 @@ export function evaluateTerrainMaterial(
     const dryGround = arid01 * (0.75 + (1 - moisture01) * 0.25);
     weights = {
       water: 0,
-      sand: shore01 * 0.55 + riverBank + dryGround,
+      sand: (shore01 * 0.55 + riverBank + dryGround) * (1 - snow01),
       grass: grassCoverage * aridGrassSuppression,
       rock: rock01 * (1 - snow01),
       snow: snow01,

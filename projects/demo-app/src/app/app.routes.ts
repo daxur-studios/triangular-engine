@@ -519,4 +519,13 @@ export const routes: Routes = [
         ({ CellPlanetMorphStreamingPageComponent }) => CellPlanetMorphStreamingPageComponent,
       ),
   },
+  {
+    path: 'cell-planet-morph-streaming-lib',
+    loadComponent: () =>
+      import(
+        './pages/cell-planet-morph-streaming-lib/cell-planet-morph-streaming-lib-page.component'
+      ).then(
+        ({ CellPlanetMorphStreamingLibPageComponent }) => CellPlanetMorphStreamingLibPageComponent,
+      ),
+  },
 ];
