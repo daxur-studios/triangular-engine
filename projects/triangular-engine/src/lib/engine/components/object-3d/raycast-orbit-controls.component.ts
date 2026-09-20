@@ -2,6 +2,7 @@ import { Component, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Camera, MOUSE, Object3D, Raycaster, Vector2, Vector3, Vector3Tuple } from 'three';
 
+import { AdvancedOrbitControls } from '../../models';
 import { OrbitControlsComponent } from './orbit-controls.component';
 import { RaycastService } from './raycast';
 
@@ -23,6 +24,8 @@ export type RaycastFocusResolver = (
 
 /** Ignore distance ratios close enough to one that they are only floating-point noise. */
 const ZOOM_RATIO_EPSILON = 1e-6;
+/** Keep the camera just above the surface point used by a zoom interaction. */
+const DEFAULT_SURFACE_CLEARANCE_M = 0.5;
 /** Smooth, short pivot handoff applied as a rotate gesture begins. */
 const DEFAULT_ROTATE_HANDOFF_DURATION_S = 0.18;
 
@@ -56,6 +59,8 @@ export class RaycastOrbitControlsComponent extends OrbitControlsComponent {
   readonly raycastFocusResolver = input<RaycastFocusResolver>();
   /** Whether wheel/pinch dolly shifts the pivot toward the current pointer focus. */
   readonly zoomToCursor = input(true);
+  /** Minimum camera-to-surface distance while zooming toward a resolved terrain hit. */
+  readonly surfaceClearanceM = input(DEFAULT_SURFACE_CLEARANCE_M);
   /** Whether a rotate gesture first shifts its pivot toward the current pointer focus. */
   readonly rotateToCursor = input(true);
   /** Action bound to primary (left) mouse button. Defaults to none so placement/select UIs retain it. */
@@ -73,12 +78,21 @@ export class RaycastOrbitControlsComponent extends OrbitControlsComponent {
   readonly #raycast = inject(RaycastService);
   #rotateLockHandoff: { readonly fromTarget: Vector3; readonly toTarget: Vector3; elapsedS: number } | null = null;
   #lastDistanceToTargetM: number | null = null;
+  #cursorIsSurfaceHit = false;
+  readonly #activePointerIds = new Set<number>();
+  #pendingZoom: {
+    readonly fromCamera: Vector3;
+    readonly fromTarget: Vector3;
+    readonly focusPoint: Vector3;
+    readonly surfaceHit: boolean;
+  } | null = null;
 
   constructor() {
     super();
     this.#initExternalPoseChanges();
     this.#initMouseButtons();
     this.#initCursorTracking();
+    this.#initWheelCapture();
     this.#initRotateTowardCursor();
     this.#initZoomAnchorCompensation();
   }
@@ -99,6 +113,8 @@ export class RaycastOrbitControlsComponent extends OrbitControlsComponent {
       this.#lastDistanceToTargetM = null;
       this.#rotateLockHandoff = null;
       this.#cursorPositionM.set(null);
+      this.#cursorIsSurfaceHit = false;
+      this.#pendingZoom = null;
     });
   }
 
@@ -116,6 +132,45 @@ export class RaycastOrbitControlsComponent extends OrbitControlsComponent {
     this.engineService.mousemove$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(
       (event) => this.#updateCursorPosition(event),
     );
+    this.engineService.wheel$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(
+      (event) => this.#beginWheelZoom(event),
+    );
+  }
+
+  /** Capture on the actual OrbitControls element so this runs before its dolly listeners. */
+  #initWheelCapture(): void {
+    effect((onCleanup) => {
+      const orbit = this.orbitControls();
+      if (!orbit) return;
+      const domElement = orbit.domElement;
+      if (!domElement) return;
+
+      const onWheel = (event: Event) => this.#beginWheelZoom(event as WheelEvent);
+      const onPointerDown = (event: Event) => {
+        this.#activePointerIds.add((event as PointerEvent).pointerId);
+      };
+      const onPointerMove = (event: Event) => {
+        if (this.#activePointerIds.size >= 2) {
+          this.#beginWheelZoom(event as PointerEvent);
+        }
+      };
+      const onPointerUp = (event: Event) => {
+        this.#activePointerIds.delete((event as PointerEvent).pointerId);
+      };
+      domElement.addEventListener('wheel', onWheel, { capture: true });
+      domElement.addEventListener('pointerdown', onPointerDown, { capture: true });
+      domElement.addEventListener('pointermove', onPointerMove, { capture: true });
+      domElement.addEventListener('pointerup', onPointerUp, { capture: true });
+      domElement.addEventListener('pointercancel', onPointerUp, { capture: true });
+      onCleanup(() => {
+        domElement.removeEventListener('wheel', onWheel, { capture: true });
+        domElement.removeEventListener('pointerdown', onPointerDown, { capture: true });
+        domElement.removeEventListener('pointermove', onPointerMove, { capture: true });
+        domElement.removeEventListener('pointerup', onPointerUp, { capture: true });
+        domElement.removeEventListener('pointercancel', onPointerUp, { capture: true });
+        this.#activePointerIds.clear();
+      });
+    });
   }
 
   #updateCursorPosition(event: MouseEvent | null): void {
@@ -127,6 +182,7 @@ export class RaycastOrbitControlsComponent extends OrbitControlsComponent {
     const resolved = this.raycastFocusResolver()?.({ raycaster, camera: this.engineService.camera, ndc, sceneChildren: this.engineService.scene.children });
     if (resolved) {
       this.#cursorPositionM.set(resolved instanceof Vector3 ? resolved.toArray() : resolved);
+      this.#cursorIsSurfaceHit = true;
       return;
     }
     const orbit = this.orbitControls();
@@ -134,6 +190,35 @@ export class RaycastOrbitControlsComponent extends OrbitControlsComponent {
     const fallback = new Vector3();
     raycaster.ray.at(orbit.target.distanceTo(this.internalCamera.position), fallback);
     this.#cursorPositionM.set(fallback.toArray() as Vector3Tuple);
+    this.#cursorIsSurfaceHit = false;
+  }
+
+  /**
+   * Wheel events are the start of a new zoom interaction. Re-sample the ray
+   * here instead of relying on the last mousemove: terrain LOD and morphing
+   * can change the hit while the pointer remains still.
+   */
+  #beginWheelZoom(event: WheelEvent | PointerEvent | null): void {
+    if (!event || !this.isActive() || !this.zoomToCursor()) return;
+
+    // The native capture listener has already sampled this wheel when the
+    // engine's wrapper-level wheel event bubbles to this subscriber.
+    if (this.#pendingZoom) return;
+
+    this.#updateCursorPosition(event);
+    const orbit = this.orbitControls();
+    const cursor = this.#cursorPositionM();
+    if (!orbit || !cursor) return;
+
+    // The OrbitControls wheel listener applies its dolly synchronously after
+    // this event is published. Keep the pose from before that dolly so the
+    // next tick can rebase the result from this interaction's hit point.
+    this.#pendingZoom = {
+      fromCamera: this.internalCamera.position.clone(),
+      fromTarget: orbit.target.clone(),
+      focusPoint: new Vector3(...cursor),
+      surfaceHit: this.#cursorIsSurfaceHit,
+    };
   }
 
   #initRotateTowardCursor(): void {
@@ -179,6 +264,15 @@ export class RaycastOrbitControlsComponent extends OrbitControlsComponent {
         this.#lastDistanceToTargetM = null;
         return;
       }
+
+      const pendingZoom = this.#pendingZoom;
+      if (pendingZoom) {
+        this.#pendingZoom = null;
+        this.#applyWheelZoomRebase(orbit, pendingZoom);
+        this.#lastDistanceToTargetM = this.internalCamera.position.distanceTo(orbit.target);
+        return;
+      }
+
       const distanceM = this.internalCamera.position.distanceTo(orbit.target);
       const previousDistanceM = this.#lastDistanceToTargetM;
       this.#lastDistanceToTargetM = distanceM;
@@ -189,6 +283,54 @@ export class RaycastOrbitControlsComponent extends OrbitControlsComponent {
       if (!cursor) return;
       this.#steerTargetTowards(orbit.target, new Vector3(...cursor), 1 - ratio);
     });
+  }
+
+  /**
+   * Rebase one wheel interaction from its current hit instead of carrying an
+   * old pivot forward. The invariant is that the current raycast hit, not a
+   * historical invisible point, controls the next zoom step.
+   */
+  #applyWheelZoomRebase(
+    orbit: AdvancedOrbitControls,
+    pendingZoom: {
+      readonly fromCamera: Vector3;
+      readonly fromTarget: Vector3;
+      readonly focusPoint: Vector3;
+      readonly surfaceHit: boolean;
+    },
+  ): void {
+    const fromTargetDistance = pendingZoom.fromCamera.distanceTo(pendingZoom.fromTarget);
+    if (fromTargetDistance <= 0) return;
+
+    const currentTargetDistance = this.internalCamera.position.distanceTo(pendingZoom.fromTarget);
+    if (!Number.isFinite(currentTargetDistance)) return;
+
+    const rawRatio = currentTargetDistance / fromTargetDistance;
+    if (!Number.isFinite(rawRatio)) return;
+
+    let ratio = rawRatio;
+    if (pendingZoom.surfaceHit) {
+      const hitDistance = pendingZoom.fromCamera.distanceTo(pendingZoom.focusPoint);
+      const clearance = Math.max(0, this.surfaceClearanceM());
+      if (hitDistance > 0 && Number.isFinite(hitDistance)) {
+        ratio = Math.max(ratio, clearance / hitDistance);
+      }
+    }
+
+    if (Math.abs(ratio - 1) >= ZOOM_RATIO_EPSILON) {
+      // This construction keeps the camera on the same side of the hit as
+      // the pre-dolly pose and scales its distance from the actual surface.
+      orbit.target.copy(pendingZoom.fromTarget).lerp(pendingZoom.focusPoint, 1 - ratio);
+      this.internalCamera.position.copy(pendingZoom.focusPoint)
+        .addScaledVector(pendingZoom.fromCamera.clone().sub(pendingZoom.focusPoint), ratio);
+    }
+
+    // The next logarithmic wheel step must use the current surface distance,
+    // never the distance to a stale orbit target.
+    const zoomReferenceDistance = pendingZoom.surfaceHit
+      ? this.internalCamera.position.distanceTo(pendingZoom.focusPoint)
+      : this.internalCamera.position.distanceTo(orbit.target);
+    orbit.zoomSpeed = Math.log(Math.max(0, zoomReferenceDistance) + 1);
   }
 
   /** Moves pivot and camera together so a cursor-focused dolly preserves the newly produced orbit geometry. */

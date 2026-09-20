@@ -12,7 +12,14 @@ import {
   RaycastFocusContext,
   RaycastOrbitControlsComponent,
 } from 'triangular-engine';
-import { DoubleSide, MeshStandardMaterial, Vector3 } from 'three';
+import {
+  BatchedMesh,
+  Box3,
+  DoubleSide,
+  Matrix4,
+  MeshStandardMaterial,
+  Vector3,
+} from 'three';
 import {
   ITerrainField,
   ITerrainFieldSample,
@@ -59,6 +66,14 @@ interface QualityPreset {
   readonly maxPatches: number;
   readonly reduction: number;
 }
+
+interface MorphRaycastBounds {
+  readonly bounds: Box3;
+}
+
+type MorphRaycastAttribute =
+  | import('three').BufferAttribute
+  | import('three').InterleavedBufferAttribute;
 
 const QUALITY_PRESETS: Readonly<Record<Quality, QualityPreset>> = {
   standard: {
@@ -224,6 +239,28 @@ export class CellPlanetMorphStreamingPageComponent {
     levels: {},
   });
 
+  /**
+   * The morph material does not use BatchedMesh's `position` attribute for
+   * rendering: it mixes `aSpherePos` and `aFlatPos` in the vertex shader.
+   * Keep the CPU-side raycast cache tied to the same morph and resident-patch
+   * revision so it cannot keep returning a hit on the invisible sphere.
+   */
+  private morphRaycastSurfaceRevision = 0;
+  private morphRaycastCacheMorph = Number.NaN;
+  private morphRaycastCacheRevision = -1;
+  private morphRaycastBounds = new WeakMap<
+    BatchedMesh,
+    Map<number, MorphRaycastBounds>
+  >();
+  private readonly morphRaycastInstanceMatrix = new Matrix4();
+  private readonly morphRaycastWorldMatrix = new Matrix4();
+  private readonly morphRaycastA = new Vector3();
+  private readonly morphRaycastB = new Vector3();
+  private readonly morphRaycastC = new Vector3();
+  private readonly morphRaycastHit = new Vector3();
+  private readonly morphRaycastClosestHit = new Vector3();
+  private readonly morphRaycastWorldBounds = new Box3();
+
   readonly timings = signal<
     CellPlanetMorphWorkerTimings & { readonly workerMs: number }
   >({
@@ -257,12 +294,198 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly terrainRaycastFocus = (
     context: RaycastFocusContext,
   ): Vector3 | null => {
+    const morph = this.morphProgress();
+    if (morph > 1e-6) {
+      // The generic Three.js raycast reads `position`, which is deliberately
+      // kept as the sphere position by the streaming worker. At any non-zero
+      // morph that is not the surface drawn by the shader, so raycast the
+      // morphed batch attributes directly instead.
+      const morphedHit = this.raycastMorphedTerrain(context, morph);
+      if (morphedHit) return morphedHit;
+
+      // Do not fall back to the sphere hit: that would reintroduce the
+      // invisible/stale zoom plane this resolver is responsible for avoiding.
+      return null;
+    }
+
     const hit = context.raycaster.intersectObjects(
       context.sceneChildren as unknown as import('three').Object3D[],
       true,
     )[0];
     return hit?.point ?? null;
   };
+
+  private raycastMorphedTerrain(
+    context: RaycastFocusContext,
+    morph: number,
+  ): Vector3 | null {
+    if (
+      morph !== this.morphRaycastCacheMorph ||
+      this.morphRaycastSurfaceRevision !== this.morphRaycastCacheRevision
+    ) {
+      this.morphRaycastCacheMorph = morph;
+      this.morphRaycastCacheRevision = this.morphRaycastSurfaceRevision;
+      this.morphRaycastBounds = new WeakMap();
+    }
+
+    let closestDistanceSq = Number.POSITIVE_INFINITY;
+    let hasHit = false;
+    const ray = context.raycaster.ray;
+
+    const visit = (object: import('three').Object3D): void => {
+      if (!object.visible) return;
+      if ((object as { isBatchedMesh?: boolean }).isBatchedMesh) {
+        const mesh = object as BatchedMesh;
+        const geometry = mesh.geometry;
+        const spherePositions = geometry.getAttribute('aSpherePos');
+        const flatPositions = geometry.getAttribute('aFlatPos');
+        const index = geometry.index;
+        if (!spherePositions || !flatPositions || !index) return;
+
+        mesh.updateMatrixWorld(true);
+        const boundsByGeometry = this.getMorphedGeometryBounds(
+          mesh,
+          spherePositions,
+          flatPositions,
+          morph,
+        );
+
+        for (let instanceId = 0; instanceId < mesh.instanceCount; instanceId++) {
+          if (!mesh.getVisibleAt(instanceId)) continue;
+          const geometryId = mesh.getGeometryIdAt(instanceId);
+          const bounds = boundsByGeometry.get(geometryId);
+          const range = mesh.getGeometryRangeAt(geometryId);
+          if (!bounds || !range) continue;
+
+          mesh.getMatrixAt(instanceId, this.morphRaycastInstanceMatrix);
+          this.morphRaycastWorldMatrix.multiplyMatrices(
+            mesh.matrixWorld,
+            this.morphRaycastInstanceMatrix,
+          );
+          this.morphRaycastWorldBounds
+            .copy(bounds.bounds)
+            .applyMatrix4(this.morphRaycastWorldMatrix);
+          if (!ray.intersectsBox(this.morphRaycastWorldBounds)) continue;
+
+          const indexEnd = range.indexStart + range.indexCount;
+          for (let i = range.indexStart; i < indexEnd; i += 3) {
+            const ia = index.getX(i);
+            const ib = index.getX(i + 1);
+            const ic = index.getX(i + 2);
+            this.readMorphedPosition(
+              spherePositions,
+              flatPositions,
+              ia,
+              morph,
+              this.morphRaycastA,
+            ).applyMatrix4(this.morphRaycastWorldMatrix);
+            this.readMorphedPosition(
+              spherePositions,
+              flatPositions,
+              ib,
+              morph,
+              this.morphRaycastB,
+            ).applyMatrix4(this.morphRaycastWorldMatrix);
+            this.readMorphedPosition(
+              spherePositions,
+              flatPositions,
+              ic,
+              morph,
+              this.morphRaycastC,
+            ).applyMatrix4(this.morphRaycastWorldMatrix);
+
+            const hit = ray.intersectTriangle(
+              this.morphRaycastA,
+              this.morphRaycastB,
+              this.morphRaycastC,
+              false,
+              this.morphRaycastHit,
+            );
+            if (!hit) continue;
+            const distanceSq = ray.origin.distanceToSquared(hit);
+            if (distanceSq < closestDistanceSq) {
+              closestDistanceSq = distanceSq;
+              this.morphRaycastClosestHit.copy(hit);
+              hasHit = true;
+            }
+          }
+        }
+        return;
+      }
+
+      for (const child of object.children) visit(child);
+    };
+
+    const sceneChildren = context.sceneChildren as unknown as import('three').Object3D[];
+    for (const child of sceneChildren) {
+      visit(child);
+    }
+
+    return hasHit ? this.morphRaycastClosestHit.clone() : null;
+  }
+
+  private getMorphedGeometryBounds(
+    mesh: BatchedMesh,
+    spherePositions: MorphRaycastAttribute,
+    flatPositions: MorphRaycastAttribute,
+    morph: number,
+  ): Map<number, MorphRaycastBounds> {
+    let boundsByGeometry = this.morphRaycastBounds.get(mesh);
+    if (!boundsByGeometry) {
+      boundsByGeometry = new Map();
+      this.morphRaycastBounds.set(mesh, boundsByGeometry);
+    }
+
+    const geometryIds = new Set<number>();
+    for (let instanceId = 0; instanceId < mesh.instanceCount; instanceId++) {
+      if (mesh.getVisibleAt(instanceId)) {
+        geometryIds.add(mesh.getGeometryIdAt(instanceId));
+      }
+    }
+
+    for (const geometryId of geometryIds) {
+      if (boundsByGeometry.has(geometryId)) continue;
+      const range = mesh.getGeometryRangeAt(geometryId);
+      if (!range) continue;
+
+      const bounds = new Box3().makeEmpty();
+      const end = range.vertexStart + range.vertexCount;
+      for (let vertex = range.vertexStart; vertex < end; vertex++) {
+        this.readMorphedPosition(
+          spherePositions,
+          flatPositions,
+          vertex,
+          morph,
+          this.morphRaycastA,
+        );
+        bounds.expandByPoint(this.morphRaycastA);
+      }
+      boundsByGeometry.set(geometryId, {
+        bounds,
+      });
+    }
+
+    return boundsByGeometry;
+  }
+
+  private readMorphedPosition(
+    spherePositions: MorphRaycastAttribute,
+    flatPositions: MorphRaycastAttribute,
+    index: number,
+    morph: number,
+    target: Vector3,
+  ): Vector3 {
+    const inverseMorph = 1 - morph;
+    target.set(
+      spherePositions.getX(index) * inverseMorph +
+        flatPositions.getX(index) * morph,
+      spherePositions.getY(index) * inverseMorph +
+        flatPositions.getY(index) * morph,
+      spherePositions.getZ(index) * inverseMorph +
+        flatPositions.getZ(index) * morph,
+    );
+    return target;
+  }
 
   /**
    * Stable patch selector reference: does NOT recreate on every morph tick!
@@ -816,6 +1039,10 @@ export class CellPlanetMorphStreamingPageComponent {
   }
 
   onLodChange(stats: ITerrainSurfaceLodStats): void {
+    // TerrainSurface emits only when resident geometry changes. Invalidate
+    // morphed bounds at that boundary so reused BatchedMesh ranges are never
+    // tested against bounds from a previous dynamic-LOD patch.
+    this.morphRaycastSurfaceRevision++;
     this.stats.set(stats);
   }
 
