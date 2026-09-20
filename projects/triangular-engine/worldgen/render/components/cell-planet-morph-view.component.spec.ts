@@ -329,7 +329,7 @@ describe('CellPlanetMorphViewComponent', () => {
     });
 
     expect(hit).not.toBeNull();
-    expect(hit?.z).toBeCloseTo(0.1, 2);
+    expect(Array.isArray(hit) ? hit[2] : hit?.z).toBeCloseTo(0.1, 2);
     fixture.destroy();
   });
 

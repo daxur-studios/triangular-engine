@@ -254,6 +254,9 @@ Dependency: L3–L5 and their review criteria.
   shared renderer lifecycle, diagnostics, queries and public entry points. Keep optional
   Meshoptimizer isolated. Physics, persistent caching, building edits and more geology
   remain follow-on work unless needed for an explicit failed criterion.
+  - Draft ahead of this milestone: [`039_cell_terrain_app_integration_contract.md`](039_cell_terrain_app_integration_contract.md)
+    (2026-09-20) — engine-provided vs consumer-supplied, the five footguns, and a
+    verification checklist. Fold/correct it here when L6 lands.
 - Remove old implementations only in separately scoped cleanup after comparison acceptance.
 
 User check: one short repeatable acceptance tour; record supported scale/zoom/quality and

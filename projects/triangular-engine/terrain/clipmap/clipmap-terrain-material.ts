@@ -1,4 +1,5 @@
 import { ShaderMaterial, Vector3, Vector4 } from 'three';
+import { TERRAIN_MACRO_VARIATION_GLSL } from '../materials/terrain-macro-variation-material';
 import { BENCHMARK_TERRAIN_GLSL } from './clipmap-benchmark-fixtures';
 
 /**
@@ -347,20 +348,6 @@ const FRAGMENT_SHADER_BODY = `
     return mix(colors[i0], colors[i1], fract(t));
   }
 
-  // A low-frequency, planet-space breakup signal. The second sample uses a
-  // rotated coordinate basis so the two scales do not form an obvious grid.
-  // The coordinates are world X/Z on the plane and can become a planet-space
-  // direction in the spherical adapter without depending on mesh UVs.
-  float terrainMacroVariation(vec2 xz) {
-    float scaleM = max(uMacroVariationScaleM, 1.0);
-    vec2 broadP = xz / scaleM + vec2(17.3, -9.1);
-    mat2 rotate = mat2(0.8, -0.6, 0.6, 0.8);
-    vec2 breakupP = rotate * (xz / (scaleM * 1.73)) + vec2(-23.1, 5.7);
-    float broad = terrainValueNoise(broadP);
-    float breakup = terrainValueNoise(breakupP);
-    return mix(broad, breakup, 0.35);
-  }
-
   void main() {
     vec3 lightDir = normalize(vec3(0.5, 0.8, 0.3));
     float diffuse = 1.0;
@@ -390,7 +377,7 @@ const FRAGMENT_SHADER_BODY = `
     vec3 base = uShowLevelTint ? levelTint(vContinuousLevel) : mapBase;
 
     if (!uShowLevelTint && uMacroVariationEnabled && uUseColorMap) {
-      float signedVariation = (terrainMacroVariation(vWorldPos.xz) - 0.5) * 2.0;
+      float signedVariation = (terrainMacroVariation3(vec3(vWorldPos.x, 0.0, vWorldPos.z), uMacroVariationScaleM) - 0.5) * 2.0;
       // The first material pass has a colour map rather than a packed weight
       // map. These conservative colour heuristics keep macro breakup on land,
       // while avoiding dirtying blue water or whitening/darkening snow.
@@ -421,7 +408,10 @@ export function createClipmapTerrainMaterial(): ShaderMaterial {
   return new ShaderMaterial({
     vertexShader: BENCHMARK_TERRAIN_GLSL + TERRAIN_HEIGHT_GLSL + VERTEX_SHADER_BODY,
     fragmentShader:
-      BENCHMARK_TERRAIN_GLSL + TERRAIN_HEIGHT_GLSL + FRAGMENT_SHADER_BODY,
+      TERRAIN_MACRO_VARIATION_GLSL +
+      BENCHMARK_TERRAIN_GLSL +
+      TERRAIN_HEIGHT_GLSL +
+      FRAGMENT_SHADER_BODY,
     uniforms: {
       uCameraWorldPos: { value: new Vector3() },
       uBaseTileSizeM: { value: 0 },

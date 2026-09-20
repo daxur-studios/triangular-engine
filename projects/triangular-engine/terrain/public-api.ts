@@ -5,6 +5,7 @@ export * from './core/terrain-math';
 export * from './core/terrain-patch';
 export * from './core/terrain-surface-sample';
 export * from './materials/terrain-material';
+export * from './materials/terrain-macro-variation-material';
 export * from './domains/terrain-surface-domain';
 export * from './domains/plane-terrain-domain';
 export * from './domains/plane-terrain-selection';

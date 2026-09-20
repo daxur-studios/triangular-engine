@@ -43,7 +43,12 @@ import {
   type IDynamicProjectionUniforms,
   type MapProjectionKind,
 } from 'triangular-engine/worldgen/render';
-import { evaluateTerrainMaterial, terrainMaterialColorRgb } from 'triangular-engine/terrain';
+import {
+  enableTerrainMacroVariation,
+  evaluateTerrainMaterial,
+  terrainMaterialColorRgb,
+  type ITerrainMacroVariationUniforms,
+} from 'triangular-engine/terrain';
 import type { IVec3, WorldProfileKind } from 'triangular-engine/worldgen';
 import {
   CELL_PLANET_U0_FIXTURE,
@@ -282,10 +287,10 @@ export class CellPlanetMorphStreamingPageComponent {
     uProjectionType: { value: 1 },
   };
 
-  private readonly macroUniforms = {
-    enabled: { value: 1 },
-    strength: { value: 0.35 },
-    scaleM: { value: 48 },
+  private readonly macroUniforms: ITerrainMacroVariationUniforms = {
+    uTerrainMacroEnabled: { value: 1 },
+    uTerrainMacroStrength: { value: 0.35 },
+    uTerrainMacroScaleM: { value: 48 },
   };
 
   readonly getKey = addressKey;
@@ -618,76 +623,11 @@ export class CellPlanetMorphStreamingPageComponent {
       vertexColors: true,
     });
 
-    const previousOnBeforeCompile = material.onBeforeCompile.bind(material);
-    const previousCacheKey = material.customProgramCacheKey.bind(material);
-    material.onBeforeCompile = (shader, renderer) => {
-      previousOnBeforeCompile(shader, renderer);
-      shader.uniforms['uTerrainMacroEnabled'] = this.macroUniforms.enabled;
-      shader.uniforms['uTerrainMacroStrength'] = this.macroUniforms.strength;
-      shader.uniforms['uTerrainMacroScaleM'] = this.macroUniforms.scaleM;
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-            attribute float terrainMacroLandFactor;
-            varying vec3 vTerrainMacroPositionM;
-            varying float vTerrainMacroLandFactor;`,
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-            vTerrainMacroPositionM = (modelMatrix * vec4(transformed, 1.0)).xyz;
-            vTerrainMacroLandFactor = terrainMacroLandFactor;`,
-        );
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-            uniform float uTerrainMacroEnabled;
-            uniform float uTerrainMacroStrength;
-            uniform float uTerrainMacroScaleM;
-            varying vec3 vTerrainMacroPositionM;
-            varying float vTerrainMacroLandFactor;
-
-            float terrainMacroHash3(vec3 p) {
-              return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
-            }
-
-            float terrainMacroValueNoise3(vec3 p) {
-              vec3 i = floor(p);
-              vec3 f = fract(p);
-              f = f * f * (3.0 - 2.0 * f);
-              float x00 = mix(terrainMacroHash3(i), terrainMacroHash3(i + vec3(1.0, 0.0, 0.0)), f.x);
-              float x10 = mix(terrainMacroHash3(i + vec3(0.0, 1.0, 0.0)), terrainMacroHash3(i + vec3(1.0, 1.0, 0.0)), f.x);
-              float x01 = mix(terrainMacroHash3(i + vec3(0.0, 0.0, 1.0)), terrainMacroHash3(i + vec3(1.0, 0.0, 1.0)), f.x);
-              float x11 = mix(terrainMacroHash3(i + vec3(0.0, 1.0, 1.0)), terrainMacroHash3(i + vec3(1.0, 1.0, 1.0)), f.x);
-              return mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
-            }
-
-            float terrainMacroVariation3(vec3 positionM) {
-              float scale = max(uTerrainMacroScaleM, 1.0);
-              vec3 broad = positionM / scale + vec3(17.3, -9.1, 4.7);
-              vec3 breakup = vec3(
-                (0.8 * positionM.x - 0.6 * positionM.z) / (scale * 1.73) - 23.1,
-                positionM.y / (scale * 1.73) + 5.7,
-                (0.6 * positionM.x + 0.8 * positionM.z) / (scale * 1.73) + 11.9
-              );
-              return terrainMacroValueNoise3(broad) * 0.65 + terrainMacroValueNoise3(breakup) * 0.35;
-            }`,
-        )
-        .replace(
-          '#include <color_fragment>',
-          `#include <color_fragment>
-            if (uTerrainMacroEnabled > 0.5) {
-              float signedVariation = (terrainMacroVariation3(vTerrainMacroPositionM) - 0.5) * 2.0;
-              vec3 warmVariation = 1.0 + signedVariation * vec3(0.12, 0.09, 0.055);
-              float amount = clamp(uTerrainMacroStrength, 0.0, 1.0) * clamp(vTerrainMacroLandFactor, 0.0, 1.0);
-              diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * warmVariation, amount);
-            }`,
-        );
-    };
-    material.customProgramCacheKey = () =>
-      `${previousCacheKey()}-cell-planet-material-macro-v1`;
+    enableTerrainMacroVariation(material, this.macroUniforms, {
+      // The demo has always broken up the *visible* (morphed) surface, so keep
+      // view space here; the main-game switch uses the morph-stable default.
+      positionSpace: 'viewM',
+    });
     enablePlanetMorphProjection(material, this.morphUniforms);
     return material;
   };
@@ -758,13 +698,16 @@ export class CellPlanetMorphStreamingPageComponent {
     });
 
     effect(() => {
-      this.macroUniforms.enabled.value =
+      this.macroUniforms.uTerrainMacroEnabled.value =
         this.colourMode() === 'material' && this.macroVariationEnabled() ? 1 : 0;
-      this.macroUniforms.strength.value = Math.max(
+      this.macroUniforms.uTerrainMacroStrength.value = Math.max(
         0,
         Math.min(1, this.macroVariationStrength()),
       );
-      this.macroUniforms.scaleM.value = Math.max(1, this.macroVariationScaleM());
+      this.macroUniforms.uTerrainMacroScaleM.value = Math.max(
+        1,
+        this.macroVariationScaleM(),
+      );
     });
   }
 
