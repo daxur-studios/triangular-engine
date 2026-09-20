@@ -2,6 +2,15 @@
 
 ## Status and ownership
 
+**Superseded for current status (2026-09-20):** the 2.5D map's live state is now tracked in
+[035 — Unified cell terrain delivery](035_unified_cell_terrain_delivery.md)'s "Verified
+starting point" table (2026-09-19). This document is retained as implementation history for
+the clipmap-era planar adapter; do not read it as the current plan. Note also that the
+"Simplification experiment" entry below predates Meshoptimizer becoming the preferred
+streaming/LOD approach (see [031](031_shared_planet_terrain_chunks.md) and 035) — at the time
+it was written, Meshoptimizer was an experimental runtime toggle on top of the clipmap, not
+the canonical path.
+
 - **2026-09-16: integration slice exists; map-specific M2–M4 acceptance and chunk-path
   adoption remain pending.** See [034 — Cell planet map roadmap](034_cell_planet_map_roadmap.md)
   for the cross-project order of work.

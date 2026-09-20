@@ -2,6 +2,13 @@
 
 ## Status and ownership
 
+**Superseded for current status (2026-09-20):** the fixed cell globe's live state is now
+tracked in [035 — Unified cell terrain delivery](035_unified_cell_terrain_delivery.md)'s
+"Verified starting point" table (2026-09-19), which records it as "shared sampler at fixed
+mesh resolution... missing: camera-driven local refinement." This document is retained for
+its debugging/case-study content (the index-buffer-undersized root cause below); do not read
+its status section as current.
+
 - **2026-09-16: fixed-resolution prototype and automated geometry checks are complete;
   production spherical chunk LOD remains pending.** See [034 — Cell planet map roadmap](034_cell_planet_map_roadmap.md)
   and [031 — Shared terrain chunks](031_shared_planet_terrain_chunks.md).

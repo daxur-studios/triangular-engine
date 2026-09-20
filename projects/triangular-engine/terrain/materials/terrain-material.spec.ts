@@ -83,9 +83,18 @@ describe('terrain material evaluation', () => {
   it('converts the same semantic sample into a bounded shared stylized colour', () => {
     const sample = evaluateTerrainMaterial(query({ elevationM: 1000, slope01: 0.8 }));
     const color = terrainMaterialColorRgb(sample);
+    const lavaLandColor = terrainMaterialColorRgb(sample, {
+      oceanSubstance: 'lava',
+    });
+    const waterSample = evaluateTerrainMaterial(query({ elevationM: -900 }));
+    const waterColor = terrainMaterialColorRgb(waterSample);
+    const lavaWaterColor = terrainMaterialColorRgb(waterSample, {
+      oceanSubstance: 'lava',
+    });
 
     expect(color.every((channel) => channel >= 0 && channel <= 1)).toBe(true);
-    expect(terrainMaterialColorRgb(sample, { oceanSubstance: 'lava' })).not.toEqual(color);
+    expect(lavaLandColor).toEqual(color);
+    expect(lavaWaterColor).not.toEqual(waterColor);
   });
 
   it('provides deterministic world-space macro variation and keeps water unchanged', () => {

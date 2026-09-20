@@ -27,15 +27,9 @@ Its **L0–L6 plan, revised 2026-09-19**, replaces the earlier U0–U7 execution
 remain longer-term product goals. Existing work and user confirmations are retained; the
 new order brings integrated LOD and morph testing ahead of the remaining geology/water work.
 
-| Gate | What you should see and test | Status |
-| --- | --- | --- |
-| L0 — Shared inputs and baseline | Reuse the existing volcano/bookmarks; freeze world, terrain-style definition and comparison settings | Implemented; awaiting user test |
-| L1 — First integrated LOD | In the morph page, zoom toward the real volcano at 0%, 50%, 100%; see detail increase and compare simplification | Not started |
-| L2 — Global coverage and cost | Travel across patches, poles and the map cut while morphing; no gaps, bounded work, measured responsiveness | Not started |
-| L3 — All routes share it | 2.5D and globe use the same renderer endpoints; selection/settings survive navigation; moving projection tracking works | Not started |
-| L4 — Two terrain styles | Toggle blended / cell-features; review mountain/volcano/plain, then mesa, then canyon within their cells | Not started; existing volcano reused |
-| L5 — Actual rivers and shores | Inspect carved bed/banks/junction/mouth and shore detail with and without water, near/far and through morph | Not started; existing paths/carve reused |
-| L6 — Accepted integrated result | Repeat the tour for both styles and supported world sizes; stable performance/memory and documented game API | Not started |
+**Gate status (2026-09-20):** the L0–L6 gate table is no longer duplicated here — 035's own
+"Current handoff" section is the single live source (two copies of the same gate states will
+drift). As of this note: L0 implemented/awaiting user test, L1a next, L1–L6 not started.
 
 **Your review points:** a short visual review at each L gate (and each L4/L5 feature packet).
 You serve the app and perform browser checks. Agents first supply a reproducible
