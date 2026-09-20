@@ -7,7 +7,6 @@
 - `projects/triangular-engine/docs/` — user-facing library documentation.
 - `docs/runbook/` — design notes and implementation history for larger features.
 - `instructions/` — maintainer workflows and historical project notes.
-- `.cursor/skills/` — Cursor-specific task guidance; keep it aligned with the public API.
 - `.daxur/token-map.json` — repository token documentation manifest (see `docs/runbook/029_token_map_usage_guide.md`).
 
 ## First steps
