@@ -264,11 +264,23 @@ export class CellPlanetMorphStreamingPageComponent {
     const maxLevel = this.qualityConfig().maxLod;
     const baseRefinementDistance = radius * 4.2;
 
-    const selected: ILatLonTerrainPatchAddress[] = [];
+    interface Candidate {
+      readonly address: ILatLonTerrainPatchAddress;
+      readonly key: string;
+      readonly distance: number;
+      readonly threshold: number;
+      readonly canRefine: boolean;
+      readonly priority: number;
+    }
+
+    const maxPatches = Math.max(
+      request.roots.length,
+      Math.floor(request.maxPatches ?? Number.MAX_SAFE_INTEGER),
+    );
     const nextRefined = new Set<string>();
     const cam = request.cameraWorldM;
 
-    const visit = (address: ILatLonTerrainPatchAddress): void => {
+    const measure = (address: ILatLonTerrainPatchAddress): Candidate => {
       const level = address.level;
       const bounds = domain.getPatchBounds(address);
       const u = (bounds.minU + bounds.maxU) * 0.5;
@@ -305,23 +317,46 @@ export class CellPlanetMorphStreamingPageComponent {
         (baseRefinementDistance / Math.pow(2, level)) *
         (wasRefined ? 1.2 : 1.0);
 
-      const refine = level < maxLevel && dist < threshold;
-      if (refine) {
-        nextRefined.add(key);
-        for (const child of domain.getChildren(address)) {
-          visit(child);
-        }
-      } else {
-        selected.push(address);
-      }
+      return {
+        address,
+        key,
+        distance: dist,
+        threshold,
+        canRefine: level < maxLevel,
+        priority: threshold / Math.max(dist, 1),
+      };
     };
 
-    for (const root of request.roots) {
-      visit(root);
+    // Start with one resident patch per root, then spend the remaining budget
+    // on the most screen-relevant leaves. Replacing one leaf with four children
+    // costs three additional patches, so the result always stays within the
+    // configured maxPatches while remaining a complete quadtree cut.
+    const frontier = request.roots.map((root) => measure(root));
+    while (frontier.length < maxPatches) {
+      let bestIndex = -1;
+      let bestPriority = 1;
+      for (let index = 0; index < frontier.length; index += 1) {
+        const candidate = frontier[index];
+        if (!candidate.canRefine || candidate.distance >= candidate.threshold) {
+          continue;
+        }
+        if (candidate.priority > bestPriority) {
+          bestIndex = index;
+          bestPriority = candidate.priority;
+        }
+      }
+
+      if (bestIndex < 0) break;
+
+      const [parent] = frontier.splice(bestIndex, 1);
+      nextRefined.add(parent.key);
+      for (const child of domain.getChildren(parent.address)) {
+        frontier.push(measure(child));
+      }
     }
 
     this.previousRefinedKeys = nextRefined;
-    return selected;
+    return frontier.map((candidate) => candidate.address);
   }
 
   readonly meshGenerator: TerrainSurfaceMeshGenerator<ILatLonTerrainPatchAddress> =
