@@ -40,7 +40,13 @@ import {
   CellPlanetMorphViewComponent,
   computeSunDirectionFromTime,
   elevationColor,
+  enablePlanetDayNightLighting,
+  enablePlanetMorphProjection,
+  evaluateSurfaceTransform,
+  IDynamicProjectionUniforms,
+  IPlanetDayNightUniforms,
   lavaOceanColor,
+  MAP_PROJECTIONS,
   MAP_PROJECTION_KINDS,
   MAP_PROJECTION_LABELS,
   MapProjectionKind,
@@ -50,7 +56,10 @@ import {
   ProjectionTrackingMode,
   temperatureColor,
 } from 'triangular-engine/worldgen/render';
-import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
+import {
+  CELL_PLANET_U0_FIXTURE,
+  getCellPlanetU0Bookmark,
+} from '../cell-planet-u0-fixture';
 import { CellPlanetWorldService } from '../cell-planet-world.service';
 import {
   CELL_PLANET_TERRAIN_STYLE_KINDS,

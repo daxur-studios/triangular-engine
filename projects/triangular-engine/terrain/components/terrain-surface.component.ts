@@ -674,13 +674,23 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     );
     geometry.setAttribute('normal', new BufferAttribute(surface.normals, 3));
     geometry.setAttribute('uv', new BufferAttribute(surface.uvs, 2));
-    const colors = this.createColors()?.({
-      address,
-      centerWorldM: patch.centerWorldM,
-      surface,
-      skirt,
-    });
+    const colors =
+      this.createColors()?.({
+        address,
+        centerWorldM: patch.centerWorldM,
+        surface,
+        skirt,
+      }) ?? surface.colors;
     if (colors) geometry.setAttribute('color', new BufferAttribute(colors, 3));
+    if (surface.attributes) {
+      for (const [name, attr] of Object.entries(surface.attributes)) {
+        if (attr instanceof Float32Array) {
+          geometry.setAttribute(name, new BufferAttribute(attr, 3));
+        } else if (attr && typeof attr === 'object' && 'array' in attr) {
+          geometry.setAttribute(name, new BufferAttribute(attr.array, attr.itemSize));
+        }
+      }
+    }
     geometry.setIndex(new BufferAttribute(surface.indices, 1));
     return geometry;
   }

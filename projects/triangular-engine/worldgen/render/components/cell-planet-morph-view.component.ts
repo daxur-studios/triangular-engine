@@ -110,6 +110,7 @@ export class CellPlanetMorphViewComponent
   readonly heightScale = input<number>(0.16);
   readonly seabedRelief = input<boolean>(true);
   readonly showOcean = input<boolean>(true);
+  readonly showTerrain = input<boolean>(true);
   readonly oceanSubstance = input<'water' | 'lava'>('water');
   readonly seaLevelElevation = input<number>(0);
 
@@ -321,6 +322,7 @@ export class CellPlanetMorphViewComponent
       this.heightScale();
       this.mapBorderClearance();
       const showOcean = this.showOcean();
+      const showTerrain = this.showTerrain();
 
       untracked(() => {
         this.dynamicUniforms.uMorph.value = Math.max(0, Math.min(1, morph));
@@ -329,6 +331,9 @@ export class CellPlanetMorphViewComponent
 
         if (this.oceanMesh) {
           this.oceanMesh.visible = showOcean;
+        }
+        if (this.terrainMesh) {
+          this.terrainMesh.visible = showTerrain;
         }
 
         const activeBasis = this.computeActiveBasis();
@@ -925,6 +930,7 @@ export class CellPlanetMorphViewComponent
     this.terrainMesh = new Mesh(this.terrainGeometryData.geometry, terrainMat);
     this.terrainMesh.name = 'morph-terrain';
     this.terrainMesh.renderOrder = 0;
+    this.terrainMesh.visible = this.showTerrain();
     this.object3D().add(this.terrainMesh);
 
     // Ocean shell

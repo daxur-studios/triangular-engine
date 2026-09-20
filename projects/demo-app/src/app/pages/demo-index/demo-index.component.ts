@@ -202,6 +202,19 @@ export const DEMOS: readonly DemoItem[] = [
       'Seamless animated transition between a 3D spherical planet and a 2.5D flat map (Equal Earth/Equirectangular) with live game units that adapt positions and surface orientation in real time.',
   },
   {
+    id: 'cell-planet-morph-streaming',
+    number: '02f',
+    title: 'Cell Planet Morph Streaming',
+    route: '/cell-planet-morph-streaming',
+    categoryId: 'terrain',
+    tier: 'lab',
+    createdAt: '2026-09-20',
+    entryPoints: ['terrain', 'worldgen'],
+    package: 'triangular-engine/terrain + worldgen/render',
+    description:
+      'Gap-free quadtree LOD chunk streaming with 2.5D flat map ↔ 3D sphere morphing. Features background Web Worker meshing, Meshoptimizer LockBorder simplification, dual edge conforming, and recognizable caldera volcano, crater, and mountains.',
+  },
+  {
     id: 'takram-clouds',
     number: '03',
     title: 'Takram Clouds',

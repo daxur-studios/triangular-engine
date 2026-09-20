@@ -1,0 +1,193 @@
+<scene [showFps]="true" [logarithmicDepthBuffer]="true">
+  <raycastOrbitControls
+    [cameraPosition]="cameraPosition()"
+    [target]="cameraTarget()"
+    [near]="1"
+    [far]="10000000"
+    [raycastFocusResolver]="terrainRaycastFocus"
+  />
+  <ambientLight [intensity]="1.2" />
+  <directionalLight [position]="[2500, 3500, 3000]" [intensity]="2.2" />
+  <directionalLight [position]="[-2000, -1000, -2000]" [intensity]="0.4" />
+
+  <terrainSurface
+    [field]="dummyField"
+    [domain]="domain()"
+    [roots]="roots()"
+    [maxLod]="qualityConfig().maxLod"
+    [resolution]="qualityConfig().resolution"
+    [generationBudget]="qualityConfig().budget"
+    [maxPatches]="qualityConfig().maxPatches"
+    [freezeLod]="freezeLod()"
+    [wireframe]="wireframe()"
+    [patchSelector]="patchSelector"
+    [meshGenerator]="meshGenerator"
+    [createMaterial]="createMaterial"
+    [colorRevision]="rebuildRevision()"
+    [getLevel]="getLevel"
+    [getKey]="getKey"
+    (lodChange)="onLodChange($event)"
+  />
+</scene>
+
+<aside class="panel" aria-label="Cell planet morph streaming controls">
+  <a routerLink="/">← Examples</a>
+  <h2>Cell Planet · Morphing Streaming</h2>
+  <p class="subtitle">
+    Gap-free quadtree LOD chunk streaming with 2.5D map ↔ 3D sphere morphing.
+  </p>
+
+  <div class="control-section">
+    <h3>Morph Transition</h3>
+    <div class="slider-row">
+      <span>Globe (0%)</span>
+      <input
+        type="range"
+        min="0"
+        max="1"
+        step="0.005"
+        [value]="morphProgress()"
+        (input)="setMorphProgress($event)"
+        (change)="onMorphSliderChange($event)"
+      />
+      <span>Map (100%)</span>
+    </div>
+    <div class="button-group">
+      <button
+        type="button"
+        [class.active]="morphProgress() === 0"
+        (click)="animateMorphTo(0)"
+      >
+        Globe
+      </button>
+      <button
+        type="button"
+        [class.active]="morphProgress() > 0 && morphProgress() < 1"
+        (click)="animateMorphTo(0.5)"
+      >
+        50%
+      </button>
+      <button
+        type="button"
+        [class.active]="morphProgress() === 1"
+        (click)="animateMorphTo(1)"
+      >
+        Flat Map
+      </button>
+      <button
+        type="button"
+        class="action-btn"
+        (click)="toggleMorph()"
+      >
+        Animate
+      </button>
+    </div>
+  </div>
+
+  <div class="control-section">
+    <h3>Cell Planet Features</h3>
+    <div class="button-group wrap">
+      @for (b of bookmarks; track b.id) {
+        <button
+          type="button"
+          [class.active]="activeBookmarkId() === b.id"
+          (click)="jumpToBookmark(b.id)"
+        >
+          {{ b.label }}
+        </button>
+      }
+    </div>
+  </div>
+
+  <div class="control-section">
+    <h3>Map Projection</h3>
+    <div class="button-group">
+      <button
+        type="button"
+        [class.active]="projectionKind() === 'equalEarth'"
+        (click)="setProjection('equalEarth')"
+      >
+        Equal Earth
+      </button>
+      <button
+        type="button"
+        [class.active]="projectionKind() === 'equirectangular'"
+        (click)="setProjection('equirectangular')"
+      >
+        Equirectangular
+      </button>
+    </div>
+  </div>
+
+  <div class="control-section">
+    <h3>Streaming Quality</h3>
+    <label>
+      <span>Preset</span>
+      <select [value]="quality()" (change)="setQuality($event)">
+        @for (opt of qualityOptions; track opt) {
+          <option [value]="opt">{{ opt }}</option>
+        }
+      </select>
+    </label>
+
+    <label>
+      <span>Mesh Reduction ({{ reductionPercent() }}%)</span>
+      <input
+        type="range"
+        min="0"
+        max="85"
+        step="5"
+        [value]="reductionPercent()"
+        (input)="setReduction($event)"
+      />
+    </label>
+
+    <label>
+      <span>Colours</span>
+      <select [value]="colourMode()" (change)="setColourMode($event)">
+        @for (mode of colourModes; track mode) {
+          <option [value]="mode">{{ mode }}</option>
+        }
+      </select>
+    </label>
+
+    <div class="button-group">
+      <button
+        type="button"
+        [class.active]="wireframe()"
+        (click)="toggleWireframe()"
+      >
+        Wireframe
+      </button>
+      <button
+        type="button"
+        [class.active]="freezeLod()"
+        (click)="toggleFreezeLod()"
+      >
+        Freeze LOD
+      </button>
+    </div>
+  </div>
+
+  <div class="control-section stats-section">
+    <h3>Telemetry & Diagnostics</h3>
+    <dl>
+      <dt>Resident Patches</dt>
+      <dd>{{ stats().resident }} / {{ stats().desired }} ({{ stats().queued }} queued)</dd>
+      <dt>Triangles</dt>
+      <dd>{{ stats().triangles.toLocaleString() }}</dd>
+      <dt>Draw Calls</dt>
+      <dd>{{ stats().drawCalls }}</dd>
+      <dt>Geometry Memory</dt>
+      <dd>{{ formatBytes(stats().geometryBytes) }}</dd>
+      <dt>LOD Cut</dt>
+      <dd class="monospace">{{ formatLevels(stats().levels) }}</dd>
+      <dt>Worker Meshing</dt>
+      <dd>{{ formatMs(timings().generationMs) }}</dd>
+      <dt>Meshoptimizer (LockBorder)</dt>
+      <dd>{{ formatMs(timings().simplificationMs) }}</dd>
+      <dt>Total Worker Roundtrip</dt>
+      <dd>{{ formatMs(timings().workerMs) }}</dd>
+    </dl>
+  </div>
+</aside>

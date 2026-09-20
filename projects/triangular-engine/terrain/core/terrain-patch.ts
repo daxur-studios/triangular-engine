@@ -18,12 +18,20 @@ export type TerrainPatchEdgeSegments = readonly [
   readonly ITerrainPatchEdgeSegment[],
 ];
 
+/** Custom vertex attribute for transferable patch geometry (e.g. dual morph positions). */
+export interface ITerrainPatchAttribute {
+  readonly array: Float32Array;
+  readonly itemSize: number;
+}
+
 /** Transferable patch geometry with no renderer or physics ownership. */
 export interface ITerrainPatchGeometry {
   positions: Float32Array;
   normals: Float32Array;
   uvs: Float32Array;
+  colors?: Float32Array;
   indices: TerrainPatchIndexArray;
+  attributes?: Readonly<Record<string, ITerrainPatchAttribute | Float32Array>>;
 }
 
 /** Patch-local mesh shared by visual and future collider consumers. */

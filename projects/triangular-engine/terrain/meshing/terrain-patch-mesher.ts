@@ -114,7 +114,7 @@ function normal(a: TerrainVector3, b: TerrainVector3): TerrainVector3 {
   return [x / length, y / length, z / length];
 }
 
-function createIndices(
+export function createIndices(
   resolution: number,
   vertexCount: number,
 ): TerrainPatchIndexArray {
@@ -141,7 +141,7 @@ function createIndices(
   return indices;
 }
 
-function conformPatchEdges(
+export function conformPatchEdges(
   positions: Float32Array,
   normals: Float32Array,
   resolution: number,
