@@ -78,6 +78,9 @@ export interface CellPlanetMorphMaterialTileRequest {
   readonly radius: number;
   readonly colorMode: 'material';
   readonly materialTileResolution: number;
+  readonly materialTileX: number;
+  readonly materialTileY: number;
+  readonly materialTileGrid: readonly [number, number];
   readonly worldProfile?: WorldProfileKind;
   readonly seed?: number;
 }
@@ -378,22 +381,28 @@ function buildMaterialTile(
   world: ReturnType<typeof getOrCreateWorld>,
   colorMode: CellPlanetMorphWorkerRequest['colorMode'],
   interiorSize: number,
+  tileX: number,
+  tileY: number,
+  tileGrid: readonly [number, number],
 ): ITerrainMaterialTilePayload | undefined {
   if (colorMode !== 'material') return undefined;
   const domain = new LatLonTerrainDomain(1, 4, 2);
+  const [gridX, gridY] = tileGrid;
   let previousCell: IPlanetGraphCell | null = null;
   return bakeTerrainMaterialTile(
     {
       worldRevision: cachedWorldKey,
-      address: { level: 0, x: 0, y: 0 },
+      address: { level: 1, x: tileX, y: tileY },
       styleRevision: 'cell-planet-material-v1',
       samplingVersion: 1,
       format: 'rgba8-linear',
     },
     {
       sample: (localU, localV) => {
-        const longitude = (localU - Math.floor(localU)) * Math.PI * 2 - Math.PI;
-        const latitude = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, localV * Math.PI - Math.PI / 2));
+        const globalU = (tileX + localU) / gridX;
+        const globalV = (tileY + localV) / gridY;
+        const longitude = (globalU - Math.floor(globalU)) * Math.PI * 2 - Math.PI;
+        const latitude = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, globalV * Math.PI - Math.PI / 2));
         const direction = domain.getFieldPosition({ level: 0, x: 0, y: 0 }, longitude, latitude);
         const dir3: IVec3 = { x: direction[0], y: direction[1], z: direction[2] };
         const sample = world.sampler.sample(dir3);
@@ -575,6 +584,9 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
         world,
         colorMode,
         data.materialTileResolution,
+        data.materialTileX,
+        data.materialTileY,
+        data.materialTileGrid,
       );
       const transferables: ArrayBuffer[] = [];
       if (materialTile) {

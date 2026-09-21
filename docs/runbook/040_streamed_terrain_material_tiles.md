@@ -385,6 +385,34 @@ implementing speculative systems. No new browser automation infrastructure.
 
 ## Progress
 
+### M3 bounded array implementation contract (2026-09-21)
+
+The next slice replaces the demo's four-region atlas, not its mesh LOD.
+Use 128-texel interiors with two sampled gutter texels, 128 RGBA8 array layers
+(8.51 MiB each CPU/GPU), and levels 0–10 of a unit-square quadtree. A 32×32
+RGBA32F directory maps directly to resident ancestors or to one of 128 sparse
+32×32 RGBA32F leaf tables (2 MiB each CPU/GPU). No dense level-10 table.
+Directory entries encode `(slot, level, x, y)`; a negative slot encodes a leaf
+table index. The CPU resolves ancestors. The shader performs one or two nearest
+mapping reads and one bilinear colour read, with no cell or ancestor search.
+The installed Three.js DataArrayTexture.addLayerUpdate path uploads individual
+layers through texSubImage3D; do not set needsUpdate without marking layers.
+
+Selection has an independent screen-space target, hysteresis, bounded traversal,
+and a bounded desired set including ancestors. One material request is in flight
+at a time. Root coverage is pinned; unused pages are LRU-evicted. World revisions
+discard stale completions; camera/geometry changes never invalidate material data.
+The slider controls screen-space detail, not an entire-world bake resolution.
+Initial array sampling deliberately uses level zero with bilinear filtering:
+this removes atlas/gutter derivative jumps, but filtered minification and smooth
+cross-LOD transitions remain an explicit M3 follow-up, not a completed seam gate.
+
+River-bed colouring belongs to M4's canonical river path/width/bank layer.
+Actual carved beds must use the same river definition in the height sampler;
+arbitrary interactive river authoring/carving is not implied by a colour overlay.
+User reports the random cell recolour stress test updates quickly; this is useful
+manual feedback, not a measured GPU performance gate.
+
 - **2026-09-20 — M1/M2 core slice:** added serializable tile identity and payload
   contracts, a linear-RGB RGBA8 baker with sampled gutters and CPU-generated
   mip levels, a byte-bounded pinned LRU cache, and a single-tile Three.js
@@ -416,3 +444,31 @@ implementing speculative systems. No new browser automation infrastructure.
   This remains a fixed global tile prototype: page-table indirection, local
   planetary tiles, visible-region selection and bounded GPU residency are still
   unfinished M3 work. Browser/GPU timing evidence remains pending.
+- **2026-09-21 — M3 regional refinement slice:** material mode now assembles a
+  fixed 2×2 regional atlas. Four small fallback pages are generated before the
+  atlas becomes visible; selected-resolution pages then update one region at a
+  time while the previous resident atlas remains bound. The worker samples each
+  region directly from the canonical surface rather than cropping the old global
+  image. This is still a demonstrator: camera-driven selection, arbitrary tile
+  depth, page-table indirection and bounded eviction remain unfinished.
+- **2026-09-21 — Dynamic cell edit harness:** the demo now includes a seeded
+  random cell-colour stress control with an edits-per-second slider. It batches
+  palette entries into one DataTexture invalidation per tick and reports edit
+  count, elapsed time and CPU update time. This verifies the fast categorical
+  palette path; arbitrary paint tiles and regional feature invalidation remain
+  later work.
+- **2026-09-21 — Regional atlas upload correction:** fixed incorrectly sized
+  mip buffers that compressed visible colour into a strip and left most of the
+  atlas empty. Regional atlases now upload their complete base image and let
+  the GPU generate correctly sized mip levels; independently halved guttered
+  pages cannot always be packed into a valid atlas mip. The single-tile adapter
+  now includes level zero in Three.js's explicit DataTexture mip array. Regional
+  UVs also use both atlas dimensions and match the baker's texel-centre convention.
+  Node-run regression tests cover full atlas coverage and explicit mip layout;
+  browser visual confirmation remains with the user.
+- **2026-09-21 — Geographic fallback during atlas resize:** replaced the first
+  arriving tile's duplication across all four pages with resampling of each
+  existing page into the resized atlas. Resampling preserves local geographic
+  coordinates and gutters; only the arriving region receives new detail.
+  Regression tests cover growth, shrinkage, out-of-order arrivals, and changing
+  gutter sizes. Initial coarse coverage is still assembled before display.

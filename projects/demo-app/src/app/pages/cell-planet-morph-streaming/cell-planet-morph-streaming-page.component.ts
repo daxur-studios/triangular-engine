@@ -44,9 +44,11 @@ import {
   setCellPerPixelOpacity,
   setCellPerPixelLookupEnabled,
   updateCellPerPixelPalette,
+  updateCellPerPixelPaletteEntries,
   formatDistanceM,
   updateCellPerPixelLookup,
   type ICellPerPixelLookupPayload,
+  type ICellPerPixelPaletteEdit,
   WORLD_SIZE_TIER_RADIUS_M,
   type IDynamicProjectionUniforms,
   type MapProjectionKind,
@@ -56,6 +58,8 @@ import {
   enableTerrainMaterialTileLookup,
   setTerrainMaterialTileEnabled,
   updateTerrainMaterialTile,
+  updateTerrainMaterialTileAtlasRegion,
+  setTerrainMaterialTileTiledEnabled,
   enableTerrainMacroVariation,
   evaluateTerrainMaterial,
   terrainMaterialColorRgb,
@@ -189,6 +193,9 @@ export class CellPlanetMorphStreamingPageComponent {
       readonly kind: 'material' | 'cellLookup';
       readonly revision: number;
       readonly resolution?: number;
+      readonly tileX?: number;
+      readonly tileY?: number;
+      readonly phase?: 'coarse' | 'refinement';
       readonly resolve: () => void;
       readonly reject: (error: Error) => void;
       readonly startedAt: number;
@@ -243,9 +250,26 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly materialTileLoading = signal(false);
   readonly factionOverlayEnabled = signal(false);
   readonly factionLookupReady = signal(false);
+  readonly randomCellStressRunning = signal(false);
+  readonly randomCellEditsPerSecond = signal(30);
+  readonly randomCellStressEdits = signal(0);
+  readonly randomCellStressLastBatchMs = signal(0);
+  readonly randomCellStressElapsedS = signal(0);
   private materialTileDebounceTimer?: number;
+  private randomCellStressTimer?: number;
+  private randomCellStressLastAt = 0;
+  private randomCellStressAccumulator = 0;
+  private randomCellStressStartedAt = 0;
+  private randomCellStressRandomState = 0x6d2b79f5;
+  private randomCellStressAutoEnabledOverlay = false;
+  private cellPaletteData?: Float32Array;
   private materialTileRevision = 0;
   private materialTileStream?: Promise<void>;
+  private readonly materialTileGrid: readonly [number, number] = [2, 2];
+  private readonly materialTileCoarsePayloads = new Map<
+    string,
+    ITerrainMaterialTilePayload
+  >();
   private factionLookupRequest?: Promise<void>;
   readonly rebuildRevision = signal(0);
 
@@ -708,15 +732,36 @@ export class CellPlanetMorphStreamingPageComponent {
             data.materialTile &&
             materialPending.revision === this.materialTileRevision
           ) {
-            updateTerrainMaterialTile(
-              this.terrainMaterialTileUniforms,
-              data.materialTile,
-            );
-            this.terrainMaterialTileReady = true;
-            this.materialTileResidentResolution.set(
-              materialPending.resolution ?? 0,
-            );
-            if (this.colourMode() === 'material') {
+            if (
+              materialPending.tileX !== undefined &&
+              materialPending.tileY !== undefined
+            ) {
+              const tileKey = `${materialPending.tileX}:${materialPending.tileY}`;
+              if (materialPending.phase === 'coarse') {
+                this.materialTileCoarsePayloads.set(tileKey, data.materialTile);
+              } else {
+                updateTerrainMaterialTileAtlasRegion(
+                  this.terrainMaterialTileUniforms,
+                  data.materialTile,
+                  materialPending.tileX,
+                  materialPending.tileY,
+                  [...this.materialTileGrid],
+                );
+              }
+            } else {
+              updateTerrainMaterialTile(
+                this.terrainMaterialTileUniforms,
+                data.materialTile,
+              );
+            }
+            const isCoarsePage = materialPending.phase === 'coarse';
+            this.terrainMaterialTileReady ||= !isCoarsePage;
+            if (materialPending.phase === 'refinement') {
+              this.materialTileResidentResolution.set(
+                materialPending.resolution ?? 0,
+              );
+            }
+            if (this.colourMode() === 'material' && !isCoarsePage) {
               setTerrainMaterialTileEnabled(
                 this.terrainMaterialTileUniforms,
                 true,
@@ -794,6 +839,7 @@ export class CellPlanetMorphStreamingPageComponent {
       if (this.materialTileDebounceTimer !== undefined) {
         clearTimeout(this.materialTileDebounceTimer);
       }
+      this.stopRandomCellStress();
       this.terrainWorker.terminate();
       this.materialWorker.terminate();
       const error = new Error('Morph terrain worker terminated.');
@@ -889,23 +935,64 @@ export class CellPlanetMorphStreamingPageComponent {
       const revision = this.materialTileRevision;
       const desired = this.materialTileResolution();
 
-      // A small first tile removes the blank interval. The previous resident
-      // tile remains bound while a requested refinement is being baked.
-      if (!this.terrainMaterialTileReady) {
-        await this.requestMaterialTile(Math.min(128, desired), revision);
-      }
+      // Generate four small fallback pages first. Keep the old atlas/direct
+      // tile visible until every coarse page is ready, then refine pages one by
+      // one so completed work becomes visible immediately.
+      this.materialTileCoarsePayloads.clear();
+      await Promise.all(
+        this.materialTileAddresses().map(({ x, y }) =>
+          this.requestMaterialTile(64, revision, x, y, 'coarse'),
+        ),
+      );
       if (revision !== this.materialTileRevision) continue;
 
-      if (this.materialTileResidentResolution() !== desired) {
-        await this.requestMaterialTile(desired, revision);
+      for (const [key, payload] of this.materialTileCoarsePayloads) {
+        const [x, y] = key.split(':').map(Number);
+        updateTerrainMaterialTileAtlasRegion(
+          this.terrainMaterialTileUniforms,
+          payload,
+          x,
+          y,
+          [...this.materialTileGrid],
+        );
       }
-      if (revision === this.materialTileRevision) return;
+      this.terrainMaterialTileReady = true;
+      setTerrainMaterialTileEnabled(this.terrainMaterialTileUniforms, true);
+      setTerrainMaterialTileTiledEnabled(this.terrainMaterialTileUniforms, true);
+      this.materialTileResidentResolution.set(64 * this.materialTileGrid[0]);
+
+      const tileResolution = Math.max(
+        64,
+        Math.round(desired / this.materialTileGrid[0] / 64) * 64,
+      );
+      this.materialTileCoarsePayloads.clear();
+      await Promise.all(
+        this.materialTileAddresses().map(({ x, y }) =>
+          this.requestMaterialTile(tileResolution, revision, x, y, 'refinement'),
+        ),
+      );
+      if (revision === this.materialTileRevision) {
+        this.materialTileResidentResolution.set(tileResolution * this.materialTileGrid[0]);
+        return;
+      }
     }
+  }
+
+  private materialTileAddresses(): readonly { readonly x: number; readonly y: number }[] {
+    return [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 0, y: 1 },
+      { x: 1, y: 1 },
+    ];
   }
 
   private requestMaterialTile(
     resolution: number,
     revision: number,
+    tileX?: number,
+    tileY?: number,
+    phase?: 'coarse' | 'refinement',
   ): Promise<void> {
     const id = this.nextWorkerRequestId++;
     return new Promise((resolve, reject) => {
@@ -913,6 +1000,9 @@ export class CellPlanetMorphStreamingPageComponent {
         kind: 'material',
         revision,
         resolution,
+        tileX,
+        tileY,
+        phase,
         resolve,
         reject,
         startedAt: performance.now(),
@@ -923,6 +1013,9 @@ export class CellPlanetMorphStreamingPageComponent {
         radius: this.radius(),
         colorMode: 'material',
         materialTileResolution: resolution,
+        materialTileX: tileX ?? 0,
+        materialTileY: tileY ?? 0,
+        materialTileGrid: this.materialTileGrid,
         worldProfile: this.worldProfileKind(),
         seed: this.seed(),
       };
@@ -974,6 +1067,7 @@ export class CellPlanetMorphStreamingPageComponent {
       palette[offset + 2] = colour[2];
       palette[offset + 3] = 1;
     }
+    this.cellPaletteData = palette;
     updateCellPerPixelPalette(this.cellPerPixelUniforms, palette);
   }
 
@@ -985,6 +1079,98 @@ export class CellPlanetMorphStreamingPageComponent {
     this.factionOverlayEnabled.set(enabled);
     setCellPerPixelOpacity(this.cellPerPixelUniforms, 0.72);
     setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, enabled);
+  }
+
+  setRandomCellEditsPerSecond(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (Number.isFinite(value)) {
+      this.randomCellEditsPerSecond.set(Math.max(1, Math.min(240, Math.round(value))));
+    }
+  }
+
+  async toggleRandomCellStress(): Promise<void> {
+    if (this.randomCellStressRunning()) {
+      this.stopRandomCellStress();
+      return;
+    }
+    if (this.colourMode() !== 'material') return;
+    await this.ensureFactionLookup();
+    if (!this.cellPaletteData) this.applyDemoFactionPalette();
+    if (!this.factionOverlayEnabled()) {
+      this.factionOverlayEnabled.set(true);
+      this.randomCellStressAutoEnabledOverlay = true;
+      setCellPerPixelOpacity(this.cellPerPixelUniforms, 0.72);
+      setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, true);
+    }
+
+    this.randomCellStressRunning.set(true);
+    this.randomCellStressEdits.set(0);
+    this.randomCellStressElapsedS.set(0);
+    this.randomCellStressLastBatchMs.set(0);
+    this.randomCellStressAccumulator = 0;
+    this.randomCellStressRandomState = 0x6d2b79f5;
+    this.randomCellStressStartedAt = performance.now();
+    this.randomCellStressLastAt = this.randomCellStressStartedAt;
+    this.randomCellStressTimer = window.setInterval(() => {
+      this.runRandomCellStressTick();
+    }, 50);
+  }
+
+  private stopRandomCellStress(): void {
+    if (this.randomCellStressTimer !== undefined) {
+      clearInterval(this.randomCellStressTimer);
+      this.randomCellStressTimer = undefined;
+    }
+    if (!this.randomCellStressRunning()) return;
+    this.randomCellStressRunning.set(false);
+    if (this.randomCellStressAutoEnabledOverlay) {
+      this.randomCellStressAutoEnabledOverlay = false;
+      this.factionOverlayEnabled.set(false);
+      setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, false);
+      setCellPerPixelOpacity(this.cellPerPixelUniforms, 1);
+    }
+  }
+
+  private runRandomCellStressTick(): void {
+    const now = performance.now();
+    const elapsedMs = Math.max(0, now - this.randomCellStressLastAt);
+    this.randomCellStressLastAt = now;
+    this.randomCellStressAccumulator +=
+      (elapsedMs / 1000) * this.randomCellEditsPerSecond();
+    const count = Math.floor(this.randomCellStressAccumulator);
+    this.randomCellStressAccumulator -= count;
+    if (count <= 0 || !this.cellPaletteData) return;
+
+    const edits: ICellPerPixelPaletteEdit[] = [];
+    const startedAt = performance.now();
+    for (let index = 0; index < count; index += 1) {
+      const cellId = Math.floor(this.nextRandomCellStressValue() * this.cellCount);
+      const colour: [number, number, number, number] = [
+        this.nextRandomCellStressValue(),
+        this.nextRandomCellStressValue(),
+        this.nextRandomCellStressValue(),
+        1,
+      ];
+      const offset = cellId * 4;
+      this.cellPaletteData[offset] = colour[0];
+      this.cellPaletteData[offset + 1] = colour[1];
+      this.cellPaletteData[offset + 2] = colour[2];
+      this.cellPaletteData[offset + 3] = 1;
+      edits.push({ cellId, colour });
+    }
+    updateCellPerPixelPaletteEntries(this.cellPerPixelUniforms, edits);
+    this.randomCellStressEdits.update((value) => value + edits.length);
+    this.randomCellStressLastBatchMs.set(performance.now() - startedAt);
+    this.randomCellStressElapsedS.set((now - this.randomCellStressStartedAt) / 1000);
+  }
+
+  private nextRandomCellStressValue(): number {
+    let state = this.randomCellStressRandomState;
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    this.randomCellStressRandomState = state >>> 0;
+    return (this.randomCellStressRandomState >>> 0) / 0x100000000;
   }
 
   /**

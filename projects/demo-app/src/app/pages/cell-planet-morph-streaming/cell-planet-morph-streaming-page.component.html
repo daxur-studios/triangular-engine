@@ -184,6 +184,27 @@
       <button type="button" (click)="toggleFactionOverlay()">
         {{ factionOverlayEnabled() ? "Hide" : "Show" }} demo faction colours
       </button>
+      <label>
+        <span>Cell edits/sec: {{ randomCellEditsPerSecond() }}</span>
+        <input
+          type="range"
+          min="1"
+          max="240"
+          step="1"
+          [value]="randomCellEditsPerSecond()"
+          (input)="setRandomCellEditsPerSecond($event)"
+        />
+      </label>
+      <button type="button" (click)="toggleRandomCellStress()">
+        {{ randomCellStressRunning() ? "Stop" : "Run" }} random cell edit test
+      </button>
+      @if (randomCellStressRunning() || randomCellStressEdits() > 0) {
+        <p class="control-hint">
+          {{ randomCellStressEdits() }} edits ·
+          {{ randomCellStressElapsedS().toFixed(1) }}s · last batch
+          {{ randomCellStressLastBatchMs().toFixed(3) }}ms
+        </p>
+      }
     }
 
     <label>

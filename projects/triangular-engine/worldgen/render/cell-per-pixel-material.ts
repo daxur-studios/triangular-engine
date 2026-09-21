@@ -30,6 +30,11 @@ export interface ICellPerPixelLookupUniforms {
   readonly uCellIdHeight: IUniform<number>;
 }
 
+export interface ICellPerPixelPaletteEdit {
+  readonly cellId: number;
+  readonly colour: readonly [number, number, number, number?];
+}
+
 function makeTexture(
   data: Float32Array | Uint8Array,
   width: number,
@@ -76,6 +81,26 @@ export function updateCellPerPixelPalette(
   }
   data.set(cellData);
   texture.needsUpdate = true;
+}
+
+/** Applies a batch of categorical cell edits with one texture invalidation. */
+export function updateCellPerPixelPaletteEntries(
+  uniforms: ICellPerPixelLookupUniforms,
+  edits: readonly ICellPerPixelPaletteEdit[],
+): void {
+  const data = uniforms.uCellData.value.image.data as Float32Array;
+  const cellCount = data.length / 4;
+  for (const edit of edits) {
+    if (!Number.isInteger(edit.cellId) || edit.cellId < 0 || edit.cellId >= cellCount) {
+      throw new RangeError(`Cell palette edit ${edit.cellId} is out of range.`);
+    }
+    const offset = edit.cellId * 4;
+    data[offset] = Math.max(0, Math.min(1, edit.colour[0]));
+    data[offset + 1] = Math.max(0, Math.min(1, edit.colour[1]));
+    data[offset + 2] = Math.max(0, Math.min(1, edit.colour[2]));
+    data[offset + 3] = edit.colour[3] === undefined ? 1 : Math.max(0, Math.min(1, edit.colour[3]));
+  }
+  if (edits.length > 0) uniforms.uCellData.value.needsUpdate = true;
 }
 
 /** Sets the blend amount used when the cell lookup is acting as an overlay. */
