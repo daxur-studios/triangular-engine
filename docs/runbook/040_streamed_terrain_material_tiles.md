@@ -401,6 +401,18 @@ implementing speculative systems. No new browser automation infrastructure.
   independent texture path; it is intentionally not the final close-up solution.
 - **2026-09-21 — Detail comparison control:** the demo now exposes a 64–1024
   material-tile resolution slider. It invalidates the material prototype's
-  worker revision after a short debounce, includes the selected resolution in
-  the tile cache key, and leaves mesh resolution unchanged. This is a measurement
-  control for choosing a default; it is not yet independent planetary tile LOD.
+  material request revision after a short debounce, requests the selected
+  resolution independently, and leaves mesh resolution unchanged. This is a
+  measurement control for choosing a default; it is not yet independent
+  planetary tile LOD.
+- **2026-09-21 — M3 first vertical slice:** material baking now uses a dedicated
+  worker request path and worker instance, so mesh generation can return without
+  waiting for the material image. The page requests a 128×128 coarse tile first,
+  keeps the current resident tile bound, then refines to the selected resolution
+  with stale-result protection. Moving the detail slider no longer rebuilds the
+  terrain mesh. The material mode also has a small faction overlay proof: a
+  geographic cell-ID atlas is requested separately and a cell-to-colour palette
+  can be replaced in place without rebaking base material tiles or geometry.
+  This remains a fixed global tile prototype: page-table indirection, local
+  planetary tiles, visible-region selection and bounded GPU residency are still
+  unfinished M3 work. Browser/GPU timing evidence remains pending.

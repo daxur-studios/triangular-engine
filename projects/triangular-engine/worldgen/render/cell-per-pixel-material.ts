@@ -22,6 +22,7 @@ export interface ICellPerPixelLookupPayload {
 
 export interface ICellPerPixelLookupUniforms {
   readonly uCellPerPixelEnabled: IUniform<number>;
+  readonly uCellPerPixelOpacity: IUniform<number>;
   readonly uCellData: IUniform<DataTexture>;
   readonly uCellIds: IUniform<DataTexture>;
   readonly uCellTextureWidth: IUniform<number>;
@@ -54,12 +55,35 @@ function makePlaceholderIds(): DataTexture {
 export function createCellPerPixelLookupUniforms(): ICellPerPixelLookupUniforms {
   return {
     uCellPerPixelEnabled: { value: 0 },
+    uCellPerPixelOpacity: { value: 1 },
     uCellData: { value: makePlaceholderTexture() },
     uCellIds: { value: makePlaceholderIds() },
     uCellTextureWidth: { value: 1 },
     uCellIdWidth: { value: 1 },
     uCellIdHeight: { value: 1 },
   };
+}
+
+/** Updates only the cell palette texture; the expensive geographic ID atlas stays resident. */
+export function updateCellPerPixelPalette(
+  uniforms: ICellPerPixelLookupUniforms,
+  cellData: Float32Array,
+): void {
+  const texture = uniforms.uCellData.value;
+  const data = texture.image.data as Float32Array;
+  if (data.length !== cellData.length) {
+    throw new RangeError('Cell palette length does not match the resident cell lookup.');
+  }
+  data.set(cellData);
+  texture.needsUpdate = true;
+}
+
+/** Sets the blend amount used when the cell lookup is acting as an overlay. */
+export function setCellPerPixelOpacity(
+  uniforms: ICellPerPixelLookupUniforms,
+  opacity: number,
+): void {
+  uniforms.uCellPerPixelOpacity.value = Math.max(0, Math.min(1, opacity));
 }
 
 /** Uploads a worker-produced lookup and enables the one-fetch shader path. */
@@ -106,6 +130,7 @@ export function enableCellPerPixelLookup(
   ) => {
     previousOnBeforeCompile(shader, renderer);
     shader.uniforms['uCellPerPixelEnabled'] = uniforms.uCellPerPixelEnabled;
+    shader.uniforms['uCellPerPixelOpacity'] = uniforms.uCellPerPixelOpacity;
     shader.uniforms['uCellData'] = uniforms.uCellData;
     shader.uniforms['uCellIds'] = uniforms.uCellIds;
     shader.uniforms['uCellTextureWidth'] = uniforms.uCellTextureWidth;
@@ -114,6 +139,7 @@ export function enableCellPerPixelLookup(
 
     const declarations = `
       uniform float uCellPerPixelEnabled;
+      uniform float uCellPerPixelOpacity;
       uniform sampler2D uCellData;
       uniform sampler2D uCellIds;
       uniform float uCellTextureWidth;
@@ -151,7 +177,11 @@ export function enableCellPerPixelLookup(
       `
       #include <color_fragment>
       if (uCellPerPixelEnabled > 0.5) {
-        diffuseColor.rgb = cellPerPixelColour(normalize(vSphereNorm));
+        diffuseColor.rgb = mix(
+          diffuseColor.rgb,
+          cellPerPixelColour(normalize(vSphereNorm)),
+          uCellPerPixelOpacity
+        );
       }
       `,
     );

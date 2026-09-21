@@ -175,6 +175,15 @@
         Independent colour tile resolution. Mesh resolution remains
         {{ qualityConfig().resolution }}.
       </p>
+      <p class="control-hint">
+        Loaded: {{ materialTileResidentResolution() || "coarse fallback pending" }}
+        @if (materialTileLoading()) {
+          · refining…
+        }
+      </p>
+      <button type="button" (click)="toggleFactionOverlay()">
+        {{ factionOverlayEnabled() ? "Hide" : "Show" }} demo faction colours
+      </button>
     }
 
     <label>

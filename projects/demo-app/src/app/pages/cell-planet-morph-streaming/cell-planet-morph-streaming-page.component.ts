@@ -41,7 +41,9 @@ import {
   EQUIRECTANGULAR_PROJECTION,
   createCellPerPixelLookupUniforms,
   enableCellPerPixelLookup,
+  setCellPerPixelOpacity,
   setCellPerPixelLookupEnabled,
+  updateCellPerPixelPalette,
   formatDistanceM,
   updateCellPerPixelLookup,
   type ICellPerPixelLookupPayload,
@@ -69,6 +71,8 @@ import {
 } from '../cell-planet-u0-fixture';
 import { getTerrainHeightScaleM } from '../cell-planet-25d-map/cell-planet-terrain-scale';
 import type {
+  CellPlanetMorphCellLookupRequest,
+  CellPlanetMorphMaterialTileRequest,
   CellPlanetMorphWorkerRequest,
   CellPlanetMorphWorkerTimings,
 } from './cell-planet-morph-streaming.worker';
@@ -163,6 +167,11 @@ export class CellPlanetMorphStreamingPageComponent {
     new URL('./cell-planet-morph-streaming.worker', import.meta.url),
     { type: 'module' },
   );
+  /** Keeps a high resolution bake from occupying the mesh worker's queue. */
+  private readonly materialWorker = new Worker(
+    new URL('./cell-planet-morph-streaming.worker', import.meta.url),
+    { type: 'module' },
+  );
   private nextWorkerRequestId = 0;
   private readonly workerRequests = new Map<
     number,
@@ -170,6 +179,17 @@ export class CellPlanetMorphStreamingPageComponent {
       readonly resolve: (
         patch: ITerrainPatchMesh<ILatLonTerrainPatchAddress>,
       ) => void;
+      readonly reject: (error: Error) => void;
+      readonly startedAt: number;
+    }
+  >();
+  private readonly materialTileRequests = new Map<
+    number,
+    {
+      readonly kind: 'material' | 'cellLookup';
+      readonly revision: number;
+      readonly resolution?: number;
+      readonly resolve: () => void;
       readonly reject: (error: Error) => void;
       readonly startedAt: number;
     }
@@ -219,7 +239,14 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly materialTileResolutionLabel = computed(
     () => `${this.materialTileResolution()}×${this.materialTileResolution()}`,
   );
+  readonly materialTileResidentResolution = signal(0);
+  readonly materialTileLoading = signal(false);
+  readonly factionOverlayEnabled = signal(false);
+  readonly factionLookupReady = signal(false);
   private materialTileDebounceTimer?: number;
+  private materialTileRevision = 0;
+  private materialTileStream?: Promise<void>;
+  private factionLookupRequest?: Promise<void>;
   readonly rebuildRevision = signal(0);
 
   // Render modes & Diagnostics
@@ -657,7 +684,7 @@ export class CellPlanetMorphStreamingPageComponent {
   };
 
   constructor() {
-    this.terrainWorker.onmessage = ({
+    const handleWorkerMessage = ({
       data,
     }: MessageEvent<{
       readonly id: number;
@@ -667,6 +694,46 @@ export class CellPlanetMorphStreamingPageComponent {
       readonly timings?: CellPlanetMorphWorkerTimings;
       readonly error?: string;
     }>) => {
+      const materialPending = this.materialTileRequests.get(data.id);
+      if (materialPending) {
+        this.materialTileRequests.delete(data.id);
+        if (data.error) {
+          materialPending.reject(new Error(data.error));
+        } else {
+          if (data.cellLookup) {
+            updateCellPerPixelLookup(this.cellPerPixelUniforms, data.cellLookup);
+            this.factionLookupReady.set(true);
+          }
+          if (
+            data.materialTile &&
+            materialPending.revision === this.materialTileRevision
+          ) {
+            updateTerrainMaterialTile(
+              this.terrainMaterialTileUniforms,
+              data.materialTile,
+            );
+            this.terrainMaterialTileReady = true;
+            this.materialTileResidentResolution.set(
+              materialPending.resolution ?? 0,
+            );
+            if (this.colourMode() === 'material') {
+              setTerrainMaterialTileEnabled(
+                this.terrainMaterialTileUniforms,
+                true,
+              );
+            }
+          }
+          if (data.timings) {
+            this.timings.set({
+              ...data.timings,
+              workerMs: performance.now() - materialPending.startedAt,
+            });
+          }
+          materialPending.resolve();
+        }
+        return;
+      }
+
       const pending = this.workerRequests.get(data.id);
       if (!pending) return;
       this.workerRequests.delete(data.id);
@@ -674,12 +741,9 @@ export class CellPlanetMorphStreamingPageComponent {
       if (data.error) {
         pending.reject(new Error(data.error));
       } else if (data.patch) {
-        if (data.materialTile) {
-          updateTerrainMaterialTile(this.terrainMaterialTileUniforms, data.materialTile);
-          this.terrainMaterialTileReady = true;
-          setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, false);
-        } else if (data.cellLookup) {
+        if (data.cellLookup) {
           updateCellPerPixelLookup(this.cellPerPixelUniforms, data.cellLookup);
+          this.factionLookupReady.set(true);
           setTerrainMaterialTileEnabled(this.terrainMaterialTileUniforms, false);
         } else {
           if (this.colourMode() === 'material') {
@@ -699,16 +763,26 @@ export class CellPlanetMorphStreamingPageComponent {
           });
         }
         pending.resolve(data.patch);
+        if (this.colourMode() === 'material') {
+          this.queueMaterialTileProgression(false);
+        }
       } else {
         pending.reject(new Error('Morph terrain worker returned no patch.'));
       }
     };
 
-    this.terrainWorker.onerror = () => {
+    this.terrainWorker.onmessage = handleWorkerMessage;
+    this.materialWorker.onmessage = handleWorkerMessage;
+
+    const handleWorkerError = () => {
       const error = new Error('Morph terrain worker crashed.');
       for (const pending of this.workerRequests.values()) pending.reject(error);
       this.workerRequests.clear();
+      for (const pending of this.materialTileRequests.values()) pending.reject(error);
+      this.materialTileRequests.clear();
     };
+    this.terrainWorker.onerror = handleWorkerError;
+    this.materialWorker.onerror = handleWorkerError;
 
     this.destroyRef.onDestroy(() => {
       if (this.morphLodDebounceTimer !== undefined) {
@@ -721,9 +795,12 @@ export class CellPlanetMorphStreamingPageComponent {
         clearTimeout(this.materialTileDebounceTimer);
       }
       this.terrainWorker.terminate();
+      this.materialWorker.terminate();
       const error = new Error('Morph terrain worker terminated.');
       for (const pending of this.workerRequests.values()) pending.reject(error);
       this.workerRequests.clear();
+      for (const pending of this.materialTileRequests.values()) pending.reject(error);
+      this.materialTileRequests.clear();
     });
 
     // Update GPU uniforms whenever morph or projection changes
@@ -791,6 +868,123 @@ export class CellPlanetMorphStreamingPageComponent {
 
       this.terrainWorker.postMessage(workerReq);
     });
+  }
+
+  private queueMaterialTileProgression(invalidate = true): void {
+    if (this.colourMode() !== 'material') return;
+    if (invalidate) this.materialTileRevision += 1;
+    if (this.materialTileStream) return;
+
+    this.materialTileLoading.set(true);
+    this.materialTileStream = this.runMaterialTileProgression()
+      .catch(() => undefined)
+      .finally(() => {
+        this.materialTileStream = undefined;
+        this.materialTileLoading.set(false);
+      });
+  }
+
+  private async runMaterialTileProgression(): Promise<void> {
+    while (this.colourMode() === 'material') {
+      const revision = this.materialTileRevision;
+      const desired = this.materialTileResolution();
+
+      // A small first tile removes the blank interval. The previous resident
+      // tile remains bound while a requested refinement is being baked.
+      if (!this.terrainMaterialTileReady) {
+        await this.requestMaterialTile(Math.min(128, desired), revision);
+      }
+      if (revision !== this.materialTileRevision) continue;
+
+      if (this.materialTileResidentResolution() !== desired) {
+        await this.requestMaterialTile(desired, revision);
+      }
+      if (revision === this.materialTileRevision) return;
+    }
+  }
+
+  private requestMaterialTile(
+    resolution: number,
+    revision: number,
+  ): Promise<void> {
+    const id = this.nextWorkerRequestId++;
+    return new Promise((resolve, reject) => {
+      this.materialTileRequests.set(id, {
+        kind: 'material',
+        revision,
+        resolution,
+        resolve,
+        reject,
+        startedAt: performance.now(),
+      });
+      const request: CellPlanetMorphMaterialTileRequest = {
+        kind: 'materialTile',
+        id,
+        radius: this.radius(),
+        colorMode: 'material',
+        materialTileResolution: resolution,
+        worldProfile: this.worldProfileKind(),
+        seed: this.seed(),
+      };
+      this.materialWorker.postMessage(request);
+    });
+  }
+
+  private ensureFactionLookup(): Promise<void> {
+    if (this.factionLookupReady()) return Promise.resolve();
+    if (this.factionLookupRequest) return this.factionLookupRequest;
+
+    const id = this.nextWorkerRequestId++;
+    const requestPromise = new Promise<void>((resolve, reject) => {
+      this.materialTileRequests.set(id, {
+        kind: 'cellLookup',
+        revision: this.materialTileRevision,
+        resolve,
+        reject,
+        startedAt: performance.now(),
+      });
+      const request: CellPlanetMorphCellLookupRequest = {
+        kind: 'cellLookup',
+        id,
+        colorMode: 'material',
+        worldProfile: this.worldProfileKind(),
+        seed: this.seed(),
+      };
+      this.materialWorker.postMessage(request);
+    }).finally(() => {
+      this.factionLookupRequest = undefined;
+    });
+    this.factionLookupRequest = requestPromise;
+    return requestPromise;
+  }
+
+  private applyDemoFactionPalette(): void {
+    const factionColours: readonly [number, number, number][] = [
+      [0.08, 0.32, 0.78],
+      [0.72, 0.16, 0.08],
+      [0.12, 0.55, 0.24],
+      [0.66, 0.42, 0.08],
+    ];
+    const palette = new Float32Array(this.cellCount * 4);
+    for (let cellId = 0; cellId < this.cellCount; cellId += 1) {
+      const colour = factionColours[cellId % factionColours.length];
+      const offset = cellId * 4;
+      palette[offset] = colour[0];
+      palette[offset + 1] = colour[1];
+      palette[offset + 2] = colour[2];
+      palette[offset + 3] = 1;
+    }
+    updateCellPerPixelPalette(this.cellPerPixelUniforms, palette);
+  }
+
+  async toggleFactionOverlay(): Promise<void> {
+    if (this.colourMode() !== 'material') return;
+    await this.ensureFactionLookup();
+    this.applyDemoFactionPalette();
+    const enabled = !this.factionOverlayEnabled();
+    this.factionOverlayEnabled.set(enabled);
+    setCellPerPixelOpacity(this.cellPerPixelUniforms, 0.72);
+    setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, enabled);
   }
 
   /**
@@ -900,7 +1094,7 @@ export class CellPlanetMorphStreamingPageComponent {
       clearTimeout(this.materialTileDebounceTimer);
     }
     this.materialTileDebounceTimer = window.setTimeout(() => {
-      this.rebuildRevision.update((revision) => revision + 1);
+      this.queueMaterialTileProgression();
     }, 180);
   }
 
@@ -939,7 +1133,14 @@ export class CellPlanetMorphStreamingPageComponent {
         this.terrainMaterialTileUniforms,
         value === 'material' && this.terrainMaterialTileReady,
       );
-      this.rebuildRevision.update((r) => r + 1);
+      if (value === 'material') {
+        this.queueMaterialTileProgression();
+      } else {
+        this.factionOverlayEnabled.set(false);
+        setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, false);
+        setCellPerPixelOpacity(this.cellPerPixelUniforms, 1);
+        this.rebuildRevision.update((r) => r + 1);
+      }
     }
   }
 

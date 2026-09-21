@@ -50,6 +50,7 @@ import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
 const OCEAN_COLOR = 'hsl(210, 55%, 22%)';
 
 export interface CellPlanetMorphWorkerRequest {
+  readonly kind?: 'terrain';
   readonly id: number;
   readonly address: ILatLonTerrainPatchAddress;
   readonly radius: number;
@@ -69,6 +70,30 @@ export interface CellPlanetMorphWorkerRequest {
   readonly worldProfile?: WorldProfileKind;
   readonly seed?: number;
 }
+
+/** Material-only work is deliberately separate from mesh generation. */
+export interface CellPlanetMorphMaterialTileRequest {
+  readonly kind: 'materialTile';
+  readonly id: number;
+  readonly radius: number;
+  readonly colorMode: 'material';
+  readonly materialTileResolution: number;
+  readonly worldProfile?: WorldProfileKind;
+  readonly seed?: number;
+}
+
+export interface CellPlanetMorphCellLookupRequest {
+  readonly kind: 'cellLookup';
+  readonly id: number;
+  readonly colorMode: 'material';
+  readonly worldProfile?: WorldProfileKind;
+  readonly seed?: number;
+}
+
+export type CellPlanetMorphWorkerMessage =
+  | CellPlanetMorphWorkerRequest
+  | CellPlanetMorphMaterialTileRequest
+  | CellPlanetMorphCellLookupRequest;
 
 export interface CellPlanetMorphWorkerTimings {
   readonly generationMs: number;
@@ -101,16 +126,13 @@ let cachedMaxSlope = 0;
 let cachedRiverMask: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
 let cachedRidgeCellSet = new Set<number>();
 let cachedLookupKey = '';
-let cachedMaterialTileKey = '';
 
 function buildCellPerPixelLookup(
   world: ReturnType<typeof getOrCreateWorld>,
   colorMode: CellPlanetMorphWorkerRequest['colorMode'],
+  includeMaterialCellLookup = false,
 ): ICellPerPixelLookupPayload | undefined {
-  // Material mode is the visual prototype: it uses the continuous surface
-  // sample and interpolated vertex colours. The atlas remains for explicit
-  // cell-data views where sharp cell boundaries are useful.
-  if (colorMode === 'lod' || colorMode === 'material') return undefined;
+  if (colorMode === 'lod' || (colorMode === 'material' && !includeMaterialCellLookup)) return undefined;
 
   const { graph, tectonics, ecology, sampler, eMin, eMax, profile, maxSlope, riverMask, ridgeCellSet } = world;
   const cellCount = graph.cells.length;
@@ -131,6 +153,12 @@ function buildCellPerPixelLookup(
       );
     } else if (colorMode === 'plates') {
       colour = parseColorToLinearRgb(plateColor(tectonics.plateIdByCell[cell.id] ?? 0));
+    } else if (colorMode === 'material') {
+      const sample = sampler.sample(cell.center);
+      const material = evaluateWorldMaterial(world, sample, cell);
+      colour = srgbRgbToLinear(terrainMaterialColorRgb(material, {
+        oceanSubstance: profile.oceanSubstance,
+      }));
     } else {
       const sample = sampler.sample(cell.center);
       colour = sample.isLand
@@ -352,9 +380,6 @@ function buildMaterialTile(
   interiorSize: number,
 ): ITerrainMaterialTilePayload | undefined {
   if (colorMode !== 'material') return undefined;
-  const key = `${cachedWorldKey}:${colorMode}:${interiorSize}`;
-  if (cachedMaterialTileKey === key) return undefined;
-  cachedMaterialTileKey = key;
   const domain = new LatLonTerrainDomain(1, 4, 2);
   let previousCell: IPlanetGraphCell | null = null;
   return bakeTerrainMaterialTile(
@@ -511,25 +536,9 @@ function compactGeometryAttributes(geometry: BufferGeometry): CompactedMeshAttri
   };
 }
 
-addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerRequest>) => {
+addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerMessage>) => {
   try {
-    const {
-      id,
-      address,
-      radius,
-      baseResolution,
-      resolution,
-      edgeRefinementLevels,
-      edgeRefinementSegments,
-      reduction,
-      targetError,
-      projectionKind,
-      colorMode,
-      materialTileResolution = 256,
-      heightScale = 160,
-      worldProfile = 'volcanic',
-      seed = 1,
-    } = data;
+    const { id, colorMode, worldProfile = 'volcanic', seed = 1 } = data;
 
     const generationStartedAt = performance.now();
     const {
@@ -547,45 +556,92 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
     } =
       getOrCreateWorld(worldProfile, seed);
 
+    const world = {
+      graph,
+      tectonics,
+      ecology,
+      features,
+      sampler,
+      eMin,
+      eMax,
+      profile,
+      maxSlope,
+      riverMask,
+      ridgeCellSet,
+    };
+
+    if (data.kind === 'materialTile') {
+      const materialTile = buildMaterialTile(
+        world,
+        colorMode,
+        data.materialTileResolution,
+      );
+      const transferables: ArrayBuffer[] = [];
+      if (materialTile) {
+        for (const mip of materialTile.mipData) {
+          transferables.push(mip.buffer as ArrayBuffer);
+        }
+      }
+      postMessage(
+        {
+          id,
+          materialTile,
+          timings: {
+            generationMs: performance.now() - generationStartedAt,
+            simplificationMs: 0,
+          } satisfies CellPlanetMorphWorkerTimings,
+        },
+        transferables,
+      );
+      return;
+    }
+
+    if (data.kind === 'cellLookup') {
+      const cellLookup = buildCellPerPixelLookup(world, colorMode, true);
+      const transferables: ArrayBuffer[] = [];
+      if (cellLookup) {
+        transferables.push(
+          cellLookup.cellData.buffer as ArrayBuffer,
+          cellLookup.cellIdData.buffer as ArrayBuffer,
+        );
+      }
+      postMessage(
+        {
+          id,
+          cellLookup,
+          timings: {
+            generationMs: performance.now() - generationStartedAt,
+            simplificationMs: 0,
+          } satisfies CellPlanetMorphWorkerTimings,
+        },
+        transferables,
+      );
+      return;
+    }
+
+    const {
+      address,
+      radius,
+      baseResolution,
+      resolution,
+      edgeRefinementLevels,
+      edgeRefinementSegments,
+      reduction,
+      targetError,
+      projectionKind,
+      materialTileResolution: _materialTileResolution = 256,
+      heightScale = 160,
+    } = data;
+
     const lookupKey = `${worldProfile}:${seed}:${colorMode}`;
     const cellLookup =
       cachedLookupKey === lookupKey
         ? undefined
         : buildCellPerPixelLookup(
-            {
-              graph,
-              tectonics,
-              ecology,
-              features,
-              sampler,
-              eMin,
-              eMax,
-              profile,
-              maxSlope,
-              riverMask,
-              ridgeCellSet,
-            },
+          world,
             colorMode,
           );
-    cachedLookupKey = lookupKey;
-    const materialTile = buildMaterialTile(
-      {
-        graph,
-        tectonics,
-        ecology,
-        features,
-        sampler,
-        eMin,
-        eMax,
-        profile,
-        maxSlope,
-        riverMask,
-        ridgeCellSet,
-      },
-      colorMode,
-      materialTileResolution,
-    );
-
+    if (cellLookup) cachedLookupKey = lookupKey;
     const domain = new LatLonTerrainDomain(radius, 4, 2);
     const bounds = domain.getPatchBounds(address);
     const stepU = (bounds.maxU - bounds.minU) / resolution;
@@ -852,18 +908,11 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
         asTransferable(cellLookup.cellIdData.buffer),
       );
     }
-    if (materialTile) {
-      for (const mip of materialTile.mipData) {
-        transferables.push(asTransferable(mip.buffer));
-      }
-    }
-
     postMessage(
       {
         id,
         patch,
         cellLookup,
-        materialTile,
         timings: { generationMs, simplificationMs } satisfies CellPlanetMorphWorkerTimings,
       },
       transferables,
