@@ -159,6 +159,24 @@
       />
     </label>
 
+    @if (colourMode() === "material") {
+      <label>
+        <span>Texture detail: {{ materialTileResolutionLabel() }}</span>
+        <input
+          type="range"
+          min="64"
+          max="1024"
+          step="64"
+          [value]="materialTileResolution()"
+          (input)="setMaterialTileResolution($event)"
+        />
+      </label>
+      <p class="control-hint">
+        Independent colour tile resolution. Mesh resolution remains
+        {{ qualityConfig().resolution }}.
+      </p>
+    }
+
     <label>
       <span>Colours</span>
       <select [value]="colourMode()" (change)="setColourMode($event)">

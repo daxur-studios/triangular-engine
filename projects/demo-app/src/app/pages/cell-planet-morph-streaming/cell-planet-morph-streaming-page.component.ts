@@ -214,6 +214,12 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly qualityOptions: readonly Quality[] = ['standard', 'high', 'ultra'];
   readonly qualityConfig = computed(() => QUALITY_PRESETS[this.quality()]);
   readonly reductionPercent = signal(35);
+  /** Demo control for the independent material tile; this does not change mesh resolution. */
+  readonly materialTileResolution = signal(256);
+  readonly materialTileResolutionLabel = computed(
+    () => `${this.materialTileResolution()}×${this.materialTileResolution()}`,
+  );
+  private materialTileDebounceTimer?: number;
   readonly rebuildRevision = signal(0);
 
   // Render modes & Diagnostics
@@ -711,6 +717,9 @@ export class CellPlanetMorphStreamingPageComponent {
       if (this.heightScaleDebounceTimer !== undefined) {
         clearTimeout(this.heightScaleDebounceTimer);
       }
+      if (this.materialTileDebounceTimer !== undefined) {
+        clearTimeout(this.materialTileDebounceTimer);
+      }
       this.terrainWorker.terminate();
       const error = new Error('Morph terrain worker terminated.');
       for (const pending of this.workerRequests.values()) pending.reject(error);
@@ -774,6 +783,7 @@ export class CellPlanetMorphStreamingPageComponent {
         targetError: 0.08,
         projectionKind: this.projectionKind(),
         colorMode: this.colourMode(),
+        materialTileResolution: this.materialTileResolution(),
         heightScale: this.terrainHeightScaleM(),
         worldProfile: this.worldProfileKind(),
         seed: this.seed(),
@@ -878,6 +888,20 @@ export class CellPlanetMorphStreamingPageComponent {
     if (!Number.isFinite(value)) return;
     this.reductionPercent.set(Math.min(95, Math.max(0, Math.round(value))));
     this.rebuildRevision.update((r) => r + 1);
+  }
+
+  setMaterialTileResolution(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (!Number.isFinite(value)) return;
+    const resolution = Math.max(64, Math.min(1024, Math.round(value / 64) * 64));
+    this.materialTileResolution.set(resolution);
+
+    if (this.materialTileDebounceTimer !== undefined) {
+      clearTimeout(this.materialTileDebounceTimer);
+    }
+    this.materialTileDebounceTimer = window.setTimeout(() => {
+      this.rebuildRevision.update((revision) => revision + 1);
+    }, 180);
   }
 
   setHeightScale(event: Event): void {

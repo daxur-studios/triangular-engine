@@ -63,6 +63,8 @@ export interface CellPlanetMorphWorkerRequest {
   readonly targetError: number;
   readonly projectionKind: MapProjectionKind;
   readonly colorMode: 'natural' | 'elevation' | 'lod' | 'plates' | 'material';
+  /** Base colour tile interior resolution; independent from mesh resolution. */
+  readonly materialTileResolution?: number;
   readonly heightScale?: number;
   readonly worldProfile?: WorldProfileKind;
   readonly seed?: number;
@@ -347,9 +349,10 @@ function evaluateWorldMaterial(
 function buildMaterialTile(
   world: ReturnType<typeof getOrCreateWorld>,
   colorMode: CellPlanetMorphWorkerRequest['colorMode'],
+  interiorSize: number,
 ): ITerrainMaterialTilePayload | undefined {
   if (colorMode !== 'material') return undefined;
-  const key = `${cachedWorldKey}:${colorMode}`;
+  const key = `${cachedWorldKey}:${colorMode}:${interiorSize}`;
   if (cachedMaterialTileKey === key) return undefined;
   cachedMaterialTileKey = key;
   const domain = new LatLonTerrainDomain(1, 4, 2);
@@ -377,7 +380,11 @@ function buildMaterialTile(
         }));
       },
     },
-    { interiorSize: 256, gutterSize: 2, mipLevels: 7 },
+    {
+      interiorSize,
+      gutterSize: 2,
+      mipLevels: Math.max(0, Math.floor(Math.log2(interiorSize)) - 1),
+    },
   );
 }
 
@@ -518,6 +525,7 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
       targetError,
       projectionKind,
       colorMode,
+      materialTileResolution = 256,
       heightScale = 160,
       worldProfile = 'volcanic',
       seed = 1,
@@ -575,6 +583,7 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerR
         ridgeCellSet,
       },
       colorMode,
+      materialTileResolution,
     );
 
     const domain = new LatLonTerrainDomain(radius, 4, 2);

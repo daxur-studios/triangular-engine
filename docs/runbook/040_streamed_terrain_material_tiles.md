@@ -1,7 +1,7 @@
 # 040 — Streamed terrain material tiles and game paint layers
 
-Status: implementation plan, 2026-09-20. No material tile system is implemented
-by this document. Intended as a staged implementation handoff to Luna.
+Status: staged implementation in progress, 2026-09-21. The fixed-geometry
+material tile prototype is implemented; planetary tile streaming remains ahead.
 
 ## Outcome
 
@@ -399,3 +399,8 @@ implementing speculative systems. No new browser automation infrastructure.
   while the mesh remains unchanged. The tile is generated once per world/style
   revision and macro variation remains a separate shader layer. This proves the
   independent texture path; it is intentionally not the final close-up solution.
+- **2026-09-21 — Detail comparison control:** the demo now exposes a 64–1024
+  material-tile resolution slider. It invalidates the material prototype's
+  worker revision after a short debounce, includes the selected resolution in
+  the tile cache key, and leaves mesh resolution unchanged. This is a measurement
+  control for choosing a default; it is not yet independent planetary tile LOD.
