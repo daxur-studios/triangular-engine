@@ -1,0 +1,8 @@
+<label>
+  <span>Data layer</span>
+  <select [value]="selectedLayerId()" (change)="onSelectionChange($event)">
+    @for (layer of layers(); track layer.id) {
+      <option [value]="layer.id">{{ layer.label }}</option>
+    }
+  </select>
+</label>

@@ -249,7 +249,8 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly materialTileLoading = signal(false);
   readonly materialTileDebug = signal(false);
   readonly materialStreamStats = signal({ resident: 0, queued: 0, inFlight: 0,
-    completed: 0, maxLevel: 0, selectionMs: 0, uploadBytes: 0, error: '' });
+    completed: 0, maxLevel: 0, selectionMs: 0, uploadBytes: 0,
+    lastBakeMs: 0, lastRoundtripMs: 0, error: '' });
   readonly factionOverlayEnabled = signal(false);
   readonly factionLookupReady = signal(false);
   readonly randomCellStressRunning = signal(false);
@@ -745,10 +746,18 @@ export class CellPlanetMorphStreamingPageComponent {
             this.factionLookupReady.set(true);
           }
           if (data.timings) {
+            const roundtripMs = performance.now() - materialPending.startedAt;
             this.timings.set({
               ...data.timings,
-              workerMs: performance.now() - materialPending.startedAt,
+              workerMs: roundtripMs,
             });
+            if (materialPending.kind === 'material') {
+              this.materialStreamStats.update(stats => ({
+                ...stats,
+                lastBakeMs: data.timings?.generationMs ?? stats.lastBakeMs,
+                lastRoundtripMs: roundtripMs,
+              }));
+            }
           }
           if (materialPending.kind === 'material' && !data.materialTile) {
             materialPending.reject(new Error('Material worker returned no tile.'));
@@ -987,9 +996,10 @@ export class CellPlanetMorphStreamingPageComponent {
     }
     const stream = this.materialStream;
     const maxLevel = Math.max(0, ...[...stream.resident.values()].map(p => p.address.level));
-    this.materialStreamStats.set({ resident: stream.resident.size, queued: stream.queued,
+    this.materialStreamStats.update(previous => ({ ...previous,
+      resident: stream.resident.size, queued: stream.queued,
       inFlight: stream.inFlight, completed: stream.completed, maxLevel, selectionMs,
-      uploadBytes: this.materialGpu.uploadedBytes, error: stream.lastError ?? '' });
+      uploadBytes: this.materialGpu.uploadedBytes, error: stream.lastError ?? '' }));
     this.materialTileLoading.set(stream.queued > 0 || stream.inFlight > 0);
   }
 

@@ -9,6 +9,7 @@ import {
   WebGLProgramParametersWithUniforms,
   WebGLRenderer,
 } from 'three';
+import { findCellAt, findCellNear, IPlanetGraphCore, IVec3 } from 'triangular-engine/worldgen';
 
 export interface ICellPerPixelLookupPayload {
   /** One RGBA float texel per cell; RGB is the linear display colour. */
@@ -33,6 +34,69 @@ export interface ICellPerPixelLookupUniforms {
 export interface ICellPerPixelPaletteEdit {
   readonly cellId: number;
   readonly colour: readonly [number, number, number, number?];
+}
+
+/** Default atlas width used by the reusable cell layer adapter. */
+const DEFAULT_CELL_ID_WIDTH = 512;
+
+/** Default atlas height used by the reusable cell layer adapter. */
+const DEFAULT_CELL_ID_HEIGHT = 256;
+
+export interface ICellPerPixelLookupBuildOptions {
+  readonly cellIdWidth?: number;
+  readonly cellIdHeight?: number;
+}
+
+/**
+ * Builds the geographic cell-ID atlas once for a graph.
+ *
+ * The palette is copied into the resident cell table; subsequent layer changes only
+ * update that table and never repeat this atlas work.
+ */
+export function buildCellPerPixelLookupPayload(
+  graph: IPlanetGraphCore,
+  cellData: Float32Array,
+  options: ICellPerPixelLookupBuildOptions = {},
+): ICellPerPixelLookupPayload {
+  const cellIdWidth = Math.max(2, Math.floor(options.cellIdWidth ?? DEFAULT_CELL_ID_WIDTH));
+  const cellIdHeight = Math.max(2, Math.floor(options.cellIdHeight ?? DEFAULT_CELL_ID_HEIGHT));
+  const expectedCellDataLength = graph.cells.length * 4;
+  if (cellData.length !== expectedCellDataLength) {
+    throw new RangeError('Cell lookup palette length does not match graph cell count.');
+  }
+
+  const cellIdData = new Uint8Array(cellIdWidth * cellIdHeight * 4);
+  for (let y = 0; y < cellIdHeight; y += 1) {
+    const latitude = -Math.PI / 2 + ((y + 0.5) / cellIdHeight) * Math.PI;
+    const cosLatitude = Math.cos(latitude);
+    const firstDirection: IVec3 = {
+      x: cosLatitude * Math.sin(-Math.PI),
+      y: Math.sin(latitude),
+      z: cosLatitude * Math.cos(-Math.PI),
+    };
+    let previousCell = findCellAt(graph, firstDirection);
+    for (let x = 0; x < cellIdWidth; x += 1) {
+      const longitude = -Math.PI + ((x + 0.5) / cellIdWidth) * Math.PI * 2;
+      const direction: IVec3 = {
+        x: cosLatitude * Math.sin(longitude),
+        y: Math.sin(latitude),
+        z: cosLatitude * Math.cos(longitude),
+      };
+      previousCell = findCellNear(graph, direction, previousCell.id);
+      const offset = (y * cellIdWidth + x) * 4;
+      cellIdData[offset] = previousCell.id & 255;
+      cellIdData[offset + 1] = (previousCell.id >> 8) & 255;
+      cellIdData[offset + 3] = 255;
+    }
+  }
+
+  return {
+    cellData: new Float32Array(cellData),
+    cellTextureWidth: graph.cells.length,
+    cellIdData,
+    cellIdWidth,
+    cellIdHeight,
+  };
 }
 
 function makeTexture(
@@ -175,7 +239,7 @@ export function enableCellPerPixelLookup(
       varying vec3 vSphereNorm;
       #endif
 
-      vec3 cellPerPixelColour(vec3 direction) {
+      vec4 cellPerPixelColour(vec3 direction) {
         float latitude = asin(clamp(direction.y, -1.0, 1.0));
         float longitude = atan(direction.x, direction.z);
         vec2 atlasUv = vec2(
@@ -186,7 +250,7 @@ export function enableCellPerPixelLookup(
         float cellId = floor(encoded.r * 255.0 + 0.5) +
           floor(encoded.g * 255.0 + 0.5) * 256.0;
         float cellX = (cellId + 0.5) / uCellTextureWidth;
-        return texture2D(uCellData, vec2(cellX, 0.5)).rgb;
+        return texture2D(uCellData, vec2(cellX, 0.5));
       }
     `;
 
@@ -202,10 +266,11 @@ export function enableCellPerPixelLookup(
       `
       #include <color_fragment>
       if (uCellPerPixelEnabled > 0.5) {
+        vec4 cellLayerColour = cellPerPixelColour(normalize(vSphereNorm));
         diffuseColor.rgb = mix(
           diffuseColor.rgb,
-          cellPerPixelColour(normalize(vSphereNorm)),
-          uCellPerPixelOpacity
+          cellLayerColour.rgb,
+          cellLayerColour.a * uCellPerPixelOpacity
         );
       }
       `,

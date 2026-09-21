@@ -9,7 +9,7 @@ import {
   VolcanoSettings,
 } from './geological-shapes';
 import { IPlanetGraphCore } from './planet-graph';
-import { findCellAt, sampleElevation } from './sample-elevation';
+import { findCellAt, findCellNear, sampleElevation } from './sample-elevation';
 import { IPlanetTectonics } from './tectonics';
 import { cross, dot, IVec3, normalize } from './vec3';
 
@@ -77,6 +77,12 @@ export interface IPlanetSurfaceSample {
 
 export interface IPlanetSurfaceSampler {
   sample(direction: IVec3): IPlanetSurfaceSample;
+  /**
+   * Coherent-grid variant for tile/mesh bakers that already resolved the
+   * previous sample's cell. It returns the same surface rule as `sample`, but
+   * avoids a full graph scan for every texel.
+   */
+  sampleNear?(direction: IVec3, hintCellId: number): IPlanetSurfaceSample;
 }
 
 const DEFAULTS: Omit<
@@ -342,9 +348,7 @@ export function createPlanetSurfaceSampler(
         })
         .filter((stamp): stamp is IVolcanoStamp => stamp !== undefined);
 
-  return {
-    sample(direction: IVec3): IPlanetSurfaceSample {
-      const unitDirection = normalize(direction);
+  const sampleAtCell = (unitDirection: IVec3, siteCell: IPlanetGraphCore['cells'][number]): IPlanetSurfaceSample => {
       // A discrete cell is its own self-contained terrain unit: its elevation is anchored to the
       // Voronoi site it belongs to (`cellBlendFraction` mixes in only a little of the
       // barycentric-blended neighbour value, so tiles don't meet at a stark cliff), then shaped
@@ -352,7 +356,6 @@ export function createPlanetSurfaceSampler(
       // edge instead of sitting as a flat-topped plateau; a hill gets a gentler, still-walkable
       // bump; flatter biomes stay close to their anchor. A landform-appropriate noise layer keeps
       // every tier from reading as a dead-flat plateau.
-      const siteCell = findCellAt(graph, unitDirection);
       const cellFeature = isDiscreteCell && siteCell ? params.features?.featureByCellId.get(siteCell.id) : undefined;
       let baseElevation: number;
       if (isDiscreteCell) {
@@ -460,6 +463,16 @@ export function createPlanetSurfaceSampler(
         isLand: isTectonicLand,
         isIce,
       };
+  };
+
+  return {
+    sample(direction: IVec3): IPlanetSurfaceSample {
+      const unitDirection = normalize(direction);
+      return sampleAtCell(unitDirection, findCellAt(graph, unitDirection));
+    },
+    sampleNear(direction: IVec3, hintCellId: number): IPlanetSurfaceSample {
+      const unitDirection = normalize(direction);
+      return sampleAtCell(unitDirection, findCellNear(graph, unitDirection, hintCellId));
     },
   };
 }

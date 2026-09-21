@@ -5,6 +5,22 @@ import { buildPlanetTectonics } from './tectonics';
 import { normalize } from './vec3';
 
 describe('createPlanetSurfaceSampler', () => {
+  it('keeps coherent sampleNear results equivalent to the canonical sampler', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 240, seed: 19 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 19 });
+    const ecology = buildPlanetEcology(graph, tectonics);
+    const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+      featureComposition: 'cell',
+    });
+    const direction = normalize({ x: 0.23, y: 0.71, z: -0.41 });
+    const cell = graph.cells[0]!;
+    const canonical = sampler.sample(direction);
+    const coherent = sampler.sampleNear?.(direction, cell.id);
+    expect(coherent).toBeDefined();
+    expect(coherent!.elevation).toBeCloseTo(canonical.elevation, 8);
+    expect(coherent!.riverCarve).toBeCloseTo(canonical.riverCarve, 8);
+  });
+
   it('applies a volcano shape inside its owning cell and fades before the cell edge', () => {
     const graph = buildPlanetGraphCore({ cellCount: 240, seed: 71 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 71 });

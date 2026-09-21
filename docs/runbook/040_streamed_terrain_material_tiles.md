@@ -435,6 +435,15 @@ arbitrary interactive river authoring/carving is not implied by a colour overlay
 User reports the random cell recolour stress test updates quickly; this is useful
 manual feedback, not a measured GPU performance gate.
 
+The next performance and feature slice is now partially implemented in the demo:
+material tiles use the sampler's coherent `sampleNear` path to avoid repeating a
+full nearest-cell graph scan per texel; the tile worker reports generation and
+round-trip timing; slope-derived rock shading is made visible; and river paths
+are indexed into flow-scaled narrow colour strokes. These are still demo-level
+style rules pending browser validation. The macro variation controls remain a
+shader layer because they update instantly without rebaking; baking that signal
+is an optional optimization to measure later, not the default path.
+
 - **2026-09-20 — M1/M2 core slice:** added serializable tile identity and payload
   contracts, a linear-RGB RGBA8 baker with sampled gutters and CPU-generated
   mip levels, a byte-bounded pinned LRU cache, and a single-tile Three.js

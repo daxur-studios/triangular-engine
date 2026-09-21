@@ -72,6 +72,17 @@ import {
   IPlanetDayNightUniforms,
   PlanetMapBorderStyle,
 } from '../planet-morph-material';
+import {
+  createCellPerPixelLookupUniforms,
+  enableCellPerPixelLookup,
+  ICellPerPixelLookupPayload,
+  ICellPerPixelLookupUniforms,
+  setCellPerPixelLookupEnabled,
+  updateCellPerPixelLookup,
+  updateCellPerPixelPalette,
+  updateCellPerPixelPaletteEntries,
+} from '../cell-per-pixel-material';
+import type { ICellDataLayerPalette } from '../cell-data-layers';
 
 export type ProjectionTrackingMode = 'none' | 'meridian' | 'oblique';
 
@@ -131,6 +142,12 @@ export class CellPlanetMorphViewComponent
       ) => [number, number, number])
     | undefined
   >(undefined);
+
+  /** Optional resident geographic lookup used by mutable cell data layers. */
+  readonly cellPerPixelLookup = input<ICellPerPixelLookupPayload | null>(null);
+
+  /** Active layer palette; edits update the material without rebuilding terrain geometry. */
+  readonly cellDataLayerPalette = input<ICellDataLayerPalette | null>(null);
 
   // Border & Tactical Overlay inputs
   readonly showCellBorders = input<boolean>(false);
@@ -261,6 +278,11 @@ export class CellPlanetMorphViewComponent
 
   private readonly dayNightUniforms: IPlanetDayNightUniforms =
     createDefaultPlanetDayNightUniforms();
+  private readonly cellPerPixelUniforms: ICellPerPixelLookupUniforms =
+    createCellPerPixelLookupUniforms();
+  private cellPerPixelLookupResident?: ICellPerPixelLookupPayload;
+  private cellPerPixelMaterial?: Material;
+  private cellPerPixelPaletteUnsubscribe?: () => void;
 
   constructor() {
     super();
@@ -275,7 +297,7 @@ export class CellPlanetMorphViewComponent
       this.projectionKind();
       this.longitudeSegments();
       this.latitudeRings();
-      this.resolveColor();
+      if (!this.cellPerPixelLookup()) this.resolveColor();
       this.oceanSubstance();
       this.customTerrainMaterial();
       this.customOceanMaterial();
@@ -283,6 +305,13 @@ export class CellPlanetMorphViewComponent
       untracked(() => {
         this.rebuildMeshes();
       });
+    });
+
+    // Switch layer palettes and subscribe to sparse cell edits without rebuilding meshes.
+    effect(() => {
+      this.cellPerPixelLookup();
+      this.cellDataLayerPalette();
+      untracked(() => this.configureCellDataLayer());
     });
 
     // Update Day/Night GPU uniforms when solar parameters change
@@ -433,9 +462,47 @@ export class CellPlanetMorphViewComponent
   }
 
   override ngOnDestroy(): void {
+    this.cellPerPixelPaletteUnsubscribe?.();
     super.ngOnDestroy();
     this.disposeMeshes();
     this.tacticalOverlay()?.dispose();
+    this.cellPerPixelUniforms.uCellData.value.dispose();
+    this.cellPerPixelUniforms.uCellIds.value.dispose();
+  }
+
+  private configureCellDataLayer(): void {
+    const lookup = this.cellPerPixelLookup();
+    const palette = this.cellDataLayerPalette();
+    if (!this.terrainMesh || !lookup) {
+      this.cellPerPixelPaletteUnsubscribe?.();
+      this.cellPerPixelPaletteUnsubscribe = undefined;
+      this.cellPerPixelLookupResident = undefined;
+      setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, false);
+      return;
+    }
+
+    if (this.cellPerPixelLookupResident !== lookup) {
+      updateCellPerPixelLookup(this.cellPerPixelUniforms, lookup);
+      this.cellPerPixelLookupResident = lookup;
+    }
+    const terrainMaterial = this.terrainMesh.material as Material;
+    if (this.cellPerPixelMaterial !== terrainMaterial) {
+      enableCellPerPixelLookup(terrainMaterial, this.cellPerPixelUniforms);
+      this.cellPerPixelMaterial = terrainMaterial;
+    }
+    setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, true);
+
+    this.cellPerPixelPaletteUnsubscribe?.();
+    this.cellPerPixelPaletteUnsubscribe = undefined;
+    if (palette) {
+      if (palette.cellCount * 4 !== lookup.cellData.length) {
+        throw new RangeError('Cell layer palette does not match the resident cell lookup.');
+      }
+      updateCellPerPixelPalette(this.cellPerPixelUniforms, palette.cellData);
+      this.cellPerPixelPaletteUnsubscribe = palette.subscribe((edits) => {
+        updateCellPerPixelPaletteEntries(this.cellPerPixelUniforms, edits);
+      });
+    }
   }
 
   // ==========================================================================
@@ -952,6 +1019,9 @@ export class CellPlanetMorphViewComponent
     this.terrainMesh.renderOrder = 0;
     this.terrainMesh.visible = this.showTerrain();
     this.object3D().add(this.terrainMesh);
+    this.cellPerPixelLookupResident = undefined;
+    this.cellPerPixelMaterial = undefined;
+    this.configureCellDataLayer();
 
     // Ocean shell
     this.oceanGeometryData = buildOceanMorphGeometry(
@@ -1324,4 +1394,3 @@ export class CellPlanetMorphViewComponent
     }
   }
 }
-

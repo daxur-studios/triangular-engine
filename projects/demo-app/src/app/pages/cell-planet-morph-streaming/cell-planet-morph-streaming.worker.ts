@@ -24,6 +24,7 @@ import {
   deriveIsLand,
   dot,
   findCellAt,
+  normalize,
   WORLD_PROFILES,
   type IPlanetGraphCell,
   type IPlanetGraphCore,
@@ -133,7 +134,23 @@ let cachedProfile = WORLD_PROFILES.volcanic;
 let cachedMaxSlope = 0;
 let cachedRiverMask: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
 let cachedRidgeCellSet = new Set<number>();
+interface IRiverMaterialPoint {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly widthRadians: number;
+}
+
+const RIVER_BIN_WIDTH = 64;
+const RIVER_BIN_HEIGHT = 32;
+let cachedRiverMaterialPoints: IRiverMaterialPoint[] = [];
+let cachedRiverMaterialBins: number[][] = [];
 let cachedLookupKey = '';
+
+type WorldMaterialContext = Pick<
+  ReturnType<typeof getOrCreateWorld>,
+  'ecology' | 'eMin' | 'eMax' | 'tectonics' | 'maxSlope' | 'riverMask' | 'ridgeCellSet'
+>;
 
 function buildCellPerPixelLookup(
   world: ReturnType<typeof getOrCreateWorld>,
@@ -246,6 +263,8 @@ function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: numb
       maxSlope: cachedMaxSlope,
       riverMask: cachedRiverMask,
       ridgeCellSet: cachedRidgeCellSet,
+      riverMaterialPoints: cachedRiverMaterialPoints,
+      riverMaterialBins: cachedRiverMaterialBins,
     };
   }
 
@@ -286,6 +305,7 @@ function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: numb
   cachedMaxSlope = ecology.slope.reduce((max, slope) => Math.max(max, slope), 0);
   cachedRiverMask = buildRiverMaterialMask(graph, ecology);
   cachedRidgeCellSet = new Set(tectonics.ridgeCellIds);
+  [cachedRiverMaterialPoints, cachedRiverMaterialBins] = buildRiverMaterialIndex(ecology);
 
   cachedWorldKey = key;
   cachedGraph = graph;
@@ -309,7 +329,91 @@ function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: numb
     maxSlope: cachedMaxSlope,
     riverMask: cachedRiverMask,
     ridgeCellSet: cachedRidgeCellSet,
+    riverMaterialPoints: cachedRiverMaterialPoints,
+    riverMaterialBins: cachedRiverMaterialBins,
   };
+}
+
+function riverBinIndex(longitude: number, latitude: number): number {
+  const wrappedU = ((longitude + Math.PI) / (Math.PI * 2)) % 1;
+  const u = Math.min(RIVER_BIN_WIDTH - 1, Math.max(0, Math.floor((wrappedU < 0 ? wrappedU + 1 : wrappedU) * RIVER_BIN_WIDTH)));
+  const v = Math.min(
+    RIVER_BIN_HEIGHT - 1,
+    Math.max(0, Math.floor(((latitude + Math.PI / 2) / Math.PI) * RIVER_BIN_HEIGHT)),
+  );
+  return v * RIVER_BIN_WIDTH + u;
+}
+
+function directionLongitude(direction: IVec3): number {
+  return Math.atan2(direction.x, direction.z);
+}
+
+function directionLatitude(direction: IVec3): number {
+  return Math.asin(Math.max(-1, Math.min(1, direction.y)));
+}
+
+function buildRiverMaterialIndex(ecology: IPlanetEcology): [IRiverMaterialPoint[], number[][]] {
+  const points: IRiverMaterialPoint[] = [];
+  const bins = Array.from({ length: RIVER_BIN_WIDTH * RIVER_BIN_HEIGHT }, () => [] as number[]);
+  let maxFlow = 1;
+  for (const flow of ecology.riverFlow) {
+    for (const value of flow) maxFlow = Math.max(maxFlow, value);
+  }
+
+  const addPoint = (point: IVec3, flow: number) => {
+    const widthRadians = 0.0035 + Math.sqrt(Math.max(0, flow) / maxFlow) * 0.012;
+    const index = points.push({ x: point.x, y: point.y, z: point.z, widthRadians }) - 1;
+    bins[riverBinIndex(directionLongitude(point), directionLatitude(point))].push(index);
+  };
+
+  for (let pathIndex = 0; pathIndex < ecology.riverPaths.length; pathIndex += 1) {
+    const path = ecology.riverPaths[pathIndex];
+    const flow = ecology.riverFlow[pathIndex] ?? [];
+    for (let pointIndex = 0; pointIndex < path.length; pointIndex += 1) {
+      const point = path[pointIndex];
+      addPoint(point, flow[pointIndex] ?? 1);
+      if (pointIndex + 1 < path.length) {
+        const next = path[pointIndex + 1];
+        addPoint(normalize({
+          x: point.x + next.x,
+          y: point.y + next.y,
+          z: point.z + next.z,
+        }), ((flow[pointIndex] ?? 1) + (flow[pointIndex + 1] ?? 1)) * 0.5);
+      }
+    }
+  }
+  return [points, bins];
+}
+
+function narrowRiverInfluence(
+  world: ReturnType<typeof getOrCreateWorld>,
+  direction: IVec3,
+): number {
+  if (world.riverMaterialPoints.length === 0) return 0;
+  const longitude = directionLongitude(direction);
+  const latitude = directionLatitude(direction);
+  const u = Math.floor((((longitude + Math.PI) / (Math.PI * 2)) % 1 + 1) % 1 * RIVER_BIN_WIDTH);
+  const v = Math.min(
+    RIVER_BIN_HEIGHT - 1,
+    Math.max(0, Math.floor(((latitude + Math.PI / 2) / Math.PI) * RIVER_BIN_HEIGHT)),
+  );
+  let best = 0;
+  for (let dv = -1; dv <= 1; dv += 1) {
+    const candidateV = v + dv;
+    if (candidateV < 0 || candidateV >= RIVER_BIN_HEIGHT) continue;
+    for (let du = -1; du <= 1; du += 1) {
+      const candidateU = (u + du + RIVER_BIN_WIDTH) % RIVER_BIN_WIDTH;
+      for (const pointIndex of world.riverMaterialBins[candidateV * RIVER_BIN_WIDTH + candidateU]) {
+        const point = world.riverMaterialPoints[pointIndex];
+        const angularDistance = Math.sqrt(Math.max(0, 2 - 2 *
+          (direction.x * point.x + direction.y * point.y + direction.z * point.z)));
+        const width = point.widthRadians;
+        const t = Math.max(0, Math.min(1, (width - angularDistance) / Math.max(width * 0.65, 1e-5)));
+        best = Math.max(best, t * t * (3 - 2 * t));
+      }
+    }
+  }
+  return best;
 }
 
 // Ultra-fast convex hill-climbing nearest-cell search on spherical Voronoi graph
@@ -353,9 +457,10 @@ function srgbRgbToLinear(rgb: readonly [number, number, number]): [number, numbe
 }
 
 function evaluateWorldMaterial(
-  world: ReturnType<typeof getOrCreateWorld>,
+  world: WorldMaterialContext,
   sample: ReturnType<IPlanetSurfaceSampler['sample']>,
   cell: IPlanetGraphCell,
+  river01Override?: number,
 ) {
   const { ecology, eMin, eMax, tectonics, maxSlope, riverMask, ridgeCellSet } = world;
   return evaluateTerrainMaterial({
@@ -375,7 +480,7 @@ function evaluateWorldMaterial(
       ecology.biome[cell.id] === 'steppe' ? 0.45 :
       ecology.biome[cell.id] === 'savanna' ? 0.25 : 0,
     ridge01: ridgeCellSet.has(cell.id) ? 1 : 0,
-    river01: riverMask[cell.id] ?? 0,
+    river01: river01Override ?? riverMask[cell.id] ?? 0,
   }, {
     snowlineM: tectonics.seaLevelElevation + Math.max(1, eMax - tectonics.seaLevelElevation) * 0.68,
     snowlineBlendM: Math.max(0.05, (eMax - tectonics.seaLevelElevation) * 0.16),
@@ -410,13 +515,25 @@ function buildMaterialTile(
         const latitude = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, globalV * Math.PI - Math.PI / 2));
         const direction = domain.getFieldPosition({ level: 0, x: 0, y: 0 }, longitude, latitude);
         const dir3: IVec3 = { x: direction[0], y: direction[1], z: direction[2] };
-        const sample = world.sampler.sample(dir3);
         const cell = findNearestCellFast(world.graph, dir3, previousCell);
         previousCell = cell;
-        const material = evaluateWorldMaterial(world, sample, cell);
-        return srgbRgbToLinear(terrainMaterialColorRgb(material, {
+        const sample = world.sampler.sampleNear?.(dir3, cell.id) ?? world.sampler.sample(dir3);
+        const river01 = sample.isLand ? narrowRiverInfluence(world, dir3) : 0;
+        const material = evaluateWorldMaterial(world, sample, cell, river01);
+        const base = terrainMaterialColorRgb(material, {
           oceanSubstance: world.profile.oceanSubstance,
-        }));
+        });
+        // Make the slope mask visually legible while keeping it part of the
+        // same material evaluation used by mesh colours.
+        const cliff = Math.max(0, Math.min(1, (material.weights.rock - 0.12) * 1.8));
+        const river = river01 * river01;
+        const riverColour: [number, number, number] = [0.06, 0.18, 0.32];
+        const cliffShade = 1 - cliff * 0.18;
+        return srgbRgbToLinear([
+          (base[0] * (1 - river) + riverColour[0] * river) * cliffShade,
+          (base[1] * (1 - river) + riverColour[1] * river) * cliffShade,
+          (base[2] * (1 - river) + riverColour[2] * river) * cliffShade,
+        ]);
       },
     },
     {
@@ -573,6 +690,8 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
       maxSlope,
       riverMask,
       ridgeCellSet,
+      riverMaterialPoints,
+      riverMaterialBins,
     } =
       getOrCreateWorld(worldProfile, seed);
 
@@ -588,6 +707,8 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
       maxSlope,
       riverMask,
       ridgeCellSet,
+      riverMaterialPoints,
+      riverMaterialBins,
     };
 
     if (data.kind === 'materialTile') {
@@ -770,7 +891,7 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
           colors[o3 + 2] = rgb[2];
         } else if (colorMode === 'material') {
           const material = evaluateWorldMaterial(
-            { graph, tectonics, ecology, features, sampler, eMin, eMax, profile, maxSlope, riverMask, ridgeCellSet },
+            { tectonics, ecology, eMin, eMax, maxSlope, riverMask, ridgeCellSet },
             sample,
             cell,
           );

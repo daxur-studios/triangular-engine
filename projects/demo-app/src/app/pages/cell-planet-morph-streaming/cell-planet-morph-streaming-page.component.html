@@ -188,6 +188,10 @@
         Storage: {{ formatBytes(materialGpu.allocatedBytes) }} each CPU/GPU;
         submitted uploads: {{ formatBytes(materialStreamStats().uploadBytes) }}.
       </p>
+      <p class="control-hint">
+        Last tile: {{ formatMs(materialStreamStats().lastBakeMs) }} worker ·
+        {{ formatMs(materialStreamStats().lastRoundtripMs) }} roundtrip.
+      </p>
       @if (materialStreamStats().error) {
         <p class="control-hint">Texture error: {{ materialStreamStats().error }}</p>
       }
