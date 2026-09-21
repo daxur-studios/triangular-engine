@@ -150,10 +150,7 @@ describe('terrain macro variation material', () => {
   it('keeps the GLSL byte-consistent with the CPU macro sampler', () => {
     expect(TERRAIN_MACRO_VARIATION_GLSL).toContain('17.3, -9.1, 4.7');
     expect(TERRAIN_MACRO_VARIATION_GLSL).toContain(
-      '(0.8 * positionM.x - 0.6 * positionM.z) / (scale * 1.73) - 23.1',
-    );
-    expect(TERRAIN_MACRO_VARIATION_GLSL).toContain(
-      '0.65 + terrainMacroValueNoise3(breakup) * 0.35',
+      'return terrainMacroValueNoise3(broad);',
     );
     expect(TERRAIN_MACRO_VARIATION_GLSL).toContain('vec3(0.12, 0.09, 0.055)');
     expect(TERRAIN_MACRO_VARIATION_GLSL).toContain(

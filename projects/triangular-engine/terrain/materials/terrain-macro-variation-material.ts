@@ -36,17 +36,12 @@ export const TERRAIN_MACRO_VARIATION_GLSL = `
     return mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
   }
 
-  // Planet-safe macro breakup in display metres. The second sample uses a
-  // rotated coordinate basis so the two scales do not form an obvious grid.
+  // Planet-safe macro breakup in display metres. Keep this to one noise sample
+  // because it runs for every visible fragment when enabled.
   float terrainMacroVariation3(vec3 positionM, float scaleM) {
     float scale = max(scaleM, 1.0);
     vec3 broad = positionM / scale + vec3(17.3, -9.1, 4.7);
-    vec3 breakup = vec3(
-      (0.8 * positionM.x - 0.6 * positionM.z) / (scale * 1.73) - 23.1,
-      positionM.y / (scale * 1.73) + 5.7,
-      (0.6 * positionM.x + 0.8 * positionM.z) / (scale * 1.73) + 11.9
-    );
-    return terrainMacroValueNoise3(broad) * 0.65 + terrainMacroValueNoise3(breakup) * 0.35;
+    return terrainMacroValueNoise3(broad);
   }
 
   // Mirror of applyTerrainMacroVariation(): land-only, sign-symmetric warm/cool

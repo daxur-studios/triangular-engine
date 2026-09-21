@@ -315,12 +315,9 @@ export function sampleTerrainMacroVariation(
     positionM[1] / scale - 9.1,
     positionM[2] / scale + 4.7,
   ];
-  const breakup: TerrainMaterialPosition = [
-    (0.8 * positionM[0] - 0.6 * positionM[2]) / (scale * 1.73) - 23.1,
-    positionM[1] / (scale * 1.73) + 5.7,
-    (0.6 * positionM[0] + 0.8 * positionM[2]) / (scale * 1.73) + 11.9,
-  ];
-  return valueNoise3(broad) * 0.65 + valueNoise3(breakup) * 0.35;
+  // Keep the close-range colour breakup to one 3D noise evaluation. A second
+  // octave doubled fragment cost without changing the material semantics.
+  return valueNoise3(broad);
 }
 
 /** Applies the shared land-only macro colour breakup to a base material colour. */

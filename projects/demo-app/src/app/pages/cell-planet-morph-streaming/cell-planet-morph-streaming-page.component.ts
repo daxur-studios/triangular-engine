@@ -248,6 +248,9 @@ export class CellPlanetMorphStreamingPageComponent {
   );
   readonly materialTileLoading = signal(false);
   readonly materialTileDebug = signal(false);
+  readonly cliffInfluenceEnabled = signal(true);
+  readonly cliffInfluenceStrength = signal(1);
+  readonly cliffSlopeDebug = signal(false);
   readonly materialStreamStats = signal({ resident: 0, queued: 0, inFlight: 0,
     completed: 0, maxLevel: 0, selectionMs: 0, uploadBytes: 0,
     lastBakeMs: 0, lastRoundtripMs: 0, error: '' });
@@ -259,6 +262,7 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly randomCellStressLastBatchMs = signal(0);
   readonly randomCellStressElapsedS = signal(0);
   private materialTileDebounceTimer?: number;
+  private cliffStyleDebounceTimer?: number;
   private randomCellStressTimer?: number;
   private randomCellStressLastAt = 0;
   private randomCellStressAccumulator = 0;
@@ -286,9 +290,8 @@ export class CellPlanetMorphStreamingPageComponent {
     'lod',
     'material',
   ];
-  readonly macroVariationEnabled = signal(true);
-  // Match the reference page's visible macro-variation starting point.
-  readonly macroVariationStrength = signal(1);
+  readonly macroVariationEnabled = signal(false);
+  readonly macroVariationStrength = signal(0.35);
   readonly macroVariationScaleM = signal(128);
   readonly wireframe = signal(false);
   readonly freezeLod = signal(false);
@@ -304,6 +307,10 @@ export class CellPlanetMorphStreamingPageComponent {
     WORLD_SIZE_TIER_RADIUS_M.medium * 2.6,
   ]);
   readonly cameraTarget = signal<[number, number, number]>([0, 0, 0]);
+  /** Orbit up blends the local globe radial with the flat map's +Z normal. */
+  readonly orbitUpVector = signal<[number, number, number]>([0, 0, 1]);
+  private readonly orbitUpCameraPosition = new Vector3();
+  private readonly orbitUpScratch = new Vector3();
   readonly formatDistanceM = formatDistanceM;
 
   // Telemetry signals
@@ -818,7 +825,10 @@ export class CellPlanetMorphStreamingPageComponent {
     this.terrainWorker.onerror = handleWorkerError;
     this.materialWorker.onerror = handleWorkerError;
 
-    const textureTick = this.engine.beforeRender$.subscribe(() => this.updateMaterialView());
+    const textureTick = this.engine.beforeRender$.subscribe(() => {
+      this.updateMaterialView();
+      this.updateOrbitUpVector();
+    });
 
     this.destroyRef.onDestroy(() => {
       textureTick.unsubscribe();
@@ -910,6 +920,34 @@ export class CellPlanetMorphStreamingPageComponent {
 
       this.terrainWorker.postMessage(workerReq);
     });
+  }
+
+  private updateOrbitUpVector(): void {
+    const camera = this.engine.camera;
+    camera.getWorldPosition(this.orbitUpCameraPosition);
+    const cameraLength = this.orbitUpCameraPosition.length();
+    if (cameraLength < 1e-4) return;
+
+    const morph = Math.max(0, Math.min(1, this.morphProgress()));
+    const sphereWeight = 1 - morph;
+    this.orbitUpScratch.set(
+      this.orbitUpCameraPosition.x / cameraLength * sphereWeight,
+      this.orbitUpCameraPosition.y / cameraLength * sphereWeight,
+      this.orbitUpCameraPosition.z / cameraLength * sphereWeight + morph,
+    ).normalize();
+    const next: [number, number, number] = [
+      this.orbitUpScratch.x,
+      this.orbitUpScratch.y,
+      this.orbitUpScratch.z,
+    ];
+    const current = this.orbitUpVector();
+    if (
+      Math.abs(current[0] - next[0]) > 1e-3 ||
+      Math.abs(current[1] - next[1]) > 1e-3 ||
+      Math.abs(current[2] - next[2]) > 1e-3
+    ) {
+      this.orbitUpVector.set(next);
+    }
   }
 
   private updateMaterialView(): void {
@@ -1021,6 +1059,9 @@ export class CellPlanetMorphStreamingPageComponent {
         materialTileX: address.x,
         materialTileY: address.y,
         materialTileGrid: [2 ** address.level, 2 ** address.level],
+        heightScaleM: this.terrainHeightScaleM(),
+        cliffStrength: this.cliffInfluenceEnabled() ? this.cliffInfluenceStrength() : 0,
+        cliffDebug: this.cliffSlopeDebug(),
         worldProfile: this.worldProfileKind(),
         seed: this.seed(),
       };
@@ -1353,6 +1394,34 @@ export class CellPlanetMorphStreamingPageComponent {
     if (Number.isFinite(value)) {
       this.macroVariationScaleM.set(Math.max(8, Math.min(128, value)));
     }
+  }
+
+  setCliffInfluenceEnabled(event: Event): void {
+    this.cliffInfluenceEnabled.set((event.target as HTMLInputElement).checked);
+    this.scheduleCliffStyleRefresh();
+  }
+
+  setCliffInfluenceStrength(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (!Number.isFinite(value)) return;
+    this.cliffInfluenceStrength.set(Math.max(0, Math.min(1, value)));
+    this.scheduleCliffStyleRefresh();
+  }
+
+  toggleCliffSlopeDebug(): void {
+    this.cliffSlopeDebug.update(value => !value);
+    this.scheduleCliffStyleRefresh();
+  }
+
+  private scheduleCliffStyleRefresh(): void {
+    if (this.cliffStyleDebounceTimer !== undefined) {
+      clearTimeout(this.cliffStyleDebounceTimer);
+    }
+    this.cliffStyleDebounceTimer = window.setTimeout(() => {
+      this.materialStream.invalidate();
+      this.materialViewKey = '';
+      this.cliffStyleDebounceTimer = undefined;
+    }, 140);
   }
 
   toggleWireframe(): void {

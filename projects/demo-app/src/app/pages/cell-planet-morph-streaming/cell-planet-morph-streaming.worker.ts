@@ -6,6 +6,7 @@ import {
   conformPatchEdges,
   createIndices,
   bakeTerrainMaterialTile,
+  createInterpolatedScalarCache,
   LatLonTerrainDomain,
   evaluateTerrainMaterial,
   terrainMaterialColorRgb,
@@ -87,6 +88,12 @@ export interface CellPlanetMorphMaterialTileRequest {
   readonly materialTileX: number;
   readonly materialTileY: number;
   readonly materialTileGrid: readonly [number, number];
+  /** Physical height multiplier used by the displayed terrain mesh. */
+  readonly heightScaleM?: number;
+  /** Strength of the local slope contribution to the baked cliff material. */
+  readonly cliffStrength?: number;
+  /** Render the local slope as a grayscale diagnostic instead of terrain colour. */
+  readonly cliffDebug?: boolean;
   readonly worldProfile?: WorldProfileKind;
   readonly seed?: number;
 }
@@ -461,14 +468,20 @@ function evaluateWorldMaterial(
   sample: ReturnType<IPlanetSurfaceSampler['sample']>,
   cell: IPlanetGraphCell,
   river01Override?: number,
+  slope01Override?: number,
+  slopeInfluence = 1,
 ) {
   const { ecology, eMin, eMax, tectonics, maxSlope, riverMask, ridgeCellSet } = world;
+  const cellSlope01 = maxSlope > 0 ? (ecology.slope[cell.id] ?? 0) / maxSlope : 0;
+  const slope01 = slope01Override === undefined
+    ? cellSlope01
+    : cellSlope01 + (slope01Override - cellSlope01) * Math.max(0, Math.min(1, slopeInfluence));
   return evaluateTerrainMaterial({
     elevationM: sample.elevation,
     seaLevelM: sample.seaLevel,
     minElevationM: eMin,
     maxElevationM: eMax,
-    slope01: maxSlope > 0 ? (ecology.slope[cell.id] ?? 0) / maxSlope : 0,
+    slope01,
     moisture01: ecology.moisture[cell.id],
     temperature01: ((ecology.temperature[cell.id] ?? 0) + 1) * 0.5,
     snowIce01:
@@ -487,6 +500,62 @@ function evaluateWorldMaterial(
   });
 }
 
+function sampleSurfaceNear(
+  sampler: IPlanetSurfaceSampler,
+  direction: IVec3,
+  hintCellId: number,
+): ReturnType<IPlanetSurfaceSampler['sample']> {
+  return sampler.sampleNear?.(direction, hintCellId) ?? sampler.sample(direction);
+}
+
+/**
+ * Estimates the slope of the actual sampled surface at a lattice point. The two
+ * forward samples keep the tile bake bounded while still following local
+ * mountains, shelves, and feature relief instead of inheriting one value for
+ * the whole Voronoi cell.
+ */
+function sampleLocalSlope01(
+  sampler: IPlanetSurfaceSampler,
+  direction: IVec3,
+  sample: ReturnType<IPlanetSurfaceSampler['sample']>,
+  hintCellId: number,
+  angularStep: number,
+  radiusM: number,
+  heightScaleM: number,
+): number {
+  if (!sample.isLand) return 0;
+  const reference = Math.abs(direction.y) < 0.9
+    ? { x: 0, y: 1, z: 0 }
+    : { x: 1, y: 0, z: 0 };
+  const tangentX = normalize({
+    x: reference.y * direction.z - reference.z * direction.y,
+    y: reference.z * direction.x - reference.x * direction.z,
+    z: reference.x * direction.y - reference.y * direction.x,
+  });
+  const tangentZ = normalize({
+    x: direction.y * tangentX.z - direction.z * tangentX.y,
+    y: direction.z * tangentX.x - direction.x * tangentX.z,
+    z: direction.x * tangentX.y - direction.y * tangentX.x,
+  });
+  const sampleOffset = (tangent: IVec3) => sampleSurfaceNear(
+    sampler,
+    normalize({
+      x: direction.x + tangent.x * angularStep,
+      y: direction.y + tangent.y * angularStep,
+      z: direction.z + tangent.z * angularStep,
+    }),
+    hintCellId,
+  );
+  const tangentSample = sampleOffset(tangentX);
+  const bitangentSample = sampleOffset(tangentZ);
+  const tangentDistanceM = Math.max(1, radiusM * angularStep);
+  const dx = (tangentSample.elevation - sample.elevation) * heightScaleM / tangentDistanceM;
+  const dz = (bitangentSample.elevation - sample.elevation) * heightScaleM / tangentDistanceM;
+  // Convert the displayed surface's physical height gradient to a stable 0..1
+  // steepness signal. atan prevents a narrow feature from saturating the tile.
+  return Math.min(1, Math.atan(Math.hypot(dx, dz)) / (Math.PI * 0.5));
+}
+
 function buildMaterialTile(
   world: ReturnType<typeof getOrCreateWorld>,
   colorMode: CellPlanetMorphWorkerRequest['colorMode'],
@@ -494,16 +563,29 @@ function buildMaterialTile(
   tileX: number,
   tileY: number,
   tileGrid: readonly [number, number],
+  radiusM: number,
+  heightScaleM: number,
+  cliffStrength = 1,
+  cliffDebug = false,
 ): CellPlanetMorphMaterialTilePayload | undefined {
   if (colorMode !== 'material') return undefined;
   const domain = new LatLonTerrainDomain(1, 4, 2);
   const [gridX, gridY] = tileGrid;
+  // Keep the physical slope sampling scale stable while texture LOD changes.
+  // With the demo's 600 km planet this is roughly a 1.5 km tangent offset.
+  const slopeStep = 0.0025;
+  // This lattice is in global texel coordinates, so its points line up across
+  // neighbouring tiles and remain bounded independently of colour resolution.
+  const slopeCacheStep = 4;
+  const slopeCache = createInterpolatedScalarCache(slopeCacheStep);
+  const cliffScale = Math.max(0, Math.min(1, cliffStrength));
+  const sampleLocalSlope = cliffScale > 0 || cliffDebug;
   let previousCell: IPlanetGraphCell | null = null;
   const payload = bakeTerrainMaterialTile(
     {
       worldRevision: cachedWorldKey,
       address: { level: Math.round(Math.log2(gridX)), x: tileX, y: tileY },
-      styleRevision: 'cell-planet-material-v1',
+      styleRevision: 'cell-planet-material-v2',
       samplingVersion: 1,
       format: 'rgba8-linear',
     },
@@ -517,18 +599,54 @@ function buildMaterialTile(
         const dir3: IVec3 = { x: direction[0], y: direction[1], z: direction[2] };
         const cell = findNearestCellFast(world.graph, dir3, previousCell);
         previousCell = cell;
-        const sample = world.sampler.sampleNear?.(dir3, cell.id) ?? world.sampler.sample(dir3);
+        const sample = sampleSurfaceNear(world.sampler, dir3, cell.id);
         const river01 = sample.isLand ? narrowRiverInfluence(world, dir3) : 0;
-        const material = evaluateWorldMaterial(world, sample, cell, river01);
+        const globalPixelX = (tileX + localU) * interiorSize - 0.5;
+        const globalPixelY = (tileY + localV) * interiorSize - 0.5;
+        const slope01 = sampleLocalSlope
+          ? slopeCache.sample(globalPixelX, globalPixelY, (gridPixelX, gridPixelY) => {
+            const gridU = (gridPixelX + 0.5) / (gridX * interiorSize);
+            const gridV = (gridPixelY + 0.5) / (gridY * interiorSize);
+            const gridLongitude = (gridU - Math.floor(gridU)) * Math.PI * 2 - Math.PI;
+            const gridLatitude = Math.max(-Math.PI / 2, Math.min(
+              Math.PI / 2,
+              gridV * Math.PI - Math.PI / 2,
+            ));
+            const gridDirection = domain.getFieldPosition(
+              { level: 0, x: 0, y: 0 },
+              gridLongitude,
+              gridLatitude,
+            );
+            const gridDir3: IVec3 = {
+              x: gridDirection[0], y: gridDirection[1], z: gridDirection[2],
+            };
+            const gridCell = findNearestCellFast(world.graph, gridDir3, previousCell);
+            const gridSample = sampleSurfaceNear(world.sampler, gridDir3, gridCell.id);
+            return sampleLocalSlope01(
+              world.sampler,
+              gridDir3,
+              gridSample,
+              gridCell.id,
+              slopeStep,
+              radiusM,
+              heightScaleM,
+            );
+          })
+          : undefined;
+        if (cliffDebug) {
+          const debugSlope = slope01 ?? 0;
+          return srgbRgbToLinear([debugSlope, debugSlope, debugSlope]);
+        }
+        const material = evaluateWorldMaterial(world, sample, cell, river01, slope01, cliffScale);
         const base = terrainMaterialColorRgb(material, {
           oceanSubstance: world.profile.oceanSubstance,
         });
         // Make the slope mask visually legible while keeping it part of the
         // same material evaluation used by mesh colours.
-        const cliff = Math.max(0, Math.min(1, (material.weights.rock - 0.12) * 1.8));
+        const cliff = Math.max(0, Math.min(1, ((slope01 ?? 0) - 0.28) * 1.45)) * cliffScale;
         const river = river01 * river01;
         const riverColour: [number, number, number] = [0.06, 0.18, 0.32];
-        const cliffShade = 1 - cliff * 0.18;
+        const cliffShade = 1 - cliff * 0.2;
         return srgbRgbToLinear([
           (base[0] * (1 - river) + riverColour[0] * river) * cliffShade,
           (base[1] * (1 - river) + riverColour[1] * river) * cliffShade,
@@ -673,6 +791,55 @@ function compactGeometryAttributes(geometry: BufferGeometry): CompactedMeshAttri
   };
 }
 
+/** Rebuild normals from the same displaced positions that are rendered. */
+function recomputeGridNormals(
+  positions: Float32Array,
+  resolution: number,
+  expectedUp: 'sphere' | 'flat',
+): Float32Array {
+  const normals = new Float32Array(positions.length);
+  const row = resolution + 1;
+  const indexAt = (u: number, v: number) => (v * row + u) * 3;
+  for (let v = 0; v <= resolution; v += 1) {
+    for (let u = 0; u <= resolution; u += 1) {
+      const leftU = Math.max(0, u - 1);
+      const rightU = Math.min(resolution, u + 1);
+      const downV = Math.max(0, v - 1);
+      const upV = Math.min(resolution, v + 1);
+      const left = indexAt(leftU, v);
+      const right = indexAt(rightU, v);
+      const down = indexAt(u, downV);
+      const up = indexAt(u, upV);
+      const dx0 = positions[right] - positions[left];
+      const dx1 = positions[right + 1] - positions[left + 1];
+      const dx2 = positions[right + 2] - positions[left + 2];
+      const dy0 = positions[up] - positions[down];
+      const dy1 = positions[up + 1] - positions[down + 1];
+      const dy2 = positions[up + 2] - positions[down + 2];
+      let nx = dx1 * dy2 - dx2 * dy1;
+      let ny = dx2 * dy0 - dx0 * dy2;
+      let nz = dx0 * dy1 - dx1 * dy0;
+      const length = Math.hypot(nx, ny, nz) || 1;
+      nx /= length;
+      ny /= length;
+      nz /= length;
+      const current = indexAt(u, v);
+      const upX = expectedUp === 'sphere' ? positions[current] : 0;
+      const upY = expectedUp === 'sphere' ? positions[current + 1] : 0;
+      const upZ = expectedUp === 'sphere' ? positions[current + 2] : 1;
+      if (nx * upX + ny * upY + nz * upZ < 0) {
+        nx = -nx;
+        ny = -ny;
+        nz = -nz;
+      }
+      normals[current] = nx;
+      normals[current + 1] = ny;
+      normals[current + 2] = nz;
+    }
+  }
+  return normals;
+}
+
 addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerMessage>) => {
   try {
     const { id, colorMode, worldProfile = 'volcanic', seed = 1 } = data;
@@ -719,6 +886,10 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
         data.materialTileX,
         data.materialTileY,
         data.materialTileGrid,
+        data.radius,
+        data.heightScaleM ?? 1,
+        data.cliffStrength,
+        data.cliffDebug,
       );
       const transferables: ArrayBuffer[] = [];
       if (materialTile) {
@@ -956,6 +1127,14 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
       edgeRefinementLevels,
       edgeRefinementSegments,
     );
+
+    // Lighting and local slope must see the displaced surface, including the
+    // relief multiplier used by the mesh. Radial/flat placeholder normals make
+    // every mountain read as a smooth sphere and create the false inner shine.
+    const actualSphereNormals = recomputeGridNormals(spherePositions, resolution, 'sphere');
+    const actualFlatNormals = recomputeGridNormals(flatPositions, resolution, 'flat');
+    sphereNormals.set(actualSphereNormals);
+    flatNormals.set(actualFlatNormals);
 
     const generationMs = performance.now() - generationStartedAt;
     const simplificationStartedAt = performance.now();

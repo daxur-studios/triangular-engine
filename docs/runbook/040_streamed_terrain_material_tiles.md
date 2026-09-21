@@ -429,6 +429,28 @@ Initial array sampling deliberately uses level zero with bilinear filtering:
 this removes atlas/gutter derivative jumps, but filtered minification and smooth
 cross-LOD transitions remain an explicit M3 follow-up, not a completed seam gate.
 
+### Slope material regression pass (2026-09-21)
+
+The worker no longer reuses one unsmoothed slope value for each 4×4 colour
+block. It evaluates a deterministic scalar lattice in global texel coordinates
+and bilinearly interpolates the four surrounding slope samples. This keeps
+neighbouring tiles aligned, makes gutter samples use the same lattice, removes
+sampling-order dependence, and bounds local height work to the slope lattice
+rather than every colour texel. The tangent offset used to estimate slope is
+fixed in world direction space so the result does not change just because the
+texture LOD changes.
+
+The cliff strength now controls the local slope contribution to material rock
+colour and the additional cliff shade together. The existing cell ecology slope
+remains the baseline material signal. With local cliffs disabled, the worker
+skips local slope sampling; the grayscale slope diagnostic still samples it
+when explicitly enabled. `scalar-grid.spec.ts` covers interpolation across
+former block boundaries, traversal-order independence, and bounded lattice
+evaluation. Library and demo builds pass. Browser/GPU visual checks remain
+pending: inspect the photographed mountain for square patches, test cliff
+strength at zero/full values, inspect tile boundaries while zooming, and
+compare settled performance with local cliffs enabled and disabled.
+
 River-bed colouring belongs to M4's canonical river path/width/bank layer.
 Actual carved beds must use the same river definition in the height sampler;
 arbitrary interactive river authoring/carving is not implied by a colour overlay.
@@ -443,6 +465,33 @@ are indexed into flow-scaled narrow colour strokes. These are still demo-level
 style rules pending browser validation. The macro variation controls remain a
 shader layer because they update instantly without rebaking; baking that signal
 is an optional optimization to measure later, not the default path.
+
+The local slope slice is now implemented in the demo. Material tile texels use
+two nearby canonical surface samples to estimate local slope, so cliff influence
+can follow mountain faces and authored relief instead of inheriting only the
+containing cell's ecology slope. The material panel exposes cliff enable/strength
+controls and a grayscale local-slope diagnostic: black is flat, white is steep.
+Changing these controls invalidates material pages after a short debounce and
+does not rebuild geometry. This remains a worker-side colour bake; it is not a
+per-frame fragment-shader height derivative.
+
+### Geometry/lighting repair and orbit orientation (2026-09-21)
+
+Material slope now uses the displayed physical height scale and local tangent
+spacing, so increasing terrain relief does not leave the cliff mask calibrated
+against an unrelated unitless elevation. Worker-generated sphere and flat meshes
+reconstruct normals from their displaced neighboring positions after edge
+conformance; lighting therefore follows actual terrain faces rather than using
+radial or flat placeholder normals. The demo's orbit controls receive a blended
+up vector: globe radial at sphere morph, world +Z at flat-map morph, and a
+normalized interpolation between them during the transition.
+
+Macro variation is off by default in the demo and its shader/CPU reference now
+uses one noise evaluation instead of two. This keeps the existing optional
+macro look while reducing its visible-fragment cost. The material panel groups
+slope, dynamic-cell, and macro diagnostics so the normal path remains readable.
+Library and demo builds remain required; visual lighting, slope-mask, orbit, and
+browser performance checks are still user-run validation.
 
 - **2026-09-20 — M1/M2 core slice:** added serializable tile identity and payload
   contracts, a linear-RGB RGBA8 baker with sampled gutters and CPU-generated
