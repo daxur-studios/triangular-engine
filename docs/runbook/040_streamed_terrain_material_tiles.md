@@ -1,7 +1,8 @@
 # 040 — Streamed terrain material tiles and game paint layers
 
 Status: staged implementation in progress, 2026-09-21. The fixed-geometry
-material tile prototype is implemented; planetary tile streaming remains ahead.
+material prototype and bounded camera-driven texture streaming slice are
+implemented; M3 filtering/transitions and browser performance acceptance remain open.
 
 ## Outcome
 
@@ -384,6 +385,27 @@ water and geometry editing tools. Provide extension boundaries for them without
 implementing speculative systems. No new browser automation infrastructure.
 
 ## Progress
+
+- **2026-09-21 — Independent texture subdivision:** replaced the demo's fixed
+  2×2 rebake progression with the bounded array contract below. Geometry
+  completion no longer schedules material generation. Selection runs from the
+  actual camera before rendering, independently of mesh freeze, with conservative
+  frustum/morph bounds and globe-only horizon rejection. Retained pages are reused;
+  screen-space slider changes alter selection without changing cache identities.
+  One worker job is in flight; root/desired ancestors are protected and stale or
+  obsolete completions are discarded. Per-layer updates replace whole-atlas
+  uploads. Debug boundaries/level tints and queue, generation-count, selection-time,
+  storage and submitted-byte counters are available on the same route.
+  Same-level gutters are unit-tested. Filtered minification, smooth cross-LOD
+  blending, exact feature/relief-aware visibility, frame upload pacing and GPU
+  timings remain open: this is not the M3 acceptance sign-off.
+  Validation: 16 focused Node/Jasmine specs pass (stream lifecycle, sparse
+  mapping, partial-layer dirty flags, same-level gutters, shader injection and
+  legacy atlas regressions). Library and demo production builds pass. No browser
+  or GPU test was run. User check: material mode, freeze mesh LOD, enable texture
+  tile boundaries, zoom/pan and verify subdivision; hold still until pending work
+  reaches zero, then verify the baked count stops increasing. Revisit a cached
+  region and test random cell edits while material jobs are active.
 
 ### M3 bounded array implementation contract (2026-09-21)
 

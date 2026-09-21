@@ -76,6 +76,41 @@ Framework-free consumers can continue composing
 
 ## Shared material sampling
 
+### Experimental streamed colour tiles (WebGL2)
+
+`selectTerrainMaterialTiles`, `TerrainMaterialTileStream`,
+`TerrainMaterialTileGpu`, and `enableStreamedTerrainMaterial` separate colour
+detail from geometry. The selector takes a projected-size/visibility callback
+and returns unit-square quadtree addresses including ancestors. The stream
+accepts an async tile provider (such as a dedicated worker), deduplicates requests,
+keeps root fallback, discards stale results, and evicts unused pages by LRU.
+Call `invalidate()` only when the world or material recipe changes, not when
+the camera moves or a geometry job finishes. Call `dispose()` on both runtime
+and GPU storage when leaving the scene.
+
+The current GPU adapter is intentionally bounded: 128 resident pages, 128×128
+interiors with two sampled gutter texels, levels 0–10, a sparse two-level lookup,
+and one colour sample per fragment. Bake linear RGBA8 with `mipLevels: 0` and
+use globally consistent sample coordinates for gutters. It uses public
+`DataArrayTexture.addLayerUpdate()` uploads, preserving shared-material batching.
+Use `gpu.setSelection(addresses, stream.resident)` on view changes, then
+`stream.update(addresses)`; the stream's `publish` callback calls `gpu.publish`.
+The shader expects global unit-square `uv`, not patch-local coordinates.
+
+This remains experimental: level-zero bilinear sampling removes shared-atlas
+filtering discontinuities, but filtered minification and smooth cross-LOD
+transitions are not yet implemented. The demo's material detail slider controls
+screen-space pixels per texel, not a global image size. Texture selection still
+runs with **Freeze LOD** enabled; **texture tile boundaries / levels** shows its
+independent subdivisions. The demo supplies conservative morph-aware bounds;
+other domains must supply their own projected-size/visibility callback.
+
+Tile storage is about 10.52 MiB each on CPU and GPU, excluding the provider's
+world data, one pending payload, and driver overhead. A completed tile is about
+68 KiB plus changed mapping pages. Browser shader/performance acceptance and
+the remaining M3 work are tracked in
+[`040 — Streamed terrain material tiles`](../../../docs/runbook/040_streamed_terrain_material_tiles.md).
+
 `evaluateTerrainMaterial` provides a renderer-independent first-pass material
 sample from elevation, slope, climate, ridge, river, and wetness signals. It
 returns normalized weights for water, sand, grass, rock, and snow, plus feature

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added experimental camera-independent material tile selection, a bounded
+  single-flight/LRU stream, sparse two-level texture-array mapping, and shared
+  material lookup in `triangular-engine/terrain`. The morph demo now selects
+  colour tiles independently of mesh LOD and exposes tile debug/queue counters.
+  Filtered minification and smooth cross-LOD transitions remain unfinished.
+
 - Moved browser image compression behind the opt-in
   `triangular-engine/image-compression` entry point so core engine consumers do
   not need to install `browser-image-compression`.

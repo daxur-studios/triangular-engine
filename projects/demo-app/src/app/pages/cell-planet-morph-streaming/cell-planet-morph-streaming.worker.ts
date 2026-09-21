@@ -72,6 +72,11 @@ export interface CellPlanetMorphWorkerRequest {
 }
 
 /** Material-only work is deliberately separate from mesh generation. */
+export interface CellPlanetMorphMaterialTilePayload extends ITerrainMaterialTilePayload {
+  /** Canonical unitless surface elevation relative to sea level at tile centre. */
+  readonly centerElevation: number;
+}
+
 export interface CellPlanetMorphMaterialTileRequest {
   readonly kind: 'materialTile';
   readonly id: number;
@@ -384,15 +389,15 @@ function buildMaterialTile(
   tileX: number,
   tileY: number,
   tileGrid: readonly [number, number],
-): ITerrainMaterialTilePayload | undefined {
+): CellPlanetMorphMaterialTilePayload | undefined {
   if (colorMode !== 'material') return undefined;
   const domain = new LatLonTerrainDomain(1, 4, 2);
   const [gridX, gridY] = tileGrid;
   let previousCell: IPlanetGraphCell | null = null;
-  return bakeTerrainMaterialTile(
+  const payload = bakeTerrainMaterialTile(
     {
       worldRevision: cachedWorldKey,
-      address: { level: 1, x: tileX, y: tileY },
+      address: { level: Math.round(Math.log2(gridX)), x: tileX, y: tileY },
       styleRevision: 'cell-planet-material-v1',
       samplingVersion: 1,
       format: 'rgba8-linear',
@@ -417,9 +422,15 @@ function buildMaterialTile(
     {
       interiorSize,
       gutterSize: 2,
-      mipLevels: Math.max(0, Math.floor(Math.log2(interiorSize)) - 1),
+      // The streaming array uses explicit level-zero sampling; no unused CPU mips.
+      mipLevels: 0,
     },
   );
+  const center = domain.getFieldPosition({ level: 0, x: 0, y: 0 },
+    ((tileX + 0.5) / gridX - 0.5) * Math.PI * 2,
+    ((tileY + 0.5) / gridY - 0.5) * Math.PI);
+  const surface = world.sampler.sample({ x: center[0], y: center[1], z: center[2] });
+  return { ...payload, centerElevation: surface.elevation - surface.seaLevel };
 }
 
 function parseColorToLinearRgb(color: string): [number, number, number] {

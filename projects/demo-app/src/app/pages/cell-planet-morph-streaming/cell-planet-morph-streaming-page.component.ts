@@ -9,6 +9,7 @@ import {
 import { RouterLink } from '@angular/router';
 import {
   EngineModule,
+  EngineService,
   RaycastFocusContext,
   RaycastOrbitControlsComponent,
 } from 'triangular-engine';
@@ -16,8 +17,11 @@ import {
   BatchedMesh,
   Box3,
   DoubleSide,
+  Frustum,
   Matrix4,
   MeshStandardMaterial,
+  Sphere,
+  Vector2,
   Vector3,
 } from 'three';
 import {
@@ -54,17 +58,15 @@ import {
   type MapProjectionKind,
 } from 'triangular-engine/worldgen/render';
 import {
-  createTerrainMaterialTileUniforms,
-  enableTerrainMaterialTileLookup,
-  setTerrainMaterialTileEnabled,
-  updateTerrainMaterialTile,
-  updateTerrainMaterialTileAtlasRegion,
-  setTerrainMaterialTileTiledEnabled,
+  TerrainMaterialTileGpu,
+  TerrainMaterialTileStream,
+  enableStreamedTerrainMaterial,
+  selectTerrainMaterialTiles,
   enableTerrainMacroVariation,
   evaluateTerrainMaterial,
   terrainMaterialColorRgb,
   type ITerrainMaterialTilePayload,
-  type ITerrainMaterialTileUniforms,
+  type ITerrainMaterialTileAddress,
   type ITerrainMacroVariationUniforms,
 } from 'triangular-engine/terrain';
 import type { IVec3, WorldProfileKind } from 'triangular-engine/worldgen';
@@ -77,6 +79,7 @@ import { getTerrainHeightScaleM } from '../cell-planet-25d-map/cell-planet-terra
 import type {
   CellPlanetMorphCellLookupRequest,
   CellPlanetMorphMaterialTileRequest,
+  CellPlanetMorphMaterialTilePayload,
   CellPlanetMorphWorkerRequest,
   CellPlanetMorphWorkerTimings,
 } from './cell-planet-morph-streaming.worker';
@@ -158,12 +161,14 @@ function addressLevel(addr: ILatLonTerrainPatchAddress): number {
   ],
   templateUrl: './cell-planet-morph-streaming-page.component.html',
   styleUrl: './cell-planet-morph-streaming-page.component.scss',
+  providers: [EngineService.provide({ showFPS: true })],
   host: {
     class: 'flex-page',
   },
 })
 export class CellPlanetMorphStreamingPageComponent {
   private readonly destroyRef = inject(DestroyRef);
+  private readonly engine = inject(EngineService);
   readonly dummyField = new StreamingDummyField();
 
   // Background Web Worker for non-blocking terrain sampling, edge conforming, and Meshoptimizer
@@ -191,12 +196,7 @@ export class CellPlanetMorphStreamingPageComponent {
     number,
     {
       readonly kind: 'material' | 'cellLookup';
-      readonly revision: number;
-      readonly resolution?: number;
-      readonly tileX?: number;
-      readonly tileY?: number;
-      readonly phase?: 'coarse' | 'refinement';
-      readonly resolve: () => void;
+      readonly resolve: (payload?: ITerrainMaterialTilePayload) => void;
       readonly reject: (error: Error) => void;
       readonly startedAt: number;
     }
@@ -241,13 +241,15 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly qualityOptions: readonly Quality[] = ['standard', 'high', 'ultra'];
   readonly qualityConfig = computed(() => QUALITY_PRESETS[this.quality()]);
   readonly reductionPercent = signal(35);
-  /** Demo control for the independent material tile; this does not change mesh resolution. */
+  /** Screen-space texture quality; page dimensions and mesh resolution stay fixed. */
   readonly materialTileResolution = signal(256);
   readonly materialTileResolutionLabel = computed(
-    () => `${this.materialTileResolution()}×${this.materialTileResolution()}`,
+    () => `${(1024 / this.materialTileResolution()).toFixed(1)} px/texel`,
   );
-  readonly materialTileResidentResolution = signal(0);
   readonly materialTileLoading = signal(false);
+  readonly materialTileDebug = signal(false);
+  readonly materialStreamStats = signal({ resident: 0, queued: 0, inFlight: 0,
+    completed: 0, maxLevel: 0, selectionMs: 0, uploadBytes: 0, error: '' });
   readonly factionOverlayEnabled = signal(false);
   readonly factionLookupReady = signal(false);
   readonly randomCellStressRunning = signal(false);
@@ -263,13 +265,14 @@ export class CellPlanetMorphStreamingPageComponent {
   private randomCellStressRandomState = 0x6d2b79f5;
   private randomCellStressAutoEnabledOverlay = false;
   private cellPaletteData?: Float32Array;
-  private materialTileRevision = 0;
-  private materialTileStream?: Promise<void>;
-  private readonly materialTileGrid: readonly [number, number] = [2, 2];
-  private readonly materialTileCoarsePayloads = new Map<
-    string,
-    ITerrainMaterialTilePayload
-  >();
+  private materialSelectionAt = -Infinity;
+  private materialViewKey = '';
+  private materialWorldKey = '';
+  private materialRefined: ReadonlySet<string> = new Set();
+  private readonly materialTileElevations = new Map<string, number>();
+  private readonly materialFrustum = new Frustum();
+  private readonly materialViewProjection = new Matrix4();
+  private readonly materialViewport = new Vector2();
   private factionLookupRequest?: Promise<void>;
   readonly rebuildRevision = signal(0);
 
@@ -362,9 +365,22 @@ export class CellPlanetMorphStreamingPageComponent {
     uTerrainMacroScaleM: { value: 48 },
   };
   private readonly cellPerPixelUniforms = createCellPerPixelLookupUniforms();
-  private readonly terrainMaterialTileUniforms: ITerrainMaterialTileUniforms =
-    createTerrainMaterialTileUniforms();
-  private terrainMaterialTileReady = false;
+  readonly materialGpu = new TerrainMaterialTileGpu();
+  private readonly materialStream = new TerrainMaterialTileStream({
+    capacity: this.materialGpu.capacity,
+    request: address => this.requestStreamedMaterialTile(address),
+    publish: (payload, slot, resident) => {
+      this.materialGpu.publish(payload, slot, resident);
+      this.materialGpu.enabled.value = this.colourMode() === 'material' ? 1 : 0;
+      for (const key of this.materialTileElevations.keys()) {
+        if (!resident.has(key)) this.materialTileElevations.delete(key);
+      }
+      const a = payload.identity.address;
+      this.materialTileElevations.set(`${a.level}/${a.x}/${a.y}`,
+        (payload as CellPlanetMorphMaterialTilePayload).centerElevation);
+      this.materialViewKey = '';
+    },
+  });
 
   readonly getKey = addressKey;
   readonly getLevel = addressLevel;
@@ -703,7 +719,7 @@ export class CellPlanetMorphStreamingPageComponent {
     });
     enablePlanetMorphProjection(material, this.morphUniforms);
     enableCellPerPixelLookup(material, this.cellPerPixelUniforms);
-    enableTerrainMaterialTileLookup(material, this.terrainMaterialTileUniforms);
+    enableStreamedTerrainMaterial(material, this.materialGpu);
     return material;
   };
 
@@ -728,53 +744,17 @@ export class CellPlanetMorphStreamingPageComponent {
             updateCellPerPixelLookup(this.cellPerPixelUniforms, data.cellLookup);
             this.factionLookupReady.set(true);
           }
-          if (
-            data.materialTile &&
-            materialPending.revision === this.materialTileRevision
-          ) {
-            if (
-              materialPending.tileX !== undefined &&
-              materialPending.tileY !== undefined
-            ) {
-              const tileKey = `${materialPending.tileX}:${materialPending.tileY}`;
-              if (materialPending.phase === 'coarse') {
-                this.materialTileCoarsePayloads.set(tileKey, data.materialTile);
-              } else {
-                updateTerrainMaterialTileAtlasRegion(
-                  this.terrainMaterialTileUniforms,
-                  data.materialTile,
-                  materialPending.tileX,
-                  materialPending.tileY,
-                  [...this.materialTileGrid],
-                );
-              }
-            } else {
-              updateTerrainMaterialTile(
-                this.terrainMaterialTileUniforms,
-                data.materialTile,
-              );
-            }
-            const isCoarsePage = materialPending.phase === 'coarse';
-            this.terrainMaterialTileReady ||= !isCoarsePage;
-            if (materialPending.phase === 'refinement') {
-              this.materialTileResidentResolution.set(
-                materialPending.resolution ?? 0,
-              );
-            }
-            if (this.colourMode() === 'material' && !isCoarsePage) {
-              setTerrainMaterialTileEnabled(
-                this.terrainMaterialTileUniforms,
-                true,
-              );
-            }
-          }
           if (data.timings) {
             this.timings.set({
               ...data.timings,
               workerMs: performance.now() - materialPending.startedAt,
             });
           }
-          materialPending.resolve();
+          if (materialPending.kind === 'material' && !data.materialTile) {
+            materialPending.reject(new Error('Material worker returned no tile.'));
+          } else {
+            materialPending.resolve(data.materialTile);
+          }
         }
         return;
       }
@@ -789,16 +769,18 @@ export class CellPlanetMorphStreamingPageComponent {
         if (data.cellLookup) {
           updateCellPerPixelLookup(this.cellPerPixelUniforms, data.cellLookup);
           this.factionLookupReady.set(true);
-          setTerrainMaterialTileEnabled(this.terrainMaterialTileUniforms, false);
+          if (this.colourMode() === 'material') {
+            setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, this.factionOverlayEnabled());
+            this.materialGpu.enabled.value = this.materialStream.resident.has('0/0/0') ? 1 : 0;
+          } else {
+            this.materialGpu.enabled.value = 0;
+          }
         } else {
           if (this.colourMode() === 'material') {
-            setTerrainMaterialTileEnabled(
-              this.terrainMaterialTileUniforms,
-              this.terrainMaterialTileReady,
-            );
+            this.materialGpu.enabled.value = this.materialStream.resident.has('0/0/0') ? 1 : 0;
           } else {
             setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, false);
-            setTerrainMaterialTileEnabled(this.terrainMaterialTileUniforms, false);
+            this.materialGpu.enabled.value = 0;
           }
         }
         if (data.timings) {
@@ -808,9 +790,7 @@ export class CellPlanetMorphStreamingPageComponent {
           });
         }
         pending.resolve(data.patch);
-        if (this.colourMode() === 'material') {
-          this.queueMaterialTileProgression(false);
-        }
+        // Geometry completion never invalidates or restarts the texture stream.
       } else {
         pending.reject(new Error('Morph terrain worker returned no patch.'));
       }
@@ -829,7 +809,12 @@ export class CellPlanetMorphStreamingPageComponent {
     this.terrainWorker.onerror = handleWorkerError;
     this.materialWorker.onerror = handleWorkerError;
 
+    const textureTick = this.engine.beforeRender$.subscribe(() => this.updateMaterialView());
+
     this.destroyRef.onDestroy(() => {
+      textureTick.unsubscribe();
+      this.materialStream.dispose();
+      this.materialGpu.dispose();
       if (this.morphLodDebounceTimer !== undefined) {
         clearTimeout(this.morphLodDebounceTimer);
       }
@@ -847,6 +832,8 @@ export class CellPlanetMorphStreamingPageComponent {
       this.workerRequests.clear();
       for (const pending of this.materialTileRequests.values()) pending.reject(error);
       this.materialTileRequests.clear();
+      // The page now owns the engine provider; the child scene reuses it.
+      this.engine.onComponentDestroy();
     });
 
     // Update GPU uniforms whenever morph or projection changes
@@ -916,94 +903,102 @@ export class CellPlanetMorphStreamingPageComponent {
     });
   }
 
-  private queueMaterialTileProgression(invalidate = true): void {
-    if (this.colourMode() !== 'material') return;
-    if (invalidate) this.materialTileRevision += 1;
-    if (this.materialTileStream) return;
-
-    this.materialTileLoading.set(true);
-    this.materialTileStream = this.runMaterialTileProgression()
-      .catch(() => undefined)
-      .finally(() => {
-        this.materialTileStream = undefined;
-        this.materialTileLoading.set(false);
-      });
-  }
-
-  private async runMaterialTileProgression(): Promise<void> {
-    while (this.colourMode() === 'material') {
-      const revision = this.materialTileRevision;
-      const desired = this.materialTileResolution();
-
-      // Generate four small fallback pages first. Keep the old atlas/direct
-      // tile visible until every coarse page is ready, then refine pages one by
-      // one so completed work becomes visible immediately.
-      this.materialTileCoarsePayloads.clear();
-      await Promise.all(
-        this.materialTileAddresses().map(({ x, y }) =>
-          this.requestMaterialTile(64, revision, x, y, 'coarse'),
-        ),
-      );
-      if (revision !== this.materialTileRevision) continue;
-
-      for (const [key, payload] of this.materialTileCoarsePayloads) {
-        const [x, y] = key.split(':').map(Number);
-        updateTerrainMaterialTileAtlasRegion(
-          this.terrainMaterialTileUniforms,
-          payload,
-          x,
-          y,
-          [...this.materialTileGrid],
-        );
-      }
-      this.terrainMaterialTileReady = true;
-      setTerrainMaterialTileEnabled(this.terrainMaterialTileUniforms, true);
-      setTerrainMaterialTileTiledEnabled(this.terrainMaterialTileUniforms, true);
-      this.materialTileResidentResolution.set(64 * this.materialTileGrid[0]);
-
-      const tileResolution = Math.max(
-        64,
-        Math.round(desired / this.materialTileGrid[0] / 64) * 64,
-      );
-      this.materialTileCoarsePayloads.clear();
-      await Promise.all(
-        this.materialTileAddresses().map(({ x, y }) =>
-          this.requestMaterialTile(tileResolution, revision, x, y, 'refinement'),
-        ),
-      );
-      if (revision === this.materialTileRevision) {
-        this.materialTileResidentResolution.set(tileResolution * this.materialTileGrid[0]);
-        return;
-      }
+  private updateMaterialView(): void {
+    const now = performance.now();
+    if (now - this.materialSelectionAt < 150) return;
+    this.materialSelectionAt = now;
+    if (this.colourMode() !== 'material') {
+      this.materialStream.update([]);
+      return;
     }
+    const worldKey = `${this.seed()}:${this.worldProfileKind()}:${this.radius()}`;
+    if (worldKey !== this.materialWorldKey) {
+      this.materialWorldKey = worldKey;
+      this.materialStream.invalidate();
+      this.materialGpu.enabled.value = 0;
+      this.materialViewKey = '';
+      this.materialRefined = new Set();
+      this.materialTileElevations.clear();
+    }
+    const camera = this.engine.camera;
+    camera.updateMatrixWorld();
+    const viewport = this.engine.renderer.getDrawingBufferSize(this.materialViewport);
+    const viewKey = [worldKey, ...camera.matrixWorld.elements, ...camera.projectionMatrix.elements,
+      viewport.x, viewport.y, this.morphProgress(), this.projectionKind(),
+      this.materialTileResolution(), this.terrainHeightScaleM()].join(',');
+    let selectionMs = this.materialStreamStats().selectionMs;
+    if (viewKey !== this.materialViewKey) {
+      const started = performance.now();
+      this.materialViewKey = viewKey;
+      this.materialViewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      this.materialFrustum.setFromProjectionMatrix(this.materialViewProjection);
+      const radius = this.radius();
+      const morph = this.morphProgress();
+      const projection = this.projectionKind() === 'equirectangular' ? EQUIRECTANGULAR_PROJECTION : EQUAL_EARTH_PROJECTION;
+      const cameraPosition = new Vector3().setFromMatrixPosition(camera.matrixWorld);
+      const focalPixels = Math.max(viewport.x * camera.projectionMatrix.elements[0],
+        viewport.y * camera.projectionMatrix.elements[5]) * 0.5;
+      const bounds = new Sphere();
+      const centerDirection = new Vector3();
+      const measure = (a: ITerrainMaterialTileAddress): number => {
+        if (a.level === 0) return Math.max(viewport.x, viewport.y) * 4;
+        const scale = 2 ** a.level;
+        const longitude = ((a.x + 0.5) / scale - 0.5) * Math.PI * 2;
+        const latitude = ((a.y + 0.5) / scale - 0.5) * Math.PI;
+        const direction = this.domain().getFieldPosition({ level: 0, x: 0, y: 0 }, longitude, latitude);
+        centerDirection.set(...direction);
+        let elevation = 0.35;
+        for (let level = a.level; level >= 0; level--) {
+          const divisor = 2 ** (a.level - level);
+          const sampled = this.materialTileElevations.get(`${level}/${Math.floor(a.x / divisor)}/${Math.floor(a.y / divisor)}`);
+          if (sampled !== undefined && Number.isFinite(sampled)) { elevation = sampled; break; }
+        }
+        const height = elevation * this.terrainHeightScaleM();
+        const projected = projection.project(longitude, latitude, Math.PI * 2 * radius, Math.PI * radius);
+        bounds.center.set(
+          direction[0] * (radius + height) * (1 - morph) + (projected.x - Math.PI * radius) * morph,
+          direction[1] * (radius + height) * (1 - morph) + (Math.PI * radius * 0.5 - projected.y) * morph,
+          direction[2] * (radius + height) * (1 - morph) + height * morph,
+        );
+        // Conservative angular/path bounds include displayed relief. Never use
+        // coarse mesh vertices to decide the available texture resolution.
+        const halfAngle = Math.min(Math.PI, 1.5 * Math.PI / scale);
+        // Canonical elevations here are unitless (~order one), not metres.
+        const reliefMargin = this.terrainHeightScaleM() * 2;
+        bounds.radius = radius * halfAngle * 1.3 + reliefMargin;
+        if (!this.materialFrustum.intersectsSphere(bounds)) return 0;
+        if (morph < 0.001 && cameraPosition.length() > radius + reliefMargin) {
+          const angle = Math.acos(Math.max(-1, Math.min(1, centerDirection.dot(cameraPosition) / cameraPosition.length())));
+          const horizon = Math.acos(Math.min(1, radius / cameraPosition.length()));
+          if (angle - halfAngle > horizon + 0.12) return 0;
+        }
+        const distance = Math.max(radius * 0.000001,
+          cameraPosition.distanceTo(bounds.center) - radius * halfAngle * 1.3);
+        // Relief is a visibility margin, not extra texture area at every depth.
+        return (radius * Math.PI * 2 / scale) * focalPixels / distance;
+      };
+      const selection = selectTerrainMaterialTiles({ measure,
+        targetTilePixels: this.materialGpu.interiorSize * 1024 / this.materialTileResolution(),
+        previousRefined: this.materialRefined, maxTiles: 96, maxLevel: 10 });
+      this.materialRefined = selection.refined;
+      this.materialGpu.setSelection(selection.addresses, this.materialStream.resident);
+      this.materialStream.update(selection.addresses);
+      selectionMs = performance.now() - started;
+    }
+    const stream = this.materialStream;
+    const maxLevel = Math.max(0, ...[...stream.resident.values()].map(p => p.address.level));
+    this.materialStreamStats.set({ resident: stream.resident.size, queued: stream.queued,
+      inFlight: stream.inFlight, completed: stream.completed, maxLevel, selectionMs,
+      uploadBytes: this.materialGpu.uploadedBytes, error: stream.lastError ?? '' });
+    this.materialTileLoading.set(stream.queued > 0 || stream.inFlight > 0);
   }
 
-  private materialTileAddresses(): readonly { readonly x: number; readonly y: number }[] {
-    return [
-      { x: 0, y: 0 },
-      { x: 1, y: 0 },
-      { x: 0, y: 1 },
-      { x: 1, y: 1 },
-    ];
-  }
-
-  private requestMaterialTile(
-    resolution: number,
-    revision: number,
-    tileX?: number,
-    tileY?: number,
-    phase?: 'coarse' | 'refinement',
-  ): Promise<void> {
+  private requestStreamedMaterialTile(address: ITerrainMaterialTileAddress): Promise<ITerrainMaterialTilePayload> {
     const id = this.nextWorkerRequestId++;
     return new Promise((resolve, reject) => {
       this.materialTileRequests.set(id, {
         kind: 'material',
-        revision,
-        resolution,
-        tileX,
-        tileY,
-        phase,
-        resolve,
+        resolve: payload => payload ? resolve(payload) : reject(new Error('Missing material payload.')),
         reject,
         startedAt: performance.now(),
       });
@@ -1012,10 +1007,10 @@ export class CellPlanetMorphStreamingPageComponent {
         id,
         radius: this.radius(),
         colorMode: 'material',
-        materialTileResolution: resolution,
-        materialTileX: tileX ?? 0,
-        materialTileY: tileY ?? 0,
-        materialTileGrid: this.materialTileGrid,
+        materialTileResolution: this.materialGpu.interiorSize,
+        materialTileX: address.x,
+        materialTileY: address.y,
+        materialTileGrid: [2 ** address.level, 2 ** address.level],
         worldProfile: this.worldProfileKind(),
         seed: this.seed(),
       };
@@ -1031,8 +1026,7 @@ export class CellPlanetMorphStreamingPageComponent {
     const requestPromise = new Promise<void>((resolve, reject) => {
       this.materialTileRequests.set(id, {
         kind: 'cellLookup',
-        revision: this.materialTileRevision,
-        resolve,
+        resolve: () => resolve(),
         reject,
         startedAt: performance.now(),
       });
@@ -1280,8 +1274,13 @@ export class CellPlanetMorphStreamingPageComponent {
       clearTimeout(this.materialTileDebounceTimer);
     }
     this.materialTileDebounceTimer = window.setTimeout(() => {
-      this.queueMaterialTileProgression();
+      this.materialViewKey = '';
     }, 180);
+  }
+
+  toggleMaterialTileDebug(): void {
+    this.materialTileDebug.update(value => !value);
+    this.materialGpu.debug.value = this.materialTileDebug() ? 1 : 0;
   }
 
   setHeightScale(event: Event): void {
@@ -1315,12 +1314,10 @@ export class CellPlanetMorphStreamingPageComponent {
     const value = (event.target as HTMLSelectElement).value as ColourMode;
     if (this.colourModes.includes(value)) {
       this.colourMode.set(value);
-      setTerrainMaterialTileEnabled(
-        this.terrainMaterialTileUniforms,
-        value === 'material' && this.terrainMaterialTileReady,
-      );
+      this.materialGpu.enabled.value = value === 'material' && this.materialStream.resident.has('0/0/0') ? 1 : 0;
       if (value === 'material') {
-        this.queueMaterialTileProgression();
+        this.materialViewKey = '';
+        setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, this.factionOverlayEnabled());
       } else {
         this.factionOverlayEnabled.set(false);
         setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, false);

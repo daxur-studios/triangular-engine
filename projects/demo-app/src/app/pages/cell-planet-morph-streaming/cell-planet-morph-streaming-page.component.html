@@ -172,15 +172,28 @@
         />
       </label>
       <p class="control-hint">
-        Independent colour tile resolution. Mesh resolution remains
+        Screen-space target (lower px/texel = sharper). Tiles subdivide on zoom;
+        mesh resolution remains
         {{ qualityConfig().resolution }}.
       </p>
       <p class="control-hint">
-        Loaded: {{ materialTileResidentResolution() || "coarse fallback pending" }}
+        {{ materialStreamStats().resident }}/128 cached tiles · deepest L{{ materialStreamStats().maxLevel }}
         @if (materialTileLoading()) {
           · refining…
         }
       </p>
+      <p class="control-hint">
+        {{ materialStreamStats().queued }} pending · {{ materialStreamStats().inFlight }} in flight ·
+        {{ materialStreamStats().completed }} baked · selection {{ materialStreamStats().selectionMs.toFixed(2) }}ms.
+        Storage: {{ formatBytes(materialGpu.allocatedBytes) }} each CPU/GPU;
+        submitted uploads: {{ formatBytes(materialStreamStats().uploadBytes) }}.
+      </p>
+      @if (materialStreamStats().error) {
+        <p class="control-hint">Texture error: {{ materialStreamStats().error }}</p>
+      }
+      <button type="button" (click)="toggleMaterialTileDebug()">
+        {{ materialTileDebug() ? "Hide" : "Show" }} texture tile boundaries / levels
+      </button>
       <button type="button" (click)="toggleFactionOverlay()">
         {{ factionOverlayEnabled() ? "Hide" : "Show" }} demo faction colours
       </button>
