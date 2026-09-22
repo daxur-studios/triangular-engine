@@ -160,7 +160,7 @@
       />
     </label>
 
-    @if (colourMode() === "material") {
+    @if (isStreamedTextureLodEnabled()) {
       <label>
         <span>Texture detail: {{ materialTileResolutionLabel() }}</span>
         <input
@@ -209,6 +209,21 @@
         }
       </select>
     </label>
+
+    @if (colourMode() !== "lod") {
+      <label class="checkbox-row">
+        <input
+          type="checkbox"
+          [checked]="isStreamedTextureLodEnabled()"
+          (change)="setStreamedTextureLod($event)"
+        />
+        <span>Use streamed texture LOD for {{ colourMode() }}</span>
+      </label>
+    } @else {
+      <p class="control-hint">
+        LOD colours show mesh patch levels, so streamed texture LOD is unavailable in this diagnostic mode.
+      </p>
+    }
 
     @if (colourMode() === "material") {
       <details class="control-subsection">

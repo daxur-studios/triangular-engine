@@ -86,6 +86,7 @@ import type {
 
 type Quality = 'standard' | 'high' | 'ultra';
 type ColourMode = 'natural' | 'elevation' | 'plates' | 'lod' | 'material';
+type StreamedTextureColourMode = Exclude<ColourMode, 'lod'>;
 
 interface QualityPreset {
   readonly maxLod: number;
@@ -290,6 +291,12 @@ export class CellPlanetMorphStreamingPageComponent {
     'lod',
     'material',
   ];
+  readonly streamedTextureLod = signal<Record<StreamedTextureColourMode, boolean>>({
+    natural: false,
+    elevation: false,
+    plates: false,
+    material: true,
+  });
   readonly macroVariationEnabled = signal(false);
   readonly macroVariationStrength = signal(0.35);
   readonly macroVariationScaleM = signal(128);
@@ -379,7 +386,7 @@ export class CellPlanetMorphStreamingPageComponent {
     request: address => this.requestStreamedMaterialTile(address),
     publish: (payload, slot, resident) => {
       this.materialGpu.publish(payload, slot, resident);
-      this.materialGpu.enabled.value = this.colourMode() === 'material' ? 1 : 0;
+      this.materialGpu.enabled.value = this.isStreamedTextureLodEnabled() ? 1 : 0;
       for (const key of this.materialTileElevations.keys()) {
         if (!resident.has(key)) this.materialTileElevations.delete(key);
       }
@@ -789,17 +796,15 @@ export class CellPlanetMorphStreamingPageComponent {
           this.factionLookupReady.set(true);
           if (this.colourMode() === 'material') {
             setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, this.factionOverlayEnabled());
-            this.materialGpu.enabled.value = this.materialStream.resident.has('0/0/0') ? 1 : 0;
-          } else {
-            this.materialGpu.enabled.value = 0;
-          }
-        } else {
-          if (this.colourMode() === 'material') {
-            this.materialGpu.enabled.value = this.materialStream.resident.has('0/0/0') ? 1 : 0;
           } else {
             setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, false);
-            this.materialGpu.enabled.value = 0;
           }
+          this.materialGpu.enabled.value = this.isStreamedTextureLodEnabled() && this.materialStream.resident.has('0/0/0') ? 1 : 0;
+        } else {
+          if (this.colourMode() !== 'material') {
+            setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, false);
+          }
+          this.materialGpu.enabled.value = this.isStreamedTextureLodEnabled() && this.materialStream.resident.has('0/0/0') ? 1 : 0;
         }
         if (data.timings) {
           this.timings.set({
@@ -956,8 +961,9 @@ export class CellPlanetMorphStreamingPageComponent {
     const now = performance.now();
     if (now - this.materialSelectionAt < 150) return;
     this.materialSelectionAt = now;
-    if (this.colourMode() !== 'material') {
+    if (!this.isStreamedTextureLodEnabled()) {
       this.materialStream.update([]);
+      this.materialGpu.enabled.value = 0;
       return;
     }
     const worldKey = `${this.seed()}:${this.worldProfileKind()}:${this.radius()}`;
@@ -1056,7 +1062,7 @@ export class CellPlanetMorphStreamingPageComponent {
         kind: 'materialTile',
         id,
         radius: this.radius(),
-        colorMode: 'material',
+        colorMode: this.colourMode() as StreamedTextureColourMode,
         materialTileResolution: this.materialGpu.interiorSize,
         materialTileX: address.x,
         materialTileY: address.y,
@@ -1367,7 +1373,9 @@ export class CellPlanetMorphStreamingPageComponent {
     const value = (event.target as HTMLSelectElement).value as ColourMode;
     if (this.colourModes.includes(value)) {
       this.colourMode.set(value);
-      this.materialGpu.enabled.value = value === 'material' && this.materialStream.resident.has('0/0/0') ? 1 : 0;
+      this.materialGpu.enabled.value = value !== 'lod' && this.streamedTextureLod()[value] && this.materialStream.resident.has('0/0/0') ? 1 : 0;
+      this.materialStream.invalidate();
+      this.materialViewKey = '';
       if (value === 'material') {
         this.materialViewKey = '';
         setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, this.factionOverlayEnabled());
@@ -1378,6 +1386,21 @@ export class CellPlanetMorphStreamingPageComponent {
         this.rebuildRevision.update((r) => r + 1);
       }
     }
+  }
+
+  isStreamedTextureLodEnabled(): boolean {
+    const mode = this.colourMode();
+    return mode !== 'lod' && this.streamedTextureLod()[mode];
+  }
+
+  setStreamedTextureLod(event: Event): void {
+    const mode = this.colourMode();
+    if (mode === 'lod') return;
+    const enabled = (event.target as HTMLInputElement).checked;
+    this.streamedTextureLod.update(values => ({ ...values, [mode]: enabled }));
+    this.materialStream.invalidate();
+    this.materialViewKey = '';
+    this.materialGpu.enabled.value = enabled && this.materialStream.resident.has('0/0/0') ? 1 : 0;
   }
 
   setMacroVariationEnabled(event: Event): void {

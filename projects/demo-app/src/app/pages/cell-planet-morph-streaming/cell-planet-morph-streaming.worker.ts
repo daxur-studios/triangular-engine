@@ -83,7 +83,7 @@ export interface CellPlanetMorphMaterialTileRequest {
   readonly kind: 'materialTile';
   readonly id: number;
   readonly radius: number;
-  readonly colorMode: 'material';
+  readonly colorMode: 'natural' | 'elevation' | 'plates' | 'material';
   readonly materialTileResolution: number;
   readonly materialTileX: number;
   readonly materialTileY: number;
@@ -568,7 +568,7 @@ function buildMaterialTile(
   cliffStrength = 1,
   cliffDebug = false,
 ): CellPlanetMorphMaterialTilePayload | undefined {
-  if (colorMode !== 'material') return undefined;
+  if (colorMode === 'lod') return undefined;
   const domain = new LatLonTerrainDomain(1, 4, 2);
   const [gridX, gridY] = tileGrid;
   // Keep the physical slope sampling scale stable while texture LOD changes.
@@ -585,7 +585,7 @@ function buildMaterialTile(
     {
       worldRevision: cachedWorldKey,
       address: { level: Math.round(Math.log2(gridX)), x: tileX, y: tileY },
-      styleRevision: 'cell-planet-material-v2',
+      styleRevision: `cell-planet-${colorMode}-v1`,
       samplingVersion: 1,
       format: 'rgba8-linear',
     },
@@ -600,6 +600,32 @@ function buildMaterialTile(
         const cell = findNearestCellFast(world.graph, dir3, previousCell);
         previousCell = cell;
         const sample = sampleSurfaceNear(world.sampler, dir3, cell.id);
+        if (colorMode === 'natural') {
+          if (!sample.isLand) {
+            return parseColorToLinearRgb(
+              world.profile.oceanSubstance === 'lava' ? lavaOceanColor() : OCEAN_COLOR,
+            );
+          }
+          const feature = world.features.featureByCellId.get(cell.id);
+          if (feature?.kind === 'volcano') {
+            const displayedHeight = (sample.elevation - sample.seaLevel) * heightScaleM;
+            return displayedHeight > Math.max(3, heightScaleM * 0.28)
+              ? [0.46, 0.22, 0.16]
+              : [0.12, 0.11, 0.12];
+          }
+          return parseColorToLinearRgb(biomeColor(world.ecology.biome[cell.id]));
+        }
+        if (colorMode === 'elevation') {
+          return parseColorToLinearRgb(elevationColor(
+            world.tectonics.elevation[cell.id] ?? sample.seaLevel,
+            world.tectonics.seaLevelElevation,
+            world.eMin,
+            world.eMax,
+          ));
+        }
+        if (colorMode === 'plates') {
+          return parseColorToLinearRgb(plateColor(world.tectonics.plateIdByCell[cell.id] ?? 0));
+        }
         const river01 = sample.isLand ? narrowRiverInfluence(world, dir3) : 0;
         const globalPixelX = (tileX + localU) * interiorSize - 0.5;
         const globalPixelY = (tileY + localV) * interiorSize - 0.5;
