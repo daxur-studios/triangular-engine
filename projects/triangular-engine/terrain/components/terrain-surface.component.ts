@@ -475,17 +475,60 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     // all of its resident children. This keeps the surface covered while
     // allowing nearby completed worker results to become visible during motion.
     const groups = this.completedReplacementGroups();
-    let removedResident = false;
+    this.pruneCoveredStaleResidents();
     for (const group of groups) {
       if (!group.every((key) => this.residents.has(key) || this.completed.has(key)))
         continue;
 
       const groupKeys = new Set(group);
-      for (const [key, resident] of this.residents) {
-        if (groupKeys.has(key) || this.replacedByGroup(key, group)) {
-          this.removePatch(key, resident);
-          removedResident = true;
+      let replacedResidents = [...this.residents].filter(
+        ([key, resident]) =>
+          groupKeys.has(key) || this.replacedByGroup(key, group),
+      );
+      const installingKeys = group.filter(
+        (key) =>
+          !this.residents.has(key) &&
+          this.completed.has(key) &&
+          this.queue.desired.has(key),
+      );
+
+      // Camera movement can leave patches from an older cut resident while a
+      // new cut is being assembled. Release any such patch only after the
+      // current resident cut fully covers its footprint, then admit a group
+      // only when the batch has room for its complete replacement.
+      if (
+        this.batching() &&
+        installingKeys.some((key) => !this.completed.get(key)?.patch.skirt)
+      ) {
+        const batchInstallCount = installingKeys.filter(
+          (key) => !this.completed.get(key)?.patch.skirt,
+        ).length;
+        const wouldExceedCapacity = (): boolean => {
+          const removedBatchResidents = replacedResidents.filter(
+            ([, resident]) => resident.batchInstanceId !== undefined,
+          ).length;
+          return (
+            this.batchedResidentCount() - removedBatchResidents + batchInstallCount >
+            this.batchedInstanceCapacity()
+          );
+        };
+        if (wouldExceedCapacity()) {
+          this.pruneCoveredStaleResidents();
+          replacedResidents = [...this.residents].filter(
+            ([key]) =>
+              groupKeys.has(key) || this.replacedByGroup(key, group),
+          );
+          if (wouldExceedCapacity()) continue;
         }
+      }
+
+      for (const [key, resident] of replacedResidents) {
+        this.removePatch(key, resident);
+      }
+      if (
+        replacedResidents.some(([, resident]) => resident.batchGeometryId !== undefined)
+      ) {
+        this.batchedRender?.object.optimize();
       }
       for (const key of group) {
         const completed = this.completed.get(key);
@@ -493,6 +536,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
         this.installPatch(key, completed.address, completed.patch);
         this.completed.delete(key);
       }
+      this.pruneCoveredStaleResidents();
     }
 
     // Dispose completed results that are no longer part of the desired cut.
@@ -501,7 +545,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     for (const key of this.completed.keys()) {
       if (!this.queue.desired.has(key)) this.completed.delete(key);
     }
-    if (removedResident && this.batchedRender) this.batchedRender.object.optimize();
+    this.pruneCoveredStaleResidents();
   }
 
   private completedReplacementGroups(): string[][] {
@@ -576,6 +620,72 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       if (!this.residents.has(key)) return false;
     }
     return true;
+  }
+
+  private batchedResidentCount(): number {
+    let count = 0;
+    for (const resident of this.residents.values()) {
+      if (resident.batchInstanceId !== undefined) count += 1;
+    }
+    return count;
+  }
+
+  private batchedInstanceCapacity(): number {
+    return (
+      this.batchedRender?.object.maxInstanceCount ??
+      Math.max(256, Math.floor(this.maxPatches() ?? 1024))
+    );
+  }
+
+  /** Remove an obsolete patch only after resident desired patches cover it. */
+  private pruneCoveredStaleResidents(): boolean {
+    const desired = [...this.queue.desired].flatMap((key) => {
+      const address = this.desiredAddresses.get(key);
+      return address === undefined ? [] : [{ key, address }];
+    });
+    if (desired.length === 0) return false;
+
+    let removed = false;
+    for (const [key, resident] of this.residents) {
+      if (this.queue.desired.has(key)) continue;
+      if (!this.isAddressCoveredByDesiredResidents(resident.address, desired)) continue;
+      this.removePatch(key, resident);
+      removed = true;
+    }
+    if (removed) this.batchedRender?.object.optimize();
+    return removed;
+  }
+
+  private isAddressCoveredByDesiredResidents(
+    address: TAddress,
+    desired: readonly { readonly key: string; readonly address: TAddress }[],
+  ): boolean {
+    const visit = (candidate: TAddress): boolean => {
+      for (const patch of desired) {
+        if (
+          this.residents.has(patch.key) &&
+          this.patchContains(patch.address, candidate)
+        ) {
+          return true;
+        }
+      }
+
+      // A desired patch below this address means its siblings must also be
+      // resident before this coarser patch can be released.
+      const descendants = desired.filter((patch) =>
+        this.patchContains(candidate, patch.address),
+      );
+      if (descendants.length === 0) return false;
+      const exactPatch = descendants.some((patch) =>
+        this.patchContains(patch.address, candidate),
+      );
+      if (exactPatch) return false;
+
+      const children = this.domain().getChildren(candidate);
+      return children.length > 0 && children.every(visit);
+    };
+
+    return visit(address);
   }
 
   private selectCustomPatches(
@@ -662,23 +772,34 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   ): void {
     const batch = this.getBatchedRender();
     const geometry = this.createGeometry(patch, address, patch.surface, false);
-    const geometryId = batch.object.addGeometry(geometry);
-    const instanceId = batch.object.addInstance(geometryId);
-    registerTerrainBatchInstance(batch.object, instanceId);
-    const matrix = new Matrix4().makeTranslation(...patch.centerWorldM);
-    batch.object.setMatrixAt(instanceId, matrix);
-    const geometryBytes = geometryByteCount(geometry);
-    geometry.dispose();
-    this.residents.set(key, {
-      address,
-      object: batch.object,
-      material: batch.material,
-      batchGeometryId: geometryId,
-      batchInstanceId: instanceId,
-      drawCalls: 0,
-      geometryBytes,
-      triangles: patch.surface.indices.length / 3,
-    });
+    let geometryId: number | undefined;
+    let instanceId: number | undefined;
+    try {
+      geometryId = batch.object.addGeometry(geometry);
+      instanceId = batch.object.addInstance(geometryId);
+      registerTerrainBatchInstance(batch.object, instanceId);
+      const matrix = new Matrix4().makeTranslation(...patch.centerWorldM);
+      batch.object.setMatrixAt(instanceId, matrix);
+      this.residents.set(key, {
+        address,
+        object: batch.object,
+        material: batch.material,
+        batchGeometryId: geometryId,
+        batchInstanceId: instanceId,
+        drawCalls: 0,
+        geometryBytes: geometryByteCount(geometry),
+        triangles: patch.surface.indices.length / 3,
+      });
+    } catch (error) {
+      if (instanceId !== undefined) {
+        unregisterTerrainBatchInstance(batch.object, instanceId);
+        batch.object.deleteInstance(instanceId);
+      }
+      if (geometryId !== undefined) batch.object.deleteGeometry(geometryId);
+      throw error;
+    } finally {
+      geometry.dispose();
+    }
   }
 
   private getBatchedRender(): { readonly object: BatchedMesh; readonly material: Material } {

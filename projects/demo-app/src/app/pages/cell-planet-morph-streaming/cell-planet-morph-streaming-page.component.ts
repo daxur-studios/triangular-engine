@@ -682,7 +682,9 @@ export class CellPlanetMorphStreamingPageComponent {
     // costs three additional patches, so the result always stays within the
     // configured maxPatches while remaining a complete quadtree cut.
     const frontier = request.roots.map((root) => measure(root));
-    while (frontier.length < maxPatches) {
+    // Refining one leaf replaces it with four children, adding three leaves.
+    // Keep the complete cut within the selector's hard budget.
+    while (frontier.length + 3 <= maxPatches) {
       let bestIndex = -1;
       let bestPriority = 1;
       for (let index = 0; index < frontier.length; index += 1) {

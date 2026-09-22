@@ -1,6 +1,6 @@
 import { fakeAsync, flushMicrotasks, TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
-import { PerspectiveCamera, Scene } from 'three';
+import { BatchedMesh, PerspectiveCamera, Scene } from 'three';
 import { EngineService } from 'triangular-engine';
 import { ConstantTerrainField } from '../core/terrain-field';
 import { PlaneTerrainDomain } from '../domains/plane-terrain-domain';
@@ -226,6 +226,48 @@ describe('TerrainSurfaceComponent', () => {
     await Promise.resolve();
     beforeRender$.next();
     expect(scene.children[0].children.length).toBe(4);
+  });
+
+  it('keeps batched residents bounded while zooming between complete LOD cuts', () => {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    const roots: IPlaneTerrainPatchAddress[] = [
+      { level: 0, x: 0, z: 0 },
+      { level: 0, x: 1, z: 0 },
+      { level: 0, x: 0, z: 1 },
+      { level: 0, x: 1, z: 1 },
+    ];
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', roots);
+    fixture.componentRef.setInput('maxLod', 1);
+    fixture.componentRef.setInput('maxPatches', 7);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('generationBudget', 100);
+    fixture.componentRef.setInput('batching', true);
+    fixture.componentRef.setInput(
+      'patchSelector',
+      ({ domain, roots: selected, cameraWorldM }:
+        ITerrainSurfaceSelectionRequest<IPlaneTerrainPatchAddress>) => {
+        const splitIndex = cameraWorldM[0] < 0 ? 0 : 1;
+        return selected.flatMap((root, index) =>
+          index === splitIndex ? domain.getChildren(root) : [root],
+        );
+      },
+    );
+    camera.position.set(5_000, 100, 5_000);
+    fixture.detectChanges();
+    beforeRender$.next();
+
+    for (let index = 0; index < 24; index += 1) {
+      camera.position.x = index % 2 === 0 ? -400 : 400;
+      beforeRender$.next();
+      const batch = scene.children[0].children.find(
+        (child): child is BatchedMesh => child instanceof BatchedMesh,
+      );
+      expect(batch?.instanceCount).toBe(7);
+    }
+
+    fixture.destroy();
   });
 
   it('uses an opt-in patch selector while retaining shared mesh streaming', () => {
