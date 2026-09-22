@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added `joltCylinderShape` and `joltCapsuleShape` (`[params]="[halfHeight, radius]"`,
+  axis local Y). The Jolt skill already listed both, but neither existed.
 - Added experimental camera-independent material tile selection, a bounded
   single-flight/LRU stream, sparse two-level texture-array mapping, and shared
   material lookup in `triangular-engine/terrain`. The morph demo now selects
