@@ -28,7 +28,6 @@ import {
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { EngineService } from 'triangular-engine';
 import { wrapVec3, wrapQuat, createMeshForShape } from '../example';
-import { JoltPhysicsComponent } from '../jolt-physics/jolt-physics.component';
 import { Jolt, JoltPhysicsService } from '../jolt-physics/jolt-physics.service';
 
 @Component({
@@ -58,7 +57,6 @@ export class JoltDebugRendererComponent implements OnDestroy {
   private static readonly MERGE_VERTEX_THRESHOLD = 512;
 
   readonly engineService = inject(EngineService);
-  readonly parentPhysics = inject(JoltPhysicsComponent);
   readonly destroyRef = inject(DestroyRef);
   readonly physicsService = inject(JoltPhysicsService);
 
@@ -145,7 +143,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
   }
 
   private async initOnceJoltReady() {
-    const meta = await this.parentPhysics.metaDataPromise;
+    const meta = await this.physicsService.metaDataPromise;
     if (!meta) return;
 
     const isDebugWasmVersion = (Jolt as any).DebugRendererJS !== undefined;
@@ -165,7 +163,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
       this.bodyDrawSettings = new (Jolt as any).BodyManagerDrawSettings();
     }
 
-    this.parentPhysics.physicsUpdated$
+    this.physicsService.physicsUpdated$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.onTick());
   }
@@ -178,7 +176,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
   }
 
   private onTick() {
-    const physicsSystem = this.parentPhysics.metaData$.value?.physicsSystem;
+    const physicsSystem = this.physicsService.metaData$.value?.physicsSystem;
     if (!physicsSystem) return;
 
     if (!this.enabled()) {
@@ -630,7 +628,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
     const v = new Vector3();
 
     // Get current physics system to validate body references
-    const physicsSystem = this.parentPhysics.metaData$.value?.physicsSystem;
+    const physicsSystem = this.physicsService.metaData$.value?.physicsSystem;
     if (!physicsSystem) return;
 
     // Enumerate the physics system itself so fallback debug rendering includes

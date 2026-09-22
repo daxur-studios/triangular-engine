@@ -24,7 +24,6 @@ import { BehaviorSubject, combineLatest } from 'rxjs';
 import { Euler, Quaternion, Vector3Tuple } from 'three';
 import { GroupComponent, provideObject3DComponent } from 'triangular-engine';
 import { LAYER_MOVING, wrapQuat, wrapVec3 } from '../example';
-import { JoltPhysicsComponent } from '../jolt-physics/jolt-physics.component';
 import {
   IJoltMetadata,
   Jolt,
@@ -79,8 +78,12 @@ export class JoltRigidBodyComponent extends GroupComponent {
   /** This is added as the custom user data ID in Jolt `body.SetUserData(this.instanceId)` */
   readonly userDataId = JoltRigidBodyComponent.nextUserDataId++;
   //#region Services
+  /**
+   * Service only, never `JoltPhysicsComponent`: a service provided above
+   * `<joltPhysics>` is reachable from content projected into a shell whose
+   * template owns `<joltPhysics>`; the component instance is not (NG0201).
+   */
   readonly physicsService = inject(JoltPhysicsService);
-  readonly physicsComponent = inject(JoltPhysicsComponent);
   readonly injector = inject(Injector);
   //#endregion
 
@@ -651,7 +654,7 @@ export class JoltRigidBodyComponent extends GroupComponent {
   }
 
   #initTick(metadata: IJoltMetadata) {
-    this.physicsComponent.physicsUpdated$
+    this.physicsService.physicsUpdated$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.#updateBodyTransform(metadata);

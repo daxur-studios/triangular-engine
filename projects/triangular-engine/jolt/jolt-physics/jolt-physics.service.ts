@@ -54,6 +54,15 @@ export class JoltPhysicsService {
   readonly tick$ = new Subject<number>();
   readonly postTick$ = new Subject<number>();
 
+  /**
+   * Emits once per rendered frame, after all fixed substeps and the
+   * body→Object3D transform sync. Use this, not `postTick$` (once per
+   * substep, many per frame under time warp), for per-frame visual work.
+   * Lives on the service, not `JoltPhysicsComponent`, so content projected
+   * across a component boundary can reach it — see `JoltRigidBodyComponent`.
+   */
+  readonly physicsUpdated$ = new Subject<void>();
+
   readonly #rigidBodiesWithId = new Map<
     string,
     WritableSignal<Jolt.Body | undefined>

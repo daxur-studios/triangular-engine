@@ -2,7 +2,7 @@ import { AsyncPipe } from '@angular/common';
 import { Component, DestroyRef, inject, input, output } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 
-import { BehaviorSubject, combineLatest, Subject } from 'rxjs';
+import { BehaviorSubject, combineLatest } from 'rxjs';
 import { Mesh, Vector3Tuple } from 'three';
 import { EngineService } from 'triangular-engine';
 import {
@@ -102,7 +102,7 @@ export class JoltPhysicsComponent {
   readonly metaDataPromise = this.physicsService.metaDataPromise;
 
   readonly dynamicObjects: Mesh[] = [];
-  readonly physicsUpdated$ = new Subject<void>();
+  readonly physicsUpdated$ = this.physicsService.physicsUpdated$;
   #memoryLogInterval: any;
   // Fixed-timestep accumulator for stable physics stepping across time scaling
   #accumulator = 0;

@@ -3,7 +3,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { BufferAttribute, BufferGeometry, DoubleSide, Mesh, MeshStandardMaterial } from 'three';
 import { GroupComponent, provideObject3DComponent } from 'triangular-engine';
 import { LAYER_MOVING, wrapVec3 } from '../example';
-import { Jolt, JoltPhysicsComponent, JoltPhysicsService } from '../jolt-physics';
+import { Jolt, JoltPhysicsService } from '../jolt-physics';
 
 export interface IJoltSoftBodyCreatedEvent { readonly body: Jolt.Body; readonly owner: JoltSoftBodyComponent; readonly vertexCount: number; }
 export type JoltSoftBodyBendType = 'none' | 'distance' | 'dihedral';
@@ -16,7 +16,6 @@ export type JoltSoftBodyBendType = 'none' | 'distance' | 'dihedral';
   providers: [provideObject3DComponent(JoltSoftBodyComponent)],
 })
 export class JoltSoftBodyComponent extends GroupComponent {
-  readonly physics = inject(JoltPhysicsComponent);
   readonly service = inject(JoltPhysicsService);
   readonly vertices = input<ReadonlyArray<readonly [number, number, number]>>([]);
   readonly faces = input<ReadonlyArray<readonly [number, number, number]>>([]);
@@ -109,7 +108,7 @@ export class JoltSoftBodyComponent extends GroupComponent {
     const motion = metadata.Jolt.castObject(this.#body.GetMotionProperties(), metadata.Jolt.SoftBodyMotionProperties);
     motion.SetPressure(this.pressure());
     this.#syncVertices(metadata.Jolt);
-    this.physics.physicsUpdated$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.#syncVertices(metadata.Jolt));
+    this.service.physicsUpdated$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.#syncVertices(metadata.Jolt));
     this.created.emit({ body: this.#body, owner: this, vertexCount: vertices.length });
   }
 
