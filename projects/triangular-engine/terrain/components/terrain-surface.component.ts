@@ -195,6 +195,8 @@ export class TerrainSurfaceComponent<TAddress = unknown>
    */
   readonly renderOriginM = input<Vector3Tuple>([0, 0, 0]);
   readonly renderQuaternion = input<QuaternionTuple>([0, 0, 0, 1]);
+  /** Hides the whole surface without dropping resident patches, e.g. while a map view shares the scene. */
+  readonly visible = input(true);
   readonly getLevel = input<(address: TAddress) => number>(defaultAddressLevel);
   readonly getKey = input<(address: TAddress) => string>(defaultAddressKey);
   readonly createMaterial = input<() => Material>(
@@ -219,6 +221,9 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       this.group.position.set(x, y, z);
       const [qx, qy, qz, qw] = this.renderQuaternion();
       this.group.quaternion.set(qx, qy, qz, qw);
+    });
+    effect(() => {
+      this.group.visible = this.visible();
     });
     effect(() => {
       const wireframe = this.wireframe();

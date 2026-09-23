@@ -193,7 +193,7 @@ function buildCellPerPixelLookup(
       }));
     } else {
       const sample = sampler.sample(cell.center);
-      colour = sample.isLand
+      colour = sample.isLand || sample.isIce
         ? parseColorToLinearRgb(biomeColor(ecology.biome[cell.id]))
         : parseColorToLinearRgb(profile.oceanSubstance === 'lava' ? lavaOceanColor() : OCEAN_COLOR);
     }
@@ -601,7 +601,7 @@ function buildMaterialTile(
         previousCell = cell;
         const sample = sampleSurfaceNear(world.sampler, dir3, cell.id);
         if (colorMode === 'natural') {
-          if (!sample.isLand) {
+          if (!sample.isLand && !sample.isIce) {
             return parseColorToLinearRgb(
               world.profile.oceanSubstance === 'lava' ? lavaOceanColor() : OCEAN_COLOR,
             );
@@ -1104,7 +1104,7 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
           macroLandFactors[idx] = 1 - Math.min(1, material.weights.water + material.snow01 * 0.75);
         } else {
           // Natural Biome mode
-          if (!sample.isLand) {
+          if (!sample.isLand && !sample.isIce) {
             const hex = profile.oceanSubstance === 'lava' ? lavaOceanColor() : OCEAN_COLOR;
             const rgb = parseColorToLinearRgb(hex);
             colors[o3] = rgb[0];
