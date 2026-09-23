@@ -88,6 +88,7 @@ export abstract class Object3DComponent implements OnDestroy {
    */
   readonly position = model<Vector3Tuple>([0, 0, 0]);
   readonly scale = model<Vector3Tuple | number>(1);
+  readonly visible = model<boolean>(true);
   /** EULER rotation */
   readonly rotation = model<EulerTuple>([0, 0, 0]);
   /** QUATERNION rotation. Updating this will update the `rotation` input converting the quaternion to euler. */
@@ -107,6 +108,7 @@ export abstract class Object3DComponent implements OnDestroy {
     this.#initSetRotation();
     this.#initSetQuaternion();
     this.#initSetScale();
+    this.#initSetVisible();
 
     this.#initSetName();
     this.#initAttachToParent();
@@ -167,6 +169,15 @@ export abstract class Object3DComponent implements OnDestroy {
       } else {
         object3D.scale.set(...scale);
       }
+    });
+  }
+
+  #initSetVisible() {
+    effect(() => {
+      const object3D = this.object3D();
+      const visible = this.visible();
+      if (!object3D) return;
+      object3D.visible = visible;
     });
   }
 

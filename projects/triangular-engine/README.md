@@ -71,7 +71,7 @@ The library is modularized into several secondary entry points (sub-libraries) s
 ## Features
 
 - Standalone Angular components: `scene`, `camera`, `mesh`, `materials`, `lights`, `gltf`, `physics`, `css2d/css3d`, post-processing, and more
-- Declarative Object3D graph with inputs for `position`, `rotation`, `scale`, and common options
+- Declarative Object3D graph with inputs for `position`, `rotation`, `scale`, `visible`, and common options
 - Rapier 3D physics integration: rigid bodies, colliders, joints, instanced rigid bodies
 - GLTF loader with optional BVH acceleration for fast raycasts
 - Engine UI helpers: stats overlay, scene tree, Daxur Studios portal-layout HUD system

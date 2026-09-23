@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a `visible` model to `Object3DComponent`, synchronized with the wrapped Three.js `Object3D.visible` property.
+
 - Added `joltCylinderShape` and `joltCapsuleShape` (`[params]="[halfHeight, radius]"`,
   axis local Y). The Jolt skill already listed both, but neither existed.
 - Added experimental camera-independent material tile selection, a bounded
