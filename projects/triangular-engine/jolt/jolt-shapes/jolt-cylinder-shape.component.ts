@@ -1,8 +1,9 @@
-import { Component, effect, input } from '@angular/core';
+import { Component, computed, effect, input } from '@angular/core';
 
 import {
   JoltShapeComponent,
   provideShapeComponent,
+  sameShapeParams,
 } from './jolt-shape.component';
 import { Jolt } from '../jolt-physics/jolt-physics.service';
 
@@ -21,6 +22,8 @@ const DEFAULT_CONVEX_RADIUS = 0.05;
 export class JoltCylinderShapeComponent extends JoltShapeComponent<Jolt.CylinderShape> {
   /** [halfHeight, radius]; the cylinder's axis is local Y. */
   readonly params = input<CylinderShapeParams>([0.5, 0.5]);
+  /** `params` by value, so an equal new array keeps the current shape. */
+  readonly #params = computed(() => this.params(), { equal: sameShapeParams });
 
   constructor() {
     super();
@@ -37,7 +40,7 @@ export class JoltCylinderShapeComponent extends JoltShapeComponent<Jolt.Cylinder
   #initInputs() {
     effect(
       () => {
-        const params = this.params();
+        const params = this.#params();
         this.updateShape(params);
       },
       {

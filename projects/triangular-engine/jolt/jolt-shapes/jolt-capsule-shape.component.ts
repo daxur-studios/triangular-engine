@@ -1,8 +1,9 @@
-import { Component, effect, input } from '@angular/core';
+import { Component, computed, effect, input } from '@angular/core';
 
 import {
   JoltShapeComponent,
   provideShapeComponent,
+  sameShapeParams,
 } from './jolt-shape.component';
 import { Jolt } from '../jolt-physics/jolt-physics.service';
 
@@ -18,6 +19,8 @@ type CapsuleShapeParams = [number, number];
 export class JoltCapsuleShapeComponent extends JoltShapeComponent<Jolt.CapsuleShape> {
   /** [halfHeight of the cylinder part, radius]; the capsule's axis is local Y. */
   readonly params = input<CapsuleShapeParams>([0.5, 0.5]);
+  /** `params` by value, so an equal new array keeps the current shape. */
+  readonly #params = computed(() => this.params(), { equal: sameShapeParams });
 
   constructor() {
     super();
@@ -34,7 +37,7 @@ export class JoltCapsuleShapeComponent extends JoltShapeComponent<Jolt.CapsuleSh
   #initInputs() {
     effect(
       () => {
-        const params = this.params();
+        const params = this.#params();
         this.updateShape(params);
       },
       {

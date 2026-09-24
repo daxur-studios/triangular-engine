@@ -29,6 +29,19 @@ export function provideShapeComponent<T extends JoltShapeComponent<any>>(
 }
 
 /**
+ * Value equality for a shape's numeric `params`. Shapes compare their params
+ * with this so a binding that hands over a new array with the same numbers
+ * (e.g. a template method call) doesn't rebuild the Jolt shape, and with it
+ * the parent body's compound, on every change detection.
+ */
+export function sameShapeParams(
+  a: readonly number[],
+  b: readonly number[],
+): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+/**
  * IMPORTANT: Make sure when a shape is created, it is added to the reference count of the shape  `shape.AddRef();`
  * so it can be released when the shape is disposed
  */

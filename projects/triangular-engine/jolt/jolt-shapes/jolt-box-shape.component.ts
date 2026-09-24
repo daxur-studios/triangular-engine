@@ -1,8 +1,9 @@
-import { Component, effect, input } from '@angular/core';
+import { Component, computed, effect, input } from '@angular/core';
 
 import {
   JoltShapeComponent,
   provideShapeComponent,
+  sameShapeParams,
 } from './jolt-shape.component';
 import { Jolt } from '../jolt-physics/jolt-physics.service';
 
@@ -17,6 +18,8 @@ type BoxShapeParams = [number, number, number];
 export class JoltBoxShapeComponent extends JoltShapeComponent<Jolt.BoxShape> {
   /** [width, height, depth] */
   readonly params = input<BoxShapeParams>([1, 1, 1]);
+  /** `params` by value, so an equal new array keeps the current shape. */
+  readonly #params = computed(() => this.params(), { equal: sameShapeParams });
 
   constructor() {
     super();
@@ -33,7 +36,7 @@ export class JoltBoxShapeComponent extends JoltShapeComponent<Jolt.BoxShape> {
   #initInputs() {
     effect(
       () => {
-        const params = this.params();
+        const params = this.#params();
         this.updateShape(params);
       },
       {

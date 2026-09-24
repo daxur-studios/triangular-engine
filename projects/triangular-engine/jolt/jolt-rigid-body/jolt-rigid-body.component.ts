@@ -511,6 +511,12 @@ export class JoltRigidBodyComponent extends GroupComponent {
         true,
         Jolt.EActivation_DontActivate,
       );
+      // `NotifyShapeChanged` recomputes mass from the shapes' density, which
+      // would drop an authored mass. Scale back to it, as creation does.
+      const authoredMassKg = this.massKg();
+      if (authoredMassKg !== undefined && authoredMassKg > 0) {
+        body.GetMotionProperties().ScaleToMass(authoredMassKg);
+      }
     } finally {
       Jolt.destroy(previousCenterOfMass);
     }
