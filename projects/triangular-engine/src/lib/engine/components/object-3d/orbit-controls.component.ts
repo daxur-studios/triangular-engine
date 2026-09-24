@@ -8,6 +8,7 @@ import {
   OnDestroy,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import {
   Box3,
@@ -280,11 +281,45 @@ export class OrbitControlsComponent implements OnDestroy {
    */
   #currentOrbit: AdvancedOrbitControls | undefined;
 
+  /**
+   * The view to resume when the controls are recreated (e.g. `isActive`
+   * back on after another rig had the screen). A new `OrbitControls` aims
+   * at the origin, so without this the angle, zoom and pan were lost.
+   * Offsets are relative to the target and the followed object, so they
+   * survive the followed object moving or a floating-origin rebase while
+   * inactive.
+   */
+  #resumeView?: {
+    readonly target: Vector3;
+    /** Camera position minus target. */
+    readonly cameraOffset: Vector3;
+    readonly follow?: Object3D;
+    /** Target minus the followed object's world position (a pan away from it). */
+    readonly panOffset?: Vector3;
+  };
+
+  #captureView(orbit: AdvancedOrbitControls): void {
+    const target = orbit.target.clone();
+    const follow = untracked(() => this.follow());
+    let panOffset: Vector3 | undefined;
+    if (follow) {
+      follow.updateMatrixWorld(true);
+      panOffset = target.clone().sub(follow.getWorldPosition(new Vector3()));
+    }
+    this.#resumeView = {
+      target,
+      cameraOffset: this.internalCamera.position.clone().sub(target),
+      follow,
+      panOffset,
+    };
+  }
+
   #initIsActive() {
     effect(() => {
       const isActive = this.isActive();
       const vp = this.viewport();
 
+      if (this.#currentOrbit) this.#captureView(this.#currentOrbit);
       this.#currentOrbit?.dispose();
       this.#currentOrbit = undefined;
       this.orbitControls.set(undefined);
@@ -297,6 +332,15 @@ export class OrbitControlsComponent implements OnDestroy {
         : this.engineService.renderer.domElement;
 
       const orbit = new AdvancedOrbitControls(this.internalCamera, domElement);
+      const resume = this.#resumeView;
+      if (resume) {
+        // `#initFollow` re-bases this on the followed object's current position.
+        orbit.target.copy(resume.target);
+        this.internalCamera.position
+          .copy(resume.target)
+          .add(resume.cameraOffset);
+        if (!resume.follow) this.#resumeView = undefined;
+      }
       this.#makeOrbitControlsBetter(orbit);
       this.#currentOrbit = orbit;
       this.orbitControls.set(orbit);
@@ -386,10 +430,23 @@ export class OrbitControlsComponent implements OnDestroy {
       const orbit = this.orbitControls();
       this.previousFollowPosition = undefined;
       this.followPositionPushedSincePostTick = false;
+      const resume = orbit ? this.#resumeView : undefined;
+      if (orbit) this.#resumeView = undefined;
       if (followObject && orbit) {
         followObject.updateMatrixWorld(true);
         const worldPos = new Vector3();
         followObject.getWorldPosition(worldPos);
+
+        // Back on after being inactive, still following the same object:
+        // put the view back exactly, pan included.
+        if (resume?.follow === followObject && resume.panOffset) {
+          orbit.target.copy(worldPos).add(resume.panOffset);
+          this.internalCamera.position
+            .copy(orbit.target)
+            .add(resume.cameraOffset);
+          this.previousFollowPosition = worldPos;
+          return;
+        }
 
         // Automatically adjust camera zoom/distance to fit the object
         const direction = new Vector3();
