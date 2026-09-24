@@ -118,6 +118,23 @@
       >
         Equirectangular
       </button>
+      <label>
+        <span>Plane border</span>
+        <select [value]="mapBorderPreset()" (change)="setMapBorderPreset($event)">
+          <option value="subtle">Subtle</option>
+          <option value="bold">Bold</option>
+          <option value="heavy">Heavy</option>
+        </select>
+      </label>
+      <label>
+        <span>Border style</span>
+        <select [value]="mapBorderStyle()" (change)="setMapBorderStyle($event)">
+          <option value="simple">Simple</option>
+          <option value="cartographic">Cartographic</option>
+          <option value="tactical">Tactical</option>
+        </select>
+      </label>
+      <p class="control-hint">The map frame appears as the planet morphs into its plane view.</p>
     </div>
   </div>
 
@@ -201,14 +218,11 @@
       </button>
     }
 
-    <label>
-      <span>Colours</span>
-      <select [value]="colourMode()" (change)="setColourMode($event)">
-        @for (mode of colourModes; track mode) {
-          <option [value]="mode">{{ mode }}</option>
-        }
-      </select>
-    </label>
+    <cellDataLayerPicker
+      [layers]="dataLayers"
+      [selectedLayerId]="colourMode()"
+      (selectedLayerIdChange)="setDataLayer($event)"
+    />
 
     @if (colourMode() !== "lod") {
       <label class="checkbox-row">

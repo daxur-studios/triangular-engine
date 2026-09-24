@@ -10,7 +10,8 @@ import type { ICellDataLayer } from '../cell-data-layers';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class CellDataLayerPickerComponent {
-  readonly layers = input<readonly ICellDataLayer[]>([]);
+  /** Full data-layer models and lightweight display options are both supported. */
+  readonly layers = input<readonly Pick<ICellDataLayer, 'id' | 'label'>[]>([]);
   readonly selectedLayerId = input<string>('');
   readonly selectedLayerIdChange = output<string>();
 

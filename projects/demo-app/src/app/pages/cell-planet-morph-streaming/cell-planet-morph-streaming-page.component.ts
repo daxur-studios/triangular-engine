@@ -19,6 +19,7 @@ import {
   DoubleSide,
   Frustum,
   Matrix4,
+  Mesh,
   MeshStandardMaterial,
   Sphere,
   Vector2,
@@ -51,11 +52,15 @@ import {
   updateCellPerPixelPaletteEntries,
   formatDistanceM,
   updateCellPerPixelLookup,
+  buildPlanetMorphBorderGeometry,
+  createPlanetMapBorderMaterial,
+  CellDataLayerPickerComponent,
   type ICellPerPixelLookupPayload,
   type ICellPerPixelPaletteEdit,
   WORLD_SIZE_TIER_RADIUS_M,
   type IDynamicProjectionUniforms,
   type MapProjectionKind,
+  type PlanetMapBorderStyle,
 } from 'triangular-engine/worldgen/render';
 import {
   TerrainMaterialTileGpu,
@@ -87,6 +92,7 @@ import type {
 type Quality = 'standard' | 'high' | 'ultra';
 type ColourMode = 'natural' | 'elevation' | 'plates' | 'lod' | 'material';
 type StreamedTextureColourMode = Exclude<ColourMode, 'lod'>;
+type MapBorderPreset = 'subtle' | 'bold' | 'heavy';
 
 interface QualityPreset {
   readonly maxLod: number;
@@ -159,6 +165,7 @@ function addressLevel(addr: ILatLonTerrainPatchAddress): number {
     RouterLink,
     RaycastOrbitControlsComponent,
     TerrainSurfaceComponent,
+    CellDataLayerPickerComponent,
   ],
   templateUrl: './cell-planet-morph-streaming-page.component.html',
   styleUrl: './cell-planet-morph-streaming-page.component.scss',
@@ -292,7 +299,7 @@ export class CellPlanetMorphStreamingPageComponent {
     'material',
   ];
   readonly streamedTextureLod = signal<Record<StreamedTextureColourMode, boolean>>({
-    natural: false,
+    natural: true,
     elevation: false,
     plates: false,
     material: true,
@@ -300,6 +307,17 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly macroVariationEnabled = signal(false);
   readonly macroVariationStrength = signal(0.35);
   readonly macroVariationScaleM = signal(128);
+  readonly dataLayers = [
+    { id: 'natural', label: 'Biomes' },
+    { id: 'material', label: 'Terrain material' },
+    { id: 'elevation', label: 'Elevation' },
+    { id: 'plates', label: 'Tectonic plates' },
+    { id: 'lod', label: 'Mesh LOD' },
+  ] as const;
+  readonly mapBorderPreset = signal<MapBorderPreset>('bold');
+  readonly mapBorderPresets: readonly MapBorderPreset[] = ['subtle', 'bold', 'heavy'];
+  readonly mapBorderStyle = signal<PlanetMapBorderStyle>('cartographic');
+  private mapBorderMesh?: Mesh;
   readonly wireframe = signal(false);
   readonly freezeLod = signal(false);
 
@@ -841,6 +859,7 @@ export class CellPlanetMorphStreamingPageComponent {
       textureTick.unsubscribe();
       this.materialStream.dispose();
       this.materialGpu.dispose();
+      this.disposeMapBorder();
       if (this.morphLodDebounceTimer !== undefined) {
         clearTimeout(this.morphLodDebounceTimer);
       }
@@ -878,6 +897,18 @@ export class CellPlanetMorphStreamingPageComponent {
     effect(() => {
       const kind = this.projectionKind();
       this.morphUniforms.uProjectionType.value = kind === 'equalEarth' ? 1 : 0;
+    });
+
+    effect(() => {
+      const radius = this.radius();
+      const projectionKind = this.projectionKind();
+      const preset = this.mapBorderPreset();
+      this.mapBorderStyle();
+      this.rebuildMapBorder(radius, projectionKind, preset);
+    });
+    effect(() => {
+      const morph = this.morphProgress();
+      if (this.mapBorderMesh) this.mapBorderMesh.visible = morph >= 0.35;
     });
 
     effect(() => {
@@ -1370,7 +1401,15 @@ export class CellPlanetMorphStreamingPageComponent {
   }
 
   setColourMode(event: Event): void {
-    const value = (event.target as HTMLSelectElement).value as ColourMode;
+    this.applyColourMode((event.target as HTMLSelectElement).value);
+  }
+
+  setDataLayer(layerId: string): void {
+    this.applyColourMode(layerId);
+  }
+
+  private applyColourMode(layerId: string): void {
+    const value = layerId as ColourMode;
     if (this.colourModes.includes(value)) {
       this.colourMode.set(value);
       this.materialGpu.enabled.value = value !== 'lod' && this.streamedTextureLod()[value] && this.materialStream.resident.has('0/0/0') ? 1 : 0;
@@ -1386,6 +1425,57 @@ export class CellPlanetMorphStreamingPageComponent {
         this.rebuildRevision.update((r) => r + 1);
       }
     }
+  }
+
+  setMapBorderPreset(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as MapBorderPreset;
+    if (this.mapBorderPresets.includes(value)) this.mapBorderPreset.set(value);
+  }
+
+  setMapBorderStyle(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as PlanetMapBorderStyle;
+    if (value === 'simple' || value === 'cartographic' || value === 'tactical') {
+      this.mapBorderStyle.set(value);
+    }
+  }
+
+  private rebuildMapBorder(
+    radius: number,
+    projectionKind: MapProjectionKind,
+    preset: MapBorderPreset,
+  ): void {
+    this.disposeMapBorder();
+    const borderWidth = radius * (preset === 'subtle' ? 0.012 : preset === 'heavy' ? 0.06 : 0.035);
+    const geometryData = buildPlanetMorphBorderGeometry({
+      radius,
+      borderWidth,
+      projectionKind,
+      clearance: radius * 0.0015,
+    });
+    const material = createPlanetMapBorderMaterial(this.morphUniforms, {
+      color: '#38bdf8',
+      opacity: 0.95,
+      borderStyle: this.mapBorderStyle(),
+      fadeStart: 0.35,
+      fadeEnd: 0.15,
+    });
+    this.mapBorderMesh = new Mesh(geometryData.geometry, material);
+    this.mapBorderMesh.name = 'morph-streaming-map-border';
+    this.mapBorderMesh.renderOrder = 5;
+    this.mapBorderMesh.visible = this.morphProgress() >= 0.35;
+    this.engine.scene.add(this.mapBorderMesh);
+  }
+
+  private disposeMapBorder(): void {
+    if (!this.mapBorderMesh) return;
+    this.engine.scene.remove(this.mapBorderMesh);
+    this.mapBorderMesh.geometry.dispose();
+    if (Array.isArray(this.mapBorderMesh.material)) {
+      this.mapBorderMesh.material.forEach((material) => material.dispose());
+    } else {
+      this.mapBorderMesh.material.dispose();
+    }
+    this.mapBorderMesh = undefined;
   }
 
   isStreamedTextureLodEnabled(): boolean {
