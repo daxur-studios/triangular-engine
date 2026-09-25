@@ -440,6 +440,19 @@ export const DEMOS: readonly DemoItem[] = [
       'Visualizes bounded scene snapshots, camera facts, deterministic warnings, filters, and truncation for agent-facing inspection.',
   },
   {
+    id: 'perf-lab',
+    number: '16c',
+    title: 'Perf Lab',
+    route: '/perf-lab',
+    categoryId: 'core',
+    tier: 'lab',
+    createdAt: '2026-09-24',
+    entryPoints: ['core', 'scatter'],
+    package: 'triangular-engine',
+    description:
+      'Deterministic performance workloads (instanced meshes, the <instancedMesh> component, individual meshes, scatter LOD rebuilds) measured by the Playwright perf suite.',
+  },
+  {
     id: 'animals-lab',
     number: '17',
     title: 'Animals Lab',

@@ -73,6 +73,16 @@ Implementation starts with **M1 only** in
 That document owns the milestone checklist, bounded Playwright/scene-adapter handoff
 and acceptance evidence; follow it instead of implementing the full design at once.
 
+Available today:
+
+- `npm run test:scene` — M1 scene/agent tests; `npm run test:scene:walkthrough` records a WebM walkthrough.
+- `npm run test:perf` — performance smoke for instanced meshes, the `<instancedMesh>` component,
+  individual meshes and scatter LOD rebuilds (`/perf-lab`). Functional checks (draw calls, instance
+  counts) always gate; timings are compared against `tests/perf/history/perf-history.jsonl` for the
+  same machine profile. `npm run test:perf:record` appends results; `npm run perf:report` prints trends.
+  To cover a new system, add a scenario in `projects/demo-app/src/app/testing/perf-harness/perf-scenarios.ts`
+  and a spec in `tests/perf/specs/`. See [tests/perf/README.md](../../../tests/perf/README.md).
+
 ## Semantic Facial Animation & Character Controls
 
 Use `FacialAnimationController` from `triangular-engine/characters` to direct facial performances via serializable commands (`FaceCommand`):

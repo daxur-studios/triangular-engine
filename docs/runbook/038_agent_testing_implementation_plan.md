@@ -15,7 +15,7 @@ exit evidence is linked here; partial progress belongs in the M1 checklist below
 
 - [ ] **M1 — Working agent test:** discover, focus, orbit, click and capture a simple scene; injected failures are detected.
 - [ ] **M2 — Trustworthy visual regressions:** persistent reviewed baselines, environment compatibility, broader camera/bounds cases and a second feature adapter.
-- [ ] **M3 — Performance history:** raw samples, fast smoke and repeatable reference runs; detect deliberate slowdowns against accepted baselines.
+- [ ] **M3 — Performance history:** raw samples, fast smoke and repeatable reference runs; detect deliberate slowdowns against accepted baselines. *(in progress — see M3 slice below)*
 - [ ] **M4 — Remote review:** exact-build HTML reports, motion recordings and authenticated access that works from a phone.
 - [ ] **M5 — Easier authoring:** record/replay actions, multi-view/contact-sheet helpers, parameter sweeps and suite selection.
 - [ ] **M6 — Optional agent services:** WebMCP uses the same adapter; local vision reviews saved evidence with measured accuracy. Neither is required to run tests.
@@ -77,6 +77,32 @@ Generated defect captures are written under ignored `artifacts/scene-defects/`.
 The remaining M1 review action is a human visual check of the report captures;
 M1.4 remains open until build identity/diff retention is durable and formal
 baseline policy is deliberately accepted.
+
+### M3 slice started — 2026-09-25
+
+M3 remains open. A first performance slice now exists; see
+[tests/perf/README.md](../../tests/perf/README.md):
+
+- `/perf-lab` demo page plus the dev-only `window.__perfTest` bridge
+  (`projects/demo-app/src/app/testing/perf-harness/`). Deterministic scenarios:
+  `empty`, `instanced-static`, `instanced-dynamic`, `instanced-component` (the engine's
+  `<instancedMesh>`), `meshes-individual`, and `scatter-lod-rebuild`.
+- Raw per-frame samples: frame interval, whole `engine.tick()`, `engine.render()`, and
+  scenario-specific timings. Also long tasks, hidden-frame detection, heap before/after
+  (with forced GC), and renderer counters. Every run enforces exact draw-call, triangle
+  and instance-count checks.
+- Smoke protocol (1 s warm-up + 2 x 2 s) and reference protocol (5 s + 3 x 10 s). Each
+  run's JSON is written to `artifacts/perf/` and attached to the report.
+- Append-only history `tests/perf/history/perf-history.jsonl` keyed by a hashed machine
+  profile. Comparison uses the median of the last 5 comparable runs, with relative and
+  absolute tolerances and noise downgrade. `--gate` is opt-in. `npm run perf:report`
+  prints trends.
+
+Verified so far: stats/history unit tests (`npm run test:perf:unit`, 20 passing),
+test discovery, the trend report on synthetic history, and type-checks of the demo-app
+and spec sources. Still open for M3: the first browser run on a real machine, a chosen
+reference machine, recorded baselines, and an injected-slowdown check that proves
+`--gate` fails.
 
 ## Decisions settled for M1
 

@@ -492,6 +492,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'perf-lab',
+    loadComponent: () =>
+      import('./pages/perf-lab/perf-lab-page.component').then(
+        ({ PerfLabPageComponent }) => PerfLabPageComponent,
+      ),
+  },
+  {
     path: 'photo-mode-lab',
     loadComponent: () =>
       import('./pages/photo-mode-lab/photo-mode-lab-page.component').then(

@@ -1,0 +1,45 @@
+:host {
+  background: #09111f;
+}
+
+.diagnostics {
+  background: rgb(8 14 23 / 82%);
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 0.5rem;
+  color: #dce9f5;
+  display: grid;
+  font: 12px/1.5 ui-monospace, monospace;
+  gap: 0.4rem;
+  left: 1rem;
+  max-width: 24rem;
+  padding: 0.75rem 0.9rem;
+  position: absolute;
+  top: 1rem;
+  z-index: 10;
+}
+
+strong {
+  color: white;
+}
+
+a,
+.quiet {
+  color: #94a3b8;
+}
+
+p {
+  margin: 0;
+}
+
+label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+select {
+  background: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 0.3rem;
+  color: #e2e8f0;
+  padding: 0.3rem 0.5rem;
+}

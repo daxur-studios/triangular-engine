@@ -1,0 +1,36 @@
+<scene>
+  @if (componentMount(); as mount) {
+    <instancedMesh
+      [geometry]="mount.geometry"
+      [material]="mount.material"
+      [maxCount]="mount.data.length"
+      [data]="mount.data"
+      [count]="mount.data.length"
+      [growStep]="0"
+      [frustumCulled]="false"
+    />
+  }
+</scene>
+
+@if (!perfTestMode) {
+  <aside class="diagnostics">
+    <a routerLink="/">← Examples</a>
+    <strong>Perf Lab</strong>
+    <p>
+      The deterministic workloads the Playwright perf suite measures
+      (<code>npm run test:perf</code>). Pick one to watch it live.
+    </p>
+    <label>
+      Scenario
+      <select [value]="selectedId()" (change)="onScenarioChange($event)">
+        @for (scenario of scenarios; track scenario.id) {
+          <option [value]="scenario.id">{{ scenario.title }}</option>
+        }
+      </select>
+    </label>
+    <span class="quiet">{{ selectedDescription() }}</span>
+    @if (status(); as text) {
+      <span>{{ text }}</span>
+    }
+  </aside>
+}

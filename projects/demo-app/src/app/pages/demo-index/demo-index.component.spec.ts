@@ -25,10 +25,10 @@ describe('DemoIndexComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should have all 56 demos and 7 categories configured with createdAt timestamps', () => {
-    expect(DEMOS.length).toBe(56);
+  it('should have all 58 demos and 7 categories configured with createdAt timestamps', () => {
+    expect(DEMOS.length).toBe(58);
     expect(CATEGORIES.length).toBe(7);
-    expect(component.totalDemosCount).toBe(56);
+    expect(component.totalDemosCount).toBe(58);
     expect(component.gemsCount).toBeGreaterThan(0);
     expect(component.labsCount).toBeGreaterThan(0);
     expect(component.archivedCount).toBeGreaterThan(0);
@@ -40,7 +40,7 @@ describe('DemoIndexComponent', () => {
     component.selectSort('newest');
     expect(component.selectedSort()).toBe('newest');
     const newest = component.sortedFilteredDemos();
-    expect(newest.length).toBe(56);
+    expect(newest.length).toBe(58);
     for (let i = 1; i < newest.length; i++) {
       expect(newest[i - 1].createdAt >= newest[i].createdAt).toBeTrue();
     }
@@ -49,7 +49,7 @@ describe('DemoIndexComponent', () => {
     component.selectSort('oldest');
     expect(component.selectedSort()).toBe('oldest');
     const oldest = component.sortedFilteredDemos();
-    expect(oldest.length).toBe(56);
+    expect(oldest.length).toBe(58);
     for (let i = 1; i < oldest.length; i++) {
       expect(oldest[i - 1].createdAt <= oldest[i].createdAt).toBeTrue();
     }
