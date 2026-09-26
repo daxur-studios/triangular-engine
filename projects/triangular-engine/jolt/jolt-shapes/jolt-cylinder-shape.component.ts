@@ -41,6 +41,7 @@ export class JoltCylinderShapeComponent extends JoltShapeComponent<Jolt.Cylinder
     effect(
       () => {
         const params = this.#params();
+        this.density();
         this.updateShape(params);
       },
       {
@@ -53,6 +54,7 @@ export class JoltCylinderShapeComponent extends JoltShapeComponent<Jolt.Cylinder
     // Jolt rejects a convex radius larger than either dimension.
     const convexRadius = Math.min(DEFAULT_CONVEX_RADIUS, halfHeight, radius);
     const shape = new Jolt.CylinderShape(halfHeight, radius, convexRadius);
+    this.applyDensity(shape);
 
     this.shape$.next(shape);
     shape.AddRef();

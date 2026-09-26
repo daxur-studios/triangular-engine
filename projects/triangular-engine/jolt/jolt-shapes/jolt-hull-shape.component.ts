@@ -40,6 +40,7 @@ export class JoltHullShapeComponent extends JoltShapeComponent<Jolt.ConvexHullSh
       () => {
         const positions = this.positions();
         const geometry = this.geometry();
+        this.density();
 
         this.updateShape({ positions, geometry });
       },
@@ -82,6 +83,7 @@ export class JoltHullShapeComponent extends JoltShapeComponent<Jolt.ConvexHullSh
     });
 
     const shape = hull.Create().Get() as Jolt.ConvexHullShape;
+    this.applyDensity(shape);
 
     Jolt.destroy(hull);
     points.forEach((point) => {

@@ -7,6 +7,7 @@ import {
   OnDestroy,
   signal,
   Type,
+  untracked,
 } from '@angular/core';
 import { toObservable, toSignal } from '@angular/core/rxjs-interop';
 
@@ -74,12 +75,26 @@ export abstract class JoltShapeComponent<
   readonly position = input<Vector3Tuple>([0, 0, 0]);
   /** Local rotation of this shape relative to the rigid body as Euler angles in radians (only used in compound shapes) */
   readonly rotation = input<Vector3Tuple>([0, 0, 0]);
+  /**
+   * kg/m³ for a convex shape (box, sphere, cylinder, capsule, hull); omitted
+   * keeps Jolt's default of 1000. A change rebuilds the shape, so the body's
+   * mass and centre of mass follow it: an assembled vessel gives each part's
+   * collider its part's mass this way. A body's `massKg` still overrides the
+   * total.
+   */
+  readonly density = input<number>();
   get parentRigidBodyComponent() {
     return this.#findClosestRigidBodyComponent();
   }
 
   readonly shape$ = new BehaviorSubject<T | undefined>(undefined);
   readonly shape = toSignal(this.shape$);
+
+  /** Sets `density` on a freshly built convex shape, before it is published on `shape$`. */
+  protected applyDensity(shape: Jolt.ConvexShape): void {
+    const density = untracked(this.density);
+    if (density !== undefined && density > 0) shape.SetDensity(density);
+  }
 
   /** Create a new shape */
   abstract createShape(...args: any[]): T;

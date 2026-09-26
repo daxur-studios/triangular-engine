@@ -35,6 +35,7 @@ export class JoltSphereShapeComponent extends JoltShapeComponent<Jolt.SphereShap
     effect(
       () => {
         const radius = this.radius();
+        this.density();
 
         this.updateShape({ radius });
       },
@@ -46,6 +47,7 @@ export class JoltSphereShapeComponent extends JoltShapeComponent<Jolt.SphereShap
 
   createShape(params: ISphereShapeParams) {
     const shape = new Jolt.SphereShape(params.radius);
+    this.applyDensity(shape);
     this.shape$.next(shape);
     shape.AddRef();
 

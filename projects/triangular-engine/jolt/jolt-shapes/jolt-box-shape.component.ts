@@ -37,6 +37,7 @@ export class JoltBoxShapeComponent extends JoltShapeComponent<Jolt.BoxShape> {
     effect(
       () => {
         const params = this.#params();
+        this.density();
         this.updateShape(params);
       },
       {
@@ -53,6 +54,7 @@ export class JoltBoxShapeComponent extends JoltShapeComponent<Jolt.BoxShape> {
     );
     const shape = new Jolt.BoxShape(halfExtents, 0.05, undefined);
     Jolt.destroy(halfExtents);
+    this.applyDensity(shape);
 
     this.shape$.next(shape);
     shape.AddRef();

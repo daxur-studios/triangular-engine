@@ -38,6 +38,7 @@ export class JoltCapsuleShapeComponent extends JoltShapeComponent<Jolt.CapsuleSh
     effect(
       () => {
         const params = this.#params();
+        this.density();
         this.updateShape(params);
       },
       {
@@ -48,6 +49,7 @@ export class JoltCapsuleShapeComponent extends JoltShapeComponent<Jolt.CapsuleSh
 
   createShape([halfHeight, radius]: CapsuleShapeParams) {
     const shape = new Jolt.CapsuleShape(halfHeight, radius);
+    this.applyDensity(shape);
 
     this.shape$.next(shape);
     shape.AddRef();

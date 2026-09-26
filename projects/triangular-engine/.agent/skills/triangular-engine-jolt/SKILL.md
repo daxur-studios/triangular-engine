@@ -85,6 +85,8 @@ Jolt shapes must be nested inside `<joltRigidBody>` components.
 | `<joltMeshShape>`        | Static arbitrary mesh     | `[geometry]="meshGeometry.geometry()"`                                 |
 | `<joltHeightFieldShape>` | Heightmap terrain         | `[map]="path" [sampleCount]="50" [width]="w" [height]="h" [depth]="d"` |
 
+Convex shapes (box, sphere, capsule, cylinder, hull) take an optional `[density]` in kg/m³ (Jolt's default is 1000). Changing it rebuilds the shape, so the body's mass and centre of mass follow. An assembled vehicle can give each part's collider `partMassKg / colliderVolume` and leave `massKg` unset, which puts the centre of mass where the mass is. A body's `massKg` still overrides the total.
+
 ### Convex Hull Example:
 
 ```html
