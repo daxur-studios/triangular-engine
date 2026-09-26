@@ -497,8 +497,16 @@ function evaluateWorldMaterial(
   const slope01 = slope01Override === undefined
     ? cellSlope01
     : cellSlope01 + (slope01Override - cellSlope01) * Math.max(0, Math.min(1, slopeInfluence));
-  return evaluateTerrainMaterial({
-    elevationM: sample.elevation,
+  // Water ownership chooses which side of the generic material's strict sea
+  // level split to evaluate. Keep the sampled depth so sand and seabed rock
+  // weights still vary with bathymetry inside ocean cells.
+  const isWaterCell = !sample.isLand && !sample.isIce;
+  const waterSideElevation = Math.min(
+    sample.elevation,
+    sample.seaLevel - Math.max(1e-5, Math.abs(sample.seaLevel) * 1e-7),
+  );
+  const material = evaluateTerrainMaterial({
+    elevationM: isWaterCell ? waterSideElevation : sample.elevation,
     seaLevelM: sample.seaLevel,
     minElevationM: eMin,
     maxElevationM: eMax,
@@ -519,6 +527,8 @@ function evaluateWorldMaterial(
     snowlineM: tectonics.seaLevelElevation + Math.max(1, eMax - tectonics.seaLevelElevation) * 0.68,
     snowlineBlendM: Math.max(0.05, (eMax - tectonics.seaLevelElevation) * 0.16),
   });
+
+  return material;
 }
 
 function sampleSurfaceNear(

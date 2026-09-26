@@ -271,6 +271,11 @@ converges to detailed tiles with bounded memory and preserved draw-call batching
   physical-width corridor that cannot visually reassign cells. Keep sea datum,
   discrete land/water ownership and sampled terrain height as separately
   inspectable values.
+  The streaming landscape material now uses cell ownership to choose the water
+  side of its strict sea-level split. Water cells retain depth-based water,
+  sand and seabed-rock weights, while samples at the datum cannot turn into
+  grass. Visual comparison against the blue cell grid is still needed across
+  texture LODs.
 - [ ] Add spatially indexed feature inputs for river paths/widths/banks and
   shoreline masks from the shared height/sea-level source.
 - [ ] Compose water/seabed, shore, biome, rock/snow and feature overrides in an
