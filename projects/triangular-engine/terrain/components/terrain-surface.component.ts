@@ -528,22 +528,26 @@ export class TerrainSurfaceComponent<TAddress = unknown>
         const batchInstallCount = installingKeys.filter(
           (key) => !this.completed.get(key)?.patch.skirt,
         ).length;
-        const wouldExceedCapacity = (): boolean => {
+        const requiredBatchInstances = (): number => {
           const removedBatchResidents = replacedResidents.filter(
             ([, resident]) => resident.batchInstanceId !== undefined,
           ).length;
           return (
-            this.batchedResidentCount() - removedBatchResidents + batchInstallCount >
-            this.batchedInstanceCapacity()
+            this.batchedResidentCount() - removedBatchResidents + batchInstallCount
           );
         };
-        if (wouldExceedCapacity()) {
+        if (requiredBatchInstances() > this.batchedInstanceCapacity()) {
           this.pruneCoveredStaleResidents();
           replacedResidents = [...this.residents].filter(
             ([key]) =>
               groupKeys.has(key) || this.replacedByGroup(key, group),
           );
-          if (wouldExceedCapacity()) continue;
+          // Grow rather than skip the group: a skipped refinement leaves
+          // the coarse parent drawn under the camera, which on a planet can
+          // sit tens of metres off the surface a collider is built from.
+          if (requiredBatchInstances() > this.batchedInstanceCapacity()) {
+            this.growBatchedInstanceCapacity(requiredBatchInstances());
+          }
         }
       }
 
@@ -653,6 +657,38 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       if (resident.batchInstanceId !== undefined) count += 1;
     }
     return count;
+  }
+
+  /**
+   * Makes room for `instanceCount` batched patches, at least doubling so a
+   * streaming cut rarely regrows. `maxPatches` only sets the starting size.
+   */
+  private growBatchedInstanceCapacity(instanceCount: number): void {
+    const object = this.getBatchedRender().object;
+    if (instanceCount <= object.maxInstanceCount) return;
+    object.setInstanceCount(Math.max(instanceCount, object.maxInstanceCount * 2));
+  }
+
+  /**
+   * Makes room in the batch's vertex and index buffers for one more patch,
+   * compacting first and doubling only if that isn't enough. The buffers
+   * start sized for `maxPatches` worst-case transition patches, so this
+   * rarely runs.
+   */
+  private ensureBatchedGeometrySpace(object: BatchedMesh, geometry: BufferGeometry): void {
+    const vertexCount = geometry.getAttribute('position').count;
+    const indexCount = geometry.index?.count ?? 0;
+    const fits = () =>
+      object.unusedVertexCount >= vertexCount && object.unusedIndexCount >= indexCount;
+    if (fits()) return;
+    object.optimize();
+    if (fits() || !object.geometry.getAttribute('position')) return;
+    const usedVertexCount = object.geometry.getAttribute('position').count - object.unusedVertexCount;
+    const usedIndexCount = (object.geometry.index?.count ?? 0) - object.unusedIndexCount;
+    object.setGeometrySize(
+      Math.max(usedVertexCount + vertexCount, 2 * (usedVertexCount + object.unusedVertexCount)),
+      Math.max(usedIndexCount + indexCount, 2 * (usedIndexCount + object.unusedIndexCount)),
+    );
   }
 
   private batchedInstanceCapacity(): number {
@@ -800,6 +836,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     let geometryId: number | undefined;
     let instanceId: number | undefined;
     try {
+      this.ensureBatchedGeometrySpace(batch.object, geometry);
       geometryId = batch.object.addGeometry(geometry);
       instanceId = batch.object.addInstance(geometryId);
       registerTerrainBatchInstance(batch.object, instanceId);

@@ -270,6 +270,35 @@ describe('TerrainSurfaceComponent', () => {
     fixture.destroy();
   });
 
+  it('grows the batch to hold a cut larger than its starting capacity', () => {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    const tilesPerSide = 18;
+    const roots: IPlaneTerrainPatchAddress[] = [];
+    for (let x = 0; x < tilesPerSide; x += 1) {
+      for (let z = 0; z < tilesPerSide; z += 1) roots.push({ level: 0, x, z });
+    }
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', roots);
+    fixture.componentRef.setInput('maxLod', 0);
+    // Starts the batch at its 256-patch minimum.
+    fixture.componentRef.setInput('maxPatches', 1);
+    fixture.componentRef.setInput('resolution', 2);
+    fixture.componentRef.setInput('generationBudget', roots.length);
+    fixture.componentRef.setInput('batching', true);
+    camera.position.set(0, 100, 0);
+    fixture.detectChanges();
+    beforeRender$.next();
+    beforeRender$.next();
+
+    const batch = scene.children[0].children.find(
+      (child): child is BatchedMesh => child instanceof BatchedMesh,
+    );
+    expect(batch?.instanceCount).toBe(roots.length);
+    expect(batch!.maxInstanceCount).toBeGreaterThanOrEqual(roots.length);
+    fixture.destroy();
+  });
+
   it('uses an opt-in patch selector while retaining shared mesh streaming', () => {
     const fixture = TestBed.createComponent(TerrainSurfaceComponent);
     const selector = jasmine
