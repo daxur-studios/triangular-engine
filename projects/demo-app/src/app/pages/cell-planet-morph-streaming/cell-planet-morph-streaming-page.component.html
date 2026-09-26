@@ -353,6 +353,14 @@
     <label class="checkbox-row">
       <input
         type="checkbox"
+        [checked]="oceanVisible()"
+        (change)="setOceanVisible($event)"
+      />
+      <span>Ocean surface</span>
+    </label>
+    <label class="checkbox-row">
+      <input
+        type="checkbox"
         [checked]="cellGridVisible()"
         (change)="setCellGridVisible($event)"
       />

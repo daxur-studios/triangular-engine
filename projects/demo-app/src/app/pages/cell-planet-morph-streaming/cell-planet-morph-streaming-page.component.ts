@@ -56,6 +56,7 @@ import {
   formatDistanceM,
   updateCellPerPixelLookup,
   buildPlanetMorphBorderGeometry,
+  buildOceanMorphGeometry,
   createPlanetBorderMorphMaterial,
   createPlanetMapBorderMaterial,
   CellDataLayerPickerComponent,
@@ -78,7 +79,11 @@ import {
   type ITerrainMaterialTileAddress,
   type ITerrainMacroVariationUniforms,
 } from 'triangular-engine/terrain';
-import type { IVec3, WorldProfileKind } from 'triangular-engine/worldgen';
+import {
+  WORLD_PROFILES,
+  type IVec3,
+  type WorldProfileKind,
+} from 'triangular-engine/worldgen';
 import {
   CELL_PLANET_U0_FIXTURE,
   type CellPlanetU0BookmarkId,
@@ -328,6 +333,8 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly freezeLod = signal(false);
   readonly cellGridVisible = signal(false);
   readonly cellGridError = signal('');
+  readonly oceanVisible = signal(true);
+  private oceanMesh?: Mesh;
   private cellGridMesh?: LineSegments;
   private cellGridKey = '';
   private cellGridPendingKey = '';
@@ -920,6 +927,7 @@ export class CellPlanetMorphStreamingPageComponent {
       this.materialStream.dispose();
       this.materialGpu.dispose();
       this.disposeMapBorder();
+      this.disposeOceanMesh();
       if (this.cellGridDebounceTimer !== undefined) {
         clearTimeout(this.cellGridDebounceTimer);
       }
@@ -962,6 +970,19 @@ export class CellPlanetMorphStreamingPageComponent {
     effect(() => {
       const kind = this.projectionKind();
       this.morphUniforms.uProjectionType.value = kind === 'equalEarth' ? 1 : 0;
+    });
+
+    effect(() => {
+      const radius = this.radius();
+      const heightScale = this.terrainHeightScaleM();
+      const projectionKind = this.projectionKind();
+      const oceanSubstance =
+        WORLD_PROFILES[this.worldProfileKind()].oceanSubstance ?? 'water';
+      this.rebuildOceanMesh(radius, heightScale, projectionKind, oceanSubstance);
+    });
+
+    effect(() => {
+      if (this.oceanMesh) this.oceanMesh.visible = this.oceanVisible();
     });
 
     effect(() => {
@@ -1679,6 +1700,76 @@ export class CellPlanetMorphStreamingPageComponent {
     }
     this.cellGridMesh = undefined;
     this.cellGridKey = '';
+  }
+
+  private rebuildOceanMesh(
+    radius: number,
+    heightScale: number,
+    projectionKind: MapProjectionKind,
+    oceanSubstance: 'water' | 'lava',
+  ): void {
+    this.disposeOceanMesh();
+
+    // The streamed terrain uses radius-relative heights: its sea datum is zero
+    // in both the sphere and flat-map positions. Build the shell at that same
+    // datum, then translate the helper's tangent-frame sphere to the origin.
+    const geometry = buildOceanMorphGeometry(
+      radius,
+      heightScale,
+      0,
+      projectionKind,
+      128,
+      64,
+    ).geometry;
+    for (const name of ['position', 'aSpherePos']) {
+      const attribute = geometry.getAttribute(name);
+      if (!attribute || attribute.itemSize !== 3) continue;
+      for (let index = 2; index < attribute.array.length; index += 3) {
+        attribute.array[index] += radius;
+      }
+      attribute.needsUpdate = true;
+    }
+    geometry.computeBoundingSphere();
+    if (geometry.boundingSphere) {
+      geometry.boundingSphere.radius = Math.max(
+        geometry.boundingSphere.radius,
+        radius * 3,
+      );
+    }
+
+    const material = new MeshStandardMaterial({
+      color: oceanSubstance === 'lava' ? '#e04010' : '#146299',
+      transparent: true,
+      opacity: 0.68,
+      roughness: 0.18,
+      metalness: 0.08,
+      depthWrite: false,
+    });
+    enablePlanetMorphProjection(material, this.morphUniforms);
+    const mesh = new Mesh(geometry, material);
+    mesh.name = 'morph-streaming-ocean';
+    mesh.visible = this.oceanVisible();
+    mesh.renderOrder = 1;
+    mesh.frustumCulled = false;
+    this.engine.scene.add(mesh);
+    this.oceanMesh = mesh;
+  }
+
+  private disposeOceanMesh(): void {
+    if (!this.oceanMesh) return;
+    this.engine.scene.remove(this.oceanMesh);
+    this.oceanMesh.geometry.dispose();
+    const material = this.oceanMesh.material;
+    if (Array.isArray(material)) {
+      for (const item of material) item.dispose();
+    } else {
+      material.dispose();
+    }
+    this.oceanMesh = undefined;
+  }
+
+  setOceanVisible(event: Event): void {
+    this.oceanVisible.set((event.target as HTMLInputElement).checked);
   }
 
   jumpToBookmark(bookmarkId: CellPlanetU0BookmarkId): void {

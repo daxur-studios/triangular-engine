@@ -54,6 +54,11 @@ import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-confi
 import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
 
 const OCEAN_COLOR = 'hsl(210, 55%, 22%)';
+// A tiny mesh-space freeboard for ice owned by frozen-water cells. The shared
+// sampler intentionally eases ice toward the sea datum at cell edges; this
+// floor prevents the rendered ice surface and translucent ocean shell from
+// occupying the same depth there without changing the shoreline ownership.
+const MIN_ICE_SURFACE_CLEARANCE_ELEVATION = 0.00025;
 
 export interface CellPlanetMorphWorkerRequest {
   readonly kind?: 'terrain';
@@ -1089,8 +1094,13 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
         const cell = findNearestCellFast(graph, dir3, previousCell);
         previousCell = cell;
 
-        // Elevation displacement in meters
-        const h = (sample.elevation - sample.seaLevel) * heightScale;
+        // Elevation displacement in meters. Frozen-water cells can ease back
+        // to the sea datum at their edges, so keep a small render-only freeboard
+        // to separate the ice from the translucent ocean shell.
+        const surfaceElevation = sample.elevation - sample.seaLevel;
+        const h = (sample.isIce
+          ? Math.max(surfaceElevation, MIN_ICE_SURFACE_CLEARANCE_ELEVATION)
+          : surfaceElevation) * heightScale;
 
         const idx = vi * row + ui;
         const o3 = idx * 3;

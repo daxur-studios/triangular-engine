@@ -280,6 +280,12 @@ converges to detailed tiles with bounded memory and preserved draw-call batching
   shoreline masks from the shared height/sea-level source.
 - [ ] Compose water/seabed, shore, biome, rock/snow and feature overrides in an
   explicit documented order. Preserve access to semantic masks for diagnostics.
+- [x] Add a translucent ocean shell to the streaming morph page, using the same
+  globe-to-map projection and sea datum as terrain; keep seabed color visible
+  beneath it. This is a display surface, not yet a cell-clipped ocean mesh, and
+  still needs visual checks at both morph endpoints and the shoreline.
+  Frozen-water terrain gets a small render-only minimum freeboard so it does
+  not z-fight with the shell where the sampler eases ice to the sea datum.
 - [ ] Add a volcano/other-colour override example to prove the game can extend
   the recipe without editing the streaming engine.
 - [ ] Refine tiles containing visible thin features sooner than smooth interiors
@@ -563,6 +569,16 @@ browser performance checks are still user-run validation.
   count, elapsed time and CPU update time. This verifies the fast categorical
   palette path; arbitrary paint tiles and regional feature invalidation remain
   later work.
+- **2026-09-26 — Streaming morph ocean shell:** added an optional translucent
+  ocean surface to `cell-planet-morph-streaming`. Its sphere and flat positions
+  use the terrain page's morph uniform and sea datum, with the shell aligned to
+  the streamed globe's origin. The opacity keeps the existing seabed colors
+  visible. Browser visual checks across globe/map morph and coast settings are
+  still pending.
+- **2026-09-26 — Ice freeboard in streaming geometry:** keep frozen-water cells
+  a small positive distance above the sea shell where their canonical sample
+  approaches the shared sea datum at the cell edge. This is a render-only
+  height floor; it does not change cell ownership or the generated shoreline.
 - **2026-09-21 — Regional atlas upload correction:** fixed incorrectly sized
   mip buffers that compressed visible colour into a strip and left most of the
   atlas empty. Regional atlases now upload their complete base image and let
