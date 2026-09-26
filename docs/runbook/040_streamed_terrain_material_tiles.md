@@ -254,13 +254,17 @@ converges to detailed tiles with bounded memory and preserved draw-call batching
 
 ### M4 — Rivers, shores and material feature composition
 
-- [ ] Consume the authoritative post-cleanup cell land/water mask for shoreline
-  material classification. Current worldgen extracts `ecology.coastlines` from
-  `tectonics.isLand`, while `createPlanetSurfaceSampler()` independently derives
-  pointwise `sample.isLand` from interpolated/shaped base elevation versus
-  `seaLevel`; cell blending and detail can therefore shift the streamed texture
-  edge away from the generated cell boundary. Resolve this source-of-truth split
-  before tuning coast colour or adding shoreline noise.
+- [x] Make the post-cleanup cell mask authoritative in surface samples. The
+  canonical sampler uses the owning graph cell's `tectonics.isLand` value.
+- [x] Build one continuous fan-triangulated base surface across cell edges.
+  Mixed land/water fan vertices are fixed to the sea datum; other vertices use
+  their shared three-cell elevation. Cell-local anchors and relief now reach
+  the shared boundary through barycentric weights, instead of a radial blend
+  that could stop short on irregular polygons.
+- [ ] Verify streamed material tiles and coarse mesh edges against the blue
+  cell-grid diagnostic, including texture filtering and low mesh resolution.
+  The continuous sampler is the height foundation; visual shoreline alignment
+  at every LOD remains unverified.
 - [ ] Keep cell ownership as the macro coast constraint. Ensure land/water
   material masks and future water coverage meet at the same classified cell
   edges; permit wiggle, beach and shallow-water detail only within an explicit

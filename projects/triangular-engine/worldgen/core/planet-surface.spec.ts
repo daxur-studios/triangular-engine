@@ -287,6 +287,34 @@ describe('createPlanetSurfaceSampler', () => {
     }
   });
 
+  it('keeps sampled land and water ownership aligned with the generated cell mask', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 240, seed: 81 });
+    const generated = buildPlanetTectonics(graph, { plateCount: 9, seed: 81 });
+    const ecology = buildPlanetEcology(graph, generated);
+    const landCellId = generated.isLand.findIndex(Boolean);
+    const waterCellId = generated.isLand.findIndex((isLand) => !isLand);
+    expect(landCellId).toBeGreaterThanOrEqual(0);
+    expect(waterCellId).toBeGreaterThanOrEqual(0);
+
+    // Deliberately make the elevation contour disagree with each cell's final
+    // ownership. Surface sampling must retain the discrete mask as authority.
+    const elevation = generated.elevation.slice();
+    elevation[landCellId] = generated.seaLevelElevation - 1;
+    elevation[waterCellId] = generated.seaLevelElevation + 1;
+    const tectonics = { ...generated, elevation };
+    const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+      featureComposition: 'cell',
+      cellDetailAmplitude: 0,
+    });
+
+    const landSample = sampler.sample(graph.cells[landCellId]!.center);
+    const waterSample = sampler.sample(graph.cells[waterCellId]!.center);
+    expect(landSample.isLand).toBe(true);
+    expect(landSample.elevation).toBeGreaterThanOrEqual(landSample.seaLevel);
+    expect(waterSample.isLand).toBe(false);
+    expect(waterSample.elevation).toBeLessThanOrEqual(waterSample.seaLevel);
+  });
+
   it('elevates polar ice / sea ice cells above sea level with freeboard', () => {
     const graph = buildPlanetGraphCore({ cellCount: 300, seed: 51 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 51 });

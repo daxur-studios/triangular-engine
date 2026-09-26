@@ -1,8 +1,40 @@
 import { buildPlanetGraphCore } from './planet-graph';
-import { findCellAt, findCellNear, sampleElevation, sampleElevationNear } from './sample-elevation';
+import {
+  findCellAt,
+  findCellNear,
+  sampleElevation,
+  sampleElevationNear,
+  sampleElevationSurfaceAtCell,
+} from './sample-elevation';
 import { buildPlanetTectonics } from './tectonics';
 
 describe('sampleElevation', () => {
+  it('preserves all three positive fan weights for an interior point', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 200, seed: 7 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 8, seed: 7 });
+    const cell = graph.cells[0];
+    const k = 0;
+    const next = (k + 1) % cell.corners.length;
+    const weights = [0.2, 0.3, 0.5];
+    const point = {
+      x: cell.center.x * weights[0]! + cell.corners[k]!.x * weights[1]! + cell.corners[next]!.x * weights[2]!,
+      y: cell.center.y * weights[0]! + cell.corners[k]!.y * weights[1]! + cell.corners[next]!.y * weights[2]!,
+      z: cell.center.z * weights[0]! + cell.corners[k]!.z * weights[1]! + cell.corners[next]!.z * weights[2]!,
+    };
+
+    const sample = sampleElevationSurfaceAtCell(cell, point, tectonics.elevation);
+    const firstCorner = (tectonics.elevation[cell.id]! +
+      tectonics.elevation[cell.neighbors[k]!]! +
+      tectonics.elevation[cell.neighbors[next]!]!) / 3;
+    const second = (tectonics.elevation[cell.id]! +
+      tectonics.elevation[cell.neighbors[next]!]! +
+      tectonics.elevation[cell.neighbors[(next + 1) % cell.neighbors.length]!]!) / 3;
+    const expected = weights[0]! * tectonics.elevation[cell.id]! + weights[1]! * firstCorner + weights[2]! * second;
+
+    expect(sample.centerWeight).toBeCloseTo(weights[0]!, 5);
+    expect(sample.elevation).toBeCloseTo(expected, 5);
+  });
+
   it('returns the cell elevation exactly at the cell center', () => {
     const graph = buildPlanetGraphCore({ cellCount: 200, seed: 7 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 8, seed: 7 });

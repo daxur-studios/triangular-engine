@@ -12,7 +12,13 @@ export * from './core/cell-path';
 export * from './core/plate-tectonics';
 export * from './core/plate-boundaries';
 export * from './core/elevation';
-export * from './core/sample-elevation';
+export {
+  cellCornerElevation,
+  findCellAt,
+  findCellNear,
+  sampleElevation,
+  sampleElevationNear,
+} from './core/sample-elevation';
 export * from './core/planet-surface';
 export * from './core/planet-surface-bake';
 export * from './core/chunking';

@@ -9,7 +9,7 @@ import {
   VolcanoSettings,
 } from './geological-shapes';
 import { IPlanetGraphCore } from './planet-graph';
-import { findCellAt, findCellNear, sampleElevation } from './sample-elevation';
+import { findCellAt, findCellNear, sampleElevationSurfaceAtCell } from './sample-elevation';
 import { IPlanetTectonics } from './tectonics';
 import { cross, dot, IVec3, normalize } from './vec3';
 
@@ -70,6 +70,7 @@ export interface IPlanetSurfaceSample {
   /** Final canonical terrain elevation, including below-sea bathymetry. */
   elevation: number;
   seaLevel: number;
+  /** Discrete ownership of the sampled point's Voronoi cell, independent of its relief. */
   isLand: boolean;
   /** True if the sampled point sits on a floating sea ice / polar ice cap shelf. */
   isIce?: boolean;
@@ -349,6 +350,14 @@ export function createPlanetSurfaceSampler(
         .filter((stamp): stamp is IVolcanoStamp => stamp !== undefined);
 
   const sampleAtCell = (unitDirection: IVec3, siteCell: IPlanetGraphCore['cells'][number]): IPlanetSurfaceSample => {
+      const sharedSurface = sampleElevationSurfaceAtCell(
+        siteCell,
+        unitDirection,
+        tectonics.elevation,
+        tectonics.isLand,
+        tectonics.seaLevelElevation,
+      );
+      const coastalReliefWeight = 1 - sharedSurface.coastlineWeight;
       // A discrete cell is its own self-contained terrain unit: its elevation is anchored to the
       // Voronoi site it belongs to (`cellBlendFraction` mixes in only a little of the
       // barycentric-blended neighbour value, so tiles don't meet at a stark cliff), then shaped
@@ -361,7 +370,6 @@ export function createPlanetSurfaceSampler(
       if (isDiscreteCell) {
         const ownElevation =
           siteCell.id < tectonics.elevation.length ? tectonics.elevation[siteCell.id]! : tectonics.seaLevelElevation;
-        const blendedElevation = sampleElevation(graph, tectonics.elevation, unitDirection);
         const cellRadius =
           siteCell.corners.length > 0
             ? Math.max(
@@ -369,13 +377,13 @@ export function createPlanetSurfaceSampler(
                 Math.min(...siteCell.corners.map((corner) => angularDistance(siteCell.center, corner))),
               )
             : 0;
-        const t = cellRadius > 0 ? angularDistance(unitDirection, siteCell.center) / cellRadius : 0;
 
-        // Keep the authored cell value near the site, then join the shared surface before the
-        // Voronoi boundary. This removes the raised-cell/platform silhouette.
-        const edgeBlend = smoothstep01(Math.max(0, Math.min(1, t)));
-        const groundBlend = Math.max(p.cellBlendFraction, edgeBlend);
-        const continuousCellGround = lerp(ownElevation, blendedElevation, groundBlend);
+        // Blend the cell's authored centre value into the same fan surface used by
+        // neighboring cells. The fan centre weight is exactly zero on every polygon
+        // edge, unlike a radial distance estimate, so cell ownership cannot create a
+        // height step at a narrow or irregular part of the boundary.
+        const groundBlend = p.cellBlendFraction + (1 - sharedSurface.centerWeight) * (1 - p.cellBlendFraction);
+        const continuousCellGround = lerp(ownElevation, sharedSurface.elevation, groundBlend);
 
         // A named volcano/mesa/crater owns the cell's local landform. The biome tier remains the
         // fallback for ordinary cells, so a feature is not stacked on a second generic extrusion.
@@ -387,11 +395,15 @@ export function createPlanetSurfaceSampler(
           smoothFalloff(angularDistance(unitDirection, siteCell.center), cellRadius),
           shape.peakSharpness,
         );
-        const peaked = continuousCellGround + shape.relief * dome;
-        const detail = (cellDetailNoise(unitDirection, detailFrequency, tectonics.seed) - 0.5) * 2 * detailAmplitude;
+        const peaked = continuousCellGround + shape.relief * dome * sharedSurface.centerWeight;
+        const detail =
+          (cellDetailNoise(unitDirection, detailFrequency, tectonics.seed) - 0.5) *
+          2 *
+          detailAmplitude *
+          sharedSurface.centerWeight;
         baseElevation = peaked + detail;
       } else {
-        baseElevation = sampleElevation(graph, tectonics.elevation, unitDirection);
+        baseElevation = sharedSurface.elevation;
       }
 
       let featureRelief = 0;
@@ -415,7 +427,10 @@ export function createPlanetSurfaceSampler(
       }
 
       const cellBiome = siteCell && ecology.biome ? ecology.biome[siteCell.id] : undefined;
-      const isTectonicLand = baseElevation >= tectonics.seaLevelElevation;
+      // Land/water ownership belongs to the generated cell mask. Blended or
+      // locally shaped elevation can move a height contour, but it must not
+      // move the shoreline into the middle of a cell polygon.
+      const isTectonicLand = tectonics.isLand[siteCell.id] ?? baseElevation >= tectonics.seaLevelElevation;
       const isIce = !isTectonicLand && cellBiome === 'ice_cap';
 
       const freeboard = p.iceShelfFreeboard ?? 0.02;
@@ -438,14 +453,20 @@ export function createPlanetSurfaceSampler(
           smoothFalloff(angularDistance(unitDirection, peak), p.summitWidthRadians) * p.summitRelief,
         );
       }
+      ridgeRelief *= coastalReliefWeight;
 
       // Rivers own their corridors. Keeping their carve below the sea datum would deepen
       // ocean cells and make river crossings ambiguous at the coast.
       const riverCarve = isTectonicLand
-        ? nearestRiverInfluence(unitDirection, ecology.riverPaths, p.riverWidthRadians) * p.riverDepth
+        ? nearestRiverInfluence(unitDirection, ecology.riverPaths, p.riverWidthRadians) * p.riverDepth * coastalReliefWeight
         : 0;
 
-      const effectiveBaseElevation = isIce ? iceElevation : baseElevation;
+      const effectiveBaseElevation = isIce
+        ? baseElevation + (iceElevation - baseElevation) * sharedSurface.centerWeight * coastalReliefWeight
+        : baseElevation;
+      // Feature stamps are cell-local even in shaped mode. Fade them with the
+      // fan's site weight so adjacent cells meet on the same shared edge.
+      featureRelief *= sharedSurface.centerWeight * coastalReliefWeight;
       const shapedElevation = effectiveBaseElevation + ridgeRelief + featureRelief - riverCarve;
       // Keep land channels from falling through the shoreline, but preserve the
       // ocean floor below the sea datum so planar and spherical consumers can

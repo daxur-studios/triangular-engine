@@ -1,5 +1,5 @@
 import { IPlanetGraphCell, IPlanetGraphCore } from './planet-graph';
-import { dot, IVec3, sub } from './vec3';
+import { cross, dot, IVec3 } from './vec3';
 
 /**
  * Nearest-site lookup: for spherical Voronoi cells generated from `graph`'s
@@ -23,25 +23,18 @@ export function findCellAt(graph: IPlanetGraphCore, direction: IVec3): IPlanetGr
 }
 
 /**
- * Planar barycentric weights of `p` against triangle `a,b,c` (Ericson,
- * *Real-Time Collision Detection*). `p` need not lie exactly in the
- * triangle's plane — only its component along the (b-a, c-a) basis is used —
- * which is what makes this a workable approximation for a spherical-triangle
- * wedge instead of requiring an exact plane projection.
+ * Cone barycentric weights for a spherical triangle. Expressing the unit ray
+ * as a combination of its three vertices makes the centre weight exactly zero
+ * on the great-circle arc between the two corner vertices. Adjacent Voronoi
+ * cells therefore use the same two endpoint weights along their shared edge.
  */
 function barycentric(p: IVec3, a: IVec3, b: IVec3, c: IVec3): [number, number, number] {
-  const v0 = sub(b, a);
-  const v1 = sub(c, a);
-  const v2 = sub(p, a);
-  const d00 = dot(v0, v0);
-  const d01 = dot(v0, v1);
-  const d11 = dot(v1, v1);
-  const d20 = dot(v2, v0);
-  const d21 = dot(v2, v1);
-  const denom = d00 * d11 - d01 * d01;
-  const v = (d11 * d20 - d01 * d21) / denom;
-  const w = (d00 * d21 - d01 * d20) / denom;
-  return [1 - v - w, v, w];
+  const bc = cross(b, c);
+  const pc = cross(p, c);
+  const bp = cross(b, p);
+  const determinant = dot(a, bc);
+  if (Math.abs(determinant) < 1e-12) return [1, 0, 0];
+  return [dot(p, bc) / determinant, dot(a, pc) / determinant, dot(a, bp) / determinant];
 }
 
 /**
@@ -73,8 +66,32 @@ export function cellCornerElevation(cell: IPlanetGraphCell, cornerIndex: number,
  * from.
  */
 function sampleElevationAtCell(cell: IPlanetGraphCell, direction: IVec3, elevation: number[]): number {
+  return sampleElevationSurfaceAtCell(cell, direction, elevation).elevation;
+}
+
+export interface ICellElevationSurfaceSample {
+  /** Height on the shared fan-triangulated cell surface. */
+  elevation: number;
+  /** Barycentric weight of the cell site; exactly zero on a cell edge. */
+  centerWeight: number;
+  /** Interpolated weight of vertices that touch both land and water cells. */
+  coastlineWeight: number;
+}
+
+/**
+ * Sample the cell fan while returning geometric weights needed by local terrain
+ * shaping. When a final land mask and datum are supplied, every mixed land/water
+ * fan vertex is pinned to the datum, so the shared coast edge has one height.
+ */
+export function sampleElevationSurfaceAtCell(
+  cell: IPlanetGraphCell,
+  direction: IVec3,
+  elevation: number[],
+  isLand?: readonly boolean[],
+  seaLevel?: number,
+): ICellElevationSurfaceSample {
   const n = cell.neighbors.length;
-  if (n < 3) return elevation[cell.id];
+  if (n < 3) return { elevation: elevation[cell.id]!, centerWeight: 1, coastlineWeight: 0 };
 
   let bestWedge = 0;
   let bestMinWeight = -Infinity;
@@ -94,12 +111,24 @@ function sampleElevationAtCell(cell: IPlanetGraphCell, direction: IVec3, elevati
   const [u, v, w] = bestWeights.map((x) => Math.max(0, x));
   const sum = u + v + w || 1;
 
-  return (
-    (u * elevation[cell.id] +
-      v * cellCornerElevation(cell, bestWedge, elevation) +
-      w * cellCornerElevation(cell, (bestWedge + 1) % n, elevation)) /
-    sum
-  );
+  const cornerIndices = [bestWedge, (bestWedge + 1) % n];
+  const cornerHeight = (cornerIndex: number): { elevation: number; isCoast: boolean } => {
+    const a = cell.id;
+    const b = cell.neighbors[cornerIndex]!;
+    const c = cell.neighbors[(cornerIndex + 1) % n]!;
+    const isCoast = !!isLand && (isLand[a] !== isLand[b] || isLand[b] !== isLand[c]);
+    return {
+      elevation: isCoast && seaLevel !== undefined ? seaLevel : cellCornerElevation(cell, cornerIndex, elevation),
+      isCoast,
+    };
+  };
+  const firstCorner = cornerHeight(cornerIndices[0]!);
+  const secondCorner = cornerHeight(cornerIndices[1]!);
+  return {
+    elevation: (u * elevation[cell.id]! + v * firstCorner.elevation + w * secondCorner.elevation) / sum,
+    centerWeight: u / sum,
+    coastlineWeight: (v * Number(firstCorner.isCoast) + w * Number(secondCorner.isCoast)) / sum,
+  };
 }
 
 /**

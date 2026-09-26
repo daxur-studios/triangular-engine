@@ -232,24 +232,40 @@ Dependency: L4 style composition. Debug paths remain independently available.
 **Shoreline ownership is a blocking prerequisite for this gate.** The generated
 world has a discrete `tectonics.isLand[cellId]` classification, and
 `ecology.coastlines` is extracted from the boundary between those classified
-cells. The current surface sampler separately decides `sample.isLand` from the
-sampled/interpolated `baseElevation >= seaLevel`; in `cell` composition mode,
-cell-edge blending and local detail can therefore put the rendered water/land
-transition somewhere other than the classified cell boundary. Streamed terrain
-colouring follows the sample result, so the texture can reinforce that displaced
-transition. This matches the reported oversized/undersized land and water cells.
-The route also resets the per-cell classification with `deriveIsLand()` before
-building ecology, so the classified edge is the post-cleanup graph boundary, not
-necessarily every raw elevation threshold crossing.
+cells. The sampler previously reclassified each point from shaped elevation;
+`createPlanetSurfaceSampler()` now reads ownership from the point's graph cell
+and keeps its sampled height on the matching side of sea level. This removes
+that source-of-truth split for sampler consumers. The streamed coarse mesh and
+filtered material tiles still need a visual edge-alignment check against the
+blue cell-grid diagnostic. The route resets the per-cell classification with
+`deriveIsLand()` before building ecology, so the classified edge is the
+post-cleanup graph boundary, not necessarily every raw elevation threshold
+crossing.
 
-The first implementation step now exists in `worldgen/core/coastlines.ts`:
+The shared base-surface rule is now implemented in `worldgen/core/sample-elevation.ts`
+and consumed by `createPlanetSurfaceSampler()`: each Voronoi cell fan uses the
+same site and corner heights on both sides of a cell edge. Spherical cone
+weights make the cell-site contribution exactly zero on the great-circle edge.
+A fan corner touching both land and water cells is fixed at
+`seaLevelElevation`; other corners retain the average elevation of their three
+sites. Thus every point on a classified coast edge interpolates to the datum.
+Cell-local anchoring now fades by the fan's centre weight, which reaches zero
+on every polygon edge even when the cell is irregular. Local detail, landforms
+and feature stamps also fade at cell edges; ridge, river and other relief fades
+toward coast vertices. This replaces
+the old centre-to-nearest-corner radial blend, which could leave an edge raised
+on irregular polygons. It establishes a continuous canonical height field; it
+does not yet prove the coarse streamed triangles or filtered texture match the
+cell boundary at every LOD.
+
+The first implementation step also exists in `worldgen/core/coastlines.ts`:
 `createCoastlineQuery(graph, finalIsLandMask)` exposes cell ownership, nearest
 shared-edge segment, and signed angular coast distance. Its input mask remains
 the authority; the query does not infer ownership from elevation or select a
 sea datum. Coherent samplers can pass the previous `cellId` as a hint. This is
-the shared query foundation only: terrain height, streamed materials, river
-mouths and water coverage still need to consume it before the shoreline gate
-passes.
+the shared query foundation only: nearest-edge distance is not yet used to
+shape a bounded shore corridor, and river mouths and explicit water coverage
+still need to share it before the shoreline gate passes.
 
 - Make the post-cleanup per-cell land/water classification and its shared cell
   boundary the authoritative macro shoreline. Surface sampling, streamed
