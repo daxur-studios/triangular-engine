@@ -598,6 +598,9 @@ export class EngineService implements IEngine {
 
   public render(time: number, force?: boolean, deltaTime = 0) {
     if (!this.renderer || !this.camera) return;
+    // Resize and camera effects can request a frame before async WebGPU init completes.
+    // onComponentInit starts the normal render loop once the backend is ready.
+    if (this.renderer instanceof WebGPURenderer && !this.renderer.initialized) return;
 
     // Only render if enough time has passed since the last frame
     if (

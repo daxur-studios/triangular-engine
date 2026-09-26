@@ -92,12 +92,22 @@ export type TerrainSurfaceMeshGenerator<TAddress> = (
   request: ITerrainSurfaceGenerationRequest<TAddress>,
 ) => ITerrainPatchMesh<TAddress> | Promise<ITerrainPatchMesh<TAddress>>;
 
+/**
+ * How far the camera may get from the batch anchor before it moves. Patch
+ * offsets stay within the camera's neighbourhood plus a patch's size, so
+ * float32 keeps millimetres near the camera; re-anchoring rewrites every
+ * batched instance matrix, so it shouldn't happen every frame.
+ */
+const BATCH_ANCHOR_REFOLLOW_DISTANCE_M = 500;
+
 interface IResidentPatch<TAddress> {
   readonly address: TAddress;
   readonly object: Mesh | BatchedMesh;
   readonly material: Material;
   readonly batchGeometryId?: number;
   readonly batchInstanceId?: number;
+  /** A batched patch's centre, kept to re-express its instance matrix when the batch anchor moves. */
+  readonly centerWorldM?: TerrainVector3;
   readonly drawCalls: number;
   readonly geometryBytes: number;
   readonly triangles: number;
@@ -122,6 +132,15 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   private readonly destroyRef = inject(DestroyRef);
   private readonly group = new Object3D();
   private batchedRender?: { readonly object: BatchedMesh; readonly material: Material };
+  /**
+   * Where the `BatchedMesh` sits in the patch group, kept near the camera.
+   * Its instance matrices are float32 on the GPU, so each holds a patch's
+   * offset from this anchor rather than its full `centerWorldM`: on a
+   * planet-sized domain that is millions of metres, which float32 rounds to
+   * about half a metre and which shakes as the camera moves.
+   */
+  private readonly batchAnchorM = new Vector3();
+  private readonly cameraInGroupM = new Vector3();
   private readonly residents = new Map<string, IResidentPatch<TAddress>>();
   private readonly queue = new TerrainGenerationQueue<TAddress>();
   private readonly completed = new Map<
@@ -280,6 +299,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   }
 
   private update(): void {
+    this.followCameraWithBatchAnchor();
     if (this.freezeLod() && this.selectionSignature !== '') {
       this.processGenerationQueue();
       return;
@@ -783,14 +803,14 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       geometryId = batch.object.addGeometry(geometry);
       instanceId = batch.object.addInstance(geometryId);
       registerTerrainBatchInstance(batch.object, instanceId);
-      const matrix = new Matrix4().makeTranslation(...patch.centerWorldM);
-      batch.object.setMatrixAt(instanceId, matrix);
+      this.setBatchInstanceMatrix(batch.object, instanceId, patch.centerWorldM);
       this.residents.set(key, {
         address,
         object: batch.object,
         material: batch.material,
         batchGeometryId: geometryId,
         batchInstanceId: instanceId,
+        centerWorldM: patch.centerWorldM,
         drawCalls: 0,
         geometryBytes: geometryByteCount(geometry),
         triangles: patch.surface.indices.length / 3,
@@ -806,6 +826,56 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       geometry.dispose();
     }
   }
+
+  private setBatchInstanceMatrix(
+    object: BatchedMesh,
+    instanceId: number,
+    centerWorldM: TerrainVector3,
+  ): void {
+    const anchor = this.batchAnchorM;
+    this.batchMatrixScratch.makeTranslation(
+      centerWorldM[0] - anchor.x,
+      centerWorldM[1] - anchor.y,
+      centerWorldM[2] - anchor.z,
+    );
+    object.setMatrixAt(instanceId, this.batchMatrixScratch);
+  }
+
+  /**
+   * Moves the batch anchor to the camera (in the patch group's frame) once
+   * the camera is `BATCH_ANCHOR_REFOLLOW_DISTANCE_M` from it, and re-expresses
+   * every batched patch against the new anchor. Nothing moves on screen: the
+   * anchor's offset and each patch's offset still add up to its centre.
+   */
+  private followCameraWithBatchAnchor(): void {
+    const batch = this.batchedRender;
+    if (!batch) return;
+    this.group.updateWorldMatrix(true, false);
+    this.engine.camera
+      .getWorldPosition(this.cameraInGroupM)
+      .applyMatrix4(this.groupInverseScratch.copy(this.group.matrixWorld).invert());
+    if (
+      this.cameraInGroupM.distanceTo(this.batchAnchorM) <
+      BATCH_ANCHOR_REFOLLOW_DISTANCE_M
+    ) {
+      return;
+    }
+    this.batchAnchorM.copy(this.cameraInGroupM);
+    batch.object.position.copy(this.batchAnchorM);
+    for (const resident of this.residents.values()) {
+      if (resident.batchInstanceId === undefined || !resident.centerWorldM) {
+        continue;
+      }
+      this.setBatchInstanceMatrix(
+        batch.object,
+        resident.batchInstanceId,
+        resident.centerWorldM,
+      );
+    }
+  }
+
+  private readonly batchMatrixScratch = new Matrix4();
+  private readonly groupInverseScratch = new Matrix4();
 
   private getBatchedRender(): { readonly object: BatchedMesh; readonly material: Material } {
     if (this.batchedRender) return this.batchedRender;
@@ -823,6 +893,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       maxInstances * indicesPerPatch,
       material,
     );
+    object.position.copy(this.batchAnchorM);
     this.group.add(object);
     this.batchedRender = { object, material };
     return this.batchedRender;
