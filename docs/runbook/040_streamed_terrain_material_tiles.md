@@ -254,6 +254,19 @@ converges to detailed tiles with bounded memory and preserved draw-call batching
 
 ### M4 — Rivers, shores and material feature composition
 
+- [ ] Consume the authoritative post-cleanup cell land/water mask for shoreline
+  material classification. Current worldgen extracts `ecology.coastlines` from
+  `tectonics.isLand`, while `createPlanetSurfaceSampler()` independently derives
+  pointwise `sample.isLand` from interpolated/shaped base elevation versus
+  `seaLevel`; cell blending and detail can therefore shift the streamed texture
+  edge away from the generated cell boundary. Resolve this source-of-truth split
+  before tuning coast colour or adding shoreline noise.
+- [ ] Keep cell ownership as the macro coast constraint. Ensure land/water
+  material masks and future water coverage meet at the same classified cell
+  edges; permit wiggle, beach and shallow-water detail only within an explicit
+  physical-width corridor that cannot visually reassign cells. Keep sea datum,
+  discrete land/water ownership and sampled terrain height as separately
+  inspectable values.
 - [ ] Add spatially indexed feature inputs for river paths/widths/banks and
   shoreline masks from the shared height/sea-level source.
 - [ ] Compose water/seabed, shore, biome, rock/snow and feature overrides in an
@@ -268,6 +281,10 @@ converges to detailed tiles with bounded memory and preserved draw-call batching
 
 Exit: rivers and shores are controlled features; slope and biome blending are
 independently configurable, and detail remains stable during movement.
+The coast acceptance check also compares the texture mask against the generated
+cell boundary at overview and close range, with geometry and colour diagnostics
+visible together. Matching a pointwise elevation contour alone does not pass if
+it causes classified land or water cells to grow or shrink visually.
 
 ### M5 — Fast game paint layers
 

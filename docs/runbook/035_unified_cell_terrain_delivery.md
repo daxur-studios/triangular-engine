@@ -229,6 +229,52 @@ blended mountains remain available, and Civ-style terrain reads as individual ce
 
 Dependency: L4 style composition. Debug paths remain independently available.
 
+**Shoreline ownership is a blocking prerequisite for this gate.** The generated
+world has a discrete `tectonics.isLand[cellId]` classification, and
+`ecology.coastlines` is extracted from the boundary between those classified
+cells. The current surface sampler separately decides `sample.isLand` from the
+sampled/interpolated `baseElevation >= seaLevel`; in `cell` composition mode,
+cell-edge blending and local detail can therefore put the rendered water/land
+transition somewhere other than the classified cell boundary. Streamed terrain
+colouring follows the sample result, so the texture can reinforce that displaced
+transition. This matches the reported oversized/undersized land and water cells.
+The route also resets the per-cell classification with `deriveIsLand()` before
+building ecology, so the classified edge is the post-cleanup graph boundary, not
+necessarily every raw elevation threshold crossing.
+
+The first implementation step now exists in `worldgen/core/coastlines.ts`:
+`createCoastlineQuery(graph, finalIsLandMask)` exposes cell ownership, nearest
+shared-edge segment, and signed angular coast distance. Its input mask remains
+the authority; the query does not infer ownership from elevation or select a
+sea datum. Coherent samplers can pass the previous `cellId` as a hint. This is
+the shared query foundation only: terrain height, streamed materials, river
+mouths and water coverage still need to consume it before the shoreline gate
+passes.
+
+- Make the post-cleanup per-cell land/water classification and its shared cell
+  boundary the authoritative macro shoreline. Surface sampling, streamed
+  materials, coast references and water coverage must all use the same ownership
+  decision; do not independently reclassify a point from blended terrain height.
+- Keep terrain height subordinate to that ownership: land-side terrain must
+  meet the water datum at the classified boundary, while water-cell seabed stays
+  below it. Specify the exact boundary interpolation and corner rule so adjacent
+  patches produce the same shoreline.
+- Allow authored shoreline wiggle, beaches and shallow shelves only as bounded
+  detail around the classified boundary. They may shape the silhouette/material
+  within a documented physical corridor, but may not make a cell appear to
+  change its land/water ownership or move the macro coast beyond that corridor.
+- Keep `seaLevelElevation` (the water datum) distinct from the land/water cell
+  mask and from terrain height. Record how the datum is chosen, how callers may
+  change it, whether changing it also regenerates the cell mask, and which
+  operation is authoritative in the morph route. Add debug views that show the
+  raw cell mask, cleaned mask, sea datum, sampled terrain and resulting water
+  coverage together.
+- Add a regression fixture with adjacent classified land/water cells. Check
+  sample ownership and rendered material on both sides of their shared edge,
+  then repeat with cell blending/detail enabled, at chunk boundaries and across
+  globe/intermediate/map morph. The texture shoreline and water edge must follow
+  the same cell boundary before optional bounded wiggle is enabled.
+
 - Define continuous corridor sampling along segments, shared bend/junction/mouth geometry,
   physical widths/depths and water profiles in canonical coordinates. Current nearest-path-
   point influence is a starting approximation, not acceptance of a continuous riverbed.

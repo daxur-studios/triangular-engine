@@ -102,6 +102,16 @@ The climate/biome/river/ridge/water pass. This is what a cloud/weather system an
 }
 ```
 
+For 3D terrain consumers, `createCoastlineQuery(graph, tectonics.isLand)`
+provides the authoritative post-cleanup cell owner and signed angular distance
+to the nearest Voronoi coast segment. Positive distance is land, negative is
+water, and a point on the shared edge is zero. Segment endpoints are the
+shared cell corners; equal-distance ties use stable segment order. Pass the
+previous sample's `cellId` as the optional hint when sampling a coherent grid.
+The query does not re-threshold elevation or choose sea level: the supplied
+final cell mask defines ownership, while `seaLevelElevation` remains the
+separate water height datum.
+
 Ridge paths include a deterministic local Voronoi-style detail route between their exact cell-centre
 anchors. Tune it through `buildPlanetEcology(..., { ridges: { ridgeDetail: { ... } } })`; the shared
 unit-sphere points are consumed by both the 2D map and 3D globe overlays. Ridge links are selected
