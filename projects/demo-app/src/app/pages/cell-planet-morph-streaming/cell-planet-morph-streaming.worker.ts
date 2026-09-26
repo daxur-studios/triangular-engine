@@ -46,6 +46,10 @@ import {
   type ICellPerPixelLookupPayload,
   type MapProjectionKind,
 } from 'triangular-engine/worldgen/render/core';
+import {
+  buildCellBorderLineGeometry,
+  type MapProjectionKind as BorderProjectionKind,
+} from 'triangular-engine/worldgen/render';
 import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
 import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
 
@@ -106,10 +110,27 @@ export interface CellPlanetMorphCellLookupRequest {
   readonly seed?: number;
 }
 
+/** Build the POC's morphing Voronoi grid on demand, away from the UI thread. */
+export interface CellPlanetMorphCellGridRequest {
+  readonly kind: 'cellGrid';
+  readonly id: number;
+  readonly radius: number;
+  readonly heightScale: number;
+  readonly projectionKind: BorderProjectionKind;
+  readonly colorMode: 'natural';
+  readonly worldProfile?: WorldProfileKind;
+  readonly seed?: number;
+}
+
 export type CellPlanetMorphWorkerMessage =
   | CellPlanetMorphWorkerRequest
   | CellPlanetMorphMaterialTileRequest
-  | CellPlanetMorphCellLookupRequest;
+  | CellPlanetMorphCellLookupRequest
+  | CellPlanetMorphCellGridRequest;
+
+export interface CellPlanetMorphCellGridPayload {
+  readonly attributes: Readonly<Record<string, { readonly array: Float32Array; readonly itemSize: number }>>;
+}
 
 export interface CellPlanetMorphWorkerTimings {
   readonly generationMs: number;
@@ -957,6 +978,30 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
         },
         transferables,
       );
+      return;
+    }
+
+    if (data.kind === 'cellGrid') {
+      const geometry = buildCellBorderLineGeometry({
+        graph,
+        sampler,
+        radius: data.radius,
+        heightScale: data.heightScale,
+        projectionKind: data.projectionKind,
+        seaLevelElevation: tectonics.seaLevelElevation,
+        seabedRelief: true,
+        clampToSeaLevel: true,
+      });
+      const attributes: Record<string, { array: Float32Array; itemSize: number }> = {};
+      const transferables: ArrayBuffer[] = [];
+      for (const [name, attribute] of Object.entries(geometry.attributes)) {
+        const array = attribute.array;
+        if (!(array instanceof Float32Array)) continue;
+        attributes[name] = { array, itemSize: attribute.itemSize };
+        transferables.push(array.buffer as ArrayBuffer);
+      }
+      geometry.dispose();
+      postMessage({ id, cellGrid: { attributes } satisfies CellPlanetMorphCellGridPayload }, transferables);
       return;
     }
 

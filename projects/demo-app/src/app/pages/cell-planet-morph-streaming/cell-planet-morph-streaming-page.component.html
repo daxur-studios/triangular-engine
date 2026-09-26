@@ -350,6 +350,17 @@
         Freeze LOD
       </button>
     </div>
+    <label class="checkbox-row">
+      <input
+        type="checkbox"
+        [checked]="cellGridVisible()"
+        (change)="setCellGridVisible($event)"
+      />
+      <span>Blue cell grid</span>
+    </label>
+    @if (cellGridError()) {
+      <p class="control-hint">Cell grid: {{ cellGridError() }}</p>
+    }
   </div>
 
   <div class="control-section stats-section">

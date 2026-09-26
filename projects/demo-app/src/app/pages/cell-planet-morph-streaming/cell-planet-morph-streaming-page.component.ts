@@ -18,6 +18,9 @@ import {
   Box3,
   DoubleSide,
   Frustum,
+  BufferAttribute,
+  BufferGeometry,
+  LineSegments,
   Matrix4,
   Mesh,
   MeshStandardMaterial,
@@ -53,6 +56,7 @@ import {
   formatDistanceM,
   updateCellPerPixelLookup,
   buildPlanetMorphBorderGeometry,
+  createPlanetBorderMorphMaterial,
   createPlanetMapBorderMaterial,
   CellDataLayerPickerComponent,
   type ICellPerPixelLookupPayload,
@@ -82,6 +86,8 @@ import {
 } from '../cell-planet-u0-fixture';
 import { getTerrainHeightScaleM } from '../cell-planet-25d-map/cell-planet-terrain-scale';
 import type {
+  CellPlanetMorphCellGridPayload,
+  CellPlanetMorphCellGridRequest,
   CellPlanetMorphCellLookupRequest,
   CellPlanetMorphMaterialTileRequest,
   CellPlanetMorphMaterialTilePayload,
@@ -320,6 +326,14 @@ export class CellPlanetMorphStreamingPageComponent {
   private mapBorderMesh?: Mesh;
   readonly wireframe = signal(false);
   readonly freezeLod = signal(false);
+  readonly cellGridVisible = signal(false);
+  readonly cellGridError = signal('');
+  private cellGridMesh?: LineSegments;
+  private cellGridKey = '';
+  private cellGridPendingKey = '';
+  private cellGridDebounceTimer?: number;
+  private latestCellGridRequestId = -1;
+  private readonly cellGridRequests = new Map<number, { readonly key: string }>();
 
   // Official Cell Planet U0 Bookmarks
   readonly bookmarks = CELL_PLANET_U0_FIXTURE.bookmarks;
@@ -760,15 +774,56 @@ export class CellPlanetMorphStreamingPageComponent {
 
   constructor() {
     const handleWorkerMessage = ({
-      data,
-    }: MessageEvent<{
+    data,
+  }: MessageEvent<{
       readonly id: number;
       readonly patch?: ITerrainPatchMesh<ILatLonTerrainPatchAddress>;
       readonly cellLookup?: ICellPerPixelLookupPayload;
+      readonly cellGrid?: CellPlanetMorphCellGridPayload;
       readonly materialTile?: ITerrainMaterialTilePayload;
       readonly timings?: CellPlanetMorphWorkerTimings;
       readonly error?: string;
     }>) => {
+      const gridPending = this.cellGridRequests.get(data.id);
+      if (gridPending) {
+        this.cellGridRequests.delete(data.id);
+        if (this.latestCellGridRequestId === data.id) {
+          this.cellGridPendingKey = '';
+          if (data.error) {
+            this.cellGridError.set(data.error);
+          } else if (
+            data.cellGrid &&
+            this.cellGridVisible() &&
+            gridPending.key === this.currentCellGridKey()
+          ) {
+            const geometry = new BufferGeometry();
+            for (const [name, attribute] of Object.entries(data.cellGrid.attributes)) {
+              if ((name === 'position' || name === 'aSpherePos') && attribute.itemSize === 3) {
+                for (let index = 2; index < attribute.array.length; index += 3) {
+                  attribute.array[index] += this.radius();
+                }
+              }
+              geometry.setAttribute(name, new BufferAttribute(attribute.array, attribute.itemSize));
+            }
+            geometry.computeBoundingSphere();
+            const material = createPlanetBorderMorphMaterial(this.morphUniforms, {
+              color: '#38bdf8',
+              opacity: 0.82,
+            });
+            const lines = new LineSegments(geometry, material);
+            lines.name = 'morph-streaming-cell-grid';
+            lines.renderOrder = 4;
+            lines.frustumCulled = false;
+            this.disposeCellGridMesh();
+            this.cellGridMesh = lines;
+            this.cellGridKey = gridPending.key;
+            this.cellGridError.set('');
+            this.engine.scene.add(lines);
+          }
+        }
+        return;
+      }
+
       const materialPending = this.materialTileRequests.get(data.id);
       if (materialPending) {
         this.materialTileRequests.delete(data.id);
@@ -846,6 +901,11 @@ export class CellPlanetMorphStreamingPageComponent {
       this.workerRequests.clear();
       for (const pending of this.materialTileRequests.values()) pending.reject(error);
       this.materialTileRequests.clear();
+      if (this.cellGridRequests.size > 0) {
+        this.cellGridRequests.clear();
+        this.cellGridPendingKey = '';
+        this.cellGridError.set(error.message);
+      }
     };
     this.terrainWorker.onerror = handleWorkerError;
     this.materialWorker.onerror = handleWorkerError;
@@ -860,6 +920,11 @@ export class CellPlanetMorphStreamingPageComponent {
       this.materialStream.dispose();
       this.materialGpu.dispose();
       this.disposeMapBorder();
+      if (this.cellGridDebounceTimer !== undefined) {
+        clearTimeout(this.cellGridDebounceTimer);
+      }
+      this.disposeCellGridMesh();
+      this.cellGridRequests.clear();
       if (this.morphLodDebounceTimer !== undefined) {
         clearTimeout(this.morphLodDebounceTimer);
       }
@@ -897,6 +962,28 @@ export class CellPlanetMorphStreamingPageComponent {
     effect(() => {
       const kind = this.projectionKind();
       this.morphUniforms.uProjectionType.value = kind === 'equalEarth' ? 1 : 0;
+    });
+
+    effect(() => {
+      const visible = this.cellGridVisible();
+      const key = this.currentCellGridKey();
+      if (!visible) {
+        if (this.cellGridMesh) this.cellGridMesh.visible = false;
+        return;
+      }
+      if (this.cellGridMesh && this.cellGridKey === key) {
+        this.cellGridMesh.visible = true;
+        return;
+      }
+      if (this.cellGridMesh) this.cellGridMesh.visible = false;
+      if (this.cellGridPendingKey === key) return;
+      if (this.cellGridDebounceTimer !== undefined) {
+        clearTimeout(this.cellGridDebounceTimer);
+      }
+      this.cellGridDebounceTimer = window.setTimeout(() => {
+        this.cellGridDebounceTimer = undefined;
+        this.requestCellGrid(key);
+      }, 120);
     });
 
     effect(() => {
@@ -1545,6 +1632,53 @@ export class CellPlanetMorphStreamingPageComponent {
 
   toggleFreezeLod(): void {
     this.freezeLod.update((v) => !v);
+  }
+
+  setCellGridVisible(event: Event): void {
+    this.cellGridVisible.set((event.target as HTMLInputElement).checked);
+    this.cellGridError.set('');
+  }
+
+  private currentCellGridKey(): string {
+    return [
+      this.seed(),
+      this.worldProfileKind(),
+      this.radius(),
+      this.terrainHeightScaleM(),
+      this.projectionKind(),
+    ].join(':');
+  }
+
+  private requestCellGrid(key: string): void {
+    if (!this.cellGridVisible() || key !== this.currentCellGridKey()) return;
+    const id = this.nextWorkerRequestId++;
+    this.latestCellGridRequestId = id;
+    this.cellGridPendingKey = key;
+    this.cellGridRequests.set(id, { key });
+    const request: CellPlanetMorphCellGridRequest = {
+      kind: 'cellGrid',
+      id,
+      radius: this.radius(),
+      heightScale: this.terrainHeightScaleM(),
+      projectionKind: this.projectionKind(),
+      colorMode: 'natural',
+      worldProfile: this.worldProfileKind(),
+      seed: this.seed(),
+    };
+    this.materialWorker.postMessage(request);
+  }
+
+  private disposeCellGridMesh(): void {
+    if (!this.cellGridMesh) return;
+    this.engine.scene.remove(this.cellGridMesh);
+    this.cellGridMesh.geometry.dispose();
+    if (Array.isArray(this.cellGridMesh.material)) {
+      for (const material of this.cellGridMesh.material) material.dispose();
+    } else {
+      this.cellGridMesh.material.dispose();
+    }
+    this.cellGridMesh = undefined;
+    this.cellGridKey = '';
   }
 
   jumpToBookmark(bookmarkId: CellPlanetU0BookmarkId): void {
