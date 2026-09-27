@@ -11,6 +11,7 @@ High-level reference for AI agents and developers working with Voronoi cell plan
 * **`triangular-engine/worldgen/render`** (Angular & Three.js Presentation):
   * `<cellPlanetMorphView>`: High-performance 3D Globe $\leftrightarrow$ 2.5D Flat Map GPU vertex reprojection with day/night solar cycle, tracking, bathymetric relief, and tactical overlays.
   * `<cellPlanetMap>`: 2D Canvas flat map with pan/zoom, seasonal temperature shifts, biomes, and graticules.
+  * `<cellPlanetMorphStreamingView>`: Worker-backed quadtree terrain with GPU morphing and camera-frustum refinement.
 
 ---
 
@@ -90,3 +91,50 @@ morphView.updateTracking(unitDirection, 'meridian');
 
 ### D. Custom Materials
 Consumers can supply custom Three.js materials via `customTerrainMaterial` and `customOceanMaterial` functions that receive `(uniforms, dayNightUniforms)`.
+
+## 5. Streaming Terrain Frustum LOD
+
+`cellPlanetMorphStreamingView` owns patch selection and streaming; the host
+supplies `radiusM`, `meshGenerator`, and camera/controls. For displaced terrain,
+set `heightScaleM` to match the mesh generator:
+
+```html
+<cellPlanetMorphStreamingView
+  [radiusM]="planetRadius"
+  [meshGenerator]="generatePatch"
+  [heightScaleM]="terrainHeightScale"
+  [morphProgress]="morph"
+  [frustumCulling]="true"
+/>
+```
+
+`frustumCulling` defaults to `true` when the active engine camera is available.
+It limits refinement, retaining a complete coarse cover outside the camera's
+view. `horizonCulling` defaults to `true` and rejects terrain beyond the planet
+curve only at `morphProgress=0`; a deformed map uses frustum bounds without
+spherical horizon rejection. Longitude wrapping and polar regions are included.
+
+`frustumSafetyFactor` defaults to `1.35` and is clamped to at least `1`. It
+expands patch UV bounds to prepare nearby terrain before a turn. Some detail
+outside the visible cone is expected from that buffer and four-child quadtree
+splits. Bounds include elevations from `-2 * heightScaleM` through
+`+2 * heightScaleM` (default height scale `0`), across both projections and all
+morph values. Keep generated elevations within that range.
+
+Changes to culling controls and the debounced LOD morph automatically invalidate
+selection without clearing resident meshes. The wrapper also forwards
+`selectionRevision` for other caller-owned selector settings. `freezeLod` keeps
+the selected cut while worker jobs finish, and applies pending selection changes
+on unfreeze.
+
+For direct `createCellPlanetMorphSurfaceSelector` integration, supply its
+`camera` provider to enable view culling, and invalidate the terrain surface
+through `selectionRevision` when live option getters change. The camera and
+patch positions must share the same planet-centred coordinate frame.
+
+`createFrozenFrustumVisualizer(camera, options)` captures a camera pose and
+projection independently of subsequent camera or parent-rig movement. Add its
+`group` to the scene and call `dispose()` to remove it and release its geometries
+and materials. The demo's Freeze LOD helper uses the camera snapshot from the
+last selection. Its displayed far distance is shortened for readability; it
+does not change the camera's actual far plane or the selector's visibility test.

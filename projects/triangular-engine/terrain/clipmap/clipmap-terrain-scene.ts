@@ -249,7 +249,7 @@ export function createClipmapTerrainScene(
     if (nowMs - lastSampleMs >= 500) {
       lastSampleMs = nowMs;
       onDiagnostics({
-        drawCalls: engine.renderer.info.render.calls,
+        drawCalls: (engine.renderer.info.render as any).drawCalls ?? engine.renderer.info.render.calls,
         triangles: engine.renderer.info.render.triangles,
         instanceCountsByLevel: levelMeshes.map((mesh) => mesh.count),
         frozen,
@@ -292,7 +292,7 @@ export function createClipmapTerrainScene(
     },
     getDiagnosticsSnapshot(): IClipmapTerrainDiagnostics {
       return {
-        drawCalls: engine.renderer.info.render.calls,
+        drawCalls: (engine.renderer.info.render as any).drawCalls ?? engine.renderer.info.render.calls,
         triangles: engine.renderer.info.render.triangles,
         instanceCountsByLevel: levelMeshes.map((mesh) => mesh.count),
         frozen,

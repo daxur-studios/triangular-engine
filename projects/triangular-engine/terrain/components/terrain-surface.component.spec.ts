@@ -349,4 +349,88 @@ describe('TerrainSurfaceComponent', () => {
     );
     expect(stats.at(-1)!.geometryBytes).toBeGreaterThan(0);
   });
+
+  function createSelectionFixture() {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    const selector = jasmine.createSpy('live selector').and.callFake(
+      ({ roots }: ITerrainSurfaceSelectionRequest<IPlaneTerrainPatchAddress>) => roots,
+    );
+    const generator = jasmine.createSpy('generator').and.callFake(
+      (request: ITerrainSurfaceGenerationRequest<IPlaneTerrainPatchAddress>) =>
+        generateTerrainPatchMesh(request.field, request.domain, request),
+    );
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', [{ level: 0, x: 0, z: 0 }]);
+    fixture.componentRef.setInput('maxLod', 1);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('generationBudget', 100);
+    fixture.componentRef.setInput('patchSelector', selector);
+    fixture.componentRef.setInput('meshGenerator', generator);
+    fixture.detectChanges();
+    beforeRender$.next();
+    beforeRender$.next();
+    selector.calls.reset();
+    return { fixture, selector, generator };
+  }
+
+  it('reruns stationary selection on revision changes without regenerating unchanged residents', () => {
+    const { fixture, selector, generator } = createSelectionFixture();
+    const resident = scene.children[0].children[0];
+    fixture.componentRef.setInput('selectionRevision', 'frustum-off');
+    fixture.detectChanges();
+    beforeRender$.next();
+    expect(selector).toHaveBeenCalledTimes(1);
+    expect(scene.children[0].children[0]).toBe(resident);
+    expect(generator).toHaveBeenCalledTimes(1);
+    beforeRender$.next();
+    expect(selector).toHaveBeenCalledTimes(1);
+    fixture.destroy();
+  });
+
+  it('reselects on small rotations even with an explicit LOD position', () => {
+    const { fixture, selector } = createSelectionFixture();
+    fixture.componentRef.setInput('lodPosition', [0, 100, 0]);
+    fixture.detectChanges();
+    beforeRender$.next();
+    selector.calls.reset();
+    camera.rotation.y += 0.0001;
+    beforeRender$.next();
+    expect(selector).toHaveBeenCalledTimes(1);
+    fixture.destroy();
+  });
+
+  it('reselects when FOV, zoom, or aspect changes without camera movement', () => {
+    const { fixture, selector } = createSelectionFixture();
+    camera.fov = 30;
+    camera.updateProjectionMatrix();
+    beforeRender$.next();
+    expect(selector).toHaveBeenCalledTimes(1);
+    camera.zoom = 2;
+    camera.updateProjectionMatrix();
+    beforeRender$.next();
+    expect(selector).toHaveBeenCalledTimes(2);
+    camera.aspect = 2;
+    camera.updateProjectionMatrix();
+    beforeRender$.next();
+    expect(selector).toHaveBeenCalledTimes(3);
+    fixture.destroy();
+  });
+
+  it('defers revision changes while frozen and applies them on unfreeze', () => {
+    const { fixture, selector, generator } = createSelectionFixture();
+    const resident = scene.children[0].children[0];
+    fixture.componentRef.setInput('freezeLod', true);
+    fixture.componentRef.setInput('selectionRevision', 1);
+    fixture.detectChanges();
+    beforeRender$.next();
+    expect(selector).not.toHaveBeenCalled();
+    expect(scene.children[0].children[0]).toBe(resident);
+    fixture.componentRef.setInput('freezeLod', false);
+    fixture.detectChanges();
+    beforeRender$.next();
+    expect(selector).toHaveBeenCalledTimes(1);
+    expect(generator).toHaveBeenCalledTimes(1);
+    fixture.destroy();
+  });
 });

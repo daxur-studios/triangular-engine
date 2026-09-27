@@ -104,6 +104,7 @@ function defaultAddressLevel(address: ILatLonTerrainPatchAddress): number {
       [freezeLod]="freezeLod()"
       [wireframe]="wireframe()"
       [patchSelector]="patchSelector"
+      [selectionRevision]="resolvedSelectionRevision()"
       [meshGenerator]="meshGenerator()"
       [createMaterial]="resolvedCreateMaterial"
       [colorRevision]="colorRevision()"
@@ -159,6 +160,12 @@ export class CellPlanetMorphStreamingViewComponent {
   readonly colorRevision = input(0);
   readonly refinementDistanceFactor = input<number | undefined>(undefined);
   readonly stickyRefinementFactor = input<number | undefined>(undefined);
+  readonly frustumCulling = input(true);
+  readonly horizonCulling = input(true);
+  readonly frustumSafetyFactor = input(1.35);
+  /** Match the mesh generator's height scale; selector bounds allow +/- twice this value. */
+  readonly heightScaleM = input(0);
+  readonly selectionRevision = input<string | number>(0);
 
   // ==========================================================================
   // Default material - macro/micro colour breakup + sphere/flat morph projection
@@ -221,7 +228,16 @@ export class CellPlanetMorphStreamingViewComponent {
     refinementDistanceFactor: () => this.refinementDistanceFactor(),
     stickyRefinementFactor: () => this.stickyRefinementFactor(),
     camera: () => this.engine?.camera,
+    frustumCulling: () => this.frustumCulling(),
+    horizonCulling: () => this.horizonCulling(),
+    frustumSafetyFactor: () => this.frustumSafetyFactor(),
+    heightScaleM: () => this.heightScaleM(),
   });
+  readonly resolvedSelectionRevision = computed(() => JSON.stringify([
+    this.selectionRevision(), this.lodMorph(), this.projectionKind(),
+    this.refinementDistanceFactor(), this.stickyRefinementFactor(),
+    this.frustumCulling(), this.horizonCulling(), this.frustumSafetyFactor(), this.heightScaleM(),
+  ]));
   readonly patchSelector: TerrainSurfacePatchSelector<ILatLonTerrainPatchAddress> = (request) =>
     this.selector.select(request);
 

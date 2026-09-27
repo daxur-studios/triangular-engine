@@ -299,7 +299,8 @@ export class ClipmapFarCoverageSpikeComponent {
     try {
       this.setTerrainKind(this.benchmarkKind());
       await this.waitFrames(3);
-      const observedDrawCalls = this.engine.renderer.info.render.calls;
+      const observedDrawCalls =
+        (this.engine.renderer.info.render as any).drawCalls ?? this.engine.renderer.info.render.calls;
 
       const result = await runClipmapBenchmarkSuite(this.engine, {
         terrainKind: this.benchmarkKind(),

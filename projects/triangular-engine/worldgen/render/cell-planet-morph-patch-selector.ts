@@ -1,12 +1,15 @@
 import { Box3, Frustum, Matrix4, Vector3, type Camera } from 'three';
 import type {
   ILatLonTerrainPatchAddress,
-  ITerrainPatchBounds,
   ITerrainSurfaceSelectionRequest,
   LatLonTerrainDomain,
   TerrainSurfacePatchSelector,
 } from 'triangular-engine/terrain';
 import { MAP_PROJECTIONS, MapProjectionKind } from './map-projections';
+import {
+  maximumCellPlanetPatchDirectionDot,
+  populateCellPlanetMorphPatchBounds,
+} from './cell-planet-morph-patch-bounds';
 
 export interface ICellPlanetMorphSurfaceSelectorOptions {
   /**
@@ -41,16 +44,17 @@ export interface ICellPlanetMorphSurfaceSelectorOptions {
    */
   readonly frustumCulling?: () => boolean | undefined;
   /**
-   * Safety multiplier applied to patch radius during frustum testing (defaults to 1.35).
-   * Expands the view cone slightly so terrain just outside the screen is refined before turning into it.
+   * Safety multiplier for patch UV bounds during frustum testing (defaults to 1.35, minimum 1).
+   * Includes nearby terrain outside the screen to buffer camera turns.
    */
   readonly frustumSafetyFactor?: () => number | undefined;
   /**
-   * Whether to cull patches beyond the planet's horizon when in sphere mode (defaults to true).
+   * Whether to cull patches beyond the planet's horizon at morph=0 (defaults to true).
    */
   readonly horizonCulling?: () => boolean | undefined;
   /**
-   * Optional height scale / relief margin in meters to expand patch bounding spheres.
+   * Terrain height scale in meters. Bounds allow elevations up to +/- twice this value.
+   * Defaults to 0; supply the mesh generator's height scale for displaced terrain.
    */
   readonly heightScaleM?: () => number | undefined;
 }
@@ -95,7 +99,7 @@ export function createCellPlanetMorphSurfaceSelector(
   ): readonly ILatLonTerrainPatchAddress[] => {
     const domain = options.domain();
     const radius = options.radiusM();
-    const morph = options.morph();
+    const morph = Math.max(0, Math.min(1, options.morph()));
     const mapWidth = 2 * Math.PI * radius;
     const mapHeight = Math.PI * radius;
     const projection = MAP_PROJECTIONS[options.projectionKind()];
@@ -108,9 +112,9 @@ export function createCellPlanetMorphSurfaceSelector(
 
     const camera = options.camera?.();
     const useFrustum = (options.frustumCulling?.() ?? true) && !!camera;
-    const safetyBase = options.frustumSafetyFactor?.() ?? 1.35;
+    const safetyBase = Math.max(1, options.frustumSafetyFactor?.() ?? 1.35);
     const enableHorizon = options.horizonCulling?.() ?? true;
-    const heightScaleM = options.heightScaleM?.() ?? 0;
+    const heightScaleM = Math.max(0, options.heightScaleM?.() ?? 0);
     const reliefMargin = heightScaleM * 2;
 
     let camDist = 0;
@@ -119,7 +123,7 @@ export function createCellPlanetMorphSurfaceSelector(
     let thetaHorizonMax = 0;
 
     if (useFrustum && camera) {
-      camera.updateMatrixWorld();
+      camera.updateWorldMatrix(true, false);
       viewProjection.multiplyMatrices(
         camera.projectionMatrix,
         camera.matrixWorldInverse,
@@ -134,7 +138,7 @@ export function createCellPlanetMorphSurfaceSelector(
         camLon = Math.atan2(camDirScratch.x, camDirScratch.z);
       }
 
-      if (enableHorizon && morph < 0.05 && camDist >= radius - reliefMargin) {
+      if (enableHorizon && morph === 0 && camDist >= radius) {
         const hc = Math.max(0, camDist - radius);
         const alphaCam = Math.acos(Math.min(1, radius / (radius + hc)));
         const alphaRelief = Math.acos(
@@ -148,66 +152,29 @@ export function createCellPlanetMorphSurfaceSelector(
       address: ILatLonTerrainPatchAddress,
       u: number,
       v: number,
-      rOffset: number,
       target: Vector3,
     ) => {
       const dir = domain.getFieldPosition(address, u, v);
-      const r = radius + (1 - morph) * rOffset;
-      const sx = dir[0] * r;
-      const sy = dir[1] * r;
-      const sz = dir[2] * r;
+      const sx = dir[0] * radius;
+      const sy = dir[1] * radius;
+      const sz = dir[2] * radius;
 
       const proj = projection.project(u, v, mapWidth, mapHeight);
       const fx = proj.x - mapWidth * 0.5;
       const fy = mapHeight * 0.5 - proj.y;
-      const fz = morph * rOffset;
 
       target.set(
         (1 - morph) * sx + morph * fx,
         (1 - morph) * sy + morph * fy,
-        (1 - morph) * sz + fz,
+        (1 - morph) * sz,
       );
-    };
-
-    const populatePatchBox = (
-      address: ILatLonTerrainPatchAddress,
-      bounds: ITerrainPatchBounds,
-      uvMargin: number,
-      target: Box3,
-    ) => {
-      const spanU = bounds.maxU - bounds.minU;
-      const spanV = bounds.maxV - bounds.minV;
-      const extraU = spanU * uvMargin;
-      const extraV = spanV * uvMargin;
-      const minU = bounds.minU - extraU;
-      const maxU = bounds.maxU + extraU;
-      const minV = Math.max(-Math.PI * 0.5, bounds.minV - extraV);
-      const maxV = Math.min(Math.PI * 0.5, bounds.maxV + extraV);
-      const midU = (minU + maxU) * 0.5;
-      const midV = (minV + maxV) * 0.5;
-
-      target.makeEmpty();
-      const uSamples = [minU, midU, maxU];
-      const vSamples = [minV, midV, maxV];
-      const rOffsets = reliefMargin > 0 ? [-reliefMargin, reliefMargin] : [0];
-
-      for (let ro = 0; ro < rOffsets.length; ro += 1) {
-        const rOff = rOffsets[ro];
-        for (let ui = 0; ui < 3; ui += 1) {
-          const uVal = uSamples[ui];
-          for (let vi = 0; vi < 3; vi += 1) {
-            getMorphedPoint(address, uVal, vSamples[vi], rOff, ptScratch);
-            target.expandByPoint(ptScratch);
-          }
-        }
-      }
     };
 
     const measure = (address: ILatLonTerrainPatchAddress): Candidate => {
       const bounds = domain.getPatchBounds(address);
       const u = (bounds.minU + bounds.maxU) * 0.5;
       const v = (bounds.minV + bounds.maxV) * 0.5;
-      getMorphedPoint(address, u, v, 0, ptScratch);
+      getMorphedPoint(address, u, v, ptScratch);
       const cx = ptScratch.x;
       const cy = ptScratch.y;
       const cz = ptScratch.z;
@@ -221,19 +188,13 @@ export function createCellPlanetMorphSurfaceSelector(
 
       let visible = true;
       if (useFrustum) {
-        // 1. Horizon culling for sphere mode (morph < 0.05)
+        // Spherical occlusion is only valid before any map deformation.
         if (
           enableHorizon &&
-          morph < 0.05 &&
+          morph === 0 &&
           thetaHorizonMax > 0
         ) {
-          const clampLon = Math.max(bounds.minU, Math.min(bounds.maxU, camLon));
-          const clampLat = Math.max(bounds.minV, Math.min(bounds.maxV, camLat));
-          const dir = domain.getFieldPosition(address, clampLon, clampLat);
-          const dot =
-            camDirScratch.x * dir[0] +
-            camDirScratch.y * dir[1] +
-            camDirScratch.z * dir[2];
+          const dot = maximumCellPlanetPatchDirectionDot(bounds, camLon, camLat);
           const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
           if (angle > thetaHorizonMax) {
             visible = false;
@@ -245,7 +206,9 @@ export function createCellPlanetMorphSurfaceSelector(
           const uvMargin = wasRefined
             ? (safetyBase - 1) * 0.5
             : (safetyBase - 1) * 0.25;
-          populatePatchBox(address, bounds, uvMargin, patchBoxScratch);
+          populateCellPlanetMorphPatchBounds(
+            bounds, radius, morph, options.projectionKind(), reliefMargin, uvMargin, patchBoxScratch,
+          );
           if (!frustum.intersectsBox(patchBoxScratch)) {
             visible = false;
           }

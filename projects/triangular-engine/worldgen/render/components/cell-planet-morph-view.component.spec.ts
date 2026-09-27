@@ -313,6 +313,9 @@ describe('CellPlanetMorphViewComponent', () => {
     fixture.componentRef.setInput('latitudeRings', 8);
     fixture.componentRef.setInput('radius', 2.0);
     fixture.componentRef.setInput('morphProgress', 1.0);
+    // Make the expected 0.1 elevation explicit rather than relying on the
+    // component's default heightScale (0.16).
+    fixture.componentRef.setInput('heightScale', 1);
     fixture.detectChanges();
 
     camera.position.set(0, 0, 10);

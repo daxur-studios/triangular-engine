@@ -5,6 +5,7 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
@@ -27,6 +28,7 @@ import {
   Sphere,
   Vector2,
   Vector3,
+  type Camera,
 } from 'three';
 import {
   ITerrainField,
@@ -335,6 +337,7 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly wireframe = signal(false);
   readonly freezeLod = signal(false);
   private frozenVisualizer?: IFrozenFrustumVisualizer;
+  private lastSelectionCamera?: Camera;
   readonly cellGridVisible = signal(false);
   readonly cellGridError = signal('');
   readonly oceanVisible = signal(true);
@@ -640,6 +643,9 @@ export class CellPlanetMorphStreamingPageComponent {
   }
 
   readonly frustumLod = signal(true);
+  readonly selectionRevision = computed(() => JSON.stringify([
+    this.frustumLod(), this.lodMorph(), this.projectionKind(), this.terrainHeightScaleM(),
+  ]));
 
   toggleFrustumLod(): void {
     this.frustumLod.update((v) => !v);
@@ -660,8 +666,17 @@ export class CellPlanetMorphStreamingPageComponent {
    * This guarantees that existing meshes are NEVER purged or flickered during morph sliding.
    */
   readonly patchSelector: TerrainSurfacePatchSelector<ILatLonTerrainPatchAddress> =
-    (request: ITerrainSurfaceSelectionRequest<ILatLonTerrainPatchAddress>) =>
-      this.morphSelector.select(request);
+    (request: ITerrainSurfaceSelectionRequest<ILatLonTerrainPatchAddress>) => {
+      const selected = this.morphSelector.select(request);
+      const camera = this.engine.camera;
+      camera.updateWorldMatrix(true, false);
+      const snapshot = camera.clone();
+      camera.matrixWorld.decompose(snapshot.position, snapshot.quaternion, snapshot.scale);
+      snapshot.updateMatrix();
+      snapshot.updateMatrixWorld(true);
+      this.lastSelectionCamera = snapshot;
+      return selected;
+    };
 
   readonly meshGenerator: TerrainSurfaceMeshGenerator<ILatLonTerrainPatchAddress> =
     (request) => this.generatePatchInWorker(request);
@@ -942,17 +957,17 @@ export class CellPlanetMorphStreamingPageComponent {
 
     effect(() => {
       const frozen = this.freezeLod();
-      if (frozen) {
-        this.frozenVisualizer?.dispose();
-        this.frozenVisualizer = createFrozenFrustumVisualizer(this.engine.camera, {
-          radiusM: this.radius(),
-          reliefMarginM: this.terrainHeightScaleM() * 2,
-        });
-        this.engine.scene.add(this.frozenVisualizer.group);
-      } else {
+      untracked(() => {
         this.frozenVisualizer?.dispose();
         this.frozenVisualizer = undefined;
-      }
+        if (frozen) {
+          this.frozenVisualizer = createFrozenFrustumVisualizer(
+            this.lastSelectionCamera ?? this.engine.camera,
+            { radiusM: this.radius(), reliefMarginM: this.terrainHeightScaleM() * 2 },
+          );
+          this.engine.scene.add(this.frozenVisualizer.group);
+        }
+      });
     });
   }
 

@@ -23,6 +23,7 @@
     [freezeLod]="freezeLod()"
     [wireframe]="wireframe()"
     [patchSelector]="patchSelector"
+    [selectionRevision]="selectionRevision()"
     [meshGenerator]="meshGenerator"
     [createMaterial]="createMaterial"
     [colorRevision]="rebuildRevision()"
@@ -345,6 +346,7 @@
       <button
         type="button"
         [class.active]="freezeLod()"
+        title="Freeze the terrain selection and show its camera view. The helper's length is shortened for readability."
         (click)="toggleFreezeLod()"
       >
         Freeze LOD

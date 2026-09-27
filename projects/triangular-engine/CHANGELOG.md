@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Added `TerrainSurfaceComponent.selectionRevision` to rerun custom LOD selection
+  without rebuilding unchanged resident meshes. Camera world transforms and
+  projection changes now invalidate custom selection, including with `lodPosition`.
+- Added configurable frustum/horizon refinement, terrain height bounds, and
+  selection revision forwarding to `cellPlanetMorphStreamingView`. Fixed
+  longitude-seam and polar horizon checks and conservative bounds across sphere,
+  flat-map, and intermediate morph states. Horizon rejection only applies at morph 0.
+- Added `createFrozenFrustumVisualizer` with an independent camera snapshot,
+  shortened display distance, and explicit resource disposal. The streaming
+  demo displays the camera used for its frozen terrain selection.
+
 - Added a `visible` model to `Object3DComponent`, synchronized with the wrapped Three.js `Object3D.visible` property.
 
 - Added `joltCylinderShape` and `joltCapsuleShape` (`[params]="[halfHeight, radius]"`,

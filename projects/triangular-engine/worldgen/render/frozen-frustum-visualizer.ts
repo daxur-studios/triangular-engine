@@ -45,6 +45,7 @@ export interface IFrozenFrustumVisualizer {
  * 4. A translucent, double-sided "pizza cone" volume projecting across the terrain.
  *
  * `depthTest` is disabled so the frustum remains visible from orbit even through mountains.
+ * Its far distance is shortened for readability; this does not change the LOD camera's far plane.
  */
 export function createFrozenFrustumVisualizer(
   camera: Camera,
@@ -60,8 +61,8 @@ export function createFrozenFrustumVisualizer(
   const volumeOpacity = options.volumeOpacity ?? 0.15;
   const edgeColor = options.edgeColor ?? 0x00ffff;
 
-  camera.updateMatrixWorld(true);
-  const camPos = camera.position.clone();
+  camera.updateWorldMatrix(true, false);
+  const camPos = new Vector3().setFromMatrixPosition(camera.matrixWorld);
   const camDist = camPos.length();
 
   const isPerspective = camera instanceof PerspectiveCamera;
@@ -78,9 +79,12 @@ export function createFrozenFrustumVisualizer(
   }
 
   const helperCam = camera.clone();
+  // The snapshot is independent of a parent rig and of subsequent camera movement.
+  camera.matrixWorld.decompose(helperCam.position, helperCam.quaternion, helperCam.scale);
+  helperCam.updateMatrix();
   if (helperCam instanceof PerspectiveCamera) {
     helperCam.far = helperFar;
-    helperCam.near = Math.max(1, camNear);
+    helperCam.near = camNear;
     helperCam.updateProjectionMatrix();
   }
   helperCam.updateMatrixWorld(true);
@@ -89,6 +93,7 @@ export function createFrozenFrustumVisualizer(
   const camHelper = new CameraHelper(helperCam);
   if (camHelper.material instanceof LineBasicMaterial) {
     camHelper.material.depthTest = false;
+    camHelper.material.depthWrite = false;
     camHelper.material.transparent = true;
     camHelper.material.opacity = 0.85;
   }
@@ -101,6 +106,7 @@ export function createFrozenFrustumVisualizer(
   const markerMat = new MeshBasicMaterial({
     color: markerColor,
     depthTest: false,
+    depthWrite: false,
     transparent: true,
     opacity: 0.9,
   });
@@ -137,6 +143,7 @@ export function createFrozenFrustumVisualizer(
     transparent: true,
     opacity: volumeOpacity,
     depthTest: false,
+    depthWrite: false,
     side: DoubleSide,
   });
   const volumeMesh = new Mesh(volumeGeo, volumeMat);
@@ -172,6 +179,7 @@ export function createFrozenFrustumVisualizer(
   const edgeMat = new LineBasicMaterial({
     color: edgeColor,
     depthTest: false,
+    depthWrite: false,
     transparent: true,
     opacity: 0.9,
   });

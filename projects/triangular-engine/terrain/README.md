@@ -29,10 +29,18 @@ Visual seam skirts are opt-in rather than enabled by default. Override
 `lodPosition` to follow a character or vehicle instead of the camera. The
 `maxLod`, `maxPatches`, `refinementDistance`, `resolution`, `generationBudget`, `skirtDepth`,
 `lodHysteresis`, `getKey`, `getLevel`, `createMaterial`, `createColors`,
-`colorRevision`, and `freezeLod`
+`colorRevision`, `selectionRevision`, and `freezeLod`
 inputs customize the policy and rendering without replacing the streaming
 loop. `lodHysteresis` defaults to `0.15`, preventing an already-refined branch
 from repeatedly flipping at its distance boundary.
+
+For a custom `patchSelector` whose settings change behind a stable function
+reference, change `selectionRevision` (a number or string) to rerun selection
+with a stationary camera. It preserves unchanged resident meshes; use
+`colorRevision` when geometry or colours need rebuilding. Custom selectors also
+rerun when the camera's world transform or projection matrix changes. Call
+Three.js `updateProjectionMatrix()` after changing FOV, zoom, or aspect ratio.
+While `freezeLod` is enabled, selection changes are deferred until unfreezing.
 
 Set `batching` to combine resident patches that use the same material into a
 Three.js `BatchedMesh`. Patch generation and replacement remain independent,

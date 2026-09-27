@@ -188,4 +188,73 @@ describe('createCellPlanetMorphSurfaceSelector', () => {
     const request = createRequest([0, 0, RADIUS_M * 2.5], { maxLevel: 3 });
     expect(disabledSelector.select(request)).toEqual(omniSelector.select(request));
   });
+
+  it('refines visible terrain across the longitude seam', () => {
+    for (const sign of [-1, 1]) {
+      const result = selectVisibleTarget({
+        cameraLon: sign * 179.9,
+        cameraLat: 0.1,
+        targetLon: -sign * 179.9,
+        targetLat: 0.1,
+        heightScaleM: 1_000,
+      });
+      expect(result.targetLevel).toBe(7);
+      expect(result.count).toBeLessThanOrEqual(220);
+    }
+  });
+
+  it('keeps directly visible terrain inside bounds with the default safety margin', () => {
+    const result = selectVisibleTarget({
+      cameraLon: 0.1,
+      cameraLat: 0.1,
+      targetLon: 0.1,
+      targetLat: 0.1,
+      far: 5_000,
+      horizonCulling: false,
+    });
+    expect(result.targetLevel).toBe(7);
+  });
 });
+
+function selectVisibleTarget(options: {
+  cameraLon: number;
+  cameraLat: number;
+  targetLon: number;
+  targetLat: number;
+  heightScaleM?: number;
+  far?: number;
+  horizonCulling?: boolean;
+}): { targetLevel: number | undefined; count: number } {
+  const radius = 600_000;
+  const targetDomain = new LatLonTerrainDomain(radius, 4, 2);
+  const targetRoots = targetDomain.createLevelZeroRoots();
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const point = (lon: number, lat: number, distance: number) =>
+    targetDomain.getFieldPosition(targetRoots[0], radians(lon), radians(lat))
+      .map((coordinate) => coordinate * distance) as [number, number, number];
+  const camera = new PerspectiveCamera(45, 1, 1, options.far ?? 2_000_000);
+  camera.position.set(...point(options.cameraLon, options.cameraLat, radius + 100));
+  camera.lookAt(...point(options.targetLon, options.targetLat, radius));
+  camera.updateMatrixWorld(true);
+  const selector = createCellPlanetMorphSurfaceSelector({
+    domain: () => targetDomain,
+    radiusM: () => radius,
+    morph: () => 0,
+    projectionKind: () => 'equalEarth',
+    camera: () => camera,
+    heightScaleM: () => options.heightScaleM ?? 0,
+    horizonCulling: () => options.horizonCulling ?? true,
+  });
+  const selected = selector.select(createRequest(
+    camera.position.toArray() as [number, number, number],
+    { domain: targetDomain, roots: targetRoots, maxLevel: 7, maxPatches: 220 },
+  ));
+  const lon = radians(options.targetLon);
+  const lat = radians(options.targetLat);
+  const target = selected.find((address) => {
+    const bounds = targetDomain.getPatchBounds(address);
+    return lon > bounds.minU && lon < bounds.maxU &&
+      lat > bounds.minV && lat < bounds.maxV;
+  });
+  return { targetLevel: target?.level, count: selected.length };
+}

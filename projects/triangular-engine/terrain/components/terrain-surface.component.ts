@@ -192,6 +192,8 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   readonly lodHysteresis = input(0.15);
   /** Keeps the current selected cut while allowing the camera to move. */
   readonly freezeLod = input(false);
+  /** Reruns selection for live selector settings without rebuilding unchanged residents. */
+  readonly selectionRevision = input<string | number>(0);
   /** Uses the built-in adaptive distance selector when omitted. */
   readonly patchSelector = input<
     TerrainSurfacePatchSelector<TAddress> | undefined
@@ -314,10 +316,18 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       this.refinementDistance() ?? estimateRefinementDistance(domain, roots);
     const hysteresis = Math.min(0.95, Math.max(0, this.lodHysteresis()));
     const patchSelector = this.patchSelector();
-    const cameraRotation = this.lodPosition()
-      ? ''
-      : `|${this.engine.camera.quaternion.x.toFixed(3)},${this.engine.camera.quaternion.y.toFixed(3)},${this.engine.camera.quaternion.z.toFixed(3)},${this.engine.camera.quaternion.w.toFixed(3)}`;
-    const selectionInputSignature = `${position.join(',')}${cameraRotation}|${maxLevel}|${refinementDistanceM}|${hysteresis}|${this.residents.size === 0}`;
+    // Custom selectors can depend on the complete view, even when lodPosition
+    // supplies a separate distance anchor. Projection changes also invalidate.
+    let cameraSignature = '';
+    if (patchSelector) {
+      const camera = this.engine.camera;
+      camera.updateWorldMatrix(true, false);
+      cameraSignature = `${camera.matrixWorld.elements.join(',')}|${camera.projectionMatrix.elements.join(',')}`;
+    }
+    const selectionInputSignature = JSON.stringify([
+      position, cameraSignature, this.selectionRevision(), maxLevel,
+      refinementDistanceM, hysteresis, this.residents.size === 0,
+    ]);
     if (selectionInputSignature === this.lastSelectionInputSignature) {
       this.processGenerationQueue();
       return;
