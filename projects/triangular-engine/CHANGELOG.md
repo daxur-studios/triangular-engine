@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Added `TerrainMaterialTileRuntime` to share texture stream/GPU ownership,
+  fallback visibility, invalidation, disposal and counters between terrain
+  consumers, and `selectCellPlanetMaterialTiles` to share camera/frustum,
+  horizon and morph-aware texture LOD selection. Documented the `terrain/core`
+  worker import boundary required for packed Angular library consumers. The
+  morph streaming demo now uses both APIs while retaining its own world sampler
+  and worker.
+- Added `colorStringToLinearRgb` to the worker-safe worldgen render core so game
+  texture bakers can reuse the standard biome, temperature, moisture, elevation
+  and plate ramps in linear RGBA tiles.
 - Added `TerrainSurfaceComponent.selectionRevision` to rerun custom LOD selection
   without rebuilding unchanged resident meshes. Camera world transforms and
   projection changes now invalidate custom selection, including with `lodPosition`.

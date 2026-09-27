@@ -7,6 +7,7 @@ export * from './world-size-tiers';
 export * from './globe-geometry';
 export * from './flow-path';
 export * from './map-projections';
+export * from './cell-planet-material-tile-selection';
 export * from './antimeridian-seam';
 export * from './planet-map-picking';
 export * from './components/planet-view.component';

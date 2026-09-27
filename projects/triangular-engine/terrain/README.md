@@ -96,6 +96,30 @@ Call `invalidate()` only when the world or material recipe changes, not when
 the camera moves or a geometry job finishes. Call `dispose()` on both runtime
 and GPU storage when leaving the scene.
 
+`TerrainMaterialTileRuntime` owns the stream and GPU lifecycle together. Give it
+an async `request(address)` callback backed by the game's worker, then call
+`update(addresses)` as the camera changes. It exposes the GPU uniforms/storage,
+bounded stream counters, `invalidate()` for world/style changes, and
+`setEnabled()` for display modes. Game code still owns the camera-to-address
+measurement and the worker's world-specific sampler.
+
+For `LatLonTerrainDomain` cell planets, `selectCellPlanetMaterialTiles` from
+`triangular-engine/worldgen/render` provides the shared camera/frustum,
+globe-horizon and morph-aware texture LOD measurement used by the demo. It
+accepts the planet's resident centre-elevation lookup and remains independent
+of the geometry patch cut. Keep this view selector on the main thread; worker
+entry files still use only the framework-free `terrain/core` APIs above.
+
+**Worker import boundary:** worker entry files must import tile contracts and
+`bakeTerrainMaterialTile` from `triangular-engine/terrain/core`. That secondary
+entry is framework-free; do not import `triangular-engine/terrain`,
+`triangular-engine/worldgen/render`, or the root `triangular-engine` from a
+worker. Angular CLI does not run the Angular linker when bundling workers, so a
+packed library import from those entries can fail at worker startup even while
+the application's main bundle works. Keep the worker file and its
+world-specific request handler in the consuming app, and transfer the baked
+typed arrays back to `TerrainMaterialTileRuntime`.
+
 The current GPU adapter is intentionally bounded: 128 resident pages, 128×128
 interiors with two sampled gutter texels, levels 0–10, a sparse two-level lookup,
 and one colour sample per fragment. Bake linear RGBA8 with `mipLevels: 0` and

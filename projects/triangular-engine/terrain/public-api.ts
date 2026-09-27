@@ -15,6 +15,7 @@ export * from './materials/tiles/terrain-material-tile-material';
 export * from './materials/tiles/terrain-material-tile-selector';
 export * from './materials/tiles/terrain-material-tile-stream';
 export * from './materials/tiles/terrain-material-tile-gpu';
+export * from './materials/tiles/terrain-material-tile-runtime';
 export * from './domains/terrain-surface-domain';
 export * from './domains/plane-terrain-domain';
 export * from './domains/plane-terrain-selection';

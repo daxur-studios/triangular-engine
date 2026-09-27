@@ -439,6 +439,32 @@ implementing speculative systems. No new browser automation infrastructure.
   reaches zero, then verify the baked count stops increasing. Revisit a cached
   region and test random cell edits while material jobs are active.
 
+- **2026-09-27 — Shared runtime extraction:** added
+  `TerrainMaterialTileRuntime` as the common owner of GPU pages, request stream,
+  root fallback visibility, invalidation, disposal and stream counters, and
+  `selectCellPlanetMaterialTiles` for shared camera/frustum, horizon and morph
+  aware texture LOD selection. The morph demo now uses both APIs; it keeps only
+  its world sampler and worker requests. The runtime adds root coverage when a
+  consumer supplies only refined addresses. Documented that game workers must
+  import baking contracts from `triangular-engine/terrain/core`, never an
+  Angular-bearing package barrel, following Mycelia case study 001. Engine and
+  demo development builds pass; the packed terrain/core bundle contains no
+  Angular imports or `ɵɵngDeclare*`. TypeScript spec checking passes. Browser
+  hosted Karma specs and visual/GPU checks remain unrun. M3 filtering,
+  transitions, upload pacing, world-specific provider work and BSP adoption
+  remain open; this extraction is not the M3 acceptance sign-off.
+
+- **2026-09-27 — BSP first consumer:** `/world` now uses the shared runtime
+  and globe/frustum/horizon-aware texture selector through the reusable cell-
+  planet component. A separate worker bakes biome, landscape material, heat,
+  moisture, elevation, and plate pages from BSP's canonical world sampler; the
+  shared data-layer picker selects the active view. The worker imports only
+  `terrain/core`, `worldgen`, and `worldgen/render/core`, leaving the existing
+  Angular-bearing mesh worker isolated from the texture path. Engine package
+  and BSP development builds pass. Browser appearance and GPU/performance
+  acceptance remain pending; M3 filtering, smooth cross-LOD transitions, and
+  paced uploads remain open.
+
 ### M3 bounded array implementation contract (2026-09-21)
 
 The next slice replaces the demo's four-region atlas, not its mesh LOD.

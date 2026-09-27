@@ -88,3 +88,48 @@ export function featureColor(feature: string): string {
 export function lavaOceanColor(): string {
   return 'hsl(18, 95%, 42%)';
 }
+
+/** Converts the framework-free HSL/hex ramp colours to linear RGB for texture baking. */
+export function colorStringToLinearRgb(
+  color: string,
+): [number, number, number] {
+  const toLinear = (channel: number): number =>
+    channel <= 0.04045
+      ? channel / 12.92
+      : Math.pow((channel + 0.055) / 1.055, 2.4);
+  const hex = /^#([\da-f]{3}|[\da-f]{6})$/i.exec(color);
+  if (hex) {
+    const expanded =
+      hex[1].length === 3
+        ? [...hex[1]].map((digit) => `${digit}${digit}`).join('')
+        : hex[1];
+    return [0, 2, 4].map((offset) =>
+      toLinear(parseInt(expanded.slice(offset, offset + 2), 16) / 255),
+    ) as [number, number, number];
+  }
+  const hsl = /^hsl\(\s*([\d.-]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*\)$/i.exec(
+    color,
+  );
+  if (!hsl) return [0.2462, 0.2462, 0.2462];
+  const hue = (((parseFloat(hsl[1]) % 360) + 360) % 360) / 360;
+  const saturation = Math.max(0, Math.min(1, parseFloat(hsl[2]) / 100));
+  const lightness = Math.max(0, Math.min(1, parseFloat(hsl[3]) / 100));
+  const channel = (offset: number): number => {
+    const t = (hue + offset + 1) % 1;
+    if (saturation === 0) return lightness;
+    const q =
+      lightness < 0.5
+        ? lightness * (1 + saturation)
+        : lightness + saturation - lightness * saturation;
+    const p = 2 * lightness - q;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  return [
+    toLinear(channel(1 / 3)),
+    toLinear(channel(0)),
+    toLinear(channel(-1 / 3)),
+  ];
+}
