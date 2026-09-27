@@ -1,3 +1,4 @@
+import { PerspectiveCamera } from 'three';
 import { LatLonTerrainDomain, type ITerrainSurfaceSelectionRequest, type ILatLonTerrainPatchAddress } from 'triangular-engine/terrain';
 import { createCellPlanetMorphSurfaceSelector } from './cell-planet-morph-patch-selector';
 
@@ -110,5 +111,81 @@ describe('createCellPlanetMorphSurfaceSelector', () => {
     selector.reset();
 
     expect(selector.select(request)).toEqual(cold);
+  });
+
+  it('restricts refinement to visible view cone and front-facing horizon when camera is supplied', () => {
+    // Camera is near the planet surface at [0, 0, 1100], looking East (+X).
+    // Terrain behind the camera (West, -X) should not be refined.
+    const camera = new PerspectiveCamera(45, 1, 1, 10_000);
+    camera.position.set(0, 0, RADIUS_M * 1.1);
+    camera.lookAt(RADIUS_M, 0, RADIUS_M * 1.1);
+    camera.updateMatrixWorld();
+
+    const coneSelector = createCellPlanetMorphSurfaceSelector({
+      domain: () => domain,
+      radiusM: () => RADIUS_M,
+      morph: () => 0,
+      projectionKind: () => 'equalEarth',
+      camera: () => camera,
+    });
+    const omniSelector = createCellPlanetMorphSurfaceSelector({
+      domain: () => domain,
+      radiusM: () => RADIUS_M,
+      morph: () => 0,
+      projectionKind: () => 'equalEarth',
+    });
+
+    const request = createRequest([0, 0, RADIUS_M * 1.1], { maxLevel: 4 });
+    const coneResult = coneSelector.select(request);
+    const omniResult = omniSelector.select(request);
+
+    // Omni-directional selector refines in all 360-degree directions including behind the camera
+    expect(omniResult.length).toBeGreaterThan(roots.length);
+    // Cone selector refines significantly fewer patches by skipping terrain behind the camera
+    expect(coneResult.length).toBeLessThan(omniResult.length);
+
+    // Verify patches behind the camera (facing West, -X) remain coarse
+    const behindPatches = coneResult.filter((addr) => {
+      const b = domain.getPatchBounds(addr);
+      const dir = domain.getFieldPosition(addr, (b.minU + b.maxU) * 0.5, (b.minV + b.maxV) * 0.5);
+      return dir[0] < -0.1;
+    });
+    expect(behindPatches.length).toBeGreaterThan(0);
+    // Patches directly behind the camera should not refine, staying at level 0 (strictly < 2)
+    expect(Math.max(...behindPatches.map((p) => p.level))).toBeLessThan(2);
+
+    // Verify patches in the look direction (East, +X) reach high refinement
+    const forwardPatches = coneResult.filter((addr) => {
+      const b = domain.getPatchBounds(addr);
+      const dir = domain.getFieldPosition(addr, (b.minU + b.maxU) * 0.5, (b.minV + b.maxV) * 0.5);
+      return dir[0] > 0.5;
+    });
+    expect(forwardPatches.length).toBeGreaterThan(0);
+    expect(Math.max(...forwardPatches.map((p) => p.level))).toBeGreaterThanOrEqual(3);
+  });
+
+  it('allows disabling frustum culling via frustumCulling option', () => {
+    const camera = new PerspectiveCamera(45, 1, 1, 100_000);
+    camera.position.set(0, 0, RADIUS_M * 2.5);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+
+    const disabledSelector = createCellPlanetMorphSurfaceSelector({
+      domain: () => domain,
+      radiusM: () => RADIUS_M,
+      morph: () => 0,
+      projectionKind: () => 'equalEarth',
+      camera: () => camera,
+      frustumCulling: () => false,
+    });
+    const omniSelector = createCellPlanetMorphSurfaceSelector({
+      domain: () => domain,
+      radiusM: () => RADIUS_M,
+      morph: () => 0,
+      projectionKind: () => 'equalEarth',
+    });
+
+    const request = createRequest([0, 0, RADIUS_M * 2.5], { maxLevel: 3 });
+    expect(disabledSelector.select(request)).toEqual(omniSelector.select(request));
   });
 });

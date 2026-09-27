@@ -349,6 +349,14 @@
       >
         Freeze LOD
       </button>
+      <button
+        type="button"
+        [class.active]="frustumLod()"
+        (click)="toggleFrustumLod()"
+        title="Focus mesh refinement on visible camera frustum cone and horizon"
+      >
+        Frustum LOD
+      </button>
     </div>
     <label class="checkbox-row">
       <input

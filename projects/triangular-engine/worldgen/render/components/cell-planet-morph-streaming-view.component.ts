@@ -3,12 +3,13 @@ import {
   Component,
   computed,
   effect,
+  inject,
   input,
   output,
   signal,
 } from '@angular/core';
 import { DoubleSide, Material, MeshStandardMaterial, Vector3 } from 'three';
-import type { RaycastFocusResolver } from 'triangular-engine';
+import { EngineService, type RaycastFocusResolver } from 'triangular-engine';
 import {
   enableTerrainMacroVariation,
   ITerrainField,
@@ -210,6 +211,8 @@ export class CellPlanetMorphStreamingViewComponent {
   // ==========================================================================
   // LOD selection + raycasting
   // ==========================================================================
+  private readonly engine = inject(EngineService, { optional: true });
+
   private readonly selector = createCellPlanetMorphSurfaceSelector({
     domain: () => this.domain(),
     radiusM: () => this.radiusM(),
@@ -217,6 +220,7 @@ export class CellPlanetMorphStreamingViewComponent {
     projectionKind: () => this.projectionKind(),
     refinementDistanceFactor: () => this.refinementDistanceFactor(),
     stickyRefinementFactor: () => this.stickyRefinementFactor(),
+    camera: () => this.engine?.camera,
   });
   readonly patchSelector: TerrainSurfacePatchSelector<ILatLonTerrainPatchAddress> = (request) =>
     this.selector.select(request);

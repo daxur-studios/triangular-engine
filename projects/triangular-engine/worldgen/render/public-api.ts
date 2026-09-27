@@ -25,3 +25,4 @@ export * from './planet-morph-border-geometry';
 export * from './cell-planet-morph-attributes';
 export * from './cell-planet-morph-patch-selector';
 export * from './cell-planet-morph-raycast';
+export * from './frozen-frustum-visualizer';

@@ -59,6 +59,9 @@ import {
   buildOceanMorphGeometry,
   createPlanetBorderMorphMaterial,
   createPlanetMapBorderMaterial,
+  createCellPlanetMorphSurfaceSelector,
+  createFrozenFrustumVisualizer,
+  type IFrozenFrustumVisualizer,
   CellDataLayerPickerComponent,
   type ICellPerPixelLookupPayload,
   type ICellPerPixelPaletteEdit,
@@ -331,6 +334,7 @@ export class CellPlanetMorphStreamingPageComponent {
   private mapBorderMesh?: Mesh;
   readonly wireframe = signal(false);
   readonly freezeLod = signal(false);
+  private frozenVisualizer?: IFrozenFrustumVisualizer;
   readonly cellGridVisible = signal(false);
   readonly cellGridError = signal('');
   readonly oceanVisible = signal(true);
@@ -635,127 +639,29 @@ export class CellPlanetMorphStreamingPageComponent {
     return target;
   }
 
+  readonly frustumLod = signal(true);
+
+  toggleFrustumLod(): void {
+    this.frustumLod.update((v) => !v);
+  }
+
+  private readonly morphSelector = createCellPlanetMorphSurfaceSelector({
+    domain: () => this.domain(),
+    radiusM: () => this.radius(),
+    morph: () => this.lodMorph(),
+    projectionKind: () => this.projectionKind(),
+    camera: () => this.engine.camera,
+    frustumCulling: () => this.frustumLod(),
+    heightScaleM: () => this.terrainHeightScaleM(),
+  });
+
   /**
    * Stable patch selector reference: does NOT recreate on every morph tick!
    * This guarantees that existing meshes are NEVER purged or flickered during morph sliding.
    */
   readonly patchSelector: TerrainSurfacePatchSelector<ILatLonTerrainPatchAddress> =
     (request: ITerrainSurfaceSelectionRequest<ILatLonTerrainPatchAddress>) =>
-      this.selectPatches(request);
-
-  private previousRefinedKeys = new Set<string>();
-
-  private selectPatches(
-    request: ITerrainSurfaceSelectionRequest<ILatLonTerrainPatchAddress>,
-  ): readonly ILatLonTerrainPatchAddress[] {
-    const domain = this.domain();
-    const morph = this.lodMorph();
-    const radius = this.radius();
-    const mapWidth = 2 * Math.PI * radius;
-    const mapHeight = Math.PI * radius;
-    const projection =
-      this.projectionKind() === 'equirectangular'
-        ? EQUIRECTANGULAR_PROJECTION
-        : EQUAL_EARTH_PROJECTION;
-    const maxLevel = this.qualityConfig().maxLod;
-    const baseRefinementDistance = radius * 4.2;
-
-    interface Candidate {
-      readonly address: ILatLonTerrainPatchAddress;
-      readonly key: string;
-      readonly distance: number;
-      readonly threshold: number;
-      readonly canRefine: boolean;
-      readonly priority: number;
-    }
-
-    const maxPatches = Math.max(
-      request.roots.length,
-      Math.floor(request.maxPatches ?? Number.MAX_SAFE_INTEGER),
-    );
-    const nextRefined = new Set<string>();
-    const cam = request.cameraWorldM;
-
-    const measure = (address: ILatLonTerrainPatchAddress): Candidate => {
-      const level = address.level;
-      const bounds = domain.getPatchBounds(address);
-      const u = (bounds.minU + bounds.maxU) * 0.5;
-      const v = (bounds.minV + bounds.maxV) * 0.5;
-
-      const dir = domain.getFieldPosition(address, u, v);
-      const spherePos: [number, number, number] = [
-        dir[0] * radius,
-        dir[1] * radius,
-        dir[2] * radius,
-      ];
-
-      const proj = projection.project(u, v, mapWidth, mapHeight);
-      const flatPos: [number, number, number] = [
-        proj.x - mapWidth * 0.5,
-        mapHeight * 0.5 - proj.y,
-        0,
-      ];
-
-      const center: [number, number, number] = [
-        (1 - morph) * spherePos[0] + morph * flatPos[0],
-        (1 - morph) * spherePos[1] + morph * flatPos[1],
-        (1 - morph) * spherePos[2] + morph * flatPos[2],
-      ];
-
-      const dist = Math.hypot(
-        center[0] - cam[0],
-        center[1] - cam[1],
-        center[2] - cam[2],
-      );
-      const key = `${address.level}:${address.x}:${address.y}`;
-      const wasRefined = this.previousRefinedKeys.has(key);
-      const threshold =
-        (baseRefinementDistance / Math.pow(2, level)) *
-        (wasRefined ? 1.2 : 1.0);
-
-      return {
-        address,
-        key,
-        distance: dist,
-        threshold,
-        canRefine: level < maxLevel,
-        priority: threshold / Math.max(dist, 1),
-      };
-    };
-
-    // Start with one resident patch per root, then spend the remaining budget
-    // on the most screen-relevant leaves. Replacing one leaf with four children
-    // costs three additional patches, so the result always stays within the
-    // configured maxPatches while remaining a complete quadtree cut.
-    const frontier = request.roots.map((root) => measure(root));
-    // Refining one leaf replaces it with four children, adding three leaves.
-    // Keep the complete cut within the selector's hard budget.
-    while (frontier.length + 3 <= maxPatches) {
-      let bestIndex = -1;
-      let bestPriority = 1;
-      for (let index = 0; index < frontier.length; index += 1) {
-        const candidate = frontier[index];
-        if (!candidate.canRefine || candidate.distance >= candidate.threshold) {
-          continue;
-        }
-        if (candidate.priority > bestPriority) {
-          bestIndex = index;
-          bestPriority = candidate.priority;
-        }
-      }
-
-      if (bestIndex < 0) break;
-
-      const [parent] = frontier.splice(bestIndex, 1);
-      nextRefined.add(parent.key);
-      for (const child of domain.getChildren(parent.address)) {
-        frontier.push(measure(child));
-      }
-    }
-
-    this.previousRefinedKeys = nextRefined;
-    return frontier.map((candidate) => candidate.address);
-  }
+      this.morphSelector.select(request);
 
   readonly meshGenerator: TerrainSurfaceMeshGenerator<ILatLonTerrainPatchAddress> =
     (request) => this.generatePatchInWorker(request);
@@ -928,6 +834,8 @@ export class CellPlanetMorphStreamingPageComponent {
       this.materialGpu.dispose();
       this.disposeMapBorder();
       this.disposeOceanMesh();
+      this.frozenVisualizer?.dispose();
+      this.frozenVisualizer = undefined;
       if (this.cellGridDebounceTimer !== undefined) {
         clearTimeout(this.cellGridDebounceTimer);
       }
@@ -1030,6 +938,21 @@ export class CellPlanetMorphStreamingPageComponent {
         1,
         this.macroVariationScaleM(),
       );
+    });
+
+    effect(() => {
+      const frozen = this.freezeLod();
+      if (frozen) {
+        this.frozenVisualizer?.dispose();
+        this.frozenVisualizer = createFrozenFrustumVisualizer(this.engine.camera, {
+          radiusM: this.radius(),
+          reliefMarginM: this.terrainHeightScaleM() * 2,
+        });
+        this.engine.scene.add(this.frozenVisualizer.group);
+      } else {
+        this.frozenVisualizer?.dispose();
+        this.frozenVisualizer = undefined;
+      }
     });
   }
 

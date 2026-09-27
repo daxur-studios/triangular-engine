@@ -314,7 +314,10 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       this.refinementDistance() ?? estimateRefinementDistance(domain, roots);
     const hysteresis = Math.min(0.95, Math.max(0, this.lodHysteresis()));
     const patchSelector = this.patchSelector();
-    const selectionInputSignature = `${position.join(',')}|${maxLevel}|${refinementDistanceM}|${hysteresis}|${this.residents.size === 0}`;
+    const cameraRotation = this.lodPosition()
+      ? ''
+      : `|${this.engine.camera.quaternion.x.toFixed(3)},${this.engine.camera.quaternion.y.toFixed(3)},${this.engine.camera.quaternion.z.toFixed(3)},${this.engine.camera.quaternion.w.toFixed(3)}`;
+    const selectionInputSignature = `${position.join(',')}${cameraRotation}|${maxLevel}|${refinementDistanceM}|${hysteresis}|${this.residents.size === 0}`;
     if (selectionInputSignature === this.lastSelectionInputSignature) {
       this.processGenerationQueue();
       return;
