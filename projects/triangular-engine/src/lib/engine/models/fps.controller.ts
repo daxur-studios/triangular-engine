@@ -76,7 +76,7 @@ export class FPSController {
       const renderer = this.engineService.renderer;
       if (renderer) {
         const info = renderer.info as any;
-        const drawCallsVal = info?.render?.calls ?? info?.render?.drawCalls ?? 0;
+        const drawCallsVal = info?.render?.drawCalls ?? info?.render?.calls ?? 0;
         const trianglesVal = info?.render?.triangles ?? 0;
         const geometriesVal = info?.memory?.geometries ?? 0;
         const texturesVal = info?.memory?.textures ?? 0;

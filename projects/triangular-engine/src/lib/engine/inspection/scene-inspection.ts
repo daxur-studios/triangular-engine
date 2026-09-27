@@ -209,9 +209,11 @@ function toCameraSnapshot(camera: Camera): SceneCameraSnapshot {
 }
 
 function toRendererSnapshot(renderer: WebGLRenderer | WebGPURenderer): SceneRendererSnapshot {
-  const render = renderer.info?.render;
+  const render = renderer.info?.render as
+    | { calls?: number; drawCalls?: number; triangles?: number; points?: number; lines?: number }
+    | undefined;
   return {
-    calls: render?.calls,
+    calls: render?.drawCalls ?? render?.calls,
     triangles: render?.triangles,
     points: render?.points,
     lines: render?.lines,
