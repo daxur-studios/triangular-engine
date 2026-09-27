@@ -8,7 +8,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { DoubleSide, Material, MeshStandardMaterial, Vector3 } from 'three';
+import { FrontSide, Material, MeshStandardMaterial, Vector3 } from 'three';
 import { EngineService, type RaycastFocusResolver } from 'triangular-engine';
 import {
   enableTerrainMacroVariation,
@@ -199,7 +199,9 @@ export class CellPlanetMorphStreamingViewComponent {
     const material = new MeshStandardMaterial({
       roughness: 0.92,
       metalness: 0.05,
-      side: DoubleSide,
+      // Triangles wind counter-clockwise from outside the globe and from +Z on the
+      // flat map. Drawing back faces too shaded the globe's far side under every pixel.
+      side: FrontSide,
       vertexColors: true,
     });
     enableTerrainMacroVariation(material, this.macroUniforms, {

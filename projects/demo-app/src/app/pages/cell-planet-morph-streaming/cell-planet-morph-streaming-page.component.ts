@@ -17,7 +17,7 @@ import {
 import {
   BatchedMesh,
   Box3,
-  DoubleSide,
+  FrontSide,
   BufferAttribute,
   BufferGeometry,
   LineSegments,
@@ -677,7 +677,9 @@ export class CellPlanetMorphStreamingPageComponent {
     const material = new MeshStandardMaterial({
       roughness: 0.92,
       metalness: 0.05,
-      side: DoubleSide,
+      // Triangles wind counter-clockwise from outside the globe and from +Z on the
+      // flat map. Drawing back faces too shaded the globe's far side under every pixel.
+      side: FrontSide,
       vertexColors: true,
     });
 
