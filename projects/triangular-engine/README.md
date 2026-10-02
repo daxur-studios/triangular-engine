@@ -256,6 +256,7 @@ All components are standalone and can be nested inside `<scene>`.
 - Lights: `ambientLight`, `directionalLight`, `pointLight`
 - Camera & Controls: `camera`, `orbitControls` (bind `[viewport]` for split-screen multi-camera rendering — see [docs/examples/multi-viewport.md](docs/examples/multi-viewport.md))
 - GLTF: `gltf`
+- Audio: `audioListener`, `positionalAudio`, `ambientAudio`, `audioSource` (see [docs/audio.md](docs/audio.md))
 - CSS: `css2d`, `css3d`
 - Physics: `physics`, `rigidBody`, `collider` family, `fixedJoint`, `sphericalJoint`, `instancedRigidBody`
 - Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `portalOutlet`, `[portalTarget]`, `[raycast]`
@@ -349,7 +350,8 @@ providers: EngineService.provide({ showFPS: true });
 
 - EngineService: `scene`, `renderer`, `tick$`, `elapsedTime$`, `setFPSLimit`, input streams (`keydown$`, `mousemove$`, `mousewheel$`, etc.), `camera$`, `switchCamera(camera)`, `requestSingleRender()`
 - PhysicsService: creates and steps Rapier `World`, `beforeStep$`, `stepped$`, `setSimulatePhysics()`, `setDebugState()`
-- LoaderService: `loadAndCacheGltf(path, cachePath?, force?)`, `loadAndCacheTexture(path)`; sets Draco path to `/draco/`; builds `userData.objectMap` for GLTF lookup
+- AudioService: audio channel buses (`master`, `music`, `sfx`, `ambient`, `voice`, `ui`), active listener management, autoplay policy unlocking, `playOneShot(src, options)`, `playPositionalOneShot(src, pos, options)`
+- LoaderService: `loadAndCacheGltf(path, cachePath?, force?)`, `loadAndCacheTexture(path)`, `loadAndCacheAudio(path)`; sets Draco path to `/draco/`; builds `userData.objectMap` for GLTF lookup
 - EngineSettingsService: reactive settings (e.g., debug, auto-save)
 
 ## API: Selectors
@@ -363,6 +365,7 @@ List of selectors available in templates (not exhaustive):
 - Materials: `material`, `meshStandardMaterial`, `meshNormalMaterial`, `meshBasicMaterial`, `shaderMaterial`, `rawShaderMaterial`, `pointsMaterial`, `spriteMaterial`
 - Lights: `light`, `ambientLight`, `directionalLight`, `pointLight`
 - GLTF: `gltf`
+- Audio: `audioListener`, `positionalAudio`, `ambientAudio`, `audioSource`
 - CSS Renderers: `css2d`, `css3d`
 - Physics: `physics`, `rigidBody`, `collider` family, `cuboidCollider`, `ballCollider`, `capsuleCollider`, `cylinderCollider`, `coneCollider`, `fixedJoint`, `sphericalJoint`, `instancedRigidBody`
 - Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `portalOutlet`, `[portalTarget]`, `[raycast]`

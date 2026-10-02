@@ -39,6 +39,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'audio-lab',
+    loadComponent: () =>
+      import('./pages/audio-lab/audio-lab-page.component').then(
+        ({ AudioLabPageComponent }) => AudioLabPageComponent,
+      ),
+  },
+  {
     path: 'takram-clouds-spike',
     loadComponent: () =>
       import('./takram-clouds-spike/takram-clouds-spike.component').then(

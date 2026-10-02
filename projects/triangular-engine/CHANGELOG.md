@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Added declarative 3D Spatial Audio and Audio Management system in core `triangular-engine`:
+  - Added `<audioListener>` (`AudioListenerComponent`) wrapping `THREE.AudioListener` with reactive `masterVolume` binding and audio filter integration.
+  - Added `<positionalAudio>` (`PositionalAudioComponent`) wrapping `THREE.PositionalAudio` with 3D spatial attenuation (`refDistance`, `maxDistance`, `rolloffFactor`, `distanceModel`), directional cone options, audio bus routing, and reactive playback lifecycle.
+  - Added `<ambientAudio>` / `<audioSource>` (`AmbientAudioComponent`) wrapping `THREE.Audio` for 2D global background music, UI sound, and environmental ambiance.
+  - Added `AudioService` managing audio mixing buses (`master`, `music`, `sfx`, `ambient`, `voice`, `ui`), bus volume/mute signals, non-blocking Web Audio autoplay unlock, buffer caching, and one-shot 2D/3D sound playback (`playOneShot`, `playPositionalOneShot`).
+  - Added `loadAndCacheAudio` to `LoaderService` with audio asset caching.
+  - Added `EngineAudioModule` exported directly through `EngineModule`.
+
 - Added `TerrainMaterialTileRuntime` to share texture stream/GPU ownership,
   fallback visibility, invalidation, disposal and counters between terrain
   consumers, and `selectCellPlanetMaterialTiles` to share camera/frustum,

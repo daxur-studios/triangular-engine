@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { NgModule } from '@angular/core';
 import {
   EffectComposerComponent,
+  EngineAudioModule,
   EngineCssComponentsModule,
   EngineCurveModule,
   EngineGeometryModule,
@@ -23,6 +24,7 @@ import { EngineEnvironmentModule, EngineFeaturesModule } from './features';
 
 const importExport = [
   EngineMaterialsModule,
+  EngineAudioModule,
   EngineParticlesModule,
   EngineMeshComponentsModule,
   EngineCurveModule,

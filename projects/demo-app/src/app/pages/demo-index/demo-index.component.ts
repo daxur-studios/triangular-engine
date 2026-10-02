@@ -84,6 +84,19 @@ export const DEMOS: readonly DemoItem[] = [
       'Multi-biome procedural landscape (coastal palms, meadow oaks, mountain pines, grass sway, 3D water, catch tower) with progressive anti-aliased (SSAA) 4K/8K photo capture.',
   },
   {
+    id: 'audio-lab',
+    number: '00a',
+    title: '3D Spatial Audio & Mixer',
+    route: '/audio-lab',
+    categoryId: 'core',
+    tier: 'gem',
+    createdAt: '2026-10-01',
+    entryPoints: ['triangular-engine'],
+    package: 'triangular-engine',
+    description:
+      'Interactive 3D spatial audio with listener tracking, distance attenuation, revolving audio orbs, multi-bus volume mixing, and one-shot sound effects.',
+  },
+  {
     id: 'water',
     number: '01',
     title: 'Water Library',

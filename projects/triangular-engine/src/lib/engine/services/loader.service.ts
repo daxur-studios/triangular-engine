@@ -39,6 +39,7 @@ export class LoaderService {
 
   readonly gltfCache = new Map<string, Promise<GLTF | undefined>>();
   readonly textureCache = new Map<string, Promise<Texture>>();
+  readonly audioCache = new Map<string, Promise<AudioBuffer>>();
 
   constructor() {
     this.dracoLoader.setDecoderPath('/draco/'); // use Web Assembly version
@@ -122,5 +123,39 @@ export class LoaderService {
 
     this.textureCache.set(texturePath, texturePromise);
     return texturePromise;
+  }
+
+  public loadAndCacheAudio(
+    audioPath: string,
+    cachePath?: string,
+    force = false,
+  ): Promise<AudioBuffer> {
+    const key = cachePath || audioPath;
+    if (this.audioCache.has(key) && !force) {
+      return this.audioCache.get(key)!;
+    }
+
+    const startedAt = performance.now();
+    const record = () =>
+      this.engineService?.fpsController.recordAssetLoadingTime(
+        performance.now() - startedAt,
+      );
+    const audioPromise = new Promise<AudioBuffer>((resolve, reject) => {
+      this.audioLoader.load(
+        audioPath,
+        (buffer) => {
+          record();
+          resolve(buffer);
+        },
+        undefined,
+        (error) => {
+          record();
+          reject(error);
+        },
+      );
+    });
+
+    this.audioCache.set(key, audioPromise);
+    return audioPromise;
   }
 }

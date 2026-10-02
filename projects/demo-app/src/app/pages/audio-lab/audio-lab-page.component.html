@@ -1,0 +1,262 @@
+<div class="audio-lab-container">
+  <!-- HUD / Controls Panel -->
+  <aside class="controls-panel">
+    <div class="panel-header">
+      <a routerLink="/" class="back-link">← Examples</a>
+      <h2>3D Spatial Audio & Mixer</h2>
+      <p class="subtitle">
+        Orbit or zoom the camera (mouse wheel) to hear real-time 3D stereo panning & distance attenuation.
+      </p>
+    </div>
+
+    <!-- Autoplay Policy Notice -->
+    @if (audioContextState() === 'suspended') {
+      <div class="banner-notice">
+        <span>🔇 Browser suspended audio. Click to enable sound.</span>
+        <button class="btn-unlock" (click)="unlockAudio()">Enable Sound</button>
+      </div>
+    }
+
+    <!-- Channel Mixer Section -->
+    <section class="control-section">
+      <h3>Audio Buses (Channels)</h3>
+
+      <div class="mixer-row">
+        <label>
+          <span>Master</span>
+          <span class="val">{{ (masterVolume() * 100) | number: '1.0-0' }}%</span>
+        </label>
+        <div class="slider-group">
+          <input
+            type="range"
+            min="0"
+            max="1.5"
+            step="0.05"
+            [value]="masterVolume()"
+            (input)="updateMasterVolume($event)"
+          />
+          <button
+            class="btn-mute"
+            [class.muted]="masterMuted()"
+            (click)="toggleMute('master')"
+          >
+            {{ masterMuted() ? 'Unmute' : 'Mute' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="mixer-row">
+        <label>
+          <span>Music (BGM)</span>
+          <span class="val">{{ (musicVolume() * 100) | number: '1.0-0' }}%</span>
+        </label>
+        <div class="slider-group">
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            [value]="musicVolume()"
+            (input)="updateMusicVolume($event)"
+          />
+          <button
+            class="btn-mute"
+            [class.muted]="musicMuted()"
+            (click)="toggleMute('music')"
+          >
+            {{ musicMuted() ? 'Unmute' : 'Mute' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="mixer-row">
+        <label>
+          <span>SFX</span>
+          <span class="val">{{ (sfxVolume() * 100) | number: '1.0-0' }}%</span>
+        </label>
+        <div class="slider-group">
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            [value]="sfxVolume()"
+            (input)="updateSfxVolume($event)"
+          />
+          <button
+            class="btn-mute"
+            [class.muted]="sfxMuted()"
+            (click)="toggleMute('sfx')"
+          >
+            {{ sfxMuted() ? 'Unmute' : 'Mute' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="mixer-row">
+        <label>
+          <span>Ambient</span>
+          <span class="val">{{ (ambientVolume() * 100) | number: '1.0-0' }}%</span>
+        </label>
+        <div class="slider-group">
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            [value]="ambientVolume()"
+            (input)="updateAmbientVolume($event)"
+          />
+          <button
+            class="btn-mute"
+            [class.muted]="ambientMuted()"
+            (click)="toggleMute('ambient')"
+          >
+            {{ ambientMuted() ? 'Unmute' : 'Mute' }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3D Spatial Sources -->
+    <section class="control-section">
+      <h3>3D Sound Emitters</h3>
+
+      <div class="emitter-item">
+        <div class="emitter-header">
+          <strong>🛸 Revolving Sound Orb</strong>
+          <button
+            class="btn-toggle"
+            [class.active]="orbPlaying()"
+            (click)="toggleOrbPlayback()"
+          >
+            {{ orbPlaying() ? 'Playing' : 'Paused' }}
+          </button>
+        </div>
+        <label>Orbit Speed</label>
+        <input
+          type="range"
+          min="0.2"
+          max="3.0"
+          step="0.1"
+          [value]="orbSpeed()"
+          (input)="updateOrbSpeed($event)"
+        />
+        <label>Ref Distance (Falloff Threshold)</label>
+        <input
+          type="range"
+          min="1"
+          max="10"
+          step="0.5"
+          [value]="orbRefDistance()"
+          (input)="updateOrbRefDistance($event)"
+        />
+      </div>
+
+      <div class="emitter-item">
+        <div class="emitter-header">
+          <strong>🗼 Central Acoustic Beacon</strong>
+          <button
+            class="btn-toggle"
+            [class.active]="beaconPlaying()"
+            (click)="toggleBeaconPlayback()"
+          >
+            {{ beaconPlaying() ? 'Playing' : 'Paused' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="emitter-item">
+        <div class="emitter-header">
+          <strong>🌌 2D Background Pad</strong>
+          <button
+            class="btn-toggle"
+            [class.active]="ambientPlaying()"
+            (click)="toggleAmbientPlayback()"
+          >
+            {{ ambientPlaying() ? 'Playing' : 'Paused' }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- One-Shot Triggers -->
+    <section class="control-section">
+      <h3>One-Shot Playback API</h3>
+      <p class="section-desc">
+        Trigger sounds on-the-fly via <code>AudioService</code>:
+      </p>
+      <div class="action-buttons">
+        <button class="btn-action" (click)="trigger2DOneShot()">
+          🔔 2D UI Click
+        </button>
+        <button class="btn-action" (click)="triggerOrbOneShot()">
+          ⚡ 3D Laser at Orb
+        </button>
+        <button class="btn-action" (click)="triggerCenterOneShot()">
+          🏛️ 3D Bell at Beacon
+        </button>
+      </div>
+    </section>
+  </aside>
+
+  <!-- 3D Scene -->
+  <scene>
+    <!-- Orbit Controls (creates & controls active PerspectiveCamera) -->
+    <orbitControls [cameraPosition]="[0, 5, 12]" [target]="[0, 1, 0]" />
+    <audioListener [(masterVolume)]="masterVolume" />
+
+    <!-- Central Beacon: Stationary 3D Sound Source -->
+    <mesh [position]="[0, 1.2, 0]">
+      <cylinderGeometry [params]="[0.4, 0.6, 2.4, 32]" />
+      <meshStandardMaterial [params]="{ color: '#26c6da', roughness: 0.2, metalness: 0.8 }" />
+
+      @if (beaconPlaying() && beaconBuffer()) {
+        <positionalAudio
+          [buffer]="beaconBuffer()"
+          [loop]="true"
+          [autoplay]="true"
+          [refDistance]="2.5"
+          [maxDistance]="30"
+          [rolloffFactor]="1.5"
+          bus="ambient"
+        />
+      }
+    </mesh>
+
+    <!-- Central Beacon Tip Glow -->
+    <mesh [position]="[0, 2.5, 0]">
+      <sphereGeometry [params]="{ radius: 0.35, widthSegments: 24, heightSegments: 24 }" />
+      <meshBasicMaterial [params]="{ color: '#80deea' }" />
+    </mesh>
+
+    <!-- Revolving Dynamic Sound Orb -->
+    <mesh [position]="orbPosition()">
+      <sphereGeometry [params]="{ radius: 0.6, widthSegments: 32, heightSegments: 32 }" />
+      <meshStandardMaterial [params]="{ color: '#ff4081', roughness: 0.3, metalness: 0.5 }" />
+
+      @if (orbPlaying() && droneBuffer()) {
+        <positionalAudio
+          [buffer]="droneBuffer()"
+          [loop]="true"
+          [autoplay]="true"
+          [refDistance]="orbRefDistance()"
+          [maxDistance]="35"
+          [rolloffFactor]="1.8"
+          bus="sfx"
+        />
+      }
+    </mesh>
+
+    <!-- Global Background Music (2D Non-Positional) -->
+    @if (ambientPlaying() && ambientBuffer()) {
+      <ambientAudio
+        [buffer]="ambientBuffer()"
+        [loop]="true"
+        [autoplay]="true"
+        [volume]="0.6"
+        bus="music"
+      />
+    }
+  </scene>
+</div>
