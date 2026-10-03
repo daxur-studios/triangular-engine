@@ -18,7 +18,10 @@ import {
   Jolt,
   JoltPhysicsService,
 } from './jolt-physics.service';
-import { JoltDebugRendererComponent } from '../jolt-debug-renderer/jolt-debug-renderer.component';
+import {
+  JoltDebugRendererComponent,
+  type JoltDebugDrawTransform,
+} from '../jolt-debug-renderer/jolt-debug-renderer.component';
 import {
   IContactValidateEvent,
   IContactAddedEvent,
@@ -82,6 +85,8 @@ export class JoltPhysicsComponent {
   readonly debug$ = toObservable(this.debug);
   readonly debugActiveBodyColor = input<number>(0xffff00);
   readonly debugSleepingBodyColor = input<number>(0x4b0010);
+  /** Where the debug view draws each body, when the page draws it elsewhere; see `JoltDebugDrawTransform`. */
+  readonly debugDrawTransform = input<JoltDebugDrawTransform | null>(null);
 
   /**
    * Worker threads Jolt may spawn during world creation (read once at init).

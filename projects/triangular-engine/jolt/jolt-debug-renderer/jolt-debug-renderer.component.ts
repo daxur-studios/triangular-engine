@@ -30,6 +30,15 @@ import { EngineService } from 'triangular-engine';
 import { wrapVec3, wrapQuat, createMeshForShape } from '../example';
 import { Jolt, JoltPhysicsService } from '../jolt-physics/jolt-physics.service';
 
+/**
+ * Where the page draws something it shows somewhere other than where the
+ * physics has it (e.g. a planet unrolled into a flat map): given a point in
+ * the physics frame, the transform that moves it there, or `null` to draw
+ * it as is. A shape is moved whole by the transform at its origin; a line
+ * point by its own.
+ */
+export type JoltDebugDrawTransform = (positionM: Vector3) => Matrix4 | null;
+
 @Component({
   selector: 'joltDebugRenderer',
   imports: [],
@@ -67,6 +76,8 @@ export class JoltDebugRendererComponent implements OnDestroy {
   readonly constraintColor = input<number>(0xff0000);
   readonly activeBodyColor = input<number>(0xffff00);
   readonly sleepingBodyColor = input<number>(0x4b0010);
+  /** Moves what's drawn to where the page draws it; see `JoltDebugDrawTransform`. */
+  readonly drawTransform = input<JoltDebugDrawTransform | null>(null);
 
   private initialized = false;
 
@@ -209,9 +220,22 @@ export class JoltDebugRendererComponent implements OnDestroy {
     const colorU32 =
       (Jolt.wrapPointer(inColor, (Jolt as any).Color) as any).mU32 >>> 0;
     const arr = (this.lineCache[colorU32] = this.lineCache[colorU32] || []);
-    const v0 = this.unwrapV3(inFrom);
-    const v1 = this.unwrapV3(inTo);
+    const v0 = this.placePoint(this.unwrapV3(inFrom));
+    const v1 = this.placePoint(this.unwrapV3(inTo));
     arr.push(v0, v1);
+  }
+
+  /** `matrix` moved by `drawTransform` at its origin, in place. */
+  private placeShape(matrix: Matrix4): Matrix4 {
+    const transform = this.drawTransform();
+    const drawn = transform?.(new Vector3().setFromMatrixPosition(matrix));
+    return drawn ? matrix.premultiply(drawn) : matrix;
+  }
+
+  /** `point` moved by `drawTransform` at itself, in place. */
+  private placePoint(point: Vector3): Vector3 {
+    const drawn = this.drawTransform()?.(point.clone());
+    return drawn ? point.applyMatrix4(drawn) : point;
   }
 
   private drawTriangle(
@@ -224,9 +248,9 @@ export class JoltDebugRendererComponent implements OnDestroy {
     const colorU32 =
       (Jolt.wrapPointer(inColor, (Jolt as any).Color) as any).mU32 >>> 0;
     const arr = (this.lineCache[colorU32] = this.lineCache[colorU32] || []);
-    const v0 = this.unwrapV3(inV1);
-    const v1 = this.unwrapV3(inV2);
-    const v2 = this.unwrapV3(inV3);
+    const v0 = this.placePoint(this.unwrapV3(inV1));
+    const v1 = this.placePoint(this.unwrapV3(inV2));
+    const v2 = this.placePoint(this.unwrapV3(inV3));
     arr.push(v0, v1);
     arr.push(v1, v2);
     arr.push(v2, v0);
@@ -241,7 +265,7 @@ export class JoltDebugRendererComponent implements OnDestroy {
   ) {
     const color =
       (Jolt.wrapPointer(inColor, (Jolt as any).Color) as any).mU32 >>> 0;
-    const position = this.unwrapV3(inPosition);
+    const position = this.placePoint(this.unwrapV3(inPosition));
     const textDecoder = new TextDecoder();
     const text = textDecoder.decode(
       (Jolt as any).HEAPU8.subarray(inStringPtr, inStringPtr + inStringLen),
@@ -269,7 +293,9 @@ export class JoltDebugRendererComponent implements OnDestroy {
     const v1 = wrapVec3(modelMatrix.GetAxisY());
     const v2 = wrapVec3(modelMatrix.GetAxisZ());
     const v3 = wrapVec3(modelMatrix.GetTranslation());
-    const matrix = new Matrix4().makeBasis(v0, v1, v2).setPosition(v3);
+    const matrix = this.placeShape(
+      new Matrix4().makeBasis(v0, v1, v2).setPosition(v3),
+    );
     this.geometryList.push({
       matrix,
       geometry: this.geometryCache[inGeometryID],
@@ -678,9 +704,9 @@ export class JoltDebugRendererComponent implements OnDestroy {
           .array as ArrayLike<number>;
 
         const rot = wrapQuat(body.GetRotation());
-        const m = new Matrix4()
-          .makeRotationFromQuaternion(rot)
-          .setPosition(pos);
+        const m = this.placeShape(
+          new Matrix4().makeRotationFromQuaternion(rot).setPosition(pos),
+        );
 
         // Active if the body is currently awake; otherwise treat as sleeping
         const isActive = body.IsActive();
@@ -729,6 +755,8 @@ export class JoltDebugRendererComponent implements OnDestroy {
             continue;
           }
 
+          this.placePoint(pa);
+          this.placePoint(pb);
           constraintPositions.push(pa.x, pa.y, pa.z, pb.x, pb.y, pb.z);
         } catch (error) {
           // Skip this constraint if it causes any errors (likely destroyed bodies)

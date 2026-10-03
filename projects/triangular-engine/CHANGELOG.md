@@ -78,6 +78,12 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `<joltPhysics [debugDrawTransform]>` (and `<joltDebugRenderer
+  [drawTransform]>`, type `JoltDebugDrawTransform`): moves what the physics
+  debug view draws to where the page draws it — e.g. onto a planet's flat
+  map. Each shape moves whole by the transform at its origin, each line
+  point by its own. Unset, nothing changes.
+
 - `triangular-engine/worldgen/render` now exports `enablePlanetMorphLighting`
   (with `createPlanetMorphLightingUniforms`): applied after
   `enablePlanetMorphProjection`, it shades a morphed surface with its sphere
