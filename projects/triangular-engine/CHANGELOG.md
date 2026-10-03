@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+- Added high-performance GPU-instanced 3D Particle & VFX System in core `triangular-engine`:
+  - Added `<particleEmitter>` (`ParticleEmitterComponent`) rendering thousands of camera-facing billboard particles in a single draw call via `InstancedBufferGeometry` and an instanced quad shader.
+  - Added built-in presets: `fire`, `smoke`, `sparks`, `explosion`, `magic`, `snow`, `rain`, and `custom`.
+  - Added configurable particle physics: continuous rate, burst emission, velocity cone spread, gravity acceleration, damping, multi-stop color ramps, size/opacity curves, and angular spin.
+  - Added `ParticleTextureUtil` generating procedural soft glow, spark star, ring shockwave, and cloud puff textures with zero external asset dependencies.
+  - Added `VfxService` for spawning one-shot particle explosions, impact sparks, and visual bursts imperatively with automatic GPU buffer cleanup.
+  - Added `EngineParticlesModule` integrated and exported through `EngineModule`.
 
 - Added declarative 3D Spatial Audio and Audio Management system in core `triangular-engine`:
   - Added `<audioListener>` (`AudioListenerComponent`) wrapping `THREE.AudioListener` with reactive `masterVolume` binding and audio filter integration.

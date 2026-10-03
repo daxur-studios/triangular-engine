@@ -97,6 +97,19 @@ export const DEMOS: readonly DemoItem[] = [
       'Interactive 3D spatial audio with listener tracking, distance attenuation, revolving audio orbs, multi-bus volume mixing, and one-shot sound effects.',
   },
   {
+    id: 'vfx-lab',
+    number: '00b',
+    title: 'GPU Particle & VFX System',
+    route: '/vfx-lab',
+    categoryId: 'core',
+    tier: 'gem',
+    createdAt: '2026-10-02',
+    entryPoints: ['triangular-engine'],
+    package: 'triangular-engine',
+    description:
+      'High-performance GPU-instanced billboard particles with real-time physics, campfire, sparks, magic portals, explosions, and live HUD parameter tuning.',
+  },
+  {
     id: 'water',
     number: '01',
     title: 'Water Library',

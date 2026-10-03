@@ -46,6 +46,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'vfx-lab',
+    loadComponent: () =>
+      import('./pages/vfx-lab/vfx-lab-page.component').then(
+        ({ VfxLabPageComponent }) => VfxLabPageComponent,
+      ),
+  },
+  {
     path: 'takram-clouds-spike',
     loadComponent: () =>
       import('./takram-clouds-spike/takram-clouds-spike.component').then(

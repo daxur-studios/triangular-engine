@@ -1,0 +1,272 @@
+<div class="vfx-lab-container">
+  <!-- HUD / Controls Panel -->
+  <aside class="controls-panel">
+    <div class="panel-header">
+      <a routerLink="/" class="back-link">← Examples</a>
+      <h2>GPU Particle & VFX Lab</h2>
+      <p class="subtitle">
+        High-performance GPU-instanced billboard particles with real-time physics and visual ramps.
+      </p>
+    </div>
+
+    <!-- Active Statistics Banner -->
+    <div class="stats-banner">
+      <div class="stat-box">
+        <span class="stat-label">Live Center Particles</span>
+        <span class="stat-val highlight">{{ mainEmitterActiveCount() }}</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Explosions Detonated</span>
+        <span class="stat-val">{{ totalExplosionsSpawned() }}</span>
+      </div>
+    </div>
+
+    <!-- Preset Selection -->
+    <section class="control-section">
+      <h3>VFX Presets</h3>
+      <div class="preset-grid">
+        <button
+          class="btn-preset"
+          [class.active]="activePreset() === 'fire'"
+          (click)="selectPreset('fire')"
+        >
+          🔥 Fire
+        </button>
+        <button
+          class="btn-preset"
+          [class.active]="activePreset() === 'smoke'"
+          (click)="selectPreset('smoke')"
+        >
+          💨 Smoke
+        </button>
+        <button
+          class="btn-preset"
+          [class.active]="activePreset() === 'sparks'"
+          (click)="selectPreset('sparks')"
+        >
+          ⚡ Sparks
+        </button>
+        <button
+          class="btn-preset"
+          [class.active]="activePreset() === 'magic'"
+          (click)="selectPreset('magic')"
+        >
+          🔮 Magic
+        </button>
+        <button
+          class="btn-preset"
+          [class.active]="activePreset() === 'snow'"
+          (click)="selectPreset('snow')"
+        >
+          ❄️ Snow
+        </button>
+        <button
+          class="btn-preset"
+          [class.active]="activePreset() === 'rain'"
+          (click)="selectPreset('rain')"
+        >
+          🌧️ Rain
+        </button>
+      </div>
+    </section>
+
+    <!-- Live Physics & Emitter Tuning -->
+    <section class="control-section">
+      <h3>Live Parameter Tuner</h3>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>Emission Rate</label>
+          <span class="val">{{ emissionRate() }} /sec</span>
+        </div>
+        <input
+          type="range"
+          min="10"
+          max="350"
+          step="5"
+          [value]="emissionRate()"
+          (input)="emissionRate.set(+$any($event.target).value)"
+        />
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>Cone Spread Angle</label>
+          <span class="val">{{ spreadAngle() }}°</span>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="180"
+          step="5"
+          [value]="spreadAngle()"
+          (input)="spreadAngle.set(+$any($event.target).value)"
+        />
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>Gravity Y</label>
+          <span class="val">{{ gravityY() | number: '1.1-1' }} m/s²</span>
+        </div>
+        <input
+          type="range"
+          min="-20"
+          max="10"
+          step="0.5"
+          [value]="gravityY()"
+          (input)="gravityY.set(+$any($event.target).value)"
+        />
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>Speed (Max)</label>
+          <span class="val">{{ speedMax() | number: '1.1-1' }} m/s</span>
+        </div>
+        <input
+          type="range"
+          min="1"
+          max="25"
+          step="0.5"
+          [value]="speedMax()"
+          (input)="speedMax.set(+$any($event.target).value)"
+        />
+      </div>
+
+      <div class="toggle-row">
+        <span>Blending Mode: <strong>{{ blendingMode() | uppercase }}</strong></span>
+        <button class="btn-toggle" (click)="toggleBlending()">Toggle Blending</button>
+      </div>
+    </section>
+
+    <!-- One-Shot Burst Spawner (VfxService) -->
+    <section class="control-section">
+      <h3>Imperative VFX API</h3>
+      <p class="section-desc">
+        Trigger one-shot particle bursts dynamically via <code>VfxService</code>:
+      </p>
+      <div class="action-buttons">
+        <button class="btn-action blast" (click)="triggerCenterExplosion()">
+          💥 Detonate Explosion
+        </button>
+        <button class="btn-action sparks" (click)="triggerSparksSpray()">
+          ⚡ Welding Sparks
+        </button>
+        <button class="btn-action magic" (click)="triggerMagicNova()">
+          🔮 Arcane Nova
+        </button>
+        <button class="btn-action fireworks" (click)="triggerFireworksSalvo()">
+          🎆 Fireworks Salvo
+        </button>
+      </div>
+    </section>
+
+    <!-- Environmental Precipitation -->
+    <section class="control-section">
+      <h3>Environment FX</h3>
+      <div class="weather-row">
+        <button
+          class="btn-weather"
+          [class.active]="weatherActive()"
+          (click)="toggleWeather()"
+        >
+          {{ weatherActive() ? 'Disable Weather' : 'Enable Weather' }}
+        </button>
+        @if (weatherActive()) {
+          <button class="btn-sub" (click)="toggleWeatherType()">
+            Mode: {{ weatherMode() | titlecase }}
+          </button>
+        }
+      </div>
+    </section>
+  </aside>
+
+  <!-- 3D Scene Viewport -->
+  <scene>
+    <!-- Orbiting Camera with Active Spatial Audio Listener -->
+    <orbitControls [cameraPosition]="[0, 6, 14]" [target]="[0, 1.5, 0]" />
+    <audioListener />
+
+    <!-- Center Showcase Pedestal: Tunable Interactive Emitter -->
+    <mesh [position]="[0, 0.4, 0]">
+      <cylinderGeometry [params]="[1.2, 1.4, 0.8, 32]" />
+      <meshStandardMaterial [params]="{ color: '#1a237e', roughness: 0.3, metalness: 0.7 }" />
+
+      <!-- The Tunable Particle Emitter -->
+      <particleEmitter
+        [preset]="activePreset()"
+        [rate]="emissionRate()"
+        [spread]="spreadAngle()"
+        [speed]="[speedMin(), speedMax()]"
+        [gravity]="[0, gravityY(), 0]"
+        [blending]="blendingMode()"
+        [shape]="emitterShape()"
+        [position]="[0, 0.5, 0]"
+        (activeCountChange)="mainEmitterActiveCount.set($event)"
+      />
+    </mesh>
+
+    <!-- Station 1: Campfire (Fire + Smoke Combo) -->
+    <mesh [position]="[-5, 0.2, 0]">
+      <cylinderGeometry [params]="[0.8, 0.9, 0.4, 16]" />
+      <meshStandardMaterial [params]="{ color: '#3e2723', roughness: 0.8 }" />
+
+      <!-- Fire Emitter -->
+      <particleEmitter
+        preset="fire"
+        [rate]="60"
+        [speed]="[1.2, 2.8]"
+        [spread]="25"
+        [position]="[0, 0.3, 0]"
+      />
+      <!-- Smoke Plume Emitter -->
+      <particleEmitter
+        preset="smoke"
+        [rate]="20"
+        [speed]="[0.8, 1.6]"
+        [spread]="30"
+        [position]="[0, 0.8, 0]"
+      />
+    </mesh>
+
+    <!-- Station 2: Electric Pylon (Sparks) -->
+    <mesh [position]="[-5, 1.5, -4]">
+      <boxGeometry [params]="[0.5, 3.0, 0.5]" />
+      <meshStandardMaterial [params]="{ color: '#455a64', metalness: 0.9, roughness: 0.2 }" />
+
+      <particleEmitter
+        preset="sparks"
+        [rate]="45"
+        [speed]="[4.0, 8.0]"
+        [spread]="80"
+        [gravity]="[0, -10, 0]"
+        [position]="[0, 1.5, 0]"
+      />
+    </mesh>
+
+    <!-- Station 3: Magic Arcane Well -->
+    <mesh [position]="[5, 0.3, 0]">
+      <cylinderGeometry [params]="[1.0, 1.2, 0.5, 32]" />
+      <meshStandardMaterial [params]="{ color: '#4a148c', roughness: 0.2, metalness: 0.8 }" />
+
+      <particleEmitter
+        preset="magic"
+        [rate]="40"
+        [spread]="120"
+        [position]="[0, 0.2, 0]"
+      />
+    </mesh>
+
+    <!-- Optional Weather Volume (Snow / Rain) -->
+    @if (weatherActive()) {
+      <mesh [position]="[0, 10, 0]">
+        <particleEmitter
+          [preset]="weatherMode()"
+          [maxParticles]="800"
+          [rate]="weatherMode() === 'rain' ? 300 : 120"
+        />
+      </mesh>
+    }
+  </scene>
+</div>
