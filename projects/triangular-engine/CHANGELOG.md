@@ -78,6 +78,12 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `triangular-engine/worldgen/render` now exports `enablePlanetMorphLighting`
+  (with `createPlanetMorphLightingUniforms`): applied after
+  `enablePlanetMorphProjection`, it shades a morphed surface with its sphere
+  normal turned by a `uMorphLightingTurn` matrix, so a flat map keeps its
+  relief and day/night sides under a light turned the same way.
+
 - `triangular-engine/terrain` now exports shared stylized material palette and
   procedural variation helpers (`terrainMaterialColorRgb`,
   `sampleTerrainMacroVariation`, and `applyTerrainMacroVariation`) so planar and

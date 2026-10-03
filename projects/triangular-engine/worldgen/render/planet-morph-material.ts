@@ -4,6 +4,7 @@ import {
   FrontSide,
   IUniform,
   Material,
+  Matrix3,
   MeshStandardMaterial,
   MeshStandardMaterialParameters,
   ShaderMaterial,
@@ -260,6 +261,68 @@ export function enablePlanetMorphProjection(
 
   material.customProgramCacheKey = () =>
     `${previousCacheKey()}|planetMorphProjection`;
+  material.needsUpdate = true;
+}
+
+/** The shading frame for {@link enablePlanetMorphLighting}. */
+export interface IPlanetMorphLightingUniforms {
+  /**
+   * Turns a sphere normal into the normal the surface is lit with. Identity
+   * lights every point as it is on the sphere.
+   */
+  uMorphLightingTurn: IUniform<Matrix3>;
+}
+
+export function createPlanetMorphLightingUniforms(): IPlanetMorphLightingUniforms {
+  return { uMorphLightingTurn: { value: new Matrix3() } };
+}
+
+/**
+ * Lights a morphed surface as if it were still on the sphere: the normal
+ * used for shading is the vertex's sphere normal turned by
+ * `uMorphLightingTurn`, not the morphed one (which is +Z everywhere on the
+ * flat map, so the whole map would be lit alike and lose its relief).
+ *
+ * For a "local sun": turn the scene's light by some rotation `Q` and set
+ * the uniform to `Q`. Every point then gets the sun angle it has on the
+ * sphere, so the terminator crosses the map where it should, and where the
+ * map is drawn turned by `Q` (around a focused object moved onto the map
+ * with the same rotation) the lighting and the light's shadows agree with
+ * the geometry exactly.
+ *
+ * Apply after {@link enablePlanetMorphProjection}, whose normal it replaces.
+ */
+export function enablePlanetMorphLighting(
+  material: Material,
+  uniforms: IPlanetMorphLightingUniforms,
+): void {
+  const previousOnBeforeCompile = material.onBeforeCompile.bind(material);
+  const previousCacheKey = material.customProgramCacheKey.bind(material);
+
+  material.onBeforeCompile = (
+    shader: WebGLProgramParametersWithUniforms,
+    renderer: WebGLRenderer,
+  ) => {
+    previousOnBeforeCompile(shader, renderer);
+
+    const morphedNormal = 'vec3 objectNormal = morphedNormal;';
+    if (!shader.vertexShader.includes(morphedNormal)) {
+      console.warn(
+        'enablePlanetMorphLighting: apply enablePlanetMorphProjection first.',
+      );
+      return;
+    }
+    shader.uniforms['uMorphLightingTurn'] = uniforms.uMorphLightingTurn;
+    shader.vertexShader =
+      'uniform mat3 uMorphLightingTurn;\n' +
+      shader.vertexShader.replace(
+        morphedNormal,
+        'vec3 objectNormal = normalize(uMorphLightingTurn * dynSphereNorm);',
+      );
+  };
+
+  material.customProgramCacheKey = () =>
+    `${previousCacheKey()}|planetMorphLighting`;
   material.needsUpdate = true;
 }
 
