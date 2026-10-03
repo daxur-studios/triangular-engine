@@ -1,0 +1,287 @@
+<div class="csm-lab-layout">
+  <!-- Interactive Side Panel / HUD Controls -->
+  <aside class="control-panel">
+    <div class="panel-header">
+      <div class="header-nav">
+        <a routerLink="/" class="back-link">← Engine Index</a>
+        <span class="badge">Feature 8</span>
+      </div>
+      <h2>Cascaded Shadow Maps (CSM)</h2>
+      <p class="subtitle">
+        Compare single-frustum directional shadows against multi-cascade shadow partitioning.
+      </p>
+    </div>
+
+    <!-- Shadow Architecture Mode Switcher -->
+    <section class="control-section">
+      <h3>Shadow Technique</h3>
+      <div class="segmented-control">
+        <button
+          [class.active]="shadowMode() === 'csm'"
+          (click)="setShadowMode('csm')"
+        >
+          ✨ CSM (Cascaded)
+        </button>
+        <button
+          [class.active]="shadowMode() === 'standard'"
+          (click)="setShadowMode('standard')"
+        >
+          📦 Standard (Single)
+        </button>
+        <button
+          [class.active]="shadowMode() === 'off'"
+          (click)="setShadowMode('off')"
+        >
+          🚫 Disabled
+        </button>
+      </div>
+
+      <div class="status-callout" [class.csm-active]="shadowMode() === 'csm'">
+        @if (shadowMode() === 'csm') {
+          <div class="status-indicator"></div>
+          <div>
+            <strong>CSM Enabled:</strong> Camera frustum is sliced into
+            <strong>{{ cascades() }} cascades</strong> up to
+            <strong>{{ maxDistance() }}m</strong>. Razor-sharp contact shadows foreground to horizon.
+          </div>
+        } @else if (shadowMode() === 'standard') {
+          <div class="status-indicator warning"></div>
+          <div>
+            <strong>Standard Single Shadow:</strong> Uses one 120m orthographic box.
+            Notice blocky foreground pixels and harsh cutoff in the distance!
+          </div>
+        } @else {
+          <div class="status-indicator muted"></div>
+          <div><strong>Shadows Disabled:</strong> Only ambient + directional diffuse lighting.</div>
+        }
+      </div>
+    </section>
+
+    <!-- CSM Cascade Tuning (Available when CSM is selected) -->
+    @if (shadowMode() === 'csm') {
+      <section class="control-section">
+        <h3>CSM Parameters</h3>
+
+        <div class="control-row">
+          <label>
+            Cascades Count: <strong>{{ cascades() }}</strong>
+          </label>
+          <div class="button-group">
+            @for (count of [1, 2, 3, 4]; track count) {
+              <button
+                class="btn-small"
+                [class.selected]="cascades() === count"
+                (click)="cascades.set(count)"
+              >
+                {{ count }}
+              </button>
+            }
+          </div>
+        </div>
+
+        <div class="control-row">
+          <label>
+            Max Distance: <strong>{{ maxDistance() }}m</strong>
+          </label>
+          <input
+            type="range"
+            min="100"
+            max="1000"
+            step="50"
+            [value]="maxDistance()"
+            (input)="maxDistance.set(+$any($event.target).value)"
+          />
+        </div>
+
+        <div class="control-row">
+          <label>
+            Split Mode: <strong>{{ splitMode() | uppercase }}</strong>
+          </label>
+          <div class="button-group">
+            <button
+              class="btn-small"
+              [class.selected]="splitMode() === 'practical'"
+              (click)="splitMode.set('practical')"
+            >
+              Practical
+            </button>
+            <button
+              class="btn-small"
+              [class.selected]="splitMode() === 'logarithmic'"
+              (click)="splitMode.set('logarithmic')"
+            >
+              Logarithmic
+            </button>
+            <button
+              class="btn-small"
+              [class.selected]="splitMode() === 'uniform'"
+              (click)="splitMode.set('uniform')"
+            >
+              Uniform
+            </button>
+          </div>
+        </div>
+
+        <div class="toggle-row">
+          <span>Cascade Seam Blending: <strong>{{ fade() ? 'ON' : 'OFF' }}</strong></span>
+          <button class="btn-toggle" (click)="toggleFade()">
+            {{ fade() ? 'Disable Fade' : 'Enable Fade' }}
+          </button>
+        </div>
+
+        <div class="toggle-row">
+          <span>Visual Frustum Helper: <strong>{{ debugHelper() ? 'ON' : 'OFF' }}</strong></span>
+          <button class="btn-toggle highlight" (click)="toggleDebugHelper()">
+            {{ debugHelper() ? 'Hide Frustums' : 'Show Frustums' }}
+          </button>
+        </div>
+      </section>
+    }
+
+    <!-- Sun & Lighting Controls -->
+    <section class="control-section">
+      <h3>Sun & Lighting Angles</h3>
+
+      <div class="control-row">
+        <label>
+          Sun Azimuth: <strong>{{ sunAzimuth() }}°</strong>
+        </label>
+        <input
+          type="range"
+          min="0"
+          max="360"
+          step="5"
+          [value]="sunAzimuth()"
+          (input)="sunAzimuth.set(+$any($event.target).value)"
+        />
+      </div>
+
+      <div class="control-row">
+        <label>
+          Sun Elevation: <strong>{{ sunElevation() }}°</strong>
+        </label>
+        <input
+          type="range"
+          min="10"
+          max="85"
+          step="5"
+          [value]="sunElevation()"
+          (input)="sunElevation.set(+$any($event.target).value)"
+        />
+      </div>
+
+      <div class="control-row">
+        <label>
+          Sun Intensity: <strong>{{ sunIntensity() | number: '1.1-1' }}</strong>
+        </label>
+        <input
+          type="range"
+          min="1.0"
+          max="6.0"
+          step="0.5"
+          [value]="sunIntensity()"
+          (input)="sunIntensity.set(+$any($event.target).value)"
+        />
+      </div>
+    </section>
+
+    <!-- Planetary Showcase Toggle -->
+    <section class="control-section">
+      <h3>Spherical Planet Test</h3>
+      <p class="section-desc">
+        Toggle spherical planet mesh with altitude-adaptive shadow scaling:
+      </p>
+      <button
+        class="btn-action"
+        [class.active]="viewPlanetSection()"
+        (click)="togglePlanetView()"
+      >
+        {{ viewPlanetSection() ? '🪐 Hide Spherical Planet' : '🪐 Show Spherical Planet' }}
+      </button>
+    </section>
+  </aside>
+
+  <!-- 3D Scene Viewport -->
+  <scene class="scene-viewport">
+    <!-- Camera with Orbit Controls -->
+    <orbitControls [cameraPosition]="[0, 6, 18]" [target]="[0, 1.5, -20]" [far]="1500" />
+
+    <!-- Ambient Fill Light -->
+    <ambientLight [intensity]="0.35" color="#b0bec5" />
+
+    <!-- Active Lighting: CSM vs Standard vs Off -->
+    @if (shadowMode() === 'csm') {
+      <csm
+        [lightDirection]="lightDirection()"
+        [intensity]="sunIntensity()"
+        [cascades]="cascades()"
+        [maxDistance]="maxDistance()"
+        [mode]="splitMode()"
+        [fade]="fade()"
+        [shadowMapSize]="shadowMapSize()"
+        [shadowBias]="shadowBias()"
+        [debug]="debugHelper()"
+        [adaptiveRange]="viewPlanetSection() && adaptivePlanetRange() ? planetAdaptiveConfig : undefined"
+      />
+    } @else if (shadowMode() === 'standard') {
+      <directionalLight
+        [position]="standardLightPosition()"
+        [intensity]="sunIntensity()"
+        [castShadow]="true"
+        [shadow]="{
+          mapSize: [2048, 2048],
+          cameraHalfExtent: 60,
+          cameraNear: 1,
+          cameraFar: 400,
+          bias: -0.0002
+        }"
+      />
+    } @else {
+      <directionalLight
+        [position]="standardLightPosition()"
+        [intensity]="sunIntensity()"
+        [castShadow]="false"
+      />
+    }
+
+    <!-- Landscape Ground Plane (Receives Shadows) -->
+    <mesh [position]="[0, 0, -150]" [receiveShadow]="true">
+      <planeGeometry [params]="[400, 500, 1, 1]" orientation="horizontal" />
+      <meshStandardMaterial [params]="{ color: '#90a4ae', roughness: 0.9, metalness: 0.0 }" />
+    </mesh>
+
+    <!-- Detailed Avatar / Foreground Subject at Origin -->
+    <mesh [position]="[0, 1.0, 0]" [castShadow]="true" [receiveShadow]="true">
+      <capsuleGeometry [params]="[0.5, 1.2, 16, 32]" />
+      <meshStandardMaterial [params]="{ color: '#ffca28', roughness: 0.3, metalness: 0.6 }" />
+    </mesh>
+
+    <!-- Ornate Pedestal Under Avatar -->
+    <mesh [position]="[0, 0.15, 0]" [castShadow]="true" [receiveShadow]="true">
+      <cylinderGeometry [params]="[1.2, 1.4, 0.3, 32]" />
+      <meshStandardMaterial [params]="{ color: '#eceff1', roughness: 0.4, metalness: 0.2 }" />
+    </mesh>
+
+    <!-- Multiple Scene Objects Placed at Varying Distances (Foreground -> Midground -> Horizon) -->
+    @for (obj of fieldObjects; track $index) {
+      <mesh [position]="obj.position" [scale]="obj.scale" [castShadow]="true" [receiveShadow]="true">
+        <boxGeometry [params]="[1, 1, 1]" />
+        <meshStandardMaterial [params]="{ color: obj.color, roughness: 0.6, metalness: 0.3 }" />
+      </mesh>
+    }
+
+    <!-- Spherical Celestial Body (Planet) Showcase -->
+    @if (viewPlanetSection()) {
+      <mesh [position]="[0, 0, -350]" [castShadow]="true" [receiveShadow]="true">
+        <sphereGeometry [params]="{ radius: 100, widthSegments: 64, heightSegments: 64 }" />
+        <meshStandardMaterial [params]="{ color: '#1e88e5', roughness: 0.8, metalness: 0.2 }" />
+
+        <!-- Mountain Peaks on the Planet -->
+        <mesh [position]="[0, 102, 0]" [castShadow]="true" [receiveShadow]="true">
+          <coneGeometry [params]="[12, 28, 16]" />
+          <meshStandardMaterial [params]="{ color: '#ffffff', roughness: 0.5, metalness: 0.1 }" />
+        </mesh>
+      </mesh>
+    }
+  </scene>
+</div>

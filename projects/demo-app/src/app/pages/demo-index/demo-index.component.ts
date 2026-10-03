@@ -110,6 +110,19 @@ export const DEMOS: readonly DemoItem[] = [
       'High-performance GPU-instanced billboard particles with real-time physics, campfire, sparks, magic portals, explosions, and live HUD parameter tuning.',
   },
   {
+    id: 'csm-lab',
+    number: '00c',
+    title: 'Cascaded Shadow Maps (CSM)',
+    route: '/csm-lab',
+    categoryId: 'core',
+    tier: 'gem',
+    createdAt: '2026-10-03',
+    entryPoints: ['triangular-engine'],
+    package: 'triangular-engine',
+    description:
+      'Compare standard single-box shadows against multi-cascade depth partitioning (1-4 cascades) with razor-sharp contact shadows, frustum debug visualizer, and planetary altitude scaling.',
+  },
+  {
     id: 'water',
     number: '01',
     title: 'Water Library',

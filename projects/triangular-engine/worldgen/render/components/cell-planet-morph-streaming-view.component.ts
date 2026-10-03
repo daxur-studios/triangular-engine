@@ -107,6 +107,8 @@ function defaultAddressLevel(address: ILatLonTerrainPatchAddress): number {
       [wireframe]="wireframe()"
       [patchSelector]="patchSelector"
       [selectionRevision]="resolvedSelectionRevision()"
+      [lodPositionToleranceM]="lodPositionToleranceM()"
+      [lodViewToleranceRadians]="lodViewToleranceRadians()"
       [meshGenerator]="meshGenerator()"
       [createMaterial]="resolvedCreateMaterial"
       [colorRevision]="colorRevision()"
@@ -170,6 +172,21 @@ export class CellPlanetMorphStreamingViewComponent {
    */
   readonly forceRefine =
     input<((address: ILatLonTerrainPatchAddress) => boolean) | undefined>(undefined);
+  /**
+   * How far (m) the LOD position, camera or planet must move, and how far (radians) the camera
+   * must turn, before patches are selected again (`TerrainSurfaceComponent`'s tolerances). Zero
+   * reselects on any change; a floating-origin scene sets them so a still view isn't reselected
+   * every frame.
+   */
+  readonly lodPositionToleranceM = input(0);
+  readonly lodViewToleranceRadians = input(0);
+  /** `bodyCenterSceneM` in steps of `lodPositionToleranceM`, so its drift alone doesn't reselect. */
+  private readonly bodyCenterSceneStep = computed(() => {
+    const toleranceM = this.lodPositionToleranceM();
+    return toleranceM > 0
+      ? this.bodyCenterSceneM().map((valueM) => Math.round(valueM / toleranceM))
+      : this.bodyCenterSceneM();
+  });
 
   // ==========================================================================
   // Morph + projection
@@ -281,7 +298,7 @@ export class CellPlanetMorphStreamingViewComponent {
     this.selectionRevision(), this.lodMorph(), this.projectionKind(),
     this.refinementDistanceFactor(), this.stickyRefinementFactor(),
     this.frustumCulling(), this.horizonCulling(), this.frustumSafetyFactor(), this.heightScaleM(),
-    this.bodyCenterSceneM(), this.forceRefine() !== undefined,
+    this.bodyCenterSceneStep(), this.forceRefine() !== undefined,
   ]));
   readonly patchSelector: TerrainSurfacePatchSelector<ILatLonTerrainPatchAddress> = (request) =>
     this.selector.select(request);

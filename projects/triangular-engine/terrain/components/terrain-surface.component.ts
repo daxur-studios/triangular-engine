@@ -18,6 +18,7 @@ import {
   Mesh,
   MeshStandardMaterial,
   Object3D,
+  Quaternion,
   QuaternionTuple,
   Sphere,
   Vector3,
@@ -166,6 +167,15 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   private desiredPatchCount = 0;
   private statsSignature = '';
   private lastSelectionInputSignature = '';
+  /** The LOD position and camera when selection last ran, for the tolerances. */
+  private lastSelectionPosition: TerrainVector3 | undefined;
+  private readonly lastSelectionCameraMatrix = new Matrix4();
+  private readonly lastSelectionCameraPosition = new Vector3();
+  private readonly lastSelectionCameraQuaternion = new Quaternion();
+  private readonly lastSelectionProjection = new Matrix4();
+  private readonly cameraPositionScratch = new Vector3();
+  private readonly cameraQuaternionScratch = new Quaternion();
+  private readonly cameraScaleScratch = new Vector3();
   private edgeMaskSelectionSignature = '';
   private cachedEdgeMasks: readonly ReturnType<
     typeof calculateTerrainPatchEdgeRefinementMasks
@@ -194,6 +204,15 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   readonly freezeLod = input(false);
   /** Reruns selection for live selector settings without rebuilding unchanged residents. */
   readonly selectionRevision = input<string | number>(0);
+  /**
+   * How far (m) the LOD position, or the camera when a `patchSelector` reads
+   * it, must move before selection runs again. Zero, the default, reruns it on
+   * any change; a floating-origin scene whose camera drifts a hair every frame
+   * sets it so a still view isn't re-selected every frame.
+   */
+  readonly lodPositionToleranceM = input(0);
+  /** How far (radians) the camera must turn before a `patchSelector` runs again. Zero reruns it on any change. */
+  readonly lodViewToleranceRadians = input(0);
   /** Uses the built-in adaptive distance selector when omitted. */
   readonly patchSelector = input<
     TerrainSurfacePatchSelector<TAddress> | undefined
@@ -316,23 +335,33 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       this.refinementDistance() ?? estimateRefinementDistance(domain, roots);
     const hysteresis = Math.min(0.95, Math.max(0, this.lodHysteresis()));
     const patchSelector = this.patchSelector();
+    const selectionInputSignature = JSON.stringify([
+      this.selectionRevision(), maxLevel, refinementDistanceM, hysteresis,
+      this.residents.size === 0, patchSelector !== undefined,
+    ]);
     // Custom selectors can depend on the complete view, even when lodPosition
     // supplies a separate distance anchor. Projection changes also invalidate.
-    let cameraSignature = '';
-    if (patchSelector) {
-      const camera = this.engine.camera;
-      camera.updateWorldMatrix(true, false);
-      cameraSignature = `${camera.matrixWorld.elements.join(',')}|${camera.projectionMatrix.elements.join(',')}`;
-    }
-    const selectionInputSignature = JSON.stringify([
-      position, cameraSignature, this.selectionRevision(), maxLevel,
-      refinementDistanceM, hysteresis, this.residents.size === 0,
-    ]);
-    if (selectionInputSignature === this.lastSelectionInputSignature) {
+    const viewMoved = patchSelector !== undefined && this.cameraMovedSinceSelection();
+    if (
+      selectionInputSignature === this.lastSelectionInputSignature &&
+      !viewMoved &&
+      !this.lodPositionMovedSinceSelection(position)
+    ) {
       this.processGenerationQueue();
       return;
     }
     this.lastSelectionInputSignature = selectionInputSignature;
+    this.lastSelectionPosition = position;
+    if (patchSelector) {
+      const camera = this.engine.camera;
+      camera.matrixWorld.decompose(
+        this.lastSelectionCameraPosition,
+        this.lastSelectionCameraQuaternion,
+        this.cameraScaleScratch,
+      );
+      this.lastSelectionCameraMatrix.copy(camera.matrixWorld);
+      this.lastSelectionProjection.copy(camera.projectionMatrix);
+    }
     // Establish a complete coarse cover before asking for a refined cut. This
     // gives the renderer a parent fallback during the first asynchronous build
     // and prevents the initial view from refining into an empty scene.
@@ -1023,6 +1052,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     this.refinedKeys.clear();
     this.statsSignature = '';
     this.lastSelectionInputSignature = '';
+    this.lastSelectionPosition = undefined;
     this.edgeMaskSelectionSignature = '';
     this.cachedEdgeMasks = [];
     this.generationEpoch++;
@@ -1033,6 +1063,44 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     this.desiredEdgeMasks.clear();
     this.queue.clear();
     this.disposeResidents();
+  }
+
+  /** Whether `position` is further than `lodPositionToleranceM` from where selection last ran. */
+  private lodPositionMovedSinceSelection(position: TerrainVector3): boolean {
+    const last = this.lastSelectionPosition;
+    if (!last) return true;
+    const toleranceM = this.lodPositionToleranceM();
+    if (toleranceM <= 0) {
+      return position[0] !== last[0] || position[1] !== last[1] || position[2] !== last[2];
+    }
+    return (
+      Math.hypot(position[0] - last[0], position[1] - last[1], position[2] - last[2]) >
+      toleranceM
+    );
+  }
+
+  /** Whether the camera moved, turned or changed projection past the tolerances since selection last ran. */
+  private cameraMovedSinceSelection(): boolean {
+    const camera = this.engine.camera;
+    camera.updateWorldMatrix(true, false);
+    if (!camera.projectionMatrix.equals(this.lastSelectionProjection)) return true;
+    const toleranceM = this.lodPositionToleranceM();
+    const toleranceRadians = this.lodViewToleranceRadians();
+    if (toleranceM <= 0 && toleranceRadians <= 0) {
+      return !camera.matrixWorld.equals(this.lastSelectionCameraMatrix);
+    }
+    camera.matrixWorld.decompose(
+      this.cameraPositionScratch,
+      this.cameraQuaternionScratch,
+      this.cameraScaleScratch,
+    );
+    const moved = toleranceM <= 0
+      ? !this.cameraPositionScratch.equals(this.lastSelectionCameraPosition)
+      : this.cameraPositionScratch.distanceTo(this.lastSelectionCameraPosition) > toleranceM;
+    const turned = toleranceRadians <= 0
+      ? !this.cameraQuaternionScratch.equals(this.lastSelectionCameraQuaternion)
+      : this.cameraQuaternionScratch.angleTo(this.lastSelectionCameraQuaternion) > toleranceRadians;
+    return moved || turned;
   }
 
   private cameraPosition(): TerrainVector3 {

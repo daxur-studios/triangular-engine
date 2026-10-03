@@ -53,6 +53,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'csm-lab',
+    loadComponent: () =>
+      import('./pages/csm-lab/csm-lab-page.component').then(
+        ({ CsmLabPageComponent }) => CsmLabPageComponent,
+      ),
+  },
+  {
     path: 'takram-clouds-spike',
     loadComponent: () =>
       import('./takram-clouds-spike/takram-clouds-spike.component').then(

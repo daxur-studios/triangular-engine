@@ -1,5 +1,13 @@
 # Changelog
 
+- Added Cascaded Shadow Maps (CSM) system in core `triangular-engine`:
+  - Added `<csm>` (`CsmComponent`) wrapping Three.js's integrated `CSM` (`three/examples/jsm/csm/CSM.js`), partitioning view frustums into 1-4 depth cascades with razor-sharp contact shadows and deep horizon coverage.
+  - Added `EngineCSM` preserving and composing with existing `material.onBeforeCompile` chains and providing safe reference counting across shared materials.
+  - Added `calculateCsmAdaptiveRange` supporting altitude-adaptive planetary and orbit scaling with smooth fading into native day/night terminators.
+  - Added `[csmReceiver]` (`CsmReceiverDirective`) enabling selective mesh opt-out and explicit registration.
+  - Added live 3D visual frustum debugging via Three.js `CSMHelper` (`[debug]="true"`).
+  - Integrated into `EngineLightModule` and exported directly through `EngineModule`.
+
 - Added high-performance GPU-instanced 3D Particle & VFX System in core `triangular-engine`:
   - Added `<particleEmitter>` (`ParticleEmitterComponent`) rendering thousands of camera-facing billboard particles in a single draw call via `InstancedBufferGeometry` and an instanced quad shader.
   - Added built-in presets: `fire`, `smoke`, `sparks`, `explosion`, `magic`, `snow`, `rain`, and `custom`.

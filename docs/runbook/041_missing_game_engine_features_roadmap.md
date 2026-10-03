@@ -245,36 +245,28 @@ graph TD
 
 ---
 
-### Feature 8: Cascaded Shadow Maps (CSM) & Expanded Lighting
+### Feature 8: Cascaded Shadow Maps (CSM) & Expanded Lighting — [COMPLETED]
 
-* **Problem in Triangular Engine**:
-  Open-world planetary terrain and scattered objects currently use standard single-frustum directional shadows. Close to the player, shadows appear pixelated/aliased; far from the player, shadows cut off abruptly.
-* **What Other Engines Have**:
-  Cascaded Shadow Maps (CSM), SpotLight cones with penumbra falloff, and RectAreaLight.
-* **Technical Strategy**:
-  - Integrate `three/addons/csm/CSM.js`.
-  - CSM partitions the camera frustum into multiple depth cascades (e.g. 3 to 4 cascades), rendering high-resolution shadow maps close to the camera and lower-resolution maps further away.
-  - Add `<spotLight>` and `<rectAreaLight>` components with helper visualization.
+* **Status**: Delivered (2026-10-03).
+* **Delivered Architecture**:
+  - Implemented `<csm>` (`CsmComponent`) in `projects/triangular-engine/src/lib/engine/components/light/csm/` wrapping Three.js's integrated `CSM` (`three/examples/jsm/csm/CSM.js`).
+  - Implemented `EngineCSM` safely composing with preexisting `material.onBeforeCompile` chains (preserving wind, dither, impostor hooks) and ref-counting shared material registrations.
+  - Implemented `calculateCsmAdaptiveRange` providing altitude-adaptive shadow scaling for spherical planets with smooth fade into native day/night terminators.
+  - Implemented `[csmReceiver]` (`CsmReceiverDirective`) enabling selective mesh shadow opt-in/opt-out.
+  - Built interactive `/csm-lab` showcase page comparing standard single-frustum shadows side-by-side with 1–4 depth cascades and live frustum debug visualization (`CSMHelper`).
 * **Target Declarative API**:
   ```html
-  <directionalLight
-    [position]="[100, 150, 80]"
-    [csm]="true"
+  <csm
+    [lightDirection]="[-1, -1.5, -1]"
+    [intensity]="3.0"
     [cascades]="4"
-    [maxDistance]="300"
-    [shadowBias]="-0.0005"
-  />
-
-  <spotLight
-    [position]="[0, 10, 0]"
-    [target]="[0, 0, 0]"
-    [angle]="45"
-    [penumbra]="0.4"
-    [distance]="50"
-    [castShadow]="true"
+    [maxDistance]="450"
+    [mode]="'practical'"
+    [fade]="true"
+    [debug]="showFrustums()"
   />
   ```
-* **Effort / Feasibility**: **Low–Medium / Very High**.
+* **Documentation**: See `projects/triangular-engine/docs/shadows.md`.
 
 ---
 
