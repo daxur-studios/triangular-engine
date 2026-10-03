@@ -103,6 +103,8 @@ function defaultAddressLevel(address: ILatLonTerrainPatchAddress): number {
       [maxPatches]="maxPatches()"
       [batching]="batching()"
       [frustumCulled]="frustumCulled()"
+      [castShadow]="castShadow()"
+      [receiveShadow]="receiveShadow()"
       [freezeLod]="freezeLod()"
       [wireframe]="wireframe()"
       [patchSelector]="patchSelector"
@@ -210,6 +212,12 @@ export class CellPlanetMorphStreamingViewComponent {
   readonly maxPatches = input<number | undefined>(undefined);
   readonly batching = input(true);
   readonly frustumCulled = input(false);
+  /**
+   * Whether the terrain casts shadows. Its shadow pass draws the sphere,
+   * not the morphed surface, so leave it off while `morphProgress` > 0.
+   */
+  readonly castShadow = input(false);
+  readonly receiveShadow = input(false);
   readonly wireframe = input(false);
   readonly freezeLod = input(false);
   /** Bump to force `TerrainSurfaceComponent` to rebuild resident patches (e.g. after a

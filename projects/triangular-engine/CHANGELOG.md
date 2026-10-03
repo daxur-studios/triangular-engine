@@ -78,6 +78,11 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- `<terrainSurface>` and `<cellPlanetMorphStreamingView>` take
+  `[castShadow]` and `[receiveShadow]` (both default `false`, as before),
+  applied to every patch mesh and the batched mesh. A morphed cell planet
+  can receive shadows; its shadow pass doesn't morph, so it shouldn't cast
+  while morphed.
 - `<joltPhysics [debugDrawTransform]>` (and `<joltDebugRenderer
   [drawTransform]>`, type `JoltDebugDrawTransform`): moves what the physics
   debug view draws to where the page draws it — e.g. onto a planet's flat

@@ -226,6 +226,10 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   >(undefined);
   readonly wireframe = input(false);
   readonly frustumCulled = input(true);
+  /** Whether the patches cast into the scene's shadow maps. */
+  readonly castShadow = input(false);
+  /** Whether the patches show shadows cast on them. */
+  readonly receiveShadow = input(false);
   /**
    * Scene-space transform applied to the renderer's patch group. Patch
    * `centerWorldM` values are interpreted relative to it, so a parent can own
@@ -283,6 +287,20 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       }
       if (this.batchedRender) {
         this.batchedRender.object.frustumCulled = culled;
+      }
+    });
+    effect(() => {
+      const cast = this.castShadow();
+      const receive = this.receiveShadow();
+      for (const { object } of this.residents.values()) {
+        object.traverse((child) => {
+          child.castShadow = cast;
+          child.receiveShadow = receive;
+        });
+      }
+      if (this.batchedRender) {
+        this.batchedRender.object.castShadow = cast;
+        this.batchedRender.object.receiveShadow = receive;
       }
     });
     effect(() => {
@@ -839,6 +857,8 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     );
     const mesh = new Mesh(surfaceGeometry, material);
     mesh.frustumCulled = this.frustumCulled();
+    mesh.castShadow = this.castShadow();
+    mesh.receiveShadow = this.receiveShadow();
     let drawCalls = 1;
     let geometryBytes = geometryByteCount(surfaceGeometry);
     let triangles = (surfaceGeometry.index?.count ?? 0) / 3;
@@ -851,6 +871,8 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       );
       const skirtMesh = new Mesh(skirtGeometry, material);
       skirtMesh.frustumCulled = this.frustumCulled();
+      skirtMesh.castShadow = this.castShadow();
+      skirtMesh.receiveShadow = this.receiveShadow();
       mesh.add(skirtMesh);
       drawCalls += 1;
       geometryBytes += geometryByteCount(skirtGeometry);
@@ -973,6 +995,8 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       material,
     );
     object.position.copy(this.batchAnchorM);
+    object.castShadow = this.castShadow();
+    object.receiveShadow = this.receiveShadow();
     this.group.add(object);
     this.batchedRender = { object, material };
     return this.batchedRender;
