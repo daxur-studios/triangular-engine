@@ -50,6 +50,34 @@ describe('body-rotation', () => {
       });
       expect(qFrozen).toEqual([0, 0, 0, 1]);
     });
+
+    it('carries on from the frozen angle after the freeze, by rotationHeldS', () => {
+      // Frozen at 10,000 s for 5,000 s: at 15,000 s it is where it was at 10,000 s.
+      const frozen = bodyOrientationAt(rotatingBody, 15_000, {
+        disableCelestialRotation: true,
+        frozenUt: 10_000,
+      });
+      const resumed = bodyOrientationAt(rotatingBody, 15_000, { rotationHeldS: 5_000 });
+      const unheld = bodyOrientationAt(rotatingBody, 10_000);
+      for (let i = 0; i < 4; i++) {
+        expect(resumed[i]).toBeCloseTo(frozen[i], 12);
+        expect(resumed[i]).toBeCloseTo(unheld[i], 12);
+      }
+    });
+
+    it('carries on from the frozen angle after the freeze, by rotationHeldS', () => {
+      // Frozen at 10,000 s for 5,000 s: at 15,000 s it is where it was at 10,000 s.
+      const frozen = bodyOrientationAt(rotatingBody, 15_000, {
+        disableCelestialRotation: true,
+        frozenUt: 10_000,
+      });
+      const resumed = bodyOrientationAt(rotatingBody, 15_000, { rotationHeldS: 5_000 });
+      const unheld = bodyOrientationAt(rotatingBody, 10_000);
+      for (let i = 0; i < 4; i++) {
+        expect(resumed[i]).toBeCloseTo(frozen[i], 12);
+        expect(resumed[i]).toBeCloseTo(unheld[i], 12);
+      }
+    });
   });
 
   describe('bodyAngularVelocityAt', () => {

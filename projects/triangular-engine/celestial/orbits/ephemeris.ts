@@ -25,6 +25,22 @@ export interface BodyWorldStateOptions {
   /** If true, orbital translation of celestial bodies is frozen at `frozenUt` (or 0). */
   disableCelestialMovement?: boolean;
   frozenUt?: UniversalTime;
+  /**
+   * How long movement has been frozen so far, before now. While moving,
+   * bodies are where they would be this much earlier, so turning the
+   * freeze off carries on from where they stopped instead of jumping to
+   * where `ut` alone puts them. `frozenUt` is already on this shifted time.
+   */
+  movementHeldS?: number;
+}
+
+/** The time orbits are evaluated at under `options` (`frozenUt` while frozen). */
+export function ephemerisUtFor(
+  ut: UniversalTime,
+  options?: BodyWorldStateOptions,
+): UniversalTime {
+  if (options?.disableCelestialMovement) return options.frozenUt ?? 0;
+  return ut - (options?.movementHeldS ?? 0);
 }
 
 /**
@@ -94,7 +110,11 @@ export function bodyWorldStateAt(
     };
   }
 
-  const relativeState = propagator.stateAt(body.orbit, parent.muM3PerS2, ut);
+  const relativeState = propagator.stateAt(
+    body.orbit,
+    parent.muM3PerS2,
+    ephemerisUtFor(ut, options),
+  );
 
   return {
     positionM: vec3Add(parentStateM.positionM, relativeState.positionM),

@@ -101,6 +101,36 @@ describe('bodyWorldStateAt', () => {
     expect(frozenState.velocityMPerS).toEqual([0, 0, 0]);
   });
 
+  it('carries on from the frozen position after the freeze, by movementHeldS', () => {
+    const frozen = bodyWorldStateAt(bodies, HOME_MOON.id, 15_000, propagator, {
+      disableCelestialMovement: true,
+      frozenUt: 10_000,
+    });
+    const resumed = bodyWorldStateAt(bodies, HOME_MOON.id, 15_000, propagator, {
+      movementHeldS: 5_000,
+    });
+    const unheld = bodyWorldStateAt(bodies, HOME_MOON.id, 10_000, propagator);
+    for (let i = 0; i < 3; i++) {
+      expect(resumed.positionM[i]).toBeCloseTo(frozen.positionM[i], 3);
+      expect(resumed.velocityMPerS[i]).toBeCloseTo(unheld.velocityMPerS[i], 6);
+    }
+  });
+
+  it('carries on from the frozen position after the freeze, by movementHeldS', () => {
+    const frozen = bodyWorldStateAt(bodies, HOME_MOON.id, 15_000, propagator, {
+      disableCelestialMovement: true,
+      frozenUt: 10_000,
+    });
+    const resumed = bodyWorldStateAt(bodies, HOME_MOON.id, 15_000, propagator, {
+      movementHeldS: 5_000,
+    });
+    const unheld = bodyWorldStateAt(bodies, HOME_MOON.id, 10_000, propagator);
+    for (let i = 0; i < 3; i++) {
+      expect(resumed.positionM[i]).toBeCloseTo(frozen.positionM[i], 3);
+      expect(resumed.velocityMPerS[i]).toBeCloseTo(unheld.velocityMPerS[i], 6);
+    }
+  });
+
   it('throws for an unknown body id', () => {
     expect(() =>
       bodyWorldStateAt(bodies, 'nonexistent', 0, propagator),

@@ -27,6 +27,13 @@ export interface BodyFrameSnapshot {
 export interface BodyRotationOptions {
   disableCelestialRotation?: boolean;
   frozenUt?: number;
+  /**
+   * How long rotation has been frozen so far, before now. While spinning,
+   * bodies are turned as they would be this much earlier, so turning the
+   * freeze off carries on from the frozen angle instead of jumping to the
+   * one `ut` alone gives. `frozenUt` is already on this shifted time.
+   */
+  rotationHeldS?: number;
 }
 
 /**
@@ -52,7 +59,7 @@ export function bodyOrientationAt(
   }
   const evalUt = options?.disableCelestialRotation
     ? (options.frozenUt ?? body.rotationEpochUt ?? 0)
-    : ut;
+    : ut - (options?.rotationHeldS ?? 0);
   const omegaRadPerS = (2 * Math.PI) / body.rotationPeriodS;
   const dtS = evalUt - (body.rotationEpochUt ?? 0);
   const angleRad = omegaRadPerS * dtS + (body.rotationInitialPhaseRad ?? 0);
