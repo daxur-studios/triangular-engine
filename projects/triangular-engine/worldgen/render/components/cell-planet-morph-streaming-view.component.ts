@@ -95,6 +95,8 @@ function defaultAddressLevel(address: ILatLonTerrainPatchAddress): number {
       [field]="field()"
       [domain]="domain()"
       [roots]="roots()"
+      [lodPosition]="lodPosition()"
+      [renderOriginM]="renderOriginM()"
       [maxLod]="maxLod()"
       [resolution]="resolution()"
       [generationBudget]="generationBudget()"
@@ -108,8 +110,8 @@ function defaultAddressLevel(address: ILatLonTerrainPatchAddress): number {
       [meshGenerator]="meshGenerator()"
       [createMaterial]="resolvedCreateMaterial"
       [colorRevision]="colorRevision()"
-      [getLevel]="defaultAddressLevel"
-      [getKey]="defaultAddressKey"
+      [getLevel]="getLevel()"
+      [getKey]="getKey()"
       (lodChange)="onLodChange($event)"
     />
   `,
@@ -130,6 +132,44 @@ export class CellPlanetMorphStreamingViewComponent {
   /** Per-patch mesh generation - see the class doc for why this is not provided by default. */
   readonly meshGenerator =
     input.required<TerrainSurfaceMeshGenerator<ILatLonTerrainPatchAddress>>();
+  /**
+   * A patch's cache key. Override to make patches generate again when something the mesh
+   * generator reads changes for only some of them (a local terrain edit, say).
+   */
+  readonly getKey =
+    input<(address: ILatLonTerrainPatchAddress) => string>(defaultAddressKey);
+  readonly getLevel =
+    input<(address: ILatLonTerrainPatchAddress) => number>(defaultAddressLevel);
+
+  // ==========================================================================
+  // Placement, for a planet that doesn't sit at the scene origin
+  // ==========================================================================
+  /**
+   * The observer LOD is measured from, relative to the planet's centre. Defaults to the camera's
+   * scene position, which is only right while the planet's centre is the scene origin; pass it
+   * whenever `renderOriginM` or `patchOriginM` are set.
+   */
+  readonly lodPosition = input<TerrainVector3 | undefined>(undefined);
+  /** Where in the scene the patches' `centerWorldM` is measured from (`TerrainSurfaceComponent.renderOriginM`). */
+  readonly renderOriginM = input<[number, number, number]>([0, 0, 0]);
+  /**
+   * The point, relative to the planet's centre, that `meshGenerator` measures each patch's
+   * `centerWorldM` from. The planet's centre is then at `renderOriginM - patchOriginM` in the
+   * scene, which the frustum test needs.
+   */
+  readonly patchOriginM = input<readonly [number, number, number]>([0, 0, 0]);
+  readonly bodyCenterSceneM = computed<[number, number, number]>(() => {
+    const [rx, ry, rz] = this.renderOriginM();
+    const [px, py, pz] = this.patchOriginM();
+    return [rx - px, ry - py, rz - pz];
+  });
+  /**
+   * Splits a visible patch past `maxLod` while this returns true, outside the `maxPatches`
+   * budget: extra detail where the camera distance alone doesn't give enough (a flattened pad,
+   * say). Bump `selectionRevision` when its answers change.
+   */
+  readonly forceRefine =
+    input<((address: ILatLonTerrainPatchAddress) => boolean) | undefined>(undefined);
 
   // ==========================================================================
   // Morph + projection
@@ -234,11 +274,14 @@ export class CellPlanetMorphStreamingViewComponent {
     horizonCulling: () => this.horizonCulling(),
     frustumSafetyFactor: () => this.frustumSafetyFactor(),
     heightScaleM: () => this.heightScaleM(),
+    bodyCenterSceneM: () => this.bodyCenterSceneM(),
+    forceRefine: (address) => this.forceRefine()?.(address) ?? false,
   });
   readonly resolvedSelectionRevision = computed(() => JSON.stringify([
     this.selectionRevision(), this.lodMorph(), this.projectionKind(),
     this.refinementDistanceFactor(), this.stickyRefinementFactor(),
     this.frustumCulling(), this.horizonCulling(), this.frustumSafetyFactor(), this.heightScaleM(),
+    this.bodyCenterSceneM(), this.forceRefine() !== undefined,
   ]));
   readonly patchSelector: TerrainSurfacePatchSelector<ILatLonTerrainPatchAddress> = (request) =>
     this.selector.select(request);

@@ -164,6 +164,62 @@ describe('createCellPlanetMorphSurfaceSelector', () => {
     expect(Math.max(...forwardPatches.map((p) => p.level))).toBeGreaterThanOrEqual(3);
   });
 
+  it('splits visible patches forceRefine asks for, past maxLevel and outside maxPatches', () => {
+    const target = roots[0];
+    const insideTarget = (address: ILatLonTerrainPatchAddress) => {
+      const bounds = domain.getPatchBounds(address);
+      const outer = domain.getPatchBounds(target);
+      return bounds.minU >= outer.minU && bounds.maxU <= outer.maxU &&
+        bounds.minV >= outer.minV && bounds.maxV <= outer.maxV;
+    };
+    const selector = createCellPlanetMorphSurfaceSelector({
+      domain: () => domain,
+      radiusM: () => RADIUS_M,
+      morph: () => 0,
+      projectionKind: () => 'equalEarth',
+      forceRefine: (address) => insideTarget(address) && address.level < 3,
+    });
+
+    const result = selector.select(
+      createRequest([0, 0, RADIUS_M * 50], { maxLevel: 1, maxPatches: roots.length }),
+    );
+
+    expect(result.filter(insideTarget).every((address) => address.level === 3)).toBeTrue();
+    expect(result.filter(insideTarget).length).toBe(64);
+    expect(result.length).toBe(roots.length - 1 + 64);
+  });
+
+  it('runs the frustum test from bodyCenterSceneM when the planet is off the scene origin', () => {
+    const offset: [number, number, number] = [5_000_000, -2_000_000, 300_000];
+    const camera = new PerspectiveCamera(45, 1, 1, 10_000);
+    camera.position.set(offset[0], offset[1], offset[2] + RADIUS_M * 1.1);
+    camera.lookAt(offset[0] + RADIUS_M, offset[1], offset[2] + RADIUS_M * 1.1);
+    camera.updateMatrixWorld();
+    const centred = new PerspectiveCamera(45, 1, 1, 10_000);
+    centred.position.set(0, 0, RADIUS_M * 1.1);
+    centred.lookAt(RADIUS_M, 0, RADIUS_M * 1.1);
+    centred.updateMatrixWorld();
+
+    const offsetSelector = createCellPlanetMorphSurfaceSelector({
+      domain: () => domain,
+      radiusM: () => RADIUS_M,
+      morph: () => 0,
+      projectionKind: () => 'equalEarth',
+      camera: () => camera,
+      bodyCenterSceneM: () => offset,
+    });
+    const centredSelector = createCellPlanetMorphSurfaceSelector({
+      domain: () => domain,
+      radiusM: () => RADIUS_M,
+      morph: () => 0,
+      projectionKind: () => 'equalEarth',
+      camera: () => centred,
+    });
+
+    const request = createRequest([0, 0, RADIUS_M * 1.1], { maxLevel: 4 });
+    expect(offsetSelector.select(request)).toEqual(centredSelector.select(request));
+  });
+
   it('allows disabling frustum culling via frustumCulling option', () => {
     const camera = new PerspectiveCamera(45, 1, 1, 100_000);
     camera.position.set(0, 0, RADIUS_M * 2.5);

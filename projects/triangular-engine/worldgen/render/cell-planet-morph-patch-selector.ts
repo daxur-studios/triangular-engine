@@ -57,7 +57,25 @@ export interface ICellPlanetMorphSurfaceSelectorOptions {
    * Defaults to 0; supply the mesh generator's height scale for displaced terrain.
    */
   readonly heightScaleM?: () => number | undefined;
+  /**
+   * Where the planet's centre is in the camera's scene, in metres. `request.cameraWorldM` and the
+   * patch bounds are measured from the centre; the camera's matrices are in the scene. Set this
+   * when the planet doesn't sit at the scene origin, e.g. under a floating origin. Defaults to
+   * the scene origin.
+   */
+  readonly bodyCenterSceneM?: () => readonly [number, number, number] | undefined;
+  /**
+   * Splits a visible patch whenever this returns true, whatever its distance and past `maxLevel`,
+   * for areas that need more detail than the camera distance gives (a flattened pad, say). These
+   * splits don't count against `maxPatches`. The callback decides where the extra detail stops;
+   * splitting also stops at `MAX_FORCED_LEVEL`. Rerun selection (`selectionRevision`) when its
+   * answers change.
+   */
+  readonly forceRefine?: (address: ILatLonTerrainPatchAddress) => boolean;
 }
+
+/** The deepest level `forceRefine` can split to, so a callback that never says no still ends. */
+const MAX_FORCED_LEVEL = 24;
 
 export interface ICellPlanetMorphSurfaceSelector {
   readonly select: TerrainSurfacePatchSelector<ILatLonTerrainPatchAddress>;
@@ -84,6 +102,7 @@ export function createCellPlanetMorphSurfaceSelector(
   const camDirScratch = new Vector3();
   const patchBoxScratch = new Box3();
   const ptScratch = new Vector3();
+  const bodyCenterScratch = new Matrix4();
 
   interface Candidate {
     readonly address: ILatLonTerrainPatchAddress;
@@ -92,6 +111,8 @@ export function createCellPlanetMorphSurfaceSelector(
     readonly threshold: number;
     readonly canRefine: boolean;
     readonly priority: number;
+    /** `forceRefine` asked for this visible patch to be split. */
+    readonly forced: boolean;
   }
 
   const select = (
@@ -128,6 +149,13 @@ export function createCellPlanetMorphSurfaceSelector(
         camera.projectionMatrix,
         camera.matrixWorldInverse,
       );
+      const bodyCenter = options.bodyCenterSceneM?.();
+      if (bodyCenter) {
+        // The frustum then takes points measured from the planet's centre, like the patch bounds.
+        viewProjection.multiply(
+          bodyCenterScratch.makeTranslation(bodyCenter[0], bodyCenter[1], bodyCenter[2]),
+        );
+      }
       frustum.setFromProjectionMatrix(viewProjection);
       camPosScratch.set(cam[0], cam[1], cam[2]);
       camDist = camPosScratch.length();
@@ -222,6 +250,10 @@ export function createCellPlanetMorphSurfaceSelector(
         threshold,
         canRefine: address.level < maxLevel && visible,
         priority: visible ? threshold / Math.max(distance, 1) : 0,
+        forced:
+          visible &&
+          address.level < MAX_FORCED_LEVEL &&
+          (options.forceRefine?.(address) ?? false),
       };
     };
 
@@ -230,11 +262,26 @@ export function createCellPlanetMorphSurfaceSelector(
       Math.floor(request.maxPatches ?? Number.MAX_SAFE_INTEGER),
     );
 
+    // Patches `forceRefine` asked for, beyond the budget.
+    let forcedExtraPatches = 0;
+    const frontier: Candidate[] = [];
+    const place = (candidate: Candidate): void => {
+      if (!candidate.forced) {
+        frontier.push(candidate);
+        return;
+      }
+      nextRefined.add(candidate.key);
+      const children = domain.getChildren(candidate.address);
+      forcedExtraPatches += children.length - 1;
+      for (const child of children) place(measure(child));
+    };
+
     // Start with one resident patch per root, then spend the remaining budget on the most
     // screen-relevant leaves. Replacing one leaf with four children costs three additional
-    // patches, so the result always stays within maxPatches while remaining a complete cut.
-    const frontier = request.roots.map(measure);
-    while (frontier.length + 3 <= maxPatches) {
+    // patches, so the result always stays within maxPatches (plus the forced splits) while
+    // remaining a complete cut.
+    for (const root of request.roots) place(measure(root));
+    while (frontier.length - forcedExtraPatches + 3 <= maxPatches) {
       let bestIndex = -1;
       let bestPriority = 0;
       for (let index = 0; index < frontier.length; index += 1) {
@@ -253,7 +300,7 @@ export function createCellPlanetMorphSurfaceSelector(
       const [parent] = frontier.splice(bestIndex, 1);
       nextRefined.add(parent.key);
       for (const child of domain.getChildren(parent.address)) {
-        frontier.push(measure(child));
+        place(measure(child));
       }
     }
 
