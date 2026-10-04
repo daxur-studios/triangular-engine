@@ -1,6 +1,7 @@
 import {
   IUniform,
   Material,
+  Matrix4,
   WebGLProgramParametersWithUniforms,
   WebGLRenderer,
 } from 'three';
@@ -91,6 +92,13 @@ export interface ITerrainMacroVariationOptions {
    * planet) still samples a single continuous field.
    */
   positionSpace?: 'bodyFixedM' | 'viewM';
+  /**
+   * Takes the lifted scene position back to the body's own frame before the
+   * noise is sampled. Without it the pattern is fixed to the scene, so when a
+   * floating origin moves the planet's group (or the group turns) the colours
+   * slide over the ground. Keep it in step with the group's transform.
+   */
+  sceneToBodyMatrix?: IUniform<Matrix4>;
 }
 
 /**
@@ -117,6 +125,7 @@ export function enableTerrainMacroVariation(
       : options.landMaskAttribute;
   const usesAttributeMask = landMaskAttribute !== null && landMaskAttribute !== '';
   const positionSpace = options.positionSpace ?? 'bodyFixedM';
+  const sceneToBodyMatrix = options.sceneToBodyMatrix;
 
   const previousOnBeforeCompile = material.onBeforeCompile.bind(material);
   const previousCacheKey = material.customProgramCacheKey.bind(material);
@@ -133,9 +142,13 @@ export function enableTerrainMacroVariation(
     if (!usesAttributeMask && options.landMaskUniform) {
       shader.uniforms['uTerrainMacroLandFactor'] = options.landMaskUniform;
     }
+    if (sceneToBodyMatrix) {
+      shader.uniforms['uTerrainMacroSceneToBody'] = sceneToBodyMatrix;
+    }
 
     const vertexDeclarations = `
       ${usesAttributeMask ? `attribute float ${landMaskAttribute};` : 'uniform float uTerrainMacroLandFactor;'}
+      ${sceneToBodyMatrix ? 'uniform mat4 uTerrainMacroSceneToBody;' : ''}
       #ifndef V_TERRAIN_MACRO_DECLARED
       #define V_TERRAIN_MACRO_DECLARED
       varying vec3 vTerrainMacroPositionM;
@@ -194,7 +207,7 @@ export function enableTerrainMacroVariation(
       #ifdef USE_INSTANCING
         terrainMacroLocal = instanceMatrix * terrainMacroLocal;
       #endif
-      vTerrainMacroPositionM = (modelMatrix * terrainMacroLocal).xyz;
+      vTerrainMacroPositionM = (${sceneToBodyMatrix ? 'uTerrainMacroSceneToBody * ' : ''}modelMatrix * terrainMacroLocal).xyz;
       vTerrainMacroLandFactor = ${maskExpression};
       #include <project_vertex>
       `,
@@ -213,6 +226,6 @@ export function enableTerrainMacroVariation(
   };
 
   material.customProgramCacheKey = () =>
-    `${previousCacheKey()}|terrainMacroVariation`;
+    `${previousCacheKey()}|terrainMacroVariation${sceneToBodyMatrix ? ':body' : ''}`;
   material.needsUpdate = true;
 }

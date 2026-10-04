@@ -1,4 +1,4 @@
-import { MeshStandardMaterial, WebGLProgramParametersWithUniforms } from 'three';
+import { Matrix4, MeshStandardMaterial, WebGLProgramParametersWithUniforms } from 'three';
 import {
   TERRAIN_MACRO_VARIATION_GLSL,
   createDefaultTerrainMacroVariationUniforms,
@@ -89,6 +89,24 @@ describe('terrain macro variation material', () => {
     expect(compile(material).vertexShader).toContain(
       'vec4 terrainMacroLocal = vec4(transformed, 1.0);',
     );
+  });
+
+  it('takes the sample back to the body frame when given a scene-to-body matrix', () => {
+    const material = new MeshStandardMaterial();
+    const sceneToBodyMatrix = { value: new Matrix4() };
+    enableTerrainMacroVariation(
+      material,
+      createDefaultTerrainMacroVariationUniforms(),
+      { sceneToBodyMatrix },
+    );
+    const shader = compile(material);
+
+    expect(shader.vertexShader).toContain('uniform mat4 uTerrainMacroSceneToBody;');
+    expect(shader.vertexShader).toContain(
+      'vTerrainMacroPositionM = (uTerrainMacroSceneToBody * modelMatrix * terrainMacroLocal).xyz;',
+    );
+    expect(shader.uniforms['uTerrainMacroSceneToBody']).toBe(sceneToBodyMatrix);
+    expect(material.customProgramCacheKey()).toContain('terrainMacroVariation:body');
   });
 
   it('reads the land mask from the attribute by default and from a uniform when null', () => {
