@@ -311,6 +311,8 @@ private readonly engineService = inject(EngineService);
 - `renderer` — The `WebGLRenderer` or `WebGPURenderer`
 - `camera$` — `BehaviorSubject<Camera>` for the active camera
 - `tick$` — `BehaviorSubject<number>` emitting delta time each frame
+- `postTick$` — after every `tick$` subscriber; `orbitControls`' `follow` and a `directionalLight`'s `shadowFollow` read the followed object here
+- `beforeRender$` — after `postTick$`, immediately before the render; for camera-relative systems that need the settled camera
 - `elapsedTime$` — `BehaviorSubject<number>` total elapsed time
 - `setSpeedFactor(timeSpeed)` — Scale engine time progression, including `0` to pause simulation time
 - `switchCamera(camera)` — Switch active camera
@@ -563,6 +565,16 @@ Use the engine portal system to register UI components on top of the 3D HUD canv
 - `EngineService` is provided per-component (NOT singleton) — each `<scene>` gets its own engine instance
 - Physics runs on the engine tick — `PhysicsService.update()` is called each frame
 - Camera switching is handled via `EngineService.switchCamera()` or the `isActive` / `switchCameraTrigger` inputs on camera/orbit components
+
+### Frame order
+
+One animation frame runs, in order:
+
+1. `EngineService.tick$`. Physics steps inside it: for each fixed step, `<joltPhysics>` emits `JoltPhysicsService.tick$` and calls `Step` once per substep, then emits its `postTick$`; after the last fixed step it copies every dynamic body's pose onto its `Object3D`.
+2. `EngineService.postTick$`: `orbitControls` follow and `directionalLight` `shadowFollow` read the followed object's world position here. Subscribers run in subscription order, so a host component's constructor subscription runs before its template children's.
+3. `EngineService.beforeRender$`, then the render.
+
+Angular change detection, and with it every template binding and `effect()`, runs after the frame is drawn. An `Object3D` placed through an input or effect is therefore one frame behind a Jolt body. That is usually invisible, but anything that moves both kinds in one step (a floating-origin rebase, high time warp) must run `ApplicationRef.tick()` in `postTick$` before the follows read positions, or push the position to `OrbitControlsComponent.updateFollowPosition()`.
 
 ---
 

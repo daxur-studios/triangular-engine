@@ -4,6 +4,10 @@
   so the macro colour pattern stays fixed to the ground when a floating origin
   moves (or turns) the planet's group instead of sliding with the scene.
 
+- The `triangular-engine` skill lists `postTick$` and `beforeRender$` and
+  gains a "Frame order" note: when physics, follows and the render run, and
+  why signal-placed objects are a frame behind Jolt bodies.
+
 - Added Cascaded Shadow Maps (CSM) system in core `triangular-engine`:
   - Added `<csm>` (`CsmComponent`) wrapping Three.js's integrated `CSM` (`three/examples/jsm/csm/CSM.js`), partitioning view frustums into 1-4 depth cascades with razor-sharp contact shadows and deep horizon coverage.
   - Added `EngineCSM` preserving and composing with existing `material.onBeforeCompile` chains and providing safe reference counting across shared materials.
