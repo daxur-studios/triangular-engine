@@ -28,6 +28,7 @@ Use public package entry points in consumer apps; do not import internal source 
 - PMNDRS helpers: `triangular-engine/pmndrs`
 - Post-processing: `triangular-engine/postprocessing`
 - Takram atmosphere/clouds: `triangular-engine/takram`
+- Image compression adapter: `triangular-engine/image-compression`
 
 ---
 
@@ -60,6 +61,12 @@ npm i @pmndrs/vanilla
 | `@angular/core`   | `^20.3.3`  |
 | `three`           | `^0.183.0` |
 | `dexie`           | `^4.2.1`   |
+
+Optional image compression (for `ScreenshotService` post-capture compression):
+
+```bash
+npm i browser-image-compression
+```
 
 ### Configure `angular.json` Assets
 
@@ -337,6 +344,50 @@ Asset loading with caching.
 - `loadAndCacheGltf(path, cachePath?, force?)` — Load and cache GLTF
 - `loadAndCacheTexture(path)` — Load and cache texture
 - Sets Draco decoder path to `/draco/`
+
+### ScreenshotService
+
+Service for capturing screenshots, progressive anti-aliased renderings (`Blob`), and thumbnails, with optional image compression, file download, and clipboard copy.
+
+```typescript
+import { ScreenshotService } from 'triangular-engine';
+// Optional compression adapter in app.config.ts:
+import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
+```
+
+```typescript
+private readonly screenshotService = inject(ScreenshotService);
+
+// Capture screenshot as a Blob
+const blob = await this.screenshotService.capture({
+  format: 'image/webp', // 'image/webp' | 'image/png' | 'image/jpeg'
+  quality: 0.85,
+  samples: 1, // 1 = instant single pass; 8..32 = progressive sub-pixel SSAA
+  multiplier: 1, // Resolution scale (e.g. 2 for 2x resolution)
+  resolution: { width: 480, height: 270 }, // Optional explicit resolution override
+  hideOverlays: true, // Auto-hide CSS2D/CSS3D overlays during capture
+  compress: {
+    maxSizeMB: 0.1,
+    maxWidthOrHeight: 480,
+    quality: 0.85,
+    fileType: 'image/webp',
+    useWebWorker: true,
+  },
+});
+
+// Capture and trigger immediate browser download
+await this.screenshotService.captureAndDownload({ fileName: 'my-scene.webp' });
+
+// Copy to system clipboard
+await this.screenshotService.copyToClipboard(blob);
+```
+
+**Key APIs:**
+
+- `capture(options?)` — Promise resolving to captured `Blob`. Forces `engine.render(..., force: true)` before reading the canvas buffer so captures are never empty/black.
+- `captureAndDownload(options?)` — Captures and triggers immediate browser file download.
+- `copyToClipboard(blob)` — Writes image blob to clipboard via Clipboard API.
+- `download(blob, fileName?)` — Triggers file download for an existing blob.
 
 ---
 
