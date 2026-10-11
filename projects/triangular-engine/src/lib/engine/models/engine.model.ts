@@ -79,6 +79,19 @@ export interface IEngineOptions {
 
   speedFactor$?: BehaviorSubject<number>;
   elapsedTime$?: BehaviorSubject<number>;
+
+  /**
+   * When Angular applies template bindings and effects (Object3D
+   * `position`/`quaternion` inputs among them) relative to the frame.
+   * - `'manual'` (default): Angular's own scheduling, after the frame is
+   *   drawn, so a signal-placed object is one frame behind anything moved
+   *   directly in `tick$` (physics bodies, a camera follow).
+   * - `'perFrame'`: the engine runs `ApplicationRef.tick()` every frame
+   *   between `postTick$` and `lateUpdate$`, so signals written in `tick$`
+   *   or `postTick$` reach the scene in the same frame. Costs one change
+   *   detection pass per frame (`EngineService.lastSyncMs`).
+   */
+  syncChangeDetection?: 'manual' | 'perFrame';
 }
 
 export interface IEngineLifecycle {

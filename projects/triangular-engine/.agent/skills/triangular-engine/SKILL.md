@@ -318,8 +318,10 @@ private readonly engineService = inject(EngineService);
 - `renderer` — The `WebGLRenderer` or `WebGPURenderer`
 - `camera$` — `BehaviorSubject<Camera>` for the active camera
 - `tick$` — `BehaviorSubject<number>` emitting delta time each frame
-- `postTick$` — after every `tick$` subscriber; `orbitControls`' `follow` and a `directionalLight`'s `shadowFollow` read the followed object here
-- `beforeRender$` — after `postTick$`, immediately before the render; for camera-relative systems that need the settled camera
+- `postTick$` — after every `tick$` subscriber; late simulation work (a signal written here still lands this frame with `syncChangeDetection: 'perFrame'`)
+- `lateUpdate$` — after `postTick$` and the change-detection sync; `orbitControls`' `follow` and a `directionalLight`'s `shadowFollow` read the followed object here
+- `beforeRender$` — after `lateUpdate$`, immediately before the render; for camera-relative systems that need the settled camera
+- `lastSyncMs` — how long the last per-frame change-detection sync took
 - `elapsedTime$` — `BehaviorSubject<number>` total elapsed time
 - `setSpeedFactor(timeSpeed)` — Scale engine time progression, including `0` to pause simulation time
 - `switchCamera(camera)` — Switch active camera
@@ -622,10 +624,14 @@ Use the engine portal system to register UI components on top of the 3D HUD canv
 One animation frame runs, in order:
 
 1. `EngineService.tick$`. Physics steps inside it: for each fixed step, `<joltPhysics>` emits `JoltPhysicsService.tick$` and calls `Step` once per substep, then emits its `postTick$`; after the last fixed step it copies every dynamic body's pose onto its `Object3D`.
-2. `EngineService.postTick$`: `orbitControls` follow and `directionalLight` `shadowFollow` read the followed object's world position here. Subscribers run in subscription order, so a host component's constructor subscription runs before its template children's.
-3. `EngineService.beforeRender$`, then the render.
+2. `EngineService.postTick$`: late simulation work. Subscribers run in subscription order, so a host component's constructor subscription runs before its template children's.
+3. The change-detection sync: with `EngineService.provide({ syncChangeDetection: 'perFrame' })` the engine runs `ApplicationRef.tick()` here, so template bindings and `effect()`s (Object3D `position`/`quaternion` inputs among them) apply in this frame.
+4. `EngineService.lateUpdate$`: `orbitControls` follow and `directionalLight` `shadowFollow` read the followed object's world position here.
+5. `EngineService.beforeRender$`, then the render, then `renderComplete$`.
 
-Angular change detection, and with it every template binding and `effect()`, runs after the frame is drawn. An `Object3D` placed through an input or effect is therefore one frame behind a Jolt body. That is usually invisible, but anything that moves both kinds in one step (a floating-origin rebase, high time warp) must run `ApplicationRef.tick()` in `postTick$` before the follows read positions, or push the position to `OrbitControlsComponent.updateFollowPosition()`.
+**The rule for app code:** write scene state (signals that place or turn objects) in `tick$` or `postTick$`. Read other objects' positions to follow them in `lateUpdate$`. Read the settled camera in `beforeRender$` (or `renderComplete$` for DOM overlays). Never rely on subscription order between two subscribers of the same phase.
+
+Without `'perFrame'` (the default, `'manual'`), Angular change detection, and with it every template binding and `effect()`, runs after the frame is drawn. An `Object3D` placed through an input or effect is then one frame behind a Jolt body. That is usually invisible, but anything that moves both kinds in one step (a floating-origin rebase, high time warp) must run `ApplicationRef.tick()` in `postTick$` before the follows read positions, or push the position to `OrbitControlsComponent.updateFollowPosition()`. Large worlds with a floating origin or time warp should use `'perFrame'`.
 
 ---
 

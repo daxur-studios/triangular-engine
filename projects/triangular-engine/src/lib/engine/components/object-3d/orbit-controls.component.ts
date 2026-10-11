@@ -24,7 +24,7 @@ import {
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { combineLatest, distinctUntilChanged, of, switchMap } from 'rxjs';
+import { distinctUntilChanged, of, switchMap } from 'rxjs';
 import { AdvancedOrbitControls } from '../../models';
 import { EngineService, MultiViewportService } from '../../services';
 import { Object3DComponent } from './object-3d.component';
@@ -196,7 +196,7 @@ export class OrbitControlsComponent implements OnDestroy {
         switchMap((isActive) => {
           if (!isActive) return of(undefined);
 
-          return this.engineService.postTick$;
+          return this.engineService.lateUpdate$;
         }),
         takeUntilDestroyed(this.destroyRef),
       )
@@ -472,13 +472,14 @@ export class OrbitControlsComponent implements OnDestroy {
       }
     });
 
-    combineLatest([
-      toObservable(this.orbitControls),
-      toObservable(this.isActive),
-      this.engineService.postTick$,
-    ])
+    // Driven by the phase alone, reading the signals' latest values: a
+    // `combineLatest` with the signals also ran the follow whenever one of
+    // them changed, outside the frame's order.
+    this.engineService.lateUpdate$
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(([orbitControls, isActive]) => {
+      .subscribe(() => {
+        const orbitControls = this.orbitControls();
+        const isActive = this.isActive();
         const authoritativePositionWasPushed =
           this.followPositionPushedSincePostTick;
         this.followPositionPushedSincePostTick = false;
@@ -526,11 +527,11 @@ export class OrbitControlsComponent implements OnDestroy {
    * once per physics substep, in the same synchronous step as a
    * floating-origin rebase) — that avoids a race against Angular's
    * effect-driven mesh position update, which runs asynchronously relative
-   * to the physics tick and can still be stale when `postTick$`'s automatic
+   * to the physics tick and can still be stale when `lateUpdate$`'s automatic
    * tracking below reads it, especially when several rebases land inside a
    * single rendered frame under high time-warp.
    *
-   * Safe to call every frame alongside automatic `postTick$` tracking. A
+   * Safe to call every frame alongside automatic `lateUpdate$` tracking. A
    * push suppresses Object3D readback for that frame, because Angular may
    * not have committed the matching template-bound transform yet.
    */
@@ -587,7 +588,7 @@ export class OrbitControlsComponent implements OnDestroy {
    * physics-tracked body's local position by `-delta` (see `PhysicsOrigin`/
    * `PhysicsWorld` in the host app). `previousFollowPosition` must be
    * corrected (not discarded) here: `#initFollow` diffs it against the
-   * followed object's current position every postTick, and nulling it
+   * followed object's current position every lateUpdate, and nulling it
    * requires two consecutive rebase-free frames to resume tracking — rare
    * enough to not matter at 1x, but at high rails warp rebases can fire on
    * nearly every frame, which stalled tracking almost entirely.

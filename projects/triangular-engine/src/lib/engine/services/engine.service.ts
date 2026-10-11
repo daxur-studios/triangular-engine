@@ -1,4 +1,5 @@
 import {
+  ApplicationRef,
   Injectable,
   Provider,
   WritableSignal,
@@ -143,10 +144,28 @@ export class EngineService implements IEngine {
    * Unit: seconds
    */
   readonly tick$: BehaviorSubject<number> = new BehaviorSubject<number>(0);
-  /** Fired after all tick$ subscribers run but before rendering the frame */
+  /**
+   * Fired after all tick$ subscribers run, before the change-detection sync
+   * and `lateUpdate$`. Late simulation work goes here; a signal written here
+   * still reaches the scene this frame when `syncChangeDetection` is
+   * `'perFrame'`.
+   */
   readonly postTick$ = new Subject<void>();
   /**
-   * Fired after postTick$ camera/controllers have settled, immediately before
+   * Fired after `postTick$` and the change-detection sync, before
+   * `beforeRender$`. Anything that follows another object (an
+   * `orbitControls` follow, a light's `shadowFollow`) reads it here, once
+   * the frame's simulation writes and, with `syncChangeDetection:
+   * 'perFrame'`, its template bindings and effects have landed. Don't
+   * write scene state here that something else in `lateUpdate$` reads:
+   * order between its subscribers is subscription order.
+   */
+  readonly lateUpdate$ = new Subject<void>();
+  /** How long the last per-frame change-detection sync took, in ms (0 while it is off). */
+  lastSyncMs = 0;
+  readonly #appRef = inject(ApplicationRef);
+  /**
+   * Fired after `lateUpdate$` camera/controllers have settled, immediately before
    * rendering. Camera-relative render systems should update here.
    */
   readonly beforeRender$ = new Subject<void>();
@@ -578,6 +597,8 @@ export class EngineService implements IEngine {
 
       // Phase 2: Post-Tick & Before-Render
       this.safeEmit('postTick$', this.postTick$, undefined);
+      this.#syncChangeDetection();
+      this.safeEmit('lateUpdate$', this.lateUpdate$, undefined);
       this.safeEmit('beforeRender$', this.beforeRender$, undefined);
 
       // Phase 3: Render Pass
@@ -594,6 +615,27 @@ export class EngineService implements IEngine {
       console.error('🔥 [TriangularEngine] Uncaught top-level error in tick loop:', err);
       this.error$.next({ phase: 'tick_uncaught', error: err });
     }
+  }
+
+  /**
+   * With `syncChangeDetection: 'perFrame'`, runs Angular change detection
+   * between `postTick$` and `lateUpdate$`, so template bindings and effects
+   * driven by signals written in `tick$`/`postTick$` apply to the scene in
+   * the frame being drawn instead of after it.
+   */
+  #syncChangeDetection(): void {
+    if (this.options.syncChangeDetection !== 'perFrame') {
+      this.lastSyncMs = 0;
+      return;
+    }
+    const start = performance.now();
+    try {
+      this.#appRef.tick();
+    } catch (err) {
+      console.error('🔥 [TriangularEngine] Uncaught error during change-detection sync:', err);
+      this.error$.next({ phase: 'sync', error: err });
+    }
+    this.lastSyncMs = performance.now() - start;
   }
 
   public render(time: number, force?: boolean, deltaTime = 0) {

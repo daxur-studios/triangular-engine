@@ -42,7 +42,7 @@ describe('RaycastOrbitControls bookmark focus', () => {
       camera: new PerspectiveCamera(),
       resolution$: new BehaviorSubject({ width: 100, height: 100 }),
       isDraggingTransformControls$: new BehaviorSubject(false),
-      tick$, postTick$: new Subject<number>(), mousemove$, pointerdown$, wheel$,
+      tick$, postTick$: new Subject<number>(), lateUpdate$: new Subject<void>(), mousemove$, pointerdown$, wheel$,
       switchCamera(camera: PerspectiveCamera) { this.camera = camera; },
     };
     TestBed.configureTestingModule({

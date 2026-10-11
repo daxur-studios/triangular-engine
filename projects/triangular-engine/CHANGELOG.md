@@ -1,5 +1,17 @@
 # Changelog
 
+- New frame phase `EngineService.lateUpdate$`, between `postTick$` and
+  `beforeRender$`. `orbitControls`' follow and `directionalLight`'s
+  `shadowFollow` moved there from `postTick$`, so they read positions after
+  every `postTick$` subscriber, whatever the subscription order. The follow
+  is now triggered by the phase alone (it also ran from a `combineLatest`
+  whenever `isActive` or the controls changed).
+- New engine option `syncChangeDetection: 'manual' | 'perFrame'`. With
+  `'perFrame'` the engine runs `ApplicationRef.tick()` between `postTick$`
+  and `lateUpdate$`, so signal-bound scene state lands in the frame being
+  drawn. `EngineService.lastSyncMs` reports its cost. Default `'manual'` is
+  unchanged behaviour.
+
 - `enableTerrainMacroVariation` takes an optional `sceneToBodyMatrix` uniform,
   so the macro colour pattern stays fixed to the ground when a floating origin
   moves (or turns) the planet's group instead of sliding with the scene.
