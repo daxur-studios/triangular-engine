@@ -92,7 +92,27 @@ export interface IEngineOptions {
    *   detection pass per frame (`EngineService.lastSyncMs`).
    */
   syncChangeDetection?: 'manual' | 'perFrame';
+  /**
+   * With `syncChangeDetection: 'perFrame'`, run one more change-detection
+   * pass after each render and warn when it
+   * moves an Object3D component's `position`, `rotation`, `quaternion`,
+   * `scale` or `visible`: that value was written after the sync and drawn a
+   * frame late (once per object). Defaults to Angular's `isDevMode()`. Costs one extra,
+   * usually clean, change-detection pass per frame.
+   */
+  warnLateSceneWrites?: boolean;
 }
+
+/** Where `EngineService.tick` is within the frame (`EngineService.framePhase`). */
+export type EngineFramePhase =
+  | 'idle'
+  | 'tick'
+  | 'postTick'
+  | 'sync'
+  | 'lateUpdate'
+  | 'beforeRender'
+  | 'render'
+  | 'lateCheck';
 
 export interface IEngineLifecycle {
   readonly onDestroy$: ReplaySubject<void>;

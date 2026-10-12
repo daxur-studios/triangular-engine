@@ -1,6 +1,7 @@
 import {
   ApplicationRef,
   Injectable,
+  isDevMode,
   Provider,
   WritableSignal,
   inject,
@@ -33,6 +34,7 @@ import { WebGPURenderer } from 'three/webgpu';
 import {
   Cursor,
   ENGINE_OPTIONS,
+  EngineFramePhase,
   EngineRenderPipeline,
   FPSController,
   IEngine,
@@ -163,6 +165,13 @@ export class EngineService implements IEngine {
   readonly lateUpdate$ = new Subject<void>();
   /** How long the last per-frame change-detection sync took, in ms (0 while it is off). */
   lastSyncMs = 0;
+  /**
+   * The part of the frame the engine is in. `'lateCheck'` is the dev-mode
+   * pass after the render (`IEngineOptions.warnLateSceneWrites`); `'idle'`
+   * is between frames (input events, async work, Angular's own scheduling).
+   */
+  framePhase: EngineFramePhase = 'idle';
+  readonly #lateSceneWritesWarned = new Set<string>();
   readonly #appRef = inject(ApplicationRef);
   /**
    * Fired after `lateUpdate$` camera/controllers have settled, immediately before
@@ -586,6 +595,7 @@ export class EngineService implements IEngine {
       const delta = Math.min(rawDelta, maxDelta) * this.speedFactor$.value;
 
       // Phase 1: Main Update Tick
+      this.framePhase = 'tick';
       this.safeEmit('tick$', this.tick$, delta);
 
       try {
@@ -596,18 +606,26 @@ export class EngineService implements IEngine {
       }
 
       // Phase 2: Post-Tick & Before-Render
+      this.framePhase = 'postTick';
       this.safeEmit('postTick$', this.postTick$, undefined);
+      this.framePhase = 'sync';
       this.#syncChangeDetection();
+      this.framePhase = 'lateUpdate';
       this.safeEmit('lateUpdate$', this.lateUpdate$, undefined);
+      this.framePhase = 'beforeRender';
       this.safeEmit('beforeRender$', this.beforeRender$, undefined);
 
       // Phase 3: Render Pass
+      this.framePhase = 'render';
       try {
         this.render(time, false, delta);
       } catch (err) {
         console.error("🔥 [TriangularEngine] Uncaught error during render pass:", err);
         this.error$.next({ phase: 'render', error: err });
       }
+
+      this.#checkLateSceneWrites();
+      this.framePhase = 'idle';
 
       const frameTimeMs = performance.now() - startTime;
       this.fpsController.recordFrame(frameTimeMs);
@@ -636,6 +654,43 @@ export class EngineService implements IEngine {
       this.error$.next({ phase: 'sync', error: err });
     }
     this.lastSyncMs = performance.now() - start;
+  }
+
+  /**
+   * Dev-mode check (`IEngineOptions.warnLateSceneWrites`): one more
+   * change-detection pass right after the render. Anything it applies to an
+   * Object3D's transform was written after this frame's sync (in
+   * `lateUpdate$`, `beforeRender$` or `renderComplete$`), so it was drawn a
+   * frame late; `Object3DComponent` reports it through
+   * `reportLateSceneWrite`. Angular would apply it before the next frame
+   * anyway, so the check doesn't change what is drawn.
+   */
+  #checkLateSceneWrites(): void {
+    if (this.options.syncChangeDetection !== 'perFrame') return;
+    if (!(this.options.warnLateSceneWrites ?? isDevMode())) return;
+    this.framePhase = 'lateCheck';
+    try {
+      this.#appRef.tick();
+    } catch (err) {
+      console.error('🔥 [TriangularEngine] Uncaught error during late scene-write check:', err);
+      this.error$.next({ phase: 'lateCheck', error: err });
+    }
+  }
+
+  /**
+   * Called by `Object3DComponent` when one of its transform inputs is
+   * applied in the dev-mode late check. Warns once per object (a
+   * `quaternion` write also moves `rotation`; one warning is enough).
+   */
+  reportLateSceneWrite(objectName: string, input: string): void {
+    if (this.#lateSceneWritesWarned.has(objectName)) return;
+    this.#lateSceneWritesWarned.add(objectName);
+    console.warn(
+      `[TriangularEngine] "${objectName}" ${input} was written after this frame's change-detection sync ` +
+        '(in lateUpdate$, beforeRender$ or renderComplete$), so it was drawn a frame late. ' +
+        'Write scene state in tick$ or postTick$, or set the Object3D directly where it is computed. ' +
+        'See the triangular-engine skill, "Frame order".',
+    );
   }
 
   public render(time: number, force?: boolean, deltaTime = 0) {

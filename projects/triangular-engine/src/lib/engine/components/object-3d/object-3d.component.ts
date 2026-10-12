@@ -126,15 +126,39 @@ export abstract class Object3DComponent implements OnDestroy {
     });
   }
 
+  /**
+   * Returns a callback for one transform input's effect: call it each time
+   * the effect applies the input. From the second application on, an
+   * application in the engine's dev-mode late check means the value was
+   * written after the frame's change-detection sync and was drawn a frame
+   * late (`IEngineOptions.warnLateSceneWrites`). The first application
+   * (creation) is never reported.
+   */
+  #lateWriteReporter(input: string): () => void {
+    let applied = false;
+    return () => {
+      if (applied && this.engineService.framePhase === 'lateCheck') {
+        this.engineService.reportLateSceneWrite(
+          this.object3D()?.name || this.constructor.name,
+          input,
+        );
+      }
+      applied = true;
+    };
+  }
+
   #initSetPosition() {
+    const applied = this.#lateWriteReporter('position');
     effect(() => {
       const object3D = this.object3D();
       const position = this.position();
       if (!object3D) return;
       object3D.position.set(...position);
+      applied();
     });
   }
   #initSetRotation() {
+    const applied = this.#lateWriteReporter('rotation');
     effect(() => {
       const object3D = this.object3D();
       const rotation = this.rotation();
@@ -142,9 +166,11 @@ export abstract class Object3DComponent implements OnDestroy {
       if (!object3D) return;
 
       object3D.rotation.set(...rotation);
+      applied();
     });
   }
   #initSetQuaternion() {
+    const applied = this.#lateWriteReporter('quaternion');
     effect(() => {
       const object3D = this.object3D();
       const quaternion = this.quaternion();
@@ -156,9 +182,11 @@ export abstract class Object3DComponent implements OnDestroy {
         new Quaternion(...quaternion).normalize(),
       );
       this.rotation.set(euler.toArray());
+      applied();
     });
   }
   #initSetScale() {
+    const applied = this.#lateWriteReporter('scale');
     effect(() => {
       const scale = this.scale();
       const object3D = this.object3D();
@@ -169,15 +197,18 @@ export abstract class Object3DComponent implements OnDestroy {
       } else {
         object3D.scale.set(...scale);
       }
+      applied();
     });
   }
 
   #initSetVisible() {
+    const applied = this.#lateWriteReporter('visible');
     effect(() => {
       const object3D = this.object3D();
       const visible = this.visible();
       if (!object3D) return;
       object3D.visible = visible;
+      applied();
     });
   }
 

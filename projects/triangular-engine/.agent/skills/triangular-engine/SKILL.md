@@ -322,6 +322,7 @@ private readonly engineService = inject(EngineService);
 - `lateUpdate$` — after `postTick$` and the change-detection sync; `orbitControls`' `follow` and a `directionalLight`'s `shadowFollow` read the followed object here
 - `beforeRender$` — after `lateUpdate$`, immediately before the render; for camera-relative systems that need the settled camera
 - `lastSyncMs` — how long the last per-frame change-detection sync took
+- `framePhase` — where the loop is in the frame (`'tick'`, `'postTick'`, `'sync'`, `'lateUpdate'`, `'beforeRender'`, `'render'`, `'lateCheck'`, `'idle'`)
 - `elapsedTime$` — `BehaviorSubject<number>` total elapsed time
 - `setSpeedFactor(timeSpeed)` — Scale engine time progression, including `0` to pause simulation time
 - `switchCamera(camera)` — Switch active camera
@@ -630,6 +631,8 @@ One animation frame runs, in order:
 5. `EngineService.beforeRender$`, then the render, then `renderComplete$`.
 
 **The rule for app code:** write scene state (signals that place or turn objects) in `tick$` or `postTick$`. Read other objects' positions to follow them in `lateUpdate$`. Read the settled camera in `beforeRender$` (or `renderComplete$` for DOM overlays). Never rely on subscription order between two subscribers of the same phase.
+
+In dev mode with `'perFrame'`, the engine runs one more change-detection pass after each render and logs `[TriangularEngine] "<name>" <input> was written after this frame's change-detection sync` when it moves an Object3D component's `position`, `rotation`, `quaternion`, `scale` or `visible`. That warning means a scene signal was written in `lateUpdate$`, `beforeRender$` or `renderComplete$` and drawn a frame late: move the write into `tick$`/`postTick$`, or set the Object3D directly where the value is computed. Turn it off with `warnLateSceneWrites: false`.
 
 Without `'perFrame'` (the default, `'manual'`), Angular change detection, and with it every template binding and `effect()`, runs after the frame is drawn. An `Object3D` placed through an input or effect is then one frame behind a Jolt body. That is usually invisible, but anything that moves both kinds in one step (a floating-origin rebase, high time warp) must run `ApplicationRef.tick()` in `postTick$` before the follows read positions, or push the position to `OrbitControlsComponent.updateFollowPosition()`. Large worlds with a floating origin or time warp should use `'perFrame'`.
 

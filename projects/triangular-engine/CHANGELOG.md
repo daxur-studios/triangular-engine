@@ -1,5 +1,12 @@
 # Changelog
 
+- Dev-mode late scene-write warning: with `syncChangeDetection:
+  'perFrame'`, the engine runs one more change-detection pass after each
+  render (option `warnLateSceneWrites`, default `isDevMode()`) and warns once
+  per object when it moves an Object3D component's transform or visibility,
+  which means the value was written after the sync and drawn a frame late.
+  New `EngineService.framePhase` and `EngineFramePhase`.
+
 - New frame phase `EngineService.lateUpdate$`, between `postTick$` and
   `beforeRender$`. `orbitControls`' follow and `directionalLight`'s
   `shadowFollow` moved there from `postTick$`, so they read positions after
@@ -97,6 +104,8 @@ All notable changes to triangular-engine are documented here.
 ## [Unreleased]
 
 ### Added
+
+- Added an Angular CLI `ng add triangular-engine` schematic that installs the engine and generates a starter scene with a lazy route. Declared the required Angular Forms, Angular Material, and `three-mesh-bvh` peers used by the package.
 
 - `<terrainSurface>` and `<cellPlanetMorphStreamingView>` take
   `[castShadow]` and `[receiveShadow]` (both default `false`, as before),

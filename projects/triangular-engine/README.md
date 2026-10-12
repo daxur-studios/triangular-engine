@@ -49,7 +49,7 @@ The library is modularized into several secondary entry points (sub-libraries) s
 
 | Entry Point | Purpose / What it does | Peer Dependencies |
 | ----------- | ---------------------- | ----------------- |
-| `triangular-engine` | **Core Package**: Declarative Angular components for Three.js scenes (such as `<scene>`, `<camera>`, `<mesh>`, `<directionalLight>`, geometries, materials, CSS2D/3D overlays, skybox, ocean, and GLTF loading). | `three`, `dexie`, `three-mesh-bvh` |
+| `triangular-engine` | **Core Package**: Declarative Angular components for Three.js scenes (such as `<scene>`, `<camera>`, `<mesh>`, `<directionalLight>`, geometries, materials, CSS2D/3D overlays, skybox, ocean, and GLTF loading). | Angular, `@daxur-studios/portal-layout`, `three`, `three-mesh-bvh`, `dexie` |
 | `triangular-engine/jolt` | **Jolt Physics**: Integration with Jolt Physics engine. Provides `<joltPhysics>`, `<joltRigidBody>`, colliders, constraints, and support for high-precision / double-precision coordinates. | `jolt-physics` |
 | `triangular-engine/rapier` | **Rapier Physics**: Integration with Rapier 3D physics. Provides `<physics>`, `<rigidBody>`, colliders, and joints. | `@dimforge/rapier3d-compat` |
 | `triangular-engine/pmndrs` | **PMNDRS Helpers**: Angular wrappers for `@pmndrs/vanilla` visual helper components such as `<billboard>` and `<sparkles>`. | `@pmndrs/vanilla` |
@@ -82,21 +82,38 @@ The library is modularized into several secondary entry points (sub-libraries) s
 
 ## Install
 
+For a standalone Angular app with a single application project and `src/app/app.routes.ts`, install and add a starter scene with:
+
 ```bash
-npm i triangular-engine three three-mesh-bvh
+ng add triangular-engine
+```
+
+The schematic installs the engine, creates `src/app/triangular-engine/engine-scene.component.*`, and adds a lazy `/triangular-engine` route. In a workspace with multiple app projects, select one with `--project <name>`. Use `--route=false` to generate the scene without editing routes.
+
+`@daxur-studios/portal-layout` is currently a required peer dependency. It must be available from your configured npm registry or already installed in the workspace before adding the engine. The repository's local development package is not published to the public npm registry.
+
+Manual installation remains available:
+
+```bash
+npm i triangular-engine @daxur-studios/portal-layout three three-mesh-bvh dexie
 ```
 
 (optionally add @dimforge/rapier3d-compat OR jolt-physics for physics, or @pmndrs/vanilla for billboard/sparkles)
 
-### Peer Dependencies
+### Required Peer Dependencies
 
-These are expected to be provided by your app (see package.json for exact versions):
+These are the core package's required peers (see `package.json` for exact versions):
 
 ```json
 {
+  "@angular/cdk": "^20.2.14",
   "@angular/common": "^20.3.3",
   "@angular/core": "^20.3.3",
+  "@angular/forms": "^20.3.3",
+  "@angular/material": "^20.2.14",
+  "@daxur-studios/portal-layout": "^0.0.1",
   "three": "^0.183.0",
+  "three-mesh-bvh": "^0.9.9",
   "dexie": "^4.2.1"
 }
 ```
@@ -284,7 +301,7 @@ Example mesh:
 <gltf [gltfPath]="'assets/models/thing.glb'" [enableBVH]="true" />
 ```
 
-- `enableBVH`: builds per-mesh BVH using `three-mesh-bvh` (if installed) for faster raycasts
+- `enableBVH`: builds per-mesh BVH using `three-mesh-bvh` for faster raycasts
 - Optional `cachePath`: custom key for the in-memory GLTF cache
 
 ## Physics (Rapier)
