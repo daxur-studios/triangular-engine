@@ -6,6 +6,7 @@
     "build": "ng build",
     "test": "ng test --watch=false",
     "build:triangular-engine": "ng build triangular-engine",
+    "typecheck:schematics": "tsc --allowJs --checkJs --noEmit --strict --skipLibCheck --module commonjs --moduleResolution node --target ES2022 projects/triangular-engine/schematics/ng-add/index.cjs",
     "test:triangular-engine:navigation": "ng run triangular-engine:test-navigation --watch=false --browsers=ChromeHeadless",
     "test:triangular-engine:animals": "ng run triangular-engine:test-animals --watch=false --browsers=ChromeHeadless",
     "test:triangular-engine:characters": "ng run triangular-engine:test-characters --watch=false --browsers=ChromeHeadless",

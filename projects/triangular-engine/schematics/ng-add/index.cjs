@@ -1,5 +1,12 @@
+// @ts-check
+
 const ts = require('typescript');
 const { SchematicsException } = require('@angular-devkit/schematics');
+
+/** @typedef {import('@angular-devkit/schematics').Tree} Tree */
+/** @typedef {{ project?: string, route?: boolean }} NgAddOptions */
+/** @typedef {{ projectType?: string, root: string, sourceRoot?: string }} AngularProject */
+/** @typedef {{ projects?: Record<string, AngularProject> }} AngularWorkspace */
 
 const ROUTE_PATH = 'triangular-engine';
 const COMPONENT_FOLDER = 'triangular-engine';
@@ -9,16 +16,24 @@ const COMPONENT_FOLDER = 'triangular-engine';
  *
  * Value: turns `ng add triangular-engine` into a verified first scene instead of a package-only install.
  */
+/** @param {NgAddOptions} options @returns {import('@angular-devkit/schematics').Rule} */
 function ngAdd(options) {
-  return (tree) => {
+  return (/** @type {Tree} */ tree) => {
     const workspacePath = '/angular.json';
     if (!tree.exists(workspacePath)) {
       throw new SchematicsException('Could not find angular.json at the workspace root.');
     }
 
-    const workspace = JSON.parse(tree.read(workspacePath).toString('utf-8'));
+    const workspaceContent = tree.read(workspacePath);
+    if (!workspaceContent) {
+      throw new SchematicsException('Could not read angular.json at the workspace root.');
+    }
+    const workspace = /** @type {AngularWorkspace} */ (JSON.parse(workspaceContent.toString()));
     const projectName = resolveProjectName(workspace, options.project);
-    const project = workspace.projects[projectName];
+    const project = workspace.projects?.[projectName];
+    if (!project) {
+      throw new SchematicsException(`Application project "${projectName}" was not found.`);
+    }
     const sourceRoot = project.sourceRoot || `${project.root}/src`;
     const appRoot = `${sourceRoot}/app`;
     const componentRoot = `${appRoot}/${COMPONENT_FOLDER}`;
@@ -46,6 +61,7 @@ function ngAdd(options) {
   };
 }
 
+/** @param {AngularWorkspace} workspace @param {string | undefined} requestedName */
 function resolveProjectName(workspace, requestedName) {
   if (requestedName) {
     const project = workspace.projects?.[requestedName];
@@ -66,8 +82,13 @@ function resolveProjectName(workspace, requestedName) {
   return applications[0][0];
 }
 
+/** @param {Tree} tree @param {string} routesPath */
 function addSceneRoute(tree, routesPath) {
-  const sourceText = tree.read(routesPath).toString('utf-8');
+  const routeContent = tree.read(routesPath);
+  if (!routeContent) {
+    throw new SchematicsException(`Could not read ${routesPath}.`);
+  }
+  const sourceText = routeContent.toString();
   const sourceFile = ts.createSourceFile(routesPath, sourceText, ts.ScriptTarget.Latest, true);
   const routesDeclaration = sourceFile.statements
     .filter(ts.isVariableStatement)
@@ -96,6 +117,7 @@ function addSceneRoute(tree, routesPath) {
   tree.commitUpdate(recorder);
 }
 
+/** @param {ts.Expression} element @param {string} path */
 function routeHasPath(element, path) {
   if (!ts.isObjectLiteralExpression(element)) return false;
   return element.properties.some(
@@ -125,6 +147,7 @@ import { EngineModule, EngineService } from 'triangular-engine';
 @Component({
   selector: 'app-engine-scene',
   standalone: true,
+  host: { class: 'flex-page' },
   imports: [EngineModule],
   templateUrl: './engine-scene.component.html',
   styleUrl: './engine-scene.component.scss',
