@@ -129,16 +129,22 @@ export abstract class Object3DComponent implements OnDestroy {
   }
 
   /**
-   * Returns a callback for one transform input's effect: call it each time
-   * the effect applies the input. From the second application on, an
-   * application in the engine's dev-mode late check means the value was
-   * written after the frame's change-detection sync and was drawn a frame
-   * late (`IEngineOptions.warnLateSceneWrites`). The first application
-   * (creation) is never reported.
+   * Returns a callback for one transform input's effect: call it with the
+   * value each time the effect applies the input. From the second
+   * application on, a changed value applied in the engine's dev-mode late
+   * check means it was written after the frame's change-detection sync and
+   * was drawn a frame late (`IEngineOptions.warnLateSceneWrites`). The first
+   * application (creation) is never reported, nor is the same numbers in a
+   * new array (a template method call such as `[position]="at(x)"` makes
+   * one on every check).
    */
-  #lateWriteReporter(input: string): () => void {
+  #lateWriteReporter(input: string): (value: unknown) => void {
     let applied = false;
-    return () => {
+    let previous: unknown;
+    return (value) => {
+      const changed = !applied || !sameTransformValue(previous, value);
+      previous = Array.isArray(value) ? [...value] : value;
+      if (!changed) return;
       if (applied && this.engineService.framePhase === 'lateCheck') {
         const element: unknown = this.#host?.nativeElement;
         this.engineService.reportLateSceneWrite(
@@ -158,7 +164,7 @@ export abstract class Object3DComponent implements OnDestroy {
       const position = this.position();
       if (!object3D) return;
       object3D.position.set(...position);
-      applied();
+      applied(position);
     });
   }
   #initSetRotation() {
@@ -170,7 +176,7 @@ export abstract class Object3DComponent implements OnDestroy {
       if (!object3D) return;
 
       object3D.rotation.set(...rotation);
-      applied();
+      applied(rotation);
     });
   }
   #initSetQuaternion() {
@@ -186,7 +192,7 @@ export abstract class Object3DComponent implements OnDestroy {
         new Quaternion(...quaternion).normalize(),
       );
       this.rotation.set(euler.toArray());
-      applied();
+      applied(quaternion);
     });
   }
   #initSetScale() {
@@ -201,7 +207,7 @@ export abstract class Object3DComponent implements OnDestroy {
       } else {
         object3D.scale.set(...scale);
       }
-      applied();
+      applied(scale);
     });
   }
 
@@ -212,7 +218,7 @@ export abstract class Object3DComponent implements OnDestroy {
       const visible = this.visible();
       if (!object3D) return;
       object3D.visible = visible;
-      applied();
+      applied(visible);
     });
   }
 
@@ -268,4 +274,12 @@ export abstract class Object3DComponent implements OnDestroy {
       this.engineService.scene.remove(this.object3D());
     }
   }
+}
+
+/** Equal numbers (or tuples of them), whether or not the array is the same instance. */
+function sameTransformValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, index) => item === b[index]);
+  }
+  return a === b;
 }

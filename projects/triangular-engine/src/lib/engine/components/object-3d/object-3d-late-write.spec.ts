@@ -55,6 +55,13 @@ describe('Object3DComponent late scene-write report', () => {
     expect(engine.reportLateSceneWrite).toHaveBeenCalledOnceWith('probe', 'position', jasmine.any(Element));
   });
 
+  it('ignores the same numbers in a new array', () => {
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+    apply(fixture, [0, 0, 0], 'lateCheck');
+    expect(engine.reportLateSceneWrite).not.toHaveBeenCalled();
+  });
+
   it('ignores changes applied between frames (input events, async work)', () => {
     const fixture = TestBed.createComponent(HostComponent);
     fixture.detectChanges();
