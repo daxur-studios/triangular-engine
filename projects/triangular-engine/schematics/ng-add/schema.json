@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/schema",
+  "$id": "TriangularEngineNgAdd",
+  "title": "Triangular Engine ng-add options",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "Angular application project to configure. Defaults to the only application in the workspace."
+    },
+    "route": {
+      "type": "boolean",
+      "default": true,
+      "description": "Add a lazy route for the generated sample scene."
+    }
+  },
+  "additionalProperties": false
+}

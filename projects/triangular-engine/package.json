@@ -20,12 +20,19 @@
     "sparkles"
   ],
   "type": "module",
+  "schematics": "./schematics/collection.json",
+  "ng-add": {
+    "save": "dependencies"
+  },
   "peerDependencies": {
     "@angular/cdk": "^20.2.14",
     "@angular/common": "^20.3.3",
     "@angular/core": "^20.3.3",
+    "@angular/forms": "^20.3.3",
+    "@angular/material": "^20.2.14",
     "@daxur-studios/portal-layout": "^0.0.1",
     "three": "^0.183.0",
+    "three-mesh-bvh": "^0.9.9",
     "dexie": "^4.2.1",
     "@dimforge/rapier3d-compat": "^0.18.0",
     "jolt-physics": "^1.0.1",
