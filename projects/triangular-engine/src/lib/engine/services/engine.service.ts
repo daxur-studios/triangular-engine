@@ -682,14 +682,16 @@ export class EngineService implements IEngine {
    * applied in the dev-mode late check. Warns once per object (a
    * `quaternion` write also moves `rotation`; one warning is enough).
    */
-  reportLateSceneWrite(objectName: string, input: string): void {
+  reportLateSceneWrite(objectName: string, input: string, element?: Element): void {
     if (this.#lateSceneWritesWarned.has(objectName)) return;
     this.#lateSceneWritesWarned.add(objectName);
+    const where = element ? ` in ${elementPath(element)}` : '';
     console.warn(
-      `[TriangularEngine] "${objectName}" ${input} was written after this frame's change-detection sync ` +
+      `[TriangularEngine] "${objectName}"${where}: ${input} was written after this frame's change-detection sync ` +
         '(in lateUpdate$, beforeRender$ or renderComplete$), so it was drawn a frame late. ' +
         'Write scene state in tick$ or postTick$, or set the Object3D directly where it is computed. ' +
-        'See the triangular-engine skill, "Frame order".',
+        'See the triangular-engine skill, "Frame order". The element:',
+      element,
     );
   }
 
@@ -752,4 +754,18 @@ export class EngineService implements IEngine {
     // Render the scene with the composer instead of the renderer
     this.render(this.fpsController.lastRenderTime, true);
   }
+}
+
+/**
+ * The custom elements (Angular components) from the page down to `element`,
+ * e.g. `app-universe > app-system-map > group`, for a warning a person can
+ * trace back to a template.
+ */
+function elementPath(element: Element): string {
+  const tags: string[] = [];
+  for (let node: Element | null = element; node && tags.length < 8; node = node.parentElement) {
+    const tag = node.tagName.toLowerCase();
+    if (node === element || tag.includes('-')) tags.unshift(tag);
+  }
+  return tags.join(' > ');
 }

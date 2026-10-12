@@ -1,6 +1,7 @@
 import {
   Component,
   DestroyRef,
+  ElementRef,
   OnDestroy,
   Provider,
   Type,
@@ -65,6 +66,7 @@ export abstract class Object3DComponent implements OnDestroy {
   readonly engineService = inject(EngineService);
   readonly materialService = inject(MaterialService);
   readonly destroyRef = inject(DestroyRef);
+  readonly #host = inject(ElementRef, { optional: true });
 
   readonly parent = inject(Object3DComponent, {
     skipSelf: true,
@@ -138,9 +140,11 @@ export abstract class Object3DComponent implements OnDestroy {
     let applied = false;
     return () => {
       if (applied && this.engineService.framePhase === 'lateCheck') {
+        const element: unknown = this.#host?.nativeElement;
         this.engineService.reportLateSceneWrite(
           this.object3D()?.name || this.constructor.name,
           input,
+          element instanceof Element ? element : undefined,
         );
       }
       applied = true;

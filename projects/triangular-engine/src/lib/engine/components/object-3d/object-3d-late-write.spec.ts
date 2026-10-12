@@ -52,7 +52,7 @@ describe('Object3DComponent late scene-write report', () => {
     expect(engine.reportLateSceneWrite).not.toHaveBeenCalled();
 
     apply(fixture, [2, 0, 0], 'lateCheck');
-    expect(engine.reportLateSceneWrite).toHaveBeenCalledOnceWith('probe', 'position');
+    expect(engine.reportLateSceneWrite).toHaveBeenCalledOnceWith('probe', 'position', jasmine.any(Element));
   });
 
   it('ignores changes applied between frames (input events, async work)', () => {
