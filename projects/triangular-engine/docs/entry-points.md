@@ -64,7 +64,7 @@ The raw event streams remain available on `EngineService` for low-level integrat
 
 ## Profiling
 
-`engine-stats` reports FPS, CPU frame time, draw calls, triangles, renderer resource counts, material count, estimated geometry/texture memory, and optional physics/asset timings. GPU timing is shown when a renderer integration provides it; otherwise it is displayed as `n/a`.
+`engine-stats` reports FPS, CPU frame time, draw calls, triangles, renderer resource counts, material count, estimated geometry/texture memory, and optional physics/asset timings. GPU timing is shown when a renderer integration provides it; otherwise it is displayed as `n/a`. When expanded, it also includes a 60-second rolling FPS graph with synchronized camera motion indicators (`<telemetry-sparkline>`) and a **Copy for Agent** button for instant token-efficient performance summaries.
 
 Physics and custom asset pipelines can publish their timings through:
 
@@ -72,3 +72,17 @@ Physics and custom asset pipelines can publish their timings through:
 engine.fpsController.recordPhysicsTime(milliseconds);
 engine.fpsController.recordAssetLoadingTime(milliseconds);
 ```
+
+### Standalone Sparkline
+
+`<telemetry-sparkline>` is also available standalone for custom HUDs and debug overlays:
+
+```html
+<telemetry-sparkline
+  [values]="engineService.fpsController.fpsHistory()"
+  [motionTags]="engineService.fpsController.cameraHistory()"
+  [width]="180"
+  [height]="36"
+/>
+```
+

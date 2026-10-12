@@ -66,7 +66,7 @@ List of component selectors you can use in templates.
 
 ## Engine UI
 
-- `engine-ui`, `engine-stats`
+- `engine-ui`, `engine-stats`, `telemetry-sparkline`
 - `[engineSlot]`, `[raycast]`
 
 Notes:

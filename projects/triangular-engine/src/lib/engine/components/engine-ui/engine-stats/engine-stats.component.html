@@ -23,6 +23,22 @@
   <!-- Detailed Mode -->
   @if (expanded()) {
     <div class="perf-details">
+      <!-- Rolling FPS History Sparkline -->
+      <div class="perf-graph-section">
+        <div class="perf-graph-header">
+          <span class="label">FPS History (60s)</span>
+          <span class="min-val">Min: {{ engineService.fpsController.minFps() }}</span>
+        </div>
+        <telemetry-sparkline
+          [values]="engineService.fpsController.fpsHistory()"
+          [motionTags]="engineService.fpsController.cameraHistory()"
+          [width]="180"
+          [height]="36"
+        />
+      </div>
+
+      <hr class="perf-divider" />
+
       <div class="perf-row">
         <span class="label">Draw Calls</span>
         <span
@@ -64,6 +80,26 @@
       <div class="perf-row">
         <span class="label">Shaders</span>
         <span class="value">{{ engineService.fpsController.programs() }}</span>
+      </div>
+
+      <hr class="perf-divider" />
+
+      <div class="perf-actions">
+        <button
+          type="button"
+          class="copy-agent-btn"
+          [class.copied]="copyState() === 'copied'"
+          (click)="copyTelemetryForAgent($event)"
+          title="Copy token-efficient diagnostic report for AI agents"
+        >
+          @if (copyState() === 'copied') {
+            <span>✓ Copied for Agent!</span>
+          } @else if (copyState() === 'failed') {
+            <span>✗ Copy failed</span>
+          } @else {
+            <span>📋 Copy for Agent</span>
+          }
+        </button>
       </div>
     </div>
   }

@@ -1,5 +1,7 @@
 export * from './object-3d';
 export * from './engine-ui/engine-ui.component';
+export * from './engine-ui/engine-stats/engine-stats.component';
+export * from './engine-ui/telemetry-sparkline/telemetry-sparkline.component';
 export * from './materials';
 export * from './keyboard';
 export * from './geometry';

@@ -152,6 +152,66 @@
   margin: 2px 0;
 }
 
+.perf-graph-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 2px;
+
+  .perf-graph-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 9.5px;
+    color: rgba(255, 255, 255, 0.5);
+
+    .min-val {
+      font-family: monospace;
+      color: rgba(255, 255, 255, 0.7);
+    }
+  }
+}
+
+.perf-actions {
+  display: flex;
+  justify-content: stretch;
+  margin-top: 4px;
+
+  .copy-agent-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 5px 8px;
+    font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.25);
+      color: #ffffff;
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+
+    &.copied {
+      background: rgba(0, 255, 135, 0.15);
+      border-color: rgba(0, 255, 135, 0.4);
+      color: #00ff87;
+    }
+  }
+}
+
 @keyframes slide-down {
   from {
     opacity: 0;

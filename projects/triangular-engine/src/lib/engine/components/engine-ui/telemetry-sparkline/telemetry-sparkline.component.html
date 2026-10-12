@@ -1,0 +1,54 @@
+<div class="sparkline-container">
+  <svg
+    [attr.width]="width()"
+    [attr.height]="height()"
+    [attr.viewBox]="viewBox()"
+    class="sparkline-svg"
+  >
+    <!-- Baseline Guide Lines -->
+    @if (showGuideLines()) {
+      <line
+        class="guideline target-line"
+        x1="0"
+        [attr.y1]="targetY()"
+        [attr.x2]="width()"
+        [attr.y2]="targetY()"
+      />
+      <line
+        class="guideline crit-line"
+        x1="0"
+        [attr.y1]="critY()"
+        [attr.x2]="width()"
+        [attr.y2]="critY()"
+      />
+    }
+
+    <!-- Histogram Bars -->
+    @for (bar of bars(); track $index) {
+      <rect
+        [attr.x]="bar.x"
+        [attr.y]="bar.y"
+        [attr.width]="bar.width"
+        [attr.height]="bar.height"
+        [class]="'spark-bar ' + bar.status"
+      >
+        <title>{{ bar.value }} FPS ({{ bar.motionTag }})</title>
+      </rect>
+    }
+  </svg>
+
+  <!-- Synchronized Camera Motion Track -->
+  @if (showMotionTrack() && bars().length > 0) {
+    <div class="motion-track" [style.width.px]="width()">
+      @for (bar of bars(); track $index) {
+        <span
+          class="motion-marker"
+          [class.active]="bar.motionTag !== 'idle'"
+          [style.color]="bar.motionColor"
+          [style.width.px]="bar.slotWidth"
+          [title]="'Camera: ' + bar.motionTag"
+        >{{ bar.motionSymbol }}</span>
+      }
+    </div>
+  }
+</div>

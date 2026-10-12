@@ -1,0 +1,75 @@
+:host {
+  display: inline-block;
+  user-select: none;
+}
+
+.sparkline-container {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sparkline-svg {
+  display: block;
+  overflow: visible;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+
+  .guideline {
+    stroke-dasharray: 2, 2;
+    stroke-width: 0.75;
+
+    &.target-line {
+      stroke: rgba(255, 255, 255, 0.15);
+    }
+
+    &.crit-line {
+      stroke: rgba(255, 75, 75, 0.3);
+    }
+  }
+
+  .spark-bar {
+    rx: 0.5;
+    ry: 0.5;
+    transition: y 0.15s ease, height 0.15s ease;
+
+    &.good {
+      fill: #00ff87;
+    }
+
+    &.warning {
+      fill: #ff9f00;
+    }
+
+    &.critical {
+      fill: #ff4b4b;
+    }
+  }
+}
+
+.motion-track {
+  display: flex;
+  align-items: center;
+  height: 12px;
+  overflow: hidden;
+  box-sizing: border-box;
+
+  .motion-marker {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 7.5px;
+    font-family: monospace;
+    font-weight: 700;
+    text-align: center;
+    opacity: 0.35;
+    transition: opacity 0.2s ease;
+    overflow: hidden;
+
+    &.active {
+      opacity: 1;
+      text-shadow: 0 0 4px currentColor;
+    }
+  }
+}
