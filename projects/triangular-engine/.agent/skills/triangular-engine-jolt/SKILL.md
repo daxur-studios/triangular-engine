@@ -9,13 +9,13 @@ This skill provides comprehensive documentation and patterns for using Jolt Phys
 
 ## 1. Setup & Installation
 
-To use Jolt Physics, install `jolt-physics` as an optional peer dependency in your project:
+For an Angular application/esbuild browser project, install the optional peer and configure browser bundling with:
 
 ```bash
-npm i jolt-physics
+ng add triangular-engine --physics=jolt
 ```
 
-Jolt is provided out-of-the-box via the `JoltPhysicsModule`.
+This supplies the decoder assets and externalizes Jolt's Node-only `module`/`node:module` imports. Use `JoltPhysicsModule` and initialize the backend with `canActivateJoltPhysics` on its route or `provideJoltPhysicsInitializer` at app bootstrap.
 
 ### Imports
 
@@ -53,7 +53,7 @@ Wrap your physics-enabled components in `<joltPhysics>`. Every object inside thi
 
     <!-- Dynamic Falling Sphere -->
     <joltRigidBody [position]="[0, 5, 0]" [motionType]="2">
-      <joltSphereShape [params]="[0.5]" />
+      <joltSphereShape [radius]="0.5" />
       <mesh>
         <sphereGeometry [params]="{ radius: 0.5 }" />
         <meshStandardMaterial [params]="{ color: 'springgreen' }" />
@@ -78,7 +78,7 @@ Jolt shapes must be nested inside `<joltRigidBody>` components.
 | Component                | Description               | Example Parameters                                                     |
 | ------------------------ | ------------------------- | ---------------------------------------------------------------------- |
 | `<joltBoxShape>`         | Box dimensions            | `[params]="[width, height, depth]"`                                    |
-| `<joltSphereShape>`      | Sphere radius             | `[params]="[radius]"`                                                  |
+| `<joltSphereShape>`      | Sphere radius             | `[radius]="radius"`                                                    |
 | `<joltCapsuleShape>`     | Capsule properties        | `[params]="[halfHeight, radius]"`                                      |
 | `<joltCylinderShape>`    | Cylinder properties       | `[params]="[halfHeight, radius]"`                                      |
 | `<joltHullShape>`        | Convex hull from geometry | `[geometry]="meshGeometry.geometry()"`                                 |
@@ -127,7 +127,7 @@ import { Vector3 } from "three";
   selector: "app-player-body",
   template: `
     <mesh><sphereGeometry [params]="{ radius: 1 }" /><meshStandardMaterial /></mesh>
-    <joltSphereShape [params]="[1]" />
+    <joltSphereShape [radius]="1" />
   `,
   providers: [provideJoltRigidBodyComponent(PlayerBodyComponent)],
 })

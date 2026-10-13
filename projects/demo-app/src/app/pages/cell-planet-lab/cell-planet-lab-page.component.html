@@ -126,6 +126,20 @@
         </button>
         <button
           type="button"
+          [class.active]="worldProfileKind() === 'mars'"
+          (click)="setWorldProfile('mars')"
+        >
+          mars
+        </button>
+        <button
+          type="button"
+          [class.active]="worldProfileKind() === 'venus'"
+          (click)="setWorldProfile('venus')"
+        >
+          venus
+        </button>
+        <button
+          type="button"
           [class.active]="worldProfileKind() === 'volcanic'"
           (click)="setWorldProfile('volcanic')"
         >

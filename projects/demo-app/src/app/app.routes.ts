@@ -144,6 +144,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'planet-archetypes-lab',
+    loadComponent: () =>
+      import('./pages/planet-archetypes-lab/planet-archetypes-lab-page.component').then(
+        ({ PlanetArchetypesLabPageComponent }) => PlanetArchetypesLabPageComponent,
+      ),
+  },
+  {
     path: 'cell-subdivision-lod-lab',
     loadComponent: () =>
       import('./pages/cell-subdivision-lod-lab/cell-subdivision-lod-lab-page.component').then(

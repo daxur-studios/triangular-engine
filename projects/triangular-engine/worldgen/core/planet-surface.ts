@@ -109,6 +109,19 @@ const LANDFORM_BY_BIOME: Partial<Record<Biome, CellLandform>> = {
   alpine: 'mountain',
   hills: 'hill',
   canyon: 'hill',
+  // Planetary biomes:
+  crater_rim: 'mountain',
+  crater_peak: 'mountain',
+  shield_volcano: 'mountain',
+  tessera_highlands: 'mountain',
+  corona_rim: 'hill',
+  lunar_highlands: 'hill',
+  martian_highlands: 'hill',
+  rift_canyon: 'hill',
+  lunar_maria: 'flat',
+  crater_floor: 'flat',
+  martian_lowlands: 'flat',
+  volcanic_plains: 'flat',
 };
 
 function resolveLandform(biome: Biome | undefined): CellLandform {

@@ -1,5 +1,11 @@
 # Changelog
 
+- Added `ng generate triangular-engine:scene-page <name>` to create a reusable standalone scene page with separate template and styles. Lazy route insertion is opt-in with `--route` and `--route-path`.
+- Moved Material Scene Tree inspection into the opt-in `triangular-engine/scene-tree` entry point. `provideSceneTree()` enables the existing `showSceneTree` UI flag; direct imports of `SceneTreeComponent` and the former `EngineFeaturesModule` must use the new subpath. Core Engine UI no longer imports Angular Material; CDK remains required by Portal Layout.
+- Declared the core RxJS peer and corrected the dependency/install documentation, including production partial-compilation publishing guidance.
+- `ng add` now maps engine textures and Draco decoder assets, and accepts `--physics=jolt` for the optional backend package and browser bundling configuration. Physics remains off by default; the sample scene contains no game-specific physics mechanics.
+- `ng add --path=features/play/pages --route-path=play` supports scaffold-owned placement, inserts routes before wildcard fallbacks, and rejects conflicting routes. Repeated setup preserves user edits and existing asset mappings.
+
 - Dev-mode late scene-write warning: with `syncChangeDetection:
   'perFrame'`, the engine runs one more change-detection pass after each
   render (option `warnLateSceneWrites`, default `isDevMode()`) and warns once

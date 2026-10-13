@@ -93,7 +93,7 @@ export class CellPlanetMapPageComponent {
   readonly seasons: Season[] = ['winter', 'spring', 'summer', 'autumn'];
   readonly waterLevel = signal(0);
 
-  readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
+  readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'mars', 'venus', 'volcanic', 'protoplanet'];
 
   readonly projectionType = signal<MapProjectionKind>('equirectangular');
   readonly projectionKinds = MAP_PROJECTION_KINDS;

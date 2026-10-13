@@ -62,7 +62,8 @@ List of component selectors you can use in templates.
 ## Features
 
 - `skyBox`, `ocean`
-- `performanceMonitor`, `sceneTree`
+- `performanceMonitor`
+- `sceneTree` — optional Material UI from `triangular-engine/scene-tree`; use `provideSceneTree()` for the scene's built-in inspection panel.
 
 ## Engine UI
 
@@ -71,5 +72,5 @@ List of component selectors you can use in templates.
 
 Notes:
 
-- All components are standalone; import `EngineModule` for convenience.
+- All components are standalone; import `EngineModule` for core components and the relevant secondary entry point for optional integrations.
 - Many components accept common Object3D inputs: `position`, `rotation`, `scale`, `name`.

@@ -1,6 +1,6 @@
 # Triangular Engine
 
-Angular-first 3D engine powered by Three.js and Rapier. Build interactive 3D scenes using ergonomic standalone Angular components for scenes, cameras, meshes, lights, materials, GLTF loading, physics, and more.
+Angular-first 3D engine powered by Three.js, with optional physics and UI integrations. Build interactive 3D scenes using ergonomic standalone Angular components for scenes, cameras, meshes, lights, materials, GLTF loading, physics, and more.
 
 This README contains the full documentation needed to use the library on npm. No external links are required.
 
@@ -10,35 +10,17 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 | Dependency      | Version  | Notes                                                          |
 | --------------- | -------- | -------------------------------------------------------------- |
-| Angular         | ^20.3.3  | Required - Angular 20.3.3 or higher                            |
+| Angular         | ^20.3.3  | Required - Angular 20.x, at least 20.3.3                       |
 | Three.js        | ^0.183.0 | Required                                                       |
 | Dexie           | ^4.2.1   | Required                                                       |
+| Angular CDK     | ^20.2.14 | Required by Portal Layout                                      |
+| Angular Forms   | ^20.3.3  | Required by engine settings                                     |
+| Portal Layout   | ^0.0.1   | Required                                                       |
+| three-mesh-bvh  | ^0.9.9   | Required                                                       |
+| RxJS            | ^7.8.0   | Required                                                       |
+| Angular Material | ^20.2.14 | Optional - Scene Tree inspection (`triangular-engine/scene-tree`) |
 | Rapier 3D       | ^0.18.0  | Optional - for physics support                                 |
-| Jolt Physics    | ^0.38.0  | Optional - alternative physics engine                          |
-| @pmndrs/vanilla | ^1.24.0  | Optional - Billboard and Sparkles (`triangular-engine/pmndrs`) |
-
-## Sub-libraries & Entry Points
-
-See the complete import and dependency matrix in [Secondary Entry Points](docs/entry-points.md).
-
-See the complete import and dependency matrix in [Secondary Entry Points](docs/entry-points.md).
-# Triangular Engine
-
-Angular-first 3D engine powered by Three.js and Rapier. Build interactive 3D scenes using ergonomic standalone Angular components for scenes, cameras, meshes, lights, materials, GLTF loading, physics, and more.
-
-This README contains the full documentation needed to use the library on npm. No external links are required.
-
-See [CHANGELOG.md](CHANGELOG.md) for release history.
-
-## Compatibility
-
-| Dependency      | Version  | Notes                                                          |
-| --------------- | -------- | -------------------------------------------------------------- |
-| Angular         | ^20.3.3  | Required - Angular 20.3.3 or higher                            |
-| Three.js        | ^0.183.0 | Required                                                       |
-| Dexie           | ^4.2.1   | Required                                                       |
-| Rapier 3D       | ^0.18.0  | Optional - for physics support                                 |
-| Jolt Physics    | ^0.38.0  | Optional - alternative physics engine                          |
+| Jolt Physics    | ^1.0.1   | Optional - use the Jolt capability's browser setup               |
 | @pmndrs/vanilla | ^1.24.0  | Optional - Billboard and Sparkles (`triangular-engine/pmndrs`) |
 
 ## Sub-libraries & Entry Points
@@ -49,7 +31,8 @@ The library is modularized into several secondary entry points (sub-libraries) s
 
 | Entry Point | Purpose / What it does | Peer Dependencies |
 | ----------- | ---------------------- | ----------------- |
-| `triangular-engine` | **Core Package**: Declarative Angular components for Three.js scenes (such as `<scene>`, `<camera>`, `<mesh>`, `<directionalLight>`, geometries, materials, CSS2D/3D overlays, skybox, ocean, and GLTF loading). | Angular, `@daxur-studios/portal-layout`, `three`, `three-mesh-bvh`, `dexie` |
+| `triangular-engine` | **Core Package**: Declarative Angular components for Three.js scenes (such as `<scene>`, `<camera>`, `<mesh>`, `<directionalLight>`, geometries, materials, CSS2D/3D overlays, skybox, ocean, and GLTF loading). | Angular Common/Core/Forms/CDK, `@daxur-studios/portal-layout`, `three`, `three-mesh-bvh`, `dexie`, `rxjs` |
+| `triangular-engine/scene-tree` | **Scene Tree**: Optional Material inspection panel with object selection and transform controls. | `@angular/material` |
 | `triangular-engine/jolt` | **Jolt Physics**: Integration with Jolt Physics engine. Provides `<joltPhysics>`, `<joltRigidBody>`, colliders, constraints, and support for high-precision / double-precision coordinates. | `jolt-physics` |
 | `triangular-engine/rapier` | **Rapier Physics**: Integration with Rapier 3D physics. Provides `<physics>`, `<rigidBody>`, colliders, and joints. | `@dimforge/rapier3d-compat` |
 | `triangular-engine/pmndrs` | **PMNDRS Helpers**: Angular wrappers for `@pmndrs/vanilla` visual helper components such as `<billboard>` and `<sparkles>`. | `@pmndrs/vanilla` |
@@ -76,7 +59,7 @@ The library is modularized into several secondary entry points (sub-libraries) s
 - 3D Spatial Audio & Multi-Bus Mixer (`<audioListener>`, `<positionalAudio>`, `<ambientAudio>`, `AudioService`)
 - Rapier 3D physics integration: rigid bodies, colliders, joints, instanced rigid bodies
 - GLTF loader with optional BVH acceleration for fast raycasts
-- Engine UI helpers: stats overlay, scene tree, Daxur Studios portal-layout HUD system
+- Engine UI helpers: stats overlay and Portal Layout HUD, with opt-in Material Scene Tree inspection
 - Signals-based services: engine tick, inputs, and camera switching
 - Stacking overlays: support top, bottom, left sidebar, right sidebar, main, modal, and notification layers
 
@@ -88,14 +71,26 @@ For a standalone Angular app with a single application project and `src/app/app.
 ng add triangular-engine
 ```
 
-The schematic installs the engine, creates `src/app/triangular-engine/engine-scene.component.*`, and adds a lazy `/triangular-engine` route. In a workspace with multiple app projects, select one with `--project <name>`. Use `--route=false` to generate the scene without editing routes.
+The schematic installs the engine, creates `src/app/triangular-engine/engine-scene.component.*`, and adds a lazy `/triangular-engine` route. It configures packaged textures under `/triangular-engine/` and Three.js Draco decoders under `/draco/`. In a workspace with multiple app projects, select one with `--project <name>`. Use `--route=false` to generate the scene without editing routes.
 
-`@daxur-studios/portal-layout` is currently a required peer dependency. It must be available from your configured npm registry or already installed in the workspace before adding the engine. The repository's local development package is not published to the public npm registry.
+Physics is off by default. Use `ng add triangular-engine --physics=jolt` to install the optional Jolt peer and configure its Node-only imports as external for an Angular application/esbuild browser build. This configures the backend; import `triangular-engine/jolt` and initialize it through its route guard or app initializer when adding a physics scene. The sample remains a core scene.
+
+Choose the generated location and route with `ng add triangular-engine --path=features/play/pages --route-path=play`. Component paths are relative to the application's `src/app`; routes are inserted before a wildcard fallback, and collisions with another component are reported.
+
+Generate additional standalone scene pages without rerunning package setup:
+
+```bash
+ng generate triangular-engine:scene-page features/play/pages/world
+```
+
+This creates `world.component.ts`, `.html`, and `.scss` under the selected application's `src/app`, with a camera, lights, sample mesh, `EngineService` provider, and `flex-page` host class. Route generation is opt-in: add `--route --route-path=play/world` to register a lazy route. Use `--project <name>` in a multi-application workspace. The generator does not install packages or select a physics backend; `ng add triangular-engine` handles initial package and asset setup.
+
+`@daxur-studios/portal-layout` is a required peer dependency and is available from the public npm registry as version `0.0.1`.
 
 Manual installation remains available:
 
 ```bash
-npm i triangular-engine @daxur-studios/portal-layout three three-mesh-bvh dexie
+npm i triangular-engine @daxur-studios/portal-layout @angular/cdk @angular/forms three three-mesh-bvh dexie rxjs
 ```
 
 (optionally add @dimforge/rapier3d-compat OR jolt-physics for physics, or @pmndrs/vanilla for billboard/sparkles)
@@ -110,29 +105,26 @@ These are the core package's required peers (see `package.json` for exact versio
   "@angular/common": "^20.3.3",
   "@angular/core": "^20.3.3",
   "@angular/forms": "^20.3.3",
-  "@angular/material": "^20.2.14",
   "@daxur-studios/portal-layout": "^0.0.1",
   "three": "^0.183.0",
   "three-mesh-bvh": "^0.9.9",
-  "dexie": "^4.2.1"
+  "dexie": "^4.2.1",
+  "rxjs": "^7.8.0"
 }
 ```
 
-Optional peer dependencies:
+Optional integrations are installed only when used:
 
-```json
-{
-  "@dimforge/rapier3d-compat": "^0.18.0",
-  OR
-  "jolt-physics": "^0.38.0",
-  AND
-  "@pmndrs/vanilla": "^1.24.0",
-  AND
-  "meshoptimizer": "^1.0.1",
-  AND
-  "browser-image-compression": "^2.0.2"
-}
-```
+| Import | Additional peers |
+| --- | --- |
+| `triangular-engine/scene-tree` | `@angular/material` |
+| `triangular-engine/jolt` | `jolt-physics` |
+| `triangular-engine/rapier` | `@dimforge/rapier3d-compat` |
+| `triangular-engine/pmndrs` | `@pmndrs/vanilla` |
+| `triangular-engine/postprocessing` | `postprocessing` |
+| `triangular-engine/takram` | `@takram/three-atmosphere`, `@takram/three-clouds`, `@takram/three-geospatial` |
+| `triangular-engine/meshoptimizer` | `meshoptimizer` |
+| `triangular-engine/image-compression` | `browser-image-compression` |
 
 `browser-image-compression` is only needed when using
 `triangular-engine/image-compression`. Core engine consumers do not need to
@@ -347,7 +339,7 @@ Wrap Jolt physics-enabled content in `<joltPhysics>`:
 
   <!-- Falling Ball (Dynamic) -->
   <joltRigidBody [position]="[0, 5, 0]" [motionType]="2">
-    <joltSphereShape [params]="[0.5]" />
+    <joltSphereShape [radius]="0.5" />
     <mesh>
       <sphereGeometry [params]="{ radius: 0.5 }" />
       <meshStandardMaterial [params]="{ color: 'springgreen' }" />
@@ -388,6 +380,29 @@ List of selectors available in templates (not exhaustive):
 - CSS Renderers: `css2d`, `css3d`
 - Physics: `physics`, `rigidBody`, `collider` family, `cuboidCollider`, `ballCollider`, `capsuleCollider`, `cylinderCollider`, `coneCollider`, `fixedJoint`, `sphericalJoint`, `instancedRigidBody`
 - Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `portalOutlet`, `[portalTarget]`, `[raycast]`
+
+## Scene Tree (optional Material UI)
+
+The core package does not require Angular Material. To use its inspection panel:
+
+```bash
+npm install @angular/material@^20.2.14
+```
+
+Import `provideSceneTree` from `triangular-engine/scene-tree` and add it beside the engine provider on the component owning the scene:
+
+```ts
+import { EngineModule, EngineService } from 'triangular-engine';
+import { provideSceneTree } from 'triangular-engine/scene-tree';
+
+// In @Component:
+// imports: [EngineModule],
+// providers: [EngineService.provide({ showFPS: true }), provideSceneTree()],
+```
+
+Enable visibility with `<scene [userInterface]="{ showSceneTree: true }">...</scene>`. Without the provider, core UI has no inspection panel. For direct `<sceneTree />` use, import `SceneTreeComponent` from the same optional entry point. `EngineSceneTreeModule` imports/exports the component and provides the adapter; `EngineFeaturesModule` is its compatibility alias at this subpath.
+
+Migration: `SceneTreeComponent` and `EngineFeaturesModule` are no longer root exports or included in `EngineModule`. Existing callers must opt into `triangular-engine/scene-tree`.
 
 ## Portal Layout (Dynamic UI Overlay System)
 
@@ -649,7 +664,7 @@ export class BasicComponent {}
 2. Bump version in `projects/triangular-engine/package.json` if needed
 3. From the workspace root: `npm run publish`
 
-The publish script builds with development configuration (required for npm) and publishes from `dist/triangular-engine`. For local development with `jolt-physics`, the workspace uses a local file override in its `devDependencies`; the published package lists `jolt-physics` as an optional `^0.38.0` peer dependency.
+The publish script builds the production Angular package in partial compilation mode and publishes from `dist/triangular-engine`. The workspace uses registry Jolt `1.0.1`, matching the library's optional `^1.0.1` peer. The consumer trial resolved Jolt `1.1.0` and verified a falling rigid body and contact event using the Jolt capability's browser configuration; core-scene checks alone do not verify physics integration.
 
 ---
 

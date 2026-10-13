@@ -177,7 +177,7 @@ export class CellPlanetGlobePageComponent {
   readonly seed = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.seed);
   readonly relaxationIterations = signal<number>(CELL_PLANET_GENERATION_DEFAULTS.relaxationIterations);
   readonly worldProfileKind = signal<WorldProfileKind>(CELL_PLANET_GENERATION_DEFAULTS.worldProfile);
-  readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
+  readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'mars', 'venus', 'volcanic', 'protoplanet'];
   readonly terrainStyle = signal<CellPlanetTerrainStyle>('blended');
   readonly terrainStyleKinds = CELL_PLANET_TERRAIN_STYLE_KINDS;
   readonly terrainStyleLabels = CELL_PLANET_TERRAIN_STYLE_LABELS;

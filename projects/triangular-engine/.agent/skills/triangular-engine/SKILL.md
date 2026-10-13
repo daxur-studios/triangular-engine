@@ -265,7 +265,7 @@ All components are standalone. Import `EngineModule` for convenience.
 | `joltPhysics`        | `gravity`, `debug`                                                                        |
 | `joltRigidBody`     | `motionType` (0=Static, 1=Kinematic, 2=Dynamic), `position`, `rotation`, `velocity`, `id` |
 | `joltBoxShape`      | `params` `[w, h, d]`                                                                      |
-| `joltSphereShape`   | `params` `[radius]`                                                                       |
+| `joltSphereShape`   | `radius`                                                                                  |
 | `joltCapsuleShape`  | `params` `[halfHeight, radius]`                                                           |
 | `joltCylinderShape` | `params` `[halfHeight, radius]`                                                           |
 | `joltHullShape`     | Convex hull from points                                                                   |
@@ -278,12 +278,14 @@ All components are standalone. Import `EngineModule` for convenience.
 | `skyBox`             | Sky environment              |
 | `ocean`              | Ocean surface                |
 | `performanceMonitor` | FPS/performance overlay      |
-| `sceneTree`          | Scene hierarchy viewer       |
+| `sceneTree`          | Optional Material viewer (`triangular-engine/scene-tree`) |
 | `engine-ui`          | UI shell with portal areas   |
 | `engine-stats`       | Stats overlay                |
 | `engine-portal-outlet`| Portal outlet element       |
 | `[enginePortal]`     | Dynamic portal registration  |
 | `[raycast]`          | Raycast directive            |
+
+Scene Tree is not included in core `EngineModule`. Import its component from `triangular-engine/scene-tree` for direct use, or add that entry's `provideSceneTree()` beside the scene's engine provider and set `userInterface.showSceneTree` to enable the built-in panel.
 
 ---
 
@@ -504,7 +506,7 @@ export class DemoComponent {}
 
     <!-- Falling Ball (Dynamic) -->
     <joltRigidBody [position]="[0, 4, 0]" [motionType]="2">
-      <joltSphereShape [params]="[0.5]" />
+      <joltSphereShape [radius]="0.5" />
       <mesh>
         <sphereGeometry [params]="{ radius: 0.5, widthSegments: 32, heightSegments: 16 }" />
         <meshNormalMaterial />

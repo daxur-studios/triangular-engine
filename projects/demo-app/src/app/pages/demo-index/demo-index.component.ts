@@ -828,6 +828,19 @@ export const DEMOS: readonly DemoItem[] = [
       'V4 structure-first planet generation (runbook 022): Fibonacci sphere sites, Lloyd relaxation, and their spherical Voronoi dual — 3D orbit view plus a 2D equirectangular unwrap.',
   },
   {
+    id: 'planet-archetypes-lab',
+    number: '39b',
+    title: 'Planetary Archetypes & Crater Lab',
+    route: '/planet-archetypes-lab',
+    categoryId: 'core',
+    tier: 'lab',
+    createdAt: '2026-10-13',
+    entryPoints: ['worldgen'],
+    package: 'triangular-engine/worldgen',
+    description:
+      'Planetary surface regimes (Moon, Mars, Venus, Earth, Protoplanet): multi-scale impact crater fields, giant multi-cell impact basins (Maria) with basalt infill, crustal depressions, and planetary biomes.',
+  },
+  {
     id: 'cell-planet-map',
     number: '42',
     title: 'Cell Planet Map',

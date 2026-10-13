@@ -63,6 +63,21 @@ export const BIOME_COLORS: Record<string, string> = {
   rainforest: 'hsl(150, 60%, 25%)',
   alpine: 'hsl(0, 0%, 75%)',
   canyon: 'hsl(20, 55%, 40%)',
+  // Lunar / Airless:
+  lunar_highlands: 'hsl(215, 6%, 58%)',
+  lunar_maria: 'hsl(220, 10%, 18%)',
+  crater_rim: 'hsl(210, 8%, 76%)',
+  crater_floor: 'hsl(215, 8%, 32%)',
+  crater_peak: 'hsl(210, 10%, 84%)',
+  // Martian:
+  martian_lowlands: 'hsl(22, 62%, 46%)',
+  martian_highlands: 'hsl(14, 52%, 34%)',
+  shield_volcano: 'hsl(10, 42%, 24%)',
+  rift_canyon: 'hsl(6, 68%, 20%)',
+  // Venusian:
+  volcanic_plains: 'hsl(36, 46%, 36%)',
+  tessera_highlands: 'hsl(46, 56%, 56%)',
+  corona_rim: 'hsl(26, 68%, 46%)',
 };
 
 export function biomeColor(biome: string): string {

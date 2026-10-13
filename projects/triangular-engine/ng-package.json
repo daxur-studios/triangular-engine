@@ -6,7 +6,12 @@
   },
   "assets": [
     "./assets",
-    "./schematics",
+    {
+      "glob": "**/*",
+      "input": "./schematics",
+      "output": "schematics",
+      "ignore": ["**/*.spec.cjs"]
+    },
     "README.md",
     "THIRD_PARTY_NOTICES.md",
     {

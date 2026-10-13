@@ -36,8 +36,8 @@
       </div>
     </div>
     <div class="ui-sidebar-right">
-      @if (userInterface().showSceneTree) {
-        <sceneTree />
+      @if (userInterface().showSceneTree && sceneTreeComponent) {
+        <ng-container *ngComponentOutlet="sceneTreeComponent"></ng-container>
       }
       <portalOutlet area="rightSidebar" />
     </div>

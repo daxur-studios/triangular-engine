@@ -20,7 +20,7 @@ import {
 } from './components';
 import { PortalTargetDirective } from '@daxur-studios/portal-layout';
 import { EngineDirectiveModule } from './directive';
-import { EngineEnvironmentModule, EngineFeaturesModule } from './features';
+import { EngineEnvironmentModule } from './features';
 
 const importExport = [
   EngineMaterialsModule,
@@ -33,7 +33,6 @@ const importExport = [
   EngineLightModule,
   EngineGeometryModule,
   EngineObject3DModule,
-  EngineFeaturesModule,
   EngineDirectiveModule,
 
   PortalTargetDirective,

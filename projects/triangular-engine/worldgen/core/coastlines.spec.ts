@@ -90,6 +90,6 @@ describe('extractCoastlines', () => {
 
   it('rejects a mask that does not describe every graph cell', () => {
     const graph = buildPlanetGraphCore({ cellCount: 40, seed: 2 });
-    expect(() => createCoastlineQuery(graph, [true])).toThrow(/mask length/i);
+    expect(() => createCoastlineQuery(graph, [true])).toThrowError(/mask length/i);
   });
 });

@@ -6,6 +6,7 @@
 - `projects/demo-app/` — the local demo application.
 - `projects/triangular-engine/docs/` — user-facing library documentation.
 - `docs/runbook/` — design notes and implementation history for larger features.
+- `docs/plans/` — current work plans linked to their runbooks; [convention](docs/plans-and-runbooks.md).
 - `instructions/` — maintainer workflows and historical project notes.
 - `.daxur/token-map.json` — repository token documentation manifest (see `docs/runbook/029_token_map_usage_guide.md`).
 
@@ -38,6 +39,7 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 - Add or update a colocated `*.spec.ts` for behavior changes.
 - Update user-facing docs and `CHANGELOG.md` for public API changes.
 - Keep optional integrations isolated from the core entry point.
+- Before feature or part work, use its existing reciprocal plan/runbook pair or create one under `docs/plans/` and `docs/runbook/`.
 - Do not edit generated output in `dist/` or `out-tsc/`; rebuild it instead.
 - Check `daxur tokens map status` when adding or expanding sublibraries to keep architecture docs in sync.
 

@@ -56,8 +56,10 @@ import {
   digCells,
   findCellAt,
   flattenCells,
+  generateImpactCraters,
   getEffectiveElevation,
   IColliderPatch,
+  IImpactCraterResult,
   IPlanetChunk,
   IPlanetEcology,
   IPlanetFeatures,
@@ -840,13 +842,26 @@ export class CellPlanetLabPageComponent implements AfterViewInit {
       seed: this.seed(),
       ...profile.tectonics,
     });
+
+    let impactCraters: IImpactCraterResult | undefined;
+    if (profile.impactCraters) {
+      impactCraters = generateImpactCraters(graph, this.tectonics.elevation, {
+        seed: this.seed(),
+        ...profile.impactCraters,
+      });
+      this.tectonics.elevation = impactCraters.elevation;
+    }
+
     const land =
       this.tectonics.isLand.filter(Boolean).length /
       this.tectonics.isLand.length;
     this.landFraction.set(`${(land * 100).toFixed(0)}%`);
     this.ecology = buildPlanetEcology(graph, this.tectonics, {
       climate: profile.climate,
-      biomes: profile.biomes,
+      biomes: {
+        ...profile.biomes,
+        craterLandform: impactCraters?.craterLandform,
+      },
     });
     this.features = computeFeatures(graph, this.tectonics, this.ecology.waterBodyKind, profile.features);
     this.featureElevation = buildFeatureElevation(this.tectonics.elevation, this.features);

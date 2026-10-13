@@ -2,14 +2,13 @@ import { Component, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatMenuModule } from '@angular/material/menu';
-import { EngineService } from '../../services';
+import { EngineService, Object3DComponent } from 'triangular-engine';
 import { Object3D, Vector3, Euler } from 'three';
 import {
   TransformControls,
   TransformControlsMode,
 } from 'three/examples/jsm/controls/TransformControls.js';
 import { Subscription } from 'rxjs';
-import { Object3DComponent } from '../../components/object-3d/object-3d.component';
 
 // Node for the scene tree
 interface SceneNode {

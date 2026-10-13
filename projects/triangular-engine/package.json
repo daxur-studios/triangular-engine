@@ -34,6 +34,7 @@
     "three": "^0.183.0",
     "three-mesh-bvh": "^0.9.9",
     "dexie": "^4.2.1",
+    "rxjs": "^7.8.0",
     "@dimforge/rapier3d-compat": "^0.18.0",
     "jolt-physics": "^1.0.1",
     "@pmndrs/vanilla": "^1.24.0",
@@ -45,6 +46,9 @@
     "meshoptimizer": "^1.0.1"
   },
   "peerDependenciesMeta": {
+    "@angular/material": {
+      "optional": true
+    },
     "@dimforge/rapier3d-compat": {
       "optional": true
     },

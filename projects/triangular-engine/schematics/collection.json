@@ -5,6 +5,11 @@
       "description": "Add Triangular Engine and a working scene route to an Angular application.",
       "factory": "./ng-add/index.cjs#ngAdd",
       "schema": "./ng-add/schema.json"
+    },
+    "scene-page": {
+      "description": "Generate a standalone Triangular Engine scene page.",
+      "factory": "./scene-page/index.cjs#scenePage",
+      "schema": "./scene-page/schema.json"
     }
   }
 }

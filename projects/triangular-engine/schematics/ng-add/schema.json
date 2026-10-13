@@ -8,10 +8,26 @@
       "type": "string",
       "description": "Angular application project to configure. Defaults to the only application in the workspace."
     },
+    "path": {
+      "type": "string",
+      "default": "triangular-engine",
+      "description": "Component directory relative to the selected application's src/app (for example features/play/pages)."
+    },
+    "routePath": {
+      "type": "string",
+      "default": "triangular-engine",
+      "description": "Literal lazy route path for the sample scene (for example play)."
+    },
     "route": {
       "type": "boolean",
       "default": true,
       "description": "Add a lazy route for the generated sample scene."
+    },
+    "physics": {
+      "type": "string",
+      "enum": ["none", "jolt"],
+      "default": "none",
+      "description": "Optionally install Jolt and configure its browser bundling. The sample remains a core scene; import triangular-engine/jolt for physics scenes."
     }
   },
   "additionalProperties": false

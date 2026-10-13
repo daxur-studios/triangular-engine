@@ -6,6 +6,8 @@ import {
   computeFeatures,
   createPlanetSurfaceSampler,
   deriveIsLand,
+  generateImpactCraters,
+  IImpactCraterResult,
   IPlanetSurfaceSampler,
   WorldProfileKind,
   WORLD_PROFILES,
@@ -29,6 +31,7 @@ export interface ICellPlanetWorldSnapshot extends ICellPlanetMapWorldData {
   /** Civ-like surface where a generated feature is owned by exactly one Voronoi cell. */
   readonly cellFeatureSampler: IPlanetSurfaceSampler;
   readonly seaLevelElevation: number;
+  readonly impactCraters?: IImpactCraterResult;
 }
 
 /**
@@ -63,6 +66,16 @@ export class CellPlanetWorldService {
       seed: options.seed,
       ...profile.tectonics,
     });
+
+    let impactCraters: IImpactCraterResult | undefined;
+    if (profile.impactCraters) {
+      impactCraters = generateImpactCraters(graph, tectonics.elevation, {
+        seed: options.seed,
+        ...profile.impactCraters,
+      });
+      tectonics.elevation = impactCraters.elevation;
+    }
+
     const seaLevelElevation = tectonics.seaLevelElevation + waterLevel * 0.3;
     tectonics.seaLevelElevation = seaLevelElevation;
     tectonics.isLand = deriveIsLand(
@@ -74,7 +87,10 @@ export class CellPlanetWorldService {
 
     const ecology = buildPlanetEcology(graph, tectonics, {
       climate: profile.climate,
-      biomes: profile.biomes,
+      biomes: {
+        ...profile.biomes,
+        craterLandform: impactCraters?.craterLandform,
+      },
     });
     const features = computeFeatures(graph, tectonics, ecology.waterBodyKind, profile.features);
     const snapshot: ICellPlanetWorldSnapshot = {
@@ -82,6 +98,7 @@ export class CellPlanetWorldService {
       tectonics,
       ecology,
       features,
+      impactCraters,
       baseSampler: createPlanetSurfaceSampler(graph, tectonics, ecology),
       featureSampler: createPlanetSurfaceSampler(graph, tectonics, ecology, { features }),
       cellFeatureSampler: createPlanetSurfaceSampler(graph, tectonics, ecology, {

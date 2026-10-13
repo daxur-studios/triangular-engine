@@ -4,6 +4,7 @@ export * from './fps.controller';
 export * from './cursor.model';
 export * from './key-binding-options';
 export * from './user-interface.model';
+export * from './scene-tree.model';
 export * from './engine-textures.model';
 export * from './third-person-controls.model';
 export * from './floating-origin.model';

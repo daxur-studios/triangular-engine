@@ -17,9 +17,28 @@ export type Biome =
   | 'savanna'
   | 'rainforest'
   | 'alpine'
-  | 'canyon';
+  | 'canyon'
+  // Airless / Lunar biomes:
+  | 'lunar_highlands'
+  | 'lunar_maria'
+  | 'crater_rim'
+  | 'crater_floor'
+  | 'crater_peak'
+  // Martian biomes:
+  | 'martian_lowlands'
+  | 'martian_highlands'
+  | 'shield_volcano'
+  | 'rift_canyon'
+  // Venusian biomes:
+  | 'volcanic_plains'
+  | 'tessera_highlands'
+  | 'corona_rim';
+
+export type PlanetaryBiomeArchetype = 'terran' | 'cratered_moon' | 'martian' | 'venusian';
 
 export interface IBiomeParams {
+  archetype?: PlanetaryBiomeArchetype;
+  craterLandform?: readonly ('none' | 'lunar_maria' | 'crater_rim' | 'crater_floor' | 'crater_peak' | 'ejecta')[];
   coldTemperatureThreshold?: number;
   hotTemperatureThreshold?: number;
   dryMoistureThreshold?: number;
@@ -132,6 +151,53 @@ export function computeBiomes(
 
   const biome: Biome[] = new Array(cellCount);
   for (let id = 0; id < cellCount; id++) {
+    if (p.archetype === 'cratered_moon') {
+      const craterTag = p.craterLandform?.[id];
+      if (craterTag === 'lunar_maria') {
+        biome[id] = 'lunar_maria';
+      } else if (craterTag === 'crater_rim') {
+        biome[id] = 'crater_rim';
+      } else if (craterTag === 'crater_floor') {
+        biome[id] = 'crater_floor';
+      } else if (craterTag === 'crater_peak') {
+        biome[id] = 'crater_peak';
+      } else {
+        biome[id] = 'lunar_highlands';
+      }
+      continue;
+    }
+
+    if (p.archetype === 'martian') {
+      const cellCenter = graph.cells[id]!.center;
+      const normalizedElevation = Math.max(0, elevation[id] - seaLevelElevation) / landRelief;
+      const normalizedSlope = slope[id] / landRelief;
+      if (Math.abs(cellCenter.y) > 0.88) {
+        biome[id] = 'ice_cap';
+      } else if (ridgeSet.has(id) || normalizedElevation >= 0.8) {
+        biome[id] = 'shield_volcano';
+      } else if (normalizedSlope >= 0.35) {
+        biome[id] = 'rift_canyon';
+      } else if (normalizedElevation < 0.35) {
+        biome[id] = 'martian_lowlands';
+      } else {
+        biome[id] = 'martian_highlands';
+      }
+      continue;
+    }
+
+    if (p.archetype === 'venusian') {
+      const normalizedElevation = Math.max(0, elevation[id] - seaLevelElevation) / landRelief;
+      const normalizedSlope = slope[id] / landRelief;
+      if (ridgeSet.has(id) || normalizedElevation >= 0.7) {
+        biome[id] = 'tessera_highlands';
+      } else if (normalizedSlope >= 0.3) {
+        biome[id] = 'corona_rim';
+      } else {
+        biome[id] = 'volcanic_plains';
+      }
+      continue;
+    }
+
     const isFrozen = temperature[id] <= effectiveColdThreshold;
 
     if (!isLand[id]) {

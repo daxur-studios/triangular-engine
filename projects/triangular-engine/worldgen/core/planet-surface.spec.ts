@@ -292,7 +292,7 @@ describe('createPlanetSurfaceSampler', () => {
     const generated = buildPlanetTectonics(graph, { plateCount: 9, seed: 81 });
     const ecology = buildPlanetEcology(graph, generated);
     const landCellId = generated.isLand.findIndex(Boolean);
-    const waterCellId = generated.isLand.findIndex((isLand) => !isLand);
+    const waterCellId = generated.isLand.findIndex((isLand, id) => !isLand && ecology.biome[id] !== 'ice_cap');
     expect(landCellId).toBeGreaterThanOrEqual(0);
     expect(waterCellId).toBeGreaterThanOrEqual(0);
 
@@ -305,6 +305,7 @@ describe('createPlanetSurfaceSampler', () => {
     const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
       featureComposition: 'cell',
       cellDetailAmplitude: 0,
+      iceShelfFreeboard: 0,
     });
 
     const landSample = sampler.sample(graph.cells[landCellId]!.center);

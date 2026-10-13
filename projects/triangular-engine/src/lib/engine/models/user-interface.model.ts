@@ -4,6 +4,7 @@ export interface IUserInterfaceOptions {
   showUI?: boolean;
 
   showStats?: boolean;
+  /** Show the inspection panel when provideSceneTree() from triangular-engine/scene-tree is configured. */
   showSceneTree?: boolean;
 
   top?: TemplateRef<any>;

@@ -138,7 +138,7 @@ export class CellPlanetMorphSpikePageComponent {
   readonly seed = signal<number>(CELL_PLANET_U0_FIXTURE.seed);
   readonly relaxationIterations = signal<number>(CELL_PLANET_U0_FIXTURE.relaxationIterations);
   readonly worldProfileKind = signal<WorldProfileKind>(CELL_PLANET_U0_FIXTURE.worldProfile);
-  readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'volcanic', 'protoplanet'];
+  readonly worldProfileKinds: WorldProfileKind[] = ['terran', 'moon', 'mars', 'venus', 'volcanic', 'protoplanet'];
   readonly terrainStyle = signal<CellPlanetTerrainStyle>('blended');
   readonly terrainStyleKinds = CELL_PLANET_TERRAIN_STYLE_KINDS;
   readonly terrainStyleLabels = CELL_PLANET_TERRAIN_STYLE_LABELS;
