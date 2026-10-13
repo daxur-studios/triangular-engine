@@ -28,6 +28,14 @@ function buildOptions(tree) {
   return JSON.parse(tree.readContent('/angular.json')).projects.game.architect.build.options;
 }
 
+function assertFlexPageStyles(styles) {
+  assert.match(styles, /:host\s*\{\s*position:\s*relative;/);
+  assert.doesNotMatch(styles, /\b(?:width|height)\s*:/i);
+  assert.doesNotMatch(styles, /\b100(?:vh|vw)\b/i);
+  assert.doesNotMatch(styles, /\bscene\s*\{/i);
+  assert.doesNotMatch(styles, /display\s*:\s*block/i);
+}
+
 test('base setup supplies decoder/texture assets without opting into physics', async () => {
   const result = await runner().runSchematic('ng-add', {}, fixture());
   const options = buildOptions(result);
@@ -38,6 +46,7 @@ test('base setup supplies decoder/texture assets without opting into physics', a
   assert.deepEqual(JSON.parse(result.readContent('/package.json')).dependencies, {});
   assert(result.readContent('/src/app/triangular-engine/engine-scene.component.ts').includes("class: 'flex-page'"));
   assert(!result.readContent('/src/app/triangular-engine/engine-scene.component.ts').includes('standalone:'));
+  assertFlexPageStyles(result.readContent('/src/app/triangular-engine/engine-scene.component.scss'));
 });
 
 test('Jolt setup installs its declared peer and configures only the selected build', async () => {
@@ -84,6 +93,7 @@ test('custom scene paths register before a wildcard route', async () => {
   source.overwrite('/src/app/app.routes.ts', "export const routes = [{ path: '**', redirectTo: 'play' }];\n");
   const result = await runner().runSchematic('ng-add', { path: 'features/play/pages', routePath: 'play' }, source);
   assert(result.exists('/src/app/features/play/pages/engine-scene.component.ts'));
+  assertFlexPageStyles(result.readContent('/src/app/features/play/pages/engine-scene.component.scss'));
   const routes = result.readContent('/src/app/app.routes.ts');
   assert(routes.includes("import('./features/play/pages/engine-scene.component')"));
   assert(routes.indexOf("path: 'play'") < routes.indexOf("path: '**'"));

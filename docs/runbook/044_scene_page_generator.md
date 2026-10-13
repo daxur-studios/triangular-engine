@@ -22,3 +22,5 @@ plans: [/docs/plans/044_scene_page_generator.md]
 - Publication remains pending; no publish or commit was performed.
 - **[decision]** Per user feedback, generated components rely on the supported Angular 20 standalone default and omit redundant `standalone: true`; both schematics use the shared template.
 - **[verification]** Schematic TypeScript checking and all 13 tests passed after removal; both generators assert that their component source omits the standalone property.
+- **[decision]** Keep shared schematic scene styles sizing-neutral: generated routed hosts use `flex-page`, and the consumer's global flex chain sizes the scene. The only generated host style is `position: relative` for overlay placement; neither generator sets viewport dimensions or sizes the `scene` selector.
+- **[verification]** Both `ng-add` and `scene-page` tests assert generated styles contain no viewport dimensions, width/height overrides, scene selector rules, or `display: block`; schematic typecheck and focused tests pass. Consumer README records the required global `.flex-page` and parent flex chain. Package rebuild/packing remains with the current acceptance run.

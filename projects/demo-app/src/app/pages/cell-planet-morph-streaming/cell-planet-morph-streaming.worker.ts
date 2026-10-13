@@ -916,55 +916,6 @@ function compactGeometryAttributes(geometry: BufferGeometry): CompactedMeshAttri
   };
 }
 
-/** Rebuild normals from the same displaced positions that are rendered. */
-function recomputeGridNormals(
-  positions: Float32Array,
-  resolution: number,
-  expectedUp: 'sphere' | 'flat',
-): Float32Array {
-  const normals = new Float32Array(positions.length);
-  const row = resolution + 1;
-  const indexAt = (u: number, v: number) => (v * row + u) * 3;
-  for (let v = 0; v <= resolution; v += 1) {
-    for (let u = 0; u <= resolution; u += 1) {
-      const leftU = Math.max(0, u - 1);
-      const rightU = Math.min(resolution, u + 1);
-      const downV = Math.max(0, v - 1);
-      const upV = Math.min(resolution, v + 1);
-      const left = indexAt(leftU, v);
-      const right = indexAt(rightU, v);
-      const down = indexAt(u, downV);
-      const up = indexAt(u, upV);
-      const dx0 = positions[right] - positions[left];
-      const dx1 = positions[right + 1] - positions[left + 1];
-      const dx2 = positions[right + 2] - positions[left + 2];
-      const dy0 = positions[up] - positions[down];
-      const dy1 = positions[up + 1] - positions[down + 1];
-      const dy2 = positions[up + 2] - positions[down + 2];
-      let nx = dx1 * dy2 - dx2 * dy1;
-      let ny = dx2 * dy0 - dx0 * dy2;
-      let nz = dx0 * dy1 - dx1 * dy0;
-      const length = Math.hypot(nx, ny, nz) || 1;
-      nx /= length;
-      ny /= length;
-      nz /= length;
-      const current = indexAt(u, v);
-      const upX = expectedUp === 'sphere' ? positions[current] : 0;
-      const upY = expectedUp === 'sphere' ? positions[current + 1] : 0;
-      const upZ = expectedUp === 'sphere' ? positions[current + 2] : 1;
-      if (nx * upX + ny * upY + nz * upZ < 0) {
-        nx = -nx;
-        ny = -ny;
-        nz = -nz;
-      }
-      normals[current] = nx;
-      normals[current + 1] = ny;
-      normals[current + 2] = nz;
-    }
-  }
-  return normals;
-}
-
 addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerMessage>) => {
   try {
     const { id, colorMode, worldProfile = 'volcanic', seed = 1 } = data;
@@ -1141,6 +1092,46 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
       z: centerDir[2],
     });
 
+    // Sample an extended (resolution + 3) x (resolution + 3) grid that extends 1 sample
+    // outside the patch boundaries in every direction. This provides consistent, continuous
+    // central-difference normals along edges and at corners matching across adjacent patches.
+    const extRow = resolution + 3;
+    const extVertexCount = extRow * extRow;
+    const extSpherePositions = new Float32Array(extVertexCount * 3);
+    const extSphereDirections = new Float32Array(extVertexCount * 3);
+    const extFlatPositions = new Float32Array(extVertexCount * 3);
+
+    for (let evi = 0; evi < extRow; evi += 1) {
+      const v = bounds.minV + (evi - 1) * stepV;
+
+      for (let eui = 0; eui < extRow; eui += 1) {
+        const u = bounds.minU + (eui - 1) * stepU;
+        const dirVec = domain.getFieldPosition(address, u, v);
+        const dir3: IVec3 = { x: dirVec[0], y: dirVec[1], z: dirVec[2] };
+
+        const sample = sampler.sample(dir3);
+        const surfaceElevation = sample.elevation - sample.seaLevel;
+        const h = (sample.isIce
+          ? Math.max(surfaceElevation, MIN_ICE_SURFACE_CLEARANCE_ELEVATION)
+          : surfaceElevation) * heightScale;
+
+        const eIdx = (evi * extRow + eui) * 3;
+        const r = radius + h;
+        extSpherePositions[eIdx] = dirVec[0] * r;
+        extSpherePositions[eIdx + 1] = dirVec[1] * r;
+        extSpherePositions[eIdx + 2] = dirVec[2] * r;
+
+        extSphereDirections[eIdx] = dirVec[0];
+        extSphereDirections[eIdx + 1] = dirVec[1];
+        extSphereDirections[eIdx + 2] = dirVec[2];
+
+        const proj = projection.project(u, v, mapWidth, mapHeight);
+        extFlatPositions[eIdx] = proj.x - mapWidth * 0.5;
+        extFlatPositions[eIdx + 1] = mapHeight * 0.5 - proj.y;
+        extFlatPositions[eIdx + 2] = h;
+      }
+    }
+
     for (let vi = 0; vi <= resolution; vi += 1) {
       const v = bounds.minV + vi * stepV;
       const latFrac = (v + Math.PI / 2) / Math.PI;
@@ -1149,22 +1140,6 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
         const u = bounds.minU + ui * stepU;
         const lonFrac = (u + Math.PI) / (2 * Math.PI);
 
-        const dirVec = domain.getFieldPosition(address, u, v);
-        const dir3: IVec3 = { x: dirVec[0], y: dirVec[1], z: dirVec[2] };
-
-        // Continuous canonical cell planet surface sample
-        const sample = sampler.sample(dir3);
-        const cell = findNearestCellFast(graph, dir3, previousCell);
-        previousCell = cell;
-
-        // Elevation displacement in meters. Frozen-water cells can ease back
-        // to the sea datum at their edges, so keep a small render-only freeboard
-        // to separate the ice from the translucent ocean shell.
-        const surfaceElevation = sample.elevation - sample.seaLevel;
-        const h = (sample.isIce
-          ? Math.max(surfaceElevation, MIN_ICE_SURFACE_CLEARANCE_ELEVATION)
-          : surfaceElevation) * heightScale;
-
         const idx = vi * row + ui;
         const o3 = idx * 3;
         const o2 = idx * 2;
@@ -1172,27 +1147,101 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
         uvs[o2] = lonFrac;
         uvs[o2 + 1] = latFrac;
 
-        // 3D Sphere geometry (centered at origin)
-        const r = radius + h;
-        spherePositions[o3] = dirVec[0] * r;
-        spherePositions[o3 + 1] = dirVec[1] * r;
-        spherePositions[o3 + 2] = dirVec[2] * r;
+        const extCenter = ((vi + 1) * extRow + (ui + 1)) * 3;
+        const extLeft = ((vi + 1) * extRow + ui) * 3;
+        const extRight = ((vi + 1) * extRow + ui + 2) * 3;
+        const extDown = (vi * extRow + (ui + 1)) * 3;
+        const extUp = ((vi + 2) * extRow + (ui + 1)) * 3;
 
-        sphereNormals[o3] = dirVec[0];
-        sphereNormals[o3 + 1] = dirVec[1];
-        sphereNormals[o3 + 2] = dirVec[2];
+        spherePositions[o3] = extSpherePositions[extCenter];
+        spherePositions[o3 + 1] = extSpherePositions[extCenter + 1];
+        spherePositions[o3 + 2] = extSpherePositions[extCenter + 2];
 
-        // 2.5D Projected Map geometry
-        const proj = projection.project(u, v, mapWidth, mapHeight);
-        flatPositions[o3] = proj.x - mapWidth * 0.5;
-        flatPositions[o3 + 1] = mapHeight * 0.5 - proj.y;
-        flatPositions[o3 + 2] = h;
+        flatPositions[o3] = extFlatPositions[extCenter];
+        flatPositions[o3 + 1] = extFlatPositions[extCenter + 1];
+        flatPositions[o3 + 2] = extFlatPositions[extCenter + 2];
 
-        flatNormals[o3] = 0;
-        flatNormals[o3 + 1] = 0;
-        flatNormals[o3 + 2] = 1;
+        // Central-difference normal for 3D sphere:
+        const sDx0 = extSpherePositions[extRight] - extSpherePositions[extLeft];
+        const sDx1 = extSpherePositions[extRight + 1] - extSpherePositions[extLeft + 1];
+        const sDx2 = extSpherePositions[extRight + 2] - extSpherePositions[extLeft + 2];
+
+        const sDy0 = extSpherePositions[extUp] - extSpherePositions[extDown];
+        const sDy1 = extSpherePositions[extUp + 1] - extSpherePositions[extDown + 1];
+        const sDy2 = extSpherePositions[extUp + 2] - extSpherePositions[extDown + 2];
+
+        let snx = sDx1 * sDy2 - sDx2 * sDy1;
+        let sny = sDx2 * sDy0 - sDx0 * sDy2;
+        let snz = sDx0 * sDy1 - sDx1 * sDy0;
+        const snLen = Math.hypot(snx, sny, snz);
+
+        const dirX = extSphereDirections[extCenter];
+        const dirY = extSphereDirections[extCenter + 1];
+        const dirZ = extSphereDirections[extCenter + 2];
+
+        if (snLen > 1e-6) {
+          snx /= snLen;
+          sny /= snLen;
+          snz /= snLen;
+          if (snx * dirX + sny * dirY + snz * dirZ < 0) {
+            snx = -snx;
+            sny = -sny;
+            snz = -snz;
+          }
+        } else {
+          snx = dirX;
+          sny = dirY;
+          snz = dirZ;
+        }
+
+        sphereNormals[o3] = snx;
+        sphereNormals[o3 + 1] = sny;
+        sphereNormals[o3 + 2] = snz;
+
+        // Central-difference normal for 2.5D flat map:
+        const fDx0 = extFlatPositions[extRight] - extFlatPositions[extLeft];
+        const fDx1 = extFlatPositions[extRight + 1] - extFlatPositions[extLeft + 1];
+        const fDx2 = extFlatPositions[extRight + 2] - extFlatPositions[extLeft + 2];
+
+        const fDy0 = extFlatPositions[extUp] - extFlatPositions[extDown];
+        const fDy1 = extFlatPositions[extUp + 1] - extFlatPositions[extDown + 1];
+        const fDy2 = extFlatPositions[extUp + 2] - extFlatPositions[extDown + 2];
+
+        let fnx = fDx1 * fDy2 - fDx2 * fDy1;
+        let fny = fDx2 * fDy0 - fDx0 * fDy2;
+        let fnz = fDx0 * fDy1 - fDx1 * fDy0;
+        const fnLen = Math.hypot(fnx, fny, fnz);
+
+        if (fnLen > 1e-6) {
+          fnx /= fnLen;
+          fny /= fnLen;
+          fnz /= fnLen;
+          if (fnz < 0) {
+            fnx = -fnx;
+            fny = -fny;
+            fnz = -fnz;
+          }
+        } else {
+          fnx = 0;
+          fny = 0;
+          fnz = 1;
+        }
+
+        flatNormals[o3] = fnx;
+        flatNormals[o3 + 1] = fny;
+        flatNormals[o3 + 2] = fnz;
 
         // Coloring from canonical cell planet worldgen
+        const dir3: IVec3 = { x: dirX, y: dirY, z: dirZ };
+        const sample = sampler.sample(dir3);
+        const cell = findNearestCellFast(graph, dir3, previousCell);
+        previousCell = cell;
+
+        const surfaceElevation = sample.elevation - sample.seaLevel;
+        const h = (sample.isIce
+          ? Math.max(surfaceElevation, MIN_ICE_SURFACE_CLEARANCE_ELEVATION)
+          : surfaceElevation) * heightScale;
+
         if (colorMode === 'lod') {
           colors[o3] = lodColor[0];
           colors[o3 + 1] = lodColor[1];
@@ -1282,14 +1331,6 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
       edgeRefinementLevels,
       edgeRefinementSegments,
     );
-
-    // Lighting and local slope must see the displaced surface, including the
-    // relief multiplier used by the mesh. Radial/flat placeholder normals make
-    // every mountain read as a smooth sphere and create the false inner shine.
-    const actualSphereNormals = recomputeGridNormals(spherePositions, resolution, 'sphere');
-    const actualFlatNormals = recomputeGridNormals(flatPositions, resolution, 'flat');
-    sphereNormals.set(actualSphereNormals);
-    flatNormals.set(actualFlatNormals);
 
     const generationMs = performance.now() - generationStartedAt;
     const simplificationStartedAt = performance.now();

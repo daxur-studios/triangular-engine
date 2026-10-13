@@ -18,6 +18,7 @@ Add `ng generate triangular-engine:scene-page <name>` for a standalone Angular p
 
 - Generate `.component.ts`, `.component.html`, and `.component.scss` below the selected application's `src/app`.
 - Use Angular 20's standalone default (omit `standalone: true`), `EngineModule`, `EngineService.provide`, and the `flex-page` host class.
+- Keep generated component styles free of viewport dimensions and scene sizing overrides; rely on the consumer's global `.flex-page` flex chain.
 - Optionally add a lazy route before wildcard fallbacks with `--route --route-path=<path>`.
 - Resolve an explicit project or the sole workspace application safely.
 - Reject invalid names, unsafe paths, missing routes files, route collisions, and any generated-file conflict before writing.
@@ -26,7 +27,7 @@ Add `ng generate triangular-engine:scene-page <name>` for a standalone Angular p
 
 ## Verification
 
-- Focused schematic node tests cover generated output, routing, workspace selection, and conflict safety.
+- Focused schematic node tests cover generated output, flex sizing contract, routing, workspace selection, and conflict safety.
 - Run schematic typecheck and tests, then build the triangular-engine library.
 
 ## Status

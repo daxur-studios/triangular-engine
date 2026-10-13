@@ -21,6 +21,14 @@ function runner() {
   return new SchematicTestRunner('triangular-engine', path.join(__dirname, '../collection.json'));
 }
 
+function assertFlexPageStyles(styles) {
+  assert.match(styles, /:host\s*\{\s*position:\s*relative;/);
+  assert.doesNotMatch(styles, /\b(?:width|height)\s*:/i);
+  assert.doesNotMatch(styles, /\b100(?:vh|vw)\b/i);
+  assert.doesNotMatch(styles, /\bscene\s*\{/i);
+  assert.doesNotMatch(styles, /display\s*:\s*block/i);
+}
+
 test('generates conventional standalone page files with shared core scene and flex contract', async () => {
   const sourceTree = fixture();
   const originalRoutes = sourceTree.read('/src/app/app.routes.ts').toString();
@@ -36,7 +44,7 @@ test('generates conventional standalone page files with shared core scene and fl
   assert(source.includes('export class WorldComponent {}'));
   assert(result.readContent(`${base}.html`).includes('<scene [showFps]="true">'));
   assert(result.readContent(`${base}.html`).includes('<orbitControls'));
-  assert(result.readContent(`${base}.scss`).includes('display: flex'));
+  assertFlexPageStyles(result.readContent(`${base}.scss`));
   assert.equal(result.readContent('/src/app/app.routes.ts'), originalRoutes);
   assert.equal(result.readContent('/angular.json'), originalWorkspace);
   assert.equal(instance.tasks.length, 0);

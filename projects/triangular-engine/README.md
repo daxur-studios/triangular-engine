@@ -85,6 +85,8 @@ ng generate triangular-engine:scene-page features/play/pages/world
 
 This creates `world.component.ts`, `.html`, and `.scss` under the selected application's `src/app`, with a camera, lights, sample mesh, `EngineService` provider, and `flex-page` host class. Route generation is opt-in: add `--route --route-path=play/world` to register a lazy route. Use `--project <name>` in a multi-application workspace. The generator does not install packages or select a physics backend; `ng add triangular-engine` handles initial package and asset setup.
 
+The generated SCSS only makes the scene host relative for overlay positioning; it adds no viewport or scene sizing rules. Canvas sizing depends on the application's existing flex chain and global `.flex-page` utility, which routed scene hosts receive from the generated component. Keep the engine `SceneComponent` flex styles intact.
+
 `@daxur-studios/portal-layout` is a required peer dependency and is available from the public npm registry as version `0.0.1`.
 
 Manual installation remains available:
