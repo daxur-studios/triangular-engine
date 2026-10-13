@@ -32,9 +32,14 @@ export type Biome =
   // Venusian biomes:
   | 'volcanic_plains'
   | 'tessera_highlands'
-  | 'corona_rim';
+  | 'corona_rim'
+  // Protoplanet / Primordial biomes:
+  | 'magma_ocean'
+  | 'volcanic_crust'
+  | 'lava_fissures'
+  | 'cinder_plateau';
 
-export type PlanetaryBiomeArchetype = 'terran' | 'cratered_moon' | 'martian' | 'venusian';
+export type PlanetaryBiomeArchetype = 'terran' | 'cratered_moon' | 'martian' | 'venusian' | 'protoplanet';
 
 export interface IBiomeParams {
   archetype?: PlanetaryBiomeArchetype;
@@ -194,6 +199,42 @@ export function computeBiomes(
         biome[id] = 'corona_rim';
       } else {
         biome[id] = 'volcanic_plains';
+      }
+      continue;
+    }
+
+    if (p.archetype === 'protoplanet') {
+      const craterTag = p.craterLandform?.[id];
+      if (craterTag === 'lunar_maria') {
+        biome[id] = 'magma_ocean';
+        continue;
+      } else if (craterTag === 'crater_rim') {
+        biome[id] = 'crater_rim';
+        continue;
+      } else if (craterTag === 'crater_floor') {
+        biome[id] = 'crater_floor';
+        continue;
+      } else if (craterTag === 'crater_peak') {
+        biome[id] = 'crater_peak';
+        continue;
+      }
+
+      if (!isLand[id]) {
+        biome[id] = 'magma_ocean';
+        continue;
+      }
+
+      const normalizedElevation = Math.max(0, elevation[id] - seaLevelElevation) / landRelief;
+      const normalizedSlope = slope[id] / landRelief;
+
+      if (ridgeSet.has(id) || normalizedElevation >= 0.75) {
+        biome[id] = 'shield_volcano';
+      } else if (normalizedSlope >= 0.28) {
+        biome[id] = 'lava_fissures';
+      } else if (normalizedElevation >= 0.35) {
+        biome[id] = 'cinder_plateau';
+      } else {
+        biome[id] = 'volcanic_crust';
       }
       continue;
     }

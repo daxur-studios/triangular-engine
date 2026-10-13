@@ -20,3 +20,5 @@ plans: [/docs/plans/044_scene_page_generator.md]
 - The consumer production app build passed. Browser `/world` passed a 960×640 to 1200×800 resize check; `APP-WORLD` retained `flex-page` and `display:flex`, the cube rendered, and there were no page or console errors. Material and Jolt remained absent.
 - Packed tarball SHA-1: `0e44d911f4ad329bee097474de8c17ec0c30ac07` (130 files); the shared helper and generator were included and specs were excluded. Browser/package evidence: `tmp/engine-base-20261013-1200/generated-page-browser-result.json`, `generated-world-page.png`, and `scene-page-package-pack.json`.
 - Publication remains pending; no publish or commit was performed.
+- **[decision]** Per user feedback, generated components rely on the supported Angular 20 standalone default and omit redundant `standalone: true`; both schematics use the shared template.
+- **[verification]** Schematic TypeScript checking and all 13 tests passed after removal; both generators assert that their component source omits the standalone property.

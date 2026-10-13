@@ -17,7 +17,7 @@ Add `ng generate triangular-engine:scene-page <name>` for a standalone Angular p
 ## Contract
 
 - Generate `.component.ts`, `.component.html`, and `.component.scss` below the selected application's `src/app`.
-- Use a standalone component, `EngineModule`, `EngineService.provide`, and the `flex-page` host class.
+- Use Angular 20's standalone default (omit `standalone: true`), `EngineModule`, `EngineService.provide`, and the `flex-page` host class.
 - Optionally add a lazy route before wildcard fallbacks with `--route --route-path=<path>`.
 - Resolve an explicit project or the sole workspace application safely.
 - Reject invalid names, unsafe paths, missing routes files, route collisions, and any generated-file conflict before writing.

@@ -30,6 +30,7 @@ test('generates conventional standalone page files with shared core scene and fl
   const base = '/src/app/features/play/pages/world.component';
   const source = result.readContent(`${base}.ts`);
   assert(source.includes("selector: 'app-world'"));
+  assert(!source.includes('standalone:'));
   assert(source.includes("host: { class: 'flex-page' }"));
   assert(source.includes("providers: [EngineService.provide({ showFPS: true })]"));
   assert(source.includes('export class WorldComponent {}'));

@@ -37,6 +37,7 @@ test('base setup supplies decoder/texture assets without opting into physics', a
   assert.deepEqual(options.externalDependencies, ['existing-external']);
   assert.deepEqual(JSON.parse(result.readContent('/package.json')).dependencies, {});
   assert(result.readContent('/src/app/triangular-engine/engine-scene.component.ts').includes("class: 'flex-page'"));
+  assert(!result.readContent('/src/app/triangular-engine/engine-scene.component.ts').includes('standalone:'));
 });
 
 test('Jolt setup installs its declared peer and configures only the selected build', async () => {

@@ -51,7 +51,6 @@ import { EngineModule, EngineService } from 'triangular-engine';
 
 @Component({
   selector: '${selector}',
-  standalone: true,
   host: { class: 'flex-page' },
   imports: [EngineModule],
   templateUrl: './${templateFile}.html',
