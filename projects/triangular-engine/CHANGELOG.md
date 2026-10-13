@@ -1,5 +1,6 @@
 # Changelog
 
+- `createPlanetSurfaceSampler` samples ridge, summit and river influence through a spatial index instead of scanning every path vertex per sample, and caches per-cell corner radii and feature frames. Output is unchanged; sampling is up to ~14× faster on worlds with dense ridge paths such as the cratered moon archetype.
 - Updated `ng add` and `scene-page` generated styles to rely on the consumer's global `.flex-page` layout and the existing scene flex contract, with only relative host positioning for overlays.
 - Added `ng generate triangular-engine:scene-page <name>` to create a reusable standalone scene page with separate template and styles. Lazy route insertion is opt-in with `--route` and `--route-path`.
 - Moved Material Scene Tree inspection into the opt-in `triangular-engine/scene-tree` entry point. `provideSceneTree()` enables the existing `showSceneTree` UI flag; direct imports of `SceneTreeComponent` and the former `EngineFeaturesModule` must use the new subpath. Core Engine UI no longer imports Angular Material; CDK remains required by Portal Layout.

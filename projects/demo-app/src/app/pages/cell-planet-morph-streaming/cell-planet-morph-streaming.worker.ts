@@ -26,6 +26,7 @@ import {
   deriveIsLand,
   dot,
   findCellAt,
+  findCellNear,
   generateImpactCraters,
   type IImpactCraterResult,
   normalize,
@@ -157,19 +158,6 @@ const LOD_COLORS: readonly [number, number, number][] = [
   [1.00, 1.00, 1.00], // L8 White
 ];
 
-// World state cache
-let cachedWorldKey = '';
-let cachedGraph: IPlanetGraphCore;
-let cachedTectonics: IPlanetTectonics;
-let cachedEcology: IPlanetEcology;
-let cachedFeatures: IPlanetFeatures;
-let cachedSampler: IPlanetSurfaceSampler;
-let cachedEMin = -0.4;
-let cachedEMax = 0.8;
-let cachedProfile = WORLD_PROFILES.volcanic;
-let cachedMaxSlope = 0;
-let cachedRiverMask: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
-let cachedRidgeCellSet = new Set<number>();
 interface IRiverMaterialPoint {
   readonly x: number;
   readonly y: number;
@@ -177,19 +165,43 @@ interface IRiverMaterialPoint {
   readonly widthRadians: number;
 }
 
+interface ICellPlanetWorld {
+  /** `${profile}:${seed}`; also the material tiles' world revision. */
+  readonly key: string;
+  readonly graph: IPlanetGraphCore;
+  readonly tectonics: IPlanetTectonics;
+  readonly ecology: IPlanetEcology;
+  readonly features: IPlanetFeatures;
+  readonly sampler: IPlanetSurfaceSampler;
+  readonly eMin: number;
+  readonly eMax: number;
+  readonly profile: (typeof WORLD_PROFILES)[WorldProfileKind];
+  readonly maxSlope: number;
+  readonly riverMask: Uint8Array;
+  readonly ridgeCellSet: ReadonlySet<number>;
+  readonly riverMaterialPoints: readonly IRiverMaterialPoint[];
+  readonly riverMaterialBins: readonly (readonly number[])[];
+}
+
 const RIVER_BIN_WIDTH = 64;
 const RIVER_BIN_HEIGHT = 32;
-let cachedRiverMaterialPoints: IRiverMaterialPoint[] = [];
-let cachedRiverMaterialBins: number[][] = [];
+// Recently used worlds stay resident so switching archetypes back and forth
+// reuses them instead of regenerating tectonics, ecology and craters.
+const MAX_CACHED_WORLDS = 4;
+const worldCache = new Map<string, ICellPlanetWorld>();
+// The Voronoi graph depends only on the seed (not the archetype) and no later
+// stage mutates it, so every archetype of one seed shares a single graph.
+let cachedGraphSeed: number | undefined;
+let cachedGraph: IPlanetGraphCore | undefined;
 let cachedLookupKey = '';
 
 type WorldMaterialContext = Pick<
-  ReturnType<typeof getOrCreateWorld>,
+  ICellPlanetWorld,
   'ecology' | 'eMin' | 'eMax' | 'tectonics' | 'maxSlope' | 'riverMask' | 'ridgeCellSet'
 >;
 
 function buildCellPerPixelLookup(
-  world: ReturnType<typeof getOrCreateWorld>,
+  world: ICellPlanetWorld,
   colorMode: CellPlanetMorphWorkerRequest['colorMode'],
   includeMaterialCellLookup = false,
 ): ICellPerPixelLookupPayload | undefined {
@@ -285,33 +297,27 @@ function buildRiverMaterialMask(graph: IPlanetGraphCore, ecology: IPlanetEcology
   return mask;
 }
 
-function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: number = 1) {
+function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: number = 1): ICellPlanetWorld {
   const key = `${profileKind}:${seed}`;
-  if (cachedWorldKey === key && cachedSampler) {
-    return {
-      graph: cachedGraph,
-      tectonics: cachedTectonics,
-      ecology: cachedEcology,
-      features: cachedFeatures,
-      sampler: cachedSampler,
-      eMin: cachedEMin,
-      eMax: cachedEMax,
-      profile: cachedProfile,
-      maxSlope: cachedMaxSlope,
-      riverMask: cachedRiverMask,
-      ridgeCellSet: cachedRidgeCellSet,
-      riverMaterialPoints: cachedRiverMaterialPoints,
-      riverMaterialBins: cachedRiverMaterialBins,
-    };
+  const cached = worldCache.get(key);
+  if (cached) {
+    // Refresh recency: Map iteration order is insertion order.
+    worldCache.delete(key);
+    worldCache.set(key, cached);
+    return cached;
   }
 
   const profile = WORLD_PROFILES[profileKind] ?? WORLD_PROFILES.volcanic;
-  const graph = buildPlanetGraphCore({
-    cellCount: CELL_PLANET_U0_FIXTURE.cellCount,
-    seed,
-    relaxationIterations: CELL_PLANET_U0_FIXTURE.relaxationIterations,
-    jitter: CELL_PLANET_GENERATION_DEFAULTS.jitter,
-  });
+  if (!cachedGraph || cachedGraphSeed !== seed) {
+    cachedGraph = buildPlanetGraphCore({
+      cellCount: CELL_PLANET_U0_FIXTURE.cellCount,
+      seed,
+      relaxationIterations: CELL_PLANET_U0_FIXTURE.relaxationIterations,
+      jitter: CELL_PLANET_GENERATION_DEFAULTS.jitter,
+    });
+    cachedGraphSeed = seed;
+  }
+  const graph = cachedGraph;
   const tectonics = buildPlanetTectonics(graph, {
     plateCount: CELL_PLANET_GENERATION_DEFAULTS.plateCount,
     seed,
@@ -353,22 +359,9 @@ function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: numb
     eMin = Math.min(eMin, e);
     eMax = Math.max(eMax, e);
   }
-  cachedMaxSlope = ecology.slope.reduce((max, slope) => Math.max(max, slope), 0);
-  cachedRiverMask = buildRiverMaterialMask(graph, ecology);
-  cachedRidgeCellSet = new Set(tectonics.ridgeCellIds);
-  [cachedRiverMaterialPoints, cachedRiverMaterialBins] = buildRiverMaterialIndex(ecology);
-
-  cachedWorldKey = key;
-  cachedGraph = graph;
-  cachedTectonics = tectonics;
-  cachedEcology = ecology;
-  cachedFeatures = features;
-  cachedSampler = sampler;
-  cachedEMin = eMin;
-  cachedEMax = eMax;
-  cachedProfile = profile;
-
-  return {
+  const [riverMaterialPoints, riverMaterialBins] = buildRiverMaterialIndex(ecology);
+  const world: ICellPlanetWorld = {
+    key,
     graph,
     tectonics,
     ecology,
@@ -377,12 +370,18 @@ function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: numb
     eMin,
     eMax,
     profile,
-    maxSlope: cachedMaxSlope,
-    riverMask: cachedRiverMask,
-    ridgeCellSet: cachedRidgeCellSet,
-    riverMaterialPoints: cachedRiverMaterialPoints,
-    riverMaterialBins: cachedRiverMaterialBins,
+    maxSlope: ecology.slope.reduce((max, slope) => Math.max(max, slope), 0),
+    riverMask: buildRiverMaterialMask(graph, ecology),
+    ridgeCellSet: new Set(tectonics.ridgeCellIds),
+    riverMaterialPoints,
+    riverMaterialBins,
   };
+
+  worldCache.set(key, world);
+  while (worldCache.size > MAX_CACHED_WORLDS) {
+    worldCache.delete(worldCache.keys().next().value!);
+  }
+  return world;
 }
 
 function riverBinIndex(longitude: number, latitude: number): number {
@@ -437,7 +436,7 @@ function buildRiverMaterialIndex(ecology: IPlanetEcology): [IRiverMaterialPoint[
 }
 
 function narrowRiverInfluence(
-  world: ReturnType<typeof getOrCreateWorld>,
+  world: ICellPlanetWorld,
   direction: IVec3,
 ): number {
   if (world.riverMaterialPoints.length === 0) return 0;
@@ -655,7 +654,7 @@ function sampleLocalSlope01(
 }
 
 function buildMaterialTile(
-  world: ReturnType<typeof getOrCreateWorld>,
+  world: ICellPlanetWorld,
   colorMode: CellPlanetMorphWorkerRequest['colorMode'],
   interiorSize: number,
   tileX: number,
@@ -681,7 +680,7 @@ function buildMaterialTile(
   let previousCell: IPlanetGraphCell | null = null;
   const payload = bakeTerrainMaterialTile(
     {
-      worldRevision: cachedWorldKey,
+      worldRevision: world.key,
       address: { level: Math.round(Math.log2(gridX)), x: tileX, y: tileY },
       styleRevision: `cell-planet-${colorMode}-v1`,
       samplingVersion: 1,
@@ -921,38 +920,9 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
     const { id, colorMode, worldProfile = 'volcanic', seed = 1 } = data;
 
     const generationStartedAt = performance.now();
-    const {
-      graph,
-      tectonics,
-      ecology,
-      features,
-      sampler,
-      eMin,
-      eMax,
-      profile,
-      maxSlope,
-      riverMask,
-      ridgeCellSet,
-      riverMaterialPoints,
-      riverMaterialBins,
-    } =
-      getOrCreateWorld(worldProfile, seed);
-
-    const world = {
-      graph,
-      tectonics,
-      ecology,
-      features,
-      sampler,
-      eMin,
-      eMax,
-      profile,
-      maxSlope,
-      riverMask,
-      ridgeCellSet,
-      riverMaterialPoints,
-      riverMaterialBins,
-    };
+    const world = getOrCreateWorld(worldProfile, seed);
+    const { graph, tectonics, ecology, features, sampler, eMin, eMax, profile, maxSlope, riverMask, ridgeCellSet } =
+      world;
 
     if (data.kind === 'materialTile') {
       const materialTile = buildMaterialTile(
@@ -1086,7 +1056,7 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
     const centerU = (bounds.minU + bounds.maxU) * 0.5;
     const centerV = (bounds.minV + bounds.maxV) * 0.5;
     const centerDir = domain.getFieldPosition(address, centerU, centerV);
-    let previousCell: IPlanetGraphCell = findCellAt(graph, {
+    let rowStartCell: IPlanetGraphCell = findCellAt(graph, {
       x: centerDir[0],
       y: centerDir[1],
       z: centerDir[2],
@@ -1100,16 +1070,26 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
     const extSpherePositions = new Float32Array(extVertexCount * 3);
     const extSphereDirections = new Float32Array(extVertexCount * 3);
     const extFlatPositions = new Float32Array(extVertexCount * 3);
+    // Interior vertices reuse these instead of sampling the surface a second time.
+    const extSamples = new Array<ReturnType<IPlanetSurfaceSampler['sample']>>(extVertexCount);
+    const extCellIds = new Int32Array(extVertexCount);
 
     for (let evi = 0; evi < extRow; evi += 1) {
       const v = bounds.minV + (evi - 1) * stepV;
+      // Walk from the previous row's first cell: a short, exact Delaunay walk
+      // instead of a brute-force scan of every cell per lattice point.
+      let hintCell = rowStartCell;
 
       for (let eui = 0; eui < extRow; eui += 1) {
         const u = bounds.minU + (eui - 1) * stepU;
         const dirVec = domain.getFieldPosition(address, u, v);
         const dir3: IVec3 = { x: dirVec[0], y: dirVec[1], z: dirVec[2] };
 
-        const sample = sampler.sample(dir3);
+        hintCell = findCellNear(graph, dir3, hintCell.id);
+        if (eui === 0) rowStartCell = hintCell;
+        const sample = sampleSurfaceNear(sampler, dir3, hintCell.id);
+        extSamples[evi * extRow + eui] = sample;
+        extCellIds[evi * extRow + eui] = hintCell.id;
         const surfaceElevation = sample.elevation - sample.seaLevel;
         const h = (sample.isIce
           ? Math.max(surfaceElevation, MIN_ICE_SURFACE_CLEARANCE_ELEVATION)
@@ -1232,10 +1212,8 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
         flatNormals[o3 + 2] = fnz;
 
         // Coloring from canonical cell planet worldgen
-        const dir3: IVec3 = { x: dirX, y: dirY, z: dirZ };
-        const sample = sampler.sample(dir3);
-        const cell = findNearestCellFast(graph, dir3, previousCell);
-        previousCell = cell;
+        const sample = extSamples[extCenter / 3];
+        const cell = graph.cells[extCellIds[extCenter / 3]];
 
         const surfaceElevation = sample.elevation - sample.seaLevel;
         const h = (sample.isIce

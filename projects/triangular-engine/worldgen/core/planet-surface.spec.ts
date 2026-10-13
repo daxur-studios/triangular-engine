@@ -221,6 +221,69 @@ describe('createPlanetSurfaceSampler', () => {
     }
   });
 
+  it('matches a full scan of dense ridge, summit and river paths', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 23 });
+    const baseTectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 23 });
+    // All-land keeps coastal relief weighting at 1, isolating the path influence.
+    const tectonics = { ...baseTectonics, isLand: baseTectonics.isLand.map(() => true) };
+    const ecology = buildPlanetEcology(graph, tectonics);
+    // Dense great-circle arcs, including one across the south pole, stand in for the
+    // thousands of crater-rim ridge vertices a cratered archetype produces.
+    const arc = (axis: { x: number; y: number; z: number }, start: number, count: number) => {
+      const a = normalize(axis.x === 0 && axis.z === 0 ? { x: 1, y: 0, z: 0 } : { x: -axis.z, y: 0, z: axis.x });
+      const b = normalize({
+        x: axis.y * a.z - axis.z * a.y,
+        y: axis.z * a.x - axis.x * a.z,
+        z: axis.x * a.y - axis.y * a.x,
+      });
+      return Array.from({ length: count }, (_, i) => {
+        const t = start + i * 0.004;
+        return { x: a.x * Math.cos(t) + b.x * Math.sin(t), y: a.y * Math.cos(t) + b.y * Math.sin(t), z: a.z * Math.cos(t) + b.z * Math.sin(t) };
+      });
+    };
+    const ridgePaths = [arc(normalize({ x: 0, y: 1, z: 0 }), 0, 1600), arc(normalize({ x: 1, y: 0, z: 0 }), 1, 900), arc(normalize({ x: 0.3, y: 0.5, z: 0.8 }), 2, 700)];
+    const ridgePathStrength = [1, 0.4, 0.75];
+    const ridgePeaks = arc(normalize({ x: 0.7, y: -0.2, z: 0.1 }), 0, 300).filter((_, i) => i % 7 === 0);
+    const riverPaths = [arc(normalize({ x: -0.4, y: 0.6, z: 0.2 }), 0.5, 1200)];
+    const params = { ridgeWidthRadians: 0.045, summitWidthRadians: 0.028, riverWidthRadians: 0.018, ridgeRelief: 0.18, summitRelief: 0.16, riverDepth: 0.08 };
+    const sampler = createPlanetSurfaceSampler(
+      graph,
+      tectonics,
+      { ...ecology, ridgePaths, ridgePathStrength, ridgePeaks, riverPaths },
+      params,
+    );
+
+    const falloff = (distance: number, width: number) => {
+      if (distance >= width) return 0;
+      const t = distance / width;
+      const smooth = 1 - t * t * (3 - 2 * t);
+      return smooth * smooth;
+    };
+    const distance = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
+      Math.acos(Math.max(-1, Math.min(1, a.x * b.x + a.y * b.y + a.z * b.z)));
+    const nearest = (direction: { x: number; y: number; z: number }, path: readonly { x: number; y: number; z: number }[]) =>
+      Math.min(...path.map((point) => distance(direction, point)));
+
+    const directions = [
+      ...ridgePaths.flat().filter((_, i) => i % 37 === 0),
+      ...riverPaths.flat().filter((_, i) => i % 41 === 0),
+      { x: 0, y: 1, z: 0 },
+      { x: 0, y: -1, z: 0 },
+    ].map((point, i) => normalize({ x: point.x + Math.sin(i) * 0.01, y: point.y + Math.cos(i * 1.7) * 0.01, z: point.z + Math.sin(i * 2.3) * 0.01 }));
+    let checkedRidge = 0;
+    for (const direction of directions) {
+      const sample = sampler.sample(direction);
+      const ridgeInfluence = Math.max(0, ...ridgePaths.map((path, i) => falloff(nearest(direction, path), params.ridgeWidthRadians) * ridgePathStrength[i]!));
+      const summit = falloff(nearest(direction, ridgePeaks), params.summitWidthRadians);
+      const expectedRidge = Math.max(ridgeInfluence * params.ridgeRelief, summit * params.summitRelief);
+      const expectedRiver = falloff(nearest(direction, riverPaths[0]!), params.riverWidthRadians) * params.riverDepth;
+      if (expectedRidge > 0) checkedRidge++;
+      expect(sample.ridgeRelief).toBeCloseTo(expectedRidge, 9);
+      expect(sample.riverCarve).toBeCloseTo(expectedRiver, 9);
+    }
+    expect(checkedRidge).toBeGreaterThan(20);
+  });
+
   it('is deterministic and projection-independent', () => {
     const graph = buildPlanetGraphCore({ cellCount: 240, seed: 61 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 61 });

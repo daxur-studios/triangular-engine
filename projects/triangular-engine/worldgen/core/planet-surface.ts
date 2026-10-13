@@ -161,32 +161,74 @@ function smoothFalloff(distance: number, width: number): number {
   return smooth * smooth;
 }
 
-function nearestPathDistance(direction: IVec3, paths: readonly IVec3[][]): number {
-  let nearest = Infinity;
-  for (const path of paths) {
-    for (const point of path) nearest = Math.min(nearest, angularDistance(direction, point));
-  }
-  return nearest;
+/**
+ * Uniform 3D bucket grid over weighted unit-sphere points (ridge, river and summit vertices).
+ * Every point outside a query's angular `width` contributes exactly zero falloff, and chord
+ * length never exceeds angular distance, so with buckets at least `width` wide every point that
+ * can influence a sample lies in the 27 buckets around it. Queries therefore cost the local path
+ * density instead of a scan over every path vertex on the planet (thousands on cratered worlds).
+ */
+interface ISpherePointIndex {
+  readonly width: number;
+  readonly cosWidth: number;
+  readonly bucketSize: number;
+  readonly dimension: number;
+  readonly buckets: Map<number, { readonly point: IVec3; readonly weight: number }[]>;
 }
 
-function nearestPathInfluence(
-  direction: IVec3,
-  paths: readonly IVec3[][],
-  strengths: readonly number[],
+function sphereBucketCoordinate(value: number, bucketSize: number): number {
+  return Math.floor((value + 1) / bucketSize) + 1;
+}
+
+function createSpherePointIndex(
+  paths: readonly (readonly IVec3[])[],
   width: number,
-): number {
+  weightForPath: (pathIndex: number) => number = () => 1,
+): ISpherePointIndex {
+  // A tiny floor keeps the grid bounded for degenerate widths; such queries return zero anyway.
+  const bucketSize = Math.max(width, 1e-3);
+  const dimension = Math.ceil(2 / bucketSize) + 3;
+  const buckets: ISpherePointIndex['buckets'] = new Map();
+  if (width > 0) {
+    for (let pathIndex = 0; pathIndex < paths.length; pathIndex++) {
+      const path = paths[pathIndex];
+      if (!path || path.length === 0) continue;
+      const weight = weightForPath(pathIndex);
+      for (const point of path) {
+        const key =
+          (sphereBucketCoordinate(point.x, bucketSize) * dimension + sphereBucketCoordinate(point.y, bucketSize)) *
+            dimension +
+          sphereBucketCoordinate(point.z, bucketSize);
+        let bucket = buckets.get(key);
+        if (!bucket) buckets.set(key, (bucket = []));
+        bucket.push({ point, weight });
+      }
+    }
+  }
+  return { width, cosWidth: Math.cos(width), bucketSize, dimension, buckets };
+}
+
+/** Max of `smoothFalloff(angularDistance) * weight` over indexed points, or 0 with none in range. */
+function maxIndexedFalloff(index: ISpherePointIndex, direction: IVec3): number {
+  if (index.buckets.size === 0) return 0;
+  const { width, cosWidth, bucketSize, dimension, buckets } = index;
+  const bx = sphereBucketCoordinate(direction.x, bucketSize);
+  const by = sphereBucketCoordinate(direction.y, bucketSize);
+  const bz = sphereBucketCoordinate(direction.z, bucketSize);
   let influence = 0;
-  for (let i = 0; i < paths.length; i++) {
-    const path = paths[i];
-    if (!path || path.length === 0) continue;
-    const distance = nearestPathDistance(direction, [path]);
-    influence = Math.max(influence, smoothFalloff(distance, width) * (strengths[i] ?? 1));
+  for (let x = bx - 1; x <= bx + 1; x++) {
+    for (let y = by - 1; y <= by + 1; y++) {
+      for (let z = bz - 1; z <= bz + 1; z++) {
+        const bucket = buckets.get((x * dimension + y) * dimension + z);
+        if (!bucket) continue;
+        for (const { point, weight } of bucket) {
+          if (dot(direction, point) < cosWidth) continue;
+          influence = Math.max(influence, smoothFalloff(angularDistance(direction, point), width) * weight);
+        }
+      }
+    }
   }
   return influence;
-}
-
-function nearestRiverInfluence(direction: IVec3, paths: readonly IVec3[][], width: number): number {
-  return smoothFalloff(nearestPathDistance(direction, paths), width);
 }
 
 function hash3(x: number, y: number, z: number, seed: number): number {
@@ -237,10 +279,30 @@ function cellDetailNoise(direction: IVec3, frequency: number, seed: number): num
 
 interface IVolcanoStamp {
   readonly cell: IPlanetGraphCore['cells'][number];
+  /** Centre-to-nearest-corner angular distance of `cell`. */
+  readonly nearestCornerRadius: number;
   readonly elevationDelta: number;
   readonly tangentX: IVec3;
   readonly tangentZ: IVec3;
   readonly settings: VolcanoSettings;
+}
+
+/** Per-cell constants of a discrete cell's feature stamp, resolved once instead of per sample. */
+interface ICellFeatureFrame {
+  readonly kind: 'volcano' | 'mesa' | 'crater';
+  readonly elevationDelta: number;
+  readonly tangentX: IVec3;
+  readonly tangentZ: IVec3;
+  readonly featureRadius: number;
+  readonly settings: ReturnType<typeof defaultGeologicalTerrainSettings>;
+  /** The shape's centre height; the stamp is normalized by it. */
+  readonly peak: number;
+}
+
+function nearestCornerAngularRadius(cell: IPlanetGraphCore['cells'][number]): number {
+  let radius = Infinity;
+  for (const corner of cell.corners) radius = Math.min(radius, angularDistance(cell.center, corner));
+  return radius;
 }
 
 function sampleFeatureShape(
@@ -259,35 +321,13 @@ function sampleFeatureShape(
   }
 }
 
-function cellFeatureRelief(
-  direction: IVec3,
+function createCellFeatureFrame(
   cell: IPlanetGraphCore['cells'][number],
   instance: NonNullable<IPlanetFeatures['instances'][number]>,
   settings: ReturnType<typeof defaultGeologicalTerrainSettings>,
-  radiusFraction: number,
-): number {
-  if (cell.corners.length === 0 || instance.elevationDelta === 0) return 0;
-
-  const footprintRadius = Math.max(
-    1e-4,
-    Math.min(...cell.corners.map((corner) => angularDistance(cell.center, corner))) * radiusFraction,
-  );
-  const distanceFromCentre = angularDistance(direction, cell.center);
-  if (distanceFromCentre >= footprintRadius) return 0;
-
+): ICellFeatureFrame {
   const reference = Math.abs(cell.center.y) < 0.92 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
   const tangentX = normalize(cross(reference, cell.center));
-  const tangentZ = normalize(cross(cell.center, tangentX));
-  const alignment = Math.max(1e-4, dot(direction, cell.center));
-  const featureRadius =
-    instance.kind === 'volcano'
-      ? settings.volcano.radius
-      : instance.kind === 'mesa'
-        ? settings.mesa.radius
-        : settings.crater.radius;
-  const tangentScale = featureRadius / Math.max(1e-4, Math.tan(footprintRadius));
-  const localX = (dot(direction, tangentX) / alignment) * tangentScale;
-  const localZ = (dot(direction, tangentZ) / alignment) * tangentScale;
   const featureSettings = {
     ...settings,
     ...(instance.kind === 'volcano'
@@ -296,24 +336,56 @@ function cellFeatureRelief(
         ? { mesa: { ...settings.mesa, seed: settings.mesa.seed + instance.siteCellId } }
         : { crater: { ...settings.crater, seed: settings.crater.seed + instance.siteCellId } }),
   };
-  const peak = sampleFeatureShape(instance.kind, 0, 0, featureSettings);
+  return {
+    kind: instance.kind,
+    elevationDelta: instance.elevationDelta,
+    tangentX,
+    tangentZ: normalize(cross(cell.center, tangentX)),
+    featureRadius:
+      instance.kind === 'volcano'
+        ? settings.volcano.radius
+        : instance.kind === 'mesa'
+          ? settings.mesa.radius
+          : settings.crater.radius,
+    settings: featureSettings,
+    peak: sampleFeatureShape(instance.kind, 0, 0, featureSettings),
+  };
+}
+
+function cellFeatureRelief(
+  direction: IVec3,
+  cell: IPlanetGraphCore['cells'][number],
+  nearestCornerRadius: number,
+  frame: ICellFeatureFrame,
+  radiusFraction: number,
+): number {
+  if (cell.corners.length === 0 || frame.elevationDelta === 0) return 0;
+
+  const footprintRadius = Math.max(1e-4, nearestCornerRadius * radiusFraction);
+  const distanceFromCentre = angularDistance(direction, cell.center);
+  if (distanceFromCentre >= footprintRadius) return 0;
+
+  const { tangentX, tangentZ, peak } = frame;
+  const alignment = Math.max(1e-4, dot(direction, cell.center));
+  const tangentScale = frame.featureRadius / Math.max(1e-4, Math.tan(footprintRadius));
+  const localX = (dot(direction, tangentX) / alignment) * tangentScale;
+  const localZ = (dot(direction, tangentZ) / alignment) * tangentScale;
   if (Math.abs(peak) < 1e-5) return 0;
 
   // The authored geological shape supplies the silhouette and local detail. The envelope is
   // cell-specific and makes the feature return to the cell's ground before the Voronoi edge.
   const edgeEnvelope = smoothFalloff(distanceFromCentre, footprintRadius);
-  return (sampleFeatureShape(instance.kind, localX, localZ, featureSettings) / peak) *
-    instance.elevationDelta * edgeEnvelope;
+  return (sampleFeatureShape(frame.kind, localX, localZ, frame.settings) / peak) *
+    frame.elevationDelta * edgeEnvelope;
 }
 
 function volcanoRelief(direction: IVec3, stamp: IVolcanoStamp, radiusFraction: number): number {
-  const { cell, elevationDelta, tangentX, tangentZ, settings } = stamp;
+  const { cell, nearestCornerRadius, elevationDelta, tangentX, tangentZ, settings } = stamp;
   if (cell.corners.length === 0 || elevationDelta === 0) return 0;
 
   // Keep the analytic shape inside the site cell. The centre-to-nearest-corner distance is a
   // conservative local footprint for an irregular Voronoi polygon; fading to zero before that
   // boundary keeps the feature owned by one cell and leaves neighbouring cell terrain intact.
-  const nearestCornerRadius = Math.min(...cell.corners.map((corner) => angularDistance(cell.center, corner)));
   const radius = Math.max(1e-4, nearestCornerRadius * radiusFraction);
   const angularDistanceFromCentre = angularDistance(direction, cell.center);
   const normalized = angularDistanceFromCentre / radius;
@@ -358,6 +430,7 @@ export function createPlanetSurfaceSampler(
           const tangentX = normalize(cross(reference, cell.center));
           return {
             cell,
+            nearestCornerRadius: nearestCornerAngularRadius(cell),
             elevationDelta: instance.elevationDelta,
             tangentX,
             tangentZ: normalize(cross(cell.center, tangentX)),
@@ -365,6 +438,24 @@ export function createPlanetSurfaceSampler(
           };
         })
         .filter((stamp): stamp is IVolcanoStamp => stamp !== undefined);
+
+  const ridgeIndex = createSpherePointIndex(
+    ecology.ridgePaths,
+    p.ridgeWidthRadians,
+    (pathIndex) => ecology.ridgePathStrength[pathIndex] ?? 1,
+  );
+  const summitIndex = createSpherePointIndex([ecology.ridgePeaks], p.summitWidthRadians);
+  const riverIndex = createSpherePointIndex(ecology.riverPaths, p.riverWidthRadians);
+
+  // Lazily resolved per-cell constants; NaN marks a cell not yet visited.
+  const nearestCornerRadiusByCell = new Float64Array(graph.cells.length).fill(NaN);
+  const nearestCornerRadius = (cell: IPlanetGraphCore['cells'][number]): number => {
+    let radius = nearestCornerRadiusByCell[cell.id]!;
+    if (Number.isNaN(radius)) nearestCornerRadiusByCell[cell.id] = radius = nearestCornerAngularRadius(cell);
+    return radius;
+  };
+  const geologicalSettings = defaultGeologicalTerrainSettings();
+  const cellFeatureFrames = new Map<number, ICellFeatureFrame>();
 
   const sampleAtCell = (unitDirection: IVec3, siteCell: IPlanetGraphCore['cells'][number]): IPlanetSurfaceSample => {
       const sharedSurface = sampleElevationSurfaceAtCell(
@@ -387,13 +478,7 @@ export function createPlanetSurfaceSampler(
       if (isDiscreteCell) {
         const ownElevation =
           siteCell.id < tectonics.elevation.length ? tectonics.elevation[siteCell.id]! : tectonics.seaLevelElevation;
-        const cellRadius =
-          siteCell.corners.length > 0
-            ? Math.max(
-                1e-4,
-                Math.min(...siteCell.corners.map((corner) => angularDistance(siteCell.center, corner))),
-              )
-            : 0;
+        const cellRadius = siteCell.corners.length > 0 ? Math.max(1e-4, nearestCornerRadius(siteCell)) : 0;
 
         // Blend the cell's authored centre value into the same fan surface used by
         // neighboring cells. The fan centre weight is exactly zero on every polygon
@@ -426,11 +511,16 @@ export function createPlanetSurfaceSampler(
       let featureRelief = 0;
       if (isDiscreteCell) {
         if (cellFeature) {
+          let frame = cellFeatureFrames.get(siteCell.id);
+          if (!frame) {
+            frame = createCellFeatureFrame(siteCell, cellFeature, geologicalSettings);
+            cellFeatureFrames.set(siteCell.id, frame);
+          }
           featureRelief = cellFeatureRelief(
             unitDirection,
             siteCell,
-            cellFeature,
-            defaultGeologicalTerrainSettings(),
+            nearestCornerRadius(siteCell),
+            frame,
             p.featureRadiusFraction,
           );
         }
@@ -457,25 +547,17 @@ export function createPlanetSurfaceSampler(
       // Ridges and rivers stay shared, cross-cell corridors in both modes — a mountain crest or
       // a river still runs through several cells the same way it does in 'shaped'. Only the
       // base elevation (and any feature stamp) is cell-local.
-      const ridgeInfluence = nearestPathInfluence(
-        unitDirection,
-        ecology.ridgePaths,
-        ecology.ridgePathStrength,
-        p.ridgeWidthRadians,
+      const ridgeInfluence = maxIndexedFalloff(ridgeIndex, unitDirection);
+      let ridgeRelief = Math.max(
+        ridgeInfluence * p.ridgeRelief,
+        maxIndexedFalloff(summitIndex, unitDirection) * p.summitRelief,
       );
-      let ridgeRelief = ridgeInfluence * p.ridgeRelief;
-      for (const peak of ecology.ridgePeaks) {
-        ridgeRelief = Math.max(
-          ridgeRelief,
-          smoothFalloff(angularDistance(unitDirection, peak), p.summitWidthRadians) * p.summitRelief,
-        );
-      }
       ridgeRelief *= coastalReliefWeight;
 
       // Rivers own their corridors. Keeping their carve below the sea datum would deepen
       // ocean cells and make river crossings ambiguous at the coast.
       const riverCarve = isTectonicLand
-        ? nearestRiverInfluence(unitDirection, ecology.riverPaths, p.riverWidthRadians) * p.riverDepth * coastalReliefWeight
+        ? maxIndexedFalloff(riverIndex, unitDirection) * p.riverDepth * coastalReliefWeight
         : 0;
 
       const effectiveBaseElevation = isIce
