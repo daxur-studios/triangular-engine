@@ -122,6 +122,10 @@ const LANDFORM_BY_BIOME: Partial<Record<Biome, CellLandform>> = {
   crater_floor: 'flat',
   martian_lowlands: 'flat',
   volcanic_plains: 'flat',
+  cinder_plateau: 'hill',
+  lava_fissures: 'hill',
+  volcanic_crust: 'flat',
+  magma_ocean: 'flat',
 };
 
 function resolveLandform(biome: Biome | undefined): CellLandform {

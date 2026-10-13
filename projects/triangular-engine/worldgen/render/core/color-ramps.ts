@@ -78,6 +78,11 @@ export const BIOME_COLORS: Record<string, string> = {
   volcanic_plains: 'hsl(36, 46%, 36%)',
   tessera_highlands: 'hsl(46, 56%, 56%)',
   corona_rim: 'hsl(26, 68%, 46%)',
+  // Protoplanet / Primordial:
+  magma_ocean: 'hsl(18, 95%, 44%)',
+  volcanic_crust: 'hsl(15, 8%, 18%)',
+  lava_fissures: 'hsl(22, 95%, 52%)',
+  cinder_plateau: 'hsl(25, 12%, 30%)',
 };
 
 export function biomeColor(biome: string): string {

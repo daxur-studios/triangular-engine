@@ -169,4 +169,44 @@ describe('computeBiomes', () => {
     }
     expect(Math.min(...seededColdCounts)).toBeLessThan(baselineColdCount);
   });
+
+  it('protoplanet archetype produces only primordial volcanic/magma biomes with no vegetation or ice caps', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 101 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 8, seed: 101 });
+    const climate = computeClimate(graph, tectonics.elevation, tectonics.isLand, tectonics.seaLevelElevation);
+    const waterBodyKind = classifyWaterBodies(graph, tectonics.isLand).waterBodyKind;
+
+    const biomes = computeBiomes(
+      graph,
+      tectonics.elevation,
+      tectonics.isLand,
+      waterBodyKind,
+      tectonics.ridgeCellIds,
+      tectonics.seaLevelElevation,
+      climate.temperature,
+      climate.moisture,
+      { archetype: 'protoplanet' },
+    );
+
+    const allowedProtoplanetBiomes = new Set([
+      'magma_ocean',
+      'volcanic_crust',
+      'lava_fissures',
+      'cinder_plateau',
+      'shield_volcano',
+      'crater_rim',
+      'crater_floor',
+      'crater_peak',
+    ]);
+
+    for (const b of biomes.biome) {
+      expect(allowedProtoplanetBiomes.has(b)).toBe(true);
+    }
+
+    for (let id = 0; id < graph.cells.length; id++) {
+      if (!tectonics.isLand[id]) {
+        expect(biomes.biome[id]).toBe('magma_ocean');
+      }
+    }
+  });
 });

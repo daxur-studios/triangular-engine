@@ -256,7 +256,14 @@ export class PlanetArchetypesLabPageComponent {
       let highlandsCount = 0;
       if (this.currentEcology) {
         for (const b of this.currentEcology.biome) {
-          if (b === 'lunar_highlands' || b === 'martian_highlands') highlandsCount++;
+          if (
+            b === 'lunar_highlands' ||
+            b === 'martian_highlands' ||
+            b === 'tessera_highlands' ||
+            b === 'cinder_plateau'
+          ) {
+            highlandsCount++;
+          }
         }
       }
       this.highlandsCoverage.set(`${((highlandsCount / total) * 100).toFixed(1)}%`);

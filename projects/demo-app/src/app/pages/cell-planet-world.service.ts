@@ -88,6 +88,7 @@ export class CellPlanetWorldService {
     const ecology = buildPlanetEcology(graph, tectonics, {
       climate: profile.climate,
       biomes: {
+        archetype: profile.archetype,
         ...profile.biomes,
         craterLandform: impactCraters?.craterLandform,
       },

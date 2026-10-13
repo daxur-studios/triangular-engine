@@ -131,7 +131,7 @@ export const WORLD_PROFILES: Record<WorldProfileKind, IWorldProfile> = {
   },
   protoplanet: {
     kind: 'protoplanet',
-    archetype: 'terran',
+    archetype: 'protoplanet',
     tectonics: {
       ridgeBoost: 1.1,
       subductionUplift: 0.7,
@@ -141,9 +141,18 @@ export const WORLD_PROFILES: Record<WorldProfileKind, IWorldProfile> = {
       baseTemperatureOffset: 0.6,
     },
     biomes: {
+      archetype: 'protoplanet',
       hotTemperatureThreshold: 0.15,
     },
     features: { volcanoes: true, mesas: true, lava: true },
+    impactCraters: {
+      basinCount: 2,
+      complexCraterCount: 8,
+      simpleCraterCount: 30,
+      mariaBasaltFlooding: true,
+      depthScale: 0.9,
+      rimScale: 1.0,
+    },
     oceanSubstance: 'lava',
   },
 };
