@@ -168,12 +168,25 @@ function smoothFalloff(distance: number, width: number): number {
  * can influence a sample lies in the 27 buckets around it. Queries therefore cost the local path
  * density instead of a scan over every path vertex on the planet (thousands on cratered worlds).
  */
+interface ISpherePointEntry {
+  readonly point: IVec3;
+  readonly weight: number;
+}
+
 interface ISpherePointIndex {
   readonly width: number;
   readonly cosWidth: number;
   readonly bucketSize: number;
   readonly dimension: number;
-  readonly buckets: Map<number, { readonly point: IVec3; readonly weight: number }[]>;
+  readonly buckets: Map<number, ISpherePointEntry[]>;
+  /**
+   * Lazily merged 27-bucket neighbourhood of each queried bucket, in the same bucket and insertion
+   * order a direct scan would visit. Coherent queries (tile bakes, mesh grids) stay in one bucket for
+   * many samples, so most queries cost one key comparison instead of 27 map lookups.
+   */
+  readonly neighbourhoods: Map<number, readonly ISpherePointEntry[]>;
+  lastNeighbourhoodKey: number;
+  lastNeighbourhood: readonly ISpherePointEntry[];
 }
 
 function sphereBucketCoordinate(value: number, bucketSize: number): number {
@@ -205,28 +218,61 @@ function createSpherePointIndex(
       }
     }
   }
-  return { width, cosWidth: Math.cos(width), bucketSize, dimension, buckets };
+  return {
+    width,
+    cosWidth: Math.cos(width),
+    bucketSize,
+    dimension,
+    buckets,
+    neighbourhoods: new Map(),
+    lastNeighbourhoodKey: -1,
+    lastNeighbourhood: [],
+  };
+}
+
+/** The points of the 27 buckets around bucket (`bx`, `by`, `bz`), merged and cached. */
+function indexedNeighbourhood(
+  index: ISpherePointIndex,
+  bx: number,
+  by: number,
+  bz: number,
+): readonly ISpherePointEntry[] {
+  const { dimension } = index;
+  const key = (bx * dimension + by) * dimension + bz;
+  if (key === index.lastNeighbourhoodKey) return index.lastNeighbourhood;
+  let merged = index.neighbourhoods.get(key);
+  if (!merged) {
+    const entries: ISpherePointEntry[] = [];
+    for (let x = bx - 1; x <= bx + 1; x++) {
+      for (let y = by - 1; y <= by + 1; y++) {
+        for (let z = bz - 1; z <= bz + 1; z++) {
+          const bucket = index.buckets.get((x * dimension + y) * dimension + z);
+          if (bucket) for (const entry of bucket) entries.push(entry);
+        }
+      }
+    }
+    index.neighbourhoods.set(key, (merged = entries));
+  }
+  index.lastNeighbourhoodKey = key;
+  index.lastNeighbourhood = merged;
+  return merged;
 }
 
 /** Max of `smoothFalloff(angularDistance) * weight` over indexed points, or 0 with none in range. */
 function maxIndexedFalloff(index: ISpherePointIndex, direction: IVec3): number {
   if (index.buckets.size === 0) return 0;
-  const { width, cosWidth, bucketSize, dimension, buckets } = index;
-  const bx = sphereBucketCoordinate(direction.x, bucketSize);
-  const by = sphereBucketCoordinate(direction.y, bucketSize);
-  const bz = sphereBucketCoordinate(direction.z, bucketSize);
+  const { width, cosWidth, bucketSize } = index;
+  const points = indexedNeighbourhood(
+    index,
+    sphereBucketCoordinate(direction.x, bucketSize),
+    sphereBucketCoordinate(direction.y, bucketSize),
+    sphereBucketCoordinate(direction.z, bucketSize),
+  );
   let influence = 0;
-  for (let x = bx - 1; x <= bx + 1; x++) {
-    for (let y = by - 1; y <= by + 1; y++) {
-      for (let z = bz - 1; z <= bz + 1; z++) {
-        const bucket = buckets.get((x * dimension + y) * dimension + z);
-        if (!bucket) continue;
-        for (const { point, weight } of bucket) {
-          if (dot(direction, point) < cosWidth) continue;
-          influence = Math.max(influence, smoothFalloff(angularDistance(direction, point), width) * weight);
-        }
-      }
-    }
+  for (let i = 0; i < points.length; i++) {
+    const { point, weight } = points[i];
+    if (dot(direction, point) < cosWidth) continue;
+    influence = Math.max(influence, smoothFalloff(angularDistance(direction, point), width) * weight);
   }
   return influence;
 }
@@ -540,9 +586,6 @@ export function createPlanetSurfaceSampler(
       const isTectonicLand = tectonics.isLand[siteCell.id] ?? baseElevation >= tectonics.seaLevelElevation;
       const isIce = !isTectonicLand && cellBiome === 'ice_cap';
 
-      const freeboard = p.iceShelfFreeboard ?? 0.02;
-      const iceMicroRelief = (cellDetailNoise(unitDirection, 40, tectonics.seed) - 0.5) * 2 * 0.003;
-      const iceElevation = tectonics.seaLevelElevation + freeboard + iceMicroRelief;
 
       // Ridges and rivers stay shared, cross-cell corridors in both modes — a mountain crest or
       // a river still runs through several cells the same way it does in 'shaped'. Only the
@@ -560,9 +603,15 @@ export function createPlanetSurfaceSampler(
         ? maxIndexedFalloff(riverIndex, unitDirection) * p.riverDepth * coastalReliefWeight
         : 0;
 
-      const effectiveBaseElevation = isIce
-        ? baseElevation + (iceElevation - baseElevation) * sharedSurface.centerWeight * coastalReliefWeight
-        : baseElevation;
+      // Only ice cells need the shelf height, so its noise is evaluated lazily.
+      let effectiveBaseElevation = baseElevation;
+      if (isIce) {
+        const freeboard = p.iceShelfFreeboard ?? 0.02;
+        const iceMicroRelief = (cellDetailNoise(unitDirection, 40, tectonics.seed) - 0.5) * 2 * 0.003;
+        const iceElevation = tectonics.seaLevelElevation + freeboard + iceMicroRelief;
+        effectiveBaseElevation =
+          baseElevation + (iceElevation - baseElevation) * sharedSurface.centerWeight * coastalReliefWeight;
+      }
       // Feature stamps are cell-local even in shaped mode. Fade them with the
       // fan's site weight so adjacent cells meet on the same shared edge.
       featureRelief *= sharedSurface.centerWeight * coastalReliefWeight;

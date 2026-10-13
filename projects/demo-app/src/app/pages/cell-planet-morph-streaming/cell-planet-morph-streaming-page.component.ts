@@ -197,11 +197,23 @@ export class CellPlanetMorphStreamingPageComponent {
     new URL('./cell-planet-morph-streaming.worker', import.meta.url),
     { type: 'module' },
   );
-  /** Keeps a high resolution bake from occupying the mesh worker's queue. */
-  private readonly materialWorker = new Worker(
-    new URL('./cell-planet-morph-streaming.worker', import.meta.url),
-    { type: 'module' },
+  /**
+   * Material bakes run off the mesh worker so a high resolution bake never
+   * occupies its queue. Tiles are independent, so a small pool bakes several in
+   * parallel; each worker keeps its own world cache. Leave cores for the main
+   * and mesh threads.
+   */
+  private readonly materialWorkers = Array.from(
+    { length: Math.min(4, Math.max(1, (navigator.hardwareConcurrency ?? 4) - 2)) },
+    () => new Worker(
+      new URL('./cell-planet-morph-streaming.worker', import.meta.url),
+      { type: 'module' },
+    ),
   );
+  /** Tile bakes currently assigned to each pooled worker, for least-busy dispatch. */
+  private readonly materialWorkerLoad = this.materialWorkers.map(() => 0);
+  /** Pooled worker index serving each in-flight material tile request id. */
+  private readonly materialTileWorkerIndex = new Map<number, number>();
   private nextWorkerRequestId = 0;
   private readonly workerRequests = new Map<
     number,
@@ -440,6 +452,7 @@ export class CellPlanetMorphStreamingPageComponent {
   private readonly cellPerPixelUniforms = createCellPerPixelLookupUniforms();
   readonly materialRuntime = new TerrainMaterialTileRuntime({
     request: address => this.requestStreamedMaterialTile(address),
+    maxInFlight: this.materialWorkers.length,
     onPublish: (payload, resident) => {
       for (const key of this.materialTileElevations.keys()) {
         if (!resident.has(key)) this.materialTileElevations.delete(key);
@@ -766,6 +779,7 @@ export class CellPlanetMorphStreamingPageComponent {
       const materialPending = this.materialTileRequests.get(data.id);
       if (materialPending) {
         this.materialTileRequests.delete(data.id);
+        this.releaseMaterialWorker(data.id);
         if (data.error) {
           materialPending.reject(new Error(data.error));
         } else {
@@ -832,7 +846,7 @@ export class CellPlanetMorphStreamingPageComponent {
     };
 
     this.terrainWorker.onmessage = handleWorkerMessage;
-    this.materialWorker.onmessage = handleWorkerMessage;
+    for (const worker of this.materialWorkers) worker.onmessage = handleWorkerMessage;
 
     const handleWorkerError = () => {
       const error = new Error('Morph terrain worker crashed.');
@@ -840,6 +854,7 @@ export class CellPlanetMorphStreamingPageComponent {
       this.workerRequests.clear();
       for (const pending of this.materialTileRequests.values()) pending.reject(error);
       this.materialTileRequests.clear();
+      this.resetMaterialWorkerLoad();
       if (this.cellGridRequests.size > 0) {
         this.cellGridRequests.clear();
         this.cellGridPendingKey = '';
@@ -847,7 +862,7 @@ export class CellPlanetMorphStreamingPageComponent {
       }
     };
     this.terrainWorker.onerror = handleWorkerError;
-    this.materialWorker.onerror = handleWorkerError;
+    for (const worker of this.materialWorkers) worker.onerror = handleWorkerError;
 
     const textureTick = this.engine.beforeRender$.subscribe(() => {
       this.updateMaterialView();
@@ -877,12 +892,13 @@ export class CellPlanetMorphStreamingPageComponent {
       }
       this.stopRandomCellStress();
       this.terrainWorker.terminate();
-      this.materialWorker.terminate();
+      for (const worker of this.materialWorkers) worker.terminate();
       const error = new Error('Morph terrain worker terminated.');
       for (const pending of this.workerRequests.values()) pending.reject(error);
       this.workerRequests.clear();
       for (const pending of this.materialTileRequests.values()) pending.reject(error);
       this.materialTileRequests.clear();
+      this.resetMaterialWorkerLoad();
       // The page now owns the engine provider; the child scene reuses it.
       this.engine.onComponentDestroy();
     });
@@ -1124,8 +1140,31 @@ export class CellPlanetMorphStreamingPageComponent {
         worldProfile: this.worldProfileKind(),
         seed: this.seed(),
       };
-      this.materialWorker.postMessage(request);
+      this.assignMaterialWorker(id).postMessage(request);
     });
+  }
+
+  /** Picks the least-busy pooled worker for a tile bake and records the assignment. */
+  private assignMaterialWorker(requestId: number): Worker {
+    let index = 0;
+    for (let candidate = 1; candidate < this.materialWorkers.length; candidate += 1) {
+      if (this.materialWorkerLoad[candidate] < this.materialWorkerLoad[index]) index = candidate;
+    }
+    this.materialWorkerLoad[index] += 1;
+    this.materialTileWorkerIndex.set(requestId, index);
+    return this.materialWorkers[index];
+  }
+
+  private releaseMaterialWorker(requestId: number): void {
+    const index = this.materialTileWorkerIndex.get(requestId);
+    if (index === undefined) return;
+    this.materialTileWorkerIndex.delete(requestId);
+    this.materialWorkerLoad[index] = Math.max(0, this.materialWorkerLoad[index] - 1);
+  }
+
+  private resetMaterialWorkerLoad(): void {
+    this.materialTileWorkerIndex.clear();
+    this.materialWorkerLoad.fill(0);
   }
 
   private ensureFactionLookup(): Promise<void> {
@@ -1147,7 +1186,7 @@ export class CellPlanetMorphStreamingPageComponent {
         worldProfile: this.worldProfileKind(),
         seed: this.seed(),
       };
-      this.materialWorker.postMessage(request);
+      this.materialWorkers[0].postMessage(request);
     }).finally(() => {
       this.factionLookupRequest = undefined;
     });
@@ -1598,7 +1637,7 @@ export class CellPlanetMorphStreamingPageComponent {
       worldProfile: this.worldProfileKind(),
       seed: this.seed(),
     };
-    this.materialWorker.postMessage(request);
+    this.materialWorkers[0].postMessage(request);
   }
 
   private disposeCellGridMesh(): void {

@@ -113,7 +113,8 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
 }
 
 function normalizeWeights(weights: TerrainMaterialWeights): TerrainMaterialWeights {
-  const total = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
+  // Summed in layer order without iterating the object: this runs per texel when baking tiles.
+  const total = 0 + weights.water + weights.sand + weights.grass + weights.rock + weights.snow;
   if (total <= 0) {
     return { water: 0, sand: 0, grass: 1, rock: 0, snow: 0 };
   }
@@ -252,22 +253,21 @@ export function terrainMaterialColorRgb(
 ): TerrainMaterialRgb {
   const palette = options.palette ?? DEFAULT_TERRAIN_MATERIAL_PALETTE;
   const water = options.oceanSubstance === 'lava' ? palette.lavaWater : palette.water;
-  const sand: TerrainMaterialRgb = [
-    palette.sand[0] * (1 - sample.arid01) + palette.desertSand[0] * sample.arid01,
-    palette.sand[1] * (1 - sample.arid01) + palette.desertSand[1] * sample.arid01,
-    palette.sand[2] * (1 - sample.arid01) + palette.desertSand[2] * sample.arid01,
-  ];
-  const layers: readonly [TerrainMaterialRgb, number][] = [
-    [water, sample.weights.water],
-    [sand, sample.weights.sand],
-    [palette.grass, sample.weights.grass],
-    [palette.rock, sample.weights.rock],
-    [palette.snow, sample.weights.snow],
-  ];
+  const arid01 = sample.arid01;
+  const weights = sample.weights;
+  const { grass, rock, snow } = palette;
+  // Layer sums are written out left to right (water, sand, grass, rock, snow) rather than reduced
+  // over temporary arrays; this runs per texel when baking tiles.
+  const sandR = palette.sand[0] * (1 - arid01) + palette.desertSand[0] * arid01;
+  const sandG = palette.sand[1] * (1 - arid01) + palette.desertSand[1] * arid01;
+  const sandB = palette.sand[2] * (1 - arid01) + palette.desertSand[2] * arid01;
   return [
-    layers.reduce((sum, [color, weight]) => sum + color[0] * weight, 0),
-    layers.reduce((sum, [color, weight]) => sum + color[1] * weight, 0),
-    layers.reduce((sum, [color, weight]) => sum + color[2] * weight, 0),
+    0 + water[0] * weights.water + sandR * weights.sand + grass[0] * weights.grass +
+      rock[0] * weights.rock + snow[0] * weights.snow,
+    0 + water[1] * weights.water + sandG * weights.sand + grass[1] * weights.grass +
+      rock[1] * weights.rock + snow[1] * weights.snow,
+    0 + water[2] * weights.water + sandB * weights.sand + grass[2] * weights.grass +
+      rock[2] * weights.rock + snow[2] * weights.snow,
   ];
 }
 

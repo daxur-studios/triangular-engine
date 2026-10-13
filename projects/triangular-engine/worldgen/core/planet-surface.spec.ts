@@ -21,6 +21,33 @@ describe('createPlanetSurfaceSampler', () => {
     expect(coherent!.riverCarve).toBeCloseTo(canonical.riverCarve, 8);
   });
 
+  it('returns the same surface whatever the neighbourhood-cache history of the sampler', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 320, seed: 29 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 29 });
+    const ecology = buildPlanetEcology(graph, tectonics);
+    const make = () => createPlanetSurfaceSampler(graph, tectonics, ecology, { featureComposition: 'cell' });
+    const directions = graph.cells.flatMap((cell) => [
+      cell.center,
+      normalize({
+        x: cell.center.x + cell.corners[0]!.x,
+        y: cell.center.y + cell.corners[0]!.y,
+        z: cell.center.z + cell.corners[0]!.z,
+      }),
+    ]);
+
+    // One long-lived sampler visits the points forwards then backwards, so every query meets a
+    // different "last bucket" state; a fresh sampler per point has no cached neighbourhoods at all.
+    const reused = make();
+    const forwards = directions.map((direction) => reused.sample(direction));
+    const backwards = [...directions].reverse().map((direction) => reused.sample(direction)).reverse();
+    directions.forEach((direction, index) => {
+      const fresh = make().sample(direction);
+      expect(forwards[index]).toEqual(fresh);
+      expect(backwards[index]).toEqual(fresh);
+    });
+    expect(forwards.some((sample) => sample.ridgeRelief > 0)).toBeTrue();
+  });
+
   it('applies a volcano shape inside its owning cell and fades before the cell edge', () => {
     const graph = buildPlanetGraphCore({ cellCount: 240, seed: 71 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 71 });

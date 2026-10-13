@@ -14,6 +14,8 @@ export interface ITerrainMaterialTileRuntimeOptions {
   ) => Promise<ITerrainMaterialTilePayload>;
   /** Maximum resident pages; the GPU adapter's hard maximum is 128. */
   readonly capacity?: number;
+  /** Concurrent `request` calls, 1–8 (default 1); raise it when requests run on a worker pool. */
+  readonly maxInFlight?: number;
   readonly onPublish?: (
     payload: ITerrainMaterialTilePayload,
     resident: ReadonlyMap<string, ITerrainMaterialResidentPage>,
@@ -49,6 +51,7 @@ export class TerrainMaterialTileRuntime {
     }
     this.stream = new TerrainMaterialTileStream({
       capacity,
+      maxInFlight: options.maxInFlight,
       request: options.request,
       publish: (payload, slot, resident) => {
         this.gpu.publish(payload, slot, resident);

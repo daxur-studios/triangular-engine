@@ -144,3 +144,44 @@ describe('terrain material evaluation', () => {
     expect(waterVaried).toEqual(waterBase);
   });
 });
+
+describe('terrain material colour', () => {
+  it('sums the palette layers exactly as a layer-ordered reduction', () => {
+    const palette = {
+      water: [0.099, 0.22, 0.341],
+      sand: [0.6804, 0.5551, 0.3796],
+      grass: [0.2977, 0.57, 0.19],
+      rock: [0.5074, 0.4248, 0.3526],
+      snow: [0.96, 0.96, 0.96],
+      desertSand: [0.74, 0.492, 0.26],
+      lavaWater: [0.819, 0.2604, 0.021],
+    } as const;
+    const queries = [
+      query(),
+      query({ elevationM: -400, snowIce01: 0.35 }),
+      query({ elevationM: 5200, temperature01: 0.1, slope01: 0.9, ridge01: 1 }),
+      query({ arid01: 0.45, moisture01: 0.2, river01: 0.6 }),
+      query({ elevationM: 2, arid01: 1, moisture01: 0.05 }),
+    ];
+    for (const oceanSubstance of ['water', 'lava'] as const) {
+      for (const input of queries) {
+        const sample = evaluateTerrainMaterial(input);
+        const water = oceanSubstance === 'lava' ? palette.lavaWater : palette.water;
+        const sand = palette.sand.map(
+          (channel, index) => channel * (1 - sample.arid01) + palette.desertSand[index] * sample.arid01,
+        );
+        const layers = [
+          [water, sample.weights.water],
+          [sand, sample.weights.sand],
+          [palette.grass, sample.weights.grass],
+          [palette.rock, sample.weights.rock],
+          [palette.snow, sample.weights.snow],
+        ] as const;
+        const expected = [0, 1, 2].map((channel) =>
+          layers.reduce((sum, [color, weight]) => sum + color[channel] * weight, 0),
+        );
+        expect(Array.from(terrainMaterialColorRgb(sample, { oceanSubstance, palette }))).toEqual(expected);
+      }
+    }
+  });
+});

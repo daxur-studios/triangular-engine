@@ -7,14 +7,17 @@ export interface ITerrainMaterialResidentPage {
   lastUse: number;
 }
 
-/** Bounded, single-flight material scheduler. Providers own worker execution. */
+/**
+ * Bounded material scheduler. Providers own worker execution; requests are single-flight unless
+ * `maxInFlight` raises the bound for a provider backed by several workers.
+ */
 export class TerrainMaterialTileStream {
   readonly resident = new Map<string, ITerrainMaterialResidentPage>();
   private desired: readonly ITerrainMaterialTileAddress[] = [];
   private protectedKeys = new Set<string>();
   private epoch = 0;
   private clock = 0;
-  private busy = false;
+  private readonly inFlightKeys = new Set<string>();
   private disposed = false;
   private failed = new Set<string>();
   completed = 0;
@@ -24,6 +27,8 @@ export class TerrainMaterialTileStream {
   constructor(private readonly options: {
     readonly capacity: number;
     readonly request: (address: ITerrainMaterialTileAddress) => Promise<ITerrainMaterialTilePayload>;
+    /** Maximum concurrent `request` calls, 1–8 (default 1). Raise only when the provider can run them in parallel. */
+    readonly maxInFlight?: number;
     /** Called synchronously with the new residency map, before rendering. */
     readonly publish: (payload: ITerrainMaterialTilePayload, slot: number,
       resident: ReadonlyMap<string, ITerrainMaterialResidentPage>) => void;
@@ -31,9 +36,16 @@ export class TerrainMaterialTileStream {
     if (!Number.isInteger(options.capacity) || options.capacity < 2 || options.capacity > 128) {
       throw new RangeError('Material page capacity must be 2–128.');
     }
+    const maxInFlight = options.maxInFlight ?? 1;
+    if (!Number.isInteger(maxInFlight) || maxInFlight < 1 || maxInFlight > 8) {
+      throw new RangeError('Material maxInFlight must be an integer from 1 to 8.');
+    }
+    this.maxInFlight = maxInFlight;
   }
 
-  get inFlight(): number { return this.busy ? 1 : 0; }
+  private readonly maxInFlight: number;
+
+  get inFlight(): number { return this.inFlightKeys.size; }
   get queued(): number {
     return this.desired.filter(a => !this.resident.has(materialTileAddressKey(a)) &&
       !this.failed.has(materialTileAddressKey(a))).length;
@@ -71,15 +83,21 @@ export class TerrainMaterialTileStream {
   dispose(): void { this.disposed = true; this.invalidate(); }
 
   private pump(): void {
-    if (this.busy || this.disposed) return;
-    const address = this.desired.find(a => {
-      const key = materialTileAddressKey(a);
-      return !this.resident.has(key) && !this.failed.has(key);
-    });
-    if (!address) return;
+    if (this.disposed) return;
+    while (this.inFlightKeys.size < this.maxInFlight) {
+      const address = this.desired.find(a => {
+        const key = materialTileAddressKey(a);
+        return !this.resident.has(key) && !this.failed.has(key) && !this.inFlightKeys.has(key);
+      });
+      if (!address) return;
+      this.request(address);
+    }
+  }
+
+  private request(address: ITerrainMaterialTileAddress): void {
     const key = materialTileAddressKey(address);
     const epoch = this.epoch;
-    this.busy = true;
+    this.inFlightKeys.add(key);
     void Promise.resolve().then(() => this.options.request(address)).then(payload => {
       if (this.disposed || epoch !== this.epoch || !this.protectedKeys.has(key)) {
         this.discarded++;
@@ -112,8 +130,8 @@ export class TerrainMaterialTileStream {
         this.resident.delete(key);
       }
     }).finally(() => {
-      this.busy = false;
-      // One completion per task; never flood the worker with the full desired set.
+      this.inFlightKeys.delete(key);
+      // One completion per task; never flood the workers beyond `maxInFlight`.
       this.pump();
     });
   }

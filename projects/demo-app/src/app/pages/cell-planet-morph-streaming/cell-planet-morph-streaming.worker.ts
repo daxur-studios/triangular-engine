@@ -5,37 +5,19 @@ import { simplifyIndexedGeometry } from 'triangular-engine/meshoptimizer';
 import {
   conformPatchEdges,
   createIndices,
-  bakeTerrainMaterialTile,
-  createInterpolatedScalarCache,
   LatLonTerrainDomain,
-  evaluateTerrainMaterial,
   terrainMaterialColorRgb,
   type ILatLonTerrainPatchAddress,
-  type ITerrainMaterialPalette,
-  type ITerrainMaterialTilePayload,
   type ITerrainPatchGeometry,
   type ITerrainPatchMesh,
   type ITerrainSurfaceGenerationRequest,
 } from 'triangular-engine/terrain/core';
 import {
-  buildPlanetEcology,
   buildPlanetGraphCore,
-  buildPlanetTectonics,
-  computeFeatures,
-  createPlanetSurfaceSampler,
-  deriveIsLand,
-  dot,
   findCellAt,
   findCellNear,
-  generateImpactCraters,
-  type IImpactCraterResult,
-  normalize,
-  WORLD_PROFILES,
   type IPlanetGraphCell,
   type IPlanetGraphCore,
-  type IPlanetTectonics,
-  type IPlanetEcology,
-  type IPlanetFeatures,
   type IPlanetSurfaceSampler,
   type IVec3,
   type WorldProfileKind,
@@ -56,8 +38,22 @@ import {
 } from 'triangular-engine/worldgen/render';
 import { CELL_PLANET_GENERATION_DEFAULTS } from '../cell-planet-generation-config';
 import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
+import {
+  buildCellColourData,
+  buildCellIdRaster,
+  buildMaterialTile,
+  CELL_ID_RASTER_HEIGHT,
+  CELL_ID_RASTER_WIDTH,
+  createCellPlanetWorld,
+  evaluateWorldMaterial,
+  OCEAN_COLOR,
+  parseColorToLinearRgb,
+  sampleSurfaceNear,
+  srgbRgbToLinear,
+  type ICellPlanetMaterialTilePayload,
+  type ICellPlanetWorld,
+} from './cell-planet-material-tile';
 
-const OCEAN_COLOR = 'hsl(210, 55%, 22%)';
 // A tiny mesh-space freeboard for ice owned by frozen-water cells. The shared
 // sampler intentionally eases ice toward the sea datum at cell edges; this
 // floor prevents the rendered ice surface and translucent ocean shell from
@@ -87,10 +83,7 @@ export interface CellPlanetMorphWorkerRequest {
 }
 
 /** Material-only work is deliberately separate from mesh generation. */
-export interface CellPlanetMorphMaterialTilePayload extends ITerrainMaterialTilePayload {
-  /** Canonical unitless surface elevation relative to sea level at tile centre. */
-  readonly centerElevation: number;
-}
+export type CellPlanetMorphMaterialTilePayload = ICellPlanetMaterialTilePayload;
 
 export interface CellPlanetMorphMaterialTileRequest {
   readonly kind: 'materialTile';
@@ -158,33 +151,6 @@ const LOD_COLORS: readonly [number, number, number][] = [
   [1.00, 1.00, 1.00], // L8 White
 ];
 
-interface IRiverMaterialPoint {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-  readonly widthRadians: number;
-}
-
-interface ICellPlanetWorld {
-  /** `${profile}:${seed}`; also the material tiles' world revision. */
-  readonly key: string;
-  readonly graph: IPlanetGraphCore;
-  readonly tectonics: IPlanetTectonics;
-  readonly ecology: IPlanetEcology;
-  readonly features: IPlanetFeatures;
-  readonly sampler: IPlanetSurfaceSampler;
-  readonly eMin: number;
-  readonly eMax: number;
-  readonly profile: (typeof WORLD_PROFILES)[WorldProfileKind];
-  readonly maxSlope: number;
-  readonly riverMask: Uint8Array;
-  readonly ridgeCellSet: ReadonlySet<number>;
-  readonly riverMaterialPoints: readonly IRiverMaterialPoint[];
-  readonly riverMaterialBins: readonly (readonly number[])[];
-}
-
-const RIVER_BIN_WIDTH = 64;
-const RIVER_BIN_HEIGHT = 32;
 // Recently used worlds stay resident so switching archetypes back and forth
 // reuses them instead of regenerating tectonics, ecology and craters.
 const MAX_CACHED_WORLDS = 4;
@@ -193,12 +159,9 @@ const worldCache = new Map<string, ICellPlanetWorld>();
 // stage mutates it, so every archetype of one seed shares a single graph.
 let cachedGraphSeed: number | undefined;
 let cachedGraph: IPlanetGraphCore | undefined;
+// The cell-id raster depends only on the graph, i.e. on the seed.
+let cachedCellIdRaster: { readonly graph: IPlanetGraphCore; readonly data: Uint8Array } | undefined;
 let cachedLookupKey = '';
-
-type WorldMaterialContext = Pick<
-  ICellPlanetWorld,
-  'ecology' | 'eMin' | 'eMax' | 'tectonics' | 'maxSlope' | 'riverMask' | 'ridgeCellSet'
->;
 
 function buildCellPerPixelLookup(
   world: ICellPlanetWorld,
@@ -207,94 +170,17 @@ function buildCellPerPixelLookup(
 ): ICellPerPixelLookupPayload | undefined {
   if (colorMode === 'lod' || (colorMode === 'material' && !includeMaterialCellLookup)) return undefined;
 
-  const { graph, tectonics, ecology, sampler, eMin, eMax, profile, maxSlope, riverMask, ridgeCellSet } = world;
-  const cellCount = graph.cells.length;
-  const cellIdWidth = 1024;
-  const cellIdHeight = 512;
-  const cellData = new Float32Array(cellCount * 4);
-
-  for (const cell of graph.cells) {
-    let colour: [number, number, number];
-    if (colorMode === 'elevation') {
-      colour = parseColorToLinearRgb(
-        elevationColor(
-          tectonics.elevation[cell.id] ?? sampler.sample(cell.center).seaLevel,
-          tectonics.seaLevelElevation,
-          eMin,
-          eMax,
-        ),
-      );
-    } else if (colorMode === 'plates') {
-      colour = parseColorToLinearRgb(plateColor(tectonics.plateIdByCell[cell.id] ?? 0));
-    } else if (colorMode === 'material') {
-      const sample = sampler.sample(cell.center);
-      const material = evaluateWorldMaterial(world, sample, cell);
-      colour = srgbRgbToLinear(terrainMaterialColorRgb(material, {
-        oceanSubstance: profile.oceanSubstance,
-        palette: getArchetypePalette(profile.archetype),
-      }));
-    } else {
-      const sample = sampler.sample(cell.center);
-      colour = sample.isLand || sample.isIce
-        ? parseColorToLinearRgb(biomeColor(ecology.biome[cell.id]))
-        : parseColorToLinearRgb(profile.oceanSubstance === 'lava' ? lavaOceanColor() : OCEAN_COLOR);
-    }
-
-    const colourOffset = cell.id * 4;
-    cellData[colourOffset] = colour[0];
-    cellData[colourOffset + 1] = colour[1];
-    cellData[colourOffset + 2] = colour[2];
-    cellData[colourOffset + 3] = 1;
-
+  if (cachedCellIdRaster?.graph !== world.graph) {
+    cachedCellIdRaster = { graph: world.graph, data: buildCellIdRaster(world.graph) };
   }
-
-  const cellIdData = new Uint8Array(cellIdWidth * cellIdHeight * 4);
-  for (let y = 0; y < cellIdHeight; y += 1) {
-    const latitude = -Math.PI / 2 + ((y + 0.5) / cellIdHeight) * Math.PI;
-    const cosLatitude = Math.cos(latitude);
-    let previousCell = findCellAt(graph, {
-      x: cosLatitude * Math.sin(-Math.PI),
-      y: Math.sin(latitude),
-      z: cosLatitude * Math.cos(-Math.PI),
-    });
-    for (let x = 0; x < cellIdWidth; x += 1) {
-      const longitude = -Math.PI + ((x + 0.5) / cellIdWidth) * Math.PI * 2;
-      const direction: IVec3 = {
-        x: cosLatitude * Math.sin(longitude),
-        y: Math.sin(latitude),
-        z: cosLatitude * Math.cos(longitude),
-      };
-      previousCell = findNearestCellFast(graph, direction, previousCell);
-      // DataTexture keeps row zero at the bottom, matching latitude -PI/2 at
-      // shader v=0. Reversing this row was the north/south alignment bug.
-      const offset = (y * cellIdWidth + x) * 4;
-      cellIdData[offset] = previousCell.id & 255;
-      cellIdData[offset + 1] = (previousCell.id >> 8) & 255;
-      cellIdData[offset + 3] = 255;
-    }
-  }
-
   return {
-    cellData,
-    cellTextureWidth: cellCount,
-    cellIdData,
-    cellIdWidth,
-    cellIdHeight,
+    cellData: buildCellColourData(world, colorMode),
+    cellTextureWidth: world.graph.cells.length,
+    // Posted buffers are transferred (detached), so hand out a copy of the cached raster.
+    cellIdData: cachedCellIdRaster.data.slice(),
+    cellIdWidth: CELL_ID_RASTER_WIDTH,
+    cellIdHeight: CELL_ID_RASTER_HEIGHT,
   };
-}
-
-function buildRiverMaterialMask(graph: IPlanetGraphCore, ecology: IPlanetEcology): Uint8Array {
-  const mask = new Uint8Array(graph.cells.length);
-  const thresholdCos = Math.cos(0.09);
-  for (const cell of graph.cells) {
-    for (const path of ecology.riverPaths) {
-      if (path.some((point) => cell.center.x * point.x + cell.center.y * point.y + cell.center.z * point.z >= thresholdCos)) {
-        mask[cell.id] = 1;
-        break;
-      }
-    }
-  }
-  return mask;
 }
 
 function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: number = 1): ICellPlanetWorld {
@@ -307,7 +193,6 @@ function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: numb
     return cached;
   }
 
-  const profile = WORLD_PROFILES[profileKind] ?? WORLD_PROFILES.volcanic;
   if (!cachedGraph || cachedGraphSeed !== seed) {
     cachedGraph = buildPlanetGraphCore({
       cellCount: CELL_PLANET_U0_FIXTURE.cellCount,
@@ -317,523 +202,13 @@ function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: numb
     });
     cachedGraphSeed = seed;
   }
-  const graph = cachedGraph;
-  const tectonics = buildPlanetTectonics(graph, {
-    plateCount: CELL_PLANET_GENERATION_DEFAULTS.plateCount,
-    seed,
-    ...profile.tectonics,
-  });
-
-  let impactCraters: IImpactCraterResult | undefined;
-  if (profile.impactCraters) {
-    impactCraters = generateImpactCraters(graph, tectonics.elevation, {
-      seed,
-      ...profile.impactCraters,
-    });
-    tectonics.elevation = impactCraters.elevation;
-  }
-
-  tectonics.isLand = deriveIsLand(
-    graph,
-    tectonics.elevation,
-    tectonics.seaLevelElevation,
-    profile.tectonics?.minRegionCellFraction,
-  );
-  const ecology = buildPlanetEcology(graph, tectonics, {
-    climate: profile.climate,
-    biomes: {
-      archetype: profile.archetype,
-      ...profile.biomes,
-      craterLandform: impactCraters?.craterLandform,
-    },
-  });
-  const features = computeFeatures(graph, tectonics, ecology.waterBodyKind, profile.features);
-  const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
-    features,
-    featureComposition: 'cell',
-  });
-
-  let eMin = Infinity;
-  let eMax = -Infinity;
-  for (const e of tectonics.elevation) {
-    eMin = Math.min(eMin, e);
-    eMax = Math.max(eMax, e);
-  }
-  const [riverMaterialPoints, riverMaterialBins] = buildRiverMaterialIndex(ecology);
-  const world: ICellPlanetWorld = {
-    key,
-    graph,
-    tectonics,
-    ecology,
-    features,
-    sampler,
-    eMin,
-    eMax,
-    profile,
-    maxSlope: ecology.slope.reduce((max, slope) => Math.max(max, slope), 0),
-    riverMask: buildRiverMaterialMask(graph, ecology),
-    ridgeCellSet: new Set(tectonics.ridgeCellIds),
-    riverMaterialPoints,
-    riverMaterialBins,
-  };
+  const world = createCellPlanetWorld(profileKind, seed, cachedGraph);
 
   worldCache.set(key, world);
   while (worldCache.size > MAX_CACHED_WORLDS) {
     worldCache.delete(worldCache.keys().next().value!);
   }
   return world;
-}
-
-function riverBinIndex(longitude: number, latitude: number): number {
-  const wrappedU = ((longitude + Math.PI) / (Math.PI * 2)) % 1;
-  const u = Math.min(RIVER_BIN_WIDTH - 1, Math.max(0, Math.floor((wrappedU < 0 ? wrappedU + 1 : wrappedU) * RIVER_BIN_WIDTH)));
-  const v = Math.min(
-    RIVER_BIN_HEIGHT - 1,
-    Math.max(0, Math.floor(((latitude + Math.PI / 2) / Math.PI) * RIVER_BIN_HEIGHT)),
-  );
-  return v * RIVER_BIN_WIDTH + u;
-}
-
-function directionLongitude(direction: IVec3): number {
-  return Math.atan2(direction.x, direction.z);
-}
-
-function directionLatitude(direction: IVec3): number {
-  return Math.asin(Math.max(-1, Math.min(1, direction.y)));
-}
-
-function buildRiverMaterialIndex(ecology: IPlanetEcology): [IRiverMaterialPoint[], number[][]] {
-  const points: IRiverMaterialPoint[] = [];
-  const bins = Array.from({ length: RIVER_BIN_WIDTH * RIVER_BIN_HEIGHT }, () => [] as number[]);
-  let maxFlow = 1;
-  for (const flow of ecology.riverFlow) {
-    for (const value of flow) maxFlow = Math.max(maxFlow, value);
-  }
-
-  const addPoint = (point: IVec3, flow: number) => {
-    const widthRadians = 0.0035 + Math.sqrt(Math.max(0, flow) / maxFlow) * 0.012;
-    const index = points.push({ x: point.x, y: point.y, z: point.z, widthRadians }) - 1;
-    bins[riverBinIndex(directionLongitude(point), directionLatitude(point))].push(index);
-  };
-
-  for (let pathIndex = 0; pathIndex < ecology.riverPaths.length; pathIndex += 1) {
-    const path = ecology.riverPaths[pathIndex];
-    const flow = ecology.riverFlow[pathIndex] ?? [];
-    for (let pointIndex = 0; pointIndex < path.length; pointIndex += 1) {
-      const point = path[pointIndex];
-      addPoint(point, flow[pointIndex] ?? 1);
-      if (pointIndex + 1 < path.length) {
-        const next = path[pointIndex + 1];
-        addPoint(normalize({
-          x: point.x + next.x,
-          y: point.y + next.y,
-          z: point.z + next.z,
-        }), ((flow[pointIndex] ?? 1) + (flow[pointIndex + 1] ?? 1)) * 0.5);
-      }
-    }
-  }
-  return [points, bins];
-}
-
-function narrowRiverInfluence(
-  world: ICellPlanetWorld,
-  direction: IVec3,
-): number {
-  if (world.riverMaterialPoints.length === 0) return 0;
-  const longitude = directionLongitude(direction);
-  const latitude = directionLatitude(direction);
-  const u = Math.floor((((longitude + Math.PI) / (Math.PI * 2)) % 1 + 1) % 1 * RIVER_BIN_WIDTH);
-  const v = Math.min(
-    RIVER_BIN_HEIGHT - 1,
-    Math.max(0, Math.floor(((latitude + Math.PI / 2) / Math.PI) * RIVER_BIN_HEIGHT)),
-  );
-  let best = 0;
-  for (let dv = -1; dv <= 1; dv += 1) {
-    const candidateV = v + dv;
-    if (candidateV < 0 || candidateV >= RIVER_BIN_HEIGHT) continue;
-    for (let du = -1; du <= 1; du += 1) {
-      const candidateU = (u + du + RIVER_BIN_WIDTH) % RIVER_BIN_WIDTH;
-      for (const pointIndex of world.riverMaterialBins[candidateV * RIVER_BIN_WIDTH + candidateU]) {
-        const point = world.riverMaterialPoints[pointIndex];
-        const angularDistance = Math.sqrt(Math.max(0, 2 - 2 *
-          (direction.x * point.x + direction.y * point.y + direction.z * point.z)));
-        const width = point.widthRadians;
-        const t = Math.max(0, Math.min(1, (width - angularDistance) / Math.max(width * 0.65, 1e-5)));
-        best = Math.max(best, t * t * (3 - 2 * t));
-      }
-    }
-  }
-  return best;
-}
-
-// Ultra-fast convex hill-climbing nearest-cell search on spherical Voronoi graph
-function findNearestCellFast(
-  graph: IPlanetGraphCore,
-  direction: IVec3,
-  startCell: IPlanetGraphCell | null,
-): IPlanetGraphCell {
-  let current = startCell ?? graph.cells[0];
-  let currentDot = dot(current.center, direction);
-
-  let improved = true;
-  let iters = 0;
-  while (improved && iters < 50) {
-    improved = false;
-    iters += 1;
-    for (const neighborId of current.neighbors) {
-      const neighbor = graph.cells[neighborId];
-      const d = dot(neighbor.center, direction);
-      if (d > currentDot) {
-        currentDot = d;
-        current = neighbor;
-        improved = true;
-      }
-    }
-  }
-  return current;
-}
-
-function srgbChannelToLinear(channel: number): number {
-  const c = Math.max(0, Math.min(1, channel));
-  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-}
-
-function srgbRgbToLinear(rgb: readonly [number, number, number]): [number, number, number] {
-  return [
-    srgbChannelToLinear(rgb[0]),
-    srgbChannelToLinear(rgb[1]),
-    srgbChannelToLinear(rgb[2]),
-  ];
-}
-
-
-const ARCHETYPE_PALETTES: Record<string, ITerrainMaterialPalette> = {
-  cratered_moon: {
-    water: [0.18, 0.18, 0.2],
-    sand: [0.22, 0.22, 0.25],
-    grass: [0.45, 0.45, 0.48],
-    rock: [0.65, 0.65, 0.68],
-    snow: [0.82, 0.82, 0.86],
-    desertSand: [0.22, 0.22, 0.25],
-    lavaWater: [0.2, 0.2, 0.2],
-  },
-  martian: {
-    water: [0.42, 0.22, 0.15],
-    sand: [0.78, 0.38, 0.2],
-    grass: [0.55, 0.28, 0.16],
-    rock: [0.35, 0.18, 0.12],
-    snow: [0.94, 0.94, 0.96],
-    desertSand: [0.78, 0.38, 0.2],
-    lavaWater: [0.85, 0.25, 0.05],
-  },
-  venusian: {
-    water: [0.45, 0.32, 0.18],
-    sand: [0.62, 0.44, 0.24],
-    grass: [0.52, 0.38, 0.2],
-    rock: [0.72, 0.54, 0.28],
-    snow: [0.65, 0.45, 0.22],
-    desertSand: [0.62, 0.44, 0.24],
-    lavaWater: [0.9, 0.35, 0.05],
-  },
-  protoplanet: {
-    water: [0.95, 0.32, 0.05],
-    sand: [0.18, 0.12, 0.1],
-    grass: [0.85, 0.3, 0.08],
-    rock: [0.22, 0.12, 0.08],
-    snow: [0.95, 0.32, 0.05],
-    desertSand: [0.18, 0.12, 0.1],
-    lavaWater: [0.95, 0.32, 0.05],
-  },
-};
-
-function getArchetypePalette(archetype?: string): ITerrainMaterialPalette | undefined {
-  return archetype ? ARCHETYPE_PALETTES[archetype] : undefined;
-}
-
-function evaluateWorldMaterial(
-  world: WorldMaterialContext,
-  sample: ReturnType<IPlanetSurfaceSampler['sample']>,
-  cell: IPlanetGraphCell,
-  river01Override?: number,
-  slope01Override?: number,
-  slopeInfluence = 1,
-) {
-  const { ecology, eMin, eMax, tectonics, maxSlope, riverMask, ridgeCellSet } = world;
-  const cellSlope01 = maxSlope > 0 ? (ecology.slope[cell.id] ?? 0) / maxSlope : 0;
-  const slope01 = slope01Override === undefined
-    ? cellSlope01
-    : cellSlope01 + (slope01Override - cellSlope01) * Math.max(0, Math.min(1, slopeInfluence));
-  // Water ownership chooses which side of the generic material's strict sea
-  // level split to evaluate. Keep the sampled depth so sand and seabed rock
-  // weights still vary with bathymetry inside ocean cells.
-  const isWaterCell = !sample.isLand && !sample.isIce;
-  const waterSideElevation = Math.min(
-    sample.elevation,
-    sample.seaLevel - Math.max(1e-5, Math.abs(sample.seaLevel) * 1e-7),
-  );
-  const material = evaluateTerrainMaterial({
-    elevationM: isWaterCell ? waterSideElevation : sample.elevation,
-    seaLevelM: sample.seaLevel,
-    minElevationM: eMin,
-    maxElevationM: eMax,
-    slope01,
-    moisture01: ecology.moisture[cell.id],
-    temperature01: ((ecology.temperature[cell.id] ?? 0) + 1) * 0.5,
-    snowIce01:
-      ecology.biome[cell.id] === 'ice_cap' ? 1 :
-      ecology.biome[cell.id] === 'glacier' ? 0.9 :
-      ecology.biome[cell.id] === 'tundra' ? 0.35 : 0,
-    arid01:
-      ecology.biome[cell.id] === 'desert' ? 1 :
-      ecology.biome[cell.id] === 'steppe' ? 0.45 :
-      ecology.biome[cell.id] === 'savanna' ? 0.25 : 0,
-    ridge01: ridgeCellSet.has(cell.id) ? 1 : 0,
-    river01: river01Override ?? riverMask[cell.id] ?? 0,
-  }, {
-    snowlineM: tectonics.seaLevelElevation + Math.max(1, eMax - tectonics.seaLevelElevation) * 0.68,
-    snowlineBlendM: Math.max(0.05, (eMax - tectonics.seaLevelElevation) * 0.16),
-  });
-
-  return material;
-}
-
-function sampleSurfaceNear(
-  sampler: IPlanetSurfaceSampler,
-  direction: IVec3,
-  hintCellId: number,
-): ReturnType<IPlanetSurfaceSampler['sample']> {
-  return sampler.sampleNear?.(direction, hintCellId) ?? sampler.sample(direction);
-}
-
-/**
- * Estimates the slope of the actual sampled surface at a lattice point. The two
- * forward samples keep the tile bake bounded while still following local
- * mountains, shelves, and feature relief instead of inheriting one value for
- * the whole Voronoi cell.
- */
-function sampleLocalSlope01(
-  sampler: IPlanetSurfaceSampler,
-  direction: IVec3,
-  sample: ReturnType<IPlanetSurfaceSampler['sample']>,
-  hintCellId: number,
-  angularStep: number,
-  radiusM: number,
-  heightScaleM: number,
-): number {
-  if (!sample.isLand) return 0;
-  const reference = Math.abs(direction.y) < 0.9
-    ? { x: 0, y: 1, z: 0 }
-    : { x: 1, y: 0, z: 0 };
-  const tangentX = normalize({
-    x: reference.y * direction.z - reference.z * direction.y,
-    y: reference.z * direction.x - reference.x * direction.z,
-    z: reference.x * direction.y - reference.y * direction.x,
-  });
-  const tangentZ = normalize({
-    x: direction.y * tangentX.z - direction.z * tangentX.y,
-    y: direction.z * tangentX.x - direction.x * tangentX.z,
-    z: direction.x * tangentX.y - direction.y * tangentX.x,
-  });
-  const sampleOffset = (tangent: IVec3) => sampleSurfaceNear(
-    sampler,
-    normalize({
-      x: direction.x + tangent.x * angularStep,
-      y: direction.y + tangent.y * angularStep,
-      z: direction.z + tangent.z * angularStep,
-    }),
-    hintCellId,
-  );
-  const tangentSample = sampleOffset(tangentX);
-  const bitangentSample = sampleOffset(tangentZ);
-  const tangentDistanceM = Math.max(1, radiusM * angularStep);
-  const dx = (tangentSample.elevation - sample.elevation) * heightScaleM / tangentDistanceM;
-  const dz = (bitangentSample.elevation - sample.elevation) * heightScaleM / tangentDistanceM;
-  // Convert the displayed surface's physical height gradient to a stable 0..1
-  // steepness signal. atan prevents a narrow feature from saturating the tile.
-  return Math.min(1, Math.atan(Math.hypot(dx, dz)) / (Math.PI * 0.5));
-}
-
-function buildMaterialTile(
-  world: ICellPlanetWorld,
-  colorMode: CellPlanetMorphWorkerRequest['colorMode'],
-  interiorSize: number,
-  tileX: number,
-  tileY: number,
-  tileGrid: readonly [number, number],
-  radiusM: number,
-  heightScaleM: number,
-  cliffStrength = 1,
-  cliffDebug = false,
-): CellPlanetMorphMaterialTilePayload | undefined {
-  if (colorMode === 'lod') return undefined;
-  const domain = new LatLonTerrainDomain(1, 4, 2);
-  const [gridX, gridY] = tileGrid;
-  // Keep the physical slope sampling scale stable while texture LOD changes.
-  // With the demo's 600 km planet this is roughly a 1.5 km tangent offset.
-  const slopeStep = 0.0025;
-  // This lattice is in global texel coordinates, so its points line up across
-  // neighbouring tiles and remain bounded independently of colour resolution.
-  const slopeCacheStep = 4;
-  const slopeCache = createInterpolatedScalarCache(slopeCacheStep);
-  const cliffScale = Math.max(0, Math.min(1, cliffStrength));
-  const sampleLocalSlope = cliffScale > 0 || cliffDebug;
-  let previousCell: IPlanetGraphCell | null = null;
-  const payload = bakeTerrainMaterialTile(
-    {
-      worldRevision: world.key,
-      address: { level: Math.round(Math.log2(gridX)), x: tileX, y: tileY },
-      styleRevision: `cell-planet-${colorMode}-v1`,
-      samplingVersion: 1,
-      format: 'rgba8-linear',
-    },
-    {
-      sample: (localU, localV) => {
-        const globalU = (tileX + localU) / gridX;
-        const globalV = (tileY + localV) / gridY;
-        const longitude = (globalU - Math.floor(globalU)) * Math.PI * 2 - Math.PI;
-        const latitude = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, globalV * Math.PI - Math.PI / 2));
-        const direction = domain.getFieldPosition({ level: 0, x: 0, y: 0 }, longitude, latitude);
-        const dir3: IVec3 = { x: direction[0], y: direction[1], z: direction[2] };
-        const cell = findNearestCellFast(world.graph, dir3, previousCell);
-        previousCell = cell;
-        const sample = sampleSurfaceNear(world.sampler, dir3, cell.id);
-        if (colorMode === 'natural') {
-          if (!sample.isLand && !sample.isIce) {
-            return parseColorToLinearRgb(
-              world.profile.oceanSubstance === 'lava' ? lavaOceanColor() : OCEAN_COLOR,
-            );
-          }
-          const feature = world.features.featureByCellId.get(cell.id);
-          if (feature?.kind === 'volcano') {
-            const displayedHeight = (sample.elevation - sample.seaLevel) * heightScaleM;
-            return displayedHeight > Math.max(3, heightScaleM * 0.28)
-              ? [0.46, 0.22, 0.16]
-              : [0.12, 0.11, 0.12];
-          }
-          return parseColorToLinearRgb(biomeColor(world.ecology.biome[cell.id]));
-        }
-        if (colorMode === 'elevation') {
-          return parseColorToLinearRgb(elevationColor(
-            world.tectonics.elevation[cell.id] ?? sample.seaLevel,
-            world.tectonics.seaLevelElevation,
-            world.eMin,
-            world.eMax,
-          ));
-        }
-        if (colorMode === 'plates') {
-          return parseColorToLinearRgb(plateColor(world.tectonics.plateIdByCell[cell.id] ?? 0));
-        }
-        const river01 = sample.isLand ? narrowRiverInfluence(world, dir3) : 0;
-        const globalPixelX = (tileX + localU) * interiorSize - 0.5;
-        const globalPixelY = (tileY + localV) * interiorSize - 0.5;
-        const slope01 = sampleLocalSlope
-          ? slopeCache.sample(globalPixelX, globalPixelY, (gridPixelX, gridPixelY) => {
-            const gridU = (gridPixelX + 0.5) / (gridX * interiorSize);
-            const gridV = (gridPixelY + 0.5) / (gridY * interiorSize);
-            const gridLongitude = (gridU - Math.floor(gridU)) * Math.PI * 2 - Math.PI;
-            const gridLatitude = Math.max(-Math.PI / 2, Math.min(
-              Math.PI / 2,
-              gridV * Math.PI - Math.PI / 2,
-            ));
-            const gridDirection = domain.getFieldPosition(
-              { level: 0, x: 0, y: 0 },
-              gridLongitude,
-              gridLatitude,
-            );
-            const gridDir3: IVec3 = {
-              x: gridDirection[0], y: gridDirection[1], z: gridDirection[2],
-            };
-            const gridCell = findNearestCellFast(world.graph, gridDir3, previousCell);
-            const gridSample = sampleSurfaceNear(world.sampler, gridDir3, gridCell.id);
-            return sampleLocalSlope01(
-              world.sampler,
-              gridDir3,
-              gridSample,
-              gridCell.id,
-              slopeStep,
-              radiusM,
-              heightScaleM,
-            );
-          })
-          : undefined;
-        if (cliffDebug) {
-          const debugSlope = slope01 ?? 0;
-          return srgbRgbToLinear([debugSlope, debugSlope, debugSlope]);
-        }
-        const material = evaluateWorldMaterial(world, sample, cell, river01, slope01, cliffScale);
-        const base = terrainMaterialColorRgb(material, {
-          oceanSubstance: world.profile.oceanSubstance,
-          palette: getArchetypePalette(world.profile.archetype),
-        });
-        // Make the slope mask visually legible while keeping it part of the
-        // same material evaluation used by mesh colours.
-        const cliff = Math.max(0, Math.min(1, ((slope01 ?? 0) - 0.28) * 1.45)) * cliffScale;
-        const river = river01 * river01;
-        const riverColour: [number, number, number] = [0.06, 0.18, 0.32];
-        const cliffShade = 1 - cliff * 0.2;
-        return srgbRgbToLinear([
-          (base[0] * (1 - river) + riverColour[0] * river) * cliffShade,
-          (base[1] * (1 - river) + riverColour[1] * river) * cliffShade,
-          (base[2] * (1 - river) + riverColour[2] * river) * cliffShade,
-        ]);
-      },
-    },
-    {
-      interiorSize,
-      gutterSize: 2,
-      // The streaming array uses explicit level-zero sampling; no unused CPU mips.
-      mipLevels: 0,
-    },
-  );
-  const center = domain.getFieldPosition({ level: 0, x: 0, y: 0 },
-    ((tileX + 0.5) / gridX - 0.5) * Math.PI * 2,
-    ((tileY + 0.5) / gridY - 0.5) * Math.PI);
-  const surface = world.sampler.sample({ x: center[0], y: center[1], z: center[2] });
-  return { ...payload, centerElevation: surface.elevation - surface.seaLevel };
-}
-
-function parseColorToLinearRgb(color: string): [number, number, number] {
-
-  if (color.startsWith('hsl')) {
-    const match = /hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*\)/.exec(color);
-    if (match) {
-      const h = parseFloat(match[1]) / 360;
-      const s = parseFloat(match[2]) / 100;
-      const l = parseFloat(match[3]) / 100;
-
-      let r: number, g: number, b: number;
-      if (s === 0) {
-        r = g = b = l;
-      } else {
-        const hue2rgb = (p: number, q: number, t: number) => {
-          let tc = t;
-          if (tc < 0) tc += 1;
-          if (tc > 1) tc -= 1;
-          if (tc < 1 / 6) return p + (q - p) * 6 * tc;
-          if (tc < 1 / 2) return q;
-          if (tc < 2 / 3) return p + (q - p) * (2 / 3 - tc) * 6;
-          return p;
-        };
-        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-        const p = 2 * l - q;
-        r = hue2rgb(p, q, h + 1 / 3);
-        g = hue2rgb(p, q, h);
-        b = hue2rgb(p, q, h - 1 / 3);
-      }
-      return [srgbChannelToLinear(r), srgbChannelToLinear(g), srgbChannelToLinear(b)];
-    }
-  }
-
-  let h = color.startsWith('#') ? color.slice(1) : color;
-  if (h.length === 3) {
-    h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-  }
-  const num = parseInt(h, 16);
-  if (Number.isNaN(num)) return [0.5, 0.5, 0.5];
-  const sR = ((num >> 16) & 255) / 255;
-  const sG = ((num >> 8) & 255) / 255;
-  const sB = (num & 255) / 255;
-  return [srgbChannelToLinear(sR), srgbChannelToLinear(sG), srgbChannelToLinear(sB)];
 }
 
 interface CompactedMeshAttributes {
@@ -921,8 +296,7 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
 
     const generationStartedAt = performance.now();
     const world = getOrCreateWorld(worldProfile, seed);
-    const { graph, tectonics, ecology, features, sampler, eMin, eMax, profile, maxSlope, riverMask, ridgeCellSet } =
-      world;
+    const { graph, tectonics, ecology, features, sampler, eMin, eMax, profile } = world;
 
     if (data.kind === 'materialTile') {
       const materialTile = buildMaterialTile(
@@ -1242,18 +616,11 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
           colors[o3 + 1] = rgb[1];
           colors[o3 + 2] = rgb[2];
         } else if (colorMode === 'material') {
-          const material = evaluateWorldMaterial(
-            { tectonics, ecology, eMin, eMax, maxSlope, riverMask, ridgeCellSet },
-            sample,
-            cell,
-          );
+          const material = evaluateWorldMaterial(world, sample, cell.id);
           // terrainMaterialColorRgb returns display/sRGB palette values. Vertex
           // colors on MeshStandardMaterial are linear working-space inputs, so
           // decode them here before the renderer applies lighting and sRGB output.
-          const rgb = srgbRgbToLinear(terrainMaterialColorRgb(material, {
-            oceanSubstance: profile.oceanSubstance,
-            palette: getArchetypePalette(profile.archetype),
-          }));
+          const rgb = srgbRgbToLinear(terrainMaterialColorRgb(material, world.materialColorOptions));
           colors[o3] = rgb[0];
           colors[o3 + 1] = rgb[1];
           colors[o3 + 2] = rgb[2];

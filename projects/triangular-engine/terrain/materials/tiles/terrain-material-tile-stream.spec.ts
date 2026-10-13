@@ -128,3 +128,74 @@ describe('independent material streaming', () => {
     expect(fresh.addresses.length).toBe(1);
   });
 });
+
+describe('parallel material streaming', () => {
+  const pages = [root, child, other, { level: 1, x: 0, y: 1 }, { level: 1, x: 1, y: 1 }];
+
+  it('rejects an unsupported in-flight bound', () => {
+    for (const maxInFlight of [0, 1.5, 9]) {
+      expect(() => new TerrainMaterialTileStream({
+        capacity: 8, maxInFlight, request: a => Promise.resolve(payload(a)), publish: () => undefined,
+      })).toThrowError(RangeError);
+    }
+  });
+
+  it('keeps up to maxInFlight distinct requests running and refills as they finish', async () => {
+    const pending = new Map<string, (p: ITerrainMaterialTilePayload) => void>();
+    const requested: string[] = [];
+    const stream = new TerrainMaterialTileStream({ capacity: 8, maxInFlight: 3,
+      request: a => new Promise(resolve => {
+        requested.push(materialTileAddressKey(a));
+        pending.set(materialTileAddressKey(a), resolve);
+      }),
+      publish: () => undefined });
+    stream.update(pages);
+    await settle();
+    expect(requested).toEqual(['0/0/0', '1/0/0', '1/1/0']);
+    expect(stream.inFlight).toBe(3);
+    // Repeated identical views never duplicate an in-flight page.
+    stream.update(pages);
+    await settle();
+    expect(requested.length).toBe(3);
+
+    // A finished page frees exactly one slot, which takes the next wanted page in view order.
+    pending.get('1/1/0')!(payload(other));
+    await settle();
+    expect(requested).toEqual(['0/0/0', '1/0/0', '1/1/0', '1/0/1']);
+    expect(stream.inFlight).toBe(3);
+    expect(stream.completed).toBe(1);
+
+    for (const [key, resolve] of [...pending]) {
+      const [level, x, y] = key.split('/').map(Number);
+      resolve(payload({ level, x, y }));
+    }
+    await settle();
+    for (const [key, resolve] of [...pending]) {
+      const [level, x, y] = key.split('/').map(Number);
+      resolve(payload({ level, x, y }));
+    }
+    await settle();
+    expect(stream.completed).toBe(5);
+    expect(stream.resident.size).toBe(5);
+    expect(stream.inFlight).toBe(0);
+    stream.dispose();
+  });
+
+  it('discards parallel results that finish after the world was invalidated', async () => {
+    const resolvers: ((p: ITerrainMaterialTilePayload) => void)[] = [];
+    const publish = jasmine.createSpy('publish');
+    const stream = new TerrainMaterialTileStream({ capacity: 8, maxInFlight: 2,
+      request: () => new Promise(resolve => resolvers.push(resolve)), publish });
+    stream.update([root, child]);
+    await settle();
+    expect(resolvers.length).toBe(2);
+    stream.invalidate();
+    resolvers[0](payload(root));
+    resolvers[1](payload(child));
+    await settle();
+    expect(publish).not.toHaveBeenCalled();
+    expect(stream.discarded).toBe(2);
+    expect(stream.inFlight).toBe(0);
+    stream.dispose();
+  });
+});

@@ -1,5 +1,5 @@
 import { IPlanetGraphCell, IPlanetGraphCore } from './planet-graph';
-import { cross, dot, IVec3 } from './vec3';
+import { dot, IVec3 } from './vec3';
 
 /**
  * Nearest-site lookup: for spherical Voronoi cells generated from `graph`'s
@@ -20,21 +20,6 @@ export function findCellAt(graph: IPlanetGraphCore, direction: IVec3): IPlanetGr
     }
   }
   return best;
-}
-
-/**
- * Cone barycentric weights for a spherical triangle. Expressing the unit ray
- * as a combination of its three vertices makes the centre weight exactly zero
- * on the great-circle arc between the two corner vertices. Adjacent Voronoi
- * cells therefore use the same two endpoint weights along their shared edge.
- */
-function barycentric(p: IVec3, a: IVec3, b: IVec3, c: IVec3): [number, number, number] {
-  const bc = cross(b, c);
-  const pc = cross(p, c);
-  const bp = cross(b, p);
-  const determinant = dot(a, bc);
-  if (Math.abs(determinant) < 1e-12) return [1, 0, 0];
-  return [dot(p, bc) / determinant, dot(a, pc) / determinant, dot(a, bp) / determinant];
 }
 
 /**
@@ -93,42 +78,93 @@ export function sampleElevationSurfaceAtCell(
   const n = cell.neighbors.length;
   if (n < 3) return { elevation: elevation[cell.id]!, centerWeight: 1, coastlineWeight: 0 };
 
+  // Hot path (every terrain sample), written on scalars so no per-wedge vectors or arrays are
+  // allocated. For each fan wedge (centre `a`, corners `b`, `c`) the unit ray `p` is expressed as a
+  // cone barycentric combination of its three vertices. That makes the centre weight exactly zero on
+  // the great-circle arc between the two corner vertices, so adjacent Voronoi cells use the same two
+  // endpoint weights along their shared edge.
+  const a = cell.center;
+  const px = direction.x;
+  const py = direction.y;
+  const pz = direction.z;
   let bestWedge = 0;
   let bestMinWeight = -Infinity;
-  let bestWeights: [number, number, number] = [1, 0, 0];
+  let bestW0 = 1;
+  let bestW1 = 0;
+  let bestW2 = 0;
 
   for (let k = 0; k < n; k++) {
-    const weights = barycentric(direction, cell.center, cell.corners[k], cell.corners[(k + 1) % n]);
-    const minWeight = Math.min(...weights);
+    const b = cell.corners[k];
+    const c = cell.corners[(k + 1) % n];
+    // bc = cross(b, c)
+    const bcx = b.y * c.z - b.z * c.y;
+    const bcy = b.z * c.x - b.x * c.z;
+    const bcz = b.x * c.y - b.y * c.x;
+    const determinant = a.x * bcx + a.y * bcy + a.z * bcz;
+    let w0: number;
+    let w1: number;
+    let w2: number;
+    if (Math.abs(determinant) < 1e-12) {
+      w0 = 1;
+      w1 = 0;
+      w2 = 0;
+    } else {
+      // pc = cross(p, c), bp = cross(b, p)
+      const pcx = py * c.z - pz * c.y;
+      const pcy = pz * c.x - px * c.z;
+      const pcz = px * c.y - py * c.x;
+      const bpx = b.y * pz - b.z * py;
+      const bpy = b.z * px - b.x * pz;
+      const bpz = b.x * py - b.y * px;
+      w0 = (px * bcx + py * bcy + pz * bcz) / determinant;
+      w1 = (a.x * pcx + a.y * pcy + a.z * pcz) / determinant;
+      w2 = (a.x * bpx + a.y * bpy + a.z * bpz) / determinant;
+    }
+    const minWeight = Math.min(w0, w1, w2);
     if (minWeight > bestMinWeight) {
       bestMinWeight = minWeight;
       bestWedge = k;
-      bestWeights = weights;
+      bestW0 = w0;
+      bestW1 = w1;
+      bestW2 = w2;
     }
     if (minWeight >= 0) break; // direction lies inside this wedge — no need to keep scanning
   }
 
-  const [u, v, w] = bestWeights.map((x) => Math.max(0, x));
+  const u = Math.max(0, bestW0);
+  const v = Math.max(0, bestW1);
+  const w = Math.max(0, bestW2);
   const sum = u + v + w || 1;
 
-  const cornerIndices = [bestWedge, (bestWedge + 1) % n];
-  const cornerHeight = (cornerIndex: number): { elevation: number; isCoast: boolean } => {
-    const a = cell.id;
-    const b = cell.neighbors[cornerIndex]!;
-    const c = cell.neighbors[(cornerIndex + 1) % n]!;
-    const isCoast = !!isLand && (isLand[a] !== isLand[b] || isLand[b] !== isLand[c]);
-    return {
-      elevation: isCoast && seaLevel !== undefined ? seaLevel : cellCornerElevation(cell, cornerIndex, elevation),
-      isCoast,
-    };
-  };
-  const firstCorner = cornerHeight(cornerIndices[0]!);
-  const secondCorner = cornerHeight(cornerIndices[1]!);
+  const firstCornerIndex = bestWedge;
+  const secondCornerIndex = (bestWedge + 1) % n;
+  const firstIsCoast = isCoastCorner(cell, firstCornerIndex, n, isLand);
+  const secondIsCoast = isCoastCorner(cell, secondCornerIndex, n, isLand);
+  const firstElevation = firstIsCoast && seaLevel !== undefined
+    ? seaLevel
+    : cellCornerElevation(cell, firstCornerIndex, elevation);
+  const secondElevation = secondIsCoast && seaLevel !== undefined
+    ? seaLevel
+    : cellCornerElevation(cell, secondCornerIndex, elevation);
   return {
-    elevation: (u * elevation[cell.id]! + v * firstCorner.elevation + w * secondCorner.elevation) / sum,
+    elevation: (u * elevation[cell.id]! + v * firstElevation + w * secondElevation) / sum,
     centerWeight: u / sum,
-    coastlineWeight: (v * Number(firstCorner.isCoast) + w * Number(secondCorner.isCoast)) / sum,
+    coastlineWeight: (v * Number(firstIsCoast) + w * Number(secondIsCoast)) / sum,
   };
+}
+
+/** True when the 3 cells meeting at `cell.corners[cornerIndex]` are not all land or all water. */
+function isCoastCorner(
+  cell: IPlanetGraphCell,
+  cornerIndex: number,
+  neighbourCount: number,
+  isLand: readonly boolean[] | undefined,
+): boolean {
+  if (!isLand) return false;
+  const a = cell.id;
+  const b = cell.neighbors[cornerIndex]!;
+  const c = cell.neighbors[(cornerIndex + 1) % neighbourCount]!;
+  return isLand[a] !== isLand[b] || isLand[b] !== isLand[c];
 }
 
 /**

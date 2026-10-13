@@ -7,6 +7,7 @@ import {
   sampleElevationSurfaceAtCell,
 } from './sample-elevation';
 import { buildPlanetTectonics } from './tectonics';
+import { cross, dot, IVec3, normalize } from './vec3';
 
 describe('sampleElevation', () => {
   it('preserves all three positive fan weights for an interior point', () => {
@@ -145,5 +146,97 @@ describe('findCellNear / sampleElevationNear', () => {
         hintCellId = cellId;
       }
     }
+  });
+});
+
+describe('sampleElevationSurfaceAtCell', () => {
+  /** The original allocating wedge search, kept as a bit-for-bit reference for the scalar fast path. */
+  function referenceSurface(
+    cell: ReturnType<typeof findCellAt>,
+    direction: IVec3,
+    elevation: number[],
+    isLand: readonly boolean[],
+    seaLevel: number,
+  ) {
+    const n = cell.neighbors.length;
+    const barycentric = (p: IVec3, a: IVec3, b: IVec3, c: IVec3): [number, number, number] => {
+      const bc = cross(b, c);
+      const pc = cross(p, c);
+      const bp = cross(b, p);
+      const determinant = dot(a, bc);
+      if (Math.abs(determinant) < 1e-12) return [1, 0, 0];
+      return [dot(p, bc) / determinant, dot(a, pc) / determinant, dot(a, bp) / determinant];
+    };
+    let bestWedge = 0;
+    let bestMinWeight = -Infinity;
+    let bestWeights: [number, number, number] = [1, 0, 0];
+    for (let k = 0; k < n; k++) {
+      const weights = barycentric(direction, cell.center, cell.corners[k], cell.corners[(k + 1) % n]);
+      const minWeight = Math.min(...weights);
+      if (minWeight > bestMinWeight) {
+        bestMinWeight = minWeight;
+        bestWedge = k;
+        bestWeights = weights;
+      }
+      if (minWeight >= 0) break;
+    }
+    const [u, v, w] = bestWeights.map((x) => Math.max(0, x));
+    const sum = u + v + w || 1;
+    const cornerHeight = (cornerIndex: number) => {
+      const a = cell.id;
+      const b = cell.neighbors[cornerIndex]!;
+      const c = cell.neighbors[(cornerIndex + 1) % n]!;
+      const isCoast = isLand[a] !== isLand[b] || isLand[b] !== isLand[c];
+      const average = (elevation[a] + elevation[b] + elevation[c]) / 3;
+      return { elevation: isCoast ? seaLevel : average, isCoast };
+    };
+    const first = cornerHeight(bestWedge);
+    const second = cornerHeight((bestWedge + 1) % n);
+    return {
+      elevation: (u * elevation[cell.id]! + v * first.elevation + w * second.elevation) / sum,
+      centerWeight: u / sum,
+      coastlineWeight: (v * Number(first.isCoast) + w * Number(second.isCoast)) / sum,
+    };
+  }
+
+  it('matches the reference wedge search exactly, including coast-pinned corners', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 300, seed: 23 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 8, seed: 23 });
+    let coastSamples = 0;
+    for (const cell of graph.cells) {
+      for (let k = 0; k < cell.corners.length; k++) {
+        const next = cell.corners[(k + 1) % cell.corners.length];
+        // Interior fan points plus points just outside the wedge, which exercise the best-wedge fallback.
+        for (const [centreMix, cornerMix, nextMix] of [
+          [0.5, 0.3, 0.2],
+          [0.1, 0.45, 0.45],
+          [0.8, 0.1, 0.1],
+          [-0.05, 0.6, 0.45],
+        ]) {
+          const direction = normalize({
+            x: cell.center.x * centreMix + cell.corners[k].x * cornerMix + next.x * nextMix,
+            y: cell.center.y * centreMix + cell.corners[k].y * cornerMix + next.y * nextMix,
+            z: cell.center.z * centreMix + cell.corners[k].z * cornerMix + next.z * nextMix,
+          });
+          const expected = referenceSurface(
+            cell,
+            direction,
+            tectonics.elevation,
+            tectonics.isLand,
+            tectonics.seaLevelElevation,
+          );
+          const actual = sampleElevationSurfaceAtCell(
+            cell,
+            direction,
+            tectonics.elevation,
+            tectonics.isLand,
+            tectonics.seaLevelElevation,
+          );
+          expect(actual).toEqual(expected);
+          if (expected.coastlineWeight > 0) coastSamples++;
+        }
+      }
+    }
+    expect(coastSamples).toBeGreaterThan(0);
   });
 });
