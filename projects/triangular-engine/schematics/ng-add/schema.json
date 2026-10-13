@@ -11,12 +11,12 @@
     "path": {
       "type": "string",
       "default": "triangular-engine",
-      "description": "Component directory relative to the selected application's src/app (for example features/play/pages)."
+      "description": "Component directory relative to the selected application's src/app (for example pages/game)."
     },
     "routePath": {
       "type": "string",
       "default": "triangular-engine",
-      "description": "Literal lazy route path for the sample scene (for example play)."
+      "description": "Literal lazy route path for the sample scene (for example game)."
     },
     "route": {
       "type": "boolean",

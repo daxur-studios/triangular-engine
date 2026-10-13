@@ -90,13 +90,13 @@ test('unsupported Jolt builders fail with an actionable setup error', async () =
 
 test('custom scene paths register before a wildcard route', async () => {
   const source = fixture();
-  source.overwrite('/src/app/app.routes.ts', "export const routes = [{ path: '**', redirectTo: 'play' }];\n");
-  const result = await runner().runSchematic('ng-add', { path: 'features/play/pages', routePath: 'play' }, source);
-  assert(result.exists('/src/app/features/play/pages/engine-scene.component.ts'));
-  assertFlexPageStyles(result.readContent('/src/app/features/play/pages/engine-scene.component.scss'));
+  source.overwrite('/src/app/app.routes.ts', "export const routes = [{ path: '**', redirectTo: 'game' }];\n");
+  const result = await runner().runSchematic('ng-add', { path: 'pages/game', routePath: 'game' }, source);
+  assert(result.exists('/src/app/pages/game/engine-scene.component.ts'));
+  assertFlexPageStyles(result.readContent('/src/app/pages/game/engine-scene.component.scss'));
   const routes = result.readContent('/src/app/app.routes.ts');
-  assert(routes.includes("import('./features/play/pages/engine-scene.component')"));
-  assert(routes.indexOf("path: 'play'") < routes.indexOf("path: '**'"));
+  assert(routes.includes("import('./pages/game/engine-scene.component')"));
+  assert(routes.indexOf("path: 'game'") < routes.indexOf("path: '**'"));
   assert.equal(ts.createSourceFile('app.routes.ts', routes, ts.ScriptTarget.Latest).parseDiagnostics.length, 0);
 });
 

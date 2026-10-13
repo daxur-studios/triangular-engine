@@ -24,6 +24,7 @@ Add `ng generate triangular-engine:scene-page <name>` for a standalone Angular p
 - Reject invalid names, unsafe paths, missing routes files, route collisions, and any generated-file conflict before writing.
 - Share route/project/name helpers and the scene template with `ng-add`; retain ng-add rerun safety and legacy `engine-scene` filenames.
 - Do not install dependencies or configure physics.
+- Document configurable `pages/` scene-page examples that fit the game scaffold's composition layout; keep consumer-selected paths supported.
 
 ## Verification
 

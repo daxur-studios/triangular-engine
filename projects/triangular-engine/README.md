@@ -75,15 +75,15 @@ The schematic installs the engine, creates `src/app/triangular-engine/engine-sce
 
 Physics is off by default. Use `ng add triangular-engine --physics=jolt` to install the optional Jolt peer and configure its Node-only imports as external for an Angular application/esbuild browser build. This configures the backend; import `triangular-engine/jolt` and initialize it through its route guard or app initializer when adding a physics scene. The sample remains a core scene.
 
-Choose the generated location and route with `ng add triangular-engine --path=features/play/pages --route-path=play`. Component paths are relative to the application's `src/app`; routes are inserted before a wildcard fallback, and collisions with another component are reported.
+Choose the generated location and route with `ng add triangular-engine --path=pages/game --route-path=game`. Component paths are relative to the application's `src/app`; routes are inserted before a wildcard fallback, and collisions with another component are reported. These paths are configurable examples. In a game scaffold, routed pages compose reusable components and domain features; `features/` holds game-specific systems.
 
 Generate additional standalone scene pages without rerunning package setup:
 
 ```bash
-ng generate triangular-engine:scene-page features/play/pages/world
+ng generate triangular-engine:scene-page pages/world
 ```
 
-This creates `world.component.ts`, `.html`, and `.scss` under the selected application's `src/app`, with a camera, lights, sample mesh, `EngineService` provider, and `flex-page` host class. Route generation is opt-in: add `--route --route-path=play/world` to register a lazy route. Use `--project <name>` in a multi-application workspace. The generator does not install packages or select a physics backend; `ng add triangular-engine` handles initial package and asset setup.
+This creates `world.component.ts`, `.html`, and `.scss` under the selected application's `src/app`, with a camera, lights, sample mesh, `EngineService` provider, and `flex-page` host class. Route generation is opt-in: add `--route --route-path=world` to register a lazy route. Use `--project <name>` in a multi-application workspace. The generator does not install packages or select a physics backend; `ng add triangular-engine` handles initial package and asset setup.
 
 The generated SCSS only makes the scene host relative for overlay positioning; it adds no viewport or scene sizing rules. Canvas sizing depends on the application's existing flex chain and global `.flex-page` utility, which routed scene hosts receive from the generated component. Keep the engine `SceneComponent` flex styles intact.
 

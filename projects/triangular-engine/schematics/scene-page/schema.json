@@ -6,7 +6,7 @@
   "properties": {
     "name": {
       "type": "string",
-      "description": "Scene page name and optional path relative to src/app (for example features/play/pages/world).",
+      "description": "Scene page name and optional path relative to src/app (for example pages/world).",
       "$default": { "$source": "argv", "index": 0 }
     },
     "project": {

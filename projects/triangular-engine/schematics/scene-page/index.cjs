@@ -65,7 +65,7 @@ function scenePage(options) {
 
 /** @param {string} rawName */
 function normalizeName(rawName) {
-  if (!rawName) throw new SchematicsException('Provide a scene page name, for example features/play/pages/world.');
+  if (!rawName) throw new SchematicsException('Provide a scene page name, for example pages/world.');
   const normalized = rawName.replace(/\\/g, '/');
   const segments = validateRelativePath(normalized, 'scene page name').split('/').map(toKebabCase);
   const fileName = segments.pop();

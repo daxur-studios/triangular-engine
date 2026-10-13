@@ -4,7 +4,8 @@
   "scripts": {
     "ng": "ng",
     "build": "ng build",
-    "test": "ng test --watch=false",
+    "test": "ng test --watch=false --browsers=ChromeHeadless",
+    "test:watch": "ng test --watch --browsers=Chrome",
     "build:triangular-engine": "ng build triangular-engine",
     "typecheck:schematics": "tsc --allowJs --checkJs --noEmit --strict --skipLibCheck --resolveJsonModule --module commonjs --moduleResolution node --target ES2022 projects/triangular-engine/schematics/shared/index.cjs projects/triangular-engine/schematics/ng-add/index.cjs projects/triangular-engine/schematics/scene-page/index.cjs",
     "test:schematics": "node --test projects/triangular-engine/schematics/ng-add/index.spec.cjs projects/triangular-engine/schematics/scene-page/index.spec.cjs",

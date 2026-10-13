@@ -23,7 +23,7 @@
 ```powershell
 npm install
 npm run build:triangular-engine
-npm test
+npm test                                # unit tests (headless, single-run)
 npm run test:triangular-engine:worldgen
 npx ng serve demo-app
 daxur tokens map --floor 50000
@@ -45,7 +45,7 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 
 ## Verification checklist
 
-- Run the narrowest relevant tests, then the library build.
+- Run the narrowest relevant tests, then the library build. Tests must always run headless and non-watching (`npm test` / `--browsers=ChromeHeadless --watch=false`). Never run tests with a browser popup or in interactive watch mode.
 - Confirm imports use the intended public entry point.
 - Check documentation links and examples against current symbols/selectors.
 - For rendering changes, verify the demo app and asset paths when practical.

@@ -34,8 +34,8 @@ test('generates conventional standalone page files with shared core scene and fl
   const originalRoutes = sourceTree.read('/src/app/app.routes.ts').toString();
   const originalWorkspace = sourceTree.read('/angular.json').toString();
   const instance = runner();
-  const result = await instance.runSchematic('scene-page', { name: 'features/play/pages/world' }, sourceTree);
-  const base = '/src/app/features/play/pages/world.component';
+  const result = await instance.runSchematic('scene-page', { name: 'pages/world' }, sourceTree);
+  const base = '/src/app/pages/world.component';
   const source = result.readContent(`${base}.ts`);
   assert(source.includes("selector: 'app-world'"));
   assert(!source.includes('standalone:'));
@@ -62,12 +62,12 @@ test('route generation is opt-in and inserts a lazy route before wildcard fallba
   const source = fixture();
   source.overwrite('/src/app/app.routes.ts', "export const routes = [{ path: '**', redirectTo: 'home' }];\n");
   const result = await runner().runSchematic('scene-page', {
-    name: 'features/play/pages/world', route: true, routePath: 'play/world',
+    name: 'pages/world', route: true, routePath: 'world',
   }, source);
   const routes = result.readContent('/src/app/app.routes.ts');
-  assert(routes.includes("import('./features/play/pages/world.component')"));
+  assert(routes.includes("import('./pages/world.component')"));
   assert(routes.includes('WorldComponent'));
-  assert(routes.indexOf("path: 'play/world'") < routes.indexOf("path: '**'"));
+  assert(routes.indexOf("path: 'world'") < routes.indexOf("path: '**'"));
   assert.equal(ts.createSourceFile('app.routes.ts', routes, ts.ScriptTarget.Latest).parseDiagnostics.length, 0);
 });
 
