@@ -1,0 +1,10 @@
+@if (engine()) {
+  <ng-template portalTarget="overlay" lane="bottomEnd">
+    <section class="capture-controls" aria-label="Catalog preview">
+      <button type="button" [disabled]="capturing()" (click)="capture()">
+        {{ capturing() ? 'Capturing…' : thumbnails.sources()[route()] ? 'Recapture thumbnail' : 'Capture thumbnail' }}
+      </button>
+      <span role="status">{{ message() }}</span>
+    </section>
+  </ng-template>
+}

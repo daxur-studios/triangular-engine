@@ -88,6 +88,21 @@
   </div>
 
   <div class="control-section">
+    <h3>Planetary Archetype</h3>
+    <div class="button-group wrap">
+      @for (p of availableWorldProfiles; track p.id) {
+        <button
+          type="button"
+          [class.active]="worldProfileKind() === p.id"
+          (click)="setWorldProfile(p.id)"
+        >
+          {{ p.icon }} {{ p.label }}
+        </button>
+      }
+    </div>
+  </div>
+
+  <div class="control-section">
     <h3>Cell Planet Features</h3>
     <div class="button-group wrap">
       @for (b of bookmarks; track b.id) {

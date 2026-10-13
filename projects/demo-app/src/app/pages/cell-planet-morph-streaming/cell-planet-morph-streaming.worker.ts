@@ -11,6 +11,7 @@ import {
   evaluateTerrainMaterial,
   terrainMaterialColorRgb,
   type ILatLonTerrainPatchAddress,
+  type ITerrainMaterialPalette,
   type ITerrainMaterialTilePayload,
   type ITerrainPatchGeometry,
   type ITerrainPatchMesh,
@@ -25,6 +26,8 @@ import {
   deriveIsLand,
   dot,
   findCellAt,
+  generateImpactCraters,
+  type IImpactCraterResult,
   normalize,
   WORLD_PROFILES,
   type IPlanetGraphCell,
@@ -216,6 +219,7 @@ function buildCellPerPixelLookup(
       const material = evaluateWorldMaterial(world, sample, cell);
       colour = srgbRgbToLinear(terrainMaterialColorRgb(material, {
         oceanSubstance: profile.oceanSubstance,
+        palette: getArchetypePalette(profile.archetype),
       }));
     } else {
       const sample = sampler.sample(cell.center);
@@ -313,6 +317,16 @@ function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: numb
     seed,
     ...profile.tectonics,
   });
+
+  let impactCraters: IImpactCraterResult | undefined;
+  if (profile.impactCraters) {
+    impactCraters = generateImpactCraters(graph, tectonics.elevation, {
+      seed,
+      ...profile.impactCraters,
+    });
+    tectonics.elevation = impactCraters.elevation;
+  }
+
   tectonics.isLand = deriveIsLand(
     graph,
     tectonics.elevation,
@@ -321,7 +335,11 @@ function getOrCreateWorld(profileKind: WorldProfileKind = 'volcanic', seed: numb
   );
   const ecology = buildPlanetEcology(graph, tectonics, {
     climate: profile.climate,
-    biomes: profile.biomes,
+    biomes: {
+      archetype: profile.archetype,
+      ...profile.biomes,
+      craterLandform: impactCraters?.craterLandform,
+    },
   });
   const features = computeFeatures(graph, tectonics, ecology.waterBodyKind, profile.features);
   const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
@@ -487,6 +505,50 @@ function srgbRgbToLinear(rgb: readonly [number, number, number]): [number, numbe
     srgbChannelToLinear(rgb[1]),
     srgbChannelToLinear(rgb[2]),
   ];
+}
+
+
+const ARCHETYPE_PALETTES: Record<string, ITerrainMaterialPalette> = {
+  cratered_moon: {
+    water: [0.18, 0.18, 0.2],
+    sand: [0.22, 0.22, 0.25],
+    grass: [0.45, 0.45, 0.48],
+    rock: [0.65, 0.65, 0.68],
+    snow: [0.82, 0.82, 0.86],
+    desertSand: [0.22, 0.22, 0.25],
+    lavaWater: [0.2, 0.2, 0.2],
+  },
+  martian: {
+    water: [0.42, 0.22, 0.15],
+    sand: [0.78, 0.38, 0.2],
+    grass: [0.55, 0.28, 0.16],
+    rock: [0.35, 0.18, 0.12],
+    snow: [0.94, 0.94, 0.96],
+    desertSand: [0.78, 0.38, 0.2],
+    lavaWater: [0.85, 0.25, 0.05],
+  },
+  venusian: {
+    water: [0.45, 0.32, 0.18],
+    sand: [0.62, 0.44, 0.24],
+    grass: [0.52, 0.38, 0.2],
+    rock: [0.72, 0.54, 0.28],
+    snow: [0.65, 0.45, 0.22],
+    desertSand: [0.62, 0.44, 0.24],
+    lavaWater: [0.9, 0.35, 0.05],
+  },
+  protoplanet: {
+    water: [0.95, 0.32, 0.05],
+    sand: [0.18, 0.12, 0.1],
+    grass: [0.85, 0.3, 0.08],
+    rock: [0.22, 0.12, 0.08],
+    snow: [0.95, 0.32, 0.05],
+    desertSand: [0.18, 0.12, 0.1],
+    lavaWater: [0.95, 0.32, 0.05],
+  },
+};
+
+function getArchetypePalette(archetype?: string): ITerrainMaterialPalette | undefined {
+  return archetype ? ARCHETYPE_PALETTES[archetype] : undefined;
 }
 
 function evaluateWorldMaterial(
@@ -702,6 +764,7 @@ function buildMaterialTile(
         const material = evaluateWorldMaterial(world, sample, cell, river01, slope01, cliffScale);
         const base = terrainMaterialColorRgb(material, {
           oceanSubstance: world.profile.oceanSubstance,
+          palette: getArchetypePalette(world.profile.archetype),
         });
         // Make the slope mask visually legible while keeping it part of the
         // same material evaluation used by mesh colours.
@@ -1162,6 +1225,7 @@ addEventListener('message', async ({ data }: MessageEvent<CellPlanetMorphWorkerM
           // decode them here before the renderer applies lighting and sRGB output.
           const rgb = srgbRgbToLinear(terrainMaterialColorRgb(material, {
             oceanSubstance: profile.oceanSubstance,
+            palette: getArchetypePalette(profile.archetype),
           }));
           colors[o3] = rgb[0];
           colors[o3 + 1] = rgb[1];

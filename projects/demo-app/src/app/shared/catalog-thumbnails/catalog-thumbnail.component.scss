@@ -1,0 +1,18 @@
+:host {
+  display: flex;
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: .5rem;
+  background: #111e28;
+}
+
+img { width: 100%; height: 100%; object-fit: cover; }
+.preview-hint {
+  position: absolute;
+  inset-inline: .5rem;
+  bottom: .5rem;
+  color: #b4c9d7;
+  font-size: .7rem;
+  text-align: center;
+}

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { CatalogThumbnailComponent } from '../../shared/catalog-thumbnails/catalog-thumbnail.component';
 
 export type SpikeStatus = 'passed' | 'failed' | 'pending' | 'inconclusive';
 
@@ -31,7 +32,7 @@ export const SPIKES: readonly ISpikeItem[] = [
     hypothesis:
       'One shared vertex buffer + per-mip index buffers + per-vertex world-space height/morph, with a neighbour-LOD-aware border clamp closing the T-junction at ring boundaries, can replace CDLOD\'s CPU-remeshed patches: crack-free by construction, draw calls bounded to one InstancedMesh per LOD level, and no geometry cache to evict or race — the failure class behind CS-019\'s flicker.',
     description:
-      'Plain Three.js, zero triangular-engine imports. Toggle morph off to see the cracks it normally hides; freeze the camera to repeat the attempt-2 static-camera flicker check.',
+      'Uses the shared triangular-engine/terrain clipmap implementation in an engine scene. Toggle morph off to see the cracks it normally hides; freeze the camera to repeat the attempt-2 static-camera flicker check.',
     runbookPath: 'docs/runbook/028_planet_terrain_attempt_history.md',
     dateISO: '2026-09-06',
   },
@@ -72,31 +73,34 @@ const STATUS_LABEL: Record<SpikeStatus, string> = {
 
 @Component({
   selector: 'app-spikes-index',
-  imports: [RouterLink],
+  imports: [RouterLink, CatalogThumbnailComponent],
   templateUrl: './spikes-index.component.html',
   styleUrl: './spikes-index.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'flex-page' },
 })
 export class SpikesIndexComponent {
   readonly spikes = SPIKES;
   readonly statusLabel = STATUS_LABEL;
 
   readonly searchQuery = signal('');
-  readonly selectedStatus = signal<'all' | SpikeStatus>('all');
+  readonly selectedStatus = signal<'visible' | 'all' | SpikeStatus>('visible');
 
   readonly totalCount = SPIKES.length;
   readonly passedCount = SPIKES.filter((s) => s.status === 'passed').length;
   readonly failedCount = SPIKES.filter((s) => s.status === 'failed').length;
-  readonly pendingCount = SPIKES.filter(
-    (s) => s.status === 'pending' || s.status === 'inconclusive',
-  ).length;
+  readonly pendingCount = SPIKES.filter((s) => s.status === 'pending').length;
+  readonly inconclusiveCount = SPIKES.filter((s) => s.status === 'inconclusive').length;
+  readonly visibleCount = SPIKES.filter((s) => s.status === 'passed' || s.status === 'pending').length;
 
   readonly filteredSpikes = computed<readonly ISpikeItem[]>(() => {
     const q = this.searchQuery().trim().toLowerCase();
     const status = this.selectedStatus();
 
     return this.spikes.filter((spike) => {
-      if (status !== 'all' && spike.status !== status) return false;
+      if (status === 'visible') {
+        if (spike.status === 'failed' || spike.status === 'inconclusive') return false;
+      } else if (status !== 'all' && spike.status !== status) return false;
       if (!q) return true;
       return (
         spike.title.toLowerCase().includes(q) ||
@@ -108,19 +112,19 @@ export class SpikesIndexComponent {
   });
 
   readonly hasActiveFilters = computed<boolean>(
-    () => this.searchQuery().trim().length > 0 || this.selectedStatus() !== 'all',
+    () => this.searchQuery().trim().length > 0 || this.selectedStatus() !== 'visible',
   );
 
   setSearchQuery(query: string): void {
     this.searchQuery.set(query);
   }
 
-  selectStatus(status: 'all' | SpikeStatus): void {
+  selectStatus(status: 'visible' | 'all' | SpikeStatus): void {
     this.selectedStatus.set(status);
   }
 
   clearFilters(): void {
     this.searchQuery.set('');
-    this.selectedStatus.set('all');
+    this.selectedStatus.set('visible');
   }
 }

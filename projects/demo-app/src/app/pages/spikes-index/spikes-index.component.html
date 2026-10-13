@@ -42,6 +42,9 @@
     <div class="filter-row">
       <span class="filter-label">Status:</span>
       <div class="status-tabs" role="tablist">
+        <button type="button" class="status-tab" [class.active]="selectedStatus() === 'visible'" (click)="selectStatus('visible')">
+          Active &amp; passed <span class="count-badge">{{ visibleCount }}</span>
+        </button>
         <button type="button" class="status-tab" [class.active]="selectedStatus() === 'all'" (click)="selectStatus('all')">
           All <span class="count-badge">{{ totalCount }}</span>
         </button>
@@ -53,6 +56,9 @@
         </button>
         <button type="button" class="status-tab pending-tab" [class.active]="selectedStatus() === 'pending'" (click)="selectStatus('pending')">
           ⏳ Pending <span class="count-badge">{{ pendingCount }}</span>
+        </button>
+        <button type="button" class="status-tab" [class.active]="selectedStatus() === 'inconclusive'" (click)="selectStatus('inconclusive')">
+          Inconclusive <span class="count-badge">{{ inconclusiveCount }}</span>
         </button>
       </div>
     </div>
@@ -79,6 +85,7 @@
   <nav class="spikes-grid" aria-label="Spikes">
     @for (spike of filteredSpikes(); track spike.id) {
       <a [routerLink]="spike.route" class="spike-card" [class]="'status-' + spike.status">
+        <app-catalog-thumbnail [route]="spike.route" [title]="spike.title" />
         <div class="card-meta">
           <span class="spike-number">Spike {{ spike.number }}</span>
           <span class="status-pill" [class]="'status-' + spike.status">

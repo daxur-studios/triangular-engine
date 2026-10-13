@@ -12,5 +12,6 @@ tags: [runbook, index]
 | --- | --- |
 | [Optional Scene Tree and Game Install](/docs/runbook/043_optional_scene_tree_and_game_install.md) | [Implementation plan](/docs/plans/043_optional_scene_tree_and_game_install.md) |
 | [Reusable Scene Page Schematic](/docs/runbook/044_scene_page_generator.md) | [Implementation plan](/docs/plans/044_scene_page_generator.md) |
+| [Demo Catalog Thumbnails](/docs/runbook/045_demo_catalog_thumbnails.md) | [Implementation plan](/docs/plans/045_demo_catalog_thumbnails.md) |
 
 Existing runbooks `001`–`042` retain their historical paths and formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

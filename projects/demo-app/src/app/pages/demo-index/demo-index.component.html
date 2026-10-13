@@ -250,6 +250,7 @@
       <div class="spotlight-grid">
         @for (demo of featuredGems(); track demo.id) {
           <a [routerLink]="demo.route" class="demo-card spotlight-card">
+            <app-catalog-thumbnail [route]="demo.route" [title]="demo.title" />
             <div class="card-meta">
               <span class="demo-number">{{ demo.number }}</span>
               <span class="tier-pill gem-pill">★ Shining Gem</span>
@@ -302,6 +303,7 @@
             [class.card-lab]="demo.tier === 'lab'"
             [class.card-archived]="demo.tier === 'archived'"
           >
+            <app-catalog-thumbnail [route]="demo.route" [title]="demo.title" />
             <div class="card-meta">
               <span class="demo-number">{{ demo.number }}</span>
               @if (demo.tier === 'gem') {
@@ -362,6 +364,7 @@
               [class.card-lab]="demo.tier === 'lab'"
               [class.card-archived]="demo.tier === 'archived'"
             >
+              <app-catalog-thumbnail [route]="demo.route" [title]="demo.title" />
               <div class="card-meta">
                 <span class="demo-number">{{ demo.number }}</span>
                 @if (demo.tier === 'gem') {

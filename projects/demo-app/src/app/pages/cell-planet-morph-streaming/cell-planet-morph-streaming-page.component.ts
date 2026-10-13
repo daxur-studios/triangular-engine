@@ -229,6 +229,23 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly worldProfileKind = signal<WorldProfileKind>(
     CELL_PLANET_U0_FIXTURE.worldProfile,
   );
+  readonly availableWorldProfiles: readonly { id: WorldProfileKind; label: string; icon: string }[] = [
+    { id: 'moon', label: 'Moon', icon: '🌑' },
+    { id: 'mars', label: 'Mars', icon: '🔴' },
+    { id: 'venus', label: 'Venus', icon: '🟡' },
+    { id: 'terran', label: 'Earth', icon: '🌍' },
+    { id: 'protoplanet', label: 'Protoplanet', icon: '🔥' },
+    { id: 'volcanic', label: 'Volcanic', icon: '🌋' },
+  ];
+
+  setWorldProfile(kind: WorldProfileKind): void {
+    if (this.worldProfileKind() === kind) return;
+    this.worldProfileKind.set(kind);
+    this.materialWorldKey = '';
+    this.materialViewKey = '';
+    this.materialRuntime.invalidate();
+    this.rebuildRevision.update((r) => r + 1);
+  }
   /** Stylized relief control, kept proportional to the physical planet radius like 25D. */
   readonly heightScale = signal(4);
   readonly terrainHeightScaleM = computed(() =>
@@ -636,7 +653,7 @@ export class CellPlanetMorphStreamingPageComponent {
 
   readonly frustumLod = signal(true);
   readonly selectionRevision = computed(() => JSON.stringify([
-    this.frustumLod(), this.lodMorph(), this.projectionKind(), this.terrainHeightScaleM(),
+    this.frustumLod(), this.lodMorph(), this.projectionKind(), this.terrainHeightScaleM(), this.worldProfileKind(),
   ]));
 
   toggleFrustumLod(): void {
@@ -1643,7 +1660,9 @@ export class CellPlanetMorphStreamingPageComponent {
     enablePlanetMorphProjection(material, this.morphUniforms);
     const mesh = new Mesh(geometry, material);
     mesh.name = 'morph-streaming-ocean';
-    mesh.visible = this.oceanVisible();
+    const profile = WORLD_PROFILES[this.worldProfileKind()];
+    const hasOcean = (profile.tectonics?.targetLandFraction ?? 0.7) < 1.0;
+    mesh.visible = this.oceanVisible() && hasOcean;
     mesh.renderOrder = 1;
     mesh.frustumCulled = false;
     this.engine.scene.add(mesh);

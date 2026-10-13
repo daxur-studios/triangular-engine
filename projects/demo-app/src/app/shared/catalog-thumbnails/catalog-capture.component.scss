@@ -1,0 +1,25 @@
+:host { display: contents; }
+
+.capture-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: .3rem;
+  max-width: 19rem;
+  color: #dceaf2;
+  font: .75rem system-ui, sans-serif;
+  text-align: end;
+}
+
+button {
+  padding: .5rem .75rem;
+  color: #e4f2fa;
+  background: #152632;
+  border: 1px solid #406275;
+  border-radius: .5rem;
+  cursor: pointer;
+  &:hover { background: #223e4e; }
+  &:disabled { cursor: wait; opacity: .7; }
+}
+
+span:not(:empty) { padding: .3rem .5rem; background: #152632; border-radius: .3rem; }

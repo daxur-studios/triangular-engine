@@ -1,0 +1,10 @@
+<img
+  [src]="preview() || 'catalog-thumbnail-placeholder.svg'"
+  [alt]="'Preview for ' + title()"
+  loading="lazy"
+  decoding="async"
+  (error)="onImageError()"
+/>
+@if (!preview()) {
+  <span class="preview-hint">Open scene to capture a preview</span>
+}

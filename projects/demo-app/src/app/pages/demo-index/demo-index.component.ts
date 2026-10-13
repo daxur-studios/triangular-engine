@@ -6,6 +6,7 @@ import {
   signal,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { CatalogThumbnailComponent } from '../../shared/catalog-thumbnails/catalog-thumbnail.component';
 
 export type DemoTier = 'gem' | 'lab' | 'archived';
 export type DemoSort = 'default' | 'newest' | 'oldest' | 'title';
@@ -893,10 +894,11 @@ export interface CategoryGroup {
 
 @Component({
   selector: 'app-demo-index',
-  imports: [RouterLink],
+  imports: [RouterLink, CatalogThumbnailComponent],
   templateUrl: './demo-index.component.html',
   styleUrl: './demo-index.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'flex-page' },
 })
 export class DemoIndexComponent {
   readonly categories = CATEGORIES;

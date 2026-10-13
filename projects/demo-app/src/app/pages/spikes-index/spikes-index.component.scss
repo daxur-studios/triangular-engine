@@ -1,6 +1,5 @@
 :host {
-  min-height: 100vh;
-  display: block;
+  min-height: 0;
   color: #edf3f7;
   background:
     radial-gradient(circle at 80% 8%, rgba(91, 157, 174, 0.15), transparent 40rem),
@@ -254,6 +253,7 @@ h1 {
 }
 
 .spike-card {
+  max-width: 24rem;
   display: flex;
   flex-direction: column;
   padding: 1.25rem;
