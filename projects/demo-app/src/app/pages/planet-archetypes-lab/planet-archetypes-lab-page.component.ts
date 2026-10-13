@@ -15,12 +15,14 @@ import {
   Color,
   DirectionalLight,
   DoubleSide,
+  FrontSide,
   Group,
   LineBasicMaterial,
   LineSegments,
   Mesh,
   MeshStandardMaterial,
   Raycaster,
+  SphereGeometry,
   Vector2,
   Vector3,
 } from 'three';
@@ -29,6 +31,8 @@ import {
   buildPlanetEcology,
   buildPlanetGraphCore,
   buildPlanetTectonics,
+  createPlanetSurfaceSampler,
+  findCellAt,
   generateImpactCraters,
   IImpactCraterResult,
   IPlanetEcology,
@@ -39,11 +43,14 @@ import {
 } from 'triangular-engine/worldgen';
 import {
   biomeColor,
+  buildPlanetGlobeGeometry,
   elevationColor,
+  IPlanetGlobeGeometry,
   lavaOceanColor,
 } from 'triangular-engine/worldgen/render';
 
 export type ArchetypeColorMode = 'biome' | 'elevation' | 'craters';
+export type SurfaceRenderMode = 'cells' | 'continuous';
 
 interface ICellInspectInfo {
   id: number;
@@ -113,9 +120,10 @@ export class PlanetArchetypesLabPageComponent {
   readonly mariaBasaltFlooding = signal<boolean>(true);
 
   // Visualization settings
+  readonly renderMode = signal<SurfaceRenderMode>('continuous');
   readonly colorMode = signal<ArchetypeColorMode>('biome');
   readonly terrainExaggeration = signal<number>(0.07);
-  readonly showBorders = signal<boolean>(true);
+  readonly showBorders = signal<boolean>(false);
 
   // Inspection
   readonly inspectedCell = signal<ICellInspectInfo | null>(null);
@@ -129,7 +137,10 @@ export class PlanetArchetypesLabPageComponent {
 
   private planetGroup = new Group();
   private terrainMesh: Mesh | null = null;
+  private continuousMesh: Mesh | null = null;
+  private oceanMesh: Mesh | null = null;
   private borderMesh: LineSegments | null = null;
+  private currentGlobeGeom: IPlanetGlobeGeometry | null = null;
   private currentGraph: IPlanetGraphCore | null = null;
   private currentTectonics: IPlanetTectonics | null = null;
   private currentEcology: IPlanetEcology | null = null;
@@ -141,7 +152,12 @@ export class PlanetArchetypesLabPageComponent {
     // Initial build
     this.rebuildPlanet();
 
+    const canvas = this.engine.canvas;
+    const onClick = (e: MouseEvent) => this.onPointerClick(e);
+    canvas.addEventListener('click', onClick);
+
     this.destroyRef.onDestroy(() => {
+      canvas.removeEventListener('click', onClick);
       this.disposeScene();
     });
   }
@@ -232,7 +248,30 @@ export class PlanetArchetypesLabPageComponent {
     this.currentEcology = ecology;
 
     this.updateStats();
-    this.rebuildMesh();
+    this.rebuildCellMesh();
+    this.rebuildContinuousMesh();
+    this.syncMeshVisibility();
+  }
+
+  setRenderMode(mode: SurfaceRenderMode): void {
+    this.renderMode.set(mode);
+    this.syncMeshVisibility();
+  }
+
+  private syncMeshVisibility(): void {
+    const isCells = this.renderMode() === 'cells';
+    if (this.terrainMesh) {
+      this.terrainMesh.visible = isCells;
+    }
+    if (this.borderMesh) {
+      this.borderMesh.visible = isCells && this.showBorders();
+    }
+    if (this.continuousMesh) {
+      this.continuousMesh.visible = !isCells;
+    }
+    if (this.oceanMesh) {
+      this.oceanMesh.visible = !isCells && this.selectedArchetype() === 'terran';
+    }
   }
 
   private updateStats(): void {
@@ -274,7 +313,7 @@ export class PlanetArchetypesLabPageComponent {
     }
   }
 
-  private rebuildMesh(): void {
+  private rebuildCellMesh(): void {
     if (!this.currentGraph || !this.currentTectonics || !this.currentEcology) return;
 
     if (this.terrainMesh) {
@@ -307,7 +346,6 @@ export class PlanetArchetypesLabPageComponent {
 
       const cColor = this.resolveCellColor(i);
 
-      // Cell polygon triangle fan: center -> corner[k] -> corner[k+1]
       const corners = cell.corners;
       const numCorners = corners.length;
       for (let k = 0; k < numCorners; k++) {
@@ -315,19 +353,15 @@ export class PlanetArchetypesLabPageComponent {
         const cornerA = corners[k]!;
         const cornerB = corners[nextK]!;
 
-        // Center
         positions.push(cell.center.x * rCenter, cell.center.y * rCenter, cell.center.z * rCenter);
         colors.push(cColor.r, cColor.g, cColor.b);
 
-        // Corner A
         positions.push(cornerA.x * rCenter, cornerA.y * rCenter, cornerA.z * rCenter);
         colors.push(cColor.r, cColor.g, cColor.b);
 
-        // Corner B
         positions.push(cornerB.x * rCenter, cornerB.y * rCenter, cornerB.z * rCenter);
         colors.push(cColor.r, cColor.g, cColor.b);
 
-        // Cell border line segment
         borderPositions.push(
           cornerA.x * (rCenter + 0.001),
           cornerA.y * (rCenter + 0.001),
@@ -363,29 +397,144 @@ export class PlanetArchetypesLabPageComponent {
       opacity: 0.35,
     });
     this.borderMesh = new LineSegments(borderGeom, borderMat);
-    this.borderMesh.visible = this.showBorders();
     this.planetGroup.add(this.borderMesh);
   }
 
-  private updateMeshColors(): void {
-    if (!this.terrainMesh || !this.currentGraph) return;
-    const geometry = this.terrainMesh.geometry;
-    const colorAttr = geometry.getAttribute('color') as BufferAttribute;
-    const array = colorAttr.array as Float32Array;
+  private rebuildContinuousMesh(): void {
+    if (!this.currentGraph || !this.currentTectonics || !this.currentEcology) return;
 
-    let index = 0;
-    const cellCount = this.currentGraph.cells.length;
-    for (let i = 0; i < cellCount; i++) {
-      const cell = this.currentGraph.cells[i]!;
-      const cColor = this.resolveCellColor(i);
-      const verticesPerCell = cell.corners.length * 3;
-      for (let v = 0; v < verticesPerCell; v++) {
-        array[index++] = cColor.r;
-        array[index++] = cColor.g;
-        array[index++] = cColor.b;
-      }
+    if (this.continuousMesh) {
+      this.planetGroup.remove(this.continuousMesh);
+      this.continuousMesh.geometry.dispose();
+      (this.continuousMesh.material as MeshStandardMaterial).dispose();
+      this.continuousMesh = null;
     }
-    colorAttr.needsUpdate = true;
+    if (this.oceanMesh) {
+      this.planetGroup.remove(this.oceanMesh);
+      this.oceanMesh.geometry.dispose();
+      (this.oceanMesh.material as MeshStandardMaterial).dispose();
+      this.oceanMesh = null;
+    }
+
+    const graph = this.currentGraph;
+    const tectonics = this.currentTectonics;
+    const ecology = this.currentEcology;
+    const profile = WORLD_PROFILES[this.selectedArchetype()];
+
+    const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
+      featureComposition: 'cell',
+    });
+
+    const globeGeom = buildPlanetGlobeGeometry({
+      sampler,
+      radius: 1.0,
+      heightScale: this.terrainExaggeration(),
+      longitudeSegments: 144,
+      latitudeRings: 72,
+      cellIdAt: (dir) => findCellAt(graph, dir).id,
+    });
+    this.currentGlobeGeom = globeGeom;
+
+    const geom = new BufferGeometry();
+    geom.setAttribute('position', new BufferAttribute(new Float32Array(globeGeom.positions), 3));
+    geom.setAttribute('normal', new BufferAttribute(new Float32Array(globeGeom.normals), 3));
+    geom.setIndex(new BufferAttribute(new Uint32Array(globeGeom.indices), 1));
+
+    const colors = this.buildContinuousColors(globeGeom);
+    geom.setAttribute('color', new BufferAttribute(colors, 3));
+
+    const material = new MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.82,
+      metalness: 0.08,
+      side: FrontSide,
+    });
+
+    this.continuousMesh = new Mesh(geom, material);
+    this.planetGroup.add(this.continuousMesh);
+
+    // Add translucent ocean shell for water worlds
+    if (profile.oceanSubstance === 'water') {
+      const oceanGeom = new SphereGeometry(1.0, 64, 32);
+      const oceanMat = new MeshStandardMaterial({
+        color: new Color('#1c5f8a'),
+        transparent: true,
+        opacity: 0.6,
+        roughness: 0.15,
+        metalness: 0.1,
+      });
+      this.oceanMesh = new Mesh(oceanGeom, oceanMat);
+      this.planetGroup.add(this.oceanMesh);
+    }
+  }
+
+  private buildContinuousColors(globeGeom: IPlanetGlobeGeometry): Float32Array {
+    const vertexCount = globeGeom.vertexCount;
+    const colors = new Float32Array(vertexCount * 3);
+    const cellIds = globeGeom.cellIds;
+    const elevations = globeGeom.elevations;
+    const minE = this.minElevation();
+    const maxE = this.maxElevation();
+    const tectonics = this.currentTectonics;
+    const mode = this.colorMode();
+
+    for (let v = 0; v < vertexCount; v++) {
+      const cellId = cellIds[v];
+      const e = elevations[v];
+      const o = v * 3;
+      let col: Color;
+
+      if (mode === 'elevation' && tectonics) {
+        col = new Color(elevationColor(e, tectonics.seaLevelElevation, minE, maxE));
+      } else if (mode === 'craters' && cellId >= 0) {
+        col = this.resolveCellColor(cellId);
+      } else {
+        // Biome mode
+        if (this.selectedArchetype() === 'protoplanet' && tectonics && e < tectonics.seaLevelElevation) {
+          col = new Color(lavaOceanColor());
+        } else if (cellId >= 0) {
+          col = this.resolveCellColor(cellId);
+        } else {
+          col = new Color(0x666666);
+        }
+      }
+
+      colors[o] = col.r;
+      colors[o + 1] = col.g;
+      colors[o + 2] = col.b;
+    }
+    return colors;
+  }
+
+  private updateMeshColors(): void {
+    // Update cell mesh
+    if (this.terrainMesh && this.currentGraph) {
+      const geometry = this.terrainMesh.geometry;
+      const colorAttr = geometry.getAttribute('color') as BufferAttribute;
+      const array = colorAttr.array as Float32Array;
+
+      let index = 0;
+      const cellCount = this.currentGraph.cells.length;
+      for (let i = 0; i < cellCount; i++) {
+        const cColor = this.resolveCellColor(i);
+        const verticesPerCell = this.currentGraph.cells[i]!.corners.length * 3;
+        for (let v = 0; v < verticesPerCell; v++) {
+          array[index++] = cColor.r;
+          array[index++] = cColor.g;
+          array[index++] = cColor.b;
+        }
+      }
+      colorAttr.needsUpdate = true;
+    }
+
+    // Update continuous mesh
+    if (this.continuousMesh && this.currentGlobeGeom) {
+      const geometry = this.continuousMesh.geometry;
+      const colorAttr = geometry.getAttribute('color') as BufferAttribute;
+      const colors = this.buildContinuousColors(this.currentGlobeGeom);
+      (colorAttr.array as Float32Array).set(colors);
+      colorAttr.needsUpdate = true;
+    }
   }
 
   private resolveCellColor(cellId: number): Color {
@@ -436,16 +585,50 @@ export class PlanetArchetypesLabPageComponent {
     });
   }
 
+  private onPointerClick(event: MouseEvent): void {
+    if (!this.currentGraph || !this.currentTectonics || !this.currentEcology) return;
+    const canvas = this.engine.canvas;
+    const rect = canvas.getBoundingClientRect();
+    const mouse = new Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    const raycaster = new Raycaster();
+    raycaster.setFromCamera(mouse, this.engine.camera);
+    const activeTarget = this.renderMode() === 'cells' ? this.terrainMesh : this.continuousMesh;
+    if (!activeTarget) return;
+    const hits = raycaster.intersectObject(activeTarget, false);
+    if (hits.length > 0 && hits[0]) {
+      const p = hits[0].point.clone().normalize();
+      const hitCell = findCellAt(this.currentGraph, { x: p.x, y: p.y, z: p.z });
+      this.inspectAt(hitCell.id);
+    }
+  }
+
   private disposeScene(): void {
     if (this.terrainMesh) {
       this.planetGroup.remove(this.terrainMesh);
       this.terrainMesh.geometry.dispose();
       (this.terrainMesh.material as MeshStandardMaterial).dispose();
+      this.terrainMesh = null;
     }
     if (this.borderMesh) {
       this.planetGroup.remove(this.borderMesh);
       this.borderMesh.geometry.dispose();
       (this.borderMesh.material as LineBasicMaterial).dispose();
+      this.borderMesh = null;
+    }
+    if (this.continuousMesh) {
+      this.planetGroup.remove(this.continuousMesh);
+      this.continuousMesh.geometry.dispose();
+      (this.continuousMesh.material as MeshStandardMaterial).dispose();
+      this.continuousMesh = null;
+    }
+    if (this.oceanMesh) {
+      this.planetGroup.remove(this.oceanMesh);
+      this.oceanMesh.geometry.dispose();
+      (this.oceanMesh.material as MeshStandardMaterial).dispose();
+      this.oceanMesh = null;
     }
     this.engine.scene.remove(this.planetGroup);
   }
