@@ -509,9 +509,9 @@ export async function handleCellPlanetMeshWorkerRequest(
       extSphereDirections[eIdx + 2] = dirVec[2];
 
       const proj = projection.project(u, v, mapWidth, mapHeight);
-      extFlatPositions[eIdx] = proj.x - mapWidth * 0.5;
-      extFlatPositions[eIdx + 1] = mapHeight * 0.5 - proj.y;
-      extFlatPositions[eIdx + 2] = h;
+      extFlatPositions[eIdx] = proj.x - mapWidth * 0.5 - centerAbs[0];
+      extFlatPositions[eIdx + 1] = mapHeight * 0.5 - proj.y - centerAbs[1];
+      extFlatPositions[eIdx + 2] = h - centerAbs[2];
     }
   }
 

@@ -103,18 +103,18 @@ const DEFAULTS: Omit<
 };
 
 /** Per-cell landform tier a discrete cell is shaped as, derived from its `ecology.biome`. */
-type CellLandform = 'mountain' | 'hill' | 'flat';
+type CellLandform = 'mountain' | 'hill' | 'flat' | 'rim';
 
 const LANDFORM_BY_BIOME: Partial<Record<Biome, CellLandform>> = {
   alpine: 'mountain',
   hills: 'hill',
   canyon: 'hill',
   // Planetary biomes:
-  crater_rim: 'mountain',
+  crater_rim: 'rim',
   crater_peak: 'mountain',
   shield_volcano: 'mountain',
   tessera_highlands: 'mountain',
-  corona_rim: 'hill',
+  corona_rim: 'rim',
   lunar_highlands: 'hill',
   martian_highlands: 'hill',
   rift_canyon: 'hill',
@@ -146,6 +146,9 @@ const LANDFORM_SHAPE: Record<CellLandform, ILandformShape> = {
   // so it cannot turn a whole cell into a raised block.
   mountain: { relief: 0.2, peakSharpness: 1.15, detailAmplitude: 0.035, detailFrequency: 55 },
   hill: { relief: 0.07, peakSharpness: 0.9, detailAmplitude: 0.035, detailFrequency: 30 },
+  // Crater and caldera rims: the circular embankment is already continuous in continuousCellGround;
+  // keep relief at 0 to avoid turning the rim into a ring of isolated conical peaks, while adding rugged texture.
+  rim: { relief: 0, peakSharpness: 1, detailAmplitude: 0.035, detailFrequency: 55 },
   // Meadow/plains/etc: buildable, close to flat, only fine ground texture.
   flat: { relief: 0, peakSharpness: 1, detailAmplitude: 0.015, detailFrequency: 45 },
 };
