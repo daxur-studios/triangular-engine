@@ -1,5 +1,10 @@
 import { PerspectiveCamera } from 'three';
-import { LatLonTerrainDomain, type ITerrainSurfaceSelectionRequest, type ILatLonTerrainPatchAddress } from 'triangular-engine/terrain';
+import {
+  LatLonTerrainDomain,
+  type ILatLonTerrainPatchAddress,
+  type ITerrainPatchMesh,
+  type ITerrainSurfaceSelectionRequest,
+} from 'triangular-engine/terrain';
 import { createCellPlanetMorphSurfaceSelector } from './cell-planet-morph-patch-selector';
 
 const RADIUS_M = 1_000;
@@ -114,11 +119,12 @@ describe('createCellPlanetMorphSurfaceSelector', () => {
   });
 
   it('restricts refinement to visible view cone and front-facing horizon when camera is supplied', () => {
-    // Camera is near the planet surface at [0, 0, 1100], looking East (+X).
+    // Camera is near the planet surface at [0, 0, 1100], looking East (+X) and down at the
+    // ground 15 degrees away (looking level, it would only see sky above the horizon).
     // Terrain behind the camera (West, -X) should not be refined.
     const camera = new PerspectiveCamera(45, 1, 1, 10_000);
     camera.position.set(0, 0, RADIUS_M * 1.1);
-    camera.lookAt(RADIUS_M, 0, RADIUS_M * 1.1);
+    camera.lookAt(Math.sin(Math.PI / 12) * RADIUS_M, 0, Math.cos(Math.PI / 12) * RADIUS_M);
     camera.updateMatrixWorld();
 
     const coneSelector = createCellPlanetMorphSurfaceSelector({
@@ -154,14 +160,85 @@ describe('createCellPlanetMorphSurfaceSelector', () => {
     // Patches directly behind the camera should not refine, staying at level 0 (strictly < 2)
     expect(Math.max(...behindPatches.map((p) => p.level))).toBeLessThan(2);
 
-    // Verify patches in the look direction (East, +X) reach high refinement
+    // Verify patches in the look direction (East, +X, short of the horizon) reach high refinement
     const forwardPatches = coneResult.filter((addr) => {
       const b = domain.getPatchBounds(addr);
       const dir = domain.getFieldPosition(addr, (b.minU + b.maxU) * 0.5, (b.minV + b.maxV) * 0.5);
-      return dir[0] > 0.5;
+      return dir[0] > 0.1 && dir[2] > 0.9;
     });
     expect(forwardPatches.length).toBeGreaterThan(0);
     expect(Math.max(...forwardPatches.map((p) => p.level))).toBeGreaterThanOrEqual(3);
+  });
+
+  it('hides meshed patches behind the camera or the horizon from drawing', () => {
+    const camera = new PerspectiveCamera(45, 1, 1, 10_000);
+    camera.position.set(0, 0, RADIUS_M * 1.1);
+    // Looking east and down at the ground 15 degrees away.
+    const target = [Math.sin(Math.PI / 12), 0, Math.cos(Math.PI / 12)];
+    camera.lookAt(target[0] * RADIUS_M, 0, target[2] * RADIUS_M);
+    camera.updateMatrixWorld();
+    const selector = createCellPlanetMorphSurfaceSelector({
+      domain: () => domain,
+      radiusM: () => RADIUS_M,
+      morph: () => 0,
+      projectionKind: () => 'equalEarth',
+      camera: () => camera,
+    });
+    selector.select(createRequest([0, 0, RADIUS_M * 1.1], { maxLevel: 3 }));
+
+    const isDrawn = (address: ILatLonTerrainPatchAddress) =>
+      selector.patchVisibility.isVisible(
+        address,
+        selector.patchVisibility.measure(address, meshPatch(address)),
+      );
+    const level = 3;
+    const count = 2 ** level;
+    const centreDirection = (address: ILatLonTerrainPatchAddress) => {
+      const b = domain.getPatchBounds(address);
+      return domain.getFieldPosition(address, (b.minU + b.maxU) / 2, (b.minV + b.maxV) / 2);
+    };
+    const patches: ILatLonTerrainPatchAddress[] = [];
+    for (let x = 0; x < 4 * count; x++) {
+      for (let y = 0; y < 2 * count; y++) patches.push({ level, x, y });
+    }
+    // Around the point the camera looks at: drawn.
+    const ahead = patches.filter((address) => {
+      const [dx, dy, dz] = centreDirection(address);
+      return dx * target[0] + dy * target[1] + dz * target[2] > 0.99;
+    });
+    expect(ahead.length).toBeGreaterThan(0);
+    expect(ahead.every(isDrawn)).toBeTrue();
+    // The far side of the planet, behind the horizon: hidden.
+    const farSide = patches.filter((address) => centreDirection(address)[2] < -0.5);
+    expect(farSide.length).toBeGreaterThan(0);
+    expect(farSide.some(isDrawn)).toBeFalse();
+    // Behind the camera, still on the near side: outside the view.
+    const behind = patches.filter((address) => {
+      const [dx, , dz] = centreDirection(address);
+      return dx < -0.4 && dz > 0.6;
+    });
+    expect(behind.length).toBeGreaterThan(0);
+    expect(behind.some(isDrawn)).toBeFalse();
+  });
+
+  it('draws every patch when frustum culling is off', () => {
+    const camera = new PerspectiveCamera(45, 1, 1, 10_000);
+    camera.position.set(0, 0, RADIUS_M * 1.1);
+    camera.lookAt(RADIUS_M, 0, RADIUS_M * 1.1);
+    camera.updateMatrixWorld();
+    const selector = createCellPlanetMorphSurfaceSelector({
+      domain: () => domain,
+      radiusM: () => RADIUS_M,
+      morph: () => 0,
+      projectionKind: () => 'equalEarth',
+      camera: () => camera,
+      frustumCulling: () => false,
+    });
+    selector.select(createRequest([0, 0, RADIUS_M * 1.1], { maxLevel: 3 }));
+    for (const root of roots) {
+      const bounds = selector.patchVisibility.measure(root, meshPatch(root));
+      expect(selector.patchVisibility.isVisible(root, bounds)).toBeTrue();
+    }
   });
 
   it('splits visible patches forceRefine asks for, past maxLevel and outside maxPatches', () => {
@@ -313,4 +390,35 @@ function selectVisibleTarget(options: {
       lat > bounds.minV && lat < bounds.maxV;
   });
   return { targetLevel: target?.level, count: selected.length };
+}
+
+/** A sea-level globe mesh of the patch with the morph mesher's `aSpherePos` attribute. */
+function meshPatch(address: ILatLonTerrainPatchAddress): ITerrainPatchMesh<ILatLonTerrainPatchAddress> {
+  const bounds = domain.getPatchBounds(address);
+  const steps = 4;
+  const sphere: number[] = [];
+  for (let i = 0; i <= steps; i++) {
+    for (let j = 0; j <= steps; j++) {
+      const direction = domain.getFieldPosition(
+        address,
+        bounds.minU + (bounds.maxU - bounds.minU) * i / steps,
+        bounds.minV + (bounds.maxV - bounds.minV) * j / steps,
+      );
+      sphere.push(direction[0] * RADIUS_M, direction[1] * RADIUS_M, direction[2] * RADIUS_M);
+    }
+  }
+  const positions = new Float32Array(sphere);
+  return {
+    address,
+    resolution: steps,
+    centerWorldM: [0, 0, 0],
+    geometricErrorM: 0,
+    surface: {
+      positions,
+      normals: new Float32Array(positions.length),
+      uvs: new Float32Array((positions.length / 3) * 2),
+      indices: new Uint32Array(0),
+      attributes: { aSpherePos: positions },
+    },
+  };
 }

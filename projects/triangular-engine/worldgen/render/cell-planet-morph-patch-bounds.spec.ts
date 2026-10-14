@@ -2,8 +2,11 @@ import { Box3, Vector3 } from 'three';
 import { LatLonTerrainDomain } from 'triangular-engine/terrain';
 import { MAP_PROJECTIONS, type MapProjectionKind } from './map-projections';
 import {
+  createCellPlanetMorphPatchExtents,
   maximumCellPlanetPatchDirectionDot,
+  maximumCellPlanetPatchPlaneDistance,
   populateCellPlanetMorphPatchBounds,
+  populateCellPlanetMorphPatchExtents,
 } from './cell-planet-morph-patch-bounds';
 
 describe('cell planet morph patch bounds', () => {
@@ -96,5 +99,56 @@ describe('cell planet morph patch bounds', () => {
       }
     }
     expect(largestUnderestimate).toBeLessThan(1e-12);
+  });
+
+  it('bounds the plane distance of sampled morphed terrain, exactly on the globe', () => {
+    const extents = createCellPlanetMorphPatchExtents();
+    const point = new Vector3();
+    let random = 12345;
+    const next = () => {
+      random = (random * 1103515245 + 12345) % 2147483648;
+      return random / 2147483648;
+    };
+    let largestUnderestimate = 0;
+    let largestGlobeOverestimate = 0;
+    for (let trial = 0; trial < 40; trial++) {
+      const normal = new Vector3(next() - 0.5, next() - 0.5, next() - 0.5).normalize();
+      const constant = (next() - 0.5) * radius;
+      for (const kind of ['equirectangular', 'equalEarth'] as const) {
+        for (const morph of [0, 0.3, 1]) {
+          for (const address of addresses) {
+            const bounds = domain.getPatchBounds(address);
+            populateCellPlanetMorphPatchExtents(bounds, radius, kind, -relief, relief, 0, extents);
+            const bound = maximumCellPlanetPatchPlaneDistance(
+              extents, morph, normal.x, normal.y, normal.z, constant,
+            );
+            let sampled = -Infinity;
+            for (let i = 0; i <= 24; i++) {
+              for (let j = 0; j <= 24; j++) {
+                const lon = bounds.minU + (bounds.maxU - bounds.minU) * i / 24;
+                const lat = bounds.minV + (bounds.maxV - bounds.minV) * j / 24;
+                const direction = domain.getFieldPosition(address, lon, lat);
+                const projection = MAP_PROJECTIONS[kind].project(lon, lat, 2 * Math.PI * radius, Math.PI * radius);
+                for (const elevation of [-relief, relief]) {
+                  point.set(
+                    (1 - morph) * direction[0] * (radius + elevation) + morph * (projection.x - Math.PI * radius),
+                    (1 - morph) * direction[1] * (radius + elevation) + morph * (Math.PI * radius / 2 - projection.y),
+                    (1 - morph) * direction[2] * (radius + elevation) + morph * elevation,
+                  );
+                  sampled = Math.max(sampled, normal.dot(point) + constant);
+                }
+              }
+            }
+            largestUnderestimate = Math.max(largestUnderestimate, sampled - bound);
+            if (morph === 0) {
+              largestGlobeOverestimate = Math.max(largestGlobeOverestimate, bound - sampled);
+            }
+          }
+        }
+      }
+    }
+    expect(largestUnderestimate).toBeLessThan(1e-6 * radius);
+    // A 24x24 grid lands within a small fraction of a patch of the true maximum.
+    expect(largestGlobeOverestimate).toBeLessThan(0.01 * radius);
   });
 });

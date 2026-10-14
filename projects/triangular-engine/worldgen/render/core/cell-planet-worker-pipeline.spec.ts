@@ -52,6 +52,27 @@ describe('cell-planet-worker-pipeline', () => {
     }
   });
 
+  it('handles diagnostic heat and moisture material tiles', async () => {
+    const cache = new CellPlanetWorldCache({ defaultCellCount: 50, defaultRelaxationIterations: 1 });
+    for (const colorMode of ['heat', 'moisture'] as const) {
+      const request: CellPlanetMaterialTileWorkerRequest = {
+        kind: 'materialTile',
+        id: 110,
+        colorMode,
+        materialTileResolution: 16,
+        materialTileX: 0,
+        materialTileY: 0,
+        materialTileGrid: [2, 1],
+        radius: 10,
+        worldProfile: 'terran',
+        seed: 3,
+      };
+      const { response } = await handleCellPlanetWorkerMessage(request, { worldCache: cache });
+      expect(response.id).toBe(110);
+      expect('materialTile' in response && !!response.materialTile).toBeTrue();
+    }
+  });
+
   it('handles cellLookup requests', async () => {
     const cache = new CellPlanetWorldCache({ defaultCellCount: 50, defaultRelaxationIterations: 1 });
     const request: CellPlanetCellLookupWorkerRequest = {

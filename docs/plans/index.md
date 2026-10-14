@@ -14,5 +14,6 @@ tags: [plans, index]
 | [Reusable Scene Page Schematic](/docs/plans/044_scene_page_generator.md) | done | [Evidence](/docs/runbook/044_scene_page_generator.md) |
 | [Demo Catalog Thumbnails](/docs/plans/045_demo_catalog_thumbnails.md) | done | [Evidence](/docs/runbook/045_demo_catalog_thumbnails.md) |
 | [Shared Cell-Planet Worker Pipeline](/docs/plans/046_cell_planet_shared_worker_pipeline.md) | in_progress | [Evidence](/docs/runbook/046_cell_planet_shared_worker_pipeline.md) |
+| [Terrain View Culling and Rotation Churn](/docs/plans/047_terrain_view_culling_and_rotation_churn.md) | done | [Evidence](/docs/runbook/047_terrain_view_culling_and_rotation_churn.md) |
 
 Convention: [Plans and Runbooks](/docs/plans-and-runbooks.md).

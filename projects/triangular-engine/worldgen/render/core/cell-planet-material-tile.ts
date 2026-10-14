@@ -38,12 +38,14 @@ import {
   biomeColor,
   elevationColor,
   lavaOceanColor,
+  moistureColor,
   plateColor,
+  temperatureColor,
 } from './color-ramps';
 
 export const OCEAN_COLOR = 'hsl(210, 55%, 22%)';
 
-export type CellPlanetColorMode = 'natural' | 'elevation' | 'lod' | 'plates' | 'material';
+export type CellPlanetColorMode = 'natural' | 'elevation' | 'lod' | 'plates' | 'material' | 'heat' | 'moisture';
 
 /** Material-only work is deliberately separate from mesh generation. */
 export interface ICellPlanetMaterialTilePayload extends ITerrainMaterialTilePayload {
@@ -537,22 +539,29 @@ function sampleLocalSlope01(
 // Flat per-cell colours (natural / elevation / plates)
 // ---------------------------------------------------------------------------
 
-function getFlatCellColours(world: ICellPlanetWorld, mode: 'elevation' | 'plates' | 'natural'): Float64Array {
+function getFlatCellColours(world: ICellPlanetWorld, mode: 'elevation' | 'plates' | 'natural' | 'heat' | 'moisture'): Float64Array {
   const cached = world.flatCellColours.get(mode);
   if (cached) return cached;
   const { graph, tectonics, ecology, eMin, eMax } = world;
   const colours = new Float64Array(graph.cells.length * 3);
   for (const cell of graph.cells) {
-    const linear = mode === 'elevation'
-      ? parseColorToLinearRgb(elevationColor(
+    let linear: readonly [number, number, number];
+    if (mode === 'elevation') {
+      linear = parseColorToLinearRgb(elevationColor(
         tectonics.elevation[cell.id] ?? tectonics.seaLevelElevation,
         tectonics.seaLevelElevation,
         eMin,
         eMax,
-      ))
-      : mode === 'plates'
-        ? parseColorToLinearRgb(plateColor(tectonics.plateIdByCell[cell.id] ?? 0))
-        : parseColorToLinearRgb(biomeColor(ecology.biome[cell.id]));
+      ));
+    } else if (mode === 'plates') {
+      linear = parseColorToLinearRgb(plateColor(tectonics.plateIdByCell[cell.id] ?? 0));
+    } else if (mode === 'heat') {
+      linear = parseColorToLinearRgb(temperatureColor(ecology.temperature[cell.id] ?? 0));
+    } else if (mode === 'moisture') {
+      linear = parseColorToLinearRgb(moistureColor(ecology.moisture[cell.id] ?? 0));
+    } else {
+      linear = parseColorToLinearRgb(biomeColor(ecology.biome[cell.id]));
+    }
     colours[cell.id * 3] = linear[0];
     colours[cell.id * 3 + 1] = linear[1];
     colours[cell.id * 3 + 2] = linear[2];
@@ -686,7 +695,7 @@ export function buildMaterialTile(
     return texelDirection;
   };
 
-  const flatColours = colorMode === 'natural' || colorMode === 'elevation' || colorMode === 'plates'
+  const flatColours = colorMode === 'natural' || colorMode === 'elevation' || colorMode === 'plates' || colorMode === 'heat' || colorMode === 'moisture'
     ? getFlatCellColours(world, colorMode)
     : undefined;
   const oceanColour = colorMode === 'natural' ? oceanLinearColour(world) : undefined;
@@ -709,7 +718,7 @@ export function buildMaterialTile(
         const dir3 = resolveTexelDirection(localU, localV);
         const cell = findNearestCellFast(graph, dir3, texelCell);
         texelCell = cell;
-        if (colorMode === 'elevation' || colorMode === 'plates') {
+        if (colorMode === 'elevation' || colorMode === 'plates' || colorMode === 'heat' || colorMode === 'moisture') {
           colour[0] = flatColours![cell.id * 3];
           colour[1] = flatColours![cell.id * 3 + 1];
           colour[2] = flatColours![cell.id * 3 + 2];

@@ -299,6 +299,54 @@ describe('TerrainSurfaceComponent', () => {
     fixture.destroy();
   });
 
+  it('hides batched residents patchVisibility rejects and re-evaluates them on reselection', () => {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    const roots: IPlaneTerrainPatchAddress[] = [
+      { level: 0, x: 0, z: 0 },
+      { level: 0, x: 1, z: 0 },
+    ];
+    let visibleX = 0;
+    const measure = jasmine
+      .createSpy('measure')
+      .and.callFake((address: IPlaneTerrainPatchAddress) => ({ x: address.x }));
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', roots);
+    fixture.componentRef.setInput('maxLod', 0);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('generationBudget', 100);
+    fixture.componentRef.setInput('batching', true);
+    fixture.componentRef.setInput(
+      'patchSelector',
+      ({ roots: selected }: ITerrainSurfaceSelectionRequest<IPlaneTerrainPatchAddress>) => selected,
+    );
+    fixture.componentRef.setInput('patchVisibility', {
+      measure,
+      isVisible: (_address: IPlaneTerrainPatchAddress, bounds: { x: number }) =>
+        bounds.x === visibleX,
+    });
+    camera.position.set(0, 100, 0);
+    fixture.detectChanges();
+    beforeRender$.next();
+    beforeRender$.next();
+
+    const batch = scene.children[0].children.find(
+      (child): child is BatchedMesh => child instanceof BatchedMesh,
+    )!;
+    const visibleIds = () =>
+      [0, 1].filter((id) => batch.getVisibleAt(id)).map((id) => measure.calls.all()[id].args[0].x);
+    expect(batch.instanceCount).toBe(2);
+    expect(measure).toHaveBeenCalledTimes(2);
+    expect(visibleIds()).toEqual([0]);
+
+    visibleX = 1;
+    camera.position.x = 10;
+    beforeRender$.next();
+    expect(visibleIds()).toEqual([1]);
+    expect(measure).toHaveBeenCalledTimes(2);
+    fixture.destroy();
+  });
+
   it('uses an opt-in patch selector while retaining shared mesh streaming', () => {
     const fixture = TestBed.createComponent(TerrainSurfaceComponent);
     const selector = jasmine

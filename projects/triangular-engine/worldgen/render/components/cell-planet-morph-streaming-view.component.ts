@@ -108,6 +108,7 @@ function defaultAddressLevel(address: ILatLonTerrainPatchAddress): number {
       [freezeLod]="freezeLod()"
       [wireframe]="wireframe()"
       [patchSelector]="patchSelector"
+      [patchVisibility]="drawCulling() ? selector.patchVisibility : undefined"
       [selectionRevision]="resolvedSelectionRevision()"
       [lodPositionToleranceM]="lodPositionToleranceM()"
       [lodViewToleranceRadians]="lodViewToleranceRadians()"
@@ -226,6 +227,13 @@ export class CellPlanetMorphStreamingViewComponent {
   readonly refinementDistanceFactor = input<number | undefined>(undefined);
   readonly stickyRefinementFactor = input<number | undefined>(undefined);
   readonly frustumCulling = input(true);
+  /**
+   * Skips drawing resident patches outside the view or behind the horizon (with `frustumCulling`
+   * on). They stay resident, so turning the camera shows them at once. Visibility updates when
+   * patches are selected, so it keeps patches up to 2 degrees, or twice
+   * `lodViewToleranceRadians`, outside the view.
+   */
+  readonly drawCulling = input(false);
   readonly horizonCulling = input(true);
   readonly frustumSafetyFactor = input(1.35);
   /** Match the mesh generator's height scale; selector bounds allow +/- twice this value. */
@@ -287,7 +295,7 @@ export class CellPlanetMorphStreamingViewComponent {
   // ==========================================================================
   private readonly engine = inject(EngineService, { optional: true });
 
-  private readonly selector = createCellPlanetMorphSurfaceSelector({
+  protected readonly selector = createCellPlanetMorphSurfaceSelector({
     domain: () => this.domain(),
     radiusM: () => this.radiusM(),
     morph: () => this.lodMorph(),
@@ -300,6 +308,8 @@ export class CellPlanetMorphStreamingViewComponent {
     frustumSafetyFactor: () => this.frustumSafetyFactor(),
     heightScaleM: () => this.heightScaleM(),
     bodyCenterSceneM: () => this.bodyCenterSceneM(),
+    patchOriginBodyM: () => this.patchOriginM(),
+    drawMarginRadians: () => Math.max(0.035, 2 * this.lodViewToleranceRadians()),
     forceRefine: (address) => this.forceRefine()?.(address) ?? false,
   });
   readonly resolvedSelectionRevision = computed(() => JSON.stringify([

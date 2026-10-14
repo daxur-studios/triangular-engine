@@ -684,6 +684,12 @@ export class CellPlanetMorphStreamingPageComponent {
   });
 
   /**
+   * Hides resident patches outside the view or behind the horizon. Re-evaluated whenever the
+   * camera turns more than `lodViewToleranceRadians` (0.005), well inside its 2-degree margin.
+   */
+  readonly patchVisibility = this.morphSelector.patchVisibility;
+
+  /**
    * Stable patch selector reference: does NOT recreate on every morph tick!
    * This guarantees that existing meshes are NEVER purged or flickered during morph sliding.
    */
