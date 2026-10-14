@@ -1,7 +1,7 @@
 import { fakeAsync, flushMicrotasks, TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { BatchedMesh, PerspectiveCamera, Scene } from 'three';
-import { EngineService } from 'triangular-engine';
+import { EngineService, TelemetrySections } from 'triangular-engine';
 import { ConstantTerrainField } from '../core/terrain-field';
 import { PlaneTerrainDomain } from '../domains/plane-terrain-domain';
 import type { IPlaneTerrainPatchAddress } from '../domains/plane-terrain-domain';
@@ -17,17 +17,19 @@ describe('TerrainSurfaceComponent', () => {
   let scene: Scene;
   let camera: PerspectiveCamera;
   let beforeRender$: Subject<void>;
+  let telemetry: TelemetrySections;
 
   beforeEach(() => {
     scene = new Scene();
     camera = new PerspectiveCamera();
     beforeRender$ = new Subject<void>();
+    telemetry = new TelemetrySections();
     TestBed.configureTestingModule({
       imports: [TerrainSurfaceComponent],
       providers: [
         {
           provide: EngineService,
-          useValue: { scene, camera, beforeRender$ },
+          useValue: { scene, camera, beforeRender$, fpsController: { telemetry } },
         },
       ],
     });
@@ -55,6 +57,59 @@ describe('TerrainSurfaceComponent', () => {
 
     fixture.destroy();
     expect(scene.children.length).toBe(0);
+  });
+
+  function createTelemetryFixture() {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', [{ level: 0, x: 0, z: 0 }]);
+    fixture.componentRef.setInput('maxLod', 1);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('generationBudget', 100);
+    camera.position.set(5_000, 100, 5_000);
+    return fixture;
+  }
+
+  it('adds its LOD counts to the agent report under telemetrySection', () => {
+    const fixture = createTelemetryFixture();
+    fixture.componentRef.setInput('telemetrySection', 'terrain');
+    fixture.detectChanges();
+    expect(telemetry.format()).toBe('terrain:\n  status: no update yet');
+
+    beforeRender$.next();
+
+    const report = telemetry.format();
+    expect(report).toContain('terrain:\n  desired: 1\n  resident: 1\n');
+    expect(report).toContain('levels: 0:1');
+    fixture.destroy();
+  });
+
+  it('adds nothing to the agent report when telemetrySection is unset', () => {
+    const fixture = createTelemetryFixture();
+    fixture.detectChanges();
+    beforeRender$.next();
+
+    expect(telemetry.format()).toBe('');
+    fixture.destroy();
+  });
+
+  it('removes its section when the name is cleared or the surface is destroyed', () => {
+    const fixture = createTelemetryFixture();
+    fixture.componentRef.setInput('telemetrySection', 'terrain');
+    fixture.detectChanges();
+    expect(telemetry.format()).toContain('terrain:');
+
+    fixture.componentRef.setInput('telemetrySection', undefined);
+    fixture.detectChanges();
+    expect(telemetry.format()).toBe('');
+
+    fixture.componentRef.setInput('telemetrySection', 'terrain');
+    fixture.detectChanges();
+    expect(telemetry.format()).toContain('terrain:');
+
+    fixture.destroy();
+    expect(telemetry.format()).toBe('');
   });
 
   it('uses an explicit LOD position instead of the camera when supplied', () => {

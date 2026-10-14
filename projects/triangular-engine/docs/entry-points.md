@@ -74,6 +74,21 @@ engine.fpsController.recordPhysicsTime(milliseconds);
 engine.fpsController.recordAssetLoadingTime(milliseconds);
 ```
 
+Pages add their own state to the **Copy for Agent** report with `telemetry.register`. Each section is a name and a set of `key: value` pairs, and it is appended after the engine's block. The provider runs only when the report is copied, so it can read signals directly. Keep the returned function and call it when the component is destroyed:
+
+```ts
+const unregister = engine.fpsController.telemetry.register('planet', () => ({
+  morph: morphProgress(),
+  patches: stats().desired,
+}));
+// in DestroyRef.onDestroy:
+unregister();
+```
+
+Values may be strings, numbers, booleans or `null`; `undefined` entries are omitted.
+
+A `<terrainSurface>` needs no provider code: set `telemetrySection` to a name and it publishes its own LOD and draw counts under that name. Leave it unset, the default, and it adds nothing to the report.
+
 ### Standalone Sparkline
 
 `<telemetry-sparkline>` is also available standalone for custom HUDs and debug overlays:

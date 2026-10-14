@@ -180,6 +180,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   private selectedLevels: Record<number, number> = {};
   private desiredPatchCount = 0;
   private statsSignature = '';
+  private latestStats: ITerrainSurfaceLodStats | undefined;
   private lastSelectionInputSignature = '';
   /** The LOD position and camera when selection last ran, for the tolerances. */
   private lastSelectionPosition: TerrainVector3 | undefined;
@@ -288,10 +289,23 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   >(undefined);
   /** Increment to rebuild resident geometry when a colour mode changes. */
   readonly colorRevision = input(0);
+  /**
+   * Adds this surface's LOD and draw counts to the engine's "Copy for Agent"
+   * report under this section name. Unset, the default, nothing is added. Give
+   * each surface a distinct name when a page has more than one.
+   */
+  readonly telemetrySection = input<string | undefined>(undefined);
   readonly lodChange = output<ITerrainSurfaceLodStats>();
 
   constructor() {
     this.engine.scene.add(this.group);
+    effect((onCleanup) => {
+      const name = this.telemetrySection();
+      if (!name) return;
+      onCleanup(
+        this.engine.fpsController.telemetry.register(name, () => this.telemetryValues()),
+      );
+    });
     effect(() => {
       const [x, y, z] = this.renderOriginM();
       this.group.position.set(x, y, z);
@@ -1204,6 +1218,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     this.selectionSignature = '';
     this.refinedKeys.clear();
     this.statsSignature = '';
+    this.latestStats = undefined;
     this.lastSelectionInputSignature = '';
     this.lastSelectionPosition = undefined;
     this.edgeMaskSelectionSignature = '';
@@ -1274,9 +1289,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     if (this.batchedRender && this.batchedRender.object.instanceCount > 0)
       drawCalls += 1;
     const signature = `${this.desiredPatchCount}:${this.residents.size}:${queued}:${drawCalls}:${triangles}:${geometryBytes}:${JSON.stringify(this.selectedLevels)}`;
-    if (signature === this.statsSignature) return;
-    this.statsSignature = signature;
-    this.lodChange.emit({
+    const stats: ITerrainSurfaceLodStats = {
       desired: this.desiredPatchCount,
       resident: this.residents.size,
       queued,
@@ -1284,7 +1297,26 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       triangles,
       geometryBytes,
       levels: this.selectedLevels,
-    });
+    };
+    this.latestStats = stats;
+    if (signature === this.statsSignature) return;
+    this.statsSignature = signature;
+    this.lodChange.emit(stats);
+  }
+
+  /** Values the "Copy for Agent" report shows for this surface; see `telemetrySection`. */
+  private telemetryValues(): Readonly<Record<string, number | string>> {
+    const stats = this.latestStats;
+    if (!stats) return { status: 'no update yet' };
+    return {
+      desired: stats.desired,
+      resident: stats.resident,
+      queued: stats.queued,
+      drawCalls: stats.drawCalls,
+      triangles: stats.triangles,
+      geometryMB: Number((stats.geometryBytes / (1024 * 1024)).toFixed(1)),
+      levels: Object.entries(stats.levels).map(([level, count]) => `${level}:${count}`).join(' ') || 'none',
+    };
   }
 }
 

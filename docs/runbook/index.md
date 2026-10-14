@@ -14,6 +14,7 @@ tags: [runbook, index]
 | [Reusable Scene Page Schematic](/docs/runbook/044_scene_page_generator.md) | [Implementation plan](/docs/plans/044_scene_page_generator.md) |
 | [Demo Catalog Thumbnails](/docs/runbook/045_demo_catalog_thumbnails.md) | [Implementation plan](/docs/plans/045_demo_catalog_thumbnails.md) |
 | [Shared Cell-Planet Worker Pipeline](/docs/runbook/046_cell_planet_shared_worker_pipeline.md) | [Implementation plan](/docs/plans/046_cell_planet_shared_worker_pipeline.md) |
-| [Terrain View Culling and Rotation Churn](/docs/runbook/047_terrain_view_culling_and_rotation_churn.md) | [Implementation plan](/docs/plans/047_terrain_view_culling_and_rotation_churn.md) |
+| [Terrain View Culling and Rotation Churn](/docs/runbook/047_terrain_view_culling_and_rotation_churn.md) | [Implementation plan](/docs/plans/047_terrain_view_culling_and_rotation_churn.md) || [Agent Telemetry Sections](/docs/runbook/048_agent_telemetry_sections.md) | [Implementation plan](/docs/plans/048_agent_telemetry_sections.md) |
+
 
 Existing runbooks `001`–`042` retain their historical paths and formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

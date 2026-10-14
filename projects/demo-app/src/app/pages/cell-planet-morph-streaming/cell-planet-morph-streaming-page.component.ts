@@ -875,20 +875,13 @@ export class CellPlanetMorphStreamingPageComponent {
       this.updateOrbitUpVector();
     });
 
-    // Included in the engine stats "Copy for Agent" report, so a pasted report
-    // shows the planet state alongside the engine's own numbers.
-    const unregisterTelemetry = this.engine.fpsController.telemetry.register('planet', () => {
-      const stats = this.stats();
-      return {
-        projection: this.projectionKind(),
-        quality: this.quality(),
-        morph: Number(this.morphProgress().toFixed(2)),
-        patches: stats.desired,
-        resident: stats.resident,
-        queued: stats.queued,
-        levels: Object.entries(stats.levels).map(([level, count]) => `${level}:${count}`).join(' ') || 'none',
-      };
-    });
+    // The terrain surface reports its own counts (telemetrySection="terrain");
+    // this adds the view state only the page knows.
+    const unregisterTelemetry = this.engine.fpsController.telemetry.register('planet', () => ({
+      projection: this.projectionKind(),
+      quality: this.quality(),
+      morph: Number(this.morphProgress().toFixed(2)),
+    }));
 
     this.destroyRef.onDestroy(() => {
       textureTick.unsubscribe();
