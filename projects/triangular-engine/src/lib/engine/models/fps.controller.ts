@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import { Camera, OrthographicCamera, PerspectiveCamera, Quaternion, Vector3 } from 'three';
 import { IEngine } from './engine.model';
+import { TelemetrySections } from './telemetry-sections.model';
 
 export enum CameraAction {
   None = 0,
@@ -45,6 +46,8 @@ export interface IPerformanceDropEvent {
 export class FPSController {
   lastRenderTime = -1;
   fpsLimitInterval = 0;
+  /** Page-supplied sections appended to `formatTelemetryForAgent`. */
+  readonly telemetry = new TelemetrySections();
 
   previousSecond = performance.now();
 
@@ -405,12 +408,15 @@ drop_event (${dropAgeS}s ago): ${drop.baselineFps}fps -> ${drop.dropFps}fps on $
         ? `\ntimeline (last ${recentCount}s):\n  fps: [${recentFps.join(', ')}]\n  cam: [${recentCam.join(', ')}]`
         : '';
 
+    const pageSections = this.telemetry.format();
+    const pageStr = pageSections ? `\n${pageSections}` : '';
+
     return `\`\`\`triangular-telemetry
 status: ${status} | fps: ${fps} (avg: ${avgFps}, min: ${minFps}) | worstFrame60s: ${maxSpike}ms
 viewport: ${width}x${height}@${pixelRatio} | renderer: ${rendererType}
 calls: ${calls} | tris: ${this.formatMetric(tris)} | shaders: ${shaders} | mats: ${mats}
 mem: geo ${geoMB}MB, tex ${texMB}MB | timing: ${timing}
-camera: ${camStr}${dropStr}${timelineStr}
+camera: ${camStr}${dropStr}${timelineStr}${pageStr}
 \`\`\``;
   }
 

@@ -263,5 +263,16 @@ describe('FPSController', () => {
       expect(output).toContain('camera: pos(0.0, 0.0, 0.0)');
       expect(output).toContain('```');
     });
+
+    it('appends page telemetry sections inside the same fenced block', () => {
+      const { controller } = createController();
+      controller.telemetry.register('planet', () => ({ patches: 140, morph: 0 }));
+
+      controller.recordFrame(16);
+
+      const output = controller.formatTelemetryForAgent();
+      expect(output).toContain('  cam: [-]\nplanet:\n  patches: 140\n  morph: 0\n```');
+      expect(output.endsWith('```')).toBeTrue();
+    });
   });
 });

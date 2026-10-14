@@ -1,6 +1,7 @@
 export * from './engine.model';
 export * from './engine-render-pipeline.model';
 export * from './fps.controller';
+export * from './telemetry-sections.model';
 export * from './cursor.model';
 export * from './key-binding-options';
 export * from './user-interface.model';

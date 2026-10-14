@@ -875,8 +875,24 @@ export class CellPlanetMorphStreamingPageComponent {
       this.updateOrbitUpVector();
     });
 
+    // Included in the engine stats "Copy for Agent" report, so a pasted report
+    // shows the planet state alongside the engine's own numbers.
+    const unregisterTelemetry = this.engine.fpsController.telemetry.register('planet', () => {
+      const stats = this.stats();
+      return {
+        projection: this.projectionKind(),
+        quality: this.quality(),
+        morph: Number(this.morphProgress().toFixed(2)),
+        patches: stats.desired,
+        resident: stats.resident,
+        queued: stats.queued,
+        levels: Object.entries(stats.levels).map(([level, count]) => `${level}:${count}`).join(' ') || 'none',
+      };
+    });
+
     this.destroyRef.onDestroy(() => {
       textureTick.unsubscribe();
+      unregisterTelemetry();
       this.materialRuntime.dispose();
       this.disposeMapBorder();
       this.disposeOceanMesh();
