@@ -40,3 +40,4 @@ export * from './core/features';
 export * from './core/impact-craters';
 export * from './core/world-profile';
 export * from './core/cell-borders';
+export * from './core/cell-planet-world';

@@ -13,5 +13,6 @@ tags: [plans, index]
 | [Optional Scene Tree and Game Install](/docs/plans/043_optional_scene_tree_and_game_install.md) | done | [Evidence](/docs/runbook/043_optional_scene_tree_and_game_install.md) |
 | [Reusable Scene Page Schematic](/docs/plans/044_scene_page_generator.md) | done | [Evidence](/docs/runbook/044_scene_page_generator.md) |
 | [Demo Catalog Thumbnails](/docs/plans/045_demo_catalog_thumbnails.md) | done | [Evidence](/docs/runbook/045_demo_catalog_thumbnails.md) |
+| [Shared Cell-Planet Worker Pipeline](/docs/plans/046_cell_planet_shared_worker_pipeline.md) | in_progress | [Evidence](/docs/runbook/046_cell_planet_shared_worker_pipeline.md) |
 
 Convention: [Plans and Runbooks](/docs/plans-and-runbooks.md).
