@@ -394,6 +394,34 @@ await this.screenshotService.copyToClipboard(blob);
 - `copyToClipboard(blob)` — Writes image blob to clipboard via Clipboard API.
 - `download(blob, fileName?)` — Triggers file download for an existing blob.
 
+### AudioService & Audio Components
+
+Triangular Engine includes a Three.js-powered 3D spatial audio system and multi-bus mixer (`master`, `music`, `sfx`, `ambient`, `voice`, `ui`). See `docs/audio.md` for full documentation.
+
+```typescript
+import { AudioService } from 'triangular-engine';
+
+private readonly audioService = inject(AudioService);
+
+// 2D One-shot UI / sting playback
+await this.audioService.playOneShot('assets/audio/click.mp3', { bus: 'ui', volume: 0.5 });
+
+// 3D Positional One-shot in world space (accepts AudioBuffer or file path)
+await this.audioService.playPositionalOneShot(bufferOrSrc, [x, y, z], {
+  bus: 'sfx',
+  refDistance: 5,
+  maxDistance: 50,
+  rolloffFactor: 1.2,
+  volume: 0.8,
+});
+```
+
+**Declarative Audio Components:**
+
+- `<audioListener>`: Virtual microphone/ears in the scene. Auto-attaches to active camera by default (`[attachToActiveCamera]="true"`).
+- `<positionalAudio>`: 3D spatialized audio source attached to any 3D entity (`[src]`, `[buffer]`, `[refDistance]`, `[maxDistance]`, `[rolloffFactor]`, `[distanceModel]`, `bus="sfx"`).
+- `<ambientAudio>`: Non-positional 2D global background music or ambience (`[src]`, `[buffer]`, `[loop]`, `bus="music"`).
+
 ---
 
 ## 6. Code Examples
