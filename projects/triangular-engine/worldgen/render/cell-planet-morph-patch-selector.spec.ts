@@ -221,6 +221,77 @@ describe('createCellPlanetMorphSurfaceSelector', () => {
     expect(behind.some(isDrawn)).toBeFalse();
   });
 
+  it('estimates a patch is hidden before it is meshed when it is behind the camera or the horizon', () => {
+    const camera = new PerspectiveCamera(45, 1, 1, 10_000);
+    camera.position.set(0, 0, RADIUS_M * 1.1);
+    const target = [Math.sin(Math.PI / 12), 0, Math.cos(Math.PI / 12)];
+    camera.lookAt(target[0] * RADIUS_M, 0, target[2] * RADIUS_M);
+    camera.updateMatrixWorld();
+    const selector = createCellPlanetMorphSurfaceSelector({
+      domain: () => domain,
+      radiusM: () => RADIUS_M,
+      morph: () => 0,
+      projectionKind: () => 'equalEarth',
+      camera: () => camera,
+    });
+    selector.select(createRequest([0, 0, RADIUS_M * 1.1], { maxLevel: 3 }));
+    const estimate = selector.patchVisibility.estimate!;
+
+    const level = 3;
+    const count = 2 ** level;
+    const centreDirection = (address: ILatLonTerrainPatchAddress) => {
+      const b = domain.getPatchBounds(address);
+      return domain.getFieldPosition(address, (b.minU + b.maxU) / 2, (b.minV + b.maxV) / 2);
+    };
+    const patches: ILatLonTerrainPatchAddress[] = [];
+    for (let x = 0; x < 4 * count; x++) {
+      for (let y = 0; y < 2 * count; y++) patches.push({ level, x, y });
+    }
+    const ahead = patches.filter((address) => {
+      const [dx, dy, dz] = centreDirection(address);
+      return dx * target[0] + dy * target[1] + dz * target[2] > 0.99;
+    });
+    expect(ahead.length).toBeGreaterThan(0);
+    expect(ahead.every(estimate)).toBeTrue();
+    const farSide = patches.filter((address) => centreDirection(address)[2] < -0.5);
+    expect(farSide.length).toBeGreaterThan(0);
+    expect(farSide.some(estimate)).toBeFalse();
+    const behind = patches.filter((address) => {
+      const [dx, , dz] = centreDirection(address);
+      return dx < -0.4 && dz > 0.6;
+    });
+    expect(behind.length).toBeGreaterThan(0);
+    expect(behind.some(estimate)).toBeFalse();
+
+    // Never stricter than the draw test on the mesh that follows.
+    for (const address of patches) {
+      const drawn = selector.patchVisibility.isVisible(
+        address,
+        selector.patchVisibility.measure(address, meshPatch(address)),
+      );
+      expect(!drawn || estimate(address)).toBeTrue();
+    }
+    // Coarser patches that cover the view are estimated visible too.
+    expect(roots.some(estimate)).toBeTrue();
+  });
+
+  it('estimates every patch may be visible when frustum culling is off', () => {
+    const camera = new PerspectiveCamera(45, 1, 1, 10_000);
+    camera.position.set(0, 0, RADIUS_M * 1.1);
+    camera.lookAt(RADIUS_M, 0, RADIUS_M * 1.1);
+    camera.updateMatrixWorld();
+    const selector = createCellPlanetMorphSurfaceSelector({
+      domain: () => domain,
+      radiusM: () => RADIUS_M,
+      morph: () => 0,
+      projectionKind: () => 'equalEarth',
+      camera: () => camera,
+      frustumCulling: () => false,
+    });
+    selector.select(createRequest([0, 0, RADIUS_M * 1.1], { maxLevel: 3 }));
+    for (const root of roots) expect(selector.patchVisibility.estimate!(root)).toBeTrue();
+  });
+
   it('draws every patch when frustum culling is off', () => {
     const camera = new PerspectiveCamera(45, 1, 1, 10_000);
     camera.position.set(0, 0, RADIUS_M * 1.1);

@@ -100,6 +100,7 @@ function defaultAddressLevel(address: ILatLonTerrainPatchAddress): number {
       [maxLod]="maxLod()"
       [resolution]="resolution()"
       [generationBudget]="generationBudget()"
+      [maxInstallsPerFrame]="maxInstallsPerFrame()"
       [maxPatches]="maxPatches()"
       [batching]="batching()"
       [frustumCulled]="frustumCulled()"
@@ -210,6 +211,8 @@ export class CellPlanetMorphStreamingViewComponent {
   readonly maxLod = input(6);
   readonly resolution = input(32);
   readonly generationBudget = input(6);
+  /** `TerrainSurfaceComponent.maxInstallsPerFrame`: zero, the default, installs every finished patch at once. */
+  readonly maxInstallsPerFrame = input(0);
   readonly maxPatches = input<number | undefined>(undefined);
   readonly batching = input(true);
   readonly frustumCulled = input(false);

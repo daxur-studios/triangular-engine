@@ -103,6 +103,16 @@ export type TerrainSurfaceMeshGenerator<TAddress> = (
  */
 const BATCH_ANCHOR_REFOLLOW_DISTANCE_M = 500;
 
+/**
+ * Added to the generation priority (a distance in metres, so at most a few
+ * million) of a replacement group `patchVisibility.estimate` rules out of the view.
+ * Far above any distance, so visible work is always generated first while the
+ * group's own distance order is kept.
+ */
+const INVISIBLE_PRIORITY_OFFSET = 1e12;
+
+const NO_KEYS: ReadonlySet<string> = new Set();
+
 interface IResidentPatch<TAddress> {
   readonly address: TAddress;
   readonly object: Mesh | BatchedMesh;
@@ -198,6 +208,16 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   /** Optional visual gap cover. Keep disabled unless a consumer explicitly requests skirts. */
   readonly skirtDepth = input(0);
   readonly generationBudget = input(4);
+  /**
+   * Soft cap on patches installed per frame; zero or less, the default, is
+   * unlimited. Finished patches otherwise all install on the frame they are
+   * noticed, which after a quick turn is a burst of geometry uploads. The cap
+   * never splits a replacement group, since that would expose a hole, so a
+   * frame always installs at least one whole group. Groups containing the
+   * nearest, possibly-visible patches go first and the rest follow on later
+   * frames.
+   */
+  readonly maxInstallsPerFrame = input(0);
   /** Optional selector hint used to cap selected patches for bounded work. */
   readonly maxPatches = input<number | undefined>(undefined);
   /** Combines same-material resident patches into one multi-draw batch. */
@@ -454,10 +474,12 @@ export class TerrainSurfaceComponent<TAddress = unknown>
         key: `${baseKey}|edge:${JSON.stringify(edgeRefinement.edgeSegments)}`,
       };
     });
+    const invisibleOnlyKeys = this.invisibleOnlyKeys(entries);
     this.desiredPriorities = new Map(
       entries.map(({ address, key }) => [
         key,
-        patchDistance(domain, address, position),
+        patchDistance(domain, address, position) +
+          (invisibleOnlyKeys.has(key) ? INVISIBLE_PRIORITY_OFFSET : 0),
       ]),
     );
     this.desiredAddresses = new Map(entries.map(({ address, key }) => [key, address]));
@@ -498,6 +520,42 @@ export class TerrainSurfaceComponent<TAddress = unknown>
 
     this.updateResidentVisibility();
     this.processGenerationQueue();
+  }
+
+  /**
+   * The selected patches that `patchVisibility.estimate` says can't contribute
+   * to the view, as whole replacement groups. A group (every selected patch
+   * over one resident's footprint, as in `completedReplacementGroups`) only
+   * installs once every member is ready, so one possibly-visible member keeps
+   * the whole group at its distance priority; ranking its invisible members
+   * behind would only delay the visible one. A patch over no resident
+   * installs alone.
+   */
+  private invisibleOnlyKeys(
+    entries: readonly { readonly address: TAddress; readonly key: string }[],
+  ): ReadonlySet<string> {
+    const estimate = this.patchVisibility()?.estimate;
+    if (!estimate) return NO_KEYS;
+    const residents = [...this.residents.values()];
+    const groups = new Map<unknown, { visible: boolean; keys: string[] }>();
+    for (const { address, key } of entries) {
+      const groupId =
+        residents.find(
+          (resident) =>
+            this.patchContains(resident.address, address) ||
+            this.patchContains(address, resident.address),
+        ) ?? key;
+      let group = groups.get(groupId);
+      if (!group) groups.set(groupId, (group = { visible: false, keys: [] }));
+      group.keys.push(key);
+      group.visible = group.visible || estimate(address);
+    }
+    const invisible = new Set<string>();
+    for (const group of groups.values()) {
+      if (group.visible) continue;
+      for (const key of group.keys) invisible.add(key);
+    }
+    return invisible;
   }
 
   /** Re-applies `patchVisibility` to every resident patch. */
@@ -599,8 +657,19 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     // all of its resident children. This keeps the surface covered while
     // allowing nearby completed worker results to become visible during motion.
     const groups = this.completedReplacementGroups();
+    const maxInstalls = Math.floor(this.maxInstallsPerFrame());
+    const capped = maxInstalls > 0;
+    if (capped) {
+      // Most useful first: the lowest priority in a group is its nearest
+      // member, and a group `patchVisibility.estimate` ruled out sorts last.
+      const groupPriority = (group: readonly string[]): number =>
+        Math.min(...group.map((key) => this.desiredPriorities.get(key) ?? Infinity));
+      groups.sort((a, b) => groupPriority(a) - groupPriority(b));
+    }
+    let installedCount = 0;
     this.pruneCoveredStaleResidents();
     for (const group of groups) {
+      if (capped && installedCount >= maxInstalls) break;
       if (!group.every((key) => this.residents.has(key) || this.completed.has(key)))
         continue;
 
@@ -661,6 +730,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
         if (!completed || !this.queue.desired.has(key)) continue;
         this.installPatch(key, completed.address, completed.patch);
         this.completed.delete(key);
+        installedCount += 1;
       }
       this.pruneCoveredStaleResidents();
     }

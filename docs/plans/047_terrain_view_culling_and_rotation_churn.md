@@ -40,11 +40,25 @@ same triangle count, with 190 ms–1 s worst frames. A still camera is fast, so 
 4. Demo page wires `patchVisibility` and sets `lodViewToleranceRadians` 0.005 / `lodPositionToleranceM` 1.
    `CellPlanetMorphStreamingViewComponent` gets an opt-in `drawCulling` input.
 
+5. Visible-first generation: `ITerrainSurfacePatchVisibility.estimate` (optional) is the draw test run
+   from an address, before meshing. `TerrainSurfaceComponent` adds a large offset to the queue
+   priority of any replacement group (every selected patch over one resident's footprint, the unit
+   `installCompletedPatches` swaps in) where no member may be visible, so those
+   patches sort after all visible work but are still generated, keeping distance order among
+   themselves. The selector's estimate uses the relief range plus every measured height and a
+   conservative distance bound, so it is never stricter than `isVisible`.
+6. New `maxInstallsPerFrame` input (default 0, unlimited) caps patches installed per update. Whole
+   replacement groups only, so at least one group installs per call; groups with the nearest
+   possibly-visible patch go first, and leftovers install on later updates (every update, even
+   with a still camera, calls `installCompletedPatches`). The demo page sets 8;
+   `CellPlanetMorphStreamingViewComponent` forwards it.
+
 Meshoptimizer simplification is unchanged.
 
 ## Not done
 
-- Per-frame install cap and incremental compaction (compaction still runs when the batch fills).
-- Leaving invisible quadtree siblings unmeshed, or meshing them at lower resolution.
+- Incremental compaction (compaction still runs when the batch fills).
+- Leaving invisible quadtree siblings unmeshed, or meshing them at lower resolution (they are now
+  only generated last).
 - A measured Chrome trace of the rotation drop; the ranking came from code review, an offline
   selector harness and the user's telemetry.

@@ -42,3 +42,14 @@ already handles.
   level from 0.1 R, the frustum contains only sky, which the old loose boxes hid.
 - Demo, high preset, telemetry camera A: 80 of 140 resident patches drawn (174k of 286k
   triangles), no holes, no console errors.
+- Visible-first generation and the install cap: `ng test triangular-engine` over
+  `../terrain/**` and `../worldgen/render/cell-planet-morph-patch-*.spec.ts` passes with new
+  specs. `TerrainSurfaceComponent`: with an `estimate` that rejects one replacement group, the
+  generator receives the visible group first (although the other is nearer) and the rest after;
+  one possibly-visible member keeps its whole group, including the level-1 members of a resident
+  replaced across two levels (grouping by direct parent first deferred those); no `estimate` keeps nearest-first;
+  `maxInstallsPerFrame` of 1 installs a whole group of four on one update (never a partial one),
+  the remainder on the next update with an unmoved camera, and the nearest group goes first.
+  Selector: `estimate` is true ahead and false on the far side and behind the camera, true for
+  everything with culling off, and never false where `isVisible(measure(...))` is true.
+- Not measured: the effect on rotation frame time (no browser or GPU run was made for this change).

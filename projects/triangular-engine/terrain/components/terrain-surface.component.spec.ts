@@ -347,6 +347,163 @@ describe('TerrainSurfaceComponent', () => {
     fixture.destroy();
   });
 
+  /** Two level-0 roots whose children are both selected: root x=0 is nearest to the camera. */
+  function createSiblingGroupFixture(
+    inputs: Record<string, unknown>,
+  ) {
+    const fixture = TestBed.createComponent(TerrainSurfaceComponent);
+    const generated: IPlaneTerrainPatchAddress[] = [];
+    const generator = (
+      request: ITerrainSurfaceGenerationRequest<IPlaneTerrainPatchAddress>,
+    ) => {
+      generated.push(request.address);
+      return generateTerrainPatchMesh(request.field, request.domain, request);
+    };
+    fixture.componentRef.setInput('field', new ConstantTerrainField(0));
+    fixture.componentRef.setInput('domain', new PlaneTerrainDomain(800));
+    fixture.componentRef.setInput('roots', [
+      { level: 0, x: 0, z: 0 },
+      { level: 0, x: 1, z: 0 },
+    ]);
+    fixture.componentRef.setInput('maxLod', 1);
+    fixture.componentRef.setInput('resolution', 4);
+    fixture.componentRef.setInput('generationBudget', 100);
+    fixture.componentRef.setInput(
+      'patchSelector',
+      ({ domain, roots: selected }: ITerrainSurfaceSelectionRequest<IPlaneTerrainPatchAddress>) =>
+        selected.flatMap((root) => domain.getChildren(root)),
+    );
+    fixture.componentRef.setInput('meshGenerator', generator);
+    for (const [name, value] of Object.entries(inputs)) {
+      fixture.componentRef.setInput(name, value);
+    }
+    camera.position.set(0, 100, 0);
+    fixture.detectChanges();
+    // The initial coarse cover: both roots.
+    beforeRender$.next();
+    expect(generated.length).toBe(2);
+    generated.length = 0;
+    return { fixture, generated };
+  }
+
+  it('generates sibling groups the camera may see before groups it cannot, then the rest', () => {
+    const estimate = jasmine
+      .createSpy('estimate')
+      .and.callFake((address: IPlaneTerrainPatchAddress) => address.x >= 2);
+    const { fixture, generated } = createSiblingGroupFixture({
+      patchVisibility: {
+        measure: () => ({}),
+        isVisible: () => true,
+        estimate,
+      },
+    });
+    fixture.componentRef.setInput('generationBudget', 1);
+    for (let frame = 0; frame < 8; frame += 1) beforeRender$.next();
+
+    expect(estimate).toHaveBeenCalled();
+    // Root x=1's children are the visible group, though root x=0's are nearer.
+    expect(generated.slice(0, 4).every((address) => address.x >= 2)).toBeTrue();
+    expect(generated.slice(4).every((address) => address.x < 2)).toBeTrue();
+    expect(generated.length).toBe(8);
+    expect(scene.children[0].children.length).toBe(8);
+    fixture.destroy();
+  });
+
+  it('keeps a whole sibling group at its distance priority when any member may be visible', () => {
+    // Only one child of the farther group is visible; its three siblings follow it.
+    const { fixture, generated } = createSiblingGroupFixture({
+      patchVisibility: {
+        measure: () => ({}),
+        isVisible: () => true,
+        estimate: (address: IPlaneTerrainPatchAddress) => address.x === 3 && address.z === 1,
+      },
+    });
+    fixture.componentRef.setInput('generationBudget', 1);
+    for (let frame = 0; frame < 8; frame += 1) beforeRender$.next();
+
+    expect(generated.slice(0, 4).every((address) => address.x >= 2)).toBeTrue();
+    expect(generated.slice(4).every((address) => address.x < 2)).toBeTrue();
+    fixture.destroy();
+  });
+
+  it('ranks every patch replacing one resident together, across levels', () => {
+    // Root x=1 is replaced by three children and four grandchildren; only one
+    // grandchild may be visible, but the root can't be swapped out until all
+    // seven are ready, so its level-1 children are not deferred either.
+    const { fixture, generated } = createSiblingGroupFixture({
+      maxLod: 2,
+      patchSelector: ({
+        domain,
+        roots: selected,
+      }: ITerrainSurfaceSelectionRequest<IPlaneTerrainPatchAddress>) =>
+        selected.flatMap((root) =>
+          domain
+            .getChildren(root)
+            .flatMap((child) =>
+              child.x === 3 && child.z === 1 ? domain.getChildren(child) : [child],
+            ),
+        ),
+      patchVisibility: {
+        measure: () => ({}),
+        isVisible: () => true,
+        estimate: (address: IPlaneTerrainPatchAddress) =>
+          address.level === 2 && address.x === 7 && address.z === 3,
+      },
+    });
+    fixture.componentRef.setInput('generationBudget', 1);
+    for (let frame = 0; frame < 11; frame += 1) beforeRender$.next();
+
+    const underSecondRoot = (address: IPlaneTerrainPatchAddress) =>
+      address.x >= 2 ** address.level;
+    expect(generated.length).toBe(11);
+    expect(generated.slice(0, 7).every(underSecondRoot)).toBeTrue();
+    expect(generated.slice(7).some(underSecondRoot)).toBeFalse();
+    fixture.destroy();
+  });
+
+  it('generates nearest first without an estimate', () => {
+    const { fixture, generated } = createSiblingGroupFixture({
+      patchVisibility: { measure: () => ({}), isVisible: () => true },
+    });
+    fixture.componentRef.setInput('generationBudget', 1);
+    for (let frame = 0; frame < 4; frame += 1) beforeRender$.next();
+
+    expect(generated.every((address) => address.x < 2)).toBeTrue();
+    fixture.destroy();
+  });
+
+  it('installs at most maxInstallsPerFrame patches per update, but never splits a group', () => {
+    const { fixture } = createSiblingGroupFixture({});
+    fixture.componentRef.setInput('maxInstallsPerFrame', 1);
+    fixture.detectChanges();
+    const patchCount = () => scene.children[0].children.length;
+    expect(patchCount()).toBe(2);
+
+    // Everything is generated this frame, but only the nearest group of four
+    // replaces its root: a cap of one still commits a whole group.
+    beforeRender$.next();
+    expect(patchCount()).toBe(5);
+
+    // A still camera drains the remainder.
+    beforeRender$.next();
+    expect(patchCount()).toBe(8);
+    beforeRender$.next();
+    expect(patchCount()).toBe(8);
+    fixture.destroy();
+  });
+
+  it('installs the finished groups nearest the camera first when capped', () => {
+    const { fixture } = createSiblingGroupFixture({});
+    fixture.componentRef.setInput('maxInstallsPerFrame', 4);
+    fixture.detectChanges();
+    beforeRender$.next();
+    const installed = scene.children[0].children.map((child) => child.position.x);
+    // Root x=1 is still resident (centre 1200 m); root x=0 was replaced.
+    expect(installed.filter((x) => x > 800).length).toBe(1);
+    expect(installed.length).toBe(5);
+    fixture.destroy();
+  });
+
   it('uses an opt-in patch selector while retaining shared mesh streaming', () => {
     const fixture = TestBed.createComponent(TerrainSurfaceComponent);
     const selector = jasmine

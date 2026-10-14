@@ -114,7 +114,8 @@ export interface ICellPlanetMorphSurfaceSelector {
   /**
    * Draw-time culling for `TerrainSurfaceComponent.patchVisibility`, using the camera from the
    * last `select()` and each patch's measured geometry. Everything is visible when frustum
-   * culling is off or no camera is supplied.
+   * culling is off or no camera is supplied. Its `estimate` makes the same test before a patch is
+   * meshed, so the surface can generate what the camera can see first.
    */
   readonly patchVisibility: ITerrainSurfacePatchVisibility<
     ILatLonTerrainPatchAddress,
@@ -145,6 +146,7 @@ export function createCellPlanetMorphSurfaceSelector(
   const camPosScratch = new Vector3();
   const camDirScratch = new Vector3();
   const extentsScratch = createCellPlanetMorphPatchExtents();
+  const estimateExtentsScratch = createCellPlanetMorphPatchExtents();
   const ptScratch = new Vector3();
   const bodyCenterScratch = new Matrix4();
   // Heights (m above radiusM) of every patch patchVisibility has measured.
@@ -431,6 +433,32 @@ export function createCellPlanetMorphSurfaceSelector(
         (1 - morph) * bounds.sphereBoundingRadius + morph * bounds.flatBoundingRadius;
       const marginRadians = Math.max(0, options.drawMarginRadians?.() ?? 0.035);
       return isInView(bounds, marginRadians, distanceBoundM);
+    },
+    estimate: (address) => {
+      if (!view.active) return true;
+      const radius = options.radiusM();
+      const [reliefMinM, reliefMaxM] = reliefRangeM();
+      // Whatever has been measured is allowed too, so a patch isVisible would draw is never
+      // estimated hidden because the relief range was narrower than its mesh.
+      const minHeightM = Math.min(reliefMinM, observedMinHeightM);
+      const maxHeightM = Math.max(reliefMaxM, observedMaxHeightM);
+      populateCellPlanetMorphPatchExtents(
+        options.domain().getPatchBounds(address), radius, options.projectionKind(),
+        minHeightM, maxHeightM, 0, estimateExtentsScratch,
+      );
+      const extents = estimateExtentsScratch;
+      // No mesh, so no measured centre: bound the distance from the planet's centre instead.
+      let flatRadiusM = 0;
+      for (let axis = 0; axis < 3; axis += 1) {
+        flatRadiusM += Math.max(Math.abs(extents.flatMin[axis]), Math.abs(extents.flatMax[axis])) ** 2;
+      }
+      const morph = view.morph;
+      // Doubled: isVisible bounds a measured box with a sphere, which reaches past maxRadius.
+      const distanceBoundM =
+        view.camDist +
+        2 * ((1 - morph) * extents.maxRadius + morph * Math.sqrt(flatRadiusM));
+      const marginRadians = Math.max(0, options.drawMarginRadians?.() ?? 0.035);
+      return isInView(extents, marginRadians, distanceBoundM);
     },
   };
 

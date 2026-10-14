@@ -36,8 +36,17 @@ export type TerrainSurfacePatchSelector<TAddress> = (
  * don't have to stay alive. `isVisible` runs for every resident patch each
  * time selection runs, and once when a patch is installed. Freezing the LOD
  * freezes visibility too.
+ *
+ * `estimate` is the same question asked before a patch is meshed, from its
+ * address alone. The surface uses it to generate what the camera can see first:
+ * a replacement group none of whose patches may be visible is queued behind all
+ * the rest (it is still generated, so the cut completes). It runs for every
+ * desired patch each time selection runs, so keep it cheap. Answer `true`
+ * whenever unsure, and never `false` for a patch `isVisible` would draw.
  */
 export interface ITerrainSurfacePatchVisibility<TAddress, TBounds = unknown> {
   readonly measure: (address: TAddress, patch: ITerrainPatchMesh<TAddress>) => TBounds;
   readonly isVisible: (address: TAddress, bounds: TBounds) => boolean;
+  /** Whether a patch that isn't meshed yet may be visible (`true`) or can't contribute to the view. */
+  readonly estimate?: (address: TAddress) => boolean;
 }
