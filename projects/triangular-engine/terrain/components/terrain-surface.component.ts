@@ -81,10 +81,12 @@ export interface ITerrainSurfaceGenerationRequest<TAddress> {
 }
 
 export type {
+  ITerrainSurfacePatchVisibility,
   ITerrainSurfaceSelectionRequest,
   TerrainSurfacePatchSelector,
 } from '../streaming/terrain-surface-patch-selector';
 import type {
+  ITerrainSurfacePatchVisibility,
   ITerrainSurfaceSelectionRequest,
   TerrainSurfacePatchSelector,
 } from '../streaming/terrain-surface-patch-selector';
@@ -109,6 +111,8 @@ interface IResidentPatch<TAddress> {
   readonly batchInstanceId?: number;
   /** A batched patch's centre, kept to re-express its instance matrix when the batch anchor moves. */
   readonly centerWorldM?: TerrainVector3;
+  /** What `patchVisibility.measure` returned for this patch. */
+  readonly visibilityBounds?: unknown;
   readonly drawCalls: number;
   readonly geometryBytes: number;
   readonly triangles: number;
@@ -218,6 +222,14 @@ export class TerrainSurfaceComponent<TAddress = unknown>
     TerrainSurfacePatchSelector<TAddress> | undefined
   >(undefined);
   /**
+   * Skips drawing resident patches the camera can't see. They stay resident,
+   * so a quick turn shows them at once instead of waiting for a rebuild.
+   * Re-evaluated whenever selection runs.
+   */
+  readonly patchVisibility = input<
+    ITerrainSurfacePatchVisibility<TAddress, any> | undefined
+  >(undefined);
+  /**
    * Optional asynchronous mesh generator. Supply a worker-backed function to
    * move field sampling and typed-array construction off the main thread.
    */
@@ -287,6 +299,8 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       }
       if (this.batchedRender) {
         this.batchedRender.object.frustumCulled = culled;
+        this.batchedRender.object.perObjectFrustumCulled = culled;
+        this.batchedRender.object.sortObjects = culled;
       }
     });
     effect(() => {
@@ -315,6 +329,7 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       this.maxPatches();
       this.batching();
       this.patchSelector();
+      this.patchVisibility();
       this.meshGenerator();
       this.getLevel();
       this.getKey();
@@ -481,7 +496,31 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       ]),
     );
 
+    this.updateResidentVisibility();
     this.processGenerationQueue();
+  }
+
+  /** Re-applies `patchVisibility` to every resident patch. */
+  private updateResidentVisibility(): void {
+    const visibility = this.patchVisibility();
+    for (const resident of this.residents.values()) {
+      this.applyResidentVisibility(resident, visibility);
+    }
+  }
+
+  private applyResidentVisibility(
+    resident: IResidentPatch<TAddress>,
+    visibility: ITerrainSurfacePatchVisibility<TAddress, any> | undefined,
+  ): void {
+    const visible =
+      !visibility ||
+      resident.visibilityBounds === undefined ||
+      visibility.isVisible(resident.address, resident.visibilityBounds);
+    if (resident.batchInstanceId !== undefined) {
+      (resident.object as BatchedMesh).setVisibleAt(resident.batchInstanceId, visible);
+    } else {
+      resident.object.visible = visible;
+    }
   }
 
   private processGenerationQueue(): void {
@@ -611,13 +650,11 @@ export class TerrainSurfaceComponent<TAddress = unknown>
         }
       }
 
+      // Freed batch space is reclaimed lazily by ensureBatchedGeometrySpace.
+      // Compacting here moved most of the batch, and re-uploaded it, on
+      // every swap while the camera moved.
       for (const [key, resident] of replacedResidents) {
         this.removePatch(key, resident);
-      }
-      if (
-        replacedResidents.some(([, resident]) => resident.batchGeometryId !== undefined)
-      ) {
-        this.batchedRender?.object.optimize();
       }
       for (const key of group) {
         const completed = this.completed.get(key);
@@ -773,7 +810,6 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       this.removePatch(key, resident);
       removed = true;
     }
-    if (removed) this.batchedRender?.object.optimize();
     return removed;
   }
 
@@ -837,6 +873,23 @@ export class TerrainSurfaceComponent<TAddress = unknown>
   }
 
   private installPatch(
+    key: string,
+    address: TAddress,
+    patch: ITerrainPatchMesh<TAddress>,
+  ): void {
+    this.installPatchObject(key, address, patch);
+    const visibility = this.patchVisibility();
+    const resident = this.residents.get(key);
+    if (!visibility || !resident) return;
+    const measured = {
+      ...resident,
+      visibilityBounds: visibility.measure(address, patch),
+    };
+    this.residents.set(key, measured);
+    this.applyResidentVisibility(measured, visibility);
+  }
+
+  private installPatchObject(
     key: string,
     address: TAddress,
     patch: ITerrainPatchMesh<TAddress>,
@@ -995,6 +1048,12 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       material,
     );
     object.position.copy(this.batchAnchorM);
+    if (!this.frustumCulled()) {
+      // Every patch has an infinite bounding sphere then, so per-instance
+      // culling and depth sorting only loop over the batch each frame.
+      object.perObjectFrustumCulled = false;
+      object.sortObjects = false;
+    }
     object.castShadow = this.castShadow();
     object.receiveShadow = this.receiveShadow();
     this.group.add(object);

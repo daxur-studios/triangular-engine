@@ -1,14 +1,20 @@
-import { Box3, Frustum, Matrix4, Vector3, type Camera } from 'three';
+import { Frustum, Matrix4, Vector3, type Camera } from 'three';
 import type {
   ILatLonTerrainPatchAddress,
+  ITerrainPatchAttribute,
+  ITerrainPatchMesh,
+  ITerrainSurfacePatchVisibility,
   ITerrainSurfaceSelectionRequest,
   LatLonTerrainDomain,
   TerrainSurfacePatchSelector,
 } from 'triangular-engine/terrain';
 import { MAP_PROJECTIONS, MapProjectionKind } from './map-projections';
 import {
+  createCellPlanetMorphPatchExtents,
   maximumCellPlanetPatchDirectionDot,
-  populateCellPlanetMorphPatchBounds,
+  maximumCellPlanetPatchPlaneDistance,
+  populateCellPlanetMorphPatchExtents,
+  type ICellPlanetMorphPatchExtents,
 } from './cell-planet-morph-patch-bounds';
 
 export interface ICellPlanetMorphSurfaceSelectorOptions {
@@ -53,10 +59,28 @@ export interface ICellPlanetMorphSurfaceSelectorOptions {
    */
   readonly horizonCulling?: () => boolean | undefined;
   /**
-   * Terrain height scale in meters. Bounds allow elevations up to +/- twice this value.
+   * Terrain height scale in meters. Until `reliefRangeM` or measured patches say otherwise,
+   * visibility tests allow elevations up to +/- twice this value.
    * Defaults to 0; supply the mesh generator's height scale for displaced terrain.
    */
   readonly heightScaleM?: () => number | undefined;
+  /**
+   * Lowest and highest terrain height, in metres above `radiusM`, for visibility tests on patches
+   * that aren't meshed yet. When omitted, the range is taken from the patches `patchVisibility`
+   * has measured, padded by a quarter of `heightScaleM`, or +/- twice `heightScaleM` before any.
+   */
+  readonly reliefRangeM?: () => readonly [number, number] | undefined;
+  /**
+   * How far (radians) the camera can turn before `patchVisibility` hides a patch it would show.
+   * Keep it above the terrain surface's `lodViewToleranceRadians`, since visibility is only
+   * re-evaluated when selection runs. Defaults to 0.035 (2 degrees).
+   */
+  readonly drawMarginRadians?: () => number | undefined;
+  /**
+   * Where the patches' `centerWorldM` is measured from, relative to the planet's centre (the
+   * mesh generator's body-fixed render origin). Defaults to the planet's centre.
+   */
+  readonly patchOriginBodyM?: () => readonly [number, number, number] | undefined;
   /**
    * Where the planet's centre is in the camera's scene, in metres. `request.cameraWorldM` and the
    * patch bounds are measured from the centre; the camera's matrices are in the scene. Set this
@@ -77,11 +101,31 @@ export interface ICellPlanetMorphSurfaceSelectorOptions {
 /** The deepest level `forceRefine` can split to, so a callback that never says no still ends. */
 const MAX_FORCED_LEVEL = 24;
 
+/** A meshed patch's extents plus a bounding sphere of each shape, for draw-time culling. */
+export interface ICellPlanetMorphPatchDrawBounds extends ICellPlanetMorphPatchExtents {
+  readonly sphereCenter: readonly [number, number, number];
+  readonly sphereBoundingRadius: number;
+  readonly flatCenter: readonly [number, number, number];
+  readonly flatBoundingRadius: number;
+}
+
 export interface ICellPlanetMorphSurfaceSelector {
   readonly select: TerrainSurfacePatchSelector<ILatLonTerrainPatchAddress>;
+  /**
+   * Draw-time culling for `TerrainSurfaceComponent.patchVisibility`, using the camera from the
+   * last `select()` and each patch's measured geometry. Everything is visible when frustum
+   * culling is off or no camera is supplied.
+   */
+  readonly patchVisibility: ITerrainSurfacePatchVisibility<
+    ILatLonTerrainPatchAddress,
+    ICellPlanetMorphPatchDrawBounds
+  >;
   /** Clears refinement-hysteresis state - call when the domain or radius changes. */
   readonly reset: () => void;
 }
+
+/** Extra angle (radians) past the horizon before terrain counts as hidden. */
+const HORIZON_PAD_RADIANS = 0.02;
 
 /**
  * Creates a stateful quadtree patch selector for `TerrainSurfaceComponent` that measures screen
@@ -100,9 +144,69 @@ export function createCellPlanetMorphSurfaceSelector(
   const viewProjection = new Matrix4();
   const camPosScratch = new Vector3();
   const camDirScratch = new Vector3();
-  const patchBoxScratch = new Box3();
+  const extentsScratch = createCellPlanetMorphPatchExtents();
   const ptScratch = new Vector3();
   const bodyCenterScratch = new Matrix4();
+  // Heights (m above radiusM) of every patch patchVisibility has measured.
+  let observedMinHeightM = Infinity;
+  let observedMaxHeightM = -Infinity;
+
+  /** The camera as of the last select(), shared by refinement and draw-time culling. */
+  const view = {
+    active: false,
+    morph: 0,
+    cam: [0, 0, 0] as [number, number, number],
+    camDist: 0,
+    camLon: 0,
+    camLat: 0,
+    horizon: false,
+    occluderRadius: 0,
+    /** The frustum's six planes as nx, ny, nz, constant, measured from the planet's centre. */
+    planes: new Float64Array(24),
+  };
+
+  const reliefRangeM = (): readonly [number, number] => {
+    const explicit = options.reliefRangeM?.();
+    if (explicit) return explicit;
+    const heightScaleM = Math.max(0, options.heightScaleM?.() ?? 0);
+    if (observedMinHeightM <= observedMaxHeightM) {
+      // Coarse patches can miss a peak or trench, so allow some beyond what was seen.
+      const pad = heightScaleM * 0.25;
+      return [observedMinHeightM - pad, observedMaxHeightM + pad];
+    }
+    return [-2 * heightScaleM, 2 * heightScaleM];
+  };
+
+  /**
+   * Whether any of the patch can be on screen. `slackAngle` keeps a patch until the camera has
+   * turned that far past it; `distanceBoundM` bounds its distance from the camera.
+   */
+  const isInView = (
+    extents: ICellPlanetMorphPatchExtents,
+    slackAngle: number,
+    distanceBoundM: number,
+  ): boolean => {
+    if (!view.active) return true;
+    if (view.horizon) {
+      // Terrain never dips below the occluder sphere, so it hides anything behind its horizon.
+      const occluder = view.occluderRadius;
+      const limit =
+        Math.acos(Math.min(1, occluder / view.camDist)) +
+        Math.acos(Math.min(1, occluder / Math.max(occluder, extents.maxRadius))) +
+        HORIZON_PAD_RADIANS;
+      const dot = maximumCellPlanetPatchDirectionDot(extents, view.camLon, view.camLat);
+      if (Math.acos(Math.max(-1, Math.min(1, dot))) > limit) return false;
+    }
+    const slackM = distanceBoundM * Math.sin(slackAngle);
+    const planes = view.planes;
+    for (let i = 0; i < 24; i += 4) {
+      const distance = maximumCellPlanetPatchPlaneDistance(
+        extents, view.morph, planes[i], planes[i + 1], planes[i + 2], planes[i + 3],
+      );
+      if (distance < -slackM) return false;
+    }
+    return true;
+  };
 
   interface Candidate {
     readonly address: ILatLonTerrainPatchAddress;
@@ -135,13 +239,12 @@ export function createCellPlanetMorphSurfaceSelector(
     const useFrustum = (options.frustumCulling?.() ?? true) && !!camera;
     const safetyBase = Math.max(1, options.frustumSafetyFactor?.() ?? 1.35);
     const enableHorizon = options.horizonCulling?.() ?? true;
-    const heightScaleM = Math.max(0, options.heightScaleM?.() ?? 0);
-    const reliefMargin = heightScaleM * 2;
+    const [minHeightM, maxHeightM] = reliefRangeM();
+    const projectionKind = options.projectionKind();
 
-    let camDist = 0;
-    let camLat = 0;
-    let camLon = 0;
-    let thetaHorizonMax = 0;
+    view.active = useFrustum;
+    view.morph = morph;
+    view.horizon = false;
 
     if (useFrustum && camera) {
       camera.updateWorldMatrix(true, false);
@@ -157,23 +260,30 @@ export function createCellPlanetMorphSurfaceSelector(
         );
       }
       frustum.setFromProjectionMatrix(viewProjection);
+      frustum.planes.forEach((plane, index) => {
+        view.planes[index * 4] = plane.normal.x;
+        view.planes[index * 4 + 1] = plane.normal.y;
+        view.planes[index * 4 + 2] = plane.normal.z;
+        view.planes[index * 4 + 3] = plane.constant;
+      });
       camPosScratch.set(cam[0], cam[1], cam[2]);
-      camDist = camPosScratch.length();
-      if (camDist > 1e-4) {
-        camDirScratch.copy(camPosScratch).multiplyScalar(1 / camDist);
+      view.cam[0] = cam[0];
+      view.cam[1] = cam[1];
+      view.cam[2] = cam[2];
+      view.camDist = camPosScratch.length();
+      if (view.camDist > 1e-4) {
+        camDirScratch.copy(camPosScratch).multiplyScalar(1 / view.camDist);
         // Coordinate system: lon=0 faces +Z, lon=+PI/2 faces +X (East), lat=+PI/2 faces +Y (North)
-        camLat = Math.asin(Math.max(-1, Math.min(1, camDirScratch.y)));
-        camLon = Math.atan2(camDirScratch.x, camDirScratch.z);
+        view.camLat = Math.asin(Math.max(-1, Math.min(1, camDirScratch.y)));
+        view.camLon = Math.atan2(camDirScratch.x, camDirScratch.z);
       }
 
-      if (enableHorizon && morph === 0 && camDist >= radius) {
-        const hc = Math.max(0, camDist - radius);
-        const alphaCam = Math.acos(Math.min(1, radius / (radius + hc)));
-        const alphaRelief = Math.acos(
-          Math.min(1, radius / (radius + reliefMargin)),
-        );
-        thetaHorizonMax = alphaCam + alphaRelief + 0.05;
-      }
+      // Spherical occlusion is only valid before any map deformation. The lowest terrain
+      // bounds a solid ball, whatever covers it.
+      view.occluderRadius = radius + Math.min(0, minHeightM);
+      view.horizon =
+        enableHorizon && morph === 0 && view.occluderRadius > 0 &&
+        view.camDist > view.occluderRadius;
     }
 
     const getMorphedPoint = (
@@ -216,31 +326,15 @@ export function createCellPlanetMorphSurfaceSelector(
 
       let visible = true;
       if (useFrustum) {
-        // Spherical occlusion is only valid before any map deformation.
-        if (
-          enableHorizon &&
-          morph === 0 &&
-          thetaHorizonMax > 0
-        ) {
-          const dot = maximumCellPlanetPatchDirectionDot(bounds, camLon, camLat);
-          const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
-          if (angle > thetaHorizonMax) {
-            visible = false;
-          }
-        }
-
-        // 2. Frustum cone culling (active across all morph states!)
-        if (visible) {
-          const uvMargin = wasRefined
-            ? (safetyBase - 1) * 0.5
-            : (safetyBase - 1) * 0.25;
-          populateCellPlanetMorphPatchBounds(
-            bounds, radius, morph, options.projectionKind(), reliefMargin, uvMargin, patchBoxScratch,
-          );
-          if (!frustum.intersectsBox(patchBoxScratch)) {
-            visible = false;
-          }
-        }
+        // The rectangle is widened (more so once refined) so detail is already there when the
+        // camera turns, and a patch at the edge doesn't flip between refined and not.
+        const uvMargin = wasRefined
+          ? (safetyBase - 1) * 0.5
+          : (safetyBase - 1) * 0.25;
+        populateCellPlanetMorphPatchExtents(
+          bounds, radius, projectionKind, minHeightM, maxHeightM, uvMargin, extentsScratch,
+        );
+        visible = isInView(extentsScratch, 0, 0);
       }
 
       return {
@@ -308,10 +402,124 @@ export function createCellPlanetMorphSurfaceSelector(
     return frontier.map((candidate) => candidate.address);
   };
 
+  const patchVisibility: ICellPlanetMorphSurfaceSelector['patchVisibility'] = {
+    measure: (address, patch) => {
+      const bounds = measureCellPlanetMorphPatch(
+        address,
+        patch,
+        options.domain(),
+        options.radiusM(),
+        options.projectionKind(),
+        options.patchOriginBodyM?.(),
+      );
+      if (bounds.minRadius <= bounds.maxRadius) {
+        const radius = options.radiusM();
+        observedMinHeightM = Math.min(observedMinHeightM, bounds.minRadius - radius);
+        observedMaxHeightM = Math.max(observedMaxHeightM, bounds.maxRadius - radius);
+      }
+      return bounds;
+    },
+    isVisible: (_address, bounds) => {
+      if (!view.active) return true;
+      const morph = view.morph;
+      const [cx, cy, cz] = view.cam;
+      const x = (1 - morph) * bounds.sphereCenter[0] + morph * bounds.flatCenter[0];
+      const y = (1 - morph) * bounds.sphereCenter[1] + morph * bounds.flatCenter[1];
+      const z = (1 - morph) * bounds.sphereCenter[2] + morph * bounds.flatCenter[2];
+      const distanceBoundM =
+        Math.hypot(x - cx, y - cy, z - cz) +
+        (1 - morph) * bounds.sphereBoundingRadius + morph * bounds.flatBoundingRadius;
+      const marginRadians = Math.max(0, options.drawMarginRadians?.() ?? 0.035);
+      return isInView(bounds, marginRadians, distanceBoundM);
+    },
+  };
+
   return {
     select,
+    patchVisibility,
     reset: () => {
       previousRefinedKeys = new Set();
     },
   };
+}
+
+function attributeArray(
+  attribute: ITerrainPatchAttribute | Float32Array | undefined,
+): ArrayLike<number> | undefined {
+  if (!attribute) return undefined;
+  return attribute instanceof Float32Array ? attribute : attribute.array;
+}
+
+/** A bounding sphere of an axis-aligned box. */
+function boxBoundingSphere(
+  min: readonly number[],
+  max: readonly number[],
+): [[number, number, number], number] {
+  return [
+    [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
+    Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2,
+  ];
+}
+
+/**
+ * Bounds of a meshed patch from its `aSpherePos` and `aFlatPos` attributes (falling back to
+ * `positions` and the projected rectangle), measured from the planet's centre.
+ */
+function measureCellPlanetMorphPatch(
+  address: ILatLonTerrainPatchAddress,
+  patch: ITerrainPatchMesh<ILatLonTerrainPatchAddress>,
+  domain: LatLonTerrainDomain,
+  radius: number,
+  projectionKind: MapProjectionKind,
+  patchOriginBodyM: readonly [number, number, number] | undefined,
+): ICellPlanetMorphPatchDrawBounds {
+  const origin = [
+    patch.centerWorldM[0] + (patchOriginBodyM?.[0] ?? 0),
+    patch.centerWorldM[1] + (patchOriginBodyM?.[1] ?? 0),
+    patch.centerWorldM[2] + (patchOriginBodyM?.[2] ?? 0),
+  ];
+  const sphere =
+    attributeArray(patch.surface.attributes?.['aSpherePos']) ?? patch.surface.positions;
+  const flat = attributeArray(patch.surface.attributes?.['aFlatPos']);
+
+  let minRadius = Infinity;
+  let maxRadius = -Infinity;
+  const sphereMin = [Infinity, Infinity, Infinity];
+  const sphereMax = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i + 2 < sphere.length; i += 3) {
+    const x = sphere[i] + origin[0];
+    const y = sphere[i + 1] + origin[1];
+    const z = sphere[i + 2] + origin[2];
+    const r = Math.hypot(x, y, z);
+    minRadius = Math.min(minRadius, r);
+    maxRadius = Math.max(maxRadius, r);
+    sphereMin[0] = Math.min(sphereMin[0], x);
+    sphereMin[1] = Math.min(sphereMin[1], y);
+    sphereMin[2] = Math.min(sphereMin[2], z);
+    sphereMax[0] = Math.max(sphereMax[0], x);
+    sphereMax[1] = Math.max(sphereMax[1], y);
+    sphereMax[2] = Math.max(sphereMax[2], z);
+  }
+  const hasSphere = minRadius <= maxRadius;
+  const extents = createCellPlanetMorphPatchExtents();
+  populateCellPlanetMorphPatchExtents(
+    domain.getPatchBounds(address), radius, projectionKind,
+    hasSphere ? minRadius - radius : 0, hasSphere ? maxRadius - radius : 0, 0, extents,
+  );
+  if (flat && flat.length >= 3) {
+    extents.flatMin.fill(Infinity);
+    extents.flatMax.fill(-Infinity);
+    for (let i = 0; i + 2 < flat.length; i += 3) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        const value = flat[i + axis] + origin[axis];
+        extents.flatMin[axis] = Math.min(extents.flatMin[axis], value);
+        extents.flatMax[axis] = Math.max(extents.flatMax[axis], value);
+      }
+    }
+  }
+  const [sphereCenter, sphereBoundingRadius] = hasSphere
+    ? boxBoundingSphere(sphereMin, sphereMax)
+    : boxBoundingSphere([0, 0, 0], [0, 0, 0]);
+  const [flatCenter, flatBoundingRadius] = boxBoundingSphere(extents.flatMin, extents.flatMax);
+  return { ...extents, sphereCenter, sphereBoundingRadius, flatCenter, flatBoundingRadius };
 }
