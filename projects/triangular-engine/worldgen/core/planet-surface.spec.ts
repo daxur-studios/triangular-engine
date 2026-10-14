@@ -212,6 +212,27 @@ describe('createPlanetSurfaceSampler', () => {
     );
   });
 
+  it('gives crater_rim cells no landform relief bump at their centre, unlike a crater_peak cell', () => {
+    const graph = buildPlanetGraphCore({ cellCount: 240, seed: 71 });
+    const tectonics = buildPlanetTectonics(graph, { plateCount: 9, seed: 71 });
+    const ecology = buildPlanetEcology(graph, tectonics);
+    const site = graph.cells[0]!;
+    // Every cell takes the same biome so the sampled site is shaped purely by its landform tier.
+    // cellDetailAmplitude: 0 removes the texture noise layer so only the relief term can differ.
+    const centreElevationFor = (biome: 'crater_rim' | 'lunar_maria' | 'crater_peak') =>
+      createPlanetSurfaceSampler(graph, tectonics, { ...ecology, biome: ecology.biome.map(() => biome) }, {
+        featureComposition: 'cell',
+        cellDetailAmplitude: 0,
+      }).sample(site.center).baseElevation;
+
+    const rimCentre = centreElevationFor('crater_rim');
+    const flatCentre = centreElevationFor('lunar_maria');
+    const peakCentre = centreElevationFor('crater_peak');
+
+    expect(rimCentre).toBeCloseTo(flatCentre, 6);
+    expect(rimCentre).toBeLessThan(peakCentre);
+  });
+
   it('keeps ridge and river shaping identical between shaped and discrete cell modes', () => {
     const graph = buildPlanetGraphCore({ cellCount: 300, seed: 51 });
     const tectonics = buildPlanetTectonics(graph, { plateCount: 10, seed: 51 });

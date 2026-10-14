@@ -114,7 +114,7 @@ const LANDFORM_BY_BIOME: Partial<Record<Biome, CellLandform>> = {
   crater_peak: 'mountain',
   shield_volcano: 'mountain',
   tessera_highlands: 'mountain',
-  corona_rim: 'rim',
+  corona_rim: 'hill',
   lunar_highlands: 'hill',
   martian_highlands: 'hill',
   rift_canyon: 'hill',
@@ -146,9 +146,9 @@ const LANDFORM_SHAPE: Record<CellLandform, ILandformShape> = {
   // so it cannot turn a whole cell into a raised block.
   mountain: { relief: 0.2, peakSharpness: 1.15, detailAmplitude: 0.035, detailFrequency: 55 },
   hill: { relief: 0.07, peakSharpness: 0.9, detailAmplitude: 0.035, detailFrequency: 30 },
-  // Crater and caldera rims: the circular embankment is already continuous in continuousCellGround;
-  // keep relief at 0 to avoid turning the rim into a ring of isolated conical peaks, while adding rugged texture.
-  rim: { relief: 0, peakSharpness: 1, detailAmplitude: 0.035, detailFrequency: 55 },
+  // Impact-crater rims only: the circular embankment is already continuous in continuousCellGround.
+  // Relief stays 0 so the rim does not become a ring of isolated conical peaks; a small detail term keeps some rugged texture.
+  rim: { relief: 0, peakSharpness: 1, detailAmplitude: 0.02, detailFrequency: 55 },
   // Meadow/plains/etc: buildable, close to flat, only fine ground texture.
   flat: { relief: 0, peakSharpness: 1, detailAmplitude: 0.015, detailFrequency: 45 },
 };

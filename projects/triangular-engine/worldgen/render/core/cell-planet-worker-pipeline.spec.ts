@@ -156,6 +156,78 @@ describe('cell-planet-worker-pipeline', () => {
     }
   });
 
+  it('keeps recentred flat and sphere positions continuous with the un-recentred mesh', async () => {
+    const plainRequest: CellPlanetMeshWorkerRequest = {
+      id: 201,
+      address,
+      radiusM: 6_000_000,
+      heightScaleM: 10_000,
+      resolution: 4,
+      worldProfile: 'volcanic',
+      seed: 1,
+    };
+    const recentredRequest: CellPlanetMeshWorkerRequest = {
+      id: 202,
+      address,
+      radiusM: 6_000_000,
+      heightScaleM: 10_000,
+      renderOriginBodyFixedM: [6_000_000, 0, 0],
+      resolution: 4,
+      worldProfile: 'volcanic',
+      seed: 1,
+    };
+    const plain = await handleCellPlanetWorkerMessage(plainRequest, {
+      worldCache: new CellPlanetWorldCache({ defaultCellCount: 50, defaultRelaxationIterations: 1 }),
+    });
+    const recentred = await handleCellPlanetWorkerMessage(recentredRequest, {
+      worldCache: new CellPlanetWorldCache({ defaultCellCount: 50, defaultRelaxationIterations: 1 }),
+    });
+    const plainPatch = 'patch' in plain.response ? plain.response.patch : undefined;
+    const recentredPatch = 'patch' in recentred.response ? recentred.response.patch : undefined;
+    expect(plainPatch).toBeDefined();
+    expect(recentredPatch).toBeDefined();
+    if (!plainPatch || !recentredPatch) return;
+
+    // Attributes may be stored as a bare Float32Array or as { array, itemSize }.
+    const float32Attribute = (attributes: unknown, name: string): Float32Array => {
+      const value = (attributes as Record<string, unknown> | undefined)?.[name];
+      const array = value instanceof Float32Array ? value : (value as { array?: Float32Array } | undefined)?.array;
+      expect(array).toBeDefined();
+      return array ?? new Float32Array(0);
+    };
+    // Recover absolute body-fixed positions: the stored value is relative to the patch centre
+    // (centerWorldM) and the render origin, so add both back.
+    type Patch = NonNullable<typeof recentredPatch>;
+    const absolutePositions = (patch: Patch, name: string, origin: readonly [number, number, number]): number[] => {
+      const values = float32Attribute(patch.surface.attributes, name);
+      const [cx, cy, cz] = patch.centerWorldM;
+      const out: number[] = [];
+      for (let i = 0; i < values.length; i += 3) {
+        out.push(
+          values[i]! + cx + origin[0],
+          values[i + 1]! + cy + origin[1],
+          values[i + 2]! + cz + origin[2],
+        );
+      }
+      return out;
+    };
+
+    const plainFlat = absolutePositions(plainPatch, 'aFlatPos', [0, 0, 0]);
+    const recentredFlat = absolutePositions(recentredPatch, 'aFlatPos', [6_000_000, 0, 0]);
+    const plainSphere = absolutePositions(plainPatch, 'aSpherePos', [0, 0, 0]);
+    const recentredSphere = absolutePositions(recentredPatch, 'aSpherePos', [6_000_000, 0, 0]);
+
+    expect(recentredFlat.length).toBe(plainFlat.length);
+    expect(recentredSphere.length).toBe(plainSphere.length);
+    // Float32 at ~6e6 m has ~0.5 m ulp, so allow a few metres of rounding slack.
+    for (let i = 0; i < plainFlat.length; i += 1) {
+      expect(Math.abs(recentredFlat[i]! - plainFlat[i]!)).toBeLessThan(5);
+    }
+    for (let i = 0; i < plainSphere.length; i += 1) {
+      expect(Math.abs(recentredSphere[i]! - plainSphere[i]!)).toBeLessThan(5);
+    }
+  });
+
   it('handles mesh requests with simplification reduction', async () => {
     const cache = new CellPlanetWorldCache({ defaultCellCount: 50, defaultRelaxationIterations: 1 });
     const request: CellPlanetMeshWorkerRequest = {
