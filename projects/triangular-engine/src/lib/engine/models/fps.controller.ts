@@ -34,6 +34,8 @@ export interface IPerformanceDropEvent {
   readonly cameraPosition: [number, number, number];
   readonly drawCallsDelta: number;
   readonly trianglesDelta: number;
+  /** Page telemetry sections as they read when the drop was detected; see `FPSController.telemetry`. */
+  readonly pageSections?: string;
 }
 
 /**
@@ -245,6 +247,8 @@ export class FPSController {
               ]
             : [0, 0, 0];
 
+          // Captured now, so the report can show page state from the drop, not from copy time.
+          const pageSections = this.telemetry.format();
           this.recentDropEvent.set({
             timestamp: now,
             baselineFps,
@@ -254,6 +258,7 @@ export class FPSController {
             cameraPosition: camPos,
             drawCallsDelta: drawCallsVal - this.prevDrawCalls,
             trianglesDelta: trianglesVal - this.prevTriangles,
+            pageSections,
           });
         }
 
@@ -395,8 +400,14 @@ export class FPSController {
     // Only report drops still inside the 60s history window; older ones are stale.
     if (drop && dropAgeS <= 60) {
       const sign = (n: number): string => (n >= 0 ? `+${this.formatMetric(n)}` : this.formatMetric(n));
+      const atDrop = drop.pageSections
+        ? `\n  at drop:\n${drop.pageSections
+            .split('\n')
+            .map((line) => `    ${line}`)
+            .join('\n')}`
+        : '';
       dropStr = `
-drop_event (${dropAgeS}s ago): ${drop.baselineFps}fps -> ${drop.dropFps}fps on ${drop.cameraAction.toUpperCase()} (worstFrame: ${drop.worstFrameMs}ms, calls: ${sign(drop.drawCallsDelta)}, tris: ${sign(drop.trianglesDelta)})`;
+drop_event (${dropAgeS}s ago): ${drop.baselineFps}fps -> ${drop.dropFps}fps on ${drop.cameraAction.toUpperCase()} (worstFrame: ${drop.worstFrameMs}ms, calls: ${sign(drop.drawCallsDelta)}, tris: ${sign(drop.trianglesDelta)})${atDrop}`;
     }
 
     const recentCount = Math.min(10, this.graph.length);

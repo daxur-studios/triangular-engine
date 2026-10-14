@@ -29,6 +29,8 @@ morph progress was never in the report, so a pasted report could not explain a f
 4. `TerrainSurfaceComponent` takes an optional `telemetrySection` input. When set, it registers a
    section with its own counts (desired, resident, queued, draw calls, triangles, geometry MB and
    the level histogram), read from the stats it already emits. Unset, the default, it adds nothing.
+   Its triangle and geometry counts are named `residentTriangles` and `residentGeometryMB`, because
+   they cover every resident patch, including patches draw culling hides.
 5. The cell-planet streaming demo sets `telemetrySection="terrain"` on its surface and keeps a
    `planet` section for projection, quality and morph, which only the page knows.
 
@@ -36,7 +38,8 @@ morph progress was never in the report, so a pasted report could not explain a f
 
 - Other library components, such as the cell-planet streaming view, do not forward
   `telemetrySection` yet; pages set it on `<terrainSurface>` directly.
-- Report values are a snapshot taken when the report is copied. A drop event is recorded earlier,
-  so the sections cannot say what the queue was doing during it. Recording section values with
-  each drop event would close that gap.
+- Report values are a snapshot taken when the report is copied, so a drop shows the sections as
+  they read when the drop was detected instead (`IPerformanceDropEvent.pageSections`). Each second
+  that qualifies as a drop refreshes it. Sections still cannot explain a stall that falls outside
+  a detected drop second, such as a single long frame that does not lower the second's FPS enough.
 - No structured (JSON) output. The report stays markdown, so existing agent prompts still read it.

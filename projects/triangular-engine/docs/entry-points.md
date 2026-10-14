@@ -89,6 +89,8 @@ Values may be strings, numbers, booleans or `null`; `undefined` entries are omit
 
 A `<terrainSurface>` needs no provider code: set `telemetrySection` to a name and it publishes its own LOD and draw counts under that name. Leave it unset, the default, and it adds nothing to the report.
 
+Sections are also captured when a frame drop is detected. The report then shows them under `drop_event` as `at drop:`, so the queue and residency from the dropped second are kept even if the report is copied later.
+
 ### Standalone Sparkline
 
 `<telemetry-sparkline>` is also available standalone for custom HUDs and debug overlays:

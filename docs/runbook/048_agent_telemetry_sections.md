@@ -26,6 +26,9 @@ Plan: [Plan 048](/docs/plans/048_agent_telemetry_sections.md).
   section existed: the page's counts were self-consistent (`levels` sums to 140, resident 140,
   queued 0). The sample also showed a drop 6 s before the copy with queued at 0 at copy time, which
   is the gap noted in the plan.
+- Drop-time capture: `fps.controller.spec.ts` checks that a section read during the drop second
+  appears under `drop_event` as `at drop:`, while the same section read at copy time shows its
+  current value. Terrain counts are now `residentTriangles` and `residentGeometryMB`.
 - Not measured in a browser. Opening the demo would load the planet in WebGL, and the report's
   output is covered by the specs above.
 

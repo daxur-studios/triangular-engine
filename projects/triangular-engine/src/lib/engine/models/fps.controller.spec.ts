@@ -274,5 +274,30 @@ describe('FPSController', () => {
       expect(output).toContain('  cam: [-]\nplanet:\n  patches: 140\n  morph: 0\n```');
       expect(output.endsWith('```')).toBeTrue();
     });
+
+    it('keeps the page sections read when a drop was detected, not when copied', () => {
+      const { controller } = createController();
+      let queued = 37;
+      controller.telemetry.register('terrain', () => ({ queued }));
+
+      controller.previousSecond = performance.now();
+      for (let i = 0; i < 59; i++) {
+        controller.recordFrame(16.6);
+      }
+      controller.previousSecond = performance.now() - 1001;
+      controller.recordFrame(16.6);
+
+      controller.previousSecond = performance.now();
+      for (let i = 0; i < 19; i++) {
+        controller.recordFrame(50);
+      }
+      controller.previousSecond = performance.now() - 1001;
+      controller.recordFrame(50);
+      queued = 0;
+
+      const output = controller.formatTelemetryForAgent();
+      expect(output).toContain('  at drop:\n    terrain:\n      queued: 37');
+      expect(output).toContain('terrain:\n  queued: 0');
+    });
   });
 });

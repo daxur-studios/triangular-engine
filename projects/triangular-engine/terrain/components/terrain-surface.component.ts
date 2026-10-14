@@ -1313,8 +1313,8 @@ export class TerrainSurfaceComponent<TAddress = unknown>
       resident: stats.resident,
       queued: stats.queued,
       drawCalls: stats.drawCalls,
-      triangles: stats.triangles,
-      geometryMB: Number((stats.geometryBytes / (1024 * 1024)).toFixed(1)),
+      residentTriangles: stats.triangles,
+      residentGeometryMB: Number((stats.geometryBytes / (1024 * 1024)).toFixed(1)),
       levels: Object.entries(stats.levels).map(([level, count]) => `${level}:${count}`).join(' ') || 'none',
     };
   }
