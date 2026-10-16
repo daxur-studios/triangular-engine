@@ -36,10 +36,22 @@ The scene camera supplies only orientation and field of view. Keep it at the ori
 
 ## Cost
 
-`march` is a fixed-count per-pixel loop (32 samples by default), the reference path. It is correct but not cheap; the cached sky-view table that makes the per-pixel cost flat is the next step (Plan 049, Phase 2c). Profile changes take one synchronous bake, about 1-2 s at the default sizes.
+`march` is a fixed-count per-pixel loop (32 samples by default), the reference path. The sky-view table (below) replaces it for the sky inside the atmosphere. Neither has been timed on a real GPU yet (Plan 049, Phase 2c gate). Profile changes take one synchronous bake, about 1-2 s at the default sizes.
 
 ## Limits
 
 - One absorber layer (ozone-like) per profile.
 - Multiple scattering is Hillaire's isotropic approximation, not a full solution.
 - No clouds, stars, ocean reflection or cell-planet integration yet.
+
+## Sky-view table
+
+`AtmosphereSkyViewLut` caches the sky for the camera's altitude and the sun's elevation in a small render target, so the sky is one texture fetch per pixel instead of a ray march. Pass it to the backdrop and call `backdrop.update(renderer)` once per frame, outside any render pass:
+
+```ts
+const skyView = new AtmosphereSkyViewLut(model);
+const backdrop = new AtmosphereBackdrop(model, { skyView });
+engine.tick$.subscribe(() => backdrop.update(engine.renderer as WebGPURenderer));
+```
+
+The table is re-rendered only when the altitude or the sun's elevation moves past a tolerance (or the profile changes). It is used while the camera is inside the atmosphere; above it, only the pixels that cross the air are marched. `backdrop.skyViewEnabled.value = 0` switches back to the per-pixel march for comparison.

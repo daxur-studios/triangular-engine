@@ -70,6 +70,56 @@ const MOON_DISTANCE = 3;
       <p class="row">stack: {{ stackKey() }}</p>
     </aside>
   `,
+  styles: `
+    .panel {
+      position: absolute;
+      left: 1rem;
+      bottom: 1rem;
+      width: min(26rem, calc(100vw - 2rem));
+      padding: 0.75rem 1rem;
+      border: 1px solid #294253;
+      border-radius: 0.75rem;
+      background: rgba(5, 13, 21, 0.92);
+      color: #e6edf3;
+      font: 14px/1.35 Inter, system-ui, sans-serif;
+      box-shadow: 0 1rem 3rem #0008;
+    }
+    .panel a {
+      color: #7cc4ff;
+    }
+    .panel h2 {
+      margin: 0.25rem 0 0.5rem;
+      font-size: 1.1rem;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem 1rem;
+      margin: 0.4rem 0;
+    }
+    .row {
+      overflow-wrap: anywhere;
+    }
+    .row label {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    button {
+      padding: 0.25rem 0.75rem;
+      border: 1px solid #3b5a70;
+      border-radius: 0.4rem;
+      background: #17303f;
+      color: #e6edf3;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #2b7fb8;
+      border-color: #2b7fb8;
+      cursor: default;
+    }
+  `,
 })
 export class PlanetMaterialExtensionsPageComponent {
   private readonly engine = inject(EngineService);

@@ -5,6 +5,7 @@ import { EngineModule, EngineService } from 'triangular-engine';
 import {
   AtmosphereBackdrop,
   AtmosphereGpuModel,
+  AtmosphereSkyViewLut,
   createAtmospherePreset,
   sunDirectionFromAngles,
   type AtmospherePresetId,
@@ -72,6 +73,7 @@ const VIEWS: readonly ViewPreset[] = [
     webGpuRendererParameters: {
       forceWebGL: BACKEND === 'webgl2',
       antialias: false,
+      trackTimestamp: true,
     },
   }),
   host: {
@@ -139,6 +141,14 @@ const VIEWS: readonly ViewPreset[] = [
         </button>
         <button (click)="toggleGround()" [class.active]="ground()">ground {{ ground() ? 'on' : 'off' }}</button>
         <button (click)="toggleChecker()" [class.active]="checker()">checker {{ checker() ? 'on' : 'off' }}</button>
+      </p>
+      <p class="row">
+        <button (click)="toggleSkyView()" [class.active]="skyViewOn()">
+          sky from {{ skyViewOn() ? 'table' : 'per-pixel march' }}
+        </button>
+      </p>
+      <p class="note">
+        GPU {{ gpuMs() }} · table renders {{ tableRenders() }} · {{ skyViewOn() ? 'table' : 'march' }} path
       </p>
       <p class="note">
         {{ backend }} · {{ sizeLabel() }} {{ presetId() }} · bake {{ bakeMs() }} ms · drag = look, wheel = altitude
@@ -213,18 +223,25 @@ export class AtmosphereLabPageComponent {
   readonly animateSun = signal(false);
   readonly ground = signal(true);
   readonly checker = signal(true);
+  readonly skyViewOn = signal(true);
+  readonly gpuMs = signal('n/a');
+  readonly tableRenders = signal(0);
 
   private radiusM = 6_371_000;
   private altitudeM = 2;
   private readonly model: AtmosphereGpuModel;
   private readonly backdrop: AtmosphereBackdrop;
+  private readonly skyView: AtmosphereSkyViewLut;
+  private frame = 0;
+  private timestampsPending = false;
   private readonly forward = new Vector3();
 
   constructor() {
     const started = performance.now();
     this.model = new AtmosphereGpuModel(this.buildProfile());
     this.bakeMs.set(Math.round(performance.now() - started));
-    this.backdrop = new AtmosphereBackdrop(this.model);
+    this.skyView = new AtmosphereSkyViewLut(this.model);
+    this.backdrop = new AtmosphereBackdrop(this.model, { skyView: this.skyView });
     this.engine.scene.add(this.backdrop.mesh);
 
     const camera = this.engine.camera;
@@ -244,11 +261,13 @@ export class AtmosphereLabPageComponent {
         this.applySun();
       }
       this.updateCamera();
+      this.updateSkyViewAndTimings();
     });
     this.destroyRef.onDestroy(() => {
       tick.unsubscribe();
       this.engine.scene.remove(this.backdrop.mesh);
       this.backdrop.dispose();
+      this.skyView.dispose();
       this.model.dispose();
     });
   }
@@ -343,6 +362,30 @@ export class AtmosphereLabPageComponent {
   toggleGround(): void {
     this.ground.update((on) => !on);
     this.backdrop.groundEnabled.value = this.ground() ? 1 : 0;
+  }
+
+  toggleSkyView(): void {
+    this.skyViewOn.update((on) => !on);
+    this.backdrop.skyViewEnabled.value = this.skyViewOn() ? 1 : 0;
+    this.skyView.invalidate();
+  }
+
+  /** Refreshes the sky-view table (outside any render pass) and, every 20 frames, reads the GPU timestamp. */
+  private updateSkyViewAndTimings(): void {
+    const renderer: any = this.engine.renderer;
+    if (!renderer?.initialized) return;
+    this.backdrop.update(renderer);
+    this.tableRenders.set(this.skyView.renderCount);
+    if (++this.frame % 20 !== 0 || this.timestampsPending || !renderer.resolveTimestampsAsync) return;
+    this.timestampsPending = true;
+    renderer
+      .resolveTimestampsAsync('render')
+      .then((ms: number | undefined) => {
+        const value = typeof ms === 'number' && ms > 0 ? ms : renderer.info?.render?.timestamp;
+        this.gpuMs.set(typeof value === 'number' && value > 0 ? value.toFixed(2) + ' ms' : 'n/a (no timestamp query)');
+      })
+      .catch(() => this.gpuMs.set('n/a (no timestamp query)'))
+      .finally(() => (this.timestampsPending = false));
   }
 
   toggleChecker(): void {

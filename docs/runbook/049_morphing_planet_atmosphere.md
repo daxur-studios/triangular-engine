@@ -261,8 +261,53 @@ cell planet involved (this entry), **2b** is the cell-planet lighting stage and 
 ### Not verified
 
 - **Performance.** The browser pane here runs ~1-2 fps (software rendering), so there is no usable timing. The per-pixel
-  march has never been timed on a real GPU; measuring it is Phase 2c's gate.
+  march has never been timed on a real GPU; measuring it is Phase 2c's gate (see the next entry).
 - Mars and the other size/view combinations were checked numerically (spec) but not all by eye.
 - The WebGL2 fallback ran only through the spec harness, not the demo.
 - Limb glow is thin on Earth (runbook trap 3); the exposure/HDR/bloom tuning is open.
 
+
+## 2026-10-16 — Phase 2c: cached sky-view table (local Sonnet session)
+
+### What exists
+
+| File | Contents |
+|---|---|
+| `atmosphere-sky-view.ts` | `AtmosphereSkyViewLut`: a 192x108 render target holding radiance (left) and transmittance (right), rendered by one full-screen pass that calls `march` per texel. `lookup(dir)` is one filtered fetch per half. `update(renderer, altitude)` re-renders only when the altitude (1% of `max(h, 0.2% of top)`) or the sun's elevation (0.05 degrees) moves, or the profile version changes |
+| `atmosphere-gpu-model.ts` | `traceRay()` split out of `march()` (ray/air/ground geometry only); the march loop is wrapped in `If(span > 0)` so pixels that miss the air skip it; `profileVersion` |
+| `atmosphere-backdrop.ts` | `skyView` option, `skyViewEnabled` uniform, `update(renderer)`. Inside the air (camera below the top) with the table on, sky and ground haze come from the table; outside, the per-pixel march runs only on the limb pixels |
+| lab | "sky from table / per-pixel march" toggle, table render counter, GPU timestamp readout (`trackTimestamp`) |
+
+### Parameterization
+
+Rows: zenith angle, split at the horizon `pi/2 + dip` (`dip = atan(sqrt(h(2R+h))/R)`, stable at small `h`), square-root
+mapping on each side so texels crowd at the horizon. Columns: `sqrt(phi/pi)` with `phi` the azimuth from the sun
+(unsigned: the sky is symmetric about the sun's vertical plane), so texels crowd around the sun. Both halves of the
+target are edge-aligned to texel centres so linear filtering never bleeds across the seam.
+
+### Results
+
+| Check | Result |
+|---|---|
+| Table vs per-pixel march (same steps), 5 scenarios x 36 directions x radiance and transmittance, on a real GPU backend (`forceWebGL`) | within 6% + 1e-4: Earth ground at high sun, dusk, noon with the default 192x108 table and 32 steps, 8 km up, Earth scaled to 100 km. Directions within ~1.5 degrees of the horizon are excluded (the table is discontinuous there by design) |
+| Re-render skipping (`update`) | no render for the same or a slightly moved camera or sun; renders for a real change or a new profile |
+| By eye | dusk and noon through the table are indistinguishable from the per-pixel march |
+| Specs | `npm run test:triangular-engine:atmosphere`: 115 pass |
+
+### Trap found: values read inside an `If` block
+
+The first table build showed black ground with a correct sky. `traceRay`'s outputs were plain expression nodes; TSL
+emitted them at their first use, which was inside the `If` branch of the march, so uses elsewhere read an out-of-scope
+value and the ground branch never ran. Making `traceRay` return `.toVar()` values (computed at the top of the shader)
+fixed it. The spec did not catch it because it never used `traceRay` outputs inside a branch. Rule for later stages:
+any value that is read inside an `If` and also outside it should be a `toVar()`.
+
+### Not verified / open
+
+- **The timing gate.** The pane here has no real GPU (1 fps, no timestamp query most frames), so nothing was measured.
+  On a real GPU, open `/atmosphere-lab` (and again with `?backend=webgl2`), pick a view, and compare the GPU readout
+  with "sky from table" on and off. Record the numbers here; the budget is <= 0.5 ms total from any camera position.
+- Froxel table (aerial perspective for arbitrary objects) is not built; it belongs with Phase 4's coverage work.
+- The ground still uses the per-pixel ground shading and the table for haze; the limb/space view marches only the
+  limb pixels, which is untimed.
+- The table is a 1-camera-altitude cache. Two cameras (split view) would need two tables.

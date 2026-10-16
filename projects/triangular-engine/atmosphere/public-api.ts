@@ -11,3 +11,4 @@ export * from './atmosphere-presets';
 export * from './atmosphere-luts';
 export * from './atmosphere-gpu-model';
 export * from './atmosphere-backdrop';
+export * from './atmosphere-sky-view';

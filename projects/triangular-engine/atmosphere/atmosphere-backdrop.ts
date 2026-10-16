@@ -1,5 +1,5 @@
 import { Mesh, PlaneGeometry, Vector3 } from 'three';
-import { NodeMaterial } from 'three/webgpu';
+import { NodeMaterial, type WebGPURenderer } from 'three/webgpu';
 import {
   Fn,
   If,
@@ -22,12 +22,15 @@ import {
   vec4,
 } from 'three/tsl';
 import { AtmosphereGpuModel } from './atmosphere-gpu-model';
+import { AtmosphereSkyViewLut } from './atmosphere-sky-view';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export interface AtmosphereBackdropOptions {
   /** Samples along each view ray. Default {@link AtmosphereGpuModel.defaultSteps}. */
   steps?: number;
+  /** A sky-view table to read the sky from (Plan 049, Phase 2c). Call {@link AtmosphereBackdrop.update} each frame. */
+  skyView?: AtmosphereSkyViewLut;
 }
 
 /**
@@ -60,10 +63,16 @@ export class AtmosphereBackdrop {
   /** Multiplies the sun disc brightness; 0 hides it. */
   readonly sunDiscStrength = uniform(1);
 
+  /** 1 reads the sky from the sky-view table (when one was given and the camera is inside the air), 0 marches every pixel. */
+  readonly skyViewEnabled = uniform(1);
+  readonly skyView?: AtmosphereSkyViewLut;
+
   constructor(
     readonly model: AtmosphereGpuModel,
     options: AtmosphereBackdropOptions = {},
   ) {
+    const skyView = options.skyView;
+    this.skyView = skyView;
     const material = new NodeMaterial();
     material.depthTest = false;
     material.depthWrite = false;
@@ -78,16 +87,34 @@ export class AtmosphereBackdrop {
     material.fragmentNode = Fn(() => {
       const dir = normalize(rayVarying);
       const sunDir = model.sunDirection;
-      const march = model.march({
-        altitude: this.altitude,
-        dir,
-        sunDir,
-        maxDistance: float(1e30),
-        steps: options.steps,
-      });
-      const colour = march.radiance.toVar();
+      const maxDistance = float(1e30);
+      const trace = model.traceRay({ altitude: this.altitude, dir, maxDistance });
 
-      const hitGround = march.hitsGround.and(this.groundEnabled.greaterThan(0.5));
+      // Scattering along the ray: one filtered fetch from the sky-view table when the camera is inside the
+      // air and the table is on, otherwise the reference per-pixel march.
+      const radiance = vec3(0).toVar();
+      const transmittance = vec3(1).toVar();
+      const marchInto = () => {
+        const m = model.march({ altitude: this.altitude, dir, sunDir, maxDistance, steps: options.steps });
+        radiance.assign(m.radiance);
+        transmittance.assign(m.transmittance);
+      };
+      if (skyView) {
+        const useTable: any = (this.skyViewEnabled.greaterThan(0.5) as any).and(
+          this.altitude.lessThan(model.uTopAltitude),
+        );
+        If(useTable, () => {
+          const s = skyView.lookup(dir);
+          radiance.assign(s.radiance);
+          transmittance.assign(s.transmittance);
+        }).Else(marchInto);
+      } else {
+        marchInto();
+      }
+      const march = { transmittance, groundDistance: trace.groundDistance };
+      const colour = radiance.toVar();
+
+      const hitGround = trace.hitsGround.and(this.groundEnabled.greaterThan(0.5));
       If(hitGround, () => {
         const R = model.uRadius;
         const point = vec3(0, this.altitude, 0).add(dir.mul(march.groundDistance));
@@ -152,6 +179,16 @@ export class AtmosphereBackdrop {
 
   setAltitude(metres: number): void {
     this.altitude.value = Math.max(0, metres);
+  }
+
+  /**
+   * Per-frame work that must happen outside a render pass: refreshes the sky-view table if the altitude or
+   * the sun moved past its tolerance. Call from the frame tick, before the scene renders. Returns true when
+   * the table was re-rendered.
+   */
+  update(renderer: WebGPURenderer): boolean {
+    if (!this.skyView || this.skyViewEnabled.value < 0.5) return false;
+    return this.skyView.update(renderer, this.altitude.value);
   }
 
   dispose(): void {

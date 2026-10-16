@@ -68,8 +68,8 @@ export function createPlanetDayNightUniforms(): IPlanetDayNightUniforms {
 /**
  * A port of `enablePlanetDayNightLighting` as a lighting stage: a day factor from the sphere normal
  * against the sun direction (smooth over the twilight width), a golden-hour glow at the terminator
- * and a night colour floor. `sunVisibility` scales the day factor, so an eclipse darkens the day side
- * towards the night floor.
+ * and a night colour floor. `sunVisibility` scales the day factor and the glow, so an eclipse darkens the
+ * day side towards the night floor and takes the golden-hour glow out of the shadow.
  */
 export function simpleDayNightLighting(uniforms: IPlanetDayNightUniforms): LightingStage {
   const enabled = uniforms.uDayNightEnabled as any;
@@ -83,7 +83,7 @@ export function simpleDayNightLighting(uniforms: IPlanetDayNightUniforms): Light
     const sunDot = dot(normalize(context.sphereNormal), normalize(sunDirection));
     const tw = max(float(0.01), twilightWidth);
     const dayFactor = smoothstep(tw.negate(), tw, sunDot).mul(sunVisibility);
-    const sunsetRim = exp(pow(sunDot.div(tw.mul(1.5)), float(2)).negate()).mul(sunsetGlow);
+    const sunsetRim = exp(pow(sunDot.div(tw.mul(1.5)), float(2)).negate()).mul(sunsetGlow).mul(sunVisibility);
     const sunsetTint = vec3(1.0, 0.52, 0.22);
     const ambientNight = nightColor.mul(nightAmbient);
     const lightMod = mix(ambientNight, vec3(1, 1, 1), dayFactor).add(

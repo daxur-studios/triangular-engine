@@ -367,9 +367,13 @@ before the material port lands. Phase 2b onwards needs Plan 050 through its Phas
    - Lighting stage (`atmosphereLighting()`) + stage 6 (`atmospherePerspective()`) + light sync + exposure.
    - Eclipse `sunVisibility`.
    - **Gate:** the same shots on the cell planet at `m = 0`.
-2c. **Cached sky-view table + budget.** Sky-view and froxel fragment passes replace the per-pixel march for
-   the sky; WebGPU / `forceWebGL` timings; the plan's ≤ 0.5 ms budget. **Gate:** budget, and the output matches
-   2a's reference march.
+2c. **Cached sky-view table + budget.** *Sky-view table built 2026-10-16; the timing gate is open.* A
+   per-frame fragment pass renders the sky-view table (192x108, radiance + transmittance, re-rendered only when
+   the altitude or the sun's elevation moves past a tolerance); the sky is then one fetch per pixel. The table
+   matches 2a's reference march within 6% in specs. Still open: froxels (planet-scale aerial perspective for
+   other objects, Phase 4's concern), and the **timing gate**: WebGPU / `forceWebGL` numbers on a real GPU
+   against the ≤ 0.5 ms budget. `/atmosphere-lab` has a "sky from table / per-pixel march" toggle and a GPU
+   timestamp readout for that comparison.
 3. **Flat map + morph.** Slab, per-sample `μs` froxels, edge fade/glow, mid-morph blend.
    **Gate:** scrub the morph at dusk with no pops, fps steady, 4-size set at `m = 1`.
    (Needs 2b and 2c. The flat-map maths can be prototyped on the plain-sphere lab first if that helps.)

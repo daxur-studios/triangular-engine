@@ -9,6 +9,7 @@ import {
 } from 'three';
 import {
   Fn,
+  If,
   Loop,
   clamp,
   dot,
@@ -27,7 +28,12 @@ import {
   vec3,
   abs,
 } from 'three/tsl';
-import { AtmosphereLutImage, AtmosphereLutOptions, AtmosphereLuts, bakeAtmosphereLuts } from './atmosphere-luts';
+import {
+  AtmosphereLutImage,
+  AtmosphereLutOptions,
+  AtmosphereLuts,
+  bakeAtmosphereLuts,
+} from './atmosphere-luts';
 import { PhysicalAtmosphereProfile } from './atmosphere-profile';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -74,18 +80,30 @@ export interface AtmosphereMarchResult {
   groundDistance: any;
 }
 
-function toHalfTexture(image: AtmosphereLutImage, existing?: DataTexture): DataTexture {
+function toHalfTexture(
+  image: AtmosphereLutImage,
+  existing?: DataTexture,
+): DataTexture {
   const half =
-    existing && existing.image.width === image.width && existing.image.height === image.height
+    existing &&
+    existing.image.width === image.width &&
+    existing.image.height === image.height
       ? (existing.image.data as Uint16Array)
       : new Uint16Array(image.width * image.height * 4);
-  for (let i = 0; i < half.length; i++) half[i] = DataUtils.toHalfFloat(image.data[i]);
+  for (let i = 0; i < half.length; i++)
+    half[i] = DataUtils.toHalfFloat(image.data[i]);
   if (existing && existing.image.data === half) {
     existing.needsUpdate = true;
     return existing;
   }
   existing?.dispose();
-  const tex = new DataTexture(half, image.width, image.height, RGBAFormat, HalfFloatType);
+  const tex = new DataTexture(
+    half,
+    image.width,
+    image.height,
+    RGBAFormat,
+    HalfFloatType,
+  );
   tex.minFilter = LinearFilter;
   tex.magFilter = LinearFilter;
   tex.wrapS = ClampToEdgeWrapping;
@@ -135,6 +153,8 @@ export class AtmosphereGpuModel {
   private irradianceTexture!: DataTexture;
   private lutSizes = { t: [1, 1], m: [1, 1], i: [1, 1] };
   private currentLuts!: AtmosphereLuts;
+  /** Increments on every {@link setProfile}; caches built from the tables compare it to know when to redo. */
+  profileVersion = 0;
 
   constructor(
     profile: PhysicalAtmosphereProfile,
@@ -160,10 +180,20 @@ export class AtmosphereGpuModel {
       throw new Error('AtmosphereGpuModel supports at most one absorber layer');
     }
     const luts = bakeAtmosphereLuts(profile, this.lutOptions);
+    this.profileVersion++;
     this.currentLuts = luts;
-    this.transmittanceTexture = toHalfTexture(luts.transmittance, this.transmittanceTexture);
-    this.multiScatterTexture = toHalfTexture(luts.multiScatter, this.multiScatterTexture);
-    this.irradianceTexture = toHalfTexture(luts.irradiance, this.irradianceTexture);
+    this.transmittanceTexture = toHalfTexture(
+      luts.transmittance,
+      this.transmittanceTexture,
+    );
+    this.multiScatterTexture = toHalfTexture(
+      luts.multiScatter,
+      this.multiScatterTexture,
+    );
+    this.irradianceTexture = toHalfTexture(
+      luts.irradiance,
+      this.irradianceTexture,
+    );
     this.lutSizes = {
       t: [luts.transmittance.width, luts.transmittance.height],
       m: [luts.multiScatter.width, luts.multiScatter.height],
@@ -221,22 +251,46 @@ export class AtmosphereGpuModel {
     const dMin = this.uTopAltitude.sub(alt);
     const dMax = rho.add(this.uHorizon);
     // (top - r)(top + r) + r^2 mu^2: no cancellation.
-    const disc = dMin.mul(this.uTopRadius.add(r)).add(r.mul(r).mul(muSun).mul(muSun));
-    const d = max(r.mul(muSun).negate().add(sqrt(max(disc, 0))), 0);
+    const disc = dMin
+      .mul(this.uTopRadius.add(r))
+      .add(r.mul(r).mul(muSun).mul(muSun));
+    const d = max(
+      r
+        .mul(muSun)
+        .negate()
+        .add(sqrt(max(disc, 0))),
+      0,
+    );
     const xMu = clamp(d.sub(dMin).div(max(dMax.sub(dMin), 1e-3)), 0, 1);
     const xR = clamp(rho.div(this.uHorizon), 0, 1);
     const [tw, th] = this.lutSizes.t;
-    const uv = vec2(xMu.mul(tw - 1).add(0.5).div(tw), xR.mul(th - 1).add(0.5).div(th));
+    const uv = vec2(
+      xMu
+        .mul(tw - 1)
+        .add(0.5)
+        .div(tw),
+      xR
+        .mul(th - 1)
+        .add(0.5)
+        .div(th),
+    );
     const t = texture(this.transmittanceTexture, uv, 0).rgb;
     // The sun sits above the horizon of the point when muSun > -rho / r; blend over its angular size.
     const horizon = rho.div(r).negate();
-    const lit = smoothstep(horizon.sub(this.uSunAngularRadius), horizon.add(this.uSunAngularRadius), muSun);
+    const lit = smoothstep(
+      horizon.sub(this.uSunAngularRadius),
+      horizon.add(this.uSunAngularRadius),
+      muSun,
+    );
     return t.mul(lit);
   }
 
   /** Sky irradiance on an upward-facing surface at altitude `alt`, relative to the sun irradiance. */
   skyIrradiance(alt: any, muSun: any): any {
-    const uv = vec2(muSun.mul(0.5).add(0.5), clamp(alt.div(this.uTopAltitude), 0, 1));
+    const uv = vec2(
+      muSun.mul(0.5).add(0.5),
+      clamp(alt.div(this.uTopAltitude), 0, 1),
+    );
     return texture(this.irradianceTexture, uv, 0).rgb;
   }
 
@@ -253,19 +307,25 @@ export class AtmosphereGpuModel {
 
   // -- the march ---------------------------------------------------------------------------------
 
-  /** Builds the nodes for one view ray. Call inside an `Fn` body. */
-  march(input: AtmosphereMarchInput): AtmosphereMarchResult {
-    const steps = input.steps ?? AtmosphereGpuModel.defaultSteps;
+  /**
+   * Where a view ray meets the atmosphere and the ground: the part of the ray inside the air
+   * (`tStart` to `tEnd`, `span` long, 0 when it misses) and the ground hit. Pure geometry, no scattering.
+   * Call inside an `Fn` body.
+   */
+  traceRay(
+    input: Pick<AtmosphereMarchInput, 'altitude' | 'dir' | 'maxDistance'>,
+  ) {
     const R = this.uRadius;
     const h = max(float(input.altitude), 0);
     const dir = input.dir;
-    const sunDir = input.sunDir;
 
     // Ray / sphere with the camera at (0, h, 0) and centre (0, -R, 0): b = (R + h) dir.y, and the
     // constants c = |oc|^2 - radius^2 are written as products so they do not cancel.
     const b = R.add(h).mul(dir.y);
     const cGround = h.mul(R.mul(2).add(h));
-    const cTop = h.sub(this.uTopAltitude).mul(h.add(this.uTopAltitude).add(R.mul(2)));
+    const cTop = h
+      .sub(this.uTopAltitude)
+      .mul(h.add(this.uTopAltitude).add(R.mul(2)));
     const discTop = b.mul(b).sub(cTop);
     const sTop = sqrt(max(discTop, 0));
     const t0 = b.negate().sub(sTop);
@@ -274,17 +334,45 @@ export class AtmosphereGpuModel {
     const sGround = sqrt(max(discGround, 0));
     // For b < 0, (-b - s) = c / (-b + s): stable when the camera is near the ground.
     const tGround = cGround.div(max(b.negate().add(sGround), 1e-6));
-    const reachesGround: any = (discGround.greaterThan(0) as any).and(b.lessThan(0));
+    const reachesGround: any = (discGround.greaterThan(0) as any).and(
+      b.lessThan(0),
+    );
 
     const tStart = max(t0, 0);
     const tEndFull = select(reachesGround, tGround, t1);
     const tEnd = min(tEndFull, float(input.maxDistance));
     const valid: any = (discTop.greaterThan(0) as any).and(t1.greaterThan(0));
     const span = select(valid, max(tEnd.sub(tStart), 0), float(0));
+    const hitsGround = reachesGround
+      .and(tGround.lessThan(float(input.maxDistance)))
+      .and(valid);
+    // Variables, so the values are computed here at the top of the shader and not inside whichever branch
+    // happens to use them first (callers read these from inside `If` blocks).
+    return {
+      h: h.toVar(),
+      tStart: tStart.toVar(),
+      tEnd: tEnd.toVar(),
+      span: span.toVar(),
+      valid: valid.toVar(),
+      hitsGround: hitsGround.toVar(),
+      groundDistance: tGround.toVar(),
+    };
+  }
+
+  /** Builds the nodes for one view ray. Call inside an `Fn` body. */
+  march(input: AtmosphereMarchInput): AtmosphereMarchResult {
+    const steps = input.steps ?? AtmosphereGpuModel.defaultSteps;
+    const R = this.uRadius;
+    const dir = input.dir;
+    const sunDir = input.sunDir;
+    const { h, tStart, span, hitsGround, groundDistance } =
+      this.traceRay(input);
     const dt = span.div(steps);
 
     const cosNu = dot(dir, sunDir);
-    const phaseR = float(3 / (16 * Math.PI)).mul(float(1).add(cosNu.mul(cosNu)));
+    const phaseR = float(3 / (16 * Math.PI)).mul(
+      float(1).add(cosNu.mul(cosNu)),
+    );
     const g = this.uMieG;
     const g2 = g.mul(g);
     const phaseM = float(3 / (8 * Math.PI))
@@ -295,44 +383,70 @@ export class AtmosphereGpuModel {
     const L = vec3(0).toVar();
     const throughput = vec3(1).toVar();
 
-    Loop({ start: int(0), end: int(steps), type: 'int', condition: '<' }, ({ i }: any) => {
-      const t = tStart.add(float(i).add(0.5).mul(dt));
-      const p = vec3(0, h, 0).add(dir.mul(t));
-      const s = max(dot(p, p).add(R.mul(2).mul(p.y)), 0);
-      const r = sqrt(this.uRadiusSq.add(s));
-      const alt = max(s.div(r.add(R)), 0);
-      const up = vec3(p.x, p.y.add(R), p.z).div(r);
-      const muSun = dot(up, sunDir);
+    // Rays that miss the air (most of the screen seen from space) skip the loop entirely.
+    If(span.greaterThan(0), () => {
+      Loop(
+        { start: int(0), end: int(steps), type: 'int', condition: '<' },
+        ({ i }: any) => {
+          const t = tStart.add(float(i).add(0.5).mul(dt));
+          const p = vec3(0, h, 0).add(dir.mul(t));
+          const s = max(dot(p, p).add(R.mul(2).mul(p.y)), 0);
+          const r = sqrt(this.uRadiusSq.add(s));
+          const alt = max(s.div(r.add(R)), 0);
+          const up = vec3(p.x, p.y.add(R), p.z).div(r);
+          const muSun = dot(up, sunDir);
 
-      const dR = exp(alt.negate().div(this.uRayleighH));
-      const dM = exp(alt.negate().div(this.uMieH));
-      const tent = max(float(1).sub(abs(alt.sub(this.uAbsorberCenter)).div(this.uAbsorberWidth)), 0);
-      const expo = exp(alt.negate().div(this.uAbsorberWidth));
-      const dA = select(this.uAbsorberKind.equal(1), tent, select(this.uAbsorberKind.equal(2), expo, float(0)));
-      const scatR = this.uRayleigh.mul(dR);
-      const scatM = this.uMieScattering.mul(dM);
-      const scat = scatR.add(scatM);
-      const ext = scat.add(this.uMieAbsorption.mul(dM)).add(this.uAbsorberExt.mul(dA));
+          const dR = exp(alt.negate().div(this.uRayleighH));
+          const dM = exp(alt.negate().div(this.uMieH));
+          const tent = max(
+            float(1).sub(
+              abs(alt.sub(this.uAbsorberCenter)).div(this.uAbsorberWidth),
+            ),
+            0,
+          );
+          const expo = exp(alt.negate().div(this.uAbsorberWidth));
+          const dA = select(
+            this.uAbsorberKind.equal(1),
+            tent,
+            select(this.uAbsorberKind.equal(2), expo, float(0)),
+          );
+          const scatR = this.uRayleigh.mul(dR);
+          const scatM = this.uMieScattering.mul(dM);
+          const scat = scatR.add(scatM);
+          const ext = scat
+            .add(this.uMieAbsorption.mul(dM))
+            .add(this.uAbsorberExt.mul(dA));
 
-      const sunT = this.sunTransmittance(s, r, muSun);
-      const psi = texture(
-        this.multiScatterTexture,
-        vec2(muSun.mul(0.5).add(0.5), clamp(alt.div(this.uTopAltitude), 0, 1)),
-        0,
-      ).rgb;
-      const source = sunT.mul(scatR.mul(phaseR).add(scatM.mul(phaseM))).add(scat.mul(psi));
+          const sunT = this.sunTransmittance(s, r, muSun);
+          const psi = texture(
+            this.multiScatterTexture,
+            vec2(
+              muSun.mul(0.5).add(0.5),
+              clamp(alt.div(this.uTopAltitude), 0, 1),
+            ),
+            0,
+          ).rgb;
+          const source = sunT
+            .mul(scatR.mul(phaseR).add(scatM.mul(phaseM)))
+            .add(scat.mul(psi));
 
-      const x = ext.mul(dt);
-      const integral = vec3(stepIntegral(x.x), stepIntegral(x.y), stepIntegral(x.z)).mul(dt);
-      L.addAssign(throughput.mul(source).mul(integral));
-      throughput.mulAssign(exp(x.negate()));
+          const x = ext.mul(dt);
+          const integral = vec3(
+            stepIntegral(x.x),
+            stepIntegral(x.y),
+            stepIntegral(x.z),
+          ).mul(dt);
+          L.addAssign(throughput.mul(source).mul(integral));
+          throughput.mulAssign(exp(x.negate()));
+        },
+      );
     });
 
     return {
       radiance: L.mul(this.uSunIrradiance),
       transmittance: throughput,
-      hitsGround: reachesGround.and(tGround.lessThan(float(input.maxDistance))).and(valid),
-      groundDistance: tGround,
+      hitsGround,
+      groundDistance,
     };
   }
 
