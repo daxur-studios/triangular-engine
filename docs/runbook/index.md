@@ -16,6 +16,7 @@ tags: [runbook, index]
 | [Shared Cell-Planet Worker Pipeline](/docs/runbook/046_cell_planet_shared_worker_pipeline.md) | [Implementation plan](/docs/plans/046_cell_planet_shared_worker_pipeline.md) |
 | [Terrain View Culling and Rotation Churn](/docs/runbook/047_terrain_view_culling_and_rotation_churn.md) | [Implementation plan](/docs/plans/047_terrain_view_culling_and_rotation_churn.md) || [Agent Telemetry Sections](/docs/runbook/048_agent_telemetry_sections.md) | [Implementation plan](/docs/plans/048_agent_telemetry_sections.md) |
 | [Morphing Planet Atmosphere](/docs/runbook/049_morphing_planet_atmosphere.md) | [Implementation plan](/docs/plans/049_morphing_planet_atmosphere.md) |
+| [TSL Planet Surface Material](/docs/runbook/050_tsl_planet_surface_material.md) | [Implementation plan](/docs/plans/050_tsl_planet_surface_material.md) |
 
 
 Existing runbooks `001`–`042` retain their historical paths and formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

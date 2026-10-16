@@ -4,6 +4,7 @@ title: Morphing Planet Atmosphere
 description: A new, fast, LUT-driven atmosphere (scattering, sky, aerial perspective, sky objects, limb glow) for the cell planet in globe, flat-map and mid-morph states, from 100 km to Earth-sized planets, written once in TSL on an extensible TSL planet material.
 timestamp: 2026-10-16T00:00:00Z
 tags: [atmosphere, scattering, sky, cell-planet, morph, rendering, performance, webgpu, tsl]
+runbook: /docs/runbook/049_morphing_planet_atmosphere.md
 ---
 
 # Plan 049: Morphing Planet Atmosphere
@@ -12,6 +13,10 @@ Status: **planned, owner: unclaimed.** Written in a cloud session from code read
 nothing here has been built or measured yet. Evidence: [Runbook 049](/docs/runbook/049_morphing_planet_atmosphere.md).
 
 Target: the cell planet as shown in `/cell-planet-morph-streaming`.
+
+**Prerequisite:** [Plan 050](/docs/plans/050_tsl_planet_surface_material.md) (TSL planet surface
+material) through its Phase 4. Plan 050 owns the material design and the port; this plan owns what
+goes into its lighting and atmosphere stages.
 
 **Decided (2026-10-16):** Hillaire-style LUTs + stylized ramps. TSL only, one version, on a new
 extensible TSL planet material. Small planets must look good. See §Decisions.
@@ -27,7 +32,7 @@ neither modified, extended nor depended on:
 
 New code goes in new files only. Changes to existing files are limited to additive exports
 (`public-api.ts`), new demo routes, docs, and the plan/runbook indexes. The current GLSL planet
-materials and the morph-streaming demo stay as they are; the TSL versions are new files.
+materials and the morph-streaming demo stay as they are (Plan 050 adds the TSL versions as new files).
 
 The new work **reads** these existing conventions without changing them: the morph attributes
 (`aSphereNorm`, `aSpherePos`, `aFlatPos`) and projections (equirect, Equal Earth), the body-frame sun
@@ -46,7 +51,7 @@ from `computeSunDirectionFromTime`, and the world-size tiers in `celestial/bodie
 | G7 | Realistic or stylized per game | One LUT interface, two producers: physical integration or artist ramps |
 | G8 | Runs on WebGL and WebGPU | One TSL implementation on `WebGPURenderer` (WebGPU, falling back to WebGL2) |
 | G9 | Mini to Earth-sized planets all look good | Scale-invariant profiles (§Planet sizes) |
-| G10 | Games can extend the planet material and get atmosphere on their own objects | Extensible TSL planet material (§Extensible planet material) and automatic coverage (§Applying the atmosphere) |
+| G10 | Games can extend the planet material and get atmosphere on their own objects | Extensible TSL planet material ([Plan 050](/docs/plans/050_tsl_planet_surface_material.md)) and automatic coverage (§Applying the atmosphere) |
 
 ## Feasibility
 
@@ -72,9 +77,9 @@ Risk areas (each is a phase gate below):
 - **Venus-thick atmospheres:** the multiple-scattering approximation gets worse as optical depth
   grows. Plan on an art-directed thick-haze profile plus an opaque cloud deck, not exact physics.
 - **Small planets:** real physics makes them look airless (§Planet sizes).
-- **The TSL port is a prerequisite:** the cell-planet surface is currently about 20 GLSL
-  `onBeforeCompile` patches, and `WebGPURenderer` ignores those. `BatchedMesh` and log-depth
-  behaviour under `WebGPURenderer` (both used by the terrain) need checking in Phase 0.
+- **The TSL port is a prerequisite:** `WebGPURenderer` ignores the cell planet's GLSL
+  `onBeforeCompile` patches. [Plan 050](/docs/plans/050_tsl_planet_surface_material.md) does the port
+  and its Phase 0 checks `BatchedMesh` and log depth under `WebGPURenderer`.
 
 ## Technique options
 
@@ -244,61 +249,19 @@ Rules that keep it working on the WebGL2 fallback:
 - CI renders each LUT pass on both backends (`forceWebGL: true` and WebGPU where available) and
   compares the readback to the CPU reference.
 
-## Extensible planet material
+## Planet material stages
 
-`onBeforeCompile` was there because it's the only way to extend three's built-in materials on
-WebGL. It works, but it's fragile:
+The surface material, its stage order and its extension API (surface layers, sun occlusion,
+emissive, building blocks) are defined in [Plan 050](/docs/plans/050_tsl_planet_surface_material.md).
+This plan fills in two of its stages and uses a third:
 
-- It's string replacement on shader chunk names, so it breaks on three upgrades.
-- It depends on order: `enablePlanetMorphLighting` has to warn if it's applied before
-  `enablePlanetMorphProjection`.
-- Each patch has to know about the others.
+- **Stage 3, sun occlusion:** its product feeds `sunVisibility`, so an eclipse darkens the sky and
+  the ground together.
+- **Stage 4, lighting:** `atmosphereLighting()` replaces Plan 050's `simpleDayNightLighting` stand-in.
+- **Stage 6, atmosphere:** `atmospherePerspective()` replaces the identity stage. It stays last, so
+  game layers are hazed too.
 
-TSL makes extension a first-class API. `NodeMaterial` exposes graph slots (`positionNode`,
-`normalNode`, `colorNode`, `emissiveNode`, `outputNode`, custom lighting models), and every piece
-is a typed `Fn` you can call, wrap or replace.
-
-**New `PlanetSurfaceMaterial`** (new files, alongside the GLSL ones, which stay untouched) is built
-from named, ordered stages that share one **planet context**: sphere position/normal, flat position,
-height, lat/lon, cell id, morph, view distance.
-
-| # | Stage | Stock content | Game extension example |
-|---|---|---|---|
-| 1 | Position | Morph sphere ↔ flat | (rarely extended) |
-| 2 | Surface layers (stack) | Cell/biome material, macro variation, streamed material tiles | Roads, decals, snow cover, scorch marks, territory tint |
-| 3 | Sun occlusion (product) | Shadow map | **Solar eclipse**, cloud shadows, ring shadows |
-| 4 | Lighting | `atmosphereLighting()` (replaceable, e.g. toon) | Custom lighting model |
-| 5 | Emissive | none | City lights on the night side, lava, bioluminescence |
-| 6 | Atmosphere | `atmospherePerspective()` | Always last, so game layers are hazed too |
-
-```ts
-const material = new PlanetSurfaceMaterial({ planet, atmosphere });
-material.addSurfaceLayer({ id: 'roads', order: 100, layer: roadsLayer });       // (ctx, below) => SurfaceSample
-material.addSunOcclusion({ id: 'eclipse', occlusion: moonEclipseOcclusion });  // (ctx) => float 0..1
-material.addEmissive({ id: 'cityLights', emissive: cityLightsEmissive });
-```
-
-Two levels:
-
-- **Slots** on the stock material, as above, for most games.
-- **Building blocks:** every stage is also exported as a standalone `Fn` (`planetMorphPosition`,
-  `cellSurface`, `atmosphereLighting`, `atmospherePerspective`, …), so a game can assemble its own
-  `NodeMaterial` from scratch.
-
-Rules:
-
-- Stages are pure functions of the context. No string editing.
-- Order comes from `order` numbers. Layer ids form the shader cache key.
-- Uniforms are nodes, so changing values never recompiles. Adding or removing layers does, so do it
-  at setup.
-
-A demo page `planet-material-extensions` (a road layer plus a moon-eclipse occluder) is the
-reference example and is covered by specs.
-
-**Porting scope:** the ~20 GLSL `onBeforeCompile` patches in `worldgen/` and `terrain/` (morph
-projection/lighting, day/night, macro variation, per-pixel cell lookup, streamed material tiles,
-seam handling) get TSL equivalents as stages 1–3. This is big enough that it may move into its own
-plan when claimed.
+Ocean and clouds use the same two stages.
 
 ## Applying the atmosphere to everything
 
@@ -372,13 +335,11 @@ pixel inside the atmosphere. Add an `atmosphere` telemetry section (Plan 048). A
 
 Each phase ends with a visible check in a demo plus a timing number.
 
-0. **Foundations.**
-   - Check that `WebGPURenderer` (WebGPU and `forceWebGL`) handles the terrain's `BatchedMesh` and log depth.
-   - CPU reference integrator + profile format + similarity scaling, with unit tests.
-   - Earth, Mars and none presets.
-1. **TSL planet material, part 1.** `PlanetSurfaceMaterial` with the stage/slot API, position
-   (morph) and a basic cell surface. New demo page `cell-planet-tsl` reaches parity with the GLSL
-   morph demo at its basic settings.
+Phases 0–1 don't need a GPU and can run while Plan 050 is in progress. Phase 2 onwards needs
+Plan 050 through its Phase 4.
+
+0. **Foundations.** CPU reference integrator + profile format + similarity scaling, with unit tests.
+1. **Presets.** Earth, Mars and none presets.
 2. **Atmosphere on the globe.**
    - `atmosphere-lab` demo: LUT pipeline, sky mesh, ground-to-space camera, limb glow, planet
      shadow, eclipse `sunVisibility`.
@@ -388,9 +349,8 @@ Each phase ends with a visible check in a demo plus a timing number.
    **Gate:** scrub the morph at dusk with no pops, fps steady, 4-size set at `m = 1`.
 4. **Coverage.** Screen pass + MRT mask, `withAtmosphere()`, opt-out, coverage debug overlay.
 5. **Sky objects.** Starfield, moon, sun disc and other bodies through `atmosphereSky(dir)`.
-6. **TSL planet material, part 2.** Port the remaining surface features (macro variation, per-pixel
-   cell lookup, streamed material tiles). Add emissive and sun-occlusion slots, and the
-   `planet-material-extensions` demo (roads + eclipse).
+6. **Extensions demo with atmosphere.** Plan 050's `planet-material-extensions` demo (roads +
+   eclipse) with the atmosphere on. Check that the eclipse darkens the sky and that roads are hazed.
 7. **Stylized model + art controls.** Ramp producer, overrides, zenith-colour solver, `flatMapEdge: 'glow'`.
 8. **More profiles.** Venus, gas giant, Titan, per-`WorldProfileKind` defaults, animated-profile demo,
    mini-tier stretch test.
@@ -413,7 +373,7 @@ Each phase ends with a visible check in a demo plus a timing number.
 | Decision | Status |
 |---|---|
 | Technique: Hillaire LUTs (physical) + stylized ramps | **Decided** 2026-10-16 |
-| TSL only, one version, on `WebGPURenderer`; planet materials ported to an extensible TSL material | **Decided** 2026-10-16 |
+| TSL only, one version, on `WebGPURenderer`; planet materials ported to an extensible TSL material ([Plan 050](/docs/plans/050_tsl_planet_surface_material.md)) | **Decided** 2026-10-16 |
 | Support 100 km to Earth, small planets must look good; similarity scaling + art knobs | **Decided** 2026-10-16 (approach proposed) |
 | Exact material path for planet surfaces + automatic screen pass for everything else + docs/skill/debug overlay | Proposed |
 | Flat map from space: soft edge fade by default, optional glowing outline | Proposed |

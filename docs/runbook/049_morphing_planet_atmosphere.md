@@ -66,3 +66,16 @@ Findings:
   `nearHazeFadeM`, `reliefFit`), a staged `PlanetSurfaceMaterial` with slot and building-block
   extension, automatic atmosphere coverage (screen pass + MRT mask + coverage debug overlay), and
   the flat-map edge default (soft fade, optional glow).
+
+## 2026-10-16 — TSL material split into Plan 050
+
+- Owner decision: the TSL planet-material port becomes its own plan,
+  [Plan 050](/docs/plans/050_tsl_planet_surface_material.md), and is picked up first.
+- The material design (stage table, slot API, building blocks, porting scope) moved to Plan 050
+  so it lives in one place. Plan 049 now only describes what it puts into stages 3, 4 and 6.
+- The old Phase 0 `WebGPURenderer` check and Phases 1 and 6 (material parts 1 and 2) moved to Plan 050.
+  Plan 049's phases were renumbered: 0 = CPU foundations, 1 = presets. From Phase 2 on, it needs
+  Plan 050 through its Phase 4.
+- Correction to the first entry: the cell-planet path is 7 `onBeforeCompile` patches plus 3
+  `ShaderMaterial`s, not "about 20" (inventory in [Runbook 050](/docs/runbook/050_tsl_planet_surface_material.md)).
+- Plan 049's frontmatter gained the missing `runbook:` back-link.
