@@ -111,7 +111,7 @@ const MACRO: 'off' | 'bodyFixed' | 'morphed' =
         [castShadow]="false"
       />
 
-      @if (!seamTest) {
+      @if (!seamTest && viewOn()) {
         <cellPlanetMorphStreamingView
           [radiusM]="radius"
           [meshGenerator]="meshGenerator"
@@ -121,7 +121,11 @@ const MACRO: 'off' | 'bodyFixed' | 'morphed' =
           [resolution]="32"
           [createMaterial]="createMaterial"
           (lodChange)="stats.set($event)"
-          [batching]="true"
+          [batching]="batchingOn()"
+          [maxPatches]="256"
+          [maxInstallsPerFrame]="8"
+          [lodPositionToleranceM]="1"
+          [lodViewToleranceRadians]="0.005"
         />
       }
     </scene>
@@ -181,6 +185,17 @@ const MACRO: 'off' | 'bodyFixed' | 'morphed' =
         <button (click)="viewFront()">front</button>
         <button (click)="viewSeam()">antimeridian</button>
         <button (click)="viewMapEdge()">map edge</button>
+      </p>
+      <p class="row">
+        <label
+          ><input
+            type="checkbox"
+            [checked]="batchingOn()"
+            (change)="setBatching($event)"
+          />
+          batching</label
+        >
+        <span>draw calls: {{ drawCalls() }}</span>
       </p>
       <p class="row">
         @if (macro) {
@@ -278,6 +293,9 @@ export class CellPlanetTslPageComponent {
   readonly tiles = TILES;
   readonly macro = MACRO !== 'off';
   readonly macroOn = signal(true);
+  readonly batchingOn = signal(true);
+  readonly viewOn = signal(true);
+  readonly drawCalls = signal(0);
   readonly tileDebug = signal(false);
   readonly cellsOn = signal(false);
   readonly oceanOn = signal(true);
@@ -470,6 +488,10 @@ export class CellPlanetTslPageComponent {
     this.cellLookup.opacity.value = 0.72;
     this.addOceanAndFrame();
     this.engine.beforeRender$.subscribe(() => {
+      // The previous frame's count; `render.calls` is the classic name, `drawCalls` the WebGPU one.
+      const info = (this.engine.renderer as any).info?.render;
+      const calls = Number(info?.drawCalls ?? info?.calls ?? 0);
+      if (calls !== this.drawCalls()) this.drawCalls.set(calls);
       if (!TILES) return;
       const camera = this.engine.camera;
       if (!camera) return;
@@ -670,6 +692,13 @@ export class CellPlanetTslPageComponent {
     } else if (this.gridMesh) {
       this.gridMesh.visible = on;
     }
+  }
+
+  /** Recreates the streaming view, since the terrain surface reads `batching` when patches are installed. */
+  setBatching(event: Event): void {
+    this.batchingOn.set((event.target as HTMLInputElement).checked);
+    this.viewOn.set(false);
+    setTimeout(() => this.viewOn.set(true));
   }
 
   setMacro(event: Event): void {

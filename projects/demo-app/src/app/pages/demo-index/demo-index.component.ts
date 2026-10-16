@@ -271,6 +271,32 @@ export const DEMOS: readonly DemoItem[] = [
       'The morph-streaming planet drawn by an extensible TSL PlanetSurfaceMaterial on WebGPURenderer (WebGPU or its WebGL2 fallback): sphere to flat-map morph, Equal Earth and equirectangular projection, seam cull, vertex-colour base layer.',
   },
   {
+    id: 'planet-material-extensions',
+    number: '02h',
+    title: 'Planet Material Extensions',
+    route: '/planet-material-extensions',
+    categoryId: 'terrain',
+    tier: 'lab',
+    createdAt: '2026-10-16',
+    entryPoints: ['planet-material'],
+    package: 'triangular-engine/planet-material',
+    description:
+      'The PlanetSurfaceMaterial extension slots on a plain sphere: a road surface layer, a moon-eclipse sun occluder, a city-lights emissive and the replaceable day/night lighting stage, each a toggle with live uniform sliders.',
+  },
+  {
+    id: 'atmosphere-lab',
+    number: '02h',
+    title: 'Atmosphere Lab (plain sphere)',
+    route: '/atmosphere-lab',
+    categoryId: 'atmosphere',
+    tier: 'lab',
+    createdAt: '2026-10-16',
+    entryPoints: ['atmosphere'],
+    package: 'triangular-engine/atmosphere',
+    description:
+      'Plan 049 Phase 2a: LUT-driven sky, sunset, limb glow, planet shadow and aerial perspective on an analytic ground sphere, from the ground to space, at planet radii from 64 km to Earth. WebGPU or its WebGL2 fallback.',
+  },
+  {
     id: 'takram-clouds',
     number: '03',
     title: 'Takram Clouds',

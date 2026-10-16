@@ -10,6 +10,7 @@ import {
   type IPlanetMorphUniforms,
 } from './planet-morph-nodes';
 import { OrderedSlots } from './ordered-slots';
+import { sunVisibilityLighting, type AtmosphereStage, type LightingStage } from './planet-lighting';
 import {
   SURFACE_LAYER_ORDER,
   vertexColorLayer,
@@ -31,6 +32,10 @@ export interface IPlanetSurfaceMaterialOptions extends IPlanetMorphGraphOptions 
   readonly side?: Side;
   /** Replaces the vertex-colour base layer (e.g. `solidColorLayer`). Its id in the stack key is `base`. */
   readonly base?: SurfaceLayer;
+  /** Stage 4, replaceable: runs after the PBR lighting. Default: none (plain PBR), or `sunVisibilityLighting` once an occluder exists. */
+  readonly lighting?: { readonly id: string; readonly stage: LightingStage };
+  /** Stage 6: runs last. Default: none (identity). */
+  readonly atmosphere?: { readonly id: string; readonly stage: AtmosphereStage };
 }
 
 /**
@@ -60,6 +65,9 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
   private readonly occluders = new OrderedSlots<SunOcclusion>();
   private readonly emissives = new OrderedSlots<EmissiveLayer>();
   private sunVisibilityNode: any = float(1);
+  private lightingEntry?: { readonly id: string; readonly stage: LightingStage };
+  private atmosphereEntry?: { readonly id: string; readonly stage: AtmosphereStage };
+  private lastSample: ISurfaceSample = { albedo: vec3(1, 1, 1), roughness: float(1), metalness: float(0) };
   private readonly morphOptionsKey: string;
 
   constructor(options: IPlanetSurfaceMaterialOptions = {}) {
@@ -67,7 +75,11 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
     this.side = options.side ?? FrontSide;
     this.morph = options.morph ?? createPlanetMorphUniforms();
     this.morphGraph = planetMorphGraph(this.morph, options);
-    this.morphOptionsKey = `${options.sphereFromGeometry ?? true}/${options.seamCullAttributes ?? false}`;
+    this.morphOptionsKey = `${options.sphereFromGeometry ?? true}/${options.seamCullAttributes ?? false}${
+      options.lightingTurn ? '/turn' : ''
+    }`;
+    this.lightingEntry = options.lighting;
+    this.atmosphereEntry = options.atmosphere;
     this.context = createPlanetContext(this.morph, this.morphGraph);
 
     this.positionNode = this.morphGraph.positionNode;
@@ -122,14 +134,49 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
     return removed;
   }
 
-  /** The product of all sun occluders (1 with none). Not yet applied to lighting (Plan 050 Phase 4). */
+  /** Replaces the lighting stage (null restores plain PBR). Triggers a recompile. */
+  setLightingStage(entry: { id: string; stage: LightingStage } | null): this {
+    this.lightingEntry = entry ?? undefined;
+    this.needsUpdate = true;
+    return this;
+  }
+
+  /** Replaces the atmosphere stage (null restores identity). Triggers a recompile. */
+  setAtmosphereStage(entry: { id: string; stage: AtmosphereStage } | null): this {
+    this.atmosphereEntry = entry ?? undefined;
+    this.needsUpdate = true;
+    return this;
+  }
+
+  /**
+   * Stages 4 and 6 run on the final lit colour: lighting (the occluders' product reaches it), then
+   * atmosphere. With neither stage and no occluder the output is untouched.
+   */
+  override setupOutput(builder: any, outputNode: any): any {
+    const lighting =
+      this.lightingEntry?.stage ?? (this.occluders.size > 0 ? sunVisibilityLighting() : undefined);
+    const atmosphere = this.atmosphereEntry?.stage;
+    if (!lighting && !atmosphere) return super.setupOutput(builder, outputNode);
+
+    let color: any = outputNode.rgb;
+    if (lighting) {
+      color = lighting(this.context, { color, sunVisibility: this.sunVisibilityNode, surface: this.lastSample });
+    }
+    if (atmosphere) color = atmosphere(this.context, color);
+    return super.setupOutput(builder, vec4(color, outputNode.a));
+  }
+
+  /** The product of all sun occluders (1 with none), fed to the lighting stage. */
   get sunVisibility(): any {
     return this.sunVisibilityNode;
   }
 
   /** Ids of the layers in run order, as `layers:a|b;occluders:c;emissives:d`. This is the shader cache key. */
   get stackKey(): string {
-    return `morph:${this.morphOptionsKey};layers:${this.layers.key()};occluders:${this.occluders.key()};emissives:${this.emissives.key()}`;
+    const stages =
+      (this.lightingEntry ? `;lighting:${this.lightingEntry.id}` : '') +
+      (this.atmosphereEntry ? `;atmosphere:${this.atmosphereEntry.id}` : '');
+    return `morph:${this.morphOptionsKey};layers:${this.layers.key()};occluders:${this.occluders.key()};emissives:${this.emissives.key()}${stages}`;
   }
 
   override customProgramCacheKey(): string {
@@ -146,6 +193,7 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
     };
     for (const { value } of this.layers.entries) sample = value(context, sample);
 
+    this.lastSample = sample;
     this.colorNode = vec4(sample.albedo, 1);
     this.roughnessNode = sample.roughness;
     this.metalnessNode = sample.metalness;

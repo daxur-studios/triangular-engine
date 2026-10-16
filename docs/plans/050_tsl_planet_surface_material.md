@@ -10,8 +10,10 @@ runbook: /docs/runbook/050_tsl_planet_surface_material.md
 # Plan 050: TSL Planet Surface Material
 
 Status: **in progress, owner: local Sonnet session.** Phase 0 spike: **go** (2026-10-16). Workspace on
-three **0.186.1**. Phase 1 built and its visual gate passed (user, 2026-10-16). Phases 2 and 3 built (specs + builds pass);
-their gates (pixel parity against the GLSL demo; "shows everything the GLSL demo shows") are still open (need a visible window).
+three **0.186.1**. Phase 1 built and its visual gate passed (user, 2026-10-16). Phases 2, 3 and 4 built (specs + builds pass);
+the Phase 2 and 3 gates (pixel parity against the GLSL demo; "shows everything the GLSL demo shows") and the Phase 4 demo
+check are still open (need a visible window). Open issue, not a blocker: the batching toggle halves WebGL frame rate in
+`cell-planet-tsl` (see the runbook).
 [Plan 049](/docs/plans/049_morphing_planet_atmosphere.md) (atmosphere) builds on it. Evidence: [Runbook 050](/docs/runbook/050_tsl_planet_surface_material.md).
 
 **Goal:** the `/cell-planet-morph-streaming` surface, rebuilt as one TSL `NodeMaterial` with a stable

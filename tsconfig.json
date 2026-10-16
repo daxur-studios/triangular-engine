@@ -53,6 +53,9 @@
       "triangular-engine/planet-material": [
         "projects/triangular-engine/planet-material/public-api"
       ],
+      "triangular-engine/atmosphere": [
+        "projects/triangular-engine/atmosphere/public-api"
+      ],
       "triangular-engine/spline": [
         "projects/triangular-engine/spline/public-api"
       ],

@@ -122,6 +122,18 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- New secondary entry point `triangular-engine/atmosphere` (Plan 049):
+  `PhysicalAtmosphereProfile` with `validateAtmosphereProfile`,
+  `scaleAtmosphereProfile` (similarity scaling to any planet radius plus
+  `thickness`, `reliefFit`, `hazeAtHorizon` and `nearHazeFadeM` knobs), the
+  `earth`, `mars` and `none` presets (`createAtmospherePreset`), and a float64
+  reference integrator (`integrateRadiance`, `sunTransmittance`,
+  `computeMultiScattering`, `buildMultiScatteringTable`). Also CPU-baked lookup
+  tables (`bakeAtmosphereLuts`: transmittance, multi-scatter, sky irradiance)
+  and their TSL counterpart for `WebGPURenderer` (`AtmosphereGpuModel.march`),
+  plus `AtmosphereBackdrop`, a full-screen sky and analytic-ground pass used by
+  the `/atmosphere-lab` demo. See `docs/atmosphere.md`.
+
 - Added an Angular CLI `ng add triangular-engine` schematic that installs the engine and generates a starter scene with a lazy route. Declared the required Angular Forms, Angular Material, and `three-mesh-bvh` peers used by the package.
 
 - `<terrainSurface>` and `<cellPlanetMorphStreamingView>` take

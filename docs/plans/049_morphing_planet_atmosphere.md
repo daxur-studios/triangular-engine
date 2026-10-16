@@ -9,8 +9,10 @@ runbook: /docs/runbook/049_morphing_planet_atmosphere.md
 
 # Plan 049: Morphing Planet Atmosphere
 
-Status: **planned, owner: unclaimed.** Nothing here has been built yet. Phases 0-1 are CPU-only and can
-start now, alongside Plan 050. Evidence: [Runbook 049](/docs/runbook/049_morphing_planet_atmosphere.md).
+Status: **in progress, owner: local Sonnet session.** Phases 0–1 (CPU foundations and presets) are built
+and re-verified locally (2026-10-16). **Phase 2a (atmosphere on a plain sphere, `/atmosphere-lab`) is built
+and waiting for a visual check**; it does not depend on Plan 050. Phase 2b onwards waits for Plan 050 Phase 4.
+Evidence: [Runbook 049](/docs/runbook/049_morphing_planet_atmosphere.md).
 
 Target: the cell planet as shown in `/cell-planet-morph-streaming`.
 
@@ -345,18 +347,32 @@ slower, G8 needs a decision (for example a lower quality tier on the fallback).
 
 Each phase ends with a visible check in a demo plus a timing number.
 
-Phases 0–1 don't need a GPU and can run while Plan 050 is in progress. Phase 2 onwards needs
-Plan 050 through its Phase 4.
+Phases 0–1 don't need a GPU and can run while Plan 050 is in progress. **Phase 2a needs only
+`WebGPURenderer` + TSL** (cleared by Plan 050's Phase 0 spike), not the cell-planet material: the sky, limb
+glow, planet shadow and the size comparison are drawn on a plain sphere, so the atmosphere can be judged
+before the material port lands. Phase 2b onwards needs Plan 050 through its Phase 4.
 
 0. **Foundations.** CPU reference integrator + profile format + similarity scaling, with unit tests.
-1. **Presets.** Earth, Mars and none presets.
-2. **Atmosphere on the globe.**
-   - `atmosphere-lab` demo: LUT pipeline, sky mesh, ground-to-space camera, limb glow, planet
-     shadow, eclipse `sunVisibility`.
-   - Lighting stage + light sync + exposure.
-   - **Gate:** budget, sun-behind-planet shot, the 4-size screenshot set at `m = 0`.
+   *Built 2026-10-16, in `projects/triangular-engine/atmosphere/`, awaiting review.*
+1. **Presets.** Earth, Mars and none presets. *Built 2026-10-16, awaiting review.*
+2a. **Atmosphere on a plain sphere** (no Plan 050 dependency). *Built 2026-10-16, awaiting a visual check.*
+   - `atmosphere-lab` demo (`/atmosphere-lab`): one full-screen pass draws the sky and an analytic ground
+     sphere from CPU-baked tables (transmittance, multi-scatter, irradiance) read by a TSL march that mirrors
+     the CPU integrator. Ground-to-space camera, dusk, sun disc, limb glow, planet shadow, aerial
+     perspective on a distance-faded checker, planet sizes 64 km to Earth, Earth and Mars.
+   - The per-pixel march is the *reference path*, fixed step count. The cached sky-view table is 2c.
+   - **Gate (visual, by eye):** the 4-size screenshot set from the ground (noon, dusk), low orbit and space
+     with the sun behind the planet; each size reads as the same atmosphere.
+2b. **Atmosphere on the cell planet globe** (needs Plan 050 Phase 4).
+   - Lighting stage (`atmosphereLighting()`) + stage 6 (`atmospherePerspective()`) + light sync + exposure.
+   - Eclipse `sunVisibility`.
+   - **Gate:** the same shots on the cell planet at `m = 0`.
+2c. **Cached sky-view table + budget.** Sky-view and froxel fragment passes replace the per-pixel march for
+   the sky; WebGPU / `forceWebGL` timings; the plan's ≤ 0.5 ms budget. **Gate:** budget, and the output matches
+   2a's reference march.
 3. **Flat map + morph.** Slab, per-sample `μs` froxels, edge fade/glow, mid-morph blend.
    **Gate:** scrub the morph at dusk with no pops, fps steady, 4-size set at `m = 1`.
+   (Needs 2b and 2c. The flat-map maths can be prototyped on the plain-sphere lab first if that helps.)
 4. **Coverage.** Screen pass + MRT mask, `withAtmosphere()`, opt-out, coverage debug overlay.
 5. **Sky objects.** Starfield, moon, sun disc and other bodies through `atmosphereSky(dir)`.
 6. **Extensions demo with atmosphere.** Plan 050's `planet-material-extensions` demo (roads +

@@ -272,3 +272,60 @@ Decisions and traps:
 Verification: planet-material specs 44/44 (10 new: seam cull on/off and its guard, frame fade and the three styles, ocean opacity
 and colour-as-uniform), library build ok, demo build 0 errors. **Not verified visually** (the automated pane is hidden). The
 Phase 3 gate ("shows everything the GLSL demo's default settings show") is open and needs a visible window.
+
+## Open issue: batching toggle halves WebGL frame rate (2026-10-16, not a blocker)
+
+Observed in `cell-planet-tsl` (user screenshots, same camera, MSAA off):
+
+| Backend | Batching | Draw calls | FPS |
+|---|---|---|---|
+| WebGPU | off | 162 | 111 |
+| WebGPU | on | 162 | 103 |
+| forceWebGL | off | 147 | 126 |
+| forceWebGL | on | 5 | 64 |
+
+Findings:
+- WebGPU: three 0.186's backend issues one `drawIndexed` per `BatchedMesh` instance (no multi-draw), so batching cannot reduce calls there. It only preallocates geometry (28 MB off, 625 MB on at the default 1024-patch capacity).
+- WebGL: batching cuts calls to 5 but halves FPS with a 0.9 ms CPU frame, so the cost looks GPU-side.
+- The GLSL `/cell-planet-morph-streaming` page does not show it. It passes `maxPatches` 80-220, `maxInstallsPerFrame` 8, `lodPositionToleranceM` 1, `lodViewToleranceRadians` 0.005; the TSL demo now passes the same, and the gap persisted.
+
+Hypothesis (unconfirmed): a batch has `sortObjects = false` when `frustumCulled` is false, so patches draw unsorted and the heavier TSL fragment stage (tiles, macro, cell lookup) overdraws. Test: `?tiles=0&macro=off&backend=webgl2`, batching on vs off. Also unknown: whether the GLSL page runs the classic `WebGLRenderer`.
+
+Possible fixes touch `TerrainSurfaceComponent` / the view defaults (off-limits for this plan), so they need a separate approved diff. Revisit in Phase 5 (perf).
+
+## Phase 4: extension slots + reference demo (2026-10-16)
+
+Built (new files in `planet-material/`): `planet-lighting.ts` (the lighting and atmosphere stage types,
+`simpleDayNightLighting`, `sunVisibilityLighting`, `identityAtmosphere`, the day/night and lighting-turn uniform
+factories) and `planet-extension-examples.ts` (`roadLayer`, `moonEclipseOcclusion`, `nightLightsEmissive`, real code a
+game can use or copy). Additive edits: `PlanetSurfaceMaterial` gained the `lighting` / `atmosphere` options,
+`setLightingStage` / `setAtmosphereStage` and a `setupOutput` override; `planetMorphGraph` gained a `lightingTurn` option.
+Demo: `/planet-material-extensions` (a plain sphere; toggles add or remove each slot, sliders write uniforms).
+
+How the stages attach:
+- **Sun occlusion.** Occluders multiply into `sunVisibility`. With no custom lighting stage, the default
+  `sunVisibilityLighting` scales the lit colour by `mix(floor 0.15, 1, sunVisibility)`. That is exact for a sun-only scene
+  and approximate otherwise (it also dims ambient). A lighting stage that models the sun itself reads `sunVisibility`
+  directly; `simpleDayNightLighting` multiplies it into its day factor.
+- **Lighting stage** runs on the final lit colour (the GLSL does the same, after `dithering_fragment`), implemented by
+  overriding `NodeMaterial.setupOutput`. With no stage and no occluder the output is untouched and the stack key is
+  unchanged (`;lighting:<id>` and `;atmosphere:<id>` are appended only when set).
+- **Atmosphere stage** runs last, after lighting, before fog. Identity by default, so Plan 049 can fill it.
+- **Lighting turn.** `lightingTurn` (a `mat3` uniform, `createPlanetMorphLightingUniforms().uMorphLightingTurn`) makes the
+  shading normal `normalize(turn * sphereNormal)` instead of the morphed normal, as in the GLSL. It adds `/turn` to the key.
+- **Emissive stack** was already built in Phase 1; it now has a GPU spec through `nightLightsEmissive`.
+
+Traps:
+- **`select(cond, vec3, vec3)` returned 0 on the false branch** in the day/night stage (disabled gave black, enabled was
+  right), where the same shape works in the macro layer. Not root-caused. The stage now blends with
+  `mix(1, lightMod, clamp(enabled, 0, 1))`, which is also continuous. If a later stage sees a similar black, suspect `select`
+  on an `outputNode.rgb` operand first.
+- A surface normal pointing away from the camera rendered black under ambient light in the spec; specs vary the sun
+  direction, not the normal, to test night.
+- Occluder maths is in angles, not metres: the umbra and penumbra of a moon at 3 radii are narrow (about 0.03 rad of
+  surface arc), so a slider needs fine steps to show the penumbra.
+
+Verification: planet-material specs 61/61 (17 new: day/night, occluder product, lighting/atmosphere order, run-time stage
+swap, lighting turn, road, eclipse umbra to penumbra, night lights), library build ok once the unrelated
+`atmosphere/atmosphere-backdrop.ts` error from another session cleared. **Not verified visually.** The gate for Plan 049
+Phase 2 ("slots exist and are spec'd") is met by the specs; the demo needs a visible window.

@@ -2,6 +2,7 @@ import {
   AmbientLight,
   BufferAttribute,
   BufferGeometry,
+  DirectionalLight,
   FloatType,
   Mesh,
   NearestFilter,
@@ -21,11 +22,16 @@ export async function renderRgba(
   meshes: Mesh[],
   view: { left: number; right: number; top: number; bottom: number },
   size: { width: number; height: number } = { width: 128, height: 64 },
-  options: { ambient?: boolean } = {},
+  options: { ambient?: boolean; /** A directional light shining from this world position towards the origin. */ light?: [number, number, number] } = {},
 ): Promise<(x: number, y: number) => [number, number, number, number]> {
   const renderer = await getEvalRenderer();
   const scene = new Scene();
   if (options.ambient) scene.add(new AmbientLight(0xffffff, 1));
+  if (options.light) {
+    const light = new DirectionalLight(0xffffff, 3);
+    light.position.set(...options.light);
+    scene.add(light);
+  }
   for (const mesh of meshes) {
     mesh.frustumCulled = false;
     scene.add(mesh);

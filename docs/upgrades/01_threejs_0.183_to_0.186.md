@@ -121,6 +121,15 @@ disconnect at spec 140 (ping timeout). Re-run it alone.
 - `TS4114`: r186 `Mesh` declares `dispose()`; subclasses defining `dispose()` need `override`.
 - A `postprocessing` below 6.39.5 has peer `three < 0.186.0`; bump it with three.
 - With a `file:` tarball engine already packed with the new peers, plain `npm install` suffices.
+- Engine linked as a `file:` **directory** (`dist/…`) and the app not declaring `@daxur-studios/portal-layout`:
+  `ng build` fails with `Could not resolve "@daxur-studios/portal-layout"` from the engine's fesm. Add the
+  portal-layout tarball as a dependency (copy it from the workspace root) or link the packed `.tgz` instead.
+- `npm install` ERESOLVE with a stale lockfile entry for the engine tarball (peer still `^0.183`): the lock
+  stores the engine's peers. Re-pack the engine, then re-install; if the conflict persists, check for
+  unrelated in-progress `file:` deps whose tarballs are missing before touching peers.
+- Test-harness failures (no zone.js, stale default spec) are not caused by this bump; triage them separately.
+- Daxur scaffold (`cli/src/scaffold/`) pins `three`, `@types/three`, `three-mesh-bvh` and the tsconfig types:
+  update those in the same pass as the apps.
 
 ## Open items
 

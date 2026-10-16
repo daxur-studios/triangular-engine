@@ -85,6 +85,11 @@ export interface IPlanetMorphGraphOptions {
    * leaves little room for. The fragment-side `fwidth` cull works without them.
    */
   readonly seamCullAttributes?: boolean;
+  /**
+   * A `mat3` uniform (`IPlanetMorphLightingUniforms.uMorphLightingTurn`). When set, the shading normal is
+   * the sphere normal turned by it, not the morphed normal, so a flat map keeps its relief and sun angle.
+   */
+  readonly lightingTurn?: unknown;
 }
 
 /** Everything stage 1 computes. Position nodes are vertex-stage; the varyings are readable in the fragment stage. */
@@ -197,7 +202,9 @@ export function planetMorphGraph(
 
   return {
     positionNode: morphedLocal.add(batchOffset),
-    normalNode: transformNormalToView(morphedNormal),
+    normalNode: transformNormalToView(
+      options.lightingTurn ? normalize((options.lightingTurn as any).mul(aSphereNorm)) : morphedNormal,
+    ),
     sphereNormal: vSphereNorm,
     morphedLocal: vMorphedLocal,
     bodyFixedLocal: vBodyFixedLocal,

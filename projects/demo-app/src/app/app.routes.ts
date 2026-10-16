@@ -548,10 +548,24 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'atmosphere-lab',
+    loadComponent: () =>
+      import('./pages/atmosphere-lab/atmosphere-lab-page.component').then(
+        ({ AtmosphereLabPageComponent }) => AtmosphereLabPageComponent,
+      ),
+  },
+  {
     path: 'cell-planet-tsl',
     loadComponent: () =>
       import('./pages/cell-planet-tsl/cell-planet-tsl-page.component').then(
         ({ CellPlanetTslPageComponent }) => CellPlanetTslPageComponent,
+      ),
+  },
+  {
+    path: 'planet-material-extensions',
+    loadComponent: () =>
+      import('./pages/planet-material-extensions/planet-material-extensions-page.component').then(
+        ({ PlanetMaterialExtensionsPageComponent }) => PlanetMaterialExtensionsPageComponent,
       ),
   },
   {

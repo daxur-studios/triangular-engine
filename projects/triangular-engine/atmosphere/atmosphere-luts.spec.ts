@@ -1,0 +1,104 @@
+import { earthAtmosphereProfile, marsAtmosphereProfile } from './atmosphere-presets';
+import { scaleAtmosphereProfile } from './atmosphere-scaling';
+import {
+  atmosphereRadii,
+  bakeAtmosphereLuts,
+  sampleIrradianceLut,
+  sampleMultiScatterLut,
+  sampleTransmittanceLut,
+  sunTransmittanceFromLut,
+  texcoordToUnitRange,
+  transmittanceRMuFromUnitCoords,
+  transmittanceUnitCoords,
+  unitRangeToTexcoord,
+} from './atmosphere-luts';
+import { sunTransmittance } from './atmosphere-reference-integrator';
+import { PhysicalAtmosphereProfile } from './atmosphere-profile';
+
+describe('atmosphere LUT parameterization', () => {
+  const profile = earthAtmosphereProfile();
+
+  it('round-trips (r, mu) through the unit coordinates', () => {
+    const { bottom } = atmosphereRadii(profile);
+    for (const altitude of [0, 100, 5_000, 30_000, 59_000]) {
+      for (const mu of [-0.2, 0, 0.3, 0.9, 1]) {
+        const r = bottom + altitude;
+        // Rays below the point's horizon hit the ground and are outside the table's range (they clamp).
+        if (mu < -Math.sqrt(1 - (bottom / r) ** 2)) continue;
+        const [xMu, xR] = transmittanceUnitCoords(profile, r, mu);
+        const back = transmittanceRMuFromUnitCoords(profile, xMu, xR);
+        expect(back.r).toBeCloseTo(r, 0);
+        expect(back.mu).toBeCloseTo(mu, 3);
+      }
+    }
+  });
+
+  it('maps unit range to texel centres and back', () => {
+    expect(unitRangeToTexcoord(0, 64)).toBeCloseTo(0.5 / 64, 12);
+    expect(unitRangeToTexcoord(1, 64)).toBeCloseTo(63.5 / 64, 12);
+    expect(texcoordToUnitRange(unitRangeToTexcoord(0.37, 64), 64)).toBeCloseTo(0.37, 12);
+  });
+});
+
+describe('baked atmosphere LUTs', () => {
+  const profile = earthAtmosphereProfile();
+  const luts = bakeAtmosphereLuts(profile);
+
+  it('reproduces the direct sun transmittance away from the shadow boundary', () => {
+    for (const altitude of [0, 1_000, 10_000, 40_000]) {
+      for (const elevationDeg of [90, 45, 15, 5, 2]) {
+        const e = (elevationDeg * Math.PI) / 180;
+        const point: [number, number, number] = [0, profile.planetRadiusM + altitude, 0];
+        const sunDir: [number, number, number] = [Math.cos(e), Math.sin(e), 0];
+        const direct = sunTransmittance(profile, point, sunDir, 256);
+        const baked = sunTransmittanceFromLut(luts, point, sunDir);
+        for (let c = 0; c < 3; c++) {
+          // Relative error only where the value matters to the picture.
+          if (direct[c] > 1e-3) expect(Math.abs(baked[c] - direct[c]) / direct[c]).toBeLessThan(0.03);
+          else expect(baked[c]).toBeLessThan(5e-3);
+        }
+      }
+    }
+  });
+
+  it('is 1 at the top of the atmosphere looking up and keeps the planet shadow at 0', () => {
+    const { top } = atmosphereRadii(profile);
+    const t = sampleTransmittanceLut(luts, top, 1);
+    expect(t[0]).toBeCloseTo(1, 4);
+    expect(sunTransmittanceFromLut(luts, [0, profile.planetRadiusM + 10, 0], [0, -1, 0])).toEqual([0, 0, 0]);
+  });
+
+  it('gives a plausible sky irradiance: blue > red, bright at noon, ~0 at night', () => {
+    const noon = sampleIrradianceLut(luts, 0, 1);
+    expect(noon[2]).toBeGreaterThan(noon[0]);
+    // Real clear-sky diffuse is roughly 10-20% of the direct beam on a horizontal surface.
+    expect(noon[1]).toBeGreaterThan(0.04);
+    expect(noon[1]).toBeLessThan(0.4);
+    const night = sampleIrradianceLut(luts, 0, -0.4);
+    expect(night[1]).toBeLessThan(0.01 * noon[1]);
+  });
+
+  it('keeps the multi-scatter term in step with a direct evaluation', () => {
+    const psi = sampleMultiScatterLut(luts, 0, 0.8);
+    expect(psi[0]).toBeGreaterThan(0);
+    expect(psi[2]).toBeGreaterThan(psi[0]);
+  });
+
+  it('bakes scaled profiles to the same tables as the original (similarity)', () => {
+    const small = scaleAtmosphereProfile(profile, { radiusM: 100_000 }) as PhysicalAtmosphereProfile;
+    const smallLuts = bakeAtmosphereLuts(small);
+    for (let i = 0; i < luts.transmittance.data.length; i += 977) {
+      expect(Math.abs(smallLuts.transmittance.data[i] - luts.transmittance.data[i])).toBeLessThan(2e-3);
+    }
+    for (let i = 0; i < luts.irradiance.data.length; i += 97) {
+      expect(Math.abs(smallLuts.irradiance.data[i] - luts.irradiance.data[i])).toBeLessThan(5e-3);
+    }
+  });
+
+  it('bakes the Mars preset without NaNs', () => {
+    const mars = bakeAtmosphereLuts(marsAtmosphereProfile(), { transmittanceSize: [64, 16], multiScatterSize: [16, 8], irradianceSize: [16, 8] });
+    for (const image of [mars.transmittance, mars.multiScatter, mars.irradiance]) {
+      expect(image.data.every((v) => Number.isFinite(v))).toBeTrue();
+    }
+  });
+});
