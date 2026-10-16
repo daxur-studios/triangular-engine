@@ -1,7 +1,31 @@
-import { Component, DestroyRef, inject, signal, viewChild } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { Group, HalfFloatType, MeshStandardMaterial, RenderTarget, Vector3, type IUniform, FrontSide } from 'three';
+import {
+  Group,
+  HalfFloatType,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  OrthographicCamera,
+  PlaneGeometry,
+  Mesh,
+  RenderTarget,
+  Scene,
+  ShaderMaterial,
+  UnsignedByteType,
+  Vector3,
+  WebGLRenderTarget,
+  WebGLRenderer,
+  Vector2,
+  type IUniform,
+  FrontSide,
+} from 'three';
 import {
   MeshBasicNodeMaterial,
   MeshStandardNodeMaterial,
@@ -18,7 +42,11 @@ import {
   uniform,
   vec3,
 } from 'three/tsl';
-import { EngineModule, EngineService, RaycastOrbitControlsComponent } from 'triangular-engine';
+import {
+  EngineModule,
+  EngineService,
+  RaycastOrbitControlsComponent,
+} from 'triangular-engine';
 import type {
   ILatLonTerrainPatchAddress,
   ITerrainPatchMesh,
@@ -49,13 +77,33 @@ import type { CellPlanetMorphWorkerRequest } from '../cell-planet-morph-streamin
 type Backend = 'classic' | 'classic-nodeuniform' | 'webgpu' | 'webgl2';
 
 function readBackend(): Backend {
-  const value = new URLSearchParams(globalThis.location?.search ?? '').get('backend');
-  return value === 'classic' || value === 'classic-nodeuniform' || value === 'webgl2' ? value : 'webgpu';
+  const value = new URLSearchParams(globalThis.location?.search ?? '').get(
+    'backend',
+  );
+  return value === 'classic' ||
+    value === 'classic-nodeuniform' ||
+    value === 'webgl2'
+    ? value
+    : 'webgpu';
 }
 const BACKEND = readBackend();
-const AA = new URLSearchParams(globalThis.location?.search ?? '').get('aa') !== '0';
-const BASIC = new URLSearchParams(globalThis.location?.search ?? '').get('mat') === 'basic';
-const LOG_DEPTH = new URLSearchParams(globalThis.location?.search ?? '').get('log') !== '0';
+const AA =
+  new URLSearchParams(globalThis.location?.search ?? '').get('aa') !== '0';
+const BASIC =
+  new URLSearchParams(globalThis.location?.search ?? '').get('mat') === 'basic';
+const LOG_DEPTH =
+  new URLSearchParams(globalThis.location?.search ?? '').get('log') !== '0';
+/**
+ * Diagnostics for the "why is WebGPURenderer slower" question (Runbook 050):
+ *   - `out=ubyte`: WebGPURenderer with an 8-bit output buffer instead of the default half float.
+ *   - `rt=1` (classic only): scene into a half-float target (MSAA when aa=1) + a full-screen tone-map pass,
+ *     which is the pipeline WebGPURenderer always runs (like-for-like).
+ *   - `mat=basic` on classic: unlit baseline, to compare with the unlit WebGPU control.
+ */
+const OUT_UBYTE =
+  new URLSearchParams(globalThis.location?.search ?? '').get('out') === 'ubyte';
+const RT =
+  new URLSearchParams(globalThis.location?.search ?? '').get('rt') === '1';
 
 function engineProviders() {
   const base = { showFPS: false };
@@ -63,7 +111,10 @@ function engineProviders() {
     return EngineService.provide({
       ...base,
       preferredRenderer: 'webgl',
-      webGLRendererParameters: { logarithmicDepthBuffer: LOG_DEPTH, antialias: AA },
+      webGLRendererParameters: {
+        logarithmicDepthBuffer: LOG_DEPTH,
+        antialias: AA,
+      },
     });
   }
   return EngineService.provide({
@@ -74,6 +125,7 @@ function engineProviders() {
       forceWebGL: BACKEND === 'webgl2',
       antialias: AA,
       trackTimestamp: BACKEND === 'webgpu',
+      ...(OUT_UBYTE ? { outputBufferType: UnsignedByteType } : {}),
     },
   });
 }
@@ -81,11 +133,16 @@ function engineProviders() {
 @Component({
   standalone: true,
   selector: 'app-tsl-webgpu-spike-page',
-  imports: [EngineModule, RouterLink, RaycastOrbitControlsComponent, CellPlanetMorphStreamingViewComponent],
+  imports: [
+    EngineModule,
+    RouterLink,
+    RaycastOrbitControlsComponent,
+    CellPlanetMorphStreamingViewComponent,
+  ],
   providers: engineProviders(),
   host: { class: 'flex-page' },
   template: `
-    <scene>
+    <scene [showFps]="true">
       <raycastOrbitControls
         [cameraPosition]="camPos()"
         [target]="camTarget()"
@@ -99,7 +156,14 @@ function engineProviders() {
         [intensity]="2.2"
         [castShadow]="shadows()"
         [shadowFollow]="focus"
-        [shadow]="{ cameraHalfExtent: 60000, cameraNear: 1, cameraFar: 400000, mapSize: [2048, 2048], bias: -0.0005, normalBias: 0.5 }"
+        [shadow]="{
+          cameraHalfExtent: 60000,
+          cameraNear: 1,
+          cameraFar: 400000,
+          mapSize: [2048, 2048],
+          bias: -0.0005,
+          normalBias: 0.5,
+        }"
       />
       <cellPlanetMorphStreamingView
         #planetView
@@ -118,64 +182,136 @@ function engineProviders() {
     <aside class="panel">
       <a routerLink="/">← Examples</a>
       <h2>Plan 050 · Phase 0 spike</h2>
-      <p>Backend: <b>{{ backend }}</b></p>
+      <p>
+        Backend: <b>{{ backend }}</b>
+      </p>
       <p class="row">
         @for (b of backends; track b) {
-          <button (click)="switchBackend(b)" [disabled]="b === backend">{{ b }}</button>
+          <button (click)="switchBackend(b)" [disabled]="b === backend">
+            {{ b }}
+          </button>
         }
       </p>
-      <label>morph <input type="range" min="0" max="1" step="0.005" [value]="morphProgress()" (input)="setMorph($event)" /></label>
+      <label
+        >morph
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.005"
+          [value]="morphProgress()"
+          (input)="setMorph($event)"
+      /></label>
       <p class="row">
         <button (click)="viewOrbit()">orbit view</button>
         <button (click)="viewSurface()">surface view</button>
-        <button (click)="shadows.set(!shadows())">shadows: {{ shadows() }}</button>
+        <button (click)="shadows.set(!shadows())">
+          shadows: {{ shadows() }}
+        </button>
       </p>
-      <p>Resident {{ stats().resident }} · tris {{ stats().triangles }} · LOD draw {{ stats().drawCalls }}</p>
+      <p>
+        Resident {{ stats().resident }} · tris {{ stats().triangles }} · LOD
+        draw {{ stats().drawCalls }}
+      </p>
       <p class="row">
-        <button (click)="runAll()" [disabled]="running">{{ running ? 'running...' : 'run all benchmarks' }}</button>
+        <button (click)="runAll()" [disabled]="running">
+          {{ running ? 'running...' : 'run all benchmarks' }}
+        </button>
       </p>
       <p>{{ status() }}</p>
       @if (report()) {
-        <textarea readonly rows="6" [value]="report()" (focus)="$any($event.target).select()"></textarea>
+        <textarea
+          readonly
+          rows="6"
+          [value]="report()"
+          (focus)="$any($event.target).select()"
+        ></textarea>
         <button (click)="copyReport()">copy JSON</button>
       }
       <pre>{{ perf() }}</pre>
     </aside>
   `,
   styles: `
-    :host { position: relative; }
-    .panel { position: absolute; top: 1rem; left: 1rem; background: rgba(10,14,20,0.85); color: #eee; padding: 1rem; border-radius: 8px; max-width: 360px; font: 13px/1.4 system-ui; z-index: 20; }
-    .panel input[type=range] { width: 100%; }
-    .row { display: flex; gap: 4px; flex-wrap: wrap; }
-    textarea { width: 100%; font: 11px monospace; }
-    pre { margin: 0; white-space: pre-wrap; font-size: 11px; }
+    :host {
+      position: relative;
+    }
+    .panel {
+      position: absolute;
+      top: 1rem;
+      left: 1rem;
+      background: rgba(10, 14, 20, 0.85);
+      color: #eee;
+      padding: 1rem;
+      border-radius: 8px;
+      max-width: 360px;
+      font: 13px/1.4 system-ui;
+      z-index: 20;
+    }
+    .panel input[type='range'] {
+      width: 100%;
+    }
+    .row {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    textarea {
+      width: 100%;
+      font: 11px monospace;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      font-size: 11px;
+    }
   `,
 })
 export class TslWebgpuSpikePageComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly engine = inject(EngineService);
-  readonly planetView = viewChild.required(CellPlanetMorphStreamingViewComponent);
+  readonly planetView = viewChild.required(
+    CellPlanetMorphStreamingViewComponent,
+  );
 
   readonly backend = BACKEND;
-  readonly backends: Backend[] = ['classic', 'classic-nodeuniform', 'webgpu', 'webgl2'];
+  readonly backends: Backend[] = [
+    'classic',
+    'classic-nodeuniform',
+    'webgpu',
+    'webgl2',
+  ];
   readonly radius = WORLD_SIZE_TIER_RADIUS_M.medium;
   readonly morphProgress = signal(0);
-  private readonly query = new URLSearchParams(globalThis.location?.search ?? '');
+  private readonly query = new URLSearchParams(
+    globalThis.location?.search ?? '',
+  );
   /** `?alt=` metres above the +Z surface point, `?back=` metres further out along +Y; `?shadows=1`. */
   readonly shadows = signal(this.query.get('shadows') === '1');
   readonly camPos = signal<[number, number, number]>(
     this.query.has('alt')
-      ? [0, Number(this.query.get('back') ?? 0), this.radius + Number(this.query.get('alt'))]
+      ? [
+          0,
+          Number(this.query.get('back') ?? 0),
+          this.radius + Number(this.query.get('alt')),
+        ]
       : [0, 0, this.radius * 2.6],
   );
-  readonly camTarget = signal<[number, number, number]>(this.query.has('alt') ? [0, 0, this.radius] : [0, 0, 0]);
+  readonly camTarget = signal<[number, number, number]>(
+    this.query.has('alt') ? [0, 0, this.radius] : [0, 0, 0],
+  );
   readonly focus = new Group();
   readonly perf = signal('');
   readonly status = signal('');
   readonly report = signal('');
   running = false;
   readonly stats = signal<ITerrainSurfaceLodStats>({
-    desired: 0, resident: 0, queued: 0, drawCalls: 0, triangles: 0, geometryBytes: 0, levels: {},
+    desired: 0,
+    resident: 0,
+    queued: 0,
+    drawCalls: 0,
+    triangles: 0,
+    geometryBytes: 0,
+    levels: {},
   });
 
   /**
@@ -197,24 +333,46 @@ export class TslWebgpuSpikePageComponent {
 
   readonly createMaterial = (): Material => {
     if (BACKEND === 'classic') {
-      const material = new MeshStandardMaterial({ roughness: 0.92, metalness: 0.05, side: FrontSide, vertexColors: true });
+      const material = BASIC
+        ? new MeshBasicMaterial({ side: FrontSide, vertexColors: true })
+        : new MeshStandardMaterial({
+            roughness: 0.92,
+            metalness: 0.05,
+            side: FrontSide,
+            vertexColors: true,
+          });
       enablePlanetMorphProjection(material, this.glslUniforms);
       return material as unknown as Material;
     }
     if (BACKEND === 'classic-nodeuniform') {
-      const material = new MeshStandardMaterial({ roughness: 0.92, metalness: 0.05, side: FrontSide, vertexColors: true });
+      const material = new MeshStandardMaterial({
+        roughness: 0.92,
+        metalness: 0.05,
+        side: FrontSide,
+        vertexColors: true,
+      });
       enablePlanetMorphProjection(material, this.nodeUniforms);
       return material as unknown as Material;
     }
     if (BASIC) {
       // Control: no lighting, to separate PBR cost from position/batch/MSAA cost.
-      const basic = new MeshBasicNodeMaterial({ side: FrontSide, vertexColors: true });
+      const basic = new MeshBasicNodeMaterial({
+        side: FrontSide,
+        vertexColors: true,
+      });
       const sp = attribute('aSpherePos', 'vec3' as const);
       const fp = attribute('aFlatPos', 'vec3' as const);
-      basic.positionNode = mix(sp, fp, this.morphNode).add(positionLocal.sub(positionGeometry));
+      basic.positionNode = mix(sp, fp, this.morphNode).add(
+        positionLocal.sub(positionGeometry),
+      );
       return basic;
     }
-    const material = new MeshStandardNodeMaterial({ roughness: 0.92, metalness: 0.05, side: FrontSide, vertexColors: true });
+    const material = new MeshStandardNodeMaterial({
+      roughness: 0.92,
+      metalness: 0.05,
+      side: FrontSide,
+      vertexColors: true,
+    });
     const aSpherePos = attribute('aSpherePos', 'vec3' as const);
     const aFlatPos = attribute('aFlatPos', 'vec3' as const);
     const aSphereNorm = attribute('aSphereNorm', 'vec3' as const);
@@ -224,7 +382,9 @@ export class TslWebgpuSpikePageComponent {
     // replaces positionLocal. The batch matrices are translation-only, so carry the translation over.
     const batchOffset = positionLocal.sub(positionGeometry);
     material.positionNode = mix(aSpherePos, aFlatPos, morph).add(batchOffset);
-    material.normalNode = transformNormalToView(normalize(mix(aSphereNorm, aFlatNorm, morph)));
+    material.normalNode = transformNormalToView(
+      normalize(mix(aSphereNorm, aFlatNorm, morph)),
+    );
     return material;
   };
 
@@ -242,13 +402,19 @@ export class TslWebgpuSpikePageComponent {
   };
 
   private readonly worker = new Worker(
-    new URL('../cell-planet-morph-streaming/cell-planet-morph-streaming.worker', import.meta.url),
+    new URL(
+      '../cell-planet-morph-streaming/cell-planet-morph-streaming.worker',
+      import.meta.url,
+    ),
     { type: 'module' },
   );
   private nextRequestId = 0;
   private readonly pending = new Map<
     number,
-    { resolve: (patch: ITerrainPatchMesh<ILatLonTerrainPatchAddress>) => void; reject: (e: Error) => void }
+    {
+      resolve: (patch: ITerrainPatchMesh<ILatLonTerrainPatchAddress>) => void;
+      reject: (e: Error) => void;
+    }
   >();
 
   private frameTimes: number[] = [];
@@ -257,9 +423,16 @@ export class TslWebgpuSpikePageComponent {
   private beforeAt = 0;
 
   constructor() {
-    const holders = BACKEND === 'classic' ? this.glslUniforms : this.nodeUniforms;
+    const holders =
+      BACKEND === 'classic' ? this.glslUniforms : this.nodeUniforms;
     this.applyMapUniforms(holders);
-    this.worker.onmessage = ({ data }: MessageEvent<{ id: number; patch?: ITerrainPatchMesh<ILatLonTerrainPatchAddress>; error?: string }>) => {
+    this.worker.onmessage = ({
+      data,
+    }: MessageEvent<{
+      id: number;
+      patch?: ITerrainPatchMesh<ILatLonTerrainPatchAddress>;
+      error?: string;
+    }>) => {
       const entry = this.pending.get(data.id);
       if (!entry) return;
       this.pending.delete(data.id);
@@ -271,6 +444,7 @@ export class TslWebgpuSpikePageComponent {
     this.engine.scene.add(this.focus);
 
     this.engine.beforeRender$.pipe(takeUntilDestroyed()).subscribe(() => {
+      this.installRtPass();
       this.beforeAt = performance.now();
     });
     this.engine.renderComplete$.pipe(takeUntilDestroyed()).subscribe(() => {
@@ -288,25 +462,98 @@ export class TslWebgpuSpikePageComponent {
     }
   }
 
+  private rtRenderer?: WebGLRenderer;
+
+  /**
+   * `rt=1` on classic: wraps `render` so the scene goes to a half-float (MSAA when aa=1) target and a
+   * full-screen pass tone-maps it to the screen, the pipeline `WebGPURenderer` always runs.
+   */
+  private installRtPass(): void {
+    const r = this.engine.renderer as unknown as WebGLRenderer;
+    if (!RT || BACKEND !== 'classic' || this.rtRenderer === r) return;
+    this.rtRenderer = r;
+    const original = r.render.bind(r);
+    const size = new Vector2();
+    let target: WebGLRenderTarget | undefined;
+    const quadScene = new Scene();
+    const quadCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const quadMaterial = new ShaderMaterial({
+      uniforms: { tDiffuse: { value: null } },
+      vertexShader: `varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+      fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+        #include <tonemapping_pars_fragment>
+        #include <colorspace_pars_fragment>
+        void main() {
+          gl_FragColor = texture2D(tDiffuse, vUv);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }`,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const quad = new Mesh(new PlaneGeometry(2, 2), quadMaterial);
+    quad.frustumCulled = false;
+    quadScene.add(quad);
+    r.render = (scene, camera) => {
+      r.getDrawingBufferSize(size);
+      if (!target || target.width !== size.x || target.height !== size.y) {
+        target?.dispose();
+        target = new WebGLRenderTarget(size.x, size.y, {
+          type: HalfFloatType,
+          samples: AA ? 4 : 0,
+        });
+      }
+      const previous = r.getRenderTarget();
+      r.setRenderTarget(target);
+      original(scene, camera);
+      r.setRenderTarget(previous);
+      quadMaterial.uniforms['tDiffuse'].value = target.texture;
+      original(quadScene, quadCamera);
+    };
+  }
+
   // ---- run-all orchestration: a renderer cannot be swapped live, so each config is a page load ----
   private static readonly CONFIGS = [
-    'backend=classic&aa=1', 'backend=classic&aa=0',
-    'backend=webgpu&aa=1', 'backend=webgpu&aa=0',
-    'backend=webgl2&aa=1', 'backend=webgl2&aa=0',
-    'backend=webgpu&aa=0&mat=basic', 'backend=webgpu&aa=1&mat=basic',
+    'backend=classic&aa=1',
+    'backend=classic&aa=0',
+    'backend=webgpu&aa=1',
+    'backend=webgpu&aa=0',
+    'backend=webgl2&aa=1',
+    'backend=webgl2&aa=0',
+    'backend=webgpu&aa=0&mat=basic',
+    'backend=webgpu&aa=1&mat=basic',
+    // diagnostics (Runbook 050): output buffer type, classic unlit, classic with the same pass structure
+    'backend=webgpu&aa=0&out=ubyte',
+    'backend=webgpu&aa=1&out=ubyte',
+    'backend=webgl2&aa=1&out=ubyte',
+    'backend=classic&aa=0&mat=basic',
+    'backend=classic&aa=1&mat=basic',
+    'backend=classic&aa=0&rt=1',
+    'backend=classic&aa=1&rt=1',
   ];
 
   private readStore(key: string): string | null {
-    try { return sessionStorage.getItem(key); } catch { return null; }
+    try {
+      return sessionStorage.getItem(key);
+    } catch {
+      return null;
+    }
   }
   private writeStore(key: string, value: string): void {
-    try { sessionStorage.setItem(key, value); } catch { /* storage blocked: results are lost */ }
+    try {
+      sessionStorage.setItem(key, value);
+    } catch {
+      /* storage blocked: results are lost */
+    }
   }
 
   runAll(): void {
     this.writeStore('spikeResults', '[]');
     this.writeStore('spikeReport', '');
-    location.assign(`${location.pathname}?${TslWebgpuSpikePageComponent.CONFIGS[0]}&auto=1`);
+    location.assign(
+      `${location.pathname}?${TslWebgpuSpikePageComponent.CONFIGS[0]}&auto=1`,
+    );
   }
 
   copyReport(): void {
@@ -354,15 +601,28 @@ export class TslWebgpuSpikePageComponent {
       this.setMorphValue(1);
       await this.waitStable();
       const flat = await median();
-      const results: unknown[] = JSON.parse(this.readStore('spikeResults') ?? '[]');
+      const results: unknown[] = JSON.parse(
+        this.readStore('spikeResults') ?? '[]',
+      );
       results.push({
-        b: BACKEND, aa: AA ? 1 : 0, mat: BASIC ? 'basic' : 'std',
-        ms: [orbit.ms, surface.ms, flat.ms], draws: [orbit.draws, surface.draws, flat.draws],
+        b: BACKEND,
+        aa: AA ? 1 : 0,
+        mat: BASIC ? 'basic' : 'std',
+        out: OUT_UBYTE ? 'ubyte' : 'half',
+        rt: RT ? 1 : 0,
+        ms: [orbit.ms, surface.ms, flat.ms],
+        draws: [orbit.draws, surface.draws, flat.draws],
       });
       this.writeStore('spikeResults', JSON.stringify(results));
       const idx = TslWebgpuSpikePageComponent.CONFIGS.findIndex((c) => {
         const q = new URLSearchParams(c);
-        return q.get('backend') === BACKEND && (q.get('aa') === '0') === !AA && (q.get('mat') === 'basic') === BASIC;
+        return (
+          q.get('backend') === BACKEND &&
+          (q.get('aa') === '0') === !AA &&
+          (q.get('mat') === 'basic') === BASIC &&
+          (q.get('out') === 'ubyte') === OUT_UBYTE &&
+          (q.get('rt') === '1') === RT
+        );
       });
       const next = TslWebgpuSpikePageComponent.CONFIGS[idx + 1];
       if (next) {
@@ -371,13 +631,39 @@ export class TslWebgpuSpikePageComponent {
       }
       let gpu = 'unknown';
       try {
-        const info = (await (navigator as unknown as { gpu?: { requestAdapter(): Promise<{ info?: { vendor?: string; description?: string } } | null> } }).gpu?.requestAdapter())?.info;
-        gpu = `${info?.vendor ?? ''} ${info?.description ?? ''}`.trim() || 'unknown';
-      } catch { /* no adapter info */ }
+        const info = (
+          await (
+            navigator as unknown as {
+              gpu?: {
+                requestAdapter(): Promise<{
+                  info?: { vendor?: string; description?: string };
+                } | null>;
+              };
+            }
+          ).gpu?.requestAdapter()
+        )?.info;
+        gpu =
+          `${info?.vendor ?? ''} ${info?.description ?? ''}`.trim() ||
+          'unknown';
+      } catch {
+        /* no adapter info */
+      }
       const round = (xs: number[]) => xs.map((x) => +Number(x).toFixed(2));
       const json = JSON.stringify({
-        gpu, res: '1280x720@1x', units: 'ms/frame [orbit,surface,flat], GPU-synced median of 5x150',
-        runs: (results as { b: string; aa: number; mat: string; ms: number[]; draws: number[] }[]).map((r) => ({ ...r, ms: round(r.ms) })),
+        gpu,
+        res: '1280x720@1x',
+        units: 'ms/frame [orbit,surface,flat], GPU-synced median of 5x150',
+        runs: (
+          results as {
+            b: string;
+            aa: number;
+            mat: string;
+            out: string;
+            rt: number;
+            ms: number[];
+            draws: number[];
+          }[]
+        ).map((r) => ({ ...r, ms: round(r.ms) })),
       });
       this.writeStore('spikeReport', json);
       this.report.set(json);
@@ -396,7 +682,12 @@ export class TslWebgpuSpikePageComponent {
     const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
     const sorted = [...this.frameTimes].sort((a, b) => a - b);
     const info = this.engine.renderer.info as unknown as {
-      render: { drawCalls?: number; calls?: number; triangles: number; timestamp?: number };
+      render: {
+        drawCalls?: number;
+        calls?: number;
+        triangles: number;
+        timestamp?: number;
+      };
     };
     this.lastPerf = {
       backend: BACKEND,
@@ -410,7 +701,9 @@ export class TslWebgpuSpikePageComponent {
     this.perf.set(JSON.stringify(this.lastPerf, null, 1));
     this.frameTimes = [];
     this.cpuTimes = [];
-    const renderer = this.engine.renderer as unknown as { resolveTimestampsAsync?: (t: string) => Promise<unknown> };
+    const renderer = this.engine.renderer as unknown as {
+      resolveTimestampsAsync?: (t: string) => Promise<unknown>;
+    };
     void renderer.resolveTimestampsAsync?.('render');
   }
 
@@ -423,7 +716,10 @@ export class TslWebgpuSpikePageComponent {
       getContext?: () => WebGL2RenderingContext;
       backend?: { device?: GPUDevice };
       render: (s: unknown, c: unknown) => void;
-      info: { reset(): void; render: { drawCalls?: number; calls?: number; triangles: number } };
+      info: {
+        reset(): void;
+        render: { drawCalls?: number; calls?: number; triangles: number };
+      };
     };
     const sync = async () => {
       const device = r.backend?.device;
@@ -431,7 +727,15 @@ export class TslWebgpuSpikePageComponent {
       else {
         // `finish()` is a no-op under ANGLE; reading a pixel back forces the GPU to drain.
         const gl = r.getContext?.();
-        gl?.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+        gl?.readPixels(
+          0,
+          0,
+          1,
+          1,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          new Uint8Array(4),
+        );
       }
     };
     for (let i = 0; i < 10; i++) this.engine.render(performance.now(), true);
@@ -441,7 +745,15 @@ export class TslWebgpuSpikePageComponent {
     const tSubmit = performance.now() - t0;
     await sync();
     const total = performance.now() - t0;
+    // GPU timestamp total of the last frame's render passes (native WebGPU only; -1 elsewhere).
+    // It covers the scene pass and the output pass together, so compare it across `out=` configs.
+    const rr = r as unknown as {
+      resolveTimestampsAsync?: (t: string) => Promise<unknown>;
+      info: { render: { timestamp?: number } };
+    };
+    await rr.resolveTimestampsAsync?.('render');
     return {
+      gpuMsLastFrame: +(rr.info.render.timestamp ?? -1).toFixed?.(3),
       backend: BACKEND,
       frames: n,
       cpuSubmitMsPerFrame: +(tSubmit / n).toFixed(3),
@@ -460,17 +772,36 @@ export class TslWebgpuSpikePageComponent {
     const r = this.engine.renderer as unknown as {
       setRenderTarget(t: RenderTarget | null): void;
       render(s: unknown, c: unknown): void;
-      readRenderTargetPixelsAsync(t: RenderTarget, x: number, y: number, w: number, h: number): Promise<Uint16Array | Float32Array>;
+      readRenderTargetPixelsAsync(
+        t: RenderTarget,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+      ): Promise<Uint16Array | Float32Array>;
     };
-    const target = new RenderTarget(width, height, { type: HalfFloatType, depthBuffer: true });
+    const target = new RenderTarget(width, height, {
+      type: HalfFloatType,
+      depthBuffer: true,
+    });
     this.engine.tick(performance.now());
     r.setRenderTarget(target);
     r.render(this.engine.scene, this.engine.camera);
     r.setRenderTarget(null);
-    const data = await r.readRenderTargetPixelsAsync(target, 0, 0, width, height);
+    const data = await r.readRenderTargetPixelsAsync(
+      target,
+      0,
+      0,
+      width,
+      height,
+    );
     const half = (h: number): number => {
-      const e = (h >> 10) & 31, m = h & 1023, sgn = h & 0x8000 ? -1 : 1;
-      return e === 0 ? sgn * 2 ** -14 * (m / 1024) : sgn * 2 ** (e - 15) * (1 + m / 1024);
+      const e = (h >> 10) & 31,
+        m = h & 1023,
+        sgn = h & 0x8000 ? -1 : 1;
+      return e === 0
+        ? sgn * 2 ** -14 * (m / 1024)
+        : sgn * 2 ** (e - 15) * (1 + m / 1024);
     };
     const canvas = document.createElement('canvas');
     canvas.width = width;
@@ -482,8 +813,10 @@ export class TslWebgpuSpikePageComponent {
         const src = ((height - 1 - y) * width + x) * 4;
         const dst = (y * width + x) * 4;
         for (let k = 0; k < 3; k++) {
-          const v = data instanceof Uint16Array ? half(data[src + k]) : data[src + k];
-          image.data[dst + k] = 255 * Math.pow(Math.min(1, Math.max(0, v)), 1 / 2.2);
+          const v =
+            data instanceof Uint16Array ? half(data[src + k]) : data[src + k];
+          image.data[dst + k] =
+            255 * Math.pow(Math.min(1, Math.max(0, v)), 1 / 2.2);
         }
         image.data[dst + 3] = 255;
       }
@@ -493,7 +826,8 @@ export class TslWebgpuSpikePageComponent {
     if (!img) {
       img = document.createElement('img');
       img.id = 'snapimg';
-      img.style.cssText = 'position:fixed;left:0;top:0;width:960px;height:540px;z-index:9999;pointer-events:none';
+      img.style.cssText =
+        'position:fixed;left:0;top:0;width:960px;height:540px;z-index:9999;pointer-events:none';
       document.body.appendChild(img);
     }
     img.src = canvas.toDataURL('image/png');
@@ -545,7 +879,10 @@ export class TslWebgpuSpikePageComponent {
   setMorphValue(value: number): void {
     const v = Math.max(0, Math.min(1, value));
     this.morphProgress.set(v);
-    (BACKEND === 'classic' ? this.glslUniforms : this.nodeUniforms).uMorph.value = v;
+    (BACKEND === 'classic'
+      ? this.glslUniforms
+      : this.nodeUniforms
+    ).uMorph.value = v;
   }
 
   viewOrbit(): void {

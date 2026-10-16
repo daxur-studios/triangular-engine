@@ -12,7 +12,7 @@ Keep these in sync:
 - `package-lock.json`
 - `projects/triangular-engine/README.md`
 - `projects/triangular-engine/docs/getting-started.md`
-- `projects/triangular-engine/.agent/skills/triangular-engine/SKILL.md`
+- `projects/triangular-engine/.agents/skills/triangular-engine/SKILL.md`
 
 Also verify the Draco asset path in `angular.json` and the documentation.
 

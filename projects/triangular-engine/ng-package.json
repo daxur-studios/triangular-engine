@@ -16,7 +16,7 @@
     "THIRD_PARTY_NOTICES.md",
     {
       "glob": "**/*",
-      "input": "./.agent/skills",
+      "input": "./.agents/skills",
       "output": "./skills"
     }
   ]

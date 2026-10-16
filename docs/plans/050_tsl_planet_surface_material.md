@@ -213,7 +213,7 @@ Each phase ends with a visible check and a timing number, recorded in the runboo
      fallback is expected to be somewhat slower than classic WebGL; record by how much.
    - User doc `projects/triangular-engine/docs/planet-material.md`: stages, slots, building blocks, a
      "writing a layer" example.
-   - A section in `.agent/skills/triangular-engine/SKILL.md`.
+   - A section in `.agents/skills/triangular-engine/SKILL.md`.
    - `CHANGELOG.md`.
 
 After Phase 4, Plan 049 Phase 2 can start. Phase 5 can run alongside it.

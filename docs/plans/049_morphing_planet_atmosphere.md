@@ -285,7 +285,7 @@ flat map is handled too. Only mid-morph is approximate, and only for non-planet 
   none), so anything missing stands out.
 - **Docs:** a new `projects/triangular-engine/docs/atmosphere.md` with a short "adding objects to an
   atmosphere scene" checklist and the extension API.
-- **Agent skill:** an atmosphere section in `.agent/skills/triangular-engine/SKILL.md`, the skill
+- **Agent skill:** an atmosphere section in `.agents/skills/triangular-engine/SKILL.md`, the skill
   game repos load, carrying the same checklist.
 
 ## Profiles (G3)
