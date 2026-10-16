@@ -44,7 +44,8 @@
               "../spline/**/*.spec.ts",
               "../procedural/**/*.spec.ts",
               "../worldgen/**/*.spec.ts",
-              "../worldgen/render/**/*.spec.ts"
+              "../worldgen/render/**/*.spec.ts",
+              "../planet-material/**/*.spec.ts"
             ]
           }
         },
@@ -66,6 +67,16 @@
             "polyfills": ["zone.js", "zone.js/testing"],
             "browsers": "ChromeHeadless",
             "include": ["../worldgen/render/**/*.spec.ts"]
+          }
+        },
+        "test-planet-material": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "watch": false,
+            "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
+            "polyfills": ["zone.js", "zone.js/testing"],
+            "browsers": "ChromeHeadless",
+            "include": ["../planet-material/**/*.spec.ts"]
           }
         },
         "test-navigation": {

@@ -13,6 +13,7 @@
     "test:triangular-engine:animals": "ng run triangular-engine:test-animals --watch=false --browsers=ChromeHeadless",
     "test:triangular-engine:characters": "ng run triangular-engine:test-characters --watch=false --browsers=ChromeHeadless",
     "test:triangular-engine:procedural": "ng run triangular-engine:test-procedural --watch=false --browsers=ChromeHeadless",
+    "test:triangular-engine:planet-material": "ng run triangular-engine:test-planet-material --watch=false --browsers=ChromeHeadless",
     "test:triangular-engine:worldgen": "ng run triangular-engine:test-worldgen --watch=false --browsers=ChromeHeadless",
     "test:scene": "playwright test -c playwright.config.ts",
     "test:scene:walkthrough": "playwright test -c playwright.config.ts tests/scene/specs/walkthrough.spec.ts",

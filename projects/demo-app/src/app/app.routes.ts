@@ -548,6 +548,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'cell-planet-tsl',
+    loadComponent: () =>
+      import('./pages/cell-planet-tsl/cell-planet-tsl-page.component').then(
+        ({ CellPlanetTslPageComponent }) => CellPlanetTslPageComponent,
+      ),
+  },
+  {
     // Plan 050 Phase 0 throwaway spike; removed once `cell-planet-tsl` exists.
     path: 'tsl-webgpu-spike',
     loadComponent: () =>

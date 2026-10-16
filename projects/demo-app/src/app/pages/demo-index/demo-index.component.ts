@@ -258,6 +258,19 @@ export const DEMOS: readonly DemoItem[] = [
       'Gap-free quadtree LOD chunk streaming with 2.5D flat map ↔ 3D sphere morphing. Features background Web Worker meshing, Meshoptimizer LockBorder simplification, dual edge conforming, and recognizable caldera volcano, crater, and mountains.',
   },
   {
+    id: 'cell-planet-tsl',
+    number: '02g',
+    title: 'Cell Planet TSL Material',
+    route: '/cell-planet-tsl',
+    categoryId: 'terrain',
+    tier: 'lab',
+    createdAt: '2026-10-16',
+    entryPoints: ['planet-material', 'terrain', 'worldgen'],
+    package: 'triangular-engine/planet-material + worldgen/render',
+    description:
+      'The morph-streaming planet drawn by an extensible TSL PlanetSurfaceMaterial on WebGPURenderer (WebGPU or its WebGL2 fallback): sphere to flat-map morph, Equal Earth and equirectangular projection, seam cull, vertex-colour base layer.',
+  },
+  {
     id: 'takram-clouds',
     number: '03',
     title: 'Takram Clouds',

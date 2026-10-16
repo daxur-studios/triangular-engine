@@ -45,6 +45,9 @@
       "triangular-engine/trail": [
         "projects/triangular-engine/trail/public-api"
       ],
+      "triangular-engine/planet-material": [
+        "projects/triangular-engine/planet-material/public-api"
+      ],
       "triangular-engine/spline": [
         "projects/triangular-engine/spline/public-api"
       ],

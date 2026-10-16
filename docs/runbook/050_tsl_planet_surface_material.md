@@ -118,3 +118,68 @@ control, no idle GPU).
 Everything the plan listed works: batch, visibility, log depth, shadows, flat map, `UniformNode`/`IUniform`.
 The frame-cost gap is ambiguous (1.5x–2.8x on a bare material, small absolute numbers, noisy machine), so per the
 session brief **Phase 1 was not started**. Options are in the session report.
+
+## 2026-10-16 — Phase 0 re-run on an idle GPU: **GO**
+
+Ran the spike's "run all benchmarks" button (8 page loads) in a visible Chrome window, GPU otherwise idle (AMD).
+1280x720 at pixel ratio 1, ms per frame `[orbit, surface, flat]`, GPU-synced median of 5 x 150 frames.
+Run-to-run noise is about +-0.2 ms (classic MSAA-on orbit read 0.63 earlier, 0.84 here).
+
+| Backend / material | MSAA | orbit | surface | flat | draws |
+|---|---|---|---|---|---|
+| classic WebGL, GLSL | on | 0.84 | 1.76 | 1.48 | 1 |
+| classic WebGL, GLSL | off | 0.45 | 1.03 | 0.72 | 1 |
+| WebGPU, `MeshStandardNodeMaterial` | on | 1.84 | 2.71 | 2.32 | 33/81/69 |
+| WebGPU, `MeshStandardNodeMaterial` | off | 0.88 | 1.39 | 1.14 | 33/81/69 |
+| WebGPURenderer `forceWebGL`, standard | on | 2.82 | 4.10 | 3.81 | 2 |
+| WebGPURenderer `forceWebGL`, standard | off | 0.62 | 1.09 | 0.89 | 2 |
+| WebGPU, `MeshBasicNodeMaterial` (control, unlit) | off | 0.51 | 0.70 | 0.64 | 33/81/69 |
+| WebGPU, `MeshBasicNodeMaterial` (control, unlit) | on | 1.61 | 2.15 | 1.90 | 33/81/69 |
+
+What the gap is made of:
+- **Not the batch.** The unlit WebGPU material with 33-81 draws and the custom `positionNode` costs 0.51/0.70/0.64 ms,
+  the same as classic GLSL with MSAA off (0.45/1.03/0.72). Position + batching + per-instance draws are free at this scale.
+- **MSAA.** Going MSAA on costs WebGPU +0.96/+1.32/+1.18 ms (standard) versus +0.39/+0.73/+0.76 ms on classic. On the
+  `forceWebGL` backend it is the worst (+2.2/+3.0/+2.9 ms). With MSAA off, `forceWebGL` is within 1.05-1.4x of classic.
+- **Node PBR shading.** Standard vs unlit, MSAA off: +0.37/+0.69/+0.50 ms.
+
+Verdict: **go.** Worst realistic case is 2.7 ms at 720p with MSAA on (4.1 ms on the WebGL2 fallback), and the
+overhead is MSAA plus the lit shader, neither of which the planet material design changes. Decision recorded for Phase 1:
+**the demo's default is MSAA off on `WebGPURenderer`** (`antialias: false`); a shader-based AA (TSL FXAA/SMAA)
+is the follow-up if edges need it. Per-instance draws on WebGPU (no multi-draw) are a cost to re-check at
+`maxPatches` ~1000 in Phase 5; at 81 draws it is noise.
+
+## 2026-10-16 — Phase 1 built: `triangular-engine/planet-material`, `cell-planet-tsl` demo
+
+New files: `projects/triangular-engine/planet-material/` (entry point; `ordered-slots`, `projection-nodes`,
+`planet-morph-nodes`, `planet-context`, `planet-surface-layers`, `planet-surface-material`, specs, `gpu-eval.testing`);
+demo `/cell-planet-tsl` (`?backend=webgpu|webgl2`, `?aa=1`, `?mesh=seam`, `?debug=1`); `shared/overlay-snapshot.ts`;
+tsconfig paths in `tsconfig.json` and `demo-app/tsconfig.app.json`; an `angular.json` test target and
+`npm run test:triangular-engine:planet-material`. The Phase 0 spike page `/tsl-webgpu-spike` is still there (delete later).
+
+Checks: `npm run build:triangular-engine` passes (the entry point is packaged); the planet-material specs pass (20).
+They include TSL `Fn`s evaluated on a real backend (WebGPURenderer `forceWebGL`, headless Chrome) against
+`map-projections.ts` / `antimeridian-seam.ts`, and a render of a seam-straddling triangle through the real
+material: culled with the mask, drawn without it.
+
+### More corrections to Plan 050
+
+- **WebGPU allows 8 vertex buffers.** The first material read 9 (position, normal, color, aSpherePos, aFlatPos,
+  aSphereNorm, aFlatNorm, aOtherDir1/2) and every draw failed with a pipeline validation error that showed up only
+  in the console, as a black frame. Fix: read the sphere position/normal from the geometry's own `position`/`normal`
+  (the streaming pipeline writes them identical to `aSpherePos`/`aSphereNorm`) and make `aOtherDir1/2` opt-in
+  (`seamCullAttributes`). Stage 1 now uses 4 attributes (+ color); Phase 2 adds uv and the macro factor, which fits (7 of 8).
+  `IPlanetMorphGraph.vertexAttributes` and a spec guard the budget. Layers must count their own attributes.
+- **`maskNode`** works as the discard hook (`false` = discard). `fwidth` is computed once, outside any branch.
+- The vertex-side cull needs real `aOtherDir1/2`; the streaming pipeline writes zeros there, so in dynamic projection mode
+  on streaming geometry only the `fwidth` cull applies (same as the GLSL path), which cannot catch large triangles.
+  Static projection (baked flat positions, the demo default) needs no seam handling: patches split at the antimeridian.
+- The sun-occlusion and emissive stacks exist in the API but sun occlusion is not yet wired into lighting (Phase 4).
+
+### Gate status
+
+- Morph at 0, 0.6 and 1, equirect and Equal Earth, static and dynamic projection: render correctly on WebGPU (visually).
+- **Not verified:** the same on the `forceWebGL` backend in the demo, and a full morph scrub with the dynamic basis rotated on
+  streaming geometry (a hidden browser pane could not present frames reliably; see the caveat in the Phase 0 entry).
+  The `forceWebGL` path is covered only by the specs. Needs a visible-browser pass: open `/cell-planet-tsl?backend=webgl2`
+  and `?backend=webgpu`, click "scrub morph", toggle the projection.

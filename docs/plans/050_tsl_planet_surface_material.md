@@ -9,7 +9,7 @@ runbook: /docs/runbook/050_tsl_planet_surface_material.md
 
 # Plan 050: TSL Planet Surface Material
 
-Status: **in progress, owner: local Sonnet session. Phase 0 spike done 2026-10-16 (conditional go; frame-cost gap on WebGPU needs an owner decision, see Runbook 050). Phase 1 not started. Do this first:** [Plan 049](/docs/plans/049_morphing_planet_atmosphere.md)
+Status: **in progress, owner: local Sonnet session. Phase 0 spike done 2026-10-16: **go** (numbers in Runbook 050). Phase 1 built (specs + library build pass); the visual gate on a visible browser is still open, see Runbook 050. Do this first:** [Plan 049](/docs/plans/049_morphing_planet_atmosphere.md)
 (atmosphere) builds on it. Written in a cloud session from code reading only. Nothing has been
 built or measured yet. Evidence: [Runbook 050](/docs/runbook/050_tsl_planet_surface_material.md).
 
