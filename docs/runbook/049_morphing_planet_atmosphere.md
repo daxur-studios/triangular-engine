@@ -44,3 +44,25 @@ Nothing was built, run or measured. Findings from reading the code:
 - Sky objects composite through a shared `atmosphereSky(dir)` function (WebGL has no dual-source blending).
 - Per-profile LUTs baked on CPU in a worker (renderer-agnostic, doubles as test reference). Per-frame
   passes as fragment passes. Froxels in a 2D atlas. This keeps both W1 (TSL only) and W2 (GLSL + TSL) open.
+
+## 2026-10-16 — Owner decisions and follow-up findings
+
+Decisions from the owner:
+
+- Technique: Hillaire LUTs + stylized ramps.
+- **TSL only, one version.** The cell-planet materials get an extensible TSL port first or alongside.
+  The TSL material must stay as extendable as the GLSL patches were, e.g. games adding their own
+  solar-eclipse shading or road layers.
+- **Planet sizes:** support Kerbin-sized (600 km), ~100 km and Earth-scale planets, and small
+  planets must look good.
+
+Findings:
+
+- `WORLD_SIZE_TIER_RADIUS_M`: mini ≈ 6.4 km, extra-small ≈ 64 km, small ≈ 191 km, medium = 600 km
+  (`HOME_PLANET`), large ≈ 1,911 km, extra-large = Earth. Mini isn't selectable in-game yet.
+- The agent skill game repos load is `.agent/skills/triangular-engine/SKILL.md`. User docs live in
+  `projects/triangular-engine/docs/`. Both get an atmosphere section (Phase 9).
+- The plan now covers: similarity scaling plus scale-free art knobs (`thickness`, `hazeAtHorizon`,
+  `nearHazeFadeM`, `reliefFit`), a staged `PlanetSurfaceMaterial` with slot and building-block
+  extension, automatic atmosphere coverage (screen pass + MRT mask + coverage debug overlay), and
+  the flat-map edge default (soft fade, optional glow).
