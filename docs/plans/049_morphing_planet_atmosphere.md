@@ -9,8 +9,8 @@ runbook: /docs/runbook/049_morphing_planet_atmosphere.md
 
 # Plan 049: Morphing Planet Atmosphere
 
-Status: **planned, owner: unclaimed.** Written in a cloud session from code reading only;
-nothing here has been built or measured yet. Evidence: [Runbook 049](/docs/runbook/049_morphing_planet_atmosphere.md).
+Status: **planned, owner: unclaimed.** Nothing here has been built yet. Phases 0-1 are CPU-only and can
+start now, alongside Plan 050. Evidence: [Runbook 049](/docs/runbook/049_morphing_planet_atmosphere.md).
 
 Target: the cell planet as shown in `/cell-planet-morph-streaming`.
 
@@ -239,6 +239,14 @@ Three's TSL (node materials) compiles to WGSL on WebGPU and to GLSL on `WebGPURe
 WebGL2 fallback, so one implementation runs on both GPU APIs. Atmosphere scenes use
 `preferredRenderer: 'webgpu'`. The engine default stays `'webgl'` for existing scenes.
 
+Output pipeline (three 0.186.1, measured in [Runbook 050](/docs/runbook/050_tsl_planet_surface_material.md)):
+
+- Use an HDR `RenderPipeline` (half-float scene target). Exposure, bloom and tone mapping run in its output
+  pass. Don't use three's `DirectRenderPipeline`: it tone-maps inside each material, so it has no HDR
+  buffer to bloom from, and it blends the sky after tone mapping.
+- MSAA off. MSAA on the half-float target costs about 1-2 ms at 720p on WebGPU (more on the WebGL2
+  fallback). Use a post-process AA pass (FXAA or SMAA) at the end of the pipeline instead; pick one in Phase 2.
+
 Rules that keep it working on the WebGL2 fallback:
 
 - Per-frame LUT passes are fragment (render-to-texture) passes, not compute. The WebGL2 fallback
@@ -329,7 +337,9 @@ altitudes. To be measured; the Hillaire paper reports sub-millisecond totals on 
 
 Quality tiers change LUT sizes, march steps and sky resolution only. No tier ever ray-marches per
 pixel inside the atmosphere. Add an `atmosphere` telemetry section (Plan 048). Also measure the
-`WebGPURenderer` WebGL2 fallback separately: it is somewhat slower than classic `WebGLRenderer`.
+`WebGPURenderer` WebGL2 fallback separately. Runbook 050 has it anywhere from classic speed to 2-5x slower,
+depending on the three version and machine load; Plan 050 Phase 1 re-measures it. If it stays several times
+slower, G8 needs a decision (for example a lower quality tier on the fallback).
 
 ## Phases
 
@@ -377,6 +387,7 @@ Plan 050 through its Phase 4.
 | Support 100 km to Earth, small planets must look good; similarity scaling + art knobs | **Decided** 2026-10-16 (approach proposed) |
 | Exact material path for planet surfaces + automatic screen pass for everything else + docs/skill/debug overlay | Proposed |
 | Flat map from space: soft edge fade by default, optional glowing outline | Proposed |
+| Output: HDR `RenderPipeline` with MSAA off plus a post AA pass. Not `DirectRenderPipeline` | Proposed 2026-10-16 (Runbook 050 numbers) |
 
 ## Out of scope for now
 

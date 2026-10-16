@@ -79,3 +79,16 @@ Findings:
 - Correction to the first entry: the cell-planet path is 7 `onBeforeCompile` patches plus 3
   `ShaderMaterial`s, not "about 20" (inventory in [Runbook 050](/docs/runbook/050_tsl_planet_surface_material.md)).
 - Plan 049's frontmatter gained the missing `runbook:` back-link.
+
+## 2026-10-16 — three 0.186.1 upgrade: what it changes for this plan
+
+- The workspace is on three 0.186.1 (`docs/upgrades/01_threejs_0.183_to_0.186.md`). The technique, the
+  phases and the TSL-only decision don't change.
+- r186 adds `DirectRenderPipeline`, which skips the half-float target and the output pass. Runbook 050
+  measured it: it removes the MSAA surcharge but not the gap to classic. It can't bloom, so this plan stays
+  on an HDR `RenderPipeline` with MSAA off plus a post AA pass. Recorded in the plan's WebGL/WebGPU
+  section and as a Proposed decision.
+- The WebGL2 fallback's cost is now uncertain: about classic speed on 0.183, 2-5x slower on 0.186.1 (busy
+  machine). Plan 050 Phase 1 re-measures it. The plan's performance section now says G8 needs a decision if
+  the slowdown holds.
+- Phases 0-1 (CPU integrator, profiles, presets) don't depend on the renderer and can start now.

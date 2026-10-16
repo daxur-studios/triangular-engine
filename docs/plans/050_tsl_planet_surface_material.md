@@ -9,9 +9,10 @@ runbook: /docs/runbook/050_tsl_planet_surface_material.md
 
 # Plan 050: TSL Planet Surface Material
 
-Status: **in progress, owner: local Sonnet session. Phase 0 spike done 2026-10-16: **go** (numbers in Runbook 050). Phase 1 built (specs + library build pass); the visual gate on a visible browser is still open, see Runbook 050. Do this first:** [Plan 049](/docs/plans/049_morphing_planet_atmosphere.md)
-(atmosphere) builds on it. Written in a cloud session from code reading only. Nothing has been
-built or measured yet. Evidence: [Runbook 050](/docs/runbook/050_tsl_planet_surface_material.md).
+Status: **in progress, owner: local Sonnet session.** Phase 0 spike: **go** (2026-10-16). Workspace on
+three **0.186.1**. Phase 1 built (specs + library build pass). Open before Phase 2: the Phase 1 visual gate on a
+visible browser, and an idle-machine re-benchmark (see Phase 1). **Do this first:**
+[Plan 049](/docs/plans/049_morphing_planet_atmosphere.md) (atmosphere) builds on it. Evidence: [Runbook 050](/docs/runbook/050_tsl_planet_surface_material.md).
 
 **Goal:** the `/cell-planet-morph-streaming` surface, rebuilt as one TSL `NodeMaterial` with a stable
 extension API, rendering the same picture on `WebGPURenderer` (WebGPU and `forceWebGL`).
@@ -193,6 +194,14 @@ Each phase ends with a visible check and a timing number, recorded in the runboo
      WebGPU / `forceWebGL` toggle, and the TSL `createMaterial`.
 
    **Gate:** morph scrub with no seam tears, in both projections, on both backends.
+
+   **Benchmark re-run (three 0.186.1, idle machine):** the 0.186.1 entry in the runbook was taken on a busy
+   machine. Re-run the spike's "run all" and add the classic `mat=basic` rows, which have never been
+   recorded. They settle whether the remaining ~2x MSAA-off gap is node PBR shading (compare unlit vs
+   standard on both renderers). Also confirm or rule out the `forceWebGL` slowdown: 0.62 -> 2.17 ms orbit
+   and 1.09 -> 5.46 ms surface between the 0.183 and 0.186 entries. That is too large to be noise. If it
+   reproduces, it is an r186 regression in three's WebGL2 backend. Bisect 0.184 / 0.185 before
+   reporting it upstream.
 2. **Surface layers.** `cellLookupLayer`, `streamedMaterialLayer` (+ its debug view) and
    `macroVariationLayer` (both position spaces).
 
@@ -209,8 +218,9 @@ Each phase ends with a visible check and a timing number, recorded in the runboo
    - New demo `planet-material-extensions`: a road layer plus a moon-eclipse occluder, covered by
      specs.
 5. **Perf + docs.**
-   - Frame time and first-compile time vs the GLSL demo, on WebGPU and `forceWebGL`. The WebGL2
-     fallback is expected to be somewhat slower than classic WebGL; record by how much.
+   - Frame time and first-compile time vs the GLSL demo, on WebGPU and `forceWebGL`. Earlier numbers are in
+     the runbook; the WebGL2 fallback ranges from about classic speed (0.183, MSAA off) to 2-5x slower
+     (0.186.1, busy machine).
    - User doc `projects/triangular-engine/docs/planet-material.md`: stages, slots, building blocks, a
      "writing a layer" example.
    - A section in `.agents/skills/triangular-engine/SKILL.md`.
