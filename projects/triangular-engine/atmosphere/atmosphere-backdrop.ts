@@ -1,5 +1,17 @@
-import { Mesh, PlaneGeometry, Vector3 } from 'three';
-import { NodeMaterial, type WebGPURenderer } from 'three/webgpu';
+import {
+  ClampToEdgeWrapping,
+  HalfFloatType,
+  LinearFilter,
+  Matrix4,
+  Mesh,
+  PlaneGeometry,
+  RGBAFormat,
+  RenderTarget,
+  Vector2,
+  Vector3,
+  type Camera,
+} from 'three';
+import { NodeMaterial, QuadMesh, type WebGPURenderer } from 'three/webgpu';
 import {
   Fn,
   If,
@@ -11,12 +23,16 @@ import {
   float,
   floor,
   length,
+  mat3,
   max,
   mod,
   normalize,
+  outputStruct,
   positionLocal,
   smoothstep,
+  texture,
   uniform,
+  uv,
   varying,
   vec3,
   vec4,
@@ -31,6 +47,12 @@ export interface AtmosphereBackdropOptions {
   steps?: number;
   /** A sky-view table to read the sky from (Plan 049, Phase 2c). Call {@link AtmosphereBackdrop.update} each frame. */
   skyView?: AtmosphereSkyViewLut;
+  /**
+   * Resolution of the from-space march as a fraction of the drawing buffer (Plan 049, Phase 2c follow-up). Above the
+   * atmosphere the planet's disc is marched per pixel; at 0.5 it is marched at a quarter of the pixels and
+   * upsampled. Needs the camera passed to {@link AtmosphereBackdrop.update}. Default 0.5; 0 turns the pass off.
+   */
+  spaceScale?: number;
 }
 
 /**
@@ -67,12 +89,31 @@ export class AtmosphereBackdrop {
   readonly skyViewEnabled = uniform(1);
   readonly skyView?: AtmosphereSkyViewLut;
 
+  /** 1 marches the view from space at reduced resolution (see {@link AtmosphereBackdropOptions.spaceScale}), 0 marches every pixel. */
+  readonly spaceLowResEnabled = uniform(1);
+  /** Number of times the reduced-resolution space pass was rendered. */
+  spaceRenderCount = 0;
+  /** Size in pixels of the reduced-resolution pass (two colour attachments: radiance and transmittance), 0 x 0 until rendered. */
+  readonly spaceSize = new Vector2();
+
+  private readonly spaceScale: number;
+  private readonly stepsOption?: number;
+  private readonly spaceReady = uniform(0);
+  private readonly spaceInvProjection = uniform(new Matrix4());
+  private readonly spaceCameraWorld = uniform(new Matrix4());
+  private spaceTarget?: RenderTarget;
+  private spaceQuad?: QuadMesh;
+  private spaceMaterial?: NodeMaterial;
+  private readonly drawingSize = new Vector2();
+
   constructor(
     readonly model: AtmosphereGpuModel,
     options: AtmosphereBackdropOptions = {},
   ) {
     const skyView = options.skyView;
     this.skyView = skyView;
+    this.spaceScale = options.spaceScale ?? 0.5;
+    this.stepsOption = options.steps;
     const material = new NodeMaterial();
     material.depthTest = false;
     material.depthWrite = false;
@@ -83,6 +124,7 @@ export class AtmosphereBackdrop {
     const farPoint = cameraProjectionMatrixInverse.mul(vec4(positionLocal.xy, 1, 1));
     const rayWorld = cameraWorldMatrix.mul(vec4(farPoint.xyz.div(farPoint.w), 0)).xyz;
     const rayVarying = varying(rayWorld, 'vAtmosphereRay');
+    const screenVarying = varying(positionLocal.xy.mul(0.5).add(0.5), 'vAtmosphereUv');
 
     material.fragmentNode = Fn(() => {
       const dir = normalize(rayVarying);
@@ -103,11 +145,17 @@ export class AtmosphereBackdrop {
         const useTable: any = (this.skyViewEnabled.greaterThan(0.5) as any).and(
           this.altitude.lessThan(model.uTopAltitude),
         );
-        If(useTable, () => {
+        const branch: any = If(useTable, () => {
           const s = skyView.lookup(dir);
           radiance.assign(s.radiance);
           transmittance.assign(s.transmittance);
-        }).Else(marchInto);
+        });
+        if (this.spaceScale > 0) {
+          branch.ElseIf(this.spaceReady.greaterThan(0.5), () => this.readSpace(screenVarying, radiance, transmittance));
+        }
+        branch.Else(marchInto);
+      } else if (this.spaceScale > 0) {
+        If(this.spaceReady.greaterThan(0.5), () => this.readSpace(screenVarying, radiance, transmittance)).Else(marchInto);
       } else {
         marchInto();
       }
@@ -181,17 +229,93 @@ export class AtmosphereBackdrop {
     this.altitude.value = Math.max(0, metres);
   }
 
+  /** Bilinear fetch from the reduced-resolution space pass at screen uv `uvNode`. */
+  private readSpace(uvNode: any, radiance: any, transmittance: any): void {
+    const target = this.ensureSpacePass();
+    radiance.assign(texture(target.textures[0], uvNode, 0).rgb);
+    transmittance.assign(texture(target.textures[1], uvNode, 0).rgb);
+  }
+
+  private ensureSpacePass(): RenderTarget {
+    if (this.spaceTarget) return this.spaceTarget;
+    // Two colour attachments (radiance, transmittance) written by one march per texel.
+    const target = new RenderTarget(1, 1, {
+      count: 2,
+      type: HalfFloatType,
+      format: RGBAFormat,
+      minFilter: LinearFilter,
+      magFilter: LinearFilter,
+      wrapS: ClampToEdgeWrapping,
+      wrapT: ClampToEdgeWrapping,
+      depthBuffer: false,
+      generateMipmaps: false,
+    } as any);
+    const model = this.model;
+    const material = new NodeMaterial();
+    const marched: any = Fn(() => {
+      const ndc: any = uv().mul(2).sub(1);
+      const far: any = this.spaceInvProjection.mul(vec4(ndc, 1, 1));
+      const dir = normalize(this.spaceCameraWorld.mul(vec4(far.xyz.div(far.w), 0)).xyz);
+      const m = model.march({
+        altitude: this.altitude,
+        dir,
+        sunDir: model.sunDirection,
+        maxDistance: float(1e30),
+        steps: this.stepsOption,
+      });
+      return (mat3 as any)(m.radiance, m.transmittance, vec3(0));
+    })().toVar();
+    material.fragmentNode = (outputStruct as any)(vec4(marched[0], 1), vec4(marched[1], 1));
+    this.spaceTarget = target;
+    this.spaceMaterial = material;
+    this.spaceQuad = new QuadMesh(material);
+    return target;
+  }
+
   /**
    * Per-frame work that must happen outside a render pass: refreshes the sky-view table if the altitude or
-   * the sun moved past its tolerance. Call from the frame tick, before the scene renders. Returns true when
-   * the table was re-rendered.
+   * the sun moved past its tolerance, and, when the camera is above the atmosphere, renders the view of the
+   * planet at reduced resolution. Call from the frame tick, after the camera has moved and before the scene
+   * renders. Pass the scene camera to enable the reduced-resolution space pass. Returns true when the
+   * sky-view table was re-rendered.
    */
-  update(renderer: WebGPURenderer): boolean {
+  update(renderer: WebGPURenderer, camera?: Camera): boolean {
+    this.updateSpacePass(renderer, camera);
     if (!this.skyView || this.skyViewEnabled.value < 0.5) return false;
     return this.skyView.update(renderer, this.altitude.value);
   }
 
+  private updateSpacePass(renderer: WebGPURenderer, camera?: Camera): void {
+    const outsideAir = this.altitude.value >= this.model.uTopAltitude.value;
+    // Inside the air the sky comes from the table, or from the full-resolution march when the table is off.
+    const wanted = this.spaceScale > 0 && this.spaceLowResEnabled.value > 0.5 && !!camera && renderer.initialized && outsideAir;
+    if (!wanted || !camera) {
+      this.spaceReady.value = 0;
+      return;
+    }
+    const target = this.ensureSpacePass();
+    renderer.getDrawingBufferSize(this.drawingSize);
+    const w = Math.max(8, Math.round(this.drawingSize.x * this.spaceScale));
+    const h = Math.max(8, Math.round(this.drawingSize.y * this.spaceScale));
+    if (target.width !== w || target.height !== h) {
+      target.setSize(w, h);
+      this.spaceSize.set(w, h);
+    }
+    camera.updateMatrixWorld();
+    this.spaceInvProjection.value.copy(camera.projectionMatrixInverse);
+    this.spaceCameraWorld.value.copy(camera.matrixWorld);
+
+    const previous = renderer.getRenderTarget();
+    renderer.setRenderTarget(target);
+    this.spaceQuad?.render(renderer);
+    renderer.setRenderTarget(previous);
+    this.spaceRenderCount++;
+    this.spaceReady.value = 1;
+  }
+
   dispose(): void {
+    this.spaceTarget?.dispose();
+    this.spaceMaterial?.dispose();
     this.mesh.geometry.dispose();
     this.material.dispose();
   }

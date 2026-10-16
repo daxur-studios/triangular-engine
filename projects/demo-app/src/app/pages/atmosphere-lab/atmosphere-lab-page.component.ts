@@ -147,6 +147,10 @@ const VIEWS: readonly ViewPreset[] = [
           sky from {{ skyViewOn() ? 'table' : 'per-pixel march' }}
         </button>
       </p>
+      <label class="check">
+        <input type="checkbox" [checked]="spaceLowRes()" (change)="setSpaceLowRes($event)" />
+        half-res march from space ({{ spaceLabel() }})
+      </label>
       <p class="note">
         GPU {{ gpuMs() }} · table renders {{ tableRenders() }} · {{ skyViewOn() ? 'table' : 'march' }} path
       </p>
@@ -182,6 +186,9 @@ const VIEWS: readonly ViewPreset[] = [
     }
     .panel label {
       display: block;
+    }
+    .panel label.check {
+      margin: 0.3rem 0;
     }
     .row {
       display: flex;
@@ -224,6 +231,8 @@ export class AtmosphereLabPageComponent {
   readonly ground = signal(true);
   readonly checker = signal(true);
   readonly skyViewOn = signal(true);
+  readonly spaceLowRes = signal(true);
+  readonly spaceLabel = signal('inside the air');
   readonly gpuMs = signal('n/a');
   readonly tableRenders = signal(0);
 
@@ -370,12 +379,20 @@ export class AtmosphereLabPageComponent {
     this.skyView.invalidate();
   }
 
+  setSpaceLowRes(event: Event): void {
+    const on = (event.target as HTMLInputElement).checked;
+    this.spaceLowRes.set(on);
+    this.backdrop.spaceLowResEnabled.value = on ? 1 : 0;
+  }
+
   /** Refreshes the sky-view table (outside any render pass) and, every 20 frames, reads the GPU timestamp. */
   private updateSkyViewAndTimings(): void {
     const renderer: any = this.engine.renderer;
     if (!renderer?.initialized) return;
-    this.backdrop.update(renderer);
+    this.backdrop.update(renderer, this.engine.camera);
     this.tableRenders.set(this.skyView.renderCount);
+    const size = this.backdrop.spaceSize;
+    this.spaceLabel.set(size.x > 0 && this.altitudeM >= this.model.uTopAltitude.value ? `${size.x} x ${size.y}` : 'not in use inside the air');
     if (++this.frame % 20 !== 0 || this.timestampsPending || !renderer.resolveTimestampsAsync) return;
     this.timestampsPending = true;
     renderer

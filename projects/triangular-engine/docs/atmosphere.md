@@ -55,3 +55,13 @@ engine.tick$.subscribe(() => backdrop.update(engine.renderer as WebGPURenderer))
 ```
 
 The table is re-rendered only when the altitude or the sun's elevation moves past a tolerance (or the profile changes). It is used while the camera is inside the atmosphere; above it, only the pixels that cross the air are marched. `backdrop.skyViewEnabled.value = 0` switches back to the per-pixel march for comparison.
+
+## From space
+
+The table cannot serve a camera above the atmosphere, and there the planet's disc can fill much of the screen, so a per-pixel march is the most expensive case. The backdrop therefore marches the air at a fraction of the screen resolution (`spaceScale`, default 0.5, so a quarter of the pixels) into a small target and upsamples it; the ground, checker and sun disc stay full-resolution. It needs the camera to build the rays:
+
+```ts
+engine.tick$.subscribe(() => backdrop.update(engine.renderer as WebGPURenderer, engine.camera));
+```
+
+Without the camera argument, or with `backdrop.spaceLowResEnabled.value = 0` or `spaceScale: 0`, every pixel is marched. The pass only runs while the camera is above the top of the atmosphere.

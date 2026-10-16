@@ -308,6 +308,48 @@ any value that is read inside an `If` and also outside it should be a `toVar()`.
   On a real GPU, open `/atmosphere-lab` (and again with `?backend=webgl2`), pick a view, and compare the GPU readout
   with "sky from table" on and off. Record the numbers here; the budget is <= 0.5 ms total from any camera position.
 - Froxel table (aerial perspective for arbitrary objects) is not built; it belongs with Phase 4's coverage work.
-- The ground still uses the per-pixel ground shading and the table for haze; the limb/space view marches only the
-  limb pixels, which is untimed.
+- The ground still uses the per-pixel ground shading and the table for haze. The space view marches every pixel
+  that crosses the air, which includes the whole planet disc, not only the limb (corrected below).
 - The table is a 1-camera-altitude cache. Two cameras (split view) would need two tables.
+
+## 2026-10-16 — Phase 2c follow-up: reduced-resolution march from space
+
+### Why
+
+The first timing on a real GPU (reported by the maintainer): much faster than the pure march at the surface, and
+nothing to draw when far out in space, but the performance drops in between (camera above the air, planet filling
+much of the view). That follows from the design: the sky-view table only serves a camera inside the air, so above it
+every pixel on the planet disc runs the full 32-step march. Cost is about `steps x planet pixels`, which peaks where
+the planet fills the screen.
+
+### What changed
+
+| File | Contents |
+|---|---|
+| `atmosphere-backdrop.ts` | `spaceScale` option (default 0.5, 0 = off), `spaceLowResEnabled` uniform, `spaceRenderCount`, `spaceSize`. `update(renderer, camera?)` renders radiance and transmittance of the camera view (one march, two colour attachments) into a `scale x drawing buffer` target while the camera is above the top of the air, and the main pass bilinearly upsamples it instead of marching. Inside the air nothing changes (table, or the full-res march when the table is off). Without a camera argument the pass is skipped and the full-res march is used |
+| `atmosphere-backdrop.spec.ts` | pass runs only above the air, size follows the drawing buffer, the checkbox uniform and a missing camera turn it off |
+| lab | "half-res march from space" checkbox, with the pass size shown |
+
+The ground disc is still shaded at full resolution (analytic ground, checker, sun disc); only the air's radiance and
+transmittance come from the small target, so the checker stays sharp and half-res only softens the haze.
+
+### Results / open
+
+- Checked by eye in the lab (Earth, space day side and the backlit limb): checkbox on and off look the same at the
+  limb; the thin backlit limb stays coloured and crisp enough. The pane is software-rendered, so no timing here.
+- **Not timed.** Maintainer: compare the GPU readout with the checkbox on and off from "Low orbit, limb" through
+  "Space, day side". Expected about a 4x cut in march cost there. If the limb shows stair-stepping or a halo on the
+  ground disc's edge (the bilinear mix of ground-hit and sky-only rays), try `spaceScale: 0.75` or a depth-aware upsample.
+- If half-res is still too slow in the mid range, the next step is the proper from-space table indexed by
+  (altitude, view zenith, sun angle) (option 3 in the discussion), or fewer steps from space.
+
+### Correction: the first version did the march twice
+
+The maintainer measured the checkbox on the "small planet at 735 m" case and still saw a drop from about 165 fps to 87 fps.
+Cause: the first version packed radiance and transmittance side by side in one target, so each of the half-res texels ran
+the full march once for each half; half-res (a quarter of the pixels) therefore only halved the work. It now writes
+both with two colour attachments (`outputStruct`, one march per texel), which is the intended 4x. In TSL the struct
+must be the material's `fragmentNode` itself (inside an `Fn` it is not recognised and the pipeline fails with
+"struct member m0 not found"), so the march is computed in an `Fn` returning a `mat3` and unpacked outside it.
+Note the sky-view table still uses the side-by-side layout (it only renders on altitude or sun changes).
+Also unverified: whether 735 m on the 64 km planet is above the top of the air (the profile top scales with the planet).
