@@ -29,6 +29,7 @@ Import optional features from their secondary entry point so applications only s
 | `triangular-engine/worldgen` | Framework-free Voronoi cell-graph planets, tectonics, ecology, climate, cell connectivity, and elevation samplers. | — |
 | `triangular-engine/worldgen/render` | Angular/Three.js 3D Globe ↔ 2.5D Map seamless GPU morphing, dynamic tracking, 2D canvas maps, borders, and tactical overlays (see [cell-planets.md](./cell-planets.md)). | `three` |
 | `triangular-engine/worldgen/render/core` | Framework-free colour ramps, projections, world-size helpers, and worker lookup payloads. Use this entry from web workers. | — |
+| `triangular-engine/atmosphere` | Planet atmosphere foundations: profile format and validation, similarity scaling to any planet radius, Earth/Mars/none presets, and a float64 CPU reference integrator (transmittance, single and multiple scattering). CPU-only for now; no rendering yet (Plan 049). | — |
 
 
 ## Provider configuration

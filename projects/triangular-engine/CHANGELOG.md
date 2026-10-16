@@ -122,6 +122,14 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- New secondary entry point `triangular-engine/atmosphere` (CPU-only, no
+  rendering yet): `PhysicalAtmosphereProfile` with `validateAtmosphereProfile`,
+  `scaleAtmosphereProfile` (similarity scaling to any planet radius plus
+  `thickness`, `reliefFit`, `hazeAtHorizon` and `nearHazeFadeM` knobs), the
+  `earth`, `mars` and `none` presets (`createAtmospherePreset`), and a float64
+  reference integrator (`integrateRadiance`, `sunTransmittance`,
+  `computeMultiScattering`, `buildMultiScatteringTable`).
+
 - Added an Angular CLI `ng add triangular-engine` schematic that installs the engine and generates a starter scene with a lazy route. Declared the required Angular Forms, Angular Material, and `three-mesh-bvh` peers used by the package.
 
 - `<terrainSurface>` and `<cellPlanetMorphStreamingView>` take

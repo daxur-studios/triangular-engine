@@ -9,8 +9,9 @@ runbook: /docs/runbook/049_morphing_planet_atmosphere.md
 
 # Plan 049: Morphing Planet Atmosphere
 
-Status: **planned, owner: unclaimed.** Nothing here has been built yet. Phases 0-1 are CPU-only and can
-start now, alongside Plan 050. Evidence: [Runbook 049](/docs/runbook/049_morphing_planet_atmosphere.md).
+Status: **in progress, owner: local Sonnet session (Phases 0–1).** Phases 0–1 (CPU foundations and
+presets) are built on 2026-10-16 and waiting for review; Phase 2 onwards waits for Plan 050 Phase 4.
+Evidence: [Runbook 049](/docs/runbook/049_morphing_planet_atmosphere.md).
 
 Target: the cell planet as shown in `/cell-planet-morph-streaming`.
 
@@ -349,7 +350,8 @@ Phases 0–1 don't need a GPU and can run while Plan 050 is in progress. Phase 2
 Plan 050 through its Phase 4.
 
 0. **Foundations.** CPU reference integrator + profile format + similarity scaling, with unit tests.
-1. **Presets.** Earth, Mars and none presets.
+   *Built 2026-10-16, in `projects/triangular-engine/atmosphere/`, awaiting review.*
+1. **Presets.** Earth, Mars and none presets. *Built 2026-10-16, awaiting review.*
 2. **Atmosphere on the globe.**
    - `atmosphere-lab` demo: LUT pipeline, sky mesh, ground-to-space camera, limb glow, planet
      shadow, eclipse `sunVisibility`.
