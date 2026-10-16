@@ -11,6 +11,9 @@ import { CatalogThumbnailComponent } from '../../shared/catalog-thumbnails/catal
 export type DemoTier = 'gem' | 'lab' | 'archived';
 export type DemoSort = 'default' | 'newest' | 'oldest' | 'title';
 
+/** Sort order the demo hub loads with by default. */
+export const DEFAULT_SORT: DemoSort = 'newest';
+
 export interface DemoCategory {
   readonly id: string;
   readonly label: string;
@@ -908,7 +911,7 @@ export class DemoIndexComponent {
   readonly selectedTier = signal<'all' | DemoTier>('all');
   readonly selectedCategory = signal<string>('all');
   readonly selectedTag = signal<string>('all');
-  readonly selectedSort = signal<DemoSort>('default');
+  readonly selectedSort = signal<DemoSort>(DEFAULT_SORT);
 
   /** All unique entry point tags with demo counts. */
   readonly allTags = computed<readonly TagWithCount[]>(() => {
@@ -1057,7 +1060,7 @@ export class DemoIndexComponent {
       this.selectedTier() !== 'all' ||
       this.selectedCategory() !== 'all' ||
       this.selectedTag() !== 'all' ||
-      this.selectedSort() !== 'default'
+      this.selectedSort() !== DEFAULT_SORT
     );
   });
 
@@ -1100,7 +1103,7 @@ export class DemoIndexComponent {
     this.selectedTier.set('all');
     this.selectedCategory.set('all');
     this.selectedTag.set('all');
-    this.selectedSort.set('default');
+    this.selectedSort.set(DEFAULT_SORT);
   }
 
   private isInputElement(target: EventTarget | null): boolean {

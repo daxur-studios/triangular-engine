@@ -548,6 +548,14 @@ export const routes: Routes = [
       ),
   },
   {
+    // Plan 050 Phase 0 throwaway spike; removed once `cell-planet-tsl` exists.
+    path: 'tsl-webgpu-spike',
+    loadComponent: () =>
+      import('./pages/tsl-webgpu-spike/tsl-webgpu-spike-page.component').then(
+        ({ TslWebgpuSpikePageComponent }) => TslWebgpuSpikePageComponent,
+      ),
+  },
+  {
     path: 'cell-planet-morph-streaming-lib',
     loadComponent: () =>
       import(

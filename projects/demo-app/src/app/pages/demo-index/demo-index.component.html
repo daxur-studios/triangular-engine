@@ -97,7 +97,7 @@
           [class.active]="selectedSort() === 'default'"
           (click)="selectSort('default')"
         >
-          Default (Categorized)
+          Categorized
         </button>
         <button
           type="button"
@@ -208,10 +208,10 @@
               <button type="button" (click)="selectCategory('all')">✕</button>
             </span>
           }
-          @if (selectedSort() !== 'default') {
+          @if (selectedSort() !== 'newest') {
             <span class="active-badge">
-              Sort: {{ selectedSort() === 'newest' ? 'Newest First' : selectedSort() === 'oldest' ? 'Oldest First' : 'Title (A–Z)' }}
-              <button type="button" (click)="selectSort('default')">✕</button>
+              Sort: {{ selectedSort() === 'default' ? 'Categorized' : selectedSort() === 'oldest' ? 'Oldest First' : 'Title (A–Z)' }}
+              <button type="button" (click)="selectSort('newest')">✕</button>
             </span>
           }
           <button type="button" class="reset-all-btn" (click)="clearAllFilters()">
