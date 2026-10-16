@@ -37,6 +37,12 @@ interface IAttemptDefinition extends ICharacterAttempt {
   readonly build: (group: Group) => void;
 }
 
+/** SVGLoader path userData shape; @types/three types it as `{}`. */
+interface ISvgPathUserData {
+  readonly style?: Record<string, string>;
+  readonly node?: Element;
+}
+
 const ATTEMPT_SPACING = 2.6;
 
 // SVG Archetype 1: Space Explorer / Cosmonaut (viewBox: 0 0 100 120)
@@ -310,7 +316,7 @@ export class CharacterLabPageComponent {
     const zStep = 0.0025; // Small z offset to avoid z-fighting while maintaining flat profile
 
     svgData.paths.forEach((path, pathIndex) => {
-      const fillColor = path.userData?.['style']?.['fill'];
+      const fillColor = (path.userData as ISvgPathUserData | undefined)?.style?.['fill'];
       if (!fillColor || fillColor === 'none') return;
 
       const shapes: Shape[] = SVGLoader.createShapes(path);
@@ -362,7 +368,7 @@ export class CharacterLabPageComponent {
     const layerStagger = 0.15;
 
     svgData.paths.forEach((path, pathIndex) => {
-      const fillColor = path.userData?.['style']?.['fill'];
+      const fillColor = (path.userData as ISvgPathUserData | undefined)?.style?.['fill'];
       if (!fillColor || fillColor === 'none') return;
 
       const shapes: Shape[] = SVGLoader.createShapes(path);
@@ -388,7 +394,7 @@ export class CharacterLabPageComponent {
       });
 
       // Per-part thickness: data-depth is authored in world meters
-      const depthAttr: string | null = path.userData?.['node']?.getAttribute?.('data-depth') ?? null;
+      const depthAttr: string | null = (path.userData as ISvgPathUserData | undefined)?.node?.getAttribute?.('data-depth') ?? null;
       const depthM = Number.parseFloat(depthAttr ?? '') || defaultDepthM;
       const depth = depthM / svgScale + pathIndex * layerStagger;
 
@@ -447,7 +453,7 @@ export class CharacterLabPageComponent {
     }
 
     svgData.paths.forEach((path, pathIndex) => {
-      const fillColor = path.userData?.['style']?.['fill'];
+      const fillColor = (path.userData as ISvgPathUserData | undefined)?.style?.['fill'];
       if (!fillColor || fillColor === 'none') return;
 
       const shapes: Shape[] = SVGLoader.createShapes(path);

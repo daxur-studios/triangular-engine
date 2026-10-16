@@ -34,5 +34,5 @@ npm run build:triangular-engine
 Build or run the demo and check WebGL/WebGPU startup, post-processing, GLTF,
 Draco, CSS renderers, and orbit controls.
 
-Current workspace baseline: Three.js `0.183.2`; library peer range
-`^0.183.0`.
+Current workspace baseline: Three.js `0.186.1`; library peer range
+`^0.186.0`.

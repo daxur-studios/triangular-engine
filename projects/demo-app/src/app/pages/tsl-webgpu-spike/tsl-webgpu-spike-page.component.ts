@@ -27,9 +27,11 @@ import {
   FrontSide,
 } from 'three';
 import {
+  DirectRenderPipeline,
   MeshBasicNodeMaterial,
   MeshStandardNodeMaterial,
   type Material,
+  type WebGPURenderer,
 } from 'three/webgpu';
 import {
   attribute,
@@ -104,6 +106,17 @@ const OUT_UBYTE =
   new URLSearchParams(globalThis.location?.search ?? '').get('out') === 'ubyte';
 const RT =
   new URLSearchParams(globalThis.location?.search ?? '').get('rt') === '1';
+/**
+ * `pipeline=direct` (webgpu / webgl2 only): render through three r186's `DirectRenderPipeline`, which applies
+ * tone mapping / output colour space inside the material shaders and skips the intermediate framebuffer +
+ * output pass of the default pipeline. Caveats: blending happens after tone mapping, and materials that
+ * sample the framebuffer (transmission / refraction) are not supported. `pipeline=default` (or omitted) keeps
+ * the renderer's own pipeline.
+ */
+const PIPELINE_DIRECT =
+  new URLSearchParams(globalThis.location?.search ?? '').get('pipeline') ===
+    'direct' &&
+  (BACKEND === 'webgpu' || BACKEND === 'webgl2');
 
 function engineProviders() {
   const base = { showFPS: false };
@@ -445,6 +458,7 @@ export class TslWebgpuSpikePageComponent {
 
     this.engine.beforeRender$.pipe(takeUntilDestroyed()).subscribe(() => {
       this.installRtPass();
+      this.installDirectPipeline();
       this.beforeAt = performance.now();
     });
     this.engine.renderComplete$.pipe(takeUntilDestroyed()).subscribe(() => {
@@ -463,6 +477,25 @@ export class TslWebgpuSpikePageComponent {
   }
 
   private rtRenderer?: WebGLRenderer;
+  private directPipeline?: DirectRenderPipeline;
+
+  /** `pipeline=direct`: hand the engine's main render to a `DirectRenderPipeline` (registered once). */
+  private installDirectPipeline(): void {
+    if (!PIPELINE_DIRECT || this.directPipeline) return;
+    const renderer = this.engine.renderer as unknown as WebGPURenderer;
+    if (!renderer?.initialized) return;
+    const pipeline = new DirectRenderPipeline(renderer);
+    this.directPipeline = pipeline;
+    const registered = {
+      render: () => pipeline.render(this.engine.scene, this.engine.camera),
+      setSize: () => undefined,
+    };
+    this.engine.registerRenderPipeline(registered);
+    this.destroyRef.onDestroy(() => {
+      this.engine.unregisterRenderPipeline(registered);
+      pipeline.dispose();
+    });
+  }
 
   /**
    * `rt=1` on classic: wraps `render` so the scene goes to a half-float (MSAA when aa=1) target and a
@@ -531,6 +564,11 @@ export class TslWebgpuSpikePageComponent {
     'backend=classic&aa=1&mat=basic',
     'backend=classic&aa=0&rt=1',
     'backend=classic&aa=1&rt=1',
+    // r186 DirectRenderPipeline (Runbook 050): the same WebGPURenderer, output processing inside the materials
+    'backend=webgpu&aa=1&pipeline=direct',
+    'backend=webgpu&aa=0&pipeline=direct',
+    'backend=webgl2&aa=1&pipeline=direct',
+    'backend=webgl2&aa=0&pipeline=direct',
   ];
 
   private readStore(key: string): string | null {
@@ -610,6 +648,7 @@ export class TslWebgpuSpikePageComponent {
         mat: BASIC ? 'basic' : 'std',
         out: OUT_UBYTE ? 'ubyte' : 'half',
         rt: RT ? 1 : 0,
+        pipeline: PIPELINE_DIRECT ? 'direct' : 'default',
         ms: [orbit.ms, surface.ms, flat.ms],
         draws: [orbit.draws, surface.draws, flat.draws],
       });
@@ -621,7 +660,8 @@ export class TslWebgpuSpikePageComponent {
           (q.get('aa') === '0') === !AA &&
           (q.get('mat') === 'basic') === BASIC &&
           (q.get('out') === 'ubyte') === OUT_UBYTE &&
-          (q.get('rt') === '1') === RT
+          (q.get('rt') === '1') === RT &&
+          (q.get('pipeline') === 'direct') === PIPELINE_DIRECT
         );
       });
       const next = TslWebgpuSpikePageComponent.CONFIGS[idx + 1];
@@ -660,6 +700,7 @@ export class TslWebgpuSpikePageComponent {
             mat: string;
             out: string;
             rt: number;
+            pipeline: string;
             ms: number[];
             draws: number[];
           }[]

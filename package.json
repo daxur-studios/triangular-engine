@@ -53,8 +53,8 @@
     "browser-image-compression": "^2.0.2",
     "dexie": "^4.2.1",
     "rxjs": "~7.8.0",
-    "three": "0.183.2",
-    "three-mesh-bvh": "^0.9.9",
+    "three": "0.186.1",
+    "three-mesh-bvh": "^0.9.16",
     "tslib": "^2.3.0"
   },
   "devDependencies": {
@@ -68,7 +68,8 @@
     "@takram/three-clouds": "0.7.6",
     "@takram/three-geospatial": "0.9.1",
     "@types/jasmine": "~5.1.0",
-    "@types/three": "^0.183.1",
+    "@types/three": "^0.186.0",
+    "@webgpu/types": "^0.1.74",
     "jasmine-core": "~5.2.0",
     "jolt-physics": "1.0.1",
     "karma": "~6.4.0",
@@ -78,7 +79,7 @@
     "karma-jasmine-html-reporter": "~2.1.0",
     "meshoptimizer": "^1.0.1",
     "ng-packagr": "^20.3.2",
-    "postprocessing": "6.39.2",
+    "postprocessing": "6.39.5",
     "prettier": "^3.3.3",
     "typescript": "~5.9.3",
     "zone.js": "~0.15.1"

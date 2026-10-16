@@ -11,7 +11,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 | Dependency      | Version  | Notes                                                          |
 | --------------- | -------- | -------------------------------------------------------------- |
 | Angular         | ^20.3.3  | Required - Angular 20.x, at least 20.3.3                       |
-| Three.js        | ^0.183.0 | Required                                                       |
+| Three.js        | ^0.186.0 | Required                                                       |
 | Dexie           | ^4.2.1   | Required                                                       |
 | Angular CDK     | ^20.2.14 | Required by Portal Layout                                      |
 | Angular Forms   | ^20.3.3  | Required by engine settings                                     |
@@ -108,7 +108,7 @@ These are the core package's required peers (see `package.json` for exact versio
   "@angular/core": "^20.3.3",
   "@angular/forms": "^20.3.3",
   "@daxur-studios/portal-layout": "^0.0.1",
-  "three": "^0.183.0",
+  "three": "^0.186.0",
   "three-mesh-bvh": "^0.9.9",
   "dexie": "^4.2.1",
   "rxjs": "^7.8.0"

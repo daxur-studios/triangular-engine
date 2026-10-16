@@ -1,5 +1,6 @@
 # Changelog
 
+- Peer dependency ranges moved to Three.js `^0.186.0` (from `^0.183.0`), `three-mesh-bvh` to `^0.9.16` and `postprocessing` to `^6.39.5`. Consumers on Three.js 0.183 must upgrade `three` to `^0.186.0` together with this release.
 - `TerrainSurfaceComponent` accepts an optional `telemetrySection` input. When set, the surface adds its LOD and draw counts (desired, resident, queued, draw calls, resident triangles, resident geometry MB and the level histogram) to the **Copy for Agent** report under that name. Unset, the default, it adds nothing.
 - `IPerformanceDropEvent.pageSections` holds the `FPSController.telemetry` sections as they read when a frame drop was detected. The **Copy for Agent** report prints them under `drop_event` as `at drop:`, so a drop shows the page state from that second rather than from when the report was copied.
 - `FPSController.telemetry` (a `TelemetrySections` registry) lets pages add named sections to the **Copy for Agent** report, after the engine's own block. Register with `register(name, () => values)`, which returns a function that removes the section; values are read only when the report is copied, and a throwing section is reported as an error without stopping the copy.

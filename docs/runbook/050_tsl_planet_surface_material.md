@@ -183,3 +183,45 @@ material: culled with the mask, drawn without it.
   streaming geometry (a hidden browser pane could not present frames reliably; see the caveat in the Phase 0 entry).
   The `forceWebGL` path is covered only by the specs. Needs a visible-browser pass: open `/cell-planet-tsl?backend=webgl2`
   and `?backend=webgpu`, click "scrub morph", toggle the projection.
+
+## 2026-10-16 — three 0.186.1: `DirectRenderPipeline` re-run of the Phase 0 benchmark
+
+Workspace upgraded 0.183.2 -> **0.186.1** (see `docs/upgrades/01_threejs_0.183_to_0.186.md`). r186 adds
+`DirectRenderPipeline` (`three/webgpu`): tone mapping and output colour space run inside the material shaders, so the
+intermediate framebuffer and output pass of the default `WebGPURenderer` pipeline are skipped. The spike page has a
+new `?pipeline=direct|default` flag (webgpu and webgl2 backends only; the page registers the pipeline with
+`EngineService.registerRenderPipeline`). The "run all benchmarks" button now also runs four `pipeline=direct` configs.
+
+Same method as the entries above: 1280x720 at pixel ratio 1, ms per frame `[orbit, surface, flat]`, GPU-synced median of
+5 x 150 frames, visible Chrome pane (AMD). **The machine was not idle** (dev builds and a test run just before), and
+numbers are noisier than the earlier table (`forceWebGL` MSAA-on read 4.8 vs 2.8 earlier). Read gaps of ~0.3 ms as noise.
+
+| Backend / pipeline | MSAA | orbit | surface | flat |
+|---|---|---|---|---|
+| classic WebGL, GLSL | on | 0.92 | 1.43 | 1.02 |
+| classic WebGL, GLSL | off | 0.50 | 0.95 | 0.66 |
+| WebGPU, default pipeline | on | 2.40 | 3.39 | 2.95 |
+| WebGPU, default pipeline | off | 1.06 | 1.51 | 1.28 |
+| WebGPU, **direct** | on | 1.70 | 2.16 | 1.68 |
+| WebGPU, **direct** | off | 1.04 | 1.57 | 1.22 |
+| `forceWebGL`, default pipeline | on | 4.77 | 8.44 | 5.72 |
+| `forceWebGL`, default pipeline | off | 2.17 | 5.46 | 3.15 |
+| `forceWebGL`, **direct** | on | 1.88 | 5.11 | 2.75 |
+| `forceWebGL`, **direct** | off | 1.82 | 5.20 | 2.78 |
+
+Draw calls: WebGPU 32/80/62 direct vs 33/81/63 default (the background draw is gone); `forceWebGL` 1 vs 2.
+Not measured: per-pass `trackTimestamp` split (the single `gpuMsLastFrame` the spike reports covers the whole render).
+
+Conclusion: **direct removes the MSAA surcharge, not the gap.** With MSAA on it saves 29-43% (2.40 -> 1.70 orbit) but
+is still 1.5-1.8x classic; with MSAA off it is identical to the default pipeline (1.04 vs 1.06), still ~2x classic.
+So the output pass is not what the remaining WebGPU-vs-classic difference is made of; node PBR shading and per-instance
+draws are. Direct is **not within ~10% of classic**, so the demo pages stay on the default pipeline (MSAA off, Phase 1 decision).
+`pipeline=direct` stays available as an opt-in on the spike page.
+
+Caveats for anyone enabling direct later: blending happens after tone mapping, and materials that sample the
+framebuffer (transmission / refraction) do not work. Plan 049's atmosphere needs an HDR `RenderPipeline` for bloom and
+exposure, which `DirectRenderPipeline` cannot provide, so Plan 049 should not depend on it.
+
+Spike note: the diagnostic `rt=1` rows (classic, half-float target + tone-map quad) are no longer valid on r186. Its `ShaderMaterial`
+fails to compile (`toneMappingExposure` redefinition: the quad's `#include <tonemapping_pars_fragment>` now duplicates what
+three injects), so those rows measured a failed pass. The 0.183 numbers above are unaffected.

@@ -59,7 +59,7 @@ npm i @pmndrs/vanilla
 | ----------------- | ---------- |
 | `@angular/common` | `^20.3.3`  |
 | `@angular/core`   | `^20.3.3`  |
-| `three`           | `^0.183.0` |
+| `three`           | `^0.186.0` |
 | `dexie`           | `^4.2.1`   |
 
 Optional image compression (for `ScreenshotService` post-capture compression):

@@ -237,3 +237,4 @@ After Phase 4, Plan 049 Phase 2 can start. Phase 5 can run alongside it.
 | Port lives in a new `triangular-engine/planet-material` entry point | Proposed |
 | Port only the streaming-demo path first (see table). Other `onBeforeCompile` users later, if ever | Proposed |
 | `simpleDayNightLighting` as a stand-in lighting stage until Plan 049 replaces it | Proposed |
+| Demo pages keep the default `WebGPURenderer` pipeline. three 0.186 `DirectRenderPipeline` (`?pipeline=direct` on the spike) only removes the MSAA surcharge, not the gap to classic (Runbook 050, three 0.186.1 entry). Plan 049 atmosphere needs an HDR `RenderPipeline` for bloom/exposure; direct cannot provide it | **Decided** 2026-10-16 |
