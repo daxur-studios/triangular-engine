@@ -353,3 +353,37 @@ must be the material's `fragmentNode` itself (inside an `Fn` it is not recognise
 "struct member m0 not found"), so the march is computed in an `Fn` returning a `mat3` and unpacked outside it.
 Note the sky-view table still uses the side-by-side layout (it only renders on altitude or sun changes).
 Also unverified: whether 735 m on the 64 km planet is above the top of the air (the profile top scales with the planet).
+
+## Phase 2b: atmosphere on the planet material (2026-10-16)
+
+Plan 050 reached Phase 4 (slots built), so Phase 2b started. The first slice is on a `PlanetSurfaceMaterial` globe with the
+morph at 0 (`/atmosphere-planet`). The cell-planet streaming demo and the eclipse hookup are not done.
+
+### What was built
+
+| File | Contents |
+|---|---|
+| `atmosphere-planet-stages.ts` | `PlanetAtmosphereBinding`: uniforms (sun in the body frame, camera in the body frame, camera altitude, metres per unit, exposure), `sync(camera, planet, backdrop?)`, `lighting()` (stage 4) and `perspective()` (stage 6). Structural context types, so the atmosphere entry does not import `planet-material`. |
+| `atmosphere-backdrop.ts` | `frame` (world to local rotation, identity by default) applied to the view ray in the main and the space pass, so a planet seen from any side can use the backdrop for the sky and limb. |
+| `atmosphere-gpu-model.ts` | `groundIrradiance(up, sunDir?)`: the sun can be passed in (the stage uses the body-frame sun). |
+| `planet-lighting.ts`, `planet-surface-material.ts` | `ILightingInput.emissive`: the emissive sum, so a lighting stage that relights from the albedo can add it back. |
+| spec | `sync` maths (altitude, local frame, planet turned), and on the GPU: bright toward the sun, dark away, aerial perspective adds blue. |
+| demo | `/atmosphere-planet`: size, preset, three camera heights, toggles for each stage and the sky, sun and exposure sliders. |
+
+### Decisions
+
+- The atmosphere stage works in the planet's body frame, with a local frame built from the camera's radial direction, so the
+  planet can sit and turn anywhere. The camera altitude is a float64 number (as in the lab); the camera position is a float32
+  uniform in metres.
+- `lighting()` replaces the PBR result (it relights from the surface albedo) instead of modulating it: the atmosphere's sun
+  colour and sky light cannot be expressed as a scale on white-light PBR. Normal maps and scene lights do not reach it.
+- Aerial perspective is one 16-32 step march per fragment for now. It takes the surface point on the sphere of the radius, so
+  terrain height and the mid-morph flat map are not modelled; the froxel table is the planned replacement.
+
+### Results / open
+
+- Checked by eye in the browser pane (software rendering, no timings): the globe is lit with a soft terminator, the aerial
+  perspective washes it with a blue-lilac haze from space, the sky toggle adds the blue limb. No console errors from the page.
+- **Open:** the maintainer's visual check (dusk on the ground, low orbit, the 64 km vs Earth sizes, Mars air), timing of the
+  per-fragment march on a real GPU, the horizon view from the ground (the demo's view buttons look straight down), the
+  `/planet-material-extensions` eclipse with the atmosphere on, the `cell-planet-tsl` demo, and the gate shots at `m = 0`.

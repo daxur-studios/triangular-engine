@@ -75,7 +75,7 @@ export const equatorRoad: SurfaceLayer = (context, below) => {
 material.addSurfaceLayer({ id: 'road', order: SURFACE_LAYER_ORDER.game, layer: equatorRoad });
 ```
 
-A sun occluder is `(context) => number node` (1 = lit), an emissive is `(context, surface) => vec3 node`, a lighting stage is `(context, { color, sunVisibility, surface }) => vec3 node`, an atmosphere stage is `(context, color) => vec3 node`.
+A sun occluder is `(context) => number node` (1 = lit), an emissive is `(context, surface) => vec3 node`, a lighting stage is `(context, { color, sunVisibility, surface, emissive }) => vec3 node` (`emissive` is the emissive stack's sum, already in `color`, or null), an atmosphere stage is `(context, color) => vec3 node`.
 
 ## Rules that keep it fast
 
@@ -85,6 +85,10 @@ A sun occluder is `(context) => number node` (1 = lit), an emissive is `(context
 - **Prefer `mix` over `select`** when blending vec3 values from `outputNode.rgb`: a `select` there returned 0 on the false branch in the day/night stage and was not root-caused.
 - **The lighting stage runs on the final lit colour**, as the GLSL day/night patch does. With occluders and no custom stage, `sunVisibilityLighting` scales the colour by `mix(0.15, 1, sunVisibility)`, exact for a sun-only scene and approximate otherwise.
 - **`lightingTurn`** (`createPlanetMorphLightingUniforms().uMorphLightingTurn`, a `mat3`) makes the shading normal `normalize(turn * sphereNormal)` instead of the morphed normal, so lighting follows the globe while the geometry morphs.
+
+## Projecting in the shader (dynamic mode)
+
+By default the flat map is the baked `aFlatPos`. To re-centre the map on a point, for example a tracked unit, call `setPlanetProjectionCentre(material.morph, { lonDeg, latDeg })`. It writes the whole projection basis and turns `uProjMode` on. Pass `null` to go back to the baked map. Setting `uProjMode` on its own is not enough: without a basis the map is projected from the default frame and tears. The seam that moves with the centre is culled in the fragment stage, so it works on indexed streaming tiles with no extra vertex attributes. Optional `seamCullAttributes` adds an exact per-triangle cull for geometry that carries `aOtherDir1/2`, at the cost of two vertex buffers.
 
 ## Backends and batching
 

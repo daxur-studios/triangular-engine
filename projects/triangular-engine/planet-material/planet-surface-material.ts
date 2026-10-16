@@ -160,7 +160,7 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
 
     let color: any = outputNode.rgb;
     if (lighting) {
-      color = lighting(this.context, { color, sunVisibility: this.sunVisibilityNode, surface: this.lastSample });
+      color = lighting(this.context, { color, sunVisibility: this.sunVisibilityNode, surface: this.lastSample, emissive: this.emissiveNode });
     }
     if (atmosphere) color = atmosphere(this.context, color);
     return super.setupOutput(builder, vec4(color, outputNode.a));

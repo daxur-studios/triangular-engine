@@ -148,7 +148,7 @@ All notable changes to triangular-engine are documented here.
   the `/atmosphere-lab` demo, and `AtmosphereSkyViewLut`, a cached sky-view table
   that turns the sky into one fetch per pixel. Above the air, the backdrop
   marches the planet at reduced resolution (`spaceScale`, pass the camera to
-  `backdrop.update`). See `docs/atmosphere.md`.
+  `backdrop.update`). `PlanetAtmosphereBinding` fills `PlanetSurfaceMaterial`'s lighting and atmosphere stages (`lighting()`, `perspective()`, `sync`), and the backdrop takes a `frame` so a planet can sit anywhere; demo `/atmosphere-planet`. See `docs/atmosphere.md`.
 
 - Added an Angular CLI `ng add triangular-engine` schematic that installs the engine and generates a starter scene with a lazy route. Declared the required Angular Forms, Angular Material, and `three-mesh-bvh` peers used by the package.
 

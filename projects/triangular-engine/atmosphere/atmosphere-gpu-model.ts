@@ -299,8 +299,8 @@ export class AtmosphereGpuModel {
    * `sunTransmittance * max(n.l, 0) + skyIrradiance`. Multiply by `albedo / pi` and the sun irradiance
    * for outgoing radiance. `up` is the unit normal (the local vertical at the point).
    */
-  groundIrradiance(up: any): any {
-    const muSun = dot(up, this.sunDirection);
+  groundIrradiance(up: any, sunDir: any = this.sunDirection): any {
+    const muSun = dot(up, sunDir);
     const sunT = this.sunTransmittance(float(0), this.uRadius, muSun);
     return sunT.mul(max(muSun, 0)).add(this.skyIrradiance(float(0), muSun));
   }

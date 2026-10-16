@@ -28,6 +28,7 @@ import {
   planetOceanMaterial,
   PlanetSurfaceMaterial,
   setPlanetMapExtent,
+  setPlanetProjectionCentre,
   streamedMaterialLayer,
   SURFACE_LAYER_ORDER,
 } from 'triangular-engine/planet-material';
@@ -180,7 +181,34 @@ const MACRO: 'off' | 'bodyFixed' | 'morphed' =
         <button (click)="dynamic.set(!dynamic())">
           projection in shader: {{ dynamic() ? 'on' : 'off' }}
         </button>
+        <button (click)="toggleSeamGlobe()">
+          synthetic seam globe: {{ seamTest ? 'on' : 'off' }}
+        </button>
       </p>
+      @if (dynamic()) {
+        <label
+          >centre lon {{ centerLon() }}°
+          <input
+            type="range"
+            min="-180"
+            max="180"
+            step="1"
+            [value]="centerLon()"
+            (input)="centerLon.set(+$any($event.target).value)"
+          />
+        </label>
+        <label
+          >centre lat {{ centerLat() }}°
+          <input
+            type="range"
+            min="-85"
+            max="85"
+            step="1"
+            [value]="centerLat()"
+            (input)="centerLat.set(+$any($event.target).value)"
+          />
+        </label>
+      }
       <p class="row">
         <button (click)="viewFront()">front</button>
         <button (click)="viewSeam()">antimeridian</button>
@@ -310,6 +338,9 @@ export class CellPlanetTslPageComponent {
   readonly projectionKind = signal<MapProjectionKind>('equalEarth');
   /** Project in the shader from the tracked basis instead of mixing the baked flat positions. */
   readonly dynamic = signal(false);
+  /** The dynamic projection's centre, degrees: the basis is set by hand, not by the camera (as the spike's manual centre). */
+  readonly centerLon = signal(0);
+  readonly centerLat = signal(0);
   readonly scrubbing = signal(false);
   readonly cameraPosition = signal<[number, number, number]>([
     0,
@@ -538,7 +569,10 @@ export class CellPlanetTslPageComponent {
         this.projectionKind() === 'equalEarth' ? 1 : 0;
     });
     effect(() => {
-      this.surface.morph.uProjMode.value = this.dynamic() ? 1 : 0;
+      setPlanetProjectionCentre(
+        this.surface.morph,
+        this.dynamic() ? { lonDeg: this.centerLon(), latDeg: this.centerLat() } : null,
+      );
     });
 
     // Morph scrub: 0 -> 1 -> 0 over 8 s, for checking the seam at every morph value.
@@ -729,6 +763,13 @@ export class CellPlanetTslPageComponent {
     const value = Number((event.target as HTMLInputElement).value);
     if (Number.isFinite(value))
       this.morphProgress.set(Math.max(0, Math.min(1, value)));
+  }
+
+  toggleSeamGlobe(): void {
+    const url = new URL(globalThis.location.href);
+    if (this.seamTest) url.searchParams.delete('mesh');
+    else url.searchParams.set('mesh', 'seam');
+    globalThis.location.href = url.toString();
   }
 
   viewFront(): void {

@@ -2,6 +2,7 @@ import {
   ClampToEdgeWrapping,
   HalfFloatType,
   LinearFilter,
+  Matrix3,
   Matrix4,
   Mesh,
   PlaneGeometry,
@@ -96,6 +97,13 @@ export class AtmosphereBackdrop {
   /** Size in pixels of the reduced-resolution pass (two colour attachments: radiance and transmittance), 0 x 0 until rendered. */
   readonly spaceSize = new Vector2();
 
+  /**
+   * Rotation from world directions to the backdrop's local frame (y up). Identity keeps the lab's convention, where
+   * the world is the local frame. A planet seen from outside sets it so local y is the camera's radial direction
+   * (see `PlanetAtmosphereBinding`).
+   */
+  readonly frame = uniform(new Matrix3());
+
   private readonly spaceScale: number;
   private readonly stepsOption?: number;
   private readonly spaceReady = uniform(0);
@@ -127,7 +135,7 @@ export class AtmosphereBackdrop {
     const screenVarying = varying(positionLocal.xy.mul(0.5).add(0.5), 'vAtmosphereUv');
 
     material.fragmentNode = Fn(() => {
-      const dir = normalize(rayVarying);
+      const dir = normalize(this.frame.mul(rayVarying));
       const sunDir = model.sunDirection;
       const maxDistance = float(1e30);
       const trace = model.traceRay({ altitude: this.altitude, dir, maxDistance });
@@ -255,7 +263,7 @@ export class AtmosphereBackdrop {
     const marched: any = Fn(() => {
       const ndc: any = uv().mul(2).sub(1);
       const far: any = this.spaceInvProjection.mul(vec4(ndc, 1, 1));
-      const dir = normalize(this.spaceCameraWorld.mul(vec4(far.xyz.div(far.w), 0)).xyz);
+      const dir = normalize(this.frame.mul(this.spaceCameraWorld.mul(vec4(far.xyz.div(far.w), 0)).xyz));
       const m = model.march({
         altitude: this.altitude,
         dir,

@@ -13,6 +13,11 @@ export interface ILightingInput {
   readonly sunVisibility: any;
   /** The surface sample the layers produced. */
   readonly surface: ISurfaceSample;
+  /**
+   * The emissive stack's sum (`vec3`), already included in `color`; `null` with none. A stage that discards
+   * `color` and relights from `surface.albedo` (Plan 049's `atmosphereLighting`) adds it back.
+   */
+  readonly emissive?: any;
 }
 
 /**

@@ -174,6 +174,23 @@ material: culled with the mask, drawn without it.
 - The vertex-side cull needs real `aOtherDir1/2`; the streaming pipeline writes zeros there, so in dynamic projection mode
   on streaming geometry only the `fwidth` cull applies (same as the GLSL path), which cannot catch large triangles.
   Static projection (baked flat positions, the demo default) needs no seam handling: patches split at the antimeridian.
+- **Dynamic projection needs a tracked basis.** `uProjMode = 1` alone projects from the default frame (`uProjForward` +Z,
+  `uProjUp` +Y, `uProjRight` +X), which tears the map into shards on baked flat positions. The GLSL views set the basis together
+  with the mode (`CellPlanetMorphView.updateTracking`); `/cell-planet-morph-streaming` pins `uProjMode` to 0, so no shipped
+  streaming demo or game exercised dynamic mode on streamed tiles (`/cell-planet-morph-spike` does, on its full un-indexed
+  geometry, which carries real `aOtherDir1/2`). The `cell-planet-tsl` "projection in shader" toggle now sets the basis from
+  centre lon/lat sliders (not from the camera). **Checked visually:** on the synthetic seam globe (the "synthetic seam
+  globe" button, `?mesh=seam`) dynamic mode renders cleanly, so the TSL morph is correct. On streamed tiles it still tears:
+  the tiles are indexed, so `aOtherDir1/2` (per triangle) is a zero array and only the `fwidth` cull applied.
+  **Why not un-index the tiles (the worldgen change):** it triples the vertices (about 5x vertex-buffer memory and 3-6x vertex
+  work), and the two extra attributes push the TSL stack to 9 vertex buffers, over WebGPU's limit of 8. So the seam check
+  is attribute-free instead: stage 1 compares the interpolated `vProjLon` with the longitude of the interpolated sphere
+  direction and discards fragments off by more than 0.5 rad (the polar cap, `|dot(dir, up)| > 0.99`, is exempt). It runs
+  only in dynamic mode, costs one `atan` per fragment, and needs no pipeline change. **Not yet verified visually** on
+  streamed tiles; the threshold and the polar exemption may need tuning. The GLSL path is unchanged (its streaming
+  view has no dynamic mode).
+- `setPlanetProjectionCentre(morph, { lonDeg, latDeg } | null)` writes the whole basis and the mode, so a page does not
+  build the vectors itself (a spec covers it).
 - The sun-occlusion and emissive stacks exist in the API but sun occlusion is not yet wired into lighting (Phase 4).
 
 ### Gate status

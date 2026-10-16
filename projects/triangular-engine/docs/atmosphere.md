@@ -65,3 +65,28 @@ engine.tick$.subscribe(() => backdrop.update(engine.renderer as WebGPURenderer, 
 ```
 
 Without the camera argument, or with `backdrop.spaceLowResEnabled.value = 0` or `spaceScale: 0`, every pixel is marched. The pass only runs while the camera is above the top of the atmosphere.
+
+## On the planet material
+
+`PlanetAtmosphereBinding` fills two stages of `PlanetSurfaceMaterial` (see [planet-material.md](planet-material.md)): the lighting stage and the atmosphere stage. The sky and limb glow behind the globe stay with `AtmosphereBackdrop` (set `groundEnabled.value = 0`), which draws behind the mesh.
+
+```ts
+const binding = new PlanetAtmosphereBinding(model, { radiusUnits: 1 }); // the globe's radius in mesh units
+const material = new PlanetSurfaceMaterial({
+  lighting: { id: 'atmosphere', stage: binding.lighting() },
+  atmosphere: { id: 'atmosphere', stage: binding.perspective() },
+});
+
+binding.setSunBody(x, y, z); // sun direction in the planet's body frame
+engine.tick$.subscribe(() => {
+  binding.sync(engine.camera, globe, backdrop); // camera altitude, body-frame camera, backdrop frame and sun
+  backdrop.update(renderer, engine.camera);
+});
+```
+
+- `lighting()` relights the surface as `albedo x (sun transmittance x N.L x sunVisibility + sky irradiance) x sun irradiance / pi x exposure`, using each point's own sun angle. It replaces the PBR result (other scene lights and normal maps do not reach it); the emissive stack is added back. An eclipse occluder darkens only the direct term.
+- `perspective()` attenuates the colour along the camera-to-surface ray and adds that ray's in-scattering (one march per fragment for now; a froxel table is planned). The surface point is taken on the sphere of the planet's radius, so terrain height and the mid-morph flat map are not modelled yet.
+- The planet may sit anywhere and turn any way: the stages work in its body frame, and `sync` points the backdrop's local frame at the camera's radial direction. The mesh's size in metres is the profile's radius, so `radiusUnits` sets the scale; call `binding.refreshScale()` after `model.setProfile` changes the radius.
+- `exposure` lives on the binding and is copied to the backdrop by `sync`, so the surface and the sky agree.
+
+Try it at `/atmosphere-planet`.

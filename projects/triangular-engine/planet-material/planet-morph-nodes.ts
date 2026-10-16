@@ -63,6 +63,37 @@ export function createPlanetMorphUniforms(): IPlanetMorphUniforms {
   };
 }
 
+/** Longitude mismatch (radians) between the interpolated and the true projected longitude that marks a seam-spanning fragment. */
+const SEAM_LON_MISMATCH = 0.5;
+/** `|dot(dir, up)|` above which a fragment is within the projection's polar cap and exempt from that check (about 8 degrees). */
+const SEAM_POLE_EXEMPT = 0.99;
+
+/**
+ * Centres the dynamic projection on `lonDeg`/`latDeg` (body frame; lon 0 = +Z, lat 0 = the equator) and switches
+ * `uProjMode` on, writing the whole basis (`uProjForward`, `uProjUp`, `uProjRight`) as the GLSL views'
+ * `computeManualBasis` does. Setting `uProjMode` alone leaves the default frame, which is not what a caller wants.
+ * Pass `null` to return to the static, baked projection.
+ */
+export function setPlanetProjectionCentre(
+  uniforms: IPlanetMorphUniforms,
+  centre: { readonly lonDeg: number; readonly latDeg: number } | null,
+): void {
+  if (!centre) {
+    uniforms.uProjMode.value = 0;
+    return;
+  }
+  const lon = (centre.lonDeg * Math.PI) / 180;
+  const lat = (centre.latDeg * Math.PI) / 180;
+  const forward = uniforms.uProjForward.value.set(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));
+  const up = uniforms.uProjUp.value.set(0, 1, 0);
+  up.addScaledVector(forward, -forward.y);
+  // A centre on a pole has no horizontal tangent: use -Z / +Z as the up reference, as the GLSL helper does.
+  if (up.lengthSq() < 1e-8) up.set(0, 0, forward.y > 0 ? -1 : 1);
+  up.normalize();
+  uniforms.uProjRight.value.crossVectors(up, forward);
+  uniforms.uProjMode.value = 1;
+}
+
 /** Sets the map extent for a planet of `radiusM`: a 2:1 map, `2 pi r` wide. */
 export function setPlanetMapExtent(uniforms: IPlanetMorphUniforms, radiusM: number): void {
   uniforms.uRadius.value = radiusM;
@@ -197,8 +228,20 @@ export function planetMorphGraph(
   // WGSL only allows derivatives in uniform control flow, so `fwidth` is evaluated once, outside any branch.
   const cullActive = mode.greaterThan(0.5).and(morph.greaterThan(0.05));
   const fw = vProjLon.fwidth().toVar();
-  const discardFragment = cullActive.and(vSeamCull.greaterThan(0.5).or(fw.greaterThan(2.8)));
-  const discardShadow = cullActive.and(vSeamCull.greaterThan(0.5));
+  // Attribute-free seam check for geometry without `aOtherDir1/2` (indexed streaming tiles). Across a triangle
+  // that spans the antimeridian the interpolated `vProjLon` runs the long way round, so it parts from the
+  // longitude of the interpolated direction by up to a full turn, at any triangle size. Inside an ordinary
+  // triangle the two agree to a few hundredths of a radian. Near the projection pole longitude changes fast
+  // and linear interpolation is legitimately off, so that cap is exempt.
+  const trueLon = seamProjectedLon(vSphereNorm, forward, right);
+  const lonMismatch = vProjLon
+    .sub(trueLon)
+    .abs()
+    .greaterThan(SEAM_LON_MISMATCH)
+    .and(dot(normalize(vSphereNorm), up).abs().lessThan(SEAM_POLE_EXEMPT));
+  const seamSpan = vSeamCull.greaterThan(0.5).or(lonMismatch);
+  const discardFragment = cullActive.and(seamSpan.or(fw.greaterThan(2.8)));
+  const discardShadow = cullActive.and(seamSpan);
 
   return {
     positionNode: morphedLocal.add(batchOffset),

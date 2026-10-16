@@ -363,7 +363,7 @@ before the material port lands. Phase 2b onwards needs Plan 050 through its Phas
    - The per-pixel march is the *reference path*, fixed step count. The cached sky-view table is 2c.
    - **Gate (visual, by eye):** the 4-size screenshot set from the ground (noon, dusk), low orbit and space
      with the sun behind the planet; each size reads as the same atmosphere.
-2b. **Atmosphere on the cell planet globe** (needs Plan 050 Phase 4).
+2b. **Atmosphere on the cell planet globe** (needs Plan 050 Phase 4). *First slice built 2026-10-16 on a `PlanetSurfaceMaterial` globe at `/atmosphere-planet` (stages, binding, sky behind the globe), awaiting a visual check; the cell-planet streaming demo and the eclipse hookup are open.*
    - Lighting stage (`atmosphereLighting()`) + stage 6 (`atmospherePerspective()`) + light sync + exposure.
    - Eclipse `sunVisibility`.
    - **Gate:** the same shots on the cell planet at `m = 0`.

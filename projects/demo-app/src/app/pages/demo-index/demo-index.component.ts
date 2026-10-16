@@ -297,6 +297,19 @@ export const DEMOS: readonly DemoItem[] = [
       'Plan 049 Phase 2a: LUT-driven sky, sunset, limb glow, planet shadow and aerial perspective on an analytic ground sphere, from the ground to space, at planet radii from 64 km to Earth. WebGPU or its WebGL2 fallback.',
   },
   {
+    id: 'atmosphere-planet',
+    number: '02i',
+    title: 'Atmosphere on the Planet Material',
+    route: '/atmosphere-planet',
+    categoryId: 'atmosphere',
+    tier: 'lab',
+    createdAt: '2026-10-16',
+    entryPoints: ['atmosphere', 'planet-material'],
+    package: 'triangular-engine/atmosphere',
+    description:
+      'Plan 049 Phase 2b: PlanetSurfaceMaterial lit and hazed by the atmosphere (lighting stage and aerial-perspective stage), with the sky and limb glow behind the globe, from space to the ground. Toggle each part; planet sizes 64 km to Earth.',
+  },
+  {
     id: 'takram-clouds',
     number: '03',
     title: 'Takram Clouds',
