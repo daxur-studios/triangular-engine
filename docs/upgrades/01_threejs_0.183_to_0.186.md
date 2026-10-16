@@ -27,7 +27,7 @@ consumers get ERESOLVE.
    add a CHANGELOG bullet, and replace the old version in README, getting-started,
    docs index and the agent skill file (`grep -rn "0\.183"`).
 3. Consumer apps that install the library as a tarball: re-pack the library
-   first (mycelia: `npm run update:engine`, which rebuilds and packs it), then
+   first (e.g. an `update:engine` script that rebuilds and packs it), then
    bump the app's own `three` pins to the identical versions.
 4. Type-check every tsconfig (`app` and `spec`), build, run headless tests.
 
@@ -39,8 +39,8 @@ consumers get ERESOLVE.
   project that uses them, including `types: []` projects.
 - **Fix:** `npm i -D @webgpu/types` and list it in `compilerOptions.types` of
   each tsconfig that compiles WebGPU code (`"types": ["@webgpu/types"]`, specs:
-  `["jasmine", "@webgpu/types"]`). Done in the workspace demo-app and mycelia.
-- Seen first as 274 errors in mycelia; 1 error (`GPUDevice`) in the demo app.
+  `["jasmine", "@webgpu/types"]`). Done in the demo-app and a consumer app.
+- Seen first as 274 errors in a consumer app; 1 error (`GPUDevice`) in the demo app.
 
 ### 2. TSL constructor overloads narrowed (TS2769 / TS2345)
 - **Symptoms:** "No overload matches this call" on `float(atomicLoad(...))`,
@@ -56,13 +56,17 @@ consumers get ERESOLVE.
   `three/tsl` imports. Prefer this over per-line `@ts-expect-error`.
 - Index/compare uniforms: type them correctly instead of casting, e.g.
   `uniform(0, 'uint')` when compared with `instanceIndex`.
-- 23 sites in 12 mycelia sandbox files; engine library code needed no change.
+- 23 sites in 12 consumer-app files; engine library code needed no change.
 
 ### 3. `Object3D.userData` / SVGLoader path userData typed as `{}`
 - **Symptoms:** `TS7053 ... can't be used to index type '{}'`,
   `TS2339: Property 'getAttribute' does not exist on type '{}'`
   (demo `character-lab-page.component.ts`: `path.userData?.['style']?.['fill']`).
 - **Fix:** local typed cast of `userData`; no runtime change.
+
+### 3b. `TS4114` missing `override` on `dispose()`
+- r186 `Mesh` now declares `dispose()`. Any class extending `Mesh` with its own `dispose()` needs `override`
+  (seen in a lens-flare class). Check other `extends Mesh|Object3D` classes.
 
 ### 4. `PostProcessing` → `RenderPipeline` rename
 - Documented in the r18x migration notes. **Not applicable** where the
@@ -93,10 +97,10 @@ consumers get ERESOLVE.
 | engine `planet-material` / `worldgen` specs | 20/20, 310/310 |
 | engine `npm test` | 1224 pass, 1 fail: pre-existing (see 'Open items') |
 | workspace demo-app `tsc` app + spec, daxur `triangular-demo` build | 0 errors, build ok |
-| Smoke (visible Browser pane, WebGPU): `/cell-planet-tsl` webgpu + webgl2, `/tsl-webgpu-spike`, mycelia menu, microbe / clouds sandboxes | render, 165 FPS, no new errors |
-| mycelia `tsc -p tsconfig.app.json` / `tsconfig.spec.json` | 0 errors (after fixes 1–2) |
-| mycelia daxur build (`daxur app status mycelia --json --wait`) | ok |
-| mycelia `npm test` | 1141 SUCCESS, 27 skipped, 0 failed |
+| Smoke (visible Browser pane, WebGPU): `/cell-planet-tsl` webgpu + webgl2, `/tsl-webgpu-spike`, consumer-app menu and sandboxes | render, 165 FPS, no new errors |
+| consumer app `tsc -p tsconfig.app.json` / `tsconfig.spec.json` | 0 errors (after fixes 1–2) |
+| consumer app daxur build (`daxur app status <app> --json --wait`) | ok |
+| consumer app `npm test` | 1141 SUCCESS, 27 skipped, 0 failed |
 
 Note: running `npm test` while the daxur dev build is compiling made Karma
 disconnect at spec 140 (ping timeout). Re-run it alone.
@@ -108,9 +112,15 @@ disconnect at spec 140 (ping timeout). Re-run it alone.
 - Run the type-check against both the app and spec tsconfig; both report
   the same TSL errors.
 - Do not use `--force` / `--legacy-peer-deps` to get past a peer conflict;
-  fix the peer range. (mycelia's `tools/update-triangular-engine.js` already
+  fix the peer range. (a consumer's update script already
   uses `--legacy-peer-deps` for the tarball install; that predates this upgrade.)
 - Check any `.agents/` vs `.agent/` path in docs before editing skill files.
+
+## Notes from a second consumer app
+
+- `TS4114`: r186 `Mesh` declares `dispose()`; subclasses defining `dispose()` need `override`.
+- A `postprocessing` below 6.39.5 has peer `three < 0.186.0`; bump it with three.
+- With a `file:` tarball engine already packed with the new peers, plain `npm install` suffices.
 
 ## Open items
 
@@ -118,5 +128,5 @@ disconnect at spec 140 (ping timeout). Re-run it alone.
   zoom…", expected distance >= 0.5, got 0.4683617673316646). **Pre-existing, not caused by the bump:** the spec
   fails with the identical value when node_modules/three is temporarily swapped back to 0.183.2 (run alone with
   `ng test triangular-engine --include=**/raycast-orbit-controls.component.spec.ts`). Not fixed here.
-- Mycelia WebGL (non-WebGPU) renderer path was not smoke-tested; only WebGPU was.
+- Consumer-app WebGL (non-WebGPU) renderer path was not smoke-tested; only WebGPU was.
 - Re-benchmark and `DirectRenderPipeline` results: `docs/runbook/050_tsl_planet_surface_material.md` (2026-10-16, three 0.186.1).

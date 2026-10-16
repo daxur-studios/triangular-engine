@@ -35,6 +35,7 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 ## Change conventions
 
 - **Do not commit**: Never run `git commit`. Leave all changes in the working tree for the user/maintainer.
+- **No private repos in this public repo**: never name private/consumer repositories, apps or their paths (code, docs, runbooks, plans, CHANGELOG, commit text). Write generic wording such as "a consumer app"; keep repo-specific notes in that repo.
 - Keep public exports and secondary-entry-point `public-api.ts` files intentional.
 - Add or update a colocated `*.spec.ts` for behavior changes.
 - Update user-facing docs and `CHANGELOG.md` for public API changes.
