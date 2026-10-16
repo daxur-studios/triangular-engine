@@ -104,6 +104,22 @@ const VIEWS: readonly ViewPreset[] = [
         <button (click)="setPreset('mars')" [class.active]="presetId() === 'mars'">Mars</button>
       </p>
 
+      <label
+        >air height {{ heightLabel() }} (rebakes on release)
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.005"
+          [value]="heightSlider()"
+          (input)="heightSlider.set(num($event))"
+          (change)="applyHeight()"
+        />
+      </label>
+      <p class="row">
+        <button (click)="resetHeight()" [class.active]="thickness() === undefined">preset height</button>
+      </p>
+
       <p class="label">View</p>
       <p class="row">
         @for (view of views; track view.label) {
@@ -233,6 +249,9 @@ export class AtmosphereLabPageComponent {
   readonly skyViewOn = signal(true);
   readonly spaceLowRes = signal(true);
   readonly spaceLabel = signal('inside the air');
+  /** Air height / planet radius; undefined keeps the preset's natural height. Slider is log: 0.002 .. 1. */
+  readonly thickness = signal<number | undefined>(undefined);
+  readonly heightSlider = signal(0.5);
   readonly gpuMs = signal('n/a');
   readonly tableRenders = signal(0);
 
@@ -282,7 +301,7 @@ export class AtmosphereLabPageComponent {
   }
 
   private buildProfile(): PhysicalAtmosphereProfile {
-    const profile = createAtmospherePreset(this.presetId(), { radiusM: this.radiusM });
+    const profile = createAtmospherePreset(this.presetId(), { radiusM: this.radiusM, thickness: this.thickness() });
     if (profile.kind !== 'physical') throw new Error('Expected a physical atmosphere profile');
     return profile;
   }
@@ -306,6 +325,30 @@ export class AtmosphereLabPageComponent {
     this.altitudeM = Math.max(1, this.altitudeM * k);
     this.sizeLabel.set(size.label);
     this.backdrop.setAltitude(this.altitudeM);
+    this.rebake();
+  }
+
+  private sliderToThickness(v: number): number {
+    return 0.002 * Math.pow(500, v);
+  }
+
+  heightLabel(): string {
+    const t = this.thickness() ?? this.sliderToThickness(this.heightSlider());
+    const prefix = this.thickness() === undefined ? 'preset' : '';
+    return `${prefix} ${(t * 100).toFixed(t < 0.1 ? 2 : 0)}% of radius = ${this.formatLength(t * this.radiusM)}`.trim();
+  }
+
+  private formatLength(m: number): string {
+    return m < 1000 ? `${m.toFixed(0)} m` : `${(m / 1000).toFixed(m < 1e5 ? 1 : 0)} km`;
+  }
+
+  applyHeight(): void {
+    this.thickness.set(this.sliderToThickness(this.heightSlider()));
+    this.rebake();
+  }
+
+  resetHeight(): void {
+    this.thickness.set(undefined);
     this.rebake();
   }
 
