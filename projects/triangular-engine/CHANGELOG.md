@@ -122,6 +122,19 @@ All notable changes to triangular-engine are documented here.
 
 ### Added
 
+- New secondary entry point `triangular-engine/planet-material` (Plan 050): the
+  cell-planet surface as one TSL node material for `WebGPURenderer` (native
+  WebGPU or `forceWebGL`). `PlanetSurfaceMaterial` runs a sphere/flat morph
+  (equirectangular and Equal Earth, seam cull), an ordered surface-layer stack
+  (`addSurfaceLayer`; stock `cellLookupLayer`, `streamedMaterialLayer`,
+  `macroVariationLayer`), sun occluders (`addSunOcclusion`), an emissive stack
+  (`addEmissive`) and replaceable lighting and atmosphere stages
+  (`simpleDayNightLighting`, `sunVisibilityLighting`, `lightingTurn`). Also
+  `planetOceanMaterial`, `planetBorderMaterial`, `planetMapBorderMaterial`, and
+  example extensions (`roadLayer`, `moonEclipseOcclusion`,
+  `nightLightsEmissive`). Demos: `/cell-planet-tsl`, `/planet-material-extensions`.
+  The GLSL patches are unchanged. See `docs/planet-material.md`.
+
 - New secondary entry point `triangular-engine/atmosphere` (Plan 049):
   `PhysicalAtmosphereProfile` with `validateAtmosphereProfile`,
   `scaleAtmosphereProfile` (similarity scaling to any planet radius plus

@@ -29,6 +29,7 @@ Use public package entry points in consumer apps; do not import internal source 
 - Post-processing: `triangular-engine/postprocessing`
 - Takram atmosphere/clouds: `triangular-engine/takram`
 - Image compression adapter: `triangular-engine/image-compression`
+- TSL cell-planet surface material (WebGPURenderer): `triangular-engine/planet-material`
 
 ---
 
@@ -679,5 +680,16 @@ Beyond the Angular component layer above, `triangular-engine` also ships pure, f
 | `procedural` | `triangular-engine/procedural` | Procedural mesh/skeleton generation (craft parts, ground-cover clumps, etc.)                                                                        |
 | `spline`     | `triangular-engine/spline`     | Core curve math (early phase; no surface binding yet)                                                                                               |
 | `trail`      | `triangular-engine/trail`      | Ground-mark decal geometry (scorch, tire tracks, footprints)                                                                                        |
+
+### Planet surface material (`triangular-engine/planet-material`)
+
+A TSL node material for the cell-planet surface, for `WebGPURenderer` only (`preferredRenderer: 'webgpu'`; `forceWebGL` for the WebGL2 fallback). Full guide: `docs/planet-material.md`.
+
+- `new PlanetSurfaceMaterial()` runs six stages: morph (fixed), surface layers, sun occlusion, lighting, emissive, atmosphere.
+- Extend it with `addSurfaceLayer({ id, order, layer })`, `addSunOcclusion`, `addEmissive`, `setLightingStage`, `setAtmosphereStage`. A layer is a pure `(context, below) => sample` TSL function; keep live values in `uniform(...)` nodes.
+- The ordered layer ids are the shader cache key (`material.stackKey`). Changing a uniform never recompiles; adding, removing or reordering a layer does. Set stacks up front and call `renderer.compileAsync`.
+- Stock layers: `cellLookupLayer`, `streamedMaterialLayer`, `macroVariationLayer` (order via `SURFACE_LAYER_ORDER`; game layers use 1000+). Examples to copy: `roadLayer`, `moonEclipseOcclusion`, `nightLightsEmissive`.
+- Traps: blend with `mix`, not `select`, on `outputNode.rgb`; evaluate `fwidth` unconditionally; WebGPU allows 8 vertex buffers (only attributes the shader reads count); three's WebGPU backend draws a `BatchedMesh` one instance at a time.
+- The classic-WebGL GLSL patches in `worldgen/render` are unchanged and remain the path for `WebGLRenderer` scenes.
 
 Each sublibrary's `public-api.ts` is the source of truth for its surface. Design rationale and scope decisions for these live in the consuming workspace's `docs/runbook/*`.

@@ -329,3 +329,14 @@ Verification: planet-material specs 61/61 (17 new: day/night, occluder product, 
 swap, lighting turn, road, eclipse umbra to penumbra, night lights), library build ok once the unrelated
 `atmosphere/atmosphere-backdrop.ts` error from another session cleared. **Not verified visually.** The gate for Plan 049
 Phase 2 ("slots exist and are spec'd") is met by the specs; the demo needs a visible window.
+
+## Phase 5: docs (2026-10-16)
+
+User visual check of `/planet-material-extensions` and the Phase 2-4 demos: looks right. The "perf not ideal" report (31 FPS, 2 draw calls, 3 triangles) came from the atmosphere page (Plan 049), not from a Plan 050 demo. It is the per-pixel `march` cost documented in `docs/atmosphere.md` ("Cost"), not terrain or batching. Plan 050 perf numbers are still unrecorded.
+
+Written: `projects/triangular-engine/docs/planet-material.md` (stages, slots, building blocks, "writing a layer", cache-key and TSL rules, backend/batching note), a `planet-material` row in `docs/entry-points.md`, a section and entry-point line in `.agents/skills/triangular-engine/SKILL.md`, and a `CHANGELOG.md` entry.
+
+Not done:
+- **Perf numbers** (frame time and first-compile time vs the GLSL demo, WebGPU and `forceWebGL`). They need a visible window: the in-app pane runs at 1 FPS when hidden. Measure with the batching toggle in `/cell-planet-tsl` and the stats panel, at an idle machine, and record them here.
+- **`daxur tokens map` registration** of `planet-material` (and `atmosphere`): `tokens map status` lists neither as a tracked section; register them with the maintainer, not from this session (Plan 049 shares the manifest).
+- Delete the throwaway `/tsl-webgpu-spike` page once the benchmark re-run is final.
