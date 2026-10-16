@@ -351,7 +351,7 @@ Wrap Jolt physics-enabled content in `<joltPhysics>`:
 ```
 
 Motion types: 0 Static, 1 Kinematic, 2 Dynamic.
-See `.agent/skills/triangular-engine-jolt/SKILL.md` for advanced Jolt controls, double precision coordinates, and joints/constraints (e.g. `<joltFixedConstraint>` or `<joltHingeConstraint>`).
+See `.agents/skills/triangular-engine-jolt/SKILL.md` for advanced Jolt controls, double precision coordinates, and joints/constraints (e.g. `<joltFixedConstraint>` or `<joltHingeConstraint>`).
 
 ## Services
 
