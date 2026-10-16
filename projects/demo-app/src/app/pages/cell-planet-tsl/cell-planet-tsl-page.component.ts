@@ -1,11 +1,15 @@
 import { Component, DestroyRef, effect, inject, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { BufferAttribute, BufferGeometry, Mesh } from 'three';
+import { BufferAttribute, BufferGeometry, Mesh, Vector2 } from 'three';
 import type { Material } from 'three/webgpu';
 import { EngineModule, EngineService, RaycastOrbitControlsComponent } from 'triangular-engine';
 import {
+  cellLookupLayer,
+  macroVariationLayer,
   PlanetSurfaceMaterial,
   setPlanetMapExtent,
+  streamedMaterialLayer,
+  SURFACE_LAYER_ORDER,
 } from 'triangular-engine/planet-material';
 import type {
   ILatLonTerrainPatchAddress,
@@ -22,6 +26,7 @@ import { snapshotToOverlay } from '../../shared/overlay-snapshot';
 import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
 import { getTerrainHeightScaleM } from '../cell-planet-25d-map/cell-planet-terrain-scale';
 import type { CellPlanetMorphWorkerRequest } from '../cell-planet-morph-streaming/cell-planet-morph-streaming.worker';
+import { MaterialStreaming } from './material-streaming';
 
 /**
  * Plan 050: the cell-planet streaming surface on `WebGPURenderer`, drawn by the TSL
@@ -31,12 +36,17 @@ import type { CellPlanetMorphWorkerRequest } from '../cell-planet-morph-streamin
  * WebGL2 fallback. A renderer cannot be swapped live, so the toggle reloads. Antialiasing is off by
  * default (`?aa=1` turns MSAA on): Plan 050 Runbook, Phase 0 measured MSAA as the main frame-cost gap.
  *
- * Phase 1 content only: the vertex-colour base layer and the morph. Streamed materials, the cell lookup,
- * macro variation, lines and the ocean follow in Phases 2 and 3.
+ * Surface layers (Phase 2): vertex colour, then streamed material tiles, the per-cell colour lookup (the
+ * territory overlay) and macro variation, in the GLSL patches' order. `?tiles=0` / `?macro=off|bodyFixed|morphed`
+ * choose the stack at load (adding or removing a layer recompiles, so the stack is fixed at setup).
+ * Lines, the map frame and the ocean follow in Phase 3.
  */
 const query = new URLSearchParams(globalThis.location?.search ?? '');
 const BACKEND: 'webgpu' | 'webgl2' = query.get('backend') === 'webgl2' ? 'webgl2' : 'webgpu';
 const ANTIALIAS = query.get('aa') === '1';
+const TILES = query.get('tiles') !== '0';
+const MACRO: 'off' | 'bodyFixed' | 'morphed' =
+  query.get('macro') === 'off' ? 'off' : query.get('macro') === 'bodyFixed' ? 'bodyFixed' : 'morphed';
 
 @Component({
   standalone: true,
@@ -100,6 +110,16 @@ const ANTIALIAS = query.get('aa') === '1';
         <button (click)="viewSeam()">antimeridian</button>
         <button (click)="viewMapEdge()">map edge</button>
       </p>
+      <p class="row">
+        @if (macro) {
+          <label><input type="checkbox" [checked]="macroOn()" (change)="setMacro($event)" /> macro</label>
+        }
+        @if (tiles) {
+          <label><input type="checkbox" [checked]="tileDebug()" (change)="setTileDebug($event)" /> tile debug</label>
+        }
+        <label><input type="checkbox" [checked]="cellsOn()" (change)="setCells($event)" /> cell overlay</label>
+      </p>
+      <p>Tiles {{ tileStats().resident }} (queued {{ tileStats().queued }}, max L{{ tileStats().maxLevel }})</p>
       <p>Resident {{ stats().resident }} · tris {{ stats().triangles }} · AA {{ aa ? 'on' : 'off' }}</p>
     </aside>
   `,
@@ -118,6 +138,12 @@ export class CellPlanetTslPageComponent {
   readonly seamTest = query.get('mesh') === 'seam';
 
   readonly backend = BACKEND;
+  readonly tiles = TILES;
+  readonly macro = MACRO !== 'off';
+  readonly macroOn = signal(true);
+  readonly tileDebug = signal(false);
+  readonly cellsOn = signal(false);
+  readonly tileStats = signal({ resident: 0, queued: 0, maxLevel: 0 });
   readonly aa = ANTIALIAS;
   readonly radius = WORLD_SIZE_TIER_RADIUS_M.medium;
   readonly morphProgress = signal(0);
@@ -133,6 +159,18 @@ export class CellPlanetTslPageComponent {
 
   /** One material, shared by the batch: its uniforms are this page's controls. */
   private readonly surface = new PlanetSurfaceMaterial();
+  private readonly streaming = new MaterialStreaming({
+    radiusM: this.radius,
+    heightScaleM: getTerrainHeightScaleM(this.radius, 4),
+    seed: CELL_PLANET_U0_FIXTURE.seed,
+    worldProfile: CELL_PLANET_U0_FIXTURE.worldProfile,
+  });
+  private readonly streamed = streamedMaterialLayer(this.streaming.gpu);
+  private readonly cellLookup = cellLookupLayer();
+  private readonly macroLayer = macroVariationLayer({
+    positionSpace: MACRO === 'bodyFixed' ? 'bodyFixed' : 'morphed',
+  });
+  private readonly drawingBuffer = new Vector2();
   readonly createMaterial = (): Material => this.surface;
 
   /**
@@ -223,6 +261,30 @@ export class CellPlanetTslPageComponent {
 
   constructor() {
     setPlanetMapExtent(this.surface.morph, this.radius);
+    // Stock order: streamed tiles, cell lookup, macro variation (SURFACE_LAYER_ORDER).
+    if (TILES) {
+      this.surface.addSurfaceLayer({ id: 'streamedMaterial', order: SURFACE_LAYER_ORDER.streamedMaterial, layer: this.streamed.layer });
+    }
+    this.surface.addSurfaceLayer({ id: 'cellLookup', order: SURFACE_LAYER_ORDER.cellLookup, layer: this.cellLookup.layer });
+    if (this.macro) {
+      this.surface.addSurfaceLayer({ id: 'macroVariation', order: SURFACE_LAYER_ORDER.macroVariation, layer: this.macroLayer.layer });
+    }
+    this.cellLookup.opacity.value = 0.72;
+    this.engine.beforeRender$.subscribe(() => {
+      if (!TILES) return;
+      const camera = this.engine.camera;
+      if (!camera) return;
+      this.engine.renderer.getDrawingBufferSize(this.drawingBuffer);
+      this.streaming.update(
+        { camera, viewport: this.drawingBuffer, morphProgress: this.morphProgress(), projectionKind: this.projectionKind() },
+        this.drawingBuffer,
+      );
+      const stats = this.streaming.runtime.stats;
+      const current = this.tileStats();
+      if (stats.resident !== current.resident || stats.queued !== current.queued || stats.maxLevel !== current.maxLevel) {
+        this.tileStats.set({ resident: stats.resident, queued: stats.queued, maxLevel: stats.maxLevel });
+      }
+    });
     if (this.seamTest) this.engine.scene.add(this.buildSeamTestGlobe());
     if (query.get('debug') === '1') {
       // Hook for automated checks in a hidden browser pane (see `overlay-snapshot.ts`).
@@ -261,6 +323,8 @@ export class CellPlanetTslPageComponent {
     };
     this.destroyRef.onDestroy(() => {
       this.worker.terminate();
+      this.streaming.dispose();
+      this.cellLookup.dispose();
       this.surface.dispose();
       this.seamMaterial.dispose();
     });
@@ -293,6 +357,28 @@ export class CellPlanetTslPageComponent {
       this.worker.postMessage(workerRequest);
     });
   };
+
+  setMacro(event: Event): void {
+    const on = (event.target as HTMLInputElement).checked;
+    this.macroOn.set(on);
+    this.macroLayer.enabled.value = on ? 1 : 0;
+  }
+
+  setTileDebug(event: Event): void {
+    const on = (event.target as HTMLInputElement).checked;
+    this.tileDebug.set(on);
+    this.streaming.gpu.debug.value = on ? 1 : 0;
+  }
+
+  /** The territory overlay: asks a worker for the cell-id atlas on first use, then toggles the layer. */
+  async setCells(event: Event): Promise<void> {
+    const on = (event.target as HTMLInputElement).checked;
+    this.cellsOn.set(on);
+    if (on && this.cellLookup.enabled.value < 0.5) {
+      this.cellLookup.setLookup(await this.streaming.requestCellLookup('material'));
+    }
+    this.cellLookup.enabled.value = on ? 1 : 0;
+  }
 
   setMorph(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);

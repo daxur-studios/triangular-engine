@@ -23,6 +23,10 @@ export interface IPlanetContext {
   readonly morphedPosition: any;
   /** `vec2(lat, lon)` in radians, in the static map frame (`lon = atan2(x, z)`, as the CPU maps use). */
   readonly latLon: any;
+  /** Unmorphed local position plus the batch translation (varying): stays welded to geography as the view morphs. */
+  readonly bodyFixedLocal: any;
+  /** Morphed local position plus the batch translation (varying). */
+  readonly morphedBatchedLocal: any;
   readonly uv: any;
   /** Camera distance in the fragment stage. */
   readonly cameraDistance: any;
@@ -41,6 +45,8 @@ export function createPlanetContext(
     sphereNormal: n,
     morphedPosition: graph.morphedLocal,
     latLon: vec2(asin(clamp(n.y, -1, 1)), atan(n.x, n.z)),
+    bodyFixedLocal: graph.bodyFixedLocal,
+    morphedBatchedLocal: graph.morphedBatchedLocal,
     uv: uv(),
     cameraDistance: planetCameraDistance(),
     projectedLon: graph.projectedLon,

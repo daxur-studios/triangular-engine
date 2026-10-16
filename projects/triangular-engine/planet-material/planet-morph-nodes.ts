@@ -97,6 +97,10 @@ export interface IPlanetMorphGraph {
   readonly sphereNormal: any;
   /** Morphed local position before batching (varying). */
   readonly morphedLocal: any;
+  /** Unmorphed local position with the batch translation applied (varying). The body-fixed sample point. */
+  readonly bodyFixedLocal: any;
+  /** Morphed local position with the batch translation applied (varying). The 'morphed' sample point. */
+  readonly morphedBatchedLocal: any;
   /** Projected longitude (varying); 0 in static mode. */
   readonly projectedLon: any;
   /** 1 when the triangle spans the antimeridian (varying, constant over a triangle). */
@@ -178,6 +182,11 @@ export function planetMorphGraph(
   const vSeamCull: any = varying(cull, 'vSeamCull');
   const vSphereNorm: any = varying(aSphereNorm, 'vSphereNorm');
   const vMorphedLocal: any = varying(morphedLocal, 'vMorphedLocal');
+  // Snapshot the batch translation (`positionLocal` is still batched-but-unmorphed here), so later reads
+  // of it are not affected by `positionNode` replacing `positionLocal`.
+  const batchOffset = positionLocal.sub(positionGeometry).toVar('planetBatchOffset');
+  const vBodyFixedLocal: any = varying(aSpherePos.add(batchOffset), 'vBodyFixedLocal');
+  const vMorphedBatched: any = varying(morphedLocal.add(batchOffset), 'vMorphedBatched');
 
   // GLSL: `vProjMode > 0.5 && vMorph > 0.05 && (vSeamCull > 0.5 || fwidth(vProjLon) > 2.8)`.
   // WGSL only allows derivatives in uniform control flow, so `fwidth` is evaluated once, outside any branch.
@@ -187,10 +196,12 @@ export function planetMorphGraph(
   const discardShadow = cullActive.and(vSeamCull.greaterThan(0.5));
 
   return {
-    positionNode: morphedLocal.add(positionLocal.sub(positionGeometry)),
+    positionNode: morphedLocal.add(batchOffset),
     normalNode: transformNormalToView(morphedNormal),
     sphereNormal: vSphereNorm,
     morphedLocal: vMorphedLocal,
+    bodyFixedLocal: vBodyFixedLocal,
+    morphedBatchedLocal: vMorphedBatched,
     projectedLon: vProjLon,
     seamCull: vSeamCull,
     visibleMask: discardFragment.not(),

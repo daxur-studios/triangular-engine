@@ -9,3 +9,6 @@ export * from './planet-morph-nodes';
 export * from './planet-context';
 export * from './planet-surface-layers';
 export * from './planet-surface-material';
+export * from './macro-variation-layer';
+export * from './cell-lookup-layer';
+export * from './streamed-material-layer';
