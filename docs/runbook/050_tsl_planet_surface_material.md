@@ -225,3 +225,50 @@ exposure, which `DirectRenderPipeline` cannot provide, so Plan 049 should not de
 Spike note: the diagnostic `rt=1` rows (classic, half-float target + tone-map quad) are no longer valid on r186. Its `ShaderMaterial`
 fails to compile (`toneMappingExposure` redefinition: the quad's `#include <tonemapping_pars_fragment>` now duplicates what
 three injects), so those rows measured a failed pass. The 0.183 numbers above are unaffected.
+
+## Phase 2: surface layers (2026-10-16)
+
+Built (new files in `planet-material/`): `macro-variation-layer.ts`, `cell-lookup-layer.ts`, `streamed-material-layer.ts`,
+exported from the entry point. Demo: `cell-planet-tsl` now stacks streamed tiles -> cell lookup -> macro variation
+(`?tiles=0`, `?macro=off|bodyFixed|morphed`), with a demo-local `material-streaming.ts` (worker pool + the existing
+`TerrainMaterialTileRuntime` and `selectCellPlanetMaterialTiles`).
+
+Decisions and traps found:
+- **Batch offset.** Stage 1 now snapshots `positionLocal - positionGeometry` once (`toVar`) and exposes
+  `bodyFixedLocal` / `morphedBatchedLocal` varyings on the context. A GPU spec renders the same triangle through a
+  translated `Mesh` and a translated `BatchedMesh` and requires identical pixels, and that a different translation differs.
+- **Noise parity is not byte parity.** `fract(sin(dot) * 43758.5453)` amplifies float32 rounding (~1e-5 in the dot) to ~0.4,
+  so the GPU hash cannot equal the float64 CPU hash (the GLSL patch has the same property). Specs pin the hash range, that the
+  noise interpolates the GPU's own lattice hashes like the CPU scheme, and the offset/scale transform; not the hash values.
+- **Texture reads.** Every layer read is an explicit `.level(0)`; the directory-vs-leaf branch is a `select` over two reads
+  (no fetch inside control flow). Layer textures sit in texture nodes, so uploads/swaps never recompile.
+- Layers take their GPU data structurally (`IStreamedMaterialGpu`, `ICellLookupPayload`), so the entry point does not import
+  `terrain` or `worldgen/render`. `streamedMaterialLayer` mirrors `gpu.enabled` / `gpu.debug` with `onFrameUpdate`.
+- `positionSpace: 'viewM'` is `'morphed'` in TSL (it samples the morphed local position).
+
+Verification: planet-material specs 34/34 (headless, `forceWebGL`), library build ok, demo build 0 errors. No fresh
+WebGPU pipeline errors on `/cell-planet-tsl`; the 7 vertex attributes fit the 8-buffer limit.
+**Not done:** the Phase 2 gate (pixel diff against the GLSL demo at globe / mid-morph / flat) and any visual check, since the
+automated pane is hidden (1 FPS, blank canvas). Needs a visible window.
+
+## Phase 3: lines, map frame, ocean (2026-10-16)
+
+Built (new files in `planet-material/`): `planet-line-materials.ts` (`planetBorderMaterial`, `planetMapBorderMaterial`),
+`planet-ocean-material.ts` (`planetOceanMaterial`). `PlanetSurfaceMaterial` gained a `base` option and a `solidColorLayer`
+helper (additive) so the ocean is stage 1 over a constant translucent colour (opacity 0.68, roughness 0.18, as the GLSL demo).
+`cell-planet-tsl` now shows the ocean, the cartographic map frame (fades in between morph 0.15 and 0.35, as in the GLSL page) and
+the cell-grid lines, with toggles and a frame-style button. The cell-overlay ShaderMaterial is not ported (no TSL view needs it).
+
+Decisions and traps:
+- **Seam cull on lines.** The GLSL moves the vertex off-screen. The TSL discards the whole primitive in the fragment stage from a
+  per-vertex `vBorderSeamCull` varying plus the `fwidth` test; both vertices of an edge agree on whether it crosses, so the result
+  matches. `fwidth` is evaluated unconditionally (WGSL).
+- **Line vs ribbon.** `ribbonWidth` 0 gives a `LineBasicNodeMaterial` for `LineSegments`; above 0 a `MeshBasicNodeMaterial` for a triangle
+  ribbon (the sideways offset is in the flat map, as in the GLSL). Specs render the ribbon: 1-px lines are not readable back reliably.
+- **Frame style is a uniform** (`style.value` 0/1/2), so switching style never recompiles.
+- **Vertex buffers.** Lines read 4-5 attributes, the frame 5, the ocean 6 (`sphereFromGeometry: false`), all under WebGPU's 8.
+- WebGPU lines are always 1 px wide; the GLSL grid is too, so no change.
+
+Verification: planet-material specs 44/44 (10 new: seam cull on/off and its guard, frame fade and the three styles, ocean opacity
+and colour-as-uniform), library build ok, demo build 0 errors. **Not verified visually** (the automated pane is hidden). The
+Phase 3 gate ("shows everything the GLSL demo's default settings show") is open and needs a visible window.

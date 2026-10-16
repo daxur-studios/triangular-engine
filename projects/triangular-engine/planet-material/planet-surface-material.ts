@@ -29,6 +29,8 @@ export interface IPlanetSurfaceMaterialOptions extends IPlanetMorphGraphOptions 
   /** The base vertex-colour layer's constant metalness (default 0.05). */
   readonly metalness?: number;
   readonly side?: Side;
+  /** Replaces the vertex-colour base layer (e.g. `solidColorLayer`). Its id in the stack key is `base`. */
+  readonly base?: SurfaceLayer;
 }
 
 /**
@@ -74,9 +76,9 @@ export class PlanetSurfaceMaterial extends MeshStandardNodeMaterial {
     this.maskShadowNode = this.morphGraph.visibleMaskShadow;
 
     this.layers.add({
-      id: 'vertexColor',
+      id: options.base ? 'base' : 'vertexColor',
       order: SURFACE_LAYER_ORDER.base,
-      value: vertexColorLayer({ roughness: options.roughness, metalness: options.metalness }),
+      value: options.base ?? vertexColorLayer({ roughness: options.roughness, metalness: options.metalness }),
     });
     this.rebuild();
   }

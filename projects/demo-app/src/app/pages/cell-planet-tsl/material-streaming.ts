@@ -11,6 +11,8 @@ import {
 } from 'triangular-engine/worldgen/render';
 import type { WorldProfileKind } from 'triangular-engine/worldgen';
 import type {
+  CellPlanetMorphCellGridPayload,
+  CellPlanetMorphCellGridRequest,
   CellPlanetMorphCellLookupRequest,
   CellPlanetMorphMaterialTilePayload,
   CellPlanetMorphMaterialTileRequest,
@@ -51,6 +53,7 @@ export class MaterialStreaming {
     worker: number;
   }>();
   private readonly lookupPending = new Map<number, (payload: ICellLookupPayload) => void>();
+  private readonly gridPending = new Map<number, (payload: CellPlanetMorphCellGridPayload) => void>();
   private readonly elevations = new Map<string, number>();
   private readonly domain: LatLonTerrainDomain;
   private refined: ReadonlySet<string> = new Set();
@@ -136,6 +139,25 @@ export class MaterialStreaming {
     });
   }
 
+  /** Requests the cell-grid line geometry (attribute arrays) for a projection from a worker. */
+  requestCellGrid(projectionKind: MapProjectionKind): Promise<CellPlanetMorphCellGridPayload> {
+    const id = this.nextId++;
+    return new Promise((resolve) => {
+      this.gridPending.set(id, resolve);
+      const request: CellPlanetMorphCellGridRequest = {
+        kind: 'cellGrid',
+        id,
+        radius: this.options.radiusM,
+        heightScaleM: this.options.heightScaleM,
+        projectionKind,
+        colorMode: 'natural',
+        worldProfile: this.options.worldProfile,
+        seed: this.options.seed,
+      };
+      this.workers[0].postMessage(request);
+    });
+  }
+
   dispose(): void {
     this.runtime.dispose();
     for (const worker of this.workers) worker.terminate();
@@ -170,8 +192,15 @@ export class MaterialStreaming {
     id: number;
     materialTile?: ITerrainMaterialTilePayload;
     cellLookup?: ICellLookupPayload;
+    cellGrid?: CellPlanetMorphCellGridPayload;
     error?: string;
   }): void {
+    const grid = this.gridPending.get(data.id);
+    if (grid) {
+      this.gridPending.delete(data.id);
+      if (data.cellGrid) grid(data.cellGrid);
+      return;
+    }
     const lookup = this.lookupPending.get(data.id);
     if (lookup) {
       this.lookupPending.delete(data.id);

@@ -10,8 +10,8 @@ runbook: /docs/runbook/050_tsl_planet_surface_material.md
 # Plan 050: TSL Planet Surface Material
 
 Status: **in progress, owner: local Sonnet session.** Phase 0 spike: **go** (2026-10-16). Workspace on
-three **0.186.1**. Phase 1 built (specs + library build pass). Open before Phase 2: the Phase 1 visual gate on a
-visible browser, and an idle-machine re-benchmark (see Phase 1). **Do this first:**
+three **0.186.1**. Phase 1 built and its visual gate passed (user, 2026-10-16). Phases 2 and 3 built (specs + builds pass);
+their gates (pixel parity against the GLSL demo; "shows everything the GLSL demo shows") are still open (need a visible window).
 [Plan 049](/docs/plans/049_morphing_planet_atmosphere.md) (atmosphere) builds on it. Evidence: [Runbook 050](/docs/runbook/050_tsl_planet_surface_material.md).
 
 **Goal:** the `/cell-planet-morph-streaming` surface, rebuilt as one TSL `NodeMaterial` with a stable

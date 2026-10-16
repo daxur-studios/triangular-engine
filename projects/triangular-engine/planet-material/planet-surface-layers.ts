@@ -1,4 +1,5 @@
-import { float, vec3, vertexColor } from 'three/tsl';
+import { Color } from 'three';
+import { float, uniform, vec3, vertexColor } from 'three/tsl';
 import type { IPlanetContext } from './planet-context';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -45,4 +46,17 @@ export function vertexColorLayer(
     roughness: float(roughness),
     metalness: float(metalness),
   });
+}
+
+/** A constant-colour base layer (the ocean shell). `color` is a live uniform node: change `.value`, nothing recompiles. */
+export function solidColorLayer(
+  options: { color?: string | Color; roughness?: number; metalness?: number } = {},
+): { layer: SurfaceLayer; color: any } {
+  const color: any = uniform(options.color instanceof Color ? options.color : new Color(options.color ?? '#ffffff'));
+  const roughness = options.roughness ?? 0.92;
+  const metalness = options.metalness ?? 0.05;
+  return {
+    color,
+    layer: () => ({ albedo: color, roughness: float(roughness), metalness: float(metalness) }),
+  };
 }
