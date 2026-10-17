@@ -27,8 +27,8 @@ import type { CloudVolume } from './cloud-volume';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-/** Volumes marched per cloud target (two sampled textures each, against WebGPU's limit of 16 per shader stage). */
-const VOLUMES_PER_TARGET = 6;
+/** Volumes marched per cloud target (three sampled textures each, against WebGPU's limit of 16 per shader stage). */
+const VOLUMES_PER_TARGET = 5;
 
 export interface CloudVolumeScreenPassOptions {
   /** Cloud resolution per axis relative to the canvas. Default 0.5 (a quarter of the pixels). */
@@ -208,7 +208,7 @@ export class CloudVolumeScreenPass {
     const viewRay = getViewPosition(screenUv, float(0.5), this.uProjectionInverse);
     const dirWorld = normalize(this.uCameraWorld.mul(vec4(viewRay, 0)).xyz);
     const surfaceMetres = getViewPosition(screenUv, sceneDepth.sample(screenUv).r, this.uProjectionInverse).length();
-    // A WebGPU shader stage binds at most 16 sampled textures and each volume reads two, so volumes are marched in chunks of
+    // A WebGPU shader stage binds at most 16 sampled textures and each volume reads three (density, light, occupancy), so volumes are marched in chunks of
     // `VOLUMES_PER_TARGET`, one cloud target per chunk, and the chunks are composited far to near.
     this.disposeNodes();
     for (let first = 0; first === 0 || first < this.volumes.length; first += VOLUMES_PER_TARGET) {

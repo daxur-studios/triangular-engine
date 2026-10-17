@@ -99,6 +99,9 @@ export class CloudVolume {
   readonly size: Vector3;
   readonly densityLayout: CloudVolumeAtlasLayout;
   readonly lightLayout: CloudVolumeAtlasLayout;
+  /** Coarse max-density grid the march uses to leap over empty space (Plan 051, Phase 2b step 6). */
+  readonly occupancyLayout: CloudVolumeAtlasLayout;
+  readonly occupancyTarget: RenderTarget;
   readonly densityTarget: RenderTarget;
   readonly lightTarget: RenderTarget;
 
@@ -121,6 +124,8 @@ export class CloudVolume {
   readonly uStepScale = uniform(1);
   /** Per-frame offset (0..1) added to the start jitter, so successive frames sample different depths. */
   readonly uFrameJitter = uniform(0);
+  /** 1 lets the march leap over empty occupancy cells; 0 marches every step (for A/B timing). */
+  readonly uSkipEmpty = uniform(1);
 
   /** How many times each bake has run, for specs and the lab readout. */
   densityBakes = 0;
@@ -161,6 +166,8 @@ export class CloudVolume {
 
   private readonly densityQuad: QuadMesh;
   private readonly lightQuad: QuadMesh;
+  private readonly occupancyQuad: QuadMesh;
+  private readonly occupancyMaterial: NodeMaterial;
   private readonly densityMaterial: NodeMaterial;
   private readonly lightMaterial: NodeMaterial;
   private readonly marchMaterial: NodeMaterial;
@@ -175,15 +182,20 @@ export class CloudVolume {
     this.cosTolerance = Math.cos(((options.sunToleranceDeg ?? 0.5) * Math.PI) / 180);
     this.densityLayout = new CloudVolumeAtlasLayout(densitySize);
     this.lightLayout = new CloudVolumeAtlasLayout(lightSize);
+    this.occupancyLayout = new CloudVolumeAtlasLayout(Math.max(4, Math.min(16, densitySize >> 3)));
     // Density is a 0..1 fraction, so 8 bits is enough; the sun optical depth is unbounded, so it stays half float.
     this.densityTarget = makeAtlasTarget(this.densityLayout, UnsignedByteType);
     this.lightTarget = makeAtlasTarget(this.lightLayout, HalfFloatType);
+    this.occupancyTarget = makeAtlasTarget(this.occupancyLayout, UnsignedByteType);
     this.uShape.value = SHAPE_ID[this.shape];
     this.uSize.value.copy(this.size);
 
     this.densityMaterial = new NodeMaterial();
     this.densityMaterial.fragmentNode = this.buildDensityNode();
     this.densityQuad = new QuadMesh(this.densityMaterial);
+    this.occupancyMaterial = new NodeMaterial();
+    this.occupancyMaterial.fragmentNode = this.buildOccupancyNode(densitySize);
+    this.occupancyQuad = new QuadMesh(this.occupancyMaterial);
     this.lightMaterial = new NodeMaterial();
     this.lightMaterial.fragmentNode = this.buildLightNode(options.lightSteps ?? 24);
     this.lightQuad = new QuadMesh(this.lightMaterial);
@@ -228,6 +240,7 @@ export class CloudVolume {
 
     if (this.densityDirty) {
       this.bake(renderer, this.densityQuad, this.densityTarget);
+      this.bake(renderer, this.occupancyQuad, this.occupancyTarget);
       this.densityBakes++;
       this.densityDirty = false;
     }
@@ -242,6 +255,8 @@ export class CloudVolume {
   dispose(): void {
     this.densityTarget.dispose();
     this.lightTarget.dispose();
+    this.occupancyTarget.dispose();
+    this.occupancyMaterial.dispose();
     this.densityMaterial.dispose();
     this.lightMaterial.dispose();
     this.marchMaterial.dispose();
@@ -297,6 +312,33 @@ export class CloudVolume {
     };
     const [a, b, c, d] = [0, 1, 2, 3].map((k) => density(this.texelPosition(this.densityLayout, k)));
     return vec4(a, b, c, d);
+  }
+
+  /**
+   * Per occupancy cell, the largest density in the cell grown by a texel and a half each way. A trilinear read of this grid
+   * is exactly zero only where every density texel that could reach the point is zero, so a zero is a safe place to leap.
+   */
+  private buildOccupancyNode(densitySize: number): any {
+    const cellTexels = densitySize / this.occupancyLayout.size;
+    const n = Math.ceil(cellTexels + 3);
+    const texel = 1 / densitySize;
+    return Fn(() => {
+      const channelMax = (channel: number) => {
+        const centre = this.texelPosition(this.occupancyLayout, channel);
+        const peak = float(0).toVar();
+        Loop(n * n * n, ({ i }: { i: any }) => {
+          const f = float(i);
+          const z = floor(f.div(n * n));
+          const r = f.sub(z.mul(n * n));
+          const y = floor(r.div(n));
+          const x = r.sub(y.mul(n));
+          const offset = vec3(x, y, z).sub((n - 1) / 2).mul(texel);
+          peak.assign(max(peak, this.densityLayout.sample(this.densityTarget.texture, centre.add(offset))));
+        });
+        return peak;
+      };
+      return vec4(channelMax(0), channelMax(1), channelMax(2), channelMax(3));
+    })();
   }
 
   private buildLightNode(lightSteps: number): any {
@@ -442,9 +484,21 @@ export class CloudVolume {
           return float(1 - g2).div(pow(float(1 + g2).sub(cosine.mul(2 * g)), 1.5).mul(4 * Math.PI));
         };
         const phase = hg(0.5).mul(0.6).add(hg(-0.3).mul(0.4));
-        Loop(int(count), ({ i }: { i: any }) => {
-          const t = tNear.add(float(i).add(jitter.mul(this.uJitter)).mul(dt));
-          const q = origin.add(dir.mul(t)).add(0.5);
+        // Empty occupancy cells are leapt over by one cell; the loop budget `count` only bounds the sampled steps.
+        const cellT = float(1 / this.occupancyLayout.size).div(max(dir.length(), 1e-6));
+        const skip = max(dt, cellT);
+        const tRay = tNear.add(jitter.mul(this.uJitter).mul(dt)).toVar();
+        Loop(int(count), () => {
+          If(tRay.greaterThan(tFar), () => {
+            Break();
+          });
+          const q = origin.add(dir.mul(tRay)).add(0.5).toVar();
+          const occupied = fetch ? select(this.uSkipEmpty.greaterThan(0.5), this.occupancyLayout.sample(this.occupancyTarget.texture, q), float(1)) : float(1);
+          If(occupied.lessThanEqual(0.0005), () => {
+            tRay.addAssign(skip);
+          });
+          If(occupied.greaterThan(0.0005), () => {
+          tRay.addAssign(dt);
           const d = q.sub(0.5);
           const blobDensity = exp(dot(d, d).div(-2 * CLOUD_BLOB_SIGMA * CLOUD_BLOB_SIGMA));
           const density = fetch ? this.densityLayout.sample(this.densityTarget.texture, q) : blobDensity;
@@ -459,6 +513,7 @@ export class CloudVolume {
             If(transmittance.lessThan(0.01), () => {
               Break();
             });
+          });
           });
         });
       });

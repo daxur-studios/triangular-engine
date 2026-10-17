@@ -129,6 +129,7 @@ interface Recording {
         <button (click)="setScale(1)" [class.active]="renderScale() === 1">1x</button>
         <button (click)="setScale(0.5)" [class.active]="renderScale() === 0.5">0.5x</button>
         <button (click)="toggleJitter()" [class.active]="!jitterOn()">jitter off</button>
+        <button (click)="toggleSkip()" [class.active]="skipOn()">empty-space skip: {{ skipOn() ? 'on' : 'off' }}</button>
         <button (click)="toggleTemporal()" [class.active]="temporalOn()">temporal reuse: {{ temporalOn() ? 'on' : 'off' }}</button>
         <button (click)="toggleFetch()" [class.active]="!fetchOn()">no fetch</button>
       </p>
@@ -280,6 +281,7 @@ export class CloudVolumesLabPageComponent {
   readonly renderScale = signal(1);
   readonly jitterOn = signal(true);
   readonly temporalOn = signal(false);
+  readonly skipOn = signal(true);
   readonly fetchOn = signal(true);
   readonly cloudMode = signal<CloudMode>('mesh');
   readonly volumeCount = signal(1);
@@ -520,6 +522,12 @@ export class CloudVolumesLabPageComponent {
     this.timer.reset();
   }
 
+  toggleSkip(): void {
+    this.skipOn.update((v) => !v);
+    for (const volume of this.allVolumes()) volume.uSkipEmpty.value = this.skipOn() ? 1 : 0;
+    this.timer.reset();
+  }
+
   toggleTemporal(): void {
     this.temporalOn.update((v) => !v);
     this.screenPass?.setTemporal(this.temporalOn());
@@ -646,7 +654,7 @@ export class CloudVolumesLabPageComponent {
     this.setClouds(saved.clouds);
     this.applySteps(saved.steps);
     const text = [
-      `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} canvas ${canvasSize.trim()} density 128 light 64 volumes ${this.volumeCount()} temporal ${this.temporalOn() ? 'on' : 'off'}`,
+      `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} canvas ${canvasSize.trim()} density 128 light 64 volumes ${this.volumeCount()} skip ${this.skipOn() ? 'on' : 'off'} temporal ${this.temporalOn() ? 'on' : 'off'}`,
       'GPU render ms avg, read after the main render. off = clouds hidden; netNN = (clouds with NN steps) - off',
       ...lines,
     ].join('\n');
@@ -749,7 +757,7 @@ export class CloudVolumesLabPageComponent {
     this.setCloudMode(saved.mode);
     this.applyPreset(saved.preset);
     const text = [
-      `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} volumes ${this.volumeCount()} steps ${this.steps()} temporal ${this.temporalOn() ? 'on' : 'off'}, 2.4 km at 120 m/s, 250 m altitude`,
+      `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} volumes ${this.volumeCount()} steps ${this.steps()} skip ${this.skipOn() ? 'on' : 'off'} temporal ${this.temporalOn() ? 'on' : 'off'}, 2.4 km at 120 m/s, 250 m altitude`,
       'GPU render ms, one sample per 10 frames, whole frame (clouds on, nothing subtracted)',
       ...lines,
     ].join('\n');

@@ -516,3 +516,12 @@ Quick re-test at 2538x1308, 24 steps, temporal on, against the earlier off numbe
 | 12 | 4.22 to 4.94 | 3.46 / 2.22 / 2.19 / 2.62 | 3.78 / 3.15 / 3.10 / 3.62 |
 
 Halving the steps does not pay for the extra accumulate pass, history copy and second full-res read. The march is not step-count bound, so the remaining lever is doing less work per ray: the empty-space skip (step 6) and the rebake cost (step 5). The code stays behind `temporal` (default false) and can be revisited once step 6 shrinks the march enough for fixed pass cost to matter less.
+
+### Step 6: empty-space skip (built, not yet measured)
+
+- `CloudVolume.occupancyTarget` is a coarse grid (density size / 8, capped at 16^3, same packed atlas layout) holding, per cell, the largest density in the cell grown by 1.5 texels each way. It is baked right after the density atlas (one-off: about 12^3 reads per channel per cell at 128^3).
+- The march reads it before every density fetch. A trilinear read of the grid is exactly zero only when every density texel that can reach that point is zero, so on a zero the ray leaps one cell (`max(dt, cell)`) without touching the density or light atlas. The loop budget now bounds sampled steps, so a ray spends it on cloud, not on air.
+- Cost: one more sampled texture per volume (3 each), so the screen pass marches 5 volumes per cloud target instead of 6.
+- Lab: "empty-space skip: on/off" button (`CloudVolume.uSkipEmpty`, no recompile); the matrix and fly-by headers print `skip on/off`.
+- Spec: occupancy is zero only where the density atlas is zero across the cell and its margin, and the grid is neither all empty nor all full.
+- Checked: type-check, library build, 10 cloud-volumes specs, lab loads and draws in the in-app browser with no new console errors (the 25-texture `RTT_60` error is unchanged and appears with 1 volume, so it is not from the volume chunking). Gain not yet measured: run the quick re-test with skip on, then off.
