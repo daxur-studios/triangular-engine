@@ -1,4 +1,4 @@
-import { DataUtils, Vector3 } from 'three';
+import { DataUtils, PerspectiveCamera, Vector3, Vector4 } from 'three';
 import { referenceOpticalDepth, type CloudAnalyticShape } from './cloud-volume-reference';
 import { CloudVolume } from './cloud-volume';
 import { getCloudTestRenderer } from './gpu-renderer.testing';
@@ -100,6 +100,35 @@ describe('CloudVolume bakes (WebGL2 backend)', () => {
     expect(min).toBe(0);
     expect(max).toBeGreaterThan(0.3);
     expect(max).toBeLessThanOrEqual(1.001);
+    volume.dispose();
+  });
+});
+
+describe('CloudVolume temporal reprojection (CPU)', () => {
+  it('the previous-frame matrix sends a point of a still box to where the previous camera saw it', () => {
+    const volume = new CloudVolume({ size: new Vector3(200, 100, 200), shape: 'box', densitySize: 16 });
+    volume.mesh.position.set(10, 20, -300);
+    const camera = new PerspectiveCamera(60, 16 / 9, 1, 5000);
+    const frame = (x: number) => {
+      camera.position.set(x, 30, 50);
+      camera.lookAt(0, 20, -300);
+      camera.updateMatrixWorld();
+      volume.setView(camera);
+    };
+    const project = (matrix: { elements: number[] }, p: Vector3): [number, number] => {
+      const clip = new Vector4(p.x, p.y, p.z, 1).applyMatrix4(matrix as never);
+      return [clip.x / clip.w, clip.y / clip.w];
+    };
+    const point = new Vector3(0.2, -0.1, 0.3);
+    frame(0);
+    const before = project((volume as any).previousClip, point);
+    frame(25);
+    const after = project((volume as any).uPreviousClip.value, point);
+    expect(after[0]).toBeCloseTo(before[0], 6);
+    expect(after[1]).toBeCloseTo(before[1], 6);
+    // The current frame saw the point somewhere else, so the reprojection is doing work.
+    const now = project((volume as any).previousClip, point);
+    expect(Math.abs(now[0] - after[0])).toBeGreaterThan(1e-3);
     volume.dispose();
   });
 });

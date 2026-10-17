@@ -527,3 +527,5 @@ Notes:
 - `nearHazeFadeM` is validated on the profile but never applied on the GPU.
 - The planet must have unit scale: `sync()` converts the camera through `planet.worldToLocal` (scale included) while `cameraDistance` is world units times `metersPerUnit`. The pages pass the scene.
 - Not done from the review's smaller items: the camera-relative ray in the no-froxel fallback, the per-frame array in `AtmosphereAerialPerspectiveLut.isDirty()`.
+
+- Sky fade, option B (maintainer chose it): the cell page now fades the backdrop by morph (0.2 to 0.8) times camera height (one to four air heights above the planet), so a low camera keeps the sphere's sky behind the hazed horizon at any morph. The flat-pose sky (option A) is still the plan's version and is not built.

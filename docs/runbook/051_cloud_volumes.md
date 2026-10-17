@@ -488,3 +488,31 @@ Reading:
 - Fixed cost of the pass: its "off" column is about 0.8 ms above the mesh's; part of the gap against the budget.
 
 Lab: a "quick re-test" button now runs only the screen pass at 24 steps for 1, 4 and 12 volumes (a 12 s fly-by and four camera spots each, about 2 minutes). "run everything" stays for full records.
+
+### Step 3b: per-volume frustum visibility (not yet measured)
+
+`CloudVolume.setView` now also tests the box against the camera frustum (`inView`). A volume outside the frustum ends every screen-pass ray at once through a uniform (`uScreenVisible`), so there is no shader recompile when the camera turns. The box-mesh path is unchanged (the GPU already culls it). The saving only applies to volumes truly out of view: if the horizon spot has all 12 volumes in the frustum, its 2.16 ms will not move. Re-test with the quick re-test button and compare against the 24-step table above.
+
+Result of step 3b (quick re-test, screen pass, 24 steps): no measurable change. Net inside / above / horizon / ground, 1 volume: 2.04 / 0.99 / 0.14 / 0.72; 4 volumes: 2.55 / 1.42 / 0.75 / 1.80; 12 volumes: 3.46 / 2.22 / 2.19 / 2.62 (before: 3.34 / - / 2.16 / -). Fly-by at 12 volumes avg 4.22, max 5.51 ms. Reading: the volumes are inside the frustum at these spots, so the visibility check has nothing to cull, and the per-volume cost is real marching, not wasted rays. The remaining levers are fewer marched samples (step 4 temporal reuse, step 6 empty-space skip), not culling. The frustum check stays: it is free and helps when the camera turns away.
+
+### Step 4: temporal reuse (built, not yet measured on the target canvas)
+
+What it does (`CloudVolumeScreenPass`, option `temporal`, default on; lab button "temporal reuse"):
+
+- Each march takes `temporalStepScale` (0.5) of the step cap, and the start jitter gains a per-frame golden-ratio offset, so successive frames sample different depths.
+- A second RTT per chunk blends this frame with last frame's result at 0.85 when valid. The history position is found by projecting the middle of the nearest volume's span inside the box with last frame's `projection x view x box` matrix (`CloudVolume.buildScreenReprojectionNode`, kept in double on the CPU, so a turning or orbiting box reprojects with its own motion). The history is clamped to the min/max of this frame's 3x3 neighbourhood (rejects ghosts and disocclusions), and a resize or a rebuild drops the blend for a frame.
+- History is a per-chunk half-float target filled by `renderer.copyTextureToTexture` after each frame.
+
+Checked in the browser pane (WebGPU, small canvas): no validation errors, the pass renders clean on and off, and a sideways move shows no visible ghosting. Timings in that small canvas are fixed-cost dominated (about 4.0 ms on, 4.1 ms off at 64 steps), so they say nothing about the 2560x1308 target: re-run the quick re-test with temporal on (its header now says so) and compare with the 24-step tables. Known limits: the reprojection depth is the span midpoint, not the true hit distance, so thin clouds in front of thick ones can smear slightly under fast motion; a reprojection spec covers the matrix maths only.
+
+#### Step 4 result: measured slower, default is now off
+
+Quick re-test at 2538x1308, 24 steps, temporal on, against the earlier off numbers:
+
+| volumes | fly-by avg (off to on) | net inside / above / horizon / ground (off) | net (on) |
+|---|---|---|---|
+| 1 | 2.23 to 2.41 | 2.04 / 0.99 / 0.14 / 0.72 | 1.66 / 1.06 / 0.63 / 0.82 |
+| 4 | 3.31 to 3.20 | 2.55 / 1.42 / 0.75 / 1.80 | 2.10 / 1.41 / 0.92 / 1.87 |
+| 12 | 4.22 to 4.94 | 3.46 / 2.22 / 2.19 / 2.62 | 3.78 / 3.15 / 3.10 / 3.62 |
+
+Halving the steps does not pay for the extra accumulate pass, history copy and second full-res read. The march is not step-count bound, so the remaining lever is doing less work per ray: the empty-space skip (step 6) and the rebake cost (step 5). The code stays behind `temporal` (default false) and can be revisited once step 6 shrinks the march enough for fixed pass cost to matter less.

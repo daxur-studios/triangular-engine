@@ -7,6 +7,7 @@ import {
   Matrix4,
   Mesh,
   NormalBlending,
+  Frustum,
   Quaternion,
   RGBAFormat,
   RenderTarget,
@@ -116,6 +117,10 @@ export class CloudVolume {
   readonly uStepTexels = uniform(1.5);
   /** Debug (Plan 051, Phase 2a): 0 turns the per-pixel start jitter off. */
   readonly uJitter = uniform(1);
+  /** Fraction of `uMarchSteps` a ray may take. Temporal reuse lowers it and averages the lost samples over frames. */
+  readonly uStepScale = uniform(1);
+  /** Per-frame offset (0..1) added to the start jitter, so successive frames sample different depths. */
+  readonly uFrameJitter = uniform(0);
 
   /** How many times each bake has run, for specs and the lab readout. */
   densityBakes = 0;
@@ -142,6 +147,17 @@ export class CloudVolume {
   private readonly uSize = uniform(new Vector3(1, 1, 1));
   private readonly uViewOrigin = uniform(new Vector3());
   private readonly uViewDirections = uniform(new Matrix4());
+  /** 1 while the box is inside the camera frustum, else 0: a hidden volume's screen-pass rays end at once, with no recompile. */
+  private readonly uScreenVisible = uniform(1);
+  private readonly viewFrustum = new Frustum();
+  private readonly viewMatrix = new Matrix4();
+  /** Whether the last {@link setView} found the box inside the camera frustum. */
+  inView = true;
+  /** Last frame's projection x view x box matrix: a point in the unit cube to last frame's clip space (computed in double). */
+  private readonly uPreviousClip = uniform(new Matrix4());
+  private readonly currentClip = new Matrix4();
+  private readonly previousClip = new Matrix4();
+  private hasPreviousClip = false;
 
   private readonly densityQuad: QuadMesh;
   private readonly lightQuad: QuadMesh;
@@ -327,10 +343,51 @@ export class CloudVolume {
    * Points the screen-space march at `camera`: the camera position in the unit frame (double precision, on the CPU)
    * and the world-to-volume direction matrix. Call once per frame after {@link update}, before drawing a screen pass.
    */
-  setView(camera: { matrixWorld: Matrix4 }): void {
+  setView(camera: { matrixWorld: Matrix4; projectionMatrix?: Matrix4; matrixWorldInverse?: Matrix4 }): void {
     this.mesh.updateWorldMatrix(true, false);
     this.uViewOrigin.value.copy(this.cameraInVolumeFrame(this.mesh, camera));
     this.uViewDirections.value.copy(this.mesh.matrixWorld).invert();
+    if (camera.projectionMatrix && camera.matrixWorldInverse) {
+      this.viewFrustum.setFromProjectionMatrix(this.viewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      this.inView = this.viewFrustum.intersectsObject(this.mesh);
+      this.uScreenVisible.value = this.inView ? 1 : 0;
+      // Each frame keeps the previous frame's matrix, so a turning or orbiting box reprojects with its own motion.
+      this.currentClip.multiplyMatrices(this.viewMatrix, this.mesh.matrixWorld);
+      this.uPreviousClip.value.copy(this.hasPreviousClip ? this.previousClip : this.currentClip);
+      this.previousClip.copy(this.currentClip);
+      this.hasPreviousClip = true;
+    }
+  }
+
+  /** Forgets last frame's matrix (after a teleport or a resize), so the next reprojection is the identity. */
+  resetHistory(): void {
+    this.hasPreviousClip = false;
+  }
+
+  /**
+   * Where this volume's visible part of each ray was last frame, for temporal reuse: `(u, v, valid, metres)` at the middle of
+   * the ray's span inside the box, projected with last frame's camera and box matrices. `valid` is 0 on a miss, a hidden box or
+   * a point outside last frame's view.
+   */
+  buildScreenReprojectionNode(dirWorld: any, limitMetres: any): any {
+    const origin = this.uViewOrigin;
+    const dir = this.uViewDirections.mul(vec4(dirWorld, 0)).xyz;
+    return Fn(() => {
+      const dirLength = dir.mul(this.uSize).length();
+      const safeInv = (d: any) => float(1).div(select(abs(d).lessThan(1e-8), float(1e-8), d));
+      const inv = vec3(safeInv(dir.x), safeInv(dir.y), safeInv(dir.z));
+      const a = vec3(-0.5).sub(origin).mul(inv);
+      const b = vec3(0.5).sub(origin).mul(inv);
+      const tNear = max(max(min(a.x, b.x), min(a.y, b.y)), max(min(a.z, b.z), 0));
+      const tBoxFar = min(min(max(a.x, b.x), max(a.y, b.y)), max(a.z, b.z));
+      const tFar = min(tBoxFar, limitMetres.div(dirLength));
+      const tMid = tNear.add(tFar).mul(0.5);
+      const clip = this.uPreviousClip.mul(vec4(origin.add(dir.mul(tMid)), 1));
+      const prevUv = clip.xy.div(clip.w.max(1e-6)).mul(0.5).add(0.5);
+      const inside = prevUv.x.greaterThan(0).and(prevUv.x.lessThan(1)).and(prevUv.y.greaterThan(0)).and(prevUv.y.lessThan(1));
+      const valid = tFar.greaterThan(tNear).and(this.uScreenVisible.greaterThan(0.5)).and(clip.w.greaterThan(1e-6)).and(inside);
+      return vec4(prevUv, select(valid, float(1), float(0)), tMid.mul(dirLength));
+    })();
   }
 
   /**
@@ -367,15 +424,16 @@ export class CloudVolume {
       const tFar: any = limitMetres ? min(tBoxFar, limitMetres.div(dirLength)) : tBoxFar;
       const color = vec3(0).toVar();
       const transmittance = float(1).toVar();
-      If(tFar.greaterThan(tNear), () => {
+      const hit: any = limitMetres ? tFar.greaterThan(tNear).and(this.uScreenVisible.greaterThan(0.5)) : tFar.greaterThan(tNear);
+      If(hit, () => {
         // Step by length (about `uStepTexels` density texels), capped by `uMarchSteps`, so a ray that only clips a corner
         // takes a few steps instead of the full count.
         const segmentMetres = tFar.sub(tNear).mul(dirLength);
         const texelMetres = this.size.x / this.densityLayout.size;
-        const count = max(float(1), min(float(steps), ceil(segmentMetres.div(this.uStepTexels.mul(texelMetres)))));
+        const count = max(float(1), min(float(steps).mul(this.uStepScale), ceil(segmentMetres.div(this.uStepTexels.mul(texelMetres)))));
         const dt = tFar.sub(tNear).div(count);
         const dtMetres = dt.mul(dirLength);
-        const jitter = fract(float(52.9829189).mul(fract(dot(screenCoordinate.xy, vec2(0.06711056, 0.00583715)))));
+        const jitter = fract(float(52.9829189).mul(fract(dot(screenCoordinate.xy, vec2(0.06711056, 0.00583715)))).add(this.uFrameJitter));
         // The volume frame is the world frame without the box's rotation, and `uSunLocal` is the sun in that frame.
         const cosine = dot(normalize(dirVolume), normalize(this.uSunLocal));
         // Two-lobe Henyey-Greenstein, mild forward and back scattering.

@@ -922,15 +922,19 @@ export class CellPlanetTslPageComponent {
     const amount = this.atmosphereOn() ? 1 : 0;
     this.atmosphereMix.value = amount;
     parts.binding.morph.value = morph;
-    // The sky is a sphere's, so it dissolves into the scene as the globe unrolls and is gone once the map is flat.
-    const sky = 1 - Math.min(1, Math.max(0, (morph - 0.2) / 0.6));
-    parts.backdrop.opacity.value = sky * sky * (3 - 2 * sky);
-    parts.backdrop.mesh.visible = amount > 0 && sky > 0;
     const lon = (this.sunLongitude() * Math.PI) / 180;
     const lat = (this.sunLatitude() * Math.PI) / 180;
     parts.binding.setSunBody(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));
     parts.binding.exposure.value = this.exposure();
     parts.binding.sync(camera, this.engine.scene, parts.backdrop);
+    // The sky is a sphere's. Close to the ground it stays (the hazed horizon needs a sky behind it, whatever the morph);
+    // it dissolves as the planet unrolls only once the camera is well above the air, from one to four air heights.
+    const aboveAir = (parts.binding.cameraAltitude.value as number) / (parts.model.uTopAltitude.value as number);
+    const high = Math.min(1, Math.max(0, (aboveAir - 1) / 3));
+    const unrolled = Math.min(1, Math.max(0, (morph - 0.2) / 0.6));
+    const fade = unrolled * unrolled * (3 - 2 * unrolled) * high * high * (3 - 2 * high);
+    parts.backdrop.opacity.value = 1 - fade;
+    parts.backdrop.mesh.visible = amount > 0 && fade < 1;
     if (amount > 0) parts.binding.update(renderer);
     if (parts.backdrop.mesh.visible) parts.backdrop.update(renderer, camera);
   }
