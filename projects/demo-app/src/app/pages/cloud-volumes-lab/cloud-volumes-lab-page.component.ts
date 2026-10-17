@@ -68,6 +68,8 @@ interface Recording {
       forceWebGL: FORCE_WEBGL,
       antialias: false,
       trackTimestamp: true,
+      // More sampled textures per stage means fewer cloud chunks (the screen pass sizes its chunks from the device limit).
+      requiredLimits: { maxSampledTexturesPerShaderStage: 48 },
     },
   }),
   host: {
@@ -281,7 +283,7 @@ export class CloudVolumesLabPageComponent {
   readonly renderScale = signal(1);
   readonly jitterOn = signal(true);
   readonly temporalOn = signal(false);
-  readonly skipOn = signal(true);
+  readonly skipOn = signal(false);
   readonly fetchOn = signal(true);
   readonly cloudMode = signal<CloudMode>('mesh');
   readonly volumeCount = signal(1);

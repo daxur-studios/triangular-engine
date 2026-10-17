@@ -63,6 +63,16 @@ export class PlanetAtmosphereBinding {
   /** Camera altitude above the ground, metres. */
   readonly cameraAltitude = uniform(0);
   /**
+   * Camera height for the sky behind the planet, metres: the sphere altitude on the globe, the height above the map
+   * (`z - radius`) when flat, blended by `morph`. Only the backdrop uses it; the haze keeps {@link cameraAltitude}.
+   */
+  readonly skyAltitude = uniform(0);
+  /**
+   * Optional point (body frame, any length) under the camera whose sun angle the sky shows. Default: the camera's own
+   * direction from the planet's centre. A page whose flat map projects a different point under the camera sets it.
+   */
+  skyAnchorBody?: Vector3;
+  /**
    * How far the planet has unrolled into its flat map, 0 (globe) to 1 (map). The page sets it with the morph. The
    * haze of a surface point blends from the spherical model to a flat slab by it ({@link perspective}).
    */
@@ -99,6 +109,10 @@ export class PlanetAtmosphereBinding {
   private readonly bodyRotation = new Matrix4();
   private readonly bodyRotation3 = new Matrix3();
   private readonly sunLocal = new Vector3();
+  private readonly skyUp = new Vector3();
+  private readonly flatUp = new Vector3();
+  private readonly skySunWorld = new Vector3();
+  private readonly skyFrameMatrix = new Matrix3();
   private readonly projectionInverse = new Matrix4();
 
   constructor(
@@ -141,6 +155,7 @@ export class PlanetAtmosphereBinding {
     this.camBody.multiplyScalar(mpu);
     this.cameraBody.value.copy(this.camBody);
     const altitude = Math.max(0, this.camBody.length() - this.model.profile.planetRadiusM);
+    const morph = this.morph.value as number;
     this.cameraAltitude.value = altitude;
 
     // Local frame in world axes: y = the camera's radial direction, x and z any orthonormal pair.
@@ -172,9 +187,45 @@ export class PlanetAtmosphereBinding {
     if (!backdrop) return;
     backdrop.exposure.value = this.exposure.value;
     backdrop.sunVisibility.value = this.sunVisibility.value as number;
-    backdrop.setAltitude(altitude);
-    backdrop.frame.value.copy(this.frameMatrix);
-    this.model.setSunDirection(this.sunLocal.x, this.sunLocal.y, this.sunLocal.z);
+    // The sky is the camera's own: its up blends from the radial direction to the map's +Z, its height likewise, and its
+    // sun keeps the sun angle under the camera with the azimuth seen on that horizon. The haze above keeps the radial
+    // frame, so only the backdrop and the sky-view table (which read `model.sunDirection`) see this.
+    this.flatUp.set(0, 0, 1).applyQuaternion(this.quaternion);
+    const radialUp = this.ey;
+    const dotUp = Math.max(-1, Math.min(1, radialUp.dot(this.flatUp)));
+    const angle = Math.acos(dotUp) * morph;
+    this.ez.copy(this.flatUp).addScaledVector(radialUp, -dotUp);
+    if (this.ez.lengthSq() < 1e-8) {
+      // The two ups agree (nothing to blend) or oppose (any perpendicular will do).
+      this.ez.set(1, 0, 0).addScaledVector(radialUp, -radialUp.x);
+      if (this.ez.lengthSq() < 1e-8) this.ez.set(0, 1, 0).addScaledVector(radialUp, -radialUp.y);
+    }
+    this.ez.normalize();
+    this.skyUp.copy(radialUp).multiplyScalar(Math.cos(angle)).addScaledVector(this.ez, Math.sin(angle)).normalize();
+    this.skyAltitude.value = Math.max(0, altitude + (Math.max(0, this.camBody.z - this.model.profile.planetRadiusM) - altitude) * morph);
+    this.ref.set(0, 1, 0);
+    if (Math.abs(this.skyUp.y) > 0.99) this.ref.set(1, 0, 0);
+    const sx = this.ex.crossVectors(this.ref, this.skyUp).normalize();
+    const sz = this.ez.crossVectors(sx, this.skyUp);
+    this.skyFrameMatrix.set(sx.x, sx.y, sx.z, this.skyUp.x, this.skyUp.y, this.skyUp.z, sz.x, sz.y, sz.z);
+    const anchor = this.skySunWorld.copy(this.skyAnchorBody ?? this.camBody).normalize();
+    const footSin = Math.max(-1, Math.min(1, anchor.dot(this.sunBody.value as Vector3)));
+    const footCos = Math.sqrt(1 - footSin * footSin);
+    let hx = this.sunWorld.dot(sx);
+    let hz = this.sunWorld.dot(sz);
+    const hLength = Math.hypot(hx, hz);
+    if (hLength > 1e-6) {
+      hx /= hLength;
+      hz /= hLength;
+    } else {
+      hx = 1;
+      hz = 0;
+    }
+    backdrop.setAltitude(this.skyAltitude.value as number);
+    backdrop.frame.value.copy(this.skyFrameMatrix);
+    this.model.setSunDirection(footCos * hx, footSin, footCos * hz);
+    // Below the map plane nothing is sky: fade the void, not a ground that is not there (more as the map flattens).
+    backdrop.voidFade.value = morph;
   }
 
   /**

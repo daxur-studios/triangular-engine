@@ -124,8 +124,8 @@ export class CloudVolume {
   readonly uStepScale = uniform(1);
   /** Per-frame offset (0..1) added to the start jitter, so successive frames sample different depths. */
   readonly uFrameJitter = uniform(0);
-  /** 1 lets the march leap over empty occupancy cells; 0 marches every step (for A/B timing). */
-  readonly uSkipEmpty = uniform(1);
+  /** 1 lets the march leap over empty occupancy cells; 0 marches every step. Default 0: measured a wash (see runbook 051). */
+  readonly uSkipEmpty = uniform(0);
 
   /** How many times each bake has run, for specs and the lab readout. */
   densityBakes = 0;

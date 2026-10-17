@@ -13,6 +13,7 @@ import {
   LineSegments,
   Mesh,
   Vector2,
+  Vector3,
 } from 'three';
 import { float, If, mix, uniform } from 'three/tsl';
 import type { Material } from 'three/webgpu';
@@ -53,6 +54,7 @@ import {
   CellPlanetMorphStreamingViewComponent,
   WORLD_SIZE_TIER_RADIUS_M,
   type MapProjectionKind,
+  CellPlanetMorphCameraRig,
 } from 'triangular-engine/worldgen/render';
 import { snapshotToOverlay } from '../../shared/overlay-snapshot';
 import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
@@ -100,6 +102,9 @@ const MACRO: 'off' | 'bodyFixed' | 'morphed' =
     : query.get('macro') === 'bodyFixed'
       ? 'bodyFixed'
       : 'morphed';
+
+/** The projection frame of the static (baked) map, which is centred on +Z. */
+const STATIC_BASIS = { forward: new Vector3(0, 0, 1), up: new Vector3(0, 1, 0), right: new Vector3(1, 0, 0) };
 
 @Component({
   standalone: true,
@@ -298,6 +303,14 @@ const MACRO: 'off' | 'bodyFixed' | 'morphed' =
         <label
           ><input
             type="checkbox"
+            [checked]="keepGroundOn()"
+            (change)="keepGroundOn.set($any($event.target).checked)"
+          />
+          keep ground in morph</label
+        >
+        <label
+          ><input
+            type="checkbox"
             [checked]="oceanOn()"
             (change)="setOcean($event)"
           />
@@ -418,6 +431,9 @@ export class CellPlanetTslPageComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly engine = inject(EngineService);
   readonly planetView = viewChild(CellPlanetMorphStreamingViewComponent);
+  private readonly orbit = viewChild(RaycastOrbitControlsComponent);
+  /** Keeps the camera over the same ground, at the same angle and up, while the planet morphs. */
+  readonly keepGroundOn = signal(true);
   /** `?mesh=seam`: a synthetic globe that carries real `aOtherDir1/2`, so the vertex-side seam cull can be exercised. */
   readonly seamTest = query.get('mesh') === 'seam';
 
@@ -453,6 +469,18 @@ export class CellPlanetTslPageComponent {
   readonly tileStats = signal({ resident: 0, queued: 0, maxLevel: 0 });
   readonly aa = ANTIALIAS;
   readonly radius = WORLD_SIZE_TIER_RADIUS_M.medium;
+  private readonly morphCamera = new CellPlanetMorphCameraRig({
+    radiusM: this.radius,
+    projection: () => this.projectionKind(),
+    basis: () =>
+      this.surface.morph.uProjMode.value > 0.5
+        ? {
+            forward: this.surface.morph.uProjForward.value,
+            up: this.surface.morph.uProjUp.value,
+            right: this.surface.morph.uProjRight.value,
+          }
+        : STATIC_BASIS,
+  });
   readonly morphProgress = signal(0);
   readonly projectionKind = signal<MapProjectionKind>(PROJECTION);
   /** Project in the shader from the tracked basis instead of mixing the baked flat positions. */
@@ -650,6 +678,9 @@ export class CellPlanetTslPageComponent {
     if (ATMOSPHERE) this.addAtmosphere();
     this.resumeSuite();
     this.engine.beforeRender$.subscribe(() => {
+      const controls = this.orbit()?.orbitControls();
+      if (controls && this.keepGroundOn()) this.morphCamera.update(controls, this.morphProgress());
+      else this.morphCamera.reset();
       this.syncAtmosphere();
       if (!this.firstFrameMs && (this.engine.renderer as any)?.initialized) {
         this.firstFrameMs = performance.now() - pageStartMs;
@@ -929,7 +960,7 @@ export class CellPlanetTslPageComponent {
     parts.binding.sync(camera, this.engine.scene, parts.backdrop);
     // The sky is a sphere's. Close to the ground it stays (the hazed horizon needs a sky behind it, whatever the morph);
     // it dissolves as the planet unrolls only once the camera is well above the air, from one to four air heights.
-    const aboveAir = (parts.binding.cameraAltitude.value as number) / (parts.model.uTopAltitude.value as number);
+    const aboveAir = (parts.binding.skyAltitude.value as number) / (parts.model.uTopAltitude.value as number);
     const high = Math.min(1, Math.max(0, (aboveAir - 1) / 3));
     const unrolled = Math.min(1, Math.max(0, (morph - 0.2) / 0.6));
     const fade = unrolled * unrolled * (3 - 2 * unrolled) * high * high * (3 - 2 * high);

@@ -27,8 +27,19 @@ import type { CloudVolume } from './cloud-volume';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-/** Volumes marched per cloud target (three sampled textures each, against WebGPU's limit of 16 per shader stage). */
-const VOLUMES_PER_TARGET = 5;
+/** Textures a volume samples in the march (density, light, occupancy). */
+const TEXTURES_PER_VOLUME = 3;
+/** Sampled textures per shader stage WebGPU guarantees; the device may allow more if the renderer requested it. */
+const DEFAULT_SAMPLED_TEXTURE_LIMIT = 16;
+/** Textures the rest of the cloud shader samples (the scene depth and a spare). */
+const RESERVED_TEXTURES = 1;
+
+/** How many volumes one cloud target can march on this renderer's device (fewer chunks means fewer half-res passes). */
+function volumesPerTarget(renderer: WebGPURenderer): number {
+  const limit = (renderer as any).backend?.device?.limits?.maxSampledTexturesPerShaderStage;
+  const budget = (typeof limit === 'number' && limit > 0 ? limit : DEFAULT_SAMPLED_TEXTURE_LIMIT) - RESERVED_TEXTURES;
+  return Math.max(1, Math.floor(budget / TEXTURES_PER_VOLUME));
+}
 
 export interface CloudVolumeScreenPassOptions {
   /** Cloud resolution per axis relative to the canvas. Default 0.5 (a quarter of the pixels). */
@@ -208,12 +219,14 @@ export class CloudVolumeScreenPass {
     const viewRay = getViewPosition(screenUv, float(0.5), this.uProjectionInverse);
     const dirWorld = normalize(this.uCameraWorld.mul(vec4(viewRay, 0)).xyz);
     const surfaceMetres = getViewPosition(screenUv, sceneDepth.sample(screenUv).r, this.uProjectionInverse).length();
-    // A WebGPU shader stage binds at most 16 sampled textures and each volume reads three (density, light, occupancy), so volumes are marched in chunks of
-    // `VOLUMES_PER_TARGET`, one cloud target per chunk, and the chunks are composited far to near.
+    // A shader stage binds a limited number of sampled textures (16 unless the renderer requested more) and each volume reads three
+    // (density, light, occupancy), so volumes are marched in chunks sized from the device limit, one cloud target per chunk, and the
+    // chunks are composited far to near.
     this.disposeNodes();
-    for (let first = 0; first === 0 || first < this.volumes.length; first += VOLUMES_PER_TARGET) {
+    const perTarget = volumesPerTarget(this.renderer);
+    for (let first = 0; first === 0 || first < this.volumes.length; first += perTarget) {
       let accumulated: any = vec4(0, 0, 0, 0);
-      const chunkVolumes = this.volumes.slice(first, first + VOLUMES_PER_TARGET);
+      const chunkVolumes = this.volumes.slice(first, first + perTarget);
       for (const volume of chunkVolumes) {
         const march = volume.buildScreenMarchNode(dirWorld, surfaceMetres);
         accumulated = vec4(march.rgb.add(accumulated.rgb.mul(float(1).sub(march.a))), march.a.add(accumulated.a.mul(float(1).sub(march.a))));

@@ -87,6 +87,11 @@ export class AtmosphereBackdrop {
   readonly sunVisibility = uniform(1);
   /** 0..1, fades the sky to black (space); the sky stays opaque so it draws first, behind the planet. The morph fades it out. */
   readonly opacity = uniform(1);
+  /**
+   * 0..1, how much of the sky below the horizon fades to the dark void (over about 10 degrees). A flat map sets it, since
+   * what lies below its plane is not a sphere's ground; 0 leaves the sky as the table gives it.
+   */
+  readonly voidFade = uniform(0);
   /** Multiplies the sun disc brightness; 0 hides it. */
   readonly sunDiscStrength = uniform(1);
 
@@ -197,7 +202,9 @@ export class AtmosphereBackdrop {
       });
 
       const exposed: any = max(colour.mul(this.exposure).mul(this.sunVisibility), 0);
-      return vec4(exposed.mul(this.opacity), 1);
+      const below = smoothstep(float(0), float(0.17), dir.y.negate());
+      const voidFactor = float(1).sub(this.voidFade.mul(below));
+      return vec4(exposed.mul(this.opacity).mul(voidFactor), 1);
     })();
 
     this.material = material;

@@ -81,6 +81,104 @@ describe('PlanetAtmosphereBinding.sync', () => {
   });
 });
 
+describe('PlanetAtmosphereBinding.sync, the sky through the morph', () => {
+  function synced(cameraAt: [number, number, number], morph: number) {
+    const model = smallPlanetModel();
+    const binding = new PlanetAtmosphereBinding(model, { radiusUnits: 1 });
+    const backdrop = new AtmosphereBackdrop(model, { steps: 4, spaceScale: 0 });
+    const camera = new PerspectiveCamera();
+    camera.position.set(...cameraAt);
+    binding.setSunBody(0.5, -0.2, 0.84);
+    binding.morph.value = morph;
+    binding.sync(camera, new Object3D(), backdrop);
+    const e = backdrop.frame.value.elements;
+    // Column-major storage of a row-major set(): row r holds the local axis r in world coordinates.
+    const axes = [new Vector3(e[0], e[3], e[6]), new Vector3(e[1], e[4], e[7]), new Vector3(e[2], e[5], e[8])];
+    return { model, binding, backdrop, axes };
+  }
+  const radial = new Vector3(0.5, 0.3, 2).normalize();
+
+  it('leaves what the haze reads (frame, sun, altitude) alone as the morph changes', () => {
+    const readings = [0, 0.5, 1].map((morph) => {
+      const r = synced([0.5, 0.3, 2], morph);
+      const internal = r.binding as unknown as { viewToLocal: { elements: number[] }; sunLocal: Vector3 };
+      const out = { view: [...internal.viewToLocal.elements], sun: internal.sunLocal.clone(), alt: r.binding.cameraAltitude.value };
+      r.backdrop.dispose();
+      r.model.dispose();
+      return out;
+    });
+    for (const other of readings.slice(1)) {
+      expect(other.view).toEqual(readings[0].view);
+      expect(other.sun.distanceTo(readings[0].sun)).toBe(0);
+      expect(other.alt).toBe(readings[0].alt);
+    }
+  });
+
+  it('points the sky up along the radial direction on the globe and the map normal when flat', () => {
+    const globe = synced([0.5, 0.3, 2], 0);
+    expect(globe.axes[1].distanceTo(radial)).toBeLessThan(1e-6);
+    const flat = synced([0.5, 0.3, 2], 1);
+    expect(flat.axes[1].distanceTo(new Vector3(0, 0, 1))).toBeLessThan(1e-6);
+    for (const r of [globe, flat]) {
+      r.backdrop.dispose();
+      r.model.dispose();
+    }
+  });
+
+  it('keeps the sky frame orthonormal mid-morph, and over the far side of the globe', () => {
+    for (const camera of [[0.5, 0.3, 2], [0, 0, -2]] as [number, number, number][]) {
+      for (const morph of [0.25, 0.5, 0.9]) {
+        const r = synced(camera, morph);
+        for (let i = 0; i < 3; i++) {
+          expect(r.axes[i].length()).toBeCloseTo(1, 5);
+          for (let j = i + 1; j < 3; j++) expect(Math.abs(r.axes[i].dot(r.axes[j]))).toBeLessThan(1e-5);
+        }
+        r.backdrop.dispose();
+        r.model.dispose();
+      }
+    }
+  });
+
+  it('moves the sky smoothly: a small morph step makes a small change', () => {
+    const a = synced([0.5, 0.3, 2], 0.5);
+    const b = synced([0.5, 0.3, 2], 0.51);
+    expect(a.axes[1].distanceTo(b.axes[1])).toBeLessThan(0.02);
+    for (const r of [a, b]) {
+      r.backdrop.dispose();
+      r.model.dispose();
+    }
+  });
+
+  it('blends the sky height from the sphere altitude to the height above the map, clamped at zero', () => {
+    const camera: [number, number, number] = [0.5, 0.3, 2];
+    const sphere = (Math.hypot(...camera) - 1) * RADIUS_M;
+    const globe = synced(camera, 0);
+    expect(globe.backdrop.altitude.value).toBeCloseTo(sphere, 2);
+    const flat = synced(camera, 1);
+    expect(flat.backdrop.altitude.value).toBeCloseTo(RADIUS_M, 2);
+    const below = synced([0, 0, 0.5], 1);
+    expect(below.backdrop.altitude.value).toBe(0);
+    for (const r of [globe, flat, below]) {
+      r.backdrop.dispose();
+      r.model.dispose();
+    }
+  });
+
+  it('keeps the sun angle under the camera for the sky when flat, and fades the void with the morph', () => {
+    const flat = synced([0.5, 0.3, 2], 1);
+    const expected = radial.dot(new Vector3(0.5, -0.2, 0.84).normalize());
+    expect(flat.model.sunDirection.value.y).toBeCloseTo(expected, 5);
+    expect(flat.model.sunDirection.value.length()).toBeCloseTo(1, 5);
+    expect(flat.backdrop.voidFade.value).toBe(1);
+    const globe = synced([0.5, 0.3, 2], 0);
+    expect(globe.backdrop.voidFade.value).toBe(0);
+    for (const r of [flat, globe]) {
+      r.backdrop.dispose();
+      r.model.dispose();
+    }
+  });
+});
+
 describe('PlanetAtmosphereBinding.update', () => {
   it('renders the froxel table once, and again only when the camera or the sun moves', async () => {
     const renderer = await getEvalRenderer();

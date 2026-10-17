@@ -27,6 +27,16 @@ export interface ILegContact {
   readonly grounded: boolean;
 }
 
+interface IJoltLegRuntime {
+  readonly metadata: IJoltMetadata;
+  readonly jolt: typeof Jolt;
+  readonly query: Jolt.NarrowPhaseQuery;
+  readonly broadPhaseFilter: Jolt.BroadPhaseLayerFilter;
+  readonly objectLayerFilter: Jolt.ObjectLayerFilter;
+  readonly shapeFilter: Jolt.ShapeFilter;
+  readonly bodyFilter: Jolt.BodyFilterJS;
+}
+
 /**
  * Standalone ray-cast suspension leg. Each physics tick this primitive casts a
  * ray from the host rigid body's local anchor along the leg's local `direction`
@@ -146,14 +156,15 @@ export class JoltLandingLegComponent implements OnDestroy {
 
     const startWorld = world.MulVec3(localPos); // RVec3 foot anchor line start
     const axis = world.Multiply3x3(localDir).Mul(1 / dirMag); // world "down", unit
-    const rayLen = this.maxLength();
+    const rayLen = this.travel();
 
     // Cast a ray down the foot axis, ignoring the host body itself.
     const ray = new J.RRayCast(startWorld, axis.Mul(rayLen));
     const raySettings = new J.RayCastSettings();
     const collector = new J.CastRayClosestHitCollisionCollector();
 
-    runtime.bodyFilter.ShouldCollide = (id: number) => id !== body.GetID();
+    const hostBodyId = body.GetID().GetIndexAndSequenceNumber();
+    runtime.bodyFilter.ShouldCollide = (id: number) => id !== hostBodyId;
 
     try {
       runtime.query.CastRay(
@@ -182,7 +193,7 @@ export class JoltLandingLegComponent implements OnDestroy {
       const mass = 1 / Math.max(1e-6, body.GetMotionProperties().GetInverseMass());
       const omega = 2 * Math.PI * this.frequency();
       const k = mass * (omega * omega);
-      const c = 2 * this.damping() * mass * omega;
+      const c = 2 * this.dampingRatio() * mass * omega;
 
       const velAtFoot = metadata.bodyInterface.GetPointVelocity(body.GetID(), hitWorld);
       const axisVel = velAtFoot.Dot(axis); // positive = bunch toward the ground
@@ -223,7 +234,7 @@ export class JoltLandingLegComponent implements OnDestroy {
       J.destroy(velAtFoot);
 
       this.#emit({
-        position: [hitWorld.GetX(), hitWorld.GetY(), hitWorld.GetZ()],
+        worldPosition: [hitWorld.GetX(), hitWorld.GetY(), hitWorld.GetZ()],
         extension,
         grounded: true,
       });

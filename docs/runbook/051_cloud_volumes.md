@@ -525,3 +525,18 @@ Halving the steps does not pay for the extra accumulate pass, history copy and s
 - Lab: "empty-space skip: on/off" button (`CloudVolume.uSkipEmpty`, no recompile); the matrix and fly-by headers print `skip on/off`.
 - Spec: occupancy is zero only where the density atlas is zero across the cell and its margin, and the grid is neither all empty nor all full.
 - Checked: type-check, library build, 10 cloud-volumes specs, lab loads and draws in the in-app browser with no new console errors (the 25-texture `RTT_60` error is unchanged and appears with 1 volume, so it is not from the volume chunking). Gain not yet measured: run the quick re-test with skip on, then off.
+
+### Step 6 result: skip is a wash; chunk count is the real cost
+
+Same-build A/B, skip on vs off (GPU ms, 2560x1308):
+
+| volumes | fly-by on / off | net inside on / off | above | horizon | ground |
+|---|---|---|---|---|---|
+| 1 | 2.06 / 2.18 | 2.29 / 2.01 | 0.80 / 1.05 | 0.17 / 0.19 | 0.56 / 0.69 |
+| 4 | 3.04 / 3.14 | 2.64 / 2.40 | 1.19 / 1.23 | 0.53 / 0.47 | 1.14 / 1.22 |
+| 12 | 4.60 / 4.75 | 4.30 / 4.04 | 2.79 / 2.85 | 2.54 / 2.51 | 2.73 / 2.85 |
+
+- The skip gains at most about 0.15 ms on the fly-by and loses about 0.25 ms inside a cloud, so `uSkipEmpty` now defaults to 0 (the toggle stays).
+- The occupancy sampler made each volume read three textures, which cut a chunk from 6 volumes to 5 and made 12 volumes render as 3 chunks. That regressed the 12-volume fly-by from 4.22 to 4.75 ms: each extra chunk costs about 0.5-0.8 ms of half-res target write plus composite taps even when its rays miss.
+- Fix: the chunk size is now derived from the device's `maxSampledTexturesPerShaderStage` (16 by default, 5 volumes per chunk). The lab requests 48, giving 15 volumes per chunk, so 12 volumes are one chunk. Consumers that want the same must pass `requiredLimits` in their renderer parameters; the request fails on adapters that cannot provide it.
+- To re-measure: reload the lab, run the 12-volume fly-by and matrix again.

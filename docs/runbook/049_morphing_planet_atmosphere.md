@@ -529,3 +529,20 @@ Notes:
 - Not done from the review's smaller items: the camera-relative ray in the no-froxel fallback, the per-frame array in `AtmosphereAerialPerspectiveLut.isDirty()`.
 
 - Sky fade, option B (maintainer chose it): the cell page now fades the backdrop by morph (0.2 to 0.8) times camera height (one to four air heights above the planet), so a low camera keeps the sphere's sky behind the hazed horizon at any morph. The flat-pose sky (option A) is still the plan's version and is not built.
+
+### Flat-pose sky (option A, built)
+
+- `PlanetAtmosphereBinding.sync` now gives the backdrop its own sky frame, height and sun; the haze keeps the radial frame (`frameMatrix`, `sunLocal`, `cameraAltitude`), pinned by a spec that compares them at morph 0, 0.5 and 1. The sky's up slerps from the camera's radial direction to the map's +Z by `morph`; `skyAltitude` blends the sphere altitude to `z - radius` (the map is the plane z = radius); the sky sun keeps the sun angle under the camera (`skyAnchorBody`, default the camera's own direction) with the azimuth projected onto the sky's horizon. Only the backdrop and the sky-view table read `model.sunDirection`, so nothing else moves.
+- `AtmosphereBackdrop.voidFade` (set to `morph` by `sync`) fades the sky below the horizon to dark over about 10 degrees, so the map edge meets the sky without a hard line. This is the `flatMapEdge: 'fade'` default for the sky; the glow outline and the haze fade near the edge are not built.
+- The cell page fades the sphere sky by `skyAltitude` (above the air's top) instead of the sphere altitude. A single blended up replaces the plan's two-evaluation crossfade (no second sky table, no double horizon); revisit if mid-morph looks squashed.
+- Not looked at on a real GPU yet.
+- The slab's elevation floor stays permanent (it adds detail the maintainer wants; the whitewash itself was fixed by the external reviews).
+
+### Morph camera (ground-anchored)
+
+- Problem: the camera and the orbit target live in the scene, but the morph moves every surface point by `mix(sphere, flat, morph)`, so scrubbing the morph slid the ground out from under the camera, lost the viewing angle, and left the orbit controls' up at +Y.
+- `CellPlanetMorphCameraRig` (`triangular-engine/worldgen/render`) holds an anchor: the ground point hit by the view ray (camera to orbit target), found by Gauss-Newton on the ground's own morph (`mix(radius * dir, projected map point, morph)`), with the previous anchor as the first guess. When `morph` changes it carries the camera and the target rigidly from the anchor's ground frame (east, north, normal) at the old morph to its frame at the new one, so height, angle to the surface, bearing and place over the ground are kept. The frame blends as the material does (normal toward +Z, north toward +Y). It then sets the controls' up to the ground normal and re-aims the camera (no roll jitter). While the morph is steady it re-finds the anchor each frame, so orbiting and panning move it.
+- A straight top-down view has no horizon to roll against, so the rig tilts the camera 1e-4 rad off the normal (as the orbit controls keep their polar angle off the pole).
+- Limits: the anchor sits on the base surface (terrain relief ignored); the flat map is the plane `z = radius`; the orbit controls' up becomes the ground normal even at morph 0 (no pole lock) once the rig runs.
+- The cell page runs it every frame, after the orbit controls and before the sky sync, with a "keep ground in morph" checkbox (on). Specs cover the frames, the anchor solve, invariants over a full morph and back, small steps, panning, the top-down tilt and a view that misses the ground.
+- Checked on the live page by driving the rig by hand: a camera 0.4R above and 0.3R behind an off-centre ground point stays at the same east, north and height offsets at morph 0, 0.25, 0.5, 0.75 and 1, and its up goes from the radial direction to +Z. The browser pane's frame loop did not run, so the scrub itself was not watched on screen.
