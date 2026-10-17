@@ -2,7 +2,7 @@ import { Component, DestroyRef, HostListener, inject, signal } from '@angular/co
 import { RouterLink } from '@angular/router';
 import { Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PerspectiveCamera, SphereGeometry, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
-import { CloudVolume } from 'triangular-engine/cloud-volumes';
+import { CloudVolume, CloudVolumeScreenPass } from 'triangular-engine/cloud-volumes';
 import { GpuTimer } from './gpu-timer';
 
 /**
@@ -18,6 +18,8 @@ const FORCE_WEBGL = query.has('forceWebGL') || query.get('backend') === 'webgl2'
 const PLANET_RADIUS = 2000;
 const VOLUME_CENTER = new Vector3(0, PLANET_RADIUS + 250, 0);
 const VOLUME_SIZE = new Vector3(600, 200, 600);
+
+type CloudMode = 'mesh' | 'pass' | 'pass-full';
 
 interface CameraPreset {
   readonly label: string;
@@ -116,6 +118,12 @@ interface Recording {
         <button (click)="setScale(0.5)" [class.active]="renderScale() === 0.5">0.5x</button>
         <button (click)="toggleJitter()" [class.active]="!jitterOn()">jitter off</button>
         <button (click)="toggleFetch()" [class.active]="!fetchOn()">no fetch</button>
+      </p>
+      <p class="row">
+        clouds drawn as
+        <button (click)="setCloudMode('mesh')" [class.active]="cloudMode() === 'mesh'">box mesh</button>
+        <button (click)="setCloudMode('pass')" [class.active]="cloudMode() === 'pass'">screen pass x0.5</button>
+        <button (click)="setCloudMode('pass-full')" [class.active]="cloudMode() === 'pass-full'">screen pass x1</button>
       </p>
       <label
         >fly speed {{ speed().toFixed(0) }} m/s
@@ -241,6 +249,7 @@ export class CloudVolumesLabPageComponent {
   readonly renderScale = signal(1);
   readonly jitterOn = signal(true);
   readonly fetchOn = signal(true);
+  readonly cloudMode = signal<CloudMode>('mesh');
   readonly matrixStatus = signal('');
   readonly matrixText = signal('');
   readonly copied = signal(false);
@@ -260,6 +269,9 @@ export class CloudVolumesLabPageComponent {
   private readonly forward = new Vector3();
   private readonly right = new Vector3();
   private readonly move = new Vector3();
+  private screenPass: CloudVolumeScreenPass | undefined;
+  private screenPipeline: ReturnType<CloudVolumeScreenPass['asEngineRenderPipeline']> | undefined;
+  private readonly passVolumes: CloudVolume[] = [];
   private yaw = 0;
   private pitch = 0;
 
@@ -305,6 +317,7 @@ export class CloudVolumesLabPageComponent {
       tick.unsubscribe();
       rendered.unsubscribe();
       this.applyScale(1);
+      this.setCloudMode('mesh');
       this.engine.scene.remove(this.planet, this.volume.mesh, this.sun, this.hemi);
       this.planet.geometry.dispose();
       (this.planet.material as MeshStandardMaterial).dispose();
@@ -332,6 +345,36 @@ export class CloudVolumesLabPageComponent {
   setClouds(on: boolean): void {
     this.cloudsOn.set(on);
     this.volume.mesh.visible = on;
+    this.passVolumes.length = 0;
+    if (on) this.passVolumes.push(this.volume);
+    this.screenPass?.rebuild();
+    this.timer.reset();
+  }
+
+  /** Box-proxy mesh in the scene, or the half-resolution (x0.5) or full-resolution screen pass owning the frame's render. */
+  setCloudMode(mode: CloudMode): void {
+    const renderer: any = this.engine.renderer;
+    if (mode === this.cloudMode() && (mode === 'mesh' || this.screenPass)) return;
+    if (this.screenPass) {
+      if (this.screenPipeline) this.engine.unregisterRenderPipeline(this.screenPipeline);
+      this.screenPass.dispose();
+      this.screenPass = undefined;
+      this.screenPipeline = undefined;
+    }
+    this.cloudMode.set(mode);
+    this.engine.scene.remove(this.volume.mesh);
+    if (mode === 'mesh') {
+      this.engine.scene.add(this.volume.mesh);
+    } else if (renderer?.initialized) {
+      this.passVolumes.length = 0;
+      if (this.cloudsOn()) this.passVolumes.push(this.volume);
+      this.screenPass = new CloudVolumeScreenPass(renderer, this.engine.scene, this.engine.camera, this.passVolumes, {
+        scale: mode === 'pass' ? 0.5 : 1,
+      });
+      this.screenPipeline = this.screenPass.asEngineRenderPipeline();
+      this.engine.registerRenderPipeline(this.screenPipeline);
+    }
+    this.volume.mesh.visible = this.cloudsOn();
     this.timer.reset();
   }
 
@@ -416,6 +459,7 @@ export class CloudVolumesLabPageComponent {
       clouds: this.cloudsOn(),
       steps: this.steps(),
       scale: this.renderScale(),
+      mode: this.cloudMode(),
       jitter: this.jitterOn(),
       fetch: this.fetchOn(),
       rebake: this.rebakeEveryFrame(),
@@ -432,37 +476,45 @@ export class CloudVolumesLabPageComponent {
     setFetch(true);
     this.volume.alwaysRebakeLight = false;
     const lines: string[] = [];
-    const total = 2 * PRESETS.length * (stepList.length + 1) + 3;
+    const runs: { label: string; mode: CloudMode; scale: number }[] = [
+      { label: 'box mesh, canvas x1', mode: 'mesh', scale: 1 },
+      { label: 'box mesh, canvas x0.5', mode: 'mesh', scale: 0.5 },
+      { label: 'screen pass x0.5, canvas x1', mode: 'pass', scale: 1 },
+    ];
+    const total = runs.length * PRESETS.length * (stepList.length + 1) + 3;
     let done = 0;
     const status = (what: string) => this.matrixStatus.set(`running ${++done}/${total}: ${what}`);
     const net = (ms: string, base: string) => (ms === 'n/a' || base === 'n/a' ? 'n/a' : (+ms - +base).toFixed(2));
     let canvasSize = '';
     let goValue = 'n/a';
-    for (const scale of [1, 0.5]) {
+    for (const run of runs) {
+      const scale = run.scale;
+      this.setCloudMode(run.mode);
       this.applyScale(scale);
       const canvas = document.querySelector('canvas');
-      canvasSize += `${scale}:${canvas?.width}x${canvas?.height} `;
-      lines.push(`scale ${scale}`, `${'camera'.padEnd(8)}${['off', ...stepList.map((s) => 'net' + s)].map((c) => c.padStart(7)).join('')}`);
+      canvasSize += `${run.mode}@${scale}:${canvas?.width}x${canvas?.height} `;
+      lines.push(run.label, `${'camera'.padEnd(8)}${['off', ...stepList.map((s) => 'net' + s)].map((c) => c.padStart(7)).join('')}`);
       for (const preset of PRESETS) {
         this.applyPreset(preset);
         this.applySteps(32);
         this.setClouds(false);
-        status(`${preset.label} off x${scale}`);
+        status(`${preset.label} off ${run.label}`);
         const off = await this.settle();
         const cells = [off];
         this.setClouds(true);
         for (const s of stepList) {
           this.applySteps(s);
-          status(`${preset.label} s${s} x${scale}`);
+          status(`${preset.label} s${s} ${run.label}`);
           const ms = await this.settle();
           cells.push(net(ms, off));
-          if (scale === 0.5 && s === 24 && preset.label === 'inside') goValue = net(ms, off);
+          if (run.mode === 'mesh' && scale === 0.5 && s === 24 && preset.label === 'inside') goValue = net(ms, off);
         }
         lines.push(`${preset.label.padEnd(8)}${cells.map((c) => c.padStart(7)).join('')}`);
       }
     }
 
-    // Single-factor runs at the heavy view: inside, 32 steps, full scale.
+    // Single-factor runs at the heavy view: inside, 32 steps, box mesh, full scale.
+    this.setCloudMode('mesh');
     this.applyScale(1);
     this.applyPreset(PRESETS[2]);
     this.setClouds(true);
@@ -490,6 +542,7 @@ export class CloudVolumesLabPageComponent {
     this.volume.alwaysRebakeLight = saved.rebake;
     setJitter(saved.jitter);
     setFetch(saved.fetch);
+    this.setCloudMode(saved.mode);
     this.applyScale(saved.scale);
     this.applyPreset(saved.preset);
     this.setClouds(saved.clouds);

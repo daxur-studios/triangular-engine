@@ -364,3 +364,19 @@ Inside, s32, scale 1, total ms: base 11.22, jitter off 10.85, no fetch 13.87, li
 - Only the short-ray view gained: above s24 went 4.22 -> 3.56 ms. Outside stays about 0.3 ms.
 - The point of step 2 is shimmer at planet scale, which this lab (2 km planet) cannot show. It stays unverified until the moving planet lab (step 7) or a larger test scene.
 - Go line at scale 0.5: 2.08 ms (step 1: 2.13).
+
+## 2026-10-17: Phase 2b step 3 built, half-resolution screen pass (not yet measured)
+
+### Built
+- `CloudVolumeScreenPass` (`cloud-volumes/cloud-volume-screen-pass.ts`, exported): a three `RenderPipeline` that draws the scene with `pass(scene, camera)` (colour + depth), marches every volume once per low-resolution pixel into an `rtt` target (`resolutionScale`, default 0.5 per axis, so a quarter of the pixels), and composites. Each ray stops at the scene surface (distance from the depth texture and the inverse projection), so clouds sit in front of and behind other geometry, including a planet poking into the box. The box-proxy mesh is not used in this mode.
+- Upsample: depth-aware bilinear. Four low-resolution taps, each weighted by bilinear weight times `exp(-relativeDepthDifference * sharpness)` (default 40), then normalised; the depth for each tap comes from the full-resolution depth at that tap's centre, the same place the march read it. Composite is `scene * (1 - cloud.a) + cloud.rgb`, and the output alpha is the over-operator, not the scene alpha (first try used the scene alpha and showed no clouds over the sky).
+- `CloudVolume`: `buildMarchNode(origin, dir, limitMetres)` is now shared between the box mesh (`buildBoxMarchNode`) and the screen pass (`buildScreenMarchNode`); `setView(camera)` sets the camera in the volume frame (double precision) and the world-to-volume direction matrix; `onMarchRebuilt` lets the pass rebuild after the `no fetch` toggle.
+- Lab: `clouds drawn as` buttons (box mesh, screen pass x0.5, screen pass x1) and the matrix now runs three blocks: box mesh at canvas x1, box mesh at canvas x0.5, screen pass x0.5 at canvas x1. "off" for the pass block is the pass with no volume, so it includes the scene render target and the composite; cloud columns stay net of that.
+- A `debugView` on the pass (`clouds`, `surface`, `depth`, `ray`) for the next steps.
+
+### Found
+- The `camera*` TSL nodes (`cameraNear`, `cameraProjectionMatrixInverse`, `cameraWorldMatrix`) resolve to the full-screen quad's camera inside an `rtt` and in the pipeline's output, not the scene camera. The pass mirrors the scene camera into its own uniforms each frame. Anything built on the pipeline later has to do the same.
+
+### Checked
+- Specs 8/8, `tsc` clean, `npm run build:triangular-engine` passes. By eye on WebGPU (edge preset): clouds look like the box mesh version at the same camera; no console errors.
+- Not checked: a view where the planet crosses the cloud box, the x1 pass mode, or silhouette halos at the planet's edge (the sharpness 40 is a first value, not tuned). Not measured: the lab matrix has to be re-run for the new block.

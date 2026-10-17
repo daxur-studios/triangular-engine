@@ -140,6 +140,8 @@ export class CloudVolume {
   private readonly inverseScratch = new Matrix4();
   private readonly cameraScratch = new Vector3();
   private readonly uSize = uniform(new Vector3(1, 1, 1));
+  private readonly uViewOrigin = uniform(new Vector3());
+  private readonly uViewDirections = uniform(new Matrix4());
 
   private readonly densityQuad: QuadMesh;
   private readonly lightQuad: QuadMesh;
@@ -177,7 +179,7 @@ export class CloudVolume {
     this.marchMaterial.blending = NormalBlending;
     this.marchMaterial.premultipliedAlpha = true;
     this.uMarchSteps.value = options.marchSteps ?? 64;
-    this.marchMaterial.fragmentNode = this.buildMarchNode();
+    this.marchMaterial.fragmentNode = this.buildBoxMarchNode();
     this.mesh = new Mesh(new BoxGeometry(1, 1, 1), this.marchMaterial);
     this.mesh.scale.copy(this.size);
     this.mesh.frustumCulled = false;
@@ -313,18 +315,47 @@ export class CloudVolume {
   setFetchEnabled(on: boolean): void {
     if (on === this.fetchEnabled) return;
     this.fetchEnabled = on;
-    this.marchMaterial.fragmentNode = this.buildMarchNode();
+    this.marchMaterial.fragmentNode = this.buildBoxMarchNode();
     this.marchMaterial.needsUpdate = true;
+    this.onMarchRebuilt?.();
   }
 
-  private buildMarchNode(): any {
+  /** Called after {@link setFetchEnabled} rebuilds the march, so a screen pass can rebuild its own copy. */
+  onMarchRebuilt: (() => void) | undefined;
+
+  /**
+   * Points the screen-space march at `camera`: the camera position in the unit frame (double precision, on the CPU)
+   * and the world-to-volume direction matrix. Call once per frame after {@link update}, before drawing a screen pass.
+   */
+  setView(camera: { matrixWorld: Matrix4 }): void {
+    this.mesh.updateWorldMatrix(true, false);
+    this.uViewOrigin.value.copy(this.cameraInVolumeFrame(this.mesh, camera));
+    this.uViewDirections.value.copy(this.mesh.matrixWorld).invert();
+  }
+
+  /**
+   * The march as a screen-space node: one ray per pixel from the camera along `dirWorld` (a unit vector node in world
+   * space), stopping at `limitMetres` (a node: the distance along the ray to the scene surface). Returns premultiplied
+   * RGBA. Needs {@link setView} each frame.
+   */
+  buildScreenMarchNode(dirWorld: any, limitMetres: any): any {
+    const dir = this.uViewDirections.mul(vec4(dirWorld, 0)).xyz;
+    return this.buildMarchNode(this.uViewOrigin, dir, limitMetres);
+  }
+
+  private buildBoxMarchNode(): any {
+    // The ray runs from the camera (in the unit frame) through the interpolated box vertex.
+    return this.buildMarchNode(this.uCameraLocal, positionLocal.sub(this.uCameraLocal), null);
+  }
+
+  /**
+   * The march. Unit cube `[-0.5, 0.5]^3`; `dir` need not be unit length, so `t` is a fraction of `dir`, not a length, and
+   * `dirLength` converts one unit of `t` to metres. `limitMetres` (or `null`) ends the ray early at a scene surface.
+   */
+  private buildMarchNode(origin: any, dir: any, limitMetres: any): any {
     const fetch = this.fetchEnabled;
     const steps = this.uMarchSteps;
     return Fn(() => {
-      // Unit cube [-0.5, 0.5]^3. The ray runs from the camera (in the unit frame) through the interpolated box vertex, so
-      // `t` is a fraction of that segment, not a length; `dirLength` converts one unit of `t` to metres.
-      const origin = this.uCameraLocal;
-      const dir = positionLocal.sub(origin);
       const dirVolume = dir.mul(this.uSize);
       const dirLength = dirVolume.length();
       const safeInv = (d: any) => float(1).div(select(abs(d).lessThan(1e-8), float(1e-8), d));
@@ -332,7 +363,8 @@ export class CloudVolume {
       const a = vec3(-0.5).sub(origin).mul(inv);
       const b = vec3(0.5).sub(origin).mul(inv);
       const tNear = max(max(min(a.x, b.x), min(a.y, b.y)), max(min(a.z, b.z), 0));
-      const tFar = min(min(max(a.x, b.x), max(a.y, b.y)), max(a.z, b.z));
+      const tBoxFar = min(min(max(a.x, b.x), max(a.y, b.y)), max(a.z, b.z));
+      const tFar: any = limitMetres ? min(tBoxFar, limitMetres.div(dirLength)) : tBoxFar;
       const color = vec3(0).toVar();
       const transmittance = float(1).toVar();
       If(tFar.greaterThan(tNear), () => {
