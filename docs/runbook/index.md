@@ -19,6 +19,7 @@ tags: [runbook, index]
 | [Morphing Planet Atmosphere](/docs/runbook/049_morphing_planet_atmosphere.md) | [Implementation plan](/docs/plans/049_morphing_planet_atmosphere.md) |
 | [TSL Planet Surface Material](/docs/runbook/050_tsl_planet_surface_material.md) | [Implementation plan](/docs/plans/050_tsl_planet_surface_material.md) |
 | [Cloud Volumes](/docs/runbook/051_cloud_volumes.md) | [Implementation plan](/docs/plans/051_cloud_volumes.md) |
+| [Page Test Sessions and Performance Comparison](/docs/runbook/052_page_test_sessions_and_performance_comparison.md) | [Implementation plan](/docs/plans/052_page_test_sessions_and_performance_comparison.md) |
 
 
 Existing runbooks `001`–`042` retain their historical paths and formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

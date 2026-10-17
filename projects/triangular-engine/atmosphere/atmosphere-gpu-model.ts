@@ -73,11 +73,22 @@ export interface AtmosphereMarchInput {
    * planet's sphere still stands for the distance it is asked about (terrain rises above the sphere).
    */
   ignoreGround?: boolean;
+  /**
+   * Light every point as if the planet did not shadow it: the sun's transmittance is read at no lower than the horizon
+   * direction. `radianceSun` is then the single-scattered sunlight accumulated over the whole ray, which a consumer can
+   * cut the planet's shadow out of afterwards (the aerial-perspective table does, per pixel, so the terminator is not
+   * limited to its texel size).
+   */
+  unshadowed?: boolean;
 }
 
 export interface AtmosphereMarchResult {
   /** In-scattered radiance, already multiplied by the sun irradiance. */
   radiance: any;
+  /** The single-scattered sunlight part of `radiance` (sun irradiance applied): the part the planet's shadow switches off. */
+  radianceSun: any;
+  /** The multiple-scattering part of `radiance` (sun irradiance applied), which the planet's shadow leaves alone. */
+  radianceMulti: any;
   /** Transmittance along the part of the ray inside the atmosphere. */
   transmittance: any;
   /** True when the ray reaches the ground inside `maxDistance`. */
@@ -387,6 +398,7 @@ export class AtmosphereGpuModel {
       .div(pow(float(1).add(g2).sub(g.mul(cosNu).mul(2)), 1.5));
 
     const L = vec3(0).toVar();
+    const Lmulti = vec3(0).toVar();
     const throughput = vec3(1).toVar();
 
     // Rays that miss the air (most of the screen seen from space) skip the loop entirely.
@@ -423,7 +435,9 @@ export class AtmosphereGpuModel {
             .add(this.uMieAbsorption.mul(dM))
             .add(this.uAbsorberExt.mul(dA));
 
-          const sunT = this.sunTransmittance(s, r, muSun);
+          // The horizon direction: -rho / r (rho = sqrt(r^2 - R^2)), the lowest sun the planet does not block.
+          const muSunLit = input.unshadowed ? max(muSun, sqrt(max(s, 0)).div(r).negate()) : muSun;
+          const sunT = this.sunTransmittance(s, r, muSunLit);
           const psi = texture(
             this.multiScatterTexture,
             vec2(
@@ -432,9 +446,8 @@ export class AtmosphereGpuModel {
             ),
             0,
           ).rgb;
-          const source = sunT
-            .mul(scatR.mul(phaseR).add(scatM.mul(phaseM)))
-            .add(scat.mul(psi));
+          const sourceSun = sunT.mul(scatR.mul(phaseR).add(scatM.mul(phaseM)));
+          const sourceMulti = scat.mul(psi);
 
           const x = ext.mul(dt);
           const integral = vec3(
@@ -442,14 +455,17 @@ export class AtmosphereGpuModel {
             stepIntegral(x.y),
             stepIntegral(x.z),
           ).mul(dt);
-          L.addAssign(throughput.mul(source).mul(integral));
+          L.addAssign(throughput.mul(sourceSun).mul(integral));
+          Lmulti.addAssign(throughput.mul(sourceMulti).mul(integral));
           throughput.mulAssign(exp(x.negate()));
         },
       );
     });
 
     return {
-      radiance: L.mul(this.uSunIrradiance),
+      radiance: L.add(Lmulti).mul(this.uSunIrradiance),
+      radianceSun: L.mul(this.uSunIrradiance),
+      radianceMulti: Lmulti.mul(this.uSunIrradiance),
       transmittance: throughput,
       hitsGround,
       groundDistance,

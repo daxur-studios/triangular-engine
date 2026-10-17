@@ -110,6 +110,13 @@ interface Recording {
         >march steps {{ steps() }}
         <input type="range" min="8" max="128" step="8" [value]="steps()" (input)="setSteps($event)" />
       </label>
+      <p class="row">
+        render scale
+        <button (click)="setScale(1)" [class.active]="renderScale() === 1">1x</button>
+        <button (click)="setScale(0.5)" [class.active]="renderScale() === 0.5">0.5x</button>
+        <button (click)="toggleJitter()" [class.active]="!jitterOn()">jitter off</button>
+        <button (click)="toggleFetch()" [class.active]="!fetchOn()">no fetch</button>
+      </p>
       <label
         >fly speed {{ speed().toFixed(0) }} m/s
         <input type="range" min="10" max="600" step="10" [value]="speed()" (input)="speed.set(num($event))" />
@@ -231,6 +238,9 @@ export class CloudVolumesLabPageComponent {
   readonly extinction = signal(0.02);
   readonly speed = signal(120);
   readonly steps = signal(64);
+  readonly renderScale = signal(1);
+  readonly jitterOn = signal(true);
+  readonly fetchOn = signal(true);
   readonly matrixStatus = signal('');
   readonly matrixText = signal('');
   readonly copied = signal(false);
@@ -282,6 +292,10 @@ export class CloudVolumesLabPageComponent {
       this.volume.update(renderer);
       this.densityBakes.set(this.volume.densityBakes);
       this.lightBakes.set(this.volume.lightBakes);
+    });
+    // Read the timestamps after the frame's main render, so the sample covers the bakes and the march of one frame.
+    const rendered = this.engine.renderComplete$.subscribe(() => {
+      const renderer: any = this.engine.renderer;
       this.timer.tick(renderer, () => {
         this.renderMs.set(this.format(this.timer.render));
         this.computeMs.set(this.format(this.timer.compute));
@@ -289,6 +303,8 @@ export class CloudVolumesLabPageComponent {
     });
     this.destroyRef.onDestroy(() => {
       tick.unsubscribe();
+      rendered.unsubscribe();
+      this.applyScale(1);
       this.engine.scene.remove(this.planet, this.volume.mesh, this.sun, this.hemi);
       this.planet.geometry.dispose();
       (this.planet.material as MeshStandardMaterial).dispose();
@@ -355,61 +371,134 @@ export class CloudVolumesLabPageComponent {
     this.timer.reset();
   }
 
-  /**
-   * Runs every camera preset with clouds off and with 64 / 32 / 16 march steps, waits for stable GPU readings,
-   * and writes one compact table (ms, GPU render average) that can be pasted straight into a report.
-   */
-  async runMatrix(): Promise<void> {
-    const configs = [
-      { label: 'off', clouds: false, steps: 64 },
-      { label: 's64', clouds: true, steps: 64 },
-      { label: 's32', clouds: true, steps: 32 },
-      { label: 's16', clouds: true, steps: 16 },
-    ];
-    const saved = { preset: PRESETS.find((p) => p.label === this.presetLabel()) ?? PRESETS[0], clouds: this.cloudsOn(), steps: this.steps() };
-    const wasRebake = this.rebakeEveryFrame();
-    this.volume.alwaysRebakeLight = false;
-    const rows: string[] = [];
+  setScale(scale: number): void {
+    this.applyScale(scale);
+  }
+
+  /** Render scale per axis: the renderer pixel ratio is the engine's ratio times `scale` (0.5 = a quarter of the pixels). */
+  private applyScale(scale: number): void {
+    this.renderScale.set(scale);
+    const renderer: any = this.engine.renderer;
+    renderer?.setPixelRatio?.(this.engine.pixelRatio * scale);
+    this.timer.reset();
+  }
+
+  toggleJitter(): void {
+    this.jitterOn.update((v) => !v);
+    this.volume.uJitter.value = this.jitterOn() ? 1 : 0;
+    this.timer.reset();
+  }
+
+  toggleFetch(): void {
+    this.fetchOn.update((v) => !v);
+    this.volume.setFetchEnabled(this.fetchOn());
+    this.timer.reset();
+  }
+
+  private async settle(): Promise<string> {
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-    let done = 0;
-    for (const preset of PRESETS) {
-      this.applyPreset(preset);
-      const cells: string[] = [];
-      for (const config of configs) {
-        this.matrixStatus.set(`running ${++done}/${PRESETS.length * configs.length}: ${preset.label} ${config.label}`);
-        this.setClouds(config.clouds);
-        this.applySteps(config.steps);
-        await sleep(800);
-        this.timer.reset();
-        for (let waited = 0; this.timer.sampleCount < 6 && waited < 20000; waited += 100) await sleep(100);
-        const avg = this.timer.render.average;
-        cells.push(avg === undefined ? 'n/a' : avg.toFixed(2));
-      }
-      rows.push(`${preset.label.padEnd(8)}${cells.map((c) => c.padStart(7)).join('')}`);
-    }
-    this.volume.alwaysRebakeLight = true;
-    const rebakeCells: string[] = [];
-    this.applyPreset(PRESETS[2]);
-    this.setClouds(true);
-    this.applySteps(32);
     await sleep(800);
     this.timer.reset();
     for (let waited = 0; this.timer.sampleCount < 6 && waited < 20000; waited += 100) await sleep(100);
-    const r = this.timer.render.average;
-    rebakeCells.push(r === undefined ? 'n/a' : r.toFixed(2));
+    const avg = this.timer.render.average;
+    return avg === undefined ? 'n/a' : avg.toFixed(2);
+  }
 
-    this.volume.alwaysRebakeLight = wasRebake;
+  /**
+   * Plan 051, Phase 2a probe. For render scale 1 and 0.5 and every camera preset it times clouds off and clouds on
+   * at 16 / 24 / 32 steps, then three extra runs at inside s32 scale 1 (jitter off, no fetch, light rebaked every
+   * frame). Writes one compact table. Cloud columns are the cost over "off" at the same scale and camera.
+   */
+  async runMatrix(): Promise<void> {
+    const stepList = [16, 24, 32];
+    const saved = {
+      preset: PRESETS.find((p) => p.label === this.presetLabel()) ?? PRESETS[0],
+      clouds: this.cloudsOn(),
+      steps: this.steps(),
+      scale: this.renderScale(),
+      jitter: this.jitterOn(),
+      fetch: this.fetchOn(),
+      rebake: this.rebakeEveryFrame(),
+    };
+    const setJitter = (on: boolean) => {
+      this.jitterOn.set(on);
+      this.volume.uJitter.value = on ? 1 : 0;
+    };
+    const setFetch = (on: boolean) => {
+      this.fetchOn.set(on);
+      this.volume.setFetchEnabled(on);
+    };
+    setJitter(true);
+    setFetch(true);
+    this.volume.alwaysRebakeLight = false;
+    const lines: string[] = [];
+    const total = 2 * PRESETS.length * (stepList.length + 1) + 3;
+    let done = 0;
+    const status = (what: string) => this.matrixStatus.set(`running ${++done}/${total}: ${what}`);
+    const net = (ms: string, base: string) => (ms === 'n/a' || base === 'n/a' ? 'n/a' : (+ms - +base).toFixed(2));
+    let canvasSize = '';
+    let goValue = 'n/a';
+    for (const scale of [1, 0.5]) {
+      this.applyScale(scale);
+      const canvas = document.querySelector('canvas');
+      canvasSize += `${scale}:${canvas?.width}x${canvas?.height} `;
+      lines.push(`scale ${scale}`, `${'camera'.padEnd(8)}${['off', ...stepList.map((s) => 'net' + s)].map((c) => c.padStart(7)).join('')}`);
+      for (const preset of PRESETS) {
+        this.applyPreset(preset);
+        this.applySteps(32);
+        this.setClouds(false);
+        status(`${preset.label} off x${scale}`);
+        const off = await this.settle();
+        const cells = [off];
+        this.setClouds(true);
+        for (const s of stepList) {
+          this.applySteps(s);
+          status(`${preset.label} s${s} x${scale}`);
+          const ms = await this.settle();
+          cells.push(net(ms, off));
+          if (scale === 0.5 && s === 24 && preset.label === 'inside') goValue = net(ms, off);
+        }
+        lines.push(`${preset.label.padEnd(8)}${cells.map((c) => c.padStart(7)).join('')}`);
+      }
+    }
+
+    // Single-factor runs at the heavy view: inside, 32 steps, full scale.
+    this.applyScale(1);
+    this.applyPreset(PRESETS[2]);
+    this.setClouds(true);
+    this.applySteps(32);
+    status('inside s32 baseline');
+    const base = await this.settle();
+    setJitter(false);
+    status('inside s32 jitter off');
+    const noJitter = await this.settle();
+    setJitter(true);
+    setFetch(false);
+    status('inside s32 no fetch');
+    const noFetch = await this.settle();
+    setFetch(true);
+    this.volume.alwaysRebakeLight = true;
+    status('inside s32 rebake every frame');
+    const rebake = await this.settle();
+    lines.push(
+      `inside s32 x1 total ms: base ${base}, jitter off ${noJitter}, no fetch ${noFetch}, rebake every frame ${rebake}`,
+    );
+    const g = parseFloat(goValue);
+    const verdict = Number.isNaN(g) ? 'n/a' : g <= 8 ? 'GO (<= 8)' : g <= 12 ? 'PACK FIRST (8-12)' : 'NO-GO (> 12)';
+    lines.push(`go line: net cloud cost at x0.5 s24 inside = ${goValue} ms -> ${verdict}`);
+
+    this.volume.alwaysRebakeLight = saved.rebake;
+    setJitter(saved.jitter);
+    setFetch(saved.fetch);
+    this.applyScale(saved.scale);
     this.applyPreset(saved.preset);
     this.setClouds(saved.clouds);
     this.applySteps(saved.steps);
-    const canvas = document.querySelector('canvas');
     this.matrixText.set(
       [
-        `cloud-volumes-lab ${this.backendLabel} canvas ${canvas?.width}x${canvas?.height} dpr ${devicePixelRatio} density 128 light 64`,
-        'GPU render ms avg (off = clouds hidden, sNN = clouds with NN march steps)',
-        `${'camera'.padEnd(8)}${configs.map((c) => c.label.padStart(7)).join('')}`,
-        ...rows,
-        `inside s32 with light rebaked every frame: ${rebakeCells[0]}`,
+        `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} canvas ${canvasSize.trim()} density 128 light 64`,
+        'GPU render ms avg, read after the main render. off = clouds hidden; netNN = (clouds with NN steps) - off',
+        ...lines,
       ].join('\n'),
     );
     this.matrixStatus.set('');

@@ -92,6 +92,10 @@ import {
   type ICellPlanetU0Bookmark,
 } from '../cell-planet-u0-fixture';
 import { getTerrainHeightScaleM } from '../cell-planet-25d-map/cell-planet-terrain-scale';
+import {
+  runFrameBenchmark,
+  type IBenchmarkScenario,
+} from '../cell-planet-tsl/frame-benchmark';
 import type {
   CellPlanetMorphCellGridPayload,
   CellPlanetMorphCellGridRequest,
@@ -101,6 +105,8 @@ import type {
   CellPlanetMorphWorkerRequest,
   CellPlanetMorphWorkerTimings,
 } from './cell-planet-morph-streaming.worker';
+
+const pageStartMs = performance.now();
 
 type Quality = 'standard' | 'high' | 'ultra';
 type ColourMode = 'natural' | 'elevation' | 'plates' | 'lod' | 'material';
@@ -328,6 +334,9 @@ export class CellPlanetMorphStreamingPageComponent {
   private readonly materialViewport = new Vector2();
   private factionLookupRequest?: Promise<void>;
   readonly rebuildRevision = signal(0);
+  readonly benchmarkStatus = signal('');
+  readonly lastReport = signal('');
+  private firstFrameMs = 0;
 
   // Render modes & Diagnostics
   readonly colourMode = signal<ColourMode>('natural');
@@ -871,6 +880,7 @@ export class CellPlanetMorphStreamingPageComponent {
     for (const worker of this.materialWorkers) worker.onerror = handleWorkerError;
 
     const textureTick = this.engine.beforeRender$.subscribe(() => {
+      if (!this.firstFrameMs) this.firstFrameMs = performance.now() - pageStartMs;
       this.updateMaterialView();
       this.updateOrbitUpVector();
     });
@@ -1824,6 +1834,74 @@ export class CellPlanetMorphStreamingPageComponent {
     // tested against bounds from a previous dynamic-LOD patch.
     this.morphRaycastSurfaceRevision++;
     this.stats.set(stats);
+  }
+
+  async copyLastReport(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.lastReport());
+      this.benchmarkStatus.set('Copied to clipboard.');
+    } catch {
+      this.benchmarkStatus.set('Clipboard blocked: the report is in the console.');
+    }
+    setTimeout(() => this.benchmarkStatus.set(''), 4000);
+  }
+
+  /**
+   * Plan 050 Phase 5: the GLSL counterpart of the TSL page's benchmark, same helper and scenarios
+   * (morph 0 / 0.5 / 1) so the two reports compare directly. Uses the 'material' colour mode, the
+   * GLSL equivalent of the TSL page's terrain material with streamed tiles.
+   */
+  async runBenchmark(): Promise<void> {
+    if (this.benchmarkStatus() !== '') return;
+    const was = { morph: this.morphProgress(), colour: this.colourMode() };
+    const setMorph = (morph: number): (() => void) => () => {
+      this.morphProgress.set(morph);
+      this.morphUniforms.uMorph.value = morph;
+      this.lodMorph.set(morph);
+      this.updateCameraForActiveBookmark(morph);
+    };
+    const scenarios: IBenchmarkScenario[] = [0, 0.5, 1].map((morph) => ({
+      name: `morph ${morph}`,
+      apply: setMorph(morph),
+    }));
+    if (this.colourMode() !== 'material') this.applyColourMode('material');
+    try {
+      const { report } = await runFrameBenchmark({
+        scenarios,
+        isSettled: () => {
+          const tiles = this.materialRuntime.stats;
+          return this.stats().queued === 0 && tiles.queued === 0 && tiles.inFlight === 0;
+        },
+        describe: () => {
+          const t = this.stats();
+          return `tiles ${this.materialRuntime.stats.resident}, tris ${t.triangles}, draws ${t.drawCalls}`;
+        },
+        header: () => {
+          const canvas = this.engine.renderer.domElement;
+          return [
+            `backend: ${this.engine.renderer.constructor.name} (GLSL materials)`,
+            `materials: GLSL MeshStandardMaterial + enableStreamedTerrainMaterial, colour mode material, quality ${this.quality()}`,
+            `canvas ${canvas.width}x${canvas.height}, devicePixelRatio ${devicePixelRatio}`,
+            `page load to first frame: ${this.firstFrameMs.toFixed(0)} ms`,
+            `frame times are rAF deltas, capped by the display refresh rate`,
+            `UA: ${navigator.userAgent}`,
+          ];
+        },
+        onProgress: (text) => this.benchmarkStatus.set(`benchmark ${text}`),
+      });
+      console.info(report);
+      this.lastReport.set(report);
+      try {
+        await navigator.clipboard.writeText(report);
+        this.benchmarkStatus.set('Copied to clipboard. Paste it back.');
+      } catch {
+        this.benchmarkStatus.set('Clipboard blocked: the report is in the console.');
+      }
+    } finally {
+      setMorph(was.morph)();
+      if (was.colour !== 'material') this.applyColourMode(was.colour);
+      setTimeout(() => this.benchmarkStatus.set(''), 6000);
+    }
   }
 
   formatBytes(bytes: number): string {

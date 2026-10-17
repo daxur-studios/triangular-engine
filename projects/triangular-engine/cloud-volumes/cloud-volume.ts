@@ -110,6 +110,8 @@ export class CloudVolume {
   readonly uNoiseSeed = uniform(0);
   /** Steps of the full-resolution march; read live, so changing it needs no rebuild. */
   readonly uMarchSteps = uniform(64, 'int');
+  /** Debug (Plan 051, Phase 2a): 0 turns the per-pixel start jitter off. */
+  readonly uJitter = uniform(1);
 
   /** How many times each bake has run, for specs and the lab readout. */
   densityBakes = 0;
@@ -139,6 +141,7 @@ export class CloudVolume {
   private readonly densityMaterial: NodeMaterial;
   private readonly lightMaterial: NodeMaterial;
   private readonly marchMaterial: NodeMaterial;
+  private fetchEnabled = true;
 
   constructor(options: CloudVolumeOptions = {}) {
     this.size = (options.size ?? new Vector3(600, 200, 600)).clone();
@@ -285,7 +288,19 @@ export class CloudVolume {
     })();
   }
 
+  /**
+   * Debug (Plan 051, Phase 2a): `false` rebuilds the march with an analytic blob instead of the atlas reads, to time the
+   * fetches. It recompiles the shader, so toggle it rarely.
+   */
+  setFetchEnabled(on: boolean): void {
+    if (on === this.fetchEnabled) return;
+    this.fetchEnabled = on;
+    this.marchMaterial.fragmentNode = this.buildMarchNode();
+    this.marchMaterial.needsUpdate = true;
+  }
+
   private buildMarchNode(): any {
+    const fetch = this.fetchEnabled;
     const steps = this.uMarchSteps;
     return Fn(() => {
       const dirWorld = normalize(positionWorld.sub(cameraPosition));
@@ -312,13 +327,15 @@ export class CloudVolume {
         };
         const phase = hg(0.5).mul(0.6).add(hg(-0.3).mul(0.4));
         Loop(steps, ({ i }: { i: any }) => {
-          const t = tNear.add(float(i).add(jitter).mul(dt));
+          const t = tNear.add(float(i).add(jitter.mul(this.uJitter)).mul(dt));
           const q = origin.add(dir.mul(t)).add(0.5);
-          const density = this.densityLayout.sample(this.densityTarget.texture, q);
+          const d = q.sub(0.5);
+          const blobDensity = exp(dot(d, d).div(-2 * CLOUD_BLOB_SIGMA * CLOUD_BLOB_SIGMA));
+          const density = fetch ? this.densityLayout.sample(this.densityTarget.texture, q) : blobDensity;
           If(density.greaterThan(0.002), () => {
             const sigma = density.mul(this.uExtinction);
             const stepT = exp(sigma.mul(dt).negate());
-            const od = this.lightLayout.sample(this.lightTarget.texture, q);
+            const od = fetch ? this.lightLayout.sample(this.lightTarget.texture, q) : density.mul(0.5);
             const sun = this.uSunColor.mul(exp(od.negate())).mul(phase.mul(4 * Math.PI * 0.25));
             const ambient = this.uAmbient.mul(q.y.mul(0.5).add(0.5));
             color.addAssign(transmittance.mul(float(1).sub(stepT)).mul(sun.add(ambient)));

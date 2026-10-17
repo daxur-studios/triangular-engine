@@ -239,3 +239,46 @@ To fix (in the Phase 2 order; none blocks the 2a probe except the timer):
 Not worth chasing before Phase 2. Packing four slices per RGBA8 texel costs the same 1 byte per voxel as R8, returns both slices of a trilinear read
 in one fetch most of the time, and keeps the RGBA readback that already works. The cause (likely a gap in the WebGL backend's readback for single-channel
 half-float targets) can be a footnote.
+
+## 2026-10-17: Phase 2a probe tooling built (not yet run)
+
+- **GPU timer** now ticks from `renderComplete$` (after the frame's main render) instead of `tick$`, so a sample covers the bakes and the march of one frame.
+- **Lab controls:** render scale 1x / 0.5x (`renderer.setPixelRatio(engine.pixelRatio × scale)`), `jitter off` (`CloudVolume.uJitter`), and `no fetch` (`CloudVolume.uFetch`, an analytic blob replaces the density and light atlas reads).
+- **Matrix button** now runs scale 1 and 0.5 × five cameras × off / 16 / 24 / 32 steps (cloud columns are net of "off" at the same scale), then inside s32 at scale 1 with jitter off, no fetch and rebake every frame, and prints the go-line verdict (net cost at 0.5x, s24, inside: ≤ 8 go, 8-12 pack first, > 12 no-go).
+- **Checked:** 8/8 specs, library build, `tsc` of the demo app. **Not checked:** the new shader and matrix in a visible browser (the pane was hidden, canvas 0 px). The maintainer's run is the first real test; the results go in a new entry here.
+
+### Correction, same day: the first Phase 2a matrix run is invalid
+
+The first build of the `no fetch` switch wrapped the density read in a uniform `If`/`Else` writing a `toVar`. On WebGPU that branch returned no density, so **no clouds were drawn** and every number from that run (including the 5.21 ms "go" figure) measured an empty march. The switch is now a separate shader variant (`CloudVolume.setFetchEnabled`), with the default path back to plain atlas reads. Checked by eye in the lab on WebGPU: clouds visible from the edge preset with fetch on, and a soft blob with fetch off. The matrix must be re-run on this build before the go line is read.
+
+## 2026-10-17: Phase 2a probe result (maintainer's GPU, WebGPU, clouds verified visible)
+
+Run on the fixed build (`CloudVolume.setFetchEnabled` variant, GPU timer read after the main render). Canvas 2560x1308 at scale 1, 1280x654 at scale 0.5, density 128, light 64. GPU render ms, cloud columns net of "off" at the same scale.
+
+| scale 1 | off | net16 | net24 | net32 |
+|---|---|---|---|---|
+| outside | 0.90 | 0.68 | 0.91 | 1.09 |
+| edge | 0.88 | 15.29 | 19.15 | 21.75 |
+| inside | 0.69 | 16.70 | 20.24 | 23.29 |
+| above | 1.80 | 6.49 | 8.16 | 9.83 |
+| below | 0.55 | 13.35 | 16.25 | 18.98 |
+
+| scale 0.5 | off | net16 | net24 | net32 |
+|---|---|---|---|---|
+| outside | 0.29 | 0.20 | 0.30 | 0.37 |
+| edge | 0.25 | 4.05 | 5.00 | 5.89 |
+| inside | 0.21 | 4.22 | 5.20 | 5.96 |
+| above | 0.50 | 1.82 | 2.25 | 2.78 |
+| below | 0.14 | 3.52 | 4.35 | 5.10 |
+
+Inside, s32, scale 1, total ms: base 23.94, jitter off 12.71, no fetch 12.10, light rebaked every frame 24.85.
+
+**Go line:** net cloud cost at scale 0.5, s24, inside = 5.20 ms. That is under the 8 ms line, so the plan's rule gives **go, 2b in the order given**. The go itself is the maintainer's to record; Phase 2b is not started.
+
+Readings (measured, not yet explained):
+- Cost scales with pixel count, not steps: scale 0.5 is about a quarter of scale 1 (20.24 -> 5.20), and steps are roughly linear on top of a base (s16 -> s32 is 16.7 -> 23.3 inside).
+- The fixed cost seen in Phase 1 (~14 ms that did not shrink with steps) is not the bakes: the light rebake adds only about 0.9 ms per frame (24.85 vs 23.94), and "off" is under 1 ms at every view. It sits inside the march per pixel.
+- Jitter off nearly halves the frame (23.94 -> 12.71). Likely jitter breaks texture-cache coherence between neighbouring pixels, so the dense atlas reads miss the cache. Worth trying a cheaper jitter (blue-noise or per-tile) in 2b.
+- No fetch (analytic blob instead of atlas reads) gives 12.10, similar to jitter off. Atlas reads are about half the cost, which supports packing the atlases (2b step 1).
+- The "no fetch" row recompiles the shader, so it is a lower bound on non-fetch work.
+- Scale 0.5 may look soft on cloud edges; not judged here.

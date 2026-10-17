@@ -58,6 +58,7 @@ import { snapshotToOverlay } from '../../shared/overlay-snapshot';
 import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
 import { getTerrainHeightScaleM } from '../cell-planet-25d-map/cell-planet-terrain-scale';
 import type { CellPlanetMorphWorkerRequest } from '../cell-planet-morph-streaming/cell-planet-morph-streaming.worker';
+import { runFrameBenchmark, type IBenchmarkScenario } from './frame-benchmark';
 import { MaterialStreaming } from './material-streaming';
 
 /**
@@ -74,6 +75,7 @@ import { MaterialStreaming } from './material-streaming';
  * Phase 3 adds the ocean shell, the map frame (fades in as the globe unrolls) and the cell-grid lines, all on the
  * same morph uniforms as the terrain.
  */
+const pageStartMs = performance.now();
 const query = new URLSearchParams(globalThis.location?.search ?? '');
 const BACKEND: 'webgpu' | 'webgl2' =
   query.get('backend') === 'webgl2' ? 'webgl2' : 'webgpu';
@@ -219,6 +221,17 @@ const MACRO: 'off' | 'bodyFixed' | 'morphed' =
             (input)="centerLat.set(+$any($event.target).value)"
           />
         </label>
+      }
+      <p class="row">
+        <button (click)="runBenchmark()" [disabled]="benchmarkStatus() !== ''">
+          run benchmark + copy
+        </button>
+      </p>
+      @if (lastReport() !== '' && benchmarkStatus() === '') {
+        <p class="row"><button (click)="copyLastReport()">copy last report</button></p>
+      }
+      @if (benchmarkStatus() !== '') {
+        <p>{{ benchmarkStatus() }}</p>
       }
       <p class="row">
         <button (click)="viewFront()">front</button>
@@ -396,6 +409,11 @@ export class CellPlanetTslPageComponent {
   readonly macro = MACRO !== 'off';
   readonly macroOn = signal(true);
   readonly batchingOn = signal(true);
+  /** Empty while idle; the running scenario (or the copy result) otherwise. */
+  readonly benchmarkStatus = signal('');
+  readonly lastReport = signal('');
+  /** Page construction to the first frame drawn after the renderer was ready (shader compile included). */
+  private firstFrameMs = 0;
   readonly viewOn = signal(true);
   readonly drawCalls = signal(0);
   readonly tileDebug = signal(false);
@@ -611,6 +629,9 @@ export class CellPlanetTslPageComponent {
     if (ATMOSPHERE) this.addAtmosphere();
     this.engine.beforeRender$.subscribe(() => {
       this.syncAtmosphere();
+      if (!this.firstFrameMs && (this.engine.renderer as any)?.initialized) {
+        this.firstFrameMs = performance.now() - pageStartMs;
+      }
       // The previous frame's count; `render.calls` is the classic name, `drawCalls` the WebGPU one.
       const info = (this.engine.renderer as any).info?.render;
       const calls = Number(info?.drawCalls ?? info?.calls ?? 0);
@@ -935,9 +956,100 @@ export class CellPlanetTslPageComponent {
 
   /** Recreates the streaming view, since the terrain surface reads `batching` when patches are installed. */
   setBatching(event: Event): void {
-    this.batchingOn.set((event.target as HTMLInputElement).checked);
+    this.applyBatching((event.target as HTMLInputElement).checked);
+  }
+
+  private applyBatching(on: boolean): void {
+    if (this.batchingOn() === on) return;
+    this.batchingOn.set(on);
     this.viewOn.set(false);
     setTimeout(() => this.viewOn.set(true));
+  }
+
+  async copyLastReport(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.lastReport());
+      this.benchmarkStatus.set('Copied to clipboard.');
+    } catch {
+      this.benchmarkStatus.set('Clipboard blocked: the report is in the console.');
+    }
+    setTimeout(() => this.benchmarkStatus.set(''), 4000);
+  }
+
+  /** Runs every scenario in turn, then copies a markdown table to the clipboard (and logs it). */
+  async runBenchmark(): Promise<void> {
+    if (this.benchmarkStatus() !== '') return;
+    const was = {
+      morph: this.morphProgress(),
+      dynamic: this.dynamic(),
+      batching: this.batchingOn(),
+      atmosphere: this.atmosphereOn(),
+      scrubbing: this.scrubbing(),
+    };
+    const set = (
+      morph: number,
+      batching: boolean,
+      options: { dynamic?: boolean; atmosphere?: boolean } = {},
+    ): (() => void) => () => {
+      this.scrubbing.set(false);
+      this.morphProgress.set(morph);
+      this.dynamic.set(options.dynamic ?? false);
+      this.atmosphereOn.set(options.atmosphere ?? true);
+      this.centerLon.set(0);
+      this.centerLat.set(0);
+      this.applyBatching(batching);
+    };
+    const scenarios: IBenchmarkScenario[] = [];
+    for (const batching of [true, false]) {
+      for (const morph of [0, 0.5, 1]) {
+        scenarios.push({
+          name: `morph ${morph}, batching ${batching ? 'on' : 'off'}`,
+          apply: set(morph, batching),
+        });
+      }
+    }
+    scenarios.push(
+      { name: 'morph 1, projection in shader, batching on', apply: set(1, true, { dynamic: true }) },
+      { name: 'morph 0, atmosphere off, batching on', apply: set(0, true, { atmosphere: false }) },
+    );
+    this.viewFront();
+    try {
+      const { report } = await runFrameBenchmark({
+        scenarios,
+        isSettled: () => this.streaming.runtime.stats.queued === 0,
+        describe: () => {
+          const t = this.stats();
+          return `tiles ${this.tileStats().resident}, tris ${t.triangles}, draws ${this.drawCalls()}`;
+        },
+        header: () => {
+          const canvas = this.engine.renderer.domElement;
+          return [
+            `backend: ${BACKEND} (${(this.engine.renderer as any).backend?.isWebGPUBackend ? 'native WebGPU' : 'WebGL2 path'}), AA ${ANTIALIAS ? 'on' : 'off'}`,
+            `materials: TSL PlanetSurfaceMaterial, tiles ${TILES ? 'on' : 'off'}, macro ${MACRO}, atmosphere ${ATMOSPHERE ? 'on' : 'off'}`,
+            `canvas ${canvas.width}x${canvas.height}, devicePixelRatio ${devicePixelRatio}`,
+            `page load to first frame: ${this.firstFrameMs.toFixed(0)} ms`,
+            `frame times are rAF deltas, capped by the display refresh rate`,
+            `UA: ${navigator.userAgent}`,
+          ];
+        },
+        onProgress: (text) => this.benchmarkStatus.set(`benchmark ${text}`),
+      });
+      console.info(report);
+      this.lastReport.set(report);
+      try {
+        await navigator.clipboard.writeText(report);
+        this.benchmarkStatus.set('Copied to clipboard. Paste it back.');
+      } catch {
+        this.benchmarkStatus.set('Clipboard blocked: the report is in the console.');
+      }
+    } finally {
+      this.morphProgress.set(was.morph);
+      this.dynamic.set(was.dynamic);
+      this.atmosphereOn.set(was.atmosphere);
+      this.scrubbing.set(was.scrubbing);
+      this.applyBatching(was.batching);
+      setTimeout(() => this.benchmarkStatus.set(''), 6000);
+    }
   }
 
   setMacro(event: Event): void {

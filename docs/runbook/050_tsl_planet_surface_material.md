@@ -205,6 +205,56 @@ material: culled with the mask, drawn without it.
   `(0,0,1)` when `uProjMode` was on, so the map at morph 1 had no terrain lighting. The GLSL material keeps the baked
   `aFlatNorm` there. The map axes (east, north, up) do not depend on the projection centre, so the baked normal stays
   valid when re-centred. `planetMorphGraph` now always uses `aFlatNorm`.
+- **Benchmark button (2026-10-17):** `/cell-planet-tsl` has "run benchmark + copy" (`frame-benchmark.ts`). It runs a discarded
+  warm-up, then 8 scenarios (morph 0 / 0.5 / 1 x batching on / off, projection in shader, atmosphere off), 3 s each after
+  streaming settles, and copies a markdown table (mean / p50 / p95 / worst frame ms, fps, tiles, triangles, draw calls,
+  page-load-to-first-frame) to the clipboard. Run it once with `?backend=webgl2` and once with `?backend=webgpu`, in a
+  visible, focused tab. Frame times are rAF deltas, so a 60 Hz display caps them. A first run in a hidden pane gave
+  1 fps rows (throttled); the report now warns on rows under 5 fps.
+- **Phase 5 numbers (2026-10-17, user run, visible tab):** 2560x1308 canvas, devicePixelRatio 1.5, AA off, atmosphere on,
+  ~115 tiles, Chrome 155 on Windows. Mean frame ms (fps). The display looks like 165 Hz (rows hit ~164 fps, and the
+  slow run's p50 values sit on multiples of ~6.06 ms), so the cap is not the limit here.
+
+  | scenario | native WebGPU | WebGL2 path |
+  |---|---|---|
+  | morph 0, batching on | 9.7 (103) | 10.1 (99) |
+  | morph 0.5, batching on | 8.1 (123) | 8.6 (116) |
+  | morph 1, batching on | 8.3 (121) | 7.9 (127) |
+  | morph 0, batching off | 9.4 (106) | 7.4 (135) |
+  | morph 0.5, batching off | 8.4 (118) | 6.3 (158) |
+  | morph 1, batching off | 8.6 (116) | 6.8 (147) |
+  | morph 1, projection in shader, batching on | 9.1 (110) | 8.3 (121) |
+  | morph 0, atmosphere off, batching on | 6.1 (164) | 7.3 (136) |
+
+  Page load to first frame: 924 ms (WebGPU), 1338 ms (WebGL2). Findings:
+  - Every scenario is above 99 fps on both backends. Native WebGPU is not faster than the WebGL2 path in this scene; the
+    two are within about 20 % either way, so the plan's "2-5x slower on the fallback" worry does not show up here.
+  - Batching: WebGPU draws 36-48 with batching on and off alike (the batch does not collapse draw calls there), and
+    batching on is slightly faster. The WebGL2 path collapses to 5-7 draws but is 20-30 % *slower* with batching on
+    (e.g. morph 0.5: 8.6 ms vs 6.3 ms). This is the batching slowdown still open; it is not a draw-call-count issue.
+  - Projection in shader costs ~0.8 ms (WebGPU) / 0.4 ms (WebGL2) over the plain morph 1 row.
+  - Atmosphere costs about 3.6 ms on WebGPU (9.7 -> 6.1) and 2.8 ms on the WebGL2 path (10.1 -> 7.3), both at morph 0
+    with batching on.
+  - Not measured at first: the GLSL demo comparison; each row is one 3 s sample, so differences under ~1 ms are noise.
+- **Rerun and GLSL comparison (2026-10-17, same machine, same tab setup):**
+
+  | scenario | TSL WebGL2 run 1 | TSL WebGL2 run 2 | GLSL page (WebGL2) |
+  |---|---|---|---|
+  | morph 0 (batching on) | 10.1 (99) | 20.6 (48) | 15.0 (67), 1 draw |
+  | morph 0.5 | 8.6 (116) | 18.5 (54) | 15.4 (65), 1 draw |
+  | morph 1 | 7.9 (127) | 17.3 (58) | 16.5 (61), 1 draw |
+
+  Page load to first frame: GLSL 305 ms, TSL 924-1641 ms (shader compile and node build).
+  - Run-to-run noise on the same backend is 2x (TSL WebGL2 morph 0: 10.1 ms then 20.6 ms; all eight scenarios shifted,
+    and in run 2 the batching-on-slower pattern is only visible at morph 0). The GPU/machine state dominates, so the
+    absolute numbers and the "batching on is 20-30 % slower on WebGL2" claim above are not established. Treat the
+    WebGPU-vs-WebGL2 ordering the same way.
+  - The GLSL page sits between the two TSL runs, so no TSL-vs-GLSL speed verdict follows. What is firm: TSL costs about
+    3-5x the first-frame time of GLSL, and neither is below 48 fps on a 2560x1308 canvas at 1.5 dpr.
+  - To settle it: run TSL and GLSL back to back, alternating, three times each, with other GPU work closed.
+- **GLSL benchmark button (2026-10-17):** `/cell-planet-morph-streaming` has the same "run benchmark + copy" (shared
+  `frame-benchmark.ts`). Scenarios: morph 0 / 0.5 / 1 in the 'material' colour mode, no batching or atmosphere variants (the
+  GLSL page has neither toggle). Run it in a visible tab and compare with the morph rows of the TSL tables above.
 - **Token map (2026-10-17):** `atmosphere` and `planet-material` are registered and acknowledged against
   `docs/atmosphere.md` and `docs/planet-material.md` (the doc-section stubs hold the why and constraints).
 - `setPlanetProjectionCentre(morph, { lonDeg, latDeg } | null)` writes the whole basis and the mode, so a page does not

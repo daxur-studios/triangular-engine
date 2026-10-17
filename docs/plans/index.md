@@ -19,6 +19,7 @@ tags: [plans, index]
 | [Morphing Planet Atmosphere](/docs/plans/049_morphing_planet_atmosphere.md) | planned | [Evidence](/docs/runbook/049_morphing_planet_atmosphere.md) |
 | [TSL Planet Surface Material](/docs/plans/050_tsl_planet_surface_material.md) | planned (do first) | [Evidence](/docs/runbook/050_tsl_planet_surface_material.md) |
 | [Cloud Volumes](/docs/plans/051_cloud_volumes.md) | in progress | [Evidence](/docs/runbook/051_cloud_volumes.md) |
+| [Page Test Sessions and Performance Comparison](/docs/plans/052_page_test_sessions_and_performance_comparison.md) | proposed | [Evidence](/docs/runbook/052_page_test_sessions_and_performance_comparison.md) |
 
 
 Convention: [Plans and Runbooks](/docs/plans-and-runbooks.md).

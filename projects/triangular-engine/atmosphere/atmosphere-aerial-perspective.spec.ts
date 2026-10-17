@@ -63,6 +63,16 @@ describe('AtmosphereAerialPerspectiveLut', () => {
       ndc: [[0, 0], [-0.4, 0.1]],
     },
     {
+      name: 'Earth, 40 km up at dusk, looking down into the planet shadow',
+      profile: earthAtmosphereProfile,
+      altitude: 40_000,
+      looking: HORIZONTAL,
+      sunElevation: -3,
+      sunAzimuth: 0,
+      distances: () => [20_000, 60_000, 90_000, 110_000, 130_000],
+      ndc: [[0, -0.5], [0.3, -0.4]],
+    },
+    {
       name: 'planet scaled to 100 km, from space, looking down at the ground',
       profile: () => scaleAtmosphereProfile(earthAtmosphereProfile(), { radiusM: 100_000 }) as PhysicalAtmosphereProfile,
       altitude: 220_000,

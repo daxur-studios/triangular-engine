@@ -2,9 +2,11 @@ import { ClampToEdgeWrapping, HalfFloatType, LinearFilter, Matrix3, Matrix4, RGB
 import { NodeMaterial, QuadMesh, type WebGPURenderer } from 'three/webgpu';
 import {
   Fn,
+  abs,
   asin,
   acos,
   clamp,
+  dot,
   exp,
   floor,
   float,
@@ -17,6 +19,7 @@ import {
   outputStruct,
   pow,
   select,
+  sqrt,
   texture,
   uniform,
   uv,
@@ -29,9 +32,9 @@ import { AtmosphereGpuModel } from './atmosphere-gpu-model';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export interface AtmosphereAerialPerspectiveOptions {
-  /** Texels across the screen per depth slice. Default 64. */
+  /** Texels across the screen per depth slice. Default 128. */
   width?: number;
-  /** Texels down the screen per depth slice. Default 36. */
+  /** Texels down the screen per depth slice. Default 72. */
   height?: number;
   /** Depth slices. Default 32. */
   slices?: number;
@@ -104,11 +107,11 @@ export class AtmosphereAerialPerspectiveLut {
     readonly model: AtmosphereGpuModel,
     private readonly options: AtmosphereAerialPerspectiveOptions = {},
   ) {
-    this.width = options.width ?? 64;
-    this.height = options.height ?? 36;
+    this.width = options.width ?? 128;
+    this.height = options.height ?? 72;
     this.slices = options.slices ?? 32;
     this.target = new RenderTarget(this.width * this.slices, this.height, {
-      count: 2,
+      count: 3,
       type: HalfFloatType,
       format: RGBAFormat,
       minFilter: LinearFilter,
@@ -150,12 +153,15 @@ export class AtmosphereAerialPerspectiveLut {
         maxDistance: distance,
         steps: this.options.steps,
         ignoreGround: true,
+        unshadowed: true,
       });
       // Optical depth, not transmittance: it varies far more smoothly (linearly in the path), so the filter does not smear
       // the steep fall-off across a planet's limb.
-      return (mat3 as any)(m.radiance, log(max(m.transmittance, 1e-30)).negate(), vec3(0));
+      // The planet's shadow is left out of the sunlit part (`unshadowed`) and cut out per pixel in `lookup`, so the
+      // terminator is not limited to a texel; the multiple-scattering part and the optical depth are smooth.
+      return (mat3 as any)(m.radianceSun, log(max(m.transmittance, 1e-30)).negate(), m.radianceMulti);
     })().toVar();
-    return (outputStruct as any)(vec4(marched[0], 1), vec4(marched[1], 1));
+    return (outputStruct as any)(vec4(marched[0], 1), vec4(marched[1], 1), vec4(marched[2], 1));
   }
 
   /**
@@ -195,14 +201,8 @@ export class AtmosphereAerialPerspectiveLut {
   lookup(ndc: any, distance: any, dirView: any): { radiance: any; transmittance: any } {
     const { width, height, slices } = this;
     const range = max(this.rangeMax.sub(this.rangeMin), 1);
-    const wInAir = pow(clamp(distance.sub(this.rangeMin).div(range), 0, 1), float(1 / 3));
-    const ends = this.rayEnds(normalize((this.lutViewToLocal as any).mul(dirView)));
-    const u = clamp(ends.tEnd.sub(distance).div(max(ends.tEnd.sub(ends.tStart), 1e-3)), 0, 1);
-    const wFromSpace = float(1).sub(pow(u, float(1 / 3)));
-    const w = select(this.lutOutside.greaterThan(0.5), wFromSpace, wInAir);
-    const f = w.mul(slices - 1);
-    const k0 = floor(min(f, float(slices - 2)));
-    const mixK = f.sub(k0);
+    const dirLocal = normalize((this.lutViewToLocal as any).mul(dirView));
+    const ends = this.rayEnds(dirLocal);
 
     // Texel-space position inside a tile, kept at least half a texel from the edge so the filter never reads the next slice.
     const ux = clamp(ndc.x.mul(0.5).add(0.5).mul(width), 0.5, width - 0.5);
@@ -210,10 +210,56 @@ export class AtmosphereAerialPerspectiveLut {
     const at = (k: any) => vec2(k.mul(width).add(ux).div(width * slices), vy);
     const tex = this.target.textures;
 
-    const radiance = mix(texture(tex[0], at(k0), 0).rgb, texture(tex[0], at(k0.add(1)), 0).rgb, mixK);
-    const opticalDepth = mix(texture(tex[1], at(k0), 0).rgb, texture(tex[1], at(k0.add(1)), 0).rgb, mixK);
-    const transmittance = exp(opticalDepth.negate());
+    // The table's accumulated value of one attachment out to `d` metres along this ray: two slices, mixed by hand.
+    const accumulated = (attachment: number, d: any): any => {
+      const wInAir = pow(clamp(d.sub(this.rangeMin).div(range), 0, 1), float(1 / 3));
+      const u = clamp(ends.tEnd.sub(d).div(max(ends.tEnd.sub(ends.tStart), 1e-3)), 0, 1);
+      const wFromSpace = float(1).sub(pow(u, float(1 / 3)));
+      const w = select(this.lutOutside.greaterThan(0.5), wFromSpace, wInAir);
+      const f = w.mul(slices - 1);
+      const k0 = floor(min(f, float(slices - 2)));
+      const mixK = f.sub(k0);
+      return mix(texture(tex[attachment], at(k0), 0).rgb, texture(tex[attachment], at(k0.add(1)), 0).rgb, mixK);
+    };
+
+    // The sunlit part is tabulated without the planet's shadow; the stretch of the ray inside it is cut out here, at pixel resolution.
+    const shadow = this.shadowSpan(dirLocal, distance);
+    const sunlit = max(accumulated(0, distance).sub(accumulated(0, shadow.to).sub(accumulated(0, shadow.from))), 0);
+    const radiance = sunlit.add(accumulated(2, distance));
+    const transmittance = exp(accumulated(1, distance).negate());
     return { radiance, transmittance };
+  }
+
+  /**
+   * The stretch of a ray (from the camera, up to `distance`) that lies in the planet's shadow: inside the cylinder of
+   * radius R along the sun's axis, on the far side of the planet from the sun. Empty when `from == to`.
+   */
+  private shadowSpan(dir: any, distance: any): { from: any; to: any } {
+    const R = this.model.uRadius;
+    const h = this.lutAltitude;
+    const sun = this.lutSun;
+    const centre = R.add(h);
+    const a0 = centre.mul(sun.y);
+    const ds = dot(dir, sun);
+    // |P(t)|^2 - (P(t).sun)^2 < R^2, with P(t) = (0, R + h, 0) + t dir, is  A t^2 + 2 B t + C < 0.
+    const A = max(float(1).sub(ds.mul(ds)), 1e-6);
+    const B = centre.mul(dir.y.sub(sun.y.mul(ds)));
+    const C = h.mul(R.mul(2).add(h)).sub(a0.mul(a0));
+    const disc = B.mul(B).sub(A.mul(C));
+    const root = sqrt(max(disc, 0));
+    const t1 = B.negate().sub(root).div(A);
+    const t2 = B.negate().add(root).div(A);
+    // Behind the planet: P(t).sun < 0.
+    const tz = a0.negate().div(select(abs(ds).lessThan(1e-6), float(1e-6), ds));
+    const flat = abs(ds).lessThan(1e-6);
+    const behindFrom = select(flat, float(-1e30), select(ds.lessThan(0), tz, float(-1e30)));
+    const behindTo = select(flat, select(a0.lessThan(0), float(1e30), float(-1e30)), select(ds.greaterThan(0), tz, float(1e30)));
+    const lo = max(t1, behindFrom);
+    const hi = min(t2, behindTo);
+    const from = clamp(lo, 0, distance);
+    const to = max(clamp(hi, 0, distance), from);
+    const any: any = disc.greaterThan(0);
+    return { from, to: select(any as any, to, from) };
   }
 
   /** The distance range of the table for a camera at `altitudeM`: from where the air begins to past the horizon. */

@@ -27,8 +27,6 @@ const DEFECT_CASES = [
 
 const OUTPUT_DIRS = [
   path.resolve(__dirname, '../../../artifacts/scene-defects'),
-  path.resolve('D:/code/Daxur-Daemon/cli/test/evals/fixtures/scene-vision'),
-  path.resolve('D:/code/Daxur-Daemon/daxur-daemon-web/public/visual-evals'),
 ];
 
 for (const dir of OUTPUT_DIRS) {

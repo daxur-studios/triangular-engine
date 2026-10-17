@@ -50,6 +50,21 @@
   </p>
 
   <div class="control-section">
+    <h3>Benchmark</h3>
+    <div class="button-group">
+      <button type="button" (click)="runBenchmark()" [disabled]="benchmarkStatus() !== ''">
+        run benchmark + copy
+      </button>
+      @if (lastReport() !== '' && benchmarkStatus() === '') {
+        <button type="button" (click)="copyLastReport()">copy last report</button>
+      }
+    </div>
+    @if (benchmarkStatus() !== '') {
+      <p class="subtitle">{{ benchmarkStatus() }}</p>
+    }
+  </div>
+
+  <div class="control-section">
     <h3>Morph Transition</h3>
     <div class="slider-row">
       <span>Globe (0%)</span>
