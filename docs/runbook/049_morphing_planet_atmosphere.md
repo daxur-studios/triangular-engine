@@ -429,3 +429,8 @@ baseline: it blends the result away but the march stays in the shader.
   under-hazes (about 2x at the worst sample of a 100 km planet at 2.2 radii), so the spec's space samples stay clear of it.
 - Open: the maintainer's frame rates on the two pages (expected near the 165 fps baseline), and the look at the rim and at the
   horizon from the ground. The mid-morph flat map is still Phase 3.
+
+### Ocean shell and checkbox (2026-10-17)
+
+- `/cell-planet-tsl`: the ocean shell takes the same lighting and haze stages as the terrain (it is a `PlanetSurfaceMaterial`), so the sea no longer reads flatter than the land. Its opacity is unchanged, so the haze tints the sea colour rather than adding to it. The map frame stays unhazed: it only shows once the globe has unrolled, where the atmosphere amount is already zero.
+- The Atmosphere checkbox is now a real cost toggle: both stages sit behind a uniform branch on the atmosphere amount, so with it off (or the globe unrolled) the shader skips the sky lookups and the haze fetch. Needs the maintainer's fps check against `?atmosphere=0` (165 fps); the fallback is rebuilding the stages on toggle.

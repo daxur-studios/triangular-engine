@@ -92,3 +92,11 @@ engine.beforeRender$.subscribe(() => { // after the camera controls have settled
 - `exposure` lives on the binding and is copied to the backdrop by `sync`, so the surface and the sky agree.
 
 Try it at `/atmosphere-planet`.
+
+<!-- doc-section section-id="sec_fa7da7a9cfe9" path="projects/triangular-engine/atmosphere" baseline-tokens="52449" -->
+**Why this exists.** One atmosphere model has to look right from the ground to orbit on planets of any size, and stay cheap enough to run beside a streaming terrain. So the expensive part (transmittance, multi-scatter, sky irradiance) is baked once on the CPU into small tables, and the GPU only does lookups and a short march. A float64 CPU reference integrator is kept in the package so the GPU path is tested against known-good numbers rather than against itself.
+
+**Constraints.** Lengths are metres and coefficients are 1/m; `scaleAtmosphereProfile` rescales a profile to another radius so equivalent viewpoints match. Rebaking (`setProfile`) costs 1-2 s, so treat it as setup, not per-frame work. The aerial-perspective table re-renders only when camera, sun or profile moves. Everything is TSL for `WebGPURenderer`; there is no classic-WebGL path.
+
+**Public boundary.** `public-api.ts` exports the profile, presets, scaling, LUT bake, GPU model, backdrop, planet stages and aerial perspective. The reference integrator is exported for tests and comparison, not for rendering.
+<!-- /doc-section -->

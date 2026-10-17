@@ -99,3 +99,11 @@ The same graph runs on native WebGPU and on `forceWebGL`. On the WebGL2 backend 
 ## Testing a stage
 
 Specs evaluate TSL on a real backend through `WebGPURenderer({ forceWebGL: true })` (`gpu-eval.testing.ts`, `render-eval.testing.ts`). They are test-only helpers and not exported. See the `*.spec.ts` files next to each layer for patterns: build a small triangle, render to a few pixels, read them back, change only a uniform and assert the pixel moved without a recompile.
+
+<!-- doc-section section-id="sec_0a7475c4e30d" path="projects/triangular-engine/planet-material" baseline-tokens="37819" -->
+**Why this exists.** The classic cell-planet material is a stack of GLSL `onBeforeCompile` patches that each page re-wires by hand, which made it fragile (a page that missed one uniform or attribute silently broke). This entry point turns the same behaviour into one TSL graph with six fixed stages and named slots, so a game adds a layer, an occluder, an emissive, a lighting model or an atmosphere with one call and never edits the engine.
+
+**Constraints.** The ordered stacks are the shader cache key, so change them at setup and use uniforms for anything live. WebGPU allows 16 vertex-to-fragment varyings and 8 vertex buffers, which is why the seam cull is done in the fragment stage with no extra attributes. Streamed terrain is drawn from a `BatchedMesh` whose anchor follows the camera, so dynamic projection must lift patch offsets through `modelWorldMatrix` and subtract `uBodyCentreScene`; in TSL the batch offset must be the first read in `positionNode`, or it evaluates as zero. It assumes an unrotated patch group.
+
+**Public boundary.** Exported: the material, stock layers, lighting stages, the stage-1 graph pieces and projection `Fn`s. The `*.testing.ts` GPU-evaluation helpers are test-only and not exported.
+<!-- /doc-section -->

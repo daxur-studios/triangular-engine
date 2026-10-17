@@ -299,6 +299,19 @@ export const DEMOS: readonly DemoItem[] = [
       'Plan 049 Phase 2a: LUT-driven sky, sunset, limb glow, planet shadow and aerial perspective on an analytic ground sphere, from the ground to space, at planet radii from 64 km to Earth. WebGPU or its WebGL2 fallback.',
   },
   {
+    id: 'cloud-volumes-lab',
+    number: '02j',
+    title: 'Cloud Volumes Lab (plain sphere)',
+    route: '/cloud-volumes-lab',
+    categoryId: 'atmosphere',
+    tier: 'lab',
+    createdAt: '2026-10-17',
+    entryPoints: ['cloud-volumes'],
+    package: 'triangular-engine/cloud-volumes',
+    description:
+      'Plan 051 Phases 0-1: a flyable 128^3 noise cloud volume with a baked sun optical-depth texture, on a plain sphere planet, with camera presets and a GPU-millisecond readout (WebGPU or ?forceWebGL).',
+  },
+  {
     id: 'atmosphere-planet',
     number: '02i',
     title: 'Atmosphere on the Planet Material',

@@ -1,0 +1,335 @@
+import {
+  BackSide,
+  BoxGeometry,
+  ClampToEdgeWrapping,
+  HalfFloatType,
+  LinearFilter,
+  Matrix4,
+  Mesh,
+  NormalBlending,
+  Quaternion,
+  RGBAFormat,
+  RenderTarget,
+  Vector3,
+} from 'three';
+import { NodeMaterial, QuadMesh, type WebGPURenderer } from 'three/webgpu';
+import {
+  Break,
+  Fn,
+  If,
+  Loop,
+  abs,
+  cameraPosition,
+  clamp,
+  dot,
+  exp,
+  float,
+  floor,
+  fract,
+  max,
+  min,
+  mx_fractal_noise_float,
+  normalize,
+  positionWorld,
+  pow,
+  screenCoordinate,
+  select,
+  smoothstep,
+  uniform,
+  uv,
+  vec2,
+  vec3,
+  vec4,
+} from 'three/tsl';
+import { CLOUD_BLOB_SIGMA } from './cloud-volume-reference';
+import { CloudVolumeAtlasLayout } from './cloud-volume-atlas';
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+export type CloudVolumeShape = 'noise' | 'box' | 'blob';
+
+export interface CloudVolumeOptions {
+  /** Box size in metres (x, y, z). Default 600 x 200 x 600. */
+  size?: Vector3;
+  /** Density texels per side. Default 128. */
+  densitySize?: number;
+  /** Sun optical-depth texels per side. Default half of `densitySize`. */
+  lightSize?: number;
+  /** What the density bake writes. Default `noise`; `box` and `blob` are analytic, for specs. */
+  shape?: CloudVolumeShape;
+  /** Extinction per metre at density 1. Default 0.02. */
+  extinction?: number;
+  /** Steps of the full-resolution march. Default 64. */
+  marchSteps?: number;
+  /** Steps of each light-bake ray toward the sun. Default 24. */
+  lightSteps?: number;
+  /** The sun must turn this far (degrees, in the volume's frame) before the light is rebaked. Default 0.5. */
+  sunToleranceDeg?: number;
+}
+
+const SHAPE_ID: Record<CloudVolumeShape, number> = { noise: 0, box: 1, blob: 2 };
+
+function makeAtlasTarget(layout: CloudVolumeAtlasLayout): RenderTarget {
+  return new RenderTarget(layout.width, layout.height, {
+    format: RGBAFormat,
+    type: HalfFloatType,
+    minFilter: LinearFilter,
+    magFilter: LinearFilter,
+    wrapS: ClampToEdgeWrapping,
+    wrapT: ClampToEdgeWrapping,
+    depthBuffer: false,
+    generateMipmaps: false,
+  });
+}
+
+/**
+ * One bounded cloud volume (Plan 051, Phase 1 spike): a density atlas, a baked sun optical-depth atlas at
+ * half resolution, and a box-proxy mesh that marches the density at full resolution with a white sun.
+ *
+ * The box is the mesh's own transform (scale = size in metres), so moving or turning `mesh` moves the cloud.
+ * Both bakes are fragment passes into 2D atlas targets, so they run on WebGPU and on the WebGL2 fallback.
+ * Call {@link update} once per frame outside any render pass: it rebakes the density only when invalidated and
+ * the light only when the sun has turned past the tolerance in the volume's frame.
+ */
+export class CloudVolume {
+  readonly mesh: Mesh;
+  readonly size: Vector3;
+  readonly densityLayout: CloudVolumeAtlasLayout;
+  readonly lightLayout: CloudVolumeAtlasLayout;
+  readonly densityTarget: RenderTarget;
+  readonly lightTarget: RenderTarget;
+
+  /** Extinction per metre at density 1; read live by both the bake and the march. */
+  readonly uExtinction;
+  readonly uSunColor = uniform(new Vector3(1, 1, 1));
+  readonly uAmbient = uniform(new Vector3(0.12, 0.16, 0.24));
+  /** Noise controls; changing them needs {@link invalidateDensity}. */
+  readonly uNoiseFrequency = uniform(3);
+  readonly uNoiseThreshold = uniform(0.38);
+  readonly uNoiseGain = uniform(3);
+  readonly uNoiseSeed = uniform(0);
+  /** Steps of the full-resolution march; read live, so changing it needs no rebuild. */
+  readonly uMarchSteps = uniform(64, 'int');
+
+  /** How many times each bake has run, for specs and the lab readout. */
+  densityBakes = 0;
+  lightBakes = 0;
+  /** Debug: rebake the light every update, to time the worst case. */
+  alwaysRebakeLight = false;
+
+  private shape: CloudVolumeShape;
+  private densityDirty = true;
+  private lightDirty = true;
+  private readonly sunWorld = new Vector3(0, 1, 0);
+  private readonly sunLocal = new Vector3(0, 1, 0);
+  private readonly bakedSunLocal = new Vector3(0, 1, 0);
+  private readonly cosTolerance: number;
+  private readonly quaternion = new Quaternion();
+  private readonly scratchPosition = new Vector3();
+  private readonly scratchScale = new Vector3();
+
+  private readonly uShape = uniform(0);
+  private readonly uSunLocal = uniform(new Vector3(0, 1, 0));
+  private readonly uSunWorld = uniform(new Vector3(0, 1, 0));
+  private readonly uInverse = uniform(new Matrix4());
+  private readonly uSize = uniform(new Vector3(1, 1, 1));
+
+  private readonly densityQuad: QuadMesh;
+  private readonly lightQuad: QuadMesh;
+  private readonly densityMaterial: NodeMaterial;
+  private readonly lightMaterial: NodeMaterial;
+  private readonly marchMaterial: NodeMaterial;
+
+  constructor(options: CloudVolumeOptions = {}) {
+    this.size = (options.size ?? new Vector3(600, 200, 600)).clone();
+    const densitySize = options.densitySize ?? 128;
+    const lightSize = options.lightSize ?? Math.max(4, densitySize >> 1);
+    this.shape = options.shape ?? 'noise';
+    this.uExtinction = uniform(options.extinction ?? 0.02);
+    this.cosTolerance = Math.cos(((options.sunToleranceDeg ?? 0.5) * Math.PI) / 180);
+    this.densityLayout = new CloudVolumeAtlasLayout(densitySize);
+    this.lightLayout = new CloudVolumeAtlasLayout(lightSize);
+    this.densityTarget = makeAtlasTarget(this.densityLayout);
+    this.lightTarget = makeAtlasTarget(this.lightLayout);
+    this.uShape.value = SHAPE_ID[this.shape];
+    this.uSize.value.copy(this.size);
+
+    this.densityMaterial = new NodeMaterial();
+    this.densityMaterial.fragmentNode = this.buildDensityNode();
+    this.densityQuad = new QuadMesh(this.densityMaterial);
+    this.lightMaterial = new NodeMaterial();
+    this.lightMaterial.fragmentNode = this.buildLightNode(options.lightSteps ?? 24);
+    this.lightQuad = new QuadMesh(this.lightMaterial);
+
+    this.marchMaterial = new NodeMaterial();
+    this.marchMaterial.side = BackSide;
+    this.marchMaterial.transparent = true;
+    this.marchMaterial.depthWrite = false;
+    this.marchMaterial.blending = NormalBlending;
+    this.marchMaterial.premultipliedAlpha = true;
+    this.uMarchSteps.value = options.marchSteps ?? 64;
+    this.marchMaterial.fragmentNode = this.buildMarchNode();
+    this.mesh = new Mesh(new BoxGeometry(1, 1, 1), this.marchMaterial);
+    this.mesh.scale.copy(this.size);
+    this.mesh.frustumCulled = false;
+  }
+
+  setShape(shape: CloudVolumeShape): void {
+    if (shape === this.shape) return;
+    this.shape = shape;
+    this.uShape.value = SHAPE_ID[shape];
+    this.invalidateDensity();
+  }
+
+  /** Marks the density, and so the light, for rebake on the next {@link update}. */
+  invalidateDensity(): void {
+    this.densityDirty = true;
+    this.lightDirty = true;
+  }
+
+  /** Direction toward the sun in world space. The light rebakes once it has turned past the tolerance. */
+  setSunDirection(x: number, y: number, z: number): void {
+    this.sunWorld.set(x, y, z).normalize();
+    this.uSunWorld.value.copy(this.sunWorld);
+  }
+
+  /** Rebakes what is stale and refreshes the march's per-frame uniforms. Call outside any render pass. */
+  update(renderer: WebGPURenderer): void {
+    this.mesh.updateWorldMatrix(true, false);
+    this.mesh.matrixWorld.decompose(this.scratchPosition, this.quaternion, this.scratchScale);
+    this.sunLocal.copy(this.sunWorld).applyQuaternion(this.quaternion.invert());
+    this.uSunLocal.value.copy(this.sunLocal);
+    this.uInverse.value.copy(this.mesh.matrixWorld).invert();
+
+    if (this.densityDirty) {
+      this.bake(renderer, this.densityQuad, this.densityTarget);
+      this.densityBakes++;
+      this.densityDirty = false;
+    }
+    if (this.lightDirty || this.alwaysRebakeLight || this.sunLocal.dot(this.bakedSunLocal) < this.cosTolerance) {
+      this.bake(renderer, this.lightQuad, this.lightTarget);
+      this.bakedSunLocal.copy(this.sunLocal);
+      this.lightBakes++;
+      this.lightDirty = false;
+    }
+  }
+
+  dispose(): void {
+    this.densityTarget.dispose();
+    this.lightTarget.dispose();
+    this.densityMaterial.dispose();
+    this.lightMaterial.dispose();
+    this.marchMaterial.dispose();
+    this.mesh.geometry.dispose();
+  }
+
+  private bake(renderer: WebGPURenderer, quad: QuadMesh, target: RenderTarget): void {
+    const previous = renderer.getRenderTarget();
+    renderer.setRenderTarget(target);
+    quad.render(renderer);
+    renderer.setRenderTarget(previous);
+  }
+
+  /** The unit-frame position of the texel the current fragment writes, from the bake quad's uv. */
+  private texelPosition(layout: CloudVolumeAtlasLayout): any {
+    const n = layout.size;
+    const px = floor(uv().x.mul(layout.width));
+    const py = floor(uv().y.mul(layout.height));
+    const col = floor(px.div(n));
+    const row = floor(py.div(n));
+    const ix = px.sub(col.mul(n));
+    const iy = py.sub(row.mul(n));
+    const k = row.mul(layout.columns).add(col);
+    return vec3(ix.add(0.5).div(n), iy.add(0.5).div(n), k.add(0.5).div(n));
+  }
+
+  private buildDensityNode(): any {
+    const p = this.texelPosition(this.densityLayout);
+    const centered = p.sub(0.5);
+    const noise = mx_fractal_noise_float(p.mul(this.uNoiseFrequency).add(this.uNoiseSeed), 4, 2.0, 0.5)
+      .mul(0.5)
+      .add(0.5);
+    // A vertical squash keeps the cloud away from the box faces so the proxy edge never shows.
+    const radius = vec3(centered.x, centered.y.mul(1.5), centered.z).length();
+    const falloff = float(1).sub(smoothstep(0.2, 0.5, radius));
+    const noiseDensity = clamp(noise.mul(falloff).sub(this.uNoiseThreshold).mul(this.uNoiseGain), 0, 1);
+    const blob = exp(
+      dot(centered, centered)
+        .negate()
+        .div(2 * CLOUD_BLOB_SIGMA * CLOUD_BLOB_SIGMA),
+    );
+    const value = select(this.uShape.lessThan(0.5), noiseDensity, select(this.uShape.lessThan(1.5), float(1), blob));
+    return vec4(value, 0, 0, 1);
+  }
+
+  private buildLightNode(lightSteps: number): any {
+    const size = this.uSize;
+    const half = size.mul(0.5);
+    return Fn(() => {
+      const p = this.texelPosition(this.lightLayout);
+      const origin = p.sub(0.5).mul(size);
+      const dir = normalize(this.uSunLocal);
+      // Slab exit distance toward the sun, per axis; a near-zero component never exits.
+      const exit = (d: any, h: any, o: any) => {
+        const safe = select(abs(d).lessThan(1e-6), float(1e-6), d);
+        return select(safe.greaterThan(0), h, h.negate()).sub(o).div(safe);
+      };
+      const length = max(min(min(exit(dir.x, half.x, origin.x), exit(dir.y, half.y, origin.y)), exit(dir.z, half.z, origin.z)), 0);
+      const dt = length.div(lightSteps);
+      const sum = float(0).toVar();
+      Loop(lightSteps, ({ i }: { i: any }) => {
+        const q = origin.add(dir.mul(float(i).add(0.5).mul(dt)));
+        sum.addAssign(this.densityLayout.sample(this.densityTarget.texture, q.div(size).add(0.5)));
+      });
+      return vec4(sum.mul(dt).mul(this.uExtinction), 0, 0, 1);
+    })();
+  }
+
+  private buildMarchNode(): any {
+    const steps = this.uMarchSteps;
+    return Fn(() => {
+      const dirWorld = normalize(positionWorld.sub(cameraPosition));
+      const origin = this.uInverse.mul(vec4(cameraPosition, 1)).xyz;
+      const dir = this.uInverse.mul(vec4(dirWorld, 0)).xyz;
+      // Unit cube [-0.5, 0.5]^3; t stays in world metres because `dir` is the world direction mapped through
+      // the inverse model matrix.
+      const safeInv = (d: any) => float(1).div(select(abs(d).lessThan(1e-8), float(1e-8), d));
+      const inv = vec3(safeInv(dir.x), safeInv(dir.y), safeInv(dir.z));
+      const a = vec3(-0.5).sub(origin).mul(inv);
+      const b = vec3(0.5).sub(origin).mul(inv);
+      const tNear = max(max(min(a.x, b.x), min(a.y, b.y)), max(min(a.z, b.z), 0));
+      const tFar = min(min(max(a.x, b.x), max(a.y, b.y)), max(a.z, b.z));
+      const color = vec3(0).toVar();
+      const transmittance = float(1).toVar();
+      If(tFar.greaterThan(tNear), () => {
+        const dt = tFar.sub(tNear).div(float(steps));
+        const jitter = fract(float(52.9829189).mul(fract(dot(screenCoordinate.xy, vec2(0.06711056, 0.00583715)))));
+        const cosine = dot(dirWorld, this.uSunWorld);
+        // Two-lobe Henyey-Greenstein, mild forward and back scattering.
+        const hg = (g: number) => {
+          const g2 = g * g;
+          return float(1 - g2).div(pow(float(1 + g2).sub(cosine.mul(2 * g)), 1.5).mul(4 * Math.PI));
+        };
+        const phase = hg(0.5).mul(0.6).add(hg(-0.3).mul(0.4));
+        Loop(steps, ({ i }: { i: any }) => {
+          const t = tNear.add(float(i).add(jitter).mul(dt));
+          const q = origin.add(dir.mul(t)).add(0.5);
+          const density = this.densityLayout.sample(this.densityTarget.texture, q);
+          If(density.greaterThan(0.002), () => {
+            const sigma = density.mul(this.uExtinction);
+            const stepT = exp(sigma.mul(dt).negate());
+            const od = this.lightLayout.sample(this.lightTarget.texture, q);
+            const sun = this.uSunColor.mul(exp(od.negate())).mul(phase.mul(4 * Math.PI * 0.25));
+            const ambient = this.uAmbient.mul(q.y.mul(0.5).add(0.5));
+            color.addAssign(transmittance.mul(float(1).sub(stepT)).mul(sun.add(ambient)));
+            transmittance.mulAssign(stepT);
+            If(transmittance.lessThan(0.01), () => {
+              Break();
+            });
+          });
+        });
+      });
+      return vec4(color, float(1).sub(transmittance));
+    })();
+  }
+}

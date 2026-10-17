@@ -555,6 +555,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'cloud-volumes-lab',
+    loadComponent: () =>
+      import('./pages/cloud-volumes-lab/cloud-volumes-lab-page.component').then(
+        ({ CloudVolumesLabPageComponent }) => CloudVolumesLabPageComponent,
+      ),
+  },
+  {
     path: 'atmosphere-planet',
     loadComponent: () =>
       import('./pages/atmosphere-planet/atmosphere-planet-page.component').then(

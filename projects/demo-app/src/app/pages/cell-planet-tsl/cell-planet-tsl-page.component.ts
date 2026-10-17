@@ -793,9 +793,10 @@ export class CellPlanetTslPageComponent {
     const lighting = binding.lighting();
     const perspective = binding.perspective();
     const amount = this.atmosphereMix;
-    this.surface.setLightingStage({
+    const lightingStage = {
       id: 'atmosphere',
-      stage: (context, input) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      stage: (context: any, input: any) => {
         // Uniform branch: with the atmosphere off (or the globe unrolled) the shader skips the sky lookups entirely.
         const out = input.color.toVar();
         If(amount.greaterThan(0), () => {
@@ -803,17 +804,23 @@ export class CellPlanetTslPageComponent {
         });
         return out;
       },
-    });
-    this.surface.setAtmosphereStage({
+    };
+    const hazeStage = {
       id: 'atmosphere',
-      stage: (context, color) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      stage: (context: any, color: any) => {
         const out = color.toVar();
         If(amount.greaterThan(0), () => {
           out.assign(mix(color, perspective(context, color), float(amount)));
         });
         return out;
       },
-    });
+    };
+    this.surface.setLightingStage(lightingStage);
+    this.surface.setAtmosphereStage(hazeStage);
+    // The sea is a surface material too: same sky light and haze, so it does not read flatter than the terrain beside it.
+    this.ocean.material.setLightingStage(lightingStage);
+    this.ocean.material.setAtmosphereStage(hazeStage);
     this.engine.scene.add(backdrop.mesh);
     this.atmosphereParts = { model, skyView, backdrop, binding };
   }

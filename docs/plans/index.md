@@ -18,7 +18,7 @@ tags: [plans, index]
 | [Agent Telemetry Sections](/docs/plans/048_agent_telemetry_sections.md) | done | [Evidence](/docs/runbook/048_agent_telemetry_sections.md) |
 | [Morphing Planet Atmosphere](/docs/plans/049_morphing_planet_atmosphere.md) | planned | [Evidence](/docs/runbook/049_morphing_planet_atmosphere.md) |
 | [TSL Planet Surface Material](/docs/plans/050_tsl_planet_surface_material.md) | planned (do first) | [Evidence](/docs/runbook/050_tsl_planet_surface_material.md) |
-| [Cloud Volumes](/docs/plans/051_cloud_volumes.md) | planned | [Evidence](/docs/runbook/051_cloud_volumes.md) |
+| [Cloud Volumes](/docs/plans/051_cloud_volumes.md) | in progress | [Evidence](/docs/runbook/051_cloud_volumes.md) |
 
 
 Convention: [Plans and Runbooks](/docs/plans-and-runbooks.md).

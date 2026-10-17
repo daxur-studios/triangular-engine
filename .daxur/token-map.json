@@ -139,6 +139,30 @@
       "dismissReason": null,
       "tokenizerVersionAtBaseline": "1.0.0",
       "exclusionHashAtBaseline": "7cfbbb6c05d74352"
+    },
+    {
+      "sectionId": "sec_fa7da7a9cfe9",
+      "scopePath": "projects/triangular-engine/atmosphere",
+      "docPath": "projects/triangular-engine/docs/atmosphere.md",
+      "excludedScopes": [],
+      "reviewState": "documented",
+      "baselineTokens": 52449,
+      "baselineAt": "2026-10-17T10:12:57.970Z",
+      "dismissReason": null,
+      "tokenizerVersionAtBaseline": "1.0.0",
+      "exclusionHashAtBaseline": "7cfbbb6c05d74352"
+    },
+    {
+      "sectionId": "sec_0a7475c4e30d",
+      "scopePath": "projects/triangular-engine/planet-material",
+      "docPath": "projects/triangular-engine/docs/planet-material.md",
+      "excludedScopes": [],
+      "reviewState": "documented",
+      "baselineTokens": 37819,
+      "baselineAt": "2026-10-17T10:13:07.331Z",
+      "dismissReason": null,
+      "tokenizerVersionAtBaseline": "1.0.0",
+      "exclusionHashAtBaseline": "7cfbbb6c05d74352"
     }
   ]
 }

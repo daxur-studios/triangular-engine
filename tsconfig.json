@@ -56,6 +56,9 @@
       "triangular-engine/atmosphere": [
         "projects/triangular-engine/atmosphere/public-api"
       ],
+      "triangular-engine/cloud-volumes": [
+        "projects/triangular-engine/cloud-volumes/public-api"
+      ],
       "triangular-engine/spline": [
         "projects/triangular-engine/spline/public-api"
       ],

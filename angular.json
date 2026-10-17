@@ -46,7 +46,8 @@
               "../worldgen/**/*.spec.ts",
               "../worldgen/render/**/*.spec.ts",
               "../planet-material/**/*.spec.ts",
-              "../atmosphere/**/*.spec.ts"
+              "../atmosphere/**/*.spec.ts",
+              "../cloud-volumes/**/*.spec.ts"
             ]
           }
         },
@@ -88,6 +89,16 @@
             "polyfills": ["zone.js", "zone.js/testing"],
             "browsers": "ChromeHeadless",
             "include": ["../atmosphere/**/*.spec.ts"]
+          }
+        },
+        "test-cloud-volumes": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "watch": false,
+            "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
+            "polyfills": ["zone.js", "zone.js/testing"],
+            "browsers": "ChromeHeadless",
+            "include": ["../cloud-volumes/**/*.spec.ts"]
           }
         },
         "test-navigation": {

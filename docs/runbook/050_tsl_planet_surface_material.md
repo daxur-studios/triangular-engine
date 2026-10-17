@@ -201,6 +201,12 @@ material: culled with the mask, drawn without it.
   wrong value and the batched macro-variation spec fails. A spec renders a batched patch at two anchors
   (`planet-morph-graph.spec.ts`). Verified in the demo: full map coverage at morph 1, and the centre-longitude slider
   scrolls it. A stale dev build once looked like the same bug; reload after rebuilding the library.
+- **Missing relief shading in dynamic mode (fixed, user-confirmed 2026-10-17):** the TSL stage forced the flat normal to
+  `(0,0,1)` when `uProjMode` was on, so the map at morph 1 had no terrain lighting. The GLSL material keeps the baked
+  `aFlatNorm` there. The map axes (east, north, up) do not depend on the projection centre, so the baked normal stays
+  valid when re-centred. `planetMorphGraph` now always uses `aFlatNorm`.
+- **Token map (2026-10-17):** `atmosphere` and `planet-material` are registered and acknowledged against
+  `docs/atmosphere.md` and `docs/planet-material.md` (the doc-section stubs hold the why and constraints).
 - `setPlanetProjectionCentre(morph, { lonDeg, latDeg } | null)` writes the whole basis and the mode, so a page does not
   build the vectors itself (a spec covers it).
 - The sun-occlusion and emissive stacks exist in the API but sun occlusion is not yet wired into lighting (Phase 4).

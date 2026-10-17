@@ -9,7 +9,7 @@ runbook: /docs/runbook/051_cloud_volumes.md
 
 # Plan 051: Cloud Volumes
 
-Status: **not started, owner: unclaimed.** Approach chosen by the owner on 2026-10-17 (see §Decisions).
+Status: **in progress, owner: local Sonnet session** (Phases 0-1 built and checked 2026-10-17; the Phase 1 go/no-go waits for the maintainer's GPU timings, and Phase 2 waits for the go). Approach chosen by the owner on 2026-10-17 (see §Decisions).
 Evidence: [Runbook 051](/docs/runbook/051_cloud_volumes.md).
 
 **Goal:** 3D clouds you can fly into and through, lit by the atmosphere (orange at dusk, hazed with
