@@ -67,6 +67,12 @@ export interface AtmosphereMarchInput {
   maxDistance: any;
   /** Samples along the ray. Default {@link AtmosphereGpuModel.defaultSteps}. */
   steps?: number;
+  /**
+   * Do not stop at the ground: the ray goes on to `maxDistance` (or the top of the air), and below the ground the air
+   * is taken as its ground-level density. The aerial-perspective table uses it so a texel whose ray dips under the
+   * planet's sphere still stands for the distance it is asked about (terrain rises above the sphere).
+   */
+  ignoreGround?: boolean;
 }
 
 export interface AtmosphereMarchResult {
@@ -313,7 +319,7 @@ export class AtmosphereGpuModel {
    * Call inside an `Fn` body.
    */
   traceRay(
-    input: Pick<AtmosphereMarchInput, 'altitude' | 'dir' | 'maxDistance'>,
+    input: Pick<AtmosphereMarchInput, 'altitude' | 'dir' | 'maxDistance' | 'ignoreGround'>,
   ) {
     const R = this.uRadius;
     const h = max(float(input.altitude), 0);
@@ -334,9 +340,9 @@ export class AtmosphereGpuModel {
     const sGround = sqrt(max(discGround, 0));
     // For b < 0, (-b - s) = c / (-b + s): stable when the camera is near the ground.
     const tGround = cGround.div(max(b.negate().add(sGround), 1e-6));
-    const reachesGround: any = (discGround.greaterThan(0) as any).and(
-      b.lessThan(0),
-    );
+    const reachesGround: any = input.ignoreGround
+      ? float(0).greaterThan(1)
+      : (discGround.greaterThan(0) as any).and(b.lessThan(0));
 
     const tStart = max(t0, 0);
     const tEndFull = select(reachesGround, tGround, t1);

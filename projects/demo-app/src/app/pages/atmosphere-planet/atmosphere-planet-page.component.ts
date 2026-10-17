@@ -208,7 +208,7 @@ export class AtmospherePlanetPageComponent {
     this.backdrop = new AtmosphereBackdrop(this.model, { skyView: this.skyView });
     this.backdrop.groundEnabled.value = 0;
     this.backdrop.sunDiscStrength.value = 1;
-    this.binding = new PlanetAtmosphereBinding(this.model, { radiusUnits: RADIUS_UNITS });
+    this.binding = new PlanetAtmosphereBinding(this.model, { radiusUnits: RADIUS_UNITS, aerialPerspective: true });
 
     this.material = new PlanetSurfaceMaterial({
       lighting: { id: 'atmosphere', stage: this.binding.lighting() },
@@ -227,6 +227,7 @@ export class AtmospherePlanetPageComponent {
       beforeRender.unsubscribe();
       this.engine.scene.remove(this.backdrop.mesh, this.globe);
       this.backdrop.dispose();
+      this.binding.dispose();
       this.skyView.dispose();
       this.model.dispose();
       this.material.dispose();
@@ -246,6 +247,7 @@ export class AtmospherePlanetPageComponent {
     if (!renderer?.initialized || !camera) return;
     this.binding.exposure.value = this.exposure();
     this.binding.sync(camera, this.globe, this.backdrop);
+    if (this.perspectiveOn()) this.binding.update(renderer);
     this.backdrop.update(renderer, camera);
   }
 

@@ -90,6 +90,8 @@ A sun occluder is `(context) => number node` (1 = lit), an emissive is `(context
 
 By default the flat map is the baked `aFlatPos`. To re-centre the map on a point, for example a tracked unit, call `setPlanetProjectionCentre(material.morph, { lonDeg, latDeg })`. It writes the whole projection basis and turns `uProjMode` on. Pass `null` to go back to the baked map. Setting `uProjMode` on its own is not enough: without a basis the map is projected from the default frame and tears. The seam that moves with the centre is culled in the fragment stage, so it works on indexed streaming tiles with no extra vertex attributes. Optional `seamCullAttributes` adds an exact per-triangle cull for geometry that carries `aOtherDir1/2`, at the cost of two vertex buffers.
 
+Streamed terrain is drawn from a `BatchedMesh` whose anchor follows the camera, so the dynamic projection lifts each patch's offset through `modelWorldMatrix` and subtracts `material.morph.uBodyCentreScene` (the planet's centre in scene space, default the origin). Set it when the planet is not at the scene origin, for example under a floating origin; it assumes the patch group is not rotated.
+
 ## Backends and batching
 
 The same graph runs on native WebGPU and on `forceWebGL`. On the WebGL2 backend three batches a `BatchedMesh` into multi-draws. On native WebGPU it issues one draw per visible instance, so batching saves memory-per-draw but not draw calls there; it only preallocates geometry (capacity is `maxPatches`). Known issue: in `cell-planet-tsl`, turning batching on halves the WebGL frame rate. See the runbook (Runbook 050, "Open issue").

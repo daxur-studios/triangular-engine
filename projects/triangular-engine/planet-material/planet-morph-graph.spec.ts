@@ -1,8 +1,10 @@
 import {
   AmbientLight,
+  BatchedMesh,
   BufferAttribute,
   BufferGeometry,
   FloatType,
+  Matrix4,
   Mesh,
   NearestFilter,
   OrthographicCamera,
@@ -45,7 +47,11 @@ describe('planetMorphGraph on the GPU', () => {
   }
 
   /** Renders to a W x H target; returns alpha per pixel (0 = nothing drawn). */
-  async function alphaOf(material: PlanetSurfaceMaterial, geometries: BufferGeometry[]) {
+  async function alphaOf(
+    material: PlanetSurfaceMaterial,
+    geometries: BufferGeometry[],
+    objects: BatchedMesh[] = [],
+  ) {
     const renderer = await getEvalRenderer();
     const scene = new Scene();
     scene.add(new AmbientLight(0xffffff, 1));
@@ -54,6 +60,7 @@ describe('planetMorphGraph on the GPU', () => {
       mesh.frustumCulled = false;
       scene.add(mesh);
     }
+    for (const object of objects) scene.add(object);
     // Map space for radius 1: x in [-pi, pi], y in [-pi/2, pi/2].
     const camera = new OrthographicCamera(-Math.PI, Math.PI, Math.PI / 2, -Math.PI / 2, -10, 10);
     camera.position.set(0, 0, 5);
@@ -100,6 +107,44 @@ describe('planetMorphGraph on the GPU', () => {
     const alpha = await alphaOf(dynamicMaterial(), [seamTriangle(), plainTriangle()]);
     expect(alpha(...plainPixel)).withContext('plain triangle').toBeGreaterThan(0.5);
     expect(alpha(...seamSpanPixel)).withContext('seam-spanning triangle').toBe(0);
+  });
+
+  /**
+   * A streamed patch the way `TerrainSurfaceComponent` draws it: positions relative to the patch centre,
+   * instance matrix `centre - anchor`, and the anchor in the batch's own position.
+   */
+  function streamedPatch(anchor: [number, number, number]): BatchedMesh {
+    const corners: [number, number][] = [[-0.3, 0.7], [0.3, 0.7], [0, 1.0]];
+    const dirs = corners.map(([lon, lat]) => dirAt(lon, lat));
+    const centre = dirs[0].map((_, axis) => (dirs[0][axis] + dirs[1][axis] + dirs[2][axis]) / 3);
+    const attribute = (fill: (k: number) => number[]) =>
+      new BufferAttribute(new Float32Array([0, 1, 2].flatMap(fill)), 3);
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', attribute((k) => dirs[k].map((v, a) => v - centre[a])));
+    geometry.setAttribute('normal', attribute((k) => dirs[k]));
+    geometry.setAttribute('color', attribute(() => [1, 1, 1]));
+    // Flat position as the worker bakes it (equirectangular, centre 0/0), relative to the sphere centre.
+    geometry.setAttribute(
+      'aFlatPos',
+      attribute((k) => [corners[k][0] - centre[0], corners[k][1] - centre[1], -centre[2]]),
+    );
+    geometry.setAttribute('aFlatNorm', attribute(() => [0, 0, 1]));
+    const batch = new BatchedMesh(1, 3, 3, dynamicMaterial());
+    batch.frustumCulled = false;
+    batch.position.set(...anchor);
+    const id = batch.addInstance(batch.addGeometry(geometry));
+    batch.setMatrixAt(id, new Matrix4().makeTranslation(
+      centre[0] - anchor[0], centre[1] - anchor[1], centre[2] - anchor[2],
+    ));
+    return batch;
+  }
+
+  it('projects a batched streamed patch to its map position wherever the batch anchor sits', async () => {
+    for (const anchor of [[0, 0, 0], [0.4, -0.3, 2.5]] as [number, number, number][]) {
+      const batch = streamedPatch(anchor);
+      const alpha = await alphaOf(batch.material as PlanetSurfaceMaterial, [], [batch]);
+      expect(alpha(...plainPixel)).withContext(`anchor ${anchor}`).toBeGreaterThan(0.5);
+    }
   });
 
   it('draws the stretched triangle when the seam cull is removed (the check can fail)', async () => {

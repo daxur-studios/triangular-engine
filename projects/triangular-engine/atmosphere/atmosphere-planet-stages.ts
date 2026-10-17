@@ -1,5 +1,7 @@
-import { Matrix3, Quaternion, Vector3, type Object3D } from 'three';
-import { Fn, abs, cross, dot, float, max, normalize, select, uniform, vec3 } from 'three/tsl';
+import { Matrix3, Matrix4, Quaternion, Vector3, type Object3D } from 'three';
+import type { WebGPURenderer } from 'three/webgpu';
+import { Fn, abs, cameraProjectionMatrix, cross, dot, float, max, normalize, positionView, select, uniform, vec3, vec4 } from 'three/tsl';
+import { AtmosphereAerialPerspectiveLut, type AtmosphereAerialPerspectiveOptions } from './atmosphere-aerial-perspective';
 import type { AtmosphereBackdrop } from './atmosphere-backdrop';
 import type { AtmosphereGpuModel } from './atmosphere-gpu-model';
 
@@ -29,6 +31,11 @@ export interface PlanetAtmosphereBindingOptions {
   radiusUnits: number;
   /** Samples along each camera-to-surface ray in {@link PlanetAtmosphereBinding.perspective}. Default the model's. */
   steps?: number;
+  /**
+   * Read the haze on the surface from a froxel table instead of marching a ray per fragment (Plan 049, Phase 3).
+   * `true` for the defaults. Needs {@link PlanetAtmosphereBinding.update} called every frame after `sync`.
+   */
+  aerialPerspective?: boolean | AtmosphereAerialPerspectiveOptions;
 }
 
 /**
@@ -53,6 +60,9 @@ export class PlanetAtmosphereBinding {
   /** Metres per world unit of the planet mesh. */
   readonly metersPerUnit = uniform(1);
 
+  /** The froxel table behind {@link perspective}, when the binding was made with `aerialPerspective`. */
+  readonly aerialPerspective?: AtmosphereAerialPerspectiveLut;
+
   private readonly steps?: number;
   private radiusUnits: number;
 
@@ -65,6 +75,10 @@ export class PlanetAtmosphereBinding {
   private readonly ez = new Vector3();
   private readonly ref = new Vector3();
   private readonly frameMatrix = new Matrix3();
+  private readonly cameraRotation = new Matrix3();
+  private readonly viewToLocal = new Matrix3();
+  private readonly sunLocal = new Vector3();
+  private readonly projectionInverse = new Matrix4();
 
   constructor(
     readonly model: AtmosphereGpuModel,
@@ -73,6 +87,12 @@ export class PlanetAtmosphereBinding {
     this.radiusUnits = options.radiusUnits;
     this.steps = options.steps;
     this.metersPerUnit.value = model.profile.planetRadiusM / options.radiusUnits;
+    if (options.aerialPerspective) {
+      this.aerialPerspective = new AtmosphereAerialPerspectiveLut(
+        model,
+        { steps: options.steps, ...(options.aerialPerspective === true ? {} : options.aerialPerspective) },
+      );
+    }
   }
 
   /** The sun's direction in the body frame; normalised. */
@@ -102,10 +122,6 @@ export class PlanetAtmosphereBinding {
     const altitude = Math.max(0, this.camBody.length() - this.model.profile.planetRadiusM);
     this.cameraAltitude.value = altitude;
 
-    if (!backdrop) return;
-    backdrop.exposure.value = this.exposure.value;
-    backdrop.setAltitude(altitude);
-
     // Local frame in world axes: y = the camera's radial direction, x and z any orthonormal pair.
     planet.getWorldQuaternion(this.quaternion);
     this.ey.copy(this.camBody).normalize().applyQuaternion(this.quaternion);
@@ -119,10 +135,40 @@ export class PlanetAtmosphereBinding {
       this.ey.x, this.ey.y, this.ey.z,
       this.ez.x, this.ez.y, this.ez.z,
     );
-    backdrop.frame.value.copy(this.frameMatrix);
-
     this.sunWorld.copy(this.sunBody.value).applyQuaternion(this.quaternion);
-    this.model.setSunDirection(this.sunWorld.dot(this.ex), this.sunWorld.dot(this.ey), this.sunWorld.dot(this.ez));
+    this.sunLocal.set(this.sunWorld.dot(this.ex), this.sunWorld.dot(this.ey), this.sunWorld.dot(this.ez));
+
+    // View space to the local frame, for the froxel table.
+    this.cameraRotation.setFromMatrix4(camera.matrixWorld);
+    this.viewToLocal.copy(this.frameMatrix).multiply(this.cameraRotation);
+    const projectionInverse = (camera as { projectionMatrixInverse?: Matrix4 }).projectionMatrixInverse;
+    if (projectionInverse) this.projectionInverse.copy(projectionInverse);
+
+    if (!backdrop) return;
+    backdrop.exposure.value = this.exposure.value;
+    backdrop.setAltitude(altitude);
+    backdrop.frame.value.copy(this.frameMatrix);
+    this.model.setSunDirection(this.sunLocal.x, this.sunLocal.y, this.sunLocal.z);
+  }
+
+  /**
+   * Renders the froxel table if the camera, the sun or the profile moved. Call once per frame after {@link sync},
+   * outside a render pass (the same place as the backdrop's `update`). Returns true when it rendered; does nothing
+   * without `aerialPerspective`.
+   */
+  update(renderer: WebGPURenderer): boolean {
+    return (
+      this.aerialPerspective?.update(renderer, {
+        altitude: this.cameraAltitude.value as number,
+        projectionInverse: this.projectionInverse,
+        viewToLocal: this.viewToLocal,
+        sunLocal: this.sunLocal,
+      }) ?? false
+    );
+  }
+
+  dispose(): void {
+    this.aerialPerspective?.dispose();
   }
 
   /**
@@ -146,12 +192,23 @@ export class PlanetAtmosphereBinding {
 
   /**
    * Stage 6 of the planet material: aerial perspective. The colour is attenuated along the ray from the camera to
-   * the surface point and the air's in-scattering on that ray is added (`colour x T + L x exposure`). One march per
-   * fragment (the froxel table of Plan 049 replaces it); the point is taken on the sphere of the planet's radius,
-   * so terrain height and the mid-morph flat map are not modelled yet.
+   * the surface point and the air's in-scattering on that ray is added (`colour x T + L x exposure`). With
+   * `aerialPerspective` it is one lookup in the froxel table at the fragment's screen position and distance, so
+   * terrain height is included. Without it, one march per fragment on the sphere of the planet's radius (terrain
+   * height and the mid-morph flat map are not modelled).
    */
   perspective(): (context: IAtmospherePlanetContext, color: any) => any {
     const { model } = this;
+    const table = this.aerialPerspective;
+    if (table) {
+      return (context, color) =>
+        Fn(() => {
+          const clip = cameraProjectionMatrix.mul(vec4(positionView, 1));
+          const ndc = clip.xy.div(clip.w);
+          const haze = table.lookup(ndc, context.cameraDistance.mul(this.metersPerUnit), normalize(positionView));
+          return color.mul(haze.transmittance).add(haze.radiance.mul(this.exposure));
+        })();
+    }
     return (context, color) =>
       Fn(() => {
         // Frame with y along the camera's radial direction; any orthonormal x and z do.

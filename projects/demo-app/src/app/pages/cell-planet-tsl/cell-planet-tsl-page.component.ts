@@ -695,6 +695,7 @@ export class CellPlanetTslPageComponent {
       if (parts) {
         this.engine.scene.remove(parts.backdrop.mesh);
         parts.backdrop.dispose();
+        parts.binding.dispose();
         parts.skyView.dispose();
         parts.model.dispose();
       }
@@ -788,7 +789,7 @@ export class CellPlanetTslPageComponent {
     const backdrop = new AtmosphereBackdrop(model, { skyView });
     backdrop.groundEnabled.value = 0;
     backdrop.sunDiscStrength.value = 1;
-    const binding = new PlanetAtmosphereBinding(model, { radiusUnits: this.radius });
+    const binding = new PlanetAtmosphereBinding(model, { radiusUnits: this.radius, aerialPerspective: true });
     const lighting = binding.lighting();
     const perspective = binding.perspective();
     const amount = this.atmosphereMix;
@@ -853,6 +854,7 @@ export class CellPlanetTslPageComponent {
     parts.binding.setSunBody(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));
     parts.binding.exposure.value = this.exposure();
     parts.binding.sync(camera, this.engine.scene, parts.backdrop);
+    if (amount > 0) parts.binding.update(renderer);
     if (parts.backdrop.mesh.visible) parts.backdrop.update(renderer, camera);
   }
 

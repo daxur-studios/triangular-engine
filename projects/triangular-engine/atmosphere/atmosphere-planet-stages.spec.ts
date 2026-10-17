@@ -1,5 +1,6 @@
 import { Object3D, PerspectiveCamera, Vector3 } from 'three';
 import { PlanetSurfaceMaterial } from '../planet-material/planet-surface-material';
+import { getEvalRenderer } from '../planet-material/gpu-eval.testing';
 import { meshOf, renderRgba, triangleWith } from '../planet-material/render-eval.testing';
 import { AtmosphereBackdrop } from './atmosphere-backdrop';
 import { AtmosphereGpuModel } from './atmosphere-gpu-model';
@@ -75,6 +76,51 @@ describe('PlanetAtmosphereBinding.sync', () => {
     expect(binding.cameraAltitude.value).toBeCloseTo(2 * RADIUS_M, 3);
 
     backdrop.dispose();
+    model.dispose();
+  });
+});
+
+describe('PlanetAtmosphereBinding.update', () => {
+  it('renders the froxel table once, and again only when the camera or the sun moves', async () => {
+    const renderer = await getEvalRenderer();
+    const model = smallPlanetModel();
+    const binding = new PlanetAtmosphereBinding(model, {
+      radiusUnits: 1,
+      aerialPerspective: { width: 8, height: 8, slices: 4, steps: 4 },
+    });
+    const planet = new Object3D();
+    const camera = new PerspectiveCamera();
+    camera.position.set(0, 0, 3);
+    binding.setSunBody(0, 0, 1);
+
+    binding.sync(camera, planet);
+    expect(binding.update(renderer)).toBeTrue();
+    binding.sync(camera, planet);
+    expect(binding.update(renderer)).toBeFalse();
+
+    camera.position.set(0, 0, 2.5);
+    binding.sync(camera, planet);
+    expect(binding.update(renderer)).toBeTrue();
+
+    camera.lookAt(0.3, 0, 0);
+    binding.sync(camera, planet);
+    expect(binding.update(renderer)).toBeTrue();
+
+    binding.setSunBody(1, 0, 1);
+    binding.sync(camera, planet);
+    expect(binding.update(renderer)).toBeTrue();
+    expect(binding.aerialPerspective?.renderCount).toBe(4);
+
+    binding.dispose();
+    model.dispose();
+  });
+
+  it('does nothing without a table', async () => {
+    const renderer = await getEvalRenderer();
+    const model = smallPlanetModel();
+    const binding = new PlanetAtmosphereBinding(model, { radiusUnits: 1 });
+    expect(binding.aerialPerspective).toBeUndefined();
+    expect(binding.update(renderer)).toBeFalse();
     model.dispose();
   });
 });

@@ -197,17 +197,17 @@ export function planetMorphGraph(
 
   // Dynamic basis: project the radial direction in the tracked frame. It is the body-fixed position
   // normalised, not `aSphereNorm`: on terrain that is the surface normal, which tilts with relief.
-  // (A fresh expression, not `batchOffset` below: that variable must stay where it was first read.)
-  // A `toVar` so it is evaluated while the positionNode builds, when `positionLocal` is still the unmorphed
-  // batched position; an inline expression is re-read later by the varyings, after `positionNode` replaced it.
+  // `batchOffset` is a `toVar` read first inside `positionNode` (written `batchOffset.add(morphedLocal)` so it
+  // builds before anything else reads `positionLocal`): there `positionLocal` is the batched, unmorphed
+  // position. An inline expression, or a read from another node first, sees it after `positionNode` replaced it.
   // Streamed tiles store `aSpherePos`/`aFlatPos` relative to the patch centre, which the batch/mesh translation
   // restores, so the absolute direction adds it back and the absolute map position takes it off again.
-  const batchShift = positionLocal.sub(positionGeometry).toVar('planetDynBatchShift');
+  const batchOffset = positionLocal.sub(positionGeometry).toVar('planetBatchOffset');
   // The batch matrix holds `centerWorldM - batchAnchor` and the anchor (it follows the camera) sits in
   // `modelWorldMatrix`, so local positions are anchor-relative: lift through the model matrix to get the
   // patch's body-fixed offset (0 when the worker sets no render origin).
   const bodyShift = modelWorldMatrix
-    .mul(vec4(batchShift, 1))
+    .mul(vec4(batchOffset, 1))
     .xyz.sub(bodyCentreScene)
     .toVar('planetDynBodyShift');
   const dir = normalize(aSpherePos.add(bodyShift)).toVar('planetRadialDir');
@@ -244,7 +244,6 @@ export function planetMorphGraph(
   const vMorphedLocal: any = varying(morphedLocal, 'vMorphedLocal');
   // Snapshot the batch translation (`positionLocal` is still batched-but-unmorphed here), so later reads
   // of it are not affected by `positionNode` replacing `positionLocal`.
-  const batchOffset = positionLocal.sub(positionGeometry).toVar('planetBatchOffset');
   const vBodyFixedLocal: any = varying(aSpherePos.add(batchOffset), 'vBodyFixedLocal');
   const vMorphedBatched: any = varying(morphedLocal.add(batchOffset), 'vMorphedBatched');
 
@@ -270,7 +269,7 @@ export function planetMorphGraph(
   const discardShadow = cullActive.and(seamSpan);
 
   return {
-    positionNode: morphedLocal.add(batchOffset),
+    positionNode: batchOffset.add(morphedLocal),
     normalNode: transformNormalToView(
       options.lightingTurn ? normalize((options.lightingTurn as any).mul(aSphereNorm)) : morphedNormal,
     ),

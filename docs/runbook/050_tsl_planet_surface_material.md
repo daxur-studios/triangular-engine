@@ -191,8 +191,16 @@ material: culled with the mask, drawn without it.
   view has no dynamic mode).
 - **Root cause of the shards at the default centre:** dynamic mode projected `aSphereNorm`, which on streamed terrain tiles
   is the surface normal (it tilts with relief), not the radial direction. It now projects the normalised body-fixed
-  position (`vRadialDir`). The GLSL material still projects `aSphereNorm`, which is probably why its dynamic mode is also
-  wrong on terrain (not changed: the GLSL patches are out of scope). Unverified on streamed tiles until checked visually.
+  position (no extra varying: WebGPU allows 16). The GLSL material still projects `aSphereNorm`, which is probably why its
+  dynamic mode is also wrong on terrain (not changed: the GLSL patches are out of scope).
+- **Root cause of the thin, camera-following band:** streamed tiles are batched; the batch matrix holds
+  `centerWorldM - batchAnchor` and the anchor (re-follows the camera every 500 m) lives in `modelWorldMatrix`, so
+  `positionLocal - positionGeometry` is anchor-relative. The patch's body-fixed offset is
+  `modelWorldMatrix * (offset, 1) - uBodyCentreScene`. Lifting it fixed the projection. TSL build order matters: `batchOffset`
+  must be the first read of `positionLocal` (`positionNode: batchOffset.add(morphedLocal)`); reading it earlier gives a
+  wrong value and the batched macro-variation spec fails. A spec renders a batched patch at two anchors
+  (`planet-morph-graph.spec.ts`). Verified in the demo: full map coverage at morph 1, and the centre-longitude slider
+  scrolls it. A stale dev build once looked like the same bug; reload after rebuilding the library.
 - `setPlanetProjectionCentre(morph, { lonDeg, latDeg } | null)` writes the whole basis and the mode, so a page does not
   build the vectors itself (a spec covers it).
 - The sun-occlusion and emissive stacks exist in the API but sun occlusion is not yet wired into lighting (Phase 4).
