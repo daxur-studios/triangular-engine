@@ -326,3 +326,41 @@ Inside, s32, scale 1, total ms: base 10.87, jitter off 10.56, no fetch 12.05, li
 - Light rebake every frame adds about 0.76 ms (11.63 vs 10.87), so step 5 (time-sliced rebake) is low priority.
 - "off" is 0.2-2 ms and varies between runs (inside 0.69 before, 1.13 now); read it as timer noise of about 0.5 ms.
 - The first-pass go line is 2.13 ms at scale 0.5 (was 5.20). Next: step 2 (unit-frame march).
+
+## 2026-10-17: Phase 2b step 2 built, unit-frame march (not yet measured)
+
+### Built
+- The march no longer maps the world `cameraPosition` and `positionWorld` through an inverse matrix in float32. A per-object uniform `uCameraLocal` (`onObjectUpdate`) holds the camera in the box's unit frame, computed on the CPU in double precision at draw time. The ray direction is the interpolated box vertex (`positionLocal`) minus that position. No world-space position reaches the shader any more; `uInverse` and `uSunWorld` are gone.
+- `t` is now a fraction of the camera-to-vertex segment. `dirLength` (the segment in metres) converts it for extinction, so `dt` metres = `dt * dirLength`. The phase function uses the ray direction in the volume frame against `uSunLocal` (the sun in the same frame).
+- Steps are by length: `count = clamp(ceil(segmentMetres / (uStepTexels * texelMetres)), 1, uMarchSteps)`, with `uStepTexels` = 1.5 density texels. `uMarchSteps` is now a cap, so a ray that only clips a corner takes a few steps. Long rays still hit the cap, so the full-crossing cost is unchanged.
+
+### Checked
+- Specs 8/8 and demo-app `tsc` clean. By eye on WebGPU: clouds draw from outside, at the edge and inside, no console errors. Not tested at planet scale (the lab planet is 2 km, where float32 was already fine), so the shimmer fix is by construction, not observed.
+- Not measured: re-run the matrix. Expect a lower cost at outside / edge views (short rays), and about the same inside. The 8 ms packed-atlas figures are the baseline.
+
+### 2b step 2 measured (maintainer's GPU, WebGPU)
+
+GPU render ms, cloud columns net of "off" at the same scale.
+
+| scale 1 | off | net16 | net24 | net32 |
+|---|---|---|---|---|
+| outside | 0.92 | 0.24 | 0.23 | 0.37 |
+| edge | 0.94 | 4.46 | 6.47 | 8.19 |
+| inside | 0.66 | 5.84 | 8.41 | 10.59 |
+| above | 1.73 | 2.58 | 3.56 | 4.28 |
+| below | 0.51 | 5.74 | 8.05 | 10.42 |
+
+| scale 0.5 | off | net16 | net24 | net32 |
+|---|---|---|---|---|
+| outside | 0.26 | 0.08 | 0.10 | 0.08 |
+| edge | 0.21 | 1.19 | 1.68 | 2.11 |
+| inside | 0.20 | 1.47 | 2.08 | 2.68 |
+| above | 0.48 | 0.67 | 0.92 | 1.10 |
+| below | 0.13 | 1.46 | 2.05 | 2.64 |
+
+Inside, s32, scale 1, total ms: base 11.22, jitter off 10.85, no fetch 13.87, light rebaked every frame 11.94.
+
+- As expected, no change where rays cross the whole box: inside s32 stays about 10.6 net (step 1: 10.13), within run noise. The line-of-sight cap is hit, so the step count is the same.
+- Only the short-ray view gained: above s24 went 4.22 -> 3.56 ms. Outside stays about 0.3 ms.
+- The point of step 2 is shimmer at planet scale, which this lab (2 km planet) cannot show. It stays unverified until the moving planet lab (step 7) or a larger test scene.
+- Go line at scale 0.5: 2.08 ms (step 1: 2.13).

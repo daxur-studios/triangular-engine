@@ -1,6 +1,6 @@
 import { Matrix3, Matrix4, Quaternion, Vector3, type Object3D } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
-import { Fn, If, abs, cameraProjectionMatrix, cross, dot, float, max, mix, normalize, positionView, select, uniform, vec3, vec4 } from 'three/tsl';
+import { Fn, If, abs, cameraProjectionMatrix, cross, dot, float, max, min, mix, normalize, positionView, select, uniform, vec3, vec4 } from 'three/tsl';
 import { AtmosphereAerialPerspectiveLut, type AtmosphereAerialPerspectiveOptions } from './atmosphere-aerial-perspective';
 import type { AtmosphereBackdrop } from './atmosphere-backdrop';
 import type { AtmosphereGpuModel } from './atmosphere-gpu-model';
@@ -243,9 +243,15 @@ export class PlanetAtmosphereBinding {
     const mpu = this.metersPerUnit;
     const dirView = normalize(positionView);
     const sunView = normalize((this.bodyToView as any).mul(this.sunBody));
+    const distance = context.cameraDistance.mul(mpu);
+    // Half-way through the unroll the surface is neither a sphere nor a plane, and a ray that grazes the blended plane would
+    // count thousands of kilometres of dense air (everything goes white). Floor the ray's elevation (0.15, an airmass of about 7),
+    // ramped in over the first third of the morph; on the flat map the same floor stops a low view from counting the
+    // whole map as air. The globe (morph 0) is untouched.
+    const elevationFloor = min(this.morph.mul(3), 1).mul(0.15);
     const haze = this.model.slab({
-      distance: context.cameraDistance.mul(mpu),
-      cameraHeight: dot(toCamera, upView).mul(mpu),
+      distance,
+      cameraHeight: max(dot(toCamera, upView).mul(mpu), distance.mul(elevationFloor)),
       cosNu: dot(dirView, sunView),
       muSun: dot(normalize(context.sphereNormal), this.sunBody),
     });

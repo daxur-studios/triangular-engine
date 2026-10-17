@@ -843,7 +843,7 @@ export class CellPlanetTslPageComponent {
         // Uniform branch: with the atmosphere off (or the globe unrolled) the shader skips the sky lookups entirely.
         const out = input.color.toVar();
         If(amount.greaterThan(0), () => {
-          out.assign(input.surface.albedo); // TEMPDBG
+          out.assign(mix(input.color, lighting(context, input), float(amount)));
         });
         return out;
       },
@@ -854,7 +854,7 @@ export class CellPlanetTslPageComponent {
       stage: (context: any, color: any) => {
         const out = color.toVar();
         If(amount.greaterThan(0), () => {
-          out.assign(color); // TEMPDBG2
+          out.assign(mix(color, perspective(context, color), float(amount)));
         });
         return out;
       },

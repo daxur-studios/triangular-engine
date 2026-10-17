@@ -85,7 +85,7 @@ export class AtmosphereBackdrop {
   readonly checkerStrength = uniform(1);
   /** 0..1, how much of the sun reaches the planet; scales the whole sky and the sun disc (an eclipse). */
   readonly sunVisibility = uniform(1);
-  /** 0..1 coverage of the sky over what is behind it; below 1 the sky blends into the scene (the morph crossfades it out). */
+  /** 0..1, fades the sky to black (space); the sky stays opaque so it draws first, behind the planet. The morph fades it out. */
   readonly opacity = uniform(1);
   /** Multiplies the sun disc brightness; 0 hides it. */
   readonly sunDiscStrength = uniform(1);
@@ -129,7 +129,7 @@ export class AtmosphereBackdrop {
     const material = new NodeMaterial();
     material.depthTest = false;
     material.depthWrite = false;
-    material.transparent = true;
+    material.transparent = false;
 
     // Clip-space quad; each corner's view-space ray is interpolated (linear in screen space, so exact).
     material.vertexNode = vec4(positionLocal.xy, 0, 1);
@@ -194,7 +194,7 @@ export class AtmosphereBackdrop {
       });
 
       const exposed: any = max(colour.mul(this.exposure).mul(this.sunVisibility), 0);
-      return vec4(exposed, this.opacity);
+      return vec4(exposed.mul(this.opacity), 1);
     })();
 
     this.material = material;

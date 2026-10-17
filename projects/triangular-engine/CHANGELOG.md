@@ -153,7 +153,7 @@ All notable changes to triangular-engine are documented here.
 - `PlanetAtmosphereBinding` accepts `aerialPerspective` (`true` or `AtmosphereAerialPerspectiveOptions`): `perspective()` then reads the haze from an `AtmosphereAerialPerspectiveLut` froxel table instead of marching a ray per fragment, and `binding.update(renderer)` re-renders the table when the camera, the sun or the profile moved. `AtmosphereGpuModel.march` and `traceRay` take `ignoreGround`. See `docs/atmosphere.md`.
 - `AtmosphereMarchInput.unshadowed` and `AtmosphereMarchResult.radianceSun` / `radianceMulti`: the single-scattered sunlight can be marched without the planet's shadow and cut afterwards; the aerial-perspective table does this per pixel so the terminator stays sharp.
 - `AtmosphereGpuModel.slab()` and `PlanetAtmosphereBinding.morph`: the haze on a flat map in closed form (a slab of air over the point's own plane), blended with the spherical haze by the morph, so a surface keeps its atmosphere while the planet unrolls.
-- Atmosphere: `AtmosphereBackdrop.opacity` (sky crossfade) and `sunVisibility` on both `AtmosphereBackdrop` and `PlanetAtmosphereBinding` (eclipse: scales haze, sky light, sky and sun disc).
+- Atmosphere: `AtmosphereBackdrop.opacity` (fades the sky to space) and `sunVisibility` on both `AtmosphereBackdrop` and `PlanetAtmosphereBinding` (eclipse: scales haze, sky light, sky and sun disc).
 
 - Added an Angular CLI `ng add triangular-engine` schematic that installs the engine and generates a starter scene with a lazy route. Declared the required Angular Forms, Angular Material, and `three-mesh-bvh` peers used by the package.
 

@@ -20,18 +20,19 @@ import {
   If,
   Loop,
   abs,
-  cameraPosition,
+  ceil,
   clamp,
   dot,
   exp,
   float,
   floor,
   fract,
+  int,
   max,
   min,
   mx_fractal_noise_float,
   normalize,
-  positionWorld,
+  positionLocal,
   pow,
   screenCoordinate,
   select,
@@ -111,6 +112,8 @@ export class CloudVolume {
   readonly uNoiseSeed = uniform(0);
   /** Steps of the full-resolution march; read live, so changing it needs no rebuild. */
   readonly uMarchSteps = uniform(64, 'int');
+  /** Target march step in density texels; the march takes fewer steps than `uMarchSteps` when a ray is short. */
+  readonly uStepTexels = uniform(1.5);
   /** Debug (Plan 051, Phase 2a): 0 turns the per-pixel start jitter off. */
   readonly uJitter = uniform(1);
 
@@ -133,8 +136,9 @@ export class CloudVolume {
 
   private readonly uShape = uniform(0);
   private readonly uSunLocal = uniform(new Vector3(0, 1, 0));
-  private readonly uSunWorld = uniform(new Vector3(0, 1, 0));
-  private readonly uInverse = uniform(new Matrix4());
+  private readonly uCameraLocal = uniform(new Vector3()).onObjectUpdate(({ object, camera }: any) => this.cameraInVolumeFrame(object, camera));
+  private readonly inverseScratch = new Matrix4();
+  private readonly cameraScratch = new Vector3();
   private readonly uSize = uniform(new Vector3(1, 1, 1));
 
   private readonly densityQuad: QuadMesh;
@@ -195,7 +199,6 @@ export class CloudVolume {
   /** Direction toward the sun in world space. The light rebakes once it has turned past the tolerance. */
   setSunDirection(x: number, y: number, z: number): void {
     this.sunWorld.set(x, y, z).normalize();
-    this.uSunWorld.value.copy(this.sunWorld);
   }
 
   /** Rebakes what is stale and refreshes the march's per-frame uniforms. Call outside any render pass. */
@@ -204,7 +207,6 @@ export class CloudVolume {
     this.mesh.matrixWorld.decompose(this.scratchPosition, this.quaternion, this.scratchScale);
     this.sunLocal.copy(this.sunWorld).applyQuaternion(this.quaternion.invert());
     this.uSunLocal.value.copy(this.sunLocal);
-    this.uInverse.value.copy(this.mesh.matrixWorld).invert();
 
     if (this.densityDirty) {
       this.bake(renderer, this.densityQuad, this.densityTarget);
@@ -226,6 +228,15 @@ export class CloudVolume {
     this.lightMaterial.dispose();
     this.marchMaterial.dispose();
     this.mesh.geometry.dispose();
+  }
+
+  /**
+   * The camera position in the box's unit frame (`[-0.5, 0.5]^3` inside the box), computed in double precision at draw
+   * time, so a parent moved late in the frame is still current and no world-space position reaches the shader.
+   */
+  private cameraInVolumeFrame(object: Mesh, camera: { matrixWorld: Matrix4 }): Vector3 {
+    this.inverseScratch.copy(object.matrixWorld).invert();
+    return this.cameraScratch.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(this.inverseScratch);
   }
 
   private bake(renderer: WebGPURenderer, quad: QuadMesh, target: RenderTarget): void {
@@ -310,11 +321,12 @@ export class CloudVolume {
     const fetch = this.fetchEnabled;
     const steps = this.uMarchSteps;
     return Fn(() => {
-      const dirWorld = normalize(positionWorld.sub(cameraPosition));
-      const origin = this.uInverse.mul(vec4(cameraPosition, 1)).xyz;
-      const dir = this.uInverse.mul(vec4(dirWorld, 0)).xyz;
-      // Unit cube [-0.5, 0.5]^3; t stays in world metres because `dir` is the world direction mapped through
-      // the inverse model matrix.
+      // Unit cube [-0.5, 0.5]^3. The ray runs from the camera (in the unit frame) through the interpolated box vertex, so
+      // `t` is a fraction of that segment, not a length; `dirLength` converts one unit of `t` to metres.
+      const origin = this.uCameraLocal;
+      const dir = positionLocal.sub(origin);
+      const dirVolume = dir.mul(this.uSize);
+      const dirLength = dirVolume.length();
       const safeInv = (d: any) => float(1).div(select(abs(d).lessThan(1e-8), float(1e-8), d));
       const inv = vec3(safeInv(dir.x), safeInv(dir.y), safeInv(dir.z));
       const a = vec3(-0.5).sub(origin).mul(inv);
@@ -324,16 +336,23 @@ export class CloudVolume {
       const color = vec3(0).toVar();
       const transmittance = float(1).toVar();
       If(tFar.greaterThan(tNear), () => {
-        const dt = tFar.sub(tNear).div(float(steps));
+        // Step by length (about `uStepTexels` density texels), capped by `uMarchSteps`, so a ray that only clips a corner
+        // takes a few steps instead of the full count.
+        const segmentMetres = tFar.sub(tNear).mul(dirLength);
+        const texelMetres = this.size.x / this.densityLayout.size;
+        const count = max(float(1), min(float(steps), ceil(segmentMetres.div(this.uStepTexels.mul(texelMetres)))));
+        const dt = tFar.sub(tNear).div(count);
+        const dtMetres = dt.mul(dirLength);
         const jitter = fract(float(52.9829189).mul(fract(dot(screenCoordinate.xy, vec2(0.06711056, 0.00583715)))));
-        const cosine = dot(dirWorld, this.uSunWorld);
+        // The volume frame is the world frame without the box's rotation, and `uSunLocal` is the sun in that frame.
+        const cosine = dot(normalize(dirVolume), normalize(this.uSunLocal));
         // Two-lobe Henyey-Greenstein, mild forward and back scattering.
         const hg = (g: number) => {
           const g2 = g * g;
           return float(1 - g2).div(pow(float(1 + g2).sub(cosine.mul(2 * g)), 1.5).mul(4 * Math.PI));
         };
         const phase = hg(0.5).mul(0.6).add(hg(-0.3).mul(0.4));
-        Loop(steps, ({ i }: { i: any }) => {
+        Loop(int(count), ({ i }: { i: any }) => {
           const t = tNear.add(float(i).add(jitter.mul(this.uJitter)).mul(dt));
           const q = origin.add(dir.mul(t)).add(0.5);
           const d = q.sub(0.5);
@@ -341,7 +360,7 @@ export class CloudVolume {
           const density = fetch ? this.densityLayout.sample(this.densityTarget.texture, q) : blobDensity;
           If(density.greaterThan(0.002), () => {
             const sigma = density.mul(this.uExtinction);
-            const stepT = exp(sigma.mul(dt).negate());
+            const stepT = exp(sigma.mul(dtMetres).negate());
             const od = fetch ? this.lightLayout.sample(this.lightTarget.texture, q) : density.mul(0.5);
             const sun = this.uSunColor.mul(exp(od.negate())).mul(phase.mul(4 * Math.PI * 0.25));
             const ambient = this.uAmbient.mul(q.y.mul(0.5).add(0.5));

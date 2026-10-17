@@ -465,6 +465,9 @@ Limits and open, in order:
 
 ### Phase 3, second slice: sky crossfade and `sunVisibility`
 
-- `AtmosphereBackdrop.opacity` (0..1) makes the sky blend into the scene. The cell page fades it with a smoothstep over morph 0.2 to 0.8 (it used to switch off at 0.5) and hides the mesh at 0. The backdrop material is now `transparent` (still first in draw order, no depth).
+- `AtmosphereBackdrop.opacity` (0..1) fades the sky to space. The cell page fades it with a smoothstep over morph 0.2 to 0.8 (it used to switch off at 0.5) and hides the mesh at 0. The sky stays opaque and fades to black: a `transparent` backdrop is drawn after the opaque terrain and paints over the land.
 - `PlanetAtmosphereBinding.sunVisibility` and `AtmosphereBackdrop.sunVisibility` (0..1) are the eclipse hookup: the haze in-scatter, the sky light on surfaces, the sky and the sun disc scale by it (`sync` copies the binding's value to the backdrop). Surfaces still multiply their own occluders into the direct light. The cell page does not drive it yet; nothing has been seen on a GPU.
 - Still open: flat-map edge fade or glow, the slab's fixed sun angle and ground height, per-sample sun froxels on the map.
+
+- Whitewash at dusk mid-morph (user report): a ray grazing the blended plane counted the full distance in dense air. `slabPerspective` floors the ray's elevation (height >= distance x 0.6 x morph x (1 - morph)), so the airmass stays near 7 at morph 0.5 and nothing changes at 0 or 1.
+- Follow-up: the floor is now 0.15 x min(3 morph, 1), so it also covers the flat map (morph 1), where a low view of the map was still whitewashed. Only morph 0 is unchanged.
