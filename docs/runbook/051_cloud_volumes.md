@@ -39,3 +39,21 @@ Nothing was built, run or measured.
   cloud bakes.
 - `triangular-engine/clouds` already exists (the mesh puffs, Runbook 023), so the new entry point is
   `triangular-engine/cloud-volumes`. Earlier cloud work (Runbooks 001, 023, 025) stays as history and is not edited.
+
+## 2026-10-17 — Moving planets, point-light showcase (cloud session, code reading only)
+
+- **Owner's question:** in a game where planets constantly spin and orbit the sun, do the "rebuild on change"
+  tables keep rebuilding? Answer recorded in the plan's §Moving planets.
+  - The atmosphere's profile tables never rebuild.
+  - The sky-view table rebuilds when the sun's elevation moves 0.05° (`sunTolerance`, `atmosphere-sky-view.ts`):
+    every few seconds at 1x, every frame under time warp.
+  - The froxel table's dirty check (`atmosphere-aerial-perspective.ts`, `isDirty`) compares the camera pose at 1e-5,
+    so it rebuilds every frame the camera moves. That is fine by design (it is small), but it means a timing taken with
+    a still camera does not include it.
+  - The clouds keep their density in the planet's body frame. Only the sun bake follows the sun, and it is time-sliced.
+- **Plan changes:**
+  - every gate is timed both still and in the moving worst case;
+  - temporal reuse reprojects with each volume's previous transform;
+  - the lab gets a spinning, orbiting planet with a time-warp slider.
+- **Owner's ask:** show custom lights on the example page. Phase 7 now specifies two lab scenes: a rocket-engine
+  fly-through, and a storm with seeded lightning flashes.
