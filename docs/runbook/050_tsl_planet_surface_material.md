@@ -430,3 +430,46 @@ Not done:
 - **Perf numbers** (frame time and first-compile time vs the GLSL demo, WebGPU and `forceWebGL`). They need a visible window: the in-app pane runs at 1 FPS when hidden. Measure with the batching toggle in `/cell-planet-tsl` and the stats panel, at an idle machine, and record them here.
 - **`daxur tokens map` registration** of `planet-material` (and `atmosphere`): `tokens map status` lists neither as a tracked section; register them with the maintainer, not from this session (Plan 049 shares the manifest).
 - Delete the throwaway `/tsl-webgpu-spike` page once the benchmark re-run is final.
+
+## 2026-10-17 — External review, checked against the code (cloud session, code reading only)
+
+An external agent reviewed `planet-material/**`, the GLSL reference it ports, and the `/cell-planet-tsl` and `/planet-material-extensions` demos. Each finding was then checked against the code at `9de4479`. Nothing was changed in code; this entry is the verdict and the fix order. The review quoted a "Phase 6" benchmark section (lines 451-471) that is not in this file on `master`; it is presumably still uncommitted in a local tree.
+
+### Confirmed, fix now (in this order, a spec for each)
+
+1. **The context's `sphereNormal` is the terrain normal, and consumers use it as a position.** `planetMorphGraph` exposes `sphereNormal: varying(aSphereNorm)`. On streamed tiles `aSphereNorm` is the central-difference surface normal (`cell-planet-worker-pipeline.ts:547-582`), which tilts with relief; the graph's own comment says so and computes the radial `dir` for projection, but that direction is not exposed. Consumers that need "where on the planet" read the tilted normal instead: `cellLookupLayer` (`cell-lookup-layer.ts:75`, cell ids sampled off-position on every slope), `createPlanetContext`'s `latLon`, `roadLayer`, `moonEclipseOcclusion` and `nightLightsEmissive` (`planet-extension-examples.ts:39, 85, 112`), and the atmosphere binding's sun-transmittance angle and surface point (`atmosphere-planet-stages.ts:256, 282`). Shading with the tilted normal (`atmosphere-planet-stages.ts:204`, the day/night terminator) is correct. Fix: keep `sphereNormal` for shading and add a `radialDirection` to `IPlanetContext` for position lookups, either as a varying of `dir` (one of 16 inter-stage slots) or derived in the fragment stage from `vBodyFixedLocal` as the seam check already does. Spec: a mesh whose `aSphereNorm` differs from `normalize(aSpherePos)`; the lookups must follow the position. The existing specs use `SphereGeometry`, where the two are equal.
+2. **Lighting stages dim the emissive stack.** `simpleDayNightLighting` and `sunVisibilityLighting` (`planet-lighting.ts:96-110`) multiply `color`, which already includes emissive. On `/planet-material-extensions` the night side multiplies by `nightColor x nightAmbient`, about 2-5 %, so `nightLightsEmissive` nearly vanishes. The stage input already carries `emissive`, and the atmosphere lighting stage already adds it back. Fix: modulate `color - emissive`, then add `emissive`. Spec: day/night plus night lights on the night side; the current night-lights spec has no lighting stage.
+3. **`/cell-planet-tsl` map frame and projection toggle.** The map border geometry is built around `z = -radius` (`planet-morph-border-geometry.ts:189`) and the page shifts the ocean by `+radius` but not the border (`cell-planet-tsl-page.component.ts:796-820`), so with the border visible (morph above 0.15) its sphere end sits up to about 0.75 R behind the globe. `meshGenerator` hardcodes `projectionKind: 'equalEarth'` (line 773) and the ocean, border and grid are built once, while the projection button (line 189) changes the CPU side. Fix: shift the border like the ocean; pass `this.projectionKind()` to the worker and rebuild ocean, border and grid on toggle, or remove the toggle.
+4. **Cell overlay toggle race** (`setCells`, line 1141). After the `await` it writes `enabled` from the stale `on`, and `setLookup` enables the layer itself, so unchecking during the worker request leaves the overlay on. Fix: read `this.cellsOn()` after the await. Minor: it requests `'material'` colours where the tooltip says territory colour.
+
+### Confirmed, design call or lower priority
+
+- **Benchmark settling (partly wrong in the review).** `applyBatching` already returns early when nothing changes, so only the switch into the batching-off rows recreates the view. The real gap: `isSettled` checks only the material-tile queue, not the terrain patch queue or in-flight tiles, so those rows can sample terrain that is still streaming (200 ms + 250 ms + 800 ms warm-up before sampling). Fix before trusting the batching-off rows.
+- **Two suns on `/cell-planet-tsl`.** The scene's directional light is fixed at `[2500, 3500, 3000]` with ambient 1.2; the sun sliders move only the atmosphere's sun. Toggling the atmosphere, or morphing toward the map, jumps the light. The atmosphere lighting stage is diffuse only, so the ocean loses its specular while it is on. Fix: drive the directional light from the same sun vector. A glint lobe for low-roughness surfaces is an owner's call. `/planet-material-extensions` has no directional light at all.
+- **Dynamic-mode seam cull without `aOtherDir` attributes leaves shards** (`planet-morph-nodes.ts:262-269`). Across a seam-spanning triangle the mismatch between `vProjLon` and the true longitude grows from zero at each vertex, so a sliver near each vertex survives, up to `SEAM_LON_MISMATCH` (0.5 rad) wide on screen; inside the pole exemption (`|dot| >= 0.99`, about 8 degrees) seam triangles survive whole. The review's suggested fix (compare the wrapped angular difference) gives the same values and changes nothing. Options: a much tighter threshold scaled by the derivative of the true longitude, seam data from the worker (stage 1 reads 6 of 8 vertex buffers), or splitting on the CPU. First write the missing GPU spec for this path.
+- **Flat normal in dynamic mode.** The comment at `planet-morph-nodes.ts:223` says the GLSL reuses the baked flat normal; it does not (`planet-morph-material.ts:151-152` uses `(0, 0, 1)` when `uProjMode > 0.5`). With a centre latitude other than 0 the baked east/north no longer match the map axes, so relief is shaded from the wrong side. Fix: match the GLSL, or rotate the normal into the tracked frame, and correct the comment.
+- **`normalize(mix(sphereNorm, flatNorm, morph))` is zero** where the two are opposite (antimeridian, equator, morph 0.5). Negligible area and the GLSL has the same; a cheap guard is fine.
+- **Cell table is `cellCount x 1`** (`cell-lookup-layer.ts:89`, and the GLSL path's `cell-per-pixel-material.ts:185`), so it exceeds WebGPU's default 8192 texture width on larger worlds. The demos use 1500 cells. Fix: a fixed-width 2D layout.
+- **Leaks.** `/planet-material-extensions` disposes nothing (two materials, two geometries). `/cell-planet-tsl` never disposes the ocean, border, grid and seam-test geometries. The streaming page's cell textures are not disposed (plausible, unchecked). The `beforeRender$`/`tick$` subscriptions are mostly harmless: the engine is provided per page and `<scene>` calls `onComponentDestroy`.
+- **Draw counts mean different things on the two pages** (terrain-only on the GLSL page, whole renderer on the TSL page). Label the column in the benchmark tables.
+- **Slot ids may contain the cache-key delimiters** (`|`, `;`, `:`), so two stacks can share a key. Reject them in `OrderedSlots.add`.
+- **The Phase 0 spike reads `info.render.timestamp` before resolving it**, so its GPU time lags one window. The page is due for deletion.
+
+### Not taken
+
+- **Disposing `QuadMesh.geometry` in `gpu-eval.testing.ts`.** Every `QuadMesh` in three.js shares one module-level geometry; disposing it affects every later quad.
+- **`intrinsicHeight` and `cellId` missing from the context.** Already documented in `planet-context.ts` as arriving with the layers that need them.
+- **The public API exports `OrderedSlots` and the example layers.** An owner's call, not a bug.
+
+### Plan points worth writing into Plan 050's status (owner's call)
+
+- `ISurfaceSample.normalTS` is declared but `PlanetSurfaceMaterial.rebuild()` never applies it.
+- Stage 3 feeds a factor applied after PBR, so `sunVisibilityLighting` also dims ambient (documented as approximate) and, until fix 2, emissive.
+
+### Untested paths the review found
+
+- A lighting stage combined with an emissive layer.
+- The dynamic seam cull without `aOtherDir` attributes (the streamed-tile path).
+- Terrain where `aSphereNorm != normalize(aSpherePos)`.
+- Mid-morph normals on the antimeridian.
+- Line and ocean materials compiled and evaluated on the GPU (the specs only check that the nodes exist).
