@@ -21,6 +21,7 @@ tags: [plans, index]
 | [Cloud Volumes](/docs/plans/051_cloud_volumes.md) | in progress | [Evidence](/docs/runbook/051_cloud_volumes.md) |
 | [Page Test Sessions and Performance Comparison](/docs/plans/052_page_test_sessions_and_performance_comparison.md) | proposed | [Evidence](/docs/runbook/052_page_test_sessions_and_performance_comparison.md) |
 | [Procedural Creature Animation](/docs/plans/053_procedural_creature_animation.md) | planned | [Evidence](/docs/runbook/053_procedural_creature_animation.md) |
+| [Stylized Illustrative Planet & Scene Rendering](/docs/plans/054_stylized_illustrative_rendering.md) | planned | [Evidence](/docs/runbook/054_stylized_illustrative_rendering.md) |
 
 
 Convention: [Plans and Runbooks](/docs/plans-and-runbooks.md).

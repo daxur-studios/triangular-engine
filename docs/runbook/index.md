@@ -21,6 +21,7 @@ tags: [runbook, index]
 | [Cloud Volumes](/docs/runbook/051_cloud_volumes.md) | [Implementation plan](/docs/plans/051_cloud_volumes.md) |
 | [Page Test Sessions and Performance Comparison](/docs/runbook/052_page_test_sessions_and_performance_comparison.md) | [Implementation plan](/docs/plans/052_page_test_sessions_and_performance_comparison.md) |
 | [Procedural Creature Animation](/docs/runbook/053_procedural_creature_animation.md) | [Implementation plan](/docs/plans/053_procedural_creature_animation.md) |
+| [Stylized Illustrative Planet & Scene Rendering](/docs/runbook/054_stylized_illustrative_rendering.md) | [Implementation plan](/docs/plans/054_stylized_illustrative_rendering.md) |
 
 
 Existing runbooks `001`–`042` retain their historical paths and formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

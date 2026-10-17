@@ -139,6 +139,11 @@ interface Recording {
         <button (click)="runFlyby()" [disabled]="matrixStatus() !== ''">fly-by test (2 x 20 s)</button>
       </p>
       <p class="row">
+        <button (click)="runAll()" [disabled]="matrixStatus() !== ''">
+          {{ matrixStatus() || 'run everything: 1/4/12 volumes, fly-bys at 24 + 64 steps, matrices (about 15 min)' }}
+        </button>
+      </p>
+      <p class="row">
         clouds drawn as
         <button (click)="setCloudMode('mesh')" [class.active]="cloudMode() === 'mesh'">box mesh</button>
         <button (click)="setCloudMode('pass')" [class.active]="cloudMode() === 'pass'">screen pass x0.5</button>
@@ -527,7 +532,7 @@ export class CloudVolumesLabPageComponent {
    * at 16 / 24 / 32 steps, then three extra runs at inside s32 scale 1 (jitter off, no fetch, light rebaked every
    * frame). Writes one compact table. Cloud columns are the cost over "off" at the same scale and camera.
    */
-  async runMatrix(): Promise<void> {
+  async runMatrix(publish = true): Promise<string> {
     const stepList = [16, 24, 32];
     const saved = {
       preset: PRESETS.find((p) => p.label === this.presetLabel()) ?? PRESETS[0],
@@ -558,7 +563,7 @@ export class CloudVolumesLabPageComponent {
     ];
     const total = runs.length * PRESETS.length * (stepList.length + 1) + 3;
     let done = 0;
-    const status = (what: string) => this.matrixStatus.set(`running ${++done}/${total}: ${what}`);
+    const status = (what: string) => this.matrixStatus.set(`${this.statusPrefix}running ${++done}/${total}: ${what}`);
     const net = (ms: string, base: string) => (ms === 'n/a' || base === 'n/a' ? 'n/a' : (+ms - +base).toFixed(2));
     let canvasSize = '';
     let goValue = 'n/a';
@@ -622,15 +627,47 @@ export class CloudVolumesLabPageComponent {
     this.applyPreset(saved.preset);
     this.setClouds(saved.clouds);
     this.applySteps(saved.steps);
-    this.matrixText.set(
-      [
-        `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} canvas ${canvasSize.trim()} density 128 light 64 volumes ${this.volumeCount()}`,
-        'GPU render ms avg, read after the main render. off = clouds hidden; netNN = (clouds with NN steps) - off',
-        ...lines,
-      ].join('\n'),
-    );
+    const text = [
+      `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} canvas ${canvasSize.trim()} density 128 light 64 volumes ${this.volumeCount()}`,
+      'GPU render ms avg, read after the main render. off = clouds hidden; netNN = (clouds with NN steps) - off',
+      ...lines,
+    ].join('\n');
+    if (publish) await this.publish(text);
+    return text;
+  }
+
+  private statusPrefix = '';
+
+  private async publish(text: string): Promise<void> {
+    this.matrixText.set(text);
     this.matrixStatus.set('');
     await this.copyMatrix();
+  }
+
+  /**
+   * Everything in one go: for 1, 4 and 12 volumes, the fly-by at 24 and 64 steps and then the full matrix. One combined
+   * report is copied to the clipboard at the end. Takes about 15 minutes; keep the tab visible.
+   */
+  async runAll(): Promise<void> {
+    const saved = { count: this.volumeCount(), steps: this.steps() };
+    const parts: string[] = [];
+    const stepsList = [24, 64];
+    const total = this.volumeCounts.length * (stepsList.length + 1);
+    let n = 0;
+    for (const count of this.volumeCounts) {
+      this.setVolumeCount(count);
+      for (const steps of stepsList) {
+        this.statusPrefix = `all ${++n}/${total} (${count} volumes, ${steps} steps): `;
+        this.applySteps(steps);
+        parts.push(await this.runFlyby(false));
+      }
+      this.statusPrefix = `all ${++n}/${total} (${count} volumes, matrix): `;
+      parts.push(await this.runMatrix(false));
+    }
+    this.statusPrefix = '';
+    this.setVolumeCount(saved.count);
+    this.applySteps(saved.steps);
+    await this.publish(parts.join('\n\n'));
   }
 
   /** One scripted pass along the great circle at 250 m altitude, 2.4 km in `seconds`; resolves with the GPU ms samples. */
@@ -661,7 +698,7 @@ export class CloudVolumesLabPageComponent {
    * The same scripted fly-by with the box meshes and with the half-resolution screen pass, for the current volume count,
    * sun and settings. Reports GPU ms over the pass (average, 95th percentile, worst sample), so motion cost and spikes show up.
    */
-  async runFlyby(): Promise<void> {
+  async runFlyby(publish = true): Promise<string> {
     const saved = { mode: this.cloudMode(), preset: PRESETS.find((p) => p.label === this.presetLabel()) ?? PRESETS[0] };
     const lines: string[] = [];
     for (const [mode, label] of [
@@ -669,7 +706,7 @@ export class CloudVolumesLabPageComponent {
       ['pass', 'screen pass x0.5'],
     ] as const) {
       this.setCloudMode(mode);
-      this.matrixStatus.set(`fly-by ${label}`);
+      this.matrixStatus.set(`${this.statusPrefix}fly-by ${label}`);
       await new Promise((resolve) => setTimeout(resolve, 1500));
       const samples = (await this.flybyOnce(20)).sort((a, b) => a - b);
       const at = (q: number) => samples[Math.floor(q * (samples.length - 1))]?.toFixed(2) ?? 'n/a';
@@ -678,15 +715,13 @@ export class CloudVolumesLabPageComponent {
     }
     this.setCloudMode(saved.mode);
     this.applyPreset(saved.preset);
-    this.matrixText.set(
-      [
-        `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} volumes ${this.volumeCount()} steps ${this.steps()}, 2.4 km at 120 m/s, 250 m altitude`,
-        'GPU render ms, one sample per 10 frames, whole frame (clouds on, nothing subtracted)',
-        ...lines,
-      ].join('\n'),
-    );
-    this.matrixStatus.set('');
-    await this.copyMatrix();
+    const text = [
+      `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} volumes ${this.volumeCount()} steps ${this.steps()}, 2.4 km at 120 m/s, 250 m altitude`,
+      'GPU render ms, one sample per 10 frames, whole frame (clouds on, nothing subtracted)',
+      ...lines,
+    ].join('\n');
+    if (publish) await this.publish(text);
+    return text;
   }
 
   async copyMatrix(): Promise<void> {
