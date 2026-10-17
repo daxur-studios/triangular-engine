@@ -14,7 +14,7 @@ import {
   Mesh,
   Vector2,
 } from 'three';
-import { float, mix, uniform } from 'three/tsl';
+import { float, If, mix, uniform } from 'three/tsl';
 import type { Material } from 'three/webgpu';
 import {
   EngineModule,
@@ -795,11 +795,24 @@ export class CellPlanetTslPageComponent {
     const amount = this.atmosphereMix;
     this.surface.setLightingStage({
       id: 'atmosphere',
-      stage: (context, input) => mix(input.color, lighting(context, input), float(amount)),
+      stage: (context, input) => {
+        // Uniform branch: with the atmosphere off (or the globe unrolled) the shader skips the sky lookups entirely.
+        const out = input.color.toVar();
+        If(amount.greaterThan(0), () => {
+          out.assign(mix(input.color, lighting(context, input), float(amount)));
+        });
+        return out;
+      },
     });
     this.surface.setAtmosphereStage({
       id: 'atmosphere',
-      stage: (context, color) => mix(color, perspective(context, color), float(amount)),
+      stage: (context, color) => {
+        const out = color.toVar();
+        If(amount.greaterThan(0), () => {
+          out.assign(mix(color, perspective(context, color), float(amount)));
+        });
+        return out;
+      },
     });
     this.engine.scene.add(backdrop.mesh);
     this.atmosphereParts = { model, skyView, backdrop, binding };
