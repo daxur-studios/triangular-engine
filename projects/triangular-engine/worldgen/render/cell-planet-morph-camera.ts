@@ -59,16 +59,16 @@ function frameOf(): ICellPlanetGroundFrame {
  * Keeps the camera over the same ground while a cell planet morphs between its globe and its flat map.
  *
  * The morph moves every surface point by `mix(sphere, flat, morph)`, but a camera and its orbit target are fixed in
- * the scene, so a growing morph slides the ground out from under them. The rig holds one *anchor*: the ground point the
- * view ray (camera to orbit target) hits. Each time `morph` changes it carries the camera and the target rigidly from the
+ * the scene, so a growing morph slides the ground out from under them. The rig holds one *anchor*: the ground point
+ * straight below the camera (along the surface normal). Each time `morph` changes it carries the camera and the target rigidly from the
  * anchor's ground frame at the old morph to its frame at the new one, so the distance, the angle to the surface, the
  * bearing and the position over the ground all stay as they were. It then sets the controls' up vector to the anchor's
  * surface normal and re-aims the camera, so there is no roll jitter between the globe's radial up and the map's +Z.
  *
  * The frame follows the material's own blend: the normal is `normalize(mix(sphere normal, +Z, morph))` and north blends
  * the same way, so the terrain under the camera stays level with its up. The flat map is the plane `z = 0` through the planet's centre (the material's flat positions carry only the terrain height) and
- * terrain relief is ignored (the anchor sits on the base surface). Call {@link update} once per frame, after the orbit
- * controls have updated and before the frame renders.
+ * terrain relief is ignored (the anchor sits on the base surface). Call {@link update} once per frame in `postTick$`
+ * (before the orbit controls settle in `lateUpdate$`), with the same morph value the material renders.
  */
 export class CellPlanetMorphCameraRig {
   private anchor = new Vector3(0, 0, 1);
@@ -81,6 +81,11 @@ export class CellPlanetMorphCameraRig {
   private readonly scratchEast = new Vector3();
   private readonly scratchNorth = new Vector3();
   private readonly scratchFound = new Vector3();
+  private readonly scratchDown = new Vector3();
+  private readonly scratchNormal = new Vector3();
+  private readonly scratchAim = new Vector3();
+  private readonly scratchCandidate = new Vector3();
+  private readonly scratchRay = new Vector3();
 
   constructor(private readonly options: ICellPlanetMorphCameraRigOptions) {}
 
@@ -162,6 +167,49 @@ export class CellPlanetMorphCameraRig {
   }
 
   /**
+   * The ground direction straight below `origin` at `morph`: the point whose surface normal passes through the camera,
+   * so the camera's offset from it is a pure height along that normal. `hint` (a previous answer) seeds the search.
+   */
+  groundUnderCamera(origin: Vector3, morph: number, hint?: Vector3, out = new Vector3()): Vector3 | null {
+    // Seeds: the previous answer (continuity), then straight toward the planet's centre. The nearest ground wins.
+    const seeds = hint ? [hint, origin] : [origin];
+    let best: Vector3 | null = null;
+    let bestDistance = Infinity;
+    for (const seed of seeds) {
+      if (!this.nadirFrom(origin, morph, seed, this.scratchCandidate)) continue;
+      const distance = this.groundPosition(this.scratchCandidate, morph, this.scratchAim).distanceTo(origin);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = out.copy(this.scratchCandidate);
+      }
+    }
+    return best;
+  }
+
+  /** Fixed-point search for the ground whose surface normal points at `origin`; false when it does not settle. */
+  private nadirFrom(origin: Vector3, morph: number, seed: Vector3, out: Vector3): boolean {
+    const d = this.scratchDown.copy(seed);
+    if (d.lengthSq() < EPSILON) d.set(0, 0, 1);
+    d.normalize();
+    for (let i = 0; i < 80; i++) {
+      const normal = this.scratchNormal.copy(d).multiplyScalar(1 - morph);
+      normal.z += morph;
+      if (normal.lengthSq() < 1e-8) normal.set(0, 0, 1);
+      normal.normalize();
+      this.scratchAim.copy(origin).sub(normal);
+      const found = this.groundUnderRay(origin, this.scratchAim, morph, d, this.scratchRay);
+      if (!found) return false;
+      const moved = found.distanceTo(d);
+      d.copy(found);
+      if (moved < 1e-11) {
+        out.copy(d);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Carries the camera and the orbit target from the anchor's frame at the previous morph to its frame at `morph`,
    * then sets the controls' up to the ground normal and re-aims the camera. The first call only finds the anchor.
    * Returns whether the pose changed.
@@ -171,7 +219,7 @@ export class CellPlanetMorphCameraRig {
     let changed = false;
 
     if (!this.hasAnchor || Number.isNaN(this.lastMorph)) {
-      const found = this.groundUnderRay(camera.position, controls.target, morph);
+      const found = this.groundUnderCamera(camera.position, morph, undefined, this.scratchFound);
       if (!found) return false;
       this.anchor.copy(found);
       this.hasAnchor = true;
@@ -184,8 +232,8 @@ export class CellPlanetMorphCameraRig {
       this.lastMorph = morph;
       changed = true;
     } else {
-      // Nothing is morphing, so the user may have moved the view: follow the ground now under the view ray.
-      const found = this.groundUnderRay(camera.position, controls.target, morph, this.anchor, this.scratchFound);
+      // Nothing is morphing, so the user may have moved the camera: follow the ground now below it.
+      const found = this.groundUnderCamera(camera.position, morph, this.anchor, this.scratchFound);
       if (found) this.anchor.copy(found);
     }
 

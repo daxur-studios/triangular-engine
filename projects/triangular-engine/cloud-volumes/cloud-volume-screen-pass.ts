@@ -36,8 +36,10 @@ const RESERVED_TEXTURES = 1;
 
 /** How many volumes one cloud target can march on this renderer's device (fewer chunks means fewer half-res passes). */
 function volumesPerTarget(renderer: WebGPURenderer): number {
-  const limit = (renderer as any).backend?.device?.limits?.maxSampledTexturesPerShaderStage;
-  const budget = (typeof limit === 'number' && limit > 0 ? limit : DEFAULT_SAMPLED_TEXTURE_LIMIT) - RESERVED_TEXTURES;
+  const limits = (renderer as any).backend?.device?.limits;
+  // Every sampled texture also takes a sampler slot, so the smaller of the two limits decides.
+  const limit = limits ? Math.min(limits.maxSampledTexturesPerShaderStage ?? Infinity, limits.maxSamplersPerShaderStage ?? Infinity) : undefined;
+  const budget = (typeof limit === 'number' && Number.isFinite(limit) && limit > 0 ? limit : DEFAULT_SAMPLED_TEXTURE_LIMIT) - RESERVED_TEXTURES;
   return Math.max(1, Math.floor(budget / TEXTURES_PER_VOLUME));
 }
 

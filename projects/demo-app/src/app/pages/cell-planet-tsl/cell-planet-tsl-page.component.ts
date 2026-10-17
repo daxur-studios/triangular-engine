@@ -677,10 +677,16 @@ export class CellPlanetTslPageComponent {
     this.addOceanAndFrame();
     if (ATMOSPHERE) this.addAtmosphere();
     this.resumeSuite();
-    this.engine.beforeRender$.subscribe(() => {
+    // After the scrub's `tick$` write and before the orbit controls settle in `lateUpdate$`: the camera and the
+    // material move to the same morph together, so the ground never slides under a frame's camera.
+    this.engine.postTick$.subscribe(() => {
+      const morph = this.morphProgress();
+      this.surface.morph.uMorph.value = morph;
       const controls = this.orbit()?.orbitControls();
-      if (controls && this.keepGroundOn()) this.morphCamera.update(controls, this.morphProgress());
+      if (controls && this.keepGroundOn()) this.morphCamera.update(controls, morph);
       else this.morphCamera.reset();
+    });
+    this.engine.beforeRender$.subscribe(() => {
       this.syncAtmosphere();
       if (!this.firstFrameMs && (this.engine.renderer as any)?.initialized) {
         this.firstFrameMs = performance.now() - pageStartMs;

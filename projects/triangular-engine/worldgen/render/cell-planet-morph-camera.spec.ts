@@ -23,15 +23,12 @@ function controlsAt(camera: Vector3, target: Vector3): ICellPlanetMorphCameraCon
   };
 }
 
-/** Camera 400 above the ground at `dir`, 300 back along the horizontal, looking at the ground point. */
+/** Camera 400 above the ground at `dir`, looking mostly along the horizontal (a little down), toward the ground's east. */
 function poseOver(r: CellPlanetMorphCameraRig, dir: Vector3, morph: number): { camera: Vector3; target: Vector3 } {
   const frame = r.groundFrame(dir, morph);
-  const camera = frame.position
-    .clone()
-    .addScaledVector(frame.normal, 400)
-    .addScaledVector(frame.east, 120)
-    .addScaledVector(frame.north, -280);
-  return { camera, target: frame.position.clone() };
+  const camera = frame.position.clone().addScaledVector(frame.normal, 400);
+  const target = camera.clone().addScaledVector(frame.east, 300).addScaledVector(frame.north, 120).addScaledVector(frame.normal, -60);
+  return { camera, target };
 }
 
 /** Where `point` stands in the ground frame, as east, north and height. */
@@ -79,13 +76,14 @@ describe('CellPlanetMorphCameraRig', () => {
     }
   });
 
-  it('finds the ground under the line of sight at any morph', () => {
+  it('finds the ground straight below the camera at any morph', () => {
     for (const kind of ['equirectangular', 'equalEarth'] as const) {
       const r = rig(kind);
       for (const dir of DIRECTIONS) {
         for (const morph of [0, 0.35, 0.7, 1]) {
           const { camera, target } = poseOver(r, dir, morph);
-          const found = r.groundUnderRay(camera, target, morph);
+          void target;
+          const found = r.groundUnderCamera(camera, morph);
           expect(found).not.toBeNull();
           expect(found!.distanceTo(dir)).toBeLessThan(1e-5);
         }
@@ -96,7 +94,7 @@ describe('CellPlanetMorphCameraRig', () => {
   it('finds the ground from a camera looking at the planet centre, as the demo starts', () => {
     const r = rig();
     for (const morph of [0, 0.5, 1]) {
-      const found = r.groundUnderRay(new Vector3(0, 0, RADIUS * 2.6), new Vector3(0, 0, 0), morph);
+      const found = r.groundUnderCamera(new Vector3(0, 0, RADIUS * 2.6), morph);
       expect(found!.distanceTo(new Vector3(0, 0, 1))).toBeLessThan(1e-6);
     }
   });
@@ -121,6 +119,25 @@ describe('CellPlanetMorphCameraRig', () => {
       for (const morph of [0.6, 0.3, 0]) r.update(controls, morph);
       expect(controls.object.position.distanceTo(camera)).toBeLessThan(1e-5);
       expect(controls.target.distanceTo(target)).toBeLessThan(1e-5);
+    }
+  });
+
+  it('holds a 10 m height above the ground and a level look through the whole morph', () => {
+    const r = rig();
+    const dir = DIRECTIONS[2];
+    const frame = r.groundFrame(dir, 0);
+    const camera = frame.position.clone().addScaledVector(frame.normal, 10);
+    const target = camera.clone().addScaledVector(frame.east, 500);
+    const controls = controlsAt(camera, target);
+    r.update(controls, 0);
+    for (const morph of [0.05, 0.2, 0.5, 0.8, 1, 0.6, 0.1]) {
+      r.update(controls, morph);
+      const f = r.groundFrame(dir, morph);
+      const offset = controls.object.position.clone().sub(f.position);
+      expect(offset.dot(f.normal)).toBeCloseTo(10, 6);
+      expect(Math.hypot(offset.dot(f.east), offset.dot(f.north))).toBeLessThan(1e-6);
+      const view = controls.target.clone().sub(controls.object.position).normalize();
+      expect(Math.abs(view.dot(f.normal))).toBeLessThan(1e-9);
     }
   });
 
@@ -206,7 +223,8 @@ describe('CellPlanetMorphCameraRig', () => {
 
   it('does nothing when the view misses the ground', () => {
     const r = rig();
-    const controls = controlsAt(new Vector3(0, 0, RADIUS * 5), new Vector3(0, 0, RADIUS * 10));
-    expect(r.update(controls, 0)).toBeFalse();
+    // Below the flat map, the ground under the camera is behind the surface normal's direction.
+    const controls = controlsAt(new Vector3(0, 0, -RADIUS * 5), new Vector3(0, 0, -RADIUS * 6));
+    expect(r.update(controls, 1)).toBeFalse();
   });
 });

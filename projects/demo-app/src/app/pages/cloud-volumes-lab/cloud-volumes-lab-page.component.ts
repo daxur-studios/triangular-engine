@@ -68,8 +68,6 @@ interface Recording {
       forceWebGL: FORCE_WEBGL,
       antialias: false,
       trackTimestamp: true,
-      // More sampled textures per stage means fewer cloud chunks (the screen pass sizes its chunks from the device limit).
-      requiredLimits: { maxSampledTexturesPerShaderStage: 48 },
     },
   }),
   host: {
@@ -267,7 +265,13 @@ export class CloudVolumesLabPageComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly forceWebGL = FORCE_WEBGL;
-  readonly backendLabel = FORCE_WEBGL ? 'forceWebGL' : 'WebGPU';
+  /** The backend the renderer actually runs on: a failed WebGPU device falls back to WebGL2 without any other sign. */
+  get backendLabel(): string {
+    const backend: any = (this.engine.renderer as any)?.backend;
+    if (!backend) return FORCE_WEBGL ? 'forceWebGL' : 'WebGPU';
+    const actual = backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2';
+    return !FORCE_WEBGL && actual !== 'WebGPU' ? 'WebGL2 (WebGPU FELL BACK)' : actual;
+  }
   readonly presets = PRESETS;
   readonly volumeCounts = [1, 4, 12];
 
