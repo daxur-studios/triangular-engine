@@ -8,6 +8,7 @@ import {
   float,
   length,
   mix,
+  modelWorldMatrix,
   normalGeometry,
   normalize,
   positionGeometry,
@@ -18,6 +19,7 @@ import {
   uniform,
   varying,
   vec3,
+  vec4,
 } from 'three/tsl';
 import {
   equalEarthFlat,
@@ -46,6 +48,11 @@ export interface IPlanetMorphUniforms {
   uRadius: IUniform<number>;
   /** 0 = equirectangular, 1 = Equal Earth. */
   uProjectionType: IUniform<number>;
+  /**
+   * Planet centre in scene space (`bodyCenterSceneM`). Dynamic projection measures body-fixed positions as
+   * `modelWorldMatrix * local - this`. Assumes an unrotated patch group.
+   */
+  uBodyCentreScene: IUniform<Vector3>;
 }
 
 /** Creates the uniform set as TSL uniform nodes (static projection, Equal Earth, unit radius). */
@@ -60,6 +67,7 @@ export function createPlanetMorphUniforms(): IPlanetMorphUniforms {
     uMapHeight: uniform(1),
     uRadius: uniform(1),
     uProjectionType: uniform(1),
+    uBodyCentreScene: uniform(new Vector3(0, 0, 0)),
   };
 }
 
@@ -172,6 +180,7 @@ export function planetMorphGraph(
   const mapWidth = uniforms.uMapWidth as any;
   const mapHeight = uniforms.uMapHeight as any;
   const projectionType = uniforms.uProjectionType as any;
+  const bodyCentreScene = uniforms.uBodyCentreScene as any;
 
   const vertexAttributes = ['position', 'normal', 'aFlatPos', 'aFlatNorm'];
   const aFlatPos = attribute('aFlatPos', 'vec3' as const);
@@ -186,8 +195,22 @@ export function planetMorphGraph(
 
   const dynamic = mode.greaterThan(0.5);
 
-  // Dynamic basis: project the sphere direction in the tracked frame.
-  const dir = aSphereNorm;
+  // Dynamic basis: project the radial direction in the tracked frame. It is the body-fixed position
+  // normalised, not `aSphereNorm`: on terrain that is the surface normal, which tilts with relief.
+  // (A fresh expression, not `batchOffset` below: that variable must stay where it was first read.)
+  // A `toVar` so it is evaluated while the positionNode builds, when `positionLocal` is still the unmorphed
+  // batched position; an inline expression is re-read later by the varyings, after `positionNode` replaced it.
+  // Streamed tiles store `aSpherePos`/`aFlatPos` relative to the patch centre, which the batch/mesh translation
+  // restores, so the absolute direction adds it back and the absolute map position takes it off again.
+  const batchShift = positionLocal.sub(positionGeometry).toVar('planetDynBatchShift');
+  // The batch matrix holds `centerWorldM - batchAnchor` and the anchor (it follows the camera) sits in
+  // `modelWorldMatrix`, so local positions are anchor-relative: lift through the model matrix to get the
+  // patch's body-fixed offset (0 when the worker sets no render origin).
+  const bodyShift = modelWorldMatrix
+    .mul(vec4(batchShift, 1))
+    .xyz.sub(bodyCentreScene)
+    .toVar('planetDynBodyShift');
+  const dir = normalize(aSpherePos.add(bodyShift)).toVar('planetRadialDir');
   const projLon = seamProjectedLon(dir, forward, right);
   const projLat = asin(clamp(dot(dir, up), -1, 1));
   const flatXY = select(
@@ -195,7 +218,7 @@ export function planetMorphGraph(
     equirectangularFlat(projLon, projLat, mapWidth, mapHeight),
     equalEarthFlat(projLon, projLat, mapWidth),
   );
-  const dynFlatPos = vec3(flatXY.x, flatXY.y, aFlatPos.z);
+  const dynFlatPos = vec3(flatXY.x.sub(bodyShift.x), flatXY.y.sub(bodyShift.y), aFlatPos.z);
   const flatPos = select(dynamic, dynFlatPos, aFlatPos);
   const flatNorm = select(dynamic, vec3(0, 0, 1), aFlatNorm);
 
@@ -215,7 +238,8 @@ export function planetMorphGraph(
   const morphedNormal = normalize(mix(aSphereNorm, flatNorm, morph));
 
   const vProjLon: any = varying(select(dynamic, projLon, float(0)), 'vProjLon');
-  const vSeamCull: any = varying(cull, 'vSeamCull');
+  // Constant 0 without aOtherDir attributes: do not spend an inter-stage slot (16 max) on it.
+  const vSeamCull: any = seamCullAttributes ? varying(cull, 'vSeamCull') : float(0);
   const vSphereNorm: any = varying(aSphereNorm, 'vSphereNorm');
   const vMorphedLocal: any = varying(morphedLocal, 'vMorphedLocal');
   // Snapshot the batch translation (`positionLocal` is still batched-but-unmorphed here), so later reads
@@ -233,12 +257,14 @@ export function planetMorphGraph(
   // longitude of the interpolated direction by up to a full turn, at any triangle size. Inside an ordinary
   // triangle the two agree to a few hundredths of a radian. Near the projection pole longitude changes fast
   // and linear interpolation is legitimately off, so that cap is exempt.
-  const trueLon = seamProjectedLon(vSphereNorm, forward, right);
+  // `vBodyFixedLocal` is anchor-relative; `modelWorldMatrix` is a uniform, so lift it here (no extra varying).
+  const bodyDirFrag = modelWorldMatrix.mul(vec4(vBodyFixedLocal, 1)).xyz.sub(bodyCentreScene);
+  const trueLon = seamProjectedLon(bodyDirFrag, forward, right);
   const lonMismatch = vProjLon
     .sub(trueLon)
     .abs()
     .greaterThan(SEAM_LON_MISMATCH)
-    .and(dot(normalize(vSphereNorm), up).abs().lessThan(SEAM_POLE_EXEMPT));
+    .and(dot(normalize(bodyDirFrag), up).abs().lessThan(SEAM_POLE_EXEMPT));
   const seamSpan = vSeamCull.greaterThan(0.5).or(lonMismatch);
   const discardFragment = cullActive.and(seamSpan.or(fw.greaterThan(2.8)));
   const discardShadow = cullActive.and(seamSpan);

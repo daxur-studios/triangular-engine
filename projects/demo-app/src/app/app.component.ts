@@ -1,6 +1,7 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { CatalogCaptureComponent } from './shared/catalog-thumbnails/catalog-capture.component';
+import { ThemeService } from './theme/theme.service';
 
 @Component({
   selector: 'app-root',
@@ -11,4 +12,7 @@ import { CatalogCaptureComponent } from './shared/catalog-thumbnails/catalog-cap
     class: 'flex-page',
   },
 })
-export class AppComponent {}
+export class AppComponent {
+  /** Injected so the theme is applied once at startup, before any routed page reads it. */
+  private readonly themeService = inject(ThemeService);
+}

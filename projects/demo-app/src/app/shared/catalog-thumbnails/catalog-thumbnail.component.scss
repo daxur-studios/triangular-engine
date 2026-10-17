@@ -4,7 +4,7 @@
   aspect-ratio: 16 / 9;
   overflow: hidden;
   border-radius: .5rem;
-  background: #111e28;
+  background: var(--mat-sys-surface-container-highest);
 }
 
 img { width: 100%; height: 100%; object-fit: cover; }
@@ -12,7 +12,7 @@ img { width: 100%; height: 100%; object-fit: cover; }
   position: absolute;
   inset-inline: .5rem;
   bottom: .5rem;
-  color: #b4c9d7;
+  color: var(--mat-sys-on-surface-variant);
   font-size: .7rem;
   text-align: center;
 }

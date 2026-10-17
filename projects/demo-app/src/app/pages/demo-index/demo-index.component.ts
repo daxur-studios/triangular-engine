@@ -3,10 +3,12 @@ import {
   Component,
   computed,
   HostListener,
+  inject,
   signal,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { CatalogThumbnailComponent } from '../../shared/catalog-thumbnails/catalog-thumbnail.component';
+import { ThemeService } from '../../theme/theme.service';
 
 export type DemoTier = 'gem' | 'lab' | 'archived';
 export type DemoSort = 'default' | 'newest' | 'oldest' | 'title';
@@ -959,11 +961,19 @@ export class DemoIndexComponent {
   readonly categories = CATEGORIES;
   readonly demos = DEMOS;
 
+  /** Active theme, driven by the app-wide ThemeService. */
+  protected readonly themeService = inject(ThemeService);
+
   readonly searchQuery = signal('');
   readonly selectedTier = signal<'all' | DemoTier>('all');
   readonly selectedCategory = signal<string>('all');
   readonly selectedTag = signal<string>('all');
   readonly selectedSort = signal<DemoSort>(DEFAULT_SORT);
+
+  /** Switch the demo app between light and dark themes. */
+  toggleTheme(): void {
+    this.themeService.toggle();
+  }
 
   /** All unique entry point tags with demo counts. */
   readonly allTags = computed<readonly TagWithCount[]>(() => {

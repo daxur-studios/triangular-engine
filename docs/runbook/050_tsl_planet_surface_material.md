@@ -189,6 +189,10 @@ material: culled with the mask, drawn without it.
   only in dynamic mode, costs one `atan` per fragment, and needs no pipeline change. **Not yet verified visually** on
   streamed tiles; the threshold and the polar exemption may need tuning. The GLSL path is unchanged (its streaming
   view has no dynamic mode).
+- **Root cause of the shards at the default centre:** dynamic mode projected `aSphereNorm`, which on streamed terrain tiles
+  is the surface normal (it tilts with relief), not the radial direction. It now projects the normalised body-fixed
+  position (`vRadialDir`). The GLSL material still projects `aSphereNorm`, which is probably why its dynamic mode is also
+  wrong on terrain (not changed: the GLSL patches are out of scope). Unverified on streamed tiles until checked visually.
 - `setPlanetProjectionCentre(morph, { lonDeg, latDeg } | null)` writes the whole basis and the mode, so a page does not
   build the vectors itself (a spec covers it).
 - The sun-occlusion and emissive stacks exist in the API but sun occlusion is not yet wired into lighting (Phase 4).

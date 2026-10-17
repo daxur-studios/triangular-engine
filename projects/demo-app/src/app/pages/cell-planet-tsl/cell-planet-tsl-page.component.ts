@@ -14,12 +14,21 @@ import {
   Mesh,
   Vector2,
 } from 'three';
+import { float, mix, uniform } from 'three/tsl';
 import type { Material } from 'three/webgpu';
 import {
   EngineModule,
   EngineService,
   RaycastOrbitControlsComponent,
 } from 'triangular-engine';
+import {
+  AtmosphereBackdrop,
+  AtmosphereGpuModel,
+  AtmosphereSkyViewLut,
+  PlanetAtmosphereBinding,
+  createAtmospherePreset,
+  type PhysicalAtmosphereProfile,
+} from 'triangular-engine/atmosphere';
 import {
   cellLookupLayer,
   macroVariationLayer,
@@ -70,6 +79,8 @@ const BACKEND: 'webgpu' | 'webgl2' =
   query.get('backend') === 'webgl2' ? 'webgl2' : 'webgpu';
 const ANTIALIAS = query.get('aa') === '1';
 const TILES = query.get('tiles') !== '0';
+/** `?atmosphere=0` leaves the material on its stock lighting (the atmosphere is built once, at setup). */
+const ATMOSPHERE = query.get('atmosphere') !== '0';
 const MACRO: 'off' | 'bodyFixed' | 'morphed' =
   query.get('macro') === 'off'
     ? 'off'
@@ -274,6 +285,69 @@ const MACRO: 'off' | 'bodyFixed' | 'morphed' =
       <p class="row">
         <button (click)="cycleBorderStyle()">frame: {{ borderStyle() }}</button>
       </p>
+      @if (atmosphere) {
+        <details open>
+        <summary>Atmosphere</summary>
+        <p class="row">
+          <label
+            ><input
+              type="checkbox"
+              [checked]="atmosphereOn()"
+              (change)="setAtmosphere($event)"
+            />
+            atmosphere (sphere only: fades out as the map unrolls)</label
+          >
+        </p>
+        <label
+          >sun longitude {{ sunLongitude() }}°
+          <input
+            type="range"
+            min="-180"
+            max="180"
+            step="1"
+            [value]="sunLongitude()"
+            (input)="sunLongitude.set(+$any($event.target).value)"
+          />
+        </label>
+        <label
+          >sun latitude {{ sunLatitude() }}°
+          <input
+            type="range"
+            min="-80"
+            max="80"
+            step="1"
+            [value]="sunLatitude()"
+            (input)="sunLatitude.set(+$any($event.target).value)"
+          />
+        </label>
+        <label
+          >exposure {{ exposure() }}
+          <input
+            type="range"
+            min="1"
+            max="30"
+            step="0.5"
+            [value]="exposure()"
+            (input)="exposure.set(+$any($event.target).value)"
+          />
+        </label>
+        <label
+          >air height {{ heightLabel() }} (rebakes on release)
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.005"
+            [value]="heightSlider()"
+            (input)="heightSlider.set(+$any($event.target).value)"
+            (change)="applyHeight()"
+          />
+        </label>
+        <p class="row">
+          <button (click)="resetHeight()">preset height</button>
+        </p>
+        </details>
+      }
       <p>
         Tiles {{ tileStats().resident }} (queued {{ tileStats().queued }}, max
         L{{ tileStats().maxLevel }})
@@ -331,6 +405,14 @@ export class CellPlanetTslPageComponent {
   readonly borderStyle = signal<'simple' | 'cartographic' | 'tactical'>(
     'cartographic',
   );
+  readonly atmosphere = ATMOSPHERE;
+  readonly atmosphereOn = signal(true);
+  readonly sunLongitude = signal(40);
+  readonly sunLatitude = signal(15);
+  readonly exposure = signal(8);
+  /** Air height as a fraction of the radius; `undefined` keeps the preset's (the terrain here is exaggerated, so it can be raised). */
+  readonly thickness = signal<number | undefined>(undefined);
+  readonly heightSlider = signal(0.5);
   readonly tileStats = signal({ resident: 0, queued: 0, maxLevel: 0 });
   readonly aa = ANTIALIAS;
   readonly radius = WORLD_SIZE_TIER_RADIUS_M.medium;
@@ -372,6 +454,14 @@ export class CellPlanetTslPageComponent {
     positionSpace: MACRO === 'bodyFixed' ? 'bodyFixed' : 'morphed',
   });
   private readonly drawingBuffer = new Vector2();
+  /** 1 = atmosphere fully on; the page sets it to zero when the toggle is off or the globe has unrolled. */
+  private readonly atmosphereMix = uniform(1);
+  private atmosphereParts?: {
+    model: AtmosphereGpuModel;
+    skyView: AtmosphereSkyViewLut;
+    backdrop: AtmosphereBackdrop;
+    binding: PlanetAtmosphereBinding;
+  };
   private readonly ocean = planetOceanMaterial({ morph: this.surface.morph });
   private oceanMesh?: Mesh;
   private readonly mapBorder = planetMapBorderMaterial(this.surface.morph, {
@@ -518,7 +608,9 @@ export class CellPlanetTslPageComponent {
     }
     this.cellLookup.opacity.value = 0.72;
     this.addOceanAndFrame();
+    if (ATMOSPHERE) this.addAtmosphere();
     this.engine.beforeRender$.subscribe(() => {
+      this.syncAtmosphere();
       // The previous frame's count; `render.calls` is the classic name, `drawCalls` the WebGPU one.
       const info = (this.engine.renderer as any).info?.render;
       const calls = Number(info?.drawCalls ?? info?.calls ?? 0);
@@ -599,6 +691,13 @@ export class CellPlanetTslPageComponent {
     };
     this.destroyRef.onDestroy(() => {
       this.worker.terminate();
+      const parts = this.atmosphereParts;
+      if (parts) {
+        this.engine.scene.remove(parts.backdrop.mesh);
+        parts.backdrop.dispose();
+        parts.skyView.dispose();
+        parts.model.dispose();
+      }
       this.streaming.dispose();
       this.cellLookup.dispose();
       this.surface.dispose();
@@ -675,6 +774,90 @@ export class CellPlanetTslPageComponent {
     this.mapBorderMesh.renderOrder = 5;
     this.mapBorderMesh.frustumCulled = false;
     this.engine.scene.add(this.mapBorderMesh);
+  }
+
+  /**
+   * Plan 049 Phase 2b on the cell planet: the stock lighting and haze are replaced by the atmosphere's, and the
+   * sky and limb are drawn behind the globe. The stages model a sphere, so both fade out as the globe unrolls
+   * (`atmosphereMix` follows `1 - morph`); mid-morph haze is Phase 3. The planet is the scene's origin, so the
+   * scene stands in for its transform, and one world unit is a metre.
+   */
+  private addAtmosphere(): void {
+    const model = new AtmosphereGpuModel(this.atmosphereProfile());
+    const skyView = new AtmosphereSkyViewLut(model);
+    const backdrop = new AtmosphereBackdrop(model, { skyView });
+    backdrop.groundEnabled.value = 0;
+    backdrop.sunDiscStrength.value = 1;
+    const binding = new PlanetAtmosphereBinding(model, { radiusUnits: this.radius });
+    const lighting = binding.lighting();
+    const perspective = binding.perspective();
+    const amount = this.atmosphereMix;
+    this.surface.setLightingStage({
+      id: 'atmosphere',
+      stage: (context, input) => mix(input.color, lighting(context, input), float(amount)),
+    });
+    this.surface.setAtmosphereStage({
+      id: 'atmosphere',
+      stage: (context, color) => mix(color, perspective(context, color), float(amount)),
+    });
+    this.engine.scene.add(backdrop.mesh);
+    this.atmosphereParts = { model, skyView, backdrop, binding };
+  }
+
+  private atmosphereProfile(): PhysicalAtmosphereProfile {
+    const profile = createAtmospherePreset('earth', { radiusM: this.radius, thickness: this.thickness() });
+    if (profile.kind !== 'physical') throw new Error('Expected a physical atmosphere profile');
+    return profile;
+  }
+
+  private sliderToThickness(v: number): number {
+    return 0.002 * Math.pow(500, v);
+  }
+
+  heightLabel(): string {
+    const t = this.thickness() ?? this.sliderToThickness(this.heightSlider());
+    const m = t * this.radius;
+    const length = m < 1000 ? `${m.toFixed(0)} m` : `${(m / 1000).toFixed(m < 1e5 ? 1 : 0)} km`;
+    return `${this.thickness() === undefined ? 'preset ' : ''}${(t * 100).toFixed(t < 0.1 ? 2 : 0)}% of radius = ${length}`;
+  }
+
+  applyHeight(): void {
+    this.thickness.set(this.sliderToThickness(this.heightSlider()));
+    this.rebakeAtmosphere();
+  }
+
+  resetHeight(): void {
+    this.thickness.set(undefined);
+    this.rebakeAtmosphere();
+  }
+
+  private rebakeAtmosphere(): void {
+    const parts = this.atmosphereParts;
+    if (!parts) return;
+    parts.model.setProfile(this.atmosphereProfile());
+    parts.binding.refreshScale();
+  }
+
+  /** Runs after the orbit controls have settled, so the haze and the sky see the camera the frame is drawn with. */
+  private syncAtmosphere(): void {
+    const parts = this.atmosphereParts;
+    const renderer: any = this.engine.renderer;
+    const camera = this.engine.camera;
+    if (!parts || !renderer?.initialized || !camera) return;
+    const morph = this.morphProgress();
+    const amount = this.atmosphereOn() ? Math.max(0, 1 - morph) : 0;
+    this.atmosphereMix.value = amount;
+    parts.backdrop.mesh.visible = amount > 0.5;
+    const lon = (this.sunLongitude() * Math.PI) / 180;
+    const lat = (this.sunLatitude() * Math.PI) / 180;
+    parts.binding.setSunBody(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));
+    parts.binding.exposure.value = this.exposure();
+    parts.binding.sync(camera, this.engine.scene, parts.backdrop);
+    if (parts.backdrop.mesh.visible) parts.backdrop.update(renderer, camera);
+  }
+
+  setAtmosphere(event: Event): void {
+    this.atmosphereOn.set((event.target as HTMLInputElement).checked);
   }
 
   setOcean(event: Event): void {

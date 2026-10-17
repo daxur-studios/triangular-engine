@@ -387,3 +387,16 @@ morph at 0 (`/atmosphere-planet`). The cell-planet streaming demo and the eclips
 - **Open:** the maintainer's visual check (dusk on the ground, low orbit, the 64 km vs Earth sizes, Mars air), timing of the
   per-fragment march on a real GPU, the horizon view from the ground (the demo's view buttons look straight down), the
   `/planet-material-extensions` eclipse with the atmosphere on, the `cell-planet-tsl` demo, and the gate shots at `m = 0`.
+
+### Cell planet wiring (2026-10-17)
+
+- `/atmosphere-planet`: the maintainer's visual check passed, and fast camera rotation showed the atmosphere fading because it
+  was updated on `tick$`, before the orbit controls moved the camera. It now updates on `beforeRender$`; fast rotation is
+  clean. A "Horizon (on the ground)" camera view was added.
+- `/cell-planet-tsl` now fills the lighting and atmosphere stages with `PlanetAtmosphereBinding` and draws the backdrop behind
+  the globe (`?atmosphere=0` leaves the stock lighting). Both stages are blended by a uniform equal to `1 - morph`, and the
+  backdrop is hidden past `morph = 0.5`, since the stages model a sphere: mid-morph haze is Phase 3. The scene stands in for
+  the planet transform (the planet is at the origin) and one world unit is a metre. The ocean shell, map frame and grid lines
+  have their own materials and are not hazed yet.
+- Not yet checked on a real GPU: the browser pane renders at about 1 fps, too slow for the streamed tiles to arrive, so only
+  the maintainer's look at `m = 0` is outstanding (cells, macro variation, terrain relief losing its normal-map shading).

@@ -1,0 +1,105 @@
+@use '@angular/material' as mat;
+@use './_theme-colors.scss' as theme-colors;
+
+/** Brand typography stack, matching the fonts loaded in index.html. */
+$plain-font-family: 'IBM Plex Sans', 'Helvetica Neue', sans-serif;
+
+/** Monospace stack used by catalog metadata chips and code-like labels. */
+$mono-font-family: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+@include mat.core();
+
+:root {
+  --app-font-mono: #{$mono-font-family};
+}
+
+body {
+  background: var(--mat-sys-surface);
+  color: var(--mat-sys-on-surface);
+  font-family: $plain-font-family;
+}
+
+// Baseline: dark is the default theme, so an un-classed <html> paints dark before
+// ThemeService runs — avoiding a light flash on first load.
+html,
+html.app-dark-theme {
+  color-scheme: dark;
+  @include mat.theme(
+    (
+      color: (
+        theme-type: dark,
+        primary: theme-colors.$primary-palette,
+        tertiary: theme-colors.$tertiary-palette,
+      ),
+      typography: (
+        brand-family: $plain-font-family,
+        plain-family: $plain-font-family,
+        bold-weight: 700,
+        medium-weight: 500,
+      ),
+      density: 0,
+    )
+  );
+
+  // Overlays — translucent white lifts surfaces on dark backgrounds.
+  --app-color-overlay-hover: rgba(255, 255, 255, 0.06);
+  --app-color-overlay-shadow: rgba(0, 0, 0, 0.35);
+
+  // Demo Hub backdrop glows.
+  --app-color-hub-glow-accent: rgba(91, 157, 174, 0.15);
+  --app-color-hub-glow-deep: rgba(45, 95, 110, 0.1);
+
+  // Catalog tier semantics.
+  --app-color-gem: #fbbf24;
+  --app-color-gem-bg: rgba(251, 191, 36, 0.15);
+  --app-color-gem-border: rgba(251, 191, 36, 0.3);
+  --app-color-lab: #38bdf8;
+  --app-color-lab-bg: rgba(56, 189, 248, 0.12);
+  --app-color-lab-border: rgba(56, 189, 248, 0.25);
+  --app-color-archived: #94a3b8;
+  --app-color-archived-bg: rgba(148, 163, 184, 0.1);
+  --app-color-archived-border: rgba(148, 163, 184, 0.2);
+  --app-color-jolt: #c084fc;
+  --app-color-jolt-bg: rgba(168, 85, 247, 0.12);
+  --app-color-jolt-border: rgba(168, 85, 247, 0.25);
+}
+
+html.app-light-theme {
+  color-scheme: light;
+  @include mat.theme(
+    (
+      color: (
+        theme-type: light,
+        primary: theme-colors.$primary-palette,
+        tertiary: theme-colors.$tertiary-palette,
+      ),
+      typography: (
+        brand-family: $plain-font-family,
+        plain-family: $plain-font-family,
+        bold-weight: 700,
+        medium-weight: 500,
+      ),
+      density: 0,
+    )
+  );
+
+  // Overlays — translucent black deepens surfaces on light backgrounds.
+  --app-color-overlay-hover: rgba(0, 0, 0, 0.04);
+  --app-color-overlay-shadow: rgba(0, 0, 0, 0.12);
+
+  --app-color-hub-glow-accent: rgba(121, 200, 216, 0.22);
+  --app-color-hub-glow-deep: rgba(79, 163, 184, 0.12);
+
+  --app-color-gem: #a16207;
+  --app-color-gem-bg: rgba(251, 191, 36, 0.18);
+  --app-color-gem-border: rgba(161, 98, 7, 0.35);
+  --app-color-lab: #0369a1;
+  --app-color-lab-bg: rgba(56, 189, 248, 0.15);
+  --app-color-lab-border: rgba(3, 105, 161, 0.3);
+  --app-color-archived: #475569;
+  --app-color-archived-bg: rgba(100, 116, 139, 0.12);
+  --app-color-archived-border: rgba(100, 116, 139, 0.28);
+  --app-color-jolt: #7e22ce;
+  --app-color-jolt-bg: rgba(168, 85, 247, 0.14);
+  --app-color-jolt-border: rgba(126, 34, 206, 0.3);
+}

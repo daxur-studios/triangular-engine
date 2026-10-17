@@ -1,18 +1,14 @@
-body,
-html {
-  margin: 0;
-  width: 100%;
+@use './app/theme/theme.scss';
+
+html,
+body {
   height: 100%;
-  min-height: 100%;
-  background: #091116;
-  min-height: 100%;
-  background: #091116;
-  min-height: 100%;
-  background: #091116;
+  margin: 0;
 }
+
 .flex-page {
   display: flex;
   flex-direction: column;
+  flex: 1 1 100%;
   overflow: auto;
-  flex: 1 1;
 }
