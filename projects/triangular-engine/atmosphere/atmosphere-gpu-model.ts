@@ -303,13 +303,25 @@ export class AtmosphereGpuModel {
     return t.mul(lit);
   }
 
+  /**
+   * Texture coordinates into an irradiance or multi-scatter table (x = 0.5 + 0.5 muSun, y = altitude / top). The tables are
+   * baked on their ends (first row = altitude 0), so the unit range maps through `(0.5 + x (size - 1)) / size`.
+   */
+  private edgeAlignedUv(muSun: any, alt: any, size: readonly number[]): any {
+    const [w, h] = size;
+    const x = clamp(muSun.mul(0.5).add(0.5), 0, 1);
+    const y = clamp(alt.div(this.uTopAltitude), 0, 1);
+    return vec2(x.mul(w - 1).add(0.5).div(w), y.mul(h - 1).add(0.5).div(h));
+  }
+
+  /** The multi-scatter term `psi` at altitude `alt` and sun-zenith cosine `muSun`, read from its table. */
+  multiScatterAt(alt: any, muSun: any): any {
+    return texture(this.multiScatterTexture, this.edgeAlignedUv(muSun, alt, this.lutSizes.m), 0).rgb;
+  }
+
   /** Sky irradiance on an upward-facing surface at altitude `alt`, relative to the sun irradiance. */
   skyIrradiance(alt: any, muSun: any): any {
-    const uv = vec2(
-      muSun.mul(0.5).add(0.5),
-      clamp(alt.div(this.uTopAltitude), 0, 1),
-    );
-    return texture(this.irradianceTexture, uv, 0).rgb;
+    return texture(this.irradianceTexture, this.edgeAlignedUv(muSun, alt, this.lutSizes.i), 0).rgb;
   }
 
   /**
@@ -439,14 +451,7 @@ export class AtmosphereGpuModel {
           // The horizon direction: -rho / r (rho = sqrt(r^2 - R^2)), the lowest sun the planet does not block.
           const muSunLit = input.unshadowed ? max(muSun, sqrt(max(s, 0)).div(r).negate()) : muSun;
           const sunT = this.sunTransmittance(s, r, muSunLit);
-          const psi = texture(
-            this.multiScatterTexture,
-            vec2(
-              muSun.mul(0.5).add(0.5),
-              clamp(alt.div(this.uTopAltitude), 0, 1),
-            ),
-            0,
-          ).rgb;
+          const psi = this.multiScatterAt(alt, muSun);
           const sourceSun = sunT.mul(scatR.mul(phaseR).add(scatM.mul(phaseM)));
           const sourceMulti = scat.mul(psi);
 
@@ -506,7 +511,7 @@ export class AtmosphereGpuModel {
       .mul(float(1).add(cosNu.mul(cosNu)))
       .div(pow(float(1).add(g2).sub(g.mul(cosNu).mul(2)), 1.5));
     const sunT = this.sunTransmittance(float(0), this.uRadius, muSun);
-    const psi = texture(this.multiScatterTexture, vec2(muSun.mul(0.5).add(0.5), 0), 0).rgb;
+    const psi = this.multiScatterAt(float(0), muSun);
     const source = sunT.mul(cR.mul(phaseR).add(cM.mul(phaseM))).add(cR.add(cM).mul(psi));
     // (1 - e^-tau) / tau per channel, by its series where tau is small.
     const series = float(1).sub(opticalDepth.mul(0.5)).add(opticalDepth.mul(opticalDepth).div(6));

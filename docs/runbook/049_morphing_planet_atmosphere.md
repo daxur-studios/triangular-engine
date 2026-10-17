@@ -508,3 +508,22 @@ An external agent reviewed `atmosphere/**` and the two atmosphere labs (commits 
 ### Untested paths the review found
 
 Sun azimuth changes on the sky-view table; `binding.sunVisibility`, the stage-3 input and `backdrop.opacity`; `perspective()` at `0 < morph <= 1` (the slab is only tested alone); horizon-straddling elevations in the sky-view spec (it skips -4° to +4°).
+
+### 2026-10-17 — Review fixes 1 to 5 done (atmosphere agent)
+
+All five confirmed findings are fixed, each with a spec (136 atmosphere specs pass):
+
+1. `AtmosphereSkyViewLut.lookup()` reads the horizontal sun direction from the live `model.sunDirection`; the table is still rendered with the frozen one. Spec: a new azimuth at the same elevation matches a freshly baked table with no re-render.
+2. The irradiance and multi-scatter tables are baked edge-aligned (`x / (w - 1)`, `y / (h - 1)`) and read through the same mapping on the CPU (`sampleIrradianceLut`, `sampleMultiScatteringTable`) and the GPU (`edgeAlignedUv`, `multiScatterAt`), so altitude 0 is a row of its own. Specs: the ground row is returned at altitude 0 on the CPU, it matches a direct hemisphere integral, and the GPU reads agree with the CPU.
+3. `lighting()` multiplies direct and sky light by both sun visibilities (the stage-3 input and `binding.sunVisibility`). Spec: either at 0 darkens the whole lit colour.
+4. `AtmosphereBackdrop` skips the reduced-resolution space pass while altitude, size, profile version, sun, frame, projection inverse and camera matrix are unchanged. Spec: counts the renders across each change.
+5. `perspective()` computes only the slab from `morph >= 0.999`, and `binding.update()` returns false there (so the pages need no guard of their own). Specs: no table re-render at morph 1, and a flat-map pixel is the same with or without a table. The four shadow-cut fetches in `lookup()` are not guarded: measure first.
+
+Open design items (maintainer's call, not done):
+- **The slab's minimum ray elevation** (`max(height, distance x 0.15)` from morph 0.33 up) raises the camera instead of capping the airmass; a low view of the map sees a higher camera than it has. Better: keep the true height and cap the column. Compare low views before and after.
+- **The backdrop crossfade**: the sky fades to black over morph 0.2 to 0.8 instead of crossfading to a flat-map sky as the plan says. Build the flat-pose sky, or fade by camera height above the slab.
+
+Notes:
+- `nearHazeFadeM` is validated on the profile but never applied on the GPU.
+- The planet must have unit scale: `sync()` converts the camera through `planet.worldToLocal` (scale included) while `cameraDistance` is world units times `metersPerUnit`. The pages pass the scene.
+- Not done from the review's smaller items: the camera-relative ray in the no-froxel fallback, the per-frame array in `AtmosphereAerialPerspectiveLut.isDirty()`.

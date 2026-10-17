@@ -1,7 +1,7 @@
-import { Fn, vec3, vec4 } from 'three/tsl';
+import { Fn, float, vec3, vec4 } from 'three/tsl';
 import { evaluateOnGpu } from '../planet-material/gpu-eval.testing';
 import { AtmosphereGpuModel } from './atmosphere-gpu-model';
-import { multiScatteringTableFromLut, sunTransmittanceFromLut } from './atmosphere-luts';
+import { multiScatteringTableFromLut, sampleIrradianceLut, sampleMultiScatterLut, sunTransmittanceFromLut } from './atmosphere-luts';
 import { earthAtmosphereProfile, marsAtmosphereProfile } from './atmosphere-presets';
 import { integrateRadiance, transmittanceAlong } from './atmosphere-reference-integrator';
 import { scaleAtmosphereProfile } from './atmosphere-scaling';
@@ -136,4 +136,28 @@ describe('AtmosphereGpuModel.march vs the CPU reference', () => {
       model.dispose();
     });
   }
+
+  it('reads the sky irradiance and the multi-scatter term at the ground like the CPU tables', async () => {
+    const model = new AtmosphereGpuModel(earthAtmosphereProfile(), SMALL);
+    const mus = [-0.3, 0, 0.2, 0.6, 1];
+    const rows = mus.map((mu) => [[mu, 0, 0, 0]]);
+    const read = (pick: 'irradiance' | 'psi') =>
+      evaluateOnGpu(rows, (at) =>
+        Fn(() => {
+          const a = at(0);
+          return vec4(pick === 'irradiance' ? model.skyIrradiance(float(0), a.x) : model.multiScatterAt(float(0), a.x), 1);
+        })(),
+      );
+    const irradiance = await read('irradiance');
+    const psi = await read('psi');
+    mus.forEach((mu, i) => {
+      const cpu = sampleIrradianceLut(model.luts, 0, mu);
+      const cpuPsi = sampleMultiScatterLut(model.luts, 0, mu);
+      for (let c = 0; c < 3; c++) {
+        expect(Math.abs(irradiance[i * 4 + c] - cpu[c])).withContext(`irradiance mu ${mu} channel ${c}`).toBeLessThan(0.01 * cpu[c] + 1e-4);
+        expect(Math.abs(psi[i * 4 + c] - cpuPsi[c])).withContext(`psi mu ${mu} channel ${c}`).toBeLessThan(0.01 * cpuPsi[c] + 1e-4);
+      }
+    });
+    model.dispose();
+  });
 });

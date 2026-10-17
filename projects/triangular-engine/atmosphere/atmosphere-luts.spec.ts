@@ -3,6 +3,7 @@ import { scaleAtmosphereProfile } from './atmosphere-scaling';
 import {
   atmosphereRadii,
   bakeAtmosphereLuts,
+  multiScatteringTableFromLut,
   sampleIrradianceLut,
   sampleMultiScatterLut,
   sampleTransmittanceLut,
@@ -12,7 +13,7 @@ import {
   transmittanceUnitCoords,
   unitRangeToTexcoord,
 } from './atmosphere-luts';
-import { sunTransmittance } from './atmosphere-reference-integrator';
+import { integrateRadiance, sunTransmittance } from './atmosphere-reference-integrator';
 import { PhysicalAtmosphereProfile } from './atmosphere-profile';
 
 describe('atmosphere LUT parameterization', () => {
@@ -76,6 +77,47 @@ describe('baked atmosphere LUTs', () => {
     expect(noon[1]).toBeLessThan(0.4);
     const night = sampleIrradianceLut(luts, 0, -0.4);
     expect(night[1]).toBeLessThan(0.01 * noon[1]);
+  });
+
+  it('reads the ground row at altitude 0, not the row above it', () => {
+    const small = bakeAtmosphereLuts(profile, { multiScatterSize: [16, 8], irradianceSize: [16, 8], multiScatterDirections: 24, irradianceDirections: 24 });
+    const { width } = small.irradiance;
+    for (const x of [0, 5, 11, 15]) {
+      const muSun = (x / (width - 1)) * 2 - 1;
+      const looked = sampleIrradianceLut(small, 0, muSun);
+      for (let c = 0; c < 3; c++) expect(looked[c]).toBeCloseTo(small.irradiance.data[x * 4 + c], 6);
+      const psi = sampleMultiScatterLut(small, 0, muSun);
+      const ms = small.multiScatter;
+      for (let c = 0; c < 3; c++) expect(psi[c]).toBeCloseTo(ms.data[x * 4 + c], 6);
+    }
+  });
+
+  it('matches a direct integral of the sky over the hemisphere at altitude 0', () => {
+    const table = multiScatteringTableFromLut(luts);
+    const origin: [number, number, number] = [0, profile.planetRadiusM, 0];
+    const directions = 256;
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    for (const muSun of [0.9, 0.5, 0.2]) {
+      const sunDir: [number, number, number] = [Math.sqrt(1 - muSun * muSun), muSun, 0];
+      const e = [0, 0, 0];
+      for (let i = 0; i < directions; i++) {
+        const cosTheta = (i + 0.5) / directions;
+        const sinTheta = Math.sqrt(1 - cosTheta * cosTheta);
+        const dir: [number, number, number] = [sinTheta * Math.cos(golden * i), cosTheta, sinTheta * Math.sin(golden * i)];
+        const { radiance } = integrateRadiance(profile, origin, dir, sunDir, {
+          steps: 48,
+          multipleScattering: table,
+          includeGround: false,
+          sunTransmittance: (p, s) => sunTransmittanceFromLut(luts, p, s),
+        });
+        for (let c = 0; c < 3; c++) e[c] += (radiance[c] / profile.sun.irradiance[c]) * cosTheta;
+      }
+      const looked = sampleIrradianceLut(luts, 0, muSun);
+      for (let c = 0; c < 3; c++) {
+        const reference = (e[c] * 2 * Math.PI) / directions;
+        expect(Math.abs(looked[c] - reference)).withContext(`muSun ${muSun} channel ${c}: lut ${looked[c]} vs integral ${reference}`).toBeLessThan(0.04 * reference + 1e-4);
+      }
+    }
   });
 
   it('keeps the multi-scatter term in step with a direct evaluation', () => {

@@ -188,9 +188,9 @@ function bakeIrradiance(
   const data = new Float32Array(width * height * 4);
   const golden = Math.PI * (3 - Math.sqrt(5));
   for (let y = 0; y < height; y++) {
-    const altitude = ((y + 0.5) / height) * profile.topAltitudeM;
+    const altitude = (y / Math.max(height - 1, 1)) * profile.topAltitudeM;
     for (let x = 0; x < width; x++) {
-      const muSun = ((x + 0.5) / width) * 2 - 1;
+      const muSun = (x / Math.max(width - 1, 1)) * 2 - 1;
       const sunDir: AtmosphereVec3 = [Math.sqrt(Math.max(0, 1 - muSun * muSun)), muSun, 0];
       const origin: AtmosphereVec3 = [0, profile.planetRadiusM + altitude, 0];
       const e: [number, number, number] = [0, 0, 0];
@@ -261,5 +261,8 @@ export function sampleMultiScatterLut(luts: AtmosphereLuts, altitudeM: number, m
 
 /** Sky irradiance on an upward-facing surface, relative to the sun irradiance. */
 export function sampleIrradianceLut(luts: AtmosphereLuts, altitudeM: number, muSun: number): AtmosphereRgb {
-  return sampleImage(luts.irradiance, 0.5 + 0.5 * muSun, altitudeM / luts.profile.topAltitudeM);
+  const { width, height } = luts.irradiance;
+  const x = Math.min(Math.max(0.5 + 0.5 * muSun, 0), 1);
+  const y = Math.min(Math.max(altitudeM / luts.profile.topAltitudeM, 0), 1);
+  return sampleImage(luts.irradiance, unitRangeToTexcoord(x, width), unitRangeToTexcoord(y, height));
 }

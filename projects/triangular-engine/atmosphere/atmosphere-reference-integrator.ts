@@ -259,7 +259,10 @@ export function computeMultiScattering(
   return { psi, l2, fms };
 }
 
-/** Multi-scattering term baked on a grid: x = 0.5 + 0.5 * muSun, y = altitude / top. */
+/**
+ * Multi-scattering term baked on a grid: x = 0.5 + 0.5 * muSun, y = altitude / top. The first and last rows and
+ * columns sit on the range's ends (edge-aligned, like the transmittance table), so altitude 0 is a row of its own.
+ */
 export interface MultiScatteringTable {
   readonly width: number;
   readonly height: number;
@@ -276,9 +279,9 @@ export function buildMultiScatteringTable(
 ): MultiScatteringTable {
   const data = new Float64Array(width * height * 3);
   for (let y = 0; y < height; y++) {
-    const altitude = ((y + 0.5) / height) * profile.topAltitudeM;
+    const altitude = (y / Math.max(height - 1, 1)) * profile.topAltitudeM;
     for (let x = 0; x < width; x++) {
-      const muSun = ((x + 0.5) / width) * 2 - 1;
+      const muSun = (x / Math.max(width - 1, 1)) * 2 - 1;
       const { psi } = computeMultiScattering(profile, altitude, muSun, options);
       data.set(psi, (y * width + x) * 3);
     }
@@ -286,10 +289,10 @@ export function buildMultiScatteringTable(
   return { width, height, topAltitudeM: profile.topAltitudeM, data };
 }
 
-/** Bilinear lookup with edge clamping (texel centres at (i + 0.5) / size). */
+/** Bilinear lookup with edge clamping on the edge-aligned grid. */
 export function sampleMultiScatteringTable(table: MultiScatteringTable, altitudeM: number, muSun: number): AtmosphereRgb {
-  const fx = Math.min(Math.max((0.5 + 0.5 * muSun) * table.width - 0.5, 0), table.width - 1);
-  const fy = Math.min(Math.max((altitudeM / table.topAltitudeM) * table.height - 0.5, 0), table.height - 1);
+  const fx = Math.min(Math.max((0.5 + 0.5 * muSun) * (table.width - 1), 0), table.width - 1);
+  const fy = Math.min(Math.max((altitudeM / table.topAltitudeM) * (table.height - 1), 0), table.height - 1);
   const x0 = Math.floor(fx);
   const y0 = Math.floor(fy);
   const x1 = Math.min(x0 + 1, table.width - 1);

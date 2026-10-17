@@ -117,6 +117,9 @@ export class AtmosphereBackdrop {
   private spaceQuad?: QuadMesh;
   private spaceMaterial?: NodeMaterial;
   private readonly drawingSize = new Vector2();
+  /** What the last space pass was rendered with; an identical frame skips the render. */
+  private readonly spaceSignature: number[] = [];
+  private spaceProfileVersion = -1;
 
   constructor(
     readonly model: AtmosphereGpuModel,
@@ -314,6 +317,21 @@ export class AtmosphereBackdrop {
       this.spaceSize.set(w, h);
     }
     camera.updateMatrixWorld();
+    // Idle in orbit: the same altitude, size, profile, sun, frame and camera give the same picture.
+    const sun = this.model.sunDirection.value;
+    const next = [
+      this.altitude.value, w, h, sun.x, sun.y, sun.z,
+      ...camera.projectionMatrixInverse.elements, ...camera.matrixWorld.elements, ...this.frame.value.elements,
+    ];
+    const unchanged =
+      this.spaceReady.value > 0.5 &&
+      this.model.profileVersion === this.spaceProfileVersion &&
+      next.length === this.spaceSignature.length &&
+      next.every((v, i) => v === this.spaceSignature[i]);
+    if (unchanged) return;
+    this.spaceSignature.length = 0;
+    this.spaceSignature.push(...next);
+    this.spaceProfileVersion = this.model.profileVersion;
     this.spaceInvProjection.value.copy(camera.projectionMatrixInverse);
     this.spaceCameraWorld.value.copy(camera.matrixWorld);
 

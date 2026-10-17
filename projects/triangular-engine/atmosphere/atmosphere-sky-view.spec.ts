@@ -107,4 +107,36 @@ describe('AtmosphereSkyViewLut', () => {
     lut.dispose();
     model.dispose();
   });
+
+  it('follows a new sun azimuth at the same elevation without a re-render', async () => {
+    const renderer = await getEvalRenderer();
+    const model = new AtmosphereGpuModel(earthAtmosphereProfile(), SMALL);
+    const options = { width: 64, height: 36, steps: 16 };
+    model.setSunDirection(...sunFrom(20, 0));
+    const stale = new AtmosphereSkyViewLut(model, options);
+    expect(stale.update(renderer, 2)).toBeTrue();
+    model.setSunDirection(...sunFrom(20, 120));
+    expect(stale.update(renderer, 2)).toBeFalse();
+    // Reference: a table baked for the new azimuth.
+    const fresh = new AtmosphereSkyViewLut(model, options);
+    expect(fresh.update(renderer, 2)).toBeTrue();
+
+    const rows = [sunFrom(25, 120), sunFrom(10, 100), sunFrom(30, 0)].map((d) => [[d[0], d[1], d[2], 0]]);
+    const read = (lut: AtmosphereSkyViewLut) =>
+      evaluateOnGpu(rows, (at) =>
+        Fn(() => {
+          const a = at(0);
+          return vec4(lut.lookup(vec3(a.x, a.y, a.z)).radiance, 1);
+        })(),
+      );
+    const actual = await read(stale);
+    const expected = await read(fresh);
+    for (let i = 0; i < actual.length; i++) {
+      if (i % 4 === 3) continue;
+      expect(Math.abs(actual[i] - expected[i])).withContext(`value ${i}: stale ${actual[i]} vs fresh ${expected[i]}`).toBeLessThan(0.03 * Math.abs(expected[i]) + 1e-4);
+    }
+    stale.dispose();
+    fresh.dispose();
+    model.dispose();
+  });
 });

@@ -7,6 +7,9 @@ import type { AtmosphereGpuModel } from './atmosphere-gpu-model';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/** From this `morph` on the planet counts as a flat map: only the slab haze is computed. */
+const FLAT_MAP_MORPH = 0.999;
+
 /**
  * The part of the planet material's context the stages read. Structural, so this entry point does not import
  * `triangular-engine/planet-material`; its `IPlanetContext` satisfies it.
@@ -175,9 +178,10 @@ export class PlanetAtmosphereBinding {
   /**
    * Renders the froxel table if the camera, the sun or the profile moved. Call once per frame after {@link sync},
    * outside a render pass (the same place as the backdrop's `update`). Returns true when it rendered; does nothing
-   * without `aerialPerspective`.
+   * without `aerialPerspective`, and once the map is flat (`morph` >= 0.999), where nothing reads the table.
    */
   update(renderer: WebGPURenderer): boolean {
+    if ((this.morph.value as number) >= FLAT_MAP_MORPH) return false;
     return (
       this.aerialPerspective?.update(renderer, {
         altitude: this.cameraAltitude.value as number,
@@ -193,8 +197,8 @@ export class PlanetAtmosphereBinding {
   }
 
   /**
-   * Stage 4 of the planet material: the surface relit from the atmosphere. `albedo x (sunT x N.L x sunVisibility +
-   * skyIrradiance) x sunIrradiance / pi x exposure`, with the sun and the sky read at the ground for the point's own
+   * Stage 4 of the planet material: the surface relit from the atmosphere. `albedo x (sunT x N.L +
+   * skyIrradiance) x sunVisibility x sunIrradiance / pi x exposure`, with the sun and the sky read at the ground for the point's own
    * sun angle (so it varies across the terminator and across a flat map). Replaces the PBR result, so the
    * scene's other lights and normal maps do not reach it; the emissive stack is added back.
    */
@@ -204,9 +208,12 @@ export class PlanetAtmosphereBinding {
       const up = normalize(context.sphereNormal);
       const muSun = dot(up, this.sunBody);
       const sunT = model.sunTransmittance(float(0), model.uRadius, muSun);
-      const direct = sunT.mul(max(muSun, 0)).mul(sunVisibility);
+      // Both eclipse inputs scale the direct light and the sky light: the stage-3 occluders (this surface's own) and the
+      // binding's (a planet-wide one, which also dims the haze and the sky behind it).
+      const visible = sunVisibility.mul(this.sunVisibility);
+      const direct = sunT.mul(max(muSun, 0));
       const sky = model.skyIrradiance(float(0), muSun);
-      const lit = surface.albedo.mul(direct.add(sky.mul(this.sunVisibility))).mul(model.uSunIrradiance).div(Math.PI).mul(this.exposure);
+      const lit = surface.albedo.mul(direct.add(sky).mul(visible)).mul(model.uSunIrradiance).div(Math.PI).mul(this.exposure);
       return emissive ? lit.add(emissive) : lit;
     };
   }
@@ -222,10 +229,16 @@ export class PlanetAtmosphereBinding {
     const spherical = this.sphericalPerspective();
     return (context, color) =>
       Fn(() => {
-        const out: any = spherical(context, color).toVar();
-        // The flat slab only costs anything while the planet is unrolling.
-        If(this.morph.greaterThan(0.001), () => {
-          out.assign(mix(out, this.slabPerspective(context, color), this.morph));
+        const out: any = color.toVar();
+        // Fully unrolled: the slab alone (the globe's lookup would be mixed out entirely). Otherwise the globe, and the
+        // slab only while the planet is unrolling.
+        If(this.morph.greaterThanEqual(FLAT_MAP_MORPH), () => {
+          out.assign(this.slabPerspective(context, color));
+        }).Else(() => {
+          out.assign(spherical(context, color));
+          If(this.morph.greaterThan(0.001), () => {
+            out.assign(mix(out, this.slabPerspective(context, color), this.morph));
+          });
         });
         return out;
       })();

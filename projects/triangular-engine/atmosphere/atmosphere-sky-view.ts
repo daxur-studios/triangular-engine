@@ -102,8 +102,7 @@ export class AtmosphereSkyViewLut {
   }
 
   /** Unit horizontal direction toward the sun (x, z), with a fallback when the sun is straight overhead. */
-  private sunHorizontal(): any {
-    const s = this.lutSunDirection;
+  private sunHorizontal(s: any): any {
     const l = length(vec2(s.x, s.z));
     return select(l.greaterThan(1e-4), vec2(s.x, s.z).div(l), vec2(0, 1));
   }
@@ -127,7 +126,7 @@ export class AtmosphereSkyViewLut {
         thetaH.sub(c.mul(c).mul(thetaH)),
       );
       const phi = sU.mul(sU).mul(Math.PI);
-      const sunH = this.sunHorizontal();
+      const sunH = this.sunHorizontal(this.lutSunDirection);
       const cp = cos(phi);
       const sp = sin(phi);
       const hx = sunH.x.mul(cp).sub(sunH.y.mul(sp));
@@ -158,7 +157,9 @@ export class AtmosphereSkyViewLut {
     const c = select(below, cBelow, cAbove);
     const tV = c.mul(0.5).add(0.5);
 
-    const sunH = this.sunHorizontal();
+    // The live sun, not the one the table was rendered with: the table is baked relative to the sun's horizontal
+    // direction, so a new azimuth at the same elevation needs no re-render.
+    const sunH = this.sunHorizontal(this.model.sunDirection);
     const dirH = normalize(vec2(dir.x, dir.z).add(vec2(1e-12, 0)));
     const phi = acos(clamp(dot(dirH, sunH), -1, 1));
     const sU = sqrt(phi.div(Math.PI));

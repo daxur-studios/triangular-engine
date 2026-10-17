@@ -1,4 +1,5 @@
 import { Object3D, PerspectiveCamera, Vector3 } from 'three';
+import { float } from 'three/tsl';
 import { PlanetSurfaceMaterial } from '../planet-material/planet-surface-material';
 import { getEvalRenderer } from '../planet-material/gpu-eval.testing';
 import { meshOf, renderRgba, triangleWith } from '../planet-material/render-eval.testing';
@@ -115,6 +116,33 @@ describe('PlanetAtmosphereBinding.update', () => {
     model.dispose();
   });
 
+  it('stops re-rendering the froxel table once the map is flat', async () => {
+    const renderer = await getEvalRenderer();
+    const model = smallPlanetModel();
+    const binding = new PlanetAtmosphereBinding(model, {
+      radiusUnits: 1,
+      aerialPerspective: { width: 8, height: 8, slices: 4, steps: 4 },
+    });
+    const planet = new Object3D();
+    const camera = new PerspectiveCamera();
+    camera.position.set(0, 0, 3);
+    binding.sync(camera, planet);
+    expect(binding.update(renderer)).toBeTrue();
+
+    binding.morph.value = 1;
+    camera.position.set(0, 0, 2.5);
+    binding.sync(camera, planet);
+    expect(binding.update(renderer)).toBeFalse();
+    expect(binding.aerialPerspective?.renderCount).toBe(1);
+
+    // Rolling back up picks the table up again, for the camera it has now.
+    binding.morph.value = 0.5;
+    expect(binding.update(renderer)).toBeTrue();
+    expect(binding.aerialPerspective?.renderCount).toBe(2);
+    binding.dispose();
+    model.dispose();
+  });
+
   it('does nothing without a table', async () => {
     const renderer = await getEvalRenderer();
     const model = smallPlanetModel();
@@ -165,6 +193,60 @@ describe('planet material atmosphere stages on the GPU', () => {
     // Air in front of the surface scatters blue light into the view and removes some of the red.
     expect(hazed[2] / hazed[0]).toBeGreaterThan(day[2] / day[0]);
 
+    model.dispose();
+  });
+
+  it('darkens both the direct light and the sky light with either sun visibility', async () => {
+    const model = smallPlanetModel();
+    const binding = new PlanetAtmosphereBinding(model, { radiusUnits: 1, steps: 16 });
+    binding.cameraBody.value.set(0, 0, 2 * RADIUS_M);
+    binding.cameraAltitude.value = RADIUS_M;
+    binding.metersPerUnit.value = RADIUS_M / 5;
+    binding.exposure.value = 4;
+    const make = (occluded: boolean) => {
+      const material = new PlanetSurfaceMaterial({ lighting: { id: 'atmosphere', stage: binding.lighting() } });
+      if (occluded) material.addSunOcclusion({ id: 'eclipse', occlusion: () => float(0) });
+      return material;
+    };
+    // Sun straight on: both the direct light and the sky light reach the surface. Sun behind the surface: only the (tiny) twilight sky.
+    binding.setSunBody(0, 0, 1);
+    const full = await pixel(make(false));
+    expect(full[0]).toBeGreaterThan(0);
+
+    binding.sunVisibility.value = 0;
+    const planetWide = await pixel(make(false));
+    expect(planetWide[0]).toBeLessThan(full[0] * 0.02);
+    expect(planetWide[1]).toBeLessThan(full[1] * 0.02);
+    expect(planetWide[2]).toBeLessThan(full[2] * 0.02);
+
+    binding.sunVisibility.value = 1;
+    const own = await pixel(make(true));
+    expect(own[0]).toBeLessThan(full[0] * 0.02);
+    expect(own[1]).toBeLessThan(full[1] * 0.02);
+    expect(own[2]).toBeLessThan(full[2] * 0.02);
+    model.dispose();
+  });
+
+  it('hazes a flat map from the slab alone, whether or not the globe has a table', async () => {
+    const model = smallPlanetModel();
+    const plain = new PlanetAtmosphereBinding(model, { radiusUnits: 1, steps: 16 });
+    const tabled = new PlanetAtmosphereBinding(model, { radiusUnits: 1, steps: 16, aerialPerspective: { width: 8, height: 8, slices: 4, steps: 4 } });
+    const results: number[][] = [];
+    for (const binding of [plain, tabled]) {
+      binding.cameraBody.value.set(0, 0, 2 * RADIUS_M);
+      binding.cameraAltitude.value = RADIUS_M;
+      binding.metersPerUnit.value = RADIUS_M / 5;
+      binding.exposure.value = 4;
+      binding.morph.value = 1;
+      binding.setSunBody(0, 0, 1);
+      results.push(
+        Array.from(
+          await pixel(new PlanetSurfaceMaterial({ lighting: { id: 'atmosphere', stage: binding.lighting() }, atmosphere: { id: 'atmosphere', stage: binding.perspective() } })),
+        ),
+      );
+    }
+    expect(results[0][2]).toBeGreaterThan(0);
+    for (let c = 0; c < 3; c++) expect(results[1][c]).toBeCloseTo(results[0][c], 6);
     model.dispose();
   });
 });

@@ -44,4 +44,46 @@ describe('AtmosphereBackdrop reduced-resolution space pass', () => {
     skyView.dispose();
     model.dispose();
   });
+
+  it('skips the render while nothing it depends on changed', async () => {
+    const renderer = await getEvalRenderer();
+    const model = new AtmosphereGpuModel(earthAtmosphereProfile(), SMALL);
+    const backdrop = new AtmosphereBackdrop(model, { steps: 8, spaceScale: 0.5 });
+    const camera = new PerspectiveCamera(75, 1, 0.1, 100);
+    backdrop.setAltitude(model.uTopAltitude.value * 3);
+
+    backdrop.update(renderer, camera);
+    backdrop.update(renderer, camera);
+    backdrop.update(renderer, camera);
+    expect(backdrop.spaceRenderCount).toBe(1);
+
+    camera.position.set(0, 1, 5);
+    camera.lookAt(0, 0, 0);
+    backdrop.update(renderer, camera);
+    expect(backdrop.spaceRenderCount).toBe(2);
+    backdrop.update(renderer, camera);
+    expect(backdrop.spaceRenderCount).toBe(2);
+
+    camera.fov = 50;
+    camera.updateProjectionMatrix();
+    backdrop.update(renderer, camera);
+    expect(backdrop.spaceRenderCount).toBe(3);
+
+    backdrop.setAltitude(model.uTopAltitude.value * 4);
+    backdrop.update(renderer, camera);
+    expect(backdrop.spaceRenderCount).toBe(4);
+
+    model.setSunDirection(0.6, 0.8, 0);
+    backdrop.update(renderer, camera);
+    expect(backdrop.spaceRenderCount).toBe(5);
+
+    model.setProfile(earthAtmosphereProfile());
+    backdrop.update(renderer, camera);
+    expect(backdrop.spaceRenderCount).toBe(6);
+    backdrop.update(renderer, camera);
+    expect(backdrop.spaceRenderCount).toBe(6);
+
+    backdrop.dispose();
+    model.dispose();
+  });
 });
