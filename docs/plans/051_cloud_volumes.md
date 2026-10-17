@@ -9,7 +9,7 @@ runbook: /docs/runbook/051_cloud_volumes.md
 
 # Plan 051: Cloud Volumes
 
-Status: **in progress, owner: local Sonnet session** (Phases 0-1 built and checked 2026-10-17; the Phase 1 go/no-go waits for the maintainer's GPU timings, and Phase 2 waits for the go). Approach chosen by the owner on 2026-10-17 (see §Decisions).
+Status: **in progress, owner: local Sonnet session** (Phases 0-1 built and checked 2026-10-17; maintainer's timings in the runbook). The review on 2026-10-17 recommends a **conditional go**, settled by the Phase 2a probe; the maintainer confirms. Approach chosen by the owner on 2026-10-17 (see §Decisions).
 Evidence: [Runbook 051](/docs/runbook/051_cloud_volumes.md).
 
 **Goal:** 3D clouds you can fly into and through, lit by the atmosphere (orange at dusk, hazed with
@@ -77,22 +77,27 @@ The costs are estimates for a desktop GPU at 1440p and have not been measured.
 
 ### `CloudVolume`
 
-An oriented box in world space (follows an `Object3D`), holding three 3D textures:
+An oriented box in world space (follows an `Object3D`), holding these volumes, each stored as a 2D slice atlas
+(Phase 1 decision, below):
 
-| Texture | Default size | Format | Rebuilt when |
+| Volume | Default size | Format | Rebuilt when |
 |---|---|---|---|
-| Density | 128³ (tier: 64³–160³) | R8 (R16F if banding shows) | A source changes |
-| Distance (to the nearest voxel above the density threshold) | half the density size | R8, in voxels | Density changes |
-| Sun optical depth (through the volume toward the sun) | half the density size | R16F | Density changes, or the sun moves past a tolerance (in the volume's frame) |
+| Density | 128³ (tier: 64³–160³) | RGBA8, consecutive z slices packed into the four channels | A source changes |
+| Occupancy (max density per brick, for skipping empty space) | 16³ (one texel per 8³ brick) | RGBA8 packed the same way | Density changes |
+| Sun optical depth (through the volume toward the sun) | half the density size | RGBA16F, packed the same way | Density changes, or the sun moves past a tolerance (in the volume's frame) |
 
 About 3 MB per volume at the defaults. Optical depth is stored rather than transmittance because it filters
 far more smoothly (the same finding as the froxel table in Runbook 049). The stylized curve is applied at
 lookup time, so changing the look never needs a rebake.
 
-**How the bakes are written is decided in Phase 1.** Compute shaders and storage textures do not exist on
-the WebGL2 fallback. The atmosphere writes its tables with fragment passes into render targets, which works on
-both backends. The default here is the same: fragment passes into a `RenderTarget3D` (or into slices laid side by
-side in a 2D target), with compute only as an optional WebGPU fast path.
+**Bakes are fragment passes into 2D slice atlases** (decided by Phase 1, Runbook 051). They run on WebGPU and on
+the WebGL2 fallback. `RenderTarget3D` and compute are not used; compute stays an optional WebGPU fast path.
+
+**Why the channels are packed** (review of Phase 1): the march is most likely limited by texture bandwidth.
+Phase 1 stored one value per RGBA16F texel (8 bytes, 16 MB for 128³) because single-channel half-float targets read back
+empty on the WebGL2 backend. Packing four slices per texel makes density 1 byte per voxel (2 MB, cache-sized). The
+two slices of a trilinear read then share one fetch most of the time; with a stride of 3 and one slice overlapping,
+they always do. Readback stays RGBA, so the Red-format issue no longer matters.
 
 ### Density sources
 
@@ -112,8 +117,14 @@ A volume combines one or more sources (max or add, per source):
 
 1. **Low-res march** (default half resolution, a tier knob). Per pixel: intersect the ray with each volume's
    box (≤ 8 volumes per pass), and stop at the opaque scene depth.
-   - Start at the box entry, or at the camera when it is inside the box. Blue-noise jitter the start point.
-   - Use the distance field to skip empty space, and take fixed small steps inside cloud.
+   - Start at the box entry, or at the camera when it is inside the box. Blue-noise jitter the start point,
+     with a per-frame offset so temporal reuse averages it.
+   - Step by length (about one to two density texels), capped by a maximum step count, not by a fixed count per ray.
+     A ray that only clips a corner then costs a few steps, not the full count.
+   - Use the occupancy grid to skip empty bricks, and take fixed small steps inside cloud.
+   - Work in the volume's unit frame. The camera position in that frame is computed on the CPU in double precision,
+     at draw time (a per-object uniform, so a parent moved late in the frame is still current). The ray direction is the
+     interpolated box vertex minus that position. No world-space position reaches the shader.
    - Stop when transmittance drops below ~0.01. A dense cloud therefore ends the march early, and being inside one is cheap.
    - Each step costs one density read, one optical-depth read, and detail noise near edges only.
 2. **Lighting per step:**
@@ -149,7 +160,7 @@ and time warp. What each table depends on, and so how often it is rebuilt:
 | Atmosphere sky-view (192×108) | Camera altitude, sun elevation at the camera | Every few seconds at 1x (the sun climbs as the planet turns); every frame under time warp. Small, so cheap either way |
 | Atmosphere froxel aerial perspective (64×36×32) | Camera pose and sun, in the planet frame | **Every frame the camera moves or turns**, by design. Its size is what keeps that cheap |
 | Cloud density | Its sources only. Volumes live in the planet's body frame, so spinning and orbiting change nothing | On shape change only; every frame for a points source |
-| Cloud distance field | Density only | Same as density |
+| Cloud occupancy grid | Density only | Same as density |
 | Cloud sun optical depth | Density, and the sun direction **in the volume's frame** | When the sun has turned past a tolerance (about 0.5°) in the volume's frame |
 
 - **Spin is slow in a volume's frame.** A 6-hour day turns the sun about 0.017° per second relative to the ground,
@@ -158,13 +169,16 @@ and time warp. What each table depends on, and so how often it is rebuilt:
 - **Time warp** makes the light rebake every frame. Two things keep that in budget:
   - the light rebake is **time-sliced**, a few slices of the texture per frame, blending toward the new texture
     so it never pops;
-  - its full cost (64³ texels × ~24 steps toward the sun) is expected around 0.1-0.2 ms, so even an unsliced rebake
-    every frame fits G6.
+  - its full cost (64³ texels × ~24 steps toward the sun) was estimated at 0.1-0.2 ms. The first Phase 1 reading
+    suggests about **1.3 ms unsliced** (Runbook 051, review; not yet confirmed). Slicing is therefore **required**, not
+    optional: 8 slices is about 0.16 ms per frame, and packed density should cut the full cost too.
   At very high warp the camera is usually far out, where the far shell (one 2D texture, no light bake) is shown
   instead of volumes.
 - **Precision:** volumes are marched in their own local box frame, so a huge world position (or a floating-origin
   shift) never reaches the shader as a large float. The planet-frame inputs to the atmosphere are in metres
-  relative to the planet, as Plan 049 already does.
+  relative to the planet, as Plan 049 already does. The Phase 1 spike does not do this yet: it maps the world
+  `cameraPosition` and `positionWorld` through the inverse matrix in float32 on the GPU. That is fine at the lab's
+  2 km planet but shimmers at planet scale, so Phase 2 fixes it (§Rendering, step 1).
 - **Gate rule:** every timing gate is measured twice, camera still and in the moving worst case
   (camera orbiting, planet turning at high time warp, so every table above rebuilds every frame).
 
@@ -173,7 +187,7 @@ and time warp. What each table depends on, and so how often it is rebuilt:
 | Pass | When | Expected cost |
 |---|---|---|
 | Density / distance rebakes | On shape change (points source: every frame) | 0 typical; ≤ 0.3 ms for a per-frame points source |
-| Light rebake | Sun turned past tolerance in the volume's frame; time-sliced | ~0.02 ms/frame sliced; ≤ 0.2 ms unsliced |
+| Light rebake | Sun turned past tolerance in the volume's frame; time-sliced | ≤ 0.2 ms/frame sliced (Phase 1 hint: ~1.3 ms unsliced, unconfirmed) |
 | Low-res march | Every frame, pixels covered by boxes only | 0.5–1.5 ms at half resolution |
 | Temporal reuse + upsample + composite | Every frame | ~0.2 ms |
 | Far shell | Pixels it covers | ~0.1–0.2 ms |
@@ -199,13 +213,36 @@ Plan 050's existing occlusion slot.
      Fragment-pass bakes, or compute with a fallback?
    - Measure the camera at outside / edge / inside.
    - **Gate:** a recorded go/no-go in the runbook. No-go means switch to option B and rewrite Phases 2–5.
+   - **Result** (Runbook 051): both backends work with fragment-pass bakes into 2D atlases. Full-resolution cost is
+     2–3 ms from outside and 19–39 ms filling the screen. The review recommends a conditional go, settled by the Phase 2a probe.
 2. **Volume core.**
-   - Jump-flood distance field, half-resolution screen pass with box intersection and scene depth;
-   - blue-noise jitter, temporal reuse, depth-aware upsample, composite in the `RenderPipeline`;
-   - flying in and out with no pop, and clouds correctly in front of and behind the planet.
-   - Reprojection uses each volume's previous transform; the lab's planet can spin and orbit a sun with a
-     time-warp slider (1x to 100 000x).
-   - **Gate:** a fly-through by eye, and GPU ms at the five camera spots within G6, still and in the moving worst case.
+   - **2a. Probe** (an hour or two, lab-only changes). It decides go/no-go and the order of 2b.
+     - Fix the GPU timer first: read it in `renderComplete$`, after the frame's main render. Read in `tick$`, it can
+       return only the passes already submitted this frame (Runbook 051, review).
+     - Add a **render scale** control: `renderer.setPixelRatio(devicePixelRatio × scale)`, with scale 1 or 0.5 per axis.
+       This gives a true half-resolution cost without building the Phase 2 pass.
+     - Add two debug toggles on the march: **jitter off**, and **no fetch** (an analytic density instead of the atlas reads).
+     - Re-run the matrix at s16 / s24 / s32 for scale 1 and 0.5. Then run once at s32, inside, with jitter off and once
+       with no fetch. Measure the light bake by itself (toggle on minus toggle off, with the fixed timer).
+     - **Go line**, on the cloud cost (render minus "off" at the same scale) at scale 0.5, s24, inside:
+       - ≤ 8 ms: go, 2b in the order below;
+       - 8–12 ms: build only step 1 of 2b (packed atlases), re-measure, then decide;
+       - \> 12 ms: no-go for volumes as the main renderer; switch to option B.
+   - **2b. Build**, in this order. Measure after each step and record it in the runbook.
+     1. **Packed atlases:** density RGBA8 with four z slices per texel (stride 3 with one slice overlapping, if
+        that measures faster), and light RGBA16F packed the same way. Specs read the packed channels back.
+     2. **Unit-frame march:** compute the camera position in the volume frame at draw time (§Rendering, step 1). Step by
+        length, capped by a maximum count.
+     3. **Half-resolution screen pass:** box intersection with the scene depth, a depth-aware upsample, and the composite
+        in the `RenderPipeline`. Clouds sit correctly in front of and behind the planet.
+     4. **Temporal reuse:** per-frame jitter offset, reprojection with each volume's previous transform, and fewer
+        steps per frame (temporal reuse saves time only through that cut, or through checkerboarding).
+     5. **Time-sliced light rebake**, blending to the new bake.
+     6. **Empty-space skip:** the 16³ occupancy grid first. Build a jump-flood distance field only if measurements
+        show the grid is not enough.
+     7. **Moving lab:** the planet spins and orbits a sun, with a time-warp slider (1x to 100 000x).
+   - **Gate:** a fly-through by eye with no pop, and GPU ms at the five camera spots within G6, still and in the moving
+     worst case.
 3. **Atmosphere lighting.** Sun colour, sky ambient and aerial perspective from the atmosphere API (Earth and
    Mars presets) on the lab's planet.
    - **Gate:** orange-lit clouds at dusk, blue-hazed far clouds, a dark night side, no white glow.
@@ -244,7 +281,9 @@ Plan 050's existing occlusion slot.
 
 - CPU reference for optical depth through an analytic density (a uniform box, a Gaussian blob) to check
   the bake. Compare to the baked texture read back from the GPU.
-- Jump-flood distance field against brute force on a small grid.
+- Occupancy grid against a brute-force max over each brick (and the jump-flood distance field against brute force,
+  if it is built).
+- Packed atlases: a read of the packed channels matches the unpacked reference, including at slice boundaries.
 - The march against a CPU reference march for a few rays (outside, inside, crossing the planet's depth),
   following the `render-eval.testing.ts` pattern from `planet-material/`.
 - Reprojection maths (a static scene under camera motion reprojects to itself).
@@ -258,7 +297,10 @@ Plan 050's existing occlusion slot.
 | Main renderer: bounded density volumes (option C), with a 2D shell for the far view (option A); puffs (B) as the fallback | **Decided** 2026-10-17 (owner) |
 | TSL only, on `WebGPURenderer`, own entry point `triangular-engine/cloud-volumes`; existing `clouds/` and `takram/` left untouched | **Decided** 2026-10-17 |
 | Stylized look by default, realistic as a preset of the same renderer | Proposed |
-| Bakes as fragment passes (both backends), compute as an optional fast path | Proposed, settled by Phase 1 |
+| Bakes as fragment passes into 2D slice atlases (both backends), compute as an optional fast path | **Decided** by Phase 1, 2026-10-17 |
+| Phase 1 go/no-go: conditional go, settled by the Phase 2a probe's go line | Recommended by the review 2026-10-17; maintainer confirms |
+| Atlas formats: density RGBA8 and light RGBA16F, four z slices packed per texel | Proposed (review), measured in Phase 2b step 1 |
+| Empty-space skip: occupancy grid first, jump-flood distance field only if needed | Proposed (review) |
 | Budget G6: ≤ 1.5 ms typical, ≤ 2.5 ms worst, measured with GPU timestamps | Proposed |
 
 ## Out of scope for now

@@ -145,3 +145,97 @@ Canvas 2560x1308 (dpr 1.5, about 3.3 MP), 128^3 density, 64^3 light, lab matrix 
 - The "inside s32 with light rebaked every frame" line (1.30 ms) is **not trustworthy**: it is below the same view's s32 figure (27.55),
   so that reading did not include the march. The light bake cost is still unmeasured; measure it by hand with the lab's rebake toggle.
 - Go / no-go: not recorded. Naive Phase 1 is 20-40x over G6 at full resolution; whether Phase 2's savings close that is the open question.
+
+## 2026-10-17 — Phase 1 review (cloud session, code reading only)
+
+Reviewed the Phase 0-1 code and the maintainer's timings. Nothing was run here. Plan 051 is updated to match (status,
+§`CloudVolume`, §Rendering step 1, §Moving planets, budget, Phase 2 split into a 2a probe and a 2b build order,
+tests, decisions).
+
+### The "light rebaked every frame: 1.30 ms" line is a timer bug, and it probably is the light bake's cost
+
+- In three 0.186, `resolveTimestampsAsync('render')` takes a snapshot of the queries recorded so far, synchronously, and
+  returns the sum for the **newest frame** among them (`WebGPUTimestampQueryPool._resolveQueries`, "total duration
+  of the last frame").
+- The lab calls `GpuTimer.tick` in `tick$`, after `volume.update`. With the rebake on, this frame's bake pass is
+  already recorded but its main render is not. The "newest frame" then holds only the bake, so the reading is the
+  bake alone. With the rebake off, nothing of the current frame is recorded yet and the previous, complete frame is
+  returned, so the matrix's other cells are valid.
+- So the light bake (64³ texels × 24 steps, reading the 16 MB RGBA16F density) probably costs **about 1.3 ms
+  unsliced**, not the 0.1-0.2 ms the plan estimated. Confirm with the fixed timer.
+- **Fix:** read the timer in `renderComplete$` (or first thing in `tick$`). Phase 2's time-sliced bakes run in
+  `tick$` every frame, so every reading would be wrong without this.
+
+### Is the stacked estimate fair? (inside, full resolution, 40 ms at s64)
+
+| Lever | Assumed | Assessment |
+|---|---|---|
+| Fewer steps (16-24) | 2x | Measured: s16 is 20.3 ms. Fair |
+| Half resolution | 4x | Slightly optimistic: about 3.5x after the upsample and composite pass (~0.2-0.3 ms at 1440p). The 2a probe measures it directly |
+| Temporal reuse | 2x | Only through fewer steps per frame or checkerboarding; it saves nothing by itself. Steps scale sub-linearly here, so 1.3-1.5x is safer unless checkerboarding |
+| Distance field / early exit | Unknown | Early exit already exists but rarely fires: at extinction 0.02/m and moderate density, reaching T < 0.01 needs a few hundred metres, about the box size. Empty-space skip helps edge and below more than inside |
+| **Missing: packed density format** | Not counted | Likely the biggest unknown win: 8 bytes per voxel to 1, and one fetch instead of two per step most of the time |
+
+Overall the 2.5 ms worst case is a fair centre. Without the format gain it is slightly optimistic; the honest range is
+about 1.5-5 ms. Typical views (from outside, partial coverage) cost 2-3 ms at full resolution today and should land
+well inside 1.5 ms. Recommendation: a **conditional go**, settled by the Phase 2a probe's go line (Plan 051, Phase 2).
+
+### Where the ~14 ms that doesn't shrink with steps may come from
+
+Per-pixel fixed work (box intersection, phase `pow`, two matrix products, one HDR blend) is well under 1 ms at 3.3 MP,
+so it is not that. Ranked guesses, each testable with one 2a toggle:
+
+1. **Fetch cost rises as steps get longer.** The interleaved-gradient jitter offsets neighbouring pixels by up to one
+   step. At 16 steps that is 4-8 texels, and adjacent z slices sit 128 px apart in the atlas, on a 16 MB texture
+   larger than most L2 caches. As steps drop, each fetch misses the cache more often. Test: **jitter off**.
+2. **Memory-bound march in general**: every step pays two atlas fetches plus uv maths, even in empty space. Test:
+   **no fetch** (analytic density). If s64 falls from ~38 ms to a few ms, packing is lever number one.
+3. **Warp divergence**: a warp runs as long as its longest ray. This is mostly proportional to steps, so it is a
+   weak candidate.
+
+It is worth testing before Phase 2 only because the test is cheap (two toggles, one run) and decides whether packing
+or half resolution comes first.
+
+### Code review against the design
+
+Correct:
+- The march maths. `dir` is the world direction through the inverse matrix, so `t` and `dt` stay in world metres
+  and `sigma × dt` is right. The slab test, `tNear` clamped to 0 for an inside camera, and back-face proxy are right.
+- The integration `T × (1 - e^(-σ dt)) × S` (energy-conserving for albedo 1), the premultiplied output with
+  `premultipliedAlpha`, and the early exit.
+- The light bake: the sun in the volume's metres frame (rotation only), the slab exit, and reading density in the
+  unit frame.
+- The rebake tolerance compares the sun in the volume's frame, so a spinning parent triggers it. Specs cover it.
+- The atlas read clamps x and y to half a texel, so nothing bleeds between slices.
+
+To fix (in the Phase 2 order; none blocks the 2a probe except the timer):
+1. **Timer read mid-frame** (above).
+2. **Precision** goes against the plan's rule: `uInverse × cameraPosition` and `positionWorld - cameraPosition` are
+   float32 world maths on the GPU. Fine at the lab's 2 km planet, shimmering at planet scale (float32 spacing is
+   about 0.5 m at 6 400 km). Fix: camera position in the unit frame from the CPU, direction = `positionLocal` minus it.
+3. **Uniform freshness:** `uInverse` and `uSunLocal` are set in `update()` from `tick$`. If a parent planet's
+   transform is written later in the frame, the march uses last frame's matrix and the cloud slides inside its box by one
+   frame of motion. Fix: a per-object uniform updated at draw time (`uniform(...).onObjectUpdate`, the same pattern as
+   three's `modelWorldMatrixInverse`). The rebake decision can stay in `update()`, since one frame late is harmless there.
+4. **Fixed step count per ray:** a ray that clips a corner pays all 64 steps, and long rays undersample. Step by
+   length with a cap.
+5. **Static jitter:** no per-frame offset yet; temporal reuse needs one.
+6. **Light bake undersampling:** 24 steps over up to ~630 m is ~26 m per step against 4.7 m density texels, with
+   no jitter, so low-sun self-shadow will band. Scale the step count with path length, capped.
+7. Minor:
+   - `setExtinction` calls `invalidateDensity`, which rebakes the 4-octave noise. Extinction only affects the
+     light; add `invalidateLight()`.
+   - `uSize` is fixed at construction, but the march uses the mesh's matrix. If anyone changes `mesh.scale`, the
+     two disagree; derive `uSize` from the decomposed scale.
+   - `frustumCulled = false` is not needed (the scaled box culls correctly). With up to 8 volumes, culling is free
+     savings.
+   - The phase is scaled by π (`phase × 4π × 0.25`), an art factor. Phase 3 must use sun radiance × phase, or the
+     clouds will be off by π against the sky.
+   - `GpuTimer.reset()` does not drop a read already in flight, so the first sample after a preset change can come
+     from the old view. The matrix's 800 ms wait hides it; add a generation counter.
+
+### Red-format targets
+
+Not worth chasing before Phase 2. Packing four slices per RGBA8 texel costs the same 1 byte per voxel as R8, returns both slices of a trilinear read
+in one fetch most of the time, and keeps the RGBA readback that already works. The cause (likely a gap in the WebGL backend's readback for single-channel
+half-float targets) can be a footnote.
