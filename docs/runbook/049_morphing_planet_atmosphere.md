@@ -438,3 +438,27 @@ baseline: it blends the result away but the march stays in the shader.
 - Terminator stair-steps (maintainer screenshot, dusk from space): the table's texels showed where the sunlit/shadow edge is sharper than a texel (bilinear of a step reads as blocks). Default grid raised from 64x36 to 128x72 slices (4096x72 target); `width`/`height` options trade it back. A sharper fix, if still visible, is to march the last slice per pixel near the limb.
 
 - Terminator stair-steps, second pass (second opinion from a subagent: a screen-space fix cannot work, a sharp edge is blocks in any table): the table is now built without the planet's shadow (`march({ unshadowed: true })` reads the sun's transmittance at no lower than the horizon direction) in three attachments, sunlit single scattering, optical depth and multiple scattering. `lookup` cuts the stretch of the ray that lies in the shadow cylinder out of the sunlit part per pixel (`sunlit(d) - (sunlit(to) - sunlit(from))`), so the terminator is exact at pixel resolution for six texture fetches more. Spec: a dusk case at 40 km looking into the shadow matches the per-ray march. Open: maintainer's look at the terminator, and the cost (fps) of the extra fetches.
+
+## Phase 3, first slice: haze through the morph (2026-10-17)
+
+What exists: the surfaces keep their atmosphere through the whole morph and on the flat map (it used to fade out with `1 - morph`).
+
+- `AtmosphereGpuModel.slab({ distance, cameraHeight, cosNu, muSun })`: the air between a surface point and the camera on a flat map, closed form. Density falls off with the height above the point's own plane, so each species' column is the path length times `(1 - e^-x) / x` (`x = cameraHeight / H`); the sun and the sky are read once at the point's own sun angle; in-scatter is `source * (1 - T) / tau` per channel. The absorber (ozone) is not modelled, so twilight is a little less blue. Spec: matches the per-ray march within 15% where the sphere is flat enough (3 km up looking down, 500 m grazing).
+- `PlanetAtmosphereBinding.morph` (0 globe, 1 map) and `bodyToView` (set by `sync`): `perspective()` is now `mix(spherical haze, slab haze, morph)`, the slab part behind an `If(morph > 0)` so the globe pays nothing. The slab's up is `normalize(mix(sphereNormal, +Z, morph))` (the morphed sea-level normal), its sun angle the intrinsic `dot(sphereNormal, sunBody)`. The lighting stage already used the point's own sun angle, so dusk crosses the map where it should.
+- `/cell-planet-tsl`: sets `binding.morph`; the surface amount stays 1 through the morph; only the backdrop (the sphere's sky) is hidden at `morph >= 0.5`.
+
+Limits and open, in order:
+
+1. Not looked at on a real GPU: scrub the morph at dusk for pops (the crossfade is linear in `morph`), and the flat map from low angles.
+2. The sky behind the map: the backdrop is still a sphere's sky and just switches off at 0.5. A crossfade of the camera's sky for its sphere and flat poses (plan, section Morph) is not built, and neither is the flat map's edge fade or glow (`flatMapEdge`).
+3. The slab ignores the fragment's own height (terrain on the map reads as sea level, slightly over-hazed) and the sun's change along the path (fine except right at the terminator).
+4. Per-sample sun angles through the froxel table on the flat map (plan: "froxels with per-sample mu_s") are not done; the slab uses the fragment's angle for the whole path.
+
+### Deferred items noted for later (maintainer asked for these to be written down)
+
+- Look pass on a real GPU: the planet's rim (the table under-hazes the last texel of the disc by about 2x), the ground horizon, dusk, the Mars preset and the lilac tuning.
+- Eclipse hookup (`sunVisibility` into the atmosphere so the sky darkens as well as the ground).
+- Re-run `npm run build:triangular-engine` (not run since the froxel table, the unshadowed table or the slab).
+- Maintainer's fps on both planet pages after the terminator change (three attachments, six more fetches) and the checkbox branch; fallbacks: table back to 96x54 or 64x36 (`aerialPerspective: { width, height }`), rebuild stages on toggle.
+- The map frame is not hazed on purpose (it only shows once the atmosphere is already off); revisit with the flat-map edge.
+- Plan 049 phases 4 to 6 (coverage, sky objects, extensions demo).

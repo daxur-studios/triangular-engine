@@ -1,6 +1,6 @@
 import { Matrix3, Matrix4, Quaternion, Vector3, type Object3D } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
-import { Fn, abs, cameraProjectionMatrix, cross, dot, float, max, normalize, positionView, select, uniform, vec3, vec4 } from 'three/tsl';
+import { Fn, If, abs, cameraProjectionMatrix, cross, dot, float, max, mix, normalize, positionView, select, uniform, vec3, vec4 } from 'three/tsl';
 import { AtmosphereAerialPerspectiveLut, type AtmosphereAerialPerspectiveOptions } from './atmosphere-aerial-perspective';
 import type { AtmosphereBackdrop } from './atmosphere-backdrop';
 import type { AtmosphereGpuModel } from './atmosphere-gpu-model';
@@ -57,6 +57,13 @@ export class PlanetAtmosphereBinding {
   readonly cameraBody = uniform(new Vector3(0, 0, 0));
   /** Camera altitude above the ground, metres. */
   readonly cameraAltitude = uniform(0);
+  /**
+   * How far the planet has unrolled into its flat map, 0 (globe) to 1 (map). The page sets it with the morph. The
+   * haze of a surface point blends from the spherical model to a flat slab by it ({@link perspective}).
+   */
+  readonly morph = uniform(0);
+  /** Body frame to view space (the planet's rotation, then the camera's inverse), for the slab's up and sun. */
+  readonly bodyToView = uniform(new Matrix3());
   /** Metres per world unit of the planet mesh. */
   readonly metersPerUnit = uniform(1);
 
@@ -77,6 +84,9 @@ export class PlanetAtmosphereBinding {
   private readonly frameMatrix = new Matrix3();
   private readonly cameraRotation = new Matrix3();
   private readonly viewToLocal = new Matrix3();
+  private readonly worldToView = new Matrix3();
+  private readonly bodyRotation = new Matrix4();
+  private readonly bodyRotation3 = new Matrix3();
   private readonly sunLocal = new Vector3();
   private readonly projectionInverse = new Matrix4();
 
@@ -140,6 +150,10 @@ export class PlanetAtmosphereBinding {
 
     // View space to the local frame, for the froxel table.
     this.cameraRotation.setFromMatrix4(camera.matrixWorld);
+    this.worldToView.copy(this.cameraRotation).transpose();
+    this.bodyRotation.makeRotationFromQuaternion(this.quaternion);
+    this.bodyRotation3.setFromMatrix4(this.bodyRotation);
+    this.bodyToView.value.copy(this.worldToView).multiply(this.bodyRotation3);
     this.viewToLocal.copy(this.frameMatrix).multiply(this.cameraRotation);
     const projectionInverse = (camera as { projectionMatrixInverse?: Matrix4 }).projectionMatrixInverse;
     if (projectionInverse) this.projectionInverse.copy(projectionInverse);
@@ -198,6 +212,40 @@ export class PlanetAtmosphereBinding {
    * height and the mid-morph flat map are not modelled).
    */
   perspective(): (context: IAtmospherePlanetContext, color: any) => any {
+    const spherical = this.sphericalPerspective();
+    return (context, color) =>
+      Fn(() => {
+        const out: any = spherical(context, color).toVar();
+        // The flat slab only costs anything while the planet is unrolling.
+        If(this.morph.greaterThan(0.001), () => {
+          out.assign(mix(out, this.slabPerspective(context, color), this.morph));
+        });
+        return out;
+      })();
+  }
+
+  /**
+   * The haze on a flat map (and, blended by {@link morph}, between globe and map): the surface point's own plane is
+   * the ground, the camera's height above it and the distance to it give the slab's columns, and the sun is read at
+   * the point's own sun angle. See {@link AtmosphereGpuModel.slab}.
+   */
+  private slabPerspective(context: IAtmospherePlanetContext, color: any): any {
+    const up = normalize((mix as any)(normalize(context.sphereNormal), vec3(0, 0, 1), this.morph));
+    const upView = normalize((this.bodyToView as any).mul(up));
+    const toCamera = positionView.negate();
+    const mpu = this.metersPerUnit;
+    const dirView = normalize(positionView);
+    const sunView = normalize((this.bodyToView as any).mul(this.sunBody));
+    const haze = this.model.slab({
+      distance: context.cameraDistance.mul(mpu),
+      cameraHeight: dot(toCamera, upView).mul(mpu),
+      cosNu: dot(dirView, sunView),
+      muSun: dot(normalize(context.sphereNormal), this.sunBody),
+    });
+    return color.mul(haze.transmittance).add(haze.radiance.mul(this.exposure));
+  }
+
+  private sphericalPerspective(): (context: IAtmospherePlanetContext, color: any) => any {
     const { model } = this;
     const table = this.aerialPerspective;
     if (table) {

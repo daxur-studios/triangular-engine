@@ -100,3 +100,7 @@ Try it at `/atmosphere-planet`.
 
 **Public boundary.** `public-api.ts` exports the profile, presets, scaling, LUT bake, GPU model, backdrop, planet stages and aerial perspective. The reference integrator is exported for tests and comparison, not for rendering.
 <!-- /doc-section -->
+
+### Flat map and the morph
+
+Set `binding.morph.value` (0 globe, 1 flat map) each frame, with the planet material's morph. `perspective()` then blends the spherical haze with a flat slab of air over each surface point's own plane (`AtmosphereGpuModel.slab`), and `lighting()` already reads each point's own sun angle, so dusk crosses the map where it should. The backdrop (the sky behind a sphere) has no flat counterpart yet: hide it as the map unrolls. The slab ignores the ozone-like absorber and the fragment's own height.

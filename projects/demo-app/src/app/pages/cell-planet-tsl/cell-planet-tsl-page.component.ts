@@ -327,7 +327,7 @@ const MACRO: 'off' | 'bodyFixed' | 'morphed' =
               [checked]="atmosphereOn()"
               (change)="setAtmosphere($event)"
             />
-            atmosphere (sphere only: fades out as the map unrolls)</label
+            atmosphere</label
           >
         </p>
         <label
@@ -909,9 +909,12 @@ export class CellPlanetTslPageComponent {
     const camera = this.engine.camera;
     if (!parts || !renderer?.initialized || !camera) return;
     const morph = this.morphProgress();
-    const amount = this.atmosphereOn() ? Math.max(0, 1 - morph) : 0;
+    // The surfaces keep their atmosphere through the morph (the haze blends to a flat slab by `binding.morph`); only the
+    // sky behind the planet is a sphere's and fades out.
+    const amount = this.atmosphereOn() ? 1 : 0;
     this.atmosphereMix.value = amount;
-    parts.backdrop.mesh.visible = amount > 0.5;
+    parts.binding.morph.value = morph;
+    parts.backdrop.mesh.visible = amount > 0 && morph < 0.5;
     const lon = (this.sunLongitude() * Math.PI) / 180;
     const lat = (this.sunLatitude() * Math.PI) / 180;
     parts.binding.setSunBody(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));

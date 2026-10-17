@@ -1,5 +1,5 @@
 import { Matrix3, Matrix4, PerspectiveCamera, Vector3 } from 'three';
-import { Fn, vec2, vec3, vec4 } from 'three/tsl';
+import { Fn, float, vec2, vec3, vec4 } from 'three/tsl';
 import { evaluateOnGpu, getEvalRenderer } from '../planet-material/gpu-eval.testing';
 import { AtmosphereAerialPerspectiveLut } from './atmosphere-aerial-perspective';
 import { AtmosphereGpuModel } from './atmosphere-gpu-model';
@@ -157,5 +157,45 @@ describe('AtmosphereAerialPerspectiveLut', () => {
     expect(lut.renderCount).toBe(5);
     lut.dispose();
     model.dispose();
+  });
+
+  describe('slab haze (flat map)', () => {
+    const cases = [
+      { name: '3 km up, looking down at 30 degrees', height: 3_000, slope: -0.5, sunElevation: 40, sunAzimuth: 30 },
+      { name: '500 m up, grazing the ground', height: 500, slope: -0.05, sunElevation: 15, sunAzimuth: 200 },
+    ];
+    for (const c of cases) {
+      it(`matches the per-ray march where the sphere is flat enough (${c.name})`, async () => {
+        await getEvalRenderer();
+        const model = new AtmosphereGpuModel(earthAtmosphereProfile(), SMALL);
+        const sun = sunFrom(c.sunElevation, c.sunAzimuth);
+        model.setSunDirection(sun.x, sun.y, sun.z);
+        const dir = new Vector3(0.3, c.slope, -1).normalize();
+        const distance = -c.height / dir.y;
+        const rows = [[[distance, c.height, 0, 0]]];
+        const run = (pick: 'radiance' | 'transmittance', useSlab: boolean) =>
+          evaluateOnGpu(rows, (at) =>
+            Fn(() => {
+              const a = at(0);
+              if (useSlab) {
+                const s = model.slab({ distance: a.x, cameraHeight: a.y, cosNu: float(dir.dot(sun)), muSun: float(sun.y) });
+                return vec4(s[pick], 1);
+              }
+              const m = model.march({ altitude: a.y, dir: vec3(dir.x, dir.y, dir.z), sunDir: vec3(sun.x, sun.y, sun.z), maxDistance: a.x, steps: 48 });
+              return vec4(m[pick], 1);
+            })(),
+          );
+        for (const pick of ['radiance', 'transmittance'] as const) {
+          const slab = await run(pick, true);
+          const march = await run(pick, false);
+          for (let ch = 0; ch < 3; ch++) {
+            expect(Math.abs(slab[ch] - march[ch]))
+              .withContext(`${c.name} ${pick} channel ${ch}: slab ${slab[ch]} vs march ${march[ch]}`)
+              .toBeLessThan(0.15 * Math.abs(march[ch]) + 2e-3);
+          }
+        }
+        model.dispose();
+      });
+    }
   });
 });

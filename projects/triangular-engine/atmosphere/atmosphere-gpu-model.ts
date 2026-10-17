@@ -18,6 +18,7 @@ import {
   int,
   max,
   min,
+  mix,
   pow,
   select,
   smoothstep,
@@ -470,6 +471,48 @@ export class AtmosphereGpuModel {
       hitsGround,
       groundDistance,
     };
+  }
+
+  /**
+   * The air between a surface point and the camera when the planet is flat: a slab whose density falls off with
+   * the height above the point's own plane. Closed form (no march): the column of each species is the path length
+   * times its mean density along the straight line, `(1 - e^-x) / x` with `x = cameraHeight / H`; the sun and the
+   * sky are read once, at the surface point's own sun angle. Call inside an `Fn` body.
+   *
+   * `distance` is the length of the ray and `cameraHeight` the camera's height above the point's plane, both in
+   * metres; `cosNu` is the cosine between the view ray and the sun and `muSun` the sun's cosine against the point's
+   * up. The ozone-like absorber is not modelled (no column for it on a slab), so twilight is a little less blue.
+   * Matches {@link march} within a few percent where the sphere's curvature is negligible.
+   */
+  slab(input: { distance: any; cameraHeight: any; cosNu: any; muSun: any }): { radiance: any; transmittance: any } {
+    const { distance, cosNu, muSun } = input;
+    const height = max(input.cameraHeight, 0);
+    const column = (scale: any): any => {
+      const x = height.div(scale);
+      const mean = mix(float(1).sub(x.mul(0.5)), float(1).sub(exp(x.negate())).div(max(x, 1e-6)), clamp(x.mul(1000), 0, 1));
+      return mean.mul(distance);
+    };
+    const cR = this.uRayleigh.mul(column(this.uRayleighH));
+    const mieColumn = column(this.uMieH);
+    const cM = this.uMieScattering.mul(mieColumn);
+    const opticalDepth = cR.add(cM).add(this.uMieAbsorption.mul(mieColumn));
+    const transmittance = exp(opticalDepth.negate());
+
+    const phaseR = float(3 / (16 * Math.PI)).mul(float(1).add(cosNu.mul(cosNu)));
+    const g = this.uMieG;
+    const g2 = g.mul(g);
+    const phaseM = float(3 / (8 * Math.PI))
+      .mul(float(1).sub(g2).div(float(2).add(g2)))
+      .mul(float(1).add(cosNu.mul(cosNu)))
+      .div(pow(float(1).add(g2).sub(g.mul(cosNu).mul(2)), 1.5));
+    const sunT = this.sunTransmittance(float(0), this.uRadius, muSun);
+    const psi = texture(this.multiScatterTexture, vec2(muSun.mul(0.5).add(0.5), 0), 0).rgb;
+    const source = sunT.mul(cR.mul(phaseR).add(cM.mul(phaseM))).add(cR.add(cM).mul(psi));
+    // (1 - e^-tau) / tau per channel, by its series where tau is small.
+    const series = float(1).sub(opticalDepth.mul(0.5)).add(opticalDepth.mul(opticalDepth).div(6));
+    const exact = float(1).sub(transmittance).div(max(opticalDepth, 1e-6));
+    const gain = mix(series, exact, clamp(opticalDepth.sub(1e-3).div(0.099), 0, 1));
+    return { radiance: source.mul(gain).mul(this.uSunIrradiance), transmittance };
   }
 
   dispose(): void {
