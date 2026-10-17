@@ -843,7 +843,7 @@ export class CellPlanetTslPageComponent {
         // Uniform branch: with the atmosphere off (or the globe unrolled) the shader skips the sky lookups entirely.
         const out = input.color.toVar();
         If(amount.greaterThan(0), () => {
-          out.assign(mix(input.color, lighting(context, input), float(amount)));
+          out.assign(input.surface.albedo); // TEMPDBG
         });
         return out;
       },
@@ -854,7 +854,7 @@ export class CellPlanetTslPageComponent {
       stage: (context: any, color: any) => {
         const out = color.toVar();
         If(amount.greaterThan(0), () => {
-          out.assign(mix(color, perspective(context, color), float(amount)));
+          out.assign(color); // TEMPDBG2
         });
         return out;
       },
@@ -914,7 +914,10 @@ export class CellPlanetTslPageComponent {
     const amount = this.atmosphereOn() ? 1 : 0;
     this.atmosphereMix.value = amount;
     parts.binding.morph.value = morph;
-    parts.backdrop.mesh.visible = amount > 0 && morph < 0.5;
+    // The sky is a sphere's, so it dissolves into the scene as the globe unrolls and is gone once the map is flat.
+    const sky = 1 - Math.min(1, Math.max(0, (morph - 0.2) / 0.6));
+    parts.backdrop.opacity.value = sky * sky * (3 - 2 * sky);
+    parts.backdrop.mesh.visible = amount > 0 && sky > 0;
     const lon = (this.sunLongitude() * Math.PI) / 180;
     const lat = (this.sunLatitude() * Math.PI) / 180;
     parts.binding.setSunBody(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));

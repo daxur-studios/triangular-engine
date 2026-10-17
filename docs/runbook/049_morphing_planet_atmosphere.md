@@ -462,3 +462,9 @@ Limits and open, in order:
 - Maintainer's fps on both planet pages after the terminator change (three attachments, six more fetches) and the checkbox branch; fallbacks: table back to 96x54 or 64x36 (`aerialPerspective: { width, height }`), rebuild stages on toggle.
 - The map frame is not hazed on purpose (it only shows once the atmosphere is already off); revisit with the flat-map edge.
 - Plan 049 phases 4 to 6 (coverage, sky objects, extensions demo).
+
+### Phase 3, second slice: sky crossfade and `sunVisibility`
+
+- `AtmosphereBackdrop.opacity` (0..1) makes the sky blend into the scene. The cell page fades it with a smoothstep over morph 0.2 to 0.8 (it used to switch off at 0.5) and hides the mesh at 0. The backdrop material is now `transparent` (still first in draw order, no depth).
+- `PlanetAtmosphereBinding.sunVisibility` and `AtmosphereBackdrop.sunVisibility` (0..1) are the eclipse hookup: the haze in-scatter, the sky light on surfaces, the sky and the sun disc scale by it (`sync` copies the binding's value to the backdrop). Surfaces still multiply their own occluders into the direct light. The cell page does not drive it yet; nothing has been seen on a GPU.
+- Still open: flat-map edge fade or glow, the slab's fixed sun angle and ground height, per-sample sun froxels on the map.

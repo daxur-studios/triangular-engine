@@ -297,3 +297,32 @@ The maintainer recorded the go on the Phase 2a probe (5.20 ms net at scale 0.5, 
 - `npm run test:triangular-engine:cloud-volumes` 8/8 (the light bake reads the packed density through the new sample path, so it covers it on the WebGL2 backend); `tsc` for the demo app clean.
 - By eye on WebGPU in the lab (edge preset): soft cumulus-like clouds with the same shading as before; no console errors from the cloud passes (the only errors were from a zero-size canvas at page load).
 - Not measured: the pane canvas is small, so its 9.4 ms is not comparable. The matrix must be re-run at full size and compared with the Phase 2a table (inside, s32, scale 1: base 23.94 ms; scale 0.5 s24 net 5.20 ms).
+
+### 2b step 1 measured (maintainer's GPU, WebGPU, same canvas sizes as Phase 2a)
+
+GPU render ms, cloud columns net of "off" at the same scale.
+
+| scale 1 | off | net16 | net24 | net32 |
+|---|---|---|---|---|
+| outside | 1.30 | 0.24 | 0.34 | 0.44 |
+| edge | 1.31 | 4.75 | 6.43 | 8.59 |
+| inside | 1.13 | 5.87 | 7.80 | 10.13 |
+| above | 2.04 | 2.83 | 4.22 | 5.37 |
+| below | 0.89 | 5.50 | 7.60 | 9.90 |
+
+| scale 0.5 | off | net16 | net24 | net32 |
+|---|---|---|---|---|
+| outside | 0.27 | 0.11 | 0.12 | 0.14 |
+| edge | 0.24 | 1.12 | 1.62 | 2.13 |
+| inside | 0.17 | 1.48 | 2.13 | 2.67 |
+| above | 0.55 | 0.69 | 0.98 | 1.33 |
+| below | 0.16 | 1.40 | 2.01 | 2.52 |
+
+Inside, s32, scale 1, total ms: base 10.87, jitter off 10.56, no fetch 12.05, light rebaked every frame 11.63.
+
+- Packing roughly halves the cost: inside s24 net at scale 1 went 20.24 -> 7.80 ms, at scale 0.5 5.20 -> 2.13 ms; inside s32 total went 23.94 -> 10.87 ms. Even full resolution now fits the 8 ms line at s24.
+- Jitter off no longer matters (10.87 -> 10.56, was 23.94 -> 12.71). That fits the reading that the cost was cache misses on scattered atlas reads; the smaller RGBA8 atlas and single fetch stay in cache.
+- The "no fetch" run (12.05) is now slower than the base, so it is no longer a usable lower bound: the analytic blob costs more ALU than the packed read. Drop that switch from the matrix reading; keep it only as a debug view.
+- Light rebake every frame adds about 0.76 ms (11.63 vs 10.87), so step 5 (time-sliced rebake) is low priority.
+- "off" is 0.2-2 ms and varies between runs (inside 0.69 before, 1.13 now); read it as timer noise of about 0.5 ms.
+- The first-pass go line is 2.13 ms at scale 0.5 (was 5.20). Next: step 2 (unit-frame march).

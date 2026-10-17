@@ -62,6 +62,12 @@ export class PlanetAtmosphereBinding {
    * haze of a surface point blends from the spherical model to a flat slab by it ({@link perspective}).
    */
   readonly morph = uniform(0);
+  /**
+   * 0..1, how much of the sun reaches the planet (an eclipse, a cloud deck). It scales the air's in-scattering, the sky
+   * light on surfaces and, via `sync` with a backdrop, the sky and sun disc. Surfaces also multiply their own
+   * `sunVisibility` into the direct light.
+   */
+  readonly sunVisibility = uniform(1);
   /** Body frame to view space (the planet's rotation, then the camera's inverse), for the slab's up and sun. */
   readonly bodyToView = uniform(new Matrix3());
   /** Metres per world unit of the planet mesh. */
@@ -160,6 +166,7 @@ export class PlanetAtmosphereBinding {
 
     if (!backdrop) return;
     backdrop.exposure.value = this.exposure.value;
+    backdrop.sunVisibility.value = this.sunVisibility.value as number;
     backdrop.setAltitude(altitude);
     backdrop.frame.value.copy(this.frameMatrix);
     this.model.setSunDirection(this.sunLocal.x, this.sunLocal.y, this.sunLocal.z);
@@ -199,7 +206,7 @@ export class PlanetAtmosphereBinding {
       const sunT = model.sunTransmittance(float(0), model.uRadius, muSun);
       const direct = sunT.mul(max(muSun, 0)).mul(sunVisibility);
       const sky = model.skyIrradiance(float(0), muSun);
-      const lit = surface.albedo.mul(direct.add(sky)).mul(model.uSunIrradiance).div(Math.PI).mul(this.exposure);
+      const lit = surface.albedo.mul(direct.add(sky.mul(this.sunVisibility))).mul(model.uSunIrradiance).div(Math.PI).mul(this.exposure);
       return emissive ? lit.add(emissive) : lit;
     };
   }
@@ -242,7 +249,7 @@ export class PlanetAtmosphereBinding {
       cosNu: dot(dirView, sunView),
       muSun: dot(normalize(context.sphereNormal), this.sunBody),
     });
-    return color.mul(haze.transmittance).add(haze.radiance.mul(this.exposure));
+    return color.mul(haze.transmittance).add(haze.radiance.mul(this.exposure).mul(this.sunVisibility));
   }
 
   private sphericalPerspective(): (context: IAtmospherePlanetContext, color: any) => any {
@@ -254,7 +261,7 @@ export class PlanetAtmosphereBinding {
           const clip = cameraProjectionMatrix.mul(vec4(positionView, 1));
           const ndc = clip.xy.div(clip.w);
           const haze = table.lookup(ndc, context.cameraDistance.mul(this.metersPerUnit), normalize(positionView));
-          return color.mul(haze.transmittance).add(haze.radiance.mul(this.exposure));
+          return color.mul(haze.transmittance).add(haze.radiance.mul(this.exposure).mul(this.sunVisibility));
         })();
     }
     return (context, color) =>
@@ -276,7 +283,7 @@ export class PlanetAtmosphereBinding {
           maxDistance: distance,
           steps: this.steps,
         });
-        return color.mul(m.transmittance).add(m.radiance.mul(this.exposure));
+        return color.mul(m.transmittance).add(m.radiance.mul(this.exposure).mul(this.sunVisibility));
       })();
   }
 }

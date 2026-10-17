@@ -83,6 +83,10 @@ export class AtmosphereBackdrop {
   readonly groundEnabled = uniform(1);
   /** 0..1, how strongly the ground checker shows. */
   readonly checkerStrength = uniform(1);
+  /** 0..1, how much of the sun reaches the planet; scales the whole sky and the sun disc (an eclipse). */
+  readonly sunVisibility = uniform(1);
+  /** 0..1 coverage of the sky over what is behind it; below 1 the sky blends into the scene (the morph crossfades it out). */
+  readonly opacity = uniform(1);
   /** Multiplies the sun disc brightness; 0 hides it. */
   readonly sunDiscStrength = uniform(1);
 
@@ -125,7 +129,7 @@ export class AtmosphereBackdrop {
     const material = new NodeMaterial();
     material.depthTest = false;
     material.depthWrite = false;
-    material.transparent = false;
+    material.transparent = true;
 
     // Clip-space quad; each corner's view-space ray is interpolated (linear in screen space, so exact).
     material.vertexNode = vec4(positionLocal.xy, 0, 1);
@@ -189,8 +193,8 @@ export class AtmosphereBackdrop {
         colour.addAssign(march.transmittance.mul(radiance).mul(mask).mul(this.sunDiscStrength));
       });
 
-      const exposed: any = max(colour.mul(this.exposure), 0);
-      return vec4(exposed, 1);
+      const exposed: any = max(colour.mul(this.exposure).mul(this.sunVisibility), 0);
+      return vec4(exposed, this.opacity);
     })();
 
     this.material = material;
