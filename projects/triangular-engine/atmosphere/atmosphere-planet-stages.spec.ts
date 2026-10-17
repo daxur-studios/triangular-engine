@@ -165,7 +165,11 @@ describe('planet material atmosphere stages on the GPU', () => {
       color: { itemSize: 3, values: corners.map(() => [0.5, 0.5, 0.5]) },
     });
 
-  const pixel = async (material: PlanetSurfaceMaterial) => (await renderRgba([meshOf(triangle(), material)], VIEW))(64, 32);
+  const pixel = async (material: PlanetSurfaceMaterial) => {
+    // The triangle lies in z = 0; a body centre far behind it makes the shaded point's radial direction +z, as its normal.
+    material.morph.uBodyCentreScene.value.set(0, 0, -100);
+    return (await renderRgba([meshOf(triangle(), material)], VIEW))(64, 32);
+  };
 
   it('lights the surface from the atmosphere: bright towards the sun, dark away from it, and hazed from a distance', async () => {
     const model = smallPlanetModel();

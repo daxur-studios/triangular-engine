@@ -40,7 +40,7 @@ describe('cellLookupLayer on the GPU', () => {
     const rows = texels.map(([x, y]) => [texelDirection(x, y)]);
     const out = await evaluateOnGpu(rows, (at) => {
       const sample = lookup.layer(
-        { sphereNormal: at(0).xyz } as any,
+        { radialDirection: at(0).xyz } as any,
         { albedo: vec3(0.2, 0.2, 0.2), roughness: 1, metalness: 0 } as any,
       );
       return vec4(sample.albedo, 1);

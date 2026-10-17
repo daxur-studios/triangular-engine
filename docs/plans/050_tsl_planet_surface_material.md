@@ -10,7 +10,7 @@ runbook: /docs/runbook/050_tsl_planet_surface_material.md
 # Plan 050: TSL Planet Surface Material
 
 Status: **in progress, owner: local Sonnet session.** Phase 0 spike: **go** (2026-10-16). Workspace on
-three **0.186.1**. Phase 1 built and its visual gate passed (user, 2026-10-16). Phases 2, 3 and 4 built (specs + builds pass); Phase 5 docs written (user doc, SKILL.md, CHANGELOG, entry-points); token-map registration done (2026-10-17); dynamic projection (`uProjMode`) works on streamed tiles in `cell-planet-tsl` with relief shading (user-confirmed 2026-10-17); TSL perf numbers recorded in the runbook (2026-10-17; GLSL comparison run, but run-to-run noise is 2x so no speed verdict).
+three **0.186.1**. Phase 1 built and its visual gate passed (user, 2026-10-16). Phases 2, 3 and 4 built (specs + builds pass); Phase 5 docs written (user doc, SKILL.md, CHANGELOG, entry-points); token-map registration done (2026-10-17); dynamic projection (`uProjMode`) works on streamed tiles in `cell-planet-tsl` with relief shading (user-confirmed 2026-10-17); TSL perf numbers recorded in the runbook (2026-10-17; 3-round alternating suite against GLSL: TSL is slower than GLSL at morph 0 and 0.5, batching on is 25-30 % slower on WebGL2 and has no effect on WebGPU); review fixes applied locally (2026-10-17, uncommitted).
 the Phase 2 and 3 gates (pixel parity against the GLSL demo; "shows everything the GLSL demo shows") and the Phase 4 demo
 check are still open (need a visible window). Open issue, not a blocker: the batching toggle halves WebGL frame rate in
 `cell-planet-tsl` (see the runbook).

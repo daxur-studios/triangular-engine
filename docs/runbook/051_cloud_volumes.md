@@ -380,3 +380,77 @@ Inside, s32, scale 1, total ms: base 11.22, jitter off 10.85, no fetch 13.87, li
 ### Checked
 - Specs 8/8, `tsc` clean, `npm run build:triangular-engine` passes. By eye on WebGPU (edge preset): clouds look like the box mesh version at the same camera; no console errors.
 - Not checked: a view where the planet crosses the cloud box, the x1 pass mode, or silhouette halos at the planet's edge (the sharpness 40 is a first value, not tuned). Not measured: the lab matrix has to be re-run for the new block.
+
+### 2b step 3 measured (maintainer's GPU, WebGPU, canvas 2560x1308)
+
+GPU render ms; cloud columns net of "off" in the same block. For the pass block, "off" is the pass with no volume.
+
+| box mesh, canvas x1 | off | net16 | net24 | net32 |
+|---|---|---|---|---|
+| outside | 0.95 | 0.17 | 0.21 | 0.30 |
+| edge | 0.86 | 4.51 | 6.48 | 8.26 |
+| inside | 0.65 | 5.95 | 8.32 | 10.59 |
+| above | 1.68 | 2.71 | 3.65 | 4.34 |
+| below | 0.54 | 5.73 | 8.10 | 10.47 |
+
+| screen pass x0.5, canvas x1 | off | net16 | net24 | net32 |
+|---|---|---|---|---|
+| outside | 1.75 | 0.15 | 0.17 | 0.23 |
+| edge | 1.63 | 1.14 | 1.59 | 2.04 |
+| inside | 1.52 | 1.42 | 1.97 | 2.59 |
+| above | 2.57 | 0.69 | 0.94 | 1.13 |
+| below | 1.38 | 1.38 | 1.96 | 2.54 |
+
+(The box mesh x0.5 block matches step 2 within noise; inside s32 x1 total 11.27 ms.)
+
+- The pass at canvas x1 costs what the box mesh costs at canvas x0.5: inside s24 net 1.97 ms against 8.32 ms for the mesh, about 4.2x less. Full-resolution output, quarter-resolution cost.
+- The pass adds a fixed cost: "off" rises by about 0.9 ms (inside 1.52 against 0.65; outside 1.75 against 0.95), the scene render target plus the composite. It is paid whether or not a cloud is on screen.
+- Totals, inside s24: pass 1.52 + 1.97 = 3.5 ms against mesh 0.65 + 8.32 = 9.0 ms. Outside, the mesh is cheaper (0.95 + 0.21 = 1.2 ms against 1.75 + 0.17 = 1.9 ms); the pass wins whenever the cloud covers many pixels.
+- Not yet looked at: silhouette halos at the planet edge, a planet crossing the box, and the x1 pass setting (a full-resolution pass would show whether the fixed cost drops when the cloud is cheap).
+
+## 2026-10-17: Lab additions before step 4 (many volumes, ground and horizon views, fly-by)
+
+The maintainer pointed out that every test so far used one cloud box floating over a plain planet, with five camera spots and no motion. Step 4 (temporal reuse) can only be judged in motion and Phase 6 needs many volumes, so the lab gained, before any step 4 work:
+
+- **Volume count 1 / 4 / 12.** Extra volumes sit on the great circle through the main one, 700 m apart, at alternating heights (centre 250 m, or 60 m so their bottoms cross the ground), each turned to the local up, each with its own noise seed and light bake. Settings (steps, extinction, jitter, fetch, rebake) apply to all.
+- **`horizon` and `ground` camera presets** (looking along that circle at 200 m and 45 m altitude). They show clouds against the planet and boxes the planet crosses. They are also part of the matrix, so a matrix run now has seven rows.
+- **Fly-by test (2 x 20 s).** A scripted camera pass along the circle at 250 m, 2.4 km at 120 m/s, once with box meshes and once with the half-resolution pass, reporting average, 95th percentile and worst GPU sample (one sample per 10 frames). It uses the current volume count and settings. The matrix header now also prints the volume count.
+
+### Found
+- **Texture-binding limit.** Marching 12 volumes in one shader needs 25 sampled textures (two atlases each plus depth), and a WebGPU fragment stage allows 16 by default (this adapter reports 48 as a higher limit, which has to be requested at device creation, and other GPUs will differ). The first try rendered nothing. `CloudVolumeScreenPass` now marches at most 6 volumes per cloud target (13 textures) and composites the chunks far to near; 12 volumes give two targets. This is a stop-gap that costs one more half-resolution target and one more upsample per chunk. It also means per-volume atlases do not scale to a planet covered in clouds: Phase 6 needs shared atlases (one density and one light texture holding many volumes' bricks) or a different path for far clouds, whichever the plan picks.
+- **No ordering between volumes** inside a chunk or across chunks (list order = far to near). The lab list is not sorted by distance, so overlapping boxes can composite in the wrong order when the camera moves. Real coverage needs a per-frame sort.
+- By eye, 12 volumes at the horizon preset draw correctly in both modes; box mesh 5.4 ms, pass 3.6 ms in the (small) preview pane, not comparable with the maintainer's canvas. The maintainer's matrix and fly-by runs are still to come.
+
+### Lab additions measured, one volume (maintainer's GPU, WebGPU, canvas 2560x1308)
+
+Matrix with the new `horizon` and `ground` rows (other rows match steps 1-3 within noise: inside s24 net 8.23 ms mesh, 2.03 ms pass). GPU render ms, cloud columns net of "off":
+
+| view | block | off | net16 | net24 | net32 |
+|---|---|---|---|---|---|
+| horizon | box mesh x1 | 0.79 | 0.14 | 0.21 | 0.24 |
+| horizon | screen pass x0.5 | 1.71 | 0.12 | 0.16 | 0.14 |
+| ground | box mesh x1 | 1.02 | 1.71 | 2.38 | 3.00 |
+| ground | box mesh, canvas x0.5 | 0.31 | 0.49 | 0.60 | 0.75 |
+| ground | screen pass x0.5 | 1.87 | 0.54 | 0.76 | 0.88 |
+
+Fly-by, 1 volume, **64 steps**, 2.4 km at 120 m/s, 250 m altitude, whole frame (clouds on, nothing subtracted), one sample per 10 frames:
+
+| mode | avg | p95 | max | samples |
+|---|---|---|---|---|
+| box mesh | 3.05 | 13.83 | 16.45 | 273 |
+| screen pass x0.5 | 2.49 | 5.11 | 6.03 | 320 |
+
+- The new views are cheap for one volume: horizon is about 0.2 ms net either way, ground about 2.4 ms (mesh) and 0.8 ms (pass) at s24. The box that the planet crosses is not a cost problem for one volume.
+- The fly-by shows what the five still views hid: the mesh averages 3.05 ms but spikes to 13.8 (p95) and 16.5 (max) when the camera is inside or at the edge; the pass spikes to 5.1 and 6.0, about 2.7x lower at the same 64 steps, with a lower average too (2.49) despite its fixed cost of about 0.9 ms. The pass's worst frame is the more important number for the G6 worst-case budget.
+- Not comparable with G6 yet: the fly-by is whole-frame and at 64 steps, while the matrix tables are cloud-only at 24. Rerun at 24 steps (the setting G6 is judged at) and at 4 and 12 volumes.
+- Not yet run: 4 and 12 volumes (matrix and fly-by).
+
+### Fly-by, 12 volumes, 64 steps (maintainer's GPU, WebGPU)
+
+| mode | avg | p95 | max | samples |
+|---|---|---|---|---|
+| box mesh | 9.40 | 18.55 | 24.18 | 167 |
+| screen pass x0.5 (2 cloud targets) | 5.03 | 7.14 | 7.86 | 269 |
+
+- Against one volume (3.05 / 13.83 / 16.45 mesh; 2.49 / 5.11 / 6.03 pass): the mesh average triples (every overlapping box is marched at full resolution), the pass average doubles (+2.5 ms for 11 more volumes, about 0.23 ms each) and its worst frame rises only from 6.0 to 7.9 ms. The pass scales much better, but is still whole-frame at 64 steps, so not yet comparable with G6.
+- Only the fly-by at 64 steps was reported; the 24-step runs and the 4-volume runs are still open.

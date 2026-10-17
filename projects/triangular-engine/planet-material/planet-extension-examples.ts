@@ -36,7 +36,7 @@ export function roadLayer(options: IRoadLayerOptions = {}): {
 
   const layer: SurfaceLayer = (context, below) => {
     // Angular distance from the great circle: asin of the normal's component along the circle's axis.
-    const distance = abs(asin(clamp(dot(normalize(context.sphereNormal), axis), -1, 1)));
+    const distance = abs(asin(clamp(dot(normalize(context.radialDirection), axis), -1, 1)));
     // Solid in the middle, a soft edge over the outer 30%.
     const mask = float(1).sub(smoothstep(halfWidth.mul(0.7), halfWidth, distance)).mul(opacity);
     return {
@@ -82,7 +82,7 @@ export function moonEclipseOcclusion(options: IMoonEclipseOptions = {}): {
   const sunAngularRadius: any = uniform(options.sunAngularRadius ?? 0.0047);
 
   const occlusion: SunOcclusion = (context) => {
-    const point = normalize(context.sphereNormal).mul(planetRadius);
+    const point = normalize(context.radialDirection).mul(planetRadius);
     const toMoon = moonPosition.sub(point);
     const distance = max(length(toMoon), float(1e-4));
     const moonAngle = asin(clamp(moonRadius.div(distance), 0, 1));
@@ -109,7 +109,7 @@ export function nightLightsEmissive(options: { color?: string | Color; strength?
     color,
     strength,
     emissive: (context) => {
-      const sunDot = dot(normalize(context.sphereNormal), normalize(sunDirection));
+      const sunDot = dot(normalize(context.radialDirection), normalize(sunDirection));
       // 1 deep in the night, 0 by the terminator.
       const night = float(1).sub(smoothstep(float(-0.15), float(0.05), sunDot));
       return vec3(color).mul(strength).mul(night);

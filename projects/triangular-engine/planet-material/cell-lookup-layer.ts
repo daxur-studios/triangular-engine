@@ -72,7 +72,7 @@ export function cellLookupLayer(): ICellLookupLayer {
   const idsNode: any = texture(cellIds);
 
   const layer: SurfaceLayer = (context: IPlanetContext, below: ISurfaceSample) => {
-    const direction = context.sphereNormal.normalize();
+    const direction = context.radialDirection.normalize();
     const encoded = idsNode.sample(cellAtlasUv(direction)).level(float(0));
     const cellId = floor(encoded.r.mul(255).add(0.5)).add(floor(encoded.g.mul(255).add(0.5)).mul(256));
     const colour = dataNode.sample(vec2(cellId.add(0.5).div(cellTextureWidth), float(0.5))).level(float(0));

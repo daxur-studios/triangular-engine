@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { moonEclipseOcclusion, nightLightsEmissive, roadLayer } from './planet-extension-examples';
+import { createPlanetDayNightUniforms, simpleDayNightLighting } from './planet-lighting';
 import { PlanetSurfaceMaterial } from './planet-surface-material';
 import { SURFACE_LAYER_ORDER } from './planet-surface-layers';
 import { meshOf, renderRgba, triangleWith } from './render-eval.testing';
@@ -19,7 +20,12 @@ function tri(normal: number[]) {
   });
 }
 
-async function pixel(material: PlanetSurfaceMaterial, normal: number[]) {
+/**
+ * Renders the triangle and reads its centre pixel. The triangle lies in the z = 0 plane, so a far-away body centre
+ * at `-radial * 100` makes the shaded point's radial direction `radial` (to within 2e-4 rad), whatever `normal` is.
+ */
+async function pixel(material: PlanetSurfaceMaterial, normal: number[], radial: number[] = normal) {
+  material.morph.uBodyCentreScene.value.set(-radial[0] * 100, -radial[1] * 100, -radial[2] * 100);
   const read = await renderRgba([meshOf(tri(normal), material)], VIEW, undefined, ambient);
   return read(64, 32);
 }
@@ -44,6 +50,19 @@ describe('planet extension examples on the GPU', () => {
       const off = await pixel(withRoad().material, farNormal);
       const offBaseline = await pixel(new PlanetSurfaceMaterial(), farNormal);
       expect(off[0]).toBeCloseTo(offBaseline[0], 4);
+      expect(off[2]).toBeCloseTo(offBaseline[2], 4);
+    });
+
+    it('follows the radial direction, not the relief-tilted surface normal', async () => {
+      // Radial direction on the equator (on the road); the normal is tilted 53 degrees off it, as on a steep slope.
+      const tilted = [0, 0.8, 0.6];
+      const equator = [0, 0, 1];
+      const baseline = await pixel(new PlanetSurfaceMaterial(), tilted, equator);
+      const onRoad = await pixel(withRoad(0.2).material, tilted, equator);
+      expect(onRoad[2]).toBeGreaterThan(baseline[2] + 0.02);
+      // The mirror case: radial direction 53 degrees off the road, normal on the equator: no road.
+      const offBaseline = await pixel(new PlanetSurfaceMaterial(), equator, tilted);
+      const off = await pixel(withRoad(0.2).material, equator, tilted);
       expect(off[2]).toBeCloseTo(offBaseline[2], 4);
     });
 
@@ -147,6 +166,21 @@ describe('planet extension examples on the GPU', () => {
       const night = await pixel(make(), [0, 0, 1]);
       expect(night[1]).toBeGreaterThan(baseline[1] + 0.3);
       expect(night[0]).toBeCloseTo(baseline[0], 3);
+    });
+
+    it('keeps the lights at full strength on the night side under day/night lighting', async () => {
+      const lights = nightLightsEmissive({ color: '#00ff00', strength: 0.5 });
+      const day = createPlanetDayNightUniforms();
+      day.uDayNightEnabled.value = 1;
+      day.uSunDirection.value.set(0, 0, -1);
+      lights.sunDirection.value.set(0, 0, -1); // night at the point
+      const plain = new PlanetSurfaceMaterial({ lighting: { id: 'dayNight', stage: simpleDayNightLighting(day) } });
+      const lit = new PlanetSurfaceMaterial({ lighting: { id: 'dayNight', stage: simpleDayNightLighting(day) } });
+      lit.addEmissive({ id: 'cityLights', emissive: lights.emissive });
+      const without = await pixel(plain, [0, 0, 1]);
+      const withLights = await pixel(lit, [0, 0, 1]);
+      // The night floor dims the lit colour only: the green channel gains the whole emissive 0.5 (not 0.5 x 0.018).
+      expect(withLights[1] - without[1]).toBeGreaterThan(0.45);
     });
   });
 });

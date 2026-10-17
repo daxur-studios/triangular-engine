@@ -245,13 +245,28 @@ material: culled with the mask, drawn without it.
   | morph 1 | 7.9 (127) | 17.3 (58) | 16.5 (61), 1 draw |
 
   Page load to first frame: GLSL 305 ms, TSL 924-1641 ms (shader compile and node build).
-  - Run-to-run noise on the same backend is 2x (TSL WebGL2 morph 0: 10.1 ms then 20.6 ms; all eight scenarios shifted,
-    and in run 2 the batching-on-slower pattern is only visible at morph 0). The GPU/machine state dominates, so the
-    absolute numbers and the "batching on is 20-30 % slower on WebGL2" claim above are not established. Treat the
-    WebGPU-vs-WebGL2 ordering the same way.
-  - The GLSL page sits between the two TSL runs, so no TSL-vs-GLSL speed verdict follows. What is firm: TSL costs about
-    3-5x the first-frame time of GLSL, and neither is below 48 fps on a 2560x1308 canvas at 1.5 dpr.
-  - To settle it: run TSL and GLSL back to back, alternating, three times each, with other GPU work closed.
+  - These two single runs differed 2x (TSL WebGL2 morph 0: 10.1 ms then 20.6 ms). The three-round suite below did not
+    reproduce that, so it was machine state (other GPU work), not the page. The suite supersedes both runs.
+- **Suite result, 3 alternating rounds (2026-10-17, visible tab, ~165 Hz display, nothing under 5 fps):** the rounds agree
+  within about 5 %, so these are established numbers for this machine. Mean frame ms (range over the 3 rounds).
+
+  | scenario | GLSL (1 draw) | TSL WebGL2, batching on (5-7 draws) | TSL WebGL2, batching off (36-48 draws) | TSL WebGPU (36-48 draws, on = off) |
+  |---|---|---|---|---|
+  | morph 0 | 6.1 (cap) | 9.5-10.1 | 7.4-7.7 | 9.6-9.9 |
+  | morph 0.5 | 6.1 (cap) | 8.2-8.7 | 6.6-6.7 | 9.0-9.3 |
+  | morph 1 | 6.1 (cap) | 6.6-7.6 | 6.1 (cap) | 7.4-7.8 |
+
+  First frame: GLSL 82-91 ms, TSL WebGL2 1022-1047 ms, TSL WebGPU 893-918 ms. Atmosphere off at morph 0
+  gives 6.1 ms on WebGPU and 6.1-6.8 ms on WebGL2. Findings:
+  - **Batching on is 25-30 % slower on the TSL WebGL2 path**, in every round and at morph 0 and 0.5, although it cuts draws
+    from 36-48 to 5-7. This reverses the "not established" note above; the cause is still open (the earlier unsorted-draw
+    hypothesis is untested).
+  - **On WebGPU batching has no effect** (same time, same 36-48 draws): the backend issues one draw per instance.
+  - **WebGPU is slower than WebGL2 with batching off** (about 9.6 vs 7.5 ms at morph 0); with batching on they are close.
+  - **TSL is slower than GLSL at morph 0 and 0.5 on every variant.** GLSL is at the display cap, so its headroom is not
+    measured; only TSL WebGL2 with batching off at morph 1 (and with the atmosphere off) reaches the cap too.
+  - **Caveats.** The scenes are not identical (GLSL has 42560 triangles at morph 0.5 against 90472 for TSL), and the first
+    row of each run still shows ~95 resident tiles against ~115 later, so it is slightly flattered.
 - **GLSL benchmark button (2026-10-17):** `/cell-planet-morph-streaming` has the same "run benchmark + copy" (shared
   `frame-benchmark.ts`). Scenarios: morph 0 / 0.5 / 1 in the 'material' colour mode, no batching or atmosphere variants (the
   GLSL page has neither toggle). Run it in a visible tab and compare with the morph rows of the TSL tables above.
@@ -430,3 +445,34 @@ Not done:
 - **Perf numbers** (frame time and first-compile time vs the GLSL demo, WebGPU and `forceWebGL`). They need a visible window: the in-app pane runs at 1 FPS when hidden. Measure with the batching toggle in `/cell-planet-tsl` and the stats panel, at an idle machine, and record them here.
 - **`daxur tokens map` registration** of `planet-material` (and `atmosphere`): `tokens map status` lists neither as a tracked section; register them with the maintainer, not from this session (Plan 049 shares the manifest).
 - Delete the throwaway `/tsl-webgpu-spike` page once the benchmark re-run is final.
+
+## Review fixes (2026-10-17, local session; checked against the working tree, not committed)
+
+Fixes for the planet-material review check above, in order:
+
+1. **`radialDirection` on `IPlanetContext`** (also on `IPlanetMorphGraph` and the atmosphere stages' structural context). It is
+   `normalize(modelWorldMatrix * bodyFixedLocal - uBodyCentreScene)`, the same point the fragment seam check already used, so
+   it needs no new varying. `cellLookupLayer`, `latLon`, `roadLayer`, `moonEclipseOcclusion`, `nightLightsEmissive` and the
+   atmosphere slab `muSun` / spherical `surfacePoint` use it. `sphereNormal` stays for shading (day/night, N.L). Specs: a
+   tilted-normal road test (radial on the road, normal 53 degrees off, and the mirror case). Existing specs that fake a
+   sphere with a flat triangle now put the body centre far behind it (`-radial * 100`) so the radial direction is the intended one.
+2. **Lighting stages keep emissive light.** `simpleDayNightLighting` and `sunVisibilityLighting` now compute
+   `(color - emissive) * factor + emissive`. Spec: day/night plus `nightLightsEmissive` on the night side, where the city
+   lights keep their full strength instead of being scaled by the night floor.
+3. **`cell-planet-tsl`:** the map frame is shifted `+radius` in z like the ocean (shared `shiftToPlanetCentre`). The projection
+   button now reloads with `?projection=` instead of switching live, because the tiles, ocean, frame and grid all bake it;
+   the worker request uses `projectionKind()` (it was hard-coded to Equal Earth). `setCells` reads `cellsOn()` after the
+   await and guards a second atlas request. The benchmark's `isSettled` also waits for the surface's `queued` and for
+   pending worker mesh requests.
+4. **Dynamic mode** uses `(0, 0, 1)` as the flat normal (as the GLSL does) and the comment says why; the `normalize` of the
+   sphere/flat blend is guarded (falls back to the flat normal when the blend is under 1e-4 long, as at morph 0.5 on the far side).
+5. **Seam without `aOtherDir`:** a GPU test now renders the seam-spanning triangle with `seamCullAttributes` off and no
+   `aOtherDir*` attributes (the streaming path) and expects it culled, plus a plain triangle kept. The cull was tightened by
+   lowering `SEAM_LON_MISMATCH` from 0.5 to 0.3 rad (an ordinary triangle agrees to a few hundredths of a radian). The
+   wrapped-angle variant was not used: it gives the same values. **The tighter threshold is verified by the specs only, not
+   on the live demo's coarse tiles:** if streaming tiles near the poles show holes, raise it again.
+
+`QuadMesh.geometry` in `gpu-eval.testing.ts` is shared and was not disposed.
+
+Verification: `npm run test:triangular-engine:planet-material` 69/69 and `:atmosphere` 136/136 (headless), demo app type-checks.
+Not verified visually.

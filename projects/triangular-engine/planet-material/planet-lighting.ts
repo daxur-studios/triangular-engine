@@ -84,7 +84,7 @@ export function simpleDayNightLighting(uniforms: IPlanetDayNightUniforms): Light
   const sunsetGlow = uniforms.uSunsetGlow as any;
   const nightColor = uniforms.uNightColor as any;
 
-  return (context, { color, sunVisibility }) => {
+  return (context, { color, sunVisibility, emissive }) => {
     const sunDot = dot(normalize(context.sphereNormal), normalize(sunDirection));
     const tw = max(float(0.01), twilightWidth);
     const dayFactor = smoothstep(tw.negate(), tw, sunDot).mul(sunVisibility);
@@ -95,7 +95,9 @@ export function simpleDayNightLighting(uniforms: IPlanetDayNightUniforms): Light
       sunsetTint.mul(sunsetRim).mul(float(1).sub(dayFactor.mul(0.6))),
     );
     // A blend, not a `select`: it is continuous, and a disabled stage returns the input colour exactly.
-    return color.mul(mix(vec3(1, 1, 1), lightMod, clamp(enabled, 0, 1)));
+    // The emissive stack is already in `color` and is not lit by the sun: dim only the lit part, then add it back.
+    const factor = mix(vec3(1, 1, 1), lightMod, clamp(enabled, 0, 1));
+    return emissive ? color.sub(emissive).mul(factor).add(emissive) : color.mul(factor);
   };
 }
 
@@ -106,5 +108,9 @@ export function simpleDayNightLighting(uniforms: IPlanetDayNightUniforms): Light
  */
 export function sunVisibilityLighting(options: { floor?: number } = {}): LightingStage {
   const floor = options.floor ?? 0.15;
-  return (_context, { color, sunVisibility }) => color.mul(mix(float(floor), float(1), sunVisibility));
+  return (_context, { color, sunVisibility, emissive }) => {
+    const factor = mix(float(floor), float(1), sunVisibility);
+    // Emissive light is not sun light: it is already in `color`, so dim only the rest.
+    return emissive ? color.sub(emissive).mul(factor).add(emissive) : color.mul(factor);
+  };
 }

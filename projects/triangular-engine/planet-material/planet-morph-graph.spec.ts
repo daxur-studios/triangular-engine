@@ -31,7 +31,7 @@ describe('planetMorphGraph on the GPU', () => {
     Math.cos(lat) * Math.cos(lon),
   ];
 
-  function triangleGeometry(corners: [number, number][]): BufferGeometry {
+  function triangleGeometry(corners: [number, number][], otherDirs = true): BufferGeometry {
     const dirs = corners.map(([lon, lat]) => dirAt(lon, lat));
     const geometry = new BufferGeometry();
     const flat = (fill: (k: number) => number[]) =>
@@ -41,8 +41,10 @@ describe('planetMorphGraph on the GPU', () => {
     geometry.setAttribute('color', flat(() => [1, 1, 1]));
     geometry.setAttribute('aFlatPos', flat(() => [0, 0, 0]));
     geometry.setAttribute('aFlatNorm', flat(() => [0, 0, 1]));
-    geometry.setAttribute('aOtherDir1', flat((k) => dirs[(k + 1) % 3]));
-    geometry.setAttribute('aOtherDir2', flat((k) => dirs[(k + 2) % 3]));
+    if (otherDirs) {
+      geometry.setAttribute('aOtherDir1', flat((k) => dirs[(k + 1) % 3]));
+      geometry.setAttribute('aOtherDir2', flat((k) => dirs[(k + 2) % 3]));
+    }
     return geometry;
   }
 
@@ -105,6 +107,21 @@ describe('planetMorphGraph on the GPU', () => {
 
   it('culls a triangle that straddles the antimeridian and keeps one that does not', async () => {
     const alpha = await alphaOf(dynamicMaterial(), [seamTriangle(), plainTriangle()]);
+    expect(alpha(...plainPixel)).withContext('plain triangle').toBeGreaterThan(0.5);
+    expect(alpha(...seamSpanPixel)).withContext('seam-spanning triangle').toBe(0);
+  });
+
+  it('culls the seam-spanning triangle with no aOtherDir attributes (the streaming tiles\' path)', async () => {
+    const material = new PlanetSurfaceMaterial(); // seamCullAttributes off: only the fragment-side checks remain
+    material.morph.uMorph.value = 1;
+    material.morph.uProjMode.value = 1;
+    material.morph.uProjectionType.value = 0;
+    material.morph.uMapWidth.value = 2 * Math.PI;
+    material.morph.uMapHeight.value = Math.PI;
+    material.morph.uRadius.value = 1;
+    const seam = triangleGeometry([[Math.PI - 0.1, -0.1], [-Math.PI + 0.1, -0.1], [Math.PI - 0.1, -0.5]], false);
+    const plain = triangleGeometry([[-0.3, 0.7], [0.3, 0.7], [0, 1.0]], false);
+    const alpha = await alphaOf(material, [seam, plain]);
     expect(alpha(...plainPixel)).withContext('plain triangle').toBeGreaterThan(0.5);
     expect(alpha(...seamSpanPixel)).withContext('seam-spanning triangle').toBe(0);
   });

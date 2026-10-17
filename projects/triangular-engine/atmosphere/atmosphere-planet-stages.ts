@@ -17,6 +17,8 @@ const FLAT_MAP_MORPH = 0.999;
 export interface IAtmospherePlanetContext {
   /** Sphere-space unit direction of the surface point (the planet's body frame). */
   readonly sphereNormal: any;
+  /** Radial unit direction of the surface point: the sun angle and surface point for haze use this, not the relief-tilted normal. */
+  readonly radialDirection: any;
   /** Distance from the camera to the fragment, in world units. */
   readonly cameraDistance: any;
 }
@@ -266,7 +268,7 @@ export class PlanetAtmosphereBinding {
       distance,
       cameraHeight: max(dot(toCamera, upView).mul(mpu), distance.mul(elevationFloor)),
       cosNu: dot(dirView, sunView),
-      muSun: dot(normalize(context.sphereNormal), this.sunBody),
+      muSun: dot(normalize(context.radialDirection), this.sunBody),
     });
     return color.mul(haze.transmittance).add(haze.radiance.mul(this.exposure).mul(this.sunVisibility));
   }
@@ -292,7 +294,7 @@ export class PlanetAtmosphereBinding {
         const ez = cross(ex, up);
         const toLocal = (v: any) => vec3(dot(v, ex), dot(v, up), dot(v, ez));
 
-        const surfacePoint = context.sphereNormal.mul(model.uRadius);
+        const surfacePoint = context.radialDirection.mul(model.uRadius);
         const dirBody = normalize(surfacePoint.sub(this.cameraBody));
         const distance = context.cameraDistance.mul(this.metersPerUnit);
         const m = model.march({

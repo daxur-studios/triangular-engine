@@ -88,6 +88,9 @@ const query = new URLSearchParams(globalThis.location?.search ?? '');
 const BACKEND: 'webgpu' | 'webgl2' =
   query.get('backend') === 'webgl2' ? 'webgl2' : 'webgpu';
 const ANTIALIAS = query.get('aa') === '1';
+/** The map projection is baked into the streamed tiles, the ocean, the frame and the grid, so it is chosen at load. */
+const PROJECTION: MapProjectionKind =
+  query.get('projection') === 'equirectangular' ? 'equirectangular' : 'equalEarth';
 const TILES = query.get('tiles') !== '0';
 /** `?atmosphere=0` leaves the material on its stock lighting (the atmosphere is built once, at setup). */
 const ATMOSPHERE = query.get('atmosphere') !== '0';
@@ -185,13 +188,8 @@ const MACRO: 'off' | 'bodyFixed' | 'morphed' =
           {{ scrubbing() ? 'stop scrub' : 'scrub morph' }}
         </button>
         <button
-          (click)="
-            projectionKind.set(
-              projectionKind() === 'equalEarth'
-                ? 'equirectangular'
-                : 'equalEarth'
-            )
-          "
+          (click)="toggleProjection()"
+          title="Reloads: the projection is baked into the tiles, ocean, frame and grid"
         >
           {{
             projectionKind() === 'equalEarth'
@@ -456,7 +454,7 @@ export class CellPlanetTslPageComponent {
   readonly aa = ANTIALIAS;
   readonly radius = WORLD_SIZE_TIER_RADIUS_M.medium;
   readonly morphProgress = signal(0);
-  readonly projectionKind = signal<MapProjectionKind>('equalEarth');
+  readonly projectionKind = signal<MapProjectionKind>(PROJECTION);
   /** Project in the shader from the tracked basis instead of mixing the baked flat positions. */
   readonly dynamic = signal(false);
   /** The dynamic projection's centre, degrees: the basis is set by hand, not by the camera (as the spike's manual centre). */
@@ -503,6 +501,8 @@ export class CellPlanetTslPageComponent {
   };
   private readonly ocean = planetOceanMaterial({ morph: this.surface.morph });
   private oceanMesh?: Mesh;
+  /** True once the cell-id atlas was requested, so a second toggle while it loads does not request it again. */
+  private cellLookupLoaded = false;
   private readonly mapBorder = planetMapBorderMaterial(this.surface.morph, {
     color: '#38bdf8',
     opacity: 0.95,
@@ -770,7 +770,7 @@ export class CellPlanetTslPageComponent {
         edgeRefinementSegments: request.edgeRefinementSegments,
         reduction: 0.35,
         targetError: 0.08,
-        projectionKind: 'equalEarth',
+        projectionKind: this.projectionKind(),
         colorMode: 'material',
         heightScale: getTerrainHeightScaleM(this.radius, 4),
         worldProfile: CELL_PLANET_U0_FIXTURE.worldProfile,
@@ -779,6 +779,17 @@ export class CellPlanetTslPageComponent {
       this.worker.postMessage(workerRequest);
     });
   };
+
+  /** Translates a helper-built geometry (tangent-frame sphere, centre at -radius in z) so the planet centre is the origin. */
+  private shiftToPlanetCentre(geometry: BufferGeometry): void {
+    for (const name of ['position', 'aSpherePos']) {
+      const attribute = geometry.getAttribute(name);
+      if (!attribute || attribute.itemSize !== 3) continue;
+      for (let index = 2; index < attribute.array.length; index += 3)
+        attribute.array[index] += this.radius;
+      attribute.needsUpdate = true;
+    }
+  }
 
   /** The ocean shell and the map frame, built once: the demo has a fixed radius, projection and sea datum. */
   private addOceanAndFrame(): void {
@@ -793,13 +804,7 @@ export class CellPlanetTslPageComponent {
     ).geometry;
     // Same convention as the GLSL demo: the streamed terrain's sea datum is zero, and the helper's
     // tangent-frame sphere is translated to the origin.
-    for (const name of ['position', 'aSpherePos']) {
-      const attribute = ocean.getAttribute(name);
-      if (!attribute || attribute.itemSize !== 3) continue;
-      for (let index = 2; index < attribute.array.length; index += 3)
-        attribute.array[index] += radius;
-      attribute.needsUpdate = true;
-    }
+    this.shiftToPlanetCentre(ocean);
     ocean.computeBoundingSphere();
     this.oceanMesh = new Mesh(ocean, this.ocean.material);
     this.oceanMesh.name = 'tsl-ocean';
@@ -813,6 +818,9 @@ export class CellPlanetTslPageComponent {
       projectionKind: this.projectionKind(),
       clearance: radius * 0.0015,
     });
+    // The frame is built in the same tangent frame as the ocean: without the shift it sits a radius behind the globe mid-morph.
+    this.shiftToPlanetCentre(frame.geometry);
+    frame.geometry.computeBoundingSphere();
     this.mapBorderMesh = new Mesh(frame.geometry, this.mapBorder.material);
     this.mapBorderMesh.name = 'tsl-map-border';
     this.mapBorderMesh.renderOrder = 5;
@@ -1081,7 +1089,11 @@ export class CellPlanetTslPageComponent {
     try {
       const { report } = await runFrameBenchmark({
         scenarios,
-        isSettled: () => this.streaming.runtime.stats.queued === 0,
+        // Nothing queued in the runtime or the surface, and no mesh request still out at the worker.
+        isSettled: () =>
+          this.streaming.runtime.stats.queued === 0 &&
+          this.stats().queued === 0 &&
+          this.pending.size === 0,
         describe: () => {
           const t = this.stats();
           return `tiles ${this.tileStats().resident}, tris ${t.triangles}, draws ${this.drawCalls()}`;
@@ -1141,18 +1153,35 @@ export class CellPlanetTslPageComponent {
   async setCells(event: Event): Promise<void> {
     const on = (event.target as HTMLInputElement).checked;
     this.cellsOn.set(on);
-    if (on && this.cellLookup.enabled.value < 0.5) {
-      this.cellLookup.setLookup(
-        await this.streaming.requestCellLookup('material'),
-      );
+    if (on && !this.cellLookupLoaded) {
+      this.cellLookupLoaded = true;
+      try {
+        this.cellLookup.setLookup(
+          await this.streaming.requestCellLookup('material'),
+        );
+      } catch (error) {
+        this.cellLookupLoaded = false;
+        throw error;
+      }
     }
-    this.cellLookup.enabled.value = on ? 1 : 0;
+    // Read after the await: a toggle off (or on again) while the atlas was loading wins.
+    this.cellLookup.enabled.value = this.cellsOn() ? 1 : 0;
   }
 
   setMorph(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
     if (Number.isFinite(value))
       this.morphProgress.set(Math.max(0, Math.min(1, value)));
+  }
+
+  /** Reloads with the other projection: tiles, ocean, frame and grid all bake it, so a live switch would mix the two. */
+  toggleProjection(): void {
+    const url = new URL(globalThis.location.href);
+    url.searchParams.set(
+      'projection',
+      this.projectionKind() === 'equalEarth' ? 'equirectangular' : 'equalEarth',
+    );
+    globalThis.location.href = url.toString();
   }
 
   toggleSeamGlobe(): void {

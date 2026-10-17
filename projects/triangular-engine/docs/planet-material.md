@@ -63,7 +63,7 @@ const axis = uniform(new Vector3(0, 1, 0));
 const halfWidth = uniform(0.02);
 
 export const equatorRoad: SurfaceLayer = (context, below) => {
-  const distance = abs(asin(dot(context.sphereNormal, axis)));        // angle from a great circle
+  const distance = abs(asin(dot(context.radialDirection, axis)));     // angle from a great circle (radialDirection, not the relief-tilted sphereNormal)
   const on = float(1).sub(smoothstep(halfWidth.mul(0.6), halfWidth, distance));
   return {
     albedo: mix(below.albedo, vec3(new Color('#f2c14e')), on),

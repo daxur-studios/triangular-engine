@@ -72,7 +72,7 @@ export function createPlanetMorphUniforms(): IPlanetMorphUniforms {
 }
 
 /** Longitude mismatch (radians) between the interpolated and the true projected longitude that marks a seam-spanning fragment. */
-const SEAM_LON_MISMATCH = 0.5;
+const SEAM_LON_MISMATCH = 0.3;
 /** `|dot(dir, up)|` above which a fragment is within the projection's polar cap and exempt from that check (about 8 degrees). */
 const SEAM_POLE_EXEMPT = 0.99;
 
@@ -137,8 +137,10 @@ export interface IPlanetMorphGraph {
   readonly positionNode: any;
   /** `normalNode`: the morphed normal in view space. */
   readonly normalNode: any;
-  /** Sphere-space unit direction (varying). */
+  /** Sphere-space unit direction (varying). On terrain this is the surface normal, which tilts with relief. */
   readonly sphereNormal: any;
+  /** Unit direction from the planet centre to the shaded point (fragment stage): geography lookups use this, not the tilted normal. */
+  readonly radialDirection: any;
   /** Morphed local position before batching (varying). */
   readonly morphedLocal: any;
   /** Unmorphed local position with the batch translation applied (varying). The body-fixed sample point. */
@@ -220,9 +222,10 @@ export function planetMorphGraph(
   );
   const dynFlatPos = vec3(flatXY.x.sub(bodyShift.x), flatXY.y.sub(bodyShift.y), aFlatPos.z);
   const flatPos = select(dynamic, dynFlatPos, aFlatPos);
-  // The baked flat normal carries the terrain relief; the map's axes (east, north, up) do not depend on the
-  // projection centre, so it stays valid when re-centred (the GLSL material does the same).
-  const flatNorm = aFlatNorm;
+  // Static mode uses the baked flat normal, which carries the terrain relief for the baked projection centre. In
+  // dynamic mode the map is re-centred in the shader and that relief frame no longer matches, so the flat normal
+  // is plain +Z, as in the GLSL material.
+  const flatNorm = select(dynamic, vec3(0, 0, 1), aFlatNorm);
 
   let cull: any = float(0);
   if (seamCullAttributes) {
@@ -237,7 +240,10 @@ export function planetMorphGraph(
   }
 
   const morphedLocal = mix(aSpherePos, flatPos, morph);
-  const morphedNormal = normalize(mix(aSphereNorm, flatNorm, morph));
+  // Opposite normals (the far side of the globe against +Z) cancel at morph 0.5: fall back to the flat normal there.
+  const blendedNormal = mix(aSphereNorm, flatNorm, morph);
+  const blendedLength = length(blendedNormal);
+  const morphedNormal = select(blendedLength.greaterThan(1e-4), blendedNormal.div(blendedLength), flatNorm);
 
   const vProjLon: any = varying(select(dynamic, projLon, float(0)), 'vProjLon');
   // Constant 0 without aOtherDir attributes: do not spend an inter-stage slot (16 max) on it.
@@ -276,6 +282,7 @@ export function planetMorphGraph(
       options.lightingTurn ? normalize((options.lightingTurn as any).mul(aSphereNorm)) : morphedNormal,
     ),
     sphereNormal: vSphereNorm,
+    radialDirection: normalize(bodyDirFrag),
     morphedLocal: vMorphedLocal,
     bodyFixedLocal: vBodyFixedLocal,
     morphedBatchedLocal: vMorphedBatched,

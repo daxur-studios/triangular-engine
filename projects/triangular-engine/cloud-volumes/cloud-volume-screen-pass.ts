@@ -22,6 +22,9 @@ import type { CloudVolume } from './cloud-volume';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/** Volumes marched per cloud target (two sampled textures each, against WebGPU's limit of 16 per shader stage). */
+const VOLUMES_PER_TARGET = 6;
+
 export interface CloudVolumeScreenPassOptions {
   /** Cloud resolution per axis relative to the canvas. Default 0.5 (a quarter of the pixels). */
   scale?: number;
@@ -46,7 +49,7 @@ export class CloudVolumeScreenPass {
   debugView: 'none' | 'clouds' | 'surface' | 'depth' | 'ray' = 'none';
 
   private readonly scenePass: any;
-  private cloudNode: any;
+  private cloudNodes: any[] = [];
   private scale: number;
   private readonly uCloudSize = uniform(new Vector2(1, 1));
   private readonly uSharpness: any;
@@ -69,7 +72,6 @@ export class CloudVolumeScreenPass {
     this.scenePass = pass(scene, camera);
     this.pipeline = new RenderPipeline(renderer);
     this.rebuild();
-    for (const volume of volumes) volume.onMarchRebuilt = () => this.rebuild();
   }
 
   /** Changes the cloud resolution per axis relative to the canvas (1 = full). */
@@ -98,13 +100,14 @@ export class CloudVolumeScreenPass {
 
   dispose(): void {
     for (const volume of this.volumes) volume.onMarchRebuilt = undefined;
-    this.cloudNode?.dispose?.();
+    for (const node of this.cloudNodes) node.dispose?.();
     this.pipeline.dispose();
     this.scenePass.dispose?.();
   }
 
   /** Builds (or rebuilds, after a scale change or a march rebuild) the cloud target and the composite. */
   rebuild(): void {
+    for (const volume of this.volumes) volume.onMarchRebuilt = () => this.rebuild();
     const sceneColor = this.scenePass.getTextureNode('output');
     const sceneDepth = this.scenePass.getTextureNode('depth');
     const screenUv = uv();
@@ -113,13 +116,18 @@ export class CloudVolumeScreenPass {
     const viewRay = getViewPosition(screenUv, float(0.5), this.uProjectionInverse);
     const dirWorld = normalize(this.uCameraWorld.mul(vec4(viewRay, 0)).xyz);
     const surfaceMetres = getViewPosition(screenUv, sceneDepth.sample(screenUv).r, this.uProjectionInverse).length();
-    let accumulated: any = vec4(0, 0, 0, 0);
-    for (const volume of this.volumes) {
-      const march = volume.buildScreenMarchNode(dirWorld, surfaceMetres);
-      accumulated = vec4(march.rgb.add(accumulated.rgb.mul(float(1).sub(march.a))), march.a.add(accumulated.a.mul(float(1).sub(march.a))));
+    // A WebGPU shader stage binds at most 16 sampled textures and each volume reads two, so volumes are marched in chunks of
+    // `VOLUMES_PER_TARGET`, one cloud target per chunk, and the chunks are composited far to near.
+    for (const node of this.cloudNodes) node.dispose?.();
+    this.cloudNodes = [];
+    for (let first = 0; first === 0 || first < this.volumes.length; first += VOLUMES_PER_TARGET) {
+      let accumulated: any = vec4(0, 0, 0, 0);
+      for (const volume of this.volumes.slice(first, first + VOLUMES_PER_TARGET)) {
+        const march = volume.buildScreenMarchNode(dirWorld, surfaceMetres);
+        accumulated = vec4(march.rgb.add(accumulated.rgb.mul(float(1).sub(march.a))), march.a.add(accumulated.a.mul(float(1).sub(march.a))));
+      }
+      this.cloudNodes.push(rtt(accumulated, null, null, { resolutionScale: this.scale }));
     }
-    this.cloudNode?.dispose?.();
-    this.cloudNode = rtt(accumulated, null, null, { resolutionScale: this.scale });
 
     // Composite: depth-aware bilinear upsample of the cloud target over the scene colour.
     const here = abs(perspectiveDepthToViewZ(sceneDepth.sample(screenUv).r, this.uNear, this.uFar));
@@ -127,7 +135,7 @@ export class CloudVolumeScreenPass {
     const base = floor(position);
     const fraction = fract(position);
     const limit = vec2(0.5).div(this.uCloudSize);
-    let sum: any = vec4(0, 0, 0, 0);
+    const taps: { uv: any; weight: any }[] = [];
     let weightSum: any = float(0);
     for (const [dx, dy] of [
       [0, 0],
@@ -140,10 +148,16 @@ export class CloudVolumeScreenPass {
       const relative = abs(tapDepth.sub(here)).div(here.max(1e-3));
       const bilinear = (dx ? fraction.x : float(1).sub(fraction.x)).mul(dy ? fraction.y : float(1).sub(fraction.y));
       const weight = bilinear.mul(exp(relative.mul(this.uSharpness).negate()).add(1e-4));
-      sum = sum.add(this.cloudNode.sample(tapUv).mul(weight));
+      taps.push({ uv: tapUv, weight });
       weightSum = weightSum.add(weight);
     }
-    const clouds = sum.div(weightSum.max(1e-6));
+    let clouds: any = vec4(0, 0, 0, 0);
+    for (const node of this.cloudNodes) {
+      let sum: any = vec4(0, 0, 0, 0);
+      for (const tap of taps) sum = sum.add(node.sample(tap.uv).mul(tap.weight));
+      const layer = sum.div(weightSum.max(1e-6));
+      clouds = vec4(layer.rgb.add(clouds.rgb.mul(float(1).sub(layer.a))), layer.a.add(clouds.a.mul(float(1).sub(layer.a))));
+    }
     if (this.debugView === 'clouds') {
       this.pipeline.outputNode = vec4(clouds.rgb, 1);
     } else if (this.debugView === 'depth') {

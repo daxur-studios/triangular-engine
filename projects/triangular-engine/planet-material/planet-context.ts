@@ -17,8 +17,10 @@ export interface IPlanetContext {
   readonly uniforms: IPlanetMorphUniforms;
   /** 0 = sphere, 1 = flat map (a float uniform node). */
   readonly morph: any;
-  /** Sphere-space unit direction. */
+  /** Sphere-space unit direction (`aSphereNorm`). On terrain this is the surface normal and tilts with relief: use it for shading only. */
   readonly sphereNormal: any;
+  /** Radial unit direction (planet centre to the shaded point): use it for geography, lat/lon and sun angle lookups. */
+  readonly radialDirection: any;
   /** Morphed local position, before batching. */
   readonly morphedPosition: any;
   /** `vec2(lat, lon)` in radians, in the static map frame (`lon = atan2(x, z)`, as the CPU maps use). */
@@ -38,11 +40,12 @@ export function createPlanetContext(
   uniforms: IPlanetMorphUniforms,
   graph: IPlanetMorphGraph,
 ): IPlanetContext {
-  const n = graph.sphereNormal;
+  const n = graph.radialDirection;
   return {
     uniforms,
     morph: uniforms.uMorph,
-    sphereNormal: n,
+    sphereNormal: graph.sphereNormal,
+    radialDirection: n,
     morphedPosition: graph.morphedLocal,
     latLon: vec2(asin(clamp(n.y, -1, 1)), atan(n.x, n.z)),
     bodyFixedLocal: graph.bodyFixedLocal,

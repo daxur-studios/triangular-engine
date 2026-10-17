@@ -24,9 +24,11 @@ type CloudMode = 'mesh' | 'pass' | 'pass-full';
 interface CameraPreset {
   readonly label: string;
   /** Offset from the volume centre. */
-  readonly offset: readonly [number, number, number];
+  readonly offset?: readonly [number, number, number];
   /** Look-at point, offset from the volume centre. */
-  readonly target: readonly [number, number, number];
+  readonly target?: readonly [number, number, number];
+  /** Alternative to offset/target: a point on the great circle the extra volumes sit on, looking along it. */
+  readonly arc?: { readonly s: number; readonly altitude: number; readonly pitchDeg: number };
 }
 
 const PRESETS: readonly CameraPreset[] = [
@@ -35,7 +37,17 @@ const PRESETS: readonly CameraPreset[] = [
   { label: 'inside', offset: [60, 0, 40], target: [-120, 10, -300] },
   { label: 'above', offset: [0, 450, 60], target: [0, 0, 0] },
   { label: 'below', offset: [0, -170, 0], target: [0, 100, 0] },
+  // Arc length s in metres along the great circle through the main volume; looking ahead along it.
+  { label: 'horizon', arc: { s: -1500, altitude: 200, pitchDeg: -3 } },
+  { label: 'ground', arc: { s: -450, altitude: 45, pitchDeg: 1 } },
 ];
+const UP = new Vector3(0, 1, 0);
+/** Position and heading on the great circle (the y-z plane) at arc length `s` metres from the main volume. */
+function arcPose(s: number, altitude: number): { position: Vector3; pitch: number } {
+  const a = s / (PLANET_RADIUS + 250);
+  const r = PLANET_RADIUS + altitude;
+  return { position: new Vector3(0, Math.cos(a) * r, Math.sin(a) * r), pitch: -a };
+}
 
 interface Recording {
   readonly preset: string;
@@ -118,6 +130,13 @@ interface Recording {
         <button (click)="setScale(0.5)" [class.active]="renderScale() === 0.5">0.5x</button>
         <button (click)="toggleJitter()" [class.active]="!jitterOn()">jitter off</button>
         <button (click)="toggleFetch()" [class.active]="!fetchOn()">no fetch</button>
+      </p>
+      <p class="row">
+        volumes
+        @for (n of volumeCounts; track n) {
+          <button (click)="setVolumeCount(n)" [class.active]="volumeCount() === n">{{ n }}</button>
+        }
+        <button (click)="runFlyby()" [disabled]="matrixStatus() !== ''">fly-by test (2 x 20 s)</button>
       </p>
       <p class="row">
         clouds drawn as
@@ -236,6 +255,7 @@ export class CloudVolumesLabPageComponent {
   readonly forceWebGL = FORCE_WEBGL;
   readonly backendLabel = FORCE_WEBGL ? 'forceWebGL' : 'WebGPU';
   readonly presets = PRESETS;
+  readonly volumeCounts = [1, 4, 12];
 
   readonly presetLabel = signal('outside');
   readonly cloudsOn = signal(true);
@@ -250,6 +270,7 @@ export class CloudVolumesLabPageComponent {
   readonly jitterOn = signal(true);
   readonly fetchOn = signal(true);
   readonly cloudMode = signal<CloudMode>('mesh');
+  readonly volumeCount = signal(1);
   readonly matrixStatus = signal('');
   readonly matrixText = signal('');
   readonly copied = signal(false);
@@ -269,6 +290,8 @@ export class CloudVolumesLabPageComponent {
   private readonly forward = new Vector3();
   private readonly right = new Vector3();
   private readonly move = new Vector3();
+  private readonly extras: CloudVolume[] = [];
+  private flyby: { t0: number; duration: number; samples: number[]; done: () => void } | undefined;
   private screenPass: CloudVolumeScreenPass | undefined;
   private screenPipeline: ReturnType<CloudVolumeScreenPass['asEngineRenderPipeline']> | undefined;
   private readonly passVolumes: CloudVolume[] = [];
@@ -298,10 +321,11 @@ export class CloudVolumesLabPageComponent {
         this.sunElevation.update((e) => (e + delta * 6 > 90 ? -10 : e + delta * 6));
         this.applySun();
       }
+      this.stepFlyby();
       this.updateCamera(delta);
       const renderer: any = this.engine.renderer;
       if (!renderer?.initialized) return;
-      this.volume.update(renderer);
+      for (const volume of this.activeVolumes()) volume.update(renderer);
       this.densityBakes.set(this.volume.densityBakes);
       this.lightBakes.set(this.volume.lightBakes);
     });
@@ -309,6 +333,8 @@ export class CloudVolumesLabPageComponent {
     const rendered = this.engine.renderComplete$.subscribe(() => {
       const renderer: any = this.engine.renderer;
       this.timer.tick(renderer, () => {
+        const last = this.timer.render.last;
+        if (this.flyby && last !== undefined) this.flyby.samples.push(last);
         this.renderMs.set(this.format(this.timer.render));
         this.computeMs.set(this.format(this.timer.compute));
       });
@@ -318,10 +344,11 @@ export class CloudVolumesLabPageComponent {
       rendered.unsubscribe();
       this.applyScale(1);
       this.setCloudMode('mesh');
-      this.engine.scene.remove(this.planet, this.volume.mesh, this.sun, this.hemi);
+      for (const volume of this.allVolumes()) this.engine.scene.remove(volume.mesh);
+      this.engine.scene.remove(this.planet, this.sun, this.hemi);
       this.planet.geometry.dispose();
       (this.planet.material as MeshStandardMaterial).dispose();
-      this.volume.dispose();
+      for (const volume of this.allVolumes()) volume.dispose();
     });
   }
 
@@ -332,11 +359,18 @@ export class CloudVolumesLabPageComponent {
 
   applyPreset(preset: CameraPreset): void {
     this.presetLabel.set(preset.label);
-    this.position.copy(VOLUME_CENTER).add(new Vector3(...preset.offset));
-    const target = VOLUME_CENTER.clone().add(new Vector3(...preset.target));
-    const dir = target.sub(this.position).normalize();
-    this.yaw = Math.atan2(dir.x, dir.z);
-    this.pitch = Math.asin(dir.y);
+    if (preset.arc) {
+      const pose = arcPose(preset.arc.s, preset.arc.altitude);
+      this.position.copy(pose.position);
+      this.yaw = 0;
+      this.pitch = pose.pitch + (preset.arc.pitchDeg * Math.PI) / 180;
+    } else {
+      this.position.copy(VOLUME_CENTER).add(new Vector3(...preset.offset!));
+      const target = VOLUME_CENTER.clone().add(new Vector3(...preset.target!));
+      const dir = target.sub(this.position).normalize();
+      this.yaw = Math.atan2(dir.x, dir.z);
+      this.pitch = Math.asin(dir.y);
+    }
     this.timer.reset();
     this.renderMs.set('n/a');
     this.computeMs.set('n/a');
@@ -344,9 +378,54 @@ export class CloudVolumesLabPageComponent {
 
   setClouds(on: boolean): void {
     this.cloudsOn.set(on);
-    this.volume.mesh.visible = on;
+    this.syncVolumes();
+  }
+
+  private allVolumes(): CloudVolume[] {
+    return [this.volume, ...this.extras];
+  }
+
+  private activeVolumes(): CloudVolume[] {
+    return this.allVolumes().slice(0, this.volumeCount());
+  }
+
+  /** 1, 4 or 12 volumes along the great circle through the main one, at alternating heights (the low ones cross the ground). */
+  setVolumeCount(n: number): void {
+    while (this.extras.length < n - 1) this.createExtra(this.extras.length + 1);
+    this.volumeCount.set(n);
+    this.syncVolumes();
+  }
+
+  private createExtra(k: number): void {
+    const volume = new CloudVolume({ size: VOLUME_SIZE, densitySize: 128 });
+    volume.uNoiseSeed.value = k * 3.7;
+    volume.uExtinction.value = this.extinction();
+    volume.uMarchSteps.value = this.steps();
+    volume.uJitter.value = this.jitterOn() ? 1 : 0;
+    volume.alwaysRebakeLight = this.rebakeEveryFrame();
+    volume.setFetchEnabled(this.fetchOn());
+    const side = k % 2 ? 1 : -1;
+    const pose = arcPose(side * Math.ceil(k / 2) * 700, k % 2 ? 250 : 60);
+    const radial = pose.position.clone().normalize();
+    volume.mesh.position.copy(pose.position);
+    volume.mesh.position.x = ((k % 3) - 1) * 260;
+    volume.mesh.quaternion.setFromUnitVectors(UP, radial);
+    this.extras.push(volume);
+    this.applySun();
+  }
+
+  /** Puts the active volumes where the current mode draws them (scene meshes, or the screen pass's list). */
+  private syncVolumes(): void {
+    const active = this.activeVolumes();
+    for (const volume of this.allVolumes()) this.engine.scene.remove(volume.mesh);
+    if (this.cloudMode() === 'mesh') {
+      for (const volume of active) {
+        volume.mesh.visible = this.cloudsOn();
+        this.engine.scene.add(volume.mesh);
+      }
+    }
     this.passVolumes.length = 0;
-    if (on) this.passVolumes.push(this.volume);
+    if (this.cloudsOn() && this.cloudMode() !== 'mesh') this.passVolumes.push(...active);
     this.screenPass?.rebuild();
     this.timer.reset();
   }
@@ -362,25 +441,19 @@ export class CloudVolumesLabPageComponent {
       this.screenPipeline = undefined;
     }
     this.cloudMode.set(mode);
-    this.engine.scene.remove(this.volume.mesh);
-    if (mode === 'mesh') {
-      this.engine.scene.add(this.volume.mesh);
-    } else if (renderer?.initialized) {
-      this.passVolumes.length = 0;
-      if (this.cloudsOn()) this.passVolumes.push(this.volume);
+    this.syncVolumes();
+    if (mode !== 'mesh' && renderer?.initialized) {
       this.screenPass = new CloudVolumeScreenPass(renderer, this.engine.scene, this.engine.camera, this.passVolumes, {
         scale: mode === 'pass' ? 0.5 : 1,
       });
       this.screenPipeline = this.screenPass.asEngineRenderPipeline();
       this.engine.registerRenderPipeline(this.screenPipeline);
     }
-    this.volume.mesh.visible = this.cloudsOn();
-    this.timer.reset();
   }
 
   toggleRebake(): void {
     this.rebakeEveryFrame.update((v) => !v);
-    this.volume.alwaysRebakeLight = this.rebakeEveryFrame();
+    for (const volume of this.allVolumes()) volume.alwaysRebakeLight = this.rebakeEveryFrame();
     this.timer.reset();
   }
 
@@ -400,8 +473,10 @@ export class CloudVolumesLabPageComponent {
 
   setExtinction(event: Event): void {
     this.extinction.set(this.num(event));
-    this.volume.uExtinction.value = this.extinction();
-    this.volume.invalidateDensity();
+    for (const volume of this.allVolumes()) {
+      volume.uExtinction.value = this.extinction();
+      volume.invalidateDensity();
+    }
   }
 
   setSteps(event: Event): void {
@@ -410,7 +485,7 @@ export class CloudVolumesLabPageComponent {
 
   private applySteps(n: number): void {
     this.steps.set(n);
-    this.volume.uMarchSteps.value = n;
+    for (const volume of this.allVolumes()) volume.uMarchSteps.value = n;
     this.timer.reset();
   }
 
@@ -428,13 +503,13 @@ export class CloudVolumesLabPageComponent {
 
   toggleJitter(): void {
     this.jitterOn.update((v) => !v);
-    this.volume.uJitter.value = this.jitterOn() ? 1 : 0;
+    for (const volume of this.allVolumes()) volume.uJitter.value = this.jitterOn() ? 1 : 0;
     this.timer.reset();
   }
 
   toggleFetch(): void {
     this.fetchOn.update((v) => !v);
-    this.volume.setFetchEnabled(this.fetchOn());
+    for (const volume of this.allVolumes()) volume.setFetchEnabled(this.fetchOn());
     this.timer.reset();
   }
 
@@ -466,15 +541,15 @@ export class CloudVolumesLabPageComponent {
     };
     const setJitter = (on: boolean) => {
       this.jitterOn.set(on);
-      this.volume.uJitter.value = on ? 1 : 0;
+      for (const volume of this.allVolumes()) volume.uJitter.value = on ? 1 : 0;
     };
     const setFetch = (on: boolean) => {
       this.fetchOn.set(on);
-      this.volume.setFetchEnabled(on);
+      for (const volume of this.allVolumes()) volume.setFetchEnabled(on);
     };
     setJitter(true);
     setFetch(true);
-    this.volume.alwaysRebakeLight = false;
+    for (const volume of this.allVolumes()) volume.alwaysRebakeLight = false;
     const lines: string[] = [];
     const runs: { label: string; mode: CloudMode; scale: number }[] = [
       { label: 'box mesh, canvas x1', mode: 'mesh', scale: 1 },
@@ -529,7 +604,7 @@ export class CloudVolumesLabPageComponent {
     status('inside s32 no fetch');
     const noFetch = await this.settle();
     setFetch(true);
-    this.volume.alwaysRebakeLight = true;
+    for (const volume of this.allVolumes()) volume.alwaysRebakeLight = true;
     status('inside s32 rebake every frame');
     const rebake = await this.settle();
     lines.push(
@@ -539,7 +614,7 @@ export class CloudVolumesLabPageComponent {
     const verdict = Number.isNaN(g) ? 'n/a' : g <= 8 ? 'GO (<= 8)' : g <= 12 ? 'PACK FIRST (8-12)' : 'NO-GO (> 12)';
     lines.push(`go line: net cloud cost at x0.5 s24 inside = ${goValue} ms -> ${verdict}`);
 
-    this.volume.alwaysRebakeLight = saved.rebake;
+    for (const volume of this.allVolumes()) volume.alwaysRebakeLight = saved.rebake;
     setJitter(saved.jitter);
     setFetch(saved.fetch);
     this.setCloudMode(saved.mode);
@@ -549,8 +624,64 @@ export class CloudVolumesLabPageComponent {
     this.applySteps(saved.steps);
     this.matrixText.set(
       [
-        `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} canvas ${canvasSize.trim()} density 128 light 64`,
+        `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} canvas ${canvasSize.trim()} density 128 light 64 volumes ${this.volumeCount()}`,
         'GPU render ms avg, read after the main render. off = clouds hidden; netNN = (clouds with NN steps) - off',
+        ...lines,
+      ].join('\n'),
+    );
+    this.matrixStatus.set('');
+    await this.copyMatrix();
+  }
+
+  /** One scripted pass along the great circle at 250 m altitude, 2.4 km in `seconds`; resolves with the GPU ms samples. */
+  private flybyOnce(seconds: number): Promise<number[]> {
+    this.timer.reset();
+    return new Promise((resolve) => {
+      const flyby = { t0: performance.now(), duration: seconds * 1000, samples: [] as number[], done: () => resolve(flyby.samples) };
+      this.flyby = flyby;
+    });
+  }
+
+  private stepFlyby(): void {
+    const flyby = this.flyby;
+    if (!flyby) return;
+    const fraction = (performance.now() - flyby.t0) / flyby.duration;
+    if (fraction >= 1) {
+      this.flyby = undefined;
+      flyby.done();
+      return;
+    }
+    const pose = arcPose(-1200 + 2400 * fraction, 250);
+    this.position.copy(pose.position);
+    this.yaw = 0;
+    this.pitch = pose.pitch;
+  }
+
+  /**
+   * The same scripted fly-by with the box meshes and with the half-resolution screen pass, for the current volume count,
+   * sun and settings. Reports GPU ms over the pass (average, 95th percentile, worst sample), so motion cost and spikes show up.
+   */
+  async runFlyby(): Promise<void> {
+    const saved = { mode: this.cloudMode(), preset: PRESETS.find((p) => p.label === this.presetLabel()) ?? PRESETS[0] };
+    const lines: string[] = [];
+    for (const [mode, label] of [
+      ['mesh', 'box mesh'],
+      ['pass', 'screen pass x0.5'],
+    ] as const) {
+      this.setCloudMode(mode);
+      this.matrixStatus.set(`fly-by ${label}`);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const samples = (await this.flybyOnce(20)).sort((a, b) => a - b);
+      const at = (q: number) => samples[Math.floor(q * (samples.length - 1))]?.toFixed(2) ?? 'n/a';
+      const avg = samples.length ? (samples.reduce((a, b) => a + b, 0) / samples.length).toFixed(2) : 'n/a';
+      lines.push(`fly-by ${label}: avg ${avg}, p95 ${at(0.95)}, max ${at(1)} ms over ${samples.length} samples`);
+    }
+    this.setCloudMode(saved.mode);
+    this.applyPreset(saved.preset);
+    this.matrixText.set(
+      [
+        `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} volumes ${this.volumeCount()} steps ${this.steps()}, 2.4 km at 120 m/s, 250 m altitude`,
+        'GPU render ms, one sample per 10 frames, whole frame (clouds on, nothing subtracted)',
         ...lines,
       ].join('\n'),
     );
@@ -614,7 +745,7 @@ export class CloudVolumesLabPageComponent {
     const x = Math.cos(el) * Math.sin(az);
     const y = Math.sin(el);
     const z = Math.cos(el) * Math.cos(az);
-    this.volume.setSunDirection(x, y, z);
+    for (const volume of this.allVolumes()) volume.setSunDirection(x, y, z);
     this.sun.position.set(x, y, z).multiplyScalar(PLANET_RADIUS * 3).add(VOLUME_CENTER);
     this.sun.target.position.copy(VOLUME_CENTER);
     this.sun.target.updateMatrixWorld();
