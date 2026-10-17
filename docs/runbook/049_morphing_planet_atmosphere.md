@@ -471,3 +471,40 @@ Limits and open, in order:
 
 - Whitewash at dusk mid-morph (user report): a ray grazing the blended plane counted the full distance in dense air. `slabPerspective` floors the ray's elevation (height >= distance x 0.6 x morph x (1 - morph)), so the airmass stays near 7 at morph 0.5 and nothing changes at 0 or 1.
 - Follow-up: the floor is now 0.15 x min(3 morph, 1), so it also covers the flat map (morph 1), where a low view of the map was still whitewashed. Only morph 0 is unchanged.
+
+## 2026-10-17 — External review, checked against the code (cloud session, code reading only)
+
+An external agent reviewed `atmosphere/**` and the two atmosphere labs (commits `3116d9b..ceda232`). Each finding was then checked against the code at `ceda232`. Nothing was changed in code; this entry is the verdict and the fix order.
+
+### Confirmed, fix now (in this order, a spec for each)
+
+1. **Sky-view halo ignores the sun's azimuth.** The table is already baked relative to the sun's horizontal direction (`buildRenderNode` rotates the ray directions by it), so its content does not depend on azimuth. The bug is only in `lookup()` (`atmosphere-sky-view.ts:161`): it reads `sunHorizontal()` from the frozen `lutSunDirection`, which updates only on a re-render, and `isDirty()` only watches altitude and sun elevation. Moving the sun's azimuth at a fixed elevation (lab), or orbiting the camera on the planet page (the sun rotates in the local frame), leaves the glow behind while the sun disc moves. Fix: take the horizontal direction in `lookup()` from the live `model.sunDirection`; no rebuild needed. Spec: change the azimuth at a fixed elevation and check that `lookup()` follows it without a re-render.
+2. **Irradiance and multi-scatter tables read the wrong altitude at the ground.** Both are baked at texel centres (`atmosphere-luts.ts:191`, `(y + 0.5) / height`) but sampled with a plain `alt / top` (`atmosphere-gpu-model.ts:308`, and the slab's `psi` at line 509), so altitude 0 clamps to the first row: about 1.9 km for irradiance (16 rows, Earth) and about 0.9 km for multi-scatter. Every lit ground pixel's sky light is read above most of the Mie layer. The CPU sampler has the same offset, so the GPU-vs-CPU specs could not catch it. Fix: bake edge-aligned (`y / (height - 1)`, `x / (width - 1)`) and sample with `unitRangeToTexcoord`, like the transmittance table. Spec: ground irradiance at altitude 0 matches the reference integrator at altitude 0.
+3. **The two `sunVisibility` values do not agree** (`atmosphere-planet-stages.ts:207-209`). Direct light is scaled only by the stage-3 occluder input, sky light only by `binding.sunVisibility`. Setting `binding.sunVisibility = 0` darkens the sky and the haze but leaves the ground in full sun; a stage-3 eclipse darkens direct light but not the sky light. No page drives either yet. Fix: scale direct and sky light by both. Spec: either value at 0 darkens both direct and sky light.
+4. **Reduced-resolution space pass renders every frame** (`atmosphere-backdrop.ts:300`). Unlike the sky-view and froxel tables it has no dirty check, so idling in orbit re-marches it each frame. Fix: skip when altitude, target size, profile version, sun, projection inverse and camera matrix are unchanged.
+5. **Globe haze is computed on the flat map.** `perspective()` always runs the spherical lookup and then mixes it out at morph 1, and the cell page still calls `binding.update()` there, re-rendering the froxel table as the camera moves. Fix: skip both at `morph >= 0.999`. The four shadow-cut fetches in `lookup()` could sit behind `If(shadow.to > shadow.from)`; measure before doing it.
+
+### Confirmed, design call or lower priority
+
+- **Slab elevation floor fakes the camera height.** The floor (`max(height, distance x 0.15)`) is deliberate (it stops grazing rays whitening), but it works by raising the camera: at 10 m looking 50 km across the map, the slab sees a camera at 7.5 km, which cuts the low Mie haze about sixfold and distorts the Rayleigh-to-Mie ratio. Better: keep the true height and cap the airmass (the column) directly. Compare low views of the flat map before and after.
+- **Backdrop fades to black during the morph.** The plan asks for a crossfade between the camera's sky for its sphere and flat poses; the code dims the sphere's sky to black over morph 0.2 to 0.8 while the surfaces keep full haze, so a low view mid-morph can show a hazed horizon under a black sky. Maintainer decides: build the flat-pose sky, or fade by camera height above the slab instead of by morph.
+- **Planet scale.** `sync()` converts the camera through `planet.worldToLocal` (scale included), but `context.cameraDistance` is in world units times `metersPerUnit`, so a scaled planet breaks the units. The pages pass the scene (unit scale). Document "planet must have unit scale", or fold the world scale into `metersPerUnit`.
+- **Precision in the no-froxel fallback.** `sphericalPerspective()` without the table builds the ray from `surfacePoint - cameraBody`, two Earth-sized float32 vectors. Taking the direction from `viewToLocal x normalize(positionView)` is camera-relative and also drops the per-fragment basis. Cheap; do it with item 5.
+- **Nits.** `AtmosphereAerialPerspectiveLut.isDirty()` allocates its signature array every frame. The `'none'` profile has no zero-cost path in the GPU model or the binding; write it into the plan as deferred.
+
+### Not taken
+
+- **Ocean shell alpha and in-scatter.** The reviewer's own derivation shows the blend is right where the shell lies over the seabed, which is the case on the planet. The ocean losing its specular under atmosphere lighting is by design (stage 4 replaces the PBR result).
+- **"`docs/atmosphere.md` does not exist".** It does, at `projects/triangular-engine/docs/atmosphere.md`.
+- **Worker baking** is already recorded as deferred above (bake is synchronous on the main thread).
+
+### Plan drift worth writing into Plan 049's status (owner's call)
+
+- `nearHazeFadeM` is validated on the profile but never applied on the GPU.
+- The labs render without an HDR `RenderPipeline`, bloom or post AA; exposure is applied inside the atmosphere shaders.
+- Scene-light sync from the tables (sun colour, ambient at the focus point) is not built.
+- The flat map uses the closed-form slab, not froxels with per-sample sun angles, and the froxel table is 128x72x32, not 32x32x32. Both are improvements on the plan; the plan should follow the code.
+
+### Untested paths the review found
+
+Sun azimuth changes on the sky-view table; `binding.sunVisibility`, the stage-3 input and `backdrop.opacity`; `perspective()` at `0 < morph <= 1` (the slab is only tested alone); horizon-straddling elevations in the sky-view spec (it skips -4° to +4°).
