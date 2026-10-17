@@ -2,7 +2,7 @@
 type: Index
 title: Runbooks
 description: Current initiative evidence and preserved legacy implementation history.
-timestamp: 2026-10-13T00:00:00Z
+timestamp: 2026-10-17T00:00:00Z
 tags: [runbook, index]
 ---
 
@@ -19,6 +19,7 @@ tags: [runbook, index]
 | [Morphing Planet Atmosphere](/docs/runbook/049_morphing_planet_atmosphere.md) | [Implementation plan](/docs/plans/049_morphing_planet_atmosphere.md) |
 | [TSL Planet Surface Material](/docs/runbook/050_tsl_planet_surface_material.md) | [Implementation plan](/docs/plans/050_tsl_planet_surface_material.md) |
 | [Cloud Volumes](/docs/runbook/051_cloud_volumes.md) | [Implementation plan](/docs/plans/051_cloud_volumes.md) |
+| [Procedural Creature Animation](/docs/runbook/052_procedural_creature_animation.md) | [Implementation plan](/docs/plans/052_procedural_creature_animation.md) |
 
 
 Existing runbooks `001`–`042` retain their historical paths and formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

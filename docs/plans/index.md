@@ -2,7 +2,7 @@
 type: Index
 title: Plans
 description: Active implementation plans with reciprocal runbook references.
-timestamp: 2026-10-13T00:00:00Z
+timestamp: 2026-10-17T00:00:00Z
 tags: [plans, index]
 ---
 
@@ -19,6 +19,7 @@ tags: [plans, index]
 | [Morphing Planet Atmosphere](/docs/plans/049_morphing_planet_atmosphere.md) | planned | [Evidence](/docs/runbook/049_morphing_planet_atmosphere.md) |
 | [TSL Planet Surface Material](/docs/plans/050_tsl_planet_surface_material.md) | planned (do first) | [Evidence](/docs/runbook/050_tsl_planet_surface_material.md) |
 | [Cloud Volumes](/docs/plans/051_cloud_volumes.md) | in progress | [Evidence](/docs/runbook/051_cloud_volumes.md) |
+| [Procedural Creature Animation](/docs/plans/052_procedural_creature_animation.md) | planned | [Evidence](/docs/runbook/052_procedural_creature_animation.md) |
 
 
 Convention: [Plans and Runbooks](/docs/plans-and-runbooks.md).
