@@ -454,3 +454,37 @@ Fly-by, 1 volume, **64 steps**, 2.4 km at 120 m/s, 250 m altitude, whole frame (
 
 - Against one volume (3.05 / 13.83 / 16.45 mesh; 2.49 / 5.11 / 6.03 pass): the mesh average triples (every overlapping box is marched at full resolution), the pass average doubles (+2.5 ms for 11 more volumes, about 0.23 ms each) and its worst frame rises only from 6.0 to 7.9 ms. The pass scales much better, but is still whole-frame at 64 steps, so not yet comparable with G6.
 - Only the fly-by at 64 steps was reported; the 24-step runs and the 4-volume runs are still open.
+
+### Multi-volume results at 24 steps (1, 4 and 12 volumes), and a quick re-test button
+
+Run with "run everything" (about 15 minutes), WebGPU, dpr 1.5, canvas 2560x1308. Fly-by is whole frame, 2.4 km at 120 m/s, 250 m altitude.
+
+| volumes, steps | box mesh avg / p95 / max | screen pass avg / p95 / max |
+|---|---|---|
+| 1, 24 | 2.44 / 8.06 / 8.52 | 2.19 / 3.41 / 3.54 |
+| 1, 64 | 3.05 / 13.89 / 16.71 | 2.53 / 5.24 / 5.57 |
+| 4, 24 | 5.98 / 11.47 / 13.17 | 3.23 / 4.52 / 4.78 |
+| 4, 64 | 9.23 / 18.55 / 23.59 | 4.24 / 6.55 / 7.34 |
+| 12, 24 | 6.16 / 11.93 / 13.70 | 4.15 / 5.37 / 5.64 |
+| 12, 64 | 9.46 / 18.74 / 24.38 | 5.06 / 7.27 / 7.93 |
+
+Screen pass net cloud cost (over its own "off"), 24 steps, canvas x1 / cloud x0.5:
+
+| camera | 1 volume | 4 volumes | 12 volumes |
+|---|---|---|---|
+| inside | 2.03 | 2.41 | 3.34 |
+| edge | 1.65 | 1.82 | 2.65 |
+| below | 1.99 | 2.24 | 2.98 |
+| above | 0.88 | 1.26 | 2.12 |
+| ground | 0.73 | 1.75 | 2.48 |
+| horizon | 0.18 | 0.65 | 2.16 |
+| outside | 0.24 | 0.79 | 1.66 |
+
+Reading:
+- The pass wins everywhere in motion: 12 volumes at 24 steps is 4.15 ms average, 5.64 ms worst, against 6.16 / 13.70 for the mesh. Its p95 stays close to its average (no spikes).
+- Against G6 (<= 1.5 typical, <= 2.5 worst, cloud only): one volume inside is 2.03 (under the worst-case line, over the typical line); 12 volumes inside is 3.34, over. With 12 volumes the pass is clearly over budget even at 24 steps, so step 4 (temporal reuse) and step 6 (empty-space skip) are needed, not optional.
+- Horizon and outside at 12 volumes cost 2.16 / 1.66 ms in the pass although few or no volumes are near: every low-res pixel still runs every volume's box test and loop set-up (the mesh path pays 0.88 at horizon because rasterisation culls). Fix candidates: cull volumes on the CPU by frustum and rebuild the chunks when the visible set changes, or a per-volume early-out before the loop.
+- Rebake every frame (the moving-sun case) at 12 volumes: 21.61 vs 12.69 ms. Step 5 (time-sliced rebake) matters for the moving worst case.
+- Fixed cost of the pass: its "off" column is about 0.8 ms above the mesh's; part of the gap against the budget.
+
+Lab: a "quick re-test" button now runs only the screen pass at 24 steps for 1, 4 and 12 volumes (a 12 s fly-by and four camera spots each, about 2 minutes). "run everything" stays for full records.

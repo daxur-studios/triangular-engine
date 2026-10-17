@@ -139,6 +139,11 @@ interface Recording {
         <button (click)="runFlyby()" [disabled]="matrixStatus() !== ''">fly-by test (2 x 20 s)</button>
       </p>
       <p class="row">
+        <button (click)="runQuick()" [disabled]="matrixStatus() !== ''">
+          {{ matrixStatus() || 'quick re-test: screen pass, 24 steps, 1/4/12 volumes (about 2 min)' }}
+        </button>
+      </p>
+      <p class="row">
         <button (click)="runAll()" [disabled]="matrixStatus() !== ''">
           {{ matrixStatus() || 'run everything: 1/4/12 volumes, fly-bys at 24 + 64 steps, matrices (about 15 min)' }}
         </button>
@@ -532,8 +537,9 @@ export class CloudVolumesLabPageComponent {
    * at 16 / 24 / 32 steps, then three extra runs at inside s32 scale 1 (jitter off, no fetch, light rebaked every
    * frame). Writes one compact table. Cloud columns are the cost over "off" at the same scale and camera.
    */
-  async runMatrix(publish = true): Promise<string> {
-    const stepList = [16, 24, 32];
+  async runMatrix(publish = true, quick = false): Promise<string> {
+    const stepList = quick ? [24] : [16, 24, 32];
+    const presets = quick ? PRESETS.filter((p) => ['inside', 'above', 'horizon', 'ground'].includes(p.label)) : PRESETS;
     const saved = {
       preset: PRESETS.find((p) => p.label === this.presetLabel()) ?? PRESETS[0],
       clouds: this.cloudsOn(),
@@ -556,12 +562,13 @@ export class CloudVolumesLabPageComponent {
     setFetch(true);
     for (const volume of this.allVolumes()) volume.alwaysRebakeLight = false;
     const lines: string[] = [];
-    const runs: { label: string; mode: CloudMode; scale: number }[] = [
+    const allRuns: { label: string; mode: CloudMode; scale: number }[] = [
       { label: 'box mesh, canvas x1', mode: 'mesh', scale: 1 },
       { label: 'box mesh, canvas x0.5', mode: 'mesh', scale: 0.5 },
       { label: 'screen pass x0.5, canvas x1', mode: 'pass', scale: 1 },
     ];
-    const total = runs.length * PRESETS.length * (stepList.length + 1) + 3;
+    const runs = quick ? allRuns.slice(2) : allRuns;
+    const total = runs.length * presets.length * (stepList.length + 1) + (quick ? 0 : 3);
     let done = 0;
     const status = (what: string) => this.matrixStatus.set(`${this.statusPrefix}running ${++done}/${total}: ${what}`);
     const net = (ms: string, base: string) => (ms === 'n/a' || base === 'n/a' ? 'n/a' : (+ms - +base).toFixed(2));
@@ -574,7 +581,7 @@ export class CloudVolumesLabPageComponent {
       const canvas = document.querySelector('canvas');
       canvasSize += `${run.mode}@${scale}:${canvas?.width}x${canvas?.height} `;
       lines.push(run.label, `${'camera'.padEnd(8)}${['off', ...stepList.map((s) => 'net' + s)].map((c) => c.padStart(7)).join('')}`);
-      for (const preset of PRESETS) {
+      for (const preset of presets) {
         this.applyPreset(preset);
         this.applySteps(32);
         this.setClouds(false);
@@ -593,6 +600,7 @@ export class CloudVolumesLabPageComponent {
       }
     }
 
+    if (!quick) {
     // Single-factor runs at the heavy view: inside, 32 steps, box mesh, full scale.
     this.setCloudMode('mesh');
     this.applyScale(1);
@@ -618,6 +626,7 @@ export class CloudVolumesLabPageComponent {
     const g = parseFloat(goValue);
     const verdict = Number.isNaN(g) ? 'n/a' : g <= 8 ? 'GO (<= 8)' : g <= 12 ? 'PACK FIRST (8-12)' : 'NO-GO (> 12)';
     lines.push(`go line: net cloud cost at x0.5 s24 inside = ${goValue} ms -> ${verdict}`);
+    }
 
     for (const volume of this.allVolumes()) volume.alwaysRebakeLight = saved.rebake;
     setJitter(saved.jitter);
@@ -644,9 +653,26 @@ export class CloudVolumesLabPageComponent {
     await this.copyMatrix();
   }
 
+  /** About two minutes: screen pass only, 24 steps, 1 / 4 / 12 volumes, a 12 s fly-by and four camera spots each. For re-tests. */
+  async runQuick(): Promise<void> {
+    const saved = { count: this.volumeCount(), steps: this.steps() };
+    const parts: string[] = [];
+    this.applySteps(24);
+    for (const count of this.volumeCounts) {
+      this.setVolumeCount(count);
+      this.statusPrefix = `quick (${count} volumes): `;
+      parts.push(await this.runFlyby(false, true));
+      parts.push(await this.runMatrix(false, true));
+    }
+    this.statusPrefix = '';
+    this.setVolumeCount(saved.count);
+    this.applySteps(saved.steps);
+    await this.publish(parts.join('\n\n'));
+  }
+
   /**
-   * Everything in one go: for 1, 4 and 12 volumes, the fly-by at 24 and 64 steps and then the full matrix. One combined
-   * report is copied to the clipboard at the end. Takes about 15 minutes; keep the tab visible.
+   * Everything in one go: for 1, 4 and 12 volumes, the fly-by at 24 and 64 steps and then the full matrix (about 15 min).
+   * Prefer {@link runQuick} for re-tests.
    */
   async runAll(): Promise<void> {
     const saved = { count: this.volumeCount(), steps: this.steps() };
@@ -698,17 +724,15 @@ export class CloudVolumesLabPageComponent {
    * The same scripted fly-by with the box meshes and with the half-resolution screen pass, for the current volume count,
    * sun and settings. Reports GPU ms over the pass (average, 95th percentile, worst sample), so motion cost and spikes show up.
    */
-  async runFlyby(publish = true): Promise<string> {
+  async runFlyby(publish = true, quick = false): Promise<string> {
     const saved = { mode: this.cloudMode(), preset: PRESETS.find((p) => p.label === this.presetLabel()) ?? PRESETS[0] };
     const lines: string[] = [];
-    for (const [mode, label] of [
-      ['mesh', 'box mesh'],
-      ['pass', 'screen pass x0.5'],
-    ] as const) {
+    const modes: [CloudMode, string][] = quick ? [['pass', 'screen pass x0.5']] : [['mesh', 'box mesh'], ['pass', 'screen pass x0.5']];
+    for (const [mode, label] of modes) {
       this.setCloudMode(mode);
       this.matrixStatus.set(`${this.statusPrefix}fly-by ${label}`);
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      const samples = (await this.flybyOnce(20)).sort((a, b) => a - b);
+      const samples = (await this.flybyOnce(quick ? 12 : 20)).sort((a, b) => a - b);
       const at = (q: number) => samples[Math.floor(q * (samples.length - 1))]?.toFixed(2) ?? 'n/a';
       const avg = samples.length ? (samples.reduce((a, b) => a + b, 0) / samples.length).toFixed(2) : 'n/a';
       lines.push(`fly-by ${label}: avg ${avg}, p95 ${at(0.95)}, max ${at(1)} ms over ${samples.length} samples`);
