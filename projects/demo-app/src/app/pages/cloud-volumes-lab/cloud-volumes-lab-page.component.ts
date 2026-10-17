@@ -129,9 +129,8 @@ interface Recording {
         <button (click)="setScale(1)" [class.active]="renderScale() === 1">1x</button>
         <button (click)="setScale(0.5)" [class.active]="renderScale() === 0.5">0.5x</button>
         <button (click)="toggleJitter()" [class.active]="!jitterOn()">jitter off</button>
-        <button (click)="toggleSkip()" [class.active]="skipOn()">empty-space skip: {{ skipOn() ? 'on' : 'off' }}</button>
-        <button (click)="toggleTemporal()" [class.active]="temporalOn()">temporal reuse: {{ temporalOn() ? 'on' : 'off' }}</button>
         <button (click)="toggleFetch()" [class.active]="!fetchOn()">no fetch</button>
+        <button (click)="toggleHidden()" [class.active]="hiddenOn()">volumes hidden: {{ hiddenOn() ? 'on' : 'off' }}</button>
       </p>
       <p class="row">
         volumes
@@ -143,6 +142,11 @@ interface Recording {
       <p class="row">
         <button (click)="runQuick()" [disabled]="matrixStatus() !== ''">
           {{ matrixStatus() || 'quick re-test: screen pass, 24 steps, 1/4/12 volumes (about 2 min)' }}
+        </button>
+      </p>
+      <p class="row">
+        <button (click)="runIsolate()" [disabled]="matrixStatus() !== ''">
+          {{ matrixStatus() || 'isolating run: screen pass, hidden vs visible volumes at 1/4/12 (about 1 min)' }}
         </button>
       </p>
       <p class="row">
@@ -286,9 +290,8 @@ export class CloudVolumesLabPageComponent {
   readonly steps = signal(64);
   readonly renderScale = signal(1);
   readonly jitterOn = signal(true);
-  readonly temporalOn = signal(false);
-  readonly skipOn = signal(false);
   readonly fetchOn = signal(true);
+  readonly hiddenOn = signal(false);
   readonly cloudMode = signal<CloudMode>('mesh');
   readonly volumeCount = signal(1);
   readonly matrixStatus = signal('');
@@ -424,6 +427,7 @@ export class CloudVolumesLabPageComponent {
     volume.uJitter.value = this.jitterOn() ? 1 : 0;
     volume.alwaysRebakeLight = this.rebakeEveryFrame();
     volume.setFetchEnabled(this.fetchOn());
+    volume.forceHidden = this.hiddenOn();
     const side = k % 2 ? 1 : -1;
     const pose = arcPose(side * Math.ceil(k / 2) * 700, k % 2 ? 250 : 60);
     const radial = pose.position.clone().normalize();
@@ -465,7 +469,6 @@ export class CloudVolumesLabPageComponent {
     if (mode !== 'mesh' && renderer?.initialized) {
       this.screenPass = new CloudVolumeScreenPass(renderer, this.engine.scene, this.engine.camera, this.passVolumes, {
         scale: mode === 'pass' ? 0.5 : 1,
-        temporal: this.temporalOn(),
       });
       this.screenPipeline = this.screenPass.asEngineRenderPipeline();
       this.engine.registerRenderPipeline(this.screenPipeline);
@@ -528,22 +531,74 @@ export class CloudVolumesLabPageComponent {
     this.timer.reset();
   }
 
-  toggleSkip(): void {
-    this.skipOn.update((v) => !v);
-    for (const volume of this.allVolumes()) volume.uSkipEmpty.value = this.skipOn() ? 1 : 0;
-    this.timer.reset();
-  }
-
-  toggleTemporal(): void {
-    this.temporalOn.update((v) => !v);
-    this.screenPass?.setTemporal(this.temporalOn());
-    this.timer.reset();
-  }
-
   toggleFetch(): void {
     this.fetchOn.update((v) => !v);
     for (const volume of this.allVolumes()) volume.setFetchEnabled(this.fetchOn());
     this.timer.reset();
+  }
+
+  toggleHidden(): void {
+    this.setHidden(!this.hiddenOn());
+    this.timer.reset();
+  }
+
+  private setHidden(on: boolean): void {
+    this.hiddenOn.set(on);
+    for (const volume of this.allVolumes()) volume.forceHidden = on;
+  }
+
+  /**
+   * Plan 051 review, step 4b. Screen pass x0.5 at the horizon, 24 steps: the pass with clouds off, then for 1 / 4 / 12 volumes the
+   * pass with every volume forced out of the frustum (rays end at once, nothing marched) and with them visible. Hidden minus
+   * clouds-off is the per-volume and per-chunk overhead with no marching at all.
+   */
+  async runIsolate(): Promise<void> {
+    const saved = {
+      preset: PRESETS.find((p) => p.label === this.presetLabel()) ?? PRESETS[0],
+      clouds: this.cloudsOn(),
+      steps: this.steps(),
+      scale: this.renderScale(),
+      mode: this.cloudMode(),
+      count: this.volumeCount(),
+      hidden: this.hiddenOn(),
+    };
+    this.setCloudMode('pass');
+    this.applyScale(1);
+    this.applyPreset(PRESETS.find((p) => p.label === 'horizon') ?? PRESETS[0]);
+    this.applySteps(24);
+    const canvas = document.querySelector('canvas');
+    const rows: string[] = [];
+    let step = 0;
+    const total = 1 + this.volumeCounts.length * 2;
+    const measure = async (what: string) => {
+      this.matrixStatus.set(`isolating ${++step}/${total}: ${what}`);
+      return (await this.settle()).padStart(7);
+    };
+    this.setHidden(false);
+    this.setClouds(false);
+    rows.push(`${'clouds off (0 volumes)'.padEnd(26)}${await measure('clouds off')}`);
+    this.setClouds(true);
+    for (const count of this.volumeCounts) {
+      this.setVolumeCount(count);
+      this.setHidden(true);
+      rows.push(`${`${count} volumes, hidden`.padEnd(26)}${await measure(`${count} hidden`)}`);
+      this.setHidden(false);
+      rows.push(`${`${count} volumes, visible`.padEnd(26)}${await measure(`${count} visible`)}`);
+    }
+    this.setHidden(saved.hidden);
+    this.setVolumeCount(saved.count);
+    this.setCloudMode(saved.mode);
+    this.applyScale(saved.scale);
+    this.applySteps(saved.steps);
+    this.applyPreset(saved.preset);
+    this.setClouds(saved.clouds);
+    await this.publish(
+      [
+        `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} canvas ${canvas?.width}x${canvas?.height} isolating run: screen pass x0.5, horizon, 24 steps`,
+        'GPU render ms avg, whole frame (nothing subtracted); hidden = every volume forced outside the frustum, no marching',
+        ...rows,
+      ].join('\n'),
+    );
   }
 
   private async settle(): Promise<string> {
@@ -660,7 +715,7 @@ export class CloudVolumesLabPageComponent {
     this.setClouds(saved.clouds);
     this.applySteps(saved.steps);
     const text = [
-      `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} canvas ${canvasSize.trim()} density 128 light 64 volumes ${this.volumeCount()} skip ${this.skipOn() ? 'on' : 'off'} temporal ${this.temporalOn() ? 'on' : 'off'}`,
+      `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} canvas ${canvasSize.trim()} density 128 light 64 volumes ${this.volumeCount()}`,
       'GPU render ms avg, read after the main render. off = clouds hidden; netNN = (clouds with NN steps) - off',
       ...lines,
     ].join('\n');
@@ -763,7 +818,7 @@ export class CloudVolumesLabPageComponent {
     this.setCloudMode(saved.mode);
     this.applyPreset(saved.preset);
     const text = [
-      `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} volumes ${this.volumeCount()} steps ${this.steps()} skip ${this.skipOn() ? 'on' : 'off'} temporal ${this.temporalOn() ? 'on' : 'off'}, 2.4 km at 120 m/s, 250 m altitude`,
+      `cloud-volumes-lab ${this.backendLabel} dpr ${devicePixelRatio} volumes ${this.volumeCount()} steps ${this.steps()}, 2.4 km at 120 m/s, 250 m altitude`,
       'GPU render ms, one sample per 10 frames, whole frame (clouds on, nothing subtracted)',
       ...lines,
     ].join('\n');

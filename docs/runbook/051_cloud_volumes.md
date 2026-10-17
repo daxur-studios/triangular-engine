@@ -540,3 +540,28 @@ Same-build A/B, skip on vs off (GPU ms, 2560x1308):
 - The occupancy sampler made each volume read three textures, which cut a chunk from 6 volumes to 5 and made 12 volumes render as 3 chunks. That regressed the 12-volume fly-by from 4.22 to 4.75 ms: each extra chunk costs about 0.5-0.8 ms of half-res target write plus composite taps even when its rays miss.
 - Tried: derive the chunk size from the device limits and request 48 sampled textures per stage in the lab. It does not work: the adapter supports 48 sampled textures but only 16 samplers per stage, and every sampled texture takes a sampler slot. Requesting 48 samplers fails device creation and the lab silently falls back to WebGL2 (a warning in the console), so those numbers are not comparable. The lab no longer requests limits; the chunk size is `min(textures, samplers)` from the device, which is 5 volumes per chunk here.
 - Open: to get more volumes per chunk, a volume must use fewer samplers (read the occupancy grid and, in Phase 6, shared atlases, with `textureLoad`, which needs no sampler), or share one sampler between textures. Not done.
+
+### Steps 4 and 6 removed (review, after the Step 6 result)
+
+- Both were removed from the code. Temporal reuse lives in commit 72839e0 and the empty-space skip with its occupancy grid in dd9890e, if a later phase wants them. The frustum visibility uniform from Step 3b stays.
+- Why: both cut steps per ray, and the 8 vs 24 step runs show the cost is not in the steps. At 12 volumes it is a fixed cost per pixel, per volume and per chunk. The skip also cost a sampler per volume even when off, and its gain was inside noise.
+- With occupancy gone a volume reads two textures, so a chunk holds 7 volumes (`min(textures, samplers) - 1` over two, from the device limit; the adapter allows only 16 samplers, so raising limits was never an option).
+- The 12-volume case is not a 2b requirement (it was a lab stress preset). G6 status is recorded in Plan 051. If step 3c (half-res box proxies) does not bring 12 volumes under budget, the many-volume case becomes its own Phase 6 gate.
+- Measurement from now on: per change, record inside net at 4 volumes (worst), horizon net at 4 volumes (typical) and fly-by p95. Ignore differences under about 0.3 ms unless it is the median of 3 runs. Run the full matrix only when closing a phase.
+- Next, in order: isolating run (12 volumes with `uScreenVisible` forced to 0 vs 0 volumes), the 25-sampled-textures error (timeboxed), the step 3c spike, step 5 (round-robin rebake, no cross-fade), step 7.
+
+### 4b result: isolating run (hidden vs visible volumes)
+
+Lab "isolating run", screen pass x0.5, horizon preset, 24 steps, whole-frame GPU ms at 2538x1308 (WebGPU, confirmed by the header label):
+
+| volumes | hidden (no marching) | visible | marching part | hidden cost over clouds-off |
+|---|---|---|---|---|
+| 0 (clouds off) | 1.85 | - | - | - |
+| 1 | 1.76 | 2.15 | 0.39 | -0.09 (noise) |
+| 4 | 2.26 | 2.39 | 0.13 | 0.41 |
+| 12 | 3.48 | 4.18 | 0.70 | 1.63 |
+
+- With every volume outside the frustum and no ray marching at all, 12 volumes still add 1.63 of the 2.33 ms over clouds-off (about 70%), and 4 volumes add 0.41 of 0.54. The march itself is 0.1-0.7 ms.
+- So the cost is structural per-volume and per-chunk shader overhead (code that runs per pixel whether or not the ray hits, plus the extra half-res target and composite taps per chunk), not ray steps. This agrees with the 8 vs 24 step runs.
+- Consequence for step 3c: box proxies help only if they remove that per-pixel work for pixels the volume does not cover. A screen pass that runs every volume at every pixel cannot be fixed by tuning the march. 1 and 4 volumes already meet G6 as measured; the many-volume case is the one 3c has to fix, otherwise it becomes a Phase 6 gate (one generic loop over volumes with per-volume parameters in a buffer).
+- The 1-volume hidden figure is below clouds-off by 0.09 ms; that is inside the 0.3 ms noise floor and not a real gain.

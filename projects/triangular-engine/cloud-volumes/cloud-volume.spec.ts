@@ -1,12 +1,12 @@
-import { DataUtils, PerspectiveCamera, Vector3, Vector4 } from 'three';
+import { DataUtils, Vector3 } from 'three';
 import { referenceOpticalDepth, type CloudAnalyticShape } from './cloud-volume-reference';
 import { CloudVolume } from './cloud-volume';
 import { getCloudTestRenderer } from './gpu-renderer.testing';
 
 /** Reads a half-float atlas back as numbers, one per texel, whatever the channel count. */
-async function readAtlas(renderer: any, volume: CloudVolume, which: 'light' | 'density' | 'occupancy'): Promise<(x: number, y: number, z: number) => number> {
-  const target = which === 'light' ? volume.lightTarget : which === 'occupancy' ? volume.occupancyTarget : volume.densityTarget;
-  const layout = which === 'light' ? volume.lightLayout : which === 'occupancy' ? volume.occupancyLayout : volume.densityLayout;
+async function readAtlas(renderer: any, volume: CloudVolume, which: 'light' | 'density'): Promise<(x: number, y: number, z: number) => number> {
+  const target = which === 'light' ? volume.lightTarget : volume.densityTarget;
+  const layout = which === 'light' ? volume.lightLayout : volume.densityLayout;
   const raw = await renderer.readRenderTargetPixelsAsync(target, 0, 0, layout.width, layout.height);
   const channels = raw.length / (layout.width * layout.height);
   const toNumber =
@@ -100,64 +100,6 @@ describe('CloudVolume bakes (WebGL2 backend)', () => {
     expect(min).toBe(0);
     expect(max).toBeGreaterThan(0.3);
     expect(max).toBeLessThanOrEqual(1.001);
-    volume.dispose();
-  });
-});
-
-describe('CloudVolume occupancy grid (WebGL2 backend)', () => {
-  it('is zero only where every density texel in its cell and the margin around it is zero, and not everywhere zero', async () => {
-    const renderer = await getCloudTestRenderer();
-    const volume = new CloudVolume({ size: new Vector3(200, 100, 200), shape: 'noise', densitySize: 32 });
-    volume.update(renderer);
-    const density = await readAtlas(renderer, volume, 'density');
-    const occupancy = await readAtlas(renderer, volume, 'occupancy');
-    const n = volume.occupancyLayout.size;
-    const cell = 32 / n;
-    let empty = 0;
-    let filled = 0;
-    for (let cz = 0; cz < n; cz++) for (let cy = 0; cy < n; cy++) for (let cx = 0; cx < n; cx++) {
-      const clamp = (v: number) => Math.min(31, Math.max(0, v));
-      let peak = 0;
-      for (let z = Math.floor(cz * cell - 1); z < (cz + 1) * cell + 1; z++)
-        for (let y = Math.floor(cy * cell - 1); y < (cy + 1) * cell + 1; y++)
-          for (let x = Math.floor(cx * cell - 1); x < (cx + 1) * cell + 1; x++) peak = Math.max(peak, density(clamp(x), clamp(y), clamp(z)));
-      const value = occupancy(cx, cy, cz);
-      if (value === 0) {
-        empty++;
-        expect(peak).toBe(0);
-      } else filled++;
-    }
-    expect(empty).toBeGreaterThan(0);
-    expect(filled).toBeGreaterThan(0);
-    volume.dispose();
-  });
-});
-
-describe('CloudVolume temporal reprojection (CPU)', () => {
-  it('the previous-frame matrix sends a point of a still box to where the previous camera saw it', () => {
-    const volume = new CloudVolume({ size: new Vector3(200, 100, 200), shape: 'box', densitySize: 16 });
-    volume.mesh.position.set(10, 20, -300);
-    const camera = new PerspectiveCamera(60, 16 / 9, 1, 5000);
-    const frame = (x: number) => {
-      camera.position.set(x, 30, 50);
-      camera.lookAt(0, 20, -300);
-      camera.updateMatrixWorld();
-      volume.setView(camera);
-    };
-    const project = (matrix: { elements: number[] }, p: Vector3): [number, number] => {
-      const clip = new Vector4(p.x, p.y, p.z, 1).applyMatrix4(matrix as never);
-      return [clip.x / clip.w, clip.y / clip.w];
-    };
-    const point = new Vector3(0.2, -0.1, 0.3);
-    frame(0);
-    const before = project((volume as any).previousClip, point);
-    frame(25);
-    const after = project((volume as any).uPreviousClip.value, point);
-    expect(after[0]).toBeCloseTo(before[0], 6);
-    expect(after[1]).toBeCloseTo(before[1], 6);
-    // The current frame saw the point somewhere else, so the reprojection is doing work.
-    const now = project((volume as any).previousClip, point);
-    expect(Math.abs(now[0] - after[0])).toBeGreaterThan(1e-3);
     volume.dispose();
   });
 });

@@ -99,9 +99,6 @@ export class CloudVolume {
   readonly size: Vector3;
   readonly densityLayout: CloudVolumeAtlasLayout;
   readonly lightLayout: CloudVolumeAtlasLayout;
-  /** Coarse max-density grid the march uses to leap over empty space (Plan 051, Phase 2b step 6). */
-  readonly occupancyLayout: CloudVolumeAtlasLayout;
-  readonly occupancyTarget: RenderTarget;
   readonly densityTarget: RenderTarget;
   readonly lightTarget: RenderTarget;
 
@@ -120,12 +117,6 @@ export class CloudVolume {
   readonly uStepTexels = uniform(1.5);
   /** Debug (Plan 051, Phase 2a): 0 turns the per-pixel start jitter off. */
   readonly uJitter = uniform(1);
-  /** Fraction of `uMarchSteps` a ray may take. Temporal reuse lowers it and averages the lost samples over frames. */
-  readonly uStepScale = uniform(1);
-  /** Per-frame offset (0..1) added to the start jitter, so successive frames sample different depths. */
-  readonly uFrameJitter = uniform(0);
-  /** 1 lets the march leap over empty occupancy cells; 0 marches every step. Default 0: measured a wash (see runbook 051). */
-  readonly uSkipEmpty = uniform(0);
 
   /** How many times each bake has run, for specs and the lab readout. */
   densityBakes = 0;
@@ -158,16 +149,11 @@ export class CloudVolume {
   private readonly viewMatrix = new Matrix4();
   /** Whether the last {@link setView} found the box inside the camera frustum. */
   inView = true;
-  /** Last frame's projection x view x box matrix: a point in the unit cube to last frame's clip space (computed in double). */
-  private readonly uPreviousClip = uniform(new Matrix4());
-  private readonly currentClip = new Matrix4();
-  private readonly previousClip = new Matrix4();
-  private hasPreviousClip = false;
+  /** Debug: treats the volume as outside the frustum, so its screen-pass rays end at once (isolates per-volume shader overhead). */
+  forceHidden = false;
 
   private readonly densityQuad: QuadMesh;
   private readonly lightQuad: QuadMesh;
-  private readonly occupancyQuad: QuadMesh;
-  private readonly occupancyMaterial: NodeMaterial;
   private readonly densityMaterial: NodeMaterial;
   private readonly lightMaterial: NodeMaterial;
   private readonly marchMaterial: NodeMaterial;
@@ -182,20 +168,15 @@ export class CloudVolume {
     this.cosTolerance = Math.cos(((options.sunToleranceDeg ?? 0.5) * Math.PI) / 180);
     this.densityLayout = new CloudVolumeAtlasLayout(densitySize);
     this.lightLayout = new CloudVolumeAtlasLayout(lightSize);
-    this.occupancyLayout = new CloudVolumeAtlasLayout(Math.max(4, Math.min(16, densitySize >> 3)));
     // Density is a 0..1 fraction, so 8 bits is enough; the sun optical depth is unbounded, so it stays half float.
     this.densityTarget = makeAtlasTarget(this.densityLayout, UnsignedByteType);
     this.lightTarget = makeAtlasTarget(this.lightLayout, HalfFloatType);
-    this.occupancyTarget = makeAtlasTarget(this.occupancyLayout, UnsignedByteType);
     this.uShape.value = SHAPE_ID[this.shape];
     this.uSize.value.copy(this.size);
 
     this.densityMaterial = new NodeMaterial();
     this.densityMaterial.fragmentNode = this.buildDensityNode();
     this.densityQuad = new QuadMesh(this.densityMaterial);
-    this.occupancyMaterial = new NodeMaterial();
-    this.occupancyMaterial.fragmentNode = this.buildOccupancyNode(densitySize);
-    this.occupancyQuad = new QuadMesh(this.occupancyMaterial);
     this.lightMaterial = new NodeMaterial();
     this.lightMaterial.fragmentNode = this.buildLightNode(options.lightSteps ?? 24);
     this.lightQuad = new QuadMesh(this.lightMaterial);
@@ -240,7 +221,6 @@ export class CloudVolume {
 
     if (this.densityDirty) {
       this.bake(renderer, this.densityQuad, this.densityTarget);
-      this.bake(renderer, this.occupancyQuad, this.occupancyTarget);
       this.densityBakes++;
       this.densityDirty = false;
     }
@@ -255,8 +235,6 @@ export class CloudVolume {
   dispose(): void {
     this.densityTarget.dispose();
     this.lightTarget.dispose();
-    this.occupancyTarget.dispose();
-    this.occupancyMaterial.dispose();
     this.densityMaterial.dispose();
     this.lightMaterial.dispose();
     this.marchMaterial.dispose();
@@ -314,33 +292,6 @@ export class CloudVolume {
     return vec4(a, b, c, d);
   }
 
-  /**
-   * Per occupancy cell, the largest density in the cell grown by a texel and a half each way. A trilinear read of this grid
-   * is exactly zero only where every density texel that could reach the point is zero, so a zero is a safe place to leap.
-   */
-  private buildOccupancyNode(densitySize: number): any {
-    const cellTexels = densitySize / this.occupancyLayout.size;
-    const n = Math.ceil(cellTexels + 3);
-    const texel = 1 / densitySize;
-    return Fn(() => {
-      const channelMax = (channel: number) => {
-        const centre = this.texelPosition(this.occupancyLayout, channel);
-        const peak = float(0).toVar();
-        Loop(n * n * n, ({ i }: { i: any }) => {
-          const f = float(i);
-          const z = floor(f.div(n * n));
-          const r = f.sub(z.mul(n * n));
-          const y = floor(r.div(n));
-          const x = r.sub(y.mul(n));
-          const offset = vec3(x, y, z).sub((n - 1) / 2).mul(texel);
-          peak.assign(max(peak, this.densityLayout.sample(this.densityTarget.texture, centre.add(offset))));
-        });
-        return peak;
-      };
-      return vec4(channelMax(0), channelMax(1), channelMax(2), channelMax(3));
-    })();
-  }
-
   private buildLightNode(lightSteps: number): any {
     const size = this.uSize;
     const half = size.mul(0.5);
@@ -392,44 +343,8 @@ export class CloudVolume {
     if (camera.projectionMatrix && camera.matrixWorldInverse) {
       this.viewFrustum.setFromProjectionMatrix(this.viewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
       this.inView = this.viewFrustum.intersectsObject(this.mesh);
-      this.uScreenVisible.value = this.inView ? 1 : 0;
-      // Each frame keeps the previous frame's matrix, so a turning or orbiting box reprojects with its own motion.
-      this.currentClip.multiplyMatrices(this.viewMatrix, this.mesh.matrixWorld);
-      this.uPreviousClip.value.copy(this.hasPreviousClip ? this.previousClip : this.currentClip);
-      this.previousClip.copy(this.currentClip);
-      this.hasPreviousClip = true;
+      this.uScreenVisible.value = this.inView && !this.forceHidden ? 1 : 0;
     }
-  }
-
-  /** Forgets last frame's matrix (after a teleport or a resize), so the next reprojection is the identity. */
-  resetHistory(): void {
-    this.hasPreviousClip = false;
-  }
-
-  /**
-   * Where this volume's visible part of each ray was last frame, for temporal reuse: `(u, v, valid, metres)` at the middle of
-   * the ray's span inside the box, projected with last frame's camera and box matrices. `valid` is 0 on a miss, a hidden box or
-   * a point outside last frame's view.
-   */
-  buildScreenReprojectionNode(dirWorld: any, limitMetres: any): any {
-    const origin = this.uViewOrigin;
-    const dir = this.uViewDirections.mul(vec4(dirWorld, 0)).xyz;
-    return Fn(() => {
-      const dirLength = dir.mul(this.uSize).length();
-      const safeInv = (d: any) => float(1).div(select(abs(d).lessThan(1e-8), float(1e-8), d));
-      const inv = vec3(safeInv(dir.x), safeInv(dir.y), safeInv(dir.z));
-      const a = vec3(-0.5).sub(origin).mul(inv);
-      const b = vec3(0.5).sub(origin).mul(inv);
-      const tNear = max(max(min(a.x, b.x), min(a.y, b.y)), max(min(a.z, b.z), 0));
-      const tBoxFar = min(min(max(a.x, b.x), max(a.y, b.y)), max(a.z, b.z));
-      const tFar = min(tBoxFar, limitMetres.div(dirLength));
-      const tMid = tNear.add(tFar).mul(0.5);
-      const clip = this.uPreviousClip.mul(vec4(origin.add(dir.mul(tMid)), 1));
-      const prevUv = clip.xy.div(clip.w.max(1e-6)).mul(0.5).add(0.5);
-      const inside = prevUv.x.greaterThan(0).and(prevUv.x.lessThan(1)).and(prevUv.y.greaterThan(0)).and(prevUv.y.lessThan(1));
-      const valid = tFar.greaterThan(tNear).and(this.uScreenVisible.greaterThan(0.5)).and(clip.w.greaterThan(1e-6)).and(inside);
-      return vec4(prevUv, select(valid, float(1), float(0)), tMid.mul(dirLength));
-    })();
   }
 
   /**
@@ -472,10 +387,10 @@ export class CloudVolume {
         // takes a few steps instead of the full count.
         const segmentMetres = tFar.sub(tNear).mul(dirLength);
         const texelMetres = this.size.x / this.densityLayout.size;
-        const count = max(float(1), min(float(steps).mul(this.uStepScale), ceil(segmentMetres.div(this.uStepTexels.mul(texelMetres)))));
+        const count = max(float(1), min(float(steps), ceil(segmentMetres.div(this.uStepTexels.mul(texelMetres)))));
         const dt = tFar.sub(tNear).div(count);
         const dtMetres = dt.mul(dirLength);
-        const jitter = fract(float(52.9829189).mul(fract(dot(screenCoordinate.xy, vec2(0.06711056, 0.00583715)))).add(this.uFrameJitter));
+        const jitter = fract(float(52.9829189).mul(fract(dot(screenCoordinate.xy, vec2(0.06711056, 0.00583715)))));
         // The volume frame is the world frame without the box's rotation, and `uSunLocal` is the sun in that frame.
         const cosine = dot(normalize(dirVolume), normalize(this.uSunLocal));
         // Two-lobe Henyey-Greenstein, mild forward and back scattering.
@@ -484,21 +399,9 @@ export class CloudVolume {
           return float(1 - g2).div(pow(float(1 + g2).sub(cosine.mul(2 * g)), 1.5).mul(4 * Math.PI));
         };
         const phase = hg(0.5).mul(0.6).add(hg(-0.3).mul(0.4));
-        // Empty occupancy cells are leapt over by one cell; the loop budget `count` only bounds the sampled steps.
-        const cellT = float(1 / this.occupancyLayout.size).div(max(dir.length(), 1e-6));
-        const skip = max(dt, cellT);
-        const tRay = tNear.add(jitter.mul(this.uJitter).mul(dt)).toVar();
-        Loop(int(count), () => {
-          If(tRay.greaterThan(tFar), () => {
-            Break();
-          });
-          const q = origin.add(dir.mul(tRay)).add(0.5).toVar();
-          const occupied = fetch ? select(this.uSkipEmpty.greaterThan(0.5), this.occupancyLayout.sample(this.occupancyTarget.texture, q), float(1)) : float(1);
-          If(occupied.lessThanEqual(0.0005), () => {
-            tRay.addAssign(skip);
-          });
-          If(occupied.greaterThan(0.0005), () => {
-          tRay.addAssign(dt);
+        Loop(int(count), ({ i }: { i: any }) => {
+          const t = tNear.add(float(i).add(jitter.mul(this.uJitter)).mul(dt));
+          const q = origin.add(dir.mul(t)).add(0.5);
           const d = q.sub(0.5);
           const blobDensity = exp(dot(d, d).div(-2 * CLOUD_BLOB_SIGMA * CLOUD_BLOB_SIGMA));
           const density = fetch ? this.densityLayout.sample(this.densityTarget.texture, q) : blobDensity;
@@ -513,7 +416,6 @@ export class CloudVolume {
             If(transmittance.lessThan(0.01), () => {
               Break();
             });
-          });
           });
         });
       });
