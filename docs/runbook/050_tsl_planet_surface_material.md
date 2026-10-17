@@ -255,6 +255,11 @@ material: culled with the mask, drawn without it.
 - **GLSL benchmark button (2026-10-17):** `/cell-planet-morph-streaming` has the same "run benchmark + copy" (shared
   `frame-benchmark.ts`). Scenarios: morph 0 / 0.5 / 1 in the 'material' colour mode, no batching or atmosphere variants (the
   GLSL page has neither toggle). Run it in a visible tab and compare with the morph rows of the TSL tables above.
+- **Run-all suite (2026-10-17):** both benchmark pages have "run ALL" (`benchmark-suite.ts`). The backend is a query
+  parameter, so switching it needs a page load; the suite keeps its queue and finished reports in `sessionStorage`
+  and each page runs itself on load, then navigates to the next. Order: TSL webgl2, TSL webgpu, GLSL, three rounds
+  (~7 min). The last page shows "copy suite result" (a click is needed for the clipboard). Keep the tab visible and
+  focused; "cancel" drops the suite.
 - **Token map (2026-10-17):** `atmosphere` and `planet-material` are registered and acknowledged against
   `docs/atmosphere.md` and `docs/planet-material.md` (the doc-section stubs hold the why and constraints).
 - `setPlanetProjectionCentre(morph, { lonDeg, latDeg } | null)` writes the whole basis and the mode, so a page does not

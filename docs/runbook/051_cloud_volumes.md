@@ -282,3 +282,18 @@ Readings (measured, not yet explained):
 - No fetch (analytic blob instead of atlas reads) gives 12.10, similar to jitter off. Atlas reads are about half the cost, which supports packing the atlases (2b step 1).
 - The "no fetch" row recompiles the shader, so it is a lower bound on non-fetch work.
 - Scale 0.5 may look soft on cloud edges; not judged here.
+
+## 2026-10-17: Phase 2b step 1 built, packed atlases (not yet measured)
+
+The maintainer recorded the go on the Phase 2a probe (5.20 ms net at scale 0.5, s24, inside).
+
+### Built
+- `CloudVolumeAtlasLayout` is now packed: each atlas cell holds four consecutive z slices in R, G, B, A, and groups advance by three slices, so slice `3g + 3` is stored in two groups. Any neighbouring slice pair `(z, z + 1)` sits in one texel of one group, so a trilinear read is one hardware-bilinear fetch plus a channel blend (weights from `z0 mod 3` and the fraction). Before it was two fetches. `sample` clamps `z0` to `size - 2` so `z1` never leaves the volume.
+- Density 128 is 43 groups in 8 columns: a 1024x768 RGBA8 target (was 2048x1024 RGBA16F). Light 64 is 21 groups: 512x192 RGBA16F (was 1024x256). Density is a 0..1 fraction, so 8 bits is enough; light optical depth is unbounded and stays half float.
+- Bakes write four slices per fragment (four noise evaluations, or four sun rays). Total bake work is about 4/3 of before because the overlapped slices are computed twice.
+- Specs read back through `layout.slotOf(z)` for the channel; density readback now handles `Uint8Array`.
+
+### Checked
+- `npm run test:triangular-engine:cloud-volumes` 8/8 (the light bake reads the packed density through the new sample path, so it covers it on the WebGL2 backend); `tsc` for the demo app clean.
+- By eye on WebGPU in the lab (edge preset): soft cumulus-like clouds with the same shading as before; no console errors from the cloud passes (the only errors were from a zero-size canvas at page load).
+- Not measured: the pane canvas is small, so its 9.4 ms is not comparable. The matrix must be re-run at full size and compared with the Phase 2a table (inside, s32, scale 1: base 23.94 ms; scale 0.5 s24 net 5.20 ms).

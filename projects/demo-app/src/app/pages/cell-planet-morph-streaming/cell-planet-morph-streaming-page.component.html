@@ -59,6 +59,17 @@
         <button type="button" (click)="copyLastReport()">copy last report</button>
       }
     </div>
+    <div class="button-group">
+      <button type="button" (click)="runSuite()" [disabled]="benchmarkStatus() !== ''">
+        run ALL (3 pages x 3 rounds, ~7 min)
+      </button>
+      @if (suiteLabel() !== '') {
+        <button type="button" (click)="stopSuite()">cancel</button>
+      }
+      @if (suiteResultText() !== '') {
+        <button type="button" (click)="copySuiteResult()">copy suite result</button>
+      }
+    </div>
     @if (benchmarkStatus() !== '') {
       <p class="subtitle">{{ benchmarkStatus() }}</p>
     }

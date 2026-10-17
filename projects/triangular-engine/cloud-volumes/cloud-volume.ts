@@ -10,6 +10,7 @@ import {
   Quaternion,
   RGBAFormat,
   RenderTarget,
+  UnsignedByteType,
   Vector3,
 } from 'three';
 import { NodeMaterial, QuadMesh, type WebGPURenderer } from 'three/webgpu';
@@ -69,10 +70,10 @@ export interface CloudVolumeOptions {
 
 const SHAPE_ID: Record<CloudVolumeShape, number> = { noise: 0, box: 1, blob: 2 };
 
-function makeAtlasTarget(layout: CloudVolumeAtlasLayout): RenderTarget {
+function makeAtlasTarget(layout: CloudVolumeAtlasLayout, type: typeof HalfFloatType | typeof UnsignedByteType): RenderTarget {
   return new RenderTarget(layout.width, layout.height, {
     format: RGBAFormat,
-    type: HalfFloatType,
+    type,
     minFilter: LinearFilter,
     magFilter: LinearFilter,
     wrapS: ClampToEdgeWrapping,
@@ -152,8 +153,9 @@ export class CloudVolume {
     this.cosTolerance = Math.cos(((options.sunToleranceDeg ?? 0.5) * Math.PI) / 180);
     this.densityLayout = new CloudVolumeAtlasLayout(densitySize);
     this.lightLayout = new CloudVolumeAtlasLayout(lightSize);
-    this.densityTarget = makeAtlasTarget(this.densityLayout);
-    this.lightTarget = makeAtlasTarget(this.lightLayout);
+    // Density is a 0..1 fraction, so 8 bits is enough; the sun optical depth is unbounded, so it stays half float.
+    this.densityTarget = makeAtlasTarget(this.densityLayout, UnsignedByteType);
+    this.lightTarget = makeAtlasTarget(this.lightLayout, HalfFloatType);
     this.uShape.value = SHAPE_ID[this.shape];
     this.uSize.value.copy(this.size);
 
@@ -233,8 +235,8 @@ export class CloudVolume {
     renderer.setRenderTarget(previous);
   }
 
-  /** The unit-frame position of the texel the current fragment writes, from the bake quad's uv. */
-  private texelPosition(layout: CloudVolumeAtlasLayout): any {
+  /** The unit-frame position of slice channel `channel` of the atlas texel the current fragment writes, from the bake quad's uv. */
+  private texelPosition(layout: CloudVolumeAtlasLayout, channel: number): any {
     const n = layout.size;
     const px = floor(uv().x.mul(layout.width));
     const py = floor(uv().y.mul(layout.height));
@@ -242,49 +244,54 @@ export class CloudVolume {
     const row = floor(py.div(n));
     const ix = px.sub(col.mul(n));
     const iy = py.sub(row.mul(n));
-    const k = row.mul(layout.columns).add(col);
-    return vec3(ix.add(0.5).div(n), iy.add(0.5).div(n), k.add(0.5).div(n));
+    const g = row.mul(layout.columns).add(col);
+    const z = g.mul(CloudVolumeAtlasLayout.STRIDE).add(channel);
+    return vec3(ix.add(0.5).div(n), iy.add(0.5).div(n), z.add(0.5).div(n));
   }
 
   private buildDensityNode(): any {
-    const p = this.texelPosition(this.densityLayout);
-    const centered = p.sub(0.5);
-    const noise = mx_fractal_noise_float(p.mul(this.uNoiseFrequency).add(this.uNoiseSeed), 4, 2.0, 0.5)
-      .mul(0.5)
-      .add(0.5);
-    // A vertical squash keeps the cloud away from the box faces so the proxy edge never shows.
-    const radius = vec3(centered.x, centered.y.mul(1.5), centered.z).length();
-    const falloff = float(1).sub(smoothstep(0.2, 0.5, radius));
-    const noiseDensity = clamp(noise.mul(falloff).sub(this.uNoiseThreshold).mul(this.uNoiseGain), 0, 1);
-    const blob = exp(
-      dot(centered, centered)
-        .negate()
-        .div(2 * CLOUD_BLOB_SIGMA * CLOUD_BLOB_SIGMA),
-    );
-    const value = select(this.uShape.lessThan(0.5), noiseDensity, select(this.uShape.lessThan(1.5), float(1), blob));
-    return vec4(value, 0, 0, 1);
+    const density = (p: any) => {
+      const centered = p.sub(0.5);
+      const noise = mx_fractal_noise_float(p.mul(this.uNoiseFrequency).add(this.uNoiseSeed), 4, 2.0, 0.5)
+        .mul(0.5)
+        .add(0.5);
+      // A vertical squash keeps the cloud away from the box faces so the proxy edge never shows.
+      const radius = vec3(centered.x, centered.y.mul(1.5), centered.z).length();
+      const falloff = float(1).sub(smoothstep(0.2, 0.5, radius));
+      const noiseDensity = clamp(noise.mul(falloff).sub(this.uNoiseThreshold).mul(this.uNoiseGain), 0, 1);
+      const blob = exp(
+        dot(centered, centered)
+          .negate()
+          .div(2 * CLOUD_BLOB_SIGMA * CLOUD_BLOB_SIGMA),
+      );
+      return select(this.uShape.lessThan(0.5), noiseDensity, select(this.uShape.lessThan(1.5), float(1), blob));
+    };
+    const [a, b, c, d] = [0, 1, 2, 3].map((k) => density(this.texelPosition(this.densityLayout, k)));
+    return vec4(a, b, c, d);
   }
 
   private buildLightNode(lightSteps: number): any {
     const size = this.uSize;
     const half = size.mul(0.5);
     return Fn(() => {
-      const p = this.texelPosition(this.lightLayout);
-      const origin = p.sub(0.5).mul(size);
       const dir = normalize(this.uSunLocal);
       // Slab exit distance toward the sun, per axis; a near-zero component never exits.
       const exit = (d: any, h: any, o: any) => {
         const safe = select(abs(d).lessThan(1e-6), float(1e-6), d);
         return select(safe.greaterThan(0), h, h.negate()).sub(o).div(safe);
       };
-      const length = max(min(min(exit(dir.x, half.x, origin.x), exit(dir.y, half.y, origin.y)), exit(dir.z, half.z, origin.z)), 0);
-      const dt = length.div(lightSteps);
-      const sum = float(0).toVar();
-      Loop(lightSteps, ({ i }: { i: any }) => {
-        const q = origin.add(dir.mul(float(i).add(0.5).mul(dt)));
-        sum.addAssign(this.densityLayout.sample(this.densityTarget.texture, q.div(size).add(0.5)));
-      });
-      return vec4(sum.mul(dt).mul(this.uExtinction), 0, 0, 1);
+      const opticalDepth = (channel: number) => {
+        const origin = this.texelPosition(this.lightLayout, channel).sub(0.5).mul(size);
+        const length = max(min(min(exit(dir.x, half.x, origin.x), exit(dir.y, half.y, origin.y)), exit(dir.z, half.z, origin.z)), 0);
+        const dt = length.div(lightSteps);
+        const sum = float(0).toVar();
+        Loop(lightSteps, ({ i }: { i: any }) => {
+          const q = origin.add(dir.mul(float(i).add(0.5).mul(dt)));
+          sum.addAssign(this.densityLayout.sample(this.densityTarget.texture, q.div(size).add(0.5)));
+        });
+        return sum.mul(dt).mul(this.uExtinction);
+      };
+      return vec4(opticalDepth(0), opticalDepth(1), opticalDepth(2), opticalDepth(3));
     })();
   }
 

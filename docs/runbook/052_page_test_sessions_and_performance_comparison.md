@@ -116,3 +116,66 @@ updated once; the original review above is intact. All six findings accepted.
 repositories or their paths in this public repo. The external directories were removed; defect captures
 now go only to the repo-local, ignored `artifacts/scene-defects/`. No other test behaviour changed.
 
+
+## 2026-10-17 — Plan 050 added more users of `frame-benchmark.ts` (note for the Plan 052 implementer)
+
+Written by the Plan 050 session after reading this runbook and the plan. Nothing in Plan 052 was edited.
+
+- `cell-planet-tsl/frame-benchmark.ts` now has a second consumer: the GLSL page
+  `/cell-planet-morph-streaming` imports it for its own "run benchmark + copy" (morph 0 / 0.5 / 1).
+  Plan 052 phase 1 deletes the file, so that import has to move to `FrameSampler` + `PageTestSession` too.
+- Both pages also have a "run ALL" button backed by `cell-planet-tsl/benchmark-suite.ts`. It chains TSL webgl2,
+  TSL webgpu and GLSL, three rounds, across **page reloads**, keeping its queue and reports in `sessionStorage`
+  (the backend is a query parameter, so one click cannot do it without reloads). This is the "reload/backend
+  pairs" case that Plan 052 (review F4) assigns to Playwright / `compare-runs`; it exists only because the
+  owner needed paste-back numbers for Plan 050 before 052 is built. When 052 lands, replace it with the
+  `compare-runs` path and delete `benchmark-suite.ts`.
+- Neither benchmark suspends `FPSController`'s 1 Hz scene traversal (review F1), and both measure rAF deltas
+  (display-capped, 165 Hz on the owner's machine). Numbers from them are comparable to each other only.
+- Measured so far (Runbook 050): two runs of the same TSL WebGL2 page differed 2x on the same machine, which is
+  evidence for 052's "compare only within a recorded environment profile" rule and for repeated, alternating runs.
+
+## 2026-10-17 — Plan revised: one-action suite and token-efficient report (owner decision)
+
+Docs only; nothing built or measured. Earlier sections, the review inbox and the synthesis are unchanged.
+
+- **Owner's requirement:** "run all" testing is the central approach. For a valid performance run the owner closes
+  everything else and keeps the tab visible and focused so rAF/GPU is not throttled, so a test pass must be one button
+  (human) or one command (agent), and must come back to a coding agent token-efficiently (paste or a file it reads).
+- **What changed in the plan:**
+  - Ground rule F4 narrowed: a **scenario** is single-load, a **suite** spans loads (pages and `?backend=` values). One
+    framework-free suite definition (`entries x rounds x order`) is expanded by a pure `expandSuite` and run either by the
+    browser `SuiteRunner` (the `sessionStorage` chain, formalized) or by a headless Playwright `npm run perf:suite`.
+  - `PageTestSession.runLoad(entry)` is the only executor; both drivers call it, so there are not two competing runners.
+    Pages lose their own suite code; `install()` resumes an active suite.
+  - Runner state machine: versioned schema and suite hash, navigate-away pauses (not drops), hidden/blurred window =>
+    `inconclusive` + one retry, per-load watchdog, 30 min stale expiry, Abort keeps partial results.
+  - New dev-only `/page-test` launcher: printed "before you press the button" checklist, live preflight, Run ALL, and on
+    return Copy report / Save raw JSON / baseline. Panel gains Run ALL.
+  - Validity gates in every run: visibility, focus, blur/pagehide events, rAF cadence (throttle floor), refresh-rate
+    estimate and quantization note, long tasks, canvas/DPR, adapter, backend actually used, battery where exposed, build hash.
+  - Report `triangular-perf-suite v1` (042 rules, 048 sections for draws/tris/tiles): header block, one row per load x
+    scenario as median of rounds with min-max spread, optional same-profile delta, verdict `ok / noisy /
+    inconclusive / smoke / needs-review`; target < 2 KB, spec ceiling 4 KB; raw samples to files/console only.
+    Playwright writes `artifacts/scene-tests/<run-id>/report.md` and `artifacts/scene-tests/latest/report.md`.
+  - Statistics policy: 3 rotated rounds, >= 2 valid rounds per row, 15 % spread => `noisy`, per-round drift factor
+    > 1.3 => `drift`, deltas only within one profile key and only above spread and one refresh period.
+  - `FrameSampler` also records in-tick CPU ms (not display-quantized). Moved to Phase 1; the suite runner and
+    report are Phase 2, the agent command and `compare-runs` Phase 3; camera, actions, interactive perf, recording and
+    docs follow (phases renumbered 0-8). Goals G7-G9 added (one-action suite, gates, report).
+  - `frame-benchmark.ts` is deleted in Phase 1 and `benchmark-suite.ts` in Phase 2, each in the same change that
+    moves both planet pages over, so both pages keep working in the interim.
+- **Evidence from Plan 050** ([Runbook 050](/docs/runbook/050_tsl_planet_surface_material.md)): the same TSL WebGL2
+  page measured 10.1 ms then 20.6 ms (2x, every scenario shifted) => rounds, rotation, spread and drift flags; p50s on
+  multiples of ~6.06 ms at 165 Hz => refresh estimate and `~` for sub-period deltas; a hidden pane ran at ~1 fps =>
+  visibility/cadence gates; first frame GLSL 305 ms vs TSL 924-1641 ms => discarded warm-up and a separate first-frame line.
+- **Superseded:** "In-page scenarios are single-load; reload/backend pairs belong only to Playwright/compare-runs"
+  (review F4 as synthesized). Reason: the owner needs authoritative GPU numbers from a visible, focused tab with one
+  click, and tests here run headless, so the Playwright-only rule would leave the human path without backend pairs.
+  F4's real failure (a reload destroying panel state mid-run) is handled by persisting runner state across loads.
+  Recording stays mutually exclusive with measuring.
+- **Open decisions for implementation:** the noise and drift thresholds (15 %, 1.3x) and the 3-round default, tuned on
+  the first Phase 2 runs; whether the build hash can be injected into the dev build cheaply; whether Chrome's
+  focused-document clipboard write works without a click on the launcher (the button stays either way); and whether a
+  headless run on this machine gets a hardware adapter at all (if not, the agent command is smoke-only and the
+  human button is the only GPU path).

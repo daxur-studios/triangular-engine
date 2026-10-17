@@ -96,6 +96,14 @@ import {
   runFrameBenchmark,
   type IBenchmarkScenario,
 } from '../cell-planet-tsl/frame-benchmark';
+import {
+  cancelBenchmarkSuite,
+  completeSuiteEntry,
+  currentSuiteEntry,
+  startBenchmarkSuite,
+  suiteResult,
+  suiteSupported,
+} from '../cell-planet-tsl/benchmark-suite';
 import type {
   CellPlanetMorphCellGridPayload,
   CellPlanetMorphCellGridRequest,
@@ -336,6 +344,8 @@ export class CellPlanetMorphStreamingPageComponent {
   readonly rebuildRevision = signal(0);
   readonly benchmarkStatus = signal('');
   readonly lastReport = signal('');
+  readonly suiteLabel = signal('');
+  readonly suiteResultText = signal(suiteResult());
   private firstFrameMs = 0;
 
   // Render modes & Diagnostics
@@ -860,6 +870,7 @@ export class CellPlanetMorphStreamingPageComponent {
       }
     };
 
+    this.resumeSuite();
     this.terrainWorker.onmessage = handleWorkerMessage;
     for (const worker of this.materialWorkers) worker.onmessage = handleWorkerMessage;
 
@@ -1836,6 +1847,43 @@ export class CellPlanetMorphStreamingPageComponent {
     this.stats.set(stats);
   }
 
+  runSuite(): void {
+    if (!suiteSupported()) {
+      this.benchmarkStatus.set('sessionStorage is blocked: the suite cannot run.');
+      return;
+    }
+    startBenchmarkSuite(3);
+  }
+
+  stopSuite(): void {
+    cancelBenchmarkSuite();
+    this.suiteLabel.set('');
+    location.reload();
+  }
+
+  async copySuiteResult(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.suiteResultText());
+      this.benchmarkStatus.set('Suite result copied. Paste it back.');
+    } catch {
+      this.benchmarkStatus.set('Clipboard blocked: the suite result is in the console.');
+    }
+    setTimeout(() => this.benchmarkStatus.set(''), 4000);
+  }
+
+  /** Starts this page's share of a running suite once the first frame has rendered. */
+  private resumeSuite(): void {
+    const entry = currentSuiteEntry();
+    if (!entry) return;
+    this.suiteLabel.set(entry.label);
+    this.benchmarkStatus.set(`suite ${entry.index}/${entry.total}: ${entry.label}, waiting for first frame`);
+    const timer = setInterval(() => {
+      if (!this.firstFrameMs) return;
+      clearInterval(timer);
+      setTimeout(() => void this.runBenchmark(), 2000);
+    }, 500);
+  }
+
   async copyLastReport(): Promise<void> {
     try {
       await navigator.clipboard.writeText(this.lastReport());
@@ -1852,7 +1900,7 @@ export class CellPlanetMorphStreamingPageComponent {
    * GLSL equivalent of the TSL page's terrain material with streamed tiles.
    */
   async runBenchmark(): Promise<void> {
-    if (this.benchmarkStatus() !== '') return;
+    if (this.benchmarkStatus() !== '' && this.suiteLabel() === '') return;
     const was = { morph: this.morphProgress(), colour: this.colourMode() };
     const setMorph = (morph: number): (() => void) => () => {
       this.morphProgress.set(morph);
@@ -1891,6 +1939,14 @@ export class CellPlanetMorphStreamingPageComponent {
       });
       console.info(report);
       this.lastReport.set(report);
+      if (this.suiteLabel() !== '') {
+        if (completeSuiteEntry(report) === 'finished') {
+          this.suiteLabel.set('');
+          this.suiteResultText.set(suiteResult());
+          this.benchmarkStatus.set('Suite finished. Press "copy suite result".');
+        }
+        return;
+      }
       try {
         await navigator.clipboard.writeText(report);
         this.benchmarkStatus.set('Copied to clipboard. Paste it back.');

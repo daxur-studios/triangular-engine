@@ -59,6 +59,14 @@ import { CELL_PLANET_U0_FIXTURE } from '../cell-planet-u0-fixture';
 import { getTerrainHeightScaleM } from '../cell-planet-25d-map/cell-planet-terrain-scale';
 import type { CellPlanetMorphWorkerRequest } from '../cell-planet-morph-streaming/cell-planet-morph-streaming.worker';
 import { runFrameBenchmark, type IBenchmarkScenario } from './frame-benchmark';
+import {
+  cancelBenchmarkSuite,
+  completeSuiteEntry,
+  currentSuiteEntry,
+  startBenchmarkSuite,
+  suiteResult,
+  suiteSupported,
+} from './benchmark-suite';
 import { MaterialStreaming } from './material-streaming';
 
 /**
@@ -227,6 +235,17 @@ const MACRO: 'off' | 'bodyFixed' | 'morphed' =
           run benchmark + copy
         </button>
       </p>
+      <p class="row">
+        <button (click)="runSuite()" [disabled]="benchmarkStatus() !== ''">
+          run ALL (3 pages x 3 rounds, ~7 min)
+        </button>
+        @if (suiteLabel() !== '') {
+          <button (click)="stopSuite()">cancel</button>
+        }
+      </p>
+      @if (suiteResultText() !== '') {
+        <p class="row"><button (click)="copySuiteResult()">copy suite result</button></p>
+      }
       @if (lastReport() !== '' && benchmarkStatus() === '') {
         <p class="row"><button (click)="copyLastReport()">copy last report</button></p>
       }
@@ -412,6 +431,8 @@ export class CellPlanetTslPageComponent {
   /** Empty while idle; the running scenario (or the copy result) otherwise. */
   readonly benchmarkStatus = signal('');
   readonly lastReport = signal('');
+  readonly suiteLabel = signal('');
+  readonly suiteResultText = signal(suiteResult());
   /** Page construction to the first frame drawn after the renderer was ready (shader compile included). */
   private firstFrameMs = 0;
   readonly viewOn = signal(true);
@@ -627,6 +648,7 @@ export class CellPlanetTslPageComponent {
     this.cellLookup.opacity.value = 0.72;
     this.addOceanAndFrame();
     if (ATMOSPHERE) this.addAtmosphere();
+    this.resumeSuite();
     this.engine.beforeRender$.subscribe(() => {
       this.syncAtmosphere();
       if (!this.firstFrameMs && (this.engine.renderer as any)?.initialized) {
@@ -966,6 +988,43 @@ export class CellPlanetTslPageComponent {
     setTimeout(() => this.viewOn.set(true));
   }
 
+  runSuite(): void {
+    if (!suiteSupported()) {
+      this.benchmarkStatus.set('sessionStorage is blocked: the suite cannot run.');
+      return;
+    }
+    startBenchmarkSuite(3);
+  }
+
+  stopSuite(): void {
+    cancelBenchmarkSuite();
+    this.suiteLabel.set('');
+    location.reload();
+  }
+
+  async copySuiteResult(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.suiteResultText());
+      this.benchmarkStatus.set('Suite result copied. Paste it back.');
+    } catch {
+      this.benchmarkStatus.set('Clipboard blocked: the suite result is in the console.');
+    }
+    setTimeout(() => this.benchmarkStatus.set(''), 4000);
+  }
+
+  /** Starts this page's share of a running suite once the first frame has rendered. */
+  private resumeSuite(): void {
+    const entry = currentSuiteEntry();
+    if (!entry) return;
+    this.suiteLabel.set(entry.label);
+    this.benchmarkStatus.set(`suite ${entry.index}/${entry.total}: ${entry.label}, waiting for first frame`);
+    const timer = setInterval(() => {
+      if (!this.firstFrameMs) return;
+      clearInterval(timer);
+      setTimeout(() => void this.runBenchmark(), 2000);
+    }, 500);
+  }
+
   async copyLastReport(): Promise<void> {
     try {
       await navigator.clipboard.writeText(this.lastReport());
@@ -978,7 +1037,7 @@ export class CellPlanetTslPageComponent {
 
   /** Runs every scenario in turn, then copies a markdown table to the clipboard (and logs it). */
   async runBenchmark(): Promise<void> {
-    if (this.benchmarkStatus() !== '') return;
+    if (this.benchmarkStatus() !== '' && this.suiteLabel() === '') return;
     const was = {
       morph: this.morphProgress(),
       dynamic: this.dynamic(),
@@ -1036,6 +1095,14 @@ export class CellPlanetTslPageComponent {
       });
       console.info(report);
       this.lastReport.set(report);
+      if (this.suiteLabel() !== '') {
+        if (completeSuiteEntry(report) === 'finished') {
+          this.suiteLabel.set('');
+          this.suiteResultText.set(suiteResult());
+          this.benchmarkStatus.set('Suite finished. Press "copy suite result".');
+        }
+        return;
+      }
       try {
         await navigator.clipboard.writeText(report);
         this.benchmarkStatus.set('Copied to clipboard. Paste it back.');

@@ -9,11 +9,12 @@ async function readAtlas(renderer: any, volume: CloudVolume, which: 'light' | 'd
   const layout = which === 'light' ? volume.lightLayout : volume.densityLayout;
   const raw = await renderer.readRenderTargetPixelsAsync(target, 0, 0, layout.width, layout.height);
   const channels = raw.length / (layout.width * layout.height);
-  const toNumber = raw instanceof Uint16Array ? (v: number) => DataUtils.fromHalfFloat(v) : (v: number) => v;
+  const toNumber =
+    raw instanceof Uint16Array ? (v: number) => DataUtils.fromHalfFloat(v) : raw instanceof Uint8Array ? (v: number) => v / 255 : (v: number) => v;
   // GL readback rows run bottom-up, so atlas row 0 is the last row of the array.
   return (x, y, z) => {
     const px = layout.pixelOf(x, y, z);
-    return toNumber(raw[((layout.height - 1 - px.y) * layout.width + px.x) * channels]);
+    return toNumber(raw[((layout.height - 1 - px.y) * layout.width + px.x) * channels + layout.slotOf(z).channel]);
   };
 }
 
