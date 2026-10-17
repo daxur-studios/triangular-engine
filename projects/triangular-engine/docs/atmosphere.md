@@ -71,21 +71,23 @@ Without the camera argument, or with `backdrop.spaceLowResEnabled.value = 0` or 
 `PlanetAtmosphereBinding` fills two stages of `PlanetSurfaceMaterial` (see [planet-material.md](planet-material.md)): the lighting stage and the atmosphere stage. The sky and limb glow behind the globe stay with `AtmosphereBackdrop` (set `groundEnabled.value = 0`), which draws behind the mesh.
 
 ```ts
-const binding = new PlanetAtmosphereBinding(model, { radiusUnits: 1 }); // the globe's radius in mesh units
+// aerialPerspective: true reads the haze from a froxel table (recommended); omit it for one march per fragment
+const binding = new PlanetAtmosphereBinding(model, { radiusUnits: 1, aerialPerspective: true }); // radiusUnits: the globe's radius in mesh units
 const material = new PlanetSurfaceMaterial({
   lighting: { id: 'atmosphere', stage: binding.lighting() },
   atmosphere: { id: 'atmosphere', stage: binding.perspective() },
 });
 
 binding.setSunBody(x, y, z); // sun direction in the planet's body frame
-engine.tick$.subscribe(() => {
+engine.beforeRender$.subscribe(() => { // after the camera controls have settled
   binding.sync(engine.camera, globe, backdrop); // camera altitude, body-frame camera, backdrop frame and sun
+  binding.update(renderer); // re-renders the froxel table when the camera or the sun moved
   backdrop.update(renderer, engine.camera);
 });
 ```
 
 - `lighting()` relights the surface as `albedo x (sun transmittance x N.L x sunVisibility + sky irradiance) x sun irradiance / pi x exposure`, using each point's own sun angle. It replaces the PBR result (other scene lights and normal maps do not reach it); the emissive stack is added back. An eclipse occluder darkens only the direct term.
-- `perspective()` attenuates the colour along the camera-to-surface ray and adds that ray's in-scattering (one march per fragment for now; a froxel table is planned). The surface point is taken on the sphere of the planet's radius, so terrain height and the mid-morph flat map are not modelled yet.
+- `perspective()` attenuates the colour along the camera-to-surface ray and adds that ray's in-scattering. With `aerialPerspective` it is one lookup in a froxel table (`AtmosphereAerialPerspectiveLut`: radiance and optical depth for a grid of screen positions and distances, re-rendered by `binding.update(renderer)` only when the camera, the sun or the profile moved); the fragment's real distance is used, so terrain height is included. Without it, one march per fragment on the sphere of the planet's radius (several times the cost on a planet that fills the screen). The table resolves the last texel of the planet's disc poorly, so the very rim can lose some haze. The mid-morph flat map is not modelled yet.
 - The planet may sit anywhere and turn any way: the stages work in its body frame, and `sync` points the backdrop's local frame at the camera's radial direction. The mesh's size in metres is the profile's radius, so `radiusUnits` sets the scale; call `binding.refreshScale()` after `model.setProfile` changes the radius.
 - `exposure` lives on the binding and is copied to the backdrop by `sync`, so the surface and the sky agree.
 

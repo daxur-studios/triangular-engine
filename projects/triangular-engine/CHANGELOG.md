@@ -150,6 +150,8 @@ All notable changes to triangular-engine are documented here.
   marches the planet at reduced resolution (`spaceScale`, pass the camera to
   `backdrop.update`). `PlanetAtmosphereBinding` fills `PlanetSurfaceMaterial`'s lighting and atmosphere stages (`lighting()`, `perspective()`, `sync`), and the backdrop takes a `frame` so a planet can sit anywhere; demo `/atmosphere-planet`. See `docs/atmosphere.md`.
 
+- `PlanetAtmosphereBinding` accepts `aerialPerspective` (`true` or `AtmosphereAerialPerspectiveOptions`): `perspective()` then reads the haze from an `AtmosphereAerialPerspectiveLut` froxel table instead of marching a ray per fragment, and `binding.update(renderer)` re-renders the table when the camera, the sun or the profile moved. `AtmosphereGpuModel.march` and `traceRay` take `ignoreGround`. See `docs/atmosphere.md`.
+
 - Added an Angular CLI `ng add triangular-engine` schematic that installs the engine and generates a starter scene with a lazy route. Declared the required Angular Forms, Angular Material, and `three-mesh-bvh` peers used by the package.
 
 - `<terrainSurface>` and `<cellPlanetMorphStreamingView>` take

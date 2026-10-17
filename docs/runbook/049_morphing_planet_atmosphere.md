@@ -400,3 +400,32 @@ morph at 0 (`/atmosphere-planet`). The cell-planet streaming demo and the eclips
   have their own materials and are not hazed yet.
 - Not yet checked on a real GPU: the browser pane renders at about 1 fps, too slow for the streamed tiles to arrive, so only
   the maintainer's look at `m = 0` is outstanding (cells, macro variation, terrain relief losing its normal-map shading).
+
+- `/cell-planet-tsl`: the Atmosphere panel is a collapsible section, with an air-height slider (percent of the radius, rebaked on
+  release, with a "preset height" reset) so the air can clear the page's exaggerated relief.
+
+### Froxel aerial perspective (2026-10-17)
+
+The maintainer's timings showed the surface march was nearly the whole cost on the planet pages: `/cell-planet-tsl` ran 165 fps with
+`?atmosphere=0` and 42 fps with it, `/atmosphere-planet` 80 fps, the lab (backdrop only) 160 fps. The page's checkbox is not a
+baseline: it blends the result away but the march stays in the shader.
+
+- `atmosphere-aerial-perspective.ts`: `AtmosphereAerialPerspectiveLut`, a two-attachment render target (radiance and optical depth)
+  of `64 x 36` screen texels by 32 distance slices laid side by side, filtered by hand between two slices. Each texel marches its own
+  ray to its slice's distance with `ignoreGround` (new on `march` and `traceRay`), so a ray that dips under the sphere still stands
+  for the distance it is asked about. It is re-rendered only when the camera, the sun or the profile moved
+  (`PlanetAtmosphereBinding.update(renderer)`).
+- In the air the slices run `rangeMin + w^3 (rangeMax - rangeMin)`, from where the air begins to past the horizon. From above the
+  air they run along each ray's own span instead (last slice at the ground hit or, for a ray that misses, its closest approach),
+  and texels that miss the planet are aimed at its limb. Reason: the sphere falls away under a ray tilted by one texel by an amount
+  comparable to the air's height; with absolute distances that under-hazed the nadir of a far small planet by 2.4x.
+- Optical depth, not transmittance, is stored and filtered: it is far smoother across a limb.
+- The lookup in `perspective()` takes the screen position from `cameraProjectionMatrix * positionView` and the distance from
+  `context.cameraDistance`. The unprojection uses depth 0, not the far plane: with a huge far the far-plane point cancels to zero
+  in float32 (the first version found no air).
+- Both planet pages opt in (`aerialPerspective: true`, `binding.update(renderer)` before the backdrop update).
+- Spec: the table matches the per-ray march within 8% (plus a small absolute margin) at the ground, 8 km up and from space, and
+  re-renders only on movement; `binding.update` is covered too. Known limit: within one texel of the planet's limb the table
+  under-hazes (about 2x at the worst sample of a 100 km planet at 2.2 radii), so the spec's space samples stay clear of it.
+- Open: the maintainer's frame rates on the two pages (expected near the 165 fps baseline), and the look at the rim and at the
+  horizon from the ground. The mid-morph flat map is still Phase 3.

@@ -220,7 +220,9 @@ export function planetMorphGraph(
   );
   const dynFlatPos = vec3(flatXY.x.sub(bodyShift.x), flatXY.y.sub(bodyShift.y), aFlatPos.z);
   const flatPos = select(dynamic, dynFlatPos, aFlatPos);
-  const flatNorm = select(dynamic, vec3(0, 0, 1), aFlatNorm);
+  // The baked flat normal carries the terrain relief; the map's axes (east, north, up) do not depend on the
+  // projection centre, so it stays valid when re-centred (the GLSL material does the same).
+  const flatNorm = aFlatNorm;
 
   let cull: any = float(0);
   if (seamCullAttributes) {
