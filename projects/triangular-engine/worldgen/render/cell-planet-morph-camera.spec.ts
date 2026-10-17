@@ -57,7 +57,7 @@ describe('CellPlanetMorphCameraRig', () => {
     expect(globe.normal.distanceTo(dir)).toBeLessThan(1e-12);
 
     const map = r.groundFrame(dir, 1);
-    expect(map.position.z).toBeCloseTo(RADIUS, 9);
+    expect(map.position.z).toBeCloseTo(0, 9);
     expect(map.normal.distanceTo(new Vector3(0, 0, 1))).toBeLessThan(1e-12);
     expect(map.north.distanceTo(new Vector3(0, 1, 0))).toBeLessThan(1e-12);
     expect(map.east.distanceTo(new Vector3(1, 0, 0))).toBeLessThan(1e-12);

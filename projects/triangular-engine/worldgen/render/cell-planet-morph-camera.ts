@@ -35,7 +35,7 @@ export interface ICellPlanetMorphCameraControls {
 }
 
 export interface ICellPlanetMorphCameraRigOptions {
-  /** The planet's radius in scene units (the sphere's radius, and the flat map's height above the origin). */
+  /** The planet's radius in scene units (the sphere's radius, and half the flat map's height). */
   readonly radiusM: number;
   /** Read live: the map projection the material draws. */
   readonly projection: () => MapProjectionKind;
@@ -66,7 +66,7 @@ function frameOf(): ICellPlanetGroundFrame {
  * surface normal and re-aims the camera, so there is no roll jitter between the globe's radial up and the map's +Z.
  *
  * The frame follows the material's own blend: the normal is `normalize(mix(sphere normal, +Z, morph))` and north blends
- * the same way, so the terrain under the camera stays level with its up. The flat map is the plane `z = radiusM` and
+ * the same way, so the terrain under the camera stays level with its up. The flat map is the plane `z = 0` through the planet's centre (the material's flat positions carry only the terrain height) and
  * terrain relief is ignored (the anchor sits on the base surface). Call {@link update} once per frame, after the orbit
  * controls have updated and before the frame renders.
  */
@@ -95,7 +95,7 @@ export class CellPlanetMorphCameraRig {
     this.lastMorph = Number.NaN;
   }
 
-  /** Position of the ground at body direction `dir` for `morph`: `mix(radius * dir, flat map point, morph)`. */
+  /** Position of the ground at body direction `dir` for `morph`: `mix(radius * dir, flat map point at z = 0, morph)`. */
   groundPosition(dir: Vector3, morph: number, out = new Vector3()): Vector3 {
     const radius = this.options.radiusM;
     const basis = this.options.basis?.() ?? DEFAULT_BASIS;
@@ -111,7 +111,7 @@ export class CellPlanetMorphCameraRig {
     return out.set(
       sphere * radius * d.x + morph * flatX,
       sphere * radius * d.y + morph * flatY,
-      sphere * radius * d.z + morph * radius,
+      sphere * radius * d.z,
     );
   }
 
@@ -249,7 +249,7 @@ export class CellPlanetMorphCameraRig {
   private planeStart(origin: Vector3, u: Vector3): Vector3 | null {
     if (Math.abs(u.z) < 1e-9) return null;
     const radius = this.options.radiusM;
-    const t = (radius - origin.z) / u.z;
+    const t = -origin.z / u.z;
     if (t < 0) return null;
     const x = origin.x + u.x * t;
     const y = origin.y + u.y * t;

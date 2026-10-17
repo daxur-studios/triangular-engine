@@ -52,6 +52,42 @@ describe('FPSController', () => {
     });
   });
 
+  describe('uncapped fps estimate', () => {
+    it('is 1000 / average CPU frame time, independent of the frame count', () => {
+      const { controller } = createController();
+
+      // 20 frames of 5ms of work each -> 200 fps ceiling, even though only 20 frames ran.
+      for (let i = 0; i < 20; i++) controller.recordFrame(5);
+      controller.previousSecond = performance.now() - 1001;
+      controller.recordFrame(5);
+
+      expect(controller.uncappedFps()).toBe(200);
+    });
+
+    it('uses the slower GPU time when GPU samples are recorded', () => {
+      const { controller } = createController();
+      controller.previousSecond = performance.now();
+
+      controller.recordGpuFrameTime(20);
+      controller.recordGpuFrameTime(20);
+      for (let i = 0; i < 10; i++) controller.recordFrame(5);
+      controller.previousSecond = performance.now() - 1001;
+      controller.recordFrame(5);
+
+      expect(controller.gpuFrameTime()).toBe(20);
+      expect(controller.uncappedFps()).toBe(50);
+    });
+
+    it('stays 0 before the first one-second boundary', () => {
+      const { controller } = createController();
+      controller.previousSecond = performance.now();
+
+      controller.recordFrame(5);
+
+      expect(controller.uncappedFps()).toBe(0);
+    });
+  });
+
   describe('camera motion tracking', () => {
     it('records "idle" when camera does not move', () => {
       const { controller } = createController();

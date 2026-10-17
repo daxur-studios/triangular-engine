@@ -172,6 +172,7 @@ export class EngineService implements IEngine {
    */
   framePhase: EngineFramePhase = 'idle';
   readonly #lateSceneWritesWarned = new Set<string>();
+  #gpuTimingPending = false;
   readonly #appRef = inject(ApplicationRef);
   /**
    * Fired after `lateUpdate$` camera/controllers have settled, immediately before
@@ -424,6 +425,7 @@ export class EngineService implements IEngine {
 
     const renderer = new WebGPURenderer({
       canvas: this.canvas,
+      trackTimestamp: this.options.gpuTiming === true,
       ...(webGpuRendererParameters || {}),
     } as any);
 
@@ -722,12 +724,35 @@ export class EngineService implements IEngine {
         this.CSS3DRenderer.render(this.scene, this.camera);
 
       this.fpsController.lastRenderTime = time;
+      this.#collectGpuTiming();
       this.safeEmit('renderComplete$', this.renderComplete$, {
         frameId: ++this.renderFrameId,
         renderedAt: performance.now(),
       });
     }
   }
+  /**
+   * Reads the last render's GPU timestamp (`gpuTiming`) without stalling the frame: at most one
+   * readback is in flight, and frames that finish while it is pending are not sampled.
+   */
+  #collectGpuTiming(): void {
+    const renderer = this.renderer as WebGPURenderer | undefined;
+    if (this.options.gpuTiming !== true || this.#gpuTimingPending) return;
+    if (typeof renderer?.resolveTimestampsAsync !== 'function') return;
+    this.#gpuTimingPending = true;
+    renderer
+      .resolveTimestampsAsync('render')
+      .then((ms) => {
+        if (typeof ms === 'number') this.fpsController.recordGpuFrameTime(ms);
+      })
+      .catch((err) => {
+        this.error$.next({ phase: 'gpuTiming', error: err });
+      })
+      .finally(() => {
+        this.#gpuTimingPending = false;
+      });
+  }
+
   public setSpeedFactor(timeSpeed: number) {
     this.speedFactor$.next(timeSpeed);
   }

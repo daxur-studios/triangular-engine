@@ -101,6 +101,12 @@ export interface IEngineOptions {
    * usually clean, change-detection pass per frame.
    */
   warnLateSceneWrites?: boolean;
+  /**
+   * Measure GPU frame time with WebGPU timestamp queries (`FPSController.gpuFrameTime`, and the
+   * GPU term of `uncappedFps`). Off by default: it adds a readback per frame. Works only on the
+   * WebGPU renderer with the `timestamp-query` adapter feature; WebGL2 reports GPU time as n/a.
+   */
+  gpuTiming?: boolean;
 }
 
 /** Where `EngineService.tick` is within the frame (`EngineService.framePhase`). */

@@ -64,7 +64,7 @@ export class PlanetAtmosphereBinding {
   readonly cameraAltitude = uniform(0);
   /**
    * Camera height for the sky behind the planet, metres: the sphere altitude on the globe, the height above the map
-   * (`z - radius`) when flat, blended by `morph`. Only the backdrop uses it; the haze keeps {@link cameraAltitude}.
+   * (`z`, the map is the plane through the centre) when flat, blended by `morph`. Only the backdrop uses it; the haze keeps {@link cameraAltitude}.
    */
   readonly skyAltitude = uniform(0);
   /**
@@ -202,7 +202,7 @@ export class PlanetAtmosphereBinding {
     }
     this.ez.normalize();
     this.skyUp.copy(radialUp).multiplyScalar(Math.cos(angle)).addScaledVector(this.ez, Math.sin(angle)).normalize();
-    this.skyAltitude.value = Math.max(0, altitude + (Math.max(0, this.camBody.z - this.model.profile.planetRadiusM) - altitude) * morph);
+    this.skyAltitude.value = Math.max(0, altitude + (Math.max(0, this.camBody.z) - altitude) * morph);
     this.ref.set(0, 1, 0);
     if (Math.abs(this.skyUp.y) > 0.99) this.ref.set(1, 0, 0);
     const sx = this.ex.crossVectors(this.ref, this.skyUp).normalize();

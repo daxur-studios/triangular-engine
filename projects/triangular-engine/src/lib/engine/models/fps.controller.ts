@@ -63,6 +63,14 @@ export class FPSController {
   /** Throttled performance indicators updated once per second */
   readonly displayCount = signal(this.frameCount);
   readonly frameTime = signal<number>(0);
+  /**
+   * Frame rate the engine could sustain without the display's vsync cap: 1000 / the slower of
+   * average tick + render (CPU) time and average GPU time. GPU time is only included when
+   * `gpuTiming` is enabled; 0 until the first second.
+   */
+  readonly uncappedFps = signal<number>(0);
+  private gpuSampleSum = 0;
+  private gpuSampleCount = 0;
   readonly drawCalls = signal<number>(0);
   readonly triangles = signal<number>(0);
   readonly geometries = signal<number>(0);
@@ -95,6 +103,15 @@ export class FPSController {
   private readonly motionHistoryList: CameraActionTag[] = [];
   private prevDrawCalls = 0;
   private prevTriangles = 0;
+
+  /**
+   * Records one GPU frame duration from a resolved timestamp query. Averaged into
+   * `gpuFrameTime` once per second, alongside the CPU figures.
+   */
+  recordGpuFrameTime(milliseconds: number): void {
+    this.gpuSampleSum += milliseconds;
+    this.gpuSampleCount++;
+  }
 
   recordPhysicsTime(milliseconds: number): void {
     this.physicsTime.set(milliseconds);
@@ -173,6 +190,13 @@ export class FPSController {
 
       const avgFrameTime = actualFrames > 0 ? this.accumulatedFrameTime / actualFrames : 0;
       this.frameTime.set(avgFrameTime);
+      const avgGpuTime = this.gpuSampleCount > 0 ? this.gpuSampleSum / this.gpuSampleCount : null;
+      this.gpuFrameTime.set(avgGpuTime === null ? null : Number(avgGpuTime.toFixed(1)));
+      this.gpuSampleSum = 0;
+      this.gpuSampleCount = 0;
+      // The slower of CPU and GPU work sets the ceiling; GPU is absent unless `gpuTiming` is on.
+      const ceilingMs = Math.max(avgFrameTime, avgGpuTime ?? 0);
+      this.uncappedFps.set(ceilingMs > 0 ? Math.round(1000 / ceilingMs) : 0);
 
       this.graph.push(actualFrames);
       if (this.graph.length > 60) {
@@ -423,7 +447,7 @@ drop_event (${dropAgeS}s ago): ${drop.baselineFps}fps -> ${drop.dropFps}fps on $
     const pageStr = pageSections ? `\n${pageSections}` : '';
 
     return `\`\`\`triangular-telemetry
-status: ${status} | fps: ${fps} (avg: ${avgFps}, min: ${minFps}) | worstFrame60s: ${maxSpike}ms
+status: ${status} | fps: ${fps} (uncapped ~${this.uncappedFps()}, avg: ${avgFps}, min: ${minFps}) | worstFrame60s: ${maxSpike}ms
 viewport: ${width}x${height}@${pixelRatio} | renderer: ${rendererType}
 calls: ${calls} | tris: ${this.formatMetric(tris)} | shaders: ${shaders} | mats: ${mats}
 mem: geo ${geoMB}MB, tex ${texMB}MB | timing: ${timing}

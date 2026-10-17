@@ -155,8 +155,8 @@ describe('PlanetAtmosphereBinding.sync, the sky through the morph', () => {
     const globe = synced(camera, 0);
     expect(globe.backdrop.altitude.value).toBeCloseTo(sphere, 2);
     const flat = synced(camera, 1);
-    expect(flat.backdrop.altitude.value).toBeCloseTo(RADIUS_M, 2);
-    const below = synced([0, 0, 0.5], 1);
+    expect(flat.backdrop.altitude.value).toBeCloseTo(2 * RADIUS_M, 2);
+    const below = synced([0, 0, -0.5], 1);
     expect(below.backdrop.altitude.value).toBe(0);
     for (const r of [globe, flat, below]) {
       r.backdrop.dispose();

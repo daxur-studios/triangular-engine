@@ -11,6 +11,7 @@
     <span class="perf-main-val">
       <span class="fps-val">{{ engineService.fpsController.displayCount() }}</span>
       <span class="unit"> FPS</span>
+      <span class="unit" title="CPU-only estimate, not capped by vsync">(~{{ engineService.fpsController.uncappedFps() }} uncapped)</span>
       <span class="divider">|</span>
       <span class="ms-val">{{ engineService.fpsController.frameTime() | number:'1.1-1' }}</span>
       <span class="unit"> ms</span>
