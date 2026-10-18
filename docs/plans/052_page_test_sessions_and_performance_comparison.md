@@ -9,7 +9,7 @@ runbook: /docs/runbook/052_page_test_sessions_and_performance_comparison.md
 
 # Plan 052: Page Test Sessions and Performance Comparison
 
-Status: **U0 core replay feasibility passed; performance/coordination gates remain open**, 2026-10-18. The shared runner and
+Status: **U0 replay and U0P rendering-cost positive control passed; quiet-performance/coordination gates remain open**, 2026-10-18. The shared runner and
 broader phases remain proposed. Original design synthesized 2026-10-17 against review
 `R-20261017-121500-pagetest-a4c9` (all six findings accepted). **Revised 2026-10-17 by owner
 decision:** the one-action "Run ALL" suite across page loads is the central performance path, with
@@ -348,9 +348,13 @@ decisions, commands, artifact locations and results in [Runbook 052](/docs/runbo
   instead of repeatedly polling. Keep all prior evidence; no automatic pruning or shared index.
 - [ ] Extend seven-checkpoint visual coverage with continuous video/all-frame checks for brief flicker.
 - [ ] Prove a known rendering slowdown against repeated quiet measurements before adopting a perf gate.
-  - In progress: isolated U0P batch-timestamp experiment; select/verify the reference adapter,
-    alternate normal/8-redundant-render journeys, measure repeatability, and test inconclusive/profile gates.
-    This is offscreen rendering-cost evidence, not an idle-machine FPS baseline.
+  - [x] Isolated U0P batch-timestamp experiment: select/verify NVIDIA Ampere, alternate normal and
+    eight-redundant-render journeys, and detect the positive control (2.539x median GPU cost).
+    Six reference windows show 10.1% spread; all final PNGs match; known contention is inconclusive.
+    Noise/missing/profile rejection specs pass. `npm run test:cloud-performance` retains all evidence.
+  - [ ] Establish a controlled quiet/reference environment and sensitivity to smaller realistic
+    rendering regressions before adopting a gate. U0P measures offscreen pass costs; it does not
+    establish idle-machine FPS, presentation smoothness or absence of unknown contention.
 
 Evidence: `npm run test:cloud-feasibility` passed (default 1,200 frames, mesh/proxy; 2026-10-18),
 as did `npx tsc -p tests/cloud-feasibility/tsconfig.json` and `npm run build:triangular-engine`.

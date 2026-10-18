@@ -276,3 +276,28 @@ Docs only; nothing built or measured. Earlier sections, the review inbox and the
   timestamp. All cases share the first reference's measured path count (no unequal animation spans).
   Compare all six normal/repeat windows against three slow windows, so order drift cannot hide in
   the separate repeat group. Busy/profile/noise/missing-evidence rejection is covered by pure specs.
+
+## 2026-10-18 — U0P redundant-render positive control passed
+
+- `npm run test:cloud-performance`, retained run `2026-10-18T12-26-12-838Z-12068`:
+  fresh immutable development build, installed headless Chrome 155, actual NVIDIA `ampere` WebGPU,
+  640x360/DPR 1, one mesh volume/24 march steps. No source changes during the run; manifests,
+  actual served bundles, raw pass timestamps/CPU/wall batches and final PNGs retained.
+- Three alternating rounds, each baseline/slow/repeat (reverse A labels in round two). Each case
+  warms a complete 1,200-step path, then measures four paths (4,800 simulation steps), identical
+  across cases. Baseline/repeat: 4,800 renders each; slow: 38,400 renders each, all timestamped.
+  The redundant renders leave every final checkpoint PNG byte-identical to the reference.
+- All six reference windows: median GPU render cost **0.18046 ms/simulation step**, min 0.16959,
+  max 0.18775, range/median **10.06%**. Three slow windows: median **0.45819 ms/step**, min 0.44306,
+  max 0.46584, spread **4.97%**. **2.539x**, nonoverlapping ranges: `slowdown-detected` under the
+  provisional >25%/<=15%-spread policy. Baseline vs repeat median ratio 1.039 is unresolved.
+- Known competing same-adapter compute is explicitly rejected as `inconclusive(known-contention,
+  insufficient-rounds)` even when its observed timing looks ordinary. This does not demonstrate
+  automatic detection of arbitrary external activity; unknown contention still cannot be excluded.
+- Both Playwright specs pass (deterministic analysis fault cases + real GPU experiment), wrapper
+  **175,325 ms**, exit 0, all contexts closed and dedicated server port released. Duration history
+  separates this positive-control workload from earlier march-cap and correctness runs.
+- **Boundary:** positive control and rejection machinery proven; authoritative quiet baseline,
+  smaller-regression sensitivity and real-time presentation remain open. No performance gate,
+  shared runner migration or agent-instruction change adopted. Shared machine coordination is
+  still required before independent agents benchmark together.
