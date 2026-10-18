@@ -1,6 +1,6 @@
 import { Component, DestroyRef, HostListener, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PerspectiveCamera, SphereGeometry, Vector3 } from 'three';
+import { Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PerspectiveCamera, Quaternion, SphereGeometry, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import { NEXT_TEST } from './next-test';
 import { CloudVolume, CloudVolumeBakeScheduler, CloudVolumeScreenPass } from 'triangular-engine/cloud-volumes';
@@ -173,6 +173,12 @@ interface Recording {
             {{ animateSun() ? 'stop sun' : 'animate sun' }}
           </button>
         </p>
+        <p class="row">
+          planet spin
+          @for (w of warps; track w) {
+            <button (click)="setSpinWarp(w)" [class.active]="spinWarp() === w">{{ w === 0 ? 'still' : w + 'x' }}</button>
+          }
+        </p>
         <label
           >extinction {{ extinction().toFixed(3) }} /m
           <input type="range" min="0.005" max="0.08" step="0.001" [value]="extinction()" (input)="setExtinction($event)" />
@@ -343,7 +349,12 @@ export class CloudVolumesLabPageComponent {
   readonly cloudsOn = signal(true);
   readonly rebakeEveryFrame = signal(false);
   /** Atlas bands rebaked per frame across volumes; 0 finishes every bake in the frame it is queued (step 5 off). */
-  readonly bakeBudget = signal(0);
+  readonly bakeBudget = signal(1);
+  /** Time warp of the planet's spin (0 = still). The planet turns once per 6 h at 1x; the sun stays fixed in space. */
+  readonly spinWarp = signal(0);
+  readonly warps = [0, 1, 1000, 100000];
+  private spinAngle = 0;
+  private readonly basePoses = new Map<CloudVolume, { position: Vector3; quaternion: Quaternion }>();
   private readonly bakeScheduler = new CloudVolumeBakeScheduler();
   readonly sunElevation = signal(35);
   readonly sunAzimuth = signal(40);
@@ -390,6 +401,7 @@ export class CloudVolumesLabPageComponent {
       new MeshStandardMaterial({ color: new Color(0x4a7a52), roughness: 1 }),
     );
     this.volume.mesh.position.copy(VOLUME_CENTER);
+    this.rememberPose(this.volume);
     this.engine.scene.add(this.planet, this.volume.mesh, this.sun, this.hemi);
     this.applySun();
 
@@ -405,6 +417,11 @@ export class CloudVolumesLabPageComponent {
     const tick = this.engine.tick$.subscribe((delta) => {
       if (this.animateSun()) {
         this.sunElevation.update((e) => (e + delta * 6 > 90 ? -10 : e + delta * 6));
+        this.applySun();
+      }
+      if (this.spinWarp() > 0) {
+        this.spinAngle = (this.spinAngle + delta * this.spinWarp() * ((Math.PI * 2) / 21600)) % (Math.PI * 2);
+        this.applySpin();
         this.applySun();
       }
       this.stepFlyby();
@@ -502,8 +519,34 @@ export class CloudVolumesLabPageComponent {
     volume.mesh.position.copy(pose.position);
     volume.mesh.position.x = ((k % 3) - 1) * 260;
     volume.mesh.quaternion.setFromUnitVectors(UP, radial);
+    this.rememberPose(volume);
+    this.applySpin();
     this.extras.push(volume);
     this.applySun();
+  }
+
+  private rememberPose(volume: CloudVolume): void {
+    this.basePoses.set(volume, { position: volume.mesh.position.clone(), quaternion: volume.mesh.quaternion.clone() });
+  }
+
+  /** Turns every volume about the planet's X axis (the great circle's normal) by the current spin angle, from its rest pose. */
+  private applySpin(): void {
+    const turn = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), this.spinAngle);
+    for (const [volume, base] of this.basePoses) {
+      volume.mesh.position.copy(base.position).applyQuaternion(turn);
+      volume.mesh.quaternion.copy(turn).multiply(base.quaternion);
+      volume.mesh.updateMatrixWorld();
+    }
+  }
+
+  setSpinWarp(warp: number): void {
+    this.spinWarp.set(warp);
+    if (warp === 0) {
+      this.spinAngle = 0;
+      this.applySpin();
+      this.applySun();
+    }
+    this.timer.reset();
   }
 
   /** Puts the active volumes where the current mode draws them (scene meshes, or the screen pass's list). */
@@ -813,6 +856,7 @@ export class CloudVolumesLabPageComponent {
       budget: this.bakeBudget(),
       sun: this.animateSun(),
       rebake: this.rebakeEveryFrame(),
+      warp: this.spinWarp(),
     };
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     const canvas = document.querySelector('canvas');
@@ -829,6 +873,7 @@ export class CloudVolumesLabPageComponent {
       this.bakeBudget.set(s.bakeBudget ?? saved.budget);
       this.rebakeEveryFrame.set(s.rebakeEveryFrame ?? saved.rebake);
       for (const volume of this.allVolumes()) volume.alwaysRebakeLight = this.rebakeEveryFrame();
+      this.setSpinWarp(s.spinWarp ?? saved.warp);
       let cells: string[];
       if (s.kind === 'flyby') {
         await sleep(1500);
@@ -853,6 +898,7 @@ export class CloudVolumesLabPageComponent {
     this.bakeBudget.set(saved.budget);
     this.rebakeEveryFrame.set(saved.rebake);
     for (const volume of this.allVolumes()) volume.alwaysRebakeLight = saved.rebake;
+    this.setSpinWarp(saved.warp);
     this.applyPreset(saved.preset);
     this.setClouds(saved.clouds);
     await this.publish(

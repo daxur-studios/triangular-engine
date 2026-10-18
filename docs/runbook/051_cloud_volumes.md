@@ -641,3 +641,11 @@ The proxy baselines are sane now (off 1.4-2.6 ms, no negative nets). Gate G6 at 
 | 4 bands/frame | 6.10 / 7.60 / 7.86 | 6.97 |
 
 Baking every stale volume in one frame spikes to about 40 ms. One band per frame removes the spikes: p95 5.31 ms, about 0.8 ms over the no-rebake fly-by (3.17 avg, 4.52 p95). A bigger budget only adds cost. Trade-off: with 12 volumes and 4 bands each, a full light refresh takes 48 frames.
+
+## 2026-10-18: Phase 2b step 7 built, moving lab (not yet measured)
+
+- `CloudVolumeBakeScheduler.bandsPerFrame` now defaults to 1 (step 5 result: p95 39.58 -> 5.31 ms at 12 volumes with the sun moving). The lab defaults to 1 band/frame too.
+- Lab: a "planet spin" row (still, 1x, 1000x, 100000x) in section 3. Every volume turns about the planet's X axis (the great circle's normal) once per 6 h at 1x, from its rest pose; the sun stays fixed in space, so the sun direction in each volume's frame turns at the warp rate. At 100000x it turns about 1667 deg/s, so every light bake is stale every frame: the worst case for the bake budget. The camera does not move with the planet.
+- Not modelled: orbit around the sun (the sun is fixed; orbiting is slower than spin, so it adds nothing the spin does not cover).
+- The one green button now runs step 7: 4 and 12 volumes, still vs spin 100000x, each as a fly-by plus inside, horizon and ground (16 scenarios). `next-test.ts` has a new `spinWarp` field.
+- Still to do for the gate: read the table, then a by-eye fly-through (no pop; the light lags under heavy warp, which is expected) and the proxy visuals (halos, depth against geometry).

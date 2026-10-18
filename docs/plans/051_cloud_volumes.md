@@ -243,7 +243,7 @@ Plan 050's existing occlusion slot.
      3c. **Half-res box proxies (spike):** one back-face box per volume rendered into the half-res target with premultiplied
         over blending, sorted far to near, each ray ending at the full-res scene depth. Removes chunks and the sampler limit.
         Keep only if it beats the screen pass at 4 and 12 volumes.
-     7. **Moving lab:** the planet spins and orbits a sun, with a time-warp slider (1x to 100 000x).
+     7. **Moving lab (built 2026-10-18; measured, by-eye check pending):** the planet spins and orbits a sun, with a time-warp slider (1x to 100 000x).
    - **Gate:** a fly-through by eye with no pop, and GPU ms at the five camera spots within G6, still and in the moving
      worst case.
 3. **Atmosphere lighting.** Sun colour, sky ambient and aerial perspective from the atmosphere API (Earth and
@@ -259,6 +259,7 @@ Plan 050's existing occlusion slot.
 6. **Far shell + planet coverage.**
    - coverage map, shell shading and the altitude cross-fade with volumes;
    - ground shadows through `addSunOcclusion` on a `PlanetSurfaceMaterial` globe;
+     (the hookup edits the planet material's slot, Plan 050, so it needs the maintainer's go-ahead then; late, performance first);
    - volumes spawned near the camera from coverage.
    - **Gate:** a descent from orbit into a cloud with no visible switch.
 7. **Point lights: rocket engine and lightning.** Up to 4 lights per volume, unshadowed, attenuated by the
@@ -311,3 +312,9 @@ Plan 050's existing occlusion slot.
 The weather simulation itself (the app supplies densities or particles), rain and snow rendering,
 lightning visuals beyond the point light, light shafts through clouds, shadows cast between volumes,
 clouds on more than one planet at a time.
+
+## Suggestions (not scheduled)
+
+- **Terrain blocking the sun for clouds** (a large mountain shading a cloud at low sun): needs a terrain shadow source (a sun-facing height or shadow map from the planet material) that the light bake can sample. Nothing provides it yet; revisit after Phase 6, only if the cost fits G6.
+- **Cloud shadows on mountains / terrain self-shadow** are the same missing piece from the other side.
+

@@ -8,7 +8,7 @@ import type { CloudVolume } from './cloud-volume';
  */
 export class CloudVolumeBakeScheduler {
   /** Atlas bands drawn per frame across all volumes. A volume's bake takes `bakeBands` of them. */
-  bandsPerFrame = 2;
+  bandsPerFrame = 1;
   private cursor = 0;
 
   update(renderer: WebGPURenderer, volumes: readonly CloudVolume[]): number {

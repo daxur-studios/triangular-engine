@@ -21,6 +21,8 @@ export interface NextTestScenario {
   /** Atlas bands rebaked per frame; 0 = all at once. */
   readonly bakeBudget?: number;
   readonly rebakeEveryFrame?: boolean;
+  /** Planet spin time warp: 0 still, 1 = one turn per 6 h, 100000 = the worst case (the light rebakes every frame). */
+  readonly spinWarp?: number;
 }
 
 export interface NextTest {
@@ -28,15 +30,19 @@ export interface NextTest {
   readonly scenarios: readonly NextTestScenario[];
 }
 
-/** Plan 051 step 5: does a per-frame bake budget flatten the spikes while the sun moves, at 12 volumes? */
+/** Plan 051 step 7: still vs a spinning planet at 100 000x, proxies, 1 band/frame, at the camera spots that matter. */
 export const NEXT_TEST: NextTest = {
-  title: 'step 5 bake budget, 12 volumes, sun animating',
-  scenarios: [0, 1, 2, 4].flatMap((bakeBudget): NextTestScenario[] => {
-    const base = { volumes: 12 as const, mode: 'proxy' as const, scale: 1, steps: 24, animateSun: true, bakeBudget };
-    const name = bakeBudget === 0 ? 'all at once' : `${bakeBudget} bands/frame`;
-    return [
-      { ...base, label: `fly-by, budget ${name}`, kind: 'flyby' },
-      { ...base, label: `inside, budget ${name}`, kind: 'static', preset: 'inside' },
-    ];
-  }),
+  title: 'step 7 moving lab: still vs spin 100000x, proxies, 1 band/frame',
+  scenarios: ([4, 12] as const).flatMap((volumes) =>
+    [0, 100000].flatMap((spinWarp): NextTestScenario[] => {
+      const base = { volumes, mode: 'proxy' as const, scale: 1, steps: 24, animateSun: false, bakeBudget: 1, spinWarp };
+      const name = `${volumes}v ${spinWarp === 0 ? 'still' : 'spin'}`;
+      return [
+        { ...base, label: `fly-by, ${name}`, kind: 'flyby' },
+        { ...base, label: `inside, ${name}`, kind: 'static', preset: 'inside' },
+        { ...base, label: `horizon, ${name}`, kind: 'static', preset: 'horizon' },
+        { ...base, label: `ground, ${name}`, kind: 'static', preset: 'ground' },
+      ];
+    }),
+  ),
 };
