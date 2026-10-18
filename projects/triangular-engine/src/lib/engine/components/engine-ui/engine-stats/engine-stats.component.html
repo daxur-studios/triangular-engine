@@ -11,7 +11,7 @@
     <span class="perf-main-val">
       <span class="fps-val">{{ engineService.fpsController.displayCount() }}</span>
       <span class="unit"> FPS</span>
-      <span class="unit" title="Estimate from CPU frame time (and GPU time when gpuTiming is on), not capped by vsync">(~{{ engineService.fpsController.uncappedFps() }} uncapped)</span>
+      <span class="unit" [title]="engineService.fpsController.gpuFrameTime() === null ? 'Ceiling from CPU frame time only (GPU timing off or unsupported), not capped by vsync' : 'Ceiling from the slower of CPU and GPU frame time, not capped by vsync'">(~{{ engineService.fpsController.uncappedFps() }} uncapped, {{ engineService.fpsController.gpuFrameTime() === null ? 'CPU only' : 'CPU+GPU' }})</span>
       <span class="divider">|</span>
       <span class="ms-val">{{ engineService.fpsController.frameTime() | number:'1.1-1' }}</span>
       <span class="unit"> ms</span>

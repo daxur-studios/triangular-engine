@@ -55,6 +55,16 @@ import {
 import { EngineSettingsService } from './engine-settings.service';
 import { EngineInputService } from './engine-input.service';
 
+/** How long one GPU timestamp readback may stay pending before its slot is released. */
+const GPU_READBACK_TIMEOUT_MS = 500;
+
+class GpuReadbackTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`GPU timestamp readback timed out after ${timeoutMs} ms`);
+    this.name = 'GpuReadbackTimeoutError';
+  }
+}
+
 /** Application-level provider. Scene components can override options with `EngineService.provide(...)`. */
 export function provideTriangularEngine(
   options: IEngineOptions = {},
@@ -172,7 +182,10 @@ export class EngineService implements IEngine {
    */
   framePhase: EngineFramePhase = 'idle';
   readonly #lateSceneWritesWarned = new Set<string>();
-  #gpuTimingPending = false;
+  /** Owner id of the one readback in flight, or `null` when none is pending (see `#collectGpuTiming`). */
+  #gpuTimingOwner: number | null = null;
+  #gpuTimingGeneration = 0;
+  #lastGpuTimingMs: number | undefined;
   readonly #appRef = inject(ApplicationRef);
   /**
    * Fired after `lateUpdate$` camera/controllers have settled, immediately before
@@ -737,19 +750,36 @@ export class EngineService implements IEngine {
    */
   #collectGpuTiming(): void {
     const renderer = this.renderer as WebGPURenderer | undefined;
-    if (this.options.gpuTiming !== true || this.#gpuTimingPending) return;
+    if (this.options.gpuTiming !== true || this.#gpuTimingOwner !== null) return;
     if (typeof renderer?.resolveTimestampsAsync !== 'function') return;
-    this.#gpuTimingPending = true;
-    renderer
-      .resolveTimestampsAsync('render')
+    const owner = ++this.#gpuTimingGeneration;
+    this.#gpuTimingOwner = owner;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // A readback that never settles must not block collection for good: the timeout releases the
+    // slot, and the late result of that readback is dropped because its owner no longer matches.
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new GpuReadbackTimeoutError(GPU_READBACK_TIMEOUT_MS)),
+        GPU_READBACK_TIMEOUT_MS,
+      );
+    });
+    Promise.race([renderer.resolveTimestampsAsync('render'), timeout])
       .then((ms) => {
-        if (typeof ms === 'number') this.fpsController.recordGpuFrameTime(ms);
+        if (this.#gpuTimingOwner !== owner) return;
+        // Installed Three.js returns its previous duration when a readback fails internally, so an
+        // identical value is treated as stale rather than as a new sample.
+        if (typeof ms !== 'number' || ms === this.#lastGpuTimingMs) return;
+        this.#lastGpuTimingMs = ms;
+        this.fpsController.recordGpuFrameTime(ms);
       })
       .catch((err) => {
+        if (this.#gpuTimingOwner !== owner) return;
+        if (err instanceof GpuReadbackTimeoutError) this.#gpuTimingOwner = null;
         this.error$.next({ phase: 'gpuTiming', error: err });
       })
       .finally(() => {
-        this.#gpuTimingPending = false;
+        clearTimeout(timer);
+        if (this.#gpuTimingOwner === owner) this.#gpuTimingOwner = null;
       });
   }
 

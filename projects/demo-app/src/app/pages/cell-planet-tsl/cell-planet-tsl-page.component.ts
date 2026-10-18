@@ -94,6 +94,10 @@ const ANTIALIAS = query.get('aa') === '1';
 const GPU_TIMING = query.get('gpuTiming') === '1';
 /** Length of the measured window of `measureFrameWindow` (Plan 052 Phase 1). */
 const FRAME_WINDOW_MS = 10_000;
+/** How long to wait for streaming to go idle before the window starts; a timeout invalidates it. */
+const FRAME_WINDOW_SETTLE_MS = 8_000;
+/** Stored runs older than this are not compared, so a stale build or setting cannot produce a delta. */
+const FRAME_WINDOW_MAX_STORED_AGE_MS = 24 * 60 * 60 * 1000;
 const FRAME_WINDOW_KEY = 'cellPlanetTsl.frameWindow';
 /** The map projection is baked into the streamed tiles, the ocean, the frame and the grid, so it is chosen at load. */
 const PROJECTION: MapProjectionKind =
@@ -1111,34 +1115,68 @@ export class CellPlanetTslPageComponent {
    */
   async measureFrameWindow(): Promise<void> {
     if (this.benchmarkStatus() !== '') return;
+    const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
     const idle = () =>
       this.streaming.runtime.stats.queued === 0 && this.stats().queued === 0 && this.pending.size === 0;
     this.benchmarkStatus.set('measuring: waiting for streaming to settle');
     const settleStart = performance.now();
-    while (performance.now() - settleStart < 8000 && !idle()) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
+    while (performance.now() - settleStart < FRAME_WINDOW_SETTLE_MS && !idle()) {
+      await sleep(250);
     }
+    const settled = idle();
     const sampler = this.engine.fpsController.frameSampler;
+    // Anything that makes the window untrustworthy is recorded on the window itself, so the verdict
+    // reads `inconclusive` instead of the numbers looking valid.
+    const onVisibility = () => {
+      if (document.hidden) sampler.invalidate('hidden');
+    };
+    const onBlur = () => sampler.invalidate('unfocused');
     sampler.start();
+    if (!settled) sampler.invalidate('streaming still busy after settle timeout');
+    if (document.hidden) sampler.invalidate('hidden at start');
+    if (!document.hasFocus()) sampler.invalidate('unfocused at start');
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('blur', onBlur);
     this.benchmarkStatus.set(`measuring ${FRAME_WINDOW_MS / 1000} s, keep this tab visible and focused`);
-    await new Promise((resolve) => setTimeout(resolve, FRAME_WINDOW_MS));
+    await sleep(FRAME_WINDOW_MS);
+    document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('blur', onBlur);
     const summary = sampler.stop();
     const flag = GPU_TIMING ? 'on' : 'off';
+    const otherFlag = GPU_TIMING ? 'off' : 'on';
     const f = (v: number) => v.toFixed(2);
     const gpu = summary.gpuMedianMs === null ? 'n/a' : `${f(summary.gpuMedianMs)} ms (${summary.gpuSamples} samples)`;
-    const line = `gpuTiming ${flag}: ${summary.frames} frames, cpu median ${f(summary.cpuMedianMs)} ms (p95 ${f(summary.cpuP95Ms)}), wall median ${f(summary.wallMedianMs)} ms (p95 ${f(summary.wallP95Ms)}), gpu ${gpu}, verdict ${summary.verdict}`;
+    const invalid = summary.invalidReasons.length > 0 ? `, invalid: ${summary.invalidReasons.join('; ')}` : '';
+    const line = `gpuTiming ${flag}: ${summary.frames} frames, cpu median ${f(summary.cpuMedianMs)} ms (p95 ${f(summary.cpuP95Ms)}), wall median ${f(summary.wallMedianMs)} ms (p95 ${f(summary.wallP95Ms)}), gpu ${gpu}, verdict ${summary.verdict}${invalid}`;
 
-    const lines = ['### Frame window (gpuTiming overhead)', `- backend: ${BACKEND}, AA ${ANTIALIAS ? 'on' : 'off'}`, `- ${line}`];
+    // Runs are only compared within one profile (the settings that change the frame cost), so a
+    // stored run from another backend or setting cannot produce a delta.
+    const canvas = this.engine.renderer.domElement;
+    const profile = `backend=${BACKEND};aa=${ANTIALIAS ? 1 : 0};projection=${PROJECTION};tiles=${TILES ? 1 : 0};macro=${MACRO};atmosphere=${ATMOSPHERE ? 1 : 0};canvas=${canvas.width}x${canvas.height};dpr=${devicePixelRatio}`;
+    const key = (f: string) => `${FRAME_WINDOW_KEY}.${f}.${profile}`;
+    const lines = ['### Frame window (gpuTiming overhead)', `- profile: ${profile}`, `- ${line}`];
     try {
-      localStorage.setItem(`${FRAME_WINDOW_KEY}.${flag}`, JSON.stringify({ line, cpuMedianMs: summary.cpuMedianMs, at: new Date().toISOString() }));
-      const otherFlag = GPU_TIMING ? 'off' : 'on';
-      const other = JSON.parse(localStorage.getItem(`${FRAME_WINDOW_KEY}.${otherFlag}`) ?? 'null');
-      if (other) {
-        const [on, off] = GPU_TIMING ? [{ cpuMedianMs: summary.cpuMedianMs }, other] : [other, { cpuMedianMs: summary.cpuMedianMs }];
-        const delta = on.cpuMedianMs - off.cpuMedianMs;
-        lines.push(`- compare (stored run ${other.at}): cpu median on minus off ${delta >= 0 ? '+' : ''}${f(delta)} ms (${off.cpuMedianMs > 0 ? ((delta / off.cpuMedianMs) * 100).toFixed(0) : 'n/a'} %). Trust only if both runs are verdict ok and the gap is above their spread.`);
+      const record = {
+        verdict: summary.verdict,
+        cpuMedianMs: summary.cpuMedianMs,
+        cpuSpreadMs: summary.cpuP95Ms - summary.cpuMedianMs,
+        at: new Date().toISOString(),
+      };
+      localStorage.setItem(key(flag), JSON.stringify(record));
+      const stored = JSON.parse(localStorage.getItem(key(otherFlag)) ?? 'null');
+      const fresh = stored && Date.now() - Date.parse(stored.at) < FRAME_WINDOW_MAX_STORED_AGE_MS;
+      if (!fresh) {
+        lines.push(`- compare: no recent stored run for this profile. Load the page with ${GPU_TIMING ? 'no gpuTiming flag' : '?gpuTiming=1'} and measure again.`);
+      } else if (stored.verdict !== 'ok' || summary.verdict !== 'ok') {
+        lines.push(`- compare: not comparable (stored ${stored.verdict}, this run ${summary.verdict}). Measure again with a visible, focused tab.`);
       } else {
-        lines.push(`- compare: load the page with ${GPU_TIMING ? 'no gpuTiming flag' : '?gpuTiming=1'} and measure again.`);
+        const on = GPU_TIMING ? record : stored;
+        const off = GPU_TIMING ? stored : record;
+        const delta = on.cpuMedianMs - off.cpuMedianMs;
+        const noise = Math.max(on.cpuSpreadMs, off.cpuSpreadMs);
+        const pct = off.cpuMedianMs > 0 ? ((delta / off.cpuMedianMs) * 100).toFixed(0) : 'n/a';
+        const reading = Math.abs(delta) <= noise ? 'within the run-to-run spread: no measurable difference' : 'outside the spread: a real difference at this noise level';
+        lines.push(`- compare (stored ${stored.at}): cpu median on minus off ${delta >= 0 ? '+' : ''}${f(delta)} ms (${pct} %), ${reading}.`);
       }
     } catch {
       lines.push('- compare: localStorage blocked, copy the line above by hand.');

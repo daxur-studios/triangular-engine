@@ -53,4 +53,52 @@ describe('FrameSampler', () => {
     expect(summary.gpuMedianMs).toBe(4);
     expect(summary.gpuSamples).toBe(3);
   });
+
+  it('uses the average of the two middle values for an even count', () => {
+    const summary = summarizeFrameSamples(frames(30, 2).concat(frames(30, 4)), frames(60, 16), []);
+
+    expect(summary.cpuMedianMs).toBe(3);
+  });
+
+  it('uses nearest-rank for p95 at the boundary', () => {
+    const cpu = [...frames(95, 1), ...frames(5, 9)];
+    const summary = summarizeFrameSamples(cpu, frames(100, 16), []);
+
+    expect(summary.cpuP95Ms).toBe(1);
+  });
+
+  it('is noisy when the median is zero but the tail is not', () => {
+    const cpu = [...frames(90, 0), ...frames(10, 10)];
+    const summary = summarizeFrameSamples(cpu, frames(100, 16), []);
+
+    expect(summary.verdict).toBe('noisy');
+  });
+
+  it('is inconclusive when the page was throttled (median wall interval above 50 ms)', () => {
+    const summary = summarizeFrameSamples(frames(100, 1), frames(100, 100), []);
+
+    expect(summary.verdict).toBe('inconclusive');
+    expect(summary.invalidReasons.length).toBe(1);
+  });
+
+  it('is inconclusive when the window was invalidated (for example hidden or unfocused)', () => {
+    const sampler = new FrameSampler();
+    sampler.start();
+    for (let i = 0; i < 100; i++) sampler.recordFrame(1, 16);
+    sampler.invalidate('hidden');
+    sampler.invalidate('hidden');
+    const summary = sampler.stop();
+
+    expect(summary.invalidReasons).toEqual(['hidden']);
+    expect(summary.verdict).toBe('inconclusive');
+  });
+
+  it('ignores invalidate outside a window', () => {
+    const sampler = new FrameSampler();
+    sampler.invalidate('hidden');
+    sampler.start();
+    for (let i = 0; i < 100; i++) sampler.recordFrame(1, 16);
+
+    expect(sampler.stop().verdict).toBe('ok');
+  });
 });

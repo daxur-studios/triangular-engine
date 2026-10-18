@@ -236,29 +236,36 @@ export class FPSController {
         const geometriesVal = info?.memory?.geometries ?? 0;
         const texturesVal = info?.memory?.textures ?? 0;
         const programsVal = info?.programs?.length ?? 0;
+        // Walking the whole scene costs render-thread time, so it is skipped inside a frame window
+        // (`frameSampler`). The memory figures keep their last values until the window ends.
+        const walkScene = !this.frameSampler.isActive;
         const materials = new Set<string>();
-        let geometryBytes = 0;
-        let textureBytes = 0;
-        this.engineService.scene.traverse((object: any) => {
-          if (object.material) {
-            const list = Array.isArray(object.material) ? object.material : [object.material];
-            for (const material of list) materials.add(material.uuid);
-          }
-          const geometry = object.geometry;
-          if (geometry?.attributes) for (const attribute of Object.values(geometry.attributes) as any[]) geometryBytes += attribute.array?.byteLength ?? 0;
-          if (geometry?.index?.array) geometryBytes += geometry.index.array.byteLength;
-          const materialList = object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : [];
-          for (const material of materialList) for (const value of Object.values(material)) {
-            if ((value as any)?.isTexture && (value as any).image) textureBytes += ((value as any).image.width ?? 0) * ((value as any).image.height ?? 0) * 4;
-          }
-        });
+        let geometryBytes = this.geometryBytes();
+        let textureBytes = this.textureBytes();
+        let materialCount = this.materials();
+        if (walkScene) {
+          this.engineService.scene.traverse((object: any) => {
+            if (object.material) {
+              const list = Array.isArray(object.material) ? object.material : [object.material];
+              for (const material of list) materials.add(material.uuid);
+            }
+            const geometry = object.geometry;
+            if (geometry?.attributes) for (const attribute of Object.values(geometry.attributes) as any[]) geometryBytes += attribute.array?.byteLength ?? 0;
+            if (geometry?.index?.array) geometryBytes += geometry.index.array.byteLength;
+            const materialList = object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : [];
+            for (const material of materialList) for (const value of Object.values(material)) {
+              if ((value as any)?.isTexture && (value as any).image) textureBytes += ((value as any).image.width ?? 0) * ((value as any).image.height ?? 0) * 4;
+            }
+          });
+          materialCount = materials.size;
+        }
 
         this.drawCalls.set(drawCallsVal);
         this.triangles.set(trianglesVal);
         this.geometries.set(geometriesVal);
         this.textures.set(texturesVal);
         this.programs.set(programsVal);
-        this.materials.set(materials.size);
+        this.materials.set(materialCount);
         this.geometryBytes.set(geometryBytes);
         this.textureBytes.set(textureBytes);
 

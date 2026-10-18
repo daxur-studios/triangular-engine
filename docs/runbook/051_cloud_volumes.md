@@ -680,3 +680,8 @@ Gross GPU ms (clouds off / still / spin) and net = clouds on minus clouds off. F
 - G6 (typical <= 1.5, worst <= 2.5): horizon passes still and spinning; inside still is at the limit (2.53); ground is a little over typical (1.73); the fly-by p95 net is about 0.3-0.5 over the worst bound.
 - Spin adds nothing: the moving worst case is no worse than still at every spot.
 - This is the 12-volume stress case, which is not a 2b requirement; 4 volumes was inside budget in earlier runs.
+
+### Decision 2026-10-18: box proxies are the screen pass default
+
+- `CloudVolumeScreenPass` now defaults to `proxies: true` (12 volumes: net inside about 2.4, horizon about 1.1, against the per-pixel pass 3.47 / 2.22). `proxies: false` keeps the chunked per-pixel march.
+- Re-test note: all of these timings were taken with the lab's own GPU timer. Once `FrameSampler` (Plan 052) can time pages, re-run the full matrix on it (both modes, the lab, and any consumer page) before Phase 2b is called closed for good.

@@ -46,7 +46,8 @@ export interface CloudVolumeScreenPassOptions {
   depthSharpness?: number;
   /**
    * Spike (Plan 051, step 3c): draw each volume's box mesh into the half-resolution target instead of marching every volume
-   * at every pixel, so only pixels a box covers run its shader. Default false.
+   * at every pixel, so only pixels a box covers run its shader. Default true (2b: it passes G6 at 12 volumes; `false` keeps the
+   * per-pixel chunked march). TODO: re-test both modes once the planned `FrameSampler` harness (Plan 052) can time them.
    */
   proxies?: boolean;
 }
@@ -94,7 +95,7 @@ export class CloudVolumeScreenPass {
     options: CloudVolumeScreenPassOptions = {},
   ) {
     this.scale = options.scale ?? 0.5;
-    this.proxies = options.proxies ?? false;
+    this.proxies = options.proxies ?? true;
     this.uSharpness = uniform(options.depthSharpness ?? 40);
     this.scenePass = pass(scene, camera);
     if (this.proxies) {

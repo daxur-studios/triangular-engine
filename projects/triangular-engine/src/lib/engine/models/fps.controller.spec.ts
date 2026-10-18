@@ -88,6 +88,24 @@ describe('FPSController', () => {
     });
   });
 
+  describe('frame window', () => {
+    it('skips the once-a-second scene walk while a window is open', () => {
+      const { controller, engine } = createController();
+      const traverse = spyOn(engine.scene, 'traverse');
+      controller.frameSampler.start();
+      controller.previousSecond = performance.now() - 1001;
+      controller.recordFrame(16);
+
+      expect(traverse).not.toHaveBeenCalled();
+
+      controller.frameSampler.stop();
+      controller.previousSecond = performance.now() - 1001;
+      controller.recordFrame(16);
+
+      expect(traverse).toHaveBeenCalled();
+    });
+  });
+
   describe('camera motion tracking', () => {
     it('records "idle" when camera does not move', () => {
       const { controller } = createController();
