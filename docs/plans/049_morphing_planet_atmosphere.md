@@ -440,7 +440,7 @@ before the material port lands. Phase 2b onwards needs Plan 050 through its Phas
    timestamp readout for that comparison.
 3. **Flat map + morph (redesigned 2026-10-18: bend morph, §Morph).** Built under the old design and kept
    until 3c replaces it: the slab haze, the flat-pose sky, the sky fade and the morph camera rig.
-   - **3a. Lab spike** in `/atmosphere-lab`, no planet material:
+   - **3a. Lab spike** (*built and gate-checked 2026-10-18; findings in Runbook 049*) in `/atmosphere-lab`, no planet material:
      - a CPU `bend()` in a new pure-maths file with specs (globe at morph 0, flat map at morph 1, precision at
        tiny `k`, curvature-form altitude, up and ray hit against brute force);
      - a longitude/latitude grid mesh bent on the CPU when the morph changes;

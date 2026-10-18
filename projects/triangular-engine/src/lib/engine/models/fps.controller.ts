@@ -2,6 +2,7 @@ import { signal } from '@angular/core';
 import { Camera, OrthographicCamera, PerspectiveCamera, Quaternion, Vector3 } from 'three';
 import { IEngine } from './engine.model';
 import { TelemetrySections } from './telemetry-sections.model';
+import { FrameSampler } from './frame-sampler';
 
 export enum CameraAction {
   None = 0,
@@ -50,6 +51,8 @@ export class FPSController {
   fpsLimitInterval = 0;
   /** Page-supplied sections appended to `formatTelemetryForAgent`. */
   readonly telemetry = new TelemetrySections();
+  /** Per-frame timing inside an explicit window (Plan 052). Idle, and free, until `start()`. */
+  readonly frameSampler = new FrameSampler();
 
   previousSecond = performance.now();
 
@@ -111,6 +114,7 @@ export class FPSController {
   recordGpuFrameTime(milliseconds: number): void {
     this.gpuSampleSum += milliseconds;
     this.gpuSampleCount++;
+    this.frameSampler.recordGpu(milliseconds);
   }
 
   recordPhysicsTime(milliseconds: number): void {
@@ -137,14 +141,16 @@ export class FPSController {
     // Real frame-to-frame interval: unlike frameTimeMs (CPU time in the tick) this also
     // captures GPU back-pressure, vsync waits, GC pauses and main-thread stalls.
     const stamp = performance.now();
+    let interval = -1;
     if (this.lastFrameStamp >= 0) {
-      const interval = stamp - this.lastFrameStamp;
+      interval = stamp - this.lastFrameStamp;
       // Ignore tab-suspend gaps; they are not rendering hitches.
       if (interval < 2000 && interval > this.currentSecondPeakInterval) {
         this.currentSecondPeakInterval = interval;
       }
     }
     this.lastFrameStamp = stamp;
+    this.frameSampler.recordFrame(frameTimeMs, interval < 2000 ? interval : -1);
 
     // Track camera movement for this frame
     const camera = this.engineService.camera;

@@ -14,3 +14,5 @@ export * from './atmosphere-backdrop';
 export * from './atmosphere-sky-view';
 export * from './atmosphere-aerial-perspective';
 export * from './atmosphere-planet-stages';
+export * from './bent-planet';
+export * from './bent-atmosphere';

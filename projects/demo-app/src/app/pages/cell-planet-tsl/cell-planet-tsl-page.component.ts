@@ -90,6 +90,11 @@ const query = new URLSearchParams(globalThis.location?.search ?? '');
 const BACKEND: 'webgpu' | 'webgl2' =
   query.get('backend') === 'webgl2' ? 'webgl2' : 'webgpu';
 const ANTIALIAS = query.get('aa') === '1';
+/** `?gpuTiming=1` turns WebGPU timestamp queries on: an engine option, so the comparison needs two loads. */
+const GPU_TIMING = query.get('gpuTiming') === '1';
+/** Length of the measured window of `measureFrameWindow` (Plan 052 Phase 1). */
+const FRAME_WINDOW_MS = 10_000;
+const FRAME_WINDOW_KEY = 'cellPlanetTsl.frameWindow';
 /** The map projection is baked into the streamed tiles, the ocean, the frame and the grid, so it is chosen at load. */
 const PROJECTION: MapProjectionKind =
   query.get('projection') === 'equirectangular' ? 'equirectangular' : 'equalEarth';
@@ -118,6 +123,7 @@ const STATIC_BASIS = { forward: new Vector3(0, 0, 1), up: new Vector3(0, 1, 0), 
   providers: EngineService.provide({
     showFPS: true,
     preferredRenderer: 'webgpu',
+    gpuTiming: GPU_TIMING,
     webGpuRendererParameters: {
       logarithmicDepthBuffer: true,
       forceWebGL: BACKEND === 'webgl2',
@@ -233,6 +239,11 @@ const STATIC_BASIS = { forward: new Vector3(0, 0, 1), up: new Vector3(0, 1, 0), 
           />
         </label>
       }
+      <p class="row">
+        <button (click)="measureFrameWindow()" [disabled]="benchmarkStatus() !== ''">
+          measure frame window ({{ gpuTimingLabel }}, 10 s)
+        </button>
+      </p>
       <p class="row">
         <button (click)="runBenchmark()" [disabled]="benchmarkStatus() !== ''">
           run benchmark + copy
@@ -1088,6 +1099,60 @@ export class CellPlanetTslPageComponent {
       this.benchmarkStatus.set('Clipboard blocked: the report is in the console.');
     }
     setTimeout(() => this.benchmarkStatus.set(''), 4000);
+  }
+
+  readonly gpuTimingLabel = GPU_TIMING ? 'gpuTiming on' : 'gpuTiming off';
+
+  /**
+   * Plan 052 Phase 1: samples the current view for `FRAME_WINDOW_MS` with `FrameSampler`, as the
+   * `gpuTiming` overhead test. The flag is an engine option set at load, so the comparison takes two
+   * loads (`?gpuTiming=1`, then without it), each from the default view. Each run is kept in
+   * localStorage per flag; once both exist, the report adds the difference.
+   */
+  async measureFrameWindow(): Promise<void> {
+    if (this.benchmarkStatus() !== '') return;
+    const idle = () =>
+      this.streaming.runtime.stats.queued === 0 && this.stats().queued === 0 && this.pending.size === 0;
+    this.benchmarkStatus.set('measuring: waiting for streaming to settle');
+    const settleStart = performance.now();
+    while (performance.now() - settleStart < 8000 && !idle()) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    const sampler = this.engine.fpsController.frameSampler;
+    sampler.start();
+    this.benchmarkStatus.set(`measuring ${FRAME_WINDOW_MS / 1000} s, keep this tab visible and focused`);
+    await new Promise((resolve) => setTimeout(resolve, FRAME_WINDOW_MS));
+    const summary = sampler.stop();
+    const flag = GPU_TIMING ? 'on' : 'off';
+    const f = (v: number) => v.toFixed(2);
+    const gpu = summary.gpuMedianMs === null ? 'n/a' : `${f(summary.gpuMedianMs)} ms (${summary.gpuSamples} samples)`;
+    const line = `gpuTiming ${flag}: ${summary.frames} frames, cpu median ${f(summary.cpuMedianMs)} ms (p95 ${f(summary.cpuP95Ms)}), wall median ${f(summary.wallMedianMs)} ms (p95 ${f(summary.wallP95Ms)}), gpu ${gpu}, verdict ${summary.verdict}`;
+
+    const lines = ['### Frame window (gpuTiming overhead)', `- backend: ${BACKEND}, AA ${ANTIALIAS ? 'on' : 'off'}`, `- ${line}`];
+    try {
+      localStorage.setItem(`${FRAME_WINDOW_KEY}.${flag}`, JSON.stringify({ line, cpuMedianMs: summary.cpuMedianMs, at: new Date().toISOString() }));
+      const otherFlag = GPU_TIMING ? 'off' : 'on';
+      const other = JSON.parse(localStorage.getItem(`${FRAME_WINDOW_KEY}.${otherFlag}`) ?? 'null');
+      if (other) {
+        const [on, off] = GPU_TIMING ? [{ cpuMedianMs: summary.cpuMedianMs }, other] : [other, { cpuMedianMs: summary.cpuMedianMs }];
+        const delta = on.cpuMedianMs - off.cpuMedianMs;
+        lines.push(`- compare (stored run ${other.at}): cpu median on minus off ${delta >= 0 ? '+' : ''}${f(delta)} ms (${off.cpuMedianMs > 0 ? ((delta / off.cpuMedianMs) * 100).toFixed(0) : 'n/a'} %). Trust only if both runs are verdict ok and the gap is above their spread.`);
+      } else {
+        lines.push(`- compare: load the page with ${GPU_TIMING ? 'no gpuTiming flag' : '?gpuTiming=1'} and measure again.`);
+      }
+    } catch {
+      lines.push('- compare: localStorage blocked, copy the line above by hand.');
+    }
+    const report = lines.join('\n');
+    console.info(report);
+    this.lastReport.set(report);
+    try {
+      await navigator.clipboard.writeText(report);
+      this.benchmarkStatus.set('Frame window copied to clipboard.');
+    } catch {
+      this.benchmarkStatus.set('Clipboard blocked: the report is in the console.');
+    }
+    setTimeout(() => this.benchmarkStatus.set(''), 1500);
   }
 
   /** Runs every scenario in turn, then copies a markdown table to the clipboard (and logs it). */

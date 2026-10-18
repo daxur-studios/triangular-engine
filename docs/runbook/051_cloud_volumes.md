@@ -664,3 +664,19 @@ WebGPU, dpr 1.5, canvas 2560x1308. Gross numbers, nothing subtracted.
 - Spinning at 100000x (the light stale every frame) costs nothing measurable over still, and there are no spikes (worst 5.44 ms). The 1 band/frame budget absorbs it.
 - Spin reads lower in some rows only because the volumes turn out of view.
 - These are gross. G6 is a net figure, so the next run adds a clouds-off baseline (12 volumes, same spots) and reports clouds off / still / spin together.
+
+### Step 7 net result: 12 volumes, clouds off vs still vs spin 100000x (proxies, 1 band/frame, 24 steps)
+
+Gross GPU ms (clouds off / still / spin) and net = clouds on minus clouds off. Fly-by net uses p95 minus p95 (rough).
+
+| spot | off | still | spin | net still | net spin |
+|---|---|---|---|---|---|
+| inside | 1.41 | 3.94 | 3.07 | 2.53 | 1.66 |
+| horizon | 1.62 | 2.63 | 3.09 | 1.01 | 1.47 |
+| ground | 1.82 | 3.55 | 3.39 | 1.73 | 1.57 |
+| fly-by p95 | 1.64 | 4.46 | 4.65 | ~2.8 | ~3.0 |
+| fly-by max | 1.97 | 5.31 | 5.51 | ~3.3 | ~3.5 |
+
+- G6 (typical <= 1.5, worst <= 2.5): horizon passes still and spinning; inside still is at the limit (2.53); ground is a little over typical (1.73); the fly-by p95 net is about 0.3-0.5 over the worst bound.
+- Spin adds nothing: the moving worst case is no worse than still at every spot.
+- This is the 12-volume stress case, which is not a 2b requirement; 4 volumes was inside budget in earlier runs.

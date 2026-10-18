@@ -11,6 +11,7 @@ import {
   type AtmospherePresetId,
   type PhysicalAtmosphereProfile,
 } from 'triangular-engine/atmosphere';
+import { BentPlanetLab } from './bent-planet-lab';
 
 /**
  * Plan 049 Phase 2a: the atmosphere on a plain sphere, with no cell planet involved.
@@ -49,6 +50,18 @@ interface ViewPreset {
   readonly sunAzimuth: number;
   readonly exposure: number;
 }
+
+/** The Phase 3a gate views: from space, low orbit, and low and side-on over the map (looking east at the map edge). */
+interface BentViewPreset extends ViewPreset {
+  readonly anchorX: number;
+  readonly anchorY: number;
+}
+const BENT_VIEWS: readonly BentViewPreset[] = [
+  { label: 'Space', altitudeR: 3, yaw: 0, pitch: -90, sunElevation: 40, sunAzimuth: 90, exposure: 6, anchorX: 0, anchorY: 0 },
+  { label: 'Low orbit', altitudeR: 0.05, yaw: 0, pitch: -16, sunElevation: 35, sunAzimuth: 90, exposure: 8, anchorX: 0, anchorY: 0 },
+  { label: 'Low, side-on (east edge)', altitudeR: 0.004, yaw: 90, pitch: 1, sunElevation: 35, sunAzimuth: 90, exposure: 8, anchorX: 0.6, anchorY: 0 },
+  { label: 'Side-on, high', altitudeR: 0.03, yaw: 90, pitch: -2, sunElevation: 35, sunAzimuth: 90, exposure: 8, anchorX: 0.3, anchorY: 0 },
+];
 
 const VIEWS: readonly ViewPreset[] = [
   { label: 'Ground, noon', altitudeM: 2, yaw: 0, pitch: 12, sunElevation: 60, sunAzimuth: 90, exposure: 8 },
@@ -119,6 +132,38 @@ const VIEWS: readonly ViewPreset[] = [
       <p class="row">
         <button (click)="resetHeight()" [class.active]="thickness() === undefined">preset height</button>
       </p>
+
+      <p class="label">Bent planet (Plan 049, Phase 3a spike)</p>
+      <p class="row">
+        <button (click)="toggleBent()" [class.active]="bentOn()">bent planet {{ bentOn() ? 'on' : 'off' }}</button>
+        <button (click)="toggleSweep()" [class.active]="sweep()" [disabled]="!bentOn()">
+          {{ sweep() ? 'stop sweep' : 'sweep 0 → 1 → 0' }}
+        </button>
+      </p>
+      @if (bentOn()) {
+        <label
+          >morph {{ morph().toFixed(3) }} (k = {{ curvatureLabel() }})
+          <input type="range" min="0" max="1" step="0.001" [value]="morph()" (input)="setMorph($event)" />
+        </label>
+        <label
+          >camera over map x {{ anchorX().toFixed(2) }}
+          <input type="range" min="-0.98" max="0.98" step="0.01" [value]="anchorX()" (input)="setAnchor($event, 'x')" />
+        </label>
+        <label
+          >camera over map y {{ anchorY().toFixed(2) }}
+          <input type="range" min="-0.95" max="0.95" step="0.01" [value]="anchorY()" (input)="setAnchor($event, 'y')" />
+        </label>
+        <p class="row">
+          <button (click)="setDayNight('real')" [class.active]="dayNight() === 'real'">real day/night</button>
+          <button (click)="setDayNight('alwaysDay')" [class.active]="dayNight() === 'alwaysDay'">always day (50°)</button>
+          <button (click)="toggleMask()" [class.active]="maskOn()">map mask {{ maskOn() ? 'on' : 'off' }}</button>
+        </p>
+        <p class="row">
+          @for (view of bentViews; track view.label) {
+            <button (click)="applyBentView(view)">{{ view.label }}</button>
+          }
+        </p>
+      }
 
       <p class="label">View</p>
       <p class="row">
@@ -232,6 +277,14 @@ export class AtmosphereLabPageComponent {
   readonly backend = BACKEND;
   readonly sizes = SIZES;
   readonly views = VIEWS;
+  readonly bentViews = BENT_VIEWS;
+  readonly bentOn = signal(false);
+  readonly morph = signal(0);
+  readonly sweep = signal(false);
+  readonly anchorX = signal(0);
+  readonly anchorY = signal(0);
+  readonly dayNight = signal<'real' | 'alwaysDay'>('real');
+  readonly maskOn = signal(true);
 
   readonly sizeLabel = signal('Earth');
   readonly presetId = signal<AtmospherePresetId>('earth');
@@ -260,6 +313,8 @@ export class AtmosphereLabPageComponent {
   private readonly model: AtmosphereGpuModel;
   private readonly backdrop: AtmosphereBackdrop;
   private readonly skyView: AtmosphereSkyViewLut;
+  private readonly bentLab: BentPlanetLab;
+  private sweepDirection = 1;
   private frame = 0;
   private timestampsPending = false;
   private readonly forward = new Vector3();
@@ -271,6 +326,9 @@ export class AtmosphereLabPageComponent {
     this.skyView = new AtmosphereSkyViewLut(this.model);
     this.backdrop = new AtmosphereBackdrop(this.model, { skyView: this.skyView });
     this.engine.scene.add(this.backdrop.mesh);
+    this.bentLab = new BentPlanetLab(this.model);
+    this.bentLab.setVisible(false);
+    this.engine.scene.add(this.bentLab.pass, this.bentLab.grid);
 
     const camera = this.engine.camera;
     if (camera instanceof PerspectiveCamera) {
@@ -288,12 +346,14 @@ export class AtmosphereLabPageComponent {
         this.sunElevation.set(elevation);
         this.applySun();
       }
+      if (this.bentOn()) this.tickBent(delta);
       this.updateCamera();
       this.updateSkyViewAndTimings();
     });
     this.destroyRef.onDestroy(() => {
       tick.unsubscribe();
-      this.engine.scene.remove(this.backdrop.mesh);
+      this.engine.scene.remove(this.backdrop.mesh, this.bentLab.pass, this.bentLab.grid);
+      this.bentLab.dispose();
       this.backdrop.dispose();
       this.skyView.dispose();
       this.model.dispose();
@@ -324,6 +384,7 @@ export class AtmosphereLabPageComponent {
     this.radiusM = size.radiusM;
     this.altitudeM = Math.max(1, this.altitudeM * k);
     this.sizeLabel.set(size.label);
+    this.bentLab.setPlanetRadius(size.radiusM);
     this.backdrop.setAltitude(this.altitudeM);
     this.rebake();
   }
@@ -428,15 +489,17 @@ export class AtmosphereLabPageComponent {
     this.backdrop.spaceLowResEnabled.value = on ? 1 : 0;
   }
 
-  /** Refreshes the sky-view table (outside any render pass) and, every 20 frames, reads the GPU timestamp. */
+  /** Refreshes the sky-view table (outside any render pass) and, every 5 frames, reads the GPU timestamp. */
   private updateSkyViewAndTimings(): void {
     const renderer: any = this.engine.renderer;
     if (!renderer?.initialized) return;
-    this.backdrop.update(renderer, this.engine.camera);
-    this.tableRenders.set(this.skyView.renderCount);
-    const size = this.backdrop.spaceSize;
-    this.spaceLabel.set(size.x > 0 && this.altitudeM >= this.model.uTopAltitude.value ? `${size.x} x ${size.y}` : 'not in use inside the air');
-    if (++this.frame % 20 !== 0 || this.timestampsPending || !renderer.resolveTimestampsAsync) return;
+    if (!this.bentOn()) {
+      this.backdrop.update(renderer, this.engine.camera);
+      this.tableRenders.set(this.skyView.renderCount);
+      const size = this.backdrop.spaceSize;
+      this.spaceLabel.set(size.x > 0 && this.altitudeM >= this.model.uTopAltitude.value ? `${size.x} x ${size.y}` : 'not in use inside the air');
+    }
+    if (++this.frame % 5 !== 0 || this.timestampsPending || !renderer.resolveTimestampsAsync) return;
     this.timestampsPending = true;
     renderer
       .resolveTimestampsAsync('render')
@@ -456,6 +519,79 @@ export class AtmosphereLabPageComponent {
   private applySun(): void {
     const dir = sunDirectionFromAngles(this.sunElevation(), this.sunAzimuth());
     this.model.setSunDirection(dir.x, dir.y, dir.z);
+    this.bentLab.setSun(this.sunElevation(), this.sunAzimuth());
+  }
+
+  // -- bent planet (Phase 3a) ----------------------------------------------------------------------
+
+  toggleBent(): void {
+    const on = !this.bentOn();
+    this.bentOn.set(on);
+    this.backdrop.mesh.visible = !on;
+    this.bentLab.setVisible(on);
+    this.gpuMs.set('n/a');
+    if (!on) {
+      this.sweep.set(false);
+      const camera = this.engine.camera;
+      if (camera instanceof PerspectiveCamera) {
+        camera.near = 0.1;
+        camera.far = 100;
+        camera.updateProjectionMatrix();
+      }
+    }
+    this.skyView.invalidate();
+  }
+
+  toggleSweep(): void {
+    this.sweep.update((on) => !on);
+  }
+
+  setMorph(event: Event): void {
+    this.sweep.set(false);
+    this.morph.set(this.num(event));
+    this.bentLab.setMorph(this.morph());
+  }
+
+  curvatureLabel(): string {
+    return (this.bentLab.bent.k * this.radiusM).toFixed(4) + ' / R';
+  }
+
+  setAnchor(event: Event, axis: 'x' | 'y'): void {
+    (axis === 'x' ? this.anchorX : this.anchorY).set(this.num(event));
+    this.bentLab.setAnchor(this.anchorX(), this.anchorY());
+  }
+
+  setDayNight(mode: 'real' | 'alwaysDay'): void {
+    this.dayNight.set(mode);
+    this.bentLab.setDayNight(mode);
+  }
+
+  toggleMask(): void {
+    this.maskOn.update((on) => !on);
+    this.bentLab.setMaskEnabled(this.maskOn());
+  }
+
+  applyBentView(view: BentViewPreset): void {
+    this.applyView(view);
+    this.anchorX.set(view.anchorX);
+    this.anchorY.set(view.anchorY);
+    this.bentLab.setAnchor(view.anchorX, view.anchorY);
+  }
+
+  private tickBent(delta: number): void {
+    if (this.sweep()) {
+      // 0 -> 1 -> 0 over about 12 seconds.
+      let next = this.morph() + (this.sweepDirection * delta) / 6;
+      if (next >= 1 || next <= 0) {
+        this.sweepDirection = -this.sweepDirection;
+        next = Math.min(1, Math.max(0, next));
+      }
+      this.morph.set(next);
+      this.bentLab.setMorph(next);
+    }
+    this.bentLab.setAltitude(this.altitudeM);
+    this.bentLab.exposure.value = this.exposure();
+    this.bentLab.update(this.engine.camera);
   }
 
   private updateCamera(): void {
