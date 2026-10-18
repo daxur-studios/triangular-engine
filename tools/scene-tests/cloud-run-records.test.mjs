@@ -15,6 +15,7 @@ test('estimates exclude failures and different workloads; use only latest 20 mat
   assert.equal(estimate.p90Ms, 2700);
   assert.equal(estimate.suggestedWaitMs, 3375);
   assert.equal(estimateDuration([], profile), null);
+  assert.equal(estimateDuration(records, { ...profile, expectedAdapter: 'nvidia', measurement: 'batch-pass-timestamps-v1' }), null);
 });
 
 test('separate run directories preserve history and expose elapsed time without starting tests', () => {

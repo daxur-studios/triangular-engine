@@ -17,7 +17,10 @@ const started = performance.now();
 const runId = `${startedAt.replace(/[:.]/g, '-')}-${process.pid}`;
 const runDir = path.join(archive, runId);
 fs.mkdirSync(runDir, { recursive: true });
-const profile = { frames: Number(process.env.CLOUD_PROBE_FRAMES ?? 1200), build: process.env.CLOUD_PROBE_BUILD_DIR ? 'reused' : 'fresh', arguments: process.argv.slice(2) };
+const performanceMode = process.argv.includes('--performance');
+const cliArguments = process.argv.slice(2).filter((arg) => arg !== '--performance');
+const profile = { frames: Number(process.env.CLOUD_PROBE_FRAMES ?? 1200), build: process.env.CLOUD_PROBE_BUILD_DIR ? 'reused' : 'fresh', arguments: process.argv.slice(2),
+  ...(performanceMode ? { expectedAdapter: process.env.CLOUD_PROBE_EXPECT_VENDOR ?? 'nvidia', measurement: 'redundant-render-batch-v1' } : {}) };
 const record = { schemaVersion: 1, runId, pid: process.pid, status: 'running', startedAt, finishedAt: null, durationMs: null, profile, estimate: estimateDuration(readRunRecords(archive), profile) };
 writeRunRecord(runDir, record);
 console.log(`Cloud feasibility evidence: ${runDir}`);
@@ -45,9 +48,9 @@ const server = net.createServer();
 await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
 const port = server.address().port;
 await new Promise((resolve) => server.close(resolve));
-const child = spawn(process.execPath, [path.join(root, 'node_modules/@playwright/test/cli.js'), 'test', '-c', 'playwright.cloud-feasibility.config.ts', ...process.argv.slice(2)], {
+const child = spawn(process.execPath, [path.join(root, 'node_modules/@playwright/test/cli.js'), 'test', '-c', 'playwright.cloud-feasibility.config.ts', ...cliArguments], {
   stdio: 'inherit', windowsHide: true,
-  env: { ...process.env, CLOUD_PROBE_RUN_DIR: runDir, CLOUD_PROBE_PORT: String(port) },
+  env: { ...process.env, CLOUD_PROBE_RUN_DIR: runDir, CLOUD_PROBE_PORT: String(port), CLOUD_PROBE_PERFORMANCE: performanceMode ? '1' : '0' },
 });
 let spawnError;
 child.once('error', (error) => { spawnError = error; });
@@ -65,7 +68,7 @@ record.durationMs = Math.round(performance.now() - started);
 record.status = !spawnError && !serverStillListening && exit.code === 0 ? 'passed' : 'failed';
 record.code = exit.code;
 record.signal = exit.signal;
-fs.writeFileSync(path.join(runDir, 'execution.json'), JSON.stringify({ command: 'npm run test:cloud-feasibility', ...record, ...exit, spawnError: spawnError?.message, sourceHash, sourceFilesChangedDuringRun: changed, reusedBuild: process.env.CLOUD_PROBE_BUILD_DIR ?? null, serverStillListening, performanceValidity: 'diagnostic-only; laptop contention uncontrolled' }, null, 2));
+fs.writeFileSync(path.join(runDir, 'execution.json'), JSON.stringify({ command: performanceMode ? 'npm run test:cloud-performance' : 'npm run test:cloud-feasibility', ...record, ...exit, spawnError: spawnError?.message, sourceHash, sourceFilesChangedDuringRun: changed, reusedBuild: process.env.CLOUD_PROBE_BUILD_DIR ?? null, serverStillListening, performanceValidity: 'diagnostic-only; laptop contention uncontrolled' }, null, 2));
 if (!fs.existsSync(path.join(runDir, 'report.md'))) fs.writeFileSync(path.join(runDir, 'report.md'), `# Cloud replay U0 feasibility\n\nStartup failed (exit ${exit.code}, signal ${exit.signal}). See execution.json and terminal output. No GPU/replay evidence established.\n`);
 fs.appendFileSync(path.join(runDir, 'report.md'), `\n\nProcess exit: ${exit.code}; dedicated server released: ${!serverStillListening}; sources changed during run: ${changed.length}. Total command duration (build through cleanup): ${(record.durationMs / 1000).toFixed(1)} s.\n`);
 writeRunRecord(runDir, record);

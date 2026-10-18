@@ -7,6 +7,7 @@ interface ReplayHost {
   move(fraction: number): void;
   state(): unknown;
   clouds(visible: boolean): void;
+  steps(count: number): void;
 }
 
 export interface CloudReplayOptions {
@@ -15,6 +16,14 @@ export interface CloudReplayOptions {
   pauseEvery?: number;
   pauseMs?: number;
   fault?: 'missing-render' | 'missing-cloud';
+}
+
+export interface CloudPerformanceOptions {
+  frames: number;
+  steps: 24 | 192;
+  minimumWallMs?: number;
+  paths?: number;
+  renderCopies?: 1 | 8;
 }
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -65,19 +74,36 @@ export function installCloudReplayProbe(engine: EngineService, host: ReplayHost)
     else backend.gl.finish();
     check();
   };
-  const renderStep = async (missing = false) => {
+  const submitStep = (missing = false, copies = 1) => {
     check();
     const before = completed;
     const node = renderer()._nodes.nodeFrame;
     node.time = frame / 60;
     node.deltaTime = 1 / 60;
     node.frameId = frame + 1;
+    // Mirror Animation.update bookkeeping too: timestamp UIDs use info.frame, not NodeFrame.
+    renderer().info.reset();
+    renderer().info.frame = node.frameId * copies;
     const cpuStart = performance.now();
     inStep = true;
-    try { if (!missing) engine.tick(stamp + frame * (1000 / 60)); }
+    try {
+      if (!missing) {
+        engine.tick(stamp + frame * (1000 / 60));
+        for (let copy = 1; copy < copies; copy++) {
+          // Positive control: real redundant scene renders, same simulation/shader time and output.
+          // A separate renderer frame ID preserves every pass's timestamp evidence.
+          renderer().info.frame++;
+          engine.render(stamp + frame * (1000 / 60), true);
+        }
+      }
+    }
     finally { inStep = false; }
     const cpuMs = performance.now() - cpuStart;
-    if (completed !== before + 1) throw new Error(`MISSING_RENDER: frame ${frame}, completed ${completed - before}`);
+    if (completed !== before + copies) throw new Error(`MISSING_RENDER: frame ${frame}, completed ${completed - before}, expected ${copies}`);
+    return cpuMs;
+  };
+  const renderStep = async (missing = false) => {
+    const cpuMs = submitStep(missing);
     await fence();
     const gpuMs = renderer().backend.trackTimestamp
       ? await bounded(renderer().resolveTimestampsAsync('render'), 15000, 'GPU_TIMESTAMP_TIMEOUT')
@@ -182,6 +208,79 @@ export function installCloudReplayProbe(engine: EngineService, host: ReplayHost)
       }
     },
     profile,
+    async measure(options: CloudPerformanceOptions) {
+      if (!prepared || replayed) throw new Error('RUN_REQUIRES_FRESH_PREPARED_PAGE');
+      if (running) throw new Error('PROBE_BUSY');
+      if (!Number.isInteger(options.frames) || options.frames < 120 || options.frames > 1200) throw new Error('INVALID_FRAME_COUNT');
+      if (![24, 192].includes(options.steps)) throw new Error('INVALID_MARCH_STEPS');
+      const minimumWallMs = options.minimumWallMs ?? 3000;
+      if (minimumWallMs < 0 || minimumWallMs > 10000) throw new Error('INVALID_MEASURING_WINDOW');
+      if (options.paths !== undefined && (!Number.isInteger(options.paths) || options.paths < 1 || options.paths > 10)) throw new Error('INVALID_PATH_COUNT');
+      const renderCopies = options.renderCopies ?? 1;
+      if (![1, 8].includes(renderCopies)) throw new Error('INVALID_RENDER_COPIES');
+      if (!renderer().backend.isWebGPUBackend || !renderer().backend.trackTimestamp) throw new Error('WEBGPU_TIMESTAMPS_REQUIRED');
+      running = true;
+      replayed = true;
+      const batches: Array<{ frames: number; wallMs: number; cpuMs: number; render: Array<[string, number]>; compute: Array<[string, number]> }> = [];
+      const journeyStates: unknown[] = [];
+      const resolve = async (kind: 'render' | 'compute'): Promise<Array<[string, number]>> => {
+        const pool = renderer().backend.timestampQueryPool[kind];
+        if (!pool || pool.currentQueryIndex === 0) return [];
+        // Three's return value is ONLY the final frame. Read every retained pass explicitly.
+        // Fail on duplicate IDs/overflow/stale values instead of reusing its lastValue fallback.
+        const expected = new Map<string, number>(pool.queryOffsets);
+        if (expected.size * 2 !== pool.currentQueryIndex || pool.currentQueryIndex >= pool.maxQueries) throw new Error(`TIMESTAMP_QUERY_LOSS: ${kind} queries=${pool.currentQueryIndex} unique=${expected.size} max=${pool.maxQueries} ids=${JSON.stringify([...expected.keys()])}`);
+        await bounded(renderer().resolveTimestampsAsync(kind), 15000, 'GPU_TIMESTAMP_TIMEOUT');
+        const values = [...pool.timestamps.entries()] as Array<[string, number]>;
+        if (values.length !== expected.size || values.some(([id, ms]) => !expected.has(id) || !Number.isFinite(ms) || ms < 0)) throw new Error('INVALID_TIMESTAMP_BATCH');
+        return values;
+      };
+      const journey = async (record: boolean) => {
+        for (let index = 0; index < options.frames;) {
+          const count = Math.min(16, options.frames - index);
+          const started = performance.now();
+          let cpuMs = 0;
+          for (let offset = 0; offset < count; offset++, index++) {
+            host.move(index / (options.frames - 1));
+            frame++;
+            cpuMs += submitStep(false, renderCopies);
+          }
+          // Batch boundaries limit queue depth/query capacity; no waits or image readbacks per frame.
+          await fence();
+          const wallMs = performance.now() - started;
+          const render = await resolve('render');
+          const compute = await resolve('compute');
+          if (record) batches.push({ frames: count, wallMs, cpuMs, render, compute });
+        }
+      };
+      try {
+        host.steps(options.steps);
+        // Compile/warm the complete path, including inside/outside and moving-light bakes.
+        await resolve('render'); await resolve('compute');
+        await journey(false);
+        const startingCompleted = completed;
+        const initialState = host.state();
+        const started = performance.now();
+        let paths = 0;
+        do {
+          await journey(true);
+          journeyStates.push(host.state());
+          paths++;
+        } while (options.paths !== undefined ? paths < options.paths : performance.now() - started < minimumWallMs && paths < 10);
+        const wallMs = performance.now() - started;
+        const simulationFrames = options.frames * paths;
+        const renderedFrames = simulationFrames * renderCopies;
+        if (completed !== startingCompleted + renderedFrames) throw new Error('PERFORMANCE_RENDER_COUNT_MISMATCH');
+        const finalCapture = await capture(); // Explicitly outside all timing windows.
+        return {
+          profile: { ...profile(), gpuCompletion: 'one queue fence per <=16 frames; all pass timestamps resolved at batch boundary',
+            performanceValidity: 'offscreen render/compute pass costs; no idle-machine FPS claim' },
+          steps: options.steps, renderCopies, framesPerPath: options.frames, paths, simulationFrames, renderedFrames, wallMs,
+          minimumWindowReached: wallMs >= minimumWallMs,
+          initialState, journeyStates, batches, finalCapture, errors: [...errors],
+        };
+      } finally { host.steps(24); running = false; }
+    },
     async run(options: CloudReplayOptions) {
       if (!prepared || replayed) throw new Error('RUN_REQUIRES_FRESH_PREPARED_PAGE');
       if (running) throw new Error('PROBE_BUSY');

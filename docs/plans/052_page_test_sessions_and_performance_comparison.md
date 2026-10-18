@@ -348,6 +348,9 @@ decisions, commands, artifact locations and results in [Runbook 052](/docs/runbo
   instead of repeatedly polling. Keep all prior evidence; no automatic pruning or shared index.
 - [ ] Extend seven-checkpoint visual coverage with continuous video/all-frame checks for brief flicker.
 - [ ] Prove a known rendering slowdown against repeated quiet measurements before adopting a perf gate.
+  - In progress: isolated U0P batch-timestamp experiment; select/verify the reference adapter,
+    alternate normal/8-redundant-render journeys, measure repeatability, and test inconclusive/profile gates.
+    This is offscreen rendering-cost evidence, not an idle-machine FPS baseline.
 
 Evidence: `npm run test:cloud-feasibility` passed (default 1,200 frames, mesh/proxy; 2026-10-18),
 as did `npx tsc -p tests/cloud-feasibility/tsconfig.json` and `npm run build:triangular-engine`.

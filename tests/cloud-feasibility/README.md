@@ -96,3 +96,57 @@ This prototype uses pinned Three.js internals in one isolated file to test feasi
 engine stepping, physics/streaming clocks, temporal-history effects, performance baselines, a shared
 machine queue and a complete replay video remain separate work. Follow the U0 checklist in Plan 052
 and append measured evidence to Runbook 052 before generalizing the adapter.
+
+## Isolated rendering-cost experiment (U0P)
+
+```powershell
+node tools/scene-tests/cloud-adapter-survey.mjs
+npm run test:cloud-performance
+```
+
+The adapter survey retains JSON under `artifacts/cloud-adapters/<timestamp>-<pid>/`, comparing normal
+Chrome launch with `--force-high-performance-gpu`. On this laptop, ordinary WebGPU selected AMD
+even with a high-performance preference; the Chrome flag selected NVIDIA Ampere. It changes only
+the disposable browser process, not Windows graphics settings. Chromium defines the switch in
+[gpu_switches.cc](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/gpu/config/gpu_switches.cc).
+U0P uses that flag and asserts the actual renderer vendor is `nvidia` (override explicitly with
+`CLOUD_PROBE_EXPECT_VENDOR` on another machine). A preference/flag is never proof of the GPU used.
+
+This command shares the ignored run archive, timing/status command and automatic server cleanup.
+Its workload/measurement/expected-adapter profile keeps duration history separate from correctness
+runs. A fresh build is the default. Do not run these performance experiments concurrently with
+other GPU tests; machine-wide coordination is still pending.
+
+Three alternating rounds each include a baseline, a same-build repeat and a positive slowdown
+control. All use the same real mesh cloud scene, 24 march steps, fixed simulated clock and complete
+path. The control redundantly renders the real scene **eight times per simulation step**, without
+advancing scene/shader time for the extra draws. Final PNGs must match the reference exactly.
+Raising the march cap alone was not a reliable positive control in the first pilot: short-ray
+sampling and early termination can prevent extra work.
+
+The first reference chooses up to ten complete measured paths to reach four seconds; all later
+cases use that **same path count**, with a three-second minimum validity gate. Each case first warms
+the full path. Up to 16 simulation steps are submitted per batch, with a GPU fence and timestamp
+resolution only at batch boundaries. All render/compute pass queries are retained; Three's public
+resolve return value covers only its final frame, so this U0-only probe checks and reads the private
+query pool instead. Missing/duplicate/stale query evidence fails the harness. Every actual render
+must have timestamp evidence. Screenshots and NVIDIA telemetry snapshots happen outside measurement.
+
+Reported GPU render/compute and wall costs are **per simulation step**, so the eight extra renders
+remain visible as extra cost. Render-pass durations exclude compute passes, CPU encoding, queue
+waits and presentation; compute costs and batch CPU/wall times are separate. These measurements
+cannot establish interactive FPS or hitch-free presentation. The final-image check covers only
+the last checkpoint; use the correctness command for intermediate visual/state checks.
+
+The provisional comparison requires at least three measurements per group, matching browser,
+actual adapter/backend, dimensions, clock/path and power profiles, valid timestamp/window evidence,
+and at most 15% range/median spread. A slowdown is resolved only above 25% and with nonoverlapping
+ranges. All six normal/repeat readings gate the positive-control comparison, exposing order drift.
+A bounded same-adapter competing compute device is also exercised and **must** be inconclusive.
+Deterministic analysis specs check noisy, missing, mismatched and busy rejection paths.
+
+Exit zero means the experiment/harness completed, **not** that a performance gate passed. Read
+`report.json`: `knownSlowdown`, `sameBuildRepeat`, `referenceSpread`, and `knownContention` carry the
+measured verdicts and reasons. Even a stable slowdown signal leaves `idleMachinePerformance`
+inconclusive: snapshots, repeated rounds and known-load flags cannot prove absence of external
+activity or control thermal/power state. No baseline is accepted and no shared runner is migrated.

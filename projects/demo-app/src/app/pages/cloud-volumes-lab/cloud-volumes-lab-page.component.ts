@@ -521,6 +521,7 @@ export class CloudVolumesLabPageComponent {
         })),
       }),
       clouds: (visible) => { if (visible !== this.cloudsOn()) this.setClouds(visible); },
+      steps: (count) => this.applySteps(count),
     }) : undefined;
     this.destroyRef.onDestroy(() => {
       disposeReplay?.();

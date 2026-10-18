@@ -23,6 +23,8 @@ export function estimateDuration(records, profile) {
   const comparable = records.filter((record) => record.status === 'passed'
     && record.profile?.frames === profile.frames && record.profile?.build === profile.build
     && JSON.stringify(record.profile?.arguments) === JSON.stringify(profile.arguments)
+    && record.profile?.expectedAdapter === profile.expectedAdapter
+    && record.profile?.measurement === profile.measurement
     && Number.isFinite(record.durationMs) && record.durationMs > 0).slice(0, 20);
   if (!comparable.length) return null;
   const sorted = comparable.map((record) => record.durationMs).sort((a, b) => a - b);

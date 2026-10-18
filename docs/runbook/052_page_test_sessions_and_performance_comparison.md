@@ -244,3 +244,35 @@ Docs only; nothing built or measured. Earlier sections, the review inbox and the
   Status lists both records and no active command; the next matching run estimates **271,672 ms**
   including headroom (one sample only). Source-manifest drift correctly records edits to wrapper,
   package, test and README during validation; application build/bundles remain retained and immutable.
+
+## 2026-10-18 — U0P performance validation started
+
+- Owner authorized the next bounded performance experiment before shared-runner migration.
+  Add batch-boundary GPU timestamp resolution with no captures/per-frame fences in the measuring
+  window; alternate normal and deliberately increased raymarch work on the same real cloud path.
+- Select and assert an actual reference GPU; retain measurements, repeatability, profile identity
+  and inconclusive reasons. No claim of idle-machine FPS while laptop activity is uncontrolled.
+  Keep this isolated from the shared runner and agent instructions.
+
+## 2026-10-18 — U0P adapter selection and positive-control findings
+
+- `node tools/scene-tests/cloud-adapter-survey.mjs` retains
+  `artifacts/cloud-adapters/2026-10-18T12-17-15-228Z-15960/survey.json`. Chrome 155 ordinary launch
+  selects AMD `gcn-5` for both WebGPU power preferences. The process-only Chromium
+  `--force-high-performance-gpu` switch selects NVIDIA `ampere`; both devices initialize without
+  software fallback. U0P explicitly asserts the actual NVIDIA vendor; no Windows settings changed.
+  Switch source: [Chromium GPU switches](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/gpu/config/gpu_switches.cc).
+- Initial retained failure `2026-10-18T12-20-36-897Z-8844` correctly rejects duplicate query IDs
+  (`TIMESTAMP_QUERY_LOSS`). Stopping Three's animation also requires updating its `info.frame`
+  bookkeeping; node/shader frame ID alone is insufficient for batched timestamp identity. The
+  probe now mirrors both. Read the complete private pass map, not Three's final-frame return value.
+- Completed march-cap pilot `2026-10-18T12-21-48-863Z-45580` (113,979 ms, exit 0, port released):
+  24 vs 192 max steps yields only a 1.013x median rendering-cost ratio, **unresolved**. Actual ray
+  length and early termination mean a higher cap need not add much work. Harness completion is
+  not a successful performance gate; full raw readings are retained.
+- Replace that unreliable positive control with eight real redundant scene renders per simulation
+  step, without advancing simulation/shader time for extra draws. Require identical final PNGs.
+  Measure GPU pass sums per simulation step, record actual render count, and verify every render's
+  timestamp. All cases share the first reference's measured path count (no unequal animation spans).
+  Compare all six normal/repeat windows against three slow windows, so order drift cannot hide in
+  the separate repeat group. Busy/profile/noise/missing-evidence rejection is covered by pure specs.

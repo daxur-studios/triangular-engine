@@ -6,6 +6,7 @@ const port = Number(process.env['CLOUD_PROBE_PORT'] ?? 4233);
 
 export default defineConfig({
   testDir: './tests/cloud-feasibility',
+  testMatch: process.env['CLOUD_PROBE_PERFORMANCE'] === '1' ? 'cloud-performance*.spec.ts' : 'cloud-replay.spec.ts',
   timeout: 300_000,
   workers: 1,
   fullyParallel: false,
@@ -19,7 +20,7 @@ export default defineConfig({
     viewport: { width: 640, height: 360 },
     deviceScaleFactor: 1,
     // No SwiftShader/unsafe WebGPU override: prove the ordinary hardware path first.
-    launchOptions: { args: ['--enable-gpu'] },
+    launchOptions: { args: process.env['CLOUD_PROBE_PERFORMANCE'] === '1' ? ['--enable-gpu', '--force-high-performance-gpu'] : ['--enable-gpu'] },
     trace: 'off',
     video: 'off',
   },
