@@ -33,6 +33,7 @@ The library is modularized into several secondary entry points (sub-libraries) s
 | ----------- | ---------------------- | ----------------- |
 | `triangular-engine` | **Core Package**: Declarative Angular components for Three.js scenes (such as `<scene>`, `<camera>`, `<mesh>`, `<directionalLight>`, geometries, materials, CSS2D/3D overlays, skybox, ocean, and GLTF loading). | Angular Common/Core/Forms/CDK, `@daxur-studios/portal-layout`, `three`, `three-mesh-bvh`, `dexie`, `rxjs` |
 | `triangular-engine/scene-tree` | **Scene Tree**: Optional Material inspection panel with object selection and transform controls. | `@angular/material` |
+| `triangular-engine/testing` | **Test runner**: Opt-in standalone reactive-form panel, versioned scenario history, URL launch selection, adapter lifecycle, cancellation and JSON evidence. Timings remain diagnostic until a controlled profile/baseline is supplied. | Angular Core/Common/Forms |
 | `triangular-engine/jolt` | **Jolt Physics**: Integration with Jolt Physics engine. Provides `<joltPhysics>`, `<joltRigidBody>`, colliders, constraints, and support for high-precision / double-precision coordinates. | `jolt-physics` |
 | `triangular-engine/rapier` | **Rapier Physics**: Integration with Rapier 3D physics. Provides `<physics>`, `<rigidBody>`, colliders, and joints. | `@dimforge/rapier3d-compat` |
 | `triangular-engine/pmndrs` | **PMNDRS Helpers**: Angular wrappers for `@pmndrs/vanilla` visual helper components such as `<billboard>` and `<sparkles>`. | `@pmndrs/vanilla` |

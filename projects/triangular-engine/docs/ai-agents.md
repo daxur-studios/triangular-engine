@@ -62,6 +62,13 @@ See: ./api/selectors.md
 
 ## Browser, Visual and Performance Test Planning
 
+For the owner-authorized cloud-first extraction, `triangular-engine/testing` now
+provides a reusable runner and contracts; see [Testing](testing.md) for actual
+imports, URL parameters and adapter lifecycle. Concrete suites stay in their host
+application. This bounded slice does not complete the broader Plan 052 or its
+controlled-machine measurement gates. Treat the earlier M1-only instructions below
+as historical scope for M1 work, not a restriction on this authorized extraction.
+
 See [037 — Agent-driven visual and performance testing](../../../docs/runbook/037_agent_driven_visual_and_performance_testing.md)
 for the proposed shared test infrastructure, text-only agent authoring workflow,
 scene-control contract, evidence storage and baseline policy. The runbook distinguishes

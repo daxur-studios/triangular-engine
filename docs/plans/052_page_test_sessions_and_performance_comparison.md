@@ -5,12 +5,45 @@ description: Prove unattended headless GPU replay on the cloud lab, then general
 timestamp: 2026-10-18T00:00:00Z
 tags: [testing, playwright, agent, page-test, performance, telemetry, demo, scenarios, suite]
 runbook: /docs/runbook/052_page_test_sessions_and_performance_comparison.md
+performance:
+  - id: cloud-runner-smoke-v1
+    url: http://triangular-demo.localhost:4200/cloud-volumes-lab?testSuite=cloud-runner-smoke&testVersion=1&testProfile=human-observed&testAutoStart=1
+    status: runnable-functional
+  - id: cloud-haze-cost-v1
+    url: http://triangular-demo.localhost:4200/cloud-volumes-lab?testSuite=cloud-haze-cost&testVersion=1&testProfile=human-observed&testAutoStart=1
+    status: runnable-diagnostic
 ---
 
 # Plan 052: Page Test Sessions and Performance Comparison
 
-Status: **U0 deterministic replay self-consistency and U0P batch-timestamp plumbing proven; pass attribution, unquantized timestamps, cloud-visible U0P capture, `bakeBudget = 1` coverage and machine locking required before Phase 1+**, 2026-10-18. The shared runner and
-broader phases remain proposed. Original design synthesized 2026-10-17 against review
+**Owner-authorized bounded extraction, 2026-10-18:** implement the reusable standalone
+test component now, starting with the cloud lab. The opt-in `triangular-engine/testing`
+entry owns generic contracts, lifecycle, reactive-form panel and URL selection; concrete
+cloud suites/adapters stay in the demo. This revises the original demo-only ownership
+below for this bounded slice. It does not establish U0P measurement validity or authorize
+a broad migration, queue service, new renderer clock API, or performance claims. Preserve
+the existing replay experiment. Add a second application adapter later to prove reuse.
+
+## Current extraction tasks
+
+- [x] Versioned suite history, stable Run latest, exact-version URL/autostart.
+- [x] Typed reactive forms, visible scenario/phase/settings, cancel and copy/download.
+- [x] Shared adapter executor with timeout, visibility evidence, partial results and cleanup.
+- [x] Cloud static and moving-camera adapter with effective inputs and timer limitations.
+- [x] One shared UI slider through a local package and reactive forms.
+- [x] Focused headless specs, library build, demo host build, docs/public exports.
+
+The bounded component slice is implemented. Sixteen runner specs, one timer spec,
+and four browser integration checks passed. The library build and demo host build
+passed; source/evidence details are in the runbook. The links in `performance` are
+executable diagnostics, not accepted baselines. A second application's adapter,
+cross-page suites, durable result transport and controlled-machine comparisons remain
+future work. The U0/U0P status below describes the broader measurement work.
+
+[Run latest diagnostic test](http://triangular-demo.localhost:4200/cloud-volumes-lab?testSuite=cloud-haze-cost&testVersion=1&testProfile=human-observed&testAutoStart=1)
+
+Status: **U0 deterministic replay self-consistency and U0P batch-timestamp plumbing proven; pass attribution, unquantized timestamps, cloud-visible U0P capture, `bakeBudget = 1` coverage and machine locking required before Phase 1+**, 2026-10-18. Broader cross-page
+orchestration remains proposed; the bounded cloud runner above is implemented. Original design synthesized 2026-10-17 against review
 `R-20261017-121500-pagetest-a4c9` (all six findings accepted). **Revised 2026-10-17 by owner
 decision:** the one-action "Run ALL" suite across page loads is the central performance path, with
 validity gates and a token-efficient report; ground rule F4 is narrowed (see Ground rules and
@@ -460,7 +493,7 @@ above before starting Phase 0/1 below.
 
 | Decision | Status |
 |---|---|
-| Page-generic `PageTestSession` in the demo app; library gets only the sampler | Decided 2026-10-17 (synthesis) |
+| Page-generic `PageTestSession` in the demo app; library gets only the sampler | Superseded for the bounded reusable component/contracts by the owner-authorized extraction above, 2026-10-18; broader orchestration stays in the demo |
 | Scenarios and suites are framework-free TS data shared by browser runner and Playwright | Decided 2026-10-17 |
 | `measure` wraps a motion/action segment, not a trailing idle step | **Decided** (review F1) |
 | Suspend `FPSController`'s 1 Hz traversal inside a measuring window | **Decided** (review F1; 037 C-F3) |

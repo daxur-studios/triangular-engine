@@ -54,3 +54,8 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 ## Documentation source of truth
 
 The package README and `projects/triangular-engine/docs/` describe the current consumer API. Treat `instructions/summary.md` and old runbooks as historical context unless they explicitly describe a current workflow. For repository documentation coverage and drift tracking, see `docs/runbook/029_token_map_usage_guide.md`.
+
+## Local package archives
+
+All local `.tgz` files go under `/ignore/packages/`, and `/ignore/` must be gitignored.
+Follow [Local package archives](docs/local-packages.md) for packing, dependency paths and clone setup.

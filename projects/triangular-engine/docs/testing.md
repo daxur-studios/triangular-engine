@@ -1,0 +1,106 @@
+# Reusable browser test runner
+
+Import the opt-in `triangular-engine/testing` entry. It provides `TestRunnerComponent`,
+`TestSession`, serializable suite/scenario/result contracts, and URL helpers. It has
+no renderer, Playwright, router, or shared UI package dependency. Do not import it
+from a worker or add it to a normal production scene unless intended.
+
+```ts
+import { TestRunnerComponent, TestRunAdapter, TestSuite } from 'triangular-engine/testing';
+
+interface Settings { enabled: boolean }
+const history: readonly TestSuite<Settings>[] = [{
+  id: 'feature-check', version: 1, title: 'Feature check', purpose: 'functional',
+  requiresVisualReview: true,
+  scenarios: [{ id: 'enabled', label: 'Enabled', settings: { enabled: true }, durationMs: 1000 }],
+}];
+
+// Add TestRunnerComponent to the host component's standalone imports.
+// The page supplies adapter: TestRunAdapter<Settings, YourSnapshot>.
+```
+
+```html
+<tri-test-runner [suites]="history" [adapter]="adapter" [available]="ready()"
+  [allowAutoStart]="testModeEnabled" (progressChange)="showProgress($event)"
+  (completed)="retainResult($event)" />
+```
+
+Keep history oldest-first. Append suites or new versions; the final entry is
+**Run latest test**. The history selector and **Run selected** retain earlier tests.
+Do not change the meaning of an existing ID/version after sharing it. Inputs must be
+structured-cloneable, JSON-compatible data with finite numbers. Paths and actions are
+registered application code, not executable JSON instructions.
+
+## Adapter lifecycle
+
+The same `TestSession` drives button and URL launches:
+
+1. `capture(context)` returns a read-only snapshot, including camera/control state.
+2. For each repetition/scenario, `apply` uses the page's real action methods,
+   `ready` awaits completed renders and explicit page conditions, then optional
+   `warmupMs` elapses and `measure` runs the action for `durationMs`.
+3. `restore(snapshot, context)` executes even after failure/cancel, using a fresh
+   signal with a five-second cleanup timeout. Make restoration safe after partial setup.
+
+Every asynchronous adapter must honor `context.signal`; use `context.wait(ms)` for
+abortable waits. The default whole-run timeout is 180 seconds. `TestSession.run`
+accepts `timeoutMs` for non-panel callers. Abort cannot stop arbitrary application
+code that ignores its signal, so do not leave background mutations running after a
+promise rejects. Cancel before disposing page resources; restoration may be a no-op
+when the entire scene has already been disposed.
+
+`measure` returns raw metrics with units/source, explicit checks, and limitations.
+The host keeps domain-specific settings, camera paths, rendered-frame readiness and
+metric providers. The generic runner does not infer GPU timing, step renderer clocks,
+or declare that a screenshot looks correct. Use `progressChange` to show effective
+settings in the page and prevent conflicting manual actions; it fires at phase/case
+boundaries, not every frame. The panel's selection/profile/repetitions use typed
+Angular reactive forms. A separate input test should exercise actual scene controls.
+
+## Launch links
+
+```text
+/your-page?testSuite=feature-check&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1
+```
+
+`testSuite=latest` follows append order and omits `testVersion`; the result's rerun
+link always pins an exact ID/version. The profile is `visible-browser`,
+`human-observed`, or `headless-hardware`. Repetitions are bounded to 1–5. Unknown
+versions/invalid options fail visibly and do not autostart a replacement test.
+Backend and other application query parameters are preserved in copied links.
+
+Autostart requires both `[allowAutoStart]="true"` and `[available]="true"`. It starts
+once per component initialization, and waits while `externalBusy` is true. Applications
+must decide whether their dev/test mode permits autostart; a query parameter alone
+does not enable hidden production tooling. Button execution uses the same input checks.
+
+## Evidence and limitations
+
+Results include the exact suite/settings, repetitions, environment, per-case checks,
+raw metrics, validity issues, errors, and a pinned rerun URL. Use **Copy result** or
+**Download JSON**; `(completed)` lets a host retain results or add another transport.
+No queue, idle-agent wakeup, baseline store, or cross-page suite chain is implemented.
+
+Visible/observer profiles record focus/visibility loss during measurements. Headless
+performance is marked inconclusive without independently verified hardware/profile
+support. Missing/invalid metrics also invalidate performance evidence. There is no
+generic budget/baseline comparison: available numbers remain **unassessed**, not a
+performance pass. Human review stays **pending** until an observer explicitly accepts
+or rejects it. Automated completion and observer acceptance are separate fields.
+
+The cloud lab adapter reports diagnostic batched whole-render GPU timestamps,
+including bake passes, with explicit limitations. It is not proof of isolated cloud
+pass cost or controlled-machine performance. The separate replay experiment remains
+unchanged. See repository Plan/Runbook 052 for the outstanding measurement work.
+
+The demo reuses the existing `FrameSampler` for completed-frame CPU/cadence summaries
+and to suspend the stats controller's scene traversal inside a measuring window.
+Provider timestamp readbacks started before a reset are discarded. The shared UI
+slider is installed from an identifiable archive under ignored `ignore/packages/`;
+it is a demo dependency, not a dependency of this optional library entry.
+
+Maintainer checks: `npm run test:triangular-engine:testing`, a headless demo test with
+`--include='**/gpu-timer.spec.ts'`, and
+`npx playwright test -c playwright.runner.config.ts`. The latter uses the existing
+application host; set `TRIANGULAR_TEST_BASE_URL` to target another served build. Its
+software-rendered browser checks establish functional integration only.

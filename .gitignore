@@ -49,3 +49,6 @@ Thumbs.db
 
 ignore/
 /.claude/worktrees/
+
+# Local package archives and other local-only artifacts
+/ignore/

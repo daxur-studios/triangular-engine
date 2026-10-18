@@ -51,6 +51,16 @@
             ]
           }
         },
+        "test-testing": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "watch": false,
+            "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
+            "polyfills": ["zone.js", "zone.js/testing"],
+            "browsers": "ChromeHeadless",
+            "include": ["../testing/**/*.spec.ts"]
+          }
+        },
         "test-worldgen": {
           "builder": "@angular/build:karma",
           "options": {

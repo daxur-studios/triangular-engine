@@ -438,3 +438,68 @@ fixes before extracting shared runner code:
 4. Add a machine-wide lockfile, process-tree cleanup on `SIGINT`/`SIGTERM`, port-binding fix, and
    `build/` vs `bundles/` deduplication before multi-agent use.
 
+
+## 2026-10-18 — Owner-authorized reusable cloud runner extraction
+
+The owner requested implementation of the reusable test component. Work begins in an
+opt-in `triangular-engine/testing` secondary entry point, with typed reactive forms,
+versioned test history, exact-version launch URLs, a stable Run latest button, visible
+scenario/settings feedback, cancellation/cleanup and structured diagnostic results.
+Concrete cloud settings, camera movement and timing providers remain in the demo.
+This bounded ownership revision supersedes the earlier demo-only restriction for the
+component/contracts; the U0P validity gaps remain open and no new accepted baseline is
+claimed. Preserve the separate replay experiment and unrelated working-tree changes.
+
+### Implemented bounded component and cloud integration
+
+- Added the opt-in `triangular-engine/testing` public entry: standalone reactive-form panel,
+  generic scenario/suite/result DTOs, a shared adapter executor, bounded URL selection,
+  cancellation/timeouts and restoration. No renderer, router, Playwright or UI library
+  dependency enters this optional entry or the engine root through it.
+- Cloud scenarios now have stable IDs/versions and explicit effective settings. History
+  is oldest-first: the short static/moving-camera smoke, then the existing haze-cost
+  suite. Run latest selects the final entry; exact-version links retain earlier tests.
+- Preserved active scene-control feedback, prevented conflicting manual input, added
+  phase/settings progress, copied/downloaded JSON and explicit observer review. A cancelled
+  or failed run cannot be visually accepted through the panel.
+- Reused the existing FrameSampler for CPU/cadence summaries and suspended the stats
+  scene traversal during measurement. Fixed old GPU timestamp replies crossing a reset;
+  retained source/attribution limitations rather than calling batched readings frame costs.
+- Built and locally installed shared UI 0.0.1 with its newly available reactive-form
+  contract. SHA-256 snapshot: 41ceb06e0f3e9a6e966850e21c2ab5dead93c53dea396bdff3e715ac629a58bc.
+  The owner then standardized tarball storage: the artifact and its dependency/lock paths
+  now live under ignored `ignore/packages/`; no tarball is intended for Git.
+
+Verification: `npm run test:triangular-engine:testing` passed 16 specs;
+`npx ng test demo-app --include='**/gpu-timer.spec.ts' --watch=false --browsers=ChromeHeadless`
+passed one spec; `npx playwright test -c playwright.runner.config.ts` passed four tests
+against the existing app host. These exercised URL autostart, static/moving scenarios,
+button equivalence, exact-version retention, stale-version rejection, latest selection,
+cancellation/restoration and real shared-slider keyboard/form wiring. Initial browser
+assertions targeted collapsed controls; corrected them and opened quality settings
+while running. A Sass namespace collision was corrected before the passing run.
+
+Library packaging and the demo host compiled successfully, including the final library
+rebuild after documentation and archive-path updates. Local smoke evidence is
+`artifacts/test-runner/cloud-smoke.json`; UI screenshot `artifacts/test-runner/cloud-runner.png`.
+The browser used software WebGL2 for functional checks: this is not GPU performance
+acceptance. No controlled-machine baseline, full haze-cost performance acceptance,
+aerodynamic consumer adapter, queue, or idle-agent wakeup was completed.
+
+performance:
+
+```json
+[
+  {"id":"cloud-runner-smoke-v1","url":"http://triangular-demo.localhost:4200/cloud-volumes-lab?testSuite=cloud-runner-smoke&testVersion=1&testProfile=human-observed&testAutoStart=1","status":"runnable-functional"},
+  {"id":"cloud-haze-cost-v1","url":"http://triangular-demo.localhost:4200/cloud-volumes-lab?testSuite=cloud-haze-cost&testVersion=1&testProfile=human-observed&testAutoStart=1","status":"runnable-diagnostic"}
+]
+```
+
+[Run latest diagnostic test](http://triangular-demo.localhost:4200/cloud-volumes-lab?testSuite=cloud-haze-cost&testVersion=1&testProfile=human-observed&testAutoStart=1).
+
+Final library rebuild passed after the DTO/panel changes; demo host build also passed.
+A final cloud-adapter review made planet spin angle explicit in resolved inputs, so a
+manual pre-run spin cannot silently alter the fixture. All four browser integration
+tests passed again after that bounded adapter change. Package-storage audit found all
+archives under ignored `ignore/packages/`, with active dependency paths resolving and migrated hashes
+preserved; producer verification outputs are retained separately from old snapshots.

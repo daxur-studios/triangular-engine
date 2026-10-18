@@ -1,0 +1,56 @@
+<section aria-label="Test runner" class="test-runner">
+  <h3>Repeatable tests</h3>
+  <form [formGroup]="form" (ngSubmit)="runSelected()">
+    <label>Test history
+      <select formControlName="suite">
+        @for (suite of suites(); track suiteKey(suite)) {
+          <option [value]="suiteKey(suite)">{{ suite.title }} · v{{ suite.version }}</option>
+        }
+      </select>
+    </label>
+    <label>Execution profile
+      <select formControlName="profile">
+        @for (profile of profiles; track profile) { <option [value]="profile">{{ profile }}</option> }
+      </select>
+    </label>
+    <label>Repetitions <input type="number" formControlName="repetitions" min="1" [max]="maxRepetitions" /></label>
+    <div class="actions">
+      <button type="button" class="primary" (click)="runLatest()" [disabled]="running() || externalBusy() || !available() || !latest() || form.invalid">Run latest test</button>
+      <button type="submit" [disabled]="running() || externalBusy() || !available() || form.invalid">Run selected</button>
+      <button type="button" (click)="copyLaunchLink()" [disabled]="form.invalid">Copy launch link</button>
+      <button type="button" (click)="cancel()" [disabled]="!running()">Cancel</button>
+    </div>
+  </form>
+  @if (!available()) { <p>Waiting for the page to be ready.</p> }
+  @if (latest(); as suite) { <p class="muted">Latest: {{ suite.title }} · v{{ suite.version }}</p> }
+  @if (progress(); as state) {
+    <p role="status" aria-live="polite">{{ state.phase }} · {{ state.completed }}/{{ state.total }} · repetition {{ state.repetition }} · {{ state.label }}</p>
+    <pre class="effective-settings" aria-label="Effective test settings">{{ activeSettings() }}</pre>
+  }
+  @if (message()) { <p role="status" class="message">{{ message() }}</p> }
+  @if (result(); as run) {
+    <p role="status">Run {{ run.status }} · automation {{ run.automatedVerdict }} · performance {{ run.performanceVerdict }} · visual review {{ run.visualReview }}</p>
+    <ol class="case-results">
+      @for (item of run.cases; track $index) {
+        <li>{{ item.scenario.label }} · {{ item.status }}
+          @for (metric of item.metrics; track metric.name) { <span class="muted">{{ metricText(metric) }}</span> }
+          @for (issue of item.validityIssues; track issue) { <span class="issue">{{ issue }}</span> }
+          @for (limitation of item.limitations; track limitation) { <span class="muted">{{ limitation }}</span> }
+        </li>
+      }
+    </ol>
+    @if (run.visualReview === 'pending' && run.status !== 'failed' && run.status !== 'cancelled') {
+      <label>Observer notes <textarea [formControl]="reviewNotes" rows="2"></textarea></label>
+      <div class="actions">
+        <button type="button" (click)="review('accepted')">Accept visual result</button>
+        <button type="button" (click)="review('rejected')">Reject visual result</button>
+      </div>
+    }
+    <div class="actions">
+      <button type="button" (click)="copyResult()">Copy result</button>
+      <button type="button" (click)="downloadResult()">Download JSON</button>
+      <a [href]="run.rerunUrl">Rerun this version</a>
+    </div>
+    <textarea class="result-json" aria-label="Test result JSON" readonly rows="8" [value]="resultText()"></textarea>
+  }
+</section>

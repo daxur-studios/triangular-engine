@@ -23,6 +23,9 @@ export class GpuTimer {
   private readonly computeSamples: number[] = [];
   private renderLast: number | undefined;
   private computeLast: number | undefined;
+  /** A reset invalidates an in-flight timestamp reply from the previous settings/measurement window. */
+  private generation = 0;
+  private readonly renderObservers = new Set<(milliseconds: number) => void>();
 
   constructor(
     private readonly everyFrames = 20,
@@ -44,10 +47,17 @@ export class GpuTimer {
 
   /** Forgets the rolling samples, e.g. after switching camera preset. */
   reset(): void {
+    this.generation++;
     this.renderSamples.length = 0;
     this.computeSamples.length = 0;
     this.renderLast = undefined;
     this.computeLast = undefined;
+  }
+
+  /** Observe each fresh provider reading once; callers retain full windows instead of the rolling HUD buffer. */
+  observeRender(observer: (milliseconds: number) => void): () => void {
+    this.renderObservers.add(observer);
+    return () => this.renderObservers.delete(observer);
   }
 
   /** Call once per frame. Returns true when a new reading landed. */
@@ -55,16 +65,19 @@ export class GpuTimer {
     if (!renderer?.initialized || !renderer.resolveTimestampsAsync) return;
     if (++this.frame % this.everyFrames !== 0 || this.pending) return;
     this.pending = true;
+    const generation = this.generation;
     const read = (type: 'render' | 'compute'): Promise<number | undefined> =>
       Promise.resolve(renderer.resolveTimestampsAsync(type))
         .then((ms: unknown) => (typeof ms === 'number' && ms > 0 ? ms : undefined))
         .catch(() => undefined);
     Promise.all([read('render'), read('compute')])
       .then(([render, compute]) => {
+        if (generation !== this.generation) return;
         this.renderLast = render;
         this.computeLast = compute;
         if (render !== undefined) push(this.renderSamples, render, this.window);
         if (compute !== undefined) push(this.computeSamples, compute, this.window);
+        if (render !== undefined) for (const observer of this.renderObservers) observer(render);
         onReading?.();
       })
       .finally(() => (this.pending = false));

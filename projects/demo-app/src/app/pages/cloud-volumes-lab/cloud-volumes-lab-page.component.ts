@@ -3,7 +3,10 @@ import { RouterLink } from '@angular/router';
 import { uniform } from 'three/tsl';
 import { Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PerspectiveCamera, Quaternion, SphereGeometry, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
-import { NEXT_TEST } from './next-test';
+import { ReactiveFormsModule, FormControl } from '@angular/forms';
+import { SliderComponent } from '@daxur-studios/ui';
+import { TestRunnerComponent, type TestContext, type TestObservation, type TestProgress, type TestRunAdapter, type TestScenario } from 'triangular-engine/testing';
+import { CLOUD_TEST_DEFAULTS, CLOUD_TEST_HISTORY, type CloudTestSettings } from './cloud-tests';
 import {
   AtmosphereBackdrop,
   AtmosphereGpuModel,
@@ -72,10 +75,23 @@ interface Recording {
   readonly compute: string;
 }
 
+interface CloudTestSnapshot {
+  settings: CloudTestSettings;
+  position: [number, number, number];
+  yaw: number;
+  pitch: number;
+  cameraMode: 'fly' | 'orbit';
+  orbitYaw: number;
+  orbitPitch: number;
+  orbitRadius: number;
+  spinAngle: number;
+  speed: number;
+}
+
 @Component({
   standalone: true,
   selector: 'app-cloud-volumes-lab-page',
-  imports: [EngineModule, RouterLink],
+  imports: [EngineModule, RouterLink, ReactiveFormsModule, SliderComponent, TestRunnerComponent],
   providers: EngineService.provide({
     showFPS: true,
     preferredRenderer: 'webgpu',
@@ -92,7 +108,7 @@ interface Recording {
   template: `
     <scene />
 
-    <aside class="panel" (pointermove)="$event.stopPropagation()">
+    <aside class="panel ui-theme-hud" (pointermove)="$event.stopPropagation()">
       <a routerLink="/">← Examples</a>
       <h2>Cloud volumes lab · Plan 051</h2>
       <p class="gpu">
@@ -104,17 +120,16 @@ interface Recording {
         {{ presetLabel() }} · clouds {{ cloudsOn() ? 'on' : 'off' }}
       </p>
 
-      <p class="row">
-        <button class="big" (click)="runNext()" [disabled]="matrixStatus() !== ''">
-          {{ matrixStatus() || 'RUN NEXT TEST: ' + nextTestTitle }}
-        </button>
-      </p>
+      <tri-test-runner
+        [suites]="testHistory" [adapter]="testAdapter" [available]="runnerReady()"
+        [externalBusy]="matrixStatus() !== '' && !runnerBusy()" [allowAutoStart]="allowTestAutoStart"
+        (progressChange)="onTestProgress($event)" />
+      <p class="note">Keep visible/focused for timing. GPU readings include bake passes; results are diagnostic until profile/baseline validation.</p>
       @if (matrixText()) {
         <textarea class="out" readonly rows="9" [value]="matrixText()"></textarea>
-        <p class="row"><button class="primary" (click)="copyMatrix()">{{ copied() ? 'copied to clipboard' : 'copy results' }}</button></p>
+        <p class="row"><button (click)="copyMatrix()">{{ copied() ? 'copied to clipboard' : 'copy results' }}</button></p>
       }
-      <p class="note">One click: runs every scenario in next-test.ts, then copies the table. Keep this tab visible.</p>
-
+      <fieldset class="scene-controls" [disabled]="runnerBusy()">
       <details>
         <summary>Older test runs</summary>
         <p class="row">
@@ -219,12 +234,10 @@ interface Recording {
         </label>
       </details>
 
-      <details>
+      <details [open]="runnerBusy()">
         <summary>4 · Quality and bake budget</summary>
-        <label
-          >march steps {{ steps() }}
-          <input type="range" min="8" max="128" step="8" [value]="steps()" (input)="setSteps($event)" />
-        </label>
+        <p class="label" data-testid="march-steps-state">March steps {{ steps() }}</p>
+        <ui--slider label="March steps" [min]="8" [max]="128" [step]="8" [formControl]="stepsControl" />
         <p class="row">
           render scale
           <button (click)="setScale(1)" [class.active]="renderScale() === 1">1x</button>
@@ -269,9 +282,11 @@ interface Recording {
         }
       </details>
       <p class="note">drag = look · W A S D = move · Q E = down/up · Shift = fast</p>
+      </fieldset>
     </aside>
   `,
   styles: `
+    .scene-controls { border: 0; padding: 0; margin: 0; min-width: 0; }
     :host {
       position: relative;
     }
@@ -364,6 +379,59 @@ export class CloudVolumesLabPageComponent {
   private readonly engine = inject(EngineService);
   private readonly destroyRef = inject(DestroyRef);
 
+  readonly testHistory = CLOUD_TEST_HISTORY;
+  readonly runnerReady = signal(false);
+  readonly runnerBusy = signal(false);
+  readonly allowTestAutoStart = isDevMode() && !REPLAY_PROBE;
+  readonly stepsControl = new FormControl(64, { nonNullable: true });
+  private stepsWereDisabled = false;
+  private pageDisposed = false;
+  private renderedFrames = 0;
+  private testEngineError = '';
+
+  /** The reusable runner owns lifecycle; these callbacks keep all cloud/rendering knowledge in the lab. */
+  readonly testAdapter: TestRunAdapter<CloudTestSettings, CloudTestSnapshot> = {
+    capture: () => {
+      this.testEngineError = '';
+      this.keys.clear();
+      return {
+        settings: this.readTestSettings(), position: this.position.toArray() as [number, number, number],
+        yaw: this.yaw, pitch: this.pitch, cameraMode: this.cameraMode(),
+        orbitYaw: this.orbitYaw, orbitPitch: this.orbitPitch, orbitRadius: this.orbitRadius,
+        spinAngle: this.spinAngle, speed: this.speed(),
+      };
+    },
+    apply: (scenario) => this.applyTestSettings(scenario.settings),
+    ready: (context) => this.waitForTestRender(context),
+    measure: (scenario, context) => this.measureTestScenario(scenario, context),
+    restore: async (snapshot, context) => {
+      if (this.pageDisposed) return;
+      this.flyby = undefined;
+      this.applyTestSettings(snapshot.settings);
+      this.spinAngle = snapshot.spinAngle;
+      this.applySpin();
+      this.position.fromArray(snapshot.position);
+      this.yaw = snapshot.yaw;
+      this.pitch = snapshot.pitch;
+      this.setCameraMode(snapshot.cameraMode);
+      this.orbitYaw = snapshot.orbitYaw;
+      this.orbitPitch = snapshot.orbitPitch;
+      this.orbitRadius = snapshot.orbitRadius;
+      this.speed.set(snapshot.speed);
+      this.applySun();
+      await this.waitForTestRender(context, false);
+    },
+    environment: () => ({
+      backend: this.backendLabel,
+      requestedBackend: FORCE_WEBGL ? 'WebGL2' : 'WebGPU',
+      gpuTimingSource: 'Three.js batched whole-render timestamps; includes light/density bake passes',
+      densityResolution: 128,
+      uiArtifact: 'daxur-studios-ui-0.0.1-41ceb06e0f3e.tgz',
+      rendererAntialias: false,
+      fpsTraversal: 'scene traversal suspended during measurement through the existing FrameSampler',
+    }),
+  };
+
   readonly forceWebGL = FORCE_WEBGL;
   /** The backend the renderer actually runs on: a failed WebGPU device falls back to WebGL2 without any other sign. */
   get backendLabel(): string {
@@ -443,6 +511,10 @@ export class CloudVolumesLabPageComponent {
   private pitch = 0;
 
   constructor() {
+    const stepsChanged = this.stepsControl.valueChanges.subscribe((value) => this.applySteps(value));
+    const testErrors = this.engine.error$.subscribe((event) => {
+      if (this.runnerBusy()) this.testEngineError = `${event.phase}: ${String(event.error)}`;
+    });
     this.planet = new Mesh(
       new SphereGeometry(PLANET_RADIUS, 128, 64),
       new MeshStandardMaterial({ color: new Color(0x4a7a52), roughness: 1 }),
@@ -502,6 +574,8 @@ export class CloudVolumesLabPageComponent {
     });
     // Read the timestamps after the frame's main render, so the sample covers the bakes and the march of one frame.
     const rendered = this.engine.renderComplete$.subscribe(() => {
+      this.renderedFrames++;
+      if (!REPLAY_PROBE) this.runnerReady.set(true);
       if (REPLAY_PROBE) return; // The isolated probe owns timestamp readback on this opt-in page.
       const renderer: any = this.engine.renderer;
       this.timer.tick(renderer, () => {
@@ -551,6 +625,10 @@ export class CloudVolumesLabPageComponent {
       steps: (count) => this.applySteps(count),
     }) : undefined;
     this.destroyRef.onDestroy(() => {
+      this.pageDisposed = true;
+      this.runnerReady.set(false);
+      stepsChanged.unsubscribe();
+      testErrors.unsubscribe();
       disposeReplay?.();
       beforeRender.unsubscribe();
       this.disposeSky();
@@ -569,6 +647,115 @@ export class CloudVolumesLabPageComponent {
   private format(reading: { last: number | undefined; average: number | undefined }): string {
     if (reading.average === undefined || reading.last === undefined) return 'n/a (no timestamp query)';
     return `${reading.average.toFixed(2)} ms avg (last ${reading.last.toFixed(2)})`;
+  }
+
+  onTestProgress(progress: TestProgress | null): void {
+    if (progress && !this.runnerBusy()) {
+      this.stepsWereDisabled = this.stepsControl.disabled;
+      this.stepsControl.disable({ emitEvent: false });
+    } else if (!progress && !this.stepsWereDisabled) {
+      this.stepsControl.enable({ emitEvent: false });
+    }
+    this.runnerBusy.set(progress !== null);
+    this.matrixStatus.set(progress ? `${progress.phase} ${progress.completed}/${progress.total}: ${progress.label ?? ''}` : '');
+  }
+
+  private readTestSettings(): CloudTestSettings {
+    return {
+      ...CLOUD_TEST_DEFAULTS,
+      preset: this.presetLabel(), volumes: this.volumeCount() as 1 | 4 | 12, mode: this.cloudMode(),
+      scale: this.renderScale(), steps: this.steps(), animateSun: this.animateSun(), bakeBudget: this.bakeBudget(),
+      rebakeEveryFrame: this.rebakeEveryFrame(), spinWarp: this.spinWarp(), spinAngle: this.spinAngle, clouds: this.cloudsOn(),
+      atmosphereLighting: this.atmosphereLighting(), haze: this.cloudHaze(),
+      sunElevation: this.sunElevation(), sunAzimuth: this.sunAzimuth(), extinction: this.extinction(),
+      jitter: this.jitterOn(), fetch: this.fetchOn(), hidden: this.hiddenOn(), skyBackdrop: this.skyBackdrop(),
+    };
+  }
+
+  private applyTestSettings(settings: CloudTestSettings): void {
+    if (this.pageDisposed) throw new Error('Cloud lab disposed');
+    const preset = PRESETS.find((item) => item.label === settings.preset);
+    if (!preset) throw new Error(`Unknown camera preset: ${settings.preset}`);
+    this.keys.clear();
+    this.setCameraMode('fly');
+    this.setVolumeCount(settings.volumes);
+    this.setCloudMode(settings.mode);
+    this.applyScale(settings.scale);
+    this.applySteps(settings.steps);
+    this.animateSun.set(settings.animateSun);
+    this.bakeBudget.set(settings.bakeBudget);
+    this.rebakeEveryFrame.set(settings.rebakeEveryFrame);
+    this.setSpinWarp(settings.spinWarp);
+    this.spinAngle = settings.spinAngle;
+    this.applySpin();
+    this.sunElevation.set(settings.sunElevation);
+    this.sunAzimuth.set(settings.sunAzimuth);
+    this.applySun();
+    const changedDensity = this.extinction() !== settings.extinction;
+    this.extinction.set(settings.extinction);
+    this.jitterOn.set(settings.jitter);
+    this.fetchOn.set(settings.fetch);
+    this.setHidden(settings.hidden);
+    for (const volume of this.allVolumes()) {
+      volume.alwaysRebakeLight = settings.rebakeEveryFrame;
+      volume.uExtinction.value = settings.extinction;
+      volume.uJitter.value = settings.jitter ? 1 : 0;
+      volume.setFetchEnabled(settings.fetch);
+      if (changedDensity) volume.invalidateDensity();
+    }
+    this.setAtmosphereLighting(settings.atmosphereLighting);
+    this.setCloudHaze(settings.haze);
+    this.setSkyBackdrop(settings.skyBackdrop);
+    this.setClouds(settings.clouds);
+    this.applyPreset(preset);
+  }
+
+  /** Readiness counts actual completed renders and initial density/light bakes; moving-light cases never await permanent queue drain. */
+  private async waitForTestRender(context: TestContext, includeBakes = true): Promise<void> {
+    const start = this.renderedFrames;
+    while (true) {
+      if (this.pageDisposed) throw new Error('Cloud lab disposed');
+      if (includeBakes && this.testEngineError) throw new Error(this.testEngineError);
+      const volumes = this.activeVolumes();
+      const initialBakes = !includeBakes || !this.cloudsOn() || volumes.every((volume) => volume.densityBakes > 0 && volume.lightBakes > 0);
+      const stableLight = !includeBakes || !this.cloudsOn() || this.animateSun() || this.spinWarp() > 0 || this.rebakeEveryFrame() || volumes.every((volume) => !volume.hasPendingBake);
+      if (this.renderedFrames >= start + 2 && initialBakes && stableLight) return;
+      await context.wait(16);
+    }
+  }
+
+  private async measureTestScenario(scenario: TestScenario<CloudTestSettings>, context: TestContext): Promise<TestObservation> {
+    const sampler = this.engine.fpsController.frameSampler;
+    if (sampler.isActive) throw new Error('Another frame sampling window is already active');
+    sampler.start();
+    const samples: number[] = [];
+    this.timer.reset();
+    const stop = this.timer.observeRender((sample) => samples.push(sample));
+    const before = this.renderedFrames;
+    try {
+      if (scenario.settings.kind === 'flyby') await this.flybyOnce(scenario.durationMs / 1000, context.signal);
+      else await context.wait(scenario.durationMs);
+      if (this.testEngineError) throw new Error(this.testEngineError);
+      const frames = sampler.stop();
+      return {
+        metrics: [{
+          name: 'gpuWholeRender', unit: 'ms', source: 'Three.js batched GPU timestamp reading, requested every 10 rendered frames; includes bake passes',
+          samples, unavailableReason: samples.length ? undefined : 'No GPU timestamp reading in this window/backend',
+        }],
+        checks: [
+          { name: 'Completed renders during action', passed: this.renderedFrames > before },
+          { name: 'Requested renderer backend', passed: FORCE_WEBGL ? this.backendLabel === 'WebGL2' : this.backendLabel === 'WebGPU', detail: this.backendLabel },
+        ],
+        details: { frames: frames.frames, cpuMedianMs: frames.cpuMedianMs, cpuP95Ms: frames.cpuP95Ms,
+          wallMedianMs: frames.wallMedianMs, wallP95Ms: frames.wallP95Ms, frameVerdict: frames.verdict },
+        validityIssues: [...frames.invalidReasons, ...(frames.frames < 60 ? ['Fewer than 60 rendered frames in measurement window'] : [])],
+        limitations: [
+          'Diagnostic timings; no controlled-machine profile or accepted baseline comparison.',
+          'GPU readings include bake passes and are not isolated cloud-raymarch or independent per-frame costs.',
+          'FPS scene traversal is suspended through FrameSampler. UI updates occur at phase boundaries.',
+        ],
+      };
+    } finally { stop(); if (sampler.isActive) sampler.stop(); }
   }
 
   applyPreset(preset: CameraPreset): void {
@@ -840,6 +1027,7 @@ export class CloudVolumesLabPageComponent {
 
   private applySteps(n: number): void {
     this.steps.set(n);
+    this.stepsControl.setValue(n, { emitEvent: false });
     for (const volume of this.allVolumes()) volume.uMarchSteps.value = n;
     this.timer.reset();
   }
@@ -1055,84 +1243,6 @@ export class CloudVolumesLabPageComponent {
     return text;
   }
 
-  readonly nextTestTitle = NEXT_TEST.title;
-
-  /** The single "run the next test" button: every scenario in `next-test.ts` in turn, one table, copied to the clipboard. */
-  async runNext(): Promise<void> {
-    const saved = {
-      preset: PRESETS.find((p) => p.label === this.presetLabel()) ?? PRESETS[0],
-      clouds: this.cloudsOn(),
-      steps: this.steps(),
-      scale: this.renderScale(),
-      mode: this.cloudMode(),
-      count: this.volumeCount(),
-      budget: this.bakeBudget(),
-      sun: this.animateSun(),
-      rebake: this.rebakeEveryFrame(),
-      warp: this.spinWarp(),
-      camera: this.cameraMode(),
-      lighting: this.atmosphereLighting(),
-      haze: this.cloudHaze(),
-    };
-    this.setCameraMode('fly');
-    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-    const canvas = document.querySelector('canvas');
-    const rows: string[] = [`${'scenario'.padEnd(36)}${['avg', 'p95', 'max'].map((c) => c.padStart(7)).join('')}`];
-    this.setClouds(true);
-    let n = 0;
-    for (const s of NEXT_TEST.scenarios) {
-      this.matrixStatus.set(`next test ${++n}/${NEXT_TEST.scenarios.length}: ${s.label}`);
-      if (s.volumes !== undefined) this.setVolumeCount(s.volumes);
-      if (s.mode !== undefined) this.setCloudMode(s.mode);
-      this.applyScale(s.scale ?? saved.scale);
-      this.applySteps(s.steps ?? saved.steps);
-      this.animateSun.set(s.animateSun ?? saved.sun);
-      this.bakeBudget.set(s.bakeBudget ?? saved.budget);
-      this.rebakeEveryFrame.set(s.rebakeEveryFrame ?? saved.rebake);
-      for (const volume of this.allVolumes()) volume.alwaysRebakeLight = this.rebakeEveryFrame();
-      this.setSpinWarp(s.spinWarp ?? saved.warp);
-      this.setAtmosphereLighting(s.atmosphereLighting ?? saved.lighting);
-      this.setCloudHaze(s.haze ?? saved.haze);
-      this.setClouds(s.clouds ?? true);
-      let cells: string[];
-      if (s.kind === 'flyby') {
-        await sleep(1500);
-        const samples = (await this.flybyOnce(s.seconds ?? 12)).sort((a, b) => a - b);
-        const at = (q: number) => samples[Math.floor(q * (samples.length - 1))]?.toFixed(2) ?? 'n/a';
-        const avg = samples.length ? (samples.reduce((a, b) => a + b, 0) / samples.length).toFixed(2) : 'n/a';
-        cells = [avg, at(0.95), at(1)];
-      } else {
-        this.applyPreset(PRESETS.find((p) => p.label === s.preset) ?? PRESETS[0]);
-        await sleep(1000);
-        this.timer.reset();
-        await sleep((s.seconds ?? 3) * 1000);
-        cells = [this.timer.render.average?.toFixed(2) ?? 'n/a', '-', '-'];
-      }
-      rows.push(`${s.label.padEnd(36)}${cells.map((c) => c.padStart(7)).join('')}`);
-    }
-    this.setVolumeCount(saved.count);
-    this.setCloudMode(saved.mode);
-    this.applyScale(saved.scale);
-    this.applySteps(saved.steps);
-    this.animateSun.set(saved.sun);
-    this.bakeBudget.set(saved.budget);
-    this.rebakeEveryFrame.set(saved.rebake);
-    for (const volume of this.allVolumes()) volume.alwaysRebakeLight = saved.rebake;
-    this.setSpinWarp(saved.warp);
-    this.setAtmosphereLighting(saved.lighting);
-    this.setCloudHaze(saved.haze);
-    this.applyPreset(saved.preset);
-    this.setCameraMode(saved.camera);
-    this.setClouds(saved.clouds);
-    await this.publish(
-      [
-        `cloud-volumes-lab next test: ${NEXT_TEST.title}`,
-        `${this.backendLabel} dpr ${devicePixelRatio} canvas ${canvas?.width}x${canvas?.height}; GPU render ms, whole frame, nothing subtracted`,
-        ...rows,
-      ].join('\n'),
-    );
-  }
-
   private statusPrefix = '';
 
   private async publish(text: string): Promise<void> {
@@ -1185,14 +1295,23 @@ export class CloudVolumesLabPageComponent {
   }
 
   /** One scripted pass along the great circle at 250 m altitude, 2.4 km in `seconds`; resolves with the GPU ms samples. */
-  private flybyOnce(seconds: number): Promise<number[]> {
+  private flybyOnce(seconds: number, signal?: AbortSignal): Promise<number[]> {
     this.timer.reset();
-    return new Promise((resolve) => {
-      const flyby = { t0: performance.now(), duration: seconds * 1000, samples: [] as number[], done: () => resolve(flyby.samples) };
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) { reject(signal.reason); return; }
+      const abort = () => {
+        if (this.flyby === flyby) this.flyby = undefined;
+        signal?.removeEventListener('abort', abort);
+        reject(signal?.reason);
+      };
+      const flyby = {
+        t0: performance.now(), duration: seconds * 1000, samples: [] as number[],
+        done: () => { signal?.removeEventListener('abort', abort); resolve(flyby.samples); },
+      };
+      signal?.addEventListener('abort', abort, { once: true });
       this.flyby = flyby;
     });
   }
-
   private stepFlyby(): void {
     const flyby = this.flyby;
     if (!flyby) return;
@@ -1261,6 +1380,7 @@ export class CloudVolumesLabPageComponent {
 
   @HostListener('window:keydown', ['$event'])
   onKeyDown(event: KeyboardEvent): void {
+    if (this.runnerBusy() || (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, tri-test-runner'))) return;
     this.keys.add(event.code);
   }
 
@@ -1271,12 +1391,12 @@ export class CloudVolumesLabPageComponent {
 
   @HostListener('window:wheel', ['$event'])
   onWheel(event: WheelEvent): void {
-    if (this.cameraMode() !== 'orbit' || !(event.target instanceof HTMLCanvasElement)) return;
+    if (this.runnerBusy() || this.cameraMode() !== 'orbit' || !(event.target instanceof HTMLCanvasElement)) return;
     this.orbitRadius = Math.max(5, Math.min(8000, this.orbitRadius * Math.exp(event.deltaY * 0.001)));
   }
 
   onPointerMove(event: PointerEvent): void {
-    if (!(event.buttons & 1)) return;
+    if (this.runnerBusy() || !(event.buttons & 1)) return;
     if (this.cameraMode() === 'orbit') {
       this.orbitYaw -= event.movementX * 0.005;
       this.orbitPitch = Math.max(-1.5, Math.min(1.5, this.orbitPitch + event.movementY * 0.005));
