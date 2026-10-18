@@ -413,7 +413,11 @@ altitudes. To be measured; the Hillaire paper reports sub-millisecond totals on 
 | Space limb march | Shell pixels only, half-res option | Scales with how much of the screen the planet covers. Bounded by the limb LUT if needed |
 
 Quality tiers change LUT sizes, march steps and sky resolution only. No tier ever ray-marches per
-pixel inside the atmosphere. Add an `atmosphere` telemetry section (Plan 048). Also measure the
+pixel inside the atmosphere at full resolution. The one exception is the bent map near its edge (§Morph, "Map
+edges from inside the air"): a masked march at half resolution per axis, upsampled, only while the camera is
+within `D` of the outline or outside it. That path has its own budget: **≤ 1.0 ms at 1080p**, so being near an
+edge costs at most about 0.5 ms extra. Surfaces never get a per-fragment march; their haze comes from the
+froxels. Add an `atmosphere` telemetry section (Plan 048). Also measure the
 `WebGPURenderer` WebGL2 fallback separately. Runbook 050 has it anywhere from classic speed to 2-5x slower,
 depending on the three version and machine load; Plan 050 Phase 1 re-measures it. If it stays several times
 slower, G8 needs a decision (for example a lower quality tier on the fallback).
