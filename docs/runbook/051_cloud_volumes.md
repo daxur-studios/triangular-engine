@@ -695,3 +695,15 @@ Gross GPU ms (clouds off / still / spin) and net = clouds on minus clouds off. F
 - **Not done in Phase 3 yet:** aerial perspective on the clouds (blue haze with distance) and a sky backdrop to see dusk against. Both need the GPU atmosphere model and a froxel lookup in the composite; they cost samplers and ms, so measure them as their own step.
 - **Camera toggle:** the lab has "fly" and "orbit the cloud" (drag to orbit the main volume, wheel to zoom). Tests and fly-bys force fly mode and restore it.
 - Green button now measures lighting off vs on (expected: no difference).
+
+### Phase 3a result: atmosphere lighting cost (measured)
+
+12 volumes, box proxies, 1 band/frame, 2560x1308, whole-frame GPU ms, lighting off vs on:
+
+| scenario | off avg / p95 / max | on avg / p95 / max |
+| --- | --- | --- |
+| fly-by, sun moving | 3.90 / 5.24 / 5.51 | 3.91 / 5.24 / 5.57 |
+| inside | 3.96 | 3.94 |
+| horizon | 2.74 | 2.66 |
+
+Lighting adds no measurable GPU cost (differences are within noise, as expected: the colour and ambient are CPU uniforms). Looks (orange dusk, dark night side, no white glow) are still to be judged by eye. The lab now starts on box proxies; the box mesh mode loses clouds whose far faces sink below the planet surface (depth-tested against the planet), so it is kept only as the old baseline.
