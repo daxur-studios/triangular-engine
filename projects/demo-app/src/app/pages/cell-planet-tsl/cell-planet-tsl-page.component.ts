@@ -1233,6 +1233,7 @@ export class CellPlanetTslPageComponent {
     try {
       const { report } = await runFrameBenchmark({
         scenarios,
+        frameSampler: this.engine.fpsController.frameSampler,
         // Nothing queued in the runtime or the surface, and no mesh request still out at the worker.
         isSettled: () =>
           this.streaming.runtime.stats.queued === 0 &&

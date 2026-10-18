@@ -15,6 +15,11 @@ decision:** the one-action "Run ALL" suite across page loads is the central perf
 validity gates and a token-efficient report; ground rule F4 is narrowed (see Ground rules and
 Decisions). Evidence: [Runbook 052](/docs/runbook/052_page_test_sessions_and_performance_comparison.md).
 
+**2026-10-18 requirement update:** unattended agent execution is the target. The human-visible,
+focused-tab/paste-back workflow below is an existing fallback, not a prerequisite for future tests.
+First prove headless hardware rendering and controlled replay on the cloud lab (U0 below). No broad
+runner migration or agent-instruction changes are authorized by this checkpoint alone.
+
 **Goal:** let a text-only coding agent (and a human with one button) take a real demo page, drive it
 the way a person would — pan, orbit, smooth-zoom from orbit down to the surface, click a toggle and do
 the same thing again — and get back facts and performance numbers that can be compared before and
@@ -315,6 +320,35 @@ artifacts/scene-tests/<run-id>/                manifest, report.md/json, samples
   never `pass` (037 B-F5). Baseline acceptance stays a deliberate human action.
 
 ## Phases
+
+### U0 — Unattended cloud-lab feasibility (2026-10-18, in progress)
+
+Use `/cloud-volumes-lab` as the first bounded experiment, reusing its real engine and cloud
+renderer. Keep a dev-only, explicitly enabled test hook and an isolated headless Playwright command.
+Cloud appearance/budgets remain owned by [Plan 051](051_cloud_volumes.md). Record compact dated
+decisions, commands, artifact locations and results in [Runbook 052](/docs/runbook/052_page_test_sessions_and_performance_comparison.md).
+
+- [ ] Launch the server/browser unattended, identify the **actual** GPU/backend and reject software
+  fallback for hardware evidence. Save raw GPU timestamps where supported; unavailable is not zero.
+- [ ] Drive a complete fixed-step approach/entry/turn/exit journey, including intermediate renders,
+  camera, sun/volume motion and bake work. Audit shader clocks as well as the engine clock.
+- [ ] Repeat the journey normally and with deliberate wall-clock pauses. Compare all frame/state
+  records and rendered checkpoints; measure image noise before choosing tolerances. Preserve raw evidence.
+- [ ] Detect deliberate visual mutation, missing render and readiness timeout; prove clean recovery.
+- [ ] One command writes a compact report, raw state/timings and captures, exits with meaningful
+  status, and cleans up its server/browser on success/failure. Record source identity without commits.
+- [ ] Exercise competing GPU load and parallel submissions in a bounded follow-up. Replay correctness
+  may pass under load; those timings must not establish an idle-machine baseline.
+- [ ] Prove a known rendering slowdown against repeated quiet measurements before adopting a perf gate.
+
+**Decision:** report separate go/no-go/inconclusive outcomes for hardware execution, replay,
+failure detection, unattended lifecycle and performance. A replay video cannot prove real-time FPS.
+Headless profiles must be evaluated on their own evidence; document focus is not a universal gate.
+Reliable performance still requires controlled hardware; scheduling/quiet heuristics cannot prove
+the absence of external contention. Cross-agent coordination is a later shared machine queue/lock,
+not merely Playwright's per-process worker count. Existing phases below remain pending this evidence.
+
+### Existing implementation sequence
 
 0. **Spike (kill criterion) — do first.** One throwaway Playwright spec on
    `/cell-planet-tsl?debug=1&backend=webgpu`: interpolate `cameraPosition` over ~120 `renderComplete$`

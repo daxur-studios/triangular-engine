@@ -21,6 +21,7 @@ import {
   atan,
 } from 'three/tsl';
 import { AtmosphereGpuModel } from './atmosphere-gpu-model';
+import type { BentAtmosphere } from './bent-atmosphere';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -34,6 +35,12 @@ export interface AtmosphereSkyViewOptions {
   altitudeTolerance?: number;
   /** Re-render when the sun's elevation changes by more than this many degrees. Default 0.05. */
   sunTolerance?: number;
+  /**
+   * Bake the table for the bent planet (Plan 049, Phase 3a): the march runs on the sphere of radius `1 / k` with the
+   * bent atmosphere's sun and no map (no mask, the sun angle from the local up), and the horizon row follows the
+   * curvature. The table re-renders when the bent atmosphere's `revision` changes.
+   */
+  bent?: BentAtmosphere;
 }
 
 /**
@@ -67,6 +74,7 @@ export class AtmosphereSkyViewLut {
   private lastAltitude = Number.NaN;
   private lastSunElevationDeg = Number.NaN;
   private lastProfileVersion = -1;
+  private lastBentRevision = -1;
   private forced = true;
 
   constructor(
@@ -96,6 +104,12 @@ export class AtmosphereSkyViewLut {
   private horizonAngle(): any {
     const R = this.model.uRadius;
     const h = this.lutAltitude;
+    const bent = this.options.bent;
+    if (bent) {
+      // The same dip on the sphere of curvature k: tan(dip) = sqrt(k h (2 + k h)). Exact at k = 0 (no dip).
+      const kh = bent.uK.mul(h);
+      return atan(sqrt(kh.mul(kh.add(2)))).add(Math.PI / 2);
+    }
     // dip = acos(R / (R + h)) = atan(sqrt(h (2R + h)) / R): the second form keeps precision at small h.
     const dip = atan(sqrt(h.mul(R.mul(2).add(h))).div(R));
     return dip.add(Math.PI / 2);
@@ -134,13 +148,15 @@ export class AtmosphereSkyViewLut {
       const sinT = sin(theta);
       const dir: any = (vec3 as any)(sinT.mul(hx), cos(theta), sinT.mul(hz));
 
-      const result = model.march({
+      const marchInput = {
         altitude: this.lutAltitude,
         dir,
         sunDir: this.lutSunDirection,
         maxDistance: float(1e30),
         steps: this.options.steps,
-      });
+      };
+      const bent = this.options.bent;
+      const result = bent ? bent.march({ ...marchInput, local: true }) : model.march(marchInput);
       const out: any = select(right, result.transmittance, result.radiance);
       return vec4(out, 1);
     })();
@@ -159,7 +175,7 @@ export class AtmosphereSkyViewLut {
 
     // The live sun, not the one the table was rendered with: the table is baked relative to the sun's horizontal
     // direction, so a new azimuth at the same elevation needs no re-render.
-    const sunH = this.sunHorizontal(this.model.sunDirection);
+    const sunH = this.sunHorizontal(this.options.bent ? this.options.bent.uSunLocal : this.model.sunDirection);
     const dirH = normalize(vec2(dir.x, dir.z).add(vec2(1e-12, 0)));
     const phi = acos(clamp(dot(dirH, sunH), -1, 1));
     const sU = sqrt(phi.div(Math.PI));
@@ -175,6 +191,11 @@ export class AtmosphereSkyViewLut {
 
   // -- per-frame update --------------------------------------------------------------------------
 
+  /** The sun the table is rendered and read with: the bent atmosphere's local sun, or the model's. */
+  private sunValue(): Vector3 {
+    return this.options.bent ? this.options.bent.uSunLocal.value : this.model.sunDirection.value;
+  }
+
   /** Forces a re-render on the next {@link update} (profile changed outside the model, resize, ...). */
   invalidate(): void {
     this.forced = true;
@@ -183,9 +204,10 @@ export class AtmosphereSkyViewLut {
   private isDirty(altitudeM: number): boolean {
     if (this.forced) return true;
     if (this.model.profileVersion !== this.lastProfileVersion) return true;
+    if (this.options.bent && this.options.bent.revision !== this.lastBentRevision) return true;
     const scale = Math.max(altitudeM, 0.002 * this.model.uTopAltitude.value);
     if (Math.abs(altitudeM - this.lastAltitude) > (this.options.altitudeTolerance ?? 0.01) * scale) return true;
-    const sunY = this.model.sunDirection.value.y;
+    const sunY = this.sunValue().y;
     const elevation = (Math.asin(Math.min(1, Math.max(-1, sunY))) * 180) / Math.PI;
     return Math.abs(elevation - this.lastSunElevationDeg) > (this.options.sunTolerance ?? 0.05);
   }
@@ -196,7 +218,7 @@ export class AtmosphereSkyViewLut {
    */
   update(renderer: WebGPURenderer, altitudeM: number): boolean {
     if (!renderer.initialized || !this.isDirty(altitudeM)) return false;
-    const sun = this.model.sunDirection.value;
+    const sun = this.sunValue();
     this.lutAltitude.value = Math.max(0, altitudeM);
     this.lutSunDirection.value.copy(sun);
 
@@ -208,6 +230,7 @@ export class AtmosphereSkyViewLut {
     this.lastAltitude = altitudeM;
     this.lastSunElevationDeg = (Math.asin(Math.min(1, Math.max(-1, sun.y))) * 180) / Math.PI;
     this.lastProfileVersion = this.model.profileVersion;
+    this.lastBentRevision = this.options.bent?.revision ?? -1;
     this.forced = false;
     this.renderCount++;
     return true;

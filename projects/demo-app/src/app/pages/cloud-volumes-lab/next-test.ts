@@ -25,6 +25,8 @@ export interface NextTestScenario {
   readonly spinWarp?: number;
   /** false = clouds off, for the baseline the net numbers are taken against. Default true. */
   readonly clouds?: boolean;
+  /** Sun colour and ambient from the atmosphere (Phase 3). */
+  readonly atmosphereLighting?: boolean;
 }
 
 export interface NextTest {
@@ -33,18 +35,19 @@ export interface NextTest {
 }
 
 /** Plan 051 step 7: still vs a spinning planet at 100 000x, proxies, 1 band/frame, at the camera spots that matter. */
-const SPOTS = ['inside', 'horizon', 'ground'];
+const SPOTS = ['inside', 'horizon'];
 
-/** A fly-by and the three static spots, all at 12 volumes, proxies, 24 steps, 1 band/frame. */
-function group(name: string, clouds: boolean, spinWarp: number): NextTestScenario[] {
-  const base = { volumes: 12 as const, mode: 'proxy' as const, scale: 1, steps: 24, animateSun: false, bakeBudget: 1, spinWarp, clouds };
+/** A fly-by (sun animating, so the lighting changes every frame) and two static spots, 12 volumes, proxies. */
+function group(name: string, atmosphereLighting: boolean): NextTestScenario[] {
+  const base = { volumes: 12 as const, mode: 'proxy' as const, scale: 1, steps: 24, bakeBudget: 1, spinWarp: 0, clouds: true, atmosphereLighting };
   return [
-    { ...base, label: `fly-by, ${name}`, kind: 'flyby' },
-    ...SPOTS.map((preset): NextTestScenario => ({ ...base, label: `${preset}, ${name}`, kind: 'static', preset })),
+    { ...base, label: `fly-by sun moving, ${name}`, kind: 'flyby', animateSun: true },
+    ...SPOTS.map((preset): NextTestScenario => ({ ...base, label: `${preset}, ${name}`, kind: 'static', preset, animateSun: false })),
   ];
 }
 
+/** Plan 051 Phase 3: does atmosphere lighting (CPU sun colour and ambient per volume) add GPU cost? Expected: none. */
 export const NEXT_TEST: NextTest = {
-  title: 'step 7 net numbers: 12 volumes, clouds off vs still vs spin 100000x, proxies, 1 band/frame',
-  scenarios: [...group('clouds off', false, 0), ...group('still', true, 0), ...group('spin', true, 100000)],
+  title: 'phase 3 atmosphere lighting cost: 12 volumes, lighting off vs on, proxies, 1 band/frame',
+  scenarios: [...group('lighting off', false), ...group('lighting on', true)],
 };

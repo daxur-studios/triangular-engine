@@ -248,6 +248,7 @@ Plan 050's existing occlusion slot.
      worst case.
 3. **Atmosphere lighting.** Sun colour, sky ambient and aerial perspective from the atmosphere API (Earth and
    Mars presets) on the lab's planet.
+   - **Status 2026-10-18:** 3a built, sun colour and sky ambient per volume on the CPU (`CloudVolumeAtmosphereLighting`). 3b (aerial perspective haze, sky backdrop in the lab, optional per-pixel sun colour) not started.
    - **Gate:** orange-lit clouds at dusk, blue-hazed far clouds, a dark night side, no white glow.
      Cost added ≤ 0.1 ms.
 4. **Stylization.** Light ramp, edge hardness, silver rim, tint and density curve, with presets

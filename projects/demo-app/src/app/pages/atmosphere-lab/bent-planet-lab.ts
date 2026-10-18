@@ -1,71 +1,127 @@
-import { BufferAttribute, BufferGeometry, DoubleSide, Mesh, PerspectiveCamera, PlaneGeometry, type Camera } from 'three';
-import { NodeMaterial } from 'three/webgpu';
+import {
+  BufferAttribute,
+  BufferGeometry,
+  ClampToEdgeWrapping,
+  DoubleSide,
+  HalfFloatType,
+  LinearFilter,
+  Matrix4,
+  Mesh,
+  PerspectiveCamera,
+  PlaneGeometry,
+  RGBAFormat,
+  RenderTarget,
+  Vector2,
+  type Camera,
+} from 'three';
+import { NodeMaterial, QuadMesh, type WebGPURenderer } from 'three/webgpu';
 import {
   Fn,
   If,
   attribute,
   cameraProjectionMatrixInverse,
   cameraWorldMatrix,
+  clamp,
   cos,
   dot,
-  floor,
   float,
   fract,
-  length,
+  fwidth,
+  mat3,
   max,
   mix,
-  mod,
   normalize,
+  outputStruct,
   positionLocal,
-  positionWorld,
+  sin,
   smoothstep,
+  texture,
   uniform,
+  uv,
   varying,
   vec3,
   vec4,
 } from 'three/tsl';
-import { AtmosphereGpuModel, BentAtmosphere, bend, type DayNightMode } from 'triangular-engine/atmosphere';
+import {
+  AtmosphereGpuModel,
+  AtmosphereSkyViewLut,
+  BentAtmosphere,
+  blendedProjection,
+  bend,
+  type BentProjection,
+  type DayNightMode,
+} from 'triangular-engine/atmosphere';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
+ * How the sky is drawn on the bent planet.
+ * - `auto`: the sky-view table inside the air, a half-resolution masked march near map edges and outside the air, blended.
+ * - `table`: the table only (inside the air); the edges are not masked in the sky.
+ * - `march`: the masked march for every pixel at full resolution (the 3a spike's path, kept for timings).
+ */
+export type BentSkyPath = 'auto' | 'table' | 'march';
+
+/**
  * Plan 049 Phase 3a: the bent planet in `/atmosphere-lab`. No planet material, no terrain.
  *
- * - A longitude/latitude grid mesh, rebuilt on the CPU with `bend()` whenever the morph (or the camera's anchor) changes.
- *   Its fragments are coloured by checker and graticule from their map coordinates, lit from the tables, and hazed by a
- *   short march from the camera to the fragment.
- * - A full-screen pass that marches the bent atmosphere (radius 1 / k, map mask, day/night) for every pixel.
+ * - A longitude/latitude grid mesh, rebuilt on the CPU with `bend()` whenever the morph, the projection or the camera's
+ *   anchor changes. Its fragments are a filtered checker and graticule, lit from the tables, with no haze (the haze
+ *   on surfaces comes from the froxel table in the planet, not from a march here).
+ * - A full-screen sky pass. By default it is one fetch from the sky-view table (baked for the bent sphere, radius `1 / k`),
+ *   and a half-resolution masked march is blended in where the map's edge is within the clear-air distance of the
+ *   camera, and used outright when the camera is above the air.
  *
  * The world is the camera's local frame (y up, camera at the origin, the anchor's ground point `altitude` below it),
  * in units of `planetRadius / 1000` metres so the planet is 1000 units across at every size.
  */
 export class BentPlanetLab {
   readonly bent: BentAtmosphere;
+  readonly skyView: AtmosphereSkyViewLut;
   readonly pass: Mesh;
   readonly grid: Mesh;
   readonly exposure = uniform(8);
   readonly altitude = uniform(1000);
-  private readonly unitM = uniform(1);
+  /** Size in pixels of the half-resolution masked pass (0 x 0 until it has rendered). */
+  readonly maskedSize = new Vector2();
+  /** How many frames rendered the masked pass, and how many wrote only the table path. */
+  maskedRenders = 0;
   private readonly passMaterial: NodeMaterial;
   private readonly gridMaterial: NodeMaterial;
   private readonly lonSegments = 360;
   private readonly latSegments = 180;
   private readonly positions: Float32Array;
   private readonly mapXY: Float32Array;
+  private readonly lonLat: Float32Array;
   private readonly positionAttribute: BufferAttribute;
+
+  /** 0 = auto, 1 = table only, 2 = full-resolution masked march per pixel. */
+  private readonly pathMode = uniform(0);
+  /** How much of the sky comes from the masked pass: 0 table only, 1 masked only. */
+  private readonly maskedWeight = uniform(1);
+  private readonly maskedInvProjection = uniform(new Matrix4());
+  private readonly maskedCameraWorld = uniform(new Matrix4());
+  private maskedTarget?: RenderTarget;
+  private maskedQuad?: QuadMesh;
+  private maskedMaterial?: NodeMaterial;
+  private readonly drawingSize = new Vector2();
 
   private radiusM = 6_371_000;
   private morphValue = 0;
   private anchorX = 0;
   private anchorY = 0;
   private altitudeM = 1000;
+  private projection: BentProjection = 'equirect';
+  private path: BentSkyPath = 'auto';
   private lastKey = '';
+  private weight = 1;
 
   constructor(
     readonly model: AtmosphereGpuModel,
     private readonly steps = 32,
   ) {
     this.bent = new BentAtmosphere(model);
+    this.skyView = new AtmosphereSkyViewLut(model, { bent: this.bent });
     this.passMaterial = this.buildPass();
     this.pass = new Mesh(new PlaneGeometry(2, 2), this.passMaterial);
     this.pass.frustumCulled = false;
@@ -75,10 +131,12 @@ export class BentPlanetLab {
     const vertexCount = (this.lonSegments + 1) * (this.latSegments + 1);
     this.positions = new Float32Array(vertexCount * 3);
     this.mapXY = new Float32Array(vertexCount * 2);
+    this.lonLat = new Float32Array(vertexCount * 2);
     const geometry = new BufferGeometry();
     this.positionAttribute = new BufferAttribute(this.positions, 3);
     geometry.setAttribute('position', this.positionAttribute);
     geometry.setAttribute('aMapXY', new BufferAttribute(this.mapXY, 2));
+    geometry.setAttribute('aLonLat', new BufferAttribute(this.lonLat, 2));
     const index = new Uint32Array(this.lonSegments * this.latSegments * 6);
     let n = 0;
     const row = this.lonSegments + 1;
@@ -101,6 +159,25 @@ export class BentPlanetLab {
 
   get morph(): number {
     return this.morphValue;
+  }
+
+  /** The share of the sky taken from the masked pass this frame (0 = table only, 1 = masked only). */
+  get maskedShare(): number {
+    return this.weight;
+  }
+
+  get skyPath(): BentSkyPath {
+    return this.path;
+  }
+
+  setSkyPath(path: BentSkyPath): void {
+    this.path = path;
+    this.pathMode.value = path === 'auto' ? 0 : path === 'table' ? 1 : 2;
+  }
+
+  setProjection(projection: BentProjection): void {
+    this.projection = projection;
+    this.apply();
   }
 
   setPlanetRadius(metres: number): void {
@@ -142,10 +219,12 @@ export class BentPlanetLab {
     this.grid.visible = on;
   }
 
-  /** Per-frame: the grid hangs `altitude` below the camera, and the clip planes follow the altitude. */
-  update(camera: Camera): void {
+  /**
+   * Per-frame, outside any render pass: moves the clip planes with the altitude, refreshes the sky-view table when its
+   * inputs changed, and renders the half-resolution masked pass when this frame's sky takes any of it.
+   */
+  update(renderer: WebGPURenderer | undefined, camera: Camera): void {
     const unit = this.radiusM / 1000;
-    this.unitM.value = unit;
     this.grid.position.set(0, -this.altitudeM / unit, 0);
     this.grid.updateMatrixWorld();
     if (camera instanceof PerspectiveCamera) {
@@ -157,31 +236,59 @@ export class BentPlanetLab {
         camera.updateProjectionMatrix();
       }
     }
+    this.weight = this.computeMaskedWeight();
+    this.maskedWeight.value = this.weight;
+    if (!renderer?.initialized) return;
+    if (this.path !== 'march' && this.weight < 1) this.skyView.update(renderer, this.altitudeM);
+    if (this.path !== 'march' && this.weight > 0) this.renderMasked(renderer, camera);
+  }
+
+  /**
+   * The masked pass's share of the sky. Above the air the table does not exist (1). Inside it, the edge at distance `d`
+   * hides behind the air once `d` passes the clear-air distance `D` (transmittance of a horizontal ray about 1%), so
+   * the share is 1 at `D / 2` and nearer, and 0 at `D` and further. Blended over that band so nothing pops.
+   */
+  private computeMaskedWeight(): number {
+    if (this.path === 'march') return 1;
+    if (this.altitudeM >= this.model.uTopAltitude.value) return 1;
+    if (this.path === 'table') return 0;
+    const d = this.bent.mapEdgeDistance();
+    if (!Number.isFinite(d)) return 0;
+    const big = this.bent.clearAirDistance(this.altitudeM);
+    if (!Number.isFinite(big)) return 1;
+    const t = Math.min(1, Math.max(0, (d - 0.5 * big) / (0.5 * big)));
+    return 1 - t * t * (3 - 2 * t);
   }
 
   // -- the grid mesh -------------------------------------------------------------------------------
 
   /** Rebuilds the grid when the shape changed (the key covers what the positions depend on). */
   private apply(force = false): void {
-    this.bent.setShape({ morph: this.morphValue, planetRadiusM: this.radiusM, anchorX: this.anchorX, anchorY: this.anchorY });
-    const key = `${this.morphValue}|${this.radiusM}|${this.anchorX}|${this.anchorY}`;
+    this.bent.setShape({
+      morph: this.morphValue,
+      planetRadiusM: this.radiusM,
+      anchorX: this.anchorX,
+      anchorY: this.anchorY,
+      projection: this.projection,
+    });
+    const key = `${this.morphValue}|${this.radiusM}|${this.anchorX}|${this.anchorY}|${this.projection}`;
     if (!force && key === this.lastKey) return;
     this.lastKey = key;
     const k = this.bent.k;
     const f = this.bent.anchorFrame;
     const unit = this.radiusM / 1000;
     const R = this.radiusM;
+    const p = this.bent.uProjBlend.value;
     const row = this.lonSegments + 1;
     for (let iy = 0; iy <= this.latSegments; iy++) {
       const lat = -Math.PI / 2 + (Math.PI * iy) / this.latSegments;
       for (let ix = 0; ix <= this.lonSegments; ix++) {
         const lon = -Math.PI + (2 * Math.PI * ix) / this.lonSegments;
-        const x = R * lon;
-        const y = R * lat;
-        const p = bend(x, y, k).position;
-        const dx = p[0] - f.origin[0];
-        const dy = p[1] - f.origin[1];
-        const dz = p[2] - f.origin[2];
+        const [x, y] = blendedProjection(lon, lat, p, R);
+        const pos = bend(x, y, k).position;
+        const dx = pos[0] - f.origin[0];
+        const dy = pos[1] - f.origin[1];
+        const dz = pos[2] - f.origin[2];
         const v = iy * row + ix;
         // The anchor's local frame: east, up, and south (-north).
         this.positions[v * 3] = (f.east[0] * dx + f.east[1] * dy + f.east[2] * dz) / unit;
@@ -189,9 +296,63 @@ export class BentPlanetLab {
         this.positions[v * 3 + 2] = -(f.north[0] * dx + f.north[1] * dy + f.north[2] * dz) / unit;
         this.mapXY[v * 2] = x;
         this.mapXY[v * 2 + 1] = y;
+        this.lonLat[v * 2] = (lon * 180) / Math.PI;
+        this.lonLat[v * 2 + 1] = (lat * 180) / Math.PI;
       }
     }
     this.positionAttribute.needsUpdate = true;
+    (this.grid.geometry.getAttribute('aMapXY') as BufferAttribute).needsUpdate = true;
+    (this.grid.geometry.getAttribute('aLonLat') as BufferAttribute).needsUpdate = true;
+  }
+
+  // -- the half-resolution masked pass ---------------------------------------------------------------
+
+  private ensureMasked(): RenderTarget {
+    if (this.maskedTarget) return this.maskedTarget;
+    const target = new RenderTarget(1, 1, {
+      count: 2,
+      type: HalfFloatType,
+      format: RGBAFormat,
+      minFilter: LinearFilter,
+      magFilter: LinearFilter,
+      wrapS: ClampToEdgeWrapping,
+      wrapT: ClampToEdgeWrapping,
+      depthBuffer: false,
+      generateMipmaps: false,
+    } as any);
+    const bent = this.bent;
+    const material = new NodeMaterial();
+    const marched: any = Fn(() => {
+      const ndc: any = uv().mul(2).sub(1);
+      const far: any = this.maskedInvProjection.mul(vec4(ndc, 1, 1));
+      const dir = normalize(this.maskedCameraWorld.mul(vec4(far.xyz.div(far.w), 0)).xyz);
+      const m = bent.march({ altitude: this.altitude, dir, sunDir: bent.uSunLocal, maxDistance: float(1e30), steps: this.steps });
+      return (mat3 as any)(m.radiance, m.transmittance, vec3(0));
+    })().toVar();
+    material.fragmentNode = (outputStruct as any)(vec4(marched[0], 1), vec4(marched[1], 1));
+    this.maskedTarget = target;
+    this.maskedMaterial = material;
+    this.maskedQuad = new QuadMesh(material);
+    return target;
+  }
+
+  private renderMasked(renderer: WebGPURenderer, camera: Camera): void {
+    const target = this.ensureMasked();
+    renderer.getDrawingBufferSize(this.drawingSize);
+    const w = Math.max(8, Math.round(this.drawingSize.x * 0.5));
+    const h = Math.max(8, Math.round(this.drawingSize.y * 0.5));
+    if (target.width !== w || target.height !== h) {
+      target.setSize(w, h);
+      this.maskedSize.set(w, h);
+    }
+    camera.updateMatrixWorld();
+    this.maskedInvProjection.value.copy((camera as PerspectiveCamera).projectionMatrixInverse);
+    this.maskedCameraWorld.value.copy(camera.matrixWorld);
+    const previous = renderer.getRenderTarget();
+    renderer.setRenderTarget(target);
+    this.maskedQuad?.render(renderer);
+    renderer.setRenderTarget(previous);
+    this.maskedRenders++;
   }
 
   // -- shaders -------------------------------------------------------------------------------------
@@ -207,22 +368,43 @@ export class BentPlanetLab {
     const farPoint = cameraProjectionMatrixInverse.mul(vec4(positionLocal.xy, 1, 1));
     const rayWorld = cameraWorldMatrix.mul(vec4(farPoint.xyz.div(farPoint.w), 0)).xyz;
     const rayVarying = varying(rayWorld, 'vBentRay');
+    const screenVarying = varying(positionLocal.xy.mul(0.5).add(0.5), 'vBentUv');
     material.fragmentNode = Fn(() => {
       const dir = normalize(rayVarying);
-      const m = bent.march({
-        altitude: this.altitude,
-        dir,
-        sunDir: bent.uSunLocal,
-        maxDistance: float(1e30),
-        steps: this.steps,
-      });
-      const colour = m.radiance.toVar();
-      // The sun disc, seen through the whole air, unless the planet's sphere is in the way.
-      If((m.hitsGround as any).not(), () => {
+      const trace = bent.traceRay({ altitude: this.altitude, dir, maxDistance: float(1e30) });
+      const radiance = vec3(0).toVar();
+      const transmittance = vec3(1).toVar();
+      const readMasked = () => {
+        const target = this.ensureMasked();
+        radiance.assign(texture(target.textures[0], screenVarying, 0).rgb);
+        transmittance.assign(texture(target.textures[1], screenVarying, 0).rgb);
+      };
+      const readTable = () => {
+        const s = this.skyView.lookup(dir);
+        radiance.assign(s.radiance);
+        transmittance.assign(s.transmittance);
+      };
+      (If(this.pathMode.greaterThan(1.5), () => {
+        const m = bent.march({ altitude: this.altitude, dir, sunDir: bent.uSunLocal, maxDistance: float(1e30), steps: this.steps });
+        radiance.assign(m.radiance);
+        transmittance.assign(m.transmittance);
+      }) as any)
+        .ElseIf(this.maskedWeight.greaterThan(0.999), readMasked)
+        .ElseIf(this.maskedWeight.lessThan(0.001), readTable)
+        .Else(() => {
+          const a = texture(this.ensureMasked().textures[0], screenVarying, 0).rgb;
+          const b = texture(this.ensureMasked().textures[1], screenVarying, 0).rgb;
+          const s = this.skyView.lookup(dir);
+          radiance.assign(mix(s.radiance, a, this.maskedWeight));
+          transmittance.assign(mix(s.transmittance, b, this.maskedWeight));
+        });
+      const colour = radiance.toVar();
+      // The sun disc, seen through the air, unless the planet's sphere is in the way.
+      If(trace.hitsGround.not(), () => {
         const angle = model.uSunAngularRadius;
         const mask = smoothstep(cos(angle), cos(angle.mul(0.97)), dot(dir, bent.uSunLocal));
-        const radiance = model.uSunIrradiance.div(angle.mul(angle).mul(Math.PI));
-        colour.addAssign(m.transmittance.mul(radiance).mul(mask));
+        const sun = model.uSunIrradiance.div(angle.mul(angle).mul(Math.PI));
+        colour.addAssign(transmittance.mul(sun).mul(mask));
       });
       return vec4(max(colour.mul(this.exposure), 0), 1);
     })();
@@ -236,31 +418,29 @@ export class BentPlanetLab {
     material.side = DoubleSide;
     material.fragmentNode = Fn(() => {
       const xy: any = attribute('aMapXY', 'vec2');
-      const lonDeg = xy.x.div(bent.uRefRadius).mul(180 / Math.PI);
-      const latDeg = xy.y.div(bent.uRefRadius).mul(180 / Math.PI);
-      // 10 degree checker, east and west tinted differently, a graticule line every 30 degrees.
-      const parity = mod(floor(lonDeg.div(10)).add(floor(latDeg.div(10))), 2);
+      const ll: any = attribute('aLonLat', 'vec2');
+      const lonDeg = ll.x;
+      const latDeg = ll.y;
+      // A 10 degree checker (a filtered square wave per axis, so it fades to grey instead of aliasing), east and west
+      // tinted differently, and a graticule line every 30 degrees, a pixel wide.
+      const square = (cells: any): any => {
+        const w = max(fwidth(cells), 1e-4);
+        return clamp(sin(cells.mul(Math.PI)).div(w.mul(Math.PI)), -1, 1);
+      };
+      const parity = float(0.5).sub(square(lonDeg.div(10)).mul(square(latDeg.div(10))).mul(0.5));
       const tint = mix(vec3(0.55, 0.7, 1.0), vec3(1.0, 0.75, 0.55), smoothstep(float(-1), float(1), lonDeg));
       const base = mix(float(0.16), float(0.4), parity);
-      const lineLon = float(1).sub(smoothstep(float(0), float(0.35), fract(lonDeg.div(30).add(0.5)).sub(0.5).abs().mul(30)));
-      const lineLat = float(1).sub(smoothstep(float(0), float(0.35), fract(latDeg.div(30).add(0.5)).sub(0.5).abs().mul(30)));
-      const albedo = base.mul(tint).mul(float(1).sub(max(lineLon, lineLat).mul(0.7)));
+      const line = (deg: any): any => {
+        const cells = deg.div(30);
+        const distance = fract(cells.add(0.5)).sub(0.5).abs();
+        const pixels = distance.div(max(fwidth(cells), 1e-6));
+        return float(1).sub(smoothstep(float(0.5), float(1.5), pixels));
+      };
+      const albedo = base.mul(tint).mul(float(1).sub(max(line(lonDeg), line(latDeg)).mul(0.7)));
 
       const light = bent.groundLight(xy.x, xy.y);
       const ground = albedo.mul(light).mul(model.uSunIrradiance).div(Math.PI);
-
-      // The air between the camera and this fragment.
-      const toFragment = positionWorld;
-      const distanceM = length(toFragment).mul(this.unitM);
-      const m = bent.march({
-        altitude: this.altitude,
-        dir: normalize(toFragment),
-        sunDir: bent.uSunLocal,
-        maxDistance: distanceM,
-        steps: Math.max(8, Math.floor(this.steps / 2)),
-      });
-      const colour = ground.mul(m.transmittance).add(m.radiance);
-      return vec4(max(colour.mul(this.exposure), 0), 1);
+      return vec4(max(ground.mul(this.exposure), 0), 1);
     })();
     return material;
   }
@@ -270,5 +450,8 @@ export class BentPlanetLab {
     this.passMaterial.dispose();
     this.grid.geometry.dispose();
     this.gridMaterial.dispose();
+    this.skyView.dispose();
+    this.maskedTarget?.dispose();
+    this.maskedMaterial?.dispose();
   }
 }

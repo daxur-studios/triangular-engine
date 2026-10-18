@@ -179,3 +179,15 @@ Docs only; nothing built or measured. Earlier sections, the review inbox and the
   focused-document clipboard write works without a click on the launcher (the button stays either way); and whether a
   headless run on this machine gets a hardware adapter at all (if not, the agent command is smoke-only and the
   human button is the only GPU path).
+
+## 2026-10-18 — U0 unattended cloud-lab feasibility started
+
+- Requirement: agents execute GPU scenes without human clicks, focus or paste-back; the owner may
+  use the laptop concurrently. Controlled replay and authoritative idle-machine performance are
+  separate claims. This supersedes the previous human-visible-tab prerequisite as the target workflow.
+- Scope: isolated headless Playwright experiment on `/cloud-volumes-lab`, explicit dev-only hook,
+  actual adapter/timestamp evidence, fixed-step journey, repeated/paused comparisons, injected failures
+  and automatic artifacts/cleanup. Plan 052 U0 owns the checklist; Plan 051 owns cloud expectations.
+- Preserve concurrent cloud/atmosphere work. No commits, broad runner replacement or agent-instruction
+  changes. Hardware/contention/known-slowdown outcomes must be recorded separately; incomplete evidence
+  stays inconclusive. Commands and measured findings will be appended after the experiment.

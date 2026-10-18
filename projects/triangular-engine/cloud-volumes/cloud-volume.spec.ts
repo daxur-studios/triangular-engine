@@ -2,6 +2,7 @@ import { DataUtils, Vector3 } from 'three';
 import { referenceOpticalDepth, type CloudAnalyticShape } from './cloud-volume-reference';
 import { CloudVolume } from './cloud-volume';
 import { CloudVolumeBakeScheduler } from './cloud-volume-bake-scheduler';
+import { CloudVolumeAtmosphereLighting, type CloudAtmosphereSource } from './cloud-volume-atmosphere-lighting';
 import { getCloudTestRenderer } from './gpu-renderer.testing';
 
 /** Reads a half-float atlas back as numbers, one per texel, whatever the channel count. */
@@ -139,5 +140,42 @@ describe('CloudVolume bakes (WebGL2 backend)', () => {
     expect(volumes.map((v) => [v.densityBakes, v.lightBakes])).toEqual([[1, 1], [1, 1], [1, 1]]);
     expect(scheduler.update(renderer, volumes)).toBe(0);
     for (const v of volumes) v.dispose();
+  });
+});
+
+describe('CloudVolumeAtmosphereLighting', () => {
+  // A flat fake atmosphere: sun transmittance falls to orange near the horizon and 0 below it, sky light follows the sun.
+  const source: CloudAtmosphereSource = {
+    planetRadiusM: 1000,
+    sunTransmittance: (point, sun) => {
+      const r = Math.hypot(...point);
+      const mu = (point[0] * sun[0] + point[1] * sun[1] + point[2] * sun[2]) / r;
+      if (mu < -0.1) return [0, 0, 0];
+      const t = Math.max(0, Math.min(1, mu * 4));
+      return [1, 0.5 + 0.5 * t, 0.2 + 0.8 * t];
+    },
+    skyIrradiance: (_alt, mu) => [0.1 * Math.max(0, mu + 0.2), 0.1 * Math.max(0, mu + 0.2), 0.2 * Math.max(0, mu + 0.2)],
+  };
+
+  function lit(sunY: number): CloudVolume {
+    const volume = new CloudVolume({ size: new Vector3(100, 50, 100) });
+    volume.mesh.position.set(0, 1250, 0);
+    volume.mesh.updateMatrixWorld();
+    new CloudVolumeAtmosphereLighting(source).update([volume], new Vector3(Math.sqrt(1 - sunY * sunY), sunY, 0));
+    return volume;
+  }
+
+  it('is white-ish overhead, orange near the horizon and black on the night side', () => {
+    const noon = lit(1).uSunColor.value;
+    const dusk = lit(0.05).uSunColor.value;
+    const night = lit(-0.9).uSunColor.value;
+    expect(noon.toArray()).toEqual([1, 1, 1]);
+    expect(dusk.x).toBeGreaterThan(dusk.z * 1.5);
+    expect(night.toArray()).toEqual([0, 0, 0]);
+  });
+
+  it('dims the ambient on the night side', () => {
+    expect(lit(-0.9).uAmbient.value.length()).toBe(0);
+    expect(lit(1).uAmbient.value.length()).toBeGreaterThan(0.1);
   });
 });

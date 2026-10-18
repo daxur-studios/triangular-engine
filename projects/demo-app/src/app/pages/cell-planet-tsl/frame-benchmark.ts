@@ -6,6 +6,8 @@
  * Frame times are `requestAnimationFrame` deltas, so they are capped by the display refresh rate: a scenario
  * at the refresh rate says "not slower than that", it does not say how much headroom there is.
  */
+import type { FrameSampler, IFrameSampleSummary } from 'triangular-engine';
+
 export interface IBenchmarkScenario {
   readonly name: string;
   /** Applies the scenario (set signals, toggle batching, ...). May return a promise. */
@@ -20,11 +22,21 @@ export interface IBenchmarkSample {
   readonly p95Ms: number;
   readonly worstMs: number;
   readonly fps: number;
+  /** FrameSampler CPU median (tick + render), not capped by the display. `null` without a sampler. */
+  readonly cpuMedianMs: number | null;
+  /** FrameSampler GPU median; `null` when `gpuTiming` is off or unsupported. */
+  readonly gpuMedianMs: number | null;
+  readonly verdict: IFrameSampleSummary['verdict'] | null;
   readonly extra: string;
 }
 
 export interface IBenchmarkOptions {
   readonly scenarios: readonly IBenchmarkScenario[];
+  /**
+   * Engine frame sampler (`fpsController.frameSampler`). Wrapped around each recorded scenario, it
+   * adds the CPU and GPU medians and a verdict to the table. The rAF columns are unchanged.
+   */
+  readonly frameSampler?: FrameSampler;
   /** True once streaming is idle (nothing queued), so installs do not pollute the samples. */
   readonly isSettled: () => boolean;
   /** One short line per scenario (draw calls, triangles, ...), read after sampling. */
@@ -87,7 +99,9 @@ export async function runFrameBenchmark(
       if (options.isSettled()) break;
     }
     await sleep(warmupMs);
+    if (!isWarmup) options.frameSampler?.start();
     const deltas = await sampleFrames(isWarmup ? 1500 : sampleMs);
+    const frameWindow = isWarmup ? undefined : options.frameSampler?.stop();
     if (isWarmup) continue;
     const sorted = [...deltas].sort((a, b) => a - b);
     const mean = deltas.reduce((sum, v) => sum + v, 0) / Math.max(1, deltas.length);
@@ -99,25 +113,32 @@ export async function runFrameBenchmark(
       p95Ms: percentile(sorted, 0.95),
       worstMs: sorted[sorted.length - 1] ?? 0,
       fps: mean > 0 ? 1000 / mean : 0,
+      cpuMedianMs: frameWindow ? frameWindow.cpuMedianMs : null,
+      gpuMedianMs: frameWindow?.gpuMedianMs ?? null,
+      verdict: frameWindow ? frameWindow.verdict : null,
       extra: options.describe(),
     });
   }
 
   const f = (v: number) => v.toFixed(1);
+  const sampled = options.frameSampler !== undefined;
   const lines = [
     '### Frame benchmark',
     ...options.header().map((line) => `- ${line}`),
     `- total run: ${((performance.now() - started) / 1000).toFixed(0)} s, ${sampleMs / 1000} s sampled per scenario`,
+    ...(sampled
+      ? ['- rAF columns (mean..fps) are capped by the display refresh rate. cpu/gpu medians come from FrameSampler; gpu needs gpuTiming on. verdict noisy means the CPU spread is above 15 %: read the medians, not the verdict, when it says noisy.']
+      : []),
     '',
     ...(samples.some((s) => s.fps < 5)
       ? ['- WARNING: rows under 5 fps mean the tab was throttled (hidden or unfocused) or still compiling. Keep it visible and rerun.']
       : []),
     '',
-    '| scenario | frames | mean ms | p50 | p95 | worst | fps | notes |',
-    '|---|---|---|---|---|---|---|---|',
+    '| scenario | frames | mean ms | p50 | p95 | worst | fps | cpu med | gpu med | verdict | notes |',
+    '|---|---|---|---|---|---|---|---|---|---|---|',
     ...samples.map(
       (s) =>
-        `| ${s.name} | ${s.frames} | ${f(s.meanMs)} | ${f(s.p50Ms)} | ${f(s.p95Ms)} | ${f(s.worstMs)} | ${f(s.fps)} | ${s.extra} |`,
+        `| ${s.name} | ${s.frames} | ${f(s.meanMs)} | ${f(s.p50Ms)} | ${f(s.p95Ms)} | ${f(s.worstMs)} | ${f(s.fps)} | ${s.cpuMedianMs === null ? '-' : s.cpuMedianMs.toFixed(2)} | ${s.gpuMedianMs === null ? 'n/a' : s.gpuMedianMs.toFixed(2)} | ${s.verdict ?? '-'} | ${s.extra} |`,
     ),
   ];
   return { samples, report: lines.join('\n') };

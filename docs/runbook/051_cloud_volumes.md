@@ -685,3 +685,13 @@ Gross GPU ms (clouds off / still / spin) and net = clouds on minus clouds off. F
 
 - `CloudVolumeScreenPass` now defaults to `proxies: true` (12 volumes: net inside about 2.4, horizon about 1.1, against the per-pixel pass 3.47 / 2.22). `proxies: false` keeps the chunked per-pixel march.
 - Re-test note: all of these timings were taken with the lab's own GPU timer. Once `FrameSampler` (Plan 052) can time pages, re-run the full matrix on it (both modes, the lab, and any consumer page) before Phase 2b is called closed for good.
+
+## 2026-10-18: Phase 2b closed, Phase 3a built (atmosphere lighting, not yet measured or eyeballed)
+
+- **2b closed** on the maintainer's go. Numbers are in the step 5, 7 and proxies-default sections above. Known leftovers: 12 volumes slightly over G6 at ground and the fly-by p95; the proxy visuals were judged fine by the maintainer's fly-through.
+- **3a, sun colour and sky ambient (CPU, zero GPU cost):** `CloudVolumeAtmosphereLighting` (`cloud-volumes/cloud-volume-atmosphere-lighting.ts`) takes a structural `CloudAtmosphereSource` (planet radius, `sunTransmittance`, `skyIrradiance`), so the cloud entry point does not import the atmosphere entry point. Per frame and per volume it samples the baked tables at the volume's centre and writes `uSunColor` and `uAmbient`. Orange near the horizon, black in the planet's shadow, no ambient on the night side. `groundLight()` gives the same colour for a scene light.
+- **Limit:** a volume is lit as one; one straddling the terminator flips as its centre crosses it (the lab's volumes are 600 m on a 2 km planet, so this is exaggerated). A per-pixel sun colour (a transmittance-table read in the march) would fix it and is not done.
+- **Lab:** Earth preset scaled to the 2 km planet with `thickness 0.3` (the clouds sit inside the air), "atmosphere lighting" toggle (default on), sun elevation now -30..90 (the animated sun wraps at -30), planet directional and sky lights follow the same colour. The lab still has no sky or backdrop and no haze.
+- **Not done in Phase 3 yet:** aerial perspective on the clouds (blue haze with distance) and a sky backdrop to see dusk against. Both need the GPU atmosphere model and a froxel lookup in the composite; they cost samplers and ms, so measure them as their own step.
+- **Camera toggle:** the lab has "fly" and "orbit the cloud" (drag to orbit the main volume, wheel to zoom). Tests and fly-bys force fly mode and restore it.
+- Green button now measures lighting off vs on (expected: no difference).

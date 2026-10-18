@@ -189,3 +189,129 @@ function smoothstep(a: number, b: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 }
+
+// -- the sun's horizon dip ------------------------------------------------------------------------
+
+/**
+ * `sin(dip / 2)` of the horizon seen from altitude `h` over the sphere of curvature `k`: `sqrt(k h / (2 (1 + k h)))`.
+ * 0 on the flat map (`k = 0`), and `acos(R / (R + h)) / 2` at `k = 1 / R`. Never forms `1 / k`.
+ */
+export function sunDipHalfSine(k: number, h: number): number {
+  const kh = Math.max(k * h, 0);
+  return Math.sqrt(kh / (2 * (1 + kh)));
+}
+
+/** The horizon's dip below the horizontal, radians (the sun is cut off below this much negative elevation). */
+export function sunDip(k: number, h: number): number {
+  return 2 * Math.asin(sunDipHalfSine(k, h));
+}
+
+/**
+ * The sun-zenith cosine of the horizon at altitude `h`: `-sin(dip) = -sqrt(k h (2 + k h)) / (1 + k h)`. The same as
+ * `-rho / r` for a sphere of radius `1 / k`, written so it is exact at `k = 0`.
+ */
+export function sunHorizonCos(k: number, h: number): number {
+  const kh = Math.max(k * h, 0);
+  return -Math.sqrt(kh * (2 + kh)) / (1 + kh);
+}
+
+// -- the march's span on a map --------------------------------------------------------------------
+
+/**
+ * Where the straight ray `o + t d` (map frame) leaves the map's rectangle grown by `margin`, `Infinity` when it never
+ * does. In the map frame a ray is straight, and on a bent sphere a point's map coordinate is no smaller than its
+ * `(x, y)` there up to the air's own height (a factor `1 + k h`), so `margin` should cover `k * top * halfWidth`.
+ * At `k = 0` it is exact. The march clamps to this instead of the map's diagonal.
+ */
+export function rayExitRect(o: Vec3, d: Vec3, halfWidth: number, halfHeight: number, margin: number): number {
+  const axis = (po: number, pd: number, half: number): number => {
+    if (Math.abs(pd) < 1e-12) return Infinity;
+    return ((pd > 0 ? half + margin : -(half + margin)) - po) / pd;
+  };
+  return Math.min(axis(o[0], d[0], halfWidth), axis(o[1], d[1], halfHeight));
+}
+
+// -- Equal Earth -----------------------------------------------------------------------------------
+
+const EE_A1 = 1.340264;
+const EE_A2 = -0.081106;
+const EE_A3 = 0.000893;
+const EE_A4 = 0.003796;
+
+/**
+ * Equal Earth on the unit sphere, as `x = lon * c(lat)` and `y`: its meridians are straight, so a row's width is
+ * `2 pi c(lat)` and the outline is a function of the row alone.
+ */
+export function equalEarthRow(lat: number): { readonly c: number; readonly y: number } {
+  const theta = Math.asin((Math.sqrt(3) / 2) * Math.sin(lat));
+  const t2 = theta * theta;
+  const t6 = t2 * t2 * t2;
+  const t8 = t6 * t2;
+  return {
+    c: (2 * Math.sqrt(3) * Math.cos(theta)) / (3 * (9 * EE_A4 * t8 + 7 * EE_A3 * t6 + 3 * EE_A2 * t2 + EE_A1)),
+    y: theta * (EE_A1 + EE_A2 * t2 + EE_A3 * t6 + EE_A4 * t8),
+  };
+}
+
+/**
+ * The projection blend of the plan: `(x, y) = mix(R (lon, lat), EqualEarth(lon, lat) R, p)`. `p = 0` is the globe's
+ * equirect (so `bend` gives the exact sphere at morph 0), `p = 1` the Equal Earth map.
+ */
+export function blendedProjection(lon: number, lat: number, p: number, radius: number): readonly [number, number] {
+  const row = equalEarthRow(lat);
+  return [radius * lon * (1 - p + p * row.c), radius * ((1 - p) * lat + p * row.y)];
+}
+
+/** Half-width (the equator) and half-height (the poles) of the blended map, metres. */
+export function blendedExtents(p: number, radius: number): { readonly halfWidth: number; readonly halfHeight: number } {
+  return {
+    halfWidth: Math.PI * radius * (1 - p + p * equalEarthRow(0).c),
+    halfHeight: radius * ((1 - p) * (Math.PI / 2) + p * equalEarthRow(Math.PI / 2).y),
+  };
+}
+
+export interface ProjectionRows {
+  /** Latitude of each row, radians; row `i` sits at `y = -halfHeight + 2 halfHeight i / (n - 1)`. */
+  readonly lat: Float32Array;
+  /** The map's half-width at each row, metres. */
+  readonly halfWidth: Float32Array;
+  readonly extents: { readonly halfWidth: number; readonly halfHeight: number };
+}
+
+/**
+ * The blended map's outline by row: for `n` rows spread evenly over the map's height, the latitude on that row and the
+ * map's half-width there. `y` depends on the latitude alone and grows with it, so the rows invert by bisection. The
+ * GPU keeps this as a small table (refreshed when the morph changes) for the map mask and the sun angle.
+ */
+export function projectionRows(p: number, radius: number, n: number): ProjectionRows {
+  const extents = blendedExtents(p, radius);
+  const lat = new Float32Array(n);
+  const halfWidth = new Float32Array(n);
+  const yOf = (phi: number): number => radius * ((1 - p) * phi + p * equalEarthRow(phi).y);
+  for (let i = 0; i < n; i++) {
+    const y = -extents.halfHeight + (2 * extents.halfHeight * i) / (n - 1);
+    let lo = -Math.PI / 2;
+    let hi = Math.PI / 2;
+    for (let it = 0; it < 50; it++) {
+      const mid = 0.5 * (lo + hi);
+      if (yOf(mid) < y) lo = mid;
+      else hi = mid;
+    }
+    const phi = 0.5 * (lo + hi);
+    lat[i] = phi;
+    halfWidth[i] = Math.PI * radius * (1 - p + p * equalEarthRow(phi).c);
+  }
+  return { lat, halfWidth, extents };
+}
+
+/** The latitude and half-width of the blended map's row at map height `y` (linear between the table's rows). */
+export function projectionRowAt(rows: ProjectionRows, y: number): { readonly lat: number; readonly halfWidth: number } {
+  const n = rows.lat.length;
+  const t = Math.min(1, Math.max(0, (y / rows.extents.halfHeight) * 0.5 + 0.5)) * (n - 1);
+  const i = Math.min(n - 2, Math.floor(t));
+  const f = t - i;
+  return {
+    lat: rows.lat[i] * (1 - f) + rows.lat[i + 1] * f,
+    halfWidth: rows.halfWidth[i] * (1 - f) + rows.halfWidth[i + 1] * f,
+  };
+}

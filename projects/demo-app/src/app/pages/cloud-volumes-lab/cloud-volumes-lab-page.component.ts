@@ -1,10 +1,12 @@
-import { Component, DestroyRef, HostListener, inject, signal } from '@angular/core';
+import { Component, DestroyRef, HostListener, inject, isDevMode, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PerspectiveCamera, Quaternion, SphereGeometry, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import { NEXT_TEST } from './next-test';
-import { CloudVolume, CloudVolumeBakeScheduler, CloudVolumeScreenPass } from 'triangular-engine/cloud-volumes';
+import { bakeAtmosphereLuts, createAtmospherePreset, sampleIrradianceLut, sunTransmittanceFromLut } from 'triangular-engine/atmosphere';
+import { CloudVolume, CloudVolumeAtmosphereLighting, CloudVolumeBakeScheduler, CloudVolumeScreenPass } from 'triangular-engine/cloud-volumes';
 import { GpuTimer } from './gpu-timer';
+import { installCloudReplayProbe } from './cloud-replay-probe';
 
 /**
  * Plan 051 Phases 0-1: the cloud-volumes test bench on a plain sphere planet (no atmosphere yet).
@@ -15,6 +17,7 @@ import { GpuTimer } from './gpu-timer';
  */
 const query = new URLSearchParams(globalThis.location?.search ?? '');
 const FORCE_WEBGL = query.has('forceWebGL') || query.get('backend') === 'webgl2';
+const REPLAY_PROBE = isDevMode() && query.get('cloudReplay') === 'u0';
 
 const PLANET_RADIUS = 2000;
 const VOLUME_CENTER = new Vector3(0, PLANET_RADIUS + 250, 0);
@@ -130,6 +133,11 @@ interface Recording {
 
       <details open>
         <summary>2 · Scene setup</summary>
+        <p class="label">Camera</p>
+        <p class="row">
+          <button (click)="setCameraMode('fly')" [class.active]="cameraMode() === 'fly'">fly (WASD)</button>
+          <button (click)="setCameraMode('orbit')" [class.active]="cameraMode() === 'orbit'">orbit the cloud</button>
+        </p>
         <p class="label">Camera preset</p>
         <p class="row">
           @for (preset of presets; track preset.label) {
@@ -162,7 +170,7 @@ interface Recording {
         <summary>3 · Sun and look</summary>
         <label
           >sun elevation {{ sunElevation().toFixed(1) }}°
-          <input type="range" min="-10" max="90" step="0.1" [value]="sunElevation()" (input)="setSunElevation($event)" />
+          <input type="range" min="-30" max="90" step="0.1" [value]="sunElevation()" (input)="setSunElevation($event)" />
         </label>
         <label
           >sun azimuth {{ sunAzimuth().toFixed(0) }}°
@@ -171,6 +179,11 @@ interface Recording {
         <p class="row">
           <button (click)="toggleSunAnimation()" [class.active]="animateSun()">
             {{ animateSun() ? 'stop sun' : 'animate sun' }}
+          </button>
+        </p>
+        <p class="row">
+          <button (click)="setAtmosphereLighting(!atmosphereLighting())" [class.active]="atmosphereLighting()">
+            atmosphere lighting: {{ atmosphereLighting() ? 'on' : 'off' }}
           </button>
         </p>
         <p class="row">
@@ -356,6 +369,15 @@ export class CloudVolumesLabPageComponent {
   private spinAngle = 0;
   private readonly basePoses = new Map<CloudVolume, { position: Vector3; quaternion: Quaternion }>();
   private readonly bakeScheduler = new CloudVolumeBakeScheduler();
+  /** Sun colour and sky ambient of every volume from the Earth atmosphere (Plan 051 Phase 3); off = the fixed white sun. */
+  readonly atmosphereLighting = signal(true);
+  /** `fly`: W A S D and drag to look. `orbit`: drag to orbit the main volume, wheel to zoom. */
+  readonly cameraMode = signal<'fly' | 'orbit'>('fly');
+  private orbitYaw = 0;
+  private orbitPitch = 0;
+  private orbitRadius = 600;
+  private readonly sunWorld = new Vector3(0, 1, 0);
+  private lighting: CloudVolumeAtmosphereLighting | undefined;
   readonly sunElevation = signal(35);
   readonly sunAzimuth = signal(40);
   readonly animateSun = signal(false);
@@ -402,6 +424,15 @@ export class CloudVolumesLabPageComponent {
     );
     this.volume.mesh.position.copy(VOLUME_CENTER);
     this.rememberPose(this.volume);
+    const profile = createAtmospherePreset('earth', { radiusM: PLANET_RADIUS, thickness: 0.3 });
+    if (profile.kind === 'physical') {
+      const luts = bakeAtmosphereLuts(profile);
+      this.lighting = new CloudVolumeAtmosphereLighting({
+        planetRadiusM: profile.planetRadiusM,
+        sunTransmittance: (point, sun) => sunTransmittanceFromLut(luts, point, sun),
+        skyIrradiance: (altitude, muSun) => sampleIrradianceLut(luts, altitude, muSun),
+      });
+    }
     this.engine.scene.add(this.planet, this.volume.mesh, this.sun, this.hemi);
     this.applySun();
 
@@ -416,7 +447,7 @@ export class CloudVolumesLabPageComponent {
 
     const tick = this.engine.tick$.subscribe((delta) => {
       if (this.animateSun()) {
-        this.sunElevation.update((e) => (e + delta * 6 > 90 ? -10 : e + delta * 6));
+        this.sunElevation.update((e) => (e + delta * 6 > 90 ? -30 : e + delta * 6));
         this.applySun();
       }
       if (this.spinWarp() > 0) {
@@ -426,6 +457,7 @@ export class CloudVolumesLabPageComponent {
       }
       this.stepFlyby();
       this.updateCamera(delta);
+      this.applyAtmosphereLighting();
       const renderer: any = this.engine.renderer;
       if (!renderer?.initialized) return;
       if (this.bakeBudget() > 0) {
@@ -439,6 +471,7 @@ export class CloudVolumesLabPageComponent {
     });
     // Read the timestamps after the frame's main render, so the sample covers the bakes and the march of one frame.
     const rendered = this.engine.renderComplete$.subscribe(() => {
+      if (REPLAY_PROBE) return; // The isolated probe owns timestamp readback on this opt-in page.
       const renderer: any = this.engine.renderer;
       this.timer.tick(renderer, () => {
         const last = this.timer.render.last;
@@ -447,7 +480,39 @@ export class CloudVolumesLabPageComponent {
         this.computeMs.set(this.format(this.timer.compute));
       });
     });
+    const disposeReplay = REPLAY_PROBE ? installCloudReplayProbe(this.engine, {
+      configure: (mode) => {
+        this.keys.clear();
+        this.flyby = undefined;
+        this.setCameraMode('fly');
+        this.setVolumeCount(1);
+        this.applySteps(24);
+        this.bakeBudget.set(0);
+        this.sunElevation.set(25);
+        this.animateSun.set(true);
+        this.setSpinWarp(100);
+        this.setClouds(true);
+        this.setCloudMode(mode);
+      },
+      move: (fraction) => {
+        // Follow the existing great-circle flyby; turn while inside the main volume.
+        const pose = arcPose(-1200 + 2400 * fraction, 250);
+        this.position.copy(pose.position);
+        this.yaw = 0.5 * Math.sin(Math.PI * fraction) ** 8;
+        this.pitch = pose.pitch;
+      },
+      state: () => ({
+        sunElevation: this.sunElevation(), spinAngle: this.spinAngle,
+        volumes: this.activeVolumes().map((volume) => ({
+          position: volume.mesh.position.toArray(), quaternion: volume.mesh.quaternion.toArray(),
+          densityBakes: volume.densityBakes, lightBakes: volume.lightBakes,
+          pendingBake: volume.hasPendingBake,
+        })),
+      }),
+      clouds: (visible) => { if (visible !== this.cloudsOn()) this.setClouds(visible); },
+    }) : undefined;
     this.destroyRef.onDestroy(() => {
+      disposeReplay?.();
       tick.unsubscribe();
       rendered.unsubscribe();
       this.applyScale(1);
@@ -478,6 +543,11 @@ export class CloudVolumesLabPageComponent {
       const dir = target.sub(this.position).normalize();
       this.yaw = Math.atan2(dir.x, dir.z);
       this.pitch = Math.asin(dir.y);
+    }
+    if (this.cameraMode() === 'orbit') {
+      // A preset moved the camera: keep orbiting the main volume from the new spot.
+      this.cameraMode.set('fly');
+      this.setCameraMode('orbit');
     }
     this.timer.reset();
     this.renderMs.set('n/a');
@@ -537,6 +607,45 @@ export class CloudVolumesLabPageComponent {
       volume.mesh.quaternion.copy(turn).multiply(base.quaternion);
       volume.mesh.updateMatrixWorld();
     }
+  }
+
+  setAtmosphereLighting(on: boolean): void {
+    this.atmosphereLighting.set(on);
+    if (!on) {
+      for (const volume of this.allVolumes()) {
+        volume.uSunColor.value.set(1, 1, 1);
+        volume.uAmbient.value.set(0.12, 0.16, 0.24);
+      }
+      this.sun.color.set(0xffffff);
+      this.sun.intensity = 3;
+      this.hemi.intensity = 0.6;
+    }
+    this.timer.reset();
+  }
+
+  /** Per frame: sun colour and ambient for the volumes, and the same light for the planet's own directional and sky lights. */
+  private applyAtmosphereLighting(): void {
+    if (!this.atmosphereLighting() || !this.lighting) return;
+    this.lighting.update(this.allVolumes(), this.sunWorld);
+    const ground = this.lighting.groundLight(this.sunWorld);
+    this.sun.color.setRGB(ground.sun[0], ground.sun[1], ground.sun[2]);
+    this.sun.intensity = 3;
+    this.hemi.intensity = 0.6 * Math.max(ground.sky, 0.02);
+  }
+
+  setCameraMode(mode: 'fly' | 'orbit'): void {
+    if (mode === this.cameraMode()) return;
+    if (mode === 'orbit') {
+      const offset = this.position.clone().sub(VOLUME_CENTER);
+      this.orbitRadius = Math.max(20, offset.length());
+      this.orbitYaw = Math.atan2(offset.x, offset.z);
+      this.orbitPitch = Math.asin(Math.max(-1, Math.min(1, offset.y / this.orbitRadius)));
+    } else {
+      const dir = VOLUME_CENTER.clone().sub(this.position).normalize();
+      this.yaw = Math.atan2(dir.x, dir.z);
+      this.pitch = Math.asin(dir.y);
+    }
+    this.cameraMode.set(mode);
   }
 
   setSpinWarp(warp: number): void {
@@ -857,7 +966,10 @@ export class CloudVolumesLabPageComponent {
       sun: this.animateSun(),
       rebake: this.rebakeEveryFrame(),
       warp: this.spinWarp(),
+      camera: this.cameraMode(),
+      lighting: this.atmosphereLighting(),
     };
+    this.setCameraMode('fly');
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     const canvas = document.querySelector('canvas');
     const rows: string[] = [`${'scenario'.padEnd(36)}${['avg', 'p95', 'max'].map((c) => c.padStart(7)).join('')}`];
@@ -874,6 +986,7 @@ export class CloudVolumesLabPageComponent {
       this.rebakeEveryFrame.set(s.rebakeEveryFrame ?? saved.rebake);
       for (const volume of this.allVolumes()) volume.alwaysRebakeLight = this.rebakeEveryFrame();
       this.setSpinWarp(s.spinWarp ?? saved.warp);
+      this.setAtmosphereLighting(s.atmosphereLighting ?? saved.lighting);
       this.setClouds(s.clouds ?? true);
       let cells: string[];
       if (s.kind === 'flyby') {
@@ -900,7 +1013,9 @@ export class CloudVolumesLabPageComponent {
     this.rebakeEveryFrame.set(saved.rebake);
     for (const volume of this.allVolumes()) volume.alwaysRebakeLight = saved.rebake;
     this.setSpinWarp(saved.warp);
+    this.setAtmosphereLighting(saved.lighting);
     this.applyPreset(saved.preset);
+    this.setCameraMode(saved.camera);
     this.setClouds(saved.clouds);
     await this.publish(
       [
@@ -974,6 +1089,7 @@ export class CloudVolumesLabPageComponent {
   private stepFlyby(): void {
     const flyby = this.flyby;
     if (!flyby) return;
+    if (this.cameraMode() === 'orbit') this.setCameraMode('fly');
     const fraction = (performance.now() - flyby.t0) / flyby.duration;
     if (fraction >= 1) {
       this.flyby = undefined;
@@ -1046,8 +1162,19 @@ export class CloudVolumesLabPageComponent {
     this.keys.delete(event.code);
   }
 
+  @HostListener('window:wheel', ['$event'])
+  onWheel(event: WheelEvent): void {
+    if (this.cameraMode() !== 'orbit' || !(event.target instanceof HTMLCanvasElement)) return;
+    this.orbitRadius = Math.max(5, Math.min(8000, this.orbitRadius * Math.exp(event.deltaY * 0.001)));
+  }
+
   onPointerMove(event: PointerEvent): void {
     if (!(event.buttons & 1)) return;
+    if (this.cameraMode() === 'orbit') {
+      this.orbitYaw -= event.movementX * 0.005;
+      this.orbitPitch = Math.max(-1.5, Math.min(1.5, this.orbitPitch + event.movementY * 0.005));
+      return;
+    }
     this.yaw -= event.movementX * 0.004;
     this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch - event.movementY * 0.004));
   }
@@ -1070,6 +1197,7 @@ export class CloudVolumesLabPageComponent {
     const x = Math.cos(el) * Math.sin(az);
     const y = Math.sin(el);
     const z = Math.cos(el) * Math.cos(az);
+    this.sunWorld.set(x, y, z);
     for (const volume of this.allVolumes()) volume.setSunDirection(x, y, z);
     this.sun.position.set(x, y, z).multiplyScalar(PLANET_RADIUS * 3).add(VOLUME_CENTER);
     this.sun.target.position.copy(VOLUME_CENTER);
@@ -1078,6 +1206,18 @@ export class CloudVolumesLabPageComponent {
 
   private updateCamera(delta: number): void {
     const camera = this.engine.camera;
+    if (this.cameraMode() === 'orbit') {
+      const cosPitch = Math.cos(this.orbitPitch);
+      this.position
+        .set(Math.sin(this.orbitYaw) * cosPitch, Math.sin(this.orbitPitch), Math.cos(this.orbitYaw) * cosPitch)
+        .multiplyScalar(this.orbitRadius)
+        .add(VOLUME_CENTER);
+      camera.up.set(0, 1, 0);
+      camera.position.copy(this.position);
+      camera.lookAt(VOLUME_CENTER);
+      camera.updateMatrixWorld();
+      return;
+    }
     const cosPitch = Math.cos(this.pitch);
     this.forward.set(cosPitch * Math.sin(this.yaw), Math.sin(this.pitch), cosPitch * Math.cos(this.yaw));
     this.right.crossVectors(this.forward, camera.up.set(0, 1, 0)).normalize().negate();

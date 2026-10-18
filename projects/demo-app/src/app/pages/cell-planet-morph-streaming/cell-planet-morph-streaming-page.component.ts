@@ -1916,6 +1916,7 @@ export class CellPlanetMorphStreamingPageComponent {
     try {
       const { report } = await runFrameBenchmark({
         scenarios,
+        frameSampler: this.engine.fpsController.frameSampler,
         isSettled: () => {
           const tiles = this.materialRuntime.stats;
           return this.stats().queued === 0 && tiles.queued === 0 && tiles.inFlight === 0;

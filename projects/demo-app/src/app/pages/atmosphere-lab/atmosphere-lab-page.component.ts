@@ -159,6 +159,14 @@ const VIEWS: readonly ViewPreset[] = [
           <button (click)="toggleMask()" [class.active]="maskOn()">map mask {{ maskOn() ? 'on' : 'off' }}</button>
         </p>
         <p class="row">
+          <button (click)="setProjection('equirect')" [class.active]="projection() === 'equirect'">equirect</button>
+          <button (click)="setProjection('equalEarth')" [class.active]="projection() === 'equalEarth'">Equal Earth</button>
+          <button (click)="setSkyPath('auto')" [class.active]="skyPath() === 'auto'">sky: table + edges</button>
+          <button (click)="setSkyPath('table')" [class.active]="skyPath() === 'table'">sky: table only</button>
+          <button (click)="setSkyPath('march')" [class.active]="skyPath() === 'march'">sky: march every pixel</button>
+        </p>
+        <p class="label">sky from the masked pass: {{ maskedShare() }}% · masked pass {{ maskedSize() }}</p>
+        <p class="row">
           @for (view of bentViews; track view.label) {
             <button (click)="applyBentView(view)">{{ view.label }}</button>
           }
@@ -285,6 +293,10 @@ export class AtmosphereLabPageComponent {
   readonly anchorY = signal(0);
   readonly dayNight = signal<'real' | 'alwaysDay'>('real');
   readonly maskOn = signal(true);
+  readonly projection = signal<'equirect' | 'equalEarth'>('equirect');
+  readonly skyPath = signal<'auto' | 'table' | 'march'>('auto');
+  readonly maskedShare = signal(0);
+  readonly maskedSize = signal('0 x 0');
 
   readonly sizeLabel = signal('Earth');
   readonly presetId = signal<AtmospherePresetId>('earth');
@@ -540,6 +552,7 @@ export class AtmosphereLabPageComponent {
       }
     }
     this.skyView.invalidate();
+    this.bentLab.skyView.invalidate();
   }
 
   toggleSweep(): void {
@@ -564,6 +577,16 @@ export class AtmosphereLabPageComponent {
   setDayNight(mode: 'real' | 'alwaysDay'): void {
     this.dayNight.set(mode);
     this.bentLab.setDayNight(mode);
+  }
+
+  setProjection(projection: 'equirect' | 'equalEarth'): void {
+    this.projection.set(projection);
+    this.bentLab.setProjection(projection);
+  }
+
+  setSkyPath(path: 'auto' | 'table' | 'march'): void {
+    this.skyPath.set(path);
+    this.bentLab.setSkyPath(path);
   }
 
   toggleMask(): void {
@@ -591,7 +614,11 @@ export class AtmosphereLabPageComponent {
     }
     this.bentLab.setAltitude(this.altitudeM);
     this.bentLab.exposure.value = this.exposure();
-    this.bentLab.update(this.engine.camera);
+    this.bentLab.update(this.engine.renderer as any, this.engine.camera);
+    this.maskedShare.set(Math.round(this.bentLab.maskedShare * 100));
+    const size = this.bentLab.maskedSize;
+    this.maskedSize.set(`${size.x} x ${size.y}`);
+    this.tableRenders.set(this.bentLab.skyView.renderCount);
   }
 
   private updateCamera(): void {

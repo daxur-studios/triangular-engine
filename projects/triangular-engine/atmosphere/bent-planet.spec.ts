@@ -5,8 +5,17 @@ import {
   bentMapCoords,
   curvatureAltitude,
   curvatureUp,
+  blendedExtents,
+  blendedProjection,
+  equalEarthRow,
   mapMaskFactor,
+  projectionRowAt,
+  projectionRows,
   rayAtAltitude,
+  rayExitRect,
+  sunDip,
+  sunDipHalfSine,
+  sunHorizonCos,
   sinc,
   type Vec3,
 } from './bent-planet';
@@ -260,5 +269,128 @@ describe('bent planet maths', () => {
     expect(sinc(0)).toBe(1);
     expect(sinc(0.00099)).toBeCloseTo(Math.sin(0.00099) / 0.00099, 12);
     expect(Math.abs(sinc(0.0010001) - sinc(0.0009999))).toBeLessThan(1e-9);
+  });
+});
+
+describe("the sun's horizon dip from the curvature", () => {
+  it("is the globe's at morph 0: acos(R / (R + h))", () => {
+    for (const h of [2, 1_000, 10_000, 100_000, 3_000_000]) {
+      expect(sunDip(1 / R, h)).toBeCloseTo(Math.acos(R / (R + h)), 9);
+    }
+  });
+
+  it('is 0 on the flat map, at any height', () => {
+    for (const h of [0, 10, 10_000, 1e7]) {
+      expect(sunDip(0, h)).toBe(0);
+      expect(sunHorizonCos(0, h)).toBe(0);
+    }
+  });
+
+  it('follows sin(dip / 2) = sqrt(k h / (2 (1 + k h))) and the horizon cosine is -sin(dip)', () => {
+    for (const k of [1 / R, 0.5 / R, 0.01 / R]) {
+      for (const h of [100, 20_000, 400_000]) {
+        const s = sunDipHalfSine(k, h);
+        expect(s * s).toBeCloseTo((k * h) / (2 * (1 + k * h)), 14);
+        expect(sunHorizonCos(k, h)).toBeCloseTo(-Math.sin(sunDip(k, h)), 12);
+        // Brute force on the sphere of radius 1/k: the horizon of a point at altitude h has cos = -rho / r.
+        const radius = 1 / k;
+        const rho = Math.sqrt(h * (2 * radius + h));
+        expect(sunHorizonCos(k, h)).toBeCloseTo(-rho / (radius + h), 10);
+      }
+    }
+  });
+
+  it('shrinks smoothly toward the flat map (a bigger sphere has a smaller dip)', () => {
+    const dips = [1, 0.5, 0.1, 0.01, 0.001].map((c) => sunDip(c / R, 10_000));
+    for (let i = 1; i < dips.length; i++) expect(dips[i]).toBeLessThan(dips[i - 1]);
+  });
+});
+
+describe('where a straight ray leaves the map', () => {
+  const W = Math.PI * R;
+  const Hh = 0.5 * Math.PI * R;
+
+  it('is the slab test on the map rectangle grown by the margin', () => {
+    // From the centre looking east: leaves at W + margin.
+    expect(rayExitRect([0, 0, 50], [1, 0, 0], W, Hh, 8000)).toBeCloseTo(W + 8000, 3);
+    // Looking diagonally, the nearer of the two sides ends it.
+    const d: Vec3 = [Math.SQRT1_2, Math.SQRT1_2, 0];
+    expect(rayExitRect([0, 0, 0], d, W, Hh, 0)).toBeCloseTo(Hh / Math.SQRT1_2, 3);
+    // From near the east edge, away from it, the far side ends it; towards it, 500 m.
+    expect(rayExitRect([W - 500, 0, 0], [1, 0, 0], W, Hh, 0)).toBeCloseTo(500, 6);
+    expect(rayExitRect([W - 500, 0, 0], [-1, 0, 0], W, Hh, 0)).toBeCloseTo(2 * W - 500, 3);
+  });
+
+  it('is infinite for a ray that stays inside along its axis, and negative once already outside and leaving', () => {
+    expect(rayExitRect([0, 0, 0], [0, 0, 1], W, Hh, 0)).toBe(Infinity);
+    expect(rayExitRect([W + 5_000, 0, 0], [1, 0, 0], W, Hh, 0)).toBeLessThan(0);
+  });
+});
+
+describe('Equal Earth and the projection blend', () => {
+  it('has the published extents: half-width 2.7066 R at the equator, half-height 1.3174 R at the poles', () => {
+    expect(Math.PI * equalEarthRow(0).c).toBeCloseTo(2.7066, 3);
+    expect(equalEarthRow(Math.PI / 2).y).toBeCloseTo(1.3174, 3);
+    expect(equalEarthRow(-Math.PI / 2).y).toBeCloseTo(-1.3174, 3);
+    const e = blendedExtents(1, R);
+    expect(e.halfWidth / R).toBeCloseTo(2.7066, 3);
+    expect(e.halfHeight / R).toBeCloseTo(1.3174, 3);
+  });
+
+  it('is equal-area: its outline encloses 4 pi R^2', () => {
+    let area = 0;
+    const n = 4000;
+    for (let i = 0; i < n; i++) {
+      const lat0 = -Math.PI / 2 + (Math.PI * i) / n;
+      const lat1 = -Math.PI / 2 + (Math.PI * (i + 1)) / n;
+      const mid = 0.5 * (lat0 + lat1);
+      const width = 2 * Math.PI * equalEarthRow(mid).c;
+      area += width * (equalEarthRow(lat1).y - equalEarthRow(lat0).y);
+    }
+    expect(area).toBeCloseTo(4 * Math.PI, 3);
+  });
+
+  it("blends from the globe's equirect (p = 0) to Equal Earth (p = 1)", () => {
+    const [lon, lat] = [1.2, 0.6];
+    const a = blendedProjection(lon, lat, 0, R);
+    expect(a[0]).toBeCloseTo(R * lon, 3);
+    expect(a[1]).toBeCloseTo(R * lat, 3);
+    const row = equalEarthRow(lat);
+    const b = blendedProjection(lon, lat, 1, R);
+    expect(b[0]).toBeCloseTo(R * lon * row.c, 3);
+    expect(b[1]).toBeCloseTo(R * row.y, 3);
+    const m = blendedProjection(lon, lat, 0.5, R);
+    expect(m[0]).toBeCloseTo(0.5 * (a[0] + b[0]), 3);
+    expect(m[1]).toBeCloseTo(0.5 * (a[1] + b[1]), 3);
+  });
+
+  it('at p = 0 the blended extents are the equirect map: pi R by pi R / 2', () => {
+    const e = blendedExtents(0, R);
+    expect(e.halfWidth).toBeCloseTo(Math.PI * R, 3);
+    expect(e.halfHeight).toBeCloseTo(0.5 * Math.PI * R, 3);
+  });
+
+  it("the outline table inverts the projection: each row's latitude lands on its height and the half-width is the edge", () => {
+    for (const p of [0, 0.3, 1]) {
+      const rows = projectionRows(p, R, 129);
+      const n = rows.lat.length;
+      for (let i = 0; i < n; i += 8) {
+        const y = -rows.extents.halfHeight + (2 * rows.extents.halfHeight * i) / (n - 1);
+        const edge = blendedProjection(Math.PI, rows.lat[i], p, R);
+        expect(Math.abs(edge[1] - y)).withContext(`p ${p} row ${i} height`).toBeLessThan(20);
+        expect(Math.abs(edge[0] - rows.halfWidth[i])).withContext(`p ${p} row ${i} half-width`).toBeLessThan(20);
+      }
+      // Monotone in latitude, and the middle row is the equator.
+      for (let i = 1; i < n; i++) expect(rows.lat[i]).toBeGreaterThan(rows.lat[i - 1]);
+      expect(Math.abs(rows.lat[(n - 1) / 2])).toBeLessThan(1e-6);
+    }
+  });
+
+  it('projectionRowAt interpolates between rows', () => {
+    const rows = projectionRows(1, R, 256);
+    const mid = projectionRowAt(rows, 0.3 * rows.extents.halfHeight);
+    const edge = blendedProjection(Math.PI, mid.lat, 1, R);
+    expect(Math.abs(edge[1] - 0.3 * rows.extents.halfHeight)).toBeLessThan(2_000);
+    expect(Math.abs(edge[0] - mid.halfWidth)).toBeLessThan(2_000);
   });
 });

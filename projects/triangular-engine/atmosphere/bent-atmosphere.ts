@@ -1,4 +1,4 @@
-import { Matrix3, Vector3 } from 'three';
+import { ClampToEdgeWrapping, DataTexture, FloatType, Matrix3, NearestFilter, RGBAFormat, Vector3 } from 'three';
 import {
   If,
   Loop,
@@ -9,24 +9,42 @@ import {
   dot,
   exp,
   float,
+  floor,
   int,
   max,
   min,
+  mix,
   pow,
   select,
   sin,
   smoothstep,
   sqrt,
+  texture,
   uniform,
+  vec2,
   vec3,
 } from 'three/tsl';
 import { AtmosphereGpuModel, type AtmosphereMarchInput } from './atmosphere-gpu-model';
 import { sunDirectionFromAngles } from './atmosphere-backdrop';
-import { MASK_GAP_RAMP, bendCurvature, bendFrame, type BentFrame, type Vec3 } from './bent-planet';
+import {
+  MASK_GAP_RAMP,
+  bendCurvature,
+  bendFrame,
+  blendedExtents,
+  projectionRowAt,
+  projectionRows,
+  type BentFrame,
+  type ProjectionRows,
+  type Vec3,
+} from './bent-planet';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export type DayNightMode = 'real' | 'alwaysDay';
+export type BentProjection = 'equirect' | 'equalEarth';
+
+/** Rows of the outline table (the blended map's latitude and half-width per row). */
+const ROW_COUNT = 256;
 
 export interface BentShape {
   /** 0 is the globe, 1 the flat map. */
@@ -36,6 +54,8 @@ export interface BentShape {
   /** The map point (metres from the map centre) the camera hangs above. Default the map centre. */
   anchorX?: number;
   anchorY?: number;
+  /** The map projection at morph 1. `equalEarth` blends from the globe's equirect with `p = morph`. Default `equirect`. */
+  projection?: BentProjection;
 }
 
 /**
@@ -62,8 +82,12 @@ export class BentAtmosphere {
   readonly uHalfHeight = uniform(1);
   /** The planet's radius at morph 0: map coordinates are `R (lon, lat)`. */
   readonly uRefRadius = uniform(1);
-  /** A march never goes further than this (the map's diagonal), which bounds rays that skim a flat map. */
+  /** A guard on the length of any march (the map's diagonal), for rays that skim a flat map with the mask off. */
   readonly uMaxSpan = uniform(1e9);
+  /** How far past the map's rectangle a masked march runs: the edge falloff plus the air's own height. */
+  readonly uClampMargin = uniform(8000);
+  /** The projection blend `p`: 0 is the equirect globe projection, 1 Equal Earth (rows come from the outline table). */
+  readonly uProjBlend = uniform(0);
   /** Falloff of the map mask at the map's edge, metres. Default about one Rayleigh scale height. */
   readonly uSoftness = uniform(8000);
   /** 1 applies the map mask, 0 leaves the air everywhere. */
@@ -76,6 +100,16 @@ export class BentAtmosphere {
   /** Sun direction in the camera's local frame, for the phase function. */
   readonly uSunLocal = uniform(new Vector3(0, 1, 0));
 
+  /** Increments when anything a baked sky-view table depends on changes (curvature, day/night mode, radius). */
+  revision = 0;
+
+  private readonly rowData = new Float32Array(ROW_COUNT * 4);
+  private readonly rowTexture: DataTexture;
+  private rows: ProjectionRows | null = null;
+  private rowKey = '';
+  private radius = 1;
+  private anchorXM = 0;
+  private anchorYM = 0;
   private mode: DayNightMode = 'real';
   private alwaysDayElevationDeg = 50;
   private alwaysDayAzimuthDeg = 135;
@@ -84,7 +118,15 @@ export class BentAtmosphere {
   private curvature = 0;
   private frame: BentFrame = bendFrame(0, 0, 0);
 
-  constructor(readonly model: AtmosphereGpuModel) {}
+  constructor(readonly model: AtmosphereGpuModel) {
+    this.rowTexture = new DataTexture(this.rowData, ROW_COUNT, 1, RGBAFormat, FloatType);
+    this.rowTexture.minFilter = NearestFilter;
+    this.rowTexture.magFilter = NearestFilter;
+    this.rowTexture.wrapS = ClampToEdgeWrapping;
+    this.rowTexture.wrapT = ClampToEdgeWrapping;
+    this.rowTexture.generateMipmaps = false;
+    this.rowTexture.needsUpdate = true;
+  }
 
   /** The current curvature, 1 / metre. */
   get k(): number {
@@ -96,16 +138,44 @@ export class BentAtmosphere {
     return this.frame;
   }
 
+  /** The blended map's rows (latitude and half-width by height), or null while the projection is plain equirect. */
+  get projectionTable(): ProjectionRows | null {
+    return this.rows;
+  }
+
   setShape(shape: BentShape): void {
     const R = shape.planetRadiusM;
     const k = bendCurvature(shape.morph, R);
+    const p = shape.projection === 'equalEarth' ? Math.min(1, Math.max(0, shape.morph)) : 0;
+    if (k !== this.curvature || R !== this.radius || p !== this.uProjBlend.value) this.revision++;
     this.curvature = k;
+    this.radius = R;
     this.uK.value = k;
     this.uRefRadius.value = R;
-    this.uHalfWidth.value = Math.PI * R;
-    this.uHalfHeight.value = 0.5 * Math.PI * R;
-    this.uMaxSpan.value = 2 * Math.hypot(Math.PI * R, 0.5 * Math.PI * R);
-    const frame = bendFrame(shape.anchorX ?? 0, shape.anchorY ?? 0, k);
+    this.uProjBlend.value = p;
+    const extents = blendedExtents(p, R);
+    this.uHalfWidth.value = extents.halfWidth;
+    this.uHalfHeight.value = extents.halfHeight;
+    this.uMaxSpan.value = 2 * Math.hypot(extents.halfWidth, extents.halfHeight);
+    const top = this.model.uTopAltitude.value;
+    this.uClampMargin.value = this.uSoftness.value + 1.5 * k * top * Math.max(extents.halfWidth, extents.halfHeight);
+    const rowKey = `${p}|${R}`;
+    if (rowKey !== this.rowKey) {
+      this.rowKey = rowKey;
+      if (p > 0) {
+        this.rows = projectionRows(p, R, ROW_COUNT);
+        for (let i = 0; i < ROW_COUNT; i++) {
+          this.rowData[i * 4] = this.rows.lat[i];
+          this.rowData[i * 4 + 1] = this.rows.halfWidth[i];
+        }
+        this.rowTexture.needsUpdate = true;
+      } else {
+        this.rows = null;
+      }
+    }
+    this.anchorXM = shape.anchorX ?? 0;
+    this.anchorYM = shape.anchorY ?? 0;
+    const frame = bendFrame(this.anchorXM, this.anchorYM, k);
     this.frame = frame;
     // Rows of the matrix are the map-frame components of (east, up, -north).
     const e = frame.east;
@@ -124,6 +194,7 @@ export class BentAtmosphere {
   }
 
   setDayNight(mode: DayNightMode, alwaysDayElevationDeg = 50, alwaysDayAzimuthDeg = 135): void {
+    if (mode !== this.mode) this.revision++;
     this.mode = mode;
     this.alwaysDayElevationDeg = alwaysDayElevationDeg;
     this.alwaysDayAzimuthDeg = alwaysDayAzimuthDeg;
@@ -150,6 +221,40 @@ export class BentAtmosphere {
     const toLocal = (v: Vec3): number => v[0] * s.x + v[1] * s.y + v[2] * s.z;
     const f = this.frame;
     this.uSunLocal.value.set(toLocal(f.east), toLocal(f.up), -toLocal(f.north));
+  }
+
+  // -- where the camera is relative to the map's edges (CPU) ----------------------------------------
+
+  /**
+   * Distance from the camera's ground point to the nearest map edge that is open (the wrap-around edges of a still
+   * closed globe do not count), metres; `Infinity` with the mask off or no open edge. Measured along the map's axes, so
+   * it overestimates next to the slanted sides of an Equal Earth outline.
+   */
+  mapEdgeDistance(): number {
+    if (this.uMaskEnabled.value < 0.5) return Infinity;
+    const k = this.curvature;
+    const H = this.uHalfHeight.value;
+    const W = this.rows ? projectionRowAt(this.rows, this.anchorYM).halfWidth : this.uHalfWidth.value;
+    const openX = k > 0 ? (2 * Math.PI) / k - 2 * W > MASK_GAP_RAMP * W : true;
+    const openY = k > 0 ? Math.PI / k - 2 * H > MASK_GAP_RAMP * H : true;
+    return Math.min(openX ? W - Math.abs(this.anchorXM) : Infinity, openY ? H - Math.abs(this.anchorYM) : Infinity);
+  }
+
+  /**
+   * How far a horizontal ray at `altitude` runs before the air in between hides what is beyond (transmittance about 1%
+   * in the clearest channel). The sky-view table is right for an edge further away than this.
+   */
+  clearAirDistance(altitude: number): number {
+    const m = this.model;
+    const h = Math.max(altitude, 0);
+    const dR = Math.exp(-h / m.uRayleighH.value);
+    const dM = Math.exp(-h / m.uMieH.value);
+    let clearest = Infinity;
+    for (const c of ['x', 'y', 'z'] as const) {
+      const ext = m.uRayleigh.value[c] * dR + (m.uMieScattering.value[c] + m.uMieAbsorption.value[c]) * dM;
+      clearest = Math.min(clearest, ext);
+    }
+    return clearest > 0 ? Math.log(100) / clearest : Infinity;
   }
 
   // -- shader pieces ---------------------------------------------------------------------------------
@@ -179,11 +284,28 @@ export class BentAtmosphere {
     return { mx, my };
   }
 
+  /** The map's outline row at map height `my`: the latitude and half-width there. Plain equirect rows need no table. */
+  mapRow(my: any): { lat: any; halfWidth: any } {
+    const lat: any = my.div(this.uRefRadius).toVar();
+    const halfWidth: any = this.uHalfWidth.toVar();
+    If(this.uProjBlend.greaterThan(0), () => {
+      const t: any = clamp(my.div(this.uHalfHeight).mul(0.5).add(0.5), 0, 1).mul(ROW_COUNT - 1);
+      const i0: any = floor(t);
+      const f: any = t.sub(i0);
+      const i1: any = min(i0.add(1), float(ROW_COUNT - 1));
+      const a: any = texture(this.rowTexture, vec2(i0.add(0.5).div(ROW_COUNT), 0.5), 0);
+      const b: any = texture(this.rowTexture, vec2(i1.add(0.5).div(ROW_COUNT), 0.5), 0);
+      lat.assign(mix(a.x, b.x, f));
+      halfWidth.assign(mix(a.y, b.y, f));
+    });
+    return { lat, halfWidth };
+  }
+
   /** 1 inside the map's outline, 0 outside, soft at the edge; 1 everywhere when the mask is off. The node form of `mapMaskFactor`. */
-  mapMask(mx: any, my: any): any {
+  mapMask(mx: any, my: any, row: { lat: any; halfWidth: any } = this.mapRow(my)): any {
     const k = this.uK;
     const kk = max(k, 1e-12);
-    const W = this.uHalfWidth;
+    const W: any = row.halfWidth;
     const H = this.uHalfHeight;
     const big = float(1e30);
     const gapX = select(k.greaterThan(0), float(2 * Math.PI).div(kk).sub(W.mul(2)), big);
@@ -198,13 +320,32 @@ export class BentAtmosphere {
     return select(this.uMaskEnabled.greaterThan(0.5), factor, float(1));
   }
 
-  /** The sun-zenith cosine at a point with map coordinates `(mx, my)`: from its globe direction, or the fixed always-day one. */
-  muSunAt(mx: any, my: any): any {
-    const lon = mx.div(this.uRefRadius);
-    const lat = my.div(this.uRefRadius);
-    const cl = cos(lat);
-    const globe = vec3(cl.mul(sin(lon)), sin(lat), cl.mul(cos(lon)));
+  /**
+   * The sun-zenith cosine at a point with map coordinates `(mx, my)`: from its globe direction (longitude from its
+   * position along the row, `pi mx / halfWidth(row)`, latitude from the row), or the fixed always-day one.
+   */
+  muSunAt(mx: any, my: any, row: { lat: any; halfWidth: any } = this.mapRow(my)): any {
+    const lon = float(Math.PI).mul(mx).div(row.halfWidth);
+    const cl = cos(row.lat);
+    const globe = (vec3 as any)(cl.mul(sin(lon)), sin(row.lat), cl.mul(cos(lon)));
     return select(this.uDayNight.greaterThan(0.5), this.uAlwaysDayMu, dot(globe, this.uSunMap));
+  }
+
+  /**
+   * The sun's transmittance at altitude `alt` for sun-zenith cosine `muSun`, with the horizon cut where the current
+   * curvature puts it (`sin(dip / 2) = sqrt(k h / (2 (1 + k h)))`: 0 on the flat map, the globe's at morph 0). The tables
+   * are baked for one radius and cut the sun at that radius's horizon, so the angle is shifted by the difference; the
+   * transmittance of the rest of the sun's path is read as the baked sphere gives it.
+   */
+  sunLight(alt: any, muSun: any): any {
+    const model = this.model;
+    const Rb = model.uRadius;
+    const sBaked = alt.mul(Rb.mul(2).add(alt));
+    const rBaked = Rb.add(alt);
+    const bakedHorizon = sqrt(sBaked).div(rBaked).negate();
+    const kh = max(this.uK.mul(alt), 0);
+    const horizon = sqrt(kh.mul(kh.add(2))).div(kh.add(1)).negate();
+    return model.sunTransmittance(sBaked, rBaked, muSun.add(bakedHorizon.sub(horizon)));
   }
 
   /**
@@ -214,8 +355,7 @@ export class BentAtmosphere {
   groundLight(mx: any, my: any): any {
     const model = this.model;
     const mu = this.muSunAt(mx, my);
-    const sunT = model.sunTransmittance(float(0), model.uRadius, mu);
-    return sunT.mul(max(mu, 0)).add(model.skyIrradiance(float(0), mu));
+    return this.sunLight(float(0), mu).mul(max(mu, 0)).add(model.skyIrradiance(float(0), mu));
   }
 
   /**
@@ -251,7 +391,23 @@ export class BentAtmosphere {
     const tGround = ground.small;
     const tStart = max(top_.lo, 0);
     const tEndFull = select(reachesGround, tGround, top_.hi);
-    const tEnd = min(min(tEndFull, float(input.maxDistance)), tStart.add(this.uMaxSpan));
+    // Past the map's outline (plus the falloff) there is no air: stop the march there. In the map frame the ray is
+    // straight, so this is the slab test; at k = 0 it is exact, and it keeps the steps on the air that counts.
+    const mapFromLocal: any = this.uMapFromLocal;
+    const originLocal: any = (vec3 as any)(0, h, 0);
+    const po: any = mapFromLocal.mul(originLocal).add(this.uMapOrigin);
+    const pd: any = mapFromLocal.mul(dir);
+    const exitAxis = (o: any, d: any, half: any): any => {
+      const reach = half.add(this.uClampMargin);
+      const along = select(d.greaterThan(0), reach.sub(o), reach.add(o));
+      return select(d.abs().lessThan(1e-12), float(1e30), along.div(max(d.abs(), 1e-12)));
+    };
+    const tExit = select(
+      this.uMaskEnabled.greaterThan(0.5),
+      min(exitAxis(po.x, pd.x, this.uHalfWidth), exitAxis(po.y, pd.y, this.uHalfHeight)),
+      float(1e30),
+    );
+    const tEnd = min(min(min(tEndFull, float(input.maxDistance)), tExit), tStart.add(this.uMaxSpan));
     const valid: any = (top_.disc.greaterThan(0) as any).and(top_.hi.greaterThan(0));
     const span = select(valid, max(tEnd.sub(tStart), 0), float(0));
     const hitsGround = reachesGround.and(tGround.lessThan(float(input.maxDistance))).and(valid);
@@ -267,12 +423,11 @@ export class BentAtmosphere {
   }
 
   /** The view-ray march on the bent planet; the result has the shape of `AtmosphereGpuModel.march`. Inside an `Fn`. */
-  march(input: AtmosphereMarchInput) {
+  march(input: AtmosphereMarchInput & { local?: boolean }) {
     const model = this.model;
     const steps = input.steps ?? AtmosphereGpuModel.defaultSteps;
     const dir = input.dir;
     const k = this.uK;
-    const Rb = model.uRadius;
     const { h, tStart, span, hitsGround, groundDistance } = this.traceRay(input);
     const dt = span.div(steps);
 
@@ -296,9 +451,19 @@ export class BentAtmosphere {
         const q = k.mul(dot(p, p)).add(p.y.mul(2));
         const root = sqrt(max(float(1).add(k.mul(q)), 1e-6));
         const alt = max(q.div(float(1).add(root)), 0);
-        const { mx, my } = this.mapCoords(p);
-        const muSun = this.muSunAt(mx, my);
-        const mask = this.mapMask(mx, my);
+        // `local`: no map. The sky-view table has none; its sun angle is the local up's (or the always-day one) and no mask.
+        let muSun: any;
+        let mask: any;
+        if (input.local) {
+          const up: any = vec3(k.mul(p.x), k.mul(p.y).add(1), k.mul(p.z)).div(root);
+          muSun = select(this.uDayNight.greaterThan(0.5), this.uAlwaysDayMu, dot(up, this.uSunLocal));
+          mask = float(1);
+        } else {
+          const { mx, my } = this.mapCoords(p);
+          const row = this.mapRow(my);
+          muSun = this.muSunAt(mx, my, row);
+          mask = this.mapMask(mx, my, row);
+        }
 
         const dR = exp(alt.negate().div(model.uRayleighH));
         const dM = exp(alt.negate().div(model.uMieH));
@@ -311,9 +476,7 @@ export class BentAtmosphere {
         const ext = scat.add(model.uMieAbsorption.mul(dM).mul(mask)).add(model.uAbsorberExt.mul(dA).mul(mask));
 
         // The tables are baked for the profile's radius: read them by altitude and sun angle on that radius.
-        const sBaked = alt.mul(Rb.mul(2).add(alt));
-        const rBaked = Rb.add(alt);
-        const sunT = model.sunTransmittance(sBaked, rBaked, muSun);
+        const sunT = this.sunLight(alt, muSun);
         const psi = model.multiScatterAt(alt, muSun);
         const sourceSun = sunT.mul(scatR.mul(phaseR).add(scatM.mul(phaseM)));
         const sourceMulti = scat.mul(psi);
