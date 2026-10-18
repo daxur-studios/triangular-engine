@@ -615,3 +615,29 @@ Fly-by (whole frame GPU ms, 24 steps, screen pass x0.5 vs box proxies x0.5):
 - Specs (10 pass, WebGL2 headless): a banded bake matches the one-shot bake; the scheduler honours the budget, finishes all volumes and then reports 0 bands drawn.
 - Lab: `bake budget` button cycles all at once / 1 / 2 / 4 bands per frame.
 - To measure: 12 volumes, animate sun on, compare fly-by p95 and the worst frame between "all at once" and 1 or 2 bands per frame. The light bake is about 0.77 ms per volume, so 1 band of 4 should be about 0.2 ms per frame.
+
+### 4d re-run after the stale-mesh fix (net at 24 steps, canvas x1)
+
+Fly-by avg / p95, screen pass vs proxies: 1 volume 2.15 / 3.34 vs 2.05 / 3.47; 4 volumes 3.30 / 4.52 vs 3.11 / 4.39; 12 volumes 4.35 / 5.70 vs 3.17 / 4.52.
+
+| volumes | mode | inside | above | horizon | ground |
+|---|---|---|---|---|---|
+| 1 | screen pass | 2.05 | 1.01 | 0.16 | 0.67 |
+| 1 | proxies | 2.13 | 0.94 | 0.11 | 0.64 |
+| 4 | screen pass | 2.35 | 1.22 | 0.64 | 1.81 |
+| 4 | proxies | 2.32 | 1.14 | 0.37 | 1.69 |
+| 12 | screen pass | 3.47 | 2.28 | 2.22 | 2.58 |
+| 12 | proxies | 2.48 | 1.06 | 1.07 | 1.74 |
+
+The proxy baselines are sane now (off 1.4-2.6 ms, no negative nets). Gate G6 at 12 volumes: proxies meet it (inside 2.48 against 2.5 worst, horizon 1.07 against 1.5 typical, with little margin on inside); the screen pass does not (3.47 and 2.22). At 1 and 4 volumes the two modes are within noise. Still unchecked: proxy visuals (halos, depth against geometry).
+
+### Step 5 result: bake budget, 12 volumes, proxies, sun animating (6 deg/s, worst case)
+
+| budget | fly-by avg / p95 / max (ms) | inside avg (ms) |
+|---|---|---|
+| all at once | 7.46 / 39.58 / 41.03 | 13.11 |
+| 1 band/frame | 3.91 / 5.31 / 5.57 | 4.67 |
+| 2 bands/frame | 4.65 / 6.09 / 6.23 | 5.39 |
+| 4 bands/frame | 6.10 / 7.60 / 7.86 | 6.97 |
+
+Baking every stale volume in one frame spikes to about 40 ms. One band per frame removes the spikes: p95 5.31 ms, about 0.8 ms over the no-rebake fly-by (3.17 avg, 4.52 p95). A bigger budget only adds cost. Trade-off: with 12 volumes and 4 bands each, a full light refresh takes 48 frames.

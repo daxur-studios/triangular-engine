@@ -2,6 +2,7 @@ import { Component, DestroyRef, HostListener, inject, signal } from '@angular/co
 import { RouterLink } from '@angular/router';
 import { Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PerspectiveCamera, SphereGeometry, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
+import { NEXT_TEST } from './next-test';
 import { CloudVolume, CloudVolumeBakeScheduler, CloudVolumeScreenPass } from 'triangular-engine/cloud-volumes';
 import { GpuTimer } from './gpu-timer';
 
@@ -79,96 +80,7 @@ interface Recording {
 
     <aside class="panel" (pointermove)="$event.stopPropagation()">
       <a routerLink="/">← Examples</a>
-      <h2>Cloud volumes lab · Plan 051 Phases 0-1</h2>
-      <p class="row">
-        <button (click)="switchBackend(false)" [disabled]="!forceWebGL">WebGPU</button>
-        <button (click)="switchBackend(true)" [disabled]="forceWebGL">forceWebGL</button>
-      </p>
-
-      <p class="label">Camera preset</p>
-      <p class="row">
-        @for (preset of presets; track preset.label) {
-          <button (click)="applyPreset(preset)" [class.active]="presetLabel() === preset.label">
-            {{ preset.label }}
-          </button>
-        }
-      </p>
-
-      <p class="label">Clouds</p>
-      <p class="row">
-        <button (click)="setClouds(true)" [class.active]="cloudsOn()">on</button>
-        <button (click)="setClouds(false)" [class.active]="!cloudsOn()">off</button>
-        <button (click)="toggleRebake()" [class.active]="rebakeEveryFrame()">
-          light rebake every frame: {{ rebakeEveryFrame() ? 'on' : 'off' }}
-        </button>
-        <button (click)="cycleBakeBudget()" [class.active]="bakeBudget() > 0">
-          bake budget: {{ bakeBudget() === 0 ? 'all at once' : bakeBudget() + ' bands/frame' }}
-        </button>
-      </p>
-
-      <label
-        >sun elevation {{ sunElevation().toFixed(1) }}°
-        <input type="range" min="-10" max="90" step="0.1" [value]="sunElevation()" (input)="setSunElevation($event)" />
-      </label>
-      <label
-        >sun azimuth {{ sunAzimuth().toFixed(0) }}°
-        <input type="range" min="-180" max="180" step="1" [value]="sunAzimuth()" (input)="setSunAzimuth($event)" />
-      </label>
-      <p class="row">
-        <button (click)="toggleSunAnimation()" [class.active]="animateSun()">
-          {{ animateSun() ? 'stop sun' : 'animate sun' }}
-        </button>
-      </p>
-      <label
-        >extinction {{ extinction().toFixed(3) }} /m
-        <input type="range" min="0.005" max="0.08" step="0.001" [value]="extinction()" (input)="setExtinction($event)" />
-      </label>
-      <label
-        >march steps {{ steps() }}
-        <input type="range" min="8" max="128" step="8" [value]="steps()" (input)="setSteps($event)" />
-      </label>
-      <p class="row">
-        render scale
-        <button (click)="setScale(1)" [class.active]="renderScale() === 1">1x</button>
-        <button (click)="setScale(0.5)" [class.active]="renderScale() === 0.5">0.5x</button>
-        <button (click)="toggleJitter()" [class.active]="!jitterOn()">jitter off</button>
-        <button (click)="toggleFetch()" [class.active]="!fetchOn()">no fetch</button>
-        <button (click)="toggleHidden()" [class.active]="hiddenOn()">volumes hidden: {{ hiddenOn() ? 'on' : 'off' }}</button>
-      </p>
-      <p class="row">
-        volumes
-        @for (n of volumeCounts; track n) {
-          <button (click)="setVolumeCount(n)" [class.active]="volumeCount() === n">{{ n }}</button>
-        }
-        <button (click)="runFlyby()" [disabled]="matrixStatus() !== ''">fly-by test (2 x 20 s)</button>
-      </p>
-      <p class="row">
-        <button (click)="runQuick()" [disabled]="matrixStatus() !== ''">
-          {{ matrixStatus() || 'quick re-test: screen pass, 24 steps, 1/4/12 volumes (about 2 min)' }}
-        </button>
-      </p>
-      <p class="row">
-        <button (click)="runIsolate()" [disabled]="matrixStatus() !== ''">
-          {{ matrixStatus() || 'isolating run: screen pass, hidden vs visible volumes at 1/4/12 (about 1 min)' }}
-        </button>
-      </p>
-      <p class="row">
-        <button (click)="runAll()" [disabled]="matrixStatus() !== ''">
-          {{ matrixStatus() || 'run everything: 1/4/12 volumes, fly-bys at 24 + 64 steps, matrices (about 15 min)' }}
-        </button>
-      </p>
-      <p class="row">
-        clouds drawn as
-        <button (click)="setCloudMode('mesh')" [class.active]="cloudMode() === 'mesh'">box mesh</button>
-        <button (click)="setCloudMode('pass')" [class.active]="cloudMode() === 'pass'">screen pass x0.5</button>
-        <button (click)="setCloudMode('pass-full')" [class.active]="cloudMode() === 'pass-full'">screen pass x1</button>
-        <button (click)="setCloudMode('proxy')" [class.active]="cloudMode() === 'proxy'">box proxies x0.5 (spike)</button>
-      </p>
-      <label
-        >fly speed {{ speed().toFixed(0) }} m/s
-        <input type="range" min="10" max="600" step="10" [value]="speed()" (input)="speed.set(num($event))" />
-      </label>
-
+      <h2>Cloud volumes lab · Plan 051</h2>
       <p class="gpu">
         GPU render {{ renderMs() }}<br />
         GPU compute {{ computeMs() }}
@@ -177,27 +89,149 @@ interface Recording {
         {{ backendLabel }} · density bakes {{ densityBakes() }} · light bakes {{ lightBakes() }} · camera
         {{ presetLabel() }} · clouds {{ cloudsOn() ? 'on' : 'off' }}
       </p>
+
       <p class="row">
-        <button (click)="runMatrix()" [disabled]="matrixStatus() !== ''">
-          {{ matrixStatus() || 'run all scenarios (about 1-2 min, keep tab visible)' }}
+        <button class="big" (click)="runNext()" [disabled]="matrixStatus() !== ''">
+          {{ matrixStatus() || 'RUN NEXT TEST: ' + nextTestTitle }}
         </button>
       </p>
       @if (matrixText()) {
         <textarea class="out" readonly rows="9" [value]="matrixText()"></textarea>
-        <p class="row"><button (click)="copyMatrix()">{{ copied() ? 'copied' : 'copy results' }}</button></p>
+        <p class="row"><button class="primary" (click)="copyMatrix()">{{ copied() ? 'copied to clipboard' : 'copy results' }}</button></p>
       }
-      <p class="row">
-        <button (click)="record()">record this reading</button>
-        <button (click)="recordings.set([])">clear</button>
-      </p>
-      @if (recordings().length) {
-        <table class="rec">
-          <tr><th>camera</th><th>clouds</th><th>backend</th><th>render</th><th>compute</th></tr>
-          @for (r of recordings(); track $index) {
-            <tr><td>{{ r.preset }}</td><td>{{ r.clouds }}</td><td>{{ r.backend }}</td><td>{{ r.render }}</td><td>{{ r.compute }}</td></tr>
+      <p class="note">One click: runs every scenario in next-test.ts, then copies the table. Keep this tab visible.</p>
+
+      <details>
+        <summary>Older test runs</summary>
+        <p class="row">
+          <button (click)="runQuick()" [disabled]="matrixStatus() !== ''">
+            {{ matrixStatus() || 'A. Quick re-test: 1/4/12 volumes, all draw modes (about 2 min)' }}
+          </button>
+        </p>
+        <p class="row">
+          <button (click)="runFlyby()" [disabled]="matrixStatus() !== ''">B. Fly-by test (2 x 20 s, current setup)</button>
+        </p>
+        <p class="row">
+          <button (click)="runIsolate()" [disabled]="matrixStatus() !== ''">
+            {{ matrixStatus() || 'C. Isolating run: hidden vs visible volumes (about 1 min)' }}
+          </button>
+        </p>
+        <p class="row">
+          <button (click)="runMatrix()" [disabled]="matrixStatus() !== ''">
+            {{ matrixStatus() || 'D. All camera scenarios, current setup (about 1-2 min)' }}
+          </button>
+        </p>
+        <p class="row">
+          <button (click)="runAll()" [disabled]="matrixStatus() !== ''">
+            {{ matrixStatus() || 'E. Run everything, for closing a phase (about 15 min)' }}
+          </button>
+        </p>
+      </details>
+
+      <details open>
+        <summary>2 · Scene setup</summary>
+        <p class="label">Camera preset</p>
+        <p class="row">
+          @for (preset of presets; track preset.label) {
+            <button (click)="applyPreset(preset)" [class.active]="presetLabel() === preset.label">
+              {{ preset.label }}
+            </button>
           }
-        </table>
-      }
+        </p>
+        <p class="label">Volumes</p>
+        <p class="row">
+          @for (n of volumeCounts; track n) {
+            <button (click)="setVolumeCount(n)" [class.active]="volumeCount() === n">{{ n }}</button>
+          }
+        </p>
+        <p class="label">Clouds drawn as</p>
+        <p class="row">
+          <button (click)="setCloudMode('mesh')" [class.active]="cloudMode() === 'mesh'">box mesh</button>
+          <button (click)="setCloudMode('pass')" [class.active]="cloudMode() === 'pass'">screen pass x0.5</button>
+          <button (click)="setCloudMode('pass-full')" [class.active]="cloudMode() === 'pass-full'">screen pass x1</button>
+          <button (click)="setCloudMode('proxy')" [class.active]="cloudMode() === 'proxy'">box proxies x0.5</button>
+        </p>
+        <p class="label">Clouds</p>
+        <p class="row">
+          <button (click)="setClouds(true)" [class.active]="cloudsOn()">on</button>
+          <button (click)="setClouds(false)" [class.active]="!cloudsOn()">off</button>
+        </p>
+      </details>
+
+      <details>
+        <summary>3 · Sun and look</summary>
+        <label
+          >sun elevation {{ sunElevation().toFixed(1) }}°
+          <input type="range" min="-10" max="90" step="0.1" [value]="sunElevation()" (input)="setSunElevation($event)" />
+        </label>
+        <label
+          >sun azimuth {{ sunAzimuth().toFixed(0) }}°
+          <input type="range" min="-180" max="180" step="1" [value]="sunAzimuth()" (input)="setSunAzimuth($event)" />
+        </label>
+        <p class="row">
+          <button (click)="toggleSunAnimation()" [class.active]="animateSun()">
+            {{ animateSun() ? 'stop sun' : 'animate sun' }}
+          </button>
+        </p>
+        <label
+          >extinction {{ extinction().toFixed(3) }} /m
+          <input type="range" min="0.005" max="0.08" step="0.001" [value]="extinction()" (input)="setExtinction($event)" />
+        </label>
+        <label
+          >fly speed {{ speed().toFixed(0) }} m/s
+          <input type="range" min="10" max="600" step="10" [value]="speed()" (input)="speed.set(num($event))" />
+        </label>
+      </details>
+
+      <details>
+        <summary>4 · Quality and bake budget</summary>
+        <label
+          >march steps {{ steps() }}
+          <input type="range" min="8" max="128" step="8" [value]="steps()" (input)="setSteps($event)" />
+        </label>
+        <p class="row">
+          render scale
+          <button (click)="setScale(1)" [class.active]="renderScale() === 1">1x</button>
+          <button (click)="setScale(0.5)" [class.active]="renderScale() === 0.5">0.5x</button>
+        </p>
+        <p class="row">
+          <button (click)="cycleBakeBudget()" [class.active]="bakeBudget() > 0">
+            bake budget: {{ bakeBudget() === 0 ? 'all at once' : bakeBudget() + ' bands/frame' }}
+          </button>
+        </p>
+      </details>
+
+      <details>
+        <summary>5 · Debug switches</summary>
+        <p class="row">
+          <button (click)="toggleRebake()" [class.active]="rebakeEveryFrame()">
+            light rebake every frame: {{ rebakeEveryFrame() ? 'on' : 'off' }}
+          </button>
+          <button (click)="toggleJitter()" [class.active]="!jitterOn()">jitter off</button>
+          <button (click)="toggleFetch()" [class.active]="!fetchOn()">no fetch</button>
+          <button (click)="toggleHidden()" [class.active]="hiddenOn()">volumes hidden: {{ hiddenOn() ? 'on' : 'off' }}</button>
+        </p>
+        <p class="row">
+          <button (click)="switchBackend(false)" [disabled]="!forceWebGL">WebGPU</button>
+          <button (click)="switchBackend(true)" [disabled]="forceWebGL">forceWebGL</button>
+        </p>
+      </details>
+
+      <details>
+        <summary>6 · Manual readings</summary>
+        <p class="row">
+          <button (click)="record()">record this reading</button>
+          <button (click)="recordings.set([])">clear</button>
+        </p>
+        @if (recordings().length) {
+          <table class="rec">
+            <tr><th>camera</th><th>clouds</th><th>backend</th><th>render</th><th>compute</th></tr>
+            @for (r of recordings(); track $index) {
+              <tr><td>{{ r.preset }}</td><td>{{ r.clouds }}</td><td>{{ r.backend }}</td><td>{{ r.render }}</td><td>{{ r.compute }}</td></tr>
+            }
+          </table>
+        }
+      </details>
       <p class="note">drag = look · W A S D = move · Q E = down/up · Shift = fast</p>
     </aside>
   `,
@@ -262,6 +296,28 @@ interface Recording {
       font: 11px/1.3 ui-monospace, monospace;
       background: #05080c;
       color: #cfe;
+    }
+    details {
+      margin-top: 0.6rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.15);
+      padding-top: 0.3rem;
+    }
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.big {
+      width: 100%;
+      padding: 0.7rem;
+      background: #2a6;
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    button.primary {
+      background: #2a6;
+      color: #fff;
+      font-weight: 600;
     }
     button.active {
       outline: 2px solid #6cf;
@@ -741,6 +797,71 @@ export class CloudVolumesLabPageComponent {
     ].join('\n');
     if (publish) await this.publish(text);
     return text;
+  }
+
+  readonly nextTestTitle = NEXT_TEST.title;
+
+  /** The single "run the next test" button: every scenario in `next-test.ts` in turn, one table, copied to the clipboard. */
+  async runNext(): Promise<void> {
+    const saved = {
+      preset: PRESETS.find((p) => p.label === this.presetLabel()) ?? PRESETS[0],
+      clouds: this.cloudsOn(),
+      steps: this.steps(),
+      scale: this.renderScale(),
+      mode: this.cloudMode(),
+      count: this.volumeCount(),
+      budget: this.bakeBudget(),
+      sun: this.animateSun(),
+      rebake: this.rebakeEveryFrame(),
+    };
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const canvas = document.querySelector('canvas');
+    const rows: string[] = [`${'scenario'.padEnd(36)}${['avg', 'p95', 'max'].map((c) => c.padStart(7)).join('')}`];
+    this.setClouds(true);
+    let n = 0;
+    for (const s of NEXT_TEST.scenarios) {
+      this.matrixStatus.set(`next test ${++n}/${NEXT_TEST.scenarios.length}: ${s.label}`);
+      if (s.volumes !== undefined) this.setVolumeCount(s.volumes);
+      if (s.mode !== undefined) this.setCloudMode(s.mode);
+      this.applyScale(s.scale ?? saved.scale);
+      this.applySteps(s.steps ?? saved.steps);
+      this.animateSun.set(s.animateSun ?? saved.sun);
+      this.bakeBudget.set(s.bakeBudget ?? saved.budget);
+      this.rebakeEveryFrame.set(s.rebakeEveryFrame ?? saved.rebake);
+      for (const volume of this.allVolumes()) volume.alwaysRebakeLight = this.rebakeEveryFrame();
+      let cells: string[];
+      if (s.kind === 'flyby') {
+        await sleep(1500);
+        const samples = (await this.flybyOnce(s.seconds ?? 12)).sort((a, b) => a - b);
+        const at = (q: number) => samples[Math.floor(q * (samples.length - 1))]?.toFixed(2) ?? 'n/a';
+        const avg = samples.length ? (samples.reduce((a, b) => a + b, 0) / samples.length).toFixed(2) : 'n/a';
+        cells = [avg, at(0.95), at(1)];
+      } else {
+        this.applyPreset(PRESETS.find((p) => p.label === s.preset) ?? PRESETS[0]);
+        await sleep(1000);
+        this.timer.reset();
+        await sleep((s.seconds ?? 3) * 1000);
+        cells = [this.timer.render.average?.toFixed(2) ?? 'n/a', '-', '-'];
+      }
+      rows.push(`${s.label.padEnd(36)}${cells.map((c) => c.padStart(7)).join('')}`);
+    }
+    this.setVolumeCount(saved.count);
+    this.setCloudMode(saved.mode);
+    this.applyScale(saved.scale);
+    this.applySteps(saved.steps);
+    this.animateSun.set(saved.sun);
+    this.bakeBudget.set(saved.budget);
+    this.rebakeEveryFrame.set(saved.rebake);
+    for (const volume of this.allVolumes()) volume.alwaysRebakeLight = saved.rebake;
+    this.applyPreset(saved.preset);
+    this.setClouds(saved.clouds);
+    await this.publish(
+      [
+        `cloud-volumes-lab next test: ${NEXT_TEST.title}`,
+        `${this.backendLabel} dpr ${devicePixelRatio} canvas ${canvas?.width}x${canvas?.height}; GPU render ms, whole frame, nothing subtracted`,
+        ...rows,
+      ].join('\n'),
+    );
   }
 
   private statusPrefix = '';
