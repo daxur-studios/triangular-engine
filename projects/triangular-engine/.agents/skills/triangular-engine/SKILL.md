@@ -30,6 +30,11 @@ Use public package entry points in consumer apps; do not import internal source 
 - Takram atmosphere/clouds: `triangular-engine/takram`
 - Image compression adapter: `triangular-engine/image-compression`
 - TSL cell-planet surface material (WebGPURenderer): `triangular-engine/planet-material`
+- Reusable browser test runner and contracts: `triangular-engine/testing`
+
+For repeatable game tests, camera paths, visual review, performance diagnostics and
+one-click test URLs, use the [triangular-engine-testing skill](../triangular-engine-testing/SKILL.md).
+It ships with the installed package at `skills/triangular-engine-testing/SKILL.md`.
 
 ---
 

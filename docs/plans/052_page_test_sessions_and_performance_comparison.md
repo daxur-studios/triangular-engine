@@ -32,6 +32,7 @@ the existing replay experiment. Add a second application adapter later to prove 
 - [x] Cloud static and moving-camera adapter with effective inputs and timer limitations.
 - [x] One shared UI slider through a local package and reactive forms.
 - [x] Focused headless specs, library build, demo host build, docs/public exports.
+- [x] Package and reference a consumer testing skill with a game adapter recipe.
 
 The bounded component slice is implemented. Sixteen runner specs, one timer spec,
 and four browser integration checks passed. The library build and demo host build

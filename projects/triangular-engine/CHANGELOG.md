@@ -1,5 +1,7 @@
 # Changelog
 
+- Packaged the `triangular-engine-testing` agent skill with a game adapter recipe, linked from the main engine skill and testing guides. Installed consumers can read `skills/triangular-engine-testing/SKILL.md` to integrate the reusable runner and author one-click tests.
+
 - Added the opt-in `triangular-engine/testing` entry: `TestRunnerComponent`, `TestSession`, typed scenario/suite/result contracts and URL helpers. Supports reactive-form selection, append-only history with Run latest, static or moving application adapters, cancellation/timeout/restoration, JSON results and separate observer review. The cloud lab is the first integration, with a locally packaged shared UI slider; timings remain diagnostic and no accepted performance baseline is implied.
 
 - `triangular-engine/atmosphere` adds the bent planet (experimental, Plan 049 Phase 3a): `bend()` and the curvature-form helpers (`curvatureAltitude`, `curvatureUp`, `rayAtAltitude`, `bentMapCoords`, `mapMaskFactor`) as pure maths, and `BentAtmosphere`, the globe's ray march on a sphere of radius `1/k` with a map mask and a `real`/`alwaysDay` sun. Used by the `/atmosphere-lab` spike; not yet on the cell planet. Also experimental: `sunDip` / `sunHorizonCos` (the horizon dip from the current curvature), `rayExitRect`, Equal Earth (`blendedProjection`, `projectionRows`), `BentAtmosphere.sunLight` / `skyGate` / `mapRow` and the `bent` option of `AtmosphereSkyViewLut` (the sky-view table for the sphere of radius `1/k`).

@@ -1,5 +1,13 @@
 # Reusable browser test runner
 
+For agent-guided integration into a game, use the
+[triangular-engine-testing skill](../.agents/skills/triangular-engine-testing/SKILL.md).
+The installed package includes it at
+`node_modules/triangular-engine/skills/triangular-engine-testing/SKILL.md`, with a
+game adapter recipe. Ask an agent to read that file and add a runnable test to your
+game; no separate skill installation is required for direct file use. For skill
+discovery, copy that skill folder into the game's `.agents/skills/` directory.
+
 Import the opt-in `triangular-engine/testing` entry. It provides `TestRunnerComponent`,
 `TestSession`, serializable suite/scenario/result contracts, and URL helpers. It has
 no renderer, Playwright, router, or shared UI package dependency. Do not import it

@@ -62,6 +62,11 @@ See: ./api/selectors.md
 
 ## Browser, Visual and Performance Test Planning
 
+For consumer game integration, follow the
+[triangular-engine-testing skill](../.agents/skills/triangular-engine-testing/SKILL.md),
+packaged at `node_modules/triangular-engine/skills/triangular-engine-testing/SKILL.md`.
+It covers game adapters, scenario history, launch links and evidence handoff.
+
 For the owner-authorized cloud-first extraction, `triangular-engine/testing` now
 provides a reusable runner and contracts; see [Testing](testing.md) for actual
 imports, URL parameters and adapter lifecycle. Concrete suites stay in their host

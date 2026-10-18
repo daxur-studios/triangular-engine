@@ -6,6 +6,13 @@ This README contains the full documentation needed to use the library on npm. No
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 
+For reusable game tests and one-click visual/performance test URLs, use the
+`triangular-engine-testing` skill. Its source is
+`.agents/skills/triangular-engine-testing/SKILL.md`. The package ships it and its adapter recipe under
+`node_modules/triangular-engine/skills/triangular-engine-testing/`. Point an agent
+at its `SKILL.md`, or copy the folder into your game's `.agents/skills/` directory
+for discovery.
+
 ## Compatibility
 
 | Dependency      | Version  | Notes                                                          |

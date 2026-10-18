@@ -503,3 +503,17 @@ manual pre-run spin cannot silently alter the fixture. All four browser integrat
 tests passed again after that bounded adapter change. Package-storage audit found all
 archives under ignored `ignore/packages/`, with active dependency paths resolving and migrated hashes
 preserved; producer verification outputs are retained separately from old snapshots.
+
+## 2026-10-18 — Consumer testing skill
+
+Added `triangular-engine-testing` alongside the existing package skills, with a
+game-owned adapter recipe. The existing asset rule ships both under
+`skills/triangular-engine-testing/`. Linked it from the main engine skill, package
+README, testing guide and agent guide. The instructions distinguish functional
+checks, diagnostic timing and human acceptance, and describe direct file use or
+copying the folder into a consumer's `.agents/skills/` directory for discovery.
+Verification: the skill-creator validator passed, the adapter example type-checked
+against the built public testing declarations, and six local documentation links
+resolved. `npm run build:triangular-engine` passed. `npm pack --dry-run --json`
+confirmed both skill files are included; their built hashes match the source.
+No runtime code changed and no new tarball was created for this documentation work.
