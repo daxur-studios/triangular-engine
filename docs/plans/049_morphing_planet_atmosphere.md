@@ -229,6 +229,17 @@ applies with that radius:
 - **Sky from inside the air** (the sky-view table) is rendered for the camera's altitude over the bent sphere,
   radius `1/k`; re-render when `k` changes. Fade between the space view and the sky by whether the camera is
   inside the air (on the map: low over it and inside its outline), as the globe does now.
+- **Map edges from inside the air (decided 2026-10-18, after the 3a spike).** The sky-view table assumes a
+  round planet with no edges, so it can't carry the map mask. Keep the table as the default. Switch to the
+  masked per-pixel march, at reduced resolution and upsampled, only when the camera is outside the map
+  outline or within distance `D` of it. `D` is where transmittance along a horizontal ray reaches about 1%:
+  beyond it, the air in between hides the edge and the table is right. Blend the two over a band so there is
+  no pop.
+- **Sun cut-off (decided 2026-10-18, after the 3a spike).** The sun's horizon dip comes from the current
+  curvature, not the baked planet: `sin(dip/2) = sqrt(k·h / (2·(1 + k·h)))`. It is 0 when flat and today's
+  value at morph 0. No extra baked radii for this.
+- **March length on the flat limit.** Clamp each march to where the ray leaves the map outline (plus
+  `edgeSoftnessM`), not the map diagonal.
 - **Haze on surfaces** (the froxel table and stage 6) takes the spherical path with radius `1/k`. The
   closed-form slab stays as the exact `k = 0` case (morph ≥ 0.999).
 - **Baked tables** (transmittance, multi-scatter, irradiance) are made for one radius and read by altitude
@@ -451,6 +462,11 @@ before the material port lands. Phase 2b onwards needs Plan 050 through its Phas
      over the map (the view that used to show a full-screen sky). Expect a rim glow throughout, glowing map
      edges at the end, no sky filling the screen from outside the map, no pops and nothing black. Frame time
      no worse than the globe.
+   - **3a follow-up** (before 3b): the two decisions above (sky near edges, sun cut-off), the march clamp to
+     the outline, and Equal Earth (projection blend in `bend()` plus the per-row half-width table). Re-run the
+     gate with an edge view (low near an edge, and from space framed on an edge), the side-on view with
+     `alwaysDay` both inside and above the air, and GPU timestamp timings at 1920×1080 for the plain globe and
+     bent at morph 0, 0.5 and 1, on both the table and per-pixel paths.
    - **3b. Bend in the material and the rig:** Plan 050's stage-1 option `morphShape`, its patch bounds and
      seam cull, and `CellPlanetMorphCameraRig` on the bent ground.
    - **3c. Wire it on `/cell-planet-tsl`** and retire what §Morph lists as replaced.
@@ -490,6 +506,8 @@ before the material port lands. Phase 2b onwards needs Plan 050 through its Phas
 | Atmosphere through the whole morph, exact for the bent sphere; only the baked tables are approximate | **Decided** 2026-10-18 |
 | Map edge: the air's own cut edge (soft map mask); stylized outline optional (Phase 7). Replaces "soft edge fade by default, optional glowing outline" | **Decided** 2026-10-18 |
 | Day/night: real by default, `alwaysDay` toggle (§Day and night) | **Decided** 2026-10-18 |
+| Sky inside the air when bent: sky-view table by default, masked per-pixel march only outside the map or within `D` of its edge (§Morph) | **Decided** 2026-10-18 |
+| Sun cut-off from the current curvature (dip 0 when flat), not the baked planet's horizon (§Morph) | **Decided** 2026-10-18 |
 | Output: HDR `RenderPipeline` with MSAA off plus a post AA pass. Not `DirectRenderPipeline` | Proposed 2026-10-16 (Runbook 050 numbers) |
 
 ## Out of scope for now
