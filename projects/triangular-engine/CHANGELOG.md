@@ -1,5 +1,7 @@
 # Changelog
 
+- `triangular-engine/testing` passes the applied scenario to `ready(context, scenario)`, supports explicitly optional unavailable metrics while retaining required-metric validity, and displays individual checks and case/run errors. Updated the consumer skill, adapter recipe and evidence guide with review defaults, host control locking and compact artifact handoff.
+
 - Packaged the `triangular-engine-testing` agent skill with a game adapter recipe, linked from the main engine skill and testing guides. Installed consumers can read `skills/triangular-engine-testing/SKILL.md` to integrate the reusable runner and author one-click tests.
 
 - Added the opt-in `triangular-engine/testing` entry: `TestRunnerComponent`, `TestSession`, typed scenario/suite/result contracts and URL helpers. Supports reactive-form selection, append-only history with Run latest, static or moving application adapters, cancellation/timeout/restoration, JSON results and separate observer review. The cloud lab is the first integration, with a locally packaged shared UI slider; timings remain diagnostic and no accepted performance baseline is implied.

@@ -37,4 +37,29 @@ describe('TestRunnerComponent', () => {
     expect(component.result()?.reviewNotes).toContain('Observed');
     fixture.destroy();
   });
+
+  it('shows failed checks with their detail, the case error and run-level errors', async () => {
+    await TestBed.configureTestingModule({ imports: [TestRunnerComponent] }).compileComponents();
+    const fixture = TestBed.createComponent<TestRunnerComponent<Settings, number>>(TestRunnerComponent);
+    const adapter: TestRunAdapter<Settings, number> = {
+      capture: () => 0, apply: () => {}, ready: async () => {},
+      measure: async () => ({ metrics: [], checks: [
+        { name: 'Pose reached', passed: true },
+        { name: 'Terrain resident', passed: false, detail: 'minimum resident patches 0' },
+      ] }),
+      restore: () => { throw new Error('restore broke'); },
+    };
+    fixture.componentRef.setInput('suites', history);
+    fixture.componentRef.setInput('adapter', adapter);
+    fixture.detectChanges();
+    fixture.componentInstance.form.controls.profile.setValue('headless-hardware');
+    await fixture.componentInstance.runLatest();
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('✓ Pose reached');
+    expect(text).toContain('✗ Terrain resident — minimum resident patches 0');
+    expect(text).toContain('Restoration failed: restore broke');
+    expect((fixture.nativeElement as HTMLElement).querySelectorAll('.check.failed').length).toBe(1);
+    fixture.destroy();
+  });
 });

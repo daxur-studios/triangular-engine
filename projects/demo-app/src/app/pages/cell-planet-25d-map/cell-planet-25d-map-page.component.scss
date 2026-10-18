@@ -1,6 +1,7 @@
 :host {
   position: relative;
-  background: #111820;
+  background: var(--mat-sys-surface);
+  color: var(--mat-sys-on-surface);
 }
 
 .readout {
@@ -16,15 +17,17 @@
   box-sizing: border-box;
   overscroll-behavior: contain;
   padding: 0.75rem 0.9rem;
-  border: 1px solid rgb(255 255 255 / 15%);
+  border: 1px solid var(--mat-sys-outline-variant);
   border-radius: 0.5rem;
-  background: rgb(8 14 23 / 86%);
-  color: #dce9f5;
-  font: 12px/1.5 ui-monospace, monospace;
+  background: color-mix(in srgb, var(--mat-sys-surface-container) 86%, transparent);
+  color: var(--mat-sys-on-surface);
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 strong {
-  color: white;
+  color: var(--mat-sys-on-surface);
 }
 
 .view-switch {
@@ -33,15 +36,15 @@ strong {
 
   a {
     padding: 0.25rem 0.45rem;
-    border: 1px solid rgb(255 255 255 / 18%);
+    border: 1px solid var(--mat-sys-outline-variant);
     border-radius: 0.25rem;
-    color: #a9c9e4;
+    color: var(--mat-sys-on-surface-variant);
     text-decoration: none;
 
     &:hover,
     &.active {
-      background: rgb(70 130 180 / 30%);
-      color: white;
+      background: var(--mat-sys-surface-container-highest);
+      color: var(--mat-sys-on-surface);
     }
   }
 }

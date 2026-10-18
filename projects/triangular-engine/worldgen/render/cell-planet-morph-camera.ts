@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { MAP_PROJECTIONS, type MapProjectionKind } from './core/map-projections';
+import { evaluateBentTransform } from './planet-morph-geometry';
 
 /** The projection's frame in body axes: `forward` is the map's centre, `up` its north, `right` its east. */
 export interface ICellPlanetProjectionBasis {
@@ -58,14 +59,14 @@ function frameOf(): ICellPlanetGroundFrame {
 /**
  * Keeps the camera over the same ground while a cell planet morphs between its globe and its flat map.
  *
- * The morph moves every surface point by `mix(sphere, flat, morph)`, but a camera and its orbit target are fixed in
+ * The morph moves every surface point by the curvature-based bent transform, but a camera and its orbit target are fixed in
  * the scene, so a growing morph slides the ground out from under them. The rig holds one *anchor*: the ground point
  * straight below the camera (along the surface normal). Each time `morph` changes it carries the camera and the target rigidly from the
  * anchor's ground frame at the old morph to its frame at the new one, so the distance, the angle to the surface, the
  * bearing and the position over the ground all stay as they were. It then sets the controls' up vector to the anchor's
  * surface normal and re-aims the camera, so there is no roll jitter between the globe's radial up and the map's +Z.
  *
- * The frame follows the material's own blend: the normal is `normalize(mix(sphere normal, +Z, morph))` and north blends
+ * The frame follows the material's own blend: the normal is the bent ground normal and north blends
  * the same way, so the terrain under the camera stays level with its up. The flat map is the plane `z = 0` through the planet's centre (the material's flat positions carry only the terrain height) and
  * terrain relief is ignored (the anchor sits on the base surface). Call {@link update} once per frame in `postTick$`
  * (before the orbit controls settle in `lateUpdate$`), with the same morph value the material renders.
@@ -100,7 +101,7 @@ export class CellPlanetMorphCameraRig {
     this.lastMorph = Number.NaN;
   }
 
-  /** Position of the ground at body direction `dir` for `morph`: `mix(radius * dir, flat map point at z = 0, morph)`. */
+  /** Position of the ground at body direction `dir` for `morph`: bent planet point. */
   groundPosition(dir: Vector3, morph: number, out = new Vector3()): Vector3 {
     const radius = this.options.radiusM;
     const basis = this.options.basis?.() ?? DEFAULT_BASIS;
@@ -112,38 +113,69 @@ export class CellPlanetMorphCameraRig {
     const point = MAP_PROJECTIONS[this.options.projection()].project(lon, lat, width, height);
     const flatX = point.x - width / 2;
     const flatY = height / 2 - point.y;
-    const sphere = 1 - morph;
-    return out.set(
-      sphere * radius * d.x + morph * flatX,
-      sphere * radius * d.y + morph * flatY,
-      sphere * radius * d.z,
-    );
+    const t = Math.min(1, Math.max(0, morph));
+    const eqX = lon * radius;
+    const eqY = lat * radius;
+    const mapX = (1 - t) * eqX + t * flatX;
+    const mapY = (1 - t) * eqY + t * flatY;
+    const k = (1 - t) / Math.max(radius, 1e-6);
+    const zCenterShift = (1 - t) * radius;
+    const bent = evaluateBentTransform(mapX, mapY, k, 0, zCenterShift);
+    return out
+      .copy(basis.right)
+      .multiplyScalar(bent.position.x)
+      .addScaledVector(basis.up, bent.position.y)
+      .addScaledVector(basis.forward, bent.position.z);
   }
 
   /** The ground's frame at body direction `dir` for `morph` (see the class notes for how it blends). */
   groundFrame(dir: Vector3, morph: number, out: ICellPlanetGroundFrame = frameOf()): ICellPlanetGroundFrame {
+    const radius = this.options.radiusM;
     const basis = this.options.basis?.() ?? DEFAULT_BASIS;
     const d = this.scratchEast.copy(dir).normalize();
-    this.groundPosition(d, morph, out.position);
+    const lon = Math.atan2(d.dot(basis.right), d.dot(basis.forward));
+    const lat = Math.asin(Math.max(-1, Math.min(1, d.dot(basis.up))));
+    const width = 2 * Math.PI * radius;
+    const height = Math.PI * radius;
+    const point = MAP_PROJECTIONS[this.options.projection()].project(lon, lat, width, height);
+    const flatX = point.x - width / 2;
+    const flatY = height / 2 - point.y;
+    const t = Math.min(1, Math.max(0, morph));
+    const eqX = lon * radius;
+    const eqY = lat * radius;
+    const mapX = (1 - t) * eqX + t * flatX;
+    const mapY = (1 - t) * eqY + t * flatY;
+    const k = (1 - t) / Math.max(radius, 1e-6);
+    const zCenterShift = (1 - t) * radius;
+    const bent = evaluateBentTransform(mapX, mapY, k, 0, zCenterShift, out.position);
 
-    // The sphere's own north: the projection's up, flattened onto the tangent plane. At the projection's pole it has none.
-    const northSphere = this.scratchNorth.copy(basis.up).addScaledVector(d, -basis.up.dot(d));
-    if (northSphere.lengthSq() < 1e-12) northSphere.copy(basis.forward).negate().addScaledVector(d, basis.forward.dot(d));
-    northSphere.normalize();
+    out.position
+      .copy(basis.right)
+      .multiplyScalar(bent.position.x)
+      .addScaledVector(basis.up, bent.position.y)
+      .addScaledVector(basis.forward, bent.position.z);
 
-    // Blend as the material does: the normal toward +Z, the north toward +Y.
-    out.normal.copy(d).multiplyScalar(1 - morph).addScaledVector(new Vector3(0, 0, 1), morph);
-    if (out.normal.lengthSq() < 1e-8) out.normal.set(0, 0, 1);
-    out.normal.normalize();
-    out.north.copy(northSphere).multiplyScalar(1 - morph).addScaledVector(new Vector3(0, 1, 0), morph);
-    out.north.addScaledVector(out.normal, -out.north.dot(out.normal));
-    if (out.north.lengthSq() < 1e-10) {
-      // North and the normal agree: any perpendicular will do, chosen to vary smoothly with the sphere's north.
-      out.north.copy(northSphere).addScaledVector(out.normal, -northSphere.dot(out.normal));
-      if (out.north.lengthSq() < 1e-10) out.north.set(1, 0, 0).addScaledVector(out.normal, -out.normal.x);
-    }
-    out.north.normalize();
-    out.east.crossVectors(out.north, out.normal);
+    out.east
+      .copy(basis.right)
+      .multiplyScalar(bent.east.x)
+      .addScaledVector(basis.up, bent.east.y)
+      .addScaledVector(basis.forward, bent.east.z)
+      .normalize();
+
+    out.north
+      .copy(basis.right)
+      .multiplyScalar(bent.north.x)
+      .addScaledVector(basis.up, bent.north.y)
+      .addScaledVector(basis.forward, bent.north.z)
+      .normalize();
+
+    out.normal
+      .copy(basis.right)
+      .multiplyScalar(bent.up.x)
+      .addScaledVector(basis.up, bent.up.y)
+      .addScaledVector(basis.forward, bent.up.z)
+      .normalize();
+
     return out;
   }
 
@@ -192,10 +224,8 @@ export class CellPlanetMorphCameraRig {
     if (d.lengthSq() < EPSILON) d.set(0, 0, 1);
     d.normalize();
     for (let i = 0; i < 80; i++) {
-      const normal = this.scratchNormal.copy(d).multiplyScalar(1 - morph);
-      normal.z += morph;
-      if (normal.lengthSq() < 1e-8) normal.set(0, 0, 1);
-      normal.normalize();
+      this.groundFrame(d, morph, this.frameA);
+      const normal = this.frameA.normal;
       this.scratchAim.copy(origin).sub(normal);
       const found = this.groundUnderRay(origin, this.scratchAim, morph, d, this.scratchRay);
       if (!found) return false;

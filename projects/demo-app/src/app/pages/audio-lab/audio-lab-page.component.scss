@@ -5,8 +5,7 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  color: #e0e6ed;
+  color: var(--mat-sys-on-surface);
 }
 
 .audio-lab-container {
@@ -30,18 +29,18 @@ scene {
   width: 340px;
   max-height: calc(100% - 32px);
   overflow-y: auto;
-  background: rgba(15, 23, 42, 0.85);
+  background: color-mix(in srgb, var(--mat-sys-surface-container) 85%, transparent);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--mat-sys-outline-variant);
   border-radius: 12px;
   padding: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 32px var(--app-color-overlay-shadow);
 
   &::-webkit-scrollbar {
     width: 6px;
   }
   &::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--mat-sys-outline);
     border-radius: 3px;
   }
 }
@@ -51,7 +50,7 @@ scene {
 
   .back-link {
     display: inline-block;
-    color: #38bdf8;
+    color: var(--mat-sys-primary);
     text-decoration: none;
     font-size: 13px;
     font-weight: 500;
@@ -68,14 +67,14 @@ scene {
     margin: 0 0 4px 0;
     font-size: 18px;
     font-weight: 700;
-    color: #f8fafc;
+    color: var(--mat-sys-on-surface);
   }
 
   .subtitle {
     margin: 0;
     font-size: 12px;
     line-height: 1.4;
-    color: #94a3b8;
+    color: var(--mat-sys-on-surface-variant);
   }
 }
 
@@ -84,17 +83,17 @@ scene {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  background: rgba(239, 68, 68, 0.2);
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: var(--mat-sys-error-container);
+  border: 1px solid var(--mat-sys-error);
   border-radius: 8px;
   padding: 8px 12px;
   margin-bottom: 14px;
   font-size: 12px;
-  color: #fca5a5;
+  color: var(--mat-sys-on-error-container);
 
   .btn-unlock {
-    background: #ef4444;
-    color: #fff;
+    background: var(--mat-sys-error);
+    color: var(--mat-sys-on-error);
     border: none;
     border-radius: 6px;
     padding: 4px 10px;
@@ -105,7 +104,10 @@ scene {
     transition: background 0.2s;
 
     &:hover {
-      background: #dc2626;
+      background-image: linear-gradient(
+        var(--app-color-overlay-hover),
+        var(--app-color-overlay-hover)
+      );
     }
   }
 }
@@ -113,7 +115,7 @@ scene {
 .control-section {
   margin-bottom: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
 
   &:last-child {
     margin-bottom: 0;
@@ -126,17 +128,17 @@ scene {
     font-size: 13px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #38bdf8;
+    color: var(--mat-sys-primary);
     font-weight: 600;
   }
 
   .section-desc {
     margin: 0 0 8px 0;
     font-size: 11px;
-    color: #94a3b8;
+    color: var(--mat-sys-on-surface-variant);
 
     code {
-      background: rgba(255, 255, 255, 0.1);
+      background: var(--mat-sys-surface-container-high);
       padding: 2px 4px;
       border-radius: 4px;
       font-size: 11px;
@@ -152,11 +154,11 @@ scene {
     justify-content: space-between;
     font-size: 12px;
     margin-bottom: 4px;
-    color: #cbd5e1;
+    color: var(--mat-sys-on-surface);
 
     .val {
-      color: #38bdf8;
-      font-family: monospace;
+      color: var(--mat-sys-primary);
+      font-family: var(--app-font-mono);
     }
   }
 
@@ -167,38 +169,38 @@ scene {
 
     input[type='range'] {
       flex: 1;
-      accent-color: #38bdf8;
+      accent-color: var(--mat-sys-primary);
       height: 4px;
       cursor: pointer;
     }
 
     .btn-mute {
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: var(--mat-sys-surface-container-high);
+      border: 1px solid var(--mat-sys-outline-variant);
       border-radius: 4px;
-      color: #94a3b8;
+      color: var(--mat-sys-on-surface-variant);
       font-size: 11px;
       padding: 3px 8px;
       cursor: pointer;
       transition: all 0.2s;
 
       &:hover {
-        background: rgba(255, 255, 255, 0.15);
-        color: #f8fafc;
+        background: var(--mat-sys-surface-container-highest);
+        color: var(--mat-sys-on-surface);
       }
 
       &.muted {
-        background: #ef4444;
-        border-color: #ef4444;
-        color: #fff;
+        background: var(--mat-sys-error);
+        border-color: var(--mat-sys-error);
+        color: var(--mat-sys-on-error);
       }
     }
   }
 }
 
 .emitter-item {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--app-color-overlay-hover);
+  border: 1px solid var(--mat-sys-outline-variant);
   border-radius: 8px;
   padding: 10px;
   margin-bottom: 8px;
@@ -211,36 +213,36 @@ scene {
 
     strong {
       font-size: 13px;
-      color: #f1f5f9;
+      color: var(--mat-sys-on-surface);
     }
   }
 
   .btn-toggle {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--mat-sys-surface-container-high);
     border: none;
     border-radius: 4px;
     padding: 3px 8px;
     font-size: 11px;
-    color: #94a3b8;
+    color: var(--mat-sys-on-surface-variant);
     cursor: pointer;
     transition: all 0.2s;
 
     &.active {
-      background: #10b981;
-      color: #fff;
+      background: var(--app-color-pass-bg);
+      color: var(--app-color-pass);
     }
   }
 
   label {
     display: block;
     font-size: 11px;
-    color: #94a3b8;
+    color: var(--mat-sys-on-surface-variant);
     margin: 6px 0 2px 0;
   }
 
   input[type='range'] {
     width: 100%;
-    accent-color: #ec4899;
+    accent-color: var(--mat-sys-tertiary);
     height: 4px;
     cursor: pointer;
   }
@@ -252,10 +254,10 @@ scene {
   gap: 6px;
 
   .btn-action {
-    background: rgba(56, 189, 248, 0.15);
-    border: 1px solid rgba(56, 189, 248, 0.3);
+    background: var(--app-color-lab-bg);
+    border: 1px solid var(--app-color-lab-border);
     border-radius: 6px;
-    color: #38bdf8;
+    color: var(--app-color-lab);
     font-size: 12px;
     font-weight: 500;
     padding: 7px 12px;
@@ -264,8 +266,11 @@ scene {
     transition: all 0.2s;
 
     &:hover {
-      background: rgba(56, 189, 248, 0.25);
-      border-color: #38bdf8;
+      background-image: linear-gradient(
+        var(--app-color-overlay-hover),
+        var(--app-color-overlay-hover)
+      );
+      border-color: var(--app-color-lab);
       transform: translateY(-1px);
     }
 

@@ -1,6 +1,7 @@
 :host {
   position: relative;
-  background: #0b1118;
+  background: var(--mat-sys-surface);
+  color: var(--mat-sys-on-surface);
 }
 
 .readout {
@@ -14,16 +15,18 @@
   max-height: calc(100vh - 2rem);
   overflow-y: auto;
   padding: 0.85rem 1rem;
-  border: 1px solid rgb(255 255 255 / 15%);
+  border: 1px solid var(--mat-sys-outline-variant);
   border-radius: 0.5rem;
-  background: rgb(8 14 23 / 90%);
-  color: #dce9f5;
-  font: 12px/1.5 ui-monospace, monospace;
+  background: color-mix(in srgb, var(--mat-sys-surface-container) 90%, transparent);
+  color: var(--mat-sys-on-surface);
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
   backdrop-filter: blur(8px);
 }
 
 strong {
-  color: white;
+  color: var(--mat-sys-on-surface);
 }
 
 .view-switch {
@@ -35,18 +38,18 @@ strong {
   a,
   span {
     padding: 0.25rem 0.5rem;
-    border: 1px solid rgb(255 255 255 / 18%);
+    border: 1px solid var(--mat-sys-outline-variant);
     border-radius: 0.25rem;
-    color: #a9c9e4;
+    color: var(--mat-sys-on-surface-variant);
     text-decoration: none;
     font-size: 11px;
   }
 
   a:hover,
   .active {
-    background: rgb(70 130 180 / 35%);
-    border-color: rgb(120 180 230 / 60%);
-    color: white;
+    background: var(--mat-sys-surface-container-highest);
+    border-color: var(--mat-sys-outline);
+    color: var(--mat-sys-on-surface);
   }
 }
 
@@ -58,17 +61,20 @@ strong {
     padding: 0.55rem 0.8rem;
     font-size: 13px;
     font-weight: bold;
-    border: 1px solid #38bdf8;
+    border: 1px solid var(--mat-sys-primary);
     border-radius: 0.35rem;
-    background: linear-gradient(135deg, #0284c7, #0369a1);
-    color: #ffffff;
+    background: var(--mat-sys-primary);
+    color: var(--mat-sys-on-primary);
     cursor: pointer;
-    box-shadow: 0 2px 8px rgb(2 132 199 / 40%);
+    box-shadow: 0 2px 8px var(--app-color-overlay-shadow);
     transition: all 0.15s ease;
 
     &:hover:not(:disabled) {
-      background: linear-gradient(135deg, #0ea5e9, #0284c7);
-      box-shadow: 0 4px 12px rgb(2 132 199 / 60%);
+      background-image: linear-gradient(
+        var(--app-color-overlay-hover),
+        var(--app-color-overlay-hover)
+      );
+      box-shadow: 0 4px 12px var(--app-color-overlay-shadow);
       transform: translateY(-1px);
     }
 
@@ -83,9 +89,9 @@ strong {
   display: grid;
   gap: 0.2rem;
   padding: 0.4rem 0.5rem;
-  background: rgb(255 255 255 / 5%);
+  background: var(--mat-sys-surface-container-high);
   border-radius: 0.35rem;
-  border: 1px solid rgb(255 255 255 / 10%);
+  border: 1px solid var(--mat-sys-outline-variant);
 
   .scrubber-header {
     display: flex;
@@ -93,14 +99,14 @@ strong {
     align-items: center;
 
     strong {
-      color: #38bdf8;
+      color: var(--mat-sys-primary);
     }
   }
 
   .scrubber-endpoints {
     display: flex;
     justify-content: space-between;
-    color: #88a2ba;
+    color: var(--mat-sys-outline);
     font-size: 10px;
   }
 }
@@ -108,14 +114,14 @@ strong {
 .control-group {
   margin: 0;
   padding: 0.5rem 0.6rem;
-  border: 1px solid rgb(255 255 255 / 12%);
+  border: 1px solid var(--mat-sys-outline-variant);
   border-radius: 0.35rem;
   display: grid;
   gap: 0.4rem;
 
   legend {
     padding: 0 0.3rem;
-    color: #94a3b8;
+    color: var(--mat-sys-on-surface-variant);
     font-size: 11px;
     font-weight: 600;
   }
@@ -126,7 +132,7 @@ label {
   gap: 0.15rem;
 
   span {
-    color: #b7cde0;
+    color: var(--mat-sys-on-surface-variant);
   }
 }
 
@@ -148,7 +154,7 @@ select {
     cursor: pointer;
 
     span {
-      color: #dce9f5;
+      color: var(--mat-sys-on-surface);
     }
   }
 }
@@ -164,22 +170,22 @@ select {
     gap: 0.35rem;
     padding: 0.3rem 0.5rem;
     font-size: 11px;
-    background: rgb(255 255 255 / 6%);
-    border: 1px solid rgb(255 255 255 / 15%);
+    background: var(--mat-sys-surface-container-high);
+    border: 1px solid var(--mat-sys-outline-variant);
     border-radius: 0.25rem;
-    color: #cbd5e1;
+    color: var(--mat-sys-on-surface-variant);
     cursor: pointer;
     transition: all 0.15s ease;
 
     &:hover {
-      background: rgb(255 255 255 / 12%);
-      color: #ffffff;
+      background: var(--mat-sys-surface-container-highest);
+      color: var(--mat-sys-on-surface);
     }
 
     &.active-focus {
-      background: rgb(14 165 233 / 25%);
-      border-color: #38bdf8;
-      color: #38bdf8;
+      background: var(--mat-sys-primary-container);
+      border-color: var(--mat-sys-primary);
+      color: var(--mat-sys-on-primary-container);
       font-weight: 600;
     }
 
@@ -193,7 +199,7 @@ select {
 }
 
 .hint {
-  color: #7dd3fc;
+  color: var(--mat-sys-primary);
   font-size: 11px;
   line-height: 1.3;
 }
@@ -202,7 +208,6 @@ select {
   margin-top: 0.2rem;
   display: grid;
   gap: 0.1rem;
-  color: #64748b;
+  color: var(--mat-sys-outline);
   font-size: 11px;
 }
-

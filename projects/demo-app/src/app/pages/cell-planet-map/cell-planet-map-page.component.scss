@@ -7,9 +7,8 @@
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
-  background: #0a0d12;
-  color: #e8e4da;
-  font-family: system-ui, sans-serif;
+  background: var(--mat-sys-surface);
+  color: var(--mat-sys-on-surface);
 }
 
 .panel {
@@ -19,8 +18,8 @@
   gap: 0.75rem;
   padding: 1rem;
   overflow-y: auto;
-  background: #10141d;
-  border-right: 1px solid #232a38;
+  background: var(--mat-sys-surface-container);
+  border-right: 1px solid var(--mat-sys-outline-variant);
 
   h1 {
     font-size: 1.1rem;
@@ -30,16 +29,16 @@
   .hint {
     margin: 0;
     font-size: 0.8rem;
-    color: #8b93a3;
+    color: var(--mat-sys-on-surface-variant);
   }
 
   .back-link {
     font-size: 0.8rem;
-    color: #8b93a3;
+    color: var(--mat-sys-on-surface-variant);
     text-decoration: none;
 
     &:hover {
-      color: #e8e4da;
+      color: var(--mat-sys-on-surface);
     }
   }
 
@@ -49,16 +48,16 @@
 
     a {
       padding: 0.3rem 0.45rem;
-      border: 1px solid #2f3a4f;
+      border: 1px solid var(--mat-sys-outline-variant);
       border-radius: 4px;
-      color: #a9b7c9;
+      color: var(--mat-sys-on-surface-variant);
       font-size: 0.78rem;
       text-decoration: none;
 
       &:hover,
       &.active {
-        background: #263149;
-        color: #e8e4da;
+        background: var(--mat-sys-surface-container-highest);
+        color: var(--mat-sys-on-surface);
       }
     }
   }
@@ -88,21 +87,22 @@
 
 button {
   padding: 0.4rem 0.6rem;
-  background: #1c2433;
-  color: #e8e4da;
-  border: 1px solid #2f3a4f;
+  background: var(--mat-sys-surface-container-high);
+  color: var(--mat-sys-on-surface);
+  border: 1px solid var(--mat-sys-outline-variant);
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.8rem;
   text-transform: capitalize;
 
   &:hover {
-    background: #263149;
+    background: var(--mat-sys-surface-container-highest);
   }
 
   &.active {
-    background: #3a5f8a;
-    border-color: #5c8bc4;
+    background: var(--mat-sys-primary-container);
+    border-color: var(--mat-sys-primary);
+    color: var(--mat-sys-on-primary-container);
   }
 }
 
@@ -116,9 +116,9 @@ button {
 .stats {
   margin-top: auto;
   padding-top: 0.75rem;
-  border-top: 1px solid #232a38;
+  border-top: 1px solid var(--mat-sys-outline-variant);
   font-size: 0.75rem;
-  color: #8b93a3;
+  color: var(--mat-sys-on-surface-variant);
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
@@ -131,7 +131,7 @@ button {
   overflow: hidden;
   cursor: grab;
   touch-action: none;
-  background: #0a0d12;
+  background: var(--mat-sys-surface);
 
   &:active {
     cursor: grabbing;

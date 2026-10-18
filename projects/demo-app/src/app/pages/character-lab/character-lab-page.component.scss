@@ -1,17 +1,18 @@
 :host {
   min-height: 100%;
-  background: #0f1218;
-  color: #eef2f8;
+  background: var(--mat-sys-surface);
+  color: var(--mat-sys-on-surface);
 }
 
 .panel {
   width: min(32rem, calc(100vw - 2rem));
   padding: 1rem;
-  border: 1px solid #2d3748;
+  border: 1px solid var(--mat-sys-outline-variant);
   border-radius: 0.75rem;
-  background: rgba(15, 20, 28, 0.94);
-  font: 13.5px/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.6);
+  background: color-mix(in srgb, var(--mat-sys-surface-container-high) 92%, transparent);
+  font-size: 13.5px;
+  line-height: 1.4;
+  box-shadow: 0 1rem 3rem var(--app-color-overlay-shadow);
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
@@ -28,12 +29,12 @@ header {
   }
   strong {
     font-size: 1.05rem;
-    color: #ffffff;
+    color: var(--mat-sys-on-surface);
   }
 }
 
 a, small {
-  color: #60a5fa;
+  color: var(--mat-sys-primary);
 }
 a {
   text-decoration: none;
@@ -44,7 +45,7 @@ a {
 
 .blurb {
   margin: 0;
-  color: #cbd5e1;
+  color: var(--mat-sys-on-surface-variant);
   font-size: 0.82rem;
 }
 
@@ -58,17 +59,17 @@ a {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #94a3b8;
+    color: var(--mat-sys-outline);
   }
 
   .tab-group {
     display: flex;
     flex-wrap: wrap;
     gap: 0.3rem;
-    background: #111827;
+    background: var(--mat-sys-surface-container);
     padding: 0.3rem;
     border-radius: 0.45rem;
-    border: 1px solid #1f2937;
+    border: 1px solid var(--mat-sys-outline-variant);
 
     .tab-btn {
       flex: 1 1 calc(33.333% - 0.3rem);
@@ -77,23 +78,23 @@ a {
       border: 1px solid transparent;
       border-radius: 0.3rem;
       padding: 0.4rem 0.5rem;
-      color: #94a3b8;
+      color: var(--mat-sys-on-surface-variant);
       font-size: 0.78rem;
       cursor: pointer;
       text-align: center;
       transition: all 0.15s ease;
 
       &:hover {
-        color: #f1f5f9;
-        background: #1e293b;
+        color: var(--mat-sys-on-surface);
+        background: var(--mat-sys-surface-container-highest);
       }
 
       &.active {
-        background: #3b82f6;
-        border-color: #60a5fa;
-        color: #ffffff;
+        background: var(--mat-sys-primary-container);
+        border-color: var(--mat-sys-primary);
+        color: var(--mat-sys-on-primary-container);
         font-weight: 600;
-        box-shadow: 0 0.15rem 0.5rem rgba(59, 130, 246, 0.35);
+        box-shadow: 0 0.15rem 0.5rem var(--app-color-overlay-shadow);
       }
     }
   }
@@ -104,11 +105,11 @@ a {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.8rem;
-  color: #e2e8f0;
+  color: var(--mat-sys-on-surface);
   cursor: pointer;
 
   input[type='checkbox'] {
-    accent-color: #3b82f6;
+    accent-color: var(--mat-sys-primary);
     width: 15px;
     height: 15px;
   }
@@ -117,8 +118,8 @@ a {
 .technique-card {
   margin-top: 0.15rem;
   padding: 0.65rem 0.8rem;
-  background: #141b26;
-  border: 1px solid #233044;
+  background: var(--mat-sys-surface-container);
+  border: 1px solid var(--mat-sys-outline-variant);
   border-radius: 0.5rem;
   display: flex;
   flex-direction: column;
@@ -132,25 +133,24 @@ a {
     .technique-tag {
       font-size: 0.75rem;
       font-weight: 600;
-      color: #38bdf8;
-      background: rgba(56, 189, 248, 0.12);
-      border: 1px solid rgba(56, 189, 248, 0.25);
+      color: var(--app-color-lab);
+      background: var(--app-color-lab-bg);
+      border: 1px solid var(--app-color-lab-border);
       padding: 0.15rem 0.45rem;
       border-radius: 0.25rem;
     }
 
     .coord-tag {
       font-size: 0.72rem;
-      font-family: ui-monospace, monospace;
-      color: #64748b;
+      font-family: var(--app-font-mono);
+      color: var(--mat-sys-outline);
     }
   }
 
   .technique-desc {
     margin: 0;
-    color: #94a3b8;
+    color: var(--mat-sys-on-surface-variant);
     font-size: 0.78rem;
     line-height: 1.35;
   }
 }
-

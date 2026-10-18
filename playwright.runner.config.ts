@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 /** Reuse the existing application host; never launch a competing development server for this suite. */
 export default defineConfig({
   testDir: './tests/scene/specs',
-  testMatch: 'test-runner.spec.ts',
+  testMatch: '**/*runner.spec.ts',
   timeout: 90_000,
   workers: 1,
   reporter: [['list']],

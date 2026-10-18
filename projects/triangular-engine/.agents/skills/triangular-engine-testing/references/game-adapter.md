@@ -24,7 +24,7 @@ interface Snapshot {
 interface GameTestDriver {
   snapshot(): Snapshot;
   apply(settings: Settings, signal: AbortSignal): Promise<void>;
-  waitForRenderedState(signal: AbortSignal): Promise<void>;
+  waitForRenderedState(settings: Settings, signal: AbortSignal): Promise<void>;
   // Reset/start providers before moving, collect during motion, and stop/remove
   // listeners in finally. Return real checks and metrics, or explain unavailable
   // readings. Every async method must stop its work when the signal aborts.
@@ -60,13 +60,15 @@ export function createGameTestAdapter(
   return {
     capture: () => game.snapshot(),
     apply: (scenario, context) => game.apply(scenario.settings, context.signal),
-    ready: (context: TestContext) => game.waitForRenderedState(context.signal),
+    ready: (context: TestContext, scenario) => game.waitForRenderedState(
+      scenario.settings, context.signal,
+    ),
     measure: (scenario, context) => game.observePath(
       scenario.settings.path, scenario.durationMs, context.signal,
     ),
     restore: async (snapshot, context) => {
       await game.restore(snapshot, context.signal);
-      await game.waitForRenderedState(context.signal);
+      await game.waitForRenderedState(snapshot.settings, context.signal);
     },
   };
 }
@@ -77,6 +79,11 @@ Bind the adapter and history to `TestRunnerComponent` in the game host. Bind
 work. While progress is non-null, prevent manual controls or other test buttons
 from fighting the adapter. On restoration and final null progress, release those
 locks. Do not dispose scene resources before cancelling and allowing cleanup.
+
+`ready(context, scenario)` receives the scenario just applied; do not cache it in
+the adapter. Readiness should check that scenario's expected rendered state.
+Lock pointer/keyboard scene controls as well as forms: a disabled fieldset alone
+does not disable canvas controls, links, or programmatic actions.
 
 For performance work, append a version/suite with `purpose: 'performance'` and
 appropriate metric providers; do not relabel an already shared functional suite.

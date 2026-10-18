@@ -14,6 +14,76 @@ import {
 } from 'three';
 import { SEAM_GLSL_FUNCTIONS } from './antimeridian-seam';
 
+export const BEND_GLSL_FUNCTIONS = /* glsl */ `
+  float planetSinc(float a) {
+    float a2 = a * a;
+    if (a2 < 1e-6) return 1.0 - a2 / 6.0 + (a2 * a2) / 120.0;
+    return sin(a) / a;
+  }
+
+  vec2 planetStaticEquirectXY(vec3 dir, vec2 flatXY, float radius, float mapWidth, float projType) {
+    if (projType < 0.5) {
+      return flatXY;
+    }
+    float EE_M = 0.8660254037844386;
+    float EE_A1 = 1.340264;
+    float EE_A2 = -0.081106;
+    float EE_A3 = 0.000893;
+    float EE_A4 = 0.003796;
+    float EE_RAW_X_MAX = 2.7066299836960748;
+
+    float sinLat = clamp(dir.y, -1.0, 1.0);
+    float pLat = asin(sinLat);
+    float theta = asin(clamp(EE_M * sinLat, -1.0, 1.0));
+    float theta2 = theta * theta;
+    float theta6 = theta2 * theta2 * theta2;
+    float scale = mapWidth / (2.0 * EE_RAW_X_MAX);
+    float denom = EE_M * (EE_A1 + 3.0 * EE_A2 * theta2 + theta6 * (7.0 * EE_A3 + 9.0 * EE_A4 * theta2));
+    float eeXPerLon = (cos(theta) * scale) / denom;
+    float eeY = theta * (EE_A1 + EE_A2 * theta2 + theta6 * (EE_A3 + EE_A4 * theta2)) * scale;
+
+    float horizSq = dir.x * dir.x + dir.z * dir.z;
+    float lonFromFlat = flatXY.x / max(eeXPerLon, 1e-6);
+    float lonFromDir = horizSq > 1e-6 ? atan(dir.x, dir.z) : lonFromFlat;
+    if (abs(lonFromDir) > 3.0 && lonFromDir * flatXY.x < 0.0) {
+      lonFromDir = -lonFromDir;
+    }
+    float poleBlend = smoothstep(1e-5, 1e-3, horizSq);
+    float pLon = mix(lonFromFlat, lonFromDir, poleBlend);
+    return vec2(radius * pLon, radius * pLat + (flatXY.y - eeY));
+  }
+
+  void planetBendTransform(
+    vec2 mapXY,
+    float k,
+    float height,
+    float zCenterShift,
+    out vec3 outPos,
+    out vec3 outEast,
+    out vec3 outNorth,
+    out vec3 outUp
+  ) {
+    float kx = k * mapXY.x;
+    float ky = k * mapXY.y;
+    float cx = cos(kx);
+    float sx = sin(kx);
+    float cy = cos(ky);
+    float sy = sin(ky);
+    outEast = vec3(cx, 0.0, -sx);
+    outNorth = vec3(-sy * sx, cy, -sy * cx);
+    outUp = vec3(cy * sx, sy, cx * cy);
+    float sincHalfX = planetSinc(0.5 * kx);
+    float sincHalfY = planetSinc(0.5 * ky);
+    float z = -(0.5 * k * mapXY.x * mapXY.x * sincHalfX * sincHalfX +
+                cx * 0.5 * k * mapXY.y * mapXY.y * sincHalfY * sincHalfY) + zCenterShift;
+    outPos = vec3(
+      cy * mapXY.x * planetSinc(kx),
+      mapXY.y * planetSinc(ky),
+      z
+    ) + height * outUp;
+  }
+`;
+
 export interface IDynamicProjectionUniforms {
   uMorph: IUniform<number>;
   uProjForward: IUniform<Vector3>;
@@ -139,6 +209,7 @@ export function enablePlanetMorphProjection(
         #endif
 
         ${SEAM_GLSL_FUNCTIONS}
+        ${BEND_GLSL_FUNCTIONS}
       ` + shader.vertexShader;
     }
 
@@ -152,47 +223,20 @@ export function enablePlanetMorphProjection(
         dynFlatNorm = vec3(0.0, 0.0, 1.0);
       }
 
-      vec3 morphedNormal = normalize(mix(dynSphereNorm, dynFlatNorm, uMorph));
-      vec3 objectNormal = morphedNormal;
-      vSphereNorm = dynSphereNorm;
-      #ifdef USE_TANGENT
-        vec3 objectTangent = vec3( tangent.xyz );
-      #endif
-      `,
-    );
-
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `
-      vec3 dynSpherePos = aSpherePos;
-      vec3 dynFlatPos = aFlatPos;
-      float seamCull = 0.0;
+      vec2 eqXY;
+      vec2 flatTargetXY;
+      float h = mix(length(aSpherePos) - uRadius, aFlatPos.z, uMorph);
 
       if (uProjMode > 0.5) {
         vec3 dir = aSphereNorm;
         float dotUp = dot(dir, uProjUp);
-
         float pLon = seamProjectedLon(dir, uProjForward, uProjRight);
         float pLat = asin(clamp(dotUp, -1.0, 1.0));
-
-        if (length(aOtherDir1) > 0.001 && length(aOtherDir2) > 0.001) {
-          if (seamTriangleCrosses(dir, aOtherDir1, aOtherDir2, uProjForward, uProjRight)) {
-            seamCull = 1.0;
-          }
-        }
-
-        vProjLon = pLon;
-        vProjMode = 1.0;
-
-        float flatX = 0.0;
-        float flatY = 0.0;
+        eqXY = vec2((pLon / 3.141592653589793) * (uRadius * 3.141592653589793), pLat * uRadius);
 
         if (uProjectionType < 0.5) {
-          // Equirectangular
-          flatX = (pLon / 3.141592653589793) * (uMapWidth * 0.5);
-          flatY = (pLat / 1.5707963267948966) * (uMapHeight * 0.5);
+          flatTargetXY = eqXY;
         } else {
-          // Equal Earth
           float EE_M = 0.8660254037844386;
           float EE_A1 = 1.340264;
           float EE_A2 = -0.081106;
@@ -207,11 +251,48 @@ export function enablePlanetMorphProjection(
           float rawY = theta * (EE_A1 + EE_A2 * theta2 + theta6 * (EE_A3 + EE_A4 * theta2));
 
           float scale = uMapWidth / (2.0 * EE_RAW_X_MAX);
-          flatX = rawX * scale;
-          flatY = rawY * scale;
+          flatTargetXY = vec2(rawX * scale, rawY * scale);
+        }
+      } else {
+        eqXY = planetStaticEquirectXY(aFlatPos.xy, uRadius, uProjectionType, uMapWidth);
+        flatTargetXY = aFlatPos.xy;
+      }
+
+      vec2 mapXY = mix(eqXY, flatTargetXY, uMorph);
+      vec3 bentPos;
+      vec3 bentEast;
+      vec3 bentNorth;
+      vec3 bentUp;
+      planetBendTransform(mapXY, h, uMorph, uRadius, bentPos, bentEast, bentNorth, bentUp);
+
+      vec3 bentReliefNorm = dynFlatNorm.x * bentEast + dynFlatNorm.y * bentNorth + dynFlatNorm.z * bentUp;
+      vec3 morphedNormal = normalize(mix(dynSphereNorm, bentReliefNorm, uMorph));
+      vec3 objectNormal = morphedNormal;
+      vSphereNorm = dynSphereNorm;
+      #ifdef USE_TANGENT
+        vec3 objectTangent = vec3( tangent.xyz );
+      #endif
+      `,
+    );
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `
+      float seamCull = 0.0;
+
+      if (uProjMode > 0.5) {
+        vec3 dir = aSphereNorm;
+        float dotUp = dot(dir, uProjUp);
+        float pLon = seamProjectedLon(dir, uProjForward, uProjRight);
+
+        if (length(aOtherDir1) > 0.001 && length(aOtherDir2) > 0.001) {
+          if (seamTriangleCrosses(dir, aOtherDir1, aOtherDir2, uProjForward, uProjRight)) {
+            seamCull = 1.0;
+          }
         }
 
-        dynFlatPos = vec3(flatX, flatY, aFlatPos.z);
+        vProjLon = pLon;
+        vProjMode = 1.0;
       } else {
         vProjLon = 0.0;
         vProjMode = 0.0;
@@ -219,7 +300,7 @@ export function enablePlanetMorphProjection(
 
       vMorph = uMorph;
       vSeamCull = seamCull;
-      vec3 transformed = mix(dynSpherePos, dynFlatPos, uMorph);
+      vec3 transformed = bentPos;
       `,
     );
 
@@ -227,7 +308,7 @@ export function enablePlanetMorphProjection(
       '#include <fog_vertex>',
       `
       #include <fog_vertex>
-      if (uProjMode > 0.5 && uMorph > 0.05 && seamCull > 0.5) {
+      if (uProjMode > 0.5 && uMorph > 0.001 && seamCull > 0.5) {
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
       }
       `,
@@ -252,7 +333,7 @@ export function enablePlanetMorphProjection(
       '#include <dithering_fragment>',
       `
       #include <dithering_fragment>
-      if (vProjMode > 0.5 && vMorph > 0.05 && (vSeamCull > 0.5 || fwidth(vProjLon) > 2.8)) {
+      if (vProjMode > 0.5 && vMorph > 0.001 && (vSeamCull > 0.5 || fwidth(vProjLon) > 2.8)) {
         discard;
       }
       `,
@@ -519,37 +600,42 @@ export function createPlanetBorderMorphMaterial(
       varying float vMorph;
 
       ${SEAM_GLSL_FUNCTIONS}
+      ${BEND_GLSL_FUNCTIONS}
 
       void main() {
-        vec3 dynSpherePos = aSpherePos;
-        vec3 dynFlatPos = aFlatPos;
+        vec3 dir = aSphereNorm;
+        float dotUp = dot(dir, uProjUp);
+
+        float pLon = seamProjectedLon(dir, uProjForward, uProjRight);
+        float pLat = asin(clamp(dotUp, -1.0, 1.0));
 
         if (uProjMode > 0.5) {
-          vec3 dir = aSphereNorm;
-          float dotUp = dot(dir, uProjUp);
-
-          float pLon = seamProjectedLon(dir, uProjForward, uProjRight);
-          float pLat = asin(clamp(dotUp, -1.0, 1.0));
-
-          float oLon = seamProjectedLon(aOtherDir, uProjForward, uProjRight);
-
-          if (uMorph > 0.05 && seamEdgeCrosses(dir, aOtherDir, uProjForward, uProjRight)) {
+          if (uMorph > 0.001 && seamEdgeCrosses(dir, aOtherDir, uProjForward, uProjRight)) {
             gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
             return;
           }
 
           vProjLon = pLon;
           vProjMode = 1.0;
+        } else {
+          vProjLon = 0.0;
+          vProjMode = 0.0;
+        }
+
+        vec2 eqXY;
+        vec2 flatTargetXY;
+        float h = mix(length(aSpherePos) - uRadius, aFlatPos.z, uMorph);
+
+        if (uProjMode > 0.5) {
+          eqXY = vec2((pLon / 3.141592653589793) * (uRadius * 3.141592653589793), pLat * uRadius);
 
           float flatX = 0.0;
           float flatY = 0.0;
 
           if (uProjectionType < 0.5) {
-            // Equirectangular
-            flatX = (pLon / 3.141592653589793) * (uMapWidth * 0.5);
-            flatY = (pLat / 1.5707963267948966) * (uMapHeight * 0.5);
+            flatX = eqXY.x;
+            flatY = eqXY.y;
           } else {
-            // Equal Earth
             float EE_M = 0.8660254037844386;
             float EE_A1 = 1.340264;
             float EE_A2 = -0.081106;
@@ -569,6 +655,7 @@ export function createPlanetBorderMorphMaterial(
           }
 
           if (uRibbonWidth > 0.0001) {
+            float oLon = seamProjectedLon(aOtherDir, uProjForward, uProjRight);
             float oUp = dot(aOtherDir, uProjUp);
             float oLat = asin(clamp(oUp, -1.0, 1.0));
 
@@ -610,14 +697,20 @@ export function createPlanetBorderMorphMaterial(
             }
           }
 
-          dynFlatPos = vec3(flatX, flatY, aFlatPos.z);
+          flatTargetXY = vec2(flatX, flatY);
         } else {
-          vProjLon = 0.0;
-          vProjMode = 0.0;
+          eqXY = planetStaticEquirectXY(aFlatPos.xy, uRadius, uProjectionType, uMapWidth);
+          flatTargetXY = aFlatPos.xy;
         }
 
+        vec2 mapXY = mix(eqXY, flatTargetXY, uMorph);
+        vec3 morphedPos;
+        vec3 bE;
+        vec3 bN;
+        vec3 bU;
+        planetBendTransform(mapXY, h, uMorph, uRadius, morphedPos, bE, bN, bU);
+
         vMorph = uMorph;
-        vec3 morphedPos = mix(dynSpherePos, dynFlatPos, uMorph);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(morphedPos, 1.0);
         #include <logdepthbuf_vertex>
       }
@@ -633,7 +726,7 @@ export function createPlanetBorderMorphMaterial(
       varying float vMorph;
 
       void main() {
-        if (vProjMode > 0.5 && vMorph > 0.05 && fwidth(vProjLon) > 2.8) {
+        if (vProjMode > 0.5 && vMorph > 0.001 && fwidth(vProjLon) > 2.8) {
           discard;
         }
         gl_FragColor = vec4(uColor, uOpacity);
@@ -700,23 +793,17 @@ export function createPlanetCellOverlayMaterial(
       varying float vDist;
 
       ${SEAM_GLSL_FUNCTIONS}
+      ${BEND_GLSL_FUNCTIONS}
 
       void main() {
         vCellId = aCellId;
         vDist = aDist;
 
-        vec3 dynSpherePos = aSpherePos;
-        vec3 dynFlatPos = aFlatPos;
-
-        // Seam culling runs in both static and dynamic modes: when tracking is off the projection
-        // basis uniforms hold the identity frame (forward=+Z, right=+X, up=+Y), so the projected
-        // longitude matches the CPU-baked aFlatPos. Testing all three triangle edges is required
-        // because a cell fan can straddle the antimeridian without any single vertex knowing it.
         vec3 dir = aSphereNorm;
         float pLon = seamProjectedLon(dir, uProjForward, uProjRight);
         float pLat = asin(clamp(dot(dir, uProjUp), -1.0, 1.0));
 
-        if (uMorph > 0.05 &&
+        if (uMorph > 0.001 &&
             seamTriangleCrosses(dir, aOtherDir1, aOtherDir2, uProjForward, uProjRight)) {
           gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
           return;
@@ -725,13 +812,24 @@ export function createPlanetCellOverlayMaterial(
         if (uProjMode > 0.5) {
           vProjLon = pLon;
           vProjMode = 1.0;
+        } else {
+          vProjLon = 0.0;
+          vProjMode = 0.0;
+        }
+
+        vec2 eqXY;
+        vec2 flatTargetXY;
+        float h = mix(length(aSpherePos) - uRadius, aFlatPos.z, uMorph);
+
+        if (uProjMode > 0.5) {
+          eqXY = vec2((pLon / 3.141592653589793) * (uRadius * 3.141592653589793), pLat * uRadius);
 
           float flatX = 0.0;
           float flatY = 0.0;
 
           if (uProjectionType < 0.5) {
-            flatX = (pLon / 3.141592653589793) * (uMapWidth * 0.5);
-            flatY = (pLat / 1.5707963267948966) * (uMapHeight * 0.5);
+            flatX = eqXY.x;
+            flatY = eqXY.y;
           } else {
             float EE_M = 0.8660254037844386;
             float EE_A1 = 1.340264;
@@ -751,14 +849,20 @@ export function createPlanetCellOverlayMaterial(
             flatY = rawY * scale;
           }
 
-          dynFlatPos = vec3(flatX, flatY, aFlatPos.z);
+          flatTargetXY = vec2(flatX, flatY);
         } else {
-          vProjLon = 0.0;
-          vProjMode = 0.0;
+          eqXY = planetStaticEquirectXY(aFlatPos.xy, uRadius, uProjectionType, uMapWidth);
+          flatTargetXY = aFlatPos.xy;
         }
 
+        vec2 mapXY = mix(eqXY, flatTargetXY, uMorph);
+        vec3 morphedPos;
+        vec3 bE;
+        vec3 bN;
+        vec3 bU;
+        planetBendTransform(mapXY, h, uMorph, uRadius, morphedPos, bE, bN, bU);
+
         vMorph = uMorph;
-        vec3 morphedPos = mix(dynSpherePos, dynFlatPos, uMorph);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(morphedPos, 1.0);
         #include <logdepthbuf_vertex>
       }
@@ -778,7 +882,7 @@ export function createPlanetCellOverlayMaterial(
       varying float vDist;
 
       void main() {
-        if (vProjMode > 0.5 && vMorph > 0.05 && fwidth(vProjLon) > 2.8) {
+        if (vProjMode > 0.5 && vMorph > 0.001 && fwidth(vProjLon) > 2.8) {
           discard;
         }
 
@@ -866,27 +970,64 @@ export function createPlanetMapBorderMaterial(
       uniform vec3 uProjUp;
       uniform vec3 uProjRight;
       uniform float uProjMode;
+      uniform float uMapWidth;
       uniform float uRadius;
+      uniform float uProjectionType;
 
       varying vec2 vUv;
       varying float vTick;
       varying float vMorph;
+
+      ${SEAM_GLSL_FUNCTIONS}
+      ${BEND_GLSL_FUNCTIONS}
 
       void main() {
         vUv = uv;
         vTick = aTick;
         vMorph = uMorph;
 
-        vec3 dynSpherePos = aSpherePos;
-        vec3 dynFlatPos = aFlatPos;
+        vec2 eqXY;
+        vec2 flatTargetXY;
+        float h = mix(length(aSpherePos) - uRadius, aFlatPos.z, uMorph);
 
         if (uProjMode > 0.5) {
           vec3 rotatedNorm = aSphereNorm.x * uProjRight + aSphereNorm.y * uProjUp + aSphereNorm.z * uProjForward;
-          float rDisplaced = length(aSpherePos + vec3(0.0, 0.0, uRadius));
-          dynSpherePos = rotatedNorm * rDisplaced - vec3(0.0, 0.0, uRadius);
+          float dotUp = dot(rotatedNorm, uProjUp);
+          float pLon = seamProjectedLon(rotatedNorm, uProjForward, uProjRight);
+          float pLat = asin(clamp(dotUp, -1.0, 1.0));
+          eqXY = vec2((pLon / 3.141592653589793) * (uRadius * 3.141592653589793), pLat * uRadius);
+
+          if (uProjectionType < 0.5) {
+            flatTargetXY = eqXY;
+          } else {
+            float EE_M = 0.8660254037844386;
+            float EE_A1 = 1.340264;
+            float EE_A2 = -0.081106;
+            float EE_A3 = 0.000893;
+            float EE_A4 = 0.003796;
+            float EE_RAW_X_MAX = 2.7066299836960748;
+
+            float theta = asin(clamp(EE_M * sin(pLat), -1.0, 1.0));
+            float theta2 = theta * theta;
+            float theta6 = theta2 * theta2 * theta2;
+            float rawX = (pLon * cos(theta)) / (EE_M * (EE_A1 + 3.0 * EE_A2 * theta2 + theta6 * (7.0 * EE_A3 + 9.0 * EE_A4 * theta2)));
+            float rawY = theta * (EE_A1 + EE_A2 * theta2 + theta6 * (EE_A3 + EE_A4 * theta2));
+
+            float scale = uMapWidth / (2.0 * EE_RAW_X_MAX);
+            flatTargetXY = vec2(rawX * scale, rawY * scale);
+          }
+        } else {
+          eqXY = planetStaticEquirectXY(aFlatPos.xy, uRadius, uProjectionType, uMapWidth);
+          flatTargetXY = aFlatPos.xy;
         }
 
-        vec3 morphedPos = mix(dynSpherePos, dynFlatPos, uMorph);
+        vec2 mapXY = mix(eqXY, flatTargetXY, uMorph);
+        vec3 morphedPos;
+        vec3 bE;
+        vec3 bN;
+        vec3 bU;
+        planetBendTransform(mapXY, h, uMorph, uRadius, morphedPos, bE, bN, bU);
+
         gl_Position = projectionMatrix * modelViewMatrix * vec4(morphedPos, 1.0);
         #include <logdepthbuf_vertex>
       }

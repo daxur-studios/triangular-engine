@@ -11,6 +11,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .muted, .issue { display: block; font-size: 0.85rem; }
 .muted { color: var(--ui-muted, #b0becd); }
 .issue { color: var(--ui-accent, #8ac9ff); }
+.failed { color: var(--ui-danger, #ff9aa2); }
 .effective-settings { max-height: 12rem; overflow: auto; font-size: 0.8rem; }
 .case-results { padding-inline-start: 1.25rem; }
 .case-results li { margin-block: 0.4rem; }

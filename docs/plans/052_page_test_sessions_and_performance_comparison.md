@@ -12,6 +12,12 @@ performance:
   - id: cloud-haze-cost-v1
     url: http://triangular-demo.localhost:4200/cloud-volumes-lab?testSuite=cloud-haze-cost&testVersion=1&testProfile=human-observed&testAutoStart=1
     status: runnable-diagnostic
+  - id: morph-streaming-smoke-v1
+    url: http://triangular-demo.localhost:4200/cell-planet-morph-streaming?testSuite=morph-streaming-smoke&testVersion=1&testProfile=human-observed&testAutoStart=1
+    status: blocked-material-streaming
+  - id: morph-streaming-morph-cost-v1
+    url: http://triangular-demo.localhost:4200/cell-planet-morph-streaming?testSuite=morph-streaming-morph-cost&testVersion=1&testProfile=human-observed&testAutoStart=1
+    status: blocked-material-streaming
 ---
 
 # Plan 052: Page Test Sessions and Performance Comparison
@@ -33,13 +39,17 @@ the existing replay experiment. Add a second application adapter later to prove 
 - [x] One shared UI slider through a local package and reactive forms.
 - [x] Focused headless specs, library build, demo host build, docs/public exports.
 - [x] Package and reference a consumer testing skill with a game adapter recipe.
+- [x] Review the second integration's API changes; align the skill and evidence guide,
+  clarify review/metric semantics, and discover runner browser specs by pattern.
 
 The bounded component slice is implemented. Sixteen runner specs, one timer spec,
 and four browser integration checks passed. The library build and demo host build
 passed; source/evidence details are in the runbook. The links in `performance` are
-executable diagnostics, not accepted baselines. A second application's adapter,
-cross-page suites, durable result transport and controlled-machine comparisons remain
-future work. The U0/U0P status below describes the broader measurement work.
+executable diagnostics, not accepted baselines. The second page's adapter is now
+implemented, but successful browser evidence is blocked by material streaming (see
+the runbook's integration review). Cross-page suites, durable result transport and
+controlled-machine comparisons remain future work. The U0/U0P status below describes
+the broader measurement work.
 
 [Run latest diagnostic test](http://triangular-demo.localhost:4200/cloud-volumes-lab?testSuite=cloud-haze-cost&testVersion=1&testProfile=human-observed&testAutoStart=1)
 

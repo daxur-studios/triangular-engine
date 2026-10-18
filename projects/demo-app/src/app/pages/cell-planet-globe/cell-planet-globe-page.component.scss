@@ -1,6 +1,7 @@
 :host {
   position: relative;
-  background: #111820;
+  background: var(--mat-sys-surface);
+  color: var(--mat-sys-on-surface);
 }
 
 .readout {
@@ -12,15 +13,17 @@
   gap: 0.35rem;
   width: min(28rem, calc(100vw - 2rem));
   padding: 0.75rem 0.9rem;
-  border: 1px solid rgb(255 255 255 / 15%);
+  border: 1px solid var(--mat-sys-outline-variant);
   border-radius: 0.5rem;
-  background: rgb(8 14 23 / 86%);
-  color: #dce9f5;
-  font: 12px/1.5 ui-monospace, monospace;
+  background: color-mix(in srgb, var(--mat-sys-surface-container) 86%, transparent);
+  color: var(--mat-sys-on-surface);
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 strong {
-  color: white;
+  color: var(--mat-sys-on-surface);
 }
 
 .label,
@@ -30,7 +33,7 @@ label {
 }
 
 label > span {
-  color: #b7cde0;
+  color: var(--mat-sys-on-surface-variant);
 }
 
 input[type='range'],
@@ -48,15 +51,15 @@ label.checkbox {
 button {
   width: max-content;
   padding: 0.25rem 0.55rem;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--mat-sys-outline-variant);
   border-radius: 0.25rem;
-  background: rgb(70 130 180 / 22%);
-  color: #eaf4ff;
+  background: var(--mat-sys-surface-container-high);
+  color: var(--mat-sys-on-surface);
   font: inherit;
   cursor: pointer;
 
   &:hover {
-    background: rgb(70 130 180 / 36%);
+    background: var(--mat-sys-surface-container-highest);
   }
 }
 
@@ -67,15 +70,15 @@ button {
   a,
   span {
     padding: 0.25rem 0.45rem;
-    border: 1px solid rgb(255 255 255 / 18%);
+    border: 1px solid var(--mat-sys-outline-variant);
     border-radius: 0.25rem;
-    color: #a9c9e4;
+    color: var(--mat-sys-on-surface-variant);
     text-decoration: none;
   }
 
   a:hover,
   .active {
-    background: rgb(70 130 180 / 30%);
-    color: white;
+    background: var(--mat-sys-surface-container-highest);
+    color: var(--mat-sys-on-surface);
   }
 }

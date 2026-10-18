@@ -1,5 +1,5 @@
 import { TestSession, waitForTest } from './test-session';
-import type { TestRunAdapter, TestSuite } from './test-contracts';
+import type { TestObservation, TestRunAdapter, TestSuite } from './test-contracts';
 
 interface Settings { value: number }
 const suite: TestSuite<Settings> = {
@@ -74,6 +74,53 @@ describe('TestSession', () => {
     expect(result.status).toBe('inconclusive');
     expect(result.performanceVerdict).toBe('inconclusive');
     expect(result.cases[0].validityIssues.length).toBe(2);
+  });
+
+  it('passes the applied scenario to ready so adapters need not remember it', async () => {
+    const seen: string[] = [];
+    adapter.ready = async (context, scenario) => { seen.push(`${context.repetition}:${scenario.id}:${scenario.settings.value}`); };
+    const multi = { ...suite, scenarios: [...suite.scenarios, { ...suite.scenarios[0], id: 'second', settings: { value: 8 } }] };
+    adapter.measure = async () => ({ metrics: [] });
+    await new TestSession<Settings, number>().run(multi, adapter, { repetitions: 2, profile: 'headless-hardware' });
+    expect(seen).toEqual(['1:first:7', '1:second:8', '2:first:7', '2:second:8']);
+  });
+
+  it('requests visual review from the explicit flag or observer profile, independently of suite purpose', async () => {
+    for (const purpose of ['functional', 'performance'] as const) {
+      const normal = await new TestSession<Settings, number>().run({ ...suite, purpose }, adapter,
+        { repetitions: 1, profile: 'headless-hardware' });
+      expect(normal.visualReview).toBe('not-required');
+      const explicit = await new TestSession<Settings, number>().run({ ...suite, purpose, requiresVisualReview: true }, adapter,
+        { repetitions: 1, profile: 'headless-hardware' });
+      expect(explicit.visualReview).toBe('pending');
+      const observed = await new TestSession<Settings, number>().run({ ...suite, purpose, requiresVisualReview: false }, adapter,
+        { repetitions: 1, profile: 'human-observed' });
+      expect(observed.visualReview).toBe('pending');
+    }
+  });
+
+  it('lists an unavailable optional metric without making the performance case inconclusive', async () => {
+    const perf: TestSuite<Settings> = { ...suite, purpose: 'performance' };
+    const withMetrics = (metrics: TestObservation['metrics']) => {
+      adapter.measure = async () => ({ metrics, checks: [{ name: 'Applied state', passed: true }] });
+    };
+    withMetrics([{ name: 'interval', unit: 'ms', source: 's', samples: [16, 17] },
+      { name: 'gpu', unit: 'ms', source: 'none', samples: [], unavailableReason: 'no timestamp query', optional: true }]);
+    const ok = await new TestSession<Settings, number>().run(perf, adapter, { repetitions: 1, profile: 'visible-browser' });
+    expect(ok.cases[0].validityIssues).not.toContain('Required metric samples unavailable or invalid');
+    expect(ok.cases[0].metrics.map((metric) => metric.name)).toEqual(['interval', 'gpu']);
+
+    withMetrics([{ name: 'gpu', unit: 'ms', source: 'none', samples: [], optional: true }]);
+    const onlyOptional = await new TestSession<Settings, number>().run(perf, adapter, { repetitions: 1, profile: 'visible-browser' });
+    expect(onlyOptional.cases[0].validityIssues).toContain('Required metric samples unavailable or invalid');
+
+    withMetrics([{ name: 'interval', unit: 'ms', source: 's', samples: [] }]);
+    const missing = await new TestSession<Settings, number>().run(perf, adapter, { repetitions: 1, profile: 'visible-browser' });
+    expect(missing.cases[0].validityIssues).toContain('Required metric samples unavailable or invalid');
+
+    withMetrics([{ name: 'interval', unit: 'ms', source: 's', samples: [16], }, { name: 'gpu', unit: 'ms', source: 'x', samples: [NaN], optional: true }]);
+    const invalid = await new TestSession<Settings, number>().run(perf, adapter, { repetitions: 1, profile: 'visible-browser' });
+    expect(invalid.cases[0].validityIssues).toContain('Required metric samples unavailable or invalid');
   });
 
   it('records a visible-profile blur as invalid evidence', async () => {

@@ -4,8 +4,10 @@ import {
   DestroyRef,
   effect,
   inject,
+  isDevMode,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
@@ -14,6 +16,7 @@ import {
   RaycastFocusContext,
   RaycastOrbitControlsComponent,
 } from 'triangular-engine';
+import { TestRunnerComponent, type TestProgress } from 'triangular-engine/testing';
 import {
   BatchedMesh,
   Box3,
@@ -70,6 +73,7 @@ import {
   type IDynamicProjectionUniforms,
   type MapProjectionKind,
   type PlanetMapBorderStyle,
+  bendPlanetSurfacePoint,
 } from 'triangular-engine/worldgen/render';
 import {
   TerrainMaterialTileRuntime,
@@ -104,6 +108,17 @@ import {
   suiteResult,
   suiteSupported,
 } from '../cell-planet-tsl/benchmark-suite';
+import {
+  createMorphTestAdapter,
+  type MorphPageSnapshot,
+  type MorphTestHost,
+} from './morph-streaming-test-adapter';
+import {
+  MORPH_TEST_HISTORY,
+  type MorphTestSettings,
+  type MorphTestVec3,
+  type MorphWorldSettings,
+} from './morph-streaming-tests';
 import type {
   CellPlanetMorphCellGridPayload,
   CellPlanetMorphCellGridRequest,
@@ -193,6 +208,7 @@ function addressLevel(addr: ILatLonTerrainPatchAddress): number {
     RaycastOrbitControlsComponent,
     TerrainSurfaceComponent,
     CellDataLayerPickerComponent,
+    TestRunnerComponent,
   ],
   templateUrl: './cell-planet-morph-streaming-page.component.html',
   styleUrl: './cell-planet-morph-streaming-page.component.scss',
@@ -204,6 +220,7 @@ function addressLevel(addr: ILatLonTerrainPatchAddress): number {
 export class CellPlanetMorphStreamingPageComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly engine = inject(EngineService);
+  private readonly orbitControlsRef = viewChild(RaycastOrbitControlsComponent);
   readonly dummyField = new StreamingDummyField();
 
   // Background Web Worker for non-blocking terrain sampling, edge conforming, and Meshoptimizer
@@ -251,7 +268,7 @@ export class CellPlanetMorphStreamingPageComponent {
 
   // World parameters matching canonical Cell Planet U0 Fixture
   readonly cellCount = CELL_PLANET_U0_FIXTURE.cellCount;
-  readonly seed = signal(CELL_PLANET_U0_FIXTURE.seed);
+  readonly seed = signal<number>(CELL_PLANET_U0_FIXTURE.seed);
   readonly worldProfileKind = signal<WorldProfileKind>(
     CELL_PLANET_U0_FIXTURE.worldProfile,
   );
@@ -671,16 +688,25 @@ export class CellPlanetMorphStreamingPageComponent {
     morph: number,
     target: Vector3,
   ): Vector3 {
-    const inverseMorph = 1 - morph;
-    target.set(
-      spherePositions.getX(index) * inverseMorph +
-        flatPositions.getX(index) * morph,
-      spherePositions.getY(index) * inverseMorph +
-        flatPositions.getY(index) * morph,
-      spherePositions.getZ(index) * inverseMorph +
-        flatPositions.getZ(index) * morph,
+    this.morphRaycastB.set(
+      spherePositions.getX(index),
+      spherePositions.getY(index),
+      spherePositions.getZ(index),
     );
-    return target;
+    this.morphRaycastC.set(
+      flatPositions.getX(index),
+      flatPositions.getY(index),
+      flatPositions.getZ(index),
+    );
+    return bendPlanetSurfacePoint(
+      this.morphRaycastB,
+      this.morphRaycastC,
+      this.radius(),
+      morph,
+      2 * Math.PI * this.radius(),
+      this.projectionKind() === 'equalEarth',
+      target,
+    );
   }
 
   readonly frustumLod = signal(true);
@@ -806,6 +832,7 @@ export class CellPlanetMorphStreamingPageComponent {
         this.materialTileRequests.delete(data.id);
         this.releaseMaterialWorker(data.id);
         if (data.error) {
+          this.noteTestError(`Material worker: ${data.error}`);
           materialPending.reject(new Error(data.error));
         } else {
           if (data.cellLookup) {
@@ -840,6 +867,7 @@ export class CellPlanetMorphStreamingPageComponent {
       this.workerRequests.delete(data.id);
 
       if (data.error) {
+        this.noteTestError(`Mesh worker: ${data.error}`);
         pending.reject(new Error(data.error));
       } else if (data.patch) {
         if (data.cellLookup) {
@@ -871,11 +899,18 @@ export class CellPlanetMorphStreamingPageComponent {
     };
 
     this.resumeSuite();
+    const frameCounter = this.engine.renderComplete$.subscribe(() => {
+      this.renderedFrameCount++;
+      if (!this.firstFrameRendered()) this.firstFrameRendered.set(true);
+    });
+    const engineErrors = this.engine.error$.subscribe((event) =>
+      this.noteTestError(`Engine ${event.phase}: ${String(event.error)}`));
     this.terrainWorker.onmessage = handleWorkerMessage;
     for (const worker of this.materialWorkers) worker.onmessage = handleWorkerMessage;
 
     const handleWorkerError = () => {
       const error = new Error('Morph terrain worker crashed.');
+      this.noteTestError(error.message);
       for (const pending of this.workerRequests.values()) pending.reject(error);
       this.workerRequests.clear();
       for (const pending of this.materialTileRequests.values()) pending.reject(error);
@@ -905,6 +940,9 @@ export class CellPlanetMorphStreamingPageComponent {
     }));
 
     this.destroyRef.onDestroy(() => {
+      this.pageDisposed = true;
+      frameCounter.unsubscribe();
+      engineErrors.unsubscribe();
       textureTick.unsubscribe();
       unregisterTelemetry();
       this.materialRuntime.dispose();
@@ -1401,9 +1439,7 @@ export class CellPlanetMorphStreamingPageComponent {
           : 1 - Math.pow(-2 * progress + 2, 3) / 2;
 
       const current = start + (target - start) * ease;
-      this.morphProgress.set(current);
-      this.morphUniforms.uMorph.value = current;
-      this.updateCameraForActiveBookmark(current);
+      this.setMorphFrame(current);
 
       if (progress < 1) {
         requestAnimationFrame(step);
@@ -1416,6 +1452,13 @@ export class CellPlanetMorphStreamingPageComponent {
       }
     };
     requestAnimationFrame(step);
+  }
+
+  /** One animation step of the morph: signal and shader uniform, with the bookmark camera following. */
+  private setMorphFrame(morph: number): void {
+    this.morphProgress.set(morph);
+    this.morphUniforms.uMorph.value = morph;
+    this.updateCameraForActiveBookmark(morph);
   }
 
   toggleMorph(): void {
@@ -1433,18 +1476,23 @@ export class CellPlanetMorphStreamingPageComponent {
 
   setQuality(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as Quality;
-    if (value in QUALITY_PRESETS) {
-      this.quality.set(value);
-      this.reductionPercent.set(
-        Math.round(QUALITY_PRESETS[value].reduction * 100),
-      );
-      this.rebuildRevision.update((r) => r + 1);
-    }
+    if (value in QUALITY_PRESETS) this.applyQuality(value);
+  }
+
+  /** Shared by the select and the test adapter; a preset also resets the mesh reduction. */
+  applyQuality(value: Quality): void {
+    this.quality.set(value);
+    this.reductionPercent.set(Math.round(QUALITY_PRESETS[value].reduction * 100));
+    this.rebuildRevision.update((r) => r + 1);
   }
 
   setReduction(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
     if (!Number.isFinite(value)) return;
+    this.applyReductionPercent(value);
+  }
+
+  applyReductionPercent(value: number): void {
     this.reductionPercent.set(Math.min(95, Math.max(0, Math.round(value))));
     this.rebuildRevision.update((r) => r + 1);
   }
@@ -1486,9 +1534,14 @@ export class CellPlanetMorphStreamingPageComponent {
   onHeightScaleChange(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
     if (!Number.isFinite(value)) return;
-    const clamped = Math.max(0, Math.min(14, value));
+    this.commitHeightScale(Math.max(0, Math.min(14, value)));
+  }
+
+  /** Applies relief immediately (the slider's committed value), cancelling its pending debounce. */
+  commitHeightScale(clamped: number): void {
     if (this.heightScaleDebounceTimer !== undefined) {
       clearTimeout(this.heightScaleDebounceTimer);
+      this.heightScaleDebounceTimer = undefined;
     }
     this.heightScale.set(clamped);
     this.rebuildRevision.update((r) => r + 1);
@@ -1547,6 +1600,14 @@ export class CellPlanetMorphStreamingPageComponent {
       projectionKind,
       clearance: radius * 0.0015,
     });
+    for (const name of ['position', 'aSpherePos']) {
+      const attribute = geometryData.geometry.getAttribute(name);
+      if (!attribute || attribute.itemSize !== 3) continue;
+      for (let index = 2; index < attribute.array.length; index += 3) {
+        attribute.array[index] += radius;
+      }
+      attribute.needsUpdate = true;
+    }
     const material = createPlanetMapBorderMaterial(this.morphUniforms, {
       color: '#38bdf8',
       opacity: 0.95,
@@ -1581,11 +1642,23 @@ export class CellPlanetMorphStreamingPageComponent {
   setStreamedTextureLod(event: Event): void {
     const mode = this.colourMode();
     if (mode === 'lod') return;
-    const enabled = (event.target as HTMLInputElement).checked;
+    this.applyStreamedTextureLod(mode, (event.target as HTMLInputElement).checked);
+  }
+
+  applyStreamedTextureLod(mode: StreamedTextureColourMode, enabled: boolean): void {
     this.streamedTextureLod.update(values => ({ ...values, [mode]: enabled }));
     this.materialRuntime.invalidate();
     this.materialViewKey = '';
     this.materialRuntime.setEnabled(enabled);
+  }
+
+  setSeed(seed: number): void {
+    if (this.seed() === seed) return;
+    this.seed.set(seed);
+    this.materialWorldKey = '';
+    this.materialViewKey = '';
+    this.materialRuntime.invalidate();
+    this.rebuildRevision.update((r) => r + 1);
   }
 
   setMacroVariationEnabled(event: Event): void {
@@ -1826,17 +1899,19 @@ export class CellPlanetMorphStreamingPageComponent {
       featureElevation + cameraAltitude,
     ];
 
-    // Smooth morphed interpolation between sphere and flat coordinates
-    this.cameraPosition.set([
-      (1 - morph) * sphereCam[0] + morph * flatCam[0],
-      (1 - morph) * sphereCam[1] + morph * flatCam[1],
-      (1 - morph) * sphereCam[2] + morph * flatCam[2],
-    ]);
-    this.cameraTarget.set([
-      (1 - morph) * sphereTarget[0] + morph * flatTarget[0],
-      (1 - morph) * sphereTarget[1] + morph * flatTarget[1],
-      (1 - morph) * sphereTarget[2] + morph * flatTarget[2],
-    ]);
+    const t = Math.min(1, Math.max(0, morph));
+    const isEE = this.projectionKind() === 'equalEarth';
+
+    const sTarget = new Vector3(sphereTarget[0], sphereTarget[1], sphereTarget[2]);
+    const fTarget = new Vector3(flatTarget[0], flatTarget[1], flatTarget[2]);
+    const mTarget = bendPlanetSurfacePoint(sTarget, fTarget, radius, t, mapWidth, isEE);
+
+    const sCam = new Vector3(sphereCam[0], sphereCam[1], sphereCam[2]);
+    const fCam = new Vector3(flatCam[0], flatCam[1], flatCam[2]);
+    const mCam = bendPlanetSurfacePoint(sCam, fCam, radius, t, mapWidth, isEE);
+
+    this.cameraPosition.set([mCam.x, mCam.y, mCam.z]);
+    this.cameraTarget.set([mTarget.x, mTarget.y, mTarget.z]);
   }
 
   onLodChange(stats: ITerrainSurfaceLodStats): void {
@@ -1847,7 +1922,232 @@ export class CellPlanetMorphStreamingPageComponent {
     this.stats.set(stats);
   }
 
+  // ---- Repeatable tests (triangular-engine/testing) -------------------------------------------
+  // The reusable runner owns lifecycle and results; everything morph-specific is in
+  // morph-streaming-test-adapter.ts behind the host below, and the suites in morph-streaming-tests.ts.
+
+  readonly testHistory = MORPH_TEST_HISTORY;
+  readonly allowTestAutoStart = isDevMode();
+  readonly testBusy = signal(false);
+  readonly testStatus = signal('');
+  private readonly firstFrameRendered = signal(false);
+  /** Usable once a frame has rendered and terrain is resident; the adapter waits for full settling itself. */
+  readonly testAvailable = computed(() => this.firstFrameRendered() && this.stats().resident > 0);
+  /** Work that would compete with, or be disturbed by, a scripted run. */
+  readonly testExternalBusy = computed(() =>
+    !this.testBusy() && (this.benchmarkStatus() !== '' || this.suiteLabel() !== '' ||
+      this.isAnimatingMorph() || this.randomCellStressRunning()));
+  /** Live effective page state, shown while a run drives the controls. */
+  readonly testActiveSummary = computed(() =>
+    `morph ${this.morphProgress().toFixed(2)} · ${this.projectionKind()} · ${this.quality()} · ` +
+    `${this.worldProfileKind()} seed ${this.seed()} · ${this.colourMode()} · relief ${this.heightScale()}`);
+  private pageDisposed = false;
+  private renderedFrameCount = 0;
+  private testError = '';
+
+  private readonly testHost: MorphTestHost = {
+    read: () => this.readTestSnapshot(),
+    applyWorld: (settings) => this.applyTestSettings(settings),
+    setMorphFrame: (morph, position, target) => this.applyTestMorphFrame(morph, position, target),
+    commitMorph: (morph) => {
+      if (this.morphLodDebounceTimer !== undefined) clearTimeout(this.morphLodDebounceTimer);
+      this.lodMorph.set(morph);
+    },
+    restore: (snapshot) => this.restoreTestSnapshot(snapshot),
+    renderedFrames: () => this.renderedFrameCount,
+    streaming: () => {
+      const lod = this.stats();
+      const tiles = this.materialRuntime.stats;
+      return {
+        patchesDesired: lod.desired, patchesResident: lod.resident, patchesQueued: lod.queued,
+        triangles: lod.triangles, drawCalls: lod.drawCalls, tilesEnabled: this.isStreamedTextureLodEnabled(),
+        tilesResident: tiles.resident, tilesQueued: tiles.queued, tilesInFlight: tiles.inFlight, tilesCompleted: tiles.completed,
+      };
+    },
+    errors: () => {
+      const tileError = this.materialRuntime.stats.error;
+      return this.testError || (tileError ? `Texture stream: ${tileError}` : '');
+    },
+    resetErrors: () => { this.testError = ''; },
+    onBeforeRender: (callback) => {
+      const subscription = this.engine.beforeRender$.subscribe(() => callback());
+      return () => subscription.unsubscribe();
+    },
+    onRenderComplete: (callback) => {
+      const subscription = this.engine.renderComplete$.subscribe((event) => callback(event.renderedAt));
+      return () => subscription.unsubscribe();
+    },
+    isSampling: () => this.engine.fpsController.frameSampler.isActive,
+    startSampling: () => this.engine.fpsController.frameSampler.start(),
+    stopSampling: () => this.engine.fpsController.frameSampler.stop(),
+    environment: () => this.testEnvironment(),
+  };
+
+  readonly testAdapter = createMorphTestAdapter(this.testHost);
+
+  onTestProgress(progress: TestProgress | null): void {
+    this.testBusy.set(progress !== null);
+    this.testStatus.set(progress
+      ? `${progress.phase} ${progress.completed}/${progress.total} · repetition ${progress.repetition}${progress.label ? ` · ${progress.label}` : ''}`
+      : '');
+  }
+
+  private noteTestError(message: string): void {
+    if (this.testBusy() && !this.testError) this.testError = message;
+  }
+
+  private readTestSnapshot(): MorphPageSnapshot {
+    const controls = this.orbitControlsRef();
+    const orbit = controls?.orbitControls();
+    const camera = controls?.internalCamera;
+    const position: MorphTestVec3 = camera
+      ? [camera.position.x, camera.position.y, camera.position.z] : [...this.cameraPosition()];
+    const target: MorphTestVec3 = orbit
+      ? [orbit.target.x, orbit.target.y, orbit.target.z] : [...this.cameraTarget()];
+    const mode = this.colourMode();
+    return {
+      world: {
+        seed: this.seed(), worldProfile: this.worldProfileKind(), projection: this.projectionKind(),
+        quality: this.quality(), reductionPercent: this.reductionPercent(), heightScale: this.heightScale(),
+        colourMode: mode, streamedTextureLod: mode === 'lod' ? false : this.streamedTextureLod()[mode],
+        materialTileResolution: this.materialTileResolution(), cliffInfluence: this.cliffInfluenceEnabled(),
+        cliffStrength: this.cliffInfluenceStrength(), macroVariation: this.macroVariationEnabled(),
+        frustumLod: this.frustumLod(), freezeLod: this.freezeLod(), wireframe: this.wireframe(),
+        oceanVisible: this.oceanVisible(), cellGrid: this.cellGridVisible(),
+        mapBorderPreset: this.mapBorderPreset(), mapBorderStyle: this.mapBorderStyle(),
+      },
+      streamedTextureLodByMode: { ...this.streamedTextureLod() },
+      morph: this.morphProgress(), lodMorph: this.lodMorph(), uniformMorph: this.morphUniforms.uMorph.value,
+      bookmark: this.activeBookmarkId(), position, target, orbitUp: [...this.orbitUpVector()],
+      controls: { enabled: orbit?.enabled ?? true, damping: orbit?.enableDamping ?? false },
+      factionOverlay: this.factionOverlayEnabled(),
+    };
+  }
+
+  private applyTestSettings(settings: MorphTestSettings): void {
+    if (this.pageDisposed) throw new Error('Morph streaming page disposed');
+    if (this.randomCellStressRunning()) throw new Error('Random cell edit test is running');
+    this.setFactionOverlay(false);
+    this.applyWorldSettings(settings);
+    this.applyTestControls(settings.controls);
+  }
+
+  /** Uses the page's own actions and only touches what differs, so an unchanged setting never regenerates meshes. */
+  private applyWorldSettings(world: MorphWorldSettings): void {
+    if (this.seed() !== world.seed) this.setSeed(world.seed);
+    this.setWorldProfile(world.worldProfile);
+    this.setProjection(world.projection);
+    if (this.quality() !== world.quality) this.applyQuality(world.quality);
+    if (this.reductionPercent() !== world.reductionPercent) this.applyReductionPercent(world.reductionPercent);
+    if (this.heightScale() !== world.heightScale) this.commitHeightScale(world.heightScale);
+    if (this.colourMode() !== world.colourMode) this.applyColourMode(world.colourMode);
+    const mode = this.colourMode();
+    if (mode !== 'lod' && this.streamedTextureLod()[mode] !== world.streamedTextureLod) {
+      this.applyStreamedTextureLod(mode, world.streamedTextureLod);
+    }
+    if (this.materialTileResolution() !== world.materialTileResolution) {
+      this.materialTileResolution.set(world.materialTileResolution);
+      this.materialViewKey = '';
+    }
+    if (this.cliffInfluenceEnabled() !== world.cliffInfluence || this.cliffInfluenceStrength() !== world.cliffStrength) {
+      this.cliffInfluenceEnabled.set(world.cliffInfluence);
+      this.cliffInfluenceStrength.set(world.cliffStrength);
+      this.scheduleCliffStyleRefresh();
+    }
+    this.macroVariationEnabled.set(world.macroVariation);
+    this.frustumLod.set(world.frustumLod);
+    this.freezeLod.set(world.freezeLod);
+    this.wireframe.set(world.wireframe);
+    this.oceanVisible.set(world.oceanVisible);
+    if (this.cellGridVisible() !== world.cellGrid) {
+      this.cellGridVisible.set(world.cellGrid);
+      this.cellGridError.set('');
+    }
+    this.mapBorderPreset.set(world.mapBorderPreset);
+    this.mapBorderStyle.set(world.mapBorderStyle);
+  }
+
+  private applyTestControls(controls: { readonly enabled: boolean; readonly damping: boolean }): void {
+    const orbit = this.orbitControlsRef()?.orbitControls();
+    if (!orbit) return;
+    orbit.enabled = controls.enabled;
+    orbit.enableDamping = controls.damping;
+  }
+
+  /** Same signals the Animate button writes, with the pose given explicitly instead of from a bookmark. */
+  private applyTestMorphFrame(morph: number, position: MorphTestVec3, target: MorphTestVec3): void {
+    this.morphProgress.set(morph);
+    this.morphUniforms.uMorph.value = morph;
+    this.setTestPose(position, target);
+  }
+
+  /** Writes the input signals and the live controls, so the pose is exact now and consistent after change detection. */
+  private setTestPose(position: MorphTestVec3, target: MorphTestVec3): void {
+    this.cameraPosition.set([position[0], position[1], position[2]]);
+    this.cameraTarget.set([target[0], target[1], target[2]]);
+    const controls = this.orbitControlsRef();
+    const orbit = controls?.orbitControls();
+    if (controls && orbit) {
+      controls.internalCamera.position.set(position[0], position[1], position[2]);
+      orbit.target.set(target[0], target[1], target[2]);
+    }
+  }
+
+  private setFactionOverlay(enabled: boolean): void {
+    if (this.factionOverlayEnabled() === enabled) return;
+    if (enabled && !this.factionLookupReady()) return;
+    this.factionOverlayEnabled.set(enabled);
+    if (enabled) setCellPerPixelOpacity(this.cellPerPixelUniforms, 0.72);
+    else setCellPerPixelOpacity(this.cellPerPixelUniforms, 1);
+    setCellPerPixelLookupEnabled(this.cellPerPixelUniforms, enabled);
+  }
+
+  /** Synchronous: streaming then follows on its own, so restoration never waits on workers inside its short timeout. */
+  private restoreTestSnapshot(snapshot: MorphPageSnapshot): void {
+    if (this.pageDisposed) return;
+    this.applyWorldSettings(snapshot.world);
+    const perMode = snapshot.streamedTextureLodByMode as Record<StreamedTextureColourMode, boolean>;
+    if (JSON.stringify(this.streamedTextureLod()) !== JSON.stringify(perMode)) {
+      this.streamedTextureLod.set({ ...perMode });
+      this.materialRuntime.invalidate();
+      this.materialViewKey = '';
+    }
+    this.materialRuntime.setEnabled(this.isStreamedTextureLodEnabled());
+    this.activeBookmarkId.set(snapshot.bookmark as CellPlanetU0BookmarkId);
+    if (this.morphLodDebounceTimer !== undefined) clearTimeout(this.morphLodDebounceTimer);
+    this.morphProgress.set(snapshot.morph);
+    this.morphUniforms.uMorph.value = snapshot.uniformMorph;
+    this.lodMorph.set(snapshot.lodMorph);
+    this.orbitUpVector.set([snapshot.orbitUp[0], snapshot.orbitUp[1], snapshot.orbitUp[2]]);
+    this.setTestPose(snapshot.position, snapshot.target);
+    this.applyTestControls(snapshot.controls);
+    this.setFactionOverlay(snapshot.factionOverlay);
+  }
+
+  /** Backend and device facts for the result; unknown values are labelled, not guessed. */
+  private testEnvironment(): Record<string, string | number | boolean | null> {
+    const renderer = this.engine.renderer as unknown as {
+      constructor: { name: string }; domElement: HTMLCanvasElement;
+      getContext?: () => WebGLRenderingContext | WebGL2RenderingContext;
+    };
+    let gpu = 'unknown';
+    try {
+      const gl = renderer.getContext?.();
+      const info = gl?.getExtension('WEBGL_debug_renderer_info');
+      if (gl && info) gpu = String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL));
+    } catch { /* leave unknown */ }
+    return {
+      page: 'cell-planet-morph-streaming', renderer: renderer.constructor.name, materials: 'GLSL MeshStandardMaterial',
+      gpuRenderer: gpu, softwareRenderer: /swiftshader|llvmpipe|software|basic render/i.test(gpu),
+      gpuTimingSource: 'none: this page has no GPU timestamp query',
+      canvas: `${renderer.domElement.width}x${renderer.domElement.height}`, logarithmicDepthBuffer: true,
+      materialWorkers: this.materialWorkers.length, hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+      fpsTraversal: 'scene traversal suspended during measurement through the existing FrameSampler',
+    };
+  }
+
   runSuite(): void {
+    if (this.testBusy()) return;
     if (!suiteSupported()) {
       this.benchmarkStatus.set('sessionStorage is blocked: the suite cannot run.');
       return;
@@ -1901,6 +2201,7 @@ export class CellPlanetMorphStreamingPageComponent {
    */
   async runBenchmark(): Promise<void> {
     if (this.benchmarkStatus() !== '' && this.suiteLabel() === '') return;
+    if (this.testBusy()) return;
     const was = { morph: this.morphProgress(), colour: this.colourMode() };
     const setMorph = (morph: number): (() => void) => () => {
       this.morphProgress.set(morph);

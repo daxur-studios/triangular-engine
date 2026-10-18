@@ -160,4 +160,43 @@ describe('AtmosphereGpuModel.march vs the CPU reference', () => {
     });
     model.dispose();
   });
+
+  it('traceRay reports the ground hit, its distance and the air span like the sphere geometry', async () => {
+    const model = new AtmosphereGpuModel(earthAtmosphereProfile(), SMALL);
+    const R = model.uRadius.value as number;
+    const top = model.uTopAltitude.value as number;
+    const cases: { altitude: number; dir: [number, number, number]; maxDistance: number }[] = [
+      { altitude: 2, dir: unit([0, 1, 0]), maxDistance: 1e30 }, // up: no ground
+      { altitude: 2, dir: unit([0.7, -0.3, 0.7]), maxDistance: 1e30 }, // down: ground
+      { altitude: 5_000, dir: unit([0.3, -0.02, 1]), maxDistance: 1e30 }, // shallow down: ground far away
+      { altitude: 5_000, dir: unit([0.3, 0.02, 1]), maxDistance: 1e30 }, // shallow up: no ground
+      { altitude: 40_000, dir: unit([1, -0.25, 0.2]), maxDistance: 1e30 }, // from high up
+      { altitude: 2, dir: unit([0.7, -0.3, 0.7]), maxDistance: 3 }, // ground beyond maxDistance
+    ];
+    const out = await evaluateOnGpu(cases.map((c) => [[c.altitude, ...c.dir], [c.maxDistance, 0, 0, 0]]), (at) =>
+      Fn(() => {
+        const a = at(0);
+        const t = model.traceRay({ altitude: a.x, dir: vec3(a.y, a.z, a.w), maxDistance: at(1).x });
+        return vec4(t.hitsGround.select(float(1), float(0)), t.groundDistance as any, t.span as any, t.tStart as any);
+      })(),
+    );
+    cases.forEach((c, i) => {
+      const b = (R + c.altitude) * c.dir[1];
+      const cGround = c.altitude * (2 * R + c.altitude);
+      const disc = b * b - cGround;
+      const reaches = disc > 0 && b < 0;
+      const tGround = reaches ? -b - Math.sqrt(disc) : Infinity;
+      const hits = reaches && tGround < c.maxDistance;
+      const label = `case ${i}`;
+      expect(out[i * 4]).withContext(`${label} hitsGround`).toBe(hits ? 1 : 0);
+      if (reaches) expect(Math.abs(out[i * 4 + 1] - tGround)).withContext(`${label} groundDistance`).toBeLessThan(1e-3 * tGround + 1e-3);
+      const cTop = (c.altitude - top) * (c.altitude + top + 2 * R);
+      const discTop = b * b - cTop;
+      const tEnd = Math.min(reaches ? tGround : -b + Math.sqrt(discTop), c.maxDistance);
+      const tStart = Math.max(-b - Math.sqrt(discTop), 0);
+      const span = Math.max(tEnd - tStart, 0);
+      expect(Math.abs(out[i * 4 + 2] - span)).withContext(`${label} span`).toBeLessThan(2e-3 * span + 1);
+    });
+    model.dispose();
+  });
 });

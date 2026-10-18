@@ -54,6 +54,159 @@ export interface ISurfaceTransform {
  *
  * An optional `basis` can be supplied to dynamically center the projection on a moving unit.
  */
+/** `sin(a) / a` via Taylor series for tiny `a` so `a = 0` is exactly 1. */
+export function planetSinc(a: number): number {
+  const a2 = a * a;
+  if (a2 < 1e-6) return 1 - a2 / 6 + (a2 * a2) / 120;
+  return Math.sin(a) / a;
+}
+
+/** Curvature k = (1 - morph) / radius (1 / metre). 0 is flat, 1 / radius is globe. */
+export function planetBendCurvature(morph: number, radius: number): number {
+  return (1 - Math.min(1, Math.max(0, morph))) / Math.max(radius, 1e-6);
+}
+
+const EE_M = 0.8660254037844386;
+const EE_A1 = 1.340264;
+const EE_A2 = -0.081106;
+const EE_A3 = 0.000893;
+const EE_A4 = 0.003796;
+const EE_RAW_X_MAX = 2.7066299836960748;
+
+/**
+ * Recovers the globe's equirectangular map coordinates (R * lon, R * lat) in static mode
+ * without polar singularities (atan2(0, 0)) or antimeridian sign-flips (+pi / -pi).
+ */
+export function recoverStaticEquirectXY(
+  dirY: number,
+  flatX: number,
+  flatY: number,
+  radius: number,
+  mapWidth: number,
+  isEqualEarth: boolean,
+): [number, number] {
+  if (!isEqualEarth) {
+    return [flatX, flatY];
+  }
+  const sinLat = Math.max(-1, Math.min(1, dirY));
+  const pLat = Math.asin(sinLat);
+  const theta = Math.asin(Math.max(-1, Math.min(1, EE_M * sinLat)));
+  const theta2 = theta * theta;
+  const theta6 = theta2 * theta2 * theta2;
+  const scale = mapWidth / (2 * EE_RAW_X_MAX);
+  const denom = EE_M * (EE_A1 + 3 * EE_A2 * theta2 + theta6 * (7 * EE_A3 + 9 * EE_A4 * theta2));
+  const eeXPerLon = (Math.cos(theta) * scale) / denom;
+  const eeY = theta * (EE_A1 + EE_A2 * theta2 + theta6 * (EE_A3 + EE_A4 * theta2)) * scale;
+
+  const lon = flatX / Math.max(eeXPerLon, 1e-6);
+  return [radius * lon, radius * pLat + (flatY - eeY)];
+}
+
+export interface IBendTransform {
+  readonly position: Vector3;
+  readonly east: Vector3;
+  readonly north: Vector3;
+  readonly up: Vector3;
+}
+
+/**
+ * Computes position and local tangent frame (east, north, up) of a point (mapX, mapY)
+ * on a bent sphere of curvature k with terrain height h and forward center shift.
+ */
+export function evaluateBentTransform(
+  mapX: number,
+  mapY: number,
+  k: number,
+  h: number,
+  zCenterShift: number,
+  outPos = new Vector3(),
+  outEast = new Vector3(),
+  outNorth = new Vector3(),
+  outUp = new Vector3(),
+): IBendTransform {
+  const kx = k * mapX;
+  const ky = k * mapY;
+  const cx = Math.cos(kx);
+  const sx = Math.sin(kx);
+  const cy = Math.cos(ky);
+  const sy = Math.sin(ky);
+
+  outEast.set(cx, 0, -sx);
+  outNorth.set(-sy * sx, cy, -sy * cx);
+  outUp.set(cy * sx, sy, cx * cy);
+
+  const sincHalfX = planetSinc(0.5 * kx);
+  const sincHalfY = planetSinc(0.5 * ky);
+  const z =
+    -(
+      0.5 * k * mapX * mapX * sincHalfX * sincHalfX +
+      cx * 0.5 * k * mapY * mapY * sincHalfY * sincHalfY
+    ) + zCenterShift;
+
+  outPos.set(
+    cy * mapX * planetSinc(kx) + h * outUp.x,
+    mapY * planetSinc(ky) + h * outUp.y,
+    z + h * outUp.z,
+  );
+
+  return { position: outPos, east: outEast, north: outNorth, up: outUp };
+}
+
+/**
+ * Computes the bent-sphere vertex position in scene space from dual attributes (sphere & flat).
+ */
+export function bendPlanetSurfacePoint(
+  spherePos: Vector3,
+  flatPos: Vector3,
+  radius: number,
+  morph: number,
+  mapWidth: number,
+  isEqualEarth: boolean,
+  target = new Vector3(),
+): Vector3 {
+  const t = Math.min(1, Math.max(0, morph));
+  if (t <= 1e-6) {
+    return target.copy(spherePos);
+  }
+  if (t >= 1 - 1e-6) {
+    return target.copy(flatPos);
+  }
+
+  const sphereLen = spherePos.length();
+  const dirY = sphereLen > 1e-6 ? spherePos.y / sphereLen : 0;
+  const hSphere = sphereLen - radius;
+  const hFlat = flatPos.z;
+  const h = (1 - t) * hSphere + t * hFlat;
+
+  const [eqX, eqY] = recoverStaticEquirectXY(
+    dirY,
+    flatPos.x,
+    flatPos.y,
+    radius,
+    mapWidth,
+    isEqualEarth,
+  );
+
+  const mapX = (1 - t) * eqX + t * flatPos.x;
+  const mapY = (1 - t) * eqY + t * flatPos.y;
+  const k = (1 - t) / Math.max(radius, 1e-6);
+  const zCenterShift = (1 - t) * radius;
+
+  evaluateBentTransform(mapX, mapY, k, h, zCenterShift, target);
+  return target;
+}
+
+/**
+ * Computes world position and surface normal for a point given its spherical unit direction
+ * and elevation at morph progress `t` (0 = 3D globe, 1 = 2.5D flat map).
+ *
+ * Both representations share the exact same orientation:
+ * +Y is North, +X is East, +Z faces toward the viewer.
+ * The front center point sits tangent at Z = 0, and as t -> 0 (Globe),
+ * the sides and back curl monotonically backwards into -Z away from the camera.
+ *
+ * An optional `basis` can be supplied to dynamically center the projection on a moving unit.
+ */
 export function evaluateSurfaceTransform(
   direction: IVec3,
   elevation: number,
@@ -89,26 +242,46 @@ export function evaluateSurfaceTransform(
     pLon = Math.atan2(normDir.x, normDir.z);
   }
 
-  // 3D Sphere state: front point at Z = 0, center at (0, 0, -radius)
-  const displacedRadius = radius + elevation * heightScale;
-  const spherePos = new Vector3(
-    normDir.x * displacedRadius,
-    normDir.y * displacedRadius,
-    normDir.z * displacedRadius - radius,
-  );
-  const sphereNorm = new Vector3(normDir.x, normDir.y, normDir.z);
-
-  // 2.5D Flat map state: in XY plane facing +Z
+  const h = elevation * heightScale;
   const proj = projection.project(pLon, pLat, mapWidth, mapHeight);
   const flatX = (proj.x / mapWidth - 0.5) * mapWidth;
   const flatY = -(proj.y / mapHeight - 0.5) * mapHeight;
-  const flatZ = elevation * heightScale;
-  const flatPos = new Vector3(flatX, flatY, flatZ);
-  const flatNorm = new Vector3(0, 0, 1);
 
-  // Interpolate: front stays anchored while edges curl backward away from camera
-  const position = new Vector3().lerpVectors(spherePos, flatPos, t);
-  const normal = new Vector3().lerpVectors(sphereNorm, flatNorm, t).normalize();
+  // Curvature k unrolls the sphere to flat space: k = (1 - t) / radius
+  const k = (1 - t) / Math.max(radius, 1e-6);
+  const eqX = radius * pLon;
+  const eqY = radius * pLat;
+  const mapX = (1 - t) * eqX + t * flatX;
+  const mapY = (1 - t) * eqY + t * flatY;
+
+  const bent = evaluateBentTransform(mapX, mapY, k, h, 0);
+
+  let normal: Vector3;
+  let position: Vector3;
+
+  if (basis) {
+    // Re-orient into dynamic basis frame
+    const eFwd = new Vector3(basis.forward.x, basis.forward.y, basis.forward.z);
+    const eUp = new Vector3(basis.up.x, basis.up.y, basis.up.z);
+    const eRight = new Vector3(basis.right.x, basis.right.y, basis.right.z);
+
+    const rotPos = new Vector3()
+      .addScaledVector(eRight, bent.position.x)
+      .addScaledVector(eUp, bent.position.y)
+      .addScaledVector(eFwd, bent.position.z);
+
+    const rotNorm = new Vector3()
+      .addScaledVector(eRight, bent.up.x)
+      .addScaledVector(eUp, bent.up.y)
+      .addScaledVector(eFwd, bent.up.z)
+      .normalize();
+
+    position = rotPos;
+    normal = rotNorm;
+  } else {
+    position = bent.position;
+    normal = bent.up;
+  }
 
   return { position, normal };
 }

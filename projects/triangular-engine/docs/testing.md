@@ -45,7 +45,8 @@ The same `TestSession` drives button and URL launches:
 
 1. `capture(context)` returns a read-only snapshot, including camera/control state.
 2. For each repetition/scenario, `apply` uses the page's real action methods,
-   `ready` awaits completed renders and explicit page conditions, then optional
+   `ready(context, scenario)` awaits completed renders and that scenario's explicit
+   page conditions without caching the last applied scenario, then optional
    `warmupMs` elapses and `measure` runs the action for `durationMs`.
 3. `restore(snapshot, context)` executes even after failure/cancel, using a fresh
    signal with a five-second cleanup timeout. Make restoration safe after partial setup.
@@ -64,6 +65,11 @@ or declare that a screenshot looks correct. Use `progressChange` to show effecti
 settings in the page and prevent conflicting manual actions; it fires at phase/case
 boundaries, not every frame. The panel's selection/profile/repetitions use typed
 Angular reactive forms. A separate input test should exercise actual scene controls.
+The host owns all control locking. A disabled fieldset covers native form controls,
+but canvas pointer/keyboard controls, links and programmatic actions need their own
+guards. Worker/engine errors outside an awaited adapter promise must be forwarded
+by the host into adapter failure/checks; the runner has no async error subscription
+hook. A page-local error sink is currently one way to do this.
 
 ## Launch links
 
@@ -88,13 +94,26 @@ Results include the exact suite/settings, repetitions, environment, per-case che
 raw metrics, validity issues, errors, and a pinned rerun URL. Use **Copy result** or
 **Download JSON**; `(completed)` lets a host retain results or add another transport.
 No queue, idle-agent wakeup, baseline store, or cross-page suite chain is implemented.
+Keep the full JSON as an artifact, including failed runs. Give agents a compact
+summary with verdicts, failed checks, key measurements, limitations, exact rerun
+link and artifact path; read raw case samples only when needed.
 
 Visible/observer profiles record focus/visibility loss during measurements. Headless
 performance is marked inconclusive without independently verified hardware/profile
-support. Missing/invalid metrics also invalidate performance evidence. There is no
+support. Performance cases require at least one non-optional metric. Empty required
+metrics and non-finite samples in any metric invalidate performance evidence. An
+additional unavailable metric can use `optional: true` with an `unavailableReason`;
+its empty samples do not invalidate the available required measurements. Choose
+optional status based on the experiment's question, never to hide missing evidence
+needed to answer it. There is no
 generic budget/baseline comparison: available numbers remain **unassessed**, not a
-performance pass. Human review stays **pending** until an observer explicitly accepts
-or rejects it. Automated completion and observer acceptance are separate fields.
+performance pass. `visualReview` starts **pending** when the suite sets
+`requiresVisualReview: true` or the profile is `human-observed`. Otherwise it is
+**not-required**, for both functional and performance suites. Functional checks
+that need appearance review must set the flag explicitly. Pending review changes
+only when an observer explicitly accepts or rejects it. Automated completion and
+observer acceptance are separate fields. The panel lists individual checks and
+their details, case errors, and run-level errors.
 
 The cloud lab adapter reports diagnostic batched whole-render GPU timestamps,
 including bake passes, with explicit limitations. It is not proof of isolated cloud
@@ -111,4 +130,6 @@ Maintainer checks: `npm run test:triangular-engine:testing`, a headless demo tes
 `--include='**/gpu-timer.spec.ts'`, and
 `npx playwright test -c playwright.runner.config.ts`. The latter uses the existing
 application host; set `TRIANGULAR_TEST_BASE_URL` to target another served build. Its
-software-rendered browser checks establish functional integration only.
+`**/*runner.spec.ts` pattern includes new runner integrations without a config edit;
+pass a filename to Playwright to select one integration. Software-rendered browser
+checks establish functional integration only.

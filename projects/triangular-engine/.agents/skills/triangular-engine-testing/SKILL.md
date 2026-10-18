@@ -25,6 +25,7 @@ router, shared UI or automation-client dependency.
    action methods. Read [the adapter recipe](references/game-adapter.md) for the
    lifecycle and a minimal factory. Capture and restore all state the test changes,
    including camera/control state. Await rendered readiness, not an arbitrary sleep.
+   `ready(context, scenario)` receives the applied scenario explicitly.
 4. Add `TestRunnerComponent` to the host's standalone imports. Bind the suite
    history, adapter, actual readiness and any competing workload. Let
    `progressChange` show the active settings and prevent conflicting manual input.
@@ -41,6 +42,8 @@ router, shared UI or automation-client dependency.
 
 These host members are integration points to implement in the game. Autostart
 requires explicit application opt-in; a query parameter alone does not enable it.
+The host owns control locking, including canvas/pointer/keyboard input and other
+test actions. A disabled form fieldset only covers its native form controls.
 
 ## Author and retain scenarios
 
@@ -89,15 +92,24 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   metric's unit, source, unavailable reason and attribution limits. Do not invent
   GPU timings from frame cadence. Include build/backend/device/viewport information
   through the adapter's `environment()` where available; label unknown values.
+  Use `optional: true` for an additional metric the page cannot provide and give
+  its `unavailableReason`. Performance cases still need at least one required
+  metric with samples; empty required or non-finite samples invalidate evidence.
 - Keep automated completion, `automatedVerdict`, `performanceVerdict`, and
   `visualReview` distinct. A completed run does not prove visual correctness.
   Visible profiles record focus/visibility loss; visibility alone does not prove
   an unthrottled GPU. The current runner leaves usable performance numbers
   `unassessed`, and marks missing evidence or unverified headless performance
   `inconclusive`. It does not compare budgets or baselines.
+  `visualReview` starts `pending` when `requiresVisualReview: true` or the profile
+  is `human-observed`; otherwise it is `not-required`, regardless of suite purpose.
+  Set the flag explicitly for functional tests that need appearance review.
 - Use the panel's JSON copy/download or host `(completed)` output to retain the
   exact suite, settings, environment and results. Include the exact-version rerun
   link in the handoff. Human acceptance is explicit; never accept it for the user.
+  Save full JSON as an artifact when possible. Report verdicts, failed checks,
+  key measurements, limitations, rerun link and artifact path first; inspect raw
+  samples on demand. Retain failed-run evidence too.
 - `(completed)` is an in-page Angular output. There is no built-in daemon queue,
   durable result endpoint or idle-agent wakeup. Use an existing authorized game
   transport if present; otherwise JSON copy/paste is the supported handoff.

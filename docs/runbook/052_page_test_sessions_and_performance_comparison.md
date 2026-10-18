@@ -5,6 +5,19 @@ description: Findings, decisions and evidence for page-generic agent+human test 
 timestamp: 2026-10-17T00:00:00Z
 tags: [testing, playwright, agent, page-test, performance, telemetry, demo, scenarios]
 plans: [/docs/plans/052_page_test_sessions_and_performance_comparison.md]
+performance:
+  - id: cloud-runner-smoke-v1
+    url: http://triangular-demo.localhost:4200/cloud-volumes-lab?testSuite=cloud-runner-smoke&testVersion=1&testProfile=human-observed&testAutoStart=1
+    status: runnable-functional
+  - id: cloud-haze-cost-v1
+    url: http://triangular-demo.localhost:4200/cloud-volumes-lab?testSuite=cloud-haze-cost&testVersion=1&testProfile=human-observed&testAutoStart=1
+    status: runnable-diagnostic
+  - id: morph-streaming-smoke-v1
+    url: http://triangular-demo.localhost:4200/cell-planet-morph-streaming?testSuite=morph-streaming-smoke&testVersion=1&testProfile=human-observed&testAutoStart=1
+    status: blocked-material-streaming
+  - id: morph-streaming-morph-cost-v1
+    url: http://triangular-demo.localhost:4200/cell-planet-morph-streaming?testSuite=morph-streaming-morph-cost&testVersion=1&testProfile=human-observed&testAutoStart=1
+    status: blocked-material-streaming
 ---
 
 # Runbook 052: Page Test Sessions and Performance Comparison
@@ -517,3 +530,73 @@ against the built public testing declarations, and six local documentation links
 resolved. `npm run build:triangular-engine` passed. `npm pack --dry-run --json`
 confirmed both skill files are included; their built hashes match the source.
 No runtime code changed and no new tarball was created for this documentation work.
+
+## 2026-10-18 — Morph integration feedback review
+
+The second integration adds game-owned morph settings, a host/adapter boundary,
+static states 0 / 0.5 / 1, a 0 → 1 → 0 sweep, functional smoke history, cancellation
+and restoration. The owner's pasted feedback is sufficient to review the work;
+this section records the decisions without requiring another handover document.
+
+Accepted shared changes from the integration:
+
+- `ready(context, scenario)` receives the applied scenario. Earlier adapters that
+  only use context remain valid TypeScript implementations. Updated the packaged
+  skill's game driver recipe to inspect expected settings in readiness and restore.
+- `TestMetric.optional` can describe additional unavailable measurements with an
+  `unavailableReason`. A performance case still needs a required metric, and empty
+  required or non-finite samples remain invalid. Optional must not excuse missing
+  measurements central to the experiment. The current morph adapter reports real
+  cadence/backlog metrics and explains its missing GPU query in limitations.
+- The panel displays individual check outcomes/details and case/run errors.
+- Browser discovery uses `**/*runner.spec.ts`, covering both integrations and later
+  runner specs without growing an explicit filename list.
+
+Documentation clarifications and deferred design:
+
+- Visual review depends on `requiresVisualReview` or the `human-observed` profile,
+  independently of functional/performance purpose. Keep the current explicit
+  semantics; add regression coverage and document them rather than changing defaults.
+- Control locking belongs to the host, which knows its forms, canvas controls,
+  keyboard input and competing actions. A disabled fieldset alone cannot lock all
+  these inputs. The runner should not mutate arbitrary page controls.
+- Async error subscriptions are a useful next API candidate. Define registration,
+  per-run unsubscription, failure versus cancellation, and cleanup-phase errors
+  before adding one. Until then hosts must forward engine/worker errors to adapters;
+  there is no shared hook or global error interception.
+- Settling and sweep helpers need a small clock/subscription contract with abort,
+  stall detection and rendered keyframe guarantees. Keep the current page helpers
+  until that contract is designed; streaming stability predicates stay game-owned.
+- Keep full JSON outside agent conversation context, including failures. Report a
+  short verdict/check/metric/limitation summary with the artifact path and exact
+  rerun link, then read raw samples on demand. This does not add durable transport.
+
+### Streaming blocker and retained evidence
+
+`artifacts/test-runner/morph-diagnostic.json` already contains a failed run from
+2026-10-18T18:45:23.541Z with automation `fail`, performance `inconclusive` and
+pending visual review. Its error is `Texture stream: Error: Material page table
+needs a resident root.` The assertion originates in
+`projects/triangular-engine/terrain/materials/tiles/terrain-material-tile-gpu.ts`.
+This corrects the feedback's claim that no result was retained: there is failed
+evidence, but no successful browser/performance acceptance. The integration agent
+also reported the error on a plain load; this review has not independently proved
+its history or root cause. Do not label it a confirmed race without that evidence.
+
+The next terrain task should reproduce on a plain page load, retain the call stack,
+identify whether root residency is lost during initial load or invalidation, add a
+focused regression and rerun both morph browser suites. Terrain runtime code is
+unchanged by this feedback review. Broader edge/altitude/horizon scenarios follow
+successful basic integration.
+
+[Launch latest morph diagnostic (currently blocked by material streaming)](http://triangular-demo.localhost:4200/cell-planet-morph-streaming?testSuite=morph-streaming-morph-cost&testVersion=1&testProfile=human-observed&testAutoStart=1).
+
+Review verification: the testing entry passed 20 headless unit specs, the morph
+adapter passed 12 headless specs, and Playwright listed six tests across the two
+runner integrations using the new glob. All four cloud browser regression checks
+passed against the existing host (47.6 seconds). The full library build passed;
+the updated adapter recipe type-checked against the packaged public declarations.
+The skill validator passed and both built skill files match their sources by hash.
+No successful morph browser run or GPU performance acceptance is claimed. No
+terrain runtime edits, commits, publishing, new tarballs or daemon transport were
+part of this review.

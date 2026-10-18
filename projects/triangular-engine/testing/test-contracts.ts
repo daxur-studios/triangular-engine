@@ -40,6 +40,12 @@ export interface TestMetric {
   readonly source: string;
   readonly samples: readonly number[];
   readonly unavailableReason?: string;
+  /**
+   * A reading this page cannot provide (for example GPU time without a timestamp query). List it with an
+   * `unavailableReason` so the gap is visible; it does not make a performance case inconclusive.
+   * Invalid (non-finite) samples still do.
+   */
+  readonly optional?: boolean;
 }
 
 export interface TestCheck {
@@ -68,7 +74,8 @@ export interface TestContext {
 export interface TestRunAdapter<TSettings extends object, TSnapshot = unknown> {
   capture(context: TestContext): TSnapshot | Promise<TSnapshot>;
   apply(scenario: TestScenario<TSettings>, context: TestContext): void | Promise<void>;
-  ready(context: TestContext): Promise<void>;
+  /** `scenario` is the one just applied, so the adapter need not remember it. */
+  ready(context: TestContext, scenario: TestScenario<TSettings>): Promise<void>;
   measure(scenario: TestScenario<TSettings>, context: TestContext): Promise<TestObservation>;
   restore(snapshot: TSnapshot, context: TestContext): void | Promise<void>;
   environment?(): Readonly<Record<string, TestSetting>>;

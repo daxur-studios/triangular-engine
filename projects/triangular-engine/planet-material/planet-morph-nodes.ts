@@ -128,8 +128,83 @@ export interface IPlanetMorphGraphOptions {
    * A `mat3` uniform (`IPlanetMorphLightingUniforms.uMorphLightingTurn`). When set, the shading normal is
    * the sphere normal turned by it, not the morphed normal, so a flat map keeps its relief and sun angle.
    */
-  readonly lightingTurn?: unknown;
+  /** Shape interpolation mode: 'bend' (default, curvature-based) or 'linear' (Cartesian mix). */
+  readonly morphShape?: 'bend' | 'linear';
 }
+
+const tslSinc = (a: any): any => {
+  const a2 = a.mul(a);
+  return select(a2.lessThan(1e-6), float(1).sub(a2.div(6)), a.sin().div(a));
+};
+
+const tslPlanetStaticEquirectXY = (
+  flatPos: any,
+  radius: any,
+  projType: any,
+  mapWidth: any,
+): any => {
+  const HALF_PI = Math.PI * 0.5;
+  const EE_M = 0.8660254037844386;
+  const EE_A1 = 1.340264;
+  const EE_A2 = -0.081106;
+  const EE_A3 = 0.000893;
+  const EE_A4 = 0.003796;
+  const EE_RAW_X_MAX = 2.7066299836960748;
+
+  const lat = flatPos.y.div(float(HALF_PI).mul(radius)).clamp(-1, 1).mul(HALF_PI);
+  const sinLat = lat.sin();
+  const theta = clamp(sinLat.mul(EE_M), -1, 1).asin();
+  const theta2 = theta.mul(theta);
+  const theta6 = theta2.mul(theta2).mul(theta2);
+  const denom = theta6
+    .mul(theta2.mul(9 * EE_A4).add(7 * EE_A3))
+    .add(theta2.mul(3 * EE_A2))
+    .add(EE_A1)
+    .mul(EE_M);
+  const eeXPerLon = theta.cos().div(denom);
+  const scale = float(mapWidth).div(2 * EE_RAW_X_MAX);
+  const rawX = flatPos.x.div(scale);
+  const eeLon = rawX.div(max(eeXPerLon, 1e-6));
+
+  const eqX = select(projType.lessThan(0.5), flatPos.x, eeLon.mul(radius));
+  const eqY = select(projType.lessThan(0.5), flatPos.y, lat.mul(radius));
+  return vec2(eqX, eqY);
+};
+
+const tslPlanetBendTransform = (
+  mapXY: any,
+  height: any,
+  morph: any,
+  radius: any,
+): { pos: any; east: any; north: any; up: any } => {
+  const k = float(1).sub(clamp(morph, 0, 1)).div(max(radius, 1e-4));
+  const zCenterShift = float(1).sub(clamp(morph, 0, 1)).mul(radius);
+  const kx = k.mul(mapXY.x);
+  const ky = k.mul(mapXY.y);
+  const cx = kx.cos();
+  const sx = kx.sin();
+  const cy = ky.cos();
+  const sy = ky.sin();
+  const outEast = vec3(cx, float(0), sx.negate());
+  const outNorth = vec3(sy.negate().mul(sx), cy, sy.negate().mul(cx));
+  const outUp = vec3(cy.mul(sx), sy, cx.mul(cy));
+  const sincHalfX = tslSinc(float(0.5).mul(kx));
+  const sincHalfY = tslSinc(float(0.5).mul(ky));
+  const z = float(-0.5)
+    .mul(k)
+    .mul(mapXY.x)
+    .mul(mapXY.x)
+    .mul(sincHalfX)
+    .mul(sincHalfX)
+    .sub(cx.mul(0.5).mul(k).mul(mapXY.y).mul(mapXY.y).mul(sincHalfY).mul(sincHalfY))
+    .add(zCenterShift);
+  const pos = vec3(
+    cy.mul(mapXY.x).mul(tslSinc(kx)),
+    mapXY.y.mul(tslSinc(ky)),
+    z,
+  ).add(outUp.mul(height));
+  return { pos, east: outEast, north: outNorth, up: outUp };
+};
 
 /** Everything stage 1 computes. Position nodes are vertex-stage; the varyings are readable in the fragment stage. */
 export interface IPlanetMorphGraph {
@@ -174,6 +249,7 @@ export function planetMorphGraph(
 ): IPlanetMorphGraph {
   const sphereFromGeometry = options.sphereFromGeometry ?? true;
   const seamCullAttributes = options.seamCullAttributes ?? false;
+  const morphShape = options.morphShape ?? 'bend';
   const morph = uniforms.uMorph as any;
   const mode = uniforms.uProjMode as any;
   const forward = uniforms.uProjForward as any;
@@ -239,11 +315,30 @@ export function planetMorphGraph(
     cull = select(dynamic.and(hasOtherDirs).and(crosses), float(1), float(0));
   }
 
-  const morphedLocal = mix(aSpherePos, flatPos, morph);
-  // Opposite normals (the far side of the globe against +Z) cancel at morph 0.5: fall back to the flat normal there.
-  const blendedNormal = mix(aSphereNorm, flatNorm, morph);
-  const blendedLength = length(blendedNormal);
-  const morphedNormal = select(blendedLength.greaterThan(1e-4), blendedNormal.div(blendedLength), flatNorm);
+  let morphedLocal: any;
+  let morphedNormal: any;
+
+  if (morphShape === 'linear') {
+    morphedLocal = mix(aSpherePos, flatPos, morph);
+    const blendedNormal = mix(aSphereNorm, flatNorm, morph);
+    const blendedLength = length(blendedNormal);
+    morphedNormal = select(blendedLength.greaterThan(1e-4), blendedNormal.div(blendedLength), flatNorm);
+  } else {
+    const dynEqXY = vec2(projLon.mul(uniforms.uRadius), projLat.mul(uniforms.uRadius));
+    const statEqXY = tslPlanetStaticEquirectXY(aFlatPos.xy, uniforms.uRadius, projectionType, mapWidth);
+    const eqXY = select(dynamic, dynEqXY, statEqXY);
+    const mapXY = mix(eqXY, flatPos.xy, morph);
+    const h = mix(length(aSpherePos).sub(uniforms.uRadius), aFlatPos.z, morph);
+    const bent = tslPlanetBendTransform(mapXY, h, morph, uniforms.uRadius);
+    morphedLocal = bent.pos;
+    const bentReliefNorm = flatNorm.x
+      .mul(bent.east)
+      .add(flatNorm.y.mul(bent.north))
+      .add(flatNorm.z.mul(bent.up));
+    const blendedNormal = mix(aSphereNorm, bentReliefNorm, morph);
+    const blendedLength = length(blendedNormal);
+    morphedNormal = select(blendedLength.greaterThan(1e-4), blendedNormal.div(blendedLength), bentReliefNorm);
+  }
 
   const vProjLon: any = varying(select(dynamic, projLon, float(0)), 'vProjLon');
   // Constant 0 without aOtherDir attributes: do not spend an inter-stage slot (16 max) on it.
@@ -255,9 +350,9 @@ export function planetMorphGraph(
   const vBodyFixedLocal: any = varying(aSpherePos.add(batchOffset), 'vBodyFixedLocal');
   const vMorphedBatched: any = varying(morphedLocal.add(batchOffset), 'vMorphedBatched');
 
-  // GLSL: `vProjMode > 0.5 && vMorph > 0.05 && (vSeamCull > 0.5 || fwidth(vProjLon) > 2.8)`.
+  // GLSL: `vProjMode > 0.5 && vMorph > 0.001 && (vSeamCull > 0.5 || fwidth(vProjLon) > 2.8)`.
   // WGSL only allows derivatives in uniform control flow, so `fwidth` is evaluated once, outside any branch.
-  const cullActive = mode.greaterThan(0.5).and(morph.greaterThan(0.05));
+  const cullActive = mode.greaterThan(0.5).and(morph.greaterThan(0.001));
   const fw = vProjLon.fwidth().toVar();
   // Attribute-free seam check for geometry without `aOtherDir1/2` (indexed streaming tiles). Across a triangle
   // that spans the antimeridian the interpolated `vProjLon` runs the long way round, so it parts from the

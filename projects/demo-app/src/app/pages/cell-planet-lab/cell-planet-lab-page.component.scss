@@ -1,16 +1,12 @@
 :host {
-  --bg: #0a0d12;
-  --panel: #121824;
-  --panel-2: #161d29;
-  --border: #232c3a;
-  --border-strong: #33404f;
-  --text: #e8edf4;
-  --text-dim: #8b96a8;
-  --line: #6fe3c0;
-  --line-dim: #2f5f52;
-  --site: #f4b860;
-  --accent: #ff6b57;
-  --grid: #1b2330;
+  --bg: var(--mat-sys-surface);
+  --panel: var(--mat-sys-surface-container);
+  --panel-2: var(--mat-sys-surface-container-high);
+  --border: var(--mat-sys-outline-variant);
+  --border-strong: var(--mat-sys-outline);
+  --text: var(--mat-sys-on-surface);
+  --text-dim: var(--mat-sys-on-surface-variant);
+  --line: var(--mat-sys-primary);
 
   min-height: 100%;
   background: var(--bg);
@@ -21,10 +17,7 @@
   display: inline-block;
   margin: 0.9rem 0 0 0.9rem;
   color: var(--text-dim);
-  font:
-    12px "IBM Plex Sans",
-    system-ui,
-    sans-serif;
+  font-size: 12px;
   text-decoration: none;
 }
 .back-link:hover {
@@ -38,8 +31,7 @@
   background: var(--panel);
   border: 0.5px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 1rem 3rem #0008;
-  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  box-shadow: 0 1rem 3rem var(--app-color-overlay-shadow);
   display: flex;
   flex-direction: column;
   gap: 1.1rem;
@@ -57,7 +49,7 @@
 
 .scope-kicker {
   display: block;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--app-font-mono);
   font-size: 11px;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -83,14 +75,14 @@
   min-width: 56px;
 }
 .stat-label {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--app-font-mono);
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-dim);
 }
 .stat-value {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--app-font-mono);
   font-size: 15px;
   font-variant-numeric: tabular-nums;
   color: var(--text);
@@ -116,7 +108,7 @@
 }
 .control > span:first-child {
   min-width: 66px;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--app-font-mono);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -131,12 +123,12 @@
   border: 0.5px solid var(--border-strong);
   border-radius: 6px;
   color: var(--text);
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--app-font-mono);
   font-size: 13px;
   padding: 5px 8px;
 }
 .control-value {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--app-font-mono);
   font-size: 13px;
   color: var(--text);
   min-width: 34px;
@@ -148,7 +140,6 @@ button {
   border: 0.5px solid var(--border-strong);
   border-radius: 6px;
   color: var(--text);
-  font-family: "IBM Plex Sans", system-ui, sans-serif;
   font-size: 13px;
   padding: 7px 12px;
   cursor: pointer;
@@ -167,7 +158,7 @@ button.active {
 }
 
 .control-group-label {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--app-font-mono);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -225,7 +216,7 @@ button.active {
   align-items: baseline;
   padding: 0.55rem 0.85rem;
   border-bottom: 0.5px solid var(--border);
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--app-font-mono);
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -250,7 +241,7 @@ canvas {
   margin: 0;
 }
 .note code {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--app-font-mono);
   background: var(--panel-2);
   border: 0.5px solid var(--border);
   border-radius: 4px;

@@ -330,6 +330,9 @@ export class CellPlanetMorphStreamingViewComponent {
   readonly raycastFocusResolver: RaycastFocusResolver = createCellPlanetMorphRaycastFocus({
     morph: () => this.morphProgress(),
     surfaceRevision: () => this.surfaceRevision,
+    radius: () => this.radiusM(),
+    mapWidth: () => 2 * Math.PI * this.radiusM(),
+    projection: () => this.projectionKind(),
   });
 
   readonly lodChange = output<ITerrainSurfaceLodStats>();

@@ -105,7 +105,7 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
             progress('applying', repetition, scenario);
             await abortable(() => adapter.apply(scenario, ctx), controller.signal);
             progress('ready', repetition, scenario);
-            await abortable(() => adapter.ready(ctx), controller.signal);
+            await abortable(() => adapter.ready(ctx, scenario), controller.signal);
             progress('warmup', repetition, scenario);
             await ctx.wait(scenario.warmupMs ?? 0);
             progress('measuring', repetition, scenario);
@@ -120,8 +120,9 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
             if (options.profile === 'headless-hardware' && suite.purpose === 'performance') {
               validityIssues.add('Headless hardware/power profile was not independently verified');
             }
-            if (suite.purpose === 'performance' && (!observation.metrics.length || observation.metrics.some((metric) =>
-              !metric.samples.length || metric.samples.some((sample) => !Number.isFinite(sample))))) {
+            if (suite.purpose === 'performance' && (!observation.metrics.some((metric) => !metric.optional) ||
+                observation.metrics.some((metric) => metric.samples.some((sample) => !Number.isFinite(sample)) ||
+                  (!metric.samples.length && !metric.optional)))) {
               validityIssues.add('Required metric samples unavailable or invalid');
             }
             const checks = observation.checks ?? [];

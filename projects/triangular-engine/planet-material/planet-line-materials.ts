@@ -110,7 +110,7 @@ export function planetBorderMaterial(
   const vProjLon: any = varying(select(dynamic, pLon, float(0)), 'vBorderProjLon');
   const crosses = seamEdgeCrosses(aSphereNorm, aOtherDir, u.uProjForward, u.uProjRight);
   const vCull: any = varying(select(dynamic.and(crosses), float(1), float(0)), 'vBorderSeamCull');
-  const cullActive = dynamic.and(u.uMorph.greaterThan(0.05));
+  const cullActive = dynamic.and(u.uMorph.greaterThan(0.001));
   // `fwidth` is evaluated unconditionally (WGSL: derivatives only in uniform control flow).
   const fw = vProjLon.fwidth().toVar();
   const hidden = cullActive.and(vCull.greaterThan(0.5).or(fw.greaterThan(2.8)));

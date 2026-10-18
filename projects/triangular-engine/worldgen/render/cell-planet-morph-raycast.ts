@@ -10,6 +10,7 @@ import {
 } from 'three';
 import { getTerrainBatchInstanceIds } from 'triangular-engine/terrain';
 import { CELL_PLANET_MORPH_ATTRIBUTES } from './cell-planet-morph-attributes';
+import { bendPlanetSurfacePoint } from './planet-morph-geometry';
 
 type MorphRaycastAttribute = BufferAttribute | InterleavedBufferAttribute;
 
@@ -25,6 +26,9 @@ export interface ICellPlanetMorphRaycastOptions {
    * `(lodChange)`), so cached bounds from a previous patch set are never reused after a resize.
    */
   readonly surfaceRevision: () => number;
+  readonly radius?: () => number;
+  readonly mapWidth?: () => number;
+  readonly projection?: () => 'equirectangular' | 'equalEarth';
   readonly spherePositionAttribute?: string;
   readonly flatPositionAttribute?: string;
 }
@@ -60,6 +64,8 @@ export function createCellPlanetMorphRaycastFocus(
   const hit = new Vector3();
   const closestHit = new Vector3();
   const worldBounds = new Box3();
+  const tempSphere = new Vector3();
+  const tempFlat = new Vector3();
 
   const readMorphedPosition = (
     sphere: MorphRaycastAttribute,
@@ -68,6 +74,22 @@ export function createCellPlanetMorphRaycastFocus(
     morph: number,
     target: Vector3,
   ): Vector3 => {
+    const radiusVal = options.radius ? options.radius() : 0;
+    if (radiusVal > 0) {
+      tempSphere.set(sphere.getX(index), sphere.getY(index), sphere.getZ(index));
+      tempFlat.set(flat.getX(index), flat.getY(index), flat.getZ(index));
+      const mapWidthVal = options.mapWidth ? options.mapWidth() : 2 * Math.PI * radiusVal;
+      const proj = options.projection ? options.projection() : 'equalEarth';
+      return bendPlanetSurfacePoint(
+        tempSphere,
+        tempFlat,
+        radiusVal,
+        morph,
+        mapWidthVal,
+        proj === 'equalEarth',
+        target,
+      );
+    }
     const inverseMorph = 1 - morph;
     target.set(
       sphere.getX(index) * inverseMorph + flat.getX(index) * morph,

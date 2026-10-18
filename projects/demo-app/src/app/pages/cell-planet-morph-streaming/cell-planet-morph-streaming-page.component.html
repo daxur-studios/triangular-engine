@@ -50,6 +50,28 @@
   </p>
 
   <div class="control-section">
+    <tri-test-runner
+      [suites]="testHistory"
+      [adapter]="testAdapter"
+      [available]="testAvailable()"
+      [externalBusy]="testExternalBusy()"
+      [allowAutoStart]="allowTestAutoStart"
+      (progressChange)="onTestProgress($event)"
+    />
+    @if (testBusy()) {
+      <p class="control-hint" role="status">
+        Test {{ testStatus() }}. Controls are locked until it finishes or is cancelled.
+      </p>
+      <p class="control-hint">Active: {{ testActiveSummary() }}</p>
+    }
+    <p class="control-hint">
+      Diagnostic only: timings here are not GPU measurements and software rendering is not hardware
+      acceptance. Appearance needs human review.
+    </p>
+  </div>
+
+  <fieldset class="test-lock" [disabled]="testBusy()">
+  <div class="control-section">
     <h3>Benchmark</h3>
     <div class="button-group">
       <button type="button" (click)="runBenchmark()" [disabled]="benchmarkStatus() !== ''">
@@ -426,6 +448,8 @@
       <p class="control-hint">Cell grid: {{ cellGridError() }}</p>
     }
   </div>
+
+  </fieldset>
 
   <div class="control-section stats-section">
     <h3>Telemetry & Diagnostics</h3>

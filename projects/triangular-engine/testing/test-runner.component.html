@@ -34,11 +34,16 @@
       @for (item of run.cases; track $index) {
         <li>{{ item.scenario.label }} · {{ item.status }}
           @for (metric of item.metrics; track metric.name) { <span class="muted">{{ metricText(metric) }}</span> }
+          @if (item.error) { <span class="issue failed">Error: {{ item.error }}</span> }
+          @for (check of item.checks; track check.name) {
+            <span class="muted check" [class.failed]="!check.passed">{{ check.passed ? '✓' : '✗' }} {{ check.name }}@if (check.detail) { — {{ check.detail }} }</span>
+          }
           @for (issue of item.validityIssues; track issue) { <span class="issue">{{ issue }}</span> }
           @for (limitation of item.limitations; track limitation) { <span class="muted">{{ limitation }}</span> }
         </li>
       }
     </ol>
+    @for (error of run.errors; track $index) { <p class="issue failed" role="alert">{{ error }}</p> }
     @if (run.visualReview === 'pending' && run.status !== 'failed' && run.status !== 'cancelled') {
       <label>Observer notes <textarea [formControl]="reviewNotes" rows="2"></textarea></label>
       <div class="actions">

@@ -199,3 +199,15 @@ select {
     }
   }
 }
+
+/* Locks the manual controls while a scripted test drives the page; the telemetry stays live. */
+.test-lock {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+
+  &:disabled {
+    opacity: 0.6;
+  }
+}
