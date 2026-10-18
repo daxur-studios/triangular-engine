@@ -1,6 +1,7 @@
 import { DataUtils, Vector3 } from 'three';
 import { referenceOpticalDepth, type CloudAnalyticShape } from './cloud-volume-reference';
 import { CloudVolume } from './cloud-volume';
+import { CloudVolumeBakeScheduler } from './cloud-volume-bake-scheduler';
 import { getCloudTestRenderer } from './gpu-renderer.testing';
 
 /** Reads a half-float atlas back as numbers, one per texel, whatever the channel count. */
@@ -101,5 +102,42 @@ describe('CloudVolume bakes (WebGL2 backend)', () => {
     expect(max).toBeGreaterThan(0.3);
     expect(max).toBeLessThanOrEqual(1.001);
     volume.dispose();
+  });
+
+  it('a banded bake spread over steps matches the one-shot bake', async () => {
+    const renderer = await getCloudTestRenderer();
+    const whole = new CloudVolume({ size, shape: 'blob', densitySize: 32, extinction: 0.02, lightSteps: 16 });
+    whole.bakeBands = 1;
+    const banded = new CloudVolume({ size, shape: 'blob', densitySize: 32, extinction: 0.02, lightSteps: 16 });
+    banded.bakeBands = 4;
+    for (const v of [whole, banded]) v.setSunDirection(sunLocal.x, sunLocal.y, sunLocal.z);
+    whole.update(renderer);
+    banded.prepare();
+    let steps = 0;
+    while (banded.bakeStep(renderer)) steps++;
+    expect(steps).toBeGreaterThan(4);
+    const a = await readAtlas(renderer, whole, 'light');
+    const b = await readAtlas(renderer, banded, 'light');
+    for (const [x, y, z] of [[2, 2, 2], [8, 8, 8], [13, 3, 9], [4, 12, 6]]) expect(b(x, y, z)).toBeCloseTo(a(x, y, z), 3);
+    whole.dispose();
+    banded.dispose();
+  });
+
+  it('the scheduler spends its band budget round-robin and finishes every volume', async () => {
+    const renderer = await getCloudTestRenderer();
+    const volumes = [0, 1, 2].map(() => new CloudVolume({ size, shape: 'box', densitySize: 16 }));
+    for (const v of volumes) v.bakeBands = 2;
+    const scheduler = new CloudVolumeBakeScheduler();
+    scheduler.bandsPerFrame = 2;
+    expect(scheduler.update(renderer, volumes)).toBe(2);
+    expect(volumes.map((v) => v.hasPendingBake)).toEqual([true, true, true]);
+    let frames = 1;
+    while (volumes.some((v) => v.hasPendingBake) && frames < 40) {
+      scheduler.update(renderer, volumes);
+      frames++;
+    }
+    expect(volumes.map((v) => [v.densityBakes, v.lightBakes])).toEqual([[1, 1], [1, 1], [1, 1]]);
+    expect(scheduler.update(renderer, volumes)).toBe(0);
+    for (const v of volumes) v.dispose();
   });
 });

@@ -691,5 +691,6 @@ A TSL node material for the cell-planet surface, for `WebGPURenderer` only (`pre
 - Stock layers: `cellLookupLayer`, `streamedMaterialLayer`, `macroVariationLayer` (order via `SURFACE_LAYER_ORDER`; game layers use 1000+). Examples to copy: `roadLayer`, `moonEclipseOcclusion`, `nightLightsEmissive`.
 - Traps: blend with `mix`, not `select`, on `outputNode.rgb`; evaluate `fwidth` unconditionally; WebGPU allows 8 vertex buffers (only attributes the shader reads count); three's WebGPU backend draws a `BatchedMesh` one instance at a time.
 - The classic-WebGL GLSL patches in `worldgen/render` are unchanged and remain the path for `WebGLRenderer` scenes.
+- Atmosphere (sky, haze, sun light on a planet, including the morph): see `atmosphere.md` beside this file (in progress).
 
 Each sublibrary's `public-api.ts` is the source of truth for its surface. Design rationale and scope decisions for these live in the consuming workspace's `docs/runbook/*`.

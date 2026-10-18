@@ -1,4 +1,4 @@
-import { Matrix4, Vector2, type Camera, type PerspectiveCamera, type Scene } from 'three';
+import { Color, Matrix4, Scene, Vector2, type Camera, type PerspectiveCamera } from 'three';
 import { RenderPipeline, type WebGPURenderer } from 'three/webgpu';
 import {
   abs,
@@ -12,6 +12,7 @@ import {
   pass,
   perspectiveDepthToViewZ,
   rtt,
+  screenUV,
   uniform,
   uv,
   vec2,
@@ -43,6 +44,11 @@ export interface CloudVolumeScreenPassOptions {
   scale?: number;
   /** How strongly the upsample rejects taps at a different depth. Default 40. */
   depthSharpness?: number;
+  /**
+   * Spike (Plan 051, step 3c): draw each volume's box mesh into the half-resolution target instead of marching every volume
+   * at every pixel, so only pixels a box covers run its shader. Default false.
+   */
+  proxies?: boolean;
 }
 
 /**
@@ -73,6 +79,12 @@ export class CloudVolumeScreenPass {
   private readonly uNear = uniform(1);
   private readonly uFar = uniform(1000);
   private readonly size = new Vector2();
+  private readonly proxies: boolean;
+  private readonly boxScene = new Scene();
+  private boxPass: any;
+  private drawScene: ((frame: any) => void) | undefined;
+  private frameToken = 0;
+  private sceneToken = -1;
 
   constructor(
     private readonly renderer: WebGPURenderer,
@@ -82,10 +94,23 @@ export class CloudVolumeScreenPass {
     options: CloudVolumeScreenPassOptions = {},
   ) {
     this.scale = options.scale ?? 0.5;
+    this.proxies = options.proxies ?? false;
     this.uSharpness = uniform(options.depthSharpness ?? 40);
     this.scenePass = pass(scene, camera);
+    if (this.proxies) {
+      // The box pass reads the scene pass's depth, so the scene pass must draw first; run it on demand, once per frame.
+      const drawScene = this.scenePass.updateBefore.bind(this.scenePass);
+      this.drawScene = drawScene;
+      this.scenePass.updateBefore = (frame: any) => this.drawSceneOnce(frame);
+    }
     this.pipeline = new RenderPipeline(renderer);
     this.rebuild();
+  }
+
+  private drawSceneOnce(frame: any): void {
+    if (this.sceneToken === this.frameToken) return;
+    this.sceneToken = this.frameToken;
+    this.drawScene?.(frame);
   }
 
   /** Changes the cloud resolution per axis relative to the canvas (1 = full). */
@@ -105,6 +130,7 @@ export class CloudVolumeScreenPass {
     this.uFar.value = camera.far;
     camera.updateMatrixWorld();
     for (const volume of this.volumes) volume.setView(camera);
+    this.frameToken++;
     this.pipeline.render();
   }
 
@@ -114,7 +140,13 @@ export class CloudVolumeScreenPass {
   }
 
   dispose(): void {
-    for (const volume of this.volumes) volume.onMarchRebuilt = undefined;
+    for (const volume of this.volumes) {
+      volume.onMarchRebuilt = undefined;
+      if (this.proxies) {
+        this.boxScene.remove(volume.mesh);
+        volume.setBoxLimit(null);
+      }
+    }
     this.disposeNodes();
     this.pipeline.dispose();
     this.scenePass.dispose?.();
@@ -123,8 +155,37 @@ export class CloudVolumeScreenPass {
   private disposeNodes(): void {
     for (const node of this.cloudNodes) node.dispose?.();
     for (const node of this.marchNodes) node.dispose?.();
+    this.boxPass?.dispose?.();
+    this.boxPass = undefined;
     this.cloudNodes = [];
     this.marchNodes = [];
+  }
+
+  /** Box proxies: one half-resolution pass that draws each visible volume's box, blended far to near by the renderer's sort. */
+  private buildProxies(sceneDepth: any): void {
+    const surfaceMetres = getViewPosition(screenUV, sceneDepth.sample(screenUV).r, this.uProjectionInverse).length();
+    // Volumes the lab dropped from the list since the last build must not stay in the box scene.
+    this.boxScene.clear();
+    for (const volume of this.volumes) {
+      volume.setBoxLimit(surfaceMetres);
+      this.boxScene.add(volume.mesh);
+    }
+    this.boxScene.background = null;
+    const boxPass: any = pass(this.boxScene, this.camera);
+    boxPass.setResolutionScale(this.scale);
+    const draw = boxPass.updateBefore.bind(boxPass);
+    const clear = new Color();
+    boxPass.updateBefore = (frame: any) => {
+      this.drawSceneOnce(frame);
+      // The cloud target starts fully transparent whatever the renderer's clear alpha is.
+      const alpha = this.renderer.getClearAlpha();
+      this.renderer.getClearColor(clear);
+      this.renderer.setClearColor(0x000000, 0);
+      draw(frame);
+      this.renderer.setClearColor(clear, alpha);
+    };
+    this.boxPass = boxPass;
+    this.cloudNodes.push(boxPass.getTextureNode('output'));
   }
 
   /** Builds (or rebuilds, after a scale change or a march rebuild) the cloud target and the composite. */
@@ -143,7 +204,8 @@ export class CloudVolumeScreenPass {
     // chunks are composited far to near.
     this.disposeNodes();
     const perTarget = volumesPerTarget(this.renderer);
-    for (let first = 0; first === 0 || first < this.volumes.length; first += perTarget) {
+    if (this.proxies) this.buildProxies(sceneDepth);
+    else for (let first = 0; first === 0 || first < this.volumes.length; first += perTarget) {
       let accumulated: any = vec4(0, 0, 0, 0);
       const chunkVolumes = this.volumes.slice(first, first + perTarget);
       for (const volume of chunkVolumes) {

@@ -2,7 +2,7 @@ import { Component, DestroyRef, HostListener, inject, signal } from '@angular/co
 import { RouterLink } from '@angular/router';
 import { Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PerspectiveCamera, SphereGeometry, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
-import { CloudVolume, CloudVolumeScreenPass } from 'triangular-engine/cloud-volumes';
+import { CloudVolume, CloudVolumeBakeScheduler, CloudVolumeScreenPass } from 'triangular-engine/cloud-volumes';
 import { GpuTimer } from './gpu-timer';
 
 /**
@@ -19,7 +19,7 @@ const PLANET_RADIUS = 2000;
 const VOLUME_CENTER = new Vector3(0, PLANET_RADIUS + 250, 0);
 const VOLUME_SIZE = new Vector3(600, 200, 600);
 
-type CloudMode = 'mesh' | 'pass' | 'pass-full';
+type CloudMode = 'mesh' | 'pass' | 'pass-full' | 'proxy';
 
 interface CameraPreset {
   readonly label: string;
@@ -101,6 +101,9 @@ interface Recording {
         <button (click)="toggleRebake()" [class.active]="rebakeEveryFrame()">
           light rebake every frame: {{ rebakeEveryFrame() ? 'on' : 'off' }}
         </button>
+        <button (click)="cycleBakeBudget()" [class.active]="bakeBudget() > 0">
+          bake budget: {{ bakeBudget() === 0 ? 'all at once' : bakeBudget() + ' bands/frame' }}
+        </button>
       </p>
 
       <label
@@ -159,6 +162,7 @@ interface Recording {
         <button (click)="setCloudMode('mesh')" [class.active]="cloudMode() === 'mesh'">box mesh</button>
         <button (click)="setCloudMode('pass')" [class.active]="cloudMode() === 'pass'">screen pass x0.5</button>
         <button (click)="setCloudMode('pass-full')" [class.active]="cloudMode() === 'pass-full'">screen pass x1</button>
+        <button (click)="setCloudMode('proxy')" [class.active]="cloudMode() === 'proxy'">box proxies x0.5 (spike)</button>
       </p>
       <label
         >fly speed {{ speed().toFixed(0) }} m/s
@@ -282,6 +286,9 @@ export class CloudVolumesLabPageComponent {
   readonly presetLabel = signal('outside');
   readonly cloudsOn = signal(true);
   readonly rebakeEveryFrame = signal(false);
+  /** Atlas bands rebaked per frame across volumes; 0 finishes every bake in the frame it is queued (step 5 off). */
+  readonly bakeBudget = signal(0);
+  private readonly bakeScheduler = new CloudVolumeBakeScheduler();
   readonly sunElevation = signal(35);
   readonly sunAzimuth = signal(40);
   readonly animateSun = signal(false);
@@ -348,7 +355,12 @@ export class CloudVolumesLabPageComponent {
       this.updateCamera(delta);
       const renderer: any = this.engine.renderer;
       if (!renderer?.initialized) return;
-      for (const volume of this.activeVolumes()) volume.update(renderer);
+      if (this.bakeBudget() > 0) {
+        this.bakeScheduler.bandsPerFrame = this.bakeBudget();
+        this.bakeScheduler.update(renderer, this.activeVolumes());
+      } else {
+        for (const volume of this.activeVolumes()) volume.update(renderer);
+      }
       this.densityBakes.set(this.volume.densityBakes);
       this.lightBakes.set(this.volume.lightBakes);
     });
@@ -468,11 +480,18 @@ export class CloudVolumesLabPageComponent {
     this.syncVolumes();
     if (mode !== 'mesh' && renderer?.initialized) {
       this.screenPass = new CloudVolumeScreenPass(renderer, this.engine.scene, this.engine.camera, this.passVolumes, {
-        scale: mode === 'pass' ? 0.5 : 1,
+        scale: mode === 'pass-full' ? 1 : 0.5,
+        proxies: mode === 'proxy',
       });
       this.screenPipeline = this.screenPass.asEngineRenderPipeline();
       this.engine.registerRenderPipeline(this.screenPipeline);
     }
+  }
+
+  cycleBakeBudget(): void {
+    const steps = [0, 1, 2, 4];
+    this.bakeBudget.set(steps[(steps.indexOf(this.bakeBudget()) + 1) % steps.length]);
+    this.timer.reset();
   }
 
   toggleRebake(): void {
@@ -644,6 +663,7 @@ export class CloudVolumesLabPageComponent {
       { label: 'box mesh, canvas x1', mode: 'mesh', scale: 1 },
       { label: 'box mesh, canvas x0.5', mode: 'mesh', scale: 0.5 },
       { label: 'screen pass x0.5, canvas x1', mode: 'pass', scale: 1 },
+      { label: 'box proxies x0.5, canvas x1', mode: 'proxy', scale: 1 },
     ];
     const runs = quick ? allRuns.slice(2) : allRuns;
     const total = runs.length * presets.length * (stepList.length + 1) + (quick ? 0 : 3);
@@ -805,7 +825,7 @@ export class CloudVolumesLabPageComponent {
   async runFlyby(publish = true, quick = false): Promise<string> {
     const saved = { mode: this.cloudMode(), preset: PRESETS.find((p) => p.label === this.presetLabel()) ?? PRESETS[0] };
     const lines: string[] = [];
-    const modes: [CloudMode, string][] = quick ? [['pass', 'screen pass x0.5']] : [['mesh', 'box mesh'], ['pass', 'screen pass x0.5']];
+    const modes: [CloudMode, string][] = quick ? [['pass', 'screen pass x0.5'], ['proxy', 'box proxies x0.5']] : [['mesh', 'box mesh'], ['pass', 'screen pass x0.5'], ['proxy', 'box proxies x0.5']];
     for (const [mode, label] of modes) {
       this.setCloudMode(mode);
       this.matrixStatus.set(`${this.statusPrefix}fly-by ${label}`);

@@ -565,3 +565,53 @@ Lab "isolating run", screen pass x0.5, horizon preset, 24 steps, whole-frame GPU
 - So the cost is structural per-volume and per-chunk shader overhead (code that runs per pixel whether or not the ray hits, plus the extra half-res target and composite taps per chunk), not ray steps. This agrees with the 8 vs 24 step runs.
 - Consequence for step 3c: box proxies help only if they remove that per-pixel work for pixels the volume does not cover. A screen pass that runs every volume at every pixel cannot be fixed by tuning the march. 1 and 4 volumes already meet G6 as measured; the many-volume case is the one 3c has to fix, otherwise it becomes a Phase 6 gate (one generic loop over volumes with per-volume parameters in a buffer).
 - The 1-volume hidden figure is below clouds-off by 0.09 ms; that is inside the 0.3 ms noise floor and not a real gain.
+
+Second isolating run, same build, smaller canvas (1608x1308, dpr 1.5, DevTools docked), whole-frame GPU ms:
+
+| volumes | hidden | visible | marching part | hidden cost over clouds-off |
+|---|---|---|---|---|
+| 0 (clouds off) | 1.09 | - | - | - |
+| 1 | 1.13 | 1.25 | 0.12 | 0.04 |
+| 4 | 1.26 | 1.60 | 0.34 | 0.17 |
+| 12 | 1.90 | 2.72 | 0.82 | 0.81 |
+
+- Both runs agree that the cost grows with volume count even when nothing is marched, but the split depends on pixel count: at 1608 px wide the fixed part is about half of the 12-volume cost (0.81 of 1.63), at 2538 px about 70%. Treat "mostly fixed overhead" as holding for 12 volumes only; at 4 volumes the marching part is the larger one at the smaller canvas. Canvas sizes differ between the runs, so do not compare absolute numbers across them.
+
+### 4c result: the 25-sampled-textures error is gone
+
+- With the current build (no occupancy texture, chunk size from the device limits, WebGPU confirmed in the header) the lab console shows no pipeline error on load, only the dev-mode and three.js "requestAnimationFrame handler took N ms" violations during first-frame shader compilation. The error was last seen before the occupancy and temporal removal and before the real-backend label, so it most likely came from the earlier unchunked or three-texture builds. Not reproduced, so not investigated further; closed. Reopen if it reappears.
+
+### Step 3c spike (4d): half-res box proxies, built, not yet measured
+
+- `CloudVolumeScreenPass` takes `proxies: true`. It renders each volume's box mesh in one half-resolution `pass()` over a separate box scene, blended by the renderer's far-to-near transparent sort, so only pixels a box covers run that volume's shader and there is no chunking by sampler count (each box is its own draw with two textures). Rays stop at the scene depth: the box material gets a limit node (`CloudVolume.setBoxLimit`, scene distance from the scene pass depth at the fragment). A volume outside the frustum has `mesh.visible = false` and is not drawn.
+- Ordering: the box pass reads the scene pass depth, so the screen pass wraps both `updateBefore` calls so the scene pass draws first, once per frame. The box target is cleared to transparent around the pass.
+- Lab: "box proxies x0.5 (spike)" button; the quick re-test and run-everything include it. Checked: type-check, 8 specs, lab draws clouds in the in-app browser (two transient size-0 swapchain errors at load or mode switch, not per frame). Not checked: depth correctness against geometry, halo and silhouette, and the numbers.
+- Judge by the 3-number check against the screen pass: inside net at 4 volumes, horizon net at 4 volumes, fly-by p95; also 12 volumes.
+
+### 4d result: box proxies vs screen pass (1, 4, 12 volumes)
+
+Fly-by (whole frame GPU ms, 24 steps, screen pass x0.5 vs box proxies x0.5):
+
+| volumes | screen pass avg / p95 | box proxies avg / p95 |
+|---|---|---|
+| 1 | 2.14 / 3.34 | 2.05 / 3.41 |
+| 4 | 3.26 / 4.52 | 3.05 / 4.39 |
+| 12 | 4.32 / 5.57 | 3.15 / 4.46 |
+
+- Static matrix: the proxy rows' `off` baselines (4.1-4.4 ms) are wrong and their nets negative. Cause: volumes dropped from the pass list (clouds off, or fewer volumes) stayed in the box scene and kept drawing, so "off" still drew clouds. Fixed afterwards with `boxScene.clear()` in `buildProxies`; re-measure the static matrix before trusting its nets. The absolute "clouds on" totals (off + net, with the screen-pass `off` of about 1.5 as the real baseline) are still usable:
+
+| volumes | camera | screen pass total | proxies total |
+|---|---|---|---|
+| 4 | inside / above / horizon / ground | 3.90 / 3.76 / 2.13 / 3.62 | 3.80 / 3.62 / 2.14 / 3.57 |
+| 12 | inside / above / horizon / ground | 4.95 / 4.80 / 3.90 / 4.53 | 3.84 / 3.63 / 2.65 / 3.49 |
+
+- Reading: at 1 and 4 volumes proxies equal the screen pass (differences under 0.3 ms). At 12 volumes they save about 1.1-1.3 ms in every camera position and about 1.1 ms on the fly-by p95, which brings 12-volume worst (inside) to about 2.3 ms net over clouds-off, under the 2.5 ms bound; horizon net is about 1.0 ms, under 1.5. So 3c fixes the many-volume case without hurting few volumes.
+- Not yet checked: depth correctness against geometry, silhouette halos, and the proxy mode's static nets after the fix.
+
+## Step 5: budgeted round-robin rebake (built, not yet measured)
+
+- `CloudVolume` splits a bake into `bakeBands` (default 4) horizontal bands of its atlas, drawn with a render-target scissor and `autoClear` off. `prepare()` queues a job (density, then light, when invalidated or the sun turned past the tolerance), `bakeStep(renderer)` draws one band, and `update()` is still prepare plus all steps, so existing callers behave as before.
+- `CloudVolumeBakeScheduler.update(renderer, volumes)` queues every volume, then draws at most `bandsPerFrame` bands, taking turns across volumes. A volume keeps marching its old atlas until its bake finishes. There is no cross-fade, so one frame can show the new light in some bands beside the old.
+- Specs (10 pass, WebGL2 headless): a banded bake matches the one-shot bake; the scheduler honours the budget, finishes all volumes and then reports 0 bands drawn.
+- Lab: `bake budget` button cycles all at once / 1 / 2 / 4 bands per frame.
+- To measure: 12 volumes, animate sun on, compare fly-by p95 and the worst frame between "all at once" and 1 or 2 bands per frame. The light bake is about 0.77 ms per volume, so 1 band of 4 should be about 0.2 ms per frame.

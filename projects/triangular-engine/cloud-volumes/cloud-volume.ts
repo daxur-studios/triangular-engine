@@ -123,10 +123,14 @@ export class CloudVolume {
   lightBakes = 0;
   /** Debug: rebake the light every update, to time the worst case. */
   alwaysRebakeLight = false;
+  /** A bake is split into this many horizontal bands of its atlas, one per {@link bakeStep}. Default 4. */
+  bakeBands = 4;
 
   private shape: CloudVolumeShape;
   private densityDirty = true;
   private lightDirty = true;
+  /** The bake in flight: which atlas, and the next band to draw. */
+  private job: { kind: 'density' | 'light'; band: number } | null = null;
   private readonly sunWorld = new Vector3(0, 1, 0);
   private readonly sunLocal = new Vector3(0, 1, 0);
   private readonly bakedSunLocal = new Vector3(0, 1, 0);
@@ -205,6 +209,7 @@ export class CloudVolume {
   invalidateDensity(): void {
     this.densityDirty = true;
     this.lightDirty = true;
+    this.job = null;
   }
 
   /** Direction toward the sun in world space. The light rebakes once it has turned past the tolerance. */
@@ -214,22 +219,55 @@ export class CloudVolume {
 
   /** Rebakes what is stale and refreshes the march's per-frame uniforms. Call outside any render pass. */
   update(renderer: WebGPURenderer): void {
+    this.prepare();
+    while (this.bakeStep(renderer));
+  }
+
+  /**
+   * Refreshes the per-frame uniforms and queues a bake when the density is invalid or the sun has turned past the
+   * tolerance. Does not draw: spend the queued work with {@link bakeStep}, or let {@link update} finish it at once.
+   */
+  prepare(): void {
     this.mesh.updateWorldMatrix(true, false);
     this.mesh.matrixWorld.decompose(this.scratchPosition, this.quaternion, this.scratchScale);
     this.sunLocal.copy(this.sunWorld).applyQuaternion(this.quaternion.invert());
     this.uSunLocal.value.copy(this.sunLocal);
 
     if (this.densityDirty) {
-      this.bake(renderer, this.densityQuad, this.densityTarget);
+      if (this.job?.kind !== 'density') this.job = { kind: 'density', band: 0 };
+    } else if (!this.job && (this.lightDirty || this.alwaysRebakeLight || this.sunLocal.dot(this.bakedSunLocal) < this.cosTolerance)) {
+      this.job = { kind: 'light', band: 0 };
+      this.bakedSunLocal.copy(this.sunLocal);
+    }
+  }
+
+  /** Whether a bake is queued: the next {@link bakeStep} draws something. */
+  get hasPendingBake(): boolean {
+    return this.job !== null;
+  }
+
+  /** Draws one band of the queued bake. Returns whether more bands remain. A finished density bake queues the light. */
+  bakeStep(renderer: WebGPURenderer): boolean {
+    const job = this.job;
+    if (!job) return false;
+    const bands = Math.max(1, Math.floor(this.bakeBands));
+    const isDensity = job.kind === 'density';
+    const target = isDensity ? this.densityTarget : this.lightTarget;
+    const height = (isDensity ? this.densityLayout : this.lightLayout).height;
+    this.bakeBand(renderer, isDensity ? this.densityQuad : this.lightQuad, target, height, job.band, bands);
+    job.band++;
+    if (job.band < bands) return true;
+    if (isDensity) {
       this.densityBakes++;
       this.densityDirty = false;
-    }
-    if (this.lightDirty || this.alwaysRebakeLight || this.sunLocal.dot(this.bakedSunLocal) < this.cosTolerance) {
-      this.bake(renderer, this.lightQuad, this.lightTarget);
+      this.job = { kind: 'light', band: 0 };
       this.bakedSunLocal.copy(this.sunLocal);
-      this.lightBakes++;
-      this.lightDirty = false;
+      return true;
     }
+    this.lightBakes++;
+    this.lightDirty = false;
+    this.job = null;
+    return false;
   }
 
   dispose(): void {
@@ -250,11 +288,24 @@ export class CloudVolume {
     return this.cameraScratch.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(this.inverseScratch);
   }
 
-  private bake(renderer: WebGPURenderer, quad: QuadMesh, target: RenderTarget): void {
+  /** Draws rows `[band, band + 1) / bands` of the atlas; with one band it draws the whole target. */
+  private bakeBand(renderer: WebGPURenderer, quad: QuadMesh, target: RenderTarget, height: number, band: number, bands: number): void {
     const previous = renderer.getRenderTarget();
+    const previousAutoClear = renderer.autoClear;
+    const sliced = bands > 1;
+    if (sliced) {
+      const y0 = Math.floor((band * height) / bands);
+      const y1 = Math.floor(((band + 1) * height) / bands);
+      target.scissor.set(0, y0, target.width, y1 - y0);
+      target.scissorTest = true;
+      // A clear would wipe the bands the other steps drew.
+      renderer.autoClear = false;
+    }
     renderer.setRenderTarget(target);
     quad.render(renderer);
     renderer.setRenderTarget(previous);
+    renderer.autoClear = previousAutoClear;
+    target.scissorTest = false;
   }
 
   /** The unit-frame position of slice channel `channel` of the atlas texel the current fragment writes, from the bake quad's uv. */
@@ -344,6 +395,8 @@ export class CloudVolume {
       this.viewFrustum.setFromProjectionMatrix(this.viewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
       this.inView = this.viewFrustum.intersectsObject(this.mesh);
       this.uScreenVisible.value = this.inView && !this.forceHidden ? 1 : 0;
+      // A box proxy that is out of view is not drawn at all.
+      this.mesh.visible = this.uScreenVisible.value > 0.5;
     }
   }
 
@@ -359,7 +412,21 @@ export class CloudVolume {
 
   private buildBoxMarchNode(): any {
     // The ray runs from the camera (in the unit frame) through the interpolated box vertex.
-    return this.buildMarchNode(this.uCameraLocal, positionLocal.sub(this.uCameraLocal), null);
+    return this.buildMarchNode(this.uCameraLocal, positionLocal.sub(this.uCameraLocal), this.boxLimit);
+  }
+
+  /** The scene distance node the box proxy stops at (null = march the whole box). */
+  private boxLimit: any = null;
+
+  /**
+   * Makes the box mesh stop each ray at `limitMetres` (a node: the distance from the camera to the scene surface at this
+   * fragment), so the mesh can be drawn into a half-resolution target against the scene's depth. `null` restores the
+   * plain box march.
+   */
+  setBoxLimit(limitMetres: any): void {
+    this.boxLimit = limitMetres;
+    this.marchMaterial.fragmentNode = this.buildBoxMarchNode();
+    this.marchMaterial.needsUpdate = true;
   }
 
   /**

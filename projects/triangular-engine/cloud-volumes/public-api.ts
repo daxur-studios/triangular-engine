@@ -6,3 +6,5 @@ export * from './cloud-volume-reference';
 export * from './cloud-volume-atlas';
 export * from './cloud-volume';
 export * from './cloud-volume-screen-pass';
+
+export * from './cloud-volume-bake-scheduler';
