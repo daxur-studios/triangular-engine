@@ -9,12 +9,15 @@ runbook: /docs/runbook/052_page_test_sessions_and_performance_comparison.md
 
 # Plan 052: Page Test Sessions and Performance Comparison
 
-Status: **U0 replay and U0P rendering-cost positive control passed; quiet-performance/coordination gates remain open**, 2026-10-18. The shared runner and
+Status: **U0 deterministic replay self-consistency and U0P batch-timestamp plumbing proven; pass attribution, unquantized timestamps, cloud-visible U0P capture, `bakeBudget = 1` coverage and machine locking required before Phase 1+**, 2026-10-18. The shared runner and
 broader phases remain proposed. Original design synthesized 2026-10-17 against review
 `R-20261017-121500-pagetest-a4c9` (all six findings accepted). **Revised 2026-10-17 by owner
 decision:** the one-action "Run ALL" suite across page loads is the central performance path, with
 validity gates and a token-efficient report; ground rule F4 is narrowed (see Ground rules and
-Decisions). Evidence: [Runbook 052](/docs/runbook/052_page_test_sessions_and_performance_comparison.md).
+Decisions). **Reviewed 2026-10-18:** offline decomposition of the retained U0P artifacts showed that
+`gpuRenderMsPerFrame` was 71.2% light-bake fragment passes (`Context 3`) and 23.6% scene/cloud raymarch
+(`Context 1`), which masked a real `1.725x` (+72.5%) raymarch slowdown in the 24→192 step pilot when
+GPU clocks boosted; see [Runbook 052](/docs/runbook/052_page_test_sessions_and_performance_comparison.md).
 
 **2026-10-18 requirement update:** unattended agent execution is the target. The human-visible,
 focused-tab/paste-back workflow below is an existing fallback, not a prerequisite for future tests.
@@ -342,31 +345,53 @@ decisions, commands, artifact locations and results in [Runbook 052](/docs/runbo
   status, and cleans up its server/browser on success/failure. Record source identity without commits.
 - [x] Exercise bounded competing GPU load: a second WebGPU compute device on the same AMD adapter;
   replay state and checkpoint pixels stay identical. These timings are diagnostic only.
-- [ ] Exercise independent parallel submissions and shared machine coordination before scaling agents.
+- [ ] Exercise independent parallel submissions and shared machine coordination before scaling agents
+  (add a cross-process GPU/build lockfile, fix the pre-build ephemeral port TOCTOU window, add
+  `SIGINT`/`SIGTERM` process-tree cleanup on Windows, detect mid-run untracked source files, and
+  deduplicate `build/` vs `bundles/` artifact retention).
 - [x] Retain per-command start/finish/total wall duration and active status in each ignored run directory;
   expose compact JSON history and workload-matched wait estimates so agents can await completion
   instead of repeatedly polling. Keep all prior evidence; no automatic pruning or shared index.
-- [ ] Extend seven-checkpoint visual coverage with continuous video/all-frame checks for brief flicker.
+- [ ] Close U0 replay coverage gaps: exercise `CloudVolumeBakeScheduler` (`bakeBudget = 1`, verifying
+  `pendingBake` across frames), ensure second-half checkpoints (`frames 659, 899, 1199`) or camera
+  look-at cover visible clouds (`missingCloudDiffs` `changedPixels > 0`), and extend seven-checkpoint
+  visual coverage with continuous video/all-frame checks for brief flicker.
 - [ ] Prove a known rendering slowdown against repeated quiet measurements before adopting a perf gate.
-  - [x] Isolated U0P batch-timestamp experiment: select/verify NVIDIA Ampere, alternate normal and
-    eight-redundant-render journeys, and detect the positive control (2.539x median GPU cost).
-    Six reference windows show 10.1% spread; all final PNGs match; known contention is inconclusive.
+  - [x] Isolated U0P batch-timestamp plumbing experiment: select/verify NVIDIA Ampere, alternate normal
+    and eight-redundant-render journeys, and resolve all pass queries without loss (2.539x total GPU
+    render sum; 6.85x on the repeated scene/output passes alongside unrepeated light-bake passes).
     Noise/missing/profile rejection specs pass. `npm run test:cloud-performance` retains all evidence.
-  - [ ] Establish a controlled quiet/reference environment and sensitivity to smaller realistic
-    rendering regressions before adopting a gate. U0P measures offscreen pass costs; it does not
-    establish idle-machine FPS, presentation smoothness or absence of unknown contention.
+  - [ ] Fix U0P pass attribution, quantization and verdict honesty (2026-10-18 review gate):
+    - Separate GPU pass durations by role (`scene/march` Context `1` vs `light-bake` Context `3` vs
+      `output` Context `5`) and eliminate mid-frame `renderer.info.reset()` `frameCalls` collisions in
+      `EngineService.render()`.
+    - Treat `gpuMs === 0` as a valid `0` duration (not `null`), and enable unquantized WebGPU timestamps
+      (`--enable-dawn-features=disallow_unsafe_apis`) in the isolated U0P launch flags so sub-65.5 µs
+      passes are not quantized to `0.065536 ms` steps.
+    - Capture U0P's verification image at a cloud-visible frame (`frame 540`) rather than `frame 1199`
+      (which faces away from the cloud), and exercise `proxy` mode.
+    - Remove `environment.power.level` from `profileKey`, rotate `slow` across all three round positions
+      (`ABC, BCA, CAB`), add two-sided/equivalence verdicts, parse `nvidia-smi` clock/utilization
+      telemetry, and fail the CLI exit code / `run.json` status when a required positive control is not
+      `slowdown-detected`.
+  - [ ] Re-run the `24 vs 192` march-step (or `proxy` mode) sensitivity experiment on the GPU (ask owner
+    before launching) to verify that the separated raymarch metric resolves the `+72.5%` (`1.725x`)
+    march-pass slowdown that was previously masked by light-bake dominance and GPU clock boost.
+  - [ ] Establish a controlled quiet/reference environment before adopting a gate. U0P measures
+    offscreen pass costs; it does not establish idle-machine FPS, presentation smoothness or absence of
+    unknown contention.
 
 Evidence: `npm run test:cloud-feasibility` passed (default 1,200 frames, mesh/proxy; 2026-10-18),
 as did `npx tsc -p tests/cloud-feasibility/tsconfig.json` and `npm run build:triangular-engine`.
 See [Runbook 052](/docs/runbook/052_page_test_sessions_and_performance_comparison.md) for the retained
-run ID, environment, failure discoveries and limits. The prototype is intentionally still isolated.
+run IDs, environment, offline pass-context decomposition, review findings and limits. The prototype is
+intentionally still isolated.
 
 **Decision:** report separate go/no-go/inconclusive outcomes for hardware execution, replay,
-failure detection, unattended lifecycle and performance. A replay video cannot prove real-time FPS.
-Headless profiles must be evaluated on their own evidence; document focus is not a universal gate.
-Reliable performance still requires controlled hardware; scheduling/quiet heuristics cannot prove
-the absence of external contention. Cross-agent coordination is a later shared machine queue/lock,
-not merely Playwright's per-process worker count. Existing phases below remain pending this evidence.
+failure detection, unattended lifecycle and performance. While gaming on the NVIDIA dGPU, agents may
+run deterministic correctness checks (U0) on the default AMD iGPU (`--enable-gpu`), whereas NVIDIA
+performance runs (U0P) must gate on active GPU processes/clocks. Complete the U0/U0P review gate items
+above before starting Phase 0/1 below.
 
 ### Existing implementation sequence
 

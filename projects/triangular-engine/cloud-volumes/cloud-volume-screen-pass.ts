@@ -29,14 +29,31 @@ const TEXTURES_PER_VOLUME = 2;
 const DEFAULT_SAMPLED_TEXTURE_LIMIT = 16;
 /** Textures the rest of the cloud shader samples (the scene depth and a spare). */
 const RESERVED_TEXTURES = 1;
+/** Extra textures the aerial-perspective lookup reads (radiance, optical depth, multiple scattering). */
+const HAZE_TEXTURES = 3;
 
 /** How many volumes one cloud target can march on this renderer's device (fewer chunks means fewer half-res passes). */
-function volumesPerTarget(renderer: WebGPURenderer): number {
+function volumesPerTarget(renderer: WebGPURenderer, reserved: number): number {
   const limits = (renderer as any).backend?.device?.limits;
   // Every sampled texture also takes a sampler slot, so the smaller of the two limits decides.
   const limit = limits ? Math.min(limits.maxSampledTexturesPerShaderStage ?? Infinity, limits.maxSamplersPerShaderStage ?? Infinity) : undefined;
-  const budget = (typeof limit === 'number' && Number.isFinite(limit) && limit > 0 ? limit : DEFAULT_SAMPLED_TEXTURE_LIMIT) - RESERVED_TEXTURES;
+  const budget = (typeof limit === 'number' && Number.isFinite(limit) && limit > 0 ? limit : DEFAULT_SAMPLED_TEXTURE_LIMIT) - reserved;
   return Math.max(1, Math.floor(budget / TEXTURES_PER_VOLUME));
+}
+
+/**
+ * Aerial perspective for the clouds (Plan 051 Phase 3b), as a structural match for the atmosphere's froxel table so this
+ * entry point does not import `triangular-engine/atmosphere`: pass `binding.aerialPerspective` (an `AtmosphereAerialPerspectiveLut`)
+ * and the binding's `metersPerUnit`, and a `scale` node (`binding.exposure` times the sun visibility times any strength).
+ * The caller updates the table each frame (`binding.update(renderer)`).
+ */
+export interface CloudVolumeHaze {
+  /** The table lookup: normalised device position, distance in metres and unit view-space direction in; vec3 radiance and transmittance out. */
+  lookup(ndc: any, distanceMetres: any, dirView: any): { radiance: any; transmittance: any };
+  /** Metres per world unit (a number or a node). */
+  metersPerUnit: any;
+  /** Multiplies the in-scattered radiance (a node or a number). */
+  scale: any;
 }
 
 export interface CloudVolumeScreenPassOptions {
@@ -81,6 +98,7 @@ export class CloudVolumeScreenPass {
   private readonly uFar = uniform(1000);
   private readonly size = new Vector2();
   private readonly proxies: boolean;
+  private hazeSource: CloudVolumeHaze | null = null;
   private readonly boxScene = new Scene();
   private boxPass: any;
   private drawScene: ((frame: any) => void) | undefined;
@@ -120,6 +138,12 @@ export class CloudVolumeScreenPass {
     this.rebuild();
   }
 
+  /** Hazes every volume's pixels with the atmosphere's aerial perspective (`null` = off). Rebuilds the march. */
+  setHaze(haze: CloudVolumeHaze | null): void {
+    this.hazeSource = haze;
+    this.rebuild();
+  }
+
   /** Draws one frame: the scene, the clouds and the composite. Run each volume's `update()` before this. */
   render(): void {
     this.renderer.getDrawingBufferSize(this.size);
@@ -143,6 +167,7 @@ export class CloudVolumeScreenPass {
   dispose(): void {
     for (const volume of this.volumes) {
       volume.onMarchRebuilt = undefined;
+      volume.haze = null;
       if (this.proxies) {
         this.boxScene.remove(volume.mesh);
         volume.setBoxLimit(null);
@@ -204,7 +229,17 @@ export class CloudVolumeScreenPass {
     // (density, light), so volumes are marched in chunks sized from the device limit, one cloud target per chunk, and the
     // chunks are composited far to near.
     this.disposeNodes();
-    const perTarget = volumesPerTarget(this.renderer);
+    const haze = this.hazeSource;
+    const hazeFn = haze
+      ? (rgb: any, alpha: any, distanceUnits: any) => {
+          const ndc = screenUV.mul(2).sub(1);
+          const dirView = normalize(getViewPosition(screenUV, float(0.5), this.uProjectionInverse));
+          const h = haze.lookup(ndc, distanceUnits.mul(haze.metersPerUnit), dirView);
+          return rgb.mul(h.transmittance).add(h.radiance.mul(haze.scale).mul(alpha));
+        }
+      : null;
+    for (const volume of this.volumes) volume.haze = hazeFn;
+    const perTarget = volumesPerTarget(this.renderer, RESERVED_TEXTURES + (haze ? HAZE_TEXTURES : 0));
     if (this.proxies) this.buildProxies(sceneDepth);
     else for (let first = 0; first === 0 || first < this.volumes.length; first += perTarget) {
       let accumulated: any = vec4(0, 0, 0, 0);

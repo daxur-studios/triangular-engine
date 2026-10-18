@@ -314,3 +314,127 @@ Docs only; nothing built or measured. Earlier sections, the review inbox and the
 - `npx tsc -p tests/cloud-feasibility/tsconfig.json`, `npm run build:triangular-engine`, Node
   history/timing tests and syntax checks pass. `git diff --check` passes. Compact status shows
   no active commands and preserves all successful/failed records. No commits executed by this session.
+
+## 2026-10-18 — Independent review of U0/U0P code and retained artifacts
+
+Reviewed independently against the code, `three@0.186.1` WebGPU internals, and the retained artifacts
+under `artifacts/cloud-adapters/2026-10-18T12-17-15-228Z-15960/` and
+`artifacts/cloud-feasibility/{2026-10-18T12-20-36-897Z-8844,2026-10-18T12-21-48-863Z-45580,2026-10-18T12-26-12-838Z-12068,2026-10-18T12-29-14-912Z-21332}/`
+(synthesizing both a cloud-container code review and a local review with direct inspection of the
+gitignored artifact files).
+
+### Offline pass-context decomposition of the retained U0P runs
+
+Each query UID in `batch.render` has the form `r:<frameCall>:<renderContextId>:f<frame>`
+(`three.webgpu.js:69294`). Grouping the raw `batches` in `2026-10-18T12-26-12-838Z-12068` and
+`2026-10-18T12-21-48-863Z-45580` by `renderContextId` resolved the open questions from both pilots:
+
+1. **Why `gpuComputeMsPerFrame` is `0` and `gpuRenderMsPerFrame` is 71% light baking:**
+   `CloudVolume` (`cloud-volume.ts:250-309`) bakes density and sun optical depth via fragment passes
+   (`QuadMesh.render(renderer)`) into 2D atlas `RenderTarget`s, not compute shaders. In
+   `2026-10-18T12-26-12-838Z-12068/baseline-1.json` (`4,800` simulation steps):
+   - **Context `3` (`lightTarget` 4-band light rebakes in `tick$`):** `3,848` passes (`962` rebakes × `4`
+     bands), totaling **`604.64 ms` (`0.1260 ms/step` = 71.2% of `gpuRenderMsPerFrame`)**.
+   - **Context `1` (`frameBufferTarget` scene + cloud raymarch pass):** `4,800` passes, totaling
+     **`200.67 ms` (`0.0418 ms/step` = 23.6%)**.
+   - **Context `5` (`_renderOutput` tone-map / sRGB blit into `outputRenderTarget`):** `4,800` passes,
+     totaling **`44.50 ms` (`0.0093 ms/step` = 5.2%)**.
+2. **Why the 8× redundant-render positive control (`2026-10-18T12-26-12-838Z-12068`) produced `2.539x`:**
+   In `submitStep()` (`cloud-replay-probe.ts:90-98`), `engine.tick()` runs **once** per simulation step
+   (running Context `3` light bakes 1×), while `engine.render()` runs **7 extra times** (repeating only
+   Context `1` + Context `5` 8×). In `slow-1.json`, Context `1 + 5` scaled by **`6.85x`**
+   (`0.0511 -> 0.3500 ms/step`), while unrepeated Context `3` ran 1× (`0.1260 -> 0.1082 ms/step`),
+   yielding $(0.3500 + 0.1082) / (0.0511 + 0.1260) = 2.588\times$ (`2.539x` median across rounds).
+3. **Correction to the `24 vs 192` march-cap diagnosis (`2026-10-18T12-21-48-863Z-45580`):**
+   The earlier entry above attributed the `1.013x` (`unresolved`) ratio to short ray length and early
+   termination. Per-context analysis of `2026-10-18T12-21-48-863Z-45580/*.json` disproves that:
+   - **Context `1` (the cloud raymarch pass) slowed down by `1.725x` (+72.5%)**, from median
+     **`0.0375 ms/step`** (range `[0.0347, 0.0403]`, 6 reference windows at 24 steps) to
+     **`0.0646 ms/step`** (range `[0.0644, 0.0655]`, 3 slow windows at 192 steps, `1.7%` spread,
+     completely nonoverlapping ranges).
+   - That +72.5% raymarch regression was masked in the flat `gpuRenderMsPerFrame` sum because:
+     (a) Context `3` light bakes use fixed `lightSteps = 24` (`cloud-volume.ts:185`), not `uMarchSteps`,
+     and make up ~71% of the sum; and
+     (b) the heavier 192-step march pass caused the RTX 3080 to boost its graphics clock from
+     `1,395-1,620 MHz` up to `1,830-1,845 MHz` (recorded in the retained `nvidia-smi` telemetry),
+     speeding up the unchanged Context `3` light-bake passes from `0.1196 ms/step` to `0.0992 ms/step`
+     (`-0.0204 ms/step`) and canceling out the `+0.0271 ms/step` increase in Context `1`.
+
+### Additional verified findings
+
+- **Second-half trajectory faces away from the cloud; U0P `finalCapture` contains zero cloud pixels:**
+  `move(fraction)` (`cloud-volumes-lab-page.component.ts:503-509`) flies from `s = -1200` to `s = +1200`
+  looking forward (`pitch = -a`). The camera enters the volume at `frame 463` and exits at `frame 771`.
+  In `2026-10-18T12-29-14-912Z-21332/report.json:323-358`, `missingCloudDiffs` has **`changedPixels: 0`
+  at checkpoints `659`, `899`, and `1199`**. Consequently, U0P's only image check (`finalCapture` at
+  `frame 1199`, `baseline-1.png` / `slow-1.png`) shows only the green planet horizon and blank sky, and
+  `mesh-reference-1199.png` is byte-identical to `mesh-missing-cloud-1199.png`.
+- **Dawn 65.536 µs ($2^{16}\text{ ns}$) timestamp quantization and `0 -> null` conflation:**
+  Without `--enable-dawn-features=disallow_unsafe_apis`, Chromium/Dawn quantizes WebGPU timestamps to
+  multiples of `0.065536 ms`. In `baseline-1.json`, 100% of pass durations are exact multiples of
+  `0.065536 ms`, and `48.4%` (`2,322 / 4,800`) of Context `1` passes and `85.9%` (`4,121 / 4,800`) of
+  Context `5` passes resolve to `0`. `cloud-replay-probe.ts:112` and `gpu-timer.ts:60` use
+  `gpuMs > 0 ? gpuMs : null`, turning valid `0` durations into `null`. On the RTX 3080, `34.2%` of
+  frames have total GPU time `0`, which would fail `cloud-replay.spec.ts:185` (`> 90%` non-null) if U0
+  were run on the NVIDIA adapter.
+- **Mid-frame `renderer.info.reset()` inside `EngineService.render()` (`engine.service.ts:725`):**
+  `submitStep` resets `info.reset()` before `engine.tick()`. After `tick$` runs the 4 light-bake bands
+  (`frameCalls = 1..4`), `EngineService.render()` calls `this.renderer.info.reset()` again, resetting
+  `frameCalls` to `0` so the main render reuses `frameCalls = 1, 2`. This avoided `TIMESTAMP_QUERY_LOSS`
+  only because `lightTarget` (`id = 3`) and the main render (`id = 1, 5`) have different
+  `RenderContext` IDs; any pre-render and in-render passes sharing a context or `ComputeNode` ID will
+  collide in `pool.queryOffsets`.
+- **Replay configuration gaps:**
+  `configure()` forces `bakeBudget = 0` (`cloud-volumes-lab-page.component.ts:496`), so `pendingBake`
+  is `false` on all 1,200 frames and `CloudVolumeBakeScheduler` (`bakeBudget = 1` default) is never
+  tested. U0P calls `prepare()` with default `mode = 'mesh'` (the legacy box-mesh path) at `640x360`
+  rather than `proxy` or `pass`.
+- **Statistical, verdict, and contention-gate gaps:**
+  - `cloud-performance.spec.ts:166` does not assert `knownSlowdown.verdict === 'slowdown-detected'`, so
+    an `unresolved` or `inconclusive` control still exits `0` and writes `status: "passed"` in `run.json`
+    (as happened in `2026-10-18T12-21-48-863Z-45580`), polluting `estimateDuration()`.
+  - `profileKey` (`cloud-performance.spec.ts:86, 145`) includes `environment.power.level`, so a 1%
+    battery charge change between windows triggers a false `profile-mismatch`.
+  - `slow` is always run in the middle slot of every round (`['baseline', 'slow', 'repeat']` /
+    `['repeat', 'slow', 'baseline']`); retained `nvidia-smi` logs show the GPU downclocks to
+    `540-675 MHz` right after `slow`, making the reading immediately after `slow` systematically the
+    slowest reference window.
+  - `knownContention` only rejects the caller-supplied `competing` flag (and `n = 1`
+    `insufficient-rounds`). Observed GPU render time during `known-contention` was `0.1837 ms/step` in
+    `12-26-12` (within baseline range) and `0.1459 ms/step` in `12-21-48` (`0.862x`, faster than all
+    baselines because the competing compute loop kept clocks boosted at `1,755 MHz`). Raw `nvidia-smi`
+    strings are saved but never parsed or gated on (`210 MHz` to `1,845 MHz` across windows).
+- **Multi-agent concurrency, port race, cancellation, and disk usage:**
+  - No cross-process lock serializes concurrent `ng build demo-app` runs (sharing `.angular/cache`) or
+    concurrent GPU access across agents.
+  - `run-cloud-feasibility.mjs:47-50` binds port `0` and closes it ~40 s before `cloud-probe-server.mjs`
+    finishes `ng build` and listens on that port (TOCTOU race).
+  - `run-cloud-feasibility.mjs` lacks `SIGINT`/`SIGTERM` handlers to kill its Windows process tree and
+    finalize `run.json`, and `run-cloud-feasibility.mjs:65` does not detect untracked source files
+    created mid-run.
+  - Retaining both `build/browser` (~17 MB) and duplicate `bundles/*.js` (~16 MB) plus 5 MB raw JSONs
+    per window consumed **477.5 MB across 14 runs**.
+
+### Claim support summary and U0/U0P completion gate
+
+| Claim | Status | Basis and remaining gap |
+|---|---|---|
+| 1. Deterministic scene correctness | **Partly supported** (self-consistency & fault liveness proven) | Fixed-step replay is invariant to wall pauses and bounded same-adapter compute on AMD iGPU (usable while gaming on NVIDIA dGPU). Needs `bakeBudget = 1` coverage, cloud-visible checkpoints for the second half of the journey, and an accepted baseline comparison. |
+| 2. Rendering cost | **Weakly supported** (query plumbing proven; attribution defective) | Hardware timestamps resolve without loss, and `Context 1` raymarch cost in `12-21-48` cleanly separated `24` vs `192` steps (`1.725x`), but the flat pass sum hid it behind `Context 3` light bakes (71%) and clock boost. Needs per-pass attribution, unquantized Dawn timestamps, `proxy` mode, cloud-visible capture, and parsed telemetry gates. |
+| 3a. Real-time smoothness | **Not measured** | Offscreen `RenderTarget`, `bakeBudget = 0`, and 16-frame queue fences bypass `rAF` cadence, swapchain presentation, and hitch sampling. |
+| 3b. Idle-machine performance | **Not established** | External load and P-state clocks (`210-1,845 MHz`) are uncontrolled; `knownContention` is a harness flag, not an observed-idle proof. |
+
+**Decision (2026-10-18 review):** keep the Phase 1–8 architecture, but complete four bounded U0/U0P
+fixes before extracting shared runner code:
+1. Split GPU pass attribution (`scene/march` vs `bake` vs `output`), stop mid-frame `info.reset()`
+   collisions, treat `gpuMs === 0` as valid `0` (not `null`), enable unquantized Dawn timestamps in the
+   isolated U0P Chrome args, capture U0P's verification PNG inside the cloud (`frame 540`), drop
+   `power.level` from `profileKey`, rotate `slow` across all three round slots, and fail the CLI exit
+   code / `run.json` status when a required positive control is not detected.
+2. Re-run the `24 vs 192` march-step (or `proxy` mode) sensitivity experiment on the GPU (after asking
+   the owner) to confirm `slowdown-detected` on the separated raymarch pass metric with unquantized
+   timestamps and parsed `nvidia-smi` telemetry.
+3. Add `bakeBudget = 1` (`CloudVolumeBakeScheduler`) and cloud-visible checkpoints to U0 replay.
+4. Add a machine-wide lockfile, process-tree cleanup on `SIGINT`/`SIGTERM`, port-binding fix, and
+   `build/` vs `bundles/` deduplication before multi-agent use.
+

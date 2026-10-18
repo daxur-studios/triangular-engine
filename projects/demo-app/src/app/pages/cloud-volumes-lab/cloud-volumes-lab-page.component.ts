@@ -1,9 +1,20 @@
 import { Component, DestroyRef, HostListener, inject, isDevMode, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { uniform } from 'three/tsl';
 import { Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PerspectiveCamera, Quaternion, SphereGeometry, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import { NEXT_TEST } from './next-test';
-import { bakeAtmosphereLuts, createAtmospherePreset, sampleIrradianceLut, sunTransmittanceFromLut } from 'triangular-engine/atmosphere';
+import {
+  AtmosphereBackdrop,
+  AtmosphereGpuModel,
+  AtmosphereSkyViewLut,
+  PlanetAtmosphereBinding,
+  bakeAtmosphereLuts,
+  createAtmospherePreset,
+  sampleIrradianceLut,
+  sunTransmittanceFromLut,
+  type PhysicalAtmosphereProfile,
+} from 'triangular-engine/atmosphere';
 import { CloudVolume, CloudVolumeAtmosphereLighting, CloudVolumeBakeScheduler, CloudVolumeScreenPass } from 'triangular-engine/cloud-volumes';
 import { GpuTimer } from './gpu-timer';
 import { installCloudReplayProbe } from './cloud-replay-probe';
@@ -184,6 +195,12 @@ interface Recording {
         <p class="row">
           <button (click)="setAtmosphereLighting(!atmosphereLighting())" [class.active]="atmosphereLighting()">
             atmosphere lighting: {{ atmosphereLighting() ? 'on' : 'off' }}
+          </button>
+          <button (click)="setSkyBackdrop(!skyBackdrop())" [class.active]="skyBackdrop()">
+            sky backdrop: {{ skyBackdrop() ? 'on' : 'off' }}
+          </button>
+          <button (click)="setCloudHaze(!cloudHaze())" [class.active]="cloudHaze()">
+            cloud haze: {{ cloudHaze() ? 'on' : 'off' }}
           </button>
         </p>
         <p class="row">
@@ -378,6 +395,13 @@ export class CloudVolumesLabPageComponent {
   private orbitRadius = 600;
   private readonly sunWorld = new Vector3(0, 1, 0);
   private lighting: CloudVolumeAtmosphereLighting | undefined;
+  /** The sky and limb glow behind the planet (Plan 051 Phase 3b); built on first use so the cost tests stay unchanged. */
+  readonly skyBackdrop = signal(false);
+  private sky: { model: AtmosphereGpuModel; skyView: AtmosphereSkyViewLut; backdrop: AtmosphereBackdrop; binding: PlanetAtmosphereBinding } | undefined;
+  /** Aerial perspective on the clouds (Plan 051 Phase 3b): the froxel table, looked up once per cloud pixel. */
+  readonly cloudHaze = signal(false);
+  private readonly hazeStrength = uniform(1);
+  private skyProfile: PhysicalAtmosphereProfile | undefined;
   readonly sunElevation = signal(35);
   readonly sunAzimuth = signal(40);
   readonly animateSun = signal(false);
@@ -427,6 +451,7 @@ export class CloudVolumesLabPageComponent {
     this.rememberPose(this.volume);
     const profile = createAtmospherePreset('earth', { radiusM: PLANET_RADIUS, thickness: 0.3 });
     if (profile.kind === 'physical') {
+      this.skyProfile = profile;
       const luts = bakeAtmosphereLuts(profile);
       this.lighting = new CloudVolumeAtmosphereLighting({
         planetRadiusM: profile.planetRadiusM,
@@ -486,6 +511,8 @@ export class CloudVolumesLabPageComponent {
         this.computeMs.set(this.format(this.timer.compute));
       });
     });
+    // The sky reads the camera, so it syncs after the lab has moved it.
+    const beforeRender = this.engine.beforeRender$.subscribe(() => this.syncSky());
     const disposeReplay = REPLAY_PROBE ? installCloudReplayProbe(this.engine, {
       configure: (mode) => {
         this.keys.clear();
@@ -525,6 +552,8 @@ export class CloudVolumesLabPageComponent {
     }) : undefined;
     this.destroyRef.onDestroy(() => {
       disposeReplay?.();
+      beforeRender.unsubscribe();
+      this.disposeSky();
       tick.unsubscribe();
       rendered.unsubscribe();
       this.applyScale(1);
@@ -621,6 +650,68 @@ export class CloudVolumesLabPageComponent {
     }
   }
 
+  setSkyBackdrop(on: boolean): void {
+    this.skyBackdrop.set(on);
+    this.ensureSky();
+    if (this.sky) this.sky.backdrop.mesh.visible = on;
+    this.timer.reset();
+  }
+
+  setCloudHaze(on: boolean): void {
+    this.cloudHaze.set(on);
+    this.ensureSky();
+    this.applyHaze();
+    this.timer.reset();
+  }
+
+  private applyHaze(): void {
+    const table = this.sky?.binding.aerialPerspective;
+    if (!this.screenPass) return;
+    if (!this.cloudHaze() || !table) {
+      this.screenPass.setHaze(null);
+      return;
+    }
+    const binding = this.sky!.binding;
+    this.screenPass.setHaze({
+      lookup: (ndc, distance, dirView) => table.lookup(ndc, distance, dirView),
+      metersPerUnit: binding.metersPerUnit,
+      scale: binding.exposure.mul(binding.sunVisibility).mul(this.hazeStrength),
+    });
+  }
+
+  private ensureSky(): void {
+    if (this.sky || !this.skyProfile) return;
+    const model = new AtmosphereGpuModel(this.skyProfile);
+    const skyView = new AtmosphereSkyViewLut(model);
+    const backdrop = new AtmosphereBackdrop(model, { skyView });
+    backdrop.groundEnabled.value = 0;
+    backdrop.sunDiscStrength.value = 1;
+    backdrop.mesh.visible = this.skyBackdrop();
+    const binding = new PlanetAtmosphereBinding(model, { radiusUnits: PLANET_RADIUS, aerialPerspective: true });
+    this.sky = { model, skyView, backdrop, binding };
+    this.engine.scene.add(backdrop.mesh);
+  }
+
+  private syncSky(): void {
+    const sky = this.sky;
+    const renderer: any = this.engine.renderer;
+    if (!sky || !(this.skyBackdrop() || this.cloudHaze()) || !renderer?.initialized) return;
+    sky.binding.setSunBody(this.sunWorld.x, this.sunWorld.y, this.sunWorld.z);
+    sky.binding.sync(this.engine.camera, this.planet, sky.backdrop);
+    if (this.cloudHaze()) sky.binding.update(renderer);
+    if (this.skyBackdrop()) sky.backdrop.update(renderer, this.engine.camera);
+  }
+
+  private disposeSky(): void {
+    if (!this.sky) return;
+    this.engine.scene.remove(this.sky.backdrop.mesh);
+    this.sky.backdrop.dispose();
+    this.sky.binding.dispose();
+    this.sky.skyView.dispose();
+    this.sky.model.dispose();
+    this.sky = undefined;
+  }
+
   setAtmosphereLighting(on: boolean): void {
     this.atmosphereLighting.set(on);
     if (!on) {
@@ -705,6 +796,7 @@ export class CloudVolumesLabPageComponent {
       });
       this.screenPipeline = this.screenPass.asEngineRenderPipeline();
       this.engine.registerRenderPipeline(this.screenPipeline);
+      if (this.cloudHaze()) this.applyHaze();
     }
   }
 
@@ -980,6 +1072,7 @@ export class CloudVolumesLabPageComponent {
       warp: this.spinWarp(),
       camera: this.cameraMode(),
       lighting: this.atmosphereLighting(),
+      haze: this.cloudHaze(),
     };
     this.setCameraMode('fly');
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -999,6 +1092,7 @@ export class CloudVolumesLabPageComponent {
       for (const volume of this.allVolumes()) volume.alwaysRebakeLight = this.rebakeEveryFrame();
       this.setSpinWarp(s.spinWarp ?? saved.warp);
       this.setAtmosphereLighting(s.atmosphereLighting ?? saved.lighting);
+      this.setCloudHaze(s.haze ?? saved.haze);
       this.setClouds(s.clouds ?? true);
       let cells: string[];
       if (s.kind === 'flyby') {
@@ -1026,6 +1120,7 @@ export class CloudVolumesLabPageComponent {
     for (const volume of this.allVolumes()) volume.alwaysRebakeLight = saved.rebake;
     this.setSpinWarp(saved.warp);
     this.setAtmosphereLighting(saved.lighting);
+    this.setCloudHaze(saved.haze);
     this.applyPreset(saved.preset);
     this.setCameraMode(saved.camera);
     this.setClouds(saved.clouds);

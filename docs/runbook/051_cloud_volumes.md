@@ -707,3 +707,16 @@ Gross GPU ms (clouds off / still / spin) and net = clouds on minus clouds off. F
 | horizon | 2.74 | 2.66 |
 
 Lighting adds no measurable GPU cost (differences are within noise, as expected: the colour and ambient are CPU uniforms). Looks (orange dusk, dark night side, no white glow) are still to be judged by eye. The lab now starts on box proxies; the box mesh mode loses clouds whose far faces sink below the planet surface (depth-tested against the planet), so it is kept only as the old baseline.
+
+### Phase 3b step 1: sky backdrop in the lab
+The lab has a `sky backdrop` toggle (off by default, built on first use so the cost tests are unchanged). It draws the Earth sky and limb glow behind the planet with `AtmosphereBackdrop`, synced to the lab camera and sun like the atmosphere-planet page. Purpose: judge the dusk look of the lit clouds by eye. Not yet measured. Next: aerial perspective haze on far clouds (froxel lookup in the composite), measured as its own step.
+
+### Phase 3b step 2: aerial perspective haze on clouds (built, not yet run)
+`CloudVolumeScreenPass.setHaze(haze)` (structural `CloudVolumeHaze`: the froxel table's `lookup`, `metersPerUnit`, `scale`) sets `CloudVolume.haze`. At the end of each march the premultiplied colour becomes `rgb x T + L x scale x alpha`, with T and L read from the table at the middle of the ray's stretch inside the volume, one lookup per cloud pixel. Works in `proxy` and `pass` modes; the pass reserves 3 extra textures per shader for the table. The lab has a `cloud haze` toggle (builds the sky model on first use; needs the table updated once per frame, which the lab does). Known limit: one distance per ray, so a cloud is hazed as a whole, not by depth through it.
+Cost test queued on the green button: 12 volumes, haze off vs on. The look (blue-hazed far clouds) is judged by eye; `scale` (exposure times strength) may need tuning because cloud colour and atmosphere radiance are different units.
+
+### Phase 3b step 2 result: haze cost, first version (measured, over budget)
+12 volumes, proxies, 1 band/frame, GPU ms whole frame (avg): fly-by 5.13 off vs 7.87 on (+2.74, p95 6.29 vs 9.18); inside 4.82 vs 5.32 (+0.50); horizon 3.59 vs 3.90 (+0.31). Far over the 0.1 ms goal. The first version ran the lookup for every box pixel, including rays that met no cloud. Fix applied: the lookup now runs only for rays with alpha > 0.001. Re-measure; if still over, options are one lookup per pixel in the composite (not per volume) or a coarser per-volume haze from the CPU.
+
+### Phase 3b step 2 result: haze cost, lookup only on hit rays (measured, still over budget)
+Canvas 2560x1308, 12 volumes, proxies, 1 band/frame, GPU ms whole frame (avg). Fly-by 3.86 off vs 6.31 on (+2.45, p95 5.24 vs 8.13); inside 3.98 vs 4.30 (+0.32); horizon 2.80 vs 2.92 (+0.12). The hit-only change took little off the fly-by (+2.74 to +2.45, different baseline runs), so the cost is the lookup itself, not the misses. The off baseline is back to 3.86 (the earlier 5.13 was noise). Per-pixel haze does not meet the 0.1 ms goal. Candidate: per-volume haze from the CPU at the volume centre (zero GPU cost, like lighting; loses per-pixel distance).

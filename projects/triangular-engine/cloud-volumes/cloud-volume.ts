@@ -415,6 +415,13 @@ export class CloudVolume {
     return this.buildMarchNode(this.uCameraLocal, positionLocal.sub(this.uCameraLocal), this.boxLimit);
   }
 
+  /**
+   * Plan 051 Phase 3b: aerial perspective for this volume's pixels. Given the premultiplied cloud colour, its alpha and the
+   * distance (world units) to the middle of the ray's stretch inside the volume, returns the hazed colour. Set by a screen
+   * pass ({@link CloudVolumeScreenPass.setHaze}); `null` = no haze. Takes effect on the next march rebuild.
+   */
+  haze: ((rgb: any, alpha: any, distanceUnits: any) => any) | null = null;
+
   /** The scene distance node the box proxy stops at (null = march the whole box). */
   private boxLimit: any = null;
 
@@ -485,6 +492,13 @@ export class CloudVolume {
             });
           });
         });
+        // Only rays that met cloud pay for the table lookup.
+        if (this.haze) {
+          const haze = this.haze;
+          If(transmittance.lessThan(0.999), () => {
+            color.assign(haze(color, float(1).sub(transmittance), tNear.add(tFar).mul(0.5).mul(dirLength)));
+          });
+        }
       });
       return vec4(color, float(1).sub(transmittance));
     })();

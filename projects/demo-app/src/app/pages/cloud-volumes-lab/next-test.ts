@@ -27,6 +27,8 @@ export interface NextTestScenario {
   readonly clouds?: boolean;
   /** Sun colour and ambient from the atmosphere (Phase 3). */
   readonly atmosphereLighting?: boolean;
+  /** Aerial perspective haze on the clouds (Phase 3b). */
+  readonly haze?: boolean;
 }
 
 export interface NextTest {
@@ -37,17 +39,17 @@ export interface NextTest {
 /** Plan 051 step 7: still vs a spinning planet at 100 000x, proxies, 1 band/frame, at the camera spots that matter. */
 const SPOTS = ['inside', 'horizon'];
 
-/** A fly-by (sun animating, so the lighting changes every frame) and two static spots, 12 volumes, proxies. */
-function group(name: string, atmosphereLighting: boolean): NextTestScenario[] {
-  const base = { volumes: 12 as const, mode: 'proxy' as const, scale: 1, steps: 24, bakeBudget: 1, spinWarp: 0, clouds: true, atmosphereLighting };
+/** A fly-by (sun animating) and two static spots, 12 volumes, proxies, atmosphere lighting on. */
+function group(name: string, haze: boolean): NextTestScenario[] {
+  const base = { volumes: 12 as const, mode: 'proxy' as const, scale: 1, steps: 24, bakeBudget: 1, spinWarp: 0, clouds: true, atmosphereLighting: true, haze };
   return [
     { ...base, label: `fly-by sun moving, ${name}`, kind: 'flyby', animateSun: true },
     ...SPOTS.map((preset): NextTestScenario => ({ ...base, label: `${preset}, ${name}`, kind: 'static', preset, animateSun: false })),
   ];
 }
 
-/** Plan 051 Phase 3: does atmosphere lighting (CPU sun colour and ambient per volume) add GPU cost? Expected: none. */
+/** Plan 051 Phase 3b: what does aerial perspective haze (a froxel table lookup per cloud pixel) cost? */
 export const NEXT_TEST: NextTest = {
-  title: 'phase 3 atmosphere lighting cost: 12 volumes, lighting off vs on, proxies, 1 band/frame',
-  scenarios: [...group('lighting off', false), ...group('lighting on', true)],
+  title: 'phase 3b cloud haze cost: 12 volumes, haze off vs on, proxies, 1 band/frame',
+  scenarios: [...group('haze off', false), ...group('haze on', true)],
 };
