@@ -1,0 +1,65 @@
+<scene [showFps]="true" [logarithmicDepthBuffer]="true">
+  <orbitControls
+    [cameraPosition]="initialPosition"
+    [target]="initialTarget"
+    [upVector]="initialUp"
+    [near]="10"
+    [far]="6000000"
+  />
+  <ambientLight [intensity]="1.1" />
+  <directionalLight
+    [position]="[1200000, 2000000, 1500000]"
+    [intensity]="2.2"
+  />
+</scene>
+<aside>
+  <h1>Illustrative cell planet</h1>
+  <p>
+    Same generated world, camera and light. Additional terrain option;
+    appearance review pending.
+  </p>
+  <form [formGroup]="form">
+    <fieldset [disabled]="busy()">
+      <label
+        >Terrain
+        <select aria-label="Terrain" formControlName="style">
+          <option value="cell-features">Existing per-cell geology</option>
+          <option value="illustrative">Illustrative lowlands and peaks</option>
+        </select></label
+      >
+      <label
+        >View
+        <select aria-label="View" formControlName="landmark">
+          <option value="lowland">Grassland</option>
+          <option value="mountain">Mountain</option>
+          <option value="volcano">Volcano</option>
+          <option value="coast">Coast</option>
+          <option value="seam">Antimeridian</option>
+          <option value="north-pole">North pole</option>
+        </select></label
+      >
+      <label
+        ><input type="checkbox" formControlName="crisp" /> Per-fragment cell
+        colours</label
+      >
+      <label
+        ><input type="checkbox" formControlName="facets" /> Faceted normals
+        (independent of shape)</label
+      >
+    </fieldset>
+  </form>
+  <p>
+    Radius 600 km · elevation scale 12 km/unit · fixed 256×128 globe. No
+    streaming/LOD in this comparison.
+  </p>
+  <p aria-live="polite">{{ activeLabel() }}</p>
+  <tri-test-runner
+    [suites]="history"
+    [adapter]="adapter"
+    [available]="rendered()"
+    [allowAutoStart]="true"
+    [resultSink]="true"
+    (progressChange)="progress($event)"
+    (completed)="lastResult.set($event)"
+  />
+</aside>

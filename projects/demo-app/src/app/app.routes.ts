@@ -2,6 +2,10 @@ import { Routes } from '@angular/router';
 
 export const routes: Routes = [
   {
+    path: 'illustrative-cell-planet',
+    loadComponent: () => import('./pages/illustrative-cell-planet/illustrative-cell-planet-page.component').then(m => m.IllustrativeCellPlanetPageComponent),
+  },
+  {
     path: '',
     pathMatch: 'full',
     loadComponent: () =>

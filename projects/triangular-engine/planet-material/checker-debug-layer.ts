@@ -11,7 +11,6 @@ import {
   sin,
   smoothstep,
   uniform,
-  vec2,
 } from 'three/tsl';
 import type { IPlanetContext } from './planet-context';
 import type { ISurfaceSample, SurfaceLayer } from './planet-surface-layers';
@@ -129,8 +128,7 @@ export function checkerDebugLayer(
     context: IPlanetContext,
     below: ISurfaceSample,
   ) => {
-    const coords: any =
-      space === 'uv' ? vec2(context.uv.x, context.uv.y) : context.latLon;
+    const coords: any = space === 'uv' ? context.uv : context.latLon;
     const cells = coords.div(cellSize);
     const toned = mix(darkColor, lightColor, checkerParity(cells));
     const checker = lineWidthPx

@@ -5,7 +5,13 @@ description: Visual breakdown, shader math, and design decisions for achieving a
 timestamp: 2026-10-17T00:00:00Z
 tags: [stylized, rendering, tsl, webgpu, cell-planet, water, geology, clouds, scatter, lighting]
 plans: [/docs/plans/054_stylized_illustrative_rendering.md]
-performance: []
+performance:
+  - id: illustrative-terrain-look-v1
+    url: http://triangular-demo.localhost:4200/illustrative-cell-planet?testSuite=illustrative-terrain-look&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1
+    status: experimental-functional-review-pending
+  - id: illustrative-terrain-cost-v1
+    url: http://triangular-demo.localhost:4200/illustrative-cell-planet?testSuite=illustrative-terrain-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
+    status: diagnostic-hardware-unmeasured
 ---
 
 # Runbook 054: Stylized Illustrative Planet & Scene Rendering
@@ -72,3 +78,88 @@ and distinct cold/steady-state measurements. Water/scatter depend on the surface
 contract; the cloud preset can progress independently. This entry records planning
 and source inspection only: no terrain code, benchmark, consumer integration or
 human visual acceptance was produced by this documentation migration.
+
+## 2026-10-18 — Experimental additive terrain implementation
+
+Implemented the first engine slice, leaving the wider style catalogue and human
+concept-art acceptance open. The graph, tectonics, ecology and named features
+remain shared; only the selected detailed surface composition changes.
+
+### Surface and worker contract
+
+- Public `ICellPlanetWorldParams.terrain?: IIllustrativeTerrainConfig` selects a
+  version-1 `illustrative` policy. An existing graph can use the same descriptor
+  through `IPlanetSurfaceParams.illustrativeTerrain`. Missing fields preserve the
+  existing styles/defaults. Invalid versions/non-finite parameters fail explicitly.
+- Positive shared base height above sea level is scaled independently (default
+  `0.12`). Narrower, linear ridge influence and cell-local angular peak/caldera
+  profiles replace broad ground bumps/noise in this option. Peak relief (`0.32`
+  mountain, `0.48` volcano) is in canonical elevation units; footprint fractions
+  are separate. Negative shared base elevation is not compressed. Existing named
+  mesas/craters retain their composition.
+- `sample`/`sampleNear`, canonical world construction and worker world creation
+  use the same policy. Worker world keys include resolved configuration, with
+  equivalent explicit/omitted defaults sharing a cache entry and changed terrain
+  settings getting distinct world/material revisions. The graph cache is shared.
+  Hosts still own complete-world revisioning, stream invalidation and stale
+  response rejection; the worker API does not repair a host's lifecycle for it.
+- The shared demo style selector adds `illustrative`, preserving `blended` and
+  `cell-features`. Existing local-feature-off behavior remains the base sampler.
+- See [consumer API](../../projects/triangular-engine/worldgen/README.md).
+  Heights/collision queries must use the selected sampler. Graph ecology slope
+  remains an authoring signal, not a new detailed-surface slope mask.
+
+### Controlled fixture and runnable evidence
+
+`/illustrative-cell-planet` uses the existing indexed `buildPlanetGlobeGeometry`
+adapter inside `<scene>`/`EngineService`; no new renderer, animation loop or morph
+algorithm. This isolates body-fixed shape from projection changes. One 600-cell
+volcanic world (seed 71, relaxation 2, jitter 0.15, plates 10), radius 600,000 m,
+height scale 12,000 m/unit, fixed 256×128 terrain and 128×64 ocean are shared by
+both styles. Switching style/appearance preserves the user's camera pose.
+
+The reactive form separates terrain composition, view, per-fragment cell colours
+and faceted versus smooth normals. The existing resident lookup replaces coarse
+interpolated vertex colours when enabled; the 2048×1024 nearest-ID atlas is still
+resolution-limited. A quiet fixture palette and rock/snow height bands provide
+shape context; they are not a new public material preset or final style acceptance.
+
+- [Look suite v1](http://triangular-demo.localhost:4200/illustrative-cell-planet?testSuite=illustrative-terrain-look&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1): lowland, mountain, volcano and coast, old/new pairs.
+- [Latest diagnostic v1](http://triangular-demo.localhost:4200/illustrative-cell-planet?testSuite=illustrative-terrain-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1): paired flyovers, altitude sweep, repeated landmark/seam/pole teleports, vertex-colour and smooth-normal controls. Slow frames snap to each motion keyframe before proceeding.
+- Static deep links accept `style`, `view` and bounded `altitudeM`, for example
+  [illustrative volcano](http://triangular-demo.localhost:4200/illustrative-cell-planet?style=illustrative&view=volcano&altitudeM=90000).
+
+Cold fixture CPU generation (including lookup construction) and fixture-start to
+first completed render are retained as run details. Resident option-apply to first
+frame is separate. Steady-state metrics are actual completed-render intervals,
+draw/triangle counts and geometry allocation counts. There is no GPU timestamp
+provider; its optional metric states that explicitly. Cancellation/restoration
+remove subscriptions and preserve settings, camera/up/target and controls.
+
+### Verification and limits
+
+- 30 headless terrain/sampler/worker specs passed: land/coast continuity,
+  coherent sampling at seams/poles, independently controlled relief, validation,
+  cache identity and canonical/worker parity, plus existing surface regressions.
+- 7 headless adapter/style specs passed, including abort cleanup, rendered
+  restoration and keyframe snapping across slow frames.
+- 3 Playwright checks passed against the existing application host: cancellation
+  with an identical restored camera screenshot, full eight-case look suite and
+  diagnostic motion suite. Retained local JSON/screenshots are under
+  `artifacts/illustrative-terrain/` (`look.json`, `cost.json`, `cancelled.json`,
+  `volcano-illustrative.png`, `volcano-existing.png`); initial development results
+  are retained separately. Headless evidence is SwiftShader. Automation passes;
+  diagnostic performance is **inconclusive** and visual review is **pending**.
+- Library build and demo TypeScript check passed. The built `worldgen` declaration
+  includes the new public configuration; its FESM has no Angular imports or partial
+  declarations. Token-map status was checked; no new entry point was added.
+
+This is a rough shape prototype, not final parity with the reference. The lowland
+change is visible, while the fixed mesh still under-resolves caldera detail and
+the categorical atlas stair-steps at close range. Arbitrary-zoom antialiasing,
+streaming/LOD transitions, morph/horizon acceptance, terrain-derived placement
+masks, target-hardware budgets and consumer collider integration remain open.
+Floating ice/seabed edges have their existing separate-surface step; land/coast
+continuity tests deliberately do not claim continuity across that transition.
+Trees, a water/cloud rewrite and GPU generation are not part of this slice.
+No package was published, no consumer package was installed and no commit was made.

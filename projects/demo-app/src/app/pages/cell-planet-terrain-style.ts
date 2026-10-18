@@ -2,20 +2,22 @@ import { IPlanetSurfaceSampler } from 'triangular-engine/worldgen';
 import { ICellPlanetWorldSnapshot } from './cell-planet-world.service';
 
 /**
- * Terrain composition policy. The world graph and feature instances are shared by both
+ * Terrain composition policy. The world graph and feature instances are shared by all
  * policies; this value only selects how the canonical surface will compose them.
  */
-export type CellPlanetTerrainStyle = 'blended' | 'cell-features';
+export type CellPlanetTerrainStyle = 'blended' | 'cell-features' | 'illustrative';
 
 export const CELL_PLANET_TERRAIN_STYLE_VERSION = 1;
 export const CELL_PLANET_TERRAIN_STYLE_KINDS: readonly CellPlanetTerrainStyle[] = [
   'blended',
   'cell-features',
+  'illustrative',
 ];
 
 export const CELL_PLANET_TERRAIN_STYLE_LABELS: Record<CellPlanetTerrainStyle, string> = {
   blended: 'Blended landscape (current)',
   'cell-features': 'Per-cell geology (experimental)',
+  illustrative: 'Illustrative lowlands and peaks (experimental)',
 };
 
 export interface ICellPlanetTerrainStyleDescriptor {
@@ -50,5 +52,7 @@ export function selectCellPlanetSurfaceSampler(
       return world.featureSampler;
     case 'cell-features':
       return world.cellFeatureSampler;
+    case 'illustrative':
+      return world.illustrativeSampler;
   }
 }

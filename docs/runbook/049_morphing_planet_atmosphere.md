@@ -758,3 +758,24 @@ hardware acceptance. No benchmark or visual review was rerun by this documentati
 update, and the earlier integration results remain dated evidence.
 
 [Run latest atmosphere diagnostic](http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1).
+
+### 2026-10-18 — First visible-tab results (saved by the Plan 052 result sink)
+
+Both `/atmosphere-lab` suites were run by the owner in a visible browser on the AMD GCN5
+machine and saved automatically under `artifacts/test-runs/` (gitignored). Read with
+`node projects/triangular-engine/bin/triangular-test-summary.mjs`.
+
+- `bent-atmosphere-cost@v1`, two runs (20:45 and 21:07 UTC, `visible-browser`), automated
+  `pass`, performance `unassessed` (no baseline). GPU render median (ms), identical across
+  both runs to about 0.1 ms: space morph 0 / 0.5 / 1 = 0.79 / 1.18 / 1.97; low orbit
+  morph 0 / 0.5 / 1 = 2.75 / 2.69 / 3.74. Frame interval was 1-2 ms lower in the second
+  run, so treat it as noisier than GPU time. The first run's fingerprint is marked stale
+  (code changed after it); the second is current. These are the first real-hardware
+  timings for this lab; not yet compared with the Phase 3a table.
+- `bent-atmosphere-look@v1`, one run (21:08 UTC), automated `pass`, visual review
+  **pending** (owner's call). GPU render median 0.13-2.6 ms; the two morph-scrub
+  scenarios were slowest at about 12-13 ms frame interval (likely rebakes during the
+  sweep). The agent has not judged appearance.
+
+Not done: the owner's by-eye acceptance, comparison against Phase 3a, any baseline.
+Nothing committed.

@@ -20,6 +20,8 @@ export {
   sampleElevationNear,
 } from './core/sample-elevation';
 export * from './core/planet-surface';
+export { ILLUSTRATIVE_TERRAIN_DEFAULTS, resolveIllustrativeTerrain, illustrativeTerrainKey } from './core/illustrative-terrain';
+export type { IIllustrativeTerrainConfig } from './core/illustrative-terrain';
 export * from './core/planet-surface-bake';
 export * from './core/chunking';
 export * from './core/sub-cells';

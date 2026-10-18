@@ -6,6 +6,7 @@ import { createPlanetSurfaceSampler, IPlanetSurfaceSampler } from './planet-surf
 import { deriveIsLand } from './elevation';
 import { buildPlanetTectonics, IPlanetTectonics } from './tectonics';
 import { IVec3 } from './vec3';
+import { IIllustrativeTerrainConfig } from './illustrative-terrain';
 import { IWorldProfile, WORLD_PROFILES, WorldProfileKind } from './world-profile';
 
 export interface ICellPlanetWorldParams {
@@ -15,6 +16,7 @@ export interface ICellPlanetWorldParams {
   readonly jitter?: number;
   readonly plateCount?: number;
   readonly worldProfileKind?: WorldProfileKind;
+  readonly terrain?: IIllustrativeTerrainConfig;
 }
 
 /**
@@ -92,6 +94,7 @@ export function buildCellPlanetWorld(
   const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
     features,
     featureComposition: 'cell',
+    illustrativeTerrain: params.terrain,
   });
 
   let eMin = Infinity;

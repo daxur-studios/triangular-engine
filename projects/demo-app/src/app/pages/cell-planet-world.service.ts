@@ -30,6 +30,8 @@ export interface ICellPlanetWorldSnapshot extends ICellPlanetMapWorldData {
   readonly featureSampler: IPlanetSurfaceSampler;
   /** Civ-like surface where a generated feature is owned by exactly one Voronoi cell. */
   readonly cellFeatureSampler: IPlanetSurfaceSampler;
+  /** Opt-in low-relief ground with angular peaks; graph/cell identity remains shared. */
+  readonly illustrativeSampler: IPlanetSurfaceSampler;
   readonly seaLevelElevation: number;
   readonly impactCraters?: IImpactCraterResult;
 }
@@ -105,6 +107,10 @@ export class CellPlanetWorldService {
       cellFeatureSampler: createPlanetSurfaceSampler(graph, tectonics, ecology, {
         features,
         featureComposition: 'cell',
+      }),
+      illustrativeSampler: createPlanetSurfaceSampler(graph, tectonics, ecology, {
+        features,
+        illustrativeTerrain: { version: 1, kind: 'illustrative' },
       }),
       seaLevelElevation,
     };

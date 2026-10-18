@@ -107,7 +107,7 @@ module.exports = require('triangular-engine/bin/triangular-test-proxy.cjs')();
 stopped with the server) and forwards the sink path to it. Optional repo-root
 `triangular-test.config.json`: `{ "port": 4223, "outputDir": "artifacts/test-runs",
 "fingerprintPaths": ["projects/my-game", "node_modules/triangular-engine"] }`. Without
-a proxy, run `npx triangular-test-receiver` and pass the receiver URL as `resultSink`.
+a proxy, run `npx triangular-test-receiver` (in this repository: `npm run test:receiver`) and pass the receiver URL as `resultSink`.
 Keep `artifacts/` gitignored.
 
 **Where results live.** `artifacts/test-runs/<suite>@v<version>/<timestamp>_<profile>_<hash>.json`
@@ -118,7 +118,7 @@ Runs accumulate; nothing is overwritten.
 diff and untracked files under `fingerprintPaths`. It is deliberately coarse: any edit
 there changes it. Older runs are flagged `STALE` in summaries, not removed.
 
-**Reading cheaply.** Run `npx triangular-test-summary [--suite id] [--last N]` first: date,
+**Reading cheaply.** Run the summary first (`npx triangular-test-summary [--suite id] [--last N]` in a consumer app, where the bin is installed; inside this repository use `npm run test:summary -- [--suite id] [--last N]`, since `npx` cannot resolve the bin here): date,
 profile, fingerprint and stale flag, the three verdicts, median/p95/max per scenario
 metric and failed checks only. Open a full JSON only for a failing case.
 

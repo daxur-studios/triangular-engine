@@ -24,6 +24,8 @@ import {
   generateImpactCraters,
   normalize,
   WORLD_PROFILES,
+  illustrativeTerrainKey,
+  type IIllustrativeTerrainConfig,
   type IImpactCraterResult,
   type IPlanetEcology,
   type IPlanetFeatures,
@@ -319,8 +321,9 @@ export function createCellPlanetWorld(
   seed: number,
   graph: IPlanetGraphCore,
   plateCount = 14,
+  terrain?: IIllustrativeTerrainConfig,
 ): ICellPlanetWorld {
-  const key = `${profileKind}:${seed}`;
+  const key = `${profileKind}:${seed}${illustrativeTerrainKey(terrain)}`;
   const profile = WORLD_PROFILES[profileKind] ?? WORLD_PROFILES.volcanic;
   const tectonics = buildPlanetTectonics(graph, {
     plateCount,
@@ -355,6 +358,7 @@ export function createCellPlanetWorld(
   const sampler = createPlanetSurfaceSampler(graph, tectonics, ecology, {
     features,
     featureComposition: 'cell',
+    illustrativeTerrain: terrain,
   });
 
   let eMin = Infinity;

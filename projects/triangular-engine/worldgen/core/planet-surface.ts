@@ -1,4 +1,5 @@
 import { Biome } from './biomes';
+import { IIllustrativeTerrainConfig, illustrativePeak, resolveIllustrativeTerrain } from './illustrative-terrain';
 import { IPlanetEcology } from './ecology';
 import { IPlanetFeatures } from './features';
 import {
@@ -19,6 +20,8 @@ import { cross, dot, IVec3, normalize } from './vec3';
  * A renderer converts those heights into metres or radial displacement.
  */
 export interface IPlanetSurfaceParams {
+  /** Additional low-relief, angular-landform composition; existing modes remain unchanged. */
+  illustrativeTerrain?: IIllustrativeTerrainConfig;
   ridgeWidthRadians?: number;
   ridgeRelief?: number;
   summitWidthRadians?: number;
@@ -88,7 +91,7 @@ export interface IPlanetSurfaceSampler {
 
 const DEFAULTS: Omit<
   Required<IPlanetSurfaceParams>,
-  'features' | 'cellDetailAmplitude' | 'cellDetailFrequency'
+  'features' | 'cellDetailAmplitude' | 'cellDetailFrequency' | 'illustrativeTerrain'
 > = {
   ridgeWidthRadians: 0.045,
   ridgeRelief: 0.18,
@@ -262,7 +265,7 @@ function indexedNeighbourhood(
 }
 
 /** Max of `smoothFalloff(angularDistance) * weight` over indexed points, or 0 with none in range. */
-function maxIndexedFalloff(index: ISpherePointIndex, direction: IVec3): number {
+function maxIndexedFalloff(index: ISpherePointIndex, direction: IVec3, angular = false): number {
   if (index.buckets.size === 0) return 0;
   const { width, cosWidth, bucketSize } = index;
   const points = indexedNeighbourhood(
@@ -275,7 +278,8 @@ function maxIndexedFalloff(index: ISpherePointIndex, direction: IVec3): number {
   for (let i = 0; i < points.length; i++) {
     const { point, weight } = points[i];
     if (dot(direction, point) < cosWidth) continue;
-    influence = Math.max(influence, smoothFalloff(angularDistance(direction, point), width) * weight);
+    const distance = angularDistance(direction, point);
+    influence = Math.max(influence, (angular ? Math.max(0, 1 - distance / width) : smoothFalloff(distance, width)) * weight);
   }
   return influence;
 }
@@ -466,7 +470,8 @@ export function createPlanetSurfaceSampler(
   params: IPlanetSurfaceParams = {},
 ): IPlanetSurfaceSampler {
   const p = { ...DEFAULTS, ...params };
-  const isDiscreteCell = p.featureComposition === 'cell';
+  const illustrative = params.illustrativeTerrain ? resolveIllustrativeTerrain(params.illustrativeTerrain) : undefined;
+  const isDiscreteCell = p.featureComposition === 'cell' || !!illustrative;
   const volcanoSettings = defaultGeologicalTerrainSettings().volcano;
   const volcanoStamps: IVolcanoStamp[] = isDiscreteCell
     ? []
@@ -490,10 +495,10 @@ export function createPlanetSurfaceSampler(
 
   const ridgeIndex = createSpherePointIndex(
     ecology.ridgePaths,
-    p.ridgeWidthRadians,
+    illustrative ? p.ridgeWidthRadians * 0.4 : p.ridgeWidthRadians,
     (pathIndex) => ecology.ridgePathStrength[pathIndex] ?? 1,
   );
-  const summitIndex = createSpherePointIndex([ecology.ridgePeaks], p.summitWidthRadians);
+  const summitIndex = createSpherePointIndex([ecology.ridgePeaks], illustrative ? p.summitWidthRadians * 0.4 : p.summitWidthRadians);
   const riverIndex = createSpherePointIndex(ecology.riverPaths, p.riverWidthRadians);
 
   // Lazily resolved per-cell constants; NaN marks a cell not yet visited.
@@ -505,6 +510,7 @@ export function createPlanetSurfaceSampler(
   };
   const geologicalSettings = defaultGeologicalTerrainSettings();
   const cellFeatureFrames = new Map<number, ICellFeatureFrame>();
+  const illustrativeFrames = new Map<number, { tangentX: IVec3; tangentZ: IVec3; footprint: number }>();
 
   const sampleAtCell = (unitDirection: IVec3, siteCell: IPlanetGraphCore['cells'][number]): IPlanetSurfaceSample => {
       const sharedSurface = sampleElevationSurfaceAtCell(
@@ -524,7 +530,10 @@ export function createPlanetSurfaceSampler(
       // every tier from reading as a dead-flat plateau.
       const cellFeature = isDiscreteCell && siteCell ? params.features?.featureByCellId.get(siteCell.id) : undefined;
       let baseElevation: number;
-      if (isDiscreteCell) {
+      if (illustrative) {
+        const relative = sharedSurface.elevation - tectonics.seaLevelElevation;
+        baseElevation = tectonics.seaLevelElevation + relative * (relative > 0 ? illustrative.lowlandReliefScale : 1);
+      } else if (isDiscreteCell) {
         const ownElevation =
           siteCell.id < tectonics.elevation.length ? tectonics.elevation[siteCell.id]! : tectonics.seaLevelElevation;
         const cellRadius = siteCell.corners.length > 0 ? Math.max(1e-4, nearestCornerRadius(siteCell)) : 0;
@@ -558,7 +567,22 @@ export function createPlanetSurfaceSampler(
       }
 
       let featureRelief = 0;
-      if (isDiscreteCell) {
+      const illustratedLandform = illustrative && (cellFeature?.kind === 'volcano' || (!cellFeature && resolveLandform(ecology.biome?.[siteCell.id]) === 'mountain'));
+      if (illustratedLandform && illustrative) {
+        const isVolcano = cellFeature?.kind === 'volcano';
+        let frame = illustrativeFrames.get(siteCell.id);
+        if (!frame) {
+          const reference = Math.abs(siteCell.center.y) < 0.92 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
+          const tangentX = normalize(cross(reference, siteCell.center));
+          frame = { tangentX, tangentZ: normalize(cross(siteCell.center, tangentX)),
+            footprint: Math.max(1e-5, nearestCornerRadius(siteCell) * (isVolcano ? illustrative.volcanoRadiusFraction : illustrative.mountainRadiusFraction)) };
+          illustrativeFrames.set(siteCell.id, frame);
+        }
+        const { tangentX, tangentZ, footprint } = frame;
+        const scale = Math.max(1e-5, dot(unitDirection, siteCell.center)) * Math.tan(footprint);
+        featureRelief = illustrativePeak(dot(unitDirection, tangentX) / scale, dot(unitDirection, tangentZ) / scale, isVolcano) *
+          (isVolcano ? illustrative.volcanoRelief : illustrative.mountainRelief);
+      } else if (isDiscreteCell) {
         if (cellFeature) {
           let frame = cellFeatureFrames.get(siteCell.id);
           if (!frame) {
@@ -593,11 +617,13 @@ export function createPlanetSurfaceSampler(
       // Ridges and rivers stay shared, cross-cell corridors in both modes — a mountain crest or
       // a river still runs through several cells the same way it does in 'shaped'. Only the
       // base elevation (and any feature stamp) is cell-local.
-      const ridgeInfluence = maxIndexedFalloff(ridgeIndex, unitDirection);
+      const ridgeInfluence = maxIndexedFalloff(ridgeIndex, unitDirection, !!illustrative);
       let ridgeRelief = Math.max(
-        ridgeInfluence * p.ridgeRelief,
-        maxIndexedFalloff(summitIndex, unitDirection) * p.summitRelief,
+        ridgeInfluence * (illustrative ? illustrative.mountainRelief : p.ridgeRelief),
+        maxIndexedFalloff(summitIndex, unitDirection, !!illustrative) * (illustrative ? illustrative.mountainRelief : p.summitRelief),
       );
+      // Named peaks own their silhouette; do not fill the caldera with a second ridge dome.
+      if (illustratedLandform) ridgeRelief *= 1 - sharedSurface.centerWeight;
       ridgeRelief *= coastalReliefWeight;
 
       // Rivers own their corridors. Keeping their carve below the sea datum would deepen

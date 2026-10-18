@@ -120,7 +120,8 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   `triangular-test.config.json` sets `fingerprintPaths` (the engine and the page
   folder), `port`, `outputDir`. If the panel says "Result not saved", use Download JSON.
 - **Read results cheaply:** run `npx triangular-test-summary [--suite id] [--last N]`
-  first. It shows date, profile, fingerprint, `STALE` vs the current tree, the three
+  first in a consumer app (installed bin). Inside the triangular-engine repository
+  `npx` fails with a 404; use `npm run test:summary -- [--suite id] [--last N]`. It shows date, profile, fingerprint, `STALE` vs the current tree, the three
   verdicts, median/p95/max per scenario and failed checks only. Open a full JSON
   (path printed per run) only for a failing case. Stale runs stay as history; do not
   compare timings across fingerprints without saying so.

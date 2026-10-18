@@ -6,8 +6,26 @@ import {
   type CellPlanetCellLookupWorkerRequest,
 } from './cell-planet-worker-pipeline';
 import type { ILatLonTerrainPatchAddress } from 'triangular-engine/terrain/core';
+import { buildCellPlanetWorld } from 'triangular-engine/worldgen';
 
 describe('cell-planet-worker-pipeline', () => {
+  it('isolates illustrative worker surfaces and reuses the unchanged graph', () => {
+    const cache = new CellPlanetWorldCache();
+    const params = { cellCount: 100, seed: 71, relaxationIterations: 1, jitter: 0.15, plateCount: 9, worldProfileKind: 'terran' as const };
+    const legacy = cache.getOrCreateWorld('terran', 71, params);
+    const terrain = { version: 1, kind: 'illustrative' } as const;
+    const styled = cache.getOrCreateWorld('terran', 71, { ...params, terrain });
+    const canonical = buildCellPlanetWorld({ ...params, terrain });
+    for (const cell of canonical.graph.cells) {
+      expect(styled.sampler.sample(cell.center)).toEqual(canonical.sampler.sample(cell.center));
+    }
+    expect(styled.graph).toBe(legacy.graph);
+    expect(styled.key).not.toBe(legacy.key);
+    expect(cache.getOrCreateWorld('terran', 71, { ...params, terrain: { ...terrain, lowlandReliefScale: 0.12 } })).toBe(styled);
+    const changed = cache.getOrCreateWorld('terran', 71, { ...params, terrain: { ...terrain, mountainRelief: 0.7 } });
+    expect(changed).not.toBe(styled);
+    expect(changed.key).not.toBe(styled.key);
+  });
   const address: ILatLonTerrainPatchAddress = {
     level: 0,
     x: 0,

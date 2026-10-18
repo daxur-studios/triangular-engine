@@ -17,6 +17,64 @@ Two entry points:
 
 ## Generation pipeline (three calls, each layered on the last)
 
+### Experimental illustrative terrain
+
+`buildCellPlanetWorld` accepts an additional, opt-in surface composition:
+
+```ts
+import { buildCellPlanetWorld, illustrativeTerrainKey } from 'triangular-engine/worldgen';
+
+const params = {
+  cellCount: 600, seed: 71, relaxationIterations: 2, jitter: 0.15,
+  plateCount: 10, worldProfileKind: 'volcanic' as const,
+  terrain: { version: 1 as const, kind: 'illustrative' as const,
+    lowlandReliefScale: 0.12, mountainRelief: 0.32, mountainRadiusFraction: 0.72,
+    volcanoRelief: 0.48, volcanoRadiusFraction: 0.78 },
+};
+const world = buildCellPlanetWorld(params);
+const sample = world.sampler.sample({ x: 1, y: 0, z: 0 });
+const revisionSuffix = illustrativeTerrainKey(params.terrain);
+```
+
+Omitting `terrain` preserves existing behavior. The policy preserves graph/seed,
+cell ownership, biomes and feature identities. It compresses positive shared base
+elevation relative to the sea datum, keeps negative shared base elevations uncompressed, removes local
+ground noise, and gives mountain/volcano cells angular silhouettes. Narrow shared
+ridge corridors remain continuous across land/coast edges. Named mesas/craters
+retain their existing shape; a volcano has a lowered caldera floor and raised rim.
+
+Heights are **canonical elevation units**, not metres: multiply relief by the
+consumer's `heightScaleM`. Footprints are fractions of a cell's angular radius.
+Lowland scale does not shrink authored peak relief. `resolveIllustrativeTerrain`
+validates and resolves defaults; `illustrativeTerrainKey` produces stable identity
+for omitted versus explicit defaults and rejects unsupported versions/non-finite
+settings. The six planar peak faces do not change Voronoi cell topology.
+
+For an already-built graph use `createPlanetSurfaceSampler(..., {
+features, illustrativeTerrain: params.terrain })`. Canonical and coherent
+`sampleNear` queries use the same rule. For worker geometry/material requests pass
+the **same complete `params` as `request.world`**. `CellPlanetWorldCache` includes
+the resolved policy in world identity while sharing the graph. Consumers must
+also include it in their own revisions, invalidate installed terrain/materials,
+and discard stale responses when switching; this API does not change a host's
+streaming lifecycle. Colliders, placement, grading and water depth must query the
+chosen sampler, never add visual-only displacement.
+`ecology.slope` remains the original graph-scale ecology signal; it is not a
+measurement of the new detailed surface. Derive placement/collision slopes from
+the selected sampler when that distinction matters.
+
+The demo `/illustrative-cell-planet` compares old/new with one graph, light and
+palette. Its fixed globe is a shape fixture, **not** a streaming/LOD benchmark.
+It separates per-fragment colours from coarse vertex colours and smooth from
+faceted normals. The resident cell-ID atlas still aliases at close range; this
+slice does not solve arbitrary-zoom boundary antialiasing, morph acceptance,
+floating-ice/seabed transitions, or prove a hardware performance budget. Trees,
+new water/cloud rendering and GPU generation are separate increments.
+
+Continue with [Plan 054](../../../docs/plans/054_stylized_illustrative_rendering.md).
+
+### Base graph, tectonics and ecology
+
 ```ts
 import {
   buildPlanetGraphCore,

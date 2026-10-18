@@ -9,6 +9,7 @@ describe('cell planet terrain styles', () => {
   it('accepts only the versioned shared style kinds', () => {
     expect(isCellPlanetTerrainStyle('blended')).toBeTrue();
     expect(isCellPlanetTerrainStyle('cell-features')).toBeTrue();
+    expect(isCellPlanetTerrainStyle('illustrative')).toBeTrue();
     expect(isCellPlanetTerrainStyle('unknown')).toBeFalse();
     expect(isCellPlanetTerrainStyle(undefined)).toBeFalse();
   });
@@ -20,14 +21,17 @@ describe('cell planet terrain styles', () => {
     });
   });
 
-  it('routes the two styles to different shared samplers', () => {
+  it('routes the styles to different shared samplers', () => {
     const baseSampler = { sample: jasmine.createSpy('base') } as never;
     const featureSampler = { sample: jasmine.createSpy('shaped') } as never;
     const cellFeatureSampler = { sample: jasmine.createSpy('cell') } as never;
-    const world = { baseSampler, featureSampler, cellFeatureSampler } as never;
+    const illustrativeSampler = { sample: jasmine.createSpy('illustrative') } as never;
+    const world = { baseSampler, featureSampler, cellFeatureSampler, illustrativeSampler } as never;
 
     expect(selectCellPlanetSurfaceSampler(world, 'blended', true)).toBe(featureSampler);
     expect(selectCellPlanetSurfaceSampler(world, 'cell-features', true)).toBe(cellFeatureSampler);
+    expect(selectCellPlanetSurfaceSampler(world, 'illustrative', true)).toBe(illustrativeSampler);
+    expect(selectCellPlanetSurfaceSampler(world, 'illustrative', false)).toBe(baseSampler);
     expect(selectCellPlanetSurfaceSampler(world, 'cell-features', false)).toBe(baseSampler);
   });
 });

@@ -5,12 +5,18 @@ description: TSL lighting stages, crisp Voronoi cell borders/palettes, bathymetr
 timestamp: 2026-10-17T00:00:00Z
 tags: [stylized, rendering, tsl, webgpu, cell-planet, water, geology, clouds, scatter, lighting]
 runbook: /docs/runbook/054_stylized_illustrative_rendering.md
-performance: []
+performance:
+  - id: illustrative-terrain-look-v1
+    url: http://triangular-demo.localhost:4200/illustrative-cell-planet?testSuite=illustrative-terrain-look&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1
+    status: experimental-functional-review-pending
+  - id: illustrative-terrain-cost-v1
+    url: http://triangular-demo.localhost:4200/illustrative-cell-planet?testSuite=illustrative-terrain-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
+    status: diagnostic-hardware-unmeasured
 ---
 
 # Plan 054: Stylized Illustrative Planet & Scene Rendering
 
-Status: **planned** (2026-10-17).
+Status: **experimental terrain slice implemented; wider rendering phases planned** (2026-10-18).
 Evidence: [Runbook 054](/docs/runbook/054_stylized_illustrative_rendering.md).
 
 ## Current bounded priority — additive terrain, 2026-10-18
@@ -50,10 +56,14 @@ atmosphere, foliage and plume work is not a prerequisite for this terrain slice.
   migration or performance win is assumed. Trees/water follow stable surface masks;
   a stylized cloud preset can progress independently with coordinated interfaces.
 
-No new terrain scenario is executable or visually accepted from this planning
-update. Append real performance entries when implemented; set hardware/budgets
-before performance acceptance. A consumer integration and combined environment
-review follow a stable built API, without naming consumer applications here.
+The experimental option is now implemented through canonical sampling and worker
+cache identity; see `worldgen/README.md` for the public versioned configuration.
+The same-world `/illustrative-cell-planet` fixture has look and diagnostic suites.
+[Run latest diagnostic](http://triangular-demo.localhost:4200/illustrative-cell-planet?testSuite=illustrative-terrain-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1).
+No hardware budget or visual acceptance is implied. This fixed-resolution fixture
+does not establish streaming/LOD, arbitrary-zoom crispness, floating-ice transition
+continuity or morph acceptance. A consumer integration and combined environment
+review follow the built API.
 
 **Goal:** Enable a cohesive **Stylized Illustrative PBR** aesthetic (comparable to *Civilization VI*, *Endless Legend*, *The Witness*, and *Astroneer*) across `triangular-engine`'s planet, terrain, water, geology, cloud, and scatter sublibraries using composable TSL nodes on `WebGPURenderer`.
 

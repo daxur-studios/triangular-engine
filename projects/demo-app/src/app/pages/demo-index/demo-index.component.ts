@@ -75,6 +75,11 @@ export const CATEGORIES: readonly DemoCategory[] = [
 ];
 
 export const DEMOS: readonly DemoItem[] = [
+  {
+    id: 'illustrative-cell-planet', number: '054', title: 'Illustrative Cell Planet', route: '/illustrative-cell-planet',
+    categoryId: 'terrain', tier: 'lab', createdAt: '2026-10-18', entryPoints: ['worldgen', 'worldgen/render', 'testing'], package: 'triangular-engine',
+    description: 'Controlled same-world comparison of low-relief plains, angular peaks and volcanoes, with repeatable camera tests.',
+  },
   // --- Shining Gems ---
   {
     id: 'photo-mode-lab',

@@ -16,6 +16,7 @@ import {
 } from 'triangular-engine/terrain/core';
 import {
   buildPlanetGraphCore,
+  illustrativeTerrainKey,
   findCellAt,
   findCellNear,
   type ICellPlanetWorldParams,
@@ -311,7 +312,7 @@ export class CellPlanetWorldCache {
       this.graphs.set(graphKey, graph);
     }
 
-    const worldKey = `${resolvedProfile}:${graphKey}:${plateCount}`;
+    const worldKey = `${resolvedProfile}:${graphKey}:${plateCount}${illustrativeTerrainKey(worldParams?.terrain)}`;
     const cached = this.worlds.get(worldKey);
     if (cached) {
       this.worlds.delete(worldKey);
@@ -319,7 +320,7 @@ export class CellPlanetWorldCache {
       return cached;
     }
 
-    const world = createCellPlanetWorld(resolvedProfile, resolvedSeed, graph, plateCount);
+    const world = createCellPlanetWorld(resolvedProfile, resolvedSeed, graph, plateCount, worldParams?.terrain);
     this.worlds.set(worldKey, world);
     const maxWorlds = this.options.maxCachedWorlds ?? 4;
     while (this.worlds.size > maxWorlds) {

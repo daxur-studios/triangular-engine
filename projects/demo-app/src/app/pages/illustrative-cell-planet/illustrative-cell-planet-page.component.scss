@@ -1,0 +1,44 @@
+:host {
+  position: relative;
+  min-height: 0;
+}
+scene {
+  flex: 1;
+  min-height: 0;
+}
+aside {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: min(380px, calc(100% - 48px));
+  max-height: calc(100% - 48px);
+  overflow: auto;
+  padding: 12px;
+  background: #101d2bea;
+  color: #edf3f7;
+  border-radius: 8px;
+}
+h1 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+p {
+  font-size: 12px;
+  line-height: 1.4;
+}
+fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+label {
+  display: block;
+  font-size: 13px;
+}
+select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+}

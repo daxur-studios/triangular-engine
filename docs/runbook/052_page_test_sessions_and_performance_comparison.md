@@ -676,3 +676,13 @@ a new public API; the owner approved it explicitly on 2026-10-18.
 Choices: reviews re-post the same run, so an accepted review produces a second file and
 index line with the same `runId`; fingerprint covers untracked files too. Not verified
 here: a real visible-tab atmosphere-lab run end to end (needs the owner's browser).
+
+## 2026-10-18 — Durable result transport: visible-tab verification
+
+The owner ran both atmosphere-lab suites in a visible tab: `POST /__triangular-test-sink`
+returned 200, run files and `index.jsonl` landed under `artifacts/test-runs/`, and the
+summary showed current and `STALE` fingerprints correctly. Gap found: `npx
+triangular-test-summary` returns an npm 404 inside this repository because the bin only
+resolves from an installed package. Added root scripts `npm run test:summary -- <args>`
+and `npm run test:receiver`; docs and skill now name the in-repo versus consumer command.
+
