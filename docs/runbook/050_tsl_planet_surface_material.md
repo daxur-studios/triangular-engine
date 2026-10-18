@@ -606,3 +606,25 @@ case's details. The environment names the backend actually running, the GPU stri
 3. `buildFingerprint` is always `'unknown'`; a build stamp would let results be tied to a build.
 4. `(completed)` fires again for a review verdict, so a host that retains results has to de-duplicate by `runId` (done here).
 5. No per-scenario image in the result (already noted for the atmosphere lab).
+
+## 2026-10-18 — Reusable checker debug layer (`checkerDebugLayer`)
+
+Added `planet-material/checker-debug-layer.ts` and `checker-debug-layer.spec.ts`. It turns the atmosphere lab's
+ground checker and graticule (`atmosphere-backdrop.ts:218-248`, `bent-planet-lab.ts:458-490`) into a reusable
+`SurfaceLayer`, so a debug checker drops onto any `PlanetSurfaceMaterial` (the cell planet included) in one call
+instead of being copied per page.
+
+- Cells live in `latLon` (radians, geography-stable across the morph) or map `uv`. `cellSize`, `strength`,
+  `enabled` and the two tones are live uniforms, so a toggle never recompiles (`stackKey` is unchanged).
+- Anti-aliasing is `fwidth`-based (sub-pixel cells fade to grey), not a distance fade: on a mesh the screen
+  derivative is the cheaper and more correct measure, and it behaves the same on WebGPU and the WebGL2 fallback.
+- No vertex attributes: it reads only `IPlanetContext.latLon` / `uv`, so the 8-buffer WebGPU budget
+  (`planet-morph-nodes.ts`) is untouched.
+- Exports the `filteredSquareWave`, `checkerParity` and `cellGridLine` `Fn`s. `checkerParity` is fwidth-filtered
+  and must run in uniform control flow (the usual WGSL derivative rule); the layer always calls it.
+- Specs: the parity maths and the sub-pixel fade are pinned on the GPU (`gpu-eval.testing`), and the layer is
+  rendered inside a `PlanetSurfaceMaterial` (`render-eval.testing`) to show a two-tone pattern that toggles off
+  to the flat base without changing `stackKey` or `version`.
+- Demo: `cell-planet-tsl?checker=1` adds the layer at `SURFACE_LAYER_ORDER.game`, with a live panel toggle.
+- Not done: no pixel-parity screenshot and no test that drives a non-uniform-control-flow call; the layer only
+  changes `albedo` and passes `roughness` / `metalness` through.

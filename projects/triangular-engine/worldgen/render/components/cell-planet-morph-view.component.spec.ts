@@ -69,10 +69,10 @@ describe('CellPlanetMorphViewComponent', () => {
     const comp = fixture.componentInstance;
     const dir: IVec3 = { x: 0, y: 0, z: 1 };
     const transform3D = comp.evaluateUnitTransform(dir, 0);
-    // At center (0, 0, 1), position should be at Z = 0 (tangent to camera)
+    // At center (0, 0, 1) the globe is centred on the origin, so the front point sits at Z = radius
     expect(transform3D.position.x).toBeCloseTo(0, 3);
     expect(transform3D.position.y).toBeCloseTo(0, 3);
-    expect(transform3D.position.z).toBeCloseTo(0, 3);
+    expect(transform3D.position.z).toBeCloseTo(2, 3);
 
     // Switch to 2.5D map
     fixture.componentRef.setInput('morphProgress', 1.0);

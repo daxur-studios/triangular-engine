@@ -116,7 +116,9 @@ Two levels of extension:
 - **Slots** on the stock material, as above, for most games.
 - **Building blocks.** Every stage and stock layer is also exported as a standalone `Fn`
   (`planetMorphPosition`, `macroVariationLayer`, `cellLookupLayer`, `streamedMaterialLayer`, …), so a
-  game can assemble its own `NodeMaterial` from scratch.
+  game can assemble its own `NodeMaterial` from scratch. `checkerDebugLayer` (added 2026-10-18) is a
+  reusable debug checkerboard layer in this spirit: the atmosphere lab's checker, geography- or UV-space,
+  live-toggled (see Runbook 050).
 
 Rules:
 

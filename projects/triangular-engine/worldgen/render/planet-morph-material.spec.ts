@@ -170,8 +170,8 @@ describe('bend GLSL helper call sites', () => {
       createPlanetMapBorderMaterial(uniforms()).vertexShader,
     ];
     for (const source of shaders) {
-      expect(source).toContain(
-        'planetStaticEquirectXY(aSphereNorm, aFlatPos.xy, uRadius, uMapWidth, uProjectionType)',
+      expect(source).toMatch(
+        /planetStaticEquirectXY\([^,]+\.y, [^,]+\.xy, uRadius, uMapWidth, uProjectionType\)/,
       );
       expect(source).toContain(
         'planetBendTransform(mapXY, (1.0 - uMorph) / uRadius, h, (1.0 - uMorph) * uRadius,',

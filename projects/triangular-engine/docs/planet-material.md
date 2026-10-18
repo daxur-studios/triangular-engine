@@ -43,12 +43,29 @@ Geometry needs the attributes the stages read: `aFlatPos` / `aFlatNorm` (the fla
 | `PlanetSurfaceMaterial` | The material, with the stage/slot API above |
 | `vertexColorLayer`, `solidColorLayer` | Base layers |
 | `cellLookupLayer`, `streamedMaterialLayer`, `macroVariationLayer` | Stock surface layers (ports of the GLSL patches) |
+| `checkerDebugLayer` | A debug checkerboard as a layer: geography (`latLon`) or map-UV cells, `fwidth`-filtered, live-toggled |
 | `planetOceanMaterial` | The ocean shell: `MeshStandardNodeMaterial` + stage 1 |
 | `planetBorderMaterial`, `planetMapBorderMaterial` | Cell-grid lines and the flat-map frame |
 | `simpleDayNightLighting`, `sunVisibilityLighting` | Lighting stages |
 | `roadLayer`, `moonEclipseOcclusion`, `nightLightsEmissive` | Working examples of a layer, an occluder and an emissive. Use or copy them |
 | `createPlanetMorphUniforms`, `planetMorphGraph`, `createPlanetContext` | Stage 1 pieces, to build a different material from the same graph |
 | `equirectangularFlat`, `equalEarthFlat`, `seam*` | The projection and seam `Fn`s |
+
+## Debug checkerboard
+
+`checkerDebugLayer` is the reusable form of the atmosphere lab's ground checker and graticule: a debug material you can drop on the planet to read scale, stretching and UVs at a glance. It reads only the planet context (no vertex attributes), so it stays within the 8-buffer budget, and it is anti-aliased with `fwidth` (a sub-pixel cell fades to grey), which reads cleanly at every zoom on both backends.
+
+```ts
+import { PlanetSurfaceMaterial, SURFACE_LAYER_ORDER, checkerDebugLayer } from 'triangular-engine/planet-material';
+
+const material = new PlanetSurfaceMaterial();
+const checker = checkerDebugLayer({ space: 'latLon', cellSize: Math.PI / 16, lines: true });
+material.addSurfaceLayer({ id: 'checkerDebug', order: SURFACE_LAYER_ORDER.game, layer: checker.layer });
+checker.enabled.value = 0;        // live toggle: no recompile
+checker.cellSize.value = 0.05;    // live
+```
+
+`space: 'latLon'` keeps cells welded to geography as the view morphs (they narrow toward the poles); `space: 'uv'` matches the map/tile UVs. `lines` draws a pixel-wide graticule on the cell edges. In `cell-planet-tsl`, `?checker=1` adds it and the panel toggles it live.
 
 ## Writing a layer
 

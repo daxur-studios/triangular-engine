@@ -30,22 +30,25 @@ function dynamicUniforms(morph: number) {
 
 describe('planetBorderMaterial on the GPU', () => {
   /** A ribbon triangle at `corners`; every vertex's `aOtherDir` is the segment's far end `other`. */
-  function ribbon(corners: [number, number][], other: [number, number]) {
+  function ribbon(corners: [number, number][], other: [number, number], onSphere = false) {
     const flat = corners.map(([lon, lat]) => [lon, lat, 0]);
+    // The bent morph needs real sphere points; the default keeps them on the flat map (a unit globe is bent at morph < 1).
+    const sphere = onSphere ? corners.map(([lon, lat]) => dirAt(lon, lat)) : flat;
     return triangleWith({
-      position: { itemSize: 3, values: flat },
-      aSpherePos: { itemSize: 3, values: flat }, // same as the flat map: the morph value cannot move it
+      position: { itemSize: 3, values: sphere },
+      aSpherePos: { itemSize: 3, values: sphere },
       aFlatPos: { itemSize: 3, values: flat },
       aSphereNorm: { itemSize: 3, values: corners.map(([lon, lat]) => dirAt(lon, lat)) },
       aOtherDir: { itemSize: 3, values: corners.map(() => dirAt(other[0], other[1])) },
       uv: { itemSize: 2, values: [[0, 0], [1, 0], [0.5, 1]] },
     });
   }
-  const draw = async (morph: number, corners: [number, number][], other: [number, number]) => {
+  const draw = async (morph: number, corners: [number, number][], other: [number, number], onSphere = false) => {
     const { material } = planetBorderMaterial(dynamicUniforms(morph), { opacity: 0.6, ribbonWidth: 0.01 });
-    const read = await renderRgba([meshOf(ribbon(corners, other), material)], VIEW);
-    const cx = corners.reduce((s, c) => s + c[0], 0) / 3;
-    const cy = corners.reduce((s, c) => s + c[1], 0) / 3;
+    const read = await renderRgba([meshOf(ribbon(corners, other, onSphere), material)], VIEW);
+    const points = onSphere ? corners.map(([lon, lat]) => dirAt(lon, lat)) : corners.map(([lon, lat]) => [lon, lat]);
+    const cx = points.reduce((s, c) => s + c[0], 0) / 3;
+    const cy = points.reduce((s, c) => s + c[1], 0) / 3;
     return read(...pixelAt(cx, cy))[3];
   };
 
@@ -64,7 +67,7 @@ describe('planetBorderMaterial on the GPU', () => {
   });
 
   it('keeps that edge when the morph is at or below 0.05 (the check can fail)', async () => {
-    expect(await draw(0.04, nearSeam, acrossSeam)).toBeCloseTo(0.6, 2);
+    expect(await draw(0.04, nearSeam, acrossSeam, true)).toBeCloseTo(0.6, 2);
   });
 
   it('uses plain line materials for ribbon width 0 and mesh materials above it', () => {

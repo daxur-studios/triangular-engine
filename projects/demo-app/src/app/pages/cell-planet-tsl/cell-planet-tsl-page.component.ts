@@ -32,6 +32,7 @@ import {
 } from 'triangular-engine/atmosphere';
 import {
   cellLookupLayer,
+  checkerDebugLayer,
   macroVariationLayer,
   planetBorderMaterial,
   planetMapBorderMaterial,
@@ -82,6 +83,7 @@ import { MaterialStreaming } from './material-streaming';
  * Surface layers (Phase 2): vertex colour, then streamed material tiles, the per-cell colour lookup (the
  * territory overlay) and macro variation, in the GLSL patches' order. `?tiles=0` / `?macro=off|bodyFixed|morphed`
  * choose the stack at load (adding or removing a layer recompiles, so the stack is fixed at setup).
+ * `?checker=1` adds the reusable debug checker layer (`checkerDebugLayer`) on top, toggled live from the panel.
  * Phase 3 adds the ocean shell, the map frame (fades in as the globe unrolls) and the cell-grid lines, all on the
  * same morph uniforms as the terrain.
  */
@@ -111,6 +113,8 @@ const MACRO: 'off' | 'bodyFixed' | 'morphed' =
     : query.get('macro') === 'bodyFixed'
       ? 'bodyFixed'
       : 'morphed';
+/** `?checker=1` adds the debug checker layer to the stack at setup (adding a layer recompiles, so it is chosen at load). */
+const CHECKER = query.get('checker') === '1';
 
 /** The projection frame of the static (baked) map, which is centred on +Z. */
 const STATIC_BASIS = { forward: new Vector3(0, 0, 1), up: new Vector3(0, 1, 0), right: new Vector3(1, 0, 0) };
@@ -297,6 +301,16 @@ const STATIC_BASIS = { forward: new Vector3(0, 0, 1), up: new Vector3(0, 1, 0), 
             macro</label
           >
         }
+        @if (checker) {
+          <label
+            ><input
+              type="checkbox"
+              [checked]="checkerOn()"
+              (change)="setChecker($event)"
+            />
+            checker</label
+          >
+        }
         @if (tiles) {
           <label
             ><input
@@ -456,6 +470,8 @@ export class CellPlanetTslPageComponent {
   readonly tiles = TILES;
   readonly macro = MACRO !== 'off';
   readonly macroOn = signal(true);
+  readonly checker = CHECKER;
+  readonly checkerOn = signal(true);
   readonly batchingOn = signal(true);
   /** Empty while idle; the running scenario (or the copy result) otherwise. */
   readonly benchmarkStatus = signal('');
@@ -533,6 +549,8 @@ export class CellPlanetTslPageComponent {
   private readonly macroLayer = macroVariationLayer({
     positionSpace: MACRO === 'bodyFixed' ? 'bodyFixed' : 'morphed',
   });
+  /** `?checker=1`: a reusable debug checker over geography, on top of every other layer. */
+  private readonly checkerLayer = checkerDebugLayer({ space: 'latLon' });
   private readonly drawingBuffer = new Vector2();
   /** 1 = atmosphere fully on; the page sets it to zero when the toggle is off or the globe has unrolled. */
   private readonly atmosphereMix = uniform(1);
@@ -686,6 +704,13 @@ export class CellPlanetTslPageComponent {
         id: 'macroVariation',
         order: SURFACE_LAYER_ORDER.macroVariation,
         layer: this.macroLayer.layer,
+      });
+    }
+    if (CHECKER) {
+      this.surface.addSurfaceLayer({
+        id: 'checkerDebug',
+        order: SURFACE_LAYER_ORDER.game,
+        layer: this.checkerLayer.layer,
       });
     }
     this.cellLookup.opacity.value = 0.72;
@@ -1264,6 +1289,12 @@ export class CellPlanetTslPageComponent {
     const on = (event.target as HTMLInputElement).checked;
     this.macroOn.set(on);
     this.macroLayer.enabled.value = on ? 1 : 0;
+  }
+
+  setChecker(event: Event): void {
+    const on = (event.target as HTMLInputElement).checked;
+    this.checkerOn.set(on);
+    this.checkerLayer.enabled.value = on ? 1 : 0;
   }
 
   setTileDebug(event: Event): void {

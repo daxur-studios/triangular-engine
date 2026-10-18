@@ -693,7 +693,7 @@ A TSL node material for the cell-planet surface, for `WebGPURenderer` only (`pre
 - `new PlanetSurfaceMaterial()` runs six stages: morph (fixed), surface layers, sun occlusion, lighting, emissive, atmosphere.
 - Extend it with `addSurfaceLayer({ id, order, layer })`, `addSunOcclusion`, `addEmissive`, `setLightingStage`, `setAtmosphereStage`. A layer is a pure `(context, below) => sample` TSL function; keep live values in `uniform(...)` nodes.
 - The ordered layer ids are the shader cache key (`material.stackKey`). Changing a uniform never recompiles; adding, removing or reordering a layer does. Set stacks up front and call `renderer.compileAsync`.
-- Stock layers: `cellLookupLayer`, `streamedMaterialLayer`, `macroVariationLayer` (order via `SURFACE_LAYER_ORDER`; game layers use 1000+). Examples to copy: `roadLayer`, `moonEclipseOcclusion`, `nightLightsEmissive`.
+- Stock layers: `cellLookupLayer`, `streamedMaterialLayer`, `macroVariationLayer` (order via `SURFACE_LAYER_ORDER`; game layers use 1000+). `checkerDebugLayer` is a reusable debug checkerboard (geography or UV cells, `fwidth`-filtered, live `enabled`/`strength`/`cellSize` uniforms). Examples to copy: `roadLayer`, `moonEclipseOcclusion`, `nightLightsEmissive`.
 - Traps: blend with `mix`, not `select`, on `outputNode.rgb`; evaluate `fwidth` unconditionally; WebGPU allows 8 vertex buffers (only attributes the shader reads count); three's WebGPU backend draws a `BatchedMesh` one instance at a time.
 - The classic-WebGL GLSL patches in `worldgen/render` are unchanged and remain the path for `WebGLRenderer` scenes.
 - Atmosphere (sky, haze, sun light on a planet, including the morph): see `atmosphere.md` beside this file (in progress).
