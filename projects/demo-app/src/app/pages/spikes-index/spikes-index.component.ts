@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { CatalogThumbnailComponent } from '../../shared/catalog-thumbnails/catalog-thumbnail.component';
+import { ThemeService } from '../../theme/theme.service';
 
 export type SpikeStatus = 'passed' | 'failed' | 'pending' | 'inconclusive';
 
@@ -82,6 +83,14 @@ const STATUS_LABEL: Record<SpikeStatus, string> = {
 export class SpikesIndexComponent {
   readonly spikes = SPIKES;
   readonly statusLabel = STATUS_LABEL;
+
+  /** Active theme, driven by the app-wide ThemeService. */
+  protected readonly themeService = inject(ThemeService);
+
+  /** Switch the demo app between light and dark themes. */
+  toggleTheme(): void {
+    this.themeService.toggle();
+  }
 
   readonly searchQuery = signal('');
   readonly selectedStatus = signal<'visible' | 'all' | SpikeStatus>('visible');

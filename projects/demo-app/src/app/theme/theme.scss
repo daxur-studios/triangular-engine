@@ -62,6 +62,17 @@ html.app-dark-theme {
   --app-color-jolt: #c084fc;
   --app-color-jolt-bg: rgba(168, 85, 247, 0.12);
   --app-color-jolt-border: rgba(168, 85, 247, 0.25);
+
+  // Spike status semantics.
+  --app-color-pass: #4ade80;
+  --app-color-pass-bg: rgba(74, 222, 128, 0.12);
+  --app-color-pass-border: rgba(74, 222, 128, 0.3);
+  --app-color-fail: #f87171;
+  --app-color-fail-bg: rgba(248, 113, 113, 0.12);
+  --app-color-fail-border: rgba(248, 113, 113, 0.3);
+  --app-color-pending: #fbbf24;
+  --app-color-pending-bg: rgba(251, 191, 36, 0.12);
+  --app-color-pending-border: rgba(251, 191, 36, 0.3);
 }
 
 html.app-light-theme {
@@ -102,4 +113,14 @@ html.app-light-theme {
   --app-color-jolt: #7e22ce;
   --app-color-jolt-bg: rgba(168, 85, 247, 0.14);
   --app-color-jolt-border: rgba(126, 34, 206, 0.3);
+
+  --app-color-pass: #15803d;
+  --app-color-pass-bg: rgba(74, 222, 128, 0.15);
+  --app-color-pass-border: rgba(21, 128, 61, 0.35);
+  --app-color-fail: #b91c1c;
+  --app-color-fail-bg: rgba(248, 113, 113, 0.15);
+  --app-color-fail-border: rgba(185, 28, 28, 0.35);
+  --app-color-pending: #a16207;
+  --app-color-pending-bg: rgba(251, 191, 36, 0.18);
+  --app-color-pending-border: rgba(161, 98, 7, 0.35);
 }
