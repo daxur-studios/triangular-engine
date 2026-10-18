@@ -874,6 +874,7 @@ export class CloudVolumesLabPageComponent {
       this.rebakeEveryFrame.set(s.rebakeEveryFrame ?? saved.rebake);
       for (const volume of this.allVolumes()) volume.alwaysRebakeLight = this.rebakeEveryFrame();
       this.setSpinWarp(s.spinWarp ?? saved.warp);
+      this.setClouds(s.clouds ?? true);
       let cells: string[];
       if (s.kind === 'flyby') {
         await sleep(1500);

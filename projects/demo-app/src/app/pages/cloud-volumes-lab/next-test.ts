@@ -23,6 +23,8 @@ export interface NextTestScenario {
   readonly rebakeEveryFrame?: boolean;
   /** Planet spin time warp: 0 still, 1 = one turn per 6 h, 100000 = the worst case (the light rebakes every frame). */
   readonly spinWarp?: number;
+  /** false = clouds off, for the baseline the net numbers are taken against. Default true. */
+  readonly clouds?: boolean;
 }
 
 export interface NextTest {
@@ -31,18 +33,18 @@ export interface NextTest {
 }
 
 /** Plan 051 step 7: still vs a spinning planet at 100 000x, proxies, 1 band/frame, at the camera spots that matter. */
+const SPOTS = ['inside', 'horizon', 'ground'];
+
+/** A fly-by and the three static spots, all at 12 volumes, proxies, 24 steps, 1 band/frame. */
+function group(name: string, clouds: boolean, spinWarp: number): NextTestScenario[] {
+  const base = { volumes: 12 as const, mode: 'proxy' as const, scale: 1, steps: 24, animateSun: false, bakeBudget: 1, spinWarp, clouds };
+  return [
+    { ...base, label: `fly-by, ${name}`, kind: 'flyby' },
+    ...SPOTS.map((preset): NextTestScenario => ({ ...base, label: `${preset}, ${name}`, kind: 'static', preset })),
+  ];
+}
+
 export const NEXT_TEST: NextTest = {
-  title: 'step 7 moving lab: still vs spin 100000x, proxies, 1 band/frame',
-  scenarios: ([4, 12] as const).flatMap((volumes) =>
-    [0, 100000].flatMap((spinWarp): NextTestScenario[] => {
-      const base = { volumes, mode: 'proxy' as const, scale: 1, steps: 24, animateSun: false, bakeBudget: 1, spinWarp };
-      const name = `${volumes}v ${spinWarp === 0 ? 'still' : 'spin'}`;
-      return [
-        { ...base, label: `fly-by, ${name}`, kind: 'flyby' },
-        { ...base, label: `inside, ${name}`, kind: 'static', preset: 'inside' },
-        { ...base, label: `horizon, ${name}`, kind: 'static', preset: 'horizon' },
-        { ...base, label: `ground, ${name}`, kind: 'static', preset: 'ground' },
-      ];
-    }),
-  ),
+  title: 'step 7 net numbers: 12 volumes, clouds off vs still vs spin 100000x, proxies, 1 band/frame',
+  scenarios: [...group('clouds off', false, 0), ...group('still', true, 0), ...group('spin', true, 100000)],
 };

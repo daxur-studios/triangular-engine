@@ -649,3 +649,18 @@ Baking every stale volume in one frame spikes to about 40 ms. One band per frame
 - Not modelled: orbit around the sun (the sun is fixed; orbiting is slower than spin, so it adds nothing the spin does not cover).
 - The one green button now runs step 7: 4 and 12 volumes, still vs spin 100000x, each as a fly-by plus inside, horizon and ground (16 scenarios). `next-test.ts` has a new `spinWarp` field.
 - Still to do for the gate: read the table, then a by-eye fly-through (no pop; the light lags under heavy warp, which is expected) and the proxy visuals (halos, depth against geometry).
+
+### Step 7 result: still vs planet spin 100000x (proxies, 1 band/frame, 24 steps, whole-frame GPU ms)
+
+WebGPU, dpr 1.5, canvas 2560x1308. Gross numbers, nothing subtracted.
+
+| scenario | 4v still | 4v spin | 12v still | 12v spin |
+|---|---|---|---|---|
+| fly-by avg / p95 / max | 3.05 / 4.39 / 4.59 | 2.51 / 4.13 / 5.31 | 3.10 / 4.59 / 4.72 | 2.98 / 4.65 / 5.44 |
+| inside | 3.77 | 2.46 | 3.82 | 3.04 |
+| horizon | 1.96 | 2.44 | 2.60 | 3.16 |
+| ground | 3.50 | 2.85 | 3.48 | 3.33 |
+
+- Spinning at 100000x (the light stale every frame) costs nothing measurable over still, and there are no spikes (worst 5.44 ms). The 1 band/frame budget absorbs it.
+- Spin reads lower in some rows only because the volumes turn out of view.
+- These are gross. G6 is a net figure, so the next run adds a clouds-off baseline (12 volumes, same spots) and reports clouds off / still / spin together.
