@@ -358,8 +358,9 @@ export class AtmosphereLabPageComponent {
         this.sunElevation.set(elevation);
         this.applySun();
       }
-      if (this.bentOn()) this.tickBent(delta);
+      // The camera first: the bent planet's masked pass reads its orientation.
       this.updateCamera();
+      if (this.bentOn()) this.tickBent(delta);
       this.updateSkyViewAndTimings();
     });
     this.destroyRef.onDestroy(() => {

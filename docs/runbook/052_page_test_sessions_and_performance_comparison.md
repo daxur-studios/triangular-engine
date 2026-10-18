@@ -191,3 +191,56 @@ Docs only; nothing built or measured. Earlier sections, the review inbox and the
 - Preserve concurrent cloud/atmosphere work. No commits, broad runner replacement or agent-instruction
   changes. Hardware/contention/known-slowdown outcomes must be recorded separately; incomplete evidence
   stays inconclusive. Commands and measured findings will be appended after the experiment.
+
+## 2026-10-18 — U0 core feasibility passed
+
+- **Rerun:** `npm run test:cloud-feasibility`. Instructions: [cloud feasibility README](/tests/cloud-feasibility/README.md).
+  Evidence: `artifacts/cloud-feasibility/2026-10-18T11-45-47-673Z-23720/report.md` and `report.json`;
+  raw frame/state records, PNGs, compiled build/served bundles and source/cleanup manifests retained alongside.
+- **Profile:** headless installed Chrome 155, actual WebGPU AMD `gcn-5` integrated adapter, timestamps
+  supported, 640x360/DPR 1, one volume/24 march steps. Each journey renders 1,200 steps (20 simulated
+  seconds), moving camera/sun/volume and rebaking light; outside/inside/outside is asserted.
+- **Passed:** mesh repeat, deliberate wall-clock pauses and same-adapter competing WebGPU compute
+  match every normalized frame state; all 21 mesh + 7 proxy checkpoint comparisons have **zero changed
+  pixels**. Competing device completed 509 batches, ~1.71 s submission-to-completion wall time, no GPU
+  errors. This is bounded contention evidence, not a gaming or saturation test.
+- **Passed:** missing cloud changes images; missing render/readiness timeout produce their expected
+  errors; fresh-page recovery matches. Normal development page has no hook. One command exits 0,
+  closes contexts and releases its dedicated server port. Full harness: 1 passed in ~2.7 min including
+  build; TypeScript check and library build pass. No commits made by this session.
+- **Findings/fixes:** bundled Chromium 140 device creation fails with `dxil.dll` Windows error 126,
+  silently falling back to hardware WebGL2; backend gate caught it. Installed Chrome creates WebGPU.
+  Stop Three.js's independent animation clock as well as the engine loop; fix the observed wrapper's
+  dimensions. Unexpected-render detection also caught catalog `ScreenshotService` auto-capture;
+  seed the normal thumbnail cache in disposable contexts before app boot. Keep the render guard.
+- **Identity:** concurrent edits to two atmosphere files and the experiment README were recorded.
+  All journeys use one immutable compiled demo; actual served JS and probe inputs are retained, so
+  these are results for that build, not an assertion about later working-tree contents.
+- **Open:** authoritative quiet/reference performance + known-slowdown validation, explicit reference
+  adapter choice (this run did not use the RTX GPU), shared coordination for independent agents,
+  continuous video/all-frame visual coverage, generic physics/streaming/temporal-history clocks.
+  Existing private Three.js hooks remain U0-only; no shared-runner migration or agent-instruction update.
+
+## 2026-10-18 — Retained command timing and low-polling status
+
+- Owner asks for historical duration estimates and organized JSON retention, avoiding repeated
+  agent wakeups while GPU tests run. Existing journey files already retain `wallMs`; the gap is
+  whole-command timing (including build) and an inexpensive active/history view.
+- Add per-directory `run.json` with UTC start/finish, monotonic total duration, workload profile and
+  terminal status. Final `execution.json` also carries these timings. Startup failures are recorded;
+  hard-killed owners can leave unfinished records and status explicitly reports owner liveness.
+- `npm run test:cloud-feasibility:status` reads compact JSON without launching the GPU suite.
+  Prefer process completion notifications/long waits; estimates are a fallback for timer choice.
+  Estimate uses up to 20 recent successful commands matching frames/build mode/arguments, p90 + 25%;
+  sample count is explicit, no matching history yields null, no idle-performance claim.
+- Existing `artifacts/` ignore covers all evidence. Unique run directories remain indefinitely,
+  including failures and old pilots; no pruning and no shared index to race between agents. Old
+  pilots lack command timing records and are not retroactively given invented durations. This is
+  local retention, not a backup or GPU queue. See the experiment README for limits and usage.
+- **Validation:** Node timing/history tests pass (workload/failure filtering, retention, active
+  elapsed time and finalization). A deliberate invalid CLI flag exits 1 and retains a failed record
+  (`2026-10-18T12-03-22-601Z-20336`, 9,409 ms). Full default GPU suite passes again in retained run
+  `2026-10-18T12-02-03-623Z-43756`: wrapper total **217,337 ms**, exit 0, dedicated port released.
+  Status lists both records and no active command; the next matching run estimates **271,672 ms**
+  including headroom (one sample only). Source-manifest drift correctly records edits to wrapper,
+  package, test and README during validation; application build/bundles remain retained and immutable.

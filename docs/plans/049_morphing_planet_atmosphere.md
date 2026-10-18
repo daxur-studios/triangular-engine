@@ -466,7 +466,7 @@ before the material port lands. Phase 2b onwards needs Plan 050 through its Phas
      over the map (the view that used to show a full-screen sky). Expect a rim glow throughout, glowing map
      edges at the end, no sky filling the screen from outside the map, no pops and nothing black. Frame time
      no worse than the globe.
-   - **3a follow-up** (before 3b): the two decisions above (sky near edges, sun cut-off), the march clamp to
+   - **3a follow-up** (*built 2026-10-18; timings, per-ray gate and findings in Runbook 049*) (before 3b): the two decisions above (sky near edges, sun cut-off), the march clamp to
      the outline, and Equal Earth (projection blend in `bend()` plus the per-row half-width table). Re-run the
      gate with an edge view (low near an edge, and from space framed on an edge), the side-on view with
      `alwaysDay` both inside and above the air, and GPU timestamp timings at 1920×1080 for the plain globe and

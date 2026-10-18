@@ -18,6 +18,8 @@
     "test:triangular-engine:cloud-volumes": "ng run triangular-engine:test-cloud-volumes --watch=false --browsers=ChromeHeadless",
     "test:triangular-engine:worldgen": "ng run triangular-engine:test-worldgen --watch=false --browsers=ChromeHeadless",
     "test:scene": "playwright test -c playwright.config.ts",
+    "test:cloud-feasibility": "node tools/scene-tests/run-cloud-feasibility.mjs",
+    "test:cloud-feasibility:status": "node tools/scene-tests/run-cloud-feasibility.mjs --status",
     "test:scene:walkthrough": "playwright test -c playwright.config.ts tests/scene/specs/walkthrough.spec.ts",
     "test:scene:report": "playwright show-report playwright-report",
     "navigation:scenarios": "node tools/run-navigation-scenarios.mjs",

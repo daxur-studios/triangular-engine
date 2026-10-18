@@ -1,5 +1,5 @@
 import type { EngineService } from 'triangular-engine';
-import { RenderTarget, SRGBColorSpace, UnsignedByteType } from 'three';
+import { PerspectiveCamera, RenderTarget, SRGBColorSpace, UnsignedByteType } from 'three';
 
 /** Plan 052 U0 only. Deliberately isolated from the shared adapter/public engine API. */
 interface ReplayHost {
@@ -45,8 +45,14 @@ export function installCloudReplayProbe(engine: EngineService, host: ReplayHost)
   let nodeUpdate: (() => void) | undefined;
   let target: RenderTarget | undefined;
   let originalOutput: RenderTarget | null = null;
+  let inStep = false;
+  let wrapper: HTMLElement | null = null;
+  let wrapperStyle: string | null = null;
   const errors: string[] = [];
-  const rendered = engine.renderComplete$.subscribe(() => completed++);
+  const rendered = engine.renderComplete$.subscribe(() => {
+    completed++;
+    if (prepared && !inStep) errors.push(`UNEXPECTED_EXTERNAL_RENDER: ${new Error().stack}`);
+  });
   const errored = engine.error$.subscribe((event) => errors.push(`${event.phase}: ${String(event.error)}`));
 
   const check = () => {
@@ -67,7 +73,9 @@ export function installCloudReplayProbe(engine: EngineService, host: ReplayHost)
     node.deltaTime = 1 / 60;
     node.frameId = frame + 1;
     const cpuStart = performance.now();
-    if (!missing) engine.tick(stamp + frame * (1000 / 60));
+    inStep = true;
+    try { if (!missing) engine.tick(stamp + frame * (1000 / 60)); }
+    finally { inStep = false; }
     const cpuMs = performance.now() - cpuStart;
     if (completed !== before + 1) throw new Error(`MISSING_RENDER: frame ${frame}, completed ${completed - before}`);
     await fence();
@@ -127,6 +135,17 @@ export function installCloudReplayProbe(engine: EngineService, host: ReplayHost)
           if (performance.now() >= deadline) throw new Error('READINESS_TIMEOUT');
           await delay(20);
         }
+        // Freeze the actual observed wrapper, not just the offscreen target. Otherwise app/HUD
+        // layout can enqueue a resize render in the middle of a paused deterministic journey.
+        wrapper = renderer().domElement.closest('.canvas-size-observer');
+        if (!wrapper) throw new Error('SCENE_WRAPPER_REQUIRED');
+        wrapperStyle = wrapper.getAttribute('style');
+        Object.assign(wrapper.style, { position: 'fixed', left: '0', top: '0', width: '640px', height: '360px', flex: 'none' });
+        while (engine.width !== 640 || engine.height !== 360) {
+          check();
+          if (performance.now() >= deadline) throw new Error('VIEWPORT_SETTLE_TIMEOUT');
+          await delay(20);
+        }
         engine.stopLoop();
         renderer()._animation.stop();
         const node = renderer()._nodes.nodeFrame;
@@ -147,8 +166,10 @@ export function installCloudReplayProbe(engine: EngineService, host: ReplayHost)
         target.texture.colorSpace = SRGBColorSpace;
         renderer().setPixelRatio(1);
         renderer().setSize(640, 360, false);
-        engine.camera.aspect = 640 / 360;
-        engine.camera.updateProjectionMatrix();
+        const camera = engine.camera;
+        if (!(camera instanceof PerspectiveCamera)) throw new Error('PERSPECTIVE_CAMERA_REQUIRED');
+        camera.aspect = 640 / 360;
+        camera.updateProjectionMatrix();
         renderer().setOutputRenderTarget(target);
         // Cold shader compilation and first density/light bakes are discarded, but still checked.
         for (frame = 1; frame <= 8; frame++) await renderStep();
@@ -171,14 +192,17 @@ export function installCloudReplayProbe(engine: EngineService, host: ReplayHost)
       const started = performance.now();
       const samples = [];
       const captures = [];
+      const startingCompleted = completed;
       try {
         for (let index = 0; index < options.frames; index++) {
           check();
           if (index && options.pauseEvery && index % options.pauseEvery === 0) await delay(options.pauseMs ?? 0);
           frame = index + 9;
+          if (completed !== startingCompleted + index) throw new Error('UNEXPECTED_EXTRA_RENDER');
           host.move(index / (options.frames - 1));
           if (options.fault === 'missing-cloud') host.clouds(false);
           const timing = await renderStep(options.fault === 'missing-render' && index === Math.floor(options.frames / 2));
+          if (completed !== startingCompleted + index + 1) throw new Error('UNEXPECTED_EXTRA_RENDER');
           const node = renderer()._nodes.nodeFrame;
           const state = {
             frame: index, simulatedSeconds: (index + 1) / 60,
@@ -197,7 +221,7 @@ export function installCloudReplayProbe(engine: EngineService, host: ReplayHost)
       }
     },
   };
-  const global = window as Window & { __cloudReplayProbe?: typeof probe };
+  const global = window as unknown as { __cloudReplayProbe?: typeof probe };
   global.__cloudReplayProbe = probe;
   return () => {
     disposed = true;
@@ -207,6 +231,10 @@ export function installCloudReplayProbe(engine: EngineService, host: ReplayHost)
     if (target) {
       renderer().setOutputRenderTarget(originalOutput);
       target.dispose();
+    }
+    if (wrapper) {
+      if (wrapperStyle === null) wrapper.removeAttribute('style');
+      else wrapper.setAttribute('style', wrapperStyle);
     }
     engine.fpsController.frameSampler.stop();
     if (global.__cloudReplayProbe === probe) delete global.__cloudReplayProbe;

@@ -33,6 +33,7 @@ import {
   normalize,
   outputStruct,
   positionLocal,
+  select,
   sin,
   smoothstep,
   texture,
@@ -56,7 +57,8 @@ import {
 
 /**
  * How the sky is drawn on the bent planet.
- * - `auto`: the sky-view table inside the air, a half-resolution masked march near map edges and outside the air, blended.
+ * - `auto`: the sky-view table inside the air; a half-resolution masked march, per ray, where a ray leaves the map's
+ *   outline before the air in front of it turns opaque, and for everything seen from above the air. Blended per pixel.
  * - `table`: the table only (inside the air); the edges are not masked in the sky.
  * - `march`: the masked march for every pixel at full resolution (the 3a spike's path, kept for timings).
  */
@@ -87,6 +89,7 @@ export class BentPlanetLab {
   /** How many frames rendered the masked pass, and how many wrote only the table path. */
   maskedRenders = 0;
   private readonly passMaterial: NodeMaterial;
+  private readonly marchMaterial: NodeMaterial;
   private readonly gridMaterial: NodeMaterial;
   private readonly lonSegments = 360;
   private readonly latSegments = 180;
@@ -97,8 +100,8 @@ export class BentPlanetLab {
 
   /** 0 = auto, 1 = table only, 2 = full-resolution masked march per pixel. */
   private readonly pathMode = uniform(0);
-  /** How much of the sky comes from the masked pass: 0 table only, 1 masked only. */
-  private readonly maskedWeight = uniform(1);
+  /** 1 when this frame renders the half-resolution masked pass and the sky pass reads it (per ray, by the gate). */
+  private readonly maskedActive = uniform(1);
   private readonly maskedInvProjection = uniform(new Matrix4());
   private readonly maskedCameraWorld = uniform(new Matrix4());
   private maskedTarget?: RenderTarget;
@@ -114,7 +117,7 @@ export class BentPlanetLab {
   private projection: BentProjection = 'equirect';
   private path: BentSkyPath = 'auto';
   private lastKey = '';
-  private weight = 1;
+  private active = true;
 
   constructor(
     readonly model: AtmosphereGpuModel,
@@ -123,6 +126,7 @@ export class BentPlanetLab {
     this.bent = new BentAtmosphere(model);
     this.skyView = new AtmosphereSkyViewLut(model, { bent: this.bent });
     this.passMaterial = this.buildPass();
+    this.marchMaterial = this.buildMarchPass();
     this.pass = new Mesh(new PlaneGeometry(2, 2), this.passMaterial);
     this.pass.frustumCulled = false;
     this.pass.renderOrder = -1000;
@@ -161,9 +165,9 @@ export class BentPlanetLab {
     return this.morphValue;
   }
 
-  /** The share of the sky taken from the masked pass this frame (0 = table only, 1 = masked only). */
+  /** 1 when the masked pass is rendered and read this frame, 0 when the table alone draws the sky. */
   get maskedShare(): number {
-    return this.weight;
+    return this.active ? 1 : 0;
   }
 
   get skyPath(): BentSkyPath {
@@ -173,6 +177,7 @@ export class BentPlanetLab {
   setSkyPath(path: BentSkyPath): void {
     this.path = path;
     this.pathMode.value = path === 'auto' ? 0 : path === 'table' ? 1 : 2;
+    this.pass.material = path === 'march' ? this.marchMaterial : this.passMaterial;
   }
 
   setProjection(projection: BentProjection): void {
@@ -236,28 +241,26 @@ export class BentPlanetLab {
         camera.updateProjectionMatrix();
       }
     }
-    this.weight = this.computeMaskedWeight();
-    this.maskedWeight.value = this.weight;
-    if (!renderer?.initialized) return;
-    if (this.path !== 'march' && this.weight < 1) this.skyView.update(renderer, this.altitudeM);
-    if (this.path !== 'march' && this.weight > 0) this.renderMasked(renderer, camera);
+    this.active = this.computeMaskedActive();
+    this.maskedActive.value = this.active ? 1 : 0;
+    if (!renderer?.initialized || this.path === 'march') return;
+    if (this.altitudeM < this.model.uTopAltitude.value) this.skyView.update(renderer, this.altitudeM);
+    if (this.active) this.renderMasked(renderer, camera);
   }
 
   /**
-   * The masked pass's share of the sky. Above the air the table does not exist (1). Inside it, the edge at distance `d`
-   * hides behind the air once `d` passes the clear-air distance `D` (transmittance of a horizontal ray about 1%), so
-   * the share is 1 at `D / 2` and nearer, and 0 at `D` and further. Blended over that band so nothing pops.
+   * Whether this frame needs the masked pass. Above the air there is no table, so always. Inside it, only when a map edge
+   * is within reach: farther from every open edge than `1.5 D` (`D`, the clear-air distance of a horizontal ray, where its
+   * transmittance is about 1%) the air in between hides the edge, and the table is right. The per-ray gate in the shader
+   * (`BentAtmosphere.skyGate`) then picks, ray by ray, how much of the pass is used, so nothing pops at this switch.
    */
-  private computeMaskedWeight(): number {
-    if (this.path === 'march') return 1;
-    if (this.altitudeM >= this.model.uTopAltitude.value) return 1;
-    if (this.path === 'table') return 0;
+  private computeMaskedActive(): boolean {
+    if (this.path === 'march') return false;
+    if (this.altitudeM >= this.model.uTopAltitude.value) return true;
+    if (this.path === 'table') return false;
     const d = this.bent.mapEdgeDistance();
-    if (!Number.isFinite(d)) return 0;
-    const big = this.bent.clearAirDistance(this.altitudeM);
-    if (!Number.isFinite(big)) return 1;
-    const t = Math.min(1, Math.max(0, (d - 0.5 * big) / (0.5 * big)));
-    return 1 - t * t * (3 - 2 * t);
+    if (!Number.isFinite(d)) return false;
+    return d < 1.5 * this.bent.clearAirDistance(this.altitudeM);
   }
 
   // -- the grid mesh -------------------------------------------------------------------------------
@@ -323,11 +326,20 @@ export class BentPlanetLab {
     const bent = this.bent;
     const material = new NodeMaterial();
     const marched: any = Fn(() => {
+      const radiance: any = vec3(0).toVar();
+      const transmittance: any = vec3(1).toVar();
       const ndc: any = uv().mul(2).sub(1);
       const far: any = this.maskedInvProjection.mul(vec4(ndc, 1, 1));
       const dir = normalize(this.maskedCameraWorld.mul(vec4(far.xyz.div(far.w), 0)).xyz);
-      const m = bent.march({ altitude: this.altitude, dir, sunDir: bent.uSunLocal, maxDistance: float(1e30), steps: this.steps });
-      return (mat3 as any)(m.radiance, m.transmittance, vec3(0));
+      const trace = bent.traceRay({ altitude: this.altitude, dir, maxDistance: float(1e30) });
+      const gate = bent.skyGate(trace, dir);
+      // Only the rays the sky pass will read: the rest keep the empty value and cost nothing.
+      If(gate.weight.greaterThan(0.001), () => {
+        const m = bent.march({ altitude: this.altitude, dir, sunDir: bent.uSunLocal, maxDistance: float(1e30), steps: this.steps });
+        radiance.assign(m.radiance);
+        transmittance.assign(m.transmittance);
+      });
+      return (mat3 as any)(radiance, transmittance, vec3(0));
     })().toVar();
     material.fragmentNode = (outputStruct as any)(vec4(marched[0], 1), vec4(marched[1], 1));
     this.maskedTarget = target;
@@ -371,40 +383,72 @@ export class BentPlanetLab {
     const screenVarying = varying(positionLocal.xy.mul(0.5).add(0.5), 'vBentUv');
     material.fragmentNode = Fn(() => {
       const dir = normalize(rayVarying);
-      const trace = bent.traceRay({ altitude: this.altitude, dir, maxDistance: float(1e30) });
       const radiance = vec3(0).toVar();
       const transmittance = vec3(1).toVar();
-      const readMasked = () => {
-        const target = this.ensureMasked();
-        radiance.assign(texture(target.textures[0], screenVarying, 0).rgb);
-        transmittance.assign(texture(target.textures[1], screenVarying, 0).rgb);
-      };
       const readTable = () => {
         const s = this.skyView.lookup(dir);
         radiance.assign(s.radiance);
         transmittance.assign(s.transmittance);
       };
-      (If(this.pathMode.greaterThan(1.5), () => {
-        const m = bent.march({ altitude: this.altitude, dir, sunDir: bent.uSunLocal, maxDistance: float(1e30), steps: this.steps });
-        radiance.assign(m.radiance);
-        transmittance.assign(m.transmittance);
-      }) as any)
-        .ElseIf(this.maskedWeight.greaterThan(0.999), readMasked)
-        .ElseIf(this.maskedWeight.lessThan(0.001), readTable)
-        .Else(() => {
-          const a = texture(this.ensureMasked().textures[0], screenVarying, 0).rgb;
-          const b = texture(this.ensureMasked().textures[1], screenVarying, 0).rgb;
-          const s = this.skyView.lookup(dir);
-          radiance.assign(mix(s.radiance, a, this.maskedWeight));
-          transmittance.assign(mix(s.transmittance, b, this.maskedWeight));
+      // The table alone while the masked pass is off (the camera is far from every open edge): no gate, no map maths.
+      (If(this.maskedActive.lessThan(0.5), readTable) as any).Else(() => {
+        const trace = bent.traceRay({ altitude: this.altitude, dir, maxDistance: float(1e30) });
+        const gate = bent.skyGate(trace, dir);
+        // A ray the ground mesh covers is not shaded here. Otherwise the table, and the masked pass by the gate's weight.
+        If(gate.skip.not(), () => {
+          const weight = gate.weight;
+          (If(weight.lessThan(0.001), readTable) as any)
+            .ElseIf(weight.greaterThan(0.999), () => {
+              const target = this.ensureMasked();
+              radiance.assign(texture(target.textures[0], screenVarying, 0).rgb);
+              transmittance.assign(texture(target.textures[1], screenVarying, 0).rgb);
+            })
+            .Else(() => {
+              const a = texture(this.ensureMasked().textures[0], screenVarying, 0).rgb;
+              const b = texture(this.ensureMasked().textures[1], screenVarying, 0).rgb;
+              const t = this.skyView.lookup(dir);
+              radiance.assign(mix(t.radiance, a, weight));
+              transmittance.assign(mix(t.transmittance, b, weight));
+            });
         });
+      });
       const colour = radiance.toVar();
-      // The sun disc, seen through the air, unless the planet's sphere is in the way.
-      If(trace.hitsGround.not(), () => {
+      // The sun disc, seen through the air, unless the planet's sphere is in the way (only where the disc is).
+      const angle = model.uSunAngularRadius;
+      const disc = smoothstep(cos(angle), cos(angle.mul(0.97)), dot(dir, bent.uSunLocal));
+      If(disc.greaterThan(0), () => {
+        const hit = bent.traceRay({ altitude: this.altitude, dir, maxDistance: float(1e30) });
+        If(hit.hitsGround.not(), () => {
+          const sun = model.uSunIrradiance.div(angle.mul(angle).mul(Math.PI));
+          colour.addAssign(transmittance.mul(sun).mul(disc));
+        });
+      });
+      return vec4(max(colour.mul(this.exposure), 0), 1);
+    })();
+    return material;
+  }
+
+  /** The spike's pass: the masked march for every pixel at full resolution. Kept for the timings. */
+  private buildMarchPass(): NodeMaterial {
+    const bent = this.bent;
+    const model = this.model;
+    const material = new NodeMaterial();
+    material.depthTest = false;
+    material.depthWrite = false;
+    material.transparent = false;
+    material.vertexNode = vec4(positionLocal.xy, 0, 1);
+    const farPoint = cameraProjectionMatrixInverse.mul(vec4(positionLocal.xy, 1, 1));
+    const rayWorld = cameraWorldMatrix.mul(vec4(farPoint.xyz.div(farPoint.w), 0)).xyz;
+    const rayVarying = varying(rayWorld, 'vBentMarchRay');
+    material.fragmentNode = Fn(() => {
+      const dir = normalize(rayVarying);
+      const m = bent.march({ altitude: this.altitude, dir, sunDir: bent.uSunLocal, maxDistance: float(1e30), steps: this.steps });
+      const colour = m.radiance.toVar();
+      If((m.hitsGround as any).not(), () => {
         const angle = model.uSunAngularRadius;
         const mask = smoothstep(cos(angle), cos(angle.mul(0.97)), dot(dir, bent.uSunLocal));
         const sun = model.uSunIrradiance.div(angle.mul(angle).mul(Math.PI));
-        colour.addAssign(transmittance.mul(sun).mul(mask));
+        colour.addAssign(m.transmittance.mul(sun).mul(mask));
       });
       return vec4(max(colour.mul(this.exposure), 0), 1);
     })();
@@ -448,6 +492,7 @@ export class BentPlanetLab {
   dispose(): void {
     this.pass.geometry.dispose();
     this.passMaterial.dispose();
+    this.marchMaterial.dispose();
     this.grid.geometry.dispose();
     this.gridMaterial.dispose();
     this.skyView.dispose();

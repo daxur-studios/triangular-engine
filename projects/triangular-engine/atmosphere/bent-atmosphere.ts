@@ -241,19 +241,14 @@ export class BentAtmosphere {
   }
 
   /**
-   * How far a horizontal ray at `altitude` runs before the air in between hides what is beyond (transmittance about 1%
-   * in the clearest channel). The sky-view table is right for an edge further away than this.
+   * How far a horizontal ray at `altitude` runs before the air in between hides what is beyond: transmittance about 1%
+   * in the clearest channel, counting only Rayleigh (the other species only shorten it). The same estimate the sky gate
+   * uses per ray, so a camera further than this from every open edge needs no masked pass.
    */
   clearAirDistance(altitude: number): number {
     const m = this.model;
-    const h = Math.max(altitude, 0);
-    const dR = Math.exp(-h / m.uRayleighH.value);
-    const dM = Math.exp(-h / m.uMieH.value);
-    let clearest = Infinity;
-    for (const c of ['x', 'y', 'z'] as const) {
-      const ext = m.uRayleigh.value[c] * dR + (m.uMieScattering.value[c] + m.uMieAbsorption.value[c]) * dM;
-      clearest = Math.min(clearest, ext);
-    }
+    const r = m.uRayleigh.value;
+    const clearest = Math.min(r.x, r.y, r.z) * Math.exp(-Math.max(altitude, 0) / m.uRayleighH.value);
     return clearest > 0 ? Math.log(100) / clearest : Infinity;
   }
 
@@ -359,11 +354,66 @@ export class BentAtmosphere {
   }
 
   /**
+   * The sky pass's per-ray gate (Plan 049, Phase 3a follow-up). `trace` is `traceRay`'s result for the ray `dir` from the
+   * camera at `trace.h`.
+   *
+   * - `skip`: the ray ends on the ground inside the map, at a steep angle. The ground mesh covers that pixel, so the sky
+   *   pass need not shade it. Grazing rays are kept, so the horizon has no gap for a filtered fetch to bleed into.
+   * - `weight`: how much of the sky must come from the masked march rather than the table. 1 from above the air (no
+   *   table there). Inside the air, 0 unless the ray leaves the map's outline before it leaves the air, and then by the
+   *   transmittance the ray still has where it leaves: the air beyond that point is what the table gets wrong, and
+   *   it counts for nothing once the air in front of it is opaque (about 1%).
+   *
+   * Inside an `Fn`.
+   */
+  skyGate(trace: any, dir: any): { skip: any; weight: any } {
+    const model = this.model;
+    const k = this.uK;
+    // Copies made here, at the top of this scope: a variable is declared where it is first built, and the first use
+    // below is inside an `If`. (`toVar` of a variable returns it, so each copy goes through an expression.)
+    const h: any = max(trace.h, 0).toVar();
+    const groundDistance: any = max(trace.groundDistance, -1e30).toVar();
+    const hitsGround: any = select(trace.hitsGround, float(1), float(0)).toVar().greaterThan(0.5);
+    const tExit: any = min(trace.tExit, 1e30).toVar();
+    const tAirEnd: any = min(trace.tAirEnd, 1e30).toVar();
+    const skipFlag: any = float(0).toVar();
+    // Only a ray that ends on the ground needs the map's coordinates of where it lands.
+    If(hitsGround, () => {
+      const ground: any = (vec3 as any)(0, h, 0).add(dir.mul(groundDistance));
+      const { mx, my } = this.mapCoords(ground);
+      const up: any = (vec3 as any)(k.mul(ground.x), k.mul(ground.y).add(1), k.mul(ground.z));
+      const steep = dot(dir, up).negate().greaterThan(0.2);
+      skipFlag.assign(select((steep as any).and(this.mapMask(mx, my).greaterThan(0.5)), float(1), float(0)));
+    });
+
+    const skip: any = skipFlag.greaterThan(0.5);
+
+    // The optical depth along the ray to where it leaves the map, in the clearest channel, for an exponential layer:
+    // ext0 e^(-h/H) H (1 - e^(-s sin / H)) / sin  (and ext0 e^(-h/H) s for a horizontal ray).
+    const rayleigh: any = model.uRayleigh;
+    const ext0 = min(min(rayleigh.x, rayleigh.y), rayleigh.z);
+    const H = model.uRayleighH;
+    const density = exp(min(h.div(H), 80).negate());
+    const s = clamp(min(tExit, tAirEnd), 0, 1e12);
+    const sinE = dir.y;
+    const arg = clamp(s.mul(sinE).div(H), -20, 20);
+    const tau = select(
+      abs(sinE).lessThan(1e-4),
+      ext0.mul(density).mul(s),
+      ext0.mul(density).mul(H).mul(float(1).sub(exp(arg.negate()))).div(sinE),
+    );
+    const leaves = tExit.lessThan(tAirEnd);
+    const needed: any = select(leaves, smoothstep(float(0.003), float(0.03), exp((tau as any).negate())), float(0));
+    const weight: any = select(h.greaterThanEqual(model.uTopAltitude), float(1), needed);
+    return { skip, weight: select(skip, float(0), weight) };
+  }
+
+  /**
    * Where a view ray from `(0, altitude, 0)` meets the air's top and the ground of the sphere of curvature `k`. The same
    * quantities as `AtmosphereGpuModel.traceRay`, in the stable form: the root that stays finite as `k -> 0` is
    * `-c / (b + sign(b) sqrt(b^2 - k c))` and the other is `-(b + sign(b) sqrt(...)) / k`.
    */
-  traceRay(input: Pick<AtmosphereMarchInput, 'altitude' | 'dir' | 'maxDistance' | 'ignoreGround'>) {
+  traceRay(input: Pick<AtmosphereMarchInput, 'altitude' | 'dir' | 'maxDistance' | 'ignoreGround'> & { local?: boolean }) {
     const k = this.uK;
     const kk = max(k, 1e-14);
     const h: any = max(float(input.altitude), 0);
@@ -388,9 +438,13 @@ export class BentAtmosphere {
     const reachesGround: any = input.ignoreGround
       ? float(0).greaterThan(1)
       : (ground.disc.greaterThan(0) as any).and(b.lessThan(0));
-    const tGround = ground.small;
-    const tStart = max(top_.lo, 0);
-    const tEndFull = select(reachesGround, tGround, top_.hi);
+    // Each quantity the others share is a variable of its own, in dependency order: a node used both inside another's
+    // initializer and on its own was built twice (once per use), and the second copy could read the wrong value.
+    const tGround: any = ground.small.toVar();
+    const reaches: any = select(reachesGround, float(1), float(0)).toVar();
+    const valid: any = select((top_.disc.greaterThan(0) as any).and(top_.hi.greaterThan(0)), float(1), float(0)).toVar();
+    const tStart: any = max(top_.lo, 0).toVar();
+    const tEndFull: any = select(reaches.greaterThan(0.5), tGround, top_.hi).toVar();
     // Past the map's outline (plus the falloff) there is no air: stop the march there. In the map frame the ray is
     // straight, so this is the slab test; at k = 0 it is exact, and it keeps the steps on the air that counts.
     const mapFromLocal: any = this.uMapFromLocal;
@@ -402,23 +456,36 @@ export class BentAtmosphere {
       const along = select(d.greaterThan(0), reach.sub(o), reach.add(o));
       return select(d.abs().lessThan(1e-12), float(1e30), along.div(max(d.abs(), 1e-12)));
     };
-    const tExit = select(
-      this.uMaskEnabled.greaterThan(0.5),
-      min(exitAxis(po.x, pd.x, this.uHalfWidth), exitAxis(po.y, pd.y, this.uHalfHeight)),
-      float(1e30),
-    );
-    const tEnd = min(min(min(tEndFull, float(input.maxDistance)), tExit), tStart.add(this.uMaxSpan));
-    const valid: any = (top_.disc.greaterThan(0) as any).and(top_.hi.greaterThan(0));
-    const span = select(valid, max(tEnd.sub(tStart), 0), float(0));
-    const hitsGround = reachesGround.and(tGround.lessThan(float(input.maxDistance))).and(valid);
+    // (`local`, the sky-view table's march, has no map and so no outline.)
+    const tExit: any = (
+      input.local
+        ? float(1e30)
+        : select(
+            this.uMaskEnabled.greaterThan(0.5),
+            min(exitAxis(po.x, pd.x, this.uHalfWidth), exitAxis(po.y, pd.y, this.uHalfHeight)),
+            float(1e30),
+          )
+    ).toVar();
+    const tAirEnd: any = min(tEndFull, float(input.maxDistance)).toVar();
+    const tEnd: any = min(min(tAirEnd, tExit), tStart.add(this.uMaxSpan)).toVar();
+    const isValid = valid.greaterThan(0.5);
+    const span: any = select(isValid, max(tEnd.sub(tStart), 0), float(0)).toVar();
+    const hitsGround: any = (reaches.greaterThan(0.5) as any)
+      .and(tGround.lessThan(float(input.maxDistance)))
+      .and(isValid)
+      .toVar();
     return {
       h: h.toVar(),
-      tStart: tStart.toVar(),
-      tEnd: tEnd.toVar(),
-      span: span.toVar(),
-      valid: valid.toVar(),
-      hitsGround: hitsGround.toVar(),
-      groundDistance: tGround.toVar(),
+      tStart,
+      /** Where the ray leaves the map's outline (plus the falloff): infinite when it never does. */
+      tExit,
+      /** The end of the air along the ray (the top, or the ground, or `maxDistance`) before the map clamp. */
+      tAirEnd,
+      tEnd,
+      span,
+      valid: isValid,
+      hitsGround,
+      groundDistance: tGround,
     };
   }
 

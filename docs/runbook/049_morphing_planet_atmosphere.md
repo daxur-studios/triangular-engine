@@ -628,3 +628,63 @@ Next: Phase 3a, the lab spike (Plan 049, Phases). Built and checked in the entry
 **Not done / limits of the spike:** Equal Earth blend; the slab fallback at morph >= 0.999 (the sphere path was stable at `k = 0` and `1e-12`, so it was not needed); surface haze through the froxel table (the lab's mesh uses a direct 16-step march); coarse tessellation of the grid mesh is visible at low altitude on Earth-size planets (sag, flat quads); the sweep was not watched live.
 
 Next: 3b (bend in the planet material and the rig). Before that, decide item 1 (table versus masked march inside the air) and item 2 (radius-aware shadow dip).
+
+## 2026-10-18 — Phase 3a follow-up: sky near edges, sun cut-off, outline clamp, Equal Earth, timings
+
+Decisions applied from Plan 049 (§Morph: "Map edges from inside the air", "Sun cut-off", "March length on the flat limit"). The planet material, `/cell-planet-tsl`, the slab, the flat-pose sky and the rig are untouched. Atmosphere suite headless: **183/183** (165 before; 18 new). `npm run build:triangular-engine` succeeds.
+
+**What changed**
+- `bent-planet.ts`: `sunDipHalfSine` / `sunDip` / `sunHorizonCos` (the shared dip helper: `sin(dip/2) = sqrt(k h / (2 (1 + k h)))`, 0 when flat, `acos(R / (R + h))` at morph 0); `rayExitRect` (where a straight ray leaves the map rectangle plus a margin); Equal Earth (`equalEarthRow`, `blendedProjection`, `blendedExtents`, `projectionRows`, `projectionRowAt`).
+- `BentAtmosphere`: `sunLight` (the sun's transmittance with the horizon cut at the current curvature's dip); the outline clamp in `traceRay` (`tExit`, `uClampMargin`); `skyGate` (per-ray choice between table and masked march); an outline-row table for Equal Earth (`mapRow`, used by the mask and by the sun angle); `mapEdgeDistance` and `clearAirDistance` for the camera-level switch; `revision`; `projection` in `setShape`.
+- `AtmosphereSkyViewLut`: option `bent`. The table is baked for the sphere of radius `1/k` (horizon row from the curvature, no map, the local sun) and re-renders when `revision` changes.
+- Lab (`bent-planet-lab.ts`): the sky is one table fetch by default; a half-resolution masked pass is rendered only when it is needed and is blended in per ray; the per-fragment grid march is gone; the checker and graticule are filtered; buttons for projection (equirect / Equal Earth) and sky path (table + edges / table only / march every pixel).
+
+**Sun cut-off.** The tables cut the sun at the *baked* sphere's horizon. `BentAtmosphere.sunLight` shifts the angle it reads by (baked horizon) − (horizon of the current curvature), so the cut lands where the current sphere puts it and the table still gives the transmittance of the rest of the path. Spec: at morph 0 it equals `sunTransmittance`; flat at 10 km, `mu = -0.02` (a degree down) is dark and `mu = +0.02` is lit, where the baked planet still lit `mu = -0.02` (transmittance > 0.05). Limit: on the flat map a sun just above the horizon reads the baked sphere's grazing transmittance; the true flat-map value (infinite airmass) would be darker. Not a visible problem yet.
+
+**Sky near edges.** Kept the plan's rule (table by default; masked pass at half resolution near edges and from above the air) and added a **per-ray gate** (`skyGate`), because the camera-level switch alone was far over budget (below). A ray needs the masked march only if it leaves the map outline before it leaves the air *and* the air in front of it is not already opaque: the weight is `smoothstep(0.003, 0.03, exp(-tau))` with `tau` the optical depth to the outline in the clearest channel (Rayleigh, exponential layer, closed form). Rays that end on the ground inside the map at a steep angle (`dot(dir, up) < -0.2`) are skipped: the mesh covers them. Grazing rays are kept so a bilinear fetch near the horizon has no hole to bleed into. The camera-level switch is the plan's: the pass is rendered only when the camera is above the air, or within `1.5 D` of an open edge (`D` = horizontal transmittance ~1%, Rayleigh red only, so it errs toward rendering). At `1.5 D` the per-ray weights are already 0 for every ray, so nothing pops at the switch.
+
+**Outline clamp.** Each march stops where its (straight, in the map frame) ray leaves the map rectangle plus `margin = softness + 1.5 k top max(W, H)` (the second term covers the `1 + k h` factor between a point's map-frame coordinate and its map coordinate). Exact at `k = 0`. The table's march (`local`) has no map and no clamp (a first version clamped it too: a hairline across the sky where the clamp bit, found by eye).
+
+**Equal Earth.** `(x, y) = mix(R (lon, lat), EqualEarth(lon, lat) R, p)` with `p = morph`. Equal Earth is `x = lon c(lat)`, `y = y(lat)`, so a row's width and latitude are functions of the row alone: the outline is a 256-row table (latitude, half-width) rebuilt when `p` or `R` changes. The mask uses the row's half-width; the sun angle uses the row's latitude and `lon = pi x / halfWidth(row)`. Specs: published extents (2.7066 R by 1.3174 R), equal area (4 pi R^2), blend ends, table inversion, GPU row lookup vs CPU, mask in and out of a row at 60 degrees, sun cosine. By eye from space: the flat Equal Earth map has the right outline with no air outside it ([morph 1](049_assets/3a-followup-equal-earth-space.jpg), [morph 0.5](049_assets/3a-followup-equal-earth-half.jpg)).
+
+**Gate, by eye** (Browser pane, WebGPU, AMD GCN5; 600 km planet; screenshots in `049_assets/`; not a live scrub, each state captured after rendering 8 frames):
+- *Low near an edge* (3 km up, 7.5 km from the east edge, looking at it): the air over the map shows as a bright blue band right above the ground strip, then black where the map ends, and dark sky above the horizon: [3a-followup-edge-close.jpg](049_assets/3a-followup-edge-close.jpg). That is the glowing edge, and nothing fills the screen beyond it.
+- *Low, 200 m, 75 km from the edge:* blue sky, no seam, no hairline ([edge-low](049_assets/3a-followup-edge-low.jpg)).
+- *Side-on, `alwaysDay`:* inside the air (200 m, 5 km: on this scaled planet the scale height is 0.75 km, so 5 km up is already dark sky) and above it (30 km, [side-on above the air](049_assets/3a-followup-side-on-above-air.jpg)): the checker fades to grey toward the horizon instead of aliasing, and no sky fills the screen.
+- *From space framed on an edge* (600 km up over the east edge): a clean straight edge, black void beyond.
+- Not seen: a thick rim glow from space at the edge (needs a grazing view along it that the camera, always over the map, cannot take); a morph scrub through Equal Earth at small morph (0.05-0.3).
+- The dark ring in the reported screenshot is not reproduced. Between that screenshot and now the per-fragment grid march (which carried the baked horizon) was dropped and the dip fixed, so I cannot say which removed it. Without the grid march the ground has no haze in the lab; that comes from the froxel table in the planet.
+
+**Timings** (GPU timestamps, a manual `renderAsync` + `resolveTimestampsAsync('render')` loop, median of 40 frames; canvas 1896 x 1080 (1.5 DPR in a 1280 x 720 viewport, 0.88 of 1080p); Earth-size planet except the Equal Earth and space rows (600 km); AMD GCN5; noise about 0.3 ms). The page's own timestamp readout stalled in the background pane, hence the manual loop. An empty frame is 0.4 ms; a trivial full-screen quad is 1.05-1.1 ms; the sky numbers are *over the quad*.
+
+| Sky only (grid hidden) | total ms | over a trivial quad |
+| --- | --- | --- |
+| Table path (in the air, edges far, morph 0 or 1) | 1.25 | **+0.14 to +0.2** (budget 0.5) |
+| Masked pass active in the air, 25 km up, morph 0.5 / 1 | 1.38 / 1.77 | +0.33 / +0.72 (budget 1.0) |
+| Masked pass active, 10 m up, 200 km from the edge, morph 0.5 / 1 | 1.77 / 1.64 | +0.7 / +0.6 |
+| 600 km planet, 10 m up, 0.98 of the way to the east edge, Equal Earth vs equirect, morph 1 | 2.88 vs 1.84 | +1.8 vs +0.8 |
+| 600 km planet, space (3 R), morph 1, equirect / Equal Earth | 3.0 / 3.5 | |
+
+Whole frame (grid mesh included, about 1.0-1.3 ms of it; plain = the globe backdrop of the same page):
+
+| view | plain | bent, auto (table + edges) m 0 / 0.5 / 1 | bent, march every pixel m 0 / 0.5 / 1 |
+| --- | --- | --- | --- |
+| Space, 3 R | 1.05 | 2.03 / 2.36 / 3.6 | 4.3 / 8.5 / 23.1 |
+| Low orbit, 0.05 R | 1.51 | 3.6 / 3.74 / 4.06 | 21.8 / 24.6 / 26.4 |
+| 25 km up | | 1.97 / 2.29 / 2.69 | 44.5 / 43.2 / 39.1 |
+| 2 m up | 1.64 | 1.7 / 1.9 / 1.64 | 1.77 / 1.77 / 1.57 |
+| 10 m up, 200 km from the edge | | 1.57 / 2.10 / 1.97 | 1.84 / 1.64 / 1.31 |
+
+Before the per-ray gate (camera-level switch only): 25 km up at morph 1 cost 9.5 ms (8.7 ms for the masked pass), and space at morph 1 cost 6.2 ms. The reported 12 fps was the 3a spike's per-fragment march plus a full-resolution march for every pixel: the "march every pixel" column above, now only a diagnostic.
+
+**Findings for 3b / the plan**
+1. **A TSL trap, found the hard way.** A node used both inside another variable's initializer and on its own was built twice, and the second copy could read the wrong value: `traceRay`'s `hitsGround` read 0 for a ray that plainly hit the ground (and `groundDistance` 0 for one row) depending only on which outputs the test used. Fix: every shared quantity is its own `toVar()` in dependency order, and later code uses the variables. The globe's `AtmosphereGpuModel.traceRay` has the same shape as the bent one had (and I did not touch it); the backdrop's ground and sun-disc tests read its `hitsGround`. It looks right in the lab, but it is worth a spec that checks `hitsGround` and `groundDistance` against the geometry for a few rays before anything else leans on it.
+2. **The camera-level switch is not enough** at this scale: the masked march in the air was 8.7 ms at morph 1 even far from edges, because `1.5 D` of a thin upper air is huge. The per-ray gate is what makes the budget. Worth putting into the plan's wording ("masked march only where a ray leaves the outline in air that is still clear").
+3. **Equal Earth costs about +1 ms** in the masked pass (two nearest-neighbour fetches and a blend per march step, for the mask and the sun). Options: one linearly filtered fetch (needs half-float and normalised values, about 20 km of error at Earth size against an 8 km falloff, so probably 16-bit unorm with more rows), fewer rows, or fewer march steps in the masked pass (16 instead of 32 halves the cost for both projections; not tried).
+4. **The camera tick order matters:** the masked pass reads the camera's orientation, so the page now updates the camera before it renders the pass (it lagged one frame).
+5. **`D` and the gate use Rayleigh only.** Mie and the absorber shorten the real clear distance; the estimate errs toward rendering the pass, never toward a missing edge.
+6. **Skipping ground rays is valid because the lab's mesh covers them.** In the planet the ground comes from the material and the haze from the froxel table, so the sky pass can skip exactly these rays there too; the 0.2 grazing threshold is a tunable.
+7. **Mesh sag still shows at low altitude on Earth size** (1 degree cells, a few hundred metres of sag at the equator); unrelated to the atmosphere.
+8. **The `1 + k h` margin term and the mask gap for Equal Earth** (the wrap-around gap uses the row's half-width) are covered by specs only at `k = 0` and by eye at 0.5; the seam opening at small morph with Equal Earth has not been looked at.
+
+**Not done:** the slab fallback at morph >= 0.999 (never needed); a live scrub; froxel haze on the mesh (dropped by decision); 16-step masked pass; the globe `traceRay` spec above.

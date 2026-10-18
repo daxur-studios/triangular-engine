@@ -280,10 +280,72 @@ describe('BentAtmosphere (GPU), the 3a follow-up', () => {
     expect(toTop).toBeLessThan(1e7);
     expect(out[5]).toBeGreaterThan(0.99 * toTop);
     expect(out[5]).toBeLessThan(1.01 * toTop);
+    // The sky-view table's march has no map: no outline clamp either.
+    const local = await evaluateOnGpu(rows, (at) =>
+      Fn(() => {
+        const a = at(0);
+        const t = bent.traceRay({ altitude: a.x, dir: vec3(a.y, a.z, a.w), maxDistance: float(1e30), local: true });
+        return vec4(t.tStart, t.tEnd, t.span, 1);
+      })(),
+    );
+    expect(local[1]).withContext('local: the top ends it, not the edge').toBeGreaterThan(0.99 * ((model.uTopAltitude.value - 20) / east[1]));
     bent.uMaskEnabled.value = 0;
     const open = await trace();
     expect(open[5]).withContext('mask off: the top still ends it').toBeGreaterThan(0.99 * toTop);
     expect(open[1]).withContext('mask off: no clamp to the outline (east)').toBeGreaterThan(0.99 * ((model.uTopAltitude.value - 20) / east[1]));
+    model.dispose();
+  });
+
+  it('the sky gate: skips rays the ground mesh covers, and asks for the masked march only where a ray leaves the map in thin air', async () => {
+    const { model, bent, R } = setup();
+    const gate = async (rays: Ray[]) =>
+      evaluateOnGpu(rays.map((r) => [[r.altitude, ...r.dir]]), (at) =>
+        Fn(() => {
+          const a = at(0);
+          const dir = vec3(a.y, a.z, a.w);
+          const t = bent.traceRay({ altitude: a.x, dir, maxDistance: float(1e30) });
+          const g = bent.skyGate(t, dir);
+          return vec4(g.skip.select(float(1), float(0)), g.weight, 0, 1);
+        })(),
+      );
+    bent.setShape({ morph: 1, planetRadiusM: R, anchorX: Math.PI * R - 500, anchorY: 0 });
+    const out = await gate([
+      { altitude: 20, dir: unit([1, 0.02, 0]) }, // 0: toward the edge, low: needs the masked march
+      { altitude: 20, dir: unit([-1, 0.02, 0]) }, // 1: away from it: the air is opaque long before the far edge
+      { altitude: 20, dir: unit([0, -1, 0]) }, // 2: straight down (500 m from the edge: inside the falloff, so not skipped)
+      { altitude: 20, dir: unit([1, -0.5, 0]) }, // 3: down at 30 degrees, lands 40 m east: still in the falloff
+      { altitude: 20, dir: unit([1, -0.03, 0]) }, // 4: grazing, lands beyond the edge: kept, but the air ends first
+      { altitude: 20, dir: unit([0, 1, 0]) }, // 5: straight up
+      { altitude: 400_000, dir: unit([1, -0.001, 0.2]) }, // 6: from above the air, to the sky: the masked march always
+    ]);
+    const skip = (i: number) => out[i * 4];
+    const weight = (i: number) => out[i * 4 + 1];
+    expect(weight(0)).withContext('toward the edge').toBeGreaterThan(0.9);
+    expect(skip(0)).toBe(0);
+    expect(weight(1)).withContext('away from the edge').toBe(0);
+    expect(skip(2)).withContext('inside the falloff band the mask is below one half: not covered for sure').toBe(0);
+    expect(skip(4)).withContext('grazing is kept (no gap at the horizon)').toBe(0);
+    expect(skip(5)).toBe(0);
+    expect(weight(5)).withContext('straight up leaves the air first').toBe(0);
+    expect(weight(6)).withContext('above the air').toBe(1);
+
+    // Well inside the map (100 km from the edge) a steep ray lands where the mesh is, and is skipped.
+    bent.setShape({ morph: 1, planetRadiusM: R, anchorX: Math.PI * R - 100_000, anchorY: 0 });
+    const inside = await gate([
+      { altitude: 20, dir: unit([0, -1, 0]) },
+      { altitude: 20, dir: unit([1, -0.5, 0]) },
+      { altitude: 20, dir: unit([1, -0.03, 0]) },
+    ]);
+    expect(inside[0]).withContext('straight down').toBe(1);
+    expect(inside[1]).withContext('weight below').toBe(0);
+    expect(inside[4]).withContext('down at 30 degrees').toBe(1);
+    expect(inside[8]).withContext('grazing is kept').toBe(0);
+
+    // Far from every edge, even a horizontal ray never asks for it (the air in front is opaque by then).
+    bent.setShape({ morph: 1, planetRadiusM: R, anchorX: 0, anchorY: 0 });
+    const mid = await gate([{ altitude: 20, dir: unit([1, 0.0005, 0]) }, { altitude: 20, dir: unit([0, 0.0005, 1]) }]);
+    expect(mid[1]).toBe(0);
+    expect(mid[5]).toBe(0);
     model.dispose();
   });
 

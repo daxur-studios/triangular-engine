@@ -1,15 +1,16 @@
 ---
 type: Plan
 title: Page Test Sessions and Performance Comparison
-description: Generalize the M1 scene-test adapter from one lab fixture to any demo page, so a page registers named actions, camera verbs, views and probes once and the same contract is driven by an agent (Playwright), a human (dev panel) and CI; make a one-action "Run ALL" suite across page loads and backends the central way to test performance, with built-in validity gates and a compact report an agent can read.
-timestamp: 2026-10-17T00:00:00Z
+description: Prove unattended headless GPU replay on the cloud lab, then generalize shared page scenarios, suites, validity gates and compact evidence for agents, CI and the human fallback.
+timestamp: 2026-10-18T00:00:00Z
 tags: [testing, playwright, agent, page-test, performance, telemetry, demo, scenarios, suite]
 runbook: /docs/runbook/052_page_test_sessions_and_performance_comparison.md
 ---
 
 # Plan 052: Page Test Sessions and Performance Comparison
 
-Status: **proposed**, 2026-10-17. No code written. Synthesized 2026-10-17 against review
+Status: **U0 core replay feasibility passed; performance/coordination gates remain open**, 2026-10-18. The shared runner and
+broader phases remain proposed. Original design synthesized 2026-10-17 against review
 `R-20261017-121500-pagetest-a4c9` (all six findings accepted). **Revised 2026-10-17 by owner
 decision:** the one-action "Run ALL" suite across page loads is the central performance path, with
 validity gates and a token-efficient report; ground rule F4 is narrowed (see Ground rules and
@@ -23,8 +24,9 @@ runner migration or agent-instruction changes are authorized by this checkpoint 
 **Goal:** let a text-only coding agent (and a human with one button) take a real demo page, drive it
 the way a person would — pan, orbit, smooth-zoom from orbit down to the surface, click a toggle and do
 the same thing again — and get back facts and performance numbers that can be compared before and
-after a change. For performance, the human's whole job is: close other work, open one page, press
-**Run ALL**, keep the tab visible, paste the report back. M1 proved the machinery on one fixed
+after a change. The existing human fallback is: close other work, open one page, press
+**Run ALL**, keep the tab visible, paste the report back. U0 tests unattended execution before
+replacing that prerequisite. M1 proved the machinery on one fixed
 fixture; this makes it **per page** and **per suite**.
 
 M1 today ([Runbook 038](/docs/runbook/038_agent_testing_implementation_plan.md)) hardwires
@@ -60,8 +62,9 @@ This plan does **not** edit the append-only Runbook 037.
   another page, another `?backend=` (the TSL renderer cannot switch live) — is a **suite entry**, and
   one suite definition is run either from the browser by one click or by Playwright.
 - **Recording is mutually exclusive with a measuring window** (037:344; review F4, unchanged).
-- **Every performance run carries its own validity gates** (visible, focused, rAF cadence, backend
-  actually used). A window that fails a gate is `inconclusive`, never a number to compare.
+- **Every performance run carries profile-appropriate validity gates** (rAF cadence where relevant,
+  backend actually used, environment and contention policy). Visibility/focus remain gates for the
+  existing visible-tab path; U0 evaluates headless replay independently. A failed gate is `inconclusive`.
 - **Camera paths execute inside the app**, not as timed external mouse calls. Keep a separate
   real-pointer/wheel test to prove the controls still work (037). Smooth zoom is a first-class verb.
 - **A measuring window covers live motion or live action, not the quiet after it** (review F1).
@@ -71,9 +74,9 @@ This plan does **not** edit the append-only Runbook 037.
   predicates, and pose stable across two completed renders (review F2).
 - **Performance is only compared within a recorded environment profile.** Software rendering is smoke
   evidence, never GPU performance (037/038). No pass/fail on absolute fps. GPU timestamps are separate.
-- Tests run headless and non-watching (repo rule). Authoritative GPU numbers therefore come from the
-  human one-click path on a visible tab; the headless agent/CI path gives the same report format and
-  counts as GPU evidence only when its profile shows a hardware adapter.
+- Tests run headless and non-watching (repo rule). The existing human one-click path remains a
+  performance fallback while U0 verifies unattended hardware execution. A hardware adapter alone
+  does not establish performance validity: controlled hardware and repeatability are also required.
 - The engine is public: no consumer-app names or paths in code, docs or runbook text.
 - Never create commits; leave everything in the working tree.
 
@@ -321,25 +324,35 @@ artifacts/scene-tests/<run-id>/                manifest, report.md/json, samples
 
 ## Phases
 
-### U0 — Unattended cloud-lab feasibility (2026-10-18, in progress)
+### U0 — Unattended cloud-lab feasibility (2026-10-18, core passed; follow-ups open)
 
 Use `/cloud-volumes-lab` as the first bounded experiment, reusing its real engine and cloud
 renderer. Keep a dev-only, explicitly enabled test hook and an isolated headless Playwright command.
 Cloud appearance/budgets remain owned by [Plan 051](051_cloud_volumes.md). Record compact dated
 decisions, commands, artifact locations and results in [Runbook 052](/docs/runbook/052_page_test_sessions_and_performance_comparison.md).
 
-- [ ] Launch the server/browser unattended, identify the **actual** GPU/backend and reject software
+- [x] Launch the server/browser unattended, identify the **actual** GPU/backend and reject software
   fallback for hardware evidence. Save raw GPU timestamps where supported; unavailable is not zero.
-- [ ] Drive a complete fixed-step approach/entry/turn/exit journey, including intermediate renders,
+- [x] Drive a complete fixed-step approach/entry/turn/exit journey, including intermediate renders,
   camera, sun/volume motion and bake work. Audit shader clocks as well as the engine clock.
-- [ ] Repeat the journey normally and with deliberate wall-clock pauses. Compare all frame/state
+- [x] Repeat the journey normally and with deliberate wall-clock pauses. Compare all frame/state
   records and rendered checkpoints; measure image noise before choosing tolerances. Preserve raw evidence.
-- [ ] Detect deliberate visual mutation, missing render and readiness timeout; prove clean recovery.
-- [ ] One command writes a compact report, raw state/timings and captures, exits with meaningful
+- [x] Detect deliberate visual mutation, missing render and readiness timeout; prove clean recovery.
+- [x] One command writes a compact report, raw state/timings and captures, exits with meaningful
   status, and cleans up its server/browser on success/failure. Record source identity without commits.
-- [ ] Exercise competing GPU load and parallel submissions in a bounded follow-up. Replay correctness
-  may pass under load; those timings must not establish an idle-machine baseline.
+- [x] Exercise bounded competing GPU load: a second WebGPU compute device on the same AMD adapter;
+  replay state and checkpoint pixels stay identical. These timings are diagnostic only.
+- [ ] Exercise independent parallel submissions and shared machine coordination before scaling agents.
+- [x] Retain per-command start/finish/total wall duration and active status in each ignored run directory;
+  expose compact JSON history and workload-matched wait estimates so agents can await completion
+  instead of repeatedly polling. Keep all prior evidence; no automatic pruning or shared index.
+- [ ] Extend seven-checkpoint visual coverage with continuous video/all-frame checks for brief flicker.
 - [ ] Prove a known rendering slowdown against repeated quiet measurements before adopting a perf gate.
+
+Evidence: `npm run test:cloud-feasibility` passed (default 1,200 frames, mesh/proxy; 2026-10-18),
+as did `npx tsc -p tests/cloud-feasibility/tsconfig.json` and `npm run build:triangular-engine`.
+See [Runbook 052](/docs/runbook/052_page_test_sessions_and_performance_comparison.md) for the retained
+run ID, environment, failure discoveries and limits. The prototype is intentionally still isolated.
 
 **Decision:** report separate go/no-go/inconclusive outcomes for hardware execution, replay,
 failure detection, unattended lifecycle and performance. A replay video cannot prove real-time FPS.
@@ -428,7 +441,7 @@ not merely Playwright's per-process worker count. Existing phases below remain p
 | Every run carries validity gates; failing windows are `inconclusive` | **Decided** 2026-10-17 (owner decision; 050 evidence) |
 | Report `triangular-perf-suite v1`: median of rounds, spread, verdict, < 2 KB; raw data to files | **Decided** 2026-10-17 |
 | Default 3 rotated rounds, >= 2 valid rounds per row, 15 % noise and 1.3x drift thresholds | Proposed; tune after the first Phase 2 runs |
-| Authoritative GPU numbers come from the human one-click path; headless runs are GPU evidence only on a hardware adapter | **Decided** 2026-10-17 |
+| Human one-click path as the required GPU workflow | **Superseded target** 2026-10-18: prove unattended hardware replay in U0; retain controlled-performance requirements and the existing fallback |
 | WebGPU capture + sampling spike precedes extraction and is a kill criterion | **Decided** (review F5) |
 | Automated harness fault-injection specs (hitch, throttling, timeout) | **Decided** (review F6) |
 | Human recording via in-app `MediaRecorder`; agent/CI via Playwright video/trace | Proposed, settle in Phase 7 |
@@ -437,6 +450,7 @@ not merely Playwright's per-process worker count. Existing phases below remain p
 ## Out of scope
 
 WebMCP transport, local vision review, remote/authenticated report hosting or a dev-server endpoint
-that receives human reports, automatic baseline acceptance, GPU timestamp capture (a separate metric),
+that receives human reports, automatic baseline acceptance, generic GPU timestamp infrastructure
+(U0 may read the cloud lab's existing timestamps as diagnostic evidence),
 a multi-browser/GPU matrix, headed Playwright perf runs (repo rule: headless), and detecting other
 tabs, apps or extensions (printed checklist only). No dashboard, database or model orchestration.

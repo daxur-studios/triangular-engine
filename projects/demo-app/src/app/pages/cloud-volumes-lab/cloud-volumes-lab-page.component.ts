@@ -154,7 +154,7 @@ interface Recording {
         </p>
         <p class="label">Clouds drawn as</p>
         <p class="row">
-          <button (click)="setCloudMode('mesh')" [class.active]="cloudMode() === 'mesh'">box mesh</button>
+          <button (click)="setCloudMode('mesh')" [class.active]="cloudMode() === 'mesh'">box mesh (old, loses clouds)</button>
           <button (click)="setCloudMode('pass')" [class.active]="cloudMode() === 'pass'">screen pass x0.5</button>
           <button (click)="setCloudMode('pass-full')" [class.active]="cloudMode() === 'pass-full'">screen pass x1</button>
           <button (click)="setCloudMode('proxy')" [class.active]="cloudMode() === 'proxy'">box proxies x0.5</button>
@@ -389,6 +389,7 @@ export class CloudVolumesLabPageComponent {
   readonly fetchOn = signal(true);
   readonly hiddenOn = signal(false);
   readonly cloudMode = signal<CloudMode>('mesh');
+  private startModeApplied = false;
   readonly volumeCount = signal(1);
   readonly matrixStatus = signal('');
   readonly matrixText = signal('');
@@ -460,6 +461,11 @@ export class CloudVolumesLabPageComponent {
       this.applyAtmosphereLighting();
       const renderer: any = this.engine.renderer;
       if (!renderer?.initialized) return;
+      if (!this.startModeApplied) {
+        this.startModeApplied = true;
+        // Box proxies are the default; the box mesh depth-tests its far faces against the planet and loses clouds.
+        if (!REPLAY_PROBE) this.setCloudMode('proxy');
+      }
       if (this.bakeBudget() > 0) {
         this.bakeScheduler.bandsPerFrame = this.bakeBudget();
         this.bakeScheduler.update(renderer, this.activeVolumes());
@@ -490,7 +496,7 @@ export class CloudVolumesLabPageComponent {
         this.bakeBudget.set(0);
         this.sunElevation.set(25);
         this.animateSun.set(true);
-        this.setSpinWarp(100);
+        this.setSpinWarp(5);
         this.setClouds(true);
         this.setCloudMode(mode);
       },
@@ -507,6 +513,11 @@ export class CloudVolumesLabPageComponent {
           position: volume.mesh.position.toArray(), quaternion: volume.mesh.quaternion.toArray(),
           densityBakes: volume.densityBakes, lightBakes: volume.lightBakes,
           pendingBake: volume.hasPendingBake,
+          cameraInside: (() => {
+            const local = volume.mesh.worldToLocal(this.engine.camera.position.clone());
+            // CloudVolume's unit box is scaled by its dimensions on the mesh.
+            return Math.abs(local.x) < 0.5 && Math.abs(local.y) < 0.5 && Math.abs(local.z) < 0.5;
+          })(),
         })),
       }),
       clouds: (visible) => { if (visible !== this.cloudsOn()) this.setClouds(visible); },
