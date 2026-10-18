@@ -80,5 +80,9 @@
   "dependencies": {
     "tslib": "^2.3.0"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "bin": {
+    "triangular-test-receiver": "./bin/triangular-test-receiver.mjs",
+    "triangular-test-summary": "./bin/triangular-test-summary.mjs"
+  }
 }

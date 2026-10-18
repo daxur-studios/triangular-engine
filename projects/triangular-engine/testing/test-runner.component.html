@@ -43,6 +43,7 @@
         </li>
       }
     </ol>
+    @if (saveStatus()) { <p role="status" class="save-status" [class.issue]="saveStatus().startsWith('Result not saved')">{{ saveStatus() }}</p> }
     @for (error of run.errors; track $index) { <p class="issue failed" role="alert">{{ error }}</p> }
     @if (run.visualReview === 'pending' && run.status !== 'failed' && run.status !== 'cancelled') {
       <label>Observer notes <textarea [formControl]="reviewNotes" rows="2"></textarea></label>

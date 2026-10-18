@@ -801,11 +801,6 @@ export class CellPlanetMorphStreamingPageComponent {
           ) {
             const geometry = new BufferGeometry();
             for (const [name, attribute] of Object.entries(data.cellGrid.attributes)) {
-              if ((name === 'position' || name === 'aSpherePos') && attribute.itemSize === 3) {
-                for (let index = 2; index < attribute.array.length; index += 3) {
-                  attribute.array[index] += this.radius();
-                }
-              }
               geometry.setAttribute(name, new BufferAttribute(attribute.array, attribute.itemSize));
             }
             geometry.computeBoundingSphere();
@@ -1600,14 +1595,6 @@ export class CellPlanetMorphStreamingPageComponent {
       projectionKind,
       clearance: radius * 0.0015,
     });
-    for (const name of ['position', 'aSpherePos']) {
-      const attribute = geometryData.geometry.getAttribute(name);
-      if (!attribute || attribute.itemSize !== 3) continue;
-      for (let index = 2; index < attribute.array.length; index += 3) {
-        attribute.array[index] += radius;
-      }
-      attribute.needsUpdate = true;
-    }
     const material = createPlanetMapBorderMaterial(this.morphUniforms, {
       color: '#38bdf8',
       opacity: 0.95,
@@ -1772,7 +1759,7 @@ export class CellPlanetMorphStreamingPageComponent {
 
     // The streamed terrain uses radius-relative heights: its sea datum is zero
     // in both the sphere and flat-map positions. Build the shell at that same
-    // datum, then translate the helper's tangent-frame sphere to the origin.
+    // datum (the helper is body-fixed, like the streamed tiles).
     const geometry = buildOceanMorphGeometry(
       radius,
       heightScale,
@@ -1781,14 +1768,6 @@ export class CellPlanetMorphStreamingPageComponent {
       128,
       64,
     ).geometry;
-    for (const name of ['position', 'aSpherePos']) {
-      const attribute = geometry.getAttribute(name);
-      if (!attribute || attribute.itemSize !== 3) continue;
-      for (let index = 2; index < attribute.array.length; index += 3) {
-        attribute.array[index] += radius;
-      }
-      attribute.needsUpdate = true;
-    }
     geometry.computeBoundingSphere();
     if (geometry.boundingSphere) {
       geometry.boundingSphere.radius = Math.max(

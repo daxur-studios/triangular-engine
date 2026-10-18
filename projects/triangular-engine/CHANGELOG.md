@@ -1,5 +1,7 @@
 # Changelog
 
+- `triangular-engine/testing`: `<tri-test-runner>` gains the opt-in `resultSink` input (`true` = same-origin `/__triangular-test-sink`, or a URL; dev builds only) that POSTs each finished run and each visual review as JSON and shows "Result saved: <file>" or "Result not saved (receiver unreachable): use Download JSON." Also exports `DEFAULT_TEST_SINK_PATH`. New package bins: `triangular-test-receiver` (dependency-free loopback receiver writing `artifacts/test-runs/<suite>@v<version>/<timestamp>_<profile>_<hash>.json` and an `index.jsonl` line, stamped with a code fingerprint from git HEAD plus a working-tree diff hash over `triangular-test.config.json` paths), `triangular-test-summary` (compact table with stale flags) and `bin/triangular-test-proxy.cjs` (an `ng serve` proxy helper that starts the receiver and forwards the sink path).
+
 - `triangular-engine/testing` passes the applied scenario to `ready(context, scenario)`, supports explicitly optional unavailable metrics while retaining required-metric validity, and displays individual checks and case/run errors. Updated the consumer skill, adapter recipe and evidence guide with review defaults, host control locking and compact artifact handoff.
 
 - Packaged the `triangular-engine-testing` agent skill with a game adapter recipe, linked from the main engine skill and testing guides. Installed consumers can read `skills/triangular-engine-testing/SKILL.md` to integrate the reusable runner and author one-click tests.

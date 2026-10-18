@@ -5,6 +5,13 @@ description: A new, fast, LUT-driven atmosphere (scattering, sky, aerial perspec
 timestamp: 2026-10-16T00:00:00Z
 tags: [atmosphere, scattering, sky, cell-planet, morph, rendering, performance, webgpu, tsl]
 runbook: /docs/runbook/049_morphing_planet_atmosphere.md
+performance:
+  - id: bent-atmosphere-look-v1
+    url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1
+    status: runnable-functional-review-pending
+  - id: bent-atmosphere-cost-v1
+    url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
+    status: runnable-diagnostic-hardware-unmeasured
 ---
 
 # Plan 049: Morphing Planet Atmosphere
@@ -13,6 +20,10 @@ Status: **in progress, owner: local Sonnet session.** Phases 0–1 (CPU foundati
 and re-verified locally (2026-10-16). **Phase 2a (atmosphere on a plain sphere, `/atmosphere-lab`) is built
 and waiting for a visual check**; it does not depend on Plan 050. Phase 2b onwards waits for Plan 050 Phase 4.
 Evidence: [Runbook 049](/docs/runbook/049_morphing_planet_atmosphere.md).
+
+[Run latest atmosphere diagnostic](http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1).
+These entries index the existing lab suites documented in the runbook; they do
+not establish human review or controlled hardware acceptance of the full matrix.
 
 **2026-10-18:** the morph is redesigned. The planet now bends instead of blending in a straight line, so
 every in-between shape is a piece of a sphere (§Morph). Phase 3 restarts from a lab spike (3a). There is also a
@@ -518,3 +529,28 @@ before the material port lands. Phase 2b onwards needs Plan 050 through its Phas
 
 Volumetric light shafts / mountain shadows in haze, airglow and aurora, a planet lighting its own
 moon (earthshine), several atmospheres overlapping on screen.
+
+## Acceptance matrix to retain — 2026-10-18
+
+Extend the decided bend and Plan 050 CPU/material integration rather than adding
+another morph algorithm. Use stable geographic anchors at center, four edge
+midpoints, four corners and wrap/seam; near-ground, low/high flight and orbital
+views in declared units; endpoints/quarter/half/three-quarter checkpoints plus
+continuous forward/reverse sweeps and repeated cycles. Record supported
+projection/backend combinations. Use bounded pairwise terrain/grid/ocean/air/
+streaming toggles and one full-feature worst-case journey, including pan/teleport
+with pending work. Existing local suites are evidence only for cases they cover.
+
+For horizon tracking, transform one stable visible terrain target through the same
+mapping and sample its projected position/camera pose on completed frames. Frustum
+inclusion alone is insufficient: record depth/occlusion where available and require
+human composition review. Do not change the target, FOV, terrain visibility or
+camera roll merely to manufacture a pass. Clarify same-point visibility versus a
+screen region versus apparent horizon direction, and report genuine occlusion or
+projection cuts.
+
+Set edge/seam/framing and memory-growth tolerances before acceptance; retain a
+single failing edge rather than averaging it away. Measure live motion after
+readiness, with captures outside performance windows and matched environment
+profiles. Add actual verified links to the performance history as cases become
+available. This matrix adds requirements, not fresh benchmark/visual acceptance.

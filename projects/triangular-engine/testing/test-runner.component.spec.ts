@@ -62,4 +62,47 @@ describe('TestRunnerComponent', () => {
     expect((fixture.nativeElement as HTMLElement).querySelectorAll('.check.failed').length).toBe(1);
     fixture.destroy();
   });
+  describe('resultSink', () => {
+    const adapter: TestRunAdapter<Settings, number> = {
+      capture: () => 0, apply: () => {}, ready: async () => {}, measure: async () => ({ metrics: [] }), restore: () => {},
+    };
+    async function runWith(sink: boolean | string) {
+      await TestBed.configureTestingModule({ imports: [TestRunnerComponent] }).compileComponents();
+      const fixture = TestBed.createComponent<TestRunnerComponent<Settings, number>>(TestRunnerComponent);
+      fixture.componentRef.setInput('suites', history);
+      fixture.componentRef.setInput('adapter', adapter);
+      fixture.componentRef.setInput('resultSink', sink);
+      fixture.detectChanges();
+      fixture.componentInstance.form.controls.profile.setValue('headless-hardware');
+      await fixture.componentInstance.runLatest();
+      for (let i = 0; i < 50 && !fixture.componentInstance.saveStatus() && sink; i++) await new Promise((r) => setTimeout(r, 5));
+      fixture.detectChanges();
+      return fixture;
+    }
+
+    it('posts the finished run to the default same-origin path and shows the stored file', async () => {
+      const spy = spyOn(window, 'fetch').and.resolveTo(new Response(JSON.stringify({ ok: true, file: 'ui-test@v2/a.json' })));
+      const fixture = await runWith(true);
+      expect(spy.calls.mostRecent().args[0]).toBe('/__triangular-test-sink');
+      expect(JSON.parse(spy.calls.mostRecent().args[1]?.body as string).suite.id).toBe('ui-test');
+      expect(fixture.componentInstance.saveStatus()).toBe('Result saved: ui-test@v2/a.json');
+      fixture.destroy();
+    });
+
+    it('says the result was not saved when the receiver is unreachable', async () => {
+      spyOn(window, 'fetch').and.rejectWith(new TypeError('Failed to fetch'));
+      const fixture = await runWith(true);
+      expect(fixture.componentInstance.saveStatus()).toContain('Result not saved');
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('use Download JSON');
+      fixture.destroy();
+    });
+
+    it('does nothing unless opted in', async () => {
+      const spy = spyOn(window, 'fetch');
+      const fixture = await runWith(false);
+      expect(spy).not.toHaveBeenCalled();
+      expect(fixture.componentInstance.saveStatus()).toBe('');
+      fixture.destroy();
+    });
+  });
 });

@@ -42,6 +42,12 @@ the existing replay experiment. Add a second application adapter later to prove 
 - [x] Review the second integration's API changes; align the skill and evidence guide,
   clarify review/metric semantics, and discover runner browser specs by pattern.
 
+- [ ] **Durable result transport (owner requested 2026-10-18, not started).** Browser runs
+  must save themselves, accumulate per suite and carry a code fingerprint, so nobody
+  copies JSON by hand. Design and acceptance in the runbook entry "Durable result
+  transport: design and brief". First step is a spike that proves a dev-server proxy
+  can start the receiver; needs owner approval of the new public `testing` input.
+
 The bounded component slice is implemented. Sixteen runner specs, one timer spec,
 and four browser integration checks passed. The library build and demo host build
 passed; source/evidence details are in the runbook. The links in `performance` are

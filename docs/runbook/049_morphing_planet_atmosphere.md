@@ -5,6 +5,13 @@ description: Findings and decisions for the new cell-planet atmosphere that foll
 timestamp: 2026-10-16T00:00:00Z
 tags: [atmosphere, scattering, sky, cell-planet, morph, rendering, performance, webgpu, tsl]
 plans: [/docs/plans/049_morphing_planet_atmosphere.md]
+performance:
+  - id: bent-atmosphere-look-v1
+    url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1
+    status: runnable-functional-review-pending
+  - id: bent-atmosphere-cost-v1
+    url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
+    status: runnable-diagnostic-hardware-unmeasured
 ---
 
 # Runbook 049: Morphing Planet Atmosphere
@@ -688,3 +695,66 @@ Before the per-ray gate (camera-level switch only): 25 km up at morph 1 cost 9.5
 8. **The `1 + k h` margin term and the mask gap for Equal Earth** (the wrap-around gap uses the row's half-width) are covered by specs only at `k = 0` and by eye at 0.5; the seam opening at small morph with Equal Earth has not been looked at.
 
 **Not done:** the slab fallback at morph >= 0.999 (never needed); a live scrub; froxel haze on the mesh (dropped by decision); 16-step masked pass; the globe `traceRay` spec above.
+
+## 2026-10-18 — globe `traceRay` spec and the 16-step masked pass (accuracy only)
+
+**Globe `traceRay`.** `atmosphere-gpu-model.spec.ts` now checks `hitsGround`, `groundDistance` and the air span against the analytic sphere geometry for six rays (up, steep and shallow down, shallow up, from 40 km, ground beyond `maxDistance`). It passes unchanged, so the globe `traceRay` did not need the `toVar()` reordering that the bent one did. Finding 1 above is closed.
+
+**16 steps vs 32, accuracy (headless, max relative radiance error against a 96-step reference, five rays toward the edge and the sky; throwaway spec, not kept):**
+
+| Case | 16 steps | 32 steps |
+|---|---|---|
+| equirect, morph 0.5, anchor at centre | 1.7 % | 0.4 % |
+| equirect, morph 1, anchor at centre | 5.5 % | 1.9 % |
+| equirect, morph 1, 500 m from the edge | 26 % | 5.6 % |
+
+Equal Earth at morph 0.5 gave the same numbers as equirect there. The Equal Earth morph-1 cases were not measured (the run timed out). The 26 % case is the one the masked pass exists for, so 16 steps is not a free halving: the cost saving would buy a visibly noisier edge. Not adopted; the lab default stays 32. Timing of 16 steps was not measured.
+
+**Still open:** a filtered 16-bit row table for Equal Earth; the k>0 specs; the by-eye checks; 3b.
+
+## 2026-10-18 — Repeatable tests for `/atmosphere-lab` (`triangular-engine/testing`)
+
+The three "not verified by eye" items from the handover can now be run from a link instead of by hand. The lab page hosts `<tri-test-runner>`; everything lab-specific sits behind a host interface, as on the morph streaming page.
+
+### What exists
+- `atmosphere-lab/atmosphere-lab-tests.ts`: the suites, oldest first.
+  - `bent-atmosphere-look` v1 (functional, `requiresVisualReview`): morph scrub 0→1→0 (equirect and Equal Earth), Equal Earth near flat (0.05→0.3→0.05), rim glow from space at the map edge (both projections, anchor 0.9), low and side-on at the east edge.
+  - `bent-atmosphere-cost` v1 (performance): space and low orbit at morph 0 / 0.5 / 1, for the diagnostic GPU frame readout.
+- `atmosphere-lab/atmosphere-lab-test-adapter.ts`: the adapter, the host interface and the pure helpers (`sweepMorphAt`, `sweepTraceProblems`, `stateMismatches`).
+- The page (`atmosphere-lab-page.component.ts`): implements the host through its own setters, locks the panel (a `fieldset`), drag and wheel while a run is active, and restores every captured field afterwards.
+- Specs: `atmosphere-lab-test-adapter.spec.ts` (12, fake host, headless) and `tests/scene/specs/atmosphere-lab-runner.spec.ts` (Playwright, real page).
+
+### Checks each case makes
+Scenario state applied as specified; frames rendered; morph reached its final state (a sweep must hit every keyframe in order); no window, rejection or `console.error` during the run (three.js logs shader and pipeline failures there); and, where a scenario says so, the masked pass active on every frame (above the air). Metrics: frame interval (required) and GPU render time (optional, from the timestamp query).
+
+### Run it
+- Look suite, human-observed: `/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1`
+- Cost suite: `/atmosphere-lab?testSuite=bent-atmosphere-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1`
+- Headless: `npx playwright test -c playwright.runner.config.ts atmosphere-lab-runner` (writes `artifacts/test-runner/atmosphere-lab-look.json`).
+
+### Results
+- Adapter specs 12/12. Headless Playwright run on SwiftShader: 6/6 scenarios completed, every check passed, `automatedVerdict` pass, `visualReview` pending. GPU time came back on the sweeps and not on the 3 s static cases at about 2 fps (few samples); that is software rendering, not a measurement.
+- In the Browser pane the run stalls ("Rendering stalled", "Page was not focused") unless something keeps painting the pane, as in the handover's gotchas. That is the pane, not the page; use the headless run or a real browser tab.
+
+### Decisions (mine; flag if you disagree)
+- The page's own GPU read-out now goes through `GpuTimer` (shared with the cloud lab). Two concurrent `resolveTimestampsAsync` readers steal each other's samples, so the page and the adapter must share one.
+- During a run the page's own sweep and sun animation are off, and the morph comes from the adapter through one `testMorph` value read in the page's tick, so the grid, the table and the sky always see the same morph in a frame.
+- `rebake` counts pending bakes, because a size change plus a preset change queue two timers and the "baking" flag used to clear after the first.
+
+### Not done
+- Nobody has looked at the look suite on real hardware yet: this is the runnable link, not the review. Acceptance of `visualReview` stays with the maintainer.
+- No per-scenario screenshot is stored with the result (the runner's result has no image field).
+- The cost suite has not been run on the AMD GCN5 machine, so no new timings are recorded here.
+
+## 2026-10-18 — Acceptance requirements consolidated into the owning plan
+
+The owner requested center/four-edge/corner/seam and altitude coverage, continuous
+forward/reverse cycles and a stable horizon-target experiment. The plan now retains
+that full matrix, tolerances to define, completed-frame/occlusion evidence and
+explicit human review. Existing lab suites cover their documented cases, not the
+whole matrix by implication. Their existing launch URLs are now indexed in matching
+plan/runbook performance arrays; latest is the cost suite, still without controlled
+hardware acceptance. No benchmark or visual review was rerun by this documentation
+update, and the earlier integration results remain dated evidence.
+
+[Run latest atmosphere diagnostic](http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1).

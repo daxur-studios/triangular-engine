@@ -12,6 +12,12 @@
       "output": "schematics",
       "ignore": ["**/*.spec.cjs"]
     },
+    {
+      "glob": "**/*",
+      "input": "./bin",
+      "output": "bin",
+      "ignore": ["**/*.spec.mjs"]
+    },
     "README.md",
     "THIRD_PARTY_NOTICES.md",
     {

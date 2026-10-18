@@ -110,9 +110,25 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   Save full JSON as an artifact when possible. Report verdicts, failed checks,
   key measurements, limitations, rerun link and artifact path first; inspect raw
   samples on demand. Retain failed-run evidence too.
-- `(completed)` is an in-page Angular output. There is no built-in daemon queue,
-  durable result endpoint or idle-agent wakeup. Use an existing authorized game
-  transport if present; otherwise JSON copy/paste is the supported handoff.
+- `(completed)` is an in-page Angular output. For durable handoff add
+  `[resultSink]="true"` to the panel (dev only). Recipe: set the `serve` option
+  `"proxyConfig": "proxy.conf.cjs"` in `angular.json` and make that file
+  `module.exports = require('triangular-engine/bin/triangular-test-proxy.cjs')();`.
+  `ng serve` then starts the receiver and every run (and review) is saved to
+  `artifacts/test-runs/<suite>@v<version>/<timestamp>_<profile>_<hash>.json` plus a
+  line in `artifacts/test-runs/index.jsonl`. Optional repo-root
+  `triangular-test.config.json` sets `fingerprintPaths` (the engine and the page
+  folder), `port`, `outputDir`. If the panel says "Result not saved", use Download JSON.
+- **Read results cheaply:** run `npx triangular-test-summary [--suite id] [--last N]`
+  first. It shows date, profile, fingerprint, `STALE` vs the current tree, the three
+  verdicts, median/p95/max per scenario and failed checks only. Open a full JSON
+  (path printed per run) only for a failing case. Stale runs stay as history; do not
+  compare timings across fingerprints without saying so.
+- **Do not trust headless/SwiftShader GPU timings** as hardware numbers. Ask for a
+  visible-tab run on the target machine for performance questions; agent-run headless
+  runs establish functional integration only.
+- Without a receiver, JSON copy/paste is the fallback handoff. No queue or
+  idle-agent wakeup exists.
 
 Verify the adapter's meaningful checks, cancellation and restoration with the
 game's narrow existing tests. Keep automated browser checks headless and

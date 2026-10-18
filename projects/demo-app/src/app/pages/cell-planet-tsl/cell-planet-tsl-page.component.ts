@@ -832,17 +832,6 @@ export class CellPlanetTslPageComponent {
     });
   };
 
-  /** Translates a helper-built geometry (tangent-frame sphere, centre at -radius in z) so the planet centre is the origin. */
-  private shiftToPlanetCentre(geometry: BufferGeometry): void {
-    for (const name of ['position', 'aSpherePos']) {
-      const attribute = geometry.getAttribute(name);
-      if (!attribute || attribute.itemSize !== 3) continue;
-      for (let index = 2; index < attribute.array.length; index += 3)
-        attribute.array[index] += this.radius;
-      attribute.needsUpdate = true;
-    }
-  }
-
   /** The ocean shell and the map frame, built once: the demo has a fixed radius, projection and sea datum. */
   private addOceanAndFrame(): void {
     const radius = this.radius;
@@ -854,9 +843,7 @@ export class CellPlanetTslPageComponent {
       128,
       64,
     ).geometry;
-    // Same convention as the GLSL demo: the streamed terrain's sea datum is zero, and the helper's
-    // tangent-frame sphere is translated to the origin.
-    this.shiftToPlanetCentre(ocean);
+    // Same convention as the GLSL demo: the streamed terrain's sea datum is zero, and the helper is body-fixed.
     ocean.computeBoundingSphere();
     this.oceanMesh = new Mesh(ocean, this.ocean.material);
     this.oceanMesh.name = 'tsl-ocean';
@@ -870,8 +857,6 @@ export class CellPlanetTslPageComponent {
       projectionKind: this.projectionKind(),
       clearance: radius * 0.0015,
     });
-    // The frame is built in the same tangent frame as the ocean: without the shift it sits a radius behind the globe mid-morph.
-    this.shiftToPlanetCentre(frame.geometry);
     frame.geometry.computeBoundingSphere();
     this.mapBorderMesh = new Mesh(frame.geometry, this.mapBorder.material);
     this.mapBorderMesh.name = 'tsl-map-border';
@@ -1019,13 +1004,6 @@ export class CellPlanetTslPageComponent {
       );
       const geometry = new BufferGeometry();
       for (const [name, attribute] of Object.entries(payload.attributes)) {
-        if (
-          (name === 'position' || name === 'aSpherePos') &&
-          attribute.itemSize === 3
-        ) {
-          for (let index = 2; index < attribute.array.length; index += 3)
-            attribute.array[index] += this.radius;
-        }
         geometry.setAttribute(
           name,
           new BufferAttribute(attribute.array, attribute.itemSize),

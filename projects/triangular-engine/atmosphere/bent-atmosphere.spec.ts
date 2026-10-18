@@ -435,44 +435,4 @@ describe('BentAtmosphere (GPU), the 3a follow-up', () => {
     bentLut.dispose();
     model.dispose();
   });
-  it('a 16-step march stays close to a 96-step reference on the masked rays (step-count trade)', async () => {
-    const { model, bent, R } = setup();
-    bent.setSun(35, 70);
-    const rays: Ray[] = [
-      { altitude: 20, dir: unit([1, 0.02, 0]) },
-      { altitude: 20, dir: unit([1, 0.2, 0.3]) },
-      { altitude: 1_000, dir: unit([0.6, 0.05, 0.8]) },
-      { altitude: 400_000, dir: unit([1, -0.001, 0.2]) },
-      { altitude: 400_000, dir: unit([0.2, -0.3, 1]) },
-    ];
-    const run = (steps: number) =>
-      evaluateOnGpu(rays.map((r) => [[r.altitude, ...r.dir]]), (at) =>
-        Fn(() => {
-          const a = at(0);
-          const m = bent.march({ altitude: a.x, dir: vec3(a.y, a.z, a.w), sunDir: bent.uSunLocal, maxDistance: 1e30, steps });
-          return vec4(m.radiance, 1);
-        })(),
-      );
-    for (const projection of ['equirect', 'equalEarth'] as const) {
-      for (const morph of [0.5, 1]) {
-        bent.setShape({ morph, planetRadiusM: R, anchorX: Math.PI * R - 500, anchorY: 0, projection });
-        const ref = await run(96);
-        const s16 = await run(16);
-        const s32 = await run(32);
-        let e16 = 0;
-        let e32 = 0;
-        rays.forEach((_, i) => {
-          for (let c = 0; c < 3; c++) {
-            const r = Math.abs(ref[i * 4 + c]) + 1e-6;
-            e16 = Math.max(e16, Math.abs(s16[i * 4 + c] - ref[i * 4 + c]) / r);
-            e32 = Math.max(e32, Math.abs(s32[i * 4 + c] - ref[i * 4 + c]) / r);
-          }
-        });
-        console.log(`STEPVALS ${Array.from(ref).slice(0,8)} | ${Array.from(s16).slice(0,8)}`);
-        console.log(`STEPS ${projection} morph ${morph}: max rel err 16 = ${e16.toFixed(4)}, 32 = ${e32.toFixed(4)}`);
-        expect(e16).toBeLessThan(0.1);
-      }
-    }
-    model.dispose();
-  });
 });

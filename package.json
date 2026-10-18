@@ -5,6 +5,7 @@
     "ng": "ng",
     "build": "ng build",
     "test": "ng test --watch=false --browsers=ChromeHeadless",
+    "test:triangular-engine:sink": "node --test projects/triangular-engine/bin/triangular-test-sink.spec.mjs",
     "test:triangular-engine:testing": "ng run triangular-engine:test-testing --watch=false --browsers=ChromeHeadless",
     "test:watch": "ng test --watch --browsers=Chrome",
     "build:triangular-engine": "ng build triangular-engine",

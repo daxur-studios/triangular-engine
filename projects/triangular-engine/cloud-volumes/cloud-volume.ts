@@ -106,6 +106,8 @@ export class CloudVolume {
   readonly uExtinction;
   readonly uSunColor = uniform(new Vector3(1, 1, 1));
   readonly uAmbient = uniform(new Vector3(0.12, 0.16, 0.24));
+  /** Debug: lower bound on the scattering phase value (0 = off); about 0.3 lifts every view angle to the forward-scatter peak. */
+  readonly uPhaseFloor = uniform(0);
   /** Noise controls; changing them needs {@link invalidateDensity}. */
   readonly uNoiseFrequency = uniform(3);
   readonly uNoiseThreshold = uniform(0.38);
@@ -472,7 +474,7 @@ export class CloudVolume {
           const g2 = g * g;
           return float(1 - g2).div(pow(float(1 + g2).sub(cosine.mul(2 * g)), 1.5).mul(4 * Math.PI));
         };
-        const phase = hg(0.5).mul(0.6).add(hg(-0.3).mul(0.4));
+        const phase = max(hg(0.5).mul(0.6).add(hg(-0.3).mul(0.4)), this.uPhaseFloor);
         Loop(int(count), ({ i }: { i: any }) => {
           const t = tNear.add(float(i).add(jitter.mul(this.uJitter)).mul(dt));
           const q = origin.add(dir.mul(t)).add(0.5);

@@ -5,12 +5,55 @@ description: TSL lighting stages, crisp Voronoi cell borders/palettes, bathymetr
 timestamp: 2026-10-17T00:00:00Z
 tags: [stylized, rendering, tsl, webgpu, cell-planet, water, geology, clouds, scatter, lighting]
 runbook: /docs/runbook/054_stylized_illustrative_rendering.md
+performance: []
 ---
 
 # Plan 054: Stylized Illustrative Planet & Scene Rendering
 
 Status: **planned** (2026-10-17).
 Evidence: [Runbook 054](/docs/runbook/054_stylized_illustrative_rendering.md).
+
+## Current bounded priority — additive terrain, 2026-10-18
+
+Implement an additional opt-in cell-planet terrain option, preserving existing
+policies, defaults and serialized worlds. Begin with broad low-relief grasslands,
+localized angular mountain ranges and recognizable volcano/caldera silhouettes,
+plus a crisp-surface comparison. Flat describes local relief on a curved planet.
+The wider phases below remain the style catalogue; finishing all lighting,
+atmosphere, foliage and plume work is not a prerequisite for this terrain slice.
+
+- Trace graph/base elevation/local geology/sampler/worker mesh/materials before
+  choosing the change. Existing demo policies include `blended` and `cell-features`;
+  preserve them. The canonical world builder and `planet-surface.ts` already expose
+  cell composition/detail controls; geology helpers now exist in worldgen core.
+  Reconcile older Runbook 010 extraction statements against source.
+- Separate actual landform shape, surface sampling/crispness and illumination.
+  Faceted normals do not change silhouettes; a global height reduction flattens
+  peaks as well as plains. Separate lowland relief and peak footprint/height in
+  explicit units, with coherent inter-cell transitions and coastlines.
+- Expose only the needed serializable public configuration and propagate it through
+  canonical sampling, workers, cache identity/invalidation and stale-response guards.
+  Preserve graph/cell identity, selection and reproducibility; document intentional
+  terrain changes. Rendered geometry, surface queries, collisions, water depth,
+  scatter placement and consumer grading must agree on the chosen surface.
+- Diagnose lookup/filtering, streamed material resolution/LOD, geometric LOD,
+  normals and screen resolution separately. Preserve stable antialiasing, quiet
+  interiors and crisp ownership boundaries without thick uniform glowing lines.
+  Do not use a post-filter to conceal missing surface information.
+- Prove a fixed-seed old/new fixture with identical camera/light/viewport/quality
+  at close, mid and distant scales. Cover lowlands, ridge, volcano and coast;
+  flyover/zoom plus pan/teleport/LOD and supported seam/pole/morph regressions.
+  Use shared-runner histories and real links; measure cold generation/first usable
+  scene separately from steady-state frame/CPU/available GPU measurements.
+- Keep backend promises explicit. TSL generation is a separate profile-led
+  experiment, including compilation/transfers/readback and gameplay parity; no GPU
+  migration or performance win is assumed. Trees/water follow stable surface masks;
+  a stylized cloud preset can progress independently with coordinated interfaces.
+
+No new terrain scenario is executable or visually accepted from this planning
+update. Append real performance entries when implemented; set hardware/budgets
+before performance acceptance. A consumer integration and combined environment
+review follow a stable built API, without naming consumer applications here.
 
 **Goal:** Enable a cohesive **Stylized Illustrative PBR** aesthetic (comparable to *Civilization VI*, *Endless Legend*, *The Witness*, and *Astroneer*) across `triangular-engine`'s planet, terrain, water, geology, cloud, and scatter sublibraries using composable TSL nodes on `WebGPURenderer`.
 

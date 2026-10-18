@@ -157,6 +157,12 @@ interface CloudTestSnapshot {
         </p>
       </details>
 
+      <p class="row">
+        <button (click)="setBrightPhase(!brightPhase())" [class.active]="brightPhase()">
+          bright from every angle (phase floor): {{ brightPhase() ? 'on' : 'off' }}
+        </button>
+      </p>
+
       <details open>
         <summary>2 · Scene setup</summary>
         <p class="label">Camera</p>
@@ -468,6 +474,7 @@ export class CloudVolumesLabPageComponent {
   private sky: { model: AtmosphereGpuModel; skyView: AtmosphereSkyViewLut; backdrop: AtmosphereBackdrop; binding: PlanetAtmosphereBinding } | undefined;
   /** Aerial perspective on the clouds (Plan 051 Phase 3b): the froxel table, looked up once per cloud pixel. */
   readonly cloudHaze = signal(false);
+  readonly brightPhase = signal(true);
   private readonly hazeStrength = uniform(1);
   private skyProfile: PhysicalAtmosphereProfile | undefined;
   readonly sunElevation = signal(35);
@@ -511,6 +518,7 @@ export class CloudVolumesLabPageComponent {
   private pitch = 0;
 
   constructor() {
+    this.applyBrightPhase();
     const stepsChanged = this.stepsControl.valueChanges.subscribe((value) => this.applySteps(value));
     const testErrors = this.engine.error$.subscribe((event) => {
       if (this.runnerBusy()) this.testEngineError = `${event.phase}: ${String(event.error)}`;
@@ -808,6 +816,7 @@ export class CloudVolumesLabPageComponent {
     volume.uExtinction.value = this.extinction();
     volume.uMarchSteps.value = this.steps();
     volume.uJitter.value = this.jitterOn() ? 1 : 0;
+    volume.uPhaseFloor.value = this.brightPhase() ? 0.3 : 0;
     volume.alwaysRebakeLight = this.rebakeEveryFrame();
     volume.setFetchEnabled(this.fetchOn());
     volume.forceHidden = this.hiddenOn();
@@ -842,6 +851,16 @@ export class CloudVolumesLabPageComponent {
     this.ensureSky();
     if (this.sky) this.sky.backdrop.mesh.visible = on;
     this.timer.reset();
+  }
+
+  setBrightPhase(on: boolean): void {
+    this.brightPhase.set(on);
+    this.applyBrightPhase();
+    this.timer.reset();
+  }
+
+  private applyBrightPhase(): void {
+    for (const volume of this.allVolumes()) volume.uPhaseFloor.value = this.brightPhase() ? 0.3 : 0;
   }
 
   setCloudHaze(on: boolean): void {

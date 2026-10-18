@@ -257,12 +257,24 @@ Plan 050's existing occlusion slot.
 5. **Sources.** Mesh source (a ship mesh baked to a cloud), points source (the demo carries a small built-in
    GPU particle swirl standing in for an app's simulation), animated noise.
    - **Gate:** the ship reads as made of cloud; the particle cloud moves every frame within G6.
+   - **Suggested additions (2026-10-18, not yet agreed):** more test shapes, to stress thin and concave features the ship does not:
+     - a **torus knot** mesh source (thin tubes, holes, self-overlap): does the distance field and softness ramp keep it readable as a knot made of cloud, with no filled-in holes or broken tubes?
+     - a **tornado** from the points source (a funnel of orbiting particles, wide at the top): does it read as a funnel from every side and stay inside the per-frame budget?
+     - Gate: both read as their shape from outside and from inside, at the same cost limits as the ship.
 6. **Far shell + planet coverage.**
    - coverage map, shell shading and the altitude cross-fade with volumes;
    - ground shadows through `addSunOcclusion` on a `PlanetSurfaceMaterial` globe;
      (the hookup edits the planet material's slot, Plan 050, so it needs the maintainer's go-ahead then; late, performance first);
    - volumes spawned near the camera from coverage.
    - **Gate:** a descent from orbit into a cloud with no visible switch.
+   - **Suggested addition (2026-10-18, not yet agreed): full-coverage stress test, ahead of the rest of this phase.** The lab
+     tops out at 12 volumes, so nothing yet shows whether a realistically covered planet works. Spawn 50-200 volumes from a
+     noise coverage map over the whole globe (a mix of overcast and clear regions) and measure:
+     - GPU ms from orbit, mid altitude and the surface, against G6;
+     - the per-frame distance sort (the unsorted-overlap issue in Runbook 051), and pop-in as volumes spawn and despawn;
+     - how many volumes are needed for believable coverage, and so whether bounded volumes alone suffice or the far shell
+       must carry more of the planet than planned.
+     - Gate: a stated volume count and GPU cost for full coverage, with no wrong-order compositing visible.
 7. **Point lights: rocket engine and lightning.** Up to 4 lights per volume, unshadowed, attenuated by the
    optical depth along a short (2-4 step) march toward each light, so a light deep inside lights a soft ball around it
    instead of the whole cloud. Lights use HDR colour and intensity, so they bloom with the rest of the scene.

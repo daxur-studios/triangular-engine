@@ -1,4 +1,4 @@
-import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, isDevMode, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { PerspectiveCamera, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
@@ -11,6 +11,14 @@ import {
   type AtmospherePresetId,
   type PhysicalAtmosphereProfile,
 } from 'triangular-engine/atmosphere';
+import { TestRunnerComponent, type TestProgress, type TestSetting } from 'triangular-engine/testing';
+import { GpuTimer } from '../cloud-volumes-lab/gpu-timer';
+import {
+  createAtmosphereLabTestAdapter,
+  type AtmosphereLabSnapshot,
+  type AtmosphereLabTestHost,
+} from './atmosphere-lab-test-adapter';
+import { ATMOSPHERE_LAB_TEST_HISTORY, type AtmosphereLabState, type AtmosphereLabTestSettings } from './atmosphere-lab-tests';
 import { BentPlanetLab } from './bent-planet-lab';
 
 /**
@@ -79,7 +87,7 @@ const VIEWS: readonly ViewPreset[] = [
 @Component({
   standalone: true,
   selector: 'app-atmosphere-lab-page',
-  imports: [EngineModule, RouterLink],
+  imports: [EngineModule, RouterLink, TestRunnerComponent],
   providers: EngineService.provide({
     showFPS: true,
     preferredRenderer: 'webgpu',
@@ -100,6 +108,19 @@ const VIEWS: readonly ViewPreset[] = [
     <aside class="panel" (pointermove)="$event.stopPropagation()" (wheel)="$event.stopPropagation()">
       <a routerLink="/">← Examples</a>
       <h2>Atmosphere lab · plain sphere</h2>
+      <tri-test-runner
+        [suites]="testHistory"
+        [adapter]="testAdapter"
+        [available]="testAvailable()"
+        [externalBusy]="testExternalBusy()"
+        [allowAutoStart]="allowTestAutoStart"
+        [resultSink]="true"
+        (progressChange)="onTestProgress($event)"
+      />
+      @if (testBusy()) {
+        <p class="note" role="status">Test {{ testStatus() }}. Controls are locked until it finishes or is cancelled.</p>
+      }
+      <fieldset class="locked" [disabled]="testBusy()">
       <p class="row">
         <button (click)="switchBackend('webgpu')" [disabled]="backend === 'webgpu'">WebGPU</button>
         <button (click)="switchBackend('webgl2')" [disabled]="backend === 'webgl2'">forceWebGL</button>
@@ -226,6 +247,7 @@ const VIEWS: readonly ViewPreset[] = [
       <p class="note">
         {{ backend }} · {{ sizeLabel() }} {{ presetId() }} · bake {{ bakeMs() }} ms · drag = look, wheel = altitude
       </p>
+      </fieldset>
     </aside>
   `,
   styles: `
@@ -245,6 +267,12 @@ const VIEWS: readonly ViewPreset[] = [
       overflow-y: auto;
       font: 13px/1.4 system-ui;
       z-index: 20;
+    }
+    .panel fieldset.locked {
+      border: 0;
+      margin: 0;
+      padding: 0;
+      min-width: 0;
     }
     .panel input[type='range'] {
       width: 100%;
@@ -327,9 +355,9 @@ export class AtmosphereLabPageComponent {
   private readonly skyView: AtmosphereSkyViewLut;
   private readonly bentLab: BentPlanetLab;
   private sweepDirection = 1;
-  private frame = 0;
-  private timestampsPending = false;
+  private readonly gpuTimer = new GpuTimer(5);
   private readonly forward = new Vector3();
+  private pendingRebakes = 0;
 
   constructor() {
     const started = performance.now();
@@ -363,8 +391,14 @@ export class AtmosphereLabPageComponent {
       if (this.bentOn()) this.tickBent(delta);
       this.updateSkyViewAndTimings();
     });
+    const rendered = this.engine.renderComplete$.subscribe(() => {
+      this.renderedFrameCount++;
+      if (!this.firstFrameRendered()) this.firstFrameRendered.set(true);
+    });
     this.destroyRef.onDestroy(() => {
       tick.unsubscribe();
+      rendered.unsubscribe();
+      this.stopErrorWatch?.();
       this.engine.scene.remove(this.backdrop.mesh, this.bentLab.pass, this.bentLab.grid);
       this.bentLab.dispose();
       this.backdrop.dispose();
@@ -381,12 +415,14 @@ export class AtmosphereLabPageComponent {
 
   private rebake(): void {
     this.baking.set(true);
+    this.pendingRebakes++;
     // Let the "baking" label paint before the synchronous bake blocks the thread.
     setTimeout(() => {
       const started = performance.now();
       this.model.setProfile(this.buildProfile());
       this.bakeMs.set(Math.round(performance.now() - started));
-      this.baking.set(false);
+      this.pendingRebakes--;
+      if (this.pendingRebakes === 0) this.baking.set(false);
       this.syncAltitudeSlider();
     }, 30);
   }
@@ -512,16 +548,11 @@ export class AtmosphereLabPageComponent {
       const size = this.backdrop.spaceSize;
       this.spaceLabel.set(size.x > 0 && this.altitudeM >= this.model.uTopAltitude.value ? `${size.x} x ${size.y}` : 'not in use inside the air');
     }
-    if (++this.frame % 5 !== 0 || this.timestampsPending || !renderer.resolveTimestampsAsync) return;
-    this.timestampsPending = true;
-    renderer
-      .resolveTimestampsAsync('render')
-      .then((ms: number | undefined) => {
-        const value = typeof ms === 'number' && ms > 0 ? ms : renderer.info?.render?.timestamp;
-        this.gpuMs.set(typeof value === 'number' && value > 0 ? value.toFixed(2) + ' ms' : 'n/a (no timestamp query)');
-      })
-      .catch(() => this.gpuMs.set('n/a (no timestamp query)'))
-      .finally(() => (this.timestampsPending = false));
+    // One reader of the timestamp queries: a second concurrent reader (the test adapter) would steal samples.
+    this.gpuTimer.tick(renderer, () => {
+      const value = this.gpuTimer.render.last;
+      this.gpuMs.set(value !== undefined ? value.toFixed(2) + ' ms' : 'n/a (no timestamp query)');
+    });
   }
 
   toggleChecker(): void {
@@ -603,7 +634,11 @@ export class AtmosphereLabPageComponent {
   }
 
   private tickBent(delta: number): void {
-    if (this.sweep()) {
+    if (this.testMorph !== undefined) {
+      // A test run drives the morph; the page's own sweep is off for its duration.
+      this.morph.set(this.testMorph);
+      this.bentLab.setMorph(this.testMorph);
+    } else if (this.sweep()) {
       // 0 -> 1 -> 0 over about 12 seconds.
       let next = this.morph() + (this.sweepDirection * delta) / 6;
       if (next >= 1 || next <= 0) {
@@ -634,13 +669,14 @@ export class AtmosphereLabPageComponent {
   }
 
   onPointerMove(event: PointerEvent): void {
-    if (!(event.buttons & 1)) return;
+    if (this.testBusy() || !(event.buttons & 1)) return;
     this.yaw.update((y) => ((((y - event.movementX * 0.2 + 180) % 360) + 360) % 360) - 180);
     this.pitch.update((p) => Math.max(-90, Math.min(90, p - event.movementY * 0.2)));
   }
 
   onWheel(event: WheelEvent): void {
     event.preventDefault();
+    if (this.testBusy()) return;
     this.altitudeM = Math.min(30 * this.radiusM, Math.max(1, this.altitudeM * Math.exp(event.deltaY * 0.0015)));
     this.backdrop.setAltitude(this.altitudeM);
     this.syncAltitudeSlider();
@@ -648,6 +684,176 @@ export class AtmosphereLabPageComponent {
 
   num(event: Event): number {
     return Number((event.target as HTMLInputElement).value);
+  }
+
+  // ---- Repeatable tests (triangular-engine/testing) -------------------------------------------
+  // The reusable runner owns lifecycle and results; everything lab-specific is in
+  // atmosphere-lab-test-adapter.ts behind the host below, and the suites in atmosphere-lab-tests.ts.
+
+  readonly testHistory = ATMOSPHERE_LAB_TEST_HISTORY;
+  readonly allowTestAutoStart = isDevMode();
+  readonly testBusy = signal(false);
+  readonly testStatus = signal('');
+  private readonly firstFrameRendered = signal(false);
+  readonly testAvailable = computed(() => this.firstFrameRendered());
+  /** A rebake or the page's own animations would disturb a scripted run. */
+  readonly testExternalBusy = computed(() => !this.testBusy() && (this.baking() || this.sweep() || this.animateSun()));
+  private renderedFrameCount = 0;
+  private testError = '';
+  /** Morph value a run hands to the next tick; undefined when no run drives the morph. */
+  private testMorph: number | undefined;
+  private stopErrorWatch?: () => void;
+
+  private readonly testHost: AtmosphereLabTestHost = {
+    read: () => this.readTestSnapshot(),
+    apply: (settings) => this.applyTestSettings(settings),
+    setMorphFrame: (morph) => { this.testMorph = morph; },
+    restore: (snapshot) => this.restoreTestSnapshot(snapshot),
+    renderedFrames: () => this.renderedFrameCount,
+    isBaking: () => this.pendingRebakes > 0,
+    maskedPassActive: () => this.bentOn() && this.bentLab.maskedShare > 0,
+    errors: () => this.testError,
+    resetErrors: () => { this.testError = ''; },
+    onBeforeRender: (callback) => {
+      const subscription = this.engine.beforeRender$.subscribe(() => callback());
+      return () => subscription.unsubscribe();
+    },
+    onRenderComplete: (callback) => {
+      const subscription = this.engine.renderComplete$.subscribe((event) => callback(event.renderedAt));
+      return () => subscription.unsubscribe();
+    },
+    observeGpu: (callback) => {
+      this.gpuTimer.reset();
+      return this.gpuTimer.observeRender(callback);
+    },
+    gpuTimestampsSupported: () => typeof (this.engine.renderer as any)?.resolveTimestampsAsync === 'function',
+    isSampling: () => this.engine.fpsController.frameSampler.isActive,
+    startSampling: () => this.engine.fpsController.frameSampler.start(),
+    stopSampling: () => this.engine.fpsController.frameSampler.stop(),
+    environment: () => this.testEnvironment(),
+  };
+
+  readonly testAdapter = createAtmosphereLabTestAdapter(this.testHost);
+
+  onTestProgress(progress: TestProgress | null): void {
+    const busy = progress !== null;
+    if (busy !== this.testBusy()) {
+      this.testBusy.set(busy);
+      if (busy) this.watchTestErrors();
+      else this.stopErrorWatch?.();
+    }
+    this.testStatus.set(progress
+      ? `${progress.phase} ${progress.completed}/${progress.total} · repetition ${progress.repetition}${progress.label ? ` · ${progress.label}` : ''}`
+      : '');
+  }
+
+  /** Window errors, unhandled rejections and `console.error` (where three.js logs shader and pipeline failures) while a run is active. */
+  private watchTestErrors(): void {
+    const note = (message: string) => { if (!this.testError) this.testError = message; };
+    const onError = (event: ErrorEvent) => note(event.message || 'window error');
+    const onRejection = (event: PromiseRejectionEvent) => note(`Unhandled rejection: ${String(event.reason)}`);
+    const original = console.error;
+    console.error = (...args: unknown[]) => {
+      note(args.map((a) => (a instanceof Error ? a.message : String(a))).join(' ').slice(0, 300));
+      original.apply(console, args);
+    };
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    this.stopErrorWatch = () => {
+      console.error = original;
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
+      this.stopErrorWatch = undefined;
+    };
+  }
+
+  private readTestSnapshot(): AtmosphereLabSnapshot {
+    const state: AtmosphereLabState = {
+      bentOn: this.bentOn(),
+      planetRadiusM: this.radiusM,
+      preset: this.presetId(),
+      projection: this.projection(),
+      skyPath: this.skyPath(),
+      maskEnabled: this.maskOn(),
+      dayNight: this.dayNight(),
+      morph: this.morph(),
+      anchor: [this.anchorX(), this.anchorY()],
+      altitudeM: this.altitudeM,
+      yawDeg: this.yaw(),
+      pitchDeg: this.pitch(),
+      sunElevationDeg: this.sunElevation(),
+      sunAzimuthDeg: this.sunAzimuth(),
+      exposure: this.exposure(),
+    };
+    return { state, sweep: this.sweep(), animateSun: this.animateSun() };
+  }
+
+  private applyTestSettings(settings: AtmosphereLabTestSettings): void {
+    this.applyLabState({ ...settings, bentOn: true, morph: settings.morphKeys[0] });
+    this.testMorph = settings.morphKeys[0];
+  }
+
+  private restoreTestSnapshot(snapshot: AtmosphereLabSnapshot): void {
+    this.testMorph = undefined;
+    this.applyLabState(snapshot.state);
+    this.sweep.set(snapshot.sweep);
+    this.animateSun.set(snapshot.animateSun);
+  }
+
+  /** The page's own setters, only where a value differs, so an unchanged setting never rebakes the tables. */
+  private applyLabState(state: AtmosphereLabState): void {
+    this.sweep.set(false);
+    this.animateSun.set(false);
+    if (this.bentOn() !== state.bentOn) this.toggleBent();
+    const size = SIZES.find((choice) => choice.radiusM === state.planetRadiusM);
+    if (!size) throw new Error(`No planet size with radius ${state.planetRadiusM} m`);
+    if (this.radiusM !== size.radiusM) this.setSize(size);
+    if (this.presetId() !== state.preset) this.setPreset(state.preset);
+    if (this.projection() !== state.projection) this.setProjection(state.projection);
+    if (this.skyPath() !== state.skyPath) this.setSkyPath(state.skyPath);
+    if (this.maskOn() !== state.maskEnabled) this.toggleMask();
+    if (this.dayNight() !== state.dayNight) this.setDayNight(state.dayNight);
+    this.anchorX.set(state.anchor[0]);
+    this.anchorY.set(state.anchor[1]);
+    this.bentLab.setAnchor(state.anchor[0], state.anchor[1]);
+    this.altitudeM = state.altitudeM;
+    this.backdrop.setAltitude(this.altitudeM);
+    this.syncAltitudeSlider();
+    this.yaw.set(state.yawDeg);
+    this.pitch.set(state.pitchDeg);
+    this.sunElevation.set(state.sunElevationDeg);
+    this.sunAzimuth.set(state.sunAzimuthDeg);
+    this.exposure.set(state.exposure);
+    this.backdrop.exposure.value = state.exposure;
+    this.applySun();
+    this.morph.set(state.morph);
+    this.bentLab.setMorph(state.morph);
+  }
+
+  /** Backend and device facts for the result; unknown values are labelled, not guessed. */
+  private testEnvironment(): Record<string, TestSetting> {
+    const renderer = this.engine.renderer as any;
+    let gpu = 'unknown';
+    try {
+      const info = renderer.backend?.adapter?.info ?? renderer.backend?.device?.adapterInfo;
+      const text = [info?.vendor, info?.architecture, info?.device, info?.description].filter(Boolean).join(' ');
+      if (text) gpu = text;
+      else {
+        const gl = renderer.getContext?.();
+        const ext = gl?.getExtension?.('WEBGL_debug_renderer_info');
+        if (gl && ext) gpu = String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL));
+      }
+    } catch { /* leave unknown */ }
+    return {
+      page: 'atmosphere-lab',
+      renderer: renderer?.constructor?.name ?? 'unknown',
+      requestedBackend: BACKEND,
+      gpuRenderer: gpu,
+      softwareRenderer: gpu === 'unknown' ? null : /swiftshader|llvmpipe|software|basic render/i.test(gpu),
+      gpuTimingSource: this.testHost.gpuTimestampsSupported() ? 'renderer timestamp query (render)' : 'none: no timestamp query on this backend',
+      canvas: `${renderer?.domElement?.width ?? 0}x${renderer?.domElement?.height ?? 0}`,
+      hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+    };
   }
 
   switchBackend(backend: 'webgpu' | 'webgl2'): void {

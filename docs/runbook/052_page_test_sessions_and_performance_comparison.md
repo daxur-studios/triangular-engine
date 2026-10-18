@@ -600,3 +600,79 @@ The skill validator passed and both built skill files match their sources by has
 No successful morph browser run or GPU performance acceptance is claimed. No
 terrain runtime edits, commits, publishing, new tarballs or daemon transport were
 part of this review.
+
+## 2026-10-18 — Documentation ownership and evidence standard consolidated
+
+The reusable API remains defined by `projects/triangular-engine/docs/testing.md`,
+its packaged skill and this plan/runbook pair. Early runner/DTO/cloud-extraction
+proposals are historical context, not a second API or executor specification.
+Generic experiment-history requirements now live in `docs/plans-and-runbooks.md`:
+literal append-only performance arrays on new/touched documents, actual latest
+and exact-version links, explicit blockers, and separate automated/performance/
+human verdicts. No broad history backfill or manifest-viewer implementation was
+performed. Full result artifacts plus compact summaries remain the current
+token-efficient handoff; queues, persistent completion delivery and idle-agent
+wakeups are still deferred. This documentation update did not rerun benchmarks or
+change the runner's behavior.
+
+## 2026-10-18 — Durable result transport: design and brief
+
+Trigger: the atmosphere-lab suites (Runbook 049) were run in a visible browser tab,
+but nothing reached disk, so an agent could not read them. The skill only covers
+launch and verdicts, not where results live or how to read a large JSON cheaply.
+Owner expectations: browser runs save to the machine automatically, repeat runs of the
+same suite persist, results carry a code hash so stale runs are recognisable, and the
+mechanism is reusable by at least two other games without per-app code.
+
+Design (proposed, not implemented):
+
+- **Receiver.** A dependency-free Node script shipped as a bin in the package. It
+  listens on localhost, accepts POSTed results and writes
+  `artifacts/test-runs/<suite>@v<version>/<timestamp>_<profile>_<hash>.json` plus one
+  summary line per run in `artifacts/test-runs/index.jsonl`.
+- **Starting it without a manual step.** Spike first: a `proxy.conf.js` for `ng serve`
+  is Node code run at server start; it may launch the receiver and forward
+  `/__triangular-test-sink` same-origin (no CORS). If that does not hold, fall back to
+  one npm script that starts the dev server and the receiver together.
+- **Runner.** Opt-in sink (input and/or URL param), default same-origin path, dev only.
+  If the receiver is unreachable the panel says "result not saved, use Download JSON"
+  and never fails silently. Needs a changelog entry and spec; owner approves the public
+  input before it lands.
+- **Fingerprint.** Computed by the receiver (the browser cannot read source): git
+  `HEAD` plus a hash of the working-tree diff limited to configured paths (engine and
+  the page folder, from one small repo-root config file). Stamped on every run; old
+  runs are marked stale in summaries, not excluded, so before/after history stays.
+  Deliberately coarse: any edit under those paths changes it.
+- **Reading.** A summary bin prints a compact table from `index.jsonl` (date, profile,
+  hash and stale flag, three verdicts, median/p95/max per scenario, failed checks
+  only). Agents read the table first and the full JSON only on failure.
+- **Per-app cost.** Adapters stay per game. A game adds a two-line proxy setup and an
+  optional config file; the skill carries the copyable recipe. No private repo names.
+- **Rejected.** File System Access API (Chromium only, per-session click, no hash);
+  agent-run Playwright only (headless GPU timings are not meaningful hardware numbers).
+
+Done when: a visible-tab run of an atmosphere-lab suite appears under
+`artifacts/test-runs/` with no manual step, repeat runs accumulate, the summary bin
+shows them with fingerprint and stale state, the skill and `docs/testing.md` say where
+results live and how to read them, and specs cover receiver, runner sink and summary.
+Not done: all of it. Nothing was committed.
+
+## 2026-10-18 — Durable result transport: implementation
+
+Spike result: `ng serve demo-app` with `proxyConfig` pointing at `projects/demo-app/proxy.conf.cjs`
+loads that Node file at server start; it spawns the receiver and forwards the
+same-origin `/__triangular-test-sink` to it. A POST through port 4222 was written under
+`artifacts/test-runs/` and indexed, and the receiver exited when the dev server was
+stopped. Angular loads the config more than once, so the receiver treats `EADDRINUSE` as
+"already running" and exits quietly. No npm-script fallback was needed.
+
+Built: `projects/triangular-engine/bin/` with `triangular-test-receiver.mjs` (also
+computes the fingerprint), `triangular-test-summary.mjs`, `triangular-test-proxy.cjs`
+and a Node spec (`npm run test:triangular-engine:sink`); repo-root
+`triangular-test.config.json`; the runner's opt-in `resultSink` input and
+`DEFAULT_TEST_SINK_PATH` export (specs in `test-runner.component.spec.ts`); docs, skill
+and changelog; the atmosphere lab passes `[resultSink]="true"`. The `resultSink` input is
+a new public API; the owner approved it explicitly on 2026-10-18.
+Choices: reviews re-post the same run, so an accepted review produces a second file and
+index line with the same `runId`; fingerprint covers untracked files too. Not verified
+here: a real visible-tab atmosphere-lab run end to end (needs the owner's browser).

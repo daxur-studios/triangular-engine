@@ -88,7 +88,52 @@ once per component initialization, and waits while `externalBusy` is true. Appli
 must decide whether their dev/test mode permits autostart; a query parameter alone
 does not enable hidden production tooling. Button execution uses the same input checks.
 
+## Saved results (dev only)
+
+Browser runs can save themselves to disk so an agent can read them. Opt in with
+`[resultSink]="true"` on `<tri-test-runner>`; each finished run, and each visual
+review of it, is POSTed to the same-origin `/__triangular-test-sink` (or the URL you
+pass). Production builds never post. If the receiver is unreachable the panel says
+"Result not saved ... use Download JSON"; it never fails silently.
+
+**Setup per game (two lines plus an optional file).** In `angular.json`, set the
+`serve` option `"proxyConfig": "proxy.conf.cjs"` and create that file:
+
+```js
+module.exports = require('triangular-engine/bin/triangular-test-proxy.cjs')();
+```
+
+`ng serve` then starts the dependency-free receiver itself (loopback only, port 4223,
+stopped with the server) and forwards the sink path to it. Optional repo-root
+`triangular-test.config.json`: `{ "port": 4223, "outputDir": "artifacts/test-runs",
+"fingerprintPaths": ["projects/my-game", "node_modules/triangular-engine"] }`. Without
+a proxy, run `npx triangular-test-receiver` and pass the receiver URL as `resultSink`.
+Keep `artifacts/` gitignored.
+
+**Where results live.** `artifacts/test-runs/<suite>@v<version>/<timestamp>_<profile>_<hash>.json`
+(full result plus `fingerprint`) and one line per run in `artifacts/test-runs/index.jsonl`.
+Runs accumulate; nothing is overwritten.
+
+**Fingerprint.** Computed by the receiver as git `HEAD` plus a hash of the working-tree
+diff and untracked files under `fingerprintPaths`. It is deliberately coarse: any edit
+there changes it. Older runs are flagged `STALE` in summaries, not removed.
+
+**Reading cheaply.** Run `npx triangular-test-summary [--suite id] [--last N]` first: date,
+profile, fingerprint and stale flag, the three verdicts, median/p95/max per scenario
+metric and failed checks only. Open a full JSON only for a failing case.
+
+**Caveat.** Headless or software-rendered (SwiftShader) runs give GPU timings that are
+not real hardware numbers; use visible-tab runs on the target machine for performance.
+
 ## Evidence and limitations
+
+When adding or substantially updating a spike, plan or runbook, append verified
+experiments to its `performance` array and keep prior versions as history. Empty
+arrays indicate planned work with no executable case. Keep paired document entries
+consistent; there is no shared-manifest resolver or automatic Markdown run button.
+The host page exposes **Run latest test**; documents provide its corresponding
+launch link and exact-version rerun. A blocked latest experiment keeps its blocker.
+See the repository's `docs/plans-and-runbooks.md` for this authoring convention.
 
 Results include the exact suite/settings, repetitions, environment, per-case checks,
 raw metrics, validity issues, errors, and a pinned rerun URL. Use **Copy result** or

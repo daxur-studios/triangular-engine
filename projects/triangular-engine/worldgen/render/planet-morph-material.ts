@@ -14,6 +14,11 @@ import {
 } from 'three';
 import { SEAM_GLSL_FUNCTIONS } from './antimeridian-seam';
 
+/** Longitude mismatch (radians) that marks a seam-spanning fragment (same value as the TSL graph). */
+const SEAM_LON_MISMATCH_GLSL = '0.3';
+/** `|dot(dir, up)|` above which a fragment is in the projection's polar cap (about 8 degrees). */
+const SEAM_POLE_EXEMPT_GLSL = '0.99';
+
 export const BEND_GLSL_FUNCTIONS = /* glsl */ `
   float planetSinc(float a) {
     float a2 = a * a;
@@ -21,7 +26,12 @@ export const BEND_GLSL_FUNCTIONS = /* glsl */ `
     return sin(a) / a;
   }
 
-  vec2 planetStaticEquirectXY(vec3 dir, vec2 flatXY, float radius, float mapWidth, float projType) {
+  // The globe's equirectangular map coordinates (R * lon, R * lat) of a statically baked vertex.
+  // \`dirY\` is the y of the RADIAL direction (the normalised body-fixed sphere position, never a
+  // terrain normal, which tilts with relief). Longitude comes from the baked flat x: Equal Earth x
+  // is linear in longitude at a given latitude and its poles are lines, so this has no polar or
+  // antimeridian singularity. Mirrors the CPU \`recoverStaticEquirectXY\`.
+  vec2 planetStaticEquirectXY(float dirY, vec2 flatXY, float radius, float mapWidth, float projType) {
     if (projType < 0.5) {
       return flatXY;
     }
@@ -32,7 +42,7 @@ export const BEND_GLSL_FUNCTIONS = /* glsl */ `
     float EE_A4 = 0.003796;
     float EE_RAW_X_MAX = 2.7066299836960748;
 
-    float sinLat = clamp(dir.y, -1.0, 1.0);
+    float sinLat = clamp(dirY, -1.0, 1.0);
     float pLat = asin(sinLat);
     float theta = asin(clamp(EE_M * sinLat, -1.0, 1.0));
     float theta2 = theta * theta;
@@ -42,15 +52,16 @@ export const BEND_GLSL_FUNCTIONS = /* glsl */ `
     float eeXPerLon = (cos(theta) * scale) / denom;
     float eeY = theta * (EE_A1 + EE_A2 * theta2 + theta6 * (EE_A3 + EE_A4 * theta2)) * scale;
 
-    float horizSq = dir.x * dir.x + dir.z * dir.z;
-    float lonFromFlat = flatXY.x / max(eeXPerLon, 1e-6);
-    float lonFromDir = horizSq > 1e-6 ? atan(dir.x, dir.z) : lonFromFlat;
-    if (abs(lonFromDir) > 3.0 && lonFromDir * flatXY.x < 0.0) {
-      lonFromDir = -lonFromDir;
-    }
-    float poleBlend = smoothstep(1e-5, 1e-3, horizSq);
-    float pLon = mix(lonFromFlat, lonFromDir, poleBlend);
+    float pLon = flatXY.x / max(eeXPerLon, 1e-6);
     return vec2(radius * pLon, radius * pLat + (flatXY.y - eeY));
+  }
+
+  // Map frame (x = projection right, y = projection up, z = projection forward) to body axes.
+  // Dynamic (tracked) mode bends in the map frame of the tracked basis; turning the result back
+  // keeps morph 0 the body-fixed globe and lays the flat map tangent at the tracked point,
+  // matching CellPlanetMorphCameraRig and evaluateSurfaceTransform.
+  vec3 planetMapFrameToBody(vec3 v, vec3 right, vec3 up, vec3 forward) {
+    return right * v.x + up * v.y + forward * v.z;
   }
 
   void planetBendTransform(
@@ -94,6 +105,16 @@ export interface IDynamicProjectionUniforms {
   uMapHeight: IUniform<number>;
   uRadius: IUniform<number>;
   uProjectionType: IUniform<number>; // 0 = equirectangular, 1 = equalEarth
+  /**
+   * Optional: the planet centre in scene space, for geometry whose `aSpherePos`/`aFlatPos` are stored
+   * relative to a patch centre (streamed tiles generated with `renderOriginBodyFixedM`) and placed by
+   * the batch/instance/model translation. The bent morph is curved about the planet centre, so
+   * {@link enablePlanetMorphProjection} then rebuilds each vertex's body-fixed point as
+   * `aSpherePos + (modelMatrix * patchMatrix * origin - uBodyCentreScene)`. Assumes an unrotated
+   * patch group, like the TSL `uBodyCentreScene`. Omit it when the attributes are already
+   * body-fixed (planet centre at the local origin), which is what every geometry builder writes.
+   */
+  uBodyCentreScene?: IUniform<Vector3>;
 }
 
 export interface IPlanetDayNightUniforms {
@@ -178,10 +199,15 @@ export function enablePlanetMorphProjection(
     shader.uniforms['uMapHeight'] = uniforms.uMapHeight;
     shader.uniforms['uRadius'] = uniforms.uRadius;
     shader.uniforms['uProjectionType'] = uniforms.uProjectionType;
+    const bodyShift = uniforms.uBodyCentreScene !== undefined;
+    if (bodyShift) {
+      shader.uniforms['uBodyCentreScene'] = uniforms.uBodyCentreScene!;
+    }
 
     if (!shader.vertexShader.includes('uniform float uMorph;')) {
       shader.vertexShader =
         `
+        ${bodyShift ? '#define PLANET_MORPH_BODY_SHIFT\n        uniform vec3 uBodyCentreScene;' : ''}
         attribute vec3 aSpherePos;
         attribute vec3 aFlatPos;
         attribute vec3 aSphereNorm;
@@ -203,6 +229,7 @@ export function enablePlanetMorphProjection(
         varying float vProjMode;
         varying float vMorph;
         varying float vSeamCull;
+        varying vec3 vPlanetRadialDir;
         #ifndef V_SPHERE_NORM_DECLARED
         #define V_SPHERE_NORM_DECLARED
         varying vec3 vSphereNorm;
@@ -223,12 +250,32 @@ export function enablePlanetMorphProjection(
         dynFlatNorm = vec3(0.0, 0.0, 1.0);
       }
 
+      // Body-fixed (planet centre at the origin) offset of this vertex's local frame. Zero unless
+      // the attributes are patch-relative (see IDynamicProjectionUniforms.uBodyCentreScene).
+      vec3 planetBodyShift = vec3(0.0);
+      #ifdef PLANET_MORPH_BODY_SHIFT
+        #if defined( USE_BATCHING )
+          mat4 planetPatchMatrix = batchingMatrix;
+        #elif defined( USE_INSTANCING )
+          mat4 planetPatchMatrix = instanceMatrix;
+        #else
+          mat4 planetPatchMatrix = mat4(1.0);
+        #endif
+        planetBodyShift = (modelMatrix * planetPatchMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz - uBodyCentreScene;
+      #endif
+      vec3 planetSphereAbs = aSpherePos + planetBodyShift;
+      vec3 planetFlatAbs = aFlatPos + planetBodyShift;
+      // The radial direction, not aSphereNorm: on terrain that is the surface normal, which tilts
+      // with relief and would scatter every vertex's longitude/latitude.
+      vec3 planetDir = normalize(planetSphereAbs);
+      vPlanetRadialDir = planetDir;
+
       vec2 eqXY;
       vec2 flatTargetXY;
-      float h = mix(length(aSpherePos) - uRadius, aFlatPos.z, uMorph);
+      float h = mix(length(planetSphereAbs) - uRadius, planetFlatAbs.z, uMorph);
 
       if (uProjMode > 0.5) {
-        vec3 dir = aSphereNorm;
+        vec3 dir = planetDir;
         float dotUp = dot(dir, uProjUp);
         float pLon = seamProjectedLon(dir, uProjForward, uProjRight);
         float pLat = asin(clamp(dotUp, -1.0, 1.0));
@@ -254,8 +301,8 @@ export function enablePlanetMorphProjection(
           flatTargetXY = vec2(rawX * scale, rawY * scale);
         }
       } else {
-        eqXY = planetStaticEquirectXY(aFlatPos.xy, uRadius, uProjectionType, uMapWidth);
-        flatTargetXY = aFlatPos.xy;
+        eqXY = planetStaticEquirectXY(planetDir.y, planetFlatAbs.xy, uRadius, uMapWidth, uProjectionType);
+        flatTargetXY = planetFlatAbs.xy;
       }
 
       vec2 mapXY = mix(eqXY, flatTargetXY, uMorph);
@@ -263,10 +310,20 @@ export function enablePlanetMorphProjection(
       vec3 bentEast;
       vec3 bentNorth;
       vec3 bentUp;
-      planetBendTransform(mapXY, h, uMorph, uRadius, bentPos, bentEast, bentNorth, bentUp);
+      planetBendTransform(mapXY, (1.0 - uMorph) / uRadius, h, (1.0 - uMorph) * uRadius, bentPos, bentEast, bentNorth, bentUp);
+      if (uProjMode > 0.5) {
+        bentPos = planetMapFrameToBody(bentPos, uProjRight, uProjUp, uProjForward);
+        bentEast = planetMapFrameToBody(bentEast, uProjRight, uProjUp, uProjForward);
+        bentNorth = planetMapFrameToBody(bentNorth, uProjRight, uProjUp, uProjForward);
+        bentUp = planetMapFrameToBody(bentUp, uProjRight, uProjUp, uProjForward);
+      }
+      // Back to the local (possibly patch-relative) frame. At morph 0 keep the baked sphere point
+      // bit-exact (the bend reproduces it only to float precision at planet scale).
+      bentPos = uMorph < 1e-4 ? aSpherePos : bentPos - planetBodyShift;
 
       vec3 bentReliefNorm = dynFlatNorm.x * bentEast + dynFlatNorm.y * bentNorth + dynFlatNorm.z * bentUp;
-      vec3 morphedNormal = normalize(mix(dynSphereNorm, bentReliefNorm, uMorph));
+      vec3 planetBlendedNorm = mix(dynSphereNorm, bentReliefNorm, uMorph);
+      vec3 morphedNormal = length(planetBlendedNorm) > 1e-4 ? normalize(planetBlendedNorm) : bentReliefNorm;
       vec3 objectNormal = morphedNormal;
       vSphereNorm = dynSphereNorm;
       #ifdef USE_TANGENT
@@ -281,8 +338,7 @@ export function enablePlanetMorphProjection(
       float seamCull = 0.0;
 
       if (uProjMode > 0.5) {
-        vec3 dir = aSphereNorm;
-        float dotUp = dot(dir, uProjUp);
+        vec3 dir = planetDir;
         float pLon = seamProjectedLon(dir, uProjForward, uProjRight);
 
         if (length(aOtherDir1) > 0.001 && length(aOtherDir2) > 0.001) {
@@ -322,26 +378,44 @@ export function enablePlanetMorphProjection(
         varying float vProjMode;
         varying float vMorph;
         varying float vSeamCull;
+        varying vec3 vPlanetRadialDir;
+        uniform vec3 uProjForward;
+        uniform vec3 uProjUp;
+        uniform vec3 uProjRight;
         #ifndef V_SPHERE_NORM_DECLARED
         #define V_SPHERE_NORM_DECLARED
         varying vec3 vSphereNorm;
         #endif
+        ${SEAM_GLSL_FUNCTIONS}
       ` + shader.fragmentShader;
     }
 
+    // Seam-spanning triangles in tracked (dynamic) mode. Indexed streaming tiles carry no
+    // aOtherDir1/2, so besides the vertex-side cull and the fwidth test (which only catches
+    // triangles a few pixels wide), compare the interpolated projected longitude with the
+    // longitude of the interpolated radial direction: across a triangle spanning the antimeridian
+    // they part by up to a full turn, inside an ordinary one they agree to hundredths of a radian.
+    // The projection's polar cap, where longitude changes fast, is exempt. Mirrors the TSL graph.
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <dithering_fragment>',
       `
       #include <dithering_fragment>
-      if (vProjMode > 0.5 && vMorph > 0.001 && (vSeamCull > 0.5 || fwidth(vProjLon) > 2.8)) {
-        discard;
+      float planetLonFw = fwidth(vProjLon);
+      if (vProjMode > 0.5 && vMorph > 0.001) {
+        vec3 planetFragDir = normalize(vPlanetRadialDir);
+        float planetTrueLon = seamProjectedLon(planetFragDir, uProjForward, uProjRight);
+        bool planetLonMismatch = abs(vProjLon - planetTrueLon) > ${SEAM_LON_MISMATCH_GLSL} &&
+          abs(dot(planetFragDir, uProjUp)) < ${SEAM_POLE_EXEMPT_GLSL};
+        if (vSeamCull > 0.5 || planetLonMismatch || planetLonFw > 2.8) {
+          discard;
+        }
       }
       `,
     );
   };
 
   material.customProgramCacheKey = () =>
-    `${previousCacheKey()}|planetMorphProjection`;
+    `${previousCacheKey()}|planetMorphProjection${uniforms.uBodyCentreScene ? ':bodyShift' : ''}`;
   material.needsUpdate = true;
 }
 
@@ -699,7 +773,7 @@ export function createPlanetBorderMorphMaterial(
 
           flatTargetXY = vec2(flatX, flatY);
         } else {
-          eqXY = planetStaticEquirectXY(aFlatPos.xy, uRadius, uProjectionType, uMapWidth);
+          eqXY = planetStaticEquirectXY(normalize(aSpherePos).y, aFlatPos.xy, uRadius, uMapWidth, uProjectionType);
           flatTargetXY = aFlatPos.xy;
         }
 
@@ -708,7 +782,10 @@ export function createPlanetBorderMorphMaterial(
         vec3 bE;
         vec3 bN;
         vec3 bU;
-        planetBendTransform(mapXY, h, uMorph, uRadius, morphedPos, bE, bN, bU);
+        planetBendTransform(mapXY, (1.0 - uMorph) / uRadius, h, (1.0 - uMorph) * uRadius, morphedPos, bE, bN, bU);
+        if (uProjMode > 0.5) {
+          morphedPos = planetMapFrameToBody(morphedPos, uProjRight, uProjUp, uProjForward);
+        }
 
         vMorph = uMorph;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(morphedPos, 1.0);
@@ -851,7 +928,7 @@ export function createPlanetCellOverlayMaterial(
 
           flatTargetXY = vec2(flatX, flatY);
         } else {
-          eqXY = planetStaticEquirectXY(aFlatPos.xy, uRadius, uProjectionType, uMapWidth);
+          eqXY = planetStaticEquirectXY(normalize(aSpherePos).y, aFlatPos.xy, uRadius, uMapWidth, uProjectionType);
           flatTargetXY = aFlatPos.xy;
         }
 
@@ -860,7 +937,10 @@ export function createPlanetCellOverlayMaterial(
         vec3 bE;
         vec3 bN;
         vec3 bU;
-        planetBendTransform(mapXY, h, uMorph, uRadius, morphedPos, bE, bN, bU);
+        planetBendTransform(mapXY, (1.0 - uMorph) / uRadius, h, (1.0 - uMorph) * uRadius, morphedPos, bE, bN, bU);
+        if (uProjMode > 0.5) {
+          morphedPos = planetMapFrameToBody(morphedPos, uProjRight, uProjUp, uProjForward);
+        }
 
         vMorph = uMorph;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(morphedPos, 1.0);
@@ -990,43 +1070,22 @@ export function createPlanetMapBorderMaterial(
         vec2 flatTargetXY;
         float h = mix(length(aSpherePos) - uRadius, aFlatPos.z, uMorph);
 
-        if (uProjMode > 0.5) {
-          vec3 rotatedNorm = aSphereNorm.x * uProjRight + aSphereNorm.y * uProjUp + aSphereNorm.z * uProjForward;
-          float dotUp = dot(rotatedNorm, uProjUp);
-          float pLon = seamProjectedLon(rotatedNorm, uProjForward, uProjRight);
-          float pLat = asin(clamp(dotUp, -1.0, 1.0));
-          eqXY = vec2((pLon / 3.141592653589793) * (uRadius * 3.141592653589793), pLat * uRadius);
-
-          if (uProjectionType < 0.5) {
-            flatTargetXY = eqXY;
-          } else {
-            float EE_M = 0.8660254037844386;
-            float EE_A1 = 1.340264;
-            float EE_A2 = -0.081106;
-            float EE_A3 = 0.000893;
-            float EE_A4 = 0.003796;
-            float EE_RAW_X_MAX = 2.7066299836960748;
-
-            float theta = asin(clamp(EE_M * sin(pLat), -1.0, 1.0));
-            float theta2 = theta * theta;
-            float theta6 = theta2 * theta2 * theta2;
-            float rawX = (pLon * cos(theta)) / (EE_M * (EE_A1 + 3.0 * EE_A2 * theta2 + theta6 * (7.0 * EE_A3 + 9.0 * EE_A4 * theta2)));
-            float rawY = theta * (EE_A1 + EE_A2 * theta2 + theta6 * (EE_A3 + EE_A4 * theta2));
-
-            float scale = uMapWidth / (2.0 * EE_RAW_X_MAX);
-            flatTargetXY = vec2(rawX * scale, rawY * scale);
-          }
-        } else {
-          eqXY = planetStaticEquirectXY(aFlatPos.xy, uRadius, uProjectionType, uMapWidth);
-          flatTargetXY = aFlatPos.xy;
-        }
+        // The frame is built in the map frame (its lon/lat are the map's own), so the baked flat
+        // position is its target in either mode; tracked mode only turns the result into the
+        // tracked basis below. Re-projecting it in the shader put its antimeridian edges on the
+        // seam, where the longitude sign is ambiguous, and stretched them across the map.
+        eqXY = planetStaticEquirectXY(normalize(aSpherePos).y, aFlatPos.xy, uRadius, uMapWidth, uProjectionType);
+        flatTargetXY = aFlatPos.xy;
 
         vec2 mapXY = mix(eqXY, flatTargetXY, uMorph);
         vec3 morphedPos;
         vec3 bE;
         vec3 bN;
         vec3 bU;
-        planetBendTransform(mapXY, h, uMorph, uRadius, morphedPos, bE, bN, bU);
+        planetBendTransform(mapXY, (1.0 - uMorph) / uRadius, h, (1.0 - uMorph) * uRadius, morphedPos, bE, bN, bU);
+        if (uProjMode > 0.5) {
+          morphedPos = planetMapFrameToBody(morphedPos, uProjRight, uProjUp, uProjForward);
+        }
 
         gl_Position = projectionMatrix * modelViewMatrix * vec4(morphedPos, 1.0);
         #include <logdepthbuf_vertex>

@@ -48,6 +48,7 @@ import { MAP_PROJECTIONS, MapProjectionKind } from '../map-projections';
 import {
   buildOceanMorphGeometry,
   buildPlanetMorphGeometry,
+  bendPlanetSurfacePoint,
   evaluateSurfaceTransform,
   IPlanetMorphGeometryData,
   ISurfaceTransform,
@@ -561,38 +562,36 @@ export class CellPlanetMorphViewComponent
     const flatArray = flat.array as Float32Array;
     const positionArray = position.array as Float32Array;
 
+    // Mirror the material's bent-planet morph so picking hits the surface actually drawn.
+    const radius = this.radius();
+    const isEqualEarth = this.projectionKind() === 'equalEarth';
+    const sphereScratch = new Vector3();
+    const flatScratch = new Vector3();
+    const out = new Vector3();
     for (let i = 0; i < positionArray.length; i += 3) {
-      const sx = sphereArray[i];
-      const sy = sphereArray[i + 1];
-      const sz = sphereArray[i + 2];
-      const fx = flatArray[i];
-      const fy = flatArray[i + 1];
-      const fz = flatArray[i + 2];
-
-      let flatX = fx;
-      let flatY = fy;
-
+      sphereScratch.set(sphereArray[i], sphereArray[i + 1], sphereArray[i + 2]);
       if (basis) {
-        // Mirror the shader's dynamic-basis reprojection: re-derive lon/lat in the tracking
-        // frame, then re-project so picking agrees with a recentered map.
-        const nx = sphereNormArray[i];
-        const ny = sphereNormArray[i + 1];
-        const nz = sphereNormArray[i + 2];
-        const dotFwd =
-          nx * basis.forward.x + ny * basis.forward.y + nz * basis.forward.z;
-        const dotRight =
-          nx * basis.right.x + ny * basis.right.y + nz * basis.right.z;
-        const dotUp = nx * basis.up.x + ny * basis.up.y + nz * basis.up.z;
-        const pLon = Math.atan2(dotRight, dotFwd);
-        const pLat = Math.asin(Math.max(-1, Math.min(1, dotUp)));
-        const proj = projection.project(pLon, pLat, mapWidth, mapHeight);
-        flatX = (proj.x / mapWidth - 0.5) * mapWidth;
-        flatY = -(proj.y / mapHeight - 0.5) * mapHeight;
+        // Dynamic basis: re-derive lon/lat in the tracking frame and bend there, as the shader does.
+        const sphereLength = sphereScratch.length();
+        const transform = evaluateSurfaceTransform(
+          { x: sphereNormArray[i], y: sphereNormArray[i + 1], z: sphereNormArray[i + 2] },
+          (1 - morph) * (sphereLength - radius) + morph * flatArray[i + 2],
+          radius,
+          1,
+          projection,
+          mapWidth,
+          mapHeight,
+          morph,
+          basis,
+        );
+        out.copy(transform.position);
+      } else {
+        flatScratch.set(flatArray[i], flatArray[i + 1], flatArray[i + 2]);
+        bendPlanetSurfacePoint(sphereScratch, flatScratch, radius, morph, mapWidth, isEqualEarth, out);
       }
-
-      positionArray[i] = sx + (flatX - sx) * morph;
-      positionArray[i + 1] = sy + (flatY - sy) * morph;
-      positionArray[i + 2] = sz + (fz - sz) * morph;
+      positionArray[i] = out.x;
+      positionArray[i + 1] = out.y;
+      positionArray[i + 2] = out.z;
     }
 
     position.needsUpdate = true;

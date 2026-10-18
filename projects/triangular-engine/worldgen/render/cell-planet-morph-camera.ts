@@ -147,7 +147,7 @@ export class CellPlanetMorphCameraRig {
     const mapY = (1 - t) * eqY + t * flatY;
     const k = (1 - t) / Math.max(radius, 1e-6);
     const zCenterShift = (1 - t) * radius;
-    const bent = evaluateBentTransform(mapX, mapY, k, 0, zCenterShift, out.position);
+    const bent = evaluateBentTransform(mapX, mapY, k, 0, zCenterShift, this.scratch);
 
     out.position
       .copy(basis.right)

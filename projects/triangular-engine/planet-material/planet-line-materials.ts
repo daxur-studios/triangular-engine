@@ -10,6 +10,7 @@ import {
   length,
   max,
   mix,
+  normalize,
   select,
   smoothstep,
   uniform,
@@ -19,7 +20,7 @@ import {
   vec3,
   vec4,
 } from 'three/tsl';
-import type { IPlanetMorphUniforms } from './planet-morph-nodes';
+import { planetBentSurfaceNodes, type IPlanetMorphUniforms } from './planet-morph-nodes';
 import {
   equalEarthFlat,
   equirectangularFlat,
@@ -103,14 +104,21 @@ export function planetBorderMaterial(
     flat = select(ribbonWidth.greaterThan(0.0001).and(dLen.greaterThan(0.00001)), flat.add(offset), flat);
   }
 
-  const dynFlatPos = vec3(flat.x, flat.y, aFlatPos.z);
-  const flatPos = select(dynamic, dynFlatPos, aFlatPos);
-  const position = mix(aSpherePos, flatPos, u.uMorph);
+  // Bent-planet morph, like the terrain (geometry is body-fixed: the planet's centre at the origin).
+  const flatTarget = select(dynamic, flat, aFlatPos.xy);
+  const position = planetBentSurfaceNodes(uniforms, {
+    sphere: aSpherePos,
+    dir: normalize(aSpherePos),
+    flatXY: flatTarget,
+    flatHeight: aFlatPos.z,
+    projLon: pLon,
+    projLat: pLat,
+  }).pos;
 
   const vProjLon: any = varying(select(dynamic, pLon, float(0)), 'vBorderProjLon');
   const crosses = seamEdgeCrosses(aSphereNorm, aOtherDir, u.uProjForward, u.uProjRight);
   const vCull: any = varying(select(dynamic.and(crosses), float(1), float(0)), 'vBorderSeamCull');
-  const cullActive = dynamic.and(u.uMorph.greaterThan(0.001));
+  const cullActive = dynamic.and(u.uMorph.greaterThan(0.05));
   // `fwidth` is evaluated unconditionally (WGSL: derivatives only in uniform control flow).
   const fw = vProjLon.fwidth().toVar();
   const hidden = cullActive.and(vCull.greaterThan(0.5).or(fw.greaterThan(2.8)));
@@ -155,7 +163,7 @@ const STYLE_CODES: Record<PlanetMapBorderStyle, number> = { simple: 0, cartograp
 
 /**
  * The flat-map frame that fades in as the globe unrolls. A port of `createPlanetMapBorderMaterial`.
- * Reads `aSpherePos`, `aFlatPos`, `aSphereNorm`, `aTick` and `uv`.
+ * Reads `aSpherePos`, `aFlatPos`, `aTick` and `uv`.
  */
 export function planetMapBorderMaterial(
   uniforms: IPlanetMorphUniforms,
@@ -170,17 +178,17 @@ export function planetMapBorderMaterial(
 
   const aSpherePos = attribute('aSpherePos', 'vec3' as const);
   const aFlatPos = attribute('aFlatPos', 'vec3' as const);
-  const aSphereNorm = attribute('aSphereNorm', 'vec3' as const);
   const aTick = attribute('aTick', 'float' as const);
 
-  // Dynamic basis: re-express the sphere point in the tracked frame, keeping its displaced radius.
-  const rotated = u.uProjRight
-    .mul(aSphereNorm.x)
-    .add(u.uProjUp.mul(aSphereNorm.y))
-    .add(u.uProjForward.mul(aSphereNorm.z));
-  const centre = vec3(0, 0, u.uRadius);
-  const rDisplaced = length(aSpherePos.add(centre));
-  const sphere = select(u.uProjMode.greaterThan(0.5), rotated.mul(rDisplaced).sub(centre), aSpherePos);
+  // The frame is built in the map frame (body-fixed geometry, planet centre at the origin), so its baked flat
+  // position is the target in both modes; dynamic mode only turns the bent result into the tracked basis.
+  const sphereDir = normalize(aSpherePos);
+  const position = planetBentSurfaceNodes(uniforms, {
+    sphere: aSpherePos,
+    dir: sphereDir,
+    flatXY: aFlatPos.xy,
+    flatHeight: aFlatPos.z,
+  }).pos;
 
   const vUv: any = varying(uv(), 'vMapBorderUv');
   const vTick: any = varying(aTick, 'vMapBorderTick');
@@ -208,7 +216,7 @@ export function planetMapBorderMaterial(
   const alpha: any = select(style.lessThan(0.5), opacity.mul(fade), select(style.lessThan(1.5), cartoAlpha, tacticalAlpha));
 
   const material = new MeshBasicNodeMaterial();
-  material.positionNode = mix(sphere, aFlatPos, u.uMorph);
+  material.positionNode = position;
   material.colorNode = vec4(rgb, alpha);
   material.maskNode = fade.greaterThan(0.001);
   material.transparent = true;
@@ -224,6 +232,6 @@ export function planetMapBorderMaterial(
     style,
     fadeStart,
     fadeEnd,
-    vertexAttributes: ['aSpherePos', 'aFlatPos', 'aSphereNorm', 'aTick', 'uv'],
+    vertexAttributes: ['aSpherePos', 'aFlatPos', 'aTick', 'uv'],
   };
 }

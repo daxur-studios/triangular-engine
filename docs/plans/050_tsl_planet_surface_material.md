@@ -14,6 +14,7 @@ three **0.186.1**. Phase 1 built and its visual gate passed (user, 2026-10-16). 
 the Phase 2 and 3 gates (pixel parity against the GLSL demo; "shows everything the GLSL demo shows") and the Phase 4 demo
 check are still open (need a visible window). Open issue, not a blocker: the batching toggle halves WebGL frame rate in
 `cell-planet-tsl` (see the runbook).
+The Phase 4 page `/planet-material-extensions` has runnable functional and diagnostic suites (`triangular-engine/testing`; launch links in the runbook's 2026-10-18 entry); acceptance of its appearance is still open.
 [Plan 049](/docs/plans/049_morphing_planet_atmosphere.md) (atmosphere) builds on it. Evidence: [Runbook 050](/docs/runbook/050_tsl_planet_surface_material.md).
 
 **Goal:** the `/cell-planet-morph-streaming` surface, rebuilt as one TSL `NodeMaterial` with a stable

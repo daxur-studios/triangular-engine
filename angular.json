@@ -246,7 +246,8 @@
         "serve": {
           "builder": "@angular/build:dev-server",
           "options": {
-            "port": 4222
+            "port": 4222,
+            "proxyConfig": "projects/demo-app/proxy.conf.cjs"
           },
           "configurations": {
             "production": {

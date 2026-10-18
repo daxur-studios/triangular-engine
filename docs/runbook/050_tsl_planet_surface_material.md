@@ -527,3 +527,82 @@ stays exact mid-morph and the map's corners stop curling up. For this material t
 `morphShape: 'bend' | 'linear'`, bent normals, a seam cull from the first bend, new patch bounds and a CPU twin
 of `bend()`. See Plan 050 §Morph shape: bend and Runbook 049's 2026-10-18 entry. Nothing is built yet; it
 follows Plan 049's lab spike (Phase 3a).
+
+## 2026-10-18 — Repeatable tests for `/planet-material-extensions` (`triangular-engine/testing`)
+
+The Phase 4 reference page now hosts the shared `<tri-test-runner>`. Rendering and materials are unchanged; the page only gained
+the runner, a locked `fieldset` around its controls, and `applyRoad` / `applyEclipse` / `applyLights` / `applySunDegrees` /
+`applyMoonDegrees` (the DOM handlers now just read the control and call them).
+
+### What exists
+- `planet-material-extensions/planet-material-extensions-tests.ts`: the suites, oldest first. Settings are fully resolved JSON
+  (toggles, sun and moon angles, camera position and target as numbers, orbit sweep, control locks).
+  - `planet-material-extensions-features` v1 (functional, `requiresVisualReview`): all features on; plain sphere; road only;
+    eclipse only with the moon on the sun axis and 40 degrees off it; night lights with the night side facing the camera; a 360 degree
+    camera orbit with everything on.
+  - `planet-material-extensions-cost` v1 (performance, `requiresVisualReview`): baseline day and night; each slot removed in turn;
+    plain; a 6 s 360 degree orbit with all slots and with none.
+- `planet-material-extensions-test-adapter.ts`: the adapter, the host interface and the pure helpers (`orbitPose`,
+  `sceneMismatches`, `stackMismatches`, `orbitTraceProblems`).
+- The page implements the host through its own actions. While a run is active it locks the panel (`fieldset.test-lock`), turns off
+  `zoomToCursor` and disables the orbit controls (so a pointer cannot fight the scripted pose, and cursor-zoom cannot steer the
+  target). It restores toggles, angles, camera position, target, up vector, `enabled` and `enableDamping` on every exit path. Every
+  finished run, failed and cancelled ones too, is kept in memory and in `localStorage` (`planet-material-extensions:test-results`).
+- Specs: `planet-material-extensions-test-adapter.spec.ts` (17, fake host, headless) and
+  `tests/scene/specs/planet-material-extensions-runner.spec.ts` (3, Playwright, real page).
+
+### Readiness and checks
+Readiness is not a sleep: the renderer is initialised, `renderer.compileAsync` has finished (so a toggled slot's program compile is not
+measured), the page state and the material's `stackKey` both match the scenario, the camera is at the scenario pose, and the state has
+held for three more completed renders. Checks: scene settings applied; the compiled stack names exactly the enabled slots (read from
+`PlanetSurfaceMaterial.stackKey`, not the page's flags); at least two renders in the window (a static window is held open to three,
+up to 20 s, so a slow renderer cannot pass or fail on an empty window); the planet drawn in the last frame (at least 16,000
+triangles); camera at its pose, or the orbit complete (monotonic, ends at fraction 1, end pose exact); controls locked; the requested
+backend is the one running; no engine error, window error, unhandled rejection or `console.error` (three.js logs shader and pipeline
+failures there).
+
+Metrics: `frameInterval` (required: deltas of `renderComplete$` timestamps) and `gpuFrameTime` (optional, always unavailable: the page
+does not enable the engine `gpuTiming` option). `FrameSampler` CPU and wall medians, triangles, draw calls and the stack key go in each
+case's details. The environment names the backend actually running, the GPU string (WebGL debug info or WebGPU adapter info),
+`softwareRenderer` (`null` when the device is unknown) and `automated`.
+
+### Run it
+- Functional, human-observed: [features v1](http://triangular-demo.localhost:4200/planet-material-extensions?testSuite=planet-material-extensions-features&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1)
+- Diagnostic measurements (not an accepted baseline), visible window: [cost v1](http://triangular-demo.localhost:4200/planet-material-extensions?testSuite=planet-material-extensions-cost&testVersion=1&testProfile=visible-browser&testRepetitions=3&testAutoStart=1)
+  The scenario windows alone add up to about 38 s per repetition (estimate; readiness comes on top), against the runner's fixed 180 s
+  limit. The SwiftShader run measured 1.0 to 1.6 min per repetition, so 3 repetitions would not fit there.
+- Same on the WebGL2 fallback: add `&backend=webgl2`. The check "Requested renderer backend in use" fails if the request was not honoured.
+- Headless: `npx playwright test -c playwright.runner.config.ts planet-material-extensions-runner`. It writes
+  `artifacts/test-runner/planet-material-extensions-{features,cost,cost-cancelled}.json` (full result JSON) and the before/after PNGs of
+  the cancel test.
+
+### Results (headless Chromium, SwiftShader, `?backend=webgl2`, 1 repetition, 2026-10-18)
+- Adapter specs 17/17; `test:triangular-engine:testing` 20/20; library build passes; Playwright 3/3.
+- Features v1: 7/7 cases completed, every check passed, `automatedVerdict` pass, `visualReview` pending.
+- Cost v1: 8/8 cases completed, every check passed, `performanceVerdict` inconclusive (software renderer, fewer than 60 frames per
+  window, cadence 180 to 260 ms per frame). Median frame intervals 183 to 232 ms with no consistent ordering between the slot cases
+  (single run, 12 to 33 frames each): this says nothing about slot cost.
+- Cancel: cancelled in the first orbit. The result (status `cancelled`, six completed cases and the cancelled one) was retained, the
+  planet region is pixel-identical before the run and after cancellation, and the panel controls are enabled again.
+
+### Not done / limits
+- Nobody has looked at either suite on real hardware: these are runnable links, not the review. `visualReview` acceptance stays with the maintainer.
+- No GPU time: the page does not enable `gpuTiming` (an engine option set at load). A hardware cost run needs it before slot cost can
+  be separated from display cadence; a scene lighter than the refresh interval reads as the refresh interval.
+- The WebGPU backend was not run headless (SwiftShader offers WebGL only); only `?backend=webgl2` has run.
+- Pre-existing, not caused by the runner: the moon's plain `PlanetSurfaceMaterial` on a `SphereGeometry` logs the warning
+  `THREE.AttributeNode: Vertex attribute "aFlatPos" not found on geometry` (a warning, so the console-error check ignores it).
+- Playwright shares the dev server with other sessions. A rebuild from someone else's edit reloads the page and ends the run in
+  progress; the spec now reports a reload as the cause. One intermittent failure was seen before that guard existed; a reload is the
+  suspected cause (other files under `planet-material` and `worldgen/render` changed during that run), not proven.
+
+### Proposed shared-runner improvements (for review; nothing changed in `triangular-engine/testing`)
+1. A configurable run timeout (suite field or component input): the fixed 180 s cannot be raised from the panel or a launch link, so a
+   cost suite at 5 repetitions times out.
+2. The same helpers now exist in the morph streaming, atmosphere lab and this adapter: waiting for N completed renders, the
+   stall-watchdog path driver, renderer and GPU identification with the software-renderer test, the window, rejection and
+   `console.error` watcher, hidden and blur invalidation of the frame sampler, and the Playwright result reader. Candidates for a
+   framework-free helper set in the testing entry.
+3. `buildFingerprint` is always `'unknown'`; a build stamp would let results be tied to a build.
+4. `(completed)` fires again for a review verdict, so a host that retains results has to de-duplicate by `runId` (done here).
+5. No per-scenario image in the result (already noted for the atmosphere lab).

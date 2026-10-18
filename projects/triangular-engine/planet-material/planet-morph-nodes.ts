@@ -4,9 +4,11 @@ import {
   attribute,
   cameraPosition,
   clamp,
+  cos,
   dot,
   float,
   length,
+  max,
   mix,
   modelWorldMatrix,
   normalGeometry,
@@ -15,9 +17,11 @@ import {
   positionLocal,
   positionWorld,
   select,
+  sin,
   transformNormalToView,
   uniform,
   varying,
+  vec2,
   vec3,
   vec4,
 } from 'three/tsl';
@@ -128,22 +132,23 @@ export interface IPlanetMorphGraphOptions {
    * A `mat3` uniform (`IPlanetMorphLightingUniforms.uMorphLightingTurn`). When set, the shading normal is
    * the sphere normal turned by it, not the morphed normal, so a flat map keeps its relief and sun angle.
    */
+  readonly lightingTurn?: unknown;
   /** Shape interpolation mode: 'bend' (default, curvature-based) or 'linear' (Cartesian mix). */
   readonly morphShape?: 'bend' | 'linear';
 }
 
 const tslSinc = (a: any): any => {
   const a2 = a.mul(a);
-  return select(a2.lessThan(1e-6), float(1).sub(a2.div(6)), a.sin().div(a));
+  return select(a2.lessThan(1e-6), float(1).sub(a2.div(6)), sin(a).div(a));
 };
 
 const tslPlanetStaticEquirectXY = (
+  dirY: any,
   flatPos: any,
   radius: any,
   projType: any,
   mapWidth: any,
 ): any => {
-  const HALF_PI = Math.PI * 0.5;
   const EE_M = 0.8660254037844386;
   const EE_A1 = 1.340264;
   const EE_A2 = -0.081106;
@@ -151,9 +156,9 @@ const tslPlanetStaticEquirectXY = (
   const EE_A4 = 0.003796;
   const EE_RAW_X_MAX = 2.7066299836960748;
 
-  const lat = flatPos.y.div(float(HALF_PI).mul(radius)).clamp(-1, 1).mul(HALF_PI);
-  const sinLat = lat.sin();
-  const theta = clamp(sinLat.mul(EE_M), -1, 1).asin();
+  const sinLat: any = clamp(dirY, -1, 1);
+  const lat: any = asin(sinLat as any);
+  const theta = asin(clamp(sinLat.mul(EE_M), -1, 1));
   const theta2 = theta.mul(theta);
   const theta6 = theta2.mul(theta2).mul(theta2);
   const denom = theta6
@@ -161,13 +166,18 @@ const tslPlanetStaticEquirectXY = (
     .add(theta2.mul(3 * EE_A2))
     .add(EE_A1)
     .mul(EE_M);
-  const eeXPerLon = theta.cos().div(denom);
+  const eeXPerLon = cos(theta).div(denom);
   const scale = float(mapWidth).div(2 * EE_RAW_X_MAX);
   const rawX = flatPos.x.div(scale);
   const eeLon = rawX.div(max(eeXPerLon, 1e-6));
+  const eeY = theta
+    .mul(theta6.mul(theta2.mul(EE_A4).add(EE_A3)).add(theta2.mul(EE_A2)).add(EE_A1))
+    .mul(scale);
 
+  // Same as the GLSL `planetStaticEquirectXY` and the CPU `recoverStaticEquirectXY`: the baked flat y's offset
+  // from the projected latitude row is carried over, so geometry nudged off its row in the map stays nudged.
   const eqX = select(projType.lessThan(0.5), flatPos.x, eeLon.mul(radius));
-  const eqY = select(projType.lessThan(0.5), flatPos.y, lat.mul(radius));
+  const eqY = select(projType.lessThan(0.5), flatPos.y, lat.mul(radius).add(flatPos.y.sub(eeY)));
   return vec2(eqX, eqY);
 };
 
@@ -181,13 +191,13 @@ const tslPlanetBendTransform = (
   const zCenterShift = float(1).sub(clamp(morph, 0, 1)).mul(radius);
   const kx = k.mul(mapXY.x);
   const ky = k.mul(mapXY.y);
-  const cx = kx.cos();
-  const sx = kx.sin();
-  const cy = ky.cos();
-  const sy = ky.sin();
-  const outEast = vec3(cx, float(0), sx.negate());
-  const outNorth = vec3(sy.negate().mul(sx), cy, sy.negate().mul(cx));
-  const outUp = vec3(cy.mul(sx), sy, cx.mul(cy));
+  const cx = cos(kx);
+  const sx = sin(kx);
+  const cy = cos(ky);
+  const sy = sin(ky);
+  const outEast = vec3(cx as any, float(0), sx.negate() as any);
+  const outNorth = vec3(sy.negate().mul(sx) as any, cy as any, sy.negate().mul(cx) as any);
+  const outUp = vec3(cy.mul(sx) as any, sy as any, cx.mul(cy) as any);
   const sincHalfX = tslSinc(float(0.5).mul(kx));
   const sincHalfY = tslSinc(float(0.5).mul(ky));
   const z = float(-0.5)
@@ -199,12 +209,63 @@ const tslPlanetBendTransform = (
     .sub(cx.mul(0.5).mul(k).mul(mapXY.y).mul(mapXY.y).mul(sincHalfY).mul(sincHalfY))
     .add(zCenterShift);
   const pos = vec3(
-    cy.mul(mapXY.x).mul(tslSinc(kx)),
-    mapXY.y.mul(tslSinc(ky)),
-    z,
+    cy.mul(mapXY.x).mul(tslSinc(kx)) as any,
+    mapXY.y.mul(tslSinc(ky)) as any,
+    z as any,
   ).add(outUp.mul(height));
   return { pos, east: outEast, north: outNorth, up: outUp };
 };
+
+/** Inputs of {@link planetBentSurfaceNodes}. All positions are body-fixed: the planet's centre is the origin. */
+export interface IPlanetBentSurfaceInputs {
+  /** Sphere point (radius + height along the radial direction). */
+  readonly sphere: any;
+  /** Unit radial direction of `sphere`, never a terrain normal (that tilts with relief). */
+  readonly dir: any;
+  /** Flat-map target x/y: the baked position in static mode, the shader-projected one in dynamic mode. */
+  readonly flatXY: any;
+  /** Height above the flat map's plane. */
+  readonly flatHeight: any;
+  /** Longitude/latitude of `dir` in the tracked basis (dynamic mode only). Omit for geometry built in the map frame. */
+  readonly projLon?: any;
+  readonly projLat?: any;
+}
+
+/**
+ * The bent-planet morph shared by every TSL planet material (terrain, ocean, lines): the point bends on a sphere of
+ * curvature `(1 - morph) / R` (centre shifted forward by `(1 - morph) R`), so morph 0 is the globe and morph 1 the flat
+ * map, with every in-between shape a piece of a sphere. Mirrors the GLSL `planetBendTransform` path of
+ * `enablePlanetMorphProjection` and the CPU `bendPlanetSurfacePoint`. Returns body-frame position and ground frame.
+ */
+export function planetBentSurfaceNodes(
+  uniforms: IPlanetMorphUniforms,
+  inputs: IPlanetBentSurfaceInputs,
+): { pos: any; east: any; north: any; up: any } {
+  const u = uniforms as any;
+  const morph = u.uMorph;
+  const radius = u.uRadius;
+  const dynamic = u.uProjMode.greaterThan(0.5);
+  const statEqXY = tslPlanetStaticEquirectXY(inputs.dir.y, inputs.flatXY, radius, u.uProjectionType, u.uMapWidth);
+  // Without projected lon/lat the geometry lives in the map frame already (the map's frame): its baked coordinates
+  // hold in both modes, and only the final turn into the tracked basis differs.
+  const eqXY =
+    inputs.projLon !== undefined && inputs.projLat !== undefined
+      ? select(dynamic, vec2(inputs.projLon.mul(radius) as any, inputs.projLat.mul(radius) as any), statEqXY)
+      : statEqXY;
+  const mapXY = mix(eqXY, inputs.flatXY, morph);
+  const h = mix(length(inputs.sphere).sub(radius), inputs.flatHeight, morph);
+  const bent = tslPlanetBendTransform(mapXY, h, morph, radius);
+  // Dynamic mode bends in the tracked basis' map frame (x right, y up, z forward): turn the result back into body
+  // axes, so morph 0 is the body-fixed globe and the flat map lies tangent at the tracked point. Same as the GLSL
+  // `planetMapFrameToBody` and `CellPlanetMorphCameraRig`.
+  const toBody = (v: any): any => u.uProjRight.mul(v.x).add(u.uProjUp.mul(v.y)).add(u.uProjForward.mul(v.z));
+  return {
+    pos: select(dynamic, toBody(bent.pos), bent.pos),
+    east: select(dynamic, toBody(bent.east), bent.east),
+    north: select(dynamic, toBody(bent.north), bent.north),
+    up: select(dynamic, toBody(bent.up), bent.up),
+  };
+}
 
 /** Everything stage 1 computes. Position nodes are vertex-stage; the varyings are readable in the fragment stage. */
 export interface IPlanetMorphGraph {
@@ -324,20 +385,27 @@ export function planetMorphGraph(
     const blendedLength = length(blendedNormal);
     morphedNormal = select(blendedLength.greaterThan(1e-4), blendedNormal.div(blendedLength), flatNorm);
   } else {
-    const dynEqXY = vec2(projLon.mul(uniforms.uRadius), projLat.mul(uniforms.uRadius));
-    const statEqXY = tslPlanetStaticEquirectXY(aFlatPos.xy, uniforms.uRadius, projectionType, mapWidth);
-    const eqXY = select(dynamic, dynEqXY, statEqXY);
-    const mapXY = mix(eqXY, flatPos.xy, morph);
-    const h = mix(length(aSpherePos).sub(uniforms.uRadius), aFlatPos.z, morph);
-    const bent = tslPlanetBendTransform(mapXY, h, morph, uniforms.uRadius);
-    morphedLocal = bent.pos;
+    // Streamed tiles store `aSpherePos`/`aFlatPos` relative to the patch centre; the bend needs the absolute
+    // body-fixed point (curvature is about the planet centre), then the shift is taken off again.
+    const absFlat = flatPos.add(bodyShift);
+    const bent = planetBentSurfaceNodes(uniforms, {
+      sphere: aSpherePos.add(bodyShift),
+      dir,
+      flatXY: absFlat.xy,
+      flatHeight: absFlat.z,
+      projLon,
+      projLat,
+    });
+    // At morph 0 keep the baked sphere point exact (the bend reproduces it only to float precision at planet scale).
+    morphedLocal = select(morph.lessThan(1e-4), aSpherePos, bent.pos.sub(bodyShift));
     const bentReliefNorm = flatNorm.x
       .mul(bent.east)
       .add(flatNorm.y.mul(bent.north))
       .add(flatNorm.z.mul(bent.up));
     const blendedNormal = mix(aSphereNorm, bentReliefNorm, morph);
     const blendedLength = length(blendedNormal);
-    morphedNormal = select(blendedLength.greaterThan(1e-4), blendedNormal.div(blendedLength), bentReliefNorm);
+    const normalizedBlended = select(blendedLength.greaterThan(1e-4), blendedNormal.div(blendedLength), bentReliefNorm);
+    morphedNormal = select(morph.lessThan(1e-4), aSphereNorm, normalizedBlended);
   }
 
   const vProjLon: any = varying(select(dynamic, projLon, float(0)), 'vProjLon');

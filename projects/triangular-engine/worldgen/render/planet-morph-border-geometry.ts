@@ -186,7 +186,7 @@ export function buildPlanetMorphBorderGeometry(
     const innerSphere = new Vector3(
       dirX * innerDisplacedR,
       dirY * innerDisplacedR,
-      dirZ * innerDisplacedR - radius,
+      dirZ * innerDisplacedR,
     );
     const innerNormSphere = new Vector3(dirX, dirY, dirZ).normalize();
 
@@ -200,7 +200,7 @@ export function buildPlanetMorphBorderGeometry(
     const outerSphere = new Vector3(
       outerNormSphere.x * outerDisplacedR,
       outerNormSphere.y * outerDisplacedR,
-      outerNormSphere.z * outerDisplacedR - radius,
+      outerNormSphere.z * outerDisplacedR,
     );
 
     pairs.push({
@@ -354,7 +354,7 @@ export function evaluateTopBorderTrack(
   const spherePos = new Vector3(
     dir.x * rDisplaced,
     dir.y * rDisplaced,
-    dir.z * rDisplaced - radius,
+    dir.z * rDisplaced,
   );
 
   const position = new Vector3().lerpVectors(spherePos, flatPos, morphProgress);
@@ -394,7 +394,7 @@ export function evaluateLeftBorderTrack(
   const spherePos = new Vector3(
     dir.x * rDisplaced,
     dir.y * rDisplaced,
-    dir.z * rDisplaced - radius,
+    dir.z * rDisplaced,
   );
 
   const position = new Vector3().lerpVectors(spherePos, flatPos, morphProgress);

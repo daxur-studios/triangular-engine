@@ -31,6 +31,14 @@ export interface ICellPlanetMorphRaycastOptions {
   readonly projection?: () => 'equirectangular' | 'equalEarth';
   readonly spherePositionAttribute?: string;
   readonly flatPositionAttribute?: string;
+  /**
+   * The planet's centre in scene space, for tiles whose `aSpherePos`/`aFlatPos` are stored relative to
+   * their patch centre (generated with a render origin) and placed by the batch translation. The bend
+   * is curved about the planet's centre, so each instance's body-fixed offset is its world
+   * translation minus this. Omit when the attributes are body-fixed (the default worker output).
+   * Same assumption as the material's `uBodyCentreScene`: an unrotated patch group.
+   */
+  readonly bodyCenterSceneM?: () => readonly [number, number, number];
 }
 
 /**
@@ -54,6 +62,7 @@ export function createCellPlanetMorphRaycastFocus(
 
   let cacheMorph = Number.NaN;
   let cacheRevision = -1;
+  // Keyed by instance, not geometry: with patch-relative attributes the bend depends on where the instance sits.
   let boundsByMesh = new WeakMap<BatchedMesh, Map<number, MorphRaycastBounds>>();
 
   const instanceMatrix = new Matrix4();
@@ -66,6 +75,7 @@ export function createCellPlanetMorphRaycastFocus(
   const worldBounds = new Box3();
   const tempSphere = new Vector3();
   const tempFlat = new Vector3();
+  const bodyOffset = new Vector3();
 
   const readMorphedPosition = (
     sphere: MorphRaycastAttribute,
@@ -73,6 +83,7 @@ export function createCellPlanetMorphRaycastFocus(
     index: number,
     morph: number,
     target: Vector3,
+    offset: Vector3 | undefined,
   ): Vector3 => {
     const radiusVal = options.radius ? options.radius() : 0;
     if (radiusVal > 0) {
@@ -88,6 +99,7 @@ export function createCellPlanetMorphRaycastFocus(
         mapWidthVal,
         proj === 'equalEarth',
         target,
+        offset,
       );
     }
     const inverseMorph = 1 - morph;
@@ -99,40 +111,35 @@ export function createCellPlanetMorphRaycastFocus(
     return target;
   };
 
-  const getMorphedGeometryBounds = (
+  /** Morphed local bounds of one instance's geometry (cached until the morph or the surface changes). */
+  const getMorphedInstanceBounds = (
     mesh: BatchedMesh,
+    instanceId: number,
+    geometryId: number,
     sphere: MorphRaycastAttribute,
     flat: MorphRaycastAttribute,
     morph: number,
-  ): Map<number, MorphRaycastBounds> => {
-    let boundsByGeometry = boundsByMesh.get(mesh);
-    if (!boundsByGeometry) {
-      boundsByGeometry = new Map();
-      boundsByMesh.set(mesh, boundsByGeometry);
+    offset: Vector3 | undefined,
+  ): MorphRaycastBounds | undefined => {
+    let boundsByInstance = boundsByMesh.get(mesh);
+    if (!boundsByInstance) {
+      boundsByInstance = new Map();
+      boundsByMesh.set(mesh, boundsByInstance);
     }
+    const cached = boundsByInstance.get(instanceId);
+    if (cached) return cached;
+    const range = mesh.getGeometryRangeAt(geometryId);
+    if (!range) return undefined;
 
-    const geometryIds = new Set<number>();
-    for (const instanceId of getTerrainBatchInstanceIds(mesh)) {
-      if (mesh.getVisibleAt(instanceId)) {
-        geometryIds.add(mesh.getGeometryIdAt(instanceId));
-      }
+    const bounds = new Box3().makeEmpty();
+    const end = range.vertexStart + range.vertexCount;
+    for (let vertex = range.vertexStart; vertex < end; vertex += 1) {
+      readMorphedPosition(sphere, flat, vertex, morph, a, offset);
+      bounds.expandByPoint(a);
     }
-
-    for (const geometryId of geometryIds) {
-      if (boundsByGeometry.has(geometryId)) continue;
-      const range = mesh.getGeometryRangeAt(geometryId);
-      if (!range) continue;
-
-      const bounds = new Box3().makeEmpty();
-      const end = range.vertexStart + range.vertexCount;
-      for (let vertex = range.vertexStart; vertex < end; vertex += 1) {
-        readMorphedPosition(sphere, flat, vertex, morph, a);
-        bounds.expandByPoint(a);
-      }
-      boundsByGeometry.set(geometryId, { bounds });
-    }
-
-    return boundsByGeometry;
+    const entry = { bounds };
+    boundsByInstance.set(instanceId, entry);
+    return entry;
   };
 
   const raycastMorphedTerrain = (
@@ -163,17 +170,24 @@ export function createCellPlanetMorphRaycastFocus(
         if (!sphere || !flat || !index) return;
 
         mesh.updateMatrixWorld(true);
-        const boundsByGeometry = getMorphedGeometryBounds(mesh, sphere, flat, morph);
+        const bodyCenter = options.bodyCenterSceneM?.();
 
         for (const instanceId of getTerrainBatchInstanceIds(mesh)) {
           if (!mesh.getVisibleAt(instanceId)) continue;
           const geometryId = mesh.getGeometryIdAt(instanceId);
-          const bounds = boundsByGeometry.get(geometryId);
           const range = mesh.getGeometryRangeAt(geometryId);
-          if (!bounds || !range) continue;
+          if (!range) continue;
 
           mesh.getMatrixAt(instanceId, instanceMatrix);
           worldMatrix.multiplyMatrices(mesh.matrixWorld, instanceMatrix);
+          let offset: Vector3 | undefined;
+          if (bodyCenter) {
+            offset = bodyOffset
+              .setFromMatrixPosition(worldMatrix)
+              .sub(tempSphere.set(bodyCenter[0], bodyCenter[1], bodyCenter[2]));
+          }
+          const bounds = getMorphedInstanceBounds(mesh, instanceId, geometryId, sphere, flat, morph, offset);
+          if (!bounds) continue;
           worldBounds.copy(bounds.bounds).applyMatrix4(worldMatrix);
           if (!ray.intersectsBox(worldBounds)) continue;
 
@@ -182,9 +196,9 @@ export function createCellPlanetMorphRaycastFocus(
             const ia = index.getX(i);
             const ib = index.getX(i + 1);
             const ic = index.getX(i + 2);
-            readMorphedPosition(sphere, flat, ia, morph, a).applyMatrix4(worldMatrix);
-            readMorphedPosition(sphere, flat, ib, morph, b).applyMatrix4(worldMatrix);
-            readMorphedPosition(sphere, flat, ic, morph, c).applyMatrix4(worldMatrix);
+            readMorphedPosition(sphere, flat, ia, morph, a, offset).applyMatrix4(worldMatrix);
+            readMorphedPosition(sphere, flat, ib, morph, b, offset).applyMatrix4(worldMatrix);
+            readMorphedPosition(sphere, flat, ic, morph, c, offset).applyMatrix4(worldMatrix);
 
             const triangleHit = ray.intersectTriangle(a, b, c, false, hit);
             if (!triangleHit) continue;

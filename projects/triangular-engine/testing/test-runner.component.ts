@@ -1,9 +1,12 @@
 import { DOCUMENT } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, input, OnInit, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, input, isDevMode, OnInit, output, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import type { TestMetric, TestProfile, TestProgress, TestRunAdapter, TestRunResult, TestSuite } from './test-contracts';
 import { buildTestLaunchUrl, MAX_TEST_REPETITIONS, parseTestLaunch, TEST_PROFILES, testSuiteKey, validateTestHistory } from './test-launch';
 import { TestSession } from './test-session';
+
+/** Same-origin path the dev-server proxy forwards to the result receiver. */
+export const DEFAULT_TEST_SINK_PATH = '/__triangular-test-sink';
 
 /** Portable test UI: the host supplies data and actions; this entry imports no renderer or automation client. */
 @Component({
@@ -22,6 +25,11 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   readonly externalBusy = input(false);
   /** Query selection is safe data; autostart still requires explicit application opt-in. */
   readonly allowAutoStart = input(false);
+  /**
+   * Opt-in durable save (dev only). `true` posts to the same-origin `DEFAULT_TEST_SINK_PATH`; a string is a custom URL.
+   * Each finished run, and each visual review of it, is POSTed as JSON; failure is shown, never silent.
+   */
+  readonly resultSink = input<boolean | string>(false);
   readonly progressChange = output<TestProgress | null>();
   readonly completed = output<TestRunResult<TSettings>>();
 
@@ -37,6 +45,8 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   readonly running = signal(false);
   readonly result = signal<TestRunResult<TSettings> | null>(null);
   readonly message = signal('');
+  /** Outcome of the last sink save: empty when the sink is off. */
+  readonly saveStatus = signal('');
   readonly latest = computed(() => this.suites().at(-1));
   readonly activeSuite = signal<TestSuite<TSettings> | null>(null);
   readonly resultText = computed(() => JSON.stringify(this.result(), null, 2));
@@ -107,6 +117,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
         const withLink = { ...result, rerunUrl: buildTestLaunchUrl(this.doc.location.href, result.suite, options.profile, options.repetitions) };
         this.result.set(withLink);
         this.completed.emit(withLink);
+        void this.saveResult(withLink);
       }
     } catch (error) {
       if (!this.destroyed) this.message.set(error instanceof Error ? error.message : String(error));
@@ -125,6 +136,19 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     const reviewed = { ...result, visualReview: verdict, reviewNotes: this.reviewNotes.value };
     this.result.set(reviewed);
     this.completed.emit(reviewed);
+    void this.saveResult(reviewed);
+  }
+
+  private async saveResult(result: TestRunResult<TSettings>): Promise<void> {
+    const sink = this.resultSink();
+    if (!sink || !isDevMode()) { this.saveStatus.set(''); return; }
+    const url = typeof sink === 'string' ? sink : DEFAULT_TEST_SINK_PATH;
+    const failed = 'Result not saved (receiver unreachable): use Download JSON.';
+    try {
+      const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result) });
+      const body = response.ok ? await response.json().catch(() => ({})) as { file?: string } : null;
+      if (!this.destroyed) this.saveStatus.set(body ? `Result saved${body.file ? `: ${body.file}` : ''}` : `${failed} (HTTP ${response.status})`);
+    } catch { if (!this.destroyed) this.saveStatus.set(failed); }
   }
 
   /** Summaries are over provider readings, which may be batched; no GPU-pass attribution is inferred. */

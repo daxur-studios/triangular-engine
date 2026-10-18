@@ -269,6 +269,9 @@ export class CellPlanetMorphStreamingViewComponent {
     uMapHeight: { value: 1 },
     uRadius: { value: 1 },
     uProjectionType: { value: 1 },
+    // Tiles generated against a render origin store patch-relative attributes; the bent morph rebuilds the
+    // body-fixed point from the batch translation and this (see IDynamicProjectionUniforms.uBodyCentreScene).
+    uBodyCentreScene: { value: new Vector3() },
   };
 
   private readonly defaultCreateMaterial = (): Material => {
@@ -333,6 +336,7 @@ export class CellPlanetMorphStreamingViewComponent {
     radius: () => this.radiusM(),
     mapWidth: () => 2 * Math.PI * this.radiusM(),
     projection: () => this.projectionKind(),
+    bodyCenterSceneM: () => this.bodyCenterSceneM(),
   });
 
   readonly lodChange = output<ITerrainSurfaceLodStats>();
@@ -357,6 +361,10 @@ export class CellPlanetMorphStreamingViewComponent {
 
     effect(() => {
       this.morphUniforms.uProjectionType.value = this.projectionKind() === 'equalEarth' ? 1 : 0;
+    });
+
+    effect(() => {
+      this.morphUniforms.uBodyCentreScene!.value.fromArray(this.bodyCenterSceneM());
     });
 
     effect(() => {

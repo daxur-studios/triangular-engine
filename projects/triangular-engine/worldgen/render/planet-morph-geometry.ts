@@ -43,17 +43,6 @@ export interface ISurfaceTransform {
   readonly normal: Vector3;
 }
 
-/**
- * Computes world position and surface normal for a point given its spherical unit direction
- * and elevation at morph progress `t` (0 = 3D globe, 1 = 2.5D flat map).
- *
- * Both representations share the exact same orientation:
- * +Y is North, +X is East, +Z faces toward the viewer.
- * The front center point sits tangent at Z = 0, and as t -> 0 (Globe),
- * the sides and back curl monotonically backwards into -Z away from the camera.
- *
- * An optional `basis` can be supplied to dynamically center the projection on a moving unit.
- */
 /** `sin(a) / a` via Taylor series for tiny `a` so `a = 0` is exactly 1. */
 export function planetSinc(a: number): number {
   const a2 = a * a;
@@ -152,8 +141,21 @@ export function evaluateBentTransform(
   return { position: outPos, east: outEast, north: outNorth, up: outUp };
 }
 
+const bendScratchSphere = new Vector3();
+const bendScratchFlat = new Vector3();
+
 /**
- * Computes the bent-sphere vertex position in scene space from dual attributes (sphere & flat).
+ * The bent-planet vertex position for static (baked) projection: the CPU twin of what
+ * `enablePlanetMorphProjection` (GLSL) and `planetMorphGraph` (TSL) draw, for raycasting, camera
+ * placement and markers.
+ *
+ * `spherePos` / `flatPos` are the vertex's `aSpherePos` / `aFlatPos`. They are body-fixed (the
+ * planet's centre at the origin, the flat map the plane z = height through it), which is what every
+ * geometry builder writes. Streamed tiles generated with a render origin store them relative to the
+ * patch centre: pass that centre's body-fixed position as `bodyOffset` and the result is relative to
+ * it again (add the patch translation back as usual).
+ *
+ * Morph 0 returns the sphere point and morph 1 the flat point exactly.
  */
 export function bendPlanetSurfacePoint(
   spherePos: Vector3,
@@ -163,6 +165,7 @@ export function bendPlanetSurfacePoint(
   mapWidth: number,
   isEqualEarth: boolean,
   target = new Vector3(),
+  bodyOffset?: Vector3,
 ): Vector3 {
   const t = Math.min(1, Math.max(0, morph));
   if (t <= 1e-6) {
@@ -172,27 +175,35 @@ export function bendPlanetSurfacePoint(
     return target.copy(flatPos);
   }
 
-  const sphereLen = spherePos.length();
-  const dirY = sphereLen > 1e-6 ? spherePos.y / sphereLen : 0;
+  const sphere = bendScratchSphere.copy(spherePos);
+  const flat = bendScratchFlat.copy(flatPos);
+  if (bodyOffset) {
+    sphere.add(bodyOffset);
+    flat.add(bodyOffset);
+  }
+
+  const sphereLen = sphere.length();
+  const dirY = sphereLen > 1e-6 ? sphere.y / sphereLen : 0;
   const hSphere = sphereLen - radius;
-  const hFlat = flatPos.z;
+  const hFlat = flat.z;
   const h = (1 - t) * hSphere + t * hFlat;
 
   const [eqX, eqY] = recoverStaticEquirectXY(
     dirY,
-    flatPos.x,
-    flatPos.y,
+    flat.x,
+    flat.y,
     radius,
     mapWidth,
     isEqualEarth,
   );
 
-  const mapX = (1 - t) * eqX + t * flatPos.x;
-  const mapY = (1 - t) * eqY + t * flatPos.y;
+  const mapX = (1 - t) * eqX + t * flat.x;
+  const mapY = (1 - t) * eqY + t * flat.y;
   const k = (1 - t) / Math.max(radius, 1e-6);
   const zCenterShift = (1 - t) * radius;
 
   evaluateBentTransform(mapX, mapY, k, h, zCenterShift, target);
+  if (bodyOffset) target.sub(bodyOffset);
   return target;
 }
 
@@ -200,12 +211,12 @@ export function bendPlanetSurfacePoint(
  * Computes world position and surface normal for a point given its spherical unit direction
  * and elevation at morph progress `t` (0 = 3D globe, 1 = 2.5D flat map).
  *
- * Both representations share the exact same orientation:
- * +Y is North, +X is East, +Z faces toward the viewer.
- * The front center point sits tangent at Z = 0, and as t -> 0 (Globe),
- * the sides and back curl monotonically backwards into -Z away from the camera.
+ * Body-fixed, like the morph materials: +Y is North, +X is East, +Z is longitude 0; the globe is
+ * centred on the origin and the flat map is the plane z = height through it. In between, the surface
+ * is a piece of a sphere of curvature (1 - t) / radius (see `evaluateBentTransform`).
  *
- * An optional `basis` can be supplied to dynamically center the projection on a moving unit.
+ * An optional `basis` can be supplied to dynamically center the projection on a moving unit; the
+ * bent result is then turned into that basis, as the shaders do in tracked mode.
  */
 export function evaluateSurfaceTransform(
   direction: IVec3,
@@ -254,7 +265,8 @@ export function evaluateSurfaceTransform(
   const mapX = (1 - t) * eqX + t * flatX;
   const mapY = (1 - t) * eqY + t * flatY;
 
-  const bent = evaluateBentTransform(mapX, mapY, k, h, 0);
+  // Body-fixed like the shaders: the globe is centred on the origin and the flat map is the plane z = h.
+  const bent = evaluateBentTransform(mapX, mapY, k, h, (1 - t) * radius);
 
   let normal: Vector3;
   let position: Vector3;
@@ -350,7 +362,7 @@ export function buildPlanetMorphGeometry(
       const displacedRadius = radius + effectiveElevation * heightScale;
       gridSpherePositions[o3] = dirX * displacedRadius;
       gridSpherePositions[o3 + 1] = dirY * displacedRadius;
-      gridSpherePositions[o3 + 2] = dirZ * displacedRadius - radius;
+      gridSpherePositions[o3 + 2] = dirZ * displacedRadius;
 
       gridSphereNormals[o3] = dirX;
       gridSphereNormals[o3 + 1] = dirY;

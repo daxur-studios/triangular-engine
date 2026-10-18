@@ -399,10 +399,10 @@ export function buildCellBorderLineGeometry(
       const other = v === start ? end.dir : start.dir;
       const displacedRadius = radius + v.elev * heightScale + clearance;
 
-      // 3D Sphere coordinates (tangent at Z=0, curving into -Z)
+      // 3D sphere coordinates, body-fixed: the planet centre at the origin
       const sx = v.dir.x * displacedRadius;
       const sy = v.dir.y * displacedRadius;
-      const sz = v.dir.z * displacedRadius - radius;
+      const sz = v.dir.z * displacedRadius;
 
       spherePositions[ptr3] = sx;
       spherePositions[ptr3 + 1] = sy;
@@ -609,10 +609,10 @@ export function buildTerritoryRibbonGeometry(
     ];
 
     for (const qv of quadVertices) {
-      // Centered at z=0 for 3D sphere
+      // Body-fixed 3D sphere: the planet centre at the origin
       const sx = qv.sphere.x;
       const sy = qv.sphere.y;
-      const sz = qv.sphere.z - radius;
+      const sz = qv.sphere.z;
 
       spherePositions[vPtr3] = sx;
       spherePositions[vPtr3 + 1] = sy;
@@ -838,7 +838,7 @@ export function buildCellOverlayGeometry(
         const vert = item.v;
         const sx = vert.dir.x * vert.r;
         const sy = vert.dir.y * vert.r;
-        const sz = vert.dir.z * vert.r - radius;
+        const sz = vert.dir.z * vert.r;
 
         spherePositions[ptr3] = sx;
         spherePositions[ptr3 + 1] = sy;

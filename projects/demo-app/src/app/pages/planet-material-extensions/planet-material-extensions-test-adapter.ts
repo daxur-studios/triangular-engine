@@ -42,7 +42,7 @@ export interface ExtensionsTestHost {
   /** Draw statistics of the last completed render. */
   drawStats(): { readonly triangles: number; readonly drawCalls: number };
   renderedFrames(): number;
-  /** First engine or material error since `resetErrors`, or ''. */
+  /** First engine, window or console error since `resetErrors`, or ''. */
   errors(): string;
   resetErrors(): void;
   onBeforeRender(callback: () => void): () => void;
@@ -58,6 +58,9 @@ const READY_TIMEOUT_MS = 60_000;
 const READY_FRAMES = 3;
 const STALL_MS = 5_000;
 const MIN_WINDOW_FRAMES = 60;
+/** A static window is held open until this many renders completed, so a slow renderer cannot pass or fail on an empty window. */
+const MIN_ACTION_FRAMES = 3;
+const MAX_WINDOW_EXTENSION_MS = 20_000;
 /** The page's globe is a 128 x 64 `SphereGeometry`: 128 * 63 * 2 triangles, so any frame that drew it has at least this many. */
 const MIN_PLANET_TRIANGLES = 16_000;
 const POSE_TOLERANCE = 1e-4;
@@ -152,15 +155,17 @@ function runOrbit(scenario: TestScenario<ExtensionsTestSettings>, context: TestC
  * Game-owned adapter for the planet material extensions page. All page knowledge sits behind
  * {@link ExtensionsTestHost}; the shared runner only sees settings, observations and snapshots.
  */
-export function createExtensionsTestAdapter(host: ExtensionsTestHost): TestRunAdapter<ExtensionsTestSettings, ExtensionsPageSnapshot> {
+export function createExtensionsTestAdapter(
+  host: ExtensionsTestHost, readyTimeoutMs = READY_TIMEOUT_MS,
+): TestRunAdapter<ExtensionsTestSettings, ExtensionsPageSnapshot> {
   async function waitReady(scenario: TestScenario<ExtensionsTestSettings>, context: TestContext): Promise<void> {
     const settings = scenario.settings;
     const began = performance.now();
-    const expired = () => performance.now() - began > READY_TIMEOUT_MS;
+    const expired = () => performance.now() - began > readyTimeoutMs;
     while (!host.rendererReady()) {
       const error = host.errors();
       if (error) throw new Error(error);
-      if (expired()) throw new Error(`Renderer not initialised after ${READY_TIMEOUT_MS / 1000} s`);
+      if (expired()) throw new Error(`Renderer not initialised after ${readyTimeoutMs / 1000} s`);
       await context.wait(16);
     }
     // A toggled slot is a new program: wait for it to be compiled instead of measuring its compile hitch.
@@ -179,7 +184,7 @@ export function createExtensionsTestAdapter(host: ExtensionsTestHost): TestRunAd
         stableSince ??= host.renderedFrames();
         if (host.renderedFrames() >= stableSince + READY_FRAMES) return;
       }
-      if (expired()) throw new Error(`Scene not ready after ${READY_TIMEOUT_MS / 1000} s: ${[...sceneMismatches(state, settings), ...stackMismatches(host.stackKey(), settings)].join('; ') || 'frames or camera pose'}`);
+      if (expired()) throw new Error(`Scene not ready after ${readyTimeoutMs / 1000} s: ${[...sceneMismatches(state, settings), ...stackMismatches(host.stackKey(), settings)].join('; ') || 'frames or camera pose'}`);
       await context.wait(16);
     }
   }
@@ -199,6 +204,7 @@ export function createExtensionsTestAdapter(host: ExtensionsTestHost): TestRunAd
       const trace: number[] = [];
       let frames = 0;
       let previousAt: number | undefined;
+      let windowExtendedMs = 0;
       const onHidden = () => { if (document.hidden) host.invalidateSampling('hidden'); };
       const onBlur = () => host.invalidateSampling('unfocused');
       document.addEventListener('visibilitychange', onHidden);
@@ -214,7 +220,12 @@ export function createExtensionsTestAdapter(host: ExtensionsTestHost): TestRunAd
       let summary: ExtensionsFrameSummary;
       try {
         if (settings.kind === 'orbit') await runOrbit(scenario, context, host, trace);
-        else await context.wait(scenario.durationMs);
+        else {
+          await context.wait(scenario.durationMs);
+          const extendedFrom = performance.now();
+          while (frames < MIN_ACTION_FRAMES && performance.now() - extendedFrom < MAX_WINDOW_EXTENSION_MS) await context.wait(16);
+          windowExtendedMs = Math.round(performance.now() - extendedFrom);
+        }
         summary = host.stopSampling();
       } finally {
         offRender();
@@ -244,7 +255,7 @@ export function createExtensionsTestAdapter(host: ExtensionsTestHost): TestRunAd
           detail: settings.kind === 'orbit' ? (orbitIssues.join('; ') || `${trace.length} orbit steps, end error ${poseError.toExponential(1)}`) : `error ${poseError.toExponential(1)}` },
         { name: 'Controls locked as configured', passed: state.controls.enabled === settings.controls.enabled && state.controls.damping === settings.controls.damping },
         { name: 'Requested renderer backend in use', passed: backend === requested, detail: `requested ${requested}, running ${backend}` },
-        { name: 'No engine or material error', passed: error === '', detail: error || undefined },
+        { name: 'No engine, window or console error', passed: error === '', detail: error || undefined },
       ];
       const software = environment['softwareRenderer'];
       const frameMetric: TestMetric = {
@@ -261,7 +272,7 @@ export function createExtensionsTestAdapter(host: ExtensionsTestHost): TestRunAd
         details: {
           frames: summary.frames, cpuMedianMs: summary.cpuMedianMs, cpuP95Ms: summary.cpuP95Ms,
           wallMedianMs: summary.wallMedianMs, wallP95Ms: summary.wallP95Ms, frameVerdict: summary.verdict,
-          triangles: draw.triangles, drawCalls: draw.drawCalls, stackKey: host.stackKey(), orbitSteps: trace.length,
+          triangles: draw.triangles, drawCalls: draw.drawCalls, stackKey: host.stackKey(), orbitSteps: trace.length, windowExtendedMs,
         },
         validityIssues: [
           ...summary.invalidReasons,

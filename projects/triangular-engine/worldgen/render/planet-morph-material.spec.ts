@@ -8,6 +8,8 @@ import {
 import {
   computeSunDirectionFromTime,
   createDefaultPlanetDayNightUniforms,
+  createPlanetBorderMorphMaterial,
+  createPlanetMapBorderMaterial,
   createPlanetMorphMaterial,
   enablePlanetDayNightLighting,
   enablePlanetMorphProjection,
@@ -146,5 +148,34 @@ describe('planet-morph-material', () => {
       expect(shader.uniforms['uMorph']).toBeDefined();
       expect(shader.uniforms['uDayNightEnabled']).toBeDefined();
     });
+  });
+});
+
+describe('bend GLSL helper call sites', () => {
+  const uniforms = (): IDynamicProjectionUniforms => ({
+    uMorph: { value: 0.5 },
+    uProjForward: { value: new Vector3(0, 0, 1) },
+    uProjUp: { value: new Vector3(0, 1, 0) },
+    uProjRight: { value: new Vector3(1, 0, 0) },
+    uProjMode: { value: 0 },
+    uProjectionType: { value: 1 },
+    uMapWidth: { value: 1 },
+    uMapHeight: { value: 1 },
+    uRadius: { value: 1 },
+  } as unknown as IDynamicProjectionUniforms);
+
+  it('passes the five-argument static equirect helper and the k/height/shift bend helper', () => {
+    const shaders = [
+      createPlanetBorderMorphMaterial(uniforms()).vertexShader,
+      createPlanetMapBorderMaterial(uniforms()).vertexShader,
+    ];
+    for (const source of shaders) {
+      expect(source).toContain(
+        'planetStaticEquirectXY(aSphereNorm, aFlatPos.xy, uRadius, uMapWidth, uProjectionType)',
+      );
+      expect(source).toContain(
+        'planetBendTransform(mapXY, (1.0 - uMorph) / uRadius, h, (1.0 - uMorph) * uRadius,',
+      );
+    }
   });
 });
