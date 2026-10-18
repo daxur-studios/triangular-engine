@@ -301,3 +301,16 @@ Docs only; nothing built or measured. Earlier sections, the review inbox and the
   smaller-regression sensitivity and real-time presentation remain open. No performance gate,
   shared runner migration or agent-instruction change adopted. Shared machine coordination is
   still required before independent agents benchmark together.
+
+## 2026-10-18 — U0P final regression verification
+
+- Full default `npm run test:cloud-feasibility` passes again after the shared frame-bookkeeping
+  change: `2026-10-18T12-29-14-912Z-21332`, **157,713 ms**, exit 0, port released, no source drift.
+  Actual WebGPU AMD profile remains the correctness default; NVIDIA selection is U0P-only.
+  Mesh/proxy state and exact checkpoint comparisons, wall pauses, same-adapter compute, missing
+  cloud/render, readiness timeout and fresh-page recovery all pass. Continuous video remains open.
+- Correctness and positive-control runs share source hash
+  `85692d05d3d463e6ab18dc0b852cf0d4b8547215102b1759584aadfa67cfb473` and retain their own builds/bundles.
+- `npx tsc -p tests/cloud-feasibility/tsconfig.json`, `npm run build:triangular-engine`, Node
+  history/timing tests and syntax checks pass. `git diff --check` passes. Compact status shows
+  no active commands and preserves all successful/failed records. No commits executed by this session.
