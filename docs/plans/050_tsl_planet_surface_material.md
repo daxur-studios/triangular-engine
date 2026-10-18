@@ -10,7 +10,7 @@ runbook: /docs/runbook/050_tsl_planet_surface_material.md
 # Plan 050: TSL Planet Surface Material
 
 Status: **in progress, owner: local Sonnet session.** Phase 0 spike: **go** (2026-10-16). Workspace on
-three **0.186.1**. Phase 1 built and its visual gate passed (user, 2026-10-16). Phases 2, 3 and 4 built (specs + builds pass); Phase 5 docs written (user doc, SKILL.md, CHANGELOG, entry-points); token-map registration done (2026-10-17); dynamic projection (`uProjMode`) works on streamed tiles in `cell-planet-tsl` with relief shading (user-confirmed 2026-10-17); TSL perf numbers recorded in the runbook (2026-10-17; 3-round alternating suite against GLSL: TSL is slower than GLSL at morph 0 and 0.5, batching on is 25-30 % slower on WebGL2 and has no effect on WebGPU); review fixes applied locally (2026-10-17, uncommitted).
+three **0.186.1**. Phase 1 built and its visual gate passed (user, 2026-10-16). Phases 2, 3 and 4 built (specs + builds pass); Phase 5 docs written (user doc, SKILL.md, CHANGELOG, entry-points); token-map registration done (2026-10-17); dynamic projection (`uProjMode`) works on streamed tiles in `cell-planet-tsl` with relief shading (user-confirmed 2026-10-17); TSL perf numbers recorded in the runbook (2026-10-17; 3-round alternating suite against GLSL: TSL is slower than GLSL at morph 0 and 0.5, batching on is 25-30 % slower on WebGL2 and has no effect on WebGPU); review fixes applied locally (2026-10-17, uncommitted). **2026-10-18:** a bend morph shape is planned for Plan 049 Phase 3b (§Morph shape: bend).
 the Phase 2 and 3 gates (pixel parity against the GLSL demo; "shows everything the GLSL demo shows") and the Phase 4 demo
 check are still open (need a visible window). Open issue, not a blocker: the batching toggle halves WebGL frame rate in
 `cell-planet-tsl` (see the runbook).
@@ -229,6 +229,28 @@ Each phase ends with a visible check and a timing number, recorded in the runboo
    - `CHANGELOG.md`.
 
 After Phase 4, Plan 049 Phase 2 can start. Phase 5 can run alongside it.
+
+## Morph shape: bend (added 2026-10-18, for Plan 049 Phase 3b)
+
+Plan 049 replaces the straight-line morph with a bend: every in-between shape is a piece of a sphere whose
+radius grows from R to infinity, so the atmosphere stays exact mid-morph and the map's corners no longer swing
+up. The formula, frame and precision rules are in [Plan 049 §Morph](/docs/plans/049_morphing_planet_atmosphere.md#morph).
+What this material needs:
+
+- **Stage 1 option `morphShape: 'bend' | 'linear'`.** `'linear'` keeps today's `mix(spherePos, flatPos, morph)`.
+  `'bend'` places the vertex with `bend()` from the blended map coordinates
+  `mix(R·(projLon, projLat), flatXY, p(morph))`, using `projLon`/`projLat`/`flatXY`, which the dynamic path
+  already computes. The terrain height goes along the bent normal. The static (baked) path needs a radial
+  direction or lon/lat per vertex to do the same; check what it has before choosing.
+- **Normals:** the bent sphere's normal replaces `normalize(mix(aSphereNorm, flatNorm, morph))`, so the
+  morph-0.5 fallback is no longer needed for `'bend'`. Relief shading keeps its current approach on top.
+- **Seam cull:** the globe opens along the seam from the first bend, so for `'bend'` the cull must not wait for
+  morph > 0.05.
+- **Patch bounds:** `cell-planet-morph-patch-bounds.ts` bounds the straight-line mix. `'bend'` needs its own
+  conservative bounds, or streamed tiles get culled wrongly mid-morph.
+- **CPU twin:** one CPU `bend()` shared with the camera rig and the specs. Pin it against the TSL output with a
+  GPU-eval spec, as the seam functions are.
+- The GLSL materials are not changed.
 
 ## Tests
 

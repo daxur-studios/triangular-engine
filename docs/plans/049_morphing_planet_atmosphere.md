@@ -14,6 +14,10 @@ and re-verified locally (2026-10-16). **Phase 2a (atmosphere on a plain sphere, 
 and waiting for a visual check**; it does not depend on Plan 050. Phase 2b onwards waits for Plan 050 Phase 4.
 Evidence: [Runbook 049](/docs/runbook/049_morphing_planet_atmosphere.md).
 
+**2026-10-18:** the morph is redesigned. The planet now bends instead of blending in a straight line, so
+every in-between shape is a piece of a sphere (§Morph). Phase 3 restarts from a lab spike (3a). There is also a
+day/night toggle (§Day and night).
+
 Target: the cell planet as shown in `/cell-planet-morph-streaming`.
 
 **Prerequisite:** [Plan 050](/docs/plans/050_tsl_planet_surface_material.md) (TSL planet surface
@@ -148,40 +152,100 @@ Without this, dusk looks wrong: an orange sky over white-lit terrain.
 - Exposure: a physical sky needs an exposure curve (altitude/sun-elevation driven, or eye
   adaptation) on top of ACES. Stylized mode sidesteps this.
 
+### Day and night
+
+`dayNight: 'real' | 'alwaysDay'` on the atmosphere binding, default `'real'` (decided 2026-10-18).
+
+- **`'real'`:** each point takes its sun angle from its globe direction, `μs = dot(globe direction, sunBody)`,
+  in every pose. The flat map shows the curved dawn/dusk line and a night side.
+- **`'alwaysDay'`:** for games without a day/night cycle. Every point gets the same sun in its own local frame:
+  elevation `alwaysDaySunElevationDeg` (default 50) from a fixed bearing relative to local north
+  (`alwaysDaySunAzimuthDeg`, default 135). The lighting stage, the haze, the sky, the space view's per-sample
+  sun angle and the sun disc all read it. From space the whole globe is lit, with an even rim glow.
+- Prefer a uniform switch over a shader rebuild. A rebuild on toggle is acceptable if the uniform version
+  costs more per pixel.
+
 ### Morph
 
-Per surface fragment, blend the inputs, not the colours:
+**Decided 2026-10-18: the planet morphs by bending, not by a straight-line blend.** The reasons are in
+Runbook 049, 2026-10-18 entry.
+
+The first version moved each point in a straight line, `mix(spherePos, flatPos, morph)`. Mid-morph that
+shape is not a sphere of any radius, and the map's corners swing up through the planet. Every part of the
+atmosphere assumes a sphere, so each needed a stand-in (the flat-air slab, the flat-pose sky, the sky fade,
+the elevation floor), and the bugs were in those stand-ins. The sky was also drawn as if the map went on
+forever, so from outside the map the whole screen turned blue.
+
+The bend keeps every in-between shape a piece of a sphere whose radius grows from R to infinity. The globe's
+atmosphere maths stays exact through the whole morph; only the radius, the centre and the map's outline change.
+
+**Shape.** Curvature `k = curve(morph) / R`, with `curve(0) = 1` and `curve(1) = 0` (start with
+`1 - morph`, tune by eye). In the **map frame** (x = the projection's right, y = its up, z = its forward,
+origin at the map centre) a vertex with map coordinates `(x, y)` and terrain height `height` sits at:
 
 ```
-up   = normalize(mix(sphereNormal, +Z, morph))       // matches the morphed sea-level normal
-h    = terrain height                                  // intrinsic, morph-invariant
-μs   = dot(sphereNormal, sunBody)                      // intrinsic
-path = actual world camera→fragment distance           // what the viewer actually looks through
+bend(x, y, k) = ( cos(k·y)·sin(k·x) / k,
+                  sin(k·y) / k,
+                  -(1 - cos(k·x)·cos(k·y)) / k )       // (0, 0, 0) at the map centre
+normal        = ( cos(k·y)·sin(k·x), sin(k·y), cos(k·x)·cos(k·y) )
+position      = T(morph) · (bend(x, y, k) + height · normal)
 ```
 
-- **Globe (m = 0):** standard spherical shell.
-- **Flat map (m = 1):** a slab of thickness `topAltitude` over the map. Sky-view and froxel marches
-  use the camera's local frame. Each froxel sample works out its own `μs` from the inverse projection
-  of its map x/y, so haze far across the map can be at dusk while the camera is at noon. The
-  sky-view LUT keeps the true R, so the horizon looks right near the ground.
-- **Mid-morph:** evaluate the camera's sky for its sphere pose and its flat pose (the morph camera
-  already interpolates the two) and crossfade by `morph`. That's two sky-view evaluations, only
-  while morphing. Surfaces use the input blend above. The check is no pops and nothing going black.
+- **Precision.** Write it in forms that are exact at `k = 0` and never form `1/k`: `sin(k·x)/k = x·sinc(k·x)`,
+  `1 - cos(a) = 2·sin²(a/2)`. At `k = 0` it is `(x, y, 0)`, the flat map.
+- **Map coordinates** blend from the globe's to the map's: `(x, y) = mix(R·(projLon, projLat), flatXY, p(morph))`.
+  At morph 0 they are `R·(lon, lat)`, so `bend` gives the exact globe (radius R, centre `(0, 0, -R)` in the map
+  frame). At morph 1, `k = 0` and the vertex is today's flat map point. `p(morph)` can lead or lag `curve`
+  (tune by eye); with `p = morph` the Equal Earth outline forms as the planet flattens.
+- **Frame.** `T(morph)` takes the map frame to the body frame at morph 0 (rotation with columns right, up,
+  forward; map centre at `R·forward`) and is the identity at morph 1. Slerp the rotation and move the offset
+  smoothly; the ground-anchored camera rig keeps the view. Check this against the dynamic projection's
+  tracked frame (`forward`, `right`, `up`) so morph 0 lands exactly on today's globe.
+- **What you see:** the globe opens along the meridian opposite the map centre, the poles open, and it
+  unrolls into the map. The map's edges always lie on the current sphere, so no corner swings up. The opening
+  is the seam the flat map already cuts; the seam cull has to run from the first bend (today it starts at
+  morph 0.05).
+- **Where it lives:** a stage-1 option of the TSL material, `morphShape: 'bend' | 'linear'`
+  ([Plan 050](/docs/plans/050_tsl_planet_surface_material.md)), with a CPU twin of `bend()` for the camera rig,
+  patch bounds and specs. The GLSL materials and their demo keep the straight-line morph.
 
-#### Flat map seen from far above (the edge question)
+**Atmosphere on the bent planet.** At curvature `k` the ground is a sphere of radius `1/k` around
+`C = T(morph)·(0, 0, -1/k)`, and the air is the shell up to `1/k + topAltitude`. Everything the globe does
+applies with that radius:
 
-On the globe, seen from space, the air shows as a glowing rim around the planet. On the flat map
-the air is a thin layer lying on top of the map. Looking straight down you see a light blue haze
-over the map, and the question is what happens at the **map's edge**:
+- **Curvature form.** Never form `1/k`, so nothing overflows as `k → 0`. With `x` a point relative to the map
+  centre in the map frame and `q = k·|x|² + 2·x.z`:
+  - altitude `h = q / (1 + sqrt(1 + k·q))`;
+  - up `= (k·x + (0, 0, 1)) / sqrt(1 + k·q)`;
+  - a ray `x = o + t·d` meets the air's top where
+    `k·t² + 2·(k·(o·d) + d.z)·t + (k·|o|² + 2·o.z - 2·H - k·H²) = 0` (`H` = top altitude). Solve it in the
+    stable form; at `k = 0` it is the plane `z = H`.
+- **Space view** (the reduced-resolution march) marches the bent shell. The density is multiplied by a
+  **map mask**: zero outside the map's outline, with a soft falloff over `edgeSoftnessM` (default about one
+  scale height). A sample's map coordinates come from its angles on the sphere, `(lon', lat') / k` (in the
+  curvature form), compared with the outline of the current blended projection. A small 1D table of the
+  map's half-width per row, refreshed when the morph changes, is enough. Wrapping edges of wrap-around maps
+  get no mask.
+- **Sky from inside the air** (the sky-view table) is rendered for the camera's altitude over the bent sphere,
+  radius `1/k`; re-render when `k` changes. Fade between the space view and the sky by whether the camera is
+  inside the air (on the map: low over it and inside its outline), as the globe does now.
+- **Haze on surfaces** (the froxel table and stage 6) takes the spherical path with radius `1/k`. The
+  closed-form slab stays as the exact `k = 0` case (morph ≥ 0.999).
+- **Baked tables** (transmittance, multi-scatter, irradiance) are made for one radius and read by altitude
+  and angle. On a larger sphere they are slightly off near the horizon. Expected to be invisible; if the lab
+  shows it, bake 3–4 radii and blend.
+- **Sun angle per point:** see §Day and night.
 
-- *Realistic slab:* the air stops dead at the edge, like a glass sheet cut with scissors. At a low
-  angle you'd see a thin blue band along the cut edge. It's correct but looks odd.
-- *Stylized edge glow:* the haze fades out softly before the edge, and a soft glowing outline
-  is drawn around the map, echoing the globe's limb glow so the morph feels continuous.
+Once the bend is checked on the cell planet, it replaces the flat-pose sky blend, the sky's fade by morph,
+`voidFade`, and the slab as the mid-morph haze. The slab's elevation floor stays until low views of the bent
+map are compared with and without it.
 
-**Default: soft fade at the edge** (no hard cut). The glowing outline is an optional profile
-setting (`flatMapEdge: 'fade' | 'glow'`), on by default for stylized profiles. Wrap-around
-maps skip the fade on the wrapping edges.
+#### Flat map seen from far above (the edge)
+
+The map mask is the edge. It is the air's own cut edge, softened by `edgeSoftnessM`. A grazing ray crosses a
+lot of air there, so the map's edge glows the way the globe's rim does, with no extra effect. Seen straight
+down, the map gets a light blue tint, and there is no air where there is no map. The stylized glowing outline
+stays an option for Phase 7.
 
 ## Planet sizes
 
@@ -286,8 +350,8 @@ Haze has to reach every object, or a game's large structure "sticks out like a s
 | UI, HUD, gizmos, sky objects | Opt out: `userData.atmosphere = 'none'` (sky objects use `atmosphereSky()` instead) | One flag |
 
 The screen pass makes forgetting harmless: default is hazed. Its cost is one full-screen pass with
-two fetches (~0.05–0.1 ms at 1080p). Since the froxels already carry per-sample sun angles, the
-flat map is handled too. Only mid-morph is approximate, and only for non-planet objects.
+two fetches (~0.05–0.1 ms at 1080p). The froxels are built for the current bent sphere (§Morph), so the
+flat map and mid-morph are covered too.
 
 **Making it hard to forget:**
 
@@ -374,14 +438,30 @@ before the material port lands. Phase 2b onwards needs Plan 050 through its Phas
    other objects, Phase 4's concern), and the **timing gate**: WebGPU / `forceWebGL` numbers on a real GPU
    against the ≤ 0.5 ms budget. `/atmosphere-lab` has a "sky from table / per-pixel march" toggle and a GPU
    timestamp readout for that comparison.
-3. **Flat map + morph.** Slab, per-sample `μs` froxels, edge fade/glow, mid-morph blend.
-   **Gate:** scrub the morph at dusk with no pops, fps steady, 4-size set at `m = 1`.
-   (Needs 2b and 2c. The flat-map maths can be prototyped on the plain-sphere lab first if that helps.)
+3. **Flat map + morph (redesigned 2026-10-18: bend morph, §Morph).** Built under the old design and kept
+   until 3c replaces it: the slab haze, the flat-pose sky, the sky fade and the morph camera rig.
+   - **3a. Lab spike** in `/atmosphere-lab`, no planet material:
+     - a CPU `bend()` in a new pure-maths file with specs (globe at morph 0, flat map at morph 1, precision at
+       tiny `k`, curvature-form altitude, up and ray hit against brute force);
+     - a longitude/latitude grid mesh bent on the CPU when the morph changes;
+     - the atmosphere given radius `1/k`, the centre and the map mask;
+     - the `dayNight` toggle.
+
+     **Gate (by eye, plus timing):** scrub morph 0 → 1 → 0 from space, from low orbit, and low and side-on
+     over the map (the view that used to show a full-screen sky). Expect a rim glow throughout, glowing map
+     edges at the end, no sky filling the screen from outside the map, no pops and nothing black. Frame time
+     no worse than the globe.
+   - **3b. Bend in the material and the rig:** Plan 050's stage-1 option `morphShape`, its patch bounds and
+     seam cull, and `CellPlanetMorphCameraRig` on the bent ground.
+   - **3c. Wire it on `/cell-planet-tsl`** and retire what §Morph lists as replaced.
+   - **3d. Day/night toggle** on the page.
+
+   **Gate:** scrub the morph at dusk with no pops, fps steady, 4-size set at `m = 1`, in both `dayNight` modes.
 4. **Coverage.** Screen pass + MRT mask, `withAtmosphere()`, opt-out, coverage debug overlay.
 5. **Sky objects.** Starfield, moon, sun disc and other bodies through `atmosphereSky(dir)`.
 6. **Extensions demo with atmosphere.** Plan 050's `planet-material-extensions` demo (roads +
    eclipse) with the atmosphere on. Check that the eclipse darkens the sky and that roads are hazed.
-7. **Stylized model + art controls.** Ramp producer, overrides, zenith-colour solver, `flatMapEdge: 'glow'`.
+7. **Stylized model + art controls.** Ramp producer, overrides, zenith-colour solver, optional stylized glowing outline around the map.
 8. **More profiles.** Venus, gas giant, Titan, per-`WorldProfileKind` defaults, animated-profile demo,
    mini-tier stretch test.
 9. **Polish + docs.** Ocean sky reflection, clouds take aerial perspective and transmitted sun,
@@ -406,7 +486,10 @@ before the material port lands. Phase 2b onwards needs Plan 050 through its Phas
 | TSL only, one version, on `WebGPURenderer`; planet materials ported to an extensible TSL material ([Plan 050](/docs/plans/050_tsl_planet_surface_material.md)) | **Decided** 2026-10-16 |
 | Support 100 km to Earth, small planets must look good; similarity scaling + art knobs | **Decided** 2026-10-16 (approach proposed) |
 | Exact material path for planet surfaces + automatic screen pass for everything else + docs/skill/debug overlay | Proposed |
-| Flat map from space: soft edge fade by default, optional glowing outline | Proposed |
+| Morph by bending: every in-between shape is a piece of a sphere, radius R → ∞ (§Morph). TSL material only; the GLSL materials keep the straight-line morph | **Decided** 2026-10-18 |
+| Atmosphere through the whole morph, exact for the bent sphere; only the baked tables are approximate | **Decided** 2026-10-18 |
+| Map edge: the air's own cut edge (soft map mask); stylized outline optional (Phase 7). Replaces "soft edge fade by default, optional glowing outline" | **Decided** 2026-10-18 |
+| Day/night: real by default, `alwaysDay` toggle (§Day and night) | **Decided** 2026-10-18 |
 | Output: HDR `RenderPipeline` with MSAA off plus a post AA pass. Not `DirectRenderPipeline` | Proposed 2026-10-16 (Runbook 050 numbers) |
 
 ## Out of scope for now

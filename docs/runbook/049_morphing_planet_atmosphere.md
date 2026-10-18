@@ -546,3 +546,51 @@ Notes:
 - Limits: the anchor sits on the base surface (terrain relief ignored); the flat map is the plane `z = 0`; the orbit controls' up becomes the ground normal even at morph 0 (no pole lock) once the rig runs.
 - The cell page runs it every frame, after the orbit controls and before the sky sync, with a "keep ground in morph" checkbox (on). Specs cover the frames, the anchor solve, invariants over a full morph and back, small steps, panning, the top-down tilt and a view that misses the ground.
 - Checked on the live page by driving the rig by hand: a camera 0.4R above and 0.3R behind an off-centre ground point stays at the same east, north and height offsets at morph 0, 0.25, 0.5, 0.75 and 1, and its up goes from the radial direction to +Z. The browser pane's frame loop did not run, so the scrub itself was not watched on screen.
+
+## 2026-10-18 — Morph redesigned: bend instead of a straight-line blend (cloud session, code reading only)
+
+The owner reported the flat map and mid-morph atmosphere as not working, with three screenshots:
+
+1. The globe: the rim glow is good.
+2. The flat map from above: half the map is dark, and there is a hazy tint with no glow at the map's edges.
+3. The flat map seen from the side, low: the whole background is blue sky, "added globally at the back", not
+   attached to the map the way the globe's air is.
+
+What the code does (read at `ac165b8`):
+
+- Screenshot 3 is by design. `AtmosphereBackdrop` is a full-screen sky for a camera `skyAltitude` above an
+  endless ground (`atmosphere-backdrop.ts`, "It does not use scene depth or any planet geometry"). On the flat
+  pose a low camera is inside that endless air, so every pixel is sky. That is right for an infinite plane and
+  wrong for a finite map.
+- Screenshot 2's dark half is the night side: each point's sun angle comes from its globe direction, so dusk
+  crosses the map. Deliberate. The owner wants to keep it and add an always-day toggle.
+- The missing edge glow is the `flatMapEdge: 'glow'` option, which was never built. A flat sheet of air has no
+  rim, so from above every ray is short.
+- Underneath it all: the straight-line morph `mix(spherePos, flatPos, morph)` gives mid-morph shapes that are
+  no sphere at all (the owner also sees the map's four corners curl up sharply). Every atmosphere piece
+  assumes a sphere, so each got a stand-in (the slab, the flat-pose sky, the sky fade, the elevation floor),
+  and that is where the bugs of the last two days came from.
+
+Decisions (owner, 2026-10-18), written into Plan 049 (§Day and night, §Morph, Phase 3, §Decisions) and Plan 050
+(§Morph shape: bend):
+
+- **Bend morph.** Every in-between shape is a piece of a sphere whose radius grows from R to infinity
+  (curvature `k = curve(morph) / R`). The atmosphere's radius is already a uniform (`uRadius`, `uTopRadius` in
+  `AtmosphereGpuModel`), so the globe maths applies at every morph value with radius `1/k`, written in a
+  curvature form that is exact at `k = 0`. TSL material only; the GLSL materials keep the straight-line morph.
+- **Map mask.** The space view's density is zero outside the map's outline (soft falloff). That gives glowing
+  map edges for free and no air where there is no map. It replaces the edge fade and outline question. The
+  stylized outline stays optional (Phase 7).
+- **Atmosphere supported through the whole morph.** The owner asked for this. Only the baked tables
+  (transmittance, multi-scatter, irradiance) are approximate on a larger sphere; bake a few radii if the lab
+  shows it.
+- **Day/night:** real by default, plus a `dayNight: 'alwaysDay'` toggle.
+- An air-skin mesh (a morphing transparent shell shaded by thickness) was considered and dropped. It works for
+  any shape but only roughly, and with the bend there is a real sphere to use.
+
+Kept until Phase 3c replaces them, then retired: the flat-pose sky blend (`skyAltitude`, `skyAnchorBody`), the
+sky fade by morph and height, `voidFade`, and the slab as the mid-morph haze. The slab stays as the exact
+`k = 0` case. The elevation floor stays until it is compared on low views of the bent map. The camera rig is
+kept and moved onto the bent ground (3b).
+
+Next: Phase 3a, the lab spike (Plan 049, Phases).

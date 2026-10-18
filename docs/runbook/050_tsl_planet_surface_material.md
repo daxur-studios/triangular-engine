@@ -519,3 +519,11 @@ Fixes for the planet-material review check above, in order:
 
 Verification: `npm run test:triangular-engine:planet-material` 69/69 and `:atmosphere` 136/136 (headless), demo app type-checks.
 Not verified visually.
+
+## 2026-10-18 — Bend morph planned (cloud session, docs only)
+
+Plan 049 is switching the morph to a bend: every in-between shape is a piece of a sphere, so the atmosphere
+stays exact mid-morph and the map's corners stop curling up. For this material that means a stage-1 option
+`morphShape: 'bend' | 'linear'`, bent normals, a seam cull from the first bend, new patch bounds and a CPU twin
+of `bend()`. See Plan 050 §Morph shape: bend and Runbook 049's 2026-10-18 entry. Nothing is built yet; it
+follows Plan 049's lab spike (Phase 3a).
