@@ -1,33 +1,21 @@
 #!/usr/bin/env node
 // Compact table over artifacts/test-runs/index.jsonl. Read this first; open a full JSON only for a failure.
-// Usage: triangular-test-summary [--suite id] [--last N] [--dir artifacts/test-runs]
+// Usage: triangular-test-summary [--suite id] [--last N] [--metric text] [--dir artifacts/test-runs]
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { computeFingerprint, loadConfig } from './triangular-test-receiver.mjs';
+import { caseSummaries, computeFingerprint, loadConfig } from './triangular-test-receiver.mjs';
 
-const q = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)];
 const fmt = (n) => (Number.isFinite(n) ? n.toFixed(2) : 'n/a');
 
-/** Per-scenario statistics for the first non-optional-unavailable metric samples, across repetitions. */
-export function scenarioStats(run) {
-  const by = new Map();
-  for (const c of run.cases ?? []) {
-    const entry = by.get(c.scenario.id) ?? { label: c.scenario.label ?? c.scenario.id, metrics: new Map(), failed: [] };
-    for (const m of c.metrics ?? []) {
-      if (!m.samples?.length) continue;
-      const list = entry.metrics.get(`${m.name} (${m.unit})`) ?? [];
-      list.push(...m.samples.filter(Number.isFinite));
-      entry.metrics.set(`${m.name} (${m.unit})`, list);
-    }
-    for (const k of c.checks ?? []) if (!k.passed) entry.failed.push(`${k.name}${k.detail ? ` — ${k.detail}` : ''}`);
-    if (c.error) entry.failed.push(`error: ${c.error}`);
-    by.set(c.scenario.id, entry);
-  }
-  return by;
-}
+/** A constant metric (draw calls, triangle counts) prints once instead of as med/p95/max. */
+const metricText = (name, s) => (s.min === s.max ? `${name} = ${fmt(s.max)}` : `${name} med ${fmt(s.med)} p95 ${fmt(s.p95)} max ${fmt(s.max)}`);
 
-export function summarize(rows, readRun, currentHash, { suite, last = 5 } = {}) {
+/**
+ * Index lines written since summaries were added carry `cases`, so no result file is opened. Older lines fall back
+ * to reading their file. `metric` keeps only metrics whose name contains that text.
+ */
+export function summarize(rows, readRun, currentHash, { suite, last = 5, metric } = {}) {
   const lines = [];
   const bySuite = Map.groupBy(rows.filter((r) => !suite || r.suite === suite), (r) => `${r.suite}@v${r.version}`);
   for (const [key, list] of bySuite) {
@@ -35,14 +23,20 @@ export function summarize(rows, readRun, currentHash, { suite, last = 5 } = {}) 
     for (const row of list.slice(-last)) {
       const stale = currentHash && row.fingerprint !== currentHash ? 'STALE' : 'current';
       lines.push(`${row.startedAt?.slice(0, 16) ?? row.savedAt.slice(0, 16)}  ${row.profile}  ${row.fingerprint} ${stale}  auto=${row.automatedVerdict} perf=${row.performanceVerdict} visual=${row.visualReview}`);
-      const run = readRun(row.file);
-      if (!run) { lines.push('  (full result file missing)'); continue; }
-      for (const [id, s] of scenarioStats(run)) {
-        const m = [...s.metrics].map(([name, v]) => { const x = [...v].sort((a, b) => a - b); return `${name} med ${fmt(q(x, 0.5))} p95 ${fmt(q(x, 0.95))} max ${fmt(x.at(-1))}`; });
+      let cases = row.cases;
+      let errors = row.errors;
+      if (!cases) {
+        const run = readRun(row.file);
+        if (!run) { lines.push('  (full result file missing)'); continue; }
+        cases = caseSummaries(run);
+        errors = run.errors;
+      }
+      for (const [id, s] of Object.entries(cases)) {
+        const m = Object.entries(s.metrics).filter(([name]) => !metric || name.includes(metric)).map(([name, v]) => metricText(name, v));
         lines.push(`  ${id}: ${m.join(' | ') || 'no metrics'}`);
         for (const f of s.failed) lines.push(`    FAIL ${f}`);
       }
-      for (const e of run.errors ?? []) lines.push(`  RUN ERROR ${e}`);
+      for (const e of errors ?? []) lines.push(`  RUN ERROR ${e}`);
       lines.push(`  file: ${row.file}`);
     }
   }
@@ -61,5 +55,5 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
   const readRun = (file) => { try { return JSON.parse(readFileSync(join(dir, file), 'utf8')); } catch { return null; } };
   const current = computeFingerprint(root, config.fingerprintPaths).hash;
   console.log(`current fingerprint ${current}\n`);
-  console.log(summarize(rows, readRun, current, { suite: opt('--suite'), last: Number(opt('--last', 5)) }));
+  console.log(summarize(rows, readRun, current, { suite: opt('--suite'), last: Number(opt('--last', 5)), metric: opt('--metric') }));
 }

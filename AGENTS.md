@@ -25,6 +25,10 @@ npm install
 npm run build:triangular-engine
 npm test                                # unit tests (headless, single-run)
 npm run test:triangular-engine:worldgen
+npm run test:triangular-engine:testing  # testing entry specs (headless)
+npm run test:triangular-engine:sink     # result receiver and summary (node --test)
+npm run test:summary -- --suite <id> --last 3 --metric <text>  # read saved browser test results
+npm run test:receiver                   # save browser test results to artifacts/test-runs/
 npx ng serve demo-app
 daxur tokens map --floor 50000
 daxur tokens map status
@@ -43,6 +47,15 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 - Before feature or part work, use its existing reciprocal plan/runbook pair or create one under `docs/plans/` and `docs/runbook/`.
 - Do not edit generated output in `dist/` or `out-tsc/`; rebuild it instead.
 - Check `daxur tokens map status` when adding or expanding sublibraries to keep architecture docs in sync.
+
+## Browser tests and their results
+
+- Before writing or extending a browser test suite, or reading its results, read
+  `projects/triangular-engine/docs/testing.md` and the `triangular-engine-testing` skill
+  (`projects/triangular-engine/.agents/skills/triangular-engine-testing/SKILL.md`).
+- Read results with `npm run test:summary` first; it reads only `artifacts/test-runs/index.jsonl`.
+  Open a full result JSON only for a failing case.
+- Timings from headless or SwiftShader runs are not hardware numbers. Check which GPU adapter a run recorded.
 
 ## Verification checklist
 

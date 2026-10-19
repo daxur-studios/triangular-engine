@@ -1,4 +1,4 @@
-import { TestSession, waitForTest } from './test-session';
+import { nearestRankPercentile, summarizeTestSamples, TestSession, waitForTest } from './test-session';
 import type { TestObservation, TestRunAdapter, TestSuite } from './test-contracts';
 
 interface Settings { value: number }
@@ -121,6 +121,24 @@ describe('TestSession', () => {
     withMetrics([{ name: 'interval', unit: 'ms', source: 's', samples: [16], }, { name: 'gpu', unit: 'ms', source: 'x', samples: [NaN], optional: true }]);
     const invalid = await new TestSession<Settings, number>().run(perf, adapter, { repetitions: 1, profile: 'visible-browser' });
     expect(invalid.cases[0].validityIssues).toContain('Required metric samples unavailable or invalid');
+  });
+
+  it('summarizes each metric with nearest-rank statistics over its finite samples', async () => {
+    adapter.measure = async () => ({ metrics: [
+      { name: 'interval', unit: 'ms', source: 's', samples: [5, 1, 4, 2, 3, NaN, 10, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] },
+      { name: 'gpu', unit: 'ms', source: 'none', samples: [], optional: true },
+    ] });
+    const result = await new TestSession<Settings, number>().run(suite, adapter, { repetitions: 1, profile: 'visible-browser' });
+    expect(result.cases[0].metrics[0].summary).toEqual({ count: 20, min: 1, median: 10, p95: 19, max: 20 });
+    expect(result.cases[0].metrics[1].summary).toBeUndefined();
+  });
+
+  it('uses the nearest rank at the percentile boundaries', () => {
+    expect(nearestRankPercentile([1, 2, 3, 4, 10], 0.95)).toBe(10);
+    expect(nearestRankPercentile([1, 2, 3, 4, 10], 0.5)).toBe(3);
+    expect(nearestRankPercentile([4], 0)).toBe(4);
+    expect(nearestRankPercentile([], 0.5)).toBeNaN();
+    expect(summarizeTestSamples([NaN, Infinity])).toBeUndefined();
   });
 
   it('records a visible-profile blur as invalid evidence', async () => {

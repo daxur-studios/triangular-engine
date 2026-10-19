@@ -3,7 +3,7 @@ import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, injec
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import type { TestMetric, TestProfile, TestProgress, TestRunAdapter, TestRunResult, TestSuite } from './test-contracts';
 import { buildTestLaunchUrl, MAX_TEST_REPETITIONS, parseTestLaunch, TEST_PROFILES, testSuiteKey, validateTestHistory } from './test-launch';
-import { TestSession } from './test-session';
+import { nearestRankPercentile, TestSession } from './test-session';
 
 /** Same-origin path the dev-server proxy forwards to the result receiver. */
 export const DEFAULT_TEST_SINK_PATH = '/__triangular-test-sink';
@@ -155,10 +155,9 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   metricText(metric: TestMetric): string {
     if (!metric.samples.length) return `${metric.name}: unavailable (${metric.unavailableReason ?? 'no readings'})`;
     if (metric.samples.some((sample) => !Number.isFinite(sample))) return `${metric.name}: invalid readings`;
-    const sorted = [...metric.samples].sort((a, b) => a - b);
-    const mean = sorted.reduce((sum, value) => sum + value, 0) / sorted.length;
-    const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
-    return `${metric.name}: mean ${mean.toFixed(2)}, p95 ${p95.toFixed(2)} ${metric.unit} · ${sorted.length} provider readings`;
+    const mean = metric.samples.reduce((sum, value) => sum + value, 0) / metric.samples.length;
+    const p95 = nearestRankPercentile([...metric.samples].sort((a, b) => a - b), 0.95);
+    return `${metric.name}: mean ${mean.toFixed(2)}, p95 ${p95.toFixed(2)} ${metric.unit} · ${metric.samples.length} provider readings`;
   }
 
   async copyResult(): Promise<void> {

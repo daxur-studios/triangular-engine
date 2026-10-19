@@ -112,7 +112,14 @@ Keep `artifacts/` gitignored.
 
 **Where results live.** `artifacts/test-runs/<suite>@v<version>/<timestamp>_<profile>_<hash>.json`
 (full result plus `fingerprint`) and one line per run in `artifacts/test-runs/index.jsonl`.
-Runs accumulate; nothing is overwritten.
+Runs accumulate; nothing is overwritten. Stored samples are rounded to 3 decimals and
+numeric arrays sit on one line, which makes a file roughly a third of its former size.
+Each index line also carries `errors` and `cases`: per scenario, across repetitions,
+`{ n, min, med, p95, max }` for every metric plus the failed checks.
+
+`TestSession` adds a `summary` (`count`, `min`, `median`, `p95`, `max`) to every metric
+with finite samples. All percentiles are nearest rank (`nearestRankPercentile`,
+`summarizeTestSamples`), the same rule `FrameSampler` and the summary bin use.
 
 **Fingerprint.** Computed by the receiver as git `HEAD` plus a hash of the working-tree
 diff and untracked files under `fingerprintPaths`. It is deliberately coarse: any edit
@@ -120,7 +127,10 @@ there changes it. Older runs are flagged `STALE` in summaries, not removed.
 
 **Reading cheaply.** Run the summary first (`npx triangular-test-summary [--suite id] [--last N]` in a consumer app, where the bin is installed; inside this repository use `npm run test:summary -- [--suite id] [--last N]`, since `npx` cannot resolve the bin here): date,
 profile, fingerprint and stale flag, the three verdicts, median/p95/max per scenario
-metric and failed checks only. Open a full JSON only for a failing case.
+metric (a constant metric such as a draw count prints once as `= value`) and failed
+checks only. `--metric text` keeps only metrics whose name contains `text`. The summary
+reads only `index.jsonl`; it opens a result file just for lines written before case
+summaries existed. Open a full JSON only for a failing case.
 
 **Caveat.** Headless or software-rendered (SwiftShader) runs give GPU timings that are
 not real hardware numbers; use visible-tab runs on the target machine for performance.

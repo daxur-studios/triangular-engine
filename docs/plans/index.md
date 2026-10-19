@@ -22,6 +22,8 @@ tags: [plans, index]
 | [Page Test Sessions and Performance Comparison](/docs/plans/052_page_test_sessions_and_performance_comparison.md) | bounded cloud-runner extraction; measurement gates remain open | [Evidence](/docs/runbook/052_page_test_sessions_and_performance_comparison.md) |
 | [Procedural Creature Animation](/docs/plans/053_procedural_creature_animation.md) | planned | [Evidence](/docs/runbook/053_procedural_creature_animation.md) |
 | [Stylized Illustrative Planet & Scene Rendering](/docs/plans/054_stylized_illustrative_rendering.md) | planned | [Evidence](/docs/runbook/054_stylized_illustrative_rendering.md) |
+| [Planet Shape System](/docs/plans/055_planet_shape_system.md) | planned (Phase 0 next) | [Evidence](/docs/runbook/055_planet_shape_system.md) |
+| [WebGPURenderer as the Default Renderer](/docs/plans/056_webgpu_default_renderer.md) | draft (owner review, then Phases 0 and 2) | [Evidence](/docs/runbook/056_webgpu_default_renderer.md) |
 
 
 Convention: [Plans and Runbooks](/docs/plans-and-runbooks.md).

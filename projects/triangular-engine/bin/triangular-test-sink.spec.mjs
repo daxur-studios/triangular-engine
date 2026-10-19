@@ -55,3 +55,36 @@ test('receiver stores runs, accumulates, and rejects junk; summary flags stale',
   assert.match(text, /FAIL bounded — x/);
   assert.match(summarize(rows, read, 'different-hash'), /STALE/);
 });
+
+test('index lines carry case summaries, so the summary opens no result file', async () => {
+  const root = repo();
+  const server = createReceiver(root, loadConfig(root));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${server.address().port}${SINK_PATH}`;
+  const body = run('r1', '2026-10-18T10:00:00Z', true);
+  body.cases.push({ ...body.cases[0], repetition: 2, checks: [], metrics: [
+    { name: 'cpu', unit: 'ms', source: 't', samples: [5.800000011920929] },
+    { name: 'draws', unit: 'count', source: 't', samples: [2, 2, 2] },
+  ] });
+  body.cases[0].checks[0].detail = 'range [ 1, 2 ]';
+  assert.equal((await fetch(url, { method: 'POST', body: JSON.stringify(body) })).status, 200);
+  server.close();
+  const [row] = readFileSync(join(root, 'artifacts/test-runs/index.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(row.cases.s1.metrics['cpu (ms)'], { n: 6, min: 1, med: 3, p95: 10, max: 10 });
+  assert.deepEqual(row.cases.s1.failed, ['bounded — range [ 1, 2 ]']);
+  const text = summarize([row], () => assert.fail('result file opened'), row.fingerprint);
+  assert.match(text, /cpu \(ms\) med 3\.00 p95 10\.00 max 10\.00 \| draws \(count\) = 2\.00/);
+  assert.match(text, /FAIL bounded — range \[ 1, 2 \]/);
+  assert.doesNotMatch(summarize([row], () => null, row.fingerprint, { metric: 'cpu' }), /draws/);
+  const stored = readFileSync(join(root, 'artifacts/test-runs', row.file), 'utf8');
+  assert.match(stored, /"samples": \[5\.8\]/);
+  assert.match(stored, /"samples": \[1,2,3,4,10\]/);
+  assert.match(stored, /"detail": "range \[ 1, 2 \]"/);
+});
+
+test('summary falls back to the result file for index lines written before case summaries', () => {
+  const old = { savedAt: 'x', startedAt: '2026-10-18T10:00:00Z', suite: 'demo', version: 2, profile: 'visible-browser',
+    fingerprint: 'h', automatedVerdict: 'pass', performanceVerdict: 'unassessed', visualReview: 'pending', file: 'f.json' };
+  assert.match(summarize([old], () => run('r1', old.startedAt), 'h'), /cpu \(ms\) med 3\.00 p95 10\.00/);
+  assert.match(summarize([old], () => null, 'h'), /full result file missing/);
+});

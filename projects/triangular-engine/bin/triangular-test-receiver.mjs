@@ -38,6 +38,48 @@ export function computeFingerprint(root, paths) {
 
 const safe = (text) => String(text).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 80);
 
+/** Stored samples keep 3 decimals (1 µs for ms metrics): browser timers are coarser, and full doubles double the file. */
+export const round = (n) => (typeof n === 'number' && Number.isFinite(n) ? Math.round(n * 1000) / 1000 : n);
+const roundSamples = (key, value) =>
+  key === 'samples' && Array.isArray(value) ? value.map(round)
+    : key === 'summary' && value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, round(v)]))
+      : value;
+/**
+ * Pretty JSON, but numeric arrays on one line instead of one sample per line. Matching requires literal newlines,
+ * which JSON strings never contain, so string contents are never rewritten.
+ */
+export const storedJson = (value) => JSON.stringify(value, roundSamples, 2)
+  .replace(/\[\n\s*((?:-?[\d.e+-]+|null)(?:,\n\s*(?:-?[\d.e+-]+|null))*)\n\s*\]/g, (_, list) => `[${list.split(/,\n\s*/).join(',')}]`);
+
+/** Nearest-rank percentile on an ascending array, as `TestSession` and `FrameSampler` use. */
+export const percentile = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * p) - 1))];
+
+/**
+ * Per scenario, across repetitions: `{ metrics: { 'name (unit)': { n, min, med, p95, max } }, failed: [check names] }`.
+ * Written to each index line so a summary never has to open the full result.
+ */
+export function caseSummaries(run) {
+  const out = {};
+  for (const c of run.cases ?? []) {
+    const entry = out[c.scenario.id] ??= { metrics: {}, failed: [], samples: {} };
+    for (const m of c.metrics ?? []) {
+      if (!m.samples?.length) continue;
+      (entry.samples[`${m.name} (${m.unit})`] ??= []).push(...m.samples.filter(Number.isFinite));
+    }
+    for (const k of c.checks ?? []) if (!k.passed) entry.failed.push(`${k.name}${k.detail ? ` — ${k.detail}` : ''}`);
+    if (c.error) entry.failed.push(`error: ${c.error}`);
+  }
+  for (const entry of Object.values(out)) {
+    for (const [name, list] of Object.entries(entry.samples)) {
+      if (!list.length) continue;
+      const x = list.sort((a, b) => a - b);
+      entry.metrics[name] = { n: x.length, min: round(x[0]), med: round(percentile(x, 0.5)), p95: round(percentile(x, 0.95)), max: round(x.at(-1)) };
+    }
+    delete entry.samples;
+  }
+  return out;
+}
+
 /** Writes the run and one index line; returns the stored relative file name. */
 export function saveRun(root, config, result) {
   if (!result || typeof result !== 'object' || result.schemaVersion !== 1 || !result.suite?.id || !result.runId) throw new Error('Not a triangular test result');
@@ -47,12 +89,13 @@ export function saveRun(root, config, result) {
   const stamp = new Date(result.startedAt ?? Date.now()).toISOString().replace(/[:.]/g, '-');
   const name = `${stamp}_${safe(result.profile)}_${fp.hash}.json`;
   const stored = { ...result, fingerprint: fp, savedAt: new Date().toISOString() };
-  writeFileSync(join(dir, name), JSON.stringify(stored, null, 2));
+  writeFileSync(join(dir, name), storedJson(stored));
   const file = `${safe(result.suite.id)}@v${safe(result.suite.version)}/${name}`;
   appendFileSync(join(root, config.outputDir, 'index.jsonl'), JSON.stringify({
     savedAt: stored.savedAt, startedAt: result.startedAt, suite: result.suite.id, version: result.suite.version, profile: result.profile,
     runId: result.runId, fingerprint: fp.hash, head: fp.headShort, automatedVerdict: result.automatedVerdict,
     performanceVerdict: result.performanceVerdict, visualReview: result.visualReview, status: result.status, file,
+    errors: result.errors ?? [], cases: caseSummaries(result),
   }) + '\n');
   return file;
 }

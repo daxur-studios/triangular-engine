@@ -1,5 +1,6 @@
 import type {
-  TestCaseResult, TestContext, TestProgress, TestRunAdapter, TestRunOptions, TestRunResult, TestSetting, TestSuite,
+  TestCaseResult, TestContext, TestMetric, TestMetricSummary, TestProgress, TestRunAdapter, TestRunOptions, TestRunResult,
+  TestSetting, TestSuite,
 } from './test-contracts';
 import { MAX_TEST_REPETITIONS, TEST_PROFILES, validateTestHistory } from './test-launch';
 
@@ -20,6 +21,30 @@ export function waitForTest(milliseconds: number, signal: AbortSignal): Promise<
     const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, milliseconds);
     signal.addEventListener('abort', abort, { once: true });
   });
+}
+
+/**
+ * Nearest-rank percentile on an ascending array: the value at rank ceil(p * n), as `FrameSampler` and the
+ * `triangular-test-summary` bin use, so every reader reports the same p95.
+ */
+export function nearestRankPercentile(sorted: readonly number[], p: number): number {
+  if (!sorted.length) return Number.NaN;
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * p) - 1))];
+}
+
+/** Statistics over the finite samples; `undefined` when there are none. */
+export function summarizeTestSamples(samples: readonly number[]): TestMetricSummary | undefined {
+  const sorted = samples.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return undefined;
+  return {
+    count: sorted.length, min: sorted[0], median: nearestRankPercentile(sorted, 0.5),
+    p95: nearestRankPercentile(sorted, 0.95), max: sorted[sorted.length - 1],
+  };
+}
+
+function withSummary(metric: TestMetric): TestMetric {
+  const summary = summarizeTestSamples(metric.samples);
+  return summary ? { ...metric, summary } : metric;
 }
 
 async function abortable<T>(work: () => T | Promise<T>, signal: AbortSignal): Promise<T> {
@@ -127,7 +152,7 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
             }
             const checks = observation.checks ?? [];
             const caseFailed = checks.some((check) => !check.passed);
-            cases.push({ scenario, repetition, status: caseFailed ? 'failed' : 'completed', metrics: observation.metrics,
+            cases.push({ scenario, repetition, status: caseFailed ? 'failed' : 'completed', metrics: observation.metrics.map(withSummary),
               checks, validityIssues: [...validityIssues], limitations: observation.limitations ?? [], details: observation.details });
             if (caseFailed) { failed = true; throw new Error(`Checks failed: ${scenario.id}`); }
           } catch (error) {

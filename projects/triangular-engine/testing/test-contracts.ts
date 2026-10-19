@@ -46,6 +46,17 @@ export interface TestMetric {
    * Invalid (non-finite) samples still do.
    */
   readonly optional?: boolean;
+  /** Filled by `TestSession` from `samples` (nearest-rank percentiles); absent when there are no finite samples. */
+  readonly summary?: TestMetricSummary;
+}
+
+/** Nearest-rank statistics of one metric's samples, so readers need not load the raw samples. */
+export interface TestMetricSummary {
+  readonly count: number;
+  readonly min: number;
+  readonly median: number;
+  readonly p95: number;
+  readonly max: number;
 }
 
 export interface TestCheck {
