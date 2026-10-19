@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { EventEmitter } from 'node:events';
 import { computeFingerprint, createReceiver, loadConfig, MACHINE_PATH, SINK_PATH } from './triangular-test-receiver.mjs';
 import {
-  createMachineMonitor, distribution, parseGpuLine, summarizeCapture, systemProbe, systemSampler,
+  createMachineMonitor, distribution, machineWarnings, parseGpuLine, summarizeCapture, systemProbe, systemSampler,
 } from './triangular-test-machine.mjs';
 import { machineText, summarize } from './triangular-test-summary.mjs';
 
@@ -208,6 +208,17 @@ test('receiver samples between start and stop, stores the machine block and a ti
   const text = summarize([row, plain], () => assert.fail('result file opened'), row.fingerprint);
   assert.match(text, /machine: gpu nvidia\/webgpu \| load med gpu 50% cpu 30% 46C \| WARN on-battery, gpu-busy-before-start, gpu-throttled/);
   assert.equal(text.match(/machine:/g).length, 1);
+});
+
+test('gpu-busy-before-start keys on a non-browser GPU process, not on the page\'s own load', () => {
+  const idle = { gpu: { util: { med: 45 }, tempC: { max: 51 } } };
+  const busy = (gpuApps) => machineWarnings({ gpuApps, idle }, {}).includes('gpu-busy-before-start');
+  assert.equal(busy([{ pid: 1, name: 'chrome.exe' }, { pid: 2, name: 'chrome.exe' }]), false);
+  assert.equal(busy([{ pid: 1, name: 'chrome.exe' }, { pid: 3, name: 'game.exe' }]), true);
+  assert.equal(busy([{ pid: 3, name: 'game.exe' }].map((app) => ({ ...app, name: undefined }))), true);
+  // No process list: fall back to the idle load threshold.
+  assert.equal(busy([]), true);
+  assert.equal(machineWarnings({ gpuApps: [], idle: { gpu: { util: { med: 5 } } } }, {}).includes('gpu-busy-before-start'), false);
 });
 
 test('machine warnings: unavailable GPU sampling and a missing adapter are marked, not failed', async () => {

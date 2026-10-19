@@ -323,3 +323,36 @@ Built in parallel by three agents in one checkout with disjoint files, then revi
 - Owner: high-performance should be the engine default. Done: both engine renderers now pass
   `powerPreference: 'high-performance'` unless the scene sets its own (`'low-power'` / `'default'`), through the internal
   `withRendererDefaults` (spec added). The lab drops its own setting and records `gpu.powerPreference`.
+- Fourth run (`…T19-46-35-066Z_visible-browser_…`), with a game running on the NVIDIA GPU: all 8 pass, still
+  `amd / gcn-5` with `gpu.powerPreference` recorded as high-performance. Chrome on Windows ignored the request, so the
+  Windows Graphics setting for `chrome.exe` is the remaining route. The machine block caught the game: the preflight
+  listed it as the heaviest process and the only GPU app, NVIDIA load median 41 %, `gpu-busy-before-start`.
+  iGPU whole-render GPU medians: empty 0.52 ms, plain sphere 1.05–1.44 ms (ground poses highest). Frame interval stays
+  at the 165 Hz refresh. One 88 ms hitch (57 ms CPU submit) in `plain-sphere-ground-6371km`.
+- Fifth run (`…T20-06-19-727Z_visible-browser_…`), after the Windows Graphics setting for `chrome.exe` and
+  `chrome://restart` (closing windows had left the 08:27 GPU process alive): **`nvidia / ampere`**, no INVALID lines,
+  `perf=unassessed`. Whole-render GPU medians: empty 0.066 ms, plain sphere 0.20 ms from orbit and 0.33 ms from the
+  ground, about 5x the iGPU. Still not a clean baseline: the game was running (`gpu-busy-before-start`, NVIDIA load
+  median 51 % during the empty frame).
+- **Timestamps are quantized:** every median is a whole multiple of 65,536 ns (0.066, 0.197, 0.328 ms). Chrome
+  quantizes timestamp queries unless WebGPU developer features are on (`chrome://flags/#enable-webgpu-developer-features`).
+  Per-pass timers need that flag, and their self-test must flag quantized samples.
+- Sixth run (`…T20-21-18-703Z_visible-browser_…`), game closed: `nvidia / ampere`, only Chrome on the GPU, SM clock
+  1860 MHz at P0. First usable look at the target GPU: whole-render medians empty 0.03–0.07 ms, sphere 0.066 ms from
+  orbit and 0.13 ms from the ground; CPU submit 0.3 ms; frame interval at the 165 Hz refresh.
+- Still quantized: every median is 0, 1, 2 or 4 × 32,768 ns, the 65,536 ns step of Chrome's timestamp quantization
+  (half-steps are medians of an even count). Sub-0.1 ms differences are unreadable until developer features are on.
+- `gpu-busy-before-start` is a false positive here: the preflight's "idle" NVIDIA load of 41 % is the lab page itself,
+  rendering at 165 Hz while preflight runs, not another app. The warning should key on another GPU app being present
+  (the preflight already lists them), not on a load threshold. `gpu-throttled` is real: one case
+  (`plain-sphere-orbit-600km`) recorded `0x48` (HW slowdown + HW thermal slowdown), with no visible effect on its median.
+- Seventh run (`…T20-24-14-021Z_visible-browser_…`), with WebGPU developer features on and `chrome://restart`: the
+  first unquantized timings. Medians now fall between the old steps, at about 1 µs resolution: empty 0.045–0.046 ms,
+  sphere 0.091 ms from orbit and 0.134–0.136 ms from the ground, the same at all three body sizes. The planet costs
+  about 0.045 ms (orbit) to 0.09 ms (ground) of GPU time above the empty frame. CPU submit 0.3–0.4 ms; frame interval
+  at the 165 Hz refresh; no throttle bits; SM clock 1830 MHz at P0. Only warnings: the false-positive
+  `gpu-busy-before-start` (NVIDIA load 45 % from the lab page itself) and `preflight-overlapped-measurement`. This is
+  the reference for the plain sphere on the target GPU until a controlled-machine profile exists.
+- `gpu-busy-before-start` now keys on a non-browser process in the preflight's GPU process list; the 20 % load
+  threshold is only the fallback when `nvidia-smi` lists no processes. Replayed on the saved runs: the seventh run no
+  longer gets it, the fifth (game running) still does. Spec added in `triangular-test-sink.spec.mjs`.

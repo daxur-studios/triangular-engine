@@ -13,7 +13,11 @@ const execFileAsync = promisify(execFile);
  * marks the run, it never fails it.
  */
 export const MACHINE_THRESHOLDS = {
-  /** Median GPU utilisation (%) in the preflight window above which the GPU counts as busy before the run. */
+  /**
+   * Median GPU utilisation (%) in the preflight window above which the GPU counts as busy before the run. Used only when
+   * nvidia-smi listed no GPU processes: the page under test is already rendering during the preflight, so its own load
+   * is not a sign of other work.
+   */
   gpuBusyPct: 20,
   /** GPU temperature (C) at or above which the GPU counts as hot before the run. */
   gpuHotC: 80,
@@ -140,13 +144,21 @@ export async function systemProbe({ platform = process.platform, exec = execFile
   return probe;
 }
 
-/** Warnings mark a run; they never fail it. */
+/** Browser processes on the GPU are taken to be the page under test (its browser cannot be told apart from another one). */
+const BROWSER_PROCESS = /^(chrome|msedge|firefox|opera|brave|vivaldi)(\.exe)?$/i;
+
+/**
+ * Warnings mark a run; they never fail it. `gpu-busy-before-start` means a non-browser process held the GPU before
+ * the run; without a process list it falls back to the idle load threshold.
+ */
 export function machineWarnings(preflight, cases, thresholds = MACHINE_THRESHOLDS) {
   const out = new Set();
   if (preflight?.power?.source === 'battery') out.add('on-battery');
+  const apps = preflight?.gpuApps ?? [];
+  if (apps.some((app) => !BROWSER_PROCESS.test(app.name ?? ''))) out.add('gpu-busy-before-start');
   const idle = preflight?.idle?.gpu;
   if (idle && typeof idle === 'object') {
-    if ((idle.util?.med ?? 0) > thresholds.gpuBusyPct) out.add('gpu-busy-before-start');
+    if (!apps.length && (idle.util?.med ?? 0) > thresholds.gpuBusyPct) out.add('gpu-busy-before-start');
     if ((idle.tempC?.max ?? 0) >= thresholds.gpuHotC) out.add('gpu-hot-before-start');
   }
   if (preflight?.overlapped) out.add('preflight-overlapped-measurement');

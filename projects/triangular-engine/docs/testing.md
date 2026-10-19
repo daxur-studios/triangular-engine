@@ -184,7 +184,9 @@ names are stored only in the result file under `artifacts/` (gitignored). Never 
 committed baselines.**
 
 **Warnings, not failures.** The run gets `machine.warnings` in its result and index line: `on-battery`,
-`gpu-busy-before-start` (median GPU utilisation above 20% while idle), `gpu-hot-before-start` (at least 80 C),
+`gpu-busy-before-start` (a non-browser process holds GPU memory before the run; the page under test already renders
+during preflight, so its own load does not count. Without an `nvidia-smi` process list it falls back to median GPU
+utilisation above 20%), `gpu-hot-before-start` (at least 80 C),
 `gpu-throttled` (power-cap, slowdown or thermal clock reasons during a case), `preflight-overlapped-measurement`, and
 `gpu-adapter-unrecorded`. These thresholds are placeholders to be set in Phase 0 of Plan 055 from measured idle
 readings; they mark a run and never change its verdict. The index line also carries `gpu` and `gpuBackend` (from
