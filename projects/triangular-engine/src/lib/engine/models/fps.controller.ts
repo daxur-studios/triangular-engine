@@ -2,7 +2,7 @@ import { signal } from '@angular/core';
 import { Camera, OrthographicCamera, PerspectiveCamera, Quaternion, Vector3 } from 'three';
 import { IEngine } from './engine.model';
 import { TelemetrySections } from './telemetry-sections.model';
-import { FrameSampler } from './frame-sampler';
+import { FrameSampler, IGpuPassBatchRecord } from './frame-sampler';
 
 export enum CameraAction {
   None = 0,
@@ -115,6 +115,11 @@ export class FPSController {
     this.gpuSampleSum += milliseconds;
     this.gpuSampleCount++;
     this.frameSampler.recordGpu(milliseconds);
+  }
+
+  /** Records one resolved timestamp batch split by render pass; only an open `frameSampler` window keeps it. */
+  recordGpuPasses(record: IGpuPassBatchRecord): void {
+    this.frameSampler.recordGpuPasses(record);
   }
 
   recordPhysicsTime(milliseconds: number): void {

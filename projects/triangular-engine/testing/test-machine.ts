@@ -98,8 +98,15 @@ export interface TestMachineMessage {
 export const MACHINE_MESSAGE_TIMEOUT_MS = 1000;
 
 /**
- * `POST <sink>/machine/<kind>` with a short timeout. Fire-and-forget: the promise never rejects, a missing, slow or
- * erroring receiver is ignored, and the body is `text/plain` so a cross-origin receiver URL needs no CORS preflight.
+ * Longest the page waits for `prepare`: the receiver answers only after its 1-3 s preflight, bounded at 8 s on its side,
+ * so this must stay longer than that bound.
+ */
+export const MACHINE_PREPARE_TIMEOUT_MS = 10_000;
+
+/**
+ * `POST <sink>/machine/<kind>` with a timeout (1 s by default; pass `MACHINE_PREPARE_TIMEOUT_MS` for `prepare`). The
+ * promise never rejects: a missing, slow or erroring receiver is ignored, and the body is `text/plain` so a cross-origin
+ * receiver URL needs no CORS preflight. `start`/`stop` are fire-and-forget; a run awaits `prepare` before its first case.
  */
 export function sendMachineMessage(
   sink: string, kind: TestMachineMessageKind, message: TestMachineMessage, timeoutMs = MACHINE_MESSAGE_TIMEOUT_MS,

@@ -1,3 +1,6 @@
+import { GPU_PASS_KINDS, timestampResolution } from './gpu-pass-timing';
+import type { GpuPassKind, GpuTimestampBatch, TimestampResolution } from './gpu-pass-timing';
+
 /**
  * Summary of one `FrameSampler` window. Medians and p95s are over the frames in the window.
  *
@@ -19,6 +22,56 @@ export interface IFrameSampleSummary {
   /** Why this window cannot be trusted (hidden tab, lost focus, throttled cadence, ...). Empty when valid. */
   readonly invalidReasons: readonly string[];
   readonly verdict: 'ok' | 'noisy' | 'inconclusive';
+  /**
+   * GPU time split by render pass, from the same timestamp readbacks as `gpuMedianMs`. `null` when no batch
+   * was resolved in the window, or the renderer exposes no per-pass timestamps.
+   */
+  readonly gpuPasses?: IGpuPassSummary | null;
+}
+
+/** One per-frame series of GPU ms: a pass kind, a pass label or the frame total. */
+export interface IGpuPassStat {
+  /** Frames that had this pass. */
+  readonly count: number;
+  readonly medianMs: number;
+  readonly p95Ms: number;
+  /** Per-frame ms in render order. */
+  readonly samples: readonly number[];
+}
+
+/**
+ * Checks that the per-pass numbers can be trusted. `passed` is true only with no `issues`:
+ * - every timestamp in a batch belongs to a pass the renderer began (`unattributedPasses`);
+ * - every pass the renderer began has a timestamp, so no frame is cut short (`incompleteFrames`);
+ * - no batch repeats frames already counted (`staleFrames`);
+ * - the passes of a batch's last frame add up to the total Three.js reports for it (`totalMismatches`);
+ * - timestamps are not rounded (`resolution.quantized`) and enough durations were seen to tell.
+ */
+export interface IGpuTimerSelfTest {
+  readonly passed: boolean;
+  readonly issues: readonly string[];
+  readonly batches: number;
+  readonly unattributedPasses: number;
+  readonly incompleteFrames: number;
+  readonly staleFrames: number;
+  readonly totalMismatches: number;
+}
+
+export interface IGpuPassSummary {
+  /** Complete frames attributed in the window. */
+  readonly frames: number;
+  readonly total: IGpuPassStat;
+  readonly byKind: Readonly<Partial<Record<GpuPassKind, IGpuPassStat>>>;
+  readonly byLabel: Readonly<Record<string, IGpuPassStat>>;
+  readonly resolution: TimestampResolution;
+  readonly selfTest: IGpuTimerSelfTest;
+}
+
+/** What one resolved readback adds to a window: the attributed batch and its checks. */
+export interface IGpuPassBatchRecord {
+  readonly batch: GpuTimestampBatch;
+  /** `false` when the batch's last frame did not add up to the Three.js total; `null` when it was not compared. */
+  readonly totalMatches: boolean | null;
 }
 
 /** Below this many frames a window says nothing reliable. */
@@ -81,6 +134,69 @@ export function summarizeFrameSamples(
   };
 }
 
+function passStat(samples: readonly number[]): IGpuPassStat {
+  const sorted = [...samples].sort((a, b) => a - b);
+  return { count: samples.length, medianMs: percentile(sorted, 0.5), p95Ms: percentile(sorted, 0.95), samples };
+}
+
+/** Reduces the per-pass readbacks of one window to per-kind and per-label series and the timer self-test. */
+export function summarizeGpuPasses(records: readonly IGpuPassBatchRecord[]): IGpuPassSummary | null {
+  if (!records.length) return null;
+  const total: number[] = [];
+  const byKind = new Map<GpuPassKind, number[]>();
+  const byLabel = new Map<string, number[]>();
+  const durations: number[] = [];
+  let unattributedPasses = 0;
+  let incompleteFrames = 0;
+  let staleFrames = 0;
+  let totalMismatches = 0;
+  for (const { batch, totalMatches } of records) {
+    unattributedPasses += batch.unattributedPasses;
+    incompleteFrames += batch.incompleteFrames;
+    staleFrames += batch.staleFrames;
+    if (totalMatches === false) totalMismatches++;
+    durations.push(...batch.passDurationsMs);
+    for (const frame of batch.frames) {
+      total.push(frame.totalMs);
+      for (const [kind, ms] of Object.entries(frame.byKind) as [GpuPassKind, number][]) {
+        if (!byKind.has(kind)) byKind.set(kind, []);
+        byKind.get(kind)!.push(ms);
+      }
+      for (const [label, ms] of Object.entries(frame.byLabel)) {
+        if (!byLabel.has(label)) byLabel.set(label, []);
+        byLabel.get(label)!.push(ms);
+      }
+    }
+  }
+  const resolution = timestampResolution(durations);
+  const issues: string[] = [];
+  if (!total.length) issues.push('No complete frame was attributed');
+  if (unattributedPasses) issues.push(`${unattributedPasses} timestamp(s) belong to no recorded pass`);
+  if (incompleteFrames) issues.push(`${incompleteFrames} frame(s) were missing a pass timestamp`);
+  if (staleFrames) issues.push(`${staleFrames} frame(s) were resolved twice (stale readback)`);
+  if (totalMismatches) issues.push(`${totalMismatches} batch(es) did not add up to the Three.js frame total`);
+  if (resolution.resolutionNs === null) issues.push(`Only ${resolution.samples} nonzero pass duration(s): too few to check timestamp rounding`);
+  else if (resolution.quantized) {
+    issues.push(`Timestamps are rounded to ${resolution.resolutionNs} ns: enable chrome://flags/#enable-webgpu-developer-features`);
+  }
+  const kinds: Partial<Record<GpuPassKind, IGpuPassStat>> = {};
+  for (const kind of GPU_PASS_KINDS) {
+    const samples = byKind.get(kind);
+    if (samples) kinds[kind] = passStat(samples);
+  }
+  return {
+    frames: total.length,
+    total: passStat(total),
+    byKind: kinds,
+    byLabel: Object.fromEntries([...byLabel].map(([label, samples]) => [label, passStat(samples)])),
+    resolution,
+    selfTest: {
+      passed: issues.length === 0, issues, batches: records.length,
+      unattributedPasses, incompleteFrames, staleFrames, totalMismatches,
+    },
+  };
+}
+
 /**
  * Records per-frame timing inside an explicit window (`start()` … `stop()`).
  *
@@ -93,6 +209,7 @@ export class FrameSampler {
   private wall: number[] = [];
   private gpu: number[] = [];
   private invalid: string[] = [];
+  private gpuPasses: IGpuPassBatchRecord[] = [];
 
   get isActive(): boolean {
     return this.active;
@@ -104,12 +221,13 @@ export class FrameSampler {
     this.wall = [];
     this.gpu = [];
     this.invalid = [];
+    this.gpuPasses = [];
   }
 
   /** Ends the window and returns its summary. */
   stop(): IFrameSampleSummary {
     this.active = false;
-    return summarizeFrameSamples(this.cpu, this.wall, this.gpu, this.invalid);
+    return { ...summarizeFrameSamples(this.cpu, this.wall, this.gpu, this.invalid), gpuPasses: summarizeGpuPasses(this.gpuPasses) };
   }
 
   /**
@@ -133,5 +251,10 @@ export class FrameSampler {
 
   recordGpu(gpuMs: number): void {
     if (this.active) this.gpu.push(gpuMs);
+  }
+
+  /** One resolved readback split by pass (fed by the engine when `gpuTiming` is on). */
+  recordGpuPasses(record: IGpuPassBatchRecord): void {
+    if (this.active) this.gpuPasses.push(record);
   }
 }

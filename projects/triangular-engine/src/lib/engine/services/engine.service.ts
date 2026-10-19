@@ -37,6 +37,7 @@ import {
   EngineFramePhase,
   EngineRenderPipeline,
   FPSController,
+  GpuPassRecorder,
   IEngine,
   IEngineOptions,
   provideEngineOptions,
@@ -187,6 +188,10 @@ export class EngineService implements IEngine {
   #gpuTimingOwner: number | null = null;
   #gpuTimingGeneration = 0;
   #lastGpuTimingMs: number | undefined;
+  /** Names each timestamped render pass when it begins, so a readback can be split per pass. */
+  readonly #gpuPasses = new GpuPassRecorder();
+  /** Inspectors whose `beginRender` already feeds `#gpuPasses` (the renderer's inspector can be replaced). */
+  readonly #gpuPassInspectors = new WeakSet<object>();
   readonly #appRef = inject(ApplicationRef);
   /**
    * Fired after `lateUpdate$` camera/controllers have settled, immediately before
@@ -725,6 +730,7 @@ export class EngineService implements IEngine {
         this.fpsController.fpsLimitInterval
     ) {
       this.renderer.info.reset();
+      if (this.options.gpuTiming === true) this.#watchGpuPasses();
 
       if (this.renderPipeline) {
         this.renderPipeline.render(deltaTime);
@@ -768,6 +774,7 @@ export class EngineService implements IEngine {
     Promise.race([renderer.resolveTimestampsAsync('render'), timeout])
       .then((ms) => {
         if (this.#gpuTimingOwner !== owner) return;
+        if (typeof ms === 'number') this.#recordGpuPasses(renderer, ms);
         // Installed Three.js returns its previous duration when a readback fails internally, so an
         // identical value is treated as stale rather than as a new sample.
         if (typeof ms !== 'number' || ms === this.#lastGpuTimingMs) return;
@@ -783,6 +790,38 @@ export class EngineService implements IEngine {
         clearTimeout(timer);
         if (this.#gpuTimingOwner === owner) this.#gpuTimingOwner = null;
       });
+  }
+
+  /**
+   * Hooks the renderer's inspector so every render pass is named as it begins (shadow map, scene, output
+   * transform, other full-screen pass). Wraps rather than replaces it, so a Three.js inspector keeps working;
+   * a newly assigned inspector is hooked on the next frame.
+   */
+  #watchGpuPasses(): void {
+    const inspector = (this.renderer as { inspector?: { beginRender?: (...args: any[]) => unknown } } | undefined)?.inspector;
+    if (!inspector || typeof inspector.beginRender !== 'function' || this.#gpuPassInspectors.has(inspector)) return;
+    this.#gpuPassInspectors.add(inspector);
+    const begin = inspector.beginRender.bind(inspector);
+    const recorder = this.#gpuPasses;
+    inspector.beginRender = (uid: string, scene: any, camera: unknown, renderTarget: any) => {
+      recorder.record(uid, scene, renderTarget);
+      return begin(uid, scene, camera, renderTarget);
+    };
+  }
+
+  /**
+   * Splits the readback that just resolved into frames and passes. Three.js keeps the batch in its render query
+   * pool's `timestamps` map (uid to ms) until the next readback; a renderer without that map has no per-pass data.
+   */
+  #recordGpuPasses(renderer: WebGPURenderer, totalMs: number): void {
+    const timestamps = (renderer as unknown as { backend?: { timestampQueryPool?: { render?: { timestamps?: unknown } } } })
+      .backend?.timestampQueryPool?.render?.timestamps;
+    if (!(timestamps instanceof Map)) return;
+    const batch = this.#gpuPasses.attribute(timestamps as ReadonlyMap<string, number>);
+    const last = batch.frames.at(-1);
+    // Three.js reports the sum of the batch's last frame; compare only when that frame survived attribution.
+    const totalMatches = last && last.frame === batch.lastBatchFrame ? Math.abs(last.totalMs - totalMs) <= 1e-6 : null;
+    this.fpsController.recordGpuPasses({ batch, totalMatches });
   }
 
   public setSpeedFactor(timeSpeed: number) {

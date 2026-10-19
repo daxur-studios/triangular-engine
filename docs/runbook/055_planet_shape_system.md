@@ -357,3 +357,50 @@ Built in parallel by three agents in one checkout with disjoint files, then revi
   threshold is only the fallback when `nvidia-smi` lists no processes. Replayed on the saved runs: the seventh run no
   longer gets it, the fifth (game running) still does. Spec added in `triangular-test-sink.spec.mjs`.
 - 2026-10-19: Phase 0 ablation math added as `compareAblation` in `triangular-engine/testing` (`test-ablation.ts`). It takes alternating A/B rounds, reduces each to its median or p95, and returns `difference`, `relative`, per-arm spread, a noise band (half the min-to-max range of each arm's round numbers, combined as a root sum of squares) and a verdict (`faster`, `slower`, `no-difference`, `rejected` above 15 % spread, `invalid` with reasons). Pure and specced; not yet wired into the lab page, the runner or the receiver.
+- Eighth run (`…T20-51-46-230Z_visible-browser_5d7b3c5c-…`), after the receiver restart: the new rule drops
+  `gpu-busy-before-start` (only Chrome on the GPU, idle load 42 % from the page itself); the only warning left is
+  `preflight-overlapped-measurement`. GPU medians repeat the seventh run within 1 µs: empty 0.046 ms, sphere
+  0.090–0.091 ms from orbit and 0.134–0.135 ms from the ground; no throttle bits. CPU load median 53 % (11 % before),
+  from other work on the machine; CPU submit stayed at 0.3–0.5 ms.
+- Chrome logs "The powerPreference option is currently ignored when calling requestAdapter() on Windows"
+  (crbug.com/369219127). That confirms the earlier finding; the engine keeps the request for platforms that honour it.
+- 2026-10-19: `preflight-overlapped-measurement` fixed at the source. The receiver now answers `/machine/prepare` only
+  after the preflight settles (bounded at 8 s; a hung probe replies `preflight: 'pending'`), and `TestSession` awaits that
+  reply (up to 10 s, never failing the run) before the first case. `overlapped` and its warning stay for pages or
+  receivers that still overlap. Specs in `test-session.spec.ts` and `triangular-test-sink.spec.mjs`.
+- 2026-10-19: per-pass GPU timers and the timer self-test built (engine `gpuTiming`, `gpu-pass-timing.ts`).
+  - **How it works.** Three.js 0.186 already writes one timestamp pair per render pass. It keys each by a uid ending
+    in the renderer frame (`r:<call>:<context>:f<frame>`) and keeps the whole resolved batch in the render query
+    pool's `timestamps` map; `resolveTimestampsAsync` returns only the last frame's sum. The engine wraps
+    `inspector.beginRender` to name each pass (`scene`, `shadow` by the `Shadow Map [ … ]` scene name, `output` for
+    the tone-mapping quad, other `fullscreen` quads). Each readback is then split into whole frames.
+  - **Self-test.** A frame missing a pass is dropped, not under-counted. The self-test fails on:
+    - a timestamp with no recorded pass;
+    - a frame missing a pass;
+    - a repeated batch;
+    - a last frame that does not add up to the Three.js total;
+    - rounded timestamps (the step inferred as the GCD of whole-ns durations; 10 µs or more counts as rounded).
+  - **Lab.** The placeholder `gpuPerPass` is replaced by `gpuScenePass` (the terrain here: the body is the only mesh),
+    `gpuShadowPasses` (terrain shadows: only the body casts) and `gpuOutputPass` (everything else). A
+    `GPU timer self-test` check is added, and the details gain `gpuTimestampStepNs`, `gpuPassFrames` and
+    `gpuPassLabels`.
+  - **Not yet.**
+    - Compute passes are not split.
+    - Plan 051's mid-frame read is answered by construction (a frame counts only when all its passes resolved), not
+      yet by an end-to-end parity probe: alternating heavy and light frames, checked per frame number.
+    - Not yet run on the owner's machine.
+  - Specs: `gpu-pass-timing.spec.ts` and `planet-shape-lab.spec.ts`.
+- Ninth run (`…T21-29-11-276Z_visible-browser_a5d329b3-…`): the first run with per-pass timers and the preflight wait.
+  - The `GPU timer self-test` passed in all eight cases: about 825 complete frames each from 390–650 readbacks, a
+    timestamp step of 1,024 ns, and per-pass totals equal to the whole-render medians.
+  - **Scene pass** (the planet):
+    - empty frame: 0.00 ms (the clear alone);
+    - sphere from orbit: 0.04–0.05 ms;
+    - sphere from the ground: 0.09 ms;
+    - the same at all three sizes.
+  - **Output pass** (tone mapping, colour space): a constant 0.04–0.05 ms. It is the whole of the empty frame's
+    0.045 ms.
+  - No shadow pass, since the shadows feature is off in the baseline.
+  - `preflight-overlapped-measurement` is gone. `gpu-busy-before-start` is real this time: a non-browser app held the
+    GPU during the preflight (process names are in the result file).
+  - Frame interval was at the 165 Hz refresh. CPU load median 73 %.

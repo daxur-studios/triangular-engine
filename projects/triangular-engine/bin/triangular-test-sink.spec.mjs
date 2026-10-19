@@ -244,6 +244,45 @@ test('machine warnings: unavailable GPU sampling and a missing adapter are marke
   assert.match(machineText({ ...row, machine: { ...row.machine, warnings: ['gpu-adapter-unrecorded'] } }), /gpu not recorded \| load med gpu n\/a cpu 30% \| WARN gpu-adapter-unrecorded/);
 });
 
+test('prepare answers after the preflight settles, so the first start is not overlapped', async () => {
+  const root = repo();
+  let probed = false;
+  const sampler = { start: () => ({ stop: async () => fakeCapture() }) };
+  const probe = async () => { await wait(150); probed = true; return { platform: 'win32', power: { source: 'ac' }, processes: [], gpuApps: [] }; };
+  const monitor = createMachineMonitor({ sampler, probe, preflightMs: 0 });
+  const server = createReceiver(root, loadConfig(root), { monitor });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const msg = { runId: 'r1', suiteId: 'demo', suiteVersion: 2, scenarioId: 's1', repetition: 1 };
+  const prepared = await fetch(`${base}${MACHINE_PATH}/prepare`, { method: 'POST', body: JSON.stringify({ runId: 'r1' }) });
+  assert.equal(probed, true);
+  assert.deepEqual(await prepared.json(), { ok: true, sampling: true, preflight: 'done' });
+  for (const action of ['start', 'stop']) await fetch(`${base}${MACHINE_PATH}/${action}`, { method: 'POST', body: JSON.stringify(msg) });
+  const body = run('r1', '2026-10-18T10:00:00Z');
+  body.suite.purpose = 'performance';
+  assert.equal((await fetch(`${base}${SINK_PATH}`, { method: 'POST', body: JSON.stringify(body) })).status, 200);
+  server.close();
+  const [row] = readFileSync(join(root, 'artifacts/test-runs/index.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.ok(!row.machine.warnings.includes('preflight-overlapped-measurement'));
+});
+
+test('a hung preflight probe does not hold prepare past its bound, and a late start still reports the overlap', async () => {
+  const root = repo();
+  const sampler = { start: () => ({ stop: async () => fakeCapture() }) };
+  const monitor = createMachineMonitor({ sampler, probe: () => new Promise(() => {}), preflightMs: 0 });
+  const server = createReceiver(root, loadConfig(root), { monitor, prepareWaitMs: 100 });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const msg = { runId: 'r1', suiteId: 'demo', suiteVersion: 2, scenarioId: 's1', repetition: 1 };
+  const began = Date.now();
+  const prepared = await fetch(`${base}${MACHINE_PATH}/prepare`, { method: 'POST', body: JSON.stringify({ runId: 'r1' }) });
+  assert.ok(Date.now() - began < 2000);
+  assert.deepEqual(await prepared.json(), { ok: true, sampling: true, preflight: 'pending' });
+  assert.deepEqual(await (await fetch(`${base}${MACHINE_PATH}/start`, { method: 'POST', body: JSON.stringify(msg) })).json(), { ok: true, sampling: true });
+  server.close();
+  assert.equal(machineWarnings({ overlapped: true }, {}).includes('preflight-overlapped-measurement'), true);
+});
+
 test('a receiver without machine sampling still answers the timing messages', async () => {
   const root = repo();
   const server = createReceiver(root, { ...loadConfig(root), machineSampling: false });

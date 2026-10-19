@@ -112,6 +112,8 @@ export interface IEngineOptions {
    * Measure GPU frame time with WebGPU timestamp queries (`FPSController.gpuFrameTime`, and the
    * GPU term of `uncappedFps`). Off by default: it adds a readback per frame. Works only on the
    * WebGPU renderer with the `timestamp-query` adapter feature; WebGL2 reports GPU time as n/a.
+   * A `FrameSampler` window also gets the time per render pass (`IFrameSampleSummary.gpuPasses`): scene,
+   * shadow, output and other full-screen passes, with a timer self-test.
    */
   gpuTiming?: boolean;
 }

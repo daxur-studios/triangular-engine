@@ -2,7 +2,7 @@ import type {
   TestCaseResult, TestContext, TestMetric, TestMetricSummary, TestProgress, TestRunAdapter, TestRunOptions, TestRunResult,
   TestSetting, TestSuite,
 } from './test-contracts';
-import { gpuVendorIssue, sendMachineMessage } from './test-machine';
+import { gpuVendorIssue, MACHINE_PREPARE_TIMEOUT_MS, sendMachineMessage } from './test-machine';
 import { MAX_TEST_REPETITIONS, TEST_PROFILES, validateTestHistory } from './test-launch';
 
 /** Includes warm-up and cleanup; a lost render loop must not leave an indefinitely running UI. */
@@ -100,8 +100,8 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
       signal, profile: options.profile, repetition, wait: (ms) => waitForTest(ms, signal),
     });
     const machineSink = suite.purpose === 'performance' ? options.machineSink : undefined;
-    const machineMessage = (kind: 'prepare' | 'start' | 'stop', scenarioId?: string, repetition?: number) =>
-      sendMachineMessage(machineSink as string, kind, { runId, suiteId: suite.id, suiteVersion: suite.version, scenarioId, repetition });
+    const machineMessage = (kind: 'prepare' | 'start' | 'stop', scenarioId?: string, repetition?: number, timeoutMs?: number) =>
+      sendMachineMessage(machineSink as string, kind, { runId, suiteId: suite.id, suiteVersion: suite.version, scenarioId, repetition }, timeoutMs);
     let snapshot: TSnapshot | undefined;
     let captured = false;
     let failed = false;
@@ -115,10 +115,12 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
         buildFingerprint: 'unknown',
       }, adapter.environment?.());
       progress('preparing');
-      // The receiver's slow preflight (power, other processes) runs now, not inside the first measurement.
-      if (machineSink) void machineMessage('prepare');
+      // The receiver's slow preflight (power, other processes) runs now, not inside the first measurement. It overlaps
+      // the capture, but the first case waits for its reply (bounded by MACHINE_PREPARE_TIMEOUT_MS; never rejects).
+      const machinePrepared = machineSink ? machineMessage('prepare', undefined, undefined, MACHINE_PREPARE_TIMEOUT_MS) : undefined;
       snapshot = await abortable(() => adapter.capture(context(controller.signal, 1)), controller.signal);
       captured = true;
+      if (machinePrepared) await abortable(() => machinePrepared, controller.signal);
       for (let repetition = 1; repetition <= options.repetitions; repetition++) {
         for (const scenario of suite.scenarios) {
           const validityIssues = new Set<string>();

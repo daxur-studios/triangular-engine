@@ -1,3 +1,4 @@
+import type { GpuPassKind, IGpuPassSummary } from 'triangular-engine';
 import type { TestCheck, TestContext, TestMetric, TestObservation, TestRunAdapter, TestScenario, TestSetting } from 'triangular-engine/testing';
 import { featureMismatches } from './planet-shape-features';
 import type { PlanetShapeTestSettings } from './planet-shape-tests';
@@ -21,6 +22,35 @@ export interface PlanetShapeFrameSummary {
   readonly gpuSamples: number;
   readonly invalidReasons: readonly string[];
   readonly verdict: string;
+  /** GPU ms split by render pass, with the timer self-test; absent or `null` without per-pass timestamps. */
+  readonly gpuPasses?: IGpuPassSummary | null;
+}
+
+/**
+ * The per-pass GPU metrics, in the terms of plan 055. WebGPU times passes, not meshes, and in this lab only the body
+ * draws into the scene pass and casts into the shadow map, so the scene pass is the terrain and the shadow passes are
+ * the terrain shadows. The output pass (tone mapping, colour space) is everything else.
+ */
+const GPU_PASS_METRICS: readonly { readonly kind: GpuPassKind; readonly name: string; readonly source: string; readonly absent: string }[] = [
+  {
+    kind: 'scene', name: 'gpuScenePass',
+    source: 'WebGPU timestamps of the main scene pass, per frame: the terrain here (the body is the only mesh), plus clear',
+    absent: 'No scene pass was timed',
+  },
+  {
+    kind: 'shadow', name: 'gpuShadowPasses',
+    source: 'WebGPU timestamps of the shadow-map passes, summed per frame: the terrain shadows (only the body casts)',
+    absent: 'No shadow pass rendered (shadows feature off)',
+  },
+  {
+    kind: 'output', name: 'gpuOutputPass',
+    source: 'WebGPU timestamps of the renderer output pass (tone mapping, colour space): everything else',
+    absent: 'No output pass was timed',
+  },
+];
+
+function passLabels(passes: IGpuPassSummary): string {
+  return Object.entries(passes.byLabel).map(([label, stat]) => `${label}: ${stat.medianMs.toFixed(4)} ms`).join('; ');
 }
 
 /** What the lab page offers the adapter: its normal actions plus read-only probes. Implemented by the page. */
@@ -138,7 +168,18 @@ export function createPlanetShapeTestAdapter(host: PlanetShapeTestHost): TestRun
         { name: 'Drawing buffer reported', passed: info.drawingBuffer[0] > 0 && info.drawingBuffer[1] > 0, detail: `${info.drawingBuffer[0]}x${info.drawingBuffer[1]}` },
         { name: 'No engine or console error', passed: error === '', detail: error || undefined },
       ];
+      const passes = summary.gpuPasses ?? null;
+      if (passes) {
+        // The timer self-test: every timestamp belongs to a pass of the frame it claims, no frame is cut short, the
+        // passes add up to the Three.js frame total, and the timestamps are not rounded.
+        checks.push({
+          name: 'GPU timer self-test', passed: passes.selfTest.passed,
+          detail: passes.selfTest.issues.join('; ')
+            || `${passes.frames} frames in ${passes.selfTest.batches} readbacks, timestamp step ${passes.resolution.resolutionNs} ns`,
+        });
+      }
       const software = environment['gpu.software'] === true;
+      const timestampQuery = environment['gpu.timestampQuery'] === true;
       const metrics: TestMetric[] = [
         {
           name: 'frameInterval', unit: 'ms', source: 'Deltas of engine renderComplete$ timestamps (performance.now); display-cadence quantized, not GPU time',
@@ -148,11 +189,13 @@ export function createPlanetShapeTestAdapter(host: PlanetShapeTestHost): TestRun
           name: 'renderSubmitCpu', unit: 'ms', source: 'beforeRender$ to renderComplete$ on the main thread: command encoding and submit, not GPU execution',
           samples: submit, unavailableReason: submit.length ? undefined : 'No frame completed in the window',
         },
-        // TODO(plan 055 Phase 0): per-pass GPU timers (terrain, terrain shadows, everything else) replace this placeholder.
-        {
-          name: 'gpuPerPass', unit: 'ms', optional: true, source: 'Per-pass GPU timestamp queries',
-          samples: [], unavailableReason: 'Per-pass GPU timers are not built yet; the whole-render GPU median is in details',
-        },
+        ...GPU_PASS_METRICS.map(({ kind, name, source, absent }): TestMetric => {
+          const samples = passes?.byKind[kind]?.samples ?? [];
+          const unavailableReason = samples.length ? undefined
+            : !passes ? (timestampQuery ? 'No per-pass GPU timestamps were resolved in the window' : 'No GPU timestamp query on this renderer')
+            : absent;
+          return { name, unit: 'ms', optional: true, source, samples, unavailableReason };
+        }),
       ];
       return {
         metrics,
@@ -161,6 +204,8 @@ export function createPlanetShapeTestAdapter(host: PlanetShapeTestHost): TestRun
           frames: summary.frames, cpuMedianMs: summary.cpuMedianMs, cpuP95Ms: summary.cpuP95Ms,
           wallMedianMs: summary.wallMedianMs, wallP95Ms: summary.wallP95Ms, frameVerdict: summary.verdict,
           gpuWholeRenderMedianMs: summary.gpuMedianMs, gpuWholeRenderSamples: summary.gpuSamples,
+          gpuPassFrames: passes?.frames ?? 0, gpuPassTotalMedianMs: passes ? passes.total.medianMs : null,
+          gpuTimestampStepNs: passes?.resolution.resolutionNs ?? null, gpuPassLabels: passes ? passLabels(passes) : null,
           drawCalls: info.drawCalls, triangles: info.triangles,
           drawingBufferWidth: info.drawingBuffer[0], drawingBufferHeight: info.drawingBuffer[1],
         },
@@ -168,12 +213,14 @@ export function createPlanetShapeTestAdapter(host: PlanetShapeTestHost): TestRun
           ...summary.invalidReasons,
           ...(summary.frames < MIN_WINDOW_FRAMES ? [`Fewer than ${MIN_WINDOW_FRAMES} rendered frames in measurement window`] : []),
           ...(software ? ['Software renderer: functional evidence only, not hardware performance'] : []),
+          ...(!passes && timestampQuery && !software ? ['No per-pass GPU timestamps were resolved in the window'] : []),
         ],
         limitations: [
           'Diagnostic timings; no controlled-machine profile, preflight gate or accepted baseline comparison yet.',
           'Draw calls and triangles come from the renderer counters of the last frame and include shadow passes.',
           'The plain sphere is an inscribed polyhedron (512 x 256 segments): a ground view stands above a flat facet, not a curved surface.',
-          'GPU time is not split per pass yet. Compare against the empty frame, not against an absolute budget.',
+          'GPU time is per render pass, not per mesh: the scene pass includes its clear, so compare it against the empty frame.',
+          'Per-pass medians come from complete frames only and need not add up to the whole-render median, which samples fewer frames.',
         ],
       };
     },

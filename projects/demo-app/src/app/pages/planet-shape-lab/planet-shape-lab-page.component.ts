@@ -24,7 +24,8 @@ import { PLANET_SHAPE_TEST_HISTORY, type PlanetShapeTestSettings } from './plane
  *
  * Frames: the body-fixed frame is the render frame. The mesh never moves; the camera sits at the origin and rides with the
  * surface; the sun turns around the planet at the spin rate. Vertices are drawn camera-relative (see
- * `planet-shape-sphere.ts`), so 6,371 km does not jitter. Per-pass GPU timers are not built yet (see the adapter).
+ * `planet-shape-sphere.ts`), so 6,371 km does not jitter. GPU time is split per render pass (scene, shadow, output; see
+ * the adapter) by the engine's `gpuTiming`.
  */
 function formatAltitude(metres: number): string {
   return metres >= 10_000 ? `${Math.round(metres / 1000).toLocaleString('en-US')} km` : `${Math.round(metres)} m`;
@@ -491,7 +492,7 @@ export class PlanetShapeLabPageComponent {
       'reference.drawingBuffer': `${REFERENCE_DRAWING_BUFFER.width}x${REFERENCE_DRAWING_BUFFER.height}`,
       'reference.drawingBufferMatches': width === REFERENCE_DRAWING_BUFFER.width && height === REFERENCE_DRAWING_BUFFER.height,
       'gpu.powerPreference': POWER_PREFERENCE,
-      gpuTimingSource: 'engine gpuTiming: whole-render timestamp query (FrameSampler median); per-pass timers not built yet',
+      gpuTimingSource: 'engine gpuTiming: WebGPU timestamps per render pass (FrameSampler gpuPasses) plus the whole-render median',
       sphereSegments: `${SPHERE_SEGMENTS.width}x${SPHERE_SEGMENTS.height}`,
       frame: BODY_FRAME_NOTE,
       hardwareConcurrency: navigator.hardwareConcurrency ?? null,

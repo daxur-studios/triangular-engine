@@ -1,3 +1,4 @@
+import { GpuPassRecorder, summarizeGpuPasses, type IGpuPassSummary } from 'triangular-engine';
 import { TestSession, buildTestLaunchUrl, parseTestLaunch, validateTestHistory, type TestSetting, type TestSuite } from 'triangular-engine/testing';
 import { adapterLabel, describeGpuAdapter } from './gpu-adapter-info';
 import {
@@ -20,6 +21,7 @@ class FakeHost implements PlanetShapeTestHost {
   error = '';
   webgpu = true;
   software = false;
+  gpuPasses: IGpuPassSummary | null = null;
   readonly before = new Set<() => void>();
   readonly render = new Set<(at: number) => void>();
   private readonly timer = setInterval(() => {
@@ -45,9 +47,27 @@ class FakeHost implements PlanetShapeTestHost {
   startSampling(): void { this.sampling = true; }
   stopSampling(): PlanetShapeFrameSummary {
     this.sampling = false;
-    return { frames: 90, cpuMedianMs: 2, cpuP95Ms: 3, wallMedianMs: 16, wallP95Ms: 18, gpuMedianMs: null, gpuSamples: 0, invalidReasons: [], verdict: 'ok' };
+    return {
+      frames: 90, cpuMedianMs: 2, cpuP95Ms: 3, wallMedianMs: 16, wallP95Ms: 18, gpuMedianMs: null, gpuSamples: 0, invalidReasons: [], verdict: 'ok',
+      gpuPasses: this.gpuPasses,
+    };
   }
-  environment(): Record<string, TestSetting> { return { backend: this.webgpu ? 'webgpu' : 'webgl2', 'gpu.software': this.software }; }
+  environment(): Record<string, TestSetting> {
+    return { backend: this.webgpu ? 'webgpu' : 'webgl2', 'gpu.software': this.software, 'gpu.timestampQuery': this.gpuPasses !== null };
+  }
+}
+
+/** The engine's per-pass summary for `frames` frames of a scene and an output pass, with the given timestamp step. */
+function gpuPassesOf(frames: number, stepNs: number): IGpuPassSummary {
+  const recorder = new GpuPassRecorder();
+  const records = [];
+  for (let frame = 1; frame <= frames; frame++) {
+    recorder.record(`r:1:2:f${frame}`, { name: 'Lab' }, null);
+    recorder.record(`r:2:5:f${frame}`, { name: 'Output Color Transform', isQuadMesh: true }, null);
+    const ms = (steps: number) => (steps * stepNs) / 1e6;
+    records.push({ batch: recorder.attribute(new Map([[`r:1:2:f${frame}`, ms(80 + frame)], [`r:2:5:f${frame}`, ms(5)]])), totalMatches: true });
+  }
+  return summarizeGpuPasses(records)!;
 }
 
 const [BASELINE] = PLANET_SHAPE_TEST_HISTORY;
@@ -218,8 +238,10 @@ describe('planet shape lab', () => {
         expect(result.cases.map((item) => item.checks.every((check) => check.passed))).toEqual([true, true]);
         expect(result.cases[0].checks.map((check) => check.name)).toContain('Planet not drawn');
         expect(result.cases[1].checks.map((check) => check.name)).toContain('Planet drawn');
-        expect(result.cases[0].metrics.map((metric) => metric.name)).toEqual(['frameInterval', 'renderSubmitCpu', 'gpuPerPass']);
-        expect(result.cases[0].metrics[2].optional).toBeTrue();
+        expect(result.cases[0].metrics.map((metric) => metric.name)).toEqual([
+          'frameInterval', 'renderSubmitCpu', 'gpuScenePass', 'gpuShadowPasses', 'gpuOutputPass']);
+        expect(result.cases[0].metrics.slice(2).every((metric) => metric.optional)).toBeTrue();
+        expect(result.cases[0].metrics[2].unavailableReason).toBe('No GPU timestamp query on this renderer');
         expect(host.state).toEqual(before);
         expect(host.before.size).toBe(0);
         expect(host.render.size).toBe(0);
@@ -244,6 +266,33 @@ describe('planet shape lab', () => {
         const result = await run(host, quick('empty-frame'), 'visible-browser');
         expect(result.cases[0].validityIssues).toContain('Software renderer: functional evidence only, not hardware performance');
         expect(result.performanceVerdict).toBe('inconclusive');
+      } finally { host.dispose(); }
+    }, 20_000);
+
+    it('reports per-pass GPU metrics and passes the timer self-test on unrounded timestamps', async () => {
+      const host = new FakeHost();
+      host.gpuPasses = gpuPassesOf(20, 1024);
+      try {
+        const result = await run(host, quick('plain-sphere-orbit-600km'));
+        const [item] = result.cases;
+        const metric = (name: string) => item.metrics.find((entry) => entry.name === name)!;
+        expect(metric('gpuScenePass').samples.length).toBe(20);
+        expect(metric('gpuOutputPass').samples.length).toBe(20);
+        expect(metric('gpuShadowPasses').unavailableReason).toBe('No shadow pass rendered (shadows feature off)');
+        expect(item.checks.find((check) => check.name === 'GPU timer self-test')?.passed).toBeTrue();
+        expect(item.details?.['gpuTimestampStepNs']).toBe(1024);
+        expect(String(item.details?.['gpuPassLabels'])).toContain('Lab:');
+      } finally { host.dispose(); }
+    }, 20_000);
+
+    it('fails the timer self-test when timestamps are rounded', async () => {
+      const host = new FakeHost();
+      host.gpuPasses = gpuPassesOf(20, 65_536);
+      try {
+        const result = await run(host, quick('plain-sphere-orbit-600km'));
+        const check = result.cases[0].checks.find((entry) => entry.name === 'GPU timer self-test');
+        expect(check?.passed).toBeFalse();
+        expect(check?.detail).toContain('rounded to 65536 ns');
       } finally { host.dispose(); }
     }, 20_000);
 

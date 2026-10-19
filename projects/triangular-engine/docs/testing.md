@@ -159,8 +159,8 @@ expected one, is not a hardware number.** A suite can say which GPU it is for wi
 validity issue and the run is `inconclusive`. The summary prints the vendor and backend per run.
 
 **What the receiver records.** `TestSession` (option `machineSink`, which `<tri-test-runner>` sets from `resultSink`
-in dev builds) sends fire-and-forget messages with a one-second timeout; a missing, slow or failing receiver never
-blocks or fails a run. All are `POST <sink>/machine/<kind>` with a `text/plain` JSON body:
+in dev builds) sends `start` and `stop` fire-and-forget with a one-second timeout, and awaits `prepare` (see
+Preflight); a missing, slow or failing receiver never fails a run. All are `POST <sink>/machine/<kind>` with a `text/plain` JSON body:
 
 | kind | when | body |
 | --- | --- | --- |
@@ -176,7 +176,10 @@ the clock-throttle reason mask (`nvidia-smi ... -lms 500`, for the GPU index in 
 finished when the result arrives, or after five minutes.
 
 **Preflight** runs once per run on `prepare`, so its slow calls (about 3 s on Windows) fall in setup, not inside the
-first measurement; if it is still running when the first case starts the run is marked
+first measurement. The receiver answers `prepare` only once the preflight has finished (after at most 8 s, with
+`preflight: 'pending'`), and the session waits for that answer (at most `MACHINE_PREPARE_TIMEOUT_MS`, 10 s) before the
+first case; a missing or slow receiver costs only that wait and never fails the run. If the preflight is still running
+when the first case starts anyway (an older receiver, or a timed-out wait), the run is marked
 `preflight-overlapped-measurement`. It records GPU idle load for about a second, and on Windows AC or battery
 (`Win32_Battery`), the active power scheme (`powercfg`), and the five processes using the most CPU over one second;
 with `nvidia-smi` also the processes holding GPU memory. Other systems skip the power and process checks. **Process
@@ -223,6 +226,44 @@ const result = compareAblation([
   With two rounds per arm the band is crude (it is just how far the two rounds disagreed), so prefer four or more.
 - `invalid` (with `reasons`, numbers `NaN`): fewer than two rounds in an arm, two neighbouring rounds from the same
   arm, a round with no finite samples or with non-finite samples, or an unusable `maxSpread`.
+
+## GPU time per pass
+
+With the engine option `gpuTiming: true` on `WebGPURenderer`, a `FrameSampler` window also splits GPU time by
+render pass. The engine reads this from the timestamps Three.js already writes for every pass, so it adds no
+query of its own.
+
+```ts
+const sampler = engine.fpsController.frameSampler;
+sampler.start();
+// ... let the scenario run ...
+const { gpuPasses } = sampler.stop();
+// gpuPasses?.byKind.scene / .shadow / .output / .fullscreen: { count, medianMs, p95Ms, samples }
+// gpuPasses?.byLabel['Shadow Map [ sun ]'], gpuPasses?.total, gpuPasses?.resolution, gpuPasses?.selfTest
+```
+
+- **Kinds.**
+  - `shadow`: a shadow-map pass. Three.js names it `Shadow Map [ <light> ]`.
+  - `output`: the renderer's tone-mapping and colour-space pass.
+  - `fullscreen`: any other `QuadMesh` pass, such as post-processing.
+  - `scene`: everything else.
+- **Passes, not meshes.** Two meshes drawn in one pass share one number. To see an object's own cost, give it its
+  own pass, or compare the scene with it and without it (see [Ablation](#ablation-abab)). A scene pass includes its
+  clear, so compare it against an empty frame.
+- **Whole frames only.** A frame counts only when every pass the renderer began for it has a timestamp. A readback
+  that lands mid-frame, or a timestamp pool that overflowed, drops that frame; it never under-counts it.
+- **Timer self-test** (`selfTest.passed`, with `issues`). It fails when:
+  - a timestamp belongs to no recorded pass;
+  - a frame is missing a pass;
+  - a batch repeats frames already counted (a stale readback);
+  - a frame's passes do not add up to the Three.js total;
+  - fewer than 8 nonzero durations were seen;
+  - the timestamps are rounded.
+- **Rounding.** `resolution.resolutionNs` is the largest step that every duration is a whole multiple of.
+  - Chrome without `chrome://flags/#enable-webgpu-developer-features` rounds to tens of microseconds, which reads
+    as `quantized`.
+  - With the flag on, the step is about 1 µs.
+- Compute passes are not split yet.
 
 ## Evidence and limitations
 

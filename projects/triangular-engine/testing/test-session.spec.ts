@@ -1,5 +1,6 @@
 import { nearestRankPercentile, summarizeTestSamples, TestSession, waitForTest } from './test-session';
 import type { TestObservation, TestRunAdapter, TestSuite } from './test-contracts';
+import { MACHINE_PREPARE_TIMEOUT_MS } from './test-machine';
 
 interface Settings { value: number }
 const suite: TestSuite<Settings> = {
@@ -205,6 +206,52 @@ describe('TestSession', () => {
       ]);
       expect(sent[1].body).toEqual({ runId: result.runId, suiteId: 'reference', suiteVersion: 1, scenarioId: 'first', repetition: 1 });
       expect(sent[4].body['repetition']).toBe(2);
+    });
+
+    it('waits for the receiver to answer prepare before the first case starts', async () => {
+      let answerPrepare!: () => void;
+      fetchSpy.and.callFake((async (url: RequestInfo | URL, init?: RequestInit) => {
+        sent.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+        if (String(url).endsWith('/prepare')) await new Promise<void>((resolve) => { answerPrepare = resolve; });
+        return new Response('{}');
+      }) as typeof fetch);
+      const applied: string[] = [];
+      adapter.apply = () => { applied.push(`applied after ${sent.length} message(s)`); };
+      const running = new TestSession<Settings, number>().run(perf, adapter, { repetitions: 1, profile: 'visible-browser', machineSink: '/sink' });
+      await settle();
+      expect(sent.map((message) => message.url)).toEqual(['/sink/machine/prepare']);
+      expect(applied).toEqual([]);
+      answerPrepare();
+      const result = await running;
+      await settle();
+      expect(applied).toEqual(['applied after 1 message(s)']);
+      expect(result.cases[0].status).toBe('completed');
+      expect(sent.map((message) => message.url)).toEqual(['/sink/machine/prepare', '/sink/machine/start', '/sink/machine/stop']);
+    });
+
+    it('does not fail the run when the receiver never answers prepare', async () => {
+      jasmine.clock().install();
+      try {
+        // Like a real fetch, a hung request rejects once its abort signal fires.
+        fetchSpy.and.callFake(((url: RequestInfo | URL, init?: RequestInit) => {
+          sent.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+          return new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+        }) as typeof fetch);
+        let done = false;
+        const running = new TestSession<Settings, number>().run(perf, adapter, { repetitions: 1, profile: 'visible-browser', machineSink: '/sink' })
+          .finally(() => { done = true; });
+        for (let i = 0; i < 20 && !done; i++) {
+          await Promise.resolve();
+          await Promise.resolve();
+          jasmine.clock().tick(MACHINE_PREPARE_TIMEOUT_MS);
+        }
+        const result = await running;
+        expect(result.cases[0].status).toBe('completed');
+        expect(result.errors).toEqual([]);
+        expect(sent[0].url).toBe('/sink/machine/prepare');
+      } finally {
+        jasmine.clock().uninstall();
+      }
     });
 
     it('sends nothing for correctness suites or without a sink', async () => {

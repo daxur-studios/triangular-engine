@@ -119,11 +119,18 @@ function readBody(req, send, limit) {
   });
 }
 
+/** Longest `/machine/prepare` waits for the preflight; a hung probe must not block the page. Keep below the page's own wait. */
+export const PREPARE_WAIT_MS = 8000;
+
 /**
- * `monitor` is injectable (specs pass a fake sampler). Timing messages answer at once and sample in the background;
- * they never block a run, and a message for an unknown case is ignored.
+ * `monitor` is injectable (specs pass a fake sampler). `start`/`stop` answer at once and sample in the background; they
+ * never block a run, and a message for an unknown case is ignored. `prepare` answers once the preflight has settled (or
+ * after `prepareWaitMs`), so the page can hold its first case until the machine is measured idle.
  */
-export function createReceiver(root, config = loadConfig(root), { monitor = config.machineSampling ? createMachineMonitor({ sampler: systemSampler({ gpuIndex: config.gpuIndex }) }) : undefined } = {}) {
+export function createReceiver(root, config = loadConfig(root), {
+  monitor = config.machineSampling ? createMachineMonitor({ sampler: systemSampler({ gpuIndex: config.gpuIndex }) }) : undefined,
+  prepareWaitMs = PREPARE_WAIT_MS,
+} = {}) {
   return createServer(async (req, res) => {
     const send = (code, body) => { if (!res.writableEnded) { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); } };
     const path = req.url?.split('?')[0] ?? '';
@@ -136,7 +143,14 @@ export function createReceiver(root, config = loadConfig(root), { monitor = conf
       try {
         const m = JSON.parse(text);
         if (typeof m?.runId !== 'string' || (action !== 'prepare' && (typeof m.scenarioId !== 'string' || !Number.isInteger(m.repetition)))) throw new Error('runId, scenarioId and repetition required');
-        if (monitor) { if (action === 'prepare') void monitor.prepare(m.runId); else void monitor[action](m); }
+        if (monitor && action === 'prepare') {
+          let timer;
+          const timedOut = new Promise((resolveWait) => { timer = setTimeout(resolveWait, prepareWaitMs, 'pending'); });
+          const outcome = await Promise.race([Promise.resolve(monitor.prepare(m.runId)).then(() => 'done', () => 'done'), timedOut]);
+          clearTimeout(timer);
+          return send(200, outcome === 'pending' ? { ok: true, sampling: true, preflight: 'pending' } : { ok: true, sampling: true, preflight: 'done' });
+        }
+        if (monitor) void monitor[action](m);
         return send(200, { ok: true, sampling: Boolean(monitor) });
       } catch (error) { return send(400, { error: error instanceof Error ? error.message : String(error) }); }
     }
