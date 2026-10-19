@@ -1,5 +1,7 @@
 # Changelog
 
+- `triangular-engine/testing`: new pure `compareAblation(rounds, { maxSpread, statistic })` for ABAB comparisons of a baseline (`A`) against a feature (`B`) from alternating rounds. Each round reduces to its median or p95, each arm to the median of those; the result carries `difference`, `relative`, per-arm `spread`, a `noiseBand` (half the min-to-max range of each arm's round numbers, combined as a root sum of squares) and a `verdict` of `faster`, `slower`, `no-difference`, `rejected` (spread above 15 % by default) or `invalid` (with `reasons`). Also exports `AblationRound`, `AblationOptions`, `AblationResult`, `AblationArmResult`, `AblationArm`, `AblationStatistic` and `AblationVerdict`.
+
 - Engine renderers now ask for the high-performance GPU: `powerPreference` defaults to `'high-performance'` for both `WebGLRenderer` and `WebGPURenderer` (the discrete GPU on hybrid laptops; Chrome otherwise handed WebGPU the integrated one). A scene that wants less passes `powerPreference: 'low-power'` (or `'default'`) in `webGLRendererParameters` / `webGpuRendererParameters`. The browser may still ignore the request.
 
 - `triangular-engine/testing`: `<tri-test-runner>` now saves results by default in dev builds (`resultSink` defaults to `true`; pass `false` to opt out). Production builds still never post. A page that forgot the input used to lose its runs silently to the receiver.

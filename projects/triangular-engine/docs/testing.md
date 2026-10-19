@@ -197,6 +197,33 @@ Not included: an empty-frame noise-floor probe before and after a suite needs th
 a lab page, not this entry. The receiver sampling is injectable (`createReceiver(root, config, { monitor })`,
 `createMachineMonitor({ sampler, probe })`) for tests on machines without `nvidia-smi`.
 
+## Ablation (ABAB)
+
+`compareAblation(rounds, { maxSpread?, statistic? })` compares a baseline (arm `A`) with a feature (arm `B`) from
+rounds that ran alternately, A B A B ...: slow drift (thermals, clocks, background load) then hits both arms
+alike instead of looking like an effect. It is pure and has no Angular, renderer or receiver dependency; it does
+not run anything, it only judges the numbers a page already collected.
+
+```ts
+import { compareAblation } from 'triangular-engine/testing';
+const result = compareAblation([
+  { arm: 'A', samples: gpuMsRound1 }, { arm: 'B', samples: gpuMsRound2 },
+  { arm: 'A', samples: gpuMsRound3 }, { arm: 'B', samples: gpuMsRound4 },
+], { statistic: 'median' });
+// result.verdict, result.difference, result.relative, result.noiseBand, result.reasons
+```
+
+- Each round is reduced to one number, its `median` (default) or `p95` (nearest rank, the same helper as the case
+  summaries). An arm's value is the median of its round numbers. Lower is better (a time).
+- `difference` is B minus A; `relative` is `difference / A`. Negative means B is faster.
+- `spread` per arm is `(max - min) / median` of its round numbers. Above `maxSpread` (default `0.15`) the verdict
+  is `rejected`: the machine moved too much to trust any gap. The numbers are still returned.
+- `noiseBand` is `sqrt(halfRangeA^2 + halfRangeB^2)`, where `halfRange` is half of `max - min` of an arm's round
+  numbers. B is `faster` or `slower` only when `|difference|` is larger than the band, otherwise `no-difference`.
+  With two rounds per arm the band is crude (it is just how far the two rounds disagreed), so prefer four or more.
+- `invalid` (with `reasons`, numbers `NaN`): fewer than two rounds in an arm, two neighbouring rounds from the same
+  arm, a round with no finite samples or with non-finite samples, or an unusable `maxSpread`.
+
 ## Evidence and limitations
 
 When adding or substantially updating a spike, plan or runbook, append verified

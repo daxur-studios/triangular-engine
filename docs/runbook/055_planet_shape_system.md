@@ -356,3 +356,4 @@ Built in parallel by three agents in one checkout with disjoint files, then revi
 - `gpu-busy-before-start` now keys on a non-browser process in the preflight's GPU process list; the 20 % load
   threshold is only the fallback when `nvidia-smi` lists no processes. Replayed on the saved runs: the seventh run no
   longer gets it, the fifth (game running) still does. Spec added in `triangular-test-sink.spec.mjs`.
+- 2026-10-19: Phase 0 ablation math added as `compareAblation` in `triangular-engine/testing` (`test-ablation.ts`). It takes alternating A/B rounds, reduces each to its median or p95, and returns `difference`, `relative`, per-arm spread, a noise band (half the min-to-max range of each arm's round numbers, combined as a root sum of squares) and a verdict (`faster`, `slower`, `no-difference`, `rejected` above 15 % spread, `invalid` with reasons). Pure and specced; not yet wired into the lab page, the runner or the receiver.
