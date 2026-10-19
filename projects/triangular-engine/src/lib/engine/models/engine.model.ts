@@ -69,8 +69,15 @@ export interface IEngineOptions {
   maxDeltaTime?: number;
 
   transparent?: boolean;
+  /**
+   * Parameters forwarded to the WebGLRenderer constructor. `powerPreference` defaults to `'high-performance'`
+   * (the discrete GPU on hybrid laptops); pass `'low-power'` or `'default'` to ask for less.
+   */
   webGLRendererParameters?: WebGLRendererParameters;
-  /** Parameters forwarded to WebGPURenderer constructor. */
+  /**
+   * Parameters forwarded to the WebGPURenderer constructor. `powerPreference` defaults to `'high-performance'`
+   * (the discrete GPU on hybrid laptops); pass `'low-power'` or `'default'` to ask for less.
+   */
   webGpuRendererParameters?: WebGPURendererParameters;
   /**
    * Preferred renderer to use. WebGL by default

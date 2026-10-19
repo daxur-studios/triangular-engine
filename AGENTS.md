@@ -54,8 +54,8 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
   `projects/triangular-engine/docs/testing.md` and the `triangular-engine-testing` skill
   (`projects/triangular-engine/.agents/skills/triangular-engine-testing/SKILL.md`).
 - Read results with `npm run test:summary` first; it reads only `artifacts/test-runs/index.jsonl`.
-  Open a full result JSON only for a failing case.
-- Timings from headless or SwiftShader runs are not hardware numbers. Check which GPU adapter a run recorded.
+  Open a full result JSON only for a failing case. In PowerShell quote the separator
+  (`npm run test:summary '--' --suite <id>`), or npm swallows the flags and prints every suite.- Timings from headless or SwiftShader runs are not hardware numbers. Check which GPU adapter a run recorded.
 
 ## Verification checklist
 

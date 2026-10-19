@@ -566,6 +566,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'planet-shape-lab',
+    loadComponent: () =>
+      import('./pages/planet-shape-lab/planet-shape-lab-page.component').then(
+        ({ PlanetShapeLabPageComponent }) => PlanetShapeLabPageComponent,
+      ),
+  },
+  {
     path: 'atmosphere-planet',
     loadComponent: () =>
       import('./pages/atmosphere-planet/atmosphere-planet-page.component').then(

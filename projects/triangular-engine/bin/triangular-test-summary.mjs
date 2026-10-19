@@ -6,6 +6,20 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { caseSummaries, computeFingerprint, loadConfig } from './triangular-test-receiver.mjs';
 
+/** One compact line: GPU adapter vendor and backend, sampled load, and warnings. Empty for runs without machine data. */
+export function machineText(row) {
+  const m = row.machine;
+  if (!row.gpu && !row.gpuBackend && !m) return '';
+  const parts = [`gpu ${[row.gpu, row.gpuBackend].filter(Boolean).join('/') || 'not recorded'}`];
+  if (m) {
+    const load = [m.gpuUtilMedPct !== undefined ? `gpu ${Math.round(m.gpuUtilMedPct)}%` : m.gpuSampling === 'unavailable' ? 'gpu n/a' : '',
+      m.cpuMedPct !== undefined ? `cpu ${Math.round(m.cpuMedPct)}%` : '', m.gpuTempMaxC !== undefined ? `${Math.round(m.gpuTempMaxC)}C` : ''].filter(Boolean);
+    if (load.length) parts.push(`load med ${load.join(' ')}`);
+    if (m.warnings?.length) parts.push(`WARN ${m.warnings.join(', ')}`);
+  }
+  return `  machine: ${parts.join(' | ')}`;
+}
+
 const fmt = (n) => (Number.isFinite(n) ? n.toFixed(2) : 'n/a');
 
 /** A constant metric (draw calls, triangle counts) prints once instead of as med/p95/max. */
@@ -23,6 +37,8 @@ export function summarize(rows, readRun, currentHash, { suite, last = 5, metric 
     for (const row of list.slice(-last)) {
       const stale = currentHash && row.fingerprint !== currentHash ? 'STALE' : 'current';
       lines.push(`${row.startedAt?.slice(0, 16) ?? row.savedAt.slice(0, 16)}  ${row.profile}  ${row.fingerprint} ${stale}  auto=${row.automatedVerdict} perf=${row.performanceVerdict} visual=${row.visualReview}`);
+      const machine = machineText(row);
+      if (machine) lines.push(machine);
       let cases = row.cases;
       let errors = row.errors;
       if (!cases) {
@@ -35,6 +51,8 @@ export function summarize(rows, readRun, currentHash, { suite, last = 5, metric 
         const m = Object.entries(s.metrics).filter(([name]) => !metric || name.includes(metric)).map(([name, v]) => metricText(name, v));
         lines.push(`  ${id}: ${m.join(' | ') || 'no metrics'}`);
         for (const f of s.failed) lines.push(`    FAIL ${f}`);
+        // A validity issue (wrong GPU, lost focus, software renderer) means these timings are not hardware numbers.
+        for (const i of s.invalid ?? []) lines.push(`    INVALID ${i}`);
       }
       for (const e of errors ?? []) lines.push(`  RUN ERROR ${e}`);
       lines.push(`  file: ${row.file}`);

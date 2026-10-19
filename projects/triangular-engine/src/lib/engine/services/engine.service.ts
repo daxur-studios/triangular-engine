@@ -54,6 +54,7 @@ import {
 } from 'three-mesh-bvh';
 import { EngineSettingsService } from './engine-settings.service';
 import { EngineInputService } from './engine-input.service';
+import { withRendererDefaults } from './renderer-defaults';
 
 /** How long one GPU timestamp readback may stay pending before its slot is released. */
 const GPU_READBACK_TIMEOUT_MS = 500;
@@ -401,10 +402,9 @@ export class EngineService implements IEngine {
       this.renderer.dispose();
     }
 
-    this.renderer = new WebGLRenderer({
-      canvas: this.canvas,
-      ...webGLRendererParameters,
-    });
+    this.renderer = new WebGLRenderer(
+      withRendererDefaults({ canvas: this.canvas, ...webGLRendererParameters }),
+    );
 
     this.renderer.info.autoReset = false;
 
@@ -436,11 +436,13 @@ export class EngineService implements IEngine {
       this.renderer.dispose();
     }
 
-    const renderer = new WebGPURenderer({
-      canvas: this.canvas,
-      trackTimestamp: this.options.gpuTiming === true,
-      ...(webGpuRendererParameters || {}),
-    } as any);
+    const renderer = new WebGPURenderer(
+      withRendererDefaults({
+        canvas: this.canvas,
+        trackTimestamp: this.options.gpuTiming === true,
+        ...(webGpuRendererParameters || {}),
+      }) as any,
+    );
 
     renderer.info.autoReset = false;
 

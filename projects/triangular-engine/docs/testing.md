@@ -90,10 +90,10 @@ does not enable hidden production tooling. Button execution uses the same input 
 
 ## Saved results (dev only)
 
-Browser runs can save themselves to disk so an agent can read them. Opt in with
-`[resultSink]="true"` on `<tri-test-runner>`; each finished run, and each visual
-review of it, is POSTed to the same-origin `/__triangular-test-sink` (or the URL you
-pass). Production builds never post. If the receiver is unreachable the panel says
+Browser runs save themselves to disk so an agent can read them. This is on by default
+in dev builds: each finished run, and each visual review of it, is POSTed to the
+same-origin `/__triangular-test-sink`, or the URL passed as `[resultSink]`.
+`[resultSink]="false"` opts out. Production builds never post. If the receiver is unreachable the panel says
 "Result not saved ... use Download JSON"; it never fails silently.
 
 **Setup per game (two lines plus an optional file).** In `angular.json`, set the
@@ -133,7 +133,67 @@ reads only `index.jsonl`; it opens a result file just for lines written before c
 summaries existed. Open a full JSON only for a failing case.
 
 **Caveat.** Headless or software-rendered (SwiftShader) runs give GPU timings that are
-not real hardware numbers; use visible-tab runs on the target machine for performance.
+not real hardware numbers; use visible-tab runs on the target machine for performance. See
+[Machine context](#machine-context-dev-only) for the recorded adapter and machine state.
+
+## Machine context (dev only)
+
+A timing number is only as good as the machine state behind it. With the result sink on, a **performance** suite
+also records what the computer was doing while each case measured. Correctness suites send nothing.
+
+**GPU adapter per run.** Put the adapter the renderer really uses into the adapter's `environment()`:
+
+```ts
+import { describeRendererGpu } from 'triangular-engine/testing';
+environment: () => ({ ...describeRendererGpu(renderer), build: 'dev' }),
+// or, with adapter info in hand: describeGpuAdapter(device.adapterInfo)
+```
+
+This adds `gpu.backend` (`webgpu`, `webgl`, `unknown`), `gpu.vendor`, `gpu.architecture`, `gpu.device` and
+`gpu.description`; browsers may blank fields, which read `unknown`. Three.js 0.186 does not keep the `GPUAdapter`, so
+`describeRendererGpu` reads `renderer.backend.device.adapterInfo` (WebGL fallback: the unmasked vendor and renderer
+strings). Never call `navigator.gpu.requestAdapter()` just to describe the GPU: on a machine with two GPUs it can
+return a different one than the renderer. **A performance run with no adapter info, or on an adapter other than the
+expected one, is not a hardware number.** A suite can say which GPU it is for with `expectedGpuVendor: 'nvidia'`
+(case-insensitive substring of `gpu.vendor`); a timing case on another vendor, or with no recorded adapter, gets a
+validity issue and the run is `inconclusive`. The summary prints the vendor and backend per run.
+
+**What the receiver records.** `TestSession` (option `machineSink`, which `<tri-test-runner>` sets from `resultSink`
+in dev builds) sends fire-and-forget messages with a one-second timeout; a missing, slow or failing receiver never
+blocks or fails a run. All are `POST <sink>/machine/<kind>` with a `text/plain` JSON body:
+
+| kind | when | body |
+| --- | --- | --- |
+| `prepare` | run start, before capture | `{ runId, suiteId, suiteVersion }` |
+| `start` | just before `measure` | `{ runId, suiteId, suiteVersion, scenarioId, repetition }` |
+| `stop` | after `measure` ends or fails | same as `start` |
+
+Between `start` and `stop` the receiver samples every 500 ms: CPU load (`os.cpus()` deltas) and free RAM
+(`os.freemem()`), plus, when `nvidia-smi` exists, GPU utilisation, VRAM, temperature, power, SM clock, P-state and
+the clock-throttle reason mask (`nvidia-smi ... -lms 500`, for the GPU index in `triangular-test.config.json` `gpuIndex`, default 0). Without `nvidia-smi` the block says
+`gpu: 'unavailable'` plus a reason. Each case in the saved result gets a `machine` block with `n`, `min`, `med`,
+`p95`, `max` per field (nearest rank, the same helper as the case summaries). A `start` whose `stop` was lost is
+finished when the result arrives, or after five minutes.
+
+**Preflight** runs once per run on `prepare`, so its slow calls (about 3 s on Windows) fall in setup, not inside the
+first measurement; if it is still running when the first case starts the run is marked
+`preflight-overlapped-measurement`. It records GPU idle load for about a second, and on Windows AC or battery
+(`Win32_Battery`), the active power scheme (`powercfg`), and the five processes using the most CPU over one second;
+with `nvidia-smi` also the processes holding GPU memory. Other systems skip the power and process checks. **Process
+names are stored only in the result file under `artifacts/` (gitignored). Never copy them into docs, plans or
+committed baselines.**
+
+**Warnings, not failures.** The run gets `machine.warnings` in its result and index line: `on-battery`,
+`gpu-busy-before-start` (median GPU utilisation above 20% while idle), `gpu-hot-before-start` (at least 80 C),
+`gpu-throttled` (power-cap, slowdown or thermal clock reasons during a case), `preflight-overlapped-measurement`, and
+`gpu-adapter-unrecorded`. These thresholds are placeholders to be set in Phase 0 of Plan 055 from measured idle
+readings; they mark a run and never change its verdict. The index line also carries `gpu` and `gpuBackend` (from
+`environment`) and a tiny `machine` summary (`warnings`, `cases`, and the highest per-case median CPU and GPU load and
+GPU temperature), so `npm run test:summary` prints one `machine:` line per run without opening the result.
+
+Not included: an empty-frame noise-floor probe before and after a suite needs the page's renderer, so it belongs to
+a lab page, not this entry. The receiver sampling is injectable (`createReceiver(root, config, { monitor })`,
+`createMachineMonitor({ sampler, probe })`) for tests on machines without `nvidia-smi`.
 
 ## Evidence and limitations
 

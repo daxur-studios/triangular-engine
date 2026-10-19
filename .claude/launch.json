@@ -2,6 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "demo-app-running",
+      "url": "http://triangular-demo.localhost:4200"
+    },
+    {
       "name": "demo-app",
       "runtimeExecutable": "npx",
       "runtimeArgs": ["ng", "serve", "demo-app", "--port", "4241"],

@@ -180,4 +180,62 @@ describe('TestSession', () => {
     controller.abort(new Error('stopped'));
     await expectAsync(waitForTest(1000, controller.signal)).toBeRejectedWithError('stopped');
   });
+
+  describe('machine context', () => {
+    const perf: TestSuite<Settings> = { ...suite, purpose: 'performance' };
+    const timing = () => ({ metrics: [{ name: 'interval', unit: 'ms', source: 's', samples: [16, 17] }] });
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+    let sent: { url: string; body: Record<string, unknown> }[];
+    let fetchSpy: jasmine.Spy;
+    beforeEach(() => {
+      sent = [];
+      fetchSpy = spyOn(globalThis, 'fetch').and.callFake((async (url: RequestInfo | URL, init?: RequestInit) => {
+        sent.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+        return new Response('{}');
+      }) as typeof fetch);
+      adapter.measure = async () => timing();
+    });
+
+    it('tells the receiver when each performance case starts and stops measuring', async () => {
+      const result = await new TestSession<Settings, number>().run(perf, adapter,
+        { repetitions: 2, profile: 'visible-browser', machineSink: '/sink' });
+      await settle();
+      expect(sent.map((message) => message.url)).toEqual([
+        '/sink/machine/prepare', '/sink/machine/start', '/sink/machine/stop', '/sink/machine/start', '/sink/machine/stop',
+      ]);
+      expect(sent[1].body).toEqual({ runId: result.runId, suiteId: 'reference', suiteVersion: 1, scenarioId: 'first', repetition: 1 });
+      expect(sent[4].body['repetition']).toBe(2);
+    });
+
+    it('sends nothing for correctness suites or without a sink', async () => {
+      await new TestSession<Settings, number>().run(suite, adapter, { repetitions: 1, profile: 'visible-browser', machineSink: '/sink' });
+      await new TestSession<Settings, number>().run(perf, adapter, { repetitions: 1, profile: 'visible-browser' });
+      await settle();
+      expect(sent).toEqual([]);
+    });
+
+    it('stops sampling when measurement fails, and an unreachable receiver never fails the run', async () => {
+      adapter.measure = async () => { throw new Error('measure failure'); };
+      const failed = await new TestSession<Settings, number>().run(perf, adapter, { repetitions: 1, profile: 'visible-browser', machineSink: '/sink' });
+      await settle();
+      expect(failed.cases[0].error).toContain('measure failure');
+      expect(sent.map((message) => message.url).slice(-2)).toEqual(['/sink/machine/start', '/sink/machine/stop']);
+
+      fetchSpy.and.rejectWith(new TypeError('Failed to fetch'));
+      adapter.measure = async () => timing();
+      const ok = await new TestSession<Settings, number>().run(perf, adapter, { repetitions: 1, profile: 'visible-browser', machineSink: '/sink' });
+      expect(ok.cases[0].status).toBe('completed');
+    });
+
+    it('marks a timing case invalid when the recorded GPU is not the expected one', async () => {
+      adapter.environment = () => ({ 'gpu.vendor': 'intel' });
+      const run = (expectedGpuVendor?: string) => new TestSession<Settings, number>().run({ ...perf, expectedGpuVendor }, adapter,
+        { repetitions: 1, profile: 'visible-browser' });
+      expect((await run('nvidia')).cases[0].validityIssues.join()).toContain('differs from expected nvidia');
+      expect((await run('intel')).cases[0].validityIssues.join()).not.toContain('GPU');
+      expect((await run()).cases[0].validityIssues.join()).not.toContain('GPU');
+      adapter.environment = undefined;
+      expect((await run('nvidia')).cases[0].validityIssues.join()).toContain('not recorded');
+    });
+  });
 });

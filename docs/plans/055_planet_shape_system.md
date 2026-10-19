@@ -302,7 +302,8 @@ Each phase ends with a check in `/planet-shape-lab` (proposed route) and recorde
 
 ### Phase 0. Test track and platform ceiling
 
-**Lab page** `/planet-shape-lab`: a body-fixed planet with fixed seeds at three sizes (64 km, 600 km, 6,371 km),
+**Lab page** `/planet-shape-lab` (skeleton built 2026-10-19: plain sphere, poses, spin, feature registry,
+`planet-shape-baseline` v1; morph slider and per-pass timers still TODO): a body-fixed planet with fixed seeds at three sizes (64 km, 600 km, 6,371 km),
 the same camera rig across contenders, a spinning planet with a time-warp slider, and the morph slider.
 
 **Measurement** (extends `triangular-engine/testing`, Plan 052's runner and `FrameSampler`):
@@ -320,7 +321,9 @@ the same camera rig across contenders, a spinning planet with a time-warp slider
   summaries and failed checks, and `npm run test:summary` reads only the index. Agents read the summary, and open
   a full result only for a failure.
 
-**Machine context** (why a number might be wrong, beyond the page's own view):
+**Machine context** (why a number might be wrong, beyond the page's own view). **Built 2026-10-19, not yet run end
+to end** (runbook): adapter per run, `expectedGpuVendor`, receiver sampling and preflight warnings; thresholds are
+placeholders until idle readings are measured.
 - The local receiver (the Node process that already saves results) samples the machine between "measuring
   started" and "measuring stopped" messages from the page: GPU busy %, VRAM, clocks, temperature and power draw,
   CPU load, free RAM, AC or battery, power mode, and the few heaviest other processes by GPU and CPU. The result

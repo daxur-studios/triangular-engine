@@ -6,10 +6,13 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { attachMachine, createMachineMonitor, systemSampler } from './triangular-test-machine.mjs';
 
 export const SINK_PATH = '/__triangular-test-sink';
+/** Timing messages from the page: `POST {SINK_PATH}/machine/{prepare,start,stop}`. */
+export const MACHINE_PATH = `${SINK_PATH}/machine`;
 export const CONFIG_FILE = 'triangular-test.config.json';
-const DEFAULTS = { port: 4223, outputDir: 'artifacts/test-runs', fingerprintPaths: ['projects'], maxBytes: 20 * 1024 * 1024 };
+const DEFAULTS = { port: 4223, outputDir: 'artifacts/test-runs', fingerprintPaths: ['projects'], maxBytes: 20 * 1024 * 1024, machineSampling: true, gpuIndex: 0 };
 
 export function loadConfig(root) {
   const file = join(root, CONFIG_FILE);
@@ -61,7 +64,8 @@ export const percentile = (sorted, p) => sorted[Math.min(sorted.length - 1, Math
 export function caseSummaries(run) {
   const out = {};
   for (const c of run.cases ?? []) {
-    const entry = out[c.scenario.id] ??= { metrics: {}, failed: [], samples: {} };
+    const entry = out[c.scenario.id] ??= { metrics: {}, failed: [], invalid: [], samples: {} };
+    for (const issue of c.validityIssues ?? []) if (!entry.invalid.includes(issue)) entry.invalid.push(issue);
     for (const m of c.metrics ?? []) {
       if (!m.samples?.length) continue;
       (entry.samples[`${m.name} (${m.unit})`] ??= []).push(...m.samples.filter(Number.isFinite));
@@ -80,15 +84,19 @@ export function caseSummaries(run) {
   return out;
 }
 
-/** Writes the run and one index line; returns the stored relative file name. */
-export function saveRun(root, config, result) {
+/**
+ * Writes the run and one index line; returns the stored relative file name. `machine` (from the monitor) adds a
+ * `machine` block per case and the preflight to the file, and a tiny summary to the index line.
+ */
+export function saveRun(root, config, result, machine) {
   if (!result || typeof result !== 'object' || result.schemaVersion !== 1 || !result.suite?.id || !result.runId) throw new Error('Not a triangular test result');
   const fp = computeFingerprint(root, config.fingerprintPaths);
   const dir = join(root, config.outputDir, `${safe(result.suite.id)}@v${safe(result.suite.version)}`);
   mkdirSync(dir, { recursive: true });
   const stamp = new Date(result.startedAt ?? Date.now()).toISOString().replace(/[:.]/g, '-');
   const name = `${stamp}_${safe(result.profile)}_${fp.hash}.json`;
-  const stored = { ...result, fingerprint: fp, savedAt: new Date().toISOString() };
+  const attached = attachMachine(result, machine);
+  const stored = { ...attached.result, fingerprint: fp, savedAt: new Date().toISOString() };
   writeFileSync(join(dir, name), storedJson(stored));
   const file = `${safe(result.suite.id)}@v${safe(result.suite.version)}/${name}`;
   appendFileSync(join(root, config.outputDir, 'index.jsonl'), JSON.stringify({
@@ -96,23 +104,52 @@ export function saveRun(root, config, result) {
     runId: result.runId, fingerprint: fp.hash, head: fp.headShort, automatedVerdict: result.automatedVerdict,
     performanceVerdict: result.performanceVerdict, visualReview: result.visualReview, status: result.status, file,
     errors: result.errors ?? [], cases: caseSummaries(result),
+    gpu: result.environment?.['gpu.vendor'], gpuBackend: result.environment?.['gpu.backend'], machine: attached.index,
   }) + '\n');
   return file;
 }
 
-export function createReceiver(root, config = loadConfig(root)) {
-  return createServer((req, res) => {
-    const send = (code, body) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
-    if (!req.url?.startsWith(SINK_PATH)) return send(404, { error: 'not found' });
+/** Reads a small JSON body; resolves `undefined` after answering 413/400 itself. */
+function readBody(req, send, limit) {
+  return new Promise((resolve) => {
+    const chunks = []; let size = 0;
+    req.on('data', (chunk) => { size += chunk.length; if (size > limit) { send(413, { error: 'too large' }); req.destroy(); resolve(undefined); } else chunks.push(chunk); });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', () => resolve(undefined));
+  });
+}
+
+/**
+ * `monitor` is injectable (specs pass a fake sampler). Timing messages answer at once and sample in the background;
+ * they never block a run, and a message for an unknown case is ignored.
+ */
+export function createReceiver(root, config = loadConfig(root), { monitor = config.machineSampling ? createMachineMonitor({ sampler: systemSampler({ gpuIndex: config.gpuIndex }) }) : undefined } = {}) {
+  return createServer(async (req, res) => {
+    const send = (code, body) => { if (!res.writableEnded) { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); } };
+    const path = req.url?.split('?')[0] ?? '';
+    if (path.startsWith(`${MACHINE_PATH}/`)) {
+      if (req.method !== 'POST') return send(405, { error: 'POST only' });
+      const action = path.slice(MACHINE_PATH.length + 1);
+      if (!['prepare', 'start', 'stop'].includes(action)) return send(404, { error: 'not found' });
+      const text = await readBody(req, send, 64 * 1024);
+      if (text === undefined) return;
+      try {
+        const m = JSON.parse(text);
+        if (typeof m?.runId !== 'string' || (action !== 'prepare' && (typeof m.scenarioId !== 'string' || !Number.isInteger(m.repetition)))) throw new Error('runId, scenarioId and repetition required');
+        if (monitor) { if (action === 'prepare') void monitor.prepare(m.runId); else void monitor[action](m); }
+        return send(200, { ok: true, sampling: Boolean(monitor) });
+      } catch (error) { return send(400, { error: error instanceof Error ? error.message : String(error) }); }
+    }
+    if (path !== SINK_PATH && path !== `${SINK_PATH}/`) return send(404, { error: 'not found' });
     if (req.method === 'GET') return send(200, { ok: true });
     if (req.method !== 'POST') return send(405, { error: 'POST only' });
-    const chunks = []; let size = 0;
-    req.on('data', (chunk) => { size += chunk.length; if (size > config.maxBytes) { send(413, { error: 'too large' }); req.destroy(); } else chunks.push(chunk); });
-    req.on('end', () => {
-      if (res.writableEnded) return;
-      try { send(200, { ok: true, file: saveRun(root, config, JSON.parse(Buffer.concat(chunks).toString('utf8'))) }); }
-      catch (error) { send(400, { error: error instanceof Error ? error.message : String(error) }); }
-    });
+    const text = await readBody(req, send, config.maxBytes);
+    if (text === undefined) return;
+    try {
+      const result = JSON.parse(text);
+      const machine = monitor && typeof result?.runId === 'string' ? await monitor.finish(result.runId) : undefined;
+      send(200, { ok: true, file: saveRun(root, config, result, machine) });
+    } catch (error) { send(400, { error: error instanceof Error ? error.message : String(error) }); }
   });
 }
 

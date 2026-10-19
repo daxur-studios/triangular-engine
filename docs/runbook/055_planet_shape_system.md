@@ -250,3 +250,76 @@ Documentation only.
   without changing the shape core.
 - Only D11 changes the race: it sets the contact gate's smallest case (R4 now includes the footpath and a whole-base
   flatten). D12 and D13 touch Phase 4 (water, look), not the contenders.
+
+## 2026-10-19 — Phase 0 slices: machine context, lab skeleton, timer survey
+
+Built in parallel by three agents in one checkout with disjoint files, then reviewed. Nothing measured yet.
+
+### Built
+- **Machine context** (`triangular-engine/testing` + receiver): `describeGpuAdapter`, `describeRendererGpu` (reads
+  `renderer.backend.device.adapterInfo`; three.js 0.186.1 keeps no `GPUAdapter`), `gpuVendorIssue`,
+  `TestSuite.expectedGpuVendor`, and `prepare`/`start`/`stop` machine messages to the receiver (performance
+  suites only, fire-and-forget, 1 s timeout). The receiver samples `nvidia-smi`, CPU and RAM every 500 ms during a
+  case and stores a per-case `machine` summary; preflight (power, power mode, heaviest processes) runs on `prepare`
+  because the probe takes about 3.4 s. Warnings, not failures: `on-battery`, `gpu-busy-before-start`,
+  `gpu-hot-before-start`, `gpu-throttled`, `gpu-adapter-unrecorded`, `preflight-overlapped-measurement`.
+- **`/planet-shape-lab` skeleton** (demo app): plain sphere at 64 km, 600 km, 6,371 km with a split high/low float
+  position so the largest body does not jitter; named poses (`orbit`, `low-flyover`, `ground`, `horizon-grazing`);
+  body-fixed frame with sun spin and time warp to 1,000,000x; feature registry (only `shadows` so far); "WebGPU
+  required" overlay. Suite `planet-shape-baseline` v1 (performance, `expectedGpuVendor: 'nvidia'`): empty frame
+  before and after (noise floor) and orbit/ground at each body size.
+
+### Checked
+- Testing entry 35/35, receiver and summary 10/10, lab specs 14/14 (all headless), library and demo builds pass.
+- The page renders in the desktop app's built-in browser with no console errors. **That browser got the AMD
+  integrated GPU (`amd / gcn-5`) at a 1512 × 1152 drawing buffer**, so the hybrid-GPU risk is real for at least one
+  Chromium on this machine. Which adapter the owner's Chrome gets is still unchecked.
+
+### Found (timer survey, read only)
+- three.js 0.186.1 on WebGPU writes a timestamp pair for every `renderer.render()` call and every compute dispatch,
+  but publishes only the frame sum (`info.render.timestamp`). Per-call values sit in
+  `renderer.backend.timestampQueryPool.render` keyed by uid, cleared on each resolve. Per-pass timing therefore means
+  one render call per pass plus reading those entries; no hand-written query sets. The pool holds 2048 slots and
+  resolves itself when full, which would split a frame: the timer self-test must catch that.
+- Plan 051's mid-frame read is fixed in the cloud lab (ticks from `renderComplete$`, generation counter).
+- Phase 0b targets: `/cdlod-planet-lab` (v2/v3, classic WebGL, no camera setter), `/cell-planet-tsl` (WebGPU, view
+  presets), `/clipmap-far-coverage-spike` (classic WebGL, `flyToDistance`). None has a test adapter yet.
+
+### Next
+- Owner: open `/planet-shape-lab` in Chrome on AC and run the suite once, to see which adapter Chrome reports and the
+  idle machine readings (the idle NVIDIA load of about 26 % already exceeds the 20 % placeholder).
+- Per-pass GPU timers with the self-test; morph wiring; then budgets and baselines.
+
+## 2026-10-19 — First owner run lost; free camera
+
+- The owner's first `planet-shape-baseline` run was not saved: the page's runner lacked `[resultSink]="true"`, so
+  nothing reached the receiver. The run must be repeated. Fixed at the root: `resultSink` now defaults to `true` in
+  dev builds (owner: fewer agent mistakes), with `false` as the opt-out.
+- `npm run test:summary -- --suite …` from PowerShell drops the `--`, so npm eats the flags and the summary prints
+  every suite. Quote it: `npm run test:summary '--' --suite …` (AGENTS.md).
+- **Free camera** (owner request): a toggle that starts from the current named pose. Left drag pans over the surface
+  at a speed that follows altitude, right drag (or shift) turns and tilts, the wheel changes altitude by 1.2x per step
+  between 2 m and 6 radii. Any pose button or test run returns to the named poses, so tests stay deterministic. Pure
+  helpers in `planet-shape-camera.ts` with specs (lab specs 16/16).
+
+## 2026-10-19 — Second owner run: Chrome on the AMD iGPU
+
+- Saved (`planet-shape-baseline@v1/2026-10-19T19-01-22-873Z_visible-browser_*.json`). Chrome reported
+  `gpu.vendor amd / gcn-5`: the integrated GPU, not the NVIDIA one. The case recorded "GPU vendor amd differs from
+  expected nvidia", but `test:summary` did not print case validity issues. It now prints them as `INVALID` lines
+  (index lines written from now on carry `invalid`; sink specs 10/10).
+- Machine warnings: `gpu-busy-before-start` (NVIDIA load 32 % median while idle) and
+  `preflight-overlapped-measurement`. Empty frame on the iGPU: frame interval median 6.0 ms, CPU submit 0.3 ms,
+  whole-render GPU median 0.59 ms. Not a hardware number for the target GPU.
+- The empty-frame check failed on one draw call: three.js finishes each frame with an output pass (colour space, tone
+  mapping) that draws one full-screen triangle. The check is now "Planet not drawn" and allows that one call. A failed
+  check stops the suite, so only `empty-frame` ran.
+- Owner: set Chrome to the high-performance GPU (Windows Settings → System → Display → Graphics), restart Chrome, rerun.
+- Third run (`…T19-24-35-016Z_human-observed_…`): all 8 cases pass, still `amd / gcn-5`, every case INVALID for the
+  vendor. Frame interval median about 6.0 ms in every scenario: that is the display refresh (about 165 Hz), not GPU
+  cost. Cause found: the lab never set `powerPreference`, which three.js passes to `navigator.gpu.requestAdapter`.
+  The lab now asks for `'high-performance'` and records it as `gpu.powerPreference`. If Chrome still picks the iGPU,
+  the fallback is adding `chrome.exe` with "Add desktop app" under Windows Graphics settings.
+- Owner: high-performance should be the engine default. Done: both engine renderers now pass
+  `powerPreference: 'high-performance'` unless the scene sets its own (`'low-power'` / `'default'`), through the internal
+  `withRendererDefaults` (spec added). The lab drops its own setting and records `gpu.powerPreference`.

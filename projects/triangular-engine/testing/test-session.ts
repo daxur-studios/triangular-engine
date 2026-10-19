@@ -2,6 +2,7 @@ import type {
   TestCaseResult, TestContext, TestMetric, TestMetricSummary, TestProgress, TestRunAdapter, TestRunOptions, TestRunResult,
   TestSetting, TestSuite,
 } from './test-contracts';
+import { gpuVendorIssue, sendMachineMessage } from './test-machine';
 import { MAX_TEST_REPETITIONS, TEST_PROFILES, validateTestHistory } from './test-launch';
 
 /** Includes warm-up and cleanup; a lost render loop must not leave an indefinitely running UI. */
@@ -98,6 +99,9 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
     const context = (signal: AbortSignal, repetition: number): TestContext => ({
       signal, profile: options.profile, repetition, wait: (ms) => waitForTest(ms, signal),
     });
+    const machineSink = suite.purpose === 'performance' ? options.machineSink : undefined;
+    const machineMessage = (kind: 'prepare' | 'start' | 'stop', scenarioId?: string, repetition?: number) =>
+      sendMachineMessage(machineSink as string, kind, { runId, suiteId: suite.id, suiteVersion: suite.version, scenarioId, repetition });
     let snapshot: TSnapshot | undefined;
     let captured = false;
     let failed = false;
@@ -111,6 +115,8 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
         buildFingerprint: 'unknown',
       }, adapter.environment?.());
       progress('preparing');
+      // The receiver's slow preflight (power, other processes) runs now, not inside the first measurement.
+      if (machineSink) void machineMessage('prepare');
       snapshot = await abortable(() => adapter.capture(context(controller.signal, 1)), controller.signal);
       captured = true;
       for (let repetition = 1; repetition <= options.repetitions; repetition++) {
@@ -125,6 +131,7 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
           const blurred = () => { if (options.profile !== 'headless-hardware') validityIssues.add('Page lost focus'); };
           const pageHidden = () => { validityIssues.add('Page navigation during measurement'); };
           let observing = false;
+          let machineStarted: Promise<void> | undefined;
           try {
             const ctx = context(controller.signal, repetition);
             progress('applying', repetition, scenario);
@@ -139,9 +146,14 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
             win?.addEventListener('blur', blurred);
             win?.addEventListener('pagehide', pageHidden);
             observing = true;
+            if (machineSink) machineStarted = machineMessage('start', scenario.id, repetition);
             const observation = await abortable(() => adapter.measure(scenario, ctx), controller.signal);
             checkVisibility();
             if (suite.purpose === 'performance') for (const issue of observation.validityIssues ?? []) validityIssues.add(issue);
+            if (suite.purpose === 'performance') {
+              const gpuIssue = gpuVendorIssue(suite.expectedGpuVendor, environment);
+              if (gpuIssue) validityIssues.add(gpuIssue);
+            }
             if (options.profile === 'headless-hardware' && suite.purpose === 'performance') {
               validityIssues.add('Headless hardware/power profile was not independently verified');
             }
@@ -162,6 +174,8 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
             }
             throw error;
           } finally {
+            // Stop follows the start message's outcome, so a slow start cannot arrive after its stop.
+            if (machineStarted) void machineStarted.then(() => machineMessage('stop', scenario.id, repetition));
             if (observing) {
               doc?.removeEventListener('visibilitychange', checkVisibility);
               win?.removeEventListener('blur', blurred);

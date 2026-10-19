@@ -155,6 +155,9 @@ EngineService.provide({
 });
 ```
 
+Renderers ask for the high-performance GPU by default (`powerPreference: 'high-performance'`). A scene that should
+use less passes `powerPreference: 'low-power'` in `webGLRendererParameters` / `webGpuRendererParameters`.
+
 ### Rules
 
 - **One `<scene>` per component/viewport.** Do NOT nest multiple `<scene>` elements.

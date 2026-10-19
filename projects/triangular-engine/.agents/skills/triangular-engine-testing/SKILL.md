@@ -110,8 +110,8 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   Save full JSON as an artifact when possible. Report verdicts, failed checks,
   key measurements, limitations, rerun link and artifact path first; inspect raw
   samples on demand. Retain failed-run evidence too.
-- `(completed)` is an in-page Angular output. For durable handoff add
-  `[resultSink]="true"` to the panel (dev only). Recipe: set the `serve` option
+- `(completed)` is an in-page Angular output. Durable handoff is on by default in dev
+  builds (`[resultSink]="false"` opts out). Recipe: set the `serve` option
   `"proxyConfig": "proxy.conf.cjs"` in `angular.json` and make that file
   `module.exports = require('triangular-engine/bin/triangular-test-proxy.cjs')();`.
   `ng serve` then starts the receiver and every run (and review) is saved to
@@ -128,6 +128,13 @@ diagnostic measurements; a runnable link is not an accepted baseline.
 - **Do not trust headless/SwiftShader GPU timings** as hardware numbers. Ask for a
   visible-tab run on the target machine for performance questions; agent-run headless
   runs establish functional integration only.
+- **Machine context (performance suites, dev sink only):** return `describeRendererGpu(renderer)` (or
+  `describeGpuAdapter(device.adapterInfo)`) from the adapter's `environment()`; never request a second adapter. Set
+  `expectedGpuVendor` on a suite meant for one GPU. With the receiver on, each timing case gets a `machine` block
+  (CPU, RAM, and `nvidia-smi` GPU readings) and the run gets `machine.warnings` (`on-battery`,
+  `gpu-busy-before-start`, `gpu-throttled`, ...), shown by `npm run test:summary`. A run with warnings, no adapter
+  info, or the wrong adapter is not a hardware number. Process names stay in `artifacts/` result files; never put
+  them in docs or baselines. See `docs/testing.md`, "Machine context".
 - Without a receiver, JSON copy/paste is the fallback handoff. No queue or
   idle-agent wakeup exists.
 

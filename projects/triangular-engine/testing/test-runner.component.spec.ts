@@ -97,11 +97,25 @@ describe('TestRunnerComponent', () => {
       fixture.destroy();
     });
 
-    it('does nothing unless opted in', async () => {
+    it('does nothing when opted out', async () => {
       const spy = spyOn(window, 'fetch');
       const fixture = await runWith(false);
       expect(spy).not.toHaveBeenCalled();
       expect(fixture.componentInstance.saveStatus()).toBe('');
+      fixture.destroy();
+    });
+
+    it('saves by default in a dev build', async () => {
+      const spy = spyOn(window, 'fetch').and.resolveTo(new Response(JSON.stringify({ ok: true })));
+      await TestBed.configureTestingModule({ imports: [TestRunnerComponent] }).compileComponents();
+      const fixture = TestBed.createComponent<TestRunnerComponent<Settings, number>>(TestRunnerComponent);
+      fixture.componentRef.setInput('suites', history);
+      fixture.componentRef.setInput('adapter', adapter);
+      fixture.detectChanges();
+      fixture.componentInstance.form.controls.profile.setValue('headless-hardware');
+      await fixture.componentInstance.runLatest();
+      for (let i = 0; i < 50 && !fixture.componentInstance.saveStatus(); i++) await new Promise((r) => setTimeout(r, 5));
+      expect(spy.calls.mostRecent().args[0]).toBe('/__triangular-test-sink');
       fixture.destroy();
     });
   });

@@ -17,6 +17,11 @@ export interface TestSuite<TSettings extends object> {
   readonly title: string;
   readonly purpose: 'functional' | 'performance';
   readonly requiresVisualReview?: boolean;
+  /**
+   * Performance suites only: the GPU vendor the numbers are meant for (matched case-insensitively against the recorded
+   * `gpu.vendor`, for example `nvidia`). A case on another vendor, or with no recorded adapter, is invalid evidence.
+   */
+  readonly expectedGpuVendor?: string;
   readonly scenarios: readonly TestScenario<TSettings>[];
 }
 
@@ -128,4 +133,10 @@ export interface TestRunOptions {
   readonly repetitions: number;
   readonly profile: TestProfile;
   readonly timeoutMs?: number;
+  /**
+   * Result-sink URL of a local receiver. When set, a performance run tells the receiver when each measure step starts
+   * and stops (`POST <url>/machine/{prepare,start,stop}`) so it can record what the machine was doing. Fire-and-forget:
+   * it never blocks or fails a run. `<tri-test-runner>` sets it from `resultSink` in dev builds.
+   */
+  readonly machineSink?: string;
 }

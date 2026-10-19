@@ -1,0 +1,255 @@
+import { TestSession, buildTestLaunchUrl, parseTestLaunch, validateTestHistory, type TestSetting, type TestSuite } from 'triangular-engine/testing';
+import { adapterLabel, describeGpuAdapter } from './gpu-adapter-info';
+import {
+  CAMERA_POSES, FREE_CAMERA_MAX_ALTITUDE_RADII, FREE_CAMERA_MIN_ALTITUDE_M, cameraViewFromPose, lookCameraView, panCameraView,
+  resolveCameraPose, resolveCameraView, zoomCameraView,
+} from './planet-shape-camera';
+import { BODIES, SPIN_PERIOD_S, spinAngleAfter, sunDirectionBody } from './planet-shape-config';
+import { FEATURES, defaultFeatureState, featureMismatches, withFeature } from './planet-shape-features';
+import { createCameraRelativeSphereGeometry } from './planet-shape-sphere';
+import {
+  createPlanetShapeTestAdapter, settingsMismatches, type PlanetShapeFrameSummary, type PlanetShapeSceneInfo, type PlanetShapeTestHost,
+} from './planet-shape-test-adapter';
+import { PLANET_SHAPE_DEFAULTS, PLANET_SHAPE_TEST_HISTORY, type PlanetShapeTestSettings } from './planet-shape-tests';
+
+/** Frames come from a 16 ms timer, so the real adapter and session run without a GPU. */
+class FakeHost implements PlanetShapeTestHost {
+  state: PlanetShapeTestSettings = { ...PLANET_SHAPE_DEFAULTS, spinAngleDeg: 12 };
+  frames = 0;
+  sampling = false;
+  error = '';
+  webgpu = true;
+  software = false;
+  readonly before = new Set<() => void>();
+  readonly render = new Set<(at: number) => void>();
+  private readonly timer = setInterval(() => {
+    for (const callback of [...this.before]) callback();
+    this.frames++;
+    for (const callback of [...this.render]) callback(performance.now());
+  }, 16);
+
+  dispose(): void { clearInterval(this.timer); }
+  read(): PlanetShapeTestSettings { return this.state; }
+  apply(settings: PlanetShapeTestSettings): void { this.state = settings; }
+  renderedFrames(): number { return this.frames; }
+  errors(): string { return this.error; }
+  resetErrors(): void { this.error = ''; }
+  backendIsWebGpu(): boolean { return this.webgpu; }
+  scene(): PlanetShapeSceneInfo {
+    const drawn = this.state.kind === 'sphere';
+    return { bodyDrawn: drawn, drawCalls: drawn ? 1 : 0, triangles: drawn ? 261_120 : 0, drawingBuffer: [2560, 1440] };
+  }
+  onBeforeRender(callback: () => void): () => void { this.before.add(callback); return () => this.before.delete(callback); }
+  onRenderComplete(callback: (at: number) => void): () => void { this.render.add(callback); return () => this.render.delete(callback); }
+  isSampling(): boolean { return this.sampling; }
+  startSampling(): void { this.sampling = true; }
+  stopSampling(): PlanetShapeFrameSummary {
+    this.sampling = false;
+    return { frames: 90, cpuMedianMs: 2, cpuP95Ms: 3, wallMedianMs: 16, wallP95Ms: 18, gpuMedianMs: null, gpuSamples: 0, invalidReasons: [], verdict: 'ok' };
+  }
+  environment(): Record<string, TestSetting> { return { backend: this.webgpu ? 'webgpu' : 'webgl2', 'gpu.software': this.software }; }
+}
+
+const [BASELINE] = PLANET_SHAPE_TEST_HISTORY;
+const quick = (...ids: string[]): TestSuite<PlanetShapeTestSettings> => ({
+  ...BASELINE,
+  scenarios: BASELINE.scenarios.filter((scenario) => ids.includes(scenario.id)).map((scenario) => ({ ...scenario, durationMs: 300, warmupMs: 0 })),
+});
+const run = (host: FakeHost, suite: TestSuite<PlanetShapeTestSettings>, profile: 'headless-hardware' | 'visible-browser' = 'visible-browser') =>
+  new TestSession<PlanetShapeTestSettings, PlanetShapeTestSettings>().run(suite, createPlanetShapeTestAdapter(host), { repetitions: 1, profile });
+
+describe('planet shape lab', () => {
+  describe('camera poses', () => {
+    it('resolves every pose on every body to a finite orthonormal view above the surface', () => {
+      for (const body of BODIES) for (const pose of CAMERA_POSES) {
+        const view = resolveCameraPose(pose.id, body.id);
+        const length = (v: readonly number[]) => Math.hypot(...v);
+        const dot = (a: readonly number[], b: readonly number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        expect(length(view.forward)).withContext(`${pose.id} ${body.id}`).toBeCloseTo(1, 12);
+        expect(length(view.up)).toBeCloseTo(1, 12);
+        expect(dot(view.forward, view.up)).toBeCloseTo(0, 12);
+        expect(length(view.position)).toBeCloseTo(body.radiusM + view.altitudeM, 4);
+        expect(view.altitudeM).toBeGreaterThan(0);
+        expect(view.near).toBeLessThan(view.far);
+      }
+    });
+
+    it('places the ground pose 2 m up and the orbit pose looking at the centre', () => {
+      expect(resolveCameraPose('ground', '6371km').altitudeM).toBe(2);
+      const orbit = resolveCameraPose('orbit', '600km');
+      const toCentre = orbit.position.map((c) => -c / Math.hypot(...orbit.position));
+      for (let i = 0; i < 3; i++) expect(orbit.forward[i]).toBeCloseTo(toCentre[i], 12);
+    });
+
+    it('points the horizon pose exactly along the horizon', () => {
+      const view = resolveCameraPose('horizon-grazing', '600km');
+      const radial = view.position.map((c) => c / Math.hypot(...view.position));
+      const along = view.forward[0] * radial[0] + view.forward[1] * radial[1] + view.forward[2] * radial[2];
+      // The line of sight to the horizon is tangent to the sphere: its distance to the centre is the radius.
+      const distanceToCentre = Math.hypot(...view.position) * Math.sqrt(1 - along * along);
+      expect(distanceToCentre).toBeCloseTo(600_000, 3);
+    });
+
+    it('free camera starts at the named pose and stays inside its altitude and pitch limits', () => {
+      const start = cameraViewFromPose('orbit', '600km');
+      const named = resolveCameraPose('orbit', '600km');
+      const free = resolveCameraView(start, '600km', 'free');
+      for (let i = 0; i < 3; i++) expect(free.position[i]).toBeCloseTo(named.position[i], 6);
+
+      let view = zoomCameraView(start, -1000, '600km');
+      expect(resolveCameraView(view, '600km', 'free').altitudeM).toBe(FREE_CAMERA_MIN_ALTITUDE_M);
+      view = zoomCameraView(start, 1000, '600km');
+      expect(view.altitudeM).toBe(FREE_CAMERA_MAX_ALTITUDE_RADII * 600_000);
+      view = lookCameraView(start, 0, -10);
+      expect(view.pitchDeg).toBe(30);
+      view = panCameraView(start, 0, 100, '600km');
+      expect(Math.abs(view.latDeg)).toBeLessThanOrEqual(89.9);
+      expect(Number.isFinite(resolveCameraView(view, '600km', 'free').forward[0])).toBeTrue();
+    });
+
+    it('free camera pans so the ground follows the pointer: dragging down looking north moves the camera north', () => {
+      const start = { ...cameraViewFromPose('orbit', '600km'), headingDeg: 0 };
+      expect(panCameraView(start, 0, 0.1, '600km').latDeg).toBeGreaterThan(start.latDeg);
+      expect(panCameraView(start, 0.1, 0, '600km').lonDeg).toBeLessThan(start.lonDeg);
+    });
+  });
+
+  describe('camera-relative sphere', () => {
+    it('keeps high plus low equal to the exact position, so a 6,371 km body is placed to well under a millimetre', () => {
+      const radius = 6_371_000;
+      const geometry = createCameraRelativeSphereGeometry(radius, 16, 8);
+      const high = geometry.getAttribute('position');
+      const low = geometry.getAttribute('aPositionLow');
+      const normal = geometry.getAttribute('normal');
+      let worstHigh = 0;
+      for (let i = 0; i < high.count; i++) {
+        const length = Math.hypot(
+          high.getX(i) + low.getX(i), high.getY(i) + low.getY(i), high.getZ(i) + low.getZ(i));
+        expect(Math.abs(length - radius)).toBeLessThan(1e-3);
+        worstHigh = Math.max(worstHigh, Math.abs(Math.hypot(high.getX(i), high.getY(i), high.getZ(i)) - radius));
+        expect(Math.hypot(normal.getX(i), normal.getY(i), normal.getZ(i))).toBeCloseTo(1, 5);
+      }
+      // The float32 position alone is off by whole decimetres: that is what the low part exists to remove.
+      expect(worstHigh).toBeGreaterThan(0.01);
+    });
+  });
+
+  describe('spin and sun', () => {
+    it('turns once per day at 1x and keeps the sun direction unit length', () => {
+      expect(spinAngleAfter(0, SPIN_PERIOD_S / 4, 1)).toBeCloseTo(Math.PI / 2, 12);
+      expect(spinAngleAfter(0, 1, 1_000_000)).toBeCloseTo((1e6 * 2 * Math.PI) / SPIN_PERIOD_S % (2 * Math.PI), 9);
+      for (const angle of [0, 1, 4]) expect(Math.hypot(...sunDirectionBody(angle))).toBeCloseTo(1, 12);
+      sunDirectionBody(2 * Math.PI).forEach((component, i) => expect(component).toBeCloseTo(sunDirectionBody(0)[i], 12));
+    });
+  });
+
+  describe('feature registry', () => {
+    it('starts honest: only real features, defaults readable and comparable', () => {
+      expect(FEATURES.map((feature) => feature.id)).toEqual(['shadows']);
+      expect(defaultFeatureState()).toEqual({ shadows: false });
+      expect(featureMismatches(withFeature(defaultFeatureState(), 'shadows', true), defaultFeatureState())).toEqual([
+        'feature shadows: expected false, found true']);
+    });
+  });
+
+  describe('gpu adapter description', () => {
+    it('flattens the adapter the renderer actually uses and the drawing buffer', () => {
+      const info = describeGpuAdapter({
+        backend: {
+          isWebGPUBackend: true,
+          device: {
+            adapterInfo: { vendor: 'nvidia', architecture: 'ada-lovelace', device: '0x2684', description: 'NVIDIA GeForce RTX 4090' },
+            features: { has: (name: string) => name === 'timestamp-query' },
+          },
+        },
+        domElement: { width: 2560, height: 1440 },
+        getPixelRatio: () => 1.5,
+      }, 1.5);
+      expect(info).toEqual(jasmine.objectContaining({
+        backend: 'webgpu', 'gpu.source': 'renderer.backend.device.adapterInfo', 'gpu.vendor': 'nvidia', 'gpu.architecture': 'ada-lovelace',
+        'gpu.device': '0x2684', 'gpu.description': 'NVIDIA GeForce RTX 4090', 'gpu.software': false, 'gpu.timestampQuery': true,
+        'canvas.drawingBufferWidth': 2560, 'canvas.drawingBufferHeight': 1440, devicePixelRatio: 1.5, rendererPixelRatio: 1.5,
+      }));
+      expect(adapterLabel(info)).toBe('nvidia / ada-lovelace / 0x2684 / NVIDIA GeForce RTX 4090');
+    });
+
+    it('labels software adapters and reports a missing adapter instead of inventing one', () => {
+      const software = describeGpuAdapter({ backend: { isWebGPUBackend: true, device: { adapterInfo: { vendor: 'google', description: 'SwiftShader Device' } } } }, 1);
+      expect(software['gpu.software']).toBeTrue();
+      const none = describeGpuAdapter({ backend: { isWebGPUBackend: true, device: {} } }, 1);
+      expect(none['gpu.source']).toBe('unavailable');
+      expect(none['gpu.software']).toBeNull();
+      expect(adapterLabel(none)).toBe('adapter unavailable');
+      expect(describeGpuAdapter(undefined, 1)['backend']).toBe('none');
+    });
+  });
+
+  describe('history', () => {
+    it('is a valid performance suite with the noise floor, orbit and ground at three sizes', () => {
+      expect(() => validateTestHistory(PLANET_SHAPE_TEST_HISTORY)).not.toThrow();
+      expect(`${BASELINE.id}@${BASELINE.version}:${BASELINE.purpose}`).toBe('planet-shape-baseline@1:performance');
+      expect(BASELINE.scenarios.map((scenario) => scenario.id)).toEqual([
+        'empty-frame',
+        'plain-sphere-orbit-64km', 'plain-sphere-ground-64km',
+        'plain-sphere-orbit-600km', 'plain-sphere-ground-600km',
+        'plain-sphere-orbit-6371km', 'plain-sphere-ground-6371km',
+        'empty-frame-after',
+      ]);
+      expect(BASELINE.scenarios[0].settings.kind).toBe('empty');
+    });
+
+    it('builds and parses an exact-version launch link', () => {
+      const base = 'http://triangular-demo.localhost:4200/planet-shape-lab';
+      const url = buildTestLaunchUrl(base, BASELINE, 'visible-browser', 1);
+      expect(parseTestLaunch(new URL(url), PLANET_SHAPE_TEST_HISTORY)?.key).toBe('planet-shape-baseline@1');
+    });
+  });
+
+  describe('adapter run', () => {
+    it('applies scenarios, checks the real state, reports metrics and restores the captured state', async () => {
+      const host = new FakeHost();
+      const before = host.state;
+      try {
+        const result = await run(host, quick('empty-frame', 'plain-sphere-ground-6371km'));
+        expect(result.errors).toEqual([]);
+        // A visible-browser profile in a headless run also records "Page was not focused", so the status stays inconclusive.
+        expect(result.cases.map((item) => item.status)).toEqual(['completed', 'completed']);
+        expect(result.automatedVerdict).toBe('pass');
+        expect(result.cases.map((item) => item.checks.every((check) => check.passed))).toEqual([true, true]);
+        expect(result.cases[0].checks.map((check) => check.name)).toContain('Planet not drawn');
+        expect(result.cases[1].checks.map((check) => check.name)).toContain('Planet drawn');
+        expect(result.cases[0].metrics.map((metric) => metric.name)).toEqual(['frameInterval', 'renderSubmitCpu', 'gpuPerPass']);
+        expect(result.cases[0].metrics[2].optional).toBeTrue();
+        expect(host.state).toEqual(before);
+        expect(host.before.size).toBe(0);
+        expect(host.render.size).toBe(0);
+        expect(host.sampling).toBeFalse();
+      } finally { host.dispose(); }
+    }, 20_000);
+
+    it('fails the backend check off WebGPU', async () => {
+      const host = new FakeHost();
+      host.webgpu = false;
+      try {
+        const result = await run(host, quick('plain-sphere-orbit-600km'));
+        expect(result.cases[0].checks.find((check) => check.name === 'WebGPU backend in use')?.passed).toBeFalse();
+        expect(result.status).toBe('failed');
+      } finally { host.dispose(); }
+    }, 20_000);
+
+    it('marks a software renderer as invalid performance evidence', async () => {
+      const host = new FakeHost();
+      host.software = true;
+      try {
+        const result = await run(host, quick('empty-frame'), 'visible-browser');
+        expect(result.cases[0].validityIssues).toContain('Software renderer: functional evidence only, not hardware performance');
+        expect(result.performanceVerdict).toBe('inconclusive');
+      } finally { host.dispose(); }
+    }, 20_000);
+
+    it('names every field the page did not honour', () => {
+      expect(settingsMismatches({ ...PLANET_SHAPE_DEFAULTS, bodyId: '64km', poseId: 'ground' }, PLANET_SHAPE_DEFAULTS)).toEqual([
+        'bodyId: expected 600km, found 64km', 'poseId: expected orbit, found ground']);
+    });
+  });
+});

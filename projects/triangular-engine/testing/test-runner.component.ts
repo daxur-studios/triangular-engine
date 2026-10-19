@@ -26,10 +26,11 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   /** Query selection is safe data; autostart still requires explicit application opt-in. */
   readonly allowAutoStart = input(false);
   /**
-   * Opt-in durable save (dev only). `true` posts to the same-origin `DEFAULT_TEST_SINK_PATH`; a string is a custom URL.
-   * Each finished run, and each visual review of it, is POSTed as JSON; failure is shown, never silent.
+   * Durable save, on by default in dev builds (production never posts). `true` posts to the same-origin
+   * `DEFAULT_TEST_SINK_PATH`; a string is a custom URL; `false` opts out. Each finished run, and each visual review of
+   * it, is POSTed as JSON; failure is shown, never silent.
    */
-  readonly resultSink = input<boolean | string>(false);
+  readonly resultSink = input<boolean | string>(true);
   readonly progressChange = output<TestProgress | null>();
   readonly completed = output<TestRunResult<TSettings>>();
 
@@ -108,7 +109,9 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     this.activeSuite.set(suite);
     this.abort = new AbortController();
     try {
-      const result = await this.session.run(suite, this.adapter(), options, (progress) => {
+      const sink = this.resultSink();
+      const machineSink = sink && isDevMode() ? (typeof sink === 'string' ? sink : DEFAULT_TEST_SINK_PATH) : undefined;
+      const result = await this.session.run(suite, this.adapter(), { ...options, machineSink }, (progress) => {
         if (this.destroyed) return;
         this.progress.set(progress);
         this.progressChange.emit(progress);

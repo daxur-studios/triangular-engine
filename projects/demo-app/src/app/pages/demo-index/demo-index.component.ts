@@ -80,6 +80,11 @@ export const DEMOS: readonly DemoItem[] = [
     categoryId: 'terrain', tier: 'lab', createdAt: '2026-10-18', entryPoints: ['worldgen', 'worldgen/render', 'testing'], package: 'triangular-engine',
     description: 'Controlled same-world comparison of low-relief plains, angular peaks and volcanoes, with repeatable camera tests.',
   },
+  {
+    id: 'planet-shape-lab', number: '055', title: 'Planet Shape Lab (test track)', route: '/planet-shape-lab',
+    categoryId: 'terrain', tier: 'lab', createdAt: '2026-10-19', entryPoints: ['testing'], package: 'triangular-engine',
+    description: 'Plan 055 Phase 0: a plain sphere at 64 km, 600 km and 6,371 km with shared camera poses, spin time warp, a feature registry and a WebGPU-only baseline test suite.',
+  },
   // --- Shining Gems ---
   {
     id: 'photo-mode-lab',
