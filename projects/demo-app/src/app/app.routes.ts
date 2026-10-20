@@ -573,6 +573,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'tests',
+    loadComponent: () =>
+      import('./pages/test-results/test-results-page.component').then(
+        ({ TestResultsPageComponent }) => TestResultsPageComponent,
+      ),
+  },
+  {
     path: 'atmosphere-planet',
     loadComponent: () =>
       import('./pages/atmosphere-planet/atmosphere-planet-page.component').then(

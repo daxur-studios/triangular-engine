@@ -146,12 +146,65 @@ describe('TestRunnerComponent', () => {
       fixture.destroy();
     });
 
+    it('does not count a dev server answering with its app HTML as a save', async () => {
+      spyOn(window, 'fetch').and.resolveTo(new Response('<!DOCTYPE html><title>Demo App</title>', { headers: { 'content-type': 'text/html' } }));
+      const fixture = await runWith(true);
+      expect(fixture.componentInstance.saveStatus()).toContain('Result not saved: /__triangular-test-sink is not the test receiver');
+      expect(fixture.componentInstance.savedFile()).toBeUndefined();
+      fixture.destroy();
+    });
+
     it('does nothing when opted out', async () => {
       const spy = spyOn(window, 'fetch');
       const fixture = await runWith(false);
       expect(spy).not.toHaveBeenCalled();
       expect(fixture.componentInstance.saveStatus()).toBe('');
       fixture.destroy();
+    });
+
+    describe('thumbnails', () => {
+      const thumbnail = jasmine.createSpy('thumbnail').and.callFake(async () => [new Blob([new Uint8Array([1, 2, 3])], { type: 'image/webp' })]);
+      const withPicture: TestRunAdapter<Settings, number> = { ...adapter, thumbnail };
+      beforeEach(() => thumbnail.calls.reset());
+      async function runPictures(thumbnails: boolean) {
+        await TestBed.configureTestingModule({ imports: [TestRunnerComponent] }).compileComponents();
+        const fixture = TestBed.createComponent<TestRunnerComponent<Settings, number>>(TestRunnerComponent);
+        fixture.componentRef.setInput('suites', history);
+        fixture.componentRef.setInput('adapter', withPicture);
+        fixture.detectChanges();
+        fixture.componentInstance.form.controls.profile.setValue('headless-hardware');
+        fixture.componentInstance.form.controls.thumbnails.setValue(thumbnails);
+        await fixture.componentInstance.runLatest();
+        for (let i = 0; i < 50 && !fixture.componentInstance.saveStatus(); i++) await new Promise((r) => setTimeout(r, 5));
+        return fixture;
+      }
+
+      it('posts the pictures with the result, and keeps them out of the copied JSON', async () => {
+        const spy = spyOn(window, 'fetch').and.resolveTo(new Response(JSON.stringify({ ok: true, file: 'ui-test@v2/a.json', thumbnails: ['ui-test@v2/a/x-r1-0.webp'], dropped: [] })));
+        const fixture = await runPictures(true);
+        const body = JSON.parse(spy.calls.mostRecent().args[1]?.body as string);
+        expect(body.thumbnailUploads).toEqual([{ case: 'check', repetition: 1, index: 0, type: 'image/webp', data: 'AQID' }]);
+        expect(fixture.componentInstance.saveStatus()).toBe('Result saved: ui-test@v2/a.json with 1 thumbnail');
+        expect(fixture.componentInstance.resultText()).not.toContain('thumbnailUploads');
+        expect(fixture.componentInstance.resultText()).not.toContain('AQID');
+        fixture.destroy();
+      });
+
+      it('says which pictures the receiver dropped', async () => {
+        spyOn(window, 'fetch').and.resolveTo(new Response(JSON.stringify({ ok: true, file: 'f.json', thumbnails: [], dropped: ['check: thumbnail dropped, over 64 KB'] })));
+        const fixture = await runPictures(true);
+        expect(fixture.componentInstance.saveStatus()).toContain('1 thumbnail dropped (check: thumbnail dropped, over 64 KB)');
+        fixture.destroy();
+      });
+
+      it('takes none when switched off, and the launch link remembers it', async () => {
+        const spy = spyOn(window, 'fetch').and.resolveTo(new Response(JSON.stringify({ ok: true })));
+        const fixture = await runPictures(false);
+        expect(thumbnail).not.toHaveBeenCalled();
+        expect(JSON.parse(spy.calls.mostRecent().args[1]?.body as string).thumbnailUploads).toBeUndefined();
+        expect(new URL(fixture.componentInstance.result()?.rerunUrl ?? '').searchParams.get('testThumbnails')).toBe('0');
+        fixture.destroy();
+      });
     });
 
     it('saves by default in a dev build', async () => {
@@ -167,5 +220,137 @@ describe('TestRunnerComponent', () => {
       expect(spy.calls.mostRecent().args[0]).toBe('/__triangular-test-sink');
       fixture.destroy();
     });
+  });
+});
+
+describe('TestRunnerComponent copy for agent when done', () => {
+  const KEY = 'triangular-test-copy-when-done';
+  const adapter: TestRunAdapter<Settings, number> = {
+    capture: () => 0, apply: () => {}, ready: async () => {}, measure: async () => ({ metrics: [] }), restore: () => {},
+  };
+  let write: jasmine.Spy;
+  let focused: boolean;
+  const clearStored = () => { try { localStorage.removeItem(KEY); } catch { /* storage unavailable */ } };
+  beforeEach(() => {
+    clearStored();
+    focused = true;
+    spyOn(document, 'hasFocus').and.callFake(() => focused);
+    write = spyOn(navigator.clipboard, 'writeText').and.resolveTo();
+    spyOn(window, 'fetch').and.resolveTo(new Response(JSON.stringify({ ok: true, file: 'ui-test@v2/a.json' })));
+  });
+  afterEach(clearStored);
+
+  async function create(copyOnFinish?: boolean) {
+    await TestBed.configureTestingModule({ imports: [TestRunnerComponent] }).compileComponents();
+    const fixture = TestBed.createComponent<TestRunnerComponent<Settings, number>>(TestRunnerComponent);
+    fixture.componentRef.setInput('suites', history);
+    fixture.componentRef.setInput('adapter', adapter);
+    if (copyOnFinish !== undefined) fixture.componentRef.setInput('copyOnFinish', copyOnFinish);
+    fixture.detectChanges();
+    fixture.componentInstance.form.controls.profile.setValue('headless-hardware');
+    return fixture;
+  }
+  const settled = async (fixture: { componentInstance: TestRunnerComponent<Settings, number> }) => {
+    for (let i = 0; i < 40 && !fixture.componentInstance.message(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  };
+
+  it('copies the agent text once the save has settled, so it names the saved file', async () => {
+    const fixture = await create();
+    await fixture.componentInstance.runLatest();
+    await settled(fixture);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write.calls.mostRecent().args[0]).toContain('Result file: ui-test@v2/a.json');
+    expect(fixture.componentInstance.message()).toBe('Copied for the agent');
+    fixture.destroy();
+  });
+
+  it('still copies when the save failed, saying the file was not saved', async () => {
+    (window.fetch as jasmine.Spy).and.rejectWith(new TypeError('Failed to fetch'));
+    const fixture = await create();
+    await fixture.componentInstance.runLatest();
+    await settled(fixture);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write.calls.mostRecent().args[0]).toContain('Result file: not saved');
+    fixture.destroy();
+  });
+
+  it('copies nothing when the host turns it off', async () => {
+    const fixture = await create(false);
+    await fixture.componentInstance.runLatest();
+    await settled(fixture);
+    expect(write).not.toHaveBeenCalled();
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Copy for agent when done');
+    fixture.destroy();
+  });
+
+  it('copies nothing when the viewer unticks it, and remembers that', async () => {
+    const fixture = await create();
+    fixture.componentInstance.copyWhenDone.setValue(false);
+    expect(localStorage.getItem(KEY)).toBe('0');
+    await fixture.componentInstance.runLatest();
+    await settled(fixture);
+    expect(write).not.toHaveBeenCalled();
+    fixture.destroy();
+    TestBed.resetTestingModule();
+    const next = await create();
+    expect(next.componentInstance.copyWhenDone.value).toBeFalse();
+    next.destroy();
+  });
+
+  it('copies nothing after a cancelled run', async () => {
+    adapter.measure = async (_, context) => { await context.wait(5_000); return { metrics: [] }; };
+    try {
+      const fixture = await create();
+      const running = fixture.componentInstance.runLatest();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      fixture.componentInstance.cancel();
+      await running;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(fixture.componentInstance.result()?.status).toBe('cancelled');
+      expect(write).not.toHaveBeenCalled();
+      fixture.destroy();
+    } finally { adapter.measure = async () => ({ metrics: [] }); }
+  });
+
+  it('copies nothing in a tab without focus, and says so', async () => {
+    focused = false;
+    const fixture = await create();
+    await fixture.componentInstance.runLatest();
+    await settled(fixture);
+    expect(write).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.message()).toBe('Not copied (tab not focused); press Copy for agent');
+    fixture.destroy();
+  });
+
+  it('reports a refused clipboard write instead of throwing', async () => {
+    write.and.rejectWith(new DOMException('Document is not focused', 'NotAllowedError'));
+    const fixture = await create();
+    await fixture.componentInstance.runLatest();
+    await settled(fixture);
+    expect(fixture.componentInstance.message()).toBe('Not copied (tab not focused); press Copy for agent');
+    fixture.destroy();
+  });
+
+  it('does not copy again when the visual review is saved', async () => {
+    const fixture = await create();
+    await fixture.componentInstance.runLatest();
+    await settled(fixture);
+    fixture.componentInstance.review('accepted');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(write).toHaveBeenCalledTimes(1);
+    fixture.destroy();
+  });
+
+  it('works when storage throws', async () => {
+    spyOn(Storage.prototype, 'getItem').and.throwError('blocked');
+    spyOn(Storage.prototype, 'setItem').and.throwError('blocked');
+    const fixture = await create();
+    expect(fixture.componentInstance.copyWhenDone.value).toBeTrue();
+    fixture.componentInstance.copyWhenDone.setValue(false);
+    await fixture.componentInstance.runLatest();
+    await settled(fixture);
+    expect(write).not.toHaveBeenCalled();
+    fixture.destroy();
   });
 });

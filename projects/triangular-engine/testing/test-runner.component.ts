@@ -1,5 +1,6 @@
 import { DOCUMENT } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, input, isDevMode, OnInit, output, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import type { TestAblationOutcome, TestCaseThumbnails, TestMetric, TestMode, TestProfile, TestProgress, TestRunAdapter, TestRunResult, TestSuite } from './test-contracts';
 import { buildTestLaunchUrl, MAX_TEST_REPETITIONS, parseTestLaunch, TEST_MODES, TEST_PROFILES, testSuiteKey, validateTestHistory } from './test-launch';
@@ -8,6 +9,19 @@ import { encodeThumbnailUploads } from './test-thumbnails';
 
 /** Same-origin path the dev-server proxy forwards to the result receiver. */
 export const DEFAULT_TEST_SINK_PATH = '/__triangular-test-sink';
+/** Per-viewer choice of copying for the agent when a run finishes. */
+const COPY_WHEN_DONE_KEY = 'triangular-test-copy-when-done';
+
+/** Storage can be missing or throw (private windows, blocked site data); the runner works without it. */
+function readStoredFlag(key: string, fallback: boolean): boolean {
+  try { const value = globalThis.localStorage?.getItem(key); return value === null || value === undefined ? fallback : value === '1'; }
+  catch { return fallback; }
+}
+
+function writeStoredFlag(key: string, value: boolean): void {
+  try { globalThis.localStorage?.setItem(key, value ? '1' : '0'); } catch { /* not remembered */ }
+}
+
 /** A soak series whose median moved more than this from the first to the last quarter is reported as drift. */
 export const SOAK_DRIFT_WARNING = 0.05;
 
@@ -103,6 +117,12 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
    * it, is POSTed as JSON; failure is shown, never silent.
    */
   readonly resultSink = input<boolean | string>(true);
+  /**
+   * Copy the agent hand-off text (`testRunAgentText`) to the clipboard when a run finishes, once its save has settled so
+   * the text names the saved file. The viewer can switch it off with the "Copy for agent when done" checkbox (remembered
+   * in `localStorage`). Not after a cancelled run, not after a visual review, and only in a focused tab.
+   */
+  readonly copyOnFinish = input(true);
   readonly progressChange = output<TestProgress | null>();
   readonly completed = output<TestRunResult<TSettings>>();
 
@@ -119,6 +139,8 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     thumbnails: new FormControl(true, { nonNullable: true }),
   });
   readonly reviewNotes = new FormControl('', { nonNullable: true });
+  /** The viewer's choice to copy for the agent when a run finishes; the `copyOnFinish` input is the host's switch. */
+  readonly copyWhenDone = new FormControl(readStoredFlag(COPY_WHEN_DONE_KEY, true), { nonNullable: true });
   readonly progress = signal<TestProgress | null>(null);
   readonly running = signal(false);
   readonly result = signal<TestRunResult<TSettings> | null>(null);
@@ -154,6 +176,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
         void this.runSelected();
       }
     });
+    this.copyWhenDone.valueChanges.pipe(takeUntilDestroyed()).subscribe((value) => writeStoredFlag(COPY_WHEN_DONE_KEY, value));
     this.destroyRef.onDestroy(() => { this.destroyed = true; this.abort?.abort(); });
   }
 
@@ -211,7 +234,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
         const withLink = { ...result, rerunUrl: buildTestLaunchUrl(this.doc.location.href, result.suite, options.profile, options.repetitions, options.mode, options.thumbnails) };
         this.result.set(withLink);
         this.completed.emit(withLink);
-        void this.saveResult(withLink, thumbnails);
+        void this.saveResult(withLink, thumbnails).then(() => this.copyWhenFinished(withLink));
       }
     } catch (error) {
       if (!this.destroyed) this.message.set(error instanceof Error ? error.message : String(error));
@@ -242,8 +265,10 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     try {
       const thumbnailUploads = thumbnails.length ? await encodeThumbnailUploads(thumbnails) : undefined;
       const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(thumbnailUploads ? { ...result, thumbnailUploads } : result) });
-      const body = response.ok ? await response.json().catch(() => ({})) as { file?: string; thumbnails?: readonly string[]; dropped?: readonly string[] } : null;
+      const body = response.ok ? await response.json().catch(() => null) as { ok?: boolean; file?: string; thumbnails?: readonly string[]; dropped?: readonly string[] } | null : null;
       if (this.destroyed) return;
+      // A dev server without the sink proxy answers 200 with the app's HTML: that is not a save.
+      if (response.ok && body?.ok !== true) { this.saveStatus.set(`Result not saved: ${url} is not the test receiver (is the sink proxy set up?). Use Download JSON.`); return; }
       this.savedFile.set(body?.file);
       const images = body?.thumbnails?.length ? ` with ${body.thumbnails.length} thumbnail${body.thumbnails.length > 1 ? 's' : ''}` : '';
       const dropped = body?.dropped?.length ? `; ${body.dropped.length} thumbnail${body.dropped.length > 1 ? 's' : ''} dropped (${body.dropped[0]})` : '';
@@ -258,6 +283,20 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     const mean = metric.samples.reduce((sum, value) => sum + value, 0) / metric.samples.length;
     const p95 = nearestRankPercentile([...metric.samples].sort((a, b) => a - b), 0.95);
     return `${metric.name}: mean ${mean.toFixed(2)}, p95 ${p95.toFixed(2)} ${metric.unit} · ${metric.samples.length} provider readings`;
+  }
+
+  /**
+   * After a run's save has settled (saved or failed), copies the hand-off text once. Chrome allows `writeText` without a
+   * click only in a focused tab; any refusal is reported in the message and never thrown.
+   */
+  private async copyWhenFinished(run: TestRunResult<TSettings>): Promise<void> {
+    if (this.destroyed || !this.copyOnFinish() || !this.copyWhenDone.value || run.status === 'cancelled') return;
+    const notCopied = 'Not copied (tab not focused); press Copy for agent';
+    if (!this.doc.hasFocus()) { this.message.set(notCopied); return; }
+    try {
+      await this.doc.defaultView?.navigator.clipboard.writeText(testRunAgentText(run, this.savedFile()));
+      if (!this.destroyed) this.message.set('Copied for the agent');
+    } catch { if (!this.destroyed) this.message.set(notCopied); }
   }
 
   /** Copies the short hand-off text: suite, mode, verdicts, the saved file and every problem. */

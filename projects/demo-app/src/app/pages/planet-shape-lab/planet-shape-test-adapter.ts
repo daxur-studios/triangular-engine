@@ -73,6 +73,11 @@ export interface PlanetShapeTestHost {
   gpuSamplesSoFar(): readonly number[];
   stopSampling(): PlanetShapeFrameSummary;
   environment(): Readonly<Record<string, TestSetting>>;
+  /**
+   * A small picture of the current view, for the results page (the page uses `ScreenshotService` on its fast path, so the
+   * renderer is not resized). Optional: a host without it gets no thumbnails. Only called after a measurement.
+   */
+  thumbnail?(): Promise<Blob | undefined>;
 }
 
 const READY_TIMEOUT_MS = 60_000;
@@ -248,5 +253,14 @@ export function createPlanetShapeTestAdapter(host: PlanetShapeTestHost): TestRun
       await waitForFrames(host, 2, context);
     },
     environment: () => host.environment(),
+    // One still per scenario, from the first repetition: later ones look at the same view. Taken by the session after
+    // `measure`, never inside the window.
+    ...(host.thumbnail ? {
+      thumbnail: async (_: TestScenario<PlanetShapeTestSettings>, context: TestContext) => {
+        if (context.repetition > 1) return undefined;
+        const image = await host.thumbnail?.();
+        return image ? [image] : undefined;
+      },
+    } : {}),
   };
 }

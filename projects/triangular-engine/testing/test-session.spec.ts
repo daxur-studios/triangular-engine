@@ -1,5 +1,6 @@
 import { MAX_FOCUS_RETRIES, nearestRankPercentile, summarizeTestSamples, TestSession, waitForTest } from './test-session';
-import type { TestObservation, TestRunAdapter, TestSuite } from './test-contracts';
+import type { TestCaseThumbnails, TestObservation, TestRunAdapter, TestRunOptions, TestSuite } from './test-contracts';
+import { MAX_CASE_THUMBNAILS, MAX_RUN_THUMBNAIL_BYTES, MAX_THUMBNAIL_BYTES } from './test-thumbnails';
 import { MACHINE_PREPARE_TIMEOUT_MS } from './test-machine';
 
 interface Settings { value: number }
@@ -275,6 +276,122 @@ describe('TestSession', () => {
     const controller = new AbortController();
     controller.abort(new Error('stopped'));
     await expectAsync(waitForTest(1000, controller.signal)).toBeRejectedWithError('stopped');
+  });
+
+  describe('thumbnails', () => {
+    const image = (bytes: number) => new Blob([new Uint8Array(bytes)], { type: 'image/webp' });
+    let order: string[];
+    let received: TestCaseThumbnails[];
+    beforeEach(() => {
+      order = [];
+      received = [];
+      const measure = adapter.measure;
+      adapter.measure = async (scenario, context) => { order.push('measure'); return measure(scenario, context); };
+      adapter.thumbnail = async () => { order.push('thumbnail'); return [image(100)]; };
+    });
+    const run = (options: Partial<TestRunOptions> = {}, input = suite) => new TestSession<Settings, number>().run(input, adapter,
+      { repetitions: 1, profile: 'headless-hardware', onThumbnails: (entry) => { received.push(entry); }, ...options });
+
+    it('asks for a thumbnail once per kept case, after its measurement, and keeps the pixels out of the result', async () => {
+      const result = await run({ repetitions: 2 });
+      expect(order).toEqual(['measure', 'thumbnail', 'measure', 'thumbnail']);
+      expect(received.map((entry) => [entry.scenarioId, entry.repetition, entry.images.length])).toEqual([['first', 1, 1], ['first', 2, 1]]);
+      expect(JSON.stringify(result)).not.toContain('"images"');
+      expect(result.cases[0].limitations).toEqual([]);
+    });
+
+    it('can be turned off, and is skipped without a place to put the pictures', async () => {
+      await run({ thumbnails: false });
+      await new TestSession<Settings, number>().run(suite, adapter, { repetitions: 1, profile: 'headless-hardware' });
+      expect(order).toEqual(['measure', 'measure']);
+      expect(received).toEqual([]);
+    });
+
+    it('turns a failing or empty hook into a limitation without failing the case', async () => {
+      adapter.thumbnail = async () => { throw new Error('canvas lost'); };
+      const failed = await run();
+      expect(failed.status).toBe('completed');
+      expect(failed.cases[0].limitations).toEqual(['Thumbnail not taken: canvas lost']);
+      adapter.thumbnail = async () => undefined;
+      expect((await run()).cases[0].limitations).toEqual([]);
+      adapter.thumbnail = async () => [];
+      expect((await run()).cases[0].limitations).toEqual([]);
+      expect(received).toEqual([]);
+    });
+
+    it('gives the hook the run\'s abort signal', async () => {
+      const cancel = new AbortController();
+      let seen: AbortSignal | undefined;
+      adapter.thumbnail = async (_, context) => { seen = context.signal; cancel.abort(); await context.wait(1000); return [image(10)]; };
+      const result = await new TestSession<Settings, number>().run(suite, adapter,
+        { repetitions: 1, profile: 'headless-hardware', onThumbnails: (entry) => { received.push(entry); } }, undefined, cancel.signal);
+      expect(seen).toBeDefined();
+      expect(result.cases[0].status).toBe('completed');
+      expect(result.cases[0].limitations[0]).toContain('Thumbnail not taken');
+      expect(result.status).toBe('cancelled');
+      expect(received).toEqual([]);
+    });
+
+    it('drops pictures over the per-image, per-case and per-run limits and says why', async () => {
+      adapter.thumbnail = async () => [image(MAX_THUMBNAIL_BYTES + 1), image(MAX_THUMBNAIL_BYTES), image(0)];
+      const result = await run();
+      expect(received[0].images.map((blob) => blob.size)).toEqual([MAX_THUMBNAIL_BYTES]);
+      expect(result.cases[0].limitations.length).toBe(2);
+      expect(result.cases[0].limitations[0]).toContain('over 64 KB');
+      // 2 MB / 64 KB = 32 full-size pictures; the 33rd finds the budget used up.
+      received = [];
+      const many: TestSuite<Settings> = { ...suite, scenarios: Array.from({ length: 33 }, (_, i) => ({ id: `case-${i}`, label: `Case ${i}`, durationMs: 1, settings: { value: 7 } })) };
+      adapter.thumbnail = async () => [image(MAX_THUMBNAIL_BYTES)];
+      const big = await run({}, many);
+      expect(received.length).toBe(MAX_RUN_THUMBNAIL_BYTES / MAX_THUMBNAIL_BYTES);
+      expect(big.cases.at(-1)?.limitations[0]).toContain('used up');
+      adapter.thumbnail = async () => Array.from({ length: MAX_CASE_THUMBNAILS + 2 }, () => image(10));
+      received = [];
+      expect((await run()).cases[0].limitations.length).toBe(2);
+      expect(received[0].images.length).toBe(MAX_CASE_THUMBNAILS);
+    });
+
+    it('keeps the picture off the page-focus watch: a blur while it is taken is neither a redo nor a validity issue', async () => {
+      spyOn(document, 'hasFocus').and.returnValue(true);
+      spyOnProperty(document, 'visibilityState').and.returnValue('visible');
+      adapter.thumbnail = async () => { order.push('thumbnail'); window.dispatchEvent(new Event('blur')); return [image(10)]; };
+      const result = await run({ profile: 'visible-browser' });
+      expect(order).toEqual(['measure', 'thumbnail']);
+      expect(result.cases[0].retries).toBeUndefined();
+      expect(result.cases[0].validityIssues).toEqual([]);
+      expect(received.length).toBe(1);
+    });
+
+    it('takes no picture of an attempt that is redone after focus loss', async () => {
+      let focused = true;
+      spyOn(document, 'hasFocus').and.callFake(() => focused);
+      spyOnProperty(document, 'visibilityState').and.returnValue('visible');
+      let attempts = 0;
+      adapter.measure = async (_, context) => {
+        order.push('measure');
+        if (++attempts === 1) {
+          focused = false;
+          window.dispatchEvent(new Event('blur'));
+          setTimeout(() => { focused = true; }, 300);
+          await context.wait(5_000);
+        }
+        return { metrics: [], checks: [{ name: 'Applied state', passed: state === 7 }] };
+      };
+      const result = await run({ profile: 'visible-browser' });
+      expect(order).toEqual(['measure', 'measure', 'thumbnail']);
+      expect(result.cases[0].retries).toBe(1);
+      expect(received.length).toBe(1);
+    }, 10_000);
+
+    it('closes the machine sampling window before the picture is taken', async () => {
+      const urls: string[] = [];
+      spyOn(globalThis, 'fetch').and.callFake((async (url: RequestInfo | URL) => { urls.push(String(url)); return new Response('{}'); }) as typeof fetch);
+      adapter.measure = async () => ({ metrics: [{ name: 'interval', unit: 'ms', source: 's', samples: [16, 17] }] });
+      let atThumbnail: string[] = [];
+      adapter.thumbnail = async () => { await new Promise((resolve) => setTimeout(resolve, 20)); atThumbnail = [...urls]; return [image(10)]; };
+      await run({ machineSink: '/sink' }, { ...suite, purpose: 'performance' });
+      expect(atThumbnail).toEqual(['/sink/machine/prepare', '/sink/machine/start', '/sink/machine/stop']);
+    });
   });
 
   describe('machine context', () => {

@@ -50,7 +50,9 @@ The same `TestSession` drives button and URL launches:
    page conditions without caching the last applied scenario, then optional
    `warmupMs` elapses and `measure` runs the action for `durationMs` (or for the
    mode's window, see [Modes](#modes-quick-standard-soak)).
-3. `restore(snapshot, context)` executes even after failure/cancel, using a fresh
+3. Optional `thumbnail(scenario, context)` takes the case's picture once `measure` has returned for an attempt that
+   is kept (see [Case thumbnails](#case-thumbnails)).
+4. `restore(snapshot, context)` executes even after failure/cancel, using a fresh
    signal with a five-second cleanup timeout. Make restoration safe after partial setup.
 
 Every asynchronous adapter must honor `context.signal`; use `context.wait(ms)` for
@@ -118,7 +120,11 @@ the saved file, A/B outcomes, and up to eight problem lines (failed checks, vali
 windows, drift). Per-case metrics, checks, the JSON and the rerun link are under **Details**. **Copy for agent**
 copies the few lines an agent needs to find the run (`testRunAgentText(run, savedFile)`): suite, mode, profile,
 verdicts, counts, the saved file, the `test:summary` command and every problem. `digestTestRun(run)` gives the
-same counts and lines for a host's own UI.
+same counts and lines for a host's own UI. When a run finishes (completed, failed or inconclusive, not cancelled) and its
+save has settled, the runner also copies that text once by itself, so it names the saved file; this needs a focused tab,
+otherwise the card says "Not copied (tab not focused); press Copy for agent". It is not repeated after a visual review.
+`[copyOnFinish]="false"` turns it off for a page, and the **Copy for agent when done** checkbox under More options is
+the viewer's own choice, remembered in `localStorage`.
 
 ## Launch links
 
@@ -128,7 +134,8 @@ same counts and lines for a host's own UI.
 
 `testSuite=latest` follows append order and omits `testVersion`; the result's rerun
 link always pins an exact ID/version and the mode. `testMode` is `quick`, `standard`
-(when omitted, as in links made before modes) or `soak`. The profile is `visible-browser`,
+(when omitted, as in links made before modes) or `soak`. `testThumbnails=0` turns the
+[case thumbnails](#case-thumbnails) off (on when omitted; the link builder only writes it when off). The profile is `visible-browser`,
 `human-observed`, or `headless-hardware`. Repetitions are bounded to 1–5. Unknown
 versions/invalid options fail visibly and do not autostart a replacement test.
 Backend and other application query parameters are preserved in copied links.
@@ -171,6 +178,14 @@ Each index line also carries `errors` and `cases`: per scenario, across repetiti
 with finite samples. All percentiles are nearest rank (`nearestRankPercentile`,
 `summarizeTestSamples`), the same rule `FrameSampler` and the summary bin use.
 
+**Read routes (same origin as the sink, local dev only).** `GET <sink>/runs?limit=N` returns
+`{ runs, total }` (the newest N index lines, default 300), `GET <sink>/run?file=<suite>@v<n>/<result>.json` one result and
+`GET <sink>/image?file=<suite>@v<n>/<result-stem>/<name>.webp` one thumbnail. A `file` is accepted only if every path
+segment is in the alphabet the receiver itself writes (no leading dot, separators or drive letters), the extension is
+`.json` (run) or an image type (image), and the real path stays under the output folder; anything else is a 400. A request
+with an `Origin` that is not a loopback host gets a 403, and loopback origins get a matching
+`access-control-allow-origin`, so the page can read a receiver on another port while an arbitrary website cannot.
+
 **Fingerprint.** Computed by the receiver as git `HEAD` plus a hash of the working-tree
 diff and untracked files under `fingerprintPaths`. It is deliberately coarse: any edit
 there changes it. Older runs are flagged `STALE` in summaries, not removed.
@@ -185,6 +200,77 @@ summaries existed. Open a full JSON only for a failing case.
 **Caveat.** Headless or software-rendered (SwiftShader) runs give GPU timings that are
 not real hardware numbers; use visible-tab runs on the target machine for performance. See
 [Machine context](#machine-context-dev-only) for the recorded adapter and machine state.
+
+## Case thumbnails
+
+A thumbnail is a small picture of what a case looks at, so the [results page](#results-page) can show it next to the
+numbers. It is a helper for the reader, not evidence, and it never enters a timing window.
+
+```ts
+const adapter: TestRunAdapter<Settings, Settings> = {
+  // capture, apply, ready, measure, restore ...
+  thumbnail: async (scenario, context) => {
+    if (context.repetition > 1) return undefined;            // later repetitions look at the same thing
+    return [await screenshots.capture({ format: 'image/webp', quality: 0.6,
+      compress: { maxWidthOrHeight: 240, fileType: 'image/webp', quality: 0.6 } })];
+  },
+};
+```
+
+- **Name.** `thumbnail`, not `capture` (`capture` is the state snapshot). The testing entry has no renderer: the page takes
+  the picture itself, for example with the engine's `ScreenshotService` on its fast path (no `resolution`, `multiplier`
+  or `samples`, so the renderer is not resized) and the opt-in `triangular-engine/image-compression` adapter
+  (`provideBrowserImageCompression()` in the page's providers).
+- **When.** `TestSession` calls it once per kept case, after `measure` has returned. Never in warmup or the window, and
+  never for an attempt that is about to be redone after focus loss. Before it runs, the focus listeners and the machine
+  `stop` message are finished, so the capture adds no validity issue, no redo and no load to the case's machine block.
+  A case with failed checks is kept and gets its picture.
+- **Abort and failure.** The hook gets the run's abort signal and `THUMBNAIL_TIMEOUT_MS` (10 s). A rejection or timeout
+  becomes a limitation on the case (`Thumbnail not taken: ...`); it never fails the case.
+- **Several images** (a looped view) are allowed, at most `MAX_CASE_THUMBNAILS` (4). Return `undefined` or `[]` for none.
+- **Limits.** `MAX_THUMBNAIL_BYTES` (64 KB) per image and `MAX_RUN_THUMBNAIL_BYTES` (2 MB) per run. Over either, the
+  image is dropped and a limitation says so; the receiver enforces the same limits (`maxImageBytes`, `maxRunImageBytes`
+  in `triangular-test.config.json`) and also checks the file signature (WebP, PNG or JPEG). Aim for 5-10 KB each.
+- **On by default**, taken only when the result sink is on. `TestRunOptions.thumbnails: false`, the runner's
+  **Case thumbnails** checkbox (More options) and `testThumbnails=0` in a launch link turn them off. A host calling
+  `TestSession.run` itself passes `onThumbnails` to receive the images (`TestCaseThumbnails`); the result has no pixels.
+- **Transport and storage.** The runner adds the images to the POST as base64 `thumbnailUploads` (never in the JSON it
+  shows, copies or downloads). The receiver writes `artifacts/test-runs/<suite>@v<n>/<result-file-stem>/<case>-r<rep>-<i>.webp`,
+  and the stored result and index line keep only the file names (`thumbnails`, relative to `artifacts/test-runs/`). The
+  reply lists `thumbnails` and `dropped`, which the runner shows under the result card.
+- **Motion labs.** A fly-by or sweep has no single view, and a representative frame needs an extra pass that is not
+  part of the timed window. Such adapters simply omit the hook.
+
+## Results page
+
+`TestResultsComponent` (`<tri-test-results>`, same entry, no engine or router dependency) browses the runs the receiver saved.
+A host page only places it; the demo app has one at `/tests`.
+
+```html
+<tri-test-results [receiver]="'/__triangular-test-sink'" [targets]="{}" [autoplay]="false" />
+```
+
+- **Receiver.** An input that defaults to the runner's sink path; the page also has an editable URL field, so a receiver
+  on another loopback port works. It reads the [read routes](#saved-results-dev-only).
+- **Runs.** Newest first: `suite@version`, mode, GPU adapter, date, commit, the four verdicts, machine warnings and
+  scenario counts (valid, invalid, failed). Filter by suite, mode and GPU. Tick two runs to compare them.
+- **A run.** Its digest (`digestTestRun`: A/B outcomes and problems, from the full result) and one row per case: the
+  thumbnail, the window (`settled`, `max` or `fixed`, seconds), redos, failed checks and validity issues, and a cell per
+  metric with median / p95 and the change of the median from a baseline. The first four metrics show; tick **All
+  metrics** or filter by name.
+- **Baseline.** The same suite id and version in the same mode, matched by scenario id and metric. The default is the
+  previous such run; any other matching run can be chosen, or none. A baseline on another GPU adapter is flagged. A
+  time (`ms`) more than 5 % above the baseline reads as worse and more than 5 % below as better; other units only read
+  as changed. There are no budgets yet: the change is the only judgement.
+- **Targets.** The metric cell has a row for a target bar. Pass `[targets]` (metric key `name (unit)` to a value in that
+  unit) and a bar appears; nothing is built in. Budgets belong to Plan 055 Phase 0.
+- **Compare.** Two runs side by side on one metric: both thumbnails and median (p95) per scenario id, and the change of B
+  (the newer run) against A.
+- **Thumbnails.** One image is a still. Several images (the first repetition's) loop on hover or focus, and a tap pins the
+  loop on a phone. `[autoplay]` loops them without hover. With `prefers-reduced-motion` nothing moves by itself and a
+  click steps to the next frame.
+- **Reading it from code.** `parseTestRunIndex`, `defaultBaseline`, `compareToBaseline`, `filterRuns` and the other pure
+  helpers are exported for a host's own view.
 
 ## Machine context (dev only)
 
@@ -379,7 +465,10 @@ Provider timestamp readbacks started before a reset are discarded. The shared UI
 slider is installed from an identifiable archive under ignored `ignore/packages/`;
 it is a demo dependency, not a dependency of this optional library entry.
 
-Maintainer checks: `npm run test:triangular-engine:testing`, a headless demo test with
+The planet shape lab takes one still per scenario (first repetition) with `ScreenshotService`; the other labs have no
+thumbnails yet.
+
+Maintainer checks: `npm run test:triangular-engine:testing`, `npm run test:triangular-engine:sink`, a headless demo test with
 `--include='**/gpu-timer.spec.ts'`, and
 `npx playwright test -c playwright.runner.config.ts`. The latter uses the existing
 application host; set `TRIANGULAR_TEST_BASE_URL` to target another served build. Its

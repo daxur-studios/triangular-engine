@@ -10,7 +10,7 @@ performance: []
 
 # Plan 058: Test Results Page and Case Thumbnails
 
-Status: **in progress.** Evidence: [Runbook 058](/docs/runbook/058_test_results_page_and_thumbnails.md).
+Status: **built, pending owner visual review.** Evidence: [Runbook 058](/docs/runbook/058_test_results_page_and_thumbnails.md).
 
 **Goal:** see past runs at a glance, and see what each test looked at, without opening result JSON. Thumbnails are a
 helper for the human reader; they never enter a timing window.
@@ -23,12 +23,12 @@ are a separate task (Plan 055 Phase 0); until then the page shows the change fro
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Adapter hook `thumbnail?(scenario, context): Promise<Blob[] \| undefined>`, called by `TestSession` after `measure` for a kept case; run option and `testThumbnails` launch parameter to turn it off | in progress |
-| 2 | Runner sends the images with the result; the receiver stores them next to it, keeps relative names in the JSON and index, enforces about 64 KB per image and 2 MB per run | in progress |
-| 3 | Receiver read routes (index, one result, one image), traversal-safe, local only | in progress |
-| 4 | `TestResultsComponent` in `triangular-engine/testing`: run list with filters, run detail with baseline change, compare, thumbnails | in progress |
-| 5 | Demo app: `/tests` route, catalog entry, planet-shape-lab thumbnail through `ScreenshotService` | in progress |
-| 6 | Docs: testing guide, skill, changelog | in progress |
+| 1 | Adapter hook `thumbnail?(scenario, context): Promise<Blob[] \| undefined>`, called by `TestSession` after `measure` for a kept case; run option and `testThumbnails` launch parameter to turn it off | done |
+| 2 | Runner sends the images with the result; the receiver stores them next to it, keeps relative names in the JSON and index, enforces about 64 KB per image and 2 MB per run | done |
+| 3 | Receiver read routes (index, one result, one image), traversal-safe, local only | done |
+| 4 | `TestResultsComponent` in `triangular-engine/testing`: run list with filters, run detail with baseline change, compare, thumbnails | done |
+| 5 | Demo app: `/tests` route, catalog entry, planet-shape-lab thumbnail through `ScreenshotService` | done |
+| 6 | Docs: testing guide, skill, changelog | done |
 
 ## Out of scope
 

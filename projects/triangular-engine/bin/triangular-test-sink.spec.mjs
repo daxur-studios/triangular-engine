@@ -328,9 +328,10 @@ async function listening(root, config = loadConfig(root)) {
   return { server, base: `http://127.0.0.1:${server.address().port}${SINK_PATH}` };
 }
 
-test('thumbnails are stored beside the result, only names reach the JSON and index, and limits drop with a reason', async () => {
+test('thumbnails are stored beside the result, only names reach the JSON and index, and limits drop with a reason', async (t) => {
   const root = repo();
   const { server, base } = await listening(root, { ...loadConfig(root), maxImageBytes: 2000, maxRunImageBytes: 3000 });
+  t.after(() => server.closeAllConnections() ?? server.close());
   const body = run('r1', '2026-10-18T10:00:00Z');
   body.cases.push({ ...body.cases[0], scenario: { id: 's2', label: 'S2' }, limitations: ['kept'] });
   body.cases.push({ ...body.cases[0], scenario: { id: 's3', label: 'S3' } });
@@ -361,12 +362,12 @@ test('thumbnails are stored beside the result, only names reach the JSON and ind
   // A result without images is stored exactly as before.
   const plain = await (await fetch(base, { method: 'POST', body: JSON.stringify(run('r2', '2026-10-18T11:00:00Z')) })).json();
   assert.deepEqual(plain.thumbnails, []);
-  server.close();
 });
 
-test('read routes serve the index, one result and one image, and refuse anything outside the output folder', async () => {
+test('read routes serve the index, one result and one image, and refuse anything outside the output folder', async (t) => {
   const root = repo();
   const { server, base } = await listening(root);
+  t.after(() => server.closeAllConnections() ?? server.close());
   const body = run('r1', '2026-10-18T10:00:00Z');
   body.thumbnailUploads = [upload('s1', 0, webp(300))];
   const saved = await (await fetch(base, { method: 'POST', body: JSON.stringify(body) })).json();
@@ -397,7 +398,7 @@ test('read routes serve the index, one result and one image, and refuse anything
     assert.equal(response.status, 400, `run ${file}`);
     assert.equal((await fetch(`${base}/image?file=${encodeURIComponent(file)}`)).status, 400, `image ${file}`);
   }
-  assert.equal((await fetch(`${base}/run?file=demo@v2/missing.json`)).status, 404);
+  assert.equal((await fetch(`${base}/run?file=demo@v2/missing.json`)).status, 400);
   // A result is not an image and an image is not a result.
   assert.equal((await fetch(`${base}/image?file=${encodeURIComponent(saved.file)}`)).status, 400);
   assert.equal((await fetch(`${base}/run?file=${encodeURIComponent(saved.thumbnails[0])}`)).status, 400);
@@ -408,5 +409,4 @@ test('read routes serve the index, one result and one image, and refuse anything
   const foreign = await fetch(`${base}/runs`, { headers: { origin: 'https://example.com' } });
   assert.equal(foreign.status, 403);
   assert.equal(foreign.headers.get('access-control-allow-origin'), null);
-  server.close();
 });

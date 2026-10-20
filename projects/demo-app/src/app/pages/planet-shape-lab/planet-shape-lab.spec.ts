@@ -46,6 +46,7 @@ class FakeHost implements PlanetShapeTestHost {
   isSampling(): boolean { return this.sampling; }
   startSampling(): void { this.sampling = true; }
   gpuSamplesSoFar(): readonly number[] { return []; }
+  thumbnail?: () => Promise<Blob | undefined>;
   stopSampling(): PlanetShapeFrameSummary {
     this.sampling = false;
     return {
@@ -261,6 +262,34 @@ describe('planet shape lab', () => {
         expect(host.sampling).toBeFalse();
       } finally { host.dispose(); }
     }, 20_000);
+
+    it('takes one still per scenario after the measurement, from the first repetition only', async () => {
+      const host = new FakeHost();
+      const seenWhileSampling: boolean[] = [];
+      host.thumbnail = async () => { seenWhileSampling.push(host.sampling); return new Blob([new Uint8Array(8)], { type: 'image/webp' }); };
+      const pictures: { scenarioId: string; repetition: number; images: number }[] = [];
+      try {
+        const result = await new TestSession<PlanetShapeTestSettings, PlanetShapeTestSettings>().run(
+          quick('empty-frame', 'plain-sphere-ground-6371km'), createPlanetShapeTestAdapter(host),
+          { repetitions: 2, profile: 'headless-hardware', mode: 'standard', onThumbnails: (entry) => { pictures.push({ scenarioId: entry.scenarioId, repetition: entry.repetition, images: entry.images.length }); } });
+        expect(result.errors).toEqual([]);
+        expect(pictures).toEqual([
+          { scenarioId: 'empty-frame', repetition: 1, images: 1 },
+          { scenarioId: 'plain-sphere-ground-6371km', repetition: 1, images: 1 },
+        ]);
+        // The sampling window is closed before the picture is taken.
+        expect(seenWhileSampling).toEqual([false, false]);
+      } finally { host.dispose(); }
+    }, 20_000);
+
+    it('offers no thumbnail hook when the page cannot take one', () => {
+      const host = new FakeHost();
+      try {
+        expect(createPlanetShapeTestAdapter(host).thumbnail).toBeUndefined();
+        host.thumbnail = async () => undefined;
+        expect(createPlanetShapeTestAdapter(host).thumbnail).toBeDefined();
+      } finally { host.dispose(); }
+    });
 
     it('fails the backend check off WebGPU', async () => {
       const host = new FakeHost();

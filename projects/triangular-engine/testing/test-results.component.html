@@ -1,0 +1,196 @@
+<section aria-label="Test results" class="results">
+  <header class="top">
+    <h3>Test results</h3>
+    <form class="source" (submit)="$event.preventDefault(); setSource(sourceInput.value)">
+      <label>Receiver <input #sourceInput type="text" [value]="source()" spellcheck="false" autocomplete="off" aria-label="Result receiver URL" /></label>
+      <button type="submit" [disabled]="loading()">{{ loading() ? 'Loading' : 'Reload' }}</button>
+    </form>
+  </header>
+
+  @if (error()) { <p class="problem" role="alert">{{ error() }}</p> }
+
+  @switch (view()) {
+    @case ('list') {
+      <div class="filters" role="group" aria-label="Filter runs">
+        <label>Suite
+          <select [value]="filter().suite" (change)="setFilter('suite', $any($event.target).value)">
+            <option value="" [selected]="!filter().suite">All suites</option>
+            @for (suite of options().suites; track suite) { <option [value]="suite" [selected]="suite === filter().suite">{{ suite }}</option> }
+          </select>
+        </label>
+        <label>Mode
+          <select [value]="filter().mode" (change)="setFilter('mode', $any($event.target).value)">
+            <option value="" [selected]="!filter().mode">All modes</option>
+            @for (mode of options().modes; track mode) { <option [value]="mode" [selected]="mode === filter().mode">{{ mode }}</option> }
+          </select>
+        </label>
+        <label>GPU
+          <select [value]="filter().gpu" (change)="setFilter('gpu', $any($event.target).value)">
+            <option value="" [selected]="!filter().gpu">All GPUs</option>
+            @for (gpu of options().gpus; track gpu) { <option [value]="gpu" [selected]="gpu === filter().gpu">{{ gpu }}</option> }
+          </select>
+        </label>
+      </div>
+      <div class="list-bar">
+        <span class="muted">{{ visible().length }} of {{ runs().length }} runs</span>
+        <button type="button" class="primary" [disabled]="picks().length !== 2" (click)="openCompare()">Compare {{ picks().length }}/2 picked</button>
+      </div>
+      @if (!loading() && !error() && !runs().length) { <p class="muted">No saved runs yet. Run a suite with the result sink on.</p> }
+      <ul class="runs">
+        @for (run of visible(); track run.file) {
+          @let counts = runCounts(run);
+          <li class="run" [class.picked]="picks().includes(run.file)">
+            <label class="pick"><input type="checkbox" [checked]="picks().includes(run.file)" (change)="togglePick(run.file)" [attr.aria-label]="'Pick ' + runLabel(run) + ' to compare'" /></label>
+            <button type="button" class="run-open" (click)="open(run.file)">
+              <span class="line"><b>{{ runKey(run) }}</b> <span class="chip">{{ runMode(run) }}</span> <span class="muted">{{ formatRunDate(run.startedAt ?? run.savedAt) }}</span></span>
+              <span class="line muted">{{ runGpu(run) }} · {{ run.profile }} · {{ run.head }}</span>
+              <span class="line">
+                <span [class]="'chip ' + tone(run.status)">{{ run.status }}</span>
+                <span [class]="'chip ' + tone(run.automatedVerdict)">auto {{ run.automatedVerdict }}</span>
+                <span [class]="'chip ' + tone(run.performanceVerdict)">perf {{ run.performanceVerdict }}</span>
+                <span [class]="'chip ' + tone(run.visualReview)">visual {{ run.visualReview }}</span>
+                @if (run.machine?.warnings?.length) { <span class="chip warn" [title]="run.machine?.warnings?.join(', ') ?? ''">{{ run.machine?.warnings?.length }} machine warnings</span> }
+              </span>
+              <span class="line counts">
+                <span>{{ counts.valid }} valid</span>
+                <span [class.warn-text]="counts.invalid">{{ counts.invalid }} invalid</span>
+                <span [class.bad-text]="counts.failed">{{ counts.failed }} failed</span>
+              </span>
+            </button>
+          </li>
+        }
+      </ul>
+    }
+
+    @case ('run') {
+      @if (selected(); as run) {
+        <div class="actions"><button type="button" (click)="back()">Back to runs</button></div>
+        <div class="card" [class.bad]="run.status === 'failed'">
+          <p class="headline">{{ runKey(run) }} · {{ runMode(run) }} · {{ formatRunDate(run.startedAt ?? run.savedAt) }}</p>
+          <p class="muted">{{ runGpu(run) }} · {{ run.profile }} · commit {{ run.head }} · {{ run.fingerprint }}</p>
+          <p>
+            <span [class]="'chip ' + tone(run.status)">{{ run.status }}</span>
+            <span [class]="'chip ' + tone(run.automatedVerdict)">auto {{ run.automatedVerdict }}</span>
+            <span [class]="'chip ' + tone(run.performanceVerdict)">perf {{ run.performanceVerdict }}</span>
+            <span [class]="'chip ' + tone(run.visualReview)">visual {{ run.visualReview }}</span>
+          </p>
+          @if (digest(); as sum) {
+            <p class="muted">{{ sum.valid }} valid · {{ sum.invalid }} invalid · {{ sum.failed }} failed@if (sum.warnings) { · {{ sum.warnings }} warnings } · {{ sum.seconds.toFixed(0) }} s</p>
+            @for (line of sum.ablations; track $index) { <p class="ablation">A/B {{ line }}</p> }
+            @if (sum.problems.length) {
+              <ul class="problems">
+                @for (line of sum.problems.slice(0, 8); track $index) { <li>{{ line }}</li> }
+                @if (sum.problems.length > 8) { <li class="muted">{{ sum.problems.length - 8 }} more in the result file</li> }
+              </ul>
+            }
+          } @else if (detail().state === 'missing') {
+            <p class="muted">The full result could not be read; showing the saved summary.</p>
+          }
+          @for (error of run.errors; track $index) { <p class="problem">{{ error }}</p> }
+          <p class="muted file">{{ run.file }}</p>
+        </div>
+
+        <div class="baseline">
+          <label>Change from
+            <select [value]="baselineChoice() ?? baseline()?.file ?? 'none'" (change)="baselineChoice.set($any($event.target).value)">
+              <option value="none" [selected]="!baseline()">No baseline</option>
+              @for (other of baselines(); track other.file) { <option [value]="other.file" [selected]="other.file === baseline()?.file">{{ runLabel(other) }}</option> }
+            </select>
+          </label>
+          <label>Metrics
+            <input type="text" placeholder="filter, e.g. gpu" [value]="metricFilter()" (input)="metricFilter.set($any($event.target).value)" aria-label="Filter metrics by name" />
+          </label>
+          <label class="check"><input type="checkbox" [checked]="allMetrics()" (change)="allMetrics.set($any($event.target).checked)" /> All metrics</label>
+          @if (baseline(); as base) {
+            @if (baselineNote(run, base); as note) { <p class="problem">{{ note }}</p> }
+          } @else if (!baselines().length) {
+            <p class="muted">No other run of this suite version in {{ runMode(run) }} mode to compare with.</p>
+          }
+        </div>
+        <p class="muted legend">Each metric: median / p95 over the window.@if (baseline()) { The change is the median against the baseline; times above +5 % read as worse. }</p>
+
+        <ol class="cases">
+          @for (row of rows(); track row.id) {
+            <li class="case">
+              <tri-test-thumbnail class="case-thumb" [urls]="thumbnailUrls(row.frames)" [label]="row.label" [autoplay]="autoplay()" />
+              <div class="case-body">
+                <p class="case-title"><b>{{ row.label }}</b>@if (row.label !== row.id) { <span class="muted"> {{ row.id }}</span> }</p>
+                @if (row.windowText || row.notes.length) {
+                  <p class="muted">{{ row.windowText }}@for (note of row.notes; track note) { <span class="note"> · {{ note }}</span> }</p>
+                }
+                @for (line of row.failed; track $index) { <p class="problem">FAIL {{ line }}</p> }
+                @for (line of row.invalid; track $index) { <p class="note-invalid">INVALID {{ line }}</p> }
+                <div class="metrics">
+                  @for (cell of visibleMetrics(row); track cell.key) {
+                    <div class="metric" [title]="cell.baselineText">
+                      <span class="m-name">{{ cell.name }}</span>
+                      <span [class]="'m-change ' + cell.kind">{{ cell.changeText }}</span>
+                      <span class="m-value"><b>{{ fmt(cell.median) }}</b> / {{ fmt(cell.p95) }} <span class="muted">{{ cell.unit }}</span></span>
+                      @if (cell.targetRatio !== undefined) {
+                        <span class="m-bar" role="meter" [attr.aria-label]="cell.name + ' against its target'" [attr.aria-valuenow]="cell.median"
+                          [attr.aria-valuetext]="cell.targetText" [class.over]="cell.targetRatio > 1"><i [style.width.%]="barWidth(cell.targetRatio)"></i></span>
+                      }
+                    </div>
+                  } @empty {
+                    <p class="muted">No metrics{{ metricFilter() ? ' match the filter' : '' }}.</p>
+                  }
+                </div>
+              </div>
+            </li>
+          }
+        </ol>
+        @if (hiddenMetrics() > 0) { <p class="muted">{{ hiddenMetrics() }} more metrics hidden: tick All metrics.</p> }
+      }
+    }
+
+    @case ('compare') {
+      <div class="actions"><button type="button" (click)="back()">Back to runs</button></div>
+      <div class="compare-pick">
+        <label>Run A
+          <select [value]="compareA() ?? ''" (change)="setCompare('a', $any($event.target).value)">
+            @for (run of runs(); track run.file) { <option [value]="run.file" [selected]="run.file === compareA()">{{ runLabel(run) }}</option> }
+          </select>
+        </label>
+        <label>Run B
+          <select [value]="compareB() ?? ''" (change)="setCompare('b', $any($event.target).value)">
+            @for (run of runs(); track run.file) { <option [value]="run.file" [selected]="run.file === compareB()">{{ runLabel(run) }}</option> }
+          </select>
+        </label>
+        <label>Metric
+          <select [value]="compareMetric()" (change)="compareMetric.set($any($event.target).value)">
+            @for (key of compareKeys(); track key) { <option [value]="key" [selected]="key === compareMetric()">{{ key }}</option> }
+          </select>
+        </label>
+      </div>
+      @if (runA(); as a) {
+        @if (runB(); as b) {
+          @if (runGpu(a) !== runGpu(b)) { <p class="problem">The runs used different GPU adapters ({{ runGpu(a) }} and {{ runGpu(b) }}).</p> }
+          @if (runMode(a) !== runMode(b) || a.version !== b.version || a.suite !== b.suite) {
+            <p class="muted">The runs are of different suites, versions or modes; only scenarios with the same id line up.</p>
+          }
+          <p class="muted legend">Median (p95) of {{ compareMetric() }}; the change is B against A.</p>
+          <ol class="cases compare">
+            @for (row of compareRows(); track row.id) {
+              <li class="case compare-row">
+                <p class="case-title"><b>{{ row.id }}</b> <span [class]="'m-change inline ' + row.kind">{{ row.deltaText }}</span></p>
+                <div class="sides">
+                  @for (side of [row.a, row.b]; track $index) {
+                    <div class="side">
+                      <span class="muted">{{ $index === 0 ? 'A' : 'B' }}</span>
+                      @if (side) {
+                        <tri-test-thumbnail [urls]="thumbnailUrls(side.frames)" [label]="row.id + ' in run ' + ($index === 0 ? 'A' : 'B')" [autoplay]="autoplay()" />
+                        <span class="m-value"><b>{{ fmt(side.median) }}</b> ({{ fmt(side.p95) }}) <span class="muted">{{ unitOf(compareMetric()) }}</span></span>
+                      } @else {
+                        <span class="muted">not in this run</span>
+                      }
+                    </div>
+                  }
+                </div>
+              </li>
+            }
+          </ol>
+        }
+      }
+    }
+  }
+</section>

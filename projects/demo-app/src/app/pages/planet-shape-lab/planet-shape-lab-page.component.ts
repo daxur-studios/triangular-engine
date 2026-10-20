@@ -1,7 +1,8 @@
 import { Component, DestroyRef, computed, inject, isDevMode, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AmbientLight, DirectionalLight, Matrix4, Mesh, OrthographicCamera, PerspectiveCamera, Quaternion, Vector3 } from 'three';
-import { EngineModule, EngineService } from 'triangular-engine';
+import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
+import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import { TestRunnerComponent, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import { adapterLabel, describeGpuAdapter, type GpuAdapterRendererLike } from './gpu-adapter-info';
 import {
@@ -37,18 +38,25 @@ function formatAltitude(metres: number): string {
  */
 const POWER_PREFERENCE = 'high-performance (engine default)';
 
+/** Longest side of a case thumbnail, in pixels. */
+const THUMBNAIL_WIDTH = 240;
+
 const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so spin shows as a travelling sun.';
 
 @Component({
   standalone: true,
   selector: 'app-planet-shape-lab-page',
   imports: [EngineModule, RouterLink, TestRunnerComponent],
-  providers: EngineService.provide({
-    showFPS: true,
-    gpuTiming: true,
-    preferredRenderer: 'webgpu',
-    webGpuRendererParameters: { antialias: false, trackTimestamp: true },
-  }),
+  providers: [
+    EngineService.provide({
+      showFPS: true,
+      gpuTiming: true,
+      preferredRenderer: 'webgpu',
+      webGpuRendererParameters: { antialias: false, trackTimestamp: true },
+    }),
+    // Case thumbnails for the results page: ScreenshotService compresses through this adapter.
+    provideBrowserImageCompression(),
+  ],
   host: {
     class: 'flex-page',
     '(pointerdown)': 'onPointerDown($event)',
@@ -167,6 +175,7 @@ const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so 
 })
 export class PlanetShapeLabPageComponent {
   private readonly engine = inject(EngineService);
+  private readonly screenshot = inject(ScreenshotService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly bodies = BODIES;
@@ -255,6 +264,12 @@ export class PlanetShapeLabPageComponent {
     gpuSamplesSoFar: () => this.engine.fpsController.frameSampler.gpuSamples,
     stopSampling: () => this.engine.fpsController.frameSampler.stop(),
     environment: () => this.environment(),
+    // Fast path (no resolution, multiplier or samples): the renderer is not resized, and the session calls this only after
+    // a measurement. 240 px WebP at quality 0.6 is a few KB.
+    thumbnail: () => this.screenshot.capture({
+      engine: this.engine, format: 'image/webp', quality: 0.6,
+      compress: { maxWidthOrHeight: THUMBNAIL_WIDTH, fileType: 'image/webp', quality: 0.6 },
+    }),
   };
   readonly testAdapter: TestRunAdapter<PlanetShapeTestSettings, PlanetShapeTestSettings> = createPlanetShapeTestAdapter(this.testHost);
 

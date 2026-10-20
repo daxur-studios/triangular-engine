@@ -87,7 +87,8 @@ panel's **Copy launch link** for an exact version (`testMode` defaults to `stand
 versions are preferable for evidence and reruns. Other application query parameters
 are preserved by the URL helper. Supported profiles are `visible-browser`,
 `human-observed`, and `headless-hardware`; repetitions are 1–5. Unknown versions or
-invalid launch options fail visibly rather than silently substituting a test.
+invalid launch options fail visibly rather than silently substituting a test. `testThumbnails=0` turns case
+thumbnails off.
 
 When updating a spike, plan or runbook, append the runnable experiment to its
 `performance` array and provide a Markdown launch link for the latest item. Keep
@@ -144,6 +145,16 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   `gpu-busy-before-start`, `gpu-throttled`, ...), shown by `npm run test:summary`. A run with warnings, no adapter
   info, or the wrong adapter is not a hardware number. Process names stay in `artifacts/` result files; never put
   them in docs or baselines. See `docs/testing.md`, "Machine context".
+- **Thumbnails and the results page.** An adapter may add `thumbnail(scenario, context)` (not `capture`, which is the
+  state snapshot) returning one or a few small `Blob`s (a still; at most 4, 64 KB each, 2 MB per run, aim for 5-10 KB).
+  `TestSession` calls it only after `measure` for a kept case, never in the window or for an attempt about to be redone,
+  and a failure becomes a limitation. Take the picture in the page (`ScreenshotService` fast path, WebP, 240 px, with
+  `provideBrowserImageCompression()`); skip it for motion labs. Thumbnails are on by default with the sink; turn them
+  off with the runner checkbox, `thumbnails: false` or `testThumbnails=0`. The receiver stores them under
+  `artifacts/test-runs/<suite>@v<n>/<result-stem>/` and keeps only names in the JSON. `<tri-test-results>` (the demo's
+  `/tests`) lists runs, shows a run's cases with thumbnails and the change from a baseline (same suite version and mode),
+  and compares two runs; read routes are `GET <sink>/runs`, `/run?file=` and `/image?file=`. For numbers, still use
+  `npm run test:summary`; the page is for a human to browse.
 - The user can press **Copy for agent** on the result card: a few lines with the suite,
   mode, verdicts, saved file and problems. Read the run with `test:summary` from there.
 - Without a receiver, JSON copy/paste is the fallback handoff. No queue or

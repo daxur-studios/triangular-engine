@@ -37,6 +37,31 @@ Plan: [Plan 058](/docs/plans/058_test_results_page_and_thumbnails.md). Related:
 - **Motion labs** (fly-bys, sweeps) have no thumbnails: a representative frame needs an extra pass that is not part
   of the timed window. The hook is optional, so they simply omit it.
 
-### Checks
+### Checks (2026-10-20)
 
-(filled in as they run)
+- `npm run test:triangular-engine:testing`: 108 passed (session thumbnail cases: order, off, failing hook, abort, limits,
+  blur during capture, redone attempt, machine window closed first; runner transport; launch parameter; results model,
+  component and thumbnail component).
+- `npm run test:triangular-engine:sink`: 16 passed (storage next to the result, per-image and per-run limits, bad
+  signature, read routes, traversal attempts, non-loopback origin).
+- `npx ng test demo-app ... --include planet-shape-lab, demo-index and test-results specs`: 35 passed.
+- `npm run build:triangular-engine` and `npx tsc -p projects/demo-app/tsconfig.app.json --noEmit`: clean.
+- Built-in browser pane: ran `planet-shape-baseline` (quick) from `/planet-shape-lab` with the new receiver; the run saved
+  8 thumbnails of 0.6-2.6 KB each (240 px WebP, about 20 KB for the whole run). `/tests` listed the runs, a run showed
+  its eight thumbnails, the window, redos and the change from the previous quick run, and compare showed two runs side
+  by side. Phone width (375 px): no horizontal scroll.
+- The pane renders on the AMD iGPU: its timings do not count, and the run is `inconclusive` (wrong GPU, page not
+  focused). Its first run stopped after one case because the "GPU timer self-test" check fails without Chrome's WebGPU
+  developer flag (timestamps rounded to 65 ms); for the verification run only that check was filtered out of the page's
+  adapter from the console, with no change to the code. The old receiver that `ng serve` started was replaced by
+  `npm run test:receiver` to pick up the new routes; restart `ng serve` (or the receiver) after pulling this change.
+- Found while checking in the pane: index lines written by older receivers lack `failed` and `invalid` for some cases;
+  `parseTestRunIndex` now fills them in (a spec covers it). A `<select [value]>` bound before its options exist shows the
+  first option, so the options carry `[selected]`.
+
+### Open
+
+- Visual review of the page by the owner (layout, density, colours in the light theme).
+- Motion labs (fly-bys, sweeps) have no thumbnails; they would need an extra untimed pass.
+- Targets and budgets: the metric cell has a bar row driven by the `targets` input; Plan 055 Phase 0 supplies the values.
+- The planet-shape thumbnails are small and mostly flat colour; the empty-frame case is a black box by design.
