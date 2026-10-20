@@ -1,50 +1,63 @@
 <section aria-label="Test runner" class="test-runner">
   <h3>Repeatable tests</h3>
   <form [formGroup]="form" (ngSubmit)="runSelected()">
-    <label>Test history
+    <label>Test
       <select formControlName="suite">
         @for (suite of suites(); track suiteKey(suite)) {
           <option [value]="suiteKey(suite)">{{ suite.title }} · v{{ suite.version }}</option>
         }
       </select>
     </label>
-    <label>Execution profile
-      <select formControlName="profile">
-        @for (profile of profiles; track profile) { <option [value]="profile">{{ profile }}</option> }
-      </select>
-    </label>
-    <label>Repetitions <input type="number" formControlName="repetitions" min="1" [max]="maxRepetitions" /></label>
+    <div class="modes" role="radiogroup" aria-label="Mode">
+      @for (mode of modes(); track mode) {
+        <label class="mode"><input type="radio" formControlName="mode" [value]="mode" /><span>{{ mode }}</span></label>
+      }
+    </div>
+    <details class="more">
+      <summary>More options</summary>
+      <label>Execution profile
+        <select formControlName="profile">
+          @for (profile of profiles; track profile) { <option [value]="profile">{{ profile }}</option> }
+        </select>
+      </label>
+      <label>Repetitions <input type="number" formControlName="repetitions" min="1" [max]="maxRepetitions" /></label>
+      <button type="button" (click)="runLatest()" [disabled]="running() || externalBusy() || !available() || !latest() || form.invalid">Run latest test</button>
+    </details>
     <div class="actions">
-      <button type="button" class="primary" (click)="runLatest()" [disabled]="running() || externalBusy() || !available() || !latest() || form.invalid">Run latest test</button>
-      <button type="submit" [disabled]="running() || externalBusy() || !available() || form.invalid">Run selected</button>
-      <button type="button" (click)="copyLaunchLink()" [disabled]="form.invalid">Copy launch link</button>
-      <button type="button" (click)="cancel()" [disabled]="!running()">Cancel</button>
+      @if (running()) {
+        <button type="button" class="primary wide" (click)="cancel()">Cancel</button>
+      } @else {
+        <button type="submit" class="primary wide" [disabled]="externalBusy() || !available() || form.invalid">Run</button>
+      }
+      <button type="button" (click)="copyLaunchLink()" [disabled]="form.invalid" title="Copy launch link" aria-label="Copy launch link">Link</button>
     </div>
   </form>
-  @if (!available()) { <p>Waiting for the page to be ready.</p> }
-  @if (latest(); as suite) { <p class="muted">Latest: {{ suite.title }} · v{{ suite.version }}</p> }
+  @if (!available()) { <p class="muted">Waiting for the page to be ready.</p> }
   @if (progress(); as state) {
-    <p role="status" aria-live="polite">{{ state.phase }} · {{ state.completed }}/{{ state.total }} · repetition {{ state.repetition }} · {{ state.label }}</p>
-    <pre class="effective-settings" aria-label="Effective test settings">{{ activeSettings() }}</pre>
+    <div class="progress" role="status" aria-live="polite">
+      <p class="headline">{{ caseText(state) }}</p>
+      <div class="bar"><div [style.width.%]="progressFraction() * 100"></div></div>
+      <p class="muted" [class.paused]="state.phase === 'paused'">{{ phaseText(state) }}</p>
+    </div>
   }
   @if (message()) { <p role="status" class="message">{{ message() }}</p> }
   @if (result(); as run) {
-    <p role="status">Run {{ run.status }} · automation {{ run.automatedVerdict }} · performance {{ run.performanceVerdict }} · visual review {{ run.visualReview }}</p>
-    <ol class="case-results">
-      @for (item of run.cases; track $index) {
-        <li>{{ item.scenario.label }} · {{ item.status }}
-          @for (metric of item.metrics; track metric.name) { <span class="muted">{{ metricText(metric) }}</span> }
-          @if (item.error) { <span class="issue failed">Error: {{ item.error }}</span> }
-          @for (check of item.checks; track check.name) {
-            <span class="muted check" [class.failed]="!check.passed">{{ check.passed ? '✓' : '✗' }} {{ check.name }}@if (check.detail) { — {{ check.detail }} }</span>
-          }
-          @for (issue of item.validityIssues; track issue) { <span class="issue">{{ issue }}</span> }
-          @for (limitation of item.limitations; track limitation) { <span class="muted">{{ limitation }}</span> }
-        </li>
+    @let sum = digest();
+    <div class="result-card" [class.bad]="run.status === 'failed'" role="status">
+      <p class="headline">Run {{ run.status }} · {{ run.mode ?? 'standard' }} · {{ sum?.seconds?.toFixed(0) }} s</p>
+      <p class="muted">{{ sum?.valid }} valid · {{ sum?.invalid }} invalid · {{ sum?.failed }} failed@if (sum?.warnings) { · {{ sum?.warnings }} warnings }</p>
+      @if (saveStatus()) { <p class="save-status muted" [class.issue]="saveStatus().startsWith('Result not saved')">{{ saveStatus() }}</p> }
+      @for (line of sum?.ablations ?? []; track $index) { <p class="ablation">A/B {{ line }}</p> }
+      @if (sum?.problems?.length) {
+        <ul class="problems">
+          @for (line of (sum?.problems ?? []).slice(0, maxProblemLines); track $index) { <li>{{ line }}</li> }
+          @if ((sum?.problems?.length ?? 0) > maxProblemLines) { <li class="muted">{{ (sum?.problems?.length ?? 0) - maxProblemLines }} more under Details</li> }
+        </ul>
       }
-    </ol>
-    @if (saveStatus()) { <p role="status" class="save-status" [class.issue]="saveStatus().startsWith('Result not saved')">{{ saveStatus() }}</p> }
-    @for (error of run.errors; track $index) { <p class="issue failed" role="alert">{{ error }}</p> }
+      <div class="actions">
+        <button type="button" class="primary wide" (click)="copyForAgent()">Copy for agent</button>
+      </div>
+    </div>
     @if (run.visualReview === 'pending' && run.status !== 'failed' && run.status !== 'cancelled') {
       <label>Observer notes <textarea [formControl]="reviewNotes" rows="2"></textarea></label>
       <div class="actions">
@@ -52,11 +65,30 @@
         <button type="button" (click)="review('rejected')">Reject visual result</button>
       </div>
     }
-    <div class="actions">
-      <button type="button" (click)="copyResult()">Copy result</button>
-      <button type="button" (click)="downloadResult()">Download JSON</button>
-      <a [href]="run.rerunUrl">Rerun this version</a>
-    </div>
-    <textarea class="result-json" aria-label="Test result JSON" readonly rows="8" [value]="resultText()"></textarea>
+    <details class="details">
+      <summary>Details ({{ run.cases.length }} cases)</summary>
+      <p class="muted">automation {{ run.automatedVerdict }} · performance {{ run.performanceVerdict }} · visual review {{ run.visualReview }}</p>
+      <ol class="case-results">
+        @for (item of run.cases; track $index) {
+          <li>{{ item.scenario.label }} · {{ item.status }}@if (item.window) { · {{ item.window.stoppedBy }} {{ (item.window.elapsedMs / 1000).toFixed(1) }} s }
+            @for (metric of item.metrics; track metric.name) { <span class="muted">{{ metricText(metric) }}</span> }
+            @if (item.error) { <span class="issue failed">Error: {{ item.error }}</span> }
+            @for (check of item.checks; track check.name) {
+              <span class="muted check" [class.failed]="!check.passed">{{ check.passed ? '✓' : '✗' }} {{ check.name }}@if (check.detail) { — {{ check.detail }} }</span>
+            }
+            @for (issue of item.validityIssues; track issue) { <span class="issue">{{ issue }}</span> }
+            @for (limitation of item.limitations; track limitation) { <span class="muted">{{ limitation }}</span> }
+          </li>
+        }
+      </ol>
+      @for (error of run.errors; track $index) { <p class="issue failed" role="alert">{{ error }}</p> }
+      <pre class="agent-text" aria-label="Agent hand-off text">{{ agentText() }}</pre>
+      <div class="actions">
+        <button type="button" (click)="copyResult()">Copy result JSON</button>
+        <button type="button" (click)="downloadResult()">Download JSON</button>
+        <a [href]="run.rerunUrl">Rerun this version</a>
+      </div>
+      <textarea class="result-json" aria-label="Test result JSON" readonly rows="6" [value]="resultText()"></textarea>
+    </details>
   }
 </section>

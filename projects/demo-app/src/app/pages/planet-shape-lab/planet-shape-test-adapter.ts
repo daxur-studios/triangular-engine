@@ -69,6 +69,8 @@ export interface PlanetShapeTestHost {
   onRenderComplete(callback: (renderedAt: number) => void): () => void;
   isSampling(): boolean;
   startSampling(): void;
+  /** Whole-render GPU ms of the open sampling window so far; empty without timestamp queries. */
+  gpuSamplesSoFar(): readonly number[];
   stopSampling(): PlanetShapeFrameSummary;
   environment(): Readonly<Record<string, TestSetting>>;
 }
@@ -77,6 +79,10 @@ const READY_TIMEOUT_MS = 60_000;
 const STALL_MS = 5_000;
 const MIN_WINDOW_FRAMES = 60;
 const SETTLE_FRAMES = 3;
+/** `performance.now()` is coarsened to 0.1 ms in this browser setup; smaller changes are timer noise. */
+const TIMER_STEP_MS = 0.1;
+/** GPU timestamps with the developer flag step at about 1 µs. */
+const GPU_STEP_MS = 0.001;
 
 /** Names every field the page did not honour; the spin angle advances on its own and is not compared. */
 export function settingsMismatches(actual: PlanetShapeTestSettings, expected: PlanetShapeTestSettings): string[] {
@@ -122,6 +128,7 @@ export function createPlanetShapeTestAdapter(host: PlanetShapeTestHost): TestRun
   }
 
   return {
+    windowModes: true,
     capture: () => host.read(),
     apply: (scenario) => {
       host.resetErrors();
@@ -145,7 +152,13 @@ export function createPlanetShapeTestAdapter(host: PlanetShapeTestHost): TestRun
         if (beforeAt !== undefined) submit.push(renderedAt - beforeAt);
       });
       try {
-        await context.wait(scenario.durationMs);
+        // Quick mode stops once frame pacing, submit time and (with timestamps) GPU time have settled.
+        await context.measureWindow(scenario, [
+          { name: 'frameInterval', samples: () => intervals, resolution: TIMER_STEP_MS },
+          { name: 'renderSubmitCpu', samples: () => submit, resolution: TIMER_STEP_MS },
+          ...(host.environment()['gpu.timestampQuery'] === true
+            ? [{ name: 'gpuFrame', samples: () => host.gpuSamplesSoFar(), resolution: GPU_STEP_MS }] : []),
+        ]);
         summary = host.stopSampling();
       } finally {
         offBefore();
@@ -196,6 +209,12 @@ export function createPlanetShapeTestAdapter(host: PlanetShapeTestHost): TestRun
             : absent;
           return { name, unit: 'ms', optional: true, source, samples, unavailableReason };
         }),
+        {
+          name: 'gpuPassTotal', unit: 'ms', optional: true,
+          source: 'WebGPU timestamps of every timed pass of a frame, summed per complete frame: what an A/B of a feature compares',
+          samples: passes?.total.samples ?? [],
+          unavailableReason: passes ? undefined : timestampQuery ? 'No per-pass GPU timestamps were resolved in the window' : 'No GPU timestamp query on this renderer',
+        },
       ];
       return {
         metrics,

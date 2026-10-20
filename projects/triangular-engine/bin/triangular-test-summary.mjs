@@ -4,7 +4,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { caseSummaries, computeFingerprint, loadConfig } from './triangular-test-receiver.mjs';
+import { ablationSummaries, caseSummaries, computeFingerprint, loadConfig } from './triangular-test-receiver.mjs';
 
 /** One compact line: GPU adapter vendor and backend, sampled load, and warnings. Empty for runs without machine data. */
 export function machineText(row) {
@@ -22,6 +22,26 @@ export function machineText(row) {
 
 const fmt = (n) => (Number.isFinite(n) ? n.toFixed(2) : 'n/a');
 
+/** `shadows @ orbit-600km gpuPassTotal median: B 0.081 vs A 0.045 (+80.0%) slower, noise 0.001`. */
+export function ablationLine(a) {
+  const head = `  A/B ${a.feature} @ ${a.group} ${a.metric} ${a.statistic}`;
+  const invalid = a.invalidRounds ? ` | ${a.invalidRounds} invalid rounds` : '';
+  if (a.verdict === 'invalid' || a.verdict === 'rejected') return `${head}: ${a.verdict.toUpperCase()} ${a.reasons.join('; ')}${invalid}`;
+  const pct = Number.isFinite(a.relative) ? ` (${a.relative > 0 ? '+' : ''}${(a.relative * 100).toFixed(1)}%)` : '';
+  return `${head}: B ${a.b} vs A ${a.a}${pct} ${a.verdict}, noise ${a.noise}${invalid}`;
+}
+
+/** `[settled 1.4s]`, `[max 5s, did not settle]`, `[fixed 60s, drift frameInterval +7.0%]`, plus redo count. */
+function windowText(s) {
+  const parts = [];
+  if (s.window) {
+    parts.push(`${s.window.stoppedBy} ${s.window.s}s`);
+    for (const [name, d] of Object.entries(s.window.drift ?? {})) if (Math.abs(d) > 0.05) parts.push(`DRIFT ${name} ${d > 0 ? '+' : ''}${(d * 100).toFixed(1)}%`);
+  }
+  if (s.retries) parts.push(`redone ${s.retries}x`);
+  return parts.length ? ` [${parts.join(', ')}]` : '';
+}
+
 /** A constant metric (draw calls, triangle counts) prints once instead of as med/p95/max. */
 const metricText = (name, s) => (s.min === s.max ? `${name} = ${fmt(s.max)}` : `${name} med ${fmt(s.med)} p95 ${fmt(s.p95)} max ${fmt(s.max)}`);
 
@@ -36,24 +56,27 @@ export function summarize(rows, readRun, currentHash, { suite, last = 5, metric 
     lines.push(`## ${key}`);
     for (const row of list.slice(-last)) {
       const stale = currentHash && row.fingerprint !== currentHash ? 'STALE' : 'current';
-      lines.push(`${row.startedAt?.slice(0, 16) ?? row.savedAt.slice(0, 16)}  ${row.profile}  ${row.fingerprint} ${stale}  auto=${row.automatedVerdict} perf=${row.performanceVerdict} visual=${row.visualReview}`);
+      lines.push(`${row.startedAt?.slice(0, 16) ?? row.savedAt.slice(0, 16)}  ${row.profile} ${row.mode ?? 'standard'}  ${row.fingerprint} ${stale}  auto=${row.automatedVerdict} perf=${row.performanceVerdict} visual=${row.visualReview}`);
       const machine = machineText(row);
       if (machine) lines.push(machine);
       let cases = row.cases;
       let errors = row.errors;
+      let ablations = row.ablations;
       if (!cases) {
         const run = readRun(row.file);
         if (!run) { lines.push('  (full result file missing)'); continue; }
         cases = caseSummaries(run);
         errors = run.errors;
+        ablations = ablationSummaries(run);
       }
       for (const [id, s] of Object.entries(cases)) {
         const m = Object.entries(s.metrics).filter(([name]) => !metric || name.includes(metric)).map(([name, v]) => metricText(name, v));
-        lines.push(`  ${id}: ${m.join(' | ') || 'no metrics'}`);
+        lines.push(`  ${id}${windowText(s)}: ${m.join(' | ') || 'no metrics'}`);
         for (const f of s.failed) lines.push(`    FAIL ${f}`);
         // A validity issue (wrong GPU, lost focus, software renderer) means these timings are not hardware numbers.
         for (const i of s.invalid ?? []) lines.push(`    INVALID ${i}`);
       }
+      for (const a of ablations ?? []) lines.push(ablationLine(a));
       for (const e of errors ?? []) lines.push(`  RUN ERROR ${e}`);
       lines.push(`  file: ${row.file}`);
     }

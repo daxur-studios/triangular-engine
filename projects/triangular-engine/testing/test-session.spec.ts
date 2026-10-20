@@ -1,4 +1,4 @@
-import { nearestRankPercentile, summarizeTestSamples, TestSession, waitForTest } from './test-session';
+import { MAX_FOCUS_RETRIES, nearestRankPercentile, summarizeTestSamples, TestSession, waitForTest } from './test-session';
 import type { TestObservation, TestRunAdapter, TestSuite } from './test-contracts';
 import { MACHINE_PREPARE_TIMEOUT_MS } from './test-machine';
 
@@ -147,6 +147,97 @@ describe('TestSession', () => {
     const result = await new TestSession<Settings, number>().run(suite, adapter, { repetitions: 1, profile: 'visible-browser' });
     expect(result.cases[0].validityIssues).toContain('Page lost focus');
     expect(result.status).toBe('inconclusive');
+  });
+
+  it('refuses quick and soak modes for an adapter with fixed-length windows', async () => {
+    await expectAsync(new TestSession<Settings, number>().run(suite, adapter, { repetitions: 1, profile: 'headless-hardware', mode: 'quick' }))
+      .toBeRejectedWithError(/use standard mode/);
+  });
+
+  it('ends a quick window once its series settle, cuts the warmup and records the window on the case', async () => {
+    const samples = Array(100).fill(1);
+    const long = { ...suite, scenarios: [{ ...suite.scenarios[0], durationMs: 10_000, warmupMs: 10_000 }] };
+    const quick: TestRunAdapter<Settings, number> = {
+      ...adapter, windowModes: true,
+      measure: async (scenario, context) => {
+        expect(context.mode).toBe('quick');
+        await context.measureWindow(scenario, [{ name: 'flat', samples: () => samples }]);
+        return { metrics: [] };
+      },
+    };
+    const began = performance.now();
+    const result = await new TestSession<Settings, number>().run(long, quick, { repetitions: 1, profile: 'headless-hardware', mode: 'quick' });
+    expect(performance.now() - began).toBeLessThan(3000);
+    expect(result.mode).toBe('quick');
+    expect(result.cases[0].window?.stoppedBy).toBe('settled');
+    expect(result.cases[0].window?.samples).toEqual({ flat: 100 });
+  }, 10_000);
+
+  describe('page focus', () => {
+    let focused: boolean;
+    beforeEach(() => {
+      focused = true;
+      spyOn(document, 'hasFocus').and.callFake(() => focused);
+      spyOnProperty(document, 'visibilityState').and.returnValue('visible');
+    });
+
+    it('stops a case that loses focus, pauses until the page is back, and redoes it', async () => {
+      let attempts = 0;
+      const phases: string[] = [];
+      adapter.measure = async (_, context) => {
+        attempts++;
+        if (attempts === 1) {
+          focused = false;
+          window.dispatchEvent(new Event('blur'));
+          setTimeout(() => { focused = true; }, 300);
+          await context.wait(5_000);
+        }
+        return { metrics: [], checks: [{ name: 'Applied state', passed: state === 7 }] };
+      };
+      const result = await new TestSession<Settings, number>().run(suite, adapter, { repetitions: 1, profile: 'visible-browser' },
+        (progress) => { if (progress) phases.push(progress.phase); });
+      expect(attempts).toBe(2);
+      expect(phases).toContain('paused');
+      expect(result.cases.length).toBe(1);
+      expect(result.cases[0].retries).toBe(1);
+      expect(result.cases[0].validityIssues).toEqual([]);
+      expect(result.status).toBe('completed');
+    }, 10_000);
+
+    it('records the loss once the retries are spent', async () => {
+      let attempts = 0;
+      adapter.measure = async () => { attempts++; window.dispatchEvent(new Event('blur')); return { metrics: [] }; };
+      const result = await new TestSession<Settings, number>().run(suite, adapter, { repetitions: 1, profile: 'visible-browser' });
+      expect(attempts).toBe(MAX_FOCUS_RETRIES + 1);
+      expect(result.cases[0].retries).toBe(MAX_FOCUS_RETRIES);
+      expect(result.cases[0].validityIssues).toContain('Page lost focus');
+    });
+
+    it('does not wait for a page that was never focused in this run', async () => {
+      focused = false;
+      const result = await new TestSession<Settings, number>().run(suite, adapter, { repetitions: 1, profile: 'visible-browser' });
+      expect(result.cases[0].validityIssues).toContain('Page was not focused');
+      expect(result.cases[0].retries).toBeUndefined();
+    });
+  });
+
+  it('compares the A/B rounds of each group per metric', async () => {
+    const ab: TestSuite<Settings> = {
+      id: 'ab', version: 1, title: 'A/B', purpose: 'functional', ablation: { feature: 'more', metrics: ['ms'] },
+      scenarios: [1, 2, 3, 4].map((round) => ({
+        id: `r${round}`, label: `Round ${round}`, durationMs: 1, settings: { value: round % 2 ? 1 : 2 },
+        ablation: { group: 'g', arm: round % 2 ? 'A' as const : 'B' as const },
+      })),
+    };
+    adapter.measure = async () => ({ metrics: [{ name: 'ms', unit: 'ms', source: 'test', samples: [state, state, state] }] });
+    const result = await new TestSession<Settings, number>().run(ab, adapter, { repetitions: 1, profile: 'headless-hardware' });
+    expect(result.ablations?.length).toBe(1);
+    const [outcome] = result.ablations!;
+    expect(outcome.group).toBe('g');
+    expect(outcome.feature).toBe('more');
+    expect(outcome.result.verdict).toBe('slower');
+    expect(outcome.result.difference).toBe(1);
+    expect(outcome.invalidRounds).toBe(0);
   });
 
   it('retains a snapshot of inputs when the caller edits its original suite', async () => {

@@ -45,6 +45,7 @@ class FakeHost implements PlanetShapeTestHost {
   onRenderComplete(callback: (at: number) => void): () => void { this.render.add(callback); return () => this.render.delete(callback); }
   isSampling(): boolean { return this.sampling; }
   startSampling(): void { this.sampling = true; }
+  gpuSamplesSoFar(): readonly number[] { return []; }
   stopSampling(): PlanetShapeFrameSummary {
     this.sampling = false;
     return {
@@ -70,13 +71,14 @@ function gpuPassesOf(frames: number, stepNs: number): IGpuPassSummary {
   return summarizeGpuPasses(records)!;
 }
 
-const [BASELINE] = PLANET_SHAPE_TEST_HISTORY;
+const [BASELINE, SHADOWS_AB] = PLANET_SHAPE_TEST_HISTORY;
 const quick = (...ids: string[]): TestSuite<PlanetShapeTestSettings> => ({
   ...BASELINE,
   scenarios: BASELINE.scenarios.filter((scenario) => ids.includes(scenario.id)).map((scenario) => ({ ...scenario, durationMs: 300, warmupMs: 0 })),
 });
-const run = (host: FakeHost, suite: TestSuite<PlanetShapeTestSettings>, profile: 'headless-hardware' | 'visible-browser' = 'visible-browser') =>
-  new TestSession<PlanetShapeTestSettings, PlanetShapeTestSettings>().run(suite, createPlanetShapeTestAdapter(host), { repetitions: 1, profile });
+const run = (host: FakeHost, suite: TestSuite<PlanetShapeTestSettings>, profile: 'headless-hardware' | 'visible-browser' = 'visible-browser',
+  mode: 'quick' | 'standard' = 'standard') =>
+  new TestSession<PlanetShapeTestSettings, PlanetShapeTestSettings>().run(suite, createPlanetShapeTestAdapter(host), { repetitions: 1, profile, mode });
 
 describe('planet shape lab', () => {
   describe('camera poses', () => {
@@ -218,6 +220,17 @@ describe('planet shape lab', () => {
       expect(BASELINE.scenarios[0].settings.kind).toBe('empty');
     });
 
+    it('alternates shadows off (A) and on (B) per pose in the A/B suite', () => {
+      expect(`${SHADOWS_AB.id}@${SHADOWS_AB.version}`).toBe('planet-shape-shadows-ab@1');
+      expect(SHADOWS_AB.ablation?.metrics).toEqual(['gpuPassTotal', 'gpuScenePass']);
+      for (const group of ['orbit-600km', 'ground-600km']) {
+        const rounds = SHADOWS_AB.scenarios.filter((scenario) => scenario.ablation?.group === group);
+        expect(rounds.map((scenario) => scenario.ablation?.arm)).toEqual(['A', 'B', 'A', 'B', 'A', 'B']);
+        expect(rounds.map((scenario) => scenario.settings.features.shadows)).toEqual([false, true, false, true, false, true]);
+        expect(new Set(rounds.map((scenario) => `${scenario.settings.bodyId}/${scenario.settings.poseId}`)).size).toBe(1);
+      }
+    });
+
     it('builds and parses an exact-version launch link', () => {
       const base = 'http://triangular-demo.localhost:4200/planet-shape-lab';
       const url = buildTestLaunchUrl(base, BASELINE, 'visible-browser', 1);
@@ -239,7 +252,7 @@ describe('planet shape lab', () => {
         expect(result.cases[0].checks.map((check) => check.name)).toContain('Planet not drawn');
         expect(result.cases[1].checks.map((check) => check.name)).toContain('Planet drawn');
         expect(result.cases[0].metrics.map((metric) => metric.name)).toEqual([
-          'frameInterval', 'renderSubmitCpu', 'gpuScenePass', 'gpuShadowPasses', 'gpuOutputPass']);
+          'frameInterval', 'renderSubmitCpu', 'gpuScenePass', 'gpuShadowPasses', 'gpuOutputPass', 'gpuPassTotal']);
         expect(result.cases[0].metrics.slice(2).every((metric) => metric.optional)).toBeTrue();
         expect(result.cases[0].metrics[2].unavailableReason).toBe('No GPU timestamp query on this renderer');
         expect(host.state).toEqual(before);
@@ -282,6 +295,31 @@ describe('planet shape lab', () => {
         expect(item.checks.find((check) => check.name === 'GPU timer self-test')?.passed).toBeTrue();
         expect(item.details?.['gpuTimestampStepNs']).toBe(1024);
         expect(String(item.details?.['gpuPassLabels'])).toContain('Lab:');
+      } finally { host.dispose(); }
+    }, 20_000);
+
+    it('runs the shadows A/B suite into one outcome per pose and metric', async () => {
+      const host = new FakeHost();
+      host.gpuPasses = gpuPassesOf(20, 1024);
+      const short = { ...SHADOWS_AB, scenarios: SHADOWS_AB.scenarios.map((scenario) => ({ ...scenario, durationMs: 200, warmupMs: 0 })) };
+      try {
+        const result = await run(host, short);
+        expect(result.ablations?.map((outcome) => `${outcome.group}/${outcome.metric}`)).toEqual([
+          'orbit-600km/gpuPassTotal', 'orbit-600km/gpuScenePass', 'ground-600km/gpuPassTotal', 'ground-600km/gpuScenePass']);
+        // The fake host times every round alike, so B cannot differ from A.
+        expect(result.ablations?.every((outcome) => outcome.result.verdict === 'no-difference')).toBeTrue();
+      } finally { host.dispose(); }
+    }, 30_000);
+
+    it('ends a quick-mode window early once frame pacing settles', async () => {
+      const host = new FakeHost();
+      const long = { ...quick('plain-sphere-orbit-600km'), scenarios: [{ ...quick('plain-sphere-orbit-600km').scenarios[0], durationMs: 4000 }] };
+      try {
+        const result = await run(host, long, 'visible-browser', 'quick');
+        expect(result.mode).toBe('quick');
+        expect(result.cases[0].window?.mode).toBe('quick');
+        expect(result.cases[0].window?.elapsedMs).toBeLessThanOrEqual(4100);
+        expect(Object.keys(result.cases[0].window?.samples ?? {})).toEqual(['frameInterval', 'renderSubmitCpu']);
       } finally { host.dispose(); }
     }, 20_000);
 

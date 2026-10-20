@@ -14,8 +14,10 @@ describe('illustrative frame adapter', () => {
     const context: TestContext = {
       signal: controller.signal,
       profile: 'headless-hardware',
+      mode: 'standard',
       repetition: 1,
       wait: async () => {},
+      measureWindow: async () => ({ mode: 'standard', elapsedMs: 0, stoppedBy: 'fixed' }),
     };
     const host: IllustrativeTestHost<string> = {
       capture: () => 'original',

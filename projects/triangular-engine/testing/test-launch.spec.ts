@@ -18,7 +18,11 @@ describe('test launch selection', () => {
   it('round-trips bounded options and preserves backend flags', () => {
     const url = new URL(buildTestLaunchUrl('http://localhost/lab?backend=webgl2', first, 'human-observed', 3));
     expect(url.searchParams.get('backend')).toBe('webgl2');
-    expect(parseTestLaunch(url, [first])).toEqual({ key: 'reference@1', profile: 'human-observed', repetitions: 3, autoStart: true });
+    expect(parseTestLaunch(url, [first])).toEqual({ key: 'reference@1', profile: 'human-observed', mode: 'standard', repetitions: 3, autoStart: true });
+    const quick = new URL(buildTestLaunchUrl('http://localhost/lab', first, 'visible-browser', 1, 'quick'));
+    expect(parseTestLaunch(quick, [first])?.mode).toBe('quick');
+    // Links saved before modes existed run as standard.
+    expect(parseTestLaunch(new URL('http://localhost/?testSuite=latest'), [first])?.mode).toBe('standard');
   });
 
   it('rejects stale identities, unsupported profiles, unbounded repeats and invalid autostart', () => {
@@ -26,7 +30,7 @@ describe('test launch selection', () => {
       'testSuite=reference&testVersion=99', 'testSuite=latest&testVersion=1',
       'testSuite=latest&testProfile=unknown', 'testSuite=latest&testRepetitions=6',
       'testSuite=latest&testRepetitions=1.5', 'testSuite=latest&testAutoStart=yes', 'testAutoStart=1',
-      'testSuite=latest&testSuite=reference', 'testSuite=latest&testScript=arbitrary',
+      'testSuite=latest&testSuite=reference', 'testSuite=latest&testScript=arbitrary', 'testSuite=latest&testMode=fast',
     ]) expect(() => parseTestLaunch(new URL(`http://localhost/?${query}`), [first])).toThrow();
   });
 
@@ -36,5 +40,9 @@ describe('test launch selection', () => {
     expect(() => validateTestHistory([{ ...first, scenarios: [{ ...first.scenarios[0], durationMs: NaN }] }])).toThrow();
     expect(() => validateTestHistory([{ ...first, scenarios: [{ ...first.scenarios[0], settings: { invalid: Infinity } }] }])).toThrow();
     expect(parseTestLaunch(new URL('http://localhost/?backend=webgl2'), [first])).toBeNull();
+    const round = { ...first.scenarios[0], ablation: { group: 'g', arm: 'A' as const } };
+    expect(() => validateTestHistory([{ ...first, scenarios: [round] }])).toThrowError(/Ablation round/);
+    expect(() => validateTestHistory([{ ...first, ablation: { feature: 'f', metrics: [] }, scenarios: [round] }])).toThrowError(/Ablation suite/);
+    expect(() => validateTestHistory([{ ...first, ablation: { feature: 'f', metrics: ['m'] }, scenarios: [round] }])).not.toThrow();
   });
 });

@@ -66,6 +66,8 @@ export function caseSummaries(run) {
   for (const c of run.cases ?? []) {
     const entry = out[c.scenario.id] ??= { metrics: {}, failed: [], invalid: [], samples: {} };
     for (const issue of c.validityIssues ?? []) if (!entry.invalid.includes(issue)) entry.invalid.push(issue);
+    if (c.window) entry.window = { stoppedBy: c.window.stoppedBy, s: round(c.window.elapsedMs / 1000), ...(c.window.drift ? { drift: c.window.drift } : {}) };
+    if (c.retries) entry.retries = (entry.retries ?? 0) + c.retries;
     for (const m of c.metrics ?? []) {
       if (!m.samples?.length) continue;
       (entry.samples[`${m.name} (${m.unit})`] ??= []).push(...m.samples.filter(Number.isFinite));
@@ -84,6 +86,15 @@ export function caseSummaries(run) {
   return out;
 }
 
+/** One compact entry per A/B outcome for the index line. */
+export function ablationSummaries(run) {
+  return (run.ablations ?? []).map((o) => ({
+    group: o.group, feature: o.feature, metric: o.metric, statistic: o.result.statistic, verdict: o.result.verdict,
+    a: round(o.result.a.value), b: round(o.result.b.value), relative: round(o.result.relative), noise: round(o.result.noiseBand),
+    reasons: o.result.reasons, invalidRounds: o.invalidRounds,
+  }));
+}
+
 /**
  * Writes the run and one index line; returns the stored relative file name. `machine` (from the monitor) adds a
  * `machine` block per case and the preflight to the file, and a tiny summary to the index line.
@@ -94,16 +105,18 @@ export function saveRun(root, config, result, machine) {
   const dir = join(root, config.outputDir, `${safe(result.suite.id)}@v${safe(result.suite.version)}`);
   mkdirSync(dir, { recursive: true });
   const stamp = new Date(result.startedAt ?? Date.now()).toISOString().replace(/[:.]/g, '-');
-  const name = `${stamp}_${safe(result.profile)}_${fp.hash}.json`;
+  const mode = result.mode && result.mode !== 'standard' ? `_${safe(result.mode)}` : '';
+  const name = `${stamp}_${safe(result.profile)}${mode}_${fp.hash}.json`;
   const attached = attachMachine(result, machine);
   const stored = { ...attached.result, fingerprint: fp, savedAt: new Date().toISOString() };
   writeFileSync(join(dir, name), storedJson(stored));
   const file = `${safe(result.suite.id)}@v${safe(result.suite.version)}/${name}`;
   appendFileSync(join(root, config.outputDir, 'index.jsonl'), JSON.stringify({
     savedAt: stored.savedAt, startedAt: result.startedAt, suite: result.suite.id, version: result.suite.version, profile: result.profile,
+    mode: result.mode ?? 'standard',
     runId: result.runId, fingerprint: fp.hash, head: fp.headShort, automatedVerdict: result.automatedVerdict,
     performanceVerdict: result.performanceVerdict, visualReview: result.visualReview, status: result.status, file,
-    errors: result.errors ?? [], cases: caseSummaries(result),
+    errors: result.errors ?? [], cases: caseSummaries(result), ...(result.ablations ? { ablations: ablationSummaries(result) } : {}),
     gpu: result.environment?.['gpu.vendor'], gpuBackend: result.environment?.['gpu.backend'], machine: attached.index,
   }) + '\n');
   return file;

@@ -1,4 +1,4 @@
-import { summarizeTestSamples } from './test-session';
+import { summarizeTestSamples } from './test-stats';
 
 /** `A` is the baseline, `B` has the feature on. */
 export type AblationArm = 'A' | 'B';

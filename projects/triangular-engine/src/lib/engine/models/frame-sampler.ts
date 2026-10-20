@@ -215,6 +215,11 @@ export class FrameSampler {
     return this.active;
   }
 
+  /** Whole-render GPU ms of the open window so far, one per resolved readback (read-only; for a settle check). */
+  get gpuSamples(): readonly number[] {
+    return this.gpu;
+  }
+
   start(): void {
     this.active = true;
     this.cpu = [];

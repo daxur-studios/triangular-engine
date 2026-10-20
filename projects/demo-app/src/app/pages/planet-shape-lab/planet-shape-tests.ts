@@ -1,7 +1,7 @@
 import type { TestScenario, TestSuite } from 'triangular-engine/testing';
 import { BODIES, FIXED_SEED, type BodyId } from './planet-shape-config';
 import type { CameraPoseId } from './planet-shape-camera';
-import { defaultFeatureState, type FeatureState } from './planet-shape-features';
+import { defaultFeatureState, withFeature, type FeatureState } from './planet-shape-features';
 
 /** Fully resolved, so a rerun cannot inherit anything from the manual controls. */
 export interface PlanetShapeTestSettings {
@@ -28,6 +28,20 @@ function scenario(id: string, label: string, settings: Partial<PlanetShapeTestSe
 }
 
 const POSES = ['orbit', 'ground'] as const;
+/** Rounds per arm of an A/B suite: `compareAblation` needs two to measure noise; three survive one bad round. */
+const AB_ROUNDS = 3;
+
+/** Alternating rounds A (shadows off), B (shadows on), A, B, ... of one pose, as one ablation group. */
+function shadowRounds(group: string, label: string, settings: Partial<PlanetShapeTestSettings>): TestScenario<PlanetShapeTestSettings>[] {
+  return Array.from({ length: AB_ROUNDS * 2 }, (_, index) => {
+    const arm = index % 2 === 0 ? 'A' : 'B';
+    const round = Math.floor(index / 2) + 1;
+    const state = arm === 'A' ? 'off' : 'on';
+    const features = withFeature(PLANET_SHAPE_DEFAULTS.features, 'shadows', arm === 'B');
+    return { ...scenario(`${group}-shadows-${state}-${round}`, `${label}, shadows ${state}, round ${round}`, { ...settings, features }),
+      ablation: { group, arm } };
+  });
+}
 
 /** Append new suites and versions at the end; a shared id/version keeps its meaning. */
 export const PLANET_SHAPE_TEST_HISTORY: readonly TestSuite<PlanetShapeTestSettings>[] = [
@@ -42,6 +56,18 @@ export const PLANET_SHAPE_TEST_HISTORY: readonly TestSuite<PlanetShapeTestSettin
       ...BODIES.flatMap((body) => POSES.map((pose) =>
         scenario(`plain-sphere-${pose}-${body.id}`, `Plain sphere, ${pose}, ${body.label}`, { bodyId: body.id, poseId: pose }))),
       scenario('empty-frame-after', 'Empty frame again (did the machine drift?)', { kind: 'empty' }),
+    ],
+  },
+  {
+    id: 'planet-shape-shadows-ab', version: 1,
+    title: 'Shadows A/B: plain sphere with shadows off (A) and on (B) in alternating rounds',
+    purpose: 'performance',
+    expectedGpuVendor: 'nvidia',
+    // The whole frame says what shadows cost; the scene pass alone shows the shadow lookups in the planet's shading.
+    ablation: { feature: 'shadows', metrics: ['gpuPassTotal', 'gpuScenePass'] },
+    scenarios: [
+      ...shadowRounds('orbit-600km', 'Orbit, 600 km', { bodyId: '600km', poseId: 'orbit' }),
+      ...shadowRounds('ground-600km', 'Ground, 600 km', { bodyId: '600km', poseId: 'ground' }),
     ],
   },
 ];

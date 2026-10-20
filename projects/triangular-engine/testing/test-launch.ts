@@ -1,8 +1,9 @@
-import type { TestProfile, TestSuite } from './test-contracts';
+import type { TestMode, TestProfile, TestSuite } from './test-contracts';
 
 /** Keep repeated runs bounded even when selection originates from an external link. */
 export const MAX_TEST_REPETITIONS = 5;
 export const TEST_PROFILES: readonly TestProfile[] = ['visible-browser', 'human-observed', 'headless-hardware'];
+export const TEST_MODES: readonly TestMode[] = ['quick', 'standard', 'soak'];
 
 /** Reject values that JSON would drop or alter before retaining immutable launch evidence. */
 function validateSettings(value: unknown, ancestors = new Set<object>()): void {
@@ -37,6 +38,12 @@ export function validateTestHistory<T extends object>(suites: readonly TestSuite
       }
       ids.add(scenario.id);
       validateSettings(scenario.settings);
+      if (scenario.ablation && (!suite.ablation || !scenario.ablation.group || !['A', 'B'].includes(scenario.ablation.arm))) {
+        throw new Error(`Ablation round without a suite ablation, group or arm in ${key}: ${scenario.id}`);
+      }
+    }
+    if (suite.ablation && (!suite.ablation.metrics.length || !suite.scenarios.some((scenario) => scenario.ablation))) {
+      throw new Error(`Ablation suite without metrics or rounds: ${key}`);
     }
   }
 }
@@ -44,6 +51,7 @@ export function validateTestHistory<T extends object>(suites: readonly TestSuite
 export interface TestLaunchSelection {
   readonly key: string;
   readonly profile: TestProfile;
+  readonly mode: TestMode;
   readonly repetitions: number;
   readonly autoStart: boolean;
 }
@@ -52,7 +60,7 @@ export interface TestLaunchSelection {
 export function parseTestLaunch<T extends object>(url: URL, suites: readonly TestSuite<T>[]): TestLaunchSelection | null {
   validateTestHistory(suites);
   const query = url.searchParams;
-  const allowed = new Set(['testSuite', 'testVersion', 'testProfile', 'testRepetitions', 'testAutoStart']);
+  const allowed = new Set(['testSuite', 'testVersion', 'testProfile', 'testRepetitions', 'testAutoStart', 'testMode']);
   const seen = new Set<string>();
   query.forEach((_, key) => {
     if (key.startsWith('test') && (!allowed.has(key) || seen.has(key))) throw new Error(`Unknown or duplicate test parameter: ${key}`);
@@ -71,19 +79,24 @@ export function parseTestLaunch<T extends object>(url: URL, suites: readonly Tes
   const profile = query.get('testProfile') ?? 'visible-browser';
   const repetitions = Number(query.get('testRepetitions') ?? '1');
   const autoStart = query.get('testAutoStart') ?? '0';
+  const mode = query.get('testMode') ?? 'standard';
+  if (!TEST_MODES.includes(mode as TestMode)) throw new Error('Invalid test mode');
   if (!TEST_PROFILES.includes(profile as TestProfile) || !Number.isInteger(repetitions) ||
       repetitions < 1 || repetitions > MAX_TEST_REPETITIONS || !['0', '1'].includes(autoStart)) {
     throw new Error('Invalid test profile, repetitions or autostart');
   }
-  return { key: testSuiteKey(suite), profile: profile as TestProfile, repetitions, autoStart: autoStart === '1' };
+  return { key: testSuiteKey(suite), profile: profile as TestProfile, mode: mode as TestMode, repetitions, autoStart: autoStart === '1' };
 }
 
 /** Exact-version evidence links retain the host's backend flags while replacing runner selection. */
-export function buildTestLaunchUrl(base: string, suite: Pick<TestSuite<object>, 'id' | 'version'>, profile: TestProfile, repetitions: number): string {
+export function buildTestLaunchUrl(
+  base: string, suite: Pick<TestSuite<object>, 'id' | 'version'>, profile: TestProfile, repetitions: number, mode: TestMode = 'standard',
+): string {
   const url = new URL(base);
   url.searchParams.set('testSuite', suite.id);
   url.searchParams.set('testVersion', String(suite.version));
   url.searchParams.set('testProfile', profile);
+  url.searchParams.set('testMode', mode);
   url.searchParams.set('testRepetitions', String(repetitions));
   url.searchParams.set('testAutoStart', '1');
   return url.toString();

@@ -90,6 +90,33 @@ test('index lines carry case summaries, so the summary opens no result file', as
   assert.match(stored, /"detail": "range \[ 1, 2 \]"/);
 });
 
+test('index lines carry the mode, each case window and the A/B outcomes, and summary prints them', async () => {
+  const root = repo();
+  const server = createReceiver(root, loadConfig(root));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${server.address().port}${SINK_PATH}`;
+  const body = { ...run('r2', '2026-10-20T10:00:00Z'), mode: 'quick' };
+  body.cases[0].window = { mode: 'quick', elapsedMs: 1432.7, stoppedBy: 'settled' };
+  body.cases[0].retries = 1;
+  const arm = (value) => ({ value, rounds: [value], spread: 0, halfRange: 0.001 });
+  body.ablations = [
+    { group: 'orbit', feature: 'shadows', metric: 'gpuPassTotal', invalidRounds: 0,
+      result: { statistic: 'median', verdict: 'slower', a: arm(0.045), b: arm(0.081), difference: 0.036, relative: 0.8, noiseBand: 0.0014, reasons: [] } },
+    { group: 'ground', feature: 'shadows', metric: 'gpuPassTotal', invalidRounds: 1,
+      result: { statistic: 'median', verdict: 'rejected', a: arm(0.09), b: arm(0.2), difference: 0.11, relative: 1.2, noiseBand: 0.01, reasons: ['Arm A spread 20.0 % exceeds 15.0 %'] } },
+  ];
+  assert.equal((await fetch(url, { method: 'POST', body: JSON.stringify(body) })).status, 200);
+  server.close();
+  const [row] = readFileSync(join(root, 'artifacts/test-runs/index.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(row.mode, 'quick');
+  assert.match(row.file, /_visible-browser_quick_/);
+  const text = summarize([row], () => assert.fail('result file opened'), row.fingerprint);
+  assert.match(text, /visible-browser quick/);
+  assert.match(text, /s1 \[settled 1\.433s, redone 1x\]:/);
+  assert.match(text, /A\/B shadows @ orbit gpuPassTotal median: B 0\.081 vs A 0\.045 \(\+80\.0%\) slower, noise 0\.001/);
+  assert.match(text, /A\/B shadows @ ground gpuPassTotal median: REJECTED Arm A spread 20\.0 % exceeds 15\.0 % \| 1 invalid rounds/);
+});
+
 test('summary falls back to the result file for index lines written before case summaries', () => {
   const old = { savedAt: 'x', startedAt: '2026-10-18T10:00:00Z', suite: 'demo', version: 2, profile: 'visible-browser',
     fingerprint: 'h', automatedVerdict: 'pass', performanceVerdict: 'unassessed', visualReview: 'pending', file: 'f.json' };
