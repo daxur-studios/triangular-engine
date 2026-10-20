@@ -1,9 +1,10 @@
 import { DOCUMENT } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, input, isDevMode, OnInit, output, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import type { TestAblationOutcome, TestMetric, TestMode, TestProfile, TestProgress, TestRunAdapter, TestRunResult, TestSuite } from './test-contracts';
+import type { TestAblationOutcome, TestCaseThumbnails, TestMetric, TestMode, TestProfile, TestProgress, TestRunAdapter, TestRunResult, TestSuite } from './test-contracts';
 import { buildTestLaunchUrl, MAX_TEST_REPETITIONS, parseTestLaunch, TEST_MODES, TEST_PROFILES, testSuiteKey, validateTestHistory } from './test-launch';
 import { nearestRankPercentile, TestSession } from './test-session';
+import { encodeThumbnailUploads } from './test-thumbnails';
 
 /** Same-origin path the dev-server proxy forwards to the result receiver. */
 export const DEFAULT_TEST_SINK_PATH = '/__triangular-test-sink';
@@ -54,7 +55,12 @@ export function digestTestRun(run: TestRunResult<object>): TestRunDigest {
     warnings += notes.length;
     for (const note of notes) problems.push(`${id}: ${note}`);
   }
-  for (const error of run.errors) if (!problems.some((line) => line.endsWith(error))) problems.push(error);
+  // `Checks failed: <id>` only repeats the failed check lines above.
+  const failedIds = new Set(run.cases.filter((item) => item.checks.some((check) => !check.passed)).map((item) => item.scenario.id));
+  for (const error of run.errors) {
+    if (failedIds.has(error.replace(/^Checks failed: /, '')) || problems.some((line) => line.endsWith(error))) continue;
+    problems.push(error);
+  }
   const seconds = Math.max(0, (Date.parse(run.finishedAt) - Date.parse(run.startedAt)) / 1000);
   return { valid, invalid, failed, seconds, problems, warnings, ablations: (run.ablations ?? []).map(ablationText) };
 }
@@ -109,6 +115,8 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     repetitions: new FormControl(1, { nonNullable: true, validators: [Validators.required, Validators.min(1), Validators.max(MAX_TEST_REPETITIONS), Validators.pattern(/^\d+$/)] }),
     profile: new FormControl<TestProfile>('visible-browser', { nonNullable: true }),
     mode: new FormControl<TestMode>('standard', { nonNullable: true }),
+    /** Small pictures of what each case looks at, saved with the result (needs the result sink). */
+    thumbnails: new FormControl(true, { nonNullable: true }),
   });
   readonly reviewNotes = new FormControl('', { nonNullable: true });
   readonly progress = signal<TestProgress | null>(null);
@@ -159,7 +167,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
       const launch = parseTestLaunch(new URL(this.doc.location.href), this.suites());
       if (launch) {
         if (!this.modes().includes(launch.mode)) throw new Error(`This page runs standard mode only, not ${launch.mode}`);
-        this.form.setValue({ suite: launch.key, repetitions: launch.repetitions, profile: launch.profile, mode: launch.mode });
+        this.form.setValue({ suite: launch.key, repetitions: launch.repetitions, profile: launch.profile, mode: launch.mode, thumbnails: launch.thumbnails });
         if (launch.autoStart && !this.allowAutoStart()) this.message.set('Autostart is disabled by this application. Use Run selected.');
         this.pendingAutoStart = launch.autoStart && this.allowAutoStart();
       }
@@ -191,16 +199,19 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     try {
       const sink = this.resultSink();
       const machineSink = sink && isDevMode() ? (typeof sink === 'string' ? sink : DEFAULT_TEST_SINK_PATH) : undefined;
-      const result = await this.session.run(suite, this.adapter(), { ...options, machineSink }, (progress) => {
+      // Pictures go only to the receiver, so without one they are not taken.
+      const thumbnails: TestCaseThumbnails[] = [];
+      const onThumbnails = machineSink && options.thumbnails ? (entry: TestCaseThumbnails) => { thumbnails.push(entry); } : undefined;
+      const result = await this.session.run(suite, this.adapter(), { ...options, machineSink, onThumbnails }, (progress) => {
         if (this.destroyed) return;
         this.progress.set(progress);
         this.progressChange.emit(progress);
       }, this.abort.signal);
       if (!this.destroyed) {
-        const withLink = { ...result, rerunUrl: buildTestLaunchUrl(this.doc.location.href, result.suite, options.profile, options.repetitions, options.mode) };
+        const withLink = { ...result, rerunUrl: buildTestLaunchUrl(this.doc.location.href, result.suite, options.profile, options.repetitions, options.mode, options.thumbnails) };
         this.result.set(withLink);
         this.completed.emit(withLink);
-        void this.saveResult(withLink);
+        void this.saveResult(withLink, thumbnails);
       }
     } catch (error) {
       if (!this.destroyed) this.message.set(error instanceof Error ? error.message : String(error));
@@ -219,20 +230,24 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     const reviewed = { ...result, visualReview: verdict, reviewNotes: this.reviewNotes.value };
     this.result.set(reviewed);
     this.completed.emit(reviewed);
-    void this.saveResult(reviewed);
+    void this.saveResult(reviewed, []);
   }
 
-  private async saveResult(result: TestRunResult<TSettings>): Promise<void> {
+  /** `thumbnails` ride in the same POST as base64 `thumbnailUploads`; the result JSON the panel shows and copies never has them. */
+  private async saveResult(result: TestRunResult<TSettings>, thumbnails: readonly TestCaseThumbnails[]): Promise<void> {
     const sink = this.resultSink();
     if (!sink || !isDevMode()) { this.saveStatus.set(''); return; }
     const url = typeof sink === 'string' ? sink : DEFAULT_TEST_SINK_PATH;
     const failed = 'Result not saved (receiver unreachable): use Download JSON.';
     try {
-      const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result) });
-      const body = response.ok ? await response.json().catch(() => ({})) as { file?: string } : null;
+      const thumbnailUploads = thumbnails.length ? await encodeThumbnailUploads(thumbnails) : undefined;
+      const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(thumbnailUploads ? { ...result, thumbnailUploads } : result) });
+      const body = response.ok ? await response.json().catch(() => ({})) as { file?: string; thumbnails?: readonly string[]; dropped?: readonly string[] } : null;
       if (this.destroyed) return;
       this.savedFile.set(body?.file);
-      this.saveStatus.set(body ? `Result saved${body.file ? `: ${body.file}` : ''}` : `${failed} (HTTP ${response.status})`);
+      const images = body?.thumbnails?.length ? ` with ${body.thumbnails.length} thumbnail${body.thumbnails.length > 1 ? 's' : ''}` : '';
+      const dropped = body?.dropped?.length ? `; ${body.dropped.length} thumbnail${body.dropped.length > 1 ? 's' : ''} dropped (${body.dropped[0]})` : '';
+      this.saveStatus.set(body ? `Result saved${body.file ? `: ${body.file}` : ''}${images}${dropped}` : `${failed} (HTTP ${response.status})`);
     } catch { if (!this.destroyed) this.saveStatus.set(failed); }
   }
 
@@ -273,7 +288,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     const suite = this.suites().find((item) => testSuiteKey(item) === this.form.controls.suite.value);
     if (!suite) return;
     const options = this.form.getRawValue();
-    const url = buildTestLaunchUrl(this.doc.location.href, suite, options.profile, options.repetitions, options.mode);
+    const url = buildTestLaunchUrl(this.doc.location.href, suite, options.profile, options.repetitions, options.mode, options.thumbnails);
     try { await this.doc.defaultView?.navigator.clipboard.writeText(url); this.message.set('Exact-version launch link copied'); }
     catch { this.message.set(url); }
   }

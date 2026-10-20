@@ -24,6 +24,7 @@ tags: [plans, index]
 | [Stylized Illustrative Planet & Scene Rendering](/docs/plans/054_stylized_illustrative_rendering.md) | planned | [Evidence](/docs/runbook/054_stylized_illustrative_rendering.md) |
 | [Planet Shape System](/docs/plans/055_planet_shape_system.md) | planned (Phase 0 next) | [Evidence](/docs/runbook/055_planet_shape_system.md) |
 | [WebGPURenderer as the Default Renderer](/docs/plans/056_webgpu_default_renderer.md) | draft (owner review, then Phases 0 and 2) | [Evidence](/docs/runbook/056_webgpu_default_renderer.md) |
+| [Test Results Page and Case Thumbnails](/docs/plans/058_test_results_page_and_thumbnails.md) | in progress | [Evidence](/docs/runbook/058_test_results_page_and_thumbnails.md) |
 
 
 Convention: [Plans and Runbooks](/docs/plans-and-runbooks.md).

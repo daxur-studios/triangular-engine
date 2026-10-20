@@ -318,3 +318,95 @@ test('a receiver without machine sampling still answers the timing messages', as
   assert.deepEqual(await response.json(), { ok: true, sampling: false });
   server.close();
 });
+
+const webp = (size) => Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP'), Buffer.alloc(Math.max(0, size - 12), 7)]);
+const upload = (caseId, index, bytes, type = 'image/webp') => ({ case: caseId, repetition: 1, index, type, data: bytes.toString('base64') });
+
+async function listening(root, config = loadConfig(root)) {
+  const server = createReceiver(root, { ...config, machineSampling: false });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return { server, base: `http://127.0.0.1:${server.address().port}${SINK_PATH}` };
+}
+
+test('thumbnails are stored beside the result, only names reach the JSON and index, and limits drop with a reason', async () => {
+  const root = repo();
+  const { server, base } = await listening(root, { ...loadConfig(root), maxImageBytes: 2000, maxRunImageBytes: 3000 });
+  const body = run('r1', '2026-10-18T10:00:00Z');
+  body.cases.push({ ...body.cases[0], scenario: { id: 's2', label: 'S2' }, limitations: ['kept'] });
+  body.cases.push({ ...body.cases[0], scenario: { id: 's3', label: 'S3' } });
+  const good = webp(1200);
+  body.thumbnailUploads = [
+    upload('s1', 0, good), upload('s1', 1, webp(1500)),
+    upload('s2', 0, webp(5000)), // over the per-image limit
+    upload('s3', 0, webp(1900)), // the run budget (3000) is used up by now
+    upload('s1', 2, Buffer.from('not an image at all, but long enough')),
+    upload('ghost', 0, good), // no such case
+  ];
+  const response = await (await fetch(base, { method: 'POST', body: JSON.stringify(body) })).json();
+  assert.equal(response.ok, true);
+  assert.deepEqual(response.thumbnails.length, 2);
+  assert.equal(response.dropped.length, 4);
+  assert.match(response.dropped.join('\n'), /s2: thumbnail dropped, 5 KB is over 2 KB|s2: thumbnail dropped, over 2 KB/);
+  assert.match(response.dropped.join('\n'), /s3: thumbnail dropped, the run's \d MB of thumbnails is used up/);
+  assert.match(response.dropped.join('\n'), /s1: thumbnail dropped, not a valid image/);
+  const [row] = readFileSync(join(root, 'artifacts/test-runs/index.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const stem = row.file.replace(/\.json$/, '').split('/')[1];
+  assert.deepEqual(row.cases.s1.thumbnails, [`demo@v2/${stem}/s1-r1-0.webp`, `demo@v2/${stem}/s1-r1-1.webp`]);
+  assert.equal(row.cases.s2.thumbnails, undefined);
+  const stored = JSON.parse(readFileSync(join(root, 'artifacts/test-runs', row.file), 'utf8'));
+  assert.equal(stored.thumbnailUploads, undefined);
+  assert.deepEqual(stored.cases[0].thumbnails, row.cases.s1.thumbnails);
+  assert.deepEqual(stored.cases[1].limitations, ['kept', 's2: thumbnail dropped, over 2 KB']);
+  assert.ok(readFileSync(join(root, 'artifacts/test-runs', row.cases.s1.thumbnails[0])).equals(good));
+  // A result without images is stored exactly as before.
+  const plain = await (await fetch(base, { method: 'POST', body: JSON.stringify(run('r2', '2026-10-18T11:00:00Z')) })).json();
+  assert.deepEqual(plain.thumbnails, []);
+  server.close();
+});
+
+test('read routes serve the index, one result and one image, and refuse anything outside the output folder', async () => {
+  const root = repo();
+  const { server, base } = await listening(root);
+  const body = run('r1', '2026-10-18T10:00:00Z');
+  body.thumbnailUploads = [upload('s1', 0, webp(300))];
+  const saved = await (await fetch(base, { method: 'POST', body: JSON.stringify(body) })).json();
+  await fetch(base, { method: 'POST', body: JSON.stringify(run('r2', '2026-10-18T11:00:00Z')) });
+  writeFileSync(join(root, 'artifacts/secret.json'), '{"secret":true}');
+  writeFileSync(join(root, 'artifacts/test-runs/demo@v2/notes.txt'), 'x');
+
+  const runs = await (await fetch(`${base}/runs`)).json();
+  assert.equal(runs.runs.length, 2);
+  assert.equal(runs.total, 2);
+  assert.equal((await (await fetch(`${base}/runs?limit=1`)).json()).runs[0].runId, 'r2');
+
+  const stored = await fetch(`${base}/run?file=${encodeURIComponent(saved.file)}`);
+  assert.equal(stored.status, 200);
+  assert.match(stored.headers.get('content-type'), /application\/json/);
+  assert.equal((await stored.json()).runId, 'r1');
+
+  const image = await fetch(`${base}/image?file=${encodeURIComponent(saved.thumbnails[0])}`);
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get('content-type'), 'image/webp');
+  assert.ok(Buffer.from(await image.arrayBuffer()).equals(webp(300)));
+
+  for (const file of [
+    '../secret.json', 'demo@v2/../../secret.json', '..%2Fsecret.json', '/etc/passwd', 'C:/Windows/win.ini', 'C:\\x.json', 'demo@v2\\x.json',
+    'demo@v2/.hidden.json', 'demo@v2/notes.txt', 'demo@v2/%00.json', 'index.jsonl', 'demo@v2', '', 'demo@v2/a/b/c.json',
+  ]) {
+    const response = await fetch(`${base}/run?file=${encodeURIComponent(file)}`);
+    assert.equal(response.status, 400, `run ${file}`);
+    assert.equal((await fetch(`${base}/image?file=${encodeURIComponent(file)}`)).status, 400, `image ${file}`);
+  }
+  assert.equal((await fetch(`${base}/run?file=demo@v2/missing.json`)).status, 404);
+  // A result is not an image and an image is not a result.
+  assert.equal((await fetch(`${base}/image?file=${encodeURIComponent(saved.file)}`)).status, 400);
+  assert.equal((await fetch(`${base}/run?file=${encodeURIComponent(saved.thumbnails[0])}`)).status, 400);
+  assert.equal((await fetch(`${base}/runs`, { method: 'POST', body: '{}' })).status, 405);
+
+  const local = await fetch(`${base}/runs`, { headers: { origin: 'http://triangular-demo.localhost:4200' } });
+  assert.equal(local.headers.get('access-control-allow-origin'), 'http://triangular-demo.localhost:4200');
+  const foreign = await fetch(`${base}/runs`, { headers: { origin: 'https://example.com' } });
+  assert.equal(foreign.status, 403);
+  assert.equal(foreign.headers.get('access-control-allow-origin'), null);
+  server.close();
+});

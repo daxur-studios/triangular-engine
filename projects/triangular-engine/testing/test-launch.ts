@@ -54,13 +54,15 @@ export interface TestLaunchSelection {
   readonly mode: TestMode;
   readonly repetitions: number;
   readonly autoStart: boolean;
+  /** `testThumbnails=0` turns the adapter's thumbnails off; they are on otherwise. */
+  readonly thumbnails: boolean;
 }
 
 /** A URL selects registered data only; it cannot provide executable commands or arbitrary settings. */
 export function parseTestLaunch<T extends object>(url: URL, suites: readonly TestSuite<T>[]): TestLaunchSelection | null {
   validateTestHistory(suites);
   const query = url.searchParams;
-  const allowed = new Set(['testSuite', 'testVersion', 'testProfile', 'testRepetitions', 'testAutoStart', 'testMode']);
+  const allowed = new Set(['testSuite', 'testVersion', 'testProfile', 'testRepetitions', 'testAutoStart', 'testMode', 'testThumbnails']);
   const seen = new Set<string>();
   query.forEach((_, key) => {
     if (key.startsWith('test') && (!allowed.has(key) || seen.has(key))) throw new Error(`Unknown or duplicate test parameter: ${key}`);
@@ -80,17 +82,19 @@ export function parseTestLaunch<T extends object>(url: URL, suites: readonly Tes
   const repetitions = Number(query.get('testRepetitions') ?? '1');
   const autoStart = query.get('testAutoStart') ?? '0';
   const mode = query.get('testMode') ?? 'standard';
+  const thumbnails = query.get('testThumbnails') ?? '1';
   if (!TEST_MODES.includes(mode as TestMode)) throw new Error('Invalid test mode');
   if (!TEST_PROFILES.includes(profile as TestProfile) || !Number.isInteger(repetitions) ||
-      repetitions < 1 || repetitions > MAX_TEST_REPETITIONS || !['0', '1'].includes(autoStart)) {
-    throw new Error('Invalid test profile, repetitions or autostart');
+      repetitions < 1 || repetitions > MAX_TEST_REPETITIONS || !['0', '1'].includes(autoStart) || !['0', '1'].includes(thumbnails)) {
+    throw new Error('Invalid test profile, repetitions, autostart or thumbnails');
   }
-  return { key: testSuiteKey(suite), profile: profile as TestProfile, mode: mode as TestMode, repetitions, autoStart: autoStart === '1' };
+  return { key: testSuiteKey(suite), profile: profile as TestProfile, mode: mode as TestMode, repetitions, autoStart: autoStart === '1', thumbnails: thumbnails === '1' };
 }
 
 /** Exact-version evidence links retain the host's backend flags while replacing runner selection. */
 export function buildTestLaunchUrl(
   base: string, suite: Pick<TestSuite<object>, 'id' | 'version'>, profile: TestProfile, repetitions: number, mode: TestMode = 'standard',
+  thumbnails = true,
 ): string {
   const url = new URL(base);
   url.searchParams.set('testSuite', suite.id);
@@ -98,6 +102,8 @@ export function buildTestLaunchUrl(
   url.searchParams.set('testProfile', profile);
   url.searchParams.set('testMode', mode);
   url.searchParams.set('testRepetitions', String(repetitions));
+  if (!thumbnails) url.searchParams.set('testThumbnails', '0');
+  else url.searchParams.delete('testThumbnails');
   url.searchParams.set('testAutoStart', '1');
   return url.toString();
 }

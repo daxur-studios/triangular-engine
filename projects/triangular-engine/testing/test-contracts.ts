@@ -168,6 +168,14 @@ export interface TestRunAdapter<TSettings extends object, TSnapshot = unknown> {
    * keep their length.
    */
   readonly windowModes?: boolean;
+  /**
+   * A small picture of what the scenario looks at (a few KB each; a still, or several frames that the results page
+   * loops). `TestSession` calls it once per kept case, after `measure` has returned: never in warmup or the window, and
+   * not for an attempt that is redone after focus loss. Honor `context.signal`. A rejection (or a timeout of
+   * `THUMBNAIL_TIMEOUT_MS`) becomes a limitation on the case and never fails it. Return `undefined` or `[]` for none.
+   * Images over `MAX_THUMBNAIL_BYTES` are dropped. The entry has no renderer: the page captures the pictures itself.
+   */
+  thumbnail?(scenario: TestScenario<TSettings>, context: TestContext): Promise<readonly Blob[] | undefined>;
 }
 
 export interface TestCaseResult<TSettings extends object> {
@@ -184,6 +192,11 @@ export interface TestCaseResult<TSettings extends object> {
   readonly window?: TestWindow;
   /** Times this case was redone because the page was hidden or lost focus. */
   readonly retries?: number;
+  /**
+   * Set by the receiver in the saved result, never in the page: the case's thumbnails as file names relative to the
+   * receiver's output folder (`<suite>@v<n>/<result-file-stem>/<case>-r<rep>-<i>.webp`). No pixel data lives in the JSON.
+   */
+  readonly thumbnails?: readonly string[];
 }
 
 /** Completed automation, usable performance evidence and human acceptance are separate outcomes. */
@@ -222,4 +235,18 @@ export interface TestRunOptions {
    * it never blocks or fails a run. `<tri-test-runner>` sets it from `resultSink` in dev builds.
    */
   readonly machineSink?: string;
+  /**
+   * Take thumbnails (default `true`; `false` also skips the adapter's `thumbnail` hook entirely). They are only taken
+   * when `onThumbnails` is given.
+   */
+  readonly thumbnails?: boolean;
+  /** Receives each kept case's thumbnails (`TestSession` keeps no pixel data in the result). */
+  readonly onThumbnails?: (thumbnails: TestCaseThumbnails) => void;
+}
+
+/** The pictures `TestAdapter.thumbnail` returned for one kept case. */
+export interface TestCaseThumbnails {
+  readonly scenarioId: string;
+  readonly repetition: number;
+  readonly images: readonly Blob[];
 }

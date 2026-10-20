@@ -404,3 +404,27 @@ Built in parallel by three agents in one checkout with disjoint files, then revi
   - `preflight-overlapped-measurement` is gone. `gpu-busy-before-start` is real this time: a non-browser app held the
     GPU during the preflight (process names are in the result file).
   - Frame interval was at the 165 Hz refresh. CPU load median 73 %.
+
+## 2026-10-20 — Shorter runs, focus redo, shadows A/B
+
+- **Why.** The owner found the runs long and the 6,000-pixel result list unread; they hand each run to an agent.
+  Run 9's samples showed the GPU pass medians settle within about 10 frames, while the 0.1 ms CPU timer never
+  settles a 0.3–0.5 ms median to 2 %: more frames do not fix a coarse timer.
+- **Built** (`triangular-engine/testing`, shared by every lab):
+  - **Modes:**
+    - `quick`: warmup at most 0.5 s; each window stops once its series settle (the halves agree, or the difference
+      is within one timer step), from 1 s up to `durationMs`.
+    - `standard`: as before.
+    - `soak`: windows of 60 s or more, with drift from the first to the last quarter.
+    - Adapters opt in with `measureWindow` and `windowModes`. Labs whose `durationMs` drives motion stay standard.
+  - **Focus loss** stops the case, pauses the run until the page is back, and redoes the case (at most two redos).
+  - **Runner:** one result card with **Copy for agent**; per-case output under Details.
+  - **A/B suites:** `ablation` on the suite and its rounds. The session runs `compareAblation` per group and
+    metric.
+- **Lab:**
+  - Watches frame interval, submit CPU and whole-render GPU (with timestamps) for the quick stop.
+  - New metric `gpuPassTotal`: all timed passes, summed per frame.
+  - New suite `planet-shape-shadows-ab` v1: 600 km at orbit and at ground. Three rounds per arm, shadows off (A)
+    and on (B). It compares `gpuPassTotal` and `gpuScenePass`.
+- **Checked:** testing specs, receiver specs and lab specs all pass, and the library builds. Not yet run on the
+  owner's machine.

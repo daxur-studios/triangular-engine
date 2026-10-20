@@ -24,6 +24,7 @@ tags: [runbook, index]
 | [Stylized Illustrative Planet & Scene Rendering](/docs/runbook/054_stylized_illustrative_rendering.md) | [Implementation plan](/docs/plans/054_stylized_illustrative_rendering.md) |
 | [Planet Shape System](/docs/runbook/055_planet_shape_system.md) | [Implementation plan](/docs/plans/055_planet_shape_system.md) |
 | [WebGPURenderer as the Default Renderer](/docs/runbook/056_webgpu_default_renderer.md) | [Implementation plan](/docs/plans/056_webgpu_default_renderer.md) |
+| [Test Results Page and Case Thumbnails](/docs/runbook/058_test_results_page_and_thumbnails.md) | [Implementation plan](/docs/plans/058_test_results_page_and_thumbnails.md) |
 
 
 Existing runbooks `001`–`042` retain their historical paths and formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

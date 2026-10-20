@@ -33,8 +33,9 @@ const history: readonly TestSuite<Settings>[] = [{
   (completed)="retainResult($event)" />
 ```
 
-Keep history oldest-first. Append suites or new versions; the final entry is
-**Run latest test**. The history selector and **Run selected** retain earlier tests.
+Keep history oldest-first. Append suites or new versions; the runner selects the final
+entry, and **Run** starts the selected test (earlier ones stay in the selector; **More
+options** has the profile, repetitions and **Run latest test**).
 Do not change the meaning of an existing ID/version after sharing it. Inputs must be
 structured-cloneable, JSON-compatible data with finite numbers. Paths and actions are
 registered application code, not executable JSON instructions.
@@ -47,7 +48,8 @@ The same `TestSession` drives button and URL launches:
 2. For each repetition/scenario, `apply` uses the page's real action methods,
    `ready(context, scenario)` awaits completed renders and that scenario's explicit
    page conditions without caching the last applied scenario, then optional
-   `warmupMs` elapses and `measure` runs the action for `durationMs`.
+   `warmupMs` elapses and `measure` runs the action for `durationMs` (or for the
+   mode's window, see [Modes](#modes-quick-standard-soak)).
 3. `restore(snapshot, context)` executes even after failure/cancel, using a fresh
    signal with a five-second cleanup timeout. Make restoration safe after partial setup.
 
@@ -71,6 +73,53 @@ guards. Worker/engine errors outside an awaited adapter promise must be forwarde
 by the host into adapter failure/checks; the runner has no async error subscription
 hook. A page-local error sink is currently one way to do this.
 
+## Modes: quick, standard, soak
+
+A run has a mode, picked in the runner or with `testMode` in a launch link. Quick and soak change only the
+measurement window, so they need an adapter that times its window with `context.measureWindow(scenario, series?)`
+and declares `windowModes: true`. Other adapters (a fly-by or sweep whose `durationMs` drives the motion) run
+`standard` only, and the runner offers nothing else.
+
+| Mode | Warmup | Window | For |
+|---|---|---|---|
+| `quick` (the runner's default where offered) | at most `QUICK_WARMUP_MS` (0.5 s) | stops once every watched series has settled: at least `QUICK_MIN_WINDOW_MS` (1 s) and `QUICK_MIN_SAMPLES` (60) per series, at most `durationMs`; without series, `QUICK_WINDOW_MS` (2 s) | checking work as you go |
+| `standard` | `warmupMs` | `durationMs` | results that count: baselines, final comparisons |
+| `soak` | `warmupMs` | at least `SOAK_WINDOW_MS` (60 s); reports each series' drift | behaviour over time: throttling, leaks, creeping cost |
+
+```ts
+measure: async (scenario, context) => {
+  const frames: number[] = [];
+  // ... collect frames while the window runs ...
+  await context.measureWindow(scenario, [{ name: 'frameMs', samples: () => frames, resolution: 0.1 }]);
+  return { metrics: [{ name: 'frameMs', unit: 'ms', source: '...', samples: frames }] };
+},
+```
+
+A series has settled when the first and second half of its samples agree on the median within 5% and on the p95
+within 10%, or within its `resolution` (its timer step; a 0.1 ms timer cannot settle a 0.3 ms median to 5%). Soak
+reports `drift`: the change of each series' median from the first to the last quarter. The case keeps the window
+(`TestCaseResult.window`: `stoppedBy` `settled`, `max` or `fixed`, `elapsedMs`, sample counts, `drift`), the
+result keeps `mode`, and `npm run test:summary` prints both. Compare a quick run only with quick runs. Soak raises
+the default run timeout by the soak windows.
+
+## Page focus
+
+On the visible profiles a run watches the page from warmup to the end of each measurement. If the page is
+hidden or loses focus, the case stops, the run pauses (phase `paused`, run timeout stopped) until the page is
+visible and focused again, and the case is redone from `apply`. After `MAX_FOCUS_RETRIES` (2) redos the loss is
+recorded as a validity issue instead, as is a loss on a page that was never visible and focused in this run (a
+background or headless run is not waited for). The case keeps `retries`. A pause gives up after
+`FOCUS_RESUME_TIMEOUT_MS` (10 minutes). Navigating away is recorded, never redone.
+
+## Result card and agent hand-off
+
+When a run ends the runner shows one card: status, mode, duration, counts of valid, invalid and failed cases,
+the saved file, A/B outcomes, and up to eight problem lines (failed checks, validity issues, redos, unsettled
+windows, drift). Per-case metrics, checks, the JSON and the rerun link are under **Details**. **Copy for agent**
+copies the few lines an agent needs to find the run (`testRunAgentText(run, savedFile)`): suite, mode, profile,
+verdicts, counts, the saved file, the `test:summary` command and every problem. `digestTestRun(run)` gives the
+same counts and lines for a host's own UI.
+
 ## Launch links
 
 ```text
@@ -78,7 +127,8 @@ hook. A page-local error sink is currently one way to do this.
 ```
 
 `testSuite=latest` follows append order and omits `testVersion`; the result's rerun
-link always pins an exact ID/version. The profile is `visible-browser`,
+link always pins an exact ID/version and the mode. `testMode` is `quick`, `standard`
+(when omitted, as in links made before modes) or `soak`. The profile is `visible-browser`,
 `human-observed`, or `headless-hardware`. Repetitions are bounded to 1–5. Unknown
 versions/invalid options fail visibly and do not autostart a replacement test.
 Backend and other application query parameters are preserved in copied links.
@@ -226,6 +276,24 @@ const result = compareAblation([
   With two rounds per arm the band is crude (it is just how far the two rounds disagreed), so prefer four or more.
 - `invalid` (with `reasons`, numbers `NaN`): fewer than two rounds in an arm, two neighbouring rounds from the same
   arm, a round with no finite samples or with non-finite samples, or an unusable `maxSpread`.
+
+### A/B suites
+
+A suite can run the rounds itself. Give it `ablation: { feature, metrics, statistic?, maxSpread? }` and give each
+round scenario `ablation: { group, arm }`, in the order A, B, A, B per group. `TestSession` then calls
+`compareAblation` per group and metric over the rounds' samples, in run order, and stores the outcomes in
+`TestRunResult.ablations` (with `invalidRounds`, the rounds that had a validity issue). The runner card, the
+agent text and `npm run test:summary` print one `A/B` line each. Repetitions keep alternating, so two repetitions
+double the rounds.
+
+```ts
+ablation: { feature: 'shadows', metrics: ['gpuPassTotal'] },
+scenarios: [
+  { id: 'off-1', label: 'Off, round 1', durationMs: 5000, settings: off, ablation: { group: 'orbit', arm: 'A' } },
+  { id: 'on-1', label: 'On, round 1', durationMs: 5000, settings: on, ablation: { group: 'orbit', arm: 'B' } },
+  // ... three or more rounds per arm
+],
+```
 
 ## GPU time per pass
 

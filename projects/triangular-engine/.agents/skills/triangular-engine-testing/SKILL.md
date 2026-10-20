@@ -60,6 +60,14 @@ cover the action rather than the idle period after it. Use actual completed fram
 and the game's existing clock; honor `context.signal` and remove subscriptions on
 completion or abort. Use `context.wait(ms)` only for abortable timed waits.
 
+For a timing window over a static view, call `context.measureWindow(scenario, series)`
+instead of `context.wait(scenario.durationMs)`, pass live sample series (with their timer
+step as `resolution`), and set `windowModes: true` on the adapter. That enables `quick`
+(stops once the series settle; the runner's default) and `soak` (60 s or more, reports
+drift) besides `standard`. Keep `standard` only where `durationMs` drives motion. For a
+feature's cost, give the suite `ablation: { feature, metrics }` and alternate round
+scenarios with `ablation: { group, arm: 'A' | 'B' }`; the session compares them.
+
 Keep settings feedback visible while running. Capture is read-only; restore must
 work after partial application or cancellation. The default run timeout is 180
 seconds; restoration receives a fresh signal with a separate five-second timeout.
@@ -68,8 +76,8 @@ Do not start uncancellable background work from an adapter.
 ## Give the user a runnable link
 
 Create a concrete launch link instead of only saying “visit this page and test it
-visually.” Use `buildTestLaunchUrl(baseUrl, suite, profile, repetitions)` or the
-panel's **Copy launch link** for an exact version:
+visually.” Use `buildTestLaunchUrl(baseUrl, suite, profile, repetitions, mode)` or the
+panel's **Copy launch link** for an exact version (`testMode` defaults to `standard`):
 
 ```text
 /game-test?testSuite=camera-toggle&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1
@@ -97,7 +105,8 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   metric with samples; empty required or non-finite samples invalidate evidence.
 - Keep automated completion, `automatedVerdict`, `performanceVerdict`, and
   `visualReview` distinct. A completed run does not prove visual correctness.
-  Visible profiles record focus/visibility loss; visibility alone does not prove
+  Visible profiles stop and redo a case when the page is hidden or loses focus (up to
+  two redos), then record the loss; visibility alone does not prove
   an unthrottled GPU. The current runner leaves usable performance numbers
   `unassessed`, and marks missing evidence or unverified headless performance
   `inconclusive`. It does not compare budgets or baselines.
@@ -135,6 +144,8 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   `gpu-busy-before-start`, `gpu-throttled`, ...), shown by `npm run test:summary`. A run with warnings, no adapter
   info, or the wrong adapter is not a hardware number. Process names stay in `artifacts/` result files; never put
   them in docs or baselines. See `docs/testing.md`, "Machine context".
+- The user can press **Copy for agent** on the result card: a few lines with the suite,
+  mode, verdicts, saved file and problems. Read the run with `test:summary` from there.
 - Without a receiver, JSON copy/paste is the fallback handoff. No queue or
   idle-agent wakeup exists.
 

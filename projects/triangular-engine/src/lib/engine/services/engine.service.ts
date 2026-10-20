@@ -24,6 +24,7 @@ import {
   PerspectiveCamera,
   Scene,
   Timer,
+  Vector2,
   WebGLRenderer,
   WebGLRendererParameters,
 } from 'three';
@@ -187,6 +188,7 @@ export class EngineService implements IEngine {
   /** Owner id of the one readback in flight, or `null` when none is pending (see `#collectGpuTiming`). */
   #gpuTimingOwner: number | null = null;
   #gpuTimingGeneration = 0;
+  readonly #drawingBufferSize = new Vector2();
   #lastGpuTimingMs: number | undefined;
   /** Names each timestamped render pass when it begins, so a readback can be split per pass. */
   readonly #gpuPasses = new GpuPassRecorder();
@@ -722,6 +724,9 @@ export class EngineService implements IEngine {
     // Resize and camera effects can request a frame before async WebGPU init completes.
     // onComponentInit starts the normal render loop once the backend is ready.
     if (this.renderer instanceof WebGPURenderer && !this.renderer.initialized) return;
+    // A hidden or collapsed container gives a 0x0 drawing buffer; WebGPU raises validation errors
+    // for the empty swapchain texture. The next resize with a real size resumes rendering.
+    if (this.#hasEmptyDrawingBuffer()) return;
 
     // Only render if enough time has passed since the last frame
     if (
@@ -752,6 +757,13 @@ export class EngineService implements IEngine {
       });
     }
   }
+  #hasEmptyDrawingBuffer(): boolean {
+    const renderer = this.renderer;
+    if (typeof renderer?.getDrawingBufferSize !== 'function') return false;
+    renderer.getDrawingBufferSize(this.#drawingBufferSize);
+    return this.#drawingBufferSize.x === 0 || this.#drawingBufferSize.y === 0;
+  }
+
   /**
    * Reads the last render's GPU timestamp (`gpuTiming`) without stalling the frame: at most one
    * readback is in flight, and frames that finish while it is pending are not sampled.

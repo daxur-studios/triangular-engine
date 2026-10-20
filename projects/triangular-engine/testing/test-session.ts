@@ -7,6 +7,7 @@ import { MAX_TEST_REPETITIONS, TEST_MODES, TEST_PROFILES, validateTestHistory } 
 import { compareAblation } from './test-ablation';
 import { summarizeTestSamples } from './test-stats';
 import { modeWarmupMs, modeWindowMs, runMeasureWindow } from './test-window';
+import { keepThumbnails, THUMBNAIL_TIMEOUT_MS } from './test-thumbnails';
 
 export { nearestRankPercentile, summarizeTestSamples } from './test-stats';
 
@@ -156,6 +157,24 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
     const machineSink = suite.purpose === 'performance' ? options.machineSink : undefined;
     const machineMessage = (kind: 'prepare' | 'start' | 'stop', scenarioId?: string, repetition?: number, timeoutMs?: number) =>
       sendMachineMessage(machineSink as string, kind, { runId, suiteId: suite.id, suiteVersion: suite.version, scenarioId, repetition }, timeoutMs);
+    // Thumbnails run after a kept case's measurement, with the run's own byte budget.
+    let thumbnailBytes = 0;
+    const takeThumbnails = async (scenario: typeof suite.scenarios[number], repetition: number): Promise<string[]> => {
+      const attemptAbort = new AbortController();
+      const forward = () => attemptAbort.abort(controller.signal.reason);
+      controller.signal.addEventListener('abort', forward, { once: true });
+      if (controller.signal.aborted) forward();
+      const giveUp = setTimeout(() => attemptAbort.abort(new Error(`timed out after ${THUMBNAIL_TIMEOUT_MS / 1000} s`)), THUMBNAIL_TIMEOUT_MS);
+      try {
+        const images = await abortable(() => adapter.thumbnail!(scenario, context(attemptAbort.signal, repetition)), attemptAbort.signal);
+        if (!images?.length) return [];
+        const kept = keepThumbnails(images, thumbnailBytes);
+        thumbnailBytes += kept.bytes;
+        if (kept.images.length) options.onThumbnails?.({ scenarioId: scenario.id, repetition, images: kept.images });
+        return [...kept.notes];
+      } catch (error) { return [`Thumbnail not taken: ${errorMessage(error)}`]; }
+      finally { clearTimeout(giveUp); controller.signal.removeEventListener('abort', forward); }
+    };
     let snapshot: TSnapshot | undefined;
     let captured = false;
     let failed = false;
@@ -193,6 +212,19 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
             const pageHidden = () => { validityIssues.add('Page navigation during measurement'); };
             let observing = false;
             let machineStarted: Promise<void> | undefined;
+            const stopObserving = () => {
+              if (!observing) return;
+              observing = false;
+              doc?.removeEventListener('visibilitychange', checkVisibility);
+              win?.removeEventListener('blur', blurred);
+              win?.removeEventListener('pagehide', pageHidden);
+            };
+            // Stop follows the start message's outcome, so a slow start cannot arrive after its stop.
+            const stopMachine = () => {
+              const started = machineStarted;
+              machineStarted = undefined;
+              if (started) void started.then(() => machineMessage('stop', scenario.id, repetition));
+            };
             let caseWindow: TestWindow | undefined;
             try {
               const ctx = context(attempt.signal, repetition, (value) => { caseWindow = value; });
@@ -218,6 +250,14 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
               const observation = await abortable(() => adapter.measure(scenario, ctx), attempt.signal);
               checkVisibility();
               if (attempt.signal.aborted) throw attempt.signal.reason;
+              // The attempt is kept. Whatever the thumbnail costs must stay outside the timing, the focus watch and the
+              // machine block, so those are closed first.
+              const thumbnailNotes: string[] = [];
+              if (options.thumbnails !== false && options.onThumbnails && adapter.thumbnail) {
+                stopObserving();
+                stopMachine();
+                thumbnailNotes.push(...await takeThumbnails(scenario, repetition));
+              }
               if (suite.purpose === 'performance') for (const issue of observation.validityIssues ?? []) validityIssues.add(issue);
               if (suite.purpose === 'performance') {
                 const gpuIssue = gpuVendorIssue(suite.expectedGpuVendor, environment);
@@ -234,7 +274,7 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
               const checks = observation.checks ?? [];
               const caseFailed = checks.some((check) => !check.passed);
               cases.push({ scenario, repetition, status: caseFailed ? 'failed' : 'completed', metrics: observation.metrics.map(withSummary),
-                checks, validityIssues: [...validityIssues], limitations: observation.limitations ?? [], details: observation.details,
+                checks, validityIssues: [...validityIssues], limitations: [...(observation.limitations ?? []), ...thumbnailNotes], details: observation.details,
                 ...(caseWindow ? { window: caseWindow } : {}), ...(retry ? { retries: retry } : {}) });
               if (caseFailed) { failed = true; throw new Error(`Checks failed: ${scenario.id}`); }
               break;
@@ -252,13 +292,8 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
               throw error;
             } finally {
               controller.signal.removeEventListener('abort', forward);
-              // Stop follows the start message's outcome, so a slow start cannot arrive after its stop.
-              if (machineStarted) void machineStarted.then(() => machineMessage('stop', scenario.id, repetition));
-              if (observing) {
-                doc?.removeEventListener('visibilitychange', checkVisibility);
-                win?.removeEventListener('blur', blurred);
-                win?.removeEventListener('pagehide', pageHidden);
-              }
+              stopMachine();
+              stopObserving();
             }
           }
         }
@@ -282,8 +317,9 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
       onProgress(null);
     }
     const inconclusive = cases.some((item) => item.validityIssues.length > 0);
-    const ablations = suite.ablation ? ablationOutcomes(suite, cases) : undefined;
     const cancelled = controller.signal.aborted && !timedOut;
+    // A run that stopped early has too few rounds to compare; its failure says more than an A/B line could.
+    const ablations = suite.ablation && !failed && !cancelled ? ablationOutcomes(suite, cases) : undefined;
     return {
       schemaVersion: 1, runId, suite, profile: options.profile, mode, repetitions: options.repetitions, startedAt,
       finishedAt: new Date().toISOString(), status: failed ? 'failed' : cancelled ? 'cancelled' : inconclusive ? 'inconclusive' : 'completed',

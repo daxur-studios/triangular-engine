@@ -303,7 +303,7 @@ Each phase ends with a check in `/planet-shape-lab` (proposed route) and recorde
 ### Phase 0. Test track and platform ceiling
 
 **Lab page** `/planet-shape-lab` (skeleton built 2026-10-19: plain sphere, poses, spin, feature registry,
-`planet-shape-baseline` v1; per-pass timers and timer self-test built and passing on the reference GPU 2026-10-19; morph slider still TODO): a body-fixed planet with fixed seeds at three sizes (64 km, 600 km, 6,371 km),
+`planet-shape-baseline` v1; per-pass timers and timer self-test built and passing on the reference GPU 2026-10-19; quick/standard/soak modes and the `planet-shape-shadows-ab` v1 A/B suite built 2026-10-20, not yet run on the owner's machine; morph slider still TODO): a body-fixed planet with fixed seeds at three sizes (64 km, 600 km, 6,371 km),
 the same camera rig across contenders, a spinning planet with a time-warp slider, and the morph slider.
 
 **Measurement** (extends `triangular-engine/testing`, Plan 052's runner and `FrameSampler`):

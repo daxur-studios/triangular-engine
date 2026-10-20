@@ -88,7 +88,7 @@ describe('TestRunnerComponent', () => {
     const run: TestRunResult<Settings> = {
       schemaVersion: 1, runId: 'r', suite: history[1], profile: 'visible-browser', mode: 'quick', repetitions: 1,
       startedAt: '2026-10-20T10:00:00.000Z', finishedAt: '2026-10-20T10:00:16.000Z', status: 'failed',
-      automatedVerdict: 'fail', performanceVerdict: 'inconclusive', visualReview: 'not-required', environment: {}, errors: [],
+      automatedVerdict: 'fail', performanceVerdict: 'inconclusive', visualReview: 'not-required', environment: {}, errors: ['Checks failed: broken'],
       cases: [
         { scenario, repetition: 1, status: 'completed', metrics: [], checks: [], validityIssues: [], limitations: [],
           window: { mode: 'quick', elapsedMs: 1200, stoppedBy: 'settled' } },

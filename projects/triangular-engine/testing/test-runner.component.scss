@@ -11,6 +11,8 @@ select, input, textarea { box-sizing: border-box; width: 100%; padding: 0.35rem;
 .mode input:checked + span { background: var(--ui-surface-raised, #253242); color: var(--ui-accent, #8ac9ff); }
 .mode input:focus-visible + span { outline: 2px solid var(--ui-accent, #8ac9ff); outline-offset: -2px; }
 .mode input:disabled + span { opacity: 0.5; }
+label.check { display: flex; align-items: center; gap: 0.4rem; }
+label.check input { width: auto; }
 details { margin-block: 0.5rem; }
 summary { cursor: pointer; color: var(--ui-muted, #b0becd); font-size: 0.85rem; }
 .actions { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-block: 0.5rem; }

@@ -21,6 +21,7 @@
         </select>
       </label>
       <label>Repetitions <input type="number" formControlName="repetitions" min="1" [max]="maxRepetitions" /></label>
+      <label class="check"><input type="checkbox" formControlName="thumbnails" /> Case thumbnails (taken after each measurement, never inside it)</label>
       <button type="button" (click)="runLatest()" [disabled]="running() || externalBusy() || !available() || !latest() || form.invalid">Run latest test</button>
     </details>
     <div class="actions">

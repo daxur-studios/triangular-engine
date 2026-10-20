@@ -238,6 +238,10 @@ describe('TestSession', () => {
     expect(outcome.result.verdict).toBe('slower');
     expect(outcome.result.difference).toBe(1);
     expect(outcome.invalidRounds).toBe(0);
+    adapter.measure = async () => ({ metrics: [], checks: [{ name: 'broken', passed: false }] });
+    const stopped = await new TestSession<Settings, number>().run(ab, adapter, { repetitions: 1, profile: 'headless-hardware' });
+    expect(stopped.status).toBe('failed');
+    expect(stopped.ablations).toBeUndefined();
   });
 
   it('retains a snapshot of inputs when the caller edits its original suite', async () => {

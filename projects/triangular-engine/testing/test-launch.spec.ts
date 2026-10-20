@@ -18,9 +18,14 @@ describe('test launch selection', () => {
   it('round-trips bounded options and preserves backend flags', () => {
     const url = new URL(buildTestLaunchUrl('http://localhost/lab?backend=webgl2', first, 'human-observed', 3));
     expect(url.searchParams.get('backend')).toBe('webgl2');
-    expect(parseTestLaunch(url, [first])).toEqual({ key: 'reference@1', profile: 'human-observed', mode: 'standard', repetitions: 3, autoStart: true });
+    expect(parseTestLaunch(url, [first])).toEqual({ key: 'reference@1', profile: 'human-observed', mode: 'standard', repetitions: 3, autoStart: true, thumbnails: true });
     const quick = new URL(buildTestLaunchUrl('http://localhost/lab', first, 'visible-browser', 1, 'quick'));
     expect(parseTestLaunch(quick, [first])?.mode).toBe('quick');
+    // Thumbnails are on unless the link says otherwise, and an on link stays free of the parameter.
+    expect(url.searchParams.has('testThumbnails')).toBeFalse();
+    const off = new URL(buildTestLaunchUrl('http://localhost/lab?testThumbnails=1', first, 'visible-browser', 1, 'quick', false));
+    expect(off.searchParams.get('testThumbnails')).toBe('0');
+    expect(parseTestLaunch(off, [first])?.thumbnails).toBeFalse();
     // Links saved before modes existed run as standard.
     expect(parseTestLaunch(new URL('http://localhost/?testSuite=latest'), [first])?.mode).toBe('standard');
   });
@@ -30,7 +35,7 @@ describe('test launch selection', () => {
       'testSuite=reference&testVersion=99', 'testSuite=latest&testVersion=1',
       'testSuite=latest&testProfile=unknown', 'testSuite=latest&testRepetitions=6',
       'testSuite=latest&testRepetitions=1.5', 'testSuite=latest&testAutoStart=yes', 'testAutoStart=1',
-      'testSuite=latest&testSuite=reference', 'testSuite=latest&testScript=arbitrary', 'testSuite=latest&testMode=fast',
+      'testSuite=latest&testSuite=reference', 'testSuite=latest&testScript=arbitrary', 'testSuite=latest&testMode=fast', 'testSuite=latest&testThumbnails=2',
     ]) expect(() => parseTestLaunch(new URL(`http://localhost/?${query}`), [first])).toThrow();
   });
 
