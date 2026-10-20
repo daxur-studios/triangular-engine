@@ -7,6 +7,7 @@
 - `projects/triangular-engine/docs/` — user-facing library documentation.
 - `docs/runbook/` — design notes and implementation history for larger features.
 - `docs/plans/` — current work plans linked to their runbooks; [convention](docs/plans-and-runbooks.md).
+- `docs/handover/` — notes for picking up unfinished work from an earlier session; [convention](docs/handover/README.md).
 - `instructions/` — maintainer workflows and historical project notes.
 - `.daxur/token-map.json` — repository token documentation manifest (see `docs/runbook/029_token_map_usage_guide.md`).
 
@@ -16,6 +17,8 @@
 2. Read `projects/triangular-engine/docs/ai-agents.md` for implementation conventions.
 3. Inspect the relevant secondary entry point before changing it.
 4. Check `git status --short` and preserve unrelated working-tree changes.
+   If `docs/handover/` has a handover for the work you are picking up, read it first. When your session ends with work
+   open, write one ([convention](docs/handover/README.md)).
 5. **DO NOT COMMIT**: Never create git commits (`git commit`). Multiple agents and developers work concurrently in the workspace; creating commits interferes with concurrent branches, worktrees, and tasks. Leave all changes uncommitted in the working tree.
 
 ## Common commands

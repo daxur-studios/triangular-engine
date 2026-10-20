@@ -3,6 +3,9 @@ import type { CloudVolume } from './cloud-volume';
 
 type Rgb = readonly [number, number, number];
 
+/** Cosine range below a volume's horizon over which its sun colour fades out (about 4 degrees). */
+const TERMINATOR_FADE = 0.07;
+
 /**
  * What the lighting needs from an atmosphere, as plain functions, so this entry point does not import
  * `triangular-engine/atmosphere`. The atmosphere's baked tables satisfy it:
@@ -48,6 +51,7 @@ export class CloudVolumeAtmosphereLighting {
 
   private readonly point = new Vector3();
   private readonly sun = new Vector3();
+  private readonly lit = new Vector3();
 
   constructor(
     private readonly source: CloudAtmosphereSource,
@@ -84,7 +88,23 @@ export class CloudVolumeAtmosphereLighting {
       const r = this.point.length();
       if (r === 0) continue;
       const muSun = this.point.dot(this.sun) / r;
-      const direct = this.source.sunTransmittance([this.point.x, this.point.y, this.point.z], sun);
+      // The source returns exactly 0 once the planet blocks the sun, so a volume's light would snap off at the
+      // horizon. Sample just above the horizon instead and fade over a few degrees below it.
+      const ratio = Math.min(1, this.source.planetRadiusM / r);
+      const muHorizon = -Math.sqrt(1 - ratio * ratio);
+      const muLit = Math.max(muSun, muHorizon + 1e-3);
+      let direct: Rgb;
+      if (muLit === muSun) {
+        direct = this.source.sunTransmittance([this.point.x, this.point.y, this.point.z], sun);
+      } else {
+        const k = Math.sqrt(Math.max(0, 1 - muLit * muLit) / Math.max(1e-6, 1 - muSun * muSun));
+        this.lit.set(this.sun.x - (this.point.x / r) * muSun, this.sun.y - (this.point.y / r) * muSun, this.sun.z - (this.point.z / r) * muSun);
+        this.lit.multiplyScalar(k).addScaledVector(this.point, muLit / r);
+        const edge = this.source.sunTransmittance([this.point.x, this.point.y, this.point.z], [this.lit.x, this.lit.y, this.lit.z]);
+        const fade = Math.max(0, Math.min(1, (muSun - (muHorizon - TERMINATOR_FADE)) / TERMINATOR_FADE));
+        const f = fade * fade * (3 - 2 * fade);
+        direct = [edge[0] * f, edge[1] * f, edge[2] * f];
+      }
       const sky = this.source.skyIrradiance(Math.max(0, r - this.source.planetRadiusM), muSun);
       volume.uSunColor.value.set(direct[0], direct[1], direct[2]);
       volume.uAmbient.value.set(sky[0], sky[1], sky[2]).multiplyScalar(this.ambientScale);

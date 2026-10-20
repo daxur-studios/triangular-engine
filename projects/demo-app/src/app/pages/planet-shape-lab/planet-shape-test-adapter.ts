@@ -92,7 +92,7 @@ const GPU_STEP_MS = 0.001;
 /** Names every field the page did not honour; the spin angle advances on its own and is not compared. */
 export function settingsMismatches(actual: PlanetShapeTestSettings, expected: PlanetShapeTestSettings): string[] {
   const out: string[] = [];
-  for (const key of ['kind', 'seed', 'bodyId', 'poseId', 'spinWarp'] as const) {
+  for (const key of ['kind', 'seed', 'bodyId', 'poseId', 'spinWarp', 'morph'] as const) {
     if (actual[key] !== expected[key]) out.push(`${key}: expected ${expected[key]}, found ${actual[key]}`);
   }
   return [...out, ...featureMismatches(actual.features, expected.features)];

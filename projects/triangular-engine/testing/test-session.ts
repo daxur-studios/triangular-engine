@@ -6,6 +6,7 @@ import { gpuVendorIssue, MACHINE_PREPARE_TIMEOUT_MS, sendMachineMessage } from '
 import { MAX_TEST_REPETITIONS, TEST_MODES, TEST_PROFILES, validateTestHistory } from './test-launch';
 import { compareAblation } from './test-ablation';
 import { summarizeTestSamples } from './test-stats';
+import { assessPerformance } from './test-performance';
 import { modeWarmupMs, modeWindowMs, runMeasureWindow } from './test-window';
 import { keepThumbnails, THUMBNAIL_TIMEOUT_MS } from './test-thumbnails';
 
@@ -320,13 +321,14 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
     const cancelled = controller.signal.aborted && !timedOut;
     // A run that stopped early has too few rounds to compare; its failure says more than an A/B line could.
     const ablations = suite.ablation && !failed && !cancelled ? ablationOutcomes(suite, cases) : undefined;
+    const performance = assessPerformance(suite, mode, cases, environment, failed || cancelled);
     return {
       schemaVersion: 1, runId, suite, profile: options.profile, mode, repetitions: options.repetitions, startedAt,
       finishedAt: new Date().toISOString(), status: failed ? 'failed' : cancelled ? 'cancelled' : inconclusive ? 'inconclusive' : 'completed',
       automatedVerdict: failed ? 'fail' : cancelled || !cases.length || cases.every((item) => !item.checks.length) ? 'not-run' : 'pass',
-      performanceVerdict: suite.purpose !== 'performance' ? 'not-run' : failed || cancelled || inconclusive ? 'inconclusive' : 'unassessed',
+      performanceVerdict: performance.verdict, ...(performance.notes.length ? { performanceNotes: performance.notes } : {}),
       visualReview: suite.requiresVisualReview || options.profile === 'human-observed' ? 'pending' : 'not-required',
-      environment, cases, ...(ablations ? { ablations } : {}), errors,
+      environment, cases: performance.cases, ...(ablations ? { ablations } : {}), errors,
     };
   }
 }

@@ -109,8 +109,10 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   Visible profiles stop and redo a case when the page is hidden or loses focus (up to
   two redos), then record the loss; visibility alone does not prove
   an unthrottled GPU. The current runner leaves usable performance numbers
-  `unassessed`, and marks missing evidence or unverified headless performance
-  `inconclusive`. It does not compare budgets or baselines.
+  `unassessed` unless the suite has `TestScenario.budgets` or a `TestSuite.baseline` (same mode); then
+  it is `pass` or `fail`, with the reasons in `TestCaseResult.performanceChecks`. Missing evidence or
+  unverified headless performance stays `inconclusive`. Make a baseline with `npm run test:baseline`; see
+  `docs/testing.md`, "Budgets and baselines".
   `visualReview` starts `pending` when `requiresVisualReview: true` or the profile
   is `human-observed`; otherwise it is `not-required`, regardless of suite purpose.
   Set the flag explicitly for functional tests that need appearance review.
@@ -128,7 +130,14 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   `artifacts/test-runs/<suite>@v<version>/<timestamp>_<profile>_<hash>.json` plus a
   line in `artifacts/test-runs/index.jsonl`. Optional repo-root
   `triangular-test.config.json` sets `fingerprintPaths` (the engine and the page
-  folder), `port`, `outputDir`. If the panel says "Result not saved", use Download JSON.
+  folder), `port` (default 4723, outside the dev-server 42xx range; give each app its own),
+  `outputDir`. If the panel says "Result not saved", use Download JSON.
+- **Several apps at once:** the receiver answers `GET {sink}` with `{ ok, receiver: 'triangular-test', root }`, where
+  `root` identifies its output folder. A port held by anything else makes the receiver exit 1 instead of saving into
+  another app's folder. Timed cases from different apps take a machine-wide lock
+  (`triangular-test-measuring.json` in the OS temp folder); a case that overlaps another app's case gets
+  `other-app-measuring`, which `npm run test:summary` prints as a `WARN`. A router that runs one receiver per app sets
+  `DAXUR_TEST_SINK=1`, so the proxy spawns nothing. Details: `docs/testing.md`, "Several apps at once".
 - **Read results cheaply:** run `npx triangular-test-summary [--suite id] [--last N]`
   first in a consumer app (installed bin). Inside the triangular-engine repository
   `npx` fails with a 404; use `npm run test:summary -- [--suite id] [--last N]`. It shows date, profile, fingerprint, `STALE` vs the current tree, the three

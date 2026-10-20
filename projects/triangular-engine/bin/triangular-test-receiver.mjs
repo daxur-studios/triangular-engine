@@ -7,16 +7,19 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writ
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { attachMachine, createMachineMonitor, systemSampler } from './triangular-test-machine.mjs';
+import { createMeasuringLock } from './triangular-test-lock.mjs';
 
 export const SINK_PATH = '/__triangular-test-sink';
 /** Timing messages from the page: `POST {SINK_PATH}/machine/{prepare,start,stop}`. */
 export const MACHINE_PATH = `${SINK_PATH}/machine`;
 export const CONFIG_FILE = 'triangular-test.config.json';
+/** Outside the 42xx range that dev servers use. Keep in sync with the `port` in the repo's triangular-test.config.json. */
+export const DEFAULT_PORT = 4723;
 /** One thumbnail is a helper picture; a run's thumbnails together stay small too. Over either, the image is dropped and said so. */
 export const MAX_IMAGE_BYTES = 64 * 1024;
 export const MAX_RUN_IMAGE_BYTES = 2 * 1024 * 1024;
 const DEFAULTS = {
-  port: 4223, outputDir: 'artifacts/test-runs', fingerprintPaths: ['projects'], maxBytes: 20 * 1024 * 1024, machineSampling: true, gpuIndex: 0,
+  port: DEFAULT_PORT, outputDir: 'artifacts/test-runs', fingerprintPaths: ['projects'], maxBytes: 20 * 1024 * 1024, machineSampling: true, gpuIndex: 0,
   maxImageBytes: MAX_IMAGE_BYTES, maxRunImageBytes: MAX_RUN_IMAGE_BYTES,
 };
 
@@ -24,6 +27,28 @@ export function loadConfig(root) {
   const file = join(root, CONFIG_FILE);
   const user = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
   return { ...DEFAULTS, ...user };
+}
+
+/** Identity of a receiver: first 12 hex of sha256 of its resolved output folder. Two apps with different folders differ. */
+export const receiverRoot = (root, config) => createHash('sha256').update(resolve(root, config.outputDir)).digest('hex').slice(0, 12);
+
+/**
+ * GET `{SINK_PATH}` on `port` and say what answered. `identity` is set only for a triangular-test receiver; anything else
+ * (no answer, non-JSON, another server, an older receiver without a root) comes back as `what`, a short description.
+ */
+export async function probeIdentity(port, { host = '127.0.0.1', timeoutMs = 2000, fetchImpl = fetch } = {}) {
+  let response;
+  try {
+    response = await fetchImpl(`http://${host}:${port}${SINK_PATH}`, { signal: AbortSignal.timeout(timeoutMs) });
+  } catch (error) {
+    return { what: `no answer (${error?.cause?.code ?? error?.name ?? 'error'})` };
+  }
+  const text = await response.text().catch(() => '');
+  let body;
+  try { body = JSON.parse(text); } catch { return { what: `a non-JSON answer (HTTP ${response.status})` }; }
+  if (body?.receiver === 'triangular-test' && body.ok === true && typeof body.root === 'string') return { identity: body };
+  if (body?.receiver === 'triangular-test') return { what: 'a triangular-test receiver with no root identity (an older build)' };
+  return { what: `a JSON answer that is not a triangular-test receiver (HTTP ${response.status})` };
 }
 
 function git(root, args) {
@@ -81,6 +106,9 @@ export function caseSummaries(run) {
     }
     for (const k of c.checks ?? []) if (!k.passed) entry.failed.push(`${k.name}${k.detail ? ` — ${k.detail}` : ''}`);
     if (c.error) entry.failed.push(`error: ${c.error}`);
+    for (const p of c.performanceChecks ?? []) {
+      if (!p.passed) entry.failed.push(`PERF ${p.metric} ${p.statistic} ${round(p.actual)} > ${round(p.limit)} (${p.kind}${p.base === undefined ? '' : `, base ${round(p.base)}`})`);
+    }
   }
   for (const entry of Object.values(out)) {
     for (const [name, list] of Object.entries(entry.samples)) {
@@ -180,6 +208,7 @@ export function saveRunWithImages(root, config, input, machine) {
     mode: result.mode ?? 'standard', repetitions: result.repetitions,
     runId: result.runId, fingerprint: fp.hash, head: fp.headShort, automatedVerdict: result.automatedVerdict,
     performanceVerdict: result.performanceVerdict, visualReview: result.visualReview, status: result.status, file,
+    ...(result.performanceNotes?.length ? { performanceNotes: result.performanceNotes } : {}),
     errors: result.errors ?? [], cases: caseSummaries(withImages), ...(result.ablations ? { ablations: ablationSummaries(result) } : {}),
     gpu: result.environment?.['gpu.vendor'], gpuBackend: result.environment?.['gpu.backend'], machine: attached.index,
   }) + '\n');
@@ -238,9 +267,12 @@ export const PREPARE_WAIT_MS = 8000;
  * after `prepareWaitMs`), so the page can hold its first case until the machine is measured idle.
  */
 export function createReceiver(root, config = loadConfig(root), {
-  monitor = config.machineSampling ? createMachineMonitor({ sampler: systemSampler({ gpuIndex: config.gpuIndex }) }) : undefined,
+  monitor = config.machineSampling ? createMachineMonitor({
+    sampler: systemSampler({ gpuIndex: config.gpuIndex }), lock: createMeasuringLock({ owner: receiverRoot(root, config) }),
+  }) : undefined,
   prepareWaitMs = PREPARE_WAIT_MS,
 } = {}) {
+  const identity = receiverRoot(root, config);
   /** GET `runs` (the index, newest `limit`), `run?file=` (one result) and `image?file=` (one thumbnail). Read only. */
   const readRoute = (req, res, route) => {
     const origin = req.headers.origin;
@@ -291,7 +323,8 @@ export function createReceiver(root, config = loadConfig(root), {
     }
     if (path.startsWith(`${SINK_PATH}/`) && ['runs', 'run', 'image'].includes(path.slice(SINK_PATH.length + 1))) return readRoute(req, res, path.slice(SINK_PATH.length + 1));
     if (path !== SINK_PATH && path !== `${SINK_PATH}/`) return send(404, { error: 'not found' });
-    if (req.method === 'GET') return send(200, { ok: true });
+    // `ok` stays for the router's health check; `receiver` and `root` tell one app's receiver from another's.
+    if (req.method === 'GET') return send(200, { ok: true, receiver: 'triangular-test', root: identity });
     if (req.method !== 'POST') return send(405, { error: 'POST only' });
     const text = await readBody(req, send, config.maxBytes);
     if (text === undefined) return;
@@ -308,9 +341,24 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
   const config = loadConfig(root);
   const port = Number(process.env.TRIANGULAR_TEST_PORT ?? config.port);
   const server = createReceiver(root, config);
-  server.on('error', (error) => {
-    if (error.code === 'EADDRINUSE') { console.log(`[triangular-test] port ${port} already served; reusing the running receiver`); process.exit(0); }
-    throw error;
+  server.on('error', async (error) => {
+    if (error.code !== 'EADDRINUSE') throw error;
+    // Something holds the port. Reuse it only if it is a receiver for this same output folder; otherwise fail loudly
+    // rather than let this app's results land in another app's folder.
+    const mine = receiverRoot(root, config);
+    const { identity, what } = await probeIdentity(port);
+    if (identity?.root === mine) {
+      console.log(`[triangular-test] port ${port} already served by a triangular-test receiver for ${join(root, config.outputDir)} (root ${mine}); reusing it`);
+      process.exit(0);
+    }
+    const answered = identity ? `a triangular-test receiver for another output folder (root ${identity.root})` : what;
+    console.error([
+      `[triangular-test] ERROR: port ${port} is already in use, and it is not this app's receiver (root ${mine}, ${join(root, config.outputDir)}).`,
+      `  answered by: ${answered}`,
+      `  Results would be saved into the wrong folder, so this receiver did not start.`,
+      `  Set "port" in ${CONFIG_FILE} (or TRIANGULAR_TEST_PORT) to a free port, then restart the dev server.`,
+    ].join('\n'));
+    process.exit(1);
   });
-  server.listen(port, '127.0.0.1', () => console.log(`[triangular-test] receiver on 127.0.0.1:${port} -> ${join(root, config.outputDir)}`));
+  server.listen(port, '127.0.0.1', () => console.log(`[triangular-test] receiver on 127.0.0.1:${port} -> ${join(root, config.outputDir)} (root ${receiverRoot(root, config)})`));
 }

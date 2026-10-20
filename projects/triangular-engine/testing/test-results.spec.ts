@@ -106,7 +106,7 @@ describe('test results model', () => {
 
   it('builds receiver URLs from a path or a full URL', () => {
     expect(indexUrl('/__triangular-test-sink/', 50)).toBe('/__triangular-test-sink/runs?limit=50');
-    expect(resultUrl('http://127.0.0.1:4223/__triangular-test-sink', 'lab@v1/a b.json')).toBe('http://127.0.0.1:4223/__triangular-test-sink/run?file=lab%40v1%2Fa%20b.json');
+    expect(resultUrl('http://127.0.0.1:4723/__triangular-test-sink', 'lab@v1/a b.json')).toBe('http://127.0.0.1:4723/__triangular-test-sink/run?file=lab%40v1%2Fa%20b.json');
     expect(imageUrl('/sink', 'lab@v1/a/x-r1-0.webp')).toBe('/sink/image?file=lab%40v1%2Fa%2Fx-r1-0.webp');
   });
 });

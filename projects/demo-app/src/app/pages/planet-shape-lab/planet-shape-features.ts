@@ -35,3 +35,12 @@ export function featureMismatches(actual: FeatureState, expected: FeatureState):
   return FEATURES.filter((feature) => actual[feature.id] !== expected[feature.id])
     .map((feature) => `feature ${feature.id}: expected ${expected[feature.id]}, found ${actual[feature.id]}`);
 }
+
+/**
+ * Whether the sun's shadow map is drawn and read. The engine's shadow pass does not morph (Plan 055, morph contract), so a
+ * morphed sphere would cast the shadow of the unmorphed globe and sample it at morphed positions. The plain sphere turns
+ * shadows off (cast and receive) while morph > 0 instead of morphing the shadow geometry.
+ */
+export function shadowsActive(features: FeatureState, morph: number): boolean {
+  return features.shadows && morph <= 0;
+}

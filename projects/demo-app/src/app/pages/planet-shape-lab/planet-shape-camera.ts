@@ -105,6 +105,13 @@ export function zoomCameraView(view: CameraView, steps: number, bodyId: BodyId):
   return { ...view, altitudeM: next, altitudeRadii: 0 };
 }
 
+/**
+ * Far clip plane, in body radii. Large enough for anything the lab draws from any pose (free camera up to 6 radii, the flat
+ * map 2πR wide at morph 1), so nothing is clipped. Not `Infinity`: three.js builds the projection matrix from
+ * `far + near` / `far - near`, which is NaN for an infinite far plane.
+ */
+export const CAMERA_FAR_RADII = 100;
+
 export function resolveCameraView(def: CameraView, bodyId: BodyId, id: CameraPoseId | 'free'): ResolvedCameraPose {
   const radius = bodyById(bodyId).radiusM;
   const altitude = def.altitudeM + def.altitudeRadii * radius;
@@ -115,7 +122,6 @@ export function resolveCameraView(def: CameraView, bodyId: BodyId, id: CameraPos
   const north = [-Math.sin(lat) * Math.sin(lon), Math.cos(lat), -Math.sin(lat) * Math.cos(lon)] as const;
   const heading = def.headingDeg * RAD;
   const horizontal = [0, 1, 2].map((i) => Math.cos(heading) * north[i] + Math.sin(heading) * east[i]);
-  const horizonDistance = Math.sqrt(altitude * (2 * radius + altitude));
   const pitchDeg = def.pitchDeg === 'horizon' ? -Math.acos(radius / (radius + altitude)) / RAD : def.pitchDeg;
   const pitch = pitchDeg * RAD;
   const forward = [0, 1, 2].map((i) => Math.cos(pitch) * horizontal[i] + Math.sin(pitch) * dir[i]);
@@ -126,8 +132,8 @@ export function resolveCameraView(def: CameraView, bodyId: BodyId, id: CameraPos
     position: [dir[0] * distance, dir[1] * distance, dir[2] * distance],
     forward: forward as [number, number, number],
     up: up as [number, number, number],
-    // The visible sphere ends at the horizon; the floor keeps a ground view from clipping the flat facet it stands on.
+    // The floor keeps a ground view from clipping the flat facet it stands on.
     near: Math.max(0.1, Math.min(altitude * 0.2, radius * 0.05)),
-    far: Math.max(1.25 * horizonDistance + 10, radius * 0.05),
+    far: radius * CAMERA_FAR_RADII,
   };
 }

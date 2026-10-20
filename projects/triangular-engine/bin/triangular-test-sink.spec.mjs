@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { EventEmitter } from 'node:events';
-import { computeFingerprint, createReceiver, loadConfig, MACHINE_PATH, SINK_PATH } from './triangular-test-receiver.mjs';
+import { baselineFromRun } from './triangular-test-baseline.mjs';
+import { caseSummaries, computeFingerprint, createReceiver, loadConfig, MACHINE_PATH, receiverRoot, SINK_PATH } from './triangular-test-receiver.mjs';
 import {
-  createMachineMonitor, distribution, machineWarnings, parseGpuLine, summarizeCapture, systemProbe, systemSampler,
+  attachMachine, createMachineMonitor, distribution, machineWarnings, OTHER_APP_MEASURING, parseGpuLine, summarizeCapture, systemProbe, systemSampler,
 } from './triangular-test-machine.mjs';
+import { createMeasuringLock } from './triangular-test-lock.mjs';
 import { machineText, summarize } from './triangular-test-summary.mjs';
 
 const run = (id, startedAt, fail = false) => ({
@@ -409,4 +414,265 @@ test('read routes serve the index, one result and one image, and refuse anything
   const foreign = await fetch(`${base}/runs`, { headers: { origin: 'https://example.com' } });
   assert.equal(foreign.status, 403);
   assert.equal(foreign.headers.get('access-control-allow-origin'), null);
+});
+
+// --- Several apps at once: identity, port ownership, the proxy under a router, and the cross-app timing lock ---
+
+const RECEIVER = fileURLToPath(new URL('./triangular-test-receiver.mjs', import.meta.url));
+const PROXY = fileURLToPath(new URL('./triangular-test-proxy.cjs', import.meta.url));
+
+const freePort = () => new Promise((resolvePort, reject) => {
+  const probe = createServer();
+  probe.on('error', reject);
+  probe.listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolvePort(port)); });
+});
+
+/** A plain server standing in for another app's dev server (or anything else holding the port). */
+async function foreignServer(port, respond) {
+  const server = createServer((req, res) => respond(res));
+  await new Promise((resolveListen) => server.listen(port, '127.0.0.1', resolveListen));
+  return { close: () => { server.closeAllConnections(); server.close(); } };
+}
+
+/** Spawns the receiver for `cwd` on `port` and resolves with its exit code and output. */
+function runReceiver(cwd, port) {
+  return new Promise((resolveExit) => {
+    const child = spawn(process.execPath, [RECEIVER], { cwd, env: { ...process.env, TRIANGULAR_TEST_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (chunk) => { out += chunk; });
+    child.stderr.on('data', (chunk) => { err += chunk; });
+    child.on('exit', (code) => resolveExit({ code, out, err }));
+  });
+}
+
+/** Spawns a receiver that stays up; resolves once it reports listening. The caller kills it. */
+function startReceiver(cwd, port) {
+  return new Promise((resolveUp, reject) => {
+    const child = spawn(process.execPath, [RECEIVER], { cwd, env: { ...process.env, TRIANGULAR_TEST_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    let out = '';
+    child.stdout.on('data', (chunk) => { out += chunk; if (out.includes('receiver on')) resolveUp(child); });
+    child.on('exit', (code) => reject(new Error(`receiver exited ${code}: ${out}`)));
+  });
+}
+
+test('GET identifies the receiver and its output folder, and keeps ok: true', async (t) => {
+  const root = repo();
+  const { server, base } = await listening(root);
+  t.after(() => server.closeAllConnections() ?? server.close());
+  const body = await (await fetch(base)).json();
+  const expected = createHash('sha256').update(resolve(root, 'artifacts/test-runs')).digest('hex').slice(0, 12);
+  assert.deepEqual(body, { ok: true, receiver: 'triangular-test', root: expected });
+  assert.equal(receiverRoot(root, loadConfig(root)), expected);
+});
+
+test('EADDRINUSE against a foreign server exits 1 and names the port and what answered', async () => {
+  const root = repo();
+  const port = await freePort();
+  const json = await foreignServer(port, (res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ app: 'other', ok: true })); });
+  try {
+    const exit = await runReceiver(root, port);
+    assert.equal(exit.code, 1);
+    assert.match(exit.err, new RegExp(`port ${port} is already in use`));
+    assert.match(exit.err, /a JSON answer that is not a triangular-test receiver/);
+    assert.equal(exit.out, '');
+  } finally { json.close(); }
+  const html = await foreignServer(port, (res) => { res.setHeader('content-type', 'text/html'); res.end('<html>dev server</html>'); });
+  try {
+    const exit = await runReceiver(root, port);
+    assert.equal(exit.code, 1);
+    assert.match(exit.err, /a non-JSON answer \(HTTP 200\)/);
+  } finally { html.close(); }
+});
+
+test('EADDRINUSE against a receiver for another output folder exits 1', async () => {
+  const mine = repo();
+  const theirs = repo();
+  writeFileSync(join(theirs, 'triangular-test.config.json'), JSON.stringify({ fingerprintPaths: ['src'], outputDir: 'their-results' }));
+  const port = await freePort();
+  const child = await startReceiver(theirs, port);
+  try {
+    const exit = await runReceiver(mine, port);
+    assert.equal(exit.code, 1);
+    assert.match(exit.err, new RegExp(`port ${port} is already in use`));
+    assert.match(exit.err, new RegExp(`another output folder \\(root ${receiverRoot(theirs, loadConfig(theirs))}\\)`));
+  } finally { child.kill(); }
+});
+
+test('EADDRINUSE against a receiver for the same output folder exits 0 and reuses it', async () => {
+  const root = repo();
+  const port = await freePort();
+  const child = await startReceiver(root, port);
+  try {
+    const exit = await runReceiver(root, port);
+    assert.equal(exit.code, 0);
+    assert.match(exit.out, /reusing it/);
+    assert.equal(exit.err, '');
+  } finally { child.kill(); }
+});
+
+test('proxy.cjs under DAXUR_TEST_SINK spawns no receiver and still returns the forwarding mapping', () => {
+  const root = repo();
+  const env = { ...process.env, DAXUR_TEST_SINK: '1' };
+  const script = `const m = require(${JSON.stringify(PROXY)})({ root: ${JSON.stringify(root)}, port: 4799 });`
+    + ' console.log(JSON.stringify({ mapping: m, spawned: Boolean(globalThis.__triangularTestReceiver) }));';
+  const out = JSON.parse(execFileSync(process.execPath, ['-e', script], { env, encoding: 'utf8' }).trim());
+  assert.deepEqual(out.mapping, { '/__triangular-test-sink': { target: 'http://127.0.0.1:4799', secure: false, logLevel: 'warn' } });
+  assert.equal(out.spawned, false);
+});
+
+test('proxy.cjs without DAXUR_TEST_SINK surfaces a receiver that refused its port', async () => {
+  const root = repo();
+  const port = await freePort();
+  const foreign = await foreignServer(port, (res) => { res.setHeader('content-type', 'application/json'); res.end('{"app":"other"}'); });
+  const env = { ...process.env };
+  delete env.DAXUR_TEST_SINK;
+  // The child exits on its own with 1 within this wait; the proxy prints its banner before the script ends.
+  const script = `require(${JSON.stringify(PROXY)})({ root: ${JSON.stringify(root)}, port: ${port} });`
+    + ' setTimeout(() => console.log(JSON.stringify(Boolean(globalThis.__triangularTestReceiver))), 1500);';
+  try {
+    const { stdout, stderr } = await new Promise((resolveRun) => execFile(process.execPath, ['-e', script], { env, encoding: 'utf8' },
+      (error, out, err) => resolveRun({ stdout: out, stderr: err })));
+    assert.equal(stdout.trim().split('\n').at(-1), 'true');
+    assert.match(stderr, /port \d+ is already in use/);
+    assert.match(stderr, new RegExp(`the receiver for this app did not start on port ${port} \\(exit 1`));
+    assert.match(stderr, /NOT saved to this app's folder/);
+  } finally { foreign.close(); }
+});
+
+function lockClock(start = 1_000_000) {
+  let at = start;
+  return { now: () => at, advance: (ms) => { at += ms; } };
+}
+
+test('the cross-app lock takes, releases, refuses a live holder and takes over a stale one', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tri-lock-'));
+  const clock = lockClock();
+  const alive = (pid) => pid !== 999;
+  const a = createMeasuringLock({ owner: 'aaaaaaaaaaaa', dir, now: clock.now, alive, pid: 100, ttlMs: 10_000, heartbeatMs: 0 });
+  const b = createMeasuringLock({ owner: 'bbbbbbbbbbbb', dir, now: clock.now, alive, pid: 200, ttlMs: 10_000, heartbeatMs: 0 });
+  const who = { runId: 'r1', scenarioId: 's1', repetition: 1 };
+  const other = { runId: 'r2', scenarioId: 's9', repetition: 1 };
+  assert.equal(a.file, join(dir, 'triangular-test-measuring.json'));
+
+  assert.equal(a.take(who), true);
+  assert.deepEqual(JSON.parse(readFileSync(a.file, 'utf8')), { root: 'aaaaaaaaaaaa', runId: 'r1', scenarioId: 's1', repetition: 1, pid: 100, expiresAt: 1_010_000 });
+  assert.equal(b.take(other), false, 'a live lock from another root is not taken');
+  assert.equal(b.release(who), false, 'a receiver releases only its own lock');
+  assert.equal(a.take({ runId: 'r3', scenarioId: 's1', repetition: 1 }), false, 'one held lock per receiver');
+
+  // The heartbeat extends the expiry, so a long case keeps the lock.
+  clock.advance(8_000);
+  a.heartbeat();
+  clock.advance(5_000);
+  assert.equal(b.take(other), false);
+  assert.equal(a.release(who), true);
+  assert.equal(existsSync(a.file), false);
+
+  assert.equal(b.take(other), true);
+  b.release(other);
+
+  // Stale by expiry: a holder that stopped heartbeating.
+  assert.equal(a.take(who), true);
+  clock.advance(10_001);
+  assert.equal(b.take(other), true, 'an expired lock is taken over');
+  b.release(other);
+
+  // Stale by a dead pid, with the expiry still in the future.
+  writeFileSync(a.file, JSON.stringify({ root: 'dddddddddddd', runId: 'x', scenarioId: 'y', repetition: 1, pid: 999, expiresAt: clock.now() + 10_000 }));
+  assert.equal(a.take(who), true, 'a lock whose pid is dead is taken over');
+  assert.equal(JSON.parse(readFileSync(a.file, 'utf8')).root, 'aaaaaaaaaaaa');
+  a.release(who);
+});
+
+test('waitFree waits out another root\'s live lock, ignores its own root, and reports its time limit', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tri-lock-'));
+  const clock = lockClock();
+  const alive = () => true;
+  const holder = createMeasuringLock({ owner: 'aaaaaaaaaaaa', dir, now: clock.now, alive, pid: 100, ttlMs: 10_000, heartbeatMs: 0 });
+  const waiter = createMeasuringLock({ owner: 'bbbbbbbbbbbb', dir, now: clock.now, alive, pid: 200, ttlMs: 10_000, heartbeatMs: 0 });
+  const sameRoot = createMeasuringLock({ owner: 'aaaaaaaaaaaa', dir, now: clock.now, alive, pid: 300, heartbeatMs: 0 });
+  const who = { runId: 'r1', scenarioId: 's1', repetition: 1 };
+  const sleep = async (ms) => clock.advance(ms);
+  holder.take(who);
+  assert.equal(await waiter.waitFree({ timeoutMs: 1000, pollMs: 200, sleep }), false);
+  assert.equal(await sameRoot.waitFree({ sleep }), true, 'its own root does not block');
+  holder.release(who);
+  assert.equal(await waiter.waitFree({ timeoutMs: 1000, pollMs: 200, sleep }), true);
+});
+
+test('a case that starts while another root holds the lock is marked other-app-measuring, and the run says so', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tri-lock-'));
+  const sampler = { start: () => ({ stop: async () => fakeCapture() }) };
+  const probe = async () => ({ platform: 'win32', power: { source: 'ac' }, processes: [], gpuApps: [] });
+  const monA = createMachineMonitor({ sampler, probe, preflightMs: 0, lock: createMeasuringLock({ owner: 'aaaaaaaaaaaa', dir, heartbeatMs: 0 }) });
+  const monB = createMachineMonitor({ sampler, probe, preflightMs: 0, lock: createMeasuringLock({ owner: 'bbbbbbbbbbbb', dir, heartbeatMs: 0 }) });
+  const s1 = { runId: 'rA', scenarioId: 's1', repetition: 1 };
+  const s2 = { runId: 'rB', scenarioId: 's1', repetition: 1 };
+  monA.start(s1);
+  monB.start(s2);
+  await monA.stop(s1);
+  await monB.stop(s2);
+  const a = await monA.finish('rA');
+  const b = await monB.finish('rB');
+  assert.equal(a.cases['s1#1'].warnings, undefined);
+  assert.deepEqual(b.cases['s1#1'].warnings, [OTHER_APP_MEASURING]);
+  // The fake GPU load and B's preflight (still waiting on A's lock when B's case began) add their own warnings.
+  assert.ok(b.warnings.includes(OTHER_APP_MEASURING));
+  assert.ok(b.warnings.includes('preflight-overlapped-measurement'));
+  assert.equal(a.warnings.includes(OTHER_APP_MEASURING), false);
+  assert.equal(existsSync(join(dir, 'triangular-test-measuring.json')), false, 'the stop releases the lock');
+
+  const row = attachMachine(run('rB', '2026-10-20T10:00:00Z'), b).index;
+  assert.match(machineText({ machine: row }), /WARN .*other-app-measuring/);
+});
+
+test('prepare waits while another root holds the lock, answers pending at its bound, and then answers done', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tri-lock-'));
+  const rootB = repo();
+  const sampler = { start: () => ({ stop: async () => fakeCapture() }) };
+  const probe = async () => ({ platform: 'win32', power: { source: 'ac' }, processes: [], gpuApps: [] });
+  const monA = createMachineMonitor({ sampler, probe, preflightMs: 0, lock: createMeasuringLock({ owner: 'aaaaaaaaaaaa', dir, heartbeatMs: 0 }) });
+  const monB = createMachineMonitor({ sampler, probe, preflightMs: 0, lock: createMeasuringLock({ owner: receiverRoot(rootB, loadConfig(rootB)), dir, heartbeatMs: 0 }) });
+  const s1 = { runId: 'rA', scenarioId: 's1', repetition: 1 };
+  monA.start(s1);
+  const server = createReceiver(rootB, loadConfig(rootB), { monitor: monB, prepareWaitMs: 100 });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}${MACHINE_PATH}`;
+  const prepare = async () => (await fetch(`${base}/prepare`, { method: 'POST', body: JSON.stringify({ runId: 'rB' }) })).json();
+  try {
+    const began = Date.now();
+    assert.deepEqual(await prepare(), { ok: true, sampling: true, preflight: 'pending' });
+    assert.ok(Date.now() - began < 2000);
+    await monA.stop(s1);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 500));
+    assert.deepEqual(await prepare(), { ok: true, sampling: true, preflight: 'done' });
+  } finally { server.close(); }
+});
+
+test('a failed performance check reaches the case summary and the summary text', () => {
+  const r = run('p1', '2026-01-01T00:00:00Z');
+  r.cases[0].performanceChecks = [
+    { metric: 'gpu', statistic: 'p95', kind: 'budget', limit: 1, actual: 1.5, passed: false },
+    { metric: 'gpu', statistic: 'median', kind: 'baseline', limit: 1.1, actual: 1.5, base: 1, passed: false },
+    { metric: 'cpu', statistic: 'p95', kind: 'budget', limit: 9, actual: 1, passed: true },
+  ];
+  const cases = caseSummaries(r);
+  assert.deepEqual(cases.s1.failed, ['PERF gpu p95 1.5 > 1 (budget)', 'PERF gpu median 1.5 > 1.1 (baseline, base 1)']);
+  const text = summarize([{ ...r, suite: 'demo', version: 2, profile: 'visible-browser', savedAt: '2026-01-01T00:00:00Z', fingerprint: 'h',
+    performanceVerdict: 'fail', performanceNotes: ['Baseline b was recorded in quick mode'], cases, file: 'f.json' }], () => null, 'h');
+  assert.match(text, /perf=fail/);
+  assert.ok(text.includes("FAIL PERF gpu p95 1.5 > 1 (budget)"));
+  assert.match(text, /PERF NOTE Baseline b/);
+});
+
+test('baselineFromRun keeps valid completed cases, combines repetitions and filters metrics', () => {
+  const summary = (median, p95) => ({ count: 5, min: 0, median, p95, max: p95 });
+  const c = (id, status, issues, med, extra = []) => ({ scenario: { id }, status, validityIssues: issues,
+    metrics: [{ name: 'gpu', unit: 'ms', summary: summary(med, med + 1) }, { name: 'cpu', unit: 'ms', summary: summary(9, 9) }, ...extra] });
+  const result = baselineFromRun({
+    runId: 'r', startedAt: '2026-03-03T00:00:00Z', environment: { 'gpu.description': 'RTX' },
+    cases: [c('a', 'completed', [], 1), c('a', 'completed', [], 2), c('a', 'completed', [], 3), c('a', 'completed', ['bad'], 50), c('b', 'failed', [], 1)],
+  }, { metrics: ['gpu'] });
+  assert.deepEqual(result, { runId: 'r', recordedAt: '2026-03-03T00:00:00Z', mode: 'standard', gpu: 'RTX', cases: { a: { gpu: { median: 2, p95: 3 } } } });
 });

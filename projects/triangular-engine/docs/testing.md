@@ -160,9 +160,9 @@ same-origin `/__triangular-test-sink`, or the URL passed as `[resultSink]`.
 module.exports = require('triangular-engine/bin/triangular-test-proxy.cjs')();
 ```
 
-`ng serve` then starts the dependency-free receiver itself (loopback only, port 4223,
+`ng serve` then starts the dependency-free receiver itself (loopback only, port 4723,
 stopped with the server) and forwards the sink path to it. Optional repo-root
-`triangular-test.config.json`: `{ "port": 4223, "outputDir": "artifacts/test-runs",
+`triangular-test.config.json`: `{ "port": 4723, "outputDir": "artifacts/test-runs",
 "fingerprintPaths": ["projects/my-game", "node_modules/triangular-engine"] }`. Without
 a proxy, run `npx triangular-test-receiver` (in this repository: `npm run test:receiver`) and pass the receiver URL as `resultSink`.
 Keep `artifacts/` gitignored.
@@ -261,9 +261,11 @@ A host page only places it; the demo app has one at `/tests`.
 - **Baseline.** The same suite id and version in the same mode, matched by scenario id and metric. The default is the
   previous such run; any other matching run can be chosen, or none. A baseline on another GPU adapter is flagged. A
   time (`ms`) more than 5 % above the baseline reads as worse and more than 5 % below as better; other units only read
-  as changed. There are no budgets yet: the change is the only judgement.
+  as changed. This page only shows change; the verdict comes from the suite's budgets and baseline (see
+  [Budgets and baselines](#budgets-and-baselines)). A failed budget or baseline check is listed on its case as
+  `FAIL PERF ...`.
 - **Targets.** The metric cell has a row for a target bar. Pass `[targets]` (metric key `name (unit)` to a value in that
-  unit) and a bar appears; nothing is built in. Budgets belong to Plan 055 Phase 0.
+  unit) and a bar appears; nothing is built in.
 - **Compare.** Two runs side by side on one metric: both thumbnails and median (p95) per scenario id, and the change of B
   (the newer run) against A.
 - **Thumbnails.** One image is a still. Several images (the first repetition's) loop on hover or focus, and a tap pins the
@@ -271,6 +273,50 @@ A host page only places it; the demo app has one at `/tests`.
   click steps to the next frame.
 - **Reading it from code.** `parseTestRunIndex`, `defaultBaseline`, `compareToBaseline`, `filterRuns` and the other pure
   helpers are exported for a host's own view.
+
+## Budgets and baselines
+
+A performance suite can judge its own numbers, so `performanceVerdict` is `pass` or `fail` and not only `unassessed`.
+`assessPerformance` (used by `TestSession`) does it; both inputs are plain data in the suite.
+
+```ts
+import baseline from './my-suite.baseline.json';
+
+const suite: TestSuite<Settings> = {
+  id: 'my-suite', version: 1, purpose: 'performance', expectedGpuVendor: 'nvidia',
+  baseline: baseline as TestBaseline,                      // committed numbers of an accepted run
+  scenarios: [{ id: 'orbit', label: 'Orbit', durationMs: 5000, settings,
+    budgets: { gpuPassTotal: { p95: 1.0 } } }],             // limits in the metric's own unit
+};
+```
+
+- **Budget.** `TestScenario.budgets`, keyed by metric name: `{ p95?, median? }`. A case passes when its summary
+  statistic is at or below the limit.
+- **Baseline.** `TestSuite.baseline`: `{ runId, recordedAt, mode, gpu?, cases: { scenarioId: { metric: { median, p95 } } } }`.
+  Only metrics listed there are compared, for both median and p95. A value regresses only when it is above
+  `base * (1 + maxRegression)` **and** above `base + minRegression`: GPU passes here take about 0.1 ms, where a
+  percentage alone is noise. Defaults: `maxRegression` 0.10, `minRegression` 0.05 (the metric's unit, ms here); set
+  either on the baseline. Getting faster never fails.
+- **Same mode only.** A baseline is compared only with a run of its own `mode`. Otherwise it is skipped, with a note in
+  `performanceNotes` (budgets still apply). A run on a different GPU description than `baseline.gpu` also gets a note.
+- **Why.** Every case with checks has `performanceChecks`: `{ metric, statistic, kind: 'budget' | 'baseline', limit,
+  actual, base?, passed }`. `limit` is the largest value that passes. The receiver adds failed checks to the case's
+  `failed` list, so `npm run test:summary` prints `FAIL PERF gpuPassTotal p95 1.2 > 1 (budget)` and the results page shows it.
+- **Verdict**, in this order: functional suite `not-run`; failed or cancelled run, or any case with a validity issue
+  `inconclusive`; a budgeted or baselined metric with no summary (and not `optional`) `inconclusive`, since missing
+  evidence is not a pass; no budget and no applicable baseline `unassessed`; any failed check `fail`; else `pass`.
+  An `optional` metric without samples is skipped.
+- **Making a baseline.** Run the suite in `standard` mode on the intended machine, check it is valid and quiet
+  (`npm run test:summary`), then:
+
+  ```powershell
+  npm run test:baseline '--' artifacts/test-runs/<suite>@v<n>/<result>.json --metrics gpuPassTotal > src/.../my-suite.baseline.json
+  ```
+
+  Without `--metrics` every metric with a summary is kept; leave out noisy CPU timers. Cases with a validity issue are
+  dropped; repetitions are combined by median. `baselineFromRun(result, { metrics? })` is the same function in code.
+- **Versions.** Budgets and baselines are judgement, not the experiment: adding or changing them keeps the suite version.
+  Changing what a scenario does, or its settings or durations, is a new version, and the old baseline no longer fits it.
 
 ## Machine context (dev only)
 
@@ -326,7 +372,8 @@ committed baselines.**
 `gpu-busy-before-start` (a non-browser process holds GPU memory before the run; the page under test already renders
 during preflight, so its own load does not count. Without an `nvidia-smi` process list it falls back to median GPU
 utilisation above 20%), `gpu-hot-before-start` (at least 80 C),
-`gpu-throttled` (power-cap, slowdown or thermal clock reasons during a case), `preflight-overlapped-measurement`, and
+`gpu-throttled` (power-cap, slowdown or thermal clock reasons during a case), `preflight-overlapped-measurement`,
+`other-app-measuring` (another app's timed case held the machine; see [Several apps at once](#several-apps-at-once-dev-only)), and
 `gpu-adapter-unrecorded`. These thresholds are placeholders to be set in Phase 0 of Plan 055 from measured idle
 readings; they mark a run and never change its verdict. The index line also carries `gpu` and `gpuBackend` (from
 `environment`) and a tiny `machine` summary (`warnings`, `cases`, and the highest per-case median CPU and GPU load and
@@ -335,6 +382,45 @@ GPU temperature), so `npm run test:summary` prints one `machine:` line per run w
 Not included: an empty-frame noise-floor probe before and after a suite needs the page's renderer, so it belongs to
 a lab page, not this entry. The receiver sampling is injectable (`createReceiver(root, config, { monitor })`,
 `createMachineMonitor({ sampler, probe })`) for tests on machines without `nvidia-smi`.
+
+## Several apps at once (dev only)
+
+Several apps on one machine can each run a receiver. Three guards keep their results and timings apart.
+
+**Identity.** `GET /__triangular-test-sink` answers `{ "ok": true, "receiver": "triangular-test", "root": "<12 hex>" }`.
+`root` is the first 12 hex characters of the SHA-256 of the receiver's resolved output folder, so two receivers for the
+same folder share it. `ok` stays for health checks.
+
+**Port ownership.** When the port is already taken, the receiver probes that identity route. The same `root` means a
+receiver for this folder: it reuses it and exits 0. Anything else (no answer, a non-JSON answer, another server, or a
+receiver for another folder) prints the port and what answered, and exits 1, so results never land in another app's
+folder. The `ng serve` proxy prints a banner when its receiver exits with an error, but it still forwards the sink to
+that port: change the port instead of ignoring the banner. Each app sets its own `port` in `triangular-test.config.json`;
+the default is 4723, outside the 42xx range dev servers use. Keep it different from every other app's port.
+
+**Under a router.** A local router that runs one receiver per app sets `DAXUR_TEST_SINK=1` on the `ng serve` it spawns.
+The proxy then starts no receiver and only returns the forwarding mapping. Only a router that runs the receiver itself
+should set it.
+
+**Timing lock.** Timed cases from different apps must not overlap, or they see each other's GPU load. While a receiver
+holds the lock, a single file in the OS temp folder says who it is, `triangular-test-measuring.json`:
+
+```json
+{ "root": "3f9c1a2b7d04", "runId": "…", "scenarioId": "…", "repetition": 1, "pid": 12345, "expiresAt": 1760000000000 }
+```
+
+- A receiver takes the lock on a machine `start` and releases it on `stop` or `finish`. While held, a heartbeat
+  extends `expiresAt` every 2 s; the time-to-live is 10 s.
+- A lock is stale when `expiresAt` has passed or its `pid` is gone. A stale lock is taken over.
+- `prepare` waits while another root holds a live lock, within the existing preflight bound (the receiver answers
+  after 8 s, the page waits 10 s). If the lock is still held then, `prepare` answers `preflight: 'pending'` and the
+  first case starts anyway.
+- A case that cannot take the lock still measures, and its `machine` block gets `warnings: ["other-app-measuring"]`.
+  The run's `machine.warnings` lists it too, so `npm run test:summary` prints `WARN … other-app-measuring`. The
+  receiver whose case began during another app's measurement carries the warning.
+- The lock is best effort. Two receivers that find the same stale lock at the same instant can both take it; that is
+  rare on a dev machine, and the case is marked, never failed.
+- Runs without machine sampling (`machineSampling: false`) never take or wait for the lock.
 
 ## Ablation (ABAB)
 
@@ -444,9 +530,8 @@ metrics and non-finite samples in any metric invalidate performance evidence. An
 additional unavailable metric can use `optional: true` with an `unavailableReason`;
 its empty samples do not invalidate the available required measurements. Choose
 optional status based on the experiment's question, never to hide missing evidence
-needed to answer it. There is no
-generic budget/baseline comparison: available numbers remain **unassessed**, not a
-performance pass. `visualReview` starts **pending** when the suite sets
+needed to answer it. Without budgets or an applicable baseline the available numbers stay
+**unassessed**, not a performance pass (see [Budgets and baselines](#budgets-and-baselines)). `visualReview` starts **pending** when the suite sets
 `requiresVisualReview: true` or the profile is `human-observed`. Otherwise it is
 **not-required**, for both functional and performance suites. Functional checks
 that need appearance review must set the flag explicitly. Pending review changes

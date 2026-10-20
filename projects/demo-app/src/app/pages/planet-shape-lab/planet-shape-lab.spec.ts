@@ -6,8 +6,8 @@ import {
   resolveCameraPose, resolveCameraView, zoomCameraView,
 } from './planet-shape-camera';
 import { BODIES, SPIN_PERIOD_S, spinAngleAfter, sunDirectionBody } from './planet-shape-config';
-import { FEATURES, defaultFeatureState, featureMismatches, withFeature } from './planet-shape-features';
-import { createCameraRelativeSphereGeometry } from './planet-shape-sphere';
+import { FEATURES, defaultFeatureState, featureMismatches, shadowsActive, withFeature } from './planet-shape-features';
+import { MORPH_CENTRE, createCameraRelativeSphereGeometry, createPlainSphereMaterial } from './planet-shape-sphere';
 import {
   createPlanetShapeTestAdapter, settingsMismatches, type PlanetShapeFrameSummary, type PlanetShapeSceneInfo, type PlanetShapeTestHost,
 } from './planet-shape-test-adapter';
@@ -72,7 +72,7 @@ function gpuPassesOf(frames: number, stepNs: number): IGpuPassSummary {
   return summarizeGpuPasses(records)!;
 }
 
-const [BASELINE, SHADOWS_AB] = PLANET_SHAPE_TEST_HISTORY;
+const [BASELINE, MORPH, SHADOWS_AB] = PLANET_SHAPE_TEST_HISTORY;
 const quick = (...ids: string[]): TestSuite<PlanetShapeTestSettings> => ({
   ...BASELINE,
   scenarios: BASELINE.scenarios.filter((scenario) => ids.includes(scenario.id)).map((scenario) => ({ ...scenario, durationMs: 300, warmupMs: 0 })),
@@ -157,6 +157,48 @@ describe('planet shape lab', () => {
     });
   });
 
+  describe('morph', () => {
+    it('drives the engine morph uniforms from the sphere material, clamped to 0..1, in dynamic projection centred on +X', () => {
+      const sphere = createPlainSphereMaterial();
+      expect(sphere.morph.uMorph.value).toBe(0);
+      sphere.setMorph(0.4);
+      expect(sphere.morph.uMorph.value).toBe(0.4);
+      sphere.setMorph(7);
+      expect(sphere.morph.uMorph.value).toBe(1);
+      sphere.setMorph(-1);
+      expect(sphere.morph.uMorph.value).toBe(0);
+      expect(sphere.morph.uProjMode.value).toBe(1);
+      expect(MORPH_CENTRE.lonDeg).toBe(0);
+      expect(sphere.morph.uProjForward.value.toArray().map((c) => Math.round(c * 1e6) / 1e6)).toEqual([0, 0, 1]);
+      sphere.setBodyRadius(600_000);
+      expect(sphere.morph.uRadius.value).toBe(600_000);
+      expect(sphere.morph.uMapWidth.value).toBeCloseTo(2 * Math.PI * 600_000, 3);
+      expect(sphere.material.positionNode).toBeTruthy();
+      expect(sphere.material.normalNode).toBeTruthy();
+      sphere.material.dispose();
+    });
+
+    it('gives the geometry the flat-map attributes the morph graph declares, without touching the body-fixed position', () => {
+      const geometry = createCameraRelativeSphereGeometry(600_000, 16, 8);
+      expect(geometry.getAttribute('aFlatPos').count).toBe(geometry.getAttribute('position').count);
+      expect(geometry.getAttribute('aFlatNorm').count).toBe(geometry.getAttribute('position').count);
+      expect(geometry.getAttribute('aPositionLow')).toBeDefined();
+    });
+
+    it('turns shadows off while morphed, and only then', () => {
+      const on = withFeature(defaultFeatureState(), 'shadows', true);
+      expect(shadowsActive(on, 0)).toBeTrue();
+      expect(shadowsActive(on, 0.01)).toBeFalse();
+      expect(shadowsActive(on, 1)).toBeFalse();
+      expect(shadowsActive(defaultFeatureState(), 0)).toBeFalse();
+    });
+
+    it('defaults to 0 and is compared like any other setting', () => {
+      expect(PLANET_SHAPE_DEFAULTS.morph).toBe(0);
+      expect(settingsMismatches({ ...PLANET_SHAPE_DEFAULTS, morph: 0.5 }, PLANET_SHAPE_DEFAULTS)).toEqual(['morph: expected 0, found 0.5']);
+    });
+  });
+
   describe('spin and sun', () => {
     it('turns once per day at 1x and keeps the sun direction unit length', () => {
       expect(spinAngleAfter(0, SPIN_PERIOD_S / 4, 1)).toBeCloseTo(Math.PI / 2, 12);
@@ -221,6 +263,34 @@ describe('planet shape lab', () => {
       expect(BASELINE.scenarios[0].settings.kind).toBe('empty');
     });
 
+    it('judges the baseline suite: a committed baseline for every scenario and a GPU budget', () => {
+      const ids = BASELINE.scenarios.map((scenario) => scenario.id);
+      expect(Object.keys(BASELINE.baseline?.cases ?? {})).toEqual(ids);
+      expect(BASELINE.baseline?.mode).toBe('standard');
+      for (const scenario of BASELINE.scenarios) {
+        expect(scenario.budgets?.['gpuPassTotal']?.p95).withContext(scenario.id).toBeGreaterThan(0);
+        expect(Object.keys(BASELINE.baseline?.cases[scenario.id] ?? {})).withContext(scenario.id).toContain('gpuOutputPass');
+      }
+      expect(SHADOWS_AB.baseline).toBeUndefined();
+      expect(SHADOWS_AB.scenarios.some((scenario) => scenario.budgets)).toBeFalse();
+    });
+
+    it('has the morph suite: 600 km, morph 0 / 0.5 / 1 at orbit and ground, budgeted, no baseline yet', () => {
+      expect(() => validateTestHistory(PLANET_SHAPE_TEST_HISTORY)).not.toThrow();
+      expect(`${MORPH.id}@${MORPH.version}:${MORPH.purpose}:${MORPH.expectedGpuVendor}`).toBe('planet-shape-morph@1:performance:nvidia');
+      expect(MORPH.scenarios.map((scenario) => scenario.id)).toEqual([
+        'morph-000-orbit-600km', 'morph-000-ground-600km', 'morph-050-orbit-600km', 'morph-050-ground-600km',
+        'morph-100-orbit-600km', 'morph-100-ground-600km']);
+      expect(MORPH.scenarios.map((scenario) => scenario.settings.morph)).toEqual([0, 0, 0.5, 0.5, 1, 1]);
+      expect(MORPH.scenarios.map((scenario) => scenario.settings.poseId)).toEqual(['orbit', 'ground', 'orbit', 'ground', 'orbit', 'ground']);
+      expect(MORPH.scenarios.every((scenario) => scenario.settings.bodyId === '600km' && scenario.settings.kind === 'sphere')).toBeTrue();
+      expect(MORPH.baseline).toBeUndefined();
+      const sphereBudget = BASELINE.scenarios[1].budgets?.['gpuPassTotal']?.p95;
+      for (const scenario of MORPH.scenarios) expect(scenario.budgets?.['gpuPassTotal']?.p95).withContext(scenario.id).toBe(sphereBudget);
+      // The existing suites keep their experiment: morph 0 everywhere.
+      for (const scenario of [...BASELINE.scenarios, ...SHADOWS_AB.scenarios]) expect(scenario.settings.morph).withContext(scenario.id).toBe(0);
+    });
+
     it('alternates shadows off (A) and on (B) per pose in the A/B suite', () => {
       expect(`${SHADOWS_AB.id}@${SHADOWS_AB.version}`).toBe('planet-shape-shadows-ab@1');
       expect(SHADOWS_AB.ablation?.metrics).toEqual(['gpuPassTotal', 'gpuScenePass']);
@@ -260,6 +330,23 @@ describe('planet shape lab', () => {
         expect(host.before.size).toBe(0);
         expect(host.render.size).toBe(0);
         expect(host.sampling).toBeFalse();
+      } finally { host.dispose(); }
+    }, 20_000);
+
+    it('applies the morph setting through the host, checks it and restores the captured value', async () => {
+      const host = new FakeHost();
+      const before = host.state;
+      const seen: number[] = [];
+      const applied = host.apply.bind(host);
+      host.apply = (settings) => { seen.push(settings.morph); applied(settings); };
+      const suite = { ...MORPH, scenarios: MORPH.scenarios.filter((scenario) => scenario.id === 'morph-050-ground-600km')
+        .map((scenario) => ({ ...scenario, durationMs: 300, warmupMs: 0 })) };
+      try {
+        const result = await run(host, suite);
+        expect(result.errors).toEqual([]);
+        expect(result.cases[0].checks.find((check) => check.name === 'Scenario state applied as specified')?.passed).toBeTrue();
+        expect(seen).toEqual([0.5, 0]);
+        expect(host.state.morph).toBe(before.morph);
       } finally { host.dispose(); }
     }, 20_000);
 

@@ -13,7 +13,7 @@ import {
   BODIES, FIXED_SEED, MAX_SPIN_WARP, MIN_SPIN_WARP, REFERENCE_DRAWING_BUFFER, SPHERE_SEGMENTS, bodyById, spinAngleAfter,
   sunDirectionBody, type BodyId,
 } from './planet-shape-config';
-import { FEATURES, defaultFeatureState, withFeature, type FeatureId, type FeatureState } from './planet-shape-features';
+import { FEATURES, defaultFeatureState, shadowsActive, withFeature, type FeatureId, type FeatureState } from './planet-shape-features';
 import { createCameraRelativeSphereGeometry, createPlainSphereMaterial } from './planet-shape-sphere';
 import { createPlanetShapeTestAdapter, type PlanetShapeTestHost } from './planet-shape-test-adapter';
 import { PLANET_SHAPE_TEST_HISTORY, type PlanetShapeTestSettings } from './planet-shape-tests';
@@ -130,11 +130,13 @@ const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so 
           }
         </p>
 
-        <p class="label">Morph (sphere to flat map)</p>
-        <!-- TODO(plan 055): the planet material's morph needs aFlatPos/aFlatNorm attributes (or its dynamic basis) and an unrotated
-             body at a known scene-space centre; wire it when the first terrain contender brings that geometry. -->
-        <input type="range" min="0" max="1" step="0.01" value="0" disabled aria-label="Morph, not wired yet" />
-        <p class="note">Not wired: the plain sphere has no flat-map geometry yet.</p>
+        <p class="label">Morph (sphere to flat map) · {{ morph().toFixed(2) }}</p>
+        <input
+          type="range" min="0" max="1" step="0.01" aria-label="Morph, sphere to flat map" data-testid="morph-slider"
+          [value]="morph()" (input)="setMorph(+$any($event.target).value)" />
+        <p class="note">Visual only (the engine's bend morph in the vertex stage). The sphere casts and receives no shadow
+          while morph &gt; 0. The flat map faces the poses (centred on longitude 0) and passes through the planet
+          centre; the camera does not follow the morph.</p>
 
         <p class="label">Features</p>
         @for (feature of features; track feature.id) {
@@ -193,6 +195,8 @@ export class PlanetShapeLabPageComponent {
   readonly spinWarp = signal(1000);
   readonly featureState = signal<FeatureState>(defaultFeatureState());
   readonly bodyDrawn = signal(true);
+  /** Sphere (0) to flat map (1). */
+  readonly morph = signal(0);
   readonly freeCamera = signal(false);
   readonly freeAltitudeLabel = signal('');
   readonly warpExponent = computed(() => Math.log10(Math.max(MIN_SPIN_WARP, this.spinWarp())));
@@ -236,6 +240,7 @@ export class PlanetShapeLabPageComponent {
     read: () => ({
       kind: this.bodyDrawn() ? 'sphere' : 'empty', seed: this.seed, bodyId: this.bodyId(), poseId: this.poseId(),
       spinWarp: this.spinWarp(), spinAngleDeg: (this.spinAngle * 180) / Math.PI, features: this.featureState(),
+      morph: this.morph(),
     }),
     apply: (settings) => {
       if (settings.seed !== this.seed) throw new Error(`Unknown seed ${settings.seed}; this lab is fixed to ${this.seed}`);
@@ -244,7 +249,7 @@ export class PlanetShapeLabPageComponent {
       this.spinWarp.set(settings.spinWarp);
       this.spinAngle = (settings.spinAngleDeg * Math.PI) / 180;
       this.featureState.set(settings.features);
-      this.applyFeatures();
+      this.setMorph(settings.morph);
       this.setBodyDrawn(settings.kind === 'sphere');
     },
     renderedFrames: () => this.renderedFrames,
@@ -286,6 +291,7 @@ export class PlanetShapeLabPageComponent {
       this.mesh.frustumCulled = false;
       this.engine.scene.add(this.mesh, this.sun, this.sun.target, this.ambient);
       this.setBody(this.builtBody);
+      this.sphere.setBodyRadius(bodyById(this.builtBody).radiusM);
       this.applyFeatures();
     }
 
@@ -325,6 +331,7 @@ export class PlanetShapeLabPageComponent {
       this.mesh.geometry.dispose();
       this.mesh.geometry = createCameraRelativeSphereGeometry(radius, SPHERE_SEGMENTS.width, SPHERE_SEGMENTS.height);
       this.configureShadow(radius);
+      this.sphere.setBodyRadius(radius);
       this.builtBody = id;
     }
     this.bodyId.set(id);
@@ -398,6 +405,14 @@ export class PlanetShapeLabPageComponent {
     this.applyFeatures();
   }
 
+  /** Morph 0..1, applied by the engine's `planetMorphGraph` in the vertex stage; body-fixed data is untouched. */
+  setMorph(value: number): void {
+    const morph = Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
+    this.morph.set(morph);
+    this.sphere.setMorph(morph);
+    this.applyFeatures();
+  }
+
   setBodyDrawn(drawn: boolean): void {
     this.bodyDrawn.set(drawn);
     if (this.mesh) this.mesh.visible = drawn && this.webGpuOk();
@@ -465,11 +480,13 @@ export class PlanetShapeLabPageComponent {
 
   private applyFeatures(): void {
     if (!this.mesh) return;
-    const { shadows } = this.featureState();
+    // Shadow choice (Plan 055 morph contract): the engine's shadow pass does not morph, so the sphere neither casts nor
+    // receives while morph > 0 (the whole shadow pass is skipped), rather than morphing the shadow geometry.
+    const shadows = shadowsActive(this.featureState(), this.morph());
+    if (this.mesh.receiveShadow !== shadows || this.sun.castShadow !== shadows) this.sphere.material.needsUpdate = true;
     this.sun.castShadow = shadows;
     this.mesh.castShadow = shadows;
     this.mesh.receiveShadow = shadows;
-    this.sphere.material.needsUpdate = true;
   }
 
   private refreshHud(renderer: GpuAdapterRendererLike): void {

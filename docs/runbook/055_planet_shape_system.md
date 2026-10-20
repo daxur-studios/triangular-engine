@@ -65,7 +65,7 @@ Gaps that Plan 055 Phase 0 closes:
   cases), no histograms.
 - The timer once read mid-frame; in-flight readbacks survived resets.
 - Correctness by eye only: no golden-image or depth checks.
-- `performanceVerdict` is always "unassessed": no budget or baseline store.
+- `performanceVerdict` is always "unassessed": no budget or baseline store. (Closed 2026-10-20, see the last entry.)
 - The runner and the lab compute p95 with different indices.
 - The real-GPU Playwright profile (`playwright.cloud-feasibility.config.ts`) exists but drives only the probe, not the lab.
 - WebGPU's 16 samplers per stage capped clouds at about 7 volumes per pass, so the terrain must pick its atlas and
@@ -428,3 +428,81 @@ Built in parallel by three agents in one checkout with disjoint files, then revi
     and on (B). It compares `gpuPassTotal` and `gpuScenePass`.
 - **Checked:** testing specs, receiver specs and lab specs all pass, and the library builds. Not yet run on the
   owner's machine.
+
+## 2026-10-20 — First shadows A/B runs on the owner's machine
+
+- **Quick run, saved** (`planet-shape-shadows-ab@v1/2026-10-20T19-28-43-623Z_visible-browser_quick_*.json`, 19:28):
+  NVIDIA adapter, 12 valid cases (600 km, orbit and ground, three rounds per arm), 23 s. Numbers below are from
+  `test:summary`; they match the owner's figures.
+  - **Shadows cost about 0.1 ms of GPU time.** `gpuPassTotal` median: orbit 0.091 → 0.187 ms (+0.096 ms), ground
+    0.135 → 0.236 ms (+0.101 ms); noise 0.002 ms or less. `gpuScenePass` also rises: orbit 0.046 → 0.067 ms, ground
+    0.089 → 0.115 ms. The shadow passes themselves take 0.07–0.08 ms. The relative gain (+106 %, +74 %) is large only
+    because the base frame is tiny.
+  - **Frame interval says nothing:** 6.0–6.1 ms in both arms is the 165 Hz display cap.
+  - **Warning `gpu-busy-before-start`** (NVIDIA load 53 % median): another app was running timed work. The
+    cross-app test lock now addresses this.
+- **Earlier run at 19:04 was INVALID:** Chrome had the AMD iGPU and the WebGPU developer-features flag was off (GPU timer
+  self-test failed, timestamps rounded to 65,536 ns). One case ran, then the suite stopped; no A/B result. The
+  `planet-shape-baseline` quick runs at 19:48–19:49 failed the same way (AMD, page not focused).
+- **Standard A/B at about 20:58** agreed with the quick run within about 2 % (81 s) but was **not saved**: the gateway's
+  built-mode SPA fallback answered the sink POST with `index.html`. Not in `test:summary`, so its numbers are unchecked
+  here.
+- **Fix:** the gateway now owns one receiver per app (ports 4700–4799, `DAXUR_TEST_SINK=1`), and the demo sink answers
+  with identity. Confirmed live on 2026-10-20.
+- Not measured: a saved standard run; shadows at 64 km and 6,371 km.
+
+## 2026-10-20 — Budgets and a committed baseline: the verdict is computed
+
+- **Built** (`triangular-engine/testing`): `TestScenario.budgets` (`{ metric: { p95?, median? } }`), `TestSuite.baseline`
+  (`TestBaseline`, with `maxRegression` 0.10 and `minRegression` 0.05 ms), `TestCaseResult.performanceChecks`,
+  `TestRunResult.performanceNotes`, and `pass` / `fail` for `performanceVerdict`. `assessPerformance` is pure and
+  `TestSession` calls it. A baseline regression fails only above both the relative and the absolute bound, because the
+  GPU numbers here are about 0.1 ms. A baseline of another mode is skipped with a note. A budgeted metric without a
+  summary makes the run `inconclusive` unless it is `optional` (the per-pass GPU metrics are). Rules in
+  `projects/triangular-engine/docs/testing.md`, "Budgets and baselines".
+- **Baseline file.** `baselineFromRun` and `npm run test:baseline` turn a saved result into the JSON. The receiver adds
+  failed checks to the case summary (`FAIL PERF ...`), so `test:summary` and the results page show them.
+- **Lab data.** `planet-shape-baseline.v1.json` is made from the owner's quiet standard run saved 2026-10-20 21:57
+  (RTX 3080 Laptop, WebGPU, 8 valid cases, first run judged by the new verdict: `pass`) with `gpuPassTotal`,
+  `gpuScenePass` and `gpuOutputPass`. Left out: `frameInterval` (the display refresh cap, not a cost) and the CPU
+  submit timer (too noisy). Measured `gpuPassTotal` p95: 0.092 ms at orbit, 0.135–0.137 ms on the ground at all three
+  sizes, 0.046 ms for the empty frame. Budgets (`gpuPassTotal` p95): 0.5 ms for the sphere cases and 0.2 ms for the
+  empty frames, guards against a broken measurement; the baseline catches smaller changes (above both +10 % and
+  +0.05 ms). The suite stays `planet-shape-baseline@v1`: the experiment did not change.
+- **Standard A/B saved** 2026-10-20 21:58 (12 valid cases, 83 s), matching the quick run: shadows add 0.097 ms
+  `gpuPassTotal` at orbit (0.090 → 0.186) and 0.098 ms on the ground (0.134 → 0.232), noise ±0.002 ms.
+  The shadows A/B suite has neither (it compares arms).
+
+## 2026-10-20 — Morph slider in the lab
+
+- **Built** (`projects/demo-app/src/app/pages/planet-shape-lab/`): a `morph` setting (0..1, default 0) in
+  `PlanetShapeTestSettings`, a slider on the page, and the adapter/host read, apply, check (`settingsMismatches`) and
+  restore it. The plain sphere material now runs the engine's `planetMorphGraph` (default `'bend'`, the same call
+  `PlanetSurfaceMaterial` makes) in the vertex stage, driven through `createPlanetMorphUniforms`, `setPlanetMapExtent`
+  (per body) and `setPlanetProjectionCentre`. No engine change, no new public API, no parallel morph.
+- **Visual only.** The graph's position replaces the vertex position (`positionNode`), so the camera-relative
+  high/low split is kept and the morph enters as the displacement `graph.positionNode - positionGeometry`, exactly 0 at
+  morph 0. Body radius, camera pose, sun and spin stay body-fixed and spherical.
+- **Dynamic projection, centred on +Z (longitude 0).** The graph needs `aFlatPos`/`aFlatNorm`; the geometry carries
+  zeros and the flat map is projected in the shader (dynamic mode). Every camera pose sits at longitude 0, so the map
+  faces the camera at morph 1. The sphere geometry is built with `phiStart` -90° so its UV seam is at -Z, the
+  projection's antimeridian: no triangle spans the cut and no seam cull is needed. (First built centred on +X; the owner
+  saw the map edge-on, as an invisible plane, at morph 1.)
+- **Far plane: 100 body radii** (`CAMERA_FAR_RADII`), was 1.25 × the horizon distance, which clipped the flattening
+  surface (the map runs past the sphere's horizon). Not `Infinity`: three.js's projection matrix is NaN for an infinite
+  far plane.
+- **Shadows: off while morph > 0** (`shadowsActive` in `planet-shape-features.ts`). The shadow pass does not morph, so
+  the sphere neither casts nor receives (the sun's shadow pass is skipped too) instead of morphing the shadow geometry.
+  The `shadows` feature keeps its stored value and comes back at morph 0.
+- **Camera note.** At morph 1 the bend puts the flat map in the plane through the planet centre (z = 0 in the map
+  frame), not tangent at radius R. The poses are unchanged, so at morph 1 the orbit pose sees the whole map from 3.5 R
+  and the ground pose (2 m above the sphere) looks along the map from one radius above it. The cell planet's
+  `CellPlanetMorphCameraRig` moves the camera with the morph; this lab does not yet. Checked in the browser
+  2026-10-20: morph 0.5 bends toward the camera, morph 1 shows the map face-on, no clipping, no console errors.
+- **New suite** `planet-shape-morph` v1 (performance, `expectedGpuVendor` nvidia): 600 km, morph 0 / 0.5 / 1 at orbit
+  and ground, six cases `morph-000|050|100-orbit|ground-600km`, `gpuPassTotal` p95 budget 0.5 ms (as the sphere cases),
+  no baseline yet: record one from the owner's first quiet standard run with `npm run test:baseline`.
+  Existing suites and their scenarios are unchanged (morph 0), but every sphere case now includes the morph graph's
+  vertex work, so a baseline drift of the first suite is possible and would be real.
+- **Checked:** the lab specs (unit level: material uniforms, clamping, geometry attributes, shadow policy, suite ids and
+  scenarios, adapter apply/restore). Not checked: the visual look and GPU cost, which need the owner's browser.

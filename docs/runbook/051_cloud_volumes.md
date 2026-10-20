@@ -720,3 +720,20 @@ Cost test queued on the green button: 12 volumes, haze off vs on. The look (blue
 
 ### Phase 3b step 2 result: haze cost, lookup only on hit rays (measured, still over budget)
 Canvas 2560x1308, 12 volumes, proxies, 1 band/frame, GPU ms whole frame (avg). Fly-by 3.86 off vs 6.31 on (+2.45, p95 5.24 vs 8.13); inside 3.98 vs 4.30 (+0.32); horizon 2.80 vs 2.92 (+0.12). The hit-only change took little off the fly-by (+2.74 to +2.45, different baseline runs), so the cost is the lookup itself, not the misses. The off baseline is back to 3.86 (the earlier 5.13 was noise). Per-pixel haze does not meet the 0.1 ms goal. Candidate: per-volume haze from the CPU at the volume centre (zero GPU cost, like lighting; loses per-pixel distance).
+
+### Caveat: earlier Phase 3 timings were on the wrong GPU
+The Phase 3a and Phase 3b haze timings above were taken with the browser on the weak integrated GPU, not the strong discrete one. Treat them as upper bounds, not as the cost decision. Re-run the `cloud-haze-cost` suite from the lab on the discrete GPU (check the adapter in the saved result) before choosing between per-pixel haze and a per-volume CPU haze.
+
+### Phase 3b step 2 result: haze cost on the discrete GPU (two runs, repeatable)
+Suite `cloud-haze-cost@v1`, 12 volumes, proxies, 1 band/frame, median GPU ms (whole render). Two runs three minutes apart, results in `artifacts/test-runs/cloud-haze-cost@v1/`. Case order confirmed from the result labels.
+
+| scenario | haze off | haze on | added |
+|---|---|---|---|
+| fly-by, sun moving | 0.51 | 0.70 / 0.71 | +0.19 / +0.20 (p95 +0.22 / +0.22) |
+| inside | 0.45 | 0.47 | +0.02 |
+| horizon | 0.29 | 0.29 | 0.00 |
+
+Frame times are about 7x lower than the earlier integrated-GPU runs, which is consistent with the discrete GPU, but the runs did not record the adapter (`gpu-adapter-unrecorded`) and both warned `gpu-busy-before-start` (the user reports nothing else was using the GPU). Static views meet the 0.1 ms goal; the fly-by is about 2x over. The per-pixel haze stays; a per-volume CPU haze is not needed unless the fly-by cost matters. Still open: by-eye look and scale tuning.
+
+### Fix: sun colour snapped off like a light bulb at the horizon
+Reported by eye while changing the sun elevation (with or without haze or sky backdrop). Cause: the atmosphere's sun transmittance is exactly 0 once the planet blocks the sun, and the lighting reads it once per volume at the volume's centre, so a volume's light went from orange to black in one step. Fix in `CloudVolumeAtmosphereLighting`: sample just above the volume's horizon and fade the colour over about 4 degrees below it (smoothstep). New spec checks no step larger than 0.25 while sweeping the sun, and 0 on the night side. 13 of 13 cloud-volumes specs pass. Confirmed smooth by eye. Remaining pop sources: a volume that straddles the terminator still flips as a whole (per-volume light), and a rebake at 1 band/frame shows old and new light side by side.

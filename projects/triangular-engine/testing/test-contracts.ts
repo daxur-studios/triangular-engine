@@ -12,6 +12,58 @@ export interface TestScenario<TSettings extends object> {
   readonly warmupMs?: number;
   /** One round of an A/B comparison (`TestSuite.ablation`): rounds of a group must alternate A, B, A, B. */
   readonly ablation?: { readonly group: string; readonly arm: AblationArm };
+  /**
+   * Performance suites: limits per metric name, in the metric's own unit. A case passes a budget when its summary
+   * statistic is at or below the limit. See `assessPerformance`.
+   */
+  readonly budgets?: Readonly<Record<string, TestBudget>>;
+}
+
+/** Upper limits for one metric of one scenario; set one or both statistics. */
+export interface TestBudget {
+  readonly p95?: number;
+  readonly median?: number;
+}
+
+/** The statistic of a metric summary that a performance check compares. */
+export type TestPerformanceStatistic = 'median' | 'p95';
+
+/**
+ * One committed number pair per case and metric, taken from a run you accepted (`baselineFromRun`). A regression fails
+ * only when the value is above `base * (1 + maxRegression)` AND above `base + minRegression`: the relative bound alone
+ * would flag noise on tiny values, the absolute one alone would miss real change on large ones.
+ */
+export interface TestBaseline {
+  readonly runId: string;
+  readonly recordedAt: string;
+  /** Compared only with runs of this mode; any other mode skips the baseline (a note, never a fail). */
+  readonly mode: TestMode;
+  /** Adapter description of the recorded run (`gpu.description`); a run on another adapter gets a note. */
+  readonly gpu?: string;
+  /** Scenario id, then metric name. */
+  readonly cases: Readonly<Record<string, Readonly<Record<string, TestBaselineStats>>>>;
+  /** Allowed relative increase (0.1 = 10 %). Default `DEFAULT_MAX_REGRESSION`. */
+  readonly maxRegression?: number;
+  /** Allowed absolute increase in the metric's own unit. Default `DEFAULT_MIN_REGRESSION`. */
+  readonly minRegression?: number;
+}
+
+export interface TestBaselineStats {
+  readonly median: number;
+  readonly p95: number;
+}
+
+/** Why a case passed or failed one limit. */
+export interface TestPerformanceCheck {
+  readonly metric: string;
+  readonly statistic: TestPerformanceStatistic;
+  readonly kind: 'budget' | 'baseline';
+  /** The largest value that still passes (for a baseline, the larger of the relative and the absolute bound). */
+  readonly limit: number;
+  readonly actual: number;
+  /** The baseline value, for `kind: 'baseline'`. */
+  readonly base?: number;
+  readonly passed: boolean;
 }
 
 /**
@@ -49,6 +101,8 @@ export interface TestSuite<TSettings extends object> {
    */
   readonly expectedGpuVendor?: string;
   readonly ablation?: TestAblationSpec;
+  /** Performance suites: the committed numbers that runs are compared with. Importing a JSON file is enough. */
+  readonly baseline?: TestBaseline;
   readonly scenarios: readonly TestScenario<TSettings>[];
 }
 
@@ -186,6 +240,8 @@ export interface TestCaseResult<TSettings extends object> {
   readonly checks: readonly TestCheck[];
   readonly validityIssues: readonly string[];
   readonly limitations: readonly string[];
+  /** Budget and baseline checks of a performance case; absent when it has none. */
+  readonly performanceChecks?: readonly TestPerformanceCheck[];
   readonly details?: Readonly<Record<string, TestSetting>>;
   readonly error?: string;
   /** The last measurement window of this case, when the adapter used `measureWindow`. */
@@ -212,7 +268,10 @@ export interface TestRunResult<TSettings extends object> {
   readonly finishedAt: string;
   readonly status: 'completed' | 'failed' | 'cancelled' | 'inconclusive';
   readonly automatedVerdict: 'pass' | 'fail' | 'not-run';
-  readonly performanceVerdict: 'unassessed' | 'inconclusive' | 'not-run';
+  /** See `assessPerformance` for the rules. */
+  readonly performanceVerdict: 'pass' | 'fail' | 'unassessed' | 'inconclusive' | 'not-run';
+  /** Why a budget or baseline was not applied (for example a baseline of another mode). */
+  readonly performanceNotes?: readonly string[];
   readonly visualReview: 'not-required' | 'pending' | 'accepted' | 'rejected';
   readonly reviewNotes?: string;
   readonly environment: Readonly<Record<string, TestSetting>>;

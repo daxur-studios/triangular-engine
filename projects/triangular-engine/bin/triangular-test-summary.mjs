@@ -77,6 +77,7 @@ export function summarize(rows, readRun, currentHash, { suite, last = 5, metric 
         for (const i of s.invalid ?? []) lines.push(`    INVALID ${i}`);
       }
       for (const a of ablations ?? []) lines.push(ablationLine(a));
+      for (const n of row.performanceNotes ?? []) lines.push(`  PERF NOTE ${n}`);
       for (const e of errors ?? []) lines.push(`  RUN ERROR ${e}`);
       lines.push(`  file: ${row.file}`);
     }

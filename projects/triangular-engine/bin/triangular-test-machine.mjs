@@ -26,6 +26,8 @@ export const MACHINE_THRESHOLDS = {
 };
 
 export const GPU_QUERY = 'utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,clocks.sm,pstate,clocks_event_reasons.active';
+/** A case began while another receiver's timed case held the machine (the cross-app lock in `triangular-test-lock.mjs`). */
+export const OTHER_APP_MEASURING = 'other-app-measuring';
 const MAX_RUNS = 20;
 
 /** `{ n, min, med, p95, max }` over the finite values (nearest rank, as the case summaries), or `undefined`. */
@@ -164,6 +166,7 @@ export function machineWarnings(preflight, cases, thresholds = MACHINE_THRESHOLD
   if (preflight?.overlapped) out.add('preflight-overlapped-measurement');
   for (const block of Object.values(cases ?? {})) {
     if (block.gpu && typeof block.gpu === 'object' && (BigInt(block.gpu.throttleReasons ?? 0) & thresholds.throttleMask)) out.add('gpu-throttled');
+    if (block.warnings?.includes(OTHER_APP_MEASURING)) out.add(OTHER_APP_MEASURING);
   }
   return [...out];
 }
@@ -171,10 +174,11 @@ export function machineWarnings(preflight, cases, thresholds = MACHINE_THRESHOLD
 const caseKey = (scenarioId, repetition) => `${scenarioId}#${repetition}`;
 
 /**
- * Holds machine data per run while the page measures. `prepare` runs the slow preflight once; `start`/`stop` bracket
- * one case's sampling; `finish(runId)` stops anything still sampling and returns what was collected.
+ * Holds machine data per run while the page measures. `prepare` runs the slow preflight once, after any other app's
+ * timed case has finished (`lock`, optional); `start`/`stop` bracket one case's sampling and hold the lock meanwhile;
+ * `finish(runId)` stops anything still sampling and returns what was collected.
  */
-export function createMachineMonitor({ sampler = systemSampler(), probe = systemProbe, intervalMs = 500, maxCaseMs = 300_000, preflightMs = 1000 } = {}) {
+export function createMachineMonitor({ sampler = systemSampler(), probe = systemProbe, lock, intervalMs = 500, maxCaseMs = 300_000, preflightMs = 1000 } = {}) {
   const runs = new Map();
   const runOf = (runId) => {
     let run = runs.get(runId);
@@ -189,6 +193,8 @@ export function createMachineMonitor({ sampler = systemSampler(), probe = system
     const run = runOf(runId);
     if (run.preflight) return run.preflight;
     run.preflight = (async () => {
+      // Another app's timed case holds the machine: the preflight waits for it (the receiver answers `pending` at its own bound).
+      if (lock) await lock.waitFree({ timeoutMs: maxCaseMs });
       const handle = sampler.start(Math.min(intervalMs, 250));
       const [system] = await Promise.all([probe(), new Promise((resolve) => setTimeout(resolve, preflightMs))]);
       return { at: new Date().toISOString(), ...system, idle: summarizeCapture(await handle.stop()) };
@@ -201,8 +207,10 @@ export function createMachineMonitor({ sampler = systemSampler(), probe = system
     if (!entry) return Promise.resolve();
     run.active.delete(key);
     clearTimeout(entry.timer);
-    const work = entry.handle.stop().then((capture) => { run.cases[key] = summarizeCapture(capture); }, (error) => {
-      run.cases[key] = { gpu: 'unavailable', gpuReason: `sampler failed: ${error?.message ?? error}` };
+    lock?.release(entry.who);
+    const mark = entry.contended ? { warnings: [OTHER_APP_MEASURING] } : {};
+    const work = entry.handle.stop().then((capture) => { run.cases[key] = { ...summarizeCapture(capture), ...mark }; }, (error) => {
+      run.cases[key] = { gpu: 'unavailable', gpuReason: `sampler failed: ${error?.message ?? error}`, ...mark };
     }).finally(() => run.pending.delete(work));
     run.pending.add(work);
     return work;
@@ -215,11 +223,14 @@ export function createMachineMonitor({ sampler = systemSampler(), probe = system
       void stop(runId, key);
       if (!run.preflight) prepare(runId);
       if (!run.settled) run.overlapped = true;
+      const who = { runId, scenarioId, repetition };
+      // A case that cannot take the lock still measures (a warning, not a failure), and its block says why.
+      const contended = Boolean(lock) && !lock.take(who);
       const handle = sampler.start(intervalMs);
-      // A lost stop message must not leave nvidia-smi running.
+      // A lost stop message must not leave nvidia-smi running (or the lock held).
       const timer = setTimeout(() => void stop(runId, key), maxCaseMs);
       timer.unref?.();
-      run.active.set(key, { handle, timer });
+      run.active.set(key, { handle, timer, who, contended });
     },
     stop: ({ runId, scenarioId, repetition }) => stop(runId, caseKey(scenarioId, repetition)),
     /** Stops anything still sampling, then returns `{ preflight, warnings, cases }`, or `undefined` for a run with no messages. */

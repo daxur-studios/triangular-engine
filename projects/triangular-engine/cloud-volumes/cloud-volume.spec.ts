@@ -174,6 +174,32 @@ describe('CloudVolumeAtmosphereLighting', () => {
     expect(night.toArray()).toEqual([0, 0, 0]);
   });
 
+  it('fades the sun out below the horizon instead of snapping to black', () => {
+    // Like the real atmosphere: lit down to the planet's horizon seen from the volume, exactly 0 beyond it.
+    const horizon: CloudAtmosphereSource = {
+      ...source,
+      sunTransmittance: (point, sun) => {
+        const r = Math.hypot(...point);
+        const mu = (point[0] * sun[0] + point[1] * sun[1] + point[2] * sun[2]) / r;
+        return mu < -Math.sqrt(1 - (1000 / r) ** 2) ? [0, 0, 0] : [1, 0.4, 0.1];
+      },
+    };
+    const sunColor = (mu: number): number => {
+      const volume = new CloudVolume({ size: new Vector3(100, 50, 100) });
+      volume.mesh.position.set(0, 1250, 0);
+      volume.mesh.updateMatrixWorld();
+      new CloudVolumeAtmosphereLighting(horizon).update([volume], new Vector3(Math.sqrt(1 - mu * mu), mu, 0));
+      return volume.uSunColor.value.x;
+    };
+    let previous = sunColor(0);
+    for (let mu = -0.01; mu >= -0.9; mu -= 0.01) {
+      const now = sunColor(mu);
+      expect(Math.abs(now - previous)).toBeLessThan(0.25);
+      previous = now;
+    }
+    expect(previous).toBe(0);
+  });
+
   it('dims the ambient on the night side', () => {
     expect(lit(-0.9).uAmbient.value.length()).toBe(0);
     expect(lit(1).uAmbient.value.length()).toBeGreaterThan(0.1);

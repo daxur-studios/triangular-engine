@@ -3,6 +3,7 @@ export * from './test-session';
 export * from './test-window';
 export * from './test-thumbnails';
 export * from './test-ablation';
+export * from './test-performance';
 export * from './test-machine';
 export * from './test-launch';
 export * from './test-runner.component';

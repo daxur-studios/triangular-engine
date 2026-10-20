@@ -303,7 +303,7 @@ Each phase ends with a check in `/planet-shape-lab` (proposed route) and recorde
 ### Phase 0. Test track and platform ceiling
 
 **Lab page** `/planet-shape-lab` (skeleton built 2026-10-19: plain sphere, poses, spin, feature registry,
-`planet-shape-baseline` v1; per-pass timers and timer self-test built and passing on the reference GPU 2026-10-19; quick/standard/soak modes and the `planet-shape-shadows-ab` v1 A/B suite built 2026-10-20, not yet run on the owner's machine; morph slider still TODO): a body-fixed planet with fixed seeds at three sizes (64 km, 600 km, 6,371 km),
+`planet-shape-baseline` v1; per-pass timers and timer self-test built and passing on the reference GPU 2026-10-19; quick/standard/soak modes and the `planet-shape-shadows-ab` v1 A/B suite built 2026-10-20 and run on the owner's machine the same day (quick and standard runs saved, agreeing within about 2%; see [Runbook 055](/docs/runbook/055_planet_shape_system.md), 2026-10-20 A/B entry; morph slider and the `planet-shape-morph` v1 suite built 2026-10-20, see [Runbook 055](/docs/runbook/055_planet_shape_system.md), 2026-10-20 morph entry; its first quiet-run baseline is still to record): a body-fixed planet with fixed seeds at three sizes (64 km, 600 km, 6,371 km),
 the same camera rig across contenders, a spinning planet with a time-warp slider, and the morph slider.
 
 **Measurement** (extends `triangular-engine/testing`, Plan 052's runner and `FrameSampler`):
@@ -351,7 +351,9 @@ Plan 051's U0P probe did), rejects runs whose spread exceeds 15 %, and reports t
 **Scaling curves:** cost against patch count, op count, edit count and body radius.
 
 **Budgets and baselines:** a budget file per scenario and a committed baseline JSON, so the runner's
-`performanceVerdict` is computed rather than "unassessed" (Plan 052).
+`performanceVerdict` is computed rather than "unassessed" (Plan 052). **Done 2026-10-20:** `TestScenario.budgets` and `TestSuite.baseline`; the baseline suite has a committed baseline from
+the owner's quiet standard NVIDIA run (2026-10-20 21:57) and a `gpuPassTotal` p95 budget. Still open: budgets for the
+shape suites (Runbook 055, 2026-10-20).
 
 **Real GPU:** a Playwright profile like `playwright.cloud-feasibility.config.ts` (real adapter, no SwiftShader,
 adapter and canvas recorded, GPU telemetry). Headless SwiftShader runs stay functional only. Existing stored runs

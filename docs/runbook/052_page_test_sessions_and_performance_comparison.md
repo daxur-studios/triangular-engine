@@ -686,3 +686,25 @@ triangular-test-summary` returns an npm 404 inside this repository because the b
 resolves from an installed package. Added root scripts `npm run test:summary -- <args>`
 and `npm run test:receiver`; docs and skill now name the in-repo versus consumer command.
 
+## 2026-10-20 — Several apps at once: receiver identity, port ownership and a timing lock
+
+Two problems with several apps on one machine. On `EADDRINUSE` the receiver logged "reusing the running receiver" and
+exited 0 without checking what held the port, so results from one app could be filed into another app's folder under
+the wrong fingerprint. And timed cases from two apps could run at once, so each saw the other's GPU load.
+
+Built in `projects/triangular-engine/bin/`: `GET /__triangular-test-sink` now also answers `receiver` and `root` (the
+first 12 hex characters of the SHA-256 of the output folder; `ok` unchanged). On `EADDRINUSE` the receiver probes that
+identity, reuses a receiver with the same root (exit 0), and otherwise prints the port and what answered and exits 1.
+`triangular-test-proxy.cjs` prints a banner when its receiver exits with an error, and spawns nothing when
+`DAXUR_TEST_SINK` is set. The repo's port and the defaults moved from 4223 to 4723. The new
+`triangular-test-lock.mjs` keeps a lock file in the OS temp folder, held by a receiver from a machine `start` to its
+`stop`/`finish` with a heartbeat; a stale lock (expired or dead pid) is taken over. `prepare` waits for another root's
+lock within the existing preflight bound, and an overlapping case is marked `other-app-measuring`. Specs: 26 in
+`npm run test:triangular-engine:sink`, the testing entry 118 of 118 headless, library build passes.
+
+Choices and limits: the lock is best effort (two receivers taking the same stale lock at the same instant can both
+win), and it covers one machine and one user's temp folder only. Under `ng serve` with no router, a refused port still
+forwards the sink to the other app's port, so the proxy can only warn; the router path (`DAXUR_TEST_SINK`) is the fix
+for that. Receivers started before this change answer identity-less and will be refused until restarted. Not verified
+here: a real two-app timed run on the owner's machine.
+

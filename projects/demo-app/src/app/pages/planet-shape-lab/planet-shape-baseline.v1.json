@@ -1,0 +1,120 @@
+{
+  "runId": "443ba388-1e09-4a00-9407-ed70e9a9cc08",
+  "recordedAt": "2026-10-20T21:57:07.826Z",
+  "mode": "standard",
+  "gpu": "NVIDIA GeForce RTX 3080 Laptop GPU",
+  "cases": {
+    "empty-frame": {
+      "gpuScenePass": {
+        "median": 0,
+        "p95": 0
+      },
+      "gpuOutputPass": {
+        "median": 0.046,
+        "p95": 0.046
+      },
+      "gpuPassTotal": {
+        "median": 0.046,
+        "p95": 0.046
+      }
+    },
+    "plain-sphere-orbit-64km": {
+      "gpuScenePass": {
+        "median": 0.045,
+        "p95": 0.046
+      },
+      "gpuOutputPass": {
+        "median": 0.045,
+        "p95": 0.046
+      },
+      "gpuPassTotal": {
+        "median": 0.09,
+        "p95": 0.092
+      }
+    },
+    "plain-sphere-ground-64km": {
+      "gpuScenePass": {
+        "median": 0.09,
+        "p95": 0.091
+      },
+      "gpuOutputPass": {
+        "median": 0.045,
+        "p95": 0.046
+      },
+      "gpuPassTotal": {
+        "median": 0.135,
+        "p95": 0.137
+      }
+    },
+    "plain-sphere-orbit-600km": {
+      "gpuScenePass": {
+        "median": 0.045,
+        "p95": 0.046
+      },
+      "gpuOutputPass": {
+        "median": 0.045,
+        "p95": 0.046
+      },
+      "gpuPassTotal": {
+        "median": 0.09,
+        "p95": 0.092
+      }
+    },
+    "plain-sphere-ground-600km": {
+      "gpuScenePass": {
+        "median": 0.088,
+        "p95": 0.089
+      },
+      "gpuOutputPass": {
+        "median": 0.046,
+        "p95": 0.046
+      },
+      "gpuPassTotal": {
+        "median": 0.133,
+        "p95": 0.135
+      }
+    },
+    "plain-sphere-orbit-6371km": {
+      "gpuScenePass": {
+        "median": 0.045,
+        "p95": 0.046
+      },
+      "gpuOutputPass": {
+        "median": 0.045,
+        "p95": 0.046
+      },
+      "gpuPassTotal": {
+        "median": 0.091,
+        "p95": 0.092
+      }
+    },
+    "plain-sphere-ground-6371km": {
+      "gpuScenePass": {
+        "median": 0.09,
+        "p95": 0.091
+      },
+      "gpuOutputPass": {
+        "median": 0.046,
+        "p95": 0.046
+      },
+      "gpuPassTotal": {
+        "median": 0.135,
+        "p95": 0.137
+      }
+    },
+    "empty-frame-after": {
+      "gpuScenePass": {
+        "median": 0,
+        "p95": 0
+      },
+      "gpuOutputPass": {
+        "median": 0.046,
+        "p95": 0.046
+      },
+      "gpuPassTotal": {
+        "median": 0.046,
+        "p95": 0.046
+      }
+    }
+  }
+}

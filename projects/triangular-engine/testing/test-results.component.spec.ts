@@ -98,16 +98,16 @@ describe('TestResultsComponent', () => {
   it('says how to start the receiver when it cannot be read, and reloads from an edited URL', async () => {
     await create();
     fetcher.and.rejectWith(new TypeError('Failed to fetch'));
-    fixture.componentInstance.setSource('http://127.0.0.1:4223/__triangular-test-sink');
+    fixture.componentInstance.setSource('http://127.0.0.1:4723/__triangular-test-sink');
     await settle();
     expect(el().querySelector('[role=alert]')?.textContent).toContain('npm run test:receiver');
-    expect(fetcher.calls.mostRecent().args[0]).toBe('http://127.0.0.1:4223/__triangular-test-sink/runs?limit=300');
+    expect(fetcher.calls.mostRecent().args[0]).toBe('http://127.0.0.1:4723/__triangular-test-sink/runs?limit=300');
     fetcher.and.callFake(async (url: string) => { calls.push(url); return new Response(JSON.stringify({ runs: [first] })); });
     const input = el().querySelector<HTMLInputElement>('.source input')!;
-    input.value = 'http://127.0.0.1:4223/__triangular-test-sink/';
+    input.value = 'http://127.0.0.1:4723/__triangular-test-sink/';
     (el().querySelector('.source') as HTMLFormElement).dispatchEvent(new Event('submit'));
     await settle();
-    expect(fetcher.calls.mostRecent().args[0]).toBe('http://127.0.0.1:4223/__triangular-test-sink/runs?limit=300');
+    expect(fetcher.calls.mostRecent().args[0]).toBe('http://127.0.0.1:4723/__triangular-test-sink/runs?limit=300');
     expect(el().querySelectorAll('.run').length).toBe(1);
   });
 
