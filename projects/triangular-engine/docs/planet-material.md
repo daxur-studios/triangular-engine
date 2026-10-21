@@ -102,6 +102,7 @@ A sun occluder is `(context) => number node` (1 = lit), an emissive is `(context
 - **Prefer `mix` over `select`** when blending vec3 values from `outputNode.rgb`: a `select` there returned 0 on the false branch in the day/night stage and was not root-caused.
 - **The lighting stage runs on the final lit colour**, as the GLSL day/night patch does. With occluders and no custom stage, `sunVisibilityLighting` scales the colour by `mix(0.15, 1, sunVisibility)`, exact for a sun-only scene and approximate otherwise.
 - **`lightingTurn`** (`createPlanetMorphLightingUniforms().uMorphLightingTurn`, a `mat3`) makes the shading normal `normalize(turn * sphereNormal)` instead of the morphed normal, so lighting follows the globe while the geometry morphs.
+- **The morphed normal is a vertex-stage varying (`vMorphedNormal`)**, so it stays correct when a material replaces `positionNode` with its own (for example a camera-relative position) and in batched terrain. It is computed from the batch offset in the vertex stage, where `positionLocal` is still the batched, unmorphed position. A `normalNode` expression that reads `positionLocal` itself still sees the replaced position in the fragment stage; keep per-vertex values in varyings. The varying costs one inter-stage slot (16 max) and is not created under `lightingTurn`.
 
 ## Projecting in the shader (dynamic mode)
 

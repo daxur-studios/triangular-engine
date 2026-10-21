@@ -24,7 +24,6 @@ class FakeHost implements AtmosphereLabTestHost {
   environmentValues: Record<string, string | number | boolean | null> = { softwareRenderer: false };
   readonly before = new Set<() => void>();
   readonly render = new Set<(at: number) => void>();
-  readonly gpu = new Set<(ms: number) => void>();
   private pendingMorph: number | undefined;
   private readonly timer = setInterval(() => {
     for (const callback of [...this.before]) callback();
@@ -32,7 +31,6 @@ class FakeHost implements AtmosphereLabTestHost {
     if (this.baking > 0) this.baking--;
     this.frames++;
     for (const callback of [...this.render]) callback(performance.now());
-    if (this.gpuSupported && this.frames % 5 === 0) for (const callback of [...this.gpu]) callback(1.5);
   }, 16);
 
   dispose(): void { clearInterval(this.timer); }
@@ -55,7 +53,6 @@ class FakeHost implements AtmosphereLabTestHost {
   resetErrors(): void { this.error = ''; }
   onBeforeRender(callback: () => void): () => void { this.before.add(callback); return () => this.before.delete(callback); }
   onRenderComplete(callback: (at: number) => void): () => void { this.render.add(callback); return () => this.render.delete(callback); }
-  observeGpu(callback: (ms: number) => void): () => void { this.gpu.add(callback); return () => this.gpu.delete(callback); }
   gpuTimestampsSupported(): boolean { return this.gpuSupported; }
   isSampling(): boolean { return this.sampling; }
   startSampling(): void { this.sampling = true; }
@@ -72,7 +69,7 @@ const quick = (suite: TestSuite<AtmosphereLabTestSettings>, ...ids: string[]): T
     .map((scenario) => ({ ...scenario, durationMs: 400, warmupMs: 0 })),
 });
 
-const [LOOK, COST] = ATMOSPHERE_LAB_TEST_HISTORY;
+const [LOOK, , COST] = ATMOSPHERE_LAB_TEST_HISTORY;
 
 describe('atmosphere lab tests', () => {
   let host: FakeHost;
@@ -83,7 +80,7 @@ describe('atmosphere lab tests', () => {
     it('is a valid append-only history ending with the cost suite', () => {
       expect(() => validateTestHistory(ATMOSPHERE_LAB_TEST_HISTORY)).not.toThrow();
       expect(ATMOSPHERE_LAB_TEST_HISTORY.map((suite) => `${suite.id}@${suite.version}:${suite.purpose}`)).toEqual([
-        'bent-atmosphere-look@1:functional', 'bent-atmosphere-cost@1:performance']);
+        'bent-atmosphere-look@1:functional', 'bent-atmosphere-cost@1:performance', 'bent-atmosphere-cost@2:performance']);
       expect(LOOK.requiresVisualReview).toBeTrue();
     });
 
@@ -105,9 +102,9 @@ describe('atmosphere lab tests', () => {
     it('builds and parses exact-version and latest launch links', () => {
       const base = 'http://triangular-demo.localhost:4200/atmosphere-lab';
       const url = buildTestLaunchUrl(base, LOOK, 'human-observed', 1);
-      expect(url).toBe(`${base}?testSuite=bent-atmosphere-look&testVersion=1&testProfile=human-observed&testRepetitions=1&testAutoStart=1`);
+      expect(url).toBe(`${base}?testSuite=bent-atmosphere-look&testVersion=1&testProfile=human-observed&testMode=standard&testRepetitions=1&testAutoStart=1`);
       expect(parseTestLaunch(new URL(url), ATMOSPHERE_LAB_TEST_HISTORY)?.key).toBe('bent-atmosphere-look@1');
-      expect(parseTestLaunch(new URL(`${base}?testSuite=latest&testAutoStart=1`), ATMOSPHERE_LAB_TEST_HISTORY)?.key).toBe('bent-atmosphere-cost@1');
+      expect(parseTestLaunch(new URL(`${base}?testSuite=latest&testAutoStart=1`), ATMOSPHERE_LAB_TEST_HISTORY)?.key).toBe('bent-atmosphere-cost@2');
     });
   });
 
@@ -130,7 +127,9 @@ describe('atmosphere lab tests', () => {
       expect(stateMismatches(applied, settings)).toEqual([]);
       expect(stateMismatches({ ...applied, projection: 'equirect', altitudeM: 5 }, settings)).toEqual([
         `altitudeM: expected ${settings.altitudeM}, found 5`, 'projection: expected equalEarth, found equirect']);
-      expect(stateMismatches({ ...applied, bentOn: false }, settings)).toContain('bent planet is off');
+      expect(stateMismatches({ ...applied, bentOn: false }, settings)).toContain('bent planet is off, expected on');
+      expect(stateMismatches({ ...applied, bentOn: false }, { ...settings, bentOn: false })).toEqual([]);
+      expect(stateMismatches(applied, { ...settings, bentOn: false })).toContain('bent planet is on, expected off');
     });
   });
 
@@ -147,11 +146,11 @@ describe('atmosphere lab tests', () => {
       expect(result.cases.map((item) => item.checks.every((check) => check.passed))).toEqual([true, true]);
       expect(result.cases[1].checks.map((check) => check.name)).toContain('Masked pass active as expected');
       expect(result.cases[0].checks.find((check) => check.name === 'Morph reached its final state')?.detail).toMatch(/animation steps/);
-      expect(result.cases[0].metrics.map((metric) => metric.name)).toEqual(['frameInterval', 'gpuRender']);
+      expect(result.cases[0].metrics.map((metric) => metric.name)).toEqual([
+        'frameInterval', 'gpuScenePass', 'gpuFullscreenPasses', 'gpuOutputPass', 'gpuPassTotal']);
       expect(host.state).toEqual(before);
       expect(host.before.size).toBe(0);
       expect(host.render.size).toBe(0);
-      expect(host.gpu.size).toBe(0);
       expect(host.sampling).toBeFalse();
     }, 20_000);
 
@@ -167,8 +166,8 @@ describe('atmosphere lab tests', () => {
     it('lists GPU time as an unavailable optional metric when the backend has no timestamp query', async () => {
       host.gpuSupported = false;
       const result = await new TestSession<AtmosphereLabTestSettings, AtmosphereLabSnapshot>().run(
-        quick(COST, 'cost-space-morph-0'), createAtmosphereLabTestAdapter(host), { repetitions: 1, profile: 'visible-browser' });
-      const gpu = result.cases[0].metrics.find((metric) => metric.name === 'gpuRender');
+        quick(COST, 'auto-m0-space'), createAtmosphereLabTestAdapter(host), { repetitions: 1, profile: 'visible-browser' });
+      const gpu = result.cases[0].metrics.find((metric) => metric.name === 'gpuPassTotal');
       expect(gpu?.optional).toBeTrue();
       expect(gpu?.unavailableReason).toBe('This backend has no GPU timestamp query');
     }, 20_000);
@@ -197,14 +196,13 @@ describe('atmosphere lab tests', () => {
       expect(host.state).toEqual(before);
       expect(host.before.size).toBe(0);
       expect(host.render.size).toBe(0);
-      expect(host.gpu.size).toBe(0);
       expect(host.sampling).toBeFalse();
     }, 20_000);
 
     it('labels a software renderer as invalid performance evidence and never as a pass', async () => {
       host.environmentValues = { softwareRenderer: true, gpuRenderer: 'SwiftShader' };
       const result = await new TestSession<AtmosphereLabTestSettings, AtmosphereLabSnapshot>().run(
-        quick(COST, 'cost-low-orbit-morph-0'), createAtmosphereLabTestAdapter(host), { repetitions: 1, profile: 'visible-browser' });
+        quick(COST, 'auto-m0-low-orbit'), createAtmosphereLabTestAdapter(host), { repetitions: 1, profile: 'visible-browser' });
       expect(result.cases[0].validityIssues).toContain('Software renderer: functional evidence only, not hardware performance');
       expect(result.performanceVerdict).toBe('inconclusive');
     }, 20_000);

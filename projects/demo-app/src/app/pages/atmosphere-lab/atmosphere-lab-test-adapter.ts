@@ -1,3 +1,4 @@
+import type { GpuPassKind, IGpuPassSummary } from 'triangular-engine';
 import type { TestCheck, TestContext, TestMetric, TestObservation, TestRunAdapter, TestScenario, TestSetting } from 'triangular-engine/testing';
 import type { AtmosphereLabState, AtmosphereLabTestSettings } from './atmosphere-lab-tests';
 
@@ -17,7 +18,19 @@ export interface AtmosphereFrameSummary {
   readonly wallP95Ms: number;
   readonly invalidReasons: readonly string[];
   readonly verdict: string;
+  /** GPU ms split by render pass, with the timer self-test; absent or `null` without per-pass timestamps. */
+  readonly gpuPasses?: IGpuPassSummary | null;
 }
+
+/**
+ * Per-pass GPU metrics. WebGPU times passes, not meshes: the plain globe is one full-screen backdrop pass, the bent
+ * planet draws its sky tables and masked pass as full-screen passes and its grid in the scene pass.
+ */
+const GPU_PASS_METRICS: readonly { readonly kind: GpuPassKind; readonly name: string; readonly source: string; readonly absent: string }[] = [
+  { kind: 'scene', name: 'gpuScenePass', source: 'WebGPU timestamps of the main scene pass per frame (backdrop or grid, plus clear)', absent: 'No scene pass was timed' },
+  { kind: 'fullscreen', name: 'gpuFullscreenPasses', source: 'WebGPU timestamps of full-screen passes per frame, summed (sky-view table, masked march)', absent: 'No full-screen pass rendered in the window' },
+  { kind: 'output', name: 'gpuOutputPass', source: 'WebGPU timestamps of the renderer output pass (tone mapping, colour space)', absent: 'No output pass was timed' },
+];
 
 /** What the lab page offers the adapter: its normal actions plus read-only probes. Implemented by the page. */
 export interface AtmosphereLabTestHost {
@@ -37,8 +50,6 @@ export interface AtmosphereLabTestHost {
   resetErrors(): void;
   onBeforeRender(callback: () => void): () => void;
   onRenderComplete(callback: (renderedAt: number) => void): () => void;
-  /** Starts GPU timestamp collection; returns a stop function. Samples arrive through `callback` in milliseconds. */
-  observeGpu(callback: (milliseconds: number) => void): () => void;
   gpuTimestampsSupported(): boolean;
   isSampling(): boolean;
   startSampling(): void;
@@ -91,7 +102,7 @@ export function sweepTraceProblems(keys: readonly number[], trace: readonly numb
 export function stateMismatches(actual: AtmosphereLabState, settings: AtmosphereLabTestSettings): string[] {
   const out: string[] = [];
   const same = (a: number, b: number) => Math.abs(a - b) <= NUMBER_TOLERANCE * Math.max(1, Math.abs(b));
-  if (!actual.bentOn) out.push('bent planet is off');
+  if (actual.bentOn !== settings.bentOn) out.push(`bent planet is ${actual.bentOn ? 'on' : 'off'}, expected ${settings.bentOn ? 'on' : 'off'}`);
   for (const key of ['planetRadiusM', 'altitudeM', 'yawDeg', 'pitchDeg', 'sunElevationDeg', 'sunAzimuthDeg', 'exposure'] as const) {
     if (!same(actual[key], settings[key])) out.push(`${key}: expected ${settings[key]}, found ${actual[key]}`);
   }
@@ -198,13 +209,11 @@ export function createAtmosphereLabTestAdapter(
       const settings = scenario.settings;
       if (host.isSampling()) throw new Error('Another frame sampling window is already active');
       const intervals: number[] = [];
-      const gpu: number[] = [];
       const trace: number[] = [];
       let frames = 0;
       let maskedFrames = 0;
       let previousAt: number | undefined;
       host.startSampling();
-      const offGpu = host.observeGpu((ms) => gpu.push(ms));
       const offRender = host.onRenderComplete((renderedAt) => {
         frames++;
         if (host.maskedPassActive()) maskedFrames++;
@@ -218,7 +227,6 @@ export function createAtmosphereLabTestAdapter(
         summary = host.stopSampling();
       } finally {
         offRender();
-        offGpu();
         if (host.isSampling()) host.stopSampling();
       }
       const state = host.read().state;
@@ -235,6 +243,15 @@ export function createAtmosphereLabTestAdapter(
           detail: settings.kind === 'sweep' ? (sweepProblems.join('; ') || `${trace.length} animation steps, final ${state.morph}`) : `morph ${state.morph}` },
         { name: 'No engine, window or console error', passed: error === '', detail: error || undefined },
       ];
+      const passes = summary.gpuPasses ?? null;
+      if (passes) {
+        // Every timestamp belongs to a pass of its frame, no frame is cut short, passes add up to the Three.js total.
+        checks.push({
+          name: 'GPU timer self-test', passed: passes.selfTest.passed,
+          detail: passes.selfTest.issues.join('; ')
+            || `${passes.frames} frames in ${passes.selfTest.batches} readbacks, timestamp step ${passes.resolution.resolutionNs} ns`,
+        });
+      }
       if (settings.expectMaskedPass !== null) {
         const expected = settings.expectMaskedPass;
         const matched = expected ? maskedFrames === frames : maskedFrames === 0;
@@ -246,27 +263,36 @@ export function createAtmosphereLabTestAdapter(
         name: 'frameInterval', unit: 'ms', source: 'Deltas of engine renderComplete$ timestamps (performance.now); display-cadence quantized, not GPU time',
         samples: intervals, unavailableReason: intervals.length ? undefined : 'Fewer than two frames completed in the window',
       };
-      const gpuMetric: TestMetric = {
-        name: 'gpuRender', unit: 'ms', optional: true,
-        source: 'Renderer GPU timestamp query (render), read every few frames; covers every render call since the previous read, including the sky-view table and the masked pass',
-        samples: gpu,
-        unavailableReason: gpu.length ? undefined : host.gpuTimestampsSupported() ? 'No timestamp reading came back in the window' : 'This backend has no GPU timestamp query',
-      };
+      const missing = host.gpuTimestampsSupported() ? 'No per-pass GPU timestamps were resolved in the window' : 'This backend has no GPU timestamp query';
+      const gpuMetrics: TestMetric[] = [
+        ...GPU_PASS_METRICS.map(({ kind, name, source, absent }): TestMetric => {
+          const samples = passes?.byKind[kind]?.samples ?? [];
+          return { name, unit: 'ms', optional: true, source, samples, unavailableReason: samples.length ? undefined : passes ? absent : missing };
+        }),
+        {
+          name: 'gpuPassTotal', unit: 'ms', optional: true,
+          source: 'WebGPU timestamps of every timed pass of a frame, summed per complete frame: the whole-frame GPU cost',
+          samples: passes?.total.samples ?? [], unavailableReason: passes ? undefined : missing,
+        },
+      ];
       return {
-        metrics: [frameMetric, gpuMetric],
+        metrics: [frameMetric, ...gpuMetrics],
         checks,
         details: {
           frames: summary.frames, cpuMedianMs: summary.cpuMedianMs, cpuP95Ms: summary.cpuP95Ms,
           wallMedianMs: summary.wallMedianMs, wallP95Ms: summary.wallP95Ms, frameVerdict: summary.verdict,
           maskedPassFrames: maskedFrames, finalMorph: state.morph,
+          gpuPassFrames: passes?.frames ?? 0, gpuPassTotalMedianMs: passes ? passes.total.medianMs : null,
+          gpuTimestampStepNs: passes?.resolution.resolutionNs ?? null,
         },
         validityIssues: [
           ...summary.invalidReasons,
           ...(summary.frames < MIN_WINDOW_FRAMES ? [`Fewer than ${MIN_WINDOW_FRAMES} rendered frames in measurement window`] : []),
           ...(software ? ['Software renderer: functional evidence only, not hardware performance'] : []),
+          ...(!passes && host.gpuTimestampsSupported() && !software ? ['No per-pass GPU timestamps were resolved in the window'] : []),
         ],
         limitations: [
-          'GPU time is a batched whole-render timestamp, not the cost of one pass; the masked pass is not separated from the table and the rest.',
+          'GPU time is per render pass, not per effect: the sky-view table and the masked march are both full-screen passes and are summed in gpuFullscreenPasses.',
           'The masked pass runs only above the air or near an open map edge, so cost differs by view; each scenario states its view.',
           'Appearance (rim glow, seams at the map edge, popping while morphing) is not judged by these checks and needs human review.',
         ],

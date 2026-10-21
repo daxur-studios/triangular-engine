@@ -482,7 +482,7 @@ Built in parallel by three agents in one checkout with disjoint files, then revi
   (per body) and `setPlanetProjectionCentre`. No engine change, no new public API, no parallel morph.
 - **Visual only.** The graph's position replaces the vertex position (`positionNode`), so the camera-relative
   high/low split is kept and the morph enters as the displacement `graph.positionNode - positionGeometry`, exactly 0 at
-  morph 0. Body radius, camera pose, sun and spin stay body-fixed and spherical.
+  morph 0. Body radius, sun and spin stay body-fixed and spherical; the camera follows the morph (below).
 - **Dynamic projection, centred on +Z (longitude 0).** The graph needs `aFlatPos`/`aFlatNorm`; the geometry carries
   zeros and the flat map is projected in the shader (dynamic mode). Every camera pose sits at longitude 0, so the map
   faces the camera at morph 1. The sphere geometry is built with `phiStart` -90° so its UV seam is at -Z, the
@@ -491,14 +491,34 @@ Built in parallel by three agents in one checkout with disjoint files, then revi
 - **Far plane: 100 body radii** (`CAMERA_FAR_RADII`), was 1.25 × the horizon distance, which clipped the flattening
   surface (the map runs past the sphere's horizon). Not `Infinity`: three.js's projection matrix is NaN for an infinite
   far plane.
+- **Lit with the sphere normal** (the graph's `lightingTurn` option, identity turn), not the morphed one. The owner saw
+  two faults with the morphed normal:
+  - At morph 1 it is +Z over the whole map, so the map was lit all alike and flipped between lit and dark as the body
+    spun. The sphere normal keeps the globe's day/night terminator on the map.
+  - At morph 0.5 there was a hard lighting line down the middle of the screen. `planetMorphGraph` builds the morphed
+    normal in the fragment stage from `positionLocal - positionGeometry` (its batch offset). This lab's `positionNode`
+    is camera-relative, so there that offset is minus the camera position, and the projected longitude became the view
+    direction's, which wraps at the screen centre. Fixed in the engine the same day: the graph now builds the morphed
+    normal in the vertex stage (`vMorphedNormal` varying), so it no longer depends on the material's `positionNode`.
+    Batched terrain had a milder form of the same error for 0 < morph < 1. The lab keeps `lightingTurn` for the first
+    reason only.
 - **Shadows: off while morph > 0** (`shadowsActive` in `planet-shape-features.ts`). The shadow pass does not morph, so
   the sphere neither casts nor receives (the sun's shadow pass is skipped too) instead of morphing the shadow geometry.
   The `shadows` feature keeps its stored value and comes back at morph 0.
-- **Camera note.** At morph 1 the bend puts the flat map in the plane through the planet centre (z = 0 in the map
-  frame), not tangent at radius R. The poses are unchanged, so at morph 1 the orbit pose sees the whole map from 3.5 R
-  and the ground pose (2 m above the sphere) looks along the map from one radius above it. The cell planet's
-  `CellPlanetMorphCameraRig` moves the camera with the morph; this lab does not yet. Checked in the browser
-  2026-10-20: morph 0.5 bends toward the camera, morph 1 shows the map face-on, no clipping, no console errors.
+- **Camera rides the morph** (added 2026-10-21; first built without it). At morph 1 the bend puts the flat map in the
+  plane through the planet centre (z = 0 in the map frame), not tangent at radius R, so fixed poses ended up one
+  radius above the map: the ground pose looked along it from R + 2 m and the morph suite's ground cases timed
+  near-empty frames. `resolveCameraView(def, body, id, morph)` (`planet-shape-camera.ts`) now carries the resolved
+  pose rigidly from the globe's ground frame under the pose's lon/lat to that point's frame at `morph`, using the
+  engine's `CellPlanetMorphCameraRig.groundFrame` (the CPU twin of the bend, Equal Earth, default basis = the lab's
+  `MORPH_CENTRE`). Height, pitch and heading over the same ground stay as they were, for named poses and the free
+  camera; `setMorph` re-resolves the pose. Only `groundFrame` is used, not the rig's orbit-controls `update`: the lab's
+  poses are closed-form, so a pose at a given morph is deterministic, as a test case needs. Ground relief is ignored
+  (the plain sphere has none). The morphed surface is float32 in the shader, so on the 6,371 km body the ground under
+  the 2 m pose can sit a few decimetres off the double-precision frame. Specs: identity at morph 0, ground pose at
+  (0, 0, 2) facing +X at morph 1, height/pitch/heading kept at morph 0–1 off the map centre. Checked in the browser
+  2026-10-21: the ground pose stays 2 m over the surface at morph 0.5 and 1, orbit sees the map face-on, no console
+  errors. Earlier check (2026-10-20): morph 0.5 bends toward the camera, no clipping.
 - **New suite** `planet-shape-morph` v1 (performance, `expectedGpuVendor` nvidia): 600 km, morph 0 / 0.5 / 1 at orbit
   and ground, six cases `morph-000|050|100-orbit|ground-600km`, `gpuPassTotal` p95 budget 0.5 ms (as the sphere cases),
   no baseline yet: record one from the owner's first quiet standard run with `npm run test:baseline`.

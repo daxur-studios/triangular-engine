@@ -28,9 +28,9 @@ export interface AtmosphereLabState {
 
 /**
  * Fully resolved scenario inputs. `morphKeys` is the morph (`[m]`, static) or the keyframes of a sweep
- * (`[0, 1, 0]`: equal time per leg, eased). The bent planet is always on during a run.
+ * (`[0, 1, 0]`: equal time per leg, eased). `bentOn: false` is the plain globe backdrop, the comparison for the cost suites.
  */
-export interface AtmosphereLabTestSettings extends Omit<AtmosphereLabState, 'bentOn' | 'morph'> {
+export interface AtmosphereLabTestSettings extends Omit<AtmosphereLabState, 'morph'> {
   readonly kind: 'static' | 'sweep';
   readonly morphKeys: readonly number[];
   /**
@@ -47,11 +47,16 @@ const EARTH_RADIUS_M = 6_371_000;
 const VIEWS = {
   space: { altitudeM: 3 * EARTH_RADIUS_M, yawDeg: 0, pitchDeg: -90, sunElevationDeg: 40, sunAzimuthDeg: 90, exposure: 6 },
   lowOrbit: { altitudeM: 0.05 * EARTH_RADIUS_M, yawDeg: 0, pitchDeg: -16, sunElevationDeg: 35, sunAzimuthDeg: 90, exposure: 8 },
+  /** 25 km up, looking down and out: in the air, above most of it. */
+  airHigh: { altitudeM: 25_000, yawDeg: 0, pitchDeg: -16, sunElevationDeg: 35, sunAzimuthDeg: 90, exposure: 8 },
+  /** 2 m up: the camera on the ground, where the table path alone is expected. */
+  ground: { altitudeM: 2, yawDeg: 0, pitchDeg: 12, sunElevationDeg: 60, sunAzimuthDeg: 90, exposure: 8 },
   sideOnEdge: { altitudeM: 0.004 * EARTH_RADIUS_M, yawDeg: 90, pitchDeg: 1, sunElevationDeg: 35, sunAzimuthDeg: 90, exposure: 8 },
 } as const;
 
 const BASE: AtmosphereLabTestSettings = {
   kind: 'static',
+  bentOn: true,
   planetRadiusM: EARTH_RADIUS_M,
   preset: 'earth',
   projection: 'equirect',
@@ -98,6 +103,30 @@ const COST_SCENARIOS: readonly TestScenario<AtmosphereLabTestSettings>[] = [
   ),
 ];
 
+/**
+ * Plan 049 Phase 3a follow-up cost matrix: the plain globe, then the bent planet on the table path (`auto`) and the
+ * per-pixel march, at morph 0 / 0.5 / 1, for four views. Whole-frame GPU time per render pass, on the target GPU.
+ */
+const COST_V2_VIEWS = [
+  { key: 'space', label: 'Space (3 R)', view: VIEWS.space, march: true },
+  { key: 'low-orbit', label: 'Low orbit (0.05 R)', view: VIEWS.lowOrbit, march: true },
+  { key: 'air-high', label: '25 km up', view: VIEWS.airHigh, march: true },
+  { key: 'ground', label: '2 m up', view: VIEWS.ground, march: false },
+] as const;
+
+const COST_V2_SCENARIOS: readonly TestScenario<AtmosphereLabTestSettings>[] = COST_V2_VIEWS.flatMap(({ key, label, view, march }) => {
+  const space = key === 'space';
+  const run = (id: string, text: string, overrides: Partial<AtmosphereLabTestSettings>) =>
+    scenario(`${id}-${key}`, `${label}, ${text}`, 3000, { ...view, ...overrides }, 600);
+  return [
+    run('plain', 'plain globe', { bentOn: false, morphKeys: [0] }),
+    ...[0, 0.5, 1].map((morph) =>
+      run(`auto-m${morphId(morph)}`, `bent, table + edges, morph ${morph}`, { morphKeys: [morph], expectMaskedPass: space ? true : null })),
+    ...(march ? [0, 0.5, 1].map((morph) =>
+      run(`march-m${morphId(morph)}`, `bent, march every pixel, morph ${morph}`, { morphKeys: [morph], skyPath: 'march' as const })) : []),
+  ];
+});
+
 /** Append new suites/versions at the end; Run latest resolves the final entry once at launch. */
 export const ATMOSPHERE_LAB_TEST_HISTORY: readonly TestSuite<AtmosphereLabTestSettings>[] = [
   {
@@ -114,5 +143,13 @@ export const ATMOSPHERE_LAB_TEST_HISTORY: readonly TestSuite<AtmosphereLabTestSe
     title: 'Bent atmosphere: GPU frame cost, space and low orbit',
     purpose: 'performance',
     scenarios: COST_SCENARIOS,
+  },
+  {
+    id: 'bent-atmosphere-cost',
+    version: 2,
+    title: 'Bent atmosphere: GPU cost per pass, plain globe vs table vs march',
+    purpose: 'performance',
+    expectedGpuVendor: 'nvidia',
+    scenarios: COST_V2_SCENARIOS,
   },
 ];

@@ -1,3 +1,5 @@
+import { Vector3 } from 'three';
+import { CellPlanetMorphCameraRig, type ICellPlanetGroundFrame } from 'triangular-engine/worldgen/render';
 import { bodyById, type BodyId } from './planet-shape-config';
 
 /**
@@ -53,8 +55,8 @@ export function cameraPoseById(id: CameraPoseId): CameraPoseDefinition {
 
 const RAD = Math.PI / 180;
 
-export function resolveCameraPose(id: CameraPoseId, bodyId: BodyId): ResolvedCameraPose {
-  return resolveCameraView(cameraPoseById(id), bodyId, id);
+export function resolveCameraPose(id: CameraPoseId, bodyId: BodyId, morph = 0): ResolvedCameraPose {
+  return resolveCameraView(cameraPoseById(id), bodyId, id, morph);
 }
 
 /** A named pose as an editable view, with `'horizon'` pitch turned into degrees for this body. */
@@ -112,7 +114,51 @@ export function zoomCameraView(view: CameraView, steps: number, bodyId: BodyId):
  */
 export const CAMERA_FAR_RADII = 100;
 
-export function resolveCameraView(def: CameraView, bodyId: BodyId, id: CameraPoseId | 'free'): ResolvedCameraPose {
+export function resolveCameraView(def: CameraView, bodyId: BodyId, id: CameraPoseId | 'free', morph = 0): ResolvedCameraPose {
+  const globe = resolveGlobeView(def, bodyId, id);
+  return morph > 0 ? followMorph(globe, def, morph) : globe;
+}
+
+/**
+ * The camera rides the morph: the pose is carried rigidly from the globe's ground frame under it (lon/lat of the pose) to
+ * that ground point's frame at `morph`, so height, pitch and heading over the same ground stay as they were and the
+ * flat map at morph 1 is seen from the same place. The frame is the engine's `CellPlanetMorphCameraRig.groundFrame`, the
+ * CPU twin of the material's bend morph, with the lab's projection: Equal Earth (the material's default
+ * `uProjectionType`) centred on longitude 0 (`MORPH_CENTRE`, the rig's default basis +Z/+Y/+X). Ground relief is not
+ * modelled (the lab sphere has none). The morphed surface is float32 in the shader, so at planet scale the ground under
+ * a 2 m camera can sit a few decimetres off the double-precision frame here; fine for a picture.
+ */
+function followMorph(globe: ResolvedCameraPose, def: CameraView, morph: number): ResolvedCameraPose {
+  const radius = bodyById(globe.bodyId).radiusM;
+  const rig = new CellPlanetMorphCameraRig({ radiusM: radius, projection: () => 'equalEarth' });
+  const lon = def.lonDeg * RAD;
+  const lat = def.latDeg * RAD;
+  const anchor = new Vector3(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));
+  const from = rig.groundFrame(anchor, 0);
+  const to = rig.groundFrame(anchor, Math.min(1, morph));
+  const position = carryPoint(new Vector3(...globe.position), from, to);
+  const forward = carryDirection(new Vector3(...globe.forward), from, to);
+  const up = carryDirection(new Vector3(...globe.up), from, to);
+  return {
+    ...globe,
+    position: [position.x, position.y, position.z],
+    forward: [forward.x, forward.y, forward.z],
+    up: [up.x, up.y, up.z],
+  };
+}
+
+function carryDirection(v: Vector3, from: ICellPlanetGroundFrame, to: ICellPlanetGroundFrame): Vector3 {
+  const east = v.dot(from.east);
+  const north = v.dot(from.north);
+  const normal = v.dot(from.normal);
+  return new Vector3().addScaledVector(to.east, east).addScaledVector(to.north, north).addScaledVector(to.normal, normal);
+}
+
+function carryPoint(p: Vector3, from: ICellPlanetGroundFrame, to: ICellPlanetGroundFrame): Vector3 {
+  return carryDirection(p.sub(from.position), from, to).add(to.position);
+}
+
+function resolveGlobeView(def: CameraView, bodyId: BodyId, id: CameraPoseId | 'free'): ResolvedCameraPose {
   const radius = bodyById(bodyId).radiusM;
   const altitude = def.altitudeM + def.altitudeRadii * radius;
   const lon = def.lonDeg * RAD;

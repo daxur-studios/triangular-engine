@@ -309,15 +309,19 @@ export class RaycastOrbitControlsComponent extends OrbitControlsComponent {
     if (!Number.isFinite(rawRatio)) return;
 
     let ratio = rawRatio;
+    let clamped = false;
     if (pendingZoom.surfaceHit) {
       const hitDistance = pendingZoom.fromCamera.distanceTo(pendingZoom.focusPoint);
       const clearance = Math.max(0, this.surfaceClearanceM());
       if (hitDistance > 0 && Number.isFinite(hitDistance)) {
-        ratio = Math.max(ratio, clearance / hitDistance);
+        const clearanceRatio = clearance / hitDistance;
+        clamped = clearanceRatio > ratio;
+        ratio = Math.max(ratio, clearanceRatio);
       }
     }
 
-    if (Math.abs(ratio - 1) >= ZOOM_RATIO_EPSILON) {
+    // A clamped ratio near 1 must still undo the dolly's overshoot past the clearance.
+    if (clamped || Math.abs(ratio - 1) >= ZOOM_RATIO_EPSILON) {
       // This construction keeps the camera on the same side of the hit as
       // the pre-dolly pose and scales its distance from the actual surface.
       orbit.target.copy(pendingZoom.fromTarget).lerp(pendingZoom.focusPoint, 1 - ratio);

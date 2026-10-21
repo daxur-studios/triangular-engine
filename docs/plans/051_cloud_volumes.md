@@ -248,7 +248,7 @@ Plan 050's existing occlusion slot.
      worst case.
 3. **Atmosphere lighting.** Sun colour, sky ambient and aerial perspective from the atmosphere API (Earth and
    Mars presets) on the lab's planet.
-   - **Status 2026-10-18:** 3a built, sun colour and sky ambient per volume on the CPU (`CloudVolumeAtmosphereLighting`). 3b (aerial perspective haze, sky backdrop in the lab, optional per-pixel sun colour) not started.
+   - **Status 2026-10-20:** 3a built (sun colour and sky ambient per volume on the CPU, `CloudVolumeAtmosphereLighting`, with a fade over the last 4° below the horizon so the colour no longer snaps off). 3b built (per-pixel aerial perspective haze in the march, sky backdrop in the lab). Gate met by eye. Haze costs +0.19 ms on the fly-by, +0.02 inside, 0 at the horizon (discrete GPU), so the fly-by is about 2x the 0.1 ms goal; per-pixel haze kept by decision. A volume straddling the terminator still flips as a whole (optional per-pixel sun colour not built).
    - **Gate:** orange-lit clouds at dusk, blue-hazed far clouds, a dark night side, no white glow.
      Cost added ≤ 0.1 ms.
 4. **Stylization.** Light ramp, edge hardness, silver rim, tint and density curve, with presets
@@ -256,6 +256,7 @@ Plan 050's existing occlusion slot.
    - **Gate:** the maintainer picks the default look.
 5. **Sources.** Mesh source (a ship mesh baked to a cloud), points source (the demo carries a small built-in
    GPU particle swirl standing in for an app's simulation), animated noise.
+   - **Status 2026-10-20:** mesh source built (`CloudVolume.setMeshSource`, CPU band-limited signed distance field in `cloud-volume-mesh-sdf.ts`, ramped and noise-eroded in the density bake; specs pass). Lab has a torus knot source button. Not yet looked at by eye; ship mesh, animated noise and points source not started. Open question: whether the points source may be WebGPU-only (compute) instead of also running on the `forceWebGL` fallback.
    - **Gate:** the ship reads as made of cloud; the particle cloud moves every frame within G6.
    - **Suggested additions (2026-10-18, not yet agreed):** more test shapes, to stress thin and concave features the ship does not:
      - a **torus knot** mesh source (thin tubes, holes, self-overlap): does the distance field and softness ramp keep it readable as a knot made of cloud, with no filled-in holes or broken tubes?

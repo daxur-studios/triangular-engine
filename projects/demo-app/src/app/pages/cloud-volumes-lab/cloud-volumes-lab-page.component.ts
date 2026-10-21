@@ -1,7 +1,7 @@
 import { Component, DestroyRef, HostListener, inject, isDevMode, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { uniform } from 'three/tsl';
-import { Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PerspectiveCamera, Quaternion, SphereGeometry, Vector3 } from 'three';
+import { Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PerspectiveCamera, Quaternion, SphereGeometry, TorusKnotGeometry, Vector3 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import { ReactiveFormsModule, FormControl } from '@angular/forms';
 import { SliderComponent } from '@daxur-studios/ui';
@@ -182,6 +182,18 @@ interface CloudTestSnapshot {
         <p class="row">
           @for (n of volumeCounts; track n) {
             <button (click)="setVolumeCount(n)" [class.active]="volumeCount() === n">{{ n }}</button>
+          }
+        </p>
+        <p class="label">Source (Phase 5)</p>
+        <p class="row">
+          @for (k of sourceKinds; track k) {
+            <button (click)="setSource(k)" [class.active]="sourceKind() === k">{{ k }}</button>
+          }
+        </p>
+        <p class="label">Noise motion (rebakes the density about every {{ noiseRefresh }} s)</p>
+        <p class="row">
+          @for (d of driftSpeeds; track d) {
+            <button (click)="setDrift(d)" [class.active]="noiseDrift() === d">{{ d === 0 ? 'still' : d + '/s' }}</button>
           }
         </p>
         <p class="label">Clouds drawn as</p>
@@ -490,6 +502,11 @@ export class CloudVolumesLabPageComponent {
   readonly cloudMode = signal<CloudMode>('mesh');
   private startModeApplied = false;
   readonly volumeCount = signal(1);
+  readonly driftSpeeds = [0, 0.1, 0.3, 1] as const;
+  readonly noiseDrift = signal<number>(0);
+  readonly noiseRefresh = 0.5;
+  readonly sourceKinds = ['noise', 'torus knot'] as const;
+  readonly sourceKind = signal<(typeof this.sourceKinds)[number]>('noise');
   readonly matrixStatus = signal('');
   readonly matrixText = signal('');
   readonly copied = signal(false);
@@ -571,6 +588,7 @@ export class CloudVolumesLabPageComponent {
         // Box proxies are the default; the box mesh depth-tests its far faces against the planet and loses clouds.
         if (!REPLAY_PROBE) this.setCloudMode('proxy');
       }
+      for (const volume of this.activeVolumes()) volume.advanceNoise(delta);
       if (this.bakeBudget() > 0) {
         this.bakeScheduler.bandsPerFrame = this.bakeBudget();
         this.bakeScheduler.update(renderer, this.activeVolumes());
@@ -803,6 +821,25 @@ export class CloudVolumesLabPageComponent {
     return this.allVolumes().slice(0, this.volumeCount());
   }
 
+  setDrift(speed: number): void {
+    this.noiseDrift.set(speed);
+    for (const volume of this.allVolumes()) {
+      volume.noiseDriftPerSecond = speed;
+      volume.noiseRefreshSeconds = this.noiseRefresh;
+    }
+  }
+
+  /** Phase 5: fills every volume from noise or from a mesh baked to a distance field. */
+  setSource(kind: (typeof this.sourceKinds)[number]): void {
+    this.sourceKind.set(kind);
+    const knot = kind === 'noise' ? null : new TorusKnotGeometry(1, 0.22, 220, 24);
+    for (const volume of this.allVolumes()) {
+      if (knot) volume.setMeshSource(knot, { padding: 0.05 });
+      else volume.setShape('noise');
+    }
+    knot?.dispose();
+  }
+
   /** 1, 4 or 12 volumes along the great circle through the main one, at alternating heights (the low ones cross the ground). */
   setVolumeCount(n: number): void {
     while (this.extras.length < n - 1) this.createExtra(this.extras.length + 1);
@@ -829,6 +866,9 @@ export class CloudVolumesLabPageComponent {
     this.rememberPose(volume);
     this.applySpin();
     this.extras.push(volume);
+    if (this.sourceKind() !== 'noise') this.setSource(this.sourceKind());
+    volume.noiseDriftPerSecond = this.noiseDrift();
+    volume.noiseRefreshSeconds = this.noiseRefresh;
     this.applySun();
   }
 

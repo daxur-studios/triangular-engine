@@ -9,6 +9,8 @@ import {
   NormalBlending,
   Frustum,
   Quaternion,
+  DataTexture,
+  type BufferGeometry,
   RGBAFormat,
   RenderTarget,
   UnsignedByteType,
@@ -46,10 +48,12 @@ import {
 } from 'three/tsl';
 import { CLOUD_BLOB_SIGMA } from './cloud-volume-reference';
 import { CloudVolumeAtlasLayout } from './cloud-volume-atlas';
+import { bakeMeshSdf, type MeshSdfOptions } from './cloud-volume-mesh-sdf';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export type CloudVolumeShape = 'noise' | 'box' | 'blob';
+/** `mesh` is filled by {@link CloudVolume.setMeshSource}; until then it reads as empty. */
+export type CloudVolumeShape = 'noise' | 'box' | 'blob' | 'mesh';
 
 export interface CloudVolumeOptions {
   /** Box size in metres (x, y, z). Default 600 x 200 x 600. */
@@ -70,7 +74,7 @@ export interface CloudVolumeOptions {
   sunToleranceDeg?: number;
 }
 
-const SHAPE_ID: Record<CloudVolumeShape, number> = { noise: 0, box: 1, blob: 2 };
+const SHAPE_ID: Record<CloudVolumeShape, number> = { noise: 0, box: 1, blob: 2, mesh: 3 };
 
 function makeAtlasTarget(layout: CloudVolumeAtlasLayout, type: typeof HalfFloatType | typeof UnsignedByteType): RenderTarget {
   return new RenderTarget(layout.width, layout.height, {
@@ -113,6 +117,17 @@ export class CloudVolume {
   readonly uNoiseThreshold = uniform(0.38);
   readonly uNoiseGain = uniform(3);
   readonly uNoiseSeed = uniform(0);
+  /** Mesh source (Phase 5): half-width of the surface ramp, as a share of the distance band (0..0.5); needs {@link invalidateDensity}. */
+  readonly uMeshSoftness = uniform(0.2);
+  /** Mesh source: how far noise eats into the edge (0 = a smooth solid, 1 = ragged); needs {@link invalidateDensity}. */
+  readonly uMeshErosion = uniform(0.6);
+  /** Noise-space units per second that the noise slides by (0 = still); see {@link advanceNoise}. */
+  noiseDriftPerSecond = 0;
+  /** Seconds between animated-noise rebakes. A smaller step each rebake looks smoother; a longer one costs less. Default 0.5. */
+  noiseRefreshSeconds = 0.5;
+  private driftClock = 0;
+  /** The mesh source's distance field, in the density atlas layout. */
+  readonly meshTexture: DataTexture;
   /** Steps of the full-resolution march; read live, so changing it needs no rebuild. */
   readonly uMarchSteps = uniform(64, 'int');
   /** Target march step in density texels; the march takes fewer steps than `uMarchSteps` when a ray is short. */
@@ -179,6 +194,12 @@ export class CloudVolume {
     this.lightTarget = makeAtlasTarget(this.lightLayout, HalfFloatType);
     this.uShape.value = SHAPE_ID[this.shape];
     this.uSize.value.copy(this.size);
+    // Starts as "all outside" (byte 255) so a mesh volume with no mesh yet is empty.
+    this.meshTexture = new DataTexture(new Uint8Array(this.densityLayout.width * this.densityLayout.height * 4).fill(255), this.densityLayout.width, this.densityLayout.height, RGBAFormat, UnsignedByteType);
+    this.meshTexture.minFilter = LinearFilter;
+    this.meshTexture.magFilter = LinearFilter;
+    this.meshTexture.generateMipmaps = false;
+    this.meshTexture.needsUpdate = true;
 
     this.densityMaterial = new NodeMaterial();
     this.densityMaterial.fragmentNode = this.buildDensityNode();
@@ -204,6 +225,37 @@ export class CloudVolume {
     if (shape === this.shape) return;
     this.shape = shape;
     this.uShape.value = SHAPE_ID[shape];
+    this.invalidateDensity();
+  }
+
+  /**
+   * Plan 051 Phase 5: makes the cloud the shape of a closed mesh. The mesh is scaled to fit the box, turned into a
+   * band-limited distance field on the CPU (once, here), and the density bake ramps it into cloud with noise eroding the
+   * edge. Call again to swap the mesh; tune `uMeshSoftness` / `uMeshErosion` afterwards with {@link invalidateDensity}.
+   */
+  setMeshSource(geometry: BufferGeometry, options: MeshSdfOptions = {}): void {
+    const position = geometry.getAttribute('position');
+    const { data } = bakeMeshSdf(position.array, geometry.getIndex()?.array ?? null, this.densityLayout.size, [this.size.x, this.size.y, this.size.z], options);
+    (this.meshTexture.image.data as Uint8Array).set(data);
+    this.meshTexture.needsUpdate = true;
+    this.shape = 'mesh';
+    this.uShape.value = SHAPE_ID.mesh;
+    this.invalidateDensity();
+  }
+
+  /**
+   * Plan 051 Phase 5, animated noise: advances the noise offset by `noiseDriftPerSecond` and rebakes the density (and so
+   * the light) about every `noiseRefreshSeconds`, never while a bake is still in flight. Call once per frame with the frame
+   * time. Nothing happens at drift 0. It costs one density and one light bake per refresh, spread over frames by the
+   * bake scheduler, so a slow drift and a longer refresh are cheaper. Noise and mesh volumes only (a mesh's edge erosion
+   * is what moves).
+   */
+  advanceNoise(deltaSeconds: number): void {
+    if (this.noiseDriftPerSecond === 0 || (this.shape !== 'noise' && this.shape !== 'mesh')) return;
+    this.driftClock += deltaSeconds;
+    if (this.driftClock < this.noiseRefreshSeconds || this.job || this.densityDirty) return;
+    this.uNoiseSeed.value += this.noiseDriftPerSecond * this.driftClock;
+    this.driftClock = 0;
     this.invalidateDensity();
   }
 
@@ -275,6 +327,7 @@ export class CloudVolume {
   dispose(): void {
     this.densityTarget.dispose();
     this.lightTarget.dispose();
+    this.meshTexture.dispose();
     this.densityMaterial.dispose();
     this.lightMaterial.dispose();
     this.marchMaterial.dispose();
@@ -339,7 +392,15 @@ export class CloudVolume {
           .negate()
           .div(2 * CLOUD_BLOB_SIGMA * CLOUD_BLOB_SIGMA),
       );
-      return select(this.uShape.lessThan(0.5), noiseDensity, select(this.uShape.lessThan(1.5), float(1), blob));
+      // Mesh: 1 inside the surface, a smooth ramp across it, then noise eats the ramp so the edge reads as cloud.
+      const sdf = this.densityLayout.sample(this.meshTexture, p);
+      const solid = float(1).sub(smoothstep(float(0.5).sub(this.uMeshSoftness), float(0.5).add(this.uMeshSoftness), sdf));
+      const meshDensity = clamp(solid.sub(float(1).sub(noise).mul(this.uMeshErosion)).div(max(float(1).sub(this.uMeshErosion), 0.05)), 0, 1);
+      return select(
+        this.uShape.lessThan(0.5),
+        noiseDensity,
+        select(this.uShape.lessThan(1.5), float(1), select(this.uShape.lessThan(2.5), blob, meshDensity)),
+      );
     };
     const [a, b, c, d] = [0, 1, 2, 3].map((k) => density(this.texelPosition(this.densityLayout, k)));
     return vec4(a, b, c, d);

@@ -136,7 +136,7 @@ const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so 
           [value]="morph()" (input)="setMorph(+$any($event.target).value)" />
         <p class="note">Visual only (the engine's bend morph in the vertex stage). The sphere casts and receives no shadow
           while morph &gt; 0. The flat map faces the poses (centred on longitude 0) and passes through the planet
-          centre; the camera does not follow the morph.</p>
+          centre; the camera rides along over the same ground.</p>
 
         <p class="label">Features</p>
         @for (feature of features; track feature.id) {
@@ -411,6 +411,8 @@ export class PlanetShapeLabPageComponent {
     this.morph.set(morph);
     this.sphere.setMorph(morph);
     this.applyFeatures();
+    // The camera rides the morph over the same ground (see `resolveCameraView`).
+    this.resolvePose();
   }
 
   setBodyDrawn(drawn: boolean): void {
@@ -437,10 +439,10 @@ export class PlanetShapeLabPageComponent {
   private resolvePose(): void {
     if (this.freeCamera()) {
       this.freeView = zoomCameraView(this.freeView, 0, this.bodyId());
-      this.pose = resolveCameraView(this.freeView, this.bodyId(), 'free');
+      this.pose = resolveCameraView(this.freeView, this.bodyId(), 'free', this.morph());
       this.freeAltitudeLabel.set(formatAltitude(this.pose.altitudeM));
     } else {
-      this.pose = resolveCameraPose(this.poseId(), this.bodyId());
+      this.pose = resolveCameraPose(this.poseId(), this.bodyId(), this.morph());
     }
     this.sphere.setCameraBodyPosition(...this.pose.position);
     this.upVector.set(...this.pose.up);

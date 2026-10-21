@@ -89,7 +89,8 @@ export const PLANET_SHAPE_TEST_HISTORY: readonly TestSuite<PlanetShapeTestSettin
     expectedGpuVendor: 'nvidia',
     // No baseline yet: record one from the owner's first quiet standard run with `npm run test:baseline`. Morph 0 is the
     // control: the same sphere as the baseline suite, now through the engine's morph graph. Shadows stay off (the sphere
-    // does not cast while morphed), so the cases differ only in the vertex stage.
+    // does not cast while morphed), so the cases differ only in the vertex stage. The pose rides the morph
+    // (`resolveCameraView`), so the ground cases stay 2 m over the surface at every morph.
     scenarios: MORPH_VALUES.flatMap((morph) => POSES.map((pose) =>
       budgeted(`morph-${Math.round(morph * 100).toString().padStart(3, '0')}-${pose}-600km`,
         `Plain sphere, morph ${morph}, ${pose}, 600 km`, { bodyId: '600km', poseId: pose, morph }))),

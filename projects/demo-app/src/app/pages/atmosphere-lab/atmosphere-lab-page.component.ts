@@ -12,7 +12,7 @@ import {
   type PhysicalAtmosphereProfile,
 } from 'triangular-engine/atmosphere';
 import { TestRunnerComponent, type TestProgress, type TestSetting } from 'triangular-engine/testing';
-import { GpuTimer } from '../cloud-volumes-lab/gpu-timer';
+import { adapterLabel, describeGpuAdapter, type GpuAdapterRendererLike } from '../planet-shape-lab/gpu-adapter-info';
 import {
   createAtmosphereLabTestAdapter,
   type AtmosphereLabSnapshot,
@@ -90,6 +90,7 @@ const VIEWS: readonly ViewPreset[] = [
   imports: [EngineModule, RouterLink, TestRunnerComponent],
   providers: EngineService.provide({
     showFPS: true,
+    gpuTiming: true,
     preferredRenderer: 'webgpu',
     webGpuRendererParameters: {
       forceWebGL: BACKEND === 'webgl2',
@@ -345,7 +346,8 @@ export class AtmosphereLabPageComponent {
   /** Air height / planet radius; undefined keeps the preset's natural height. Slider is log: 0.002 .. 1. */
   readonly thickness = signal<number | undefined>(undefined);
   readonly heightSlider = signal(0.5);
-  readonly gpuMs = signal('n/a');
+  /** The engine's `gpuTiming` owns the timestamp readback; the FPS overlay shows the GPU time. */
+  readonly gpuMs = signal('in the FPS overlay');
   readonly tableRenders = signal(0);
 
   private radiusM = 6_371_000;
@@ -355,7 +357,6 @@ export class AtmosphereLabPageComponent {
   private readonly skyView: AtmosphereSkyViewLut;
   private readonly bentLab: BentPlanetLab;
   private sweepDirection = 1;
-  private readonly gpuTimer = new GpuTimer(5);
   private readonly forward = new Vector3();
   private pendingRebakes = 0;
 
@@ -538,7 +539,7 @@ export class AtmosphereLabPageComponent {
     this.backdrop.spaceLowResEnabled.value = on ? 1 : 0;
   }
 
-  /** Refreshes the sky-view table (outside any render pass) and, every 5 frames, reads the GPU timestamp. */
+  /** Refreshes the sky-view table (outside any render pass). */
   private updateSkyViewAndTimings(): void {
     const renderer: any = this.engine.renderer;
     if (!renderer?.initialized) return;
@@ -548,11 +549,6 @@ export class AtmosphereLabPageComponent {
       const size = this.backdrop.spaceSize;
       this.spaceLabel.set(size.x > 0 && this.altitudeM >= this.model.uTopAltitude.value ? `${size.x} x ${size.y}` : 'not in use inside the air');
     }
-    // One reader of the timestamp queries: a second concurrent reader (the test adapter) would steal samples.
-    this.gpuTimer.tick(renderer, () => {
-      const value = this.gpuTimer.render.last;
-      this.gpuMs.set(value !== undefined ? value.toFixed(2) + ' ms' : 'n/a (no timestamp query)');
-    });
   }
 
   toggleChecker(): void {
@@ -573,7 +569,6 @@ export class AtmosphereLabPageComponent {
     this.bentOn.set(on);
     this.backdrop.mesh.visible = !on;
     this.bentLab.setVisible(on);
-    this.gpuMs.set('n/a');
     if (!on) {
       this.sweep.set(false);
       const camera = this.engine.camera;
@@ -722,10 +717,6 @@ export class AtmosphereLabPageComponent {
       const subscription = this.engine.renderComplete$.subscribe((event) => callback(event.renderedAt));
       return () => subscription.unsubscribe();
     },
-    observeGpu: (callback) => {
-      this.gpuTimer.reset();
-      return this.gpuTimer.observeRender(callback);
-    },
     gpuTimestampsSupported: () => typeof (this.engine.renderer as any)?.resolveTimestampsAsync === 'function',
     isSampling: () => this.engine.fpsController.frameSampler.isActive,
     startSampling: () => this.engine.fpsController.frameSampler.start(),
@@ -789,7 +780,7 @@ export class AtmosphereLabPageComponent {
   }
 
   private applyTestSettings(settings: AtmosphereLabTestSettings): void {
-    this.applyLabState({ ...settings, bentOn: true, morph: settings.morphKeys[0] });
+    this.applyLabState({ ...settings, morph: settings.morphKeys[0] });
     this.testMorph = settings.morphKeys[0];
   }
 
@@ -832,26 +823,19 @@ export class AtmosphereLabPageComponent {
 
   /** Backend and device facts for the result; unknown values are labelled, not guessed. */
   private testEnvironment(): Record<string, TestSetting> {
-    const renderer = this.engine.renderer as any;
-    let gpu = 'unknown';
-    try {
-      const info = renderer.backend?.adapter?.info ?? renderer.backend?.device?.adapterInfo;
-      const text = [info?.vendor, info?.architecture, info?.device, info?.description].filter(Boolean).join(' ');
-      if (text) gpu = text;
-      else {
-        const gl = renderer.getContext?.();
-        const ext = gl?.getExtension?.('WEBGL_debug_renderer_info');
-        if (gl && ext) gpu = String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL));
-      }
-    } catch { /* leave unknown */ }
+    const renderer = this.engine.renderer as unknown as GpuAdapterRendererLike;
+    const info = describeGpuAdapter(renderer, globalThis.devicePixelRatio ?? 1);
     return {
       page: 'atmosphere-lab',
-      renderer: renderer?.constructor?.name ?? 'unknown',
+      renderer: (renderer as object | undefined)?.constructor?.name ?? 'unknown',
       requestedBackend: BACKEND,
-      gpuRenderer: gpu,
-      softwareRenderer: gpu === 'unknown' ? null : /swiftshader|llvmpipe|software|basic render/i.test(gpu),
-      gpuTimingSource: this.testHost.gpuTimestampsSupported() ? 'renderer timestamp query (render)' : 'none: no timestamp query on this backend',
-      canvas: `${renderer?.domElement?.width ?? 0}x${renderer?.domElement?.height ?? 0}`,
+      ...info,
+      gpuRenderer: adapterLabel(info),
+      softwareRenderer: info['gpu.software'] ?? null,
+      'gpu.powerPreference': 'high-performance (engine default)',
+      gpuTimingSource: this.testHost.gpuTimestampsSupported()
+        ? 'engine gpuTiming: WebGPU timestamps per render pass (FrameSampler gpuPasses)'
+        : 'none: no timestamp query on this backend',
       hardwareConcurrency: navigator.hardwareConcurrency ?? null,
     };
   }

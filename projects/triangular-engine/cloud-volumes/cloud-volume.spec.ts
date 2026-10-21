@@ -1,4 +1,4 @@
-import { DataUtils, Vector3 } from 'three';
+import { DataUtils, IcosahedronGeometry, Vector3 } from 'three';
 import { referenceOpticalDepth, type CloudAnalyticShape } from './cloud-volume-reference';
 import { CloudVolume } from './cloud-volume';
 import { CloudVolumeBakeScheduler } from './cloud-volume-bake-scheduler';
@@ -102,6 +102,42 @@ describe('CloudVolume bakes (WebGL2 backend)', () => {
     expect(min).toBe(0);
     expect(max).toBeGreaterThan(0.3);
     expect(max).toBeLessThanOrEqual(1.001);
+    volume.dispose();
+  });
+
+  it('a mesh source bakes to solid inside, empty outside and a soft edge between', async () => {
+    const renderer = await getCloudTestRenderer();
+    const volume = new CloudVolume({ size: new Vector3(100, 100, 100), densitySize: 32 });
+    volume.uMeshErosion.value = 0;
+    volume.setMeshSource(new IcosahedronGeometry(1, 3), { padding: 0.2 });
+    volume.update(renderer);
+    const read = await readAtlas(renderer, volume, 'density');
+    expect(read(16, 16, 16)).toBeGreaterThan(0.99);
+    expect(read(0, 0, 0)).toBeLessThan(0.01);
+    // Radius is 30 m on a 3.125 m texel grid: texel 25 sits about 1 m past the surface along x, 26 about 4 m past.
+    expect(read(26, 16, 16)).toBeLessThan(0.5);
+    expect(read(8, 16, 16)).toBeGreaterThan(0.99);
+    volume.dispose();
+  });
+
+  it('animated noise rebakes the density after the refresh time, never mid-bake, and not at drift 0', async () => {
+    const renderer = await getCloudTestRenderer();
+    const volume = new CloudVolume({ size, shape: 'noise', densitySize: 16 });
+    volume.update(renderer);
+    volume.advanceNoise(10);
+    volume.update(renderer);
+    expect(volume.densityBakes).toBe(1);
+
+    volume.noiseDriftPerSecond = 2;
+    volume.noiseRefreshSeconds = 0.5;
+    volume.advanceNoise(0.2);
+    expect(volume.uNoiseSeed.value).toBe(0);
+    volume.advanceNoise(0.4);
+    expect(volume.uNoiseSeed.value).toBeCloseTo(1.2, 5);
+    volume.advanceNoise(5);
+    expect(volume.uNoiseSeed.value).toBeCloseTo(1.2, 5);
+    volume.update(renderer);
+    expect(volume.densityBakes).toBe(2);
     volume.dispose();
   });
 

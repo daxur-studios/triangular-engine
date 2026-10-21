@@ -417,6 +417,12 @@ export function planetMorphGraph(
   // of it are not affected by `positionNode` replacing `positionLocal`.
   const vBodyFixedLocal: any = varying(aSpherePos.add(batchOffset), 'vBodyFixedLocal');
   const vMorphedBatched: any = varying(morphedLocal.add(batchOffset), 'vMorphedBatched');
+  // The morphed normal reads `dir` and `bodyShift`, which come from `batchOffset`. Left as an expression it would be
+  // rebuilt in the fragment stage by `normalNode`, where `positionLocal` is the varying of whatever `positionNode`
+  // produced (the morph displacement, or a camera-relative position), so the projection would follow that.
+  // Evaluate it in the vertex stage. Skipped under `lightingTurn`, which shades with the sphere normal and
+  // must not spend an inter-stage slot (16 max) on a normal it never reads.
+  const vMorphedNormal: any = options.lightingTurn ? null : varying(morphedNormal, 'vMorphedNormal');
 
   // GLSL: `vProjMode > 0.5 && vMorph > 0.001 && (vSeamCull > 0.5 || fwidth(vProjLon) > 2.8)`.
   // WGSL only allows derivatives in uniform control flow, so `fwidth` is evaluated once, outside any branch.
@@ -442,7 +448,7 @@ export function planetMorphGraph(
   return {
     positionNode: batchOffset.add(morphedLocal),
     normalNode: transformNormalToView(
-      options.lightingTurn ? normalize((options.lightingTurn as any).mul(aSphereNorm)) : morphedNormal,
+      options.lightingTurn ? normalize((options.lightingTurn as any).mul(aSphereNorm)) : normalize(vMorphedNormal),
     ),
     sphereNormal: vSphereNorm,
     radialDirection: normalize(bodyDirFrag),

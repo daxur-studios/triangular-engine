@@ -13,7 +13,9 @@ import {
   Scene,
 } from 'three';
 import { getEvalRenderer } from './gpu-eval.testing';
+import { vec3 } from 'three/tsl';
 import { PlanetSurfaceMaterial } from './planet-surface-material';
+import { renderRgba } from './render-eval.testing';
 
 /**
  * End-to-end check of stage 1 on a real GPU backend: the vertex attributes, the shader-side
@@ -130,7 +132,7 @@ describe('planetMorphGraph on the GPU', () => {
    * A streamed patch the way `TerrainSurfaceComponent` draws it: positions relative to the patch centre,
    * instance matrix `centre - anchor`, and the anchor in the batch's own position.
    */
-  function streamedPatch(anchor: [number, number, number]): BatchedMesh {
+  function streamedPatch(anchor: [number, number, number], material = dynamicMaterial()): BatchedMesh {
     const corners: [number, number][] = [[-0.3, 0.7], [0.3, 0.7], [0, 1.0]];
     const dirs = corners.map(([lon, lat]) => dirAt(lon, lat));
     const centre = dirs[0].map((_, axis) => (dirs[0][axis] + dirs[1][axis] + dirs[2][axis]) / 3);
@@ -146,7 +148,7 @@ describe('planetMorphGraph on the GPU', () => {
       attribute((k) => [corners[k][0] - centre[0], corners[k][1] - centre[1], -centre[2]]),
     );
     geometry.setAttribute('aFlatNorm', attribute(() => [0, 0, 1]));
-    const batch = new BatchedMesh(1, 3, 3, dynamicMaterial());
+    const batch = new BatchedMesh(1, 3, 3, material);
     batch.frustumCulled = false;
     batch.position.set(...anchor);
     const id = batch.addInstance(batch.addGeometry(geometry));
@@ -170,5 +172,53 @@ describe('planetMorphGraph on the GPU', () => {
     material.needsUpdate = true;
     const alpha = await alphaOf(material, [seamTriangle()]);
     expect(alpha(...seamSpanPixel)).toBeGreaterThan(0.5);
+  });
+
+  describe('morphed normal in the fragment stage', () => {
+    // A mid-morph, dynamically projected patch, lit by a directional light so the colour follows the shading normal.
+    const view = { left: -Math.PI, right: Math.PI, top: Math.PI / 2, bottom: -Math.PI / 2 };
+    const light: [number, number, number] = [1, 0.6, 1];
+
+    function litMaterial(): PlanetSurfaceMaterial {
+      const material = dynamicMaterial();
+      material.morph.uMorph.value = 0.5;
+      return material;
+    }
+
+    const render = async (mesh: Mesh) => {
+      const read = await renderRgba([mesh], view, { width: W, height: H }, { light });
+      const pixels: [number, number, number, number][] = [];
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) pixels.push(read(x, y));
+      return pixels;
+    };
+
+    function expectSamePicture(
+      reference: [number, number, number, number][],
+      actual: [number, number, number, number][],
+    ): void {
+      expect(reference.filter((p) => p[3] > 0.5).length).withContext('pixels covered').toBeGreaterThan(20);
+      let worst = 0;
+      reference.forEach((p, i) => {
+        if (p[3] <= 0.5) return;
+        expect(actual[i][3]).withContext(`coverage at ${i}`).toBeGreaterThan(0.5);
+        for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(p[c] - actual[i][c]));
+      });
+      expect(worst).withContext('largest channel difference').toBeLessThan(0.02);
+    }
+
+    it('is unchanged when the material offsets the position (a camera-relative positionNode)', async () => {
+      const patch = () => triangleGeometry([[-0.3, 0.2], [0.5, 0.2], [0.1, 0.9]], false);
+      const reference = await render(new Mesh(patch(), litMaterial()));
+      const shifted = litMaterial();
+      // Moves the vertex along the view axis only, so the picture changes only through what the graph reads from `positionLocal`.
+      shifted.positionNode = shifted.morphGraph.positionNode.add(vec3(0, 0, -2));
+      expectSamePicture(reference, await render(new Mesh(patch(), shifted)));
+    });
+
+    it('matches for a batched streamed patch and the same patch drawn unbatched (the terrain path)', async () => {
+      const unbatched = triangleGeometry([[-0.3, 0.7], [0.3, 0.7], [0, 1.0]], false);
+      const reference = await render(new Mesh(unbatched, litMaterial()));
+      expectSamePicture(reference, await render(streamedPatch([0.4, -0.3, 2.5], litMaterial())));
+    });
   });
 });

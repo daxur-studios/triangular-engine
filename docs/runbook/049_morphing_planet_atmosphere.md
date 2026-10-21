@@ -11,7 +11,10 @@ performance:
     status: runnable-functional-review-pending
   - id: bent-atmosphere-cost-v1
     url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
-    status: runnable-diagnostic-hardware-unmeasured
+    status: superseded-by-v2
+  - id: bent-atmosphere-cost-v2
+    url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-cost&testVersion=2&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1
+    status: measured-rtx3080-no-baseline
 ---
 
 # Runbook 049: Morphing Planet Atmosphere
@@ -779,3 +782,62 @@ machine and saved automatically under `artifacts/test-runs/` (gitignored). Read 
 
 Not done: the owner's by-eye acceptance, comparison against Phase 3a, any baseline.
 Nothing committed.
+
+## 2026-10-21 — Re-measured on the RTX 3080 (per-pass GPU timing, cost suite v2)
+
+**Every earlier timing in this runbook was taken on the AMD GCN5 iGPU.** That includes the Phase 3a follow-up tables and the 2026-10-18
+`bent-atmosphere-cost@v1` runs. On this hybrid laptop Chrome picked the iGPU until it was set to High performance in Windows.
+Treat those numbers as iGPU numbers, not as the target hardware. The built-in browser pane still reports `amd / gcn-5`, so it
+is not usable for timing either.
+
+### Tooling change
+- The lab now uses the engine's `gpuTiming: true`. The engine owns `resolveTimestampsAsync`, and `FrameSampler.stop()`
+  returns per-pass `gpuPasses`. The page's `GpuTimer` read-out is gone, because a second timestamp reader would steal samples. The FPS overlay shows
+  GPU time instead.
+- The page reports its adapter (`describeGpuAdapter`) in the run's environment. So every result says which GPU it ran on.
+- New suite `bent-atmosphere-cost` **v2** (v1 is kept unchanged), `expectedGpuVendor: 'nvidia'`, so a run on any other
+  vendor is inconclusive. It covers four views (space 3 R, low orbit, 25 km up, 2 m up). In each view it runs the plain globe (`bentOn: false`), the bent
+  table path ("auto") at morph 0 / 0.5 / 1, and "march every pixel" at the same morphs (not at 2 m). That makes 25 scenarios, 3 s each.
+- Metrics: `gpuScenePass` (sky backdrop + grid mesh), `gpuFullscreenPasses` (the masked edge pass), `gpuOutputPass`,
+  `gpuPassTotal`, all optional; frame interval is still required. There is a "GPU timer self-test" check.
+- Fix found by the first v2 run: `stateMismatches` always demanded the bent planet on, so every `plain-*` case failed to
+  settle. It now compares against the scenario's `bentOn`.
+
+### Run
+`bent-atmosphere-cost@v2`, 2026-10-20 23:32 UTC, `visible-browser`, standard mode, 1 repetition, owner's Chrome. Automated
+`pass`, 25/25 valid, performance `unassessed` (no baseline yet).
+- Adapter recorded: `nvidia / ampere / 0x249c / NVIDIA GeForce RTX 3080 Laptop GPU`. Timestamp step 1024 ns (the WebGPU
+  developer-features flag is on).
+- Canvas 2538 x 1308 (DPR 1.5). That is 1.6x the pixels of the 1896 x 1080 AMD tables.
+- Warnings: `gpu-busy-before-start` and `gpu-throttled`. nvidia-smi saw a median GPU load of 100% at 71 C, and throttle reasons
+  were set in 4 of 25 cases. Treat single tenths of a millisecond as noise until a second run on a cool GPU agrees.
+- Frame interval is about 6.1 ms in every case except the 25 km march. That is the display cap (about 165 Hz), not a cost.
+
+GPU pass total, median ms (scene pass + masked pass + output pass; the output pass is a constant 0.04-0.05):
+
+| view | plain | bent, auto m 0 / 0.5 / 1 | of which masked pass | bent, march every pixel m 0 / 0.5 / 1 |
+| --- | --- | --- | --- | --- |
+| Space, 3 R | 0.10 | 0.24 / 0.30 / 0.39 | 0.12 / 0.16 / 0.17 | 0.57 / 1.50 / 2.93 |
+| Low orbit | 0.13 | 0.45 / 0.46 / 0.47 | 0.23 / 0.23 / 0.27 | 3.04 / 3.16 / 3.42 |
+| 25 km up | 0.18 | 0.24 / 0.31 / 0.29 | – / 0.03 / 0.08 | 6.77 / 6.65 / 5.79 |
+| 2 m up | 0.16 | 0.18 / 0.19 / 0.15 | – | not run |
+
+p95 is within 0.03 ms of the median everywhere except the march rows.
+
+### What it says
+1. **The table path meets the budget everywhere on the RTX.** Bent auto minus the plain globe: space +0.14 / +0.20 / +0.29,
+   low orbit +0.32 / +0.33 / +0.34, 25 km +0.06 / +0.13 / +0.11, 2 m +0.02 / +0.03 / -0.01. The budget is <= 0.5 ms total. The
+   masked pass peaks at 0.27 ms (low orbit, morph 1), against its 1.0 ms budget.
+2. **Low orbit is now the most expensive view**, not space at morph 1 (that was the worst case on the AMD iGPU). The masked pass runs at
+   every morph there, including morph 0.
+3. **March every pixel stays a diagnostic.** At 25 km up it costs 5.8-6.8 ms, enough to push frame interval past the
+   display cap (median 6.8-6.9 ms). The per-ray gate is still what makes the budget.
+4. On the AMD iGPU the same auto cases cost 2.0-4.1 ms per whole frame, about 8-10x more. The measurement differs too: whole-frame
+   timestamps, over a 1.05 ms trivial-quad floor, at fewer pixels. So the ratio is a rough guide, not a like-for-like
+   comparison.
+
+### Not done
+- No second run, no baseline (performance stays `unassessed`), no run on a GPU that is cool and idle before it starts.
+- Equal Earth is not in v2. The Phase 3a table's +1 ms Equal Earth cost is an iGPU number and was not re-measured.
+- The look suite has not been re-run on NVIDIA. Its visual review is still pending.
+- Nothing committed.

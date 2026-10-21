@@ -3,7 +3,8 @@ import { BufferAttribute, BufferGeometry, Sphere, SphereGeometry, Vector3 } from
 import { MeshStandardNodeMaterial } from 'three/webgpu';
 import { attribute, color, floor, mix, mod, positionGeometry, uniform, uv, vec2 } from 'three/tsl';
 import {
-  createPlanetMorphUniforms, planetMorphGraph, setPlanetMapExtent, setPlanetProjectionCentre, type IPlanetMorphUniforms,
+  createPlanetMorphLightingUniforms, createPlanetMorphUniforms, planetMorphGraph, setPlanetMapExtent, setPlanetProjectionCentre,
+  type IPlanetMorphUniforms,
 } from 'triangular-engine/planet-material';
 
 /**
@@ -72,7 +73,11 @@ export function createPlainSphereMaterial(): PlainSphereMaterial {
   // The engine's morph graph (default 'bend' shape, geometry position/normal are the sphere), in dynamic projection mode.
   const morph = createPlanetMorphUniforms();
   setPlanetProjectionCentre(morph, MORPH_CENTRE);
-  const graph = planetMorphGraph(morph, { sphereFromGeometry: true });
+  // Lit with the sphere normal (identity turn), not the morphed one: the morphed normal is +Z over the whole flat map,
+  // so at morph 1 the map is lit all alike and flips between lit and dark as the body spins. The sphere normal keeps
+  // the day/night terminator where it is on the globe.
+  const lighting = createPlanetMorphLightingUniforms();
+  const graph = planetMorphGraph(morph, { sphereFromGeometry: true, lightingTurn: lighting.uMorphLightingTurn });
   // `graph.positionNode - positionGeometry` is the morph displacement: exactly 0 at morph 0 (the graph returns the baked
   // sphere point), so the camera-relative split above keeps its sub-millimetre placement. It is float32 once morphed,
   // which is fine for a picture and is never used for placement or physics.

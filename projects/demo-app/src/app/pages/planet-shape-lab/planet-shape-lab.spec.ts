@@ -1,3 +1,5 @@
+import { Vector3 } from 'three';
+import { CellPlanetMorphCameraRig } from 'triangular-engine/worldgen/render';
 import { GpuPassRecorder, summarizeGpuPasses, type IGpuPassSummary } from 'triangular-engine';
 import { TestSession, buildTestLaunchUrl, parseTestLaunch, validateTestHistory, type TestSetting, type TestSuite } from 'triangular-engine/testing';
 import { adapterLabel, describeGpuAdapter } from './gpu-adapter-info';
@@ -191,6 +193,45 @@ describe('planet shape lab', () => {
       expect(shadowsActive(on, 0.01)).toBeFalse();
       expect(shadowsActive(on, 1)).toBeFalse();
       expect(shadowsActive(defaultFeatureState(), 0)).toBeFalse();
+    });
+
+    it('leaves the camera on the globe pose at morph 0', () => {
+      for (const pose of CAMERA_POSES) {
+        expect(resolveCameraPose(pose.id, '600km', 0)).toEqual(resolveCameraPose(pose.id, '600km'));
+      }
+    });
+
+    it('carries the camera onto the flat map at morph 1: same height over the same ground, facing the map', () => {
+      const round = (v: readonly number[]): number[] => v.map((c) => Math.round(c * 1e6) / 1e6 + 0);
+      const radius = 600_000;
+      // The map is the plane z = 0 through the planet centre, centred on longitude 0, so the ground pose stands 2 m above it.
+      const ground = resolveCameraPose('ground', '600km', 1);
+      expect(round(ground.position)).toEqual([0, 0, 2]);
+      expect(round(ground.forward)).toEqual([1, 0, 0]);
+      expect(round(ground.up)).toEqual([0, 0, 1]);
+      const orbit = resolveCameraPose('orbit', '600km', 1);
+      expect(orbit.position[2]).toBeCloseTo(2.5 * radius, 3);
+      expect(round(orbit.forward)).toEqual([0, 0, -1]);
+      expect(orbit.near).toBe(resolveCameraPose('orbit', '600km').near);
+    });
+
+    it('keeps height, pitch and heading over the anchored ground at every morph, off the map centre too', () => {
+      const radius = 600_000;
+      const rig = new CellPlanetMorphCameraRig({ radiusM: radius, projection: () => 'equalEarth' });
+      const view = { lonDeg: 30, latDeg: 20, headingDeg: 40, pitchDeg: -35, altitudeM: 1_000, altitudeRadii: 0 };
+      const anchor = new Vector3(Math.cos(20 * Math.PI / 180) * Math.sin(30 * Math.PI / 180), Math.sin(20 * Math.PI / 180),
+        Math.cos(20 * Math.PI / 180) * Math.cos(30 * Math.PI / 180));
+      for (const morph of [0, 0.25, 0.5, 0.75, 1]) {
+        const pose = resolveCameraView(view, '600km', 'free', morph);
+        const frame = rig.groundFrame(anchor, morph);
+        const offset = new Vector3(...pose.position).sub(frame.position);
+        expect(offset.dot(frame.normal)).withContext(`height at ${morph}`).toBeCloseTo(1_000, 3);
+        expect(offset.length()).withContext(`straight above at ${morph}`).toBeCloseTo(1_000, 3);
+        const forward = new Vector3(...pose.forward);
+        expect(Math.asin(forward.dot(frame.normal)) * 180 / Math.PI).withContext(`pitch at ${morph}`).toBeCloseTo(-35, 6);
+        expect(Math.atan2(forward.dot(frame.east), forward.dot(frame.north)) * 180 / Math.PI).withContext(`heading at ${morph}`)
+          .toBeCloseTo(40, 6);
+      }
     });
 
     it('defaults to 0 and is compared like any other setting', () => {

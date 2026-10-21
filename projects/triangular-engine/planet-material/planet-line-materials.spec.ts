@@ -46,6 +46,12 @@ describe('planetBorderMaterial on the GPU', () => {
   const draw = async (morph: number, corners: [number, number][], other: [number, number], onSphere = false) => {
     const { material } = planetBorderMaterial(dynamicUniforms(morph), { opacity: 0.6, ribbonWidth: 0.01 });
     const read = await renderRgba([meshOf(ribbon(corners, other, onSphere), material)], VIEW);
+    // The bent morph shifts a sphere-space triangle by a few pixels, so look for the ribbon instead of one pixel.
+    if (onSphere) {
+      let peak = 0;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) peak = Math.max(peak, read(x, y)[3]);
+      return peak;
+    }
     const points = onSphere ? corners.map(([lon, lat]) => dirAt(lon, lat)) : corners.map(([lon, lat]) => [lon, lat]);
     const cx = points.reduce((s, c) => s + c[0], 0) / 3;
     const cy = points.reduce((s, c) => s + c[1], 0) / 3;
