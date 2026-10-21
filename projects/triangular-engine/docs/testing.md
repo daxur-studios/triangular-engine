@@ -439,20 +439,25 @@ Inside this repository use `npm run test:run -- …`. In order, it:
    `<ms>-<pid>.json`, holding the suite, version, repo and URL. The oldest ticket whose pid is alive runs, so launchers
    from any app on the machine take turns. Dead tickets are removed by whoever looks, so a crashed launcher never
    blocks the queue. The ticket is removed on exit.
-3. **Waits for a quiet machine.** Over `--quiet-window-s` (10 s) the median GPU load must be at most `--quiet-pct`
+3. **Waits for the owner to be away.** If the OS temp folder holds `triangular-test-away.json`
+   (`{ "away": true, "setAt": "<iso>", "expiresAt": <ms> }`, written by a local dashboard's "I'm away" switch), the run
+   holds the head of the queue until `away` is true and `expiresAt` has not passed, checking every 30 s, and gives up
+   after `--away-wait-min` (480 min). An unreadable file counts as not away. Without the file there is no switch and
+   this step is skipped: then only start runs when the owner has said the machine is free.
+4. **Waits for a quiet machine.** Over `--quiet-window-s` (10 s) the median GPU load must be at most `--quiet-pct`
    (10 %), and no process may be on the GPU except browsers and the Windows compositor (`dwm.exe`, which `nvidia-smi`
    lists as `[Insufficient Permissions]`). A game or another heavy app holds the run back. It checks again every 30 s
    and gives up after `--quiet-wait-min` (120 min). Without `nvidia-smi` it skips this check and says so.
-4. **Opens a dedicated Chrome.** It uses a throwaway profile in the OS temp folder, full screen, with
+5. **Opens a dedicated Chrome.** It uses a throwaway profile in the OS temp folder, full screen, with
    `--enable-webgpu-developer-features`: a fresh profile does not carry `chrome://flags`, and without that flag GPU
    timestamps are rounded and the timer self-test fails. The URL is the suite's autostart link (see "Launch links").
    On a hybrid-GPU laptop, `chrome.exe` uses the GPU set for it in the Windows graphics settings.
-5. **Waits for the result.** It finishes when `index.jsonl` gains this suite and version with a `startedAt` after
-   the launch, when `--timeout-min` (30) passes, or when that Chrome closes.
-6. **Cleans up.** It closes that Chrome (unless `--keep-open`), deletes the profile and prints
+6. **Waits for the result.** It finishes when `index.jsonl` gains this suite, version, profile and mode with a
+   `startedAt` after the launch (so a quick run started by hand meanwhile is not taken for it), when `--timeout-min` (30) passes, or when that Chrome closes.
+7. **Cleans up.** It closes that Chrome (unless `--keep-open`), deletes the profile and prints
    `triangular-test-summary --suite <id> --last 1`.
 
-Exit codes: 0 saved and passed, 1 saved but not passed, 2 no result (timeout or Chrome closed), 3 never quiet,
+Exit codes: 0 saved and passed, 1 saved but not passed, 2 no result (timeout or Chrome closed), 3 never away or never quiet,
 4 setup error. Other options: `--profile`, `--mode`, `--repetitions`, `--no-thumbnails`, `--chrome <path>`.
 
 For agents: start it in the background and wait for the process to exit. Do not poll. One launcher per run; queue

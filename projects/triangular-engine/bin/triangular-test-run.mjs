@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// Runs one browser test suite unattended: waits its turn in a machine-wide queue, waits for a quiet GPU, opens a
+// Runs one browser test suite unattended: waits its turn in a machine-wide queue, waits for the owner to be away (if the
+// machine has an away switch) and for a quiet GPU, opens a
 // dedicated full-screen Chrome at the suite's autostart URL, waits for the receiver to save the result, closes that
 // Chrome and prints the summary. Dev only, local only. Made for agents: start it in the background and wait for exit.
 //   triangular-test-run --url http://my-app.localhost:4200/lab --suite my-suite --version 1 [options]
-// Exit codes: 0 saved and passed, 1 saved but not passed, 2 no result in time (or Chrome closed), 3 the GPU never got
-// quiet, 4 setup error (no receiver, no Chrome, bad arguments).
+// Exit codes: 0 saved and passed, 1 saved but not passed, 2 no result in time (or Chrome closed), 3 the owner never went
+// away or the GPU never got quiet, 4 setup error (no receiver, no Chrome, bad arguments).
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
@@ -24,7 +25,7 @@ const MODES = ['quick', 'standard', 'soak'];
 const PROFILES = ['visible-browser', 'human-observed', 'headless-hardware'];
 const DEFAULTS = {
   version: undefined, profile: 'visible-browser', mode: 'standard', repetitions: 1, thumbnails: true, timeoutMin: 30,
-  quietPct: 10, quietWindowS: 10, quietWaitMin: 120, chrome: undefined, keepOpen: false,
+  quietPct: 10, quietWindowS: 10, quietWaitMin: 120, awayWaitMin: 480, chrome: undefined, keepOpen: false,
 };
 /** Browsers are skipped when judging quiet (the user's own Chrome idles on the GPU); their load still counts. */
 const BROWSER_PROCESS = /^(chrome|msedge|firefox|opera|brave|vivaldi)(\.exe)?$/i;
@@ -32,8 +33,8 @@ const BROWSER_PROCESS = /^(chrome|msedge|firefox|opera|brave|vivaldi)(\.exe)?$/i
 export function parseArgs(argv) {
   const out = { ...DEFAULTS };
   const flags = { '--url': 'url', '--suite': 'suite', '--version': 'version', '--profile': 'profile', '--mode': 'mode', '--repetitions': 'repetitions',
-    '--timeout-min': 'timeoutMin', '--quiet-pct': 'quietPct', '--quiet-window-s': 'quietWindowS', '--quiet-wait-min': 'quietWaitMin', '--chrome': 'chrome' };
-  const numbers = new Set(['version', 'repetitions', 'timeoutMin', 'quietPct', 'quietWindowS', 'quietWaitMin']);
+    '--timeout-min': 'timeoutMin', '--quiet-pct': 'quietPct', '--quiet-window-s': 'quietWindowS', '--quiet-wait-min': 'quietWaitMin', '--away-wait-min': 'awayWaitMin', '--chrome': 'chrome' };
+  const numbers = new Set(['version', 'repetitions', 'timeoutMin', 'quietPct', 'quietWindowS', 'quietWaitMin', 'awayWaitMin']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--no-thumbnails') { out.thumbnails = false; continue; }
@@ -47,7 +48,7 @@ export function parseArgs(argv) {
   if (!Number.isInteger(out.version) || out.version < 1) throw new Error('--version must be a whole number from 1');
   if (!MODES.includes(out.mode) || !PROFILES.includes(out.profile)) throw new Error(`--mode is one of ${MODES.join('|')}, --profile one of ${PROFILES.join('|')}`);
   if (!Number.isInteger(out.repetitions) || out.repetitions < 1 || out.repetitions > 5) throw new Error('--repetitions is 1-5');
-  for (const key of ['timeoutMin', 'quietPct', 'quietWindowS', 'quietWaitMin']) if (!(out[key] >= 0)) throw new Error(`--${key} must be a number >= 0`);
+  for (const key of ['timeoutMin', 'quietPct', 'quietWindowS', 'quietWaitMin', 'awayWaitMin']) if (!(out[key] >= 0)) throw new Error(`--${key} must be a number >= 0`);
   new URL(out.url);
   return out;
 }
@@ -103,6 +104,26 @@ export function createRunQueue({ dir = join(tmpdir(), QUEUE_DIR), now = Date.now
   };
 }
 
+/** The owner's "I'm away" switch, written by a local dashboard: `{ away, setAt, expiresAt (ms) }` in the OS temp folder. */
+export const AWAY_FILE = 'triangular-test-away.json';
+
+/**
+ * May a run take over the screen? No switch file means the machine does not use one: yes. Otherwise only while the
+ * switch is on and not expired; an unreadable file counts as not away, so a half-written file never starts a run.
+ */
+export function awayVerdict(text, now = Date.now()) {
+  if (text === undefined) return { ok: true, reason: 'no away switch on this machine' };
+  let state;
+  try { state = JSON.parse(text); } catch { return { ok: false, reason: 'away switch unreadable' }; }
+  if (state?.away !== true) return { ok: false, reason: 'owner not away' };
+  if (Number.isFinite(state.expiresAt) && state.expiresAt <= now) return { ok: false, reason: `away switch expired ${new Date(state.expiresAt).toISOString()}` };
+  return { ok: true, reason: `owner away${Number.isFinite(state.expiresAt) ? ` until ${new Date(state.expiresAt).toISOString()}` : ''}` };
+}
+
+function readAway(path = join(tmpdir(), AWAY_FILE)) {
+  try { return readFileSync(path, 'utf8'); } catch { return undefined; }
+}
+
 /** Quiet = median GPU load at or under `maxPct` and no non-browser, non-system process on the GPU. */
 export function quietVerdict(utils, apps, { maxPct }) {
   const values = utils.filter(Number.isFinite).sort((a, b) => a - b);
@@ -132,12 +153,17 @@ async function gpuReadings(windowS) {
   return { utils, apps };
 }
 
-/** The first saved row of this suite/version that started at or after `since` (ms). */
-export function findResult(text, { suite, version, since }) {
+/**
+ * The first saved row of this suite/version (and, when given, profile and mode) that started at or after `since` (ms).
+ * Profile and mode keep a run the owner starts by hand meanwhile (usually `quick`) from being taken for this one.
+ */
+export function findResult(text, { suite, version, since, profile, mode }) {
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let row;
     try { row = JSON.parse(line); } catch { continue; }
+    if (profile !== undefined && row.profile !== profile) continue;
+    if (mode !== undefined && row.mode !== mode) continue;
     if (row.suite === suite && row.version === version && Date.parse(row.startedAt) >= since) return row;
   }
   return undefined;
@@ -225,6 +251,16 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
     await sleep(5000);
   }
 
+  // Hold the head of the queue until the owner is away; a run never takes the screen from someone using it.
+  const awayUntil = Date.now() + options.awayWaitMin * 60_000;
+  for (let first = true; ; first = false) {
+    const verdict = awayVerdict(readAway());
+    if (verdict.ok) { log(verdict.reason); break; }
+    if (Date.now() >= awayUntil) { console.error(`[triangular-test-run] owner not away in ${options.awayWaitMin} min: ${verdict.reason}`); return 3; }
+    if (first) log(`waiting for the owner to be away: ${verdict.reason}`);
+    await sleep(30_000);
+  }
+
   const quietUntil = Date.now() + options.quietWaitMin * 60_000;
   for (let first = true; ; first = false) {
     const { utils, apps } = await gpuReadings(options.quietWindowS);
@@ -248,7 +284,7 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
   const deadline = Date.now() + options.timeoutMin * 60_000;
   while (Date.now() < deadline && !chromeGone) {
     await sleep(5000);
-    try { row = findResult(readFileSync(index, 'utf8'), { suite: options.suite, version: options.version, since }); } catch { /* no index yet */ }
+    try { row = findResult(readFileSync(index, 'utf8'), { suite: options.suite, version: options.version, since, profile: options.profile, mode: options.mode }); } catch { /* no index yet */ }
     if (row) break;
   }
   if (!options.keepOpen) {

@@ -9,18 +9,22 @@ import { percentile, round } from './triangular-test-receiver.mjs';
 const execFileAsync = promisify(execFile);
 
 /**
- * Placeholders. Phase 0 sets them from measured idle readings on the reference machine; until then a warning only
- * marks the run, it never fails it.
+ * Set from measured readings on the reference machine (RTX 3080 laptop, 165 Hz panel, 2026-10-21; plan 055 Phase 0).
+ * A warning only marks the run, it never fails it.
  */
 export const MACHINE_THRESHOLDS = {
   /**
    * Median GPU utilisation (%) in the preflight window above which the GPU counts as busy before the run. Used only when
-   * nvidia-smi listed no GPU processes: the page under test is already rendering during the preflight, so its own load
-   * is not a sign of other work.
+   * nvidia-smi listed no GPU processes. The machine with nothing open reads 0 %; the page under test, already rendering
+   * an empty frame full screen at 165 Hz during the preflight, reads 40-48 % on its own (p95 up to 48 over 11 runs).
    */
-  gpuBusyPct: 20,
-  /** GPU temperature (C) at or above which the GPU counts as hot before the run. */
-  gpuHotC: 80,
+  gpuBusyPct: 60,
+  /**
+   * GPU temperature (C) at or above which the GPU counts as hot before the run. Only near-throttle heat matters: the
+   * reference machine holds its clocks (preflights 38-52 C, timed cases peak at 48 C, no throttle bits), and real
+   * slowdown is caught by `throttleMask` anyway. Warning only; nothing waits for the GPU to cool.
+   */
+  gpuHotC: 85,
   /** `clocks_event_reasons.active` bits that mean the clocks were held down: SW power cap, HW slowdown, SW/HW thermal, power brake. */
   throttleMask: 0xecn,
 };

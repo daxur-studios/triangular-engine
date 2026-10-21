@@ -57,6 +57,27 @@ function migrateScenario(scenario: NextTestScenario, index: number): TestScenari
   };
 }
 
+/** Rounds per arm of the A/B suite: `compareAblation` needs two to measure noise; three survive one bad round. */
+const AB_ROUNDS = 3;
+
+/**
+ * Plan 055 frame budget: what the clouds add to a frame, as one fixed cost. Alternating rounds with clouds off (A) and on
+ * (B) at a still camera, 12 volumes, proxies, atmosphere lighting and haze on (the full Plan 051 feature set), sun and
+ * spin still so nothing rebakes after settling. Off still draws the rest of the lab, so B - A is the clouds alone.
+ */
+function cloudRounds(preset: string): TestScenario<CloudTestSettings>[] {
+  return Array.from({ length: AB_ROUNDS * 2 }, (_, index) => {
+    const on = index % 2 === 1;
+    const round = Math.floor(index / 2) + 1;
+    return {
+      id: `${preset}-clouds-${on ? 'on' : 'off'}-${round}`, label: `${preset}, clouds ${on ? 'on' : 'off'}, round ${round}`,
+      durationMs: 5000, warmupMs: 1500,
+      settings: { ...CLOUD_TEST_DEFAULTS, preset, volumes: 12, mode: 'proxy', clouds: on, atmosphereLighting: true, haze: true },
+      ablation: { group: preset, arm: on ? 'B' : 'A' },
+    };
+  });
+}
+
 /** Append new suites/versions at the end. Run latest resolves the final entry exactly once at launch. */
 export const CLOUD_TEST_HISTORY: readonly TestSuite<CloudTestSettings>[] = [
   {
@@ -69,5 +90,13 @@ export const CLOUD_TEST_HISTORY: readonly TestSuite<CloudTestSettings>[] = [
   {
     id: 'cloud-haze-cost', version: 1, title: NEXT_TEST.title, purpose: 'performance', requiresVisualReview: true,
     scenarios: NEXT_TEST.scenarios.map(migrateScenario),
+  },
+  {
+    id: 'cloud-cost-ab', version: 1,
+    title: 'Clouds A/B for the Plan 055 frame budget: clouds off (A) and on (B), 12 volumes, haze on, outside / inside / horizon',
+    purpose: 'performance',
+    expectedGpuVendor: 'nvidia',
+    ablation: { feature: 'clouds', metrics: ['gpuWholeRender'] },
+    scenarios: ['outside', 'inside', 'horizon'].flatMap(cloudRounds),
   },
 ];

@@ -91,14 +91,19 @@ At 160 fps the whole frame has **6.25 ms**. Proposed split, to be confirmed by P
 | Pass | Proposed budget (GPU) | Source |
 |---|---|---|
 | Terrain, including its shadow passes | **≤ 2.0 ms p95** | this plan |
-| Atmosphere (bent, during morph) | ~0.8–2.0 ms | measured in Runbook 049 (0.79 / 1.18 / 1.97 ms at morph 0 / 0.5 / 1) |
-| Clouds | ≤ 1.5 ms typical | Plan 051, G6 |
+| Atmosphere (bent, during morph) | ~0.8–2.0 ms | measured in Runbook 049 (0.79 / 1.18 / 1.97 ms at morph 0 / 0.5 / 1); **Phase 0: ≤ 0.4 ms** (below) |
+| Clouds | ≤ 1.5 ms typical | Plan 051, G6; **Phase 0: 0.10–0.37 ms** (below) |
 | Water, objects, vessels, post, UI | the rest (~1 ms) | unmeasured |
 
 Main-thread CPU for terrain: **≤ 0.5 ms p95**, with no allocations per frame in steady state. Worker time is
 budgeted separately (§Gates).
 
 This table is already tight. Phase 0 measures the fixed costs (an empty frame, atmosphere on/off, clouds on/off).
+**Measured 2026-10-21** (quiet unattended standard runs, RTX 3080, full screen 2538 × 1440, Runbook 055): empty frame
+0.05 ms; atmosphere on its default path (`auto`) adds 0.03–0.37 ms over the same view without it (worst at low orbit);
+clouds (12 volumes, haze on) add 0.10 / 0.37 / 0.17 ms outside / inside / at the horizon. Together ≤ ~0.8 ms, against
+the ~2.3–3.5 ms the table set aside. The full-resolution march path of the atmosphere (`march`, kept for timings) costs
+0.6–7.3 ms and is not a default. Whether to move D8 is the owner's call.
 The terrain share (D8) was accepted by the owner on 2026-10-19 as a working number: if Phase 0 shows the other
 passes need more or less, the owner may move it, recorded in the runbook before the race starts.
 
@@ -321,9 +326,9 @@ the same camera rig across contenders, a spinning planet with a time-warp slider
   summaries and failed checks, and `npm run test:summary` reads only the index. Agents read the summary, and open
   a full result only for a failure.
 
-**Machine context** (why a number might be wrong, beyond the page's own view). **Built 2026-10-19, not yet run end
-to end** (runbook): adapter per run, `expectedGpuVendor`, receiver sampling and preflight warnings; thresholds are
-placeholders until idle readings are measured.
+**Machine context** (why a number might be wrong, beyond the page's own view). **Built 2026-10-19, run end to end
+and thresholds set 2026-10-21** (runbook): adapter per run, `expectedGpuVendor`, receiver sampling and preflight
+warnings; `gpuBusyPct` 60 (fallback only; the page alone reads 40-48 %) and `gpuHotC` 85 (readings 38-52 C; warning only).
 - The local receiver (the Node process that already saves results) samples the machine between "measuring
   started" and "measuring stopped" messages from the page: GPU busy %, VRAM, clocks, temperature and power draw,
   CPU load, free RAM, AC or battery, power mode, and the few heaviest other processes by GPU and CPU. The result

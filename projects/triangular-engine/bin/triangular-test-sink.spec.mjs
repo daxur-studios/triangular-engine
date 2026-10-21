@@ -194,7 +194,7 @@ test('receiver samples between start and stop, stores the machine block and a ti
   const root = repo();
   const starts = [];
   const sampler = { start: (interval) => { starts.push(interval); return { stop: async () => fakeCapture(50, 4n) }; } };
-  const probe = async () => ({ platform: 'win32', power: { source: 'battery', scheme: 'Balanced' }, processes: [{ pid: 1, name: 'private-process', cpuCoreShare: 0.9 }], gpuApps: [] });
+  const probe = async () => ({ platform: 'win32', power: { source: 'battery', scheme: 'Balanced' }, processes: [{ pid: 1, name: 'private-process', cpuCoreShare: 0.9 }], gpuApps: [{ pid: 9, name: 'game.exe', memMiB: 900 }] });
   const monitor = createMachineMonitor({ sampler, probe, preflightMs: 0 });
   const server = createReceiver(root, loadConfig(root), { monitor });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -250,8 +250,9 @@ test('gpu-busy-before-start keys on a non-browser GPU process, not on the page\'
   assert.equal(busy([{ pid: 3, name: 'game.exe' }].map((app) => ({ ...app, name: undefined }))), true);
   // The compositor is always listed, often unreadable: not other work.
   assert.equal(busy([{ pid: 1, name: 'chrome.exe' }, { pid: 4, name: '[Insufficient Permissions]' }, { pid: 5, name: 'dwm.exe' }]), false);
-  // No process list: fall back to the idle load threshold.
-  assert.equal(busy([]), true);
+  // No process list: fall back to the idle load threshold, above the page's own load (45 % here).
+  assert.equal(busy([]), false);
+  assert.equal(machineWarnings({ gpuApps: [], idle: { gpu: { util: { med: 75 } } } }, {}).includes('gpu-busy-before-start'), true);
   assert.equal(machineWarnings({ gpuApps: [], idle: { gpu: { util: { med: 5 } } } }, {}).includes('gpu-busy-before-start'), false);
 });
 

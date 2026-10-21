@@ -579,3 +579,98 @@ Built in parallel by three agents in one checkout with disjoint files, then revi
 - **Morph camera, GPU side.** A browser check confirmed the specs above: ground where the camera expects it at every
   spot, no seam cracks. It also saw one `GpuReadbackTimeoutError` from the engine's GPU timer while the browser pane was
   in the background. That is a hidden-tab effect, not a timing-run fault; unattended runs use a full-screen window.
+
+### 2026-10-21: surface-coordinate precision (`surfaceCoordErrorM`)
+
+The owner saw the checker edge go speckled at 6,371 km in the ground pose and crisp at 64 km. It is not texture
+resolution: the colour comes from the geometry's `uv`, interpolated in float32 across triangles about 78 km wide, and a
+float32 step of u near 0.5 is 2^-24 of the circumference, 2.4 m at 6,371 km. With the camera 2 m up, that moves the edge
+by many pixels at random.
+
+- The probe now writes u/v to green/blue (alpha is the drawn flag). `referenceFacetUv` rebuilds the lab sphere's own
+  triangles in doubles, intersects the pixel's ray with them and interpolates uv exactly, so the metric isolates the
+  float32 coordinate from facet shape. Metres of ground: du x circumference at the latitude, dv x half meridian.
+- Same suite (`planet-shape-quality` v1): the scenarios are unchanged; this adds a metric.
+- Spec floor: just storing the exact uv in float32 costs up to 1.2 m at 6,371 km.
+
+Run 2026-10-21T14:54 (RTX 3080, quick mode, which does not matter for a functional suite), median / p95 / max in metres:
+
+| Pose | 64 km | 600 km | 6,371 km |
+|---|---|---|---|
+| orbit | 0.35 / 0.98 / 6.2 | 3.3 / 9.0 / 58 | 35 / 97 / 616 |
+| low flyover | 0.02 / 0.08 / 0.38 | 0.20 / 0.71 / 3.5 | 2.2 / 7.5 / 37 |
+| ground | 0.01 / 0.03 / 0.05 | 0.14 / 0.33 / 0.44 | 1.1 / 2.7 / 4.2 |
+| horizon grazing | 0.02 / 0.05 / 1.05 | 0.14 / 0.42 / 9.6 | 1.8 / 4.9 / 105 |
+
+The error grows linearly with the radius, as a float32 coordinate must. At orbit a metre of ground is far under a pixel,
+so only the near poses matter: at ground on 6,371 km it is 1-4 m, a whole checker edge's width at 2 m altitude. Any
+material or texture keyed by global surface position inherits this; the contenders must key surface lookups
+camera- or tile-relative. Fixing it is contender work (Phase 1+), not the plain sphere's.
+
+### 2026-10-21: preflight thresholds from measured readings
+
+Baseline rerun `planet-shape-baseline@v1/2026-10-21T14-56-34-832Z_visible-browser_3d4c9267-9a985aa5.json`, unattended
+on the RTX 3080, owner away: auto=pass, perf=pass, **no machine warnings** (the first clean one; the receiver's
+compositor fix is live). Frame interval 6.1 ms in every case (165 Hz vsync), empty frame GPU 0.05 ms, plain sphere
+0.10 ms at orbit and 0.16 ms on the ground at every size.
+
+Readings across the 11 saved timing runs (baseline, morph, shadows A/B):
+
+| Reading | Value |
+|---|---|
+| GPU load, nothing open (launcher quiet check) | 0 % |
+| GPU load in the preflight, page already rendering | median 13-47 %, p95 up to 48 % (55 % once, with a game client open) |
+| GPU load in timed cases | median 43-46 % (the page's empty frame alone: 44 %) |
+| GPU temperature, preflight | 38-52 C |
+| GPU temperature, timed cases | 43-48 C, clocks 1830 MHz, P0, no throttle bits |
+
+So the page itself loads the GPU about 45 %: compositing a full-screen 2560 x 1440 frame at 165 Hz, not the scene.
+A load threshold can never tell the page from other work, which is why `gpu-busy-before-start` keys on a non-browser
+GPU process first.
+
+- `gpuBusyPct` 20 -> **60**: the fallback when `nvidia-smi` lists no processes. Above anything the page alone reads.
+- `gpuHotC` 80 -> **85** (owner: the laptop holds its temperature in Turbo mode, and a run must never wait to cool).
+  Warning only: the launcher never waits on temperature, and real slowdown shows as throttle bits.
+- `throttleMask` unchanged: no throttle bit seen.
+- The receiver loads these when it starts: restart `daxur app serve` for them to apply.
+- Game-load scenario (a synthetic "rest of the game" load, proposed during Phase 0, never in the plan): dropped by the
+  owner. GPU and CPU costs of independent work add; contention effects are second order and hit every contender alike,
+  so they do not change the ranking. The one real risk, main-thread CPU work (LOD, streaming) competing with game
+  logic, is checked on the winning contender in a real game, not on a synthetic load.
+
+### 2026-10-21: fixed costs for the frame budget table
+
+Phase 0 asks for the costs that sit beside terrain in every frame. Atmosphere and clouds are measured in their own labs
+(both are WebGPU/TSL already), not wired into the planet-shape lab: each is a screen-space pass whose cost does not
+depend on what terrain is drawn, and wiring them in is Plan 049's and 051's job.
+
+- **Atmosphere:** `bent-atmosphere-cost@v2` (`/atmosphere-lab`), rerun full screen:
+  `2026-10-21T15-11-02-138Z_visible-browser_3d4c9267-c0e46c6e.json`. Each view has a `plain` case (no atmosphere) and the
+  atmosphere on its default `auto` path at morph 0 / 0.5 / 1. The run is marked `gpu-throttled`: its `march` cases hold
+  the GPU at 7 ms a frame. The `auto` cases agree with the 2026-10-20 run within 0.03 ms.
+- **Clouds:** new `cloud-cost-ab@v1` (`/cloud-volumes-lab`): clouds off (A) and on (B) in alternating rounds, 12 volumes,
+  proxies, atmosphere lighting and haze on, still camera at three spots:
+  `2026-10-21T15-13-06-124Z_visible-browser_3d4c9267-c0e46c6e.json`. No machine warnings. The lab now records the GPU
+  adapter and drawing buffer (it recorded neither before). Its timer is whole-render (it includes the cloud bakes).
+
+GPU ms, median, RTX 3080, 2538 × 1440 (the same buffer as the planet-shape baseline):
+
+| Cost | Case | Off | On | Added |
+|---|---|---|---|---|
+| Empty frame | `planet-shape-baseline` | | 0.05 | 0.05 |
+| Atmosphere `auto`, morph 0 / 0.5 / 1 | space | 0.11 | 0.26 / 0.34 / 0.42 | 0.15 / 0.23 / 0.31 |
+| | low orbit | 0.14 | 0.48 / 0.48 / 0.51 | 0.34 / 0.34 / 0.37 |
+| | high in the air | 0.20 | 0.26 / 0.33 / 0.30 | 0.06 / 0.13 / 0.10 |
+| | ground | 0.17 | 0.20 / 0.20 / 0.16 | 0.03 / 0.03 / -0.01 |
+| Atmosphere `march` (not a default) | all views | | 0.66–7.34 | 0.5–7.1 |
+| Clouds, 12 volumes, haze | outside | 0.18 | 0.27 | 0.10 |
+| | inside | 0.14 | 0.51 | 0.37 |
+| | horizon | 0.16 | 0.33 | 0.17 |
+
+Round-to-round noise in the clouds A/B is 0.001 ms. **Result:** the fixed costs together are at most about 0.8 ms
+(0.05 + 0.37 + 0.37), well under the ~2.3–3.5 ms the frame budget table set aside for them, so terrain's 2.0 ms (D8)
+is not squeezed. The Runbook 049 figures in the table (0.79–1.97 ms) predate the `auto` path. Caveats: clouds were
+measured with 12 volumes, the lab's largest preset, and a still sun; a moving sun or a fast spin rebakes and costs more
+(Plan 051's flyby cases). Neither lab draws terrain, so overdraw between terrain and these passes is not in the
+numbers.
+

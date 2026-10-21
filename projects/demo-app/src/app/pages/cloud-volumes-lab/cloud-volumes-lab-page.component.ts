@@ -5,7 +5,7 @@ import { Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, P
 import { EngineModule, EngineService } from 'triangular-engine';
 import { ReactiveFormsModule, FormControl } from '@angular/forms';
 import { SliderComponent } from '@daxur-studios/ui';
-import { TestRunnerComponent, type TestContext, type TestObservation, type TestProgress, type TestRunAdapter, type TestScenario } from 'triangular-engine/testing';
+import { TestRunnerComponent, describeRendererGpu, type TestContext, type TestObservation, type TestProgress, type TestRunAdapter, type TestScenario } from 'triangular-engine/testing';
 import { CLOUD_TEST_DEFAULTS, CLOUD_TEST_HISTORY, type CloudTestSettings } from './cloud-tests';
 import {
   AtmosphereBackdrop,
@@ -447,6 +447,11 @@ export class CloudVolumesLabPageComponent {
       uiArtifact: 'daxur-studios-ui-0.0.1-41ceb06e0f3e.tgz',
       rendererAntialias: false,
       fpsTraversal: 'scene traversal suspended during measurement through the existing FrameSampler',
+      // The adapter, so a suite's `expectedGpuVendor` can be checked, and the size the cost was paid at.
+      ...describeRendererGpu(this.engine.renderer as any),
+      'canvas.drawingBufferWidth': (this.engine.renderer as any)?.domElement?.width ?? 0,
+      'canvas.drawingBufferHeight': (this.engine.renderer as any)?.domElement?.height ?? 0,
+      devicePixelRatio: globalThis.devicePixelRatio ?? 1,
     }),
   };
 

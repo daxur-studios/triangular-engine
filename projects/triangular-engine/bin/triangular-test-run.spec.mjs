@@ -4,7 +4,18 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { buildRunUrl, chromeArgs, createRunQueue, findChrome, findResult, getJson, parseArgs, quietVerdict } from './triangular-test-run.mjs';
+import { awayVerdict, buildRunUrl, chromeArgs, createRunQueue, findChrome, findResult, getJson, parseArgs, quietVerdict } from './triangular-test-run.mjs';
+
+test('awayVerdict: no switch runs; otherwise only while away and unexpired, and a broken file holds back', () => {
+  const now = Date.parse('2026-10-21T15:00:00Z');
+  assert.equal(awayVerdict(undefined, now).ok, true);
+  assert.equal(awayVerdict(JSON.stringify({ away: true, expiresAt: now + 60_000 }), now).ok, true);
+  assert.equal(awayVerdict(JSON.stringify({ away: true }), now).ok, true);
+  assert.equal(awayVerdict(JSON.stringify({ away: false, expiresAt: now + 60_000 }), now).ok, false);
+  assert.match(awayVerdict(JSON.stringify({ away: true, expiresAt: now - 1 }), now).reason, /expired/);
+  assert.equal(awayVerdict('{"away":tr', now).ok, false);
+  assert.equal(parseArgs(['--url', 'http://x/', '--suite', 's', '--version', '1', '--away-wait-min', '0']).awayWaitMin, 0);
+});
 
 test('parseArgs needs url, suite and version, and checks the rest', () => {
   const ok = parseArgs(['--url', 'http://app.localhost:4200/lab', '--suite', 's', '--version', '2', '--no-thumbnails', '--timeout-min', '5']);
@@ -71,6 +82,10 @@ test('findResult takes the first row of the suite/version saved after the launch
   const since = Date.parse('2026-10-21T10:59:59Z');
   assert.equal(findResult(rows + '\nnot json\n', { suite: 's', version: 1, since })?.file, 'new');
   assert.equal(findResult(rows, { suite: 's', version: 3, since }), undefined);
+  // A quick run the owner starts by hand meanwhile is not this standard run.
+  const handRun = JSON.stringify({ suite: 's', version: 1, profile: 'visible-browser', mode: 'quick', startedAt: '2026-10-21T11:00:02Z', file: 'hand' });
+  const mine = JSON.stringify({ suite: 's', version: 1, profile: 'visible-browser', mode: 'standard', startedAt: '2026-10-21T11:00:03Z', file: 'mine' });
+  assert.equal(findResult(`${handRun}\n${mine}`, { suite: 's', version: 1, since, profile: 'visible-browser', mode: 'standard' })?.file, 'mine');
 });
 
 test('chromeArgs use a throwaway profile, full screen and the precise GPU timer flag; findChrome checks the usual paths', () => {
