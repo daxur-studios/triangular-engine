@@ -25,13 +25,15 @@ export interface PlanetShapeTestSettings {
   readonly morph: number;
   /** Most march steps per pixel of the raymarched terrain; ignored by the other kinds. */
   readonly raySteps: number;
+  /** Pre-pass resolution divisor of terrain v2 (0 = off); ignored by the other kinds. */
+  readonly rayPrepass: number;
   /** `quality` measures the view against the exact sphere instead of timing it; absent = timing. */
   readonly probe?: 'quality';
 }
 
 export const PLANET_SHAPE_DEFAULTS: PlanetShapeTestSettings = {
   kind: 'sphere', seed: FIXED_SEED, bodyId: '600km', poseId: 'orbit', spinWarp: 1000, spinAngleDeg: 0, features: defaultFeatureState(), morph: 0,
-  raySteps: DEFAULT_RAY_STEPS,
+  raySteps: DEFAULT_RAY_STEPS, rayPrepass: 0,
 };
 
 const WARMUP_MS = 1500;
@@ -143,6 +145,27 @@ export const PLANET_SHAPE_TEST_HISTORY: readonly TestSuite<PlanetShapeTestSettin
       ...[32, 256].flatMap((steps) => (['orbit', 'ground'] as const).map((pose) =>
         scenario(`raymarch-${pose}-600km-${steps}-steps`, `Raymarch, ${pose}, 600 km, ${steps} steps`,
           { kind: 'raymarch', bodyId: '600km', poseId: pose, raySteps: steps }))),
+    ],
+  },
+  {
+    id: 'planet-shape-raymarch', version: 2,
+    title: 'Raymarched terrain v2 (density field): every pose and size without and with the 1/4 pre-pass, v1 as reference',
+    purpose: 'performance',
+    expectedGpuVendor: 'nvidia',
+    // No budgets yet. The scene pass is the terrain (shell, march and shading) plus its pre-pass when on.
+    scenarios: [
+      ...BODIES.flatMap((body) => CAMERA_POSES.flatMap((pose) => [0, 4].map((prepass) =>
+        scenario(`v2-${pose.id}-${body.id}-prepass-${prepass}`, `Terrain v2, ${pose.label.toLowerCase()}, ${body.label}, pre-pass ${prepass ? `1/${prepass}` : 'off'}`,
+          { kind: 'raymarch-lit', bodyId: body.id, poseId: pose.id, rayPrepass: prepass })))),
+      ...[2, 8].map((prepass) =>
+        scenario(`v2-ground-600km-prepass-${prepass}`, `Terrain v2, ground, 600 km, pre-pass 1/${prepass}`,
+          { kind: 'raymarch-lit', bodyId: '600km', poseId: 'ground', rayPrepass: prepass })),
+      scenario('v2-ground-600km-prepass-4-shadows', 'Terrain v2, ground, 600 km, pre-pass 1/4, soft shadow',
+        { kind: 'raymarch-lit', bodyId: '600km', poseId: 'ground', rayPrepass: 4,
+          features: withFeature(PLANET_SHAPE_DEFAULTS.features, 'shadows', true) }),
+      ...CAMERA_POSES.map((pose) =>
+        scenario(`v1-${pose.id}-600km`, `Terrain v1 (reference), ${pose.label.toLowerCase()}, 600 km`,
+          { kind: 'raymarch', bodyId: '600km', poseId: pose.id })),
     ],
   },
 ];

@@ -154,13 +154,23 @@ const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so 
               <button (click)="setRaySteps(steps)" [class.active]="raySteps() === steps">{{ steps }}</button>
             }
           </p>
+          @if (surface() === 'raymarch-lit') {
+            <p class="row">
+              pre-pass:
+              @for (scale of rayPrepassPresets; track scale) {
+                <button (click)="setRayPrepass(scale)" [class.active]="rayPrepass() === scale" [attr.data-testid]="'prepass-' + scale">
+                  {{ scale === 0 ? 'off' : '1/' + scale }}</button>
+              }
+            </p>
+          }
           @if (surface() === 'raymarch') {
             <p class="note">Contender C, minimal (Plan 055 Phase 1): a shell at R + H whose pixels sphere-trace one fixed
               height field. No morph and no shadows yet; a flat pad under the poses keeps the camera out of the hills.</p>
           } @else {
             <p class="note">Contender C, second try: a 3D density field (canyons plus vertically stretched rock noise, so
               ledges and overhangs), camera-relative detail noise for close range, a sky (no fog). The Shadows feature turns
-              on a soft shadow march. Marches twice the chosen steps. No morph.</p>
+              on a soft shadow march. Marches twice the chosen steps. No morph. The pre-pass marches at a fraction of the
+              resolution first, so the full march starts next to the ground.</p>
           }
         }
 
@@ -232,6 +242,9 @@ export class PlanetShapeLabPageComponent {
   readonly surface = signal<Surface>('sphere');
   readonly raySteps = signal(DEFAULT_RAY_STEPS);
   readonly rayStepPresets = RAY_STEP_PRESETS;
+  /** Pre-pass resolution divisor of terrain v2; 0 = off. */
+  readonly rayPrepass = signal(0);
+  readonly rayPrepassPresets = [0, 2, 4, 8] as const;
   /** Sphere (0) to flat map (1). */
   readonly morph = signal(0);
   readonly freeCamera = signal(false);
@@ -279,12 +292,16 @@ export class PlanetShapeLabPageComponent {
   /** Quality probe target and camera, made on first use (`planet-shape-quality.ts`). */
   private probe: { target: RenderTarget; camera: PerspectiveCamera; scene: Scene; mesh: Mesh } | undefined;
   private readonly beforeRenderCallbacks = new Set<() => void>();
+  /** The pre-pass draws the visible shell again, with the terrain's pre-pass material, into the terrain's target. */
+  private readonly prepassMesh = Object.assign(new Mesh(), { frustumCulled: false });
+  private readonly prepassScene = Object.assign(new Scene(), { name: 'Raymarch pre-pass' }).add(this.prepassMesh);
+  private readonly prepassClear = new Color();
   private readonly renderCallbacks = new Set<(renderedAt: number) => void>();
 
   /** Everything the shared runner needs from this page; the runner never sees the scene. */
   private readonly testHost: PlanetShapeTestHost = {
     read: () => ({
-      kind: this.bodyDrawn() ? this.surface() : 'empty', raySteps: this.raySteps(), seed: this.seed, bodyId: this.bodyId(), poseId: this.poseId(),
+      kind: this.bodyDrawn() ? this.surface() : 'empty', raySteps: this.raySteps(), rayPrepass: this.rayPrepass(), seed: this.seed, bodyId: this.bodyId(), poseId: this.poseId(),
       spinWarp: this.spinWarp(), spinAngleDeg: (this.spinAngle * 180) / Math.PI, features: this.featureState(),
       morph: this.morph(),
     }),
@@ -297,6 +314,7 @@ export class PlanetShapeLabPageComponent {
       this.featureState.set(settings.features);
       this.setMorph(settings.morph);
       this.setRaySteps(settings.raySteps);
+      this.setRayPrepass(settings.rayPrepass);
       if (settings.kind !== 'empty') this.setSurface(settings.kind);
       this.setBodyDrawn(settings.kind !== 'empty');
     },
@@ -357,7 +375,10 @@ export class PlanetShapeLabPageComponent {
       this.updateCamera();
       this.updatePixelAngle();
     });
-    const beforeRender = this.engine.beforeRender$.subscribe(() => { for (const callback of this.beforeRenderCallbacks) callback(); });
+    const beforeRender = this.engine.beforeRender$.subscribe(() => {
+      this.renderPrepass();
+      for (const callback of this.beforeRenderCallbacks) callback();
+    });
     const rendered = this.engine.renderComplete$.subscribe(({ renderedAt }) => {
       this.renderedFrames++;
       const renderer = this.engine.renderer as unknown as GpuAdapterRendererLike & { info?: { render: { drawCalls: number; triangles: number } } };
@@ -504,6 +525,40 @@ export class PlanetShapeLabPageComponent {
   setRaySteps(steps: number): void {
     this.raySteps.set(steps);
     for (const entry of this.rayTerrains) entry.terrain.setSteps(steps);
+  }
+
+  setRayPrepass(scale: number): void {
+    this.rayPrepass.set(scale);
+  }
+
+  /**
+   * The visible terrain's low-resolution pre-pass, drawn into its own target just before the frame. It is a scene pass
+   * of its own (label `Raymarch pre-pass`), so the scene-pass metric includes it.
+   */
+  private renderPrepass(): void {
+    const entry = this.rayTerrains.find((candidate) => candidate.shell?.visible === true);
+    if (!entry?.shell || !entry.terrain.prepass || !entry.terrain.setPrepass) return;
+    const renderer = this.engine.renderer as unknown as {
+      domElement?: { width: number; height: number };
+      getRenderTarget(): unknown; setRenderTarget(target: unknown): void; getClearColor(target: Color): Color; getClearAlpha(): number;
+      setClearColor(color: Color | number, alpha: number): void; render(scene: Scene, camera: unknown): void;
+    };
+    const scale = this.rayPrepass();
+    entry.terrain.setPrepass(scale, renderer.domElement?.width ?? 1, renderer.domElement?.height ?? 1);
+    if (scale <= 0 || !this.engine.camera) return;
+    this.prepassMesh.geometry = entry.shell.geometry;
+    this.prepassMesh.material = entry.terrain.prepass.material;
+    const previousTarget = renderer.getRenderTarget();
+    const previousClear = renderer.getClearColor(this.prepassClear);
+    const previousAlpha = renderer.getClearAlpha();
+    try {
+      renderer.setRenderTarget(entry.terrain.prepass.target);
+      renderer.setClearColor(0x000000, 0);
+      renderer.render(this.prepassScene, this.engine.camera);
+    } finally {
+      renderer.setRenderTarget(previousTarget);
+      renderer.setClearColor(previousClear, previousAlpha);
+    }
   }
 
   private applySurface(): void {

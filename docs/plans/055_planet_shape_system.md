@@ -403,6 +403,30 @@ Real terrain in the lab as soon as possible, measured by the Phase 0 harness:
 - **Gate:** the owner sees the terrain and its per-pass GPU ms at every pose and size; the owner then picks the next
   step (more of C, or A and B to race against it).
 
+### Phase 1 finish line: the foundation (set 2026-10-21)
+
+The raymarch v2 (a 3D density field with canyons and overhangs) replaced the height map. Before more biomes or polish,
+one terrain recipe has to be fast, editable and tested. Phase 1 is done when all five hold:
+
+1. **Fast enough to build on.** v2 at the ground pose is at most 16 ms scene pass on the 3080 at full screen,
+   recorded in a `planet-shape-raymarch` v2 suite. This is a working milestone, not the budget: D8 gives terrain
+   2.0 ms p95, and v1 already took about 40 ms near the ground (2026-10-21). Closing that gap is the race's job
+   (Phase 2); the finish line only has to show the levers work. First levers: march at a reduced resolution with a depth-aware upscale, then a
+   cheaper march (coarse pre-pass, fewer octaves in the march, detail only in shading). v1 (the height map) stays in
+   the suite as the cost reference and a possible far-distance version.
+2. **One definition of the terrain:** base field, then biome parameters, then edits. The TSL field lives in its own
+   module with a TypeScript twin; a parity spec (`evaluateOnGpu`) compares them. The CPU twin answers "is this point
+   solid", "ground height here" and "flat enough to build". This is the start of Phase 1b's evaluator.
+3. **Edits:** a short list of flatten / smooth / carve ops (a flatten disc with a soft edge to a set height) replaces
+   the hard-coded pad, evaluated the same on GPU and CPU, so a base sits exactly on the drawn ground. These are the
+   first Phase 1b shape ops.
+4. **Two contrasting biomes, blended** (canyons and rolling hills) by a low-frequency mask that blends field
+   parameters, not separate fields, so cost stays flat. More biomes after this are content.
+5. **Tests:** timing per biome, edit site and pose; the parity spec; visual-review poses on each biome and on a
+   flattened base site.
+
+Out until after the finish line: more biomes, materials, lighting polish, water, planet-scale LOD, morph.
+
 ### Phase 1b. Shape ops, evaluator and data-flow core
 
 - Op types, bounds, minimum visible size, fidelity class, blend modes, op log with deterministic replay.

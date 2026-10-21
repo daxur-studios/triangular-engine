@@ -758,3 +758,49 @@ that the reference shader makes canyons with overhangs, which a height map canno
 Seen in the browser pane only (integrated GPU, about 1 FPS there at DPR 1.5 with the pane hidden, so no timing
 claim). Horizon grazing at 600 km and 64 km shows layered canyon walls; the ground pose stands on the flat pad, so it
 shows a plain with canyons on the horizon.
+
+## 2026-10-21: the v2 terrain field as modules with a CPU twin
+
+The v2 density field is now one definition in three files beside the lab page (the raymarcher still holds its own copy
+until it is switched to import them):
+
+- `planet-shape-noise.ts`: `generateNoiseBytes()` (the exact bytes the lab texture uses, RGBA8 256 x 256),
+  `createNoiseTexture()`, `NOISE_PERIOD`.
+- `planet-shape-field.ts`: the constants, `NoiseFrame` plus the CPU frame helpers (`fieldFrameMatrices`, `noiseOrigin`),
+  and the exported TSL functions `valueNoise`, `sampleFrame`, `padAt`, `canyonAt`, `rockAt`, `densityAt`. They take the
+  texture, frames, camera and relief unit as arguments; the doubles-on-CPU, camera-relative design is unchanged.
+- `planet-shape-field-cpu.ts`: `createTerrainFieldCpu(radiusM)` with `canyon`, `rock`, `density`, `isSolid` and
+  `groundHeightAt(direction)` (altitude of the outermost surface, found by marching down from the plateau-top sphere in
+  0.05-unit steps, then bisection), all in doubles on body-relative positions, reading the same bytes through the smooth
+  four-tap path.
+
+`planet-shape-field.spec.ts` compares them through `evaluateOnGpu` (smooth path on the GPU; the hardware-filtered path
+has 8-bit filter weights, so it is deliberately not the parity target) at 40 points per body on 20 km, 1737 km and
+6371 km bodies, cameras at the surface with camera-relative offsets. Worst differences found: value noise 7e-6, canyon
+6e-5, rock 4e-6, density 0.36 m at 6371 km (0.04 % of the 900 m unit; 5 mm at 20 km). Specs assert 2e-3, 5e-3, 3e-3 and
+1 % of a unit. CPU-only specs cover determinism, 256 periodicity, range, and `groundHeightAt` landing at density ~0 with
+solid below and open above. Run:
+`npx ng test demo-app --watch=false --browsers=ChromeHeadless --include='**/planet-shape-field.spec.ts'`.
+
+Surprises: the density error grows with body radius (float32 `up` and altitude at 6.4e6 m), not the noise, so the CPU
+twin is the more accurate of the two on large bodies; the pad edge is the most sensitive place (`1 - up.z` cancels in
+float32). The spec points keep clear of the sharpest pad transition on purpose only by sampling; none is exactly on it.
+
+#### Same day: Phase 1 finish line set; v1 timed; v2 pre-pass; suite v2
+
+- **v1 timed** (`planet-shape-raymarch@1`, visible quick run on the 3080, 2538 × 1308, GPU warm and throttled at 78 °C,
+  so somewhat high): orbit 0.7–4.4 ms; near the ground 27–45 ms scene pass; at 600 km ground 12.7 / 41.6 / 58 ms for
+  32 / 128 / 256 steps. The cost follows the step count: the march dominates, not shading. Close poses did not settle
+  in their 5 s windows (too few, too slow frames) and the 256-step ground case was invalid (58 ms cadence); the medians
+  still stand.
+- **Finish line** written into the plan (Phase 1 finish line): fast enough to build on (16 ms milestone; D8 stays 2 ms),
+  one field definition with a CPU twin and parity spec, edits (flatten / smooth / carve replacing the pad), two
+  blended biomes, and tests for each.
+- **Pre-pass** (v2): the shell is drawn first into a float target at 1/2, 1/4 or 1/8 of the drawing buffer with a
+  coarse march that writes the last distance still in the air. The full march starts at the nearest of the 3 × 3
+  coarse pixels around it, less a margin of four coarse footprints; if none reached the ground the pixel is sky and
+  is not marched. It is its own scene pass (`Raymarch pre-pass`), so `gpuScenePass` includes it. In the lab it looked
+  the same as no pre-pass at 1/4 and 1/8 (horizon and low flyover, 600 km); features thinner than a coarse pixel
+  standing alone against the sky could be lost.
+- **Suite `planet-shape-raymarch` v2:** v2 at every pose and size with the pre-pass off and at 1/4, 1/2 and 1/8 at the
+  600 km ground, one case with the soft shadow, and v1 at 600 km as the reference. Not run yet (needs the laptop free).

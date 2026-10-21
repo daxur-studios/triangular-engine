@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { BackSide, Vector3 } from 'three';
-import { MeshBasicNodeMaterial } from 'three/webgpu';
+import { MeshBasicNodeMaterial, type RenderTarget } from 'three/webgpu';
 import {
   Break, Discard, Fn, If, Loop, cameraFar, ceil, int, log2, cameraNear, cameraViewMatrix, clamp, color, cross, dot, float, max, mix,
   mx_noise_float, normalize, positionWorld, select, smoothstep, sqrt, uniform, vec3, vec4, viewZToPerspectiveDepth,
@@ -60,6 +60,10 @@ export interface RaymarchTerrain {
   setSteps(steps: number): void;
   /** Soft shadow march on or off, for terrains that have one. */
   setShadows?(on: boolean): void;
+  /** Low-resolution pre-pass, for terrains that have one: the page draws the shell with `material` into `target` first. */
+  readonly prepass?: { readonly material: MeshBasicNodeMaterial; readonly target: RenderTarget };
+  /** Pre-pass at the drawing buffer (`width` x `height`) divided by `scale`; 0 turns it off. */
+  setPrepass?(scale: number, width: number, height: number): void;
 }
 
 export function createRaymarchTerrain(): RaymarchTerrain {

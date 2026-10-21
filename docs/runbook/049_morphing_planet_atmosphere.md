@@ -824,6 +824,14 @@ GPU pass total, median ms (scene pass + masked pass + output pass; the output pa
 
 p95 is within 0.03 ms of the median everywhere except the march rows.
 
+A second run (2026-10-21 21:52 UTC, same adapter) had no `gpu-busy-before-start` warning but was again `gpu-throttled` (70 C).
+It matched the table within 0.01 ms on the plain and auto rows. The march rows moved by up to 0.4 ms (low orbit at morph 1 went to
+3.82 ms).
+
+**The suite checks state, frames and errors, not pixels.** A black or missing sky would still pass. The owner has
+accepted the look by eye. They report a thin black band between the horizon and the sky from some views, and a slightly
+blocky froxel haze from some angles (minor).
+
 ### What it says
 1. **The table path meets the budget everywhere on the RTX.** Bent auto minus the plain globe: space +0.14 / +0.20 / +0.29,
    low orbit +0.32 / +0.33 / +0.34, 25 km +0.06 / +0.13 / +0.11, 2 m +0.02 / +0.03 / -0.01. The budget is <= 0.5 ms total. The
