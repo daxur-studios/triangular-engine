@@ -4,11 +4,16 @@ import morphBaselineV1 from './planet-shape-morph-baseline.v1.json';
 import { BODIES, FIXED_SEED, type BodyId } from './planet-shape-config';
 import { CAMERA_POSES, type CameraPoseId } from './planet-shape-camera';
 import { defaultFeatureState, withFeature, type FeatureState } from './planet-shape-features';
+import { DEFAULT_RAY_STEPS } from './planet-shape-raymarch';
 
 /** Fully resolved, so a rerun cannot inherit anything from the manual controls. */
 export interface PlanetShapeTestSettings {
-  /** `empty` draws nothing at all: the noise floor of the machine, browser and renderer. */
-  readonly kind: 'empty' | 'sphere';
+  /**
+   * `empty` draws nothing at all: the noise floor of the machine, browser and renderer. `sphere` is the plain sphere;
+   * `raymarch` the first raymarched terrain (Phase 1, contender C minimal: no morph, no shadows); `raymarch-lit` its
+   * second try (a 3D density field with canyons and overhangs, sky, optional soft shadow).
+   */
+  readonly kind: 'empty' | 'sphere' | 'raymarch' | 'raymarch-lit';
   readonly seed: number;
   readonly bodyId: BodyId;
   readonly poseId: CameraPoseId;
@@ -18,12 +23,15 @@ export interface PlanetShapeTestSettings {
   readonly features: FeatureState;
   /** Sphere (0) to flat map (1): a visual transform only, applied by the engine's `planetMorphGraph`. */
   readonly morph: number;
+  /** Most march steps per pixel of the raymarched terrain; ignored by the other kinds. */
+  readonly raySteps: number;
   /** `quality` measures the view against the exact sphere instead of timing it; absent = timing. */
   readonly probe?: 'quality';
 }
 
 export const PLANET_SHAPE_DEFAULTS: PlanetShapeTestSettings = {
   kind: 'sphere', seed: FIXED_SEED, bodyId: '600km', poseId: 'orbit', spinWarp: 1000, spinAngleDeg: 0, features: defaultFeatureState(), morph: 0,
+  raySteps: DEFAULT_RAY_STEPS,
 };
 
 const WARMUP_MS = 1500;
@@ -121,5 +129,20 @@ export const PLANET_SHAPE_TEST_HISTORY: readonly TestSuite<PlanetShapeTestSettin
     scenarios: BODIES.flatMap((body) => CAMERA_POSES.map((pose) =>
       scenario(`quality-${pose.id}-${body.id}`, `Quality, ${pose.label.toLowerCase()}, ${body.label}`,
         { bodyId: body.id, poseId: pose.id, spinWarp: 0, probe: 'quality' }))),
+  },
+  {
+    id: 'planet-shape-raymarch', version: 1,
+    title: 'Raymarched terrain (Phase 1, contender C minimal): every pose and size, then 32 / 256 steps at 600 km',
+    purpose: 'performance',
+    expectedGpuVendor: 'nvidia',
+    // No budgets yet: this run sets the first numbers. The scene pass is the terrain (the shell and its march).
+    scenarios: [
+      ...BODIES.flatMap((body) => CAMERA_POSES.map((pose) =>
+        scenario(`raymarch-${pose.id}-${body.id}`, `Raymarch, ${pose.label.toLowerCase()}, ${body.label}`,
+          { kind: 'raymarch', bodyId: body.id, poseId: pose.id }))),
+      ...[32, 256].flatMap((steps) => (['orbit', 'ground'] as const).map((pose) =>
+        scenario(`raymarch-${pose}-600km-${steps}-steps`, `Raymarch, ${pose}, 600 km, ${steps} steps`,
+          { kind: 'raymarch', bodyId: '600km', poseId: pose, raySteps: steps }))),
+    ],
   },
 ];

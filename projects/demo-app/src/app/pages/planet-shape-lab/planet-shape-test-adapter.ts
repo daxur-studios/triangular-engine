@@ -107,7 +107,7 @@ const GPU_STEP_MS = 0.001;
 /** Names every field the page did not honour; the spin angle advances on its own and is not compared. */
 export function settingsMismatches(actual: PlanetShapeTestSettings, expected: PlanetShapeTestSettings): string[] {
   const out: string[] = [];
-  for (const key of ['kind', 'seed', 'bodyId', 'poseId', 'spinWarp', 'morph'] as const) {
+  for (const key of ['kind', 'seed', 'bodyId', 'poseId', 'spinWarp', 'morph', 'raySteps'] as const) {
     if (actual[key] !== expected[key]) out.push(`${key}: expected ${expected[key]}, found ${actual[key]}`);
   }
   return [...out, ...featureMismatches(actual.features, expected.features)];
@@ -265,7 +265,7 @@ export function createPlanetShapeTestAdapter(host: PlanetShapeTestHost): TestRun
       const environment = host.environment();
       const mismatches = settingsMismatches(host.read(), settings);
       const error = host.errors();
-      const expectDrawn = settings.kind === 'sphere';
+      const expectDrawn = settings.kind !== 'empty';
       const checks: TestCheck[] = [
         { name: 'Scenario state applied as specified', passed: mismatches.length === 0, detail: mismatches.join('; ') || undefined },
         { name: 'Frames rendered during the action', passed: frames >= 2, detail: `${frames} completed renders` },

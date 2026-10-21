@@ -17,6 +17,8 @@ import {
 } from './planet-shape-config';
 import { FEATURES, defaultFeatureState, shadowsActive, withFeature, type FeatureId, type FeatureState } from './planet-shape-features';
 import { createCameraRelativeSphereGeometry, createPlainSphereMaterial } from './planet-shape-sphere';
+import { DEFAULT_RAY_STEPS, createRaymarchTerrain, type RaymarchTerrain } from './planet-shape-raymarch';
+import { createLitRaymarchTerrain } from './planet-shape-raymarch-lit';
 import { QUALITY_PROBE_SIZE, frameFromProbeRgba, type QualityFrame } from './planet-shape-quality';
 import { createPlanetShapeTestAdapter, type PlanetShapeQualityProbe, type PlanetShapeTestHost } from './planet-shape-test-adapter';
 import { PLANET_SHAPE_TEST_HISTORY, type PlanetShapeTestSettings } from './planet-shape-tests';
@@ -43,6 +45,12 @@ const POWER_PREFERENCE = 'high-performance (engine default)';
 
 /** Longest side of a case thumbnail, in pixels. */
 const THUMBNAIL_WIDTH = 240;
+
+/** Tessellation of the raymarch shell: coarse, since it only has to cover the pixels the march may hit. */
+const SHELL_SEGMENTS = { width: 128, height: 64 } as const;
+const RAY_STEP_PRESETS = [32, 64, 128, 256] as const;
+type RaymarchSurface = 'raymarch' | 'raymarch-lit';
+type Surface = 'sphere' | RaymarchSurface;
 
 const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so spin shows as a travelling sun.';
 
@@ -133,6 +141,29 @@ const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so 
           }
         </p>
 
+        <p class="label">Surface</p>
+        <p class="row">
+          <button (click)="setSurface('sphere')" [class.active]="surface() === 'sphere'">plain sphere</button>
+          <button (click)="setSurface('raymarch')" [class.active]="surface() === 'raymarch'" data-testid="surface-raymarch">raymarched terrain</button>
+          <button (click)="setSurface('raymarch-lit')" [class.active]="surface() === 'raymarch-lit'" data-testid="surface-raymarch-lit">terrain v2 (canyons, shadertoy-style)</button>
+        </p>
+        @if (surface() !== 'sphere') {
+          <p class="row">
+            steps:
+            @for (steps of rayStepPresets; track steps) {
+              <button (click)="setRaySteps(steps)" [class.active]="raySteps() === steps">{{ steps }}</button>
+            }
+          </p>
+          @if (surface() === 'raymarch') {
+            <p class="note">Contender C, minimal (Plan 055 Phase 1): a shell at R + H whose pixels sphere-trace one fixed
+              height field. No morph and no shadows yet; a flat pad under the poses keeps the camera out of the hills.</p>
+          } @else {
+            <p class="note">Contender C, second try: a 3D density field (canyons plus vertically stretched rock noise, so
+              ledges and overhangs), camera-relative detail noise for close range, a sky (no fog). The Shadows feature turns
+              on a soft shadow march. Marches twice the chosen steps. No morph.</p>
+          }
+        }
+
         <p class="label">Morph (sphere to flat map) · {{ morph().toFixed(2) }}</p>
         <input
           type="range" min="0" max="1" step="0.01" aria-label="Morph, sphere to flat map" data-testid="morph-slider"
@@ -198,6 +229,9 @@ export class PlanetShapeLabPageComponent {
   readonly spinWarp = signal(1000);
   readonly featureState = signal<FeatureState>(defaultFeatureState());
   readonly bodyDrawn = signal(true);
+  readonly surface = signal<Surface>('sphere');
+  readonly raySteps = signal(DEFAULT_RAY_STEPS);
+  readonly rayStepPresets = RAY_STEP_PRESETS;
   /** Sphere (0) to flat map (1). */
   readonly morph = signal(0);
   readonly freeCamera = signal(false);
@@ -235,6 +269,13 @@ export class PlanetShapeLabPageComponent {
   private readonly sun = new DirectionalLight(0xffffff, 3);
   private readonly ambient = new AmbientLight(0x6688aa, 0.3);
   private mesh: Mesh | undefined;
+  /** The raymarched surfaces, each with its own shell; at most one is visible. */
+  private readonly rayTerrains: { surface: RaymarchSurface; terrain: RaymarchTerrain; shell?: Mesh }[] = [
+    { surface: 'raymarch', terrain: createRaymarchTerrain() },
+    { surface: 'raymarch-lit', terrain: createLitRaymarchTerrain() },
+  ];
+  /** Whether the raymarch pipelines are compiled: done before the runner may start, so no case pays for it. */
+  private terrainCompile: 'pending' | 'running' | 'done' = 'pending';
   /** Quality probe target and camera, made on first use (`planet-shape-quality.ts`). */
   private probe: { target: RenderTarget; camera: PerspectiveCamera; scene: Scene; mesh: Mesh } | undefined;
   private readonly beforeRenderCallbacks = new Set<() => void>();
@@ -243,7 +284,7 @@ export class PlanetShapeLabPageComponent {
   /** Everything the shared runner needs from this page; the runner never sees the scene. */
   private readonly testHost: PlanetShapeTestHost = {
     read: () => ({
-      kind: this.bodyDrawn() ? 'sphere' : 'empty', seed: this.seed, bodyId: this.bodyId(), poseId: this.poseId(),
+      kind: this.bodyDrawn() ? this.surface() : 'empty', raySteps: this.raySteps(), seed: this.seed, bodyId: this.bodyId(), poseId: this.poseId(),
       spinWarp: this.spinWarp(), spinAngleDeg: (this.spinAngle * 180) / Math.PI, features: this.featureState(),
       morph: this.morph(),
     }),
@@ -255,14 +296,16 @@ export class PlanetShapeLabPageComponent {
       this.spinAngle = (settings.spinAngleDeg * Math.PI) / 180;
       this.featureState.set(settings.features);
       this.setMorph(settings.morph);
-      this.setBodyDrawn(settings.kind === 'sphere');
+      this.setRaySteps(settings.raySteps);
+      if (settings.kind !== 'empty') this.setSurface(settings.kind);
+      this.setBodyDrawn(settings.kind !== 'empty');
     },
     renderedFrames: () => this.renderedFrames,
     errors: () => this.engineError,
     resetErrors: () => { this.engineError = ''; },
     backendIsWebGpu: () => this.webGpuOk() && this.hud().backend === 'webgpu',
     scene: () => ({
-      bodyDrawn: this.bodyDrawn() && this.mesh?.visible === true,
+      bodyDrawn: this.bodyDrawn() && (this.mesh?.visible === true || this.rayTerrains.some((entry) => entry.shell?.visible === true)),
       drawCalls: this.lastDrawCalls,
       triangles: this.lastTriangles,
       drawingBuffer: [this.hud().width, this.hud().height],
@@ -295,6 +338,13 @@ export class PlanetShapeLabPageComponent {
       this.configureShadow(bodyById(this.builtBody).radiusM);
       this.mesh = new Mesh(createCameraRelativeSphereGeometry(bodyById(this.builtBody).radiusM, SPHERE_SEGMENTS.width, SPHERE_SEGMENTS.height), this.sphere.material);
       this.mesh.frustumCulled = false;
+      for (const entry of this.rayTerrains) {
+        entry.shell = new Mesh(this.shellGeometry(entry.terrain, bodyById(this.builtBody).radiusM), entry.terrain.material);
+        entry.shell.frustumCulled = false;
+        entry.shell.visible = false;
+        entry.terrain.setBody(bodyById(this.builtBody).radiusM);
+        this.engine.scene.add(entry.shell);
+      }
       this.engine.scene.add(this.mesh, this.sun, this.sun.target, this.ambient);
       this.setBody(this.builtBody);
       this.sphere.setBodyRadius(bodyById(this.builtBody).radiusM);
@@ -305,6 +355,7 @@ export class PlanetShapeLabPageComponent {
       if (this.spinWarp() > 0) this.spinAngle = spinAngleAfter(this.spinAngle, delta, this.spinWarp());
       this.updateSun();
       this.updateCamera();
+      this.updatePixelAngle();
     });
     const beforeRender = this.engine.beforeRender$.subscribe(() => { for (const callback of this.beforeRenderCallbacks) callback(); });
     const rendered = this.engine.renderComplete$.subscribe(({ renderedAt }) => {
@@ -326,6 +377,13 @@ export class PlanetShapeLabPageComponent {
         this.engine.scene.remove(this.mesh, this.sun, this.sun.target, this.ambient);
         this.mesh.geometry.dispose();
       }
+      for (const entry of this.rayTerrains) {
+        if (entry.shell) {
+          this.engine.scene.remove(entry.shell);
+          entry.shell.geometry.dispose();
+        }
+        entry.terrain.material.dispose();
+      }
       this.probe?.target.dispose();
       this.sphere.material.dispose();
       this.sphere.probeMaterial.dispose();
@@ -340,6 +398,13 @@ export class PlanetShapeLabPageComponent {
       this.mesh.geometry = createCameraRelativeSphereGeometry(radius, SPHERE_SEGMENTS.width, SPHERE_SEGMENTS.height);
       this.configureShadow(radius);
       this.sphere.setBodyRadius(radius);
+      for (const entry of this.rayTerrains) {
+        if (entry.shell) {
+          entry.shell.geometry.dispose();
+          entry.shell.geometry = this.shellGeometry(entry.terrain, radius);
+        }
+        entry.terrain.setBody(radius);
+      }
       this.builtBody = id;
     }
     this.bodyId.set(id);
@@ -425,8 +490,40 @@ export class PlanetShapeLabPageComponent {
 
   setBodyDrawn(drawn: boolean): void {
     this.bodyDrawn.set(drawn);
-    if (this.mesh) this.mesh.visible = drawn && this.webGpuOk();
+    this.applySurface();
     this.sun.visible = drawn;
+  }
+
+  /** Which surface draws: the plain sphere or the raymarched terrain (never both, so the scene pass is one of them). */
+  setSurface(surface: Surface): void {
+    this.surface.set(surface);
+    this.applySurface();
+    this.applyFeatures();
+  }
+
+  setRaySteps(steps: number): void {
+    this.raySteps.set(steps);
+    for (const entry of this.rayTerrains) entry.terrain.setSteps(steps);
+  }
+
+  private applySurface(): void {
+    const drawn = this.bodyDrawn() && this.webGpuOk();
+    if (this.mesh) this.mesh.visible = drawn && this.surface() === 'sphere';
+    for (const entry of this.rayTerrains) if (entry.shell) entry.shell.visible = drawn && this.surface() === entry.surface;
+  }
+
+  private shellGeometry(terrain: RaymarchTerrain, radiusM: number) {
+    return createCameraRelativeSphereGeometry(terrain.shellRadiusM(radiusM, SHELL_SEGMENTS.height), SHELL_SEGMENTS.width, SHELL_SEGMENTS.height);
+  }
+
+  /** Radians per drawing-buffer pixel at the screen centre: the march's hit tolerance. Numbers only, every frame. */
+  private updatePixelAngle(): void {
+    const camera = this.engine.camera;
+    const height = (this.engine.renderer as unknown as { domElement?: { height: number } }).domElement?.height ?? 0;
+    if (camera instanceof PerspectiveCamera && height > 0) {
+      const angle = (2 * Math.tan((camera.fov * Math.PI) / 360)) / height;
+      for (const entry of this.rayTerrains) entry.terrain.setPixelAngle(angle);
+    }
   }
 
   onTestProgress(progress: TestProgress | null): void {
@@ -453,6 +550,7 @@ export class PlanetShapeLabPageComponent {
       this.pose = resolveCameraPose(this.poseId(), this.bodyId(), this.morph());
     }
     this.sphere.setCameraBodyPosition(...this.pose.position);
+    for (const entry of this.rayTerrains) entry.terrain.setCamera(...this.pose.position);
     this.upVector.set(...this.pose.up);
     this.backward.set(...this.pose.forward).negate();
     this.right.crossVectors(this.upVector, this.backward).normalize();
@@ -483,6 +581,7 @@ export class PlanetShapeLabPageComponent {
     const radius = bodyById(this.bodyId()).radiusM;
     const [cx, cy, cz] = this.pose.position;
     const sun = sunDirectionBody(this.spinAngle, this.sunDirection);
+    for (const entry of this.rayTerrains) entry.terrain.setSun(sun[0], sun[1], sun[2]);
     this.sun.target.position.set(-cx, -cy, -cz);
     this.sun.position.set(-cx + sun[0] * radius * 2, -cy + sun[1] * radius * 2, -cz + sun[2] * radius * 2);
     this.sun.target.updateMatrixWorld();
@@ -492,7 +591,10 @@ export class PlanetShapeLabPageComponent {
     if (!this.mesh) return;
     // Shadow choice (Plan 055 morph contract): the engine's shadow pass does not morph, so the sphere neither casts nor
     // receives while morph > 0 (the whole shadow pass is skipped), rather than morphing the shadow geometry.
-    const shadows = shadowsActive(this.featureState(), this.morph());
+    // The raymarched terrain has no shadow pass yet, so it draws without one rather than with the hidden sphere's.
+    const shadows = shadowsActive(this.featureState(), this.morph()) && this.surface() === 'sphere';
+    // Terrain v2 marches its own soft shadow instead.
+    for (const entry of this.rayTerrains) entry.terrain.setShadows?.(this.featureState().shadows);
     if (this.mesh.receiveShadow !== shadows || this.sun.castShadow !== shadows) this.sphere.material.needsUpdate = true;
     this.sun.castShadow = shadows;
     this.mesh.castShadow = shadows;
@@ -564,7 +666,7 @@ export class PlanetShapeLabPageComponent {
     const previous = this.hud();
     const adapter = adapterLabel(info);
     if (backend === previous.backend && width === previous.width && height === previous.height && adapter === previous.adapter) {
-      if (!this.runnerReady() && this.webGpuOk()) this.runnerReady.set(true);
+      if (!this.runnerReady() && this.webGpuOk() && this.warmTerrain()) this.runnerReady.set(true);
       return;
     }
     this.hud.set({
@@ -576,7 +678,29 @@ export class PlanetShapeLabPageComponent {
       this.webGpuReason.set(`The renderer started on ${backend} instead.`);
       this.setBodyDrawn(false);
     }
-    this.runnerReady.set(this.webGpuOk());
+    this.runnerReady.set(this.webGpuOk() && this.warmTerrain());
+  }
+
+  /**
+   * Compiles the raymarch pipeline once, in the background, and says whether it is done. Its first use otherwise
+   * stalls the GPU long enough for the timestamp readback to time out inside a test case.
+   */
+  private warmTerrain(): boolean {
+    if (this.terrainCompile === 'pending' && this.mesh) {
+      this.terrainCompile = 'running';
+      const renderer = this.engine.renderer as unknown as { compileAsync(object: Mesh, camera: unknown, scene: Scene): Promise<void> };
+      // `compileAsync` skips hidden objects while it collects them, which happens before its first await.
+      const done = Promise.all(this.rayTerrains.map(({ shell }) => {
+        if (!shell) return Promise.resolve();
+        const visible = shell.visible;
+        shell.visible = true;
+        const compiled = renderer.compileAsync(shell, this.engine.camera, this.engine.scene);
+        shell.visible = visible;
+        return compiled;
+      }));
+      done.then(() => { this.terrainCompile = 'done'; }, (error: unknown) => { this.engineError ||= `terrain compile: ${String(error)}`; this.terrainCompile = 'done'; });
+    }
+    return this.terrainCompile === 'done';
   }
 
   private environment(): Record<string, TestSetting> {

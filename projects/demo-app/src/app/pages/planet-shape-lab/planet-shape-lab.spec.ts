@@ -44,7 +44,7 @@ class FakeHost implements PlanetShapeTestHost {
   resetErrors(): void { this.error = ''; }
   backendIsWebGpu(): boolean { return this.webgpu; }
   scene(): PlanetShapeSceneInfo {
-    const drawn = this.state.kind === 'sphere';
+    const drawn = this.state.kind !== 'empty';
     return { bodyDrawn: drawn, drawCalls: drawn ? 1 : 0, triangles: drawn ? 261_120 : 0, drawingBuffer: [2560, 1440] };
   }
   onBeforeRender(callback: () => void): () => void { this.before.add(callback); return () => this.before.delete(callback); }

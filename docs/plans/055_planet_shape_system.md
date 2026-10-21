@@ -285,7 +285,8 @@ true shape with no mesh in between.
 
 ## Race rules
 
-- Phase 1 must be finished first, so every contender starts from the same harness, op system and evaluator.
+- Phase 1b must be finished before the race rounds, so every contender is judged with the same harness, op system
+  and evaluator (contender C's first version comes earlier, in Phase 1).
 - **One folder per contender, in one checkout** (owner, 2026-10-19). Each contender lives in its own folder
   (`planet-shape/contender-a`, `-b`, `-c`) with its own test adapter, and the lab page switches between them, so all
   three share one harness and one build. Parallel sessions may work at once if each touches only its own
@@ -369,19 +370,40 @@ show the `headless-hardware` profile far slower than `visible-browser` for the s
 **timings come from `visible-browser` runs** until Phase 0 shows a headless profile that matches them. Correctness
 suites stay headless.
 
-**Platform ceiling microbenchmarks** (no terrain): draw calls × triangles per draw on `WebGPURenderer`; instanced
+**Platform ceiling microbenchmarks** (**parked** by the owner 2026-10-21: the race measures the same limits on real
+terrain; run one only when a contender hits a wall it would explain) (no terrain): draw calls × triangles per draw on `WebGPURenderer`; instanced
 against merged geometry; heights read from a texture in the vertex stage; upload throughput; worker evaluator
 throughput; one full-screen sphere-trace at 8, 32 and 128 steps; readback round-trip latency.
 
 **Gate:** the owner sees per-pass GPU ms, the quality metrics and an ablation report on a plain sphere; the timer
-self-test passes; the frame budget table is confirmed with measured fixed costs.
+self-test passes; the frame budget table is confirmed with measured fixed costs. **Closed 2026-10-21** (owner): all
+of these are in the runbook; the microbenchmarks are parked.
 
-### Phase 0b. Measure the old attempts
+**Reordered 2026-10-21 (owner).** Too long had passed without any terrain. Phase 0b is parked, and the next phase
+is the first raymarched terrain (Phase 1 below). The shape-op system, workers and data-flow core (now Phase 1b) are
+built when a renderer needs them, not ahead of it.
 
+### Phase 0b. Measure the old attempts (parked 2026-10-21)
+
+Parked by the owner: the old attempts already failed, and where they spent their time would not change what is built.
 Adapters for the CDLOD planet (v2 and v3), the cell planet TSL path and the clipmap, run on the Phase 0 scenarios
 that apply. No fixes. **Gate:** a table in the runbook of where each one spent its time.
 
-### Phase 1. Shape ops, evaluator and data-flow core
+### Phase 1. First raymarched terrain (contender C, minimal)
+
+Real terrain in the lab as soon as possible, measured by the Phase 0 harness:
+
+- A bounding shell (the sphere at radius `R + H`, back faces) rasterised camera-relative; each of its pixels sphere-traces
+  a height field from the shell to the surface and writes its own depth, so raster and marched pixels sort.
+- One fixed height function in TSL (fractal noise over the body-frame direction, `0..H`), no ops yet.
+- Body-relative altitude along the ray from doubles computed on the CPU, so a 6,371 km body does not lose the ground
+  to float32.
+- Lit by the lab's sun; no shadows and no morph yet (the lab shows the plain sphere for those).
+- A `planet-shape-raymarch` v1 timing suite on every pose and size, and the step count as a toggle.
+- **Gate:** the owner sees the terrain and its per-pass GPU ms at every pose and size; the owner then picks the next
+  step (more of C, or A and B to race against it).
+
+### Phase 1b. Shape ops, evaluator and data-flow core
 
 - Op types, bounds, minimum visible size, fidelity class, blend modes, op log with deterministic replay.
 - The two example shape programs on a cell planet.

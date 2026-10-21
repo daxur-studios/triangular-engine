@@ -674,3 +674,87 @@ measured with 12 volumes, the lab's largest preset, and a still sun; a moving su
 (Plan 051's flyby cases). Neither lab draws terrain, so overdraw between terrain and these passes is not in the
 numbers.
 
+### 2026-10-21: phases reordered; first raymarched terrain (Phase 1)
+
+The owner closed Phase 0, parked the platform microbenchmarks and Phase 0b, and moved the first raymarched terrain
+ahead of the shape-op machinery (plan, Phases). Built in the lab (`planet-shape-raymarch.ts`, the lab's **Surface:
+raymarched terrain** button and a steps row):
+
+- A back-faced shell at `R + H` (128 x 64, camera-relative, radius pushed out so its chords still enclose the sphere).
+  Each of its pixels starts where the ray enters the shell (or at the camera inside it), sphere-traces one fixed height
+  field and writes its own depth. `H = min(0.01 R, 8 km)`.
+- Height: fractal Perlin noise (`mx_noise_float`) over the body-frame direction, `R / 4` base hills, a flat pad under
+  the poses so no pose starts inside a hill. Octaves are added only while their wavelength is over four pixel
+  footprints (up to 14, the last one fading in). In the march, octaves stop as soon as the most the rest could add
+  leaves the ground below the ray, and above `H` no noise is evaluated at all.
+- Altitude along the ray uses `|o|^2 - R^2` from doubles on the CPU, so 6,371 km keeps the ground to millimetres near
+  the camera.
+- A ray that runs out of steps within 8 pixels of the ground keeps its last point (otherwise the horizon is speckled).
+- The pipeline is compiled before the runner is ready; its first use otherwise stalled the GPU past the 500 ms
+  timestamp readback limit (the first run failed on case 1 that way).
+- No morph, no shadows, no quality probe yet (the quality suite still measures the plain sphere).
+
+First timing run, `planet-shape-raymarch@v1` (RTX 3080, 2538 x 1440, unattended standard run;
+`2026-10-21T17-11-41-211Z_visible-browser_556840cd-0c1fc7b9.json`), scene pass = terrain, median GPU ms:
+
+| Pose | 64 km | 600 km | 6,371 km |
+|---|---|---|---|
+| Orbit | 4.5 | 4.7 | 1.1 |
+| Low flyover | 40.9 | 41.7 | 29.3 |
+| Ground | 44.2 | 43.4 | 36.1 |
+| Horizon grazing | 47.5 | 48.2 | 42.0 |
+
+Steps at 600 km: orbit 2.6 / 4.7 / 4.9 ms and ground 11.9 / 43.4 / 60.9 ms at 32 / 128 / 256 steps. The run is marked
+`gpu-throttled` (the page itself held the GPU at 100 %) and the 256-step ground case `INVALID` (61 ms cadence).
+
+**Reading:** the low poses are 15-25x over the 2.0 ms terrain budget, and their cost is linear in the step count, so
+most pixels use every step: the sky and grazing rays cross up to `sqrt(2RH)` (85 km at 600 km) of shell before they
+leave it, in steps of 0.6 x the gap to the ground below. This is contender C's stated main risk (per-pixel cost at
+1440p). The design in the plan answers it with a tight raster mesh that bounds the surface from outside, so the march
+covers only the last stretch and sky pixels are never marched; this first version uses the loosest bound there is
+(the `R + H` sphere). Also open: half-resolution marching, and a cone/relaxed step.
+
+
+### 2026-10-21: terrain v2, the Shadertoy recipe (`planet-shape-raymarch-lit.ts`)
+
+The first terrain looked flat and fell apart (a pit at the pad, mid-air speckle, horizontal stripes of holes). The owner
+asked for something in the style of the Shadertoy terrains; v2 takes their ideas (no code copied: Shadertoy shaders
+are CC BY-NC-SA by default) and sits next to v1 under Surface, "terrain v2".
+
+- Value noise from one 256 x 256 RG texture, the four texel reads blended in the shader. A single octave of value
+  noise reads as blocky; colour noise thresholded by `smoothstep` made it worse, so the grass tint now follows height.
+- The march sees up to 9 octaves; the normal 13, plus camera-relative bump and colour noise (camera position modulo
+  the noise period in doubles, so it holds at 6,371 km).
+- Rays step by `max(0.5 gap, 1.2 % of t)`, refined by one secant step, and the `R + H` sphere is the analytic bound
+  (rays that miss it never march). No more stripes; rays that run out stop where they are.
+- Heights from below the sphere to `H = min(0.03 R, 9 km)`, so the pad is at mean level (no pit).
+- A sky inside a `0.04 R` air band; black space above it. Sun, sky and bounce light, optional soft shadow (the
+  `shadows` feature), a `1 - exp(-x)` tone curve. Fog was tried and dropped (owner).
+
+Seen only in the browser pane (integrated GPU), not timed yet. With the paused sun at noon over the poses the ground is
+flat-lit; the horizon at 600 km from 12 km is still smooth (the hills there are low, the mountain mask mostly off).
+
+#### Same day: v2 rebuilt as a density field (canyons, ledges, overhangs)
+
+The owner found the height-map v2 looked like "worms under the skin" (ridged octaves plus noise bump) and pointed out
+that the reference shader makes canyons with overhangs, which a height map cannot. Right: the reference is a 3D field,
+`altitude + canyons + noise(p * (1, 4, 1))`, stepped at a quarter of its value. v2 now follows that:
+
+- Field = `altitude + pad * U * (7 * canyon + 3 * (rock - 0.44))`, `U = relief / 10`, `relief = min(0.03 R, 9 km)`.
+  `rock` is three octaves of 3D value noise with the vertical stretched 4x (strata, ledges, overhangs); `canyon` is a
+  two-octave mask, winding channels where it crosses its middle plus basins where it is high.
+- Every noise is a camera-relative frame: `origin + matrix * x`, the matrix (scale, octave rotation) and the origin
+  (camera times matrix, modulo the 256 period) worked out in doubles on the CPU. Octaves finer than a pixel fade to
+  their mean.
+- The march runs between the plateau-top sphere and a solid-floor sphere (reaching it is ground), twice the chosen
+  steps, `max(field / 4, k t)` with `k` growing from 0.8 % to 6 % over the second half, so rays skimming the flat pad
+  still reach the horizon. The march uses one hardware-filtered fetch per noise; normals use the four-tap noise
+  (8-bit filter weights step visibly in finite differences).
+- Close range: six camera-relative detail levels (2.5 U down by 5x each) for bump and colour, each faded by footprint.
+- Shading after the reference: rock banded by altitude, grass on up-facing ground, some pale dust on flat tops,
+  Oren-Nayar sun / five-direction sky / bounce, occlusion low in canyons, `1.4 x / (1 + x)`, a muted grade in display
+  space. The reference's sun strength (7, orange) assumes a low sun; at a high sun it is 2.2 and white, or noon blows out.
+
+Seen in the browser pane only (integrated GPU, about 1 FPS there at DPR 1.5 with the pane hidden, so no timing
+claim). Horizon grazing at 600 km and 64 km shows layered canyon walls; the ground pose stands on the flat pad, so it
+shows a plain with canyons on the horizon.
