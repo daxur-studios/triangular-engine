@@ -148,6 +148,11 @@ export async function systemProbe({ platform = process.platform, exec = execFile
 
 /** Browser processes on the GPU are taken to be the page under test (its browser cannot be told apart from another one). */
 const BROWSER_PROCESS = /^(chrome|msedge|firefox|opera|brave|vivaldi)(\.exe)?$/i;
+/**
+ * Always on the GPU and not other work: the Windows compositor, and nvidia-smi's `[Insufficient Permissions]` (on
+ * Windows that is the compositor, `dwm.exe`, which a normal user cannot read). Without this every run warned.
+ */
+export const SYSTEM_GPU_PROCESS = /^(dwm|csrss)(\.exe)?$|^\[.*\]$/i;
 
 /**
  * Warnings mark a run; they never fail it. `gpu-busy-before-start` means a non-browser process held the GPU before
@@ -156,7 +161,7 @@ const BROWSER_PROCESS = /^(chrome|msedge|firefox|opera|brave|vivaldi)(\.exe)?$/i
 export function machineWarnings(preflight, cases, thresholds = MACHINE_THRESHOLDS) {
   const out = new Set();
   if (preflight?.power?.source === 'battery') out.add('on-battery');
-  const apps = preflight?.gpuApps ?? [];
+  const apps = (preflight?.gpuApps ?? []).filter((app) => !SYSTEM_GPU_PROCESS.test(app.name ?? ''));
   if (apps.some((app) => !BROWSER_PROCESS.test(app.name ?? ''))) out.add('gpu-busy-before-start');
   const idle = preflight?.idle?.gpu;
   if (idle && typeof idle === 'object') {

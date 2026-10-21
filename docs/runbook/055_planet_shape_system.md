@@ -521,8 +521,24 @@ Built in parallel by three agents in one checkout with disjoint files, then revi
   errors. Earlier check (2026-10-20): morph 0.5 bends toward the camera, no clipping.
 - **New suite** `planet-shape-morph` v1 (performance, `expectedGpuVendor` nvidia): 600 km, morph 0 / 0.5 / 1 at orbit
   and ground, six cases `morph-000|050|100-orbit|ground-600km`, `gpuPassTotal` p95 budget 0.5 ms (as the sphere cases),
-  no baseline yet: record one from the owner's first quiet standard run with `npm run test:baseline`.
+  baseline recorded 2026-10-21 (see the entry at the end).
   Existing suites and their scenarios are unchanged (morph 0), but every sphere case now includes the morph graph's
   vertex work, so a baseline drift of the first suite is possible and would be real.
 - **Checked:** the lab specs (unit level: material uniforms, clamping, geometry attributes, shadow policy, suite ids and
   scenarios, adapter apply/restore). Not checked: the visual look and GPU cost, which need the owner's browser.
+
+### 2026-10-21: morph baseline and unattended runs
+
+- **Baseline.** `planet-shape-morph` v1 now has a baseline (`planet-shape-morph-baseline.v1.json`) from a quiet
+  standard run on the RTX 3080 at 11:57. `gpuPassTotal` p95: orbit 0.11 / 0.18 / 0.33 ms and ground 0.16 ms at every
+  morph (0 / 0.5 / 1). A run at 11:21 agreed within 0.01 ms. Orbit at morph 1 costs about 3x morph 0 because the
+  flat map covers more of the screen. Ground stays flat because the camera rides the morph. Morph 0 matches the plain
+  sphere baseline, so the morph graph's vertex work costs next to nothing.
+- **Unattended runs.** The run was made with the new `triangular-test-run` bin (`npm run test:run`, see
+  `projects/triangular-engine/docs/testing.md`, "Unattended runs"). It queues machine-wide, waits for a quiet GPU, opens
+  a throwaway full-screen Chrome with `--enable-webgpu-developer-features`, waits for the saved row and closes that
+  Chrome. Without the flag a fresh profile rounds GPU timestamps and the timer self-test fails (the 11:20 run).
+- **Warning fix.** `gpu-busy-before-start` fired on every Windows run because `nvidia-smi` lists the compositor
+  (`dwm.exe`) as `[Insufficient Permissions]`. The receiver now skips it; the fix applies once the receiver restarts.
+- **Fingerprint.** `triangular-test.config.json` now includes the lab folder in `fingerprintPaths`, so a change to the
+  lab marks earlier runs `STALE`. Also applies once the receiver restarts.

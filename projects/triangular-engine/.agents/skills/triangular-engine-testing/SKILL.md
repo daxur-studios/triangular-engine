@@ -166,8 +166,14 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   `npm run test:summary`; the page is for a human to browse.
 - The user can press **Copy for agent** on the result card: a few lines with the suite,
   mode, verdicts, saved file and problems. Read the run with `test:summary` from there.
-- Without a receiver, JSON copy/paste is the fallback handoff. No queue or
-  idle-agent wakeup exists.
+- **Run a hardware suite yourself, unattended:** `npx triangular-test-run --url <page url> --suite <id> --version <n>`
+  (in this repo `npm run test:run -- …`), from the app's repo root with the receiver up. Start it **in the background
+  and wait for it to exit**; do not poll. It queues machine-wide with every other app's launcher, waits for a quiet
+  GPU (no game, low load), opens a throwaway full-screen Chrome with `--enable-webgpu-developer-features`, waits for
+  the saved result, closes that Chrome and prints the summary. Exit 0 pass, 1 not passed, 2 no result, 3 never
+  quiet, 4 setup error. It takes over the screen: run it only when the user has said the machine is free.
+  Details: `docs/testing.md`, "Unattended runs".
+- Without a receiver, JSON copy/paste is the fallback handoff.
 
 Verify the adapter's meaningful checks, cancellation and restoration with the
 game's narrow existing tests. Keep automated browser checks headless and

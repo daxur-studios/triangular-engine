@@ -422,6 +422,42 @@ holds the lock, a single file in the OS temp folder says who it is, `triangular-
   rare on a dev machine, and the case is marked, never failed.
 - Runs without machine sampling (`machineSampling: false`) never take or wait for the lock.
 
+## Unattended runs (dev only)
+
+`triangular-test-run` runs one suite with no one at the keyboard, for agents and for a machine left alone to measure.
+Run it from the app's repo root, with the dev server and its receiver up:
+
+```bash
+npx triangular-test-run --url http://my-app.localhost:4200/lab --suite my-suite --version 1
+```
+
+Inside this repository use `npm run test:run -- …`. In order, it:
+
+1. **Checks the receiver.** `GET <page origin>/__triangular-test-sink` must answer with this repo's `root`, or the run
+   would be saved somewhere else. A `*.localhost` host is reached on 127.0.0.1 with its name in the `Host` header.
+2. **Queues.** Each launcher writes a ticket into `triangular-test-queue/` in the OS temp folder, named
+   `<ms>-<pid>.json`, holding the suite, version, repo and URL. The oldest ticket whose pid is alive runs, so launchers
+   from any app on the machine take turns. Dead tickets are removed by whoever looks, so a crashed launcher never
+   blocks the queue. The ticket is removed on exit.
+3. **Waits for a quiet machine.** Over `--quiet-window-s` (10 s) the median GPU load must be at most `--quiet-pct`
+   (10 %), and no process may be on the GPU except browsers and the Windows compositor (`dwm.exe`, which `nvidia-smi`
+   lists as `[Insufficient Permissions]`). A game or another heavy app holds the run back. It checks again every 30 s
+   and gives up after `--quiet-wait-min` (120 min). Without `nvidia-smi` it skips this check and says so.
+4. **Opens a dedicated Chrome.** It uses a throwaway profile in the OS temp folder, full screen, with
+   `--enable-webgpu-developer-features`: a fresh profile does not carry `chrome://flags`, and without that flag GPU
+   timestamps are rounded and the timer self-test fails. The URL is the suite's autostart link (see "Launch links").
+   On a hybrid-GPU laptop, `chrome.exe` uses the GPU set for it in the Windows graphics settings.
+5. **Waits for the result.** It finishes when `index.jsonl` gains this suite and version with a `startedAt` after
+   the launch, when `--timeout-min` (30) passes, or when that Chrome closes.
+6. **Cleans up.** It closes that Chrome (unless `--keep-open`), deletes the profile and prints
+   `triangular-test-summary --suite <id> --last 1`.
+
+Exit codes: 0 saved and passed, 1 saved but not passed, 2 no result (timeout or Chrome closed), 3 never quiet,
+4 setup error. Other options: `--profile`, `--mode`, `--repetitions`, `--no-thumbnails`, `--chrome <path>`.
+
+For agents: start it in the background and wait for the process to exit. Do not poll. One launcher per run; queue
+several suites by starting several launchers. If a launcher is killed, its Chrome window stays open; close it.
+
 ## Ablation (ABAB)
 
 `compareAblation(rounds, { maxSpread?, statistic? })` compares a baseline (arm `A`) with a feature (arm `B`) from

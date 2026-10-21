@@ -84,6 +84,7 @@
   "bin": {
     "triangular-test-receiver": "./bin/triangular-test-receiver.mjs",
     "triangular-test-summary": "./bin/triangular-test-summary.mjs",
-    "triangular-test-baseline": "./bin/triangular-test-baseline.mjs"
+    "triangular-test-baseline": "./bin/triangular-test-baseline.mjs",
+    "triangular-test-run": "./bin/triangular-test-run.mjs"
   }
 }

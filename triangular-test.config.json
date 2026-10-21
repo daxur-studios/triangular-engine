@@ -1,5 +1,5 @@
 {
   "port": 4723,
   "outputDir": "artifacts/test-runs",
-  "fingerprintPaths": ["projects/triangular-engine", "projects/demo-app/src/app/pages/atmosphere-lab"]
+  "fingerprintPaths": ["projects/triangular-engine", "projects/demo-app/src/app/pages/atmosphere-lab", "projects/demo-app/src/app/pages/planet-shape-lab"]
 }

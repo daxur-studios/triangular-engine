@@ -1,5 +1,6 @@
 import type { TestBaseline, TestScenario, TestSuite } from 'triangular-engine/testing';
 import baselineV1 from './planet-shape-baseline.v1.json';
+import morphBaselineV1 from './planet-shape-morph-baseline.v1.json';
 import { BODIES, FIXED_SEED, type BodyId } from './planet-shape-config';
 import type { CameraPoseId } from './planet-shape-camera';
 import { defaultFeatureState, withFeature, type FeatureState } from './planet-shape-features';
@@ -87,10 +88,12 @@ export const PLANET_SHAPE_TEST_HISTORY: readonly TestSuite<PlanetShapeTestSettin
     title: 'Morph: plain sphere at morph 0, 0.5 and 1 (sphere, half-bent, flat map) at orbit and ground, 600 km',
     purpose: 'performance',
     expectedGpuVendor: 'nvidia',
-    // No baseline yet: record one from the owner's first quiet standard run with `npm run test:baseline`. Morph 0 is the
-    // control: the same sphere as the baseline suite, now through the engine's morph graph. Shadows stay off (the sphere
-    // does not cast while morphed), so the cases differ only in the vertex stage. The pose rides the morph
-    // (`resolveCameraView`), so the ground cases stay 2 m over the surface at every morph.
+    // Quiet standard run of 2026-10-21 11:57 on the RTX 3080 (unattended, `npm run test:run`), same metrics as the
+    // baseline suite; a run 35 min earlier agreed within 0.01 ms. Morph 0 is the control: the same sphere as the
+    // baseline suite, now through the engine's morph graph. Shadows stay off (the sphere does not cast while morphed),
+    // so the cases differ only in the vertex stage. The pose rides the morph (`resolveCameraView`), so the ground cases
+    // stay 2 m over the surface at every morph.
+    baseline: morphBaselineV1 as TestBaseline,
     scenarios: MORPH_VALUES.flatMap((morph) => POSES.map((pose) =>
       budgeted(`morph-${Math.round(morph * 100).toString().padStart(3, '0')}-${pose}-600km`,
         `Plain sphere, morph ${morph}, ${pose}, 600 km`, { bodyId: '600km', poseId: pose, morph }))),

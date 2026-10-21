@@ -248,6 +248,8 @@ test('gpu-busy-before-start keys on a non-browser GPU process, not on the page\'
   assert.equal(busy([{ pid: 1, name: 'chrome.exe' }, { pid: 2, name: 'chrome.exe' }]), false);
   assert.equal(busy([{ pid: 1, name: 'chrome.exe' }, { pid: 3, name: 'game.exe' }]), true);
   assert.equal(busy([{ pid: 3, name: 'game.exe' }].map((app) => ({ ...app, name: undefined }))), true);
+  // The compositor is always listed, often unreadable: not other work.
+  assert.equal(busy([{ pid: 1, name: 'chrome.exe' }, { pid: 4, name: '[Insufficient Permissions]' }, { pid: 5, name: 'dwm.exe' }]), false);
   // No process list: fall back to the idle load threshold.
   assert.equal(busy([]), true);
   assert.equal(machineWarnings({ gpuApps: [], idle: { gpu: { util: { med: 5 } } } }, {}).includes('gpu-busy-before-start'), false);

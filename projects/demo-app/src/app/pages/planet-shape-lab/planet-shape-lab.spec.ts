@@ -316,7 +316,7 @@ describe('planet shape lab', () => {
       expect(SHADOWS_AB.scenarios.some((scenario) => scenario.budgets)).toBeFalse();
     });
 
-    it('has the morph suite: 600 km, morph 0 / 0.5 / 1 at orbit and ground, budgeted, no baseline yet', () => {
+    it('has the morph suite: 600 km, morph 0 / 0.5 / 1 at orbit and ground, budgeted, with a baseline for every case', () => {
       expect(() => validateTestHistory(PLANET_SHAPE_TEST_HISTORY)).not.toThrow();
       expect(`${MORPH.id}@${MORPH.version}:${MORPH.purpose}:${MORPH.expectedGpuVendor}`).toBe('planet-shape-morph@1:performance:nvidia');
       expect(MORPH.scenarios.map((scenario) => scenario.id)).toEqual([
@@ -325,7 +325,8 @@ describe('planet shape lab', () => {
       expect(MORPH.scenarios.map((scenario) => scenario.settings.morph)).toEqual([0, 0, 0.5, 0.5, 1, 1]);
       expect(MORPH.scenarios.map((scenario) => scenario.settings.poseId)).toEqual(['orbit', 'ground', 'orbit', 'ground', 'orbit', 'ground']);
       expect(MORPH.scenarios.every((scenario) => scenario.settings.bodyId === '600km' && scenario.settings.kind === 'sphere')).toBeTrue();
-      expect(MORPH.baseline).toBeUndefined();
+      expect(Object.keys(MORPH.baseline?.cases ?? {}).sort()).toEqual(MORPH.scenarios.map((scenario) => scenario.id).sort());
+      expect(MORPH.baseline?.mode).toBe('standard');
       const sphereBudget = BASELINE.scenarios[1].budgets?.['gpuPassTotal']?.p95;
       for (const scenario of MORPH.scenarios) expect(scenario.budgets?.['gpuPassTotal']?.p95).withContext(scenario.id).toBe(sphereBudget);
       // The existing suites keep their experiment: morph 0 everywhere.

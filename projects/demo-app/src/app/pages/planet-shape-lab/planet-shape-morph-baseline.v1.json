@@ -1,0 +1,92 @@
+{
+  "runId": "84b611dc-4b9f-4530-8b87-65984d423090",
+  "recordedAt": "2026-10-21T11:57:38.312Z",
+  "mode": "standard",
+  "gpu": "NVIDIA GeForce RTX 3080 Laptop GPU",
+  "cases": {
+    "morph-000-orbit-600km": {
+      "gpuScenePass": {
+        "median": 0.055,
+        "p95": 0.057
+      },
+      "gpuOutputPass": {
+        "median": 0.049,
+        "p95": 0.05
+      },
+      "gpuPassTotal": {
+        "median": 0.104,
+        "p95": 0.106
+      }
+    },
+    "morph-000-ground-600km": {
+      "gpuScenePass": {
+        "median": 0.11,
+        "p95": 0.112
+      },
+      "gpuOutputPass": {
+        "median": 0.049,
+        "p95": 0.049
+      },
+      "gpuPassTotal": {
+        "median": 0.159,
+        "p95": 0.161
+      }
+    },
+    "morph-050-orbit-600km": {
+      "gpuScenePass": {
+        "median": 0.124,
+        "p95": 0.127
+      },
+      "gpuOutputPass": {
+        "median": 0.049,
+        "p95": 0.05
+      },
+      "gpuPassTotal": {
+        "median": 0.173,
+        "p95": 0.176
+      }
+    },
+    "morph-050-ground-600km": {
+      "gpuScenePass": {
+        "median": 0.112,
+        "p95": 0.113
+      },
+      "gpuOutputPass": {
+        "median": 0.049,
+        "p95": 0.049
+      },
+      "gpuPassTotal": {
+        "median": 0.161,
+        "p95": 0.162
+      }
+    },
+    "morph-100-orbit-600km": {
+      "gpuScenePass": {
+        "median": 0.279,
+        "p95": 0.28
+      },
+      "gpuOutputPass": {
+        "median": 0.049,
+        "p95": 0.05
+      },
+      "gpuPassTotal": {
+        "median": 0.328,
+        "p95": 0.329
+      }
+    },
+    "morph-100-ground-600km": {
+      "gpuScenePass": {
+        "median": 0.114,
+        "p95": 0.114
+      },
+      "gpuOutputPass": {
+        "median": 0.049,
+        "p95": 0.049
+      },
+      "gpuPassTotal": {
+        "median": 0.162,
+        "p95": 0.163
+      }
+    }
+  }
+}
