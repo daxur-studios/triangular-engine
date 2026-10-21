@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { BufferAttribute, BufferGeometry, Sphere, SphereGeometry, Vector3 } from 'three';
-import { MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, color, floor, mix, mod, positionGeometry, uniform, uv, vec2 } from 'three/tsl';
+import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu';
+import { attribute, color, float, floor, mix, mod, positionGeometry, positionView, uniform, uv, vec2, vec4 } from 'three/tsl';
 import {
   createPlanetMorphLightingUniforms, createPlanetMorphUniforms, planetMorphGraph, setPlanetMapExtent, setPlanetProjectionCentre,
   type IPlanetMorphUniforms,
@@ -47,6 +47,11 @@ export function createCameraRelativeSphereGeometry(radiusM: number, widthSegment
 
 export interface PlainSphereMaterial {
   readonly material: MeshStandardNodeMaterial;
+  /**
+   * The quality probe's material (`planet-shape-quality.ts`): the same vertex stage, unlit, writing the distance from the
+   * camera in metres to red, the surface coordinates u/v to green/blue and 1 to alpha. Drawn only into the probe's float target, never to the screen.
+   */
+  readonly probeMaterial: MeshBasicNodeMaterial;
   /** Camera position in the body frame, in doubles; split into the two uniforms. */
   setCameraBodyPosition(x: number, y: number, z: number): void;
   /** The engine's morph uniforms, driven exactly as the cell planet drives them. */
@@ -83,10 +88,16 @@ export function createPlainSphereMaterial(): PlainSphereMaterial {
   // which is fine for a picture and is never used for placement or physics.
   material.positionNode = (graph.positionNode as any).sub(positionGeometry).add((positionGeometry as any).sub(cameraHigh).add(low.sub(cameraLow)));
   material.normalNode = graph.normalNode;
+  const probeMaterial = new MeshBasicNodeMaterial();
+  probeMaterial.positionNode = material.positionNode;
+  // The camera sits at the render origin, so the view-space length is the distance from the camera.
+  const surface = uv() as any;
+  probeMaterial.outputNode = vec4((positionView as any).length(), surface.x, surface.y, float(1));
   const cell = floor((uv() as any).mul(vec2(72, 36))) as any;
   material.colorNode = mix(color(0x4a7a52), color(0x7f9a62), mod(cell.x.add(cell.y), 2));
   return {
     material,
+    probeMaterial,
     morph,
     setMorph(value): void { morph.uMorph.value = Math.min(1, Math.max(0, value)); },
     setBodyRadius(radiusM): void { setPlanetMapExtent(morph, radiusM); },

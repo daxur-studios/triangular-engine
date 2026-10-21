@@ -338,7 +338,10 @@ placeholders until idle readings are measured.
 - Process names stay in local result files (`artifacts/` is gitignored). They never go into committed baselines,
   docs or the runbook.
 
-**Quality metrics** (computed in the lab against the reference renderer at the same pose):
+**Quality metrics** (computed in the lab against the reference renderer at the same pose). **Built 2026-10-21 for the
+plain sphere** (`planet-shape-quality` v1, functional; runbook): until contender C exists the reference is the exact
+sphere, ray-traced on the CPU in doubles. Silhouette, depth, cracks and flicker are measured; popping, fidelity classes
+and collider parity wait for terrain and a collider.
 - silhouette error in px, compared column by column along the horizon, and depth error per pixel;
 - crack count: clear to magenta, count magenta pixels inside the planet's outline;
 - flicker: two frames at a still pose must match; popping: frame-to-frame change during a slow zoom stays smooth;

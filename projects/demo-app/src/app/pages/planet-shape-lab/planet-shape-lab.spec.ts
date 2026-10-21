@@ -11,6 +11,10 @@ import { BODIES, SPIN_PERIOD_S, spinAngleAfter, sunDirectionBody } from './plane
 import { FEATURES, defaultFeatureState, featureMismatches, shadowsActive, withFeature } from './planet-shape-features';
 import { MORPH_CENTRE, createCameraRelativeSphereGeometry, createPlainSphereMaterial } from './planet-shape-sphere';
 import {
+  changedPixels, compareQuality, countHoles, frameFromProbeRgba, referenceFacetUv, referenceSphereFrame, surfaceCoordinateErrors,
+  type QualityFrame, type QualityProbeCamera,
+} from './planet-shape-quality';
+import {
   createPlanetShapeTestAdapter, settingsMismatches, type PlanetShapeFrameSummary, type PlanetShapeSceneInfo, type PlanetShapeTestHost,
 } from './planet-shape-test-adapter';
 import { PLANET_SHAPE_DEFAULTS, PLANET_SHAPE_TEST_HISTORY, type PlanetShapeTestSettings } from './planet-shape-tests';
@@ -49,6 +53,7 @@ class FakeHost implements PlanetShapeTestHost {
   startSampling(): void { this.sampling = true; }
   gpuSamplesSoFar(): readonly number[] { return []; }
   thumbnail?: () => Promise<Blob | undefined>;
+  qualityProbe?: PlanetShapeTestHost['qualityProbe'];
   stopSampling(): PlanetShapeFrameSummary {
     this.sampling = false;
     return {
@@ -59,6 +64,37 @@ class FakeHost implements PlanetShapeTestHost {
   environment(): Record<string, TestSetting> {
     return { backend: this.webgpu ? 'webgpu' : 'webgl2', 'gpu.software': this.software, 'gpu.timestampQuery': this.gpuPasses !== null };
   }
+}
+
+/** A small probe camera of a named pose, as the page builds it. */
+function probeCamera(poseId: 'orbit' | 'ground', bodyId: '600km' | '6371km'): { camera: QualityProbeCamera; radiusM: number } {
+  const pose = resolveCameraPose(poseId, bodyId);
+  return {
+    camera: { position: pose.position, forward: pose.forward, up: pose.up, fovDeg: 60, near: pose.near, far: pose.far },
+    radiusM: BODIES.find((body) => body.id === bodyId)!.radiusM,
+  };
+}
+
+/** A frame as the probe would read it: the reference itself, optionally with pixels knocked out. */
+function withHoles(frame: QualityFrame, holes: readonly number[]): QualityFrame {
+  const distance = Float32Array.from(frame.distance);
+  for (const i of holes) distance[i] = NaN;
+  return { ...frame, distance };
+}
+
+/** A reference frame with the exact facet uv filled in, as a perfect probe would read it. */
+function withSurface(frame: QualityFrame, camera: QualityProbeCamera, radiusM: number, segments: { width: number; height: number }): QualityFrame {
+  const u = new Float32Array(frame.distance.length).fill(NaN);
+  const v = new Float32Array(frame.distance.length).fill(NaN);
+  for (let i = 0; i < frame.distance.length; i++) {
+    if (Number.isNaN(frame.distance[i])) continue;
+    const exact = referenceFacetUv(camera, radiusM, segments, frame.width, frame.height, i % frame.width, Math.floor(i / frame.width), frame.distance[i]);
+    if (exact) {
+      u[i] = exact.u;
+      v[i] = exact.v;
+    }
+  }
+  return { ...frame, distance: Float32Array.from(frame.distance), u, v };
 }
 
 /** The engine's per-pass summary for `frames` frames of a scene and an output pass, with the given timestamp step. */
@@ -74,7 +110,7 @@ function gpuPassesOf(frames: number, stepNs: number): IGpuPassSummary {
   return summarizeGpuPasses(records)!;
 }
 
-const [BASELINE, MORPH, SHADOWS_AB] = PLANET_SHAPE_TEST_HISTORY;
+const [BASELINE, MORPH, SHADOWS_AB, QUALITY] = PLANET_SHAPE_TEST_HISTORY;
 const quick = (...ids: string[]): TestSuite<PlanetShapeTestSettings> => ({
   ...BASELINE,
   scenarios: BASELINE.scenarios.filter((scenario) => ids.includes(scenario.id)).map((scenario) => ({ ...scenario, durationMs: 300, warmupMs: 0 })),
@@ -215,23 +251,56 @@ describe('planet shape lab', () => {
       expect(orbit.near).toBe(resolveCameraPose('orbit', '600km').near);
     });
 
-    it('keeps height, pitch and heading over the anchored ground at every morph, off the map centre too', () => {
+    // The spots that move most: off centre, both sides near the seam (lon ±180, the map's left and right edges), the seam
+    // itself, high latitudes where Equal Earth squeezes the meridians, and next to a pole.
+    const MORPH_SPOTS = [[30, 20], [175, 0], [-170, 45], [179.9, -30], [180, 0], [90, 80], [-60, -85], [0, 89.9]] as const;
+
+    it('keeps height, pitch and heading over the anchored ground at every morph, at the centre, the edges and the poles', () => {
       const radius = 600_000;
       const rig = new CellPlanetMorphCameraRig({ radiusM: radius, projection: () => 'equalEarth' });
-      const view = { lonDeg: 30, latDeg: 20, headingDeg: 40, pitchDeg: -35, altitudeM: 1_000, altitudeRadii: 0 };
-      const anchor = new Vector3(Math.cos(20 * Math.PI / 180) * Math.sin(30 * Math.PI / 180), Math.sin(20 * Math.PI / 180),
-        Math.cos(20 * Math.PI / 180) * Math.cos(30 * Math.PI / 180));
-      for (const morph of [0, 0.25, 0.5, 0.75, 1]) {
-        const pose = resolveCameraView(view, '600km', 'free', morph);
-        const frame = rig.groundFrame(anchor, morph);
-        const offset = new Vector3(...pose.position).sub(frame.position);
-        expect(offset.dot(frame.normal)).withContext(`height at ${morph}`).toBeCloseTo(1_000, 3);
-        expect(offset.length()).withContext(`straight above at ${morph}`).toBeCloseTo(1_000, 3);
-        const forward = new Vector3(...pose.forward);
-        expect(Math.asin(forward.dot(frame.normal)) * 180 / Math.PI).withContext(`pitch at ${morph}`).toBeCloseTo(-35, 6);
-        expect(Math.atan2(forward.dot(frame.east), forward.dot(frame.north)) * 180 / Math.PI).withContext(`heading at ${morph}`)
-          .toBeCloseTo(40, 6);
+      for (const [lonDeg, latDeg] of MORPH_SPOTS) {
+        const view = { lonDeg, latDeg, headingDeg: 40, pitchDeg: -35, altitudeM: 1_000, altitudeRadii: 0 };
+        const lon = lonDeg * Math.PI / 180;
+        const lat = latDeg * Math.PI / 180;
+        const anchor = new Vector3(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));
+        for (const morph of [0, 0.25, 0.5, 0.75, 1]) {
+          const at = `lon ${lonDeg} lat ${latDeg} morph ${morph}`;
+          const pose = resolveCameraView(view, '600km', 'free', morph);
+          const frame = rig.groundFrame(anchor, morph);
+          expect([...pose.position, ...pose.forward, ...pose.up].every(Number.isFinite)).withContext(`finite at ${at}`).toBeTrue();
+          const offset = new Vector3(...pose.position).sub(frame.position);
+          expect(offset.dot(frame.normal)).withContext(`height at ${at}`).toBeCloseTo(1_000, 3);
+          expect(offset.length()).withContext(`straight above at ${at}`).toBeCloseTo(1_000, 3);
+          const forward = new Vector3(...pose.forward);
+          const up = new Vector3(...pose.up);
+          expect(forward.length()).withContext(`unit forward at ${at}`).toBeCloseTo(1, 9);
+          expect(forward.dot(up)).withContext(`forward ⟂ up at ${at}`).toBeCloseTo(0, 9);
+          expect(Math.asin(forward.dot(frame.normal)) * 180 / Math.PI).withContext(`pitch at ${at}`).toBeCloseTo(-35, 6);
+          expect(Math.atan2(forward.dot(frame.east), forward.dot(frame.north)) * 180 / Math.PI).withContext(`heading at ${at}`)
+            .toBeCloseTo(40, 6);
+        }
       }
+    });
+
+    it('lands on the flat map plane at morph 1 at every spot, inside the Equal Earth outline', () => {
+      const radius = 600_000;
+      for (const [lonDeg, latDeg] of MORPH_SPOTS) {
+        const view = { lonDeg, latDeg, headingDeg: 0, pitchDeg: -90, altitudeM: 2, altitudeRadii: 0 };
+        const pose = resolveCameraView(view, '600km', 'free', 1);
+        const at = `lon ${lonDeg} lat ${latDeg}`;
+        // The map is the plane z = 0 facing +Z; the camera is 2 m in front of it, looking straight at it.
+        expect(pose.position[2]).withContext(`2 m over the map at ${at}`).toBeCloseTo(2, 3);
+        expect(pose.forward[2]).withContext(`looking at the map at ${at}`).toBeCloseTo(-1, 6);
+        // The map is scaled to 2πR wide (`uMapWidth`): x within ±πR, y within ±0.4868πR (Equal Earth's height to width).
+        expect(Math.abs(pose.position[0])).withContext(`x inside the map at ${at}`).toBeLessThanOrEqual(Math.PI * radius + 1);
+        expect(Math.abs(pose.position[1])).withContext(`y inside the map at ${at}`).toBeLessThanOrEqual(0.4868 * Math.PI * radius);
+      }
+      // Longitude 180 is the seam: the frame puts it on the right edge, and a hair east of it is on the left edge.
+      const seam = (lonDeg: number) => resolveCameraView({ lonDeg, latDeg: 0, headingDeg: 0, pitchDeg: -90, altitudeM: 2, altitudeRadii: 0 },
+        '600km', 'free', 1).position[0];
+      expect(seam(180)).toBeCloseTo(Math.PI * radius, 0);
+      expect(seam(179.999)).toBeGreaterThan(0.99 * Math.PI * radius);
+      expect(seam(-179.999)).toBeLessThan(-0.99 * Math.PI * radius);
     });
 
     it('defaults to 0 and is compared like any other setting', () => {
@@ -290,6 +359,78 @@ describe('planet shape lab', () => {
     });
   });
 
+  describe('quality metrics', () => {
+    it('ray-traces the exact sphere: the orbit centre is the altitude, the ground pose sees sky above and ground 2 m below', () => {
+      const orbit = probeCamera('orbit', '600km');
+      const frame = referenceSphereFrame(orbit.camera, orbit.radiusM, 64, 36);
+      // A pixel next to the image centre looks half a pixel (0.8 degrees here) past the planet centre: 1.5 R away, plus a little.
+      const centre = frame.distance[18 * 64 + 32];
+      expect(centre).toBeGreaterThan(1_500_000);
+      expect(centre).toBeLessThan(1_500_000 * 1.001);
+      expect(Number.isNaN(frame.distance[0])).toBeTrue();
+
+      const ground = probeCamera('ground', '6371km');
+      const view = referenceSphereFrame(ground.camera, ground.radiusM, 64, 36);
+      expect(Array.from(view.distance.slice(0, 64)).every(Number.isNaN)).toBeTrue();
+      // Bottom-centre ray: on a 6,371 km body 2 m up, the ground is flat to far under a millimetre at 4 m.
+      const sy = (1 - (35.5 / 36) * 2) * Math.tan(Math.PI / 6);
+      const sx = (32.5 / 64 * 2 - 1) * Math.tan(Math.PI / 6) * (64 / 36);
+      const flat = (2 * Math.hypot(1, sx, sy)) / -sy;
+      expect(Math.abs(view.distance[35 * 64 + 32] - flat)).toBeLessThan(1e-3);
+    });
+
+    it('finds no error against itself, and counts a hole as a crack, not a hole that opens onto the border', () => {
+      const { camera, radiusM } = probeCamera('orbit', '600km');
+      const reference = referenceSphereFrame(camera, radiusM, 64, 36);
+      const clean = compareQuality(withHoles(reference, []), reference);
+      expect(clean.cracks).toBe(0);
+      expect(clean.silhouetteErrorPx.every((value) => value === 0)).toBeTrue();
+      expect(clean.depthErrorM.every((value) => value < 0.1)).toBeTrue();
+      expect(clean.drawnProbe).toBe(clean.drawnReference);
+
+      const inside = 18 * 64 + 32;
+      const cracked = compareQuality(withHoles(reference, [inside, inside + 1]), reference);
+      expect(cracked.cracks).toBe(2);
+      expect(Math.max(...cracked.silhouetteErrorPx)).toBe(1);
+      // A frame wholly undrawn has no enclosed pixel.
+      expect(countHoles({ width: 4, height: 3, distance: new Float32Array(12).fill(NaN) })).toBe(0);
+    });
+
+    it('reads the probe target: alpha 1 is drawn with its u/v, the cleared background is not', () => {
+      const rgba = new Float32Array([5, 0.25, 0.75, 1, 0, 0, 0, 0, 7, 0.5, 0.5, 0.5]);
+      const frame = frameFromProbeRgba(rgba, 3, 1);
+      expect(frame.distance[0]).toBe(5);
+      expect([frame.u![0], frame.v![0]]).toEqual([0.25, 0.75]);
+      expect(Number.isNaN(frame.distance[1])).toBeTrue();
+      expect(Number.isNaN(frame.distance[2])).toBeTrue();
+      expect(Number.isNaN(frame.u![2])).toBeTrue();
+      expect(changedPixels(frame, frame)).toBe(0);
+      expect(changedPixels(frame, frameFromProbeRgba(new Float32Array([5.5, 0, 0, 1, 0, 0, 0, 0, 7, 0, 0, 1]), 3, 1))).toBe(2);
+    });
+
+    it('finds the exact uv on the lab sphere\'s own triangle, and turns a uv error into metres of ground', () => {
+      const { camera, radiusM } = probeCamera('ground', '6371km');
+      const segments = { width: 512, height: 256 };
+      const frame = withSurface(referenceSphereFrame(camera, radiusM, 64, 36), camera, radiusM, segments);
+      const clean = surfaceCoordinateErrors(frame, camera, radiusM, segments);
+      expect(clean.unmatched).toBe(0);
+      expect(clean.errorsM.length).toBeGreaterThan(0);
+      // Storing the exact uv in float32 alone costs up to half a float32 step of u near 0.5 (2^-25 of the circumference,
+      // 1.2 m at 6,371 km): the floor any float32 surface coordinate has on a body this size, before interpolation.
+      expect(Math.max(...clean.errorsM)).toBeLessThan(2 ** -25 * 2 * Math.PI * radiusM * 1.05);
+      // Every uv is in range, and the facet lies inside the sphere: its distance is never shorter than the sphere's.
+      const centre = 35 * 64 + 32;
+      const exact = referenceFacetUv(camera, radiusM, segments, 64, 36, 32, 35, frame.distance[centre])!;
+      expect(exact.u).toBeGreaterThan(0);
+      expect(exact.u).toBeLessThan(1);
+      // A u off by one millionth is that fraction of the circumference at the latitude: about 40 m at the equator.
+      const shifted = { ...frame, u: frame.u!.map((value) => value + 1e-6) };
+      const errors = surfaceCoordinateErrors(shifted, camera, radiusM, segments).errorsM;
+      const expected = 1e-6 * 2 * Math.PI * radiusM * exact.sinTheta;
+      expect(Math.abs(errors[errors.length - 1] - expected)).toBeLessThan(0.05 * expected);
+    });
+  });
+
   describe('history', () => {
     it('is a valid performance suite with the noise floor, orbit and ground at three sizes', () => {
       expect(() => validateTestHistory(PLANET_SHAPE_TEST_HISTORY)).not.toThrow();
@@ -342,6 +483,17 @@ describe('planet shape lab', () => {
         expect(rounds.map((scenario) => scenario.settings.features.shadows)).toEqual([false, true, false, true, false, true]);
         expect(new Set(rounds.map((scenario) => `${scenario.settings.bodyId}/${scenario.settings.poseId}`)).size).toBe(1);
       }
+    });
+
+    it('has the quality suite: functional, every pose at every size, unmorphed and paused, no budgets', () => {
+      expect(QUALITY.id).toBe('planet-shape-quality');
+      expect(QUALITY.purpose).toBe('functional');
+      expect(QUALITY.expectedGpuVendor).toBeUndefined();
+      expect(QUALITY.scenarios.length).toBe(BODIES.length * CAMERA_POSES.length);
+      expect(QUALITY.scenarios.every((item) => item.settings.probe === 'quality' && item.settings.morph === 0
+        && item.settings.spinWarp === 0 && item.settings.kind === 'sphere' && !item.budgets)).toBeTrue();
+      // The timing suites keep their settings unchanged: no probe field.
+      expect([BASELINE, MORPH, SHADOWS_AB].every((suite) => suite.scenarios.every((item) => !('probe' in item.settings)))).toBeTrue();
     });
 
     it('builds and parses an exact-version launch link', () => {
@@ -489,6 +641,31 @@ describe('planet shape lab', () => {
         const check = result.cases[0].checks.find((entry) => entry.name === 'GPU timer self-test');
         expect(check?.passed).toBeFalse();
         expect(check?.detail).toContain('rounded to 65536 ns');
+      } finally { host.dispose(); }
+    }, 20_000);
+
+    it('measures quality against the exact sphere without a timing window, and fails on a crack', async () => {
+      const host = new FakeHost();
+      let holes: number[] = [];
+      host.qualityProbe = async () => {
+        const { camera, radiusM } = probeCamera('orbit', '600km');
+        const reference = referenceSphereFrame(camera, radiusM, 64, 36);
+        return { frames: [withHoles(reference, holes), withHoles(reference, holes)], camera, radiusM, segments: { width: 512, height: 256 } };
+      };
+      const suite = { ...QUALITY, scenarios: QUALITY.scenarios.filter((item) => item.id === 'quality-orbit-600km') };
+      try {
+        const clean = await run(host, suite);
+        expect(clean.errors).toEqual([]);
+        expect(clean.automatedVerdict).toBe('pass');
+        expect(clean.cases[0].metrics.map((metric) => metric.name)).toEqual([
+          'silhouetteErrorPx', 'depthErrorM', 'depthErrorRelative', 'cracks', 'flickerPixels', 'surfaceCoordErrorM']);
+        expect(clean.cases[0].metrics[3].samples).toEqual([0]);
+        expect(host.sampling).toBeFalse();
+
+        holes = [18 * 64 + 32];
+        const cracked = await run(host, suite);
+        expect(cracked.automatedVerdict).toBe('fail');
+        expect(cracked.cases[0].checks.find((check) => check.name.startsWith('No cracks'))?.passed).toBeFalse();
       } finally { host.dispose(); }
     }, 20_000);
 

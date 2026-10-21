@@ -542,3 +542,40 @@ Built in parallel by three agents in one checkout with disjoint files, then revi
   (`dwm.exe`) as `[Insufficient Permissions]`. The receiver now skips it; the fix applies once the receiver restarts.
 - **Fingerprint.** `triangular-test.config.json` now includes the lab folder in `fingerprintPaths`, so a change to the
   lab marks earlier runs `STALE`. Also applies once the receiver restarts.
+- **Morph camera at edges and poles.** `planet-shape-lab.spec.ts` now checks the camera at eight spots (incl. lon
+  180 / 179.9 / -170, lat 80 / -85 / 89.9) at morph 0 to 1: height, pitch and heading hold everywhere, and at morph 1
+  the camera lands on the map plane inside the Equal Earth outline. Lon 180 maps to the right edge, -179.999 to the
+  left. A browser check of the lab (600 km at 50 m and 2 km; 6371 km at 2 m and 50 m, morph 1) found the GPU ground
+  where the camera expects it at every spot, with no seam cracks. Expected, not bugs: at lon 180 the camera sits on the
+  map's right edge, so half the view is empty past it; at lat 89.9 facing north it looks past the map's pole edge.
+  There is no wrap-around at the seam or pole (a flat map has edges); a game that needs one handles it itself.
+  Night-side spots look black at the default ambient light, which is lighting, not a camera fault.
+
+### 2026-10-21: quality metrics on the plain sphere
+
+- **Probe.** `planet-shape-quality.ts` plus a probe material that shares the sphere's vertex stage and writes the distance
+  from the camera (red) and a drawn flag (green) into a 1280 x 720 float target (half the reference drawing buffer). The
+  page draws it between engine frames in its own scene and reads it back twice. The reference is the exact sphere,
+  ray-traced on the CPU in doubles at pixel centres, clipped by view depth like the GPU. Contender C replaces it later.
+- **Metrics.** `silhouetteErrorPx`: per column, |drawn px - exact drawn px|. `depthErrorM` and `depthErrorRelative`:
+  every 16 px where both draw. `cracks`: undrawn pixels enclosed by the surface (flood fill from the border; plan 055's
+  magenta count). `flickerPixels`: pixels that differ between the two frames of a still pose. Checks fail on any crack or
+  flicker; silhouette and depth are reported, not judged.
+- **Suite.** `planet-shape-quality` v1, functional: 4 poses x 3 bodies, morph 0, spin paused. First run, 12:36,
+  unattended on the RTX 3080: all pass, 0 cracks, 0 flicker everywhere.
+
+  | Pose | Silhouette max px (64 / 600 / 6,371 km) | Depth error median, p95 (600 km) |
+  |---|---|---|
+  | orbit | 0 / 0 / 0 | 21 m, 54 m |
+  | low flyover | 1 / 1 / 1 | 35 m, 133 m |
+  | ground | 3 / 6 / 7 | 0.26 m, 15 m |
+  | horizon grazing | 1 / 1 / 1 | 48 m, 193 m |
+
+  These are the plain sphere's own tessellation (512 x 256, inscribed), the floor a contender is compared against, not
+  faults. Depth error grows with the body (facets are wider), except at the ground pose, where the camera stands over
+  one flat facet. There the horizon is 3 to 7 probe px off the true one, and grazing rays near it carry the depth p95.
+- **Not measured yet:** popping during a slow zoom (no LOD), per-fidelity-class metrics (no terrain), collider parity
+  (no collider).
+- **Morph camera, GPU side.** A browser check confirmed the specs above: ground where the camera expects it at every
+  spot, no seam cracks. It also saw one `GpuReadbackTimeoutError` from the engine's GPU timer while the browser pane was
+  in the background. That is a hidden-tab effect, not a timing-run fault; unattended runs use a full-screen window.

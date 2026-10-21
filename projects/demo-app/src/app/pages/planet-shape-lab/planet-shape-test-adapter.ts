@@ -1,6 +1,10 @@
 import type { GpuPassKind, IGpuPassSummary } from 'triangular-engine';
 import type { TestCheck, TestContext, TestMetric, TestObservation, TestRunAdapter, TestScenario, TestSetting } from 'triangular-engine/testing';
 import { featureMismatches } from './planet-shape-features';
+import {
+  DEPTH_SAMPLE_STRIDE, changedPixels, compareQuality, referenceSphereFrame, surfaceCoordinateErrors, type QualityFrame,
+  type QualityProbeCamera,
+} from './planet-shape-quality';
 import type { PlanetShapeTestSettings } from './planet-shape-tests';
 
 /** What the last completed render drew, from the renderer's own counters (shadow passes included). */
@@ -53,6 +57,15 @@ function passLabels(passes: IGpuPassSummary): string {
   return Object.entries(passes.byLabel).map(([label, stat]) => `${label}: ${stat.medianMs.toFixed(4)} ms`).join('; ');
 }
 
+/** Two offscreen frames of the current view from the quality probe, with the camera and body they were drawn for. */
+export interface PlanetShapeQualityProbe {
+  readonly frames: readonly [QualityFrame, QualityFrame];
+  readonly camera: QualityProbeCamera;
+  readonly radiusM: number;
+  /** Width/height segments of the drawn sphere, so the reference can rebuild its triangles. */
+  readonly segments: { readonly width: number; readonly height: number };
+}
+
 /** What the lab page offers the adapter: its normal actions plus read-only probes. Implemented by the page. */
 export interface PlanetShapeTestHost {
   /** The full state a run changes; also the snapshot a run restores. */
@@ -78,6 +91,8 @@ export interface PlanetShapeTestHost {
    * renderer is not resized). Optional: a host without it gets no thumbnails. Only called after a measurement.
    */
   thumbnail?(): Promise<Blob | undefined>;
+  /** Draws the current view twice into the quality probe's float target and reads both back. Optional: WebGPU pages only. */
+  qualityProbe?(): Promise<PlanetShapeQualityProbe>;
 }
 
 const READY_TIMEOUT_MS = 60_000;
@@ -105,6 +120,80 @@ async function waitForFrames(host: PlanetShapeTestHost, count: number, context: 
     if (performance.now() - began > STALL_MS) throw new Error(`No frame rendered for ${STALL_MS} ms`);
     await context.wait(16);
   }
+}
+
+const max = (values: readonly number[]): number => values.reduce((a, b) => Math.max(a, b), 0);
+
+/**
+ * Plan 055 quality metrics of the current view against the exact sphere (`planet-shape-quality.ts`). A correctness case:
+ * no timing window, and the numbers are the same on any GPU that draws the same triangles.
+ */
+async function measureQuality(host: PlanetShapeTestHost, scenario: TestScenario<PlanetShapeTestSettings>, context: TestContext): Promise<TestObservation> {
+  if (!host.qualityProbe) throw new Error('This page has no quality probe');
+  await waitForFrames(host, 2, context);
+  const probe = await host.qualityProbe();
+  const [frame, again] = probe.frames;
+  const reference = referenceSphereFrame(probe.camera, probe.radiusM, frame.width, frame.height);
+  const result = compareQuality(frame, reference);
+  const flicker = changedPixels(frame, again);
+  const surface = surfaceCoordinateErrors(frame, probe.camera, probe.radiusM, probe.segments);
+  const settings = scenario.settings;
+  const mismatches = settingsMismatches(host.read(), settings);
+  const error = host.errors();
+  const checks: TestCheck[] = [
+    { name: 'Scenario state applied as specified', passed: mismatches.length === 0, detail: mismatches.join('; ') || undefined },
+    { name: 'WebGPU backend in use', passed: host.backendIsWebGpu(), detail: String(host.environment()['backend']) },
+    // The reference is the sphere itself; a morphed surface is a different shape.
+    { name: 'Unmorphed (the reference is the sphere)', passed: settings.morph === 0, detail: `morph ${settings.morph}` },
+    { name: 'Reference sees the planet', passed: result.drawnReference > 0, detail: `${result.drawnReference} px` },
+    { name: 'Planet drawn in the probe', passed: result.drawnProbe > 0, detail: `${result.drawnProbe} px` },
+    { name: 'No cracks: no undrawn pixel enclosed by the surface', passed: result.cracks === 0, detail: `${result.cracks} px` },
+    { name: 'No flicker: two frames at a still pose match', passed: flicker === 0, detail: `${flicker} px differ` },
+    { name: 'No engine or console error', passed: error === '', detail: error || undefined },
+  ];
+  const metrics: TestMetric[] = [
+    {
+      name: 'silhouetteErrorPx', unit: 'px', samples: result.silhouetteErrorPx,
+      source: `Per column of the ${frame.width}x${frame.height} probe: |drawn pixels - drawn pixels of the exact sphere| (columns where either draws)`,
+      unavailableReason: result.silhouetteErrorPx.length ? undefined : 'Nothing drawn in either frame',
+    },
+    {
+      name: 'depthErrorM', unit: 'm', samples: result.depthErrorM,
+      source: `|probe distance - exact sphere distance| from the camera, every ${DEPTH_SAMPLE_STRIDE} px where both draw`,
+      unavailableReason: result.depthErrorM.length ? undefined : 'No pixel drawn in both frames',
+    },
+    {
+      name: 'depthErrorRelative', unit: 'ratio', samples: result.depthErrorRelative,
+      source: 'depthErrorM divided by the exact distance, same pixels',
+      unavailableReason: result.depthErrorRelative.length ? undefined : 'No pixel drawn in both frames',
+    },
+    { name: 'cracks', unit: 'px', samples: [result.cracks], source: 'Undrawn probe pixels cut off from the image border by drawn ones' },
+    { name: 'flickerPixels', unit: 'px', samples: [flicker], source: 'Pixels whose drawn flag or distance differ between two probe frames of the same pose' },
+    {
+      name: 'surfaceCoordErrorM', unit: 'm', samples: surface.errorsM,
+      source: `|GPU uv - exact uv on the same triangle| in metres of ground, every ${DEPTH_SAMPLE_STRIDE} px where the probe draws`,
+      unavailableReason: surface.errorsM.length ? undefined : 'No drawn pixel with a matching triangle',
+    },
+  ];
+  return {
+    metrics,
+    checks,
+    details: {
+      probeWidth: frame.width, probeHeight: frame.height, drawnProbe: result.drawnProbe, drawnReference: result.drawnReference,
+      silhouetteErrorMaxPx: max(result.silhouetteErrorPx), depthErrorMaxM: max(result.depthErrorM),
+      depthErrorMaxRelative: max(result.depthErrorRelative), radiusM: probe.radiusM, fovDeg: probe.camera.fovDeg,
+      surfaceCoordErrorMaxM: max(surface.errorsM), surfaceCoordUnmatched: surface.unmatched,
+    },
+    validityIssues: [],
+    limitations: [
+      "The reference is the exact sphere, so the errors include the plain sphere's own tessellation (512 x 256, inscribed): they are the floor a contender is compared with, not a fault.",
+      `The probe is ${frame.width}x${frame.height} (half the reference drawing buffer); silhouette pixels are probe pixels.`,
+      'Depth is the distance from the camera, written in float32 by the probe material: about 7 significant digits.',
+      'A crack that reaches the silhouette is not counted as a crack; it shows in the silhouette error.',
+      'surfaceCoordErrorM compares with the exact uv on the drawn triangle, not the true sphere: it is the float32 precision of the surface coordinates (what a checker edge or texture lookup shows), not facet shape.',
+      'Not measured yet (need terrain or a collider): popping during a slow zoom, per-fidelity-class metrics, collider parity.',
+    ],
+  };
 }
 
 /**
@@ -141,6 +230,7 @@ export function createPlanetShapeTestAdapter(host: PlanetShapeTestHost): TestRun
     },
     ready: (context, scenario) => waitSettled(scenario, context),
     measure: async (scenario, context): Promise<TestObservation> => {
+      if (scenario.settings.probe === 'quality') return measureQuality(host, scenario, context);
       if (host.isSampling()) throw new Error('Another frame sampling window is already active');
       const intervals: number[] = [];
       const submit: number[] = [];

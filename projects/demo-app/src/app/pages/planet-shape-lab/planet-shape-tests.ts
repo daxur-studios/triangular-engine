@@ -2,7 +2,7 @@ import type { TestBaseline, TestScenario, TestSuite } from 'triangular-engine/te
 import baselineV1 from './planet-shape-baseline.v1.json';
 import morphBaselineV1 from './planet-shape-morph-baseline.v1.json';
 import { BODIES, FIXED_SEED, type BodyId } from './planet-shape-config';
-import type { CameraPoseId } from './planet-shape-camera';
+import { CAMERA_POSES, type CameraPoseId } from './planet-shape-camera';
 import { defaultFeatureState, withFeature, type FeatureState } from './planet-shape-features';
 
 /** Fully resolved, so a rerun cannot inherit anything from the manual controls. */
@@ -18,6 +18,8 @@ export interface PlanetShapeTestSettings {
   readonly features: FeatureState;
   /** Sphere (0) to flat map (1): a visual transform only, applied by the engine's `planetMorphGraph`. */
   readonly morph: number;
+  /** `quality` measures the view against the exact sphere instead of timing it; absent = timing. */
+  readonly probe?: 'quality';
 }
 
 export const PLANET_SHAPE_DEFAULTS: PlanetShapeTestSettings = {
@@ -109,5 +111,15 @@ export const PLANET_SHAPE_TEST_HISTORY: readonly TestSuite<PlanetShapeTestSettin
       ...shadowRounds('orbit-600km', 'Orbit, 600 km', { bodyId: '600km', poseId: 'orbit' }),
       ...shadowRounds('ground-600km', 'Ground, 600 km', { bodyId: '600km', poseId: 'ground' }),
     ],
+  },
+  {
+    id: 'planet-shape-quality', version: 1,
+    title: 'Quality: the plain sphere against the exact sphere (silhouette, depth, cracks, flicker), every pose and size',
+    // Correctness, not timing: the same numbers on any GPU that draws the same triangles, so no vendor is required.
+    purpose: 'functional',
+    // Spin paused so two frames of a pose are the same view; the probe is unlit, so the sun would not matter anyway.
+    scenarios: BODIES.flatMap((body) => CAMERA_POSES.map((pose) =>
+      scenario(`quality-${pose.id}-${body.id}`, `Quality, ${pose.label.toLowerCase()}, ${body.label}`,
+        { bodyId: body.id, poseId: pose.id, spinWarp: 0, probe: 'quality' }))),
   },
 ];

@@ -1,6 +1,8 @@
 import { Component, DestroyRef, computed, inject, isDevMode, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { AmbientLight, DirectionalLight, Matrix4, Mesh, OrthographicCamera, PerspectiveCamera, Quaternion, Vector3 } from 'three';
+import {
+  AmbientLight, Color, DirectionalLight, FloatType, Matrix4, Mesh, OrthographicCamera, PerspectiveCamera, Quaternion, RenderTarget, Scene, Vector3,
+} from 'three';
 import { EngineModule, EngineService, ScreenshotService } from 'triangular-engine';
 import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import { TestRunnerComponent, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
@@ -15,7 +17,8 @@ import {
 } from './planet-shape-config';
 import { FEATURES, defaultFeatureState, shadowsActive, withFeature, type FeatureId, type FeatureState } from './planet-shape-features';
 import { createCameraRelativeSphereGeometry, createPlainSphereMaterial } from './planet-shape-sphere';
-import { createPlanetShapeTestAdapter, type PlanetShapeTestHost } from './planet-shape-test-adapter';
+import { QUALITY_PROBE_SIZE, frameFromProbeRgba, type QualityFrame } from './planet-shape-quality';
+import { createPlanetShapeTestAdapter, type PlanetShapeQualityProbe, type PlanetShapeTestHost } from './planet-shape-test-adapter';
 import { PLANET_SHAPE_TEST_HISTORY, type PlanetShapeTestSettings } from './planet-shape-tests';
 
 /**
@@ -232,6 +235,8 @@ export class PlanetShapeLabPageComponent {
   private readonly sun = new DirectionalLight(0xffffff, 3);
   private readonly ambient = new AmbientLight(0x6688aa, 0.3);
   private mesh: Mesh | undefined;
+  /** Quality probe target and camera, made on first use (`planet-shape-quality.ts`). */
+  private probe: { target: RenderTarget; camera: PerspectiveCamera; scene: Scene; mesh: Mesh } | undefined;
   private readonly beforeRenderCallbacks = new Set<() => void>();
   private readonly renderCallbacks = new Set<(renderedAt: number) => void>();
 
@@ -275,6 +280,7 @@ export class PlanetShapeLabPageComponent {
       engine: this.engine, format: 'image/webp', quality: 0.6,
       compress: { maxWidthOrHeight: THUMBNAIL_WIDTH, fileType: 'image/webp', quality: 0.6 },
     }),
+    qualityProbe: () => this.qualityProbe(),
   };
   readonly testAdapter: TestRunAdapter<PlanetShapeTestSettings, PlanetShapeTestSettings> = createPlanetShapeTestAdapter(this.testHost);
 
@@ -320,7 +326,9 @@ export class PlanetShapeLabPageComponent {
         this.engine.scene.remove(this.mesh, this.sun, this.sun.target, this.ambient);
         this.mesh.geometry.dispose();
       }
+      this.probe?.target.dispose();
       this.sphere.material.dispose();
+      this.sphere.probeMaterial.dispose();
     });
   }
 
@@ -489,6 +497,63 @@ export class PlanetShapeLabPageComponent {
     this.sun.castShadow = shadows;
     this.mesh.castShadow = shadows;
     this.mesh.receiveShadow = shadows;
+  }
+
+  /**
+   * Draws the current view twice into a float target with the probe material (distance in red, u/v in green/blue, drawn flag in alpha) and
+   * reads both back. Each draw is synchronous between engine frames, with the renderer's target and clear restored at
+   * once, so the screen never shows it. Its own scene holds only the body, sharing the on-screen mesh's geometry.
+   */
+  private async qualityProbe(): Promise<PlanetShapeQualityProbe> {
+    if (!this.mesh) throw new Error('No planet mesh (WebGPU unavailable)');
+    const { width, height } = QUALITY_PROBE_SIZE;
+    const fovDeg = this.engine.camera instanceof PerspectiveCamera ? this.engine.camera.fov : 60;
+    if (!this.probe) {
+      const scene = new Scene();
+      const mesh = new Mesh(this.mesh.geometry, this.sphere.probeMaterial);
+      mesh.frustumCulled = false;
+      scene.add(mesh);
+      this.probe = { target: new RenderTarget(width, height, { type: FloatType, depthBuffer: true }), camera: new PerspectiveCamera(), scene, mesh };
+    }
+    const { target, camera, scene, mesh } = this.probe;
+    mesh.geometry = this.mesh.geometry;
+    camera.fov = fovDeg;
+    camera.aspect = width / height;
+    camera.near = this.pose.near;
+    camera.far = this.pose.far;
+    camera.updateProjectionMatrix();
+    camera.position.set(0, 0, 0);
+    camera.quaternion.copy(this.cameraQuaternion);
+    camera.updateMatrixWorld();
+    const renderer = this.engine.renderer as unknown as {
+      getRenderTarget(): RenderTarget | null; setRenderTarget(target: RenderTarget | null): void;
+      getClearColor(target: Color): Color; getClearAlpha(): number; setClearColor(color: Color | number, alpha: number): void;
+      render(scene: Scene, camera: PerspectiveCamera): void;
+      readRenderTargetPixelsAsync(target: RenderTarget, x: number, y: number, width: number, height: number): Promise<ArrayBufferView>;
+    };
+    const frame = async (): Promise<QualityFrame> => {
+      const previousTarget = renderer.getRenderTarget();
+      const previousClear = renderer.getClearColor(new Color());
+      const previousAlpha = renderer.getClearAlpha();
+      try {
+        renderer.setRenderTarget(target);
+        renderer.setClearColor(0x000000, 0);
+        renderer.render(scene, camera);
+      } finally {
+        renderer.setRenderTarget(previousTarget);
+        renderer.setClearColor(previousClear, previousAlpha);
+      }
+      const rgba = await renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height);
+      return frameFromProbeRgba(rgba as Float32Array, width, height);
+    };
+    const first = await frame();
+    const second = await frame();
+    return {
+      frames: [first, second],
+      camera: { position: this.pose.position, forward: this.pose.forward, up: this.pose.up, fovDeg, near: this.pose.near, far: this.pose.far },
+      radiusM: bodyById(this.bodyId()).radiusM,
+      segments: SPHERE_SEGMENTS,
+    };
   }
 
   private refreshHud(renderer: GpuAdapterRendererLike): void {
