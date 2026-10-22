@@ -440,6 +440,11 @@ Phase 2 race.
   colliders. Measure pages per second, latency and main-thread cost. Contenders use the winner, or both as a toggle.
 - **Gate:** parity specs pass; replaying an op log gives identical hashes; the op-count cost curve is recorded; D2 is decided.
 
+Status 2026-10-22: op types, bounds, fidelity, blend modes, op log and op index done on the CPU; the TSL twin
+(`shape-ops/shape-ops-gpu.ts`, per-tile op lists in float textures) replaces terrain v2's 8-edit list, with parity specs
+against the CPU and the `landforms` preset (mountain, crater, ridge, road, overhang, arch, tunnel). Open: the shape-op
+timing run (`planet-shape-ops` v1), per-tile march bands, wiring the cell bake into the field, workers, D2's decision.
+
 ### Phase 2. The race
 
 Proposed gates, to be confirmed by the owner after Phase 0 and before round 1:

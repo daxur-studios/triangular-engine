@@ -17,6 +17,9 @@ export interface ShapeOpIndex {
   bandAt(direction: V3): AltitudeBand;
   /** Tile id (face * n² + j * n + i) of a direction, for packing per-tile lists. */
   tileOf(direction: V3): number;
+  /** The op list and band of tile `tile` (what the shader twin packs). */
+  opsInTile(tile: number): readonly number[];
+  bandInTile(tile: number): AltitudeBand;
   readonly stats: { readonly tiles: number; readonly entries: number; readonly maxPerTile: number };
 }
 
@@ -59,6 +62,12 @@ const WIDE_CAP = 0.6;
 
 const CAP_SAMPLES = 32;
 
+/**
+ * Tiles are grown by this (radians) in the cap test, so a float32 direction that lands a hair across a tile border (the
+ * shader twin's lookup) still finds every op that touches it. About 6 m on an Earth-size body.
+ */
+const TILE_MARGIN = 1e-6;
+
 export function buildShapeOpIndex(bounds: readonly (readonly ShapeBounds[])[], base: AltitudeBand, tilesPerFace = 32): ShapeOpIndex {
   const n = tilesPerFace;
   const tiles = 6 * n * n;
@@ -71,7 +80,7 @@ export function buildShapeOpIndex(bounds: readonly (readonly ShapeBounds[])[], b
         const centre = at(0.5, 0.5);
         centres.push(centre);
         // A tile is a convex spherical quad, so its farthest point from the centre is a corner.
-        radii.push(Math.max(...[at(0, 0), at(1, 0), at(0, 1), at(1, 1)].map((corner) => angleBetween(centre, corner))));
+        radii.push(Math.max(...[at(0, 0), at(1, 0), at(0, 1), at(1, 1)].map((corner) => angleBetween(centre, corner))) + TILE_MARGIN);
       }
     }
   }
@@ -139,6 +148,8 @@ export function buildShapeOpIndex(bounds: readonly (readonly ShapeBounds[])[], b
     opsAt: (direction) => lists[tileOf(direction)],
     bandAt: (direction) => bands[tileOf(direction)],
     tileOf,
+    opsInTile: (tile) => lists[tile],
+    bandInTile: (tile) => bands[tile],
     stats: { tiles, entries, maxPerTile: lists.reduce((most, list) => Math.max(most, list.length), 0) },
   };
 }

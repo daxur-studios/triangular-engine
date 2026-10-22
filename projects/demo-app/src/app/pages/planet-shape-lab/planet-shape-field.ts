@@ -5,6 +5,7 @@ import {
   uniform, uniformArray, vec2, vec3,
 } from 'three/tsl';
 import { NOISE_PERIOD, NOISE_SLICE_SHIFT } from './planet-shape-noise';
+import type { ShapeOpNodes } from './shape-ops/shape-ops-gpu';
 
 /**
  * Plan 055: the v2 terrain as one definition. A 3D density field,
@@ -391,6 +392,8 @@ export interface FieldNodes {
   readonly rockOverride?: any;
   /** The edit list; none if left out. */
   readonly edits?: TerrainEditNodes;
+  /** Shape ops (`shape-ops/shape-ops-gpu.ts`), applied after the edits; none if left out. */
+  readonly shapeOps?: ShapeOpNodes;
 }
 
 /** Biome blend at the camera-relative point `x` (0 canyons .. 1 hills). */
@@ -443,10 +446,15 @@ export function fieldGroundedAt(field: FieldNodes, biome: any): any {
 
 /**
  * Signed field in metres (negative inside rock), not yet scaled for stepping. `x` is camera-relative. `editMask` (an int
- * node, from `rayEditMask`) limits the edits applied; the default is all of them. Only the rock modes in use are
+ * node, from `rayEditMask`) limits the edits applied; the default is all of them. The shape ops follow the edits. Only the rock modes in use are
  * evaluated: wild where the grounded share is 0, grounded where it is 1, both (blended) between.
  */
-export function densityAt(field: FieldNodes, x: any, altitude: any, footprint: any, smooth: boolean, editMask: any = int(ALL_EDITS)): any {
+export function densityAt(field: FieldNodes, x0: any, altitude0: any, footprint0: any, smooth: boolean, editMask: any = int(ALL_EDITS)): any {
+  // Variables, not expressions: an expression shared by both rock branches is emitted where it is first built, which
+  // may be inside a branch that does not run (the lit normals at share 0 read an unset value).
+  const x = x0.toVar();
+  const altitude = float(altitude0).toVar();
+  const footprint = float(footprint0).toVar();
   const up = (normalize(field.camera.add(x)) as any).toVar();
   const biome = fieldBiomeAt(field, x, smooth).toVar();
   const grounded = fieldGroundedAt(field, biome).toVar();
@@ -458,5 +466,6 @@ export function densityAt(field: FieldNodes, x: any, altitude: any, footprint: a
     return mix(wild, ground, share);
   });
   const value = surface(x, up, altitude, footprint, biome, grounded);
-  return field.edits ? applyEdits(field.edits.a, field.edits.b, field.edits.count, editMask, value, x, up, altitude) : value;
+  const edited = field.edits ? applyEdits(field.edits.a, field.edits.b, field.edits.count, editMask, value, x, up, altitude) : value;
+  return field.shapeOps ? field.shapeOps.apply(edited, x, up, altitude, footprint) : edited;
 }

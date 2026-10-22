@@ -17,7 +17,7 @@ import {
 } from './planet-shape-config';
 import { FEATURES, defaultFeatureState, shadowsActive, withFeature, type FeatureId, type FeatureState } from './planet-shape-features';
 import { createCameraRelativeSphereGeometry, createPlainSphereMaterial } from './planet-shape-sphere';
-import { TERRAIN_EDIT_PRESETS, terrainEditPreset, type TerrainEditPresetId } from './planet-shape-edits';
+import { TERRAIN_EDIT_PRESETS, shapeOpPreset, type TerrainEditPresetId } from './planet-shape-edits';
 import { DEFAULT_RAY_STEPS, createRaymarchTerrain, type RaymarchTerrain } from './planet-shape-raymarch';
 import { createLitRaymarchTerrain } from './planet-shape-raymarch-lit';
 import { RAY_BIOMES, RAY_ROCKS, type RayBiome, type RayRock } from './planet-shape-tests';
@@ -173,8 +173,14 @@ const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so 
             <p class="row">
               rock:
               @for (rock of rayRocks; track rock) {
-                <button (click)="setRayRock(rock)" [class.active]="rayRock() === rock" [attr.data-testid]="'rock-' + rock">{{ rock }}</button>
+                <button (click)="setRayRock(rock)" [class.active]="rayRock() === rock && rayRockMix() === undefined" [attr.data-testid]="'rock-' + rock">{{ rock }}</button>
               }
+            </p>
+            <p class="row">
+              wild → grounded · {{ rayRockMix() === undefined ? '-' : rayRockMix()!.toFixed(2) }}
+              <input
+                type="range" min="0" max="1" step="0.05" aria-label="Rock mix, wild to grounded" data-testid="rock-mix"
+                [value]="rayRockMix() ?? 0.5" (input)="setRayRockMix(+$any($event.target).value)" />
             </p>
             <p class="row">
               edits:
@@ -275,6 +281,8 @@ export class PlanetShapeLabPageComponent {
   /** Terrain v2 rock: each biome's own, wild everywhere or grounded everywhere. */
   readonly rayRock = signal<RayRock>('biome');
   readonly rayRocks = RAY_ROCKS;
+  /** Lab-only: a grounded share between 0 and 1 everywhere (both rock modes evaluated); `undefined` when a button rules. */
+  readonly rayRockMix = signal<number | undefined>(undefined);
   /** Sphere (0) to flat map (1). */
   readonly morph = signal(0);
   readonly freeCamera = signal(false);
@@ -572,8 +580,14 @@ export class PlanetShapeLabPageComponent {
     for (const entry of this.rayTerrains) entry.terrain.setBiome?.(value);
   }
 
+  setRayRockMix(share: number): void {
+    this.rayRockMix.set(share);
+    for (const entry of this.rayTerrains) entry.terrain.setRock?.(share);
+  }
+
   setRayRock(rock: RayRock): void {
     this.rayRock.set(rock);
+    this.rayRockMix.set(undefined);
     const value = rock === 'wild' ? 0 : rock === 'grounded' ? 1 : undefined;
     for (const entry of this.rayTerrains) entry.terrain.setRock?.(value);
   }
@@ -584,8 +598,8 @@ export class PlanetShapeLabPageComponent {
   }
 
   private applyRayEdits(): void {
-    const edits = terrainEditPreset(this.rayEdits(), bodyById(this.builtBody).radiusM);
-    for (const entry of this.rayTerrains) entry.terrain.setEdits?.(edits);
+    const ops = shapeOpPreset(this.rayEdits(), bodyById(this.builtBody).radiusM);
+    for (const entry of this.rayTerrains) entry.terrain.setShapeOps?.(ops);
   }
 
   /**

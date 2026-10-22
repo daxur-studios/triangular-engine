@@ -2,6 +2,7 @@
 import { BackSide, Vector3 } from 'three';
 import { MeshBasicNodeMaterial, type RenderTarget } from 'three/webgpu';
 import type { TerrainEdit } from './planet-shape-field';
+import type { ShapeOp } from './shape-ops/shape-op';
 import {
   Break, Discard, Fn, If, Loop, cameraFar, ceil, int, log2, cameraNear, cameraViewMatrix, clamp, color, cross, dot, float, max, mix,
   mx_noise_float, normalize, positionWorld, select, smoothstep, sqrt, uniform, vec3, vec4, viewZToPerspectiveDepth,
@@ -67,6 +68,8 @@ export interface RaymarchTerrain {
   setRock?(grounded: number | undefined): void;
   /** Terrain edits in order, for terrains that take them; `undefined` restores the default (the pad under the poses). */
   setEdits?(edits: readonly TerrainEdit[] | undefined): void;
+  /** Shape ops in order, for terrains that take them (they replace the edits); `undefined` restores the default pad. */
+  setShapeOps?(ops: readonly ShapeOp[] | undefined): void;
   /** Low-resolution pre-pass, for terrains that have one: the page draws the shell with `material` into `target` first. */
   readonly prepass?: { readonly material: MeshBasicNodeMaterial; readonly target: RenderTarget };
   /** Pre-pass at the drawing buffer (`width` x `height`) divided by `scale`; 0 turns it off. */

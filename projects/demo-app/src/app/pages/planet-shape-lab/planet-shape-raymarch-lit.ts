@@ -7,12 +7,13 @@ import {
   vec3, vec4, viewZToPerspectiveDepth,
 } from 'three/tsl';
 import {
-  BIOME_OFFSET, CANYON_DEPTH, MASK_OFFSETS, ROCK_AMPLITUDE, ROCK_MEAN, ROCK_OCTAVES, bottomAltitudeM, densityAt, fieldFrameMatrices,
-  fieldBiomeAt, noiseFrame, noiseOrigin, padEdit, rayEditMask, sampleFrame, terrainEditUniforms, topAltitudeM, unitM, valueNoise, type FieldNodes,
-  type TerrainEdit,
+  BIOME_OFFSET, CANYON_DEPTH, MASK_OFFSETS, ROCK_OCTAVES, bottomAltitudeM, densityAt, fieldFrameMatrices,
+  fieldBiomeAt, noiseFrame, noiseOrigin, padEdit, sampleFrame, topAltitudeM, unitM, valueNoise, type FieldNodes,
 } from './planet-shape-field';
 import { createNoiseTexture } from './planet-shape-noise';
 import type { RaymarchTerrain } from './planet-shape-raymarch';
+import { shapeOpFromTerrainEdit, type ShapeOp } from './shape-ops/shape-op';
+import { createShapeOpTextures } from './shape-ops/shape-ops-gpu';
 
 /**
  * Plan 055 Phase 1, second try: a raymarched density field (defined in `planet-shape-field.ts`, with a CPU twin) on the recipe of the well-known Shadertoy canyon terrains
@@ -82,18 +83,19 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
   const uRockOverride = uniform(-1) as any;
   const detailFrames = Array.from({ length: DETAIL_LEVELS }, (_, i) => noiseFrame(new Vector3(i * 31.7, i * 7.3, i * 19.1)));
   const uDetailScales = Array.from({ length: DETAIL_LEVELS }, () => uniform(1) as any);
-  const editUniforms = terrainEditUniforms();
+  const shapeOps = createShapeOpTextures();
+  /** Shadow rays stop above this altitude (metres): the top of the band, raised by the shape ops. */
+  const uShadowTop = uniform(0) as any;
   let radius = 1;
   let camera: [number, number, number] = [0, 0, 1];
-  /** The edit list; `undefined` is the default, the pad under the poses. */
-  let edits: readonly TerrainEdit[] | undefined;
+  /** The shape ops; `undefined` is the default, the pad under the poses. */
+  let ops: readonly ShapeOp[] | undefined;
 
   const field: FieldNodes = {
     noiseTexture, camera: uCamera, unit: uUnit, rockFrames, maskFrames, biome: { frame: biomeFrame, override: uBiomeOverride }, rockOverride: uRockOverride,
-    edits: editUniforms,
+    shapeOps,
   };
-  const density = (x: any, altitude: any, footprint: any, smooth: boolean, editMask?: any): any =>
-    densityAt(field, x, altitude, footprint, smooth, editMask);
+  const density = (x: any, altitude: any, footprint: any, smooth: boolean): any => densityAt(field, x, altitude, footprint, smooth);
   const sample = (frame: (typeof detailFrames)[number], x: any, smooth: boolean): any => sampleFrame(noiseTexture, frame, x, smooth);
 
   /** Altitude of the camera-relative point `x`, precise near the camera (see `planet-shape-raymarch.ts`). */
@@ -155,7 +157,6 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
         });
       }
       If(tEnd.greaterThan(t), () => {
-        const editMask = rayEditMask(editUniforms.a, editUniforms.bound, editUniforms.count, d, t, tEnd).toVar();
         const tPrevious = t.toVar();
         const fieldPrevious = float(1e30).toVar();
         const tSafe = t.toVar();
@@ -165,7 +166,7 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
           const x = d.mul(t);
           const altitude = uCamQ.add(t.mul(b.mul(2).add(t))).div(uCamera.add(x).length().add(uRadius)).toVar();
           const footprint = t.mul(pixelAngle).toVar();
-          const field = density(x, altitude, footprint, false, editMask).mul(STEP_SCALE).toVar();
+          const field = density(x, altitude, footprint, false).mul(STEP_SCALE).toVar();
           If(field.lessThan(footprint.mul(0.5)), () => {
             tSafe.assign(tPrevious);
             // Crossed (or touched) the rock: one secant step between the last two samples.
@@ -178,7 +179,9 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
           tPrevious.assign(t);
           fieldPrevious.assign(field);
           const late = clamp(float(i).div(float(steps)).mul(2).sub(1), 0, 1);
-          t.addAssign(max(max(field, t.mul(mix(float(RELATIVE_STEP), float(LATE_RELATIVE_STEP), late.mul(late)))), float(0.01)));
+          const stride = max(max(field, t.mul(mix(float(RELATIVE_STEP), float(LATE_RELATIVE_STEP), late.mul(late)))), float(0.01));
+          // Never past the nearest union shape (an arch leg, a ledge): beyond its fade the field does not see it.
+          t.addAssign(min(stride, max(shapeOps.reach(x, footprint), footprint)));
           If(t.greaterThan(tEnd), () => { Break(); });
         });
         // Reaching the solid floor is ground; a ray that ran out of steps inside the band stops where it is.
@@ -274,11 +277,11 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
         Loop(uShadowSteps, () => {
           const s = x.add(uSun.mul(u));
           const sAltitude = altitudeOf(s).toVar();
-          If(sAltitude.greaterThan(uUnit.mul(ROCK_AMPLITUDE * ROCK_MEAN)), () => { Break(); });
+          If(sAltitude.greaterThan(uShadowTop), () => { Break(); });
           const field = density(s, sAltitude, max(footprint, u.mul(0.01)), false).mul(STEP_SCALE);
           shadow.assign(min(shadow, clamp(field.mul(16).div(u), 0, 1)));
           If(shadow.lessThan(0.01), () => { Break(); });
-          u.addAssign(clamp(field, uUnit.mul(0.1), uUnit.mul(2)));
+          u.addAssign(clamp(min(field, shapeOps.reach(s, footprint)), uUnit.mul(0.1), uUnit.mul(2)));
         });
       });
 
@@ -338,10 +341,14 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
     });
     for (const frame of allFrames) frame.uMatrix.value.copy(frame.matrix);
   };
+  const updateOps = () => {
+    shapeOps.setOps(ops ?? [shapeOpFromTerrainEdit(padEdit(radius), 'pad')], radius, { bottomM: bottomAltitudeM(radius), topM: topAltitudeM(radius) });
+    uShadowTop.value = shapeOps.band.topM;
+  };
   const updateCamera = () => {
     const [x, y, z] = camera;
-    const top = radius + topAltitudeM(radius);
-    const bottom = radius + bottomAltitudeM(radius);
+    const top = radius + shapeOps.band.topM;
+    const bottom = radius + shapeOps.band.bottomM;
     const air = airHeightM(radius);
     const r2 = x * x + y * y + z * z;
     uCamera.value.set(x, y, z);
@@ -353,7 +360,13 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
     const t = Math.min(1, Math.max(0, (air - altitude) / (air * 0.5)));
     uSkyAmount.value = t * t * (3 - 2 * t);
     for (const frame of allFrames) frame.uOrigin.value.copy(noiseOrigin(frame.matrix, frame.offset, x, y, z, origin));
-    editUniforms.set(edits ?? [padEdit(radius)], camera, radius);
+    shapeOps.setCamera(camera);
+  };
+
+  const setShapeOps = (next: readonly ShapeOp[] | undefined) => {
+    ops = next;
+    updateOps();
+    updateCamera();
   };
 
   return {
@@ -367,6 +380,7 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
       uRadius.value = radiusM;
       uUnit.value = unitM(radiusM);
       updateFrames(unitM(radiusM));
+      updateOps();
       updateCamera();
     },
     setCamera(x, y, z) {
@@ -380,9 +394,9 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
     setBiome(biome) { uBiomeOverride.value = biome ?? -1; },
     setRock(grounded) { uRockOverride.value = grounded ?? -1; },
     setEdits(next) {
-      edits = next;
-      updateCamera();
+      setShapeOps(next?.map((edit, i) => shapeOpFromTerrainEdit(edit, `edit-${i}`)));
     },
+    setShapeOps,
     setPrepass(scale, width, height) {
       uPrepassScale.value = scale;
       if (scale <= 0) return;

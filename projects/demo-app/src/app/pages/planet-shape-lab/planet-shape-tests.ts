@@ -217,6 +217,26 @@ export const PLANET_SHAPE_TEST_HISTORY: readonly TestSuite<PlanetShapeTestSettin
     ],
   },
   {
+    id: 'planet-shape-ops', version: 1,
+    title: 'Terrain v2 shape ops on the GPU: the pad alone against the pad plus the landforms (eight ops), at 600 km with the 1/4 pre-pass',
+    purpose: 'performance',
+    expectedGpuVendor: 'nvidia',
+    // No budgets yet: what the per-tile op lookup and the landforms cost per march step. `planet-shape-edits` v1 run
+    // again gives the old 8-edit list against the same views through the shape-op path.
+    scenarios: CAMERA_POSES.filter((pose) => pose.id !== 'orbit').flatMap((pose) => (['pad', 'landforms'] as const).map((edits) =>
+      scenario(`ops-${edits}-${pose.id}-600km`, `Terrain v2, ${edits}, ${pose.label.toLowerCase()}, 600 km`,
+        { kind: 'raymarch-lit', bodyId: '600km', poseId: pose.id, rayPrepass: 4, rayEdits: edits }))),
+  },
+  {
+    id: 'planet-shape-landforms-views', version: 1,
+    title: 'Terrain v2 landforms for review: mountain, crater, ridge, road, overhang, arch and tunnel from the low and grazing poses',
+    purpose: 'functional',
+    requiresVisualReview: true,
+    scenarios: (['low-flyover', 'horizon-grazing'] as const).map((poseId) =>
+      scenario(`view-landforms-${poseId}-600km`, `Terrain v2, landforms, ${poseId.replace('-', ' ')}, 600 km`,
+        { kind: 'raymarch-lit', bodyId: '600km', poseId, rayPrepass: 4, rayEdits: 'landforms', spinWarp: 0, spinAngleDeg: 0 })),
+  },
+  {
     id: 'planet-shape-rock', version: 1,
     title: 'Terrain v2 rock: wild (3D noise density) against grounded (warped height surface), at 600 km with the 1/4 pre-pass and the pad',
     purpose: 'performance',

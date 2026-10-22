@@ -992,3 +992,149 @@ Built in a parallel session from the plan's "Data-flow core" rules. It's a libra
   - Each copy submits its own command buffer; batching comes later.
 - **Spec run time:** the grounded-rock floater spec (24 voxel blocks of the CPU field) blocked the headless browser past
   Karma's ping timeout in a full lab run. It now yields every 4 layers, and the full lab run is 77/77.
+
+## 2026-10-22: cell-planet bake and shape programs
+
+Phase 1b: the cell planet as the source of terrain v2's large scale. New folder
+`projects/demo-app/src/app/pages/planet-shape-lab/cell-bake/` (no other lab file touched). Not wired in yet.
+
+- **`cell-bake.ts`**
+  - `cellData(world, params?)` returns per-cell `baseHeightM`, `biome` (0 = canyons, 1 = hills, as `CANYON_BIOME` /
+    `HILLS_BIOME`), `maxHeightM` and `isMountain`. Heights come from `tectonics.elevation` above sea level, scaled so the
+    highest land is `landMaxM` (3000); sea floor is clamped to `-oceanDepthM` (600). `maxHeightM` is the base plus
+    `mountainReliefM` (1800) in a mountain cell, `otherReliefM` (300) on other land, 0 at sea. Dry biomes
+    (canyon, rift canyon, desert, martian lowlands/highlands, volcanic plains, cinder plateau) are 0; all else is 1.
+  - `bakeCellPlanet(world, { resolution = 128, blendFraction = 0.5, ... })` returns a `CellBake`:
+    `{ resolution, size = resolution + 2, data: Float32Array, blendRadians, cellCount }`. `data` is an RGBA float32
+    atlas, `size` wide and `6 * size` tall, faces stacked; texel = `[baseHeightM, biome, maxHeightM, 1]`.
+    Face = axis * 2 + (negative ? 1 : 0), u and v are the next two axes over the major component (as `op-index.ts`).
+    Each face has a one-texel gutter baked from the true directions beyond its edge, so bilinear lookups cross face
+    edges without a seam.
+  - Blending: a cell's weight is a smoothstep from 1 at the nearest cell's angle to 0 at that angle plus `blendRadians`
+    (`blendFraction` of the mean cell spacing), then normalised. Equal on a border, so continuous; no polygon steps.
+  - `sampleCellBake(bake, direction)` returns `{ baseHeightM, biome, maxHeightM }` with bilinear filtering (any
+    non-zero direction).
+  - `createCellBakeTexture(bake)` returns a `DataTexture` (float32, nearest filter). `cellBakeNode(texture,
+    bake.resolution, directionNode)` is the TSL twin and returns a vec3 node `(baseHeightM, biome, maxHeightM)`. It does
+    the CPU steps with four `textureLoad`s, so it needs no float32-filterable feature. Bind the texture once; the
+    direction is the unit body-relative direction of the sample point.
+  - Also exported: `isMountainCell(world, id)`, `cellBakeDirection(face, u, v)`.
+  - Cost: O(texels x cells), about 0.2 s at 48 texels and 600 cells in the spec; roughly a second or two at 128 and 2,000
+    cells. Bake once per world, off the frame path.
+- **`shape-programs.ts`**: `type ShapeProgram = (world, seed, { radiusM, mountainHeightM? }) => ShapeOp[]`. Pure and
+  deterministic; every op is checked with `validateShapeOp` before it is returned. Positions are `direction * radiusM`.
+  - `singleCellMountains`: one `cone` (blend `add`, fidelity `silhouette`) per mountain cell; radius is 0.85 of the
+    cell's farthest-corner angle; height 70 to 100 % of `mountainHeightM` (1500).
+  - `multiCellRidges`: shared edges between neighbouring mountain cells are chained into polylines; each chain of at
+    least two edges is a rounded `path` (`add`) with seeded heights. A chain of five or more points gets a summit
+    `crater`; each end gets a `disc` with `scale` 0.5 to calm the foot.
+- **Integration notes**
+  - Large scale: `altitude = baseHeightM(bake) + ops + detail`, with the biome weight feeding `biomeParams(m)` /
+    `biomeAt`, and `maxHeightM` bounding the per-direction march band (the op index band is still the base band widened
+    by the ops).
+  - Biome borders are blended but not noise-warped here; warp the lookup direction in the field if borders look smooth.
+  - The TSL node has no GPU parity run yet (the spec builds the node graph only); compare it with `sampleCellBake`
+    in the lab on real hardware.
+- **Specs** (`cell-bake.spec.ts`, 11, headless): layout and finite values, texel-centre reproduction, a mixed-biome
+  blend, no steps across cell borders and face edges (bounded slope), seam continuity at face edges, TSL node and texture
+  construction, mountain cells exist, valid cone per mountain cell and deterministic output, valid ridge paths with
+  craters and discs, and `compileShapeOps` plus `buildShapeOpIndex` stats (indexed evaluation equals full).
+  Run: `npx ng test demo-app --watch=false --browsers=ChromeHeadless --include='**/cell-bake/*.spec.ts'`.
+
+## 2026-10-22: D2 collider blocks (GPU density vs workers)
+
+Question: can collider data for terrain with overhangs be made fast enough. New folder
+`projects/demo-app/src/app/pages/planet-shape-lab/collider-blocks/`; nothing else in `planet-shape-lab/` was edited.
+
+- **Built.**
+  - `block-grid.ts`: a block is 33³ corner samples (32³ cells), 143,748 bytes as float32, origin body-relative in doubles.
+  - `gpu-density-block.ts`: a TSL compute pass (`densityAt`, the raymarcher's graph, workgroup 64) writing a storage buffer, read back through `gpu-data-flow`'s `ReadbackRing` (`adoptGpuBuffer` on the buffer behind the TSL storage node). Per block only uniforms change (origin, noise-frame origins, edits, overrides), so one compiled pipeline serves every block. This is the first real use of the data-flow binding, and it worked unchanged.
+  - `surface-nets.ts`: naive surface nets (mean of edge crossings, quads split on the shorter diagonal, wound toward positive density). Open at the block boundary, so a collider needs one block of padding or neighbour skirts.
+  - `cpu-density-block.ts` (the CPU twin per corner), `block-worker-pool.ts` and `collider-block.worker.ts` (a pool; jobs: sample, mesh, sample+mesh; grids and meshes transferred, not copied).
+- **Specs** (`collider-blocks.spec.ts`, 8, headless):
+  - Surface nets on an analytic sphere and a torus: every edge used exactly twice, once per direction, Euler characteristic 2 and 0, vertices within 0.1 voxel of the sphere, outward winding, volume within 5 %. An open surface stays open; an all-outside grid gives no mesh.
+  - Worker blocks equal main-thread blocks bit for bit; worker meshes equal main-thread meshes.
+  - GPU against CPU on 20 km blocks (2 m voxels, wild canyons, four directions, one with a carve edit): worst 9.1e-3 m against the 0.6 m field tolerance (a hundredth of the unit), 2 sign flips in 35,937 on the edit block, none elsewhere.
+  - Timing logs. The GPU specs skip cleanly with "WebGPU is not available" in plain `ChromeHeadless`.
+- **How to run.** `--include='**/collider-blocks/*.spec.ts'` matched; the `src/app/...` pattern in the brief matched nothing. Plain `ChromeHeadless` has no WebGPU adapter (5 run, 3 skipped). WebGPU needs `--karma-config=karma.gpu.conf.cjs --browsers=ChromeHeadlessGpu` (8 of 8).
+- **Timings.** Headless and **the adapter is SwiftShader (`google / swiftshader`, a CPU-emulated GPU)**, so the GPU rows are not hardware numbers; two attempts at other flags still got SwiftShader. The CPU rows are real V8 in Chrome workers on the owner laptop CPU, with 4 workers, 20 km body, 2 m voxels. Ms per 33³ block:
+
+  | path | one block, latency | pipelined, throughput |
+  |---|---|---|
+  | GPU compute + readback, wild canyons | 6.2 (CPU submit 0.15) | 4.3–4.7 per block, about 220 blocks/s |
+  | GPU, grounded hills | 5.9 | 4.5–4.7 |
+  | GPU, biome-mask blend | 6.2–7.1 | 4.6–5.2 |
+  | CPU twin in a worker, wild | 62–65 (1.7–1.8 µs per sample) | 16 per block, 4 workers, 62 blocks/s |
+  | CPU twin, grounded hills | 63–77 (1.7–2.1 µs) | 16 |
+  | CPU twin, mask blend | 73–74 (2.0–2.1 µs) | 19, 54 blocks/s |
+  | surface nets, main thread (4,300 triangles) | 1.1–1.3 | |
+  | surface nets, in a worker | 1.5–2.0 median, round trip 2.4 (first runs cold, up to 13) | |
+
+  Pipelined GPU ring latency is 25–35 ms because eight requests queue behind each other; that is queueing, not per-block cost.
+- **Findings.**
+  - The "12 µs per sample, 390 ms per block" figure does not hold in the browser: V8 in a worker does 1.7–2.1 µs per `density` call, 6× better, 62–77 ms per block. The earlier number was Node, unwarmed, with the pad edit. The CPU path is therefore a real option, not only a fallback: one block meets the 100 ms edit-to-collider target on a single worker.
+  - Even on a software GPU the compute path is 3.5–4× faster in throughput than 4 workers and 10× faster per block, and the CPU cost on the main thread is 0.15 ms. A fill of a ring of 75 blocks (5×5×3) takes about 0.35 s on SwiftShader against about 1.2–1.4 s on 4 workers.
+  - Meshing is cheap (about 1.2 ms): do it on the main thread for a block or two per frame, or in the worker that already has the grid; a separate mesh worker only costs a transfer.
+  - GPU precision: the field's camera is a float32 uniform, so the block origin is rounded (about 0.25 m at Earth radius). Fine at the 20 km check body; Earth-size bodies need the origin split in two floats, or blocks built camera-relative to a nearer origin.
+  - Readback is 140 KiB per block; packing to f16 or i16 distances halves it if needed.
+- **Recommendation.** GPU density with the readback ring, then meshing and the Jolt shape on the CPU side (main thread or a worker), with the CPU-worker path kept as the fallback and reference (it is 60–75 ms per block, fast enough for edits and for the first fill on machines without WebGPU). Before D2 is closed, repeat the GPU rows on a real adapter (RTX 3080 Laptop); that needs a browser run with a lab hook or a test-run suite, which `collider-blocks/` does not provide. If the hardware GPU is not at least as fast as SwiftShader here, the workers alone are enough.
+- **Needed from the field files.** Nothing was missing: `densityAt`, `fieldFrameMatrices`, `noiseOrigin`, `terrainEditUniforms`, `createTerrainFieldCpu` (`edits`, `biomeOverride`, `groundedOverride`) were enough. If `densityAt`'s signature changes, `gpu-density-block.ts` is the only consumer here.
+
+## 2026-10-22: shape ops on the GPU (TSL twin), replacing the edit list
+
+`shape-ops/shape-ops-gpu.ts`, `createShapeOpTextures()`: `setOps(ops, radiusM, base)`, `setCamera(camera)`,
+`apply(value, x, up, altitude, footprint)` (TSL), `band`, `index`. Terrain v2 (`planet-shape-raymarch-lit.ts`) now
+takes shape ops through `FieldNodes.shapeOps` (`densityAt` applies them after the old edits, which the lit terrain no
+longer sets); `setEdits` converts edits with `shapeOpFromTerrainEdit`. The CPU twin got `setShapeOps`, and
+`groundHeightAt` searches the band widened by the ops.
+
+**Packing.** Four RGBA32F textures, 128 wide, allocated once: ops (4 texels each: centre and shape code; size, edge,
+height and blend code; shape extras, blend parameter, minimum visible size; first segment and count), path and tube
+segments (4 texels: ends with heights, great-circle normal and angle, unit start and its length), one texel per op-index
+tile (first entry, count, band) and an R32F list of op positions. Capacities 4096 ops, 4096 segments, 65,536 index
+entries, 6 x 32² tiles; `setOps` throws past them.
+
+**Precision.** Positions are packed relative to an origin near the camera and repacked when the camera has moved more
+than max(1 km, a tenth of its altitude); the shader adds the small camera-to-origin shift. Arcs come from
+camera-relative differences: the angle between P and P + D is `atan(|up x D|, |P| + up . D)`, so two nearly equal unit
+vectors are never subtracted. On a path the signed angle along the segment uses the same trick around the circle's
+normal. The op index grows each tile by 1e-6 rad (about 6 m on Earth) so a float32 lookup a hair across a tile border
+still finds every op.
+
+**A GPU `asin` trap.** The first parity run was off by up to 0.1 units on paths only. The cause: the evaluation
+backend's `asin(0.002)` returned 0.00206 (3 % high). The perpendicular arc is now `atan(s, sqrt(1 - s²))`, exact
+there. Worth remembering for any small-angle maths in shaders.
+
+**Specs** (`shape-ops-gpu.spec.ts`, 6, all pass with the 13 CPU ones): ten ops of every shape and blend against
+`compileShapeOps` at 20 km, 600 km, Earth and a cube-face corner, worst 0.043 m (unit 60 m) and 0.69 m (unit 900 m)
+with 40 to 50 % of values changed; footprint skips relaxed ops and keeps contact ones; the band grows by the ops; the
+whole terrain v2 density with the landforms against the CPU twin at 600 km, worst 6.3 m (the field's own tolerance is
+9 m there), 107 of 160 points changed by the ops. Full lab specs: 99 pass (with the two side sessions' new specs).
+
+**Landforms preset** (`shapeOpPreset('landforms')`, the lab's "pad + landforms" button), in relief units east of the
+poses: a cone mountain (5 units, raised, not added: added onto the 7-unit-deep canyon it first landed in, it barely
+reached the plain), a crater, a round ridge path, a flat road (`set`, a causeway through the canyons), a sphere ledge on
+the mountain's flank (a column under it reads air, rock, air, rock: a real overhang), a bent tube arch and a tunnel
+through the mountain's foot. Seen in the lab from the grazing pose; the arch's underside shows ribbed banding, most
+likely march steps across the union's fade, to look at with the step and normal settings.
+
+**Not done yet.** The march still runs the global band (`band`, the widest over all tiles); per-tile bands are packed
+(tile texel z, w) but unused. Timing: suite `planet-shape-ops` v1 (pad against landforms, three poses) and the review
+suite `planet-shape-landforms-views` v1, not run (they need the laptop free). Re-running `planet-shape-edits` v1 gives
+the old 8-edit list's numbers against the shape-op path on the same views. The old edit uniforms (`terrainEditUniforms`,
+`rayEditMask`) stay for the field spec's edit tests and can go once those move to shape ops.
+
+## 2026-10-22: arch gaps and the share-0 shading fix
+
+- **Arch legs in slices over canyons.** A volume op leaves the field untouched beyond 2k from its shape (so the op
+  index can skip it), so near a thin union shape the field is the plain terrain's value. Over a deep canyon that is
+  hundreds of metres, and a march step jumped through the leg. Which slices survived depended on the step pattern,
+  so changing biome or the rock share moved them. Fix: `ShapeOpNodes.reach(x, footprint)` is the exact distance to the
+  nearest union shape (a global list after the tile entries, not per tile, since a step can start outside the
+  listing tiles). The march and the shadow march never step past it. The cost is one SDF per union op per step;
+  per-tile lists with a margin of one step would be needed with many unions.
+- **Wild (share exactly 0) shaded wrong.** The lit normals passed expressions into `densityAt`. TSL emits a shared
+  expression where it is first built, which was inside the grounded `If` block, so at share 0 the normals read an
+  unset value (dark faces, black crater, shading that looked like different shapes). `densityAt` now takes its inputs
+  as variables first. The density itself was right: GPU against CPU at shares 0, 0.05 and 1, one-tap and smooth noise,
+  with and without ops, all within 0.005 units.

@@ -4,6 +4,7 @@ import {
   WARP_AMPLITUDE, biomeParams, bottomAltitudeM, fieldFrameMatrices, padEdit, positiveModulo, topAltitudeM, unitM, type BiomeParams, type TerrainEdit,
 } from './planet-shape-field';
 import { NOISE_PERIOD, NOISE_SIZE, NOISE_SLICE_SHIFT, generateNoiseBytes } from './planet-shape-noise';
+import { compileShapeOps, shapeOpsBounds, type CompiledShapeOps, type ShapeOp } from './shape-ops/shape-op';
 
 /**
  * The v2 terrain field in doubles: the TypeScript twin of `planet-shape-field.ts`. Positions are body-relative (metres
@@ -65,6 +66,9 @@ export interface TerrainFieldCpu {
   /** The edits in use, in order; the default is the pad under the poses. */
   readonly edits: readonly TerrainEdit[];
   setEdits(edits: readonly TerrainEdit[]): void;
+  /** Shape ops applied after the edits, as the shader does; none by default. */
+  readonly shapeOps: readonly ShapeOp[];
+  setShapeOps(ops: readonly ShapeOp[]): void;
   /** Signed field in metres (negative inside rock). */
   density(p: readonly [number, number, number], footprint?: number): number;
   isSolid(p: readonly [number, number, number]): boolean;
@@ -174,11 +178,13 @@ export function createTerrainFieldCpu(
     const ground = share > 0 ? groundedDensity(p, footprint, params) : 0;
     let value = wild * (1 - share) + ground * share;
     for (const edit of edits) value = applyEditCpu(edit, value, p, altitude);
-    return value;
+    return compiled ? compiled.apply(value, p, footprint) : value;
   };
 
-  const top = topAltitudeM(radiusM);
-  const bottom = bottomAltitudeM(radiusM);
+  let compiled: CompiledShapeOps | undefined;
+  /** The band `groundHeightAt` searches: the field's, widened by the shape ops. */
+  let top = topAltitudeM(radiusM);
+  let bottom = bottomAltitudeM(radiusM);
 
   return {
     radiusM,
@@ -194,6 +200,19 @@ export function createTerrainFieldCpu(
     setEdits(next) {
       if (next.length > MAX_TERRAIN_EDITS) throw new Error(`At most ${MAX_TERRAIN_EDITS} terrain edits`);
       edits = next;
+    },
+    get shapeOps() { return compiled?.ops ?? []; },
+    setShapeOps(ops) {
+      const base = { bottomM: bottomAltitudeM(radiusM), topM: topAltitudeM(radiusM) };
+      compiled = ops.length > 0 ? compileShapeOps(ops, radiusM) : undefined;
+      top = base.topM;
+      bottom = base.bottomM;
+      for (const pieces of shapeOpsBounds(ops, radiusM, base)) {
+        for (const piece of pieces) {
+          top = Math.max(top, piece.topM);
+          bottom = Math.min(bottom, piece.bottomM);
+        }
+      }
     },
     canyon,
     rock: (p, footprint) => rock(p, footprint),
