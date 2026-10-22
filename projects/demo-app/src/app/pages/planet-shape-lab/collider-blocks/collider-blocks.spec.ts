@@ -1,19 +1,15 @@
 import { BLOCK_CELLS, BLOCK_CORNERS, BLOCK_SAMPLES, gridIndex, type DensityBlockSpec, type Vec3 } from './block-grid';
 import { ColliderBlockWorkerPool, meshDensityBlockInWorker, sampleAndMeshInWorker, sampleDensityBlockInWorker } from './block-worker-pool';
-import { fillDensityBlockCpu } from './cpu-density-block';
+import { DIRECTIONS, MODES, RADIUS_M, VOXEL_M, cpuGrid, crossesSurface, surfaceBlock } from './block-fixtures';
 import { createGpuDensityBlockGenerator, type GpuDensityBlockGenerator } from './gpu-density-block';
 import { meshDensityBlock, type SurfaceNetsMesh } from './surface-nets';
-import { unitM, type TerrainEdit } from '../planet-shape-field';
-import { createTerrainFieldCpu } from '../planet-shape-field-cpu';
-import { generateNoiseBytes } from '../planet-shape-noise';
+import { unitM } from '../planet-shape-field';
 
 /**
  * Plan 055 D2: can collider data for terrain with overhangs be made fast enough. Correctness first (surface nets,
  * GPU against the CPU twin), then timings. Timings from headless or software-rendered runs are indicative only.
  */
 
-const RADIUS_M = 20_000;
-const VOXEL_M = 2;
 /** Same density tolerance as the field parity specs: a hundredth of the relief unit. */
 const DENSITY_TOLERANCE_M = unitM(RADIUS_M) * 0.01;
 
@@ -113,31 +109,6 @@ describe('collider blocks: surface nets', () => {
   });
 });
 
-/** A block spanning the ground in a direction of the wild canyon biome, so it has overhang-capable rock. */
-function surfaceBlock(direction: Vec3, edits: TerrainEdit[] = []): DensityBlockSpec {
-  const field = createTerrainFieldCpu(RADIUS_M, undefined, []);
-  field.biomeOverride = 0;
-  field.groundedOverride = 0;
-  const length = Math.hypot(...direction);
-  const height = field.groundHeightAt(direction);
-  const r = RADIUS_M + height;
-  const centre: Vec3 = [(direction[0] / length) * r, (direction[1] / length) * r, (direction[2] / length) * r];
-  const half = (BLOCK_CELLS * VOXEL_M) / 2;
-  return {
-    radiusM: RADIUS_M, voxelM: VOXEL_M, origin: [centre[0] - half, centre[1] - half, centre[2] - half], edits, biomeOverride: 0, groundedOverride: 0,
-  };
-}
-
-const DIRECTIONS: Vec3[] = [[0.3, 0.2, 0.93], [-0.5, 0.7, 0.51], [0.9, 0.1, 0.42], [0.1, -0.95, 0.29]];
-
-function cpuGrid(spec: DensityBlockSpec): Float32Array {
-  return fillDensityBlockCpu(createTerrainFieldCpu(spec.radiusM, generateNoiseBytes(), []), spec, new Float32Array(BLOCK_SAMPLES));
-}
-
-function crossesSurface(grid: Float32Array): boolean {
-  return grid.some((d) => d < 0) && grid.some((d) => d >= 0);
-}
-
 describe('collider blocks: CPU density in workers', () => {
   let pool: ColliderBlockWorkerPool;
   beforeAll(() => { pool = new ColliderBlockWorkerPool(2); });
@@ -227,13 +198,6 @@ describe('collider blocks: GPU density against the CPU twin', () => {
     expect(Math.abs(gpuMesh.positions.length - cpuMesh.positions.length) / cpuMesh.positions.length).toBeLessThan(0.02);
   }, 60_000);
 });
-
-/** Cost differs by rock mode: wild reads one density, grounded another, the mask blend can need both. */
-const MODES: { name: string; biomeOverride?: number; groundedOverride?: number }[] = [
-  { name: 'wild canyons', biomeOverride: 0, groundedOverride: 0 },
-  { name: 'grounded hills', biomeOverride: 1, groundedOverride: 1 },
-  { name: 'biome mask blend', biomeOverride: undefined, groundedOverride: undefined },
-];
 
 describe('collider blocks: timings (indicative only: headless, possibly a software adapter)', () => {
   const stats = (values: number[]): string => {

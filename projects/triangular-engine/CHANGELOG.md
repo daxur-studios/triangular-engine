@@ -189,6 +189,8 @@ All notable changes to triangular-engine are documented here.
 
 ## [Unreleased]
 
+- `triangular-engine/jolt`: keep activation/contact listeners alive until body cleanup and world destruction finish. Removing an active body can synchronously call its listener; freeing the wrapper first could hang teardown.
+
 ### Added
 
 - New secondary entry point `triangular-engine/planet-material` (Plan 050): the

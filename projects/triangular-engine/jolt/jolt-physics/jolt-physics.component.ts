@@ -647,20 +647,6 @@ export class JoltPhysicsComponent {
     const meta = this.physicsService.metaData$.value;
     if (!meta) return;
 
-    // Release the activation listener
-    try {
-      Jolt.destroy(this.activationListener);
-    } catch {
-      console.warn('Failed to destroy activation listener');
-    }
-
-    // Release the contact listener
-    try {
-      Jolt.destroy(this.contactListener);
-    } catch {
-      console.warn('Failed to destroy contact listener');
-    }
-
     if (this.#memoryLogInterval) {
       clearInterval(this.#memoryLogInterval);
       this.#memoryLogInterval = undefined;
@@ -693,6 +679,21 @@ export class JoltPhysicsComponent {
         const Jolt = meta.Jolt;
         Jolt.destroy(meta.jolt);
       } catch {}
+      // RemoveBody can synchronously invoke listeners. Their wrappers must
+      // outlive the native world, including its body/constraint cleanup.
+      // Release the activation listener
+      try {
+        Jolt.destroy(this.activationListener);
+      } catch {
+        console.warn('Failed to destroy activation listener');
+      }
+
+      // Release the contact listener
+      try {
+        Jolt.destroy(this.contactListener);
+      } catch {
+        console.warn('Failed to destroy contact listener');
+      }
     }
   }
 }

@@ -41,6 +41,8 @@ export interface GpuDensityBlockGenerator {
   readonly radiusM: number;
   /** Adapter description, to read timings against. */
   readonly adapter: string;
+  /** The renderer behind the compute pass, for `describeRendererGpu`. */
+  readonly renderer: WebGPURenderer;
   /** Dispatch the compute pass for a block and queue its readback. False when every readback slot is busy (dropped). */
   request(id: number, spec: DensityBlockSpec, frame: number): boolean;
   /** Blocks that have arrived since the last call. */
@@ -138,6 +140,7 @@ export async function createGpuDensityBlockGenerator(radiusM: number, options: G
   return {
     radiusM,
     adapter,
+    renderer,
     request(id, spec, frame) {
       if (ring.freeSlots === 0) return ring.request(storage as never, 0, frame, undefined as never);
       const startedAt = performance.now();

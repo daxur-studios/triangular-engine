@@ -573,6 +573,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'collider-blocks-bench',
+    loadComponent: () =>
+      import('./pages/planet-shape-lab/collider-blocks/collider-blocks-bench-page.component').then(
+        ({ ColliderBlocksBenchPageComponent }) => ColliderBlocksBenchPageComponent,
+      ),
+  },
+  {
     path: 'tests',
     loadComponent: () =>
       import('./pages/test-results/test-results-page.component').then(

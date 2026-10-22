@@ -277,8 +277,11 @@ field library and the surface tracer. Fur and plants are out of scope, but nothi
 | **Main risk** | Overhangs are second-class | The seam between shell and block meshes; meshing cost under edits | Per-pixel cost at 1440p; morph inversion; shadows |
 | **Draw calls** | A few, independent of patch count | A few, plus one per resident block batch | A few |
 
-Existing pieces each may reuse: the instanced clipmap (`terrain/clipmap`), the unused `CdlodV3InstancedRenderer`,
-the 047 culling work, the cell planet's morph selector, Plan 051's march code and GPU timer.
+**No code from the earlier terrain attempts** (D14): not `terrain/cdlod` (including `CdlodV3InstancedRenderer`),
+`terrain/clipmap`, the cell planet renderers or their morph selector. Each contender writes its own selection, grids
+and LOD in its folder. Lessons from those attempts may be read in their runbooks; their code is not imported or
+copied. Shared engine infrastructure that is not a terrain attempt stays usable: the GPU timer, the 055 shape-op
+field and its twins, the data-flow core, and libraries such as meshoptimizer.
 
 Contender C is also the slow **reference renderer** in Phase 0: at maximum steps and full precision it shows the
 true shape with no mesh in between.
@@ -549,6 +552,7 @@ Not decisions yet; each names the phase that settles it.
 | D11 | Target is 1440p only, no 4K tier. Smallest contact edit is a 2 m footpath; edits are building-scale up to a whole base (§Fidelity classes) | **Decided** 2026-10-19 (owner; 2 m is a working number) |
 | D12 | Lava is a surface material over a height op (volcano), not a separate surface. Rivers carve a channel op; their water surface is Phase 4 | **Decided** 2026-10-19 (owner: "whatever runs well") |
 | D13 | Caves below sea level are flooded (below sea level is water). At morph 1 the map shows the outermost surface; tunnels and caves are not drawn | **Decided** 2026-10-19 (owner left it to the plan) |
+| D14 | No code reused from the earlier terrain attempts (CDLOD, clipmap, cell planet renderers); contenders write their own LOD and grids (§The contenders) | **Decided** 2026-10-22 (owner) |
 
 ## Out of scope for now
 
