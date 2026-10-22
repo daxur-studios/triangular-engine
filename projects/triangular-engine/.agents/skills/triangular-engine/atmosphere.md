@@ -25,6 +25,12 @@ Referenced from the main `triangular-engine` skill. Full guide: `docs/atmosphere
 - Morphing planets: write morph state in `tick$`/`postTick$`, read the settled camera in `beforeRender$`. If you also use `CellPlanetMorphCameraRig`, call it in `postTick$` and set the material's `uMorph` in the same step, or the camera and surface disagree for a frame and flicker.
 - Cost: the froxel table (`aerialPerspective`) is the cheap haze path; without it the haze is a ray march per fragment.
 
+## Sky objects
+
+- Stars: `atmosphere.stars = 1` (default 0, off), `atmosphere.starRotation` in the body frame. They are part of the sky and fade in daylight on their own.
+- Moons and planets: `atmosphere.addSkyBody({ direction, angularRadiusDeg, albedo })`, move with `handle.direction` (body frame). Don't add `body.mesh` to the scene yourself; it is in `atmosphere.object`.
+- A custom sky object in TSL: `backdrop.skyObject(radiance, worldDir)`, drawn after the backdrop. Details in `docs/atmosphere.md`, "Sky objects".
+
 ## Known gaps (in progress)
 
 - On the flat map the haze is per-surface-fragment and the sky is a dome behind the map. There is no visible air layer above the map's edges yet (the view reads as global, not local).

@@ -1,5 +1,10 @@
 # Changelog
 
+- `triangular-engine/atmosphere`: stars, moons and other bodies in the sky, seen through the air (Plan 049, Phase 5).
+  - **Stars.** `PlanetAtmosphere.stars` (brightness, default 0) and `starRotation`; `<planetAtmosphere [stars]>`. Drawn by `AtmosphereBackdrop` (new uniforms `stars`, `starFrame`, `pixelAngle`, which `update(renderer, camera)` sets from the camera). New `starField(dir, pixelAngle, layers?)` (TSL), its CPU twin `starFieldAt`, `starFieldCell`, `starFieldStar`, `starHash`, `STAR_FIELD_LAYERS` and the fade constants.
+  - **Sky bodies.** New `AtmosphereSkyBody` (`angularRadiusDeg`, `albedo`, `emission`, `lit`; `setDirections(world, sun)`), and `PlanetAtmosphere.addSkyBody({ direction, ... })` / `removeSkyBody` / `skyBodies`, whose `direction` is in the body frame.
+  - **Any sky object.** `AtmosphereBackdrop.atmosphereSky(worldDir)` → `{ inscatter, transmittance }` and `skyObject(radiance, worldDir)` for your own TSL materials; `objectAir` uniform.
+  - **Breaking (unreleased API):** `PlanetAtmosphere.object` is now a group holding the sky mesh and the bodies, not the sky mesh itself. Hide the sky with `sky = false` or `backdrop.mesh.visible`.
 - `triangular-engine/testing`: a scenario's own quick length, so timed actions get a quick mode too. `TestScenario.quickMs` (at most `durationMs`, checked by `validateTestHistory`) is the scenario's length in quick mode: the most a watched window runs, the length of an unwatched one (in place of `QUICK_WINDOW_MS`), and of a timed action. New `modeActionMs(scenario, mode)`: how long a sweep or fly-by runs in a mode (`quickMs` in quick mode when set, otherwise `durationMs`). An adapter whose motion follows `durationMs` can now set `windowModes` and time its motion with `modeActionMs`. `modeWindowMs` returns `quickMs ?? durationMs` in quick mode. Standard and soak are unchanged.
 - `triangular-engine/gpu-data-flow`: new entry with the reusable CPU/GPU/worker data-flow core (Plan 055, Phase 1b). Preview.
   - **`UploadRing`** (`enqueue`, `flush`, `setBudget`): writes up to `bytesPerFrame` per frame, splits larger writes, queue depth and peak are metrics.

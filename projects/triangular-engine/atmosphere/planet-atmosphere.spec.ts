@@ -1,4 +1,4 @@
-import { Object3D, PerspectiveCamera, Scene } from 'three';
+import { Object3D, PerspectiveCamera, Scene, Vector3 } from 'three';
 import { uniform } from 'three/tsl';
 import { getEvalRenderer } from '../planet-material/gpu-eval.testing';
 import { PlanetSurfaceMaterial } from '../planet-material/planet-surface-material';
@@ -49,7 +49,61 @@ describe('PlanetAtmosphere', () => {
     const atmosphere = smallAtmosphere();
     expect(atmosphere.model.profile.planetRadiusM).toBeCloseTo(RADIUS_M, 3);
     expect(atmosphere.binding.metersPerUnit.value).toBeCloseTo(RADIUS_M, 3);
-    expect(atmosphere.object).toBe(atmosphere.backdrop.mesh);
+    expect(atmosphere.object.children).toContain(atmosphere.backdrop.mesh);
+    atmosphere.dispose();
+  });
+
+  it('keeps sky bodies in its group, points them from the body frame and frees them', async () => {
+    const renderer = await getEvalRenderer();
+    const planet = new Object3D();
+    planet.rotation.y = Math.PI / 2;
+    const atmosphere = smallAtmosphere({ planet });
+    atmosphere.sunDirection.set(0, 0, 1);
+    const moon = atmosphere.addSkyBody({ direction: [1, 0, 0] });
+    expect(atmosphere.object.children).toContain(moon.body.mesh);
+    expect(atmosphere.skyBodies).toEqual([moon]);
+
+    const camera = new PerspectiveCamera();
+    camera.position.set(0, 0, 1.5);
+    atmosphere.update(renderer, camera);
+    // A quarter turn about y takes body +x to world -z and body +z to world +x.
+    expect(moon.body.direction.value.z).toBeCloseTo(-1, 6);
+    expect(moon.body.sunDirection.value.x).toBeCloseTo(1, 6);
+    expect(atmosphere.backdrop.objectAir.value).toBe(1);
+
+    // Without the sky the body stays, seen through no air.
+    atmosphere.sky = false;
+    atmosphere.update(renderer, camera);
+    expect(atmosphere.backdrop.objectAir.value).toBe(0);
+    expect(moon.body.mesh.visible).toBeTrue();
+
+    atmosphere.removeSkyBody(moon);
+    expect(moon.body.mesh.parent).toBeNull();
+    expect(atmosphere.skyBodies.length).toBe(0);
+    atmosphere.addSkyBody();
+    atmosphere.dispose();
+    expect(atmosphere.skyBodies.length).toBe(0);
+  });
+
+  it('turns the stars with the planet and their own rotation', async () => {
+    const renderer = await getEvalRenderer();
+    const planet = new Object3D();
+    planet.rotation.y = Math.PI / 2;
+    const atmosphere = smallAtmosphere({ planet });
+    atmosphere.stars = 2;
+    const camera = new PerspectiveCamera();
+    camera.position.set(0, 0, 1.5);
+    atmosphere.update(renderer, camera);
+    expect(atmosphere.backdrop.stars.value).toBe(2);
+    // World -z is body +x, which is star +x while the stars have no rotation of their own.
+    const world = new Vector3(0, 0, -1).applyMatrix3(atmosphere.backdrop.starFrame.value);
+    expect(world.x).toBeCloseTo(1, 6);
+
+    atmosphere.starRotation.setFromAxisAngle(new Vector3(0, 0, 1), Math.PI / 2);
+    atmosphere.update(renderer, camera);
+    // The stars turned a quarter about body z, so body +x is their -y.
+    const turned = new Vector3(0, 0, -1).applyMatrix3(atmosphere.backdrop.starFrame.value);
+    expect(turned.y).toBeCloseTo(-1, 6);
     atmosphere.dispose();
   });
 
@@ -137,16 +191,16 @@ describe('PlanetAtmosphere', () => {
 
     atmosphere.update(renderer, camera);
     expect(atmosphere.binding.cameraAltitude.value).toBeCloseTo(RADIUS_M / 2, 0);
-    expect(atmosphere.object.visible).toBeTrue();
+    expect(atmosphere.backdrop.mesh.visible).toBeTrue();
 
     atmosphere.enabled = false;
     atmosphere.update(renderer, camera);
-    expect(atmosphere.object.visible).toBeFalse();
+    expect(atmosphere.backdrop.mesh.visible).toBeFalse();
 
     atmosphere.enabled = true;
     atmosphere.sky = false;
     atmosphere.update(renderer, camera);
-    expect(atmosphere.object.visible).toBeFalse();
+    expect(atmosphere.backdrop.mesh.visible).toBeFalse();
     atmosphere.dispose();
   });
 });

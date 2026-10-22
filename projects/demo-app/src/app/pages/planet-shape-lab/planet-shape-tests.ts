@@ -21,7 +21,8 @@ export interface PlanetShapeTestSettings {
    * `raymarch` the first raymarched terrain (Phase 1, contender C minimal: no morph, no shadows); `raymarch-lit` its
    * second try (a 3D density field with canyons and overhangs, sky, optional soft shadow).
    */
-  readonly kind: 'empty' | 'sphere' | 'raymarch' | 'raymarch-lit';
+  /** `mesh-b`: contender B (`contender-b/`), drawn with terrain v2's field and settings. */
+  readonly kind: 'empty' | 'sphere' | 'raymarch' | 'raymarch-lit' | 'mesh-b';
   readonly seed: number;
   readonly bodyId: BodyId;
   readonly poseId: CameraPoseId;
@@ -48,6 +49,8 @@ export interface PlanetShapeTestSettings {
   readonly probe?: 'quality' | 'terrain-quality';
   /** A free-camera view that replaces the pose (close-ups of one landform); absent = the pose. */
   readonly view?: CameraView;
+  /** Contender B's near volume zone; `false` is the shell alone (contender A). Absent = on; ignored by the other kinds. */
+  readonly meshBlocks?: boolean;
 }
 
 export const PLANET_SHAPE_DEFAULTS: PlanetShapeTestSettings = {
@@ -286,5 +289,18 @@ export const PLANET_SHAPE_TEST_HISTORY: readonly TestSuite<PlanetShapeTestSettin
             { kind: 'raymarch-lit', bodyId: '600km', poseId: 'low-flyover', view, rayEdits: 'landforms', rayBiome: biome, spinWarp: 0, spinAngleDeg: 0, probe: 'terrain-quality' })),
       ]),
     ],
+  },
+  {
+    id: 'planet-shape-terrain-quality-b', version: 1,
+    title: 'Contender B against terrain v2\'s reference march: the terrain-quality views, with the near volume zone (B) and without it (A)',
+    // Correctness, not timing: B's mesh where terrain v2's fast march stands in the same probe (Plan 055 D18, seam
+    // spike stage 2). Each view is built for the screen's pixel angle before it is probed, which takes seconds.
+    purpose: 'functional',
+    scenarios: (['canyons', 'blend'] as const).flatMap((biome) => [
+      ...(['low-flyover', 'horizon-grazing'] as const).map((poseId) => ({ id: poseId as string, label: poseId.replace('-', ' '), poseId, view: undefined as CameraView | undefined })),
+      ...LANDFORM_VIEWS.map(({ id, label, view }) => ({ id, label, poseId: 'low-flyover' as const, view })),
+    ].flatMap(({ id, label, poseId, view }) => ([true, false] as const).map((blocks) =>
+      scenario(`mesh-${blocks ? 'b' : 'a'}-${biome}-${id}-600km`, `${blocks ? 'B (shell + near zone)' : 'A (shell only)'} vs reference, landforms, ${biome}, ${label}, 600 km`,
+        { kind: 'mesh-b', bodyId: '600km', poseId, ...(view ? { view } : {}), rayEdits: 'landforms', rayBiome: biome, spinWarp: 0, spinAngleDeg: 0, probe: 'terrain-quality', meshBlocks: blocks })))),
   },
 ];

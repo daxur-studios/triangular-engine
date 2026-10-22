@@ -588,6 +588,10 @@ before the material port lands. Phase 2b onwards needs Plan 050 through its Phas
      `/atmosphere-planet` switched to it, docs and CHANGELOG. It does not touch the material. `/cell-planet-tsl`
      still wires by hand; moving it to the component waits for the owner (Plan 050 owns that page's material).
 5. **Sky objects.** Starfield, moon, sun disc and other bodies through `atmosphereSky(dir)`.
+   (*Built 2026-10-22, specs pass; checked by eye on `/atmosphere-planet` on the iGPU pane, not timed. Runbook 049.*)
+   Procedural stars in the backdrop, `AtmosphereSkyBody` discs, `backdrop.atmosphereSky(dir)` / `skyObject()`, `PlanetAtmosphere.stars`
+   and `addSkyBody`. The sun disc was already drawn this way. Decided: the moon does not light the air or the ground (it would be about
+   a millionth of the sun). Left: earthshine, textured bodies, the bent sky of `/atmosphere-lab` (it has its own pass), GPU timing.
 6. **Extensions demo with atmosphere.** Plan 050's `planet-material-extensions` demo (roads +
    eclipse) with the atmosphere on. Check that the eclipse darkens the sky and that roads are hazed.
 7. **Stylized model + art controls.** Ramp producer, overrides, zenith-colour solver, optional stylized glowing outline around the map.

@@ -79,6 +79,8 @@ export interface PlanetShapeTerrainProbe {
   readonly camera: QualityProbeCamera;
   /** Radians per probe pixel. */
   readonly pixelAngle: number;
+  /** Numbers the drawn contender reports about its own build (contender B: leaves, triangles, timings). */
+  readonly contender?: Readonly<Record<string, number>>;
 }
 
 /** What the lab page offers the adapter: its normal actions plus read-only probes. Implemented by the page. */
@@ -127,6 +129,7 @@ export function settingsMismatches(actual: PlanetShapeTestSettings, expected: Pl
   for (const key of ['kind', 'seed', 'bodyId', 'poseId', 'spinWarp', 'morph', 'raySteps', 'rayPrepass', 'rayEdits', 'rayBiome', 'rayRock'] as const) {
     if (actual[key] !== expected[key]) out.push(`${key}: expected ${expected[key]}, found ${actual[key]}`);
   }
+  if ((actual.meshBlocks ?? true) !== (expected.meshBlocks ?? true)) out.push(`meshBlocks: expected ${expected.meshBlocks ?? true}, found ${actual.meshBlocks ?? true}`);
   const view = (settings: PlanetShapeTestSettings) => (settings.view ? JSON.stringify(settings.view) : 'the pose');
   if (view(actual) !== view(expected)) out.push(`view: expected ${view(expected)}, found ${view(actual)}`);
   return [...out, ...featureMismatches(actual.features, expected.features)];
@@ -257,7 +260,10 @@ async function measureTerrainQuality(host: PlanetShapeTestHost, scenario: TestSc
   const checks: TestCheck[] = [
     { name: 'Scenario state applied as specified', passed: mismatches.length === 0, detail: mismatches.join('; ') || undefined },
     { name: 'WebGPU backend in use', passed: host.backendIsWebGpu(), detail: String(host.environment()['backend']) },
-    { name: 'Terrain v2, unmorphed', passed: settings.kind === 'raymarch-lit' && settings.morph === 0, detail: `${settings.kind}, morph ${settings.morph}` },
+    {
+      name: 'Terrain v2 or contender B, unmorphed', passed: (settings.kind === 'raymarch-lit' || settings.kind === 'mesh-b') && settings.morph === 0,
+      detail: `${settings.kind}, morph ${settings.morph}`,
+    },
     { name: 'Terrain drawn by both marches', passed: result.drawnFast > 0 && result.drawnReference > 0, detail: `fast ${result.drawnFast} px, reference ${result.drawnReference} px` },
     { name: 'Reference march finished every pixel', passed: probe.reference.ranOut === 0, detail: `${probe.reference.ranOut} px ran out of steps` },
     {
@@ -311,6 +317,7 @@ async function measureTerrainQuality(host: PlanetShapeTestHost, scenario: TestSc
       frameTimerStalledByProbe: timerStalled,
       referenceCpuCompared: cpu.compared, referenceCpuCoverageMismatch: cpu.coverageMismatch,
       surfaceFieldMaxFootprints: max(result.fieldFootprints), referenceCpuErrorMaxFootprints: max(cpu.errorFootprints),
+      ...Object.fromEntries(Object.entries(probe.contender ?? {}).map(([key, value]) => [`contender.${key}`, value])),
     },
     validityIssues: [],
     limitations: [

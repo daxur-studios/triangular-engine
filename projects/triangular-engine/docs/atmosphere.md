@@ -96,6 +96,7 @@ import { PlanetAtmosphereComponent } from 'triangular-engine/atmosphere';
 | `sunDirection` | Direction to the sun in the body frame (`Vector3` or `[x, y, z]`). |
 | `morph` | Pass the material's `morph.uMorph` to share one value (read at start), or a number. |
 | `exposure`, `enabled`, `sky` | Exposure (default 8); `enabled = false` skips the atmosphere on the surfaces without a recompile and hides the sky; `sky = false` hides only the sky. |
+| `stars` | Star brightness, 0 (default) for none. See [Sky objects](#sky-objects). |
 
 The component's `atmosphere()` signal gives the `PlanetAtmosphere` for anything else (its `binding`, `model`, `backdrop`).
 
@@ -106,7 +107,7 @@ Without Angular, or to call the update yourself:
 ```ts
 const atmosphere = new PlanetAtmosphere({ preset: 'earth', radiusM: 600_000, radiusUnits: 1, planet, morph: surface.morph.uMorph });
 atmosphere.withAtmosphere(surface).withAtmosphere(ocean.material); // { lighting?, haze? } per surface
-scene.add(atmosphere.object);
+scene.add(atmosphere.object); // a group: the sky and any sky bodies
 atmosphere.sunDirection.set(x, y, z);
 engine.beforeRender$.subscribe(() => atmosphere.update(renderer, engine.camera));
 atmosphere.configure({ thickness: 0.05 }); // rebakes only when the air or the size changed
@@ -114,6 +115,23 @@ atmosphere.dispose(); // takes the stages off, removes the sky, frees the GPU re
 ```
 
 Surfaces are taken structurally (`IAtmosphereSurface`: `setLightingStage` and `setAtmosphereStage`), so this entry point does not import `triangular-engine/planet-material`. Other materials (`withAtmosphere(nodeMaterial)`) and haze on non-planet objects are not covered yet (Plan 049, Phase 4).
+
+## Sky objects
+
+Stars, moons and other bodies are seen through the same air as the sky behind them: the haze covers them near the horizon, the long path there reddens them, and a bright day sky hides them.
+
+```ts
+atmosphere.stars = 1; // or <planetAtmosphere [stars]="1">
+atmosphere.starRotation.setFromAxisAngle(axis, angle); // the stars in the body frame; turn them with the sun for a day
+const moon = atmosphere.addSkyBody({ direction: [0.9, 0.2, 0.3], angularRadiusDeg: 0.26, albedo: new Color(0.14, 0.14, 0.14) });
+moon.direction.set(x, y, z); // body frame, like sunDirection; read in update()
+atmosphere.removeSkyBody(moon);
+```
+
+- **Stars** are drawn by the backdrop, procedurally (`starField(dir, pixelAngle)`: cube-face cells, at most one star per cell, placed by an integer hash, three layers from a few bright to many faint). A star is a Gaussian about half a pixel wide at any field of view; a layer fades out once its cells are under 3-6 pixels across. They are display-referred (added after exposure), multiplied by the air's transmittance, and fade out as the sky behind them brightens (linear luminance 0.003 to 0.04, `STAR_FADE_LUMA_START`/`END`), so they show at night and in late twilight and never in the day. They are part of the sky: `sky = false` hides them. `starFieldAt(dir, pixelAngle)` is the CPU twin.
+- **Sky bodies** (`AtmosphereSkyBody`, or `PlanetAtmosphere.addSkyBody`) are a disc at infinity, lit by the sun as a sphere (so they show phases), plus an optional `emission`. They are drawn after the sky and before the scene (render order -999, no depth test), so the planet and every scene object cover them. Their rim blends into the sky colour behind, so they stay opaque. A body does not light the air or the ground. With the sky off they stay, seen through no air.
+- **Your own sky objects:** in a TSL material drawn after the backdrop, `backdrop.atmosphereSky(worldDir)` returns `{ inscatter, transmittance }` (display units, exposure applied), and `backdrop.skyObject(radiance, worldDir)` is `radiance x exposure x transmittance + inscatter`.
+- On the flat map (`morph > 0`) the sky's sun is moved to keep the sun angle under the camera; bodies and stars keep their true directions.
 
 ## On the planet material
 

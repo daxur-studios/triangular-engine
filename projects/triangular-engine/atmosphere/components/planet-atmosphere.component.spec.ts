@@ -78,7 +78,7 @@ describe('PlanetAtmosphereComponent', () => {
 
     fixture.componentRef.setInput('enabled', false);
     beforeRender$.next();
-    expect(atmosphere.object.visible).toBeFalse();
+    expect(atmosphere.backdrop.mesh.visible).toBeFalse();
 
     fixture.destroy();
     expect(scene.children).not.toContain(atmosphere.object);

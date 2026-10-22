@@ -1079,6 +1079,27 @@ Question: can collider data for terrain with overhangs be made fast enough. New 
   - Readback is 140 KiB per block; packing to f16 or i16 distances halves it if needed.
 - **Recommendation.** GPU density with the readback ring, then meshing and the Jolt shape on the CPU side (main thread or a worker), with the CPU-worker path kept as the fallback and reference (it is 60–75 ms per block, fast enough for edits and for the first fill on machines without WebGPU). Before D2 is closed, repeat the GPU rows on a real adapter (RTX 3080 Laptop); that needs a browser run with a lab hook or a test-run suite, which `collider-blocks/` does not provide. If the hardware GPU is not at least as fast as SwiftShader here, the workers alone are enough.
 - **Needed from the field files.** Nothing was missing: `densityAt`, `fieldFrameMatrices`, `noiseOrigin`, `terrainEditUniforms`, `createTerrainFieldCpu` (`edits`, `biomeOverride`, `groundedOverride`) were enough. If `densityAt`'s signature changes, `gpu-density-block.ts` is the only consumer here.
+- **Real GPU run (same day).** `/collider-blocks-bench` (suite `collider-blocks@1`, standard, visible-browser, RTX 3080 Laptop,
+  WebGPU, 4 workers, 20 km body, 2 m voxels; GPU parity check passed; performance verdict `unassessed`, no budget set).
+  Ms per 33³ block, median (p95):
+
+  | path | one block, latency | pipelined, per block |
+  |---|---|---|
+  | GPU wild canyons | 4.0 (4.5) | 1.01 |
+  | GPU grounded hills | 4.1 (4.6) | 0.83 |
+  | GPU biome-mask blend | 4.2 (5.3) | 0.78 |
+  | CPU workers, wild | 59 (64) | 16.3 |
+  | CPU workers, hills | 60 (84) | 16.6 |
+  | CPU workers, blend | 71 (73) | 19.6 |
+  | surface nets, main thread | 1.3 (10.6) | |
+  | surface nets, worker round trip | 3.3 (19.1) | |
+
+  The GPU is 15–20× the four workers in throughput (about 1000–1300 blocks/s against 50–60) and 15× faster for a single
+  block. One-block latency is about 4 ms, mostly readback (copy and map), so it fits inside a frame or two. The
+  mesher spikes (p95 10–19 ms) come from a busy GPU (86 % median load in this run) and a cold JIT, not from the
+  algorithm. This confirms the recommendation: GPU density with the readback ring, CPU meshing, CPU workers as fallback and
+  reference. A 75-block ring fills in about 0.1 s on the GPU against 1.2–1.5 s on workers. Still open: float32 origin
+  rounding on Earth-size bodies, and block padding or skirts for the colliders.
 
 ## 2026-10-22: shape ops on the GPU (TSL twin), replacing the edit list
 
@@ -1214,3 +1235,61 @@ fault instead of a screenshot.
     allowed. The fast points' field reached 3.6 footprints in the canyons' grazing views; the line is 4.
   - **Not done.** The fast probe leaves the pre-pass out (its target has another size). Shading is not compared, only where the
     surface is drawn. The horizon fattening (the cone stop) could be tightened by shrinking the hit cone with distance.
+
+## 2026-10-22/23: meshing review, decisions D14-D18, contender B seam spike stages 1-2
+
+- **Decisions.** D14 (owner): no code from the earlier terrain attempts. A three-reviewer meshing review
+  (`docs/plans/055_meshing_review.md`) led to D15-D18 (owner left them to the plan): A merges into B as its
+  blocks-off ablation; design D (meshed blocks everywhere) held in reserve; a foundation apron only for contact ops
+  under 2 px; gate changes (R1 arch/seam with edits, R3 morphed shadows, R4 workload, R2 smallest topology feature);
+  the B seam spike first.
+- **How much overhangs (CPU twin, 600 km, a 21.6 x 10.8 km area round the landforms, 100 m columns, 20 m steps).**
+  Canyons with the landforms: 8.6% of columns cross the ground more than once, in 26% of the 1 km tiles; the same
+  without any op: 7.1% and 29%. Blend: 8.1%, 19% of tiles. A column that overhangs spans 4.7-6.2 km between its top and
+  bottom crossings (median). So canyon country overhangs near any camera, natively, not only at the ops.
+- **Built** (`planet-shape-lab/contender-b/`, surface `mesh-b` in the lab):
+  - `cube-sphere.ts`: equal-angle cube-sphere, faces as `op-index.ts`; canonical lattice keys, so a shared vertex has
+    the same key and direction from every face (cube edges included).
+  - `leaf-select.ts`: quadtree by screen cell size, view and horizon culling, 2:1 balance, coarser-edge masks, a
+    pinned rectangle held at one level.
+  - `column-scan-gpu.ts`: a TSL compute pass that steps each radial column down and bisects every sign change (up to
+    11 crossings kept); `b-field.ts` sets up terrain v2's field around an origin.
+  - `shell-mesh.ts`: the height shell from the outermost crossing; edge heights shared by lattice key, odd edge vertices
+    folded onto even ones next to a coarser leaf.
+  - `zone-mesh.ts`: the near volume zone (below).
+  - `mesh-terrain.ts`: selection in passes deepening 4, 7, 10, 13, 16, 19, each scanning its new leaves with the
+    ranges of their scanned ancestors (without that, a camera inside the ±8 km band made every leaf under it split to
+    level 19: 11,650 leaves and 24M triangles instead of about 950 and 2M). Scans are cached per leaf.
+  - Specs (`contender-b.spec.ts`, 9): face mapping, shared keys across cube edges and corners, balance, culling, a
+    whole-sphere shell closed (every directed edge paired, Euler characteristic 2) with per-leaf offsets only sharing
+    hides, and shell + zone with a cave closed the same way.
+- **The zone, and the seam.** A square of same-level leaves around the ground under the camera (reach 5x the height
+  over the ground, at most 16 leaves a side, none above 20 km), meshed as one grid with surface nets taken straight
+  from the column scans: signs are exact at any altitude, radial crossings are the scanned roots, a horizontal crossing
+  is placed by each column's signed distance to its nearest crossing. No 3D sampling. Its boundary columns keep only
+  the outermost crossing, so the boundary faces are single valued and their contour runs from shell vertex to shell
+  vertex; quads that would need cells outside become a strip to that contour, and a fan per shell edge closes the
+  rest. Quads are wound from the grid edge's rock end to its air end, seam triangles to match a neighbour.
+- **Measured** (this laptop's iGPU, by calling the probe directly; 480 x 270 probe against terrain v2's reference):
+
+  | View | A (shell only) | B (shell + zone) |
+  |---|---|---|
+  | canyons low flyover | 2.44% | 3.12% (zone level 6: 460 m cells) |
+  | canyons horizon grazing | 4.58% | 0.97% |
+  | canyons arch-road | 28.3% (the arch filled) | 1.09% |
+  | canyons road-along | 4.30% | 4.31% |
+  | canyons tunnel | 1.08% | 1.09% |
+  | blend low / grazing / arch / road / tunnel | 2.19 / 2.58 / 0.41 / 0.44 / 1.08% | 0.96 / 1.57 / 0.41 / 0.50 / 1.09% |
+
+  No view has a hole or a stray pixel (0 drawn by one only away from an outline): the seam and the 2:1 shell edges
+  leave no visible crack. The wrong pixels left are overhangs beyond the zone, which the shell fills (16-27 km in
+  arch-road), and the zone's single level: too coarse when the camera is high (low flyover), too fine far out. 1.6-2.4M
+  triangles, 0.2-0.7M of them the zone's. A build takes 2-5 s here (scans about 3 s on the iGPU, CPU assembly about 3 s).
+- **What this says.** The seam works, and B without its zone (A) fails the 0.5% line in all but one view. B with one
+  zone level fails it too, for two reasons a zone with levels of its own would remove: overhangs farther out, and cells
+  sized for one distance. That is a volume LOD with 2:1 transitions between zone levels, the problem design D was
+  proposed for, so B's near zone and D converge in canyon country.
+- **Suite.** `planet-shape-terrain-quality-b` v1 (functional): the ten views, B and A each (20 cases). Not run on the
+  reference machine yet.
+- **Not done.** Zone levels (the next risk); GPU meshing and next-frame edits; morph; timing; colliders from the zone;
+  a zone across a cube edge (clipped to one face now); 6,371 km precision; normals across leaf edges (shading seams).

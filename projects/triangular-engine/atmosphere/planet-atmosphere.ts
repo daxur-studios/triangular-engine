@@ -1,4 +1,4 @@
-import { Vector3, type Camera, type IUniform, type Object3D } from 'three';
+import { Group, Matrix4, Quaternion, Vector3, type Camera, type IUniform, type Object3D } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
 import { If, float, mix, uniform } from 'three/tsl';
 import type { AtmosphereAerialPerspectiveOptions } from './atmosphere-aerial-perspective';
@@ -13,6 +13,7 @@ import {
 import { createAtmospherePreset, type AtmospherePresetId } from './atmosphere-presets';
 import type { PhysicalAtmosphereProfile } from './atmosphere-profile';
 import { scaleAtmosphereProfile } from './atmosphere-scaling';
+import { AtmosphereSkyBody, type AtmosphereSkyBodyOptions } from './atmosphere-sky-body';
 import { AtmosphereSkyViewLut, type AtmosphereSkyViewOptions } from './atmosphere-sky-view';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -79,6 +80,18 @@ interface SurfaceEntry {
   haze: boolean;
 }
 
+export interface PlanetSkyBodyOptions extends AtmosphereSkyBodyOptions {
+  /** Direction to the body in the planet's body frame, like {@link PlanetAtmosphere.sunDirection}. Default +z. */
+  direction?: Vector3 | readonly [number, number, number];
+}
+
+/** A body in the sky of a {@link PlanetAtmosphere}: move it by writing {@link direction}. */
+export interface PlanetSkyBody {
+  readonly body: AtmosphereSkyBody;
+  /** Direction to the body in the planet's body frame; read (and normalised) in {@link PlanetAtmosphere.update}. */
+  readonly direction: Vector3;
+}
+
 /**
  * The Plan 049 atmosphere for one planet, in one object: it owns the model, the sky-view table, the sky behind the
  * planet and the binding, and puts the lighting and haze stages on the surfaces that opt in.
@@ -112,9 +125,26 @@ export class PlanetAtmosphere {
   enabled = true;
   /** Draw the sky and limb glow behind the planet. */
   sky = true;
+  /**
+   * Star brightness, 0 (default) for none. The stars are part of the sky: they fade as the sky behind them brightens
+   * and show through the air's transmittance, and they go when {@link sky} is off.
+   */
+  stars = 0;
+  /**
+   * Orientation of the stars in the planet's body frame. The stars are fixed in space, so a planet whose sun turns
+   * around it (a day) turns them the same way.
+   */
+  readonly starRotation = new Quaternion();
   /** How long the last table bake took, ms. */
   lastBakeMs = 0;
 
+  private readonly root = new Group();
+  private readonly bodies: PlanetSkyBody[] = [];
+  private readonly planetQuaternion = new Quaternion();
+  private readonly starQuaternion = new Quaternion();
+  private readonly starMatrix = new Matrix4();
+  private readonly bodyWorld = new Vector3();
+  private readonly sunWorld = new Vector3();
   private readonly amount = uniform(1);
   private readonly lightingStage: AtmosphereLightingStage;
   private readonly hazeStage: AtmosphereHazeStage;
@@ -137,6 +167,8 @@ export class PlanetAtmosphere {
     this.backdrop = new AtmosphereBackdrop(this.model, { ...options.backdrop, skyView: this.skyView });
     this.backdrop.groundEnabled.value = 0;
     this.backdrop.sunDiscStrength.value = 1;
+    this.root.name = 'PlanetAtmosphere';
+    this.root.add(this.backdrop.mesh);
     this.binding = new PlanetAtmosphereBinding(this.model, {
       radiusUnits: this.radiusUnits,
       aerialPerspective: options.aerialPerspective ?? true,
@@ -163,9 +195,36 @@ export class PlanetAtmosphere {
     };
   }
 
-  /** The sky behind the planet; add it to the scene. */
+  /** The sky behind the planet and the bodies in it (a group holding {@link backdrop}'s mesh); add it to the scene. */
   get object(): Object3D {
-    return this.backdrop.mesh;
+    return this.root;
+  }
+
+  /** The bodies added with {@link addSkyBody}. */
+  get skyBodies(): readonly PlanetSkyBody[] {
+    return this.bodies;
+  }
+
+  /**
+   * Adds a moon, planet or other body to the sky, seen through this atmosphere and lit by its sun. Returns a handle
+   * whose `direction` (body frame) moves it.
+   */
+  addSkyBody(options: PlanetSkyBodyOptions = {}): PlanetSkyBody {
+    const body = new AtmosphereSkyBody(this.backdrop, options);
+    const direction = new Vector3(0, 0, 1);
+    if (options.direction) direction.fromArray(Array.from(options.direction as ArrayLike<number>));
+    const handle: PlanetSkyBody = { body, direction };
+    this.bodies.push(handle);
+    this.root.add(body.mesh);
+    return handle;
+  }
+
+  /** Removes a body added with {@link addSkyBody} and frees it. */
+  removeSkyBody(handle: PlanetSkyBody): void {
+    const index = this.bodies.indexOf(handle);
+    if (index < 0) return;
+    this.bodies.splice(index, 1);
+    handle.body.dispose();
   }
 
   /** How far the planet has unrolled into its flat map, 0..1. Writes the shared uniform when one was given. */
@@ -266,13 +325,27 @@ export class PlanetAtmosphere {
     const fade = unrolled * unrolled * (3 - 2 * unrolled) * high * high * (3 - 2 * high);
     backdrop.opacity.value = 1 - fade;
     backdrop.mesh.visible = on && this.sky && fade < 1;
+    // Bodies stay in the sky without it; then nothing in front of them is air.
+    backdrop.objectAir.value = backdrop.mesh.visible ? 1 : 0;
+    backdrop.stars.value = Math.max(0, this.stars);
+    this.planet.getWorldQuaternion(this.planetQuaternion);
+    // World directions to the star frame: undo the planet's rotation, then the stars' own.
+    this.starQuaternion.copy(this.planetQuaternion).multiply(this.starRotation).invert();
+    backdrop.starFrame.value.setFromMatrix4(this.starMatrix.makeRotationFromQuaternion(this.starQuaternion));
+    this.sunWorld.copy(this.sunDirection).normalize().applyQuaternion(this.planetQuaternion);
+    for (const { body, direction } of this.bodies) {
+      this.bodyWorld.copy(direction).normalize().applyQuaternion(this.planetQuaternion);
+      body.setDirections(this.bodyWorld, this.sunWorld);
+    }
     if (on && this.anyHaze()) binding.update(renderer);
     if (backdrop.mesh.visible) backdrop.update(renderer, camera);
   }
 
-  /** Takes the stages off every surface, removes the sky from the scene and frees the GPU resources. */
+  /** Takes the stages off every surface, removes the sky and its bodies from the scene and frees the GPU resources. */
   dispose(): void {
     for (const surface of [...this.surfaces.keys()]) this.withoutAtmosphere(surface);
+    for (const handle of [...this.bodies]) this.removeSkyBody(handle);
+    this.root.removeFromParent();
     this.backdrop.mesh.removeFromParent();
     this.backdrop.dispose();
     this.binding.dispose();

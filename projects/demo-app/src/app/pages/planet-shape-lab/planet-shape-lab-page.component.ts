@@ -20,6 +20,7 @@ import { createCameraRelativeSphereGeometry, createPlainSphereMaterial } from '.
 import { TERRAIN_EDIT_PRESETS, shapeOpPreset, type TerrainEditPresetId } from './planet-shape-edits';
 import { DEFAULT_RAY_STEPS, createRaymarchTerrain, type RaymarchTerrain } from './planet-shape-raymarch';
 import { createLitRaymarchTerrain } from './planet-shape-raymarch-lit';
+import { createMeshTerrain } from './contender-b/mesh-terrain';
 import { RAY_BIOMES, RAY_ROCKS, type RayBiome, type RayRock } from './planet-shape-tests';
 import { QUALITY_PROBE_SIZE, frameFromProbeRgba, type QualityFrame } from './planet-shape-quality';
 import { TERRAIN_PROBE_SIZE, terrainFrameFromRgba, type TerrainDepthFrame } from './planet-shape-terrain-quality';
@@ -58,7 +59,9 @@ const THUMBNAIL_WIDTH = 240;
 const SHELL_SEGMENTS = { width: 128, height: 64 } as const;
 const RAY_STEP_PRESETS = [32, 64, 128, 256] as const;
 type RaymarchSurface = 'raymarch' | 'raymarch-lit';
-type Surface = 'sphere' | RaymarchSurface;
+type Surface = 'sphere' | RaymarchSurface | 'mesh-b';
+
+type MeshTerrainUpdate = ReturnType<typeof createMeshTerrain>['update'];
 
 const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so spin shows as a travelling sun.';
 
@@ -154,14 +157,17 @@ const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so 
           <button (click)="setSurface('sphere')" [class.active]="surface() === 'sphere'">plain sphere</button>
           <button (click)="setSurface('raymarch')" [class.active]="surface() === 'raymarch'" data-testid="surface-raymarch">raymarched terrain</button>
           <button (click)="setSurface('raymarch-lit')" [class.active]="surface() === 'raymarch-lit'" data-testid="surface-raymarch-lit">terrain v2 (canyons, shadertoy-style)</button>
+          <button (click)="setSurface('mesh-b')" [class.active]="surface() === 'mesh-b'" data-testid="surface-mesh-b">contender B (mesh, stage 1: shell)</button>
         </p>
         @if (surface() !== 'sphere') {
-          <p class="row">
-            steps:
-            @for (steps of rayStepPresets; track steps) {
-              <button (click)="setRaySteps(steps)" [class.active]="raySteps() === steps">{{ steps }}</button>
-            }
-          </p>
+          @if (surface() !== 'mesh-b') {
+            <p class="row">
+              steps:
+              @for (steps of rayStepPresets; track steps) {
+                <button (click)="setRaySteps(steps)" [class.active]="raySteps() === steps">{{ steps }}</button>
+              }
+            </p>
+          }
           @if (surface() === 'raymarch-lit') {
             <p class="row">
               pre-pass:
@@ -170,6 +176,8 @@ const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so 
                   {{ scale === 0 ? 'off' : '1/' + scale }}</button>
               }
             </p>
+          }
+          @if (surface() === 'raymarch-lit' || surface() === 'mesh-b') {
             <p class="row">
               biome:
               @for (biome of rayBiomes; track biome) {
@@ -196,7 +204,16 @@ const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so 
               }
             </p>
           }
-          @if (surface() === 'raymarch') {
+          @if (surface() === 'mesh-b') {
+            <label class="feature">
+              <input type="checkbox" [checked]="meshBlocks()" (change)="setMeshBlocks($any($event.target).checked)" data-testid="mesh-blocks" />
+              Near volume zone (off: the shell alone, contender A)
+            </label>
+            <p class="note">Contender B (Plan 055 D15), seam spike stage 2: the height shell, the same field as terrain v2,
+              and around the ground under the camera a zone of one level meshed in 3D (surface nets on the scanned columns),
+              so overhangs near the camera are drawn. Rebuilt when the camera moves (columns scanned on the GPU, the mesh
+              assembled on the CPU), so moving shows a pause. {{ meshBLabel() }}</p>
+          } @else if (surface() === 'raymarch') {
             <p class="note">Contender C, minimal (Plan 055 Phase 1): a shell at R + H whose pixels sphere-trace one fixed
               height field. No morph and no shadows yet; a flat pad under the poses keeps the camera out of the hills.</p>
           } @else {
@@ -296,6 +313,10 @@ export class PlanetShapeLabPageComponent {
   readonly warpExponent = computed(() => Math.log10(Math.max(MIN_SPIN_WARP, this.spinWarp())));
   readonly bodyRadiusLabel = computed(() => bodyById(this.bodyId()).label + ' radius');
   readonly drawnTriangles = signal(0);
+  /** Contender B's last build, for the note under the surface buttons. */
+  readonly meshBLabel = signal('');
+  /** Contender B's near volume zone on (B) or off (the shell alone: contender A). */
+  readonly meshBlocks = signal(true);
 
   readonly webGpuOk = signal(typeof navigator !== 'undefined' && !!(navigator as Navigator & { gpu?: unknown }).gpu);
   readonly webGpuReason = signal(this.webGpuOk() ? '' : 'This browser exposes no navigator.gpu.');
@@ -331,6 +352,10 @@ export class PlanetShapeLabPageComponent {
     { surface: 'raymarch', terrain: createRaymarchTerrain() },
     { surface: 'raymarch-lit', terrain: createLitRaymarchTerrain() },
   ];
+  /** Contender B (`contender-b/`); drawn when the surface is `mesh-b`. */
+  private readonly meshB = createMeshTerrain();
+  /** Contender B's rebuild in progress, if any. */
+  private meshBUpdate: Promise<void> | undefined;
   /** Whether the raymarch pipelines are compiled: done before the runner may start, so no case pays for it. */
   private terrainCompile: 'pending' | 'running' | 'done' = 'pending';
   /** Quality probe target and camera, made on first use (`planet-shape-quality.ts`). */
@@ -349,7 +374,7 @@ export class PlanetShapeLabPageComponent {
     read: () => ({
       kind: this.bodyDrawn() ? this.surface() : 'empty', raySteps: this.raySteps(), rayPrepass: this.rayPrepass(), rayEdits: this.rayEdits(), rayBiome: this.rayBiome(), rayRock: this.rayRock(), seed: this.seed, bodyId: this.bodyId(), poseId: this.poseId(),
       spinWarp: this.spinWarp(), spinAngleDeg: (this.spinAngle * 180) / Math.PI, features: this.featureState(),
-      morph: this.morph(), ...(this.freeCamera() ? { view: this.freeView } : {}),
+      morph: this.morph(), ...(this.freeCamera() ? { view: this.freeView } : {}), meshBlocks: this.meshBlocks(),
     }),
     apply: (settings) => {
       if (settings.seed !== this.seed) throw new Error(`Unknown seed ${settings.seed}; this lab is fixed to ${this.seed}`);
@@ -365,6 +390,7 @@ export class PlanetShapeLabPageComponent {
       this.setRayEdits(settings.rayEdits);
       this.setRayBiome(settings.rayBiome);
       this.setRayRock(settings.rayRock);
+      this.setMeshBlocks(settings.meshBlocks ?? true);
       if (settings.kind !== 'empty') this.setSurface(settings.kind);
       this.setBodyDrawn(settings.kind !== 'empty');
     },
@@ -373,7 +399,8 @@ export class PlanetShapeLabPageComponent {
     resetErrors: () => { this.engineError = ''; },
     backendIsWebGpu: () => this.webGpuOk() && this.hud().backend === 'webgpu',
     scene: () => ({
-      bodyDrawn: this.bodyDrawn() && (this.mesh?.visible === true || this.rayTerrains.some((entry) => entry.shell?.visible === true)),
+      bodyDrawn: this.bodyDrawn() && (this.mesh?.visible === true || this.meshB.mesh.visible
+        || this.rayTerrains.some((entry) => entry.shell?.visible === true)),
       drawCalls: this.lastDrawCalls,
       triangles: this.lastTriangles,
       drawingBuffer: [this.hud().width, this.hud().height],
@@ -414,7 +441,9 @@ export class PlanetShapeLabPageComponent {
         entry.terrain.setBody(bodyById(this.builtBody).radiusM);
         this.engine.scene.add(entry.shell);
       }
-      this.engine.scene.add(this.mesh, this.sun, this.sun.target, this.ambient);
+      this.meshB.mesh.visible = false;
+      this.meshB.setBody(bodyById(this.builtBody).radiusM);
+      this.engine.scene.add(this.mesh, this.meshB.mesh, this.sun, this.sun.target, this.ambient);
       this.setBody(this.builtBody);
       this.applyRayEdits();
       this.sphere.setBodyRadius(bodyById(this.builtBody).radiusM);
@@ -426,6 +455,7 @@ export class PlanetShapeLabPageComponent {
       this.updateSun();
       this.updateCamera();
       this.updatePixelAngle();
+      void this.updateMeshB();
     });
     const beforeRender = this.engine.beforeRender$.subscribe(() => {
       this.renderPrepass();
@@ -457,6 +487,8 @@ export class PlanetShapeLabPageComponent {
         }
         entry.terrain.material.dispose();
       }
+      this.engine.scene.remove(this.meshB.mesh);
+      this.meshB.dispose();
       this.probe?.target.dispose();
       this.terrainProbeParts?.target.dispose();
       this.sphere.material.dispose();
@@ -479,6 +511,7 @@ export class PlanetShapeLabPageComponent {
         }
         entry.terrain.setBody(radius);
       }
+      this.meshB.setBody(radius);
       this.builtBody = id;
       this.applyRayEdits();
     }
@@ -597,11 +630,13 @@ export class PlanetShapeLabPageComponent {
     this.rayBiome.set(biome);
     const value = biome === 'canyons' ? 0 : biome === 'hills' ? 1 : undefined;
     for (const entry of this.rayTerrains) entry.terrain.setBiome?.(value);
+    this.meshB.setBiome(value);
   }
 
   setRayRockMix(share: number): void {
     this.rayRockMix.set(share);
     for (const entry of this.rayTerrains) entry.terrain.setRock?.(share);
+    this.meshB.setRock(share);
   }
 
   setRayRock(rock: RayRock): void {
@@ -609,6 +644,12 @@ export class PlanetShapeLabPageComponent {
     this.rayRockMix.set(undefined);
     const value = rock === 'wild' ? 0 : rock === 'grounded' ? 1 : undefined;
     for (const entry of this.rayTerrains) entry.terrain.setRock?.(value);
+    this.meshB.setRock(value);
+  }
+
+  setMeshBlocks(on: boolean): void {
+    this.meshBlocks.set(on);
+    this.meshB.setBlocks(on);
   }
 
   setRayEdits(id: TerrainEditPresetId): void {
@@ -619,6 +660,7 @@ export class PlanetShapeLabPageComponent {
   private applyRayEdits(): void {
     const ops = shapeOpPreset(this.rayEdits(), bodyById(this.builtBody).radiusM);
     for (const entry of this.rayTerrains) entry.terrain.setShapeOps?.(ops);
+    this.meshB.setShapeOps(ops);
   }
 
   /**
@@ -655,6 +697,24 @@ export class PlanetShapeLabPageComponent {
     const drawn = this.bodyDrawn() && this.webGpuOk();
     if (this.mesh) this.mesh.visible = drawn && this.surface() === 'sphere';
     for (const entry of this.rayTerrains) if (entry.shell) entry.shell.visible = drawn && this.surface() === entry.surface;
+    this.meshB.mesh.visible = drawn && this.surface() === 'mesh-b';
+  }
+
+  /** Starts contender B's rebuild when it is drawn and something changed; one at a time. */
+  private updateMeshB(): Promise<void> {
+    if (!this.meshB.mesh.visible) return Promise.resolve();
+    this.meshBUpdate ??= this.meshB.update(this.engine.renderer as unknown as Parameters<MeshTerrainUpdate>[0])
+      .then(() => {
+        const stats = this.meshB.stats;
+        if (stats) {
+          this.meshBLabel.set(`${stats.leaves} shell leaves, ${Math.round(stats.triangles / 1000)}k triangles; zone level ${stats.zoneLevel}, `
+            + `${stats.zoneLeaves} leaves a side, ${Math.round(stats.zoneTriangles / 1000)}k triangles; `
+            + `select ${stats.selectMs.toFixed(0)} ms, scan ${stats.scanMs.toFixed(0)} ms, assemble ${stats.assembleMs.toFixed(0)} ms.`);
+        }
+      })
+      .catch((error: unknown) => { this.engineError ||= `contender B: ${String(error)}`; })
+      .finally(() => { this.meshBUpdate = undefined; });
+    return this.meshBUpdate;
   }
 
   private shellGeometry(terrain: RaymarchTerrain, radiusM: number) {
@@ -668,6 +728,7 @@ export class PlanetShapeLabPageComponent {
     if (camera instanceof PerspectiveCamera && height > 0) {
       const angle = (2 * Math.tan((camera.fov * Math.PI) / 360)) / height;
       for (const entry of this.rayTerrains) entry.terrain.setPixelAngle(angle);
+      this.meshB.setPixelAngle(angle);
     }
   }
 
@@ -696,6 +757,12 @@ export class PlanetShapeLabPageComponent {
     }
     this.sphere.setCameraBodyPosition(...this.pose.position);
     for (const entry of this.rayTerrains) entry.terrain.setCamera(...this.pose.position);
+    this.meshB.setCamera(...this.pose.position);
+    const camera = this.engine.camera;
+    // A little wider than the screen, so the probe's view (16:9) and a turn of the head stay inside the drawn leaves.
+    if (camera instanceof PerspectiveCamera) {
+      this.meshB.setView({ forward: this.pose.forward, up: this.pose.up, fovDeg: camera.fov * 1.1, aspect: Math.max(camera.aspect, 16 / 9) * 1.1 });
+    }
     this.upVector.set(...this.pose.up);
     this.backward.set(...this.pose.forward).negate();
     this.right.crossVectors(this.upVector, this.backward).normalize();
@@ -727,6 +794,7 @@ export class PlanetShapeLabPageComponent {
     const [cx, cy, cz] = this.pose.position;
     const sun = sunDirectionBody(this.spinAngle, this.sunDirection);
     for (const entry of this.rayTerrains) entry.terrain.setSun(sun[0], sun[1], sun[2]);
+    this.meshB.setSun(sun[0], sun[1], sun[2]);
     this.sun.target.position.set(-cx, -cy, -cz);
     this.sun.position.set(-cx + sun[0] * radius * 2, -cy + sun[1] * radius * 2, -cz + sun[2] * radius * 2);
     this.sun.target.updateMatrixWorld();
@@ -779,7 +847,8 @@ export class PlanetShapeLabPageComponent {
   /**
    * Draws terrain v2 of the current view into a float target with its depth probes (distance in red, ran-out flag in
    * green, ground in alpha): the fast march twice, then the reference march, each read back before the next. The pixel
-   * angle is the probe's while it draws, and the screen's again after.
+   * angle is the probe's while it draws, and the screen's again after. With contender B on screen, B's mesh is the fast
+   * frame (twice), still judged by terrain v2's reference march of the same field.
    */
   private async terrainProbe(): Promise<PlanetShapeTerrainProbe> {
     const entry = this.rayTerrains.find((candidate) => candidate.surface === 'raymarch-lit');
@@ -795,10 +864,16 @@ export class PlanetShapeLabPageComponent {
       this.terrainProbeParts = { target: new RenderTarget(width, height, { type: FloatType, depthBuffer: true }), camera: new PerspectiveCamera(), scene, mesh };
     }
     const { target, camera, scene, mesh } = this.terrainProbeParts;
-    mesh.geometry = entry.shell.geometry;
+    const contenderB = this.surface() === 'mesh-b';
+    if (contenderB) await this.updateMeshB();
     this.aimProbeCamera(camera, fovDeg, width / height);
     const pixelAngle = (2 * Math.tan((fovDeg * Math.PI) / 360)) / height;
     const frame = async (material: typeof probes.fast): Promise<TerrainDepthFrame> => {
+      const drawsB = material === this.meshB.probeMaterial;
+      mesh.geometry = drawsB ? this.meshB.mesh.geometry : entry.shell!.geometry;
+      if (drawsB) mesh.position.copy(this.meshB.mesh.position);
+      else mesh.position.set(0, 0, 0);
+      this.meshB.setProbePixelAngle(pixelAngle);
       mesh.material = material;
       // A new material's pipeline compiles in the background and the draw is skipped until it is ready: every pixel
       // writes a distance (sky too), so an all-zero target means nothing was drawn yet.
@@ -813,12 +888,15 @@ export class PlanetShapeLabPageComponent {
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
     };
-    const fast = await frame(probes.fast);
-    const again = await frame(probes.fast);
+    const fastMaterial = contenderB ? this.meshB.probeMaterial : probes.fast;
+    const fast = await frame(fastMaterial);
+    const again = await frame(fastMaterial);
     const reference = await frame(probes.reference);
+    const stats = contenderB ? this.meshB.stats : undefined;
     return {
       fast, again, reference, pixelAngle,
       camera: { position: this.pose.position, forward: this.pose.forward, up: this.pose.up, fovDeg, near: this.pose.near, far: this.pose.far },
+      ...(stats ? { contender: { ...stats } } : {}),
     };
   }
 

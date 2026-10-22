@@ -11,25 +11,31 @@ import {
   Vector2,
   Vector3,
   type Camera,
+  type PerspectiveCamera,
 } from 'three';
 import { NodeMaterial, QuadMesh, type WebGPURenderer } from 'three/webgpu';
 import {
   Fn,
   If,
   atan,
+  cameraProjectionMatrix,
   cameraProjectionMatrixInverse,
+  cameraViewMatrix,
   cameraWorldMatrix,
   cos,
   dot,
   float,
   floor,
   length,
+  luminance,
   mat3,
   max,
+  mix,
   mod,
   normalize,
   outputStruct,
   positionLocal,
+  select,
   smoothstep,
   texture,
   uniform,
@@ -40,6 +46,14 @@ import {
 } from 'three/tsl';
 import { AtmosphereGpuModel } from './atmosphere-gpu-model';
 import { AtmosphereSkyViewLut } from './atmosphere-sky-view';
+import { starField } from './atmosphere-stars';
+
+/**
+ * Stars fade out as the exposed sky behind them brightens from this linear luminance to {@link STAR_FADE_LUMA_END}: gone
+ * well before a day sky (about 0.2), still there in late twilight.
+ */
+export const STAR_FADE_LUMA_START = 0.003;
+export const STAR_FADE_LUMA_END = 0.04;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -94,6 +108,18 @@ export class AtmosphereBackdrop {
   readonly voidFade = uniform(0);
   /** Multiplies the sun disc brightness; 0 hides it. */
   readonly sunDiscStrength = uniform(1);
+
+  /** Star brightness (display-referred, added after exposure); 0 draws no stars and skips their cost. */
+  readonly stars = uniform(0);
+  /** Rotation from world directions to the star field's frame. Identity fixes the stars to the world axes. */
+  readonly starFrame = uniform(new Matrix3());
+  /** Radians per pixel at the centre of the view; {@link update} sets it from the camera. Sizes the stars. */
+  readonly pixelAngle = uniform(0.001);
+  /**
+   * 0..1, how much air sky objects ({@link skyObject}) are seen through. The owner sets 0 while the sky is off, so
+   * bodies drawn without it are not tinted by a table that is no longer updated.
+   */
+  readonly objectAir = uniform(1);
 
   /** 1 reads the sky from the sky-view table (when one was given and the camera is inside the air), 0 marches every pixel. */
   readonly skyViewEnabled = uniform(1);
@@ -151,34 +177,7 @@ export class AtmosphereBackdrop {
       const sunDir = model.sunDirection;
       const maxDistance = float(1e30);
       const trace = model.traceRay({ altitude: this.altitude, dir, maxDistance });
-
-      // Scattering along the ray: one filtered fetch from the sky-view table when the camera is inside the
-      // air and the table is on, otherwise the reference per-pixel march.
-      const radiance = vec3(0).toVar();
-      const transmittance = vec3(1).toVar();
-      const marchInto = () => {
-        const m = model.march({ altitude: this.altitude, dir, sunDir, maxDistance, steps: options.steps });
-        radiance.assign(m.radiance);
-        transmittance.assign(m.transmittance);
-      };
-      if (skyView) {
-        const useTable: any = (this.skyViewEnabled.greaterThan(0.5) as any).and(
-          this.altitude.lessThan(model.uTopAltitude),
-        );
-        const branch: any = If(useTable, () => {
-          const s = skyView.lookup(dir);
-          radiance.assign(s.radiance);
-          transmittance.assign(s.transmittance);
-        });
-        if (this.spaceScale > 0) {
-          branch.ElseIf(this.spaceReady.greaterThan(0.5), () => this.readSpace(screenVarying, radiance, transmittance));
-        }
-        branch.Else(marchInto);
-      } else if (this.spaceScale > 0) {
-        If(this.spaceReady.greaterThan(0.5), () => this.readSpace(screenVarying, radiance, transmittance)).Else(marchInto);
-      } else {
-        marchInto();
-      }
+      const { radiance, transmittance } = this.skyAlong(dir, screenVarying);
       const march = { transmittance, groundDistance: trace.groundDistance };
       const colour = radiance.toVar();
 
@@ -202,9 +201,17 @@ export class AtmosphereBackdrop {
       });
 
       const exposed: any = max(colour.mul(this.exposure).mul(this.sunVisibility), 0);
-      const below = smoothstep(float(0), float(0.17), dir.y.negate());
-      const voidFactor = float(1).sub(this.voidFade.mul(below));
-      return vec4(exposed.mul(this.opacity).mul(voidFactor), 1);
+      const voidFactor = this.voidFactor(dir);
+      const sky = exposed.mul(this.opacity).mul(voidFactor).toVar();
+      // Stars (display-referred, after exposure) through the air in front of them, fading out as the sky behind them
+      // brightens. Not on rays that end on the ground: there the planet is in front of them.
+      If(this.stars.greaterThan(0).and(trace.hitsGround.not()), () => {
+        const starDir = normalize(this.starFrame.mul(rayVarying));
+        const through = mix(vec3(1), transmittance, this.opacity);
+        const fade = float(1).sub(smoothstep(STAR_FADE_LUMA_START, STAR_FADE_LUMA_END, luminance(sky)));
+        sky.addAssign(starField(starDir, this.pixelAngle).mul(through).mul(fade).mul(this.stars));
+      });
+      return vec4(sky, 1);
     })();
 
     this.material = material;
@@ -249,6 +256,86 @@ export class AtmosphereBackdrop {
 
   setAltitude(metres: number): void {
     this.altitude.value = Math.max(0, metres);
+  }
+
+  /**
+   * In-scattered radiance and transmittance along a unit direction `dir` in the backdrop's local frame, as the sky
+   * shows them: one fetch from the sky-view table inside the air, the reduced-resolution space pass at `screenUv`
+   * (0..1, y up) above it, otherwise a march. Call inside a TSL `Fn`.
+   */
+  private skyAlong(dir: any, screenUv: any): { radiance: any; transmittance: any } {
+    const model = this.model;
+    const skyView = this.skyView;
+    const radiance = vec3(0).toVar();
+    const transmittance = vec3(1).toVar();
+    const marchInto = () => {
+      const m = model.march({
+        altitude: this.altitude,
+        dir,
+        sunDir: model.sunDirection,
+        maxDistance: float(1e30),
+        steps: this.stepsOption,
+      });
+      radiance.assign(m.radiance);
+      transmittance.assign(m.transmittance);
+    };
+    if (skyView) {
+      const useTable: any = (this.skyViewEnabled.greaterThan(0.5) as any).and(this.altitude.lessThan(model.uTopAltitude));
+      const branch: any = If(useTable, () => {
+        const s = skyView.lookup(dir);
+        radiance.assign(s.radiance);
+        transmittance.assign(s.transmittance);
+      });
+      if (this.spaceScale > 0) {
+        branch.ElseIf(this.spaceReady.greaterThan(0.5), () => this.readSpace(screenUv, radiance, transmittance));
+      }
+      branch.Else(marchInto);
+    } else if (this.spaceScale > 0) {
+      If(this.spaceReady.greaterThan(0.5), () => this.readSpace(screenUv, radiance, transmittance)).Else(marchInto);
+    } else {
+      marchInto();
+    }
+    return { radiance, transmittance };
+  }
+
+  /** 1 above the horizon, fading to `1 - voidFade` over about 10 degrees below it. */
+  private voidFactor(dir: any): any {
+    const below = smoothstep(float(0), float(0.17), dir.y.negate());
+    return float(1).sub(this.voidFade.mul(below));
+  }
+
+  /**
+   * The air between the camera and a sky object (Plan 049 `atmosphereSky(dir)`) in world direction `worldDir`:
+   * `inscatter` is display radiance (exposure, eclipse and the sky's fade already applied) to add on top of the object,
+   * `transmittance` what reaches the camera of the object's own light. On a ray that ends on the backdrop's ground
+   * (when it draws one) the transmittance is 0. Call inside a TSL `Fn`, from any material drawn after the backdrop.
+   */
+  atmosphereSky(worldDir: any): { inscatter: any; transmittance: any } {
+    const model = this.model;
+    const dir = (normalize(this.frame.mul(worldDir) as any) as any).toVar();
+    const clip: any = cameraProjectionMatrix.mul(cameraViewMatrix.mul(vec4(worldDir, 0)));
+    const screenUv = clip.xy.div(clip.w).mul(0.5).add(0.5);
+    const sky = this.skyAlong(dir, screenUv);
+    const trace = model.traceRay({ altitude: this.altitude, dir, maxDistance: float(1e30) });
+    const blocked = select(trace.hitsGround.and(this.groundEnabled.greaterThan(0.5)), float(0), float(1));
+    const air = this.opacity.mul(this.objectAir);
+    const transmittance = mix(vec3(1), sky.transmittance.mul(blocked), air);
+    const inscatter = max(sky.radiance, vec3(0))
+      .mul(this.exposure)
+      .mul(this.sunVisibility)
+      .mul(this.voidFactor(dir))
+      .mul(air);
+    return { inscatter, transmittance };
+  }
+
+  /**
+   * Display colour of a sky object with radiance `radiance` (relative to the sun's irradiance, like the sky) in world
+   * direction `worldDir`: `radiance x exposure x transmittance + inscatter`. Opaque objects (moon, planets, a sun disc)
+   * use it as their colour, so they replace the sky behind them exactly.
+   */
+  skyObject(radiance: any, worldDir: any): any {
+    const { inscatter, transmittance } = this.atmosphereSky(worldDir);
+    return radiance.mul(this.exposure).mul(transmittance).add(inscatter);
   }
 
   /** Bilinear fetch from the reduced-resolution space pass at screen uv `uvNode`. */
@@ -302,6 +389,13 @@ export class AtmosphereBackdrop {
    * sky-view table was re-rendered.
    */
   update(renderer: WebGPURenderer, camera?: Camera): boolean {
+    if (camera && (camera as PerspectiveCamera).isPerspectiveCamera && renderer.initialized) {
+      renderer.getDrawingBufferSize(this.drawingSize);
+      const { fov, zoom } = camera as PerspectiveCamera;
+      // The angle one pixel spans at the centre of the view: the view's height at unit distance over the pixel count.
+      const height = (2 * Math.tan((fov * Math.PI) / 360)) / zoom;
+      this.pixelAngle.value = height / Math.max(1, this.drawingSize.y);
+    }
     this.updateSpacePass(renderer, camera);
     if (!this.skyView || this.skyViewEnabled.value < 0.5) return false;
     return this.skyView.update(renderer, this.altitude.value);

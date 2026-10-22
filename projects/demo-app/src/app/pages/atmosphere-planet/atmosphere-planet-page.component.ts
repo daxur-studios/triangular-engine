@@ -1,8 +1,8 @@
 import { Component, DestroyRef, computed, inject, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { BufferAttribute, Mesh, SphereGeometry, Vector3 } from 'three';
+import { BufferAttribute, Color, Mesh, SphereGeometry, Vector3 } from 'three';
 import { EngineModule, EngineService, RaycastOrbitControlsComponent } from 'triangular-engine';
-import { PlanetAtmosphereComponent, type PlanetAtmospherePresetId } from 'triangular-engine/atmosphere';
+import { PlanetAtmosphereComponent, type PlanetAtmospherePresetId, type PlanetSkyBody } from 'triangular-engine/atmosphere';
 import { PlanetSurfaceMaterial } from 'triangular-engine/planet-material';
 
 /**
@@ -11,7 +11,7 @@ import { PlanetSurfaceMaterial } from 'triangular-engine/planet-material';
  *
  * - Stage 4 (`[lighting]`): the surface is relit from the atmosphere, so dusk is orange on the ground too.
  * - Stage 6 (`[haze]`): aerial perspective from the camera to each surface point.
- * - The sky and the limb glow (`[sky]`) are drawn behind the globe.
+ * - The sky and the limb glow (`[sky]`) are drawn behind the globe, with stars (`[stars]`) and a moon (Phase 5) in it.
  *
  * The globe is a unit sphere; its size in metres is the atmosphere profile's radius, so the size buttons only rescale
  * the air. Drag to orbit, wheel to zoom: the view buttons move the camera to an altitude. `?backend=webgl2` runs the
@@ -71,6 +71,7 @@ const VIEWS: readonly ViewChoice[] = [
         [lighting]="lightingOn()"
         [haze]="perspectiveOn()"
         [sky]="skyOn()"
+        [stars]="stars()"
         [sunDirection]="sunDirection()"
         [exposure]="exposure()"
       />
@@ -109,6 +110,17 @@ const VIEWS: readonly ViewChoice[] = [
       <label
         >sun latitude {{ sunLatitude() }}°
         <input type="range" min="-90" max="90" step="1" [value]="sunLatitude()" (input)="setSunLatitude($event)" />
+      </label>
+      <label
+        >stars {{ stars() }}
+        <input type="range" min="0" max="3" step="0.1" [value]="stars()" (input)="setStars($event)" />
+      </label>
+      <p class="row">
+        <label><input type="checkbox" [checked]="moonOn()" (change)="setMoon($event)" /> moon</label>
+      </p>
+      <label
+        >moon longitude {{ moonLongitude() }}°
+        <input type="range" min="-180" max="180" step="1" [value]="moonLongitude()" (input)="setMoonLongitude($event)" />
       </label>
       <label
         >exposure {{ exposure() }}
@@ -196,6 +208,9 @@ export class AtmospherePlanetPageComponent {
   readonly sunLongitude = signal(40);
   readonly sunLatitude = signal(15);
   readonly exposure = signal(8);
+  readonly stars = signal(1);
+  readonly moonOn = signal(true);
+  readonly moonLongitude = signal(-120);
   readonly stackKey = signal('');
   readonly altitudeLabel = signal('');
 
@@ -205,6 +220,7 @@ export class AtmospherePlanetPageComponent {
     return [Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon)];
   });
 
+  private moon?: PlanetSkyBody;
   private readonly material = new PlanetSurfaceMaterial();
   readonly globe = new Mesh(this.buildGlobe(), this.material);
   readonly surfaces = [this.material];
@@ -223,6 +239,12 @@ export class AtmospherePlanetPageComponent {
   private onTick(): void {
     const atmosphere = this.atmosphere()?.atmosphere();
     if (!atmosphere) return;
+    // A moon three times the real one's size, so it reads at the demo's field of view, 10 degrees off the equator.
+    this.moon ??= atmosphere.addSkyBody({ angularRadiusDeg: 0.8, albedo: new Color(0.3, 0.3, 0.3) });
+    const lon = (this.moonLongitude() * Math.PI) / 180;
+    const lat = (10 * Math.PI) / 180;
+    this.moon.direction.set(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));
+    this.moon.body.mesh.visible = this.moonOn();
     const m = atmosphere.binding.cameraAltitude.value;
     this.altitudeLabel.set(m < 1000 ? `${m.toFixed(0)} m` : `${(m / 1000).toFixed(m < 1e5 ? 1 : 0)} km`);
     this.bakeMs.set(Math.round(atmosphere.lastBakeMs));
@@ -272,6 +294,18 @@ export class AtmospherePlanetPageComponent {
 
   setSunLatitude(event: Event): void {
     this.sunLatitude.set(Number((event.target as HTMLInputElement).value));
+  }
+
+  setStars(event: Event): void {
+    this.stars.set(Number((event.target as HTMLInputElement).value));
+  }
+
+  setMoon(event: Event): void {
+    this.moonOn.set((event.target as HTMLInputElement).checked);
+  }
+
+  setMoonLongitude(event: Event): void {
+    this.moonLongitude.set(Number((event.target as HTMLInputElement).value));
   }
 
   setExposure(event: Event): void {

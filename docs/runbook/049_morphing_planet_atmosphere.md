@@ -1156,3 +1156,65 @@ and `mapToLonLat` against `blendedProjection` for the globe, Equal Earth and bet
 [Look v3 quick](http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=3&testProfile=visible-browser&testMode=quick&testRepetitions=1&testAutoStart=1).
 Expect, as on the iGPU: `uncoveredPixels` under 2 cells and `horizonBandPixels` 0 at 2 m in all four views, the 85 m case at about a thirtieth of
 its old number (the RTX frame is larger, so its counts differ), and nothing else changed (sky luma, the space and orbit views, the edge case).
+
+### Result, RTX 3080 (owner runs, quick v3, `nvidia/webgpu`)
+Run `2026-10-22T22-14-01-337Z_visible-browser_quick_a9358898-dc0ba53f`: 16 valid, 0 failed, 37 s. An earlier owner run at 18:25
+(`a4fd8788-cb1b8570`, also nvidia) gave the same picture numbers in every case. Before is the 16:39 standard run above (the picture
+metrics do not depend on the mode; the 17:54 quick run matched it exactly). A cell is 9.9 px here.
+
+| case | uncovered cells before | after | strip after | dark horizon columns before | after |
+| --- | --- | --- | --- | --- | --- |
+| 2 m, morph 0 | 323.5 | **1.3** | 0.05 px | 256 of 256 | **0** |
+| 2 m, morph 0.5 | 151.1 | **0.0** | none | 256 of 256 | **0** |
+| 2 m, Equal Earth, morph 0.5 | 154.2 | **0.0** | none | 256 of 256 | **0** |
+| 2 m, horizon at the view's centre | 307.0 | **0.0** | none | 256 of 256 | **0** |
+| 85 m | 211.5 | 10.3 | 0.4 px | 0 | 0 |
+| 381 m | 107.9 | 28.1 | 1.1 px | 0 | 0 |
+| 1.7 km | 41.9 | 14.6 | 0.6 px | 0 | 0 |
+| 5 km | 28.0 | 28.0 | 1.1 px | 0 | 0 |
+| 25 km, morph 0 / 0.5 | 12.0 / 5.0 | 12.0 / 5.0 | 0.5 / 0.2 px | 0 | 0 |
+| low orbit, east edge, rim glow | 3.2 to 3.3, 11.0, 0 | unchanged | | 0 | 0 |
+
+- **The band is gone on the RTX at 2 m in all four views**, as on the iGPU. Sky luma is unchanged in every case (2 m 0.56).
+- 85 m fell to about a twentieth, not the thirtieth the iGPU showed. The 381 m strip is about 1 px on the RTX (0.6 px on the iGPU,
+  whose cells are smaller); it is the coarse mesh's sag beyond the window, the same colour as the haze (band 0), and is left as is.
+- GPU pass total, median, against the 17:54 quick run before the fix: within ±0.05 ms in every case (2 m 0.154 → 0.16 ms, 85 m
+  0.181 → 0.18 ms). The 11 250 triangles of the window cost nothing measurable here.
+
+## 2026-10-22 — Phase 5: stars, moons and other sky objects
+
+Built on the planet atmosphere (`AtmosphereBackdrop`, `PlanetAtmosphere`); the bent lab's own sky pass is not touched.
+
+### What was built
+- **`backdrop.atmosphereSky(worldDir)` → `{ inscatter, transmittance }`** and **`skyObject(radiance, worldDir)`**, the plan's
+  `atmosphereSky(dir)`. They read the air the same way the sky does (sky-view table inside the air, the reduced-resolution space
+  pass above it at the direction's own screen position, else a march), with exposure, eclipse, the sky's fade and the void below
+  the map applied. A ray that ends on the backdrop's ground gets transmittance 0. The sky lookup was moved into one private
+  method (`skyAlong`) that the sky and the objects share, so they cannot drift apart.
+- **Stars** in the backdrop's own fragment (no extra pass): `starField(dir, pixelAngle)`, cube-face cells with at most one star
+  each, placed by a 32-bit integer hash (identical on every GPU and in the CPU twin `starFieldAt`), three layers (40, 110 and 280
+  cells per face edge). A star is a Gaussian of 0.55 px; a layer fades out below 3-6 px per cell. Display-referred (after
+  exposure, since a fixed exposure for the day sky would make physical starlight black), times the air's transmittance, faded
+  by the sky behind it (linear luminance 0.003 to 0.04). Skipped by a uniform branch at `stars = 0` (default), so pages that do
+  not ask for stars draw what they drew before.
+- **`AtmosphereSkyBody`**: a quad at infinity (corners on the tangent plane at unit distance, `w = 0`), lit as a sphere by a
+  world sun (phases), plus emission, drawn opaque after the sky (render order -999, no depth test) with its rim blended into the
+  sky colour behind it. Double-sided: the quad's winding on screen depends on the tangent frame (a first version was culled).
+- **`PlanetAtmosphere`**: `stars`, `starRotation` (body frame), `addSkyBody` / `removeSkyBody` / `skyBodies` with body-frame
+  directions turned to world in `update`. `object` is now a group (sky mesh and bodies), so bodies stay when the sky is hidden
+  (`objectAir = 0`: seen through no air).
+
+### Decided
+- The moon does not light the air or the ground: moonlight is about a millionth of sunlight, invisible at one exposure.
+- On the flat map the sky's sun is re-placed to keep the sun angle under the camera; bodies and stars keep their true
+  directions. Not checked visually at mid-morph.
+
+### Checked
+- Specs: 200 of 200 in `npm run test:triangular-engine:atmosphere`, headless (WebGL2 fallback). New: the GPU star field equals
+  the CPU twin at star centres, at 1, 2 and 4 sigma and in empty sky, at two pixel sizes; layer density and fade; a full moon's
+  lit face is 75-100% of `albedo / pi x exposure` at the zenith and the new moon equals the sky; a moon 2 degrees up is under 60%
+  of the zenith one and redder; sky bodies follow the planet's rotation; stars turn with the planet and `starRotation`.
+- By eye on `/atmosphere-planet` (browser pane, AMD iGPU, 800 x 600): stars from space around the globe; at 13 m, night with a
+  full moon among the stars; twilight with stars fading toward the red glow; noon with a pale half-lit moon and no stars (the
+  first fade, 0.02 to 0.3, left stars in the darker blue of the day sky, so it was lowered).
+- **Not done:** GPU timing (the stars add a few integer hashes per sky pixel only when on), an RTX look, a browser test suite.

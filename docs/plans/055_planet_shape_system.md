@@ -267,15 +267,22 @@ field library and the surface tracer. Fur and plants are out of scope, but nothi
 
 ## The contenders
 
-| | A. Height shell | B. Near volume + shell | C. Raymarched hybrid |
-|---|---|---|---|
-| **What** | Cube-sphere patches drawn as instanced grids that read heights from a resident page atlas. A camera-centred clipmap is a selection-policy toggle inside A, not a separate contender | A's shell beyond a radius. Near the camera, small 3D blocks where volume ops exist, meshed with surface nets, cutting a hole in the shell | A coarse raster mesh that bounds the surface from outside, then a sphere-traced march from that mesh's depth for the last stretch of detail |
-| **Overhangs** | Fallback: authored arch and cave mesh kits placed by ops | Native near the camera; height approximation far away | Native |
-| **Edits** | Rewrite affected pages | Rewrite pages; remesh affected blocks | Change the op buffer, nothing to rebuild (plus the bounding mesh if an edit raises the surface) |
-| **Morph** | Vertex stage | Vertex stage for both | Inverse morph per ray step (risk) |
-| **Collider** | From the same pages | From the same pages and block meshes | From the CPU evaluator (no mesh on the GPU to share) |
-| **Main risk** | Overhangs are second-class | The seam between shell and block meshes; meshing cost under edits | Per-pixel cost at 1440p; morph inversion; shadows |
-| **Draw calls** | A few, independent of patch count | A few, plus one per resident block batch | A few |
+**Revised 2026-10-22 (D15–D18)** after the [meshing review](/docs/plans/055_meshing_review.md) by three reviewers.
+A and B are one contender: A is B with its volume blocks switched off, kept as an ablation toggle. A design D
+(sparse meshed blocks everywhere, no shell) is held in reserve: it gets a spike only if B's seam spike fails on the
+seam, the one problem D removes.
+
+| | B. Shell + near volume blocks (A = blocks off) | C. Raymarched hybrid |
+|---|---|---|
+| **What** | One fixed grid mesh drawn instanced over a 2:1 balanced cube-sphere quadtree, reading a page atlas baked by GPU compute from the shape-op field. Near the camera and moving bodies, wherever the field can be multi-valued (volume-op bounds, and `grounded < 1`), quadtree leaves are drawn instead as curvilinear `(u, v, r)` prisms meshed with surface nets | A coarse raster mesh that bounds the surface from outside, then a sphere-traced march from that mesh's depth for the last stretch of detail |
+| **Cracks and seams** | Stitched index buffers for coarser neighbours, interior geomorphing, canonical shared edge samples across cube faces, no skirts. A leaf is shell or prisms, never both; the boundary between them lies where the field is single-valued and both sides emit identical vertices | None (one surface) |
+| **Overhangs** | Native near the camera; height shell far away | Native |
+| **Edits** | Dirty pages and blocks rebuilt by compute before the scene pass, drawn indirectly: next frame | Change the op buffer, nothing to rebuild (plus the bounding mesh if an edit raises the surface) |
+| **Morph** | Vertex stage for both | Inverse morph per ray step (risk) |
+| **Collider** | GPU density fill, readback, worker surface nets (D2), Jolt installation budgeted | From the CPU evaluator (no mesh on the GPU to share) |
+| **Memory** | Fixed pools; positions relative to origins kept in doubles; on exhaustion refinement halts and the coarse cover stays (reported), never the shell over a tunnel | Op buffers only |
+| **Main risk** | The shell/prism seam under motion, edits and morph; refinement for contact and topology | Per-pixel cost at 1440p (5.4–9.2 ms near the ground so far); morph inversion; shadows |
+| **Draw calls** | A few, plus one indirect draw for blocks | A few |
 
 **No code from the earlier terrain attempts** (D14): not `terrain/cdlod` (including `CdlodV3InstancedRenderer`),
 `terrain/clipmap`, the cell planet renderers or their morph selector. Each contender writes its own selection, grids
@@ -463,6 +470,24 @@ Proposed gates, to be confirmed by the owner after Phase 0 and before round 1:
 Every round also runs: grazing horizon, cube-face seams and poles, low sun with mountain shadows, and landing-leg
 contact (render surface against collider under a vessel).
 
+**Gate changes (D17, 2026-10-22; numbers set before round 1):**
+- R1 adds one arch (or tunnel) case with a 30 Hz carve/flatten edit, so each design meets its defining risk first.
+- R3: mesh contenders draw shadows during the morph; "off" is no longer a pass for them.
+- R4 states its workload: dirty volume per update, the most ops overlapping one place, and the camera jump envelope.
+- R2 states the smallest protected topology feature, and counts islands and channels directly (IoU stays as a
+  second metric). Contact follows D16.
+
+**B seam spike (D18), before round 1.** In `planet-shape-lab/contender-b/`, on the 600 km `landforms` preset at the
+`arch-road` and `horizon-grazing` views, and the same sector on a 6,371 km body: shell leaves meeting volume-prism
+leaves across the arch and the graded road, one 2:1 LOD edge, a 30 Hz edit, morph 0 / 0.5 / 1. It fails on any
+crack pixel at the seam, over 0.5% wrong pixels in `planet-shape-terrain-quality`, over 2.0 ms GPU or 0.5 ms main
+thread p95, an edit not visible on the next frame, or a collider older than 100 ms during the edit stream.
+
+Status 2026-10-23 (runbook): stages 1-2 built in `planet-shape-lab/contender-b/` (shell, a one-level near zone meshed
+from the column scans, the seam). The seam leaves no visible crack in the ten terrain-quality views; B is 0.4-4.3%
+wrong against the 0.5% line, from overhangs beyond the zone and the zone's single level. Next: zone levels with 2:1
+transitions, then GPU meshing for next-frame edits, morph and timing. Suite `planet-shape-terrain-quality-b` v1.
+
 ### Phase 3. Winner hardening: colliders and queries
 
 Collider streaming through Jolt (`TerrainJoltColliderAdapter` pattern), the surface query API and its
@@ -513,9 +538,10 @@ Not decisions yet; each names the phase that settles it.
   ops; ops are bucketed per cell or tile and a ray visits only the buckets it crosses. Phase 1b.
 - **Per-region height bounds.** With each cell's maximum height baked in, the march band is thin over plains and
   tall only in mountain cells, which should help the ground-pose cost. Phase 1b, measured in Phase 2.
-- **Cell mesh and march must agree.** The cell planet mesh is the natural far level and contender C's bounding
-  mesh (pushed up by each cell's maximum relief), so it must be built from the same field evaluator, not its own
-  height function, or the switch pops and colliders disagree with what is drawn. Phase 1b / Phase 2.
+- **Far mesh and march must agree.** Contender C's far level and bounding mesh (pushed up by each region's maximum
+  relief) must be built from the same field evaluator, not its own height function, or the switch pops and
+  colliders disagree with what is drawn. Under D14 it is C's own mesh, not the cell planet renderer's (revised
+  2026-10-22). Phase 1b / Phase 2.
 - **Colliders with overhangs.** Jolt's heightfield shape has no overhangs, so it is only a far fallback. Near each
   moving body, small 3D blocks (tens of metres) are sampled from the field, meshed (surface nets) and handed to Jolt
   as mesh shapes; edits rebuild only the blocks they touch. Phase 3, with the D2 spike choosing who samples.
@@ -548,11 +574,15 @@ Not decisions yet; each names the phase that settles it.
 | D7 | Flat map tiles sideways at morph 1 | Open |
 | D8 | Terrain budget ≤ 2.0 ms GPU p95 including shadows, ≤ 0.5 ms main thread | **Accepted** 2026-10-19 (owner) as a working number; may be moved after Phase 0, before the race |
 | D9 | Cell graph stays the data model; shape programs are per game; edits are ops | **Decided** 2026-10-19 (owner) |
-| D10 | Three contenders (A, B, C); clipmap as a toggle inside A | **Decided** 2026-10-19 (owner) |
+| D10 | Three contenders (A, B, C); clipmap as a toggle inside A | **Decided** 2026-10-19 (owner); superseded by D15 |
 | D11 | Target is 1440p only, no 4K tier. Smallest contact edit is a 2 m footpath; edits are building-scale up to a whole base (§Fidelity classes) | **Decided** 2026-10-19 (owner; 2 m is a working number) |
 | D12 | Lava is a surface material over a height op (volcano), not a separate surface. Rivers carve a channel op; their water surface is Phase 4 | **Decided** 2026-10-19 (owner: "whatever runs well") |
 | D13 | Caves below sea level are flooded (below sea level is water). At morph 1 the map shows the outermost surface; tunnels and caves are not drawn | **Decided** 2026-10-19 (owner left it to the plan) |
 | D14 | No code reused from the earlier terrain attempts (CDLOD, clipmap, cell planet renderers); contenders write their own LOD and grids (§The contenders) | **Decided** 2026-10-22 (owner) |
+| D15 | A merges into B as its blocks-off ablation; design D (meshed blocks everywhere) is held in reserve, spiked only if B's seam spike fails on the seam ([meshing review](/docs/plans/055_meshing_review.md)) | **Decided** 2026-10-22 (owner left it to the plan) |
+| D16 | A contact op under 2 px on screen may stop pinning refinement; objects placed on it carry a foundation apron. At 2 px and over, contact edges are snapped or refined and the 1 px gap gate holds (a 2 km runway stays in this class until high orbit) | **Decided** 2026-10-22 (owner left it to the plan) |
+| D17 | Gate changes: R1 gains an arch/seam case with a 30 Hz edit; R3 needs shadows during the morph from mesh contenders; R4 states its workload; R2 states a smallest protected topology feature (§Phase 2) | **Decided** 2026-10-22 (owner left it to the plan); the numbers are set before round 1 |
+| D18 | First mesh work is B's seam spike (§Phase 2), judged by `planet-shape-terrain-quality` | **Decided** 2026-10-22 (owner left it to the plan) |
 
 ## Out of scope for now
 

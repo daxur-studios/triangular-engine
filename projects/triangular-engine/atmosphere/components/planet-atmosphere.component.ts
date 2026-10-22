@@ -65,6 +65,8 @@ export class PlanetAtmosphereComponent implements OnInit {
   readonly enabled = input(true);
   /** Draw the sky and limb glow behind the planet. */
   readonly sky = input(true);
+  /** Star brightness, 0 for none (see `PlanetAtmosphere.stars`). Add moons with `atmosphere().addSkyBody()`. */
+  readonly stars = input(0);
   /** Read the surface haze from a froxel table. Read when the component starts. */
   readonly aerialPerspective = input<PlanetAtmosphereOptions['aerialPerspective']>(true);
 
@@ -133,6 +135,7 @@ export class PlanetAtmosphereComponent implements OnInit {
     atmosphere.planet = this.planet() ?? this.engine.scene;
     atmosphere.enabled = this.enabled();
     atmosphere.sky = this.sky();
+    atmosphere.stars = this.stars();
     atmosphere.exposure = this.exposure();
     const sun = this.sunDirection();
     if (Array.isArray(sun)) atmosphere.sunDirection.set(sun[0], sun[1], sun[2]);
