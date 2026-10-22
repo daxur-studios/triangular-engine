@@ -15,6 +15,9 @@ performance:
   - id: bent-atmosphere-cost-v2
     url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-cost&testVersion=2&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1
     status: measured-rtx3080-no-baseline
+  - id: bent-atmosphere-look-v2
+    url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=2&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1
+    status: runnable-image-checks-rtx-run-failed-as-expected
 ---
 
 # Runbook 049: Morphing Planet Atmosphere
@@ -849,3 +852,98 @@ blocky froxel haze from some angles (minor).
 - Equal Earth is not in v2. The Phase 3a table's +1 ms Equal Earth cost is an iGPU number and was not re-measured.
 - The look suite has not been re-run on NVIDIA. Its visual review is still pending.
 - Nothing committed.
+
+## 2026-10-21 — Image checks for `/atmosphere-lab` (look suite v2)
+
+The suites checked state, frames and errors, so a black sky or a black band under the horizon passed. `bent-atmosphere-look` **v2**
+(v1 is unchanged) reads the final frame of every case back and judges it. **The owner still has to run it on the RTX 3080**
+(link below). Everything measured here came from the built-in browser pane, which is the AMD iGPU.
+
+### What was built
+- `atmosphere-lab-image-checks.ts`: the pure part (reduce a frame to about 256 cells across, predict sky and ground per cell with the CPU
+  bent-planet maths, run the checks). `atmosphere-lab-image-checks.testing.ts` makes synthetic frames for the specs.
+- **The sky pass writes black where it skips a ray.** `BentAtmosphere.skyGate` skips only steep rays that end on the ground inside the
+  map; the sky pass then leaves `radiance = 0`, so the pixel is black and the mesh is expected to cover it. The coverage check could not
+  use the normal pass for that reason. `BentPlanetLab.setCoverageProbe(true)` swaps the sky pass for a separate probe material (the normal
+  materials and shaders are untouched) that paints magenta wherever the analytic ground sphere is hit inside the map, at any angle, and
+  black elsewhere. The mesh draws over it as usual, so magenta that is left is ground the atmosphere expects and the mesh does not cover.
+- `measure` renders two extra frames after the timing window and the sampler are closed (normal, then probe), copies each out of the
+  canvas in the same task and reduces it. Every source pixel is read, and each cell keeps its mean luma, its darkest luma and its sentinel
+  share, so a band one pixel thick is not averaged away by the reduction to 256 cells.
+- Checks, for every case that sets `imageChecks` (all of v2):
+  - **Ground mesh covers the atmosphere's ground**: `uncoveredPixels`, the sentinel area in cells of the 256 px frame, limit 1. It
+    measured exactly 0 wherever mesh and sphere agree.
+  - **Sky is lit**: `skyMedianLuma`, the median tone-mapped luma of the cells the CPU maths predicts show sky. It runs only when the camera
+    is in the air and the sun is over the horizon, and must exceed 0.02. That separates a black sky (0.000) from the thin air at 25 km (0.08).
+  - **No dark band at the horizon**: `horizonBandPixels`, the cells within 3 of each predicted sky-over-ground boundary whose darkest pixel
+    is under 15% of the dimmer of the sky above and the ground below. It fails when more than 2% of the boundary columns have one.
+  - A scenario says whether it needs a lit sky and a horizon (`imageChecks: { litSky, horizon }`). If it does and the check cannot apply, that
+    fails with the reason instead of passing quietly.
+- `thumbnail()` is implemented: one 240 px WebP of the final view per kept case, first repetition, for every suite of the lab.
+- v2 scenarios: seven views from inside the air (2 m at morph 0 / 0.5 / Equal Earth 0.5 / horizon level, 5 km, 25 km at morph 0 / 0.5),
+  then the six v1 scenarios unchanged, with coverage checked. **A failed check ends a run at that case** (the session stops on the first
+  failed case), so the views the owner reported come first.
+- Specs: `atmosphere-lab-image-checks.spec.ts` (the pure maths, and each check against a synthetic defect) and the adapter spec with a fake
+  host. 40 specs in the two files, headless, passing.
+
+### Measured on the AMD iGPU (built-in pane, 1512 x 1152, 2026-10-21 22:12 UTC)
+That run used a temporary local patch that stopped a failed check from ending the run, so every case was measured; the patch is not in the
+tree. (The GPU timer self-test also fails in the pane because the developer-features flag is off. That is unrelated.)
+
+| case | uncovered (cells) | thickness | sky median luma | dark horizon columns |
+| --- | --- | --- | --- | --- |
+| 2 m, noon: morph 0, morph 0.5, Equal Earth 0.5, horizon level | 0 | none | **0.000** | not judged (sky black) |
+| 5 km, morph 0 | 34.9 | 0.8 px | 0.392 | 0 of 256 |
+| 25 km, morph 0 | 16.6 | 0.4 px | 0.082 | 0 of 256 |
+| 25 km, morph 0.5 | 4.8 | 0.1 px | 0.078 | 0 of 256 |
+| low and side-on, east edge, morph 0.2 | 13.5 | 0.3 px | 0.038 | 0 of 256 |
+| low orbit, scrub end (morph 0) and Equal Earth near flat | 4.1 to 4.4 | 0.1 px | not applicable | 0 of 72 to 83 |
+| rim glow from space, both projections | 0 | none | not applicable | not applicable |
+
+Thickness is the uncovered area over the 256 columns, times the 5.9 px of a cell.
+
+### What it found
+1. **A black sky in the bent planet below roughly 0.5 to 1 km.** It is not a harness effect: turning the bent planet on at the lab's default
+   2 m view shows it by hand, and with the wheel the sky is black at 85 m and 381 m and lit at 1.7 km. The "march every pixel" path was
+   black too. Suspect, not tested: `BentPlanetLab.update` clamps the near plane at `1e-4` units with the far plane at `1e5`, so far over
+   near passes about `1.7e7` (the float32 mantissa) once the camera is lower than a few hundred metres, and the sky pass rebuilds each ray
+   from `cameraProjectionMatrixInverse`, which would lose the direction. Whether the RTX shows it is the main thing to read from the
+   owner's run (`skyMedianLuma` in the four 2 m cases). If it does, the owner's earlier views were above about a kilometre.
+2. **The mesh leaves a sliver of the analytic ground uncovered along the horizon**, at 5 km and 25 km: 0.1 to 0.8 px thick. This is what the
+   suspected cause predicts. The grid is 1 degree (360 x 180) with its vertices on the sphere, its chords sag by up to
+   `R (1 - cos 0.5 deg)`, about 240 m, so it is a shell inside the sphere, and a ray that grazes the sphere near the horizon can enter the
+   shell and leave without touching the mesh. The size fits (sag over the horizon distance is about 0.04 degrees at 5 km). I did not
+   change the mesh to watch the sliver close.
+3. **That sliver is not black in the normal frame.** The rays are grazing, so the gate does not skip them and the sky pass draws the table
+   there. The band check found no dark cell in the 5 km and 25 km views (0 of 256). So the owner's thin black band was **not reproduced** in
+   any view where the check could judge it. It may be the black sky seen from lower views (the band check cannot judge a black sky and
+   says so), or something the iGPU does not show.
+
+### Run it (owner, NVIDIA Chrome, tab focused)
+[Look v2 with image checks](http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=2&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1).
+Expect it to stop at the first failed case. If the RTX also has a black sky near the ground, that is case 1 (`horizon-ground-noon-m0`:
+"Sky is lit", and the band "none could be judged"). Read it with `npm run test:summary '--' --suite bent-atmosphere-look --last 1`.
+Thumbnails are under `artifacts/test-runs/bent-atmosphere-look@v2/` and on the `/tests` page.
+
+### Not done
+- Only case 1 has been run on the RTX 3080 (see the RTX section below). The thresholds (limit 1 cell, luma 0.02, 15% and 2%) come from the iGPU run above and are unconfirmed there.
+- No fix: the rendering is unchanged except for the added probe material. The black sky near the ground and the horizon sliver are open.
+- Because a failed check stops the run, one RTX run shows only the first failing case. A report-only survey variant would show all of
+  them; it is not built.
+- No baseline image and no pixel comparison between runs: these are checks against a prediction, not a diff.
+- Nothing committed.
+
+### 2026-10-21 22:40 UTC — look v2 on the RTX 3080 (owner run)
+Run `2026-10-21T22-40-53-163Z_visible-browser_594d3961-cc087021` (`machine: gpu nvidia/webgpu`, so this is the RTX, not the iGPU).
+It stopped at case 1, as predicted.
+
+| check (`horizon-ground-noon-m0`, 2 m, morph 0) | result |
+| --- | --- |
+| Ground mesh covers the atmosphere's ground | pass, `uncoveredPixels` = 0 |
+| Sky is lit | **fail**, `skyMedianLuma` = 0.000 over 21504 sky cells (needs > 0.02) |
+| No dark band at the horizon | **fail**, none could be judged: 256 predicted boundaries, all 256 skipped because the sky above was darker than 0.02 |
+
+- **Finding 1 (black sky near the ground) is confirmed on the RTX**, with the same value as the iGPU (0.000). It is not an AMD artefact.
+- The harness cannot say anything about the horizon band below the black sky; the band check reports that instead of passing.
+- Only case 1 ran, so the other 12 cases (5 km, 25 km, the v1 scenarios) have no RTX data yet. The iGPU numbers above for those are unconfirmed on the RTX.
+- Still open and not fixed: the black sky below roughly 0.5 to 1 km and the horizon sliver. Next measurement that would help is a report-only survey variant (not built) so one run covers every case.

@@ -12,6 +12,9 @@ performance:
   - id: bent-atmosphere-cost-v1
     url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-cost&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
     status: runnable-diagnostic-hardware-unmeasured
+  - id: bent-atmosphere-look-v2
+    url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=2&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1
+    status: runnable-image-checks-rtx-run-failed-as-expected
 ---
 
 # Plan 049: Morphing Planet Atmosphere
@@ -384,6 +387,94 @@ flat map and mid-morph are covered too.
 - **Agent skill:** an atmosphere section in `.agents/skills/triangular-engine/SKILL.md`, the skill
   game repos load, carrying the same checklist.
 
+### Adding the atmosphere to a game's planet (decided and built 2026-10-21)
+
+Today a page wires the atmosphere by hand, about 100 lines (`addAtmosphere()` / `syncAtmosphere()` in
+`/cell-planet-tsl`, and `/atmosphere-planet`): it builds `AtmosphereGpuModel`, `AtmosphereSkyViewLut`,
+`AtmosphereBackdrop` and `PlanetAtmosphereBinding`, wraps the binding's stages in an on/off mix, puts them on the
+planet and the ocean material, adds the backdrop to the scene, calls `sync` / `update` in `beforeRender$`, rebakes
+on a radius or thickness change and disposes four objects. A game should need two lines.
+
+**Target usage:**
+
+```html
+<planetAtmosphere
+  [preset]="'earth'" [radius]="600_000" [thickness]="0.03"
+  [planet]="planetGroup" [surfaces]="[surface, ocean.material]"
+  [sunDirection]="sunBody" [morph]="surface.morph.uMorph" />
+```
+
+```ts
+const atmosphere = new PlanetAtmosphere({ preset: 'earth', radiusM: 600_000, planet: planetGroup });
+atmosphere.withAtmosphere(surface).withAtmosphere(ocean.material);
+scene.add(atmosphere.object);
+engine.beforeRender$.subscribe(() => atmosphere.update(renderer, camera));
+```
+
+**`PlanetAtmosphere` (three-only class, in `triangular-engine/atmosphere`).** Owns the model, the sky-view table,
+the backdrop and the binding, and is the only thing a game touches:
+
+- `constructor({ preset | profile, radiusM, radiusUnits = radiusM, thickness?, planet, aerialPerspective = true,
+  backdrop?: { sunDisc, ground } })`.
+- `configure(partial)`: diffs `preset` / `profile` / `radiusM` / `thickness` and rebakes (`model.setProfile` +
+  `binding.refreshScale`) only when one changed. This replaces the page's `rebakeAtmosphere()`.
+- Per-frame inputs, plain properties read in `update()`: `sunDirection` (body frame), `exposure`, `enabled`,
+  `dayNight` (once 3d lands). `enabled` drives one uniform that gates both stages with a uniform `If`, as the page
+  does now, so "off" costs no sky lookups and needs no shader rebuild.
+- `object`: the backdrop mesh, to add to the scene. `update(renderer, camera)`: `binding.sync`, the sky fade by
+  altitude and morph, `binding.update`, `backdrop.update`. `dispose()` removes the stages it put on its surfaces
+  and frees the GPU parts.
+- Low-level access stays: `model`, `binding`, `backdrop` are readonly fields for labs and tests.
+
+**How surfaces opt in.** `atmosphere.withAtmosphere(material)` sets the material's lighting stage (4) and
+atmosphere stage (6) to the gated binding stages, with id `'atmosphere'`, and remembers the material;
+`withoutAtmosphere(material)` restores the stock stages (only if the stage there is still ours). It returns `this`
+for chaining. The atmosphere entry takes the material structurally, as it already does for the context:
+
+```ts
+interface IAtmosphereSurface {
+  setLightingStage(entry: { id: string; stage: (context: IAtmospherePlanetContext, input: IAtmosphereLightingInput) => any } | null): unknown;
+  setAtmosphereStage(entry: { id: string; stage: (context: IAtmospherePlanetContext, color: any) => any } | null): unknown;
+}
+```
+
+`PlanetSurfaceMaterial` (planet and ocean) satisfies it without either entry importing the other. A spec
+(`atmosphere/planet-atmosphere.spec.ts`; specs may import across entries, the entry itself may not) assigns a real
+`PlanetSurfaceMaterial` to `IAtmosphereSurface`, so a change on either side breaks the build, not a page. The component's `[surfaces]` input calls `withAtmosphere` / `withoutAtmosphere` on the difference between
+old and new arrays. Phase 4's free function `withAtmosphere(nodeMaterial)` for any other `NodeMaterial` (wrapping
+`outputNode`) is a separate, later API; the method name matches it on purpose.
+
+**Tick order.** The engine's frame is `tick$` → `postTick$` → change-detection sync → `lateUpdate$` (controls
+and follows settle the camera) → `beforeRender$` → render. The component subscribes to `beforeRender$` and reads
+its inputs there, at call time, not in an `effect`, so it always sees the camera and the morph the frame is drawn
+with, whatever the subscription order. The rule for games, in the docs: write the morph and the planet transform by
+`lateUpdate$`; never move the camera in `beforeRender$` (the engine already says camera-relative systems update
+there). The class form leaves the call to the game and documents the same rule.
+
+**Sharing the morph.** One value, written once. `PlanetAtmosphere` takes `morph` as a number or as a uniform node
+(`surface.morph.uMorph`). Given a node, the binding reads its `.value` in `sync` instead of owning its own `morph`
+uniform, so the material and the atmosphere can't disagree within a frame and the game doesn't copy it each frame.
+This needs one additive option on `PlanetAtmosphereBinding` (`morph?: UniformNode<number>`). The page's sky fade
+by morph moves into the class as is, and is retired with the rest of §Morph's stand-ins in 3c.
+
+**What lives where.**
+
+| Piece | Entry | Imports |
+|---|---|---|
+| `AtmosphereGpuModel`, sky view, backdrop, binding, stages (today) | `triangular-engine/atmosphere` | three, three/tsl |
+| `PlanetAtmosphere`, `IAtmosphereSurface` | `triangular-engine/atmosphere` | the above only |
+| `PlanetAtmosphereComponent` (`<planetAtmosphere>`) | `triangular-engine/atmosphere`, `components/` folder (as `water` does) | the class + `EngineService` |
+| `PlanetSurfaceMaterial`, its stage types | `triangular-engine/planet-material` | never imports `atmosphere`, and vice versa |
+
+The atmosphere entry must not import `planet-material`; the structural interfaces above are the contract. The
+component is a thin wrapper (signal inputs → `configure` / properties, `beforeRender$` → `update`, destroy →
+`dispose`, `planet` defaulting to the engine scene). Light sync (scene `DirectionalLight` colour from the tables)
+is a later addition to the same class.
+
+**Not in this step:** changing `PlanetSurfaceMaterial` or `/cell-planet-tsl` (Plan 050 owns the material; the page
+moves to the component only with the owner's go-ahead), the screen pass, `withAtmosphere(nodeMaterial)`.
+`/atmosphere-planet` is the first page to switch, since it is this plan's own demo.
+
 ## Profiles (G3)
 
 | Preset | Key traits | Notes |
@@ -489,6 +580,10 @@ before the material port lands. Phase 2b onwards needs Plan 050 through its Phas
 
    **Gate:** scrub the morph at dusk with no pops, fps steady, 4-size set at `m = 1`, in both `dayNight` modes.
 4. **Coverage.** Screen pass + MRT mask, `withAtmosphere()`, opt-out, coverage debug overlay.
+   - **4a. Game wiring** (*built 2026-10-21, specs pass; `/atmosphere-planet` checked in the browser, looks the
+     same as before*): `PlanetAtmosphere` + `<planetAtmosphere>` (§Adding the atmosphere to a game's planet),
+     `/atmosphere-planet` switched to it, docs and CHANGELOG. It does not touch the material. `/cell-planet-tsl`
+     still wires by hand; moving it to the component waits for the owner (Plan 050 owns that page's material).
 5. **Sky objects.** Starfield, moon, sun disc and other bodies through `atmosphereSky(dir)`.
 6. **Extensions demo with atmosphere.** Plan 050's `planet-material-extensions` demo (roads +
    eclipse) with the atmosphere on. Check that the eclipse darkens the sky and that roads are hazed.
@@ -523,6 +618,7 @@ before the material port lands. Phase 2b onwards needs Plan 050 through its Phas
 | Day/night: real by default, `alwaysDay` toggle (§Day and night) | **Decided** 2026-10-18 |
 | Sky inside the air when bent: sky-view table by default, masked per-pixel march only outside the map or within `D` of its edge (§Morph) | **Decided** 2026-10-18 |
 | Sun cut-off from the current curvature (dip 0 when flat), not the baked planet's horizon (§Morph) | **Decided** 2026-10-18 |
+| Game wiring: `PlanetAtmosphere` class + `<planetAtmosphere>` component in the atmosphere entry, surfaces opt in with `withAtmosphere(material)` through a structural interface, update in `beforeRender$`, morph shared as the material's uniform | **Decided** 2026-10-21 (built, Phase 4a) |
 | Output: HDR `RenderPipeline` with MSAA off plus a post AA pass. Not `DirectRenderPipeline` | Proposed 2026-10-16 (Runbook 050 numbers) |
 
 ## Out of scope for now

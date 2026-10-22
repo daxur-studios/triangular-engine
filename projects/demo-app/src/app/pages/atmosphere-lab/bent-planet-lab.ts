@@ -91,6 +91,8 @@ export class BentPlanetLab {
   private readonly passMaterial: NodeMaterial;
   private readonly marchMaterial: NodeMaterial;
   private readonly gridMaterial: NodeMaterial;
+  private coverageMaterial?: NodeMaterial;
+  private probing = false;
   private readonly lonSegments = 360;
   private readonly latSegments = 180;
   private readonly positions: Float32Array;
@@ -177,7 +179,18 @@ export class BentPlanetLab {
   setSkyPath(path: BentSkyPath): void {
     this.path = path;
     this.pathMode.value = path === 'auto' ? 0 : path === 'table' ? 1 : 2;
-    this.pass.material = path === 'march' ? this.marchMaterial : this.passMaterial;
+    if (!this.probing) this.pass.material = path === 'march' ? this.marchMaterial : this.passMaterial;
+  }
+
+  /**
+   * Check-only (the lab's image tests): swaps the sky pass for a probe that paints magenta wherever the sky pass's analytic
+   * ground sphere is hit inside the map, and black elsewhere, so what is left magenta after the grid mesh has drawn is ground
+   * the atmosphere expects and the mesh does not cover. A separate material, so the normal passes are untouched.
+   */
+  setCoverageProbe(on: boolean): void {
+    this.probing = on;
+    if (on) this.coverageMaterial ??= this.buildCoverageProbe();
+    this.pass.material = on && this.coverageMaterial ? this.coverageMaterial : this.path === 'march' ? this.marchMaterial : this.passMaterial;
   }
 
   setProjection(projection: BentProjection): void {
@@ -455,6 +468,38 @@ export class BentPlanetLab {
     return material;
   }
 
+  /**
+   * The coverage probe: the sky pass's ground test (`BentAtmosphere.skyGate`) without the steepness limit, so every ray the
+   * analytic sphere would end on inside the map is marked, grazing ones too. Sentinel magenta; everything else black.
+   */
+  private buildCoverageProbe(): NodeMaterial {
+    const bent = this.bent;
+    const material = new NodeMaterial();
+    material.depthTest = false;
+    material.depthWrite = false;
+    material.transparent = false;
+    material.vertexNode = vec4(positionLocal.xy, 0, 1);
+    const farPoint = cameraProjectionMatrixInverse.mul(vec4(positionLocal.xy, 1, 1));
+    const rayWorld = cameraWorldMatrix.mul(vec4(farPoint.xyz.div(farPoint.w), 0)).xyz;
+    const rayVarying = varying(rayWorld, 'vBentProbeRay');
+    material.fragmentNode = Fn(() => {
+      const dir = normalize(rayVarying);
+      const colour: any = vec3(0).toVar();
+      const trace = bent.traceRay({ altitude: this.altitude, dir, maxDistance: float(1e30) });
+      // Copies made at the top of this scope, as in `skyGate`: the first use below is inside an `If`.
+      const h: any = max(trace.h, 0).toVar();
+      const groundDistance: any = max(trace.groundDistance, -1e30).toVar();
+      const hitsGround: any = select(trace.hitsGround, float(1), float(0)).toVar().greaterThan(0.5);
+      If(hitsGround, () => {
+        const ground: any = (vec3 as any)(0, h, 0).add(dir.mul(groundDistance));
+        const { mx, my } = bent.mapCoords(ground);
+        If(bent.mapMask(mx, my).greaterThan(0.5), () => colour.assign(vec3(1, 0, 1)));
+      });
+      return vec4(colour, 1);
+    })();
+    return material;
+  }
+
   private buildGrid(): NodeMaterial {
     const bent = this.bent;
     const model = this.model;
@@ -493,6 +538,7 @@ export class BentPlanetLab {
     this.pass.geometry.dispose();
     this.passMaterial.dispose();
     this.marchMaterial.dispose();
+    this.coverageMaterial?.dispose();
     this.grid.geometry.dispose();
     this.gridMaterial.dispose();
     this.skyView.dispose();

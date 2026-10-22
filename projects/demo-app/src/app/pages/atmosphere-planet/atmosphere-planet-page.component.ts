@@ -1,24 +1,17 @@
-import { Component, DestroyRef, inject, signal, viewChild } from '@angular/core';
+import { Component, DestroyRef, computed, inject, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { BufferAttribute, Mesh, SphereGeometry, Vector3 } from 'three';
 import { EngineModule, EngineService, RaycastOrbitControlsComponent } from 'triangular-engine';
-import {
-  AtmosphereBackdrop,
-  AtmosphereGpuModel,
-  AtmosphereSkyViewLut,
-  PlanetAtmosphereBinding,
-  createAtmospherePreset,
-  type AtmospherePresetId,
-  type PhysicalAtmosphereProfile,
-} from 'triangular-engine/atmosphere';
+import { PlanetAtmosphereComponent, type PlanetAtmospherePresetId } from 'triangular-engine/atmosphere';
 import { PlanetSurfaceMaterial } from 'triangular-engine/planet-material';
 
 /**
- * Plan 049 Phase 2b: the atmosphere on a `PlanetSurfaceMaterial` globe (the morph stays at 0).
+ * Plan 049 Phase 2b: the atmosphere on a `PlanetSurfaceMaterial` globe (the morph stays at 0), wired with
+ * `<planetAtmosphere>` (Phase 4a).
  *
- * - Stage 4 (`binding.lighting()`): the surface is relit from the atmosphere, so dusk is orange on the ground too.
- * - Stage 6 (`binding.perspective()`): aerial perspective from the camera to each surface point.
- * - The sky and the limb glow come from an `AtmosphereBackdrop` (ground off) drawn behind the globe.
+ * - Stage 4 (`[lighting]`): the surface is relit from the atmosphere, so dusk is orange on the ground too.
+ * - Stage 6 (`[haze]`): aerial perspective from the camera to each surface point.
+ * - The sky and the limb glow (`[sky]`) are drawn behind the globe.
  *
  * The globe is a unit sphere; its size in metres is the atmosphere profile's radius, so the size buttons only rescale
  * the air. Drag to orbit, wheel to zoom: the view buttons move the camera to an altitude. `?backend=webgl2` runs the
@@ -59,7 +52,7 @@ const VIEWS: readonly ViewChoice[] = [
 @Component({
   standalone: true,
   selector: 'app-atmosphere-planet-page',
-  imports: [EngineModule, RouterLink, RaycastOrbitControlsComponent],
+  imports: [EngineModule, RouterLink, RaycastOrbitControlsComponent, PlanetAtmosphereComponent],
   providers: EngineService.provide({
     showFPS: true,
     preferredRenderer: 'webgpu',
@@ -69,6 +62,18 @@ const VIEWS: readonly ViewChoice[] = [
   template: `
     <scene>
       <raycastOrbitControls [cameraPosition]="[0, 0.6, 3.2]" [target]="[0, 0, 0]" [near]="0.00005" [far]="100" />
+      <planetAtmosphere
+        [preset]="presetId()"
+        [radius]="radiusM()"
+        [radiusUnits]="radiusUnits"
+        [planet]="globe"
+        [surfaces]="surfaces"
+        [lighting]="lightingOn()"
+        [haze]="perspectiveOn()"
+        [sky]="skyOn()"
+        [sunDirection]="sunDirection()"
+        [exposure]="exposure()"
+      />
     </scene>
     <aside class="panel">
       <a routerLink="/">← Examples</a>
@@ -77,7 +82,7 @@ const VIEWS: readonly ViewChoice[] = [
         <button (click)="switchBackend('webgpu')" [disabled]="backend === 'webgpu'">WebGPU</button>
         <button (click)="switchBackend('webgl2')" [disabled]="backend === 'webgl2'">forceWebGL</button>
       </p>
-      <p class="label">Planet size {{ baking() ? '(baking tables…)' : '' }}</p>
+      <p class="label">Planet size</p>
       <p class="row">
         @for (size of sizes; track size.label) {
           <button (click)="setSize(size)" [class.active]="sizeLabel() === size.label">{{ size.label }}</button>
@@ -177,11 +182,13 @@ export class AtmospherePlanetPageComponent {
   readonly backend = BACKEND;
   readonly sizes = SIZES;
   readonly views = VIEWS;
+  readonly radiusUnits = RADIUS_UNITS;
   private readonly orbit = viewChild(RaycastOrbitControlsComponent);
+  private readonly atmosphere = viewChild(PlanetAtmosphereComponent);
 
   readonly sizeLabel = signal('64 km');
-  readonly presetId = signal<AtmospherePresetId>('earth');
-  readonly baking = signal(false);
+  readonly radiusM = signal(64_000);
+  readonly presetId = signal<PlanetAtmospherePresetId>('earth');
   readonly bakeMs = signal(0);
   readonly lightingOn = signal(true);
   readonly perspectiveOn = signal(true);
@@ -192,90 +199,43 @@ export class AtmospherePlanetPageComponent {
   readonly stackKey = signal('');
   readonly altitudeLabel = signal('');
 
-  private radiusM = 64_000;
-  private readonly model: AtmosphereGpuModel;
-  private readonly skyView: AtmosphereSkyViewLut;
-  private readonly backdrop: AtmosphereBackdrop;
-  private readonly binding: PlanetAtmosphereBinding;
-  private readonly material: PlanetSurfaceMaterial;
-  private readonly globe: Mesh;
+  readonly sunDirection = computed<[number, number, number]>(() => {
+    const lon = (this.sunLongitude() * Math.PI) / 180;
+    const lat = (this.sunLatitude() * Math.PI) / 180;
+    return [Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon)];
+  });
+
+  private readonly material = new PlanetSurfaceMaterial();
+  readonly globe = new Mesh(this.buildGlobe(), this.material);
+  readonly surfaces = [this.material];
 
   constructor() {
-    const started = performance.now();
-    this.model = new AtmosphereGpuModel(this.buildProfile());
-    this.bakeMs.set(Math.round(performance.now() - started));
-    this.skyView = new AtmosphereSkyViewLut(this.model);
-    this.backdrop = new AtmosphereBackdrop(this.model, { skyView: this.skyView });
-    this.backdrop.groundEnabled.value = 0;
-    this.backdrop.sunDiscStrength.value = 1;
-    this.binding = new PlanetAtmosphereBinding(this.model, { radiusUnits: RADIUS_UNITS, aerialPerspective: true });
-
-    this.material = new PlanetSurfaceMaterial({
-      lighting: { id: 'atmosphere', stage: this.binding.lighting() },
-      atmosphere: { id: 'atmosphere', stage: this.binding.perspective() },
-    });
-    this.globe = new Mesh(this.buildGlobe(), this.material);
-    this.engine.scene.add(this.backdrop.mesh, this.globe);
-    this.stackKey.set(this.material.stackKey);
-    this.applySun();
-
-    // The atmosphere reads the camera, so it runs after the orbit controls have settled (a frame behind otherwise).
+    this.engine.scene.add(this.globe);
     const tick = this.engine.tick$.subscribe(() => this.onTick());
-    const beforeRender = this.engine.beforeRender$.subscribe(() => this.syncAtmosphere());
     inject(DestroyRef).onDestroy(() => {
       tick.unsubscribe();
-      beforeRender.unsubscribe();
-      this.engine.scene.remove(this.backdrop.mesh, this.globe);
-      this.backdrop.dispose();
-      this.binding.dispose();
-      this.skyView.dispose();
-      this.model.dispose();
+      this.engine.scene.remove(this.globe);
       this.material.dispose();
       this.globe.geometry.dispose();
     });
   }
 
-  private buildProfile(): PhysicalAtmosphereProfile {
-    const profile = createAtmospherePreset(this.presetId(), { radiusM: this.radiusM });
-    if (profile.kind !== 'physical') throw new Error('Expected a physical atmosphere profile');
-    return profile;
-  }
-
-  private syncAtmosphere(): void {
-    const renderer: any = this.engine.renderer;
-    const camera = this.engine.camera;
-    if (!renderer?.initialized || !camera) return;
-    this.binding.exposure.value = this.exposure();
-    this.binding.sync(camera, this.globe, this.backdrop);
-    if (this.perspectiveOn()) this.binding.update(renderer);
-    this.backdrop.update(renderer, camera);
-  }
-
   private onTick(): void {
-    const m = this.binding.cameraAltitude.value;
+    const atmosphere = this.atmosphere()?.atmosphere();
+    if (!atmosphere) return;
+    const m = atmosphere.binding.cameraAltitude.value;
     this.altitudeLabel.set(m < 1000 ? `${m.toFixed(0)} m` : `${(m / 1000).toFixed(m < 1e5 ? 1 : 0)} km`);
-  }
-
-  private rebake(): void {
-    this.baking.set(true);
-    setTimeout(() => {
-      const started = performance.now();
-      this.model.setProfile(this.buildProfile());
-      this.binding.refreshScale();
-      this.bakeMs.set(Math.round(performance.now() - started));
-      this.baking.set(false);
-    }, 30);
+    this.bakeMs.set(Math.round(atmosphere.lastBakeMs));
+    this.stackKey.set(this.material.stackKey);
   }
 
   setSize(size: SizeChoice): void {
-    this.radiusM = size.radiusM;
+    this.radiusM.set(size.radiusM);
     this.sizeLabel.set(size.label);
-    this.rebake();
   }
 
-  setPreset(id: AtmospherePresetId): void {
+  setPreset(id: PlanetAtmospherePresetId): void {
     this.presetId.set(id);
-    this.rebake();
   }
 
   applyView(view: ViewChoice): void {
@@ -295,33 +255,23 @@ export class AtmospherePlanetPageComponent {
   }
 
   setLighting(event: Event): void {
-    const on = (event.target as HTMLInputElement).checked;
-    this.lightingOn.set(on);
-    this.material.setLightingStage(on ? { id: 'atmosphere', stage: this.binding.lighting() } : null);
-    this.stackKey.set(this.material.stackKey);
+    this.lightingOn.set((event.target as HTMLInputElement).checked);
   }
 
   setPerspective(event: Event): void {
-    const on = (event.target as HTMLInputElement).checked;
-    this.perspectiveOn.set(on);
-    this.material.setAtmosphereStage(on ? { id: 'atmosphere', stage: this.binding.perspective() } : null);
-    this.stackKey.set(this.material.stackKey);
+    this.perspectiveOn.set((event.target as HTMLInputElement).checked);
   }
 
   setSky(event: Event): void {
-    const on = (event.target as HTMLInputElement).checked;
-    this.skyOn.set(on);
-    this.backdrop.mesh.visible = on;
+    this.skyOn.set((event.target as HTMLInputElement).checked);
   }
 
   setSunLongitude(event: Event): void {
     this.sunLongitude.set(Number((event.target as HTMLInputElement).value));
-    this.applySun();
   }
 
   setSunLatitude(event: Event): void {
     this.sunLatitude.set(Number((event.target as HTMLInputElement).value));
-    this.applySun();
   }
 
   setExposure(event: Event): void {
@@ -332,13 +282,6 @@ export class AtmospherePlanetPageComponent {
     const url = new URL(globalThis.location.href);
     url.searchParams.set('backend', backend);
     globalThis.location.href = url.toString();
-  }
-
-  private applySun(): void {
-    const lon = (this.sunLongitude() * Math.PI) / 180;
-    const lat = (this.sunLatitude() * Math.PI) / 180;
-    const sun = new Vector3(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));
-    this.binding.setSunBody(sun.x, sun.y, sun.z);
   }
 
   /** A sphere with the attributes the material reads (the flat map equals the sphere) and a latitude colour. */

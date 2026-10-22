@@ -16,3 +16,5 @@ export * from './atmosphere-aerial-perspective';
 export * from './atmosphere-planet-stages';
 export * from './bent-planet';
 export * from './bent-atmosphere';
+export * from './planet-atmosphere';
+export * from './components/planet-atmosphere.component';

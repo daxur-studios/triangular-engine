@@ -3,6 +3,8 @@ import {
   createAtmosphereLabTestAdapter, stateMismatches, sweepMorphAt, sweepTraceProblems,
   type AtmosphereFrameSummary, type AtmosphereLabSnapshot, type AtmosphereLabTestHost,
 } from './atmosphere-lab-test-adapter';
+import type { CheckFrames } from './atmosphere-lab-image-checks';
+import { syntheticFrames } from './atmosphere-lab-image-checks.testing';
 import { ATMOSPHERE_LAB_TEST_HISTORY, type AtmosphereLabTestSettings } from './atmosphere-lab-tests';
 
 /** Frames come from a 16 ms timer. A morph handed over by a run takes effect on the following frame, like the page's tick. */
@@ -21,6 +23,10 @@ class FakeHost implements AtmosphereLabTestHost {
   baking = 0;
   masked = true;
   gpuSupported = true;
+  /** What `readCheckFrames` returns; a test swaps it to show a defect the checks must catch. */
+  checkFrames: () => CheckFrames = () => syntheticFrames(this.state.state);
+  checkFrameReads = 0;
+  thumbnails = 0;
   environmentValues: Record<string, string | number | boolean | null> = { softwareRenderer: false };
   readonly before = new Set<() => void>();
   readonly render = new Set<(at: number) => void>();
@@ -36,7 +42,7 @@ class FakeHost implements AtmosphereLabTestHost {
   dispose(): void { clearInterval(this.timer); }
   read(): AtmosphereLabSnapshot { return this.state; }
   apply(settings: AtmosphereLabTestSettings): void {
-    const { kind: _kind, morphKeys, expectMaskedPass: _expect, ...rest } = settings;
+    const { kind: _kind, morphKeys, expectMaskedPass: _expect, imageChecks: _image, ...rest } = settings;
     this.state = {
       state: { ...rest, bentOn: true, morph: morphKeys[0], projection: settings.projection },
       sweep: false, animateSun: false,
@@ -53,6 +59,8 @@ class FakeHost implements AtmosphereLabTestHost {
   resetErrors(): void { this.error = ''; }
   onBeforeRender(callback: () => void): () => void { this.before.add(callback); return () => this.before.delete(callback); }
   onRenderComplete(callback: (at: number) => void): () => void { this.render.add(callback); return () => this.render.delete(callback); }
+  async readCheckFrames(): Promise<CheckFrames> { this.checkFrameReads++; return this.checkFrames(); }
+  async captureThumbnail(): Promise<Blob> { this.thumbnails++; return new Blob(['x'], { type: 'image/webp' }); }
   gpuTimestampsSupported(): boolean { return this.gpuSupported; }
   isSampling(): boolean { return this.sampling; }
   startSampling(): void { this.sampling = true; }
@@ -69,7 +77,8 @@ const quick = (suite: TestSuite<AtmosphereLabTestSettings>, ...ids: string[]): T
     .map((scenario) => ({ ...scenario, durationMs: 400, warmupMs: 0 })),
 });
 
-const [LOOK, , COST] = ATMOSPHERE_LAB_TEST_HISTORY;
+const COVERAGE_CHECK = "Ground mesh covers the atmosphere's ground";
+const [LOOK, , COST, LOOK2] = ATMOSPHERE_LAB_TEST_HISTORY;
 
 describe('atmosphere lab tests', () => {
   let host: FakeHost;
@@ -77,11 +86,13 @@ describe('atmosphere lab tests', () => {
   afterEach(() => host.dispose());
 
   describe('history', () => {
-    it('is a valid append-only history ending with the cost suite', () => {
+    it('is a valid append-only history ending with look v2', () => {
       expect(() => validateTestHistory(ATMOSPHERE_LAB_TEST_HISTORY)).not.toThrow();
       expect(ATMOSPHERE_LAB_TEST_HISTORY.map((suite) => `${suite.id}@${suite.version}:${suite.purpose}`)).toEqual([
-        'bent-atmosphere-look@1:functional', 'bent-atmosphere-cost@1:performance', 'bent-atmosphere-cost@2:performance']);
+        'bent-atmosphere-look@1:functional', 'bent-atmosphere-cost@1:performance', 'bent-atmosphere-cost@2:performance',
+        'bent-atmosphere-look@2:functional']);
       expect(LOOK.requiresVisualReview).toBeTrue();
+      expect(LOOK2.requiresVisualReview).toBeTrue();
     });
 
     it('covers the three open Plan 049 look checks with resolved numbers', () => {
@@ -99,12 +110,24 @@ describe('atmosphere lab tests', () => {
       }
     });
 
+    it('keeps look v1 free of image checks and gives every look v2 scenario expectations', () => {
+      expect(LOOK.scenarios.some((item) => item.settings.imageChecks !== undefined)).toBeFalse();
+      expect(LOOK2.scenarios.every((item) => item.settings.imageChecks !== undefined)).toBeTrue();
+      const v1 = new Map(LOOK.scenarios.map((item) => [item.id, item.settings]));
+      for (const item of LOOK2.scenarios.filter((entry) => v1.has(entry.id))) {
+        const { imageChecks: _checks, ...rest } = item.settings;
+        expect(rest).withContext(item.id).toEqual(v1.get(item.id)!);
+      }
+      expect(LOOK2.scenarios.filter((item) => item.settings.imageChecks?.horizon).length).toBeGreaterThanOrEqual(5);
+    });
+
     it('builds and parses exact-version and latest launch links', () => {
       const base = 'http://triangular-demo.localhost:4200/atmosphere-lab';
       const url = buildTestLaunchUrl(base, LOOK, 'human-observed', 1);
       expect(url).toBe(`${base}?testSuite=bent-atmosphere-look&testVersion=1&testProfile=human-observed&testMode=standard&testRepetitions=1&testAutoStart=1`);
       expect(parseTestLaunch(new URL(url), ATMOSPHERE_LAB_TEST_HISTORY)?.key).toBe('bent-atmosphere-look@1');
-      expect(parseTestLaunch(new URL(`${base}?testSuite=latest&testAutoStart=1`), ATMOSPHERE_LAB_TEST_HISTORY)?.key).toBe('bent-atmosphere-cost@2');
+      expect(parseTestLaunch(new URL(`${base}?testSuite=latest&testAutoStart=1`), ATMOSPHERE_LAB_TEST_HISTORY)?.key).toBe('bent-atmosphere-look@2');
+      expect(buildTestLaunchUrl(base, LOOK2, 'visible-browser', 1)).toContain('testSuite=bent-atmosphere-look&testVersion=2');
     });
   });
 
@@ -206,5 +229,96 @@ describe('atmosphere lab tests', () => {
       expect(result.cases[0].validityIssues).toContain('Software renderer: functional evidence only, not hardware performance');
       expect(result.performanceVerdict).toBe('inconclusive');
     }, 20_000);
+
+    describe('image checks (look v2)', () => {
+      const run = (ids: string[], thumbnails?: { scenarioId: string; images: readonly Blob[] }[]) =>
+        new TestSession<AtmosphereLabTestSettings, AtmosphereLabSnapshot>().run(
+          quick(LOOK2, ...ids), createAtmosphereLabTestAdapter(host), {
+            repetitions: 1, profile: 'headless-hardware',
+            ...(thumbnails ? { thumbnails: true, onThumbnails: (item) => thumbnails.push(item) } : {}),
+          });
+      const check = (result: Awaited<ReturnType<typeof run>>, name: string) =>
+        result.cases[0].checks.find((item) => item.name === name);
+      const metric = (result: Awaited<ReturnType<typeof run>>, name: string) =>
+        result.cases[0].metrics.find((item) => item.name === name);
+
+      it('reads the final frame once, after the window, and passes a healthy view', async () => {
+        const result = await run(['horizon-air-high-m0']);
+        expect(result.errors).toEqual([]);
+        expect(result.status).toBe('completed');
+        expect(host.checkFrameReads).toBe(1);
+        expect(result.cases[0].checks.map((item) => item.name)).toEqual(jasmine.arrayContaining([
+          COVERAGE_CHECK, 'Sky is lit', 'No dark band at the horizon']));
+        expect(metric(result, 'uncoveredPixels')?.samples).toEqual([0]);
+        expect(metric(result, 'skyMedianLuma')?.samples[0]).toBeCloseTo(0.6, 5);
+        expect(metric(result, 'horizonBandPixels')?.samples).toEqual([0]);
+        expect(host.sampling).toBeFalse();
+      }, 20_000);
+
+      it('fails a black sky, naming the median it measured', async () => {
+        host.checkFrames = () => syntheticFrames(host.state.state, { sky: 0 });
+        const result = await run(['horizon-air-high-m0']);
+        expect(check(result, 'Sky is lit')?.passed).toBeFalse();
+        expect(check(result, 'Sky is lit')?.detail).toContain('median luma 0.000');
+        expect(result.status).toBe('failed');
+      }, 20_000);
+
+      it('fails a black band under the horizon and counts it', async () => {
+        host.checkFrames = () => syntheticFrames(host.state.state, { bandRows: 2 });
+        const result = await run(['horizon-air-high-m0']);
+        expect(check(result, 'No dark band at the horizon')?.passed).toBeFalse();
+        expect(metric(result, 'horizonBandPixels')?.samples[0]).toBeGreaterThan(0);
+        expect(check(result, 'Sky is lit')?.passed).toBeTrue();
+      }, 20_000);
+
+      it('fails ground the atmosphere expects and the mesh does not cover', async () => {
+        host.checkFrames = () => syntheticFrames(host.state.state, { uncoveredCells: 12 });
+        const result = await run(['horizon-air-high-m0']);
+        expect(check(result, COVERAGE_CHECK)?.passed).toBeFalse();
+        expect(metric(result, 'uncoveredPixels')?.samples).toEqual([12]);
+      }, 20_000);
+
+      it('says why a check that a scenario expects could not apply', async () => {
+        // Above the air with the sun up: no lit-sky check applies, but the scenario asked for one.
+        host.checkFrames = () => syntheticFrames(host.state.state, {}, 64, 48);
+        const suite = quick(LOOK2, 'horizon-air-high-m0');
+        const result = await new TestSession<AtmosphereLabTestSettings, AtmosphereLabSnapshot>().run(
+          { ...suite, scenarios: suite.scenarios.map((item) => ({ ...item, settings: { ...item.settings, altitudeM: 3_000_000 } })) },
+          createAtmosphereLabTestAdapter(host), { repetitions: 1, profile: 'headless-hardware' });
+        expect(check(result, 'Sky is lit')?.passed).toBeFalse();
+        expect(check(result, 'Sky is lit')?.detail).toContain('the camera is above the air');
+        expect(metric(result, 'skyMedianLuma')?.unavailableReason).toContain('Not applicable');
+      }, 20_000);
+
+      it('does not insist on a lit sky or a horizon where the scenario expects none', async () => {
+        const result = await run(['rim-glow-equirect']);
+        expect(result.cases[0].checks.map((item) => item.name)).toContain(COVERAGE_CHECK);
+        expect(check(result, 'Sky is lit')).toBeUndefined();
+        expect(result.cases[0].checks.filter((item) => !item.passed)).toEqual([]);
+        expect(result.status).toBe('completed');
+      }, 20_000);
+
+      it('keeps look v1 free of pixel reads, and still takes one thumbnail per kept case', async () => {
+        const thumbnails: { scenarioId: string; images: readonly Blob[] }[] = [];
+        const result = await new TestSession<AtmosphereLabTestSettings, AtmosphereLabSnapshot>().run(
+          quick(LOOK, 'rim-glow-equirect'), createAtmosphereLabTestAdapter(host), {
+            repetitions: 1, profile: 'headless-hardware', thumbnails: true, onThumbnails: (item) => thumbnails.push(item),
+          });
+        expect(result.status).toBe('completed');
+        expect(host.checkFrameReads).toBe(0);
+        expect(host.thumbnails).toBe(1);
+        expect(thumbnails.map((item) => item.scenarioId)).toEqual(['rim-glow-equirect']);
+        expect(thumbnails[0].images.length).toBe(1);
+      }, 20_000);
+
+      it('takes the thumbnail of a failed case too, and none with thumbnails off', async () => {
+        host.checkFrames = () => syntheticFrames(host.state.state, { sky: 0 });
+        const thumbnails: { scenarioId: string; images: readonly Blob[] }[] = [];
+        const result = await run(['horizon-air-high-m0'], thumbnails);
+        expect(result.status).toBe('failed');
+        expect(thumbnails.length).toBe(1);
+        expect(host.thumbnails).toBe(1);
+      }, 20_000);
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { Matrix3, Matrix4, Quaternion, Vector3, type Object3D } from 'three';
+import { Matrix3, Matrix4, Quaternion, Vector3, type IUniform, type Object3D } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
 import { Fn, If, abs, cameraProjectionMatrix, cross, dot, float, max, min, mix, normalize, positionView, select, uniform, vec3, vec4 } from 'three/tsl';
 import { AtmosphereAerialPerspectiveLut, type AtmosphereAerialPerspectiveOptions } from './atmosphere-aerial-perspective';
@@ -9,6 +9,8 @@ import type { AtmosphereGpuModel } from './atmosphere-gpu-model';
 
 /** From this `morph` on the planet counts as a flat map: only the slab haze is computed. */
 const FLAT_MAP_MORPH = 0.999;
+
+const morphUniform = () => uniform(0);
 
 /**
  * The part of the planet material's context the stages read. Structural, so this entry point does not import
@@ -41,6 +43,11 @@ export interface PlanetAtmosphereBindingOptions {
    * `true` for the defaults. Needs {@link PlanetAtmosphereBinding.update} called every frame after `sync`.
    */
   aerialPerspective?: boolean | AtmosphereAerialPerspectiveOptions;
+  /**
+   * A morph uniform to read instead of owning one, such as the planet material's `morph.uMorph`: the material and the
+   * atmosphere then share one value and nothing copies it each frame. It must be a TSL uniform node.
+   */
+  morph?: IUniform<number>;
 }
 
 /**
@@ -73,10 +80,11 @@ export class PlanetAtmosphereBinding {
    */
   skyAnchorBody?: Vector3;
   /**
-   * How far the planet has unrolled into its flat map, 0 (globe) to 1 (map). The page sets it with the morph. The
-   * haze of a surface point blends from the spherical model to a flat slab by it ({@link perspective}).
+   * How far the planet has unrolled into its flat map, 0 (globe) to 1 (map). The page sets it with the morph, or
+   * passes the material's own uniform as `options.morph`. The haze of a surface point blends from the spherical model
+   * to a flat slab by it ({@link perspective}).
    */
-  readonly morph = uniform(0);
+  readonly morph: ReturnType<typeof morphUniform>;
   /**
    * 0..1, how much of the sun reaches the planet (an eclipse, a cloud deck). It scales the air's in-scattering, the sky
    * light on surfaces and, via `sync` with a backdrop, the sky and sun disc. Surfaces also multiply their own
@@ -121,6 +129,7 @@ export class PlanetAtmosphereBinding {
   ) {
     this.radiusUnits = options.radiusUnits;
     this.steps = options.steps;
+    this.morph = (options.morph as unknown as ReturnType<typeof morphUniform> | undefined) ?? morphUniform();
     this.metersPerUnit.value = model.profile.planetRadiusM / options.radiusUnits;
     if (options.aerialPerspective) {
       this.aerialPerspective = new AtmosphereAerialPerspectiveLut(
@@ -135,8 +144,9 @@ export class PlanetAtmosphereBinding {
     this.sunBody.value.set(x, y, z).normalize();
   }
 
-  /** Call after the profile changes size (the planet's radius in metres). */
-  refreshScale(): void {
+  /** Call after the profile changes size (the planet's radius in metres), or with the mesh's new radius in world units. */
+  refreshScale(radiusUnits = this.radiusUnits): void {
+    this.radiusUnits = radiusUnits;
     this.metersPerUnit.value = this.model.profile.planetRadiusM / this.radiusUnits;
   }
 

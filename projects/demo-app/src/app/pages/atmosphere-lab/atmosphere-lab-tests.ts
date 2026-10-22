@@ -27,12 +27,26 @@ export interface AtmosphereLabState {
 }
 
 /**
+ * What a scenario says its final frame must show. Present only on the suites that read pixels (look v2 on): the checks
+ * then run whatever these say, and the flags make a check that cannot apply (no sky in view, the sun down) a failure
+ * instead of a quiet skip.
+ */
+export interface AtmosphereImageExpectations {
+  /** The camera is in the air with the sun up, so the sky must be lit. */
+  readonly litSky: boolean;
+  /** The view has a ground and sky boundary for the horizon band check to follow. */
+  readonly horizon: boolean;
+}
+
+/**
  * Fully resolved scenario inputs. `morphKeys` is the morph (`[m]`, static) or the keyframes of a sweep
  * (`[0, 1, 0]`: equal time per leg, eased). `bentOn: false` is the plain globe backdrop, the comparison for the cost suites.
  */
 export interface AtmosphereLabTestSettings extends Omit<AtmosphereLabState, 'morph'> {
   readonly kind: 'static' | 'sweep';
   readonly morphKeys: readonly number[];
+  /** Read the final frame back and check it (coverage, lit sky, horizon band). Absent in suites that predate image checks. */
+  readonly imageChecks?: AtmosphereImageExpectations;
   /**
    * Whether the half-resolution masked pass should be active on every frame of the window: `true` where the
    * camera is above the air, `false` where it must not be, `null` where it depends on the edge distance.
@@ -93,6 +107,32 @@ const LOOK_SCENARIOS: readonly TestScenario<AtmosphereLabTestSettings>[] = [
     { ...VIEWS.sideOnEdge, morphKeys: [0.2], anchor: [0.6, 0] }),
 ];
 
+const NO_EXPECTATIONS: AtmosphereImageExpectations = { litSky: false, horizon: false };
+
+/**
+ * Look v2: the final frame of every case is read back and checked (coverage of the atmosphere's ground by the mesh; a lit
+ * sky; no dark band at the horizon). First the views from inside the air where the horizon is on screen, then the v1
+ * scenarios unchanged. Orbit and space views check coverage only: there the sky is mostly space and the horizon is the
+ * limb glow. A failed check ends a run at that case, so the views the owner reported come first.
+ */
+const LOOK_V2_SCENARIOS: readonly TestScenario<AtmosphereLabTestSettings>[] = [
+  scenario('horizon-ground-noon-m0', 'Ground (2 m), noon, morph 0: horizon and sky', 2500,
+    { ...VIEWS.ground, morphKeys: [0], imageChecks: { litSky: true, horizon: true } }),
+  scenario('horizon-ground-noon-m0_5', 'Ground (2 m), noon, morph 0.5', 2500,
+    { ...VIEWS.ground, morphKeys: [0.5], imageChecks: { litSky: true, horizon: true } }),
+  scenario('horizon-ground-noon-equal-earth-m0_5', 'Ground (2 m), noon, Equal Earth, morph 0.5', 2500,
+    { ...VIEWS.ground, morphKeys: [0.5], projection: 'equalEarth', imageChecks: { litSky: true, horizon: true } }),
+  scenario('horizon-ground-level-m0', 'Ground (2 m), horizon at the centre of the view, morph 0', 2500,
+    { ...VIEWS.ground, pitchDeg: 0, morphKeys: [0], imageChecks: { litSky: true, horizon: true } }),
+  scenario('horizon-mountain-5km-m0', 'Mountain top (5 km), morph 0', 2500,
+    { ...VIEWS.ground, altitudeM: 5_000, pitchDeg: -3, sunElevationDeg: 25, morphKeys: [0], imageChecks: { litSky: true, horizon: true } }),
+  scenario('horizon-air-high-m0', '25 km up, looking down and out, morph 0', 2500,
+    { ...VIEWS.airHigh, morphKeys: [0], imageChecks: { litSky: true, horizon: true } }),
+  scenario('horizon-air-high-m0_5', '25 km up, looking down and out, morph 0.5', 2500,
+    { ...VIEWS.airHigh, morphKeys: [0.5], imageChecks: { litSky: true, horizon: true } }),
+  ...LOOK_SCENARIOS.map((item) => ({ ...item, settings: { ...item.settings, imageChecks: NO_EXPECTATIONS } })),
+];
+
 /** Timing rows from the Phase 3a gate (space and low orbit at morph 0 / 0.5 / 1), for the diagnostic GPU frame readout. */
 const COST_SCENARIOS: readonly TestScenario<AtmosphereLabTestSettings>[] = [
   ...(['space', 'lowOrbit'] as const).flatMap((view) =>
@@ -151,5 +191,13 @@ export const ATMOSPHERE_LAB_TEST_HISTORY: readonly TestSuite<AtmosphereLabTestSe
     purpose: 'performance',
     expectedGpuVendor: 'nvidia',
     scenarios: COST_V2_SCENARIOS,
+  },
+  {
+    id: 'bent-atmosphere-look',
+    version: 2,
+    title: 'Bent atmosphere: look, with image checks (coverage, lit sky, horizon band)',
+    purpose: 'functional',
+    requiresVisualReview: true,
+    scenarios: LOOK_V2_SCENARIOS,
   },
 ];

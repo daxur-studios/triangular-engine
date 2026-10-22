@@ -66,6 +66,55 @@ engine.tick$.subscribe(() => backdrop.update(engine.renderer as WebGPURenderer, 
 
 Without the camera argument, or with `backdrop.spaceLowResEnabled.value = 0` or `spaceScale: 0`, every pixel is marched. The pass only runs while the camera is above the top of the atmosphere.
 
+## Adding it to a game's planet
+
+`<planetAtmosphere>` (or the `PlanetAtmosphere` class behind it) does all of the wiring below: it builds the model, the sky-view table, the sky behind the planet and the binding, puts the lighting and haze stages on your surfaces, and updates once per frame. The scene needs `preferredRenderer: 'webgpu'`.
+
+```ts
+import { PlanetAtmosphereComponent } from 'triangular-engine/atmosphere';
+```
+
+```html
+<planetAtmosphere
+  preset="earth"
+  [radius]="600_000"
+  [radiusUnits]="1"
+  [planet]="planetGroup"
+  [surfaces]="[surface, ocean.material]"
+  [sunDirection]="sunBody"
+  [morph]="surface.morph.uMorph"
+/>
+```
+
+| Input | Meaning |
+|---|---|
+| `preset`, `profile` | `'earth'` (default) or `'mars'`, or a custom `PhysicalAtmosphereProfile` scaled to `radius` like a preset. |
+| `radius` (required), `thickness` | Planet radius in metres; air height / radius (default: the preset's). Changing either, or the preset, rebakes the tables (about 1-2 s). |
+| `radiusUnits` | The planet mesh's radius in world units. Default `radius` (one unit is a metre). |
+| `planet` | The planet's root object; its transform is the body frame. Default: the scene, with the planet at its origin. |
+| `surfaces`, `lighting`, `haze` | Surfaces to light (stage 4) and haze (stage 6): any `PlanetSurfaceMaterial`, planet or ocean. Removing one from the array restores its default stages. |
+| `sunDirection` | Direction to the sun in the body frame (`Vector3` or `[x, y, z]`). |
+| `morph` | Pass the material's `morph.uMorph` to share one value (read at start), or a number. |
+| `exposure`, `enabled`, `sky` | Exposure (default 8); `enabled = false` skips the atmosphere on the surfaces without a recompile and hides the sky; `sky = false` hides only the sky. |
+
+The component's `atmosphere()` signal gives the `PlanetAtmosphere` for anything else (its `binding`, `model`, `backdrop`).
+
+**Frame order.** The component updates in the engine's `beforeRender$`, after the camera controls settle in `lateUpdate$`, and reads its inputs at that moment. Write the morph and the planet's transform by `lateUpdate$`, and don't move the camera in `beforeRender$`.
+
+Without Angular, or to call the update yourself:
+
+```ts
+const atmosphere = new PlanetAtmosphere({ preset: 'earth', radiusM: 600_000, radiusUnits: 1, planet, morph: surface.morph.uMorph });
+atmosphere.withAtmosphere(surface).withAtmosphere(ocean.material); // { lighting?, haze? } per surface
+scene.add(atmosphere.object);
+atmosphere.sunDirection.set(x, y, z);
+engine.beforeRender$.subscribe(() => atmosphere.update(renderer, engine.camera));
+atmosphere.configure({ thickness: 0.05 }); // rebakes only when the air or the size changed
+atmosphere.dispose(); // takes the stages off, removes the sky, frees the GPU resources
+```
+
+Surfaces are taken structurally (`IAtmosphereSurface`: `setLightingStage` and `setAtmosphereStage`), so this entry point does not import `triangular-engine/planet-material`. Other materials (`withAtmosphere(nodeMaterial)`) and haze on non-planet objects are not covered yet (Plan 049, Phase 4).
+
 ## On the planet material
 
 `PlanetAtmosphereBinding` fills two stages of `PlanetSurfaceMaterial` (see [planet-material.md](planet-material.md)): the lighting stage and the atmosphere stage. The sky and limb glow behind the globe stay with `AtmosphereBackdrop` (set `groundEnabled.value = 0`), which draws behind the mesh.
@@ -88,7 +137,7 @@ engine.beforeRender$.subscribe(() => { // after the camera controls have settled
 
 - `lighting()` relights the surface as `albedo x (sun transmittance x N.L x sunVisibility + sky irradiance) x sun irradiance / pi x exposure`, using each point's own sun angle. It replaces the PBR result (other scene lights and normal maps do not reach it); the emissive stack is added back. An eclipse occluder darkens only the direct term.
 - `perspective()` attenuates the colour along the camera-to-surface ray and adds that ray's in-scattering. With `aerialPerspective` it is one lookup in a froxel table (`AtmosphereAerialPerspectiveLut`: radiance and optical depth for a grid of screen positions and distances, re-rendered by `binding.update(renderer)` only when the camera, the sun or the profile moved); the fragment's real distance is used, so terrain height is included. Without it, one march per fragment on the sphere of the planet's radius (several times the cost on a planet that fills the screen). The table resolves the last texel of the planet's disc poorly, so the very rim can lose some haze. The mid-morph flat map is not modelled yet.
-- The planet may sit anywhere and turn any way: the stages work in its body frame, and `sync` points the backdrop's local frame at the camera's radial direction. The mesh's size in metres is the profile's radius, so `radiusUnits` sets the scale; call `binding.refreshScale()` after `model.setProfile` changes the radius.
+- The planet may sit anywhere and turn any way: the stages work in its body frame, and `sync` points the backdrop's local frame at the camera's radial direction. The mesh's size in metres is the profile's radius, so `radiusUnits` sets the scale; call `binding.refreshScale()` after `model.setProfile` changes the radius (or `refreshScale(radiusUnits)` when the mesh's size changes). `options.morph` takes the material's morph uniform instead of the binding owning one.
 - `exposure` lives on the binding and is copied to the backdrop by `sync`, so the surface and the sky agree.
 
 Try it at `/atmosphere-planet`.
@@ -98,7 +147,7 @@ Try it at `/atmosphere-planet`.
 
 **Constraints.** Lengths are metres and coefficients are 1/m; `scaleAtmosphereProfile` rescales a profile to another radius so equivalent viewpoints match. Rebaking (`setProfile`) costs 1-2 s, so treat it as setup, not per-frame work. The aerial-perspective table re-renders only when camera, sun or profile moves. Everything is TSL for `WebGPURenderer`; there is no classic-WebGL path.
 
-**Public boundary.** `public-api.ts` exports the profile, presets, scaling, LUT bake, GPU model, backdrop, planet stages and aerial perspective. The reference integrator is exported for tests and comparison, not for rendering.
+**Public boundary.** `public-api.ts` exports the profile, presets, scaling, LUT bake, GPU model, backdrop, planet stages, aerial perspective, and `PlanetAtmosphere` with its `<planetAtmosphere>` component. The reference integrator is exported for tests and comparison, not for rendering.
 <!-- /doc-section -->
 
 ### Flat map and the morph

@@ -591,8 +591,9 @@ Provider timestamp readbacks started before a reset are discarded. The shared UI
 slider is installed from an identifiable archive under ignored `ignore/packages/`;
 it is a demo dependency, not a dependency of this optional library entry.
 
-The planet shape lab takes one still per scenario (first repetition) with `ScreenshotService`; the other labs have no
-thumbnails yet.
+The planet shape lab takes one still per scenario (first repetition) with `ScreenshotService`. The atmosphere lab takes one
+too (a 240 px WebP from its own canvas copy) and its look suite v2 also reads the final frame back for image checks; the
+other labs have no thumbnails yet.
 
 Maintainer checks: `npm run test:triangular-engine:testing`, `npm run test:triangular-engine:sink`, a headless demo test with
 `--include='**/gpu-timer.spec.ts'`, and

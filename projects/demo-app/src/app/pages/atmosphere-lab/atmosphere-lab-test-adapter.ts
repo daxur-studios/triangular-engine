@@ -1,5 +1,6 @@
 import type { GpuPassKind, IGpuPassSummary } from 'triangular-engine';
 import type { TestCheck, TestContext, TestMetric, TestObservation, TestRunAdapter, TestScenario, TestSetting } from 'triangular-engine/testing';
+import { runImageChecks, type CheckFrames } from './atmosphere-lab-image-checks';
 import type { AtmosphereLabState, AtmosphereLabTestSettings } from './atmosphere-lab-tests';
 
 /** The lab state a run changes, captured read-only and restorable as a unit. */
@@ -50,6 +51,13 @@ export interface AtmosphereLabTestHost {
   resetErrors(): void;
   onBeforeRender(callback: () => void): () => void;
   onRenderComplete(callback: (renderedAt: number) => void): () => void;
+  /**
+   * Check-only, after the timing window: renders the current view as it is and again with the coverage probe in place of the
+   * sky pass, reads both back and reduces them (see `atmosphere-lab-image-checks.ts`). Leaves the lab as it found it.
+   */
+  readCheckFrames(signal: AbortSignal): Promise<CheckFrames>;
+  /** A small picture (WebP, about 240 px wide) of the current view, for the case's thumbnail. */
+  captureThumbnail(signal: AbortSignal): Promise<Blob>;
   gpuTimestampsSupported(): boolean;
   isSampling(): boolean;
   startSampling(): void;
@@ -258,6 +266,35 @@ export function createAtmosphereLabTestAdapter(
         checks.push({ name: 'Masked pass active as expected', passed: frames > 0 && matched,
           detail: `${maskedFrames} of ${frames} frames had the masked pass, expected ${expected ? 'all' : 'none'}` });
       }
+      // Pixels, after the timing window and the sampler are closed: two extra frames that the numbers above never see.
+      const imageMetrics: TestMetric[] = [];
+      const imageDetails: Record<string, TestSetting> = {};
+      if (settings.imageChecks) {
+        const frames = await host.readCheckFrames(context.signal);
+        const outcome = runImageChecks(state, frames, settings.imageChecks);
+        checks.push(...outcome.checks);
+        Object.assign(imageDetails, outcome.details);
+        const point = (value: number | null) => (value === null ? [] : [value]);
+        imageMetrics.push(
+          {
+            name: 'uncoveredPixels', unit: 'px',
+            source: 'Coverage probe frame: pixels where the atmosphere expects ground inside the map and the mesh left the sentinel, counted by area in cells of the 256 px wide check frame',
+            samples: [outcome.uncoveredPixels],
+          },
+          {
+            name: 'skyMedianLuma', unit: 'luma', optional: true,
+            source: 'Median luma (0..1, tone-mapped sRGB) of the cells the CPU bent-planet maths predicts show sky',
+            samples: point(outcome.skyMedianLuma),
+            unavailableReason: outcome.skyMedianLuma === null ? 'Not applicable to this view (above the air, sun down, or too little sky)' : undefined,
+          },
+          {
+            name: 'horizonBandPixels', unit: 'px', optional: true,
+            source: 'Cells within 3 of the predicted sky/ground boundary whose darkest pixel is under 15% of the dimmer of the sky above and the ground below',
+            samples: point(outcome.horizonBandPixels),
+            unavailableReason: outcome.horizonBandPixels === null ? 'No predicted horizon with usable neighbours in this view' : undefined,
+          },
+        );
+      }
       const software = environment['softwareRenderer'] === true;
       const frameMetric: TestMetric = {
         name: 'frameInterval', unit: 'ms', source: 'Deltas of engine renderComplete$ timestamps (performance.now); display-cadence quantized, not GPU time',
@@ -276,7 +313,7 @@ export function createAtmosphereLabTestAdapter(
         },
       ];
       return {
-        metrics: [frameMetric, ...gpuMetrics],
+        metrics: [frameMetric, ...gpuMetrics, ...imageMetrics],
         checks,
         details: {
           frames: summary.frames, cpuMedianMs: summary.cpuMedianMs, cpuP95Ms: summary.cpuP95Ms,
@@ -284,6 +321,7 @@ export function createAtmosphereLabTestAdapter(
           maskedPassFrames: maskedFrames, finalMorph: state.morph,
           gpuPassFrames: passes?.frames ?? 0, gpuPassTotalMedianMs: passes ? passes.total.medianMs : null,
           gpuTimestampStepNs: passes?.resolution.resolutionNs ?? null,
+          ...imageDetails,
         },
         validityIssues: [
           ...summary.invalidReasons,
@@ -295,9 +333,15 @@ export function createAtmosphereLabTestAdapter(
           'GPU time is per render pass, not per effect: the sky-view table and the masked march are both full-screen passes and are summed in gpuFullscreenPasses.',
           'The masked pass runs only above the air or near an open map edge, so cost differs by view; each scenario states its view.',
           'Appearance (rim glow, seams at the map edge, popping while morphing) is not judged by these checks and needs human review.',
+          ...(settings.imageChecks ? [
+            'Image checks read the final frame only. They predict sky and ground from the analytic bent sphere (the one the sky pass assumes), '
+              + 'so they find where the mesh and that sphere disagree, not every visual flaw. Thresholds are tone-mapped sRGB luma.',
+          ] : []),
         ],
       };
     },
+    // After `measure` for a kept case, never in the window. A still of the final view; later repetitions look at the same thing.
+    thumbnail: async (_scenario, context) => (context.repetition > 1 ? undefined : [await host.captureThumbnail(context.signal)]),
     restore: async (snapshot, context) => {
       host.restore(snapshot);
       await waitForFrames(host, 2, context);

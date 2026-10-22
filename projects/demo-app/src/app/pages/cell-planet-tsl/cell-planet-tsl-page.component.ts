@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   DestroyRef,
   effect,
   inject,
@@ -15,21 +16,13 @@ import {
   Vector2,
   Vector3,
 } from 'three';
-import { float, If, mix, uniform } from 'three/tsl';
 import type { Material } from 'three/webgpu';
 import {
   EngineModule,
   EngineService,
   RaycastOrbitControlsComponent,
 } from 'triangular-engine';
-import {
-  AtmosphereBackdrop,
-  AtmosphereGpuModel,
-  AtmosphereSkyViewLut,
-  PlanetAtmosphereBinding,
-  createAtmospherePreset,
-  type PhysicalAtmosphereProfile,
-} from 'triangular-engine/atmosphere';
+import { PlanetAtmosphereComponent } from 'triangular-engine/atmosphere';
 import {
   cellLookupLayer,
   checkerDebugLayer,
@@ -126,6 +119,7 @@ const STATIC_BASIS = { forward: new Vector3(0, 0, 1), up: new Vector3(0, 1, 0), 
     EngineModule,
     RouterLink,
     RaycastOrbitControlsComponent,
+    PlanetAtmosphereComponent,
     CellPlanetMorphStreamingViewComponent,
   ],
   providers: EngineService.provide({
@@ -154,6 +148,19 @@ const STATIC_BASIS = { forward: new Vector3(0, 0, 1), up: new Vector3(0, 1, 0), 
         [intensity]="2.2"
         [castShadow]="false"
       />
+      @if (atmosphere) {
+        <!-- Plan 049: sky, limb, and the lighting and haze stages on the planet and the sea; shares the morph uniform. -->
+        <planetAtmosphere
+          preset="earth"
+          [radius]="radius"
+          [thickness]="thickness()"
+          [surfaces]="atmosphereSurfaces"
+          [morph]="atmosphereMorph"
+          [sunDirection]="sunDirection()"
+          [exposure]="exposure()"
+          [enabled]="atmosphereOn()"
+        />
+      }
 
       @if (!seamTest && viewOn()) {
         <cellPlanetMorphStreamingView
@@ -552,15 +559,15 @@ export class CellPlanetTslPageComponent {
   /** `?checker=1`: a reusable debug checker over geography, on top of every other layer. */
   private readonly checkerLayer = checkerDebugLayer({ space: 'latLon' });
   private readonly drawingBuffer = new Vector2();
-  /** 1 = atmosphere fully on; the page sets it to zero when the toggle is off or the globe has unrolled. */
-  private readonly atmosphereMix = uniform(1);
-  private atmosphereParts?: {
-    model: AtmosphereGpuModel;
-    skyView: AtmosphereSkyViewLut;
-    backdrop: AtmosphereBackdrop;
-    binding: PlanetAtmosphereBinding;
-  };
   private readonly ocean = planetOceanMaterial({ morph: this.surface.morph });
+  /** The planet and the sea get the atmosphere's lighting and haze; the seam-test mesh keeps the stock stages. */
+  readonly atmosphereSurfaces = [this.surface, this.ocean.material];
+  readonly atmosphereMorph = this.surface.morph.uMorph;
+  readonly sunDirection = computed<[number, number, number]>(() => {
+    const lon = (this.sunLongitude() * Math.PI) / 180;
+    const lat = (this.sunLatitude() * Math.PI) / 180;
+    return [Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon)];
+  });
   private oceanMesh?: Mesh;
   /** True once the cell-id atlas was requested, so a second toggle while it loads does not request it again. */
   private cellLookupLoaded = false;
@@ -715,7 +722,6 @@ export class CellPlanetTslPageComponent {
     }
     this.cellLookup.opacity.value = 0.72;
     this.addOceanAndFrame();
-    if (ATMOSPHERE) this.addAtmosphere();
     this.resumeSuite();
     // After the scrub's `tick$` write and before the orbit controls settle in `lateUpdate$`: the camera and the
     // material move to the same morph together, so the ground never slides under a frame's camera.
@@ -727,7 +733,6 @@ export class CellPlanetTslPageComponent {
       else this.morphCamera.reset();
     });
     this.engine.beforeRender$.subscribe(() => {
-      this.syncAtmosphere();
       if (!this.firstFrameMs && (this.engine.renderer as any)?.initialized) {
         this.firstFrameMs = performance.now() - pageStartMs;
       }
@@ -811,14 +816,6 @@ export class CellPlanetTslPageComponent {
     };
     this.destroyRef.onDestroy(() => {
       this.worker.terminate();
-      const parts = this.atmosphereParts;
-      if (parts) {
-        this.engine.scene.remove(parts.backdrop.mesh);
-        parts.backdrop.dispose();
-        parts.binding.dispose();
-        parts.skyView.dispose();
-        parts.model.dispose();
-      }
       this.streaming.dispose();
       this.cellLookup.dispose();
       this.surface.dispose();
@@ -890,60 +887,6 @@ export class CellPlanetTslPageComponent {
     this.engine.scene.add(this.mapBorderMesh);
   }
 
-  /**
-   * Plan 049 Phase 2b on the cell planet: the stock lighting and haze are replaced by the atmosphere's, and the
-   * sky and limb are drawn behind the globe. The stages model a sphere, so both fade out as the globe unrolls
-   * (`atmosphereMix` follows `1 - morph`); mid-morph haze is Phase 3. The planet is the scene's origin, so the
-   * scene stands in for its transform, and one world unit is a metre.
-   */
-  private addAtmosphere(): void {
-    const model = new AtmosphereGpuModel(this.atmosphereProfile());
-    const skyView = new AtmosphereSkyViewLut(model);
-    const backdrop = new AtmosphereBackdrop(model, { skyView });
-    backdrop.groundEnabled.value = 0;
-    backdrop.sunDiscStrength.value = 1;
-    const binding = new PlanetAtmosphereBinding(model, { radiusUnits: this.radius, aerialPerspective: true });
-    const lighting = binding.lighting();
-    const perspective = binding.perspective();
-    const amount = this.atmosphereMix;
-    const lightingStage = {
-      id: 'atmosphere',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      stage: (context: any, input: any) => {
-        // Uniform branch: with the atmosphere off (or the globe unrolled) the shader skips the sky lookups entirely.
-        const out = input.color.toVar();
-        If(amount.greaterThan(0), () => {
-          out.assign(mix(input.color, lighting(context, input), float(amount)));
-        });
-        return out;
-      },
-    };
-    const hazeStage = {
-      id: 'atmosphere',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      stage: (context: any, color: any) => {
-        const out = color.toVar();
-        If(amount.greaterThan(0), () => {
-          out.assign(mix(color, perspective(context, color), float(amount)));
-        });
-        return out;
-      },
-    };
-    this.surface.setLightingStage(lightingStage);
-    this.surface.setAtmosphereStage(hazeStage);
-    // The sea is a surface material too: same sky light and haze, so it does not read flatter than the terrain beside it.
-    this.ocean.material.setLightingStage(lightingStage);
-    this.ocean.material.setAtmosphereStage(hazeStage);
-    this.engine.scene.add(backdrop.mesh);
-    this.atmosphereParts = { model, skyView, backdrop, binding };
-  }
-
-  private atmosphereProfile(): PhysicalAtmosphereProfile {
-    const profile = createAtmospherePreset('earth', { radiusM: this.radius, thickness: this.thickness() });
-    if (profile.kind !== 'physical') throw new Error('Expected a physical atmosphere profile');
-    return profile;
-  }
-
   private sliderToThickness(v: number): number {
     return 0.002 * Math.pow(500, v);
   }
@@ -957,48 +900,10 @@ export class CellPlanetTslPageComponent {
 
   applyHeight(): void {
     this.thickness.set(this.sliderToThickness(this.heightSlider()));
-    this.rebakeAtmosphere();
   }
 
   resetHeight(): void {
     this.thickness.set(undefined);
-    this.rebakeAtmosphere();
-  }
-
-  private rebakeAtmosphere(): void {
-    const parts = this.atmosphereParts;
-    if (!parts) return;
-    parts.model.setProfile(this.atmosphereProfile());
-    parts.binding.refreshScale();
-  }
-
-  /** Runs after the orbit controls have settled, so the haze and the sky see the camera the frame is drawn with. */
-  private syncAtmosphere(): void {
-    const parts = this.atmosphereParts;
-    const renderer: any = this.engine.renderer;
-    const camera = this.engine.camera;
-    if (!parts || !renderer?.initialized || !camera) return;
-    const morph = this.morphProgress();
-    // The surfaces keep their atmosphere through the morph (the haze blends to a flat slab by `binding.morph`); only the
-    // sky behind the planet is a sphere's and fades out.
-    const amount = this.atmosphereOn() ? 1 : 0;
-    this.atmosphereMix.value = amount;
-    parts.binding.morph.value = morph;
-    const lon = (this.sunLongitude() * Math.PI) / 180;
-    const lat = (this.sunLatitude() * Math.PI) / 180;
-    parts.binding.setSunBody(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));
-    parts.binding.exposure.value = this.exposure();
-    parts.binding.sync(camera, this.engine.scene, parts.backdrop);
-    // The sky is a sphere's. Close to the ground it stays (the hazed horizon needs a sky behind it, whatever the morph);
-    // it dissolves as the planet unrolls only once the camera is well above the air, from one to four air heights.
-    const aboveAir = (parts.binding.skyAltitude.value as number) / (parts.model.uTopAltitude.value as number);
-    const high = Math.min(1, Math.max(0, (aboveAir - 1) / 3));
-    const unrolled = Math.min(1, Math.max(0, (morph - 0.2) / 0.6));
-    const fade = unrolled * unrolled * (3 - 2 * unrolled) * high * high * (3 - 2 * high);
-    parts.backdrop.opacity.value = 1 - fade;
-    parts.backdrop.mesh.visible = amount > 0 && fade < 1;
-    if (amount > 0) parts.binding.update(renderer);
-    if (parts.backdrop.mesh.visible) parts.backdrop.update(renderer, camera);
   }
 
   setAtmosphere(event: Event): void {

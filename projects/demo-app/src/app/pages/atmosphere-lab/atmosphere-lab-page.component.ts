@@ -18,6 +18,7 @@ import {
   type AtmosphereLabSnapshot,
   type AtmosphereLabTestHost,
 } from './atmosphere-lab-test-adapter';
+import { reduceFrame, type CheckFrames } from './atmosphere-lab-image-checks';
 import { ATMOSPHERE_LAB_TEST_HISTORY, type AtmosphereLabState, type AtmosphereLabTestSettings } from './atmosphere-lab-tests';
 import { BentPlanetLab } from './bent-planet-lab';
 
@@ -717,6 +718,8 @@ export class AtmosphereLabPageComponent {
       const subscription = this.engine.renderComplete$.subscribe((event) => callback(event.renderedAt));
       return () => subscription.unsubscribe();
     },
+    readCheckFrames: (signal) => this.readCheckFrames(signal),
+    captureThumbnail: (signal) => this.captureThumbnail(signal),
     gpuTimestampsSupported: () => typeof (this.engine.renderer as any)?.resolveTimestampsAsync === 'function',
     isSampling: () => this.engine.fpsController.frameSampler.isActive,
     startSampling: () => this.engine.fpsController.frameSampler.start(),
@@ -819,6 +822,60 @@ export class AtmosphereLabPageComponent {
     this.applySun();
     this.morph.set(state.morph);
     this.bentLab.setMorph(state.morph);
+  }
+
+  // ---- Image checks (atmosphere-lab-image-checks.ts) --------------------------------------------
+
+  private scratchCanvas?: HTMLCanvasElement;
+
+  /**
+   * Renders one frame now and copies the canvas out in the same task (a WebGPU canvas is only readable until the task
+   * ends, which is how `ScreenshotService` reads it too). Not part of any timing window: the caller closes it first.
+   */
+  private renderAndRead(): { data: Uint8ClampedArray; width: number; height: number } {
+    const canvas = this.engine.canvas;
+    this.engine.render(this.engine.fpsController.lastRenderTime, true);
+    const { width, height } = canvas;
+    if (!width || !height) throw new Error('The canvas has no size to read');
+    const scratch = (this.scratchCanvas ??= document.createElement('canvas'));
+    scratch.width = width;
+    scratch.height = height;
+    const context = scratch.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('No 2D context to read the canvas with');
+    context.drawImage(canvas, 0, 0);
+    return { data: context.getImageData(0, 0, width, height).data, width, height };
+  }
+
+  private async readCheckFrames(signal: AbortSignal): Promise<CheckFrames> {
+    const read = () => {
+      const { data, width, height } = this.renderAndRead();
+      return reduceFrame(data, width, height);
+    };
+    const normal = read();
+    if (signal.aborted) throw signal.reason;
+    this.bentLab.setCoverageProbe(true);
+    try {
+      // Build the probe's pipeline before the frame that is read, so that frame is not drawn without it.
+      await (this.engine.renderer as any)?.compileAsync?.(this.engine.scene, this.engine.camera);
+      if (signal.aborted) throw signal.reason;
+      const coverage = read();
+      return { normal, coverage, airTopM: this.model.uTopAltitude.value };
+    } finally {
+      this.bentLab.setCoverageProbe(false);
+    }
+  }
+
+  private async captureThumbnail(signal: AbortSignal): Promise<Blob> {
+    const canvas = this.engine.canvas;
+    this.engine.render(this.engine.fpsController.lastRenderTime, true);
+    const width = Math.min(240, canvas.width);
+    const small = document.createElement('canvas');
+    small.width = width;
+    small.height = Math.max(1, Math.round((canvas.height * width) / canvas.width));
+    small.getContext('2d')?.drawImage(canvas, 0, 0, small.width, small.height);
+    if (signal.aborted) throw signal.reason;
+    return new Promise<Blob>((resolve, reject) =>
+      small.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not encode the thumbnail'))), 'image/webp', 0.6));
   }
 
   /** Backend and device facts for the result; unknown values are labelled, not guessed. */
