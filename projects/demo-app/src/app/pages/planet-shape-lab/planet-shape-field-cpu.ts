@@ -1,7 +1,7 @@
 import type { Matrix3 } from 'three';
 import {
   BIOME_EDGE, BIOME_OFFSET, MASK_OFFSETS, MAX_TERRAIN_EDITS, MIN_EDGE_M, ROCK_LATTICE, ROCK_MEAN, OCTAVE_SCALE,
-  biomeParams, bottomAltitudeM, fieldFrameMatrices, padEdit, positiveModulo, topAltitudeM, unitM, type TerrainEdit,
+  WARP_AMPLITUDE, biomeParams, bottomAltitudeM, fieldFrameMatrices, padEdit, positiveModulo, topAltitudeM, unitM, type BiomeParams, type TerrainEdit,
 } from './planet-shape-field';
 import { NOISE_PERIOD, NOISE_SIZE, NOISE_SLICE_SHIFT, generateNoiseBytes } from './planet-shape-noise';
 
@@ -52,6 +52,12 @@ export interface TerrainFieldCpu {
   biome(p: readonly [number, number, number]): number;
   /** The single biome used everywhere (0..1), or `undefined` for the mask. */
   biomeOverride: number | undefined;
+  /** The grounded rock mode everywhere (0 wild .. 1 grounded), or `undefined` for each biome's own. */
+  groundedOverride: number | undefined;
+  /** Grounded share 0..1 at the body-relative point (the override, or the biome blend of `grounded`). */
+  grounded(p: readonly [number, number, number]): number;
+  /** The grounded warp displacement (metres, tangential) at the body-relative point. */
+  warp(p: readonly [number, number, number]): [number, number, number];
   /** Canyon mask 0..1 at the body-relative point. */
   canyon(p: readonly [number, number, number]): number;
   /** Rock noise sum 0..0.875 under the biome there; `footprint` (metres, default 0) fades octaves finer than a pixel to their mean. */
@@ -88,9 +94,11 @@ export function applyEditCpu(edit: TerrainEdit, value: number, p: readonly [numb
 export function createTerrainFieldCpu(
   radiusM: number, bytes: Uint8Array = generateNoiseBytes(), initialEdits: readonly TerrainEdit[] = [padEdit(radiusM)],
   biomeOverride?: number,
+  groundedOverride?: number,
 ): TerrainFieldCpu {
   let edits = initialEdits;
   let override = biomeOverride;
+  let rockOverride = groundedOverride;
   const unit = unitM(radiusM);
   const frames = fieldFrameMatrices(unit);
   const noise = (m: Matrix3, offset: readonly [number, number, number], x: number, y: number, z: number): number => {
@@ -113,28 +121,58 @@ export function createTerrainFieldCpu(
   const biome = (p: readonly [number, number, number]): number =>
     override ?? smoothstep(BIOME_EDGE[0], BIOME_EDGE[1], noise(frames.biome, BIOME_OFFSET, p[0], p[1], p[2]));
 
-  const rock = (p: readonly [number, number, number], footprint = 0, params = biomeParams(biome(p))): number => {
+  const rock = (p: readonly [number, number, number], footprint = 0, params = biomeParams(biome(p)), flat = false): number => {
     const length = Math.hypot(p[0], p[1], p[2]);
     const altitude = length - radiusM;
-    const k = (altitude * (params.stretch - 1)) / length;
+    const stretch = flat ? 1 : params.stretch;
+    const k = (altitude * (stretch - 1)) / length;
     const sx = p[0] + p[0] * k;
     const sy = p[1] + p[1] * k;
     const sz = p[2] + p[2] * k;
     let sum = 0;
     frames.rock.forEach((m, i) => {
-      const lattice = unit * (ROCK_LATTICE / OCTAVE_SCALE ** i) / params.stretch;
+      const lattice = unit * (ROCK_LATTICE / OCTAVE_SCALE ** i) / stretch;
       const detail = (1 - smoothstep(lattice * 0.25, lattice, footprint)) * params.octaveContrast[i];
       sum += (0.5 + (noise(m, zero, sx, sy, sz) - 0.5) * detail) * 0.5 ** (i + 1);
     });
     return sum;
   };
 
-  const density = (p: readonly [number, number, number], footprint = 0): number => {
+  const grounded = (p: readonly [number, number, number]): number => rockOverride ?? biomeParams(biome(p)).grounded;
+
+  const warp = (p: readonly [number, number, number]): [number, number, number] => {
+    const n0 = noise(frames.mask[0], MASK_OFFSETS[0], p[0], p[1], p[2]);
+    const n1 = noise(frames.mask[1], MASK_OFFSETS[1], p[0], p[1], p[2]);
+    const mx = (n0 - 0.5) * 2 * WARP_AMPLITUDE[0] * unit;
+    const my = (n1 - 0.5) * 2 * WARP_AMPLITUDE[1] * unit;
     const length = Math.hypot(p[0], p[1], p[2]);
-    const altitude = length - radiusM;
+    const along = (mx * p[0] + my * p[1]) / length;
+    return [mx - (p[0] / length) * along, my - (p[1] / length) * along, -(p[2] / length) * along];
+  };
+
+  const wildDensity = (p: readonly [number, number, number], footprint: number, params: BiomeParams): number => {
+    const altitude = Math.hypot(p[0], p[1], p[2]) - radiusM;
+    return altitude + (canyon(p) * params.canyonDepth + (rock(p, footprint, params) - ROCK_MEAN) * params.rockAmplitude) * unit;
+  };
+
+  /** A height surface read at the warped point: relief depends on the direction of `q = p + w(p)` only. */
+  const groundedDensity = (p: readonly [number, number, number], footprint: number, params: BiomeParams): number => {
+    const w = warp(p);
+    const q: [number, number, number] = [p[0] + w[0], p[1] + w[1], p[2] + w[2]];
+    const length = Math.hypot(q[0], q[1], q[2]);
+    const surface: [number, number, number] = [(q[0] / length) * radiusM, (q[1] / length) * radiusM, (q[2] / length) * radiusM];
+    const relief = (params.canyonDepth > 0 ? canyon(surface) * params.canyonDepth : 0)
+      + (rock(surface, footprint, params, true) - ROCK_MEAN) * params.rockAmplitude;
+    return length - radiusM + relief * unit;
+  };
+
+  const density = (p: readonly [number, number, number], footprint = 0): number => {
+    const altitude = Math.hypot(p[0], p[1], p[2]) - radiusM;
     const params = biomeParams(biome(p));
-    const relief = (canyon(p) * params.canyonDepth + (rock(p, footprint, params) - ROCK_MEAN) * params.rockAmplitude) * unit;
-    let value = altitude + relief;
+    const share = rockOverride ?? params.grounded;
+    const wild = share < 1 ? wildDensity(p, footprint, params) : 0;
+    const ground = share > 0 ? groundedDensity(p, footprint, params) : 0;
+    let value = wild * (1 - share) + ground * share;
     for (const edit of edits) value = applyEditCpu(edit, value, p, altitude);
     return value;
   };
@@ -148,6 +186,10 @@ export function createTerrainFieldCpu(
     get edits() { return edits; },
     get biomeOverride() { return override; },
     set biomeOverride(value) { override = value; },
+    get groundedOverride() { return rockOverride; },
+    set groundedOverride(value) { rockOverride = value; },
+    grounded,
+    warp,
     biome,
     setEdits(next) {
       if (next.length > MAX_TERRAIN_EDITS) throw new Error(`At most ${MAX_TERRAIN_EDITS} terrain edits`);

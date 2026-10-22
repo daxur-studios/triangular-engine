@@ -25,6 +25,7 @@
     "test:triangular-engine:atmosphere": "ng run triangular-engine:test-atmosphere --watch=false --browsers=ChromeHeadless",
     "test:gpu": "ng test triangular-engine --watch=false --karma-config=karma.gpu.conf.cjs --browsers=ChromeHeadlessGpu",
     "test:triangular-engine:cloud-volumes": "ng run triangular-engine:test-cloud-volumes --watch=false --browsers=ChromeHeadless",
+    "test:triangular-engine:gpu-data-flow": "ng run triangular-engine:test-gpu-data-flow --watch=false --browsers=ChromeHeadless",
     "test:triangular-engine:worldgen": "ng run triangular-engine:test-worldgen --watch=false --browsers=ChromeHeadless",
     "test:scene": "playwright test -c playwright.config.ts",
     "test:cloud-feasibility": "node tools/scene-tests/run-cloud-feasibility.mjs",

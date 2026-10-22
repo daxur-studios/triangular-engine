@@ -4,8 +4,8 @@ import { float, uniform, vec4 } from 'three/tsl';
 import { evaluateOnGpu } from '../../../../../triangular-engine/planet-material/gpu-eval.testing';
 import {
   BIOME_OFFSET, CANYON_BIOME, HILLS_BIOME, MASK_OFFSETS, ROCK_MEAN, ROCK_OCTAVES, biomeAt, bottomAltitudeM, canyonAt, densityAt, editBoundM, fieldFrameMatrices, noiseOrigin, padEdit, rayEditMask,
-  rockAt, sampleFrame,
-  terrainEditUniforms, topAltitudeM, unitM, type FieldNodes, type NoiseFrameNodes, type TerrainEdit,
+  NOISE_GRADIENT_MAX, rockAt, sampleFrame,
+  terrainEditUniforms, topAltitudeM, unitM, warpLipschitzBound, type FieldNodes, type NoiseFrameNodes, type TerrainEdit,
 } from './planet-shape-field';
 import { createTerrainFieldCpu, valueNoiseCpu } from './planet-shape-field-cpu';
 import { NOISE_PERIOD, createNoiseTexture, generateNoiseBytes } from './planet-shape-noise';
@@ -190,7 +190,7 @@ describe('planet shape terrain field: CPU twin', () => {
 });
 
 /** GPU density at camera-relative points `xs` for one camera, with `edits` packed for that camera. */
-async function gpuDensity(radiusM: number, camera: V3, xs: V3[], edits: readonly TerrainEdit[]): Promise<number[]> {
+async function gpuDensity(radiusM: number, camera: V3, xs: V3[], edits: readonly TerrainEdit[], rockOverride = -1): Promise<number[]> {
   const unit = unitM(radiusM);
   const frames = fieldFrameMatrices(unit);
   const matrices = [...frames.mask, ...frames.rock, frames.biome];
@@ -207,7 +207,7 @@ async function gpuDensity(radiusM: number, camera: V3, xs: V3[], edits: readonly
     const field: FieldNodes = {
       noiseTexture: texture, camera: uniform(new Vector3(...camera)), unit: float(unit),
       maskFrames: frameNodes.slice(0, 2), rockFrames: frameNodes.slice(2, 2 + ROCK_OCTAVES), edits: editUniforms,
-      biome: { frame: frameNodes[2 + ROCK_OCTAVES], override: float(-1) },
+      biome: { frame: frameNodes[2 + ROCK_OCTAVES], override: float(-1) }, rockOverride: float(rockOverride),
     };
     return vec4(densityAt(field, at(0).xyz, at(0).w, float(0), true), 0, 0, 0);
   });
@@ -395,11 +395,213 @@ describe('planet shape terrain field: biomes', () => {
   });
 
   it('has no canyons in the hills biome', () => {
-    const field = createTerrainFieldCpu(radiusM, undefined, [], 1);
+    const field = createTerrainFieldCpu(radiusM, undefined, [], 1, 0);
     const unit = field.unit;
     for (const d of [[0.3, 0.2, 0.93], [-0.5, 0.7, 0.51], [0.9, 0.1, 0.42]] as V3[]) {
       const p = above(radiusM, d, unit * 0.3);
       expect(field.density(p)).toBeCloseTo(unit * 0.3 + (field.rock(p) - ROCK_MEAN) * HILLS_BIOME.rockAmplitude * unit, 6);
     }
   });
+});
+
+/** Deterministic pseudo-random numbers in [0, 1). */
+function lcg(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+}
+
+describe('planet shape terrain field: grounded rock', () => {
+  it('matches the CPU twin on the GPU when grounded or half grounded, three body sizes', async () => {
+    for (const radiusM of BODY_RADII_M) {
+      const unit = unitM(radiusM);
+      const bytes = generateNoiseBytes();
+      const points = samplePoints(radiusM);
+      for (const share of [1, 0.5]) {
+        const cpu = createTerrainFieldCpu(radiusM, bytes, [], undefined, share);
+        let worst = 0;
+        // Samples come four to a camera, in order.
+        for (let first = 0; first < points.length; first += 4) {
+          const group = points.slice(first, first + 4);
+          const gpu = await gpuDensity(radiusM, group[0].camera, group.map((p) => p.x), [], share);
+          group.forEach((p, i) => {
+            const body: V3 = [p.camera[0] + p.x[0], p.camera[1] + p.x[1], p.camera[2] + p.x[2]];
+            worst = Math.max(worst, Math.abs(gpu[i] - cpu.density(body)));
+          });
+        }
+        console.log(`grounded parity ${radiusM} m, share ${share}: worst |gpu-cpu| density ${worst.toExponential(2)} m (unit ${unit} m)`);
+        expect(worst).toBeLessThan(unit * DENSITY_TOLERANCE_UNITS);
+      }
+    }
+  }, 120_000);
+
+  it('keeps each biome its own mode unless overridden: canyons wild, hills grounded', () => {
+    const field = createTerrainFieldCpu(600_000);
+    expect(CANYON_BIOME.grounded).toBe(0);
+    expect(HILLS_BIOME.grounded).toBe(1);
+    field.biomeOverride = 0;
+    expect(field.grounded([600_000, 0, 0])).toBe(0);
+    field.biomeOverride = 1;
+    expect(field.grounded([600_000, 0, 0])).toBe(1);
+    field.groundedOverride = 0;
+    expect(field.grounded([600_000, 0, 0])).toBe(0);
+  });
+
+  it('has a noise gradient below the constant the warp bound uses', () => {
+    const bytes = generateNoiseBytes();
+    const next = lcg(7);
+    const h = 1e-4;
+    let worst = 0;
+    for (let k = 0; k < 20_000; k++) {
+      const x = next() * 200;
+      const y = next() * 200;
+      const z = next() * 200;
+      const gx = (valueNoiseCpu(bytes, x + h, y, z) - valueNoiseCpu(bytes, x - h, y, z)) / (2 * h);
+      const gy = (valueNoiseCpu(bytes, x, y + h, z) - valueNoiseCpu(bytes, x, y - h, z)) / (2 * h);
+      const gz = (valueNoiseCpu(bytes, x, y, z + h) - valueNoiseCpu(bytes, x, y, z - h)) / (2 * h);
+      worst = Math.max(worst, Math.hypot(gx, gy, gz));
+    }
+    console.log(`value noise: largest |grad| ${worst.toFixed(3)} per lattice cell (bound ${NOISE_GRADIENT_MAX})`);
+    expect(worst).toBeLessThan(NOISE_GRADIENT_MAX);
+  });
+
+  for (const radiusM of [20_000, 600_000, 6_371_000]) {
+    it(`warps with a gradient below 1 on a ${radiusM / 1000} km body (finite differences)`, () => {
+      const field = createTerrainFieldCpu(radiusM);
+      const unit = field.unit;
+      const h = unit * 1e-3;
+      const next = lcg(radiusM);
+      const jacobian = (p: V3): number[][] => {
+        const columns = [0, 1, 2].map((axis) => {
+          const hi: V3 = [...p];
+          const lo: V3 = [...p];
+          hi[axis] += h;
+          lo[axis] -= h;
+          const a = field.warp(hi);
+          const b = field.warp(lo);
+          return [(a[0] - b[0]) / (2 * h), (a[1] - b[1]) / (2 * h), (a[2] - b[2]) / (2 * h)];
+        });
+        return [0, 1, 2].map((row) => [columns[0][row], columns[1][row], columns[2][row]]);
+      };
+      /** Spectral norm by power iteration on J^T J. */
+      const norm = (j: number[][]): number => {
+        let v = [0.577, 0.577, 0.577];
+        let value = 0;
+        for (let i = 0; i < 40; i++) {
+          const jv = j.map((row) => row[0] * v[0] + row[1] * v[1] + row[2] * v[2]);
+          const w = [0, 1, 2].map((c) => j[0][c] * jv[0] + j[1][c] * jv[1] + j[2][c] * jv[2]);
+          const length = Math.hypot(...w);
+          if (length === 0) return 0;
+          value = Math.sqrt(length);
+          v = w.map((x) => x / length);
+        }
+        return value;
+      };
+      let worst = 0;
+      let largestWarp = 0;
+      for (let k = 0; k < 1500; k++) {
+        const d: V3 = [next() - 0.5, next() - 0.5, next() - 0.5];
+        const p = above(radiusM, d, unit * (next() * 10 - 8));
+        const q: V3 = [p[0] + (next() - 0.5) * unit * 40, p[1] + (next() - 0.5) * unit * 40, p[2] + (next() - 0.5) * unit * 40];
+        worst = Math.max(worst, norm(jacobian(q)));
+        largestWarp = Math.max(largestWarp, Math.hypot(...field.warp(q)) / unit);
+      }
+      console.log(`warp ${radiusM} m: largest ||Dw|| ${worst.toFixed(3)} (proven bound ${warpLipschitzBound().toFixed(3)}), largest |w| ${largestWarp.toFixed(2)} units`);
+      expect(warpLipschitzBound()).toBeLessThan(0.7);
+      expect(worst).toBeLessThan(warpLipschitzBound());
+      expect(worst).toBeGreaterThan(0.05);
+    });
+  }
+
+  /**
+   * Solid voxels of a block (n x n x nz, 6 units wide, the whole band tall) not reachable from its bottom layer. Yields to
+   * the browser every few layers: a block is a few seconds of CPU field, longer than Karma's ping timeout.
+   */
+  async function unreachedSolid(
+    field: ReturnType<typeof createTerrainFieldCpu>, d: V3, nx: number, nz: number,
+  ): Promise<{ solid: number; unreached: number; bottomSolid: boolean }> {
+    const unit = field.unit;
+    const radiusM = field.radiusM;
+    const width = 6 * unit;
+    const bottom = bottomAltitudeM(radiusM) - unit * 0.5;
+    const top = topAltitudeM(radiusM) + unit * 0.5;
+    const centre = above(radiusM, d, 0);
+    const n = Math.hypot(...centre);
+    const up: V3 = [centre[0] / n, centre[1] / n, centre[2] / n];
+    const east0: V3 = [up[2], 0, -up[0]];
+    const el = Math.hypot(...east0);
+    const east: V3 = [east0[0] / el, east0[1] / el, east0[2] / el];
+    const north: V3 = [up[1] * east[2] - up[2] * east[1], up[2] * east[0] - up[0] * east[2], up[0] * east[1] - up[1] * east[0]];
+    const solid = new Uint8Array(nx * nx * nz);
+    let count = 0;
+    for (let k = 0; k < nz; k++) {
+      if (k % 4 === 0) await new Promise((resolve) => setTimeout(resolve));
+      const z = bottom + ((top - bottom) * k) / (nz - 1);
+      for (let j = 0; j < nx; j++) {
+        const y = (j / (nx - 1) - 0.5) * width;
+        for (let i = 0; i < nx; i++) {
+          const x = (i / (nx - 1) - 0.5) * width;
+          const p: V3 = [
+            centre[0] + east[0] * x + north[0] * y + up[0] * z,
+            centre[1] + east[1] * x + north[1] * y + up[1] * z,
+            centre[2] + east[2] * x + north[2] * y + up[2] * z,
+          ];
+          if (field.isSolid(p)) {
+            solid[(k * nx + j) * nx + i] = 1;
+            count++;
+          }
+        }
+      }
+    }
+    const reached = new Uint8Array(solid.length);
+    const stack: number[] = [];
+    let bottomSolid = true;
+    for (let c = 0; c < nx * nx; c++) {
+      if (solid[c]) {
+        reached[c] = 1;
+        stack.push(c);
+      } else bottomSolid = false;
+    }
+    while (stack.length) {
+      const c = stack.pop()!;
+      const i = c % nx;
+      const j = Math.floor(c / nx) % nx;
+      const k = Math.floor(c / (nx * nx));
+      const visit = (ni: number, nj: number, nk: number): void => {
+        if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= nx || nk >= nz) return;
+        const id = (nk * nx + nj) * nx + ni;
+        if (solid[id] && !reached[id]) {
+          reached[id] = 1;
+          stack.push(id);
+        }
+      };
+      visit(i - 1, j, k); visit(i + 1, j, k); visit(i, j - 1, k); visit(i, j + 1, k); visit(i, j, k - 1); visit(i, j, k + 1);
+    }
+    let reachedCount = 0;
+    for (const r of reached) reachedCount += r;
+    return { solid: count, unreached: count - reachedCount, bottomSolid };
+  }
+
+  it('has no floating rock when grounded, and wild rock does float (the check has teeth)', async () => {
+    const radiusM = 600_000;
+    const bytes = generateNoiseBytes();
+    const next = lcg(2026);
+    const spots: V3[] = Array.from({ length: 12 }, () => [next() - 0.5, next() - 0.5, next() - 0.2]);
+    let wildUnreached = 0;
+    for (const biome of [0, 1]) {
+      for (const d of spots) {
+        const grounded = await unreachedSolid(createTerrainFieldCpu(radiusM, bytes, [], biome, 1), d, 48, 96);
+        const wild = await unreachedSolid(createTerrainFieldCpu(radiusM, bytes, [], biome, 0), d, 48, 96);
+        console.log(`floaters, biome ${biome}, ${d.map((x) => x.toFixed(2))}: grounded ${grounded.unreached} of ${grounded.solid} solid voxels unreached, wild ${wild.unreached} of ${wild.solid}`);
+        expect(grounded.bottomSolid).toBeTrue();
+        expect(wild.bottomSolid).toBeTrue();
+        expect(grounded.solid).toBeGreaterThan(48 * 48 * 8);
+        expect(grounded.unreached).toBe(0);
+        wildUnreached += wild.unreached;
+      }
+    }
+    expect(wildUnreached).toBeGreaterThan(0);
+  }, 600_000);
 });

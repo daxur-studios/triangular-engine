@@ -63,6 +63,8 @@ export interface RaymarchTerrain {
   setShadows?(on: boolean): void;
   /** A single biome everywhere (0 canyons .. 1 rolling hills), or `undefined` for the blend mask; for terrains with biomes. */
   setBiome?(biome: number | undefined): void;
+  /** Rock mode everywhere (0 wild floating-capable 3D rock, 1 grounded height surface), or `undefined` for each biome's own. */
+  setRock?(grounded: number | undefined): void;
   /** Terrain edits in order, for terrains that take them; `undefined` restores the default (the pad under the poses). */
   setEdits?(edits: readonly TerrainEdit[] | undefined): void;
   /** Low-resolution pre-pass, for terrains that have one: the page draws the shell with `material` into `target` first. */

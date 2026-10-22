@@ -78,6 +78,8 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
   const biomeFrame = noiseFrame(new Vector3(...BIOME_OFFSET));
   /** A single biome everywhere (0 canyons .. 1 hills), or -1 for the mask. */
   const uBiomeOverride = uniform(-1) as any;
+  /** Rock mode everywhere (0 wild, 1 grounded), or -1 for each biome's own. */
+  const uRockOverride = uniform(-1) as any;
   const detailFrames = Array.from({ length: DETAIL_LEVELS }, (_, i) => noiseFrame(new Vector3(i * 31.7, i * 7.3, i * 19.1)));
   const uDetailScales = Array.from({ length: DETAIL_LEVELS }, () => uniform(1) as any);
   const editUniforms = terrainEditUniforms();
@@ -87,7 +89,8 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
   let edits: readonly TerrainEdit[] | undefined;
 
   const field: FieldNodes = {
-    noiseTexture, camera: uCamera, unit: uUnit, rockFrames, maskFrames, biome: { frame: biomeFrame, override: uBiomeOverride }, edits: editUniforms,
+    noiseTexture, camera: uCamera, unit: uUnit, rockFrames, maskFrames, biome: { frame: biomeFrame, override: uBiomeOverride }, rockOverride: uRockOverride,
+    edits: editUniforms,
   };
   const density = (x: any, altitude: any, footprint: any, smooth: boolean, editMask?: any): any =>
     densityAt(field, x, altitude, footprint, smooth, editMask);
@@ -375,6 +378,7 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
     setSteps(steps) { uSteps.value = Math.max(1, Math.round(steps)); },
     setShadows(on) { uShadowSteps.value = on ? SHADOW_STEPS : 0; },
     setBiome(biome) { uBiomeOverride.value = biome ?? -1; },
+    setRock(grounded) { uRockOverride.value = grounded ?? -1; },
     setEdits(next) {
       edits = next;
       updateCamera();

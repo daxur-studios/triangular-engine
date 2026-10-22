@@ -2,7 +2,7 @@
 import { Matrix3, Vector3, Vector4, type DataTexture } from 'three';
 import {
   Continue, Fn, If, Loop, abs, bitAnd, bitOr, clamp, dot, float, floor, fract, int, max, mix, normalize, select, shiftLeft, smoothstep, texture,
-  uniform, uniformArray, vec2,
+  uniform, uniformArray, vec2, vec3,
 } from 'three/tsl';
 import { NOISE_PERIOD, NOISE_SLICE_SHIFT } from './planet-shape-noise';
 
@@ -52,14 +52,21 @@ export interface BiomeParams {
   readonly stretch: number;
   /** Per rock octave, how much of its contrast is kept (0..1); the octave's mean stays put, so the band does not move. */
   readonly octaveContrast: readonly [number, number, number];
+  /**
+   * 0..1, how much of the rock is grounded: 0 is the wild 3D density (floating rock possible), 1 the warped height
+   * surface (`groundedDensity`, one connected sheet). Blended as densities.
+   */
+  readonly grounded: number;
 }
 
 /**
  * Biome 0: canyons, mesas and strata. Biome 1: rolling hills, no canyons, round and smoother. Every biome must stay
  * inside the canyon biome's band (`canyonDepth` and `rockAmplitude` no larger), since the march's spheres come from it.
+ * Canyons stay wild (the owner likes the floating rock there; strata and ledges come from the vertical stretch, which a
+ * height surface cannot have); hills are grounded, since rounded hills with floating blobs read as a bug, not a place.
  */
-export const CANYON_BIOME: BiomeParams = { canyonDepth: CANYON_DEPTH, rockAmplitude: ROCK_AMPLITUDE, stretch: STRETCH, octaveContrast: [1, 1, 1] };
-export const HILLS_BIOME: BiomeParams = { canyonDepth: 0, rockAmplitude: 3, stretch: 1, octaveContrast: [1, 0.5, 0.2] };
+export const CANYON_BIOME: BiomeParams = { canyonDepth: CANYON_DEPTH, rockAmplitude: ROCK_AMPLITUDE, stretch: STRETCH, octaveContrast: [1, 1, 1], grounded: 0 };
+export const HILLS_BIOME: BiomeParams = { canyonDepth: 0, rockAmplitude: 3, stretch: 1, octaveContrast: [1, 0.5, 0.2], grounded: 1 };
 /**
  * Lattice of the biome mask, in units, its frame offset, and the mask values over which one biome turns into the other.
  * The offset was picked so that at 600 km the poses stand in hills and canyons begin some 10 km east, where the low and
@@ -69,6 +76,34 @@ export const BIOME_LATTICE = 40;
 export const BIOME_OFFSET: readonly [number, number, number] = [196.92, 16.4, 162.44];
 export const BIOME_EDGE: readonly [number, number] = [0.42, 0.58];
 
+/**
+ * The grounded rock's warp: the sample point is moved by `w(p)` before the height surface is read, so cliffs lean and
+ * overhang, and `p -> p + w(p)` is a bijection as long as `w` is a contraction (largest gradient below 1). The solid set
+ * is then the image of a height-surface solid under a bijection: connected, no floaters, no stray holes.
+ *
+ * `w` is built from the two canyon-mask noises (free: the canyon term reads the same samples), each moving the point along
+ * one fixed axis, then projected onto the tangent plane (|projection| <= 1, so it can only lower the bound).
+ * Bound. A value noise cell is a trilinear blend with smoothstep weights, so each partial derivative is a convex
+ * combination of lattice differences (|diff| <= 1) times smoothstep' <= 1.5, per lattice cell: |grad n| <= 1.5 * sqrt(3)
+ * = 2.6 (`NOISE_GRADIENT_MAX`). Noise i has lattice `L_i` units and moves the point by `2 A_i (n_i - 0.5)` along an
+ * orthonormal axis `a_i`, so `Dw = P sum_i 2 A_i a_i grad(n_i)^T`, and ||Dw|| <= 2 G sqrt(sum_i (A_i / L_i)^2). With
+ * `A_i = WARP_FACTOR * L_i` that is `2 G sqrt(2) WARP_FACTOR` = 0.59 for 0.08. The projection onto the tangent plane at
+ * `p` changes with `p` on the scale of the body radius; a unit is at most 0.3 % of it, adding `2 |m| / R` <= 0.017
+ * (`warpLipschitzBound`). Total below 0.61: margin 0.39 to 1, for the bound's looseness is no excuse to cut it close.
+ */
+export const WARP_FACTOR = 0.08;
+export const NOISE_GRADIENT_MAX = 2.6;
+/** Largest relief unit relative to the body radius (`reliefM` is at most 3 % of it, a unit a tenth of that). */
+export const UNIT_RADIUS_RATIO = 0.003;
+/** Warp amplitude (units) of the two mask noises: the point moves by up to +-A along its axis. */
+export const WARP_AMPLITUDE: readonly [number, number] = [WARP_FACTOR * MASK_LATTICE, (WARP_FACTOR * MASK_LATTICE) / OCTAVE_SCALE];
+
+/** The proven upper bound of the warp's gradient (operator norm), see above. */
+export function warpLipschitzBound(): number {
+  const noise = 2 * NOISE_GRADIENT_MAX * Math.hypot(WARP_AMPLITUDE[0] / MASK_LATTICE, WARP_AMPLITUDE[1] / (MASK_LATTICE / OCTAVE_SCALE));
+  return noise + (2 * Math.hypot(...WARP_AMPLITUDE) * UNIT_RADIUS_RATIO);
+}
+
 /** The parameters at biome blend `m` (0 canyons .. 1 hills). */
 export function biomeParams(m: number): BiomeParams {
   const lerp = (a: number, b: number): number => a + (b - a) * m;
@@ -77,6 +112,7 @@ export function biomeParams(m: number): BiomeParams {
     rockAmplitude: lerp(CANYON_BIOME.rockAmplitude, HILLS_BIOME.rockAmplitude),
     stretch: lerp(CANYON_BIOME.stretch, HILLS_BIOME.stretch),
     octaveContrast: [0, 1, 2].map((i) => lerp(CANYON_BIOME.octaveContrast[i], HILLS_BIOME.octaveContrast[i])) as [number, number, number],
+    grounded: lerp(CANYON_BIOME.grounded, HILLS_BIOME.grounded),
   };
 }
 
@@ -319,9 +355,10 @@ const blendParam = (pick: (params: BiomeParams) => number, biome: any): any => m
  */
 export function rockAt(
   noiseTexture: DataTexture, rockFrames: readonly NoiseFrameNodes[], unit: any,
-  x: any, up: any, altitude: any, footprint: any, smooth: boolean, biome: any = float(0),
+  x: any, up: any, altitude: any, footprint: any, smooth: boolean, biome: any = float(0), flat = false,
 ): any {
-  const stretch = blendParam((b) => b.stretch, biome).toVar();
+  // `flat`: no vertical stretch, for the grounded height surface (sampled on the sphere, where altitude is 0 anyway).
+  const stretch = (flat ? float(1) : blendParam((b) => b.stretch, biome)).toVar();
   const stretched = x.add(up.mul(altitude.mul(stretch.sub(1)))).toVar();
   let sum: any = float(0);
   rockFrames.forEach((frame, i) => {
@@ -350,6 +387,8 @@ export interface FieldNodes {
   readonly maskFrames: readonly NoiseFrameNodes[];
   /** The biome mask; canyons everywhere if left out. */
   readonly biome?: BiomeNodes;
+  /** Rock mode override (node): 0 or above replaces the biomes' `grounded` everywhere (0 wild, 1 grounded); below 0 keeps them. */
+  readonly rockOverride?: any;
   /** The edit list; none if left out. */
   readonly edits?: TerrainEditNodes;
 }
@@ -361,16 +400,63 @@ export function fieldBiomeAt(field: FieldNodes, x: any, smooth: boolean): any {
   return select(override.greaterThanEqual(0), override, biomeAt(field.noiseTexture, field.biome.frame, x, smooth));
 }
 
+/** The grounded warp at the camera-relative point `x` (node, vec3, metres): tangential, see `WARP_FACTOR`. */
+function warpAt(field: FieldNodes, x: any, up: any, smooth: boolean): any {
+  const n0 = sampleFrame(field.noiseTexture, field.maskFrames[0], x, smooth);
+  const n1 = sampleFrame(field.noiseTexture, field.maskFrames[1], x, smooth);
+  const m = vec3(n0.sub(0.5).mul(2 * WARP_AMPLITUDE[0]), n1.sub(0.5).mul(2 * WARP_AMPLITUDE[1]), 0).mul(field.unit);
+  return m.sub(up.mul(dot(m, up)));
+}
+
+/**
+ * The grounded density: a height surface read at the warped point `q = x + w(x)`. Relief is the same expression as the
+ * wild field's (canyon term plus rock octaves) but sampled on the sphere under `q`, so it depends on the direction of `q`
+ * only. `w` is tangential at `x`, so `|x + w|` is exact without cancellation: altitude(q) = altitude(x) + |w|^2 / (|x| + |q|).
+ */
+function groundedDensity(field: FieldNodes, x: any, up: any, altitude: any, footprint: any, smooth: boolean, biome: any): any {
+  const w = warpAt(field, x, up, smooth).toVar();
+  const q = x.add(w).toVar();
+  const pb = field.camera.add(q).toVar();
+  const altitudeQ = altitude.add(dot(w, w).div(field.camera.add(x).length().add(pb.length()))).toVar();
+  const upQ = (normalize(pb) as any).toVar();
+  const surface = q.sub(upQ.mul(altitudeQ)).toVar();
+  const rock = rockAt(field.noiseTexture, field.rockFrames, field.unit, surface, upQ, float(0), footprint, smooth, biome, true);
+  const depth = blendParam((b) => b.canyonDepth, biome).toVar();
+  const canyon = float(0).toVar();
+  If(depth.greaterThan(0), () => { canyon.assign(canyonAt(field.noiseTexture, field.maskFrames, surface, smooth).mul(depth)); });
+  return altitudeQ.add(canyon.add(rock.sub(ROCK_MEAN).mul(blendParam((b) => b.rockAmplitude, biome))).mul(field.unit));
+}
+
+/** The wild density: altitude plus 3D noise relief. */
+function wildDensity(field: FieldNodes, x: any, up: any, altitude: any, footprint: any, smooth: boolean, biome: any): any {
+  const rock = rockAt(field.noiseTexture, field.rockFrames, field.unit, x, up, altitude, footprint, smooth, biome);
+  const relief = canyonAt(field.noiseTexture, field.maskFrames, x, smooth).mul(blendParam((b) => b.canyonDepth, biome))
+    .add(rock.sub(ROCK_MEAN).mul(blendParam((b) => b.rockAmplitude, biome))).mul(field.unit);
+  return altitude.add(relief);
+}
+
+/** Grounded share 0..1 at a point with biome blend `biome`. */
+export function fieldGroundedAt(field: FieldNodes, biome: any): any {
+  const perBiome = blendParam((b) => b.grounded, biome);
+  return field.rockOverride ? select(field.rockOverride.greaterThanEqual(0), field.rockOverride, perBiome) : perBiome;
+}
+
 /**
  * Signed field in metres (negative inside rock), not yet scaled for stepping. `x` is camera-relative. `editMask` (an int
- * node, from `rayEditMask`) limits the edits applied; the default is all of them.
+ * node, from `rayEditMask`) limits the edits applied; the default is all of them. Only the rock modes in use are
+ * evaluated: wild where the grounded share is 0, grounded where it is 1, both (blended) between.
  */
 export function densityAt(field: FieldNodes, x: any, altitude: any, footprint: any, smooth: boolean, editMask: any = int(ALL_EDITS)): any {
   const up = (normalize(field.camera.add(x)) as any).toVar();
   const biome = fieldBiomeAt(field, x, smooth).toVar();
-  const rock = rockAt(field.noiseTexture, field.rockFrames, field.unit, x, up, altitude, footprint, smooth, biome);
-  const relief = canyonAt(field.noiseTexture, field.maskFrames, x, smooth).mul(blendParam((b) => b.canyonDepth, biome))
-    .add(rock.sub(ROCK_MEAN).mul(blendParam((b) => b.rockAmplitude, biome))).mul(field.unit);
-  const value = altitude.add(relief);
+  const grounded = fieldGroundedAt(field, biome).toVar();
+  const surface = Fn(([px, pUp, pAltitude, pFootprint, pBiome, share]: any[]) => {
+    const wild = float(0).toVar();
+    const ground = float(0).toVar();
+    If(share.lessThan(1), () => { wild.assign(wildDensity(field, px, pUp, pAltitude, pFootprint, smooth, pBiome)); });
+    If(share.greaterThan(0), () => { ground.assign(groundedDensity(field, px, pUp, pAltitude, pFootprint, smooth, pBiome)); });
+    return mix(wild, ground, share);
+  });
+  const value = surface(x, up, altitude, footprint, biome, grounded);
   return field.edits ? applyEdits(field.edits.a, field.edits.b, field.edits.count, editMask, value, x, up, altitude) : value;
 }

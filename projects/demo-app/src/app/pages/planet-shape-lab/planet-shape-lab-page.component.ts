@@ -20,7 +20,7 @@ import { createCameraRelativeSphereGeometry, createPlainSphereMaterial } from '.
 import { TERRAIN_EDIT_PRESETS, terrainEditPreset, type TerrainEditPresetId } from './planet-shape-edits';
 import { DEFAULT_RAY_STEPS, createRaymarchTerrain, type RaymarchTerrain } from './planet-shape-raymarch';
 import { createLitRaymarchTerrain } from './planet-shape-raymarch-lit';
-import { RAY_BIOMES, type RayBiome } from './planet-shape-tests';
+import { RAY_BIOMES, RAY_ROCKS, type RayBiome, type RayRock } from './planet-shape-tests';
 import { QUALITY_PROBE_SIZE, frameFromProbeRgba, type QualityFrame } from './planet-shape-quality';
 import { createPlanetShapeTestAdapter, type PlanetShapeQualityProbe, type PlanetShapeTestHost } from './planet-shape-test-adapter';
 import { PLANET_SHAPE_TEST_HISTORY, type PlanetShapeTestSettings } from './planet-shape-tests';
@@ -171,6 +171,12 @@ const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so 
               }
             </p>
             <p class="row">
+              rock:
+              @for (rock of rayRocks; track rock) {
+                <button (click)="setRayRock(rock)" [class.active]="rayRock() === rock" [attr.data-testid]="'rock-' + rock">{{ rock }}</button>
+              }
+            </p>
+            <p class="row">
               edits:
               @for (preset of rayEditPresets; track preset.id) {
                 <button (click)="setRayEdits(preset.id)" [class.active]="rayEdits() === preset.id" [attr.data-testid]="'edits-' + preset.id">
@@ -266,6 +272,9 @@ export class PlanetShapeLabPageComponent {
   /** Terrain v2 biomes: the blend mask, or one biome everywhere. */
   readonly rayBiome = signal<RayBiome>('blend');
   readonly rayBiomes = RAY_BIOMES;
+  /** Terrain v2 rock: each biome's own, wild everywhere or grounded everywhere. */
+  readonly rayRock = signal<RayRock>('biome');
+  readonly rayRocks = RAY_ROCKS;
   /** Sphere (0) to flat map (1). */
   readonly morph = signal(0);
   readonly freeCamera = signal(false);
@@ -322,7 +331,7 @@ export class PlanetShapeLabPageComponent {
   /** Everything the shared runner needs from this page; the runner never sees the scene. */
   private readonly testHost: PlanetShapeTestHost = {
     read: () => ({
-      kind: this.bodyDrawn() ? this.surface() : 'empty', raySteps: this.raySteps(), rayPrepass: this.rayPrepass(), rayEdits: this.rayEdits(), rayBiome: this.rayBiome(), seed: this.seed, bodyId: this.bodyId(), poseId: this.poseId(),
+      kind: this.bodyDrawn() ? this.surface() : 'empty', raySteps: this.raySteps(), rayPrepass: this.rayPrepass(), rayEdits: this.rayEdits(), rayBiome: this.rayBiome(), rayRock: this.rayRock(), seed: this.seed, bodyId: this.bodyId(), poseId: this.poseId(),
       spinWarp: this.spinWarp(), spinAngleDeg: (this.spinAngle * 180) / Math.PI, features: this.featureState(),
       morph: this.morph(),
     }),
@@ -338,6 +347,7 @@ export class PlanetShapeLabPageComponent {
       this.setRayPrepass(settings.rayPrepass);
       this.setRayEdits(settings.rayEdits);
       this.setRayBiome(settings.rayBiome);
+      this.setRayRock(settings.rayRock);
       if (settings.kind !== 'empty') this.setSurface(settings.kind);
       this.setBodyDrawn(settings.kind !== 'empty');
     },
@@ -560,6 +570,12 @@ export class PlanetShapeLabPageComponent {
     this.rayBiome.set(biome);
     const value = biome === 'canyons' ? 0 : biome === 'hills' ? 1 : undefined;
     for (const entry of this.rayTerrains) entry.terrain.setBiome?.(value);
+  }
+
+  setRayRock(rock: RayRock): void {
+    this.rayRock.set(rock);
+    const value = rock === 'wild' ? 0 : rock === 'grounded' ? 1 : undefined;
+    for (const entry of this.rayTerrains) entry.terrain.setRock?.(value);
   }
 
   setRayEdits(id: TerrainEditPresetId): void {

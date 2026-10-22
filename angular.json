@@ -47,7 +47,8 @@
               "../worldgen/render/**/*.spec.ts",
               "../planet-material/**/*.spec.ts",
               "../atmosphere/**/*.spec.ts",
-              "../cloud-volumes/**/*.spec.ts"
+              "../cloud-volumes/**/*.spec.ts",
+              "../gpu-data-flow/**/*.spec.ts"
             ]
           }
         },
@@ -59,6 +60,16 @@
             "polyfills": ["zone.js", "zone.js/testing"],
             "browsers": "ChromeHeadless",
             "include": ["../testing/**/*.spec.ts"]
+          }
+        },
+        "test-gpu-data-flow": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "watch": false,
+            "tsConfig": "projects/triangular-engine/tsconfig.spec.json",
+            "polyfills": ["zone.js", "zone.js/testing"],
+            "browsers": "ChromeHeadless",
+            "include": ["../gpu-data-flow/**/*.spec.ts"]
           }
         },
         "test-worldgen": {

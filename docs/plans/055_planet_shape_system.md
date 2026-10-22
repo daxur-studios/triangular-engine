@@ -427,8 +427,7 @@ one terrain recipe has to be fast, editable and tested. Phase 1 is done when all
 
 Out until after the finish line: more biomes, materials, lighting polish, water, planet-scale LOD, morph.
 
-Status 2026-10-22: items 1–4 met and item 5 in place, with only the owner's review of the `planet-shape-terrain-views`
-run still open. The numbers are in the runbook. Near the ground the scene pass is 7–9 ms, so the 2 ms D8 budget remains the
+Status 2026-10-22: all five items met (the owner checked the blend and edits in the lab); Phase 1 is done. The numbers are in the runbook. Near the ground the scene pass is 7–9 ms, so the 2 ms D8 budget remains the
 Phase 2 race.
 
 ### Phase 1b. Shape ops, evaluator and data-flow core
@@ -482,6 +481,51 @@ Quality tiers, a terrain telemetry section (Plan 048), consumer docs under `proj
 - Fidelity: contact snapping keeps footprint vertices on the op at every LOD (contender-specific).
 - Sampler count per pass stays under the device limit.
 - Timer self-test logic (sample-to-frame attribution) against a fake renderer.
+
+## Design notes (2026-10-22, owner questions after Phase 1)
+
+Not decisions yet; each names the phase that settles it.
+
+- **Floating rock.** The v2 field adds 3D noise to altitude, so a dip in the noise above the ground makes a solid
+  blob with no support; a field read at one point cannot know about connectivity. Mostly a look problem (render,
+  collide and "ground height" all handle it). Fixes, cheapest first: (1) displace a 2D height surface sideways by 3D
+  noise instead of adding density — with a warp gradient below 1 the surface stays one connected sheet, so no
+  floaters or stray holes, overhangs kept, about the same cost; arches and caves then come only from volume ops;
+  (2) fade the 3D noise with height above a 2D base (rarer, not gone); (3) flood-fill each page in a worker and mask
+  unconnected pieces (exact, needs Phase 1b paging). Proposed: (1) as a per-biome "grounded / wild" switch.
+  **Implemented 2026-10-22** (fix 1, per-biome `grounded`, hills grounded and canyons wild; runbook 055, same date).
+- **Cell planet as the source.** Field = smooth base height from the cells + shape-program ops + detail noise with
+  biome parameters from the cells + player edits. Per-cell data (base height, biome weights, maximum height) is baked
+  into a cube-map texture so the march and the CPU twin sample it cheaply; no Voronoi search per step. Cell edges
+  are interpolated smoothly and biome borders noise-warped, so no polygons show. Phase 1b.
+- **Shape programs only compose engine ops.** Every op needs a TSL twin and a parity spec, so a game builds
+  mountains from the op set (single-cell cone, ridges through several cell centres…) and adds new op shapes to the
+  engine rather than writing free-form code. Phase 1b.
+- **Op lookup must scale.** Phase 1's loop over at most 8 edits with a per-ray mask does not scale to hundreds of
+  ops; ops are bucketed per cell or tile and a ray visits only the buckets it crosses. Phase 1b.
+- **Per-region height bounds.** With each cell's maximum height baked in, the march band is thin over plains and
+  tall only in mountain cells, which should help the ground-pose cost. Phase 1b, measured in Phase 2.
+- **Cell mesh and march must agree.** The cell planet mesh is the natural far level and contender C's bounding
+  mesh (pushed up by each cell's maximum relief), so it must be built from the same field evaluator, not its own
+  height function, or the switch pops and colliders disagree with what is drawn. Phase 1b / Phase 2.
+- **Colliders with overhangs.** Jolt's heightfield shape has no overhangs, so it is only a far fallback. Near each
+  moving body, small 3D blocks (tens of metres) are sampled from the field, meshed (surface nets) and handed to Jolt
+  as mesh shapes; edits rebuild only the blocks they touch. Phase 3, with the D2 spike choosing who samples.
+- **Who samples collider blocks (D2 input).** The unoptimised CPU twin costs about 12 µs per sample in Node on the
+  reference laptop: about 390 ms for a 32³ block on one thread. Typed-array, allocation-free code may gain several
+  times, still tens of ms per block. A GPU compute pass fills the same 32³ grid in a small fraction of a
+  millisecond; a fixed-size density grid (128 KiB as float32) fits data-flow rule 3, arrives after the measured
+  readback latency (inside the 100 ms edit-to-collider target), and a worker then meshes it and builds the Jolt
+  shape. The CPU path stays for synchronous queries, for physics without a GPU frame (loading, headless) and as the
+  reference. Proposed: GPU density + worker meshing, CPU fallback; the D2 spike measures both.
+- **Scatter (Phase 4).** Deterministic per cell from the CPU field; candidates come from the surface query (ray hit
+  and normal), so ledges and ground under overhangs work; filtered by slope, up-facing, biome, altitude and the
+  material masks; edits invalidate only inside their bounds; drawn as instances or impostors, which mix with the
+  march because it writes depth.
+- **Expected race outcome.** A hybrid: a height shell or the cell mesh beyond a few km, true 3D near the camera
+  (C's march or B's blocks). Phase 1 numbers point there (orbit and flyover 1–3 ms, ground 7–9 ms). Overhangs are not
+  lost: R5 requires an arch, an overhanging cliff and a tunnel, visible and collidable, from every finalist; far
+  away they are sub-pixel and may be approximated.
 
 ## Decisions
 

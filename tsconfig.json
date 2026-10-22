@@ -54,6 +54,9 @@
       "triangular-engine/planet-material": [
         "projects/triangular-engine/planet-material/public-api"
       ],
+      "triangular-engine/gpu-data-flow": [
+        "projects/triangular-engine/gpu-data-flow/public-api"
+      ],
       "triangular-engine/atmosphere": [
         "projects/triangular-engine/atmosphere/public-api"
       ],

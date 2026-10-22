@@ -1,5 +1,12 @@
 # Changelog
 
+- `triangular-engine/gpu-data-flow`: new entry with the reusable CPU/GPU/worker data-flow core (Plan 055, Phase 1b). Preview.
+  - **`UploadRing`** (`enqueue`, `flush`, `setBudget`): writes up to `bytesPerFrame` per frame, splits larger writes, queue depth and peak are metrics.
+  - **`ReadbackRing`** (`request`, `poll`): fixed-size slots, never awaited in a frame; each `ReadbackResult` carries the request frame, a caller tag, `latencyMs` (submit to usable) and `latencyFrames`; a full ring drops and counts the request.
+  - **`DoubleBuffer`**, **`CapacityGuard`** and **`GpuCapacityError`**: buffer creation and growth are checked against `maxStorageBufferBindingSize`, `maxUniformBufferBindingSize` and `maxBufferSize` (with optional headroom and a total budget) before anything is created.
+  - **`JobScheduler`**: separate `gpu` and `worker` lanes with per-frame cost budgets, priorities and an in-flight cap.
+  - **`LatencyWindow`** and plain-data `telemetry()` on every part.
+  - Logic sits behind the small `FlowDevice` interface; `createWebGpuFlowDevice`, `webGpuDeviceOf(renderer)` and `adoptGpuBuffer` bind it to a raw `GPUDevice` or three's `WebGPURenderer`. Test target: `npm run test:triangular-engine:gpu-data-flow`.
 - `triangular-engine/atmosphere`: one object and one component to put the atmosphere on a game's planet (Plan 049, Phase 4a).
   - **`PlanetAtmosphere`** owns the model, sky-view table, backdrop and binding. `withAtmosphere(surface, { lighting?, haze? })` / `withoutAtmosphere(surface)` put the lighting (stage 4) and haze (stage 6) stages on a planet or ocean material, gated by `enabled` (a uniform branch, no recompile). `configure({ preset, profile, radiusM, thickness, radiusUnits })` rebakes only when the air or the size changed. `update(renderer, camera)` once per frame before rendering; `dispose()` removes the stages and the sky. Properties `sunDirection`, `exposure`, `enabled`, `sky`, `morph`, `lastBakeMs`; `object` is the sky mesh.
   - **`<planetAtmosphere>`** (`PlanetAtmosphereComponent`): inputs `preset`, `profile`, `radius` (required), `radiusUnits`, `thickness`, `planet`, `surfaces`, `lighting`, `haze`, `sunDirection`, `morph`, `exposure`, `enabled`, `sky`, `aerialPerspective`; updates in `beforeRender$`; `atmosphere()` signal.

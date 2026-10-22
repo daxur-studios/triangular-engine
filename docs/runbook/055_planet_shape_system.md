@@ -871,3 +871,124 @@ float32). The spec points keep clear of the sharpest pad transition on purpose o
   (`planet-shape-terrain-views` v1, 11 cases) is saved with thumbnails and `visual=pending` for the owner.
 - **Finish line status:** 1 (16 ms) met; 2 (one definition, CPU twin, parity) met; 3 (edits) met; 4 (two blended
   biomes) met; 5 (tests) in place: timing per biome, edit set and pose, parity specs, review views pending.
+- **Owner review (same day):** the owner checked the blend and the flatten edits in the lab and found them working,
+  which closes item 5; Phase 1 is done. The owner noticed floating rock (unsupported 3D-noise blobs) in places.
+  Causes, fixes and the cell-planet, collider, scatter and race notes from that conversation are in the plan's
+  "Design notes (2026-10-22)".
+- **CPU twin cost (Node 22, reference laptop, one thread):** about 12 µs per `density` sample, 390 ms for a 32³
+  block at 600 km. Input to the D2 spike: collider blocks are a strong case for GPU sampling with a readback.
+
+## 2026-10-22: grounded rock for terrain v2 (floating-rock fix 1)
+
+- **Built.** `BiomeParams.grounded` (0..1, blended by the biome mask): 0 is the wild 3D density as before, 1 the
+  grounded one. Canyons stay wild (the owner likes the floaters there, and strata need the vertical stretch a height
+  surface cannot have); hills are grounded. Densities are blended by the share; only the modes in use are evaluated
+  (`If` per share), so hills cost about what they did (biome read, two warp reads that the canyon term would share,
+  three rock octaves; the canyon term is skipped where the biome's canyon depth is 0). Lab: "rock: biome / wild /
+  grounded" row (`setRock?` on the raymarch terrain, settings key `rayRock`, a mismatch key in the adapter, defaults
+  `biome`). Timing suite `planet-shape-rock` v1 (wild vs grounded at low, ground and grazing, 600 km, `rayPrepass: 4`)
+  is defined, not run.
+- **Field.** `density_grounded(p) = altitude(q) + relief(direction(q))`, `q = p + w(p)`. The relief is the wild field's
+  expression (canyon term plus rock octaves) read at the point of the sphere under `q`, with no vertical stretch, so it
+  depends on the direction of `q` only. `w` is tangential: the two canyon-mask noises (lattices 30 and 14.9 units)
+  move the point along two fixed axes by up to ±`WARP_FACTOR` × lattice (±2.4 and ±1.2 units), projected onto the
+  tangent plane. `altitude(q)` is computed as `altitude(p) + |w|²/(|p| + |q|)` (exact for a tangential `w`, no
+  cancellation on a big body). CPU twin: `warp`, `groundedOverride`, `grounded`.
+- **Bound.** Value noise has `|grad n| <= 1.5 √3 = 2.6` per lattice cell (smoothstep' <= 1.5, lattice differences
+  <= 1). With `A_i = 0.08 L_i`, `||Dw|| <= 2 · 2.6 · √2 · 0.08 = 0.59`, plus 0.017 for the projection varying over the
+  body radius (a unit is at most 0.3 % of it): `warpLipschitzBound()` = 0.604, so `p -> q` is a bijection with margin
+  0.4. The solid set is then a deformed height-surface solid: connected, no floaters. In the blend zone (share between
+  0 and 1) the density is a mix, so the guarantee holds where the share is 1, which covers the hills; the border is as
+  narrow as the biome edge.
+- **Specs** (`planet-shape-field.spec.ts`, headless): GPU/CPU parity with grounded 1 and 0.5 on 20 km, 1737 km and
+  6371 km bodies (worst 1e-3 m at 20 km, 0.4 m at the big bodies against a 9 m tolerance, the same level as the wild
+  parity); measured largest `||Dw||` 0.21–0.23 by finite differences (bound 0.604) and measured noise gradient 1.41
+  (bound 2.6); no-floaters flood fill (48×48×96 voxels, 6 units wide, the whole band tall, 12 spots × canyons and
+  hills): grounded 0 unreached solid voxels in all 24 blocks, wild 18 unreached voxels in one canyon block and none
+  elsewhere (floaters are rare and small in the grid: the check has teeth, but thinly). The existing hills spec now
+  pins `groundedOverride 0`. The lead's in-progress `shape-ops` spec did not compile during my runs, so I ran with a
+  temporary tsconfig that left it out (field and lab specs: 64 of 65 on the first run, the one failure being my own
+  threshold, then 25 of 25 in the field spec).
+- **Look** (lab, low flyover, 600 km, 1/4 pre-pass, spin paused). Canyons wild: stepped ledges, fragmented strata and
+  ragged overhangs. Canyons grounded: one smooth sheet, canyon walls lean a little, no ledges (no vertical stretch).
+  Hills wild vs grounded: both rolling; grounded is slightly bumpier (isotropic octaves, no stretch to flatten them).
+  The tell is the canyons: use wild there for the floating-rock look, grounded for solid ground.
+- **Constants:** `WARP_FACTOR` 0.08, `NOISE_GRADIENT_MAX` 2.6, `UNIT_RADIUS_RATIO` 0.003, `WARP_AMPLITUDE` [2.4, 1.19]
+  units, `CANYON_BIOME.grounded` 0, `HILLS_BIOME.grounded` 1.
+
+## 2026-10-22: Phase 1b starts: shape ops, op log, op index (CPU)
+
+New folder `projects/demo-app/src/app/pages/planet-shape-lab/shape-ops/` (CPU reference; the TSL twin and the field
+integration come next, after the grounded-rock work on the field files lands).
+
+- **`shape-op.ts`.**
+  - Height ops: `disc`, `cone`, `crater`, `path` (flat or round profile, a height per point). Blends: `add`, `set`, `raise`, `lower`, `scale`.
+  - Volume ops: `sphere`, `tube`, with `union` or `subtract`.
+  - Each op has an id, a fidelity class and a minimum visible size. `contact` and `topology` ops are never skipped; `relaxed` and `silhouette` ops are skipped when the sample footprint is larger than their size.
+  - Horizontal distances are arcs on the body sphere. The Phase 1 edits used the distance from the vertical axis, which grows with depth.
+  - `shapeOpFromTerrainEdit` maps flatten → disc + set, soften → disc + scale, and carve → sphere + subtract.
+  - `validateShapeOp` gives readable errors for ops from save files.
+- **Bounds contract.**
+  - Outside an op's caps the op is the identity, bit for bit.
+  - Inside the caps but outside its altitude range, the op never changes solidity.
+  - Two changes were needed to make the first rule exact:
+    - Volume ops fade out between k and 2k from the shape. A plain smooth union lowers positive values far away, and a later `set`/`scale` could then flip solidity when an index skips the union.
+    - Height blends return the input untouched at weight 0, because `scale` re-adding the altitude was off by one ulp.
+  - `shapeOpsBounds` widens each op's input band by the earlier ops whose caps meet it.
+- **`op-log.ts`.**
+  - Entry types are `add`, `replace` (keeps the op's position) and `remove`.
+  - `replayOpLog` is deterministic and throws on entries that don't fit.
+  - `hashShapeOps` is a 64-bit hash of canonical JSON (sorted keys), so key order doesn't matter.
+  - `createOpLog` provides append (atomic: a refused entry leaves the log as it was), undo and `toJSON`. `parseOpLog` checks the version and replays.
+- **`op-index.ts`.**
+  - Cube-face gnomonic tiles; each op is listed in every tile its caps meet, in apply order. A cap's tile box comes from its sampled rim, grown so the gaps between samples are covered.
+  - `bandAt` gives the per-tile altitude band: the march bound per region.
+  - Applying a tile's ops gives exactly the value of applying them all. A march still must not step past a tile's edge on that value.
+- **Specs** (`shape-ops.spec.ts`, 12/12, headless):
+  - Ground under the `sites` preset, edits vs ops: worst difference 2.7e-4 units (103 of 160 grounds moved).
+  - Each shape gives the profile it describes.
+  - Volume ops add and remove rock.
+  - Validation errors.
+  - The bounds contract on the real CPU field: 2238 points outside bounds kept solidity; 40 inside changed it, so the check has teeth.
+  - After 40 random ops, the ground stays inside the index's per-tile band.
+  - Minimum visible size by fidelity class.
+  - Op log: replay through a JSON save, undo restoring every earlier hash, refused entries.
+  - Index: no op missed at cap rims across face edges and corners; ascending order.
+  - Indexed evaluation equals full evaluation exactly.
+- **CPU cost per sample against op count** (ops packed into about 40 units, so tiles are crowded; 512 tiles per face):
+
+  | ops | all ops | indexed | max ops per tile |
+  |---|---|---|---|
+  | 10 | 2.7 µs | 1.3 µs | 2 |
+  | 100 | 28 µs | 1.7 µs | 14 |
+  | 1000 | 160 µs | 11 µs | 158 |
+
+  This is the first point of the op-count cost curve.
+
+## 2026-10-22: data-flow core (`triangular-engine/gpu-data-flow`)
+
+Built in a parallel session from the plan's "Data-flow core" rules. It's a library secondary entry, with a doc in
+`projects/triangular-engine/docs/gpu-data-flow.md` and a CHANGELOG entry.
+
+- **Design.** All logic is plain TypeScript behind a small `FlowDevice` interface (`createBuffer`, `writeBuffer`,
+  `copyBuffer`, `mapRead`, `limits`, and an injectable clock), so the specs use a fake device.
+  - The caller passes the frame in; the module doesn't own it.
+  - Readback slots are fixed in size. When all are busy, a request drops (and is counted) instead of queueing.
+  - Latency is recorded in milliseconds from the clock and in frames.
+  - Default limits are the WebGPU defaults (128 MiB storage binding).
+- **Parts:**
+  - `UploadRing`: a per-frame byte budget; large writes split on 4-byte boundaries; queue depth and bytes as metrics.
+  - `ReadbackRing`: `request` returns at once; `poll(frame)` yields results with `frame`, `tag`, `latencyMs` and `latencyFrames`.
+  - `LatencyWindow`: p50/p95 over a rolling window.
+  - `DoubleBuffer`: `swap` and `grow`; growth is guarded and keeps the read contents.
+  - `CapacityGuard`: throws `GpuCapacityError` before creation, with headroom and a total budget.
+  - `JobScheduler`: GPU and worker lanes with per-frame cost budgets, an in-flight cap, priorities and error isolation.
+  - `telemetry()` on every part returns plain data.
+  - WebGPU binding: `createWebGpuFlowDevice`, `webGpuDeviceOf(renderer)` and `adoptGpuBuffer`.
+- **Specs:** 27, headless, in `gpu-data-flow.spec.ts`; `npm run test:triangular-engine:gpu-data-flow`. The library
+  build passes.
+- **Not yet:**
+  - The binding has not run on real WebGPU hardware. Its first real use is the D2 collider-block spike.
+  - Each copy submits its own command buffer; batching comes later.
+- **Spec run time:** the grounded-rock floater spec (24 voxel blocks of the CPU field) blocked the headless browser past
+  Karma's ping timeout in a full lab run. It now yields every 4 layers, and the full lab run is 77/77.

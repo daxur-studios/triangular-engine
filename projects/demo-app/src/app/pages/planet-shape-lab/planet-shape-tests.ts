@@ -9,6 +9,9 @@ import { DEFAULT_RAY_STEPS } from './planet-shape-raymarch';
 
 export const RAY_BIOMES = ['blend', 'canyons', 'hills'] as const;
 export type RayBiome = (typeof RAY_BIOMES)[number];
+/** Rock mode of terrain v2: each biome's own, wild (3D noise, floaters possible) or grounded (warped height surface). */
+export const RAY_ROCKS = ['biome', 'wild', 'grounded'] as const;
+export type RayRock = (typeof RAY_ROCKS)[number];
 
 /** Fully resolved, so a rerun cannot inherit anything from the manual controls. */
 export interface PlanetShapeTestSettings {
@@ -35,13 +38,15 @@ export interface PlanetShapeTestSettings {
   readonly rayEdits: TerrainEditPresetId;
   /** Biomes of terrain v2: the blend mask, or one biome everywhere; ignored by the other kinds. */
   readonly rayBiome: RayBiome;
+  /** Rock mode of terrain v2; ignored by the other kinds. */
+  readonly rayRock: RayRock;
   /** `quality` measures the view against the exact sphere instead of timing it; absent = timing. */
   readonly probe?: 'quality';
 }
 
 export const PLANET_SHAPE_DEFAULTS: PlanetShapeTestSettings = {
   kind: 'sphere', seed: FIXED_SEED, bodyId: '600km', poseId: 'orbit', spinWarp: 1000, spinAngleDeg: 0, features: defaultFeatureState(), morph: 0,
-  raySteps: DEFAULT_RAY_STEPS, rayPrepass: 0, rayEdits: 'pad', rayBiome: 'blend',
+  raySteps: DEFAULT_RAY_STEPS, rayPrepass: 0, rayEdits: 'pad', rayBiome: 'blend', rayRock: 'biome',
 };
 
 const WARMUP_MS = 1500;
@@ -210,5 +215,16 @@ export const PLANET_SHAPE_TEST_HISTORY: readonly TestSuite<PlanetShapeTestSettin
         scenario(`view-sites-${poseId}-600km`, `Terrain v2, base-site edits, ${poseId.replace('-', ' ')}, 600 km`,
           { kind: 'raymarch-lit', bodyId: '600km', poseId, rayPrepass: 4, rayEdits: 'sites', spinWarp: 0, spinAngleDeg: 0 })),
     ],
+  },
+  {
+    id: 'planet-shape-rock', version: 1,
+    title: 'Terrain v2 rock: wild (3D noise density) against grounded (warped height surface), at 600 km with the 1/4 pre-pass and the pad',
+    purpose: 'performance',
+    expectedGpuVendor: 'nvidia',
+    // No budgets yet: what the grounded warp costs per march step against the wild field. The biome blend stays, so a
+    // view differs only where the mode changes the field.
+    scenarios: CAMERA_POSES.filter((pose) => pose.id !== 'orbit').flatMap((pose) => (['wild', 'grounded'] as const).map((rock) =>
+      scenario(`rock-${rock}-${pose.id}-600km`, `Terrain v2, rock ${rock}, ${pose.label.toLowerCase()}, 600 km`,
+        { kind: 'raymarch-lit', bodyId: '600km', poseId: pose.id, rayPrepass: 4, rayRock: rock }))),
   },
 ];
