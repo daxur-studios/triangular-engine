@@ -56,7 +56,7 @@ export function frameFromProbeRgba(rgba: Float32Array, width: number, height: nu
 }
 
 /** Unit direction (and its pre-normalisation length, for view depth) of the ray through a pixel centre. */
-function pixelRay(camera: QualityProbeCamera, width: number, height: number, column: number, row: number): [number, number, number, number] {
+export function pixelRay(camera: QualityProbeCamera, width: number, height: number, column: number, row: number): [number, number, number, number] {
   const [fx, fy, fz] = camera.forward;
   const [ux, uy, uz] = camera.up;
   // right = forward x up, matching the page's camera basis (right, up, -forward).

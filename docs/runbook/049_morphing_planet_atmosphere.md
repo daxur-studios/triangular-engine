@@ -18,6 +18,9 @@ performance:
   - id: bent-atmosphere-look-v2
     url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=2&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1
     status: runnable-image-checks-rtx-run-failed-as-expected
+  - id: bent-atmosphere-look-v3
+    url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=3&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1
+    status: measured-rtx3080-survey
 ---
 
 # Runbook 049: Morphing Planet Atmosphere
@@ -947,3 +950,209 @@ It stopped at case 1, as predicted.
 - The harness cannot say anything about the horizon band below the black sky; the band check reports that instead of passing.
 - Only case 1 ran, so the other 12 cases (5 km, 25 km, the v1 scenarios) have no RTX data yet. The iGPU numbers above for those are unconfirmed on the RTX.
 - Still open and not fixed: the black sky below roughly 0.5 to 1 km and the horizon sliver. Next measurement that would help is a report-only survey variant (not built) so one run covers every case.
+
+## 2026-10-22 — Black sky near the ground fixed in the lab; look v3 (survey)
+
+### The black sky: cause and fix
+The RTX run above said the bent planet's sky is black near the ground. Cause, confirmed:
+- The sky pass, the masked pass and the coverage probe rebuild each ray as `projectionMatrixInverse * (x, y, 1, 1)` and divide by
+  its `w`. In exact maths `w` is `1 / far`, but it is the difference of two terms of size `1 / near`, so in float32 it is lost once
+  `far / near` passes the mantissa (about 1.7e7). `BentPlanetLab.update` set `near` from the altitude (floor `1e-4` units) and `far`
+  to a fixed `1e5`. An emulation of that arithmetic (`bent-planet-clip.spec.ts` keeps it) gives `w` = 0 at 2 m, 85 m and 381 m (every
+  ray is inf or NaN: black) and 24% off at 1.7 km (still a usable direction: lit). That is the pattern seen in the pane.
+- Fix, in the lab only (no shader or planet material change): `bentPlanetClipPlanes` in `bent-planet-clip.ts` caps `far / near` at
+  `1e6`, still `far` >= 10 times the horizon distance at every altitude the lab uses. Checked by hand on the iGPU pane (camera
+  `near` 1e-4, `far` 100, `w` 0.0098 instead of 0, the sky a light haze instead of black) and by the suite below.
+- Result on the iGPU, 2026-10-22 16:17 UTC, `skyMedianLuma` per altitude (noon, morph 0): 2 m 0.53, 85 m 0.53, 381 m 0.52, 1.7 km 0.48,
+  5 km 0.39, 25 km 0.08. It was 0.000 at the first three.
+- Not run on the RTX since the fix.
+
+### What the fix showed
+With the sky working, the coverage and band checks can see the ground, and they find the black band the owner reported:
+
+| view (noon, morph 0) | uncovered (cells) | about | dark horizon columns |
+| --- | --- | --- | --- |
+| 2 m | 419 | 9.7 px thick | 256 of 256 (652 cells, darkest 0.001) |
+| 2 m, morph 0.5 | 199 | | 256 of 256 (474 cells) |
+| 2 m, Equal Earth, morph 0.5 | 206 | | 256 of 256 (494 cells) |
+| 2 m, horizon at the view's centre | 396 | | 256 of 256 (655 cells) |
+| 85 m | 261 | 6 px | 0 |
+| 381 m | 135 | 3.1 px | 0 |
+| 1.7 km | 64 | 1.5 px | 0 |
+| 5 km | 35 | 0.8 px | 0 |
+| 25 km | 16.6 | 0.4 px | 0 |
+
+(Thickness is the uncovered area over the 256 columns times 5.9 px per cell.) The thumbnail of the 2 m case shows a thin dark line along
+the horizon, and a dark wedge in the ground pointing at it that I have not explained.
+- **The uncovered strip is the 1-degree mesh sitting under the analytic sphere**, and it shrinks as the camera rises, as that predicts.
+  Near a grid vertex the chord falls away from the sphere by about `x (L - x) / 2R` for a distance `x` along an edge of length `L`
+  (111 km), which is a plane tilted down about 0.5 degrees. The true horizon at 2 m is 0.04 degrees below level, so the rays between
+  0.04 and about 0.5 degrees below level hit the sphere and miss the mesh, about 8 to 10 px of a 1152 px, 75 degree view. At 5 km the horizon
+  is 2.2 degrees down and the same tilt is under a pixel. The sizes fit; I did not change the mesh to watch the strip close.
+- **It is black only at 2 m.** At 85 m and above the strip is uncovered but the normal frame there is not dark (band 0). Why the sky pass
+  shows black for those rays at 2 m and not at 85 m is not known (the sky-view table below the horizon is the first place to look).
+- **Not fixed.** The mesh and the sky-view table are the planet's rendering; the brief for this work was to measure and report.
+
+### Look v3: a survey
+Gating runs stop at the first failed case, so one RTX run showed one case. `bent-atmosphere-look` **v3** (v1 and v2 unchanged) is a
+survey: `reportOnly: true` in every scenario makes the adapter record each failed check as passed with a `WOULD FAIL:` detail and count
+them in the metric `checksWouldFail` (and `details.wouldFail`), so the session goes on. The engine's session is unchanged. It has the 13
+v2 cases plus three altitudes under a kilometre (`horizon-ground-85m-m0`, `-381m-m0`, `-1700m-m0`), 16 in all. Gate with v2, survey with v3.
+- `checksWouldFail` also counts the GPU timer self-test where the developer-features flag is off (the pane): that note is the same on
+  every case there and is not about the picture. Look at `skyMedianLuma`, `uncoveredPixels` and `horizonBandPixels`.
+- The first survey run found a flaw in the band check: seen from space (the two rim-glow cases) one boundary column was judged and called
+  a dark band. A band is now judged only with at least 8 columns (`BAND_MIN_COLUMNS`); fewer is "not judged", like a black sky.
+- Read it: `npm run test:summary '--' --suite bent-atmosphere-look --last 1`; for the names of what would fail, open the saved JSON
+  (`details.wouldFail` and the `WOULD FAIL` check details per case).
+
+### Run it (owner, NVIDIA Chrome, tab focused)
+[Look v3 survey](http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=3&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1).
+About a minute with the tab focused; an unfocused tab waits at the first case. Expect `skyMedianLuma` above 0.4 for all four views up to 1.7 km,
+`uncoveredPixels` falling from several hundred at 2 m to about 16 at 25 km, and `horizonBandPixels` above 0 at 2 m only.
+
+### Specs
+48 in `atmosphere-lab/*.spec.ts`, headless, passing: the adapter spec (look v3 survey and the history), the image checks (now with the
+minimum band width) and `bent-planet-clip.spec.ts`. They were run with a temporary spec tsconfig that includes only these files, because the
+full demo-app spec build was failing on another session's unfinished Plan 055 work (`applyWithSteepness`), not on anything here.
+
+### 2026-10-22 16:39 UTC — look v3 on the RTX 3080 (owner run)
+Run `2026-10-22T16-39-15-676Z_visible-browser_a4fd8788-62896573`: `gpu.vendor` nvidia, NVIDIA GeForce RTX 3080 Laptop GPU (Ampere), WebGPU,
+viewport 1707 x 872 at devicePixelRatio 1.5 (check frame 256 x 132 from 2538 x 1308, so a cell is 9.9 px). 16 cases, all completed, 0 validity issues, 70 s.
+The GPU timer self-test passes here, so `checksWouldFail` counts only the picture checks.
+
+| case (noon unless stated) | sky median luma RTX / iGPU | uncovered cells RTX / iGPU | RTX strip | dark horizon columns RTX / iGPU |
+| --- | --- | --- | --- | --- |
+| 2 m, morph 0 | 0.56 / 0.53 | 323.5 / 419.1 | 12.5 px | **256 of 256** (521 cells) / 256 of 256 (652) |
+| 2 m, morph 0.5 | 0.56 / 0.53 | 151.1 / 199.0 | 5.8 px | **256 of 256** (313) / 256 of 256 (474) |
+| 2 m, Equal Earth, morph 0.5 | 0.56 / 0.53 | 154.2 / 206.0 | 6.0 px | **256 of 256** (314) / 256 of 256 (494) |
+| 2 m, horizon at the view's centre | 0.61 / 0.58 | 307.0 / 395.8 | 11.9 px | **256 of 256** (442) / 256 of 256 (655) |
+| 85 m | 0.56 / 0.53 | 211.5 / 260.5 | 8.2 px | 0 / 0 |
+| 381 m | 0.55 / 0.52 | 107.9 / 134.7 | 4.2 px | 0 / 0 |
+| 1.7 km | 0.51 / 0.48 | 41.9 / 64.1 | 1.6 px | 0 / 0 |
+| 5 km | 0.44 / 0.39 | 28.0 / 34.9 | 1.1 px | 0 / 0 |
+| 25 km, morph 0 | 0.10 / 0.08 | 12.0 / 16.6 | 0.5 px | 0 / 0 |
+| 25 km, morph 0.5 | 0.09 / 0.08 | 5.0 / 4.8 | 0.2 px | 0 / 0 |
+| low orbit, Equal Earth near flat | n/a | 3.2 to 3.3 / 4.1 to 4.4 | 0.1 px | 0 / 0 |
+| east edge | 0.04 / 0.04 | 11.0 / 13.5 | 0.4 px | 0 / 0 |
+| rim glow, both projections | n/a | 0 / 0 | none | not judged (a limb, under 8 columns) |
+
+Strip = uncovered cells over 256 columns times 9.9 px. Cell counts differ between the two GPUs because the frames differ (the RTX
+canvas is 2538 x 1308, the iGPU pane 1512 x 1152, and a cell is a share of the frame), so compare the pattern, not the counts.
+
+- **The black sky is fixed on the RTX.** The median sky luma is 0.44 to 0.61 at every altitude up to 5 km, where the run before the fix
+  read 0.000 at 2 m.
+- **The black band shows up on the RTX at 2 m, in all four 2 m views, and at no other altitude.** Every one of the 256 boundary columns
+  has a cell with a darkest pixel 0.1% to 1% of its neighbours: a black line along the horizon, 9.9 px cells, about 12 px thick at morph
+  0 (about 0.7 degrees; the thumbnail shows it as a sharp black line between the sky and the ground, with the dark wedge in the ground
+  below it that I have not explained). Morph 0.5 and Equal Earth give about half that.
+- **The strip of ground the mesh does not cover is there at every altitude and shrinks as the camera rises**, from 12.5 px at 2 m to 0.2
+  px at 25 km, the same shape as on the iGPU. That fits the 1 degree mesh tilting under the sphere; it is a reading of the sizes, not a test.
+  Whether a strip is black depends on the view: only at 2 m.
+- Both GPUs agree on everything but frame size, so the band is not an AMD or NVIDIA effect.
+- Still not fixed, as asked: the mesh, and why the strip is black at 2 m and not at 85 m.
+
+## 2026-10-22 — Quick mode for the `/atmosphere-lab` suites
+
+Runs took long (look v3: 70 s for 16 cases), mostly because every case ran its full window. The lab adapter now sets
+`windowModes`, so the runner offers quick, standard and soak; quick is its default.
+
+- **Still views** time their window with `context.measureWindow`, watching `frameInterval` (0.1 ms timer step) and the
+  whole-frame GPU samples (`gpuFrame`, 1 µs step, when timestamps exist; the page host gained `gpuSamplesSoFar`). Quick
+  stops once both settle (at least 1 s and 60 frames).
+- **Sweeps** run for `modeActionMs(scenario, mode)`. The three look sweeps (8, 8 and 6 s) have `quickMs: 2400` (1.2 s
+  per leg, about 70 frames per leg at 60 Hz): enough to catch a stall, a skipped keyframe or an error, too fast to judge
+  popping by eye. A quick sweep needs at least 20 frames instead of 60 to count as valid.
+- `quickMs` is new in the testing entry (`TestScenario.quickMs`, `modeActionMs`). It was added to existing suite
+  versions because it changes only quick mode, which these suites did not offer before; standard runs are unchanged
+  and stay comparable with earlier results. Compare quick runs only with quick runs.
+- **RTX 3080 quick run** (owner, 2026-10-22 17:54 UTC, `nvidia/webgpu`,
+  `bent-atmosphere-look@v3/2026-10-22T17-54-44-452Z_visible-browser_quick_a4fd8788-93bbf13e.json`): 16 valid, 0 failed,
+  **34 s against 70 s** for the standard run at 16:39. Every still view settled at 1.01–1.02 s. The picture
+  metrics match the standard run exactly in every case (uncovered pixels, sky luma, horizon band, `checksWouldFail`).
+  GPU pass totals of the still views agree within 0.01 ms; the sweeps read 0.02–0.21 ms lower at p95, because a
+  shorter sweep has fewer slow frames. Of the 34 s, about 20 s is windows (13 still views at 1 s, three sweeps at
+  2.4 s); the rest is per-case settling (at least 0.4 s and 3 frames), warm-up, the pixel read-back and the thumbnail.
+  Standard is still the mode for results that count.
+- Specs: 3 new (quick sweep reaches every keyframe in its quick length; a still view stops once settled; every sweep
+  has a `quickMs`); atmosphere-lab specs 51 of 51, testing entry 140 of 140, headless.
+
+## 2026-10-22 — The black horizon band at 2 m: cause and fix (fine window around the camera)
+
+### Cause, tested before anything was changed
+The strip of ground the 1 degree mesh leaves uncovered is the mesh's chords sitting under the analytic sphere. Test: a CPU ray cast
+(float64, the globe at morph 0, a camera `h` metres over a grid vertex, the real triangle split of `BentPlanetLab`) for the
+shallowest ray below level that meets the mesh, minus the sphere's own horizon dip:
+
+| grid step | strip at 2 m (dip 0.0454 deg), along an axis / along the diagonal | at 85 m (dip 0.296 deg) |
+| --- | --- | --- |
+| 1 degree (the lab) | 0.456 / 0.662 deg | 0.248 / 0.442 deg |
+| 0.25 degree | 0.100 / 0.005 deg | |
+| 0.1 degree | 0.015 / 0.033 deg | |
+| 0.04 degree | 0.0004 / 0.0011 deg | |
+
+The 1 degree numbers match what the RTX measured (about 0.7 degrees, 12.5 px at morph 0) and fall as the camera rises, as the
+tilt `L / 2R` (0.5 degrees) is a fixed angle against a horizon dip that grows with the height. The strip closes as the step falls:
+the tilt has to stay under the dip, which takes an edge under twice the horizon distance (10 km at 2 m; 0.04 degrees is 4.4 km).
+The strip is thickest along the quad diagonals and thinnest along the grid axes.
+
+### Why black at 2 m and not at 85 m
+`BentAtmosphere.skyGate` skips only steep rays (more than about 11.5 degrees below level): the ground mesh is trusted to draw those.
+A grazing ray that the mesh misses is not skipped, and takes the sky-view table's value for a ray that ends on the ground, which is
+the in-scattering along its path and nothing from the ground itself. At 2 m that path is at most 5 km, so the strip is a thin
+haze: darkest pixel 0.001 to 0.01 of its neighbours. At 85 m it is 10 to 33 km, a haze the same colour as the horizon above it:
+no band (band 0), though the strip is just as uncovered. This is read from the gate and the table, not measured separately; it is
+consistent with the pictures (the black went away when the mesh covered the strip, and nothing else changed).
+
+### The dark wedge in the ground
+Not a mesh gap. It is the lab's own 10 degree checker and east/west tint: with the camera over lon 0 / lat 0 the meridian and the equator
+cross under it, and the filtered checker fades to grey in a band around the meridian whose width follows the pixel footprint
+(a wedge toward the horizon). Moving the camera off that cross (`camera over map x` 0.3, longitude 54 degrees) removes it, and the
+horizon there is clean. Its staircase edge was the coarse triangles interpolating the longitude across 111 km; it is smooth now.
+
+### Fix (lab only: `bent-planet-lab.ts`, new `bent-planet-near-grid.ts`; no planet material, no `/cell-planet-tsl`, no engine file)
+- A fine window, `nearGrid` (a child of `grid`, same material): the 3 x 3 coarse cells around the camera's cell, each split 25 ways
+  (0.04 degrees; 76 x 76 vertices, 11 250 triangles). Its vertices sit on the bent surface, and the outer cell eases (smoothstep)
+  onto the coarse mesh's own chords, so the window meets the coarse mesh edge to edge with no step. At the map's outline the window
+  ends with the map (no easing there). The window moves with the anchor (`applyNear`, with every rebuild of the grid).
+- The coarse triangles under the window are emptied in the coarse index (degenerate), not overdrawn: no overdraw, and nothing left to
+  the depth test where its resolution is as coarse as the gap between the two surfaces (with `far / near` at 1e6, about 1 m at 5 km
+  and 200 m at 60 km; the coarse mesh sags 0.9% of the distance below the fine one). The index is rewritten only when the window
+  moves to another cell.
+- Window size: the camera's cell and one cell each way, so the window's edge is at least 111 km from the camera. That is as far as the
+  horizon is at 970 m up; below about 240 m the coarse tilt is over the horizon's dip and the window is what closes the strip, above
+  it the coarse mesh alone does. From 970 m up the window's edge can be seen: the two meshes meet there with no step, but the lon/lat
+  checker shifts by up to 0.1 degrees across it (the coarse mesh's own error, which the window does not have), invisible at the
+  checker's 10 degree cells.
+- Pure helpers (`nearWindow`, `nearCoarseWeight`, `coarseSurfacePoint`, `fillNearGrid`, `mapToLonLat`) are in the new file so the
+  geometry can be tested without a GPU.
+
+### Result, iGPU pane (pixels only; 2026-10-22 18:09 UTC quick v3, repeated at 18:15 after a refactor with the same picture numbers)
+| case | uncovered cells before | after | strip after | dark horizon columns before | after |
+| --- | --- | --- | --- | --- | --- |
+| 2 m, morph 0 | 419.1 | **0.9** | 0.02 px | 256 of 256 | **0** |
+| 2 m, morph 0.5 | 199.0 | **0.0** | none | 256 of 256 | **0** |
+| 2 m, Equal Earth, morph 0.5 | 206.0 | **0.0** | none | 256 of 256 | **0** |
+| 2 m, horizon at the view's centre | 395.8 | **0.0** | none | 256 of 256 | **0** |
+| 85 m | 260.5 | 8.0 | 0.2 px | 0 | 0 |
+| 381 m | 134.7 | 24.2 | 0.6 px | 0 | 0 |
+| 1.7 km | 64.1 | 17.8 | 0.4 px | 0 | 0 |
+| 5 km | 34.9 | 34.9 | 0.8 px | 0 | 0 |
+| 25 km, morph 0 / 0.5 | 16.6 / 4.8 | 16.6 / 4.8 | 0.4 / 0.1 px | 0 | 0 |
+| space and low-orbit views, east edge | 4.1 to 4.4, 13.5 | unchanged | | 0 | 0 |
+
+Sky luma is unchanged in every case (2 m 0.53). The strip that is left at 85 m and above is the coarse mesh's sag seen at the horizon
+(about 0.05 degrees at 5 km, under a pixel, and the same colour as the haze: no band); the window is not meant to reach it. The coverage
+check (limit 1 cell) therefore still lists a `WOULD FAIL` for those altitudes in the survey. Gating v2 still stops at the first of them.
+The window's outer edge shows from 970 m up; the 5 km view at the anchor has no visible seam.
+
+### Specs
+64 in `atmosphere-lab/*.spec.ts` (13 new in `bent-planet-near-grid.spec.ts`), headless, passing; run with a temporary spec tsconfig
+including only these files (the full demo-app spec build was still blocked by another session's Plan 055 work), deleted afterwards. The
+spec casts rays at the real window and coarse mesh: at 2 m the 1 degree mesh leaves more than 0.4 degrees at azimuths 0, 45 and 90, the
+window under 0.005; at 85 m under 0.005 too. It also checks that the window's outer edge lies on the coarse chords, the triangle split,
+and `mapToLonLat` against `blendedProjection` for the globe, Equal Earth and between.
+
+### Run it (owner, NVIDIA Chrome, tab focused; quick, 34 s)
+[Look v3 quick](http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=3&testProfile=visible-browser&testMode=quick&testRepetitions=1&testAutoStart=1).
+Expect, as on the iGPU: `uncoveredPixels` under 2 cells and `horizonBandPixels` 0 at 2 m in all four views, the 85 m case at about a thirtieth of
+its old number (the RTX frame is larger, so its counts differ), and nothing else changed (sky luma, the space and orbit views, the edge case).

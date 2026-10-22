@@ -2,7 +2,8 @@ import type { TestBaseline, TestScenario, TestSuite } from 'triangular-engine/te
 import baselineV1 from './planet-shape-baseline.v1.json';
 import morphBaselineV1 from './planet-shape-morph-baseline.v1.json';
 import { BODIES, FIXED_SEED, type BodyId } from './planet-shape-config';
-import { CAMERA_POSES, type CameraPoseId } from './planet-shape-camera';
+import { CAMERA_POSES, type CameraPoseId, type CameraView } from './planet-shape-camera';
+import { unitM } from './planet-shape-field';
 import { defaultFeatureState, withFeature, type FeatureState } from './planet-shape-features';
 import type { TerrainEditPresetId } from './planet-shape-edits';
 import { DEFAULT_RAY_STEPS } from './planet-shape-raymarch';
@@ -40,8 +41,13 @@ export interface PlanetShapeTestSettings {
   readonly rayBiome: RayBiome;
   /** Rock mode of terrain v2; ignored by the other kinds. */
   readonly rayRock: RayRock;
-  /** `quality` measures the view against the exact sphere instead of timing it; absent = timing. */
-  readonly probe?: 'quality';
+  /**
+   * `quality` measures the view against the exact sphere, `terrain-quality` the raymarched terrain's march against its
+   * slow reference march (`planet-shape-terrain-quality.ts`), instead of timing it; absent = timing.
+   */
+  readonly probe?: 'quality' | 'terrain-quality';
+  /** A free-camera view that replaces the pose (close-ups of one landform); absent = the pose. */
+  readonly view?: CameraView;
 }
 
 export const PLANET_SHAPE_DEFAULTS: PlanetShapeTestSettings = {
@@ -72,6 +78,23 @@ function budgeted(id: string, label: string, settings: Partial<PlanetShapeTestSe
 }
 
 const POSES = ['orbit', 'ground'] as const;
+
+/**
+ * A free-camera view of the landforms on the 600 km body: `east` and `north` in relief units from the poses (as
+ * `planet-shape-edits.ts` places them), `altitude` in units, heading clockwise from north, pitch above the horizon.
+ */
+function landformView(east: number, north: number, altitude: number, headingDeg: number, pitchDeg: number): CameraView {
+  const radiusM = 600_000;
+  const degrees = (units: number) => (units * unitM(radiusM) * 180) / (radiusM * Math.PI);
+  return { lonDeg: degrees(east), latDeg: degrees(north), headingDeg, pitchDeg, altitudeM: altitude * unitM(radiusM), altitudeRadii: 0 };
+}
+
+/** Close-ups where the march has failed before: the road crossing canyons beside the arch, and the tunnel's mountain. */
+const LANDFORM_VIEWS = [
+  { id: 'arch-road', label: 'through the arch to the road', view: landformView(13, -10, 2.5, 0, -12) },
+  { id: 'road-along', label: 'along the road', view: landformView(0, -1.5, 1.5, 80, -8) },
+  { id: 'tunnel', label: 'the tunnel and the mountain', view: landformView(20, -6, 2, 60, -5) },
+] as const;
 /** Morph values of the morph suite; ids use the percent so they contain no dot. */
 const MORPH_VALUES = [0, 0.5, 1] as const;
 /** Rounds per arm of an A/B suite: `compareAblation` needs two to measure noise; three survive one bad round. */
@@ -246,5 +269,22 @@ export const PLANET_SHAPE_TEST_HISTORY: readonly TestSuite<PlanetShapeTestSettin
     scenarios: CAMERA_POSES.filter((pose) => pose.id !== 'orbit').flatMap((pose) => (['wild', 'grounded'] as const).map((rock) =>
       scenario(`rock-${rock}-${pose.id}-600km`, `Terrain v2, rock ${rock}, ${pose.label.toLowerCase()}, 600 km`,
         { kind: 'raymarch-lit', bodyId: '600km', poseId: pose.id, rayPrepass: 4, rayRock: rock }))),
+  },
+  {
+    id: 'planet-shape-terrain-quality', version: 1,
+    title: 'Terrain v2 march against its reference: landforms in canyons and the blend from the low and grazing poses and three close-ups',
+    // Correctness, not timing: the fast march (as drawn, without the pre-pass) against a slow reference march of the same
+    // field, which is checked in turn against the CPU twin. No vendor required.
+    purpose: 'functional',
+    scenarios: [
+      ...(['canyons', 'blend'] as const).flatMap((biome) => [
+        ...(['low-flyover', 'horizon-grazing'] as const).map((poseId) =>
+          scenario(`march-${biome}-${poseId}-600km`, `March vs reference, landforms, ${biome}, ${poseId.replace('-', ' ')}, 600 km`,
+            { kind: 'raymarch-lit', bodyId: '600km', poseId, rayEdits: 'landforms', rayBiome: biome, spinWarp: 0, spinAngleDeg: 0, probe: 'terrain-quality' })),
+        ...LANDFORM_VIEWS.map(({ id, label, view }) =>
+          scenario(`march-${biome}-${id}-600km`, `March vs reference, landforms, ${biome}, ${label}, 600 km`,
+            { kind: 'raymarch-lit', bodyId: '600km', poseId: 'low-flyover', view, rayEdits: 'landforms', rayBiome: biome, spinWarp: 0, spinAngleDeg: 0, probe: 'terrain-quality' })),
+      ]),
+    ],
   },
 ];

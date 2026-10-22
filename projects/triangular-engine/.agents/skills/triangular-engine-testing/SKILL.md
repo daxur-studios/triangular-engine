@@ -64,7 +64,10 @@ For a timing window over a static view, call `context.measureWindow(scenario, se
 instead of `context.wait(scenario.durationMs)`, pass live sample series (with their timer
 step as `resolution`), and set `windowModes: true` on the adapter. That enables `quick`
 (stops once the series settle; the runner's default) and `soak` (60 s or more, reports
-drift) besides `standard`. Keep `standard` only where `durationMs` drives motion. For a
+drift) besides `standard`. Where `durationMs` drives motion (a sweep, a fly-by), time the
+motion with `modeActionMs(scenario, context.mode)` and give the scenario a `quickMs`: the
+shortest length that still shows what the case checks (standard keeps `durationMs`). An
+unwatched window also runs `quickMs` in quick mode. For a
 feature's cost, give the suite `ablation: { feature, metrics }` and alternate round
 scenarios with `ablation: { group, arm: 'A' | 'B' }`; the session compares them.
 

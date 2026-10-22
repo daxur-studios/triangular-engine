@@ -79,12 +79,12 @@ hook. A page-local error sink is currently one way to do this.
 
 A run has a mode, picked in the runner or with `testMode` in a launch link. Quick and soak change only the
 measurement window, so they need an adapter that times its window with `context.measureWindow(scenario, series?)`
-and declares `windowModes: true`. Other adapters (a fly-by or sweep whose `durationMs` drives the motion) run
-`standard` only, and the runner offers nothing else.
+and declares `windowModes: true`. Other adapters run `standard` only, and the runner offers nothing else. A fly-by
+or sweep whose length drives the motion can join in with `quickMs` and `modeActionMs` (below).
 
 | Mode | Warmup | Window | For |
 |---|---|---|---|
-| `quick` (the runner's default where offered) | at most `QUICK_WARMUP_MS` (0.5 s) | stops once every watched series has settled: at least `QUICK_MIN_WINDOW_MS` (1 s) and `QUICK_MIN_SAMPLES` (60) per series, at most `durationMs`; without series, `QUICK_WINDOW_MS` (2 s) | checking work as you go |
+| `quick` (the runner's default where offered) | at most `QUICK_WARMUP_MS` (0.5 s) | stops once every watched series has settled: at least `QUICK_MIN_WINDOW_MS` (1 s) and `QUICK_MIN_SAMPLES` (60) per series, at most `quickMs ?? durationMs`; without series, `quickMs ?? QUICK_WINDOW_MS` (2 s) | checking work as you go |
 | `standard` | `warmupMs` | `durationMs` | results that count: baselines, final comparisons |
 | `soak` | `warmupMs` | at least `SOAK_WINDOW_MS` (60 s); reports each series' drift | behaviour over time: throttling, leaks, creeping cost |
 
@@ -95,6 +95,18 @@ measure: async (scenario, context) => {
   await context.measureWindow(scenario, [{ name: 'frameMs', samples: () => frames, resolution: 0.1 }]);
   return { metrics: [{ name: 'frameMs', unit: 'ms', source: '...', samples: frames }] };
 },
+```
+
+Each scenario can set its own quick length, `quickMs` (at most `durationMs`): the shortest time that still shows what
+the case checks. In quick mode it is the most a watched window runs and the length of an unwatched one (in place of
+`QUICK_WINDOW_MS`). An adapter whose motion follows the scenario's length (a sweep, a fly-by) can offer quick mode
+too: it sets `windowModes`, runs the motion for `modeActionMs(scenario, context.mode)` (`quickMs` in quick mode,
+otherwise `durationMs`) and gives its motion scenarios a `quickMs`. Without one, the motion keeps its full length.
+
+```ts
+{ id: 'scrub', label: 'Morph scrub 0 → 1 → 0', durationMs: 8000, quickMs: 2400, settings: { ... } }
+// in measure:
+await runSweep(scenario, modeActionMs(scenario, context.mode), context);
 ```
 
 A series has settled when the first and second half of its samples agree on the median within 5% and on the p95

@@ -236,6 +236,15 @@ export function padEdit(radiusM: number): TerrainEdit {
 export const MIN_EDGE_M = 1e-3;
 
 /**
+ * The raymarcher steps by the field times this (the stretched noise is steeper than 1), so it trusts the field to rise
+ * at most 1 / this metres per metre travelled. Where it is steeper a step can land past the surface; the specs measure
+ * how often its steps pass through rock (`shape-ops/march-steps.spec.ts`).
+ */
+export const MARCH_STEP_SCALE = 0.25;
+/** The reference march's scale (`planet-shape-terrain-quality.ts`): it trusts the field up to a slope of 64. */
+export const REFERENCE_STEP_SCALE = MARCH_STEP_SCALE / 16;
+
+/**
  * The shader form of an edit for a camera at `camera` (body-relative, doubles): `a` = centre minus camera (so it stays
  * precise near the camera on an Earth-size body) and the kind code; `b` = (radius, edge, height, strength).
  */

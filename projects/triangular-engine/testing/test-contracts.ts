@@ -10,6 +10,12 @@ export interface TestScenario<TSettings extends object> {
   readonly settings: TSettings;
   readonly durationMs: number;
   readonly warmupMs?: number;
+  /**
+   * The scenario's length in quick mode, at most `durationMs`: the most a watched window runs, the length of an
+   * unwatched one (default `QUICK_WINDOW_MS`), and of a timed action (`modeActionMs`; default `durationMs`). Set it to
+   * the shortest time that still shows what the case checks; standard and soak ignore it.
+   */
+  readonly quickMs?: number;
   /** One round of an A/B comparison (`TestSuite.ablation`): rounds of a group must alternate A, B, A, B. */
   readonly ablation?: { readonly group: string; readonly arm: AblationArm };
   /**
@@ -110,7 +116,7 @@ export type TestProfile = 'visible-browser' | 'human-observed' | 'headless-hardw
 /**
  * How long each measurement window runs (`TestContext.measureWindow`):
  * - `quick`: stops once every watched series has settled (at least `QUICK_MIN_WINDOW_MS` and `QUICK_MIN_SAMPLES`),
- *   at most the scenario's `durationMs`; warmup is cut to at most `QUICK_WARMUP_MS`. For checking work as you go.
+ *   at most the scenario's `quickMs ?? durationMs`; warmup is cut to at most `QUICK_WARMUP_MS`. For checking work as you go.
  * - `standard`: the scenario's `durationMs`. For results that count (baselines, final comparisons).
  * - `soak`: at least `SOAK_WINDOW_MS`, and reports how far each series drifted from the first to the last quarter.
  */
@@ -202,7 +208,8 @@ export interface TestContext {
   /**
    * The measurement window for `scenario` in this run's mode; call it from `measure` in place of
    * `wait(scenario.durationMs)`. Quick mode watches `series` and stops once they settle; without series it runs a
-   * fixed `QUICK_WINDOW_MS` (at most `durationMs`). Rejects on abort, like `wait`.
+   * fixed `quickMs ?? QUICK_WINDOW_MS` (at most `durationMs`). Rejects on abort, like `wait`. For motion whose speed
+   * follows the scenario's length, run it for `modeActionMs(scenario, mode)` instead.
    */
   measureWindow(scenario: TestScenario<object>, series?: readonly TestSettleSeries[]): Promise<TestWindow>;
 }
@@ -218,8 +225,8 @@ export interface TestRunAdapter<TSettings extends object, TSnapshot = unknown> {
   environment?(): Readonly<Record<string, TestSetting>>;
   /**
    * The adapter times its measurement with `context.measureWindow`, so quick and soak modes change its windows.
-   * Without it the runner offers only `standard`: scenario timings that drive an animation (a sweep, a fly-by) must
-   * keep their length.
+   * Without it the runner offers only `standard`. An adapter that drives an animation (a sweep, a fly-by) can set it
+   * too when it times the motion with `modeActionMs`, which keeps the full length unless a scenario sets `quickMs`.
    */
   readonly windowModes?: boolean;
   /**

@@ -75,8 +75,8 @@ function insideBounds(pieces: readonly ShapeBounds[], p: V3, radiusM: number): {
   return { cap, column };
 }
 
-/** A random op of any kind and blend near `centre`, sized in relief units. */
-function randomOp(random: Rng, id: string, radiusM: number, centre: V3, unit: number): ShapeOp {
+/** A random op of any kind and blend near `centre`, sized in relief units; `grade` false leaves graded ops out. */
+function randomOp(random: Rng, id: string, radiusM: number, centre: V3, unit: number, grade = true): ShapeOp {
   const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)];
   const spread = (unit * 6) / radiusM;
   const near = (altitude: number): [number, number, number] => at(around(centre, random() * spread, random() * Math.PI * 2), radiusM, altitude);
@@ -92,10 +92,10 @@ function randomOp(random: Rng, id: string, radiusM: number, centre: V3, unit: nu
       : { kind, points: [near(height()), near(height()), near(height())], radiusM: size() * 0.3 };
     return { id, shape, blend, fidelity };
   }
-  const blend = pick([
+  const blend = pick(([
     { mode: 'add' }, { mode: 'set' }, { mode: 'raise', smoothM: unit * random() }, { mode: 'lower', smoothM: unit * random() },
-    { mode: 'scale', factor: random() * 2 - 0.3 },
-  ] as const);
+    { mode: 'scale', factor: random() * 2 - 0.3 }, { mode: 'grade', slope: 0.5 + random() * 1.5 },
+  ] as const).filter((b) => grade || b.mode !== 'grade'));
   switch (kind) {
     case 'disc':
       return { id, shape: { kind, centre: near(0), radiusM: size(), edgeM, heightM: height() }, blend, fidelity };
@@ -202,6 +202,13 @@ describe('planet shape ops: shapes', () => {
     expect(ground(disc({ mode: 'lower', smoothM: 1 }), d)).toBeCloseTo(0, 2);
     expect(ground(disc({ mode: 'scale', factor: 0.25 }), d, hill)).toBeCloseTo(UNIT * 0.5, 3);
     expect(ground(disc({ mode: 'set' }), d, hill)).toBeCloseTo(UNIT, 3);
+    // Graded: level inside, then 45 degree banks down to lower ground (a fill) or up to higher ground (a cutting).
+    const graded = disc({ mode: 'grade' });
+    expect(ground(graded, d, hill)).toBeCloseTo(UNIT, 3);
+    expect(ground(graded, side(r + UNIT * 0.5), hill)).toBeCloseTo(UNIT * 1.5, 3);
+    expect(ground(graded, side(r + UNIT * 0.5))).toBeCloseTo(UNIT * 0.5, 3);
+    expect(ground(graded, side(r + UNIT * 2))).toBeCloseTo(0, 3);
+    expect(ground(disc({ mode: 'grade', slope: 2 }), side(r + UNIT * 0.25))).toBeCloseTo(UNIT * 0.5, 3);
   });
 
   it('volume ops add and remove rock', () => {
@@ -404,9 +411,11 @@ describe('planet shape ops: index', () => {
     const base = createTerrainFieldCpu(RADIUS, generateNoiseBytes(), []);
     for (const count of [10, 100, 1000]) {
       const random = rng(count);
-      // Spread ops over a region about 40 units across, so tiles hold a share of them.
+      // Spread ops over a region about 40 units across, so tiles hold a share of them. No graded ops: their caps reach
+      // as far as the band under them needs, and hundreds of overlapping random scale ops (factors up to 1.7) stretch
+      // that band without limit, so a graded op ends up covering the body.
       const ops = Array.from({ length: count }, (_, i) =>
-        randomOp(random, `op-${i}`, RADIUS, around(ORIGIN, (random() * UNIT * 40) / RADIUS, random() * Math.PI * 2), UNIT));
+        randomOp(random, `op-${i}`, RADIUS, around(ORIGIN, (random() * UNIT * 40) / RADIUS, random() * Math.PI * 2), UNIT, false));
       const bounds = shapeOpsBounds(ops, RADIUS, BASE_BAND);
       const index = buildShapeOpIndex(bounds, BASE_BAND, 512);
       const compiled = compileShapeOps(ops, RADIUS);

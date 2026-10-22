@@ -262,6 +262,8 @@ export const BAND_DARK_RATIO = 0.15;
 export const BAND_REFERENCE_FLOOR = 0.02;
 /** Share of examined boundary columns that may hold a dark cell. */
 export const BAND_COLUMN_TOLERANCE = 0.02;
+/** Fewer judged columns than this is a sliver of a limb or an edge, not a horizon: the check does not apply (seen from space, one column). */
+export const BAND_MIN_COLUMNS = 8;
 
 const median = (values: number[]): number => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -304,8 +306,10 @@ export function runImageChecks(
 
   // 3. The band between the predicted boundary and the ground: dark cells that neither neighbour explains.
   const band = horizonBand(normal, prediction);
-  const bandNote = `${band.boundaries} predicted boundaries, ${band.skippedDark} skipped because the sky above or the ground below was darker than ${BAND_REFERENCE_FLOOR}, ${band.skippedNeighbours} for lack of neighbours`;
-  if (band.columns > 0) {
+  const bandNote = `${band.boundaries} predicted boundaries, ${band.skippedDark} skipped because the sky above or the ground below was darker than ${BAND_REFERENCE_FLOOR}, ${band.skippedNeighbours} for lack of neighbours`
+    + (band.columns > 0 && band.columns < BAND_MIN_COLUMNS ? `, and only ${band.columns} columns left (needs ${BAND_MIN_COLUMNS})` : '');
+  const bandJudged = band.columns >= BAND_MIN_COLUMNS;
+  if (bandJudged) {
     const darkColumns = band.darkColumns;
     checks.push({
       name: 'No dark band at the horizon',
@@ -326,7 +330,7 @@ export function runImageChecks(
     checks,
     uncoveredPixels: uncovered,
     skyMedianLuma,
-    horizonBandPixels: band.columns > 0 ? band.darkCells : null,
+    horizonBandPixels: bandJudged ? band.darkCells : null,
     horizonColumns: band.columns,
     details: {
       uncoveredPixels: uncovered, skyMedianLuma, skyCells: skyLuma.length, horizonColumns: band.columns,

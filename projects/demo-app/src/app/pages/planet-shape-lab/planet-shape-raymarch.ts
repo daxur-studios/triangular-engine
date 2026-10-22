@@ -74,6 +74,13 @@ export interface RaymarchTerrain {
   readonly prepass?: { readonly material: MeshBasicNodeMaterial; readonly target: RenderTarget };
   /** Pre-pass at the drawing buffer (`width` x `height`) divided by `scale`; 0 turns it off. */
   setPrepass?(scale: number, width: number, height: number): void;
+  /**
+   * Depth probes for the quality tests, for terrains that have them: the shell drawn with `fast` (the march as drawn,
+   * without the pre-pass) or `reference` (a slow march that trusts the field far less) writes per pixel red = distance
+   * along the ray (metres), green = 1 where the steps ran out, blue = the field at the drawn point in footprints there,
+   * alpha = 1 on ground and 0 on sky. Both use the pixel angle last set.
+   */
+  readonly depthProbe?: { readonly fast: MeshBasicNodeMaterial; readonly reference: MeshBasicNodeMaterial };
 }
 
 export function createRaymarchTerrain(): RaymarchTerrain {

@@ -71,6 +71,10 @@ export interface TerrainFieldCpu {
   setShapeOps(ops: readonly ShapeOp[]): void;
   /** Signed field in metres (negative inside rock). */
   density(p: readonly [number, number, number], footprint?: number): number;
+  /** Distance (metres) to the nearest union shape op, `Infinity` if none: the march's step never goes past it. */
+  reach(p: readonly [number, number, number], footprint?: number): number;
+  /** Altitudes (metres) the ground lies between: the field's band, widened by the shape ops. */
+  readonly band: { readonly bottomM: number; readonly topM: number };
   isSolid(p: readonly [number, number, number]): boolean;
   /** Altitude above the body sphere (metres) of the outermost surface along the radial `direction` (need not be unit). */
   groundHeightAt(direction: readonly [number, number, number]): number;
@@ -217,6 +221,8 @@ export function createTerrainFieldCpu(
     canyon,
     rock: (p, footprint) => rock(p, footprint),
     density,
+    reach: (p, footprint) => compiled?.reach(p, footprint) ?? Infinity,
+    get band() { return { bottomM: bottom, topM: top }; },
     isSolid: (p) => density(p) <= 0,
     groundHeightAt(direction) {
       const length = Math.hypot(direction[0], direction[1], direction[2]);

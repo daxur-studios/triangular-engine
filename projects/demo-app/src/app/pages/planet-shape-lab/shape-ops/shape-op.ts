@@ -87,11 +87,16 @@ export type VolumeShape = SphereShape | TubeShape;
  * - `add`: raises the ground by the profile (a cone or ridge on top of whatever is there);
  * - `set`: replaces the ground with the profile (a pad, a road);
  * - `raise`: lifts the ground to at least the profile, `lower`: cuts it to at most the profile (smoothed over `smoothM`);
- * - `scale`: keeps `factor` of the relief (0.25 softens to rounded hills).
+ * - `scale`: keeps `factor` of the relief (0.25 softens to rounded hills);
+ * - `grade`: the profile inside the shape, and outside it banks that rise and fall from the profile's height by `slope`
+ *   (rise over run, default 1) until they meet the ground: a cutting where the ground is higher, a fill where it is
+ *   lower. Unlike `set`, whose edge squeezes any drop into `edgeM` (a cliff the march cannot trust across a canyon),
+ *   the field stays as steep as the banks. The edge is unused; the banks reach as far as the ground band needs.
  */
 export type HeightBlend =
   | { readonly mode: 'add' }
   | { readonly mode: 'set' }
+  | { readonly mode: 'grade'; readonly slope?: number }
   | { readonly mode: 'raise'; readonly smoothM?: number }
   | { readonly mode: 'lower'; readonly smoothM?: number }
   | { readonly mode: 'scale'; readonly factor: number };
@@ -293,7 +298,7 @@ function assertPoints(points: unknown, what: string, maxAngle: number | undefine
 }
 
 const FIDELITY = new Set<FidelityClass>(['silhouette', 'contact', 'topology', 'relaxed']);
-const HEIGHT_BLENDS = new Set(['add', 'set', 'raise', 'lower', 'scale']);
+const HEIGHT_BLENDS = new Set(['add', 'set', 'grade', 'raise', 'lower', 'scale']);
 const VOLUME_BLENDS = new Set(['union', 'subtract']);
 
 /** Throws a readable error unless `op` is a well-formed shape op (ops arrive from save files and game code). */
@@ -356,6 +361,23 @@ export function validateShapeOp(op: ShapeOp): void {
   if (!(isVolumeOp(op) ? VOLUME_BLENDS : HEIGHT_BLENDS).has(mode)) throw new Error(`Shape op ${op.id}: blend ${mode} does not fit a ${shape.kind}`);
   if ('smoothM' in op.blend && op.blend.smoothM !== undefined) assertFinite(op.blend.smoothM, 'smoothM');
   if (op.blend.mode === 'scale') assertFinite(op.blend.factor, 'factor');
+  if (op.blend.mode === 'grade' && op.blend.slope !== undefined) assertPositive(op.blend.slope, 'slope');
+}
+
+/**
+ * Distance (metres, along the body sphere) from the shape's centre or centre line at which its profile ends: the disc
+ * or cone radius, the crater's outer rim, half the path's width. A `grade` op's banks start there.
+ */
+function coreOf(shape: HeightShape): number {
+  switch (shape.kind) {
+    case 'disc':
+    case 'cone':
+      return shape.radiusM;
+    case 'crater':
+      return shape.radiusM + shape.rimWidthM;
+    case 'path':
+      return shape.widthM / 2;
+  }
 }
 
 // ---------- bounds ----------
@@ -367,9 +389,12 @@ function union(a: AltitudeBand, b: AltitudeBand): AltitudeBand {
 /**
  * The op's bounds on a body of `radiusM`, given the band the field already spans where the op sits (`band`, with
  * `bottomM <= 0 <= topM`). The altitude range is what solidity can change over:
- * - `add` shifts the band by the profile's range; `set`, `raise` and `lower` widen it to the profile (plus the smoothing);
+ * - `add` shifts the band by the profile's range; `set`, `grade`, `raise` and `lower` widen it to the profile (plus the
+ *   smoothing);
  * - `scale` stretches it by the factor;
  * - a volume op's range is its shape grown by twice the smoothing (it fades out over the second width).
+ * A `grade` op's caps reach as far as its banks can still meet ground inside the band: beyond that the ground lies
+ * between the banks and the op leaves the value as it was.
  */
 export function shapeOpBounds(op: ShapeOp, radiusM: number, band: AltitudeBand): ShapeBounds[] {
   if (isVolumeOp(op)) {
@@ -398,6 +423,7 @@ export function shapeOpBounds(op: ShapeOp, radiusM: number, band: AltitudeBand):
       range = { bottomM: band.bottomM + Math.min(0, low), topM: band.topM + Math.max(0, high) };
       break;
     case 'set':
+    case 'grade':
       range = union(band, { bottomM: low, topM: high });
       break;
     case 'raise':
@@ -414,23 +440,20 @@ export function shapeOpBounds(op: ShapeOp, radiusM: number, band: AltitudeBand):
     }
   }
   const shape = op.shape;
-  const edge = edgeOf(shape);
+  // The banks clamp the value to within slope x distance of the profile's level; the ground in the band is never
+  // further from that level than this, so past it (with a margin for rounding) the clamp passes the value through.
+  const beyond = op.blend.mode === 'grade'
+    ? (Math.max(high - band.bottomM, band.topM - low) / (op.blend.slope ?? 1)) * 1.01 + MIN_EDGE_M
+    : edgeOf(shape);
   const cap = (centre: V3, reachM: number, extraAngle = 0): ShapeBounds => ({
     direction: normalize(centre), angle: Math.min(Math.PI, reachM / radiusM + extraAngle), ...range,
   });
-  switch (shape.kind) {
-    case 'disc':
-    case 'cone':
-      return [cap(shape.centre, shape.radiusM + edge)];
-    case 'crater':
-      return [cap(shape.centre, shape.radiusM + shape.rimWidthM + edge)];
-    case 'path':
-      return shape.points.slice(1).map((b, i) => {
-        const a = normalize(shape.points[i]);
-        const bn = normalize(b);
-        return cap([a[0] + bn[0], a[1] + bn[1], a[2] + bn[2]], shape.widthM / 2 + edge, angleBetween(a, bn) / 2);
-      });
-  }
+  if (shape.kind !== 'path') return [cap(shape.centre, coreOf(shape) + beyond)];
+  return shape.points.slice(1).map((b, i) => {
+    const a = normalize(shape.points[i]);
+    const bn = normalize(b);
+    return cap([a[0] + bn[0], a[1] + bn[1], a[2] + bn[2]], coreOf(shape) + beyond, angleBetween(a, bn) / 2);
+  });
 }
 
 /** Whether two caps overlap. */
@@ -463,13 +486,19 @@ export function shapeOpsBounds(ops: readonly ShapeOp[], radiusM: number, base: A
 /** An op prepared for evaluation: `apply` takes the value, the point, its unit direction and altitude. */
 type Apply = (value: number, p: V3, direction: V3, altitude: number) => number;
 
-function heightProfile(shape: HeightShape, radiusM: number): (direction: V3) => { height: number; weight: number } {
+/** The profile at a direction: its height, its weight (1 inside, fading over the edge) and the metres beyond its core. */
+type Profile = { height: number; weight: number; beyond: number };
+
+function heightProfile(shape: HeightShape, radiusM: number): (direction: V3) => Profile {
   switch (shape.kind) {
     case 'disc': {
       const centre = normalize(shape.centre);
       const edge = edgeOf(shape);
       const height = shape.heightM ?? 0;
-      return (d) => ({ height, weight: 1 - smoothstep(shape.radiusM, shape.radiusM + edge, angleBetween(d, centre) * radiusM) });
+      return (d) => {
+        const r = angleBetween(d, centre) * radiusM;
+        return { height, weight: 1 - smoothstep(shape.radiusM, shape.radiusM + edge, r), beyond: Math.max(0, r - shape.radiusM) };
+      };
     }
     case 'cone': {
       const centre = normalize(shape.centre);
@@ -477,7 +506,10 @@ function heightProfile(shape: HeightShape, radiusM: number): (direction: V3) => 
       const sharpness = shape.sharpness ?? 1;
       return (d) => {
         const r = angleBetween(d, centre) * radiusM;
-        return { height: shape.heightM * (1 - smoothstep(0, shape.radiusM, r)) ** sharpness, weight: 1 - smoothstep(shape.radiusM, shape.radiusM + edge, r) };
+        return {
+          height: shape.heightM * (1 - smoothstep(0, shape.radiusM, r)) ** sharpness, weight: 1 - smoothstep(shape.radiusM, shape.radiusM + edge, r),
+          beyond: Math.max(0, r - shape.radiusM),
+        };
       };
     }
     case 'crater': {
@@ -490,7 +522,7 @@ function heightProfile(shape: HeightShape, radiusM: number): (direction: V3) => 
         const height = r < shape.radiusM
           ? -shape.depthM + (shape.depthM + shape.rimHeightM) * s * s
           : shape.rimHeightM * (1 - smoothstep(shape.radiusM, outer, r));
-        return { height, weight: 1 - smoothstep(outer, outer + edge, r) };
+        return { height, weight: 1 - smoothstep(outer, outer + edge, r), beyond: Math.max(0, r - outer) };
       };
     }
     case 'path': {
@@ -511,23 +543,27 @@ function heightProfile(shape: HeightShape, radiusM: number): (direction: V3) => 
           }
         });
         const r = best * radiusM;
-        return { height: round ? height * (1 - smoothstep(0, half + edge, r)) : height, weight: 1 - smoothstep(half, half + edge, r) };
+        return { height: round ? height * (1 - smoothstep(0, half + edge, r)) : height, weight: 1 - smoothstep(half, half + edge, r), beyond: Math.max(0, r - half) };
       };
     }
   }
 }
 
+/** Signed distance (metres, negative inside) from body-relative `p` to a volume shape. */
+function volumeSdf(shape: VolumeShape): (p: V3) => number {
+  return shape.kind === 'sphere'
+    ? (p) => Math.hypot(p[0] - shape.centre[0], p[1] - shape.centre[1], p[2] - shape.centre[2]) - shape.radiusM
+    : (p) => {
+      let best = Infinity;
+      for (let i = 1; i < shape.points.length; i++) best = Math.min(best, segmentDistance(p, shape.points[i - 1], shape.points[i]));
+      return best - shape.radiusM;
+    };
+}
+
 function prepare(op: ShapeOp, radiusM: number): Apply {
   if (isVolumeOp(op)) {
     const k = smoothOf(op.blend);
-    const shape = op.shape;
-    const sdf = shape.kind === 'sphere'
-      ? (p: V3) => Math.hypot(p[0] - shape.centre[0], p[1] - shape.centre[1], p[2] - shape.centre[2]) - shape.radiusM
-      : (p: V3) => {
-        let best = Infinity;
-        for (let i = 1; i < shape.points.length; i++) best = Math.min(best, segmentDistance(p, shape.points[i - 1], shape.points[i]));
-        return best - shape.radiusM;
-      };
+    const sdf = volumeSdf(op.shape);
     // A smooth union also lowers a positive value far from the shape (it reads as a nearer surface). Fading the op out
     // between k and 2k from the shape keeps it exactly the identity outside its bounds, so skipping it there (the op
     // index does) changes nothing for later ops. Inside the fade both terms have the input's sign, so solidity holds.
@@ -552,6 +588,14 @@ function prepare(op: ShapeOp, radiusM: number): Apply {
         const { height, weight } = profile(d);
         return weight <= 0 ? value : value + (altitude - height - value) * weight;
       };
+    case 'grade': {
+      const slope = blend.slope ?? 1;
+      return (value, _p, d, altitude) => {
+        const { height, beyond } = profile(d);
+        const level = altitude - height;
+        return Math.max(Math.min(value, level + slope * beyond), level - slope * beyond);
+      };
+    }
     case 'raise':
     case 'lower': {
       const k = smoothOf(blend);
@@ -578,13 +622,24 @@ export interface CompiledShapeOps {
   readonly ops: readonly ShapeOp[];
   /** The field value at body-relative `p` after the ops (or only those at `indices`, in order). */
   apply(value: number, p: V3, footprintM?: number, indices?: readonly number[]): number;
+  /**
+   * Distance (metres) from `p` to the nearest union shape not skipped at `footprintM`, `Infinity` if none: the march
+   * never steps further, since beyond its fade a union leaves the field blind to the shape (the shader's `reach`).
+   */
+  reach(p: V3, footprintM?: number): number;
 }
 
 export function compileShapeOps(ops: readonly ShapeOp[], radiusM: number): CompiledShapeOps {
   ops.forEach(validateShapeOp);
   const applies = ops.map((op) => prepare(op, radiusM));
+  const unions = ops.flatMap((op) => (isVolumeOp(op) && op.blend.mode === 'union' ? [{ op, sdf: volumeSdf(op.shape) }] : []));
   return {
     ops,
+    reach(p, footprintM = 0) {
+      let nearest = Infinity;
+      for (const { op, sdf } of unions) if (!(footprintM > 0 && skipsOp(op, footprintM))) nearest = Math.min(nearest, sdf(p));
+      return nearest;
+    },
     apply(value, p, footprintM = 0, indices) {
       const length = Math.hypot(p[0], p[1], p[2]);
       const direction: V3 = [p[0] / length, p[1] / length, p[2] / length];

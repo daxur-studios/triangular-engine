@@ -1,5 +1,5 @@
 import {
-  CHECK_FRAME_WIDTH, LIT_SKY_MIN_LUMA, UNCOVERED_TOLERANCE_PX, horizonBand, isSentinelPixel, predictView, reduceFrame, runImageChecks,
+  BAND_MIN_COLUMNS, CHECK_FRAME_WIDTH, LIT_SKY_MIN_LUMA, UNCOVERED_TOLERANCE_PX, horizonBand, isSentinelPixel, predictView, reduceFrame, runImageChecks,
   sunLocalDirection, type Surface,
 } from './atmosphere-lab-image-checks';
 import { syntheticFrames } from './atmosphere-lab-image-checks.testing';
@@ -174,6 +174,19 @@ describe('atmosphere lab image checks', () => {
       };
       expect(failed(darken(1))).toEqual([]);
       expect(failed(darken(4))).toEqual(['No dark band at the horizon']);
+    });
+
+    it('does not judge a sliver of boundary (a limb seen from space), but still says so where a horizon is expected', () => {
+      const narrow = BAND_MIN_COLUMNS - 1;
+      const frames = syntheticFrames(STATE, { bandRows: 1 }, narrow, 48);
+      const quiet = runImageChecks(STATE, frames, { litSky: false, horizon: false });
+      expect(quiet.checks.map((item) => item.name)).not.toContain('No dark band at the horizon');
+      expect(quiet.horizonBandPixels).toBeNull();
+      const insists = runImageChecks(STATE, frames, expectAll);
+      expect(insists.checks.find((item) => item.name === 'No dark band at the horizon')?.detail)
+        .toContain(`only ${narrow} columns left (needs ${BAND_MIN_COLUMNS})`);
+      expect(runImageChecks(STATE, syntheticFrames(STATE, { bandRows: 1 }, BAND_MIN_COLUMNS, 48), expectAll)
+        .checks.find((item) => item.name === 'No dark band at the horizon')?.passed).toBeFalse();
     });
 
     it('fails any sentinel the mesh leaves beyond a tolerance of a cell', () => {

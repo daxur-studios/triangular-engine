@@ -76,6 +76,11 @@ function opsAround(radiusM: number, base: V3): ShapeOp[] {
     { id: 'boulder', shape: { kind: 'sphere', centre: at(-5, 3, 0.5), radiusM: 0.8 * u }, blend: { mode: 'union', smoothM: 0.3 * u } },
     { id: 'tunnel', shape: { kind: 'tube', points: [at(2, 5, -0.5), at(5, 4, 0), at(8, 1, -0.3)], radiusM: 0.7 * u }, blend: { mode: 'subtract', smoothM: 0.2 * u } },
     { id: 'flat-road', shape: { kind: 'path', points: [at(-2, -2), at(6, 6)], heightsM: [0.3 * u, 0.3 * u], widthM: u, edgeM: 0.5 * u, profile: 'flat' }, blend: { mode: 'set' } },
+    {
+      id: 'graded-road', shape: { kind: 'path', points: [at(-9, 4), at(-1, 9)], heightsM: [-0.4 * u, 0.6 * u], widthM: 0.8 * u },
+      blend: { mode: 'grade', slope: 1.5 }, fidelity: 'contact',
+    },
+    { id: 'graded-pad', shape: { kind: 'disc', centre: at(9, 9), radiusM: 1.5 * u, heightM: 0.4 * u }, blend: { mode: 'grade' } },
   ];
 }
 
@@ -165,7 +170,7 @@ describe('shape ops on the GPU', () => {
     gpu.dispose();
   });
 
-  it('reaches the nearest union shape exactly, past the tiles that list it, and ignores the other volume ops', async () => {
+  it('reaches the nearest union shape exactly, past the tiles that list it, and ignores the other volume ops (and the CPU twin agrees)', async () => {
     const radiusM = 600_000;
     const u = unitM(radiusM);
     const ops = shapeOpPreset('landforms', radiusM);
@@ -194,7 +199,11 @@ describe('shape ops on the GPU', () => {
       points.map((p) => [[p[0] - camera[0], p[1] - camera[1], p[2] - camera[2], 0]]),
       (slot) => vec4(gpu.reach(slot(0).xyz, float(0)), 0, 0, 0),
     );
-    points.forEach((p, i) => expect(Math.abs(result[i * 4] - exact(p))).withContext(`point ${i}`).toBeLessThan(u * 1e-3));
+    const cpu = compileShapeOps(ops, radiusM);
+    points.forEach((p, i) => {
+      expect(Math.abs(result[i * 4] - exact(p))).withContext(`point ${i}`).toBeLessThan(u * 1e-3);
+      expect(cpu.reach(p)).withContext(`CPU, point ${i}`).toBeCloseTo(exact(p), 6);
+    });
     gpu.dispose();
   });
 

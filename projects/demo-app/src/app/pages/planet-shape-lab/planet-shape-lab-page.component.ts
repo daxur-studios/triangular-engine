@@ -22,7 +22,10 @@ import { DEFAULT_RAY_STEPS, createRaymarchTerrain, type RaymarchTerrain } from '
 import { createLitRaymarchTerrain } from './planet-shape-raymarch-lit';
 import { RAY_BIOMES, RAY_ROCKS, type RayBiome, type RayRock } from './planet-shape-tests';
 import { QUALITY_PROBE_SIZE, frameFromProbeRgba, type QualityFrame } from './planet-shape-quality';
-import { createPlanetShapeTestAdapter, type PlanetShapeQualityProbe, type PlanetShapeTestHost } from './planet-shape-test-adapter';
+import { TERRAIN_PROBE_SIZE, terrainFrameFromRgba, type TerrainDepthFrame } from './planet-shape-terrain-quality';
+import {
+  createPlanetShapeTestAdapter, type PlanetShapeQualityProbe, type PlanetShapeTerrainProbe, type PlanetShapeTestHost,
+} from './planet-shape-test-adapter';
 import { PLANET_SHAPE_TEST_HISTORY, type PlanetShapeTestSettings } from './planet-shape-tests';
 
 /**
@@ -44,6 +47,9 @@ function formatAltitude(metres: number): string {
  * The browser may still ignore it; `gpu.vendor` records what it chose.
  */
 const POWER_PREFERENCE = 'high-performance (engine default)';
+
+/** How long the terrain probe waits for its pipelines to compile before it gives up. */
+const TERRAIN_PROBE_COMPILE_MS = 60_000;
 
 /** Longest side of a case thumbnail, in pixels. */
 const THUMBNAIL_WIDTH = 240;
@@ -329,6 +335,8 @@ export class PlanetShapeLabPageComponent {
   private terrainCompile: 'pending' | 'running' | 'done' = 'pending';
   /** Quality probe target and camera, made on first use (`planet-shape-quality.ts`). */
   private probe: { target: RenderTarget; camera: PerspectiveCamera; scene: Scene; mesh: Mesh } | undefined;
+  /** Terrain probe target, camera and shell, made on first use (`planet-shape-terrain-quality.ts`). */
+  private terrainProbeParts: { target: RenderTarget; camera: PerspectiveCamera; scene: Scene; mesh: Mesh } | undefined;
   private readonly beforeRenderCallbacks = new Set<() => void>();
   /** The pre-pass draws the visible shell again, with the terrain's pre-pass material, into the terrain's target. */
   private readonly prepassMesh = Object.assign(new Mesh(), { frustumCulled: false });
@@ -341,12 +349,13 @@ export class PlanetShapeLabPageComponent {
     read: () => ({
       kind: this.bodyDrawn() ? this.surface() : 'empty', raySteps: this.raySteps(), rayPrepass: this.rayPrepass(), rayEdits: this.rayEdits(), rayBiome: this.rayBiome(), rayRock: this.rayRock(), seed: this.seed, bodyId: this.bodyId(), poseId: this.poseId(),
       spinWarp: this.spinWarp(), spinAngleDeg: (this.spinAngle * 180) / Math.PI, features: this.featureState(),
-      morph: this.morph(),
+      morph: this.morph(), ...(this.freeCamera() ? { view: this.freeView } : {}),
     }),
     apply: (settings) => {
       if (settings.seed !== this.seed) throw new Error(`Unknown seed ${settings.seed}; this lab is fixed to ${this.seed}`);
       this.setBody(settings.bodyId);
       this.setPose(settings.poseId);
+      if (settings.view) this.setFreeView(settings.view);
       this.spinWarp.set(settings.spinWarp);
       this.spinAngle = (settings.spinAngleDeg * Math.PI) / 180;
       this.featureState.set(settings.features);
@@ -383,6 +392,7 @@ export class PlanetShapeLabPageComponent {
       compress: { maxWidthOrHeight: THUMBNAIL_WIDTH, fileType: 'image/webp', quality: 0.6 },
     }),
     qualityProbe: () => this.qualityProbe(),
+    terrainProbe: () => this.terrainProbe(),
   };
   readonly testAdapter: TestRunAdapter<PlanetShapeTestSettings, PlanetShapeTestSettings> = createPlanetShapeTestAdapter(this.testHost);
 
@@ -448,6 +458,7 @@ export class PlanetShapeLabPageComponent {
         entry.terrain.material.dispose();
       }
       this.probe?.target.dispose();
+      this.terrainProbeParts?.target.dispose();
       this.sphere.material.dispose();
       this.sphere.probeMaterial.dispose();
     });
@@ -487,6 +498,14 @@ export class PlanetShapeLabPageComponent {
   setFreeCamera(on: boolean): void {
     if (on) this.freeView = cameraViewFromPose(this.poseId(), this.bodyId());
     this.freeCamera.set(on);
+    this.drag = undefined;
+    this.resolvePose();
+  }
+
+  /** The free camera at a given view (a test's close-up). */
+  setFreeView(view: CameraView): void {
+    this.freeView = view;
+    this.freeCamera.set(true);
     this.drag = undefined;
     this.resolvePose();
   }
@@ -745,35 +764,8 @@ export class PlanetShapeLabPageComponent {
     }
     const { target, camera, scene, mesh } = this.probe;
     mesh.geometry = this.mesh.geometry;
-    camera.fov = fovDeg;
-    camera.aspect = width / height;
-    camera.near = this.pose.near;
-    camera.far = this.pose.far;
-    camera.updateProjectionMatrix();
-    camera.position.set(0, 0, 0);
-    camera.quaternion.copy(this.cameraQuaternion);
-    camera.updateMatrixWorld();
-    const renderer = this.engine.renderer as unknown as {
-      getRenderTarget(): RenderTarget | null; setRenderTarget(target: RenderTarget | null): void;
-      getClearColor(target: Color): Color; getClearAlpha(): number; setClearColor(color: Color | number, alpha: number): void;
-      render(scene: Scene, camera: PerspectiveCamera): void;
-      readRenderTargetPixelsAsync(target: RenderTarget, x: number, y: number, width: number, height: number): Promise<ArrayBufferView>;
-    };
-    const frame = async (): Promise<QualityFrame> => {
-      const previousTarget = renderer.getRenderTarget();
-      const previousClear = renderer.getClearColor(new Color());
-      const previousAlpha = renderer.getClearAlpha();
-      try {
-        renderer.setRenderTarget(target);
-        renderer.setClearColor(0x000000, 0);
-        renderer.render(scene, camera);
-      } finally {
-        renderer.setRenderTarget(previousTarget);
-        renderer.setClearColor(previousClear, previousAlpha);
-      }
-      const rgba = await renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height);
-      return frameFromProbeRgba(rgba as Float32Array, width, height);
-    };
+    this.aimProbeCamera(camera, fovDeg, width / height);
+    const frame = async (): Promise<QualityFrame> => frameFromProbeRgba(await this.drawOffscreen(scene, camera, target, width, height), width, height);
     const first = await frame();
     const second = await frame();
     return {
@@ -782,6 +774,89 @@ export class PlanetShapeLabPageComponent {
       radiusM: bodyById(this.bodyId()).radiusM,
       segments: SPHERE_SEGMENTS,
     };
+  }
+
+  /**
+   * Draws terrain v2 of the current view into a float target with its depth probes (distance in red, ran-out flag in
+   * green, ground in alpha): the fast march twice, then the reference march, each read back before the next. The pixel
+   * angle is the probe's while it draws, and the screen's again after.
+   */
+  private async terrainProbe(): Promise<PlanetShapeTerrainProbe> {
+    const entry = this.rayTerrains.find((candidate) => candidate.surface === 'raymarch-lit');
+    const probes = entry?.terrain.depthProbe;
+    if (!entry?.shell || !probes) throw new Error('No terrain v2 depth probe (WebGPU unavailable)');
+    const { width, height } = TERRAIN_PROBE_SIZE;
+    const fovDeg = this.engine.camera instanceof PerspectiveCamera ? this.engine.camera.fov : 60;
+    if (!this.terrainProbeParts) {
+      const scene = new Scene();
+      const mesh = new Mesh(entry.shell.geometry, probes.fast);
+      mesh.frustumCulled = false;
+      scene.add(mesh);
+      this.terrainProbeParts = { target: new RenderTarget(width, height, { type: FloatType, depthBuffer: true }), camera: new PerspectiveCamera(), scene, mesh };
+    }
+    const { target, camera, scene, mesh } = this.terrainProbeParts;
+    mesh.geometry = entry.shell.geometry;
+    this.aimProbeCamera(camera, fovDeg, width / height);
+    const pixelAngle = (2 * Math.tan((fovDeg * Math.PI) / 360)) / height;
+    const frame = async (material: typeof probes.fast): Promise<TerrainDepthFrame> => {
+      mesh.material = material;
+      // A new material's pipeline compiles in the background and the draw is skipped until it is ready: every pixel
+      // writes a distance (sky too), so an all-zero target means nothing was drawn yet.
+      const began = performance.now();
+      while (true) {
+        entry.terrain.setPixelAngle(pixelAngle);
+        const rgba = this.drawOffscreen(scene, camera, target, width, height);
+        this.updatePixelAngle();
+        const pixels = await rgba;
+        if (pixels.some((value, i) => i % 4 === 0 && value !== 0)) return terrainFrameFromRgba(pixels, width, height);
+        if (performance.now() - began > TERRAIN_PROBE_COMPILE_MS) throw new Error(`Terrain probe drew nothing for ${TERRAIN_PROBE_COMPILE_MS / 1000} s`);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    };
+    const fast = await frame(probes.fast);
+    const again = await frame(probes.fast);
+    const reference = await frame(probes.reference);
+    return {
+      fast, again, reference, pixelAngle,
+      camera: { position: this.pose.position, forward: this.pose.forward, up: this.pose.up, fovDeg, near: this.pose.near, far: this.pose.far },
+    };
+  }
+
+  /** Points an offscreen probe camera like the screen's: at the origin, the pose's orientation and clip range. */
+  private aimProbeCamera(camera: PerspectiveCamera, fovDeg: number, aspect: number): void {
+    camera.fov = fovDeg;
+    camera.aspect = aspect;
+    camera.near = this.pose.near;
+    camera.far = this.pose.far;
+    camera.updateProjectionMatrix();
+    camera.position.set(0, 0, 0);
+    camera.quaternion.copy(this.cameraQuaternion);
+    camera.updateMatrixWorld();
+  }
+
+  /**
+   * Draws `scene` into the float `target`, cleared to zero, synchronously between engine frames with the renderer's
+   * target and clear restored at once (so the screen never shows it), then reads it back.
+   */
+  private drawOffscreen(scene: Scene, camera: PerspectiveCamera, target: RenderTarget, width: number, height: number): Promise<Float32Array> {
+    const renderer = this.engine.renderer as unknown as {
+      getRenderTarget(): RenderTarget | null; setRenderTarget(target: RenderTarget | null): void;
+      getClearColor(target: Color): Color; getClearAlpha(): number; setClearColor(color: Color | number, alpha: number): void;
+      render(scene: Scene, camera: PerspectiveCamera): void;
+      readRenderTargetPixelsAsync(target: RenderTarget, x: number, y: number, width: number, height: number): Promise<ArrayBufferView>;
+    };
+    const previousTarget = renderer.getRenderTarget();
+    const previousClear = renderer.getClearColor(new Color());
+    const previousAlpha = renderer.getClearAlpha();
+    try {
+      renderer.setRenderTarget(target);
+      renderer.setClearColor(0x000000, 0);
+      renderer.render(scene, camera);
+    } finally {
+      renderer.setRenderTarget(previousTarget);
+      renderer.setClearColor(previousClear, previousAlpha);
+    }
+    return renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height) as Promise<Float32Array>;
   }
 
   private refreshHud(renderer: GpuAdapterRendererLike): void {

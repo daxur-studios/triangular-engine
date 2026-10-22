@@ -5,6 +5,10 @@ import {
   DEPTH_SAMPLE_STRIDE, changedPixels, compareQuality, referenceSphereFrame, surfaceCoordinateErrors, type QualityFrame,
   type QualityProbeCamera,
 } from './planet-shape-quality';
+import {
+  BEHIND_FOOTPRINTS, CPU_CHECK_GRID, EDGE_PIXELS, OFF_SURFACE_FOOTPRINTS, TERRAIN_SAMPLE_STRIDE, checkReferenceOnCpu, compareTerrainDepth, labFieldCpu,
+  type TerrainDepthFrame,
+} from './planet-shape-terrain-quality';
 import type { PlanetShapeTestSettings } from './planet-shape-tests';
 
 /** What the last completed render drew, from the renderer's own counters (shadow passes included). */
@@ -66,6 +70,17 @@ export interface PlanetShapeQualityProbe {
   readonly segments: { readonly width: number; readonly height: number };
 }
 
+/** The terrain v2 depth probe of the current view (`planet-shape-terrain-quality.ts`). */
+export interface PlanetShapeTerrainProbe {
+  /** The march as drawn (without the pre-pass), twice, and the reference march. */
+  readonly fast: TerrainDepthFrame;
+  readonly again: TerrainDepthFrame;
+  readonly reference: TerrainDepthFrame;
+  readonly camera: QualityProbeCamera;
+  /** Radians per probe pixel. */
+  readonly pixelAngle: number;
+}
+
 /** What the lab page offers the adapter: its normal actions plus read-only probes. Implemented by the page. */
 export interface PlanetShapeTestHost {
   /** The full state a run changes; also the snapshot a run restores. */
@@ -93,6 +108,8 @@ export interface PlanetShapeTestHost {
   thumbnail?(): Promise<Blob | undefined>;
   /** Draws the current view twice into the quality probe's float target and reads both back. Optional: WebGPU pages only. */
   qualityProbe?(): Promise<PlanetShapeQualityProbe>;
+  /** Draws terrain v2 of the current view with its fast march (twice) and its reference march, and reads them back. */
+  terrainProbe?(): Promise<PlanetShapeTerrainProbe>;
 }
 
 const READY_TIMEOUT_MS = 60_000;
@@ -110,6 +127,8 @@ export function settingsMismatches(actual: PlanetShapeTestSettings, expected: Pl
   for (const key of ['kind', 'seed', 'bodyId', 'poseId', 'spinWarp', 'morph', 'raySteps', 'rayPrepass', 'rayEdits', 'rayBiome', 'rayRock'] as const) {
     if (actual[key] !== expected[key]) out.push(`${key}: expected ${expected[key]}, found ${actual[key]}`);
   }
+  const view = (settings: PlanetShapeTestSettings) => (settings.view ? JSON.stringify(settings.view) : 'the pose');
+  if (view(actual) !== view(expected)) out.push(`view: expected ${view(expected)}, found ${view(actual)}`);
   return [...out, ...featureMismatches(actual.features, expected.features)];
 }
 
@@ -197,6 +216,114 @@ async function measureQuality(host: PlanetShapeTestHost, scenario: TestScenario<
 }
 
 /**
+ * Most of the drawn pixels the fast march may get wrong (`compareTerrainDepth`: off the surface, behind it, or drawn by
+ * one march only away from an outline). On 2026-10-22 the ten landform views measured 0.00-0.12%, and the same views
+ * with the road `set` across the canyon (the bands seen through the arch) 1.66%.
+ */
+const MAX_WRONG_SHARE = 0.005;
+/** The engine's frame timer gives up on a readback while a probe holds the GPU: expected during a probe, not a fault. */
+const PROBE_TIMER_ERROR = /^gpuTiming: GpuReadbackTimeoutError/;
+/** Most footprints the GPU reference may be off the CPU march on a grid pixel, and how many grid pixels may be. */
+const REFERENCE_CPU_FOOTPRINTS = 2;
+const REFERENCE_CPU_OFF = 2;
+/**
+ * Most |field| (footprints) at a reference point. The reference stops on a crossing to a twentieth of a pixel, so the
+ * field there is the field's own steepness at grazing views, not a miss: on 2026-10-22 it measured up to 2.2 on an
+ * integrated GPU and 4.0 on an RTX 3080 (road-along). A refinement that failed, or a field that jumps, shows far above.
+ */
+const REFERENCE_FIELD_FOOTPRINTS = 8;
+
+/**
+ * Plan 055 terrain quality of the current view: terrain v2's march as drawn against its slow reference march, and the
+ * reference against the CPU twin on a grid of pixels (`planet-shape-terrain-quality.ts`). A correctness case.
+ */
+async function measureTerrainQuality(host: PlanetShapeTestHost, scenario: TestScenario<PlanetShapeTestSettings>, context: TestContext): Promise<TestObservation> {
+  if (!host.terrainProbe) throw new Error('This page has no terrain probe');
+  await waitForFrames(host, 2, context);
+  const before = host.errors();
+  host.resetErrors();
+  const probe = await host.terrainProbe();
+  await waitForFrames(host, 2, context);
+  const during = host.errors();
+  const timerStalled = PROBE_TIMER_ERROR.test(during);
+  const error = before || (timerStalled ? '' : during);
+  const result = compareTerrainDepth(probe.fast, probe.reference, probe.pixelAngle);
+  const flicker = changedPixels(probe.fast, probe.again);
+  const settings = scenario.settings;
+  const cpu = checkReferenceOnCpu(probe.reference, labFieldCpu(settings), probe.camera, probe.pixelAngle);
+  const cpuOff = cpu.errorFootprints.filter((error) => error > REFERENCE_CPU_FOOTPRINTS).length + cpu.coverageMismatch;
+  const mismatches = settingsMismatches(host.read(), settings);
+  const { width, height } = probe.fast;
+  const checks: TestCheck[] = [
+    { name: 'Scenario state applied as specified', passed: mismatches.length === 0, detail: mismatches.join('; ') || undefined },
+    { name: 'WebGPU backend in use', passed: host.backendIsWebGpu(), detail: String(host.environment()['backend']) },
+    { name: 'Terrain v2, unmorphed', passed: settings.kind === 'raymarch-lit' && settings.morph === 0, detail: `${settings.kind}, morph ${settings.morph}` },
+    { name: 'Terrain drawn by both marches', passed: result.drawnFast > 0 && result.drawnReference > 0, detail: `fast ${result.drawnFast} px, reference ${result.drawnReference} px` },
+    { name: 'Reference march finished every pixel', passed: probe.reference.ranOut === 0, detail: `${probe.reference.ranOut} px ran out of steps` },
+    {
+      name: `Reference drew on the surface (field within ${REFERENCE_FIELD_FOOTPRINTS} footprints of zero)`,
+      passed: result.referenceFieldMax <= REFERENCE_FIELD_FOOTPRINTS, detail: `most ${result.referenceFieldMax.toFixed(2)} footprints`,
+    },
+    {
+      name: `Reference agrees with the CPU march (within ${REFERENCE_CPU_FOOTPRINTS} footprints on all but ${REFERENCE_CPU_OFF} grid pixels)`,
+      passed: cpu.compared >= 10 && cpuOff <= REFERENCE_CPU_OFF,
+      detail: `${cpu.compared} compared, ${cpuOff} off (${cpu.coverageMismatch} drawn by one only)`,
+    },
+    {
+      name: `Fast march matches the reference (at most ${MAX_WRONG_SHARE * 100}% of pixels off the surface, behind it, or drawn by one only away from edges)`,
+      passed: result.wrongShare <= MAX_WRONG_SHARE,
+      detail: `${(result.wrongShare * 100).toFixed(3)}%: ${result.offSurface} px off the surface, ${result.behind} px behind it, `
+        + `${result.coverageWrong} px drawn by one only; ${result.edgeShift} px of edge shift`,
+    },
+    { name: 'No flicker: two fast frames at a still pose match', passed: flicker === 0, detail: `${flicker} px differ` },
+    { name: 'No engine or console error', passed: error === '', detail: error || undefined },
+  ];
+  const metrics: TestMetric[] = [
+    {
+      name: 'wrongPixelShare', unit: 'ratio', samples: [result.wrongShare],
+      source: `Pixels drawn off the surface (field over ${OFF_SURFACE_FOOTPRINTS} footprints) or behind it (over ${BEHIND_FOOTPRINTS} footprints along the ray), `
+        + `or by one march only more than ${EDGE_PIXELS} px from an outline, over the pixels either draws (${width}x${height} probe)`,
+    },
+    {
+      name: 'surfaceFieldFootprints', unit: 'footprints', samples: result.fieldFootprints,
+      source: `|field at the fast march's drawn point| over the footprint there, every ${TERRAIN_SAMPLE_STRIDE} px where both draw`,
+      unavailableReason: result.fieldFootprints.length ? undefined : 'No pixel drawn by both marches',
+    },
+    { name: 'offSurfacePixels', unit: 'px', samples: [result.offSurface], source: `Fast points in front of the reference with the field over ${OFF_SURFACE_FOOTPRINTS} footprints from zero` },
+    { name: 'behindPixels', unit: 'px', samples: [result.behind], source: `Fast points more than ${BEHIND_FOOTPRINTS} footprints behind the reference along the ray` },
+    { name: 'coverageWrongPixels', unit: 'px', samples: [result.coverageWrong], source: `Pixels drawn by one march only, more than ${EDGE_PIXELS} px from the reference's outline` },
+    { name: 'edgeShiftPixels', unit: 'px', samples: [result.edgeShift], source: `Pixels off or drawn by one march only within ${EDGE_PIXELS} px of where the reference agrees: fatter or thinner edges` },
+    {
+      name: 'referenceCpuErrorFootprints', unit: 'footprints', samples: cpu.errorFootprints,
+      source: `|GPU reference - CPU reference march (doubles)| over the footprint, on a ${CPU_CHECK_GRID.columns}x${CPU_CHECK_GRID.rows} pixel grid where both draw`,
+      unavailableReason: cpu.errorFootprints.length ? undefined : 'No grid pixel drawn by both',
+    },
+    { name: 'fastRanOutPixels', unit: 'px', samples: [probe.fast.ranOut], source: 'Fast march pixels that ran out of steps inside the band (drawn where they stopped)' },
+    { name: 'flickerPixels', unit: 'px', samples: [flicker], source: 'Pixels whose drawn flag or distance differ between two fast frames of the same view' },
+  ];
+  return {
+    metrics,
+    checks,
+    details: {
+      probeWidth: width, probeHeight: height, pixelAngle: probe.pixelAngle, drawnFast: result.drawnFast, drawnReference: result.drawnReference,
+      offSurfacePixels: result.offSurface, behindPixels: result.behind, coverageWrongPixels: result.coverageWrong, edgeShiftPixels: result.edgeShift,
+      referenceRanOut: probe.reference.ranOut, referenceFieldMaxFootprints: result.referenceFieldMax,
+      frameTimerStalledByProbe: timerStalled,
+      referenceCpuCompared: cpu.compared, referenceCpuCoverageMismatch: cpu.coverageMismatch,
+      surfaceFieldMaxFootprints: max(result.fieldFootprints), referenceCpuErrorMaxFootprints: max(cpu.errorFootprints),
+    },
+    validityIssues: [],
+    limitations: [
+      'The fast frame is the march as drawn but without the pre-pass (the probe target has its own size); the pre-pass can only start a ray later, so it may miss features thinner than a coarse pixel that this does not see.',
+      `The reference trusts the field up to a slope of 64 and never steps under a pixel: ground thinner than a pixel can still be missed by both. It is checked against the CPU twin on ${CPU_CHECK_GRID.columns * CPU_CHECK_GRID.rows} pixels only.`,
+      'A fast point in front of the reference with the field near zero passes however far it is along the ray: that is the half-pixel cone stop at a grazing angle, and on screen the same place.',
+      'The probe holds the GPU long enough for the engine\'s frame timer to give up on a readback; that error is expected during the probe and not counted.',
+      'Shading is not compared: a pixel at the right depth with a wrong normal is not caught.',
+    ],
+  };
+}
+
+/**
  * Game-owned adapter for the planet shape lab. All page knowledge sits behind {@link PlanetShapeTestHost}; the shared
  * runner only sees settings, observations and snapshots.
  */
@@ -231,6 +358,7 @@ export function createPlanetShapeTestAdapter(host: PlanetShapeTestHost): TestRun
     ready: (context, scenario) => waitSettled(scenario, context),
     measure: async (scenario, context): Promise<TestObservation> => {
       if (scenario.settings.probe === 'quality') return measureQuality(host, scenario, context);
+      if (scenario.settings.probe === 'terrain-quality') return measureTerrainQuality(host, scenario, context);
       if (host.isSampling()) throw new Error('Another frame sampling window is already active');
       const intervals: number[] = [];
       const submit: number[] = [];

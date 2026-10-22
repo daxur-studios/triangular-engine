@@ -1,6 +1,6 @@
 import type { TestSettleSeries } from './test-contracts';
 import {
-  modeWarmupMs, modeWindowMs, QUICK_MIN_WINDOW_MS, QUICK_WARMUP_MS, QUICK_WINDOW_MS, runMeasureWindow, seriesDrift, seriesSettled,
+  modeActionMs, modeWarmupMs, modeWindowMs, QUICK_MIN_WINDOW_MS, QUICK_WARMUP_MS, QUICK_WINDOW_MS, runMeasureWindow, seriesDrift, seriesSettled,
   SOAK_WINDOW_MS,
 } from './test-window';
 
@@ -70,5 +70,21 @@ describe('test measurement window', () => {
     const long = await runMeasureWindow({ durationMs: 400 }, 'soak', [{ name: 's', samples: () => soak.samples }], soak.wait, soak.now);
     expect(long.elapsedMs).toBe(SOAK_WINDOW_MS);
     expect(long.drift?.['s']).toBeCloseTo(0.2, 6);
+  });
+
+  it('gives a scenario its own quick length for windows and timed actions', async () => {
+    const scenario = { durationMs: 8000, quickMs: 1500 };
+    expect(modeActionMs(scenario, 'quick')).toBe(1500);
+    expect(modeActionMs(scenario, 'standard')).toBe(8000);
+    expect(modeActionMs(scenario, 'soak')).toBe(8000);
+    expect(modeActionMs({ durationMs: 8000 }, 'quick')).toBe(8000);
+    expect(modeWindowMs(scenario, 'quick')).toBe(1500);
+    const unwatched = clock(() => 1);
+    expect((await runMeasureWindow({ durationMs: 5000, quickMs: 700 }, 'quick', [], unwatched.wait, unwatched.now)).elapsedMs).toBe(700);
+    const ramp = clock((t) => t);
+    const capped = await runMeasureWindow(scenario, 'quick', [{ name: 'ramp', samples: () => ramp.samples }], ramp.wait, ramp.now);
+    expect(capped).toEqual(jasmine.objectContaining({ stoppedBy: 'max', elapsedMs: 1500 }));
+    const standard = clock(() => 1);
+    expect((await runMeasureWindow(scenario, 'standard', [], standard.wait, standard.now)).elapsedMs).toBe(8000);
   });
 });

@@ -63,15 +63,18 @@ export function shapeOpPreset(id: TerrainEditPresetId, radiusM: number): readonl
       id: 'ridge', shape: { kind: 'path', points: [at(14, 10), at(24, 14), at(36, 12)], heightsM: [2 * u, 3 * u, 2.5 * u], widthM: 3 * u, edgeM: 2 * u, profile: 'round' },
       blend: { mode: 'raise', smoothM: 0.5 * u },
     },
+    // Graded, not set: it crosses canyon country, and a set edge would turn the canyon's depth into a sheer cliff.
+    // The banks rise and fall at 45 degrees from the road until they meet the ground (a cutting or a fill).
     {
-      id: 'road', shape: { kind: 'path', points: [at(2, 0), at(12, 1), at(22, -1)], heightsM: [0, 0.2 * u, 0.4 * u], widthM: 0.6 * u, edgeM: 0.6 * u },
-      blend: { mode: 'set' }, fidelity: 'contact',
+      id: 'road', shape: { kind: 'path', points: [at(2, 0), at(12, 1), at(22, -1)], heightsM: [0, 0.2 * u, 0.4 * u], widthM: 0.6 * u },
+      blend: { mode: 'grade' }, fidelity: 'contact',
     },
     // A ledge on the mountain's near flank (the cone is 2.3 units high there), sticking out over the slope below.
     { id: 'overhang', shape: { kind: 'sphere', centre: at(25.8, 4, 2.6), radiusM: 1.3 * u }, blend: { mode: 'union', smoothM: 0.3 * u }, fidelity: 'topology' },
-    // A bent tube rising out of the plain and back into it.
+    // A bent tube rising out of the plain and back into it. The legs go on straight down past the deepest canyon floor
+    // (CANYON_DEPTH units), so the arch stands on whatever ground the biome puts under it.
     {
-      id: 'arch', shape: { kind: 'tube', points: [at(10, -3, -0.6), at(11, -3, 1.6), at(13, -3, 2.2), at(15, -3, 1.6), at(16, -3, -0.6)], radiusM: 0.45 * u },
+      id: 'arch', shape: { kind: 'tube', points: [at(10, -3, -8), at(10, -3, -0.6), at(11, -3, 1.6), at(13, -3, 2.2), at(15, -3, 1.6), at(16, -3, -0.6), at(16, -3, -8)], radiusM: 0.45 * u },
       blend: { mode: 'union', smoothM: 0.2 * u }, fidelity: 'topology',
     },
     // Straight through the mountain's foot, open at both ends.

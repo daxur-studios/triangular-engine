@@ -7,7 +7,7 @@ import {
   vec3, vec4, viewZToPerspectiveDepth,
 } from 'three/tsl';
 import {
-  BIOME_OFFSET, CANYON_DEPTH, MASK_OFFSETS, ROCK_OCTAVES, bottomAltitudeM, densityAt, fieldFrameMatrices,
+  BIOME_OFFSET, CANYON_DEPTH, MARCH_STEP_SCALE, MASK_OFFSETS, REFERENCE_STEP_SCALE, ROCK_OCTAVES, bottomAltitudeM, densityAt, fieldFrameMatrices,
   fieldBiomeAt, noiseFrame, noiseOrigin, padEdit, sampleFrame, topAltitudeM, unitM, valueNoise, type FieldNodes,
 } from './planet-shape-field';
 import { createNoiseTexture } from './planet-shape-noise';
@@ -31,6 +31,9 @@ import { createShapeOpTextures } from './shape-ops/shape-ops-gpu';
  * - An optional pre-pass marches the same field at a fraction of the resolution and keeps, per coarse pixel, the last
  *   distance still in the air. The full-resolution march starts at the nearest of those around its pixel, so it needs a
  *   few steps instead of the whole band.
+ * - Two depth probes for the quality tests (`depthProbe`): the same march without the pre-pass, and a slow reference
+ *   march that trusts the field only a sixteenth as far (steep up to 64), never steps less than a pixel and hits only on
+ *   a crossing. Where the two disagree, the fast march is wrong.
  *
  * The flat pad under the poses sits at the sphere; the plateau rises a little above it and the canyons cut far below.
  */
@@ -41,7 +44,13 @@ function airHeightM(radiusM: number): number {
 }
 
 /** Field values are scaled by this before stepping: the stretched noise is much steeper than 1. */
-const STEP_SCALE = 0.25;
+const STEP_SCALE = MARCH_STEP_SCALE;
+/** Bisections of a hit's bracket at most (each halves it), stopping once it is narrower than the pixel. */
+const REFINE_STEPS = 8;
+/** The reference march (field scale `REFERENCE_STEP_SCALE`): its most steps (no relative stride, so many), its bisections and their stop. */
+const REFERENCE_STEPS = 4096;
+const REFERENCE_REFINE_STEPS = 16;
+const REFERENCE_REFINE_PIXELS = 0.05;
 /**
  * Each step goes at least this share of the distance travelled, so grazing rays cannot stall; the share grows over the
  * second half of the steps, so rays skimming flat ground still reach the horizon.
@@ -131,15 +140,20 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
   };
 
   /**
-   * The march of one pixel, from the plateau-top sphere to the ground, the solid floor or out of the band. `coarse` is
-   * the pre-pass: wider pixels, nothing discarded. The full march starts from the pre-pass when it is on.
-   * Returns (t, surface: 1 ground / 0 sky, the last t still in the air, 0).
+   * The march of one pixel, from the plateau-top sphere to the ground, the solid floor or out of the band:
+   * - `full` is what the screen draws: it starts from the pre-pass when that is on, and discards sky in space;
+   * - `coarse` is the pre-pass: wider pixels, no refinement, nothing discarded;
+   * - `probe` is `full` without the pre-pass (its target has another size), nothing discarded;
+   * - `reference` is the slow march the probe is checked against (see the header).
+   * Returns (t, surface: 1 ground / 0 sky, the last t still in the air, 1 if the steps ran out inside the band).
    */
-  const buildTrace = (coarse: boolean) => Fn(() => {
+  const buildTrace = (kind: 'full' | 'coarse' | 'probe' | 'reference') => Fn(() => {
+    const coarse = kind === 'coarse';
+    const reference = kind === 'reference';
     const d = (normalize(positionWorld) as any).toVar();
     const b = dot(d, uCamera).toVar();
     const discOuter = b.mul(b).sub(uCamQOuter).toVar();
-    if (!coarse) If(discOuter.lessThan(0), () => { Discard(); });
+    if (kind === 'full') If(discOuter.lessThan(0), () => { Discard(); });
     const tOuter = b.negate().add(sqrt(max(discOuter, float(0)))).toVar();
     const result = vec4(tOuter, 0, 0, 0).toVar();
     const pixelAngle = coarse ? uPixelAngle.mul(uPrepassScale) : uPixelAngle;
@@ -150,7 +164,7 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
       const t = select(uCamQTop.lessThan(0), float(0), max(float(0), b.negate().sub(root))).toVar();
       const tFloor = sphereEntry(b, uCamQBottom).toVar();
       const tEnd = select(tFloor.greaterThan(0), tFloor, b.negate().add(root)).toVar();
-      if (!coarse) {
+      if (kind === 'full') {
         If(uPrepassScale.greaterThan(0), () => {
           const start = prepassStart().toVar();
           t.assign(select(start.lessThan(0), tEnd, max(t, start)));
@@ -161,39 +175,67 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
         const fieldPrevious = float(1e30).toVar();
         const tSafe = t.toVar();
         const hit = float(0).toVar();
-        const steps = uSteps.mul(2).toVar();
+        const steps = reference ? int(REFERENCE_STEPS) : uSteps.mul(2).toVar();
+        /** The stepping field at distance `s` along the ray. */
+        const fieldAlong = (s: any): any => {
+          const xs = d.mul(s);
+          const altitude = uCamQ.add(s.mul(b.mul(2).add(s))).div(uCamera.add(xs).length().add(uRadius));
+          return density(xs, altitude, s.mul(pixelAngle), false).mul(STEP_SCALE);
+        };
         Loop(steps, ({ i }: { i: any }) => {
           const x = d.mul(t);
-          const altitude = uCamQ.add(t.mul(b.mul(2).add(t))).div(uCamera.add(x).length().add(uRadius)).toVar();
           const footprint = t.mul(pixelAngle).toVar();
-          const field = density(x, altitude, footprint, false).mul(STEP_SCALE).toVar();
-          If(field.lessThan(footprint.mul(0.5)), () => {
+          const field = fieldAlong(t).toVar();
+          // The reference hits only on a crossing; the others within half a pixel of the surface.
+          If(field.lessThan(reference ? float(0) : footprint.mul(0.5)), () => {
             tSafe.assign(tPrevious);
-            // Crossed (or touched) the rock: one secant step between the last two samples.
             If(field.lessThan(0).and(fieldPrevious.lessThan(1e29)), () => {
-              t.assign(tPrevious.add(t.sub(tPrevious).mul(fieldPrevious.div(fieldPrevious.sub(field)))));
+              // Crossed into the rock. Where the field is far steeper than distance (a road set across a canyon wall
+              // turns metres of depth into a cliff a fraction of a unit wide) the last step can end deep in the rock,
+              // and a secant across it lands off the surface, in bands. Bisect the bracket down to the pixel first.
+              const lo = float(tPrevious).toVar();
+              const hi = float(t).toVar();
+              const fieldLo = fieldPrevious.toVar();
+              const fieldHi = field.toVar();
+              if (!coarse) {
+                Loop(reference ? REFERENCE_REFINE_STEPS : REFINE_STEPS, () => {
+                  If(hi.sub(lo).lessThan(reference ? footprint.mul(REFERENCE_REFINE_PIXELS) : footprint as any), () => { Break(); });
+                  const mid = lo.add(hi).mul(0.5).toVar();
+                  const fieldMid = fieldAlong(mid).toVar();
+                  If(fieldMid.lessThan(0), () => { hi.assign(mid); fieldHi.assign(fieldMid); })
+                    .Else(() => { lo.assign(mid); fieldLo.assign(fieldMid); });
+                });
+              }
+              tSafe.assign(lo);
+              t.assign(lo.add(hi.sub(lo).mul(fieldLo.div(fieldLo.sub(fieldHi)))));
             });
             hit.assign(1);
             Break();
           });
           tPrevious.assign(t);
           fieldPrevious.assign(field);
-          const late = clamp(float(i).div(float(steps)).mul(2).sub(1), 0, 1);
-          const stride = max(max(field, t.mul(mix(float(RELATIVE_STEP), float(LATE_RELATIVE_STEP), late.mul(late)))), float(0.01));
-          // Never past the nearest union shape (an arch leg, a ledge): beyond its fade the field does not see it.
-          t.addAssign(min(stride, max(shapeOps.reach(x, footprint), footprint)));
+          if (reference) {
+            // A sixteenth of the field, at least a pixel, never past the nearest union shape.
+            t.addAssign(max(min(field.mul(REFERENCE_STEP_SCALE / STEP_SCALE), shapeOps.reach(x, footprint)), footprint));
+          } else {
+            const late = clamp(float(i).div(float(steps)).mul(2).sub(1), 0, 1);
+            const stride = max(max(field, t.mul(mix(float(RELATIVE_STEP), float(LATE_RELATIVE_STEP), late.mul(late)))), float(0.01));
+            // Never past the nearest union shape (an arch leg, a ledge): beyond its fade the field does not see it.
+            t.addAssign(min(stride, max(shapeOps.reach(x, footprint), footprint)));
+          }
           If(t.greaterThan(tEnd), () => { Break(); });
         });
         // Reaching the solid floor is ground; a ray that ran out of steps inside the band stops where it is.
+        const ranOut = select(hit.lessThan(0.5).and(t.lessThan(tEnd)), float(1), float(0)).toVar();
         If(hit.lessThan(0.5), () => { tSafe.assign(tPrevious); });
         If(hit.lessThan(0.5).and(tFloor.greaterThan(0)), () => { t.assign(min(t, tFloor)); hit.assign(1); });
-        If(hit.greaterThan(0.5).or(t.lessThan(tEnd)), () => { result.assign(vec4(t, 1, tSafe, 0)); });
+        If(hit.greaterThan(0.5).or(t.lessThan(tEnd)), () => { result.assign(vec4(t, 1, tSafe, ranOut)); });
       });
     });
-    if (!coarse) If(result.y.lessThan(0.5).and(uSkyAmount.lessThan(0.001)), () => { Discard(); });
+    if (kind === 'full') If(result.y.lessThan(0.5).and(uSkyAmount.lessThan(0.001)), () => { Discard(); });
     return result;
   });
-  const trace = buildTrace(false)().toVar() as any;
+  const trace = buildTrace('full')().toVar() as any;
 
   /** Rough diffuse (Oren-Nayar, roughness 1) for light `l`, normal `n`, toward-viewer `v`. */
   const roughDiffuse = (l: any, n: any, v: any): any => {
@@ -323,9 +365,23 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
   const hitView = cameraViewMatrix.mul(vec4(normalize(positionWorld).mul(trace.x), 1)) as any;
   material.depthNode = viewZToPerspectiveDepth(hitView.z, cameraNear, cameraFar);
   // The pre-pass writes raw distances (red: last t in the air, green: 1 where the coarse ray reached the ground).
-  const coarse = buildTrace(true)() as any;
+  const coarse = buildTrace('coarse')() as any;
   const prepassMaterial = new MeshBasicNodeMaterial({ side: BackSide });
   prepassMaterial.outputNode = vec4(coarse.z, coarse.y, 0, 1);
+  // Depth probes: red the distance along the ray, green 1 where the steps ran out, blue the field at the drawn point (in
+  // footprints there, as the march samples it), alpha 1 on ground (0 sky).
+  const depthProbeMaterial = (kind: 'probe' | 'reference') => {
+    const trace = buildTrace(kind);
+    const probeMaterial = new MeshBasicNodeMaterial({ side: BackSide });
+    probeMaterial.outputNode = Fn(() => {
+      const probe = trace().toVar() as any;
+      const x = (normalize(positionWorld) as any).mul(probe.x).toVar();
+      const footprint = max(probe.x.mul(uPixelAngle), float(1e-3)).toVar();
+      return vec4(probe.x, probe.w, density(x, altitudeOf(x), footprint, false).div(footprint), probe.y);
+    })();
+    return probeMaterial;
+  };
+  const depthProbe = { fast: depthProbeMaterial('probe'), reference: depthProbeMaterial('reference') };
 
   const origin = new Vector3();
   const allFrames = [...rockFrames, ...maskFrames, biomeFrame, ...detailFrames];
@@ -372,6 +428,7 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
   return {
     material,
     prepass: { material: prepassMaterial, target: prepassTarget },
+    depthProbe,
     shellRadiusM(radiusM, heightSegments) {
       return (radiusM + airHeightM(radiusM)) / Math.cos(Math.PI / heightSegments);
     },

@@ -1,5 +1,6 @@
 # Changelog
 
+- `triangular-engine/testing`: a scenario's own quick length, so timed actions get a quick mode too. `TestScenario.quickMs` (at most `durationMs`, checked by `validateTestHistory`) is the scenario's length in quick mode: the most a watched window runs, the length of an unwatched one (in place of `QUICK_WINDOW_MS`), and of a timed action. New `modeActionMs(scenario, mode)`: how long a sweep or fly-by runs in a mode (`quickMs` in quick mode when set, otherwise `durationMs`). An adapter whose motion follows `durationMs` can now set `windowModes` and time its motion with `modeActionMs`. `modeWindowMs` returns `quickMs ?? durationMs` in quick mode. Standard and soak are unchanged.
 - `triangular-engine/gpu-data-flow`: new entry with the reusable CPU/GPU/worker data-flow core (Plan 055, Phase 1b). Preview.
   - **`UploadRing`** (`enqueue`, `flush`, `setBudget`): writes up to `bytesPerFrame` per frame, splits larger writes, queue depth and peak are metrics.
   - **`ReadbackRing`** (`request`, `poll`): fixed-size slots, never awaited in a frame; each `ReadbackResult` carries the request frame, a caller tag, `latencyMs` (submit to usable) and `latencyFrames`; a full ring drops and counts the request.

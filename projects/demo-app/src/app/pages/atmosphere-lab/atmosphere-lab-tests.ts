@@ -48,6 +48,11 @@ export interface AtmosphereLabTestSettings extends Omit<AtmosphereLabState, 'mor
   /** Read the final frame back and check it (coverage, lit sky, horizon band). Absent in suites that predate image checks. */
   readonly imageChecks?: AtmosphereImageExpectations;
   /**
+   * Survey: a check that fails is recorded as passed with a `WOULD FAIL` detail and counted in `checksWouldFail`, so the
+   * session does not stop at the case and one run measures every case. Absent (or false) in every suite that gates.
+   */
+  readonly reportOnly?: boolean;
+  /**
    * Whether the half-resolution masked pass should be active on every frame of the window: `true` where the
    * camera is above the air, `false` where it must not be, `null` where it depends on the edge distance.
    */
@@ -91,14 +96,20 @@ function scenario(
   return { id, label, durationMs, warmupMs, settings: { ...BASE, ...overrides } };
 }
 
+/**
+ * Quick mode's sweep length: 1.2 s per leg still renders every keyframe with about 70 frames per leg at 60 Hz, enough to
+ * catch a stall, a skipped leg or an error, but too fast for a person to judge popping. Standard keeps the slow sweep.
+ */
+const QUICK_SWEEP_MS = 2400;
+
 /** The Plan 049 Phase 3a checks that were still waiting for a person to scrub and look. */
 const LOOK_SCENARIOS: readonly TestScenario<AtmosphereLabTestSettings>[] = [
-  scenario('scrub-equirect', 'Morph scrub 0 → 1 → 0, equirect, low orbit', 8000,
-    { kind: 'sweep', morphKeys: [0, 1, 0] }),
-  scenario('scrub-equal-earth', 'Morph scrub 0 → 1 → 0, Equal Earth, low orbit', 8000,
-    { kind: 'sweep', morphKeys: [0, 1, 0], projection: 'equalEarth' }),
-  scenario('equal-earth-low-morph', 'Equal Earth near flat: morph 0.05 → 0.3 → 0.05', 6000,
-    { kind: 'sweep', morphKeys: [0.05, 0.3, 0.05], projection: 'equalEarth' }),
+  { ...scenario('scrub-equirect', 'Morph scrub 0 → 1 → 0, equirect, low orbit', 8000,
+    { kind: 'sweep', morphKeys: [0, 1, 0] }), quickMs: QUICK_SWEEP_MS },
+  { ...scenario('scrub-equal-earth', 'Morph scrub 0 → 1 → 0, Equal Earth, low orbit', 8000,
+    { kind: 'sweep', morphKeys: [0, 1, 0], projection: 'equalEarth' }), quickMs: QUICK_SWEEP_MS },
+  { ...scenario('equal-earth-low-morph', 'Equal Earth near flat: morph 0.05 → 0.3 → 0.05', 6000,
+    { kind: 'sweep', morphKeys: [0.05, 0.3, 0.05], projection: 'equalEarth' }), quickMs: QUICK_SWEEP_MS },
   scenario('rim-glow-equirect', 'Rim glow from space at the map edge, equirect, morph 0.5', 3000,
     { ...VIEWS.space, morphKeys: [0.5], anchor: [0.9, 0], expectMaskedPass: true }),
   scenario('rim-glow-equal-earth', 'Rim glow from space at the map edge, Equal Earth, morph 0.5', 3000,
@@ -132,6 +143,19 @@ const LOOK_V2_SCENARIOS: readonly TestScenario<AtmosphereLabTestSettings>[] = [
     { ...VIEWS.airHigh, morphKeys: [0.5], imageChecks: { litSky: true, horizon: true } }),
   ...LOOK_SCENARIOS.map((item) => ({ ...item, settings: { ...item.settings, imageChecks: NO_EXPECTATIONS } })),
 ];
+
+/**
+ * Look v3: the v2 scenarios as a survey, plus three altitudes under a kilometre (where the sky was black before the
+ * camera's far/near ratio was capped), with every failed check recorded instead of ending the run. For the first run on
+ * new hardware or after a change, to see every case at once; gate with v2.
+ */
+const LOOK_V3_SCENARIOS: readonly TestScenario<AtmosphereLabTestSettings>[] = [
+  ...LOOK_V2_SCENARIOS.slice(0, 1),
+  ...[85, 381, 1_700].map((altitudeM) =>
+    scenario(`horizon-ground-${altitudeM}m-m0`, `${altitudeM} m up, noon, morph 0: horizon and sky`, 2500,
+      { ...VIEWS.ground, altitudeM, morphKeys: [0], imageChecks: { litSky: true, horizon: true } })),
+  ...LOOK_V2_SCENARIOS.slice(1),
+].map((item) => ({ ...item, settings: { ...item.settings, reportOnly: true } }));
 
 /** Timing rows from the Phase 3a gate (space and low orbit at morph 0 / 0.5 / 1), for the diagnostic GPU frame readout. */
 const COST_SCENARIOS: readonly TestScenario<AtmosphereLabTestSettings>[] = [
@@ -199,5 +223,13 @@ export const ATMOSPHERE_LAB_TEST_HISTORY: readonly TestSuite<AtmosphereLabTestSe
     purpose: 'functional',
     requiresVisualReview: true,
     scenarios: LOOK_V2_SCENARIOS,
+  },
+  {
+    id: 'bent-atmosphere-look',
+    version: 3,
+    title: 'Bent atmosphere: look survey (image checks recorded, every case runs)',
+    purpose: 'functional',
+    requiresVisualReview: true,
+    scenarios: LOOK_V3_SCENARIOS,
   },
 ];

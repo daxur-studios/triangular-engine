@@ -1138,3 +1138,79 @@ the old 8-edit list's numbers against the shape-op path on the same views. The o
   unset value (dark faces, black crater, shading that looked like different shapes). `densityAt` now takes its inputs
   as variables first. The density itself was right: GPU against CPU at shares 0, 0.05 and 1, one-tap and smooth noise,
   with and without ops, all within 0.005 units.
+- **Ring bands ("portal" look) on the road walls over canyons.** A `set` path over a canyon blends the road surface
+  and the canyon floor across a 0.6-unit edge, so up to 7 units of depth become a cliff whose field grows many times
+  faster than distance. A march step over the edge ended deep inside the road column, and the single secant step
+  between the last two samples interpolated across that jump, landing off the surface in bands. Fix: the full march
+  bisects the hit bracket (up to `REFINE_STEPS` = 8, stopping once it is narrower than the pixel) before the secant.
+  Dividing the field by a local steepness bound was tried and dropped: it only helps inside the edge band (a ray
+  still steps into the band from outside), and scaling the value changes how later ops (`scale`, smooth `raise`)
+  read it. The GPU also now packs the minimum edge for height shapes without an `edgeM` key, as the CPU does.
+- **Arch floating over canyons.** Its legs ended 0.6 units below the plain, above the canyon floors (up to
+  `CANYON_DEPTH` = 7 units down). They now run on straight down to 8 units below.
+
+## 2026-10-22: graded road, a march-step spec and the terrain quality suite
+
+The bisection above made the road bands rarer, not gone (owner, same day, through the arch). The cause was the field,
+not the refinement: across a canyon the `set` road's 0.6-unit edge is a cliff about 12 times steeper than distance, and
+the march, which trusts the field up to 4 (`MARCH_STEP_SCALE` = 0.25), stepped clean through thin parts of it. No
+refinement helps a step that never lands in rock. So the fix moved to the op, and two checks now measure this class of
+fault instead of a screenshot.
+
+- **`grade` blend** (`shape-op.ts`, shader twin code 7). The profile inside the shape, and outside it banks that rise
+  and fall from the profile's height by `slope` (rise over run, default 1) until they meet the ground: a cutting where
+  the ground is higher, a fill where it is lower. It is a clamp, `max(min(value, level + slope * d), level - slope * d)`
+  with `d` the metres beyond the shape's core, so where the ground already lies between the banks the value passes
+  through bit for bit. Its caps reach as far as the band under it needs (`(band height) / slope`, 1% margin), which
+  keeps the "identity outside the caps" contract. The landforms road is now graded at slope 1. Limit: the caps follow
+  the band, and overlapping `scale` ops with factors over 1 stretch the band without limit (the 1,000-op cost
+  benchmark of random ops reached whole-body caps and hung the browser), so that benchmark leaves graded ops out. A log
+  of real edits does not stack exaggerating scales; if one ever does, `grade` needs a cap on its bank reach.
+- **March-step spec** (`shape-ops/march-steps.spec.ts`). From random air points in each op's bounds it takes the
+  march's own step (field x `MARCH_STEP_SCALE`, capped at the nearest union shape) in a random direction and measures
+  the rock the step crosses, with the ops and without. Raw slope was measured first and dropped: union shapes are steep
+  in their fade band by design, and the march's `reach` cap already covers them. Numbers (600 km body, 1,500 points per
+  op): with the graded road the most rock any step crosses is 0.23 units, at the ridge, where the field alone also
+  crosses 0.10 (its stretched noise is a little steeper than 4 in places; those steps land in the rock with one
+  crossing, which the bisection resolves). With the road `set`, 0.84 units at the road and 0.95 near the arch. The line
+  is 0.3 units, and the spec checks that the set road fails it. The tunnel's steps cross up to 0.15 units: noise inside
+  the rock it opens, not the tube.
+- **CPU reach twin.** `CompiledShapeOps.reach(p)` and `TerrainFieldCpu.reach(p)` give the shader's `reach` on the CPU
+  (the shader spec checks the two agree), and `TerrainFieldCpu.band` the altitudes the ground lies between.
+- **Terrain quality suite** (`planet-shape-terrain-quality` v1, functional, `planet-shape-terrain-quality.ts`). Terrain
+  v2 gets two depth probes: the march as drawn (without the pre-pass) and a slow reference march that trusts the field
+  only up to a slope of 64, never steps under a pixel, hits only on a crossing and bisects to a twentieth of a pixel.
+  Each writes per pixel the distance, a ran-out flag and the field at the drawn point in footprints. A pixel is wrong
+  when its fast point is off the surface (field over 4 footprints from zero), behind the reference by over 4 footprints
+  along the ray (through a wall), or drawn by one march only more than 3 pixels from the reference's outline (a hole or
+  sliver). The reference is checked on a grid of 40 pixels against the same march on the CPU twin in doubles. Scenarios:
+  landforms in canyons and in the blend, from the low flyover and the grazing pose and three close-ups set by a new
+  optional `view` setting (through the arch to the road, along the road, the tunnel and the mountain). Scenario
+  settings may now carry a free-camera `view`; the page applies it after the pose.
+  - **Measured on the iGPU** (direct probe calls in the browser pane, the same classification): the ten views 0.00-0.12%
+    wrong, every wrong pixel the far horizon drawn a few pixels fat. No fast point off the surface or behind it. The
+    fast march's drawn points sit a median 1.1-1.6 footprints from the surface by the field, at most 2 (its half-pixel
+    hit cone, as designed). The same arch view with the road `set` again: 1.66% wrong, 1,313 pixels behind the surface,
+    all on the road wall seen through the arch, which is where the owner saw the bands. The line is 0.5%. GPU reference
+    against the CPU march, first run: median 0.04 footprints, at most 0.28.
+  - **How the measure got there.** Distance along the ray was tried first and flagged 8% of the low flyover: a cone stop
+    at a grazing angle is many footprints short along the ray but the same place on screen. Distance along a normal
+    estimated from the reference's depths was second, still 2.8%: the estimate is poor on distant grazing ground. The
+    field at the drawn point is what the march itself promises, so it needs no geometry guesses.
+  - **Gotchas.** A probe material whose `outputNode` used `.toVar()` outside an `Fn` drew nothing, with no shader or GPU
+    error; wrapped in an `Fn` it works. A new probe material's pipeline compiles in the background and its first draws
+    are skipped, so the page redraws until the target holds anything (60 s limit). The reference holds the iGPU for
+    over half a second, which trips the engine's GPU-timer readback timeout; the adapter treats that error during the
+    probe as expected and still fails on any other.
+  - **First run on the reference machine (RTX 3080).** It stopped at road-along on the guard that the reference's own
+    point has |field| at most 4 footprints: 4.0009. The four views that ran were 0.00% wrong, with no pixels off the
+    surface or behind it. The reference stops on a crossing to a twentieth of a pixel, so its |field| is the field's
+    steepness there (iGPU 2.2 in the same view, 1.2-3.0 in the others), not a miss, and the CPU check agreed (max 2.05
+    footprints). The guard is now 8 (`REFERENCE_FIELD_FOOTPRINTS`), there to catch a failed refinement or a field that
+    jumps. The fast march's off-surface line stays 4; its points reached 3.6 at grazing views, which is close.
+  - **Passed on the reference machine** (2026-10-22T18:09, RTX 3080): all ten cases 0.00% wrong (most wrong pixels in a
+    case: 78 drawn by one march only, in a 480x270 probe), no fast ray ran out, no flicker. The reference agreed with
+    the CPU march to a median of at most 0.11 footprints; blend arch-road had grid pixels up to 2.6 off, within the two
+    allowed. The fast points' field reached 3.6 footprints in the canyons' grazing views; the line is 4.
+  - **Not done.** The fast probe leaves the pre-pass out (its target has another size). Shading is not compared, only where the
+    surface is drawn. The horizon fattening (the cone stop) could be tightened by shrinking the hit cone with distance.

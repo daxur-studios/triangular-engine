@@ -15,6 +15,9 @@ performance:
   - id: bent-atmosphere-look-v2
     url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=2&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1
     status: runnable-image-checks-rtx-run-failed-as-expected
+  - id: bent-atmosphere-look-v3
+    url: http://triangular-demo.localhost:4200/atmosphere-lab?testSuite=bent-atmosphere-look&testVersion=3&testProfile=visible-browser&testMode=standard&testRepetitions=1&testAutoStart=1
+    status: measured-rtx3080-survey
 ---
 
 # Plan 049: Morphing Planet Atmosphere

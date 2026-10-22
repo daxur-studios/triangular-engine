@@ -20,7 +20,7 @@ import { angleBetween, shapeOpSizeM, shapeOpsBounds, validateShapeOp, type Altit
 
 /** Shape and blend codes as stored in the op texture. */
 export const SHAPE_CODE: Readonly<Record<ShapeOp['shape']['kind'], number>> = { disc: 0, cone: 1, crater: 2, path: 3, sphere: 4, tube: 5 };
-export const BLEND_CODE: Readonly<Record<ShapeOp['blend']['mode'], number>> = { add: 0, set: 1, raise: 2, lower: 3, scale: 4, union: 5, subtract: 6 };
+export const BLEND_CODE: Readonly<Record<ShapeOp['blend']['mode'], number>> = { add: 0, set: 1, raise: 2, lower: 3, scale: 4, union: 5, subtract: 6, grade: 7 };
 
 /** All textures are this wide; an entry `i` sits at (i & (WIDTH - 1), i >> WIDTH_SHIFT). */
 const WIDTH_SHIFT = 7;
@@ -184,9 +184,10 @@ export function createShapeOpTextures(): ShapeOpTextures {
           value.assign(select(distance.lessThanEqual(k), combined, combined.add(value.sub(combined).mul(smoothstep(k, k.mul(2), distance)))));
         });
       }).Else(() => {
-        // Height ops: a profile (height, weight) from the arc to the shape, then the blend.
+        // Height ops: a profile (height, weight, metres beyond the core) from the arc to the shape, then the blend.
         const height = float(0).toVar();
         const weight = float(0).toVar();
+        const beyond = float(0).toVar();
         const edge = h1.y;
         If(shape.equal(SHAPE_CODE.path), () => {
           const best = float(1e30).toVar();
@@ -223,15 +224,18 @@ export function createShapeOpTextures(): ShapeOpTextures {
           const half = h1.x;
           height.assign(select(h2.x.greaterThan(0.5), height.mul(float(1).sub(smoothstep(float(0), half.add(edge), r))), height));
           weight.assign(float(1).sub(smoothstep(half, half.add(edge), r)));
+          beyond.assign(max(r.sub(half), float(0)));
         }).Else(() => {
           const r = arcTo(h0.xyz.sub(y), up, lenP).mul(uRadius).toVar();
           const radiusM = h1.x;
           If(shape.equal(SHAPE_CODE.disc), () => {
             height.assign(h1.z);
             weight.assign(float(1).sub(smoothstep(radiusM, radiusM.add(edge), r)));
+            beyond.assign(max(r.sub(radiusM), float(0)));
           }).ElseIf(shape.equal(SHAPE_CODE.cone), () => {
             height.assign(h1.z.mul(pow(float(1).sub(smoothstep(float(0), radiusM, r)), h2.x)));
             weight.assign(float(1).sub(smoothstep(radiusM, radiusM.add(edge), r)));
+            beyond.assign(max(r.sub(radiusM), float(0)));
           }).Else(() => {
             // Crater: h1.z depth, h2.x rim height, h2.y rim width.
             const outer = radiusM.add(h2.y).toVar();
@@ -242,11 +246,16 @@ export function createShapeOpTextures(): ShapeOpTextures {
               h2.x.mul(float(1).sub(smoothstep(radiusM, outer, r))),
             ));
             weight.assign(float(1).sub(smoothstep(outer, outer.add(edge), r)));
+            beyond.assign(max(r.sub(outer), float(0)));
           });
         });
-        If(weight.greaterThan(0), () => {
+        const k = h2.z;
+        If(blend.equal(BLEND_CODE.grade), () => {
+          // Banks of slope k from the profile's level, outside the weight too (see `shape-op.ts`).
+          const level = altitude.sub(height).toVar();
+          value.assign(max(min(value, level.add(k.mul(beyond))), level.sub(k.mul(beyond))));
+        }).ElseIf(weight.greaterThan(0), () => {
           const target = altitude.sub(height).toVar();
-          const k = h2.z;
           If(blend.equal(BLEND_CODE.add), () => {
             value.assign(value.sub(height.mul(weight)));
           }).ElseIf(blend.equal(BLEND_CODE.set), () => {
@@ -311,8 +320,9 @@ export function createShapeOpTextures(): ShapeOpTextures {
       const fidelity = op.fidelity ?? 'relaxed';
       const minVisible = fidelity === 'contact' || fidelity === 'topology' ? NEVER_SKIP : op.minVisibleSizeM ?? shapeOpSizeM(op);
       const blend = op.blend;
-      const blendParam = blend.mode === 'scale' ? blend.factor : blend.mode === 'add' || blend.mode === 'set' ? 0 : Math.max(blend.smoothM ?? 0, MIN_EDGE_M);
-      const edge = 'edgeM' in shape ? Math.max(shape.edgeM ?? 0, MIN_EDGE_M) : 0;
+      const blendParam = blend.mode === 'scale' ? blend.factor : blend.mode === 'grade' ? blend.slope ?? 1
+        : blend.mode === 'add' || blend.mode === 'set' ? 0 : Math.max(blend.smoothM ?? 0, MIN_EDGE_M);
+      const edge = shape.kind === 'sphere' || shape.kind === 'tube' ? 0 : Math.max(shape.edgeM ?? 0, MIN_EDGE_M);
       let h1: number[] = [0, 0, 0];
       let h2xy: number[] = [0, 0];
       switch (shape.kind) {

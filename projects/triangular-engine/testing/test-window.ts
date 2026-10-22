@@ -23,8 +23,17 @@ export function modeWarmupMs(scenario: Pick<TestScenario<object>, 'warmupMs'>, m
 }
 
 /** The longest window a scenario gets in `mode`. */
-export function modeWindowMs(scenario: Pick<TestScenario<object>, 'durationMs'>, mode: TestMode): number {
+export function modeWindowMs(scenario: Pick<TestScenario<object>, 'durationMs' | 'quickMs'>, mode: TestMode): number {
+  if (mode === 'quick') return scenario.quickMs ?? scenario.durationMs;
   return mode === 'soak' ? Math.max(scenario.durationMs, SOAK_WINDOW_MS) : scenario.durationMs;
+}
+
+/**
+ * How long a timed action (a sweep, a fly-by: motion whose speed follows its length) runs in `mode`: the scenario's
+ * `quickMs` in quick mode when it has one, otherwise `durationMs`. Soak does not stretch an action.
+ */
+export function modeActionMs(scenario: Pick<TestScenario<object>, 'durationMs' | 'quickMs'>, mode: TestMode): number {
+  return mode === 'quick' ? scenario.quickMs ?? scenario.durationMs : scenario.durationMs;
 }
 
 function stats(samples: readonly number[]): { median: number; p95: number } {
@@ -69,7 +78,7 @@ function counts(series: readonly TestSettleSeries[]): Record<string, number> {
  * Runs one measurement window in `mode`. `wait` must reject on abort; `now` is injectable for tests.
  */
 export async function runMeasureWindow(
-  scenario: Pick<TestScenario<object>, 'durationMs'>, mode: TestMode, series: readonly TestSettleSeries[],
+  scenario: Pick<TestScenario<object>, 'durationMs' | 'quickMs'>, mode: TestMode, series: readonly TestSettleSeries[],
   wait: (ms: number) => Promise<void>, now: () => number = () => performance.now(),
 ): Promise<TestWindow> {
   const began = now();
@@ -82,14 +91,15 @@ export async function runMeasureWindow(
       drift: mode === 'soak' ? drift : undefined };
   }
   if (!series.length) {
-    await wait(Math.min(scenario.durationMs, QUICK_WINDOW_MS));
+    await wait(Math.min(scenario.durationMs, scenario.quickMs ?? QUICK_WINDOW_MS));
     return { mode, elapsedMs: elapsed(), stoppedBy: 'fixed' };
   }
-  while (elapsed() < scenario.durationMs) {
+  const maxMs = modeWindowMs(scenario, mode);
+  while (elapsed() < maxMs) {
     if (elapsed() >= QUICK_MIN_WINDOW_MS && series.every((item) => seriesSettled(item.samples(), item.resolution))) {
       return { mode, elapsedMs: elapsed(), stoppedBy: 'settled', samples: counts(series) };
     }
-    await wait(Math.min(POLL_MS, Math.max(1, scenario.durationMs - elapsed())));
+    await wait(Math.min(POLL_MS, Math.max(1, maxMs - elapsed())));
   }
   return { mode, elapsedMs: elapsed(), stoppedBy: 'max', samples: counts(series) };
 }

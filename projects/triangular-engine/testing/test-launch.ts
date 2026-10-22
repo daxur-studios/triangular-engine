@@ -33,7 +33,8 @@ export function validateTestHistory<T extends object>(suites: readonly TestSuite
     const ids = new Set<string>();
     for (const scenario of suite.scenarios) {
       if (!scenario.id || ids.has(scenario.id) || !Number.isFinite(scenario.durationMs) || scenario.durationMs <= 0 ||
-          !Number.isFinite(scenario.warmupMs ?? 0) || (scenario.warmupMs ?? 0) < 0) {
+          !Number.isFinite(scenario.warmupMs ?? 0) || (scenario.warmupMs ?? 0) < 0 ||
+          (scenario.quickMs !== undefined && !(scenario.quickMs > 0 && scenario.quickMs <= scenario.durationMs))) {
         throw new Error(`Invalid or duplicate scenario in ${key}: ${scenario.id}`);
       }
       ids.add(scenario.id);

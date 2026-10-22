@@ -52,6 +52,8 @@ import {
   type BentProjection,
   type DayNightMode,
 } from 'triangular-engine/atmosphere';
+import { bentPlanetClipPlanes } from './bent-planet-clip';
+import { NEAR_CELLS, NEAR_VERTICES, fillNearGrid, mapToLonLat, nearIndices, nearWindow } from './bent-planet-near-grid';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -82,6 +84,8 @@ export class BentPlanetLab {
   readonly skyView: AtmosphereSkyViewLut;
   readonly pass: Mesh;
   readonly grid: Mesh;
+  /** The fine window around the camera (a child of `grid`; see `bent-planet-near-grid.ts`). */
+  readonly nearGrid: Mesh;
   readonly exposure = uniform(8);
   readonly altitude = uniform(1000);
   /** Size in pixels of the half-resolution masked pass (0 x 0 until it has rendered). */
@@ -99,6 +103,13 @@ export class BentPlanetLab {
   private readonly mapXY: Float32Array;
   private readonly lonLat: Float32Array;
   private readonly positionAttribute: BufferAttribute;
+  private readonly indexAttribute: BufferAttribute;
+  private readonly nearPositions = new Float32Array(NEAR_VERTICES * NEAR_VERTICES * 3);
+  private readonly nearMapXY = new Float32Array(NEAR_VERTICES * NEAR_VERTICES * 2);
+  private readonly nearLonLat = new Float32Array(NEAR_VERTICES * NEAR_VERTICES * 2);
+  /** The coarse cells the fine window replaces (their triangles are emptied in the coarse index), and the window's key. */
+  private cutCells: number[] = [];
+  private cutKey = '';
 
   /** 0 = auto, 1 = table only, 2 = full-resolution masked march per pixel. */
   private readonly pathMode = uniform(0);
@@ -153,11 +164,22 @@ export class BentPlanetLab {
         n += 6;
       }
     }
-    geometry.setIndex(new BufferAttribute(index, 1));
+    this.indexAttribute = new BufferAttribute(index, 1);
+    geometry.setIndex(this.indexAttribute);
     this.gridMaterial = this.buildGrid();
     this.grid = new Mesh(geometry, this.gridMaterial);
     this.grid.frustumCulled = false;
     this.grid.name = 'BentPlanetGrid';
+
+    const nearGeometry = new BufferGeometry();
+    nearGeometry.setAttribute('position', new BufferAttribute(this.nearPositions, 3));
+    nearGeometry.setAttribute('aMapXY', new BufferAttribute(this.nearMapXY, 2));
+    nearGeometry.setAttribute('aLonLat', new BufferAttribute(this.nearLonLat, 2));
+    nearGeometry.setIndex(new BufferAttribute(nearIndices(), 1));
+    this.nearGrid = new Mesh(nearGeometry, this.gridMaterial);
+    this.nearGrid.frustumCulled = false;
+    this.nearGrid.name = 'BentPlanetNearGrid';
+    this.grid.add(this.nearGrid);
     this.apply(true);
   }
 
@@ -247,10 +269,10 @@ export class BentPlanetLab {
     this.grid.updateMatrixWorld();
     if (camera instanceof PerspectiveCamera) {
       const altUnits = this.altitudeM / unit;
-      const near = Math.min(1, Math.max(1e-4, altUnits * 0.05));
-      if (Math.abs(camera.near - near) > near * 0.01 || camera.far !== 1e5) {
+      const { near, far } = bentPlanetClipPlanes(altUnits);
+      if (Math.abs(camera.near - near) > near * 0.01 || camera.far !== far) {
         camera.near = near;
-        camera.far = 1e5;
+        camera.far = far;
         camera.updateProjectionMatrix();
       }
     }
@@ -290,9 +312,6 @@ export class BentPlanetLab {
     const key = `${this.morphValue}|${this.radiusM}|${this.anchorX}|${this.anchorY}|${this.projection}`;
     if (!force && key === this.lastKey) return;
     this.lastKey = key;
-    const k = this.bent.k;
-    const f = this.bent.anchorFrame;
-    const unit = this.radiusM / 1000;
     const R = this.radiusM;
     const p = this.bent.uProjBlend.value;
     const row = this.lonSegments + 1;
@@ -301,15 +320,8 @@ export class BentPlanetLab {
       for (let ix = 0; ix <= this.lonSegments; ix++) {
         const lon = -Math.PI + (2 * Math.PI * ix) / this.lonSegments;
         const [x, y] = blendedProjection(lon, lat, p, R);
-        const pos = bend(x, y, k).position;
-        const dx = pos[0] - f.origin[0];
-        const dy = pos[1] - f.origin[1];
-        const dz = pos[2] - f.origin[2];
         const v = iy * row + ix;
-        // The anchor's local frame: east, up, and south (-north).
-        this.positions[v * 3] = (f.east[0] * dx + f.east[1] * dy + f.east[2] * dz) / unit;
-        this.positions[v * 3 + 1] = (f.up[0] * dx + f.up[1] * dy + f.up[2] * dz) / unit;
-        this.positions[v * 3 + 2] = -(f.north[0] * dx + f.north[1] * dy + f.north[2] * dz) / unit;
+        this.localPosition(x, y, this.positions, v * 3);
         this.mapXY[v * 2] = x;
         this.mapXY[v * 2 + 1] = y;
         this.lonLat[v * 2] = (lon * 180) / Math.PI;
@@ -319,6 +331,69 @@ export class BentPlanetLab {
     this.positionAttribute.needsUpdate = true;
     (this.grid.geometry.getAttribute('aMapXY') as BufferAttribute).needsUpdate = true;
     (this.grid.geometry.getAttribute('aLonLat') as BufferAttribute).needsUpdate = true;
+    this.applyNear();
+  }
+
+  /** A map point on the bent surface, in the anchor's local frame (east, up, south), in lab units. */
+  private localPosition(x: number, y: number, out: { [i: number]: number }, at: number): void {
+    const f = this.bent.anchorFrame;
+    const pos = bend(x, y, this.bent.k).position;
+    const dx = pos[0] - f.origin[0];
+    const dy = pos[1] - f.origin[1];
+    const dz = pos[2] - f.origin[2];
+    const unit = this.radiusM / 1000;
+    out[at] = (f.east[0] * dx + f.east[1] * dy + f.east[2] * dz) / unit;
+    out[at + 1] = (f.up[0] * dx + f.up[1] * dy + f.up[2] * dz) / unit;
+    out[at + 2] = -(f.north[0] * dx + f.north[1] * dy + f.north[2] * dz) / unit;
+  }
+
+  /**
+   * The fine window (`bent-planet-near-grid.ts`): its vertices on the surface, the outer cell easing onto the coarse mesh's
+   * chords; and the coarse triangles it replaces emptied, so the two never overlap: no overdraw, and nothing left to the
+   * depth test where its resolution (with `far / near` at 1e6: about 1 m at 5 km, 200 m at 60 km) is as coarse as the
+   * gap between the two surfaces.
+   */
+  private applyNear(): void {
+    const R = this.radiusM;
+    const p = this.bent.uProjBlend.value;
+    const { lon: anchorLon, lat: anchorLat } = mapToLonLat(this.anchorX, this.anchorY, p, R);
+    const window = nearWindow(
+      ((anchorLon + Math.PI) / (2 * Math.PI)) * this.lonSegments,
+      ((anchorLat + Math.PI / 2) / Math.PI) * this.latSegments,
+      this.lonSegments,
+      this.latSegments,
+    );
+    const key = `${window.ix0}|${window.iy0}`;
+    if (key !== this.cutKey) {
+      const index = this.indexAttribute.array as Uint32Array;
+      const row = this.lonSegments + 1;
+      const setCell = (cell: number, empty: boolean): void => {
+        const a = Math.floor(cell / this.lonSegments) * row + (cell % this.lonSegments);
+        index.set(empty ? [0, 0, 0, 0, 0, 0] : [a, a + 1, a + row, a + 1, a + row + 1, a + row], cell * 6);
+      };
+      for (const cell of this.cutCells) setCell(cell, false);
+      this.cutCells = [];
+      for (let cy = 0; cy < NEAR_CELLS; cy++) {
+        for (let cx = 0; cx < NEAR_CELLS; cx++) this.cutCells.push((window.iy0 + cy) * this.lonSegments + window.ix0 + cx);
+      }
+      for (const cell of this.cutCells) setCell(cell, true);
+      this.indexAttribute.needsUpdate = true;
+      this.cutKey = key;
+    }
+    fillNearGrid(
+      window,
+      this.lonSegments,
+      this.latSegments,
+      this.positions,
+      this.lonSegments + 1,
+      (lon, lat) => blendedProjection(lon, lat, p, R),
+      (x, y, out, at) => this.localPosition(x, y, out, at),
+      { positions: this.nearPositions, mapXY: this.nearMapXY, lonLat: this.nearLonLat },
+    );
+    const geometry = this.nearGrid.geometry;
+    (geometry.getAttribute('position') as BufferAttribute).needsUpdate = true;
+    (geometry.getAttribute('aMapXY') as BufferAttribute).needsUpdate = true;
+    (geometry.getAttribute('aLonLat') as BufferAttribute).needsUpdate = true;
   }
 
   // -- the half-resolution masked pass ---------------------------------------------------------------
@@ -540,6 +615,7 @@ export class BentPlanetLab {
     this.marchMaterial.dispose();
     this.coverageMaterial?.dispose();
     this.grid.geometry.dispose();
+    this.nearGrid.geometry.dispose();
     this.gridMaterial.dispose();
     this.skyView.dispose();
     this.maskedTarget?.dispose();

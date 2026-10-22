@@ -723,6 +723,7 @@ export class AtmosphereLabPageComponent {
     gpuTimestampsSupported: () => typeof (this.engine.renderer as any)?.resolveTimestampsAsync === 'function',
     isSampling: () => this.engine.fpsController.frameSampler.isActive,
     startSampling: () => this.engine.fpsController.frameSampler.start(),
+    gpuSamplesSoFar: () => this.engine.fpsController.frameSampler.gpuSamples,
     stopSampling: () => this.engine.fpsController.frameSampler.stop(),
     environment: () => this.testEnvironment(),
   };

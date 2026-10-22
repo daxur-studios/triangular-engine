@@ -1,4 +1,5 @@
 import type { GpuPassKind, IGpuPassSummary } from 'triangular-engine';
+import { modeActionMs } from 'triangular-engine/testing';
 import type { TestCheck, TestContext, TestMetric, TestObservation, TestRunAdapter, TestScenario, TestSetting } from 'triangular-engine/testing';
 import { runImageChecks, type CheckFrames } from './atmosphere-lab-image-checks';
 import type { AtmosphereLabState, AtmosphereLabTestSettings } from './atmosphere-lab-tests';
@@ -61,6 +62,8 @@ export interface AtmosphereLabTestHost {
   gpuTimestampsSupported(): boolean;
   isSampling(): boolean;
   startSampling(): void;
+  /** The open window's whole-frame GPU samples so far (ms), for quick mode to watch; read, never changed. */
+  gpuSamplesSoFar(): readonly number[];
   stopSampling(): AtmosphereFrameSummary;
   environment(): Readonly<Record<string, TestSetting>>;
 }
@@ -70,6 +73,12 @@ const SETTLE_MS = 400;
 const SETTLE_FRAMES = 3;
 const STALL_MS = 5_000;
 const MIN_WINDOW_FRAMES = 60;
+/** Quick mode: a sweep shortened by its `quickMs` still renders this many frames, or the window is not evidence. */
+const MIN_QUICK_WINDOW_FRAMES = 20;
+/** `performance.now()` is coarsened to 0.1 ms in this browser setup; smaller changes are timer noise. */
+const TIMER_STEP_MS = 0.1;
+/** GPU timestamps with the developer flag step at about 1 µs. */
+const GPU_STEP_MS = 0.001;
 const MORPH_TOLERANCE = 1e-6;
 const NUMBER_TOLERANCE = 1e-6;
 
@@ -133,7 +142,7 @@ async function waitForFrames(host: AtmosphereLabTestHost, count: number, context
 }
 
 function runSweep(
-  scenario: TestScenario<AtmosphereLabTestSettings>, context: TestContext, host: AtmosphereLabTestHost, trace: number[],
+  scenario: TestScenario<AtmosphereLabTestSettings>, lengthMs: number, context: TestContext, host: AtmosphereLabTestHost, trace: number[],
 ): Promise<void> {
   const keys = scenario.settings.morphKeys;
   return new Promise<void>((resolve, reject) => {
@@ -152,7 +161,7 @@ function runSweep(
       if (done || endReached) return;
       const now = performance.now();
       startedAt ??= now;
-      const fraction = Math.min(1, (now - startedAt) / scenario.durationMs);
+      const fraction = Math.min(1, (now - startedAt) / lengthMs);
       const { morph, leg } = sweepMorphAt(keys, fraction);
       // A slow frame must not step over a keyframe: the first frame past a leg's end renders exactly that keyframe.
       const legs = keys.length - 1;
@@ -207,6 +216,7 @@ export function createAtmosphereLabTestAdapter(
   }
 
   return {
+    windowModes: true,
     capture: () => host.read(),
     apply: (scenario) => {
       host.resetErrors();
@@ -230,8 +240,13 @@ export function createAtmosphereLabTestAdapter(
       });
       let summary: AtmosphereFrameSummary;
       try {
-        if (settings.kind === 'sweep') await runSweep(scenario, context, host, trace);
-        else await context.wait(scenario.durationMs);
+        // A sweep runs for its mode's length (shorter in quick mode when the scenario sets `quickMs`); a still view's
+        // window stops in quick mode once frame pacing and (with timestamps) GPU time have settled.
+        if (settings.kind === 'sweep') await runSweep(scenario, modeActionMs(scenario, context.mode), context, host, trace);
+        else await context.measureWindow(scenario, [
+          { name: 'frameInterval', samples: () => intervals, resolution: TIMER_STEP_MS },
+          ...(host.gpuTimestampsSupported() ? [{ name: 'gpuFrame', samples: () => host.gpuSamplesSoFar(), resolution: GPU_STEP_MS }] : []),
+        ]);
         summary = host.stopSampling();
       } finally {
         offRender();
@@ -295,7 +310,20 @@ export function createAtmosphereLabTestAdapter(
           },
         );
       }
+      // Survey: what failed is kept in the result, but as a note, so the session goes on to the next case.
+      const wouldFail = settings.reportOnly ? checks.filter((item) => !item.passed) : [];
+      if (settings.reportOnly) {
+        checks.splice(0, checks.length, ...checks.map((item) => (item.passed ? item : { ...item, passed: true, detail: `WOULD FAIL: ${item.detail ?? ''}` })));
+        imageMetrics.push({
+          name: 'checksWouldFail', unit: 'checks',
+          source: 'Checks of this case that failed and were recorded as notes because the suite is a survey',
+          samples: [wouldFail.length],
+        });
+        imageDetails['wouldFail'] = wouldFail.map((item) => item.name).join('; ');
+      }
       const software = environment['softwareRenderer'] === true;
+      // A quick sweep is short by design; a quick still view watched to settled already has its samples.
+      const minFrames = context.mode === 'quick' && settings.kind === 'sweep' ? MIN_QUICK_WINDOW_FRAMES : MIN_WINDOW_FRAMES;
       const frameMetric: TestMetric = {
         name: 'frameInterval', unit: 'ms', source: 'Deltas of engine renderComplete$ timestamps (performance.now); display-cadence quantized, not GPU time',
         samples: intervals, unavailableReason: intervals.length ? undefined : 'Fewer than two frames completed in the window',
@@ -325,7 +353,7 @@ export function createAtmosphereLabTestAdapter(
         },
         validityIssues: [
           ...summary.invalidReasons,
-          ...(summary.frames < MIN_WINDOW_FRAMES ? [`Fewer than ${MIN_WINDOW_FRAMES} rendered frames in measurement window`] : []),
+          ...(summary.frames < minFrames ? [`Fewer than ${minFrames} rendered frames in measurement window`] : []),
           ...(software ? ['Software renderer: functional evidence only, not hardware performance'] : []),
           ...(!passes && host.gpuTimestampsSupported() && !software ? ['No per-pass GPU timestamps were resolved in the window'] : []),
         ],
@@ -333,6 +361,9 @@ export function createAtmosphereLabTestAdapter(
           'GPU time is per render pass, not per effect: the sky-view table and the masked march are both full-screen passes and are summed in gpuFullscreenPasses.',
           'The masked pass runs only above the air or near an open map edge, so cost differs by view; each scenario states its view.',
           'Appearance (rim glow, seams at the map edge, popping while morphing) is not judged by these checks and needs human review.',
+          ...(settings.reportOnly ? [
+            'Survey suite: failed checks are recorded as "WOULD FAIL" notes (see checksWouldFail) and do not fail the case or end the run. Gate with a version that is not a survey.',
+          ] : []),
           ...(settings.imageChecks ? [
             'Image checks read the final frame only. They predict sky and ground from the analytic bent sphere (the one the sky pass assumes), '
               + 'so they find where the mesh and that sphere disagree, not every visual flaw. Thresholds are tone-mapped sRGB luma.',

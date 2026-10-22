@@ -36,13 +36,16 @@ class FakeHost implements AtmosphereLabTestHost {
     if (this.pendingMorph !== undefined) this.state = { ...this.state, state: { ...this.state.state, morph: this.pendingMorph } };
     if (this.baking > 0) this.baking--;
     this.frames++;
+    if (this.sampling) this.gpuSamples.push(0.5);
     for (const callback of [...this.render]) callback(performance.now());
   }, 16);
+  /** One steady GPU sample per frame while sampling. */
+  gpuSamples: number[] = [];
 
   dispose(): void { clearInterval(this.timer); }
   read(): AtmosphereLabSnapshot { return this.state; }
   apply(settings: AtmosphereLabTestSettings): void {
-    const { kind: _kind, morphKeys, expectMaskedPass: _expect, imageChecks: _image, ...rest } = settings;
+    const { kind: _kind, morphKeys, expectMaskedPass: _expect, imageChecks: _image, reportOnly: _report, ...rest } = settings;
     this.state = {
       state: { ...rest, bentOn: true, morph: morphKeys[0], projection: settings.projection },
       sweep: false, animateSun: false,
@@ -63,7 +66,8 @@ class FakeHost implements AtmosphereLabTestHost {
   async captureThumbnail(): Promise<Blob> { this.thumbnails++; return new Blob(['x'], { type: 'image/webp' }); }
   gpuTimestampsSupported(): boolean { return this.gpuSupported; }
   isSampling(): boolean { return this.sampling; }
-  startSampling(): void { this.sampling = true; }
+  startSampling(): void { this.sampling = true; this.gpuSamples = []; }
+  gpuSamplesSoFar(): readonly number[] { return this.gpuSamples; }
   stopSampling(): AtmosphereFrameSummary {
     this.sampling = false;
     return { frames: 90, cpuMedianMs: 2, cpuP95Ms: 3, wallMedianMs: 16, wallP95Ms: 18, invalidReasons: [], verdict: 'ok' };
@@ -74,11 +78,11 @@ class FakeHost implements AtmosphereLabTestHost {
 const quick = (suite: TestSuite<AtmosphereLabTestSettings>, ...ids: string[]): TestSuite<AtmosphereLabTestSettings> => ({
   ...suite,
   scenarios: suite.scenarios.filter((scenario) => ids.includes(scenario.id))
-    .map((scenario) => ({ ...scenario, durationMs: 400, warmupMs: 0 })),
+    .map((scenario) => ({ ...scenario, durationMs: 400, warmupMs: 0, quickMs: undefined })),
 });
 
 const COVERAGE_CHECK = "Ground mesh covers the atmosphere's ground";
-const [LOOK, , COST, LOOK2] = ATMOSPHERE_LAB_TEST_HISTORY;
+const [LOOK, , COST, LOOK2, LOOK3] = ATMOSPHERE_LAB_TEST_HISTORY;
 
 describe('atmosphere lab tests', () => {
   let host: FakeHost;
@@ -86,13 +90,28 @@ describe('atmosphere lab tests', () => {
   afterEach(() => host.dispose());
 
   describe('history', () => {
-    it('is a valid append-only history ending with look v2', () => {
+    it('is a valid append-only history ending with look v3', () => {
       expect(() => validateTestHistory(ATMOSPHERE_LAB_TEST_HISTORY)).not.toThrow();
       expect(ATMOSPHERE_LAB_TEST_HISTORY.map((suite) => `${suite.id}@${suite.version}:${suite.purpose}`)).toEqual([
         'bent-atmosphere-look@1:functional', 'bent-atmosphere-cost@1:performance', 'bent-atmosphere-cost@2:performance',
-        'bent-atmosphere-look@2:functional']);
+        'bent-atmosphere-look@2:functional', 'bent-atmosphere-look@3:functional']);
       expect(LOOK.requiresVisualReview).toBeTrue();
       expect(LOOK2.requiresVisualReview).toBeTrue();
+      expect(LOOK3.requiresVisualReview).toBeTrue();
+    });
+
+    it('makes look v3 a survey of the v2 views plus three altitudes under a kilometre, and keeps v1 and v2 gating', () => {
+      expect(LOOK3.scenarios.every((item) => item.settings.reportOnly === true)).toBeTrue();
+      expect(LOOK.scenarios.concat(LOOK2.scenarios).some((item) => item.settings.reportOnly)).toBeFalse();
+      const ids = LOOK3.scenarios.map((item) => item.id);
+      expect(ids.slice(0, 5)).toEqual(['horizon-ground-noon-m0', 'horizon-ground-85m-m0', 'horizon-ground-381m-m0',
+        'horizon-ground-1700m-m0', 'horizon-ground-noon-m0_5']);
+      expect(LOOK3.scenarios.length).toBe(LOOK2.scenarios.length + 3);
+      const v2 = new Map(LOOK2.scenarios.map((item) => [item.id, item.settings]));
+      for (const item of LOOK3.scenarios.filter((entry) => v2.has(entry.id))) {
+        const { reportOnly: _report, ...rest } = item.settings;
+        expect(rest).withContext(item.id).toEqual(v2.get(item.id)!);
+      }
     });
 
     it('covers the three open Plan 049 look checks with resolved numbers', () => {
@@ -126,8 +145,9 @@ describe('atmosphere lab tests', () => {
       const url = buildTestLaunchUrl(base, LOOK, 'human-observed', 1);
       expect(url).toBe(`${base}?testSuite=bent-atmosphere-look&testVersion=1&testProfile=human-observed&testMode=standard&testRepetitions=1&testAutoStart=1`);
       expect(parseTestLaunch(new URL(url), ATMOSPHERE_LAB_TEST_HISTORY)?.key).toBe('bent-atmosphere-look@1');
-      expect(parseTestLaunch(new URL(`${base}?testSuite=latest&testAutoStart=1`), ATMOSPHERE_LAB_TEST_HISTORY)?.key).toBe('bent-atmosphere-look@2');
+      expect(parseTestLaunch(new URL(`${base}?testSuite=latest&testAutoStart=1`), ATMOSPHERE_LAB_TEST_HISTORY)?.key).toBe('bent-atmosphere-look@3');
       expect(buildTestLaunchUrl(base, LOOK2, 'visible-browser', 1)).toContain('testSuite=bent-atmosphere-look&testVersion=2');
+      expect(buildTestLaunchUrl(base, LOOK3, 'visible-browser', 1)).toContain('testSuite=bent-atmosphere-look&testVersion=3');
     });
   });
 
@@ -230,6 +250,40 @@ describe('atmosphere lab tests', () => {
       expect(result.performanceVerdict).toBe('inconclusive');
     }, 20_000);
 
+    describe('quick mode', () => {
+      it('gives every sweep a quick length and leaves standard windows as they were', () => {
+        expect(createAtmosphereLabTestAdapter(host).windowModes).toBeTrue();
+        for (const suite of ATMOSPHERE_LAB_TEST_HISTORY) for (const item of suite.scenarios) {
+          if (item.settings.kind === 'sweep') expect(item.quickMs).withContext(item.id).toBeLessThan(item.durationMs);
+          else expect(item.quickMs).withContext(item.id).toBeUndefined();
+        }
+        expect(LOOK.scenarios.find((item) => item.id === 'scrub-equirect')?.durationMs).toBe(8000);
+      });
+
+      it('runs a sweep for its quick length and still reaches every keyframe', async () => {
+        const [sweep] = LOOK.scenarios.filter((item) => item.id === 'equal-earth-low-morph');
+        const suite = { ...LOOK, scenarios: [{ ...sweep, durationMs: 4000, quickMs: 600, warmupMs: 0 }] };
+        const began = performance.now();
+        const result = await new TestSession<AtmosphereLabTestSettings, AtmosphereLabSnapshot>().run(
+          suite, createAtmosphereLabTestAdapter(host), { repetitions: 1, profile: 'headless-hardware', mode: 'quick' });
+        expect(result.status).toBe('completed');
+        expect(result.mode).toBe('quick');
+        expect(result.cases[0].checks.find((check) => check.name === 'Morph reached its final state')?.passed).toBeTrue();
+        expect(performance.now() - began).toBeLessThan(3000);
+      }, 20_000);
+
+      it('stops a still view once frame pacing and GPU time settle', async () => {
+        const suite = { ...COST, scenarios: COST.scenarios.filter((item) => item.id === 'auto-m0-space')
+          .map((item) => ({ ...item, durationMs: 6000, warmupMs: 0 })) };
+        const result = await new TestSession<AtmosphereLabTestSettings, AtmosphereLabSnapshot>().run(
+          suite, createAtmosphereLabTestAdapter(host), { repetitions: 1, profile: 'headless-hardware', mode: 'quick' });
+        const window = result.cases[0].window;
+        expect(window?.stoppedBy).toBe('settled');
+        expect(window?.elapsedMs).toBeLessThan(6000);
+        expect(Object.keys(window?.samples ?? {})).toEqual(['frameInterval', 'gpuFrame']);
+      }, 20_000);
+    });
+
     describe('image checks (look v2)', () => {
       const run = (ids: string[], thumbnails?: { scenarioId: string; images: readonly Blob[] }[]) =>
         new TestSession<AtmosphereLabTestSettings, AtmosphereLabSnapshot>().run(
@@ -318,6 +372,40 @@ describe('atmosphere lab tests', () => {
         expect(result.status).toBe('failed');
         expect(thumbnails.length).toBe(1);
         expect(host.thumbnails).toBe(1);
+      }, 20_000);
+    });
+
+    describe('survey (look v3)', () => {
+      const survey = (ids: string[]) =>
+        new TestSession<AtmosphereLabTestSettings, AtmosphereLabSnapshot>().run(
+          quick(LOOK3, ...ids), createAtmosphereLabTestAdapter(host), { repetitions: 1, profile: 'headless-hardware' });
+
+      it('records every failed check as a note and goes on to the next case', async () => {
+        host.checkFrames = () => syntheticFrames(host.state.state, { sky: 0, uncoveredCells: 12 });
+        const result = await survey(['horizon-ground-noon-m0', 'horizon-air-high-m0']);
+        expect(result.errors).toEqual([]);
+        expect(result.status).toBe('completed');
+        expect(result.cases.map((item) => item.scenario.id)).toEqual(['horizon-ground-noon-m0', 'horizon-air-high-m0']);
+        for (const item of result.cases) {
+          expect(item.status).toBe('completed');
+          expect(item.checks.every((entry) => entry.passed)).toBeTrue();
+          const lit = item.checks.find((entry) => entry.name === 'Sky is lit');
+          expect(lit?.detail).toContain('WOULD FAIL: median luma 0.000');
+          expect(item.checks.find((entry) => entry.name === COVERAGE_CHECK)?.detail).toContain('WOULD FAIL');
+          expect(item.metrics.find((entry) => entry.name === 'checksWouldFail')?.samples[0]).toBeGreaterThanOrEqual(2);
+          expect(String(item.details?.['wouldFail'])).toContain('Sky is lit');
+          expect(item.limitations.join(' ')).toContain('Survey suite');
+        }
+      }, 20_000);
+
+      it('counts none and notes nothing on a healthy view, and the same defect still fails look v2', async () => {
+        const healthy = await survey(['horizon-air-high-m0']);
+        expect(healthy.cases[0].metrics.find((entry) => entry.name === 'checksWouldFail')?.samples).toEqual([0]);
+        expect(healthy.cases[0].checks.some((entry) => entry.detail?.includes('WOULD FAIL'))).toBeFalse();
+        host.checkFrames = () => syntheticFrames(host.state.state, { sky: 0 });
+        const gate = await new TestSession<AtmosphereLabTestSettings, AtmosphereLabSnapshot>().run(
+          quick(LOOK2, 'horizon-air-high-m0'), createAtmosphereLabTestAdapter(host), { repetitions: 1, profile: 'headless-hardware' });
+        expect(gate.status).toBe('failed');
       }, 20_000);
     });
   });
