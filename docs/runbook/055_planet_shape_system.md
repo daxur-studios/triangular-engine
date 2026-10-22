@@ -803,4 +803,71 @@ float32). The spec points keep clear of the sharpest pad transition on purpose o
   the same as no pre-pass at 1/4 and 1/8 (horizon and low flyover, 600 km); features thinner than a coarse pixel
   standing alone against the sky could be lost.
 - **Suite `planet-shape-raymarch` v2:** v2 at every pose and size with the pre-pass off and at 1/4, 1/2 and 1/8 at the
-  600 km ground, one case with the soft shadow, and v1 at 600 km as the reference. Not run yet (needs the laptop free).
+  600 km ground, one case with the soft shadow, and v1 at 600 km as the reference. Run 2026-10-22 (below).
+
+#### 2026-10-22: v2 timed (finish line 1 met); edits replace the pad (finish line 3)
+
+- **Suite `planet-shape-raymarch` v2, unattended on the 3080** (`npm run test:run`, standard, 2538 × 1440, GPU at
+  100 % and throttled at about 76 °C, so a little high). Scene pass medians (ms), pre-pass off → 1/4:
+  ground 15.5 → 4.9 (64 km), 17.0 → 5.4 (600 km), 19.1 → 8.4 (6371 km); horizon grazing 6.1 → 2.9, 4.3 → 2.9,
+  2.6 → 2.3; low flyover 3.1 → 2.4, 3.5 → 2.8, 2.2 → 2.6; orbit 1.2–1.7 either way. At the 600 km ground, 1/2 is
+  7.8 and 1/8 is 6.1 (1/4 is the sweet spot), the soft shadow adds 0.8 (6.2). v1 at 600 km in the same run: 42–50
+  near the ground. So the 16 ms milestone holds at every pose with the 1/4 pre-pass; D8's 2 ms is still 3–4× away
+  near the ground. Of the 5.4 ms, the pre-pass at 1/2 was 4.6 ms in the pass labels, so the coarse march is now the
+  bigger half.
+- **Runner fix:** the first attempt stopped at the 26th scenario with "Run timed out": the whole-run budget was a flat
+  180 s unless the mode was soak. `TestSession` now adds every scenario's warm-up and window (times the repetitions)
+  to the 180 s in every mode (`testing/test-session.ts`, CHANGELOG, `docs/testing.md`).
+- **Edits** (`planet-shape-field.ts`): `TerrainEdit` = `flatten` (a disc levelled at `heightM`, soft edge `edgeM`),
+  `soften` (the disc keeps `strength` of the relief), `carve` (a sphere removed, smooth-max rim). Applied after the
+  noise, in list order, up to 8. The shader gets two vec4 arrays: the centre minus the camera, worked out in doubles
+  every frame like the noise origins (so a metre-scale disc holds on an Earth-size body), and the kind code; and
+  radius, edge, height, strength. The pad is now `padEdit(radius)`, the default list; `padAt` is gone. The CPU twin
+  applies the same edits (`applyEditCpu`, `createTerrainFieldCpu(radius, bytes, edits)`, `setEdits`).
+- **Per-ray edit mask:** looping over every edit at every march step cost too much (first edits run: ground pad
+  6.5 ms against 5.4 with the old inline pad; the pad plus three sites 9.2). Each edit now has a bound radius
+  (`editBoundM`: a disc's cylinder through the air band with 5 % margin, a carve's sphere plus rim) outside which it
+  cannot change solidity; each ray works out once which bounds its segment passes (`rayEditMask`, an int bitmask)
+  and the march skips the others. Normals and shadows still read all edits. Timed again (`planet-shape-edits` v1,
+  600 km, 1/4 pre-pass, ms, none / pad / pad + three sites): low flyover 3.0 / 3.2 / 3.7 (4.2 before the mask),
+  horizon grazing 3.1 / 3.3 / 3.8 (4.2), ground 2.7 / 6.6 / 9.1 (9.2). At the ground the camera stands in the pad
+  and looks straight at the sites, so nearly every ray really does meet them; and a disc's bound sphere spans the
+  whole air band (about 17 km at 600 km for a 2.7 km disc). Levers for the race: a capsule bound along the edit's
+  vertical instead of a sphere, and a cheaper inline path when one edit is in play. ("None" at the ground is cheap
+  only because the 2 m camera is then inside rock.)
+- **Lab:** an "edits" row (pad, none, pad + base sites: a raised flat base, a bowl carved into the pad rim and a
+  softened stretch, east of the poses where the low and grazing views look); setting `rayEdits` in the tests;
+  suite `planet-shape-edits` v1 (none / pad / sites at the low, ground and grazing poses, 600 km, pre-pass 1/4).
+- **Specs** (55 lab specs green): edit parity GPU against CPU at 20 km and 6371 km (worst 3 mm and 0.66 m against
+  units of 60 m and 900 m; about 150 points per body actually changed by the edits, so the check is not vacuous);
+  flatten levels the ground at its height and leaves it alone outside; soften keeps its share of the relief; carve
+  opens a hole; points just outside each bound keep their solidity; the GPU mask selects the edit a ray passes and
+  not one beside it.
+
+#### Same day: two blended biomes (finish line 4); review suite (finish line 5)
+
+- **Biomes** (`planet-shape-field.ts`): `BiomeParams` = canyon depth, rock amplitude, vertical stretch, per-octave
+  contrast (an octave keeps its mean, so the band does not move). `CANYON_BIOME` is the old field (7, 3, 4,
+  [1, 1, 1]); `HILLS_BIOME` is rolling hills (0, 3, 1, [1, 0.5, 0.2]): no canyons, round, smoother. A biome mask
+  (value noise on its own camera-relative frame, lattice 40 units, edge 0.42–0.58) blends the parameters, not two
+  fields: one extra texture read per step. Every biome has to stay inside the canyon biome's band (a spec checks
+  it), since the march spheres come from it. The offset was picked (by a CPU search) so that at 600 km the poses stand
+  in hills and canyons start about 10 km east: the grazing view shows rolling green hills in front and canyon country
+  behind. Shading: the hills are greener (grass on gentler slopes and more of it) and less dusty. A first try with
+  amplitude 2.5 and contrast [1, 0.35, 0.12] read as nearly flat from 12 km up.
+- `FieldNodes.biome` = frame and an override node (0 or more replaces the mask); `fieldBiomeAt`, `biomeAt`,
+  `biomeParams`; `rockAt` takes the blend. CPU twin: `biome(p)`, `biomeOverride`, fourth argument of
+  `createTerrainFieldCpu`. Lab: a "biome" row (blend, canyons, hills); setting `rayBiome`.
+- **Specs** (58 green): field parity now includes the biome frame (rock and density compared under the blend; worst
+  density 0.16 m at 6371 km, 5 mm at 20 km); the biome band check; the mask gives both biomes over a sphere of
+  directions (over 80 of 400 each) and the override makes one everywhere; the hills biome has no canyon term.
+- **Suites:** `planet-shape-biomes` v1 (timing: canyons, hills, blend at the low, ground and grazing poses, 600 km,
+  1/4 pre-pass) and `planet-shape-terrain-views` v1 (functional, `requiresVisualReview`: each biome and the blend at
+  those poses and the base-site edits at the low and grazing poses, spin paused at a fixed sun). The views wait for the
+  owner's review on the results page.
+- **Timed** (`planet-shape-biomes` v1, 600 km, 1/4 pre-pass, pad; ms, canyons / hills / blend): low flyover
+  3.1 / 3.2 / 3.7, horizon grazing 3.2 / 3.7 / 4.4, ground 7.0 / 8.1 / 9.1. The blend costs more than either biome
+  alone (the mask read, and the border is where these views look). All under the 16 ms milestone. The views run
+  (`planet-shape-terrain-views` v1, 11 cases) is saved with thumbnails and `visual=pending` for the owner.
+- **Finish line status:** 1 (16 ms) met; 2 (one definition, CPU twin, parity) met; 3 (edits) met; 4 (two blended
+  biomes) met; 5 (tests) in place: timing per biome, edit set and pose, parity specs, review views pending.

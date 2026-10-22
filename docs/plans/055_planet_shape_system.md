@@ -427,6 +427,10 @@ one terrain recipe has to be fast, editable and tested. Phase 1 is done when all
 
 Out until after the finish line: more biomes, materials, lighting polish, water, planet-scale LOD, morph.
 
+Status 2026-10-22: items 1–4 met and item 5 in place, with only the owner's review of the `planet-shape-terrain-views`
+run still open. The numbers are in the runbook. Near the ground the scene pass is 7–9 ms, so the 2 ms D8 budget remains the
+Phase 2 race.
+
 ### Phase 1b. Shape ops, evaluator and data-flow core
 
 - Op types, bounds, minimum visible size, fidelity class, blend modes, op log with deterministic replay.

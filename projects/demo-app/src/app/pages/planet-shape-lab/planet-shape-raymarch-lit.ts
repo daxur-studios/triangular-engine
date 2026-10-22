@@ -7,8 +7,9 @@ import {
   vec3, vec4, viewZToPerspectiveDepth,
 } from 'three/tsl';
 import {
-  CANYON_DEPTH, MASK_OFFSETS, ROCK_AMPLITUDE, ROCK_MEAN, ROCK_OCTAVES, bottomAltitudeM, densityAt, fieldFrameMatrices,
-  noiseFrame, noiseOrigin, sampleFrame, topAltitudeM, unitM, valueNoise, type FieldNodes,
+  BIOME_OFFSET, CANYON_DEPTH, MASK_OFFSETS, ROCK_AMPLITUDE, ROCK_MEAN, ROCK_OCTAVES, bottomAltitudeM, densityAt, fieldFrameMatrices,
+  fieldBiomeAt, noiseFrame, noiseOrigin, padEdit, rayEditMask, sampleFrame, terrainEditUniforms, topAltitudeM, unitM, valueNoise, type FieldNodes,
+  type TerrainEdit,
 } from './planet-shape-field';
 import { createNoiseTexture } from './planet-shape-noise';
 import type { RaymarchTerrain } from './planet-shape-raymarch';
@@ -74,13 +75,22 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
   const prepassTarget = new RenderTarget(1, 1, { type: FloatType, depthBuffer: false });
   const rockFrames = Array.from({ length: ROCK_OCTAVES }, () => noiseFrame());
   const maskFrames = MASK_OFFSETS.map((offset) => noiseFrame(new Vector3(...offset)));
+  const biomeFrame = noiseFrame(new Vector3(...BIOME_OFFSET));
+  /** A single biome everywhere (0 canyons .. 1 hills), or -1 for the mask. */
+  const uBiomeOverride = uniform(-1) as any;
   const detailFrames = Array.from({ length: DETAIL_LEVELS }, (_, i) => noiseFrame(new Vector3(i * 31.7, i * 7.3, i * 19.1)));
   const uDetailScales = Array.from({ length: DETAIL_LEVELS }, () => uniform(1) as any);
+  const editUniforms = terrainEditUniforms();
   let radius = 1;
   let camera: [number, number, number] = [0, 0, 1];
+  /** The edit list; `undefined` is the default, the pad under the poses. */
+  let edits: readonly TerrainEdit[] | undefined;
 
-  const field: FieldNodes = { noiseTexture, camera: uCamera, unit: uUnit, rockFrames, maskFrames };
-  const density = (x: any, altitude: any, footprint: any, smooth: boolean): any => densityAt(field, x, altitude, footprint, smooth);
+  const field: FieldNodes = {
+    noiseTexture, camera: uCamera, unit: uUnit, rockFrames, maskFrames, biome: { frame: biomeFrame, override: uBiomeOverride }, edits: editUniforms,
+  };
+  const density = (x: any, altitude: any, footprint: any, smooth: boolean, editMask?: any): any =>
+    densityAt(field, x, altitude, footprint, smooth, editMask);
   const sample = (frame: (typeof detailFrames)[number], x: any, smooth: boolean): any => sampleFrame(noiseTexture, frame, x, smooth);
 
   /** Altitude of the camera-relative point `x`, precise near the camera (see `planet-shape-raymarch.ts`). */
@@ -142,6 +152,7 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
         });
       }
       If(tEnd.greaterThan(t), () => {
+        const editMask = rayEditMask(editUniforms.a, editUniforms.bound, editUniforms.count, d, t, tEnd).toVar();
         const tPrevious = t.toVar();
         const fieldPrevious = float(1e30).toVar();
         const tSafe = t.toVar();
@@ -151,7 +162,7 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
           const x = d.mul(t);
           const altitude = uCamQ.add(t.mul(b.mul(2).add(t))).div(uCamera.add(x).length().add(uRadius)).toVar();
           const footprint = t.mul(pixelAngle).toVar();
-          const field = density(x, altitude, footprint, false).mul(STEP_SCALE).toVar();
+          const field = density(x, altitude, footprint, false, editMask).mul(STEP_SCALE).toVar();
           If(field.lessThan(footprint.mul(0.5)), () => {
             tSafe.assign(tPrevious);
             // Crossed (or touched) the rock: one secant step between the last two samples.
@@ -240,13 +251,16 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
       normal.assign(normalize(normal.add(bump.sub(normal.mul(dot(bump, normal))).mul(bumpAmount.mul(0.5)))));
       const facing = dot(normal, up).toVar();
 
-      // Material: rock, banded by height (strata), grass on up-facing ground, pale dust on flat tops.
+      // Material: rock, banded by height (strata), grass on up-facing ground, pale dust on flat tops. The hills biome is
+      // greener (grass on gentler slopes too, and more of it) and less dusty.
+      const biome = fieldBiomeAt(field, x, true).toVar();
       const band = valueNoise(noiseTexture, vec3(altitude.div(uUnit.mul(0.35)), fine.mul(2), 0.5), true);
       const rock = mix(vec3(0.3, 0.27, 0.24), vec3(0.42, 0.3, 0.22), band).mul(detail).toVar();
-      const lush = sample(maskFrames[1], x, true);
-      const grass = mix(vec3(0.2, 0.3, 0), vec3(0.26, 0.16, 0.08), smoothstep(0.3, 0.7, lush)).mul(detail);
-      const withGrass = mix(rock, grass, smoothstep(0.55, 0.9, facing).mul(smoothstep(0.35, 0.55, lush.add(fine.mul(0.3)))));
-      const dusty = smoothstep(0.95, 0.99, facing).mul(smoothstep(0.45, 0.7, fine)).mul(0.6);
+      const lush = sample(maskFrames[1], x, true).add(biome.mul(0.25));
+      const grass = mix(vec3(0.2, 0.3, 0), vec3(0.26, 0.16, 0.08), smoothstep(0.3, 0.7, lush.sub(biome.mul(0.3)))).mul(detail);
+      const grassy = smoothstep(mix(float(0.55), float(0.35), biome), mix(float(0.9), float(0.7), biome), facing);
+      const withGrass = mix(rock, grass, grassy.mul(smoothstep(0.35, 0.55, lush.add(fine.mul(0.3)))));
+      const dusty = smoothstep(0.95, 0.99, facing).mul(smoothstep(0.45, 0.7, fine)).mul(float(0.6).sub(biome.mul(0.5)));
       const albedo = mix(withGrass, vec3(0.46, 0.43, 0.39).mul(detail), dusty).toVar();
 
       // Soft shadow toward the sun over the march field (penumbra from the closest pass).
@@ -308,11 +322,12 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
   prepassMaterial.outputNode = vec4(coarse.z, coarse.y, 0, 1);
 
   const origin = new Vector3();
-  const allFrames = [...rockFrames, ...maskFrames, ...detailFrames];
+  const allFrames = [...rockFrames, ...maskFrames, biomeFrame, ...detailFrames];
   const updateFrames = (unit: number) => {
     const matrices = fieldFrameMatrices(unit);
     rockFrames.forEach((frame, i) => frame.matrix.copy(matrices.rock[i]));
     maskFrames.forEach((frame, i) => frame.matrix.copy(matrices.mask[i]));
+    biomeFrame.matrix.copy(matrices.biome);
     detailFrames.forEach((frame, i) => {
       const scale = DETAIL_COARSEST * unit * DETAIL_RATIO ** i;
       frame.matrix.identity().multiplyScalar(1 / scale);
@@ -335,6 +350,7 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
     const t = Math.min(1, Math.max(0, (air - altitude) / (air * 0.5)));
     uSkyAmount.value = t * t * (3 - 2 * t);
     for (const frame of allFrames) frame.uOrigin.value.copy(noiseOrigin(frame.matrix, frame.offset, x, y, z, origin));
+    editUniforms.set(edits ?? [padEdit(radius)], camera, radius);
   };
 
   return {
@@ -358,6 +374,11 @@ export function createLitRaymarchTerrain(): RaymarchTerrain {
     setPixelAngle(radians) { uPixelAngle.value = radians; },
     setSteps(steps) { uSteps.value = Math.max(1, Math.round(steps)); },
     setShadows(on) { uShadowSteps.value = on ? SHADOW_STEPS : 0; },
+    setBiome(biome) { uBiomeOverride.value = biome ?? -1; },
+    setEdits(next) {
+      edits = next;
+      updateCamera();
+    },
     setPrepass(scale, width, height) {
       uPrepassScale.value = scale;
       if (scale <= 0) return;

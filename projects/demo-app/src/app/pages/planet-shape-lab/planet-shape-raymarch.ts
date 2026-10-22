@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { BackSide, Vector3 } from 'three';
 import { MeshBasicNodeMaterial, type RenderTarget } from 'three/webgpu';
+import type { TerrainEdit } from './planet-shape-field';
 import {
   Break, Discard, Fn, If, Loop, cameraFar, ceil, int, log2, cameraNear, cameraViewMatrix, clamp, color, cross, dot, float, max, mix,
   mx_noise_float, normalize, positionWorld, select, smoothstep, sqrt, uniform, vec3, vec4, viewZToPerspectiveDepth,
@@ -60,6 +61,10 @@ export interface RaymarchTerrain {
   setSteps(steps: number): void;
   /** Soft shadow march on or off, for terrains that have one. */
   setShadows?(on: boolean): void;
+  /** A single biome everywhere (0 canyons .. 1 rolling hills), or `undefined` for the blend mask; for terrains with biomes. */
+  setBiome?(biome: number | undefined): void;
+  /** Terrain edits in order, for terrains that take them; `undefined` restores the default (the pad under the poses). */
+  setEdits?(edits: readonly TerrainEdit[] | undefined): void;
   /** Low-resolution pre-pass, for terrains that have one: the page draws the shell with `material` into `target` first. */
   readonly prepass?: { readonly material: MeshBasicNodeMaterial; readonly target: RenderTarget };
   /** Pre-pass at the drawing buffer (`width` x `height`) divided by `scale`; 0 turns it off. */

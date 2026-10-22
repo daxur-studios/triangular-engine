@@ -1,11 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Matrix3, Vector3, type DataTexture } from 'three';
-import { abs, float, floor, fract, max, mix, normalize, smoothstep, sqrt, texture, uniform, vec2 } from 'three/tsl';
+import { Matrix3, Vector3, Vector4, type DataTexture } from 'three';
+import {
+  Continue, Fn, If, Loop, abs, bitAnd, bitOr, clamp, dot, float, floor, fract, int, max, mix, normalize, select, shiftLeft, smoothstep, texture,
+  uniform, uniformArray, vec2,
+} from 'three/tsl';
 import { NOISE_PERIOD, NOISE_SLICE_SHIFT } from './planet-shape-noise';
 
 /**
  * Plan 055: the v2 terrain as one definition. A 3D density field,
- * `altitude + pad * unit * (CANYON_DEPTH * canyon + ROCK_AMPLITUDE * (rock - ROCK_MEAN))`, negative inside rock, in metres.
+ * `altitude + unit * (canyonDepth * canyon + rockAmplitude * (rock - ROCK_MEAN))`, negative inside rock, in metres,
+ * then the edits (flatten, soften, carve) in list order. The biome parameters (canyon depth, rock amplitude, vertical
+ * stretch, octave contrast) are blended between two biomes, canyons and rolling hills, by a low-frequency mask: one
+ * field whose parameters vary, not two fields, so the cost does not grow with the biomes.
  * The TSL functions here are what the raymarcher draws; `planet-shape-field-cpu.ts` is the same field in doubles, and
  * `planet-shape-field.spec.ts` keeps the two equal. Constants and frame layout live here and are shared by both.
  *
@@ -13,7 +19,7 @@ import { NOISE_PERIOD, NOISE_SLICE_SHIFT } from './planet-shape-noise';
  * coordinates modulo the period) are worked out in doubles on the CPU, so metre-scale noise holds on an Earth-size body.
  */
 
-/** Radius of the flat pad under the poses, as an angle from the +z pole: fully flat inside, full relief outside. */
+/** The flat pad under the poses (the first edit), as an angle from the +z pole: fully flat inside, full relief outside. */
 export const PAD_INNER_RAD = 0.0015;
 export const PAD_OUTER_RAD = 0.004;
 /** In units (a tenth of the relief): canyon depth, rock-noise amplitude, rock-noise lattice, canyon-mask lattice. */
@@ -37,6 +43,42 @@ export const MASK_OFFSETS: readonly [readonly [number, number, number], readonly
   [11.3, 4.7, 8.1],
   [3.1, 17.9, 5.3],
 ];
+
+/** Parameters a biome sets, in relief units where they are lengths. */
+export interface BiomeParams {
+  readonly canyonDepth: number;
+  readonly rockAmplitude: number;
+  /** How much finer the rock noise is vertically (strata and ledges); 1 = round. */
+  readonly stretch: number;
+  /** Per rock octave, how much of its contrast is kept (0..1); the octave's mean stays put, so the band does not move. */
+  readonly octaveContrast: readonly [number, number, number];
+}
+
+/**
+ * Biome 0: canyons, mesas and strata. Biome 1: rolling hills, no canyons, round and smoother. Every biome must stay
+ * inside the canyon biome's band (`canyonDepth` and `rockAmplitude` no larger), since the march's spheres come from it.
+ */
+export const CANYON_BIOME: BiomeParams = { canyonDepth: CANYON_DEPTH, rockAmplitude: ROCK_AMPLITUDE, stretch: STRETCH, octaveContrast: [1, 1, 1] };
+export const HILLS_BIOME: BiomeParams = { canyonDepth: 0, rockAmplitude: 3, stretch: 1, octaveContrast: [1, 0.5, 0.2] };
+/**
+ * Lattice of the biome mask, in units, its frame offset, and the mask values over which one biome turns into the other.
+ * The offset was picked so that at 600 km the poses stand in hills and canyons begin some 10 km east, where the low and
+ * grazing views look: both biomes and the border between them are in view.
+ */
+export const BIOME_LATTICE = 40;
+export const BIOME_OFFSET: readonly [number, number, number] = [196.92, 16.4, 162.44];
+export const BIOME_EDGE: readonly [number, number] = [0.42, 0.58];
+
+/** The parameters at biome blend `m` (0 canyons .. 1 hills). */
+export function biomeParams(m: number): BiomeParams {
+  const lerp = (a: number, b: number): number => a + (b - a) * m;
+  return {
+    canyonDepth: lerp(CANYON_BIOME.canyonDepth, HILLS_BIOME.canyonDepth),
+    rockAmplitude: lerp(CANYON_BIOME.rockAmplitude, HILLS_BIOME.rockAmplitude),
+    stretch: lerp(CANYON_BIOME.stretch, HILLS_BIOME.stretch),
+    octaveContrast: [0, 1, 2].map((i) => lerp(CANYON_BIOME.octaveContrast[i], HILLS_BIOME.octaveContrast[i])) as [number, number, number],
+  };
+}
 
 /** Total relief of the terrain; everything else is in units of a tenth of it. */
 export function reliefM(radiusM: number): number {
@@ -74,8 +116,8 @@ export function noiseFrame(offset = new Vector3()): NoiseFrame {
   return { matrix: new Matrix3(), offset, uMatrix: uniform(new Matrix3()), uOrigin: uniform(new Vector3()) };
 }
 
-/** Matrices of the rock octaves and the two canyon-mask frames for a body whose relief unit is `unit` metres. */
-export function fieldFrameMatrices(unit: number): { rock: Matrix3[]; mask: [Matrix3, Matrix3] } {
+/** Matrices of the rock octaves, the two canyon-mask frames and the biome frame for a body whose relief unit is `unit` metres. */
+export function fieldFrameMatrices(unit: number): { rock: Matrix3[]; mask: [Matrix3, Matrix3]; biome: Matrix3 } {
   const rock: Matrix3[] = [];
   let octave = new Matrix3().multiplyScalar(1 / (ROCK_LATTICE * unit));
   for (let i = 0; i < ROCK_OCTAVES; i++) {
@@ -84,7 +126,8 @@ export function fieldFrameMatrices(unit: number): { rock: Matrix3[]; mask: [Matr
   }
   const mask0 = new Matrix3().identity().multiplyScalar(1 / (MASK_LATTICE * unit));
   const mask1 = new Matrix3().copy(OCTAVE_ROTATION).multiplyScalar(OCTAVE_SCALE / (MASK_LATTICE * unit));
-  return { rock, mask: [mask0, mask1] };
+  const biome = new Matrix3().copy(OCTAVE_ROTATION).transpose().multiplyScalar(1 / (BIOME_LATTICE * unit));
+  return { rock, mask: [mask0, mask1], biome };
 }
 
 export function positiveModulo(value: number, period: number): number {
@@ -121,10 +164,138 @@ export function sampleFrame(noiseTexture: DataTexture, frame: NoiseFrameNodes, x
   return valueNoise(noiseTexture, frame.uOrigin.add(frame.uMatrix.mul(x)), smooth);
 }
 
-/** Pad mask 0 (flat) .. 1 (full relief) from the unit up vector. */
-export function padAt(up: any): any {
-  return smoothstep(PAD_INNER_RAD, PAD_OUTER_RAD, sqrt(max(float(0), float(2).sub(up.z.mul(2)))));
+/** Most edits the field takes at once. */
+export const MAX_TERRAIN_EDITS = 8;
+
+export type TerrainEditKind = 'flatten' | 'soften' | 'carve';
+/** Kind codes as stored in the shader (the w of an edit's first vector). */
+export const TERRAIN_EDIT_CODE: Readonly<Record<TerrainEditKind, number>> = { flatten: 1, soften: 2, carve: 3 };
+
+/**
+ * A local change to the field, applied after the noise and in list order. `centre` is body-relative, in metres.
+ * - `flatten`: within `radiusM` of the vertical through `centre`, the ground is level at altitude `heightM` (default
+ *   0), blending back to the field over `edgeM`. Keep `heightM` between the solid floor and the plateau top.
+ * - `soften`: the same disc keeps `strength` (0..1, default 0.25) of the relief: rounded hills, shallower canyons.
+ * - `carve`: removes the rock inside a sphere of `radiusM` at `centre`, its rim rounded over `edgeM`.
+ * Edges much narrower than the height they blend make steep field slopes, which the march may step over.
+ */
+export interface TerrainEdit {
+  readonly kind: TerrainEditKind;
+  readonly centre: readonly [number, number, number];
+  readonly radiusM: number;
+  readonly edgeM: number;
+  readonly heightM?: number;
+  readonly strength?: number;
 }
+
+/** The flat pad under the camera poses (+z), as a flatten edit at altitude 0. */
+export function padEdit(radiusM: number): TerrainEdit {
+  return {
+    kind: 'flatten', centre: [0, 0, radiusM], radiusM: PAD_INNER_RAD * radiusM, edgeM: (PAD_OUTER_RAD - PAD_INNER_RAD) * radiusM, heightM: 0,
+  };
+}
+
+/** Edge widths are kept above this (metres), so the blends stay defined. */
+export const MIN_EDGE_M = 1e-3;
+
+/**
+ * The shader form of an edit for a camera at `camera` (body-relative, doubles): `a` = centre minus camera (so it stays
+ * precise near the camera on an Earth-size body) and the kind code; `b` = (radius, edge, height, strength).
+ */
+export function packEdit(edit: TerrainEdit, camera: readonly [number, number, number], a: Vector4, b: Vector4): void {
+  a.set(edit.centre[0] - camera[0], edit.centre[1] - camera[1], edit.centre[2] - camera[2], TERRAIN_EDIT_CODE[edit.kind]);
+  b.set(edit.radiusM, Math.max(edit.edgeM, MIN_EDGE_M), edit.heightM ?? 0, edit.strength ?? 0.25);
+}
+
+/**
+ * Radius (metres) of a sphere around the edit's centre outside which, within the air band of a body of `radiusM`, the
+ * edit cannot change whether a point is solid: a disc edit's cylinder through the band (with a margin for the
+ * curvature), a carve's sphere plus its rounded rim.
+ */
+export function editBoundM(edit: TerrainEdit, radiusM: number): number {
+  const reach = edit.radiusM + Math.max(edit.edgeM, MIN_EDGE_M);
+  if (edit.kind === 'carve') return reach;
+  const centreAltitude = Math.hypot(...edit.centre) - radiusM;
+  const span = Math.max(topAltitudeM(radiusM) - centreAltitude, centreAltitude - bottomAltitudeM(radiusM), 0);
+  return Math.hypot(reach, span) * 1.05;
+}
+
+/** Every edit selected: the mask for field reads that are not along one ray (normals, shadows). */
+export const ALL_EDITS = (1 << MAX_TERRAIN_EDITS) - 1;
+
+/** Shader inputs of the edit list: arrays of `MAX_TERRAIN_EDITS` (two vec4, one bound radius) and the count in use. */
+export interface TerrainEditNodes {
+  readonly a: any;
+  readonly b: any;
+  readonly bound: any;
+  readonly count: any;
+}
+
+/**
+ * Uniforms for the edit list; `set` packs `edits` for a camera on a body of `radiusM` (call it again whenever the camera
+ * moves).
+ */
+export function terrainEditUniforms(): TerrainEditNodes & {
+  set(edits: readonly TerrainEdit[], camera: readonly [number, number, number], radiusM: number): void;
+} {
+  const a = Array.from({ length: MAX_TERRAIN_EDITS }, () => new Vector4());
+  const b = Array.from({ length: MAX_TERRAIN_EDITS }, () => new Vector4());
+  const bound = Array.from({ length: MAX_TERRAIN_EDITS }, () => 0);
+  const nodes = {
+    a: uniformArray(a, 'vec4'), b: uniformArray(b, 'vec4'), bound: uniformArray(bound, 'float'), count: uniform(0, 'int') as any,
+  };
+  return {
+    ...nodes,
+    set(edits, camera, radiusM) {
+      if (edits.length > MAX_TERRAIN_EDITS) throw new Error(`At most ${MAX_TERRAIN_EDITS} terrain edits`);
+      edits.forEach((edit, i) => {
+        packEdit(edit, camera, a[i], b[i]);
+        bound[i] = editBoundM(edit, radiusM);
+      });
+      nodes.count.value = edits.length;
+    },
+  };
+}
+
+/**
+ * Which edits a ray can meet: bit `i` is set when the segment `t0`..`t1` along the unit direction `d` (camera-relative)
+ * passes within edit `i`'s bound. Worked out once per ray, so the march skips the rest.
+ */
+export const rayEditMask = Fn(([editA, bound, count, d, t0, t1]: any[]) => {
+  const mask = int(0).toVar();
+  Loop(count, ({ i }: { i: any }) => {
+    const centre = editA.element(i).xyz;
+    const t = clamp(dot(centre, d), t0, t1);
+    If(d.mul(t).sub(centre).length().lessThan(bound.element(i)), () => {
+      mask.assign(bitOr(mask, shiftLeft(int(1), i)));
+    });
+  });
+  return mask;
+});
+
+/** The edits in `mask` applied to a field value; `x` is camera-relative, `up` the unit up vector there. */
+const applyEdits = Fn(([editA, editB, count, mask, value0, x, up, altitude]: any[]) => {
+  const value = float(value0).toVar();
+  Loop(count, ({ i }: { i: any }) => {
+    If(bitAnd(mask, shiftLeft(int(1), i)).equal(0), () => { Continue(); });
+    const a = editA.element(i).toVar();
+    const b = editB.element(i).toVar();
+    const rel = x.sub(a.xyz).toVar();
+    If(a.w.lessThan(2.5), () => {
+      // Flatten or soften: a disc around the centre's vertical.
+      const horizontal = rel.sub(up.mul(dot(rel, up))).length();
+      const weight = float(1).sub(smoothstep(b.x, b.x.add(b.y), horizontal));
+      const target = select(a.w.lessThan(1.5), altitude.sub(b.z), altitude.add(value.sub(altitude).mul(b.w)));
+      value.assign(mix(value, target, weight));
+    }).Else(() => {
+      // Carve: a smooth maximum of the field and the sphere's outside distance.
+      const hole = b.x.sub(rel.length());
+      const h = clamp(float(0.5).add(hole.sub(value).mul(0.5).div(b.y)), 0, 1);
+      value.assign(mix(value, hole, h).add(b.y.mul(h).mul(float(1).sub(h))));
+    });
+  });
+  return value;
+});
 
 /** Canyon mask 0..1: winding channels where the mask noise crosses its middle, and basins where it is high. */
 export function canyonAt(noiseTexture: DataTexture, maskFrames: readonly NoiseFrameNodes[], x: any, smooth: boolean): any {
@@ -134,19 +305,38 @@ export function canyonAt(noiseTexture: DataTexture, maskFrames: readonly NoiseFr
   return max(smoothstep(0.74, 0.93, channel), smoothstep(0.66, 0.8, v));
 }
 
-/** Rock noise sum 0..ROCK_MAX; octaves finer than a pixel fade to their mean. `unit` is the relief unit in metres. */
+/** Biome blend 0 (canyons) .. 1 (rolling hills) from the biome frame. */
+export function biomeAt(noiseTexture: DataTexture, biomeFrame: NoiseFrameNodes, x: any, smooth: boolean): any {
+  return smoothstep(BIOME_EDGE[0], BIOME_EDGE[1], sampleFrame(noiseTexture, biomeFrame, x, smooth));
+}
+
+/** A biome parameter at blend `biome` (node). */
+const blendParam = (pick: (params: BiomeParams) => number, biome: any): any => mix(float(pick(CANYON_BIOME)), float(pick(HILLS_BIOME)), biome);
+
+/**
+ * Rock noise sum 0..ROCK_MAX; octaves finer than a pixel fade to their mean, and the biome sets the stretch and each
+ * octave's contrast. `unit` is the relief unit in metres.
+ */
 export function rockAt(
   noiseTexture: DataTexture, rockFrames: readonly NoiseFrameNodes[], unit: any,
-  x: any, up: any, altitude: any, footprint: any, smooth: boolean,
+  x: any, up: any, altitude: any, footprint: any, smooth: boolean, biome: any = float(0),
 ): any {
-  const stretched = x.add(up.mul(altitude.mul(STRETCH - 1))).toVar();
+  const stretch = blendParam((b) => b.stretch, biome).toVar();
+  const stretched = x.add(up.mul(altitude.mul(stretch.sub(1)))).toVar();
   let sum: any = float(0);
   rockFrames.forEach((frame, i) => {
-    const lattice = unit.mul((ROCK_LATTICE / STRETCH) / OCTAVE_SCALE ** i);
-    const detail = float(1).sub(smoothstep(lattice.mul(0.25), lattice, footprint));
+    const lattice = unit.mul(ROCK_LATTICE / OCTAVE_SCALE ** i).div(stretch);
+    const contrast = blendParam((b) => b.octaveContrast[i], biome);
+    const detail = float(1).sub(smoothstep(lattice.mul(0.25), lattice, footprint)).mul(contrast);
     sum = sum.add(mix(float(0.5), sampleFrame(noiseTexture, frame, stretched, smooth), detail).mul(0.5 ** (i + 1)));
   });
   return sum;
+}
+
+/** The biome mask's frame, and an override (node): at 0 or above it replaces the mask everywhere (a single biome). */
+export interface BiomeNodes {
+  readonly frame: NoiseFrameNodes;
+  readonly override: any;
 }
 
 /** Everything `densityAt` reads: the texture, the camera and relief unit as nodes, and the frames. */
@@ -158,13 +348,29 @@ export interface FieldNodes {
   readonly unit: any;
   readonly rockFrames: readonly NoiseFrameNodes[];
   readonly maskFrames: readonly NoiseFrameNodes[];
+  /** The biome mask; canyons everywhere if left out. */
+  readonly biome?: BiomeNodes;
+  /** The edit list; none if left out. */
+  readonly edits?: TerrainEditNodes;
 }
 
-/** Signed field in metres (negative inside rock), not yet scaled for stepping. `x` is camera-relative. */
-export function densityAt(field: FieldNodes, x: any, altitude: any, footprint: any, smooth: boolean): any {
+/** Biome blend at the camera-relative point `x` (0 canyons .. 1 hills). */
+export function fieldBiomeAt(field: FieldNodes, x: any, smooth: boolean): any {
+  if (!field.biome) return float(0);
+  const override = field.biome.override;
+  return select(override.greaterThanEqual(0), override, biomeAt(field.noiseTexture, field.biome.frame, x, smooth));
+}
+
+/**
+ * Signed field in metres (negative inside rock), not yet scaled for stepping. `x` is camera-relative. `editMask` (an int
+ * node, from `rayEditMask`) limits the edits applied; the default is all of them.
+ */
+export function densityAt(field: FieldNodes, x: any, altitude: any, footprint: any, smooth: boolean, editMask: any = int(ALL_EDITS)): any {
   const up = (normalize(field.camera.add(x)) as any).toVar();
-  const rock = rockAt(field.noiseTexture, field.rockFrames, field.unit, x, up, altitude, footprint, smooth);
-  const relief = canyonAt(field.noiseTexture, field.maskFrames, x, smooth).mul(CANYON_DEPTH)
-    .add(rock.sub(ROCK_MEAN).mul(ROCK_AMPLITUDE)).mul(field.unit);
-  return altitude.add(relief.mul(padAt(up)));
+  const biome = fieldBiomeAt(field, x, smooth).toVar();
+  const rock = rockAt(field.noiseTexture, field.rockFrames, field.unit, x, up, altitude, footprint, smooth, biome);
+  const relief = canyonAt(field.noiseTexture, field.maskFrames, x, smooth).mul(blendParam((b) => b.canyonDepth, biome))
+    .add(rock.sub(ROCK_MEAN).mul(blendParam((b) => b.rockAmplitude, biome))).mul(field.unit);
+  const value = altitude.add(relief);
+  return field.edits ? applyEdits(field.edits.a, field.edits.b, field.edits.count, editMask, value, x, up, altitude) : value;
 }

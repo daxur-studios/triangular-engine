@@ -56,8 +56,8 @@ The same `TestSession` drives button and URL launches:
    signal with a five-second cleanup timeout. Make restoration safe after partial setup.
 
 Every asynchronous adapter must honor `context.signal`; use `context.wait(ms)` for
-abortable waits. The default whole-run timeout is 180 seconds. `TestSession.run`
-accepts `timeoutMs` for non-panel callers. Abort cannot stop arbitrary application
+abortable waits. The default whole-run timeout is 180 seconds plus every scenario's
+warm-up and window (times the repetitions). `TestSession.run` accepts `timeoutMs` for non-panel callers. Abort cannot stop arbitrary application
 code that ignores its signal, so do not leave background mutations running after a
 promise rejects. Cancel before disposing page resources; restoration may be a no-op
 when the entire scene has already been disposed.

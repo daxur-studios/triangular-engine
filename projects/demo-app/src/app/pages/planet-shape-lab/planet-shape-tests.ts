@@ -4,7 +4,11 @@ import morphBaselineV1 from './planet-shape-morph-baseline.v1.json';
 import { BODIES, FIXED_SEED, type BodyId } from './planet-shape-config';
 import { CAMERA_POSES, type CameraPoseId } from './planet-shape-camera';
 import { defaultFeatureState, withFeature, type FeatureState } from './planet-shape-features';
+import type { TerrainEditPresetId } from './planet-shape-edits';
 import { DEFAULT_RAY_STEPS } from './planet-shape-raymarch';
+
+export const RAY_BIOMES = ['blend', 'canyons', 'hills'] as const;
+export type RayBiome = (typeof RAY_BIOMES)[number];
 
 /** Fully resolved, so a rerun cannot inherit anything from the manual controls. */
 export interface PlanetShapeTestSettings {
@@ -27,13 +31,17 @@ export interface PlanetShapeTestSettings {
   readonly raySteps: number;
   /** Pre-pass resolution divisor of terrain v2 (0 = off); ignored by the other kinds. */
   readonly rayPrepass: number;
+  /** Edit list of terrain v2 (`planet-shape-edits.ts`); ignored by the other kinds. */
+  readonly rayEdits: TerrainEditPresetId;
+  /** Biomes of terrain v2: the blend mask, or one biome everywhere; ignored by the other kinds. */
+  readonly rayBiome: RayBiome;
   /** `quality` measures the view against the exact sphere instead of timing it; absent = timing. */
   readonly probe?: 'quality';
 }
 
 export const PLANET_SHAPE_DEFAULTS: PlanetShapeTestSettings = {
   kind: 'sphere', seed: FIXED_SEED, bodyId: '600km', poseId: 'orbit', spinWarp: 1000, spinAngleDeg: 0, features: defaultFeatureState(), morph: 0,
-  raySteps: DEFAULT_RAY_STEPS, rayPrepass: 0,
+  raySteps: DEFAULT_RAY_STEPS, rayPrepass: 0, rayEdits: 'pad', rayBiome: 'blend',
 };
 
 const WARMUP_MS = 1500;
@@ -166,6 +174,41 @@ export const PLANET_SHAPE_TEST_HISTORY: readonly TestSuite<PlanetShapeTestSettin
       ...CAMERA_POSES.map((pose) =>
         scenario(`v1-${pose.id}-600km`, `Terrain v1 (reference), ${pose.label.toLowerCase()}, 600 km`,
           { kind: 'raymarch', bodyId: '600km', poseId: pose.id })),
+    ],
+  },
+  {
+    id: 'planet-shape-edits', version: 1,
+    title: 'Terrain v2 edits: the pad alone, no edits, and the pad plus three base-site edits, at 600 km with the 1/4 pre-pass',
+    purpose: 'performance',
+    expectedGpuVendor: 'nvidia',
+    // No budgets yet: what the edit loop costs per march step.
+    scenarios: CAMERA_POSES.filter((pose) => pose.id !== 'orbit').flatMap((pose) => (['none', 'pad', 'sites'] as const).map((edits) =>
+      scenario(`edits-${edits}-${pose.id}-600km`, `Terrain v2, edits ${edits}, ${pose.label.toLowerCase()}, 600 km`,
+        { kind: 'raymarch-lit', bodyId: '600km', poseId: pose.id, rayPrepass: 4, rayEdits: edits }))),
+  },
+  {
+    id: 'planet-shape-biomes', version: 1,
+    title: 'Terrain v2 biomes: canyons only, hills only and the blend, at 600 km with the 1/4 pre-pass and the pad',
+    purpose: 'performance',
+    expectedGpuVendor: 'nvidia',
+    // No budgets yet: what each biome costs, and what the blend mask adds.
+    scenarios: CAMERA_POSES.filter((pose) => pose.id !== 'orbit').flatMap((pose) => RAY_BIOMES.map((biome) =>
+      scenario(`biome-${biome}-${pose.id}-600km`, `Terrain v2, biome ${biome}, ${pose.label.toLowerCase()}, 600 km`,
+        { kind: 'raymarch-lit', bodyId: '600km', poseId: pose.id, rayPrepass: 4, rayBiome: biome }))),
+  },
+  {
+    id: 'planet-shape-terrain-views', version: 1,
+    title: 'Terrain v2 views for review: each biome and the blend at the low, ground and grazing poses, and the base-site edits',
+    // Pictures to judge, not timing: spin paused at a fixed sun so every run shows the same views.
+    purpose: 'functional',
+    requiresVisualReview: true,
+    scenarios: [
+      ...RAY_BIOMES.flatMap((biome) => CAMERA_POSES.filter((pose) => pose.id !== 'orbit').map((pose) =>
+        scenario(`view-${biome}-${pose.id}-600km`, `Terrain v2, ${biome}, ${pose.label.toLowerCase()}, 600 km`,
+          { kind: 'raymarch-lit', bodyId: '600km', poseId: pose.id, rayPrepass: 4, rayBiome: biome, spinWarp: 0, spinAngleDeg: 0 }))),
+      ...(['low-flyover', 'horizon-grazing'] as const).map((poseId) =>
+        scenario(`view-sites-${poseId}-600km`, `Terrain v2, base-site edits, ${poseId.replace('-', ' ')}, 600 km`,
+          { kind: 'raymarch-lit', bodyId: '600km', poseId, rayPrepass: 4, rayEdits: 'sites', spinWarp: 0, spinAngleDeg: 0 })),
     ],
   },
 ];

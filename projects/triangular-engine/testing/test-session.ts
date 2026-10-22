@@ -113,9 +113,10 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
     if (externalSignal?.aborted) cancel();
     let timedOut = false;
     const total = suite.scenarios.length * options.repetitions;
-    // Soak windows are long by design; the default budget grows with them.
+    // The default budget is a fixed allowance for loading and settling plus every scenario's warm-up and window, so
+    // long suites and soak windows fit.
     let remainingMs = options.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS +
-      (mode === 'soak' ? suite.scenarios.reduce((sum, scenario) => sum + modeWindowMs(scenario, mode), 0) * options.repetitions : 0);
+      suite.scenarios.reduce((sum, scenario) => sum + (scenario.warmupMs ?? 0) + modeWindowMs(scenario, mode), 0) * options.repetitions;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let timerStartedAt = 0;
     const resumeTimer = () => {

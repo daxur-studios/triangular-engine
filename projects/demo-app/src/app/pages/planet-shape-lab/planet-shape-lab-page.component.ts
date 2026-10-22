@@ -17,8 +17,10 @@ import {
 } from './planet-shape-config';
 import { FEATURES, defaultFeatureState, shadowsActive, withFeature, type FeatureId, type FeatureState } from './planet-shape-features';
 import { createCameraRelativeSphereGeometry, createPlainSphereMaterial } from './planet-shape-sphere';
+import { TERRAIN_EDIT_PRESETS, terrainEditPreset, type TerrainEditPresetId } from './planet-shape-edits';
 import { DEFAULT_RAY_STEPS, createRaymarchTerrain, type RaymarchTerrain } from './planet-shape-raymarch';
 import { createLitRaymarchTerrain } from './planet-shape-raymarch-lit';
+import { RAY_BIOMES, type RayBiome } from './planet-shape-tests';
 import { QUALITY_PROBE_SIZE, frameFromProbeRgba, type QualityFrame } from './planet-shape-quality';
 import { createPlanetShapeTestAdapter, type PlanetShapeQualityProbe, type PlanetShapeTestHost } from './planet-shape-test-adapter';
 import { PLANET_SHAPE_TEST_HISTORY, type PlanetShapeTestSettings } from './planet-shape-tests';
@@ -162,6 +164,19 @@ const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so 
                   {{ scale === 0 ? 'off' : '1/' + scale }}</button>
               }
             </p>
+            <p class="row">
+              biome:
+              @for (biome of rayBiomes; track biome) {
+                <button (click)="setRayBiome(biome)" [class.active]="rayBiome() === biome" [attr.data-testid]="'biome-' + biome">{{ biome }}</button>
+              }
+            </p>
+            <p class="row">
+              edits:
+              @for (preset of rayEditPresets; track preset.id) {
+                <button (click)="setRayEdits(preset.id)" [class.active]="rayEdits() === preset.id" [attr.data-testid]="'edits-' + preset.id">
+                  {{ preset.label }}</button>
+              }
+            </p>
           }
           @if (surface() === 'raymarch') {
             <p class="note">Contender C, minimal (Plan 055 Phase 1): a shell at R + H whose pixels sphere-trace one fixed
@@ -245,6 +260,12 @@ export class PlanetShapeLabPageComponent {
   /** Pre-pass resolution divisor of terrain v2; 0 = off. */
   readonly rayPrepass = signal(0);
   readonly rayPrepassPresets = [0, 2, 4, 8] as const;
+  /** Terrain v2 edit list: the pad, none, or the pad plus one edit of each kind. */
+  readonly rayEdits = signal<TerrainEditPresetId>('pad');
+  readonly rayEditPresets = TERRAIN_EDIT_PRESETS;
+  /** Terrain v2 biomes: the blend mask, or one biome everywhere. */
+  readonly rayBiome = signal<RayBiome>('blend');
+  readonly rayBiomes = RAY_BIOMES;
   /** Sphere (0) to flat map (1). */
   readonly morph = signal(0);
   readonly freeCamera = signal(false);
@@ -301,7 +322,7 @@ export class PlanetShapeLabPageComponent {
   /** Everything the shared runner needs from this page; the runner never sees the scene. */
   private readonly testHost: PlanetShapeTestHost = {
     read: () => ({
-      kind: this.bodyDrawn() ? this.surface() : 'empty', raySteps: this.raySteps(), rayPrepass: this.rayPrepass(), seed: this.seed, bodyId: this.bodyId(), poseId: this.poseId(),
+      kind: this.bodyDrawn() ? this.surface() : 'empty', raySteps: this.raySteps(), rayPrepass: this.rayPrepass(), rayEdits: this.rayEdits(), rayBiome: this.rayBiome(), seed: this.seed, bodyId: this.bodyId(), poseId: this.poseId(),
       spinWarp: this.spinWarp(), spinAngleDeg: (this.spinAngle * 180) / Math.PI, features: this.featureState(),
       morph: this.morph(),
     }),
@@ -315,6 +336,8 @@ export class PlanetShapeLabPageComponent {
       this.setMorph(settings.morph);
       this.setRaySteps(settings.raySteps);
       this.setRayPrepass(settings.rayPrepass);
+      this.setRayEdits(settings.rayEdits);
+      this.setRayBiome(settings.rayBiome);
       if (settings.kind !== 'empty') this.setSurface(settings.kind);
       this.setBodyDrawn(settings.kind !== 'empty');
     },
@@ -365,6 +388,7 @@ export class PlanetShapeLabPageComponent {
       }
       this.engine.scene.add(this.mesh, this.sun, this.sun.target, this.ambient);
       this.setBody(this.builtBody);
+      this.applyRayEdits();
       this.sphere.setBodyRadius(bodyById(this.builtBody).radiusM);
       this.applyFeatures();
     }
@@ -427,6 +451,7 @@ export class PlanetShapeLabPageComponent {
         entry.terrain.setBody(radius);
       }
       this.builtBody = id;
+      this.applyRayEdits();
     }
     this.bodyId.set(id);
     this.drawnTriangles.set(Math.round((this.mesh.geometry.index?.count ?? 0) / 3));
@@ -529,6 +554,22 @@ export class PlanetShapeLabPageComponent {
 
   setRayPrepass(scale: number): void {
     this.rayPrepass.set(scale);
+  }
+
+  setRayBiome(biome: RayBiome): void {
+    this.rayBiome.set(biome);
+    const value = biome === 'canyons' ? 0 : biome === 'hills' ? 1 : undefined;
+    for (const entry of this.rayTerrains) entry.terrain.setBiome?.(value);
+  }
+
+  setRayEdits(id: TerrainEditPresetId): void {
+    this.rayEdits.set(id);
+    this.applyRayEdits();
+  }
+
+  private applyRayEdits(): void {
+    const edits = terrainEditPreset(this.rayEdits(), bodyById(this.builtBody).radiusM);
+    for (const entry of this.rayTerrains) entry.terrain.setEdits?.(edits);
   }
 
   /**
