@@ -209,6 +209,10 @@ const BODY_FRAME_NOTE ='Body-fixed frame: the camera rides with the surface, so 
               <input type="checkbox" [checked]="meshBlocks()" (change)="setMeshBlocks($any($event.target).checked)" data-testid="mesh-blocks" />
               Near volume zone (off: the shell alone, contender A)
             </label>
+            <label class="feature">
+              <input type="checkbox" [checked]="meshWireframe()" (change)="setMeshWireframe($any($event.target).checked)" data-testid="mesh-wireframe" />
+              Wireframe
+            </label>
             <p class="note">Contender B (Plan 055 D15), seam spike stage 2: the height shell, the same field as terrain v2,
               and around the ground under the camera a zone of one level meshed in 3D (surface nets on the scanned columns),
               so overhangs near the camera are drawn. Rebuilt when the camera moves (columns scanned on the GPU, the mesh
@@ -314,9 +318,11 @@ export class PlanetShapeLabPageComponent {
   readonly bodyRadiusLabel = computed(() => bodyById(this.bodyId()).label + ' radius');
   readonly drawnTriangles = signal(0);
   /** Contender B's last build, for the note under the surface buttons. */
-  readonly meshBLabel = signal('');
+  readonly meshBLabel = signal('Building the first mesh (a few seconds)...');
   /** Contender B's near volume zone on (B) or off (the shell alone: contender A). */
   readonly meshBlocks = signal(true);
+  /** Contender B's lit surface as lines, to see the mesh when it draws nothing visible. */
+  readonly meshWireframe = signal(false);
 
   readonly webGpuOk = signal(typeof navigator !== 'undefined' && !!(navigator as Navigator & { gpu?: unknown }).gpu);
   readonly webGpuReason = signal(this.webGpuOk() ? '' : 'This browser exposes no navigator.gpu.');
@@ -645,6 +651,11 @@ export class PlanetShapeLabPageComponent {
     const value = rock === 'wild' ? 0 : rock === 'grounded' ? 1 : undefined;
     for (const entry of this.rayTerrains) entry.terrain.setRock?.(value);
     this.meshB.setRock(value);
+  }
+
+  setMeshWireframe(on: boolean): void {
+    this.meshWireframe.set(on);
+    this.meshB.setWireframe(on);
   }
 
   setMeshBlocks(on: boolean): void {

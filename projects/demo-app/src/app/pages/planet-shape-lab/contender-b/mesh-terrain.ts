@@ -95,6 +95,8 @@ export interface MeshTerrain {
   setShapeOps(ops: readonly ShapeOp[] | undefined): void;
   /** The near volume zone on (B) or off (A: the height shell everywhere). */
   setBlocks(on: boolean): void;
+  /** Draws the lit surface as lines (the probe material is unaffected). */
+  setWireframe(on: boolean): void;
   /** Rebuilds for the current camera and settings if anything changed; resolves when the mesh drawn is current. */
   update(renderer: ComputeRenderer): Promise<void>;
   dispose(): void;
@@ -128,7 +130,11 @@ export function createMeshTerrain(): MeshTerrain {
     return vec4(t, 0, drawField.density(x, drawField.altitudeOf(x), footprint).div(footprint), 1);
   })();
 
-  const mesh = new Mesh(new BufferGeometry(), material);
+  // One degenerate triangle until the first build lands: an empty geometry has no `position` attribute, which warns on every draw.
+  const emptyGeometry = () => new BufferGeometry()
+    .setAttribute('position', new BufferAttribute(new Float32Array(9), 3))
+    .setAttribute('normal', new BufferAttribute(new Float32Array(9), 3));
+  const mesh = new Mesh(emptyGeometry(), material);
   mesh.frustumCulled = false;
 
   let radius = 1;
@@ -357,6 +363,7 @@ export function createMeshTerrain(): MeshTerrain {
     setBiome(biome) { buildField.setBiome(biome); drawField.setBiome(biome); fieldChanged(); },
     setRock(grounded) { buildField.setRock(grounded); drawField.setRock(grounded); fieldChanged(); },
     setShapeOps(ops) { buildField.setShapeOps(ops); drawField.setShapeOps(ops); fieldChanged(); },
+    setWireframe(on) { material.wireframe = on; },
     setBlocks(on) {
       if (on !== blocks) {
         blocks = on;
