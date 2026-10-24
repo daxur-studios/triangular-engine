@@ -7,7 +7,7 @@ import { MAX_TEST_REPETITIONS, TEST_MODES, TEST_PROFILES, validateTestHistory } 
 import { compareAblation } from './test-ablation';
 import { summarizeTestSamples } from './test-stats';
 import { assessPerformance } from './test-performance';
-import { modeWarmupMs, modeWindowMs, runMeasureWindow } from './test-window';
+import { modeWarmupMs, modeWindowMs, runMeasureWindow, TEST_CAP_MS, waitForSettled } from './test-window';
 import { keepThumbnails, THUMBNAIL_TIMEOUT_MS } from './test-thumbnails';
 import { describeJsEngine } from './core/test-timer';
 
@@ -16,10 +16,20 @@ export { nearestRankPercentile, summarizeTestSamples } from './test-stats';
 /** Added to every case of a CPU-evidence suite, so no reader mistakes it for a GPU or hardware-profile number. */
 export const CPU_ONLY_LIMITATION = 'CPU-only timing (suite evidence "cpu"): the GPU and hardware-profile checks were skipped; this is not GPU or hardware evidence';
 
-/** Includes warm-up and cleanup; a lost render loop must not leave an indefinitely running UI. Paused time is not counted. */
-const DEFAULT_RUN_TIMEOUT_MS = 180_000;
-/** Cleanup has its own un-aborted context so cancelling work still restores the scene. */
+/**
+ * Allowance of ONE test for loading and settling, added to that test's warm-up and window; a lost render loop must not
+ * leave an indefinitely running UI. Paused time is not counted. There is no batch-wide budget (plan 061).
+ */
+export const DEFAULT_TEST_TIMEOUT_MS = 180_000;
+/** Restoration after every test has its own un-aborted context so cancelling work still restores the scene. */
 const CLEANUP_TIMEOUT_MS = 5_000;
+/**
+ * Cooldown after a GPU performance test, before the next one starts (library-wide), so a test does not inherit the
+ * last one's queue or heat. Skipped for functional and CPU-only suites, where it would only slow the run.
+ * TODO(plan 061): also wait for queued GPU work to finish before the cooldown. The entry has no renderer, so it needs an
+ * adapter hook (for example `idle?(): Promise<void>`) that the host implements with its device queue.
+ */
+export const TEST_COOLDOWN_MS = 250;
 /**
  * A case whose page is hidden or loses focus during warmup or measurement is stopped, and redone once the page is
  * visible and focused again, at most this many times. After that the loss is recorded as a validity issue. Only a
@@ -100,7 +110,7 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
     validateTestHistory([suiteInput]);
     if (!TEST_PROFILES.includes(options.profile) || !Number.isInteger(options.repetitions) ||
         options.repetitions < 1 || options.repetitions > MAX_TEST_REPETITIONS ||
-        !Number.isFinite(options.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS) || (options.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS) <= 0 ||
+        !Number.isFinite(options.timeoutMs ?? DEFAULT_TEST_TIMEOUT_MS) || (options.timeoutMs ?? DEFAULT_TEST_TIMEOUT_MS) <= 0 ||
         !TEST_MODES.includes(options.mode ?? 'standard')) {
       throw new Error('Invalid test run options');
     }
@@ -115,20 +125,18 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
     const cancel = () => controller.abort(new Error('Run cancelled'));
     externalSignal?.addEventListener('abort', cancel, { once: true });
     if (externalSignal?.aborted) cancel();
-    let timedOut = false;
     const total = suite.scenarios.length * options.repetitions;
-    // The default budget is a fixed allowance for loading and settling plus every scenario's warm-up and window, so
-    // long suites and soak windows fit.
-    let remainingMs = options.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS +
-      suite.scenarios.reduce((sum, scenario) => sum + (scenario.warmupMs ?? 0) + modeWindowMs(scenario, mode), 0) * options.repetitions;
+    // The timer is per test: each test has its own limit and its own abort, so a hang fails that test and the run goes on.
+    let testAbort = new AbortController();
+    let testTimedOut = false;
+    let remainingMs = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let timerStartedAt = 0;
     const resumeTimer = () => {
       timerStartedAt = Date.now();
-      timer = setTimeout(() => { timedOut = true; controller.abort(new Error('Run timed out')); }, Math.max(0, remainingMs));
+      timer = setTimeout(() => { testTimedOut = true; testAbort.abort(new Error('Test timed out')); }, Math.max(0, remainingMs));
     };
     const pauseTimer = () => { clearTimeout(timer); remainingMs -= Date.now() - timerStartedAt; };
-    resumeTimer();
     const cases: TestCaseResult<TSettings>[] = [];
     const errors: string[] = [];
     const environment: Record<string, TestSetting> = {};
@@ -185,9 +193,23 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
     };
     let snapshot: TSnapshot | undefined;
     let captured = false;
+    // True from the first apply of a test until its restore, so restoration runs after every test and never twice.
+    let dirty = false;
     let failed = false;
     const progress = (phase: TestProgress['phase'], repetition = 1, scenario?: typeof suite.scenarios[number], retry = 0) =>
       onProgress({ phase, completed: cases.length, total, repetition, scenarioId: scenario?.id, label: scenario?.label, retry: retry || undefined });
+    const restoreState = async (repetition = 1, scenario?: typeof suite.scenarios[number]) => {
+      if (!captured || !dirty) return;
+      dirty = false;
+      const cleanup = new AbortController();
+      const cleanupTimer = setTimeout(() => cleanup.abort(new Error('Restoration timed out')), CLEANUP_TIMEOUT_MS);
+      try {
+        progress('restoring', repetition, scenario);
+        await abortable(() => adapter.restore(snapshot as TSnapshot, context(cleanup.signal, repetition)), cleanup.signal);
+      } catch (error) { failed = true; errors.push(`Restoration failed: ${errorMessage(error)}`); }
+      finally { clearTimeout(cleanupTimer); }
+    };
+    let testsStarted = 0;
     try {
       Object.assign(environment, {
         userAgent: win?.navigator.userAgent ?? 'unavailable',
@@ -204,132 +226,160 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
       snapshot = await abortable(() => adapter.capture(context(controller.signal, 1)), controller.signal);
       captured = true;
       if (machinePrepared) await abortable(() => machinePrepared, controller.signal);
-      for (let repetition = 1; repetition <= options.repetitions; repetition++) {
+      for (let repetition = 1; repetition <= options.repetitions && !controller.signal.aborted; repetition++) {
         for (const scenario of suite.scenarios) {
-          for (let retry = 0; ; retry++) {
-            let canRetry = false;
-            const attempt = new AbortController();
-            const forward = () => attempt.abort(controller.signal.reason);
-            controller.signal.addEventListener('abort', forward, { once: true });
-            const validityIssues = new Set<string>();
-            // Before the last attempt a lost page stops the attempt; on the last one it is recorded instead.
-            const lost = (reason: string) => {
-              if (canRetry) { if (!attempt.signal.aborted) attempt.abort(new FocusLost(reason)); }
-              else validityIssues.add(reason);
-            };
-            const checkVisibility = () => { const reason = pageLost(); if (reason) lost(reason); };
-            const blurred = () => { if (watchFocus) lost('Page lost focus'); };
-            const pageHidden = () => { validityIssues.add('Page navigation during measurement'); };
-            let observing = false;
-            let machineStarted: Promise<void> | undefined;
-            const stopObserving = () => {
-              if (!observing) return;
-              observing = false;
-              doc?.removeEventListener('visibilitychange', checkVisibility);
-              win?.removeEventListener('blur', blurred);
-              win?.removeEventListener('pagehide', pageHidden);
-            };
-            // Stop follows the start message's outcome, so a slow start cannot arrive after its stop.
-            const stopMachine = () => {
-              const started = machineStarted;
-              machineStarted = undefined;
-              if (started) void started.then(() => machineMessage('stop', scenario.id, repetition));
-            };
-            let caseWindow: TestWindow | undefined;
-            try {
-              const ctx = context(attempt.signal, repetition, (value) => { caseWindow = value; });
-              progress('applying', repetition, scenario, retry);
-              await abortable(() => adapter.apply(scenario, ctx), attempt.signal);
-              if (!cpuOnly) {
-                progress('ready', repetition, scenario, retry);
-                await abortable(() => adapter.ready(ctx, scenario), attempt.signal);
-              }
-              // A page someone was looking at earlier in this run waits here for them, without spending a retry. A page
-              // that was never visible and focused (a headless or background run) is not waited for: the loss is
-              // recorded instead, as it is on the last attempt.
-              if (!pageLost()) sawPage = true;
-              else if (sawPage) await waitForPage(pageLost() ?? '', repetition, scenario, retry);
-              canRetry = watchFocus && sawPage && retry < MAX_FOCUS_RETRIES;
-              doc?.addEventListener('visibilitychange', checkVisibility);
-              win?.addEventListener('blur', blurred);
-              win?.addEventListener('pagehide', pageHidden);
-              observing = true;
-              progress('warmup', repetition, scenario, retry);
-              await ctx.wait(modeWarmupMs(scenario, mode));
-              progress('measuring', repetition, scenario, retry);
-              checkVisibility();
-              if (machineSink) machineStarted = machineMessage('start', scenario.id, repetition);
-              const observation = await abortable(() => adapter.measure(scenario, ctx), attempt.signal);
-              checkVisibility();
-              if (attempt.signal.aborted) throw attempt.signal.reason;
-              // The attempt is kept. Whatever the thumbnail costs must stay outside the timing, the focus watch and the
-              // machine block, so those are closed first.
-              const thumbnailNotes: string[] = [];
-              if (!cpuOnly && options.thumbnails !== false && options.onThumbnails && adapter.thumbnail) {
-                stopObserving();
+          if (controller.signal.aborted) break;
+          // A test is one scenario of one repetition: its own timer, its own restore, and a failure does not end the run.
+          testAbort = new AbortController();
+          testTimedOut = false;
+          const forwardRun = () => testAbort.abort(controller.signal.reason);
+          controller.signal.addEventListener('abort', forwardRun, { once: true });
+          remainingMs = options.timeoutMs ?? DEFAULT_TEST_TIMEOUT_MS + (scenario.warmupMs ?? 0) + modeWindowMs(scenario, mode) +
+            (scenario.phases?.prelude?.settle ? scenario.phases.prelude.maxMs ?? TEST_CAP_MS : 0);
+          resumeTimer();
+          testsStarted++;
+          try {
+            for (let retry = 0; ; retry++) {
+              let canRetry = false;
+              const attempt = new AbortController();
+              const forward = () => attempt.abort(testAbort.signal.reason);
+              testAbort.signal.addEventListener('abort', forward, { once: true });
+              if (testAbort.signal.aborted) forward();
+              const validityIssues = new Set<string>();
+              // Before the last attempt a lost page stops the attempt; on the last one it is recorded instead.
+              const lost = (reason: string) => {
+                if (canRetry) { if (!attempt.signal.aborted) attempt.abort(new FocusLost(reason)); }
+                else validityIssues.add(reason);
+              };
+              const checkVisibility = () => { const reason = pageLost(); if (reason) lost(reason); };
+              const blurred = () => { if (watchFocus) lost('Page lost focus'); };
+              const pageHidden = () => { validityIssues.add('Page navigation during measurement'); };
+              let observing = false;
+              let machineStarted: Promise<void> | undefined;
+              const stopObserving = () => {
+                if (!observing) return;
+                observing = false;
+                doc?.removeEventListener('visibilitychange', checkVisibility);
+                win?.removeEventListener('blur', blurred);
+                win?.removeEventListener('pagehide', pageHidden);
+              };
+              // Stop follows the start message's outcome, so a slow start cannot arrive after its stop.
+              const stopMachine = () => {
+                const started = machineStarted;
+                machineStarted = undefined;
+                if (started) void started.then(() => machineMessage('stop', scenario.id, repetition));
+              };
+              let caseWindow: TestWindow | undefined;
+              try {
+                const ctx = context(attempt.signal, repetition, (value) => { caseWindow = value; });
+                progress('applying', repetition, scenario, retry);
+                dirty = true;
+                await abortable(() => adapter.apply(scenario, ctx), attempt.signal);
+                if (!cpuOnly) {
+                  progress('ready', repetition, scenario, retry);
+                  await abortable(() => adapter.ready(ctx, scenario), attempt.signal);
+                }
+                // A page someone was looking at earlier in this run waits here for them, without spending a retry. A page
+                // that was never visible and focused (a headless or background run) is not waited for: the loss is
+                // recorded instead, as it is on the last attempt.
+                if (!pageLost()) sawPage = true;
+                else if (sawPage) await waitForPage(pageLost() ?? '', repetition, scenario, retry);
+                canRetry = watchFocus && sawPage && retry < MAX_FOCUS_RETRIES;
+                doc?.addEventListener('visibilitychange', checkVisibility);
+                win?.addEventListener('blur', blurred);
+                win?.addEventListener('pagehide', pageHidden);
+                observing = true;
+                progress('warmup', repetition, scenario, retry);
+                await ctx.wait(modeWarmupMs(scenario, mode));
+                // A declared settle condition is polled (two passing polls in a row); a scenario without one is unchanged.
+                if (scenario.phases?.prelude?.settle && adapter.settled) {
+                  const settledInTime = await abortable(() => waitForSettled(() => adapter.settled!(scenario, ctx),
+                    scenario.phases?.prelude?.maxMs ?? TEST_CAP_MS, (ms) => ctx.wait(ms)), attempt.signal);
+                  if (!settledInTime) validityIssues.add('Prelude did not settle within its limit');
+                }
+                progress('measuring', repetition, scenario, retry);
+                checkVisibility();
+                if (machineSink) machineStarted = machineMessage('start', scenario.id, repetition);
+                const observation = await abortable(() => adapter.measure(scenario, ctx), attempt.signal);
+                checkVisibility();
+                if (attempt.signal.aborted) throw attempt.signal.reason;
+                // The attempt is kept. Whatever the thumbnail costs must stay outside the timing, the focus watch and the
+                // machine block, so those are closed first.
+                const thumbnailNotes: string[] = [];
+                if (!cpuOnly && options.thumbnails !== false && options.onThumbnails && adapter.thumbnail) {
+                  stopObserving();
+                  stopMachine();
+                  thumbnailNotes.push(...await takeThumbnails(scenario, repetition));
+                }
+                if (suite.purpose === 'performance') for (const issue of observation.validityIssues ?? []) validityIssues.add(issue);
+                if (suite.purpose === 'performance' && !cpuOnly) {
+                  const gpuIssue = gpuVendorIssue(suite.expectedGpuVendor, environment);
+                  if (gpuIssue) validityIssues.add(gpuIssue);
+                }
+                if (options.profile === 'headless-hardware' && suite.purpose === 'performance' && !cpuOnly) {
+                  validityIssues.add('Headless hardware/power profile was not independently verified');
+                }
+                if (suite.purpose === 'performance' && (!observation.metrics.some((metric) => !metric.optional) ||
+                    observation.metrics.some((metric) => metric.samples.some((sample) => !Number.isFinite(sample)) ||
+                      (!metric.samples.length && !metric.optional)))) {
+                  validityIssues.add('Required metric samples unavailable or invalid');
+                }
+                // A window that hit its cap never showed a stable series: inconclusive, never a pass.
+                if (caseWindow?.stoppedBy === 'capped') validityIssues.add('Window hit its cap without settling');
+                const checks = observation.checks ?? [];
+                const caseFailed = checks.some((check) => !check.passed);
+                const window = caseWindow && caseFailed ? { ...caseWindow, stoppedBy: 'failed' as const } : caseWindow;
+                cases.push({ scenario, repetition, status: caseFailed ? 'failed' : 'completed', metrics: observation.metrics.map(withSummary),
+                  checks, validityIssues: [...validityIssues], limitations: [...(observation.limitations ?? []), ...(cpuOnly && suite.purpose === 'performance' ? [CPU_ONLY_LIMITATION] : []), ...thumbnailNotes], details: observation.details,
+                  stopReason: caseFailed ? 'failed' : window?.stoppedBy ?? 'fixed',
+                  ...(window ? { window } : {}), ...(retry ? { retries: retry } : {}) });
+                if (caseFailed) { failed = true; throw new Error(`Checks failed: ${scenario.id}`); }
+                break;
+              } catch (error) {
+                const reason = attempt.signal.reason;
+                if (!controller.signal.aborted && !testTimedOut && reason instanceof FocusLost) {
+                  await waitForPage(reason.message, repetition, scenario, retry + 1);
+                  continue;
+                }
+                if (cases.at(-1)?.scenario.id !== scenario.id || cases.at(-1)?.repetition !== repetition) {
+                  cases.push({ scenario, repetition, status: controller.signal.aborted ? 'cancelled' : 'failed',
+                    metrics: [], checks: [], validityIssues: [...validityIssues], limitations: [], error: errorMessage(error),
+                    stopReason: 'failed', ...(retry ? { retries: retry } : {}) });
+                }
+                throw error;
+              } finally {
+                testAbort.signal.removeEventListener('abort', forward);
                 stopMachine();
-                thumbnailNotes.push(...await takeThumbnails(scenario, repetition));
+                stopObserving();
               }
-              if (suite.purpose === 'performance') for (const issue of observation.validityIssues ?? []) validityIssues.add(issue);
-              if (suite.purpose === 'performance' && !cpuOnly) {
-                const gpuIssue = gpuVendorIssue(suite.expectedGpuVendor, environment);
-                if (gpuIssue) validityIssues.add(gpuIssue);
-              }
-              if (options.profile === 'headless-hardware' && suite.purpose === 'performance' && !cpuOnly) {
-                validityIssues.add('Headless hardware/power profile was not independently verified');
-              }
-              if (suite.purpose === 'performance' && (!observation.metrics.some((metric) => !metric.optional) ||
-                  observation.metrics.some((metric) => metric.samples.some((sample) => !Number.isFinite(sample)) ||
-                    (!metric.samples.length && !metric.optional)))) {
-                validityIssues.add('Required metric samples unavailable or invalid');
-              }
-              const checks = observation.checks ?? [];
-              const caseFailed = checks.some((check) => !check.passed);
-              cases.push({ scenario, repetition, status: caseFailed ? 'failed' : 'completed', metrics: observation.metrics.map(withSummary),
-                checks, validityIssues: [...validityIssues], limitations: [...(observation.limitations ?? []), ...(cpuOnly && suite.purpose === 'performance' ? [CPU_ONLY_LIMITATION] : []), ...thumbnailNotes], details: observation.details,
-                ...(caseWindow ? { window: caseWindow } : {}), ...(retry ? { retries: retry } : {}) });
-              if (caseFailed) { failed = true; throw new Error(`Checks failed: ${scenario.id}`); }
-              break;
-            } catch (error) {
-              const reason = attempt.signal.reason;
-              if (!controller.signal.aborted && reason instanceof FocusLost) {
-                await waitForPage(reason.message, repetition, scenario, retry + 1);
-                continue;
-              }
-              if (cases.at(-1)?.scenario.id !== scenario.id || cases.at(-1)?.repetition !== repetition) {
-                cases.push({ scenario, repetition, status: controller.signal.aborted && !timedOut ? 'cancelled' : 'failed',
-                  metrics: [], checks: [], validityIssues: [...validityIssues], limitations: [], error: errorMessage(error),
-                  ...(retry ? { retries: retry } : {}) });
-              }
-              throw error;
-            } finally {
-              controller.signal.removeEventListener('abort', forward);
-              stopMachine();
-              stopObserving();
             }
+          } catch (error) {
+            // A failed or timed-out test is recorded and the run goes on; only a cancel (or a lost page) ends the run.
+            errors.push(errorMessage(error));
+            if (!controller.signal.aborted) failed = true;
+          } finally {
+            clearTimeout(timer);
+            controller.signal.removeEventListener('abort', forwardRun);
+            await restoreState(repetition, scenario);
+          }
+          if (suite.purpose === 'performance' && !cpuOnly && !controller.signal.aborted && testsStarted < total) {
+            try { await waitForTest(TEST_COOLDOWN_MS, controller.signal); } catch { /* cancelled: the loop ends above */ }
           }
         }
       }
     } catch (error) {
+      // Setup failed (capture, machine preflight) or the run was cancelled before a test began.
       errors.push(errorMessage(error));
-      if (!controller.signal.aborted || timedOut) failed = true;
+      if (!controller.signal.aborted) failed = true;
     } finally {
       clearTimeout(timer);
       externalSignal?.removeEventListener('abort', cancel);
-      if (captured) {
-        const cleanup = new AbortController();
-        const cleanupTimer = setTimeout(() => cleanup.abort(new Error('Restoration timed out')), CLEANUP_TIMEOUT_MS);
-        try {
-          progress('restoring');
-          await abortable(() => adapter.restore(snapshot as TSnapshot, context(cleanup.signal, 1)), cleanup.signal);
-        } catch (error) { failed = true; errors.push(`Restoration failed: ${errorMessage(error)}`); }
-        finally { clearTimeout(cleanupTimer); }
-      }
+      await restoreState();
       this.running = false;
       onProgress(null);
     }
+    const cancelled = controller.signal.aborted;
     const inconclusive = cases.some((item) => item.validityIssues.length > 0);
-    const cancelled = controller.signal.aborted && !timedOut;
     // A run that stopped early has too few rounds to compare; its failure says more than an A/B line could.
     const ablations = suite.ablation && !failed && !cancelled ? ablationOutcomes(suite, cases) : undefined;
     const performance = assessPerformance(suite, mode, cases, environment, failed || cancelled);

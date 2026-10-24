@@ -1,6 +1,7 @@
 import type { TestSettleSeries } from './test-contracts';
+import { QUICK_WARMUP_ITERATIONS } from './core/test-cpu-measure';
 import {
-  createSettleChecker, modeActionMs, modeWarmupIterations, modeWarmupMs, QUICK_WARMUP_ITERATIONS, modeWindowMs, QUICK_MIN_WINDOW_MS, QUICK_WARMUP_MS, QUICK_WINDOW_MS, runMeasureWindow, seriesDrift, seriesSettled,
+  analyzeSeries, createSettleChecker, TEST_CAP_MS, waitForSettled, modeActionMs, modeWarmupIterations, modeWarmupMs, modeWindowMs, QUICK_MIN_WINDOW_MS, QUICK_WARMUP_MS, QUICK_WINDOW_MS, runMeasureWindow, seriesDrift, seriesSettled,
   SOAK_WINDOW_MS,
 } from './test-window';
 
@@ -54,7 +55,7 @@ describe('test measurement window', () => {
   it('runs a quick window to its maximum when a series keeps changing', async () => {
     const fake = clock((t) => t);
     const window = await runMeasureWindow({ durationMs: 3000 }, 'quick', [{ name: 'ramp', samples: () => fake.samples }], fake.wait, fake.now);
-    expect(window.stoppedBy).toBe('max');
+    expect(window.stoppedBy).toBe('capped');
     expect(window.elapsedMs).toBe(3000);
   });
 
@@ -83,7 +84,7 @@ describe('test measurement window', () => {
     expect((await runMeasureWindow({ durationMs: 5000, quickMs: 700 }, 'quick', [], unwatched.wait, unwatched.now)).elapsedMs).toBe(700);
     const ramp = clock((t) => t);
     const capped = await runMeasureWindow(scenario, 'quick', [{ name: 'ramp', samples: () => ramp.samples }], ramp.wait, ramp.now);
-    expect(capped).toEqual(jasmine.objectContaining({ stoppedBy: 'max', elapsedMs: 1500 }));
+    expect(capped).toEqual(jasmine.objectContaining({ stoppedBy: 'capped', elapsedMs: 1500 }));
     const standard = clock(() => 1);
     expect((await runMeasureWindow(scenario, 'standard', [], standard.wait, standard.now)).elapsedMs).toBe(8000);
   });
@@ -116,7 +117,102 @@ describe('createSettleChecker', () => {
     const flat = Array.from({ length: 100 }, () => 1);
     const ramp = Array.from({ length: 100 }, (_, i) => i);
     expect(checker.settled({ samples: () => flat.slice(0, 10) }, 'a')).toBeFalse();
-    expect(checker.settled({ samples: () => flat }, 'a')).toBeTrue();
+    // One passing look is not enough; the next look (after 10 % more samples) is the second in a row.
+    expect(checker.settled({ samples: () => flat }, 'a')).toBeFalse();
+    expect(checker.settled({ samples: () => [...flat, ...flat.slice(0, 20)] }, 'a')).toBeTrue();
     expect(checker.settled({ samples: () => ramp }, 'b')).toBeFalse();
+  });
+});
+
+describe('block stop rule', () => {
+  const noise = (n: number, base: number, amount: number) => Array.from({ length: n }, (_, i) => base + amount * Math.sin(i * 12.9898));
+
+  it('settles a steady series', () => {
+    const look = analyzeSeries(noise(200, 16, 0.3), 0.1);
+    expect(look.settled).toBeTrue();
+    expect(look.warmupDropped).toBe(0);
+  });
+
+  it('does not settle a ramp', () => {
+    expect(analyzeSeries(Array.from({ length: 200 }, (_, i) => 10 + i * 0.1)).settled).toBeFalse();
+  });
+
+  it('settles a spike train and reports the hitches without stopping on them', () => {
+    // A 5x spike every 10th frame (offset, so the first frame is no warm-up): the same in every block.
+    const train = Array.from({ length: 200 }, (_, i) => (i % 10 === 5 ? 5 : 1));
+    const look = analyzeSeries(train);
+    expect(look.settled).toBeTrue();
+    expect(look.hitches).toBe(20);
+  });
+
+  it('rejects correlated noise that two halves would pass', () => {
+    // Quarters 1, 2, 2, 1: both halves hold the same mix (same median, same p95), the blocks differ by 100 %.
+    const wave = [...Array(50).fill(1), ...Array(50).fill(2), ...Array(50).fill(2), ...Array(50).fill(1)];
+    const first = wave.slice(0, 100).sort((a, b) => a - b);
+    const second = wave.slice(100).sort((a, b) => a - b);
+    expect(first[49]).toBe(second[49]);
+    expect(first[94]).toBe(second[94]);
+    expect(analyzeSeries(wave).settled).toBeFalse();
+  });
+
+  it('drops leading frames still over 2x the later median and records how many', () => {
+    const series = [60, 40, 25, 22, ...Array.from({ length: 196 }, (_, i) => 10 + 0.2 * Math.sin(i * 12.9898))];
+    const look = analyzeSeries(series, 0.1);
+    expect(look.warmupDropped).toBe(4);
+    expect(look.settled).toBeTrue();
+    // Never drops more than a quarter of the series.
+    expect(analyzeSeries([...Array(30).fill(100), ...Array(70).fill(1)]).warmupDropped).toBeLessThanOrEqual(25);
+  });
+
+  it('needs two passing checks in a row, and a failing one resets the streak', () => {
+    const checker = createSettleChecker();
+    const good = Array(100).fill(1);
+    expect(checker.settled({ samples: () => good }, 'a')).toBeFalse();
+    expect(checker.settled({ samples: () => [...good, ...Array(20).fill(1)] }, 'a')).toBeTrue();
+    const bad = [...good, ...Array(20).fill(1), ...Array(100).fill(5)];
+    expect(checker.settled({ samples: () => bad }, 'a')).toBeFalse();
+  });
+
+  it('caps a series that never settles, at the cap and never earlier', async () => {
+    const fake = clock((t) => t);
+    const window = await runMeasureWindow({ durationMs: 120_000, phases: { window: { kind: 'steady', capMs: 2000 } } }, 'quick',
+      [{ name: 'ramp', samples: () => fake.samples }], fake.wait, fake.now);
+    expect(window.stoppedBy).toBe('capped');
+    expect(window.elapsedMs).toBe(2000);
+    // Without a capMs the library cap applies.
+    const long = clock((t) => t);
+    const unbounded = await runMeasureWindow({ durationMs: 600_000 }, 'quick', [{ name: 'ramp', samples: () => long.samples }], long.wait, long.now);
+    expect(unbounded.stoppedBy).toBe('capped');
+    expect(unbounded.elapsedMs).toBe(TEST_CAP_MS);
+  });
+
+  it('records warm-up and hitch counts on a settled window', async () => {
+    const fake = clock((t) => (t <= 30 ? 9 : 1));
+    const window = await runMeasureWindow({ durationMs: 5000 }, 'quick', [{ name: 's', samples: () => fake.samples }], fake.wait, fake.now);
+    expect(window.stoppedBy).toBe('settled');
+    expect(window.warmupDropped?.['s']).toBe(3);
+    expect(window.hitches?.['s']).toBe(0);
+  });
+
+  it('runs scripted windows for their own length and counted windows not at all', async () => {
+    const fake = clock(() => 1);
+    const scripted = await runMeasureWindow({ durationMs: 800, quickMs: 300, phases: { window: { kind: 'scripted' } } }, 'quick',
+      [{ name: 's', samples: () => fake.samples }], fake.wait, fake.now);
+    expect(scripted).toEqual(jasmine.objectContaining({ stoppedBy: 'fixed', elapsedMs: 300 }));
+    const counted = await runMeasureWindow({ durationMs: 800, phases: { window: { kind: 'counted' } } }, 'standard', [], fake.wait, fake.now);
+    expect(counted).toEqual({ mode: 'standard', elapsedMs: 0, stoppedBy: 'fixed', samples: undefined });
+  });
+});
+
+describe('waitForSettled', () => {
+  it('needs two passes in a row and gives up at its limit', async () => {
+    let t = 0;
+    const wait = async (ms: number) => { t += ms; };
+    const now = () => t;
+    const answers = [true, false, true, true];
+    expect(await waitForSettled(() => answers.shift() ?? true, 5000, wait, now)).toBeTrue();
+    expect(answers.length).toBe(0);
+    expect(await waitForSettled(() => false, 500, wait, now)).toBeFalse();
+    expect(t).toBeGreaterThanOrEqual(500);
   });
 });

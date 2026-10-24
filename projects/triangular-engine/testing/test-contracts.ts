@@ -28,6 +28,38 @@ export interface TestScenario<TSettings extends object> {
    * statistic is at or below the limit. See `assessPerformance`.
    */
   readonly budgets?: Readonly<Record<string, TestBudget>>;
+  /** Optional phase declaration (prelude, then one measured window). Without it a scenario is a `steady` window. */
+  readonly phases?: TestPhases;
+}
+
+/** The unmeasured step before the window. `warmupMs` on the scenario stays the floor of the warm-up. */
+export interface TestPrelude {
+  /**
+   * Wait for the adapter's `settled` hook (two passing polls in a row) after `ready` and the warm-up. Ignored when the
+   * adapter has no hook, so a series-less scenario runs as before unless it declares a condition.
+   */
+  readonly settle?: boolean;
+  /** Longest the prelude waits for `settle`, default `TEST_CAP_MS`. A prelude that hits it records a validity issue. */
+  readonly maxMs?: number;
+}
+
+/**
+ * The measured window, one of:
+ * - `steady`: sample until the stop rule fires (quick mode), at most the cap.
+ * - `scripted`: a camera path or sweep; runs its own length (`modeActionMs`) and never stops on the series.
+ * - `counted`: a fixed iteration count that the adapter loops itself; `measureWindow` returns at once.
+ */
+export type TestWindowKind = 'steady' | 'scripted' | 'counted';
+
+export interface TestWindowSpec {
+  readonly kind: TestWindowKind;
+  /** `steady` only: the hard cap of the window, default `TEST_CAP_MS`. Also limited by the mode's window length. */
+  readonly capMs?: number;
+}
+
+export interface TestPhases {
+  readonly prelude?: TestPrelude;
+  readonly window?: TestWindowSpec;
 }
 
 /** Upper limits for one metric of one scenario; set one or both statistics. */
@@ -219,12 +251,25 @@ export interface TestSettleSeries {
   readonly resolution?: number;
 }
 
+/**
+ * Why a test's window ended:
+ * - `settled`: the stop rule was met. Valid evidence.
+ * - `capped`: the hard cap came first. Inconclusive, never a pass.
+ * - `failed`: a check failed or the test threw (set by `TestSession`).
+ * - `fixed`: scripted, counted or unwatched windows, which end by their own length.
+ * - `max`: legacy name of `capped`, read from results saved before plan 061; never produced now.
+ */
+export type TestStopReason = 'settled' | 'capped' | 'failed' | 'fixed' | 'max';
+
 /** How a measurement window ran; `TestSession` records it on the case. */
 export interface TestWindow {
   readonly mode: TestMode;
   readonly elapsedMs: number;
-  /** `settled`: quick mode saw stable series; `max`: it ran to `durationMs`; `fixed`: the mode's length, no watching. */
-  readonly stoppedBy: 'settled' | 'max' | 'fixed';
+  readonly stoppedBy: TestStopReason;
+  /** Leading samples dropped as warm-up (still over 2x the later median), per watched series. */
+  readonly warmupDropped?: Readonly<Record<string, number>>;
+  /** Samples over 2x the median, per watched series. Reported only; never a stop condition. */
+  readonly hitches?: Readonly<Record<string, number>>;
   /** Samples per watched series when the window ended. */
   readonly samples?: Readonly<Record<string, number>>;
   /** Soak only: relative change of each series' median from its first to its last quarter (0.05 = 5% higher). */
@@ -259,6 +304,11 @@ export interface TestRunAdapter<TSettings extends object, TSnapshot = unknown> {
   /** `scenario` is the one just applied, so the adapter need not remember it. */
   ready(context: TestContext, scenario: TestScenario<TSettings>): Promise<void>;
   measure(scenario: TestScenario<TSettings>, context: TestContext): Promise<TestObservation>;
+  /**
+   * The condition behind `phases.prelude.settle` (for example "queued work is 0 and the camera has stopped"). The session
+   * polls it and needs two passing polls in a row. Read-only; honor `context.signal`.
+   */
+  settled?(scenario: TestScenario<TSettings>, context: TestContext): boolean | Promise<boolean>;
   restore(snapshot: TSnapshot, context: TestContext): void | Promise<void>;
   environment?(): Readonly<Record<string, TestSetting>>;
   /**
@@ -291,6 +341,8 @@ export interface TestCaseResult<TSettings extends object> {
   readonly error?: string;
   /** The last measurement window of this case, when the adapter used `measureWindow`. */
   readonly window?: TestWindow;
+  /** Why the test ended: `failed` for a failed or cancelled case, else the window's reason, else `fixed`. */
+  readonly stopReason?: TestStopReason;
   /** Times this case was redone because the page was hidden or lost focus. */
   readonly retries?: number;
   /**
@@ -332,6 +384,11 @@ export interface TestRunOptions {
   readonly profile: TestProfile;
   /** Default `standard`. `quick` and `soak` need an adapter with `windowModes`. */
   readonly mode?: TestMode;
+  /**
+   * The limit of ONE test (apply, ready, warm-up, window, checks), not of the whole run. Default
+   * `DEFAULT_TEST_TIMEOUT_MS` plus the scenario's warm-up and window. A test that hits it fails and the run goes on.
+   * Time the page spends hidden is not counted.
+   */
   readonly timeoutMs?: number;
   /**
    * Result-sink URL of a local receiver. When set, a performance run tells the receiver when each measure step starts
@@ -353,4 +410,28 @@ export interface TestCaseThumbnails {
   readonly scenarioId: string;
   readonly repetition: number;
   readonly images: readonly Blob[];
+}
+
+/** One test of a batch: a scenario of a suite version, run `repetitions` times. */
+export interface TestBatchTest {
+  readonly suiteId: string;
+  readonly suiteVersion: number;
+  readonly scenarioId: string;
+  readonly repetitions?: number;
+}
+
+/**
+ * An ordered list of tests, run one at a time as fast as the page allows, with a per-test limit only (no batch budget).
+ * A failed test does not stop the batch. The batch runner itself lives in the host; each test is one `TestSession` run.
+ */
+export interface TestBatch {
+  readonly id?: string;
+  readonly tests: readonly TestBatchTest[];
+}
+
+/** The results of a batch, in the order of `TestBatch.tests`. */
+export interface TestBatchResult {
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly runs: readonly TestRunResult<object>[];
 }

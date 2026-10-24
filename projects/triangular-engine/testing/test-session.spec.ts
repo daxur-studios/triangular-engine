@@ -156,13 +156,15 @@ describe('TestSession', () => {
   });
 
   it('ends a quick window once its series settle, cuts the warmup and records the window on the case', async () => {
-    const samples = Array(100).fill(1);
+    // A live series: it grows on every read, as frames do, so the second confirming look has new samples to see.
+    const samples: number[] = Array(100).fill(1);
+    const live = () => { samples.push(...Array(20).fill(1)); return samples; };
     const long = { ...suite, scenarios: [{ ...suite.scenarios[0], durationMs: 10_000, warmupMs: 10_000 }] };
     const quick: TestRunAdapter<Settings, number> = {
       ...adapter, windowModes: true,
       measure: async (scenario, context) => {
         expect(context.mode).toBe('quick');
-        await context.measureWindow(scenario, [{ name: 'flat', samples: () => samples }]);
+        await context.measureWindow(scenario, [{ name: 'flat', samples: live }]);
         return { metrics: [] };
       },
     };
@@ -171,7 +173,7 @@ describe('TestSession', () => {
     expect(performance.now() - began).toBeLessThan(3000);
     expect(result.mode).toBe('quick');
     expect(result.cases[0].window?.stoppedBy).toBe('settled');
-    expect(result.cases[0].window?.samples).toEqual({ flat: 100 });
+    expect(result.cases[0].window?.samples?.['flat']).toBeGreaterThanOrEqual(100);
   }, 10_000);
 
   describe('page focus', () => {
@@ -253,13 +255,61 @@ describe('TestSession', () => {
     expect(result.cases[0].scenario.settings.value).toBe(7);
   });
 
-  it('retains a failed check once and stops instead of reporting later cases as passed', async () => {
+  it('keeps every failed test and goes on with the next one', async () => {
     adapter.measure = async () => ({ metrics: [], checks: [{ name: 'Expected failure', passed: false }] });
     const result = await new TestSession<Settings, number>().run(suite, adapter, { repetitions: 3, profile: 'headless-hardware' });
     expect(result.status).toBe('failed');
-    expect(result.cases.length).toBe(1);
-    expect(result.cases[0].checks[0].passed).toBeFalse();
+    expect(result.automatedVerdict).toBe('fail');
+    expect(result.cases.length).toBe(3);
+    expect(result.cases.every((item) => !item.checks[0].passed && item.stopReason === 'failed')).toBeTrue();
   });
+
+  it('continues after a failed middle test, restoring after each of the three', async () => {
+    const three: TestSuite<Settings> = { ...suite, scenarios: ['a', 'b', 'c'].map((id) => ({ id, label: id, durationMs: 1, settings: { value: 7 } })) };
+    let restores = 0;
+    const restore = adapter.restore;
+    adapter.restore = (snapshot, context) => { restores++; return restore(snapshot, context); };
+    adapter.measure = async (scenario) => ({ metrics: [], checks: [{ name: 'ok', passed: scenario.id !== 'b' }] });
+    const result = await new TestSession<Settings, number>().run(three, adapter, { repetitions: 1, profile: 'headless-hardware' });
+    expect(result.cases.map((item) => [item.scenario.id, item.status])).toEqual([['a', 'completed'], ['b', 'failed'], ['c', 'completed']]);
+    expect(restores).toBe(3);
+    expect(state).toBe(3);
+  });
+
+  it('times out one hung test and runs the rest', async () => {
+    const two: TestSuite<Settings> = { ...suite, scenarios: ['a', 'b'].map((id) => ({ id, label: id, durationMs: 1, settings: { value: 7 } })) };
+    adapter.ready = (_, scenario) => scenario.id === 'a' ? new Promise<void>(() => {}) : Promise.resolve();
+    const result = await new TestSession<Settings, number>().run(two, adapter, { repetitions: 1, profile: 'headless-hardware', timeoutMs: 50 });
+    expect(result.cases.map((item) => item.status)).toEqual(['failed', 'completed']);
+    expect(result.cases[0].error).toContain('timed out');
+    expect(state).toBe(3);
+  });
+
+  it('makes a capped window inconclusive, never a pass', async () => {
+    const ramp = Array.from({ length: 200 }, (_, i) => i + 1);
+    const capped = { ...suite, scenarios: [{ ...suite.scenarios[0], durationMs: 1500, phases: { window: { kind: 'steady' as const, capMs: 1200 } } }] };
+    const quick: TestRunAdapter<Settings, number> = {
+      ...adapter, windowModes: true,
+      measure: async (scenario, context) => { await context.measureWindow(scenario, [{ name: 'ramp', samples: () => ramp }]); return { metrics: [] }; },
+    };
+    const result = await new TestSession<Settings, number>().run(capped, quick, { repetitions: 1, profile: 'headless-hardware', mode: 'quick' });
+    expect(result.cases[0].stopReason).toBe('capped');
+    expect(result.cases[0].validityIssues).toContain('Window hit its cap without settling');
+    expect(result.status).toBe('inconclusive');
+  }, 10_000);
+
+  it('polls a declared prelude settle condition before the window', async () => {
+    const declared = { ...suite, scenarios: [{ ...suite.scenarios[0], phases: { prelude: { settle: true, maxMs: 2000 } } }] };
+    let polls = 0;
+    adapter.settled = () => ++polls >= 3;
+    const result = await new TestSession<Settings, number>().run(declared, adapter, { repetitions: 1, profile: 'headless-hardware' });
+    expect(polls).toBe(4);
+    expect(result.cases[0].validityIssues).toEqual([]);
+    adapter.settled = () => false;
+    const stuck = { ...suite, scenarios: [{ ...suite.scenarios[0], phases: { prelude: { settle: true, maxMs: 150 } } }] };
+    const late = await new TestSession<Settings, number>().run(stuck, adapter, { repetitions: 1, profile: 'headless-hardware' });
+    expect(late.cases[0].validityIssues).toContain('Prelude did not settle within its limit');
+  }, 10_000);
 
   it('rejects simultaneous runs before they can capture or restore each other', async () => {
     const session = new TestSession<Settings, number>();
