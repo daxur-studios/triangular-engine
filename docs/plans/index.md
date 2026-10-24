@@ -25,6 +25,8 @@ tags: [plans, index]
 | [Planet Shape System](/docs/plans/055_planet_shape_system.md) | planned (Phase 0 next) | [Evidence](/docs/runbook/055_planet_shape_system.md) |
 | [WebGPURenderer as the Default Renderer](/docs/plans/056_webgpu_default_renderer.md) | draft (owner review, then Phases 0 and 2) | [Evidence](/docs/runbook/056_webgpu_default_renderer.md) |
 | [Test Results Page and Case Thumbnails](/docs/plans/058_test_results_page_and_thumbnails.md) | built, pending owner visual review | [Evidence](/docs/runbook/058_test_results_page_and_thumbnails.md) |
+| [LOD Surface Core for Water and Terrain](/docs/plans/059_lod_surface_core.md) | draft (agent review in progress) | [Evidence](/docs/runbook/059_lod_surface_core.md) |
+| [Testing Entry for CPU Performance Work](/docs/plans/060_testing_cpu_performance.md) | built, not released | [Evidence](/docs/runbook/060_testing_cpu_performance.md) |
 
 
 Convention: [Plans and Runbooks](/docs/plans-and-runbooks.md).

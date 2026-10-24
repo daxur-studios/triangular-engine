@@ -25,6 +25,8 @@ tags: [runbook, index]
 | [Planet Shape System](/docs/runbook/055_planet_shape_system.md) | [Implementation plan](/docs/plans/055_planet_shape_system.md) |
 | [WebGPURenderer as the Default Renderer](/docs/runbook/056_webgpu_default_renderer.md) | [Implementation plan](/docs/plans/056_webgpu_default_renderer.md) |
 | [Test Results Page and Case Thumbnails](/docs/runbook/058_test_results_page_and_thumbnails.md) | [Implementation plan](/docs/plans/058_test_results_page_and_thumbnails.md) |
+| [LOD Surface Core for Water and Terrain](/docs/runbook/059_lod_surface_core.md) | [Implementation plan](/docs/plans/059_lod_surface_core.md) |
+| [Testing Entry for CPU Performance Work](/docs/runbook/060_testing_cpu_performance.md) | [Implementation plan](/docs/plans/060_testing_cpu_performance.md) |
 
 
 Existing runbooks `001`–`042` retain their historical paths and formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).
