@@ -27,6 +27,7 @@ tags: [runbook, index]
 | [Test Results Page and Case Thumbnails](/docs/runbook/058_test_results_page_and_thumbnails.md) | [Implementation plan](/docs/plans/058_test_results_page_and_thumbnails.md) |
 | [LOD Surface Core for Water and Terrain](/docs/runbook/059_lod_surface_core.md) | [Implementation plan](/docs/plans/059_lod_surface_core.md) |
 | [Testing Entry for CPU Performance Work](/docs/runbook/060_testing_cpu_performance.md) | [Implementation plan](/docs/plans/060_testing_cpu_performance.md) |
+| [Test Runner Batch Runs and a Deterministic Stop Rule](/docs/runbook/061_test_runner_batch_and_stop_rule.md) | [Implementation plan](/docs/plans/061_test_runner_batch_and_stop_rule.md) |
 
 
 Existing runbooks `001`–`042` retain their historical paths and formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

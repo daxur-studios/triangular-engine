@@ -11,6 +11,9 @@ performance: []
 # Plan 057: Planet Water System
 
 Status: **design only, nothing built, nothing measured.** Written 2026-10-20 from code reading and prior plans.
+
+**Parked 2026-10-24 (owner, Plan 059 D10):** the contender race waits until Plan 059's M3 (water v0 on the new LOD
+surface core). W1-W17 stay the long-term target list.
 No decision below has been made by the owner except those inherited from Plans 055 and 056 (marked as such).
 Phase 0 is **blocked on Plan 055 Phase 0** (§Dependencies on Plan 055).
 Evidence: [Runbook 057](/docs/runbook/057_planet_water_system.md).

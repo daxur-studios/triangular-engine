@@ -1,7 +1,7 @@
 ---
 type: Plan
 title: LOD Surface Core for Water and Terrain
-description: A fresh, WebGPU-only, performance-tested level-of-detail surface (a height over a plane or a sphere, drawn as one instanced grid whose density follows pluggable criteria), shown first on a flat and a sphere lab page, then used by a new water surface and later by low-detail terrain. Draft for review; nothing built.
+description: A fresh, WebGPU-only, performance-tested level-of-detail surface (a height over a plane or a sphere, drawn as one instanced grid whose density follows pluggable criteria), shown first on a flat and a sphere lab page, then used by a new water surface and later by low-detail terrain. Review done (three agents, two rounds) and owner decisions taken; M1 and spike S1 next; nothing built.
 timestamp: 2026-10-24T00:00:00Z
 tags: [lod, mesh, quadtree, sphere, plane, water, terrain, webgpu, tsl, performance, testing]
 runbook: /docs/runbook/059_lod_surface_core.md
@@ -79,7 +79,7 @@ any radius, §L7).
 | L3 | **Bounded popping.** Level changes are blended or bounded; a popping score during a scripted zoom stays under a threshold set from a known-bad control (blending off) |
 | L4 | **Custom criteria.** Camera distance (screen-space error), feature importance (regions with a target detail), horizon nearness (silhouette) and a global budget. They combine by one stated rule, and each is a toggle measured on and off |
 | L5 | **Cost on the reference machine** (RTX 3080 Laptop, 2560 x 1440, Plan 055 D1), working numbers: surface <= 0.5 ms GPU p95 with flat or analytic-wave heights; selection <= 0.2 ms main thread p95 with no per-frame allocation; one draw per pass per surface |
-| L6 | **Low-end profile.** The same suite runs on the laptop's AMD integrated GPU and is reported separately. Working number: a lower-detail preset holds 60 fps there |
+| L6 | **Low-end profile.** The same suite runs on the laptop's AMD integrated GPU and is reported separately. Preset (D6/D7): 1280 x 720, surface <= 2 ms GPU p95 |
 | L7 | **Precision.** No vertex jitter on a 6,371 km sphere at 2 m eye height. Patches are placed relative to the camera from double-precision CPU positions |
 | L8 | **Dynamic heights.** A height that changes every frame (waves) or by an edit (a stamp into the height texture) shows on the next frame with no re-meshing |
 | L9 | **CPU twin.** Every height source has a CPU sampler returning the same height within a stated tolerance, for buoyancy, colliders and gameplay queries. A spec proves it |
@@ -106,7 +106,9 @@ Proposed choices, each an open question in the review:
    feature and horizon criteria and orbit views of a sphere need a decision per patch. A quadtree with only the
    distance criterion lays out ring-like levels anyway.
 2. **Criteria as target cell sizes, smallest wins.** A unit every criterion can produce and a person can read
-   ("2 m cells on the road, 50 m at the horizon"). The budget scales all targets up until the leaf count fits.
+   ("2 m cells on the road, 50 m at the horizon"). A pixel floor (about 2 px) limits ordinary requests. Under the
+   leaf cap, splits go by priority (node size over target size), coarse cover stays valid, and unmet requests are
+   reported. (Review round 2 replaced global target scaling.)
 3. **Cracks closed in the vertex stage:** odd edge vertices next to a coarser neighbour fold onto that neighbour's
    edge (a 4-bit mask per leaf). One index buffer, one draw. No skirts.
 4. **Heights read live in the vertex stage by default.** That is what makes waves and edits show on the next frame.
@@ -119,12 +121,14 @@ Proposed choices, each an open question in the review:
 ## First users
 
 **Water (first).** Written new, in TSL:
-- Live analytic waves: a small set of directional waves with an exact CPU twin; selection uses the wave amplitude as
-  its roughness bound, so calm water draws a coarse grid.
+- Live analytic waves: a small set of directional waves with an exact CPU twin; selection uses a wavelength-aware
+  bound (chord sag), so calm water and long swell draw a coarse grid. One shader with choppiness Q as a toggle;
+  Q = 0 (vertical sines) first, Gerstner judged later.
 - Normal detail that fades with distance (filtered, so the horizon does not shimmer); a simple lit look: sky
   reflection by Fresnel, a depth tint, sun glint.
-- Later, a camera-local writable height texture updated by a compute wave equation for ripples, wakes and splashes:
-  the same kind of source terrain edits use.
+- Later, a camera-local writable height texture for ripples, wakes and splashes, written as decaying stamps (no wave
+  equation solver at first): the same kind of source terrain edits use. First edits are CPU-authoritative and
+  uploaded when dirty.
 
 **Low-detail terrain (second):** a height texture baked by compute from a noise function, edits as compute stamps into
 the same texture (visible next frame), and a small CPU height-field collider near moving bodies from the CPU twin
@@ -136,11 +140,11 @@ Each milestone ends with a gate measured on the reference machine and recorded i
 
 | # | Milestone | Gate |
 |---|---|---|
-| M0 | **Lab and harness, no LOD yet.** `/lod-surface-lab` in the demo app, WebGPU only. Plane and sphere, a uniform grid, debug views, counters, GPU pass timers. Suite `lod-surface-baseline` v1 (§Suite) | The suite runs and saves results on the NVIDIA adapter and on the iGPU |
-| M1 | **Quadtree LOD,** distance criterion only, edge folding, LOD colours, on plane and sphere (10 km, 600 km, 6,371 km) | Zero crack pixels; L5 cost; ground-to-orbit zoom with no rebuild storm; L7 jitter check |
-| M2 | **Blending and the other criteria** (feature regions, horizon, budget), each a toggle measured ABAB | Popping score; each criterion shows its effect and its cost |
+| M1 | **Lab, harness and quadtree LOD** (M0 merged in). `/lod-surface-lab`, suite `lod-surface-baseline` v1 (§Suite). Bounded 100 km plane, spheres 10 km and 600 km; flat and static-bump sources; distance criterion with pixel floor, leaf cap, fixed-level toggle as the uniform baseline; equal-angle warp and `patchCells` 16/32/64 toggles; static edge folding; LOD colours, wireframe, bounds, counters, GPU pass timers; validated crack probe; one scripted zoom. Pops allowed and labelled | Zero crack pixels (probe validated by an injected gap); L5 cost; ground-to-orbit zoom with no rebuild storm; runs on both adapters |
+| S1 | **Precision spike, alongside M1** (disposable): three-face cube corner with a 2:1 seam, all 16 masks, 10 km and 6,371 km, 2 m eye, 1 mm per frame, float64 reference | No crack pixels; jitter <= 0.05 px; decides the Earth-scale formula and informs D9 |
+| M2 | **Blending and the other criteria** (feature regions, horizon, priority budget), each a toggle measured ABAB. Transition fixture first (diagonal ridge, live edit, unequal neighbours, reversed toggle) | Popping score; 3D boundary equality during morphs; each criterion shows its effect and its cost |
 | M3 | **Water v0:** live analytic waves on plane and sphere, CPU twin, amplitude-aware selection, the simple lit look | L5 cost; parity spec; owner visual review |
-| M4 | **Writable height texture source,** shared by water ripples (compute wave equation) and terrain stamps | Next-frame visibility; cost of an update |
+| M4 | **Writable height texture source,** shared by water ripples (decaying stamps) and terrain stamps; CPU-authoritative first | Next-frame visibility; cost of an update |
 | M5 | **Low-detail terrain v0:** baked noise height texture, edits, collider patch | L5 cost (with its own working number), parity, crack probe |
 
 After M5 the owner decides how water and terrain grow from here, and whether Plans 055 and 057 adopt the core.
@@ -178,11 +182,13 @@ fine reference during a slow scripted zoom. Both are open to the review.
 | D1 | Fresh code: nothing ported, wrapped or imported from the GLSL `water/` module or the earlier terrain attempts | **Decided** 2026-10-24 (owner) |
 | D2 | WebGPU only (`WebGPURenderer`, TSL, compute allowed) | **Decided** 2026-10-24 (owner) |
 | D3 | Plan 055's lab and contenders untouched; no imports from 055 lab code (it may be read for lessons) | **Decided** 2026-10-24 (owner approved the direction) |
-| D4 | LOD structure: quadtree of patches, clipmap rings, or another | Open (proposal: quadtree; review Q1) |
-| D5 | Level blending: per-vertex morph, timed fade, or accept pops at low detail | Open (review Q3) |
-| D6 | Machines: NVIDIA reference (Plan 055 D1) plus the AMD iGPU as a low-end profile | Open (proposal: both) |
-| D7 | Budgets L5 and L6 | Open (working numbers) |
-| D8 | Where the code lives first and the entry-point names | Open (proposal: demo-app lab, promote after M2) |
-| D9 | Scale range tested in v1 | Open (proposal: plane to 100 km; spheres 10 km and 600 km; 6,371 km for precision only) |
-| D10 | Plan 057: park its race until this plan's M3, keeping W1-W17 as the long-term list | Open |
-| D11 | Globe-to-map morph | Open (proposal: out of v1; the vertex stage leaves room for it) |
+| D4 | LOD structure and budget | **Agreed in review** 2026-10-24: 2:1 quadtree, one instanced grid, CPU selection, edge folding without skirts, priority splitting under a leaf cap with a pixel floor |
+| D5 | Level blending | Open: settled by the M2 transition fixture (ratio-driven morph vs timed parent-triangle morph); pops accepted in M1 |
+| D6 | Machines: NVIDIA reference (Plan 055 D1) plus the AMD iGPU as a low-end profile | **Decided** 2026-10-24 (owner): both; the iGPU preset is 1280 x 720 with the surface <= 2 ms GPU p95 (scene named in M1) |
+| D7 | Budgets L5 and L6 | **Decided** 2026-10-24 (owner): L5 as written (<= 0.5 ms GPU, <= 0.2 ms CPU p95 at 2560 x 1440); L6 = the 720p / 2 ms iGPU preset |
+| D8 | Where the code lives first and the entry-point names | **Decided** 2026-10-24 (owner): `projects/demo-app/src/app/pages/lod-surface-lab/`, promoted to an entry point (name such as `triangular-engine/lod-surface`) after M2 |
+| D9 | Scale range tested in v1 | **Decided** 2026-10-24 (owner): plane to 100 km, spheres 10 km and 600 km; 6,371 km is spike S1 only and informs scope, not a gate |
+| D10 | Plan 057: park its race until this plan's M3, keeping W1-W17 as the long-term list | **Decided** 2026-10-24 (owner): parked |
+| D11 | Globe-to-map morph | Agreed in review: out of v1 |
+| D12 | Cube warp | Agreed in review: equal-angle default, toggle kept; value checked by measurement |
+| D13 | Water v0 look and motion bar (sines or Gerstner; acceptable transition motion) | **Decided** 2026-10-24 (owner): sines (Q = 0) first; the owner judges Gerstner and transition motion by eye at the M3 review; pops are fine until then |

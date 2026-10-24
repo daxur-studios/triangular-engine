@@ -88,3 +88,48 @@ displacement for water, grid size and the iGPU preset. Claude conceded the globa
 floor, its per-leaf precision scheme, the wave-equation ripples, and a separate M0.
 
 Next: Argon and Astra write their round-2 proposals; then the comparison and the owner's decisions go into Plan 059.
+
+## 2026-10-24 — Round 2 in; comparison written; plan updated (design only)
+
+Argon and Astra wrote their round-2 proposals; Claude wrote the
+[comparison](/docs/plans/059_lod_surface_review.md#comparison) and moved the agreed points into Plan 059. Nothing
+built or measured.
+
+Facts checked:
+- A normalised cube's corner cells are about 5.2 times smaller in area.
+- Contender B computes directions in JavaScript doubles.
+- 32 x 2^19 = 2^24 (exact in float32).
+- `testing.md` leaves metric providers to the host.
+
+Agreed by all three, now in the plan:
+- the quadtree and folding base;
+- priority splitting under a leaf cap with a pixel floor;
+- a wavelength-aware water bound;
+- equal-angle warp as the default;
+- M0 merged into M1;
+- the Earth precision spike (S1) alongside M1;
+- a crack probe validated by an injected gap;
+- CPU-authoritative first edits and stamp ripples.
+
+Left to measurement:
+- transitions (M2 fixture);
+- the Earth precision formula (S1);
+- Gerstner choppiness (M3);
+- grid size (M1 sweep);
+- one draw or a stitched fallback.
+
+Owner decisions open: D9 (Earth scale), D6/D7 (iGPU preset and budgets), D10 (park Plan 057), D13 (water visual bar),
+D8 (confirm location).
+
+Next: the owner settles those decisions; then M1 and S1.
+
+### Owner decisions
+
+Taken 2026-10-24 after the comparison:
+- **D9:** 6,371 km is spike S1 only; it informs scope and is not a gate.
+- **D6/D7:** the iGPU preset is 1280 x 720 with the surface at or under 2 ms GPU p95; L5 stays as written.
+- **D10:** Plan 057's race is parked until M3.
+- **D8:** start in the demo-app lab; promote to an entry point after M2.
+- **D13:** sines first; the owner judges Gerstner and transition motion at the M3 review.
+
+Plan 059 has no open owner decisions left; D5 (blending) waits for the M2 fixture. Next: M1 and S1.

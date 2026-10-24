@@ -647,5 +647,93 @@ implementation should follow evidence, without another owner vote for each detai
 
 ## Comparison
 
-_Written after all three round-2 proposals: where they agree, where they differ, and the decisions left for the
-owner. The agreed result then goes into Plan 059._
+Written by Claude after all three round-2 proposals were in. Facts the proposals rely on were checked:
+- A normalised cube's corner cells are 3^1.5 ≈ 5.2 times smaller than its centre cells (Argon; general knowledge).
+- `cube-sphere.ts` evaluates directions in JavaScript doubles (`Math.tan`, `Math.hypot`).
+- 32 x 2^19 = 2^24, so the lattice endpoints are exactly representable in float32 (Astra).
+- `testing.md` leaves metric providers to the host page (Astra).
+- Argon's L5 numbers match Plan 059.
+
+Argon's link to `cube-sphere.ts` is an absolute `file:///` path; it is left as written because this section does not
+edit the others.
+
+### Agreed by all three
+
+1. **Base.** Fresh WebGPU/TSL code. Build it in a demo-app lab first. Plan 055 stays untouched.
+2. **Structure.** One 2:1-balanced quadtree: 1 root for a bounded plane, 6 for the cube-sphere. It is drawn as one
+   shared instanced N x N grid with per-leaf data in one buffer. No clipmap rings, no projected grid, no GPU-built
+   tree.
+3. **Selection.** On the CPU, over pooled typed arrays, with no per-frame allocation. GPU selection only after a
+   measured CPU bottleneck.
+4. **Cracks.** Odd edge vertices fold onto a coarser neighbour, using a 4-bit mask. One index buffer, no skirts. The
+   test is equality of the final 3D positions.
+5. **Budget.** Split by priority under a leaf cap, keep valid coarse cover, and report unmet requests. Global target
+   scaling is dropped. A pixel floor (about 2 px) limits ordinary requests. Astra's limit: the floor must not
+   override a required silhouette or error tolerance.
+6. **Roughness bound.** Water uses a wavelength-aware bound (chord sag), not amplitude alone. Long swells stay
+   coarse; short chop refines.
+7. **Cube warp.** Equal-angle by default; Astra changed its mind. Keep a toggle, and settle the value by measurement
+   at matched error.
+8. **Milestones.** M0 merges into M1, and a fixed level is the uniform baseline. M1 uses the distance criterion
+   only, and pops are allowed and labelled.
+9. **Earth precision.** A spike runs alongside M1. A small sphere must not wait for it.
+10. **Crack probe.** Trusted only after it reports an injected gap. Silhouette pixels are masked.
+11. **Measurement.** Both adapters, in a visible browser. Headless runs check correctness only.
+12. **What the core shares.** Domain, selection and height sampling; analytic and texture sources both fit. Shading,
+    simulation, edits policy and physics stay outside.
+13. **Edits and ripples.** First edits are CPU-authoritative, uploaded when dirty. No wave-equation solver at first;
+    ripples later use decaying stamps.
+14. **Splits.** The four children of a parent split and merge together, and edges next to a coarser leaf stay fully
+    folded.
+
+### Still different, and what settles it
+
+| Topic | Where each stands | Settled by | When |
+|---|---|---|---|
+| Transitions | Claude and Argon: a morph driven by the priority ratio, with each odd vertex moving to the average of two even neighbours. Astra: a reversible timed morph onto the parent's triangles. Astra says a two-neighbour average is not enough for interior vertices or for curved sphere positions | Astra's fixture: diagonal ridge, live edit, unequal neighbours, a feature toggled and reversed, all edge masks. It measures 3D boundary equality, depth jumps and GPU p95 | M2 |
+| Earth precision formula | Argon: lattice keys plus hi/lo camera evaluation. Claude and Astra: hi/lo cannot repair error already in a float32 direction (about 0.4 m at 6,371 km), so test before choosing | The corner spike against a float64 reference: crack pixels, jitter (fail above 0.05 px), vertex ms | Alongside M1 |
+| Water waves | Converging. Argon: Gerstner with choppiness Q as a toggle (Q = 0 is the sine wave). Astra: a scalar source first; two inversion steps do not guarantee 1 cm without bounds. Claude: vec3 in the contract, normal-only first | Q toggle on one shader, Q = 0 first. Then GPU ms, query residual against a float64 solve, and owner visual review | M3 |
+| Grid size N | 16 (Astra), 32 (Argon); all agree on a toggle | Sweep at matched screen error: surface GPU ms + selection ms on both adapters | M1 |
+| One draw or a fallback | Claude and Argon: one draw is required. Astra: try one draw first, and allow small stitched batches if they pass more simply | The same transition fixture | M2 |
+
+Claude's own round-1 precision scheme (offset from each leaf's centre) was withdrawn in round 2. The spike therefore
+compares lattice + hi/lo with and without extended-precision directions, not Claude's scheme against Argon's.
+
+### Owner decisions (merged)
+
+All three name the first two.
+
+1. **Earth scale (D9).** Is 6,371 km precision a requirement of this track, or only a spike that informs scope?
+   - Claude and Astra: a spike only, not an M1 gate.
+   - Argon: gate it in M1 if the spike passes.
+2. **iGPU preset (D6, D7).** 720p within 2 ms, or 1080p within 1.8 ms, with a named scene. Plus the reference budget,
+   proposed at ≤ 0.5 ms GPU and ≤ 0.2 ms CPU p95 at 2560 x 1440.
+3. **Plan 057 (D10).** Park its four-contender race until M3.
+4. **The visual bar.** What counts as good enough for the first water, and how much transition motion is acceptable.
+   This includes sines or Gerstner if they look different enough to matter.
+5. **Location (D8).** Build in the demo-app lab through M2, then promote to an entry point such as
+   `triangular-engine/lod-surface`. All three already assume this, so a yes is enough.
+
+Argon's budget question (D4 in its list) is no longer open: all three now propose priority splitting. Grid size, warp
+arithmetic and queue details follow measurement, with no owner vote needed.
+
+### Merged first steps
+
+- **M1** (a few days):
+  - `/lod-surface-lab` and suite `lod-surface-baseline` v1.
+  - Shapes: a bounded 100 km plane and 10 km and 600 km spheres.
+  - Height sources: flat and a static bump.
+  - Selection: distance criterion with the pixel floor, a leaf cap, and a fixed-level toggle as the uniform baseline.
+  - Toggles: equal-angle warp and `patchCells` 16/32/64.
+  - Static edge folding.
+  - Debug views: LOD colours, wireframe and bounds.
+  - Counters: leaves, triangles, draws, pixels per triangle, selection ms.
+  - GPU pass timers and the validated crack probe.
+  - One scripted ground-to-orbit zoom, run on both adapters.
+- **Spike alongside M1.** It lives in its own folder and is disposable.
+  - A three-face cube corner with a 2:1 edge across the seam, covering all 16 masks.
+  - Radii 10 km and 6,371 km, a 2 m eye height, and the camera moving 1 mm per frame.
+  - A float64 reference and an injected-gap control.
+  - Boundary error is recorded separately from raster holes. If seams fail, stop expanding.
+- **Out of M1:** blending, feature and horizon criteria, the unbounded plane, water, terrain, colliders and entry
+  points.
