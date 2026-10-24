@@ -679,3 +679,30 @@ test('baselineFromRun keeps valid completed cases, combines repetitions and filt
   }, { metrics: ['gpu'] });
   assert.deepEqual(result, { runId: 'r', recordedAt: '2026-03-03T00:00:00Z', mode: 'standard', gpu: 'RTX', cases: { a: { gpu: { median: 2, p95: 3 } } } });
 });
+
+test('summary prints a grouped breakdown sorted by share, and keeps group and share in the index', () => {
+  const run = { cases: [
+    { scenario: { id: 'n-10' }, status: 'completed', metrics: [
+      { name: 'solve', unit: 'µs', samples: [8, 8], group: 'spans', share: 0.8 },
+      { name: 'setup', unit: 'µs', samples: [1, 1], group: 'spans', share: 0.1 },
+      { name: 'unattributed', unit: 'µs', samples: [1, 1], group: 'spans', share: 0.1 },
+      { name: 'total', unit: 'µs', samples: [10, 10], group: 'spans', share: 1 },
+      { name: 'timeUs', unit: 'µs', samples: [10, 10] },
+    ] },
+  ] };
+  const cases = caseSummaries(run);
+  assert.equal(cases['n-10'].metrics['solve (µs)'].share, 0.8);
+  assert.equal(cases['n-10'].metrics['timeUs (µs)'].share, undefined);
+  const text = summarize([{ suite: 's', version: 1, savedAt: '2026-01-01T00:00:00Z', profile: 'p', fingerprint: 'f', automatedVerdict: 'pass', performanceVerdict: 'unassessed', visualReview: 'not-required', file: 'x.json', cases }], () => null, 'f');
+  assert.match(text, /n-10: timeUs \(µs\) = 10\.00\n/);
+  const rows = text.split('\n').filter((l) => /^ {6}\S/.test(l)).map((l) => l.trim().split(/\s+/)[0]);
+  assert.deepEqual(rows, ['total', 'solve', 'setup', 'unattributed']);
+  assert.match(text, /breakdown spans:/);
+});
+
+test('baseline tool records the engine and tolerances', () => {
+  const run = { runId: 'r', startedAt: 'x', environment: { jsEngine: 'chrome 130.0' }, cases: [{ scenario: { id: 'a' }, status: 'completed', metrics: [{ name: 't', summary: { median: 1, p95: 2 } }] }] };
+  const made = baselineFromRun(run, { tolerances: { t: { rel: 0.2, abs: 2 } } });
+  assert.equal(made.jsEngine, 'chrome 130.0');
+  assert.deepEqual(made.tolerances, { t: { rel: 0.2, abs: 2 } });
+});

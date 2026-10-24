@@ -185,3 +185,42 @@ describe('TestSession performance verdict', () => {
     expect((await run(flat(1), 'headless-hardware')).performanceVerdict).toBe('inconclusive');
   });
 });
+
+describe('baseline tolerances and engines', () => {
+  const us = (value: number) => metric('t', Array.from({ length: 20 }, () => value), { unit: 'µs' });
+  const base = (over: Partial<TestBaseline> = {}) => baseline({ cases: { a: { t: { median: 10, p95: 10 } } }, ...over });
+  const check = (b: TestBaseline, value: number, env: Record<string, string> = {}) =>
+    assessPerformance(suite({ baseline: b }), 'standard', [item(scenario('a'), [us(value)])], env, false);
+
+  it('judges a non-ms unit by the relative bound alone by default', () => {
+    expect(check(base(), 10.9).verdict).toBe('pass');
+    expect(check(base(), 11.5).verdict).toBe('fail');
+  });
+
+  it('uses a per-metric rel and abs over the baseline-wide values', () => {
+    expect(check(base({ tolerances: { t: { rel: 0.5 } } }), 14).verdict).toBe('pass');
+    expect(check(base({ tolerances: { t: { rel: 0, abs: 3 } } }), 12.5).verdict).toBe('pass');
+    expect(check(base({ tolerances: { t: { rel: 0, abs: 3 } } }), 13.5).verdict).toBe('fail');
+    expect(check(base({ maxRegression: 0.5, tolerances: { other: { rel: 0 } } }), 14).verdict).toBe('pass');
+  });
+
+  it('keeps the 0.05 ms floor for ms metrics', () => {
+    const ms = assessPerformance(suite({ baseline: baseline({ cases: { a: { gpu: { median: 0.01, p95: 0.01 } } } }) }), 'standard',
+      [item(scenario('a'), [metric('gpu', flat(0.04))])], {}, false);
+    expect(ms.verdict).toBe('pass');
+  });
+
+  it('refuses a baseline from another engine family, with a note', () => {
+    const result = check(base({ jsEngine: 'node 22.1.0 (v8 12.4)' }), 100, { jsEngine: 'chrome 130.0' });
+    expect(result.verdict).toBe('unassessed');
+    expect(result.notes.join()).toContain('not compared');
+    expect(check(base({ jsEngine: 'chrome 129.0' }), 100, { jsEngine: 'chrome 130.0' }).verdict).toBe('fail');
+  });
+
+  it('records engine and tolerances in a baseline made from a run', () => {
+    const made = baselineFromRun({ runId: 'r', startedAt: 'x', mode: 'standard', environment: { jsEngine: 'chrome 130.0' },
+      cases: [item(scenario('a'), [us(10)])] }, { tolerances: { t: { rel: 0.2 } } });
+    expect(made.jsEngine).toBe('chrome 130.0');
+    expect(made.tolerances).toEqual({ t: { rel: 0.2 } });
+  });
+});

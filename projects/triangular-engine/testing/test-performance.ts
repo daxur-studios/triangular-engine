@@ -1,13 +1,20 @@
 import type {
   TestBaseline, TestBaselineStats, TestCaseResult, TestMetric, TestMode, TestPerformanceCheck, TestPerformanceStatistic,
-  TestRunResult, TestSetting, TestSuite,
+  TestRunResult, TestSetting, TestSuite, TestTolerance,
 } from './test-contracts';
 import { nearestRankPercentile } from './test-stats';
+import { jsEngineFamily } from './core/test-timer';
 
 /** Allowed relative increase over a baseline before it can count as a regression. */
 export const DEFAULT_MAX_REGRESSION = 0.1;
-/** Allowed absolute increase (the metric's own unit; 0.05 ms) before it can count as a regression. */
+/** Allowed absolute increase of a millisecond metric (0.05 ms) before it can count as a regression. */
 export const DEFAULT_MIN_REGRESSION = 0.05;
+
+/**
+ * The absolute floor used when a baseline sets no `minRegression`: `DEFAULT_MIN_REGRESSION` for `ms`, 0 for any other
+ * unit (µs, ratios, counts), which are then judged by the relative bound unless the baseline gives an `abs`.
+ */
+export const defaultMinRegression = (unit: string): number => (unit === 'ms' ? DEFAULT_MIN_REGRESSION : 0);
 
 const STATISTICS: readonly TestPerformanceStatistic[] = ['median', 'p95'];
 
@@ -41,6 +48,11 @@ export function assessPerformance<TSettings extends object>(
   let baseline = suite.baseline;
   if (baseline && baseline.mode !== mode) {
     notes.push(`Baseline ${baseline.runId} was recorded in ${baseline.mode} mode and not compared with this ${mode} run`);
+    baseline = undefined;
+  }
+  const engine = environment['jsEngine'];
+  if (baseline?.jsEngine && typeof engine === 'string' && jsEngineFamily(engine) !== jsEngineFamily(baseline.jsEngine)) {
+    notes.push(`Baseline ${baseline.runId} was recorded on ${baseline.jsEngine} and not compared with this ${engine} run: CPU timings do not transfer between engines`);
     baseline = undefined;
   }
   const gpu = environment['gpu.description'];
@@ -88,8 +100,10 @@ function metricChecks(
     }
     const value = base?.[statistic];
     if (value !== undefined && baseline) {
-      const bound = Math.max(value * (1 + (baseline.maxRegression ?? DEFAULT_MAX_REGRESSION)),
-        value + (baseline.minRegression ?? DEFAULT_MIN_REGRESSION));
+      const tolerance = baseline.tolerances?.[name];
+      const rel = tolerance?.rel ?? baseline.maxRegression ?? DEFAULT_MAX_REGRESSION;
+      const abs = tolerance?.abs ?? baseline.minRegression ?? defaultMinRegression(metric.unit);
+      const bound = Math.max(value * (1 + rel), value + abs);
       checks.push({ metric: name, statistic, kind: 'baseline', limit: bound, actual: summary[statistic], base: value, passed: summary[statistic] <= bound });
     }
   }
@@ -99,6 +113,8 @@ function metricChecks(
 export interface BaselineFromRunOptions {
   /** Keep only these metric names (for example to leave out a noisy CPU timer). Default: every metric with a summary. */
   readonly metrics?: readonly string[];
+  /** Written into the baseline as its per-metric `tolerances`. */
+  readonly tolerances?: Readonly<Record<string, TestTolerance>>;
 }
 
 /**
@@ -129,9 +145,11 @@ export function baselineFromRun(
     for (const [name, stats] of byMetric) cases[scenarioId][name] = { median: middle(stats.median), p95: middle(stats.p95) };
   }
   const gpu = result.environment['gpu.description'];
+  const engine = result.environment['jsEngine'];
   return {
     runId: result.runId, recordedAt: result.startedAt, mode: result.mode ?? 'standard',
-    ...(typeof gpu === 'string' && gpu ? { gpu } : {}), cases,
+    ...(typeof gpu === 'string' && gpu ? { gpu } : {}), ...(typeof engine === 'string' && engine ? { jsEngine: engine } : {}),
+    ...(options.tolerances ? { tolerances: options.tolerances } : {}), cases,
   };
 }
 

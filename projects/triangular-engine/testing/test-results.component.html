@@ -123,7 +123,7 @@
                 <div class="metrics">
                   @for (cell of visibleMetrics(row); track cell.key) {
                     <div class="metric" [title]="cell.baselineText">
-                      <span class="m-name">{{ cell.name }}</span>
+                      <span class="m-name">{{ cell.name }}@if (cell.share !== undefined) { <span class="muted">{{ (cell.share * 100).toFixed(1) }}%</span> }</span>
                       <span [class]="'m-change ' + cell.kind">{{ cell.changeText }}</span>
                       <span class="m-value"><b>{{ fmt(cell.median) }}</b> / {{ fmt(cell.p95) }} <span class="muted">{{ cell.unit }}</span></span>
                       @if (cell.targetRatio !== undefined) {

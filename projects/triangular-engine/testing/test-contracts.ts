@@ -11,6 +11,11 @@ export interface TestScenario<TSettings extends object> {
   readonly durationMs: number;
   readonly warmupMs?: number;
   /**
+   * Untimed calls of the measured work before sampling, for adapters that count iterations instead of time (see
+   * `cpuBench`). Quick mode cuts it to at most `QUICK_WARMUP_ITERATIONS`. Read it with `modeWarmupIterations`.
+   */
+  readonly warmupIterations?: number;
+  /**
    * The scenario's length in quick mode, at most `durationMs`: the most a watched window runs, the length of an
    * unwatched one (default `QUICK_WINDOW_MS`), and of a timed action (`modeActionMs`; default `durationMs`). Set it to
    * the shortest time that still shows what the case checks; standard and soak ignore it.
@@ -41,6 +46,11 @@ export type TestPerformanceStatistic = 'median' | 'p95';
  */
 export interface TestBaseline {
   readonly runId: string;
+  /**
+   * JS engine description of the recorded run (`describeJsEngine()`, set by `baselineFromRun`). A run on another engine
+   * family (Node vs a browser, Chrome vs Firefox) is not compared: CPU timings do not transfer.
+   */
+  readonly jsEngine?: string;
   readonly recordedAt: string;
   /** Compared only with runs of this mode; any other mode skips the baseline (a note, never a fail). */
   readonly mode: TestMode;
@@ -50,8 +60,19 @@ export interface TestBaseline {
   readonly cases: Readonly<Record<string, Readonly<Record<string, TestBaselineStats>>>>;
   /** Allowed relative increase (0.1 = 10 %). Default `DEFAULT_MAX_REGRESSION`. */
   readonly maxRegression?: number;
-  /** Allowed absolute increase in the metric's own unit. Default `DEFAULT_MIN_REGRESSION`. */
+  /**
+   * Allowed absolute increase in the metric's own unit. Default `defaultMinRegression(unit)`: 0.05 for `ms`, 0 for any
+   * other unit (so a microsecond metric is judged by the relative bound alone unless you set this).
+   */
   readonly minRegression?: number;
+  /** Per metric name, overriding `maxRegression` (`rel`) and `minRegression` (`abs`) for that metric only. */
+  readonly tolerances?: Readonly<Record<string, TestTolerance>>;
+}
+
+/** Regression tolerance of one metric: a value fails only when above `base * (1 + rel)` AND above `base + abs`. */
+export interface TestTolerance {
+  readonly rel?: number;
+  readonly abs?: number;
 }
 
 export interface TestBaselineStats {
@@ -100,6 +121,12 @@ export interface TestSuite<TSettings extends object> {
   readonly version: number;
   readonly title: string;
   readonly purpose: 'functional' | 'performance';
+  /**
+   * Performance suites: what the numbers are evidence of. Default `'gpu'`: the GPU vendor and headless-profile rules
+   * apply. `'cpu'` is for pure CPU timings (`cpuBench`): those rules are skipped, no focus watch or thumbnail runs,
+   * and every case carries the limitation that it is not GPU or hardware-profile evidence.
+   */
+  readonly evidence?: 'gpu' | 'cpu';
   readonly requiresVisualReview?: boolean;
   /**
    * Performance suites only: the GPU vendor the numbers are meant for (matched case-insensitively against the recorded
@@ -150,6 +177,12 @@ export interface TestMetric {
    * Invalid (non-finite) samples still do.
    */
   readonly optional?: boolean;
+  /**
+   * Metrics of one breakdown share a `group` (for example the spans of `createSpanRecorder`). With `share` (the fraction
+   * of the group's total, 0..1) results and `triangular-test-summary` print them as a table sorted by share.
+   */
+  readonly group?: string;
+  readonly share?: number;
   /** Filled by `TestSession` from `samples` (nearest-rank percentiles); absent when there are no finite samples. */
   readonly summary?: TestMetricSummary;
 }
@@ -216,6 +249,11 @@ export interface TestContext {
 
 /** Capture is read-only. Restore must be safe after a partially applied scenario, including errors/cancel. */
 export interface TestRunAdapter<TSettings extends object, TSnapshot = unknown> {
+  /**
+   * The adapter measures pure CPU work with no render loop (see `cpuBench`, `simpleAdapter`): the session does not watch
+   * page focus, takes no thumbnail and treats the suite as `evidence: 'cpu'`. Pair it with `evidence: 'cpu'` on the suite.
+   */
+  readonly cpuOnly?: boolean;
   capture(context: TestContext): TSnapshot | Promise<TSnapshot>;
   apply(scenario: TestScenario<TSettings>, context: TestContext): void | Promise<void>;
   /** `scenario` is the one just applied, so the adapter need not remember it. */

@@ -76,6 +76,16 @@ work after partial application or cancellation. The default run timeout is 180
 seconds; restoration receives a fresh signal with a separate five-second timeout.
 Do not start uncancellable background work from an adapter.
 
+## CPU timing and breakdowns
+
+For pure CPU cost (a per-tick solver at 1-100 objects) use `cpuBench({ setup, run, counts, spans })` and
+`bench.suite(...)` with `bench.adapter`; no scene, ready gate or thumbnail, runs headless. Time sub-parts with
+`createSpanRecorder(names)` (`spans.time('name', fn)`; `metrics()` gives per-span, `unattributed` and `total` with
+`group`/`share`, which `npm run test:summary` prints as a breakdown sorted by share). CPU suites have
+`evidence: 'cpu'`: report them as CPU timings, never as GPU or hardware evidence, and compare baselines only on the same
+engine. Use `metric`, `waitFor`, `scenarioFactory`, `simpleAdapter` from the entry instead of local copies. Details:
+`docs/testing.md`, "CPU performance".
+
 ## Give the user a runnable link
 
 Create a concrete launch link instead of only saying “visit this page and test it

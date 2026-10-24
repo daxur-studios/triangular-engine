@@ -95,14 +95,16 @@ export const percentile = (sorted, p) => sorted[Math.min(sorted.length - 1, Math
 export function caseSummaries(run) {
   const out = {};
   for (const c of run.cases ?? []) {
-    const entry = out[c.scenario.id] ??= { metrics: {}, failed: [], invalid: [], samples: {} };
+    const entry = out[c.scenario.id] ??= { metrics: {}, failed: [], invalid: [], samples: {}, groups: {} };
     for (const issue of c.validityIssues ?? []) if (!entry.invalid.includes(issue)) entry.invalid.push(issue);
     if (c.window) entry.window = { stoppedBy: c.window.stoppedBy, s: round(c.window.elapsedMs / 1000), ...(c.window.drift ? { drift: c.window.drift } : {}) };
     if (c.retries) entry.retries = (entry.retries ?? 0) + c.retries;
     if (c.thumbnails?.length) (entry.thumbnails ??= []).push(...c.thumbnails);
     for (const m of c.metrics ?? []) {
       if (!m.samples?.length) continue;
-      (entry.samples[`${m.name} (${m.unit})`] ??= []).push(...m.samples.filter(Number.isFinite));
+      const key = `${m.name} (${m.unit})`;
+      (entry.samples[key] ??= []).push(...m.samples.filter(Number.isFinite));
+      if (m.group !== undefined && Number.isFinite(m.share)) (entry.groups[key] ??= { group: m.group, shares: [] }).shares.push(m.share);
     }
     for (const k of c.checks ?? []) if (!k.passed) entry.failed.push(`${k.name}${k.detail ? ` — ${k.detail}` : ''}`);
     if (c.error) entry.failed.push(`error: ${c.error}`);
@@ -115,8 +117,11 @@ export function caseSummaries(run) {
       if (!list.length) continue;
       const x = list.sort((a, b) => a - b);
       entry.metrics[name] = { n: x.length, min: round(x[0]), med: round(percentile(x, 0.5)), p95: round(percentile(x, 0.95)), max: round(x.at(-1)) };
+      const g = entry.groups[name];
+      if (g) Object.assign(entry.metrics[name], { group: g.group, share: round(g.shares.reduce((a, b) => a + b, 0) / g.shares.length) });
     }
     delete entry.samples;
+    delete entry.groups;
   }
   return out;
 }

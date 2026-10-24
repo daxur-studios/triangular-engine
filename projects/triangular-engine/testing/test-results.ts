@@ -7,6 +7,9 @@ export interface TestRunIndexMetric {
   readonly med: number;
   readonly p95: number;
   readonly max: number;
+  /** A breakdown metric (see `TestMetric.group`): its group and its mean share of the group's total, 0..1. */
+  readonly group?: string;
+  readonly share?: number;
 }
 
 /** One scenario across the run's repetitions, as the receiver writes it to `index.jsonl`. */
@@ -161,11 +164,11 @@ export function compareToBaseline(run: Pick<TestRunIndexEntry, 'cases'>, baselin
 
 export type TestChangeKind = 'none' | 'same' | 'better' | 'worse' | 'changed';
 
-/** Times (`ms`) are lower-is-better; any other unit is only reported as changed. Inside the notice band it is the same. */
+/** Times (`ms`, `µs`, `ns`) are lower-is-better; any other unit is only reported as changed. Inside the notice band it is the same. */
 export function changeKind(change: number | undefined, unit: string): TestChangeKind {
   if (change === undefined || !Number.isFinite(change)) return 'none';
   if (Math.abs(change) < CHANGE_NOTICE) return 'same';
-  if (unit !== 'ms') return 'changed';
+  if (unit !== 'ms' && unit !== 'µs' && unit !== 'ns') return 'changed';
   return change > 0 ? 'worse' : 'better';
 }
 

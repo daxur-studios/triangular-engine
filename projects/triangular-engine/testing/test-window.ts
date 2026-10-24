@@ -1,5 +1,6 @@
 import type { TestMode, TestScenario, TestSettleSeries, TestWindow } from './test-contracts';
 import { nearestRankPercentile } from './test-stats';
+import { QUICK_WARMUP_ITERATIONS } from './core/test-cpu-measure';
 
 /** Quick mode never stops before this, so a burst of identical early frames cannot end a window. */
 export const QUICK_MIN_WINDOW_MS = 1000;
@@ -15,11 +16,19 @@ export const SOAK_WINDOW_MS = 60_000;
 export const SETTLE_MEDIAN_TOLERANCE = 0.05;
 export const SETTLE_P95_TOLERANCE = 0.1;
 const POLL_MS = 100;
+/** A series is checked again only once it has grown by this factor since its last check. */
+const SETTLE_RECHECK_GROWTH = 1.1;
 
 /** The warmup a scenario gets in `mode`. */
 export function modeWarmupMs(scenario: Pick<TestScenario<object>, 'warmupMs'>, mode: TestMode): number {
   const warmup = scenario.warmupMs ?? 0;
   return mode === 'quick' ? Math.min(warmup, QUICK_WARMUP_MS) : warmup;
+}
+
+/** The untimed iterations a scenario gets in `mode` (`warmupIterations`, cut in quick mode). */
+export function modeWarmupIterations(scenario: Pick<TestScenario<object>, 'warmupIterations'>, mode: TestMode): number {
+  const iterations = scenario.warmupIterations ?? 0;
+  return mode === 'quick' ? Math.min(iterations, QUICK_WARMUP_ITERATIONS) : iterations;
 }
 
 /** The longest window a scenario gets in `mode`. */
@@ -70,6 +79,31 @@ export function seriesDrift(samples: readonly number[]): number | null {
   return first === 0 ? null : (last - first) / Math.abs(first);
 }
 
+/**
+ * Settle check for growing series that costs little however long the window is: a series is re-evaluated (a copy and
+ * three sorts, see `seriesSettled`) only after it has grown by 10 % since its last check, and the last answer stands in
+ * between. Polling every 100 ms over tens of thousands of samples then costs a handful of evaluations, not hundreds.
+ */
+export function createSettleChecker(): {
+  settled(item: Pick<TestSettleSeries, 'samples' | 'resolution'>, key?: string): boolean; readonly evaluations: number;
+} {
+  const last = new Map<string, { length: number; settled: boolean }>();
+  let evaluations = 0;
+  return {
+    get evaluations() { return evaluations; },
+    settled(item, key = '') {
+      const samples = item.samples();
+      const seen = last.get(key);
+      if (samples.length < QUICK_MIN_SAMPLES) return false;
+      if (seen && samples.length < seen.length * SETTLE_RECHECK_GROWTH) return seen.settled;
+      evaluations++;
+      const settled = seriesSettled(samples, item.resolution);
+      last.set(key, { length: samples.length, settled });
+      return settled;
+    },
+  };
+}
+
 function counts(series: readonly TestSettleSeries[]): Record<string, number> {
   return Object.fromEntries(series.map((item) => [item.name, item.samples().filter(Number.isFinite).length]));
 }
@@ -95,8 +129,9 @@ export async function runMeasureWindow(
     return { mode, elapsedMs: elapsed(), stoppedBy: 'fixed' };
   }
   const maxMs = modeWindowMs(scenario, mode);
+  const checker = createSettleChecker();
   while (elapsed() < maxMs) {
-    if (elapsed() >= QUICK_MIN_WINDOW_MS && series.every((item) => seriesSettled(item.samples(), item.resolution))) {
+    if (elapsed() >= QUICK_MIN_WINDOW_MS && series.every((item) => checker.settled(item, item.name))) {
       return { mode, elapsedMs: elapsed(), stoppedBy: 'settled', samples: counts(series) };
     }
     await wait(Math.min(POLL_MS, Math.max(1, maxMs - elapsed())));

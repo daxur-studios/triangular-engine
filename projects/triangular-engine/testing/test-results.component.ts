@@ -4,7 +4,7 @@ import { DEFAULT_TEST_SINK_PATH, digestTestRun } from './test-runner.component';
 import {
   baselineCandidates, changeKind, compareToBaseline, defaultBaseline, filterRuns, formatChange, formatMetricValue, formatRunDate, imageUrl,
   indexUrl, metricKeys, pairCases, parseTestRunIndex, resultUrl, runCounts, runFilterOptions, runGpu, runKey, runMode, runTime, splitMetricKey,
-  thumbnailFrames, type TestChangeKind, type TestRunFilter, type TestRunIndexCase, type TestRunIndexEntry,
+  thumbnailFrames, type TestChangeKind, type TestRunFilter, type TestRunIndexCase, type TestRunIndexEntry, type TestRunIndexMetric,
 } from './test-results';
 import { TestThumbnailComponent } from './test-thumbnail.component';
 
@@ -22,6 +22,9 @@ export interface TestMetricCell {
   readonly median: number;
   readonly p95: number;
   readonly samples: number;
+  /** A breakdown metric: its group and share of the group's total (0..1), shown as a percentage. */
+  readonly group?: string;
+  readonly share?: number;
   readonly changeText: string;
   readonly kind: TestChangeKind;
   readonly baselineText: string;
@@ -47,6 +50,12 @@ export interface TestCompareRow {
   readonly b?: { readonly frames: readonly string[]; readonly median?: number; readonly p95?: number };
   readonly deltaText: string;
   readonly kind: TestChangeKind;
+}
+
+/** Plain metrics keep their order; grouped (breakdown) metrics follow, largest share first. */
+function breakdownOrder<T extends [string, TestRunIndexMetric]>(entries: T[]): T[] {
+  return [...entries.filter(([, m]) => m.group === undefined),
+    ...entries.filter(([, m]) => m.group !== undefined).sort(([, a], [, b]) => (b.share ?? 0) - (a.share ?? 0))];
 }
 
 type View = 'list' | 'run' | 'compare';
@@ -204,7 +213,10 @@ export class TestResultsComponent {
   visibleMetrics(row: TestCaseRow): readonly TestMetricCell[] {
     const text = this.metricFilter().trim().toLowerCase();
     const matching = text ? row.metrics.filter((cell) => cell.key.toLowerCase().includes(text)) : row.metrics;
-    return this.allMetrics() || text ? matching : matching.slice(0, DEFAULT_METRICS);
+    if (this.allMetrics() || text) return matching;
+    // A breakdown (grouped metrics) is the point of its case, so it is never cut off.
+    const plain = matching.filter((cell) => cell.group === undefined).slice(0, DEFAULT_METRICS);
+    return [...plain, ...matching.filter((cell) => cell.group !== undefined)];
   }
 
   tone(value: string): string {
@@ -246,12 +258,13 @@ export class TestResultsComponent {
       notes: this.caseNotes(item),
       failed: item.failed,
       invalid: item.invalid,
-      metrics: Object.entries(item.metrics).map(([key, metric]): TestMetricCell => {
+      metrics: breakdownOrder(Object.entries(item.metrics)).map(([key, metric]): TestMetricCell => {
         const { name, unit } = splitMetricKey(key);
         const change = changes[id]?.[key];
         const target = targets[key];
         return {
           key, name, unit, median: metric.med, p95: metric.p95, samples: metric.n,
+          ...(metric.group !== undefined ? { group: metric.group, share: metric.share } : {}),
           changeText: baseline ? formatChange(change?.change) : '', kind: baseline ? changeKind(change?.change, unit) : 'none',
           baselineText: change ? `baseline median ${formatMetricValue(change.baseMedian)}, p95 ${formatMetricValue(change.baseP95)} ${unit}` : 'not in the baseline',
           ...(target ? { targetRatio: metric.med / target, targetText: `target ${formatMetricValue(target)} ${unit}` } : {}),

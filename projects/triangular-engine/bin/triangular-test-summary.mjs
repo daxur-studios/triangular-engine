@@ -46,6 +46,26 @@ function windowText(s) {
 const metricText = (name, s) => (s.min === s.max ? `${name} = ${fmt(s.max)}` : `${name} med ${fmt(s.med)} p95 ${fmt(s.p95)} max ${fmt(s.max)}`);
 
 /**
+ * Metrics that carry a `group` (a span breakdown) as a table sorted by share, largest first: share, median, p95. Rows
+ * are `    <group>: name  42.1%  med 12.3 p95 14.0`. Empty when no metric has a group.
+ */
+export function breakdownLines(metrics, filter) {
+  const groups = new Map();
+  for (const [key, v] of Object.entries(metrics)) {
+    if (v.group === undefined || (filter && !key.includes(filter))) continue;
+    groups.set(v.group, [...(groups.get(v.group) ?? []), [key, v]]);
+  }
+  const lines = [];
+  for (const [group, rows] of groups) {
+    rows.sort((a, b) => (b[1].share ?? 0) - (a[1].share ?? 0));
+    const width = Math.max(...rows.map(([key]) => key.length));
+    lines.push(`    breakdown ${group}:`);
+    for (const [key, v] of rows) lines.push(`      ${key.padEnd(width)}  ${(((v.share ?? 0) * 100).toFixed(1) + '%').padStart(6)}  med ${fmt(v.med)} p95 ${fmt(v.p95)}`);
+  }
+  return lines;
+}
+
+/**
  * Index lines written since summaries were added carry `cases`, so no result file is opened. Older lines fall back
  * to reading their file. `metric` keeps only metrics whose name contains that text.
  */
@@ -70,8 +90,9 @@ export function summarize(rows, readRun, currentHash, { suite, last = 5, metric 
         ablations = ablationSummaries(run);
       }
       for (const [id, s] of Object.entries(cases)) {
-        const m = Object.entries(s.metrics).filter(([name]) => !metric || name.includes(metric)).map(([name, v]) => metricText(name, v));
+        const m = Object.entries(s.metrics).filter(([name, v]) => v.group === undefined && (!metric || name.includes(metric))).map(([name, v]) => metricText(name, v));
         lines.push(`  ${id}${windowText(s)}: ${m.join(' | ') || 'no metrics'}`);
+        lines.push(...breakdownLines(s.metrics, metric));
         for (const f of s.failed) lines.push(`    FAIL ${f}`);
         // A validity issue (wrong GPU, lost focus, software renderer) means these timings are not hardware numbers.
         for (const i of s.invalid ?? []) lines.push(`    INVALID ${i}`);

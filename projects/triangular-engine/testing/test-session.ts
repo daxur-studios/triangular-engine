@@ -9,8 +9,12 @@ import { summarizeTestSamples } from './test-stats';
 import { assessPerformance } from './test-performance';
 import { modeWarmupMs, modeWindowMs, runMeasureWindow } from './test-window';
 import { keepThumbnails, THUMBNAIL_TIMEOUT_MS } from './test-thumbnails';
+import { describeJsEngine } from './core/test-timer';
 
 export { nearestRankPercentile, summarizeTestSamples } from './test-stats';
+
+/** Added to every case of a CPU-evidence suite, so no reader mistakes it for a GPU or hardware-profile number. */
+export const CPU_ONLY_LIMITATION = 'CPU-only timing (suite evidence "cpu"): the GPU and hardware-profile checks were skipped; this is not GPU or hardware evidence';
 
 /** Includes warm-up and cleanup; a lost render loop must not leave an indefinitely running UI. Paused time is not counted. */
 const DEFAULT_RUN_TIMEOUT_MS = 180_000;
@@ -130,7 +134,9 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
     const environment: Record<string, TestSetting> = {};
     const doc = typeof document === 'undefined' ? undefined : document;
     const win = doc?.defaultView;
-    const watchFocus = options.profile !== 'headless-hardware' && !!doc;
+    // A CPU-only suite or adapter has no render loop to protect: no focus watch, thumbnail or GPU validity rule.
+    const cpuOnly = suite.evidence === 'cpu' || adapter.cpuOnly === true;
+    const watchFocus = options.profile !== 'headless-hardware' && !!doc && !cpuOnly;
     const context = (signal: AbortSignal, repetition: number, onWindow?: (measured: TestWindow) => void): TestContext => ({
       signal, profile: options.profile, mode, repetition, wait: (ms) => waitForTest(ms, signal),
       measureWindow: async (scenario, series = []) => {
@@ -188,6 +194,8 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
         viewport: win ? `${win.innerWidth}x${win.innerHeight}` : 'unavailable',
         devicePixelRatio: win?.devicePixelRatio ?? null,
         buildFingerprint: 'unknown',
+        jsEngine: describeJsEngine(),
+        ...(cpuOnly ? { evidence: 'cpu-only' } : {}),
       }, adapter.environment?.());
       progress('preparing');
       // The receiver's slow preflight (power, other processes) runs now, not inside the first measurement. It overlaps
@@ -232,8 +240,10 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
               const ctx = context(attempt.signal, repetition, (value) => { caseWindow = value; });
               progress('applying', repetition, scenario, retry);
               await abortable(() => adapter.apply(scenario, ctx), attempt.signal);
-              progress('ready', repetition, scenario, retry);
-              await abortable(() => adapter.ready(ctx, scenario), attempt.signal);
+              if (!cpuOnly) {
+                progress('ready', repetition, scenario, retry);
+                await abortable(() => adapter.ready(ctx, scenario), attempt.signal);
+              }
               // A page someone was looking at earlier in this run waits here for them, without spending a retry. A page
               // that was never visible and focused (a headless or background run) is not waited for: the loss is
               // recorded instead, as it is on the last attempt.
@@ -255,17 +265,17 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
               // The attempt is kept. Whatever the thumbnail costs must stay outside the timing, the focus watch and the
               // machine block, so those are closed first.
               const thumbnailNotes: string[] = [];
-              if (options.thumbnails !== false && options.onThumbnails && adapter.thumbnail) {
+              if (!cpuOnly && options.thumbnails !== false && options.onThumbnails && adapter.thumbnail) {
                 stopObserving();
                 stopMachine();
                 thumbnailNotes.push(...await takeThumbnails(scenario, repetition));
               }
               if (suite.purpose === 'performance') for (const issue of observation.validityIssues ?? []) validityIssues.add(issue);
-              if (suite.purpose === 'performance') {
+              if (suite.purpose === 'performance' && !cpuOnly) {
                 const gpuIssue = gpuVendorIssue(suite.expectedGpuVendor, environment);
                 if (gpuIssue) validityIssues.add(gpuIssue);
               }
-              if (options.profile === 'headless-hardware' && suite.purpose === 'performance') {
+              if (options.profile === 'headless-hardware' && suite.purpose === 'performance' && !cpuOnly) {
                 validityIssues.add('Headless hardware/power profile was not independently verified');
               }
               if (suite.purpose === 'performance' && (!observation.metrics.some((metric) => !metric.optional) ||
@@ -276,7 +286,7 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
               const checks = observation.checks ?? [];
               const caseFailed = checks.some((check) => !check.passed);
               cases.push({ scenario, repetition, status: caseFailed ? 'failed' : 'completed', metrics: observation.metrics.map(withSummary),
-                checks, validityIssues: [...validityIssues], limitations: [...(observation.limitations ?? []), ...thumbnailNotes], details: observation.details,
+                checks, validityIssues: [...validityIssues], limitations: [...(observation.limitations ?? []), ...(cpuOnly && suite.purpose === 'performance' ? [CPU_ONLY_LIMITATION] : []), ...thumbnailNotes], details: observation.details,
                 ...(caseWindow ? { window: caseWindow } : {}), ...(retry ? { retries: retry } : {}) });
               if (caseFailed) { failed = true; throw new Error(`Checks failed: ${scenario.id}`); }
               break;

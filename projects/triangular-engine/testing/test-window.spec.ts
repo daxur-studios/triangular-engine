@@ -1,6 +1,6 @@
 import type { TestSettleSeries } from './test-contracts';
 import {
-  modeActionMs, modeWarmupMs, modeWindowMs, QUICK_MIN_WINDOW_MS, QUICK_WARMUP_MS, QUICK_WINDOW_MS, runMeasureWindow, seriesDrift, seriesSettled,
+  createSettleChecker, modeActionMs, modeWarmupIterations, modeWarmupMs, QUICK_WARMUP_ITERATIONS, modeWindowMs, QUICK_MIN_WINDOW_MS, QUICK_WARMUP_MS, QUICK_WINDOW_MS, runMeasureWindow, seriesDrift, seriesSettled,
   SOAK_WINDOW_MS,
 } from './test-window';
 
@@ -86,5 +86,37 @@ describe('test measurement window', () => {
     expect(capped).toEqual(jasmine.objectContaining({ stoppedBy: 'max', elapsedMs: 1500 }));
     const standard = clock(() => 1);
     expect((await runMeasureWindow(scenario, 'standard', [], standard.wait, standard.now)).elapsedMs).toBe(8000);
+  });
+});
+
+describe('modeWarmupIterations', () => {
+  it('keeps the count, and cuts it in quick mode', () => {
+    expect(modeWarmupIterations({}, 'standard')).toBe(0);
+    expect(modeWarmupIterations({ warmupIterations: 50 }, 'standard')).toBe(50);
+    expect(modeWarmupIterations({ warmupIterations: 50 }, 'quick')).toBe(QUICK_WARMUP_ITERATIONS);
+    expect(modeWarmupIterations({ warmupIterations: 2 }, 'quick')).toBe(2);
+  });
+});
+
+describe('createSettleChecker', () => {
+  it('re-evaluates a growing series only after it grew by 10 %', () => {
+    const checker = createSettleChecker();
+    const samples: number[] = [];
+    for (let i = 0; i < 20_000; i++) {
+      samples.push(1 + (i % 2) * 0.001);
+      checker.settled({ samples: () => samples, resolution: 0.01 }, 'a');
+    }
+    // One poll per sample would be 20 000 evaluations; geometric growth needs about a hundred.
+    expect(checker.evaluations).toBeLessThan(120);
+    expect(checker.settled({ samples: () => samples, resolution: 0.01 }, 'a')).toBeTrue();
+  });
+
+  it('answers false below the minimum and keeps series apart', () => {
+    const checker = createSettleChecker();
+    const flat = Array.from({ length: 100 }, () => 1);
+    const ramp = Array.from({ length: 100 }, (_, i) => i);
+    expect(checker.settled({ samples: () => flat.slice(0, 10) }, 'a')).toBeFalse();
+    expect(checker.settled({ samples: () => flat }, 'a')).toBeTrue();
+    expect(checker.settled({ samples: () => ramp }, 'b')).toBeFalse();
   });
 });

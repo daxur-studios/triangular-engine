@@ -109,6 +109,10 @@ otherwise `durationMs`) and gives its motion scenarios a `quickMs`. Without one,
 await runSweep(scenario, modeActionMs(scenario, context.mode), context);
 ```
 
+`TestScenario.warmupIterations` is the untimed-call counterpart of `warmupMs` for adapters that count iterations
+(`modeWarmupIterations`, at most `QUICK_WARMUP_ITERATIONS` in quick mode). The settle check re-evaluates a series only after
+it grew by 10 %, so long windows cost little.
+
 A series has settled when the first and second half of its samples agree on the median within 5% and on the p95
 within 10%, or within its `resolution` (its timer step; a 0.1 ms timer cannot settle a 0.3 ms median to 5%). Soak
 reports `drift`: the change of each series' median from the first to the last quarter. The case keeps the window
@@ -210,7 +214,8 @@ reads only `index.jsonl`; it opens a result file just for lines written before c
 summaries existed. Open a full JSON only for a failing case.
 
 **Caveat.** Headless or software-rendered (SwiftShader) runs give GPU timings that are
-not real hardware numbers; use visible-tab runs on the target machine for performance. See
+not real hardware numbers; use visible-tab runs on the target machine for performance (pure CPU suites are the
+exception, see [CPU performance](#cpu-performance-spans-and-micro-benches)). See
 [Machine context](#machine-context-dev-only) for the recorded adapter and machine state.
 
 ## Case thumbnails
@@ -307,8 +312,9 @@ const suite: TestSuite<Settings> = {
 - **Baseline.** `TestSuite.baseline`: `{ runId, recordedAt, mode, gpu?, cases: { scenarioId: { metric: { median, p95 } } } }`.
   Only metrics listed there are compared, for both median and p95. A value regresses only when it is above
   `base * (1 + maxRegression)` **and** above `base + minRegression`: GPU passes here take about 0.1 ms, where a
-  percentage alone is noise. Defaults: `maxRegression` 0.10, `minRegression` 0.05 (the metric's unit, ms here); set
-  either on the baseline. Getting faster never fails.
+  percentage alone is noise. Defaults: `maxRegression` 0.10, `minRegression` 0.05 for `ms` metrics and 0 for any other
+  unit (`defaultMinRegression(unit)`); set either on the baseline, or per metric with `tolerances: { name: { rel?, abs? } }`
+  (`npm run test:baseline '--' file --tolerance timeUs=0.15,2`). Getting faster never fails.
 - **Same mode only.** A baseline is compared only with a run of its own `mode`. Otherwise it is skipped, with a note in
   `performanceNotes` (budgets still apply). A run on a different GPU description than `baseline.gpu` also gets a note.
 - **Why.** Every case with checks has `performanceChecks`: `{ metric, statistic, kind: 'budget' | 'baseline', limit,
@@ -519,6 +525,62 @@ scenarios: [
   // ... three or more rounds per arm
 ],
 ```
+
+## CPU performance: spans and micro-benches
+
+For pure CPU work (a per-tick solver, a mesher) there is no scene to wait for. `triangular-engine/testing/core` has
+no Angular and imports in Node; `triangular-engine/testing` re-exports it.
+
+**Named spans.** `createSpanRecorder(names, { unit?: 'ms' | 'µs', capacity?, group? })` preallocates its buffers and
+measures its own begin/end cost at creation, then removes it from each span and from the total.
+
+```ts
+const spans = createSpanRecorder(['broadphase', 'solve', 'integrate'], { unit: 'µs' });
+spans.beginRound();
+spans.time('solve', () => solve(state));          // or spans.begin('x') ... spans.end('x')
+spans.endRound();                                  // endRound(n) after a batch of n runs: values per iteration
+return { metrics: spans.metrics() };               // one metric per span + unattributed + total
+```
+
+Each metric has `group` and `share` (its fraction of all rounds' total; `total` is 1; `unattributed` is time outside
+every span). Results and `npm run test:summary` print a `breakdown <group>:` table sorted by share; the results page
+lists grouped metrics last, largest share first, and never hides them. A span near the timer step (`describeTimer()`)
+is noise: time a batch round instead.
+
+**CPU benches.** `cpuBench({ setup(n), run(fixture, n, spans?), counts, spans?, warmupIterations?, batchTargetMs?,
+minSamples?, maxSamples?, durationMs?, quickMs?, teardown? })` returns `{ scenarios, adapter, suite(meta, extra?) }`.
+
+```ts
+const bench = cpuBench({ counts: [1, 10, 100], spans: ['drag', 'solve'], setup: (n) => makeVessels(n),
+  run: (vessels, n, spans) => { for (const v of vessels) { spans!.time('drag', () => drag(v)); spans!.time('solve', () => solve(v)); } } });
+export const suite = bench.suite({ id: 'aero-cpu', version: 1, title: 'Aero CPU cost' });   // adapter: bench.adapter
+```
+
+- **Not frame-paced.** No ready gate, scene or thumbnail. Per count it warms up (`warmupIterations`, default 3, cut in
+  quick mode), grows a batch until one sample lasts at least `batchTargetMs` (default 1 ms; at least ten timer steps),
+  then samples until `minSamples` (30) and the mode's window are met (`maxSamples` 1000; soak is uncapped). It yields
+  between samples, so Cancel works.
+- **Metrics.** `timeUs` (µs per iteration), `usPerUnit` (`timeUs / n`; flat across counts means linear), plus the
+  span breakdown. Raw samples are kept. `details.outliers` counts IQR (Tukey 1.5) outliers; over 10 % adds a
+  limitation. `details.scalingExponent` on the later counts is the log-log slope of the median against `n` so far.
+- **CPU evidence.** The suite has `evidence: 'cpu'` and the adapter `cpuOnly: true`: the GPU vendor and
+  headless-profile rules, the focus watch and thumbnails are skipped, so it runs headless and a run is not
+  `inconclusive` for that reason. Every case carries `CPU_ONLY_LIMITATION` and `environment.evidence` is `cpu-only`:
+  never quote it as GPU or hardware-profile evidence. Any suite can set `evidence: 'cpu'` (with an adapter that has
+  `cpuOnly: true`) for its own CPU timing.
+- **Pieces.** `measureCpuCase`, `iqrOutliers`, `scalingExponent`, `yieldToEventLoop` are exported for your own loop.
+
+**Helpers** (replace per-file copies): `metric(name, unit, source, samples, extra?)`, `timeMetric(name, source,
+samples)`, `waitFor(context, test, pollMs?)`, `onFrames(host, cb)` and `waitRenderedFrames(host, context, n)` (host:
+anything with `engine.beforeRender$`), `timedWindow(host, scenario, context, step, { evalsPerFrame?, series?,
+resolutionUs? })` (µs of `step` per frame under `measureWindow`), `scenarioFactory(defaults)` →
+`make(id, label, settingsOverrides?, extra?)`, `simpleAdapter({ measure, ...optional parts })` and `describeTimer()`
+(`{ resolutionMs, source }`; put it in `environment()`).
+
+**Engines and Node.** Every run records `environment.jsEngine` (`describeJsEngine()`: `node 22.1.0 ...`, `chrome 130.0`)
+and `baselineFromRun` copies it. A baseline whose `jsEngine` is another family is not compared (a note, like another
+mode); CPU timings do not transfer between engines. The core functions run under Node; `TestSession`, the runner and
+the receiver upload still need the Angular entry.
 
 ## GPU time per pass
 
