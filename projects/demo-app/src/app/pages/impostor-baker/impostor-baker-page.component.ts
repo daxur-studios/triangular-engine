@@ -1,5 +1,14 @@
 import { DecimalPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  computed,
+  inject,
+  isDevMode,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
   BufferGeometry,
@@ -19,6 +28,18 @@ import {
 } from 'three';
 import { EngineModule, EngineService } from 'triangular-engine';
 import { browserImageCompression } from 'triangular-engine/image-compression';
+import {
+  TestRunnerComponent,
+  describeRendererGpu,
+  waitRenderedFrames,
+  type TestCheck,
+  type TestContext,
+  type TestMetric,
+  type TestObservation,
+  type TestProgress,
+  type TestRunAdapter,
+  type TestSetting,
+} from 'triangular-engine/testing';
 import {
   buildFloraMesh,
   FLORA_OAK_ARCHETYPE,
@@ -42,6 +63,14 @@ import {
   type IOctahedralImpostorMaterialHandle,
   type OctahedralImpostorType,
 } from 'triangular-engine/impostor';
+import {
+  createImpostorBakerTestAdapter,
+  type ImpostorBakeTimings,
+} from './impostor-baker-test-adapter';
+import {
+  IMPOSTOR_BAKER_TEST_HISTORY,
+  type ImpostorBakerTestSettings,
+} from './impostor-baker-tests';
 
 export type TreeSpeciesKey = 'oak' | 'pine' | 'palm';
 
@@ -85,6 +114,21 @@ const FOREST_SCALE_RANGE: readonly [number, number] = [0.75, 1.35];
 /** Directional light is aimed at the world origin regardless of distance — only its direction from that point matters for lighting. */
 const SUN_DISTANCE_M = 30;
 
+interface OrbitControlsRef {
+  orbitControls(): { enabled: boolean } | undefined;
+}
+
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 /**
  * Proves out `triangular-engine/impostor` end to end: bakes a hemispherical or
  * spherical octahedral atlas from a procedural tree (Oak, Pine, Palm), renders one
@@ -93,13 +137,25 @@ const SUN_DISTANCE_M = 30;
  */
 @Component({
   selector: 'app-impostor-baker-page',
-  imports: [RouterLink, EngineModule, DecimalPipe],
+  imports: [RouterLink, EngineModule, DecimalPipe, TestRunnerComponent],
   templateUrl: './impostor-baker-page.component.html',
   styleUrl: './impostor-baker-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [EngineService.provide({ showFPS: true })],
+  host: { '[class.test-running]': 'runnerBusy()' },
 })
 export class ImpostorBakerPageComponent {
+  readonly testHistory = IMPOSTOR_BAKER_TEST_HISTORY;
+  readonly allowTestAutoStart = isDevMode();
+  readonly runnerBusy = signal(false);
+  readonly runnerReady = computed(
+    () =>
+      !!this.atlas &&
+      !!this.impostorMesh &&
+      !this.baking() &&
+      !this.compressing() &&
+      this.textureMode() === 'raw',
+  );
   readonly treeSpeciesList = TREE_SPECIES;
   readonly selectedSpeciesKey = signal<TreeSpeciesKey>('oak');
   readonly treeSeed = signal(7);
@@ -113,14 +169,18 @@ export class ImpostorBakerPageComponent {
   /** Half-extent (m) of the forest's scatter area — density is forestCount spread over this area, independent of instance count. */
   readonly forestSpreadM = signal(60);
   readonly baking = signal(false);
+  readonly lastBakeTimings = signal<ImpostorBakeTimings | null>(null);
 
   // Compression inspection state
   readonly textureMode = signal<'raw' | 'compressed'>('raw');
   readonly compressing = signal(false);
   readonly compressionQuality = signal(0.8);
-  readonly compressionFormat = signal<'image/webp' | 'image/jpeg' | 'image/png'>('image/webp');
+  readonly compressionFormat = signal<
+    'image/webp' | 'image/jpeg' | 'image/png'
+  >('image/webp');
   readonly normalDepthMode = signal<'lossless' | 'lossy'>('lossless');
-  readonly compressionStats = signal<IOctahedralImpostorCompressionStats | null>(null);
+  readonly compressionStats =
+    signal<IOctahedralImpostorCompressionStats | null>(null);
 
   /** 0 = north, 90 = east, ... — orbits the sun around the vertical axis. */
   readonly sunAzimuthDeg = signal(55);
@@ -138,7 +198,8 @@ export class ImpostorBakerPageComponent {
     ];
   });
 
-  private readonly engine = inject(EngineService);
+  readonly engine = inject(EngineService);
+  readonly orbitControlsRef = viewChild<OrbitControlsRef>('bakerOrbitControls');
   private readonly group = new Group();
   private treeSource!: Group;
 
@@ -149,8 +210,15 @@ export class ImpostorBakerPageComponent {
   private forestMesh?: InstancedMesh;
   private albedoPreviewMesh?: Mesh<PlaneGeometry, MeshBasicMaterial>;
   private normalDepthPreviewMesh?: Mesh<PlaneGeometry, MeshBasicMaterial>;
+  readonly testAdapter: TestRunAdapter<
+    ImpostorBakerTestSettings,
+    ImpostorBakerTestSettings
+  >;
+  private controlsEnabledBeforeTest = true;
 
   constructor() {
+    this.testAdapter = createImpostorBakerTestAdapter(this);
+
     const ground = new Mesh(
       new PlaneGeometry(GROUND_SIZE_M, GROUND_SIZE_M),
       new MeshStandardMaterial({ color: '#3c4a33', roughness: 1 }),
@@ -181,19 +249,26 @@ export class ImpostorBakerPageComponent {
   }
 
   private rebuildSourceTreeAndBake(): void {
+    this.replaceSourceTree();
+    this.bake();
+  }
+
+  private replaceSourceTree(): number {
+    const startedAt = performance.now();
     if (this.treeSource) {
       this.group.remove(this.treeSource);
       this.treeSource.traverse((child) => {
         if (child instanceof Mesh) {
           child.geometry?.dispose();
-          if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
+          if (Array.isArray(child.material))
+            child.material.forEach((m) => m.dispose());
           else child.material?.dispose();
         }
       });
     }
     this.treeSource = this.buildTree(this.treeSeed());
     this.group.add(this.treeSource);
-    this.bake();
+    return performance.now() - startedAt;
   }
 
   rebake(): void {
@@ -247,7 +322,10 @@ export class ImpostorBakerPageComponent {
 
   private rebuildForestIfBaked(): void {
     if (this.impostorMesh && this.materialHandle) {
-      this.rebuildForest(this.impostorMesh.geometry, this.materialHandle.material);
+      this.rebuildForest(
+        this.impostorMesh.geometry,
+        this.materialHandle.material,
+      );
     }
   }
 
@@ -300,13 +378,17 @@ export class ImpostorBakerPageComponent {
       this.compressedAtlas?.dispose();
       this.compressedAtlas = undefined;
 
-      const compressed = await compressOctahedralImpostorAtlas(renderer, this.atlas, {
-        imageCompression: browserImageCompression,
-        quality: this.compressionQuality(),
-        fileType: this.compressionFormat(),
-        normalDepthMode: this.normalDepthMode(),
-        maxSizeMB: 2,
-      });
+      const compressed = await compressOctahedralImpostorAtlas(
+        renderer,
+        this.atlas,
+        {
+          imageCompression: browserImageCompression,
+          quality: this.compressionQuality(),
+          fileType: this.compressionFormat(),
+          normalDepthMode: this.normalDepthMode(),
+          maxSizeMB: 2,
+        },
+      );
 
       this.compressedAtlas = compressed;
       this.compressionStats.set(compressed.stats);
@@ -322,23 +404,44 @@ export class ImpostorBakerPageComponent {
   }
 
   downloadAlbedo(): void {
-    this.downloadAtlasTexture('albedo', `octahedral-${this.selectedSpeciesKey()}-albedo`);
+    this.downloadAtlasTexture(
+      'albedo',
+      `octahedral-${this.selectedSpeciesKey()}-albedo`,
+    );
   }
 
   downloadNormalDepth(): void {
-    this.downloadAtlasTexture('normalDepth', `octahedral-${this.selectedSpeciesKey()}-normal-depth`);
+    this.downloadAtlasTexture(
+      'normalDepth',
+      `octahedral-${this.selectedSpeciesKey()}-normal-depth`,
+    );
   }
 
   downloadCompressedAlbedo(): void {
     if (!this.compressedAtlas) return;
-    const ext = this.compressionFormat() === 'image/webp' ? 'webp' : this.compressionFormat() === 'image/jpeg' ? 'jpg' : 'png';
-    this.downloadBlob(this.compressedAtlas.albedoBlob, `octahedral-${this.selectedSpeciesKey()}-albedo-compressed.${ext}`);
+    const ext =
+      this.compressionFormat() === 'image/webp'
+        ? 'webp'
+        : this.compressionFormat() === 'image/jpeg'
+          ? 'jpg'
+          : 'png';
+    this.downloadBlob(
+      this.compressedAtlas.albedoBlob,
+      `octahedral-${this.selectedSpeciesKey()}-albedo-compressed.${ext}`,
+    );
   }
 
   downloadCompressedNormalDepth(): void {
     if (!this.compressedAtlas) return;
-    const ext = this.normalDepthMode() === 'lossy' && this.compressionFormat() === 'image/webp' ? 'webp' : 'png';
-    this.downloadBlob(this.compressedAtlas.normalDepthBlob, `octahedral-${this.selectedSpeciesKey()}-normal-depth-compressed.${ext}`);
+    const ext =
+      this.normalDepthMode() === 'lossy' &&
+      this.compressionFormat() === 'image/webp'
+        ? 'webp'
+        : 'png';
+    this.downloadBlob(
+      this.compressedAtlas.normalDepthBlob,
+      `octahedral-${this.selectedSpeciesKey()}-normal-depth-compressed.${ext}`,
+    );
   }
 
   private downloadBlob(blob: Blob, filename: string): void {
@@ -350,7 +453,10 @@ export class ImpostorBakerPageComponent {
     URL.revokeObjectURL(url);
   }
 
-  private downloadAtlasTexture(which: 'albedo' | 'normalDepth', fileName: string): void {
+  private downloadAtlasTexture(
+    which: 'albedo' | 'normalDepth',
+    fileName: string,
+  ): void {
     const renderer = this.engine.renderer;
     if (!this.atlas || !(renderer instanceof WebGLRenderer)) return;
     exportOctahedralImpostorAtlas(renderer, this.atlas, which, fileName);
@@ -359,9 +465,14 @@ export class ImpostorBakerPageComponent {
   private applyActiveTextures(): void {
     if (!this.atlas || !this.materialHandle) return;
 
-    const useCompressed = this.textureMode() === 'compressed' && !!this.compressedAtlas;
-    const albedo = useCompressed ? this.compressedAtlas!.albedo : this.atlas.albedo;
-    const normalDepth = useCompressed ? this.compressedAtlas!.normalDepth : this.atlas.normalDepth;
+    const useCompressed =
+      this.textureMode() === 'compressed' && !!this.compressedAtlas;
+    const albedo = useCompressed
+      ? this.compressedAtlas!.albedo
+      : this.atlas.albedo;
+    const normalDepth = useCompressed
+      ? this.compressedAtlas!.normalDepth
+      : this.atlas.normalDepth;
 
     const mat = this.materialHandle.material as unknown as {
       map: Texture | null;
@@ -382,64 +493,108 @@ export class ImpostorBakerPageComponent {
     }
   }
 
-  private bake(): void {
+  private bake(
+    options: {
+      readonly autoCompress?: boolean;
+      readonly preserveCompressedAtlas?: boolean;
+    } = {},
+  ): void {
     const renderer = this.engine.renderer;
     if (!(renderer instanceof WebGLRenderer)) {
-      console.warn('[impostor-baker] Octahedral impostor baking requires a WebGL renderer.');
+      console.warn(
+        '[impostor-baker] Octahedral impostor baking requires a WebGL renderer.',
+      );
       return;
     }
 
+    const startedAt = performance.now();
+    const timings: { -readonly [K in keyof ImpostorBakeTimings]: number } = {
+      cleanupMs: 0,
+      updateSourceMs: 0,
+      atlasBakeMs: 0,
+      impostorBuildMs: 0,
+      previewBuildMs: 0,
+      forestBuildMs: 0,
+      totalMs: 0,
+    };
     this.baking.set(true);
-    this.disposeBaked();
+    try {
+      let stageStart = performance.now();
+      this.disposeBaked({
+        preserveCompressedAtlas: options.preserveCompressedAtlas,
+      });
+      timings.cleanupMs = performance.now() - stageStart;
 
-    this.treeSource.updateMatrixWorld(true);
+      stageStart = performance.now();
+      this.treeSource.updateMatrixWorld(true);
+      timings.updateSourceMs = performance.now() - stageStart;
 
-    const atlas = createOctahedralImpostorAtlas({
-      renderer,
-      target: this.treeSource,
-      textureSize: this.textureSizePx(),
-      spritesPerSide: this.spritesPerSide(),
-      type: this.impostorType(),
-    });
-    this.atlas = atlas;
+      stageStart = performance.now();
+      const atlas = createOctahedralImpostorAtlas({
+        renderer,
+        target: this.treeSource,
+        textureSize: this.textureSizePx(),
+        spritesPerSide: this.spritesPerSide(),
+        type: this.impostorType(),
+      });
+      timings.atlasBakeMs = performance.now() - stageStart;
+      this.atlas = atlas;
 
-    const { mesh, materialHandle } = buildOctahedralImpostorMesh({
-      target: this.treeSource,
-      baseType: MeshStandardMaterial,
-      albedo: atlas.albedo,
-      normalDepth: atlas.normalDepth,
-      spritesPerSide: this.spritesPerSide(),
-      alphaClamp: this.alphaClamp(),
-      transparent: this.transparent(),
-      type: this.impostorType(),
-    });
-    mesh.position.copy(IMPOSTOR_COMPARISON_POSITION);
-    this.group.add(mesh);
-    this.impostorMesh = mesh;
-    this.materialHandle = materialHandle;
+      stageStart = performance.now();
+      const { mesh, materialHandle } = buildOctahedralImpostorMesh({
+        target: this.treeSource,
+        baseType: MeshStandardMaterial,
+        albedo: atlas.albedo,
+        normalDepth: atlas.normalDepth,
+        spritesPerSide: this.spritesPerSide(),
+        alphaClamp: this.alphaClamp(),
+        transparent: this.transparent(),
+        type: this.impostorType(),
+      });
+      mesh.position.copy(IMPOSTOR_COMPARISON_POSITION);
+      this.group.add(mesh);
+      this.impostorMesh = mesh;
+      this.materialHandle = materialHandle;
+      timings.impostorBuildMs = performance.now() - stageStart;
 
-    this.buildAtlasPreview(atlas);
-    this.rebuildForest(mesh.geometry, materialHandle.material);
+      stageStart = performance.now();
+      this.buildAtlasPreview(atlas);
+      timings.previewBuildMs = performance.now() - stageStart;
 
-    this.baking.set(false);
+      stageStart = performance.now();
+      this.rebuildForest(mesh.geometry, materialHandle.material);
+      timings.forestBuildMs = performance.now() - stageStart;
+      timings.totalMs = performance.now() - startedAt;
+      this.lastBakeTimings.set(timings);
+    } finally {
+      this.baking.set(false);
+    }
 
-    if (this.textureMode() === 'compressed') {
-      this.compressAtlas();
+    if (options.autoCompress !== false && this.textureMode() === 'compressed') {
+      void this.compressAtlas();
     }
   }
 
   private buildTree(seed: number): Group {
     const group = new Group();
-    const option = TREE_SPECIES.find((s) => s.key === this.selectedSpeciesKey()) ?? TREE_SPECIES[0];
+    const option =
+      TREE_SPECIES.find((s) => s.key === this.selectedSpeciesKey()) ??
+      TREE_SPECIES[0];
     const skeleton = generateFloraSkeleton(option.archetype, seed);
     const { geometry } = buildFloraMesh(skeleton, option.archetype);
     this.colorizeByWindWeight(geometry, option.colors);
-    const mesh = new Mesh(geometry, new MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
+    const mesh = new Mesh(
+      geometry,
+      new MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }),
+    );
     group.add(mesh);
     return group;
   }
 
-  private colorizeByWindWeight(geometry: BufferGeometry, colors: IFloraSpeciesColorHints): void {
+  private colorizeByWindWeight(
+    geometry: BufferGeometry,
+    colors: IFloraSpeciesColorHints,
+  ): void {
     const windWeight = geometry.getAttribute('windWeight');
     const colorsArray = new Float32Array(windWeight.count * 3);
     const trunkColor = new Color(colors.trunkHex);
@@ -459,7 +614,9 @@ export class ImpostorBakerPageComponent {
       new PlaneGeometry(ATLAS_PREVIEW_SIZE_M, ATLAS_PREVIEW_SIZE_M),
       new MeshBasicMaterial({ map: atlas.albedo, transparent: true }),
     );
-    albedoMesh.position.copy(ATLAS_PREVIEW_POSITION).setX(ATLAS_PREVIEW_POSITION.x - ATLAS_PREVIEW_SIZE_M * 0.6);
+    albedoMesh.position
+      .copy(ATLAS_PREVIEW_POSITION)
+      .setX(ATLAS_PREVIEW_POSITION.x - ATLAS_PREVIEW_SIZE_M * 0.6);
     this.group.add(albedoMesh);
     this.albedoPreviewMesh = albedoMesh;
 
@@ -467,13 +624,18 @@ export class ImpostorBakerPageComponent {
       new PlaneGeometry(ATLAS_PREVIEW_SIZE_M, ATLAS_PREVIEW_SIZE_M),
       new MeshBasicMaterial({ map: atlas.normalDepth }),
     );
-    normalDepthMesh.position.copy(ATLAS_PREVIEW_POSITION).setX(ATLAS_PREVIEW_POSITION.x + ATLAS_PREVIEW_SIZE_M * 0.6);
+    normalDepthMesh.position
+      .copy(ATLAS_PREVIEW_POSITION)
+      .setX(ATLAS_PREVIEW_POSITION.x + ATLAS_PREVIEW_SIZE_M * 0.6);
     this.group.add(normalDepthMesh);
     this.normalDepthPreviewMesh = normalDepthMesh;
   }
 
   /** Scattered separately from the single comparison impostor so its count can change without a full rebake. */
-  private rebuildForest(geometry: PlaneGeometry, material: MeshStandardMaterial): void {
+  private rebuildForest(
+    geometry: PlaneGeometry,
+    material: MeshStandardMaterial,
+  ): void {
     if (this.forestMesh) {
       this.group.remove(this.forestMesh);
       this.forestMesh = undefined;
@@ -487,16 +649,17 @@ export class ImpostorBakerPageComponent {
     const quaternion = new Quaternion();
     const upAxis = new Vector3(0, 1, 0);
     const scale = new Vector3();
+    const random = seededRandom(this.treeSeed());
     const [scaleMin, scaleMax] = FOREST_SCALE_RANGE;
 
     for (let i = 0; i < count; i++) {
       position.set(
-        (Math.random() - 0.5) * spreadM * 2,
+        (random() - 0.5) * spreadM * 2,
         0,
-        FOREST_NEAR_Z_M + Math.random() * spreadM,
+        FOREST_NEAR_Z_M + random() * spreadM,
       );
-      quaternion.setFromAxisAngle(upAxis, Math.random() * Math.PI * 2);
-      scale.setScalar(scaleMin + Math.random() * (scaleMax - scaleMin));
+      quaternion.setFromAxisAngle(upAxis, random() * Math.PI * 2);
+      scale.setScalar(scaleMin + random() * (scaleMax - scaleMin));
       forest.setMatrixAt(i, matrix.compose(position, quaternion, scale));
     }
     forest.instanceMatrix.needsUpdate = true;
@@ -505,7 +668,9 @@ export class ImpostorBakerPageComponent {
     this.forestMesh = forest;
   }
 
-  private disposeBaked(): void {
+  private disposeBaked(
+    options: { readonly preserveCompressedAtlas?: boolean } = {},
+  ): void {
     if (this.forestMesh) {
       this.group.remove(this.forestMesh);
       this.forestMesh = undefined;
@@ -518,7 +683,10 @@ export class ImpostorBakerPageComponent {
     this.materialHandle?.material.dispose();
     this.materialHandle = undefined;
 
-    for (const preview of [this.albedoPreviewMesh, this.normalDepthPreviewMesh]) {
+    for (const preview of [
+      this.albedoPreviewMesh,
+      this.normalDepthPreviewMesh,
+    ]) {
       if (!preview) continue;
       this.group.remove(preview);
       preview.geometry.dispose();
@@ -527,9 +695,11 @@ export class ImpostorBakerPageComponent {
     this.albedoPreviewMesh = undefined;
     this.normalDepthPreviewMesh = undefined;
 
-    this.compressedAtlas?.dispose();
-    this.compressedAtlas = undefined;
-    this.compressionStats.set(null);
+    if (!options.preserveCompressedAtlas) {
+      this.compressedAtlas?.dispose();
+      this.compressedAtlas = undefined;
+      this.compressionStats.set(null);
+    }
 
     this.atlas?.renderTarget.dispose();
     this.atlas = undefined;
@@ -538,5 +708,181 @@ export class ImpostorBakerPageComponent {
   private dispose(): void {
     this.disposeBaked();
     this.group.removeFromParent();
+  }
+
+  readTestSettings(): ImpostorBakerTestSettings {
+    return {
+      operation: 'check',
+      species: this.selectedSpeciesKey(),
+      seed: this.treeSeed(),
+      type: this.impostorType(),
+      spritesPerSide: this.spritesPerSide(),
+      textureSizePx: this.textureSizePx(),
+      forestCount: this.forestCount(),
+      rebuildSourceTree: false,
+      compressionFormat: this.compressionFormat(),
+      compressionQuality: this.compressionQuality(),
+      normalDepthMode: this.normalDepthMode(),
+    };
+  }
+
+  applyTestSettings(settings: ImpostorBakerTestSettings): void {
+    const sourceChanged =
+      settings.species !== this.selectedSpeciesKey() ||
+      settings.seed !== this.treeSeed();
+    this.selectedSpeciesKey.set(settings.species);
+    this.treeSeed.set(settings.seed);
+    this.impostorType.set(settings.type);
+    this.spritesPerSide.set(settings.spritesPerSide);
+    this.textureSizePx.set(settings.textureSizePx);
+    this.forestCount.set(settings.forestCount);
+    this.compressionFormat.set(settings.compressionFormat);
+    this.compressionQuality.set(settings.compressionQuality);
+    this.normalDepthMode.set(settings.normalDepthMode);
+    this.textureMode.set('raw');
+    if (sourceChanged) this.replaceSourceTree();
+    this.bake({ autoCompress: false, preserveCompressedAtlas: true });
+  }
+
+  async waitForTestReady(
+    context: TestContext,
+    expected: ImpostorBakerTestSettings,
+  ): Promise<void> {
+    context.signal.throwIfAborted();
+    if (!this.runnerReady())
+      throw new Error('Impostor scene is not ready in raw texture mode.');
+    await waitRenderedFrames(this, context, 2);
+    context.signal.throwIfAborted();
+    const failed = this.inspectTestState(expected).filter(
+      (check) => !check.passed,
+    );
+    if (failed.length) {
+      throw new Error(
+        `Impostor scene did not reach the requested state: ${failed.map((check) => check.name).join('; ')}`,
+      );
+    }
+  }
+
+  readTestRenderInfo(): {
+    readonly drawCalls: number;
+    readonly triangles: number;
+  } {
+    const render = this.engine.renderer.info.render;
+    return { drawCalls: render.calls, triangles: render.triangles };
+  }
+
+  measureTestBake(
+    rebuildSourceTree: boolean,
+  ): ImpostorBakeTimings & { readonly sourceTreeBuildMs: number } {
+    const sourceTreeBuildMs = rebuildSourceTree ? this.replaceSourceTree() : 0;
+    this.bake({ autoCompress: false, preserveCompressedAtlas: true });
+    const timings = this.lastBakeTimings();
+    if (!timings)
+      throw new Error('The atlas bake did not produce timing data.');
+    return { ...timings, sourceTreeBuildMs };
+  }
+
+  async measureTestCompression(
+    signal: AbortSignal,
+  ): Promise<
+    IOctahedralImpostorCompressionStats & { readonly wallMs: number }
+  > {
+    signal.throwIfAborted();
+    const renderer = this.engine.renderer;
+    if (!(renderer instanceof WebGLRenderer) || !this.atlas)
+      throw new Error('A ready WebGL atlas is required for compression.');
+    const startedAt = performance.now();
+    const compressed = await compressOctahedralImpostorAtlas(
+      renderer,
+      this.atlas,
+      {
+        imageCompression: browserImageCompression,
+        quality: this.compressionQuality(),
+        fileType: this.compressionFormat(),
+        normalDepthMode: this.normalDepthMode(),
+        maxSizeMB: 2,
+      },
+    );
+    if (signal.aborted) {
+      compressed.dispose();
+      signal.throwIfAborted();
+    }
+    const stats = {
+      ...compressed.stats,
+      wallMs: performance.now() - startedAt,
+    };
+    compressed.dispose();
+    return stats;
+  }
+
+  inspectTestState(expected: ImpostorBakerTestSettings): readonly TestCheck[] {
+    const renderer = this.engine.renderer;
+    const atlas = this.atlas;
+    return [
+      {
+        name: 'WebGL renderer available',
+        passed: renderer instanceof WebGLRenderer,
+      },
+      {
+        name: 'Atlas dimensions match settings',
+        passed:
+          !!atlas &&
+          atlas.renderTarget.width === expected.textureSizePx &&
+          atlas.renderTarget.height === expected.textureSizePx,
+      },
+      {
+        name: 'Both atlas textures exist',
+        passed:
+          !!atlas &&
+          !!atlas.albedo &&
+          !!atlas.normalDepth &&
+          atlas.renderTarget.textures.length === 2,
+      },
+      {
+        name: 'Impostor mesh and material exist',
+        passed: !!this.impostorMesh && !!this.materialHandle?.material,
+      },
+      {
+        name: 'Impostor material uses atlas textures',
+        passed:
+          !!atlas &&
+          this.materialHandle?.material.map === atlas.albedo &&
+          this.materialHandle.material.normalMap === atlas.normalDepth,
+      },
+      {
+        name: 'Forest instance count matches settings',
+        passed: this.forestMesh?.count === expected.forestCount,
+      },
+      {
+        name: 'Projection setting applied',
+        passed: this.impostorType() === expected.type,
+      },
+    ];
+  }
+
+  testEnvironment(): Readonly<Record<string, TestSetting>> {
+    const renderer = this.engine.renderer;
+    const dom =
+      renderer instanceof WebGLRenderer ? renderer.domElement : undefined;
+    return {
+      ...describeRendererGpu(
+        renderer as Parameters<typeof describeRendererGpu>[0],
+      ),
+      'scene.backend': 'webgl',
+      'scene.viewportWidth': dom?.width ?? 'unknown',
+      'scene.viewportHeight': dom?.height ?? 'unknown',
+      'scene.gpuTiming':
+        'unavailable: atlas creation uses WebGL without a GPU timestamp provider',
+    };
+  }
+
+  onTestProgress(progress: TestProgress | null): void {
+    const controls = this.orbitControlsRef()?.orbitControls();
+    if (progress && !this.runnerBusy())
+      this.controlsEnabledBeforeTest = controls?.enabled ?? true;
+    this.runnerBusy.set(progress !== null);
+    if (controls)
+      controls.enabled =
+        progress === null ? this.controlsEnabledBeforeTest : false;
   }
 }

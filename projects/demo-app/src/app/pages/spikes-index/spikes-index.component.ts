@@ -63,6 +63,19 @@ export const SPIKES: readonly ISpikeItem[] = [
     runbookPath: 'docs/runbook/028_planet_terrain_attempt_history.md',
     dateISO: '2026-09-19',
   },
+  {
+    id: 'planet-surface-detail-spike',
+    number: '4',
+    title: 'Planet surface detail LOD (S1: flat runway in the material)',
+    route: '/planet-surface-detail-spike',
+    status: 'pending',
+    hypothesis:
+      'A 2 km x 45 m runway drawn by an analytic SDF layer in the planet surface material, on terrain flattened under it by a height stamp in the height source, stays on the ground with no gap or cut at every terrain LOD, and its markings stay sharp up close (Plan 063 Q2). Q1/Q3 (forest far form) follow if Q2 holds.',
+    description:
+      'Clone of /cell-planet-tsl with a spike worker that stamps the runway into the terrain heights and a TSL runway layer. ?runway=on|paint|stamp|off.',
+    runbookPath: 'docs/runbook/063_planet_surface_detail_lod.md',
+    dateISO: '2026-10-25',
+  },
 ];
 
 const STATUS_LABEL: Record<SpikeStatus, string> = {

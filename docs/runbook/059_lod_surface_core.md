@@ -235,3 +235,33 @@ The lab is in the demo app: `projects/demo-app/src/app/pages/lod-surface-lab/`, 
 1. Look at the page with the window in front: render, probe, controls.
 2. Owner runs `lod-surface-baseline` v1 on both adapters, including selection CPU p95, and the gates are recorded here.
 3. Spike S1.
+
+## 2026-10-25 — First baseline run on the RTX 3080: three fixes, suite v2
+
+The owner ran `lod-surface-baseline` v1 in quick mode, visible browser, on the NVIDIA adapter (2538×1308 drawing buffer). Result: 3 valid cases, 21 failed, 1 invalid. Every crack check failed, many windows were capped, and both zoom cases failed their state check.
+
+### Findings
+
+- **Selection CPU in the browser:** median 0.3–0.4 ms and p95 0.4–0.5 ms on the ground poses (cap 1024), 0.1–0.2 ms at orbit. That is about twice the 0.2 ms L5 budget, which the Node bench had met. The selector still needs work (incremental split and merge, or less per-frame work) before L5 passes. GPU scene pass: 0.14–0.27 ms at 32 cells, 0.66–0.92 ms at 64 cells.
+- **Large holes on the NVIDIA sphere came from the GPU's `sin`, not the selector.** Sphere-600km eye-2m had 190,661 crack px, and the flat source had 357,490. The same poses on the AMD iGPU (browser pane, same buffer size) had 0–9 px, with identical selection stats (deepest level 19, the same unmet and drawn counts). WGSL only bounds `sin`'s absolute error, and the vertex offset took `sin` of the deep-leaf parameter offset, which is about 1e-6. On NVIDIA that wiped out the offset, so neighbouring leaves no longer met. The evidence matches: the no-warp case (no trig) had 6 px where the warped one had 592, and the plane had 3–6 px.
+- **Capped windows:** still cases had `quickMs: 1500`. The settle check needs two passing looks, with the series growing 10% between them, after at least 1 s, so 1.5 s usually ran out first.
+- **Zoom state check:** the zoom clears its motion flag when it ends, and the adapter read the settings after that, so it reported `motion: expected zoom, found undefined`.
+- **Residual seam pixels (open):** after the sine fix, the AMD pane still shows 1–5 isolated crack pixels per pose, scattered over the surface (near the camera too) and on the plane as well. These look like float seam sparkles: two leaves compute the same edge vertex from different camera-relative origins, and the sums differ in the last bits. The 0 px gate fails on them.
+
+### Built
+
+- `lod-surface-mesh.ts`: `warpDelta` uses `smallSin`, a Taylor polynomial to x^9 (relative accuracy holds down to tiny x), instead of the built-in `sin`.
+- `lod-surface-test-adapter.ts`: a zoom case's settings are checked while the zoom still runs.
+- `lod-surface-tests.ts`: **suite v2**, the same cases, with still windows no longer capped at 1.5 s in quick mode (the cap is their full 4 s). v1 stays in the history.
+- Specs: the polynomial in float steps against `Math.sin` (under 1e-6 relative error, from 1e-7 to 0.85); v2 keeps v1's cases with no short quick cap on still cases; a zoom case passes its state check (fake host). 29 headless specs pass.
+
+### Verified
+
+- In the browser pane (AMD, 3807×1962 after the fix): the surface renders; the sphere poses have 1–5 crack px; the injected-gap control finds 96,549 px and the folding-off control 257 px.
+- Not verified: the fix on the NVIDIA adapter, which the pane cannot use. That needs a v2 run there.
+
+### Next
+
+1. Owner reruns v2 on the NVIDIA adapter to confirm the holes are gone.
+2. Decide how to close the residual seam pixels: either make seam vertices bit-identical (positions on shared edges from shared data), or a small overlap or skirt.
+3. Bring selection p95 under 0.2 ms in the browser.

@@ -25,7 +25,10 @@ so a game can ship it as a static asset and skip baking entirely at load
 time — both paths share the exact same bake + render code, so there is no
 separate "pre-baked" format to keep in sync.
 
-Only the hemispherical octahedral projection is implemented (matching what
-the reference three.ez implementation this was ported from actually
-finished) — this covers every scatter use case, since the camera is never
-below the ground plane relative to a tree/rock.
+Both hemispherical and full spherical octahedral projections are supported.
+Use `hemispherical` for ground-anchored assets such as trees and rocks; it
+allocates the atlas to views over the upper hemisphere. Use `spherical` for
+airborne, floating, or space assets that must be viewed from below as well.
+The spherical bake directions and render-time shader mapping are implemented
+by this package; the original reference library's unfinished full-sphere path
+was completed as part of this port.

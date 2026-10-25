@@ -88,10 +88,9 @@ const gridCoord = new Vector2();
  * produced via MRT: albedo and packed normal+depth, both consumed by
  * `octahedral-impostor-material.ts` at render time.
  *
- * Direct port of the reference octahedral-impostor library's
- * `createTextureAtlas`, scoped to the hemispherical projection (the only
- * one that library finished) and without the ORM-map bake path (never
- * implemented there either).
+ * Port of the reference octahedral-impostor library's `createTextureAtlas`,
+ * with hemispherical and full spherical projection support. The ORM-map bake
+ * path from the reference remains unimplemented.
  */
 export function createOctahedralImpostorAtlas(
   options: ICreateOctahedralImpostorAtlasOptions,
@@ -117,7 +116,17 @@ export function createOctahedralImpostorAtlas(
 
   for (let row = 0; row < spritesPerSide; row++) {
     for (let col = 0; col < spritesPerSide; col++) {
-      renderBakeView(renderer, target, col, row, spritesPerSide, spriteSize, atlasSize, cameraFactor, type);
+      renderBakeView(
+        renderer,
+        target,
+        col,
+        row,
+        spritesPerSide,
+        spriteSize,
+        atlasSize,
+        cameraFactor,
+        type,
+      );
     }
   }
 
@@ -160,7 +169,9 @@ function renderBakeView(
     hemiOctahedronGridToDirection(gridCoord, bakeCamera.position);
   }
   const dirY = bakeCamera.position.y;
-  bakeCamera.position.setLength(boundingSphere.radius * cameraFactor).add(boundingSphere.center);
+  bakeCamera.position
+    .setLength(boundingSphere.radius * cameraFactor)
+    .add(boundingSphere.center);
   bakeCamera.up.set(0, 1, 0);
   if (Math.abs(dirY) > 0.999) {
     bakeCamera.up.set(-1, 0, 0);
@@ -174,7 +185,10 @@ function renderBakeView(
   renderer.render(target, bakeCamera);
 }
 
-function setupRenderer(renderer: WebGLRenderer, atlasSize: number): IRendererSnapshot {
+function setupRenderer(
+  renderer: WebGLRenderer,
+  atlasSize: number,
+): IRendererSnapshot {
   const pixelRatio = renderer.getPixelRatio();
   const scissorTest = renderer.getScissorTest();
   const clearAlpha = renderer.getClearAlpha();
@@ -206,11 +220,24 @@ function setupRenderer(renderer: WebGLRenderer, atlasSize: number): IRendererSna
   return { renderTarget, pixelRatio, scissorTest, clearAlpha };
 }
 
-function restoreRenderer(renderer: WebGLRenderer, snapshot: IRendererSnapshot): void {
+function restoreRenderer(
+  renderer: WebGLRenderer,
+  snapshot: IRendererSnapshot,
+): void {
   renderer.setRenderTarget(null);
   renderer.setScissorTest(snapshot.scissorTest);
-  renderer.setViewport(savedViewport.x, savedViewport.y, savedViewport.z, savedViewport.w);
-  renderer.setScissor(savedScissor.x, savedScissor.y, savedScissor.z, savedScissor.w);
+  renderer.setViewport(
+    savedViewport.x,
+    savedViewport.y,
+    savedViewport.z,
+    savedViewport.w,
+  );
+  renderer.setScissor(
+    savedScissor.x,
+    savedScissor.y,
+    savedScissor.z,
+    savedScissor.w,
+  );
   renderer.setPixelRatio(snapshot.pixelRatio);
   renderer.setClearAlpha(snapshot.clearAlpha);
 }
@@ -222,7 +249,9 @@ function overrideTargetMaterials(target: Object3D): void {
 
     mesh.userData[USERDATA_ORIGINAL_MATERIAL_KEY] = mesh.material;
     mesh.material = Array.isArray(mesh.material)
-      ? mesh.material.map((material) => createBakeMaterial(material as MeshStandardMaterial))
+      ? mesh.material.map((material) =>
+          createBakeMaterial(material as MeshStandardMaterial),
+        )
       : createBakeMaterial(mesh.material as MeshStandardMaterial);
   });
 }
@@ -273,11 +302,19 @@ function createBakeMaterial(material: MeshStandardMaterial): ShaderMaterial {
     uniforms['displacementMap'] = { value: material.displacementMap };
     uniforms['displacementScale'] = { value: material.displacementScale };
     uniforms['displacementBias'] = { value: material.displacementBias };
-    uniforms['displacementMapTransform'] = { value: material.displacementMap!.matrix };
+    uniforms['displacementMapTransform'] = {
+      value: material.displacementMap!.matrix,
+    };
   }
 
   const defines: { [key: string]: string } = {};
-  if (hasMap || hasAlphaMap || hasNormalMap || hasBumpMap || hasDisplacementMap) {
+  if (
+    hasMap ||
+    hasAlphaMap ||
+    hasNormalMap ||
+    hasBumpMap ||
+    hasDisplacementMap
+  ) {
     defines['USE_UV'] = '';
   }
 
@@ -319,8 +356,10 @@ function createBakeMaterial(material: MeshStandardMaterial): ShaderMaterial {
     if (hasNormalMap) {
       shader.normalMap = true;
       shader.normalMapUv = 'uv';
-      shader.normalMapTangentSpace = material.normalMapType === TangentSpaceNormalMap;
-      shader.normalMapObjectSpace = material.normalMapType === ObjectSpaceNormalMap;
+      shader.normalMapTangentSpace =
+        material.normalMapType === TangentSpaceNormalMap;
+      shader.normalMapObjectSpace =
+        material.normalMapType === ObjectSpaceNormalMap;
     }
     if (hasBumpMap) {
       shader.bumpMap = true;

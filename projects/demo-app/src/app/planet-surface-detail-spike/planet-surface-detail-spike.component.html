@@ -1,0 +1,68 @@
+<scene>
+  <raycastOrbitControls
+    [cameraPosition]="cameraPosition()"
+    [target]="cameraTarget()"
+    [near]="0.5"
+    [far]="10000000"
+    [raycastFocusResolver]="planetView()?.raycastFocusResolver"
+  />
+  <ambientLight [intensity]="1.2" />
+  <directionalLight [position]="[2500, 3500, 3000]" [intensity]="2.2" [castShadow]="false" />
+  <planetAtmosphere
+    preset="earth"
+    [radius]="radius"
+    [surfaces]="atmosphereSurfaces"
+    [morph]="atmosphereMorph"
+    [sunDirection]="sunDirection()"
+    [exposure]="exposure()"
+  />
+  <cellPlanetMorphStreamingView
+    [radiusM]="radius"
+    [meshGenerator]="meshGenerator"
+    [morphProgress]="0"
+    projectionKind="equalEarth"
+    [maxLod]="6"
+    [resolution]="32"
+    [createMaterial]="createMaterial"
+    (lodChange)="stats.set($event)"
+    [batching]="true"
+    [maxPatches]="256"
+    [maxInstallsPerFrame]="8"
+    [lodPositionToleranceM]="1"
+    [lodViewToleranceRadians]="0.005"
+  />
+</scene>
+
+<aside class="panel">
+  <a routerLink="/spikes">← Spikes</a>
+  <h2>Surface detail LOD · S1</h2>
+  <p>{{ runwayLengthM }} m × {{ runwayWidthM }} m runway · mode <b>{{ runwayMode }}</b></p>
+  <p>{{ siteText() }}</p>
+  <p class="row">
+    @for (view of views; track view.altitudeM) {
+      <button (click)="jump(view.altitudeM)" [class.on]="altitudeM() === view.altitudeM">{{ view.label }}</button>
+    }
+  </p>
+  <p class="row">
+    <label><input type="checkbox" [checked]="top()" (change)="setTop($any($event.target).checked)" /> top-down</label>
+    <label><input type="checkbox" [checked]="paintOn()" (change)="setPaint($event)" /> SDF paint</label>
+  </p>
+  <p class="row">
+    Reload as:
+    <button (click)="switchRunway('on')" [disabled]="runwayMode === 'on'">stamp + paint</button>
+    <button (click)="switchRunway('paint')" [disabled]="runwayMode === 'paint'">paint only</button>
+    <button (click)="switchRunway('stamp')" [disabled]="runwayMode === 'stamp'">stamp only</button>
+    <button (click)="switchRunway('off')" [disabled]="runwayMode === 'off'">off</button>
+  </p>
+  <label>sun elevation {{ sunElevation() }}°
+    <input type="range" min="2" max="85" step="1" [value]="sunElevation()" (input)="setSunElevation($event)" />
+  </label>
+  <label>sun azimuth {{ sunAzimuth() }}°
+    <input type="range" min="-180" max="180" step="5" [value]="sunAzimuth()" (input)="setSunAzimuth($event)" />
+  </label>
+  <label>exposure {{ exposure() }}
+    <input type="range" min="1" max="30" step="0.5" [value]="exposure()" (input)="setExposure($event)" />
+  </label>
+  <p>Tiles {{ tileStats().resident }} (queued {{ tileStats().queued }}, max L{{ tileStats().maxLevel }})</p>
+  <p>Patches {{ stats().resident }} · tris {{ stats().triangles }} · levels {{ stats().levels | json }}</p>
+</aside>

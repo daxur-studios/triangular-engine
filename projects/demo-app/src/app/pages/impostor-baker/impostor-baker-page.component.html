@@ -3,298 +3,353 @@
     <section class="panel" aria-label="Octahedral impostor baker controls">
       <header>
         <div>
-          <a routerLink="/">← Examples</a>
+          <a
+            [routerLink]="runnerBusy() ? null : '/'"
+            [attr.aria-disabled]="runnerBusy()"
+            >← Examples</a
+          >
           <small>triangular-engine/impostor</small>
         </div>
         <strong>Octahedral impostor baker</strong>
       </header>
 
       <p class="blurb">
-        <code>createOctahedralImpostorAtlas</code> bakes the procedural oak
-        (left) from a grid of camera directions covering the upper
-        hemisphere into the two textures previewed above the scene: albedo
-        and packed normal+depth. <code>buildOctahedralImpostorMesh</code>
-        then patches a real <code>MeshStandardMaterial</code> (still lit by
-        the scene's lights) to pick and blend the 3 nearest baked views at
-        render time — that's the single billboard to the right of the tree.
-        The field stretching into the distance is a plain
-        <code>InstancedMesh</code> sharing that exact geometry/material
-        across thousands of copies, each orienting to the camera
-        independently in the vertex shader.
+        <code>createOctahedralImpostorAtlas</code> bakes the procedural
+        {{ selectedSpeciesKey() }} (left) from a grid of camera directions
+        covering the
+        {{
+          impostorType() === "hemispherical"
+            ? "upper hemisphere"
+            : "full sphere"
+        }}
+        into the two textures previewed above the scene: albedo and packed
+        normal+depth. <code>buildOctahedralImpostorMesh</code> then patches a
+        real <code>MeshStandardMaterial</code> (still lit by the scene's lights)
+        to pick and blend the 3 nearest baked views at render time — that's the
+        single billboard to the right of the tree. The field stretching into the
+        distance is a plain <code>InstancedMesh</code> sharing that exact
+        geometry/material across thousands of copies, each orienting to the
+        camera independently in the vertex shader.
       </p>
 
-      <div class="section-title">Source flora model</div>
-      <nav aria-label="Source flora model">
-        <label
-          >Species
-          <select
-            [value]="selectedSpeciesKey()"
-            (change)="setSpecies($any($event.target).value)"
-          >
-            @for (species of treeSpeciesList; track species.key) {
-              <option [value]="species.key">{{ species.name }}</option>
-            }
-          </select></label
-        >
-        <label
-          >Seed
-          <input
-            type="number"
-            min="1"
-            max="999"
-            step="1"
-            [value]="treeSeed()"
-            (change)="setTreeSeed($any($event.target).value)"
-          /></label
-        >
-      </nav>
-
-      <div class="section-title">Bake parameters</div>
-      <nav aria-label="Bake parameters">
-        <label
-          >Coverage
-          <select
-            [value]="impostorType()"
-            (change)="setImpostorType($any($event.target).value)"
-          >
-            <option value="hemispherical">180° (Hemispherical — Ground)</option>
-            <option value="spherical">360° (Full Spherical — Airborne)</option>
-          </select></label
-        >
-        <label
-          >Sprites/side
-          <select
-            [value]="spritesPerSide()"
-            (change)="setSpritesPerSide($any($event.target).value)"
-          >
-            <option value="8">8 × 8</option>
-            <option value="12">12 × 12</option>
-            <option value="16">16 × 16</option>
-            <option value="24">24 × 24</option>
-          </select></label
-        >
-        <label
-          >Atlas size
-          <select
-            [value]="textureSizePx()"
-            (change)="setTextureSize($any($event.target).value)"
-          >
-            <option value="1024">1024</option>
-            <option value="2048">2048</option>
-            <option value="4096">4096</option>
-          </select></label
-        >
-        <button (click)="rebake()" [disabled]="baking()">
-          {{ baking() ? "Baking…" : "Rebake" }}
-        </button>
-      </nav>
-
-      <div class="section-title">Texture mode & compression</div>
-      <nav aria-label="Texture mode toggle">
-        <div class="mode-toggle">
-          <button
-            type="button"
-            [class.active]="textureMode() === 'raw'"
-            (click)="setTextureMode('raw')"
-          >
-            Raw (RenderTarget)
-          </button>
-          <button
-            type="button"
-            [class.active]="textureMode() === 'compressed'"
-            [disabled]="compressing()"
-            (click)="setTextureMode('compressed')"
-          >
-            {{ compressing() ? "Compressing…" : "Compressed (browser-image-compression)" }}
-          </button>
-        </div>
-      </nav>
-
-      <nav aria-label="Compression settings">
-        <label
-          >Format
-          <select
-            [value]="compressionFormat()"
-            (change)="setCompressionFormat($any($event.target).value)"
-          >
-            <option value="image/webp">WebP</option>
-            <option value="image/jpeg">JPEG</option>
-            <option value="image/png">PNG</option>
-          </select></label
-        >
-        <label
-          >Quality
-          <input
-            type="range"
-            min="0.1"
-            max="1.0"
-            step="0.05"
-            [value]="compressionQuality()"
-            (input)="setCompressionQuality($any($event.target).value)"
-          />
-          {{ compressionQuality() | number: "1.2-2" }}</label
-        >
-        <label
-          >Normal/Depth
-          <select
-            [value]="normalDepthMode()"
-            (change)="setNormalDepthMode($any($event.target).value)"
-          >
-            <option value="lossless">Lossless PNG</option>
-            <option value="lossy">Lossy (Artifact Test)</option>
-          </select></label
-        >
-        <button
-          (click)="compressAtlas()"
-          [disabled]="compressing() || baking()"
-        >
-          {{ compressing() ? "Compressing…" : "Recompress" }}
-        </button>
-      </nav>
-
-      @if (compressionStats(); as stats) {
-        <div class="stats-card">
-          <div class="stat-row">
-            <span>Raw GPU VRAM:</span>
-            <strong>{{ stats.rawGpuSizeBytes / (1024 * 1024) | number: "1.2-2" }} MB</strong>
-          </div>
-          <div class="stat-row">
-            <span>Raw PNG total:</span>
-            <strong>{{ stats.totalRawPngSizeBytes / 1024 | number: "1.0-0" }} KB</strong>
-          </div>
-          <div class="stat-row">
-            <span>Compressed (Albedo + Normal):</span>
-            <strong class="highlight">{{ stats.totalCompressedSizeBytes / 1024 | number: "1.0-0" }} KB (Albedo: {{ stats.compressedAlbedoSizeBytes / 1024 | number: "1.0-0" }} KB)</strong>
-          </div>
-          <div class="stat-row">
-            <span>Savings vs Raw PNG:</span>
-            <strong class="savings">{{ stats.pngSavingsPercent | number: "1.1-1" }}% smaller</strong>
-          </div>
-          <div class="stat-row">
-            <span>Compression time:</span>
-            <span>{{ stats.durationMs | number: "1.0-0" }} ms</span>
-          </div>
-        </div>
-      }
-
-      <div class="section-title">Live material tuning</div>
-      <nav aria-label="Live material tuning">
-        <label
-          >Alpha clamp
-          <input
-            type="range"
-            min="0"
-            max="0.9"
-            step="0.01"
-            [value]="alphaClamp()"
-            (input)="setAlphaClamp($any($event.target).value)"
-          />
-          {{ alphaClamp() | number: "1.2-2" }}</label
-        >
-        <label
-          ><input
-            type="checkbox"
-            [checked]="transparent()"
-            (change)="setTransparent($any($event.target).checked)"
-          />
-          Transparent</label
-        >
-      </nav>
-
-      <div class="section-title">Forest field</div>
-      <nav aria-label="Forest field">
-        <label
-          >Forest instances
-          <select
-            [value]="forestCount()"
-            (change)="setForestCount($any($event.target).value)"
-          >
-            <option value="500">500</option>
-            <option value="2000">2,000</option>
-            <option value="4000">4,000</option>
-            <option value="10000">10,000</option>
-          </select></label
-        >
-        <label
-          >Forest spread
-          <select
-            [value]="forestSpreadM()"
-            (change)="setForestSpread($any($event.target).value)"
-          >
-            <option value="30">Tight (30m)</option>
-            <option value="60">Default (60m)</option>
-            <option value="120">Wide (120m)</option>
-            <option value="250">Sparse (250m)</option>
-          </select></label
-        >
-      </nav>
-
-      <div class="section-title">Sun & lighting</div>
-      <nav aria-label="Sun">
-        <label
-          >Azimuth
-          <input
-            type="range"
-            min="0"
-            max="360"
-            step="1"
-            [value]="sunAzimuthDeg()"
-            (input)="setSunAzimuth($any($event.target).value)"
-          />
-          {{ sunAzimuthDeg() }}°</label
-        >
-        <label
-          >Elevation
-          <input
-            type="range"
-            min="-90"
-            max="90"
-            step="1"
-            [value]="sunElevationDeg()"
-            (input)="setSunElevation($any($event.target).value)"
-          />
-          {{ sunElevationDeg() }}°</label
-        >
-        <label
-          >Intensity
-          <input
-            type="range"
-            min="0"
-            max="4"
-            step="0.05"
-            [value]="sunIntensity()"
-            (input)="setSunIntensity($any($event.target).value)"
-          />
-          {{ sunIntensity() | number: "1.2-2" }}</label
-        >
-      </nav>
-
-      <div class="section-title">Export</div>
-      <nav aria-label="Export">
-        <button (click)="downloadAlbedo()">Download raw albedo PNG</button>
-        <button (click)="downloadNormalDepth()">
-          Download raw normal/depth PNG
-        </button>
-        @if (textureMode() === 'compressed' || compressionStats()) {
-          <button (click)="downloadCompressedAlbedo()">
-            Download compressed albedo
-          </button>
-          <button (click)="downloadCompressedNormalDepth()">
-            Download compressed normal/depth
-          </button>
-        }
-      </nav>
-
+      <tri-test-runner
+        [suites]="testHistory"
+        [adapter]="testAdapter"
+        [available]="runnerReady()"
+        [allowAutoStart]="allowTestAutoStart"
+        [resultSink]="true"
+        (progressChange)="onTestProgress($event)"
+      />
       <p class="blurb note">
-        Both textures are what a game can ship or cache to IndexedDB/Dexie to skip baking at
-        runtime — load them with a <code>TextureLoader</code> and pass
-        straight into <code>buildOctahedralImpostorMesh</code>'s
-        <code>albedo</code>/<code>normalDepth</code> options.
+        Tests temporarily rebake the atlas and restore these controls afterward.
+        Bake and compression results are main-thread wall times. Render cases
+        report display cadence and CPU submit time, not GPU time. Switch to Raw
+        texture mode before running.
       </p>
+
+      <fieldset class="scene-controls" [disabled]="runnerBusy()">
+        <div class="section-title">Source flora model</div>
+        <nav aria-label="Source flora model">
+          <label
+            >Species
+            <select
+              [value]="selectedSpeciesKey()"
+              (change)="setSpecies($any($event.target).value)"
+            >
+              @for (species of treeSpeciesList; track species.key) {
+                <option [value]="species.key">{{ species.name }}</option>
+              }
+            </select></label
+          >
+          <label
+            >Seed
+            <input
+              type="number"
+              min="1"
+              max="999"
+              step="1"
+              [value]="treeSeed()"
+              (change)="setTreeSeed($any($event.target).value)"
+          /></label>
+        </nav>
+
+        <div class="section-title">Bake parameters</div>
+        <nav aria-label="Bake parameters">
+          <label
+            >Coverage
+            <select
+              [value]="impostorType()"
+              (change)="setImpostorType($any($event.target).value)"
+            >
+              <option value="hemispherical">
+                180° (Hemispherical — Ground)
+              </option>
+              <option value="spherical">
+                360° (Full Spherical — Airborne)
+              </option>
+            </select></label
+          >
+          <label
+            >Sprites/side
+            <select
+              [value]="spritesPerSide()"
+              (change)="setSpritesPerSide($any($event.target).value)"
+            >
+              <option value="8">8 × 8</option>
+              <option value="12">12 × 12</option>
+              <option value="16">16 × 16</option>
+              <option value="24">24 × 24</option>
+            </select></label
+          >
+          <label
+            >Atlas size
+            <select
+              [value]="textureSizePx()"
+              (change)="setTextureSize($any($event.target).value)"
+            >
+              <option value="1024">1024</option>
+              <option value="2048">2048</option>
+              <option value="4096">4096</option>
+            </select></label
+          >
+          <button (click)="rebake()" [disabled]="baking()">
+            {{ baking() ? "Baking…" : "Rebake" }}
+          </button>
+        </nav>
+
+        <div class="section-title">Texture mode & compression</div>
+        <nav aria-label="Texture mode toggle">
+          <div class="mode-toggle">
+            <button
+              type="button"
+              [class.active]="textureMode() === 'raw'"
+              (click)="setTextureMode('raw')"
+            >
+              Raw (RenderTarget)
+            </button>
+            <button
+              type="button"
+              [class.active]="textureMode() === 'compressed'"
+              [disabled]="compressing()"
+              (click)="setTextureMode('compressed')"
+            >
+              {{
+                compressing()
+                  ? "Compressing…"
+                  : "Compressed (browser-image-compression)"
+              }}
+            </button>
+          </div>
+        </nav>
+
+        <nav aria-label="Compression settings">
+          <label
+            >Format
+            <select
+              [value]="compressionFormat()"
+              (change)="setCompressionFormat($any($event.target).value)"
+            >
+              <option value="image/webp">WebP</option>
+              <option value="image/jpeg">JPEG</option>
+              <option value="image/png">PNG</option>
+            </select></label
+          >
+          <label
+            >Quality
+            <input
+              type="range"
+              min="0.1"
+              max="1.0"
+              step="0.05"
+              [value]="compressionQuality()"
+              (input)="setCompressionQuality($any($event.target).value)"
+            />
+            {{ compressionQuality() | number: "1.2-2" }}</label
+          >
+          <label
+            >Normal/Depth
+            <select
+              [value]="normalDepthMode()"
+              (change)="setNormalDepthMode($any($event.target).value)"
+            >
+              <option value="lossless">Lossless PNG</option>
+              <option value="lossy">Lossy (Artifact Test)</option>
+            </select></label
+          >
+          <button
+            (click)="compressAtlas()"
+            [disabled]="compressing() || baking()"
+          >
+            {{ compressing() ? "Compressing…" : "Recompress" }}
+          </button>
+        </nav>
+
+        @if (compressionStats(); as stats) {
+          <div class="stats-card">
+            <div class="stat-row">
+              <span>Raw GPU VRAM:</span>
+              <strong
+                >{{
+                  stats.rawGpuSizeBytes / (1024 * 1024) | number: "1.2-2"
+                }}
+                MB</strong
+              >
+            </div>
+            <div class="stat-row">
+              <span>Raw PNG total:</span>
+              <strong
+                >{{
+                  stats.totalRawPngSizeBytes / 1024 | number: "1.0-0"
+                }}
+                KB</strong
+              >
+            </div>
+            <div class="stat-row">
+              <span>Compressed (Albedo + Normal):</span>
+              <strong class="highlight"
+                >{{ stats.totalCompressedSizeBytes / 1024 | number: "1.0-0" }}
+                KB (Albedo:
+                {{ stats.compressedAlbedoSizeBytes / 1024 | number: "1.0-0" }}
+                KB)</strong
+              >
+            </div>
+            <div class="stat-row">
+              <span>Savings vs Raw PNG:</span>
+              <strong class="savings"
+                >{{ stats.pngSavingsPercent | number: "1.1-1" }}%
+                smaller</strong
+              >
+            </div>
+            <div class="stat-row">
+              <span>Compression time:</span>
+              <span>{{ stats.durationMs | number: "1.0-0" }} ms</span>
+            </div>
+          </div>
+        }
+
+        <div class="section-title">Live material tuning</div>
+        <nav aria-label="Live material tuning">
+          <label
+            >Alpha clamp
+            <input
+              type="range"
+              min="0"
+              max="0.9"
+              step="0.01"
+              [value]="alphaClamp()"
+              (input)="setAlphaClamp($any($event.target).value)"
+            />
+            {{ alphaClamp() | number: "1.2-2" }}</label
+          >
+          <label
+            ><input
+              type="checkbox"
+              [checked]="transparent()"
+              (change)="setTransparent($any($event.target).checked)"
+            />
+            Transparent</label
+          >
+        </nav>
+
+        <div class="section-title">Forest field</div>
+        <nav aria-label="Forest field">
+          <label
+            >Forest instances
+            <select
+              [value]="forestCount()"
+              (change)="setForestCount($any($event.target).value)"
+            >
+              <option value="500">500</option>
+              <option value="2000">2,000</option>
+              <option value="4000">4,000</option>
+              <option value="10000">10,000</option>
+            </select></label
+          >
+          <label
+            >Forest spread
+            <select
+              [value]="forestSpreadM()"
+              (change)="setForestSpread($any($event.target).value)"
+            >
+              <option value="30">Tight (30m)</option>
+              <option value="60">Default (60m)</option>
+              <option value="120">Wide (120m)</option>
+              <option value="250">Sparse (250m)</option>
+            </select></label
+          >
+        </nav>
+
+        <div class="section-title">Sun & lighting</div>
+        <nav aria-label="Sun">
+          <label
+            >Azimuth
+            <input
+              type="range"
+              min="0"
+              max="360"
+              step="1"
+              [value]="sunAzimuthDeg()"
+              (input)="setSunAzimuth($any($event.target).value)"
+            />
+            {{ sunAzimuthDeg() }}°</label
+          >
+          <label
+            >Elevation
+            <input
+              type="range"
+              min="-90"
+              max="90"
+              step="1"
+              [value]="sunElevationDeg()"
+              (input)="setSunElevation($any($event.target).value)"
+            />
+            {{ sunElevationDeg() }}°</label
+          >
+          <label
+            >Intensity
+            <input
+              type="range"
+              min="0"
+              max="4"
+              step="0.05"
+              [value]="sunIntensity()"
+              (input)="setSunIntensity($any($event.target).value)"
+            />
+            {{ sunIntensity() | number: "1.2-2" }}</label
+          >
+        </nav>
+
+        <div class="section-title">Export</div>
+        <nav aria-label="Export">
+          <button (click)="downloadAlbedo()">Download raw albedo PNG</button>
+          <button (click)="downloadNormalDepth()">
+            Download raw normal/depth PNG
+          </button>
+          @if (textureMode() === "compressed" || compressionStats()) {
+            <button (click)="downloadCompressedAlbedo()">
+              Download compressed albedo
+            </button>
+            <button (click)="downloadCompressedNormalDepth()">
+              Download compressed normal/depth
+            </button>
+          }
+        </nav>
+
+        <p class="blurb note">
+          Both textures are what a game can ship or cache to IndexedDB/Dexie to
+          skip baking at runtime — load them with a
+          <code>TextureLoader</code> and pass straight into
+          <code>buildOctahedralImpostorMesh</code>'s <code>albedo</code>/<code
+            >normalDepth</code
+          >
+          options.
+        </p>
+      </fieldset>
     </section>
   </ng-template>
 
   <orbitControls
+    #bakerOrbitControls
     [cameraPosition]="[16, 10, 26]"
     [target]="[4, 3, 10]"
     [isActive]="true"

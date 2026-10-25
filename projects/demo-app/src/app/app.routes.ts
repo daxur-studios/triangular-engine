@@ -85,6 +85,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'planet-surface-detail-spike',
+    loadComponent: () =>
+      import('./planet-surface-detail-spike/planet-surface-detail-spike.component').then(
+        ({ PlanetSurfaceDetailSpikeComponent }) => PlanetSurfaceDetailSpikeComponent,
+      ),
+  },
+  {
     path: 'spikes',
     loadComponent: () =>
       import('./pages/spikes-index/spikes-index.component').then(

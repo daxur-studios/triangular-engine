@@ -1,0 +1,30 @@
+:host {
+  position: relative;
+}
+
+.panel {
+  background: rgb(10 14 20 / 85%);
+  border-radius: 8px;
+  color: #eee;
+  font: 13px/1.4 system-ui;
+  left: 1rem;
+  max-width: 340px;
+  padding: 1rem;
+  position: absolute;
+  top: 1rem;
+  z-index: 20;
+
+  input[type='range'] {
+    width: 100%;
+  }
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+button.on {
+  outline: 2px solid #38bdf8;
+}

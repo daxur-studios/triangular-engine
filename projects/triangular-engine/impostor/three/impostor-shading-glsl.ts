@@ -3,12 +3,11 @@
  * `MeshStandardMaterial`) via `onBeforeCompile` in
  * `octahedral-impostor-material.ts` — see that file for the exact
  * `#include` splice points. Ported from the reference octahedral-impostor
- * library's `shaders/impostor/octahedral_impostor_shader_*.glsl`, trimmed to
- * what that reference actually ships: hemispherical projection only (its
- * full-octahedral branch was never finished), always-on normal-map
- * blending (its `EZ_USE_NORMAL` toggle was permanently true), and no ORM /
- * parallax (both were commented-out scaffolding there too). `EZ_TRANSPARENT`
- * is kept — it's a real, exercised toggle in the reference.
+ * library's `shaders/impostor/octahedral_impostor_shader_*.glsl`, extended
+ * with the full-octahedral branch that reference left unfinished. Normal-map
+ * blending is always enabled (its `EZ_USE_NORMAL` toggle was permanently
+ * true), and ORM / parallax remain unimplemented (both were commented-out
+ * scaffolding there too). `EZ_TRANSPARENT` is kept as an exercised toggle.
  *
  * The vertex-side math projects the plane's local-space vertex onto the
  * baked sprite whose direction is nearest the camera, then blends the 3

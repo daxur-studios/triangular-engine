@@ -13,7 +13,7 @@ performance:
 
 # Plan 059: LOD Surface Core for Water and Terrain
 
-Status: **M1 in progress (2026-10-25):** lab page, selector, renderer, crack probe and suite built and spec-tested; selector made persistent, about 0.2 ms per select in Node; gates not yet measured on hardware (see [Runbook 059](/docs/runbook/059_lod_surface_core.md)). Earlier status: **draft, nothing built.** Written 2026-10-24 after an owner discussion. Before anything is built, the
+Status: **M1 in progress (2026-10-25):** lab page, selector, renderer, crack probe and suite built and spec-tested; selector made persistent, about 0.2 ms per select in Node; first RTX 3080 run (suite v1): selection p95 0.4–0.5 ms in the browser; an NVIDIA `sin` precision hole fixed; 1–5 px seam sparkles left open; suite v2 waits on a rerun (see [Runbook 059](/docs/runbook/059_lod_surface_core.md)). Earlier status: **draft, nothing built.** Written 2026-10-24 after an owner discussion. Before anything is built, the
 direction is reviewed by three agents: [LOD surface review](/docs/plans/059_lod_surface_review.md). The
 architecture below is Claude's proposal and may change with the review.
 Evidence: [Runbook 059](/docs/runbook/059_lod_surface_core.md).
