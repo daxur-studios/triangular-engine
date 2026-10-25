@@ -1,14 +1,14 @@
 ---
 type: Index
-title: Runbooks
+title: Engineering Records
 description: Current initiative evidence and preserved legacy implementation history.
 timestamp: 2026-10-17T00:00:00Z
 tags: [runbook, index]
 ---
 
-# Runbooks
+# Engineering Records
 
-| Runbook | Plan |
+| Engineering Record | Plan |
 | --- | --- |
 | [Optional Scene Tree and Game Install](/docs/runbook/043_optional_scene_tree_and_game_install.md) | [Implementation plan](/docs/plans/043_optional_scene_tree_and_game_install.md) |
 | [Reusable Scene Page Schematic](/docs/runbook/044_scene_page_generator.md) | [Implementation plan](/docs/plans/044_scene_page_generator.md) |
@@ -31,6 +31,6 @@ tags: [runbook, index]
 | [Planet Surface Detail LOD](/docs/runbook/063_planet_surface_detail_lod.md) | [Implementation plan](/docs/plans/063_planet_surface_detail_lod.md) |
 | [Engine Docs Ship With Entry Points](/docs/runbook/064_engine_docs_ship_with_entry_points.md) | [Implementation plan](/docs/plans/064_engine_docs_ship_with_entry_points.md) |
 | [Composite Cell Planet on WebGPURenderer](/docs/runbook/065_composite_cell_planet.md) | [Implementation plan](/docs/plans/065_composite_cell_planet.md) |
+| [Engineering Records and Development Map](/docs/runbook/066_engineering_records_and_development_map.md) | [PLAN-066](/docs/plans/066_engineering_records_and_development_map.md) |
 
-
-Existing runbooks `001`–`042` retain their historical paths and formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).
+Existing records retain their `docs/runbook/` paths. Legacy runbooks `001`–`042` retain their historical formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

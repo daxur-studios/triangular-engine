@@ -1,0 +1,580 @@
+{
+  "schemaVersion": 1,
+  "documents": [
+    {
+      "id": "plan-043",
+      "number": 43,
+      "initiativeId": "legacy-043-optional-scene-tree-and-game-install",
+      "title": "Optional Scene Tree and Game Install",
+      "plan": "/docs/plans/043_optional_scene_tree_and_game_install.md",
+      "record": "/docs/runbook/043_optional_scene_tree_and_game_install.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-044",
+      "number": 44,
+      "initiativeId": "legacy-044-scene-page-generator",
+      "title": "Reusable Scene Page Schematic",
+      "plan": "/docs/plans/044_scene_page_generator.md",
+      "record": "/docs/runbook/044_scene_page_generator.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-045",
+      "number": 45,
+      "initiativeId": "legacy-045-demo-catalog-thumbnails",
+      "title": "Demo Catalog Thumbnails",
+      "plan": "/docs/plans/045_demo_catalog_thumbnails.md",
+      "record": "/docs/runbook/045_demo_catalog_thumbnails.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-046",
+      "number": 46,
+      "initiativeId": "legacy-046-cell-planet-shared-worker-pipeline",
+      "title": "Shared Cell-Planet Worker Pipeline and Worldgen Extraction",
+      "plan": "/docs/plans/046_cell_planet_shared_worker_pipeline.md",
+      "record": null,
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-047",
+      "number": 47,
+      "initiativeId": "legacy-047-terrain-view-culling-and-rotation-churn",
+      "title": "Terrain View Culling and Rotation Churn",
+      "plan": "/docs/plans/047_terrain_view_culling_and_rotation_churn.md",
+      "record": null,
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-048",
+      "number": 48,
+      "initiativeId": "legacy-048-agent-telemetry-sections",
+      "title": "Agent Telemetry Sections",
+      "plan": "/docs/plans/048_agent_telemetry_sections.md",
+      "record": null,
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-049",
+      "number": 49,
+      "initiativeId": "legacy-049-morphing-planet-atmosphere",
+      "title": "Morphing Planet Atmosphere",
+      "plan": "/docs/plans/049_morphing_planet_atmosphere.md",
+      "record": "/docs/runbook/049_morphing_planet_atmosphere.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-050",
+      "number": 50,
+      "initiativeId": "legacy-050-tsl-planet-surface-material",
+      "title": "TSL Planet Surface Material",
+      "plan": "/docs/plans/050_tsl_planet_surface_material.md",
+      "record": "/docs/runbook/050_tsl_planet_surface_material.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-051",
+      "number": 51,
+      "initiativeId": "legacy-051-cloud-volumes",
+      "title": "Cloud Volumes",
+      "plan": "/docs/plans/051_cloud_volumes.md",
+      "record": "/docs/runbook/051_cloud_volumes.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-052",
+      "number": 52,
+      "initiativeId": "legacy-052-page-test-sessions-and-performance-comparison",
+      "title": "Page Test Sessions and Performance Comparison",
+      "plan": "/docs/plans/052_page_test_sessions_and_performance_comparison.md",
+      "record": "/docs/runbook/052_page_test_sessions_and_performance_comparison.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-053",
+      "number": 53,
+      "initiativeId": "legacy-053-procedural-creature-animation",
+      "title": "Procedural Creature Animation",
+      "plan": "/docs/plans/053_procedural_creature_animation.md",
+      "record": "/docs/runbook/053_procedural_creature_animation.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-054",
+      "number": 54,
+      "initiativeId": "legacy-054-stylized-illustrative-rendering",
+      "title": "Stylized Illustrative Planet & Scene Rendering",
+      "plan": "/docs/plans/054_stylized_illustrative_rendering.md",
+      "record": "/docs/runbook/054_stylized_illustrative_rendering.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-055",
+      "number": 55,
+      "initiativeId": "legacy-055-planet-shape-system",
+      "title": "Planet Shape System",
+      "plan": "/docs/plans/055_planet_shape_system.md",
+      "record": "/docs/runbook/055_planet_shape_system.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-056",
+      "number": 56,
+      "initiativeId": "legacy-056-webgpu-default-renderer",
+      "title": "WebGPURenderer as the Default Renderer",
+      "plan": "/docs/plans/056_webgpu_default_renderer.md",
+      "record": "/docs/runbook/056_webgpu_default_renderer.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-057",
+      "number": 57,
+      "initiativeId": "legacy-057-planet-water-system",
+      "title": "Planet Water System",
+      "plan": "/docs/plans/057_planet_water_system.md",
+      "record": "/docs/runbook/057_planet_water_system.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-058",
+      "number": 58,
+      "initiativeId": "legacy-058-test-results-page-and-thumbnails",
+      "title": "Test Results Page and Case Thumbnails",
+      "plan": "/docs/plans/058_test_results_page_and_thumbnails.md",
+      "record": "/docs/runbook/058_test_results_page_and_thumbnails.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-059",
+      "number": 59,
+      "initiativeId": "legacy-059-lod-surface-core",
+      "title": "LOD Surface Core for Water and Terrain",
+      "plan": "/docs/plans/059_lod_surface_core.md",
+      "record": "/docs/runbook/059_lod_surface_core.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-060",
+      "number": 60,
+      "initiativeId": "legacy-060-testing-cpu-performance",
+      "title": "Testing Entry for CPU Performance Work",
+      "plan": "/docs/plans/060_testing_cpu_performance.md",
+      "record": "/docs/runbook/060_testing_cpu_performance.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-061",
+      "number": 61,
+      "initiativeId": "legacy-061-test-runner-batch-and-stop-rule",
+      "title": "Test Runner Batch Runs and a Deterministic Stop Rule",
+      "plan": "/docs/plans/061_test_runner_batch_and_stop_rule.md",
+      "record": "/docs/runbook/061_test_runner_batch_and_stop_rule.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-062",
+      "number": 62,
+      "initiativeId": "legacy-062-impostor-baker-testing",
+      "title": "Impostor Baker Testing",
+      "plan": "/docs/plans/062_impostor_baker_testing.md",
+      "record": "/docs/runbook/062_impostor_baker_testing.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-063",
+      "number": 63,
+      "initiativeId": "legacy-063-planet-surface-detail-lod",
+      "title": "Planet Surface Detail LOD",
+      "plan": "/docs/plans/063_planet_surface_detail_lod.md",
+      "record": "/docs/runbook/063_planet_surface_detail_lod.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-064",
+      "number": 64,
+      "initiativeId": "legacy-064-engine-docs-ship-with-entry-points",
+      "title": "Engine Docs Ship With Entry Points",
+      "plan": "/docs/plans/064_engine_docs_ship_with_entry_points.md",
+      "record": "/docs/runbook/064_engine_docs_ship_with_entry_points.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-065",
+      "number": 65,
+      "initiativeId": "legacy-065-composite-cell-planet",
+      "title": "Composite Cell Planet on WebGPURenderer",
+      "plan": "/docs/plans/065_composite_cell_planet.md",
+      "record": "/docs/runbook/065_composite_cell_planet.md",
+      "recordId": null,
+      "scopeHash": null,
+      "mapped": false,
+      "review": {
+        "state": "unassessed",
+        "reviewed": null,
+        "reviewer": null
+      },
+      "phases": [],
+      "progress": null,
+      "relations": []
+    },
+    {
+      "id": "plan-066",
+      "number": 66,
+      "initiativeId": "engineering-records-development-map",
+      "title": "Engineering Records and Development Map",
+      "outcome": "A developer can see what is being built, what can proceed, which decisions need attention,\nhow experiments relate, and how their observed behavior changes over time. The demo app and\nconsumer games can supply their own documents, pages and results to the same viewer.\n\nAn initiative is the subject; a plan describes intended work; an Engineering Record preserves\ndated findings, decisions and evidence. Completed, abandoned and superseded plans and records\nremain available under their original identity and links.",
+      "plan": "/docs/plans/066_engineering_records_and_development_map.md",
+      "record": "/docs/runbook/066_engineering_records_and_development_map.md",
+      "recordId": "er-066",
+      "scopeHash": "c27b934e82beb5878219c93aad831b273b32fa2c26731332dfed74f657f5f1d5",
+      "mapped": true,
+      "review": {
+        "state": "reviewed",
+        "reviewed": "2026-10-25",
+        "reviewer": "agent",
+        "items": [
+          {
+            "id": "Q1",
+            "kind": "investigation",
+            "state": "resolved",
+            "appliesTo": [
+              "m2"
+            ],
+            "blocks": [
+              "m2"
+            ],
+            "body": "- [x] How will a change to planned scope make the old readiness review visibly stale?\n  - Why it matters: an old approval of scope must not silently apply to new commitments.\n  - Next action: implement the fingerprint check and cover it with fixtures.\n  - Resolution: the review records a SHA-256 fingerprint of the scoped outcome, acceptance and relationships plus the review item text and targets; the checker reports unassessed when that input changes."
+          },
+          {
+            "id": "Q2",
+            "kind": "investigation",
+            "state": "resolved",
+            "appliesTo": [
+              "m2"
+            ],
+            "blocks": [
+              "m2"
+            ],
+            "body": "- [x] How do checked boxes distinguish a real answer from a deferral or a reopened question?\n  - Why it matters: a checkbox alone can make an unanswered decision appear closed.\n  - Next action: use explicit item state and require evidence for resolved/deferred states.\n  - Resolution: item metadata declares open, deferred or resolved; the checkbox must agree; resolved items require a Resolution line, deferred items require a reason, and reopened items preserve prior answers separately."
+          },
+          {
+            "id": "Q3",
+            "kind": "investigation",
+            "state": "open",
+            "appliesTo": [
+              "m4"
+            ],
+            "blocks": [
+              "m4"
+            ],
+            "body": "- [ ] Which document loaders, routes and tooling depend on the old names and paths?\n  - Why it matters: renaming a folder could break existing references and document discovery.\n  - Next action: inventory consumers before migration and prepare an old-to-new identity/link map."
+          }
+        ]
+      },
+      "phases": [
+        {
+          "id": "m1",
+          "title": "Formalize versioned metadata, phase identities, review items and two Markdown templates.",
+          "acceptance": "ordinary Markdown stays readable; missing, stale, clear, open and blocking reviews have distinct behavior; questions can be resolved, deferred and reopened without losing their meaning.",
+          "progress": "done",
+          "readiness": {
+            "state": "ready",
+            "open": 0,
+            "blockers": 0
+          }
+        },
+        {
+          "id": "m2",
+          "title": "Build the creation, validation and manifest helper; add agent authoring rules.",
+          "acceptance": "exclusive creation preserves existing files; reciprocal links, stable identities, review freshness, phase readiness and relationships validate; legacy documents remain readable as unassessed.",
+          "progress": "done",
+          "readiness": {
+            "state": "ready",
+            "open": 0,
+            "blockers": 0
+          }
+        },
+        {
+          "id": "m3",
+          "title": "Build a reusable viewer entry point and a demo-app adapter using real example pages, thumbnails and test summaries, plus an independent project fixture.",
+          "acceptance": "cards show scoped readiness, accepted goals, relationships and evidence age; selecting a concern opens its source; both projects use the same viewer; scope history distinguishes a developer-confirmed baseline from later proposed, accepted, deferred or rejected changes, and shows baseline and current accepted-scope progress separately when the data supports it.",
+          "progress": "done",
+          "readiness": {
+            "state": "ready",
+            "open": 0,
+            "blockers": 0
+          }
+        },
+        {
+          "id": "m4",
+          "title": "Adopt the format incrementally and migrate names or paths where useful.",
+          "acceptance": "link and identity audit passes; no plans or history disappear; old references resolve; package and public API checks pass where applicable.",
+          "progress": "planned",
+          "readiness": {
+            "state": "needs-resolution",
+            "open": 1,
+            "blockers": 1
+          }
+        }
+      ],
+      "progress": {
+        "done": 3,
+        "total": 4,
+        "percent": 75
+      },
+      "relations": [
+        {
+          "type": "builds-on",
+          "title": "Test Results Page and Case Thumbnails",
+          "href": "/docs/plans/058_test_results_page_and_thumbnails.md",
+          "path": "/docs/plans/058_test_results_page_and_thumbnails.md"
+        }
+      ],
+      "scopeHistory": {
+        "baseline": {
+          "state": "unconfirmed",
+          "goals": []
+        },
+        "changes": [
+          {
+            "id": "SC-066-M3",
+            "date": "2026-10-25",
+            "kind": "addition",
+            "origin": "requested",
+            "disposition": "accepted",
+            "scopeIds": [
+              "m3"
+            ],
+            "summary": "Add explicit scope history, baseline and current-scope progress to the development map.",
+            "reason": "Make scope growth visible without treating skimmed plan reviews as developer agreement.",
+            "impact": "Extend M3 with a normalized scope-history contract, viewer support and an independent fixture."
+          }
+        ]
+      }
+    }
+  ],
+  "generatedAt": "2026-10-25T19:16:47.474Z",
+  "currentFingerprint": "072dfd16-64eb4e5a",
+  "diagnostics": []
+}

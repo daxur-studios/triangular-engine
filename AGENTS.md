@@ -5,8 +5,8 @@
 - `projects/triangular-engine/` — the published Angular library.
 - `projects/demo-app/` — the local demo application.
 - `projects/triangular-engine/docs/` — cross-cutting library guides; they ship in the npm package. Each secondary entry point's guide is `projects/triangular-engine/<entry>/README.md`, next to its code, and ships with it.
-- `docs/runbook/` — design notes and implementation history for larger features.
-- `docs/plans/` — current work plans linked to their runbooks; [convention](docs/plans-and-runbooks.md).
+- `docs/runbook/` — Engineering Records (legacy runbook path): design notes and implementation history for larger features.
+- `docs/plans/` — current and preserved historical work plans linked to their Engineering Records; [convention](docs/plans-and-runbooks.md).
 - `docs/handover/` — notes for picking up unfinished work from an earlier session; [convention](docs/handover/README.md).
 - `instructions/` — maintainer workflows and historical project notes.
 - `.daxur/token-map.json` — repository token documentation manifest (see `docs/runbook/029_token_map_usage_guide.md`).
@@ -33,6 +33,7 @@ npm run test:triangular-engine:sink     # result receiver and summary (node --te
 npm run test:summary -- --suite <id> --last 3 --metric <text>  # read saved browser test results
 npm run test:receiver                   # save browser test results to artifacts/test-runs/
 npx ng serve demo-app
+npm run serve:demo-map                  # refresh the records manifest, then serve the development map
 daxur tokens map --floor 50000
 daxur tokens map status
 ```
@@ -50,6 +51,9 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 - Public symbols get TSDoc. IDE hovers show it to consumers, so write it for them.
 - Keep optional integrations isolated from the core entry point.
 - Before feature or part work, use its existing reciprocal plan/runbook pair or create one under `docs/plans/` and `docs/runbook/`.
+- Preserve numbered plans and Engineering Records after completion, abandonment or supersession. Record the outcome and replacement links; do not delete them, reuse their numbers, or silently erase earlier commitments. Retain existing paths until a link-preserving migration is implemented; see [the convention](docs/plans-and-runbooks.md).
+- Use `npm run docs:records:new -- --title "..." --slug ...` to allocate a shared number, create the reciprocal Markdown pair from templates, and update both indexes. `npm run docs:records:check` validates mapped documents; `npm run docs:records:review -- docs/plans/<file>.md agent` refreshes its scope fingerprint only after reviewing it. A preview from `npm run docs:records:next` is not a reservation. For a different workspace root, invoke `node scripts/engineering-records.mjs new --root <workspace> ...` directly. Read [the document format and workflow](docs/plans-and-runbooks.md#engineering-record-format-and-tooling) before authoring mapped plans.
+- Never run `docs:records:baseline` unless the developer explicitly confirms the exact scope snapshot; review markers, checkboxes and agent-authored reviewer fields are not confirmation. Keep confirmed baselines and dated scope changes in the paired Engineering Record; do not overwrite the history.
 - Do not edit generated output in `dist/` or `out-tsc/`; rebuild it instead.
 - Check `daxur tokens map status` when adding or expanding sublibraries to keep architecture docs in sync.
 

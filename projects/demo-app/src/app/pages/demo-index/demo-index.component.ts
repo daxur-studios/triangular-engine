@@ -95,6 +95,11 @@ export const DEMOS: readonly DemoItem[] = [
     categoryId: 'core', tier: 'lab', createdAt: '2026-10-20', entryPoints: ['testing'], package: 'triangular-engine',
     description: 'Browse the browser test runs the dev result receiver saved: a case thumbnail, median and p95, the change from a baseline run, and two runs side by side.',
   },
+  {
+    id: 'development-map', number: '066', title: 'Development Map', route: '/development-map',
+    categoryId: 'core', tier: 'lab', createdAt: '2026-10-25', entryPoints: ['development-map', 'testing'], package: 'triangular-engine/development-map',
+    description: 'Explore feature branches, example pages, plan readiness, scope history and saved test evidence in one reusable view.',
+  },
   // --- Shining Gems ---
   {
     id: 'photo-mode-lab',

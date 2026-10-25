@@ -31,6 +31,7 @@ Use public package entry points in consumer apps; do not import internal source 
 - Image compression adapter: `triangular-engine/image-compression`
 - TSL cell-planet surface material (WebGPURenderer): `triangular-engine/planet-material`
 - Reusable browser test runner and contracts: `triangular-engine/testing`
+- Reusable development progress viewer: `triangular-engine/development-map`
 
 For repeatable game tests, camera paths, visual review, performance diagnostics and
 one-click test URLs, use the [triangular-engine-testing skill](../triangular-engine-testing/SKILL.md).
@@ -60,6 +61,7 @@ in this repository. Each entry's TSDoc also shows in IDE hovers.
 | CPU/GPU/worker data transport                    | `gpu-data-flow/README.md`                                            |
 | Water, terrain, scatter                          | `water/README.md`, `terrain/README.md`, `scatter/README.md`          |
 | Browser test runner                              | `testing/README.md`, plus the `triangular-engine-testing` skill       |
+| Development map viewer                           | `development-map/README.md`                                           |
 
 ---
 

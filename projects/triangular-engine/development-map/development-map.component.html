@@ -1,0 +1,184 @@
+<main class="map-shell">
+  <header class="map-header">
+    <p class="eyebrow">Development map</p>
+    <h1>{{ project().title }}</h1>
+    @if (project().description) { <p class="description">{{ project().description }}</p> }
+    <div class="summary" aria-label="Project summary">
+      <span>{{ project().branches.length }} branches</span>
+      <span>{{ exampleCount() }} examples</span>
+      @if (unlinkedExampleCount()) { <span>{{ unlinkedExampleCount() }} without a linked document</span> }
+      <span>{{ concernCount() }} open concerns</span>
+    </div>
+  </header>
+
+  @if (project().diagnostics?.length) {
+    <aside class="diagnostics" aria-label="Project data diagnostics">
+      <strong>Some map data needs attention</strong>
+      @for (diagnostic of project().diagnostics; track $index) { <p>{{ diagnostic }}</p> }
+    </aside>
+  }
+
+  <div class="branches">
+    @for (branch of project().branches; track branch.id) {
+      <section class="branch" [attr.aria-labelledby]="'branch-' + branch.id">
+        <header class="branch-header">
+          <div>
+            <p class="eyebrow">{{ branch.examples.length }} examples</p>
+            <h2 [id]="'branch-' + branch.id">{{ branch.title }}</h2>
+            @if (branch.description) { <p>{{ branch.description }}</p> }
+          </div>
+          <span class="branch-mark" aria-hidden="true">↘</span>
+        </header>
+
+        @if (branch.examples.length) {
+          <div class="example-grid">
+            @for (example of branch.examples; track example.id) {
+              <article class="example-card">
+                <a class="preview" [href]="example.href" [attr.aria-label]="'Open ' + example.title">
+                  @if (example.thumbnailUrl) {
+                    <img [src]="example.thumbnailUrl" [alt]="'Preview for ' + example.title" loading="lazy" />
+                  } @else {
+                    <span class="preview-empty">Scene preview not captured</span>
+                  }
+                  <span class="open-mark" aria-hidden="true">↗</span>
+                </a>
+                <div class="card-body">
+                  <div class="card-title-row">
+                    <h3><a [href]="example.href">{{ example.title }}</a></h3>
+                    <span class="page-kind">Example</span>
+                  </div>
+                  @if (example.description) { <p class="example-description">{{ example.description }}</p> }
+                  @if (!example.documents.length) { <p class="document-gap">No plan or Engineering Record linked to this map card yet.</p> }
+
+                  @if (example.documents.length) {
+                    <div class="documents">
+                      @for (document of example.documents; track document.id) {
+                        <section class="document" [id]="document.id">
+                          <div class="document-heading">
+                            <div>
+                              <p class="eyebrow">{{ document.number ? 'Plan ' + document.number : 'Engineering Record' }}</p>
+                              <h4>{{ document.title }}</h4>
+                            </div>
+                            <span class="status" [attr.data-state]="document.readiness">{{ document.readiness }}</span>
+                          </div>
+                          @if (document.progress) {
+                            <div class="progress-line" [attr.aria-label]="document.progress.done + ' of ' + document.progress.total + ' scope goals complete'">
+                              <span class="progress-copy">{{ document.progress.done }}/{{ document.progress.total }} goals</span>
+                              <span class="progress-track"><span [style.width.%]="document.progress.percent"></span></span>
+                              <span class="progress-percent">{{ document.progress.percent }}%</span>
+                            </div>
+                          }
+
+                          @if (document.scope) {
+                            <div class="scope-summary">
+                              @if (document.scope.baselineState === 'confirmed' && document.scope.baseline) {
+                                <span>Baseline {{ document.scope.baseline.done }}/{{ document.scope.baseline.total }} · Current {{ document.scope.current.done }}/{{ document.scope.current.total }}</span>
+                                @if (document.scope.acceptedGrowth !== undefined) { <strong>{{ document.scope.acceptedGrowth > 0 ? '+' : '' }}{{ document.scope.acceptedGrowth }} accepted scope items</strong> }
+                              } @else if (document.scope.baselineState === 'confirmed') {
+                                <span>Baseline confirmed · progress cannot be matched to current scope IDs</span>
+                              } @else {
+                                <span>Baseline unconfirmed · scope growth unassessed</span>
+                              }
+                            </div>
+                          }
+
+                          @if (document.phases.length) {
+                            <details class="phase-details">
+                              <summary>Phases and readiness <span>{{ document.phases.length }}</span></summary>
+                              <ul>
+                                @for (phase of document.phases; track phase.id) {
+                                  <li><span class="phase-dot" [attr.data-state]="phase.state"></span><span>{{ phase.title }}</span><small>{{ phase.state }} · {{ phase.readiness }}</small></li>
+                                }
+                              </ul>
+                            </details>
+                          }
+
+                          @if (document.concerns.length) {
+                            <details class="concern-details">
+                              <summary>Questions and assumptions <span>{{ document.concerns.length }}</span></summary>
+                              @for (concern of document.concerns; track concern.id) {
+                                <details class="concern" [id]="document.id + '-' + concern.id">
+                                  <summary><span>{{ concern.id }} · {{ concern.state }}</span>{{ concern.title }}</summary>
+                                  <pre>{{ concern.body }}</pre>
+                                  @if (concern.sourceHref) { <a [href]="concern.sourceHref">{{ concern.sourceLabel || 'Open source' }}</a> }
+                                </details>
+                              }
+                            </details>
+                          }
+
+                          @if (document.relations.length) {
+                            <div class="relations" aria-label="Document relationships">
+                              @for (relation of document.relations; track relation.type + relation.href) {
+                                <a [href]="relation.href" [attr.data-relation]="relation.type">{{ relation.type }} · {{ relation.title }}</a>
+                              }
+                            </div>
+                          }
+
+                          @if (document.scope?.changes?.length) {
+                            <details class="scope-changes">
+                              <summary>Scope changes <span>{{ document.scope!.changes.length }}</span></summary>
+                              @for (change of document.scope!.changes; track change.id) {
+                                <article class="scope-change">
+                                  <div><strong>{{ change.summary }}</strong><span>{{ change.date }} · {{ change.origin }} · {{ change.disposition }}</span></div>
+                                  <p>{{ change.reason }}</p><small>{{ change.impact }} · {{ change.kind }} · {{ change.scopeIds.join(', ') }}</small>
+                                </article>
+                              }
+                            </details>
+                          }
+                        </section>
+                      }
+                    </div>
+                  }
+
+                  @if (example.evidence.length) {
+                    <div class="evidence-list">
+                      <div class="evidence-title"><span>Saved evidence</span><a [href]="example.evidence[0].href || '/tests'">All runs ↗</a></div>
+                      @for (evidence of example.evidence; track evidence.id) {
+                        <section class="evidence" [attr.data-stale]="evidence.stale === true ? 'true' : null">
+                          <div class="evidence-heading">
+                            <strong>{{ evidence.suite }} v{{ evidence.version }}</strong>
+                            <span>{{ evidence.savedAt | date:'mediumDate' }}</span>
+                          </div>
+                          <p class="verdicts">{{ evidence.automatedVerdict }} · performance {{ evidence.performanceVerdict }} · visual {{ evidence.visualReview }}@if (evidence.stale === true) { <b>· stale</b> }</p>
+                          @if (evidence.gpu) { <p class="hardware">{{ evidence.gpu }} · {{ evidence.profile }} · {{ evidence.mode }}</p> }
+                          @if (evidence.metrics.length) {
+                            <dl class="metrics">
+                              @for (metric of evidence.metrics; track metric.name) {
+                                <div><dt>{{ metric.name }}</dt><dd>med {{ metric.median }} {{ metric.unit }} · p95 {{ metric.p95 }} {{ metric.unit }}</dd></div>
+                              }
+                            </dl>
+                          }
+                          @if (evidence.thumbnailUrl) { <img class="test-thumbnail" [src]="evidence.thumbnailUrl" [alt]="'Saved test view for ' + evidence.suite" loading="lazy" /> }
+                          @if (evidence.warnings.length) { <p class="warnings">{{ evidence.warnings.join(' · ') }}</p> }
+                        </section>
+                      }
+                    </div>
+                  }
+                </div>
+              </article>
+            }
+          </div>
+        } @else {
+          <p class="empty-branch">No mapped examples in this branch yet.</p>
+        }
+      </section>
+    }
+  </div>
+
+  @if (timeline().length) {
+    <section class="timeline" aria-labelledby="timeline-title">
+      <header><p class="eyebrow">Progress over time</p><h2 id="timeline-title">Timeline</h2></header>
+      <ol>
+        @for (event of timeline(); track event.id) {
+          <li [attr.data-kind]="event.kind">
+            <time [attr.datetime]="event.date">{{ event.date | date:'mediumDate' }}</time>
+            <div><p class="event-kind">{{ event.kind }}@if (event.disposition) { · {{ event.disposition }} }</p>
+              <h3>{{ event.title }}</h3><p>{{ event.detail }}</p>
+              @if (event.href) { <a [href]="event.href">Open source</a> }
+            </div>
+          </li>
+        }
+      </ol>
+    </section>
+  }
+</main>

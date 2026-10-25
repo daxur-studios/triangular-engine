@@ -594,6 +594,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'development-map',
+    loadComponent: () =>
+      import('./pages/development-map/development-map-page.component').then(
+        ({ DevelopmentMapPageComponent }) => DevelopmentMapPageComponent,
+      ),
+  },
+  {
     path: 'tests',
     loadComponent: () =>
       import('./pages/test-results/test-results-page.component').then(
