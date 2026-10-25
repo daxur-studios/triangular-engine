@@ -2,38 +2,42 @@
 import { BufferAttribute, Color, FrontSide, InstancedBufferAttribute, InstancedBufferGeometry, Mesh, Vector3 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
-  Fn, abs, attribute, cos, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize, positionGeometry, select, sign,
-  smoothstep, step, tan, uniform, uniformArray, varying, vec2, vec3, vec4,
+  attribute, cos, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize, positionGeometry,
+  smoothstep, step, uniform, uniformArray, varying, vec2, vec3, vec4,
 } from 'three/tsl';
-import { FACE_FRAMES, PLANE_FRAME, cubePoint, type LodDomain, type Vec3 } from './lod-domain';
+import { FACE_FRAMES, PLANE_FRAME, type LodDomain, type Vec3 } from './lod-domain';
 import type { HeightSource } from './lod-height';
-import type { LodSelector, PatchCells } from './lod-selector';
+import { SIN_DENOMINATORS, anchorFor, latticeSteps, newAnchor } from './lod-lattice';
+import { maxLevelFor, type LodSelector, type PatchCells } from './lod-selector';
 
 /**
  * Plan 059 M1 renderer: one shared N x N grid drawn instanced, one instance per drawn leaf, one draw call.
  *
- * Precision (L7, without the Earth case, which is spike S1): every leaf gets its centre relative to the camera from
- * doubles on the CPU (`aOrigin`); the vertex stage adds the vertex's offset from that centre, computed so its float
- * error scales with the leaf size, not the radius. On the sphere the offset is R (c / |c| - cC / |cC|) rewritten as
- * R (dc / |c| - cC (dc . (2 cC + dc)) / (|c| |cC| (|c| + |cC|))), with dc from a tan difference and a per-leaf
- * correction for the float rounding of cC (`aCubeError`), so dc is the exact cube-space difference to float accuracy.
+ * Seams (L2, bit-identical): a vertex is addressed by integer lattice coordinates (U, V) on one grid per face of
+ * L = patchCells * 2^maxLevel steps (`lod-lattice.ts`), all exact in float32. Its position relative to the camera is a
+ * function of those coordinates (on the sphere: of the cube-lattice vector T, the same for both faces at a seam) and
+ * of per-frame uniforms only: the anchor, a lattice point near the camera, with its double-precision distance to the
+ * camera. No per-leaf float term enters, so every leaf that draws a vertex gets the same bits. An odd vertex on an
+ * edge next to a coarser leaf (mask bit) snaps by one grid cell onto the coarse leaf's own vertex.
  *
- * Cracks (L2): heights and normals are read at the vertex's global parameters, which are exact float lattice values
- * shared bit for bit by every leaf touching that vertex (the warp is exactly +-1 at a face edge, so neighbouring faces
- * agree too). Odd vertices on an edge next to a coarser leaf (mask bit) are placed at the mean of their two even
- * neighbours' final positions, which is where the coarser leaf's edge runs.
+ * Precision (L7, without the Earth case, which is spike S1): the vertex is anchorRel + R (c / |c| - cA / |cA|) with
+ * c = cA + dc and dc = tan(a) - tan(b) = sin(a - b) / (cos a cos b) for angles pi/4 T / L, where a - b comes from the
+ * exact integer T - TA, so dc has float relative accuracy and the offset error scales with the distance to the anchor,
+ * not the radius. R (...) is rewritten as R (dc / |c| - cA (dc . (2 cA + dc)) / (|c| |cA| (|c| + |cA|))).
  */
 
 export type LodView = 'lod' | 'shaded';
 
 /**
- * sin(x) for |x| under 1 (leaf offsets give at most about pi / 4) as a Taylor polynomial to x^9, below float rounding.
+ * sin(x) for |x| up to pi / 2 (lattice differences give at most that) as a Taylor polynomial to x^15, error below 1e-10.
  * The built-in `sin` is not safe here: WGSL only bounds its absolute error, and on an RTX 3080 that error wiped out
  * the small offsets of deep leaves (x about 1e-6) and opened holes between leaves on the sphere.
  */
 const smallSin = (x: any): any => {
   const x2 = x.mul(x);
-  return x.mul(float(1).sub(x2.div(6).mul(float(1).sub(x2.div(20).mul(float(1).sub(x2.div(42).mul(float(1).sub(x2.div(72)))))))));
+  let inner: any = float(1);
+  for (let k = SIN_DENOMINATORS.length - 1; k >= 0; k--) inner = float(1).sub(x2.div(SIN_DENOMINATORS[k]).mul(inner));
+  return x.mul(inner);
 };
 
 /** Floats per instance attribute (four vec4). */
@@ -87,7 +91,7 @@ function gridGeometry(cells: number, capacity: number): InstancedBufferGeometry 
   const geometry = new InstancedBufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(positions, 3));
   geometry.setIndex(new BufferAttribute(index, 1));
-  for (const name of ['aOrigin', 'aCube', 'aCubeError', 'aInfo']) {
+  for (const name of ['aLeaf', 'aInfo']) {
     geometry.setAttribute(name, new InstancedBufferAttribute(new Float32Array(capacity * STRIDE), STRIDE));
   }
   geometry.instanceCount = 0;
@@ -101,6 +105,8 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const { domain, patchCells, source, capacity } = options;
   const sphere = domain.kind === 'sphere';
   const equalAngle = domain.warp === 'equal-angle';
+  const maxLevel = maxLevelFor(patchCells);
+  const steps = latticeSteps(patchCells, maxLevel);
   const geometry = gridGeometry(patchCells, capacity);
   const frames = uniformArray(FACE_FRAMES.flatMap(({ u, v }) => [new Vector3(...u), new Vector3(...v)]), 'vec3') as any;
   const uFolding = uniform(1) as any;
@@ -108,61 +114,61 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const uLodColour = uniform(1) as any;
   const uBounds = uniform(1) as any;
   const uSun = uniform(new Vector3(0.4, 0.8, 0.45).normalize()) as any;
+  // Per-frame anchor (lod-lattice.ts): its lattice vector, cube point, rounding error, cosines, and distance to the camera.
+  const uAnchorT = uniform(new Vector3()) as any;
+  const uAnchorCube = uniform(new Vector3()) as any;
+  const uAnchorError = uniform(new Vector3()) as any;
+  const uAnchorCos = uniform(new Vector3(1, 1, 1)) as any;
+  const uAnchorRel = uniform(new Vector3()) as any;
   const size = float(domain.sizeM);
   const cells = float(patchCells);
 
-  const origin = attribute('aOrigin', 'vec4') as any;
-  const cube = attribute('aCube', 'vec4') as any;
-  const cubeError = attribute('aCubeError', 'vec4') as any;
-  const info = attribute('aInfo', 'vec4') as any;
-  const du = info.x;
-  const mask = info.z;
-  const face = info.w.toInt();
+  const leaf = attribute('aLeaf', 'vec4') as any; // U0, V0, lattice step per cell, face
+  const info = attribute('aInfo', 'vec4') as any; // level, edge mask
+  const mask = info.y;
+  const face = leaf.w.toInt();
   const axisU = sphere ? frames.element(face.mul(2)) : vec3(...PLANE_FRAME.u);
   const axisV = sphere ? frames.element(face.mul(2).add(1)) : vec3(...PLANE_FRAME.v);
   const axisN = sphere ? axisU.cross(axisV) : vec3(...PLANE_FRAME.n);
+  const centreLattice = leaf.xy.add(leaf.z.mul(patchCells / 2));
 
-  /** Cube coordinate of a parameter, exactly +-1 at the face edge. */
-  const warp = (u: any): any => {
-    const t = u.mul(2).sub(1);
-    if (!equalAngle) return t;
-    return select(abs(t).greaterThanEqual(1), sign(t), tan(t.mul(Math.PI / 4)));
-  };
-  /** Exact cube-space difference warp(u) - warp(uC) for a parameter offset d = u - uC. */
-  const warpDelta = (u: any, uC: any, d: any): any => {
-    if (!equalAngle) return d.mul(2);
-    return smallSin(d.mul(Math.PI / 2)).div(cos(u.mul(2).sub(1).mul(Math.PI / 4)).mul(cos(uC.mul(2).sub(1).mul(Math.PI / 4))));
-  };
-
-  /** Global base point (for heights and normals), the leaf-relative offset, and the outward normal at grid point g. */
-  const basePoint = (g: any) => {
-    const local = g.mul(1 / patchCells).sub(0.5).mul(du);
-    const uC = cube.w;
-    const vC = cubeError.w;
-    const u = uC.add(local.x);
-    const v = vC.add(local.y);
+  /**
+   * Position relative to the camera, global base point (for heights and normals) and outward normal at grid point g.
+   * Everything derives from the vertex's lattice coordinates and the anchor uniforms; `gap` shrinks the vertex toward
+   * its leaf centre in lattice units (the injected-gap control; it adds exactly 0 when 0).
+   */
+  const basePoint = (g: any, gap: any) => {
+    const lattice = leaf.xy.add(g.mul(leaf.z));
+    const toCentre = centreLattice.sub(lattice);
     if (!sphere) {
-      const global = axisU.mul(u.sub(0.5).mul(size)).add(axisV.mul(v.sub(0.5).mul(size)));
-      const offset = axisU.mul(local.x).add(axisV.mul(local.y)).mul(size);
-      return { global, offset, up: axisN };
+      const delta = lattice.sub(uAnchorT.xy).add(toCentre.mul(gap));
+      const offset = axisU.mul(delta.x).add(axisV.mul(delta.y)).mul(domain.sizeM / steps);
+      const global = axisU.mul(lattice.x.div(steps).sub(0.5).mul(size)).add(axisV.mul(lattice.y.div(steps).sub(0.5).mul(size)));
+      return { global, offset: uAnchorRel.add(offset), up: axisN };
     }
-    const up = normalize(axisN.add(axisU.mul(warp(u))).add(axisV.mul(warp(v))));
-    const cC = cube.xyz;
-    const dc = axisU.mul(warpDelta(u, uC, local.x)).add(axisV.mul(warpDelta(v, vC, local.y))).add(cubeError.xyz);
-    const c = cC.add(dc);
+    // Cube-lattice vector: one component is +-L; the others are 2U - L, 2V - L. Integers, exact in float32.
+    const t = axisN.mul(steps).add(axisU.mul(lattice.x.mul(2).sub(steps))).add(axisV.mul(lattice.y.mul(2).sub(steps)));
+    const dT = t.sub(uAnchorT).add(axisU.mul(toCentre.x.mul(2)).add(axisV.mul(toCentre.y.mul(2))).mul(gap));
+    const angle = Math.PI / 4 / steps;
+    // tan(a) - tan(b) = sin(a - b) / (cos a cos b), with a - b from the exact integer difference.
+    const dcRaw = equalAngle ? smallSin(dT.mul(angle)).div(cos(t.mul(angle)).mul(uAnchorCos)) : dT.div(steps);
+    const dc = dcRaw.add(uAnchorError);
+    const cA = uAnchorCube;
+    const c = cA.add(dc);
     const lc = c.length();
-    const lC = cC.length();
-    const offset = dc.div(lc).sub(cC.mul(dot(dc, cC.mul(2).add(dc)).div(lc.mul(lC).mul(lc.add(lC))))).mul(size);
-    return { global: up.mul(size), offset, up };
+    const lC = cA.length();
+    const offset = dc.div(lc).sub(cA.mul(dot(dc, cA.mul(2).add(dc)).div(lc.mul(lC).mul(lc.add(lC))))).mul(size);
+    const up = c.div(lc);
+    return { global: up.mul(size), offset: uAnchorRel.add(offset), up };
   };
 
-  const surfacePoint = Fn(([g]: [any]) => {
-    const { global, offset, up } = basePoint(g);
-    return origin.xyz.add(offset.mul(float(1).sub(uGap))).add(up.mul(source.heightNode(global)));
-  });
+  const surfacePoint = (g: any) => {
+    const { global, offset, up } = basePoint(g, uGap);
+    return offset.add(up.mul(source.heightNode(global)));
+  };
 
   const grid = positionGeometry.xy as any;
-  // Folding: an odd vertex on a coarser edge moves to the mean of its even neighbours along that edge.
+  // Folding: an odd vertex on a coarser edge snaps one grid cell back along that edge, onto the coarse leaf's own vertex.
   const oddX = mod(grid.x, 2);
   const oddY = mod(grid.y, 2);
   const south = float(1).sub(step(0.5, grid.y));
@@ -172,15 +178,15 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const alongX = min(1, south.mul(bit(mask, 0)).add(north.mul(bit(mask, 2)))).mul(oddX).mul(uFolding);
   const alongY = min(1, east.mul(bit(mask, 1)).add(west.mul(bit(mask, 3)))).mul(oddY).mul(uFolding);
   const foldStep = vec2(alongX as any, alongY as any);
-  const positionNode = surfacePoint(grid.sub(foldStep)).add(surfacePoint(grid.add(foldStep))).mul(0.5);
+  const positionNode = surfacePoint(grid.sub(foldStep));
 
   // Lighting normal from the height gradient at the vertex's own grid point.
-  const own = basePoint(grid);
+  const own = basePoint(grid, float(0));
   const gradient = source.gradientNode(own.global) as any;
   const tangential = gradient.sub(own.up.mul(dot(gradient, own.up)));
   const shadingNormal = varying(normalize(own.up.sub(tangential)), 'vLodNormal') as any;
   const patchUv = varying(grid.mul(1 / patchCells), 'vLodPatchUv') as any;
-  const level = varying(info.y, 'vLodLevel') as any;
+  const level = varying(info.x, 'vLodLevel') as any;
 
   const hue = fract(level.mul(0.137).add(0.05));
   const palette = vec3(0.5).add(vec3(0.5).mul(cos(vec3(hue, hue.add(1 / 3), hue.add(2 / 3)).mul(2 * Math.PI))));
@@ -202,9 +208,9 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   mesh.frustumCulled = false;
   mesh.name = 'LOD surface';
 
-  const attributes = ['aOrigin', 'aCube', 'aCubeError', 'aInfo'].map((name) => geometry.getAttribute(name) as InstancedBufferAttribute);
-  const [originData, cubeData, errorData, infoData] = attributes.map((attr) => attr.array as Float32Array);
-  const point: Vec3 = [0, 0, 0];
+  const attributes = ['aLeaf', 'aInfo'].map((name) => geometry.getAttribute(name) as InstancedBufferAttribute);
+  const [leafData, infoData] = attributes.map((attr) => attr.array as Float32Array);
+  const anchor = newAnchor();
 
   return {
     mesh,
@@ -215,38 +221,16 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
       for (let k = 0; k < count; k++) {
         const node = selector.leaves[k];
         const level = selector.level[node];
-        const step = 1 / 2 ** level;
-        const uC = (selector.i[node] + 0.5) * step;
-        const vC = (selector.j[node] + 0.5) * step;
+        const stepLattice = 2 ** (maxLevel - level);
         const o = k * STRIDE;
-        const root = selector.root[node];
-        if (sphere) {
-          // cC rounded to float as the shader sees it; the origin is that float point on the sphere, in doubles.
-          cubePoint(root, uC, vC, domain.warp, point);
-          let length2 = 0;
-          for (let a = 0; a < 3; a++) {
-            const rounded = Math.fround(point[a]);
-            cubeData[o + a] = rounded;
-            errorData[o + a] = point[a] - rounded;
-            length2 += rounded * rounded;
-          }
-          const scale = domain.sizeM / Math.sqrt(length2);
-          for (let a = 0; a < 3; a++) originData[o + a] = cubeData[o + a] * scale - camera[a];
-        } else {
-          const x = (uC - 0.5) * domain.sizeM;
-          const y = (vC - 0.5) * domain.sizeM;
-          for (let a = 0; a < 3; a++) {
-            originData[o + a] = x * PLANE_FRAME.u[a] + y * PLANE_FRAME.v[a] - camera[a];
-            cubeData[o + a] = 0;
-            errorData[o + a] = 0;
-          }
-        }
-        cubeData[o + 3] = uC;
-        errorData[o + 3] = vC;
-        infoData[o] = step;
-        infoData[o + 1] = level;
-        infoData[o + 2] = selector.masks[k];
-        infoData[o + 3] = root;
+        leafData[o] = selector.i[node] * patchCells * stepLattice;
+        leafData[o + 1] = selector.j[node] * patchCells * stepLattice;
+        leafData[o + 2] = stepLattice;
+        leafData[o + 3] = selector.root[node];
+        infoData[o] = level;
+        infoData[o + 1] = selector.masks[k];
+        infoData[o + 2] = 0;
+        infoData[o + 3] = 0;
       }
       for (const attr of attributes) {
         attr.clearUpdateRanges();
@@ -254,6 +238,12 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
         attr.needsUpdate = true;
       }
       geometry.instanceCount = count;
+      anchorFor(domain, camera, steps, anchor);
+      (uAnchorT.value as Vector3).set(...anchor.t);
+      (uAnchorCube.value as Vector3).set(...anchor.cube);
+      (uAnchorError.value as Vector3).set(...anchor.error);
+      (uAnchorCos.value as Vector3).set(...anchor.cos);
+      (uAnchorRel.value as Vector3).set(...anchor.rel);
       return count;
     },
     setView(view) { uLodColour.value = view === 'lod' ? 1 : 0; },

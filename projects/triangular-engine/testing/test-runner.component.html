@@ -45,7 +45,7 @@
       @if (running()) {
         <button type="button" class="primary wide" (click)="cancel()">Cancel</button>
       } @else {
-        <button type="submit" class="primary wide" [disabled]="externalBusy() || !available() || form.invalid">Run</button>
+        <button type="submit" class="primary wide" [disabled]="externalBusy() || !available() || form.invalid">Run suite</button>
       }
       <button type="button" (click)="copyLaunchLink()" [disabled]="form.invalid" title="Copy launch link" aria-label="Copy launch link">Link</button>
       <details #runMenu class="run-menu">

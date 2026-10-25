@@ -60,6 +60,47 @@
   <label>sun azimuth {{ sunAzimuth() }}°
     <input type="range" min="-180" max="180" step="5" [value]="sunAzimuth()" (input)="setSunAzimuth($event)" />
   </label>
+  <p class="row">
+    Sun:
+    <button (click)="sunElevation.set(70)" [class.on]="sunElevation() === 70">noon</button>
+    <button (click)="sunElevation.set(25)" [class.on]="sunElevation() === 25">afternoon</button>
+    <button (click)="sunElevation.set(8)" [class.on]="sunElevation() === 8">low sun</button>
+  </p>
+  <hr />
+  <h3>Forest (Q1 · Q3)</h3>
+  <p>{{ forestText() }} · {{ treeCount() }} trees</p>
+  <p class="row">
+    <button (click)="focusForest()" [disabled]="!site()">go to forest</button>
+    <button (click)="focusRunway()" [disabled]="!focus()">back to runway</button>
+  </p>
+  <label>altitude {{ altitudeM() }} m (log)
+    <input type="range" min="0" max="1" step="0.002" [value]="altitudeLog()" (input)="setAltitudeLog($event)" />
+  </label>
+  <p class="row">
+    Show:
+    <button (click)="setViewMode(0)" [class.on]="viewMode() === 0">both</button>
+    <button (click)="setViewMode(1)" [class.on]="viewMode() === 1">instances only</button>
+    <button (click)="setViewMode(2)" [class.on]="viewMode() === 2">layer only</button>
+  </p>
+  <label>fade starts {{ fadeStartM() }} m
+    <input type="range" min="100" max="4000" step="10" [value]="fadeStartM()" (input)="setFadeStart($event)" />
+  </label>
+  <label>fade width {{ fadeWidthM() }} m
+    <input type="range" min="50" max="4000" step="10" [value]="fadeWidthM()" (input)="setFadeWidth($event)" />
+  </label>
+  <p class="row">
+    <button (click)="resetFadeBand()">band from tree size ({{ crownWidthM }} m crown: {{ forestBand.startM.toFixed(0) }}–{{ forestBand.endM.toFixed(0) }} m)</button>
+  </p>
+  <label>density scale {{ densityScale() }}
+    <input type="range" min="0" max="2" step="0.05" [value]="densityScale()" (input)="setDensityScale($event)" />
+  </label>
+  <p class="row">
+    Shadow steps:
+    @for (steps of [0, 2, 4]; track steps) {
+      <button (click)="setShadowSteps(steps)" [class.on]="shadowSteps() === steps">{{ steps }}</button>
+    }
+  </p>
+  <hr />
   <label>exposure {{ exposure() }}
     <input type="range" min="1" max="30" step="0.5" [value]="exposure()" (input)="setExposure($event)" />
   </label>

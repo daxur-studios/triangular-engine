@@ -9,6 +9,62 @@ const history: readonly TestSuite<Settings>[] = [1, 2].map((version) => ({
 }));
 
 describe('TestRunnerComponent', () => {
+  it('keeps all A/B rounds together when Run all is clicked and clears an older batch result', async () => {
+    await TestBed.configureTestingModule({ imports: [TestRunnerComponent] }).compileComponents();
+    const fixture = TestBed.createComponent<TestRunnerComponent<Settings, number>>(TestRunnerComponent);
+    const suite: TestSuite<Settings> = {
+      id: 'paired', version: 1, title: 'Paired comparison', purpose: 'performance', requiresVisualReview: false,
+      ablation: { feature: 'extra work', metrics: ['cost'] },
+      scenarios: ['A', 'B', 'A', 'B'].map((arm, index) => ({
+        id: `round-${index}`, label: `Round ${index}`, durationMs: 1, warmupMs: 0,
+        settings: { value: arm === 'A' ? 1 : 2 }, ablation: { group: 'workload', arm: arm as 'A' | 'B' },
+      })),
+    };
+    let applied = 0;
+    const measured: string[] = [];
+    const adapter: TestRunAdapter<Settings, number> = {
+      capture: () => applied, apply: (scenario) => { applied = scenario.settings.value; }, ready: async () => {},
+      measure: async (scenario) => {
+        measured.push(scenario.id);
+        return { metrics: [{ name: 'cost', unit: 'ms', source: 'deterministic test input', samples: [applied, applied] }] };
+      },
+      restore: (snapshot) => { applied = snapshot; },
+    };
+    fixture.componentRef.setInput('suites', [suite]);
+    fixture.componentRef.setInput('adapter', adapter);
+    fixture.componentRef.setInput('resultSink', false);
+    fixture.componentRef.setInput('copyOnFinish', false);
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    component.form.controls.profile.setValue('headless-hardware');
+    const completed: TestRunResult<Settings>[] = [];
+    component.completed.subscribe((run) => completed.push(run));
+    // An earlier independent batch should disappear when the whole suite starts.
+    await component.runBatch([{ suiteId: suite.id, suiteVersion: 1, scenarioId: suite.scenarios[0].id }]);
+    expect(component.batchEntries().length).toBe(1);
+    completed.length = 0;
+    measured.length = 0;
+    const finished = new Promise<void>((resolve) => {
+      component.completed.subscribe(() => resolve());
+    });
+    const menu = fixture.nativeElement.querySelector('.run-menu') as HTMLDetailsElement;
+    menu.open = true;
+    (menu.querySelector('button') as HTMLButtonElement).click();
+    await finished;
+    fixture.detectChanges();
+    expect(menu.open).toBeFalse();
+    expect(completed.length).toBe(1);
+    expect(component.result()?.cases.length).toBe(4);
+    expect(measured).toEqual(suite.scenarios.map((scenario) => scenario.id));
+    expect(component.result()?.ablations?.[0].result.a.rounds.length).toBe(2);
+    expect(component.result()?.ablations?.[0].result.b.rounds.length).toBe(2);
+    expect(component.result()?.ablations?.[0].result.verdict).toBe('slower');
+    expect(component.batchEntries()).toEqual([]);
+    expect(applied).toBe(0);
+    expect(fixture.nativeElement.textContent).toContain('Run suite');
+    fixture.destroy();
+  });
+
   it('uses reactive form selection, runs latest, restores and requires explicit visual review', async () => {
     await TestBed.configureTestingModule({ imports: [TestRunnerComponent] }).compileComponents();
     const fixture = TestBed.createComponent<TestRunnerComponent<Settings, number>>(TestRunnerComponent);

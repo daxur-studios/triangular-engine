@@ -1,7 +1,9 @@
 import { poseView, resolveCamera, frustumNormals } from './lod-camera';
 import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
-import { EDGE_STEP, cubePoint, domainPoint, domainPreset, neighbourCell, warpCoordinate, type LodDomain, type NeighbourCell, type Vec3 } from './lod-domain';
+import { EDGE_STEP, FACE_FRAMES, cubePoint, domainPoint, domainPreset, neighbourCell, warpCoordinate, type LodDomain, type NeighbourCell, type Vec3 } from './lod-domain';
 import { createHeightSource } from './lod-height';
+import { createLodSurfaceMesh } from './lod-surface-mesh';
+import { anchorFor, cubeLattice, foldedGrid, gridLattice, latticeSteps, leafLattice, planeVertexF32, smallSinF32, sphereVertexF32 } from './lod-lattice';
 import { CAP_SLACK, LodSelector, maxLevelFor, type SelectorSettings, type SelectorView } from './lod-selector';
 import { createLodSurfaceTestAdapter, settingsMismatches, type LodSurfaceTestHost } from './lod-surface-test-adapter';
 import type { LodSurfaceTestSettings } from './lod-surface-tests';
@@ -267,22 +269,154 @@ describe('Plan 059 vertex offset (shader formula, in doubles)', () => {
 });
 
 describe('Plan 059 small-angle sine (shader polynomial, in float steps)', () => {
-  /** The shader's `smallSin`, every operation rounded to float as the GPU does. */
-  function smallSinFloat(x: number): number {
-    const f = Math.fround;
-    const xf = f(x);
-    const x2 = f(xf * xf);
-    let inner = f(1 - f(x2 / 72));
-    inner = f(1 - f(f(x2 / 42) * inner));
-    inner = f(1 - f(f(x2 / 20) * inner));
-    inner = f(1 - f(f(x2 / 6) * inner));
-    return f(xf * inner);
-  }
-
-  it('keeps float relative accuracy from deep-leaf offsets up to a whole face', () => {
-    for (const x of [1e-7, 3e-6, 1e-4, 0.01, 0.3, Math.PI / 4, 0.85]) {
+  it('keeps float relative accuracy from deep-leaf offsets up to a quarter turn', () => {
+    for (const x of [1e-7, 3e-6, 1e-4, 0.01, 0.3, Math.PI / 4, 0.85, 1.3, Math.PI / 2]) {
       const exact = Math.sin(Math.fround(x));
-      expect(Math.abs(smallSinFloat(x) - exact) / exact).toBeLessThan(1e-6);
+      expect(Math.abs(smallSinF32(x) - exact) / exact).toBeLessThan(1e-6);
+    }
+  });
+});
+
+describe('Plan 059 bit-identical seam lattice', () => {
+  const cells = 32;
+  const maxLevel = maxLevelFor(cells);
+  const steps = latticeSteps(cells, maxLevel);
+  const bitsOf = (v: readonly number[]) => v.map((x) => Math.fround(x)).join(',');
+
+  it('uses 2^24 lattice steps per face side for every patch size', () => {
+    for (const c of [16, 32, 64] as const) expect(latticeSteps(c, maxLevelFor(c))).toBe(2 ** 24);
+  });
+
+  it('addresses a shared edge vertex by the same lattice point from same-level neighbours', () => {
+    const west = leafLattice(0, 5, 3, 7, cells, maxLevel);
+    const east = leafLattice(0, 5, 4, 7, cells, maxLevel);
+    for (let g = 0; g <= cells; g++) expect(gridLattice(west, cells, g)).toEqual(gridLattice(east, 0, g));
+    const south = leafLattice(0, 5, 3, 6, cells, maxLevel);
+    for (let g = 0; g <= cells; g++) expect(gridLattice(west, g, 0)).toEqual(gridLattice(south, g, cells));
+    const deep = leafLattice(0, maxLevel, 2 ** maxLevel - 1, 2 ** maxLevel - 1, cells, maxLevel);
+    expect(gridLattice(deep, cells, cells)).toEqual([steps, steps]);
+  });
+
+  it('gives the same float position on the sphere and the plane for same-level neighbours', () => {
+    const camera: Vec3 = [1_234_567, 2_345_678, 3_456_789];
+    for (const domain of [sphere600, plane, domainPreset('sphere-600km', 'none')]) {
+      const isPlane = domain.kind === 'plane';
+      const anchor = anchorFor(domain, isPlane ? [30_000, 2, -10_000] : camera, steps);
+      const west = leafLattice(isPlane ? 0 : 4, 7, 100, 61, cells, maxLevel);
+      const east = leafLattice(west.root, 7, 101, 61, cells, maxLevel);
+      for (let g = 0; g <= cells; g++) {
+        const [u1, v1] = gridLattice(west, cells, g);
+        const [u2, v2] = gridLattice(east, 0, g);
+        const a = isPlane ? planeVertexF32(domain, steps, u1, v1, anchor) : sphereVertexF32(domain, steps, cubeLattice(west.root, u1, v1, steps), anchor);
+        const b = isPlane ? planeVertexF32(domain, steps, u2, v2, anchor) : sphereVertexF32(domain, steps, cubeLattice(east.root, u2, v2, steps), anchor);
+        expect(bitsOf(a)).toBe(bitsOf(b));
+      }
+    }
+  });
+
+  it('folds a fine edge vertex exactly onto the coarse neighbour vertex, with identical float positions', () => {
+    const anchor = anchorFor(sphere600, [10, 5_000, 599_000], steps);
+    // Fine leaves (level 5, i = 15) sit west of a coarse leaf (level 4, i = 8): their east edge, mask bit 1, is the coarser one.
+    const coarse = leafLattice(4, 4, 8, 1, cells, maxLevel);
+    for (const j of [2, 3]) {
+      const fine = leafLattice(4, 5, 15, j, cells, maxLevel);
+      for (let g = 0; g <= cells; g++) {
+        const [fx, fy] = foldedGrid(cells, g, cells, 1 << 1);
+        const [u, v] = gridLattice(fine, fx, fy);
+        const gy = (v - coarse.v0) / coarse.step;
+        expect(Number.isInteger(gy) && gy >= 0 && gy <= cells).toBeTrue();
+        expect(gridLattice(coarse, 0, gy)).toEqual([u, v]);
+        const a = sphereVertexF32(sphere600, steps, cubeLattice(4, u, v, steps), anchor);
+        const [cu, cv] = gridLattice(coarse, 0, gy);
+        const b = sphereVertexF32(sphere600, steps, cubeLattice(4, cu, cv, steps), anchor);
+        expect(bitsOf(a)).toBe(bitsOf(b));
+        expect(foldedGrid(cells, g, cells, 1 << 1, false)).toEqual([cells, g]);
+      }
+    }
+    expect(foldedGrid(3, 0, cells, 1)).toEqual([2, 0]);
+    expect(foldedGrid(3, 0, cells, 4)).toEqual([3, 0]);
+    expect(foldedGrid(3, cells, cells, 4)).toEqual([2, cells]);
+    expect(foldedGrid(0, 5, cells, 8)).toEqual([0, 4]);
+    expect(foldedGrid(4, 0, cells, 1)).toEqual([4, 0]);
+  });
+
+  it('gives one cube-lattice vector, so one position, to a seam vertex from every face that has it', () => {
+    let seams = 0;
+    for (let f = 0; f < 6; f++) {
+      for (const [u, v] of [[steps, 0], [steps, steps], [steps, 12_345_678], [0, 7], [99, steps], [steps - 5, 0]]) {
+        const t = cubeLattice(f, u, v, steps);
+        const anchor = anchorFor(sphere600, [(u - steps / 2) * 0.05 + 1, 3, 600_000], steps);
+        for (let g = 0; g < 6; g++) {
+          if (g === f) continue;
+          const { n: gn, u: gu, v: gv } = FACE_FRAMES[g];
+          if (t[0] * gn[0] + t[1] * gn[1] + t[2] * gn[2] !== steps) continue;
+          const dotWith = (axis: Vec3) => t[0] * axis[0] + t[1] * axis[1] + t[2] * axis[2];
+          const other = cubeLattice(g, (dotWith(gu) + steps) / 2, (dotWith(gv) + steps) / 2, steps);
+          expect(other).toEqual(t);
+          expect(bitsOf(sphereVertexF32(sphere600, steps, other, anchor))).toBe(bitsOf(sphereVertexF32(sphere600, steps, t, anchor)));
+          seams++;
+        }
+      }
+    }
+    expect(seams).toBeGreaterThan(20);
+  });
+
+  it('keeps the float position within millimetres of the double position near the camera (eye 2 m, sphere 600 km)', () => {
+    const position: Vec3 = [0, 0, 0];
+    const normal: Vec3 = [0, 0, 0];
+    domainPoint(sphere600, 4, 0.4137, 0.5921, position, normal);
+    const camera: Vec3 = [position[0] + normal[0] * 2, position[1] + normal[1] * 2, position[2] + normal[2] * 2];
+    const anchor = anchorFor(sphere600, camera, steps);
+    const reference: Vec3 = [0, 0, 0];
+    const normalOut: Vec3 = [0, 0, 0];
+    for (const radius of [0.5, 5, 50, 500, 5000]) {
+      for (let k = 0; k < 40; k++) {
+        const lu = Math.round((0.4137 + (Math.cos(k * 2.4) * radius) / (sphere600.sizeM * 1.5708)) * steps);
+        const lv = Math.round((0.5921 + (Math.sin(k * 2.4) * radius) / (sphere600.sizeM * 1.5708)) * steps);
+        domainPoint(sphere600, 4, lu / steps, lv / steps, reference, normalOut);
+        const exact = reference.map((value, a) => value - camera[a]);
+        const float = sphereVertexF32(sphere600, steps, cubeLattice(4, lu, lv, steps), anchor);
+        expect(Math.hypot(float[0] - exact[0], float[1] - exact[1], float[2] - exact[2])).toBeLessThan(2e-3 + radius * 2e-6);
+      }
+    }
+  });
+
+  it('keeps the plane position within a millimetre of the double position near the camera', () => {
+    const camera: Vec3 = [12_345.678, 2, -23_456.789];
+    const anchor = anchorFor(plane, camera, steps);
+    const unit = plane.sizeM / steps;
+    for (const [du, dv] of [[0, 0], [300, -4], [-5000, 1200]]) {
+      const lu = Math.round((camera[0] / plane.sizeM + 0.5) * steps) + du;
+      const lv = Math.round((-camera[2] / plane.sizeM + 0.5) * steps) + dv;
+      const exact = [(lu / steps - 0.5) * plane.sizeM - camera[0], -camera[1], -(lv / steps - 0.5) * plane.sizeM - camera[2]];
+      const float = planeVertexF32(plane, steps, lu, lv, anchor);
+      expect(Math.hypot(float[0] - exact[0], float[1] - exact[1], float[2] - exact[2])).toBeLessThan(1e-3 + Math.hypot(du, dv) * unit * 2e-7);
+    }
+  });
+
+  it('moves a shrunk vertex only when the gap is on', () => {
+    const anchor = anchorFor(sphere600, [0, 0, 600_002], steps);
+    const t = cubeLattice(4, steps / 2 + 100, steps / 2 + 200, steps);
+    const centre = cubeLattice(4, steps / 2 + 132, steps / 2 + 232, steps);
+    const plain = sphereVertexF32(sphere600, steps, t, anchor);
+    expect(bitsOf(sphereVertexF32(sphere600, steps, t, anchor, [0, 0, 0], 0, centre))).toBe(bitsOf(plain));
+    expect(bitsOf(sphereVertexF32(sphere600, steps, t, anchor, [0, 0, 0], 0.1, centre))).not.toBe(bitsOf(plain));
+  });
+});
+
+describe('Plan 059 surface mesh construction', () => {
+  it('builds the vertex graph and uploads lattice attributes for the sphere and the plane', () => {
+    for (const domain of [sphere600, plane]) {
+      const source = createHeightSource('bumps', domain.kind);
+      const selector = new LodSelector(settingsFor(domain, { mode: 'fixed', fixedLevel: 2 }));
+      const view = viewFor(domain, 'eye-2m');
+      selector.select(view);
+      const surface = createLodSurfaceMesh({ domain, patchCells: 32, source, capacity: 2048 });
+      const count = surface.upload(selector, view.camera);
+      expect(count).toBe(selector.stats.drawn);
+      const leaf = (surface.mesh.geometry.getAttribute('aLeaf') as { array: Float32Array }).array;
+      expect(leaf[2]).toBe(2 ** (maxLevelFor(32) - 2));
+      surface.dispose();
     }
   });
 });

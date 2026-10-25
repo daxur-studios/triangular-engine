@@ -232,14 +232,15 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     return this.runSelected();
   }
 
-  async runSelected(): Promise<void> {
+  async runSelected(mode?: TestMode): Promise<void> {
     if (this.running() || !this.available() || this.externalBusy() || this.form.invalid) return;
-    const options = this.form.getRawValue();
+    const options = { ...this.form.getRawValue(), ...(mode ? { mode } : {}) };
     const suite = this.suites().find((item) => testSuiteKey(item) === options.suite);
     if (!suite) { this.message.set('Unknown test selection'); return; }
     this.running.set(true);
     this.form.disable({ emitEvent: false });
     this.result.set(null);
+    this.batchEntries.set([]);
     this.savedFile.set(undefined);
     this.saveStatus.set('');
     this.reviewNotes.reset();
@@ -284,10 +285,11 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     this.batchTests.update((tests) => [...tests, { suiteId: suite.id, suiteVersion: suite.version, scenarioId }]);
   }
 
-  /** Runs every scenario of the chosen suite as a batch in one mode (the ⋮ menu); the form's mode when none is given. */
+  /** Keeps A/B rounds in one session; independent scenarios retain incremental batch saves. */
   runAll(mode?: TestMode): Promise<void> {
     const suite = this.suites().find((item) => testSuiteKey(item) === this.form.controls.suite.value);
     if (!suite) return Promise.resolve();
+    if (suite.ablation) return this.runSelected(mode);
     const tests = suite.scenarios.map((scenario) => ({ suiteId: suite.id, suiteVersion: suite.version, scenarioId: scenario.id }));
     return this.runBatch(tests, mode);
   }

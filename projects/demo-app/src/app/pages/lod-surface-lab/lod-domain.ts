@@ -96,7 +96,7 @@ export function domainPoint(domain: LodDomain, root: number, u: number, v: numbe
 }
 
 /** Which face a direction falls on and its unwarped plane coordinates s, t in [-1, 1] there. */
-function faceOfDirection(x: number, y: number, z: number): { face: number; s: number; t: number } {
+export function faceOfDirection(x: number, y: number, z: number): { face: number; s: number; t: number } {
   const ax = Math.abs(x);
   const ay = Math.abs(y);
   const az = Math.abs(z);
