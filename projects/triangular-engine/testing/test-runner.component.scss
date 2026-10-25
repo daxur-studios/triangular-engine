@@ -16,6 +16,10 @@ label.check input { width: auto; }
 details { margin-block: 0.5rem; }
 summary { cursor: pointer; color: var(--ui-muted, #b0becd); font-size: 0.85rem; }
 .actions { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-block: 0.5rem; }
+.run-menu { position: relative; }
+.run-menu > summary { list-style: none; cursor: pointer; padding: 0 0.5rem; }
+.run-menu > summary::-webkit-details-marker { display: none; }
+.run-menu-items { position: absolute; z-index: 1; display: flex; flex-direction: column; gap: 0.3rem; padding: 0.4rem; background: inherit; border: 1px solid currentColor; }
 button { padding: 0.4rem 0.6rem; border: 1px solid var(--ui-border, #627080); border-radius: 0.25rem; color: inherit; background: var(--ui-surface-raised, #253242); cursor: pointer; }
 button.primary { border-color: var(--ui-accent, #8ac9ff); }
 button.wide { flex: 1; }

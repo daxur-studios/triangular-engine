@@ -1,16 +1,19 @@
 ---
 type: Plan
 title: LOD Surface Core for Water and Terrain
-description: A fresh, WebGPU-only, performance-tested level-of-detail surface (a height over a plane or a sphere, drawn as one instanced grid whose density follows pluggable criteria), shown first on a flat and a sphere lab page, then used by a new water surface and later by low-detail terrain. Review done (three agents, two rounds) and owner decisions taken; M1 and spike S1 next; nothing built.
+description: A fresh, WebGPU-only, performance-tested level-of-detail surface (a height over a plane or a sphere, drawn as one instanced grid whose density follows pluggable criteria), shown first on a flat and a sphere lab page, then used by a new water surface and later by low-detail terrain. Review and owner decisions done. M1 lab built (demo-app `/lod-surface-lab`, suite `lod-surface-baseline` v1, 25 headless specs green); its gates are not yet measured, and CPU selection is 8-15x over budget in Node, so a persistent tree comes next. Spike S1 not started.
 timestamp: 2026-10-24T00:00:00Z
 tags: [lod, mesh, quadtree, sphere, plane, water, terrain, webgpu, tsl, performance, testing]
 runbook: /docs/runbook/059_lod_surface_core.md
-performance: []
+performance:
+  - id: lod-surface-baseline-v1
+    url: http://triangular-demo.localhost:4200/lod-surface-lab?testSuite=lod-surface-baseline&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
+    status: runnable-hardware-unmeasured
 ---
 
 # Plan 059: LOD Surface Core for Water and Terrain
 
-Status: **draft, nothing built.** Written 2026-10-24 after an owner discussion. Before anything is built, the
+Status: **M1 in progress (2026-10-25):** lab page, selector, renderer, crack probe and suite built and spec-tested; gates not yet measured on hardware; selection CPU over budget (see [Runbook 059](/docs/runbook/059_lod_surface_core.md)). Earlier status: **draft, nothing built.** Written 2026-10-24 after an owner discussion. Before anything is built, the
 direction is reviewed by three agents: [LOD surface review](/docs/plans/059_lod_surface_review.md). The
 architecture below is Claude's proposal and may change with the review.
 Evidence: [Runbook 059](/docs/runbook/059_lod_surface_core.md).

@@ -25,6 +25,20 @@
       @if (copyOnFinish()) {
         <label class="check"><input type="checkbox" [formControl]="copyWhenDone" /> Copy for agent when done</label>
       }
+      <fieldset class="batch">
+        <legend>Batch (runs in order, one test at a time)</legend>
+        <select [formControl]="batchScenario" aria-label="Scenario to add">
+          @for (scenario of selectedScenarios(); track scenario.id) { <option [value]="scenario.id">{{ scenario.label }}</option> }
+        </select>
+        <button type="button" (click)="addToBatch()" [disabled]="running()">Add to batch</button>
+        <ol>
+          @for (test of batchTests(); track $index) {
+            <li>{{ batchLabel(test) }} <button type="button" (click)="removeFromBatch($index)" [disabled]="running()" aria-label="Remove from batch">x</button></li>
+          }
+        </ol>
+        <button type="button" (click)="runBatch()" [disabled]="running() || externalBusy() || !available() || form.invalid || !batchTests().length">Run batch ({{ batchTests().length }})</button>
+        <button type="button" (click)="clearBatch()" [disabled]="running() || !batchTests().length">Clear</button>
+      </fieldset>
       <button type="button" (click)="runLatest()" [disabled]="running() || externalBusy() || !available() || !latest() || form.invalid">Run latest test</button>
     </details>
     <div class="actions">
@@ -34,6 +48,14 @@
         <button type="submit" class="primary wide" [disabled]="externalBusy() || !available() || form.invalid">Run</button>
       }
       <button type="button" (click)="copyLaunchLink()" [disabled]="form.invalid" title="Copy launch link" aria-label="Copy launch link">Link</button>
+      <details #runMenu class="run-menu">
+        <summary aria-label="More run options" title="More run options">⋮</summary>
+        <div class="run-menu-items">
+          @for (mode of modes(); track mode) {
+            <button type="button" (click)="runMenu.removeAttribute('open'); runAll(mode)" [disabled]="running() || externalBusy() || !available() || form.invalid">Run all · {{ mode }}</button>
+          }
+        </div>
+      </details>
     </div>
   </form>
   @if (!available()) { <p class="muted">Waiting for the page to be ready.</p> }
@@ -45,6 +67,16 @@
     </div>
   }
   @if (message()) { <p role="status" class="message">{{ message() }}</p> }
+  @if (batchEntries().length) {
+    <div class="result-card" role="status">
+      <p class="headline">Batch · {{ batchEntries().length }} test{{ batchEntries().length > 1 ? 's' : '' }} finished</p>
+      <div class="actions"><button type="button" class="primary wide" (click)="copyAll()">Copy all</button></div>
+      <details class="details">
+        <summary>Batch summaries</summary>
+        <pre class="agent-text" aria-label="Batch summaries">{{ batchText() }}</pre>
+      </details>
+    </div>
+  }
   @if (result(); as run) {
     @let sum = digest();
     <div class="result-card" [class.bad]="run.status === 'failed'" role="status">
@@ -74,7 +106,7 @@
       <p class="muted">automation {{ run.automatedVerdict }} · performance {{ run.performanceVerdict }} · visual review {{ run.visualReview }}</p>
       <ol class="case-results">
         @for (item of run.cases; track $index) {
-          <li>{{ item.scenario.label }} · {{ item.status }}@if (item.window) { · {{ item.window.stoppedBy }} {{ (item.window.elapsedMs / 1000).toFixed(1) }} s }
+          <li>{{ item.scenario.label }} · {{ item.status }}@if (item.window) { · {{ item.stopReason ?? item.window.stoppedBy }} {{ (item.window.elapsedMs / 1000).toFixed(1) }} s }
             @for (metric of item.metrics; track metric.name) { <span class="muted">{{ metricText(metric) }}</span> }
             @if (item.error) { <span class="issue failed">Error: {{ item.error }}</span> }
             @for (check of item.checks; track check.name) {

@@ -86,6 +86,11 @@ export const DEMOS: readonly DemoItem[] = [
     description: 'Plan 055 Phase 0: a plain sphere at 64 km, 600 km and 6,371 km with shared camera poses, spin time warp, a feature registry and a WebGPU-only baseline test suite.',
   },
   {
+    id: 'lod-surface-lab', number: '059', title: 'LOD Surface Lab', route: '/lod-surface-lab',
+    categoryId: 'terrain', tier: 'lab', createdAt: '2026-10-25', entryPoints: ['testing'], package: 'triangular-engine',
+    description: 'Plan 059 M1: one instanced grid on a 100 km plane and 10 km / 600 km cube-spheres, a CPU quadtree with 2:1 balance, edge folding, LOD colours, a crack probe and a WebGPU-only baseline suite.',
+  },
+  {
     id: 'test-results', number: '058', title: 'Test Results', route: '/tests',
     categoryId: 'core', tier: 'lab', createdAt: '2026-10-20', entryPoints: ['testing'], package: 'triangular-engine',
     description: 'Browse the browser test runs the dev result receiver saved: a case thumbnail, median and p95, the change from a baseline run, and two runs side by side.',

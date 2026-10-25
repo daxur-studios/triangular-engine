@@ -2,7 +2,7 @@ import { DOCUMENT } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, input, isDevMode, OnInit, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import type { TestAblationOutcome, TestCaseThumbnails, TestMetric, TestMode, TestProfile, TestProgress, TestRunAdapter, TestRunResult, TestSuite } from './test-contracts';
+import type { TestAblationOutcome, TestBatchTest, TestCaseThumbnails, TestMetric, TestMode, TestProfile, TestProgress, TestRunAdapter, TestRunResult, TestStopReason, TestSuite } from './test-contracts';
 import { buildTestLaunchUrl, MAX_TEST_REPETITIONS, parseTestLaunch, TEST_MODES, TEST_PROFILES, testSuiteKey, validateTestHistory } from './test-launch';
 import { nearestRankPercentile, TestSession } from './test-session';
 import { encodeThumbnailUploads } from './test-thumbnails';
@@ -62,7 +62,8 @@ export function digestTestRun(run: TestRunResult<object>): TestRunDigest {
     for (const issue of item.validityIssues) problems.push(`${id}: invalid, ${issue}`);
     const notes: string[] = [];
     if (item.retries) notes.push(`redone ${item.retries}x after the page lost focus`);
-    if (item.window?.mode === 'quick' && item.window.stoppedBy === 'max') notes.push('did not settle within its window');
+    // `max` is the legacy name of `capped`; only a quick window treated it as unsettled. A cap hit is never a pass.
+    if (item.window?.stoppedBy === 'capped' || (item.window?.mode === 'quick' && item.window.stoppedBy === 'max')) notes.push('did not settle within its window');
     for (const [name, drift] of Object.entries(item.window?.drift ?? {})) {
       if (Math.abs(drift) > SOAK_DRIFT_WARNING) notes.push(`${name} drifted ${drift > 0 ? '+' : ''}${(drift * 100).toFixed(1)}%`);
     }
@@ -92,6 +93,25 @@ export function testRunAgentText(run: TestRunResult<object>, savedFile?: string)
     ...digest.ablations.map((line) => `A/B ${line}`),
     ...digest.problems.map((line) => `- ${line}`),
   ].join('\n');
+}
+
+/** Why a whole test ended, from its cases: any failure, else any cap hit, else settled if a window settled, else fixed. */
+export function testRunStopReason(run: TestRunResult<object>): Exclude<TestStopReason, 'max'> {
+  const reasons = run.cases.map((item) => item.stopReason ?? item.window?.stoppedBy ?? 'fixed');
+  if (run.status === 'failed' || run.status === 'cancelled' || !run.cases.length || reasons.includes('failed')) return 'failed';
+  if (reasons.includes('capped') || reasons.includes('max')) return 'capped';
+  return reasons.includes('settled') ? 'settled' : 'fixed';
+}
+
+/** One finished test of a batch, with the file the sink stored it in (when it did). */
+export interface TestBatchEntry {
+  readonly run: TestRunResult<object>;
+  readonly savedFile?: string;
+}
+
+/** Every test's hand-off text, blank-line separated, each block starting with its stop reason. */
+export function testBatchAgentText(entries: readonly TestBatchEntry[]): string {
+  return entries.map(({ run, savedFile }) => `${testRunStopReason(run)}\n${testRunAgentText(run, savedFile)}`).join('\n\n');
 }
 
 /** Portable test UI: the host supplies data and actions; this entry imports no renderer or automation client. */
@@ -153,6 +173,13 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   readonly agentText = computed(() => { const run = this.result(); return run ? testRunAgentText(run, this.savedFile()) : ''; });
   /** Fraction of cases done, for the progress bar. */
   readonly progressFraction = computed(() => { const state = this.progress(); return state && state.total ? state.completed / state.total : 0; });
+  /** The batch being built: tests run in this order, one at a time. */
+  readonly batchTests = signal<readonly TestBatchTest[]>([]);
+  /** Scenario picked for "Add to batch" (from the selected suite). */
+  readonly batchScenario = new FormControl('', { nonNullable: true });
+  /** Tests finished so far in the current or last batch. */
+  readonly batchEntries = signal<readonly TestBatchEntry[]>([]);
+  readonly batchText = computed(() => testBatchAgentText(this.batchEntries()));
   readonly latest = computed(() => this.suites().at(-1));
   readonly activeSuite = signal<TestSuite<TSettings> | null>(null);
   readonly resultText = computed(() => JSON.stringify(this.result(), null, 2));
@@ -244,6 +271,107 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     }
   }
 
+  /** Scenarios of the suite chosen in the form, for the batch picker. */
+  selectedScenarios(): readonly { id: string; label: string }[] {
+    const suite = this.suites().find((item) => testSuiteKey(item) === this.form.controls.suite.value);
+    return suite?.scenarios ?? [];
+  }
+
+  addToBatch(): void {
+    const suite = this.suites().find((item) => testSuiteKey(item) === this.form.controls.suite.value);
+    const scenarioId = this.batchScenario.value || suite?.scenarios[0]?.id;
+    if (!suite || !scenarioId) return;
+    this.batchTests.update((tests) => [...tests, { suiteId: suite.id, suiteVersion: suite.version, scenarioId }]);
+  }
+
+  /** Runs every scenario of the chosen suite as a batch in one mode (the ⋮ menu); the form's mode when none is given. */
+  runAll(mode?: TestMode): Promise<void> {
+    const suite = this.suites().find((item) => testSuiteKey(item) === this.form.controls.suite.value);
+    if (!suite) return Promise.resolve();
+    const tests = suite.scenarios.map((scenario) => ({ suiteId: suite.id, suiteVersion: suite.version, scenarioId: scenario.id }));
+    return this.runBatch(tests, mode);
+  }
+
+  removeFromBatch(index: number): void { this.batchTests.update((tests) => tests.filter((_, i) => i !== index)); }
+
+  clearBatch(): void { this.batchTests.set([]); }
+
+  batchLabel(test: TestBatchTest): string {
+    const suite = this.suites().find((item) => item.id === test.suiteId && item.version === test.suiteVersion);
+    return `${suite?.title ?? test.suiteId} · v${test.suiteVersion} · ${suite?.scenarios.find((item) => item.id === test.scenarioId)?.label ?? test.scenarioId}`;
+  }
+
+  /**
+   * Runs the batch's tests in order, one `TestSession` run each, with that test's own limit. A failed or throwing test is
+   * recorded and the batch goes on; each result is saved to the sink as soon as its test ends, so a crash keeps the
+   * earlier ones. Cancel stops after the running test. When all are done, every summary is copied (or `Copy all` does it).
+   */
+  async runBatch(tests: readonly TestBatchTest[] = this.batchTests(), mode?: TestMode): Promise<void> {
+    if (this.running() || !this.available() || this.externalBusy() || this.form.invalid || !tests.length) return;
+    const options = { ...this.form.getRawValue(), ...(mode ? { mode } : {}) };
+    this.running.set(true);
+    this.form.disable({ emitEvent: false });
+    this.result.set(null);
+    this.savedFile.set(undefined);
+    this.saveStatus.set('');
+    this.message.set('');
+    this.batchEntries.set([]);
+    this.abort = new AbortController();
+    let cancelled = false;
+    try {
+      const sink = this.resultSink();
+      const machineSink = sink && isDevMode() ? (typeof sink === 'string' ? sink : DEFAULT_TEST_SINK_PATH) : undefined;
+      for (const [index, test] of tests.entries()) {
+        if (this.abort.signal.aborted || this.destroyed) { cancelled = true; break; }
+        const suite = this.suites().find((item) => item.id === test.suiteId && item.version === test.suiteVersion);
+        const scenario = suite?.scenarios.find((item) => item.id === test.scenarioId);
+        if (!suite || !scenario) { this.message.set(`Unknown test in batch: ${test.suiteId}@${test.suiteVersion} ${test.scenarioId}`); continue; }
+        // One scenario per run; a suite-level ablation only makes sense while its rounds are present.
+        const single: TestSuite<TSettings> = { ...suite, scenarios: [scenario], ...(scenario.ablation ? {} : { ablation: undefined }) };
+        this.activeSuite.set(single);
+        const thumbnails: TestCaseThumbnails[] = [];
+        const onThumbnails = machineSink && options.thumbnails ? (entry: TestCaseThumbnails) => { thumbnails.push(entry); } : undefined;
+        const repetitions = test.repetitions ?? options.repetitions;
+        try {
+          const result = await this.session.run(single, this.adapter(), { ...options, repetitions, machineSink, onThumbnails }, (progress) => {
+            if (this.destroyed) return;
+            this.progress.set(progress ? { ...progress, label: `test ${index + 1} of ${tests.length}${progress.label ? ` · ${progress.label}` : ''}` } : progress);
+            this.progressChange.emit(progress);
+          }, this.abort.signal);
+          if (this.destroyed) break;
+          const withLink = { ...result, rerunUrl: buildTestLaunchUrl(this.doc.location.href, result.suite, options.profile, repetitions, options.mode, options.thumbnails) };
+          this.completed.emit(withLink);
+          // Saved before the next test starts, so a later crash keeps this result.
+          const savedFile = await this.saveResult(withLink, thumbnails);
+          this.batchEntries.update((entries) => [...entries, { run: withLink, savedFile }]);
+          if (result.status === 'cancelled') { cancelled = true; break; }
+        } catch (error) {
+          if (!this.destroyed) this.message.set(error instanceof Error ? error.message : String(error));
+        }
+      }
+    } finally {
+      this.running.set(false);
+      this.form.enable({ emitEvent: false });
+    }
+    if (!this.destroyed && !cancelled && this.batchEntries().length) await this.copyBatchWhenFinished();
+  }
+
+  /** Copies every test's summary; the button covers a tab that was not focused when the batch ended. */
+  async copyAll(): Promise<void> {
+    try { await this.doc.defaultView?.navigator.clipboard.writeText(this.batchText()); this.message.set('Copied all summaries'); }
+    catch { this.message.set('Clipboard unavailable; select the text under Batch summaries.'); }
+  }
+
+  private async copyBatchWhenFinished(): Promise<void> {
+    if (!this.copyOnFinish() || !this.copyWhenDone.value) return;
+    const notCopied = 'Not copied (tab not focused); press Copy all';
+    if (!this.doc.hasFocus()) { this.message.set(notCopied); return; }
+    try {
+      await this.doc.defaultView?.navigator.clipboard.writeText(this.batchText());
+      if (!this.destroyed) this.message.set('Copied all summaries');
+    } catch { if (!this.destroyed) this.message.set(notCopied); }
+  }
+
   cancel(): void { this.abort?.abort(); }
 
   /** Reviewer acceptance is explicit and never inferred from automated completion. */
@@ -257,23 +385,24 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   }
 
   /** `thumbnails` ride in the same POST as base64 `thumbnailUploads`; the result JSON the panel shows and copies never has them. */
-  private async saveResult(result: TestRunResult<TSettings>, thumbnails: readonly TestCaseThumbnails[]): Promise<void> {
+  private async saveResult(result: TestRunResult<TSettings>, thumbnails: readonly TestCaseThumbnails[]): Promise<string | undefined> {
     const sink = this.resultSink();
-    if (!sink || !isDevMode()) { this.saveStatus.set(''); return; }
+    if (!sink || !isDevMode()) { this.saveStatus.set(''); return undefined; }
     const url = typeof sink === 'string' ? sink : DEFAULT_TEST_SINK_PATH;
     const failed = 'Result not saved (receiver unreachable): use Download JSON.';
     try {
       const thumbnailUploads = thumbnails.length ? await encodeThumbnailUploads(thumbnails) : undefined;
       const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(thumbnailUploads ? { ...result, thumbnailUploads } : result) });
       const body = response.ok ? await response.json().catch(() => null) as { ok?: boolean; file?: string; thumbnails?: readonly string[]; dropped?: readonly string[] } | null : null;
-      if (this.destroyed) return;
+      if (this.destroyed) return undefined;
       // A dev server without the sink proxy answers 200 with the app's HTML: that is not a save.
-      if (response.ok && body?.ok !== true) { this.saveStatus.set(`Result not saved: ${url} is not the test receiver (is the sink proxy set up?). Use Download JSON.`); return; }
+      if (response.ok && body?.ok !== true) { this.saveStatus.set(`Result not saved: ${url} is not the test receiver (is the sink proxy set up?). Use Download JSON.`); return undefined; }
       this.savedFile.set(body?.file);
       const images = body?.thumbnails?.length ? ` with ${body.thumbnails.length} thumbnail${body.thumbnails.length > 1 ? 's' : ''}` : '';
       const dropped = body?.dropped?.length ? `; ${body.dropped.length} thumbnail${body.dropped.length > 1 ? 's' : ''} dropped (${body.dropped[0]})` : '';
       this.saveStatus.set(body ? `Result saved${body.file ? `: ${body.file}` : ''}${images}${dropped}` : `${failed} (HTTP ${response.status})`);
-    } catch { if (!this.destroyed) this.saveStatus.set(failed); }
+      return body?.file;
+    } catch { if (!this.destroyed) this.saveStatus.set(failed); return undefined; }
   }
 
   /** Summaries are over provider readings, which may be batched; no GPU-pass attribution is inferred. */

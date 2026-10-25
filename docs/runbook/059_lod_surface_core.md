@@ -133,3 +133,77 @@ Taken 2026-10-24 after the comparison:
 - **D13:** sines first; the owner judges Gerstner and transition motion at the M3 review.
 
 Plan 059 has no open owner decisions left; D5 (blending) waits for the M2 fixture. Next: M1 and S1.
+
+## 2026-10-25 — M1 built; specs green; gates not yet measured
+
+### Built
+
+The lab is in the demo app: `projects/demo-app/src/app/pages/lod-surface-lab/`, at the route `/lod-surface-lab`, with index entry 059. It does not import from Plan 055 lab code (D3).
+
+- **Domains (`lod-domain.ts`).**
+  - Bounded 100 km plane; spheres of 10 km and 600 km.
+  - Cube faces with an equal-angle warp that is exactly ±1 at face edges.
+  - Cross-face neighbour lookup by radial projection.
+- **Selector (`lod-selector.ts`).**
+  - CPU quadtree, rebuilt from the roots every frame with pooled typed arrays.
+  - Splits by priority from a max-heap: distance criterion, cell size in pixels with a 2 px floor.
+  - Leaf cap, with `CAP_SLACK` 144 for forced balance splits. A fixed-level mode serves as the uniform baseline.
+  - 2:1 balance as a restricted quadtree: coarser neighbours are split before a split, across faces too.
+  - A 4-bit coarser-edge mask per leaf.
+  - Frustum culling on bounding spheres.
+  - Deepest level is `min(20, 24 - log2 patchCells)`, so lattice parameters stay exact in float32.
+- **Renderer (`lod-surface-mesh.ts`).**
+  - One instanced grid, one draw, TSL on `WebGPURenderer`.
+  - Each leaf's origin is relative to the camera, computed in doubles.
+  - The vertex offset uses the cancellation-free form R·(dc/|c| − cC(dc·(2cC+dc))/(|c||cC|(|c|+|cC|))), with dc from an exact tan-difference.
+  - Heights and normals are evaluated at the global lattice parameter, so they are identical across leaves.
+  - Static edge folding: an odd vertex on a coarser edge goes to the mean of its two even neighbours.
+  - Debug views: LOD colours, shaded, bounds, wireframe, freeze selection.
+- **Heights (`lod-height.ts`).** Flat, and static bumps (crossing sines over five scales).
+- **Crack probe (`lod-crack-probe.ts` and the page).**
+  - A backstop is drawn first, without depth, just inside the surface: a smaller sphere, or a square under the lowest height.
+  - The surface is drawn over it into an RGBA8 target.
+  - A backstop pixel counts as a crack unless it touches the background.
+- **Suite `lod-surface-baseline` v1 (`lod-surface-tests.ts`, `lod-surface-test-adapter.ts`).**
+  - Cases: 3 domains × 5 poses with bumps; flat on the plane and sphere-600; cells 16 and 64; no warp; the fixed-level baseline.
+  - Two controls, injected gap and folding off, that must find cracks.
+  - Two 12 s scripted zooms from a 2 m eye to orbit.
+  - Each still case runs its timing window, then the probe outside the window.
+  - Checks include one draw, leaves within cap plus slack, zero cracks (or some for the controls), and no selection frame over 8 ms during the zoom.
+  - Launch link: in the plan front matter.
+
+### Verified
+
+- **Headless specs.** `lod-surface-lab.spec.ts`, 25 specs, all pass, run with `ng test demo-app --watch=false --browsers=ChromeHeadless --include=…/lod-surface-lab.spec.ts`. They cover:
+  - shared cube-edge vertices bit-identical across faces, with and without the warp;
+  - symmetric cross-face neighbours;
+  - 2:1 balance, whole cover and correct masks on all three domains at three poses;
+  - cap behaviour;
+  - the deepest-level bound;
+  - storage reuse;
+  - the shader offset formula against the direct difference, in doubles;
+  - height bounds;
+  - crack counting;
+  - suite shape.
+- **Demo-app build.** It failed in HEAD before this work: `triangular-engine/testing/core` was mapped in the root `tsconfig.json` but not in `projects/demo-app/tsconfig.app.json`, whose `paths` override it. Added the mapping, and the build passes.
+- **Page.** It mounts and runs a selection: sphere 600 km at the 2 m eye gives 1023 leaves (749 drawn), deepest level 18, cap hit. It was **not seen rendering**: the session window was hidden, so the pane got no animation frames. The screenshot, probe and controls are unchecked.
+
+### Findings
+
+- **Selection CPU is over the L5 budget.** In Node, the 15 baseline poses take 1.6–3.0 ms per select with cap 1024 and 32 cells, and 0.4–0.9 ms at orbit. The budget is ≤ 0.2 ms.
+  - The profile shows `addNode` (6 domain points per node, about 4000 nodes per frame) at about 75% of the time, and `neighbourCell` (balance) at 20%.
+  - Node geometry does not depend on the camera, so keeping the tree, or at least node geometry, across frames should remove most of this. A persistent tree also helps M2 (blending needs per-node history).
+- **The cap binds at 4 px cells.** At 1440p with cap 1024, every non-orbit pose hits the cap, and "unmet" is close to the drawn count. Either the default cell size grows (8 px), or the cap does once GPU cost is measured. The M1 sweep decides.
+
+### Not done
+
+- Seeing the page render, the probe run, and both controls finding cracks (needs the app window in front).
+- `lod-surface-baseline` v1 on the NVIDIA and AMD adapters (owner-run, or unattended when the owner says the laptop is free).
+- The persistent selector, to meet the CPU budget.
+- Spike S1.
+
+### Next
+
+1. Make the selector persistent (geometry cache, then incremental split and merge).
+2. Look at the page with the window in front: render, probe, controls.
+3. Owner runs the suite on both adapters, and the gates are recorded here.

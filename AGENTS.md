@@ -53,9 +53,14 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 
 ## Browser tests and their results
 
-- Before writing or extending a browser test suite, or reading its results, read
-  `projects/triangular-engine/docs/testing.md` and the `triangular-engine-testing` skill
+- Before adding or changing a page integration with `triangular-engine/testing`
+  (including `<tri-test-runner>` and its game adapter), writing or extending a browser
+  test suite, or reading its results, read `projects/triangular-engine/docs/testing.md`
+  and the `triangular-engine-testing` skill
   (`projects/triangular-engine/.agents/skills/triangular-engine-testing/SKILL.md`).
+  This is a repository-local skill; it may not appear in the agent's installed skill
+  catalog. Open the file at that path directly. For consumer apps outside this repo,
+  the package includes it at `node_modules/triangular-engine/skills/triangular-engine-testing/`.
 - Read results with `npm run test:summary` first; it reads only `artifacts/test-runs/index.jsonl`.
   Open a full result JSON only for a failing case. In PowerShell quote the separator
   (`npm run test:summary '--' --suite <id>`), or npm swallows the flags and prints every suite.- Timings from headless or SwiftShader runs are not hardware numbers. Check which GPU adapter a run recorded.

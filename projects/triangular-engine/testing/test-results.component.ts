@@ -236,7 +236,7 @@ export class TestResultsComponent {
   private caseNotes(item: TestRunIndexCase): string[] {
     const notes: string[] = [];
     if (item.retries) notes.push(`redone ${item.retries}x after the page lost focus`);
-    if (item.window?.stoppedBy === 'max') notes.push('did not settle within its window');
+    if (item.window?.stoppedBy === 'max' || item.window?.stoppedBy === 'capped') notes.push('did not settle within its window');
     for (const [name, drift] of Object.entries(item.window?.drift ?? {})) {
       if (Math.abs(drift) > 0.05) notes.push(`${name} drifted ${drift > 0 ? '+' : ''}${(drift * 100).toFixed(1)}%`);
     }

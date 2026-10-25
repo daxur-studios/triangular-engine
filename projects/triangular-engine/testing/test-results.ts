@@ -1,4 +1,4 @@
-import type { TestMode } from './test-contracts';
+import type { TestMode, TestStopReason } from './test-contracts';
 
 /** Nearest-rank statistics of one metric in a run's index line (`npm run test:summary` reads the same). */
 export interface TestRunIndexMetric {
@@ -18,7 +18,7 @@ export interface TestRunIndexCase {
   readonly metrics: Readonly<Record<string, TestRunIndexMetric>>;
   readonly failed: readonly string[];
   readonly invalid: readonly string[];
-  readonly window?: { readonly stoppedBy: 'settled' | 'max' | 'fixed'; readonly s: number; readonly drift?: Readonly<Record<string, number>> };
+  readonly window?: { readonly stoppedBy: TestStopReason; readonly s: number; readonly drift?: Readonly<Record<string, number>> };
   readonly retries?: number;
   /** File names relative to the receiver's output folder. */
   readonly thumbnails?: readonly string[];
