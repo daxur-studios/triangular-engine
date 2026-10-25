@@ -28,6 +28,7 @@ tags: [runbook, index]
 | [LOD Surface Core for Water and Terrain](/docs/runbook/059_lod_surface_core.md) | [Implementation plan](/docs/plans/059_lod_surface_core.md) |
 | [Testing Entry for CPU Performance Work](/docs/runbook/060_testing_cpu_performance.md) | [Implementation plan](/docs/plans/060_testing_cpu_performance.md) |
 | [Test Runner Batch Runs and a Deterministic Stop Rule](/docs/runbook/061_test_runner_batch_and_stop_rule.md) | [Implementation plan](/docs/plans/061_test_runner_batch_and_stop_rule.md) |
+| [Planet Surface Detail LOD](/docs/runbook/063_planet_surface_detail_lod.md) | [Implementation plan](/docs/plans/063_planet_surface_detail_lod.md) |
 
 
 Existing runbooks `001`–`042` retain their historical paths and formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

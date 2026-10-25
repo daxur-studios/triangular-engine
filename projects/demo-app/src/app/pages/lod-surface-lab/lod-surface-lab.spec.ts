@@ -3,7 +3,9 @@ import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
 import { EDGE_STEP, cubePoint, domainPoint, domainPreset, neighbourCell, warpCoordinate, type LodDomain, type NeighbourCell, type Vec3 } from './lod-domain';
 import { createHeightSource } from './lod-height';
 import { CAP_SLACK, LodSelector, maxLevelFor, type SelectorSettings, type SelectorView } from './lod-selector';
-import { settingsMismatches } from './lod-surface-test-adapter';
+import { createLodSurfaceTestAdapter, settingsMismatches, type LodSurfaceTestHost } from './lod-surface-test-adapter';
+import type { LodSurfaceTestSettings } from './lod-surface-tests';
+import type { TestContext, TestScenario } from 'triangular-engine/testing';
 import { DEFAULT_SETTINGS, LOD_SURFACE_TEST_HISTORY, crackExpectation } from './lod-surface-tests';
 
 const sphere600 = domainPreset('sphere-600km');
@@ -264,6 +266,27 @@ describe('Plan 059 vertex offset (shader formula, in doubles)', () => {
   });
 });
 
+describe('Plan 059 small-angle sine (shader polynomial, in float steps)', () => {
+  /** The shader's `smallSin`, every operation rounded to float as the GPU does. */
+  function smallSinFloat(x: number): number {
+    const f = Math.fround;
+    const xf = f(x);
+    const x2 = f(xf * xf);
+    let inner = f(1 - f(x2 / 72));
+    inner = f(1 - f(f(x2 / 42) * inner));
+    inner = f(1 - f(f(x2 / 20) * inner));
+    inner = f(1 - f(f(x2 / 6) * inner));
+    return f(xf * inner);
+  }
+
+  it('keeps float relative accuracy from deep-leaf offsets up to a whole face', () => {
+    for (const x of [1e-7, 3e-6, 1e-4, 0.01, 0.3, Math.PI / 4, 0.85]) {
+      const exact = Math.sin(Math.fround(x));
+      expect(Math.abs(smallSinFloat(x) - exact) / exact).toBeLessThan(1e-6);
+    }
+  });
+});
+
 describe('Plan 059 height sources', () => {
   it('stay within their bound', () => {
     for (const kind of ['plane', 'sphere'] as const) {
@@ -311,5 +334,41 @@ describe('Plan 059 suite', () => {
     expect(settingsMismatches(DEFAULT_SETTINGS, DEFAULT_SETTINGS)).toEqual([]);
     expect(settingsMismatches({ ...DEFAULT_SETTINGS, patchCells: 16 }, DEFAULT_SETTINGS)).toEqual(['patchCells: expected 32, found 16']);
     expect(settingsMismatches(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, motion: 'zoom' }).length).toBe(1);
+  });
+
+  it('keeps every case of v1 in v2 and gives v2 still windows their full length in quick mode', () => {
+    const [v1, v2] = LOD_SURFACE_TEST_HISTORY;
+    expect([v1.version, v2.version]).toEqual([1, 2]);
+    expect(v2.scenarios.map((scenario) => scenario.id)).toEqual(v1.scenarios.map((scenario) => scenario.id));
+    for (const scenario of v2.scenarios.filter((item) => item.settings.motion !== 'zoom')) expect(scenario.quickMs).toBeUndefined();
+  });
+
+  it('checks the state of a zoom case while the zoom runs, not after it ends', async () => {
+    let zoom: number | undefined;
+    let frames = 0;
+    const host = {
+      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, ...(zoom !== undefined ? { motion: 'zoom' as const } : {}) }),
+      setZoomProgress: (t: number | undefined) => { zoom = t; },
+      renderedFrames: () => frames++,
+      errors: () => '', resetErrors: () => undefined, backendIsWebGpu: () => true,
+      frame: () => ({ stats: { leaves: 1, drawn: 1, splits: 0, forcedSplits: 0, unmet: 0, capHit: false, deepestLevel: 0 }, instances: 1, trianglesPerLeaf: 2, drawCalls: 1, rendererTriangles: 2, drawingBuffer: [1, 1] as const }),
+      onRenderComplete: () => () => undefined,
+      selectionSamples: () => [0.1], leafSamples: () => [1], resetSamples: () => undefined,
+      isSampling: () => false, startSampling: () => undefined, gpuSamplesSoFar: () => [],
+      stopSampling: () => ({ frames: 100, cpuMedianMs: 1, cpuP95Ms: 1, wallMedianMs: 6, wallP95Ms: 6, gpuMedianMs: null, gpuSamples: 0, invalidReasons: [], verdict: 'ok' as const }),
+      crackProbe: () => Promise.reject(new Error('no probe in a zoom case')),
+      environment: () => ({}),
+    } as unknown as LodSurfaceTestHost;
+    let now = 0;
+    spyOn(performance, 'now').and.callFake(() => now);
+    const context = {
+      mode: 'quick', repetition: 1, signal: new AbortController().signal,
+      wait: (ms: number) => { now += ms; return Promise.resolve(); },
+    } as unknown as TestContext;
+    const scenario = LOD_SURFACE_TEST_HISTORY[1].scenarios.find((item) => item.id === 'zoom-sphere-600km') as TestScenario<LodSurfaceTestSettings>;
+    zoom = 0;
+    const observation = await createLodSurfaceTestAdapter(host).measure(scenario, context);
+    expect(observation.checks?.find((check) => check.name === 'Scenario state applied as specified')?.passed).toBeTrue();
+    expect(zoom).toBeUndefined();
   });
 });

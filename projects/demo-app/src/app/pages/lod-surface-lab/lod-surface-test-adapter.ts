@@ -123,6 +123,8 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
       let frames = 0;
       let previousAt: number | undefined;
       let summary: IFrameSampleSummary;
+      // The zoom clears its own motion when it ends, so its state is checked while it still runs.
+      let zoomMismatches: string[] = [];
       host.resetSamples();
       host.startSampling();
       const offRender = host.onRenderComplete((renderedAt) => {
@@ -131,8 +133,10 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
         previousAt = renderedAt;
       });
       try {
-        if (settings.motion === 'zoom') await zoom(scenario, context);
-        else {
+        if (settings.motion === 'zoom') {
+          await zoom(scenario, context);
+          zoomMismatches = settingsMismatches(host.read(), settings);
+        } else {
           await context.measureWindow(scenario, [
             { name: 'frameInterval', samples: () => intervals, resolution: TIMER_STEP_MS },
             ...(host.environment()['gpu.timestampQuery'] === true
@@ -153,7 +157,7 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
       // The probe runs after the window, so it never shares a frame with the timing.
       const probe = settings.motion === 'zoom' ? undefined : await host.crackProbe();
       await waitForFrames(host, 2, context);
-      const mismatches = settingsMismatches(host.read(), settings);
+      const mismatches = settings.motion === 'zoom' ? zoomMismatches : settingsMismatches(host.read(), settings);
       const error = host.errors();
       const checks: TestCheck[] = [
         { name: 'Scenario state applied as specified', passed: mismatches.length === 0, detail: mismatches.join('; ') || undefined },

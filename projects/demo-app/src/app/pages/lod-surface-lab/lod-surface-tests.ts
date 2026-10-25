@@ -43,8 +43,27 @@ export function crackExpectation(settings: LodSurfaceTestSettings): CrackExpecta
 const DOMAINS: readonly DomainPresetId[] = ['plane-100km', 'sphere-10km', 'sphere-600km'];
 const POSES: readonly PoseId[] = ['eye-2m', 'low-200m', 'mid-5km', 'horizon', 'orbit'];
 
-function still(id: string, label: string, change: Partial<LodSurfaceTestSettings>): TestScenario<LodSurfaceTestSettings> {
-  return { id, label, settings: { ...DEFAULT_SETTINGS, ...change }, warmupMs: 500, durationMs: 4000, quickMs: 1500 };
+/** A still case; `quickMs`, when given, caps its quick window below the full 4 s. */
+function still(id: string, label: string, change: Partial<LodSurfaceTestSettings>, quickMs?: number): TestScenario<LodSurfaceTestSettings> {
+  return { id, label, settings: { ...DEFAULT_SETTINGS, ...change }, warmupMs: 500, durationMs: 4000, ...(quickMs ? { quickMs } : {}) };
+}
+
+/** The cases of `lod-surface-baseline`; v1 capped each still window at 1.5 s in quick mode. */
+function baselineScenarios(stillQuickMs?: number): TestScenario<LodSurfaceTestSettings>[] {
+  const s = (id: string, label: string, change: Partial<LodSurfaceTestSettings>) => still(id, label, change, stillQuickMs);
+  return [
+    ...DOMAINS.flatMap((domain) => POSES.map((pose) => s(`${domain}-${pose}`, `${domain} · ${pose} · bumps`, { domain, pose }))),
+    s('plane-100km-eye-2m-flat', 'plane-100km · eye-2m · flat', { domain: 'plane-100km', pose: 'eye-2m', source: 'flat' }),
+    s('sphere-600km-eye-2m-flat', 'sphere-600km · eye-2m · flat', { domain: 'sphere-600km', pose: 'eye-2m', source: 'flat' }),
+    s('sphere-600km-eye-2m-cells16', 'sphere-600km · eye-2m · 16 cells', { patchCells: 16 }),
+    s('sphere-600km-eye-2m-cells64', 'sphere-600km · eye-2m · 64 cells', { patchCells: 64 }),
+    s('sphere-600km-mid-5km-nowarp', 'sphere-600km · 5 km · no warp', { pose: 'mid-5km', warp: 'none' }),
+    s('sphere-10km-orbit-fixed', 'sphere-10km · orbit · fixed level 5 (uniform baseline)', { domain: 'sphere-10km', pose: 'orbit', mode: 'fixed', fixedLevel: 5 }),
+    s('control-injected-gap', 'control: injected gap (probe must find cracks)', { pose: 'low-200m', injectedGap: 0.01 }),
+    s('control-folding-off', 'control: folding off over bumps (probe should find cracks)', { pose: 'low-200m', folding: false }),
+    { id: 'zoom-sphere-600km', label: 'zoom 2 m to orbit · sphere-600km', settings: { ...DEFAULT_SETTINGS, motion: 'zoom' }, warmupMs: 500, durationMs: 12_000, quickMs: 6000 },
+    { id: 'zoom-plane-100km', label: 'zoom 2 m to orbit · plane-100km', settings: { ...DEFAULT_SETTINGS, domain: 'plane-100km', motion: 'zoom' }, warmupMs: 500, durationMs: 12_000, quickMs: 6000 },
+  ];
 }
 
 /**
@@ -57,19 +76,10 @@ const BASELINE_V1: TestSuite<LodSurfaceTestSettings> = {
   version: 1,
   title: 'LOD surface core M1: cost, cracks and the ground-to-orbit zoom (Plan 059)',
   purpose: 'performance',
-  scenarios: [
-    ...DOMAINS.flatMap((domain) => POSES.map((pose) => still(`${domain}-${pose}`, `${domain} · ${pose} · bumps`, { domain, pose }))),
-    still('plane-100km-eye-2m-flat', 'plane-100km · eye-2m · flat', { domain: 'plane-100km', pose: 'eye-2m', source: 'flat' }),
-    still('sphere-600km-eye-2m-flat', 'sphere-600km · eye-2m · flat', { domain: 'sphere-600km', pose: 'eye-2m', source: 'flat' }),
-    still('sphere-600km-eye-2m-cells16', 'sphere-600km · eye-2m · 16 cells', { patchCells: 16 }),
-    still('sphere-600km-eye-2m-cells64', 'sphere-600km · eye-2m · 64 cells', { patchCells: 64 }),
-    still('sphere-600km-mid-5km-nowarp', 'sphere-600km · 5 km · no warp', { pose: 'mid-5km', warp: 'none' }),
-    still('sphere-10km-orbit-fixed', 'sphere-10km · orbit · fixed level 5 (uniform baseline)', { domain: 'sphere-10km', pose: 'orbit', mode: 'fixed', fixedLevel: 5 }),
-    still('control-injected-gap', 'control: injected gap (probe must find cracks)', { pose: 'low-200m', injectedGap: 0.01 }),
-    still('control-folding-off', 'control: folding off over bumps (probe should find cracks)', { pose: 'low-200m', folding: false }),
-    { id: 'zoom-sphere-600km', label: 'zoom 2 m to orbit · sphere-600km', settings: { ...DEFAULT_SETTINGS, motion: 'zoom' }, warmupMs: 500, durationMs: 12_000, quickMs: 6000 },
-    { id: 'zoom-plane-100km', label: 'zoom 2 m to orbit · plane-100km', settings: { ...DEFAULT_SETTINGS, domain: 'plane-100km', motion: 'zoom' }, warmupMs: 500, durationMs: 12_000, quickMs: 6000 },
-  ],
+  scenarios: baselineScenarios(1500),
 };
 
-export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1];
+/** v2: the same cases; a still window's quick cap is its full 4 s, so a series has time to settle. */
+const BASELINE_V2: TestSuite<LodSurfaceTestSettings> = { ...BASELINE_V1, version: 2, scenarios: baselineScenarios() };
+
+export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2];

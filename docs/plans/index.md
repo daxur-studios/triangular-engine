@@ -29,6 +29,7 @@ tags: [plans, index]
 | [Testing Entry for CPU Performance Work](/docs/plans/060_testing_cpu_performance.md) | built, not released | [Evidence](/docs/runbook/060_testing_cpu_performance.md) |
 | [Test Runner Batch Runs and a Deterministic Stop Rule](/docs/plans/061_test_runner_batch_and_stop_rule.md) | proposal, not started | [Evidence](/docs/runbook/061_test_runner_batch_and_stop_rule.md) |
 | [Impostor Baker Testing](/docs/plans/062_impostor_baker_testing.md) | planned | [Evidence](/docs/runbook/062_impostor_baker_testing.md) |
+| [Planet Surface Detail LOD](/docs/plans/063_planet_surface_detail_lod.md) | proposal, not started | [Evidence](/docs/runbook/063_planet_surface_detail_lod.md) |
 
 
 Convention: [Plans and Runbooks](/docs/plans-and-runbooks.md).

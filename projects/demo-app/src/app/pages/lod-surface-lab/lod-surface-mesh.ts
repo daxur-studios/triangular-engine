@@ -2,7 +2,7 @@
 import { BufferAttribute, Color, FrontSide, InstancedBufferAttribute, InstancedBufferGeometry, Mesh, Vector3 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
-  Fn, abs, attribute, cos, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize, positionGeometry, select, sign, sin,
+  Fn, abs, attribute, cos, dot, float, floor, fract, fwidth, max, min, mix, mod, normalize, positionGeometry, select, sign,
   smoothstep, step, tan, uniform, uniformArray, varying, vec2, vec3, vec4,
 } from 'three/tsl';
 import { FACE_FRAMES, PLANE_FRAME, cubePoint, type LodDomain, type Vec3 } from './lod-domain';
@@ -25,6 +25,16 @@ import type { LodSelector, PatchCells } from './lod-selector';
  */
 
 export type LodView = 'lod' | 'shaded';
+
+/**
+ * sin(x) for |x| under 1 (leaf offsets give at most about pi / 4) as a Taylor polynomial to x^9, below float rounding.
+ * The built-in `sin` is not safe here: WGSL only bounds its absolute error, and on an RTX 3080 that error wiped out
+ * the small offsets of deep leaves (x about 1e-6) and opened holes between leaves on the sphere.
+ */
+const smallSin = (x: any): any => {
+  const x2 = x.mul(x);
+  return x.mul(float(1).sub(x2.div(6).mul(float(1).sub(x2.div(20).mul(float(1).sub(x2.div(42).mul(float(1).sub(x2.div(72)))))))));
+};
 
 /** Floats per instance attribute (four vec4). */
 const STRIDE = 4;
@@ -121,7 +131,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   /** Exact cube-space difference warp(u) - warp(uC) for a parameter offset d = u - uC. */
   const warpDelta = (u: any, uC: any, d: any): any => {
     if (!equalAngle) return d.mul(2);
-    return sin(d.mul(Math.PI / 2)).div(cos(u.mul(2).sub(1).mul(Math.PI / 4)).mul(cos(uC.mul(2).sub(1).mul(Math.PI / 4))));
+    return smallSin(d.mul(Math.PI / 2)).div(cos(u.mul(2).sub(1).mul(Math.PI / 4)).mul(cos(uC.mul(2).sub(1).mul(Math.PI / 4))));
   };
 
   /** Global base point (for heights and normals), the leaf-relative offset, and the outward normal at grid point g. */
