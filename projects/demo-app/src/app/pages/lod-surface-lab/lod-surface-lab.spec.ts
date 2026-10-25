@@ -816,7 +816,7 @@ describe('Plan 059 crack probe counting', () => {
 
 describe('Plan 059 suite', () => {
   it('has unique case ids, controls that expect cracks, and plain settings', () => {
-    const suite = LOD_SURFACE_TEST_HISTORY[LOD_SURFACE_TEST_HISTORY.length - 1];
+    const suite = LOD_SURFACE_TEST_HISTORY[1];
     const ids = suite.scenarios.map((scenario) => scenario.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(suite.scenarios.filter((scenario) => crackExpectation(scenario.settings) === 'some').length).toBe(2);

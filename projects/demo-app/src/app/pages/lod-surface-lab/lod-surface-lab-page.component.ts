@@ -12,10 +12,11 @@ import {
 } from './lod-camera';
 import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
 import { DOMAIN_PRESETS, domainPreset, type CubeWarp, type DomainPresetId, type LodDomain } from './lod-domain';
-import { HEIGHT_SOURCES, HEIGHT_SOURCE_LABELS, createHeightSource, isBakedSource, type HeightSource, type HeightSourceId } from './lod-height';
-import { DEFAULT_BAKE_K, textureMegabytes, type BakeLayout } from './lod-height-bake';
+import { HEIGHT_SOURCES, HEIGHT_SOURCE_LABELS, createHeightSource, isBakedSource, sourceSupports, type HeightSource, type HeightSourceId } from './lod-height';
+import { DEFAULT_BAKE_K, textureMegabytes, percentile, twinErrors, type BakeLayout } from './lod-height-bake';
 import { bakeInWorker } from './lod-height-bake-client';
 import type { BakedSourceId } from './lod-height-noise';
+import { cellPlanetFor, type CellPlanetDescription } from './lod-height-terrain';
 import { createTextureHeightSource, type TextureHeightSource } from './lod-height-texture';
 import { CAP_SLACK, LodSelector, PATCH_CELLS, PIXEL_FLOOR, type LodMode, type PatchCells, type SelectorStats, type SelectorView } from './lod-selector';
 import { SKY, createLodSurfaceMesh, type LodSurfaceMesh, type LodView } from './lod-surface-mesh';
@@ -39,10 +40,16 @@ const THUMBNAIL_WIDTH = 240;
 /** Selection samples kept for the HUD's running mean. */
 const HUD_SAMPLES = 60;
 
-/** Baked textures kept (CPU arrays and GPU textures) so switching back to a source does not bake again. */
+/**
+ * Baked textures kept (CPU arrays and GPU textures; 25 MB each for six faces at 1025², twice that again on the GPU) so
+ * switching back to a source does not bake again. The terrain suite orders its cases source by source and domain by
+ * domain, so one pass bakes each combination once with this; a second repetition bakes again.
+ */
 const BAKE_CACHE = 2;
 /** Texture sizes offered for baked sources: 2^k texel cells per face side. */
 const BAKE_SIZES = [10, 11] as const;
+
+const maxOf = (values: readonly number[]): number => values.reduce((a, b) => Math.max(a, b), 0);
 
 const SOFTWARE = /swiftshader|llvmpipe|software|basic render|microsoft basic/i;
 
@@ -269,7 +276,8 @@ export class LodSurfaceLabPageComponent {
     if (!info) return '';
     const perFace = info.bakeMsPerFace.map((ms) => ms.toFixed(0)).join('/');
     const upload = info.uploadMs === null ? 'n/a' : `${info.uploadMs.toFixed(1)} ms`;
-    return `${info.source} ${info.side}² x ${info.faces}: bake ${perFace} ms per face (+${info.pyramidMs.toFixed(0)} pyramid, ${info.roundTripMs.toFixed(0)} round trip) · upload ${upload} · ${info.textureMB.toFixed(1)} MB`;
+    const world = info.worldBuildMs === undefined ? '' : `world ${info.worldBuildMs.toFixed(0)} ms, `;
+    return `${info.source} ${info.side}² x ${info.faces}: ${world}bake ${perFace} ms per face (+${info.pyramidMs.toFixed(0)} pyramid, ${info.roundTripMs.toFixed(0)} round trip) · upload ${upload} · ${info.textureMB.toFixed(1)} MB · twin vs source max ${maxOf(info.twinErrorM).toFixed(2)} m, p95 ${percentile(info.twinErrorM, 0.95).toFixed(2)} m`;
   });
   readonly freeCamera = signal(false);
   readonly frozen = signal(false);
@@ -537,8 +545,17 @@ export class LodSurfaceLabPageComponent {
       this.bakeInfo.set(undefined);
       return createHeightSource(id, domain.kind);
     }
+    if (!sourceSupports(id, domain.kind)) {
+      // No such surface (the cell planet on the plane): draw flat and say so. The suites never ask for it.
+      this.pendingBake = '';
+      this.activeBake = '';
+      this.bakeStatus.set(`${id} needs a sphere: showing flat`);
+      this.bakeInfo.set(undefined);
+      return createHeightSource('flat', domain.kind);
+    }
     const layout: BakeLayout = { kind: domain.kind, warp: domain.warp, sizeM: domain.sizeM, k: this.bakeK() };
-    const key = [id, layout.kind, layout.warp, layout.sizeM, layout.k].join('|');
+    const planet = id === 'cell-planet' ? cellPlanetFor(domain.sizeM) : undefined;
+    const key = [id, layout.kind, layout.warp, layout.sizeM, layout.k, ...(planet ? [planet.seed, planet.cellCount, planet.heightScaleM] : [])].join('|');
     const hit = this.bakes.get(key);
     if (hit) {
       this.pendingBake = '';
@@ -550,14 +567,14 @@ export class LodSurfaceLabPageComponent {
     if (this.pendingBake !== key) {
       this.pendingBake = key;
       this.bakeStatus.set(`baking ${id} ${2 ** layout.k + 1}² x ${domain.kind === 'plane' ? 1 : 6}…`);
-      void this.bake(id as BakedSourceId, layout, key);
+      void this.bake(id as BakedSourceId, layout, key, planet);
     }
     return undefined;
   }
 
-  private async bake(id: BakedSourceId, layout: BakeLayout, key: string): Promise<void> {
+  private async bake(id: BakedSourceId, layout: BakeLayout, key: string, planet?: CellPlanetDescription): Promise<void> {
     try {
-      const { baked, roundTripMs } = await bakeInWorker(id, layout);
+      const { baked, probes, worldBuildMs, roundTripMs } = await bakeInWorker(id, layout, planet);
       const source = createTextureHeightSource(id, baked);
       // Hand the texture to the renderer now so the upload is timed here, not inside a rendered frame.
       let uploadMs: number | null = null;
@@ -571,7 +588,8 @@ export class LodSurfaceLabPageComponent {
       }
       const info: LodSurfaceBakeInfo = {
         source: id, side: baked.side, faces: baked.faces, bakeMsPerFace: baked.bakeMsPerFace, pyramidMs: baked.pyramidMs, roundTripMs,
-        uploadMs, textureMB: textureMegabytes(baked),
+        uploadMs, textureMB: textureMegabytes(baked), twinErrorM: twinErrors(probes, source.heightAtLattice),
+        ...(worldBuildMs === undefined ? {} : { worldBuildMs }),
       };
       this.bakes.set(key, { source, info });
       while (this.bakes.size > BAKE_CACHE) {

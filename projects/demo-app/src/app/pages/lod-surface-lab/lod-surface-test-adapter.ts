@@ -1,6 +1,7 @@
 import type { GpuPassKind, IFrameSampleSummary } from 'triangular-engine';
 import { modeActionMs, type TestCheck, type TestContext, type TestMetric, type TestObservation, type TestRunAdapter, type TestScenario, type TestSetting } from 'triangular-engine/testing';
 import type { CrackCount } from './lod-crack-probe';
+import { percentile } from './lod-height-bake';
 import { CAP_SLACK, type SelectorStats } from './lod-selector';
 import { crackExpectation, type LodSurfaceTestSettings } from './lod-surface-tests';
 
@@ -18,6 +19,10 @@ export interface LodSurfaceBakeInfo {
   /** CPU time of handing the texture to the renderer (`initTexture`); the GPU copy itself runs after it. Null if it failed. */
   readonly uploadMs: number | null;
   readonly textureMB: number;
+  /** |CPU twin - source| at the probe points, metres (`twinErrors`); the interpolation error of the texture, not a GPU read-back. */
+  readonly twinErrorM: readonly number[];
+  /** Cell planet only: building its world, ms, in the worker (once per world; later bakes of it report the same figure). */
+  readonly worldBuildMs?: number;
 }
 
 /** What the selector and renderer did on the last frame. */
@@ -59,7 +64,8 @@ export interface LodSurfaceTestHost {
   thumbnail?(): Promise<Blob | undefined>;
 }
 
-const READY_TIMEOUT_MS = 30_000;
+/** Includes a bake: the cell planet's six faces take about ten seconds on a laptop, and a first case also builds its world. */
+const READY_TIMEOUT_MS = 60_000;
 const STALL_MS = 5_000;
 const SETTLE_FRAMES = 3;
 const MIN_WINDOW_FRAMES = 60;
@@ -101,6 +107,12 @@ function bakeMetrics(bake: LodSurfaceBakeInfo | undefined): TestMetric[] {
     { name: 'bakeMs', unit: 'ms', optional: true, samples: [sum + bake.pyramidMs], source: 'Worker time: all faces plus the min/max pyramid' },
     { name: 'uploadMs', unit: 'ms', optional: true, samples: bake.uploadMs === null ? [] : [bake.uploadMs], source: 'Main-thread time of renderer.initTexture; GPU copy time is not included', unavailableReason: bake.uploadMs === null ? 'initTexture failed or the renderer was not ready' : undefined },
     { name: 'textureMB', unit: 'MB', optional: true, samples: [bake.textureMB], source: 'Float32 height texels of all faces (10^6 bytes)' },
+    ...(bake.worldBuildMs === undefined ? [] : [{ name: 'worldBuildMs', unit: 'ms', optional: true, samples: [bake.worldBuildMs], source: 'Worker time of buildCellPlanetWorld, once per world (not part of bakeMs)' } satisfies TestMetric]),
+    {
+      name: 'twinVsSamplerErrorM', unit: 'm', optional: true, samples: [...bake.twinErrorM],
+      source: '|CPU twin bilinear - direct source value| at 64 off-texel lattice points over the faces; the interpolation error of the texture, NOT a GPU read-back',
+      unavailableReason: bake.twinErrorM.length ? undefined : 'No probe points',
+    },
   ];
 }
 
@@ -253,7 +265,7 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
           unmet: info.stats.unmet, capHit: info.stats.capHit, deepestLevel: info.stats.deepestLevel,
           drawCalls: info.drawCalls, rendererTriangles: info.rendererTriangles,
           drawingBufferWidth: info.drawingBuffer[0], drawingBufferHeight: info.drawingBuffer[1],
-          ...(info.bake ? { bakeSource: info.bake.source, bakeSide: info.bake.side, bakeRoundTripMs: info.bake.roundTripMs } : {}),
+          ...(info.bake ? { bakeSource: info.bake.source, bakeSide: info.bake.side, bakeRoundTripMs: info.bake.roundTripMs, twinErrorMaxM: maxOf(info.bake.twinErrorM), twinErrorP95M: percentile(info.bake.twinErrorM, 0.95) } : {}),
           ...(probe ? { crackPixels: probe.cracks, crackMaskedPixels: probe.masked, probeSurfacePixels: probe.surface, probeWidth: probe.width, probeHeight: probe.height } : {}),
         },
         validityIssues: [

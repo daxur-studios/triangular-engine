@@ -82,4 +82,46 @@ const BASELINE_V1: TestSuite<LodSurfaceTestSettings> = {
 /** v2: the same cases; a still window's quick cap is its full 4 s, so a series has time to settle. */
 const BASELINE_V2: TestSuite<LodSurfaceTestSettings> = { ...BASELINE_V1, version: 2, scenarios: baselineScenarios() };
 
-export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2];
+/** Terrain sources the suite measures, each with the domains it makes sense on (the cell planet is a sphere only). */
+export const TERRAIN_CASES: readonly { readonly source: HeightSourceId; readonly domains: readonly DomainPresetId[] }[] = [
+  { source: 'cell-planet', domains: ['sphere-10km', 'sphere-600km'] },
+  { source: 'noise', domains: ['plane-100km', 'sphere-600km', 'sphere-10km'] },
+  { source: 'cliff', domains: ['plane-100km', 'sphere-10km'] },
+];
+
+/** Cell planet 10 km: the world and its sampler are built once and shared with the 600 km bake that follows. */
+function terrainScenarios(): TestScenario<LodSurfaceTestSettings>[] {
+  const settings = (source: HeightSourceId, domain: DomainPresetId, pose: PoseId): Partial<LodSurfaceTestSettings> => ({ source, domain, pose, view: 'shaded', bounds: false });
+  const out: TestScenario<LodSurfaceTestSettings>[] = [];
+  for (const { source, domains } of TERRAIN_CASES) {
+    for (const domain of domains) {
+      for (const pose of POSES) out.push(still(`${source}-${domain}-${pose}`, `${source} · ${domain} · ${pose}`, settings(source, domain, pose)));
+      // The control sits in the middle of its source's group, so it reuses that bake instead of making a third one.
+      if (source === 'noise' && domain === 'sphere-10km') {
+        out.push(still('control-injected-gap', 'control: injected gap over baked noise (probe must find cracks)', { ...settings(source, domain, 'low-200m'), injectedGap: 0.01 }));
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Suite `lod-surface-terrain` v1 (Plan 059 order step 3): the baseline poses over the baked terrain sources, each case
+ * after its bake has landed (the adapter waits for `heightSourceReady`, so no bake falls inside a timing window). Cases
+ * run source by source and domain by domain so the page's two-entry bake cache is hit by every case after the first of a
+ * group. Besides the baseline metrics each case reports the bake (per face, total, upload, texture MB, world build for the
+ * cell planet) and the CPU twin's error against the source at 64 probe points. The cliff is expected to look stretched on the plane:
+ * that is what the slope criterion and M6 are for. Settings differ from the baseline (shaded view, no bounds overlay) so
+ * thumbnails read as terrain.
+ */
+const TERRAIN_V1: TestSuite<LodSurfaceTestSettings> = {
+  id: 'lod-surface-terrain',
+  version: 1,
+  title: 'LOD surface core: baked terrain sources (cell planet, noise, cliff) at the baseline poses (Plan 059)',
+  purpose: 'performance',
+  requiresVisualReview: true,
+  scenarios: terrainScenarios(),
+};
+
+/** Oldest first; the final entry is "Run latest test". The baseline is still run by its exact version. */
+export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, TERRAIN_V1];

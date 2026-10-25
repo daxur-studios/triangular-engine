@@ -9,6 +9,9 @@ performance:
   - id: lod-surface-baseline-v1
     url: http://triangular-demo.localhost:4200/lod-surface-lab?testSuite=lod-surface-baseline&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
     status: runnable-hardware-unmeasured
+  - id: lod-surface-terrain-v1
+    url: http://triangular-demo.localhost:4200/lod-surface-lab?testSuite=lod-surface-terrain&testVersion=1&testProfile=visible-browser&testRepetitions=1&testAutoStart=1
+    status: measured-rtx3080-visual-review-pending
 ---
 
 # Plan 059: LOD Surface Core for Water and Terrain
@@ -168,7 +171,7 @@ measured on the RTX 3080 before the next starts:
 2. **M4 core without water:** a per-face baked height texture read live in the vertex stage, with a CPU twin. *Built 2026-10-25 as specs-only chunk B (noise and baked-bumps sources, worker bake, min/max node ranges; 92 headless specs); first browser look on the AMD iGPU: draws, 0 crack px on baked noise, the gap control still finds cracks; RTX run and a faster bake (about 800 ms per face now) open, see the runbook.*
 3. **Terrain suite** (`lod-surface-terrain`, new): the baseline poses and metrics for every terrain source, plus
    bake and upload time. First sources: the cell planet (through the worldgen surface sampler), plain noise and a
-   synthetic cliff/step fixture. Adding a terrain means adding a source, not a suite.
+   synthetic cliff/step fixture. Adding a terrain means adding a source, not a suite. *Built 2026-10-25 as specs-only chunk C: suite `lod-surface-terrain` v1 (36 cases), sources `cell-planet` and `cliff`, world build and twin error metrics, and a bake about 3x faster; 117 headless specs. First RTX 3080 run the same day: 0 crack px in all 35 ordinary cases, the control found 27,838 px, GPU scene pass p95 at most 0.27 ms; visual review pending, see the runbook.*
 4. **Slope criterion** (from M2), measured ABAB in the terrain suite.
 5. **M5:** edits and the collider patch.
 6. **M6:** cliffs.

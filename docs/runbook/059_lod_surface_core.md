@@ -512,3 +512,122 @@ so the numbers below are not RTX evidence and the bake times are CPU times on th
   value noise allocates two closures per call and runs up to 10 octaves per texel. Fine for a lab, not for edits or the
   cell planet: optimise (inline the corner hashes, no closures) before chunk C measures bake time.
 - **Upload ms** (2.2–2.7 ms) is the CPU side of `initTexture` only, as recorded above.
+
+## 2026-10-25 — Bake speed-up and chunk C: terrain suite (specs only, no browser run)
+
+Two jobs: make the bake fast enough to measure, then build the terrain suite. Everything below is checked by headless
+specs (117 pass) and `ng build demo-app`. **No browser suite was run**, so nothing here is hardware evidence.
+
+**Bake speed-up.** Value noise no longer allocates per call: the corner hashes and the blend are inline, the hash is
+`Math.imul`, and octave constants are precomputed. `texelPoint` reuses a per-`k` component table, and `buildPyramid`
+uses plain min/max. Values are bit-identical to the old closure form. The canonical cube-edge texel and f32 rules are
+unchanged, so seams stay identical. A spec bakes one face and checks only time-independent properties.
+
+Per face at k=10 (1025² texels), headless node, indicative only:
+
+| Source | Before, ms | After, ms |
+| --- | --- | --- |
+| noise, sphere | 1350–1470 | 370–490 |
+| noise, plane | about 1080 | 350–440 |
+| cell planet | not built | about 920, plus a world build of about 195 |
+
+**New sources.** Each is a `BakedSourceId`, rebuilt by id in the worker.
+
+- `cell-planet`: the worldgen cell planet, built in the worker from a small serialisable description (seed 3, 1000
+  cells). The world build is timed apart as `worldBuildMs`. Height comes from `sampler.sampleNear` with a cell hint, so
+  there is no full cell scan per texel. Sphere only; `sourceSupports` hides it on the plane.
+- `cliff`: a synthetic step fixture, for testing seams and ranges against a known edge.
+- `noise`: unchanged design, now in the suite.
+
+**Twin error.** `twinVsSamplerErrorM` compares the CPU twin of the baked texture with the source sampler at probe
+points. The worker samples the probes, so the main thread needs no world. A GPU read-back (`gpuVsTwinErrorM`) was not
+built: it cannot be checked headless.
+
+**Suite `lod-surface-terrain` v1.** 36 cases: sources by the domains they suit, at the five poses, plus one injected-gap
+control. Cases are ordered so each source and domain is one run, which the two-entry bake cache turns into one bake per
+group. Each case waits for `heightSourceReady` (timeout now 60 s). Repetitions re-bake. Baseline v2 is untouched, and the
+history has three entries.
+
+**Not done.**
+- No browser run, so no timings, no crack-probe result on the new sources, and no WGSL check of them.
+- No GPU read-back metric.
+- Height scales of the new sources are first guesses.
+
+**For review.** The cell planet seed and cell count were chosen so the poses stand on land; check this on a real run.
+Check that the cache comment in the page matches the ordering above.
+
+## 2026-10-25 — Chunk C review and a first browser look (AMD iGPU, not timing)
+
+Reviewed the bake speed-up and the terrain sources and suite, then reran the lab specs (117 pass) and `ng build
+demo-app` (passes). No defects found.
+
+- **Cell planet seams.** The hinted cell walk (`findCellNear`) is a greedy walk over the cell neighbours, which ends at
+  the nearest cell whatever the hint, so a texel shared by two faces gets one value. It could differ only on an exact
+  tie between two cell centres. The spec "bakes seam-identical faces with the cell planet sampler" covers this.
+- **Several suites in one history.** The testing entry allows this (append suites or versions, oldest first). "Run
+  latest test" now starts `lod-surface-terrain` v1. The baseline is run by its exact version link.
+- **Bake metrics per case.** Cases that reuse a cached bake report the same bake figures as the first case of their
+  group. Read bake numbers from one case per group.
+
+First look in the browser pane on the AMD iGPU, functional only:
+
+- **Draws.** The cell planet and the cliff compile, bake, upload and draw with no console errors. The cliff shows as a
+  stretched 200 m wall ahead of the 2 m eye, as intended.
+- **Bake, 10 km sphere, 1025² x 6.** Cell planet: world build 131 ms, then 803–1005 ms per face, 5.8 s round trip.
+  Cliff: 185–253 ms per face, 1.5 s round trip.
+- **Twin vs source.** Cell planet: max 0.11 m, p95 0.04 m. Cliff: 0.00 m at the probes (the 20 m ramp is about one texel
+  here and the probes missed it).
+- **Crack probe: no valid result.** The pane's page stopped drawing frames: the HUD and repeated probes did not change.
+  The unchanged static-bumps source, 0 px on the RTX, also read 837,089 px. So the high counts (515k to 837k px) are
+  stale frames, not cracks. Recheck on the RTX run.
+
+**Open:** the RTX run of `lod-surface-terrain` v1 (timings, crack probe, poses on land); a GPU read-back of heights.
+
+## 2026-10-25 — Terrain suite v1 on the RTX 3080
+
+The owner ran `lod-surface-terrain` v1 on the RTX 3080 Laptop: NVIDIA WebGPU adapter, visible browser, standard
+mode, one repetition, 36 valid cases in 200 s. The run logged `WARN other-app-measuring, gpu-throttled` at medium
+load, so the timings are indicative, not a clean measurement. Visual review is still pending.
+
+| | result |
+|---|---|
+| crack px, 35 ordinary cases | 0 |
+| `control-injected-gap` | 27,838 px (probe works) |
+| GPU scene pass p95 | 0.04–0.27 ms |
+| frame interval median | 6.0–6.1 ms (display-paced) |
+| selection CPU p95 | 0.0–0.1 ms (still poses, memo; not a selection measurement) |
+
+Bake, one case per group (worker on the laptop CPU):
+
+| source, domain | per face median / p95 | total | upload | texture |
+|---|---|---|---|---|
+| cell planet, 10 km sphere | 543 / 646 ms | 3.5 s | 10.8 ms | 25.2 MB |
+| cell planet, 600 km sphere | 565 / 641 ms | 3.6 s | 2.3 ms | 25.2 MB |
+| noise, 100 km plane | 254 ms | 0.30 s | 0.5 ms | 4.2 MB |
+| noise, 600 km sphere | 306 / 342 ms | 2.0 s | 2.5 ms | 25.2 MB |
+| noise, 10 km sphere | 304 / 337 ms | 2.0 s | 2.2 ms | 25.2 MB |
+| cliff, 100 km plane | 63 ms | 0.08 s | 0.7 ms | 4.2 MB |
+| cliff, 10 km sphere | 112 / 136 ms | 0.77 s | 2.9 ms | 25.2 MB |
+
+The cell-planet world build took 96 ms.
+
+CPU twin vs sampler at the 64 probes (max / p95):
+- cell planet 10 km: 0.11 / 0.04 m;
+- cell planet 600 km: 0.86 / 0.31 m, against a ±1200 m height range;
+- noise: 0.09–0.12 / 0.07–0.09 m;
+- cliff: 0.00 m, because the probes miss the ramp.
+
+### Findings
+
+- **Seams hold on real terrain.** There are 0 crack px on every source, domain and pose, including the cliff and the
+  cell planet. The bit-identical seam rule carries over to baked textures.
+- **Drawing is cheap.** The GPU cost is the same as on the baseline suite. Height texture fetches add nothing visible
+  at this scale.
+- **The bake is the cost.** A cell-planet sphere takes about 3.5 s, mostly in the cell lookup. Noise takes about 2 s.
+  This is fine for a lab, but too slow for edits (M5) or a page load. The likely next step is to bake faces in
+  parallel workers, or to bake coarse first and refine.
+- **The 600 km cell-planet twin error is larger.** Its 0.86 m max is 0.07% of its height range. That is an
+  interpolation error between texels on steep cell borders, not a seam error, and it should drop at a finer texel.
+
+**Open:** a visual review of the shaded cases, including whether the cell-planet poses stand on land; a clean rerun
+without other apps measuring; the jitter look; the AMD run; a GPU read-back of heights.

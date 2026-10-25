@@ -1,19 +1,24 @@
 /// <reference lib="webworker" />
 
-import { bakeBuffers, bakeHeights, type BakeLayout } from './lod-height-bake';
-import { samplerFor, type BakedSourceId } from './lod-height-noise';
+import { bakeBuffers, type BakeLayout } from './lod-height-bake';
+import { runBake, type BakedSourceId } from './lod-height-noise';
+import { parseCellPlanet, type CellPlanetDescription } from './lod-height-terrain';
 
-/** One bake: the source by name (functions do not cross `postMessage`) and the texture layout. */
+/**
+ * One bake: the source by name (functions do not cross `postMessage`), the texture layout and, for the cell planet, the
+ * plain description the worker builds its world from.
+ */
 export interface BakeRequest {
   readonly id: number;
   readonly source: BakedSourceId;
   readonly layout: BakeLayout;
+  readonly planet?: CellPlanetDescription;
 }
 
 addEventListener('message', ({ data }: MessageEvent<BakeRequest>) => {
   try {
-    const baked = bakeHeights(data.layout, samplerFor(data.source, data.layout));
-    postMessage({ id: data.id, baked }, bakeBuffers(baked));
+    const output = runBake(data.source, data.layout, data.planet ? parseCellPlanet(data.planet) : undefined);
+    postMessage({ id: data.id, ...output }, bakeBuffers(output.baked));
   } catch (error) {
     postMessage({ id: data.id, error: error instanceof Error ? error.message : String(error) });
   }
