@@ -192,6 +192,43 @@ describe('Plan 059 LOD selector', () => {
     expect(Array.from(selector.leaves.subarray(0, selector.stats.leaves))).toEqual(first);
   });
 
+  it('selects the same cells as a fresh selector after many views, through pool reclaims', () => {
+    const settings = settingsFor(sphere600, { cull: true, leafCap: 256 });
+    const reused = new LodSelector(settings, 2);
+    const cellsOf = (selector: LodSelector): string[] => {
+      const keys: string[] = [];
+      for (let k = 0; k < selector.stats.leaves; k++) {
+        const node = selector.leaves[k];
+        keys.push(`${selector.root[node]}:${selector.level[node]}:${selector.i[node]}:${selector.j[node]}:${selector.masks[k]}:${k < selector.stats.drawn}`);
+      }
+      return keys.sort();
+    };
+    // Rotating the camera and frustum about the centre (x, y, z -> y, z, x) looks at other faces of the same sphere.
+    const rotate = (v: SelectorView, turns: number): SelectorView => {
+      const turn = (x: number, y: number, z: number): Vec3 => {
+        let p: Vec3 = [x, y, z];
+        for (let t = 0; t < turns; t++) p = [p[1], p[2], p[0]];
+        return p;
+      };
+      const frustum = new Float64Array(12);
+      for (let p = 0; p < 12; p += 3) frustum.set(turn(v.frustum[p], v.frustum[p + 1], v.frustum[p + 2]), p);
+      return { camera: turn(...v.camera), pixelAngle: v.pixelAngle, frustum };
+    };
+    for (let round = 0; round < 2; round++) {
+      for (const pose of ['eye-2m', 'horizon', 'low-200m', 'mid-5km', 'orbit'] as const) {
+        for (let turns = 0; turns < 3; turns++) {
+          const view = rotate(viewFor(sphere600, pose), turns);
+          reused.select(view);
+          const fresh = new LodSelector(settings);
+          fresh.select(view);
+          expect(cellsOf(reused)).withContext(`round ${round} ${pose} turns ${turns}`).toEqual(cellsOf(fresh));
+          expect(balanceIssues(reused, sphere600)).toEqual([]);
+        }
+      }
+    }
+    expect(reused.reclaims).toBeGreaterThan(0);
+  });
+
   it('culls: fewer drawn leaves than leaves when looking along the ground', () => {
     const selector = new LodSelector(settingsFor(plane, { cull: true }));
     selector.select(viewFor(plane, 'eye-2m'));

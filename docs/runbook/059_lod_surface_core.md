@@ -207,3 +207,31 @@ The lab is in the demo app: `projects/demo-app/src/app/pages/lod-surface-lab/`, 
 1. Make the selector persistent (geometry cache, then incremental split and merge).
 2. Look at the page with the window in front: render, probe, controls.
 3. Owner runs the suite on both adapters, and the gates are recorded here.
+
+## 2026-10-25 — Persistent selector; selection at the CPU budget in Node
+
+### Built
+
+- **Persistent node pool** in `lod-selector.ts`. The tree is still re-selected from the roots every frame, in the same priority order, but nodes are no longer recreated:
+  - a node keeps its block of four children after it stops being split, with their camera-independent data (centre, normal, bounding radius, longest edge, and the same-level neighbour cell across each edge);
+  - `open` marks the nodes split in the current frame, and only culling and priority are recomputed per view;
+  - the pool holds four trees by default; when it runs low, blocks that the last tree did not reach go on a free list.
+- **Neighbour lookups start from the nearest shared ancestor** (parent pointers) instead of the root, except across cube faces.
+- The bench script was a scratch file and is deleted; the numbers are below.
+
+### Verified
+
+- 26 headless specs pass. The new spec checks that a reused selector picks the same cells, masks and drawn flags as a fresh selector over 30 views (5 poses × 3 rotations of the sphere, twice). It uses a two-tree pool, so reclaiming runs, and checks 2:1 balance after every view.
+
+### Findings
+
+- **Selection is now at the L5 budget in Node.** Cap 1024, 32 cells, 4 px cells, culling on, 15 baseline poses: 0.15–0.19 ms per select for a still camera and 0.17–0.21 ms for a camera moving 1% of its altitude per frame. Orbit is 0.03–0.10 ms. Before: 1.6–3.0 ms.
+  - The steps: keeping the pool alone gave 0.7–1.3 ms; caching neighbour cells gave 0.22–0.52 ms; climbing from the shared ancestor gave the numbers above.
+  - These are Node numbers on the owner's laptop, not browser main-thread p95 on the reference machine. L5 is not yet measured.
+  - Profile after the change: neighbour descent and split priority lead; there is no single large cost left. Incremental split and merge (no re-selection from the roots) is the next step if the browser numbers miss.
+
+### Next
+
+1. Look at the page with the window in front: render, probe, controls.
+2. Owner runs `lod-surface-baseline` v1 on both adapters, including selection CPU p95, and the gates are recorded here.
+3. Spike S1.

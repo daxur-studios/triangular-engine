@@ -20,8 +20,8 @@ import { DEFAULT_SETTINGS, LOD_SURFACE_TEST_HISTORY, type LodSurfaceTestSettings
 
 /**
  * Plan 059 M1: the LOD surface lab. A bounded 100 km plane and cube-spheres of 10 km and 600 km, drawn by one
- * instanced grid whose leaves come from a CPU quadtree rebuilt every frame (`lod-selector.ts`), cracks closed by edge
- * folding (`lod-surface-mesh.ts`). WebGPU only (Plan 059 D2): without it the page says so and draws nothing.
+ * instanced grid whose leaves come from a CPU quadtree re-selected every frame over a persistent node pool
+ * (`lod-selector.ts`), cracks closed by edge folding (`lod-surface-mesh.ts`). WebGPU only (Plan 059 D2): without it the page says so and draws nothing.
  *
  * Frames: the domain frame is the render frame; the engine camera sits at the origin and only turns, and every leaf is
  * placed relative to the camera from doubles. Reversed float depth, so 2 cm near planes and orbit views share a buffer.
