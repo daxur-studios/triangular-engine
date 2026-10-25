@@ -70,6 +70,8 @@ shortest length that still shows what the case checks (standard keeps `durationM
 unwatched window also runs `quickMs` in quick mode. For a
 feature's cost, give the suite `ablation: { feature, metrics }` and alternate round
 scenarios with `ablation: { group, arm: 'A' | 'B' }`; the session compares them.
+The main **Run suite** button and the menu's **Run all** keep A/B suites together. A custom batch of individual
+scenarios saves separate results and cannot combine their rounds into one comparison.
 
 Keep settings feedback visible while running. Capture is read-only; restore must
 work after partial application or cancellation. The default run timeout is 180
@@ -84,7 +86,7 @@ For pure CPU cost (a per-tick solver at 1-100 objects) use `cpuBench({ setup, ru
 `group`/`share`, which `npm run test:summary` prints as a breakdown sorted by share). CPU suites have
 `evidence: 'cpu'`: report them as CPU timings, never as GPU or hardware evidence, and compare baselines only on the same
 engine. Use `metric`, `waitFor`, `scenarioFactory`, `simpleAdapter` from the entry instead of local copies. Details:
-`docs/testing.md`, "CPU performance".
+`testing/README.md`, "CPU performance".
 
 ## Give the user a runnable link
 
@@ -125,7 +127,7 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   `unassessed` unless the suite has `TestScenario.budgets` or a `TestSuite.baseline` (same mode); then
   it is `pass` or `fail`, with the reasons in `TestCaseResult.performanceChecks`. Missing evidence or
   unverified headless performance stays `inconclusive`. Make a baseline with `npm run test:baseline`; see
-  `docs/testing.md`, "Budgets and baselines".
+  `testing/README.md`, "Budgets and baselines".
   `visualReview` starts `pending` when `requiresVisualReview: true` or the profile
   is `human-observed`; otherwise it is `not-required`, regardless of suite purpose.
   Set the flag explicitly for functional tests that need appearance review.
@@ -150,7 +152,7 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   another app's folder. Timed cases from different apps take a machine-wide lock
   (`triangular-test-measuring.json` in the OS temp folder); a case that overlaps another app's case gets
   `other-app-measuring`, which `npm run test:summary` prints as a `WARN`. A router that runs one receiver per app sets
-  `DAXUR_TEST_SINK=1`, so the proxy spawns nothing. Details: `docs/testing.md`, "Several apps at once".
+  `DAXUR_TEST_SINK=1`, so the proxy spawns nothing. Details: `testing/README.md`, "Several apps at once".
 - **Read results cheaply:** run `npx triangular-test-summary [--suite id] [--last N]`
   first in a consumer app (installed bin). Inside the triangular-engine repository
   `npx` fails with a 404; use `npm run test:summary -- [--suite id] [--last N]`. It shows date, profile, fingerprint, `STALE` vs the current tree, the three
@@ -166,7 +168,7 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   (CPU, RAM, and `nvidia-smi` GPU readings) and the run gets `machine.warnings` (`on-battery`,
   `gpu-busy-before-start`, `gpu-throttled`, ...), shown by `npm run test:summary`. A run with warnings, no adapter
   info, or the wrong adapter is not a hardware number. Process names stay in `artifacts/` result files; never put
-  them in docs or baselines. See `docs/testing.md`, "Machine context".
+  them in docs or baselines. See `testing/README.md`, "Machine context".
 - **Thumbnails and the results page.** An adapter may add `thumbnail(scenario, context)` (not `capture`, which is the
   state snapshot) returning one or a few small `Blob`s (a still; at most 4, 64 KB each, 2 MB per run, aim for 5-10 KB).
   `TestSession` calls it only after `measure` for a kept case, never in the window or for an attempt about to be redone,
@@ -185,7 +187,7 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   GPU (no game, low load), opens a throwaway full-screen Chrome with `--enable-webgpu-developer-features`, waits for
   the saved result, closes that Chrome and prints the summary. Exit 0 pass, 1 not passed, 2 no result, 3 never
   quiet, 4 setup error. It takes over the screen: run it only when the user has said the machine is free.
-  Details: `docs/testing.md`, "Unattended runs".
+  Details: `testing/README.md`, "Unattended runs".
 - Without a receiver, JSON copy/paste is the fallback handoff.
 
 Verify the adapter's meaningful checks, cancellation and restoration with the

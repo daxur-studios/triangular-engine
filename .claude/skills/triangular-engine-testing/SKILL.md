@@ -8,7 +8,7 @@ description: Add or extend repeatable functional, visual-review and performance 
 The skill's source ships with the package. Read it before writing a suite or reading results:
 
 - Skill: `projects/triangular-engine/.agents/skills/triangular-engine-testing/SKILL.md` (and the adapter recipe beside it)
-- Guide: `projects/triangular-engine/docs/testing.md`
+- Guide: `projects/triangular-engine/testing/README.md`
 
 In this repository:
 

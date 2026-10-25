@@ -1,6 +1,6 @@
-# GPU data flow (`triangular-engine/gpu-data-flow`)
+# triangular-engine/gpu-data-flow
 
-Transport and scheduling for data that moves between the CPU, the GPU and workers: an upload ring with a byte budget, a readback ring with frame tags and measured latency, double-buffered storage buffers, capacity guards, and a job scheduler with per-frame budgets. No Angular, no three.js. Design: [Plan 055](../../../docs/plans/055_planet_shape_system.md), "Data-flow core".
+Transport and scheduling for data that moves between the CPU, the GPU and workers: an upload ring with a byte budget, a readback ring with frame tags and measured latency, double-buffered storage buffers, capacity guards, and a job scheduler with per-frame budgets. No Angular, no three.js. Design: Plan 055, "Data-flow core".
 
 Status: **preview.** The logic is plain TypeScript behind a small `FlowDevice` interface and is covered by specs with a fake device. The WebGPU binding is thin and not yet exercised on hardware.
 

@@ -1,8 +1,8 @@
-# Atmosphere (`triangular-engine/atmosphere`)
+# triangular-engine/atmosphere
 
 A physically based, lookup-table-driven planet atmosphere: sky colour, sunsets, aerial perspective, sun disc and limb glow, for planets from about 60 km to Earth-sized. It runs on `WebGPURenderer` (WebGPU, or its WebGL2 fallback) as TSL.
 
-Status: **preview.** The atmosphere is drawn on a plain sphere (`AtmosphereBackdrop`). It is not yet part of the cell-planet material, and it is not yet cached per frame (see Cost). Design and phases: [Plan 049](../../../docs/plans/049_morphing_planet_atmosphere.md). Try it at `/atmosphere-lab` in the demo app.
+Status: **preview.** The atmosphere is drawn on a plain sphere (`AtmosphereBackdrop`). It is not yet part of the cell-planet material, and it is not yet cached per frame (see Cost). Design and phases: Plan 049. Try it at `/atmosphere-lab` in the demo app.
 
 ## Pieces
 
@@ -135,7 +135,7 @@ atmosphere.removeSkyBody(moon);
 
 ## On the planet material
 
-`PlanetAtmosphereBinding` fills two stages of `PlanetSurfaceMaterial` (see [planet-material.md](planet-material.md)): the lighting stage and the atmosphere stage. The sky and limb glow behind the globe stay with `AtmosphereBackdrop` (set `groundEnabled.value = 0`), which draws behind the mesh.
+`PlanetAtmosphereBinding` fills two stages of `PlanetSurfaceMaterial` (see the [planet material guide](../planet-material/README.md)): the lighting stage and the atmosphere stage. The sky and limb glow behind the globe stay with `AtmosphereBackdrop` (set `groundEnabled.value = 0`), which draws behind the mesh.
 
 ```ts
 // aerialPerspective: true reads the haze from a froxel table (recommended); omit it for one march per fragment

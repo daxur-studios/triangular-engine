@@ -26,7 +26,7 @@ entry keeps its blocker rather than silently selecting an older test.
 
 The host page uses `triangular-engine/testing` to expose **Run latest test** and
 exact-version reruns; Markdown plans/runbooks expose corresponding launch links.
-Follow the [testing guide](../projects/triangular-engine/docs/testing.md) for
+Follow the [testing guide](../projects/triangular-engine/testing/README.md) for
 current contracts and profiles. Agents author and exercise these scenarios;
 "visit the page and inspect it" is not a complete feature handoff. Builds/unit
 tests, controlled performance evidence and explicit human visual acceptance

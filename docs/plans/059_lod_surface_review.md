@@ -416,7 +416,7 @@ mathematical/rendering principles below are **general knowledge**; budgets and i
    empty demo reaching 60 fps proves little. Record p50/p95/p99, cold compilation, uploads, allocations, memory,
    transitions, per-pass costs, adapter/browser, resolution and power conditions. Use warmed visible-browser runs,
    paired ABAB comparisons and a sustained run; headless checks correctness only. Missing GPU timestamps mean
-   "unmeasured", not zero. The [test runner](../../projects/triangular-engine/docs/testing.md) requires host-supplied
+   "unmeasured", not zero. The [test runner](../../projects/triangular-engine/testing/README.md) requires host-supplied
    metrics. **Falsifier:** test these budgets with representative scene load. Validate crack probes using injected
    gaps and valid silhouettes; a backstop can leak at legitimate boundaries. Measure pops with frozen waves and
    reprojection/reference coverage so camera motion is not counted as LOD instability.
@@ -629,7 +629,7 @@ separate delivery. A fixed level can be above zero when useful for comparisons.
   wave-evaluation time or bandwidth floor follows from the round-1 evidence. Sweep leaf counts and teleports;
   compare p95 and sustained whole-scene frame time on both adapters. Keep L5 provisional; choose between
   720p/2 ms and 1080p/1.8 ms only with an explicit scene/profile. The
-  [testing contract](../../projects/triangular-engine/docs/testing.md) leaves metric providers to the host;
+  [testing contract](../../projects/triangular-engine/testing/README.md) leaves metric providers to the host;
   instrumentation is real M1 work, not an automatic runner feature.
 
 **Revised first steps.** M1 combines harness and distance LOD: bounded plane, 10 km sphere, fixed patch cap,

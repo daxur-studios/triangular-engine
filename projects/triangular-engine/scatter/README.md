@@ -43,4 +43,4 @@ Physics residency remains independently player/vehicle-driven and should not
 share the render-streaming viewpoint.
 
 Current API decisions and implementation status are tracked in
-[`docs/runbook/005_scatter_sublibrary.md`](../../../docs/runbook/005_scatter_sublibrary.md).
+`docs/runbook/005_scatter_sublibrary.md`.

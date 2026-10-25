@@ -74,3 +74,21 @@ Notes:
 
 - All components are standalone; import `EngineModule` for core components and the relevant secondary entry point for optional integrations.
 - Many components accept common Object3D inputs: `position`, `rotation`, `scale`, `name`.
+
+## Quick reference: template selectors
+
+
+List of selectors available in templates (not exhaustive):
+
+- Core: `scene`, `group`, `mesh`, `points`, `sprite`, `primitive`, `gridHelper`, `arrowHelper`
+- Post-processing: `effect-composer`, `unrealBloomPass`, `glitchPass`, `outputPass`, `smaaPass`, `shaderPass`
+- Camera & Controls: `camera`, `orbitControls`
+- Geometry: `bufferGeometry`, `bufferAttribute`, `boxGeometry`, `sphereGeometry`, `planeGeometry`, `capsuleGeometry`
+- Materials: `material`, `meshStandardMaterial`, `meshNormalMaterial`, `meshBasicMaterial`, `shaderMaterial`, `rawShaderMaterial`, `pointsMaterial`, `spriteMaterial`
+- Lights: `light`, `ambientLight`, `directionalLight`, `pointLight`
+- GLTF: `gltf`
+- Audio: `audioListener`, `positionalAudio`, `ambientAudio`, `audioSource`
+- CSS Renderers: `css2d`, `css3d`
+- Physics: `physics`, `rigidBody`, `collider` family, `cuboidCollider`, `ballCollider`, `capsuleCollider`, `cylinderCollider`, `coneCollider`, `fixedJoint`, `sphericalJoint`, `instancedRigidBody`
+- Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `portalOutlet`, `[portalTarget]`, `[raycast]`
+

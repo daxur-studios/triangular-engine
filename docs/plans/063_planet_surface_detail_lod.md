@@ -10,7 +10,7 @@ performance: []
 
 # Plan 063: Planet Surface Detail LOD
 
-Status: **proposal, not started.** Design notes and reasoning: [Runbook 063](/docs/runbook/063_planet_surface_detail_lod.md).
+Status: **spike S1 in progress: Q2 passed (runway, `/planet-surface-detail-spike`); Q1 and Q3 built, waiting for the owner's visual judgement (checklist in the runbook); Q4, Q5 open.** Design notes and reasoning: [Runbook 063](/docs/runbook/063_planet_surface_detail_lod.md).
 Depends on [Plan 050](/docs/plans/050_tsl_planet_surface_material.md) (surface material, streamed pages) and
 [Plan 049](/docs/plans/049_morphing_planet_atmosphere.md) (atmosphere lighting and aerial perspective).
 
@@ -34,10 +34,10 @@ Run on `/cell-planet-tsl` or a cloned spike page (`new-spike` skill). Nothing en
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Height stamp: flatten terrain under placed flat features in the height source | planned |
-| 2 | SDF feature layer: per-page list of segments/rectangles evaluated in the material | planned |
-| 3 | Far-form layer: coverage, canopy height and normal channel, distance fade in | planned |
-| 4 | Aggregate and height-field sun shadow in the far-form layer | planned |
+| 1 | Height stamp: flatten terrain under placed flat features in the height source | spiked (Q2 pass, demo worker hook) |
+| 2 | SDF feature layer: per-page list of segments/rectangles evaluated in the material | spiked (one rectangle, Q2 pass; per-page list still planned) |
+| 3 | Far-form layer: coverage, canopy height and normal channel, distance fade in | spiked as an analytic density field, no baked page (owner to judge Q1); the normal channel cannot reach the lighting stage |
+| 4 | Aggregate and height-field sun shadow in the far-form layer | spiked (0/2/4-step march, owner to judge Q3) |
 | 5 | TSL impostor material that uses the planet lighting and haze stages | planned |
 | 6 | Page bake on stream-in from deterministic scatter and placed features; invalidation on edit | planned |
 | 7 | Emission channel for night lights on the far form | later |

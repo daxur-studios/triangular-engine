@@ -1,4 +1,4 @@
----
+# triangular-engine/procedural
 type: Architecture Note
 title: procedural
 description: TODO: describe purpose + why, not what

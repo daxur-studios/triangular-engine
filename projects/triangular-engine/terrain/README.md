@@ -76,7 +76,7 @@ patch retention, Three.js geometry creation, and GPU upload.
 
 > **Worker caveat**: an Angular app's worker entry that imports this entry point must start with
 > `import '@angular/compiler';`, or its unlinked partial declarations throw at load and silently
-> yield no patches. See the root README's Web Worker troubleshooting note.
+> yield no patches. See the [Web Worker note](../docs/troubleshooting.md) in troubleshooting.
 
 Framework-free consumers can continue composing
 `selectAdaptiveTerrainPatches`, `TerrainGenerationQueue`, and
@@ -141,7 +141,7 @@ Tile storage is about 10.52 MiB each on CPU and GPU, excluding the provider's
 world data, one pending payload, and driver overhead. A completed tile is about
 68 KiB plus changed mapping pages. Browser shader/performance acceptance and
 the remaining M3 work are tracked in
-[`040 — Streamed terrain material tiles`](../../../docs/runbook/040_streamed_terrain_material_tiles.md).
+`040 — Streamed terrain material tiles`.
 
 `evaluateTerrainMaterial` provides a renderer-independent first-pass material
 sample from elevation, slope, climate, ridge, river, and wetness signals. It
@@ -205,5 +205,5 @@ CDLOD eliminates LOD popping by morphing odd grid vertices towards their coarser
 locations on the GPU, avoiding geometry skirts and T-junction cracks across LOD boundaries.
 
 Current design and implementation gates are tracked in
-[`docs/runbook/004_multi_surface_terrain.md`](../../../docs/runbook/004_multi_surface_terrain.md) and
-[`docs/runbook/019_cdlod_celestial_migration.md`](../../../docs/runbook/019_cdlod_celestial_migration.md).
+`docs/runbook/004_multi_surface_terrain.md` and
+`docs/runbook/019_cdlod_celestial_migration.md`.

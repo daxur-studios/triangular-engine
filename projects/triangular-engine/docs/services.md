@@ -60,3 +60,18 @@ import { provideBrowserImageCompression } from 'triangular-engine/image-compress
 
 providers: [provideBrowserImageCompression()]
 ```
+
+## Quick reference
+
+
+Provide per component where you host `<scene>`:
+
+```ts
+providers: EngineService.provide({ showFPS: true });
+```
+
+- EngineService: `scene`, `renderer`, `tick$`, `elapsedTime$`, `setFPSLimit`, input streams (`keydown$`, `mousemove$`, `mousewheel$`, etc.), `camera$`, `switchCamera(camera)`, `requestSingleRender()`
+- PhysicsService: creates and steps Rapier `World`, `beforeStep$`, `stepped$`, `setSimulatePhysics()`, `setDebugState()`
+- AudioService: audio channel buses (`master`, `music`, `sfx`, `ambient`, `voice`, `ui`), active listener management, autoplay policy unlocking, `playOneShot(src, options)`, `playPositionalOneShot(src, pos, options)`
+- LoaderService: `loadAndCacheGltf(path, cachePath?, force?)`, `loadAndCacheTexture(path)`, `loadAndCacheAudio(path)`; sets Draco path to `/draco/`; builds `userData.objectMap` for GLTF lookup
+- EngineSettingsService: reactive settings (e.g., debug, auto-save)

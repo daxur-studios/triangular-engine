@@ -10,7 +10,13 @@ performance: []
 
 # Plan 061: Test Runner Batch Runs and a Deterministic Stop Rule
 
-Status: **proposal, not started.** Every number below is a proposal for owner approval, not a decision. Current contracts are in the [testing guide](../../projects/triangular-engine/docs/testing.md). Related work: [052 page test sessions](/docs/plans/052_page_test_sessions_and_performance_comparison.md) and [060 CPU performance](/docs/plans/060_testing_cpu_performance.md). Evidence and open decisions are logged in [runbook 061](/docs/runbook/061_test_runner_batch_and_stop_rule.md).
+2026-10-25 correction: **Run all** must preserve a suite-level A/B experiment as one session; splitting rounds
+into independent results removes the opposite arm and makes every comparison invalid. Independent suites keep
+incremental scenario saves. The main **Run suite** action also clears stale batch summaries. This correction
+does not change the stop rule or combine arbitrary manually assembled batches. Verification is recorded in
+[runbook 061](/docs/runbook/061_test_runner_batch_and_stop_rule.md).
+
+Status: **proposal, not started.** Every number below is a proposal for owner approval, not a decision. Current contracts are in the [testing guide](../../projects/triangular-engine/testing/README.md). Related work: [052 page test sessions](/docs/plans/052_page_test_sessions_and_performance_comparison.md) and [060 CPU performance](/docs/plans/060_testing_cpu_performance.md). Evidence and open decisions are logged in [runbook 061](/docs/runbook/061_test_runner_batch_and_stop_rule.md).
 
 ## 1. Summary
 
@@ -109,4 +115,4 @@ Nothing is run yet. What would prove it:
 - Clipboard test: the copied text has one block per test, blank-line separated, each starting with its stop reason.
 - Compare old quick runs and new runs on a few demo scenarios: the new median is within tolerance, and total time is not longer.
 - Drift check: inject a slow-down between reference runs and confirm the flag.
-- A visible-tab run on real hardware for the reference test, since headless timings are not hardware numbers ([testing guide](../../projects/triangular-engine/docs/testing.md), "Evidence and limitations").
+- A visible-tab run on real hardware for the reference test, since headless timings are not hardware numbers ([testing guide](../../projects/triangular-engine/testing/README.md), "Evidence and limitations").

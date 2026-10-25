@@ -1,4 +1,4 @@
-# Cell Planets & Seamless 2.5D ↔ 3D Morph
+# triangular-engine/worldgen/render: cell planets
 
 High-level reference for AI agents and developers working with Voronoi cell planets, map projections, and the GPU morphing system.
 

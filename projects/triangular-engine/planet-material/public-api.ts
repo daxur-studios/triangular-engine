@@ -1,7 +1,7 @@
 /**
  * TSL planet surface material for `WebGPURenderer` (and its WebGL2 fallback). Three-only: it imports
  * `three/webgpu` and `three/tsl`, so it is kept apart from `worldgen/render`, which stays on the
- * classic `WebGLRenderer`. See Plan 050 and `docs/planet-material.md`.
+ * classic `WebGLRenderer`. See Plan 050 and `planet-material/README.md`.
  */
 export * from './ordered-slots';
 export * from './projection-nodes';

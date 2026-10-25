@@ -1,5 +1,8 @@
 # Changelog
 
+- **Documentation ships with each entry point (Plan 064).** Entry-specific guides moved into their entry's `README.md`, which the package ships next to the entry's code: `atmosphere`, `planet-material`, `testing`, `gpu-data-flow`, `procedural`, `worldgen/render` (cell planets), `rapier` (physics), `jolt`, `pmndrs` and `characters` (facial animation). `docs/` is now part of the package with the cross-cutting guides. The root README is an index of entry guides, the shipped `triangular-engine` skill folds in the agent conventions from the former `docs/ai-agents.md` and points at the entry guides, and public symbols are documented with TSDoc for IDE hovers. Removed paths: `docs/ai-agents.md`, `docs/atmosphere.md`, `docs/cell-planets.md`, `docs/facial-animation.md`, `docs/gpu-data-flow.md`, `docs/jolt-physics.md`, `docs/physics.md`, `docs/planet-material.md`, `docs/pmndrs.md`, `docs/procedural.md` and `docs/testing.md`. Update any link that pointed at them to the entry's `README.md`. No API changed.
+- `triangular-engine/testing`: **Run all** keeps A/B suites in one session instead of splitting each round into a separate result with missing comparison arms. The main button is labelled **Run suite** and clears stale batch summaries. Independent suites retain incremental per-scenario saves; manually assembled batches remain separate runs.
+
 - `triangular-engine/testing`: CPU performance work (Plan 060). All additions are optional; existing suites behave as before.
   - **New entry `triangular-engine/testing/core`** (no Angular, imports in Node; `triangular-engine/testing` re-exports it): `createSpanRecorder(names, { unit?, capacity?, group? })` (`begin/end/time/beginRound/endRound(iterations?)/metrics/reset`, calibrated timer cost removed; metrics per span plus `unattributed` and `total`), `measureCpuCase`, `iqrOutliers`, `scalingExponent`, `yieldToEventLoop`, `metric`, `timeMetric`, `waitFor`, `describeTimer`, `describeJsEngine`, `jsEngineFamily`, `nowMs`, `CpuMetric`.
   - **`cpuBench({ setup, run, counts, spans?, warmupIterations?, batchTargetMs?, minSamples?, maxSamples?, durationMs?, quickMs?, teardown? })`**: auto-batched, not frame-paced CPU cases with `timeUs`, `usPerUnit`, optional span breakdown, outlier count and `scalingExponent` in `details`. `bench.suite(meta)` and `bench.adapter`.
@@ -217,7 +220,7 @@ All notable changes to triangular-engine are documented here.
   `planetOceanMaterial`, `planetBorderMaterial`, `planetMapBorderMaterial`, and
   example extensions (`roadLayer`, `moonEclipseOcclusion`,
   `nightLightsEmissive`). Demos: `/cell-planet-tsl`, `/planet-material-extensions`.
-  The GLSL patches are unchanged. See `docs/planet-material.md`.
+  The GLSL patches are unchanged. See `planet-material/README.md`.
 
 - New secondary entry point `triangular-engine/atmosphere` (Plan 049):
   `PhysicalAtmosphereProfile` with `validateAtmosphereProfile`,

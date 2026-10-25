@@ -48,6 +48,14 @@ Decisions from the owner, 2026-10-24:
 
 ## Caveats
 
+### 2026-10-25: preserve A/B comparisons from the menu
+
+Observed a consumer's **Run all** produce one saved session per round, each with only one comparison arm.
+Functional checks passed but A/B analysis reported missing rounds. **Run all** now delegates A/B suites to the
+same full-suite session as the main button, labelled **Run suite**. Independent suites retain per-scenario batch
+saves; arbitrary custom batches are unchanged. A regression clicks the real menu button and checks one result,
+ordered A/B/A/B rounds, two rounds per arm, restoration and removal of older batch summaries. Verification: the engine testing entry passed **184/184** headless tests (9.907 s), including the actual menu-click regression; library build succeeded at `2026-10-25T09:30:37.226Z`. Logs are ignored artifacts `ignore/testing-ablation-menu-tests.log` and `ignore/testing-ablation-menu-build.log`. This establishes execution grouping and restoration, not target-machine performance acceptance.
+
 - Line references in the plan came from a survey and have not been re-verified against the code. Check them before implementation starts.
 - Numbers approved by the owner, 2026-10-24: 5% median and 10% p95 tolerance, at least 4 blocks, 250 ms cooldown, 60 s per-test cap. Other numbers in the plan (for example the 60 frames / 500 ms warm-up text in §4) are superseded by the decided warm-up rule in Open questions, item 1.
 - Nothing has been run. Verification is listed in the plan.

@@ -34,3 +34,14 @@ Or load via `LoaderService.loadAndCacheTexture`.
 ## Export/Other Loaders
 
 `LoaderService` also exposes `BufferGeometryLoader`, `ObjectLoader`, `SVGLoader`, `STLLoader`, `FBXLoader`, `GLTFExporter` if you need direct access.
+
+## Textures and loaders
+
+
+- Textures: pass a `map` to `meshStandardMaterial` to auto-load a texture path
+
+  ```html
+  <meshStandardMaterial [map]="'assets/textures/wood.jpg'" />
+  ```
+
+- Direct loaders/exporters: access via `LoaderService` if you need `BufferGeometryLoader`, `ObjectLoader`, `SVGLoader`, `STLLoader`, `FBXLoader`, `GLTFExporter`

@@ -141,3 +141,151 @@ Real shadow maps only cover the near ring, where the meshes are. The far form ha
 
 A falsifiable spike on `/cell-planet-tsl` (or a cloned spike page), kept out of the library until the gates pass:
 see the plan's spike section.
+
+## 2026-10-25 — Spike S1, Q2: runway (height stamp + SDF layer)
+
+Spike page `/planet-surface-detail-spike` (`projects/demo-app/src/app/planet-surface-detail-spike/`), cloned from the
+`/cell-planet-tsl` page. No library change.
+
+### What was built
+
+- `runway-site.ts`: pure placement and stamp. Runway 2000 m × 45 m, plateau = rectangle + 120 m apron, smoothstep
+  shoulder 1400 m. `findRunwaySite` scans lat/lon for the flattest dry spot (deterministic). Spec:
+  `runway-site.spec.ts` (7 cases, headless, pass).
+- Height stamp: the demo-owned worker wraps `handleCellPlanetWorkerMessage` and passes `modifyElevation` when the
+  request carries `runwayStamp`. It reaches the mesh path only; material tiles are untouched.
+- `runway-layer.ts`: analytic SDF `SurfaceLayer` (order `game`). Rectangle SDF in metres in the tangent plane;
+  coverage filtered by `fwidth(d)`, spread by `min(1, W/px)` when sub-pixel; centreline dashes, edge lines and
+  threshold bars fade with the pixel footprint. It reads no textures, so the level-0 fetch rule did not apply; the
+  `fwidth` calls are unconditional and `select` evaluates both sides.
+- Query flag `?runway=on|paint|stamp|off` (default `on` = stamp + paint). The panel has "Reload as" buttons.
+
+### Gotcha
+
+`IPlanetContext.bodyFixedLocal` is relative to the camera-following render anchor, not the body centre. The first
+version painted the runway offset from the stamp by a camera-dependent amount. Fix: recover body-fixed metres with
+`modelWorldMatrix.mul(vec4(bodyFixedLocal, 1)).xyz.sub(uniforms.uBodyCentreScene)`.
+
+### Evidence
+
+World: medium tier, radius 600 km, maxLod 6 (finest triangle edge ~1.7–2 km at the site). Mesh audit
+(`auditTerrainUnderRunway()` on the page): max deviation of the batched terrain mesh from the plateau under the
+runway rectangle.
+
+| View | Edge length | stamp + paint | paint only |
+| --- | --- | --- | --- |
+| 1.5 km | ~1.7 km | 0.54 m | 3.02 m |
+| 25 km | ~1.7 km | 0.53 m | — |
+| 100 km | ~2.3 km | 1.02 m | 3.44 m |
+| 400 km | ~14 km | 7.14 m | — |
+
+Screenshots (built-in browser): [60 m](063_assets/s1-runway-60m.jpg) (sharp dashes and edge lines),
+[1.5 km](063_assets/s1-runway-1500m.jpg) (whole runway, threshold bars at the end). Checked at 60 m, 1.5 km,
+25 km, 100 km and 400 km with no gap, floating or cut at any of them.
+
+### Verdict
+
+**Q2: pass.** The paint is a material layer evaluated per fragment, so it follows the ground at every LOD by
+construction. The stamp keeps the mesh flat to ~1 m at fine LODs.
+
+Caveats:
+- At ≥100 km the runway is faint (sub-pixel; expected). At 400 km the stamp leaves 7 m of mesh deviation, invisible
+  at that range.
+- Terrain triangles at the finest LOD are wider than the runway, so only the material can carry the 45 m feature.
+- The site search picks the flattest terrain, so the stamp's benefit is modest here. It would matter on rough sites.
+- First site search takes ~30 s in the worker; a hard-coded site or a shared cache would be better for production.
+- Material-tile slope/cliff colour is baked from unstamped terrain (minor colour mismatch only).
+- Not tested: morph progress > 0.
+
+### Other questions
+
+- Q1 and Q3: see the next entry (built, owner to judge).
+- Q4 (GPU cost): **open**; needs the owner's RTX 3080 with `?gpuTiming=1`. Headless timings are not hardware numbers.
+- Q5 (impostor under atmosphere): **open**.
+
+## 2026-10-25 — Spike S1, Q1 and Q3: forest density field, instances, canopy layer, height-field shadow
+
+Same page, `/planet-surface-detail-spike`. Status: **built; the owner judges Q1 and Q3 by eye.** My own visual check was cut
+short (see "What was and was not verified").
+
+### Design (fields, features, instances)
+
+A forest is a continuous **field**, not a list of trees. Density = body-fixed noise (three octaves: 6 km regions, 1.5 km
+stands, 120 m patchy edges) x a land mask (coast to tree line) x runway clearance. Nothing is stored. Instances are
+sampled from the same density near the camera; the far form is a material layer evaluated from the same function.
+
+- `forest-field.ts`: the density on the CPU, the scatter (`scatterForest`) and every constant the GPU twin repeats.
+  The noise is an integer-hash value noise (`imul`, xor-shift), so the CPU and TSL versions agree bit-for-bit on the
+  lattice; no `sin` hash (GPU `sin` differs from the CPU's).
+- `forest-layer.ts`: the TSL twin. Surface layer: `mix(ground, tree albedo, density x cover x weight)`. Sun occlusion:
+  a 0/2/4-step march toward the sun over canopy height (`density x 22 m`), added with `addSunOcclusion`.
+- `forest-instances.ts`: one `InstancedMesh` (cone and trunk placeholder). Its material is a `MeshBasicNodeMaterial`
+  that runs `binding.lighting()` and `binding.perspective()`, the planet's own lighting and haze stages, on the same
+  tree albedo. It dissolves out over the fade band with an alpha hash while the layer fades in.
+- Worker: `forestScatter` (trees at the sampler's ground height, with the runway stamp) and `forestSpot` (nearest solid
+  forest to the runway, for the camera presets).
+- Fade band from tree size: 1 px ~ 0.001 x distance. A tree is individual while its crown is >= 12 px and gone at 4 px:
+  12 m crown gives 1000 m to 3000 m (`forestFadeBand`, unit-tested). The sliders default to it.
+
+### Lessons
+
+1. **The aggregate must come from the instance parameters.** My first version gave the layer a fixed 94 % canopy
+   cover while instances (8 m crowns on a 14 m grid) covered only ~26 %. Result: light ground with dissolving trees
+   next to dark canopy, a clear brightness step across the band (screenshot `s1-forest-1500m-band-prefix.jpg`, the
+   "before"). The layer's cover is now `FOREST_CANOPY_COVER` = crown area / cell area (capped 0.9), derived from crown
+   width and spacing, and the instance spacing and crown were changed to 12 m and 12 m (cover 0.79). That is the
+   answer to "bake the aggregate from the instances?": no bake is needed while the parameters are shared.
+2. **The atmosphere lighting stage ignores `normalTS` and the scene's lights.** It reads `sphereNormal` only
+   (`albedo x (sunT x N.L + sky) x sunVisibility`). So a canopy normal from the density gradient cannot reach the lit
+   colour without a library change. The only canopy lighting term is the sun occlusion (the march). A library
+   follow-up could add a normal input to the lighting stage; recorded, not done.
+3. **Occlusion also dims the sky term.** `sunVisibility` multiplies direct and sky light in the stage, so a shadow of 0
+   would be black. The occluder returns `mix(1, 0.32, shade)` (the floor stands in for skylight); a lighting stage
+   that took shadow separately would be better.
+4. **Shadow start height.** The march starts at the canopy top the pixel shows (far, layer weight 1) and at the ground
+   near (weight 0), so the floor between near trees is shaded and a far canopy top is lit unless a taller neighbour
+   shades it. The instances themselves are not shadowed (no shadow maps in the spike).
+5. **Instances need the same stages to match.** A standard material lit by scene lights would never match the terrain.
+   `binding.lighting()` and `binding.perspective()` are public, so the near form can reuse them with a fake
+   context (`sphereNormal`, `radialDirection`, `cameraDistance`). This also starts to answer Q5's mesh half.
+6. **After a camera jump far from the last place, wait for streaming.** Terrain patches take several frames to stream
+   in; until then the trees stand over the backdrop (blue). The page's `__psd.step` waits; a jump button does not.
+7. **Worker-side scatter works**: ~54 000 trees in 3 km at 12 to 14 m spacing, one request, no stalls seen. Ground
+   height comes from the sampler (not the simplified mesh), so trees may float or sink by the mesh's error.
+
+### What was and was not verified
+
+- Unit: `forest-field.spec.ts` (hash range and determinism, continuity, coverage share, coast and tree line, fade band
+  from tree size, canopy cover from spacing, runway clearance, scatter determinism, scatter follows the field, density
+  scale, water and runway exclusion). Spike specs 18/18, headless. `ng build demo-app --configuration development`
+  clean.
+- Seen in the built-in browser (before the cover fix): forest at 300 m with instances and shadow blotches on the ground
+  (`s1-forest-300m-noon.jpg`); at 1.5 km the band with dissolving instances and the dark far canopy (the step in
+  lesson 1).
+- **Not seen after the fix**: the claude window was minimised, so the page ran at ~1 fps and streaming stalled. Q1
+  and Q3 are therefore not asserted as passed. GPU cost was not measured (the page was throttled; `?gpuTiming=1` was
+  not read). Shadow steps 0/2/4 are a uniform branch, so the owner can compare them live.
+
+### Owner checklist (Q1, Q3)
+
+Use the panel: **go to forest** (waits ~10 s for the search), then the altitude slider (log). Wait for terrain to settle
+after each jump.
+
+1. Q1, noon (sun **noon** button, elevation 70): oblique view, slider from 100 m to 6 km slowly. Look at 1 to 3 km (the
+   band): no pop of trees, no brightness step in the ground. Try **instances only** and **layer only** at 1.5 km to see
+   each form alone; their average colour should match.
+2. Q1, low sun (**low sun**, elevation 8): the same slow zoom. Instances are lit by the planet stages, so the sunny side
+   brightens as the sun lowers; check the band again.
+3. Q1 sliders: **fade starts** / **fade width** (or reset to the tree-size band), **density scale** (0.5 and 1.5 move the
+   scatter and the layer together).
+4. Q3 from altitude: 6 km and 25 km, **low sun**, shadow steps **0** vs **2** vs **4**, and sun azimuth around the circle.
+   Pass if forest edges show directional shadows that rotate with the sun and vanish at 0 steps.
+5. Q3 at noon: shadows should shrink to the stand's own shade (a dark forest floor), not long streaks.
+6. Runway clearing: **back to runway**, 300 m and 1.5 km: no trees on the runway or apron.
+
+### Open
+
+- Q4 cost: the layer evaluates the density about 6 times per pixel (layer, own canopy, up to 4 march samples), each 3 octaves
+  x 8 hashes. Cheaper options if needed: 2 octaves in the march, a 2-D noise on a cube face, or a baked coarse density page.
+- Q5, impostor band (skipped), and instance shadows on trees remain open.
+- Not tested: morph progress > 0 (the density uses body-fixed coordinates, so it should stay welded).

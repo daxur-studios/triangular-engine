@@ -1,8 +1,8 @@
-# Planet surface material (`triangular-engine/planet-material`)
+# triangular-engine/planet-material
 
 The cell-planet surface as one TSL node material, for `WebGPURenderer` (native WebGPU, or its WebGL2 fallback via `forceWebGL`). It replaces the GLSL `onBeforeCompile` patches used by the classic-WebGL cell-planet scenes, and is built so a game can add its own layers (roads, decals, snow), sun occluders (eclipses), emissive light (city lights), a lighting model and an atmosphere without editing the engine.
 
-Status: **preview.** Design and phases: [Plan 050](../../../docs/plans/050_tsl_planet_surface_material.md). Try it at `/cell-planet-tsl` (the full streaming surface) and `/planet-material-extensions` (a plain sphere with a road, an eclipse and city lights) in the demo app. The classic-WebGL terrain demos keep working unchanged.
+Status: **preview.** Design and phases: Plan 050. Try it at `/cell-planet-tsl` (the full streaming surface) and `/planet-material-extensions` (a plain sphere with a road, an eclipse and city lights) in the demo app. The classic-WebGL terrain demos keep working unchanged.
 
 Use a `WebGPURenderer`: `EngineService.provide({ preferredRenderer: 'webgpu', webGpuRendererParameters: { forceWebGL: false } })`.
 

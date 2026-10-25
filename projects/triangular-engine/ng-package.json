@@ -19,7 +19,13 @@
       "ignore": ["**/*.spec.mjs"]
     },
     "README.md",
+    "CHANGELOG.md",
     "THIRD_PARTY_NOTICES.md",
+    {
+      "glob": "**/*",
+      "input": "./docs",
+      "output": "docs"
+    },
     {
       "glob": "**/*",
       "input": "./.agents/skills",

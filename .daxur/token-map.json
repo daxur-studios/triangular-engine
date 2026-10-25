@@ -107,7 +107,7 @@
     {
       "sectionId": "sec_4c6a72dc5409",
       "scopePath": "projects/triangular-engine/jolt",
-      "docPath": "projects/triangular-engine/docs/jolt-physics.md",
+      "docPath": "projects/triangular-engine/jolt/README.md",
       "excludedScopes": [],
       "reviewState": "documented",
       "baselineTokens": 50847,
@@ -131,7 +131,7 @@
     {
       "sectionId": "sec_1051eb08db18",
       "scopePath": "projects/triangular-engine/procedural",
-      "docPath": "projects/triangular-engine/docs/procedural.md",
+      "docPath": "projects/triangular-engine/procedural/README.md",
       "excludedScopes": [],
       "reviewState": "documented",
       "baselineTokens": 171834,
@@ -143,7 +143,7 @@
     {
       "sectionId": "sec_fa7da7a9cfe9",
       "scopePath": "projects/triangular-engine/atmosphere",
-      "docPath": "projects/triangular-engine/docs/atmosphere.md",
+      "docPath": "projects/triangular-engine/atmosphere/README.md",
       "excludedScopes": [],
       "reviewState": "documented",
       "baselineTokens": 52449,
@@ -155,7 +155,7 @@
     {
       "sectionId": "sec_0a7475c4e30d",
       "scopePath": "projects/triangular-engine/planet-material",
-      "docPath": "projects/triangular-engine/docs/planet-material.md",
+      "docPath": "projects/triangular-engine/planet-material/README.md",
       "excludedScopes": [],
       "reviewState": "documented",
       "baselineTokens": 37819,

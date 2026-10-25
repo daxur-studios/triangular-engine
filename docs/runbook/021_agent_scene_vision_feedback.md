@@ -4,7 +4,7 @@ Status: Ready for implementation handoff (Sol architecture pass, 2026-08-22).
 
 Related work:
 
-- [projects/triangular-engine/docs/ai-agents.md](../../projects/triangular-engine/docs/ai-agents.md) — supported agent-facing engine conventions.
+- [projects/triangular-engine/.agents/skills/triangular-engine/SKILL.md](../../projects/triangular-engine/.agents/skills/triangular-engine/SKILL.md) — supported agent-facing engine conventions.
 - [projects/triangular-engine/src/lib/engine/components/scene-saver/scene-saver.component.ts](../../projects/triangular-engine/src/lib/engine/components/scene-saver/scene-saver.component.ts) — existing human-triggered canvas export; useful precedent, not the implementation API for this plan.
 - Downstream application WebMCP documentation — existing browser-tab-to-MCP relay and tool registration.
 - Downstream application telemetry documentation — precedent for compact, deterministic agent summaries.

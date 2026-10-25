@@ -4,7 +4,7 @@
 
 - `projects/triangular-engine/` — the published Angular library.
 - `projects/demo-app/` — the local demo application.
-- `projects/triangular-engine/docs/` — user-facing library documentation.
+- `projects/triangular-engine/docs/` — cross-cutting library guides; they ship in the npm package. Each secondary entry point's guide is `projects/triangular-engine/<entry>/README.md`, next to its code, and ships with it.
 - `docs/runbook/` — design notes and implementation history for larger features.
 - `docs/plans/` — current work plans linked to their runbooks; [convention](docs/plans-and-runbooks.md).
 - `docs/handover/` — notes for picking up unfinished work from an earlier session; [convention](docs/handover/README.md).
@@ -14,7 +14,7 @@
 ## First steps
 
 1. Read `projects/triangular-engine/README.md` for the supported consumer API.
-2. Read `projects/triangular-engine/docs/ai-agents.md` for implementation conventions.
+2. Read `projects/triangular-engine/.agents/skills/triangular-engine/SKILL.md` for implementation conventions; it lists the entry-point guides to read before changing an entry.
 3. Inspect the relevant secondary entry point before changing it.
 4. Check `git status --short` and preserve unrelated working-tree changes.
    If `docs/handover/` has a handover for the work you are picking up, read it first. When your session ends with work
@@ -46,6 +46,8 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 - Keep public exports and secondary-entry-point `public-api.ts` files intentional.
 - Add or update a colocated `*.spec.ts` for behavior changes.
 - Update user-facing docs and `CHANGELOG.md` for public API changes.
+- New secondary entry points document themselves in `<entry>/README.md` and are added to the package README index and `projects/triangular-engine/docs/entry-points.md`. Entry-specific guides do not go in `projects/triangular-engine/docs/`.
+- Public symbols get TSDoc. IDE hovers show it to consumers, so write it for them.
 - Keep optional integrations isolated from the core entry point.
 - Before feature or part work, use its existing reciprocal plan/runbook pair or create one under `docs/plans/` and `docs/runbook/`.
 - Do not edit generated output in `dist/` or `out-tsc/`; rebuild it instead.
@@ -55,7 +57,7 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 
 - Before adding or changing a page integration with `triangular-engine/testing`
   (including `<tri-test-runner>` and its game adapter), writing or extending a browser
-  test suite, or reading its results, read `projects/triangular-engine/docs/testing.md`
+  test suite, or reading its results, read `projects/triangular-engine/testing/README.md`
   and the `triangular-engine-testing` skill
   (`projects/triangular-engine/.agents/skills/triangular-engine-testing/SKILL.md`).
   This is a repository-local skill; it may not appear in the agent's installed skill
@@ -74,7 +76,7 @@ For a library-only edit loop, use `npm run watch`. `npm run start` prepares a li
 
 ## Documentation source of truth
 
-The package README and `projects/triangular-engine/docs/` describe the current consumer API. Treat `instructions/summary.md` and old runbooks as historical context unless they explicitly describe a current workflow. For repository documentation coverage and drift tracking, see `docs/runbook/029_token_map_usage_guide.md`.
+The package README, `projects/triangular-engine/docs/` and each entry's `<entry>/README.md` describe the current consumer API. Treat `instructions/summary.md` and old runbooks as historical context unless they explicitly describe a current workflow. For repository documentation coverage and drift tracking, see `docs/runbook/029_token_map_usage_guide.md`.
 
 ## Local package archives
 

@@ -2,7 +2,7 @@
 
 Structure-first planet generation: a spherical Voronoi cell graph where continents, mountain
 ridges, biomes, and rivers are per-cell/per-edge data, not noise. Full design history and
-rationale lives in [`docs/runbook/022_v4_voronoi_cell_planets.md`](../../../docs/runbook/022_v4_voronoi_cell_planets.md)
+rationale lives in `docs/runbook/022_v4_voronoi_cell_planets.md`
 (a decision log — read this file instead if you just need to know what data is available and
 how to get at it).
 
@@ -13,7 +13,7 @@ Two entry points:
   declarations), so it's the entry point to import from a Web Worker.
 - **`triangular-engine/worldgen/render`** (`render/`) — the Angular/Three.js rendering layer,
   currently one component: `<planetView>`. **Not worker-safe**: importing it from a worker needs
-  `import '@angular/compiler';` first (see the root README's Web Worker troubleshooting note).
+  `import '@angular/compiler';` first (see the [Web Worker note](../docs/troubleshooting.md) in troubleshooting).
 
 ## Generation pipeline (three calls, each layered on the last)
 
@@ -71,7 +71,7 @@ slice does not solve arbitrary-zoom boundary antialiasing, morph acceptance,
 floating-ice/seabed transitions, or prove a hardware performance budget. Trees,
 new water/cloud rendering and GPU generation are separate increments.
 
-Continue with [Plan 054](../../../docs/plans/054_stylized_illustrative_rendering.md).
+Continue with Plan 054.
 
 ### Base graph, tectonics and ecology
 
@@ -225,7 +225,7 @@ dimensionless on purpose).
 
 Declarative wrapper that runs the full pipeline above and renders a chunked, 2-level-LOD mesh +
 ocean shell + optional river/coastline overlays. See
-[`docs/runbook/022_v4_voronoi_cell_planets.md`](../../../docs/runbook/022_v4_voronoi_cell_planets.md)'s
+`docs/runbook/022_v4_voronoi_cell_planets.md`'s
 Layer 2 for *why* it's chunked instead of one mesh.
 
 ```html

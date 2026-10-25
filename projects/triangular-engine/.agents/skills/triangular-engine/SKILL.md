@@ -36,6 +36,31 @@ For repeatable game tests, camera paths, visual review, performance diagnostics 
 one-click test URLs, use the [triangular-engine-testing skill](../triangular-engine-testing/SKILL.md).
 It ships with the installed package at `skills/triangular-engine-testing/SKILL.md`.
 
+### Where the detailed guides are
+
+Read the guide for an entry before writing code against it. Paths below are relative to the
+package root: `node_modules/triangular-engine/` in an installed app, `projects/triangular-engine/`
+in this repository. Each entry's TSDoc also shows in IDE hovers.
+
+| Need                                             | Read                                                                 |
+| ------------------------------------------------ | -------------------------------------------------------------------- |
+| Install, first scene, Draco and assets           | `docs/getting-started.md`, `docs/assets-and-loading.md`              |
+| Core concepts, components, selectors             | `docs/core-concepts.md`, `docs/components.md`, `docs/api/selectors.md` |
+| Services and the frame loop                      | `docs/services.md`, `docs/entry-points.md`                           |
+| Shadows, particles, audio                        | `docs/shadows.md`, `docs/particles.md`, `docs/audio.md`              |
+| Which secondary entry to import                  | `docs/entry-points.md`                                               |
+| Rapier physics                                   | `rapier/README.md`                                                   |
+| Jolt physics                                     | `jolt/README.md`                                                     |
+| PMNDRS billboard and sparkles                    | `pmndrs/README.md`                                                   |
+| Planet atmosphere                                | `atmosphere/README.md`                                               |
+| Planet surface material (`WebGPURenderer`)       | `planet-material/README.md`                                          |
+| Cell planets: 3D globe ↔ 2.5D map                | `worldgen/render/README.md`; generation in `worldgen/README.md`      |
+| Characters and facial animation                  | `characters/README.md`                                               |
+| Procedural flora and craft parts                 | `procedural/README.md`                                               |
+| CPU/GPU/worker data transport                    | `gpu-data-flow/README.md`                                            |
+| Water, terrain, scatter                          | `water/README.md`, `terrain/README.md`, `scatter/README.md`          |
+| Browser test runner                              | `testing/README.md`, plus the `triangular-engine-testing` skill       |
+
 ---
 
 ## 1. Installation & Setup
@@ -691,14 +716,20 @@ Beyond the Angular component layer above, `triangular-engine` also ships pure, f
 
 ### Planet surface material (`triangular-engine/planet-material`)
 
-A TSL node material for the cell-planet surface, for `WebGPURenderer` only (`preferredRenderer: 'webgpu'`; `forceWebGL` for the WebGL2 fallback). Full guide: `docs/planet-material.md`.
+A TSL node material for the cell-planet surface. It needs `WebGPURenderer` (`preferredRenderer: 'webgpu'`). Stages, layer authoring, stock layers, the shader cache key and the TSL traps are in `planet-material/README.md`. The atmosphere on that surface is in `atmosphere/README.md`. The classic-WebGL cell-planet path stays in `worldgen/render/README.md`.
 
-- `new PlanetSurfaceMaterial()` runs six stages: morph (fixed), surface layers, sun occlusion, lighting, emissive, atmosphere.
-- Extend it with `addSurfaceLayer({ id, order, layer })`, `addSunOcclusion`, `addEmissive`, `setLightingStage`, `setAtmosphereStage`. A layer is a pure `(context, below) => sample` TSL function; keep live values in `uniform(...)` nodes.
-- The ordered layer ids are the shader cache key (`material.stackKey`). Changing a uniform never recompiles; adding, removing or reordering a layer does. Set stacks up front and call `renderer.compileAsync`.
-- Stock layers: `cellLookupLayer`, `streamedMaterialLayer`, `macroVariationLayer` (order via `SURFACE_LAYER_ORDER`; game layers use 1000+). `checkerDebugLayer` is a reusable debug checkerboard (geography or UV cells, `fwidth`-filtered, live `enabled`/`strength`/`cellSize` uniforms). Examples to copy: `roadLayer`, `moonEclipseOcclusion`, `nightLightsEmissive`.
-- Traps: blend with `mix`, not `select`, on `outputNode.rgb`; evaluate `fwidth` unconditionally; WebGPU allows 8 vertex buffers (only attributes the shader reads count); three's WebGPU backend draws a `BatchedMesh` one instance at a time.
-- The classic-WebGL GLSL patches in `worldgen/render` are unchanged and remain the path for `WebGLRenderer` scenes.
-- Atmosphere (sky, haze, sun light on a planet, including the morph): see `atmosphere.md` beside this file (in progress).
+Each sublibrary's `public-api.ts` is the source of truth for its surface, and its TSDoc is what IDE hovers show.
 
-Each sublibrary's `public-api.ts` is the source of truth for its surface. Design rationale and scope decisions for these live in the consuming workspace's `docs/runbook/*`.
+---
+
+## 11. Agent Conventions
+
+- **Import from entry points only.** Take each feature from its secondary entry (see the guide table in the entry points section). Do not reach into another entry's internals.
+- **One engine provider per scene.** Provide `EngineService` in the component that owns `<scene>`: `providers: EngineService.provide({ showFPS: true })`. Create exactly one `<scene>` per viewport. Switch cameras with `isActive` on a `<camera>` or `<orbitControls>`.
+- **Selectors.** When generating templates, use the selectors in §3. `docs/api/selectors.md` lists the deterministic set.
+- **Frame and input.** Write scene state in `tick$` or `postTick$` (§9). For gameplay input, bind actions with `EngineInputService.bind(action, ...keys)` and read `actions$`. The raw streams on `EngineService` (`keydown$`, `mousemove$`, …) are for low-level integrations.
+- **Physics.** Drive bodies by id with `PhysicsService.getRigidBodyById(id)`. To drag a dynamic body, set it to `KinematicPositionBased` while dragging and restore it afterwards. For many similar objects, use `instancedRigidBody` (Rapier) or `instancedMesh`.
+- **Assets.** Prefer `LoaderService.loadAndCacheGltf` and `loadAndCacheTexture`. Draco decoders are served from `/draco/` (§1).
+- **Profiling.** `docs/entry-points.md` (Profiling) covers `engine-stats`, `telemetry.register` and the **Copy for Agent** report.
+- **Characters.** Drive facial performances through `FacialAnimationController` from `triangular-engine/characters`; see `characters/README.md`.
+- **Browser tests.** For a game's repeatable tests, follow the `triangular-engine-testing` skill and `testing/README.md`.

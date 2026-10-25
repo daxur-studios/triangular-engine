@@ -265,3 +265,52 @@ The owner ran `lod-surface-baseline` v1 in quick mode, visible browser, on the N
 1. Owner reruns v2 on the NVIDIA adapter to confirm the holes are gone.
 2. Decide how to close the residual seam pixels: either make seam vertices bit-identical (positions on shared edges from shared data), or a small overlap or skirt.
 3. Bring selection p95 under 0.2 ms in the browser.
+
+## 2026-10-25 — Bit-identical seams
+
+Goal: close the 1–5 px "sparkle" cracks that remained after the sine fix by making every shared seam vertex a function of data that is exactly identical for each leaf that draws it.
+
+### Findings
+
+- The sparkles had one cause. A vertex was `leaf origin (camera-relative, per leaf) + offset from the leaf centre (per leaf) + height`, with `warpDelta` also based at the leaf centre. Two leaves sharing an edge vertex took different float paths to the same point, so the results differed in the last bits and the rasterizer left hairline gaps. The old fold also placed an odd edge vertex at the mean of its even neighbours' final positions, which is collinear with the coarse edge only to float rounding (a hair-thin T-junction).
+- Nothing per-leaf has to enter the position: the lattice below makes every input global.
+
+### Built
+
+1. **One integer lattice per face** (`lod-lattice.ts`). L = patchCells * 2^maxLevel = 2^24 steps per face side for 16, 32 and 64 cells alike (`maxLevelFor` gives 20, 19, 18). A leaf has step s = 2^(maxLevel − level) per grid cell and origin (i, j) * patchCells * s; vertex (gx, gy) is the lattice point (U, V) = origin + (gx, gy) * s. All values are integers up to 2^24, so float32 arithmetic on them is exact (the shader keeps them in float, so no i32 path is needed). The instance attributes are now only `aLeaf = (U0, V0, s, face)` and `aInfo = (level, mask)`.
+2. **Folding by snapping.** An odd vertex on an edge next to a coarser leaf moves one grid cell back along the edge (`foldedGrid` on the CPU, step functions in the shader). That is an even index, a lattice point the coarse leaf also has (its step is 2s and its origin a multiple of 2s because patchCells is even), so the folded vertex equals the coarse vertex exactly, height included. The edge becomes a degenerate fine segment plus the coarse segment itself: no T-junction. Cost: the cells beside a folded edge stretch by up to half a cell, and the folded edge follows the coarse leaf's own vertices (previously the chord midpoint, the same line).
+3. **Cube-lattice vector T on the sphere.** T = n L + u (2U − L) + v (2V − L) is an integer vector with one component ±L. It identifies the point, not the face: a seam vertex reached from either face (three at a corner) has the same T, so it gets the same bits without a cross-face table. The cube point is tan(π/4 T_k / L) per component (T_k / L with the warp off).
+4. **Camera anchor, per frame (uniforms).** The CPU picks the lattice point nearest to the camera's direction (integer vector `uAnchorT`), its float cube point `cA` and rounding error, `cos(π/4 T_A / L)`, and `uAnchorRel` = (anchor point on the base surface) − camera, subtracted in doubles. This is the brief's "integer part plus fraction": the fraction (including the camera height) lives inside `uAnchorRel`. Deviation: one global anchor on the camera's face; other faces and the far side are handled by the same T arithmetic, which is face-independent.
+5. **Vertex path:** `dT = T − T_A` in exact integers; `dc = sin(dT π/4/L) / (cos(T π/4/L) cos(T_A π/4/L)) + error` per component (tan a − tan b = sin(a − b) / (cos a cos b)); then the existing form `R (dc / |c| − cA (dc · (2 cA + dc)) / (|c| |cA| (|c| + |cA|)))` with `c = cA + dc`; position = `uAnchorRel` + that + up * height. The up vector and the height sample point come from `c / |c|`, also a function of T only. `smallSin` is now a Taylor polynomial to x^15 (`SIN_DENOMINATORS`), accurate to about 1e-10 for |x| ≤ π/2, because its argument is no longer a leaf's half width but can span a whole face. The plane is the same with dU, dV and a constant `size / L`.
+6. **Controls:** the injected gap shrinks `dT` toward the leaf centre's lattice point by `gap * (T_c − T)`, an additive term that is exactly 0 when the gap is 0. The folding-off control is unchanged (`uFolding` = 0 stops the snap).
+7. **CPU cost:** the upload no longer evaluates `tan` or normalises per leaf (two attributes and a few integer products per leaf), so it gets cheaper. The selector is untouched.
+8. **Invariance:** TSL does not expose an invariant qualifier on the position output, so none is set. Within one pipeline the same inputs go through the same instructions; there are no per-leaf branches, and the only data-dependent selects (the fold step functions) take the vertex's own grid coordinates. `lod-domain.ts` only gains an `export` on `faceOfDirection`.
+
+Precision (sphere-600km, eye 2 m):
+
+- Lattice spacing is R π/2 / 2^24 ≈ 0.056 m at a face centre, so a 32-cell leaf at level 19 is about 1.8 m wide.
+- `dT` is exact (integers). `dT * (π/4/L)` has relative error about 1e-7 of `dT`, i.e. of the distance to the anchor, not of R: 0.1 mm at 1 km. The polynomial error is about 1e-10. The built-in `cos` only enters as a divisor in [0.7, 1]; if its relative error were as large as 1e-6 that is 1 mm at 1 km, 0.1 mm at 100 m.
+- The `cubeError` term restores the anchor's float rounding (about 3e-8 * R = 0.02 m, a visible constant shift if left out).
+- `uAnchorRel` is at most the anchor-to-camera distance (a fraction of a lattice step plus the camera height), so its rounding is about 1e-7 m. Far vertices carry 1e-7 relative error (0.06 m at 600 km, under a pixel there).
+- Heights are sampled at `up * R` in absolute floats: the sine phase error is about 0.06 m / wavelength * amplitude, at most 0.005 m (31 m scale). Unchanged.
+- The headless spec mirrors the shader in `Math.fround` (`sphereVertexF32`) and compares with the double position: within 2 mm + 2e-6 * distance from 0.5 m to 5 km around an eye-2m camera. The mirror uses `Math.cos`; the GPU's `cos` is the one term not mirrored exactly.
+
+### Verified
+
+- 38 headless specs pass (`ng test demo-app --browsers=ChromeHeadless --watch=false --include="**/lod-surface-lab/**/*.spec.ts"`; 29 before, 9 added, the sine spec widened in place to π/2): same-level neighbours and fine-beside-coarse (folded) leaves give identical lattice points and identical float positions on the sphere (with and without warp) and the plane; folding lands on the coarse leaf's lattice points; every cube-edge vertex has one T from each face that contains it, so one float position; the float mirror stays within millimetres of doubles near an eye-2m camera on the sphere and the plane; the gap term is exactly 0 when off; the mesh builds its vertex graph and uploads lattice attributes for the sphere and plane. `tsc -p projects/demo-app/tsconfig.app.json --noEmit` and the spec config type-check.
+- In the browser pane (AMD iGPU, WebGPU, 1896×1080 probe buffer), the shader compiles and renders with no console errors. `crackProbe()` read **0 px** in all of these cases:
+  - plane-100km, sphere-10km and sphere-600km, at all five poses;
+  - plane-100km and sphere-600km over flat ground, at all five poses;
+  - no warp at 5 km;
+  - 16 and 64 cells at eye-2m.
+
+  Both controls still find cracks: an injected gap of 0.01 at low-200m gives 26,273 px, and folding off over bumps gives 56 px. Before this change, the same poses showed 1–5 px.
+- Not yet measured on the NVIDIA adapter.
+- Suite not bumped: `lod-surface-baseline` v2 keeps its ids, settings and durations; only the renderer changed.
+
+### Next
+
+1. Rerun v2 on the NVIDIA adapter. It covers both the sine fix and this one. In the pane, every case already reads 0 px.
+2. Watch for sub-millimetre jitter at eye-2m; the GPU `cos` is the one non-polynomial term (a polynomial cosine would remove it).
+3. If sparkles remain, the shared remaining operation is the clip transform, and the main and probe materials must render the same position bits (they share one node graph).
+4. Selection p95 under 0.2 ms in the browser (still open).

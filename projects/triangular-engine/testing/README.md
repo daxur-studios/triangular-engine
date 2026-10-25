@@ -1,7 +1,7 @@
-# Reusable browser test runner
+# triangular-engine/testing
 
 For agent-guided integration into a game, use the
-[triangular-engine-testing skill](../.agents/skills/triangular-engine-testing/SKILL.md).
+the `triangular-engine-testing` skill (`skills/triangular-engine-testing/SKILL.md` in the installed package).
 The installed package includes it at
 `node_modules/triangular-engine/skills/triangular-engine-testing/SKILL.md`, with a
 game adapter recipe. Ask an agent to read that file and add a runnable test to your
@@ -516,6 +516,11 @@ round scenario `ablation: { group, arm }`, in the order A, B, A, B per group. `T
 `TestRunResult.ablations` (with `invalidRounds`, the rounds that had a validity issue). The runner card, the
 agent text and `npm run test:summary` print one `A/B` line each. Repetitions keep alternating, so two repetitions
 double the rounds.
+
+Use **Run suite** (the main button) or **Run all** in the menu for the complete comparison. Both keep an A/B
+suite's scenarios in one session, so both arms and all rounds reach the analyser together. Independent suites
+still use one saved result per scenario under **Run all**. A manually assembled batch of individual scenarios
+does not combine their A/B evidence; run the full suite for that comparison.
 
 ```ts
 ablation: { feature: 'shadows', metrics: ['gpuPassTotal'] },

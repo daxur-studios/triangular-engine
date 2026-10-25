@@ -99,3 +99,45 @@ Passes: `unrealBloomPass`, `glitchPass`, `outputPass`, `smaaPass`, `shaderPass`.
 
 - Environment: `<skyBox>`, `<ocean>`
 - Performance monitor: `<performanceMonitor>`
+
+## Component overview
+
+
+All components are standalone and can be nested inside `<scene>`.
+
+- `scene`: hosts the renderer canvas, handles resize, and drives the render loop
+- Core nodes: `group`, `mesh`, `points`, `sprite`, `gridHelper`, `arrowHelper`
+- Post-processing: `effect-composer`, `unrealBloomPass`, `glitchPass`, `outputPass`, `smaaPass`, `shaderPass`
+- Geometry: `boxGeometry`, `sphereGeometry`, `planeGeometry`, `bufferGeometry`, `capsuleGeometry`, `bufferAttribute`
+- Materials: `meshStandardMaterial`, `meshNormalMaterial`, `meshBasicMaterial`, `shaderMaterial`, `rawShaderMaterial`, `pointsMaterial`, `spriteMaterial`
+- Lights: `ambientLight`, `directionalLight`, `pointLight`
+- Camera & Controls: `camera`, `orbitControls` (bind `[viewport]` for split-screen multi-camera rendering — see [examples/multi-viewport.md](examples/multi-viewport.md))
+- GLTF: `gltf`
+- Audio: `audioListener`, `positionalAudio`, `ambientAudio`, `audioSource` (see [audio.md](audio.md))
+- CSS: `css2d`, `css3d`
+- Physics: `physics`, `rigidBody`, `collider` family, `fixedJoint`, `sphericalJoint`, `instancedRigidBody`
+- Features & UI: `skyBox`, `ocean`, `performanceMonitor`, `sceneTree`, `engine-ui`, `engine-stats`, `portalOutlet`, `[portalTarget]`, `[raycast]`
+
+Example mesh:
+
+```html
+<mesh [position]="[0,1,0]" [castShadow]="true">
+  <boxGeometry [params]="[1,1,1]" />
+  <meshStandardMaterial [params]="{ color: '#88c' }" />
+  <!-- or <meshStandardMaterial [map]="'assets/textures/wood.jpg'" /> -->
+  <!-- or <meshNormalMaterial /> -->
+  <!-- or <shaderMaterial /> -->
+  <!-- or <rawShaderMaterial /> -->
+  <!-- or <pointsMaterial /> -->
+  <!-- or <spriteMaterial /> -->
+</mesh>
+```
+
+## GLTF Loading
+
+```html
+<gltf [gltfPath]="'assets/models/thing.glb'" [enableBVH]="true" />
+```
+
+- `enableBVH`: builds per-mesh BVH using `three-mesh-bvh` for faster raycasts
+- Optional `cachePath`: custom key for the in-memory GLTF cache

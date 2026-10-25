@@ -281,7 +281,7 @@ selector, input, preset, entry point, supported domain, optional peer, or
 runtime limitation must update this page in the same change.
 
 Implementation history and unfinished engineering gates remain in
-[`docs/runbook/002_water_sublibrary.md`](../../../docs/runbook/002_water_sublibrary.md);
+`docs/runbook/002_water_sublibrary.md`;
 game-facing instructions belong here.
 
 <!-- doc-section section-id="sec_961cc877cce7" path="projects/triangular-engine/water" baseline-tokens="57165" -->
