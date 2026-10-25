@@ -4,6 +4,22 @@ import type { CrackCount } from './lod-crack-probe';
 import { CAP_SLACK, type SelectorStats } from './lod-selector';
 import { crackExpectation, type LodSurfaceTestSettings } from './lod-surface-tests';
 
+/** What baking a texture height source cost (Plan 059 step 2); absent for analytic sources. */
+export interface LodSurfaceBakeInfo {
+  readonly source: string;
+  /** Texels per face side. */
+  readonly side: number;
+  readonly faces: number;
+  /** Sampling time of each face, ms (in the worker). */
+  readonly bakeMsPerFace: readonly number[];
+  readonly pyramidMs: number;
+  /** Wall time from request to result on the main thread: worker start, bake and transfer. */
+  readonly roundTripMs: number;
+  /** CPU time of handing the texture to the renderer (`initTexture`); the GPU copy itself runs after it. Null if it failed. */
+  readonly uploadMs: number | null;
+  readonly textureMB: number;
+}
+
 /** What the selector and renderer did on the last frame. */
 export interface LodSurfaceFrameInfo {
   readonly stats: Readonly<SelectorStats>;
@@ -12,6 +28,7 @@ export interface LodSurfaceFrameInfo {
   readonly drawCalls: number;
   readonly rendererTriangles: number;
   readonly drawingBuffer: readonly [number, number];
+  readonly bake?: LodSurfaceBakeInfo;
 }
 
 /** The lab page as the adapter sees it: its own setters plus read-only probes. */
@@ -22,6 +39,8 @@ export interface LodSurfaceTestHost {
   errors(): string;
   resetErrors(): void;
   backendIsWebGpu(): boolean;
+  /** False while a baked height source is still baking: the surface drawn is not yet the one the settings name. */
+  heightSourceReady?(): boolean;
   frame(): LodSurfaceFrameInfo;
   onRenderComplete(callback: (renderedAt: number) => void): () => void;
   /** Main-thread ms of selection plus instance upload, one sample per frame since the last reset. */
@@ -73,6 +92,18 @@ async function waitForFrames(host: LodSurfaceTestHost, count: number, context: T
   }
 }
 
+/** Bake cost metrics of a texture source; none for an analytic one. Optional: they describe the setup, not the window. */
+function bakeMetrics(bake: LodSurfaceBakeInfo | undefined): TestMetric[] {
+  if (!bake) return [];
+  const sum = bake.bakeMsPerFace.reduce((a, b) => a + b, 0);
+  return [
+    { name: 'bakeMsPerFace', unit: 'ms', optional: true, samples: [...bake.bakeMsPerFace], source: 'Worker sampling time of each face texture (performance.now)' },
+    { name: 'bakeMs', unit: 'ms', optional: true, samples: [sum + bake.pyramidMs], source: 'Worker time: all faces plus the min/max pyramid' },
+    { name: 'uploadMs', unit: 'ms', optional: true, samples: bake.uploadMs === null ? [] : [bake.uploadMs], source: 'Main-thread time of renderer.initTexture; GPU copy time is not included', unavailableReason: bake.uploadMs === null ? 'initTexture failed or the renderer was not ready' : undefined },
+    { name: 'textureMB', unit: 'MB', optional: true, samples: [bake.textureMB], source: 'Float32 height texels of all faces (10^6 bytes)' },
+  ];
+}
+
 const maxOf = (values: readonly number[]): number => values.reduce((a, b) => Math.max(a, b), 0);
 
 export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAdapter<LodSurfaceTestSettings, LodSurfaceTestSettings> {
@@ -85,7 +116,8 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
       if (error) throw new Error(error);
       const frame = host.renderedFrames();
       const mismatches = settingsMismatches(host.read(), scenario.settings);
-      if (mismatches.length > 0) settled = 0;
+      if (host.heightSourceReady?.() === false) settled = 0;
+      else if (mismatches.length > 0) settled = 0;
       else if (frame > lastFrame) settled++;
       lastFrame = frame;
       if (performance.now() - began > READY_TIMEOUT_MS) {
@@ -208,6 +240,7 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
             unavailableReason: samples.length ? undefined : timestampQuery ? 'No per-pass GPU timestamps resolved in the window' : 'No GPU timestamp query on this renderer',
           };
         }),
+        ...bakeMetrics(info.bake),
         ...(probe ? [{ name: 'crackPixels', unit: 'px', samples: [probe.cracks], source: 'Backstop pixels inside the surface, outline-adjacent pixels masked' } satisfies TestMetric] : []),
       ];
       return {
@@ -220,6 +253,7 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
           unmet: info.stats.unmet, capHit: info.stats.capHit, deepestLevel: info.stats.deepestLevel,
           drawCalls: info.drawCalls, rendererTriangles: info.rendererTriangles,
           drawingBufferWidth: info.drawingBuffer[0], drawingBufferHeight: info.drawingBuffer[1],
+          ...(info.bake ? { bakeSource: info.bake.source, bakeSide: info.bake.side, bakeRoundTripMs: info.bake.roundTripMs } : {}),
           ...(probe ? { crackPixels: probe.cracks, crackMaskedPixels: probe.masked, probeSurfacePixels: probe.surface, probeWidth: probe.width, probeHeight: probe.height } : {}),
         },
         validityIssues: [

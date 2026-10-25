@@ -1,7 +1,10 @@
 import { poseView, resolveCamera, frustumNormals, panView, type CameraView } from './lod-camera';
 import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
 import { EDGE_STEP, FACE_FRAMES, cubePoint, domainPoint, domainPreset, neighbourCell, warpCoordinate, type LodDomain, type NeighbourCell, type Vec3 } from './lod-domain';
-import { createHeightSource } from './lod-height';
+import { createHeightSource, type NodeHeightRanges } from './lod-height';
+import { bakeHeights, type BakeLayout } from './lod-height-bake';
+import { noiseSampler } from './lod-height-noise';
+import { createTextureHeightSource } from './lod-height-texture';
 import { createLodSurfaceMesh } from './lod-surface-mesh';
 import { anchorFor, cubeLattice, foldedGrid, gridLattice, latticeSteps, leafLattice, planeVertexF32, smallSinF32, sphereVertexF32 } from './lod-lattice';
 import { LEAF_STRIDE, packLeaves } from './lod-leaf-pack';
@@ -860,5 +863,103 @@ describe('Plan 059 suite', () => {
     const observation = await createLodSurfaceTestAdapter(host).measure(scenario, context);
     expect(observation.checks?.find((check) => check.name === 'Scenario state applied as specified')?.passed).toBeTrue();
     expect(zoom).toBeUndefined();
+  });
+});
+
+describe('Plan 059 selector with per-node height ranges', () => {
+  const POSE_IDS = ['eye-2m', 'low-200m', 'mid-5km', 'horizon', 'orbit'] as const;
+  const sphere10 = domainPreset('sphere-10km');
+
+  function noiseSource(domain: LodDomain, k = 6) {
+    const layout: BakeLayout = { kind: domain.kind, warp: domain.warp, sizeM: domain.sizeM, k };
+    return createTextureHeightSource('noise', bakeHeights(layout, noiseSampler(layout)));
+  }
+
+  for (const [label, domain] of [['plane', plane], ['sphere 10 km', sphere10], ['sphere 600 km', sphere600]] as const) {
+    it(`keeps a whole, 2:1-balanced tree with consistent masks (${label})`, () => {
+      const source = noiseSource(domain);
+      for (const cull of [false, true]) {
+        const selector = new LodSelector(settingsFor(domain, { heightBoundM: source.boundM, heightRanges: source, cull, leafCap: 400 }));
+        for (const pose of POSE_IDS) {
+          selector.select(viewFor(domain, pose));
+          expect(balanceIssues(selector, domain)).withContext(`${pose} cull ${cull}`).toEqual([]);
+          expect(coveredArea(selector)).withContext(`${pose} cull ${cull}`).toBeCloseTo(domain.kind === 'plane' ? 1 : 6, 9);
+        }
+      }
+      source.dispose();
+    });
+
+    it(`picks exactly the plain reference's leaves when every range is the global bound (${label})`, () => {
+      const bound = 80;
+      const stub: NodeHeightRanges = { nodeRange: (_root, _level, _i, _j, out) => { out[0] = -bound; out[1] = bound; } };
+      const base = settingsFor(domain, { heightBoundM: bound, leafCap: 300 });
+      const selector = new LodSelector({ ...base, heightRanges: stub }, 2);
+      const reference = new ReferenceSelector(base);
+      for (const pose of POSE_IDS) {
+        const view = viewOfCamera(domain, poseView(pose, domain));
+        selector.select(view);
+        reference.select(view);
+        expect(leavesOf(selector)).withContext(pose).toEqual(reference.leaves);
+        expect({ ...selector.stats }).withContext(pose).toEqual(reference.stats);
+      }
+    });
+  }
+
+  it('bounds every displaced vertex of every selected leaf by the node sphere (centre moved to mid-range, radius widened)', () => {
+    const PATCH = 32;
+    for (const domain of [sphere10, plane]) {
+      const source = noiseSource(domain);
+      const selector = new LodSelector(settingsFor(domain, { heightBoundM: source.boundM, heightRanges: source, cull: false, leafCap: 300 }));
+      const range: [number, number] = [0, 0];
+      const position: Vec3 = [0, 0, 0];
+      const normal: Vec3 = [0, 0, 0];
+      const lattice = leafLattice(0, 0, 0, 0, PATCH, maxLevelFor(PATCH));
+      for (const pose of POSE_IDS) {
+        selector.select(viewFor(domain, pose));
+        for (let k = 0; k < selector.stats.leaves; k += 3) {
+          const node = selector.leaves[k];
+          const level = selector.level[node];
+          source.nodeRange(selector.root[node], level, selector.i[node], selector.j[node], range);
+          const mid = (range[0] + range[1]) / 2;
+          const centre = [0, 1, 2].map((a) => selector.center[node * 3 + a] + selector.normal[node * 3 + a] * mid);
+          leafLattice(selector.root[node], level, selector.i[node], selector.j[node], PATCH, maxLevelFor(PATCH), lattice);
+          for (let gy = 0; gy <= PATCH; gy += 4) {
+            for (let gx = 0; gx <= PATCH; gx += 4) {
+              const [u, v] = gridLattice(lattice, gx, gy);
+              domainPoint(domain, lattice.root, u / 2 ** 24, v / 2 ** 24, position, normal);
+              const h = source.heightAtLattice(lattice.root, u, v);
+              const distance = Math.hypot(...[0, 1, 2].map((a) => position[a] + normal[a] * h - centre[a]));
+              expect(distance).withContext(`${pose} node ${node} vertex ${gx},${gy}`).toBeLessThanOrEqual(selector.radius[node] * (1 + 1e-9) + 1e-6);
+            }
+          }
+        }
+      }
+      source.dispose();
+    }
+  });
+
+  it('gives deep nodes tighter spheres than the global bound would', () => {
+    const source = noiseSource(sphere10, 7);
+    const ranged = new LodSelector(settingsFor(sphere10, { heightBoundM: source.boundM, heightRanges: source, cull: false, leafCap: 400 }));
+    const global = new LodSelector(settingsFor(sphere10, { heightBoundM: source.boundM, cull: false, leafCap: 400 }));
+    const view = viewFor(sphere10, 'low-200m');
+    ranged.select(view);
+    global.select(view);
+    let tighter = 0;
+    let deep = 0;
+    for (let k = 0; k < ranged.stats.leaves; k++) {
+      const node = ranged.leaves[k];
+      if (ranged.level[node] < 7) continue;
+      deep++;
+      // Same cell, same order of nodes only if the trees match, so compare the radius of the same (root, level, i, j) by formula.
+      const range: [number, number] = [0, 0];
+      source.nodeRange(ranged.root[node], ranged.level[node], ranged.i[node], ranged.j[node], range);
+      if (range[1] - range[0] < 2 * source.boundM * 0.5) tighter++;
+    }
+    expect(deep).toBeGreaterThan(0);
+    expect(tighter).toBe(deep);
+    expect(ranged.stats.leaves).toBeGreaterThan(0);
+    expect(global.stats.leaves).toBeGreaterThan(0);
+    source.dispose();
   });
 });

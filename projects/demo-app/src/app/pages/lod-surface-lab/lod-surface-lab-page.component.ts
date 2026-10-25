@@ -12,10 +12,14 @@ import {
 } from './lod-camera';
 import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
 import { DOMAIN_PRESETS, domainPreset, type CubeWarp, type DomainPresetId, type LodDomain } from './lod-domain';
-import { HEIGHT_SOURCES, createHeightSource, type HeightSource, type HeightSourceId } from './lod-height';
+import { HEIGHT_SOURCES, HEIGHT_SOURCE_LABELS, createHeightSource, isBakedSource, type HeightSource, type HeightSourceId } from './lod-height';
+import { DEFAULT_BAKE_K, textureMegabytes, type BakeLayout } from './lod-height-bake';
+import { bakeInWorker } from './lod-height-bake-client';
+import type { BakedSourceId } from './lod-height-noise';
+import { createTextureHeightSource, type TextureHeightSource } from './lod-height-texture';
 import { CAP_SLACK, LodSelector, PATCH_CELLS, PIXEL_FLOOR, type LodMode, type PatchCells, type SelectorStats, type SelectorView } from './lod-selector';
 import { SKY, createLodSurfaceMesh, type LodSurfaceMesh, type LodView } from './lod-surface-mesh';
-import { createLodSurfaceTestAdapter, type LodSurfaceTestHost } from './lod-surface-test-adapter';
+import { createLodSurfaceTestAdapter, type LodSurfaceBakeInfo, type LodSurfaceTestHost } from './lod-surface-test-adapter';
 import { DEFAULT_SETTINGS, LOD_SURFACE_TEST_HISTORY, type LodSurfaceTestSettings } from './lod-surface-tests';
 
 /**
@@ -34,6 +38,11 @@ const GAP_SHARE = 0.01;
 const THUMBNAIL_WIDTH = 240;
 /** Selection samples kept for the HUD's running mean. */
 const HUD_SAMPLES = 60;
+
+/** Baked textures kept (CPU arrays and GPU textures) so switching back to a source does not bake again. */
+const BAKE_CACHE = 2;
+/** Texture sizes offered for baked sources: 2^k texel cells per face side. */
+const BAKE_SIZES = [10, 11] as const;
 
 const SOFTWARE = /swiftshader|llvmpipe|software|basic render|microsoft basic/i;
 
@@ -93,6 +102,7 @@ interface RendererLike {
         deepest level {{ stats().deepestLevel }} · splits {{ stats().splits }} (+{{ stats().forcedSplits }} balance)
         @if (stats().capHit) { · <b>cap hit, {{ stats().unmet }} unmet</b> }<br />
         selection {{ selectionMs().toFixed(2) }} ms · altitude {{ altitudeLabel() }}
+        @if (bakeLine()) { <br />{{ bakeLine() }} }
         @if (probeResult()) { <br />probe: {{ probeResult() }} }
       </p>
 
@@ -122,9 +132,17 @@ interface RendererLike {
         <p class="label">Height source</p>
         <p class="row">
           @for (id of sources; track id) {
-            <button (click)="setSource(id)" [class.active]="sourceId() === id">{{ id === 'flat' ? 'flat' : 'static bumps' }}</button>
+            <button (click)="setSource(id)" [class.active]="sourceId() === id">{{ sourceLabels[id] }}</button>
           }
         </p>
+        @if (bakedSelected()) {
+          <p class="row">
+            baked texture:
+            @for (k of bakeSizes; track k) {
+              <button (click)="setBakeK(k)" [class.active]="bakeK() === k">{{ 2 ** k + 1 }}²</button>
+            }
+          </p>
+        }
 
         <p class="label">Criterion</p>
         <p class="row">
@@ -216,6 +234,8 @@ export class LodSurfaceLabPageComponent {
   readonly domains = DOMAIN_PRESETS;
   readonly poses = POSES;
   readonly sources = HEIGHT_SOURCES;
+  readonly sourceLabels = HEIGHT_SOURCE_LABELS;
+  readonly bakeSizes = BAKE_SIZES;
   readonly leafCaps = LEAF_CAPS;
   readonly patchCellOptions = PATCH_CELLS;
   readonly pixelFloor = PIXEL_FLOOR;
@@ -238,6 +258,19 @@ export class LodSurfaceLabPageComponent {
   readonly view = signal<LodView>(DEFAULT_SETTINGS.view);
   readonly wireframe = signal(DEFAULT_SETTINGS.wireframe);
   readonly bounds = signal(DEFAULT_SETTINGS.bounds);
+  /** Baked texture size: 2^k texel cells per face side (not a test setting; the suites use the default). */
+  readonly bakeK = signal<number>(DEFAULT_BAKE_K);
+  readonly bakeStatus = signal('');
+  readonly bakeInfo = signal<LodSurfaceBakeInfo | undefined>(undefined);
+  readonly bakedSelected = computed(() => isBakedSource(this.sourceId()));
+  readonly bakeLine = computed(() => {
+    const info = this.bakeInfo();
+    if (this.bakeStatus() && this.bakeStatus() !== 'ready') return this.bakeStatus();
+    if (!info) return '';
+    const perFace = info.bakeMsPerFace.map((ms) => ms.toFixed(0)).join('/');
+    const upload = info.uploadMs === null ? 'n/a' : `${info.uploadMs.toFixed(1)} ms`;
+    return `${info.source} ${info.side}² x ${info.faces}: bake ${perFace} ms per face (+${info.pyramidMs.toFixed(0)} pyramid, ${info.roundTripMs.toFixed(0)} round trip) · upload ${upload} · ${info.textureMB.toFixed(1)} MB`;
+  });
   readonly freeCamera = signal(false);
   readonly frozen = signal(false);
 
@@ -257,6 +290,10 @@ export class LodSurfaceLabPageComponent {
   private selector: LodSelector | undefined;
   private surface: LodSurfaceMesh | undefined;
   private builtKey = '';
+  /** Key of the bake being waited for, or '' when none (the drawn surface is then the one the settings name). */
+  private pendingBake = '';
+  private activeBake = '';
+  private readonly bakes = new Map<string, { source: TextureHeightSource; info: LodSurfaceBakeInfo }>();
   private freeView: CameraView = poseView(DEFAULT_SETTINGS.pose, this.domain);
   private zoomProgress: number | undefined;
   private camera: ResolvedCamera | undefined;
@@ -283,6 +320,7 @@ export class LodSurfaceLabPageComponent {
     errors: () => this.engineError,
     resetErrors: () => { this.engineError = ''; },
     backendIsWebGpu: () => this.webGpuOk() && this.hud().backend === 'webgpu',
+    heightSourceReady: () => this.pendingBake === '',
     frame: () => ({
       stats: { ...(this.selector?.stats ?? this.stats()) },
       instances: (this.surface?.mesh.geometry as InstancedBufferGeometry | undefined)?.instanceCount ?? 0,
@@ -290,6 +328,7 @@ export class LodSurfaceLabPageComponent {
       drawCalls: this.lastDrawCalls,
       rendererTriangles: this.lastTriangles,
       drawingBuffer: [this.hud().width, this.hud().height],
+      ...(this.bakeInfo() && this.activeBake ? { bake: this.bakeInfo() } : {}),
     }),
     onRenderComplete: (callback) => { this.renderCallbacks.add(callback); return () => this.renderCallbacks.delete(callback); },
     selectionSamples: () => this.selectionSamples,
@@ -333,6 +372,9 @@ export class LodSurfaceLabPageComponent {
         this.engine.scene.remove(this.surface.mesh);
         this.surface.dispose();
       }
+      this.pendingBake = '';
+      for (const { source } of this.bakes.values()) source.dispose();
+      this.bakes.clear();
       if (this.probeParts) {
         this.probeParts.target.dispose();
         this.probeParts.backstop.geometry.dispose();
@@ -360,6 +402,7 @@ export class LodSurfaceLabPageComponent {
   }
 
   setSource(id: HeightSourceId): void { this.sourceId.set(id); this.rebuild(); }
+  setBakeK(k: number): void { this.bakeK.set(k); this.rebuild(); }
   setMode(mode: LodMode): void { this.mode.set(mode); this.rebuild(); }
   setFixedLevel(level: number): void { this.fixedLevel.set(level); this.rebuild(); }
   setCellPixels(pixels: number): void { this.cellPixels.set(Math.max(PIXEL_FLOOR, pixels)); this.rebuild(); }
@@ -448,17 +491,27 @@ export class LodSurfaceLabPageComponent {
     this.zoomProgress = settings.motion === 'zoom' ? 0 : undefined;
   }
 
-  /** Makes the selector and, when its shader inputs changed, the surface mesh for the current settings. */
+  /**
+   * Makes the selector and, when its shader inputs changed, the surface mesh for the current settings. A baked source that
+   * is not ready yet starts its bake and returns: the surface drawn stays as it was until the bake finishes and calls this
+   * again, which then reads every setting afresh.
+   */
   private rebuild(): void {
     if (!this.webGpuOk()) return;
-    this.domain = domainPreset(this.domainId(), this.warp());
-    this.source = createHeightSource(this.sourceId(), this.domain.kind);
+    const domain = domainPreset(this.domainId(), this.warp());
+    const source = this.resolveSource(domain);
+    if (!source) return;
+    const sizeChanged = domain.kind !== this.domain.kind || domain.sizeM !== this.domain.sizeM;
+    this.domain = domain;
+    this.source = source;
+    if (sizeChanged) this.freeView = poseView(this.poseId(), this.domain);
     this.selector = new LodSelector({
       domain: this.domain, patchCells: this.patchCells(), mode: this.mode(), fixedLevel: this.fixedLevel(), cellPixels: this.cellPixels(),
       leafCap: this.leafCap(), heightBoundM: this.source.boundM, cull: this.cull(),
+      ...(this.source.nodeRange ? { heightRanges: { nodeRange: this.source.nodeRange.bind(this.source) } } : {}),
     });
     const capacity = this.leafCap() + CAP_SLACK + 6;
-    const key = [this.domainId(), this.warp(), this.sourceId(), this.patchCells(), capacity].join('|');
+    const key = [this.domainId(), this.warp(), this.sourceId(), this.activeBake, this.patchCells(), capacity].join('|');
     if (key === this.builtKey && this.surface) return;
     if (this.surface) {
       this.engine.scene.remove(this.surface.mesh);
@@ -472,6 +525,69 @@ export class LodSurfaceLabPageComponent {
     this.surface.setWireframe(this.wireframe());
     this.engine.scene.add(this.surface.mesh);
     this.builtKey = key;
+  }
+
+  /** The current source for a domain: analytic ones at once, baked ones from the cache or after a bake (then undefined). */
+  private resolveSource(domain: LodDomain): HeightSource | undefined {
+    const id = this.sourceId();
+    if (!isBakedSource(id)) {
+      this.pendingBake = '';
+      this.activeBake = '';
+      this.bakeStatus.set('');
+      this.bakeInfo.set(undefined);
+      return createHeightSource(id, domain.kind);
+    }
+    const layout: BakeLayout = { kind: domain.kind, warp: domain.warp, sizeM: domain.sizeM, k: this.bakeK() };
+    const key = [id, layout.kind, layout.warp, layout.sizeM, layout.k].join('|');
+    const hit = this.bakes.get(key);
+    if (hit) {
+      this.pendingBake = '';
+      this.activeBake = key;
+      this.bakeStatus.set('ready');
+      this.bakeInfo.set(hit.info);
+      return hit.source;
+    }
+    if (this.pendingBake !== key) {
+      this.pendingBake = key;
+      this.bakeStatus.set(`baking ${id} ${2 ** layout.k + 1}² x ${domain.kind === 'plane' ? 1 : 6}…`);
+      void this.bake(id as BakedSourceId, layout, key);
+    }
+    return undefined;
+  }
+
+  private async bake(id: BakedSourceId, layout: BakeLayout, key: string): Promise<void> {
+    try {
+      const { baked, roundTripMs } = await bakeInWorker(id, layout);
+      const source = createTextureHeightSource(id, baked);
+      // Hand the texture to the renderer now so the upload is timed here, not inside a rendered frame.
+      let uploadMs: number | null = null;
+      const renderer = this.engine.renderer as unknown as { initTexture?(texture: unknown): void };
+      const began = performance.now();
+      try {
+        renderer.initTexture?.(source.texture);
+        uploadMs = performance.now() - began;
+      } catch {
+        // Not initialised yet: the first frame that draws the surface uploads it.
+      }
+      const info: LodSurfaceBakeInfo = {
+        source: id, side: baked.side, faces: baked.faces, bakeMsPerFace: baked.bakeMsPerFace, pyramidMs: baked.pyramidMs, roundTripMs,
+        uploadMs, textureMB: textureMegabytes(baked),
+      };
+      this.bakes.set(key, { source, info });
+      while (this.bakes.size > BAKE_CACHE) {
+        const oldest = [...this.bakes.keys()].find((candidate) => candidate !== key && candidate !== this.activeBake);
+        if (oldest === undefined) break;
+        this.bakes.get(oldest)?.source.dispose();
+        this.bakes.delete(oldest);
+      }
+      if (this.pendingBake === key) this.rebuild();
+    } catch (error) {
+      if (this.pendingBake === key) {
+        this.pendingBake = '';
+        this.bakeStatus.set(`bake failed: ${String(error)}`);
+        this.engineError ||= `bake: ${String(error)}`;
+      }
+    }
   }
 
   private currentView(): CameraView {

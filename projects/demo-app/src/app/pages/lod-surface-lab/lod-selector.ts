@@ -1,4 +1,5 @@
 import { EDGE_STEP, domainPoint, neighbourCell, rootCount, type LodDomain, type NeighbourCell, type Vec3 } from './lod-domain';
+import type { NodeHeightRanges } from './lod-height';
 
 /**
  * Plan 059 M1 selector: a 2:1-balanced quadtree per root, re-selected every frame from the roots by priority splitting
@@ -47,6 +48,11 @@ export interface SelectorSettings {
   readonly leafCap: number;
   /** Largest |height| of the source anywhere, metres: widens every node's bounds. */
   readonly heightBoundM: number;
+  /**
+   * Per-node height ranges, when the source has them (a baked texture's min/max pyramid). A node's bounding sphere is then
+   * centred at the middle of its range, along the node's normal, instead of widened by the global {@link heightBoundM}.
+   */
+  readonly heightRanges?: NodeHeightRanges;
   /** Refine and draw only nodes whose bounds touch the view frustum. */
   readonly cull: boolean;
 }
@@ -156,6 +162,7 @@ export class LodSelector {
   private readonly point: Vec3 = [0, 0, 0];
   private readonly pointNormal: Vec3 = [0, 0, 0];
   private readonly corner: Vec3 = [0, 0, 0];
+  private readonly range: [number, number] = [0, 0];
 
   /**
    * @param poolTrees Node pool size in trees, at least 2: after a reclaim the pool holds the last tree and must still
@@ -500,12 +507,23 @@ export class LodSelector {
       previousY = corner[1];
       previousZ = corner[2];
     }
-    this.radius[node] = radius + this.settings.heightBoundM;
-    this.edge[node] = edge;
     const h = node * HOT;
-    this.hot[h] = point[0];
-    this.hot[h + 1] = point[1];
-    this.hot[h + 2] = point[2];
+    const ranges = this.settings.heightRanges;
+    if (ranges) {
+      // Displaced points lie between heights lo and hi along their own normals, which differ from the centre's by at most
+      // (distance / radius) on a sphere: centre the sphere at the middle height and widen by half the range plus that tilt.
+      ranges.nodeRange(root, level, i, j, this.range);
+      const mid = (this.range[0] + this.range[1]) / 2;
+      const tilt = domain.kind === 'sphere' ? Math.abs(mid) / domain.sizeM : 0;
+      this.radius[node] = radius * (1 + tilt) + (this.range[1] - this.range[0]) / 2;
+      for (let k = 0; k < 3; k++) this.hot[h + k] = point[k] + this.normal[c + k] * mid;
+    } else {
+      this.radius[node] = radius + this.settings.heightBoundM;
+      this.hot[h] = point[0];
+      this.hot[h + 1] = point[1];
+      this.hot[h + 2] = point[2];
+    }
+    this.edge[node] = edge;
     this.hot[h + 3] = this.radius[node];
     this.hot[h + 4] = level >= this.maxLevel ? 0 : edge / this.settings.patchCells;
     const cell = this.cell;

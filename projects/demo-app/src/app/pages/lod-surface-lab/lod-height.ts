@@ -8,8 +8,17 @@ import type { DomainKind, Vec3 } from './lod-domain';
  * two agree to float32 rounding. The bound is the sum of amplitudes; the selector widens every node by it.
  */
 
-export type HeightSourceId = 'flat' | 'bumps';
-export const HEIGHT_SOURCES: readonly HeightSourceId[] = ['flat', 'bumps'];
+export type HeightSourceId = 'flat' | 'bumps' | 'noise' | 'bumps-baked';
+export const HEIGHT_SOURCES: readonly HeightSourceId[] = ['flat', 'bumps', 'noise', 'bumps-baked'];
+
+/** Sources read from a baked texture; they need a bake (`lod-height-bake.ts`) before they can be made. */
+export const BAKED_SOURCES: readonly HeightSourceId[] = ['noise', 'bumps-baked'];
+export const isBakedSource = (id: HeightSourceId): boolean => BAKED_SOURCES.includes(id);
+
+/** Menu text of a source. */
+export const HEIGHT_SOURCE_LABELS: Readonly<Record<HeightSourceId, string>> = {
+  flat: 'flat', bumps: 'static bumps', noise: 'baked noise', 'bumps-baked': 'bumps, baked',
+};
 
 export interface Bump {
   readonly axis: Vec3;
@@ -45,9 +54,32 @@ export function bumpsFor(kind: DomainKind): readonly Bump[] {
   return out;
 }
 
-export interface HeightSource {
+/**
+ * Height by lattice point, for sources baked into a per-face texture: the vertex stage knows each vertex's face and
+ * integer lattice coordinates (U, V, exact in float32), so these need no position and make seam vertices bit-identical
+ * by construction. Face is an int node, lattice a vec2 node.
+ */
+export interface LatticeHeightNodes {
+  /** TSL height at (face, lattice). */
+  heightNode(face: any, lattice: any): any;
+  /** TSL vec2 of dh/dU and dh/dV, metres per lattice step, at (face, lattice). */
+  slopeNode(face: any, lattice: any): any;
+}
+
+/** Conservative height range of a quadtree node, from a source that knows more than one global bound. */
+export interface NodeHeightRanges {
+  /** Writes [min, max] of the heights over node (root, level, i, j) into `out`, metres. */
+  nodeRange(root: number, level: number, i: number, j: number, out: [number, number]): void;
+}
+
+export interface HeightSource extends Partial<NodeHeightRanges> {
   readonly id: HeightSourceId;
+  /** Largest |height| anywhere; the selector's fallback when the source gives no per-node range. */
   readonly boundM: number;
+  /** Set for baked sources: the vertex stage uses this instead of {@link heightNode} and {@link gradientNode}. */
+  readonly lattice?: LatticeHeightNodes;
+  /** Releases GPU resources, if any. */
+  dispose?(): void;
   /** Height at a base-surface position (domain frame, doubles). */
   heightAt(x: number, y: number, z: number): number;
   /** TSL height at a base-surface position node (float32). */
@@ -56,7 +88,9 @@ export interface HeightSource {
   gradientNode(position: any): any;
 }
 
+/** Analytic sources only; baked ones come from `createTextureHeightSource` once their bake is done. */
 export function createHeightSource(id: HeightSourceId, kind: DomainKind): HeightSource {
+  if (isBakedSource(id)) throw new Error(`Height source ${id} is baked: bake it, then use createTextureHeightSource`);
   if (id === 'flat') {
     return { id, boundM: 0, heightAt: () => 0, heightNode: () => float(0), gradientNode: () => vec3(0, 0, 0) };
   }

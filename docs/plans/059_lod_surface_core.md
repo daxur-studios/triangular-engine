@@ -165,7 +165,7 @@ Each milestone ends with a gate measured on the reference machine and recorded i
 measured on the RTX 3080 before the next starts:
 
 1. **Close M1:** selection CPU p95 <= 0.2 ms in the browser; jitter at eye-2m in motion; one AMD iGPU run.
-2. **M4 core without water:** a per-face baked height texture read live in the vertex stage, with a CPU twin.
+2. **M4 core without water:** a per-face baked height texture read live in the vertex stage, with a CPU twin. *Built 2026-10-25 as specs-only chunk B (noise and baked-bumps sources, worker bake, min/max node ranges; 92 headless specs); first browser look on the AMD iGPU: draws, 0 crack px on baked noise, the gap control still finds cracks; RTX run and a faster bake (about 800 ms per face now) open, see the runbook.*
 3. **Terrain suite** (`lod-surface-terrain`, new): the baseline poses and metrics for every terrain source, plus
    bake and upload time. First sources: the cell planet (through the worldgen surface sampler), plain noise and a
    synthetic cliff/step fixture. Adding a terrain means adding a source, not a suite.

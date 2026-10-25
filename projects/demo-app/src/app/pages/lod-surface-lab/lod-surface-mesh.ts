@@ -145,7 +145,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
       const delta = lattice.sub(uAnchorT.xy).add(toCentre.mul(gap));
       const offset = axisU.mul(delta.x).add(axisV.mul(delta.y)).mul(domain.sizeM / steps);
       const global = axisU.mul(lattice.x.div(steps).sub(0.5).mul(size)).add(axisV.mul(lattice.y.div(steps).sub(0.5).mul(size)));
-      return { global, offset: uAnchorRel.add(offset), up: axisN };
+      return { global, offset: uAnchorRel.add(offset), up: axisN, lattice, c: undefined as any, lc: undefined as any };
     }
     // Cube-lattice vector: one component is +-L; the others are 2U - L, 2V - L. Integers, exact in float32.
     const t = axisN.mul(steps).add(axisU.mul(lattice.x.mul(2).sub(steps))).add(axisV.mul(lattice.y.mul(2).sub(steps)));
@@ -160,12 +160,44 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     const lC = cA.length();
     const offset = dc.div(lc).sub(cA.mul(dot(dc, cA.mul(2).add(dc)).div(lc.mul(lC).mul(lc.add(lC))))).mul(size);
     const up = c.div(lc);
-    return { global: up.mul(size), offset: uAnchorRel.add(offset), up };
+    return { global: up.mul(size), offset: uAnchorRel.add(offset), up, lattice, c, lc };
   };
 
+  // Baked sources are read by (face, lattice): a function of the vertex's own integer coordinates, never of the gap or of
+  // float positions, so seam vertices (including folded ones, which sit on a coarser lattice point) get the same bits.
   const surfacePoint = (g: any) => {
-    const { global, offset, up } = basePoint(g, uGap);
-    return offset.add(up.mul(source.heightNode(global)));
+    const { global, offset, up, lattice } = basePoint(g, uGap);
+    const height = source.lattice ? source.lattice.heightNode(face, lattice) : source.heightNode(global);
+    return offset.add(up.mul(height));
+  };
+
+  /**
+   * Surface gradient of a lattice height from its slopes per lattice step (hU, hV): with the tangents eU, eV of one step
+   * (scaled by the nominal step length so the metric stays O(1) in float32) it is (G hU - F hV) eU + (E hV - F hU) eV over
+   * (E G - F^2). Plane: constant tangents. Sphere: from the cube point c = n + a axisU + b axisV, d(a)/dU the warp's slope.
+   */
+  const latticeGradient = (own: { lattice: any; c: any; lc: any }) => {
+    const slope = source.lattice!.slopeNode(face, own.lattice) as any;
+    const unit = domain.sizeM / steps;
+    let eU: any;
+    let eV: any;
+    if (!sphere) {
+      eU = axisU;
+      eV = axisV;
+    } else {
+      const a = dot(own.c, axisU);
+      const b = dot(own.c, axisV);
+      const dA = equalAngle ? a.mul(a).add(1).mul(Math.PI / (2 * steps)) : float(2 / steps);
+      const dB = equalAngle ? b.mul(b).add(1).mul(Math.PI / (2 * steps)) : float(2 / steps);
+      const lc = own.lc;
+      const tangent = (axis: any, along: any, slopeAlong: any) => axis.mul(slopeAlong).div(lc).sub(own.c.mul(along.mul(slopeAlong).div(lc.mul(lc).mul(lc)))).mul(size.div(unit));
+      eU = tangent(axisU, a, dA);
+      eV = tangent(axisV, b, dB);
+    }
+    const E = dot(eU, eU);
+    const F = dot(eU, eV);
+    const G = dot(eV, eV);
+    return eU.mul(G.mul(slope.x).sub(F.mul(slope.y))).add(eV.mul(E.mul(slope.y).sub(F.mul(slope.x)))).div(E.mul(G).sub(F.mul(F)).mul(unit));
   };
 
   const grid = positionGeometry.xy as any;
@@ -183,7 +215,7 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
 
   // Lighting normal from the height gradient at the vertex's own grid point.
   const own = basePoint(grid, float(0));
-  const gradient = source.gradientNode(own.global) as any;
+  const gradient = (source.lattice ? latticeGradient(own) : source.gradientNode(own.global)) as any;
   const tangential = gradient.sub(own.up.mul(dot(gradient, own.up)));
   const shadingNormal = varying(normalize(own.up.sub(tangential)), 'vLodNormal') as any;
   const patchUv = varying(grid.mul(1 / patchCells), 'vLodPatchUv') as any;

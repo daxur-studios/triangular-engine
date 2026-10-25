@@ -450,3 +450,65 @@ The owner ran `lod-surface-baseline` v2 on the RTX 3080 Laptop (NVIDIA adapter, 
 
 1. Rerun with nothing else measuring, and judge M1 on the zoom cases' p95.
 2. If the margin matters, the suite could time selection over N repetitions per frame, or the page could be cross-origin isolated for a finer timer. Either changes the measurement, so the suite version goes to v3.
+
+## 2026-10-25 — Chunk B: baked texture height source (specs only, no browser run)
+
+Plan 059 order step 2 ([plan](/docs/plans/059_lod_surface_core.md), "Steps 2 and 3 in detail"). Built in `projects/demo-app/src/app/pages/lod-surface-lab/`; only headless specs and the demo build have run. The `lod-surface-baseline` suite is untouched (no case uses the new sources, so it stays v2); the terrain suite is the next chunk.
+
+### What was built
+
+| File | Role |
+|---|---|
+| `lod-height-bake.ts` | Pure bake: layout, texel positions, `bakeHeights(layout, sampler)`, min/max pyramid, `pyramidRange` |
+| `lod-height-noise.ts` | Samplers: `noise` (value-noise fBm, 300 m peak) and a texel-aware copy of the static bumps (`bumps-baked`) |
+| `lod-height-texture.ts` | `createTextureHeightSource`: `DataArrayTexture`, CPU twin (`latticeHeightF32`), TSL lattice height and slope nodes |
+| `lod-height-bake.worker.ts`, `lod-height-bake-client.ts` | Worker (same `new Worker(new URL(...))` pattern as the other demo workers) and its promise client; inline fallback without `Worker` |
+| `lod-height.ts` | New ids, optional `lattice` and `nodeRange` on `HeightSource` (`flat` and `bumps` unchanged) |
+| `lod-selector.ts` | Optional `heightRanges` in the settings, used when a node is initialised |
+| `lod-surface-mesh.ts` | Vertex stage reads a lattice source by `(face, lattice)`; gradient from lattice slopes |
+| page, test adapter | Source picker (baked noise, bumps baked, 1025² / 2049²), HUD bake line, bake metrics, `heightSourceReady` |
+
+### Design choices
+
+- **Texture layout.** One `r32float` array texture, one layer per cube face (one for the plane), (2^k + 1)² texels, nearest filter, no mipmaps. k = 10 (1025², 25.2 MB for six faces) by default; k = 11 (2049², 100.7 MB) is a button. An atlas would pass 8192 px high at k = 11 (6 x 2049), so a layer array it is. Texel i is lattice coordinate i · 2^(24 − k), an integer, so a texel centre is a lattice point.
+- **How the vertex stage gets face and (u, v).** It already has both: the leaf attribute carries the face, and the vertex's lattice point `leaf.xy + g · step` is exact in float32. A source that defines `lattice` is called with `(face, lattice)` instead of the base position. The lattice used is the vertex's own, without the injected-gap shift (as before, the gap moves only the position), and for a folded vertex it is the folded grid point, a coarser lattice point. The lookup is a function of `(face, U, V)` only, so folded and same-level neighbours on one face agree by construction.
+- **Canonical edges.** A texel's sampler position comes from its cube-lattice integer vector T (`cubeLattice`, then `cubeComponent`, as the vertex stage does), not from `(face, u, v)`. T is the same integer vector for every face that has the point, so a texel on an edge or corner gets a bit-identical position and therefore value from each face. The spec groups all boundary texels by exact position: 12 · (2^k − 1) pairs and 8 triples, all equal.
+- **Bilinear in float32 by hand.** `gx = U / 2^(24−k)` is exact (power of two); cell = min(floor(gx), 2^k − 1); fraction = gx − cell, exact. Weights are exact dyadic fractions. Blend: `lerp(p, q, w)` returns p at 0 and q at 1; otherwise `lo + (hi − lo) · t` with lo/hi the smaller/larger of p, q and t = w or 1 − w toward hi. That makes `lerp(p, q, w)` and `lerp(q, p, 1 − w)` the same bits, so a vertex on a cube edge gets the same height from both faces even though the edge runs in opposite directions in them, and cannot depend on whether the GPU fuses multiply-add (same code, same inputs). The CPU twin rounds every step with `Math.fround`. Hardware filtering is not used.
+- **Normals.** Analytic slope of the bilinear patch per lattice step (hU, hV), turned into a surface gradient with the tangents of one lattice step (plane: the face axes; sphere: from the cube point and the warp's slope) and the metric (E, F, G). Not seam-critical.
+- **Pyramid.** Level 0 is the min and max of each texel cell's four corner texels (a bilinear patch cannot leave them); coarser levels reduce 2 x 2. A node at level ≤ k maps to exactly one pyramid cell; a node below the texel size uses the containing cell. Ranges are padded outward by 1e-6 relative plus 1e-6 m so a float32 lerp that overshoots by an ulp stays inside.
+- **Selector.** `SelectorSettings.heightRanges` (optional; `heightBoundM` stays the fallback for analytic sources). In `initNode` (not the per-frame loop, nodes persist) the bounding sphere is centred at the middle of the node's range along the node's normal, with radius = corner radius · (1 + |mid| / R) + half the range. The `1 + |mid| / R` term bounds the tilt between normals across a node on a sphere. With a stub range of ±bound the selection equals the plain reference selector's exactly. The hot loop is unchanged and allocation-free.
+- **Worker.** `bakeHeights` is a pure function; the worker only maps a source id to its sampler (functions do not cross `postMessage`), bakes, and transfers the texel and pyramid buffers. The page caches two bakes (CPU arrays and GPU textures) so switching back does not bake again; while a bake runs the previous surface stays drawn and `heightSourceReady()` is false so the test adapter does not settle on a stale surface.
+- **Recorded.** Bake ms per face (worker), pyramid ms, main-thread round trip, `initTexture` ms (CPU side of the upload only), texture MB. Shown in the HUD and, for baked sources, as optional metrics (`bakeMsPerFace`, `bakeMs`, `uploadMs`, `textureMB`) in the test adapter.
+- **Sampler interface.** `(x, y, z) => metres` on the base-surface position (domain frame). `createPlanetSurfaceSampler` from `triangular-engine/worldgen` can be adapted to it in the next chunk; the worker will need to build it from a plain description since it cannot receive functions.
+
+### Specs
+
+92 headless specs pass (62 before; +30): 22 in the new `lod-height-texture.spec.ts` (layout and determinism, bilinear against a double reference and exact texel hits, symmetry of the blend, slope against finite differences, canonical edges for both warps, shared-edge vertex heights for same-level neighbours across cube faces and for 2:1 folded edges on the plane and the 10 km sphere, pyramid against brute force, node range containing every vertex of its leaf grid at levels on both sides of the texel size, the vertex graph building for a texture source) and 8 appended to `lod-surface-lab.spec.ts` (valid 2:1 tree with ranges on three domains, equality with the plain reference when every range is the global bound, bounding sphere containing displaced vertices, tighter radii). `npx ng build demo-app` passes.
+
+### Not measured
+
+- Bake ms per face, round trip and upload ms on the RTX 3080 (headless runs say nothing about them); 2049² cost.
+- No browser run: the TSL graph builds (a spec constructs it) but has not been compiled to WGSL on a GPU. Not yet seen: whether Tint accepts `textureLoad` on the array layer with the int node, the crack probe on a baked source, and the visual result.
+- CPU twin against GPU heights (L9) is proved CPU-side only (twin against a double reference); a read-back comparison belongs to the terrain suite's probe points.
+- GPU fused multiply-add: the symmetric blend is designed not to depend on it, but only the crack probe on the RTX and the AMD iGPU can confirm face-edge bit equality.
+- `noise` amplitude (300 m on the 600 km and 10 km spheres, 300 m on the plane) is a first guess; texel size caps detail (about 1.2 km on the 600 km sphere at 1025²).
+
+## 2026-10-25 — Chunk B review and a first browser look (AMD iGPU, not timing)
+
+Reviewed the chunk B code (texture source, bake, pyramid, selector ranges, mesh gradient) and reran the lab specs: 92
+pass headless. Then a functional look in the in-app browser, which ran on the **AMD iGPU** (`amd / gcn-5`, 1512×1152),
+so the numbers below are not RTX evidence and the bake times are CPU times on that laptop.
+
+- **WGSL compiles and draws.** Baked noise renders with relief on the 10 km sphere (lumpy silhouette and shading at
+  orbit); no console errors. `textureLoad` on the array layer is accepted.
+- **Crack probe on baked noise: 0 px** on the 10 km sphere at orbit (all six faces and their edges in view) and at
+  2 m eye (1023 leaves, cap hit), and on the 600 km sphere at 5 km. The injected-gap control on the same source finds
+  14,983 px. This is first evidence that the symmetric blend keeps cube-edge seams bit-identical on a real GPU; the
+  RTX run is still owed.
+- **Review notes, no defects found:** the node bounding sphere (radius · (1 + |mid|/R) + half range, centred at mid
+  along the normal) is a correct bound, since |n_p − n_c| = |p − c| / R; the sphere tangents use the right warp slopes
+  (equal-angle da/dU = (1 + a²) π / 2L, none 2/L); the pyramid's 4-corner cell range bounds a bilinear patch.
+- **Bake is slow:** about 800 ms per face at 1025² (4.9 s round trip for six faces); at 2049² expect about 20 s. The
+  value noise allocates two closures per call and runs up to 10 octaves per texel. Fine for a lab, not for edits or the
+  cell planet: optimise (inline the corner hashes, no closures) before chunk C measures bake time.
+- **Upload ms** (2.2–2.7 ms) is the CPU side of `initTexture` only, as recorded above.
