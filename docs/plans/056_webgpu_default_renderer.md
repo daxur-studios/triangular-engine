@@ -13,6 +13,8 @@ performance: []
 Status: **draft, nothing built.** Written 2026-10-19 from code reading only. Nothing was run or measured.
 Phase 0 is next.
 Evidence: [Runbook 056](/docs/runbook/056_webgpu_default_renderer.md).
+[Plan 065](/docs/plans/065_composite_cell_planet.md) proposes pulling six Phase 0–1 items forward so one consumer
+game route can opt into `WebGPURenderer` before Phase 6.
 
 **Goal:** a new `EngineService` renders with three.js `WebGPURenderer` unless the consumer opts out. TSL is the
 one shading path for new engine code. Every module that only works on `WebGLRenderer` is either ported, retired,

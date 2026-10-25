@@ -13,7 +13,7 @@ import {
 import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
 import { DOMAIN_PRESETS, domainPreset, type CubeWarp, type DomainPresetId, type LodDomain } from './lod-domain';
 import { HEIGHT_SOURCES, createHeightSource, type HeightSource, type HeightSourceId } from './lod-height';
-import { CAP_SLACK, LodSelector, PATCH_CELLS, PIXEL_FLOOR, type LodMode, type PatchCells, type SelectorStats } from './lod-selector';
+import { CAP_SLACK, LodSelector, PATCH_CELLS, PIXEL_FLOOR, type LodMode, type PatchCells, type SelectorStats, type SelectorView } from './lod-selector';
 import { SKY, createLodSurfaceMesh, type LodSurfaceMesh, type LodView } from './lod-surface-mesh';
 import { createLodSurfaceTestAdapter, type LodSurfaceTestHost } from './lod-surface-test-adapter';
 import { DEFAULT_SETTINGS, LOD_SURFACE_TEST_HISTORY, type LodSurfaceTestSettings } from './lod-surface-tests';
@@ -262,6 +262,8 @@ export class LodSurfaceLabPageComponent {
   private camera: ResolvedCamera | undefined;
   private drag: { pointerId: number; look: boolean } | undefined;
   private readonly frustum = new Float64Array(12);
+  /** The view handed to the selector every frame, rewritten in place (no per-frame allocation). */
+  private readonly selectorView: { -readonly [K in keyof SelectorView]: SelectorView[K] } = { camera: [0, 0, 0], pixelAngle: 0, frustum: this.frustum };
   private readonly basis = new Matrix4();
   private readonly axes = [new Vector3(), new Vector3(), new Vector3()] as const;
   private renderedFrames = 0;
@@ -510,7 +512,11 @@ export class LodSurfaceLabPageComponent {
     if (!this.frozen()) {
       const height = (this.engine.renderer as unknown as RendererLike).domElement?.height || 1080;
       const fov = (FOV_DEG * Math.PI) / 180;
-      selector.select({ camera: camera.position, pixelAngle: (2 * Math.tan(fov / 2)) / height, frustum: frustumNormals(camera, fov, aspect, this.frustum) });
+      const selectorView = this.selectorView;
+      selectorView.camera = camera.position;
+      selectorView.pixelAngle = (2 * Math.tan(fov / 2)) / height;
+      frustumNormals(camera, fov, aspect, this.frustum);
+      selector.select(selectorView);
     }
     surface.upload(selector, camera.position);
     const elapsed = performance.now() - began;

@@ -1,7 +1,7 @@
 ---
 type: Plan
 title: LOD Surface Core for Water and Terrain
-description: A fresh, WebGPU-only, performance-tested level-of-detail surface (a height over a plane or a sphere, drawn as one instanced grid whose density follows pluggable criteria), shown first on a flat and a sphere lab page, then used by a new water surface and later by low-detail terrain. Review and owner decisions done. M1 lab built (demo-app `/lod-surface-lab`, suite `lod-surface-baseline` v2, 38 headless specs green) with bit-identical seam vertices; v2 on the RTX 3080 shows 0 crack pixels in every ordinary case and GPU scene pass p95 under 0.3 ms, but selection CPU p95 is 0.4–0.6 ms against the 0.2 ms budget. Spike S1 not started. Cliff detail decided (D14): slope criterion in M2, vector displacement as M6.
+description: A fresh, WebGPU-only, performance-tested level-of-detail surface (a height over a plane or a sphere, drawn as one instanced grid whose density follows pluggable criteria), shown first on a flat and a sphere lab page, then used by a new water surface and later by low-detail terrain. Review and owner decisions done. M1 lab built (demo-app `/lod-surface-lab`, suite `lod-surface-baseline` v2, 62 headless specs green) with bit-identical seam vertices; v2 on the RTX 3080 shows 0 crack pixels in every ordinary case and GPU scene pass p95 under 0.3 ms. After the selector rework, selection CPU p95 is 0.1 ms on still poses and 0.2 ms while zooming, exactly at the 0.2 ms budget on a 0.1 ms timer; jitter and AMD runs remain. Spike S1 not started. Cliff detail decided (D14): slope criterion in M2, vector displacement as M6. Order changed to terrain first (D15): close M1, height texture, a terrain suite with the cell planet, then slope, edits and cliffs; water later.
 timestamp: 2026-10-24T00:00:00Z
 tags: [lod, mesh, quadtree, sphere, plane, water, terrain, webgpu, tsl, performance, testing]
 runbook: /docs/runbook/059_lod_surface_core.md
@@ -136,6 +136,12 @@ Proposed choices, each an open question in the review:
 - Later, a camera-local writable height texture for ripples, wakes and splashes, written as decaying stamps (no wave
   equation solver at first): the same kind of source terrain edits use. First edits are CPU-authoritative and
   uploaded when dirty.
+- **Lessons from Minamo** (a public MIT WebGPU ocean renderer, studied 2026-10-25; approaches only, no code copied,
+  credited where adopted; see the runbook): fold the slope variance of unresolved waves into roughness (for sines,
+  (A·k)²/2 per wave, no texture); fade each wave out as its wavelength nears about 4 vertex spacings; floor the
+  specular alpha at the sun's angular radius for glint, with exact Fresnel and a roughness-chosen sky mip; depth
+  absorption in closed form per RGB channel. Not taken: its camera-centred polar disc (plane only) and FFT cascades
+  (no exact CPU twin, tiling, plane only).
 
 **Low-detail terrain (second):** a height texture baked by compute from a noise function, edits as compute stamps into
 the same texture (visible next frame), and a small CPU height-field collider near moving bodies from the CPU twin
@@ -154,6 +160,42 @@ Each milestone ends with a gate measured on the reference machine and recorded i
 | M4 | **Writable height texture source,** shared by water ripples (decaying stamps) and terrain stamps; CPU-authoritative first | Next-frame visibility; cost of an update |
 | M5 | **Low-detail terrain v0:** baked noise height texture, edits, collider patch | L5 cost (with its own working number), parity, crack probe |
 | M6 | **Terrain v1: cliffs (D14).** Vector displacement, stretch criterion, fold guard, mesh-shape collider patch, ray-hit query (§Cliff detail). Cases: a 200 m vertical cliff, a recessed face, an overhang, all at eye-2m and 200 m | Zero crack pixels; no inverted triangles; L5 cost with cliffs in view; a body rests on a ledge and under an overhang; CPU twin parity |
+
+**Order (D15, decided 2026-10-25): terrain first.** The milestones keep their numbers but run in this order, each
+measured on the RTX 3080 before the next starts:
+
+1. **Close M1:** selection CPU p95 <= 0.2 ms in the browser; jitter at eye-2m in motion; one AMD iGPU run.
+2. **M4 core without water:** a per-face baked height texture read live in the vertex stage, with a CPU twin.
+3. **Terrain suite** (`lod-surface-terrain`, new): the baseline poses and metrics for every terrain source, plus
+   bake and upload time. First sources: the cell planet (through the worldgen surface sampler), plain noise and a
+   synthetic cliff/step fixture. Adding a terrain means adding a source, not a suite.
+4. **Slope criterion** (from M2), measured ABAB in the terrain suite.
+5. **M5:** edits and the collider patch.
+6. **M6:** cliffs.
+7. **Later:** blending and the remaining M2 criteria, then water (M3), which can borrow lessons from the public
+   Minamo renderer (see the runbook).
+
+**Steps 2 and 3 in detail (proposal):**
+- **Texture height source.** One `r32float` texture per cube face (or one for the plane), (2^k + 1)² texels so texel
+  centres sit on lattice points. Edge and corner texels are baked from the canonical lattice point, so faces that
+  share an edge hold identical values and the bit-identical seams survive. Bilinear filtering is done by hand in f32
+  in TSL, with the same arithmetic on the CPU, so the CPU twin matches (hardware filtering drops sub-texel bits).
+- **Node bounds** come from a CPU min/max pyramid over the texture, not one global bound, so culling and the coming
+  slope criterion get real per-node height ranges.
+- **Bake** runs in a worker from a CPU sampler and is uploaded once. Recorded: bake ms per face, upload ms, texture
+  MB.
+- **Known limit:** one texture per face caps detail at its texel size (2049² per face is about 5 m on the 10 km
+  sphere, about 290 m on 600 km). Near detail beyond that (analytic noise on top, or camera-local tiles) is decided
+  from the terrain suite's numbers, not up front.
+- **Sources:**
+  - the cell planet: `buildCellPlanetWorld` and its surface sampler from `triangular-engine/worldgen`, with a
+    height scale;
+  - plain noise;
+  - a cliff fixture: a 200 m step with a steep ramp, on the plane and on the 10 km sphere.
+- **Suite `lod-surface-terrain` v1:**
+  - Cases: sources × the baseline domains where each source makes sense × the five baseline poses, plus the
+    injected-gap control.
+  - Metrics: the baseline metrics, plus bake, upload, texture MB, and CPU-twin height error at probe points.
 
 After M6 the owner decides how water and terrain grow from here, and whether Plans 055 and
 057 adopt the core.
@@ -233,3 +275,4 @@ fine reference during a slow scripted zoom. Both are open to the review.
 | D12 | Cube warp | Agreed in review: equal-angle default, toggle kept; value checked by measurement |
 | D13 | Water v0 look and motion bar (sines or Gerstner; acceptable transition motion) | **Decided** 2026-10-24 (owner): sines (Q = 0) first; the owner judges Gerstner and transition motion by eye at the M3 review; pops are fine until then |
 | D14 | Cliff detail by vector displacement of the sheet (M6, §Cliff detail), which brings sheet overhangs into scope while arches, caves and tunnels stay with Plan 055 | **Decided** 2026-10-25 (owner): accepted as M6; the slope criterion goes into M2 |
+| D15 | Milestone order | **Decided** 2026-10-25 (owner): terrain first (§Milestones, Order); water after M6 |

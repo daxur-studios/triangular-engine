@@ -8,6 +8,7 @@ import {
 import { FACE_FRAMES, PLANE_FRAME, type LodDomain, type Vec3 } from './lod-domain';
 import type { HeightSource } from './lod-height';
 import { SIN_DENOMINATORS, anchorFor, latticeSteps, newAnchor } from './lod-lattice';
+import { LEAF_STRIDE, packLeaves } from './lod-leaf-pack';
 import { maxLevelFor, type LodSelector, type PatchCells } from './lod-selector';
 
 /**
@@ -40,9 +41,6 @@ const smallSin = (x: any): any => {
   return x.mul(inner);
 };
 
-/** Floats per instance attribute (four vec4). */
-const STRIDE = 4;
-
 export interface LodSurfaceMeshOptions {
   readonly domain: LodDomain;
   readonly patchCells: PatchCells;
@@ -55,7 +53,10 @@ export interface LodSurfaceMesh {
   /** Same geometry and vertex stage, writing 1 to every drawn pixel: the crack probe's material. */
   readonly probeMaterial: MeshBasicNodeMaterial;
   readonly material: MeshBasicNodeMaterial;
-  /** Writes the drawn leaves for a camera position (doubles); returns the instance count. */
+  /**
+   * Writes the drawn leaves for a camera position (doubles); returns the instance count. The leaf arrays are only
+   * rewritten, and the GPU buffers only marked for upload, when the selection changed since the last call.
+   */
   upload(selector: LodSelector, camera: Vec3): number;
   setView(view: LodView): void;
   setBounds(on: boolean): void;
@@ -92,7 +93,7 @@ function gridGeometry(cells: number, capacity: number): InstancedBufferGeometry 
   geometry.setAttribute('position', new BufferAttribute(positions, 3));
   geometry.setIndex(new BufferAttribute(index, 1));
   for (const name of ['aLeaf', 'aInfo']) {
-    geometry.setAttribute(name, new InstancedBufferAttribute(new Float32Array(capacity * STRIDE), STRIDE));
+    geometry.setAttribute(name, new InstancedBufferAttribute(new Float32Array(capacity * LEAF_STRIDE), LEAF_STRIDE));
   }
   geometry.instanceCount = 0;
   return geometry;
@@ -211,40 +212,40 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
   const attributes = ['aLeaf', 'aInfo'].map((name) => geometry.getAttribute(name) as InstancedBufferAttribute);
   const [leafData, infoData] = attributes.map((attr) => attr.array as Float32Array);
   const anchor = newAnchor();
+  let packedFrom: LodSelector | undefined;
+  let packedVersion = -1;
+  let packedCount = 0;
 
   return {
     mesh,
     material,
     probeMaterial,
     upload(selector, camera) {
-      const count = Math.min(selector.stats.drawn, capacity);
-      for (let k = 0; k < count; k++) {
-        const node = selector.leaves[k];
-        const level = selector.level[node];
-        const stepLattice = 2 ** (maxLevel - level);
-        const o = k * STRIDE;
-        leafData[o] = selector.i[node] * patchCells * stepLattice;
-        leafData[o + 1] = selector.j[node] * patchCells * stepLattice;
-        leafData[o + 2] = stepLattice;
-        leafData[o + 3] = selector.root[node];
-        infoData[o] = level;
-        infoData[o + 1] = selector.masks[k];
-        infoData[o + 2] = 0;
-        infoData[o + 3] = 0;
+      if (selector !== packedFrom || selector.version !== packedVersion) {
+        packedFrom = selector;
+        packedVersion = selector.version;
+        packedCount = packLeaves(selector, patchCells, maxLevel, capacity, leafData, infoData);
+        // Reuse the one update range of each attribute instead of allocating a new one per upload.
+        for (const attr of attributes) {
+          const ranges = attr.updateRanges;
+          if (ranges.length === 1) {
+            ranges[0].start = 0;
+            ranges[0].count = Math.max(1, packedCount) * LEAF_STRIDE;
+          } else {
+            ranges.length = 0;
+            ranges.push({ start: 0, count: Math.max(1, packedCount) * LEAF_STRIDE });
+          }
+          attr.needsUpdate = true;
+        }
+        geometry.instanceCount = packedCount;
       }
-      for (const attr of attributes) {
-        attr.clearUpdateRanges();
-        attr.addUpdateRange(0, Math.max(1, count) * STRIDE);
-        attr.needsUpdate = true;
-      }
-      geometry.instanceCount = count;
       anchorFor(domain, camera, steps, anchor);
-      (uAnchorT.value as Vector3).set(...anchor.t);
-      (uAnchorCube.value as Vector3).set(...anchor.cube);
-      (uAnchorError.value as Vector3).set(...anchor.error);
-      (uAnchorCos.value as Vector3).set(...anchor.cos);
-      (uAnchorRel.value as Vector3).set(...anchor.rel);
-      return count;
+      setVector(uAnchorT.value as Vector3, anchor.t);
+      setVector(uAnchorCube.value as Vector3, anchor.cube);
+      setVector(uAnchorError.value as Vector3, anchor.error);
+      setVector(uAnchorCos.value as Vector3, anchor.cos);
+      setVector(uAnchorRel.value as Vector3, anchor.rel);
+      return packedCount;
     },
     setView(view) { uLodColour.value = view === 'lod' ? 1 : 0; },
     setBounds(on) { uBounds.value = on ? 1 : 0; },
@@ -259,6 +260,10 @@ export function createLodSurfaceMesh(options: LodSurfaceMeshOptions): LodSurface
     },
   };
 }
+
+const setVector = (target: Vector3, v: Vec3): void => {
+  target.set(v[0], v[1], v[2]);
+};
 
 /** Background colour of the lab. */
 export const SKY = new Color(0x0b1220);

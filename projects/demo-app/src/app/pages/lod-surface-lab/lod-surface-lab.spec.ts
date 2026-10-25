@@ -1,10 +1,11 @@
-import { poseView, resolveCamera, frustumNormals } from './lod-camera';
+import { poseView, resolveCamera, frustumNormals, panView, type CameraView } from './lod-camera';
 import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
 import { EDGE_STEP, FACE_FRAMES, cubePoint, domainPoint, domainPreset, neighbourCell, warpCoordinate, type LodDomain, type NeighbourCell, type Vec3 } from './lod-domain';
 import { createHeightSource } from './lod-height';
 import { createLodSurfaceMesh } from './lod-surface-mesh';
 import { anchorFor, cubeLattice, foldedGrid, gridLattice, latticeSteps, leafLattice, planeVertexF32, smallSinF32, sphereVertexF32 } from './lod-lattice';
-import { CAP_SLACK, LodSelector, maxLevelFor, type SelectorSettings, type SelectorView } from './lod-selector';
+import { LEAF_STRIDE, packLeaves } from './lod-leaf-pack';
+import { CAP_SLACK, LodSelector, PIXEL_FLOOR, maxLevelFor, type SelectorSettings, type SelectorView } from './lod-selector';
 import { createLodSurfaceTestAdapter, settingsMismatches, type LodSurfaceTestHost } from './lod-surface-test-adapter';
 import type { LodSurfaceTestSettings } from './lod-surface-tests';
 import type { TestContext, TestScenario } from 'triangular-engine/testing';
@@ -238,6 +239,361 @@ describe('Plan 059 LOD selector', () => {
     selector.select(viewFor(plane, 'eye-2m'));
     expect(selector.stats.drawn).toBeLessThan(selector.stats.leaves);
     expect(selector.stats.drawn).toBeGreaterThan(0);
+  });
+});
+
+interface ReferenceStats { leaves: number; drawn: number; splits: number; forcedSplits: number; unmet: number; capHit: boolean; deepestLevel: number }
+
+/**
+ * The M1 selection written the plain way, for comparison: no pool, no neighbour pointers, no stamps, no early return.
+ * Cells are looked up by key, the balance and the edge masks search the tree from the roots, and the queue is the
+ * original swap-based binary heap, so ties pop in the same order as in the selector.
+ */
+class ReferenceSelector {
+  private readonly geometry = new Map<string, { centre: Vec3; radius: number; edge: number }>();
+  leaves: string[] = [];
+  stats!: ReferenceStats;
+
+  constructor(private readonly settings: SelectorSettings) {}
+
+  select(view: SelectorView): void {
+    const { domain, patchCells, leafCap, cull, mode, fixedLevel } = this.settings;
+    interface Node { root: number; level: number; i: number; j: number; open: boolean; visible: boolean; priority: number }
+    const maxLevel = maxLevelFor(patchCells);
+    const treeCapacity = 2 * (leafCap + CAP_SLACK) + 64;
+    const key = (root: number, level: number, i: number, j: number) => `${root}:${level}:${i}:${j}`;
+    const nodes = new Map<string, Node>();
+    const order: Node[] = [];
+    const heap: Node[] = [];
+    const stats: ReferenceStats = { leaves: 0, drawn: 0, splits: 0, forcedSplits: 0, unmet: 0, capHit: false, deepestLevel: 0 };
+    const roots = domain.kind === 'plane' ? 1 : 6;
+    let leafCount = roots;
+    const cell: NeighbourCell = { root: 0, i: 0, j: 0 };
+
+    const geometryOf = (n: Node) => {
+      const k = key(n.root, n.level, n.i, n.j);
+      let g = this.geometry.get(k);
+      if (!g) {
+        const size = 1 / 2 ** n.level;
+        const centre: Vec3 = [0, 0, 0];
+        const normal: Vec3 = [0, 0, 0];
+        domainPoint(domain, n.root, (n.i + 0.5) * size, (n.j + 0.5) * size, centre, normal);
+        const corners = [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]].map(([di, dj]) => {
+          const p: Vec3 = [0, 0, 0];
+          domainPoint(domain, n.root, (n.i + di) * size, (n.j + dj) * size, p, normal);
+          return p;
+        });
+        let radius = 0;
+        let edge = 0;
+        corners.forEach((p, c) => {
+          if (c < 4) radius = Math.max(radius, Math.hypot(p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]));
+          if (c > 0) edge = Math.max(edge, Math.hypot(p[0] - corners[c - 1][0], p[1] - corners[c - 1][1], p[2] - corners[c - 1][2]));
+        });
+        g = { centre, radius: radius + this.settings.heightBoundM, edge };
+        this.geometry.set(k, g);
+      }
+      return g;
+    };
+    const priorityOf = (n: Node): number => {
+      if (n.level >= maxLevel) return 0;
+      if (mode === 'fixed') return n.level < fixedLevel ? 1 + fixedLevel - n.level : 0;
+      const g = geometryOf(n);
+      const x = g.centre[0] - view.camera[0];
+      const y = g.centre[1] - view.camera[1];
+      const z = g.centre[2] - view.camera[2];
+      const gap = Math.max(Math.sqrt(x * x + y * y + z * z) - g.radius, 1e-3);
+      const target = Math.max(this.settings.cellPixels, PIXEL_FLOOR) * view.pixelAngle * gap;
+      return g.edge / patchCells / target;
+    };
+    const visibleOf = (n: Node): boolean => {
+      if (!cull) return true;
+      const g = geometryOf(n);
+      const x = g.centre[0] - view.camera[0];
+      const y = g.centre[1] - view.camera[1];
+      const z = g.centre[2] - view.camera[2];
+      for (let p = 0; p < 12; p += 3) if (view.frustum[p] * x + view.frustum[p + 1] * y + view.frustum[p + 2] * z < -g.radius) return false;
+      return true;
+    };
+    const push = (n: Node) => {
+      if (n.priority <= 1) return;
+      let k = heap.length;
+      heap.push(n);
+      while (k > 0) {
+        const parent = (k - 1) >> 1;
+        if (heap[parent].priority >= heap[k].priority) break;
+        [heap[parent], heap[k]] = [heap[k], heap[parent]];
+        k = parent;
+      }
+    };
+    const pop = (): Node => {
+      const top = heap[0];
+      const last = heap.pop()!;
+      if (heap.length > 0) heap[0] = last;
+      let k = 0;
+      while (true) {
+        const left = 2 * k + 1;
+        const right = left + 1;
+        let best = k;
+        if (left < heap.length && heap[left].priority > heap[best].priority) best = left;
+        if (right < heap.length && heap[right].priority > heap[best].priority) best = right;
+        if (best === k) break;
+        [heap[best], heap[k]] = [heap[k], heap[best]];
+        k = best;
+      }
+      return top;
+    };
+    const activate = (root: number, level: number, i: number, j: number) => {
+      const n: Node = { root, level, i, j, open: false, visible: false, priority: 0 };
+      n.visible = visibleOf(n);
+      n.priority = n.visible ? priorityOf(n) : 0;
+      nodes.set(key(root, level, i, j), n);
+      order.push(n);
+      push(n);
+    };
+    /** The deepest node at or above `level` covering the cell, searching down from its root. */
+    const covering = (root: number, level: number, i: number, j: number): Node => {
+      for (let l = 0; l < level; l++) {
+        const ancestor = nodes.get(key(root, l, i >>> (level - l), j >>> (level - l)))!;
+        if (!ancestor.open) return ancestor;
+      }
+      return nodes.get(key(root, level, i, j))!;
+    };
+    const across = (n: Node, e: number): Node | undefined =>
+      neighbourCell(domain, n.root, n.level, n.i, n.j, e, cell) ? covering(cell.root, n.level, cell.i, cell.j) : undefined;
+    const split = (n: Node, forced: boolean): boolean => {
+      if (n.level >= maxLevel || order.length + 4 > treeCapacity) return false;
+      if (leafCount + 3 > leafCap + CAP_SLACK) return false;
+      for (let e = 0; e < 4; e++) {
+        const other = across(n, e);
+        if (other && other.level < n.level && !other.open && !split(other, true)) return false;
+      }
+      n.open = true;
+      leafCount += 3;
+      if (forced) stats.forcedSplits++;
+      else stats.splits++;
+      for (let k = 0; k < 4; k++) activate(n.root, n.level + 1, n.i * 2 + (k & 1), n.j * 2 + (k >> 1));
+      return true;
+    };
+
+    for (let r = 0; r < roots; r++) activate(r, 0, 0, 0);
+    while (heap.length > 0) {
+      const n = pop();
+      if (n.open) continue;
+      if (leafCount + 3 > leafCap || !split(n, false)) {
+        push(n);
+        stats.capHit = true;
+        break;
+      }
+    }
+    stats.unmet = heap.filter((n) => !n.open).length;
+    const describeLeaf = (n: Node) => {
+      let mask = 0;
+      for (let e = 0; e < 4; e++) {
+        const other = across(n, e);
+        if (other && other.level < n.level) mask |= 1 << e;
+      }
+      stats.deepestLevel = Math.max(stats.deepestLevel, n.level);
+      return `${key(n.root, n.level, n.i, n.j)}:${mask}`;
+    };
+    const leaves = order.filter((n) => !n.open);
+    const drawn = leaves.filter((n) => n.visible);
+    this.leaves = [...drawn, ...leaves.filter((n) => !n.visible)].map(describeLeaf);
+    stats.leaves = leaves.length;
+    stats.drawn = drawn.length;
+    this.stats = stats;
+  }
+}
+
+/** The selector's leaves as the reference describes them: `root:level:i:j:mask`, drawn first, in tree order. */
+function leavesOf(selector: LodSelector): string[] {
+  const out: string[] = [];
+  for (let k = 0; k < selector.stats.leaves; k++) {
+    const node = selector.leaves[k];
+    out.push(`${selector.root[node]}:${selector.level[node]}:${selector.i[node]}:${selector.j[node]}:${selector.masks[k]}`);
+  }
+  return out;
+}
+
+/** The selector view for a camera view, with the same 60 degree, 1440-pixel screen as {@link viewFor}. */
+function viewOfCamera(domain: LodDomain, view: CameraView): SelectorView {
+  const camera = resolveCamera(view, domain, createHeightSource('bumps', domain.kind));
+  const fov = Math.PI / 3;
+  return { camera: camera.position, pixelAngle: (2 * Math.tan(fov / 2)) / 1440, frustum: frustumNormals(camera, fov, 16 / 9, new Float64Array(12)) };
+}
+
+describe('Plan 059 selector against the plain reference', () => {
+  const POSE_IDS = ['eye-2m', 'low-200m', 'mid-5km', 'horizon', 'orbit'] as const;
+
+  for (const [label, domain] of [['plane', plane], ['sphere 600 km', sphere600]] as const) {
+    for (const [mode, leafCap] of [['distance', 64], ['distance', 300], ['distance', 1024], ['fixed', 700]] as const) {
+      for (const cull of [true, false]) {
+        it(`picks the same leaves, masks, order and stats while the camera moves (${label}, ${mode}, cap ${leafCap}, cull ${cull})`, () => {
+          const settings = settingsFor(domain, { cull, leafCap, mode, fixedLevel: 4 });
+          const selector = new LodSelector(settings, 2);
+          const reference = new ReferenceSelector(settings);
+          for (const pose of POSE_IDS) {
+            // Jump to the pose, then fly: 1% of the altitude per frame ahead, with a pan and a turn every few frames.
+            let camera: CameraView = poseView(pose, domain);
+            for (let frame = 0; frame < 8; frame++) {
+              camera = panView(camera, frame % 4 === 3 ? 0.004 : 0, 0.01 / 1.5, domain);
+              if (frame % 5 === 4) camera = { ...camera, headingRad: camera.headingRad + 0.3 };
+              const view = viewOfCamera(domain, camera);
+              selector.select(view);
+              reference.select(view);
+              expect(leavesOf(selector)).withContext(`${pose} frame ${frame}`).toEqual(reference.leaves);
+              expect({ ...selector.stats }).withContext(`${pose} frame ${frame}`).toEqual(reference.stats);
+            }
+          }
+        });
+      }
+    }
+  }
+
+  it('hits the cap in the capped cases, so the priority order decides what is split', () => {
+    const selector = new LodSelector(settingsFor(sphere600, { cull: true, leafCap: 300 }));
+    selector.select(viewOfCamera(sphere600, poseView('horizon', sphere600)));
+    expect(selector.stats.capHit).toBeTrue();
+    expect(selector.stats.unmet).toBeGreaterThan(0);
+  });
+
+  it('links every neighbour pointer to the cell across the edge, and gives the search-based masks', () => {
+    const settings = settingsFor(sphere600, { cull: true, leafCap: 256 });
+    const selector = new LodSelector(settings, 2);
+    const cell: NeighbourCell = { root: 0, i: 0, j: 0 };
+    for (const pose of POSE_IDS) {
+      for (let turn = 0; turn < 2; turn++) {
+        let camera: CameraView = { ...poseView(pose, sphere600), headingRad: turn };
+        for (let frame = 0; frame < 4; frame++) {
+          camera = panView(camera, 0.002, 0.01 / 1.5, sphere600);
+          selector.select(viewOfCamera(sphere600, camera));
+          for (let k = 0; k < selector.activeCount; k++) {
+            const node = selector.active[k];
+            const level = selector.level[node];
+            for (let e = 0; e < 4; e++) {
+              const linked = selector.nb[node * 4 + e];
+              expect(neighbourCell(sphere600, selector.root[node], level, selector.i[node], selector.j[node], e, cell)).toBeTrue();
+              if (linked === selector.unlinked) {
+                // No node for that cell yet, so a coarser leaf covers it.
+                expect(selector.level[selector.findCovering(cell.root, level, cell.i, cell.j)]).toBeLessThan(level);
+                continue;
+              }
+              expect([selector.root[linked], selector.level[linked], selector.i[linked], selector.j[linked]]).toEqual([cell.root, level, cell.i, cell.j]);
+            }
+          }
+          for (let k = 0; k < selector.stats.leaves; k++) expect(selector.masks[k]).toBe(selector.edgeMask(selector.leaves[k]));
+        }
+      }
+    }
+  });
+
+  it('reclaims blocks of nodes in a small pool and still selects what the reference does', () => {
+    const settings = settingsFor(sphere600, { cull: true, leafCap: 1024 });
+    const selector = new LodSelector(settings, 2);
+    const reference = new ReferenceSelector(settings);
+    for (let round = 0; round < 3; round++) {
+      for (const pose of POSE_IDS) {
+        const view = viewOfCamera(sphere600, poseView(pose, sphere600));
+        selector.select(view);
+        reference.select(view);
+        expect(leavesOf(selector)).withContext(pose).toEqual(reference.leaves);
+      }
+    }
+    expect(selector.reclaims).toBeGreaterThan(0);
+  });
+
+  it('points at the stand-in for no neighbour on the plane border and nowhere else', () => {
+    const selector = new LodSelector(settingsFor(plane, { cull: false }));
+    selector.select(viewFor(plane, 'eye-2m'));
+    for (let k = 0; k < selector.activeCount; k++) {
+      const node = selector.active[k];
+      const cells = 2 ** selector.level[node];
+      const border = [selector.j[node] === 0, selector.i[node] === cells - 1, selector.j[node] === cells - 1, selector.i[node] === 0];
+      for (let e = 0; e < 4; e++) expect(selector.nb[node * 4 + e] === selector.none).toBe(border[e]);
+    }
+  });
+
+  it('returns without redoing the tree for an identical view, and rebuilds for any change', () => {
+    const selector = new LodSelector(settingsFor(sphere600, { cull: true }));
+    const view = viewFor(sphere600, 'low-200m');
+    selector.select(view);
+    const version = selector.version;
+    const first = leavesOf(selector);
+    selector.select({ camera: [...view.camera] as Vec3, pixelAngle: view.pixelAngle, frustum: Float64Array.from(view.frustum) });
+    expect(selector.version).toBe(version);
+    expect(leavesOf(selector)).toEqual(first);
+    selector.select({ ...view, pixelAngle: view.pixelAngle * 50 });
+    expect(selector.version).toBe(version + 1);
+    expect(leavesOf(selector).length).toBeLessThan(first.length);
+    const turned = Float64Array.from(view.frustum);
+    turned[0] += 1e-6;
+    selector.select({ ...view, frustum: turned });
+    expect(selector.version).toBe(version + 2);
+    selector.select(view);
+    expect(leavesOf(selector)).toEqual(first);
+  });
+});
+
+describe('Plan 059 leaf packing and frustum', () => {
+  it('writes each drawn leaf as lattice origin, step, face, level and mask, and no more than the capacity', () => {
+    const selector = new LodSelector(settingsFor(sphere600, { cull: true }));
+    selector.select(viewFor(sphere600, 'low-200m'));
+    const maxLevel = maxLevelFor(32);
+    const leafData = new Float32Array(2048 * LEAF_STRIDE);
+    const infoData = new Float32Array(2048 * LEAF_STRIDE);
+    const count = packLeaves(selector, 32, maxLevel, 2048, leafData, infoData);
+    expect(count).toBe(selector.stats.drawn);
+    for (let k = 0; k < count; k++) {
+      const node = selector.leaves[k];
+      const step = 2 ** (maxLevel - selector.level[node]);
+      expect(Array.from(leafData.subarray(k * 4, k * 4 + 4))).toEqual([selector.i[node] * 32 * step, selector.j[node] * 32 * step, step, selector.root[node]]);
+      expect(Array.from(infoData.subarray(k * 4, k * 4 + 4))).toEqual([selector.level[node], selector.masks[k], 0, 0]);
+    }
+    expect(packLeaves(selector, 32, maxLevel, 10, leafData, infoData)).toBe(10);
+  });
+
+  it('uploads only when the selection changed, and for a different selector', () => {
+    const source = createHeightSource('bumps', sphere600.kind);
+    const surface = createLodSurfaceMesh({ domain: sphere600, patchCells: 32, source, capacity: 2048 });
+    const attribute = surface.mesh.geometry.getAttribute('aLeaf') as unknown as { version: number; updateRanges: { start: number; count: number }[] };
+    const selector = new LodSelector(settingsFor(sphere600, { cull: true }));
+    const view = viewFor(sphere600, 'low-200m');
+    selector.select(view);
+    const count = surface.upload(selector, view.camera);
+    const uploaded = attribute.version;
+    const ranges = attribute.updateRanges;
+    expect(ranges.length).toBe(1);
+    expect(ranges[0].count).toBe(count * 4);
+    selector.select(view);
+    surface.upload(selector, view.camera);
+    expect(attribute.version).toBe(uploaded);
+    selector.select(viewFor(sphere600, 'mid-5km'));
+    surface.upload(selector, view.camera);
+    expect(attribute.version).toBe(uploaded + 1);
+    expect(attribute.updateRanges).toBe(ranges);
+    const other = new LodSelector(settingsFor(sphere600, { cull: true }));
+    other.select(viewFor(sphere600, 'mid-5km'));
+    surface.upload(other, view.camera);
+    expect(attribute.version).toBe(uploaded + 2);
+    surface.dispose();
+  });
+
+  it('gives the frustum side planes of the earlier formula, bit for bit', () => {
+    const fov = Math.PI / 3;
+    for (const pose of ['eye-2m', 'horizon', 'orbit'] as const) {
+      const camera = resolveCamera(poseView(pose, sphere600), sphere600, createHeightSource('bumps', 'sphere'));
+      const expected = new Float64Array(12);
+      const ay = fov / 2;
+      const ax = Math.atan(Math.tan(ay) * (16 / 9));
+      const planes: [Vec3, number][] = [[camera.right, ax], [camera.right, -ax], [camera.up, ay], [camera.up, -ay]];
+      planes.forEach(([axis, angle], p) => {
+        const sign = Math.sign(angle);
+        const a = Math.abs(angle);
+        for (let k = 0; k < 3; k++) expected[p * 3 + k] = sign * Math.cos(a) * axis[k] + Math.sin(a) * camera.forward[k];
+      });
+      const out = new Float64Array(12);
+      expect(frustumNormals(camera, fov, 16 / 9, out)).toBe(out);
+      expect(Array.from(out)).toEqual(Array.from(expected));
+    }
   });
 });
 

@@ -88,12 +88,17 @@ export function resolveCamera(view: CameraView, domain: LodDomain, source: Heigh
 export function frustumNormals(camera: ResolvedCamera, verticalFovRad: number, aspect: number, out: Float64Array): Float64Array {
   const ay = verticalFovRad / 2;
   const ax = Math.atan(Math.tan(ay) * aspect);
-  const planes: [Vec3, number][] = [[camera.right, ax], [camera.right, -ax], [camera.up, ay], [camera.up, -ay]];
-  planes.forEach(([axis, angle], p) => {
-    const sideSign = Math.sign(angle);
-    const a = Math.abs(angle);
-    for (let k = 0; k < 3; k++) out[p * 3 + k] = sideSign * Math.cos(a) * axis[k] + Math.sin(a) * camera.forward[k];
-  });
+  // Side planes in pairs: +angle and -angle about one axis share their sine and cosine. No allocation, called every frame.
+  const cx = Math.cos(ax);
+  const sx = Math.sin(ax);
+  const cy = Math.cos(ay);
+  const sy = Math.sin(ay);
+  for (let k = 0; k < 3; k++) {
+    out[k] = cx * camera.right[k] + sx * camera.forward[k];
+    out[3 + k] = -cx * camera.right[k] + sx * camera.forward[k];
+    out[6 + k] = cy * camera.up[k] + sy * camera.forward[k];
+    out[9 + k] = -cy * camera.up[k] + sy * camera.forward[k];
+  }
   return out;
 }
 

@@ -1,4 +1,4 @@
-import { domainPoint, neighbourCell, rootCount, type LodDomain, type NeighbourCell, type Vec3 } from './lod-domain';
+import { EDGE_STEP, domainPoint, neighbourCell, rootCount, type LodDomain, type NeighbourCell, type Vec3 } from './lod-domain';
 
 /**
  * Plan 059 M1 selector: a 2:1-balanced quadtree per root, re-selected every frame from the roots by priority splitting
@@ -13,6 +13,13 @@ import { domainPoint, neighbourCell, rootCount, type LodDomain, type NeighbourCe
  * geometry, after it stops being split, so re-selecting a nearby view only redoes per-view culling and priority.
  * {@link LodSelector.open} marks the nodes split in the current frame; blocks the last tree did not reach are reclaimed
  * when the pool runs low.
+ *
+ * Neighbours are pointers, not searches: {@link LodSelector.nb} holds, per node and edge, the pool node of the same-level
+ * cell across that edge (linked when the later of the two blocks is made, so it persists with the pool). In the current
+ * tree that cell is a leaf or open exactly when its node is stamped with this frame; if it is not, a coarser leaf covers
+ * it (edge mask bit set) and, by the 2:1 balance, that leaf is the parent's neighbour across the same edge. So the
+ * balance check while splitting and the edge masks cost a few array reads per edge. A view identical to the last one
+ * returns without redoing the tree ({@link LodSelector.version} says whether the leaves changed).
  */
 
 export type PatchCells = 16 | 32 | 64;
@@ -73,6 +80,11 @@ const POOL_TREES = 4;
 /** {@link LodSelector.neighbourRoot} value for an edge on the plane's border. */
 export const NO_NEIGHBOUR = 255;
 
+/** Doubles per node in the packed geometry the per-view loop reads: centre x y z, bounding radius, longest edge per cell. */
+const HOT = 8;
+/** {@link LodSelector.select} remembers the last view as camera (3), frustum (12) and pixel angle. */
+const VIEW_KEY = 16;
+
 export class LodSelector {
   readonly settings: SelectorSettings;
   readonly maxLevel: number;
@@ -91,12 +103,25 @@ export class LodSelector {
   readonly normal: Float64Array;
   readonly radius: Float64Array;
   readonly edge: Float64Array;
+  /** How many times too big the node's cells are, for nodes queued to split this frame (above 1); 0 for the rest. */
   readonly priority: Float64Array;
   readonly visible: Uint8Array;
   /** Same-level cell across each edge, 4 per node: root ({@link NO_NEIGHBOUR} at the plane's border), i, j. */
   readonly neighbourRoot: Uint8Array;
   readonly neighbourI: Uint32Array;
   readonly neighbourJ: Uint32Array;
+  /**
+   * Pool node of the same-level cell across each edge, 4 per node. Two stand-in nodes past the pool keep this branch-free:
+   * {@link unlinked} when that cell has no node yet (never in the tree) and {@link none} at the plane's border (always).
+   * Cleared to {@link unlinked} for nodes of freed blocks.
+   */
+  readonly nb: Int32Array;
+  readonly unlinked: number;
+  readonly none: number;
+  /** Frame number in which the node was last part of the tree (a root, or a child of a node split that frame). */
+  readonly stamp: Int32Array;
+  /** Bumped by every {@link select} that rebuilt the tree; a repeat of the last view keeps it, and the leaves. */
+  version = 0;
   /** Pool high-water mark: every node below it is allocated or in a free block. */
   nodeCount = 0;
   /** Nodes of the current tree (roots, then the children of open nodes) in visiting order. */
@@ -111,12 +136,22 @@ export class LodSelector {
   /** Most nodes one tree can hold. */
   private readonly treeCapacity: number;
   private readonly heap: Int32Array;
+  private readonly heapKey: Float64Array;
   private heapSize = 0;
+  private frame = 0;
+  /** Packed centre, radius and edge per cell, {@link HOT} doubles per node. */
+  private readonly hot: Float64Array;
+  private readonly capacity: number;
+  private readonly culledLeaves: Int32Array;
+  private readonly culledMasks: Uint8Array;
+  private readonly viewKey = new Float64Array(VIEW_KEY);
+  private hasViewKey = false;
+  /** Pixels per target cell times the angle of a pixel: this view's metres of cell per metre of gap. */
+  private pixelScale = 0;
   private readonly freeBlocks: Int32Array;
   private freeCount = 0;
   private readonly live: Uint8Array;
   private leafCount = 0;
-  private view: SelectorView | undefined;
   private readonly cell: NeighbourCell = { root: 0, i: 0, j: 0 };
   private readonly point: Vec3 = [0, 0, 0];
   private readonly pointNormal: Vec3 = [0, 0, 0];
@@ -131,11 +166,14 @@ export class LodSelector {
     this.maxLevel = maxLevelFor(settings.patchCells);
     this.treeCapacity = 2 * (settings.leafCap + CAP_SLACK) + 64;
     const capacity = Math.max(2, poolTrees) * this.treeCapacity;
+    this.capacity = capacity;
+    this.unlinked = capacity;
+    this.none = capacity + 1;
     this.root = new Uint8Array(capacity);
     this.level = new Uint8Array(capacity);
     this.i = new Uint32Array(capacity);
     this.j = new Uint32Array(capacity);
-    this.child = new Int32Array(capacity);
+    this.child = new Int32Array(capacity + 2).fill(-1);
     this.open = new Uint8Array(capacity);
     this.parent = new Int32Array(capacity);
     this.center = new Float64Array(capacity * 3);
@@ -147,17 +185,26 @@ export class LodSelector {
     this.neighbourRoot = new Uint8Array(capacity * 4);
     this.neighbourI = new Uint32Array(capacity * 4);
     this.neighbourJ = new Uint32Array(capacity * 4);
+    this.nb = new Int32Array(capacity * 4);
+    this.stamp = new Int32Array(capacity + 2);
+    this.hot = new Float64Array(capacity * HOT);
     this.live = new Uint8Array(capacity);
     this.freeBlocks = new Int32Array(capacity >> 2);
     this.active = new Int32Array(this.treeCapacity);
     this.heap = new Int32Array(this.treeCapacity);
+    this.heapKey = new Float64Array(this.treeCapacity);
     this.leaves = new Int32Array(settings.leafCap + CAP_SLACK + 6);
     this.masks = new Uint8Array(settings.leafCap + CAP_SLACK + 6);
+    this.culledLeaves = new Int32Array(settings.leafCap + CAP_SLACK + 6);
+    this.culledMasks = new Uint8Array(settings.leafCap + CAP_SLACK + 6);
   }
 
   /** Selects the tree for a view and fills {@link leaves}, {@link masks} and {@link stats}. */
   select(view: SelectorView): void {
-    this.view = view;
+    if (this.sameView(view)) return;
+    this.version++;
+    this.frame++;
+    this.pixelScale = Math.max(this.settings.cellPixels, PIXEL_FLOOR) * view.pixelAngle;
     this.heapSize = 0;
     const stats = this.stats;
     stats.splits = 0;
@@ -166,13 +213,16 @@ export class LodSelector {
     const roots = rootCount(this.settings.domain);
     if (this.nodeCount === 0) {
       for (let r = 0; r < roots; r++) this.initNode(this.nodeCount++, -1, r, 0, 0, 0);
+      // A root's neighbours are roots, which are always in the tree.
+      for (let n = 0; n < roots * 4; n++) if (this.nb[n] !== this.none) this.nb[n] = this.neighbourRoot[n];
     } else {
       // Room for a whole new tree, or drop what the last tree did not reach (it needs last frame's open flags).
-      if (this.child.length - this.nodeCount + 4 * this.freeCount < this.treeCapacity) this.reclaim(roots);
+      if (this.capacity - this.nodeCount + 4 * this.freeCount < this.treeCapacity) this.reclaim(roots);
       for (let k = 0; k < this.activeCount; k++) this.open[this.active[k]] = 0;
     }
     this.activeCount = 0;
-    for (let r = 0; r < roots; r++) this.activate(r);
+    this.stamp[this.none] = this.frame;
+    this.activateRange(0, roots);
     this.leafCount = roots;
 
     while (this.heapSize > 0) {
@@ -180,7 +230,7 @@ export class LodSelector {
       if (this.open[node] === 1) continue;
       if (this.leafCount + 3 > this.settings.leafCap || !this.split(node, false)) {
         // Put it back so the unmet count below includes it.
-        this.push(node);
+        this.push(node, this.priority[node]);
         stats.capHit = true;
         break;
       }
@@ -188,6 +238,22 @@ export class LodSelector {
     stats.unmet = 0;
     for (let k = 0; k < this.heapSize; k++) if (this.open[this.heap[k]] === 0) stats.unmet++;
     this.collectLeaves();
+  }
+
+  /** True when the view equals the last one selected for (then the tree is already right); otherwise remembers it. */
+  private sameView(view: SelectorView): boolean {
+    const key = this.viewKey;
+    const camera = view.camera;
+    const frustum = view.frustum;
+    let same = this.hasViewKey && key[15] === view.pixelAngle;
+    for (let k = 0; k < 3; k++) if (key[k] !== camera[k]) same = false;
+    for (let k = 0; k < 12; k++) if (key[3 + k] !== frustum[k]) same = false;
+    if (same) return true;
+    for (let k = 0; k < 3; k++) key[k] = camera[k];
+    for (let k = 0; k < 12; k++) key[3 + k] = frustum[k];
+    key[15] = view.pixelAngle;
+    this.hasViewKey = true;
+    return false;
   }
 
   /** Index of the deepest node at or above `level` covering cell (i, j) of `level` on `root`. */
@@ -235,21 +301,33 @@ export class LodSelector {
   }
 
   private collectLeaves(): void {
-    // Drawn leaves first, then the culled ones (kept for checks); one pass each over the current tree.
-    let count = 0;
+    // Drawn leaves first, then the culled ones (kept for checks), each in tree order.
+    const { active, open, visible, level, leaves, masks, culledLeaves, culledMasks, nb, stamp, frame } = this;
+    let drawn = 0;
+    let culled = 0;
     let deepest = 0;
-    for (let pass = 0; pass < 2; pass++) {
-      for (let k = 0; k < this.activeCount; k++) {
-        const node = this.active[k];
-        if (this.open[node] === 1 || (this.visible[node] === 1) !== (pass === 0)) continue;
-        this.leaves[count] = node;
-        this.masks[count] = this.edgeMask(node);
-        if (this.level[node] > deepest) deepest = this.level[node];
-        count++;
+    for (let k = 0; k < this.activeCount; k++) {
+      const node = active[k];
+      if (open[node] === 1) continue;
+      // Bit e: the same-level cell across edge e is not in the tree, so a coarser leaf covers it.
+      const n = node * 4;
+      const mask =
+        (stamp[nb[n]] !== frame ? 1 : 0) | (stamp[nb[n + 1]] !== frame ? 2 : 0) | (stamp[nb[n + 2]] !== frame ? 4 : 0) | (stamp[nb[n + 3]] !== frame ? 8 : 0);
+      if (visible[node] === 1) {
+        leaves[drawn] = node;
+        masks[drawn++] = mask;
+      } else {
+        culledLeaves[culled] = node;
+        culledMasks[culled++] = mask;
       }
-      if (pass === 0) this.stats.drawn = count;
+      if (level[node] > deepest) deepest = level[node];
     }
-    this.stats.leaves = count;
+    for (let k = 0; k < culled; k++) {
+      leaves[drawn + k] = culledLeaves[k];
+      masks[drawn + k] = culledMasks[k];
+    }
+    this.stats.drawn = drawn;
+    this.stats.leaves = drawn + culled;
     this.stats.deepestLevel = deepest;
   }
 
@@ -261,10 +339,11 @@ export class LodSelector {
     const level = this.level[node];
     if (level >= this.maxLevel || this.activeCount + 4 > this.treeCapacity) return false;
     if (this.leafCount + 3 > this.settings.leafCap + CAP_SLACK) return false;
-    if (this.child[node] === -1 && this.freeCount === 0 && this.nodeCount + 4 > this.child.length) return false;
+    if (this.child[node] === -1 && this.freeCount === 0 && this.nodeCount + 4 > this.capacity) return false;
+    const nb = this.nb;
     for (let e = 0; e < 4; e++) {
-      if (this.neighbourRoot[node * 4 + e] === NO_NEIGHBOUR) continue;
-      const other = this.coveringNeighbour(node, e);
+      if (this.stamp[nb[node * 4 + e]] === this.frame) continue;
+      const other = this.coarserNeighbour(node, e);
       if (this.level[other] < level && this.open[other] === 0 && !this.split(other, true)) return false;
     }
     let first = this.child[node];
@@ -278,22 +357,100 @@ export class LodSelector {
       const i = this.i[node] * 2;
       const j = this.j[node] * 2;
       for (let k = 0; k < 4; k++) this.initNode(first + k, node, root, level + 1, i + (k & 1), j + (k >> 1));
+      this.linkBlock(node, first);
       this.child[node] = first;
     }
     this.open[node] = 1;
     this.leafCount += 3;
     if (forced) this.stats.forcedSplits++;
     else this.stats.splits++;
-    for (let k = 0; k < 4; k++) this.activate(first + k);
+    this.activateRange(first, 4);
     return true;
   }
 
-  /** Adds a node to the current tree as a leaf, with this view's culling and priority, and queues it. */
-  private activate(node: number): void {
-    this.active[this.activeCount++] = node;
-    this.visible[node] = this.isVisible(node) ? 1 : 0;
-    this.priority[node] = this.visible[node] ? this.splitPriority(node) : 0;
-    this.push(node);
+  /**
+   * The leaf covering the same-level cell across edge `e` of `node` when that cell is not in the tree: by the balance it
+   * is the parent's neighbour across the same edge. Falls back to a search from the tree if the pointer is not such a leaf.
+   */
+  private coarserNeighbour(node: number, e: number): number {
+    const other = this.nb[this.parent[node] * 4 + e];
+    if (this.stamp[other] === this.frame && this.open[other] === 0) return other;
+    return this.coveringNeighbour(node, e);
+  }
+
+  /** Sets {@link nb} for the four new children of `parent`, and the matching pointer back from each linked neighbour. */
+  private linkBlock(parent: number, first: number): void {
+    const { nb, child, neighbourRoot, neighbourI, neighbourJ, root, i, j } = this;
+    for (let k = 0; k < 4; k++) {
+      const node = first + k;
+      for (let e = 0; e < 4; e++) {
+        const n = node * 4 + e;
+        const ni = (k & 1) + EDGE_STEP[e][0];
+        const nj = (k >> 1) + EDGE_STEP[e][1];
+        if (ni >= 0 && ni < 2 && nj >= 0 && nj < 2) {
+          nb[n] = first + ni + 2 * nj;
+          continue;
+        }
+        // Across the parent's edge: the cell is a child of the parent's own neighbour, if that has a block yet.
+        const across = nb[parent * 4 + e];
+        if (child[across] === -1) {
+          nb[n] = across === this.none ? across : this.unlinked;
+          continue;
+        }
+        const other = child[across] + (neighbourI[n] & 1) + 2 * (neighbourJ[n] & 1);
+        nb[n] = other;
+        for (let f = 0; f < 4; f++) {
+          const m = other * 4 + f;
+          if (neighbourRoot[m] === root[node] && neighbourI[m] === i[node] && neighbourJ[m] === j[node]) {
+            nb[m] = node;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Adds `count` consecutive nodes to the current tree as leaves, with this view's culling and priority, and queues the
+   * ones that ask for a split.
+   */
+  private activateRange(first: number, count: number): void {
+    const { active, stamp, visible, priority, hot, level, viewKey: key } = this;
+    const { cull, mode, fixedLevel } = this.settings;
+    const frame = this.frame;
+    const maxLevel = this.maxLevel;
+    const pixelScale = this.pixelScale;
+    let n = this.activeCount;
+    for (let node = first; node < first + count; node++) {
+      active[n++] = node;
+      stamp[node] = frame;
+      const h = node * HOT;
+      const x = hot[h] - key[0];
+      const y = hot[h + 1] - key[1];
+      const z = hot[h + 2] - key[2];
+      const r = hot[h + 3];
+      if (cull && (key[3] * x + key[4] * y + key[5] * z < -r || key[6] * x + key[7] * y + key[8] * z < -r || key[9] * x + key[10] * y + key[11] * z < -r || key[12] * x + key[13] * y + key[14] * z < -r)) {
+        visible[node] = 0;
+        priority[node] = 0;
+        continue;
+      }
+      visible[node] = 1;
+      let value = 0;
+      if (mode === 'fixed') {
+        const nodeLevel = level[node];
+        if (nodeLevel < maxLevel && nodeLevel < fixedLevel) value = 1 + fixedLevel - nodeLevel;
+      } else {
+        // Cells per target size; the deepest level has edge 0, so it never asks. The division only runs when the cell is too big.
+        const target = pixelScale * Math.max(Math.sqrt(x * x + y * y + z * z) - r, 1e-3);
+        const edge = hot[h + 4];
+        if (edge > target) value = edge / target;
+      }
+      if (value > 1) {
+        priority[node] = value;
+        this.push(node, value);
+      } else priority[node] = 0;
+    }
+    this.activeCount = n;
   }
 
   /** Frees every child block the last tree did not reach; the pool then holds that tree and free blocks only. */
@@ -306,6 +463,9 @@ export class LodSelector {
     // Child blocks start at `roots` and are allocated four at a time, so they stay aligned.
     for (let first = roots; first < this.nodeCount; first += 4) if (live[first] === 0) this.freeBlocks[this.freeCount++] = first;
     for (let node = 0; node < this.nodeCount; node++) if (live[node] === 0 || this.open[node] === 0) this.child[node] = -1;
+    // Pointers into freed blocks would name nodes that are about to be remade as other cells.
+    const nb = this.nb;
+    for (let n = 0; n < this.nodeCount * 4; n++) if (nb[n] < this.nodeCount && live[nb[n]] === 0) nb[n] = this.unlinked;
   }
 
   /** Sets a node's cell and its camera-independent data: centre, normal, bounding radius, longest edge, neighbours. */
@@ -342,6 +502,12 @@ export class LodSelector {
     }
     this.radius[node] = radius + this.settings.heightBoundM;
     this.edge[node] = edge;
+    const h = node * HOT;
+    this.hot[h] = point[0];
+    this.hot[h + 1] = point[1];
+    this.hot[h + 2] = point[2];
+    this.hot[h + 3] = this.radius[node];
+    this.hot[h + 4] = level >= this.maxLevel ? 0 : edge / this.settings.patchCells;
     const cell = this.cell;
     for (let e = 0; e < 4; e++) {
       const n = node * 4 + e;
@@ -349,73 +515,45 @@ export class LodSelector {
       this.neighbourRoot[n] = found ? cell.root : NO_NEIGHBOUR;
       this.neighbourI[n] = cell.i;
       this.neighbourJ[n] = cell.j;
+      this.nb[n] = found ? this.unlinked : this.none;
     }
   }
 
-  private isVisible(node: number): boolean {
-    const view = this.view;
-    if (!this.settings.cull || !view) return true;
-    const c = node * 3;
-    const x = this.center[c] - view.camera[0];
-    const y = this.center[c + 1] - view.camera[1];
-    const z = this.center[c + 2] - view.camera[2];
-    const r = this.radius[node];
-    const f = view.frustum;
-    for (let p = 0; p < 12; p += 3) if (f[p] * x + f[p + 1] * y + f[p + 2] * z < -r) return false;
-    return true;
-  }
-
-  /** How many times too big this node's cells are for the criterion; above 1 asks for a split. */
-  private splitPriority(node: number): number {
-    const settings = this.settings;
-    if (this.level[node] >= this.maxLevel) return 0;
-    if (settings.mode === 'fixed') return this.level[node] < settings.fixedLevel ? 1 + settings.fixedLevel - this.level[node] : 0;
-    const view = this.view;
-    if (!view) return 0;
-    const c = node * 3;
-    const x = this.center[c] - view.camera[0];
-    const y = this.center[c + 1] - view.camera[1];
-    const z = this.center[c + 2] - view.camera[2];
-    const distance = Math.sqrt(x * x + y * y + z * z);
-    const gap = Math.max(distance - this.radius[node], 1e-3);
-    const target = Math.max(settings.cellPixels, PIXEL_FLOOR) * view.pixelAngle * gap;
-    return this.edge[node] / settings.patchCells / target;
-  }
-
-  private push(node: number): void {
-    if (this.priority[node] <= 1) return;
+  private push(node: number, value: number): void {
     const heap = this.heap;
-    const priority = this.priority;
+    const keys = this.heapKey;
     let k = this.heapSize++;
-    heap[k] = node;
     while (k > 0) {
       const parent = (k - 1) >> 1;
-      if (priority[heap[parent]] >= priority[heap[k]]) break;
-      const swap = heap[parent];
-      heap[parent] = heap[k];
-      heap[k] = swap;
+      if (keys[parent] >= value) break;
+      heap[k] = heap[parent];
+      keys[k] = keys[parent];
       k = parent;
     }
+    heap[k] = node;
+    keys[k] = value;
   }
 
   private pop(): number {
     const heap = this.heap;
-    const priority = this.priority;
+    const keys = this.heapKey;
     const top = heap[0];
-    heap[0] = heap[--this.heapSize];
+    const size = --this.heapSize;
+    const node = heap[size];
+    const value = keys[size];
     let k = 0;
     while (true) {
       const left = 2 * k + 1;
+      if (left >= size) break;
       const right = left + 1;
-      let best = k;
-      if (left < this.heapSize && priority[heap[left]] > priority[heap[best]]) best = left;
-      if (right < this.heapSize && priority[heap[right]] > priority[heap[best]]) best = right;
-      if (best === k) break;
-      const swap = heap[best];
-      heap[best] = heap[k];
-      heap[k] = swap;
+      const best = right < size && keys[right] > keys[left] ? right : left;
+      if (keys[best] <= value) break;
+      heap[k] = heap[best];
+      keys[k] = keys[best];
       k = best;
     }
+    heap[k] = node;
+    keys[k] = value;
     return top;
   }
 }

@@ -359,3 +359,94 @@ LOD'd detail going inward and outward, and how that works with overhangs and Jol
 
 1. The slope criterion goes into M2.
 2. M6 (cliffs) after M5.
+
+## 2026-10-25 — Selection CPU: Node p95 0.10 ms moving, 0.001 ms still (browser not rerun)
+
+Goal: selection p95 at or under 0.2 ms in the browser on the reference laptop. The browser has run about 2.5 times slower than Node, so the aim in Node was p95 of 0.08 ms at cap 1024, still and moving.
+
+### Built
+
+1. **What the browser metric times.** The page times `frustumNormals`, `selector.select` and `mesh.upload` together. The old `frustumNormals` allocated four arrays per frame and `upload` repacked and re-uploaded every frame even when nothing had changed. Both are now allocation-free, and `upload` skips the pack and the GPU write when the selector and its `version` are unchanged (`lod-leaf-pack.ts` holds the pack; the attribute update ranges are reused objects).
+2. **Unchanged-view memo.** `select` compares a 16-double key (camera, frustum planes, pixel angle) and returns early on a match. `version` counts rebuilds.
+3. **Neighbour pointers and stamps.** Each pool node holds the pool index of the same-level cell across each edge (`nb`), linked when the later block is created, with two stand-in nodes for "not made yet" and "plane border". A node is in the current tree when `stamp[node] === frame`. The 2:1 balance check and the edge masks are now stamp reads, not tree descents. The descend-based `coveringNeighbour`, `findCovering` and `edgeMask` stay as the reference path for the specs.
+4. **Cheaper per-node work.** One hot array (centre, radius, edge length) per node, one loop for culling and priority per new block, the division skipped for nodes that cannot ask for a split, and `priority[]` kept only for queued nodes (0 otherwise; it was the raw value before). Leaves and masks come out of one branch-free pass.
+5. Not done: incremental split and merge from the last frame's tree. It cannot promise the same leaves as a rebuild from the roots under the cap, so the tree is still rebuilt from the roots every changed frame.
+
+### Verified
+
+- 62 headless specs pass (`ng test demo-app --browsers=ChromeHeadless --watch=false --include="**/lod-surface-lab/**/*.spec.ts"`; 38 before, 24 added). The new ones compare the selector with a plain reference (cells by key, search-based balance and masks, the original binary heap) for exact leaves, masks, order and stats: plane and sphere 600 km, caps 64, 300 and 1024 plus fixed level 4 at cap 700, cull on and off, five poses with a moving camera, and a small pool that reclaims. They also check every `nb` pointer against `neighbourCell`, the memo and the upload skip, the pack contents, and the new `frustumNormals` against the old formula bit for bit.
+- A scratch comparison of the original and the new selector over 5400 views (three domains, caps 64, 300 and 1024, cull on and off, five poses, 60 moving frames each): 0 mismatches in leaves, masks, order and stats.
+- **Node timings, 15 baseline poses, cap 1024, frustumNormals + select + pack + anchor, min of three runs, noisy laptop:**
+
+| Node, ms | before p50 | before p95 | after p50 | after p95 |
+|---|---|---|---|---|
+| still camera | 0.178 | 0.251 | 0.001 | 0.001 |
+| jitter (view changes every frame) | 0.191 | 0.292 | 0.045 | 0.072 |
+| moving, 1% altitude per frame | 0.192 | 0.258 | 0.064 | 0.100 |
+| moving, cap-hit poses only | 0.255 | 0.330 | 0.088 | 0.130 |
+
+- **Browser numbers are not measured.** The owner needs to rerun `lod-surface-baseline` v2.
+
+### Findings
+
+- Moving at the cap is still about 0.10 to 0.13 ms in Node, above the 0.08 aim. Profile: culling and priority about 35 percent, collecting leaves and popping the heap about 35, splitting about 10. The remainder looks like branch misprediction and heap work.
+- Chrome rounds `performance.now()` to 0.1 ms unless the page is cross-origin isolated. A sub-0.2 ms p95 is only readable to within that step.
+- Node timing on this laptop moves by tens of percent between runs, so only A/B alternation and min-of-three were trusted.
+
+### Next
+
+1. Owner reruns `lod-surface-baseline` v2 on the NVIDIA adapter and reads `npm run test:summary`.
+2. If moving at the cap is still over 0.2 ms in the browser, the remaining cost is the heap and the per-node cull; a coarser first pass or reusing last frame's culling by frustum margin would be the next candidates, each needing the same equivalence spec.
+
+## 2026-10-25 — Water: lessons from Minamo (study only, nothing built)
+
+Read the public, MIT-licensed Minamo WebGPU water demo for ideas for M3. No code was copied; credit the approaches if they are adopted. Its assets are CC0, but its `docs/brand/` folder is not MIT.
+
+### Worth adopting (ranked)
+
+1. Slope-variance roughness: each sine adds (A·k)²/2 to the surface's slope variance, which feeds the specular roughness, so distant waves turn into gloss instead of aliasing.
+2. Each wave fades out as its wavelength nears about four vertex spacings of the grid it is drawn on. This fits our per-leaf spacing directly.
+3. Sun glint: GGX alpha floored at the sun's angular radius, exact Fresnel, and the sky mip chosen by roughness.
+4. Closed-form RGB depth absorption. This needs a depth copy, and on a sphere "up" is the local normal.
+5. Foam from the Jacobian of Gerstner waves.
+6. One wave function shared by the mesh, the CPU and the waterline. Ours is already exact on the CPU twin; Minamo reads back from the GPU a frame late.
+7. A near-plane waterline texture (deferred).
+8. Filtering texture heights in exact f32. This also applies to chunk B's terrain texture.
+9. Check its GPU timer approach against ours; the sky fixes are minor.
+
+### Not a fit
+
+- The polar disc grid (plane only).
+- FFT cascades.
+- Periodic textures without a floating origin.
+- Underwater and lens effects.
+- 1.25× supersampling.
+- Its raw WGSL post stack.
+
+### Next
+
+These go into M3 after M6 (D15).
+
+## 2026-10-25 — RTX rerun after the selector rework: selection at budget
+
+The owner ran `lod-surface-baseline` v2 on the RTX 3080 Laptop (NVIDIA adapter, visible browser, quick mode, one case per run, fingerprint `ec202a60-e3b0c442`). Every run logged `WARN other-app-measuring`.
+
+| | before (v2) | after |
+|---|---|---|
+| selection CPU p95, still poses | 0.4–0.5 ms | 0.1 ms (median 0.0) |
+| selection CPU p95, `zoom-sphere-600km` | 0.6 ms | 0.2 ms (max 0.4) |
+| selection CPU p95, `zoom-plane-100km` | 0.5 ms | 0.2 ms (max 1.1) |
+| crack px, ordinary cases | 0 | 0 |
+| controls (injected gap / folding off) | found | 42,042 / 105 px |
+| GPU scene pass p95 | ≤ 0.27 ms (cells64 0.67) | ≤ 0.27 ms (cells64 0.61) |
+
+### Findings
+
+- On still poses, the unchanged-view memo skips selection entirely, so their selection metric now measures upload and anchor work, not selection. The zoom cases are the real selection measurement.
+- The zoom p95 sits exactly on the 0.2 ms budget. Chrome's timer steps by 0.1 ms here, so this pass has no margin. The 1.1 ms maximum on the plane is a single frame.
+- `sphere-600km-mid-5km-nowarp` and `control-injected-gap` hit the 4 s window cap without settling. Both rendered correctly (0 px and 42,042 px). The settle rule did not converge, probably on the 0.0/0.1 ms flicker of the quantised timer; the surface itself is not affected.
+
+### Next
+
+1. Rerun with nothing else measuring, and judge M1 on the zoom cases' p95.
+2. If the margin matters, the suite could time selection over N repetitions per frame, or the page could be cross-origin isolated for a finer timer. Either changes the measurement, so the suite version goes to v3.

@@ -30,6 +30,7 @@ tags: [runbook, index]
 | [Test Runner Batch Runs and a Deterministic Stop Rule](/docs/runbook/061_test_runner_batch_and_stop_rule.md) | [Implementation plan](/docs/plans/061_test_runner_batch_and_stop_rule.md) |
 | [Planet Surface Detail LOD](/docs/runbook/063_planet_surface_detail_lod.md) | [Implementation plan](/docs/plans/063_planet_surface_detail_lod.md) |
 | [Engine Docs Ship With Entry Points](/docs/runbook/064_engine_docs_ship_with_entry_points.md) | [Implementation plan](/docs/plans/064_engine_docs_ship_with_entry_points.md) |
+| [Composite Cell Planet on WebGPURenderer](/docs/runbook/065_composite_cell_planet.md) | [Implementation plan](/docs/plans/065_composite_cell_planet.md) |
 
 
 Existing runbooks `001`–`042` retain their historical paths and formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).
