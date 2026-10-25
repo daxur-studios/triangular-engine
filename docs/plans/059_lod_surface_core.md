@@ -1,7 +1,7 @@
 ---
 type: Plan
 title: LOD Surface Core for Water and Terrain
-description: A fresh, WebGPU-only, performance-tested level-of-detail surface (a height over a plane or a sphere, drawn as one instanced grid whose density follows pluggable criteria), shown first on a flat and a sphere lab page, then used by a new water surface and later by low-detail terrain. Review and owner decisions done. M1 lab built (demo-app `/lod-surface-lab`, suite `lod-surface-baseline` v1, 26 headless specs green) with a persistent selector at about 0.2 ms in Node; its gates are not yet measured in the browser. Spike S1 not started.
+description: A fresh, WebGPU-only, performance-tested level-of-detail surface (a height over a plane or a sphere, drawn as one instanced grid whose density follows pluggable criteria), shown first on a flat and a sphere lab page, then used by a new water surface and later by low-detail terrain. Review and owner decisions done. M1 lab built (demo-app `/lod-surface-lab`, suite `lod-surface-baseline` v2, 38 headless specs green) with bit-identical seam vertices; v2 on the RTX 3080 shows 0 crack pixels in every ordinary case and GPU scene pass p95 under 0.3 ms, but selection CPU p95 is 0.4–0.6 ms against the 0.2 ms budget. Spike S1 not started. Cliff detail decided (D14): slope criterion in M2, vector displacement as M6.
 timestamp: 2026-10-24T00:00:00Z
 tags: [lod, mesh, quadtree, sphere, plane, water, terrain, webgpu, tsl, performance, testing]
 runbook: /docs/runbook/059_lod_surface_core.md
@@ -68,7 +68,11 @@ lower-detail track that neither blocks nor depends on Plan 055.
   texture (terrain bakes and edits, water ripples and wakes).
 - **Instruments from day one:** LOD-level colours, wireframe, patch bounds, counters, GPU pass timers, a crack probe.
 
-**Out for now:** caves, arches and overhangs (Plan 055 owns them); the globe-to-map morph (D11); FFT and ray-marched
+**In (D14, decided 2026-10-25):** cliff detail. Steep slopes refine through a slope criterion (M2); vertical and
+overhanging cliff faces come from vector displacement of the same sheet (M6, §Cliff detail).
+
+**Out for now:** caves, arches and tunnels (Plan 055 owns them; one displaced sheet cannot make them); overhangs
+other than those of a displaced sheet; the globe-to-map morph (D11); FFT and ray-marched
 water; beaches, swash, rivers, weather and ice (Plan 057's list); materials beyond a debug look and a basic lit look;
 paging for large terrain textures; Earth-scale precision of height sources (the mesh itself must be precise at
 any radius, §L7).
@@ -145,12 +149,45 @@ Each milestone ends with a gate measured on the reference machine and recorded i
 |---|---|---|
 | M1 | **Lab, harness and quadtree LOD** (M0 merged in). `/lod-surface-lab`, suite `lod-surface-baseline` v1 (§Suite). Bounded 100 km plane, spheres 10 km and 600 km; flat and static-bump sources; distance criterion with pixel floor, leaf cap, fixed-level toggle as the uniform baseline; equal-angle warp and `patchCells` 16/32/64 toggles; static edge folding; LOD colours, wireframe, bounds, counters, GPU pass timers; validated crack probe; one scripted zoom. Pops allowed and labelled | Zero crack pixels (probe validated by an injected gap); L5 cost; ground-to-orbit zoom with no rebuild storm; runs on both adapters |
 | S1 | **Precision spike, alongside M1** (disposable): three-face cube corner with a 2:1 seam, all 16 masks, 10 km and 6,371 km, 2 m eye, 1 mm per frame, float64 reference | No crack pixels; jitter <= 0.05 px; decides the Earth-scale formula and informs D9 |
-| M2 | **Blending and the other criteria** (feature regions, horizon, priority budget), each a toggle measured ABAB. Transition fixture first (diagonal ridge, live edit, unequal neighbours, reversed toggle) | Popping score; 3D boundary equality during morphs; each criterion shows its effect and its cost |
+| M2 | **Blending and the other criteria** (feature regions, horizon, priority budget, slope: a node's height range counts in its error, so steep slopes refine), each a toggle measured ABAB. Transition fixture first (diagonal ridge, live edit, unequal neighbours, reversed toggle) | Popping score; 3D boundary equality during morphs; each criterion shows its effect and its cost |
 | M3 | **Water v0:** live analytic waves on plane and sphere, CPU twin, amplitude-aware selection, the simple lit look | L5 cost; parity spec; owner visual review |
 | M4 | **Writable height texture source,** shared by water ripples (decaying stamps) and terrain stamps; CPU-authoritative first | Next-frame visibility; cost of an update |
 | M5 | **Low-detail terrain v0:** baked noise height texture, edits, collider patch | L5 cost (with its own working number), parity, crack probe |
+| M6 | **Terrain v1: cliffs (D14).** Vector displacement, stretch criterion, fold guard, mesh-shape collider patch, ray-hit query (§Cliff detail). Cases: a 200 m vertical cliff, a recessed face, an overhang, all at eye-2m and 200 m | Zero crack pixels; no inverted triangles; L5 cost with cliffs in view; a body rests on a ledge and under an overhang; CPU twin parity |
 
-After M5 the owner decides how water and terrain grow from here, and whether Plans 055 and 057 adopt the core.
+After M6 the owner decides how water and terrain grow from here, and whether Plans 055 and
+057 adopt the core.
+
+## Cliff detail (D14, decided)
+
+A height along the base normal cannot draw a cliff: the grid is spaced over the ground, so a 200 m face over a few
+metres of ground is a few stretched triangles, and a vertical step puts every vertex at its top or its bottom.
+
+1. **Slope criterion (M2, no decision needed).** The height source gives a node's height range (or a slope bound);
+   the error measure counts it, so steep slopes (to about 70°) subdivide and LOD like the rest. Vertical faces stay
+   unsolved.
+2. **Vector displacement (M6).** Each vertex moves by a 3D offset in the base tangent frame (`dU`, `dV`, height),
+   so the sheet stretches up the face and its vertices spread over it. Noise along the face's own normal gives
+   detail both inward (recesses, ledges) and outward (bulges, overhangs).
+   - **Seams:** the offset is a function of the integer lattice coordinate, as the height is, so shared vertices stay
+     bit-identical and edge folding is unchanged.
+   - **Stretch criterion:** where the sheet stretches (large ∂P/∂u), the target cell size shrinks by the stretch, so
+     a near cliff gets rows up its face and a far one coarsens by screen error.
+   - **Fold guard:** the sheet must not fold through itself. Sideways offset is bounded (positive Jacobian, or a
+     "grounded" clamp as in the Plan 055 meshing review); a spec checks it on the source.
+   - **Data:** an RGB(A) offset texture instead of one height channel; normals from its finite differences; node
+     bounds become 3D boxes instead of a height range.
+   - **Limit:** still one sheet. Arches, caves and tunnels stay with Plan 055.
+3. **Separate cliff meshes in a second pass (not proposed).** Kits or surface-nets blocks at cliff regions would
+   bring back seams between two systems. Considered only for arches and caves.
+
+**Jolt.** The height-field shape stores one height per grid point, so it cannot hold a vertical face or an overhang;
+it stays for far or flat ground. Near each moving body a small `MeshShape` (tens of metres, about 1–2k triangles) is
+built from the CPU twin of the displaced sheet and rebuilt as the body moves or after an edit; mesh shapes take any
+triangles, so inward and outward detail both collide. **Queries:** under an overhang "height at (x, z)" is not
+unique, so the CPU twin adds a ray-hit query next to the height lookup.
+
+**Cost:** three or four texture channels instead of one; more triangles only where cliffs are near; still one draw.
 
 ## Suite (proposed): `lod-surface-baseline` v1
 
@@ -195,3 +232,4 @@ fine reference during a slow scripted zoom. Both are open to the review.
 | D11 | Globe-to-map morph | Agreed in review: out of v1 |
 | D12 | Cube warp | Agreed in review: equal-angle default, toggle kept; value checked by measurement |
 | D13 | Water v0 look and motion bar (sines or Gerstner; acceptable transition motion) | **Decided** 2026-10-24 (owner): sines (Q = 0) first; the owner judges Gerstner and transition motion by eye at the M3 review; pops are fine until then |
+| D14 | Cliff detail by vector displacement of the sheet (M6, §Cliff detail), which brings sheet overhangs into scope while arches, caves and tunnels stay with Plan 055 | **Decided** 2026-10-25 (owner): accepted as M6; the slope criterion goes into M2 |

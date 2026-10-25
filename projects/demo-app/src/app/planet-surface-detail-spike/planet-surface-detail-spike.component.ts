@@ -2,6 +2,7 @@ import { JsonPipe } from '@angular/common';
 import { Component, computed, DestroyRef, effect, inject, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Mesh, Vector2, Vector3 } from 'three';
+import { float } from 'three/tsl';
 import type { Material } from 'three/webgpu';
 import { EngineModule, EngineService, RaycastOrbitControlsComponent } from 'triangular-engine';
 import { PlanetAtmosphereComponent } from 'triangular-engine/atmosphere';
@@ -28,18 +29,35 @@ import { CELL_PLANET_U0_FIXTURE } from '../pages/cell-planet-u0-fixture';
 import { getTerrainHeightScaleM } from '../pages/cell-planet-25d-map/cell-planet-terrain-scale';
 import type { CellPlanetMorphWorkerRequest } from '../pages/cell-planet-morph-streaming/cell-planet-morph-streaming.worker';
 import { FOREST_CROWN_WIDTH_M, FOREST_SPACING_M, forestFadeBand } from './forest-field';
-import { ForestInstances } from './forest-instances';
-import { forestLayer, type ForestViewMode } from './forest-layer';
+import { ROCK_SHAPE, SurfaceInstances, TREE_SHAPE, rockGeometry, treeGeometry } from './forest-instances';
+import { forestDensityParity, forestLayer, type ForestViewMode } from './forest-layer';
+import { ROCK_SIZE_M, ROCK_SIZE_RANGE_M, ROCK_SPACING_M, rockBands } from './rock-field';
+import { rockLayer } from './rock-layer';
 import { MaterialStreaming } from './material-streaming';
 import { runwayLayer } from './runway-layer';
 import { RUNWAY_LENGTH_M, RUNWAY_WIDTH_M, runwayFrame, type IRunwaySite } from './runway-site';
 
-/** Scatter disc radius around the camera (metres), grid spacing, and the instance buffer size. */
-const SCATTER_RADIUS_M = 3000;
+/** Grid spacing of the tree scatter and the instance buffer sizes. The scatter's grid is body-fixed (see `scatterCells`). */
 const SCATTER_SPACING_M = FOREST_SPACING_M;
-const SCATTER_CAPACITY = 140_000;
+const TREE_CAPACITY = 300_000;
+const ROCK_CAPACITY = 60_000;
 /** The camera may drift this far (metres) from the scatter centre before the next scatter is requested. */
-const SCATTER_RECENTRE_M = 500;
+const SCATTER_RECENTRE_M = 400;
+/** Width of the dissolve inside a window's edge (metres). */
+const WINDOW_FADE_M = 400;
+/** A window must hold all the camera can still see of a class: the end of its fade band, the drift allowed, and the edge dissolve. */
+const windowRadiusFor = (fadeEndM: number): number => Math.ceil((fadeEndM + 2 * SCATTER_RECENTRE_M) / 100) * 100;
+
+type ObjectClass = 'tree' | 'rock';
+
+/** One object class's window: its instances, where the last scatter was centred, and what it was asked for. */
+interface IClassWindow {
+  instances?: SurfaceInstances;
+  centre: Vector3 | null;
+  inFlight: boolean;
+  radiusM: number;
+  densityScale: number;
+}
 
 const query = new URLSearchParams(globalThis.location?.search ?? '');
 /**
@@ -111,8 +129,15 @@ export class PlanetSurfaceDetailSpikeComponent {
   readonly fadeStartM = signal(Math.round(forestFadeBand().startM));
   readonly fadeWidthM = signal(Math.round(forestFadeBand().endM - forestFadeBand().startM));
   readonly densityScale = signal(1);
-  readonly shadowSteps = signal(4);
+  readonly shadowSteps = signal(0);
   readonly treeCount = signal(0);
+  /** Trees found in the window beyond the buffer: lost at the far edge, never along a row. */
+  readonly treesDropped = signal(0);
+  readonly rockCount = signal(0);
+  readonly showRocks = signal(true);
+  readonly rockSizeM = ROCK_SIZE_M;
+  readonly rockSizeRangeM = ROCK_SIZE_RANGE_M;
+  readonly rockBandsM = rockBands();
   readonly crownWidthM = FOREST_CROWN_WIDTH_M;
   readonly forestBand = forestFadeBand();
   readonly sunElevation = signal(50);
@@ -142,10 +167,11 @@ export class PlanetSurfaceDetailSpikeComponent {
   private readonly macroLayer = macroVariationLayer({ positionSpace: 'morphed' });
   private readonly runway = runwayLayer();
   private readonly forest = forestLayer(WORLD_SIZE_TIER_RADIUS_M.medium);
-  private forestInstances?: ForestInstances;
-  private scatterCentre: Vector3 | null = null;
-  private scatterInFlight = false;
-  private scatterWantedDensity = 1;
+  private readonly rocks = rockLayer(this.forest, WORLD_SIZE_TIER_RADIUS_M.medium);
+  private readonly windows: Record<ObjectClass, IClassWindow> = {
+    tree: { centre: null, inFlight: false, radiusM: 0, densityScale: 1 },
+    rock: { centre: null, inFlight: false, radiusM: 0, densityScale: 1 },
+  };
   readonly atmosphereRef = viewChild(PlanetAtmosphereComponent);
   private readonly ocean = planetOceanMaterial({ morph: this.surface.morph });
   readonly atmosphereSurfaces = [this.surface, this.ocean.material];
@@ -176,6 +202,7 @@ export class PlanetSurfaceDetailSpikeComponent {
     this.surface.addSurfaceLayer({ id: 'macroVariation', order: SURFACE_LAYER_ORDER.macroVariation, layer: this.macroLayer.layer });
     this.surface.addSurfaceLayer({ id: 'runway', order: SURFACE_LAYER_ORDER.game, layer: this.runway.layer });
     this.surface.addSurfaceLayer({ id: 'forest', order: SURFACE_LAYER_ORDER.game - 100, layer: this.forest.layer });
+    this.surface.addSurfaceLayer({ id: 'rocks', order: SURFACE_LAYER_ORDER.game - 90, layer: this.rocks.layer });
     this.surface.addSunOcclusion({ id: 'forestShadow', occlusion: this.forest.occlusion });
     this.addOcean();
 
@@ -219,20 +246,47 @@ export class PlanetSurfaceDetailSpikeComponent {
       u.shadowSteps.value = this.shadowSteps();
       const [x, y, z] = this.sunDirection();
       u.sunBody.value.set(x, y, z);
-      if (this.forestInstances) this.forestInstances.mesh.visible = this.viewMode() !== 2;
+      this.rocks.uniforms.enabled.value = this.showRocks() ? 1 : 0;
+      const trees = this.windows.tree.instances;
+      const rocks = this.windows.rock.instances;
+      if (trees) trees.mesh.visible = this.viewMode() !== 2;
+      if (rocks) rocks.mesh.visible = this.viewMode() !== 2 && this.showRocks();
     });
 
     // The near form needs the atmosphere's binding: build it once the atmosphere exists.
     effect(() => {
       const binding = this.atmosphereRef()?.atmosphere()?.binding;
-      if (!binding || this.forestInstances) return;
-      this.forestInstances = new ForestInstances(
-        this.forest,
+      if (!binding || this.windows.tree.instances) return;
+      const bodyCentre = this.surface.morph.uBodyCentreScene as unknown;
+      const trees = new SurfaceInstances(
+        {
+          geometry: treeGeometry(),
+          shape: TREE_SHAPE,
+          capacity: TREE_CAPACITY,
+          albedo: this.forest.treeAlbedo,
+          opacity: (distance) => float(1).sub(this.forest.fadeWeight(distance)),
+          windowRadiusM: windowRadiusFor(this.fadeStartM() + this.fadeWidthM()),
+          windowFadeM: WINDOW_FADE_M,
+        },
         binding,
-        this.surface.morph.uBodyCentreScene as unknown,
-        SCATTER_CAPACITY,
+        bodyCentre,
       );
-      this.engine.scene.add(this.forestInstances.mesh);
+      const rocks = new SurfaceInstances(
+        {
+          geometry: rockGeometry(),
+          shape: ROCK_SHAPE,
+          capacity: ROCK_CAPACITY,
+          albedo: this.rocks.rockAlbedo,
+          opacity: (distance) => this.rocks.meshOpacity(distance),
+          windowRadiusM: windowRadiusFor(this.rockBandsM.meshEndM),
+          windowFadeM: WINDOW_FADE_M,
+        },
+        binding,
+        bodyCentre,
+      );
+      this.windows.tree.instances = trees;
+      this.windows.rock.instances = rocks;
+      this.engine.scene.add(trees.mesh, rocks.mesh);
     });
 
     this.engine.beforeRender$.subscribe(() => {
@@ -243,7 +297,7 @@ export class PlanetSurfaceDetailSpikeComponent {
         { camera, viewport: this.drawingBuffer, morphProgress: 0, projectionKind: 'equalEarth' },
         this.drawingBuffer,
       );
-      this.updateForestInstances(camera.position);
+      this.updateInstances(camera.position);
       const s = this.streaming.runtime.stats;
       const current = this.tileStats();
       if (s.resident !== current.resident || s.queued !== current.queued || s.maxLevel !== current.maxLevel) {
@@ -257,6 +311,19 @@ export class PlanetSurfaceDetailSpikeComponent {
       jump: (altitudeM: number, top = false, lateralM = 0) => {
         this.top.set(top);
         this.jump(altitudeM, lateralM);
+      },
+      /** Q1 check: the shader's forest density against the CPU function the instances are scattered from. */
+      parity: (count = 4096) => {
+        const radius = WORLD_SIZE_TIER_RADIUS_M.medium;
+        const points = new Float32Array(count * 4);
+        for (let i = 0; i < count; i += 1) {
+          const lon = i * 0.37;
+          const lat = Math.sin(i * 0.11) * 1.2;
+          const h = 60 + (i % 50) * 30;
+          const r = radius + h;
+          points.set([Math.cos(lat) * Math.sin(lon) * r, Math.sin(lat) * r, Math.cos(lat) * Math.cos(lon) * r, h], i * 4);
+        }
+        return forestDensityParity(this.engine.renderer, points);
       },
       /** Jumps, waits for streaming to settle, then audits the terrain under the runway. */
       step: async (altitudeM: number, top = false) => {
@@ -273,7 +340,8 @@ export class PlanetSurfaceDetailSpikeComponent {
     };
 
     this.destroyRef.onDestroy(() => {
-      this.forestInstances?.dispose();
+      this.windows.tree.instances?.dispose();
+      this.windows.rock.instances?.dispose();
       this.worker.terminate();
       this.streaming.dispose();
       this.surface.dispose();
@@ -326,45 +394,63 @@ export class PlanetSurfaceDetailSpikeComponent {
   }
 
   /**
-   * Keeps the instance scatter around the camera: asks the worker for trees when the camera has drifted from the last
-   * scatter centre (or the density scale changed) and the camera is low enough for individual trees to matter.
+   * Keeps each class's instance window around the camera. A window is requested when the camera has drifted from the
+   * last one's centre, when the radius it must cover changed (the fade band was edited), or when the density scale
+   * changed, and only while the camera is low enough for the class to matter. Which instance stands where never
+   * depends on the window: the worker emits the cells of a body-fixed grid that fall inside it.
    */
-  private updateForestInstances(cameraScene: Vector3): void {
-    const instances = this.forestInstances;
-    if (!instances) return;
-    instances.update();
-    if (this.scatterInFlight || this.viewMode() === 2) return;
+  private updateInstances(cameraScene: Vector3): void {
+    for (const cls of ['tree', 'rock'] as const) this.windows[cls].instances?.update();
+    if (this.viewMode() === 2) return;
     const body = cameraScene.clone().sub(this.surface.morph.uBodyCentreScene.value as Vector3);
     const altitudeM = body.length() - this.radius;
-    if (altitudeM > this.fadeStartM() + this.fadeWidthM() + 1500) return;
     const ground = body.clone().normalize().multiplyScalar(this.radius);
-    const stale =
-      !this.scatterCentre ||
-      this.scatterCentre.distanceTo(ground) > SCATTER_RECENTRE_M ||
-      this.scatterWantedDensity !== this.densityScale();
-    if (!stale) return;
-    this.scatterInFlight = true;
-    this.scatterCentre = ground;
-    this.scatterWantedDensity = this.densityScale();
     const centre = ground.clone().normalize();
-    void this.request({
-      kind: 'forestScatter',
-      radiusM: this.radius,
-      heightScaleM: this.heightScaleM,
-      worldProfile: CELL_PLANET_U0_FIXTURE.worldProfile,
-      seed: CELL_PLANET_U0_FIXTURE.seed,
-      centre: [centre.x, centre.y, centre.z],
-      areaRadiusM: SCATTER_RADIUS_M,
-      spacingM: SCATTER_SPACING_M,
-      densityScale: this.scatterWantedDensity,
-      site: this.site(),
-      stamp: RUNWAY === 'on' || RUNWAY === 'stamp',
-    })
-      .then((data) => {
-        instances.setTrees(ground, data.trees as Float32Array);
-        this.treeCount.set(instances.treeCount);
+    const treeFadeEndM = this.fadeStartM() + this.fadeWidthM();
+    const wants: Record<ObjectClass, { fadeEndM: number; capacity: number; spacingM: number }> = {
+      tree: { fadeEndM: treeFadeEndM, capacity: TREE_CAPACITY, spacingM: SCATTER_SPACING_M },
+      rock: { fadeEndM: this.rockBandsM.meshEndM, capacity: ROCK_CAPACITY, spacingM: ROCK_SPACING_M },
+    };
+    for (const cls of ['tree', 'rock'] as const) {
+      const window = this.windows[cls];
+      const want = wants[cls];
+      const instances = window.instances;
+      if (!instances || window.inFlight || altitudeM > want.fadeEndM + 1500) continue;
+      if (cls === 'rock' && !this.showRocks()) continue;
+      const radiusM = windowRadiusFor(want.fadeEndM);
+      const density = cls === 'tree' ? this.densityScale() : 1;
+      const stale =
+        !window.centre || window.centre.distanceTo(ground) > SCATTER_RECENTRE_M || window.radiusM !== radiusM || window.densityScale !== density;
+      if (!stale) continue;
+      window.inFlight = true;
+      window.centre = ground;
+      window.radiusM = radiusM;
+      window.densityScale = density;
+      void this.request({
+        kind: 'forestScatter',
+        objectClass: cls,
+        radiusM: this.radius,
+        heightScaleM: this.heightScaleM,
+        worldProfile: CELL_PLANET_U0_FIXTURE.worldProfile,
+        seed: CELL_PLANET_U0_FIXTURE.seed,
+        centre: [centre.x, centre.y, centre.z],
+        areaRadiusM: radiusM,
+        spacingM: want.spacingM,
+        maxCount: want.capacity,
+        densityScale: density,
+        site: this.site(),
+        stamp: RUNWAY === 'on' || RUNWAY === 'stamp',
       })
-      .finally(() => (this.scatterInFlight = false));
+        .then((data) => {
+          instances.setInstances(ground, data.trees as Float32Array);
+          instances.setWindowRadius(radiusM);
+          if (cls === 'tree') {
+            this.treeCount.set(instances.instanceCount);
+            this.treesDropped.set(Math.max((data.accepted as number) - instances.instanceCount, 0));
+          } else this.rockCount.set(instances.instanceCount);
+        })
+        .finally(() => (window.inFlight = false));
+    }
   }
 
   /** Finds solid forest near the runway site and points the camera presets at it. */
@@ -499,6 +585,10 @@ export class PlanetSurfaceDetailSpikeComponent {
       }
     }
     return { patches: rows.length, samples: total, maxDevM: +worst.toFixed(2), rows };
+  }
+
+  setShowRocks(on: boolean): void {
+    this.showRocks.set(on);
   }
 
   setViewMode(mode: ForestViewMode): void {

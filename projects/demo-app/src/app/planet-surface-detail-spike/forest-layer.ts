@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { StorageBufferAttribute } from 'three/webgpu';
 import {
   Fn,
   If,
@@ -6,6 +7,7 @@ import {
   dot,
   float,
   floor,
+  instanceIndex,
   int,
   length,
   max,
@@ -13,8 +15,11 @@ import {
   mix,
   modelWorldMatrix,
   normalize,
+  screenUV,
   select,
   smoothstep,
+  sqrt,
+  storage,
   uint,
   uniform,
   vec2,
@@ -31,12 +36,13 @@ import {
   FOREST_TREE_HEIGHT_M,
   FOREST_TREELINE_M,
   forestFadeBand,
+  forestFieldDensity,
 } from './forest-field';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-/** `0` both forms, `1` instances only, `2` layer only (a debug view). */
-export type ForestViewMode = 0 | 1 | 2;
+/** `0` both forms, `1` instances only, `2` layer only, `3` instances on the left half of the screen and the layer on the right. */
+export type ForestViewMode = 0 | 1 | 2 | 3;
 
 export interface IForestLayer {
   readonly layer: SurfaceLayer;
@@ -55,12 +61,23 @@ export interface IForestLayer {
   };
   /** Weight of the layer at a camera distance (node): 0 near, 1 far, honouring `mode`. Instances use `1 - weight`. */
   fadeWeight(distance: any): any;
+  /** Forest density at a body-fixed point (node), with the density scale and the runway clearance. */
+  density(p: any, heightM: any): any;
+  /** 0 on the runway and its apron, 1 beyond the clearance (node). */
+  clearance(p: any): any;
   /** Colour of one tree, and so of the canopy. */
   readonly treeAlbedo: any;
   setSite(along: readonly number[], across: readonly number[]): void;
 }
 
 const smooth = (edge0: number, edge1: number, x: any): any => smoothstep(float(edge0), float(edge1), x);
+
+/** Body-fixed metres of the fragment, lifted out of the camera-following anchor (see `runway-layer.ts`). */
+export const bodyFixed = (context: IPlanetContext): any =>
+  modelWorldMatrix.mul(vec4(context.bodyFixedLocal, 1)).xyz.sub(context.uniforms.uBodyCentreScene as any);
+
+/** Layer weight in the split view (mode 3): 0 on the left half of the screen (instances), 1 on the right (layer). */
+export const splitLayerWeight = (): any => select(screenUV.x.lessThan(0.5), float(0), float(1));
 
 /** The integer hash of `forestHash`, in TSL: same constants, same wrap-around on 32 bits. */
 function hashNode(ix: any, iy: any, iz: any): any {
@@ -75,7 +92,7 @@ function hashNode(ix: any, iy: any, iz: any): any {
 }
 
 /** `forestNoise` in TSL. `p` is body-fixed metres. */
-function noiseNode(p: any, cellM: number, octave: number): any {
+export function noiseNode(p: any, cellM: number, octave: number): any {
   const o = octave * 1013.7;
   const q = vec3(p.x.add(o), p.y.add(o * 0.7), p.z.add(o * 1.3)).div(cellM);
   const f = floor(q);
@@ -94,7 +111,7 @@ function noiseNode(p: any, cellM: number, octave: number): any {
 }
 
 /** `forestFieldDensity` in TSL (no runway clearance, no density scale). */
-function fieldDensityNode(p: any, heightM: any): any {
+export function fieldDensityNode(p: any, heightM: any): any {
   let n: any = float(0);
   FOREST_OCTAVES.forEach((octave, i) => {
     n = n.add(noiseNode(p, octave.cellM, i).mul(octave.weight));
@@ -122,17 +139,13 @@ export function forestLayer(radiusM: number): IForestLayer {
   const fadeStartM: any = uniform(band.startM);
   const fadeEndM: any = uniform(band.endM);
   const densityScale: any = uniform(1);
-  const shadowSteps: any = uniform(4);
+  const shadowSteps: any = uniform(0);
   const shadowStrength: any = uniform(0.85);
   const sunBody: any = uniform(new Vector3(0, 1, 0));
   const alongAxis: any = uniform(new Vector3(1, 0, 0));
   const acrossAxis: any = uniform(new Vector3(0, 0, 1));
   const treeAlbedo: any = uniform(new Vector3(0.035, 0.085, 0.03));
   const shadowFloor = 0.32;
-
-  /** Body-fixed metres of the fragment, lifted out of the camera-following anchor (see `runway-layer.ts`). */
-  const bodyFixed = (context: IPlanetContext): any =>
-    modelWorldMatrix.mul(vec4(context.bodyFixedLocal, 1)).xyz.sub(context.uniforms.uBodyCentreScene as any);
 
   const clearance = (p: any): any => {
     const a = dot(p, alongAxis);
@@ -144,15 +157,38 @@ export function forestLayer(radiusM: number): IForestLayer {
   const density = (p: any, heightM: any): any => clamp(fieldDensityNode(p, heightM).mul(densityScale), 0, 1).mul(clearance(p));
 
   const fadeWeight = (distance: any): any =>
-    select(mode.equal(1), float(0), select(mode.equal(2), float(1), smoothstep(fadeStartM, fadeEndM, distance)));
+    select(
+      mode.equal(1),
+      float(0),
+      select(mode.equal(2), float(1), select(mode.equal(3), splitLayerWeight(), smoothstep(fadeStartM, fadeEndM, distance))),
+    );
+
+  /**
+   * How shaded the floor between crowns is at density `dens`, in [0, 1]: the first step of the shadow march below,
+   * from the ground, with the density taken as uniform. Under instances the march shades the floor pixel by pixel; the
+   * far form shows canopy and floor in one pixel, so it darkens the floor's share of the albedo by the same amount.
+   */
+  const floorShade = (p: any, dens: any): any => {
+    const sunUp = dot(sunBody, normalize(p));
+    const horizontalLength = max(sqrt(max(float(1).sub(sunUp.mul(sunUp)), 0)), 1e-4);
+    const tanElevation = max(sunUp.div(horizontalLength), 0.02);
+    const treeHeight = float(FOREST_TREE_HEIGHT_M);
+    const reach = clamp(treeHeight.mul(1.2).div(tanElevation), 20, 500);
+    const firstStep = reach.div(max(shadowSteps, 1));
+    const shade = clamp(dens.mul(treeHeight).sub(firstStep.mul(tanElevation)).div(treeHeight.mul(0.2)), 0, 1);
+    return select(shadowSteps.greaterThan(0), shade, float(0));
+  };
 
   const layer: SurfaceLayer = (context: IPlanetContext, below: ISurfaceSample) => {
     const p = bodyFixed(context);
     const heightM = length(p).sub(radiusM);
-    const cover = density(p, heightM).mul(fadeWeight(context.cameraDistance)).mul(FOREST_CANOPY_COVER).mul(enabled);
+    const weight = fadeWeight(context.cameraDistance);
+    const dens = density(p, heightM);
+    const cover = dens.mul(weight).mul(FOREST_CANOPY_COVER).mul(enabled);
+    const floor = mix(float(1), float(shadowFloor), floorShade(p, dens).mul(shadowStrength).mul(weight).mul(enabled));
     return {
       ...below,
-      albedo: mix(below.albedo, vec3(treeAlbedo), cover),
+      albedo: mix(below.albedo.mul(floor), vec3(treeAlbedo), cover),
       roughness: mix(below.roughness, float(0.92), cover),
     };
   };
@@ -190,10 +226,58 @@ export function forestLayer(radiusM: number): IForestLayer {
     occlusion,
     uniforms: { enabled, mode, fadeStartM, fadeEndM, densityScale, shadowSteps, shadowStrength, sunBody },
     fadeWeight,
+    density,
+    clearance,
     treeAlbedo,
     setSite(along, across) {
       alongAxis.value.set(along[0], along[1], along[2]);
       acrossAxis.value.set(across[0], across[1], across[2]);
     },
   };
+}
+
+/** Result of {@link forestDensityParity}: the shader's density against `forestFieldDensity` at the same points. */
+export interface IDensityParity {
+  readonly samples: number;
+  readonly maxDifference: number;
+  readonly meanDifference: number;
+  /** Samples differing by more than 0.02. */
+  readonly beyondTolerance: number;
+  /** The first few disagreements: point, CPU value, GPU value. */
+  readonly worst: readonly { point: readonly number[]; cpu: number; gpu: number }[];
+}
+
+/**
+ * Evaluates the TSL density (`fieldDensityNode`, the node the layer is built from) on the GPU at `points`
+ * (body-fixed metres, height above the datum in the fourth component) and compares it with the CPU function the
+ * scatter uses. Needs a WebGPU backend (compute); read the numbers off the page with `__psd.parity()`.
+ */
+export async function forestDensityParity(renderer: any, points: Float32Array): Promise<IDensityParity> {
+  const n = points.length / 4;
+  const input = new StorageBufferAttribute(points, 4);
+  const output = new StorageBufferAttribute(new Float32Array(n), 1);
+  const source: any = storage(input, 'vec4', n);
+  const result: any = storage(output, 'float', n);
+  const kernel: any = Fn(() => {
+    const point = source.element(instanceIndex);
+    result.element(instanceIndex).assign(fieldDensityNode(point.xyz, point.w));
+  })().compute(n);
+  await renderer.computeAsync(kernel);
+  const gpu = new Float32Array(await renderer.getArrayBufferAsync(output));
+  let max = 0;
+  let sum = 0;
+  let beyond = 0;
+  const worst: { point: number[]; cpu: number; gpu: number }[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const cpu = forestFieldDensity(points[i * 4], points[i * 4 + 1], points[i * 4 + 2], points[i * 4 + 3]);
+    const d = Math.abs(cpu - gpu[i]);
+    max = Math.max(max, d);
+    sum += d;
+    if (d > 0.02) {
+      beyond += 1;
+      if (worst.length < 5) worst.push({ point: Array.from(points.subarray(i * 4, i * 4 + 4)), cpu, gpu: gpu[i] });
+    }
+  }
+  kernel.dispose?.();
+  return { samples: n, maxDifference: max, meanDifference: sum / n, beyondTolerance: beyond, worst };
 }

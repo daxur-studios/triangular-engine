@@ -314,3 +314,48 @@ Precision (sphere-600km, eye 2 m):
 2. Watch for sub-millimetre jitter at eye-2m; the GPU `cos` is the one non-polynomial term (a polynomial cosine would remove it).
 3. If sparkles remain, the shared remaining operation is the clip transform, and the main and probe materials must render the same position bits (they share one node graph).
 4. Selection p95 under 0.2 ms in the browser (still open).
+
+## 2026-10-25 — v2 on the RTX 3080: no cracks
+
+The owner ran `lod-surface-baseline` v2 in quick mode, visible browser, on the NVIDIA adapter (2538×1308 drawing buffer), at commit 79d8c66 with a clean tree, so with both the sine fix and the bit-identical seams.
+
+### Verified
+
+- All 25 cases valid and passing; every still window settled (1.0–3.1 s), none capped. Both zoom cases pass their state check.
+- `crackPixels` is **0** in all 21 ordinary still cases (v1 on this adapter: every crack check failed).
+- Both controls still find cracks: injected gap 42,042 px, folding off 105 px.
+- GPU scene pass p95 0.04–0.27 ms at 32 cells (0.61 ms at 64 cells, 6.3 M triangles), inside the L5 0.5 ms at this buffer size for the default grid. The buffer is 2538×1308, not the 2560×1440 L5 names.
+- Frame interval median 6.0–6.1 ms (the display rate) everywhere.
+
+### Findings
+
+- Selection CPU p95 is 0.4–0.6 ms in every capped-leaf case (0.1–0.2 ms where fewer than 400 leaves are selected), so 2–3× the L5 0.2 ms. The 1,024-leaf cap is hit at every ground and horizon pose.
+- Jitter not checked: the suite measures still frames only.
+
+### Next
+
+1. Selection p95 under 0.2 ms in the browser (the remaining M1 gate).
+2. Watch for sub-millimetre jitter at eye-2m in motion; a polynomial cosine is the fix if it shows.
+3. Spike S1.
+
+## 2026-10-25 — Cliff detail: design note (nothing built)
+
+The owner asked whether a tall cliff (200 m, now one stretched face from bottom to top) could get subdivided,
+LOD'd detail going inward and outward, and how that works with overhangs and Jolt. Written up as the plan's
+§Cliff detail, milestone M6 and decision D14. The owner accepted D14 the same day: cliffs by vector displacement are M6.
+
+### Findings
+
+- A height along the base normal cannot subdivide a vertical face: grid density is spaced over the ground, so more
+  levels add vertices only at the face's top and bottom. A slope term in the error measure helps steep slopes only.
+- Vector displacement (a 3D offset per lattice point) moves vertices up the face. It keeps the bit-identical seams
+  of the 2026-10-25 lattice work, because the offset is a function of the same integer lattice coordinate.
+- The main risk is the sheet folding through itself; sideways offset needs a bound (positive Jacobian or a grounded
+  clamp).
+- Jolt's height-field shape cannot hold vertical faces or overhangs; near bodies the collider becomes a small
+  `MeshShape` patch from the CPU twin, and the twin needs a ray-hit query.
+
+### Next
+
+1. The slope criterion goes into M2.
+2. M6 (cliffs) after M5.

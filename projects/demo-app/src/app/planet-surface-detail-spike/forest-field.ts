@@ -14,11 +14,12 @@ export const FOREST_CROWN_WIDTH_M = 12;
 /** Grid cell of the instance scatter: at most one tree per cell, so a solid stand is a tree every 12 m. */
 export const FOREST_SPACING_M = 12;
 /**
- * Share of the ground a solid stand's crowns cover (area of one crown over the area of its cell). The far form's
- * canopy cover is this, so both forms show the same aggregate albedo: the layer is derived from the instance
- * parameters, not tuned by eye.
+ * Share of the ground a solid stand's crowns cover seen from above: the area of the union of the crowns' discs, measured
+ * on the scatter itself (`forest-field.spec.ts` re-measures it and fails if it drifts). It is not the sum of the
+ * discs over the cell area: jittered crowns overlap, so 12 m crowns on a 12 m grid cover about 0.65, not 0.79. The far
+ * form's canopy cover is this, so both forms show the same aggregate albedo.
  */
-export const FOREST_CANOPY_COVER = Math.min(0.9, (Math.PI * (FOREST_CROWN_WIDTH_M / 2) ** 2) / FOREST_SPACING_M ** 2);
+export const FOREST_CANOPY_COVER = 0.65;
 /** Lattice cell size (metres) and weight of each noise octave: regions, stands, patchy edges. */
 export const FOREST_OCTAVES: readonly { readonly cellM: number; readonly weight: number }[] = [
   { cellM: 6000, weight: 0.55 },
@@ -99,53 +100,142 @@ export function forestClearance(site: IRunwaySite | null, direction: Vec3, radiu
   return smooth(FOREST_CLEARANCE_M[0], FOREST_CLEARANCE_M[1], runwayDistanceM(site, direction, radiusM));
 }
 
-export interface IForestScatterOptions {
-  /** Unit direction of the scatter centre. */
+/** Hash of a body-fixed lattice cell plus a salt, to [0, 1): one independent draw per `seed` for every cell. */
+export function cellHash(ix: number, iy: number, iz: number, seed: number): number {
+  let h = Math.imul(ix, 0x8da6b343) ^ Math.imul(iy, 0xd8163841) ^ Math.imul(iz, 0xcb1ab31f) ^ Math.imul(seed + 1, 0x27d4eb2f);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 8) / 16777216;
+}
+
+/** Floats per instance in {@link scatterCells}'s result: x, y, z (body-fixed metres from the centre), a random 0..1. */
+export const SCATTER_STRIDE = 4;
+
+export interface IScatterOptions {
+  /** Unit direction of the window centre. The window only selects which cells to emit; it never moves a cell. */
   readonly centre: Vec3;
   readonly radiusM: number;
-  /** Radius of the scattered disc, metres. */
+  /** Radius of the emitted window, metres along the surface. */
   readonly areaRadiusM: number;
-  /** Grid cell size, metres: at most one tree per cell. */
+  /** Lattice cell size, metres: at most one object per cell. */
+  readonly spacingM: number;
+  /** Object class: every class draws its own jitter, keep and attribute hashes from this. */
+  readonly seed: number;
+  /** Keeps the nearest `maxCount` when the window holds more, so a shortfall is lost at the far edge, not along a row. */
+  readonly maxCount?: number;
+  /** Ground height above the datum at a direction (stamp included), `null` for water or ice. */
+  heightAt(direction: Vec3): number | null;
+  /** Keep probability in [0, 1] at a ground point: `radius` is the distance from the body centre, `heightM` above the datum. */
+  densityAt(direction: Vec3, radius: number, heightM: number): number;
+}
+
+/** What {@link scatterCells} found: the instances, and how many cells passed before `maxCount` cut the far ones. */
+export interface IScatterResult {
+  readonly instances: Float32Array;
+  readonly accepted: number;
+}
+
+/**
+ * Deterministic scatter on a fixed body-fixed lattice. Every cell `(ix, iy, iz)` of `spacingM` metres owns one jittered
+ * candidate point; the cells considered are those whose point lies in the one-cell shell just above the datum sphere,
+ * so there is one candidate per `spacingM`² of surface. The candidate is projected down to the ground, kept when
+ * `densityAt` exceeds the cell's own draw, and given its yaw and size from the cell's own hash. Nothing depends on the
+ * camera, the window centre, the request order or the level of detail: a place always holds the same object, which is
+ * what colliders and persistence need.
+ */
+export function scatterCells(options: IScatterOptions): IScatterResult {
+  const { centre, radiusM, areaRadiusM, spacingM: S, seed } = options;
+  const R = radiusM;
+  const a2 = areaRadiusM * areaRadiusM;
+  // Iterate the two body axes other than the centre's dominant one; solve the third from the shell.
+  const k = Math.abs(centre[0]) >= Math.abs(centre[1]) && Math.abs(centre[0]) >= Math.abs(centre[2]) ? 0 : Math.abs(centre[1]) >= Math.abs(centre[2]) ? 1 : 2;
+  const u = (k + 1) % 3;
+  const v = (k + 2) % 3;
+  const sign = centre[k] >= 0 ? 1 : -1;
+  const cell = [0, 0, 0];
+  const found: number[] = [];
+  const order: number[] = [];
+  const iuMin = Math.floor((centre[u] * R - areaRadiusM) / S);
+  const iuMax = Math.floor((centre[u] * R + areaRadiusM) / S);
+  const ivMin = Math.floor((centre[v] * R - areaRadiusM) / S);
+  const ivMax = Math.floor((centre[v] * R + areaRadiusM) / S);
+  for (let iu = iuMin; iu <= iuMax; iu += 1) {
+    for (let iv = ivMin; iv <= ivMax; iv += 1) {
+      // Where along the dominant axis the shell can be for this column of cells (padded for the sphere's slope).
+      const pu = (iu + 0.5) * S;
+      const pv = (iv + 0.5) * S;
+      const rest = pu * pu + pv * pv;
+      const innerSq = R * R - rest;
+      const outerSq = (R + S) * (R + S) - rest;
+      if (outerSq <= 0) continue;
+      const a = Math.sqrt(Math.max(innerSq, 0));
+      const b = Math.sqrt(outerSq);
+      const from = sign > 0 ? a - 2 * S : -b - 2 * S;
+      const to = sign > 0 ? b + 2 * S : -a + 2 * S;
+      for (let ik = Math.floor(from / S); ik <= Math.floor(to / S); ik += 1) {
+        cell[k] = ik;
+        cell[u] = iu;
+        cell[v] = iv;
+        const [cx, cy, cz] = cell;
+        const px = (cx + cellHash(cx, cy, cz, seed * 8)) * S;
+        const py = (cy + cellHash(cx, cy, cz, seed * 8 + 1)) * S;
+        const pz = (cz + cellHash(cx, cy, cz, seed * 8 + 2)) * S;
+        const r = Math.hypot(px, py, pz);
+        if (r < R || r >= R + S) continue;
+        const direction: Vec3 = [px / r, py / r, pz / r];
+        const cosine = direction[0] * centre[0] + direction[1] * centre[1] + direction[2] * centre[2];
+        const arc = R * Math.acos(Math.min(cosine, 1));
+        if (arc * arc > a2) continue;
+        const heightM = options.heightAt(direction);
+        if (heightM === null) continue;
+        const ground = R + heightM;
+        const density = options.densityAt(direction, ground, heightM);
+        if (cellHash(cx, cy, cz, seed * 8 + 3) >= density) continue;
+        found.push(
+          direction[0] * ground - centre[0] * R,
+          direction[1] * ground - centre[1] * R,
+          direction[2] * ground - centre[2] * R,
+          cellHash(cx, cy, cz, seed * 8 + 4),
+        );
+        order.push(arc);
+      }
+    }
+  }
+  const accepted = order.length;
+  const keep = Math.min(accepted, options.maxCount ?? accepted);
+  const sorted = order.map((_, i) => i).sort((p, q) => order[p] - order[q]).slice(0, keep);
+  const instances = new Float32Array(keep * SCATTER_STRIDE);
+  sorted.forEach((from, to) => {
+    for (let c = 0; c < SCATTER_STRIDE; c += 1) instances[to * SCATTER_STRIDE + c] = found[from * SCATTER_STRIDE + c];
+  });
+  return { instances, accepted };
+}
+
+/** Seed of the tree class in {@link scatterCells}. */
+export const TREE_SEED = 1;
+
+export interface IForestScatterOptions {
+  readonly centre: Vec3;
+  readonly radiusM: number;
+  readonly areaRadiusM: number;
   readonly spacingM: number;
   readonly densityScale: number;
   readonly site: IRunwaySite | null;
-  /** Ground height above the datum at a direction (stamp included), `null` for water or ice. */
+  readonly maxCount?: number;
   heightAt(direction: Vec3): number | null;
 }
 
-/** Floats per instance in {@link scatterForest}'s result: x, y, z (body-fixed metres from the centre), a random 0..1. */
-export const SCATTER_STRIDE = 4;
-
-/**
- * Instances for the forest near `centre`: a jittered grid, a tree per cell with probability equal to the field's
- * density there (times `densityScale`), at the ground height. Positions are body-fixed metres relative to the point
- * on the surface under `centre` at height 0, so they stay small in float32.
- */
-export function scatterForest(options: IForestScatterOptions): Float32Array {
-  const { centre, radiusM, areaRadiusM, spacingM, densityScale, site } = options;
-  const { along, across } = runwayFrame(centre, 0);
-  const out: number[] = [];
-  const cells = Math.ceil(areaRadiusM / spacingM);
-  for (let j = -cells; j <= cells; j += 1) {
-    for (let i = -cells; i <= cells; i += 1) {
-      // Jitter and the keep/discard draw come from the cell's own hash, so the scatter is the same wherever it is cut.
-      const a = (i + forestHash(i, j, 11)) * spacingM;
-      const b = (j + forestHash(i, j, 23)) * spacingM;
-      if (a * a + b * b > areaRadiusM * areaRadiusM) continue;
-      const x = centre[0] + (along[0] * a + across[0] * b) / radiusM;
-      const y = centre[1] + (along[1] * a + across[1] * b) / radiusM;
-      const z = centre[2] + (along[2] * a + across[2] * b) / radiusM;
-      const l = Math.hypot(x, y, z);
-      const direction: Vec3 = [x / l, y / l, z / l];
-      const heightM = options.heightAt(direction);
-      if (heightM === null) continue;
-      const r = radiusM + heightM;
-      const density =
-        Math.min(forestFieldDensity(direction[0] * r, direction[1] * r, direction[2] * r, heightM) * densityScale, 1) *
-        forestClearance(site, direction, radiusM);
-      if (forestHash(i, j, 37) >= density) continue;
-      out.push(direction[0] * r - centre[0] * radiusM, direction[1] * r - centre[1] * radiusM, direction[2] * r - centre[2] * radiusM, forestHash(i, j, 51));
-    }
-  }
-  return Float32Array.from(out);
+/** Trees: {@link scatterCells} with the forest density field (times `densityScale`) and the runway clearance. */
+export function scatterForest(options: IForestScatterOptions): IScatterResult {
+  const { radiusM, densityScale, site } = options;
+  return scatterCells({
+    ...options,
+    seed: TREE_SEED,
+    densityAt: (direction, radius, heightM) =>
+      Math.min(forestFieldDensity(direction[0] * radius, direction[1] * radius, direction[2] * radius, heightM) * densityScale, 1) *
+      forestClearance(site, direction, radiusM),
+  });
 }

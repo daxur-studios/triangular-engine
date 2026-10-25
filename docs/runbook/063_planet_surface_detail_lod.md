@@ -199,7 +199,7 @@ Caveats:
 
 ### Other questions
 
-- Q1 and Q3: see the next entry (built, owner to judge).
+- Q1 and Q3: see the next two entries (built; the second revises the first after the owner's review).
 - Q4 (GPU cost): **open**; needs the owner's RTX 3080 with `?gpuTiming=1`. Headless timings are not hardware numbers.
 - Q5 (impostor under atmosphere): **open**.
 
@@ -233,7 +233,7 @@ sampled from the same density near the camera; the far form is a material layer 
    cover while instances (8 m crowns on a 14 m grid) covered only ~26 %. Result: light ground with dissolving trees
    next to dark canopy, a clear brightness step across the band (screenshot `s1-forest-1500m-band-prefix.jpg`, the
    "before"). The layer's cover is now `FOREST_CANOPY_COVER` = crown area / cell area (capped 0.9), derived from crown
-   width and spacing, and the instance spacing and crown were changed to 12 m and 12 m (cover 0.79). That is the
+   width and spacing, and the instance spacing and crown were changed to 12 m and 12 m (cover first assumed 0.79; measured 0.65, see the revision entry). That is the
    answer to "bake the aggregate from the instances?": no bake is needed while the parameters are shared.
 2. **The atmosphere lighting stage ignores `normalTS` and the scene's lights.** It reads `sphereNormal` only
    (`albedo x (sunT x N.L + sky) x sunVisibility`). So a canopy normal from the density gradient cannot reach the lit
@@ -289,3 +289,80 @@ after each jump.
   x 8 hashes. Cheaper options if needed: 2 octaves in the march, a 2-D noise on a cube face, or a baked coarse density page.
 - Q5, impostor band (skipped), and instance shadows on trees remain open.
 - Not tested: morph progress > 0 (the density uses body-fixed coordinates, so it should stay welded).
+
+## 2026-10-25 (revision) — Spike S1: deterministic placement, matching forms, no hard edge, rocks
+
+The owner reviewed Q1/Q3 and found four problems. Status: **fixed and measured where possible; owner re-judges by eye.**
+
+### Causes found
+
+1. **Trees moved on every zoom.** The scatter grid was anchored to the request window (camera-centred), so each
+   recentre re-rolled the lattice. Fix: `scatterCells` runs a hash over a fixed body-fixed 3-D cell lattice
+   (cell id to seed; one jittered candidate per cell in the shell above the datum, projected to the ground; kept when
+   `density > the cell's own hash`; yaw and size from the same hash). The window only selects which cells to emit, so
+   position, rotation and scale depend on the location alone (needed for Jolt colliders). Runtime check: 116 880 of
+   121 922 trees reappeared identically after a recentre (the rest left the window). Specs: two centres give identical
+   trees in the overlap; window-size and axis independence; one candidate per cell.
+2. **Straight/curved hard line.** (a) The buffer truncated along a row (the far edge was cut off in a line); now
+   `maxCount` keeps the nearest, so truncation loses the far edge only (and `treesDropped` shows it). (b) The window had
+   no fade and its radius did not follow the fade band. Now the radius is `ceil((fadeEnd + 2 x 400) / 100) x 100`
+   (3800 m for trees), is re-requested when the band changes, and the edge dissolves over 400 m inside it
+   (per-instance alpha hash by distance from the window centre), so the far edge fades and never cuts.
+3. **Dark blobs and colour mismatch.** CPU/GPU density parity was fine (`__psd.parity(n)`, max 0.0008, plus a float32
+   spec). The real causes: the layer's cover constant was wrong (0.79 assumed, **0.65 measured**: a solid stand of 12 m
+   crowns on a 12 m grid; `FOREST_CANOPY_COVER` is now that measured value and a Monte-Carlo spec holds it within
+   0.03), and the far form lacked the floor shade the near form has between trunks. The layer now applies an analytic
+   first march step (`floorShade`) to the ground it mixes with. Split view (mode 3) puts instances left and layer right
+   for a direct comparison.
+4. Lesson 1 above is superseded: crown 12 m, cover 0.65.
+
+### Rocks (new object class)
+
+- `rock-field.ts`, `rock-layer.ts`; the same cell hash with its own seed (`ROCK_SEED` 2) and its own density:
+  value noise (320 m and 45 m cells) x land mask x (1 - 0.85 x forest density) x runway clearance, one candidate per
+  6 m cell, size 1 to 3 m.
+- Bands from size (1 px ~ 0.001 x distance, 12 px / 4 px, as for trees): a 2 m rock gives mesh to 167 m, mesh to
+  speckle over 167-500 m, speckle to nothing over 1000-2000 m. The speckle is a per-metre grain hash mixed toward the
+  rock albedo and roughness by `ROCK_COVER x density`; beyond 2 km there is nothing.
+- Panel: show toggle, mesh count, bands shown from the rock size.
+
+### Measured (split view at 250 m over solid forest, left instances vs right layer, mean RGB)
+
+| sun | steps 0 right/left | steps 4 right/left |
+|---|---|---|
+| 70 | 1.08, 1.06, 1.00 | 0.85, 0.90, 0.81 |
+| 25 | 1.09, 1.15, 1.10 | 1.02, 1.13, 1.26 |
+| 8 | 0.96, 1.03, 0.88 | 1.00, 1.27, 1.00 |
+
+Mostly within ~10 %. Known residual: at noon with 4 shadow steps the layer is ~15 % darker (the march also shades the
+canopy top), and the 8-bit values at low sun are small, so ratios there are noisy.
+
+### Verified / not verified
+
+- Specs 29/29 headless; `ng build demo-app --configuration development` clean. Scatter ~2.4 s in the worker for ~120k trees
+  plus ~21k rocks, none dropped.
+- **Not verified**: rocks by eye at 30 m / 150 m / 1 km (the browser pane was hidden, so rAF stalled), the window-edge
+  dissolve by eye, GPU cost (Q4 open), Q5 open.
+
+### Owner checklist (replaces the earlier one)
+
+Panel: **go to forest**, then the altitude slider. Wait for terrain to settle after each jump.
+
+1. Same trees after zoom: at 300 m note a distinctive tree, zoom to 3 km and back, again after a large pan: same tree
+   in the same place with the same size and lean.
+2. No hard edge: zoom out slowly from 100 m to 6 km, oblique view: no straight or curved line where trees end; the far
+   edge dissolves into the layer.
+3. Split view (**split: instances | layer**) at 250 m and 1.5 km, noon and low sun, steps 0 and 4: colour and
+   brightness of the two halves agree; no dark blobs in the layer where instances are sparse.
+4. Rocks at 30 m, 150 m and 1 km (show rocks on): mesh up close, mesh to speckle fade around 167-500 m, a faint grain
+   at 1 km, nothing past 2 km. Try the three view modes.
+5. Low sun and the sliders (fade band, density scale) as before; shadows at 6 km / 25 km with steps 0/2/4.
+6. Runway clearance: no trees or rocks on the runway or apron.
+
+### Owner verdict on Q3 (2026-10-25): failed
+
+Q3 **failed by owner judgement**: the forest looks better with shadow steps at 0. The height-field shadow march
+produces dark areas the owner does not want (dark blobs). Scope item 4 (height-field sun shadow in the far-form layer)
+is **rejected**. Shadow steps now default to 0 (layer uniform and panel). The march stays behind the existing 0/2/4
+toggle because it costs nothing to keep; it is not tuned further and is not part of the forest work. The checklist's
+shadow items (5 and the 6 km / 25 km shadow check) no longer apply.

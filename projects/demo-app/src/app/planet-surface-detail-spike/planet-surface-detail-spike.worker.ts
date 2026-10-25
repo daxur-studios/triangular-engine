@@ -8,6 +8,7 @@ import {
 } from 'triangular-engine/worldgen/render/core';
 import type { WorldProfileKind } from 'triangular-engine/worldgen';
 import { forestClearance, forestFieldDensity, scatterForest } from './forest-field';
+import { scatterRocks } from './rock-field';
 import { findRunwaySite, runwayHeightStamp, type IRunwaySite, type ModifyElevation, type Vec3 } from './runway-site';
 
 /**
@@ -33,8 +34,12 @@ export interface IForestScatterRequest {
   readonly worldProfile: WorldProfileKind;
   readonly seed: number;
   readonly centre: Vec3;
+  /** Object class: trees (forest field) or rocks (rock field, own seed and spacing). */
+  readonly objectClass: 'tree' | 'rock';
   readonly areaRadiusM: number;
   readonly spacingM: number;
+  /** Instance buffer size: the nearest this many are kept, so a shortfall is lost at the window's far edge. */
+  readonly maxCount: number;
   readonly densityScale: number;
   readonly site: IRunwaySite | null;
   /** Ground carries the runway stamp (the mesh does), so trees at the plateau stand on it. */
@@ -136,16 +141,12 @@ addEventListener('message', async ({ data }: MessageEvent<SpikeWorkerRequest>) =
     return;
   }
   if (data.kind === 'forestScatter') {
-    const trees = scatterForest({
-      centre: data.centre,
-      radiusM: data.radiusM,
-      areaRadiusM: data.areaRadiusM,
-      spacingM: data.spacingM,
-      densityScale: data.densityScale,
-      site: data.site,
-      heightAt: groundHeight(data),
-    });
-    postMessage({ id: data.id, trees }, [trees.buffer]);
+    const common = { centre: data.centre, radiusM: data.radiusM, areaRadiusM: data.areaRadiusM, maxCount: data.maxCount, site: data.site, heightAt: groundHeight(data) };
+    const { instances, accepted } =
+      data.objectClass === 'rock'
+        ? scatterRocks(common)
+        : scatterForest({ ...common, spacingM: data.spacingM, densityScale: data.densityScale });
+    postMessage({ id: data.id, trees: instances, accepted }, [instances.buffer]);
     return;
   }
   if (data.kind === 'forestSpot') {
