@@ -409,7 +409,7 @@ describe('Plan 059 suite lod-surface-terrain', () => {
 
   it('is the last entry after the untouched baseline versions, and a valid history', () => {
     expect(history.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
-      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-terrain@1', 'lod-surface-terrain@2',
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3',
     ]);
     expect(() => validateTestHistory(history)).not.toThrow();
     expect(terrain.purpose).toBe('performance');

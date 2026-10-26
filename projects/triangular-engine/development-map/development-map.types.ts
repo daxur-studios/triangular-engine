@@ -1,9 +1,18 @@
 /** Readiness from the project's structured plan review. */
-export type DevelopmentMapReadiness = 'ready' | 'open-items' | 'needs-resolution' | 'unassessed';
+export type DevelopmentMapReadiness =
+  | 'ready'
+  | 'open-items'
+  | 'needs-resolution'
+  | 'unassessed';
 
 /** A stable document relation as authored by the project adapter. */
 export interface DevelopmentMapRelation {
-  readonly type: 'depends-on' | 'builds-on' | 'alternative-to' | 'supersedes' | 'related-to';
+  readonly type:
+    | 'depends-on'
+    | 'builds-on'
+    | 'alternative-to'
+    | 'supersedes'
+    | 'related-to';
   readonly title: string;
   readonly href: string;
 }
@@ -15,6 +24,10 @@ export interface DevelopmentMapConcern {
   readonly kind: 'intent' | 'assumption' | 'investigation';
   readonly state: 'open' | 'deferred' | 'resolved';
   readonly blocks: boolean;
+  /** Phase IDs this review item applies to, copied from the owning plan. */
+  readonly appliesTo?: readonly string[];
+  /** Phase IDs that must wait for this item to resolve. */
+  readonly blockingPhases?: readonly string[];
   readonly body: string;
   readonly sourceHref?: string;
   readonly sourceLabel?: string;
@@ -24,6 +37,8 @@ export interface DevelopmentMapConcern {
 export interface DevelopmentMapPhase {
   readonly id: string;
   readonly title: string;
+  /** Optional concise acceptance summary for relationship-graph inspectors. */
+  readonly acceptance?: string;
   readonly state: 'planned' | 'in_progress' | 'blocked' | 'done';
   readonly readiness: DevelopmentMapReadiness;
 }

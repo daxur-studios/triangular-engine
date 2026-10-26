@@ -1,4 +1,4 @@
-import { SWEEP_ALTITUDE_SHARE, SWEEP_PERIOD_S, SWEEP_YAW_RAD, frustumNormals, panView, poseView, resolveCamera, sweepPathView, type CameraView } from './lod-camera';
+import { SWEEP_ALTITUDE_SHARE, SWEEP_PERIOD_S, SWEEP_YAW_RAD, frustumNormals, panView, poseView, resolveCamera, sweepPathView, type CameraView, type PoseId } from './lod-camera';
 import { domainPreset, neighbourCell, type LodDomain, type NeighbourCell } from './lod-domain';
 import { createHeightSource } from './lod-height';
 import { CAP_SLACK, LodSelector, PIXEL_FLOOR, maxLevelFor, type SelectorSettings, type SelectorView } from './lod-selector';
@@ -258,6 +258,70 @@ describe('Plan 059 selector hysteresis', () => {
     }
   });
 
+  describe('at the leaf cap', () => {
+    // Plane, 200 m, no culling, a cap the tree reaches: the budget, not the threshold, decides which nodes split.
+    const CAP = 1024;
+    const MARGIN = 1.15;
+    const startView = (): SelectorView => viewOfCamera(plane, poseView('low-200m', plane));
+    /** The camera moved by `metres` along the ground (heading-relative), keeping the pose otherwise. */
+    const movedView = (metres: number): SelectorView => {
+      const pose = poseView('low-200m', plane);
+      return viewOfCamera(plane, { ...pose, ground: [pose.ground[0] + metres, pose.ground[1], pose.ground[2] + metres * 0.37] });
+    };
+    /** Builds the tree of the start view and then of the moved one; returns the second-frame selector. */
+    const afterMove = (hysteresis: number, metres: number): LodSelector => {
+      const selector = new LodSelector(settingsFor(plane, { cull: false, leafCap: CAP, hysteresis }));
+      selector.select(startView());
+      selector.select(movedView(metres));
+      return selector;
+    };
+    const churnOf = (selector: LodSelector) => selector.stats.newSplits + selector.stats.merges;
+
+    it('does not let a new request displace a kept split that it beats by less than the margin', () => {
+      for (const metres of [5, 8, 12, 20, 30]) {
+        const plain = afterMove(0, metres);
+        const hysteretic = afterMove(0.15, metres);
+        expect(plain.stats.capHit).withContext(`${metres} m`).toBeTrue();
+        expect(hysteretic.stats.capHit).withContext(`${metres} m`).toBeTrue();
+        // Single-ranked, the cut moves with the camera; with the margin the nodes near it re-rank by less than 15%, so the kept splits stay.
+        expect(churnOf(plain)).withContext(`${metres} m`).toBeGreaterThan(0);
+        expect(churnOf(hysteretic)).withContext(`${metres} m`).toBe(0);
+      }
+    });
+
+    it('lets a new request displace a kept split once it beats it by more than the margin', () => {
+      const selector = afterMove(0.15, 60);
+      expect(churnOf(selector)).toBeGreaterThan(0);
+      expect(selector.stats.newSplits).toBeGreaterThan(0);
+      expect(selector.stats.merges).toBeGreaterThan(0);
+      // Every request that took budget outranks every kept split that lost it by the margin.
+      let weakestNew = Infinity;
+      let strongestLost = 0;
+      for (let k = 0; k < selector.activeCount; k++) {
+        const node = selector.active[k];
+        const value = selector.priority[node];
+        if (selector.open[node] === 1 && selector.wasOpen[node] === 0 && value > 1) weakestNew = Math.min(weakestNew, value);
+        if (selector.open[node] === 0 && selector.wasOpen[node] === 1 && value > 0) strongestLost = Math.max(strongestLost, value * MARGIN);
+      }
+      expect(weakestNew).toBeGreaterThanOrEqual(strongestLost);
+      expect(balanceIssues(selector, plane)).toEqual([]);
+      expect(coveredArea(selector)).toBeCloseTo(1, 9);
+    });
+
+    it('gives the same tree as the single threshold when the hysteresis is 0, however it was set', () => {
+      for (const metres of [0.1, 5, 60]) {
+        const absent = new LodSelector(settingsFor(plane, { cull: false, leafCap: CAP }));
+        const zero = new LodSelector(settingsFor(plane, { cull: false, leafCap: CAP, hysteresis: 0 }));
+        for (const selector of [absent, zero]) {
+          selector.select(startView());
+          selector.select(movedView(metres));
+        }
+        expect(treeOf(zero)).toBe(treeOf(absent));
+        expect(zero.stats.unmet).toBe(absent.stats.unmet);
+      }
+    });
+  });
+
   it('serves requests before retentions when the cap is tight, and does not count a dropped retention as unmet', () => {
     const base = viewOfCamera(sphere600, poseView('low-200m', sphere600));
     const near = withPixelAngle(base, base.pixelAngle);
@@ -334,28 +398,30 @@ describe('Plan 059 sweep path', () => {
     }
   });
 
+  /** [visible, all] level changes of a 60 fps sweep over four periods: the first period, and the three later ones. */
+  function sweepChurn(domain: LodDomain, pose: PoseId, cull: boolean, leafCap: number, hysteresis: number) {
+    const selector = new LodSelector(settingsFor(domain, { cull, leafCap, hysteresis }));
+    selector.select(viewOfCamera(domain, sweepPathView(domain, pose, 0)));
+    const out = { first: 0, later: 0, firstAll: 0, laterAll: 0, capped: 0 };
+    for (let frame = 1; frame <= 4 * SWEEP_PERIOD_S * 60; frame++) {
+      selector.select(viewOfCamera(domain, sweepPathView(domain, pose, frame / 60)));
+      const visible = selector.stats.visibleNewSplits + selector.stats.visibleMerges;
+      const all = selector.stats.newSplits + selector.stats.merges;
+      expect(visible).toBeLessThanOrEqual(all);
+      if (selector.stats.capHit) out.capped++;
+      if (frame <= SWEEP_PERIOD_S * 60) { out.first += visible; out.firstAll += all; } else { out.later += visible; out.laterAll += all; }
+    }
+    return out;
+  }
+
+  const SWEEP_CASES = [['sphere eye-2m', sphere600, 'eye-2m'], ['sphere low-200m', sphere600, 'low-200m'], ['sphere mid-5km', sphere600, 'mid-5km'], ['plane low-200m', plane, 'low-200m']] as const;
+
   it('crosses thresholds repeatedly: far more on-screen level changes without hysteresis than with it once the first swing is over', () => {
     const results: string[] = [];
-    const cases = [['sphere eye-2m', sphere600, 'eye-2m'], ['sphere low-200m', sphere600, 'low-200m'], ['sphere mid-5km', sphere600, 'mid-5km'], ['plane low-200m', plane, 'low-200m']] as const;
-    for (const [label, domain, pose] of cases) {
+    for (const [label, domain, pose] of SWEEP_CASES) {
       for (const cull of [false, true]) {
-        // [visible, all] level changes in the first period and the three later ones.
-        const churn = (hysteresis: number) => {
-          const selector = new LodSelector(settingsFor(domain, { cull, leafCap: 20_000, hysteresis }));
-          selector.select(viewOfCamera(domain, sweepPathView(domain, pose, 0)));
-          const out = { first: 0, later: 0, firstAll: 0, laterAll: 0 };
-          // 60 frames a second for four periods.
-          for (let frame = 1; frame <= 4 * SWEEP_PERIOD_S * 60; frame++) {
-            selector.select(viewOfCamera(domain, sweepPathView(domain, pose, frame / 60)));
-            const visible = selector.stats.visibleNewSplits + selector.stats.visibleMerges;
-            const all = selector.stats.newSplits + selector.stats.merges;
-            expect(visible).toBeLessThanOrEqual(all);
-            if (frame <= SWEEP_PERIOD_S * 60) { out.first += visible; out.firstAll += all; } else { out.later += visible; out.laterAll += all; }
-          }
-          return out;
-        };
-        const without = churn(0);
-        const withHysteresis = churn(0.15);
+        const without = sweepChurn(domain, pose, cull, 20_000, 0);
+        const withHysteresis = sweepChurn(domain, pose, cull, 20_000, 0.15);
         results.push(`${label} cull ${cull}: h=0 ${JSON.stringify(without)} h=0.15 ${JSON.stringify(withHysteresis)}`);
         if (label.startsWith('plane')) {
           // The altitude swing crosses thresholds; the hysteresis removes the back-and-forth flips, culling or not.
@@ -364,7 +430,27 @@ describe('Plan 059 sweep path', () => {
         }
       }
     }
-    console.log(`sweep churn over 4 periods at 60 fps (first period, three later): ${results.join(' | ')}`);
+    console.log(`sweep churn over 4 periods at 60 fps, cap 20000 (first period, three later): ${results.join(' | ')}`);
+  });
+
+  it('removes churn at the 1,024-leaf cap of the browser suites too, where the budget decides the tree', () => {
+    const results: string[] = [];
+    for (const [label, domain, pose] of SWEEP_CASES) {
+      for (const cull of [false, true]) {
+        const without = sweepChurn(domain, pose, cull, 1024, 0);
+        const withHysteresis = sweepChurn(domain, pose, cull, 1024, 0.15);
+        results.push(`${label} cull ${cull}: h=0 ${JSON.stringify(without)} h=0.15 ${JSON.stringify(withHysteresis)}`);
+        const where = `${label} cull ${cull}`;
+        // Every case sits at the cap; the swing still crosses thresholds, so the single ranking churns.
+        expect(without.capped).withContext(where).toBe(480);
+        if (label === 'sphere eye-2m') continue;
+        expect(without.later).withContext(where).toBeGreaterThan(0);
+        // Measured: no churn at all unculled; culled, the frustum sweep still brings new nodes in, so about a quarter fewer (0.72 to 0.76).
+        if (!cull) expect(withHysteresis.laterAll).withContext(where).toBe(0);
+        else expect(withHysteresis.later).withContext(where).toBeLessThan(0.85 * without.later);
+      }
+    }
+    console.log(`sweep churn over 4 periods at 60 fps, cap 1024 (first period, three later): ${results.join(' | ')}`);
   });
 
   it('with culling on, a camera wobbling around thresholds changes level on screen at h=0 and not at h=0.15', () => {

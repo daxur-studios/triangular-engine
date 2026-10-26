@@ -128,6 +128,17 @@ const BASELINE_V3: TestSuite<LodSurfaceTestSettings> = {
   scenarios: [...baselineScenarios(DEFAULT_SETTINGS), ...baselineSweeps()],
 };
 
+/**
+ * v4: the same cases as v3. The selector's leaf budget is hysteretic too (a node split in the last tree ranks `hysteresis`
+ * higher), which matters at this suite's 1,024-leaf cap where every moving case sits at the cap, so v3's churn numbers are
+ * not comparable: at the cap v3 showed no effect from the hysteresis at all.
+ */
+const BASELINE_V4: TestSuite<LodSurfaceTestSettings> = {
+  ...BASELINE_V3,
+  version: 4,
+  title: 'LOD surface core: cost, cracks, the zoom and the back-and-forth sweep, with split/merge hysteresis in the threshold and the leaf budget (Plan 059)',
+};
+
 /** Terrain sources the suite measures, each with the domains it makes sense on (the cell planet is a sphere only). */
 export const TERRAIN_CASES: readonly { readonly source: HeightSourceId; readonly domains: readonly DomainPresetId[] }[] = [
   { source: 'cell-planet', domains: ['sphere-10km', 'sphere-600km'] },
@@ -188,5 +199,12 @@ const TERRAIN_V2: TestSuite<LodSurfaceTestSettings> = {
   scenarios: terrainScenarios(DEFAULT_SETTINGS, true),
 };
 
+/** v3: the same cases; the hysteresis also ranks the leaf budget (see {@link BASELINE_V4}), so v2's sweep numbers are not comparable. */
+const TERRAIN_V3: TestSuite<LodSurfaceTestSettings> = {
+  ...TERRAIN_V2,
+  version: 3,
+  title: 'LOD surface core: baked terrain sources at the baseline poses and a back-and-forth sweep, with split/merge hysteresis in the threshold and the leaf budget (Plan 059)',
+};
+
 /** Oldest first; the final entry is "Run latest test". Earlier versions are still run by their exact version. */
-export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, TERRAIN_V1, TERRAIN_V2];
+export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3];

@@ -28,6 +28,7 @@
     "@angular/cdk": "^20.2.14",
     "@angular/common": "^20.3.3",
     "@angular/core": "^20.3.3",
+    "@daxur-studios/mermaid-runtime": "^0.1.0",
     "@angular/forms": "^20.3.3",
     "@angular/material": "^20.2.14",
     "@daxur-studios/portal-layout": "^0.0.1",
@@ -47,6 +48,9 @@
   },
   "peerDependenciesMeta": {
     "@angular/material": {
+      "optional": true
+    },
+    "@daxur-studios/mermaid-runtime": {
       "optional": true
     },
     "@dimforge/rapier3d-compat": {

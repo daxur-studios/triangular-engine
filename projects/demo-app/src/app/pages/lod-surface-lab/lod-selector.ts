@@ -13,9 +13,12 @@ import type { NodeHeightRanges } from './lod-height';
  * Hysteresis (distance mode): the tree is rebuilt every frame, so a node whose cells sit right at the target size would
  * split and merge as the camera wobbles. With one threshold, `value = edge / target`, a leaf splits when value > 1; a node
  * that was split in the previous tree stays split while value > 1 / (1 + hysteresis), i.e. it merges only once its cells are
- * `hysteresis` smaller than the split point. A kept node is queued with its own value (at most 1), so it sorts after every
- * real request and the leaf cap serves requests before retentions; a retention the cap or the pool cannot afford is dropped
- * silently (it is not a request, so it is neither `capHit` nor `unmet`). Forced (2:1 balance) splits are not retained.
+ * `hysteresis` smaller than the split point. The leaf budget is hysteretic too: when the cap binds, the budget, not the
+ * threshold, decides the tree, and the ranking shifts a little every frame, so nodes near the cut would flip. A node split in
+ * the last tree therefore competes for the budget with its value times (1 + hysteresis); any other node with its plain value.
+ * A new request displaces a kept split only by beating it by that margin. A kept node whose value is at most 1 (a
+ * retention) is not a request: it competes with its boosted key (so it can outrank a request just above 1), and one the cap
+ * or the pool cannot afford is dropped silently, neither `capHit` nor `unmet`. Forced (2:1 balance) splits are not retained.
  *
  * The node pool persists across frames: a node keeps its block of four children, with their camera-independent
  * geometry, after it stops being split, so re-selecting a nearby view only redoes per-view culling and priority.
@@ -63,8 +66,10 @@ export interface SelectorSettings {
   /** Refine and draw only nodes whose bounds touch the view frustum. */
   readonly cull: boolean;
   /**
-   * Split/merge hysteresis ratio, distance mode only (absent or 0: a single threshold, as before). A node split in the last
-   * tree stays split while its cells are less than `hysteresis` smaller than the split point (value > 1 / (1 + hysteresis)).
+   * Split/merge hysteresis ratio, distance mode only (absent or 0: a single threshold and a plain ranking, as before). A node
+   * split in the last tree stays split while its cells are less than `hysteresis` smaller than the split point (value >
+   * 1 / (1 + hysteresis)). Under the leaf cap it also ranks `hysteresis` higher than its value (value * (1 + hysteresis)),
+   * so a new request must beat a kept split by that margin to take its place in the budget.
    */
   readonly hysteresis?: number;
 }
@@ -198,6 +203,8 @@ export class LodSelector {
   private pixelScale = 0;
   /** 1 / (1 + hysteresis): a node split in the last tree stays split above this value. 1 means no hysteresis. */
   private readonly keepValue: number;
+  /** 1 + hysteresis: the factor on a kept node's value in the budget ranking. 1 means a plain ranking. */
+  private readonly keepBoost: number;
   /** Nodes of the last tree that were split, counted while their flags are copied; the merges are those not split again. */
   private openLast = 0;
   private readonly freeBlocks: Int32Array;
@@ -220,7 +227,8 @@ export class LodSelector {
     this.treeCapacity = 2 * (settings.leafCap + CAP_SLACK) + 64;
     const capacity = Math.max(2, poolTrees) * this.treeCapacity;
     this.capacity = capacity;
-    this.keepValue = 1 / (1 + Math.max(0, settings.hysteresis ?? 0));
+    this.keepBoost = 1 + Math.max(0, settings.hysteresis ?? 0);
+    this.keepValue = 1 / this.keepBoost;
     this.unlinked = capacity;
     this.none = capacity + 1;
     this.root = new Uint8Array(capacity);
@@ -303,10 +311,11 @@ export class LodSelector {
       const node = this.pop();
       if (this.open[node] === 1) continue;
       if (this.leafCount + 3 > this.settings.leafCap || !this.split(node, false)) {
-        // A request is put back so the unmet count below includes it. A retention (value at most 1: kept split only by
-        // hysteresis) is dropped: nothing asked for it, and whatever is still queued sorts after it, so is a retention too.
+        // A request (value above 1; the key may be boosted, so the key says nothing about this) is put back with its own key
+        // so the unmet count below includes it. A retention (value at most 1: kept split only by hysteresis) is dropped:
+        // nothing asked for it.
         if (this.priority[node] > 1) {
-          this.push(node, this.priority[node]);
+          this.push(node, this.wasOpen[node] === 1 ? this.priority[node] * this.keepBoost : this.priority[node]);
           stats.capHit = true;
         }
         break;
@@ -314,6 +323,8 @@ export class LodSelector {
     }
     stats.unmet = 0;
     for (let k = 0; k < this.heapSize; k++) if (this.open[this.heap[k]] === 0 && this.priority[this.heap[k]] > 1) stats.unmet++;
+    // A boosted retention can reach the cap before requests that are still queued; those requests went unmet.
+    if (stats.unmet > 0) stats.capHit = true;
     this.collectLeaves();
   }
 
@@ -515,6 +526,7 @@ export class LodSelector {
     const { cull, mode, fixedLevel } = this.settings;
     const frame = this.frame;
     const keepValue = this.keepValue;
+    const keepBoost = this.keepBoost;
     const maxLevel = this.maxLevel;
     const pixelScale = this.pixelScale;
     let n = this.activeCount;
@@ -549,7 +561,8 @@ export class LodSelector {
       }
       if (value > 1 || (kept && value > 0 && keepValue < 1)) {
         priority[node] = value;
-        this.push(node, value);
+        // Budget rank: a node split in the last tree competes `hysteresis` higher (keepBoost is 1 without hysteresis).
+        this.push(node, kept ? value * keepBoost : value);
       } else priority[node] = 0;
     }
     this.activeCount = n;

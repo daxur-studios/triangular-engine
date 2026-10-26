@@ -13,7 +13,7 @@ performance: []
 
 # Plan 066: Engineering Records and Development Map
 
-Status: **M1, M2 and M3 complete; M4 planned**. Evidence and decisions:
+Status: **M1, M2 and M3 complete; M4 planned; M5 in progress**. Evidence and decisions:
 [ER 066](/docs/runbook/066_engineering_records_and_development_map.md).
 
 <!-- tri:scope -->
@@ -33,7 +33,8 @@ remain available under their original identity and links.
 - **m1** — Formalize versioned metadata, phase identities, review items and two Markdown templates. Acceptance: ordinary Markdown stays readable; missing, stale, clear, open and blocking reviews have distinct behavior; questions can be resolved, deferred and reopened without losing their meaning.
 - **m2** — Build the creation, validation and manifest helper; add agent authoring rules. Acceptance: exclusive creation preserves existing files; reciprocal links, stable identities, review freshness, phase readiness and relationships validate; legacy documents remain readable as unassessed.
 - **m3** — Build a reusable viewer entry point and a demo-app adapter using real example pages, thumbnails and test summaries, plus an independent project fixture. Acceptance: cards show scoped readiness, accepted goals, relationships and evidence age; selecting a concern opens its source; both projects use the same viewer; scope history distinguishes a developer-confirmed baseline from later proposed, accepted, deferred or rejected changes, and shows baseline and current accepted-scope progress separately when the data supports it.
-- **m4** — Adopt the format incrementally and migrate names or paths where useful. Acceptance: link and identity audit passes; no plans or history disappear; old references resolve; package and public API checks pass where applicable.
+- **m4** — Validate the format and viewer contract against the first candidate projects with different document, page, and test layouts. Acceptance: at least one game project and one UI-only project can provide adapters; legacy records remain findable; documented plan retention and spike/example lifecycle rules are explicit; checks identify broken links and missing structured fields without forcing a bulk migration.
+- **m5** — Implement the selected branch-grouped Mermaid graph cards using normalized project relationships. Acceptance: graph topology comes from explicit page, phase, concern and document relationships; the demo applies the graph to Plan 066 as the first real case; navigation and relationship labels are understandable on review. Keep this pass in 2D Mermaid; revisit spatial rendering only if feedback identifies a question it could answer. Refining attention summaries is useful but does not block this phase.
 
 ## Constraints and relationships
 
@@ -52,8 +53,7 @@ remain available under their original identity and links.
   impact and affected IDs. Never infer whether a change was wanted from its origin. Show growth and
   progress against the confirmed baseline and current accepted scope separately; when there is no
   confirmed baseline, label growth unassessed.
-- Keep the first viewer to area lanes, example cards, selected relationships, progress and evidence.
-  Scheduling, effort prediction, results storage and inference of human agreement are outside scope.
+- Use reusable Mermaid graph cards as the selected 2D presentation. Graph edges must come from explicit normalized relationships; layout or document order must not imply dependencies. Scheduling, effort prediction, results storage and inference of human agreement are outside scope.
 - The viewer will consume a versioned manifest. Repository parsing and project-specific navigation
   belong in adapters. Expose the generic Angular viewer at `triangular-engine/development-map`.
 - **builds-on**: [Test Results Page and Case Thumbnails](/docs/plans/058_test_results_page_and_thumbnails.md)
@@ -67,10 +67,11 @@ remain available under their original identity and links.
 | m2    | done    |
 | m3    | done    |
 | m4    | planned |
+| m5    | in_progress |
 
 ## Questions, assumptions and investigations
 
-<!-- tri:review version="1" scope-hash="c27b934e82beb5878219c93aad831b273b32fa2c26731332dfed74f657f5f1d5" reviewed="2026-10-25" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="3974530c31a3506374bf9e5224bf93f1688bd7c7100316b2a655cc81f410be82" reviewed="2026-10-25" reviewer="agent" -->
 <!-- tri:item id="Q1" kind="investigation" applies-to="m2" blocks="m2" state="resolved" -->
 
 - [x] How will a change to planned scope make the old readiness review visibly stale?
@@ -92,6 +93,21 @@ remain available under their original identity and links.
 - [ ] Which document loaders, routes and tooling depend on the old names and paths?
   - Why it matters: renaming a folder could break existing references and document discovery.
   - Next action: inventory consumers before migration and prepare an old-to-new identity/link map.
+    <!-- /tri:item -->
+
+<!-- tri:item id="Q4" kind="intent" applies-to="m5" blocks="none" state="open" -->
+
+- [ ] Which decisions or assumptions deserve a short highlighted attention summary, and what should it surface before someone opens the full plan?
+  - Why it matters: a plan review can be skimmed without the developer understanding a consequential assumption or choice.
+  - Next action: keep this open but non-blocking while the Mermaid-card pilot proceeds. Revisit concise synthetic examples and anonymized Git-history cases when refining the attention summary.
+    <!-- /tri:item -->
+
+<!-- tri:item id="Q5" kind="investigation" applies-to="m5" blocks="m5" state="resolved" -->
+
+- [x] Which 2D Mermaid view should present branching progress, alternatives and evidence?
+  - Why it matters: the view should make both delivery status and relationships understandable without requiring the reader to reconstruct them from separate documents.
+  - Next action: implement branch-grouped Mermaid cards from normalized relationships; use Plan 066 as the first real map and ask the developer to review the resulting topology and navigation.
+  - Resolution: branch-grouped Mermaid cards are the selected primary presentation. They can show branching, merges, alternatives and dependencies only when those edges are present in adapter data; document order must not imply an edge. No Three.js rendering is part of this pass.
     <!-- /tri:item -->
     <!-- /tri:review -->
 
@@ -127,8 +143,9 @@ items resolve, defer or reopen.
    changes. Headless behavior tests do not establish hardware performance.
 6. **Human usefulness:** on a realistic example with a surprising assumption, a developer should
    be able to find the intended result, consequential caveat, next action and work that can proceed
-   after a quick skim. Revise wording/layout based on confusion; automated checks cannot prove
-   human understanding or visual acceptance.
+   after a quick skim. Include a fabricated case and a de-identified example derived from Git
+   history. Revise wording/layout based on confusion; automated checks cannot prove human
+   understanding or visual acceptance.
 
 Use accepted phases/goals for progress. The manifest reports completed planned scope, not time
 remaining. Keep IDs stable when scope changes. Relation types `depends-on`, `builds-on`,

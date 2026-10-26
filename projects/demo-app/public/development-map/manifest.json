@@ -447,7 +447,7 @@
       "plan": "/docs/plans/066_engineering_records_and_development_map.md",
       "record": "/docs/runbook/066_engineering_records_and_development_map.md",
       "recordId": "er-066",
-      "scopeHash": "c27b934e82beb5878219c93aad831b273b32fa2c26731332dfed74f657f5f1d5",
+      "scopeHash": "3974530c31a3506374bf9e5224bf93f1688bd7c7100316b2a655cc81f410be82",
       "mapped": true,
       "review": {
         "state": "reviewed",
@@ -489,6 +489,30 @@
               "m4"
             ],
             "body": "- [ ] Which document loaders, routes and tooling depend on the old names and paths?\n  - Why it matters: renaming a folder could break existing references and document discovery.\n  - Next action: inventory consumers before migration and prepare an old-to-new identity/link map."
+          },
+          {
+            "id": "Q4",
+            "kind": "intent",
+            "state": "open",
+            "appliesTo": [
+              "m5"
+            ],
+            "blocks": [
+              "none"
+            ],
+            "body": "- [ ] Which decisions or assumptions deserve a short highlighted attention summary, and what should it surface before someone opens the full plan?\n  - Why it matters: a plan review can be skimmed without the developer understanding a consequential assumption or choice.\n  - Next action: keep this open but non-blocking while the Mermaid-card pilot proceeds. Revisit concise synthetic examples and anonymized Git-history cases when refining the attention summary."
+          },
+          {
+            "id": "Q5",
+            "kind": "investigation",
+            "state": "resolved",
+            "appliesTo": [
+              "m5"
+            ],
+            "blocks": [
+              "m5"
+            ],
+            "body": "- [x] Which 2D Mermaid view should present branching progress, alternatives and evidence?\n  - Why it matters: the view should make both delivery status and relationships understandable without requiring the reader to reconstruct them from separate documents.\n  - Next action: implement branch-grouped Mermaid cards from normalized relationships; use Plan 066 as the first real map and ask the developer to review the resulting topology and navigation.\n  - Resolution: branch-grouped Mermaid cards are the selected primary presentation. They can show branching, merges, alternatives and dependencies only when those edges are present in adapter data; document order must not imply an edge. No Three.js rendering is part of this pass."
           }
         ]
       },
@@ -528,20 +552,31 @@
         },
         {
           "id": "m4",
-          "title": "Adopt the format incrementally and migrate names or paths where useful.",
-          "acceptance": "link and identity audit passes; no plans or history disappear; old references resolve; package and public API checks pass where applicable.",
+          "title": "Validate the format and viewer contract against the first candidate projects with different document, page, and test layouts.",
+          "acceptance": "at least one game project and one UI-only project can provide adapters; legacy records remain findable; documented plan retention and spike/example lifecycle rules are explicit; checks identify broken links and missing structured fields without forcing a bulk migration.",
           "progress": "planned",
           "readiness": {
             "state": "needs-resolution",
             "open": 1,
             "blockers": 1
           }
+        },
+        {
+          "id": "m5",
+          "title": "Implement the selected branch-grouped Mermaid graph cards using normalized project relationships.",
+          "acceptance": "graph topology comes from explicit page, phase, concern and document relationships; the demo applies the graph to Plan 066 as the first real case; navigation and relationship labels are understandable on review. Keep this pass in 2D Mermaid; revisit spatial rendering only if feedback identifies a question it could answer. Refining attention summaries is useful but does not block this phase.",
+          "progress": "in_progress",
+          "readiness": {
+            "state": "open-items",
+            "open": 1,
+            "blockers": 0
+          }
         }
       ],
       "progress": {
         "done": 3,
-        "total": 4,
-        "percent": 75
+        "total": 5,
+        "percent": 60
       },
       "relations": [
         {
@@ -569,12 +604,25 @@
             "summary": "Add explicit scope history, baseline and current-scope progress to the development map.",
             "reason": "Make scope growth visible without treating skimmed plan reviews as developer agreement.",
             "impact": "Extend M3 with a normalized scope-history contract, viewer support and an independent fixture."
+          },
+          {
+            "id": "SC-066-M5",
+            "date": "2026-10-25",
+            "kind": "change",
+            "origin": "requested",
+            "disposition": "accepted",
+            "scopeIds": [
+              "m5"
+            ],
+            "summary": "Implement the selected Mermaid-card presentation and use Plan 066 as its first real input.",
+            "reason": "Review relationship topology and navigation against actual planning data before adopting the viewer elsewhere.",
+            "impact": "Replace the M5 layout comparison with a focused implementation and review of data-driven cards."
           }
         ]
       }
     }
   ],
-  "generatedAt": "2026-10-25T19:16:47.474Z",
-  "currentFingerprint": "072dfd16-64eb4e5a",
+  "generatedAt": "2026-10-25T21:37:04.701Z",
+  "currentFingerprint": "39b1e74a-1e7e7818",
   "diagnostics": []
 }

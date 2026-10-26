@@ -5,6 +5,11 @@ project's examples, plans, open concerns, scope changes and saved test evidence.
 It is data-in/data-out: the host project owns Markdown parsing, page links,
 thumbnails, source navigation and test-result loading.
 
+The view renders relationship previews with `@daxur-studios/mermaid-runtime`.
+Install that optional peer package and its Mermaid Runtime peer dependencies when using this entry point.
+The project adapter supplies explicit page-to-document links, phase readiness, concern targets and
+document relationships; the viewer does not infer edges from document order.
+
 ```ts
 import { DevelopmentMapComponent, type DevelopmentMapProject } from 'triangular-engine/development-map';
 

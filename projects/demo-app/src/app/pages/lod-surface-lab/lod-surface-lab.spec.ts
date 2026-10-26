@@ -933,19 +933,19 @@ describe('Plan 059 suite', () => {
 });
 
 describe('Plan 059 suite versions and hysteresis', () => {
-  const [v1, v2, v3, t1, t2] = LOD_SURFACE_TEST_HISTORY;
+  const [v1, v2, v3, v4, t1, t2, t3] = LOD_SURFACE_TEST_HISTORY;
   const idsOf = (suite: typeof v1) => suite.scenarios.map((scenario) => scenario.id);
 
   it('lists the versions oldest first with the latest terrain suite last', () => {
     expect(LOD_SURFACE_TEST_HISTORY.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
-      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-terrain@1', 'lod-surface-terrain@2',
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3',
     ]);
   });
 
   it('keeps v1, v2 and terrain v1 at the single threshold they were measured with, and gives the later versions the lab default', () => {
     for (const suite of [v1, v2, t1]) for (const scenario of suite.scenarios) expect(scenario.settings.hysteresis).withContext(`${suite.id}@${suite.version} ${scenario.id}`).toBe(0);
     expect(DEFAULT_SETTINGS.hysteresis).toBe(0.15);
-    for (const suite of [v3, t2]) {
+    for (const suite of [v3, v4, t2, t3]) {
       for (const scenario of suite.scenarios) {
         expect(scenario.settings.hysteresis).withContext(`${suite.id}@${suite.version} ${scenario.id}`).toBe(scenario.id.endsWith('-nohyst') ? 0 : 0.15);
       }
@@ -958,7 +958,9 @@ describe('Plan 059 suite versions and hysteresis', () => {
     for (const id of idsOf(v1)) expect(idsOf(v2)).toContain(id);
     expect(idsOf(t2).filter((id) => !idsOf(t1).includes(id))).toEqual(['sweep-cell-planet-sphere-10km-low-200m', 'sweep-cliff-plane-100km-low-200m']);
     expect(idsOf(t2).filter((id) => idsOf(t1).includes(id))).toEqual(idsOf(t1));
-    for (const suite of [v3, t2]) {
+    expect(idsOf(v4)).toEqual(idsOf(v3));
+    expect(idsOf(t3)).toEqual(idsOf(t2));
+    for (const suite of [v3, v4, t2, t3]) {
       const ids = idsOf(suite);
       expect(new Set(ids).size).toBe(ids.length);
       for (const scenario of suite.scenarios.filter((item) => item.id.startsWith('sweep-'))) {

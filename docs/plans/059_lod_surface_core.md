@@ -178,7 +178,9 @@ measured on the RTX 3080 before the next starts:
    last tree stays split until its cells are 15% under the split point. A back-and-forth sweep camera counts on-screen
    level changes. *Built 2026-10-25, specs only: suites `lod-surface-baseline` v3 and `lod-surface-terrain` v2, 138 lab
    specs green. RTX 3080 sweep run 2026-10-25: no effect at the suites' 1,024-leaf cap, where the budget decides the
-   tree; the budget needs its own hysteresis, see the runbook.*
+   tree; the budget needs its own hysteresis, see the runbook. Budget hysteresis built the same day, specs only: a kept
+   split ranks `1 + h` higher for the leaf budget; suites baseline v4 and terrain v3, 142 lab specs green; at the 1,024
+   cap unculled sweep churn falls to 0, culled by about a quarter; RTX rerun pending.*
 4. **Slope criterion** (from M2), measured ABAB in the terrain suite.
 5. **M5:** edits and the collider patch.
 6. **M6:** cliffs.

@@ -43,7 +43,7 @@ Import optional features from their secondary entry point so applications only s
 | Import | Guide | What it provides | Optional peer |
 | --- | --- | --- | --- |
 | `triangular-engine` | [Core guide](docs/README.md) | Scene graph, cameras, lights, geometry, materials, GLTF, services, portal UI, renderer lifecycle | — (Angular, `three`, `dexie`, `three-mesh-bvh`, `rxjs`, `@daxur-studios/portal-layout`) |
-| `triangular-engine/development-map` | [development-map/README.md](development-map/README.md) | Reusable data-driven view for project branches, example pages, plans, scope changes and saved evidence | Angular Common/Core |
+| `triangular-engine/development-map` | [development-map/README.md](development-map/README.md) | Reusable data-driven view for project branches, example pages, plans, scope changes and saved evidence | Angular Common/Core; optional `@daxur-studios/mermaid-runtime` for relationship cards |
 | `triangular-engine/scene-tree` | [scene-tree/README.md](scene-tree/README.md) | Material Scene Tree inspection panel | `@angular/material` |
 | `triangular-engine/testing` | [testing/README.md](testing/README.md) | Browser test runner, launch and result contracts, adapter executor | — |
 | `triangular-engine/rapier` | [rapier/README.md](rapier/README.md) | Rapier rigid bodies, colliders, joints, physics components | `@dimforge/rapier3d-compat` |

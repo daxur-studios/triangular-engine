@@ -103,7 +103,8 @@ versions are preferable for evidence and reruns. Other application query paramet
 are preserved by the URL helper. Supported profiles are `visible-browser`,
 `human-observed`, and `headless-hardware`; repetitions are 1–5. Unknown versions or
 invalid launch options fail visibly rather than silently substituting a test. `testThumbnails=0` turns case
-thumbnails off.
+thumbnails off. `testCases=a,b,other@2/c` runs those cases as a batch (bare ids belong to `testSuite`; build the
+link with `buildTestBatchLaunchUrl`).
 
 When updating a spike, plan or runbook, append the runnable experiment to its
 `performance` array and provide a Markdown launch link for the latest item. Keep

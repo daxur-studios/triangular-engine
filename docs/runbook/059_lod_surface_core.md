@@ -753,3 +753,44 @@ one repetition each; added to `triangular-engine/testing` this session). All sev
   request beats it by `1 + h`. Then rerun the seven cases.
 - Calibrate at the suite's own cap, not 20,000.
 - Investigate the plane residual separately.
+
+## 2026-10-25 — A hysteretic leaf budget (specs only, no browser run)
+
+**Rule.** A node split in the last tree now competes for the leaf budget with its value times `1 + h`; every other
+node competes with its plain value. A new request takes a kept split's place in the budget only by beating it by the
+margin. Same `hysteresis` setting, no new one; with h = 0 the tree is identical to before (a spec checks absent and 0).
+
+**Design choices.**
+
+- The heap key is boosted; `priority` still holds the raw value, and "a real request" is still `value > 1`, never the
+  key. `unmet` and `capHit` count real requests only.
+- A retention (kept, value in `(1/(1+h), 1]`) competes with its boosted key, so a kept node at 0.95 (key 1.09) beats a
+  new request at 1.05. It is the consistent rule; the 2:1 balance, cover, mask and cap checks still pass at caps 200 and
+  4,096. A retention that does not fit is still dropped silently.
+- A boosted retention can now reach the cap while real requests are still queued behind it, so `capHit` is also set
+  when `unmet > 0`.
+- The loop still stops at the first node that does not fit; balance splits are unchanged.
+- Suites bumped because the measurement changed: `lod-surface-baseline` v4 and `lod-surface-terrain` v3, the same cases
+  as v3 and v2. The older versions stay addressable, but they now run the new selector.
+
+**Headless calibration at the suites' 1,024 cap** (`lod-selector-hysteresis.spec.ts`, on-screen split + merge in the
+three later periods of four, 60 fps; every case sits at the cap on all 480 frames):
+
+| Sweep | h = 0 (and the old h = 0.15) | h = 0.15 now |
+| --- | ---: | ---: |
+| plane low-200m, unculled | 48 | 0 |
+| sphere low-200m, unculled | 12 | 0 |
+| sphere mid-5km, unculled | 12 | 0 |
+| plane low-200m, culled | 696 | 531 |
+| sphere low-200m, culled | 756 | 558 |
+| sphere mid-5km, culled | 630 | 456 |
+| sphere eye-2m | 0 | 0 |
+
+Setting the boost to 1 made h = 0.15 match h = 0 exactly, which confirms the browser finding: the old hysteresis did
+nothing at this cap. The 20,000-leaf calibration is unchanged (the cap never binds there).
+
+**Open.** The suites cull (`cull: true`), and culled churn falls only 24–28%. The likely reason is that the heading sweep
+brings nodes into the frustum, and they outrank kept splits by more than the margin, which is real change, not flicker.
+An "at the leaf cap" spec shows the margin holds for 5–30 m camera moves and gives way at 60 m, where every new request
+that took budget beat every lost kept split by the margin (3.612 against 3.544). The RTX rerun of the seven sweep cases
+(baseline v4, terrain v3) is next. 142 lab specs pass headless.

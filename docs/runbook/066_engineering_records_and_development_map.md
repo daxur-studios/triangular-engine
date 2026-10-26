@@ -185,6 +185,53 @@ loaded with four branches, 15 examples and one open concern. Existing run eviden
 stale when its fingerprint differs from the current source, and performance remains unassessed
 when the saved run does not have an assessed performance verdict.
 
+## 2026-10-25 — expand adoption and visual exploration
+
+The initial adoption set spans projects with Three.js game pages and a UI-library demo with no game
+scene. Their existing plan, spike, example, thumbnail, and test-index conventions differ. Keep
+project-specific parsing in adapters; do not make the normalized viewer assume Three.js or a single
+catalog layout. M4 now includes one game-oriented and one UI-only adapter, legacy retention, and
+checks that expose mismatches without requiring a bulk migration.
+
+A Git-history review found a concrete retention case in one candidate: a 253-line completed plan was
+deleted in a commit that added only a short summary to its related record. The plan was restored in
+that source project when the developer confirmed that plans should remain. Use an anonymized version
+of this event in attention-format examples; do not put consumer project names or paths into this
+public repository.
+
+The developer wants several renderer options demonstrated before choosing a final view. This pass
+stays with two Mermaid approaches: branch-grouped reusable graph cards and one relationship graph
+with compact per-branch progress diagrams. Both use the same examples, relations, illustrative
+metrics, and synthetic plus Git-history-derived review cases. The card mock follows the supplied
+component design but does not yet import the Angular package. Spatial rendering is deferred for this
+pass; revisit it only if feedback identifies a question it could answer.
+
+## 2026-10-25 — Mermaid card presentation selected
+
+The developer selected branch-grouped Mermaid cards as the primary presentation. A card's Mermaid
+graph may represent fan-out, fan-in, alternatives, supersession and dependency edges when those
+relations are present in the normalized adapter data; layout must not infer a relationship merely
+from document order. Keep card diagrams compact and allow larger graphs to be inspected through the
+viewer's relationship navigation. The three-node progress strips in the comparison mock are
+illustrative placeholders, not generated relation graphs, so data-driven topology remains an
+implementation item. The selected presentation remains 2D Mermaid; no Three.js rendering is part of
+this pass.
+
+## 2026-10-25 — Plan 066 chosen as the first Mermaid-card pilot
+
+The developer asked to lower Q4's attention-summary research priority so it does not block the
+Mermaid-card implementation. Q4 stays open and visible as a non-blocking item; revisit its examples
+after the first graph-card review.
+
+Use Plan 066 itself as the first real input for data-driven card topology. Its explicit phase states,
+review items and relation to Plan 058 can test whether the map distinguishes completed work, separate
+outstanding phases and a blocker without inventing dependencies from document order. Update the
+normalized model only where the source manifest already supplies the relationship; record any missing
+source data as a limitation rather than fabricating an edge.
+
+The accepted M5 scope now implements the selected card approach and applies it to Plan 066; it no
+longer compares two layouts. The attention-summary research remains lower priority and non-blocking.
+
 ## Structured scope history
 
 <!-- tri:scope-history -->
@@ -194,5 +241,10 @@ when the saved run does not have an assessed performance verdict.
 - Summary: Add explicit scope history, baseline and current-scope progress to the development map.
 - Reason: Make scope growth visible without treating skimmed plan reviews as developer agreement.
 - Impact: Extend M3 with a normalized scope-history contract, viewer support and an independent fixture.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-066-M5" date="2026-10-25" kind="change" origin="requested" disposition="accepted" scope-ids="m5" -->
+- Summary: Implement the selected Mermaid-card presentation and use Plan 066 as its first real input.
+- Reason: Review relationship topology and navigation against actual planning data before adopting the viewer elsewhere.
+- Impact: Replace the M5 layout comparison with a focused implementation and review of data-driven cards.
 <!-- /tri:scope-change -->
 <!-- /tri:scope-history -->
