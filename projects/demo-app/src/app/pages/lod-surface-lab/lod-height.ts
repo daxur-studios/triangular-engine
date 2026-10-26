@@ -8,16 +8,16 @@ import type { DomainKind, Vec3 } from './lod-domain';
  * two agree to float32 rounding. The bound is the sum of amplitudes; the selector widens every node by it.
  */
 
-export type HeightSourceId = 'flat' | 'bumps' | 'noise' | 'bumps-baked' | 'cell-planet' | 'cliff';
-export const HEIGHT_SOURCES: readonly HeightSourceId[] = ['flat', 'bumps', 'noise', 'bumps-baked', 'cell-planet', 'cliff'];
+export type HeightSourceId = 'flat' | 'bumps' | 'noise' | 'bumps-baked' | 'cell-planet' | 'cliff' | 'biome-mix';
+export const HEIGHT_SOURCES: readonly HeightSourceId[] = ['flat', 'bumps', 'noise', 'bumps-baked', 'cell-planet', 'cliff', 'biome-mix'];
 
 /** Sources read from a baked texture; they need a bake (`lod-height-bake.ts`) before they can be made. */
-export const BAKED_SOURCES: readonly HeightSourceId[] = ['noise', 'bumps-baked', 'cell-planet', 'cliff'];
+export const BAKED_SOURCES: readonly HeightSourceId[] = ['noise', 'bumps-baked', 'cell-planet', 'cliff', 'biome-mix'];
 export const isBakedSource = (id: HeightSourceId): boolean => BAKED_SOURCES.includes(id);
 
 /** Menu text of a source. */
 export const HEIGHT_SOURCE_LABELS: Readonly<Record<HeightSourceId, string>> = {
-  flat: 'flat', bumps: 'static bumps', noise: 'baked noise', 'bumps-baked': 'bumps, baked', 'cell-planet': 'cell planet', cliff: 'cliff fixture',
+  flat: 'flat', bumps: 'static bumps', noise: 'baked noise', 'bumps-baked': 'bumps, baked', 'cell-planet': 'cell planet', cliff: 'cliff fixture', 'biome-mix': 'biome mix',
 };
 
 /** The cell planet is a sphere (its surface sampler has no plane); every other source works on both domains. */

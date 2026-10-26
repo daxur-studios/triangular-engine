@@ -367,6 +367,28 @@ describe('Plan 059 baked height seams: neighbouring leaves get the same bits', (
   }
 });
 
+describe('Plan 059 biome texture bounds', () => {
+  it('bounds each root and keeps the twin on its baked texels for both domains', () => {
+    for (const kind of ['plane', 'sphere'] as const) {
+      const layout = layoutFor(kind, 5);
+      const baked = bakeHeights(layout, samplerFor('biome-mix', layout));
+      const source = createTextureHeightSource('biome-mix', baked);
+      const unit = texelLattice(layout.k);
+      for (let face = 0; face < baked.faces; face++) {
+        const range: [number, number] = [0, 0];
+        source.nodeRange!(face, 0, 0, 0, range);
+        for (let j = 0; j < baked.side; j++) for (let i = 0; i < baked.side; i++) {
+          const h = baked.texels[face * baked.side ** 2 + j * baked.side + i];
+          expect(h).toBeGreaterThanOrEqual(range[0]);
+          expect(h).toBeLessThanOrEqual(range[1]);
+          expect(latticeHeightF32(baked, face, i * unit, j * unit)).toBe(h);
+        }
+      }
+      source.dispose();
+    }
+  });
+});
+
 describe('Plan 059 baked height pyramid', () => {
   it('matches a brute-force min and max over the texels a node covers (within the rounding pad)', () => {
     const random = rng(51);

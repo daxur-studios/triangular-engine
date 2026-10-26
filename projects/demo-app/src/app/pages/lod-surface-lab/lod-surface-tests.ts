@@ -27,9 +27,9 @@ export interface LodSurfaceTestSettings {
   readonly bounds: boolean;
   /**
    * A scripted camera runs during the window instead of a still pose: `zoom` flies the ground-to-orbit path once; `sweep`
-   * holds `pose` and swings the camera back and forth (yaw and a little altitude, `sweepPathView`) for the whole window.
+   * holds `pose` and swings the camera back and forth; `biome-sweep` traverses the five biome regions.
    */
-  readonly motion?: 'zoom' | 'sweep';
+  readonly motion?: 'zoom' | 'sweep' | 'biome-sweep';
 }
 
 /** The lab's defaults, and what suites from `lod-surface-baseline` v3 / `lod-surface-terrain` v2 on run with. */
@@ -144,6 +144,7 @@ export const TERRAIN_CASES: readonly { readonly source: HeightSourceId; readonly
   { source: 'cell-planet', domains: ['sphere-10km', 'sphere-600km'] },
   { source: 'noise', domains: ['plane-100km', 'sphere-600km', 'sphere-10km'] },
   { source: 'cliff', domains: ['plane-100km', 'sphere-10km'] },
+  { source: 'biome-mix', domains: ['plane-100km', 'sphere-10km'] },
 ];
 
 /** The sweep each terrain v2 group ends with, keyed `source|domain`; it joins its group so the bake cache is still hit. */
@@ -159,7 +160,7 @@ const TERRAIN_SWEEPS: Readonly<Record<string, PoseId>> = {
 function terrainScenarios(base: LodSurfaceTestSettings, sweeps: boolean): TestScenario<LodSurfaceTestSettings>[] {
   const settings = (source: HeightSourceId, domain: DomainPresetId, pose: PoseId): Partial<LodSurfaceTestSettings> => ({ source, domain, pose, view: 'shaded', bounds: false });
   const out: TestScenario<LodSurfaceTestSettings>[] = [];
-  for (const { source, domains } of TERRAIN_CASES) {
+  for (const { source, domains } of TERRAIN_CASES.filter((entry) => entry.source !== 'biome-mix')) {
     for (const domain of domains) {
       for (const pose of POSES) out.push(still(`${source}-${domain}-${pose}`, `${source} · ${domain} · ${pose}`, settings(source, domain, pose), undefined, base));
       // The control sits in the middle of its source's group, so it reuses that bake instead of making a third one.
@@ -206,5 +207,24 @@ const TERRAIN_V3: TestSuite<LodSurfaceTestSettings> = {
   title: 'LOD surface core: baked terrain sources at the baseline poses and a back-and-forth sweep, with split/merge hysteresis in the threshold and the leaf budget (Plan 059)',
 };
 
+/** v4 adds the biome source without changing the historical suite definitions. */
+const BIOME_CASES: TestScenario<LodSurfaceTestSettings>[] = TERRAIN_CASES.find((entry) => entry.source === 'biome-mix')!.domains.flatMap((domain) => {
+  const common: Partial<LodSurfaceTestSettings> = { source: 'biome-mix', domain, view: 'shaded', bounds: false };
+  return [
+    ...POSES.map((pose) => still(`biome-mix-${domain}-${pose}`, `biome mix · ${domain} · ${pose}`, { ...common, pose })),
+    ...(['biome-mountain', 'biome-canyon'] as const).map((pose) => still(`biome-mix-${domain}-${pose}`, `biome mix · ${domain} · ${pose}`, { ...common, pose })),
+    { id: `biome-mix-${domain}-traverse`, label: `biome mix · ${domain} · traversal`, settings: { ...DEFAULT_SETTINGS, ...common, motion: 'biome-sweep' as const }, warmupMs: 500, durationMs: 8000, quickMs: 4000 },
+  ];
+});
+const FLOOR_CASES = [2, 4, 2, 4].map((cellPixels, index) => still(
+  `biome-mix-floor-${cellPixels}-${index + 1}`, `biome mix · mountain · ${cellPixels} px · round ${index + 1}`,
+  { source: 'biome-mix', domain: 'plane-100km', pose: 'biome-mountain', view: 'shaded', bounds: false, cellPixels },
+));
+const TERRAIN_V4: TestSuite<LodSurfaceTestSettings> = {
+  ...TERRAIN_V3, version: 4,
+  title: 'LOD surface core: mixed biome terrain and pixel size (Plan 059)',
+  scenarios: [...TERRAIN_V3.scenarios, ...BIOME_CASES, ...FLOOR_CASES],
+};
+
 /** Oldest first; the final entry is "Run latest test". Earlier versions are still run by their exact version. */
-export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3];
+export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, BASELINE_V4, TERRAIN_V1, TERRAIN_V2, TERRAIN_V3, TERRAIN_V4];

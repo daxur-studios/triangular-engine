@@ -222,7 +222,7 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
         previousAt = renderedAt;
       });
       try {
-        if (settings.motion === 'zoom') {
+        if (settings.motion === 'zoom' || settings.motion === 'biome-sweep') {
           const began = performance.now();
           await zoom(scenario, context);
           motionSeconds = (performance.now() - began) / 1000;
@@ -241,7 +241,7 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
       } finally {
         offRender();
         if (host.isSampling()) host.stopSampling();
-        if (settings.motion === 'zoom') host.setZoomProgress(undefined);
+        if (settings.motion === 'zoom' || settings.motion === 'biome-sweep') host.setZoomProgress(undefined);
         if (settings.motion === 'sweep') host.setSweepTime(undefined);
       }
       const selection = [...host.selectionSamples()];
@@ -296,6 +296,8 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
         { name: 'leaves', unit: 'count', samples: leaves, source: 'Leaves of the selected tree per frame (drawn and culled)' },
         { name: 'drawnLeaves', unit: 'count', samples: [info.instances], source: 'Instances drawn on the last frame' },
         { name: 'surfaceTriangles', unit: 'count', samples: [info.instances * info.trianglesPerLeaf], source: 'Drawn leaves x 2 N^2 on the last frame' },
+        { name: 'pixelsPerTriangleUpperBound', unit: 'px/triangle', samples: [info.drawingBuffer[0] * info.drawingBuffer[1] / Math.max(1, info.instances * info.trianglesPerLeaf)], source: 'Canvas device pixels divided by drawn surface triangles, upper bound; last frame' },
+        { name: 'drawCalls', unit: 'count', samples: [info.drawCalls], source: 'Renderer draw calls on the last frame' },
         {
           name: 'frameInterval', unit: 'ms', samples: intervals, source: 'Deltas of renderComplete$ timestamps; display-cadence quantized, not GPU time',
           unavailableReason: intervals.length ? undefined : 'Fewer than two frames completed',

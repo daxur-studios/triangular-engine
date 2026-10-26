@@ -1,6 +1,6 @@
 import { validateTestHistory } from 'triangular-engine/testing';
 import { buildCellPlanetWorld } from 'triangular-engine/worldgen';
-import { poseView, resolveCamera, type PoseId } from './lod-camera';
+import { biomePathView, poseView, resolveCamera, type PoseId } from './lod-camera';
 import { domainPreset, type CubeWarp, type DomainKind, type DomainPresetId } from './lod-domain';
 import { sourceSupports, type HeightSource, type HeightSourceId } from './lod-height';
 import {
@@ -322,6 +322,62 @@ function cliffAlong(view: ReturnType<typeof poseView>, up: readonly number[]): n
   return [0, 1, 2].map((k) => Math.cos(view.headingRad) * north[k] + Math.sin(view.headingRad) * east[k]);
 }
 
+describe('Plan 059 biome mix', () => {
+  for (const kind of ['plane', 'sphere'] as const) {
+    it(`bakes deterministically within bounds on ${kind}`, () => {
+      const layout = layoutFor(kind, 6);
+      const a = runBake('biome-mix', layout).baked;
+      const b = runBake('biome-mix', layout).baked;
+      expect(a.texels.every((h, i) => h === b.texels[i] && Number.isFinite(h))).toBeTrue();
+      expect(a.minM).toBeGreaterThanOrEqual(-3);
+      expect(a.maxM).toBeLessThanOrEqual(kind === 'plane' ? 2000 : 600);
+      expect(a.boundM).toBeGreaterThanOrEqual(Math.max(Math.abs(a.minM), Math.abs(a.maxM)));
+      if (kind === 'sphere') expectSeamIdentical(a, 6);
+      else {
+        const sampler = samplerFor('biome-mix', layout);
+        for (let i = 0; i <= 64; i++) {
+          const p = texelPoint(layout, 0, i, 32);
+          expect(a.texels[32 * a.side + i]).toBe(Math.fround(sampler(...p)));
+        }
+      }
+    });
+    it(`places meadow, hills, ridges, crater and canyon at their coordinates on ${kind}`, () => {
+      const layout = layoutFor(kind, 10);
+      const sample = samplerFor('biome-mix', layout);
+      const at = (u: number, v: number) => kind === 'plane'
+        ? sample(u * layout.sizeM, 0, v * layout.sizeM)
+        : sample(layout.sizeM * Math.cos(1.8 * v) * Math.sin(1.8 * u), layout.sizeM * Math.sin(1.8 * v), layout.sizeM * Math.cos(1.8 * v) * Math.cos(1.8 * u));
+      const scale = kind === 'plane' ? 2000 : 600;
+      expect(Math.abs(at(-0.4, 0.02))).toBeLessThan(4);
+      expect(at(-0.2, 0)).toBeGreaterThan(0.01 * scale);
+      expect(Math.max(...Array.from({ length: 101 }, (_, i) => at(-0.05 + i * 0.001, 0)))).toBeGreaterThan(0.7 * scale);
+      expect(at(0.2, 0)).toBeLessThan(at(0.2, 0.03));
+      const centre = 0.055 * Math.sin(24 * 0.4);
+      expect(at(0.4, centre)).toBeLessThan(at(0.4, centre + 0.05));
+    });
+  }
+
+  it('traverses all five region centres on both domains', () => {
+    for (const id of ['plane-100km', 'sphere-10km'] as const) {
+      const domain = domainPreset(id);
+      for (let i = 0; i < 5; i++) {
+        const ground = biomePathView(domain, i / 4).ground;
+        const u = domain.kind === 'plane' ? ground[0] / domain.sizeM : Math.atan2(ground[0], ground[2]) / 1.8;
+        expect(u).toBeCloseTo(-0.4 + 0.2 * i, 10);
+      }
+    }
+  });
+
+  it('lists both domains, all baseline poses, traversals, targets and the alternating floor cases in v4', () => {
+    const suite = LOD_SURFACE_TEST_HISTORY.find((item) => item.id === 'lod-surface-terrain' && item.version === 4)!;
+    for (const domain of ['plane-100km', 'sphere-10km']) {
+      for (const pose of [...POSES, 'biome-mountain', 'biome-canyon']) expect(suite.scenarios.some((item) => item.id === `biome-mix-${domain}-${pose}`)).toBeTrue();
+      expect(suite.scenarios.find((item) => item.id === `biome-mix-${domain}-traverse`)?.settings.motion).toBe('biome-sweep');
+    }
+    expect(suite.scenarios.filter((item) => item.id.startsWith('biome-mix-floor-')).map((item) => item.settings.cellPixels)).toEqual([2, 4, 2, 4]);
+  });
+});
+
 describe('Plan 059 CPU twin error metric', () => {
   it('takes nearest-rank percentiles', () => {
     expect(percentile([], 0.95)).toBe(0);
@@ -409,7 +465,7 @@ describe('Plan 059 suite lod-surface-terrain', () => {
 
   it('is the last entry after the untouched baseline versions, and a valid history', () => {
     expect(history.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
-      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3',
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4',
     ]);
     expect(() => validateTestHistory(history)).not.toThrow();
     expect(terrain.purpose).toBe('performance');
@@ -418,11 +474,12 @@ describe('Plan 059 suite lod-surface-terrain', () => {
   });
 
   it('groups the terrain v2 sweep cases with the cases of their source and domain', () => {
-    const keys = latest.scenarios.map((scenario) => `${scenario.settings.source}|${scenario.settings.domain}`);
+    const v3 = history.find((suite) => suite.id === 'lod-surface-terrain' && suite.version === 3)!;
+    const keys = v3.scenarios.map((scenario) => `${scenario.settings.source}|${scenario.settings.domain}`);
     const runs = keys.filter((key, n) => n === 0 || key !== keys[n - 1]);
     expect(new Set(runs).size).toBe(runs.length);
-    expect(latest.scenarios.length).toBe(terrain.scenarios.length + 2);
-    for (const scenario of latest.scenarios.filter((item) => item.settings.motion === 'sweep')) {
+    expect(v3.scenarios.length).toBe(terrain.scenarios.length + 2);
+    for (const scenario of v3.scenarios.filter((item) => item.settings.motion === 'sweep')) {
       expect(sourceSupports(scenario.settings.source as HeightSourceId, domainPreset(scenario.settings.domain as DomainPresetId).kind)).toBeTrue();
     }
   });
@@ -431,7 +488,7 @@ describe('Plan 059 suite lod-surface-terrain', () => {
     const ids = terrain.scenarios.map((scenario) => scenario.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.length).toBe(36);
-    for (const { source, domains } of TERRAIN_CASES) {
+    for (const { source, domains } of TERRAIN_CASES.filter((entry) => entry.source !== 'biome-mix')) {
       for (const domain of domains) for (const pose of POSES) expect(ids).toContain(`${source}-${domain}-${pose}`);
     }
     const controls = terrain.scenarios.filter((scenario) => crackExpectation(scenario.settings) === 'some');
@@ -449,7 +506,7 @@ describe('Plan 059 suite lod-surface-terrain', () => {
     const keys = terrain.scenarios.map((scenario) => `${scenario.settings.source}|${scenario.settings.domain}`);
     const runs = keys.filter((key, n) => n === 0 || key !== keys[n - 1]);
     expect(new Set(runs).size).toBe(runs.length);
-    expect(runs.length).toBe(TERRAIN_CASES.reduce((sum, entry) => sum + entry.domains.length, 0));
+    expect(runs.length).toBe(TERRAIN_CASES.filter((entry) => entry.source !== 'biome-mix').reduce((sum, entry) => sum + entry.domains.length, 0));
   });
 });
 

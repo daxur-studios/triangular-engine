@@ -925,6 +925,8 @@ describe('Plan 059 suite', () => {
     expect(times[times.length - 1]).toBeCloseTo(4, 6);
     expect(times.every((t, k) => k === 0 || t >= times[k - 1])).toBeTrue();
     const metric = (name: string) => observation.metrics?.find((item) => item.name === name);
+    expect(metric('pixelsPerTriangleUpperBound')?.samples).toEqual([0.5]);
+    expect(metric('drawCalls')?.samples).toEqual([1]);
     expect(metric('levelChanges')?.samples).toEqual([0, 6, 0, 2]);
     expect(metric('levelChangesPerSecond')?.samples[0]).toBeCloseTo(8 / 4.0, 1);
     expect(metric('levelChangesAll')?.samples[0]).toBeCloseTo(16 / 4.0, 1);
@@ -938,7 +940,7 @@ describe('Plan 059 suite versions and hysteresis', () => {
 
   it('lists the versions oldest first with the latest terrain suite last', () => {
     expect(LOD_SURFACE_TEST_HISTORY.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
-      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3',
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-baseline@4', 'lod-surface-terrain@1', 'lod-surface-terrain@2', 'lod-surface-terrain@3', 'lod-surface-terrain@4',
     ]);
   });
 

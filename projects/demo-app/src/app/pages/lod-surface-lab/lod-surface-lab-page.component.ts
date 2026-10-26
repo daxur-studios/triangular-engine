@@ -7,7 +7,7 @@ import { EngineModule, EngineService, ScreenshotService } from 'triangular-engin
 import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import {
-  POSES, frustumNormals, groundFrame, lookView, panView, poseView, resolveCamera, sweepPathView, zoomPathView, zoomView, type CameraView, type PoseId,
+  POSES, biomePathView, frustumNormals, groundFrame, lookView, panView, poseView, resolveCamera, sweepPathView, zoomPathView, zoomView, type CameraView, type PoseId,
   type ResolvedCamera,
 } from './lod-camera';
 import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
@@ -311,6 +311,7 @@ export class LodSurfaceLabPageComponent {
   private zoomProgress: number | undefined;
   /** Seconds into the scripted sweep of the named pose, or undefined when no sweep runs. */
   private sweepTime: number | undefined;
+  private biomeMotion = false;
   private camera: ResolvedCamera | undefined;
   private drag: { pointerId: number; look: boolean } | undefined;
   private readonly frustum = new Float64Array(12);
@@ -487,7 +488,7 @@ export class LodSurfaceLabPageComponent {
       domain: this.domainId(), warp: this.warp(), source: this.sourceId(), patchCells: this.patchCells(), mode: this.mode(),
       fixedLevel: this.fixedLevel(), cellPixels: this.cellPixels(), leafCap: this.leafCap(), cull: this.cull(), hysteresis: this.hysteresis(), folding: this.folding(),
       injectedGap: this.injectedGap(), pose: this.poseId(), view: this.view(), wireframe: this.wireframe(), bounds: this.bounds(),
-      ...(this.zoomProgress !== undefined ? { motion: 'zoom' as const } : this.sweepTime !== undefined ? { motion: 'sweep' as const } : {}),
+      ...(this.zoomProgress !== undefined ? { motion: this.biomeMotion ? 'biome-sweep' as const : 'zoom' as const } : this.sweepTime !== undefined ? { motion: 'sweep' as const } : {}),
     };
   }
 
@@ -510,7 +511,8 @@ export class LodSurfaceLabPageComponent {
     this.setWireframe(settings.wireframe);
     this.setBounds(settings.bounds);
     this.setPose(settings.pose);
-    this.zoomProgress = settings.motion === 'zoom' ? 0 : undefined;
+    this.biomeMotion = settings.motion === 'biome-sweep';
+    this.zoomProgress = settings.motion === 'zoom' || this.biomeMotion ? 0 : undefined;
     this.sweepTime = settings.motion === 'sweep' ? 0 : undefined;
   }
 
@@ -624,7 +626,7 @@ export class LodSurfaceLabPageComponent {
   }
 
   private currentView(): CameraView {
-    if (this.zoomProgress !== undefined) return zoomPathView(this.domain, this.zoomProgress);
+    if (this.zoomProgress !== undefined) return this.biomeMotion ? biomePathView(this.domain, this.zoomProgress) : zoomPathView(this.domain, this.zoomProgress);
     if (this.sweepTime !== undefined) return sweepPathView(this.domain, this.poseId(), this.sweepTime);
     return this.freeCamera() ? this.freeView : poseView(this.poseId(), this.domain);
   }

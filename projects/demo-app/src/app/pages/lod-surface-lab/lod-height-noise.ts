@@ -9,7 +9,7 @@ import { cellPlanetFor, cellPlanetSampler, cellPlanetWorld, cliffSampler, type C
  */
 
 /** Identifiers of the baked sources that a worker can rebuild by name (functions do not cross `postMessage`). */
-export type BakedSourceId = 'noise' | 'bumps-baked' | 'cell-planet' | 'cliff';
+export type BakedSourceId = 'noise' | 'bumps-baked' | 'cell-planet' | 'cliff' | 'biome-mix';
 
 /** Axis multipliers of the lattice hash; one per axis so a corner is the xor of three products. */
 const HASH_X = 0x27d4eb2d;
@@ -120,6 +120,39 @@ export function bakedBumpsSampler(layout: BakeLayout): HeightSampler {
   };
 }
 
+/** Five regions run from x=-0.4 to x=0.4. Sphere longitude uses 1.8 radians per unit;
+ * latitude fades the strip out before the longitude wrap, preserving continuity everywhere. */
+export function biomeMixSampler(layout: BakeLayout): HeightSampler {
+  const amplitude = Math.min(2000, layout.sizeM * 0.06);
+  const smooth = (a: number, b: number, x: number) => {
+    const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  };
+  return (x, y, z) => {
+    const r = Math.hypot(x, y, z);
+    const u = layout.kind === 'plane' ? x / layout.sizeM : Math.atan2(x, z) / 1.8;
+    const v = layout.kind === 'plane' ? z / layout.sizeM : Math.asin(Math.max(-1, Math.min(1, y / r))) / 1.8;
+    const meadow = 3 * Math.sin(22 * u) * Math.cos(19 * v);
+    const hills = amplitude * 0.035 * (1 + Math.sin(28 * u) * Math.cos(24 * v));
+    const warp = valueNoise3(u * 11, v * 11, 0, 59);
+    const ridge = 1 - Math.abs(Math.sin(37 * u + 4 * Math.sin(12 * v) + 2 * warp));
+    const mountain = amplitude * (0.12 + 0.88 * ridge ** 2) * (0.55 + 0.45 * Math.cos(12 * v) ** 2);
+    const radius = Math.hypot((u - 0.2) / 0.12, v / 0.12);
+    const cone = Math.max(0, 1 - radius);
+    const crater = 1 - smooth(0.18, 0.30, radius);
+    const volcano = amplitude * Math.max(0, cone - 0.48 * crater);
+    const canyonDistance = Math.abs(v - 0.055 * Math.sin(24 * u));
+    const canyon = amplitude * 0.23 * smooth(0.015, 0.037, canyonDistance);
+    let h = meadow;
+    h += (hills - h) * smooth(-0.34, -0.26, u);
+    h += (mountain - h) * smooth(-0.14, -0.06, u);
+    h += (volcano - h) * smooth(0.06, 0.14, u);
+    h += (canyon - h) * smooth(0.26, 0.34, u);
+    if (layout.kind === 'sphere') h *= (1 - smooth(0.38, 0.48, Math.abs(v))) * (1 - smooth(0.55, 0.7, Math.abs(u)));
+    return h;
+  };
+}
+
 /** A sampler and what it cost to make: the cell planet builds a world first (seconds), the others are free. */
 export interface BakeSource {
   readonly sampler: HeightSampler;
@@ -136,6 +169,7 @@ export function bakeSourceFor(id: BakedSourceId, layout: BakeLayout, planet: Cel
     case 'noise': return { sampler: noiseSampler(layout) };
     case 'bumps-baked': return { sampler: bakedBumpsSampler(layout) };
     case 'cliff': return { sampler: cliffSampler(layout) };
+    case 'biome-mix': return { sampler: biomeMixSampler(layout) };
     case 'cell-planet': {
       if (layout.kind !== 'sphere') throw new Error('The cell planet source is a sphere source');
       const { world, buildMs } = cellPlanetWorld(planet);

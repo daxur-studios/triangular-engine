@@ -183,7 +183,7 @@ measured on the RTX 3080 before the next starts:
    cap unculled sweep churn falls to 0, culled by about a quarter. RTX 3080 rerun 2026-10-26: on-screen changes fall
    21–32% (plane 110 to 83 against its no-hysteresis partner), 0 crack px; about 80 a second remain, see the runbook.*
    **3b. Biome-mix source and a triangle budget** (added 2026-10-26 by the owner, ahead of the slope criterion;
-   proposal, not built). Details below the list.
+   proposal). Details below the list. *Built 2026-10-26: terrain v4 adds the biome source, traversals, target views and 2/4 px ABAB; 149 lab specs green and 20 headless cases have 0 crack px. The cap masks the floor comparison and canyon appearance needs review; see the runbook.*
 4. **Slope criterion** (from M2), measured ABAB in the terrain suite, on the biome-mix source among others.
 5. **M5:** edits and the collider patch.
 6. **M6:** cliffs.

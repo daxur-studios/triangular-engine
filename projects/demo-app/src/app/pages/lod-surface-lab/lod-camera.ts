@@ -7,7 +7,7 @@ import type { HeightSource } from './lod-height';
  * render origin and only turns (the surface is drawn camera-relative).
  */
 
-export type PoseId = 'eye-2m' | 'low-200m' | 'mid-5km' | 'horizon' | 'orbit';
+export type PoseId = 'eye-2m' | 'low-200m' | 'mid-5km' | 'horizon' | 'orbit' | 'biome-mountain' | 'biome-canyon';
 
 export interface CameraView {
   /** Plane: ground x, z in metres. Sphere: a ground direction (normalised when resolved). */
@@ -33,6 +33,7 @@ const SPHERE_GROUND: Vec3 = [0.9, 0.85, 1];
 export function poseView(id: PoseId, domain: LodDomain): CameraView {
   const ground = domain.kind === 'plane' ? PLANE_GROUND : SPHERE_GROUND;
   const headingRad = domain.kind === 'plane' ? 0.6 : -0.75;
+  if (id === 'biome-mountain' || id === 'biome-canyon') return biomeView(domain, id === 'biome-mountain' ? -0.04 : 0.36);
   switch (id) {
     case 'eye-2m': return { ground, altitudeM: 2, headingRad, pitchRad: -8 * DEG };
     case 'low-200m': return { ground, altitudeM: 200, headingRad, pitchRad: -15 * DEG };
@@ -40,6 +41,22 @@ export function poseView(id: PoseId, domain: LodDomain): CameraView {
     case 'horizon': return { ground, altitudeM: 50, headingRad, pitchRad: 0 };
     case 'orbit': return { ground, altitudeM: domain.kind === 'plane' ? 120_000 : 2 * domain.sizeM, headingRad, pitchRad: -90 * DEG };
   }
+}
+
+/** A camera on the region strip, looking along it. The plane and sphere use the same biome coordinates. */
+export function biomeView(domain: LodDomain, u: number): CameraView {
+  const angle = 1.8 * u;
+  return {
+    ground: domain.kind === 'plane' ? [u * domain.sizeM, 0, 0] : [Math.sin(angle), 0, Math.cos(angle)],
+    altitudeM: domain.kind === 'plane' ? 3000 : 900,
+    headingRad: Math.PI / 2,
+    pitchRad: -35 * DEG,
+  };
+}
+
+/** A single traversal of the five region centres, from meadow to canyon. */
+export function biomePathView(domain: LodDomain, t: number): CameraView {
+  return biomeView(domain, -0.4 + 0.8 * Math.max(0, Math.min(1, t)));
 }
 
 export interface ResolvedCamera {

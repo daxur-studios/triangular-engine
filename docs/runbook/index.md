@@ -32,5 +32,6 @@ tags: [runbook, index]
 | [Engine Docs Ship With Entry Points](/docs/runbook/064_engine_docs_ship_with_entry_points.md) | [Implementation plan](/docs/plans/064_engine_docs_ship_with_entry_points.md) |
 | [Composite Cell Planet on WebGPURenderer](/docs/runbook/065_composite_cell_planet.md) | [Implementation plan](/docs/plans/065_composite_cell_planet.md) |
 | [Engineering Records and Development Map](/docs/runbook/066_engineering_records_and_development_map.md) | [PLAN-066](/docs/plans/066_engineering_records_and_development_map.md) |
+| [Test Cost Breakdown and Budget View](/docs/runbook/067_test-cost-breakdown.md) | [PLAN-067](/docs/plans/067_test-cost-breakdown.md) |
 
 Existing records retain their `docs/runbook/` paths. Legacy runbooks `001`–`042` retain their historical formats; new work uses reciprocal pairs. [Convention](/docs/plans-and-runbooks.md).

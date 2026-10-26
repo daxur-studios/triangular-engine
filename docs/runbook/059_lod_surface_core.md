@@ -908,3 +908,38 @@ pipelines) may react to load differently.
   the first run checks that headless WebGPU picks that adapter.
 - **A cost-breakdown view (idea).** The owner asked for a view of each test's cost by area (draw calls, memory, GPU and
   CPU time), and a combined view for terrain plus material, clouds and sky. Not part of this plan; it needs its own record.
+
+## 2026-10-26 — Biome mix, terrain v4 (headless, noisy)
+
+Built `biome-mix` for the plane and 10 km sphere, through the worker and the existing texture and min/max pyramid. A strip places meadow, hills, ridged mountains, a cratered cone and a winding canyon side by side; a traversal moves across the strip on each domain. Terrain v4 adds the five baseline poses, a mountain and canyon pose, the traversal on each domain, and four alternating 2/4 px mountain cases. Earlier suite definitions remain. The pixel metric is canvas device pixels divided by drawn surface triangles, an upper bound; draw calls are also a metric.
+
+The selector's `cellPixels` floor clamps the target **projected cell-edge length**, not triangle area: `max(cellPixels, 2) * pixelAngle` enters the distance criterion. The ABAB cases compare target values 2 and 4 at the same view, not two different global constants. All four hit the 1,024-leaf cap, drew exactly the same 1,626,112 triangles and gave 1.659 canvas pixels per triangle. The experiment cannot isolate the floor under that cap; repeat at a view or cap where both settings are not budget-limited.
+
+The prescribed headless hardware, standard, noisy launches ran one per case on NVIDIA WebGPU. All 20 automated checks passed; all performance verdicts are inconclusive because headless hardware/power was not independently verified. Some cases warned GPU throttling; do not treat noisy timings as a clean hardware baseline. These numbers are from fingerprint `0efa22a9-910c6ac7` before subsequent spec and case-registry-only changes. Drawn counts and pixels per triangle are the last measured frame; traversal GPU and CPU timings cover its full window. The crack probe runs after motion returns to the named pose, so traversal crack counts do not check the whole path.
+
+| Case | Crack px | Triangles | Draws | Canvas px / triangle upper bound | Texture MB | GPU scene med / p95 ms | Selection CPU p95 ms | Bake ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| floor-2-1 | 0 | 1626112 | 2 | 1.659 | 4.203 | 0.242 / 0.245 | 0.1 | 493.2 |
+| plane-100km-eye-2m | 0 | 1519616 | 2 | 1.775 | 4.203 | 0.158 / 0.165 | 0.1 | 379 |
+| plane-100km-low-200m | 0 | 1533952 | 2 | 1.759 | 4.203 | 0.213 / 0.217 | 0.1 | 393.4 |
+| plane-100km-mid-5km | 0 | 1370112 | 2 | 1.969 | 4.203 | 0.204 / 0.207 | 0.1 | 373.4 |
+| plane-100km-horizon | 0 | 1474560 | 2 | 1.83 | 4.203 | 0.197 / 0.2 | 0.1 | 424 |
+| plane-100km-orbit | 0 | 131072 | 2 | 20.583 | 4.203 | 0.033 / 0.034 | 0.1 | 385.3 |
+| plane-100km-biome-mountain | 0 | 1626112 | 2 | 1.659 | 4.203 | 0.241 / 0.244 | 0.1 | 465.2 |
+| plane-100km-biome-canyon | 0 | 991232 | 2 | 2.722 | 4.203 | 0.172 / 0.181 | 0.1 | 386.1 |
+| plane-100km-traverse | 0 | 894976 | 2 | 3.014 | 4.203 | 0.233 / 0.251 | 0.5 | 428 |
+| sphere-10km-eye-2m | 0 | 1423360 | 2 | 1.895 | 25.215 | 0.18 / 0.187 | 0.1 | 3700.1 |
+| sphere-10km-low-200m | 0 | 1503232 | 2 | 1.795 | 25.215 | 0.187 / 0.195 | 0.1 | 3693.6 |
+| sphere-10km-mid-5km | 0 | 315392 | 2 | 8.554 | 25.215 | 0.032 / 0.034 | 0.1 | 3596.5 |
+| sphere-10km-horizon | 0 | 1472512 | 2 | 1.832 | 25.215 | 0.177 / 0.184 | 0.1 | 3748.1 |
+| sphere-10km-orbit | 0 | 466944 | 2 | 5.778 | 25.215 | 0.066 / 0.068 | 0.1 | 3190.4 |
+| sphere-10km-biome-mountain | 0 | 1638400 | 2 | 1.647 | 25.215 | 0.199 / 0.202 | 0.1 | 3123.2 |
+| sphere-10km-biome-canyon | 0 | 1615872 | 2 | 1.67 | 25.215 | 0.219 / 0.225 | 0.1 | 3095.5 |
+| sphere-10km-traverse | 0 | 1585152 | 2 | 1.702 | 25.215 | 0.219 / 0.236 | 0.5 | 3088.4 |
+| floor-4-2 | 0 | 1626112 | 2 | 1.659 | 4.203 | 0.248 / 0.252 | 0.1 | 497.8 |
+| floor-2-3 | 0 | 1626112 | 2 | 1.659 | 4.203 | 0.248 / 0.252 | 0.1 | 457.8 |
+| floor-4-4 | 0 | 1626112 | 2 | 1.659 | 4.203 | 0.242 / 0.244 | 0.1 | 468.1 |
+
+The floor thumbnails are visually alike: ridges show as narrow, jagged pale bands. The plane canyon thumbnail looks almost flat and does not clearly show the winding cut. Zero crack pixels do not establish that the crests and canyon look right or that no triangles are inverted. The 100 km plane's roughly 98 m texels may limit steep detail; this has not been visually separated from the camera and simple shading. Visual review, a better canyon view and an uncapped floor comparison remain open.
+
+Verification: 142 lab specs before, 149 after, all green with the prescribed headless command; `npm run build:triangular-engine` passed. No GPU height readback or visual acceptance was performed.
