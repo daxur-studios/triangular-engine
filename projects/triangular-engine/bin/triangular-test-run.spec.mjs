@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { awayVerdict, buildRunUrl, chromeArgs, createRunQueue, findChrome, findResult, getJson, parseArgs, quietVerdict } from './triangular-test-run.mjs';
+import { awayVerdict, buildRunUrl, chromeArgs, createRunQueue, findChrome, findResult, getJson, HEADLESS_WINDOW, needsAwaySwitch, noResultMessage, parseArgs, quietVerdict } from './triangular-test-run.mjs';
 
 test('awayVerdict: no switch runs; otherwise only while away and unexpired, and a broken file holds back', () => {
   const now = Date.parse('2026-10-21T15:00:00Z');
@@ -97,6 +97,70 @@ test('chromeArgs use a throwaway profile, full screen and the precise GPU timer 
   const path = findChrome('win32', (p) => p.startsWith('C:\\PF'), { PROGRAMFILES: 'C:\\PF' });
   assert.equal(path, join('C:\\PF', 'Google', 'Chrome', 'Application', 'chrome.exe'));
   assert.equal(findChrome('linux', () => false, {}), undefined);
+});
+
+test('chromeArgs keep a covered window rendering, with one merged --disable-features', () => {
+  const args = chromeArgs('C:\tmp\p', 'http://x/');
+  for (const flag of ['--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling']) {
+    assert.ok(args.includes(flag), flag);
+  }
+  const features = args.filter((arg) => arg.startsWith('--disable-features'));
+  assert.equal(features.length, 1, 'a second --disable-features would replace the first');
+  assert.ok(features[0].slice('--disable-features='.length).split(',').includes('CalculateNativeWinOcclusion'));
+});
+
+test('headless-hardware starts hidden headless Chrome on the real GPU at a fixed window size', () => {
+  const args = chromeArgs('C:\\tmp\\p', 'http://x/', { profile: 'headless-hardware' });
+  assert.ok(args.includes('--headless=new'));
+  assert.ok(!args.includes('--start-fullscreen'));
+  for (const flag of ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=d3d11', '--enable-unsafe-webgpu', '--enable-webgpu-developer-features',
+    '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling']) assert.ok(args.includes(flag), flag);
+  assert.ok(!args.includes('--disable-gpu'));
+  assert.ok(!args.some((arg) => /swiftshader/i.test(arg)));
+  assert.ok(args.includes(`--window-size=${HEADLESS_WINDOW.width},${HEADLESS_WINDOW.height}`));
+  assert.ok(args.includes(`--force-device-scale-factor=${HEADLESS_WINDOW.scaleFactor}`));
+  assert.equal(args.at(-1), 'http://x/');
+  assert.ok(chromeArgs('p', 'http://x/', { profile: 'headless-hardware', windowSize: { width: 1280, height: 720 } }).includes('--window-size=1280,720'));
+});
+
+test('visible profiles keep the full-screen args: no headless, window size or GPU overrides', () => {
+  for (const profile of ['visible-browser', 'human-observed']) {
+    const args = chromeArgs('p', 'http://x/', { profile });
+    assert.ok(args.includes('--start-fullscreen'));
+    assert.ok(!args.some((arg) => /^--(headless|window-size|force-device-scale-factor|use-angle|enable-gpu|ignore-gpu-blocklist|enable-unsafe-webgpu)/.test(arg)));
+  }
+  assert.deepEqual(chromeArgs('p', 'http://x/'), chromeArgs('p', 'http://x/', { profile: 'visible-browser' }));
+});
+
+test('--window-size is parsed as WxH and checked', () => {
+  const base = ['--url', 'http://x/', '--suite', 's', '--version', '1'];
+  assert.deepEqual(parseArgs([...base, '--window-size', '1280x720']).windowSize, { width: 1280, height: 720 });
+  assert.equal(parseArgs(base).windowSize, undefined);
+  assert.throws(() => parseArgs([...base, '--window-size', '1280']), /--window-size/);
+  assert.throws(() => parseArgs([...base, '--window-size', 'axb']), /--window-size/);
+});
+
+test('only visible profiles wait for the away switch', () => {
+  assert.equal(needsAwaySwitch('headless-hardware'), false);
+  assert.equal(needsAwaySwitch('visible-browser'), true);
+  assert.equal(needsAwaySwitch('human-observed'), true);
+});
+
+test('a headless-hardware row is matched by profile; a headed row of the same suite is not', () => {
+  const since = Date.parse('2026-10-21T10:59:59Z');
+  const rows = [
+    { suite: 's', version: 1, profile: 'visible-browser', mode: 'standard', startedAt: '2026-10-21T11:00:00Z', file: 'headed' },
+    { suite: 's', version: 1, profile: 'headless-hardware', mode: 'standard', startedAt: '2026-10-21T11:00:01Z', file: 'headless' },
+  ].map((row) => JSON.stringify(row)).join('\n');
+  assert.equal(findResult(rows, { suite: 's', version: 1, since, profile: 'headless-hardware', mode: 'standard' })?.file, 'headless');
+});
+
+test('noResultMessage reports a timeout as a timeout and a real early close as Chrome closed', () => {
+  const timeout = noResultMessage({ chromeClosed: false, timeoutMin: 30 });
+  assert.match(timeout, /timed out/);
+  assert.match(timeout, /30 min/);
+  assert.doesNotMatch(timeout, /Chrome closed/);
+  assert.match(noResultMessage({ chromeClosed: true, timeoutMin: 30 }), /^Chrome closed/);
 });
 
 test('getJson sends a *.localhost request to 127.0.0.1 with the name in the Host header', async () => {

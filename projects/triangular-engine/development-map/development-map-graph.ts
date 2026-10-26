@@ -4,6 +4,7 @@ import type { DevelopmentMapExample } from './development-map.types';
 export interface DevelopmentMapExampleGraph {
   readonly graph: MermaidRuntime.Graph;
   readonly nodeKinds: Record<string, MermaidRuntime.NodeKindStyle>;
+  readonly sourceLinks: Record<string, { href: string; label: string }>;
   readonly progress: number | null;
   readonly readiness: string | null;
   readonly status: string | null;
@@ -54,6 +55,7 @@ export function buildDevelopmentMapExampleGraph(
   const nodes: MermaidRuntime.Node[] = [];
   const transitions: MermaidRuntime.Transition[] = [];
   const nodeIds = new Set<string>();
+  const sourceLinks: Record<string, { href: string; label: string }> = {};
   const addNode = (node: MermaidRuntime.Node): void => {
     if (nodeIds.has(node.id)) return;
     nodes.push(node);
@@ -70,6 +72,7 @@ export function buildDevelopmentMapExampleGraph(
       .filter(Boolean)
       .join('\n'),
   });
+  sourceLinks[pageId] = { href: example.href, label: 'Open example' };
 
   let done = 0;
   let total = 0;
@@ -122,6 +125,12 @@ export function buildDevelopmentMapExampleGraph(
         .filter(Boolean)
         .join('\n'),
     });
+    if (document.sourceHref) {
+      sourceLinks[documentId] = {
+        href: document.sourceHref,
+        label: `Open ${document.id.startsWith('plan-') ? 'plan' : 'Engineering Record'}`,
+      };
+    }
     transitions.push({ from: pageId, to: documentId, label: 'tracked by' });
 
     if (document.progress && document.progress.total > 0) {
@@ -189,6 +198,12 @@ export function buildDevelopmentMapExampleGraph(
             .filter(Boolean)
             .join('\n'),
         });
+        if (concern.sourceHref || document.sourceHref) {
+          sourceLinks[concernNodeId] = {
+            href: concern.sourceHref || document.sourceHref!,
+            label: concern.sourceLabel || 'Open source plan',
+          };
+        }
         transitions.push({
           from: phaseNodeId,
           to: concernNodeId,
@@ -210,6 +225,10 @@ export function buildDevelopmentMapExampleGraph(
         type: 'related document',
         detail: `Relationship: ${relation.type}\nSource: ${relation.href}`,
       });
+      sourceLinks[targetId] = {
+        href: relation.href,
+        label: `Open related ${relation.type}`,
+      };
       transitions.push({
         from: documentId,
         to: targetId,
@@ -221,6 +240,7 @@ export function buildDevelopmentMapExampleGraph(
   return {
     graph: { nodes, transitions },
     nodeKinds: NODE_KINDS,
+    sourceLinks,
     progress: total > 0 ? Math.round((done / total) * 100) : null,
     readiness,
     status:

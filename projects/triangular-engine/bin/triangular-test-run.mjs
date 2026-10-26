@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Runs one browser test suite unattended: waits its turn in a machine-wide queue, waits for the owner to be away (if the
-// machine has an away switch) and for a quiet GPU, opens a
-// dedicated full-screen Chrome at the suite's autostart URL, waits for the receiver to save the result, closes that
+// machine has an away switch; not for --profile headless-hardware, which never takes the screen) and for a quiet GPU, opens a
+// dedicated full-screen Chrome (hidden headless Chrome on the real GPU for headless-hardware) at the suite's autostart URL, waits for the receiver to save the result, closes that
 // Chrome and prints the summary. Dev only, local only. Made for agents: start it in the background and wait for exit.
 //   triangular-test-run --url http://my-app.localhost:4200/lab --suite my-suite --version 1 [options]
 // Exit codes: 0 saved and passed, 1 saved but not passed, 2 no result in time (or Chrome closed), 3 the owner never went
@@ -27,13 +27,18 @@ const DEFAULTS = {
   version: undefined, profile: 'visible-browser', mode: 'standard', repetitions: 1, thumbnails: true, timeoutMin: 30,
   quietPct: 10, quietWindowS: 10, quietWaitMin: 120, awayWaitMin: 480, chrome: undefined, keepOpen: false,
 };
+/**
+ * Headless window size in CSS pixels plus device scale factor. They are what the headed full-screen runs on the owner's
+ * machine recorded (viewport 1707x872, devicePixelRatio 1.5, so 2560x1308 device pixels): same canvas pixel count.
+ */
+export const HEADLESS_WINDOW = { width: 1707, height: 872, scaleFactor: 1.5 };
 /** Browsers are skipped when judging quiet (the user's own Chrome idles on the GPU); their load still counts. */
 const BROWSER_PROCESS = /^(chrome|msedge|firefox|opera|brave|vivaldi)(\.exe)?$/i;
 
 export function parseArgs(argv) {
   const out = { ...DEFAULTS };
   const flags = { '--url': 'url', '--suite': 'suite', '--version': 'version', '--profile': 'profile', '--mode': 'mode', '--repetitions': 'repetitions',
-    '--timeout-min': 'timeoutMin', '--quiet-pct': 'quietPct', '--quiet-window-s': 'quietWindowS', '--quiet-wait-min': 'quietWaitMin', '--away-wait-min': 'awayWaitMin', '--chrome': 'chrome' };
+    '--timeout-min': 'timeoutMin', '--quiet-pct': 'quietPct', '--quiet-window-s': 'quietWindowS', '--quiet-wait-min': 'quietWaitMin', '--away-wait-min': 'awayWaitMin', '--chrome': 'chrome', '--window-size': 'windowSize' };
   const numbers = new Set(['version', 'repetitions', 'timeoutMin', 'quietPct', 'quietWindowS', 'quietWaitMin', 'awayWaitMin']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -42,6 +47,12 @@ export function parseArgs(argv) {
     const key = flags[arg];
     if (!key || i + 1 >= argv.length) throw new Error(`Unknown or incomplete argument: ${arg}`);
     const value = argv[++i];
+    if (key === 'windowSize') {
+      const match = /^(\d{3,5})x(\d{3,5})$/i.exec(value);
+      if (!match) throw new Error('--window-size is <width>x<height> in CSS pixels, e.g. 1707x872');
+      out.windowSize = { width: Number(match[1]), height: Number(match[2]) };
+      continue;
+    }
     out[key] = numbers.has(key) ? Number(value) : value;
   }
   if (!out.url || !out.suite || out.version === undefined) throw new Error('--url, --suite and --version are required');
@@ -177,10 +188,34 @@ export function findChrome(platform = process.platform, exists = existsSync, env
   return candidates.find((path) => exists(path));
 }
 
-/** A fresh profile does not carry chrome://flags, so the precise GPU timer flag goes on the command line. */
-export function chromeArgs(profileDir, url) {
-  return [`--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', '--start-fullscreen',
-    '--enable-webgpu-developer-features', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', url];
+/**
+ * A fresh profile does not carry chrome://flags, so the precise GPU timer flag goes on the command line. The rest keep a
+ * window that other windows cover rendering at full rate: without them Windows native occlusion marks it hidden, Chrome
+ * stops producing frames and the run never finishes. `--disable-features` is passed once, with every feature joined.
+ */
+export function chromeArgs(profileDir, url, { profile = 'visible-browser', windowSize } = {}) {
+  const disabledFeatures = ['CalculateNativeWinOcclusion'];
+  // Headless: no screen to take over, so the window has a fixed size (same pixel count as a headed full-screen run) and
+  // Chrome is told to use the real GPU (ANGLE on D3D11) instead of falling back to SwiftShader.
+  const size = windowSize ?? HEADLESS_WINDOW;
+  const display = isHeadlessProfile(profile)
+    ? ['--headless=new', `--window-size=${size.width},${size.height}`, `--force-device-scale-factor=${HEADLESS_WINDOW.scaleFactor}`,
+      '--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=d3d11', '--enable-unsafe-webgpu']
+    : ['--start-fullscreen'];
+  return [`--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', ...display,
+    '--enable-webgpu-developer-features', '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
+    '--disable-backgrounding-occluded-windows', `--disable-features=${disabledFeatures.join(',')}`, url];
+}
+
+/** A headless run takes over no screen. */
+export function isHeadlessProfile(profile) { return profile === 'headless-hardware'; }
+
+/** Does this profile hold back until the owner's "I'm away" switch is on? Visible profiles do; headless does not. */
+export function needsAwaySwitch(profile) { return !isHeadlessProfile(profile); }
+
+/** Why a run ended without a saved row. `chromeClosed` is true only when Chrome went away before the launcher closed it. */
+export function noResultMessage({ chromeClosed, timeoutMin }) {
+  return `${chromeClosed ? 'Chrome closed' : `timed out: no result in ${timeoutMin} min`} before the run was saved`;
 }
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -253,7 +288,8 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
 
   // Hold the head of the queue until the owner is away; a run never takes the screen from someone using it.
   const awayUntil = Date.now() + options.awayWaitMin * 60_000;
-  for (let first = true; ; first = false) {
+  if (!needsAwaySwitch(options.profile)) log('headless profile: not waiting for the owner to be away');
+  else for (let first = true; ; first = false) {
     const verdict = awayVerdict(readAway());
     if (verdict.ok) { log(verdict.reason); break; }
     if (Date.now() >= awayUntil) { console.error(`[triangular-test-run] owner not away in ${options.awayWaitMin} min: ${verdict.reason}`); return 3; }
@@ -275,7 +311,7 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
   const profileDir = mkdtempSync(join(tmpdir(), 'triangular-test-chrome-'));
   const since = Date.now() - 2000;
   log(`opening ${url}`);
-  const chrome = spawn(chromePath, chromeArgs(profileDir, url), { stdio: 'ignore', windowsHide: false });
+  const chrome = spawn(chromePath, chromeArgs(profileDir, url, options), { stdio: 'ignore', windowsHide: isHeadlessProfile(options.profile) });
   let chromeGone = false;
   chrome.on('exit', () => { chromeGone = true; });
   chrome.on('error', () => { chromeGone = true; });
@@ -287,13 +323,14 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
     try { row = findResult(readFileSync(index, 'utf8'), { suite: options.suite, version: options.version, since, profile: options.profile, mode: options.mode }); } catch { /* no index yet */ }
     if (row) break;
   }
+  const chromeClosed = chromeGone; // read before closeChrome, which makes the exit handler set it too
   if (!options.keepOpen) {
     closeChrome(chrome);
     await sleep(1000);
     try { rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }); } catch { /* temp folder; the OS cleans it */ }
   }
   if (!row) {
-    console.error(`[triangular-test-run] ${chromeGone ? 'Chrome closed' : `no result in ${options.timeoutMin} min`} before the run was saved`);
+    console.error(`[triangular-test-run] ${noResultMessage({ chromeClosed, timeoutMin: options.timeoutMin })}`);
     return 2;
   }
   log(`saved ${row.file}: auto=${row.automatedVerdict} perf=${row.performanceVerdict} status=${row.status}`);

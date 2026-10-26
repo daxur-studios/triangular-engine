@@ -447,7 +447,7 @@
 >
   @if (activeGraph(); as selected) {
     <div class="graph-dialog-shell">
-      <header class="graph-dialog-header">
+      <header class="branch-header">
         <div>
           <p class="eyebrow">{{ selected.branchTitle }} · relationship graph</p>
           <h2 id="relationship-graph-title">{{ selected.example.title }}</h2>
@@ -465,22 +465,48 @@
           ×
         </button>
       </header>
-      <mr-task-graph
-        class="expanded-graph"
-        [nodes]="selected.card.graph.nodes"
-        [transitions]="selected.card.graph.transitions ?? []"
-        [groups]="selected.card.graph.groups ?? []"
-        [nodeKinds]="selected.card.nodeKinds"
-        [rootLabel]="selected.example.title"
-        [showInspector]="true"
-        [showMinimap]="true"
-        [showBreadcrumb]="true"
-        [direction]="'LR'"
-      />
-      <p class="graph-dialog-help">
-        Node icons identify pages, plans and records, phases, review items, and
-        related documents.
-      </p>
+      <div class="graph-explorer">
+        <mr-task-graph
+          class="expanded-graph"
+          [nodes]="selected.card.graph.nodes"
+          [transitions]="selected.card.graph.transitions ?? []"
+          [groups]="selected.card.graph.groups ?? []"
+          [nodeKinds]="selected.card.nodeKinds"
+          [rootLabel]="selected.example.title"
+          [selectedNodeId]="selectedGraphNodeId()"
+          [showInspector]="false"
+          [showMinimap]="false"
+          [showBreadcrumb]="true"
+          [direction]="'LR'"
+          [farLabel]="graphFarLabel"
+          (nodeSelected)="selectGraphNode($event)"
+        />
+        <aside class="graph-node-inspector" aria-label="Selected graph node details" aria-live="polite">
+          @if (selectedGraphNode(); as node) {
+            <header>
+              <p class="eyebrow">{{ node.type || "Graph node" }}</p>
+              <h3>{{ node.title }}</h3>
+              @if (node.subtitle) {
+                <p>{{ node.subtitle }}</p>
+              }
+              <span class="status" [attr.data-status]="node.status">
+                {{ node.status }}
+              </span>
+            </header>
+            @if (node.detail) {
+              <section>
+                <h4>Details</h4>
+                <p class="graph-node-detail">{{ node.detail }}</p>
+              </section>
+            }
+            @if (selectedGraphSource(); as source) {
+              <a class="example-link graph-node-source" [href]="source.href">{{ source.label }} ↗</a>
+            }
+          } @else {
+            <p>Select a node to inspect its details.</p>
+          }
+        </aside>
+      </div>
     </div>
   }
 </dialog>

@@ -204,6 +204,15 @@ describe('DevelopmentMapComponent', () => {
       fixture.componentInstance.activeGraph()?.card.nodeKinds['phase'].icon,
     ).toContain('<svg');
 
+    fixture.componentInstance.selectGraphNode('concern-plan-1-Q1');
+    fixture.detectChanges();
+    expect(
+      page.querySelector('.graph-node-inspector')?.textContent,
+    ).toContain('Blocks: m1');
+    expect(
+      page.querySelector<HTMLAnchorElement>('.graph-node-source')?.getAttribute('href'),
+    ).toBe('#plan-1');
+
     fixture.componentInstance.closeGraph();
     fixture.detectChanges();
     expect(dialog?.open).toBeFalse();

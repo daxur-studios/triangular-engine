@@ -11,6 +11,7 @@ import { DatePipe } from '@angular/common';
 import {
   GraphCardComponent,
   TaskGraphComponent,
+  type MermaidRuntime,
 } from '@daxur-studios/mermaid-runtime';
 import type {
   DevelopmentMapExample,
@@ -33,12 +34,28 @@ import {
 export class DevelopmentMapComponent {
   /** Project-specific document, example-page and test data, normalized by the host app. */
   readonly project = input.required<DevelopmentMapProject>();
+  /** Keep a short node name visible when the expanded graph is initially fit to the viewport. */
+  readonly graphFarLabel = (node: MermaidRuntime.Node): string =>
+    node.title.length > 12 ? `${node.title.slice(0, 11).trimEnd()}…` : node.title;
   /** The selected example whose relationship graph is open in the full viewer. */
   readonly activeGraph = signal<{
     example: DevelopmentMapExample;
     branchTitle: string;
     card: DevelopmentMapExampleGraph;
   } | null>(null);
+  readonly selectedGraphNodeId = signal<string | null>(null);
+  readonly selectedGraphNode = computed(() => {
+    const active = this.activeGraph();
+    const nodeId = this.selectedGraphNodeId();
+    return (
+      active?.card.graph.nodes.find((node) => node.id === nodeId) ?? null
+    );
+  });
+  readonly selectedGraphSource = computed(() => {
+    const active = this.activeGraph();
+    const nodeId = this.selectedGraphNodeId();
+    return nodeId ? (active?.card.sourceLinks[nodeId] ?? null) : null;
+  });
 
   private readonly graphDialog = viewChild<ElementRef<HTMLDialogElement>>('graphDialog');
 
@@ -103,6 +120,7 @@ export class DevelopmentMapComponent {
       this.exampleCards().get(exampleId) ?? {
         graph: { nodes: [] },
         nodeKinds: {},
+        sourceLinks: {},
         progress: null,
         readiness: null,
         status: null,
@@ -116,6 +134,11 @@ export class DevelopmentMapComponent {
     if (card.graph.nodes.length < 2) return;
 
     this.activeGraph.set({ example, branchTitle, card });
+    this.selectedGraphNodeId.set(
+      card.graph.nodes.find((node) => node.status === 'running')?.id ??
+        card.graph.nodes[0]?.id ??
+        null,
+    );
     const dialog = this.graphDialog()?.nativeElement;
     if (dialog && !dialog.open) dialog.showModal();
   }
@@ -124,10 +147,16 @@ export class DevelopmentMapComponent {
     const dialog = this.graphDialog()?.nativeElement;
     if (dialog?.open) dialog.close();
     this.activeGraph.set(null);
+    this.selectedGraphNodeId.set(null);
   }
 
   onGraphDialogClose(): void {
     this.activeGraph.set(null);
+    this.selectedGraphNodeId.set(null);
+  }
+
+  selectGraphNode(nodeId: string): void {
+    this.selectedGraphNodeId.set(nodeId);
   }
 
   onGraphDialogBackdrop(event: MouseEvent): void {
