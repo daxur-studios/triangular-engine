@@ -10,6 +10,11 @@ Install that optional peer package and its Mermaid Runtime peer dependencies whe
 The project adapter supplies explicit page-to-document links, phase readiness, concern targets and
 document relationships; the viewer does not infer edges from document order.
 
+Cards with relationships can be opened from their graph preview or expand control. The expanded
+Mermaid Runtime view supports pan/zoom, node selection and an inspector with the normalized node
+details. Inline SVG icons and short kind labels distinguish example pages, plans/records, phases,
+review items and related documents.
+
 ```ts
 import { DevelopmentMapComponent, type DevelopmentMapProject } from 'triangular-engine/development-map';
 

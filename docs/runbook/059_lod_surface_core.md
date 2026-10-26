@@ -794,3 +794,39 @@ brings nodes into the frustum, and they outrank kept splits by more than the mar
 An "at the leaf cap" spec shows the margin holds for 5–30 m camera moves and gives way at 60 m, where every new request
 that took budget beat every lost kept split by the margin (3.612 against 3.544). The RTX rerun of the seven sweep cases
 (baseline v4, terrain v3) is next. 142 lab specs pass headless.
+
+## 2026-10-26 — Sweep cases on the RTX 3080 with the hysteretic budget
+
+The seven sweep cases, standard mode, one batch run by the owner (baseline v4, terrain v3, fingerprint
+`8e65d264-18bfd933`). The machine line warns `gpu-busy-before-start` and `other-app-measuring` (one case also
+`gpu-throttled`). Those affect the timings, not the level-change counts, which come from the selector.
+
+| Case | On-screen changes/s, v3 / terrain v2 | Now | All changes/s now |
+| --- | ---: | ---: | ---: |
+| sphere-600km eye-2m (control) | 0 | 0 | 0 |
+| plane-100km low-200m | 111.5 | 82.6 | 332 |
+| plane-100km low-200m, no hysteresis | 107.5 | 110.4 | 379 |
+| sphere-600km mid-5km | 104.1 | 85.8 | 330 |
+| sphere-600km mid-5km, no hysteresis | 107.2 | 109.0 | 368 |
+| cell-planet sphere-10km low-200m | 104.7 | 84.1 | 314 |
+| cliff plane-100km low-200m | 149.4 | 101.6 | 191 |
+
+All cases: 0 crack px, automation pass, GPU scene pass p95 at most 0.22 ms.
+
+### Findings
+
+- **Budget hysteresis works in the browser.** Against its own no-hysteresis partner, the plane falls 25% (110.4 to
+  82.6) and the sphere 21% (109.0 to 85.8). Against the v2 numbers, the cell planet falls 20% and the cliff 32%. The
+  headless calibration predicted 24–28% for culled sweeps.
+- An earlier unattended run of the plane case the same evening gave 79.4, so the number repeats.
+- **About 80 changes a second remain.** The headless specs point at the heading sweep bringing nodes into the frustum,
+  where they outrank kept splits by more than 15%. That may be real change rather than flicker. Not yet shown either way.
+- **The unattended launcher failed for this rerun.** Five of seven runs saved nothing. The test Chrome most likely opened
+  behind other windows and stopped drawing. Each run then hit the 30-minute limit, and the launcher reported it as
+  "Chrome closed" because it closes Chrome before printing the message. Not fixed yet; the owner ran the batch by hand.
+
+### Next
+
+- Tell flicker from real change: count only changes of nodes that were on screen in both frames and whose value
+  stayed within the margin, or run the sweep without culling in the browser.
+- Fix the launcher: keep a covered window drawing, and report a timeout as a timeout.

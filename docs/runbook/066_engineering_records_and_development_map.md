@@ -232,6 +232,15 @@ source data as a limitation rather than fabricating an edge.
 The accepted M5 scope now implements the selected card approach and applies it to Plan 066; it no
 longer compares two layouts. The attention-summary research remains lower priority and non-blocking.
 
+## 2026-10-26 — Expand card graphs on demand
+
+The developer requested that a compact Mermaid graph open as a larger Mermaid Runtime graph,
+with node-level details and SVG icons by node kind. This is an accepted M5 refinement: the card
+preview stays compact; selecting its graph or expand control opens a pan/zoom view with an
+inspector. Page, plan/record, phase, concern and related-document nodes get distinct icons and
+kind labels. The expanded view must preserve only explicit relationships and make their labels
+readable. This remains 2D Mermaid; no Three.js view is added.
+
 ## Structured scope history
 
 <!-- tri:scope-history -->
@@ -246,5 +255,10 @@ longer compares two layouts. The attention-summary research remains lower priori
 - Summary: Implement the selected Mermaid-card presentation and use Plan 066 as its first real input.
 - Reason: Review relationship topology and navigation against actual planning data before adopting the viewer elsewhere.
 - Impact: Replace the M5 layout comparison with a focused implementation and review of data-driven cards.
+<!-- /tri:scope-change -->
+<!-- tri:scope-change id="SC-066-M5-DETAIL" date="2026-10-26" kind="addition" origin="requested" disposition="accepted" scope-ids="m5" -->
+- Summary: Open a compact card graph in an expanded Mermaid Runtime view with node inspection and per-kind SVG icons.
+- Reason: Make branching relationships and their supporting details inspectable without crowding the roadmap cards.
+- Impact: Extend M5 with accessible graph expansion, a pan/zoom detail view, inspector content and node-kind styling.
 <!-- /tri:scope-change -->
 <!-- /tri:scope-history -->

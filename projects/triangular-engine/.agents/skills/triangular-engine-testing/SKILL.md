@@ -187,8 +187,15 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   and wait for it to exit**; do not poll. It queues machine-wide with every other app's launcher, waits for a quiet
   GPU (no game, low load), opens a throwaway full-screen Chrome with `--enable-webgpu-developer-features`, waits for
   the saved result, closes that Chrome and prints the summary. Exit 0 pass, 1 not passed, 2 no result, 3 never
-  quiet, 4 setup error. It takes over the screen: run it only when the user has said the machine is free.
-  Details: `testing/README.md`, "Unattended runs".
+  quiet, 4 setup error. It takes over the screen: run it only when the machine is free.
+- **"I'm away — let queued runs start".** A local dashboard (the Daxur app) has this switch. It writes
+  `triangular-test-away.json` in the OS temp folder, and the launcher waits for it. When the user says it is on, that
+  is permission to run: do not ask again and do not hand them a link to click. Start the launcher yourself for the
+  runs you would have linked, and read the results when it exits. While the switch is off, queued runs wait.
+- **One launch is one saved result.** The launcher returns at the first saved row for its suite and version, so a
+  `testCases` batch in `--url` would be cut off after its first case. To run chosen cases unattended, start one
+  launcher per case, one after another, with `--url "<page>?testCases=<id>"` and that case's own `--suite` and
+  `--version`. Details: `testing/README.md`, "Unattended runs".
 - Without a receiver, JSON copy/paste is the fallback handoff.
 
 Verify the adapter's meaningful checks, cancellation and restoration with the

@@ -545,3 +545,109 @@ details > summary span {
     grid-column: 2;
   }
 }
+
+.graph-expand {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 1px solid var(--dev-map-border);
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--dev-map-bg) 72%, transparent);
+  color: var(--dev-map-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 1rem;
+}
+.graph-expand:hover,
+.graph-expand:focus-visible {
+  border-color: var(--dev-map-accent);
+  color: var(--dev-map-accent);
+}
+
+.graph-dialog {
+  width: min(96vw, 92rem);
+  max-width: none;
+  height: min(92dvh, 66rem);
+  max-height: none;
+  overflow: hidden;
+  border: 1px solid var(--dev-map-border);
+  border-radius: 1rem;
+  padding: 0;
+  background: var(--dev-map-bg, #11131a);
+  color: var(--dev-map-text, #e7e9f0);
+}
+.graph-dialog::backdrop {
+  background: rgb(5 8 14 / 82%);
+  backdrop-filter: blur(4px);
+}
+.graph-dialog-shell {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+.graph-dialog-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--dev-map-border);
+  padding: 1rem 1.25rem;
+}
+.graph-dialog-header .eyebrow {
+  margin-bottom: 0.3rem;
+}
+.graph-dialog-header h2 {
+  margin: 0;
+  font-size: clamp(1.1rem, 2vw, 1.55rem);
+}
+.graph-dialog-header p:not(.eyebrow) {
+  margin: 0.35rem 0 0;
+  color: var(--dev-map-muted);
+  font-size: 0.78rem;
+}
+.graph-dialog-close {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--dev-map-border);
+  border-radius: 0.6rem;
+  background: var(--dev-map-panel);
+  color: var(--dev-map-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 1.5rem;
+  line-height: 1;
+}
+.graph-dialog-close:hover,
+.graph-dialog-close:focus-visible {
+  border-color: var(--dev-map-accent);
+  color: var(--dev-map-accent);
+}
+.expanded-graph {
+  display: block;
+  min-height: 0;
+  flex: 1;
+}
+.graph-dialog-help {
+  margin: 0;
+  border-top: 1px solid var(--dev-map-border);
+  padding: 0.55rem 1rem;
+  color: var(--dev-map-muted);
+  font-size: 0.68rem;
+}
+
+@media (max-width: 700px) {
+  .graph-dialog {
+    width: 100vw;
+    height: 100dvh;
+    margin: 0;
+    border-radius: 0;
+  }
+  .graph-dialog-header {
+    padding: 0.8rem;
+  }
+}

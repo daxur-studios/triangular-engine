@@ -183,4 +183,30 @@ describe('DevelopmentMapComponent', () => {
       page.querySelector<HTMLAnchorElement>('a[href="/experiments/oak"]'),
     ).not.toBeNull();
   });
+
+  it('opens the compact card graph in the detailed Mermaid Runtime viewer', () => {
+    fixture.componentRef.setInput('project', gardenProject);
+    fixture.detectChanges();
+    const page = fixture.nativeElement as HTMLElement;
+    const expand = page.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open relationship graph for Tide Pool"]',
+    );
+
+    expect(expand).not.toBeNull();
+    expand?.click();
+    fixture.detectChanges();
+
+    const dialog = page.querySelector<HTMLDialogElement>('dialog.graph-dialog');
+    expect(dialog?.open).toBeTrue();
+    expect(page.querySelector('mr-task-graph')).not.toBeNull();
+    expect(page.textContent).toContain('Select a node to inspect its status');
+    expect(
+      fixture.componentInstance.activeGraph()?.card.nodeKinds['phase'].icon,
+    ).toContain('<svg');
+
+    fixture.componentInstance.closeGraph();
+    fixture.detectChanges();
+    expect(dialog?.open).toBeFalse();
+    expect(page.querySelector('mr-task-graph')).toBeNull();
+  });
 });

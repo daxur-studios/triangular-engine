@@ -180,7 +180,8 @@ measured on the RTX 3080 before the next starts:
    specs green. RTX 3080 sweep run 2026-10-25: no effect at the suites' 1,024-leaf cap, where the budget decides the
    tree; the budget needs its own hysteresis, see the runbook. Budget hysteresis built the same day, specs only: a kept
    split ranks `1 + h` higher for the leaf budget; suites baseline v4 and terrain v3, 142 lab specs green; at the 1,024
-   cap unculled sweep churn falls to 0, culled by about a quarter; RTX rerun pending.*
+   cap unculled sweep churn falls to 0, culled by about a quarter. RTX 3080 rerun 2026-10-26: on-screen changes fall
+   21–32% (plane 110 to 83 against its no-hysteresis partner), 0 crack px; about 80 a second remain, see the runbook.*
 4. **Slope criterion** (from M2), measured ABAB in the terrain suite.
 5. **M5:** edits and the collider patch.
 6. **M6:** cliffs.

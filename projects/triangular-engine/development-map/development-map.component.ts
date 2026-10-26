@@ -1,12 +1,21 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   computed,
   input,
+  signal,
+  viewChild,
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { GraphCardComponent } from '@daxur-studios/mermaid-runtime';
-import type { DevelopmentMapProject } from './development-map.types';
+import {
+  GraphCardComponent,
+  TaskGraphComponent,
+} from '@daxur-studios/mermaid-runtime';
+import type {
+  DevelopmentMapExample,
+  DevelopmentMapProject,
+} from './development-map.types';
 import {
   buildDevelopmentMapExampleGraph,
   type DevelopmentMapExampleGraph,
@@ -16,7 +25,7 @@ import {
 @Component({
   selector: 'tri-development-map',
   standalone: true,
-  imports: [DatePipe, GraphCardComponent],
+  imports: [DatePipe, GraphCardComponent, TaskGraphComponent],
   templateUrl: './development-map.component.html',
   styleUrl: './development-map.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -24,6 +33,14 @@ import {
 export class DevelopmentMapComponent {
   /** Project-specific document, example-page and test data, normalized by the host app. */
   readonly project = input.required<DevelopmentMapProject>();
+  /** The selected example whose relationship graph is open in the full viewer. */
+  readonly activeGraph = signal<{
+    example: DevelopmentMapExample;
+    branchTitle: string;
+    card: DevelopmentMapExampleGraph;
+  } | null>(null);
+
+  private readonly graphDialog = viewChild<ElementRef<HTMLDialogElement>>('graphDialog');
 
   /** Events from all branches, newest first, with invalid dates kept at the end. */
   readonly timeline = computed(() =>
@@ -85,10 +102,35 @@ export class DevelopmentMapComponent {
     return (
       this.exampleCards().get(exampleId) ?? {
         graph: { nodes: [] },
+        nodeKinds: {},
         progress: null,
         readiness: null,
         status: null,
       }
     );
+  }
+
+  /** Open the compact card graph in Mermaid Runtime's pan/zoom viewer. */
+  openGraph(example: DevelopmentMapExample, branchTitle: string): void {
+    const card = buildDevelopmentMapExampleGraph(example);
+    if (card.graph.nodes.length < 2) return;
+
+    this.activeGraph.set({ example, branchTitle, card });
+    const dialog = this.graphDialog()?.nativeElement;
+    if (dialog && !dialog.open) dialog.showModal();
+  }
+
+  closeGraph(): void {
+    const dialog = this.graphDialog()?.nativeElement;
+    if (dialog?.open) dialog.close();
+    this.activeGraph.set(null);
+  }
+
+  onGraphDialogClose(): void {
+    this.activeGraph.set(null);
+  }
+
+  onGraphDialogBackdrop(event: MouseEvent): void {
+    if (event.target === event.currentTarget) this.closeGraph();
   }
 }

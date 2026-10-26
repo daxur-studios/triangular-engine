@@ -494,7 +494,10 @@ Exit codes: 0 saved and passed, 1 saved but not passed, 2 no result (timeout or 
 4 setup error. Other options: `--profile`, `--mode`, `--repetitions`, `--no-thumbnails`, `--chrome <path>`.
 
 For agents: start it in the background and wait for the process to exit. Do not poll. One launcher per run; queue
-several suites by starting several launchers. If a launcher is killed, its Chrome window stays open; close it.
+several suites by starting several launchers. When the owner says the "I'm away" switch is on, that is the go-ahead:
+run what you would have linked instead of handing over a link. The launcher returns at the first saved row for its
+suite and version, so a [`testCases`](#launch-links) batch in `--url` stops after its first case; run chosen cases
+with one launcher per case (`--url "<page>?testCases=<id>"`, that case's `--suite` and `--version`), one after another. If a launcher is killed, its Chrome window stays open; close it.
 
 ## Ablation (ABAB)
 

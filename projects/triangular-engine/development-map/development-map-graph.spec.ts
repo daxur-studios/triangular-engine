@@ -91,5 +91,16 @@ describe('buildDevelopmentMapExampleGraph', () => {
       result.graph.nodes.find((node) => node.id === 'phase-plan-066-m4')
         ?.status,
     ).toBe('failed');
+    expect(result.nodeKinds['example page'].icon).toContain('<svg');
+    expect(result.nodeKinds['plan or record'].icon).toContain('<svg');
+    expect(result.nodeKinds['investigation'].icon).toContain('<svg');
+    expect(
+      result.graph.nodes.find((node) => node.id === 'phase-plan-066-m4')
+        ?.detail,
+    ).toContain('State: planned');
+    expect(
+      result.graph.nodes.find((node) => node.id === 'concern-plan-066-Q3')
+        ?.detail,
+    ).toContain('Blocks: m4');
   });
 });

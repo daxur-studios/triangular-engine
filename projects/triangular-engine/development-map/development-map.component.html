@@ -54,8 +54,20 @@
                 [showProgress]="card.progress !== null"
                 [previewMode]="'simple'"
                 [previewDirection]="'LR'"
-                [interactive]="false"
+                [interactive]="card.graph.nodes.length > 1"
+                (cardClick)="openGraph(example, branch.title)"
               >
+                <button
+                  header-actions
+                  class="graph-expand"
+                  type="button"
+                  [hidden]="card.graph.nodes.length < 2"
+                  [attr.aria-label]="'Open relationship graph for ' + example.title"
+                  title="Open relationship graph"
+                  (click)="openGraph(example, branch.title)"
+                >
+                  ↗
+                </button>
                 <span badge class="page-kind">Example</span>
                 @if (card.readiness) {
                   <span
@@ -425,3 +437,50 @@
     </section>
   }
 </main>
+
+<dialog
+  #graphDialog
+  class="graph-dialog"
+  aria-labelledby="relationship-graph-title"
+  (close)="onGraphDialogClose()"
+  (click)="onGraphDialogBackdrop($event)"
+>
+  @if (activeGraph(); as selected) {
+    <div class="graph-dialog-shell">
+      <header class="graph-dialog-header">
+        <div>
+          <p class="eyebrow">{{ selected.branchTitle }} · relationship graph</p>
+          <h2 id="relationship-graph-title">{{ selected.example.title }}</h2>
+          <p>
+            Select a node to inspect its status and details. Arrows show recorded
+            relationships only.
+          </p>
+        </div>
+        <button
+          class="graph-dialog-close"
+          type="button"
+          aria-label="Close relationship graph"
+          (click)="closeGraph()"
+        >
+          ×
+        </button>
+      </header>
+      <mr-task-graph
+        class="expanded-graph"
+        [nodes]="selected.card.graph.nodes"
+        [transitions]="selected.card.graph.transitions ?? []"
+        [groups]="selected.card.graph.groups ?? []"
+        [nodeKinds]="selected.card.nodeKinds"
+        [rootLabel]="selected.example.title"
+        [showInspector]="true"
+        [showMinimap]="true"
+        [showBreadcrumb]="true"
+        [direction]="'LR'"
+      />
+      <p class="graph-dialog-help">
+        Node icons identify pages, plans and records, phases, review items, and
+        related documents.
+      </p>
+    </div>
+  }
+</dialog>

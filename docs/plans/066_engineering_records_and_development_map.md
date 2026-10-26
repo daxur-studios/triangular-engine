@@ -34,7 +34,7 @@ remain available under their original identity and links.
 - **m2** — Build the creation, validation and manifest helper; add agent authoring rules. Acceptance: exclusive creation preserves existing files; reciprocal links, stable identities, review freshness, phase readiness and relationships validate; legacy documents remain readable as unassessed.
 - **m3** — Build a reusable viewer entry point and a demo-app adapter using real example pages, thumbnails and test summaries, plus an independent project fixture. Acceptance: cards show scoped readiness, accepted goals, relationships and evidence age; selecting a concern opens its source; both projects use the same viewer; scope history distinguishes a developer-confirmed baseline from later proposed, accepted, deferred or rejected changes, and shows baseline and current accepted-scope progress separately when the data supports it.
 - **m4** — Validate the format and viewer contract against the first candidate projects with different document, page, and test layouts. Acceptance: at least one game project and one UI-only project can provide adapters; legacy records remain findable; documented plan retention and spike/example lifecycle rules are explicit; checks identify broken links and missing structured fields without forcing a bulk migration.
-- **m5** — Implement the selected branch-grouped Mermaid graph cards using normalized project relationships. Acceptance: graph topology comes from explicit page, phase, concern and document relationships; the demo applies the graph to Plan 066 as the first real case; navigation and relationship labels are understandable on review. Keep this pass in 2D Mermaid; revisit spatial rendering only if feedback identifies a question it could answer. Refining attention summaries is useful but does not block this phase.
+- **m5** — Implement the selected branch-grouped Mermaid graph cards using normalized project relationships. Acceptance: graph topology comes from explicit page, phase, concern and document relationships; selecting a card opens a larger pan/zoom Mermaid Runtime graph with node inspection and type-specific SVG icons; the demo applies the graph to Plan 066 as the first real case; navigation and relationship labels are understandable on review. Keep this pass in 2D Mermaid; revisit spatial rendering only if feedback identifies a question it could answer. Refining attention summaries is useful but does not block this phase.
 
 ## Constraints and relationships
 
@@ -71,7 +71,7 @@ remain available under their original identity and links.
 
 ## Questions, assumptions and investigations
 
-<!-- tri:review version="1" scope-hash="3974530c31a3506374bf9e5224bf93f1688bd7c7100316b2a655cc81f410be82" reviewed="2026-10-25" reviewer="agent" -->
+<!-- tri:review version="1" scope-hash="44653c51665a31175ce9d507aed058861066f17679bb433ef54101cf377f807c" reviewed="2026-10-26" reviewer="agent" -->
 <!-- tri:item id="Q1" kind="investigation" applies-to="m2" blocks="m2" state="resolved" -->
 
 - [x] How will a change to planned scope make the old readiness review visibly stale?
@@ -106,8 +106,8 @@ remain available under their original identity and links.
 
 - [x] Which 2D Mermaid view should present branching progress, alternatives and evidence?
   - Why it matters: the view should make both delivery status and relationships understandable without requiring the reader to reconstruct them from separate documents.
-  - Next action: implement branch-grouped Mermaid cards from normalized relationships; use Plan 066 as the first real map and ask the developer to review the resulting topology and navigation.
-  - Resolution: branch-grouped Mermaid cards are the selected primary presentation. They can show branching, merges, alternatives and dependencies only when those edges are present in adapter data; document order must not imply an edge. No Three.js rendering is part of this pass.
+  - Next action: use Plan 066 as the first real map and ask the developer to review card-to-graph navigation, node details and relationship meaning.
+  - Resolution: branch-grouped Mermaid cards are the selected primary presentation. They can show branching, merges, alternatives and dependencies only when those edges are present in adapter data; document order must not imply an edge. A card opens a larger pan/zoom graph with an inspector and node-kind SVG icons. No Three.js rendering is part of this pass.
     <!-- /tri:item -->
     <!-- /tri:review -->
 
