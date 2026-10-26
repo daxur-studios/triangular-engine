@@ -417,6 +417,12 @@ function leavesOf(selector: LodSelector): string[] {
   return out;
 }
 
+/** The selector's stats as the reference counts them: the level-churn counters (`newSplits`, `merges`) are new and left out. */
+function statsOf(selector: LodSelector): ReferenceStats {
+  const { leaves, drawn, splits, forcedSplits, unmet, capHit, deepestLevel } = selector.stats;
+  return { leaves, drawn, splits, forcedSplits, unmet, capHit, deepestLevel };
+}
+
 /** The selector view for a camera view, with the same 60 degree, 1440-pixel screen as {@link viewFor}. */
 function viewOfCamera(domain: LodDomain, view: CameraView): SelectorView {
   const camera = resolveCamera(view, domain, createHeightSource('bumps', domain.kind));
@@ -444,12 +450,34 @@ describe('Plan 059 selector against the plain reference', () => {
               selector.select(view);
               reference.select(view);
               expect(leavesOf(selector)).withContext(`${pose} frame ${frame}`).toEqual(reference.leaves);
-              expect({ ...selector.stats }).withContext(`${pose} frame ${frame}`).toEqual(reference.stats);
+              expect(statsOf(selector)).withContext(`${pose} frame ${frame}`).toEqual(reference.stats);
             }
           }
         });
       }
     }
+  }
+
+  for (const [label, domain] of [['plane', plane], ['sphere 600 km', sphere600]] as const) {
+    it(`gives the reference's leaves, masks and stats with the hysteresis set to 0, and the same churn as a hysteresis-free run (${label})`, () => {
+      const settings = settingsFor(domain, { cull: true, leafCap: 300, hysteresis: 0 });
+      const selector = new LodSelector(settings, 2);
+      const absent = new LodSelector(settingsFor(domain, { cull: true, leafCap: 300 }), 2);
+      const reference = new ReferenceSelector(settings);
+      for (const pose of POSE_IDS) {
+        let camera: CameraView = poseView(pose, domain);
+        for (let frame = 0; frame < 8; frame++) {
+          camera = panView(camera, frame % 4 === 3 ? 0.004 : 0, 0.01 / 1.5, domain);
+          const view = viewOfCamera(domain, camera);
+          selector.select(view);
+          absent.select(view);
+          reference.select(view);
+          expect(leavesOf(selector)).withContext(`${pose} frame ${frame}`).toEqual(reference.leaves);
+          expect(statsOf(selector)).withContext(`${pose} frame ${frame}`).toEqual(reference.stats);
+          expect({ ...selector.stats }).withContext(`${pose} frame ${frame}`).toEqual({ ...absent.stats });
+        }
+      }
+    });
   }
 
   it('hits the cap in the capped cases, so the priority order decides what is split', () => {
@@ -838,31 +866,119 @@ describe('Plan 059 suite', () => {
 
   it('checks the state of a zoom case while the zoom runs, not after it ends', async () => {
     let zoom: number | undefined;
+    let now = 0;
     let frames = 0;
     const host = {
       read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, ...(zoom !== undefined ? { motion: 'zoom' as const } : {}) }),
       setZoomProgress: (t: number | undefined) => { zoom = t; },
       renderedFrames: () => frames++,
       errors: () => '', resetErrors: () => undefined, backendIsWebGpu: () => true,
-      frame: () => ({ stats: { leaves: 1, drawn: 1, splits: 0, forcedSplits: 0, unmet: 0, capHit: false, deepestLevel: 0 }, instances: 1, trianglesPerLeaf: 2, drawCalls: 1, rendererTriangles: 2, drawingBuffer: [1, 1] as const }),
+      frame: () => ({ stats: { leaves: 1, drawn: 1, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0 }, instances: 1, trianglesPerLeaf: 2, drawCalls: 1, rendererTriangles: 2, drawingBuffer: [1, 1] as const }),
       onRenderComplete: () => () => undefined,
-      selectionSamples: () => [0.1], leafSamples: () => [1], resetSamples: () => undefined,
+      selectionSamples: () => [0.1], leafSamples: () => [1], levelChangeSamples: () => [0], levelChangeAllSamples: () => [0], resetSamples: () => undefined, setSweepTime: () => undefined,
       isSampling: () => false, startSampling: () => undefined, gpuSamplesSoFar: () => [],
       stopSampling: () => ({ frames: 100, cpuMedianMs: 1, cpuP95Ms: 1, wallMedianMs: 6, wallP95Ms: 6, gpuMedianMs: null, gpuSamples: 0, invalidReasons: [], verdict: 'ok' as const }),
       crackProbe: () => Promise.reject(new Error('no probe in a zoom case')),
       environment: () => ({}),
     } as unknown as LodSurfaceTestHost;
-    let now = 0;
     spyOn(performance, 'now').and.callFake(() => now);
     const context = {
       mode: 'quick', repetition: 1, signal: new AbortController().signal,
       wait: (ms: number) => { now += ms; return Promise.resolve(); },
     } as unknown as TestContext;
-    const scenario = LOD_SURFACE_TEST_HISTORY[1].scenarios.find((item) => item.id === 'zoom-sphere-600km') as TestScenario<LodSurfaceTestSettings>;
+    const scenario = LOD_SURFACE_TEST_HISTORY[2].scenarios.find((item) => item.id === 'zoom-sphere-600km') as TestScenario<LodSurfaceTestSettings>;
     zoom = 0;
     const observation = await createLodSurfaceTestAdapter(host).measure(scenario, context);
     expect(observation.checks?.find((check) => check.name === 'Scenario state applied as specified')?.passed).toBeTrue();
     expect(zoom).toBeUndefined();
+  });
+
+  it('runs a sweep case on the sweep clock, checks its state while it runs, probes after it and reports the level churn', async () => {
+    let sweepAt: number | undefined;
+    const times: number[] = [];
+    let probes = 0;
+    let now = 0;
+    const host = {
+      read: (): LodSurfaceTestSettings => ({ ...DEFAULT_SETTINGS, ...(sweepAt !== undefined ? { motion: 'sweep' as const } : {}) }),
+      setZoomProgress: () => undefined,
+      setSweepTime: (t: number | undefined) => { sweepAt = t; if (t !== undefined) times.push(t); },
+      renderedFrames: () => Math.floor(now / 16),
+      errors: () => '', resetErrors: () => undefined, backendIsWebGpu: () => true,
+      frame: () => ({ stats: { leaves: 1, drawn: 1, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0 }, instances: 1, trianglesPerLeaf: 2, drawCalls: 1, rendererTriangles: 2, drawingBuffer: [1, 1] as const }),
+      onRenderComplete: () => () => undefined,
+      selectionSamples: () => [0.1, 0.1, 0.1, 0.1], leafSamples: () => [1, 1, 1, 1], levelChangeSamples: () => [0, 6, 0, 2], levelChangeAllSamples: () => [0, 10, 0, 6], resetSamples: () => undefined,
+      isSampling: () => false, startSampling: () => undefined, gpuSamplesSoFar: () => [],
+      stopSampling: () => ({ frames: 100, cpuMedianMs: 1, cpuP95Ms: 1, wallMedianMs: 6, wallP95Ms: 6, gpuMedianMs: null, gpuSamples: 0, invalidReasons: [], verdict: 'ok' as const }),
+      crackProbe: () => { probes++; return Promise.resolve({ cracks: 0, masked: 0, surface: 10, background: 10, width: 4, height: 4 }); },
+      environment: () => ({}),
+    } as unknown as LodSurfaceTestHost;
+    spyOn(performance, 'now').and.callFake(() => now);
+    const context = { mode: 'quick', repetition: 1, signal: new AbortController().signal, wait: (ms: number) => { now += ms; return Promise.resolve(); } } as unknown as TestContext;
+    const scenario = LOD_SURFACE_TEST_HISTORY[2].scenarios.find((item) => item.id === 'sweep-sphere-600km-eye-2m') as TestScenario<LodSurfaceTestSettings>;
+    sweepAt = 0;
+    const observation = await createLodSurfaceTestAdapter(host).measure(scenario, context);
+    expect(observation.checks?.find((check) => check.name === 'Scenario state applied as specified')?.passed).toBeTrue();
+    expect(sweepAt).toBeUndefined();
+    expect(probes).toBe(1);
+    // Quick mode runs quickMs (4 s) of the sweep clock, in 16 ms steps from 0, the last clamped to the end.
+    expect(times[0]).toBe(0);
+    expect(times[times.length - 1]).toBeCloseTo(4, 6);
+    expect(times.every((t, k) => k === 0 || t >= times[k - 1])).toBeTrue();
+    const metric = (name: string) => observation.metrics?.find((item) => item.name === name);
+    expect(metric('levelChanges')?.samples).toEqual([0, 6, 0, 2]);
+    expect(metric('levelChangesPerSecond')?.samples[0]).toBeCloseTo(8 / 4.0, 1);
+    expect(metric('levelChangesAll')?.samples[0]).toBeCloseTo(16 / 4.0, 1);
+    expect(observation.validityIssues).not.toContain('Fewer than 60 rendered frames in the window');
+  });
+});
+
+describe('Plan 059 suite versions and hysteresis', () => {
+  const [v1, v2, v3, t1, t2] = LOD_SURFACE_TEST_HISTORY;
+  const idsOf = (suite: typeof v1) => suite.scenarios.map((scenario) => scenario.id);
+
+  it('lists the versions oldest first with the latest terrain suite last', () => {
+    expect(LOD_SURFACE_TEST_HISTORY.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-terrain@1', 'lod-surface-terrain@2',
+    ]);
+  });
+
+  it('keeps v1, v2 and terrain v1 at the single threshold they were measured with, and gives the later versions the lab default', () => {
+    for (const suite of [v1, v2, t1]) for (const scenario of suite.scenarios) expect(scenario.settings.hysteresis).withContext(`${suite.id}@${suite.version} ${scenario.id}`).toBe(0);
+    expect(DEFAULT_SETTINGS.hysteresis).toBe(0.15);
+    for (const suite of [v3, t2]) {
+      for (const scenario of suite.scenarios) {
+        expect(scenario.settings.hysteresis).withContext(`${suite.id}@${suite.version} ${scenario.id}`).toBe(scenario.id.endsWith('-nohyst') ? 0 : 0.15);
+      }
+    }
+  });
+
+  it('keeps every earlier case id in v3 and terrain v2 and adds the sweep cases', () => {
+    expect(idsOf(v3).slice(0, idsOf(v2).length)).toEqual(idsOf(v2));
+    expect(idsOf(v3).slice(idsOf(v2).length)).toEqual(['sweep-sphere-600km-eye-2m', 'sweep-plane-100km-low-200m', 'sweep-plane-100km-low-200m-nohyst', 'sweep-sphere-600km-mid-5km', 'sweep-sphere-600km-mid-5km-nohyst']);
+    for (const id of idsOf(v1)) expect(idsOf(v2)).toContain(id);
+    expect(idsOf(t2).filter((id) => !idsOf(t1).includes(id))).toEqual(['sweep-cell-planet-sphere-10km-low-200m', 'sweep-cliff-plane-100km-low-200m']);
+    expect(idsOf(t2).filter((id) => idsOf(t1).includes(id))).toEqual(idsOf(t1));
+    for (const suite of [v3, t2]) {
+      const ids = idsOf(suite);
+      expect(new Set(ids).size).toBe(ids.length);
+      for (const scenario of suite.scenarios.filter((item) => item.id.startsWith('sweep-'))) {
+        expect(scenario.settings.motion).toBe('sweep');
+        expect(scenario.durationMs).toBe(8000);
+        expect(scenario.quickMs).toBe(4000);
+      }
+    }
+  });
+
+  it('runs the A/B partner of a sweep with the same settings but the hysteresis', () => {
+    const a = v3.scenarios.find((scenario) => scenario.id === 'sweep-plane-100km-low-200m')!;
+    const b = v3.scenarios.find((scenario) => scenario.id === 'sweep-plane-100km-low-200m-nohyst')!;
+    expect({ ...b.settings, hysteresis: a.settings.hysteresis }).toEqual(a.settings);
+    expect(b.settings.hysteresis).toBe(0);
+  });
+
+  it('names a hysteresis or sweep the page did not honour', () => {
+    expect(settingsMismatches({ ...DEFAULT_SETTINGS, hysteresis: 0 }, DEFAULT_SETTINGS)).toEqual(['hysteresis: expected 0.15, found 0']);
+    expect(settingsMismatches(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, motion: 'sweep' }).length).toBe(1);
   });
 });
 
@@ -900,7 +1016,7 @@ describe('Plan 059 selector with per-node height ranges', () => {
         selector.select(view);
         reference.select(view);
         expect(leavesOf(selector)).withContext(pose).toEqual(reference.leaves);
-        expect({ ...selector.stats }).withContext(pose).toEqual(reference.stats);
+        expect(statsOf(selector)).withContext(pose).toEqual(reference.stats);
       }
     });
   }

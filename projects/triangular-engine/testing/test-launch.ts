@@ -1,9 +1,12 @@
-import type { TestMode, TestProfile, TestSuite } from './test-contracts';
+import type { TestBatchTest, TestMode, TestProfile, TestSuite } from './test-contracts';
 
 /** Keep repeated runs bounded even when selection originates from an external link. */
 export const MAX_TEST_REPETITIONS = 5;
 export const TEST_PROFILES: readonly TestProfile[] = ['visible-browser', 'human-observed', 'headless-hardware'];
 export const TEST_MODES: readonly TestMode[] = ['quick', 'standard', 'soak'];
+/** Most cases one `testCases` link may name. */
+export const MAX_TEST_CASES = 50;
+const QUALIFIED_CASE = /^([a-z0-9][a-z0-9-]*)@([1-9][0-9]*)\/(.+)$/;
 
 /** Reject values that JSON would drop or alter before retaining immutable launch evidence. */
 function validateSettings(value: unknown, ancestors = new Set<object>()): void {
@@ -57,13 +60,34 @@ export interface TestLaunchSelection {
   readonly autoStart: boolean;
   /** `testThumbnails=0` turns the adapter's thumbnails off; they are on otherwise. */
   readonly thumbnails: boolean;
+  /** The cases named by `testCases`, in link order. Absent when the link has no `testCases`. */
+  readonly cases?: readonly TestBatchTest[];
+}
+
+/** Resolves the `testCases` list against the registered history; every entry must name a registered scenario. */
+function parseTestCases<T extends object>(raw: string, suite: TestSuite<T>, suites: readonly TestSuite<T>[]): readonly TestBatchTest[] {
+  const entries = raw.split(',');
+  if (entries.length > MAX_TEST_CASES) throw new Error(`testCases names more than ${MAX_TEST_CASES} cases`);
+  const seen = new Set<string>();
+  return entries.map((entry) => {
+    if (!entry) throw new Error('testCases has an empty entry');
+    const match = QUALIFIED_CASE.exec(entry);
+    const owner = match ? suites.find((item) => item.id === match[1] && String(item.version) === match[2]) : suite;
+    const scenarioId = match ? match[3] : entry;
+    if (!owner) throw new Error(`testCases names an unknown suite: ${entry}`);
+    if (!owner.scenarios.some((scenario) => scenario.id === scenarioId)) throw new Error(`testCases names an unknown case: ${entry}`);
+    const key = `${testSuiteKey(owner)}/${scenarioId}`;
+    if (seen.has(key)) throw new Error(`testCases repeats a case: ${entry}`);
+    seen.add(key);
+    return { suiteId: owner.id, suiteVersion: owner.version, scenarioId };
+  });
 }
 
 /** A URL selects registered data only; it cannot provide executable commands or arbitrary settings. */
 export function parseTestLaunch<T extends object>(url: URL, suites: readonly TestSuite<T>[]): TestLaunchSelection | null {
   validateTestHistory(suites);
   const query = url.searchParams;
-  const allowed = new Set(['testSuite', 'testVersion', 'testProfile', 'testRepetitions', 'testAutoStart', 'testMode', 'testThumbnails']);
+  const allowed = new Set(['testSuite', 'testVersion', 'testProfile', 'testRepetitions', 'testAutoStart', 'testMode', 'testThumbnails', 'testCases']);
   const seen = new Set<string>();
   query.forEach((_, key) => {
     if (key.startsWith('test') && (!allowed.has(key) || seen.has(key))) throw new Error(`Unknown or duplicate test parameter: ${key}`);
@@ -89,7 +113,12 @@ export function parseTestLaunch<T extends object>(url: URL, suites: readonly Tes
       repetitions < 1 || repetitions > MAX_TEST_REPETITIONS || !['0', '1'].includes(autoStart) || !['0', '1'].includes(thumbnails)) {
     throw new Error('Invalid test profile, repetitions, autostart or thumbnails');
   }
-  return { key: testSuiteKey(suite), profile: profile as TestProfile, mode: mode as TestMode, repetitions, autoStart: autoStart === '1', thumbnails: thumbnails === '1' };
+  const rawCases = query.get('testCases');
+  const cases = rawCases === null ? undefined : parseTestCases(rawCases, suite, suites);
+  return {
+    key: testSuiteKey(suite), profile: profile as TestProfile, mode: mode as TestMode, repetitions, autoStart: autoStart === '1', thumbnails: thumbnails === '1',
+    ...(cases ? { cases } : {}),
+  };
 }
 
 /** Exact-version evidence links retain the host's backend flags while replacing runner selection. */
@@ -98,6 +127,8 @@ export function buildTestLaunchUrl(
   thumbnails = true,
 ): string {
   const url = new URL(base);
+  // A suite link never inherits a batch from the page it was made on.
+  url.searchParams.delete('testCases');
   url.searchParams.set('testSuite', suite.id);
   url.searchParams.set('testVersion', String(suite.version));
   url.searchParams.set('testProfile', profile);
@@ -106,5 +137,29 @@ export function buildTestLaunchUrl(
   if (!thumbnails) url.searchParams.set('testThumbnails', '0');
   else url.searchParams.delete('testThumbnails');
   url.searchParams.set('testAutoStart', '1');
+  return url.toString();
+}
+
+/**
+ * Builds a launch link that runs a chosen list of cases as one batch, in order. The first test's suite and exact
+ * version become `testSuite`/`testVersion`; its cases are written as bare scenario ids and cases of other suites as
+ * `<suiteId>@<version>/<scenarioId>`. Other query parameters of `base` are kept. `parseTestLaunch` reads it back into
+ * `TestLaunchSelection.cases`. Throws for an empty list, more than `MAX_TEST_CASES` tests, or a scenario id containing a comma.
+ */
+export function buildTestBatchLaunchUrl(
+  base: string, tests: readonly TestBatchTest[], profile: TestProfile, repetitions: number, mode: TestMode = 'standard',
+  thumbnails = true,
+): string {
+  const first = tests[0];
+  if (!first) throw new Error('A batch link needs at least one test');
+  if (tests.length > MAX_TEST_CASES) throw new Error(`A batch link holds at most ${MAX_TEST_CASES} tests`);
+  const entries = tests.map((test) => {
+    if (test.scenarioId.includes(',')) throw new Error(`Scenario id cannot be used in a link: ${test.scenarioId}`);
+    const same = test.suiteId === first.suiteId && test.suiteVersion === first.suiteVersion;
+    // A bare id that looks qualified would be read as another suite, so it is written in full.
+    return same && !QUALIFIED_CASE.test(test.scenarioId) ? test.scenarioId : `${test.suiteId}@${test.suiteVersion}/${test.scenarioId}`;
+  });
+  const url = new URL(buildTestLaunchUrl(base, { id: first.suiteId, version: first.suiteVersion }, profile, repetitions, mode, thumbnails));
+  url.searchParams.set('testCases', entries.join(','));
   return url.toString();
 }

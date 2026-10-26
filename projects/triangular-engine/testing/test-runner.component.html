@@ -38,6 +38,7 @@
         </ol>
         <button type="button" (click)="runBatch()" [disabled]="running() || externalBusy() || !available() || form.invalid || !batchTests().length">Run batch ({{ batchTests().length }})</button>
         <button type="button" (click)="clearBatch()" [disabled]="running() || !batchTests().length">Clear</button>
+        <button type="button" (click)="copyBatchLink()" [disabled]="form.invalid || !batchTests().length" title="Copy a launch link that runs this batch">Copy batch link</button>
       </fieldset>
       <button type="button" (click)="runLatest()" [disabled]="running() || externalBusy() || !available() || !latest() || form.invalid">Run latest test</button>
     </details>

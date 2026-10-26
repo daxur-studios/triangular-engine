@@ -10,6 +10,13 @@ import type { NodeHeightRanges } from './lod-height';
  * over-sized node splits first, so when the cap stops splitting the coarse cover is still whole and the remaining
  * requests are counted as unmet. All storage is typed arrays sized once per settings change: no per-frame allocation.
  *
+ * Hysteresis (distance mode): the tree is rebuilt every frame, so a node whose cells sit right at the target size would
+ * split and merge as the camera wobbles. With one threshold, `value = edge / target`, a leaf splits when value > 1; a node
+ * that was split in the previous tree stays split while value > 1 / (1 + hysteresis), i.e. it merges only once its cells are
+ * `hysteresis` smaller than the split point. A kept node is queued with its own value (at most 1), so it sorts after every
+ * real request and the leaf cap serves requests before retentions; a retention the cap or the pool cannot afford is dropped
+ * silently (it is not a request, so it is neither `capHit` nor `unmet`). Forced (2:1 balance) splits are not retained.
+ *
  * The node pool persists across frames: a node keeps its block of four children, with their camera-independent
  * geometry, after it stops being split, so re-selecting a nearby view only redoes per-view culling and priority.
  * {@link LodSelector.open} marks the nodes split in the current frame; blocks the last tree did not reach are reclaimed
@@ -55,6 +62,11 @@ export interface SelectorSettings {
   readonly heightRanges?: NodeHeightRanges;
   /** Refine and draw only nodes whose bounds touch the view frustum. */
   readonly cull: boolean;
+  /**
+   * Split/merge hysteresis ratio, distance mode only (absent or 0: a single threshold, as before). A node split in the last
+   * tree stays split while its cells are less than `hysteresis` smaller than the split point (value > 1 / (1 + hysteresis)).
+   */
+  readonly hysteresis?: number;
 }
 
 export interface SelectorView {
@@ -69,8 +81,26 @@ export interface SelectorView {
 export interface SelectorStats {
   leaves: number;
   drawn: number;
+  /** Nodes split by their own request this frame, including ones kept split by hysteresis (not the balance splits). */
   splits: number;
   forcedSplits: number;
+  /** Nodes split in this tree that were not split in the last one (balance splits included); 0 when `select` returned early. */
+  newSplits: number;
+  /**
+   * Nodes split in the last tree and not split in this one, including those below a node that merged; 0 when `select`
+   * returned early. `newSplits + merges` is the level churn of the frame.
+   */
+  merges: number;
+  /**
+   * {@link newSplits} restricted to what is on screen: nodes split now and not in the last tree that were visible (inside
+   * the frustum) in both trees. Nodes entering or leaving the frustum change level unseen, so they are not flicker.
+   */
+  visibleNewSplits: number;
+  /**
+   * {@link merges} restricted to what is on screen: leaves of this tree that were split in the last one and were visible in
+   * both trees. A merged node counts once; the nodes below it are not in the tree.
+   */
+  visibleMerges: number;
   /** Nodes that still wanted to split when the cap or the node pool stopped splitting. */
   unmet: number;
   capHit: boolean;
@@ -103,13 +133,25 @@ export class LodSelector {
   readonly child: Int32Array;
   /** 1 when the node is split in the current frame. */
   readonly open: Uint8Array;
+  /**
+   * 1 when the node was split in the last tree that was built (the previous rebuilding {@link select}). Written for the
+   * last tree's nodes when a rebuild starts, and checked against {@link stamp} when a node joins the new tree, so it is right
+   * for every node of the current tree whatever happened between: a repeated view does not rebuild (nothing changes), and a
+   * node that was not in the last tree (merged away, or freed by a reclaim and remade) reads 0.
+   */
+  readonly wasOpen: Uint8Array;
+  /** {@link visible} as of the last tree, kept and validated exactly like {@link wasOpen}; 0 for a node not in the last tree. */
+  readonly wasVisible: Uint8Array;
   /** Parent node, or -1 for a root. */
   readonly parent: Int32Array;
   readonly center: Float64Array;
   readonly normal: Float64Array;
   readonly radius: Float64Array;
   readonly edge: Float64Array;
-  /** How many times too big the node's cells are, for nodes queued to split this frame (above 1); 0 for the rest. */
+  /**
+   * How many times too big the node's cells are, for nodes queued to split this frame (above 1), or, for a node kept split
+   * by hysteresis, its value in (1 / (1 + hysteresis), 1]; 0 for the rest.
+   */
   readonly priority: Float64Array;
   readonly visible: Uint8Array;
   /** Same-level cell across each edge, 4 per node: root ({@link NO_NEIGHBOUR} at the plane's border), i, j. */
@@ -138,7 +180,7 @@ export class LodSelector {
   /** Leaves after {@link select}, as node indices, with their edge masks; drawn leaves first (`stats.drawn`). */
   readonly leaves: Int32Array;
   readonly masks: Uint8Array;
-  readonly stats: SelectorStats = { leaves: 0, drawn: 0, splits: 0, forcedSplits: 0, unmet: 0, capHit: false, deepestLevel: 0 };
+  readonly stats: SelectorStats = { leaves: 0, drawn: 0, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0 };
   /** Most nodes one tree can hold. */
   private readonly treeCapacity: number;
   private readonly heap: Int32Array;
@@ -154,6 +196,10 @@ export class LodSelector {
   private hasViewKey = false;
   /** Pixels per target cell times the angle of a pixel: this view's metres of cell per metre of gap. */
   private pixelScale = 0;
+  /** 1 / (1 + hysteresis): a node split in the last tree stays split above this value. 1 means no hysteresis. */
+  private readonly keepValue: number;
+  /** Nodes of the last tree that were split, counted while their flags are copied; the merges are those not split again. */
+  private openLast = 0;
   private readonly freeBlocks: Int32Array;
   private freeCount = 0;
   private readonly live: Uint8Array;
@@ -174,6 +220,7 @@ export class LodSelector {
     this.treeCapacity = 2 * (settings.leafCap + CAP_SLACK) + 64;
     const capacity = Math.max(2, poolTrees) * this.treeCapacity;
     this.capacity = capacity;
+    this.keepValue = 1 / (1 + Math.max(0, settings.hysteresis ?? 0));
     this.unlinked = capacity;
     this.none = capacity + 1;
     this.root = new Uint8Array(capacity);
@@ -182,6 +229,8 @@ export class LodSelector {
     this.j = new Uint32Array(capacity);
     this.child = new Int32Array(capacity + 2).fill(-1);
     this.open = new Uint8Array(capacity);
+    this.wasOpen = new Uint8Array(capacity);
+    this.wasVisible = new Uint8Array(capacity);
     this.parent = new Int32Array(capacity);
     this.center = new Float64Array(capacity * 3);
     this.normal = new Float64Array(capacity * 3);
@@ -208,7 +257,14 @@ export class LodSelector {
 
   /** Selects the tree for a view and fills {@link leaves}, {@link masks} and {@link stats}. */
   select(view: SelectorView): void {
-    if (this.sameView(view)) return;
+    if (this.sameView(view)) {
+      // Nothing was rebuilt, so nothing changed level this call.
+      this.stats.newSplits = 0;
+      this.stats.merges = 0;
+      this.stats.visibleNewSplits = 0;
+      this.stats.visibleMerges = 0;
+      return;
+    }
     this.version++;
     this.frame++;
     this.pixelScale = Math.max(this.settings.cellPixels, PIXEL_FLOOR) * view.pixelAngle;
@@ -217,6 +273,7 @@ export class LodSelector {
     stats.splits = 0;
     stats.forcedSplits = 0;
     stats.capHit = false;
+    this.openLast = 0;
     const roots = rootCount(this.settings.domain);
     if (this.nodeCount === 0) {
       for (let r = 0; r < roots; r++) this.initNode(this.nodeCount++, -1, r, 0, 0, 0);
@@ -225,7 +282,17 @@ export class LodSelector {
     } else {
       // Room for a whole new tree, or drop what the last tree did not reach (it needs last frame's open flags).
       if (this.capacity - this.nodeCount + 4 * this.freeCount < this.treeCapacity) this.reclaim(roots);
-      for (let k = 0; k < this.activeCount; k++) this.open[this.active[k]] = 0;
+      // The last tree's flags become "split last frame" (the new tree is built against them), then the open flags restart.
+      const { active, open, wasOpen, wasVisible, visible } = this;
+      let openLast = 0;
+      for (let k = 0; k < this.activeCount; k++) {
+        const node = active[k];
+        wasOpen[node] = open[node];
+        wasVisible[node] = visible[node];
+        openLast += open[node];
+        open[node] = 0;
+      }
+      this.openLast = openLast;
     }
     this.activeCount = 0;
     this.stamp[this.none] = this.frame;
@@ -236,14 +303,17 @@ export class LodSelector {
       const node = this.pop();
       if (this.open[node] === 1) continue;
       if (this.leafCount + 3 > this.settings.leafCap || !this.split(node, false)) {
-        // Put it back so the unmet count below includes it.
-        this.push(node, this.priority[node]);
-        stats.capHit = true;
+        // A request is put back so the unmet count below includes it. A retention (value at most 1: kept split only by
+        // hysteresis) is dropped: nothing asked for it, and whatever is still queued sorts after it, so is a retention too.
+        if (this.priority[node] > 1) {
+          this.push(node, this.priority[node]);
+          stats.capHit = true;
+        }
         break;
       }
     }
     stats.unmet = 0;
-    for (let k = 0; k < this.heapSize; k++) if (this.open[this.heap[k]] === 0) stats.unmet++;
+    for (let k = 0; k < this.heapSize; k++) if (this.open[this.heap[k]] === 0 && this.priority[this.heap[k]] > 1) stats.unmet++;
     this.collectLeaves();
   }
 
@@ -313,14 +383,29 @@ export class LodSelector {
     let drawn = 0;
     let culled = 0;
     let deepest = 0;
+    // Split nodes of this tree that were (kept) or were not (opened) split in the last one.
+    let kept = 0;
+    let opened = 0;
+    let visibleOpened = 0;
+    let visibleMerged = 0;
+    const wasOpen = this.wasOpen;
+    const wasVisible = this.wasVisible;
     for (let k = 0; k < this.activeCount; k++) {
       const node = active[k];
-      if (open[node] === 1) continue;
+      if (open[node] === 1) {
+        if (wasOpen[node] === 1) kept++;
+        else {
+          opened++;
+          if (visible[node] === 1 && wasVisible[node] === 1) visibleOpened++;
+        }
+        continue;
+      }
       // Bit e: the same-level cell across edge e is not in the tree, so a coarser leaf covers it.
       const n = node * 4;
       const mask =
         (stamp[nb[n]] !== frame ? 1 : 0) | (stamp[nb[n + 1]] !== frame ? 2 : 0) | (stamp[nb[n + 2]] !== frame ? 4 : 0) | (stamp[nb[n + 3]] !== frame ? 8 : 0);
       if (visible[node] === 1) {
+        if (wasOpen[node] === 1 && wasVisible[node] === 1) visibleMerged++;
         leaves[drawn] = node;
         masks[drawn++] = mask;
       } else {
@@ -336,6 +421,10 @@ export class LodSelector {
     this.stats.drawn = drawn;
     this.stats.leaves = drawn + culled;
     this.stats.deepestLevel = deepest;
+    this.stats.newSplits = opened;
+    this.stats.merges = this.openLast - kept;
+    this.stats.visibleNewSplits = visibleOpened;
+    this.stats.visibleMerges = visibleMerged;
   }
 
   /**
@@ -422,14 +511,19 @@ export class LodSelector {
    * ones that ask for a split.
    */
   private activateRange(first: number, count: number): void {
-    const { active, stamp, visible, priority, hot, level, viewKey: key } = this;
+    const { active, stamp, visible, priority, hot, level, wasOpen, wasVisible, viewKey: key } = this;
     const { cull, mode, fixedLevel } = this.settings;
     const frame = this.frame;
+    const keepValue = this.keepValue;
     const maxLevel = this.maxLevel;
     const pixelScale = this.pixelScale;
     let n = this.activeCount;
     for (let node = first; node < first + count; node++) {
       active[n++] = node;
+      // Split in the last tree: open there, and in that tree (stamped one rebuild ago; older flags are stale).
+      const kept = wasOpen[node] === 1 && stamp[node] === frame - 1;
+      wasOpen[node] = kept ? 1 : 0;
+      if (stamp[node] !== frame - 1) wasVisible[node] = 0;
       stamp[node] = frame;
       const h = node * HOT;
       const x = hot[h] - key[0];
@@ -450,9 +544,10 @@ export class LodSelector {
         // Cells per target size; the deepest level has edge 0, so it never asks. The division only runs when the cell is too big.
         const target = pixelScale * Math.max(Math.sqrt(x * x + y * y + z * z) - r, 1e-3);
         const edge = hot[h + 4];
-        if (edge > target) value = edge / target;
+        // A node split in the last tree keeps its split down to keepValue (1 without hysteresis: the single threshold).
+        if (edge > (kept ? target * keepValue : target)) value = edge / target;
       }
-      if (value > 1) {
+      if (value > 1 || (kept && value > 0 && keepValue < 1)) {
         priority[node] = value;
         this.push(node, value);
       } else priority[node] = 0;
@@ -484,6 +579,8 @@ export class LodSelector {
     this.j[node] = j;
     this.child[node] = -1;
     this.open[node] = 0;
+    this.wasOpen[node] = 0;
+    this.wasVisible[node] = 0;
     const domain = this.settings.domain;
     const size = 1 / 2 ** level;
     const { point, pointNormal, corner } = this;

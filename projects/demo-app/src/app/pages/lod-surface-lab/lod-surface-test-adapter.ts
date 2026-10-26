@@ -52,9 +52,15 @@ export interface LodSurfaceTestHost {
   selectionSamples(): readonly number[];
   /** Leaves per frame since the last reset (same frames as {@link selectionSamples}). */
   leafSamples(): readonly number[];
+  /** On-screen nodes that changed between split and merged per frame since the last reset (same frames; `visibleNewSplits + visibleMerges`). */
+  levelChangeSamples(): readonly number[];
+  /** The same with every node, frustum entries and exits included (`newSplits + merges`). */
+  levelChangeAllSamples(): readonly number[];
   resetSamples(): void;
   /** Places the camera on the scripted zoom (0 eye, 1 orbit); `undefined` returns to the named pose. */
   setZoomProgress(t: number | undefined): void;
+  /** Places the camera on the scripted sweep of the case's pose, `seconds` into it; `undefined` returns to the named pose. */
+  setSweepTime(seconds: number | undefined): void;
   isSampling(): boolean;
   startSampling(): void;
   gpuSamplesSoFar(): readonly number[];
@@ -118,6 +124,30 @@ function bakeMetrics(bake: LodSurfaceBakeInfo | undefined): TestMetric[] {
 
 const maxOf = (values: readonly number[]): number => values.reduce((a, b) => Math.max(a, b), 0);
 
+/** Level churn of a moving case: the per-frame series and its rate over the seconds the motion ran. */
+function levelChangeMetrics(changes: readonly number[], all: readonly number[], seconds: number): TestMetric[] {
+  const total = changes.reduce((a, b) => a + b, 0);
+  const totalAll = all.reduce((a, b) => a + b, 0);
+  const rated = seconds > 0 && changes.length > 0;
+  return [
+    {
+      name: 'levelChanges', unit: 'count', samples: [...changes],
+      source: 'Per frame, on screen only: nodes split in this tree and not the last (visibleNewSplits) plus nodes split in the last and not this (visibleMerges), visible in both trees; 0 for a repeated view',
+      unavailableReason: changes.length ? undefined : 'No frame selected in the window',
+    },
+    {
+      name: 'levelChangesPerSecond', unit: 'count/s', samples: rated ? [total / seconds] : [],
+      source: 'Sum of levelChanges over the seconds the motion ran, first swing included',
+      unavailableReason: rated ? undefined : 'No motion time or no frames',
+    },
+    {
+      name: 'levelChangesAll', unit: 'count/s', optional: true, samples: rated ? [totalAll / seconds] : [],
+      source: 'Per second like levelChangesPerSecond, but counting every node, frustum entries and exits included (newSplits + merges)',
+      unavailableReason: rated ? undefined : 'No motion time or no frames',
+    },
+  ];
+}
+
 export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAdapter<LodSurfaceTestSettings, LodSurfaceTestSettings> {
   async function waitSettled(scenario: TestScenario<LodSurfaceTestSettings>, context: TestContext): Promise<void> {
     const began = performance.now();
@@ -152,6 +182,19 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
     }
   }
 
+  /** Swings the camera over the action time on the sweep path's clock; returns the seconds it ran. */
+  async function sweep(scenario: TestScenario<LodSurfaceTestSettings>, context: TestContext): Promise<number> {
+    const durationMs = modeActionMs(scenario, context.mode);
+    const began = performance.now();
+    host.setSweepTime(0);
+    while (true) {
+      const elapsed = performance.now() - began;
+      host.setSweepTime(Math.min(elapsed, durationMs) / 1000);
+      if (elapsed >= durationMs) return elapsed / 1000;
+      await context.wait(16);
+    }
+  }
+
   return {
     windowModes: true,
     capture: () => host.read(),
@@ -167,8 +210,10 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
       let frames = 0;
       let previousAt: number | undefined;
       let summary: IFrameSampleSummary;
-      // The zoom clears its own motion when it ends, so its state is checked while it still runs.
-      let zoomMismatches: string[] = [];
+      // A scripted motion clears itself when it ends, so its state is checked while it still runs.
+      let motionMismatches: string[] = [];
+      let motionSeconds = 0;
+      const moving = settings.motion !== undefined;
       host.resetSamples();
       host.startSampling();
       const offRender = host.onRenderComplete((renderedAt) => {
@@ -178,8 +223,13 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
       });
       try {
         if (settings.motion === 'zoom') {
+          const began = performance.now();
           await zoom(scenario, context);
-          zoomMismatches = settingsMismatches(host.read(), settings);
+          motionSeconds = (performance.now() - began) / 1000;
+          motionMismatches = settingsMismatches(host.read(), settings);
+        } else if (settings.motion === 'sweep') {
+          motionSeconds = await sweep(scenario, context);
+          motionMismatches = settingsMismatches(host.read(), settings);
         } else {
           await context.measureWindow(scenario, [
             { name: 'frameInterval', samples: () => intervals, resolution: TIMER_STEP_MS },
@@ -192,16 +242,21 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
         offRender();
         if (host.isSampling()) host.stopSampling();
         if (settings.motion === 'zoom') host.setZoomProgress(undefined);
+        if (settings.motion === 'sweep') host.setSweepTime(undefined);
       }
       const selection = [...host.selectionSamples()];
       const leaves = [...host.leafSamples()];
+      const levelChanges = [...host.levelChangeSamples()];
+      const levelChangesAll = [...host.levelChangeAllSamples()];
       const info = host.frame();
       const environment = host.environment();
       const expectCracks = crackExpectation(settings);
-      // The probe runs after the window, so it never shares a frame with the timing.
+      // The probe runs after the window, so it never shares a frame with the timing. The zoom ends far from the pose it is
+      // named for, so it has none. The sweep's last frame is a view like any other, and its tree carries the splits the
+      // hysteresis kept from the swing, which is the tree the probe should see.
       const probe = settings.motion === 'zoom' ? undefined : await host.crackProbe();
       await waitForFrames(host, 2, context);
-      const mismatches = settings.motion === 'zoom' ? zoomMismatches : settingsMismatches(host.read(), settings);
+      const mismatches = moving ? motionMismatches : settingsMismatches(host.read(), settings);
       const error = host.errors();
       const checks: TestCheck[] = [
         { name: 'Scenario state applied as specified', passed: mismatches.length === 0, detail: mismatches.join('; ') || undefined },
@@ -220,7 +275,7 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
           : { name: 'Control: the probe finds the cracks this case makes', passed: probe.cracks > 0, detail: `${probe.cracks} px of ${probe.width}x${probe.height}` });
         checks.push({ name: 'Surface seen by the probe', passed: probe.surface > 0, detail: `${probe.surface} px` });
       }
-      if (settings.motion === 'zoom') {
+      if (moving) {
         checks.push({ name: `No rebuild storm: every frame's selection under ${STORM_MS} ms`, passed: selection.length > 0 && maxOf(selection) < STORM_MS, detail: `most ${maxOf(selection).toFixed(2)} ms over ${selection.length} frames` });
       }
       const passes = summary.gpuPasses ?? null;
@@ -253,6 +308,7 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
           };
         }),
         ...bakeMetrics(info.bake),
+        ...(moving ? levelChangeMetrics(levelChanges, levelChangesAll, motionSeconds) : []),
         ...(probe ? [{ name: 'crackPixels', unit: 'px', samples: [probe.cracks], source: 'Backstop pixels inside the surface, outline-adjacent pixels masked' } satisfies TestMetric] : []),
       ];
       return {
@@ -262,6 +318,7 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
           frames: summary.frames, cpuMedianMs: summary.cpuMedianMs, cpuP95Ms: summary.cpuP95Ms, frameVerdict: summary.verdict,
           gpuWholeRenderMedianMs: summary.gpuMedianMs, gpuPassTotalMedianMs: passes ? passes.total.medianMs : null,
           leaves: info.stats.leaves, drawnLeaves: info.instances, splits: info.stats.splits, forcedSplits: info.stats.forcedSplits,
+          newSplits: info.stats.newSplits, merges: info.stats.merges, visibleNewSplits: info.stats.visibleNewSplits, visibleMerges: info.stats.visibleMerges, hysteresis: settings.hysteresis,
           unmet: info.stats.unmet, capHit: info.stats.capHit, deepestLevel: info.stats.deepestLevel,
           drawCalls: info.drawCalls, rendererTriangles: info.rendererTriangles,
           drawingBufferWidth: info.drawingBuffer[0], drawingBufferHeight: info.drawingBuffer[1],
@@ -269,12 +326,13 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
           ...(probe ? { crackPixels: probe.cracks, crackMaskedPixels: probe.masked, probeSurfacePixels: probe.surface, probeWidth: probe.width, probeHeight: probe.height } : {}),
         },
         validityIssues: [
-          ...(settings.motion === 'zoom' ? [] : summary.invalidReasons),
-          ...(settings.motion !== 'zoom' && summary.frames < MIN_WINDOW_FRAMES ? [`Fewer than ${MIN_WINDOW_FRAMES} rendered frames in the window`] : []),
+          ...(moving ? [] : summary.invalidReasons),
+          ...(!moving && summary.frames < MIN_WINDOW_FRAMES ? [`Fewer than ${MIN_WINDOW_FRAMES} rendered frames in the window`] : []),
           ...(software ? ['Software renderer: functional evidence only, not hardware performance'] : []),
         ],
         limitations: [
-          'M1 rebuilds the tree from the roots every frame (no hysteresis): level pops are allowed and labelled in M1.',
+          'The tree is rebuilt from the roots every frame. Distance mode splits at value > 1 and keeps a split node down to 1 / (1 + hysteresis) (0 = one threshold, so pops at it); fixed mode has no hysteresis.',
+          'levelChanges counts only nodes that changed between split and merged while on screen in both trees; levelChangesAll adds the nodes that crossed the frustum edge, which change level unseen. Level pops are not blended in M1 (Plan 059 D5).',
           'Draw calls and renderer triangles are the last frame\'s counters; surfaceTriangles counts drawn leaves only.',
           'The crack probe masks backstop pixels next to the background, so a hole on the outline is not counted.',
           'selectionCpu includes the instance upload copy, not the GPU buffer write.',
@@ -283,13 +341,14 @@ export function createLodSurfaceTestAdapter(host: LodSurfaceTestHost): TestRunAd
     },
     restore: async (snapshot, context) => {
       host.setZoomProgress(undefined);
+      host.setSweepTime(undefined);
       host.apply(snapshot);
       await waitForFrames(host, 2, context);
     },
     environment: () => host.environment(),
     ...(host.thumbnail ? {
       thumbnail: async (scenario: TestScenario<LodSurfaceTestSettings>, context: TestContext) => {
-        if (context.repetition > 1 || scenario.settings.motion === 'zoom') return undefined;
+        if (context.repetition > 1 || scenario.settings.motion !== undefined) return undefined;
         const image = await host.thumbnail?.();
         return image ? [image] : undefined;
       },

@@ -3,7 +3,7 @@ import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, injec
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import type { TestAblationOutcome, TestBatchTest, TestCaseThumbnails, TestMetric, TestMode, TestProfile, TestProgress, TestRunAdapter, TestRunResult, TestStopReason, TestSuite } from './test-contracts';
-import { buildTestLaunchUrl, MAX_TEST_REPETITIONS, parseTestLaunch, TEST_MODES, TEST_PROFILES, testSuiteKey, validateTestHistory } from './test-launch';
+import { buildTestBatchLaunchUrl, buildTestLaunchUrl, MAX_TEST_REPETITIONS, parseTestLaunch, TEST_MODES, TEST_PROFILES, testSuiteKey, validateTestHistory } from './test-launch';
 import { nearestRankPercentile, TestSession } from './test-session';
 import { encodeThumbnailUploads } from './test-thumbnails';
 
@@ -193,6 +193,8 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   private readonly session = new TestSession<TSettings, TSnapshot>();
   private readonly initialized = signal(false);
   private pendingAutoStart = false;
+  /** Launch-link cases waiting for autostart, run as a batch instead of the whole suite. */
+  private pendingCases: { tests: readonly TestBatchTest[]; mode: TestMode } | undefined;
   private destroyed = false;
   private abort?: AbortController;
 
@@ -200,7 +202,9 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
     effect(() => {
       if (this.initialized() && this.available() && !this.externalBusy() && this.pendingAutoStart && !this.running()) {
         this.pendingAutoStart = false;
-        void this.runSelected();
+        const cases = this.pendingCases;
+        this.pendingCases = undefined;
+        void (cases ? this.runBatch(cases.tests, cases.mode) : this.runSelected());
       }
     });
     this.copyWhenDone.valueChanges.pipe(takeUntilDestroyed()).subscribe((value) => writeStoredFlag(COPY_WHEN_DONE_KEY, value));
@@ -220,6 +224,10 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
         this.form.setValue({ suite: launch.key, repetitions: launch.repetitions, profile: launch.profile, mode: launch.mode, thumbnails: launch.thumbnails });
         if (launch.autoStart && !this.allowAutoStart()) this.message.set('Autostart is disabled by this application. Use Run selected.');
         this.pendingAutoStart = launch.autoStart && this.allowAutoStart();
+        if (launch.cases) {
+          this.batchTests.set(launch.cases);
+          if (this.pendingAutoStart) this.pendingCases = { tests: launch.cases, mode: launch.mode };
+        }
       }
     } catch (error) { this.message.set(error instanceof Error ? error.message : String(error)); }
     this.initialized.set(true);
@@ -452,6 +460,17 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   async copyResult(): Promise<void> {
     try { await this.doc.defaultView?.navigator.clipboard.writeText(this.resultText()); this.message.set('Result copied'); }
     catch { this.message.set('Clipboard unavailable; select the result text or download JSON.'); }
+  }
+
+  async copyBatchLink(): Promise<void> {
+    const tests = this.batchTests();
+    if (!tests.length) return;
+    const options = this.form.getRawValue();
+    let url: string;
+    try { url = buildTestBatchLaunchUrl(this.doc.location.href, tests, options.profile, options.repetitions, options.mode, options.thumbnails); }
+    catch (error) { this.message.set(error instanceof Error ? error.message : String(error)); return; }
+    try { await this.doc.defaultView?.navigator.clipboard.writeText(url); this.message.set('Batch launch link copied'); }
+    catch { this.message.set(url); }
   }
 
   async copyLaunchLink(): Promise<void> {

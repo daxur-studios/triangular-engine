@@ -130,6 +130,25 @@ export function zoomView(view: CameraView, notches: number, domain: LodDomain): 
   return { ...view, altitudeM: Math.min(ceiling, Math.max(0.5, view.altitudeM * 1.15 ** notches)) };
 }
 
+/** The scripted sweep's period, seconds (0.5 Hz): one swing out, back, over the other side and back to the pose. */
+export const SWEEP_PERIOD_S = 2;
+/** Heading swing of the scripted sweep, radians either side of the pose (30 degrees). */
+export const SWEEP_YAW_RAD = 30 * DEG;
+/** Altitude swing of the scripted sweep, as a share of the pose altitude either side of it. */
+export const SWEEP_ALTITUDE_SHARE = 0.02;
+
+/**
+ * The scripted sweep: holds a pose and swings the camera back and forth, heading +-{@link SWEEP_YAW_RAD} with the
+ * altitude changing +-{@link SWEEP_ALTITUDE_SHARE} in step, once every {@link SWEEP_PERIOD_S} seconds. A pure function of
+ * `t` (seconds since the sweep began), so every run flies the same path; at t = 0 (and every whole period) it is the pose.
+ * Pure turning only changes what the frustum culls, so it is the altitude change that moves the distance thresholds.
+ */
+export function sweepPathView(domain: LodDomain, pose: PoseId, t: number): CameraView {
+  const from = poseView(pose, domain);
+  const swing = Math.sin((2 * Math.PI * t) / SWEEP_PERIOD_S);
+  return { ...from, headingRad: from.headingRad + SWEEP_YAW_RAD * swing, altitudeM: from.altitudeM * (1 + SWEEP_ALTITUDE_SHARE * swing) };
+}
+
 /** The scripted zoom: 2 m eye to orbit, altitude logarithmic, pitch from the eye pose to straight down. */
 export function zoomPathView(domain: LodDomain, t: number): CameraView {
   const from = poseView('eye-2m', domain);

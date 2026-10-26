@@ -403,12 +403,28 @@ describe('Plan 059 CPU twin error metric', () => {
 
 describe('Plan 059 suite lod-surface-terrain', () => {
   const history = LOD_SURFACE_TEST_HISTORY;
-  const terrain = history[history.length - 1];
+  const latest = history[history.length - 1];
+  /** Terrain v1 as it was shared: the same 36 cases, single-threshold selection. */
+  const terrain = history.find((suite) => suite.id === 'lod-surface-terrain' && suite.version === 1)!;
 
   it('is the last entry after the untouched baseline versions, and a valid history', () => {
-    expect(history.map((suite) => `${suite.id}@${suite.version}`)).toEqual(['lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-terrain@1']);
+    expect(history.map((suite) => `${suite.id}@${suite.version}`)).toEqual([
+      'lod-surface-baseline@1', 'lod-surface-baseline@2', 'lod-surface-baseline@3', 'lod-surface-terrain@1', 'lod-surface-terrain@2',
+    ]);
     expect(() => validateTestHistory(history)).not.toThrow();
     expect(terrain.purpose).toBe('performance');
+    expect(latest.id).toBe('lod-surface-terrain');
+    expect(latest.purpose).toBe('performance');
+  });
+
+  it('groups the terrain v2 sweep cases with the cases of their source and domain', () => {
+    const keys = latest.scenarios.map((scenario) => `${scenario.settings.source}|${scenario.settings.domain}`);
+    const runs = keys.filter((key, n) => n === 0 || key !== keys[n - 1]);
+    expect(new Set(runs).size).toBe(runs.length);
+    expect(latest.scenarios.length).toBe(terrain.scenarios.length + 2);
+    for (const scenario of latest.scenarios.filter((item) => item.settings.motion === 'sweep')) {
+      expect(sourceSupports(scenario.settings.source as HeightSourceId, domainPreset(scenario.settings.domain as DomainPresetId).kind)).toBeTrue();
+    }
   });
 
   it('has 36 cases: every source on every domain it suits at the five poses, plus one injected-gap control', () => {

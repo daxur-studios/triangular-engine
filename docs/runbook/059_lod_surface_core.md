@@ -630,4 +630,126 @@ CPU twin vs sampler at the 64 probes (max / p95):
   interpolation error between texels on steep cell borders, not a seam error, and it should drop at a finer texel.
 
 **Open:** a visual review of the shaded cases, including whether the cell-planet poses stand on land; a clean rerun
-without other apps measuring; the jitter look; the AMD run; a GPU read-back of heights.
+without other apps measuring; the jitter look; a GPU read-back of heights. (The AMD run was dropped; see below.)
+
+## 2026-10-25 — Terrain suite v1, case by case in quick mode (RTX 3080)
+
+The owner then ran the 36 cases one at a time in quick mode, visible browser, about 4–8 s each, likely while looking
+at each pose. Every run logged `WARN other-app-measuring`, and laptop CPU load rose from about 20% to 50–73% during
+the batch.
+
+- **28 cases settled and 8 hit the 4 s cap**: `cell-planet-sphere-10km-orbit`, `noise-sphere-600km-horizon`,
+  `noise-sphere-10km-horizon`, `noise-sphere-10km-orbit`, `control-injected-gap`, `cliff-plane-100km-low-200m`,
+  `cliff-sphere-10km-mid-5km` and `cliff-sphere-10km-horizon`. All 36 settled in the standard run.
+- **The caps come from frame hitches, not the surface.** Every capped case has a frame interval max of 12–58 ms and a
+  p95 of 6.6–8.3 ms, against a 6.7–7.8 ms max on the settled cases. A few hitches in a 4 s window keep the two halves
+  from agreeing on p95 within 10%. On those cases the GPU scene pass stays at 0.06–0.22 ms and selection p95 at
+  0.1 ms. The hitches fall on the busiest stretch of CPU load, which suggests the browser or another app, not the lab.
+- **The checks match the standard run.** There are 0 crack px in all 35 ordinary cases, and the control again finds
+  27,838 px.
+- **The bake is 2–30% slower under the extra load**: cell planet 587 / 695 ms per face (3.8 s), noise 600 km sphere
+  312 ms (2.0 s), noise 10 km sphere 383 ms (2.4 s), noise plane 271 ms, cliff plane 76 ms and cliff 10 km sphere
+  146 ms (1.0 s). The twin errors are unchanged.
+
+Nothing here changes the findings above. A capped quick case is inconclusive on timing, not a failure; rerun it, or use
+standard mode, with the laptop otherwise idle.
+
+## 2026-10-25 — Owner notes: AMD run dropped; hysteresis missing
+
+- **The AMD iGPU run is dropped** (owner). The M1 close no longer waits on it. The agent's browser looks on the iGPU
+  for chunks B and C count as functional evidence only (it draws, 0 crack px, the control finds cracks), not timing.
+- **The owner saw blocks switch back and forth between levels while rotating the camera by hand.** This is expected
+  in M1: the selector rebuilds the tree every frame with a single split threshold and no hysteresis (the suite labels
+  this as a limitation). A node right at the threshold splits and merges as its distance wobbles. Hysteresis is in
+  the selector design (§Architecture, and the selector specs) but no step of the D15 order schedules it. The automated
+  cases do not catch it, because their poses are still and the one scripted zoom moves one way.
+
+## 2026-10-25 — Split/merge hysteresis and the sweep camera (specs only, no browser run)
+
+Built by a Sonnet 5.5 agent and reviewed. All the code is in `projects/demo-app/src/app/pages/lod-surface-lab/`.
+
+- **The rule (`lod-selector.ts`, setting `hysteresis`, lab default 0.15, distance mode only).** A leaf splits when
+  `edge / target > 1`, as before. A node that was split in the last tree stays split while `edge / target > 1 / (1 +
+  h)`. Hysteresis 0 gives exactly the old trees; a spec compares them with the reference selector.
+  - A kept node is queued with its own value, at most 1. It therefore sorts after every real request.
+  - When the leaf cap or the node pool stops splitting, a kept node is dropped quietly. It counts as neither
+    `capHit` nor `unmet`.
+  - Balance splits are never kept.
+- **History.** `wasOpen` and `wasVisible` are copied from the last tree while its flags are cleared. They count only
+  when `stamp === frame - 1`, so a node outside the last tree (merged away, or freed and remade) reads 0. A repeated
+  view returns early, keeping the history and reporting no changes. No spec forces an actual reclaim, so that path
+  rests on the stamp check.
+- **Counting changes.**
+  - `newSplits` and `merges` are the raw counts.
+  - `visibleNewSplits` and `visibleMerges` count only nodes visible in both frames.
+  - The raw count was useless with culling on. On a plane sweep it was 5,760 against 5,724, almost all nodes crossing
+    the frustum edge, where a level change is invisible.
+  - The HUD shows both counts.
+- **Sweep camera (`sweepPathView` in `lod-camera.ts`).** The camera holds a pose and swings its heading by ±30° and
+  its altitude by ±2% on a 2 s period. Turning alone only changes culling, so the altitude swing is what crosses the
+  distance thresholds. The adapter drives it by wall-clock time and runs the crack probe at the end, back on the pose.
+- **Metrics.** `levelChanges` is the on-screen count per frame, as a series. `levelChangesPerSecond` is its rate,
+  and `levelChangesAll` is the raw rate.
+- **Suites.** Old versions keep their meaning and are pinned to hysteresis 0.
+  - `lod-surface-baseline` v3 turns hysteresis on in every case. It adds `sweep-sphere-600km-eye-2m` (a control: the
+    tree is at its deepest level there, so nothing crosses a threshold), `sweep-plane-100km-low-200m` and
+    `sweep-sphere-600km-mid-5km`, each of the last two with a `-nohyst` A/B partner.
+  - `lod-surface-terrain` v2 turns hysteresis on and adds `sweep-cell-planet-sphere-10km-low-200m` and
+    `sweep-cliff-plane-100km-low-200m`.
+- **Headless calibration** (culling on, 60 fps, on-screen changes in the first period / the next three):
+
+| sweep | h = 0 | h = 0.15 |
+|---|---|---|
+| plane low-200m | 20 / 60 | 8 / 12 |
+| sphere 600 km eye-2m | 0 / 0 | 0 / 0 |
+| sphere 600 km low-200m | 10 / 30 | 2 / 0 |
+| sphere 600 km mid-5km | 12 / 36 | 1 / 0 |
+
+- **Specs.** 138 lab specs pass, up from 117. The demo-app build succeeds. The full demo-app run has 3 failures
+  outside this lab: the test-history specs for two other pages (morph streaming and planet material) and a timing
+  flake in the atmosphere-lab adapter.
+
+**Open.**
+- The RTX run of baseline v3 and terrain v2: the A/B rates, and an owner check by hand that rotating no longer flips
+  blocks.
+- The residual 12 changes on the plane at h = 0.15. That pose fills the 1,024-leaf cap, so which requests get served
+  shifts with the view, and kept nodes are dropped first. A larger cap, or ranking kept nodes above new requests, would
+  test this.
+
+## 2026-10-25 — Sweep cases on the RTX 3080: hysteresis has no effect at the 1,024-leaf cap
+
+The owner ran the seven sweep cases as one batch from a `testCases` launch link (standard mode, `visible-browser`,
+one repetition each; added to `triangular-engine/testing` this session). All seven pass the automation checks, with
+0 crack px.
+
+| case | leaves | on-screen changes/s | all changes/s |
+|---|---|---|---|
+| baseline v3 `sweep-sphere-600km-eye-2m` (control) | 1,023 | 0 | 0 |
+| baseline v3 `sweep-plane-100km-low-200m` | 1,024 | 111.5 | 380.5 |
+| baseline v3 `sweep-plane-100km-low-200m-nohyst` | 1,024 | 107.5 | 375.2 |
+| baseline v3 `sweep-sphere-600km-mid-5km` | 1,023 | 104.1 | 364.1 |
+| baseline v3 `sweep-sphere-600km-mid-5km-nohyst` | 1,023 | 107.2 | 366.2 |
+| terrain v2 `sweep-cell-planet-sphere-10km-low-200m` | 1,023 | 104.7 | 349.3 |
+| terrain v2 `sweep-cliff-plane-100km-low-200m` | 1,024 | 149.4 | 256.6 |
+
+### Findings
+
+- **Hysteresis on and off give the same rate**, about 105–110 on-screen changes a second. It removes nothing in
+  the browser.
+- **Every sweep case except the control sits at the leaf cap.** The suites use `leafCap: 1024`, but the headless
+  calibration spec ran with `leafCap: 20_000` (`lod-selector-hysteresis.spec.ts`), so it never met the cap. At the cap,
+  which nodes get split depends on how requests rank, and that ranking shifts every frame as the camera turns. Kept
+  nodes rank after every real request and are the first dropped, so the budget decides the tree and hysteresis never
+  takes part. This is likely what the owner sees when rotating by hand at the default cap.
+- **Correction to the previous entry.** The plane residual (8 / 12) was blamed on the cap, but that calibration ran at
+  20,000 leaves and never reached it, so its cause is still unknown.
+- The page parameter `hysteresis` does reach the selector (`lod-surface-lab-page.component.ts`), so this is not a
+  wiring fault.
+
+### Next
+
+- Make the budget itself hysteretic. Options to compare in a spec at `leafCap: 1024`: rank a kept node with a bonus
+  over new requests, so a new split must beat it by a margin; or let a split in the last tree hold its place until a
+  request beats it by `1 + h`. Then rerun the seven cases.
+- Calibrate at the suite's own cap, not 20,000.
+- Investigate the plane residual separately.

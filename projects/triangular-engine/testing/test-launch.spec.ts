@@ -1,4 +1,4 @@
-import { buildTestLaunchUrl, parseTestLaunch, testSuiteKey, validateTestHistory } from './test-launch';
+import { buildTestBatchLaunchUrl, buildTestLaunchUrl, MAX_TEST_CASES, parseTestLaunch, testSuiteKey, validateTestHistory } from './test-launch';
 import type { TestSuite } from './test-contracts';
 
 const first: TestSuite<{ enabled: boolean }> = {
@@ -37,6 +37,58 @@ describe('test launch selection', () => {
       'testSuite=latest&testRepetitions=1.5', 'testSuite=latest&testAutoStart=yes', 'testAutoStart=1',
       'testSuite=latest&testSuite=reference', 'testSuite=latest&testScript=arbitrary', 'testSuite=latest&testMode=fast', 'testSuite=latest&testThumbnails=2',
     ]) expect(() => parseTestLaunch(new URL(`http://localhost/?${query}`), [first])).toThrow();
+  });
+
+  describe('testCases', () => {
+    const multi: TestSuite<{ enabled: boolean }> = {
+      ...first, scenarios: [first.scenarios[0], { ...first.scenarios[0], id: 'other' }, { ...first.scenarios[0], id: 'third' }],
+    };
+    const other: TestSuite<{ enabled: boolean }> = { ...first, id: 'second-suite', version: 3, scenarios: [{ ...first.scenarios[0], id: 'zoom' }] };
+    const history = [multi, other];
+    const parse = (query: string, suites = history) => parseTestLaunch(new URL(`http://localhost/?${query}`), suites);
+    const test = (suiteId: string, suiteVersion: number, scenarioId: string) => ({ suiteId, suiteVersion, scenarioId });
+
+    it('resolves bare, qualified and mixed entries in link order, and omits cases without the parameter', () => {
+      expect(parse('testSuite=reference&testVersion=1&testCases=other,check')?.cases).toEqual([test('reference', 1, 'other'), test('reference', 1, 'check')]);
+      expect(parse('testSuite=reference&testVersion=1&testCases=second-suite@3/zoom')?.cases).toEqual([test('second-suite', 3, 'zoom')]);
+      expect(parse('testSuite=reference&testVersion=1&testCases=third,second-suite@3/zoom,reference@1/check')?.cases)
+        .toEqual([test('reference', 1, 'third'), test('second-suite', 3, 'zoom'), test('reference', 1, 'check')]);
+      expect(parse('testSuite=reference&testVersion=1')?.cases).toBeUndefined();
+      expect('cases' in parse('testSuite=reference&testVersion=1')!).toBeFalse();
+    });
+
+    it('resolves bare ids against latest', () => {
+      expect(parse('testSuite=latest&testCases=zoom')?.cases).toEqual([test('second-suite', 3, 'zoom')]);
+    });
+
+    it('rejects unknown, empty, repeated and too many entries', () => {
+      const base = 'testSuite=reference&testVersion=1&testCases=';
+      for (const cases of ['missing', 'check,missing', 'zoom', 'nope@1/check', 'second-suite@9/zoom', 'second-suite@3/check', '', 'check,', ',check', 'check,,other', 'check,check', 'check,reference@1/check']) {
+        expect(() => parse(base + encodeURIComponent(cases))).toThrow();
+      }
+      expect(() => parse('testCases=check')).toThrow();
+      expect(() => parse(`${base}check&testCases=other`)).toThrow();
+      const many = Array.from({ length: MAX_TEST_CASES + 1 }, (_, index) => `s${index}`);
+      const wide = { ...first, scenarios: many.map((id) => ({ ...first.scenarios[0], id })) };
+      expect(parse(base + many.slice(0, MAX_TEST_CASES).join(','), [wide])?.cases?.length).toBe(MAX_TEST_CASES);
+      expect(() => parse(base + many.join(','), [wide])).toThrowError(/more than/);
+    });
+
+    it('round-trips through the batch builder and keeps the suite link free of cases', () => {
+      const tests = [test('reference', 1, 'third'), test('second-suite', 3, 'zoom'), test('reference', 1, 'check')];
+      const link = buildTestBatchLaunchUrl('http://localhost/lab?backend=webgl2', tests, 'human-observed', 2, 'quick', false);
+      const url = new URL(link);
+      expect(url.searchParams.get('testSuite')).toBe('reference');
+      expect(url.searchParams.get('testVersion')).toBe('1');
+      expect(url.searchParams.get('testCases')).toBe('third,second-suite@3/zoom,check');
+      expect(url.searchParams.get('backend')).toBe('webgl2');
+      expect(parseTestLaunch(url, history)).toEqual({
+        key: 'reference@1', profile: 'human-observed', mode: 'quick', repetitions: 2, autoStart: true, thumbnails: false, cases: tests,
+      });
+      expect(new URL(buildTestLaunchUrl(link, multi, 'visible-browser', 1)).searchParams.has('testCases')).toBeFalse();
+      expect(() => buildTestBatchLaunchUrl('http://localhost/', [], 'visible-browser', 1)).toThrow();
+      expect(() => buildTestBatchLaunchUrl('http://localhost/', [test('reference', 1, 'a,b')], 'visible-browser', 1)).toThrow();
+    });
   });
 
   it('rejects ambiguous histories and invalid scenarios before starting', () => {

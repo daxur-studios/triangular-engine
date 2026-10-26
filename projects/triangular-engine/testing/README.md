@@ -156,6 +156,21 @@ link always pins an exact ID/version and the mode. `testMode` is `quick`, `stand
 versions/invalid options fail visibly and do not autostart a replacement test.
 Backend and other application query parameters are preserved in copied links.
 
+`testCases` runs a chosen list of cases as one batch instead of the whole suite. It is a comma-separated list
+of scenario ids from the link's `testSuite`/`testVersion` (`latest` resolves as usual), and an entry may name another
+registered suite as `<suiteId>@<version>/<scenarioId>`:
+
+```text
+/your-page?testSuite=feature-check&testVersion=1&testCases=startup,orbit,other-suite@2/zoom&testMode=quick&testAutoStart=1
+```
+
+Every entry must resolve to a registered scenario, entries may not be empty or repeat, and a link holds at most 50
+(`MAX_TEST_CASES`); anything else fails visibly and does not autostart. The cases fill the batch in link order. With
+autostart the batch runs in the link's mode, one saved result per case (like **Run batch**); without it the batch is
+only pre-filled. `testSuite` is still required and picks the suite shown in the form.
+`buildTestBatchLaunchUrl(base, tests, profile, repetitions, mode, thumbnails)` builds such a link, and the batch's
+**Copy batch link** button copies it. Suite links made by `buildTestLaunchUrl` drop any `testCases` of the page they were made on.
+
 Autostart requires both `[allowAutoStart]="true"` and `[available]="true"`. It starts
 once per component initialization, and waits while `externalBusy` is true. Applications
 must decide whether their dev/test mode permits autostart; a query parameter alone
@@ -520,7 +535,8 @@ double the rounds.
 Use **Run suite** (the main button) or **Run all** in the menu for the complete comparison. Both keep an A/B
 suite's scenarios in one session, so both arms and all rounds reach the analyser together. Independent suites
 still use one saved result per scenario under **Run all**. A manually assembled batch of individual scenarios
-does not combine their A/B evidence; run the full suite for that comparison.
+does not combine their A/B evidence; run the full suite for that comparison. **Copy batch link** (next to
+**Run batch**) copies a [`testCases` launch link](#launch-links) for the current batch.
 
 ```ts
 ablation: { feature: 'shadows', metrics: ['gpuPassTotal'] },

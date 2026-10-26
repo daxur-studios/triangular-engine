@@ -174,6 +174,11 @@ measured on the RTX 3080 before the next starts:
 3. **Terrain suite** (`lod-surface-terrain`, new): the baseline poses and metrics for every terrain source, plus
    bake and upload time. First sources: the cell planet (through the worldgen surface sampler), plain noise and a
    synthetic cliff/step fixture. Adding a terrain means adding a source, not a suite. *Built 2026-10-25 as specs-only chunk C: suite `lod-surface-terrain` v1 (36 cases), sources `cell-planet` and `cliff`, world build and twin error metrics, and a bake about 3x faster; 117 headless specs. First RTX 3080 run the same day: 0 crack px in all 35 ordinary cases, the control found 27,838 px, GPU scene pass p95 at most 0.27 ms; visual review pending, see the runbook.*
+   **3a. Split/merge hysteresis** (added 2026-10-25 by the owner, ahead of the slope criterion): a node split in the
+   last tree stays split until its cells are 15% under the split point. A back-and-forth sweep camera counts on-screen
+   level changes. *Built 2026-10-25, specs only: suites `lod-surface-baseline` v3 and `lod-surface-terrain` v2, 138 lab
+   specs green. RTX 3080 sweep run 2026-10-25: no effect at the suites' 1,024-leaf cap, where the budget decides the
+   tree; the budget needs its own hysteresis, see the runbook.*
 4. **Slope criterion** (from M2), measured ABAB in the terrain suite.
 5. **M5:** edits and the collider patch.
 6. **M6:** cliffs.

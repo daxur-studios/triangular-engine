@@ -410,3 +410,89 @@ describe('TestRunnerComponent copy for agent when done', () => {
     fixture.destroy();
   });
 });
+
+describe('TestRunnerComponent testCases launch links', () => {
+  const suite: TestSuite<Settings> = {
+    id: 'batch-suite', version: 1, title: 'Batch suite', purpose: 'functional',
+    scenarios: ['a', 'b', 'c'].map((id, index) => ({ id, label: `Case ${id}`, settings: { value: index }, durationMs: 1 })),
+  };
+  const originalUrl = location.href;
+  afterEach(() => window.history.replaceState(null, '', originalUrl));
+
+  async function create(query: string, allowAutoStart: boolean) {
+    window.history.replaceState(null, '', `${location.pathname}?${query}`);
+    await TestBed.configureTestingModule({ imports: [TestRunnerComponent] }).compileComponents();
+    const measured: string[] = [];
+    const adapter: TestRunAdapter<Settings, number> = {
+      capture: () => 0, apply: () => {}, ready: async () => {}, restore: () => {},
+      measure: async (scenario) => { measured.push(scenario.id); return { metrics: [] }; },
+    };
+    const fixture = TestBed.createComponent<TestRunnerComponent<Settings, number>>(TestRunnerComponent);
+    fixture.componentRef.setInput('suites', [suite]);
+    fixture.componentRef.setInput('adapter', adapter);
+    fixture.componentRef.setInput('resultSink', false);
+    fixture.componentRef.setInput('copyOnFinish', false);
+    fixture.componentRef.setInput('allowAutoStart', allowAutoStart);
+    return { fixture, measured };
+  }
+  const link = 'testSuite=batch-suite&testVersion=1&testProfile=headless-hardware&testCases=c,a';
+  const until = async (condition: () => boolean) => {
+    for (let i = 0; i < 200 && !condition(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  };
+
+  it('pre-fills the batch without running when the link does not autostart', async () => {
+    const { fixture, measured } = await create(link, true);
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(component.batchTests().map((test) => test.scenarioId)).toEqual(['c', 'a']);
+    expect(measured).toEqual([]);
+    fixture.destroy();
+  });
+
+  it('runs the named cases, not the whole suite, when the link autostarts', async () => {
+    const { fixture, measured } = await create(`${link}&testAutoStart=1`, true);
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    await until(() => component.batchEntries().length === 2 && !component.running());
+    expect(measured).toEqual(['c', 'a']);
+    expect(component.batchEntries().map((entry) => entry.run.cases.map((item) => item.scenario.id))).toEqual([['c'], ['a']]);
+    fixture.destroy();
+  });
+
+  it('does not autostart when the application disallows it', async () => {
+    const blocked = await create(`${link}&testAutoStart=1`, false);
+    blocked.fixture.detectChanges();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(blocked.measured).toEqual([]);
+    expect(blocked.fixture.componentInstance.batchTests().length).toBe(2);
+    blocked.fixture.destroy();
+  });
+
+  it('fails visibly on an unknown case and starts nothing', async () => {
+    const bad = await create(`${link},missing&testAutoStart=1`, true);
+    bad.fixture.detectChanges();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(bad.fixture.componentInstance.message()).toContain('unknown case');
+    expect(bad.fixture.componentInstance.batchTests()).toEqual([]);
+    expect(bad.measured).toEqual([]);
+    bad.fixture.destroy();
+  });
+
+  it('copies a batch link for the current batch and disables the button when empty', async () => {
+    const { fixture } = await create(link, false);
+    const write = spyOn(navigator.clipboard, 'writeText').and.resolveTo();
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    const button = () => Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>).find((item) => item.textContent?.includes('Copy batch link'))!;
+    expect(button().disabled).toBeFalse();
+    await component.copyBatchLink();
+    const copied = new URL(write.calls.mostRecent().args[0]);
+    expect(copied.searchParams.get('testCases')).toBe('c,a');
+    expect(copied.searchParams.get('testSuite')).toBe('batch-suite');
+    component.clearBatch();
+    fixture.detectChanges();
+    expect(button().disabled).toBeTrue();
+    fixture.destroy();
+  });
+});

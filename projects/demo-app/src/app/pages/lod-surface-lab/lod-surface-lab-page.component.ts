@@ -7,7 +7,7 @@ import { EngineModule, EngineService, ScreenshotService } from 'triangular-engin
 import { provideBrowserImageCompression } from 'triangular-engine/image-compression';
 import { TestRunnerComponent, describeRendererGpu, type TestProgress, type TestRunAdapter, type TestSetting } from 'triangular-engine/testing';
 import {
-  POSES, frustumNormals, groundFrame, lookView, panView, poseView, resolveCamera, zoomPathView, zoomView, type CameraView, type PoseId,
+  POSES, frustumNormals, groundFrame, lookView, panView, poseView, resolveCamera, sweepPathView, zoomPathView, zoomView, type CameraView, type PoseId,
   type ResolvedCamera,
 } from './lod-camera';
 import { BACKSTOP_VALUE, countCracks } from './lod-crack-probe';
@@ -107,6 +107,7 @@ interface RendererLike {
         @if (hud().software) { <b> · SOFTWARE RENDERER</b> }<br />
         leaves {{ stats().leaves }} (drawn {{ stats().drawn }}) · {{ triangles() }} triangles<br />
         deepest level {{ stats().deepestLevel }} · splits {{ stats().splits }} (+{{ stats().forcedSplits }} balance)
+        · this frame on screen +{{ stats().visibleNewSplits }} / -{{ stats().visibleMerges }} (all +{{ stats().newSplits }} / -{{ stats().merges }})
         @if (stats().capHit) { · <b>cap hit, {{ stats().unmet }} unmet</b> }<br />
         selection {{ selectionMs().toFixed(2) }} ms · altitude {{ altitudeLabel() }}
         @if (bakeLine()) { <br />{{ bakeLine() }} }
@@ -159,6 +160,9 @@ interface RendererLike {
         @if (mode() === 'distance') {
           <p class="row">cell size {{ cellPixels() }} px (floor {{ pixelFloor }} px)
             <input type="range" min="2" max="16" step="1" aria-label="Target cell size in pixels" [value]="cellPixels()" (input)="setCellPixels(+$any($event.target).value)" />
+          </p>
+          <p class="row">hysteresis {{ hysteresis() === 0 ? 'off' : hysteresis().toFixed(2) }}
+            <input type="range" min="0" max="0.5" step="0.05" aria-label="Split and merge hysteresis" [value]="hysteresis()" (input)="setHysteresis(+$any($event.target).value)" />
           </p>
         } @else {
           <p class="row">level {{ fixedLevel() }}
@@ -259,6 +263,7 @@ export class LodSurfaceLabPageComponent {
   readonly cellPixels = signal(DEFAULT_SETTINGS.cellPixels);
   readonly leafCap = signal(DEFAULT_SETTINGS.leafCap);
   readonly cull = signal(DEFAULT_SETTINGS.cull);
+  readonly hysteresis = signal(DEFAULT_SETTINGS.hysteresis);
   readonly folding = signal(DEFAULT_SETTINGS.folding);
   readonly injectedGap = signal(DEFAULT_SETTINGS.injectedGap);
   readonly poseId = signal<PoseId>(DEFAULT_SETTINGS.pose);
@@ -287,7 +292,7 @@ export class LodSurfaceLabPageComponent {
   readonly runnerReady = signal(false);
   readonly runnerBusy = signal(false);
   readonly hud = signal({ backend: 'starting', width: 0, height: 0, adapter: 'adapter unknown', software: false });
-  readonly stats = signal<SelectorStats>({ leaves: 0, drawn: 0, splits: 0, forcedSplits: 0, unmet: 0, capHit: false, deepestLevel: 0 });
+  readonly stats = signal<SelectorStats>({ leaves: 0, drawn: 0, splits: 0, forcedSplits: 0, newSplits: 0, merges: 0, visibleNewSplits: 0, visibleMerges: 0, unmet: 0, capHit: false, deepestLevel: 0 });
   readonly selectionMs = signal(0);
   readonly altitudeLabel = signal('');
   readonly probeResult = signal('');
@@ -304,6 +309,8 @@ export class LodSurfaceLabPageComponent {
   private readonly bakes = new Map<string, { source: TextureHeightSource; info: LodSurfaceBakeInfo }>();
   private freeView: CameraView = poseView(DEFAULT_SETTINGS.pose, this.domain);
   private zoomProgress: number | undefined;
+  /** Seconds into the scripted sweep of the named pose, or undefined when no sweep runs. */
+  private sweepTime: number | undefined;
   private camera: ResolvedCamera | undefined;
   private drag: { pointerId: number; look: boolean } | undefined;
   private readonly frustum = new Float64Array(12);
@@ -318,6 +325,8 @@ export class LodSurfaceLabPageComponent {
   private readonly hudSamples: number[] = [];
   private selectionSamples: number[] = [];
   private leafSamples: number[] = [];
+  private levelChangeSamples: number[] = [];
+  private levelChangeAllSamples: number[] = [];
   private readonly renderCallbacks = new Set<(renderedAt: number) => void>();
   private probeParts: { target: RenderTarget; scene: Scene; surface: Mesh; backstop: Mesh; backstopMaterial: MeshBasicNodeMaterial } | undefined;
 
@@ -341,8 +350,11 @@ export class LodSurfaceLabPageComponent {
     onRenderComplete: (callback) => { this.renderCallbacks.add(callback); return () => this.renderCallbacks.delete(callback); },
     selectionSamples: () => this.selectionSamples,
     leafSamples: () => this.leafSamples,
-    resetSamples: () => { this.selectionSamples = []; this.leafSamples = []; },
+    levelChangeSamples: () => this.levelChangeSamples,
+    levelChangeAllSamples: () => this.levelChangeAllSamples,
+    resetSamples: () => { this.selectionSamples = []; this.leafSamples = []; this.levelChangeSamples = []; this.levelChangeAllSamples = []; },
     setZoomProgress: (t) => { this.zoomProgress = t; },
+    setSweepTime: (seconds) => { this.sweepTime = seconds; },
     isSampling: () => this.engine.fpsController.frameSampler.isActive,
     startSampling: () => this.engine.fpsController.frameSampler.start(),
     gpuSamplesSoFar: () => this.engine.fpsController.frameSampler.gpuSamples,
@@ -418,6 +430,7 @@ export class LodSurfaceLabPageComponent {
   setPatchCells(cells: PatchCells): void { this.patchCells.set(cells); this.rebuild(); }
   setWarp(warp: CubeWarp): void { this.warp.set(warp); this.rebuild(); }
   setCull(on: boolean): void { this.cull.set(on); this.rebuild(); }
+  setHysteresis(ratio: number): void { this.hysteresis.set(Math.max(0, ratio)); this.rebuild(); }
   setFolding(on: boolean): void { this.folding.set(on); this.surface?.setFolding(on); }
   setInjectedGap(share: number): void { this.injectedGap.set(share); this.surface?.setInjectedGap(share); }
   setView(view: LodView): void { this.view.set(view); this.surface?.setView(view); }
@@ -472,9 +485,9 @@ export class LodSurfaceLabPageComponent {
   private readSettings(): LodSurfaceTestSettings {
     return {
       domain: this.domainId(), warp: this.warp(), source: this.sourceId(), patchCells: this.patchCells(), mode: this.mode(),
-      fixedLevel: this.fixedLevel(), cellPixels: this.cellPixels(), leafCap: this.leafCap(), cull: this.cull(), folding: this.folding(),
+      fixedLevel: this.fixedLevel(), cellPixels: this.cellPixels(), leafCap: this.leafCap(), cull: this.cull(), hysteresis: this.hysteresis(), folding: this.folding(),
       injectedGap: this.injectedGap(), pose: this.poseId(), view: this.view(), wireframe: this.wireframe(), bounds: this.bounds(),
-      ...(this.zoomProgress !== undefined ? { motion: 'zoom' as const } : {}),
+      ...(this.zoomProgress !== undefined ? { motion: 'zoom' as const } : this.sweepTime !== undefined ? { motion: 'sweep' as const } : {}),
     };
   }
 
@@ -488,6 +501,7 @@ export class LodSurfaceLabPageComponent {
     this.cellPixels.set(settings.cellPixels);
     this.leafCap.set(settings.leafCap);
     this.cull.set(settings.cull);
+    this.hysteresis.set(settings.hysteresis);
     this.frozen.set(false);
     this.rebuild();
     this.setFolding(settings.folding);
@@ -497,6 +511,7 @@ export class LodSurfaceLabPageComponent {
     this.setBounds(settings.bounds);
     this.setPose(settings.pose);
     this.zoomProgress = settings.motion === 'zoom' ? 0 : undefined;
+    this.sweepTime = settings.motion === 'sweep' ? 0 : undefined;
   }
 
   /**
@@ -515,7 +530,7 @@ export class LodSurfaceLabPageComponent {
     if (sizeChanged) this.freeView = poseView(this.poseId(), this.domain);
     this.selector = new LodSelector({
       domain: this.domain, patchCells: this.patchCells(), mode: this.mode(), fixedLevel: this.fixedLevel(), cellPixels: this.cellPixels(),
-      leafCap: this.leafCap(), heightBoundM: this.source.boundM, cull: this.cull(),
+      leafCap: this.leafCap(), heightBoundM: this.source.boundM, cull: this.cull(), hysteresis: this.hysteresis(),
       ...(this.source.nodeRange ? { heightRanges: { nodeRange: this.source.nodeRange.bind(this.source) } } : {}),
     });
     const capacity = this.leafCap() + CAP_SLACK + 6;
@@ -610,6 +625,7 @@ export class LodSurfaceLabPageComponent {
 
   private currentView(): CameraView {
     if (this.zoomProgress !== undefined) return zoomPathView(this.domain, this.zoomProgress);
+    if (this.sweepTime !== undefined) return sweepPathView(this.domain, this.poseId(), this.sweepTime);
     return this.freeCamera() ? this.freeView : poseView(this.poseId(), this.domain);
   }
 
@@ -643,6 +659,8 @@ export class LodSurfaceLabPageComponent {
     surface.setSun([0, 1, 2].map((k) => groundUp[k] + 0.6 * east[k] + 0.4 * north[k]) as [number, number, number]);
 
     const began = performance.now();
+    let levelChanges = 0;
+    let levelChangesAll = 0;
     if (!this.frozen()) {
       const height = (this.engine.renderer as unknown as RendererLike).domElement?.height || 1080;
       const fov = (FOV_DEG * Math.PI) / 180;
@@ -651,11 +669,16 @@ export class LodSurfaceLabPageComponent {
       selectorView.pixelAngle = (2 * Math.tan(fov / 2)) / height;
       frustumNormals(camera, fov, aspect, this.frustum);
       selector.select(selectorView);
+      // Zero for a repeated view (select returned early); a frozen selection never calls it, so it counts none either.
+      levelChanges = selector.stats.visibleNewSplits + selector.stats.visibleMerges;
+      levelChangesAll = selector.stats.newSplits + selector.stats.merges;
     }
     surface.upload(selector, camera.position);
     const elapsed = performance.now() - began;
     this.selectionSamples.push(elapsed);
     this.leafSamples.push(selector.stats.leaves);
+    this.levelChangeSamples.push(levelChanges);
+    this.levelChangeAllSamples.push(levelChangesAll);
     this.hudSamples.push(elapsed);
     if (this.hudSamples.length > HUD_SAMPLES) this.hudSamples.shift();
     if (this.renderedFrames % 15 === 0) {

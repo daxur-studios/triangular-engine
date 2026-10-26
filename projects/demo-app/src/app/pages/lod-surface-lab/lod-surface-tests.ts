@@ -16,6 +16,8 @@ export interface LodSurfaceTestSettings {
   readonly cellPixels: number;
   readonly leafCap: number;
   readonly cull: boolean;
+  /** Split/merge hysteresis ratio of the distance criterion (`SelectorSettings.hysteresis`); 0 is the single threshold. */
+  readonly hysteresis: number;
   readonly folding: boolean;
   /** Share of each leaf's size it is shrunk by (probe validation); 0 in every ordinary case. */
   readonly injectedGap: number;
@@ -23,15 +25,22 @@ export interface LodSurfaceTestSettings {
   readonly view: LodView;
   readonly wireframe: boolean;
   readonly bounds: boolean;
-  /** The scripted ground-to-orbit zoom runs during the window instead of a still pose. */
-  readonly motion?: 'zoom';
+  /**
+   * A scripted camera runs during the window instead of a still pose: `zoom` flies the ground-to-orbit path once; `sweep`
+   * holds `pose` and swings the camera back and forth (yaw and a little altitude, `sweepPathView`) for the whole window.
+   */
+  readonly motion?: 'zoom' | 'sweep';
 }
 
+/** The lab's defaults, and what suites from `lod-surface-baseline` v3 / `lod-surface-terrain` v2 on run with. */
 export const DEFAULT_SETTINGS: LodSurfaceTestSettings = {
   domain: 'sphere-600km', warp: 'equal-angle', source: 'bumps', patchCells: 32, mode: 'distance', fixedLevel: 5,
-  cellPixels: 4, leafCap: 1024, cull: true, folding: true, injectedGap: 0, pose: 'eye-2m', view: 'lod', wireframe: false,
+  cellPixels: 4, leafCap: 1024, cull: true, hysteresis: 0.15, folding: true, injectedGap: 0, pose: 'eye-2m', view: 'lod', wireframe: false,
   bounds: true,
 };
+
+/** What suites before the hysteresis existed were measured with: the single threshold. Their definitions keep it. */
+const NO_HYSTERESIS: LodSurfaceTestSettings = { ...DEFAULT_SETTINGS, hysteresis: 0 };
 
 /** What a case expects of the crack probe. */
 export type CrackExpectation = 'none' | 'some';
@@ -44,13 +53,23 @@ const DOMAINS: readonly DomainPresetId[] = ['plane-100km', 'sphere-10km', 'spher
 const POSES: readonly PoseId[] = ['eye-2m', 'low-200m', 'mid-5km', 'horizon', 'orbit'];
 
 /** A still case; `quickMs`, when given, caps its quick window below the full 4 s. */
-function still(id: string, label: string, change: Partial<LodSurfaceTestSettings>, quickMs?: number): TestScenario<LodSurfaceTestSettings> {
-  return { id, label, settings: { ...DEFAULT_SETTINGS, ...change }, warmupMs: 500, durationMs: 4000, ...(quickMs ? { quickMs } : {}) };
+function still(
+  id: string, label: string, change: Partial<LodSurfaceTestSettings>, quickMs?: number, base: LodSurfaceTestSettings = DEFAULT_SETTINGS,
+): TestScenario<LodSurfaceTestSettings> {
+  return { id, label, settings: { ...base, ...change }, warmupMs: 500, durationMs: 4000, ...(quickMs ? { quickMs } : {}) };
 }
 
-/** The cases of `lod-surface-baseline`; v1 capped each still window at 1.5 s in quick mode. */
-function baselineScenarios(stillQuickMs?: number): TestScenario<LodSurfaceTestSettings>[] {
-  const s = (id: string, label: string, change: Partial<LodSurfaceTestSettings>) => still(id, label, change, stillQuickMs);
+/** A sweep case: the pose held while the camera swings for 8 s (four periods); quick mode shows two. */
+function sweep(id: string, label: string, change: Partial<LodSurfaceTestSettings>): TestScenario<LodSurfaceTestSettings> {
+  return { id, label, settings: { ...DEFAULT_SETTINGS, ...change, motion: 'sweep' }, warmupMs: 500, durationMs: 8000, quickMs: 4000 };
+}
+
+/**
+ * The cases of `lod-surface-baseline`; v1 capped each still window at 1.5 s in quick mode. `base` is what the cases start
+ * from (v1 and v2 predate the hysteresis, so they use {@link NO_HYSTERESIS}).
+ */
+function baselineScenarios(base: LodSurfaceTestSettings, stillQuickMs?: number): TestScenario<LodSurfaceTestSettings>[] {
+  const s = (id: string, label: string, change: Partial<LodSurfaceTestSettings>) => still(id, label, change, stillQuickMs, base);
   return [
     ...DOMAINS.flatMap((domain) => POSES.map((pose) => s(`${domain}-${pose}`, `${domain} · ${pose} · bumps`, { domain, pose }))),
     s('plane-100km-eye-2m-flat', 'plane-100km · eye-2m · flat', { domain: 'plane-100km', pose: 'eye-2m', source: 'flat' }),
@@ -61,8 +80,23 @@ function baselineScenarios(stillQuickMs?: number): TestScenario<LodSurfaceTestSe
     s('sphere-10km-orbit-fixed', 'sphere-10km · orbit · fixed level 5 (uniform baseline)', { domain: 'sphere-10km', pose: 'orbit', mode: 'fixed', fixedLevel: 5 }),
     s('control-injected-gap', 'control: injected gap (probe must find cracks)', { pose: 'low-200m', injectedGap: 0.01 }),
     s('control-folding-off', 'control: folding off over bumps (probe should find cracks)', { pose: 'low-200m', folding: false }),
-    { id: 'zoom-sphere-600km', label: 'zoom 2 m to orbit · sphere-600km', settings: { ...DEFAULT_SETTINGS, motion: 'zoom' }, warmupMs: 500, durationMs: 12_000, quickMs: 6000 },
-    { id: 'zoom-plane-100km', label: 'zoom 2 m to orbit · plane-100km', settings: { ...DEFAULT_SETTINGS, domain: 'plane-100km', motion: 'zoom' }, warmupMs: 500, durationMs: 12_000, quickMs: 6000 },
+    { id: 'zoom-sphere-600km', label: 'zoom 2 m to orbit · sphere-600km', settings: { ...base, motion: 'zoom' }, warmupMs: 500, durationMs: 12_000, quickMs: 6000 },
+    { id: 'zoom-plane-100km', label: 'zoom 2 m to orbit · plane-100km', settings: { ...base, domain: 'plane-100km', motion: 'zoom' }, warmupMs: 500, durationMs: 12_000, quickMs: 6000 },
+  ];
+}
+
+/**
+ * The sweep cases added in baseline v3 and terrain v2. The `-nohyst` case is the A/B partner of the one before it: the same
+ * sweep with the single threshold, so `levelChangesPerSecond` shows what the hysteresis removes.
+ */
+function baselineSweeps(): TestScenario<LodSurfaceTestSettings>[] {
+  return [
+    sweep('sweep-sphere-600km-eye-2m', 'sweep · sphere-600km · eye-2m', { domain: 'sphere-600km', pose: 'eye-2m' }),
+    sweep('sweep-plane-100km-low-200m', 'sweep · plane-100km · low-200m', { domain: 'plane-100km', pose: 'low-200m' }),
+    sweep('sweep-plane-100km-low-200m-nohyst', 'sweep · plane-100km · low-200m · no hysteresis (A/B)', { domain: 'plane-100km', pose: 'low-200m', hysteresis: 0 }),
+    // The eye-2m sweep never crosses a threshold on the sphere (the tree is at its deepest level); 5 km does, so it carries the sphere A/B.
+    sweep('sweep-sphere-600km-mid-5km', 'sweep · sphere-600km · mid-5km', { domain: 'sphere-600km', pose: 'mid-5km' }),
+    sweep('sweep-sphere-600km-mid-5km-nohyst', 'sweep · sphere-600km · mid-5km · no hysteresis (A/B)', { domain: 'sphere-600km', pose: 'mid-5km', hysteresis: 0 }),
   ];
 }
 
@@ -76,11 +110,23 @@ const BASELINE_V1: TestSuite<LodSurfaceTestSettings> = {
   version: 1,
   title: 'LOD surface core M1: cost, cracks and the ground-to-orbit zoom (Plan 059)',
   purpose: 'performance',
-  scenarios: baselineScenarios(1500),
+  scenarios: baselineScenarios(NO_HYSTERESIS, 1500),
 };
 
 /** v2: the same cases; a still window's quick cap is its full 4 s, so a series has time to settle. */
-const BASELINE_V2: TestSuite<LodSurfaceTestSettings> = { ...BASELINE_V1, version: 2, scenarios: baselineScenarios() };
+const BASELINE_V2: TestSuite<LodSurfaceTestSettings> = { ...BASELINE_V1, version: 2, scenarios: baselineScenarios(NO_HYSTERESIS) };
+
+/**
+ * v3: split/merge hysteresis (0.15, the lab default) is on in every case, the moving cases also record `levelChanges`, and
+ * three sweep cases hold a pose while the camera swings back and forth (one of them without hysteresis, for comparison).
+ * Existing case ids are unchanged, but their numbers are not comparable with v2: the tree they draw differs.
+ */
+const BASELINE_V3: TestSuite<LodSurfaceTestSettings> = {
+  ...BASELINE_V1,
+  version: 3,
+  title: 'LOD surface core: cost, cracks, the zoom and the back-and-forth sweep, with split/merge hysteresis (Plan 059)',
+  scenarios: [...baselineScenarios(DEFAULT_SETTINGS), ...baselineSweeps()],
+};
 
 /** Terrain sources the suite measures, each with the domains it makes sense on (the cell planet is a sphere only). */
 export const TERRAIN_CASES: readonly { readonly source: HeightSourceId; readonly domains: readonly DomainPresetId[] }[] = [
@@ -89,17 +135,28 @@ export const TERRAIN_CASES: readonly { readonly source: HeightSourceId; readonly
   { source: 'cliff', domains: ['plane-100km', 'sphere-10km'] },
 ];
 
-/** Cell planet 10 km: the world and its sampler are built once and shared with the 600 km bake that follows. */
-function terrainScenarios(): TestScenario<LodSurfaceTestSettings>[] {
+/** The sweep each terrain v2 group ends with, keyed `source|domain`; it joins its group so the bake cache is still hit. */
+const TERRAIN_SWEEPS: Readonly<Record<string, PoseId>> = {
+  'cell-planet|sphere-10km': 'low-200m',
+  'cliff|plane-100km': 'low-200m',
+};
+
+/**
+ * Cell planet 10 km: the world and its sampler are built once and shared with the 600 km bake that follows. `base` is
+ * what the cases start from; `sweeps` adds the sweep case at the end of its source and domain group.
+ */
+function terrainScenarios(base: LodSurfaceTestSettings, sweeps: boolean): TestScenario<LodSurfaceTestSettings>[] {
   const settings = (source: HeightSourceId, domain: DomainPresetId, pose: PoseId): Partial<LodSurfaceTestSettings> => ({ source, domain, pose, view: 'shaded', bounds: false });
   const out: TestScenario<LodSurfaceTestSettings>[] = [];
   for (const { source, domains } of TERRAIN_CASES) {
     for (const domain of domains) {
-      for (const pose of POSES) out.push(still(`${source}-${domain}-${pose}`, `${source} · ${domain} · ${pose}`, settings(source, domain, pose)));
+      for (const pose of POSES) out.push(still(`${source}-${domain}-${pose}`, `${source} · ${domain} · ${pose}`, settings(source, domain, pose), undefined, base));
       // The control sits in the middle of its source's group, so it reuses that bake instead of making a third one.
       if (source === 'noise' && domain === 'sphere-10km') {
-        out.push(still('control-injected-gap', 'control: injected gap over baked noise (probe must find cracks)', { ...settings(source, domain, 'low-200m'), injectedGap: 0.01 }));
+        out.push(still('control-injected-gap', 'control: injected gap over baked noise (probe must find cracks)', { ...settings(source, domain, 'low-200m'), injectedGap: 0.01 }, undefined, base));
       }
+      const sweepPose = sweeps ? TERRAIN_SWEEPS[`${source}|${domain}`] : undefined;
+      if (sweepPose) out.push(sweep(`sweep-${source}-${domain}-${sweepPose}`, `sweep · ${source} · ${domain} · ${sweepPose}`, settings(source, domain, sweepPose)));
     }
   }
   return out;
@@ -120,8 +177,16 @@ const TERRAIN_V1: TestSuite<LodSurfaceTestSettings> = {
   title: 'LOD surface core: baked terrain sources (cell planet, noise, cliff) at the baseline poses (Plan 059)',
   purpose: 'performance',
   requiresVisualReview: true,
-  scenarios: terrainScenarios(),
+  scenarios: terrainScenarios(NO_HYSTERESIS, false),
 };
 
-/** Oldest first; the final entry is "Run latest test". The baseline is still run by its exact version. */
-export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, TERRAIN_V1];
+/** v2: hysteresis on, plus one back-and-forth sweep on the cell planet and one on the cliff (each in its group). */
+const TERRAIN_V2: TestSuite<LodSurfaceTestSettings> = {
+  ...TERRAIN_V1,
+  version: 2,
+  title: 'LOD surface core: baked terrain sources at the baseline poses and a back-and-forth sweep, with split/merge hysteresis (Plan 059)',
+  scenarios: terrainScenarios(DEFAULT_SETTINGS, true),
+};
+
+/** Oldest first; the final entry is "Run latest test". Earlier versions are still run by their exact version. */
+export const LOD_SURFACE_TEST_HISTORY: readonly TestSuite<LodSurfaceTestSettings>[] = [BASELINE_V1, BASELINE_V2, BASELINE_V3, TERRAIN_V1, TERRAIN_V2];
