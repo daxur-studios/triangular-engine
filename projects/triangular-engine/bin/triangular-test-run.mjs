@@ -4,12 +4,14 @@
 // dedicated full-screen Chrome (hidden headless Chrome on the real GPU for headless-hardware) at the suite's autostart URL, waits for the receiver to save the result, closes that
 // Chrome and prints the summary. Dev only, local only. Made for agents: start it in the background and wait for exit.
 //   triangular-test-run --url http://my-app.localhost:4200/lab --suite my-suite --version 1 [options]
+// --noisy: the owner keeps working or playing meanwhile, so do not wait for a quiet GPU, and tag the run `noisy`. Every run
+// samples GPU and CPU load and lists known heavy programs at start and end (saved as <result>.load.json).
 // Exit codes: 0 saved and passed, 1 saved but not passed, 2 no result in time (or Chrome closed), 3 the owner never went
 // away or the GPU never got quiet, 4 setup error (no receiver, no Chrome, bad arguments).
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
-import { tmpdir } from 'node:os';
+import { cpus, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -25,7 +27,7 @@ const MODES = ['quick', 'standard', 'soak'];
 const PROFILES = ['visible-browser', 'human-observed', 'headless-hardware'];
 const DEFAULTS = {
   version: undefined, profile: 'visible-browser', mode: 'standard', repetitions: 1, thumbnails: true, timeoutMin: 30,
-  quietPct: 10, quietWindowS: 10, quietWaitMin: 120, awayWaitMin: 480, chrome: undefined, keepOpen: false,
+  noisy: false, quietPct: 10, quietWindowS: 10, quietWaitMin: 120, awayWaitMin: 480, chrome: undefined, keepOpen: false,
 };
 /**
  * Headless window size in CSS pixels plus device scale factor. They are what the headed full-screen runs on the owner's
@@ -44,6 +46,7 @@ export function parseArgs(argv) {
     const arg = argv[i];
     if (arg === '--no-thumbnails') { out.thumbnails = false; continue; }
     if (arg === '--keep-open') { out.keepOpen = true; continue; }
+    if (arg === '--noisy') { out.noisy = true; continue; }
     const key = flags[arg];
     if (!key || i + 1 >= argv.length) throw new Error(`Unknown or incomplete argument: ${arg}`);
     const value = argv[++i];
@@ -65,13 +68,14 @@ export function parseArgs(argv) {
 }
 
 /** Mirrors `buildTestLaunchUrl` of `triangular-engine/testing`; keep the two in step. */
-export function buildRunUrl(page, { suite, version, profile, mode, repetitions, thumbnails }) {
+export function buildRunUrl(page, { suite, version, profile, mode, repetitions, thumbnails, noisy }) {
   const url = new URL(page);
   url.searchParams.set('testSuite', suite);
   url.searchParams.set('testVersion', String(version));
   url.searchParams.set('testProfile', profile);
   url.searchParams.set('testMode', mode);
   url.searchParams.set('testRepetitions', String(repetitions));
+  url.searchParams.set('testLoad', noisy ? 'noisy' : 'clean');
   if (!thumbnails) url.searchParams.set('testThumbnails', '0');
   url.searchParams.set('testAutoStart', '1');
   return url.toString();
@@ -143,6 +147,121 @@ export function quietVerdict(utils, apps, { maxPct }) {
   if (!values.length) return { quiet: true, reason: 'no GPU readings (nvidia-smi missing?): not checked' };
   const med = values[Math.floor((values.length - 1) / 2)];
   return med <= maxPct ? { quiet: true, reason: `GPU load median ${med}%` } : { quiet: false, reason: `GPU load median ${med}% > ${maxPct}%` };
+}
+
+/** One whole-machine GPU utilisation reading in percent (first GPU), or undefined without nvidia-smi. */
+export async function gpuUtilOnce() {
+  try {
+    const { stdout } = await execFileAsync('nvidia-smi', ['--query-gpu=utilization.gpu', '--format=csv,noheader,nounits', '-i', '0'], { windowsHide: true, timeout: 15_000 });
+    const value = Number(stdout.trim());
+    return Number.isFinite(value) ? value : undefined;
+  } catch { return undefined; }
+}
+
+/**
+ * Programs whose load makes timings noisy, by category. Matched on the process image name, case-insensitive.
+ * game: a game running; game-client: a game's launcher or client, which render and poll in the background;
+ * ide: editors and IDEs; agent: the desktop agent app.
+ */
+export const HEAVY_PROGRAMS = {
+  game: ['League of Legends.exe'],
+  'game-client': ['LeagueClient.exe', 'LeagueClientUx.exe', 'RiotClientServices.exe'],
+  ide: ['Code.exe', 'Cursor.exe', 'idea64.exe', 'webstorm64.exe', 'devenv.exe'],
+  agent: ['claude.exe'],
+};
+
+/** Image names from `tasklist /FO CSV /NH` (or one name per line, as `ps -A -o comm=` prints). */
+export function parseProcessNames(text) {
+  const names = new Set();
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const quoted = /^"([^"]+)"/.exec(line.trim());
+    const name = (quoted ? quoted[1] : line.trim().split(/[\\/]/).pop())?.trim();
+    if (name) names.add(name);
+  }
+  return [...names];
+}
+
+/** The known heavy programs among `names`: `{ programs, categories }`, programs sorted in their listed spelling. */
+export function classifyPrograms(names) {
+  const known = new Map();
+  for (const [category, list] of Object.entries(HEAVY_PROGRAMS)) for (const exe of list) known.set(exe.toLowerCase(), { exe, category });
+  const programs = new Set();
+  const categories = new Set();
+  for (const name of names) {
+    const hit = known.get(String(name).toLowerCase());
+    if (hit) { programs.add(hit.exe); categories.add(hit.category); }
+  }
+  return { programs: [...programs].sort(), categories: Object.keys(HEAVY_PROGRAMS).filter((c) => categories.has(c)) };
+}
+
+/** Default process listing: one `tasklist` call on Windows, one `ps` elsewhere. `run(file, args)` resolves to stdout; injectable. */
+export async function listHeavyPrograms(run = async (file, args) => (await execFileAsync(file, args, { windowsHide: true, timeout: 15_000, maxBuffer: 16 * 1024 * 1024 })).stdout, platform = process.platform) {
+  try {
+    const text = platform === 'win32' ? await run('tasklist', ['/FO', 'CSV', '/NH']) : await run('ps', ['-A', '-o', 'comm=']);
+    return classifyPrograms(parseProcessNames(text));
+  } catch { return { programs: [], categories: [] }; }
+}
+
+/** Whole-machine CPU utilisation in percent between two `os.cpus()` snapshots; undefined when no time passed. */
+export function cpuPercent(before, after) {
+  const total = (list) => list.reduce((sum, c) => sum + Object.values(c.times).reduce((a, b) => a + b, 0), 0);
+  const idle = (list) => list.reduce((sum, c) => sum + c.times.idle, 0);
+  const span = total(after) - total(before);
+  if (!(span > 0)) return undefined;
+  return Math.min(100, Math.max(0, (1 - (idle(after) - idle(before)) / span) * 100));
+}
+
+const nearestRank = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1))];
+
+/** Median and p95 (nearest rank) of the finite readings, rounded to whole percent; undefined for none. */
+export function percentStats(values) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  return sorted.length ? { med: Math.round(nearestRank(sorted, 0.5)), p95: Math.round(nearestRank(sorted, 0.95)), n: sorted.length } : undefined;
+}
+
+/**
+ * The load record of one run, saved beside its result as `<result>.load.json`. `condition` is the launcher's tag,
+ * `programs` and `categories` the union of the listings at start and end.
+ */
+export function summarizeLoad({ noisy, gpu = [], cpu = [], start = { programs: [], categories: [] }, end = { programs: [], categories: [] } }) {
+  const g = percentStats(gpu);
+  const c = percentStats(cpu);
+  const programs = [...new Set([...start.programs, ...end.programs])].sort();
+  const categories = Object.keys(HEAVY_PROGRAMS).filter((k) => start.categories.includes(k) || end.categories.includes(k));
+  return {
+    condition: noisy ? 'noisy' : 'clean',
+    ...(g ? { gpuMedPct: g.med, gpuP95Pct: g.p95, gpuSamples: g.n } : {}),
+    ...(c ? { cpuMedPct: c.med, cpuP95Pct: c.p95, cpuSamples: c.n } : {}),
+    programs, categories, programsAtStart: start.programs, programsAtEnd: end.programs,
+  };
+}
+
+/** Name of the load sidecar of a saved result file (`suite@v1/run.json` becomes `suite@v1/run.load.json`). */
+export const loadSidecarName = (file) => file.replace(/\.json$/, '.load.json');
+
+/** A reader returning CPU % since its previous call (the first call covers the time since the reader was made). */
+export function cpuReader(snapshot = () => cpus()) {
+  let last = snapshot();
+  return async () => { const now = snapshot(); const value = cpuPercent(last, now); last = now; return value; };
+}
+
+/**
+ * Samples whole-machine GPU and CPU utilisation every `intervalMs` until `stop()`, which resolves to the readings.
+ * `gpu` and `cpu` are injectable async readers.
+ */
+export function startLoadSampler({ intervalMs = 3000, gpu = gpuUtilOnce, cpu = cpuReader() } = {}) {
+  const readings = { gpu: [], cpu: [] };
+  let busy = Promise.resolve();
+  const tick = () => {
+    busy = busy.then(async () => {
+      const [g, c] = await Promise.all([gpu(), cpu()]);
+      if (Number.isFinite(g)) readings.gpu.push(g);
+      if (Number.isFinite(c)) readings.cpu.push(c);
+    }).catch(() => {});
+  };
+  tick();
+  const timer = setInterval(tick, intervalMs);
+  return async function stop() { clearInterval(timer); tick(); await busy; return readings; };
 }
 
 async function gpuReadings(windowS) {
@@ -298,7 +417,8 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
   }
 
   const quietUntil = Date.now() + options.quietWaitMin * 60_000;
-  for (let first = true; ; first = false) {
+  if (options.noisy) log('noisy run: not waiting for a quiet GPU; load is sampled and saved with the result');
+  else for (let first = true; ; first = false) {
     const { utils, apps } = await gpuReadings(options.quietWindowS);
     const verdict = quietVerdict(utils, apps, { maxPct: options.quietPct });
     if (verdict.quiet) { log(`machine quiet: ${verdict.reason}`); break; }
@@ -310,6 +430,8 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
   const url = buildRunUrl(options.url, options);
   const profileDir = mkdtempSync(join(tmpdir(), 'triangular-test-chrome-'));
   const since = Date.now() - 2000;
+  const programsStart = await listHeavyPrograms();
+  const sampler = startLoadSampler();
   log(`opening ${url}`);
   const chrome = spawn(chromePath, chromeArgs(profileDir, url, options), { stdio: 'ignore', windowsHide: isHeadlessProfile(options.profile) });
   let chromeGone = false;
@@ -323,6 +445,9 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
     try { row = findResult(readFileSync(index, 'utf8'), { suite: options.suite, version: options.version, since, profile: options.profile, mode: options.mode }); } catch { /* no index yet */ }
     if (row) break;
   }
+  const readings = await sampler();
+  const programsEnd = await listHeavyPrograms();
+  const load = summarizeLoad({ noisy: options.noisy, gpu: readings.gpu, cpu: readings.cpu, start: programsStart, end: programsEnd });
   const chromeClosed = chromeGone; // read before closeChrome, which makes the exit handler set it too
   if (!options.keepOpen) {
     closeChrome(chrome);
@@ -333,6 +458,8 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
     console.error(`[triangular-test-run] ${noResultMessage({ chromeClosed, timeoutMin: options.timeoutMin })}`);
     return 2;
   }
+  try { writeFileSync(join(root, config.outputDir, loadSidecarName(row.file)), JSON.stringify(load, null, 2)); } catch (error) { log(`could not save the load record: ${error?.message ?? error}`); }
+  log(`load ${load.condition}: gpu ${load.gpuMedPct ?? 'n/a'}/${load.gpuP95Pct ?? 'n/a'}% cpu ${load.cpuMedPct ?? 'n/a'}/${load.cpuP95Pct ?? 'n/a'}% [${load.categories.join(', ')}]`);
   log(`saved ${row.file}: auto=${row.automatedVerdict} perf=${row.performanceVerdict} status=${row.status}`);
   spawnSync(process.execPath, [fileURLToPath(new URL('./triangular-test-summary.mjs', import.meta.url)), '--suite', options.suite, '--last', '1'],
     { cwd: root, stdio: 'inherit' });

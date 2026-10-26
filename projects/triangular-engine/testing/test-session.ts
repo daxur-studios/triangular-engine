@@ -3,7 +3,7 @@ import type {
   TestAblationOutcome, TestWindow,
 } from './test-contracts';
 import { gpuVendorIssue, MACHINE_PREPARE_TIMEOUT_MS, sendMachineMessage } from './test-machine';
-import { MAX_TEST_REPETITIONS, TEST_MODES, TEST_PROFILES, validateTestHistory } from './test-launch';
+import { MAX_TEST_REPETITIONS, TEST_LOADS, TEST_MODES, TEST_PROFILES, validateTestHistory } from './test-launch';
 import { compareAblation } from './test-ablation';
 import { summarizeTestSamples } from './test-stats';
 import { assessPerformance } from './test-performance';
@@ -111,7 +111,7 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
     if (!TEST_PROFILES.includes(options.profile) || !Number.isInteger(options.repetitions) ||
         options.repetitions < 1 || options.repetitions > MAX_TEST_REPETITIONS ||
         !Number.isFinite(options.timeoutMs ?? DEFAULT_TEST_TIMEOUT_MS) || (options.timeoutMs ?? DEFAULT_TEST_TIMEOUT_MS) <= 0 ||
-        !TEST_MODES.includes(options.mode ?? 'standard')) {
+        !TEST_MODES.includes(options.mode ?? 'standard') || (options.load !== undefined && !TEST_LOADS.includes(options.load))) {
       throw new Error('Invalid test run options');
     }
     const mode = options.mode ?? 'standard';
@@ -384,7 +384,7 @@ export class TestSession<TSettings extends object, TSnapshot = unknown> {
     const ablations = suite.ablation && !failed && !cancelled ? ablationOutcomes(suite, cases) : undefined;
     const performance = assessPerformance(suite, mode, cases, environment, failed || cancelled);
     return {
-      schemaVersion: 1, runId, suite, profile: options.profile, mode, repetitions: options.repetitions, startedAt,
+      schemaVersion: 1, runId, suite, profile: options.profile, mode, repetitions: options.repetitions, startedAt, ...(options.load ? { load: options.load } : {}),
       finishedAt: new Date().toISOString(), status: failed ? 'failed' : cancelled ? 'cancelled' : inconclusive ? 'inconclusive' : 'completed',
       automatedVerdict: failed ? 'fail' : cancelled || !cases.length || cases.every((item) => !item.checks.length) ? 'not-run' : 'pass',
       performanceVerdict: performance.verdict, ...(performance.notes.length ? { performanceNotes: performance.notes } : {}),

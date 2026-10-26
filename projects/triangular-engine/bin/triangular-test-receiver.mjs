@@ -210,7 +210,7 @@ export function saveRunWithImages(root, config, input, machine) {
   const file = `${prefix}/${name}`;
   appendFileSync(join(root, config.outputDir, 'index.jsonl'), JSON.stringify({
     savedAt: stored.savedAt, startedAt: result.startedAt, suite: result.suite.id, version: result.suite.version, profile: result.profile,
-    mode: result.mode ?? 'standard', repetitions: result.repetitions,
+    mode: result.mode ?? 'standard', ...(result.load ? { load: result.load } : {}), repetitions: result.repetitions,
     runId: result.runId, fingerprint: fp.hash, head: fp.headShort, automatedVerdict: result.automatedVerdict,
     performanceVerdict: result.performanceVerdict, visualReview: result.visualReview, status: result.status, file,
     ...(result.performanceNotes?.length ? { performanceNotes: result.performanceNotes } : {}),

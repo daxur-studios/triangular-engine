@@ -706,3 +706,19 @@ test('baseline tool records the engine and tolerances', () => {
   assert.equal(made.jsEngine, 'chrome 130.0');
   assert.deepEqual(made.tolerances, { t: { rel: 0.2, abs: 2 } });
 });
+
+test('the result\'s load tag reaches the index line; the summary shows it with the launcher\'s load record', async () => {
+  const root = repo();
+  const server = createReceiver(root, loadConfig(root));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${server.address().port}${SINK_PATH}`;
+  assert.equal((await fetch(url, { method: 'POST', body: JSON.stringify({ ...run('n1', '2026-10-18T10:00:00Z'), load: 'noisy' }) })).status, 200);
+  assert.equal((await fetch(url, { method: 'POST', body: JSON.stringify(run('c1', '2026-10-18T11:00:00Z')) })).status, 200);
+  server.close();
+  const [noisy, clean] = readFileSync(join(root, 'artifacts/test-runs/index.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(noisy.load, 'noisy');
+  assert.equal('load' in clean, false, 'untagged runs stay untagged (read as clean)');
+  const load = { condition: 'noisy', gpuMedPct: 45, gpuP95Pct: 80, cpuMedPct: 30, cpuP95Pct: 60, categories: ['game-client', 'ide'] };
+  const text = summarize([noisy, clean], () => null, 'h', { readLoad: (file) => (file === noisy.file ? load : null) });
+  assert.match(text, /load: noisy gpu 45\/80% cpu 30\/60% \[game-client, ide\]/);
+});

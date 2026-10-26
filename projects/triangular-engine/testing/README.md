@@ -485,13 +485,56 @@ Inside this repository use `npm run test:run -- …`. In order, it:
    `--enable-webgpu-developer-features`: a fresh profile does not carry `chrome://flags`, and without that flag GPU
    timestamps are rounded and the timer self-test fails. The URL is the suite's autostart link (see "Launch links").
    On a hybrid-GPU laptop, `chrome.exe` uses the GPU set for it in the Windows graphics settings.
+   The window keeps rendering when other windows cover it (`--disable-backgrounding-occluded-windows`,
+   `--disable-renderer-backgrounding`, `--disable-background-timer-throttling`, `--disable-features=CalculateNativeWinOcclusion`),
+   so the owner can keep working in other windows. Light work barely moves the numbers; heavy GPU work will. A
+   minimized window is untested. A covered window that does not have keyboard focus is still a [page focus](#page-focus)
+   loss: the page pauses until focused again or records the loss as a validity issue.
 6. **Waits for the result.** It finishes when `index.jsonl` gains this suite, version, profile and mode with a
-   `startedAt` after the launch (so a quick run started by hand meanwhile is not taken for it), when `--timeout-min` (30) passes, or when that Chrome closes.
+   `startedAt` after the launch (so a quick run started by hand meanwhile is not taken for it), when `--timeout-min` (30) passes, or when that Chrome closes. A timeout is reported as "timed out" with the minutes waited; "Chrome closed" means it went away early.
 7. **Cleans up.** It closes that Chrome (unless `--keep-open`), deletes the profile and prints
    `triangular-test-summary --suite <id> --last 1`.
 
 Exit codes: 0 saved and passed, 1 saved but not passed, 2 no result (timeout or Chrome closed), 3 never away or never quiet,
 4 setup error. Other options: `--profile`, `--mode`, `--repetitions`, `--no-thumbnails`, `--chrome <path>`.
+
+**Headless profile.** `--profile headless-hardware` starts Chrome with `--headless=new` instead of full screen, hidden, with
+`--enable-gpu --ignore-gpu-blocklist --use-angle=d3d11 --enable-unsafe-webgpu` so it uses the real GPU, not SwiftShader. It
+takes no screen, so it does not wait for the "I'm away" switch (the quiet-GPU check still runs). The window is fixed at
+`--window-size` (default `1707x872` CSS pixels with `--force-device-scale-factor=1.5`: the viewport and devicePixelRatio the
+headed full-screen runs on the owner's machine recorded, so the canvas has the same pixel count; override with
+`--window-size WxH`). On a hybrid-GPU laptop the Windows graphics preference for `chrome.exe` must be the high-performance
+GPU; check the adapter in `test:summary`. Such a run is still marked "Headless hardware/power profile was not independently
+verified" (inconclusive). Headless FPS and frame pacing are not comparable with headed runs; GPU pass timings are.
+Do not compare a headless result with a headed one as a baseline. The results page offers the same profile and load
+condition first and defaults to one of them; picking a headed run against a headless one by hand is allowed.
+
+**Clean and noisy runs.** A clean run is the default: it waits for a quiet GPU and, for visible profiles, for the away
+switch. `--noisy` is for quick iterations while the owner keeps working or playing (editor, agents, a game client, even a
+game). It skips the quiet-GPU wait only; visible profiles still wait for the away switch, headless does not. Every run,
+clean or noisy, samples whole-machine GPU and CPU load every 3 s while Chrome runs and lists known heavy programs
+(`League of Legends.exe`; `LeagueClient.exe`, `LeagueClientUx.exe`, `RiotClientServices.exe`; `Code.exe`, `Cursor.exe`,
+`idea64.exe`, `webstorm64.exe`, `devenv.exe`; `claude.exe`, grouped as game, game-client, ide, agent) at start and end,
+with one `tasklist` call each.
+
+The launcher adds `testLoad=noisy|clean` to the link; the page records it as `load` in the result and the index line (rows
+without it count as `clean`). The measured load is only known to the launcher, so it saves it beside the result as
+`<result>.load.json` (`condition`, `gpuMedPct`, `gpuP95Pct`, `cpuMedPct`, `cpuP95Pct`, `programs`, `categories`).
+`test:summary` shows it per row: `load: noisy gpu 45/80% cpu 30/60% [game-client, ide]`.
+
+- Safe to read from a noisy run: pass or fail, counts (draw calls, nodes, splits and merges), a same-run A/B, and GPU
+  pass timings while no game runs (check the load line).
+- Needs a clean run: absolute timings, frame pacing, and any baseline or budget.
+- Measured once (an LOD lab sweep on an RTX 3080 laptop):
+  with editors, agents and a game client open, headless counts, GPU pass timings and frame interval matched clean
+  headless runs. A running game left counts and GPU pass timings unchanged but doubled the frame interval, and CPU
+  timer p95 rose by one 0.1 ms step. Headless counts differed from headed ones (about 10% fewer level changes) under
+  any load, so compare counts within one mode. CPU-heavy cases are not measured yet.
+- A baseline is the previous run of the same suite, version, mode, profile and load condition. `baselineCandidates` lists
+  those first and the rest after; `defaultBaseline` only picks a same-condition run.
+- Run clean batches at night or at the end of a phase.
+
+Example: `npm run test:run '--' --url "http://my-app.localhost:4200/lab?testCases=some-case" --suite my-suite --version 1 --profile headless-hardware --mode standard --noisy`.
 
 For agents: start it in the background and wait for the process to exit. Do not poll. One launcher per run; queue
 several suites by starting several launchers. When the owner says the "I'm away" switch is on, that is the go-ahead:

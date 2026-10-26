@@ -1,4 +1,4 @@
-import type { TestMode, TestStopReason } from './test-contracts';
+import type { TestLoad, TestMode, TestStopReason } from './test-contracts';
 
 /** Nearest-rank statistics of one metric in a run's index line (`npm run test:summary` reads the same). */
 export interface TestRunIndexMetric {
@@ -32,6 +32,8 @@ export interface TestRunIndexEntry {
   readonly version: number;
   readonly profile: string;
   readonly mode?: TestMode;
+  /** The machine condition (`testLoad`); absent counts as `clean`. */
+  readonly load?: TestLoad;
   readonly repetitions?: number;
   readonly runId: string;
   readonly fingerprint: string;
@@ -76,6 +78,11 @@ export function parseTestRunIndex(body: unknown): TestRunIndexEntry[] {
 
 export const runTime = (run: Pick<TestRunIndexEntry, 'startedAt' | 'savedAt'>): number => Date.parse(run.startedAt ?? run.savedAt) || 0;
 export const runMode = (run: Pick<TestRunIndexEntry, 'mode'>): TestMode => run.mode ?? 'standard';
+/** Older rows have no load tag and were clean runs. */
+export const runLoad = (run: Pick<TestRunIndexEntry, 'load'>): TestLoad => run.load ?? 'clean';
+/** Same profile and same load condition: the only runs whose absolute timings can be set against each other. */
+export const sameCondition = (a: Pick<TestRunIndexEntry, 'profile' | 'load'>, b: Pick<TestRunIndexEntry, 'profile' | 'load'>): boolean =>
+  a.profile === b.profile && runLoad(a) === runLoad(b);
 export const runGpu = (run: Pick<TestRunIndexEntry, 'gpu' | 'gpuBackend'>): string =>
   run.gpu ? `${run.gpu}${run.gpuBackend ? ` ${run.gpuBackend}` : ''}` : NO_GPU_LABEL;
 export const runKey = (run: Pick<TestRunIndexEntry, 'suite' | 'version'>): string => `${run.suite}@${run.version}`;
@@ -115,15 +122,20 @@ export function filterRuns(runs: readonly TestRunIndexEntry[], filter: TestRunFi
     (!filter.gpu || runGpu(run) === filter.gpu));
 }
 
-/** Runs a run can be compared with: the same suite id and version in the same mode. Newest first, the run itself left out. */
+/**
+ * Runs a run can be compared with: the same suite id and version in the same mode. Runs of the same profile and load
+ * condition come first, then the others (a headed against a headless run is a fair hand-picked comparison); each group is
+ * newest first. The run itself is left out.
+ */
 export function baselineCandidates(runs: readonly TestRunIndexEntry[], run: TestRunIndexEntry): TestRunIndexEntry[] {
   return runs.filter((other) => other.file !== run.file && other.suite === run.suite && other.version === run.version && runMode(other) === runMode(run))
-    .sort((a, b) => runTime(b) - runTime(a));
+    .sort((a, b) => Number(sameCondition(b, run)) - Number(sameCondition(a, run)) || runTime(b) - runTime(a));
 }
 
-/** The latest matching run before this one. */
+/** The latest earlier run of the same profile and load condition. A run of another condition is never picked for you. */
 export function defaultBaseline(runs: readonly TestRunIndexEntry[], run: TestRunIndexEntry): TestRunIndexEntry | undefined {
-  return baselineCandidates(runs, run).find((other) => runTime(other) < runTime(run));
+  return baselineCandidates(runs, run).filter((other) => sameCondition(other, run) && runTime(other) < runTime(run))
+    .sort((a, b) => runTime(b) - runTime(a))[0];
 }
 
 export function splitMetricKey(key: string): { name: string; unit: string } {

@@ -1,9 +1,10 @@
-import type { TestBatchTest, TestMode, TestProfile, TestSuite } from './test-contracts';
+import type { TestBatchTest, TestLoad, TestMode, TestProfile, TestSuite } from './test-contracts';
 
 /** Keep repeated runs bounded even when selection originates from an external link. */
 export const MAX_TEST_REPETITIONS = 5;
 export const TEST_PROFILES: readonly TestProfile[] = ['visible-browser', 'human-observed', 'headless-hardware'];
 export const TEST_MODES: readonly TestMode[] = ['quick', 'standard', 'soak'];
+export const TEST_LOADS: readonly TestLoad[] = ['clean', 'noisy'];
 /** Most cases one `testCases` link may name. */
 export const MAX_TEST_CASES = 50;
 const QUALIFIED_CASE = /^([a-z0-9][a-z0-9-]*)@([1-9][0-9]*)\/(.+)$/;
@@ -56,6 +57,8 @@ export interface TestLaunchSelection {
   readonly key: string;
   readonly profile: TestProfile;
   readonly mode: TestMode;
+  /** `testLoad=noisy|clean`; absent when the link does not say. It is only recorded in the result. */
+  readonly load?: TestLoad;
   readonly repetitions: number;
   readonly autoStart: boolean;
   /** `testThumbnails=0` turns the adapter's thumbnails off; they are on otherwise. */
@@ -87,7 +90,7 @@ function parseTestCases<T extends object>(raw: string, suite: TestSuite<T>, suit
 export function parseTestLaunch<T extends object>(url: URL, suites: readonly TestSuite<T>[]): TestLaunchSelection | null {
   validateTestHistory(suites);
   const query = url.searchParams;
-  const allowed = new Set(['testSuite', 'testVersion', 'testProfile', 'testRepetitions', 'testAutoStart', 'testMode', 'testThumbnails', 'testCases']);
+  const allowed = new Set(['testSuite', 'testVersion', 'testProfile', 'testRepetitions', 'testAutoStart', 'testMode', 'testThumbnails', 'testCases', 'testLoad']);
   const seen = new Set<string>();
   query.forEach((_, key) => {
     if (key.startsWith('test') && (!allowed.has(key) || seen.has(key))) throw new Error(`Unknown or duplicate test parameter: ${key}`);
@@ -108,7 +111,9 @@ export function parseTestLaunch<T extends object>(url: URL, suites: readonly Tes
   const autoStart = query.get('testAutoStart') ?? '0';
   const mode = query.get('testMode') ?? 'standard';
   const thumbnails = query.get('testThumbnails') ?? '1';
+  const load = query.get('testLoad');
   if (!TEST_MODES.includes(mode as TestMode)) throw new Error('Invalid test mode');
+  if (load !== null && !TEST_LOADS.includes(load as TestLoad)) throw new Error('Invalid test load');
   if (!TEST_PROFILES.includes(profile as TestProfile) || !Number.isInteger(repetitions) ||
       repetitions < 1 || repetitions > MAX_TEST_REPETITIONS || !['0', '1'].includes(autoStart) || !['0', '1'].includes(thumbnails)) {
     throw new Error('Invalid test profile, repetitions, autostart or thumbnails');
@@ -117,7 +122,7 @@ export function parseTestLaunch<T extends object>(url: URL, suites: readonly Tes
   const cases = rawCases === null ? undefined : parseTestCases(rawCases, suite, suites);
   return {
     key: testSuiteKey(suite), profile: profile as TestProfile, mode: mode as TestMode, repetitions, autoStart: autoStart === '1', thumbnails: thumbnails === '1',
-    ...(cases ? { cases } : {}),
+    ...(load ? { load: load as TestLoad } : {}), ...(cases ? { cases } : {}),
   };
 }
 

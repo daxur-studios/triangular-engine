@@ -173,6 +173,12 @@ export interface TestSuite<TSettings extends object> {
 
 export type TestProfile = 'visible-browser' | 'human-observed' | 'headless-hardware';
 /**
+ * The machine condition a run was started under, from the `testLoad` link parameter (the launcher's `--noisy` sets it).
+ * `clean`: nothing else heavy was using the machine. `noisy`: the owner was working or playing meanwhile, so absolute
+ * timings are not comparable with clean runs. Runs saved before this existed count as `clean`.
+ */
+export type TestLoad = 'clean' | 'noisy';
+/**
  * How long each measurement window runs (`TestContext.measureWindow`):
  * - `quick`: stops once every watched series has settled (at least `QUICK_MIN_WINDOW_MS` and `QUICK_MIN_SAMPLES`),
  *   at most the scenario's `quickMs ?? durationMs`; warmup is cut to at most `QUICK_WARMUP_MS`. For checking work as you go.
@@ -360,6 +366,8 @@ export interface TestRunResult<TSettings extends object> {
   readonly profile: TestProfile;
   /** Absent in results saved before modes existed, which ran as `standard`. */
   readonly mode?: TestMode;
+  /** Absent unless the link set `testLoad`; absent counts as `clean`. */
+  readonly load?: TestLoad;
   readonly repetitions: number;
   readonly startedAt: string;
   readonly finishedAt: string;
@@ -384,6 +392,8 @@ export interface TestRunOptions {
   readonly profile: TestProfile;
   /** Default `standard`. `quick` and `soak` need an adapter with `windowModes`. */
   readonly mode?: TestMode;
+  /** The machine condition, recorded in the result only. It changes nothing about how the run measures. */
+  readonly load?: TestLoad;
   /**
    * The limit of ONE test (apply, ready, warm-up, window, checks), not of the whole run. Default
    * `DEFAULT_TEST_TIMEOUT_MS` plus the scenario's warm-up and window. A test that hits it fails and the run goes on.

@@ -4,7 +4,8 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { awayVerdict, buildRunUrl, chromeArgs, createRunQueue, findChrome, findResult, getJson, HEADLESS_WINDOW, needsAwaySwitch, noResultMessage, parseArgs, quietVerdict } from './triangular-test-run.mjs';
+import { awayVerdict, buildRunUrl, chromeArgs, classifyPrograms, cpuPercent, createRunQueue, findChrome, findResult, getJson, HEADLESS_WINDOW, HEAVY_PROGRAMS, listHeavyPrograms, loadSidecarName, needsAwaySwitch, noResultMessage, parseArgs, parseProcessNames, percentStats, quietVerdict, startLoadSampler, summarizeLoad } from './triangular-test-run.mjs';
+import { loadText } from './triangular-test-summary.mjs';
 
 test('awayVerdict: no switch runs; otherwise only while away and unexpired, and a broken file holds back', () => {
   const now = Date.parse('2026-10-21T15:00:00Z');
@@ -170,4 +171,90 @@ test('getJson sends a *.localhost request to 127.0.0.1 with the name in the Host
   try {
     assert.deepEqual(await getJson(`http://my-app.localhost:${port}/__triangular-test-sink?x=1`), { host: `my-app.localhost:${port}`, path: '/__triangular-test-sink?x=1' });
   } finally { server.close(); }
+});
+
+const base = ['--url', 'http://x/', '--suite', 's', '--version', '1'];
+
+test('--noisy is a flag, off by default, and does not change the away rule', () => {
+  assert.equal(parseArgs(base).noisy, false);
+  const noisy = parseArgs([...base, '--noisy', '--profile', 'headless-hardware']);
+  assert.equal(noisy.noisy, true);
+  assert.equal(needsAwaySwitch(noisy.profile), false);
+  assert.equal(needsAwaySwitch(parseArgs([...base, '--noisy']).profile), true, 'visible profiles still wait for the away switch');
+});
+
+test('buildRunUrl tags the load condition: noisy with --noisy, clean otherwise', () => {
+  const opts = { suite: 's', version: 1, profile: 'headless-hardware', mode: 'standard', repetitions: 1, thumbnails: true };
+  assert.equal(new URL(buildRunUrl('http://x/lab', opts)).searchParams.get('testLoad'), 'clean');
+  assert.equal(new URL(buildRunUrl('http://x/lab', { ...opts, noisy: true })).searchParams.get('testLoad'), 'noisy');
+});
+
+test('parseProcessNames reads tasklist CSV and plain name lines', () => {
+  const csv = '"System Idle Process","0","Services","0","8 K"\r\n"League of Legends.exe","4242","Console","1","900,000 K"\r\n"Code.exe","10","Console","1","1 K"\r\n';
+  assert.deepEqual(parseProcessNames(csv), ['System Idle Process', 'League of Legends.exe', 'Code.exe']);
+  assert.deepEqual(parseProcessNames('/usr/bin/claude\nbash\n\n'), ['claude', 'bash']);
+  assert.deepEqual(parseProcessNames(undefined), []);
+});
+
+test('classifyPrograms groups known heavy programs by category, case-insensitively', () => {
+  assert.deepEqual(classifyPrograms(['chrome.exe', 'leagueclientux.exe', 'RiotClientServices.exe', 'CODE.EXE', 'claude.exe']),
+    { programs: ['Code.exe', 'LeagueClientUx.exe', 'RiotClientServices.exe', 'claude.exe'], categories: ['game-client', 'ide', 'agent'] });
+  assert.deepEqual(classifyPrograms(['League of Legends.exe']), { programs: ['League of Legends.exe'], categories: ['game'] });
+  assert.deepEqual(classifyPrograms(['explorer.exe']), { programs: [], categories: [] });
+  assert.deepEqual(Object.keys(HEAVY_PROGRAMS), ['game', 'game-client', 'ide', 'agent']);
+});
+
+test('listHeavyPrograms makes one call through the injected runner and never throws', async () => {
+  const calls = [];
+  const run = async (file, args) => { calls.push([file, ...args]); return '"devenv.exe","1","Console","1","1 K"\r\n'; };
+  assert.deepEqual(await listHeavyPrograms(run, 'win32'), { programs: ['devenv.exe'], categories: ['ide'] });
+  assert.deepEqual(calls, [['tasklist', '/FO', 'CSV', '/NH']]);
+  assert.deepEqual(await listHeavyPrograms(async () => 'claude\n', 'linux'), { programs: [], categories: [] });
+  assert.deepEqual(await listHeavyPrograms(async () => { throw new Error('no tasklist'); }, 'win32'), { programs: [], categories: [] });
+});
+
+test('cpuPercent compares two os.cpus snapshots', () => {
+  const snap = (idle, busy) => [{ times: { user: busy, nice: 0, sys: 0, idle, irq: 0 } }];
+  assert.equal(cpuPercent(snap(0, 0), snap(75, 25)), 25);
+  assert.equal(cpuPercent(snap(10, 10), snap(10, 10)), undefined);
+  assert.equal(cpuPercent(snap(0, 0), snap(0, 50)), 100);
+});
+
+test('percentStats uses nearest rank and skips non-numbers', () => {
+  assert.equal(percentStats([]), undefined);
+  assert.equal(percentStats([NaN, undefined]), undefined);
+  assert.deepEqual(percentStats([10, 20, 30, 40, 100]), { med: 30, p95: 100, n: 5 });
+  assert.deepEqual(percentStats([44.6]), { med: 45, p95: 45, n: 1 });
+});
+
+test('summarizeLoad merges both program listings and tags the condition', () => {
+  const load = summarizeLoad({ noisy: true, gpu: [40, 50, 60, 70, 80], cpu: [20, 30, 40], start: { programs: ['Code.exe'], categories: ['ide'] },
+    end: { programs: ['LeagueClient.exe', 'Code.exe'], categories: ['game-client', 'ide'] } });
+  assert.equal(load.condition, 'noisy');
+  assert.deepEqual([load.gpuMedPct, load.gpuP95Pct, load.cpuMedPct, load.cpuP95Pct], [60, 80, 30, 40]);
+  assert.deepEqual(load.programs, ['Code.exe', 'LeagueClient.exe']);
+  assert.deepEqual(load.categories, ['game-client', 'ide']);
+  const clean = summarizeLoad({ noisy: false });
+  assert.equal(clean.condition, 'clean');
+  assert.equal(clean.gpuMedPct, undefined);
+  assert.equal(loadSidecarName('suite@v1/run_abc.json'), 'suite@v1/run_abc.load.json');
+});
+
+test('startLoadSampler collects injected readings until stopped', async () => {
+  let g = 0;
+  const stop = startLoadSampler({ intervalMs: 5, gpu: async () => ++g * 10, cpu: async () => 5 });
+  await new Promise((done) => setTimeout(done, 40));
+  const readings = await stop();
+  assert.ok(readings.gpu.length >= 2 && readings.cpu.length === readings.gpu.length);
+  assert.equal(readings.gpu[0], 10);
+  const missing = await startLoadSampler({ intervalMs: 5, gpu: async () => undefined, cpu: async () => 7 })();
+  assert.deepEqual(missing.gpu, []);
+});
+
+test('loadText shows condition, gpu and cpu median/p95 and the categories', () => {
+  const load = { condition: 'noisy', gpuMedPct: 45, gpuP95Pct: 80, cpuMedPct: 30, cpuP95Pct: 60, categories: ['game-client', 'ide'] };
+  assert.equal(loadText({}, load), '  load: noisy gpu 45/80% cpu 30/60% [game-client, ide]');
+  assert.equal(loadText({}, { condition: 'clean', cpuMedPct: 5, cpuP95Pct: 9, categories: [] }), '  load: clean gpu n/a cpu 5/9%');
+  assert.equal(loadText({ load: 'noisy' }, null), '  load: noisy');
+  assert.equal(loadText({}, null), '');
 });

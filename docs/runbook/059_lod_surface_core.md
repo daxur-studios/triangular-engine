@@ -830,3 +830,81 @@ All cases: 0 crack px, automation pass, GPU scene pass p95 at most 0.22 ms.
 - Tell flicker from real change: count only changes of nodes that were on screen in both frames and whose value
   stayed within the margin, or run the sweep without culling in the browser.
 - Fix the launcher: keep a covered window drawing, and report a timeout as a timeout.
+
+## 2026-10-26 — Noise matrix: headless runs while the owner uses the laptop
+
+The owner wants to iterate on noisy runs while they work, and keep idle runs for the end of a day or phase. The
+launcher gained a headless mode on the real GPU (`--profile headless-hardware`, same 2560×1308 device pixels as the
+headed runs) and a `--noisy` flag (no quiet-GPU wait; every run records machine load in `<result>.load.json`); see the
+[testing guide](/projects/triangular-engine/testing/README.md#unattended-runs-dev-only). This section measures what
+load changes. Case `sweep-plane-100km-low-200m`, baseline v4, standard mode, RTX 3080, fingerprint
+`0efa22a9-582eb6ed`. Three runs per headless condition; the headed column is the single 2026-10-26 run above.
+
+| Metric | Headed, idle | Headless, game running | Headless, game client only | Headless, clean |
+| --- | ---: | ---: | ---: | ---: |
+| GPU scene pass med / p95 (ms) | 0.20 / 0.21 | 0.20 / 0.20–0.21 | 0.20 / 0.20 | 0.20–0.23 / 0.20–0.25 |
+| Frame interval med / p95 (ms) | 6.1 / 6.6 | 12.5 / 13.4–14.0 | 6.1 / 6.4–6.6 | 6.1 / 6.4 |
+| Selection CPU p95 (ms) | 0.2 | 0.3 | 0.3 | 0.2 |
+| On-screen changes/s | 82.6 | 75.2–76.9 | 73.8–78.2 | 73.3–75.1 |
+| All changes/s | 332 | 312–313 | 310–315 | 310–313 |
+| Drawn leaves | 752 | 769–770 | 768–771 | 769–770 |
+| Machine CPU median | n/a | 33–40% | 40–44% | 21–23% |
+
+"Game running" is a League of Legends match; "client only" is its launcher left open; editors and agents ran in all
+three headless conditions. Every run: automation pass, 0 crack px, NVIDIA adapter. Headless runs are inconclusive by
+the validity rule, as expected. The machine GPU figure (about 40–50% in every headless row) includes the test itself,
+so it does not measure background load.
+
+### Findings
+
+- **Load does not move the selector's counts.** Changes per second, all changes and drawn leaves match between noisy
+  and clean headless runs, with or without a game.
+- **Headless differs from headed by itself:** about 10% fewer on-screen changes and 2% more drawn leaves, under every
+  load. Most likely the effective viewport or framing differs slightly. Compare counts only within one mode.
+- **A running game doubles the frame interval** (6.1 to 12.5 ms). Without a game, headless pacing matches headed.
+- **Selection CPU p95 rises by one 0.1 ms timer step under load.** A weak contention signal, below the timer's
+  resolution for a sharper reading.
+- **GPU pass timings hold under every condition.**
+
+### What can be read under load
+
+| Condition | Safe to judge | Needs a clean or headed run |
+| --- | --- | --- |
+| Editors, agents, a game client | Everything within headless, including headless baselines | Comparison with headed runs |
+| A game running | Pass/fail, crack px, GPU pass timings, change counts, same-run A/B | Frame interval; selection CPU at the 0.1 ms level |
+| Idle, end of day or phase | Headed runs: frame time against headed baselines, final check | — |
+
+Idle runs are not needed after each change. One case and one GPU so far; heavier cases (CPU-bound bakes, worker
+pipelines) may react to load differently.
+
+### Next
+
+- Find why headless shows fewer changes than headed (compare the recorded canvas size and camera framing).
+- Repeat the matrix on a CPU-heavy case before trusting CPU timings from noisy runs.
+
+## 2026-10-26 — Owner notes: no jitter seen; a biome source; a triangle budget
+
+- **No jitter seen.** The owner tested by hand and zoomed as close as the lab allows: no jitter anywhere. Recorded as
+  an owner observation. The measured gate (at most 0.05 px at eye-2m in motion, from S1) has no number yet; the owner's
+  look is enough to stop it blocking terrain work.
+- **A mixed-biome source.** The owner wants to see different kinds of terrain together, like concept art of meadows,
+  hills, sharp chiselled mountains, a volcano and canyons, and to know they run fast. It is a new source in the terrain
+  suite, which is how terrains are meant to be added, and a better test bed for the slope criterion than the current
+  sources. Planned as step 3b of the plan. True overhangs stay in M6; snow, grass, trees and rocks belong to the surface
+  material ([Plan 050](/docs/plans/050_tsl_planet_surface_material.md)) and scatter work, not to this core.
+- **Triangles per pixel.** The latest headless sweep run (`sweep-plane-100km-low-200m`, baseline v4) draws 1,574,913
+  triangles in 2 draw calls (769 leaves × 32² cells × 2) on a 2560×1308 canvas: about 2 device pixels per triangle,
+  which is what the pixel floor of about 2 px per cell asks for. The scene pass costs 0.2 ms only because the lab
+  shading is trivial. GPUs shade in 2×2 pixel blocks, so a real material pays several times over for triangles this
+  small. Common practice aims at about 8–16 pixels per triangle or more. Raising the floor or using fewer cells per
+  patch is the cheap fix, measured ABAB in step 3b.
+- **Budget per system, not just frame time.** Frame time on the RTX 3080 hides how much room is left for the material,
+  scatter, sky, clouds and the game. Step 3b records counts that do not depend on the machine (triangles, pixels per
+  triangle, draw calls, texture MB) next to the timings, against a proposed terrain budget.
+- **The AMD iGPU as an early warning (proposal).** Dropped 2026-10-25 as a gate. The owner would take it back as long
+  as it does not block them. A headless run on the iGPU takes no screen, so it can run while the owner works. It needs
+  a second Chrome install (for example Chrome for Testing), set to power saving in Windows graphics settings and passed
+  with `--chrome <path>`. The graphics preference is per executable, so the main Chrome stays on the RTX. Not tried yet:
+  the first run checks that headless WebGPU picks that adapter.
+- **A cost-breakdown view (idea).** The owner asked for a view of each test's cost by area (draw calls, memory, GPU and
+  CPU time), and a combined view for terrain plus material, clouds and sky. Not part of this plan; it needs its own record.

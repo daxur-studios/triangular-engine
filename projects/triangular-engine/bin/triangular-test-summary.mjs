@@ -20,6 +20,23 @@ export function machineText(row) {
   return `  machine: ${parts.join(' | ')}`;
 }
 
+/**
+ * `noisy gpu 45/80% cpu 30/60% [game-client, ide]`: the run's load condition, then GPU and CPU median/p95 and the heavy
+ * program categories seen, from the launcher's `<result>.load.json`. A row without a record shows its tag, or nothing
+ * when it has neither (older rows were clean).
+ */
+export function loadText(row, load) {
+  const condition = load?.condition ?? row.load;
+  if (!condition) return '';
+  const pair = (med, p95) => (med === undefined ? 'n/a' : `${med}/${p95 ?? 'n/a'}%`);
+  if (!load) return `  load: ${condition}`;
+  const programs = load.categories?.length ? ` [${load.categories.join(', ')}]` : '';
+  return `  load: ${condition} gpu ${pair(load.gpuMedPct, load.gpuP95Pct)} cpu ${pair(load.cpuMedPct, load.cpuP95Pct)}${programs}`;
+}
+
+/** Name of the load record beside a result file. */
+export const loadFile = (file) => file.replace(/\.json$/, '.load.json');
+
 const fmt = (n) => (Number.isFinite(n) ? n.toFixed(2) : 'n/a');
 
 /** `shadows @ orbit-600km gpuPassTotal median: B 0.081 vs A 0.045 (+80.0%) slower, noise 0.001`. */
@@ -69,7 +86,7 @@ export function breakdownLines(metrics, filter) {
  * Index lines written since summaries were added carry `cases`, so no result file is opened. Older lines fall back
  * to reading their file. `metric` keeps only metrics whose name contains that text.
  */
-export function summarize(rows, readRun, currentHash, { suite, last = 5, metric } = {}) {
+export function summarize(rows, readRun, currentHash, { suite, last = 5, metric, readLoad = () => null } = {}) {
   const lines = [];
   const bySuite = Map.groupBy(rows.filter((r) => !suite || r.suite === suite), (r) => `${r.suite}@v${r.version}`);
   for (const [key, list] of bySuite) {
@@ -77,6 +94,8 @@ export function summarize(rows, readRun, currentHash, { suite, last = 5, metric 
     for (const row of list.slice(-last)) {
       const stale = currentHash && row.fingerprint !== currentHash ? 'STALE' : 'current';
       lines.push(`${row.startedAt?.slice(0, 16) ?? row.savedAt.slice(0, 16)}  ${row.profile} ${row.mode ?? 'standard'}  ${row.fingerprint} ${stale}  auto=${row.automatedVerdict} perf=${row.performanceVerdict} visual=${row.visualReview}`);
+      const load = loadText(row, readLoad(row.file));
+      if (load) lines.push(load);
       const machine = machineText(row);
       if (machine) lines.push(machine);
       let cases = row.cases;
@@ -118,5 +137,6 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
   const readRun = (file) => { try { return JSON.parse(readFileSync(join(dir, file), 'utf8')); } catch { return null; } };
   const current = computeFingerprint(root, config.fingerprintPaths).hash;
   console.log(`current fingerprint ${current}\n`);
-  console.log(summarize(rows, readRun, current, { suite: opt('--suite'), last: Number(opt('--last', 5)), metric: opt('--metric') }));
+  const readLoad = (file) => readRun(loadFile(file));
+  console.log(summarize(rows, readRun, current, { suite: opt('--suite'), last: Number(opt('--last', 5)), metric: opt('--metric'), readLoad }));
 }

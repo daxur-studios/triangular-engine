@@ -187,7 +187,26 @@ diagnostic measurements; a runnable link is not an accepted baseline.
   and wait for it to exit**; do not poll. It queues machine-wide with every other app's launcher, waits for a quiet
   GPU (no game, low load), opens a throwaway full-screen Chrome with `--enable-webgpu-developer-features`, waits for
   the saved result, closes that Chrome and prints the summary. Exit 0 pass, 1 not passed, 2 no result, 3 never
-  quiet, 4 setup error. It takes over the screen: run it only when the machine is free.
+  quiet, 4 setup error. The test Chrome keeps rendering when other windows cover it (minimized is untested), so the
+  owner can keep working elsewhere; light work barely affects numbers, heavy GPU work will, and a window without focus
+  is recorded as a page-focus loss. Without --profile headless-hardware it opens full screen: prefer running it when the machine is free.
+- **Headless run while the owner works:** add `--profile headless-hardware`. Chrome starts hidden (`--headless=new`, real GPU
+  via D3D11, no SwiftShader), does not wait for the away switch (it still waits for a quiet GPU) and does not take the
+  screen. Window is 1707x872 at scale 1.5, the size of the owner's headed full-screen runs; `--window-size WxH` overrides.
+  It needs the Windows graphics preference for `chrome.exe` set to the high-performance GPU: check the adapter the run
+  recorded in `test:summary` (`machine: gpu ...`). The run stays inconclusive ("Headless hardware/power profile was not
+  independently verified"). Headless FPS and frame pacing are not comparable with headed runs; GPU pass timings are.
+  Do not use a headed run as the baseline of a headless one or the reverse.
+- **Noisy run, for quick iterations while the owner works:** add `--noisy`. It skips the wait for a quiet GPU (visible
+  profiles still wait for the away switch; headless does not). Every run samples GPU and CPU load and lists known heavy
+  programs (game, game-client, ide, agent); the launcher tags the run `testLoad=noisy|clean` (saved as `load`) and writes
+  `<result>.load.json`, which `test:summary` shows as `load: noisy gpu 45/80% cpu 30/60% [game-client, ide]`.
+  Read from a noisy run: pass/fail, counts, same-run A/B, GPU pass timings while no game runs. Do not read absolute
+  timings or make baselines from it; that needs a clean run. Baselines match on profile and load condition too
+  (rows without a tag are clean). Suite versions do not change. Measured once (testing README, "Clean and noisy
+  runs"): owner work and a game client did not change headless results; a running game doubled the frame interval
+  only. Headless and headed counts differ by about 10%, so never compare counts across the two modes. Iterate on
+  noisy headless runs; idle runs are for headed frame time and end-of-phase checks, not after every change.
 - **"I'm away — let queued runs start".** A local dashboard (the Daxur app) has this switch. It writes
   `triangular-test-away.json` in the OS temp folder, and the launcher waits for it. When the user says it is on, that
   is permission to run: do not ask again and do not hand them a link to click. Start the launcher yourself for the

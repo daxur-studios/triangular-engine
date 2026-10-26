@@ -1,6 +1,6 @@
 import {
   baselineCandidates, changeKind, compareToBaseline, defaultBaseline, filterRuns, formatChange, formatMetricValue, formatRunDate, imageUrl,
-  indexUrl, metricKeys, pairCases, parseTestRunIndex, resultUrl, runCounts, runFilterOptions, splitMetricKey, thumbnailFrames, type TestRunIndexCase,
+  indexUrl, metricKeys, pairCases, parseTestRunIndex, resultUrl, runCounts, runFilterOptions, runLoad, sameCondition, splitMetricKey, thumbnailFrames, type TestRunIndexCase,
   type TestRunIndexEntry,
 } from './test-results';
 
@@ -61,6 +61,24 @@ describe('test results model', () => {
     // A newer run is a valid choice, but never the default.
     expect(baselineCandidates(all, old).map((item) => item.file)).toEqual([newest.file, mid.file]);
     expect(defaultBaseline(all, standard)).toBeUndefined();
+  });
+
+  it('treats runs without a load tag as clean and never defaults to another profile or load condition', () => {
+    const clean = run('lab@v1/p.json', '2026-10-20T08:00:00Z', { profile: 'headless-hardware' });
+    const noisyOld = run('lab@v1/q.json', '2026-10-20T09:00:00Z', { profile: 'headless-hardware', load: 'noisy' });
+    const headed = run('lab@v1/r.json', '2026-10-20T09:30:00Z');
+    const noisyNew = run('lab@v1/s.json', '2026-10-20T10:00:00Z', { profile: 'headless-hardware', load: 'noisy' });
+    const cleanNew = run('lab@v1/t.json', '2026-10-20T11:00:00Z', { profile: 'headless-hardware', load: 'clean' });
+    const pool = [clean, noisyOld, headed, noisyNew, cleanNew];
+    expect(runLoad(clean)).toBe('clean');
+    expect(sameCondition(clean, cleanNew)).toBeTrue();
+    expect(sameCondition(clean, headed)).toBeFalse();
+    // Same condition first, then the rest newest first; nothing is dropped.
+    expect(baselineCandidates(pool, noisyNew).map((item) => item.file)).toEqual([noisyOld.file, cleanNew.file, headed.file, clean.file]);
+    expect(defaultBaseline(pool, noisyNew)).toBe(noisyOld);
+    expect(defaultBaseline(pool, cleanNew)).toBe(clean);
+    expect(defaultBaseline(pool, noisyOld)).toBeUndefined();
+    expect(defaultBaseline(pool, headed)).toBeUndefined();
   });
 
   it('compares medians by scenario id and metric, skipping what the baseline lacks', () => {

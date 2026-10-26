@@ -101,6 +101,14 @@ describe('TestSession', () => {
     }
   });
 
+  it('records the machine condition in the result only when one was given', async () => {
+    const noisy = await new TestSession<Settings, number>().run(suite, adapter, { repetitions: 1, profile: 'visible-browser', load: 'noisy' });
+    expect(noisy.load).toBe('noisy');
+    const plain = await new TestSession<Settings, number>().run(suite, adapter, { repetitions: 1, profile: 'visible-browser' });
+    expect('load' in plain).toBeFalse();
+    await expectAsync(new TestSession<Settings, number>().run(suite, adapter, { repetitions: 1, profile: 'visible-browser', load: 'loud' as never })).toBeRejected();
+  });
+
   it('lists an unavailable optional metric without making the performance case inconclusive', async () => {
     const perf: TestSuite<Settings> = { ...suite, purpose: 'performance' };
     const withMetrics = (metrics: TestObservation['metrics']) => {

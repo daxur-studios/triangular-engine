@@ -16,7 +16,7 @@ performance:
 
 # Plan 059: LOD Surface Core for Water and Terrain
 
-Status: **M1 in progress (2026-10-25), seams reworked:** shared seam vertices are now bit-identical by construction (one integer lattice per face, folding by snapping, a camera anchor; see the "Bit-identical seams" runbook section); 38 headless specs pass; not yet checked on a GPU. Before that: **M1 in progress:** lab page, selector, renderer, crack probe and suite built and spec-tested; selector made persistent, about 0.2 ms per select in Node; first RTX 3080 run (suite v1): selection p95 0.4–0.5 ms in the browser; an NVIDIA `sin` precision hole fixed; 1–5 px seam sparkles left open; suite v2 waits on a rerun (see [Runbook 059](/docs/runbook/059_lod_surface_core.md)). Earlier status: **draft, nothing built.** Written 2026-10-24 after an owner discussion. Before anything is built, the
+Status: **Next: step 3b, a biome-mix source and a triangle budget (proposal, 2026-10-26).** The owner saw no jitter by hand at the closest zoom (recorded; the measured jitter gate no longer blocks). **Noise matrix measured (2026-10-26):** on the RTX 3080, headless runs give the same counts, crack px and GPU pass timings whether the owner is working, running a game or idle; a game only doubles the frame interval. Headless shows about 10% fewer on-screen changes than headed under any load, so counts are compared only within one mode. Iterate on noisy headless runs; keep headed idle runs for frame time and end-of-phase checks (see the "Noise matrix" runbook section). Earlier: **M1 in progress (2026-10-25), seams reworked:** shared seam vertices are now bit-identical by construction (one integer lattice per face, folding by snapping, a camera anchor; see the "Bit-identical seams" runbook section); 38 headless specs pass; not yet checked on a GPU. Before that: **M1 in progress:** lab page, selector, renderer, crack probe and suite built and spec-tested; selector made persistent, about 0.2 ms per select in Node; first RTX 3080 run (suite v1): selection p95 0.4–0.5 ms in the browser; an NVIDIA `sin` precision hole fixed; 1–5 px seam sparkles left open; suite v2 waits on a rerun (see [Runbook 059](/docs/runbook/059_lod_surface_core.md)). Earlier status: **draft, nothing built.** Written 2026-10-24 after an owner discussion. Before anything is built, the
 direction is reviewed by three agents: [LOD surface review](/docs/plans/059_lod_surface_review.md). The
 architecture below is Claude's proposal and may change with the review.
 Evidence: [Runbook 059](/docs/runbook/059_lod_surface_core.md).
@@ -182,7 +182,9 @@ measured on the RTX 3080 before the next starts:
    split ranks `1 + h` higher for the leaf budget; suites baseline v4 and terrain v3, 142 lab specs green; at the 1,024
    cap unculled sweep churn falls to 0, culled by about a quarter. RTX 3080 rerun 2026-10-26: on-screen changes fall
    21–32% (plane 110 to 83 against its no-hysteresis partner), 0 crack px; about 80 a second remain, see the runbook.*
-4. **Slope criterion** (from M2), measured ABAB in the terrain suite.
+   **3b. Biome-mix source and a triangle budget** (added 2026-10-26 by the owner, ahead of the slope criterion;
+   proposal, not built). Details below the list.
+4. **Slope criterion** (from M2), measured ABAB in the terrain suite, on the biome-mix source among others.
 5. **M5:** edits and the collider patch.
 6. **M6:** cliffs.
 7. **Later:** blending and the remaining M2 criteria, then water (M3), which can borrow lessons from the public
@@ -209,6 +211,33 @@ measured on the RTX 3080 before the next starts:
   - Cases: sources × the baseline domains where each source makes sense × the five baseline poses, plus the
     injected-gap control.
   - Metrics: the baseline metrics, plus bake, upload, texture MB, and CPU-twin height error at probe points.
+
+**Step 3b in detail (proposal):**
+- **Biome-mix source** (`biome-mix`, a baked source next to `noise`, `cliff` and `cell-planet`): one deterministic
+  CPU sampler that lays out regions side by side, so one camera path crosses all of them:
+  - meadow: near-flat with gentle undulation of a few metres;
+  - rolling hills: smooth, tens of metres;
+  - sharp mountains: ridged noise with sharp crests and steep flanks, hundreds of metres to about 2 km on the plane;
+  - a volcano: a cone with a crater rim and a sunken crater;
+  - a canyon: a winding cut with steep walls (a heightfield, so walls are steep, not vertical; overhangs stay in M6).
+  Blends between regions are smooth, so no seam comes from the source itself. On the plane and the 10 km sphere,
+  scaled to each domain; heights stay inside the range the domain's culling and min/max pyramid assume.
+- **Cases** in `lod-surface-terrain`: the source over its domains × the five baseline poses, plus a sweep case and
+  poses aimed at the sharp mountains and the canyon (the steepest parts, where cracks, folding and the coming slope
+  criterion matter most). New cases bump the suite version.
+- **Size metrics on every LOD case:** drawn triangles (already recorded), draw calls (already recorded), texture MB
+  (already on terrain cases), and **pixels per triangle**: surface pixels on screen divided by drawn triangles (canvas
+  pixels as an upper bound where the surface fills the view). Today the plane sweep draws about 1.57M triangles on
+  2560×1308, about 2 px per triangle, set by the pixel floor of about 2 px per cell.
+- **One ABAB: the pixel floor at 2 px against 4 px** (about 2 and 8 px per triangle if the floor is a cell's edge), on the biome source:
+  triangles, GPU pass, crack px and how the sharp crests look. The slope criterion (step 4) then refines where the
+  height range asks for it, so a higher floor costs less detail where it matters.
+- **Terrain budget (proposal, for owner review):** at 60 fps on the RTX 3080, terrain at most 1.5 ms GPU and 0.5 ms
+  main-thread CPU per frame, at most 1M drawn triangles, at most 8 draw calls, at least 8 px per triangle, height
+  textures at most 64 MB. Recorded next to each run; not a gate until reviewed.
+- **The AMD iGPU as an early warning (proposal):** a headless run on the iGPU through a second Chrome install set to
+  power saving, passed with `--chrome <path>`. It does not block the owner and is not a gate; it shows costs the RTX
+  hides. First run checks that the adapter is the iGPU.
 
 After M6 the owner decides how water and terrain grow from here, and whether Plans 055 and
 057 adopt the core.

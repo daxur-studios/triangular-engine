@@ -2,7 +2,7 @@ import { DOCUMENT } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, input, isDevMode, OnInit, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import type { TestAblationOutcome, TestBatchTest, TestCaseThumbnails, TestMetric, TestMode, TestProfile, TestProgress, TestRunAdapter, TestRunResult, TestStopReason, TestSuite } from './test-contracts';
+import type { TestAblationOutcome, TestBatchTest, TestCaseThumbnails, TestLoad, TestMetric, TestMode, TestProfile, TestProgress, TestRunAdapter, TestRunResult, TestStopReason, TestSuite } from './test-contracts';
 import { buildTestBatchLaunchUrl, buildTestLaunchUrl, MAX_TEST_REPETITIONS, parseTestLaunch, TEST_MODES, TEST_PROFILES, testSuiteKey, validateTestHistory } from './test-launch';
 import { nearestRankPercentile, TestSession } from './test-session';
 import { encodeThumbnailUploads } from './test-thumbnails';
@@ -194,6 +194,8 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
   private readonly initialized = signal(false);
   private pendingAutoStart = false;
   /** Launch-link cases waiting for autostart, run as a batch instead of the whole suite. */
+  /** The `testLoad` of the launch link, passed on to every run this page starts. */
+  private launchLoad: TestLoad | undefined;
   private pendingCases: { tests: readonly TestBatchTest[]; mode: TestMode } | undefined;
   private destroyed = false;
   private abort?: AbortController;
@@ -220,6 +222,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
       if (this.adapter().windowModes) this.form.controls.mode.setValue('quick');
       const launch = parseTestLaunch(new URL(this.doc.location.href), this.suites());
       if (launch) {
+        this.launchLoad = launch.load;
         if (!this.modes().includes(launch.mode)) throw new Error(`This page runs standard mode only, not ${launch.mode}`);
         this.form.setValue({ suite: launch.key, repetitions: launch.repetitions, profile: launch.profile, mode: launch.mode, thumbnails: launch.thumbnails });
         if (launch.autoStart && !this.allowAutoStart()) this.message.set('Autostart is disabled by this application. Use Run selected.');
@@ -261,7 +264,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
       // Pictures go only to the receiver, so without one they are not taken.
       const thumbnails: TestCaseThumbnails[] = [];
       const onThumbnails = machineSink && options.thumbnails ? (entry: TestCaseThumbnails) => { thumbnails.push(entry); } : undefined;
-      const result = await this.session.run(suite, this.adapter(), { ...options, machineSink, onThumbnails }, (progress) => {
+      const result = await this.session.run(suite, this.adapter(), { ...options, ...(this.launchLoad ? { load: this.launchLoad } : {}), machineSink, onThumbnails }, (progress) => {
         if (this.destroyed) return;
         this.progress.set(progress);
         this.progressChange.emit(progress);
@@ -343,7 +346,7 @@ export class TestRunnerComponent<TSettings extends object = Record<string, unkno
         const onThumbnails = machineSink && options.thumbnails ? (entry: TestCaseThumbnails) => { thumbnails.push(entry); } : undefined;
         const repetitions = test.repetitions ?? options.repetitions;
         try {
-          const result = await this.session.run(single, this.adapter(), { ...options, repetitions, machineSink, onThumbnails }, (progress) => {
+          const result = await this.session.run(single, this.adapter(), { ...options, repetitions, ...(this.launchLoad ? { load: this.launchLoad } : {}), machineSink, onThumbnails }, (progress) => {
             if (this.destroyed) return;
             this.progress.set(progress ? { ...progress, label: `test ${index + 1} of ${tests.length}${progress.label ? ` · ${progress.label}` : ''}` } : progress);
             this.progressChange.emit(progress);

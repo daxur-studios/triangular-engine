@@ -30,12 +30,18 @@ describe('test launch selection', () => {
     expect(parseTestLaunch(new URL('http://localhost/?testSuite=latest'), [first])?.mode).toBe('standard');
   });
 
+  it('reads testLoad as noisy or clean, and leaves it absent when the link does not say', () => {
+    expect(parseTestLaunch(new URL('http://localhost/?testSuite=latest&testLoad=noisy'), [first])?.load).toBe('noisy');
+    expect(parseTestLaunch(new URL('http://localhost/?testSuite=latest&testLoad=clean'), [first])?.load).toBe('clean');
+    expect(parseTestLaunch(new URL('http://localhost/?testSuite=latest'), [first])?.load).toBeUndefined();
+  });
+
   it('rejects stale identities, unsupported profiles, unbounded repeats and invalid autostart', () => {
     for (const query of [
       'testSuite=reference&testVersion=99', 'testSuite=latest&testVersion=1',
       'testSuite=latest&testProfile=unknown', 'testSuite=latest&testRepetitions=6',
       'testSuite=latest&testRepetitions=1.5', 'testSuite=latest&testAutoStart=yes', 'testAutoStart=1',
-      'testSuite=latest&testSuite=reference', 'testSuite=latest&testScript=arbitrary', 'testSuite=latest&testMode=fast', 'testSuite=latest&testThumbnails=2',
+      'testSuite=latest&testSuite=reference', 'testSuite=latest&testScript=arbitrary', 'testSuite=latest&testMode=fast', 'testSuite=latest&testThumbnails=2', 'testSuite=latest&testLoad=loud',
     ]) expect(() => parseTestLaunch(new URL(`http://localhost/?${query}`), [first])).toThrow();
   });
 
